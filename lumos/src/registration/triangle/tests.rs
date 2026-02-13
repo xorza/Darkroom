@@ -362,7 +362,7 @@ fn test_kdtree_match_rotated_stars() {
         .collect();
 
     let config = TriangleParams {
-        check_orientation: false, // Rotation changes orientation
+        check_orientation: false, // Symmetric test pattern creates ambiguous correspondences
         ..Default::default()
     };
 
@@ -1047,7 +1047,7 @@ fn test_match_180_degree_rotation() {
         .collect();
 
     let config = TriangleParams {
-        check_orientation: false, // Must disable for 180 degree rotation
+        check_orientation: false, // Symmetric pattern creates ambiguous correspondences under 180° rotation
         ..Default::default()
     };
 

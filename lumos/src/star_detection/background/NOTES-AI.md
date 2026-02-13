@@ -208,6 +208,26 @@ The module does not support input weight or variance maps. Some astronomical ima
 
 **Severity**: Low for typical astrophotography. Higher for survey data.
 
+### 7. Mask Fallback Includes Star Pixels
+
+When too few unmasked pixels remain in a tile during refinement (tile_grid.rs line
+249-251), the fallback calls `collect_sampled_pixels`, which collects **all** pixels
+including masked star pixels. This biases the tile's background estimate upward in
+heavily crowded regions. A better fallback would interpolate from neighboring tiles.
+
+**Severity**: Low. Only triggers when most of a tile is covered by detected sources.
+The `min_unmasked_fraction` parameter (default 0.3) limits how often this occurs.
+
+### 8. No Convergence Check Across Refinement Iterations
+
+The refinement loop (mod.rs lines 79-98) runs for a fixed number of iterations without
+checking whether the background estimate has converged between iterations. Adding an
+early-exit when the max pixel-level change drops below a threshold would save computation
+when the first iteration already produces a good result.
+
+**Severity**: Low. 1-2 iterations are typical; the cost of an unnecessary iteration is
+modest compared to the rest of the pipeline.
+
 ## Strengths vs Industry
 
 1. **MAD-based sigma** is more robust than SExtractor's clipped std dev (tile_grid.rs:269, math/statistics/mod.rs:174-196)

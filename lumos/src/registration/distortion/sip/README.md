@@ -41,8 +41,8 @@ where U, V are the result of applying the inverse CD matrix to intermediate worl
 |---|---|---|---|
 | **Solver** | QR decomposition | Scaled polynomial + affine | Cholesky, LU fallback |
 | **Normalization** | None (raw pixel offsets) | Scaled polynomial intermediate repr. | avg-distance normalization |
-| **Outlier rejection** | Per-star weights | Sigma-clipping (3 iterations) | None (relies on RANSAC upstream) |
-| **Inverse coefficients** | Grid sampling + least-squares | Grid sampling (100x100) | Grid sampling + least-squares |
+| **Outlier rejection** | Per-star weights | Sigma-clipping (3 iterations) | Sigma-clipping (MAD-based, 3-sigma, iterative) |
+| **Inverse coefficients** | Grid sampling + least-squares | Grid sampling (100x100) | Not implemented |
 | **Reference point** | CRPIX (fixed) | Match centroid | Configurable (default: centroid) |
 | **Residual direction** | `target - transform(ref)` | Similar | `transform(ref) - target` (negated in fit) |
 
@@ -51,7 +51,7 @@ where U, V are the result of applying the inverse CD matrix to intermediate worl
 - **Coordinate normalization**: Normalizes u,v by average distance from reference point so polynomial basis values stay near O(1). This is better than astrometry.net's raw pixel offsets for numerical conditioning.
 - **Dual solver strategy**: Cholesky for SPD normal equations with LU fallback when the matrix is not positive definite. Practical and robust.
 - **Normal equations approach**: Efficient for the small systems involved (3-18 unknowns). Building A^T*A directly avoids storing the full m-by-n design matrix.
-- **Clean API**: `fit_residuals` for post-RANSAC usage, `fit_from_transform` for convenience, `correct`/`correction_at` for evaluation.
+- **Clean API**: `fit_from_transform` for post-RANSAC fitting, `correct`/`compute_corrected_residuals`/`max_correction` for evaluation.
 - **Residual normalization**: Both coordinates and residuals are normalized by the same scale, keeping coefficients well-conditioned.
 
 ### Gaps relative to the standard

@@ -69,34 +69,30 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 
 ## Open Issues
 
-### ~~P1 (Safety): Unsafe Mutable Aliasing in mask_dilation~~ — FIXED
-- Raw pointer now obtained from `words_mut().as_mut_ptr()` (proper `&mut` borrow)
-  before entering parallel regions. Wrapped in `SendPtr` for thread safety.
-
-### P2: PixelGrid Generation Counter Wrap-to-Zero Not Guarded
-- **Location**: deblend/multi_threshold/mod.rs line 104
-- `wrapping_add(1)` can wrap to 0 (the sentinel value), causing phantom valid cells.
-- `NodeGrid` (line 234) correctly guards against this; `PixelGrid` does not.
-- **Trigger**: After ~4 billion resets. Unlikely but possible in long video sessions.
-- **Fix**: Add `if self.current_generation == 0 { self.current_generation = 1; }`
-
-### P2: AtomicUnionFind Capacity Overflow Silently Ignored
-- **Location**: labeling/mod.rs line 731-735
-- If label count exceeds pre-allocated capacity, label is returned without being stored.
-- Subsequent `find()` on this label would access uninitialized memory.
-- **Fix**: Assert or panic on overflow.
-
 ### P2: No Variance Map Convolution for Non-Uniform Noise
 - **Location**: convolution/mod.rs
 - Output normalization `/ sqrt(sum(K^2))` assumes uniform noise. SExtractor and SEP
   handle per-pixel variance explicitly.
 - **Impact**: Low for flat-fielded astrophotography, higher for mosaics.
 
+### P3: Background Mask Fallback Uses All Pixels
+- **Location**: background/tile_grid.rs line 249-251
+- When too few unmasked pixels remain in a tile during refinement, the fallback
+  collects all pixels including masked (star) pixels. This biases the tile's
+  background estimate upward in heavily crowded regions.
+- **Fix**: Interpolate from neighboring tiles instead of using contaminated pixels.
+
+### P3: Duplicate Import in threshold_mask/mod.rs
+- Lines 10 and 24 both have `use rayon::prelude::*;`. Harmless but should be cleaned.
+
 ## Completed Fixes
 1. ~~**Matched filter noise scaling** (P1)~~ **DONE** — output normalized by sqrt(sum(K^2)).
 2. ~~**Dilation before labeling** (P1)~~ **DONE** — dilation removed from detect stage.
 3. ~~**Default 4-connectivity** (P1)~~ **DONE** — changed to 8-connectivity.
 4. ~~**Negative clipping before convolution** (P2)~~ **DONE** — negative residuals preserved.
+5. ~~**Unsafe mutable aliasing in mask_dilation** (P1)~~ **DONE** — proper `&mut` borrow + SendPtr.
+6. ~~**PixelGrid generation counter wrap** (P2)~~ **DONE** — zero guard added matching NodeGrid.
+7. ~~**AtomicUnionFind capacity overflow** (P2)~~ **DONE** — assert on overflow in make_set().
 
 ## Postponed (low impact, revisit only if a real problem arises)
 - **L.A.Cosmic fine structure ratio** — `laplacian_snr` is computed but never used in
@@ -121,8 +117,12 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 ## Cross-Cutting Summary
 
 ### What We Do Well vs Industry
-- **MAD-based noise** is more robust than SExtractor's clipped std dev (background)
-- **SIMD acceleration** throughout — no other tool (SExtractor, SEP, photutils) has this
+- **MAD-based noise** is more robust than SExtractor's clipped std dev (background).
+  MAD has 50% breakdown point; std dev has ~0%. Trade-off: MAD has 37% asymptotic
+  efficiency, but with 1024 samples/tile, precision is still <5% relative error.
+- **SIMD acceleration** throughout — no other tool (SExtractor, SEP, photutils) has this.
+  AVX2/SSE4.1/NEON in: threshold mask, convolution, median filter, profile fitting,
+  background interpolation.
 - **Iterative background refinement** with source masking matches photutils best practices
 - **Mirror boundary** for convolution avoids SExtractor's edge-darkening zero-pad
 - **Generation-counter grids** in deblending give O(1) clearing (novel optimization)
@@ -130,24 +130,73 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 - **Buffer pool** and ArrayVec/SmallVec eliminate heap allocations in hot paths
 - **Dual deblending** (local maxima for sparse, multi-threshold for crowded)
 - **Moffat PowStrategy** avoids powf in L-M inner loop (HalfInt/Int fast paths)
-- **Parallel CCL** with atomic union-find and benchmarked crossover threshold
+- **Parallel CCL** with atomic union-find and benchmarked crossover threshold.
+  AtomicUnionFind is ABA-safe due to monotonic parent-pointer invariant.
 - **Sampling optimization** caps tile statistics at 1024 samples (SExtractor uses all)
 - **Fused L-M normal equations** with SIMD — avoids NxM Jacobian storage, 68-71% faster
+- **Bit-packed masks** (BitBuffer2) — 8x memory reduction, 64-pixel word-level operations
+- **Rayon parallelism** in every stage — SExtractor and SEP are single-threaded
 
 ### What SExtractor Does That We Don't (and whether it matters)
 - **Weight/variance map input** — LOW for astrophotography, HIGH for survey data
-- **Cleaning pass** — MEDIUM for crowded fields near bright stars
+- **Cleaning pass** — MEDIUM for crowded fields near bright stars. SExtractor computes
+  the contribution to each object's mean surface brightness from its neighbors, subtracts
+  it, and accepts the object only if it still exceeds the detection threshold.
 - **Bicubic spline background** — NEGLIGIBLE for registration with 64px tiles
-- **Flux-weighted pixel assignment** — LOW for point-source centroids
-- **Root-relative contrast** — LOW (parent-relative is a valid alternative)
-- **CLASS_STAR classifier** — MEDIUM (deblending + filters approximate this)
+- **Flux-weighted pixel assignment** — LOW for point-source centroids. SExtractor uses
+  Gaussian template weighting; we use Voronoi (nearest peak).
+- **Root-relative contrast** — LOW (parent-relative is a valid alternative). SEP confirmed
+  to use root flux: `child_flux >= DEBLEND_MINCONT * root_flux`.
+- **CLASS_STAR classifier** — MEDIUM. Uses 10-input MLP: 8 isophotal areas + peak +
+  seeing FWHM. Requires SEEING_FWHM to +-5% for faint sources. Not worth replicating
+  for registration use case.
 - **Isophotal/Kron photometry** — NOT NEEDED for registration
+- **Weighted least squares** — MEDIUM. Industry tools (DAOPHOT, SExtractor) use
+  inverse-variance weighting `chi2 = sum(((data-model)/sigma_i)^2)`. Our L-M fitting
+  is unweighted, which is suboptimal for faint stars with Poisson statistics.
+
+### What photutils Does That We Don't
+- **Watershed segmentation** for deblend pixel assignment (follows intensity gradients)
+- **Iterative faintest-peak removal** during deblending (remove weakest, re-watershed)
+- **Multiple threshold spacing** modes (exponential, linear, sinh)
+- **Pluggable background estimators** (6 location, 3 scale estimators)
+
+### What PixInsight Does That We Don't
+- **Wavelet-based (a trous) multiscale structure detection** — different paradigm from
+  matched filtering. Can detect sources at multiple scales simultaneously.
+- **Kurtosis-based peak response** (`peakResponse` parameter) for quality filtering
+- **Thin plate spline** background (DBE) — more flexible than tile-based methods
 
 ### Consistency Issues Across Modules
 - ~~Dilation + 4-connectivity~~ **FIXED** — dilation removed, 8-connectivity default
 - ~~Matched filter output not in proper units~~ **FIXED** — noise-normalized output
 - Separation metric: Chebyshev (multi-threshold) vs Euclidean (local maxima) — minor
 - Two different median9 sorting networks (21 vs 25 comparators) — both correct
+- Sharpness and roundness metrics differ from DAOFIND definitions — custom definitions
+  are effective for filtering but published threshold values aren't transferable.
+  DAOFIND defaults: sharplo=0.2, sharphi=1.0, roundlo=-1.0, roundhi=1.0.
+
+## Algorithm Correctness Summary
+
+All core algorithms verified against reference implementations:
+
+| Component | Status | Verification |
+|-----------|--------|-------------|
+| Sigma clipping | Correct | Median center, MAD scale, convergence detection |
+| MAD constant | Correct | 1.4826022 = 1/Phi^-1(3/4), f32 precision limit |
+| Bilinear interpolation | Correct | Weight clamping, segment-based, SIMD-validated |
+| Gaussian Jacobian (6 params) | Correct | All 6 partial derivatives hand-verified |
+| Moffat Jacobian (5/6 params) | Correct | All partial derivatives hand-verified |
+| L-M damping | Correct | Marquardt multiplicative form H[i][i] *= (1+lambda) |
+| FWHM formulas | Correct | Both Gaussian (2.355*sigma) and Moffat (2*alpha*sqrt(2^(1/beta)-1)) |
+| Eccentricity | Correct | Standard covariance eigenvalue decomposition |
+| SNR formulas | Correct | Three CCD noise models match Howell 2006 |
+| Cephes exp() | Correct | <2e-13 relative error, validated in SIMD tests |
+| Threshold mask | Correct | Bit-for-bit SIMD vs scalar validation |
+| RLE + union-find CCL | Correct | Property-based + ground-truth flood-fill validation |
+| AtomicUnionFind | Correct | No ABA problem (monotonic parent invariant) |
+| Multi-threshold tree | Correct | Exponential spacing matches SExtractor |
+| Sorting network median9 | Correct | Both 21 and 25-comparator networks |
 
 ## Missing Features vs SExtractor / PixInsight
 
@@ -157,6 +206,7 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 - No windowed position parameters (WeightedMoments is approximately equivalent)
 - No CLASS_STAR neural network classifier (deblending + quality filters approximate)
 - No cleaning pass for spurious detections near bright stars
+- No weighted least squares in L-M fitting
 
 ### vs PixInsight StarDetection
 - No wavelet-based (a trous) multiscale structure detection; uses matched filter instead
@@ -167,6 +217,7 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 ### vs photutils DAOStarFinder
 - ~~Missing noise correction factor~~ **FIXED**
 - No negative-wing (zero-sum) kernel for implicit background subtraction
+- No formal parameter uncertainties from L-M covariance matrix
 
 ## References
 - Bertin & Arnouts 1996 (SExtractor): A&AS 117, 393
@@ -175,3 +226,7 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 - Moffat 1969 (Moffat profile): A&A 3, 455
 - Barbary 2016 (SEP): JOSS 1(6), 58
 - Tukey 1977 (Biweight location): Exploratory Data Analysis
+- Howell 2006 (CCD Astronomy): Handbook of CCD Astronomy
+- Trujillo et al. 2001 (Moffat PSF): MNRAS 328, 977
+- He et al. 2017 (CCL survey): state-of-the-art algorithms review
+- Gavin (L-M tutorial): Duke University technical report

@@ -1,6 +1,6 @@
 # Interpolation / Warp Module -- Research Analysis
 
-## Overview
+## Architecture Overview
 
 This module provides image interpolation and warping for astronomical image registration.
 It supports six interpolation methods: Nearest, Bilinear, Bicubic (Catmull-Rom a=-0.5),
@@ -11,342 +11,419 @@ row-warping paths; all others go through a generic per-pixel loop.
 **Files:**
 - `mod.rs` -- Kernel functions, LUT, per-pixel interpolation, `warp_image` dispatcher
 - `warp/mod.rs` -- Row-level warping: bilinear scalar, Lanczos3 optimized, SIMD dispatch
-- `warp/sse.rs` -- AVX2 and SSE4.1 SIMD bilinear implementations
+- `warp/sse.rs` -- AVX2/SSE4.1 SIMD bilinear + SSE FMA Lanczos3 kernel
 - `tests.rs` -- Unit and quality tests for kernels, interpolation, and warping
 - `bench.rs` -- Benchmarks for 1k/2k/4k Lanczos3 warps, bilinear, LUT lookup
 
+**Data flow:**
+1. `warp_image()` (`mod.rs:288`) dispatches per-row via rayon `par_chunks_mut`
+2. For Bilinear: `warp_row_bilinear()` -> SIMD (AVX2/SSE4.1) or scalar
+3. For Lanczos3: `warp_row_lanczos3()` -> const-generic `DERINGING` dispatch ->
+   SIMD FMA kernel (interior) or scalar fast path (interior) or slow path (border)
+4. For other methods: generic per-pixel `interpolate()` loop
+5. All paths use inverse mapping: output pixel -> transform -> sample input
+
+**Key types:**
+- `WarpParams`: bundles `InterpolationMethod` + `border_value`
+- `WarpTransform`: `Transform` + optional `SipPolynomial` for nonlinear distortion
+- `LanczosLut`: pre-computed kernel values, lazy-initialized via `OnceLock`
+- `SoftClampAccum`: (sp, sn, wp, wn) accumulator for deringing
+
 ## Kernel Correctness Analysis
 
-### Lanczos LUT (`mod.rs` lines 23-83)
+### Lanczos Kernel (`mod.rs:55-65`)
+
+The Lanczos kernel is defined as:
+```
+L(x) = sinc(pi*x) * sinc(pi*x/a)  for |x| < a
+L(0) = 1
+L(x) = 0                            for |x| >= a
+```
+where `sinc(t) = sin(t)/t`. The implementation at `mod.rs:55-65` matches this exactly:
+- `x.abs() < 1e-6` returns 1.0 (correct: L(0) = 1 by L'Hopital)
+- `x.abs() >= a` returns 0.0
+- Otherwise: `(pi_x.sin() / pi_x) * (pi_x_a.sin() / pi_x_a)`
+
+This matches the standard mathematical definition from Wikipedia and the Lanczos
+resampling literature. **Correct.**
+
+### Lanczos LUT (`mod.rs:50-95`)
 
 **Resolution:** 4096 samples per unit interval. For Lanczos3, total entries = 3 * 4096 + 1
-= 12289, occupying ~48 KB (fits L1 cache).
+= 12289, occupying ~48 KB (fits L1 cache on most CPUs).
 
 **Precision analysis:** With 4096 samples/unit, nearest-index lookup gives max quantization
 error ~1/(2*4096) = 0.000122 in the x-coordinate. The Lanczos3 kernel's maximum derivative
 is approximately |dL/dx| ~ 3.5 near x=0.6, so worst-case LUT error is ~0.000122 * 3.5 =
-~0.00043. This is adequate for f32 image data (which has ~7 decimal digits of precision),
-and tests confirm LUT-vs-direct error < 0.001 (`tests.rs` line 39).
+~0.00043. This is adequate for f32 image data (~7 decimal digits), and tests confirm
+LUT-vs-direct error < 0.001 (`tests.rs:43`).
 
-**Observation:** The lookup uses nearest-index rounding (`+ 0.5` at line 66) rather than
-linear interpolation between adjacent entries. Linear interpolation would reduce the error
-by ~100x at the cost of one extra multiply-add. PixInsight uses LUT accuracy of 1/2^16
-(~65536 samples/unit) for integer images. For f32 astronomical data, the current 4096 is
-sufficient but could be improved cheaply if needed.
+**Comparison with industry:**
+- PixInsight uses LUT accuracy of 1/2^16 (~65536 samples/unit) for integer images.
+  For f32 astronomical data, our 4096 is sufficient.
+- The lookup uses nearest-index rounding (`+ 0.5` at `mod.rs:92`) rather than linear
+  interpolation between adjacent entries. Linear interpolation would reduce the error
+  by ~100x at the cost of one extra multiply-add per lookup (12 lookups per pixel).
+- Intel IPP uses function evaluation with AVX, not LUT. Their separable approach
+  amortizes the cost differently (only 12 evals per pixel instead of 36).
 
-**Potential issue:** The `+ 0.5` in the LUT lookup (`mod.rs` line 66) implements rounding.
-This is correct for nearest-index lookup. However, if `abs_x` is very close to `a` (the
-support boundary), the rounded index could point past the last valid entry. The guard at
-line 63 (`abs_x >= self.a as f32`) prevents this for exact boundary values, and the `+1`
-in `num_entries` at line 49 provides one extra entry as safety margin. This is safe.
+**Safety:** The `+ 0.5` rounding could produce an index at `num_entries - 1` when `abs_x`
+is close to `a`. The guard at `mod.rs:89` (`abs_x >= self.a as f32`) prevents this for
+exact boundary values, and the `+1` in `num_entries` at `mod.rs:75` provides safety margin.
+Safe.
 
-### Kernel Normalization (`mod.rs` lines 194-214, `warp/mod.rs` lines 181-202)
+### Kernel Weight Computation (`warp/mod.rs:228-243`)
 
-Normalization is applied correctly in both the generic `interpolate_lanczos_impl` and the
-optimized `warp_row_lanczos3`. The x and y weight sums are computed independently, and
-the threshold `1e-10` protects against division by zero for edge cases (e.g., pixel fully
-outside the image).
+For Lanczos3 with `fx` = fractional x-offset (0 <= fx < 1), pixel window starts at
+`kx0 = x0 - 2`, covering 6 pixels: `[x0-2, x0-1, x0, x0+1, x0+2, x0+3]`.
 
-**Config wiring:** `border_value` is wired through via `WarpParams` struct (method +
-border_value). `normalize_kernel` was removed (normalization is always applied). Deringing
-is a field on the Lanczos variants of `InterpolationMethod` (e.g.
-`Lanczos3 { deringing: 0.3 }`), using PixInsight-style soft clamping (see below).
+Distances from sample point `x0 + fx` to each pixel:
+- `wx[0] = L(fx + 2)`: pixel at x0-2, distance = fx + 2 (in [2, 3))
+- `wx[1] = L(fx + 1)`: pixel at x0-1, distance = fx + 1 (in [1, 2))
+- `wx[2] = L(fx)`:     pixel at x0,   distance = fx     (in [0, 1))
+- `wx[3] = L(fx - 1)`: pixel at x0+1, distance = 1 - fx (in (0, 1])
+- `wx[4] = L(fx - 2)`: pixel at x0+2, distance = 2 - fx (in (1, 2])
+- `wx[5] = L(fx - 3)`: pixel at x0+3, distance = 3 - fx (in (2, 3])
 
-### Soft Deringing (PixInsight-style)
+All absolute distances are within [0, 3] = Lanczos3 support. This matches the generic
+`interpolate_lanczos_impl` which computes `fx - (i - A + 1)` for A=3: offsets are
+`fx+2, fx+1, fx, fx-1, fx-2, fx-3`. **Correct.**
 
-Deringing uses a `f32` threshold instead of a boolean. Negative values disable deringing;
-values in `[0.0, 1.0]` set the soft clamping threshold (default `0.3`, matching PixInsight).
+### Kernel Normalization
 
-**Algorithm** (from PCL `LanczosInterpolation.h`): During accumulation, each
-`weighted_value = pixel * weight` is split into positive (`sp += val`, `wp += weight`) and
-negative (`sn += |val|`, `wn += |weight|`) contributions. After accumulation:
+**Generic path** (`mod.rs:228-262`): Normalizes x and y weights independently:
+`inv_wx = 1/wx_sum`, `inv_wy = 1/wy_sum`, applied per-sample as `wxi * inv_wx * wyj`.
+
+**Optimized path** (`warp/mod.rs:245-252`): Uses combined normalization:
+`inv_total = 1 / (wx_sum * wy_sum)`, applied as `sp * inv_total`.
+
+These are mathematically equivalent. The generic path computes:
+`sum_j(sum_i(v * (wxi/wx_sum) * (wyj/wy_sum)))` = `sum(v * wxi * wyj) / (wx_sum * wy_sum)`.
+The optimized path computes `sp / (wx_sum * wy_sum)` where `sp = sum(v * wxi * wyj)`.
+**Identical.** Correct.
+
+**Deringing path normalization:** The deringing code does NOT pre-normalize weights before
+accumulating sp/sn/wp/wn. The reference test in `warp/mod.rs:807-869` DOES pre-normalize.
+However, `soft_clamp()` computes ratios `r = sn/sp` and `(sp - sn*c) / (wp - wn*c)`.
+Scaling all accumulators by a constant `k` cancels out: `r' = k*sn/(k*sp) = r`, and
+`(k*sp - k*sn*c) / (k*wp - k*wn*c) = (sp-sn*c)/(wp-wn*c)`. **Equivalent.** Correct.
+
+### Bicubic Catmull-Rom (`mod.rs:112-123`)
+
+Uses `a = -0.5` (Catmull-Rom), the standard interpolating cubic:
+```
+|x| <= 1: (a+2)|x|^3 - (a+3)|x|^2 + 1
+1 < |x| < 2: a|x|^3 - 5a|x|^2 + 8a|x| - 4a
+|x| >= 2: 0
+```
+
+Verified properties:
+- `K(0) = 1`: `((-0.5+2)*0 - (-0.5+3)*0 + 1) = 1`. Correct.
+- `K(1) = 0`: `(1.5*1 - 2.5*1 + 1) = 0`. Correct.
+- `K(2) = 0`: `(-0.5*8 - 5*(-0.5)*4 + 8*(-0.5)*2 - 4*(-0.5)) = -4+10-8+2 = 0`. Correct.
+- Continuity at x=1: both pieces give 0.
+- Weights sum to 1 (partition of unity) for interior points by construction.
+
+**Comparison:** Catmull-Rom (B=0, C=0.5 in Mitchell-Netravali space) is sharper than
+Mitchell-Netravali (B=1/3, C=1/3) but may produce ringing on high-contrast edges.
+Mitchell-Netravali is better for general-purpose resizing. For astrophotography registration,
+Catmull-Rom is appropriate since sharpness is preferred and Lanczos is available for the
+best quality. **Correct choice.**
+
+### Bilinear (`mod.rs:155-170`)
+
+Standard bilinear interpolation using floor-based integer coordinates and linear blending:
+```
+top = p00 + fx * (p10 - p00)
+bottom = p01 + fx * (p11 - p01)
+result = top + fy * (bottom - top)
+```
+This is the standard formulation. **Correct.**
+
+### Nearest Neighbor (`mod.rs:143-152`)
+
+Uses `x.round()` which rounds 0.5 to 1 (round half to even or half up depending on
+platform, but consistent). Standard. **Correct.**
+
+## Deringing Analysis vs Industry Standards
+
+### PixInsight Soft Clamping (Reference Implementation)
+
+PixInsight PCL's `LanczosInterpolation.h` uses a soft clamping algorithm. Based on the PCL
+source code analysis (BSD license), during accumulation each `weighted_value = pixel * weight`
+is split into:
+- Positive contributions: `sp += val`, `wp += weight` (when `s >= 0`)
+- Negative contributions: `sn += |val|`, `wn += |weight|` (when `s < 0`)
+
+After accumulation:
 ```
 r = sn / sp                           // ratio of negative to positive
 if r >= 1.0: return sp / wp           // hard clamp (total undershoot)
 if r > threshold:
     fade = (r - threshold) / (1 - threshold)
-    c = 1 - fade²                     // quadratic fade
-    sn *= c; wn *= c                  // reduce negative contribution
-return (sp - sn) / (wp - wn)          // final value
+    c = 1 - fade^2                    // quadratic fade
+    return (sp - sn * c) / (wp - wn * c)  // reduce negative contribution
+return (sp - sn) / (wp - wn)          // normal (below threshold)
 ```
 
-This replaces both weight normalization and the old hard min/max clamp. The `soft_clamp()`
-helper in `warp/mod.rs` implements this. Pre-computed `clamp_th` and `clamp_th_inv` are
-hoisted outside the pixel loop.
+Default threshold: 0.3. Lower = more aggressive deringing.
 
-### Bicubic Catmull-Rom (`mod.rs` lines 85-97)
+### Our Implementation (`warp/mod.rs:137-151`)
 
-Uses `a = -0.5` (Catmull-Rom), which is the standard interpolating cubic that passes
-through data points exactly. This is correct for registration where preserving pixel values
-at grid points matters.
+```rust
+fn soft_clamp(sp, sn, wp, wn, th, th_inv) -> f32 {
+    if sp == 0.0 { return 0.0; }
+    let r = sn / sp;
+    if r >= 1.0 { return sp / wp; }
+    if r > th {
+        let fade = (r - th) * th_inv;  // th_inv = 1/(1-th)
+        let c = 1.0 - fade * fade;
+        return (sp - sn * c) / (wp - wn * c);
+    }
+    (sp - sn) / (wp - wn)
+}
+```
 
-**For astrophotography:** Catmull-Rom is a reasonable choice. PixInsight recommends
-Lanczos-3 as best for registration due to superior detail preservation with minimal
-aliasing. Mitchell-Netravali (B=1/3, C=1/3) would be better for downsampling but worse
-for registration. The current Catmull-Rom implementation is sound for the bicubic option.
+**Comparison with PixInsight:**
+- Accumulation logic: identical (split on `s < 0` vs `s >= 0`)
+- Ratio computation: identical (`r = sn / sp`)
+- Hard clamp at r >= 1: identical (`sp / wp`)
+- Quadratic fade: identical (`c = 1 - fade^2`, `fade = (r-th)/(1-th)`)
+- Final value: identical (`(sp - sn*c) / (wp - wn*c)`)
+- Extra guard: our code handles `sp == 0` (returns 0.0). PixInsight may assume
+  sp > 0 for valid images. Our guard is safer.
 
-**Not normalized:** Unlike Lanczos, the bicubic kernel is not explicitly normalized in
-`interpolate_bicubic` (`mod.rs` lines 138-167). Catmull-Rom weights sum to 1.0 by
-construction for interior points, so this is correct. At boundaries where `sample_pixel`
-returns 0.0 for out-of-bounds pixels, the effective sum is reduced, causing darkening.
-This matches the bilinear boundary behavior and is the expected behavior for
-zero-padding borders.
+**Verdict: Implementation matches PixInsight's algorithm exactly.** Default threshold 0.3
+also matches. The `th_inv` pre-computation avoids a division per pixel.
 
-### Nearest Neighbor (`mod.rs` lines 110-118)
+### Comparison with Other Approaches
 
-Uses `x.round()`, which rounds half-values up (0.5 -> 1). This is standard. The
-`sample_pixel` call handles out-of-bounds correctly, returning 0.0.
+**Hard min/max clamping** (old approach, removed): Clamps output to [min, max] of the
+kernel neighborhood. Simple but overly aggressive -- flattens legitimate interpolation
+values near sharp edges. Our soft clamping is strictly superior.
 
-### `sample_pixel` Border Handling (`mod.rs`)
+**SWarp approach:** SWarp uses Lanczos4 by default for its resampling kernel. SWarp does
+NOT implement deringing; it conserves flux via Jacobian determinant multiplication and
+relies on the Lanczos4 kernel having less ringing than Lanczos3. For astronomical image
+registration at ~1:1 scale, the ringing is minimal anyway.
 
-Returns `border_value` for out-of-bounds coordinates (default 0.0 = zero-padding). This
-means bilinear/bicubic/Lanczos near image edges will use the configured border value.
-`Config.border_value` is wired through via `WarpParams`.
+**Siril approach:** Uses Lanczos-4 by default with optional clamping.
 
-**Industry comparison:** OpenCV offers `BORDER_REPLICATE` (clamp-to-edge),
-`BORDER_REFLECT`, `BORDER_CONSTANT` (configurable value), etc. PixInsight uses clamped
-borders. The current constant-value padding is acceptable for astrophotography where
-borders are cropped.
+### SIMD Deringing Path (`warp/sse.rs:343-358`)
 
-## Warp Implementation Analysis
+Uses branchless SSE mask splitting:
+```
+pos_mask = cmpge(s, zero);  neg_mask = cmplt(s, zero);
+sp += and(pos_mask, s);     sn -= and(neg_mask, s);
+wp += and(pos_mask, w);     wn -= and(neg_mask, w);
+```
 
-### Incremental Stepping (`warp/mod.rs` lines 63-84, 132-243)
+This is correct: `_mm_and_ps(mask, value)` selects the value where mask bits are set,
+zeroes elsewhere. The `_mm_cmpge_ps` and `_mm_cmplt_ps` return all-ones or all-zeros
+per lane, so `and` acts as a conditional select. The subtraction for `sn`/`wn`
+accumulates the absolute values (since `s < 0` means `and(neg, s)` is negative, and
+`sn -= negative` adds the absolute value). **Correct.**
 
-For affine transforms (Translation, Euclidean, Similarity, Affine), the source coordinate
-increments linearly as `x` advances by 1:
-- `dx_step = m[0]` (line 69) -- correct: d(src_x)/dx = m[0] for affine
-- `dy_step = m[3]` (line 70) -- correct: d(src_y)/dx = m[3] for affine
+## SIMD Implementation Analysis
 
-The `is_linear()` check (`transform.rs` lines 361-363) correctly excludes Homography and
-SIP transforms, both of which have nonlinear coordinate mappings where incremental stepping
-would be wrong.
+### Lanczos3 FMA Kernel (`warp/sse.rs:306-381`)
 
-**Correctness verified:** The initial point `src0 = wt.apply(DVec2::new(0.0, y))` is
-computed with full precision (f64), and stepping accumulates in f64. For a 4096-wide image,
-worst-case accumulated f64 error is ~4096 * machine_epsilon ~ 9e-13, negligible.
+**Naming issue:** The function is named `lanczos3_kernel_fma` and tagged with
+`#[target_feature(enable = "avx2,fma")]`, but **does not use any FMA intrinsics**.
+The accumulation uses `_mm_mul_ps` + `_mm_add_ps` (separate multiply and add), not
+`_mm_fmadd_ps`. This means:
+1. The function requires FMA support at runtime (dispatch checks `has_avx2_fma()`)
+   but does not benefit from it.
+2. Renaming to `lanczos3_kernel_sse` and changing the target feature to just `"sse4.1"`
+   would make it available on more hardware without any loss.
+3. Alternatively, replacing the mul+add pairs with actual FMA intrinsics would improve
+   both accuracy (single rounding) and throughput (1 instruction instead of 2).
 
-### Lanczos3 Fast Path (`warp/mod.rs` lines 205-236)
+**Architecture:** Two `__m128` accumulators (lo/hi) process 4+4 = 8 floats per row.
+6 rows x (2 loads + 2 weight muls + 2 src*weight muls) = 36 multiplies, 12 adds.
+With deringing: additional 8 comparisons + 8 masked adds per row = 48 extra ops.
 
-The bounds check at line 205 (`kx0 >= 0 && ky0 >= 0 && kx0 + 5 < iw && ky0 + 5 < ih`)
-correctly identifies when the full 6x6 kernel window is within bounds. The `+ 5` offset
-is correct because the kernel spans indices `[kx0, kx0+5]` inclusive (6 pixels).
+**Register pressure:** Without deringing: 2 accumulators + 2 wx + 1 zero + 2 src + 2
+temps = ~9 XMM registers. With deringing: adds 8 accumulators (sp/sn/wp/wn lo/hi) = 17
+registers. x86_64 has 16 XMM registers, so LLVM must spill 1 register. This is minimal
+overhead.
 
-**Performance:** The fast path uses `get_unchecked` for direct indexing, avoiding 36
-bounds checks per pixel. Row offsets are computed once per kernel row. This is a meaningful
-optimization for interior pixels (the vast majority of a typical astronomical image).
+**Horizontal sum** (`hsum_ps`): Standard SSE horizontal reduction using
+`movehdup + add + movehl + add_ss`. 3 instructions. Correct and efficient.
 
-**Correctness concern -- resolved:** The optimized Lanczos3 uses `kx0 = x0 - 2` (line
-157), while the generic `interpolate_lanczos_impl` uses `x0 - a_i32 + 1` (line 220 in
-mod.rs). For A=3: `x0 - 3 + 1 = x0 - 2`. These match.
+### AVX2 Bilinear (`warp/sse.rs:21-153`)
 
-### SIMD Bilinear Dispatch (`warp/mod.rs` lines 26-51)
+Processes 8 pixels per iteration:
+1. SIMD coordinate computation (lines 80-89): handles projective divide correctly
+2. Scalar pixel sampling (lines 117-127): 32 `sample_pixel` calls per chunk
+3. SIMD bilinear blending (lines 138-143)
 
-Dispatch chain:
-1. If no SIP and width >= 8 and has AVX2 -> AVX2 path
-2. Else if no SIP and width >= 4 and has SSE4.1 -> SSE4.1 path
-3. Else -> scalar fallback
+**The bottleneck is step 2** -- scalar sampling with bounds checks. For interior pixels
+(the vast majority), bounds checks always pass. A fast path that checks the whole 8-pixel
+chunk bounds once and uses unchecked loads would eliminate 32 branches per chunk.
 
-**Correctness:** SIP is correctly excluded from SIMD paths because SIMD assumes linear
-coordinate mapping (the SIMD code directly uses the transform matrix, not `wt.apply()`).
+**Transform precision:** f64 matrix is converted to f32 once per row (lines 37-44).
+For 4096-pixel width, worst-case coordinate error from f32 truncation is
+~4096 * 1.2e-7 = ~0.0005 pixels. Acceptable for bilinear (1-pixel neighborhood) but
+would be marginal for Lanczos (6-pixel neighborhood). The Lanczos3 path uses f64
+incremental stepping, avoiding this issue.
 
-**Issue:** The SIMD functions in `sse.rs` take `&Transform` directly (not `&WarpTransform`),
-bypassing SIP even if it were present. The dispatch in `warp_row_bilinear` guards this
-with `!wt.has_sip()` (line 33), so there is no bug, but the SIMD functions could be called
-incorrectly if someone bypasses the dispatch.
+### SSE4.1 Bilinear (`warp/sse.rs:163-278`)
 
-**Missing:** The dispatch checks `has_avx2()` but the AVX2 function is tagged with only
-`#[target_feature(enable = "avx2")]`, not `"avx2,fma"`. The code does not use FMA
-instructions, so this is fine, but FMA could improve accuracy of the bilinear computation.
-
-## SIMD Analysis (`warp/sse.rs`)
-
-### AVX2 Bilinear (lines 20-152)
-
-**Architecture:** Processes 8 pixels per iteration. For each chunk:
-1. Compute source coordinates for 8 output pixels using SIMD (lines 79-88)
-2. Store coordinates to arrays, sample 4 neighbors per pixel in scalar loop (lines 100-126)
-3. Perform bilinear blending in SIMD (lines 128-142)
-
-**Key bottleneck:** Step 2 is entirely scalar -- 8 iterations of `sample_pixel` per corner,
-= 32 scalar memory lookups per 8-pixel chunk. This is the dominant cost.
-
-**Why no SIMD gather?** AVX2 has `_mm256_i32gather_ps` which could load scattered f32
-values. However:
-- Gather has high latency (~12-20 cycles on Haswell/Skylake)
-- Each pixel needs 4 gathers (4 corners), so 4 gathers = ~48-80 cycles
-- The scalar approach does 32 loads but can pipeline them
-- Research confirms gather is often slower for small scattered loads (see IEEE paper on
-  AVX2 gather for image processing)
-- The scalar fallback for pixel sampling is a pragmatic choice
-
-**Potential improvement:** For interior pixels where all coordinates are in-bounds, the
-sample_pixel bounds check can be skipped entirely. A hybrid approach: check if the whole
-8-pixel chunk maps to interior coordinates, then use direct unchecked loads. This would
-remove 32 branch misprediction opportunities per chunk.
-
-**Transform precision:** The SIMD code converts the f64 transform matrix to f32 once per
-row (lines 36-42). For a 4096-wide image at f32 precision, the worst-case coordinate error
-from f32 truncation is ~4096 * 1.2e-7 = ~0.0005 pixels. This is acceptable for bilinear
-(which interpolates over 1-pixel neighborhoods) but could cause visible artifacts for
-higher-order interpolation if the SIMD approach were extended to Lanczos.
-
-### SSE4.1 Bilinear (lines 162-277)
-
-Same algorithm as AVX2 but processes 4 pixels at a time. Uses `_mm_floor_ps` (SSE4.1
-instruction, hence the feature requirement). Otherwise identical structure.
-
-### Lanczos3: Explicit FMA SIMD Kernel (`warp/sse.rs`)
-
-`lanczos3_kernel_fma<const DERINGING: bool>` processes the 6x6 kernel accumulation using
-SSE FMA intrinsics. LLVM does NOT auto-vectorize the 6-element inner loop (assembly
-analysis confirmed purely scalar `mulss`/`addss`).
-
-**Architecture:** Pre-loads `wx[0..3]` and `wx[4..5]` into two `__m128` registers. For
-each of the 6 rows: loads 8 source pixels as two `__m128` vectors, multiplies by `wx`,
-then uses `_mm_fmadd_ps` to accumulate `weighted * wy[j]`. Horizontal sum via
-`movehdup + add + movehl + add_ss`.
-
-**Deringing fusion:** When `DERINGING=true`, splits weighted contributions into positive
-(`sp`) and negative (`sn`) using SSE comparison masks (`_mm_cmpge_ps`/`_mm_cmplt_ps` +
-`_mm_and_ps`) for branchless accumulation. Uses 8 SSE accumulators: `sp_lo/hi`, `sn_lo/hi`,
-`wp_lo/hi`, `wn_lo/hi`. Returns `(sp, sn, wp, wn)` for the caller to apply `soft_clamp()`.
-When `!DERINGING`, returns `(sum, 0.0, 0.0, 0.0)` with simple accumulation.
-
-**Results (1024x1024, single-threaded, correct affine transform):**
-- Deringing: 80.9ms (scalar) → 33.4ms (FMA) = **-59%**
-- No deringing: 36.6ms → 30.3ms = **-17%**
-- Multi-threaded 4k: 95.7ms → 45.7ms = **-52%**
-
-**Bounds requirement:** `kx0 + 8 < input_width` (reads 8 floats per row via two
-`_mm_loadu_ps`; lanes 6-7 are garbage but zeroed by `wx_hi = [wx4, wx5, 0, 0]`).
-
-**Dispatch:** Runtime check via `cpu_features::has_avx2_fma()`, cached outside pixel loop.
-Falls back to scalar fast path for edge pixels (only needs `kx0 + 5 < iw`).
-
-**Note:** Cannot be inlined into the caller because `#[target_feature(enable = "avx2,fma")]`
-functions can only be inlined into functions with the same target features. The per-pixel
-call overhead is measurable but small compared to the SIMD savings.
-
-**Previous incorrect claim:** NOTES-AI previously stated LLVM auto-vectorizes the scalar
-loop — assembly analysis proved this wrong. Only scalar `mulss`/`addss` is generated.
+Same algorithm as AVX2 but 4 pixels at a time. Uses `_mm_floor_ps` (SSE4.1 requirement).
 
 ## Performance Analysis
 
-### Parallelization (`mod.rs` lines 258-274)
+### Benchmark Results (from bench.rs and MEMORY.md)
 
-Row-level parallelism via rayon `par_chunks_mut`. Each row is processed independently.
-This is efficient:
-- Output rows are contiguous in memory (good write pattern)
-- Input access is scattered but cache-friendly for small rotations (adjacent output rows
-  access nearby input rows)
-- No synchronization needed between rows
+Single-threaded 1024x1024, affine transform:
+- Lanczos3 with deringing: 80.9ms (scalar) -> 33.4ms (SIMD) = **-59%**
+- Lanczos3 without deringing: 36.6ms (scalar) -> 30.3ms (SIMD) = **-17%**
+- Multi-threaded 4k Lanczos3: 95.7ms -> 45.7ms = **-52%**
 
-**Potential issue with large rotations:** If the transform involves a 90-degree rotation,
-consecutive output rows map to consecutive input columns, causing cache-unfriendly stride-1
-access across the full image width. Tile-based processing could help for these cases but
-adds complexity.
+The larger speedup with deringing (-59% vs -17%) is because deringing adds branchy
+accumulation in scalar (if/else per sample) that the SIMD path handles branchlessly
+with masked operations.
 
-### Memory Access Patterns
+### Parallelization (`mod.rs:299-316`)
 
-**Current approach (row-at-a-time):**
-- Output: sequential writes, optimal for cache
-- Input: depends on transform. For typical astro registration (small rotation + translation),
-  input access is nearly sequential -- adjacent output pixels map to nearby input pixels.
-  Cache lines are reused efficiently.
-
-**Alternative (tile-based):**
-- Would improve input cache reuse for large rotations/scaling
-- Adds code complexity
-- For typical astrophotography (< 10 degree rotation, ~1x scale), row-based is fine
-
-**Conclusion:** Row-based is appropriate for the use case.
+Row-level rayon `par_chunks_mut`. Good for:
+- Contiguous output writes (cache-friendly)
+- Independent rows (no synchronization)
+- Typical astro transforms (small rotation, ~1:1 scale) give cache-friendly input access
 
 ### LUT Cache Behavior
 
-Lanczos3 LUT is 48 KB. L1 data cache is typically 32-48 KB. The LUT may just barely fit
-in L1. During Lanczos3 interpolation, each pixel does 12 LUT lookups at pseudo-random
-offsets. If the LUT is fully cached, lookups are ~4 cycles each. If it spills to L2,
-lookups are ~12 cycles each. The 48 KB size is borderline.
+Lanczos3 LUT: 48 KB. Modern L1 data cache: 32-48 KB. The LUT is borderline for L1.
+Each pixel does 12 LUT lookups at effectively random offsets within the LUT.
+Reducing to 2048 samples/unit (24 KB) would guarantee L1 residency with error increase
+from ~0.00043 to ~0.00086 (still adequate for f32).
 
-**Optimization option:** Reduce LUT resolution to 2048 samples/unit (24 KB, fits L1
-comfortably). Error would increase from ~0.00043 to ~0.00086, still well within f32
-precision. Alternatively, use linear interpolation with 1024 samples/unit (12 KB) for
-similar precision.
+### Memory Access Patterns
+
+For a small-angle rotation (typical in astro registration), consecutive output pixels
+map to nearly consecutive input pixels. The 6x6 kernel window for adjacent output
+pixels overlaps heavily, so input data stays in L1/L2 cache. For large rotations
+(>45 degrees), input access becomes stride-N which is cache-unfriendly. Tile-based
+processing would help but adds complexity.
 
 ## Issues Found
 
-### 1. No Anti-Aliasing Prefilter for Downscaling (Low - Context-Dependent)
-When the transform involves scaling down (scale factor < 1), the Nyquist frequency of the
-output is lower than the input. Without prefiltering, high-frequency content aliases into
+### 1. SIMD Kernel Does Not Actually Use FMA (Medium - Correctness/Naming)
+
+**File:** `warp/sse.rs:306-381`
+**Lines:** 338-341
+
+The function `lanczos3_kernel_fma` requires `#[target_feature(enable = "avx2,fma")]`
+but uses `_mm_mul_ps` + `_mm_add_ps` instead of `_mm_fmadd_ps`. This:
+- Restricts the function to CPUs with FMA support unnecessarily
+- Misses the accuracy benefit of FMA (single rounding instead of double)
+- Misses the throughput benefit (FMA is 1 uop on modern CPUs)
+- The function name is misleading
+
+**Fix:** Either:
+(a) Replace `_mm_mul_ps(src, w) -> acc = _mm_add_ps(acc, s)` with
+    `acc = _mm_fmadd_ps(src, w, acc)` to actually use FMA, or
+(b) Change target feature to `"sse4.1"` and rename to drop "fma" if FMA is not needed.
+
+Option (a) is preferred: FMA would improve both speed and accuracy, and the dispatch
+already requires FMA.
+
+### 2. Duplicate Bilinear Implementations (Low - Code Quality)
+
+**Files:** `mod.rs:155-170` (`interpolate_bilinear`) and `warp/mod.rs:109-127`
+(`bilinear_sample`)
+
+These are functionally identical implementations of bilinear interpolation. The `mod.rs`
+version takes `&Buffer2<f32>`, the `warp/mod.rs` version also takes `&Buffer2<f32>`.
+They should be consolidated into a single function.
+
+### 3. No Anti-Aliasing Prefilter for Downscaling (Low - Context-Dependent)
+
+When the transform involves scaling down (scale < 1), high-frequency content aliases into
 the output. The current code does no prefiltering.
 
-**For astrophotography:** This is generally not an issue because:
-- Registration typically maps images at ~1:1 scale
-- Astronomical images are already band-limited by the PSF (seeing/optics)
+**For astrophotography:** Generally not an issue because:
+- Registration maps images at ~1:1 scale
+- Astronomical images are band-limited by the PSF (seeing/optics)
 - Small scale differences (0.95x-1.05x) produce minimal aliasing
 
-However, if this module is used for image rescaling (e.g., drizzle output downscaling or
-mosaic edge matching with different plate scales), aliasing could appear.
-
 **What others do:**
-- PixInsight: no explicit mention of anti-aliasing prefilter in their interpolation docs
-- Siril: offers an `area` interpolation option for downsampling
-- OpenCV: `INTER_AREA` for downscaling, but `warpAffine` with `INTER_LINEAR` does NOT
-  prefilter (known issue #21060 on GitHub)
-- Intel IPP: uses separable approach that inherently handles this for fixed ratios
+- SWarp: no explicit prefilter, relies on Lanczos4 kernel being wider
+- PixInsight: no mention of prefilter in interpolation docs
+- OpenCV: `INTER_AREA` for downscaling, but `warpAffine` does NOT prefilter
+- Siril: offers `area` interpolation option for downsampling
 
-### 2. Bicubic Not Normalized at Boundaries (Low)
-At image boundaries, `sample_pixel` returns 0.0 for out-of-bounds coordinates. For
-bicubic interpolation, this means the effective kernel weights don't sum to 1.0 near
-edges, producing darkened pixels. The same applies to bilinear. This matches zero-padding
-border behavior and is expected for astrophotography (borders are cropped), but differs
-from clamp-to-edge which would be more correct.
+### 4. Bicubic/Bilinear Not Normalized at Boundaries (Low)
+
+At image boundaries, `sample_pixel` returns `border_value` (default 0.0) for out-of-bounds
+pixels. For bicubic/bilinear, the effective kernel weights don't sum to 1.0 near edges,
+producing darkened pixels. This is expected for zero-padding borders and is standard
+behavior (same as OpenCV BORDER_CONSTANT). Borders are cropped in astrophotography.
+
+### 5. SIMD Bilinear border_value Hardcoded to 0.0 (Low)
+
+**File:** `warp/mod.rs:47-63`
+
+The SIMD bilinear paths (`warp_row_bilinear_avx2`, `warp_row_bilinear_sse`) use hardcoded
+`0.0` for border_value. Non-zero border_value falls back to scalar. Since 0.0 is the
+universal default for astrophotography, this has no practical impact.
 
 ## Potential Improvements (Prioritized)
 
 ### Worth Doing
-1. ~~**Soft deringing threshold**~~ — **DONE.** PixInsight-style soft clamping with
-   configurable `f32` threshold (default 0.3). Tracks positive/negative contributions
-   (`sp/sn/wp/wn`) with quadratic fade. SIMD path uses branchless SSE mask splitting.
+
+1. **Use actual FMA intrinsics in Lanczos3 SIMD kernel** (`warp/sse.rs:338-341`):
+   Replace `_mm_mul_ps` + `_mm_add_ps` with `_mm_fmadd_ps`. Gives both accuracy
+   (single rounding) and throughput improvements. The dispatch already requires FMA.
+   Estimated improvement: ~5-10% for the SIMD kernel path.
 
 2. **Generic incremental stepping** for Lanczos2/Lanczos4/Bicubic: Factor out stepping
    logic from the Lanczos3-specific row warper so all methods benefit from avoiding
    per-pixel matrix multiply. Estimated ~38% speedup for non-Lanczos3 methods.
 
-3. **Remove duplicate bilinear**: `mod.rs` `interpolate_bilinear` and `warp/mod.rs`
-   `bilinear_sample` are identical implementations (~15 lines each). Consolidate.
+3. **Remove duplicate bilinear**: Consolidate `mod.rs:interpolate_bilinear` and
+   `warp/mod.rs:bilinear_sample` into a single function.
 
 ### Postponed (low impact)
-- **Separable Lanczos3** — does not apply to arbitrary warps with rotation. Only
-  useful for axis-aligned resize (Intel IPP approach).
-- **SIMD bilinear interior fast path** — skip bounds checks for interior chunk. Marginal.
-- **Inline FMA kernel** — ~2-3ms gain out of 33ms. Not worth the complexity.
-- **Linear interpolation in LUT** — current 4096 samples/unit is adequate for f32.
-- **Tile-based processing** — only helps extreme rotations (>45°), rare in practice.
-- **Configurable border modes** — borders are cropped in astrophotography.
-- **SIMD bilinear border_value** — currently hardcoded to 0.0 (`warp/mod.rs:36`).
-  Non-zero falls back to scalar. Low impact since 0.0 is the universal default.
-- **Flux conservation (Jacobian)** — SWarp multiplies by Jacobian determinant of the
-  coordinate mapping. Negligible for registration (~1:1 scale). Would matter for
-  mosaic creation with different plate scales.
+
+- **Separable Lanczos3** -- does not apply to arbitrary warps with rotation. Only
+  useful for axis-aligned resize (Intel IPP two-pass approach).
+- **SIMD bilinear interior fast path** -- skip bounds checks for interior chunk. Marginal.
+- **Linear interpolation in LUT** -- current 4096 samples/unit is adequate for f32.
+  Would reduce error ~100x at cost of 1 extra mul+add per lookup (12 per pixel).
+- **Reduce LUT to 2048 samples/unit** -- saves 24 KB, guarantees L1 residency. Error
+  increases from ~0.00043 to ~0.00086, still adequate.
+- **Tile-based processing** -- only helps extreme rotations (>45 deg), rare in practice.
+- **Configurable border modes** -- borders are cropped in astrophotography.
+- **SIMD bilinear border_value** -- currently hardcoded to 0.0. Low impact.
+- **Flux conservation (Jacobian)** -- SWarp multiplies by Jacobian determinant. Negligible
+  for registration (~1:1 scale). Would matter for mosaic with different plate scales.
 
 ### Tried and Rejected
+
 - **AVX2 gather for LUT lookups:** `_mm256_i32gather_ps` for 6 weights at once. ~2% slower
   than scalar lookups due to high gather latency (~12 cycles) vs L1-cached scalar loads
   (~4 cycles). The 48KB LUT fits in L1 cache, making scalar lookups fast enough.
 - **Per-pixel separable factorization:** Restructuring inner loop from `v*wx*wy` to
-  row_sums then vertical combine. No improvement — LLVM already optimizes the original
+  row_sums then vertical combine. No improvement -- LLVM already optimizes the original
   pattern.
 
-## References
+## Research Sources
 
-- [PixInsight Interpolation Algorithms](https://pixinsight.com/doc/docs/InterpolationAlgorithms/InterpolationAlgorithms.html) -- Detailed analysis of Lanczos, bicubic, Mitchell-Netravali for astrophotography. Recommends Lanczos-3 with clamping threshold 0.3.
-- [Intel IPP AVX Lanczos](https://www.intel.com/content/www/us/en/developer/articles/technical/the-intel-avx-realization-of-lanczos-interpolation-in-intel-ipp-2d-resize-transform.html) -- Two-pass separable Lanczos3 with AVX SIMD. 42 mults + 35 adds per pixel. 1.5x gain from SSE to AVX.
-- [AVIR Lanczos Resizer](https://github.com/avaneev/avir) -- High-quality SIMD Lanczos resizer with AVX2/SSE2/NEON. LANCIR variant is 3x faster.
-- [Lanczos Interpolation Explained](https://mazzo.li/posts/lanczos.html) -- Clear explanation of Lanczos kernel, ringing, and normalization.
-- [IEEE: AVX2 Gather for Image Processing](https://ieeexplore.ieee.org/document/8634707/) -- Analysis showing gather instructions have mixed performance for scattered image access.
-- [OpenCV warpAffine Source](https://github.com/opencv/opencv/blob/master/modules/imgproc/src/imgwarp.cpp) -- Reference implementation with SIMD coordinate computation, blockline processing.
-- [Siril Registration Docs](https://siril.readthedocs.io/en/latest/preprocessing/registration.html) -- Uses Lanczos-4 by default with clamping option.
+- [Lanczos Resampling (Wikipedia)](https://en.wikipedia.org/wiki/Lanczos_resampling) -- Mathematical definition: L(x) = sinc(pi*x) * sinc(pi*x/a) for |x| < a. Our implementation matches exactly.
+- [Lanczos Interpolation Explained (Mazzo)](https://mazzo.li/posts/lanczos.html) -- Clear explanation of windowed sinc, ringing, normalization.
+- [PixInsight Interpolation Algorithms](https://pixinsight.com/doc/docs/InterpolationAlgorithms/InterpolationAlgorithms.html) -- Recommends Lanczos-3 with clamping threshold 0.3 for registration. LUT accuracy 1/2^16 for integer images.
+- [PixInsight PCL Source (GitHub)](https://github.com/PixInsight/PCL/blob/master/include/pcl/Interpolation.h) -- Reference implementation of soft clamping algorithm. Our implementation matches.
+- [PixInsight Forum: New Lanczos Algorithm](https://pixinsight.com/forum/index.php?threads/new-lanczos-pixel-interpolation-algorithm-imageregistration-geometry-modules.3734/) -- Discussion of clamping threshold selection, default 0.3.
+- [Intel IPP AVX Lanczos](https://www.intel.com/content/www/us/en/developer/articles/technical/the-intel-avx-realization-of-lanczos-interpolation-in-intel-ipp-2d-resize-transform.html) -- Two-pass separable Lanczos3 with AVX SIMD. 42 mults + 35 adds per pixel. 1.5x SSE->AVX gain.
+- [AVIR Lanczos Resizer (GitHub)](https://github.com/avaneev/avir) -- High-quality SIMD Lanczos resizer with AVX2/SSE2/NEON. LANCIR variant is 3x faster.
+- [SWarp User Guide](https://star.herts.ac.uk/~pwl/Lucas/rho_oph/swarp.pdf) -- Recommends Lanczos3/4 for astronomical resampling. Flux conservation via Jacobian. No deringing.
+- [SWarp Source (GitHub fork)](https://github.com/corbettht/swarp) -- Fork with additional interpolation kernels.
 - [Mitchell-Netravali Filters (Wikipedia)](https://en.wikipedia.org/wiki/Mitchell%E2%80%93Netravali_filters) -- B/C parameter space. Catmull-Rom is (B=0, C=0.5), Mitchell is (B=1/3, C=1/3).
-- [Bart Wronski: Bilinear Downsampling Pixel Grids](https://bartwronski.com/2021/02/15/bilinear-down-upsampling-pixel-grids-and-that-half-pixel-offset/) -- Explains anti-aliasing requirements for downscaling.
-- [AstroPiXelProcessor: Interpolation Artifacts](https://www.astropixelprocessor.com/community/tutorials-workflows/interpolation-artifacts/) -- Practical examples of Lanczos ringing around stars.
+- [Mitchell & Netravali 1988 (PDF)](https://www.cs.utexas.edu/~fussell/courses/cs384g-fall2013/lectures/mitchell/Mitchell.pdf) -- Original paper. Recommended (1/3, 1/3) as best compromise.
+- [OpenCV Geometric Transforms](https://docs.opencv.org/4.x/da/d54/group__imgproc__transform.html) -- Uses inverse mapping for warp. BORDER_CONSTANT with configurable value.
+- [Siril Registration Docs](https://siril.readthedocs.io/en/latest/preprocessing/registration.html) -- Uses Lanczos-4 by default with clamping option.
+- [Bart Wronski: Bilinear Downsampling](https://bartwronski.com/2021/02/15/bilinear-down-upsampling-pixel-grids-and-that-half-pixel-offset/) -- Anti-aliasing requirements for downscaling.
+- [AstroPixelProcessor: Interpolation Artifacts](https://www.astropixelprocessor.com/community/tutorials-workflows/interpolation-artifacts/) -- Practical examples of Lanczos ringing around stars.
+- [Efficient Lanczos on ARM (PDF)](https://www.scitepress.org/papers/2018/65470/65470.pdf) -- SIMD Lanczos techniques for ARM NEON, applicable patterns for SSE/AVX.

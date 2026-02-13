@@ -402,10 +402,44 @@ threshold and larger dilation radius to create conservative object masks.
 - The atomic `find()` chases parent pointers without path compression.
 - Sequential `UnionFind` does full path compression (lines 628-663).
 - For typical astronomical masks (few large components), this is not a bottleneck.
-- Path compression with atomics requires CAS loops and is complex to implement correctly.
+- Path compression with atomics requires CAS loops and is complex to implement
+  correctly (see Jayanti & Tarjan "Concurrent Disjoint Set Union").
 
 ### P3: Missing SExtractor Cleaning Pass
 - SExtractor applies a cleaning pass that removes spurious detections near bright star
   wings (CLEAN parameter). This implementation has no equivalent.
 - The quality filter stage partially compensates, but dedicated cleaning would help
   in crowded fields with very bright stars.
+
+## Thread Safety Analysis
+
+### AtomicUnionFind: No ABA Problem
+The ABA problem does not apply to this union-find because parent pointers have a
+**monotonic invariant**: once a parent changes from self (root) to another node, it
+can only be further compressed (pointing closer to the new root), never back to self.
+The CAS at `union()` attempts to set `parent[root_b]` from `root_b` to `root_a`.
+For ABA to occur, `parent[root_b]` would need to change away from `root_b` and back.
+But once it stops being a root (parent != self), it cannot become a root again.
+Therefore ABA is structurally impossible.
+
+### Ordering Analysis
+- `make_set`: `SeqCst` on `fetch_add` — correct, ensures unique label allocation.
+- `find`: `Relaxed` loads — safe because worst case returns stale non-root; the
+  CAS loop in `union` detects this and retries.
+- `union` CAS: `AcqRel` — provides necessary synchronization for correctness.
+- `label_count`: `Relaxed` load after Rayon join barrier — technically correct
+  (Rayon barrier provides happens-before), but fragile if call ordering changes.
+
+### Parallel Label Writing
+Phase 4 uses raw pointers for disjoint write access. Safe because each strip writes
+to non-overlapping row ranges. The `SendPtr` pattern is sound because memory is alive
+for the entire parallel block.
+
+## Minor Code Quality Issues
+
+### Duplicate Import in threshold_mask/mod.rs
+Lines 10 and 24 both have `use rayon::prelude::*;`. Harmless but should be cleaned.
+
+### NEON Double Reinterpret in threshold_mask/neon.rs
+Line 41: `vreinterpretq_u32_f32(vreinterpretq_f32_u32(cmp))` — `cmp` is already
+`uint32x4_t`, so this is a no-op. Should be `let mask_u32 = cmp;`.

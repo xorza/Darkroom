@@ -183,7 +183,40 @@ NEON gives 2x. Fused normal equations avoid Jacobian allocation.
 - **Integration** (~80 tests): full measure_star pipeline, stamp validation, refine
   centroid convergence/rejection, compute_metrics scaling, Hessian properties
 
+## Algorithm Correctness Verification
+
+All Jacobian entries verified by manual differentiation:
+
+**Gaussian** (6 params): df/dx0 = A*exp(E)*(dx/sx^2), df/dy0 = A*exp(E)*(dy/sy^2),
+df/dA = exp(E), df/d(sigma_x) = A*exp(E)*dx^2/sx^3, df/d(sigma_y) = A*exp(E)*dy^2/sy^3,
+df/dB = 1.0. All correct.
+
+**Moffat** (5 params): df/dx0 = 2*A*beta*dx/(alpha^2)*u^(-beta-1),
+df/dA = u^(-beta), df/d(alpha) = 2*A*beta*r^2/(alpha^3)*u^(-beta-1), df/dB = 1.0.
+All correct. Sign convention: `dx = x - x0`, `d(dx)/d(x0) = -1`,
+`dE/d(dx) = -dx/sx^2`, combined sign is positive for x > x0. Correct.
+
+**L-M convergence**: Three exit conditions verified — (1) max_delta < 1e-8,
+(2) chi2_rel_change < 1e-10, (3) position-only convergence. Stall detection on
+rejected steps prevents infinite loops. Lambda cap at 1e10.
+
 ## Issues Found by Research
+
+### MINOR: Redundant Initial Chi² Computation
+- **Location**: lm_optimizer.rs lines 142 and 155
+- Line 142 computes `prev_chi2 = model.batch_compute_chi2(...)`, then line 155
+  overwrites it with `current_chi2` from `batch_build_normal_equations` on the
+  first iteration. The initial computation is wasted work (one extra chi² pass).
+- **Impact**: Negligible — one extra evaluation per star.
+
+### LOW-MEDIUM: No Weighted Least Squares
+- The fitting is unweighted: `chi2 = sum((data - model)^2)`. Optimal fitting should
+  weight by inverse variance: `chi2 = sum(((data - model) / sigma_i)^2)` where
+  `sigma_i^2 = data_i/gain + sky_var + read_noise^2`.
+- Industry tools (DAOPHOT, SExtractor) use inverse-variance weighting, which improves
+  accuracy for faint stars and properly handles Poisson photon-counting statistics.
+- For the centroid use case, the position accuracy impact is small for bright stars
+  (SNR > 20) but becomes significant for faint stars near the detection threshold.
 
 ### HIGH: L.A.Cosmic Laplacian SNR Missing Fine Structure Ratio — POSTPONED
 - `laplacian_snr` is computed but not used in the filter stage (filter uses sharpness

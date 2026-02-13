@@ -154,7 +154,8 @@ valid but requires proper noise scaling (which is currently missing).
 SEP implements the full matched filter: `T = C^{-1}S / sqrt(S^T C^{-1} S)`, where C
 is the noise covariance matrix and S is the PSF kernel. For uniform noise, this reduces
 to simple convolution divided by `sqrt(sum(S^2))`. The output is in units of
-standard deviations above background. This implementation does not perform this normalization.
+standard deviations above background. This implementation now performs the same
+normalization (output / sqrt(sum(K^2))).
 
 ### vs PixInsight StarDetection
 

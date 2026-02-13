@@ -86,14 +86,19 @@ A branch is kept as separate object if at least 2 children have flux >= min_flux
 If only 0-1 children pass, the parent becomes a leaf (no split). This is per-node
 recursive, not global.
 
-**NOTE**: SExtractor's `DEBLEND_MINCONT` is documented ambiguously, but examination of the
-SExtractor source code (`analyse.c`) reveals the contrast is computed relative to the
-**total (root) component flux**, not the parent branch flux. The formula is:
-`child_flux >= DEBLEND_MINCONT * total_flux`. This implementation uses parent-relative
-contrast, which is a **deliberate deviation** that makes the criterion stricter for
-nested splits (a child must be significant relative to its immediate parent, not just
-relative to the whole component). In practice, the difference mainly affects deeply
-nested tree structures with 3+ levels of splitting.
+**NOTE**: SExtractor's `DEBLEND_MINCONT` is documented ambiguously, but examination of
+both the SExtractor source code (`analyse.c`) and SEP source confirms the contrast is
+computed relative to the **total (root) component flux**, not the parent branch flux.
+SEP formula: `child_flux - child_thresh * child_npix > DEBLEND_MINCONT * root_flux`.
+This implementation uses parent-relative contrast, which is a **deliberate deviation**
+that makes the criterion stricter for nested splits (a child must be significant relative
+to its immediate parent, not just relative to the whole component). In practice, the
+difference mainly affects deeply nested tree structures with 3+ levels of splitting.
+
+photutils takes a different approach: it applies watershed segmentation, then iteratively
+removes the faintest peak that fails the contrast criterion, re-applies watershed, and
+repeats. This "remove one at a time" strategy handles the case where several faint
+sources could combine to meet the contrast criterion individually.
 
 ### Grid-Based BFS (L900-1049)
 - `PixelGrid` (L50-186): flat arrays indexed by local bbox coordinates with

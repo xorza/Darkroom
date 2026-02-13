@@ -1,188 +1,184 @@
-# Spatial Module (K-D Tree) -- Research Notes
+# Spatial Module (K-D Tree)
 
-## Overview
+## Architecture
 
-A custom 2D k-d tree implementation in ~390 lines (`mod.rs`) for efficient spatial queries on star positions. Provides k-nearest-neighbor (KNN) and radius search. Used in three places in the registration pipeline:
+A custom 2D k-d tree in ~450 lines (`mod.rs`) for spatial queries on star positions. Three structs:
 
-1. **Triangle formation** (`triangle/matching.rs:20-23`) -- k-d tree on star positions, KNN queries to form triangles.
-2. **Invariant-space matching** (`triangle/voting.rs:96-101`) -- k-d tree on triangle ratio pairs (2D), radius queries for similar triangles.
-3. **Match recovery** (`mod.rs:354-357`) -- k-d tree on target stars, 1-NN queries to find additional inlier matches after RANSAC.
+- `KdTree` -- flat implicit-layout tree storing `indices: Vec<usize>` (permuted point indices) and `points: Vec<DVec2>` (owned copy of input).
+- `Neighbor` -- query result: `index: usize` + `dist_sq: f64`.
+- `BoundedMaxHeap` -- bounded max-heap for KNN. Two variants: `Small` (stack-allocated array, k <= 32) and `Large` (heap-allocated Vec).
 
-Dimensionality is always 2 (DVec2). Typical point counts: 50-200 stars for triangle formation; thousands of triangles for invariant-space lookup.
+Tests in `tests.rs` (~570 lines, 25 tests).
 
-## Implementation Correctness
+### Usage in Pipeline
 
-### Construction (lines 55-117)
+1. **Triangle formation** (`triangle/matching.rs:20`) -- KdTree on star positions, `k_nearest` queries to form triangles. Typical n: 50-200 stars, k: 5-20.
+2. **Invariant-space matching** (`triangle/voting.rs:96-101`) -- KdTree on triangle ratio pairs (2D), `radius_indices_into` for similar triangles. Typical n: hundreds to thousands of triangles.
+3. **Match recovery** (`registration/mod.rs:361,390`) -- KdTree on target stars, `nearest_one` to find additional inlier matches after RANSAC.
 
-**Layout**: Implicit flat array. The `indices` Vec stores a permutation of `[0..n)`. For any range `[start, end)`, the node is at `mid = start + (end - start) / 2`. Left subtree is `[start, mid)`, right subtree is `[mid+1, end)`. Split dimension alternates by depth: `depth % 2` (x=0, y=1).
+## Algorithm Description
 
-**Median selection**: Uses `select_nth_unstable_by` (line 81) with `median = len / 2`. This is Rust's introselect algorithm, guaranteed O(n) worst-case since Rust 1.77 (PR #107522 added median-of-medians fallback). Prior versions had O(n^2) worst case for adversarial inputs, but this is now fixed.
+### Construction (`mod.rs:55-117`)
 
-**Correctness of index arithmetic**: Build computes `mid = range.start + median` where `median = len / 2` (line 78, 95). Search computes `mid = start + (end - start) / 2` (line 153). These are algebraically identical: `start + (end - start) / 2 = start + len / 2`. Consistent.
+Iterative median-split using an explicit work stack. For each range `[start, end)`:
+1. Compute `median = len / 2`.
+2. Call `select_nth_unstable_by(median, ...)` -- Rust's introselect, O(n) guaranteed since Rust 1.77.
+3. The median element becomes the node at `mid = start + median`.
+4. Left subtree is `[start, mid)`, right subtree is `[mid+1, end)`.
+5. Split dimension alternates by depth: `depth % 2` (0=x, 1=y).
 
-**Balance**: For even-length ranges, `len / 2` favors the left subtree. E.g., for 4 elements: left gets 2, right gets 1. This is standard and correct -- a perfectly balanced tree is only possible for `n = 2^k - 1`. The slight left bias does not affect correctness or asymptotic performance.
+Complexity: O(n log n) time, O(n) space. Comparison uses `f64::total_cmp()` (NaN-safe total ordering).
 
-**Complexity**: O(n) work per level (one `select_nth_unstable_by` call partitions the current range), O(log n) levels. Total: O(n log n). Space: O(n) for the indices array plus O(n) for the cloned points.
+### KNN Search (`mod.rs:127-182`)
 
-**Edge cases handled**:
-- Empty input returns `None` (line 56-58).
-- Single-element ranges skipped (line 73-75: `len <= 1`).
-- All identical points: `partial_cmp` returns `Equal` for ties. `select_nth_unstable_by` handles ties correctly (places them on either side). The tree degrades to linear but remains correct.
+Standard recursive best-first search with bounded max-heap:
+1. Visit node at `mid`, push to heap.
+2. Determine near/far subtrees based on `diff = query_val - point_val`.
+3. Recurse into near subtree first.
+4. Prune far subtree if `heap.is_full() && diff_sq >= heap.max_distance()`.
+5. Sort final results by `dist_sq` ascending.
 
-**Potential issue -- NaN coordinates**: Line 92 uses `partial_cmp(...).unwrap()`. If any coordinate is NaN, this panics. For star positions (pixel coordinates), NaN should never occur. The unwrap is acceptable per project conventions but worth noting.
+### Nearest-One Search (`mod.rs:188-243`)
 
-### KNN Search (lines 127-182)
+Specialized 1-NN with scalar `best` tracker instead of heap. Same near-first/prune-far logic. No allocation.
 
-**Algorithm**: Standard recursive KNN with bounded max-heap. Visit the node at `mid`, push its distance, then recurse into the nearer subtree first, then conditionally recurse into the farther subtree.
+### Radius Search (`mod.rs:249-294`)
 
-**Pruning** (line 179): `if !heap.is_full() || diff_sq < heap.max_distance()`. This is the standard condition:
-- If the heap is not yet full, we must explore all branches.
-- If the squared distance from the query to the splitting plane (`diff_sq`) is less than the current k-th best distance, the farther subtree might contain closer points.
+Recursive traversal collecting all points within `radius_sq`:
+1. Visit node, check `dist_sq <= radius_sq`.
+2. Prune subtrees: always search the near side; search the far side only if `diff_sq <= radius_sq`.
 
-This is **correct**. The comparison uses strict `<` for `diff_sq < heap.max_distance()`, which means points exactly on the boundary of the current best distance are not explored in the farther subtree. This is fine because such points would be at exactly the same distance as the worst current neighbor and would not improve the result set (they would replace equal-distance entries, but the heap already contains k items and the new point is not strictly closer).
+Buffer-reuse API: `radius_indices_into(&self, query, radius, &mut Vec<usize>)` clears and fills the buffer. Avoids allocation in hot loops.
 
-**Subtree ordering** (lines 169-173): If `diff < 0.0`, the query is on the left side of the split, so search left first. Otherwise search right first. This is correct and important for pruning efficiency.
+### BoundedMaxHeap (`mod.rs:307-450`)
 
-**Edge cases handled**:
-- `k == 0` returns empty (line 128-130).
-- `k > n` returns all n points (tested in `test_kdtree_k_nearest_more_than_available`).
-- Empty tree returns empty (line 128).
+Custom max-heap tracking k smallest distances. Stack-allocated for k <= 32 (512 bytes), heap-allocated otherwise. Standard sift-up/sift-down operations.
 
-**Result sorting**: Line 136 sorts output by `dist_sq` ascending. This is a convenience for callers. Cost is O(k log k), negligible for typical k.
+## Comparison with Industry Standard Implementations
 
-### Radius Search (lines 184-233)
+### vs nanoflann (C++, the dominant point cloud KD-tree)
 
-**Algorithm**: Recursive traversal, collecting all points within `radius_sq` of the query.
+| Aspect | Our KdTree | nanoflann |
+|--------|-----------|-----------|
+| Node structure | Implicit flat array (8 bytes/node) | Explicit nodes with child pointers + split value |
+| Leaf handling | No leaf nodes; recurse to individual points | leaf_max_size (default 10), brute-force within leaves |
+| Split dimension | Alternating `depth % 2` | Max-spread dimension (widest coordinate range) |
+| Split value | Median element | Midpoint of bounding box, clamped to data range |
+| Distance metrics | L2 only | Pluggable (L1, L2, custom) |
+| Radius search | Collects indices only | Returns (index, distance) pairs |
+| Memory model | Owns points (copies input) | Adaptor pattern, zero-copy from user data |
 
-**Pruning** (lines 226-231):
-```rust
-if diff <= 0.0 || diff_sq <= radius_sq {
-    // search left subtree
-}
-if diff >= 0.0 || diff_sq <= radius_sq {
-    // search right subtree
-}
-```
+Key differences:
+- nanoflann's leaf-based approach reduces function call overhead: instead of recursing down to single elements, it brute-forces within groups of 10-50 points. This is a meaningful optimization for large trees (>1000 points) because it reduces branch mispredictions and function call overhead. For our typical n=200, the tree depth is only ~8, so the benefit is negligible.
+- nanoflann chooses the split dimension with maximum spread rather than cycling. This produces more spatially balanced splits when data has anisotropic distribution. For 2D star positions (roughly uniform scatter on the image), alternating dimensions works well. For the invariant-space tree (triangle ratios concentrated in a narrow band), max-spread could help.
 
-Where `diff = query_val - point_val` (signed distance from query to splitting plane along the split axis).
+### vs scipy.spatial.KDTree (Python/C, the reference scientific implementation)
 
-**Correctness analysis**:
-- If `diff <= 0.0`: query is on the left side (or on the plane), so the left subtree is the "near" side -- always search it. The right subtree is only searched if `diff_sq <= radius_sq` (the radius crosses the split plane).
-- If `diff >= 0.0`: query is on the right side (or on the plane), so the right subtree is the "near" side -- always search it. The left subtree is only searched if `diff_sq <= radius_sq`.
-- If `diff == 0.0`: both conditions trigger, so both subtrees are always searched. This is correct because the query sits on the splitting plane and both sides could contain points within the radius.
+| Aspect | Our KdTree | scipy KDTree |
+|--------|-----------|-------------|
+| Split strategy | Alternating + median | Sliding midpoint (Maneewongvatana & Mount 1999) or median split |
+| Compact nodes | No (implicit layout) | Optional: shrinks bounding boxes to actual data range |
+| Distance metrics | L2 only | L1, L2, L-infinity, Minkowski |
+| balanced_tree option | Always balanced (median) | Configurable; default True since v1.4 |
+| Leaf size | 1 (no leaf optimization) | Default 16 |
 
-This pruning is **correct** and slightly more conservative than needed when `diff == 0.0` (it searches both unconditionally), but this is the right thing to do.
+scipy's sliding midpoint rule prevents degenerate thin cells. Not needed for 2D astronomical data which is typically well-distributed.
 
-**Buffer reuse**: `radius_indices_into` takes `&mut Vec<usize>`, clears it, and appends results. This avoids allocation in hot loops (tested in `test_kdtree_radius_indices_buffer_reuse`).
+### vs Astrometry.net libkd (C, astronomical application)
 
-### BoundedMaxHeap (lines 246-389)
+| Aspect | Our KdTree | libkd |
+|--------|-----------|-------|
+| Domain | 2D pixel coordinates | 2D-3D celestial coordinates |
+| Split strategy | Alternating + median | Configurable (SPLIT or full BBOX per node) |
+| Leaf size | 1 | Configurable (Nleaf parameter) |
+| Serialization | None | FITS format I/O |
+| Data types | f64 only | f64, f32, u16, u32 |
 
-**Design**: A custom max-heap that keeps the k smallest distances. Two variants:
-- `Small`: stack-allocated array of 32 `Neighbor` entries (common case: k <= 32).
-- `Large`: heap-allocated `Vec` for k > 32.
+libkd is designed for persistent indexes (million-star catalogs stored on disk). Our tree is ephemeral (built per-image, <200 stars). The design tradeoffs are appropriate for each use case.
 
-**Heap operations**:
-- `push` (lines 293-320): If not full, insert and sift up. If full and new element is smaller than max, replace root and sift down. This is standard bounded-heap insertion.
-- `sift_up` (lines 355-365): Standard binary heap sift-up by parent index `(idx - 1) / 2`.
-- `sift_down` (lines 367-388): Standard binary heap sift-down comparing left/right children.
+### vs kiddo (Rust, the dominant Rust KD-tree crate)
 
-**Correctness**: The heap maintains the max-heap property on `dist_sq`. After k insertions, only elements with `dist_sq < items[0].dist_sq` are accepted. This correctly tracks the k nearest points.
+| Aspect | Our KdTree | kiddo v5 |
+|--------|-----------|----------|
+| Layout | Flat implicit (in-order) | Eytzinger (BFS order) or modified van Emde Boas |
+| Dimensions | 2D hardcoded | Const-generic N-dimensional |
+| SIMD | None | Optional (nightly, for `nearest_one` on f64) |
+| Serialization | None | rkyv zero-copy |
+| Cache optimization | None (L1-resident at n=200) | Eytzinger reduces cache-line fetches for deep trees |
 
-**Performance note**: The `Small` variant uses a fixed 32-element array (32 * 16 = 512 bytes on the stack). This avoids heap allocation for the common case. The `#[allow(clippy::large_enum_variant)]` annotation (line 258) correctly suppresses the size difference warning.
+kiddo's Eytzinger layout fetches a new cache line approximately every 3 levels (for f64). Since our tree depth is ~8 levels, that is ~3 cache misses in the worst case, compared to ~8 with the in-order layout. At n=200 the entire tree (5 KB) fits in L1 cache, making this irrelevant. For the invariant-space tree (thousands of points, ~80 KB), the difference is also small because L2 cache (256 KB) absorbs it.
 
-## Performance Analysis
+### vs FLANN (C++, approximate NN for high-dimensional data)
 
-### Construction
-
-For n = 200 stars (typical maximum):
-- `select_nth_unstable_by` on 200 elements: ~200-400 comparisons.
-- Tree depth: ~8 levels.
-- Total: ~1600-3200 comparisons. Microsecond-scale on modern CPUs.
-
-### KNN Query
-
-For n = 200, k = 20 (typical for triangle formation):
-- Expected nodes visited: O(sqrt(n) + k) in 2D = ~14 + 20 = ~34 nodes.
-- Per query: sub-microsecond.
-- 200 queries (one per star): still sub-millisecond total.
-
-### Radius Query
-
-For n = thousands of triangle invariants, typical radius tolerance:
-- Similar asymptotic behavior. The invariant-space k-d tree handles this well.
-
-### Memory
-
-- `indices`: 200 * 8 bytes = 1.6 KB
-- `points`: 200 * 16 bytes = 3.2 KB
-- Total: ~5 KB. Fits in L1 cache.
-
-### Brute Force Comparison
-
-For n < 200, brute-force KNN is O(n*k) per query, O(n^2 * k) for all queries. With n=200, k=20: 800,000 comparisons vs k-d tree's ~6,800. The k-d tree wins by ~100x in comparisons, though both are fast enough in practice. The k-d tree approach is the right choice even at this scale because:
-1. It is already implemented and correct.
-2. It handles the invariant-space queries on thousands of triangles where brute force would be noticeably slower.
-3. Removing it would mean different code paths for different uses.
+Not applicable. FLANN targets high-dimensional approximate NN using randomized k-d forests and hierarchical k-means. Our 2D exact queries are a trivial case for any exact k-d tree. Approximate methods would introduce errors in star matching that propagate through triangle voting.
 
 ## Issues Found
 
-### No Issues (implementation is solid)
+### No Correctness Bugs
 
-The code is clean, correct, and well-tested. Specific positives:
+The implementation is correct. Specific verification:
 
-1. **Implicit layout is correctly implemented** -- build and search use the same `mid` formula.
-2. **KNN pruning is standard and correct** -- matches textbook descriptions.
-3. **Radius pruning is correct** -- handles the `diff == 0` (on-plane) case properly.
-4. **BoundedMaxHeap is correctly implemented** -- standard binary heap with bounded capacity.
-5. **Edge cases are thoroughly tested** -- empty tree, k=0, k>n, duplicate points, identical points, collinear points, negative coordinates, zero radius, boundary distance.
-6. **Buffer reuse pattern** for radius search avoids allocation in loops.
+1. **Build/search index consistency** (`mod.rs:78,95` vs `mod.rs:153`): Build uses `mid = range.start + median` where `median = len / 2`. Search uses `mid = start + (end - start) / 2`. These are algebraically identical. Verified.
 
-### Minor Observations (not bugs)
+2. **KNN pruning** (`mod.rs:179`): `!heap.is_full() || diff_sq < heap.max_distance()`. Strict `<` is correct: when the heap is full and a candidate's splitting-plane distance equals the worst distance, it cannot improve the result. Matches textbook algorithm.
 
-1. ~~**`partial_cmp().unwrap()`**~~ — **FIXED**: replaced with `f64::total_cmp()` in both build (line 92) and k_nearest sort (line 136).
+3. **Radius pruning** (`mod.rs:287-293`): The `diff <= 0.0` / `diff >= 0.0` conditions correctly identify the near subtree (always searched) and far subtree (searched only if `diff_sq <= radius_sq`). The `diff == 0.0` case correctly searches both subtrees unconditionally.
 
-2. **Points are cloned** (line 60): `points.to_vec()` copies all points into the tree. For DVec2 (16 bytes each), this is 200 * 16 = 3.2 KB. Negligible. An alternative would be to store a reference `&[DVec2]`, but the owned copy avoids lifetime complexity.
+4. **nearest_one pruning** (`mod.rs:240`): Uses `diff * diff < best.dist_sq` (strict `<`). If a point exactly on the splitting plane is equidistant to the current best, we skip the far subtree. This is fine because the splitting-plane distance is a lower bound; even if we cross, no point on the other side can be strictly closer.
 
-3. **Stack depth during search**: KNN and radius search use recursion. For n=200, depth is ~8. For n=10,000 (unlikely), depth is ~14. No stack overflow risk.
+5. **BoundedMaxHeap** (`mod.rs:334-450`): Standard binary max-heap with bounded capacity. `sift_up` and `sift_down` are textbook correct. `push` correctly handles the three cases: heap not full (insert + sift up), heap full and new element smaller (replace root + sift down), heap full and new element larger (reject).
 
-4. **`into_vec` for Small variant** (line 350): Copies from stack array to Vec. This is one allocation per KNN query. Could be avoided by returning an iterator, but the caller (`k_nearest`) sorts the result anyway, so the Vec is needed.
+### Minor Observations (not bugs, no action needed)
 
-## Potential Improvements
+1. **Points are cloned** (`mod.rs:60`): `points.to_vec()` copies all points into the tree. For DVec2 (16 bytes each), this is 200 * 16 = 3.2 KB. Negligible. An alternative would be to store a reference `&[DVec2]`, but the owned copy avoids lifetime complexity. Correct design choice.
 
-### Not Recommended (overkill for this use case)
+2. **Stack depth during search**: KNN and radius search use recursion. For n=200, depth is ~8. For n=10,000, depth is ~14. No stack overflow risk.
 
-1. **Van Emde Boas / Eytzinger layout**: Cache-oblivious layouts improve performance for millions of points. With n <= 200 (fits in L1 cache), there is zero benefit.
+3. **`into_vec` for Small variant** (`mod.rs:409-411`): Copies from stack array to Vec. This is one allocation per KNN query. Could be avoided by returning an iterator, but the caller (`k_nearest`) sorts the result anyway, so the Vec is needed.
 
-2. **SIMD distance computation**: Not worth it for single-point distance checks. The loop body is already simple scalar code.
+4. **Alternating dimension strategy**: The `depth % 2` cycling is simple and correct for 2D. The max-spread strategy (used by nanoflann) would be slightly better for anisotropic distributions but adds complexity and a per-level O(n) scan to compute spread. Not worth it for 2D.
 
-3. **Approximate NN (FLANN-style)**: Exact NN is needed for star matching correctness. Approximate methods introduce errors that propagate through triangle voting.
-
-4. **External crate (kiddo)**: Adds a dependency for code that is ~390 lines, thoroughly tested, and performant at this scale. The README.md already documents this decision.
+## Prioritized Improvements
 
 ### Recommended
 
-1. ~~**`nearest_one()` method**~~ — **FIXED**: added `nearest_one() -> Option<Neighbor>` with scalar tracker, used in `recover_matches`.
+1. **L-infinity radius search** -- The invariant-space voting code (`voting.rs:124-138`) uses L2 radius search scaled by sqrt(2) to circumscribe the L-infinity tolerance square, then post-filters with `is_similar()` (L-infinity check). A native `radius_chebyshev_into()` method would:
+   - Eliminate the post-filter.
+   - Use simpler pruning: `|diff| <= radius` on the split axis (no squaring needed).
+   - Reduce candidate count by ~22% (circle area vs square area = pi/4 ~ 0.785, so ~21.5% of candidates are in the circle but outside the square).
+   - The k-d tree splitting plane intersection test for L-infinity is simpler than for L2: check `|diff| <= radius` on the split axis, which is exactly the pruning condition already needed.
 
-2. ~~**`f64::total_cmp()`**~~ — **FIXED**: see Minor Observations above.
+### Not Recommended (overkill for current scale)
 
-3. **L-infinity radius search for invariant matching**: Voting code (`voting.rs:126-134`) uses L2 radius search then post-filters with L-infinity `is_similar()`. A native `radius_chebyshev_into()` method would eliminate the post-filter and reduce candidate count by ~22%. The k-d tree pruning for L-infinity is simpler than L2: check `|diff| <= radius` on the split axis.
+2. **Leaf-size optimization**: Switch to brute-force at 16-32 elements per leaf. Industry standard (nanoflann: 10, libkd: 32, scikit-learn: 16, kiddo: varies). Would reduce function call overhead by ~3x for the invariant-space tree (n = 1000-5000). For the star tree (n = 200), no measurable benefit. Only worth implementing if profiling shows the invariant-space tree queries are a bottleneck.
 
-### Low Priority
+3. **Eytzinger / van Emde Boas layout**: Cache-oblivious layouts improve performance for trees that do not fit in L1 cache. Research (Khuong & Morin 2015) shows sorted order is best for small n, and Eytzinger becomes faster for large n. Our tree fits in L1 (5 KB at n=200, ~80 KB at n=5000). No benefit at current scale.
 
-4. **Iterative KNN/radius search**: Replace recursion with an explicit stack (as done in construction). Not needed at current scale.
+4. **Max-spread split dimension**: Choose the coordinate with the largest range instead of cycling. Produces more balanced spatial regions for anisotropic distributions. The invariant-space data (triangle ratios) could benefit, but the improvement is marginal for 2D. Adds O(n) per level to compute spread.
 
-5. **Leaf-size optimization**: Switch to brute-force at 16-32 elements. Industry standard (libkd: 32, scikit-learn: 30). Only matters for n > ~1000 (invariant-space tree).
+5. **Iterative KNN/radius search**: Replace recursion with an explicit stack (as done in construction). Avoids function call overhead. Negligible for depth ~8-14.
 
-## References
+6. **Distance metric abstraction**: Support L1, L2, L-infinity via a trait or enum. Only L-infinity is useful (see item 1). A dedicated `radius_chebyshev_into()` method is simpler than a generic metric system.
 
-- [Implicit k-d tree (Wikipedia)](https://en.wikipedia.org/wiki/Implicit_k-d_tree)
-- [sif-kdtree crate (flat implicit layout in Rust)](https://docs.rs/sif-kdtree/latest/sif_kdtree/)
-- [Cache-oblivious k-d tree (GeeksforGeeks)](https://www.geeksforgeeks.org/dsa/cache-oblivious-kd-tree/)
-- [Eytzinger Binary Search (Algorithmica)](https://algorithmica.org/en/eytzinger)
-- [K-D Tree vs Ball Tree comparison (GeeksforGeeks)](https://www.geeksforgeeks.org/machine-learning/ball-tree-and-kd-tree-algorithms/)
-- [Rust select_nth_unstable O(n^2) fix (PR #107522)](https://github.com/rust-lang/rust/pull/107522)
-- [Astrometry.net k-d tree (libkd)](https://astrometry.net/doc/libkd.html)
-- [Astrometry.net blind calibration paper](https://arxiv.org/pdf/0910.2233)
-- [Global Multi-Triangle Voting star identification](https://www.mdpi.com/2076-3417/12/19/9993)
-- [scikit-learn Nearest Neighbors (brute vs tree crossover)](https://scikit-learn.org/stable/modules/neighbors.html)
-- [FLANN approximate nearest neighbors](https://www.cs.ubc.ca/research/flann/)
+7. **SIMD distance computation**: Not worth it for single-point distance checks in 2D. The loop body is one subtraction + one dot product.
+
+8. **Approximate NN (FLANN-style)**: Exact NN is required for star matching correctness.
+
+## Research Sources
+
+- [nanoflann C++ library -- GitHub](https://github.com/jlblancoc/nanoflann) -- Header-only KD-tree with leaf_max_size, max-spread split, CRTP adaptor pattern.
+- [nanoflann API documentation](https://jlblancoc.github.io/nanoflann/) -- Node structure, leaf behavior, radius search API.
+- [scipy.spatial.KDTree -- SciPy v1.17.0](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.KDTree.html) -- Sliding midpoint rule, balanced_tree option, compact_nodes.
+- [scipy.spatial.cKDTree -- SciPy v1.17.0](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.cKDTree.html) -- C implementation details, Maneewongvatana & Mount 1999 reference.
+- [FLANN -- Fast Library for Approximate Nearest Neighbors](https://www.cs.ubc.ca/research/flann/) -- Randomized k-d forests, hierarchical k-means, auto-configuration.
+- [Astrometry.net libkd documentation](https://astrometry.net/doc/libkd.html) -- KD_BUILD_BBOX vs KD_BUILD_SPLIT, Nleaf parameter, FITS I/O.
+- [Astrometry.net blind calibration paper (arXiv:0910.2233)](https://arxiv.org/pdf/0910.2233) -- Star matching with geometric hashing, k-d tree acceleration.
+- [kiddo Rust crate -- GitHub](https://github.com/sdd/kiddo) -- Eytzinger and modified van Emde Boas layouts, SIMD nearest_one.
+- [kiddo crate documentation](https://docs.rs/kiddo/latest/kiddo/) -- Cache-line analysis: one fetch per 3 levels (f64 Eytzinger), per 4 levels (f32 vEB).
+- [Array Layouts for Comparison-Based Searching (Khuong & Morin 2015)](https://arxiv.org/pdf/1509.05053) -- Eytzinger vs vEB vs sorted: Eytzinger fastest for large n, sorted best for small n.
+- [K-D Trees Are Better when Cut on the Longest Side (Amenta et al.)](https://web.cs.ucdavis.edu/~amenta/w07/kdlongest.pdf) -- Max-spread split produces better spatial balance.
+- [k-d tree -- Wikipedia](https://en.wikipedia.org/wiki/K-d_tree) -- Standard algorithm description, pruning conditions.
+- [Rust select_nth_unstable O(n^2) fix (PR #107522)](https://github.com/rust-lang/rust/pull/107522) -- Median-of-medians fallback guarantees O(n) worst case.
+- [scikit-learn Nearest Neighbors documentation](https://scikit-learn.org/stable/modules/neighbors.html) -- Brute vs tree crossover analysis, leaf_size parameter.
+- [CMSC 420: Answering Queries with kd-trees (Dave Mount)](https://www.cs.umd.edu/class/fall2019/cmsc420-0201/Lects/lect14-kd-query.pdf) -- Formal pruning analysis for range and NN queries.
+- [Efficient Radius Neighbor Search in Three-dimensional Point Clouds (Behley et al. 2015)](https://jbehley.github.io/papers/behley2015icra.pdf) -- Radius search optimizations for point clouds.
