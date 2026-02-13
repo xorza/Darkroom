@@ -129,13 +129,6 @@ as its primary distortion correction method when distortion correction is
 enabled. They iteratively refine with "surface simplifiers" for accuracy.
 Integrating TPS would close the gap with PixInsight for wide-field work.
 
-### random_sample_into Allocates O(n) Every RANSAC Iteration
-**File:** `ransac/mod.rs:516-527`
-
-`buffer.extend(0..n)` called up to 2000 times with n~200. The buffer is
-cleared and refilled each iteration. Could persist a pre-allocated index
-array and shuffle in place.
-
 ## Minor Issues
 
 - No weighted least-squares in final refinement. MAGSAC++ weights are available
@@ -143,8 +136,6 @@ array and shuffle in place.
 - Bicubic kernel not normalized (Catmull-Rom sums to 1.0 only at integer
   positions; at fractional positions the sum deviates slightly).
 - No anti-aliasing filter for scale-down warps (rare in astrophotography).
-- `random_sample_into` uses partial Fisher-Yates but re-creates the index
-  array each call. A persistent shuffled buffer would save allocations.
 
 ## Missing Features vs Industry Tools
 

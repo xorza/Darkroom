@@ -2189,3 +2189,36 @@ fn test_non_degenerate_quad() {
     ];
     assert!(!is_sample_degenerate(&pts));
 }
+
+#[test]
+fn test_random_sample_into_produces_unique_indices() {
+    use rand::SeedableRng;
+    let mut rng = rand::rngs::SmallRng::seed_from_u64(42);
+    let n = 50;
+    let k = 4;
+    let mut buffer = Vec::new();
+    let mut indices = Vec::new();
+
+    for _ in 0..200 {
+        random_sample_into(&mut rng, n, k, &mut buffer, &mut indices);
+
+        assert_eq!(buffer.len(), k);
+        // All indices in range
+        for &idx in &buffer {
+            assert!(idx < n, "Index {idx} out of range 0..{n}");
+        }
+        // All indices unique
+        let mut sorted = buffer.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), k, "Duplicate indices in sample: {:?}", buffer);
+        // Persistent array stays valid
+        assert_eq!(indices.len(), n);
+        for (i, &v) in indices.iter().enumerate() {
+            assert_eq!(
+                v, i,
+                "indices[{i}] = {v}, expected {i} (corrupted after sample)"
+            );
+        }
+    }
+}

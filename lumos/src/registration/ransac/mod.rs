@@ -435,6 +435,9 @@ impl RansacEstimator {
             .map(|&c| (c + 0.1).powi(2)) // Square to emphasize high-confidence matches
             .collect();
 
+        // Persistent index array for Fisher-Yates shuffle (avoids O(n) re-init per iteration)
+        let mut shuffle_indices: Vec<usize> = Vec::new();
+
         self.ransac_loop(
             &ref_points,
             &target_points,
@@ -462,7 +465,7 @@ impl RansacEstimator {
                         sample_buf,
                     );
                 } else {
-                    random_sample_into(&mut rng, n, min_samples, sample_buf);
+                    random_sample_into(&mut rng, n, min_samples, sample_buf, &mut shuffle_indices);
                 }
             },
         )
@@ -512,18 +515,43 @@ fn weighted_sample_into<R: Rng>(
 
 /// Randomly sample k unique indices from 0..n into pre-allocated buffer.
 ///
-/// Uses partial Fisher-Yates shuffle: O(k) time, O(n) space.
-fn random_sample_into<R: Rng>(rng: &mut R, n: usize, k: usize, buffer: &mut Vec<usize>) {
+/// Uses partial Fisher-Yates shuffle: O(k) time. The `indices` scratch buffer
+/// persists across calls to avoid re-creating the `[0..n]` array each iteration.
+/// After sampling, the swaps are undone to restore `indices` to `[0..n]`.
+fn random_sample_into<R: Rng>(
+    rng: &mut R,
+    n: usize,
+    k: usize,
+    buffer: &mut Vec<usize>,
+    indices: &mut Vec<usize>,
+) {
     debug_assert!(k <= n, "Cannot sample {} indices from {}", k, n);
-    buffer.clear();
-    buffer.extend(0..n);
 
-    // Partial Fisher-Yates: shuffle only first k elements
+    // Initialize or resize the persistent index array
+    if indices.len() != n {
+        indices.clear();
+        indices.extend(0..n);
+    }
+
+    // Partial Fisher-Yates: shuffle first k elements, recording swap targets
+    buffer.clear();
+    // k is always small (2-4 for RANSAC min_samples), stack array suffices
+    let mut swap_targets = [0usize; 8];
+    assert!(
+        k <= swap_targets.len(),
+        "k={k} exceeds swap tracking capacity"
+    );
     for i in 0..k {
         let j = rng.random_range(i..n);
-        buffer.swap(i, j);
+        indices.swap(i, j);
+        swap_targets[i] = j;
+        buffer.push(indices[i]);
     }
-    buffer.truncate(k);
+
+    // Undo swaps in reverse order to restore indices to [0, 1, 2, ..., n-1]
+    for i in (0..k).rev() {
+        indices.swap(i, swap_targets[i]);
+    }
 }
 
 /// Check if a sample of points is degenerate (too close together or collinear).
