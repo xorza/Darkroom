@@ -10,8 +10,7 @@
 use crate::common::Buffer2;
 use crate::registration::config::InterpolationMethod;
 use crate::registration::interpolation::warp_image;
-use crate::registration::transform::Transform;
-use crate::registration::transform::TransformType;
+use crate::registration::transform::{Transform, TransformType, WarpTransform};
 use crate::registration::warp;
 use crate::star_detection::StarDetector;
 use crate::testing::synthetic::{self, StarFieldConfig, stamps};
@@ -28,7 +27,7 @@ fn do_warp(
 ) -> Buffer2<f32> {
     let inverse = transform.inverse();
     let mut output = Buffer2::new(input.width(), input.height(), vec![0.0; input.len()]);
-    warp_image(input, &mut output, &inverse, None, method);
+    warp_image(input, &mut output, &WarpTransform::new(inverse), method);
     output
 }
 
@@ -481,8 +480,7 @@ fn test_warp_with_detected_transform() {
     warp(
         &target_astro,
         &mut warped_astro,
-        &result.transform,
-        None,
+        &result.warp_transform(),
         &warp_config,
     );
 
@@ -596,7 +594,12 @@ fn test_warp_grayscale() {
         ..Default::default()
     };
     let mut warped = ref_image.clone();
-    warp(&ref_image, &mut warped, &transform, None, &warp_config);
+    warp(
+        &ref_image,
+        &mut warped,
+        &WarpTransform::new(transform),
+        &warp_config,
+    );
 
     // Verify dimensions and basic properties
     assert_eq!(warped.width(), width);
@@ -635,7 +638,12 @@ fn test_warp_rgb() {
         ..Default::default()
     };
     let mut warped = rgb_image.clone();
-    warp(&rgb_image, &mut warped, &transform, None, &warp_config);
+    warp(
+        &rgb_image,
+        &mut warped,
+        &WarpTransform::new(transform),
+        &warp_config,
+    );
 
     // Verify dimensions preserved
     assert_eq!(warped.width(), width);
@@ -676,7 +684,12 @@ fn test_warp_preserves_output_metadata() {
         interpolation: InterpolationMethod::Bilinear,
         ..Default::default()
     };
-    warp(&image, &mut warped, &transform, None, &warp_config);
+    warp(
+        &image,
+        &mut warped,
+        &WarpTransform::new(transform),
+        &warp_config,
+    );
 
     // Verify output metadata is preserved (warp only modifies pixel data)
     assert_eq!(warped.metadata.object, Some("M42".to_string()));
@@ -783,15 +796,13 @@ fn test_warp_with_sip_correction() {
     warp_image(
         &ref_buf,
         &mut output_no_sip,
-        &transform,
-        None,
+        &WarpTransform::new(transform),
         InterpolationMethod::Lanczos3,
     );
     warp_image(
         &ref_buf,
         &mut output_with_sip,
-        &transform,
-        Some(&sip),
+        &WarpTransform::with_sip(transform, sip),
         InterpolationMethod::Lanczos3,
     );
 
@@ -875,15 +886,19 @@ fn test_warp_api_with_sip() {
 
     // Warp without SIP
     let mut warped_no_sip = image.clone();
-    warp(&image, &mut warped_no_sip, &transform, None, &warp_config);
+    warp(
+        &image,
+        &mut warped_no_sip,
+        &WarpTransform::new(transform),
+        &warp_config,
+    );
 
     // Warp with SIP
     let mut warped_with_sip = image.clone();
     warp(
         &image,
         &mut warped_with_sip,
-        &transform,
-        Some(&sip),
+        &WarpTransform::with_sip(transform, sip),
         &warp_config,
     );
 

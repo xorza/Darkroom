@@ -1,5 +1,6 @@
 use super::*;
 use crate::common::Buffer2;
+use crate::registration::transform::{Transform, WarpTransform};
 use glam::DVec2;
 
 const EPSILON: f32 = 1e-5;
@@ -248,8 +249,7 @@ fn test_warp_identity() {
     warp_image(
         &input_buf,
         &mut output,
-        &transform,
-        None,
+        &WarpTransform::new(transform),
         InterpolationMethod::Bilinear,
     );
 
@@ -279,8 +279,7 @@ fn test_warp_translation() {
     warp_image(
         &input_buf,
         &mut output,
-        &transform,
-        None,
+        &WarpTransform::new(transform),
         InterpolationMethod::Bilinear,
     );
 
@@ -303,8 +302,7 @@ fn test_warp_scale() {
     warp_image(
         &input_buf,
         &mut output,
-        &transform,
-        None,
+        &WarpTransform::new(transform),
         InterpolationMethod::Bilinear,
     );
 
@@ -351,8 +349,7 @@ fn test_warp_rotation() {
     warp_image(
         &input_buf,
         &mut output,
-        &transform,
-        None,
+        &WarpTransform::new(transform),
         InterpolationMethod::Bilinear,
     );
 
@@ -589,8 +586,7 @@ fn test_warp_image_lanczos3_identity() {
     warp_image(
         &input_buf,
         &mut output,
-        &transform,
-        None,
+        &WarpTransform::new(transform),
         InterpolationMethod::Lanczos3,
     );
 
@@ -620,8 +616,7 @@ fn test_warp_image_lanczos3_translation() {
     warp_image(
         &input_buf,
         &mut output,
-        &transform,
-        None,
+        &WarpTransform::new(transform),
         InterpolationMethod::Lanczos3,
     );
 
@@ -658,8 +653,7 @@ fn test_warp_image_lanczos3_rotation() {
     warp_image(
         &input_buf,
         &mut output,
-        &transform,
-        None,
+        &WarpTransform::new(transform),
         InterpolationMethod::Lanczos3,
     );
 
@@ -692,8 +686,7 @@ fn test_warp_image_lanczos3_matches_per_pixel() {
     warp_image(
         &input_buf,
         &mut output,
-        &transform,
-        None,
+        &WarpTransform::new(transform),
         InterpolationMethod::Lanczos3,
     );
 

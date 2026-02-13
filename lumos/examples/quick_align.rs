@@ -87,8 +87,7 @@ fn main() {
     warp(
         &target_image,
         &mut aligned,
-        &result.transform,
-        None,
+        &result.warp_transform(),
         &warp_config,
     );
 

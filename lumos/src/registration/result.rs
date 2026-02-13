@@ -1,7 +1,7 @@
 //! Registration result and error types.
 
 use crate::registration::distortion::SipPolynomial;
-use crate::registration::transform::Transform;
+use crate::registration::transform::{Transform, WarpTransform};
 
 /// Reason for RANSAC failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,6 +165,14 @@ impl RegistrationResult {
             num_inliers,
             quality_score,
             elapsed_ms: 0.0,
+        }
+    }
+
+    /// Create a [`WarpTransform`] bundling the transform and SIP correction.
+    pub fn warp_transform(&self) -> WarpTransform {
+        WarpTransform {
+            transform: self.transform,
+            sip: self.sip_correction.clone(),
         }
     }
 

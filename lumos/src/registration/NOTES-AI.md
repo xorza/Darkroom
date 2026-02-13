@@ -13,8 +13,8 @@ warping with Lanczos interpolation and SIMD-optimized row warping.
 3. Vote matrix accumulates vertex correspondences from similar triangles
 4. RANSAC with MAGSAC++ scoring estimates transform from voted matches
 5. Post-RANSAC match recovery via k-d tree projection on unmatched stars
-6. Optional SIP polynomial fit on residuals, applied during warping when provided
-7. Image warping with output→input coordinate mapping (Lanczos3 default)
+6. Optional SIP polynomial fit on residuals, bundled into `WarpTransform`
+7. Image warping via `warp()` / `warp_image()` takes `&WarpTransform` (output→input mapping, Lanczos3 default)
 
 ### Strengths
 - Triangle formation via k-d tree O(n*k^2) vs O(n^3) brute-force
@@ -134,7 +134,7 @@ Integrating TPS would close the gap with PixInsight for wide-field work.
 |------|---------|
 | `mod.rs` | Public API: `register()`, `warp()`, match recovery |
 | `config.rs` | `Config` struct, presets, `InterpolationMethod` |
-| `transform.rs` | `Transform` (3x3 homogeneous), `TransformType` enum |
+| `transform.rs` | `Transform` (3x3 homogeneous), `TransformType` enum, `WarpTransform` (bundles Transform + optional SIP) |
 | `result.rs` | `RegistrationResult`, `RegistrationError` |
 | `triangle/mod.rs` | Triangle matching params and re-exports |
 | `triangle/geometry.rs` | `Triangle` struct, invariant ratios, orientation |
@@ -146,6 +146,6 @@ Integrating TPS would close the gap with PixInsight for wide-field work.
 | `distortion/mod.rs` | Re-exports for SIP and TPS |
 | `distortion/sip/mod.rs` | SIP polynomial fitting via Cholesky/LU |
 | `distortion/tps/mod.rs` | Thin-plate spline (WIP, not integrated) |
-| `interpolation/mod.rs` | Interpolation kernels, `warp_image()` |
-| `interpolation/warp/mod.rs` | Optimized row warping (AVX2, SSE, scalar) |
+| `interpolation/mod.rs` | Interpolation kernels, `warp_image(&WarpTransform)` |
+| `interpolation/warp/mod.rs` | Optimized row warping (AVX2, SSE, scalar), takes `&WarpTransform` |
 | `spatial/mod.rs` | K-d tree (flat implicit layout) |

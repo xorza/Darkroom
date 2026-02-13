@@ -10,7 +10,7 @@ use glam::DVec2;
 use crate::common::Buffer2;
 use crate::registration::config::InterpolationMethod;
 use crate::registration::interpolation::warp_image;
-use crate::registration::transform::Transform;
+use crate::registration::transform::{Transform, WarpTransform};
 use crate::registration::{Config, TransformType, register};
 use crate::star_detection::{StarDetector, config::Config as DetConfig};
 use crate::testing::synthetic::{self, StarFieldConfig};
@@ -44,8 +44,7 @@ fn transform_image(
     warp_image(
         &src_buf,
         &mut output,
-        &inverse,
-        None,
+        &WarpTransform::new(inverse),
         InterpolationMethod::Bilinear,
     );
     output.into_vec()
@@ -62,8 +61,7 @@ fn translate_image(src_pixels: &[f32], width: usize, height: usize, dx: f64, dy:
     warp_image(
         &src_buf,
         &mut output,
-        &inverse,
-        None,
+        &WarpTransform::new(inverse),
         InterpolationMethod::Bilinear,
     );
     output.into_vec()

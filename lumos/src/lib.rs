@@ -90,6 +90,7 @@ pub use registration::{
     SipPolynomial,
     Transform,
     TransformType,
+    WarpTransform,
     // Top-level functions
     register,
     warp,

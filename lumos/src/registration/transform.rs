@@ -3,6 +3,7 @@
 use glam::DVec2;
 
 use crate::math::DMat3;
+use crate::registration::distortion::SipPolynomial;
 
 /// Supported transformation models with increasing degrees of freedom.
 ///
@@ -311,6 +312,57 @@ impl Transform {
     }
 }
 
+/// Combined transform + optional SIP distortion correction for warping.
+///
+/// Bundles a linear `Transform` with an optional `SipPolynomial` so that
+/// callers of `warp()` cannot forget to include the SIP correction.
+/// For each output pixel `p`, the source coordinate is:
+/// `src = transform.apply(sip.correct(p))` when SIP is present,
+/// or `src = transform.apply(p)` otherwise.
+#[derive(Debug, Clone)]
+pub struct WarpTransform {
+    pub transform: Transform,
+    pub sip: Option<SipPolynomial>,
+}
+
+impl WarpTransform {
+    /// Create a warp transform with no SIP correction.
+    pub fn new(transform: Transform) -> Self {
+        Self {
+            transform,
+            sip: None,
+        }
+    }
+
+    /// Create a warp transform with SIP distortion correction.
+    pub fn with_sip(transform: Transform, sip: SipPolynomial) -> Self {
+        Self {
+            transform,
+            sip: Some(sip),
+        }
+    }
+
+    /// Compute the source coordinate for a given output pixel position.
+    pub fn apply(&self, p: DVec2) -> DVec2 {
+        let corrected = match &self.sip {
+            Some(sip) => sip.correct(p),
+            None => p,
+        };
+        self.transform.apply(corrected)
+    }
+
+    /// Whether this transform has a nonlinear SIP component.
+    pub fn has_sip(&self) -> bool {
+        self.sip.is_some()
+    }
+
+    /// Whether this transform is purely linear (affine or simpler, no SIP).
+    /// When true, incremental stepping and SIMD can be used.
+    pub fn is_linear(&self) -> bool {
+        self.sip.is_none() && !matches!(self.transform.transform_type, TransformType::Homography)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -442,5 +494,107 @@ mod tests {
         // x' = 100 / 1.1 ≈ 90.9
         assert!((p.x - 90.909).abs() < 0.01);
         assert!(approx_eq(p.y, 0.0));
+    }
+
+    // ========================================================================
+    // WarpTransform tests
+    // ========================================================================
+
+    #[test]
+    fn test_warp_transform_new() {
+        let t = Transform::translation(DVec2::new(10.0, 5.0));
+        let wt = WarpTransform::new(t);
+        assert!(!wt.has_sip());
+        assert!(wt.is_linear());
+
+        let p = wt.apply(DVec2::new(1.0, 2.0));
+        assert!(approx_eq(p.x, 11.0));
+        assert!(approx_eq(p.y, 7.0));
+    }
+
+    #[test]
+    fn test_warp_transform_with_sip() {
+        use crate::registration::distortion::{SipConfig, SipPolynomial};
+
+        let transform = Transform::identity();
+
+        // Create a simple SIP from synthetic points with barrel distortion
+        let cx = 50.0;
+        let cy = 50.0;
+        let k = 1e-4;
+        let mut ref_pts = Vec::new();
+        let mut tgt_pts = Vec::new();
+        for gy in 0..10 {
+            for gx in 0..10 {
+                let rx = 5.0 + gx as f64 * 10.0;
+                let ry = 5.0 + gy as f64 * 10.0;
+                let dx = rx - cx;
+                let dy = ry - cy;
+                let r2 = dx * dx + dy * dy;
+                ref_pts.push(DVec2::new(rx, ry));
+                tgt_pts.push(DVec2::new(rx + k * dx * r2, ry + k * dy * r2));
+            }
+        }
+        let sip_config = SipConfig {
+            order: 3,
+            reference_point: Some(DVec2::new(cx, cy)),
+        };
+        let sip =
+            SipPolynomial::fit_from_transform(&ref_pts, &tgt_pts, &transform, &sip_config).unwrap();
+
+        let wt = WarpTransform::with_sip(transform, sip);
+        assert!(wt.has_sip());
+        assert!(!wt.is_linear());
+
+        // Corner point should differ from identity
+        let corner = DVec2::new(0.0, 0.0);
+        let result = wt.apply(corner);
+        let no_sip = WarpTransform::new(transform).apply(corner);
+        assert!(
+            (result - no_sip).length() > 0.01,
+            "SIP should produce different coordinates"
+        );
+    }
+
+    #[test]
+    fn test_warp_transform_is_linear() {
+        // Translation: linear
+        let wt = WarpTransform::new(Transform::translation(DVec2::new(1.0, 2.0)));
+        assert!(wt.is_linear());
+
+        // Euclidean: linear
+        let wt = WarpTransform::new(Transform::euclidean(DVec2::ZERO, 0.1));
+        assert!(wt.is_linear());
+
+        // Similarity: linear
+        let wt = WarpTransform::new(Transform::similarity(DVec2::ZERO, 0.1, 1.02));
+        assert!(wt.is_linear());
+
+        // Affine: linear
+        let wt = WarpTransform::new(Transform::affine([1.0, 0.0, 5.0, 0.0, 1.0, 3.0]));
+        assert!(wt.is_linear());
+
+        // Homography: not linear
+        let wt = WarpTransform::new(Transform::homography([
+            1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.001, 0.0,
+        ]));
+        assert!(!wt.is_linear());
+    }
+
+    #[test]
+    fn test_warp_transform_apply_no_sip_matches_transform() {
+        let t = Transform::similarity(DVec2::new(3.0, -2.0), 0.5, 1.1);
+        let wt = WarpTransform::new(t);
+
+        for &p in &[
+            DVec2::new(0.0, 0.0),
+            DVec2::new(100.0, 50.0),
+            DVec2::new(-10.0, 200.0),
+        ] {
+            let from_wt = wt.apply(p);
+            let from_t = t.apply(p);
+            assert!(approx_eq(from_wt.x, from_t.x));
+            assert!(approx_eq(from_wt.y, from_t.y));
+        }
     }
 }

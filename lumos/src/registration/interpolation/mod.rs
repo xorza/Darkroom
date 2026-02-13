@@ -11,8 +11,7 @@ use rayon::prelude::*;
 
 use crate::common::Buffer2;
 use crate::registration::config::InterpolationMethod;
-use crate::registration::distortion::SipPolynomial;
-use crate::registration::transform::Transform;
+use crate::registration::transform::WarpTransform;
 
 #[cfg(test)]
 mod bench;
@@ -240,17 +239,15 @@ fn interpolate(data: &Buffer2<f32>, x: f32, y: f32, method: InterpolationMethod)
     }
 }
 
-/// Warp an image using a transformation matrix and optional SIP distortion correction.
+/// Warp an image using a [`WarpTransform`] (linear transform + optional SIP correction).
 ///
-/// The transform maps output coordinates to input coordinates (output → input).
-/// When SIP is provided, each output pixel is first corrected via `sip.correct(p)`
-/// before applying the transform: `src = transform.apply(sip.correct(p))`.
-/// Parallelized with rayon. Bilinear and Lanczos3 use optimized row-warping paths.
+/// For each output pixel `p`, computes `src = warp_transform.apply(p)` and samples
+/// the input image at `src`. Parallelized with rayon. Bilinear and Lanczos3 use
+/// optimized row-warping paths.
 pub fn warp_image(
     input: &Buffer2<f32>,
     output: &mut Buffer2<f32>,
-    transform: &Transform,
-    sip: Option<&SipPolynomial>,
+    warp_transform: &WarpTransform,
     method: InterpolationMethod,
 ) {
     let width = input.width();
@@ -264,16 +261,13 @@ pub fn warp_image(
         .enumerate()
         .for_each(|(y, row)| {
             if method == InterpolationMethod::Bilinear {
-                warp::warp_row_bilinear(input, row, y, transform, sip);
+                warp::warp_row_bilinear(input, row, y, warp_transform);
             } else if method == InterpolationMethod::Lanczos3 {
-                warp::warp_row_lanczos3(input, row, y, transform, sip);
+                warp::warp_row_lanczos3(input, row, y, warp_transform);
             } else {
                 for (x, pixel) in row.iter_mut().enumerate() {
-                    let mut p = glam::DVec2::new(x as f64, y as f64);
-                    if let Some(s) = sip {
-                        p = s.correct(p);
-                    }
-                    let src = transform.apply(p);
+                    let p = glam::DVec2::new(x as f64, y as f64);
+                    let src = warp_transform.apply(p);
                     *pixel = interpolate(input, src.x as f32, src.y as f32, method);
                 }
             }

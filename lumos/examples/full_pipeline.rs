@@ -433,8 +433,7 @@ fn register_all_lights(
                 lumos::warp(
                     &target_image,
                     &mut warped,
-                    &result.transform,
-                    None,
+                    &result.warp_transform(),
                     &reg_config,
                 );
 

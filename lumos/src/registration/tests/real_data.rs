@@ -232,7 +232,7 @@ fn test_register_two_calibrated_lights() {
     // Warp img2 to align with img1 and measure time
     let warp_start = std::time::Instant::now();
     let mut warped = img2.clone();
-    crate::registration::warp(&img2, &mut warped, &result.transform, None, &reg_config);
+    crate::registration::warp(&img2, &mut warped, &result.warp_transform(), &reg_config);
     let warp_elapsed = warp_start.elapsed();
 
     println!(
@@ -326,8 +326,7 @@ fn bench_register_and_warp_all(b: ::bench::Bencher) {
             crate::registration::warp(
                 &images[i],
                 &mut warped,
-                &result.transform,
-                None,
+                &result.warp_transform(),
                 &reg_config,
             );
 
@@ -409,8 +408,7 @@ fn bench_warp(b: ::bench::Bencher) {
         crate::registration::warp(
             black_box(&img2),
             black_box(&mut warped),
-            black_box(&registration.transform),
-            None,
+            black_box(&registration.warp_transform()),
             black_box(&reg_config),
         )
     });
