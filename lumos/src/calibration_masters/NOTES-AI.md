@@ -6,7 +6,7 @@ Creates master calibration frames (dark, flat, bias) from raw CFA sensor data an
 applies them to calibrate light frames. Detects defective pixels (hot and cold/dead)
 via MAD-based statistics. Operates on raw single-channel CFA data before demosaicing.
 
-**Files:** mod.rs (orchestration), hot_pixels.rs (detection/correction), tests.rs (integration tests)
+**Files:** mod.rs (orchestration), defect_map.rs (detection/correction), tests.rs (integration tests)
 
 ## Architecture
 
@@ -54,6 +54,8 @@ uses `f64` accumulation for the mean, which is good numerical practice.
 - Sigma floor: `max(computed_sigma, median * 0.1)` prevents over-detection on
   uniform darks where MAD approaches zero
 - `DefectMap` stores separate `hot_indices` and `cold_indices` vectors
+- Per-CFA-color statistics: each pixel tested against its own color's thresholds
+  (R, G, B computed independently for Bayer/X-Trans; single channel for Mono)
 
 **Industry comparison:**
 - PixInsight CosmeticCorrection: Uses master dark or auto-detect (3 sigma default,
@@ -97,19 +99,6 @@ Avoids O(n log n) sort on full-resolution images.
 
 ## Remaining Issues
 
-### Medium: Single-Channel Statistics vs Per-CFA-Channel
-- **File:** hot_pixels.rs:49-52 (calls `compute_single_channel_stats` on all pixels)
-- Statistics are computed across ALL CFA pixels regardless of color channel
-- In Bayer data, green pixels are 50% of the total and can have different dark current
-  characteristics than red or blue pixels due to different spectral response and
-  potentially different photodiode sizes in some sensor designs
-- A hot pixel in the red channel might not exceed the global threshold if green pixels
-  dominate the statistics
-- **Industry:** PixInsight CosmeticCorrection has a CFA-aware mode. Siril supports
-  CFA-specific processing.
-- **Fix:** Compute separate MAD statistics for each CFA color channel (R, G1, G2, B for
-  Bayer; 3 channels for X-Trans). Flag pixels hot within their own channel.
-
 ### Medium: No Flat Dark Support
 - **File:** mod.rs:101-109
 - No slot for flat darks (dark frames taken at flat exposure time)
@@ -120,14 +109,14 @@ Avoids O(n log n) sort on full-resolution images.
   flat dark from master flat before normalization.
 
 ### Low: X-Trans Neighbor Search Biased Toward Top-Left
-- **File:** hot_pixels.rs:262-285
+- **File:** defect_map.rs:262-285
 - Iterates dy then dx from negative to positive, breaks at 24 neighbors
 - Systematic bias: top-left neighbors always included, bottom-right may be excluded
 - **Fix:** Collect all same-color neighbors within radius, sort by Manhattan distance,
   take closest 24
 
 ### Low: DefectMap::correct is Sequential
-- **File:** hot_pixels.rs
+- **File:** defect_map.rs
 - Iterates hot and cold indices sequentially
 - Safe to parallelize: Bayer stride-2 neighbors never overlap with other hot pixels'
   replacement zones (hot pixels are sparse). For X-Trans, radius-6 neighborhoods could

@@ -32,6 +32,14 @@ impl CfaType {
             CfaType::XTrans(pattern) => pattern[y % 6][x % 6],
         }
     }
+
+    /// Number of distinct color channels (1 for Mono, 3 for Bayer/X-Trans).
+    pub fn num_colors(&self) -> usize {
+        match self {
+            CfaType::Mono => 1,
+            CfaType::Bayer(_) | CfaType::XTrans(_) => 3,
+        }
+    }
 }
 
 /// Raw CFA image - single channel with color filter pattern metadata.

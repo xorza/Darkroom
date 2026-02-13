@@ -30,6 +30,8 @@ use crate::astro_image::cfa::{CfaImage, CfaType};
 use crate::common::Buffer2;
 use crate::stacking::cache::StackableImage;
 
+use arrayvec::ArrayVec;
+
 use rayon::prelude::*;
 
 /// A mask of defective pixels (hot and cold/dead) detected from a master dark frame.
@@ -48,37 +50,38 @@ pub struct DefectMap {
 }
 
 impl DefectMap {
-    /// Detect defective pixels from a raw CFA master dark (single channel).
+    /// Detect defective pixels from a raw CFA master dark.
     ///
-    /// Uses MAD on the single-channel data. Detects both:
-    /// - **Hot pixels**: above `median + sigma_threshold * sigma`
-    /// - **Cold/dead pixels**: below `median - sigma_threshold * sigma`
+    /// Computes per-CFA-color MAD statistics so that each pixel is tested against
+    /// thresholds derived from same-color pixels only. This prevents green pixels
+    /// (50% of Bayer data) from dominating the statistics and masking defects in
+    /// red or blue channels.
     ///
-    /// Pixel positions are stored as flat indices into the width*height grid.
+    /// Detects both:
+    /// - **Hot pixels**: above `median + sigma_threshold * sigma` for their color
+    /// - **Cold/dead pixels**: below `median - sigma_threshold * sigma` for their color
     pub fn from_master_dark(dark: &CfaImage, sigma_threshold: f32) -> Self {
         assert!(sigma_threshold > 0.0, "Sigma threshold must be positive");
 
-        let stats = compute_single_channel_stats(&dark.data, sigma_threshold);
+        let width = dark.data.width();
+        let height = dark.data.height();
+        let cfa_type = dark.metadata.cfa_type.as_ref();
 
-        let upper_threshold = stats.threshold;
-        let lower_threshold = (stats.median - sigma_threshold * stats.sigma).max(0.0);
-
-        tracing::info!(
-            "Defect pixel CFA: median={:.6}, MAD={:.6}, sigma={:.6}, upper={:.6}, lower={:.6}",
-            stats.median,
-            stats.mad,
-            stats.sigma,
-            upper_threshold,
-            lower_threshold,
-        );
+        // Compute per-color thresholds
+        let thresholds = compute_per_color_thresholds(&dark.data, cfa_type, sigma_threshold);
 
         let mut hot_indices = Vec::new();
         let mut cold_indices = Vec::new();
 
         for (i, &val) in dark.data.iter().enumerate() {
-            if val > upper_threshold {
+            let x = i % width;
+            let y = i / width;
+            let color = cfa_color_at(cfa_type, x, y) as usize;
+            let (upper, lower) = thresholds[color];
+
+            if val > upper {
                 hot_indices.push(i);
-            } else if val < lower_threshold {
+            } else if val < lower {
                 cold_indices.push(i);
             }
         }
@@ -86,8 +89,8 @@ impl DefectMap {
         Self {
             hot_indices,
             cold_indices,
-            width: dark.data.width(),
-            height: dark.data.height(),
+            width,
+            height,
         }
     }
 
@@ -138,52 +141,104 @@ impl DefectMap {
     }
 }
 
-/// Statistics for a single channel used in hot pixel detection.
-#[derive(Debug)]
-struct ChannelStats {
-    median: f32,
-    mad: f32,
-    sigma: f32,
-    threshold: f32,
-}
-
-/// Maximum number of samples to use for median estimation.
+/// Maximum number of samples per color channel for median estimation.
 const MAX_MEDIAN_SAMPLES: usize = 100_000;
 
-/// Compute statistics for a single channel of data.
-fn compute_single_channel_stats(data: &[f32], sigma_threshold: f32) -> ChannelStats {
-    let pixel_count = data.len();
-    let use_sampling = pixel_count > MAX_MEDIAN_SAMPLES * 2;
-    let sample_count = if use_sampling {
-        MAX_MEDIAN_SAMPLES
-    } else {
-        pixel_count
-    };
-    let stride = if use_sampling {
-        pixel_count / sample_count
-    } else {
-        1
-    };
+use crate::math::MAD_TO_SIGMA;
 
-    let mut samples: Vec<f32> = (0..sample_count).map(|i| data[i * stride]).collect();
-    let median = crate::math::median_f32_mut(&mut samples);
-
-    for v in samples.iter_mut() {
-        *v = (*v - median).abs();
+/// Get CFA color index at (x, y). Returns 0 for Mono/None.
+fn cfa_color_at(cfa_type: Option<&CfaType>, x: usize, y: usize) -> u8 {
+    match cfa_type {
+        Some(cfa) => cfa.color_at(x, y),
+        None => 0,
     }
-    let mad = crate::math::median_f32_mut(&mut samples);
+}
 
-    const MAD_TO_SIGMA: f32 = 1.4826;
-    let computed_sigma = mad * MAD_TO_SIGMA;
-    let sigma = computed_sigma.max(median * 0.1);
-    let threshold = median + sigma_threshold * sigma;
+/// Compute per-CFA-color (upper, lower) thresholds.
+///
+/// Returns an ArrayVec indexed by color (0=R/mono, 1=G, 2=B).
+/// Length is 1 for mono, 3 for Bayer/X-Trans.
+fn compute_per_color_thresholds(
+    data: &Buffer2<f32>,
+    cfa_type: Option<&CfaType>,
+    sigma_threshold: f32,
+) -> ArrayVec<(f32, f32), 3> {
+    let num_colors = cfa_type.map_or(1, |c| c.num_colors());
+    let mut thresholds = ArrayVec::new();
 
-    ChannelStats {
-        median,
-        mad,
-        sigma,
-        threshold,
+    for color in 0..num_colors as u8 {
+        let mut samples = collect_color_samples(data, cfa_type, color);
+
+        if samples.is_empty() {
+            thresholds.push((f32::MAX, f32::MIN));
+            continue;
+        }
+
+        let median = crate::math::median_f32_mut(&mut samples);
+
+        for v in samples.iter_mut() {
+            *v = (*v - median).abs();
+        }
+        let mad = crate::math::median_f32_mut(&mut samples);
+
+        let computed_sigma = mad * MAD_TO_SIGMA;
+        let sigma = computed_sigma.max(median * 0.1);
+        let upper = median + sigma_threshold * sigma;
+        let lower = (median - sigma_threshold * sigma).max(0.0);
+
+        tracing::info!(
+            "Defect stats color={color}: median={median:.6}, MAD={mad:.6}, \
+             sigma={sigma:.6}, upper={upper:.6}, lower={lower:.6}"
+        );
+
+        thresholds.push((upper, lower));
     }
+
+    thresholds
+}
+
+/// Collect pixel samples for a specific CFA color channel.
+///
+/// Uses uniform sampling when the channel has more than `MAX_MEDIAN_SAMPLES * 2` pixels.
+fn collect_color_samples(
+    data: &Buffer2<f32>,
+    cfa_type: Option<&CfaType>,
+    target_color: u8,
+) -> Vec<f32> {
+    let width = data.width();
+    let height = data.height();
+    let total = width * height;
+
+    if cfa_type.map_or(1, |c| c.num_colors()) == 1 {
+        // Mono: all pixels belong to color 0, use strided sampling
+        let use_sampling = total > MAX_MEDIAN_SAMPLES * 2;
+        let sample_count = if use_sampling {
+            MAX_MEDIAN_SAMPLES
+        } else {
+            total
+        };
+        let stride = if use_sampling {
+            total / sample_count
+        } else {
+            1
+        };
+        return (0..sample_count).map(|i| data[i * stride]).collect();
+    }
+
+    // CFA: collect all pixels of target_color, then subsample if too many
+    let mut pixels: Vec<f32> = (0..total)
+        .filter(|&i| cfa_color_at(cfa_type, i % width, i / width) == target_color)
+        .map(|i| data[i])
+        .collect();
+
+    if pixels.len() > MAX_MEDIAN_SAMPLES * 2 {
+        let stride = pixels.len() / MAX_MEDIAN_SAMPLES;
+        pixels = (0..MAX_MEDIAN_SAMPLES)
+            .map(|i| pixels[i * stride])
+            .collect();
+    }
+
+    pixels
 }
 
 /// Calculate median of 8-connected neighbors from raw channel data.
@@ -550,6 +605,76 @@ mod tests {
             "Expected 45.0, got {}",
             image.data[4]
         );
+    }
+
+    #[test]
+    fn test_per_channel_detection_bayer() {
+        // 8x8 Bayer RGGB image.
+        // Red pixels (at even x, even y) have value 100.0
+        // Green pixels have value 200.0
+        // Blue pixels (at odd x, odd y) have value 50.0
+        // One red pixel is hot at 500.0 — should be detected by per-channel stats
+        // even though 500 might not exceed a global threshold dominated by green=200.
+        let pattern = CfaType::Bayer(crate::raw::demosaic::CfaPattern::Rggb);
+        let mut pixels = vec![0.0f32; 64];
+        for y in 0..8 {
+            for x in 0..8 {
+                let color = pattern.color_at(x, y);
+                pixels[y * 8 + x] = match color {
+                    0 => 100.0, // R
+                    1 => 200.0, // G
+                    2 => 50.0,  // B
+                    _ => unreachable!(),
+                };
+            }
+        }
+        // Make one red pixel hot
+        pixels[0] = 500.0; // (0,0) = R
+
+        let dark = make_cfa(8, 8, pixels, pattern.clone());
+        let defect_map = DefectMap::from_master_dark(&dark, 3.0);
+
+        // The hot red pixel should be detected
+        assert!(
+            is_hot(&defect_map, 0),
+            "Hot red pixel at (0,0) not detected"
+        );
+
+        // Green and blue pixels should not be flagged
+        assert!(!is_hot(&defect_map, 1)); // G at (1,0)
+        assert!(!is_hot(&defect_map, 9)); // B at (1,1)
+    }
+
+    #[test]
+    fn test_per_channel_detection_cold_in_blue() {
+        // 8x8 Bayer RGGB: R=100, G=200, B=150
+        // One blue pixel is dead at 0.0
+        let pattern = CfaType::Bayer(crate::raw::demosaic::CfaPattern::Rggb);
+        let mut pixels = vec![0.0f32; 64];
+        for y in 0..8 {
+            for x in 0..8 {
+                let color = pattern.color_at(x, y);
+                pixels[y * 8 + x] = match color {
+                    0 => 100.0,
+                    1 => 200.0,
+                    2 => 150.0,
+                    _ => unreachable!(),
+                };
+            }
+        }
+        // Dead blue pixel at (1,1)
+        pixels[9] = 0.0;
+
+        let dark = make_cfa(8, 8, pixels, pattern.clone());
+        let defect_map = DefectMap::from_master_dark(&dark, 3.0);
+
+        assert!(
+            is_cold(&defect_map, 9),
+            "Dead blue pixel at (1,1) not detected"
+        );
+        // Other pixels should not be flagged
+        assert!(!is_cold(&defect_map, 0)); // R at (0,0)
+        assert!(!is_cold(&defect_map, 1)); // G at (1,0)
     }
 
     #[test]
