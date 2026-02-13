@@ -119,7 +119,7 @@ sources could combine to meet the contrast criterion individually.
 ### Buffer Reuse (L314-355)
 - `DeblendBuffers`: 7 reusable buffers (component_pixels, pixel_to_node,
   above_threshold, parent_pixels_above, bfs_queue, regions, region_pool + pixel_grid)
-- Created once per rayon thread via `fold` in detect.rs:191-219
+- Created once per rayon thread via `fold` in detect.rs:184-210
 - Region pool: recycled Vec<Pixel> to avoid per-BFS allocation
 
 ### Early Termination (L444-446, L542-550)
@@ -211,7 +211,7 @@ stacking where the current algorithms operate.
    0.005 default contrast closely match the reference implementation.
 3. **Memory efficiency**: ArrayVec/SmallVec throughout, generation-counter grids avoid
    clearing, region pool recycles Vec allocations, DeblendBuffers reused across components.
-4. **Parallelism**: Rayon fold with per-thread DeblendBuffers (detect.rs:191-219).
+4. **Parallelism**: Rayon fold with per-thread DeblendBuffers (detect.rs:184-210).
 5. **Early termination**: 4-level no-split check avoids wasted iterations (L444-550).
 6. **Area conservation**: Both algorithms guarantee total pixel count is preserved
    after deblending (verified by tests).

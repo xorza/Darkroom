@@ -98,7 +98,11 @@ Formula: `(order+1)(order+2)/2 - 3`
 
 The SIP standard defines A/B as the **forward** polynomial: pixel offsets
 `(u, v)` from CRPIX are corrected before applying the CD matrix (or in our
-case, the homography). The code at `sip/mod.rs:151-159` computes:
+case, the homography). This direction convention is confirmed by Siril's SIP
+implementation (since v1.3): Siril applies SIP correction before the linear
+transform, matching our approach exactly.
+
+The code at `sip/mod.rs:151-159` computes:
 
 ```rust
 targets_u[i] = -(transform.apply(ref[i]).x - target[i].x) / norm_scale
@@ -489,6 +493,9 @@ distortion/
 - [LSST FitSipDistortionTask](https://pipelines.lsst.io/modules/lsst.meas.astrom/tasks/lsst.meas.astrom.FitSipDistortion.html) -- sigma-clipping, scaled polynomial
 - [PixInsight Distortion Correction](https://www.pixinsight.com/tutorials/sa-distortion/index.html) -- TPS approach
 - [PixInsight Solver Distortion Algorithm](https://pixinsight.com/tutorials/solver-distortion/) -- surface simplifiers
+
+### Industry Implementations (continued)
+- [Siril Registration (SIP since v1.3)](https://siril.readthedocs.io/en/stable/preprocessing/registration.html) -- Applies SIP correction before linear transform, confirming our direction convention
 
 ### Related Standards
 - [TPV WCS Convention](https://fits.gsfc.nasa.gov/registry/tpvwcs/tpv.html) -- PV polynomials (SExtractor/SWarp)

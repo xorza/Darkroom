@@ -1,14 +1,17 @@
 # Detection Pipeline: Threshold Mask, Labeling, Mask Dilation
 
-These three modules form the core detection pipeline used by
-`detector/stages/detect.rs` (line 50-136). The pipeline flow is:
+Three modules supporting the detection pipeline in `detector/stages/detect.rs`
+(line 50-127). The detection pipeline flow is:
 
 1. **Threshold mask** -- mark pixels above `bg + sigma * noise`
-2. **Mask dilation** -- expand mask by radius to connect nearby fragments
-3. **Connected component labeling** -- group connected pixels into regions
+2. **Connected component labeling** -- group connected pixels into regions
 
 After labeling, regions are filtered by area and edge margin, then passed to
 deblending and centroid stages.
+
+Mask dilation is no longer used in the detect stage (removed in favor of
+8-connectivity in CCL). It is still used for background refinement masking
+(background/mod.rs) with configurable radius.
 
 ---
 
@@ -140,18 +143,16 @@ exclusive (mod.rs line 44-49).
 
 Supports both 4-connectivity and 8-connectivity (config.rs line 16-28):
 
-- **4-connectivity** (default): runs overlap if `prev.start < curr.end && prev.end > curr.start` (mod.rs line 67)
-- **8-connectivity**: runs overlap if `prev.start < curr.end + 1 && prev.end + 1 > curr.start` (mod.rs line 68)
+- **4-connectivity**: runs overlap if `prev.start < curr.end && prev.end > curr.start` (mod.rs line 67)
+- **8-connectivity** (default): runs overlap if `prev.start < curr.end + 1 && prev.end + 1 > curr.start` (mod.rs line 68)
 
 The `search_window` method (mod.rs line 55-60) expands the search range by 1
 pixel on each side for 8-connectivity to catch diagonal adjacency.
 
 **Comparison with SExtractor**: SExtractor uses 8-connectivity by default
 ("pixels whose values exceed the local threshold and which touch each other
-at their sides or angles"). This implementation defaults to 4-connectivity
-(config.rs line 275), which avoids merging diagonally-adjacent close star
-pairs. The 8-connectivity option is available for wide-field and crowded-field
-presets (config.rs lines 464, 503, 528).
+at their sides or angles"). This implementation now also defaults to
+8-connectivity (config.rs line 273), matching SExtractor and photutils.
 
 **Comparison with photutils**: Python's photutils `detect_sources` defaults
 to 8-connectivity as well, matching SExtractor's convention.
@@ -261,18 +262,14 @@ The `verify_ccl_invariants` function (lines 1210-1293) checks four invariants:
 
 ### Purpose
 
-Mask dilation serves two purposes in the pipeline:
+Mask dilation is used for **background mask dilation** (background/mod.rs line
+141): configurable radius (`bg_mask_dilation`, default 3, config.rs line 196)
+to mask object wings during iterative background refinement. Ensures the
+background estimate is not contaminated by faint star halos.
 
-1. **Detection dilation** (detect.rs line 115): radius 1 dilation after
-   thresholding, before labeling. Connects nearby above-threshold pixels that
-   might be separated due to noise fluctuations at the detection boundary.
-   This prevents a single star from being fragmented into multiple small
-   components.
-
-2. **Background mask dilation** (background/mod.rs line 141): configurable
-   radius (`bg_mask_dilation`, default 3, config.rs line 196) to mask object
-   wings during iterative background refinement. Ensures the background
-   estimate is not contaminated by faint star halos.
+Note: Detection-stage dilation (formerly radius 1 before labeling) was removed.
+The detect stage now goes directly from threshold mask to CCL without dilation.
+8-connectivity in CCL handles the gap-bridging that dilation previously provided.
 
 ### Structuring Element
 
@@ -333,14 +330,11 @@ bottleneck is memory bandwidth, not compute.
 
 | Context | Radius | Config field | Purpose |
 |---------|--------|-------------|---------|
-| Detection | 1 | hardcoded in detect.rs:115 | Connect fragmented detections |
 | Background refinement | 3 (default) | `bg_mask_dilation` (config.rs:196) | Mask object wings |
 | Precise ground preset | 5 | `bg_mask_dilation` (config.rs:518) | Conservative masking |
 
-The detection dilation radius of 1 is conservative -- it only bridges 1-pixel
-gaps between above-threshold pixels. This is sufficient for well-sampled PSFs
-(FWHM > 2px) where the core pixels are already connected. For undersampled
-PSFs, 8-connectivity (without dilation) may be more appropriate.
+Detection no longer uses dilation. The default 8-connectivity in CCL handles
+diagonal adjacency, making radius-1 dilation redundant for well-sampled PSFs.
 
 ### Tests
 
@@ -360,25 +354,27 @@ Comprehensive test suite (829 lines) covering:
 
 ## Pipeline Integration
 
-The three modules are orchestrated in `detector/stages/detect.rs`:
+The modules are orchestrated in `detector/stages/detect.rs`:
 
 ```
 detect() (detect.rs line 50):
   1. Optional matched filter (lines 63-89)
   2. create_threshold_mask / create_threshold_mask_filtered (lines 95-107)
-  3. count pixels above threshold (line 110)
-  4. dilate_mask(&mask, 1, &mut dilated) (line 115)
-  5. LabelMap::from_pool (line 120)
-  6. extract_and_filter_candidates (line 125)
+  3. count pixels above threshold (line 109)
+  4. LabelMap::from_pool (line 111)
+  5. extract_and_filter_candidates (line 116)
 ```
+
+No dilation is applied between thresholding and labeling. The default
+8-connectivity in CCL handles diagonal pixel adjacency.
 
 Buffer management uses `BufferPool` for zero-allocation reuse across
 detection calls. BitBuffer2 masks and Buffer2<u32> label maps are acquired
 from and released back to the pool.
 
-For background refinement (background/mod.rs line 119-143), the same
-threshold mask + dilation sequence is used but with a different sigma
-threshold and larger dilation radius to create conservative object masks.
+For background refinement (background/mod.rs line 119-143), the threshold
+mask + dilation sequence is used with a different sigma threshold and larger
+dilation radius to create conservative object masks for source exclusion.
 
 ## Issues Found by Research
 

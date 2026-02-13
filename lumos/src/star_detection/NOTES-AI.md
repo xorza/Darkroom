@@ -33,6 +33,30 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 6. **filter** - Cascading quality filters (saturation, SNR, eccentricity, sharpness,
    roundness), MAD-based FWHM outlier removal, spatial-hash duplicate removal
 
+### Pipeline Order Analysis
+
+The pipeline order (background -> filter -> threshold -> label -> deblend -> centroid)
+is correct and matches the standard approach used by SExtractor, SEP, and photutils:
+
+1. **Background first**: Must come before thresholding because the threshold is
+   `bg + k*sigma`. SExtractor, SEP, photutils all follow this order.
+2. **Matched filter before threshold**: The convolution boosts SNR for point sources,
+   making fainter stars detectable. SExtractor applies filtering before thresholding.
+   DAOFIND also convolves before detecting peaks.
+3. **Threshold before labeling**: Standard approach. The threshold mask defines which
+   pixels are "detected"; CCL groups them. This is the SExtractor/SEP flow.
+4. **Labeling before deblending**: Deblending operates on connected components, so
+   components must be identified first. SExtractor's analyse.c operates per-component.
+5. **Deblending before centroid**: The deblend step splits blended components into
+   individual regions, each of which gets a centroid. Correct order.
+6. **Centroid before quality filter**: Quality metrics (SNR, FWHM, eccentricity) are
+   computed from centroid data, so centroiding must precede filtering. Correct.
+
+**One deviation from SExtractor**: SExtractor performs detection and measurement in a
+single streaming pass through the image (line-by-line). This implementation stores full
+intermediate results (background map, label map, region list) which uses more memory
+but enables parallel processing and buffer reuse.
+
 ### Key Subsystems
 - **convolution/** - Separable Gaussian O(n*k), elliptical 2D O(n*k^2), SIMD row/col passes
 - **centroid/** - Weighted moments, Gaussian 6-param L-M, Moffat 5/6-param L-M with
@@ -86,32 +110,32 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 - Lines 10 and 24 both have `use rayon::prelude::*;`. Harmless but should be cleaned.
 
 ## Completed Fixes
-1. ~~**Matched filter noise scaling** (P1)~~ **DONE** — output normalized by sqrt(sum(K^2)).
-2. ~~**Dilation before labeling** (P1)~~ **DONE** — dilation removed from detect stage.
-3. ~~**Default 4-connectivity** (P1)~~ **DONE** — changed to 8-connectivity.
-4. ~~**Negative clipping before convolution** (P2)~~ **DONE** — negative residuals preserved.
-5. ~~**Unsafe mutable aliasing in mask_dilation** (P1)~~ **DONE** — proper `&mut` borrow + SendPtr.
-6. ~~**PixelGrid generation counter wrap** (P2)~~ **DONE** — zero guard added matching NodeGrid.
-7. ~~**AtomicUnionFind capacity overflow** (P2)~~ **DONE** — assert on overflow in make_set().
+1. ~~**Matched filter noise scaling** (P1)~~ **DONE** -- output normalized by sqrt(sum(K^2)).
+2. ~~**Dilation before labeling** (P1)~~ **DONE** -- dilation removed from detect stage.
+3. ~~**Default 4-connectivity** (P1)~~ **DONE** -- changed to 8-connectivity.
+4. ~~**Negative clipping before convolution** (P2)~~ **DONE** -- negative residuals preserved.
+5. ~~**Unsafe mutable aliasing in mask_dilation** (P1)~~ **DONE** -- proper `&mut` borrow + SendPtr.
+6. ~~**PixelGrid generation counter wrap** (P2)~~ **DONE** -- zero guard added matching NodeGrid.
+7. ~~**AtomicUnionFind capacity overflow** (P2)~~ **DONE** -- assert on overflow in make_set().
 
 ## Postponed (low impact, revisit only if a real problem arises)
-- **L.A.Cosmic fine structure ratio** — `laplacian_snr` is computed but never used in
+- **L.A.Cosmic fine structure ratio** -- `laplacian_snr` is computed but never used in
   the filter pipeline. Only matters if Laplacian-based filtering is activated.
-- **Mode estimator for background** — Iterative refinement with source masking already
+- **Mode estimator for background** -- Iterative refinement with source masking already
   handles crowded fields. Marginal improvement.
-- **Deblend contrast criterion** — Parent-relative vs root-relative. Only affects deeply
+- **Deblend contrast criterion** -- Parent-relative vs root-relative. Only affects deeply
   nested 3+ level blends. Valid alternative.
-- **Quality metrics vs DAOFIND** — Custom definitions work for filtering. Published
+- **Quality metrics vs DAOFIND** -- Custom definitions work for filtering. Published
   threshold values aren't transferable, but acceptable.
-- **Bicubic spline background** — Negligible for registration with 64px tiles.
-- **Gaussian fit rotation angle** — Adequate for near-circular ground-based PSFs.
-- **FWHM discretization correction** — Only matters for FWHM < 3px.
-- **Fit parameters discarded** — Only position used from profile fits.
-- **Voronoi vs flux-weighted deblend** — Low impact for point-source centroids.
-- **SExtractor cleaning pass** — Quality filter stage partially compensates.
-- **Parameter uncertainties from L-M covariance** — Useful for weighted registration
+- **Bicubic spline background** -- Negligible for registration with 64px tiles.
+- **Gaussian fit rotation angle** -- Adequate for near-circular ground-based PSFs.
+- **FWHM discretization correction** -- Only matters for FWHM < 3px.
+- **Fit parameters discarded** -- Only position used from profile fits.
+- **Voronoi vs flux-weighted deblend** -- Low impact for point-source centroids.
+- **SExtractor cleaning pass** -- Quality filter stage partially compensates.
+- **Parameter uncertainties from L-M covariance** -- Useful for weighted registration
   but not critical for current centroid-only use case.
-- **Separation metric inconsistency** — Chebyshev in multi-threshold vs Euclidean in
+- **Separation metric inconsistency** -- Chebyshev in multi-threshold vs Euclidean in
   local maxima. Both err on the side of merging close peaks. Minor inconsistency.
 
 ## Cross-Cutting Summary
@@ -120,7 +144,7 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 - **MAD-based noise** is more robust than SExtractor's clipped std dev (background).
   MAD has 50% breakdown point; std dev has ~0%. Trade-off: MAD has 37% asymptotic
   efficiency, but with 1024 samples/tile, precision is still <5% relative error.
-- **SIMD acceleration** throughout — no other tool (SExtractor, SEP, photutils) has this.
+- **SIMD acceleration** throughout -- no other tool (SExtractor, SEP, photutils) has this.
   AVX2/SSE4.1/NEON in: threshold mask, convolution, median filter, profile fitting,
   background interpolation.
 - **Iterative background refinement** with source masking matches photutils best practices
@@ -133,27 +157,32 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 - **Parallel CCL** with atomic union-find and benchmarked crossover threshold.
   AtomicUnionFind is ABA-safe due to monotonic parent-pointer invariant.
 - **Sampling optimization** caps tile statistics at 1024 samples (SExtractor uses all)
-- **Fused L-M normal equations** with SIMD — avoids NxM Jacobian storage, 68-71% faster
-- **Bit-packed masks** (BitBuffer2) — 8x memory reduction, 64-pixel word-level operations
-- **Rayon parallelism** in every stage — SExtractor and SEP are single-threaded
+- **Fused L-M normal equations** with SIMD -- avoids NxM Jacobian storage, 68-71% faster
+- **Bit-packed masks** (BitBuffer2) -- 8x memory reduction, 64-pixel word-level operations
+- **Rayon parallelism** in every stage -- SExtractor and SEP are single-threaded
 
 ### What SExtractor Does That We Don't (and whether it matters)
-- **Weight/variance map input** — LOW for astrophotography, HIGH for survey data
-- **Cleaning pass** — MEDIUM for crowded fields near bright stars. SExtractor computes
+- **Weight/variance map input** -- LOW for astrophotography, HIGH for survey data
+- **Cleaning pass** -- MEDIUM for crowded fields near bright stars. SExtractor computes
   the contribution to each object's mean surface brightness from its neighbors, subtracts
   it, and accepts the object only if it still exceeds the detection threshold.
-- **Bicubic spline background** — NEGLIGIBLE for registration with 64px tiles
-- **Flux-weighted pixel assignment** — LOW for point-source centroids. SExtractor uses
+- **Bicubic spline background** -- NEGLIGIBLE for registration with 64px tiles
+- **Flux-weighted pixel assignment** -- LOW for point-source centroids. SExtractor uses
   Gaussian template weighting; we use Voronoi (nearest peak).
-- **Root-relative contrast** — LOW (parent-relative is a valid alternative). SEP confirmed
+- **Root-relative contrast** -- LOW (parent-relative is a valid alternative). SEP confirmed
   to use root flux: `child_flux >= DEBLEND_MINCONT * root_flux`.
-- **CLASS_STAR classifier** — MEDIUM. Uses 10-input MLP: 8 isophotal areas + peak +
+- **CLASS_STAR classifier** -- MEDIUM. Uses 10-input MLP: 8 isophotal areas + peak +
   seeing FWHM. Requires SEEING_FWHM to +-5% for faint sources. Not worth replicating
   for registration use case.
-- **Isophotal/Kron photometry** — NOT NEEDED for registration
-- **Weighted least squares** — MEDIUM. Industry tools (DAOPHOT, SExtractor) use
+- **Isophotal/Kron photometry** -- NOT NEEDED for registration
+- **Weighted least squares** -- MEDIUM. Industry tools (DAOPHOT, SExtractor) use
   inverse-variance weighting `chi2 = sum(((data-model)/sigma_i)^2)`. Our L-M fitting
   is unweighted, which is suboptimal for faint stars with Poisson statistics.
+- **Mode estimator** (2.5*med - 1.5*mean) -- LOW. More appropriate for crowded fields
+  but iterative refinement partially compensates. See background/NOTES-AI.md.
+- **Zero-sum (lowered Gaussian) kernel** -- LOW. DAOFIND's negative-wing kernel
+  provides implicit local background subtraction during convolution. Our approach
+  of explicit background subtraction before convolution is equally valid.
 
 ### What photutils Does That We Don't
 - **Watershed segmentation** for deblend pixel assignment (follows intensity gradients)
@@ -162,17 +191,32 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 - **Pluggable background estimators** (6 location, 3 scale estimators)
 
 ### What PixInsight Does That We Don't
-- **Wavelet-based (a trous) multiscale structure detection** — different paradigm from
-  matched filtering. Can detect sources at multiple scales simultaneously.
+- **Wavelet-based (a trous) multiscale structure detection** -- different paradigm from
+  matched filtering. Can detect sources at multiple scales simultaneously. PixInsight
+  uses dyadic wavelet layers where layer N corresponds to structures of size 2^N pixels.
+  This provides natural multi-scale noise suppression (small-scale layers capture noise,
+  large-scale layers capture extended objects).
 - **Kurtosis-based peak response** (`peakResponse` parameter) for quality filtering
-- **Thin plate spline** background (DBE) — more flexible than tile-based methods
+- **Thin plate spline** background (DBE) -- more flexible than tile-based methods
+- **Noise estimation via starlet transform** (MRS noise estimator) -- more sophisticated
+  than tile-based sigma clipping
+
+### What DAOFIND/DAOStarFinder Does That We Don't
+- **Zero-sum kernel**: DAOFIND kernel `K = (G - mean(G))` normalized so output is in
+  amplitude units (least-squares Gaussian fit). Implicitly subtracts local background.
+- **Noise correction factor**: `relerr = 1/sqrt(sum(K^2) - sum(K)^2/N)` properly
+  accounts for the zero-sum normalization. Our `1/sqrt(sum(K^2))` is correct for
+  our sum=1 kernel but cannot be directly compared.
+- **Formal sharpness/roundness**: DAOFIND computes sharpness as `(peak - mean_4neighbors)
+  / peak` and roundness from marginal distributions of the density-enhancement image.
+  Our metrics are functionally similar but use different formulas.
 
 ### Consistency Issues Across Modules
-- ~~Dilation + 4-connectivity~~ **FIXED** — dilation removed, 8-connectivity default
-- ~~Matched filter output not in proper units~~ **FIXED** — noise-normalized output
-- Separation metric: Chebyshev (multi-threshold) vs Euclidean (local maxima) — minor
-- Two different median9 sorting networks (21 vs 25 comparators) — both correct
-- Sharpness and roundness metrics differ from DAOFIND definitions — custom definitions
+- ~~Dilation + 4-connectivity~~ **FIXED** -- dilation removed, 8-connectivity default
+- ~~Matched filter output not in proper units~~ **FIXED** -- noise-normalized output
+- Separation metric: Chebyshev (multi-threshold) vs Euclidean (local maxima) -- minor
+- Two different median9 sorting networks (21 vs 25 comparators) -- both correct
+- Sharpness and roundness metrics differ from DAOFIND definitions -- custom definitions
   are effective for filtering but published threshold values aren't transferable.
   DAOFIND defaults: sharplo=0.2, sharphi=1.0, roundlo=-1.0, roundhi=1.0.
 
@@ -197,6 +241,9 @@ All core algorithms verified against reference implementations:
 | AtomicUnionFind | Correct | No ABA problem (monotonic parent invariant) |
 | Multi-threshold tree | Correct | Exponential spacing matches SExtractor |
 | Sorting network median9 | Correct | Both 21 and 25-comparator networks |
+| Matched filter normalization | Correct | `output / sqrt(sum(K^2))` matches SEP approach |
+| Mirror boundary convolution | Correct | Preserves flux for sum=1 kernels |
+| Separable decomposition | Correct | axis_ratio >= 0.99 dispatches to separable path |
 
 ## Missing Features vs SExtractor / PixInsight
 
@@ -213,11 +260,21 @@ All core algorithms verified against reference implementations:
 - No noise estimation via starlet transform (MRS noise estimator)
 - Matched filter is mathematically optimal for known Gaussian PSF but cannot handle
   scale variation across the field
+- No adaptive structure size detection (PixInsight auto-tunes minimum structure size)
 
 ### vs photutils DAOStarFinder
 - ~~Missing noise correction factor~~ **FIXED**
 - No negative-wing (zero-sum) kernel for implicit background subtraction
 - No formal parameter uncertainties from L-M covariance matrix
+
+### vs All Tools: What We Have That They Don't
+- **SIMD acceleration** in every hot path (no other tool has this)
+- **Dual deblending modes** selectable via config
+- **Moffat PowStrategy** for fast integer/half-integer exponents
+- **Generation-counter grids** for O(1) deblend buffer clearing
+- **Buffer pool** for zero-allocation across video frame sequences
+- **Parallel CCL** with benchmarked sequential/parallel crossover
+- **Bit-packed masks** with word-level operations
 
 ## References
 - Bertin & Arnouts 1996 (SExtractor): A&AS 117, 393
@@ -230,3 +287,5 @@ All core algorithms verified against reference implementations:
 - Trujillo et al. 2001 (Moffat PSF): MNRAS 328, 977
 - He et al. 2017 (CCL survey): state-of-the-art algorithms review
 - Gavin (L-M tutorial): Duke University technical report
+- Wu et al. 2009: Optimizing two-pass CCL algorithms, PAA
+- Thomas et al. 2006: Comparison of centroid algorithms, MNRAS 371, 323

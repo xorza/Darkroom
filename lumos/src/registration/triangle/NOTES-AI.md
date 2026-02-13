@@ -165,6 +165,33 @@ shortest/longest), both in [0, 1]. Used geometric hashing with 2D bins.
 - Our KNN approach scales to 200+ stars; Siril's brute-force is limited to ~20.
 - Both use triangle similarity + RANSAC pipeline. Same conceptual architecture.
 
+### ASTAP (Han Kleijn)
+
+**Implementation:** Supports both triangle and quad descriptors (since 2024 updates).
+- Triangle mode: similar to Groth/Valdes, hash-based indexing.
+- Quad mode: 4-star descriptors analogous to Astrometry.net's approach. Noted by the
+  author as providing better uniqueness than triangles for large star fields.
+- Supports SIP distortion correction.
+- 2025 update: "full implementation of reverse mapping with bilinear interpolation."
+
+**Our implementation vs ASTAP:**
+- We only support triangles; ASTAP's dual triangle/quad approach provides fallback
+  for difficult fields. For our 50-200 star image-to-image matching, triangles suffice.
+- ASTAP's hash-based lookup is similar in spirit to Valdes' geometric hashing.
+
+### starmatch (PyPI 2024-2025)
+
+**Implementation:** Python library (v1.0+, 2024-2025) for star pattern matching.
+- Multi-pass matching with different pixel tolerances for initial and secondary
+  matching passes. This adaptive tolerance strategy improves match success rate
+  on difficult fields.
+- Uses triangle similarity matching with iterative refinement.
+
+**Our implementation vs starmatch:**
+- We use a single fixed tolerance (ratio_tolerance=0.01). Multi-pass matching
+  with relaxed tolerances on retry could improve robustness for difficult cases
+  (very noisy centroids, moderate distortion).
+
 ### GMTV (2022) -- Global Multi-Triangle Voting
 
 - Uses PCA-reduced triangle features for efficient search.

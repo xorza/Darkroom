@@ -352,6 +352,23 @@ Min points: 4. **Correct**.
 
 ## Comparison with Industry Implementations
 
+### SupeRANSAC (Barath et al. 2025)
+
+SupeRANSAC (arXiv:2506.04803) is a comprehensive unified RANSAC framework
+that integrates and evaluates all major RANSAC components. Their key finding
+for scoring: **MAGSAC++ is adopted as the default scoring function**, with
+the authors noting it achieves "the best trade-off in terms of average model
+accuracy and robustness to parameter choices." This directly validates our
+choice of MAGSAC++ scoring.
+
+The full SupeRANSAC pipeline includes: MAGSAC++ scoring, GC-RANSAC for
+local optimization, progressive NAPSAC sampling, SPRT for early model
+rejection, and DEGENSAC for homography degeneracy. We implement the most
+impactful component (MAGSAC++ scoring) while substituting simpler
+alternatives for the others (iterative LS for LO, 3-phase progressive
+for PROSAC/NAPSAC). For our star registration use case (200 matches at
+50%+ inlier ratio), the additional components provide diminishing returns.
+
 ### OpenCV USAC Framework
 
 OpenCV's Universal RANSAC (Raguram et al., TPAMI 2013, updated by
@@ -487,6 +504,8 @@ IRWLS would help in scenarios with gradual inlier/outlier transition
 - Efraimidis, Spirakis. "Weighted Random Sampling with a Reservoir." 2006.
 - Piedade et al. "RANSAC Scoring Functions: Analysis and Reality Check."
   arXiv:2512.19850, Dec 2025.
+- Barath et al. "SupeRANSAC: Unified Random Sample Consensus." 2025.
+  https://arxiv.org/abs/2506.04803
 - OpenCV USAC: https://docs.opencv.org/4.x/de/d3e/tutorial_usac.html
 - danini/magsac: https://github.com/danini/magsac
 - Siril registration: https://siril.readthedocs.io/en/stable/preprocessing/registration.html

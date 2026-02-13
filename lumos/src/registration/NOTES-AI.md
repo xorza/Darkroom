@@ -23,16 +23,34 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 6. Optional SIP polynomial fit on residuals, bundled into `WarpTransform`
 7. Image warping via `warp()` / `warp_image()` takes `&WarpTransform` (output->input mapping, Lanczos3 default)
 
+### Auto Transform Selection (mod.rs:158-180)
+`TransformType::Auto` starts with Similarity, upgrades to Homography if
+RMS > 0.5px. The 0.5px threshold is absolute. FWHM-adaptive scaling would
+be more robust (e.g., 0.25 * median_fwhm).
+
+### Match Recovery (mod.rs:353-430)
+ICP-style iterative recovery: project unmatched ref stars through transform,
+find nearest target in k-d tree, refit, repeat up to 5 iterations. Ensures
+result never has fewer matches than the input seed. This is a correct and
+effective technique -- matches PixInsight's iterative refinement approach.
+
+### max_sigma Derivation (mod.rs:130-132)
+`max_sigma = max(median_fwhm * 0.5, 0.5)`. Effective threshold is ~3 * max_sigma
+(from chi-squared quantile). For typical seeing (FWHM 2-4px), this gives
+threshold ~3-6px. Floor at 0.5px prevents too-tight thresholds on sharp optics.
+
 ## Cross-Cutting Research Summary
 
-Research conducted against: PixInsight, Siril, Astrometry.net, Astroalign, OpenCV USAC,
-MAGSAC++ paper (Barath et al. 2020), Groth 1986, Valdes 1995, Tabur 2007, Lang 2010,
-SWarp, LSST pipeline, nanoflann, scipy KDTree, kiddo, Mitchell-Netravali 1988,
-Hartley & Zisserman 2003, Umeyama 1991, Shupe et al. 2005 (SIP standard).
+Research conducted against: PixInsight, Siril, Astrometry.net, Astroalign,
+AstroPixelProcessor, ASTAP, OpenCV USAC, SupeRANSAC (Barath 2025),
+MAGSAC++ paper (Barath et al. 2020), Piedade et al. 2025, Groth 1986,
+Valdes 1995, Tabur 2007, Lang 2010, SWarp, LSST pipeline, nanoflann,
+scipy KDTree, kiddo, Mitchell-Netravali 1988, Hartley & Zisserman 2003,
+Umeyama 1991, Shupe et al. 2005 (SIP standard), starmatch (PyPI 2025).
 
 ### What We Do Correctly
 - **All 5 transform estimators** verified correct (translation, euclidean, similarity, affine, homography)
-- **MAGSAC++ scoring** is a correct k=2 specialization; confirmed equivalent to Gaussian-Uniform likelihood (Piedade et al. 2025)
+- **MAGSAC++ scoring** is a correct k=2 specialization; confirmed equivalent to Gaussian-Uniform likelihood (Piedade et al. 2025); adopted by SupeRANSAC (Barath 2025) as the default scoring function
 - **SIP polynomial direction** correct (forward A/B, applied before linear transform)
 - **SIP coordinate normalization** improves on the standard (reduces condition number)
 - **SIP sigma-clipping** correct (MAD-based, 3 iterations, 3-sigma, one-sided rejection)
@@ -54,6 +72,8 @@ Hartley & Zisserman 2003, Umeyama 1991, Shupe et al. 2005 (SIP standard).
 - **Triangle vertex ordering** by geometric role (opposite shortest/middle/longest side)
 - **Groth R=10 elongation filter** and Heron's formula degeneracy check
 - **Pipeline architecture** matches industry standard (detect -> match -> estimate -> warp)
+- **Homography as default for wide-field** matches Siril recommendation (homography is "well-suited for the general case and strongly recommended for wide-field images")
+- **Double precision for SIP** matches SIP standard recommendation ("single precision strongly discouraged")
 
 ### Prioritized Issues Across All Submodules
 
@@ -65,7 +85,7 @@ Hartley & Zisserman 2003, Umeyama 1991, Shupe et al. 2005 (SIP standard).
 5. ~~**Align confidence defaults**~~ -- **FIXED**
 6. ~~**Add `nearest_one()`** to k-d tree~~ -- **FIXED**
 7. ~~**Use `f64::total_cmp()`** in k-d tree~~ -- **FIXED**
-8. ~~**Fix stale README.md files** (distortion/README.md, distortion/sip/README.md)~~ -- **FIXED** (removed nonexistent inverse methods, fixed test counts, fixed outlier rejection status)
+8. ~~**Fix stale README.md files** (distortion/README.md, distortion/sip/README.md)~~ -- **FIXED**
 9. **`#[allow(dead_code)]` on pub fields** (ransac/mod.rs:126-131) -- use `pub(crate)` instead
 
 #### Medium Effort (moderate changes, meaningful impact)
@@ -90,43 +110,147 @@ Hartley & Zisserman 2003, Umeyama 1991, Shupe et al. 2005 (SIP standard).
 26. **Inverse SIP polynomial (AP/BP)** -- needed for FITS header export
 27. **Quad descriptors** -- only needed for blind all-sky solving or very dense fields
 28. **Reduce adaptive k or benchmark k=8** (triangle/matching.rs:60) -- k=20 generates excessive triangles for 150 stars
+29. **Output framing options** -- PixInsight and Siril both support max/min/COG framing; we only support fixed (=input)
+30. **Multi-pass matching with different tolerances** -- starmatch (2024) uses different pixel tolerances for initial/secondary matching, improving success rate
 
 ### Comparison with Industry Tools
 
-| Aspect | This Crate | PixInsight | Siril | Astrometry.net | Astroalign |
-|--------|-----------|------------|-------|----------------|------------|
-| Star matching | Triangles (2D) | Polygons (6D) | Triangles | Quads (4D) | Triangles (2D) |
-| Vertex ordering | Correct (geometric role) | Correct | Correct | N/A (hash) | Correct (geometric) |
-| RANSAC scoring | MAGSAC++ | Standard | OpenCV | Bayesian odds | RANSAC |
-| LO-RANSAC | Iterative LS | N/A | N/A | N/A | No |
-| IRWLS polish | No | N/A | N/A | N/A | No |
-| Distortion | SIP (forward) | TPS (iterative) | SIP (from WCS) | SIP (full A/B/AP/BP) | None |
-| Sigma-clipping SIP | Yes (3-iter, 3-sigma MAD) | N/A | N/A | Yes | N/A |
-| Lanczos deringing | Soft (PixInsight-style) | Soft threshold (0.3) | Binary toggle | N/A | N/A |
-| SIMD warp | AVX2 bilinear; SSE FMA Lanczos3 | Full SIMD | OpenCV SIMD | N/A | N/A |
-| Match recovery | Iterative (ICP-style) | Iterative | N/A | Bayesian | N/A |
-| K-d tree | Custom flat implicit | N/A | N/A | libkd (FITS I/O) | scipy |
-| Output framing | Fixed (=input) | Max/min/COG | Max/min/current/COG | N/A | Fixed |
+| Aspect | This Crate | PixInsight | Siril | Astrometry.net | Astroalign | ASTAP | APP |
+|--------|-----------|------------|-------|----------------|------------|-------|-----|
+| Star matching | Triangles (2D) | Polygons (6D) | Triangles | Quads (4D) | Triangles (2D) | Triangles/Quads | Proprietary |
+| Vertex ordering | Correct (geometric role) | Correct | Correct | N/A (hash) | Correct (geometric) | Hash-based | N/A |
+| RANSAC scoring | MAGSAC++ | Standard | OpenCV RANSAC | Bayesian odds | RANSAC | N/A | N/A |
+| LO-RANSAC | Iterative LS | N/A | N/A | N/A | No | N/A | N/A |
+| Transform types | Trans/Eucl/Sim/Aff/Homo | All + TPS | Shift/Sim/Aff/Homo | SIP+CD | Affine | Affine+SIP | DDC |
+| Distortion | SIP (forward) | TPS (iterative) | SIP (from WCS) | SIP (full A/B/AP/BP) | None | SIP | DDC |
+| Sigma-clipping SIP | Yes (3-iter, 3-sigma MAD) | N/A | N/A | Yes | N/A | N/A | N/A |
+| Lanczos deringing | Soft (PixInsight-style) | Soft threshold (0.3) | Binary toggle | N/A | N/A | Bilinear only | Lanczos+M-N |
+| SIMD warp | AVX2 bilinear; SSE FMA Lanczos3 | Full SIMD | OpenCV SIMD | N/A | N/A | N/A | N/A |
+| Match recovery | Iterative (ICP-style) | Iterative | N/A | Bayesian | N/A | N/A | N/A |
+| K-d tree | Custom flat implicit | N/A | N/A | libkd (FITS I/O) | scipy | N/A | N/A |
+| Output framing | Fixed (=input) | Max/min/COG | Max/min/current/COG | N/A | Fixed | Fixed | Configurable |
+| Inverse warp | Forward mapping | Reverse mapping | Reverse mapping | N/A | Forward | Reverse | Reverse |
 
 ### Key Research Conclusions
+
 - **Pipeline architecture is sound** -- matches the detect-match-estimate-warp flow used by all major tools
-- **MAGSAC++ scoring is the right choice** -- validated by Piedade et al. (2025) as equivalent to optimal GaU likelihood
-- **SIP over TPS for default** is reasonable -- more constrained, less overfitting risk, FITS compatible
-- **Triangle matching works for our scale** (50-200 stars) -- quads/polygons only needed for dense fields
+- **MAGSAC++ scoring is the right choice** -- validated by Piedade et al. (2025) as equivalent to optimal GaU likelihood; adopted as default by SupeRANSAC (Barath et al. 2025), the state-of-the-art unified RANSAC framework
+- **SIP over TPS for default** is reasonable -- more constrained, less overfitting risk, FITS compatible; Siril also uses SIP since v1.3
+- **Triangle matching works for our scale** (50-200 stars) -- quads/polygons only needed for dense fields or blind solving; ASTAP supports both triangles and quads, noting quads work best for uniqueness
 - **Soft deringing matches PixInsight exactly** -- previously the biggest gap, now resolved
 - **No critical bugs found across any submodule** -- all issues are improvements, not correctness failures
 - **Most impactful open improvement**: use actual FMA intrinsics in Lanczos3 SIMD kernel (interpolation/warp/sse.rs)
 - **K-d tree is solid** -- no bugs, appropriate for our scale, only potential improvement is L-infinity search
+- **SupeRANSAC (2025) validates our approach**: their comprehensive evaluation found MAGSAC++ achieves "the best trade-off in terms of average model accuracy and robustness to parameter choices" -- the same scorer we use
+- **Multi-pass tolerance** (starmatch 2024) is a potentially useful refinement not yet implemented
+- **Block homography** (Li et al. 2020) for anisoplanatism is beyond current scope but relevant for very wide fields
 
 ### Per-Module Summary
 
 | Module | Correctness | Issues | Top Priority |
 |--------|------------|--------|-------------|
-| triangle/ | All correct | Tight default tolerance (0.01), excessive triangles at k=20, misleading test comments | Increase tolerance to 0.02 |
-| ransac/ | All 5 estimators verified, MAGSAC++ correct | LO buffer replacement, dead_code annotations, affine lacks normalization | Fix LO buffer, add affine normalization |
-| distortion/ | SIP direction/coords/solver all correct, TPS correct | Stale READMEs, no inverse SIP, no fit diagnostics, TPS not integrated | Fix stale docs, add fit quality return |
+| triangle/ | All correct | Tight default tolerance (0.01), excessive triangles at k=20 | Benchmark k=8-10 |
+| ransac/ | All 5 estimators verified, MAGSAC++ correct (confirmed by SupeRANSAC 2025) | LO buffer replacement, dead_code annotations, affine lacks normalization | Fix LO buffer, add affine normalization |
+| distortion/ | SIP direction/coords/solver all correct, TPS correct | No inverse SIP, no fit diagnostics, TPS not integrated | Add fit quality return |
 | interpolation/ | All kernels correct, deringing matches PixInsight | SIMD kernel doesn't use FMA, duplicate bilinear | Use actual FMA intrinsics |
 | spatial/ | No bugs found, all algorithms textbook correct | None (minor: could add L-inf radius search) | L-infinity radius search |
+
+## Detailed Analysis: What We Have vs What Industry Tools Offer
+
+### Star Matching Quality
+
+**Our approach (Groth/Valdes triangles)**: 2D invariant space (s0/s2, s1/s2). O(n*k^2)
+triangle formation via KNN k-d tree. Vote accumulation + greedy one-to-one resolution.
+
+**PixInsight (polygon descriptors)**: 6D invariant space for default pentagon. 3x lower
+uncertainty than our triangles. Cannot handle mirror transforms. The paper notes that
+"less uncertainty leads to less false star pair matches" and "the overall image
+registration process is considerably more robust and efficient even under difficult
+conditions."
+
+**Astrometry.net (quad descriptors)**: 4D hash codes from pairs of stars in a local
+coordinate frame defined by the two most distant stars. 2x discriminating power over
+triangles. Designed for blind solving against full-sky catalogs.
+
+**Assessment**: Our triangle approach is adequate for image-to-image registration with
+50-200 stars. PixInsight's polygon approach would improve robustness in dense fields
+but adds significant complexity. For our use case, the downstream RANSAC handles the
+higher false-positive rate from triangles effectively.
+
+### RANSAC Quality
+
+**Our approach**: MAGSAC++ scoring (k=2 closed-form), progressive 3-phase sampling,
+LO-RANSAC (iterative LS on inliers), adaptive early termination, plausibility checks
+(rotation/scale bounds).
+
+**SupeRANSAC (Barath 2025)**: The state-of-the-art unified RANSAC integrates MAGSAC++
+scoring, GC-RANSAC for local optimization, progressive sampling (NAPSAC), SPRT for
+early model rejection, DEGENSAC for homography degeneracy. Their extensive evaluation
+confirms MAGSAC++ as the best scoring function.
+
+**OpenCV USAC**: MAGSAC++, GC-RANSAC, PROSAC, SPRT, DEGENSAC -- the full toolbox.
+
+**Assessment**: We have the most important components: MAGSAC++ scoring, LO-RANSAC,
+adaptive termination, and domain-specific plausibility checks. The missing features
+(GC-RANSAC, SPRT, DEGENSAC, true PROSAC) matter more for general computer vision
+(thousands of SIFT matches at 20% inlier ratio) than for star registration (200 matches
+at 50%+ inlier ratio after triangle voting). Our ~18-iteration convergence for typical
+workloads makes sampling strategy irrelevant.
+
+### Transform Estimation Quality
+
+All 5 estimators are mathematically correct:
+- **Translation**: exact average displacement
+- **Euclidean**: constrained Procrustes (Umeyama 1991)
+- **Similarity**: Procrustes + scale (Umeyama 1991)
+- **Affine**: normal equations with 3x3 explicit inverse (adequate conditioning for star coords)
+- **Homography**: DLT with Hartley normalization + direct SVD (Hartley & Zisserman 2003)
+
+The affine estimator lacks point normalization (unlike the homography path), which could
+cause precision loss for very large coordinate ranges (>1e6 pixels). This is the only
+remaining numerical concern.
+
+### Distortion Correction Quality
+
+**Our SIP**: Forward polynomial (A/B), orders 2-5, Cholesky+LU solver, MAD sigma-clipping,
+avg-distance normalization. No inverse polynomial (AP/BP), no FITS I/O.
+
+**Siril SIP**: Since v1.3, applies SIP correction before linear transform (same direction).
+Reads from WCS headers. The correction follows the same convention we implement.
+
+**Astrometry.net SIP**: Full A/B/AP/BP with QR solver, no normalization (raw pixel offsets).
+Higher order support (up to 9). Grid-sampled inverse fitting.
+
+**PixInsight TPS**: Non-parametric, handles arbitrary local distortions. Iterative
+successive approximation scheme. More flexible than SIP for complex optics.
+
+**Assessment**: Our SIP implementation is correct and well-conditioned. The main gaps are
+(1) no inverse polynomial for FITS interoperability, (2) no FITS header I/O, and
+(3) TPS not integrated for complex distortion patterns. For the registration-only use
+case, these gaps have no practical impact.
+
+### Interpolation Quality
+
+**Our Lanczos3 + soft deringing**: Matches PixInsight's algorithm exactly (same formula,
+same default threshold 0.3, same quadratic fade). SIMD-optimized with incremental stepping
+for linear transforms. LUT-based kernel evaluation (4096 samples/unit).
+
+**PixInsight**: Lanczos-3 default with clamping threshold 0.3. Same approach.
+
+**Siril**: Lanczos-4 default with optional clamping. Slightly wider kernel, marginal
+quality difference at the cost of more compute per pixel.
+
+**SWarp**: Lanczos-4 default, no deringing. Flux conservation via Jacobian.
+
+**AstroPixelProcessor**: Supports Lanczos and Mitchell-Netravali. Drizzle integration.
+
+**ASTAP**: Bilinear only (simpler but lower quality). 2025 update added "full implementation
+of reverse mapping with bilinear interpolation for less background noise."
+
+**Assessment**: Our interpolation is at parity with PixInsight, the gold standard. The
+main open item is using actual FMA intrinsics in the SIMD kernel (currently tagged with
+FMA target feature but uses separate mul+add). This is a performance optimization, not
+a correctness issue.
 
 ## File Map
 
@@ -141,3 +265,33 @@ Hartley & Zisserman 2003, Umeyama 1991, Shupe et al. 2005 (SIP standard).
 | `distortion/` | SIP polynomial (integrated), TPS (not integrated) |
 | `interpolation/` | Kernels, `warp_image()`, row warping (SIMD + scalar) |
 | `spatial/` | K-d tree (flat implicit layout, KNN + radius + nearest_one) |
+
+## References
+
+### Papers
+- Groth 1986 -- Original triangle matching algorithm
+- Valdes et al. 1995 -- FOCAS compressed triangle ratios
+- Tabur 2007 -- Optimistic Pattern Matching
+- Lang et al. 2010 -- Astrometry.net blind calibration with quads
+- Beroiz et al. 2020 -- Astroalign triangle matching
+- Barath et al. 2020 -- MAGSAC++ (CVPR 2020)
+- Piedade et al. 2025 -- RANSAC scoring functions equivalence (arXiv:2512.19850)
+- Barath et al. 2025 -- SupeRANSAC unified framework (arXiv:2506.04803)
+- Fischler & Bolles 1981 -- Original RANSAC
+- Umeyama 1991 -- Procrustes transform estimation
+- Hartley & Zisserman 2003 -- Multiple View Geometry (DLT, normalization)
+- Shupe et al. 2005 -- SIP distortion convention
+- Mitchell & Netravali 1988 -- Cubic filter parameter space
+- Li et al. 2020 -- Block homography for astronomical registration
+- GMTV 2022 -- Global Multi-Triangle Voting
+
+### Software
+- PixInsight StarAlignment (polygon descriptors, TPS distortion, soft Lanczos clamping)
+- Siril 1.5 (triangle matching, OpenCV RANSAC, SIP since v1.3)
+- Astrometry.net (quad descriptors, Bayesian verification, SIP A/B/AP/BP)
+- Astroalign (Python triangle matching, scipy k-d tree)
+- AstroPixelProcessor 2.0 (DDC distortion, Lanczos/Mitchell-Netravali, drizzle)
+- ASTAP (triangle/quad matching, SIP, reverse mapping bilinear)
+- starmatch v1.0 (PyPI 2025, multi-pass matching with adaptive tolerances)
+- OpenCV USAC (MAGSAC++, GC-RANSAC, PROSAC, SPRT)
+- SupeRANSAC (danini/superansac, unified RANSAC 2025)
