@@ -2,7 +2,7 @@
 
 ## Overview
 
-A custom 2D k-d tree implementation in ~390 lines (`mod.rs`) for efficient spatial queries on star positions. Provides k-nearest-neighbor (KNN) and radius search. Used in four places in the registration pipeline:
+A custom 2D k-d tree implementation in ~390 lines (`mod.rs`) for efficient spatial queries on star positions. Provides k-nearest-neighbor (KNN) and radius search. Used in three places in the registration pipeline:
 
 1. **Triangle formation** (`triangle/matching.rs:20-23`) -- k-d tree on star positions, KNN queries to form triangles.
 2. **Invariant-space matching** (`triangle/voting.rs:96-101`) -- k-d tree on triangle ratio pairs (2D), radius queries for similar triangles.
@@ -159,13 +159,19 @@ The code is clean, correct, and well-tested. Specific positives:
 
 4. **External crate (kiddo)**: Adds a dependency for code that is ~390 lines, thoroughly tested, and performant at this scale. The README.md already documents this decision.
 
-### Could Consider
+### Recommended
 
-1. **`f64::total_cmp()` instead of `partial_cmp().unwrap()`**: Eliminates the panic path for NaN. Slightly more defensive. One-line change on lines 92 and 136.
+1. **`nearest_one()` method**: `recover_matches` (`mod.rs:389`) calls `k_nearest(predicted, 1)` in a loop over all unmatched stars, allocating a `Vec` via `BoundedMaxHeap` per iteration. A dedicated `nearest_one() -> Option<Neighbor>` using a scalar best-distance tracker (no heap, no Vec) would eliminate these allocations. ~30 lines. Reference: kiddo crate provides this.
 
-2. **Iterative KNN/radius search**: Replace recursion with an explicit stack (as done in construction). Would eliminate any theoretical stack overflow concern for very deep trees. Not needed at current scale.
+2. **`f64::total_cmp()` instead of `partial_cmp().unwrap()`**: Eliminates the panic path for NaN. One-line change on lines 92 and 136.
 
-3. **`get_point` bounds check removal**: `get_point` (line 241-243) uses `self.points[idx]` which panics on out-of-bounds. All callers use valid indices from the tree itself, so this is fine. Adding `debug_assert!(idx < self.points.len())` would be more explicit.
+3. **L-infinity radius search for invariant matching**: Voting code (`voting.rs:126-134`) uses L2 radius search then post-filters with L-infinity `is_similar()`. A native `radius_chebyshev_into()` method would eliminate the post-filter and reduce candidate count by ~22%. The k-d tree pruning for L-infinity is simpler than L2: check `|diff| <= radius` on the split axis.
+
+### Low Priority
+
+4. **Iterative KNN/radius search**: Replace recursion with an explicit stack (as done in construction). Not needed at current scale.
+
+5. **Leaf-size optimization**: Switch to brute-force at 16-32 elements. Industry standard (libkd: 32, scikit-learn: 30). Only matters for n > ~1000 (invariant-space tree).
 
 ## References
 

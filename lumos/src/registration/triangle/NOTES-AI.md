@@ -12,7 +12,7 @@ vote accumulation scheme.
 - `geometry.rs` - `Triangle` struct: side ratio invariants, orientation, degeneracy filters
 - `matching.rs` - Triangle formation via KNN k-d tree, `match_triangles()` entry point
 - `voting.rs` - Vote matrix (dense/sparse), invariant k-d tree, correspondence voting
-- `tests.rs` - 40+ tests covering transforms, noise, edge cases, stress tests
+- `tests.rs` - 65+ tests covering transforms, noise, edge cases, stress tests
 
 ## Algorithm Flow
 
@@ -43,6 +43,27 @@ vote accumulation scheme.
 
 ## Issues Found
 
+### Issue 0: Orientation Test Comments Incorrectly State Rotation Changes Orientation
+
+**Severity:** Medium (misleading documentation)
+
+**Location:** `tests.rs:365` and `tests.rs:1050`
+
+```rust
+check_orientation: false, // Rotation changes orientation   // <-- WRONG
+check_orientation: false, // Must disable for 180 degree rotation  // <-- WRONG
+```
+
+Pure rotations (including 90 and 180 degrees) **preserve** orientation (determinant = +1).
+Only reflections change chirality. The tests pass with `check_orientation: false` because
+the symmetric test pattern (a square + center point) creates ambiguous triangle
+correspondences -- many isosceles right triangles from the square have identical shapes,
+so the orientation check rejects valid matches that map to different vertex permutations
+of the symmetric pattern.
+
+**Fix:** Correct the comments to explain symmetric pattern ambiguity. Add a test with an
+asymmetric star pattern that verifies rotation works with `check_orientation: true`.
+
 ### Issue 1: Invariant Ratio Convention Differs from Literature
 
 **Severity:** Low (functionally equivalent but confusing)
@@ -71,12 +92,17 @@ which is approximately 5% relative tolerance.
 **Location:** `voting.rs:131-134`
 
 The k-d tree `radius_indices_into()` uses L2 (Euclidean) distance, but `is_similar()`
-uses L-infinity (per-axis max). For tolerance `t`: L2 ball is a circle of radius t,
-L-inf ball is a square of half-side t. The L-inf square is inscribed in the L2 circle,
-so L-inf is the stricter metric. The k-d tree (L2) returns a superset of what
-`is_similar` (L-inf) accepts, so the tree acts as a pre-filter and `is_similar`
-performs the exact check. No false negatives are possible. The code comment at
-`voting.rs:131-133` correctly states that L-infinity is stricter.
+uses L-infinity (per-axis max). The L-inf square is inscribed in the L2 circle, so
+L-inf is stricter. However, points at L-inf boundary corners (e.g., `(t, t)` from
+query, L2 distance `t*sqrt(2)`) are NOT in the L2 ball of radius `t`. This means
+valid L-inf matches at the corners are missed. Effective tolerance in worst case is
+`ratio_tolerance / sqrt(2)`.
+
+**Fix:** Either multiply the k-d tree radius by `sqrt(2)`:
+```rust
+invariant_tree.radius_indices_into(query, params.ratio_tolerance * SQRT_2, &mut candidates);
+```
+Or implement L-infinity radius search in the k-d tree (see spatial/NOTES-AI.md).
 
 ### Issue 3: Adaptive k_neighbors May Be Too Aggressive
 
@@ -117,9 +143,39 @@ but keep only ~5,000-10,000 unique triangles. The hashing overhead is non-trivia
 Alternative: Sort all triangle triples at the end and dedup, or use a more
 targeted triangle generation strategy that avoids duplicates by construction.
 
+### Issue 4: Default ratio_tolerance May Be Too Tight
+
+**Severity:** Low
+
+**Location:** `mod.rs:36` (0.01)
+
+With sub-pixel centroid noise, star position errors propagate to side-length errors,
+then to ratio errors. For a triangle with sides ~50px and centroid error ~0.3px,
+ratio error is approximately `0.3/50 = 0.006` -- already 60% of the 0.01 tolerance.
+Combined with the L2/L-inf mismatch (Issue 2), effective tolerance drops to ~0.007.
+The `precise_wide_field` config already relaxes to 0.02.
+
+**Recommendation:** Consider increasing default to 0.02, or document that 0.01 is
+calibrated for well-separated stars with good centroid accuracy.
+
 ## Missing Features
 
-### 1. Quad/Polygon Descriptors
+### 1. Weighted Voting by Triangle Rarity
+
+**Priority:** Medium
+
+**Location:** `voting.rs:143-149`
+
+All triangle votes have equal weight. Near-equilateral triangles are extremely
+common in uniform star distributions and dominate the vote matrix with false
+correspondences. Tabur (2007) explicitly addresses this by processing rare triangles
+first. The GMTV algorithm (2022) weights by selectivity score.
+
+**Recommendation:** Weight each vote by inverse density in invariant space.
+Pre-compute weight per reference triangle (count neighbors within tolerance, invert).
+Particularly helps with clustered/gridded star fields.
+
+### 2. Quad/Polygon Descriptors
 
 Triangle descriptors have only 2 degrees of freedom (2D invariant space), making
 them prone to false matches in dense star fields. Industry has moved to:
@@ -146,23 +202,22 @@ provides rigorous false-positive control (default threshold: 10^9 odds). The cur
 implementation relies only on vote counts and a minimum vote threshold, which is
 less principled.
 
-### 3. Global Triangle Selection Strategy
+### 4. Global Triangle Selection Strategy
 
 The current implementation uses only local KNN triangles. Astrometry.net pre-selects
 specific star configurations that maximize discriminating power across the entire
 field. Adding a few globally-formed triangles (e.g., from the 4-5 brightest stars)
 could improve matching robustness for small star counts.
 
-### 4. Weighted Voting
-
-All triangle votes have equal weight. Triangles with very common shapes (e.g.,
-near-equilateral) produce more false votes than distinctive triangles. Weighting
-votes by the rarity of the triangle shape in the reference set (inverse frequency)
-would improve signal-to-noise in the vote matrix.
-
 ## Potential Improvements
 
-### Priority 1: Upgrade to Quad Descriptors
+### Priority 1: Fix L2/L-inf Tolerance Mismatch
+Multiply k-d tree radius by `sqrt(2)` or implement L-inf search. One-line fix.
+
+### Priority 2: Fix Orientation Test Comments
+Correct misleading comments about rotation changing orientation.
+
+### Priority 3: Upgrade to Quad Descriptors
 Replace 2D triangle invariants with 4D quad hash codes. This would:
 - Halve false match rate compared to triangles
 - Enable matching in denser star fields
@@ -178,12 +233,12 @@ Implementation sketch:
 5. Index quads in 4D k-d tree
 6. Match with radius search as now
 
-### Priority 2: Consider Fixed k Like Astroalign
+### Priority 4: Consider Fixed k Like Astroalign
 The adaptive k formula produces 19x more triangles than Astroalign for 150 stars.
 Consider benchmarking with k=5 (matching Astroalign) to see if quality holds with
 dramatically fewer triangles and faster runtime.
 
-### Priority 3: Pre-filter by Star Brightness
+### Priority 5: Pre-filter by Star Brightness
 Both Astrometry.net and PixInsight weight their star selection by brightness.
 Forming triangles only from the brightest N stars (already done upstream in the
 pipeline per NOTES-AI.md) is correct, but the triangle formation could additionally
@@ -197,7 +252,7 @@ prioritize triangles that include bright stars.
 - Dense/sparse vote matrix auto-switching at 250K entries is practical engineering
 - Elongation filter (R>10) matches Groth 1986 recommendation
 - Area-based degeneracy check (Heron's formula) is more robust than cross-product alone
-- Orientation check is optional, correctly disabled for rotated/mirrored images
+- Orientation check is optional (correctly rejects mirror-image matches when enabled)
 - Vertex ordering by geometric role (opposite shortest/middle/longest side)
 - Comprehensive test suite (65+ tests, including noise, outliers, stress tests)
 - Greedy conflict resolution is standard and adequate
@@ -228,6 +283,12 @@ prioritize triangles that include bright stars.
   [arXiv](https://arxiv.org/abs/1909.02946) |
   [GitHub](https://github.com/quatrope/astroalign)
 
+- Tabur, V. (2007). "Fast Algorithms for Matching CCD Images to a Stellar Catalogue."
+  *PASA*, 24, 189-198. [arXiv](https://arxiv.org/abs/0710.3618)
+
 - PixInsight StarAlignment documentation. "Arbitrary Distortion Correction with
   StarAlignment."
   [Tutorial](https://www.pixinsight.com/tutorials/sa-distortion/index.html)
+
+- GMTV (2022). "Global Multi-Triangle Voting" star identification.
+  [MDPI](https://www.mdpi.com/2076-3417/12/19/9993)

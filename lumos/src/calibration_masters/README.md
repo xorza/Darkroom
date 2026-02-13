@@ -39,8 +39,19 @@ With bias removed: `(Flat - Bias) / mean(Flat - Bias) = pure vignetting profile`
 
 - **No dark scaling**: Raw dark storage prevents scaling darks to different exposure times
   (bias component would be incorrectly scaled). Darks must match light exposure time.
-- **No flat dark support**: Flat frames are only bias-corrected, not dark-corrected. Fine for
-  short flat exposures, but CMOS cameras with longer flat exposures may accumulate thermal noise.
+
+## Flat Dark Support
+
+Flat dark frames (darks taken at the flat's exposure time) can be provided to
+`CalibrationMasters::new()` or `from_raw_files()`. When available, the flat dark is
+subtracted from the flat instead of bias during normalization:
+
+```
+normalize(Flat - FlatDark) instead of normalize(Flat - Bias)
+```
+
+This is important for narrowband imaging where longer flat exposures accumulate
+significant dark current. Flat dark takes priority over bias when both are provided.
 
 ## Hot Pixel Detection
 

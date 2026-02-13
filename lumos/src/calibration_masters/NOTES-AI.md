@@ -71,8 +71,9 @@ uses `f64` accumulation for the mean, which is good numerical practice.
 - Common sigma range: 3-5 sigma (this implementation uses 5.0, conservative).
 
 **Verdict:** MAD is a better choice than standard deviation or average deviation for
-outlier detection because it is robust to the outliers themselves. The 5-sigma default
-is conservative, which avoids false positives but may miss marginal hot pixels.
+outlier detection because it is robust to the outliers themselves. Per-CFA-color
+statistics is better than most tools (Siril uses global statistics). The 5-sigma
+default is conservative, which avoids false positives but may miss marginal hot pixels.
 
 ## Hot Pixel Correction (CFA-Aware)
 
@@ -100,34 +101,67 @@ Avoids O(n log n) sort on full-resolution images.
 - >= 8 frames: sigma-clipped mean at 3 sigma (statistically efficient)
 - Darks/biases: no normalization; Flats: multiplicative normalization
 
-## Remaining Issues
+## Issues
+
+### Medium: Sigma Floor Fails When Median is Zero
+- **File:** defect_map.rs:185
+- `sigma = computed_sigma.max(median * 0.1)` — if median=0 (possible for bias frames
+  or well-cooled darks with very low background), the floor becomes 0.
+- When both MAD=0 and median=0, sigma=0 and upper=0, so every pixel with value > 0
+  gets flagged as hot. This would produce massive false positives on bias frames.
+- **Fix:** Use an absolute floor instead, e.g. `sigma.max(1e-6)` or
+  `sigma.max(median * 0.1).max(absolute_floor)`.
+
+### Low: collect_color_samples Allocates Full Channel Before Subsampling
+- **File:** defect_map.rs:229-241
+- For CFA mode, collects ALL pixels of target color into a Vec, then subsamples.
+  On a 6000x4000 image, this allocates ~6M f32s (~24MB) per color channel just to
+  keep 100K samples.
+- The mono path already uses strided sampling directly (line 225).
+- **Fix:** Use strided iteration for CFA too — count matching pixels first, compute
+  stride, then collect every Nth matching pixel directly.
+
+### Low: from_raw_files Stacks Sequentially
+- **File:** mod.rs:121-124
+- Darks, flats, biases, and flat_darks are stacked one after another.
+- These are completely independent operations.
+- **Fix:** Use `rayon::join` or `std::thread::scope` to stack in parallel.
+  Would give ~2-4x speedup during master creation with 4 frame types.
 
 ### Low: DefectMap::correct is Sequential
-- **File:** defect_map.rs
-- Iterates hot and cold indices sequentially
-- Safe to parallelize: Bayer stride-2 neighbors never overlap with other hot pixels'
-  replacement zones (hot pixels are sparse). For X-Trans, radius-6 neighborhoods could
-  theoretically overlap but in practice hot pixels are rare enough.
-- **Fix:** Use `par_iter` with index-based writes (requires unsafe or par_chunks on
-  the pixel buffer). Or partition indices by spatial locality.
+- **File:** defect_map.rs:136
+- Iterates hot and cold indices sequentially.
+- Safe to parallelize: hot pixels are sparse, Bayer stride-2 neighborhoods don't
+  overlap. For X-Trans, radius-6 neighborhoods could theoretically overlap but
+  hot pixels are rare enough in practice.
+- **Fix:** Use `par_iter` with index-based writes or partition by spatial locality.
 
 ### Low: No Dark Frame Scaling
-- No support for scaling dark frames to different exposure times or temperatures
-- Dark current scales linearly with exposure for CCDs: `dark_current = rate * time`
-- For CMOS sensors, scaling is unreliable (amp glow, non-linear dark current behavior)
-- Modern practice: Use matched darks (same exposure/temp) rather than scaling
-- **Status:** Acceptable limitation for CMOS workflows. Document that matched darks are
-  required.
+- No support for scaling dark frames to different exposure times or temperatures.
+- Dark current scales linearly with exposure for CCDs: `dark_current = rate * time`.
+- For CMOS sensors, scaling is unreliable (amp glow, non-linear dark current).
+- Modern practice: Use matched darks (same exposure/temp) rather than scaling.
+- **Status:** Acceptable limitation for CMOS workflows.
+
+## Documentation Issues
+
+### README.md Outdated
+- Line 42 says "No flat dark support" but the code fully supports flat darks
+  (`master_flat_dark` field, `from_raw_files` accepts flat_darks, flat dark takes
+  priority over bias for flat normalization).
+- Should be updated to reflect current implementation.
 
 ## Test Coverage
 
 - Unit tests for hot pixel detection (small/large images, edge cases, no defects)
 - Unit tests for cold/dead pixel detection and mixed hot+cold detection
 - Unit tests for correction (Bayer stride-2, Mono 8-connected, corner pixels, cold pixels)
+- Per-CFA-color detection tests (hot red in mixed-value Bayer, cold blue)
 - Integration tests for full calibration pipeline (dark sub, bias-only, flat correction,
   combined dark+flat+bias with algebraic verification, flat dark priority over bias)
 - Dimension mismatch assertions tested with `#[should_panic]`
 - Full pipeline test verifies vignetting cancellation algebraically
+- **Missing:** No test for median=0 edge case in sigma floor
 
 ## Key Constants and Thresholds
 

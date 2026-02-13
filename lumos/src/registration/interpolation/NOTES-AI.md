@@ -279,22 +279,35 @@ edges, producing darkened pixels. The same applies to bilinear. This matches zer
 border behavior and is expected for astrophotography (borders are cropped), but differs
 from clamp-to-edge which would be more correct.
 
-## Missing Features / Potential Improvements (Prioritized)
+## Potential Improvements (Prioritized)
 
-### High Priority
-1. **Separable Lanczos3:** Two-pass (horizontal then vertical) reduces 36 ops to 12 per
-   pixel. Each pass processes consecutive pixels enabling natural SIMD vectorization. Intel
-   IPP uses this approach. Note: separable decomposition does not directly apply to
-   arbitrary warps with rotation (source coordinates differ per pixel), but shear
-   decomposition of affine transforms could enable it.
+### Worth Doing
+1. **Soft deringing threshold**: Replace hard min/max clamp with configurable threshold.
+   `clamp(val, min - t * range, max + t * range)` where `range = max - min` and default
+   `t = 0.3` (PixInsight's default). Preserves more Lanczos sharpness at smooth gradients
+   while still preventing extreme ringing. Simple change to `warp/mod.rs` lines 223-228,
+   256-261, and 279-284.
+
+2. **Generic incremental stepping** for Lanczos2/Lanczos4/Bicubic: Factor out stepping
+   logic from the Lanczos3-specific row warper so all methods benefit from avoiding
+   per-pixel matrix multiply. Estimated ~38% speedup for non-Lanczos3 methods.
+
+3. **Remove duplicate bilinear**: `mod.rs` `interpolate_bilinear` and `warp/mod.rs`
+   `bilinear_sample` are identical implementations (~15 lines each). Consolidate.
 
 ### Postponed (low impact)
+- **Separable Lanczos3** — does not apply to arbitrary warps with rotation. Only
+  useful for axis-aligned resize (Intel IPP approach).
 - **SIMD bilinear interior fast path** — skip bounds checks for interior chunk. Marginal.
-- **FMA for SIMD bilinear** — replace `mul+add` with `fmadd`. Marginal.
 - **Inline FMA kernel** — ~2-3ms gain out of 33ms. Not worth the complexity.
 - **Linear interpolation in LUT** — current 4096 samples/unit is adequate for f32.
 - **Tile-based processing** — only helps extreme rotations (>45°), rare in practice.
 - **Configurable border modes** — borders are cropped in astrophotography.
+- **SIMD bilinear border_value** — currently hardcoded to 0.0 (`warp/mod.rs:36`).
+  Non-zero falls back to scalar. Low impact since 0.0 is the universal default.
+- **Flux conservation (Jacobian)** — SWarp multiplies by Jacobian determinant of the
+  coordinate mapping. Negligible for registration (~1:1 scale). Would matter for
+  mosaic creation with different plate scales.
 
 ### Tried and Rejected
 - **AVX2 gather for LUT lookups:** `_mm256_i32gather_ps` for 6 weights at once. ~2% slower

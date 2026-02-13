@@ -25,11 +25,15 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 
 ## Cross-Cutting Research Summary
 
+Research conducted against: PixInsight, Siril, Astrometry.net, Astroalign, OpenCV USAC,
+MAGSAC++ paper, Groth 1986, Valdes 1995, Tabur 2007, Lang 2010, SWarp, LSST pipeline.
+
 ### What We Do Correctly
 - **All 5 transform estimators** verified correct (translation, euclidean, similarity, affine, homography)
 - **MAGSAC++ scoring** is a structurally correct k=2 specialization of the paper
 - **SIP polynomial direction** is correct (forward A/B, applied before linear transform)
 - **SIP coordinate normalization** improves on the standard (reduces condition number)
+- **SIP sigma-clipping** implemented and active (MAD-based, 3 iterations, 3-sigma)
 - **K-d tree** implementation is clean, correct, well-tested (no bugs found)
 - **Lanczos LUT** precision (4096 samples/unit) is adequate for f32 data
 - **Kernel normalization** applied correctly in both generic and optimized paths
@@ -37,31 +41,37 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 - **Adaptive iteration count** formula matches standard (Fischler & Bolles 1981)
 - **Hartley normalization** for DLT homography is standard and correct
 - **Triangle vertex ordering** by geometric role (opposite shortest/middle/longest side)
-- **SIP reference_point** configurable via `Config.sip_reference_point` (defaults to centroid, can pass image center)
-- **Lanczos deringing** via min/max clamping of source pixels in kernel window (`InterpolationMethod::Lanczos3 { deringing: true }`)
-- **`WarpParams` struct** bundles interpolation method and border_value through warp pipeline
-- **MAGSAC++ preemptive scoring** exits early when cumulative loss exceeds best score
+- **Lanczos3 FMA SIMD kernel** with fused deringing: -59% single-threaded, -52% MT 4k
+- **Pipeline architecture** matches industry standard (detect → match → estimate → warp)
 
-### Important Missing Features
+### Prioritized Issues Across All Submodules
 
-7. ~~**Single-pass match recovery**~~ **DONE** — `recover_matches` now iterates
-   up to 5 passes (ICP-style): project → match → re-validate → refit → repeat
-   until convergence. Each pass also re-validates existing matches, removing
-   outliers that drifted beyond threshold. Safety fallback ensures we never
-   return fewer matches than we started with.
+#### Quick Fixes (easy, localized changes)
+1. **Replace GammaLut with `1-exp(-x)`** (ransac/magsac.rs) — removes ~70 lines, k=2 closed-form
+2. **Fix L2/L-inf tolerance mismatch** (triangle/voting.rs:126) — multiply radius by sqrt(2)
+3. **Fix orientation test comments** (triangle/tests.rs:365,1050) — rotation preserves orientation
+4. **Check target point degeneracy** (ransac/mod.rs:289) — add `is_sample_degenerate(&sample_target)`
+5. **Align confidence defaults** — RansacParams::default() 0.999 vs Config::default() 0.995
+6. **Add `nearest_one()`** to k-d tree (spatial/mod.rs) — avoids Vec allocation in match recovery
+7. **Use `f64::total_cmp()`** in k-d tree (spatial/mod.rs:92,136) — eliminates NaN panic path
 
-8. **TPS not integrated** — fully implemented and tested (`distortion/tps/`)
-   but marked `dead_code`. PixInsight's primary distortion method.
+#### Medium Effort (moderate changes, meaningful impact)
+8. **Soft deringing threshold** (interpolation) — configurable `t=0.3` (PixInsight-style) instead of hard min/max clamp
+9. **Direct SVD for homography DLT** (ransac/transforms.rs) — SVD on 2n x 9 matrix A, not A^T A
+10. **TPS coordinate normalization** (distortion/tps/mod.rs) — center+scale before building matrix
+11. **SIP condition number monitoring** (distortion/sip/mod.rs:406) — detect ill-conditioned systems
+12. **SIP order validation** (distortion/sip/mod.rs:138) — require `n >= 3 * terms.len()` not just `n >= terms.len()`
+13. **Generic incremental stepping** (interpolation) — benefit Lanczos2/4/Bicubic with ~38% speedup
+14. **Weighted triangle voting** (triangle/voting.rs) — weight by inverse density in invariant space
+15. **Spatial coverage in quality score** (result.rs:150) — prevent degenerate registrations with clustered matches
 
-9. ~~**Separable Lanczos3**~~ **Superseded** — explicit FMA SIMD kernel
-   (`lanczos3_kernel_fma`) now vectorizes the 6x6 accumulation with fused
-   min/max deringing tracking. Results: -59% with deringing, -52% multi-threaded
-   4k. LLVM does NOT auto-vectorize the 6-element loop (contrary to previous
-   claim). Separable two-pass remains theoretically possible for pure resize
-   but doesn't apply to arbitrary warps with rotation.
-
-10. **Missing IRWLS for MAGSAC++** — paper's key contribution for model accuracy.
-    We use MAGSAC++ only for scoring, with binary inlier selection for estimation.
+#### Architecture (larger, revisit when needed)
+16. **IRWLS final polish for MAGSAC++** — sigma-marginalized weights for sub-pixel accuracy
+17. **Star quality filtering** before registration — eccentricity, SNR, saturation
+18. **FWHM-adaptive auto-upgrade threshold** (mod.rs:168) — current 0.5px is absolute, should scale
+19. **TPS integration** into pipeline — fully implemented/tested but dead code
+20. **Inverse SIP polynomial (AP/BP)** — needed for FITS header export
+21. **Quad descriptors** — only needed for blind all-sky solving or very dense fields
 
 ### Comparison with Industry Tools
 
@@ -73,16 +83,18 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 | IRWLS polish | No | N/A | N/A | N/A | No |
 | Distortion | SIP (forward) | TPS (iterative) | SIP (from WCS) | SIP (full A/B/AP/BP) | None |
 | Sigma-clipping SIP | Yes (3-iter, 3-sigma MAD) | N/A | N/A | Yes | N/A |
-| Lanczos deringing | Yes (min/max clamping) | Yes (0.3 threshold) | Yes | N/A | N/A |
-| SIMD warp | AVX2 bilinear; Lanczos3 FMA kernel | Full SIMD | OpenCV SIMD | N/A | N/A |
+| Lanczos deringing | Hard min/max | Soft threshold (0.3) | Binary toggle | N/A | N/A |
+| SIMD warp | AVX2 bilinear; Lanczos3 FMA | Full SIMD | OpenCV SIMD | N/A | N/A |
 | Match recovery | Iterative (ICP-style) | Iterative | N/A | Bayesian | N/A |
 | Output framing | Fixed (=input) | Max/min/COG | Max/min/current/COG | N/A | Fixed |
 
-### Postponed (low impact, revisit only if a real problem arises)
-- **TPS integration** — already implemented/tested but dead code. SIP is sufficient for typical setups.
-- **IRWLS for MAGSAC++** — marginal sub-pixel accuracy gain. Current pipeline works well.
-- **Quad descriptors** — only matters for blind all-sky matching, not frame-to-frame registration.
-- **Inline FMA kernel** — ~2-3ms gain out of 33ms. Not worth forcing AVX2 on entire row function.
+### Key Research Conclusions
+- **Pipeline architecture is sound** — matches the detect-match-estimate-warp flow used by all major tools
+- **MAGSAC++ scoring is the right choice** — better than Siril (basic RANSAC) and Astroalign
+- **SIP over TPS for default** is reasonable — more constrained, less overfitting risk
+- **Triangle matching works for our scale** (50-200 stars) — quads/polygons only needed for dense fields
+- **No critical bugs found** — issues are improvements, not correctness failures
+- **Biggest gap is soft deringing** — PixInsight's threshold approach preserves more sharpness
 
 ## File Map
 

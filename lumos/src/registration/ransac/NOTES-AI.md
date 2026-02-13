@@ -118,27 +118,51 @@ The SVD solver returns a poor model rejected by MAGSAC++ scoring.
 
 ## Issues Found
 
+### Important
 1. **Missing IRWLS** (moderate) -- paper's key contribution for model accuracy.
    Impact smaller for well-separated star matches.
-3. **No SPRT** (minor) -- for 50-500 point sets, benefit is minimal.
-4. **A^T A for homography** (minor) -- direct SVD on A more robust.
-5. **Outlier penalty differs** (negligible) -- constant penalty vs skip.
-6. **Fixed phase boundaries** (minor) -- PROSAC growth function more principled.
+2. **A^T A for homography** (moderate) -- Direct SVD on 2n x 9 matrix A is more
+   robust (doesn't square condition number). nalgebra's `SVD` supports non-square.
+3. **Homography degeneracy: no same-side test** -- Only checks collinearity on
+   ref points (`mod.rs:289-291`). Should check both ref and target. OpenCV's USAC
+   also checks that points 3,4 lie on same side of line through 1,2 in both images.
+4. **GammaLut unnecessary for k=2** (`magsac.rs:9-68`) -- For k=2, `gamma(1,x) =
+   1 - exp(-x)` is a trivial closed-form. Direct computation is one `exp` instruction,
+   likely faster than LUT. Remove ~70 lines.
 
-## Missing Features
+### Minor
+5. **LO inlier buffer replacement** (`mod.rs:322-337`) -- `inlier_buf = lo_inliers`
+   replaces pre-allocated buffer with a new `Vec` from `local_optimization`, defeating
+   buffer reuse. Fix: write into `inlier_buf` directly or `extend_from_slice`.
+6. **Confidence default mismatch** -- `RansacParams::default()` has 0.999,
+   `Config::default()` has 0.995, README says 0.995. The `RansacParams::default()`
+   value is never used in practice. Should match Config.
+7. **Progressive phase doesn't adapt** -- Phase boundaries based on original
+   `max_iterations`, not adaptive count. After early convergence, phases don't adjust.
+8. **`#[allow(dead_code)]` on pub fields** (`mod.rs:126-131`) -- `RansacResult`
+   has `pub iterations` and `pub inlier_ratio` with `#[allow(dead_code)]`. If they're
+   public API, the annotation is wrong. If diagnostic-only, use `pub(crate)`.
+9. **No SPRT** (minor) -- for 50-500 point sets, benefit is minimal.
+10. **Fixed phase boundaries** (minor) -- PROSAC growth function more principled.
 
-- IRWLS polishing with sigma-marginalized weights
-- SPRT early model rejection
-- PROSAC continuous progressive sampling
-- Inner RANSAC / threshold shrinking in LO
-- Graph-Cut spatial coherence (OpenCV USAC)
+## Missing Features (by impact)
+
+- **IRWLS polishing** with sigma-marginalized weights (moderate -- sub-pixel accuracy)
+- **Same-side homography degeneracy** test on both ref and target points (moderate)
+- **Direct SVD for DLT** on 2n x 9 matrix A (moderate -- numerical stability)
+- PROSAC continuous progressive sampling (low)
+- Inner RANSAC / threshold shrinking in LO (low)
+- SPRT early model rejection (low -- small point sets)
+- Graph-Cut spatial coherence -- OpenCV USAC (low -- clean star matches)
 
 ## Potential Improvements (Prioritized)
 
-1. **IRWLS final polish**: 3-5 IRWLS iterations after model selection.
-2. **Direct SVD for homography**: SVD on full 2n×9 matrix A.
-3. **PROSAC sampling**: Replace 3-phase with continuous growth.
-4. **Inline exp(-x)**: Replace GammaLut with direct computation for k=2.
+1. **Replace GammaLut with exp()**: For k=2, `gamma(1,x) = 1-exp(-x)`. Removes ~70 lines. Easy win.
+2. **Check target point degeneracy**: Add `|| is_sample_degenerate(&sample_target)` at `mod.rs:289`.
+3. **Direct SVD for homography**: SVD on full 2n x 9 matrix A via nalgebra.
+4. **IRWLS final polish**: 3-5 IRWLS iterations after model selection with sigma-marginalized weights.
+5. **Fix LO buffer replacement**: Write into `inlier_buf` directly instead of replacing it.
+6. **Align confidence defaults**: Make `RansacParams::default()` match Config's 0.995.
 
 ## References
 
