@@ -56,7 +56,7 @@ and Siril's `equalize_cfa`.
 | MAD_TO_SIGMA | 1.4826 | 1/Phi^-1(0.75), standard for normal distributions |
 | MAX_MEDIAN_SAMPLES | 100,000 | Adaptive sampling for images >200K pixels |
 | Sigma floor (relative) | median * 0.1 | Prevents MAD=0 over-detection on uniform darks |
-| Sigma floor (absolute) | 1e-4 | Prevents over-detection when median is also zero |
+| Sigma floor (absolute) | 5e-4 | ~33 ADU in 16-bit; prevents flagging warm tail of clean CMOS darks |
 | Stacking threshold | 8 frames | Below: median; above: sigma-clipped mean |
 
 ---
@@ -148,7 +148,7 @@ are already present if scaling is needed later for CCD users.
 - MAD-based sigma estimation (robust to outliers, breakdown point 50%)
 - Per-CFA-color statistics (R, G, B tested independently)
 - Default 5.0 sigma threshold
-- Sigma floor: `max(computed_sigma, median * 0.1, 1e-4)`
+- Sigma floor: `max(computed_sigma, median * 0.1, 5e-4)`
 - Detects both hot (above upper) and cold (below lower) from master dark
 - Adaptive sampling: 100K samples per channel for images >200K pixels
 
