@@ -62,6 +62,7 @@ pub use star_detection::{
     BackgroundRefinement,
     // Configuration
     CentroidMethod,
+    ChannelStats,
     Config as StarDetectionConfig,
     Connectivity,
     // Main API
@@ -71,6 +72,10 @@ pub use star_detection::{
     NoiseModel,
     Star,
     StarDetector,
+    compute_channel_stats,
+    // Detection result file I/O
+    load_detection_result,
+    save_detection_result,
 };
 
 // ============================================================================

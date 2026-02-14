@@ -12,23 +12,35 @@ mod bench;
 // Imports
 // =============================================================================
 
+use arrayvec::ArrayVec;
+use serde::{Deserialize, Serialize};
+
 use crate::astro_image::AstroImage;
 
 use super::buffer_pool::BufferPool;
 use super::config::Config;
 use super::star::Star;
 
+/// Per-channel robust statistics (median and MAD).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ChannelStats {
+    pub median: f32,
+    pub mad: f32,
+}
+
 /// Result of star detection with diagnostics.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectionResult {
     /// Detected stars sorted by flux (brightest first).
     pub stars: Vec<Star>,
     /// Diagnostic information from the detection pipeline.
     pub diagnostics: Diagnostics,
+    /// Per-channel image statistics (median + MAD).
+    pub channel_stats: ArrayVec<ChannelStats, 3>,
 }
 
 /// Diagnostic information from star detection.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Diagnostics {
     /// Number of pixels above detection threshold.
     pub pixels_above_threshold: usize,
@@ -216,6 +228,38 @@ impl StarDetector {
             diagnostics.median_snr = crate::math::median_f32_mut(&mut buf);
         }
 
-        DetectionResult { stars, diagnostics }
+        let channel_stats = compute_channel_stats(image);
+
+        DetectionResult {
+            stars,
+            diagnostics,
+            channel_stats,
+        }
     }
+}
+
+/// Compute per-channel median and MAD statistics (channels in parallel).
+pub fn compute_channel_stats(image: &AstroImage) -> ArrayVec<ChannelStats, 3> {
+    use rayon::prelude::*;
+
+    let channels: Vec<&[f32]> = (0..image.channels())
+        .map(|c| image.channel(c).pixels())
+        .collect();
+
+    let stats: Vec<ChannelStats> = channels
+        .into_par_iter()
+        .map(|data| {
+            let mut buf = data.to_vec();
+            let median = crate::math::median_f32_mut(&mut buf);
+            let mut scratch = Vec::with_capacity(data.len());
+            let mad = crate::math::mad_f32_with_scratch(data, median, &mut scratch);
+            ChannelStats { median, mad }
+        })
+        .collect();
+
+    let mut result = ArrayVec::new();
+    for s in stats {
+        result.push(s);
+    }
+    result
 }

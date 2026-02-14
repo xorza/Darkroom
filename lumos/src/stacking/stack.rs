@@ -10,11 +10,12 @@ use arrayvec::ArrayVec;
 use crate::AstroImage;
 
 use super::FrameType;
-use super::cache::{ChannelStats, FrameStats, ImageCache, StackableImage};
+use super::cache::{FrameStats, ImageCache, StackableImage};
 use super::config::{CombineMethod, Normalization, StackConfig, Weighting};
 use super::error::Error;
 use super::progress::ProgressCallback;
 use crate::math;
+use crate::star_detection::ChannelStats;
 
 /// Per-frame, per-channel affine normalization parameters.
 ///

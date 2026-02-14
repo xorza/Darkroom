@@ -1,9 +1,10 @@
 //! Star detection result types.
 
 use glam::DVec2;
+use serde::{Deserialize, Serialize};
 
 /// A detected star with sub-pixel position and quality metrics.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Star {
     /// Position (sub-pixel accurate).
     pub pos: DVec2,

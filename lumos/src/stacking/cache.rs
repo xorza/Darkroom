@@ -31,13 +31,7 @@ use crate::stacking::cache_config::{
 use crate::stacking::error::Error;
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
 use crate::stacking::stack::FrameNorm;
-
-/// Per-channel robust statistics (median and MAD).
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct ChannelStats {
-    pub median: f32,
-    pub mad: f32,
-}
+use crate::star_detection::ChannelStats;
 
 /// Per-frame statistics: one `ChannelStats` per channel.
 #[derive(Debug, Clone)]

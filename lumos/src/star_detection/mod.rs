@@ -58,6 +58,7 @@ mod centroid;
 pub mod config;
 mod convolution;
 mod deblend;
+pub mod detection_file;
 pub(crate) mod detector;
 pub(crate) mod labeling;
 mod mask_dilation;
@@ -74,7 +75,10 @@ pub mod tests;
 
 // Main detector types
 pub(crate) use buffer_pool::BufferPool;
-pub use detector::{DetectionResult, Diagnostics, StarDetector};
+pub use detection_file::{load_detection_result, save_detection_result};
+pub use detector::{
+    ChannelStats, DetectionResult, Diagnostics, StarDetector, compute_channel_stats,
+};
 
 // Configuration
 pub use config::BackgroundRefinement;
