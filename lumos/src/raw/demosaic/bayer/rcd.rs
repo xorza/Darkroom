@@ -86,17 +86,23 @@ pub(super) fn rcd_demosaic(bayer: &BayerImage) -> Vec<f32> {
     let mut rgb_b = vec![0.0f32; npix];
 
     // ── Copy CFA values to the appropriate RGB channel ───────────────────
-
-    let rgb_slices: [&mut [f32]; 3] = [&mut rgb_r, &mut rgb_g, &mut rgb_b];
-    rgb_slices.into_iter().enumerate().for_each(|(ch, rgb_ch)| {
-        rgb_ch.par_chunks_mut(rw).enumerate().for_each(|(ry, row)| {
-            for (rx, pixel) in row.iter_mut().enumerate() {
-                if pattern.color_at(ry, rx) == ch {
-                    *pixel = cfa[ry * rw + rx];
+    // Single parallel dispatch for all 3 channels (avoids 3 rayon syncs).
+    {
+        let ptr_r = SendPtr(rgb_r.as_mut_ptr());
+        let ptr_g = SendPtr(rgb_g.as_mut_ptr());
+        let ptr_b = SendPtr(rgb_b.as_mut_ptr());
+        (0..rh).into_par_iter().for_each(|ry| {
+            let ptrs = [ptr_r.get(), ptr_g.get(), ptr_b.get()];
+            for rx in 0..rw {
+                let c = pattern.color_at(ry, rx);
+                // SAFETY: Each (ry, rx) maps to a unique index ry*rw+rx.
+                // Only one channel is written per pixel, so no data races.
+                unsafe {
+                    *ptrs[c].add(ry * rw + rx) = cfa[ry * rw + rx];
                 }
             }
         });
-    });
+    }
 
     // ── Step 1: Fused V/H Direction Detection ───────────────────────────
     // Computes V-HPF², H-HPF², and VH_Dir in a single parallel pass per row.
@@ -151,34 +157,37 @@ pub(super) fn rcd_demosaic(bayer: &BayerImage) -> Vec<f32> {
             }
         });
 
-    // v_hpf is dead — reuse as scratch for PQ-Dir later.
+    // v_hpf is dead — reuse buffer for LPF (Step 2–3), then PQ-Dir (Step 4).
     let mut scratch = v_hpf;
-    let mut lpf = vec![0.0f32; npix];
 
-    // ── Step 2: Low-Pass Filter ──────────────────────────────────────────
+    // ── Step 2: Low-Pass Filter (LPF) ──────────────────────────────────
+    // 3×3 weighted average used by Step 3 for ratio-corrected estimation.
+    // Reuses scratch buffer (was v_hpf, same npix size).
 
+    // No fill needed: Step 2 writes all positions that Step 3 reads
+    // (rows 1..rh-1, cols 1..rw-1; Step 3 reads within BORDER=4 margin).
+    let lpf = &mut scratch;
     lpf.par_chunks_mut(rw)
         .enumerate()
         .for_each(|(ry, lpf_row)| {
-            if ry < 2 || ry + 2 >= rh {
+            if ry < 1 || ry + 1 >= rh {
                 return;
             }
-            let col_start = 2 + (pattern.color_at(ry, 0) & 1);
-            let mut rx = col_start;
-            while rx < rw.saturating_sub(2) {
-                let idx = ry * rw + rx;
-                lpf_row[rx] = cfa[idx]
-                    + 0.5 * (cfa[idx - rw] + cfa[idx + rw] + cfa[idx - 1] + cfa[idx + 1])
+            for (rx, val) in lpf_row
+                .iter_mut()
+                .enumerate()
+                .skip(1)
+                .take(rw.saturating_sub(2))
+            {
+                let i = ry * rw + rx;
+                *val = cfa[i]
+                    + 0.5 * (cfa[i - rw] + cfa[i + rw] + cfa[i - 1] + cfa[i + 1])
                     + 0.25
-                        * (cfa[idx - rw - 1]
-                            + cfa[idx - rw + 1]
-                            + cfa[idx + rw - 1]
-                            + cfa[idx + rw + 1]);
-                rx += 2;
+                        * (cfa[i - rw - 1] + cfa[i - rw + 1] + cfa[i + rw - 1] + cfa[i + rw + 1]);
             }
         });
 
-    // ── Step 3: Green Channel Interpolation ──────────────────────────────
+    // ── Step 3: Green Channel Interpolation ─────────────────────────────
 
     rgb_g
         .par_chunks_mut(rw)
@@ -187,6 +196,7 @@ pub(super) fn rcd_demosaic(bayer: &BayerImage) -> Vec<f32> {
             if ry < BORDER || ry + BORDER >= rh {
                 return;
             }
+
             let col_start = BORDER + (pattern.color_at(ry, 0) & 1);
             let mut rx = col_start;
             while rx < rw.saturating_sub(BORDER) {
@@ -242,12 +252,13 @@ pub(super) fn rcd_demosaic(bayer: &BayerImage) -> Vec<f32> {
             }
         });
 
-    drop(lpf);
+    // End LPF borrow so scratch is reusable.
+    let _ = lpf;
 
     // ── Step 4: Red and Blue Channel Interpolation ───────────────────────
 
     // Step 4.0-4.1: P/Q diagonal direction detection.
-    // Reuse scratch buffer (was V-HPF, now dead) for pq_dir.
+    // Reuse scratch buffer for pq_dir.
     scratch.fill(0.0);
     let mut pq_dir = scratch;
 
@@ -380,34 +391,25 @@ fn step4_2_rb_at_opposing(
     // Each pass: the destination channel's values at neighbor positions were set in CFA copy
     // and are never written in this step, so reads from other rows are safe.
 
-    // Pass 1: R-rows → write B. The dst buffer (rgb_b) is read for neighbors and
-    // written at current-row positions only. Each row writes to non-overlapping indices.
+    // Single dispatch: R-rows write B, B-rows write R. Rows are independent
+    // (each writes only to its own indices in the destination buffer).
+    let dst_r = SendPtr(rgb_r.as_mut_ptr());
     let dst_b = SendPtr(rgb_b.as_mut_ptr());
+    let buf_len = rw * rh;
     (BORDER..rh.saturating_sub(BORDER))
         .into_par_iter()
         .for_each(|ry| {
             let col_start = BORDER + (pattern.color_at(ry, 0) & 1);
-            if pattern.color_at(ry, col_start) != 0 {
-                return; // Not an R-row
-            }
+            let color = pattern.color_at(ry, col_start);
+            let ptr = match color {
+                0 => dst_b.get(), // R-row → write B
+                2 => dst_r.get(), // B-row → write R
+                _ => return,      // G-row → skip
+            };
             // SAFETY: Each row writes only to its own indices (ry*rw+col_start, ry*rw+col_start+2, ...).
             // No two parallel iterations share the same ry, so writes don't overlap.
             // Reads from other rows access CFA-original values that are never written in this loop.
-            let dst = unsafe { std::slice::from_raw_parts_mut(dst_b.get(), rw * rh) };
-            process_step4_2_row(dst, rgb_g, pq_dir, ry, col_start, s);
-        });
-
-    // Pass 2: B-rows → write R.
-    let dst_r = SendPtr(rgb_r.as_mut_ptr());
-    (BORDER..rh.saturating_sub(BORDER))
-        .into_par_iter()
-        .for_each(|ry| {
-            let col_start = BORDER + (pattern.color_at(ry, 0) & 1);
-            if pattern.color_at(ry, col_start) != 2 {
-                return; // Not a B-row
-            }
-            // SAFETY: Same reasoning as Pass 1.
-            let dst = unsafe { std::slice::from_raw_parts_mut(dst_r.get(), rw * rh) };
+            let dst = unsafe { std::slice::from_raw_parts_mut(ptr, buf_len) };
             process_step4_2_row(dst, rgb_g, pq_dir, ry, col_start, s);
         });
 }

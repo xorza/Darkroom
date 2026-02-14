@@ -43,18 +43,19 @@ Reference: https://github.com/LuisSR/RCD-Demosaicing
 ## Parallelism
 
 All compute-heavy steps use rayon `par_chunks_mut` or `into_par_iter` by row.
-`SendPtr` pattern for Steps 4.2 and 4.3 (write current row, read neighbor rows).
+11 parallel dispatches total (CFA copy fused 3→1, Step 4.2 fused 2→1).
+`SendPtr` pattern for CFA copy, Steps 4.2, and 4.3 (write current row, read neighbor rows).
 `Strides` struct bundles `rw, rh, w1, w2, w3` to reduce argument count.
 
 ## Memory Layout
 
 Working buffers in raw coordinate space (full raw_width × raw_height):
-- `v_hpf` → reused as `pq_dir` (scratch buffer)
+- `scratch` (v_hpf → lpf → pq_dir): triple-reused buffer
 - `vh_dir`: V/H direction map
-- `lpf`: low-pass filter (freed after Step 3)
 - `rgb_r, rgb_g, rgb_b`: planar R/G/B output
+- `p_hpf, q_hpf`: half-width temp buffers (Step 4.0 scoped)
 
-Peak: ~7P f32 (P = raw_width × raw_height). For 8736×5856: ~1.4 GB.
+Peak: ~6P f32 + 1P half (P = raw_width × raw_height). For 8736×5856: ~1.3 GB.
 
 ## Performance
 
@@ -64,7 +65,8 @@ Peak: ~7P f32 (P = raw_width × raw_height). For 8736×5856: ~1.4 GB.
 |---------|------|------|-------------|
 | Serial baseline | 548ms | 44 | — |
 | Rayon parallel | 150ms | 160 | 3.6x parallel speedup |
-| + Fused Step 1 + border opt | 120ms | 200 | **-20% from parallel** |
+| + Fused Step 1 + border opt | 120ms | 200 | -20% from parallel |
+| + Buffer reuse + dispatch fusion | 111ms | 216 | -8% from above |
 
 ### Real file (Canon CR2, 8736×5856, 51 MP):
 
@@ -75,20 +77,26 @@ Peak: ~7P f32 (P = raw_width × raw_height). For 8736×5856: ~1.4 GB.
 | vs libraw AHD | 2731ms | **2.9x** |
 | vs libraw DHT | 5627ms | **5.9x** |
 
-### Profiling breakdown (single-threaded, % of compute):
+### Profiling breakdown (single-threaded, P-core %, current):
 
-| Step | Before | After |
-|------|--------|-------|
-| Step 1 (VH direction) | 32% | 21% |
-| Step 4.2 (R/B opposing) | 11% | 12% |
-| Step 4.3 (R/B green) | 17% | 10% |
-| Step 3 (Green interp) | 8% | 6% |
-| Step 5 (Border) | **7.5%** | **3.0%** |
+| Component | % |
+|-----------|---|
+| Memory zeroing (clear_page_erms) | 7% |
+| f32 ops (abs/clamp) | 8% |
+| Step 1b (H-HPF + VH_Dir) | 10% |
+| Step 4.3 (R/B at green) | 6% |
+| Step 2 (LPF) | 6% |
+| Step 4.0 (PQ HPF) | 4% |
+| intp() | 4% |
+| CFA copy | 3% |
+| Step 1a (V-HPF) | 3% |
+| Unresolved (rcd.rs:0) | 16% |
 
 ### Key optimizations applied:
 1. **Fused Step 1**: V-HPF full buffer + inline H-HPF sliding window (eliminates 1 full pass + per-row alloc)
 2. **Border iteration**: Only touches actual border pixels instead of scanning entire image
-3. **Buffer reuse**: v_hpf buffer reused as pq_dir (saves 1 large allocation)
+3. **Buffer triple-reuse**: scratch buffer serves as v_hpf → lpf → pq_dir (saves 2 large allocations)
+4. **Dispatch fusion**: CFA copy 3→1 dispatch, Step 4.2 R/B 2→1 dispatch (reduces rayon sync overhead)
 
 ## Quality
 
@@ -105,10 +113,13 @@ Methods: `color_at(y,x)→{0,1,2}`, `red_in_row(y)`, `pattern_2x2()`,
 
 ## Further Optimization Opportunities
 
-1. **AVX2 SIMD**: stride-2 inner loops not auto-vectorized by LLVM; manual SIMD could help Steps 4.2/4.3
-2. **Fast reciprocal**: `_mm256_rcp_ps` for ratio correction divisions
-3. **Tiling**: RawTherapee uses 194×194 tiles with 9-pixel overlap for better cache locality
-4. **Step fusion**: Steps 2+3 could potentially be fused (LPF only read at stride-2)
+1. **Tiling**: RawTherapee uses 194×194 tiles with 9-pixel overlap for better cache locality
+2. **AVX2 SIMD**: stride-2 inner loops not auto-vectorized by LLVM, but manual SIMD requires gather (stride-2 + diagonal neighbors) which benchmarks showed is slower than scalar for this access pattern
+
+### Evaluated and rejected:
+- **Step 2+3 fusion**: LPF computed inline 5× per pixel (45 ops) vs 1 cached read. No improvement.
+- **Manual SIMD (AVX2)**: Stride-2 column access + diagonal/vertical neighbors require gather — slower than scalar L1 loads.
+- **Uninit allocations**: OS lazy page allocation means first-touch cost shifts mid-computation. Slightly worse than vec zeroing.
 
 ## Benchmarks
 
