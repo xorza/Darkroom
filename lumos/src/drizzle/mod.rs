@@ -329,12 +329,17 @@ impl DrizzleAccumulator {
                 let ox_center = t.x as f32 * scale;
                 let oy_center = t.y as f32 * scale;
 
+                let jaco = local_jacobian(transform, t, ix, iy, scale as f64) as f32;
+                if jaco < 1e-30 {
+                    continue;
+                }
+
                 let ox_min = (ox_center - half_drop).floor().max(0.0) as usize;
                 let oy_min = (oy_center - half_drop).floor().max(0.0) as usize;
                 let ox_max = (ox_center + half_drop).ceil().min(output_width as f32) as usize;
                 let oy_max = (oy_center + half_drop).ceil().min(output_height as f32) as usize;
 
-                let effective_weight = weight * pw;
+                let effective_weight = weight * pw / jaco;
                 for oy in oy_min..oy_max {
                     for ox in ox_min..ox_max {
                         let overlap = compute_square_overlap(
@@ -472,7 +477,11 @@ impl DrizzleAccumulator {
                 let oy = (t.y as f32 * scale).floor() as isize;
 
                 if ox >= 0 && ox < output_width as isize && oy >= 0 && oy < output_height as isize {
-                    self.accumulate(image, ix, iy, ox as usize, oy as usize, weight * pw);
+                    let jaco = local_jacobian(transform, t, ix, iy, scale as f64) as f32;
+                    if jaco < 1e-30 {
+                        continue;
+                    }
+                    self.accumulate(image, ix, iy, ox as usize, oy as usize, weight * pw / jaco);
                 }
             }
         }
@@ -510,6 +519,11 @@ impl DrizzleAccumulator {
                 let ox_center = t.x as f32 * scale;
                 let oy_center = t.y as f32 * scale;
 
+                let jaco = local_jacobian(transform, t, ix, iy, scale as f64) as f32;
+                if jaco < 1e-30 {
+                    continue;
+                }
+
                 let ox_int = ox_center.floor() as isize;
                 let oy_int = oy_center.floor() as isize;
 
@@ -538,7 +552,8 @@ impl DrizzleAccumulator {
 
                 // Second pass: distribute flux with normalized weights.
                 // Per-pixel weight scales the effective frame weight.
-                let inv_total = (weight * pw) / total_weight;
+                // Jacobian correction: divide by local area magnification.
+                let inv_total = (weight * pw) / (total_weight * jaco);
                 for dy in -radius..=radius {
                     let oy = oy_int + dy;
                     if oy < 0 || oy >= output_height {
@@ -670,6 +685,22 @@ impl DrizzleResult {
     pub fn coverage_at(&self, x: usize, y: usize) -> f32 {
         self.coverage[(x, y)]
     }
+}
+
+/// Compute local Jacobian determinant (area magnification) at pixel `(ix, iy)`.
+///
+/// Uses finite differences: transforms center, center+dx, center+dy through the
+/// transform and computes |det([∂out/∂x, ∂out/∂y])| * scale².
+///
+/// For affine transforms this is constant (= det(M) * scale²).
+/// For homographies it varies spatially.
+#[inline]
+fn local_jacobian(transform: &Transform, center: DVec2, ix: usize, iy: usize, scale: f64) -> f64 {
+    let right = transform.apply(DVec2::new(ix as f64 + 1.5, iy as f64 + 0.5));
+    let down = transform.apply(DVec2::new(ix as f64 + 0.5, iy as f64 + 1.5));
+    let dx = right - center;
+    let dy = down - center;
+    (dx.x * dy.y - dx.y * dy.x).abs() * scale * scale
 }
 
 /// Compute overlap area between two axis-aligned rectangles.
@@ -2867,5 +2898,250 @@ mod tests {
             "Corner pixel should also be 6.5, got {}",
             out[0]
         );
+    }
+
+    // ========================================================================
+    // Jacobian correction tests
+    // ========================================================================
+
+    #[test]
+    fn test_local_jacobian_identity_scale1() {
+        // Identity transform, scale=1: one input pixel maps to exactly one output pixel.
+        // Jacobian = |det(I)| * 1² = 1.0
+        let transform = Transform::identity();
+        let center = transform.apply(DVec2::new(5.5, 5.5));
+        let jaco = local_jacobian(&transform, center, 5, 5, 1.0);
+        assert!(
+            (jaco - 1.0).abs() < 1e-10,
+            "Identity scale=1: expected 1.0, got {jaco}"
+        );
+    }
+
+    #[test]
+    fn test_local_jacobian_identity_scale2() {
+        // Identity transform, scale=2: one input pixel maps to a 2×2 area in output.
+        // Jacobian = |det(I)| * 2² = 4.0
+        let transform = Transform::identity();
+        let center = transform.apply(DVec2::new(5.5, 5.5));
+        let jaco = local_jacobian(&transform, center, 5, 5, 2.0);
+        assert!(
+            (jaco - 4.0).abs() < 1e-10,
+            "Identity scale=2: expected 4.0, got {jaco}"
+        );
+    }
+
+    #[test]
+    fn test_local_jacobian_rotation_preserves_area() {
+        // Pure rotation around origin: area is preserved, Jacobian = scale².
+        // Rotation by 30° around (0, 0), scale=1.
+        use crate::math::DMat3;
+        use crate::registration::TransformType;
+        let angle = 30.0_f64.to_radians();
+        let (sin_a, cos_a) = angle.sin_cos();
+        let matrix = DMat3::from_rows([cos_a, -sin_a, 0.0], [sin_a, cos_a, 0.0], [0.0, 0.0, 1.0]);
+        let transform = Transform::from_matrix(matrix, TransformType::Euclidean);
+        let center = transform.apply(DVec2::new(50.5, 50.5));
+        let jaco = local_jacobian(&transform, center, 50, 50, 1.0);
+        // Rotation preserves area: Jacobian = 1.0
+        assert!(
+            (jaco - 1.0).abs() < 1e-10,
+            "30° rotation: expected 1.0, got {jaco}"
+        );
+    }
+
+    #[test]
+    fn test_local_jacobian_anisotropic_scale() {
+        // Scale by 2x in x, 3x in y: area magnification = 6.
+        use crate::math::DMat3;
+        use crate::registration::TransformType;
+        let matrix = DMat3::from_rows([2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 1.0]);
+        let transform = Transform::from_matrix(matrix, TransformType::Affine);
+        let center = transform.apply(DVec2::new(5.5, 5.5));
+        // Jacobian = |det([2,0;0,3])| * scale² = 6 * 1 = 6.0
+        let jaco = local_jacobian(&transform, center, 5, 5, 1.0);
+        assert!(
+            (jaco - 6.0).abs() < 1e-10,
+            "2x×3x scale: expected 6.0, got {jaco}"
+        );
+    }
+
+    #[test]
+    fn test_local_jacobian_perspective_varies_spatially() {
+        // Perspective transform: Jacobian should differ at different image locations.
+        // Homography with small perspective terms.
+        use crate::math::DMat3;
+        use crate::registration::TransformType;
+        let matrix = DMat3::from_rows(
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1e-4, 0.0, 1.0], // perspective: w = 1e-4 * x + 1
+        );
+        let transform = Transform::from_matrix(matrix, TransformType::Homography);
+
+        // At x=0: w ≈ 1, minimal distortion
+        let c0 = transform.apply(DVec2::new(0.5, 0.5));
+        let jaco_left = local_jacobian(&transform, c0, 0, 0, 1.0);
+
+        // At x=1000: w ≈ 1.1, noticeable distortion
+        let c1000 = transform.apply(DVec2::new(1000.5, 0.5));
+        let jaco_right = local_jacobian(&transform, c1000, 1000, 0, 1.0);
+
+        // Jacobians must differ for perspective transform
+        assert!(
+            (jaco_left - jaco_right).abs() > 0.01,
+            "Perspective Jacobian should vary: left={jaco_left:.6}, right={jaco_right:.6}"
+        );
+        // At x=0, w≈1 so jaco≈1. At x=1000, w≈1.1 so area shrinks → jaco < 1.
+        assert!(
+            jaco_left > jaco_right,
+            "Left side should have larger Jacobian than right: {jaco_left:.6} vs {jaco_right:.6}"
+        );
+    }
+
+    #[test]
+    fn test_turbo_jacobian_uniform_image_with_scale() {
+        // Drizzle a uniform image (value=5.0) with identity transform and scale=2.
+        // With Jacobian correction: each input pixel contributes to a 2×2 area,
+        // Jacobian = 4.0, so weight is divided by 4. But finalize normalizes by
+        // total weight, so the output should still be 5.0 everywhere covered.
+        let w = 6;
+        let h = 6;
+        let image = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), vec![5.0; w * h]);
+
+        let config = DrizzleConfig {
+            scale: 2.0,
+            pixfrac: 1.0,
+            kernel: DrizzleKernel::Turbo,
+            ..Default::default()
+        };
+
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(w, h, 1), config);
+        acc.add_image(image, &Transform::identity(), 1.0, None);
+        let result = acc.finalize();
+
+        // Interior output pixels should be 5.0 (weighted mean of uniform value)
+        let out = result.image.channel(0);
+        let ow = result.image.width();
+        // Check a few interior pixels (avoiding edges where coverage may be partial)
+        for y in 2..10 {
+            for x in 2..10 {
+                let val = out[y * ow + x];
+                assert!(
+                    (val - 5.0).abs() < 0.01,
+                    "Turbo scale=2: pixel ({x},{y}) = {val}, expected 5.0"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_turbo_matches_square_identity_with_jacobian() {
+        // With identity transform (affine, constant Jacobian), Turbo and Square
+        // should produce identical output since both now have Jacobian correction
+        // and the drop is axis-aligned.
+        let w = 8;
+        let h = 8;
+        // Gradient image: pixel value = (x + y * w) as f32
+        let pixels: Vec<f32> = (0..w * h).map(|i| i as f32).collect();
+        let image_turbo = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), pixels.clone());
+        let image_square = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), pixels);
+
+        let config_turbo = DrizzleConfig {
+            scale: 1.0,
+            pixfrac: 1.0,
+            kernel: DrizzleKernel::Turbo,
+            ..Default::default()
+        };
+        let config_square = DrizzleConfig {
+            scale: 1.0,
+            pixfrac: 1.0,
+            kernel: DrizzleKernel::Square,
+            ..Default::default()
+        };
+
+        let mut acc_turbo = DrizzleAccumulator::new(ImageDimensions::new(w, h, 1), config_turbo);
+        acc_turbo.add_image(image_turbo, &Transform::identity(), 1.0, None);
+        let result_turbo = acc_turbo.finalize();
+
+        let mut acc_square = DrizzleAccumulator::new(ImageDimensions::new(w, h, 1), config_square);
+        acc_square.add_image(image_square, &Transform::identity(), 1.0, None);
+        let result_square = acc_square.finalize();
+
+        let out_turbo = result_turbo.image.channel(0);
+        let out_square = result_square.image.channel(0);
+        let mut max_diff = 0.0f32;
+        for i in 0..out_turbo.len() {
+            let diff = (out_turbo[i] - out_square[i]).abs();
+            max_diff = max_diff.max(diff);
+        }
+        assert!(
+            max_diff < 1e-3,
+            "Turbo vs Square with identity: max_diff={max_diff}, expected <1e-3"
+        );
+    }
+
+    #[test]
+    fn test_gaussian_jacobian_uniform_scale2() {
+        // Gaussian kernel with scale=2, uniform image: output should be uniform.
+        let w = 8;
+        let h = 8;
+        let image = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), vec![3.0; w * h]);
+
+        let config = DrizzleConfig {
+            scale: 2.0,
+            pixfrac: 1.0,
+            kernel: DrizzleKernel::Gaussian,
+            ..Default::default()
+        };
+
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(w, h, 1), config);
+        acc.add_image(image, &Transform::identity(), 1.0, None);
+        let result = acc.finalize();
+
+        let out = result.image.channel(0);
+        let ow = result.image.width();
+        // Check interior pixels
+        for y in 4..12 {
+            for x in 4..12 {
+                let val = out[y * ow + x];
+                if val != 0.0 {
+                    assert!(
+                        (val - 3.0).abs() < 0.05,
+                        "Gaussian scale=2: pixel ({x},{y}) = {val}, expected 3.0"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_point_kernel_jacobian_uniform_scale2() {
+        // Point kernel with scale=2, uniform image: output should be uniform
+        // where covered (point kernel only hits one output pixel per input pixel).
+        let w = 8;
+        let h = 8;
+        let image = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), vec![7.0; w * h]);
+
+        let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
+
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(w, h, 1), config);
+        acc.add_image(image, &Transform::identity(), 1.0, None);
+        let result = acc.finalize();
+
+        let out = result.image.channel(0);
+        let ow = result.image.width();
+        let oh = result.image.height();
+        // All covered pixels should have value 7.0
+        for y in 0..oh {
+            for x in 0..ow {
+                let val = out[y * ow + x];
+                if val != 0.0 {
+                    assert!(
+                        (val - 7.0).abs() < 0.01,
+                        "Point scale=2: pixel ({x},{y}) = {val}, expected 7.0"
+                    );
+                }
+            }
+        }
     }
 }

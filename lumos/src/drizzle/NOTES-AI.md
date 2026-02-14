@@ -191,7 +191,7 @@ Source: [PCL DrizzleIntegrationInstance.cpp](https://github.com/PixInsight/PCL)
 | **Context/contribution map** | No             | Yes (bitmask)  | Rejection maps | Rejection maps |
 | **Coverage map**             | Yes            | Yes            | No             | Yes            |
 | **CFA/Bayer drizzle**        | **No**         | N/A (HST)      | Yes            | Yes            |
-| **Jacobian correction**      | Square kernel  | Yes (per-pixel)| Yes            | Yes (splines)  |
+| **Jacobian correction**      | All kernels    | Yes (per-pixel)| Yes            | Yes (splines)  |
 | **Parallel accumulation**    | **No**         | No             | Unknown        | Fast Drizzle   |
 | **Scale range**              | Any f32        | Continuous     | 0.1-3.0        | Typically int  |
 
@@ -346,13 +346,29 @@ quadrilateral-to-pixel overlap via polygon clipping, with Jacobian correction fo
 Correct for arbitrary transforms including rotation and shear. Also subsumes Jacobian
 correction (below) for the Square kernel path.
 
-### ~~P2 (Important): Jacobian / Geometric Distortion Correction~~ -- DONE (Square kernel)
+### ~~P2 (Important): Jacobian / Geometric Distortion Correction~~ -- DONE (all kernels)
 
-The Square kernel computes the Jacobian from the 4 transformed corners and divides the
-overlap weight by `abs(jaco)`. This correctly handles non-affine transforms (homography,
-SIP distortion) where local pixel scale varies across the image. For other kernels (Turbo,
-Point, Gaussian, Lanczos), Jacobian correction is not yet implemented — these still assume
-constant pixel scale.
+All kernels now include Jacobian correction for non-affine transforms:
+
+- **Square**: Computes Jacobian from 4 transformed corners (cross-product of diagonals).
+- **Turbo, Point, Gaussian, Lanczos**: Use `local_jacobian()` helper — finite-difference
+  approximation of `|det(J)| * scale²` via 2 extra `transform.apply()` calls per input pixel
+  (center+dx, center+dy). Reuses the already-computed center transform result.
+
+The `local_jacobian()` function:
+```rust
+fn local_jacobian(transform, center, ix, iy, scale) -> f64:
+    right = transform.apply(ix + 1.5, iy + 0.5)
+    down  = transform.apply(ix + 0.5, iy + 1.5)
+    dx = right - center;  dy = down - center
+    |dx.x * dy.y - dx.y * dy.x| * scale²
+```
+
+For affine transforms, `local_jacobian()` returns the same constant `|det(M)| * scale²`
+everywhere (mathematically exact). For homographies, it varies spatially — edge pixels may
+have 10-20% different magnification than center pixels. Without correction, this creates
+subtle photometric gradients across the output. The STScI reference only applies Jacobian
+to the Square kernel; our implementation goes beyond by correcting all kernels.
 
 ### P2 (Important): CFA/Bayer Drizzle
 
