@@ -1,6 +1,6 @@
 # lumos - Implementation Notes (AI)
 
-> **Last Updated**: 2026-02-06
+> **Last Updated**: 2026-02-14
 
 Astrophotography image processing library for loading, calibrating, and stacking astronomical images.
 
@@ -15,20 +15,26 @@ Astrophotography image processing library for loading, calibrating, and stacking
 | `math.rs` | SIMD-accelerated math utilities (ARM NEON, x86 SSE4) |
 | `star_detection/` | Star detection and centroid computation |
 | `registration/` | Image registration, alignment, and astrometry |
+| `drizzle/` | Variable-Pixel Linear Reconstruction (Fruchter & Hook 2002) |
+| `gradient_removal/` | Background gradient extraction and removal (polynomial + TPS) |
 
 ## Key Types
 
 ```rust
-AstroImage         // Astronomical image wrapper around imaginarium::Image with metadata
-AstroImageMetadata // FITS metadata (object, instrument, exposure, bitpix, etc.)
-ImageDimensions    // { width, height, channels } - helper struct
-BitPix             // FITS pixel type enum (UInt8, Int16, Int32, Int64, Float32, Float64)
-StackingMethod     // Mean | Median | SigmaClippedMean(SigmaClipConfig)
-SigmaClipConfig    // { sigma, max_iterations }
-CacheConfig        // { cache_dir, keep_cache, available_memory, progress }
-StackError         // Error type for stacking operations
-FrameType          // Dark | Flat | Bias | Light
-CalibrationMasters // Container for master dark/flat/bias frames
+AstroImage           // Astronomical image wrapper around imaginarium::Image with metadata
+AstroImageMetadata   // FITS metadata (object, instrument, exposure, bitpix, etc.)
+ImageDimensions      // { width, height, channels } - helper struct
+BitPix               // FITS pixel type enum (UInt8, Int16, Int32, Int64, Float32, Float64)
+StackConfig          // Builder for stacking parameters (combine, rejection, normalization, weights)
+CombineMethod        // Mean(Rejection) | Median
+Normalization        // None | Global | Multiplicative
+Rejection            // SigmaClip | Winsorized | LinearFit | Percentile | Gesd | None
+FrameType            // Dark | Flat | Bias | Light
+CacheConfig          // { cache_dir, keep_cache, available_memory, progress }
+CalibrationMasters   // Container for master dark/flat/bias frames
+DrizzleConfig        // Builder for drizzle parameters (kernel, scale, pixfrac, etc.)
+DrizzleAccumulator   // Accumulate contributions from multiple dithered frames
+DrizzleResult        // { image: AstroImage, coverage: Buffer2<f32> }
 ```
 
 ## Stacking Module Structure
@@ -37,27 +43,25 @@ See `stacking/NOTES-AI.md` for detailed documentation.
 
 | Module | Description |
 |--------|-------------|
-| `stacking/mod.rs` | `StackingMethod`, `FrameType`, `ImageStack` dispatch |
-| `stacking/mean/` | Mean stacking (SIMD: NEON/SSE/scalar) |
-| `stacking/median/` | Median stacking via mmap (SIMD sorting networks) |
-| `stacking/sigma_clipped/` | Sigma-clipped mean via mmap |
-| `stacking/weighted/` | Weighted mean with quality-based frame weights |
-| `stacking/local_normalization.rs` | Tile-based local normalization (PixInsight-style) |
-| `stacking/live.rs` | Live/real-time stacking with incremental updates |
-| `stacking/comet.rs` | Comet/asteroid dual-stack stacking |
-| `stacking/session.rs` | Multi-session integration with weighted stacking |
-| `stacking/gradient_removal.rs` | Post-stack gradient removal (polynomial/RBF) |
-| `stacking/gpu/` | GPU-accelerated sigma clipping and batch pipeline |
+| `stacking/mod.rs` | Public API, `FrameType` enum, re-exports |
+| `stacking/stack.rs` | `stack()`/`stack_with_progress()` entry points, normalization, dispatch |
+| `stacking/config.rs` | `StackConfig`, `CombineMethod`, `Normalization`, presets, validation |
+| `stacking/rejection.rs` | Six rejection algorithms with config structs, `Rejection` enum dispatch |
+| `stacking/cache.rs` | `ImageCache<I>` (in-memory or mmap), chunked parallel processing |
+| `stacking/cache_config.rs` | `CacheConfig`, adaptive chunk sizing, system memory queries |
+| `stacking/error.rs` | `Error` enum (thiserror), I/O and dimension errors |
+| `stacking/progress.rs` | `ProgressCallback`, `StackingStage` (Loading/Processing) |
+| `stacking/bench.rs` | Benchmark tests |
+| `stacking/tests/` | Integration tests, real data tests |
 
 ## Demosaic Module (raw/demosaic/)
 
-Bayer and X-Trans demosaicing with SIMD acceleration.
+X-Trans demosaicing implemented; Bayer demosaicing is `todo!()`.
 
 | Module | Description |
 |--------|-------------|
-| `bayer/mod.rs` | Dispatcher + SSE3/NEON SIMD row functions, shared helpers |
-| `bayer/scalar.rs` | Scalar bilinear interpolation functions |
-| `bayer/tests.rs` | 25 tests covering all CFA patterns and SIMD-vs-scalar consistency |
+| `bayer/mod.rs` | `CfaPattern` enum, `BayerImage` struct, `demosaic_bayer()` **[todo!()]** |
+| `bayer/tests.rs` | 11 tests for CFA patterns and BayerImage validation |
 | `xtrans/mod.rs` | X-Trans entry point, `XTransPattern`, `XTransImage` |
 | `xtrans/markesteijn.rs` | Markesteijn 1-pass orchestrator, `DemosaicArena` preallocation |
 | `xtrans/markesteijn_steps.rs` | Algorithm steps: green interp, R/B, derivatives, homogeneity, blend |
@@ -65,12 +69,11 @@ Bayer and X-Trans demosaicing with SIMD acceleration.
 
 CFA Patterns: RGGB, BGGR, GRBG, GBRG
 
-### Bayer Demosaic Architecture
+### Bayer Demosaic Status
 
-- Single consolidated entry point `demosaic_bilinear()` with runtime SIMD detection
-- Row-based rayon parallelism with per-row SIMD (SSE3/NEON)
-- Shared helpers: `demosaic_pixel_scalar()` for border/tail, `assign_simd_pixels()` for SIMD lane extraction
-- Scalar fallback for non-SIMD architectures or small images
+**Not implemented.** `demosaic_bayer()` contains `todo!()` — any Bayer RAW file panics.
+The `CfaPattern` enum and `BayerImage` struct are complete with full validation.
+RCD (Ratio Corrected Demosaicing) is the recommended algorithm for implementation.
 
 ### X-Trans Markesteijn 1-Pass Algorithm
 

@@ -360,21 +360,12 @@ Siril's default normalization uses IKSS (clip 6*MAD, recompute with BWMV). Our m
 matches Siril's fast fallback mode. Impact is marginal for typical data but could improve
 normalization quality when bright nebulosity or dense star fields are present.
 
-### P3: Missing Drizzle Integration
+### ~~P3: Missing Drizzle Integration~~ -- IMPLEMENTED (separate module)
 
-Drizzle (Variable-Pixel Linear Reconstruction) enables sub-pixel resolution recovery by mapping
-input pixels onto a finer output grid accounting for sub-pixel shifts between frames. Developed
-for Hubble Deep Field, now standard in PixInsight, DSS, and Astro Pixel Processor.
-
-Requirements: 30+ frames, slightly undersampled data (stars < 2-3 pixels), known sub-pixel
-registration offsets. Dramatically increases memory and processing time (650GB reported for
-large Bayer drizzle). Output grid typically 1.5x-3x input resolution.
-
-Integration with stacking: drizzle replaces the standard pixel-gather step. Instead of
-gathering the same pixel from all frames, each input pixel contributes to a neighborhood of
-output pixels weighted by the overlap area. Rejection still applies but operates on the
-drizzle-accumulated values. This is architecturally separate from the current stacking pipeline
-and would require its own processing path.
+Drizzle is now implemented as `lumos::drizzle` module (separate from stacking). See
+`drizzle/NOTES-AI.md`. Supports 4 kernels (Turbo, Point, Gaussian, Lanczos), projective
+transforms, configurable scale/pixfrac, per-channel Buffer2 storage, rayon-parallel
+finalization. All formulas verified against STScI DrizzlePac reference.
 
 ### P3: Missing Large-Scale Rejection
 
@@ -405,7 +396,7 @@ feature gap for light-polluted imaging sites with many satellite passes.
 | Combine methods | Mean, Median | Mean, Median, Min, Max |
 | Rejection maps | Not generated | Low/High rejection maps + slope map |
 | Large-scale rejection | Not implemented | Layers + growth for satellite trails |
-| Drizzle | Not implemented | Full drizzle integration |
+| Drizzle | Separate module (4 kernels, projective) | Full drizzle integration |
 | Memory model | 75% RAM or mmap disk cache | On-demand FITS row reading |
 
 ### vs Siril
@@ -507,7 +498,6 @@ a unique approach not found in PixInsight or Siril but effective for mixed-expos
 5. **Add IKSS/BWMV statistics** (P3) -- moderate effort, marginal improvement.
 6. **Add sigma clip convergence mode** (P3) -- iterate until no rejection.
 7. **Add large-scale rejection** (P3) -- significant effort, high value for satellite sites.
-8. **Add drizzle integration** (P3) -- significant effort, separate processing path.
 
 ## Test Coverage
 

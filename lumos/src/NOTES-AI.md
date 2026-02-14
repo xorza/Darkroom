@@ -7,12 +7,7 @@ patterns and the highest-priority **unfixed** issues across all modules.
 
 | Module | Issue | Severity |
 |--------|-------|----------|
-| drizzle | Drop size formula inverted: `pixfrac / scale` should be `pixfrac * scale` | Critical |
-| drizzle | Square kernel only transforms center point (is actually Turbo kernel) | Critical |
-| drizzle | Gaussian kernel FWHM uses wrong formula | Critical |
 | raw | Bayer demosaic not implemented (`todo!()`) - affects >95% of cameras | Critical |
-| drizzle | Lanczos used without required constraints (pixfrac=1, scale=1) | Major |
-| drizzle | No output clamping (Lanczos negative lobes) | Major |
 | gradient_removal | Normal equations solver squares condition number | Significant |
 | gradient_removal | TPS coordinates not normalized (5 orders of magnitude mismatch) | Significant |
 | gradient_removal | TPS regularization scaling is arbitrary (magic constant) | Significant |
@@ -52,6 +47,15 @@ patterns and the highest-priority **unfixed** issues across all modules.
 - registration: Direct SVD for homography DLT → Hartley normalization + SVD
 - calibration: Single-channel MAD across CFA → per-CFA-color statistics
 - calibration: Sigma floor fails when median=0 → added absolute floor `1e-4`
+- drizzle: Drop size formula inverted (`pixfrac / scale`) → fixed to `pixfrac * scale`
+- drizzle: Square kernel mislabeled → renamed to Turbo (axis-aligned approximation)
+- drizzle: Gaussian kernel FWHM wrong formula → fixed sigma = `drop_size / 2.3548`
+- drizzle: Lanczos used without constraints → runtime warning when pixfrac≠1 or scale≠1
+- drizzle: No output clamping → Lanczos output clamped to `[0, +inf)` in finalize
+- drizzle: min_coverage compared against raw weight → compared against normalized weight
+- drizzle: Interleaved pixel layout → per-channel `Buffer2<f32>` (no interleaved allocation)
+- drizzle: `into_interleaved_pixels()` allocation per frame → `add_image()` reads channels directly
+- drizzle: Finalization single-threaded → rayon row-parallel normalization and coverage
 
 </details>
 
@@ -60,7 +64,6 @@ patterns and the highest-priority **unfixed** issues across all modules.
 ### 1. Negative Values Not Handled Consistently
 - calibration_masters: dark subtraction doesn't clamp to zero (intentional, matches PixInsight)
 - gradient_removal: subtraction correction can produce negatives
-- drizzle: no output clamping (Lanczos negative lobes)
 - stacking: no post-combination clamping
 - **Decision**: Preserving negatives in the linear pipeline is correct (prevents positive bias).
   Clamping should only happen at output boundaries (FITS/TIFF export, display).
@@ -74,7 +77,7 @@ patterns and the highest-priority **unfixed** issues across all modules.
 
 ### 3. SIMD Coverage
 - raw normalization: SSE4.1 only, no AVX2 path (2x throughput available)
-- drizzle: entirely single-threaded
+- drizzle: accumulation loops single-threaded (finalization is rayon-parallel)
 - gradient_removal: TPS evaluation O(n*W*H) with no spatial optimization
 - registration: Lanczos3 SIMD kernel uses mul+add instead of actual FMA intrinsics
 - **Well-covered**: math sums, convolution, threshold mask, median filter, profile fitting,
@@ -106,48 +109,42 @@ patterns and the highest-priority **unfixed** issues across all modules.
 | astro_image | 1 moderate | FITS loading correct | Comprehensive metadata parsing | Float FITS normalization, FITS writing |
 | raw | 1 critical | X-Trans verified, pipeline correct | 2.1x faster than libraw | Bayer demosaic todo!() |
 | gradient_removal | 3 significant | Algorithms correct but numerically fragile | Dual-method (polynomial + TPS) | Normal equations, TPS conditioning |
-| drizzle | 3 critical | Point kernel correct, overlap correct | Projective transform support | Formula bugs, missing features |
+| drizzle | None remaining | All 4 kernels verified correct | Projective transform, rayon finalization | True Square kernel, Jacobian correction |
 
 ## Recommendations by Priority
 
 ### Immediate (data corruption / wrong results)
-1. Fix drizzle drop size formula (`pixfrac * scale`)
-2. Fix drizzle Gaussian FWHM formula (`sigma = (pixfrac * scale) / 2.3548`)
-3. Implement Bayer demosaic (RCD recommended; libraw fallback as interim)
+1. Implement Bayer demosaic (RCD recommended; libraw fallback as interim)
 
 ### Short-term (correctness improvements)
-4. Rename drizzle Square kernel to Turbo
-5. Add drizzle Lanczos parameter validation (warn/error when pixfrac != 1 or scale != 1)
-6. Add drizzle output clamping (at least [0, +inf) for Lanczos kernel)
-7. Fix drizzle `min_coverage` normalization (compare against normalized weight)
-8. Replace gradient_removal normal equations with QR/SVD (nalgebra)
-9. Normalize gradient_removal TPS coordinates to [0,1]
-10. Use data-dependent TPS regularization (MATLAB tpaps-style)
-11. Increase gradient_removal sample box radius (5x5 → 11x11+)
-12. Add float FITS normalization heuristic (detect range, normalize if max > 2.0)
+2. Replace gradient_removal normal equations with QR/SVD (nalgebra)
+3. Normalize gradient_removal TPS coordinates to [0,1]
+4. Use data-dependent TPS regularization (MATLAB tpaps-style)
+5. Increase gradient_removal sample box radius (5x5 → 11x11+)
+6. Add float FITS normalization heuristic (detect range, normalize if max > 2.0)
 
 ### Medium-term (quality & interoperability)
-13. Add FITS writing support
-14. Add stacking rejection maps (per-pixel high/low counts)
-15. Add per-CFA-channel flat normalization
-16. Add iterative gradient sample rejection (sigma=3, max 10 iterations)
-17. Coarse-grid TPS evaluation (evaluate on 64px grid, bilinearly interpolate)
-18. Implement true drizzle Square kernel (4-corner transform + polygon clipping)
-19. Parallelize drizzle (rayon row-parallel)
-20. Use actual FMA intrinsics in registration Lanczos3 SIMD kernel
-21. Add drizzle context image (per-pixel contributing-frame bitmask)
-22. Add drizzle per-pixel weight maps
-23. Fix gradient_removal division correction (mean → median)
+7. Add FITS writing support
+8. Add stacking rejection maps (per-pixel high/low counts)
+9. Add per-CFA-channel flat normalization
+10. Add iterative gradient sample rejection (sigma=3, max 10 iterations)
+11. Coarse-grid TPS evaluation (evaluate on 64px grid, bilinearly interpolate)
+12. Fix gradient_removal division correction (mean → median)
+13. Use actual FMA intrinsics in registration Lanczos3 SIMD kernel
+14. Implement true drizzle Square kernel (4-corner transform + polygon clipping)
+15. Add drizzle context image (per-pixel contributing-frame bitmask)
+16. Add drizzle per-pixel weight maps
+17. Parallelize drizzle accumulation loops (per-thread accumulators or atomics)
 
 ### Long-term (completeness)
-24. Add noise-based auto weighting to stacking (`w = 1/sigma_bg^2`)
-25. Add drizzle Jacobian correction for non-affine transforms
-26. Add drizzle variance/error propagation
-27. Add stacking additive-only normalization mode
-28. Add stacking Min/Max/Sum combine methods
-29. Generic incremental stepping for registration interpolation (benefit Lanczos2/4/Bicubic)
-30. Add cold pixel detection from flats in calibration
-31. Add missing FITS metadata (RA/DEC, XPIXSZ/YPIXSZ, READOUTM, DATAMAX)
+18. Add noise-based auto weighting to stacking (`w = 1/sigma_bg^2`)
+19. Add drizzle Jacobian correction for non-affine transforms
+20. Add drizzle variance/error propagation
+21. Add stacking additive-only normalization mode
+22. Add stacking Min/Max/Sum combine methods
+23. Generic incremental stepping for registration interpolation (benefit Lanczos2/4/Bicubic)
+24. Add cold pixel detection from flats in calibration
+25. Add missing FITS metadata (RA/DEC, XPIXSZ/YPIXSZ, READOUTM, DATAMAX)
 
 ## Verified Correct (no action needed)
 
@@ -163,6 +160,9 @@ These were investigated and confirmed correct against industry references:
 - **registration SIP direction**: matches Siril v1.3 convention (forward A/B)
 - **registration all 5 transform estimators**: translation, euclidean, similarity, affine, homography
 - **registration Lanczos3 + soft deringing**: matches PixInsight algorithm exactly
+- **drizzle all 4 kernels**: Turbo (axis-aligned drop), Point, Gaussian (FWHM=pixfrac*scale), Lanczos-3
+- **drizzle weight accumulation**: two-pass weighted mean, min_coverage against normalized weight
+- **drizzle output**: Lanczos clamped [0,+inf), rayon-parallel finalization, Buffer2 per-channel storage
 - **stacking all 6 rejection algorithms**: sigma clip, winsorized, linear fit, percentile, GESD, none
 - **stacking normalization formulas**: global matches Siril "additive with scaling"
 - **star_detection pipeline order**: matches SExtractor (background → filter → threshold → label → deblend → centroid)
