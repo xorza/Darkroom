@@ -251,12 +251,12 @@ impl StarDetector {
         let path = path.as_ref();
         let image = AstroImage::from_file(path)?;
         let result = self.detect(&image);
-        super::detection_file::save_detection_result(path, &result).map_err(|e| {
-            ImageLoadError::Io {
+        crate::star_detection::detection_file::save_detection_result(path, &result).map_err(
+            |e| ImageLoadError::Io {
                 path: path.to_path_buf(),
                 source: e,
-            }
-        })?;
+            },
+        )?;
         Ok(result)
     }
 }
