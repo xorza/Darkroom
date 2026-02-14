@@ -1,14 +1,14 @@
 # Bayer Demosaic — RCD Implementation
 
-## Current Status: IMPLEMENTED
+## Current Status: IMPLEMENTED (Rayon parallel)
 
-`demosaic_bayer()` calls `rcd::rcd_demosaic()` — a full scalar implementation of the
+`demosaic_bayer()` calls `rcd::rcd_demosaic()` — a full rayon-parallel implementation of the
 RCD (Ratio Corrected Demosaicing) algorithm v2.3 by Luis Sanz Rodriguez.
 
 ## Files
 
 - `mod.rs`: `CfaPattern` enum, `BayerImage` struct, `demosaic_bayer()` entry point
-- `rcd.rs`: RCD algorithm (5 steps, ~400 lines)
+- `rcd.rs`: RCD algorithm (5 steps, rayon row-parallel, ~600 lines)
 - `tests.rs`: 20 tests (11 CFA pattern + 9 RCD correctness)
 
 ## Algorithm: RCD (Ratio Corrected Demosaicing)
@@ -45,32 +45,50 @@ Reference: https://github.com/LuisSR/RCD-Demosaicing
 - `BORDER = 4` (pixels on each side)
 - `intp(a, b, c) = b + a*(c - b)` (linear interpolation)
 
+## Parallelism
+
+All compute-heavy steps use rayon `par_chunks_mut` or `into_par_iter` by row:
+- CFA copy: parallel by channel and row
+- Step 1.1 (V HPF): `par_chunks_mut(rw)` by row
+- Step 1.2 (VH_Dir): `par_chunks_mut(rw)` with per-row H HPF buffer
+- Step 2 (LPF): `par_chunks_mut(rw)` by row
+- Step 3 (Green): `par_chunks_mut(rw)` by row
+- Step 4.0-4.1 (PQ HPF/Dir): `par_chunks_mut` by row
+- Step 4.2 (R/B at opposing): `SendPtr` + `into_par_iter` over row indices (two passes: R-rows, B-rows)
+- Step 4.3 (R/B at green): `SendPtr` + `into_par_iter` over row indices
+- Output extraction: `par_chunks_mut(width*3)` by row
+
+`SendPtr` pattern (same as X-Trans): raw pointer wrapper implementing Send+Sync
+for parallel write access to non-overlapping row regions.
+
+`Strides` struct bundles `rw, rh, w1, w2, w3` to reduce function argument count.
+
 ## Memory Layout
 
 Working buffers in raw coordinate space (full raw_width × raw_height):
 - `vh_dir`: f32, V/H direction map
-- `lpf`: f32, low-pass filter (freed conceptually after Step 3)
-- `rgb[3]`: f32 × 3, planar R/G/B output
+- `lpf`: f32, low-pass filter (freed after Step 3)
+- `rgb_r, rgb_g, rgb_b`: f32 × 3, planar R/G/B output
 - `pq_dir`: f32, P/Q diagonal direction map (Step 4 only)
 - P/Q HPF: half-resolution buffers (every other pixel)
-- V HPF: sliding window of 3 rows
-- H HPF: single row buffer
+- V HPF: full buffer (freed before Step 1.2)
 
 Peak: ~7P f32 (P = raw_width × raw_height). For 8736×5856: ~1.4 GB.
 
 ## Performance
 
 Benchmark on Canon CR2 (8736×5856, 51.2 MP):
-- RCD core: ~1200ms (demosaic only)
-- Full pipeline (load + normalize + demosaic): ~1940ms
-- vs libraw PPG: 0.8x (PPG is simpler, less accurate)
-- vs libraw AHD: 1.4x faster
-- vs libraw DHT: 3.0x faster
+- RCD demosaic only: ~1037ms
+- vs libraw PPG: 1.5x faster
+- vs libraw AHD: 2.6x faster
+- vs libraw DHT: 5.5x faster
 
 Synthetic benchmark (no I/O):
-- 1000×1000 (1 MP): 24ms → 42 MP/s
-- 4000×3000 (12 MP): 278ms → 43 MP/s
-- 6000×4000 (24 MP): 548ms → 44 MP/s
+- 1000×1000 (1 MP): 15ms → 86 MP/s
+- 4000×3000 (12 MP): 88ms → 141 MP/s
+- 6000×4000 (24 MP): 153ms → 160 MP/s
+
+Parallel speedup vs serial baseline: ~3.6x (24 MP: 548ms → 153ms)
 
 ## Quality
 
@@ -87,14 +105,10 @@ Methods: `color_at(y,x)→{0,1,2}`, `red_in_row(y)`, `pattern_2x2()`,
 
 ## Optimization Opportunities
 
-Current implementation is single-threaded scalar. Potential improvements:
-1. **Rayon row-parallel**: Each step processes independent rows
-2. **AVX2 SIMD**: 8 f32 lanes for gradient/LPF computation
-3. **Memory reduction**: Fuse steps or use tiling to reduce peak memory
-4. **Fast reciprocal**: `_mm256_rcp_ps` for ratio correction division
-5. **Tiling**: RawTherapee uses 194×194 tiles with 9-pixel overlap
-
-Expected with rayon + SIMD: ~100-200ms for 24 MP (5-10x improvement).
+1. **AVX2 SIMD**: 8 f32 lanes for gradient/LPF computation
+2. **Memory reduction**: Fuse steps or use tiling to reduce peak memory
+3. **Fast reciprocal**: `_mm256_rcp_ps` for ratio correction division
+4. **Tiling**: RawTherapee uses 194×194 tiles with 9-pixel overlap
 
 ## Benchmarks
 
