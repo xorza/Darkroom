@@ -35,10 +35,20 @@ impl TestRng {
         (self.next_u64() >> 33) as f32 / (1u64 << 31) as f32
     }
 
-    /// Return a random f64 in [0, 1).
+    /// Return a random f64 in [0, 1) with full 53-bit mantissa precision.
     #[inline]
     pub fn next_f64(&mut self) -> f64 {
-        (self.next_u64() >> 33) as f64 / (1u64 << 31) as f64
+        (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    /// Return a Gaussian-distributed f32 with mean 0 and standard deviation 1.
+    ///
+    /// Uses the Box-Muller transform. Consumes two uniform samples per call.
+    #[inline]
+    pub fn next_gaussian_f32(&mut self) -> f32 {
+        let u1 = self.next_f32().max(1e-10);
+        let u2 = self.next_f32();
+        (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos()
     }
 }
 

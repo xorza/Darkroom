@@ -7,14 +7,16 @@ patterns and the highest-priority **unfixed** issues across all modules.
 
 | Module | Issue | Severity |
 |--------|-------|----------|
-| raw | Bayer demosaic not implemented (`todo!()`) - affects >95% of cameras | Critical |
 | stacking | `weighted_mean_indexed()` no guard against `weight_sum == 0` | Low |
-| testing | `TestRng::next_f64` truncated to 31 bits (should be 53) | Low |
 
 ## Already Fixed
 
 <details><summary>Click to expand</summary>
 
+- raw: Bayer RCD demosaic implemented (111ms/24MP, 216 MP/s)
+- testing: `TestRng::next_f64` fixed to 53-bit precision (was 31-bit)
+- testing: `next_gaussian_f32()` added to TestRng, consolidated 8 Box-Muller duplicates
+- registration: LO-RANSAC buffer reuse fixed (output parameter + swap, no allocations)
 - astro_image: 3-channel FITS loaded as interleaved -> loads planar via `from_planar_channels`
 - astro_image: FITS integer data not normalized -> `BitPix::normalization_max()` normalizes to [0,1]
 - astro_image: Missing BAYERPAT/FILTER/GAIN/CCD-TEMP -> comprehensive FITS metadata parsing
@@ -100,8 +102,8 @@ patterns and the highest-priority **unfixed** issues across all modules.
 
 ### 4. Testing Patterns
 - TestRng: centralized deterministic RNG (Knuth MMIX LCG). ~25 call sites.
-- Duplicated Gaussian noise: Box-Muller in 3 places. Should be `TestRng::next_gaussian()`.
-- TestRng::next_f64 only 31 bits of precision (should be 53 for f64 mantissa).
+- `next_gaussian_f32()` on TestRng for Box-Muller Gaussian sampling.
+- `next_f64` uses 53-bit precision (full f64 mantissa coverage).
 - All SIMD paths have bit-for-bit (or within-epsilon) tests against scalar references.
 - Comprehensive property-based and ground-truth tests in star_detection and registration.
 
@@ -124,7 +126,6 @@ patterns and the highest-priority **unfixed** issues across all modules.
 
 | Priority | Feature | Module | Impact | Industry Reference |
 |----------|---------|--------|--------|-------------------|
-| Critical | Bayer demosaic (RCD) | raw | >95% of cameras cannot process | Siril default, 4-step algorithm |
 | P1 | Per-pixel input weights / bad pixel masks | drizzle | Hot pixels/cosmic rays contaminate output | STScI, Siril (flat-based), PixInsight |
 | P1 | FITS writing | astro_image | Primary astro interchange format | All tools |
 | P1 | Variance propagation | stacking | No per-pixel noise estimate for downstream use | PixInsight, IRAF |
@@ -159,45 +160,43 @@ patterns and the highest-priority **unfixed** issues across all modules.
 | stacking | None remaining | All 6 rejection algos verified | MAD-based sigma (more robust than DSS/Siril default) | Rejection maps, auto weighting, variance |
 | calibration | None remaining | Formula matches PixInsight/Siril | Per-CFA-color MAD detection, per-CFA flat | Configurable sigma threshold |
 | astro_image | None remaining | FITS loading correct | Comprehensive metadata parsing, float normalization | FITS writing, RA/DEC metadata |
-| raw | 1 critical | X-Trans verified, pipeline correct | 2.1x faster than libraw | Bayer demosaic todo!() |
+| raw | None remaining | X-Trans + Bayer RCD verified | 2.1x faster than libraw (X-Trans), 216 MP/s (Bayer) | None critical |
 | drizzle | None remaining | All 4 kernels verified correct | Projective transform, rayon finalization | Per-pixel weights, Square kernel, Jacobian |
 | common | None | All correct | CPU feature detection, Buffer2/BitBuffer2 | None |
-| testing | None critical | Deterministic RNG, comprehensive synthetic data | Centralized TestRng, StarFieldBuilder | Duplicated Gaussian noise, f64 precision |
+| testing | None | Deterministic RNG, comprehensive synthetic data | Centralized TestRng, StarFieldBuilder, next_gaussian_f32 | Poisson noise, DetectionMetrics consolidation |
 
 ## Recommendations by Priority
 
 ### Immediate (data corruption / wrong results)
-1. Implement Bayer demosaic (RCD recommended; libraw AHD fallback as interim)
+None remaining.
 
 ### Short-term (quality improvements)
-2. Add per-pixel weight map support to drizzle (most impactful quality improvement)
-3. Add FITS writing support
-4. Add RA/DEC and pixel size metadata reading
-5. Expose configurable sigma threshold for defect map detection
-6. Fix TestRng::next_f64 to use 53-bit precision
-7. Add `next_gaussian()` to TestRng (consolidate 3 Box-Muller duplicates)
+1. Add per-pixel weight map support to drizzle (most impactful quality improvement)
+2. Add FITS writing support
+3. Add RA/DEC and pixel size metadata reading
+4. Expose configurable sigma threshold for defect map detection
 
 ### Medium-term (feature parity)
-8. Implement true drizzle Square kernel (port STScI `sgarea()` + `boxer()`)
-9. Add stacking rejection maps (per-pixel high/low counts)
-10. Add noise-based auto weighting to stacking (`w = 1/sigma_bg^2`)
-11. Add weighted least squares to L-M fitting (inverse-variance weighting)
-12. Add parameter uncertainties from L-M covariance matrix
-13. Add drizzle Jacobian correction for non-affine transforms
-14. Implement CFA/Bayer drizzle
-15. Generic incremental stepping for registration interpolation
-16. Parallelize drizzle accumulation loops
+5. Implement true drizzle Square kernel (port STScI `sgarea()` + `boxer()`)
+6. Add stacking rejection maps (per-pixel high/low counts)
+7. Add noise-based auto weighting to stacking (`w = 1/sigma_bg^2`)
+8. Add weighted least squares to L-M fitting (inverse-variance weighting)
+9. Add parameter uncertainties from L-M covariance matrix
+10. Add drizzle Jacobian correction for non-affine transforms
+11. Implement CFA/Bayer drizzle
+12. Generic incremental stepping for registration interpolation
+13. Parallelize drizzle accumulation loops
 
 ### Long-term (completeness)
-17. Add variance propagation to stacking
-18. Add drizzle variance/error propagation
-19. Add drizzle context image (per-pixel contributing-frame bitmask)
-20. Add stacking Min/Max/Sum combine methods and additive-only normalization
-21. Add cold pixel detection from flats in calibration
-22. Add NaN/Inf handling in FITS float loader
-23. Add multi-HDU FITS support
-24. Add large-scale rejection for satellite trails
-25. Add missing FITS metadata (DATAMAX, ISOSPEED, CALSTAT, FOCRATIO)
+14. Add variance propagation to stacking
+15. Add drizzle variance/error propagation
+16. Add drizzle context image (per-pixel contributing-frame bitmask)
+17. Add stacking Min/Max/Sum combine methods and additive-only normalization
+18. Add cold pixel detection from flats in calibration
+19. Add NaN/Inf handling in FITS float loader
+20. Add multi-HDU FITS support
+21. Add large-scale rejection for satellite trails
+22. Add missing FITS metadata (DATAMAX, ISOSPEED, CALSTAT, FOCRATIO)
 
 ## Verified Correct (no action needed)
 
@@ -214,6 +213,7 @@ These were investigated and confirmed correct against industry references:
 - **raw WB normalization**: min=1.0 (matches dcraw convention)
 - **raw black level consolidation**: replicates libraw's `adjust_bl()` correctly
 - **X-Trans Markesteijn**: MAE ~0.0005 vs libraw, 2.1x speedup, coefficients match reference
+- **Bayer RCD demosaic**: 5-step algorithm, 111ms/24MP (216 MP/s), buffer triple-reuse, 11 rayon dispatches
 - **registration MAGSAC++**: validated by SupeRANSAC 2025 and Piedade et al. 2025
 - **registration SIP direction**: matches Siril v1.3+ convention (forward A/B)
 - **registration all 5 transform estimators**: translation, euclidean, similarity, affine, homography

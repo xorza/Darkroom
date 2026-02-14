@@ -46,10 +46,7 @@ fn test_deblend_star_pair() {
     // Add noise
     let mut rng = crate::testing::TestRng::new(42);
     for p in &mut pixels {
-        let u1 = rng.next_f32().max(1e-10);
-        let u2 = rng.next_f32();
-        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
-        *p += z * 0.01;
+        *p += rng.next_gaussian_f32() * 0.01;
         *p = p.clamp(0.0, 1.0);
     }
 
@@ -152,10 +149,7 @@ fn test_deblend_chain() {
     // Add noise
     let mut rng = crate::testing::TestRng::new(42);
     for p in &mut pixels {
-        let u1 = rng.next_f32().max(1e-10);
-        let u2 = rng.next_f32();
-        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
-        *p += z * 0.01;
+        *p += rng.next_gaussian_f32() * 0.01;
         *p = p.clamp(0.0, 1.0);
     }
 
@@ -259,10 +253,7 @@ fn test_deblend_unequal_pair() {
     // Add noise
     let mut rng = crate::testing::TestRng::new(42);
     for p in &mut pixels {
-        let u1 = rng.next_f32().max(1e-10);
-        let u2 = rng.next_f32();
-        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
-        *p += z * 0.01;
+        *p += rng.next_gaussian_f32() * 0.01;
         *p = p.clamp(0.0, 1.0);
     }
 

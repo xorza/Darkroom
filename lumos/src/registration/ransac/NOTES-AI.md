@@ -237,11 +237,11 @@ Pre-allocated buffers for samples, inliers, and LO working space
 (`mod.rs:264-270`). Partial Fisher-Yates shuffle with undo
 (`mod.rs:533-567`) avoids O(n) re-initialization per iteration.
 
-**Issue**: `inlier_buf = lo_inliers` at `mod.rs:335` replaces the
-pre-allocated buffer with a new Vec from `local_optimization`, defeating
-buffer reuse for subsequent iterations. The old buffer becomes `lo_inliers`
-(via the return from `local_optimization`) and may be re-allocated on
-next LO call. Not a correctness bug but creates unnecessary allocations.
+**Buffer reuse**: `local_optimization` takes `inlier_buf: &mut Vec<usize>`
+as an output parameter and writes improved inlier sets directly into it
+via `std::mem::swap`. No allocations occur after initial setup. A local
+`scratch_inliers` Vec is used for scoring candidates, and only swapped
+into `inlier_buf` when an improvement is found.
 
 ## Transform Estimation (`transforms.rs`)
 
@@ -417,32 +417,18 @@ spatially well-separated, so spatial coherence constraints add nothing.
 
 ### Active Issues
 
-1. **LO buffer replacement** (`mod.rs:335`):
-   `inlier_buf = lo_inliers` replaces the pre-allocated Vec with a new one
-   from `local_optimization`, defeating buffer reuse. Should write into
-   `inlier_buf` directly via `extend_from_slice` or pass it as output
-   parameter. **Severity**: Low (extra allocations, no correctness impact).
-
-2. **Progressive phase boundaries don't adapt** (`mod.rs:464`):
+1. **Progressive phase boundaries don't adapt** (`mod.rs:464`):
    `let phase = iteration * 3 / max_iter` uses the original `max_iter`,
    not the adaptively reduced count. After early convergence detection
    reduces effective iterations, the phase progression doesn't adjust.
    In practice, with ~18 iterations for 50% inlier ratio, only phase 1
    runs. **Severity**: Negligible for typical workloads.
 
-3. **`#[allow(dead_code)]` on pub fields** (`mod.rs:126-131`):
-   `RansacResult::iterations` and `::inlier_ratio` are `pub` with
-   `#[allow(dead_code)]`. If they are public API, the annotation is
-   misleading. If diagnostic-only, use `pub(crate)`.
-   **Severity**: Code quality only.
-
-4. ~~**Affine estimation uses normal equations without normalization**~~ -- **FIXED**.
-   Now uses Hartley normalization (`normalize_points()` + denormalize via
-   `compose`), same pattern as the homography estimator. Condition number
-   is well-controlled for all practical coordinate ranges.
-
 ### Resolved Issues (from previous analysis)
 
+- LO buffer replacement defeating reuse -- FIXED (output parameter + swap)
+- `#[allow(dead_code)]` on pub diagnostic fields -- kept (fields are test-only diagnostics)
+- Affine estimation without Hartley normalization -- FIXED
 - Direct SVD for homography DLT (was using A^T*A) -- FIXED
 - Target point degeneracy check -- FIXED
 - Gamma LUT replaced with closed-form `1-exp(-x)` -- FIXED
@@ -463,22 +449,15 @@ IRWLS would help in scenarios with gradual inlier/outlier transition
 
 ## Potential Improvements (Prioritized)
 
-1. **Fix LO buffer replacement** (`mod.rs:335`): Pass `inlier_buf` as
-   output parameter to `local_optimization` or use `extend_from_slice`.
-   Eliminates unnecessary allocations. Effort: 15 minutes.
-
-2. ~~**Add point normalization to affine estimation**~~ -- **DONE**.
-   Hartley normalization + denormalize via compose, same as homography.
-
-3. **IRWLS final polish**: After RANSAC selects the best model, run 3-5
+1. **IRWLS final polish**: After RANSAC selects the best model, run 3-5
    IRWLS iterations with sigma-marginalized weights from MAGSAC++. Would
    improve accuracy for borderline inliers. Effort: 2 hours.
 
-4. **True PROSAC**: Replace 3-phase heuristic with PROSAC growth function.
+2. **True PROSAC**: Replace 3-phase heuristic with PROSAC growth function.
    Theoretical improvement for high-outlier-rate scenarios, negligible for
    current star registration workloads. Effort: 2 hours.
 
-5. **Inner RANSAC in LO**: Sample non-minimal subsets from inliers instead
+3. **Inner RANSAC in LO**: Sample non-minimal subsets from inliers instead
    of using the full set. Would help when inlier set contains structured
    outliers. Effort: 1 hour.
 

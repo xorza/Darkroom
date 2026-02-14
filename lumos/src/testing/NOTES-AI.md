@@ -34,7 +34,8 @@ Deterministic LCG for reproducible test data. Knuth MMIX multiplier (63641362238
 pub struct TestRng { state: u64 }
 // next_u64: state = state * 6364136223846793005 + 1; return state
 // next_f32: (next_u64() >> 33) as f32 / 2^31
-// next_f64: (next_u64() >> 33) as f64 / 2^31
+// next_f64: (next_u64() >> 11) as f64 / 2^53
+// next_gaussian_f32: Box-Muller transform returning f32
 ```
 
 **Properties:**
@@ -42,13 +43,13 @@ pub struct TestRng { state: u64 }
 - Deterministic given seed -- same seed always produces same sequence
 - No external dependency (no `rand` crate needed)
 - Used by ~25 call sites across the crate
+- `next_f64` uses 53-bit precision (full f64 mantissa coverage)
+- `next_f32` uses 31 bits (sufficient for f32's 23-bit mantissa)
+- `next_gaussian_f32()` provides Box-Muller Gaussian sampling (mean=0, stddev=1)
 
 **Known limitations:**
-- **next_f64 has only 31 bits of precision** (shift right 33, divide by 2^31). f64 has a 53-bit mantissa, so ~22 bits of precision are wasted. The output only has ~9 decimal digits of uniformity resolution. Adequate for noise generation and position jitter, but not for tests requiring fine-grained f64 distributions.
-- next_f32 has 31 bits, which is fine (f32 mantissa is 23 bits, so 24 bits of precision needed).
-- LCGs have known sequential correlation in low-order bits, but the right-shift by 33 uses only the high bits, which mitigates this.
+- LCGs have known sequential correlation in low-order bits, but the right-shift by 33/11 uses only the high bits, which mitigates this.
 - Increment 1 instead of Knuth's recommended 1442695040888963407 -- still gives full period but may have slightly worse spectral properties. For test data generation this is not a concern.
-- No Gaussian distribution method on TestRng itself. Box-Muller is implemented ad-hoc in `star_field.rs::add_gaussian_noise`, `centroid/test_utils.rs::add_noise`, and `star_field.rs::generate_star_positions` (clustered case). Three independent implementations.
 
 ## Positioned Trait
 
@@ -133,10 +134,6 @@ For registration testing:
 
 ### Issues
 
-1. **next_f64 truncated to 31 bits.** The implementation `(next_u64() >> 33) as f64 / (1u64 << 31) as f64` produces only ~9 decimal digits of resolution. This is identical to next_f32's effective precision. If f64 precision matters (e.g., subpixel position accuracy testing at < 1e-9), this is insufficient. Fix: use `(next_u64() >> 11) as f64 / (1u64 << 53) as f64` for full 53-bit precision.
-
-2. **Duplicated Gaussian noise generation.** Box-Muller transform is implemented in three places: `star_field.rs::add_gaussian_noise()`, `centroid/test_utils.rs::add_noise()`, and inline in `generate_star_positions()` (clustered case). Should be a method on TestRng (e.g., `next_gaussian(&mut self) -> f64`).
-
 3. **BackgroundEstimate helpers live outside the testing module.** `background_map.rs` produces `BackgroundEstimate` structs for test use, while `star_detection/tests/common/output/metrics.rs` contains `DetectionMetrics` and pass/fail criteria. Both are test infrastructure but live in different modules. The `DetectionMetrics` infrastructure could be promoted to `testing/` for broader reuse.
 
 4. **No Poisson noise generator.** Astronomical photon noise follows Poisson statistics, not Gaussian. For realistic synthetic images (especially at low flux), a Poisson noise generator would be more accurate. Current Gaussian noise is adequate for most detection/registration tests but insufficient for photometry accuracy tests.
@@ -147,14 +144,10 @@ For registration testing:
 
 ## Recommendations
 
-1. **Add `next_gaussian()` to TestRng.** Centralizes Box-Muller, eliminates the three duplicated implementations, and makes it trivial to add Gaussian noise anywhere.
+1. **Consolidate DetectionMetrics into testing/.** Move `star_detection/tests/common/output/metrics.rs` (and potentially comparison.rs) into `testing/` so registration tests and future modules can compute detection metrics against ground truth without depending on `star_detection::tests`.
 
-2. **Fix next_f64 precision.** Change to `(next_u64() >> 11) as f64 / (1u64 << 53) as f64` for full 53-bit mantissa coverage. Current code works but wastes the purpose of f64.
+2. **Add a `next_poisson()` method** (or standalone function) for photon noise simulation in photometry-sensitive tests.
 
-3. **Consolidate DetectionMetrics into testing/.** Move `star_detection/tests/common/output/metrics.rs` (and potentially comparison.rs) into `testing/` so registration tests and future modules can compute detection metrics against ground truth without depending on `star_detection::tests`.
+3. **Rename or document the noise distribution difference** between `patterns::add_noise` (uniform) and `star_field::add_gaussian_noise` (Gaussian) to prevent confusion. Consider renaming `patterns::add_noise` to `add_uniform_noise`.
 
-4. **Add a `next_poisson()` method** (or standalone function) for photon noise simulation in photometry-sensitive tests.
-
-5. **Rename or document the noise distribution difference** between `patterns::add_noise` (uniform) and `star_field::add_gaussian_noise` (Gaussian) to prevent confusion. Consider renaming `patterns::add_noise` to `add_uniform_noise`.
-
-6. **Add a test_data path helper.** Similar to `calibration_dir()`, add a function that returns `PathBuf` to `lumos/test_data/` for loading small fixture images in tests that need them.
+4. **Add a test_data path helper.** Similar to `calibration_dir()`, add a function that returns `PathBuf` to `lumos/test_data/` for loading small fixture images in tests that need them.

@@ -113,16 +113,9 @@ fn add_gaussian_star(pixels: &mut [f32], width: usize, height: usize, star: &Syn
 /// Add Gaussian noise to the image.
 #[allow(dead_code)]
 fn add_noise(pixels: &mut [f32], sigma: f32) {
-    use std::f32::consts::PI;
-
     let mut rng = crate::testing::TestRng::new(12345);
-
     for p in pixels.iter_mut() {
-        let u1 = rng.next_f32().max(1e-10);
-        let u2 = rng.next_f32();
-
-        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).cos();
-        *p += z * sigma;
+        *p += rng.next_gaussian_f32() * sigma;
     }
 }
 

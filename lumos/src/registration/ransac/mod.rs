@@ -161,14 +161,14 @@ impl RansacEstimator {
         true
     }
 
-    /// Perform local optimization on a promising hypothesis.
+    /// Local optimization: refine transform using iterative re-estimation (LO-RANSAC).
     ///
-    /// This implements the LO-RANSAC algorithm:
     /// 1. Re-estimate transform using current inliers
     /// 2. Find new inliers with the refined transform
     /// 3. Repeat until convergence or max iterations
     ///
-    /// This typically improves the inlier count by 5-15%.
+    /// On return, `inlier_buf` contains the best inlier set found.
+    /// Typically improves inlier count by 5-15%.
     #[allow(clippy::too_many_arguments)]
     fn local_optimization(
         &self,
@@ -180,11 +180,15 @@ impl RansacEstimator {
         inlier_buf: &mut Vec<usize>,
         point_buf_ref: &mut Vec<DVec2>,
         point_buf_target: &mut Vec<DVec2>,
-    ) -> (Transform, Vec<usize>, f64) {
+    ) -> (Transform, f64) {
         let transform_type = initial_transform.transform_type;
         let min_samples = transform_type.min_points();
         let mut current_transform = *initial_transform;
-        let mut current_inliers = initial_inliers.to_vec();
+
+        // Use inlier_buf as the "current best" and a local scratch for scoring.
+        inlier_buf.clear();
+        inlier_buf.extend_from_slice(initial_inliers);
+        let mut scratch_inliers = Vec::with_capacity(inlier_buf.len());
 
         // Compute initial score
         let initial_score = score_hypothesis(
@@ -192,20 +196,20 @@ impl RansacEstimator {
             target_points,
             &current_transform,
             scorer,
-            inlier_buf,
+            &mut scratch_inliers,
             f64::NEG_INFINITY,
         );
         let mut current_score = initial_score;
 
         for _ in 0..self.params.lo_max_iterations {
-            if current_inliers.len() < min_samples {
+            if inlier_buf.len() < min_samples {
                 break;
             }
 
             // Re-estimate transform using all current inliers
             point_buf_ref.clear();
             point_buf_target.clear();
-            for &i in &current_inliers {
+            for &i in inlier_buf.iter() {
                 point_buf_ref.push(ref_points[i]);
                 point_buf_target.push(target_points[i]);
             }
@@ -222,22 +226,22 @@ impl RansacEstimator {
                 target_points,
                 &refined,
                 scorer,
-                inlier_buf,
+                &mut scratch_inliers,
                 current_score,
             );
 
             // Check for convergence (no improvement)
-            if inlier_buf.len() <= current_inliers.len() && new_score <= current_score {
+            if scratch_inliers.len() <= inlier_buf.len() && new_score <= current_score {
                 break;
             }
 
             // Update if improved
             current_transform = refined;
-            std::mem::swap(&mut current_inliers, inlier_buf);
+            std::mem::swap(inlier_buf, &mut scratch_inliers);
             current_score = new_score;
         }
 
-        (current_transform, current_inliers, current_score)
+        (current_transform, current_score)
     }
 
     /// Core RANSAC loop with MAGSAC++ scoring.
@@ -319,7 +323,7 @@ impl RansacEstimator {
                 && score > best_score
                 && inlier_buf.len() >= min_samples
             {
-                let (lo_transform, lo_inliers, lo_score) = self.local_optimization(
+                let (lo_transform, lo_score) = self.local_optimization(
                     ref_points,
                     target_points,
                     &current_transform,
@@ -332,7 +336,7 @@ impl RansacEstimator {
                 // Only accept LO result if it's still plausible
                 if self.is_plausible(&lo_transform) {
                     current_transform = lo_transform;
-                    inlier_buf = lo_inliers;
+                    std::mem::swap(&mut inlier_buf, &mut lo_inlier_buf);
                     score = lo_score;
                 }
             }

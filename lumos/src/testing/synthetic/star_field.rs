@@ -354,13 +354,8 @@ fn generate_star_positions(
             // Central cluster (Gaussian distribution)
             for _ in 0..cluster_count {
                 loop {
-                    let u1 = rng.next_f32().max(1e-10);
-                    let u2 = rng.next_f32();
-                    let z1 = (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).cos();
-                    let z2 = (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).sin();
-
-                    let x = cx + z1 * cluster_radius;
-                    let y = cy + z2 * cluster_radius;
+                    let x = cx + rng.next_gaussian_f32() * cluster_radius;
+                    let y = cy + rng.next_gaussian_f32() * cluster_radius;
 
                     if x >= margin
                         && x < config.width as f32 - margin
@@ -401,12 +396,8 @@ fn generate_star_positions(
 /// Add Gaussian noise to pixels.
 fn add_gaussian_noise(pixels: &mut [f32], sigma: f32, seed: u64) {
     let mut rng = crate::testing::TestRng::new(seed);
-
     for p in pixels.iter_mut() {
-        let u1 = rng.next_f32().max(1e-10);
-        let u2 = rng.next_f32();
-        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).cos();
-        *p += z * sigma;
+        *p += rng.next_gaussian_f32() * sigma;
     }
 }
 

@@ -4,12 +4,7 @@
 pub fn add_noise(pixels: &mut [f32], noise_sigma: f32, seed: u64) {
     let mut rng = crate::testing::TestRng::new(seed);
     for pixel in pixels.iter_mut() {
-        // Box-Muller transform
-        let u1 = rng.next_f32().max(1e-10);
-        let u2 = rng.next_f32();
-
-        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
-        *pixel += z * noise_sigma;
+        *pixel += rng.next_gaussian_f32() * noise_sigma;
     }
 }
 
