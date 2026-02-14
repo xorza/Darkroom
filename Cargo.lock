@@ -183,6 +183,9 @@ name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "as-slice"
@@ -626,6 +629,7 @@ dependencies = [
  "lz4_flex",
  "mlua",
  "rayon",
+ "ryu",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -2033,6 +2037,7 @@ dependencies = [
  "rand 0.10.0",
  "rand_chacha 0.10.0",
  "rayon",
+ "serde",
  "smallvec",
  "strum",
  "strum_macros",
@@ -3348,6 +3353,12 @@ name = "rustversion"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
+
+[[package]]
+name = "ryu"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "safe_arch"

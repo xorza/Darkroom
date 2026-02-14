@@ -586,6 +586,23 @@ fn serde_defaults() {
 // ===========================================================================
 
 #[test]
+fn float_extreme_values() {
+    // These previously panicked due to 32-byte stack buffer overflow in emit_float.
+    // f64::MAX Display is ~309 chars, 5e-324 is ~326 chars. ryu handles all values safely.
+    roundtrip(&f64::MAX);
+    roundtrip(&f64::MIN);
+    roundtrip(&f64::MIN_POSITIVE);
+    roundtrip(&5e-324_f64); // smallest subnormal
+
+    // Verify ryu produces scientific notation for extreme values
+    let scn = to_string(&f64::MAX).unwrap();
+    assert!(
+        scn.contains('e') || scn.contains('E'),
+        "f64::MAX should use scientific notation: {scn}"
+    );
+}
+
+#[test]
 fn float_keeps_decimal_point() {
     let scn = to_string(&1.0f64).unwrap();
     assert!(

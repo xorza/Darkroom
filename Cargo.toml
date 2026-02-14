@@ -73,11 +73,12 @@ bitcode = { version = "*", features = ["serde"] }
 rfd = { version = "*" }
 async-trait = { version = "*" }
 aligned-vec = { version = "*" }
-arrayvec = { version = "*" }
+arrayvec = { version = "*", features = ["serde"] }
 smallvec = { version = "*" }
 parking_lot = { version = "*" }
 rand_chacha = { version = "*" }
 nalgebra = { version = "*" }
+ryu = { version = "*" }
 
 
 [profile.bench]

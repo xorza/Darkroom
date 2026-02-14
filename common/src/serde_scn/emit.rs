@@ -51,15 +51,11 @@ fn emit_float<W: Write>(w: &mut W, f: f64, indent: usize, at_start: bool) -> Res
         // SCN doesn't have NaN/Infinity literals — emit null.
         w.write_all(b"null")?;
     } else {
-        // Ensure float always has a decimal point so it parses back as float.
-        // Use a stack buffer to avoid heap allocation from format!().
-        let mut buf = [0u8; 32];
-        let mut cursor = std::io::Cursor::new(&mut buf[..]);
-        write!(cursor, "{f}").unwrap();
-        let len = cursor.position() as usize;
-        let s = &buf[..len];
-        w.write_all(s)?;
-        if !s.contains(&b'.') && !s.contains(&b'e') && !s.contains(&b'E') {
+        // ryu produces the shortest roundtrip-safe decimal (max 24 bytes).
+        let mut buf = ryu::Buffer::new();
+        let s = buf.format(f);
+        w.write_all(s.as_bytes())?;
+        if !s.contains('.') && !s.contains('e') && !s.contains('E') {
             w.write_all(b".0")?;
         }
     }
