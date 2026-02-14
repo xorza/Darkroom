@@ -65,7 +65,7 @@ pub fn load_fits(path: &Path) -> Result<AstroImage> {
         telescope: read_key_optional(&hdu, &mut fptr, "TELESCOP"),
         date_obs: read_key_optional(&hdu, &mut fptr, "DATE-OBS"),
         exposure_time: read_key_optional(&hdu, &mut fptr, "EXPTIME"),
-        iso: None,
+        iso: read_key_optional::<i32>(&hdu, &mut fptr, "ISOSPEED").map(|v| v as u32),
         bitpix,
         header_dimensions: dimensions,
         cfa_type,
@@ -82,6 +82,11 @@ pub fn load_fits(path: &Path) -> Result<AstroImage> {
         offset: read_key_optional(&hdu, &mut fptr, "OFFSET"),
         focal_length: read_key_optional(&hdu, &mut fptr, "FOCALLEN"),
         airmass: read_key_optional(&hdu, &mut fptr, "AIRMASS"),
+        ra_deg: read_ra_deg(&hdu, &mut fptr),
+        dec_deg: read_dec_deg(&hdu, &mut fptr),
+        pixel_size_x: read_key_optional(&hdu, &mut fptr, "XPIXSZ"),
+        pixel_size_y: read_key_optional(&hdu, &mut fptr, "YPIXSZ"),
+        data_max: read_key_optional(&hdu, &mut fptr, "DATAMAX"),
     };
 
     // FITS stores 3D images in planar order (all R, then all G, then all B).
@@ -173,6 +178,72 @@ fn read_cfa_from_headers(hdu: &fitsio::hdu::FitsHdu, fptr: &mut FitsFile) -> Opt
     }
 
     Some(CfaType::Bayer(pattern))
+}
+
+/// Read RA in degrees from FITS headers.
+///
+/// Tries: `RA` (degrees, NINA/SGP), `OBJCTRA` (HMS string, MaximDL/ASCOM),
+/// `CRVAL1` (WCS reference point, plate-solved images).
+fn read_ra_deg(hdu: &fitsio::hdu::FitsHdu, fptr: &mut FitsFile) -> Option<f64> {
+    if let Some(ra) = read_key_optional::<f64>(hdu, fptr, "RA") {
+        return Some(ra);
+    }
+    if let Some(s) = read_key_optional::<String>(hdu, fptr, "OBJCTRA") {
+        return parse_hms_to_deg(&s);
+    }
+    read_key_optional::<f64>(hdu, fptr, "CRVAL1")
+}
+
+/// Read DEC in degrees from FITS headers.
+///
+/// Tries: `DEC` (degrees), `OBJCTDEC` (DMS string), `CRVAL2` (WCS).
+fn read_dec_deg(hdu: &fitsio::hdu::FitsHdu, fptr: &mut FitsFile) -> Option<f64> {
+    if let Some(dec) = read_key_optional::<f64>(hdu, fptr, "DEC") {
+        return Some(dec);
+    }
+    if let Some(s) = read_key_optional::<String>(hdu, fptr, "OBJCTDEC") {
+        return parse_dms_to_deg(&s);
+    }
+    read_key_optional::<f64>(hdu, fptr, "CRVAL2")
+}
+
+/// Parse HMS string "HH MM SS.ss" to degrees.
+/// Accepts both space-delimited and colon-delimited formats.
+fn parse_hms_to_deg(s: &str) -> Option<f64> {
+    let parts: Vec<f64> = s
+        .split([' ', ':'])
+        .filter(|p| !p.is_empty())
+        .map(|p| p.trim().parse().ok())
+        .collect::<Option<Vec<_>>>()?;
+    if parts.len() != 3 {
+        return None;
+    }
+    // RA in hours: deg = (h + m/60 + s/3600) * 15
+    let sign = if parts[0].is_sign_negative() {
+        -1.0
+    } else {
+        1.0
+    };
+    Some(sign * (parts[0].abs() + parts[1] / 60.0 + parts[2] / 3600.0) * 15.0)
+}
+
+/// Parse DMS string "±DD MM SS.ss" to degrees.
+/// Accepts both space-delimited and colon-delimited formats.
+fn parse_dms_to_deg(s: &str) -> Option<f64> {
+    let parts: Vec<f64> = s
+        .split([' ', ':'])
+        .filter(|p| !p.is_empty())
+        .map(|p| p.trim().parse().ok())
+        .collect::<Option<Vec<_>>>()?;
+    if parts.len() != 3 {
+        return None;
+    }
+    let sign = if parts[0].is_sign_negative() {
+        -1.0
+    } else {
+        1.0
+    };
+    Some(sign * (parts[0].abs() + parts[1] / 60.0 + parts[2] / 3600.0))
 }
 
 /// Helper to read an optional string key from FITS header.
@@ -360,5 +431,77 @@ mod tests {
         assert!((result[0] - 0.0).abs() < 1e-7);
         assert!(result[1].is_nan()); // Not sanitized for integer types
         assert!((result[2] - 1.0).abs() < 1e-7);
+    }
+
+    // ====================================================================
+    // RA/DEC coordinate parsing tests
+    // ====================================================================
+
+    #[test]
+    fn test_parse_hms_space_delimited() {
+        // M42: RA = 05h 35m 17.3s = (5 + 35/60 + 17.3/3600) * 15 = 83.82208333... deg
+        let deg = parse_hms_to_deg("05 35 17.3").unwrap();
+        let expected = (5.0 + 35.0 / 60.0 + 17.3 / 3600.0) * 15.0; // 83.82208333
+        assert!(
+            (deg - expected).abs() < 1e-10,
+            "got {deg}, expected {expected}"
+        );
+    }
+
+    #[test]
+    fn test_parse_hms_colon_delimited() {
+        // Same value with colons
+        let deg = parse_hms_to_deg("05:35:17.3").unwrap();
+        let expected = (5.0 + 35.0 / 60.0 + 17.3 / 3600.0) * 15.0;
+        assert!((deg - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_parse_hms_zero() {
+        // RA = 00h 00m 00.0s = 0.0 deg
+        let deg = parse_hms_to_deg("00 00 00.0").unwrap();
+        assert!((deg - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_parse_dms_positive() {
+        // M42 DEC: -05° 23' 28.0" = -(5 + 23/60 + 28/3600) = -5.39111...
+        let deg = parse_dms_to_deg("-05 23 28.0").unwrap();
+        let expected = -(5.0 + 23.0 / 60.0 + 28.0 / 3600.0); // -5.39111
+        assert!(
+            (deg - expected).abs() < 1e-10,
+            "got {deg}, expected {expected}"
+        );
+    }
+
+    #[test]
+    fn test_parse_dms_colon_delimited() {
+        let deg = parse_dms_to_deg("+45:30:15.5").unwrap();
+        let expected = 45.0 + 30.0 / 60.0 + 15.5 / 3600.0; // 45.50430555
+        assert!((deg - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_parse_dms_negative_zero_degrees() {
+        // DEC = -00° 30' 00.0" = -0.5 deg (sign on zero degrees)
+        let deg = parse_dms_to_deg("-00 30 00.0").unwrap();
+        let expected = -0.5;
+        assert!(
+            (deg - expected).abs() < 1e-10,
+            "got {deg}, expected {expected}"
+        );
+    }
+
+    #[test]
+    fn test_parse_hms_invalid_parts() {
+        assert!(parse_hms_to_deg("05 35").is_none()); // only 2 parts
+        assert!(parse_hms_to_deg("").is_none());
+        assert!(parse_hms_to_deg("abc def ghi").is_none());
+    }
+
+    #[test]
+    fn test_parse_dms_invalid_parts() {
+        assert!(parse_dms_to_deg("45 30").is_none());
+        assert!(parse_dms_to_deg("").is_none());
     }
 }

@@ -163,6 +163,16 @@ pub struct AstroImageMetadata {
     pub focal_length: Option<f64>,
     /// Airmass at time of observation.
     pub airmass: Option<f64>,
+    /// Right ascension of telescope pointing in degrees.
+    pub ra_deg: Option<f64>,
+    /// Declination of telescope pointing in degrees.
+    pub dec_deg: Option<f64>,
+    /// Pixel size in microns (X axis).
+    pub pixel_size_x: Option<f64>,
+    /// Pixel size in microns (Y axis).
+    pub pixel_size_y: Option<f64>,
+    /// Maximum valid pixel value (saturation level).
+    pub data_max: Option<f64>,
 }
 
 // ============================================================================
