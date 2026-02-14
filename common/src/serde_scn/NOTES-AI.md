@@ -70,45 +70,9 @@ Not urgent — only affects strings with many non-ASCII characters.
 
 ---
 
-## Serde Convention Violations (de.rs)
+## Serde Convention Notes (de.rs)
 
-### `deserialize_str` aggressively coerces non-string types (de.rs:103-117)
-
-Converts Int→String, Float→String, Bool→String, Null→"null", unit Variant→String.
-
-serde_json's `deserialize_str` only accepts `Value::String` — all other types return `invalid_type`.
-The `deserialize_str`/`deserialize_string` methods are type hints ("the input IS a string"), not
-conversion requests. Coercing 42 to "42" in the format deserializer can cause unexpected behavior
-with `#[serde(flatten)]` and `#[serde(untagged)]`.
-
-**Fix**: Make strict — only accept `ScnValue::String`.
-
-### `deserialize_f64` casts integers directly (de.rs:90-97)
-
-Does `visitor.visit_f64(i as f64)` instead of `visitor.visit_i64(i)`. serde_json passes the native
-type and lets the visitor handle conversion. The current approach hides precision loss for large i64
-values and prevents custom visitors from rejecting lossy conversion.
-
-**Fix**: Pass through as `visit_i64`/`visit_u64`, matching serde_json pattern.
-
-### `deserialize_i64`/`deserialize_u64` pass Float through (de.rs:62-86)
-
-Including `ScnValue::Float(f) => visitor.visit_f64(f)` in integer deserializers adds unnecessary
-code paths. The standard i64 visitor's `visit_f64` default returns a type error anyway.
-
-**Fix**: Remove Float arm from integer deserializers.
-
-### Error messages dump entire value trees (de.rs, multiple locations)
-
-`format!("expected X, got {:?}", self)` dumps the full ScnValue tree. For large structures this
-creates walls of text and wasteful allocations (especially bad with `#[serde(untagged)]` which
-retries multiple variants).
-
-**Fix**: Add an `unexpected()` method returning `serde::de::Unexpected`, then use
-`serde::de::Error::invalid_type(self.unexpected(), &"expected")`. Produces concise messages like
-`invalid type: integer 42, expected null`.
-
-### `deserialize_any` for `Variant(tag, None)` returns `visit_string` (de.rs:34)
+### `deserialize_any` for `Variant(tag, None)` returns `visit_string` (de.rs:58)
 
 Loses variant semantics. Can cause issues with `#[serde(untagged)]` where a String variant may
 match before an enum variant. The Variant-with-payload case correctly uses single-entry map.

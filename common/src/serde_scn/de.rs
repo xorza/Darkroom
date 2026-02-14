@@ -4,6 +4,30 @@ use super::error::{Result, ScnError};
 use super::value::ScnValue;
 
 // ===========================================================================
+// Helpers
+// ===========================================================================
+
+impl ScnValue {
+    fn unexpected(&self) -> de::Unexpected<'_> {
+        match self {
+            ScnValue::Null => de::Unexpected::Unit,
+            ScnValue::Bool(b) => de::Unexpected::Bool(*b),
+            ScnValue::Int(i) => de::Unexpected::Signed(*i),
+            ScnValue::Uint(u) => de::Unexpected::Unsigned(*u),
+            ScnValue::Float(f) => de::Unexpected::Float(*f),
+            ScnValue::String(s) => de::Unexpected::Str(s),
+            ScnValue::Array(_) => de::Unexpected::Seq,
+            ScnValue::Map(_) => de::Unexpected::Map,
+            ScnValue::Variant(..) => de::Unexpected::Other("variant"),
+        }
+    }
+
+    fn invalid_type_error<E: de::Error>(self, exp: &dyn de::Expected) -> E {
+        E::invalid_type(self.unexpected(), exp)
+    }
+}
+
+// ===========================================================================
 // Deserializer: ScnValue → T
 // ===========================================================================
 
@@ -63,7 +87,6 @@ impl<'de> de::Deserializer<'de> for ScnValue {
         match self {
             ScnValue::Int(i) => visitor.visit_i64(i),
             ScnValue::Uint(u) => visitor.visit_u64(u),
-            ScnValue::Float(f) => visitor.visit_f64(f),
             _ => self.deserialize_any(visitor),
         }
     }
@@ -80,7 +103,6 @@ impl<'de> de::Deserializer<'de> for ScnValue {
         match self {
             ScnValue::Uint(u) => visitor.visit_u64(u),
             ScnValue::Int(i) => visitor.visit_i64(i),
-            ScnValue::Float(f) => visitor.visit_f64(f),
             _ => self.deserialize_any(visitor),
         }
     }
@@ -90,8 +112,8 @@ impl<'de> de::Deserializer<'de> for ScnValue {
     fn deserialize_f64<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             ScnValue::Float(f) => visitor.visit_f64(f),
-            ScnValue::Int(i) => visitor.visit_f64(i as f64),
-            ScnValue::Uint(u) => visitor.visit_f64(u as f64),
+            ScnValue::Int(i) => visitor.visit_i64(i),
+            ScnValue::Uint(u) => visitor.visit_u64(u),
             _ => self.deserialize_any(visitor),
         }
     }
@@ -103,16 +125,7 @@ impl<'de> de::Deserializer<'de> for ScnValue {
     fn deserialize_str<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             ScnValue::String(s) => visitor.visit_string(s),
-            ScnValue::Int(i) => visitor.visit_string(i.to_string()),
-            ScnValue::Uint(u) => visitor.visit_string(u.to_string()),
-            ScnValue::Float(f) => visitor.visit_string(f.to_string()),
-            ScnValue::Bool(b) => visitor.visit_string(b.to_string()),
-            ScnValue::Null => visitor.visit_string("null".to_string()),
-            ScnValue::Variant(tag, None) => visitor.visit_string(tag),
-            _ => Err(ScnError::Message(format!(
-                "expected string, got {:?}",
-                self
-            ))),
+            _ => Err(self.invalid_type_error(&"a string")),
         }
     }
 
@@ -137,7 +150,7 @@ impl<'de> de::Deserializer<'de> for ScnValue {
     fn deserialize_unit<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             ScnValue::Null => visitor.visit_unit(),
-            _ => Err(ScnError::Message(format!("expected null, got {:?}", self))),
+            _ => Err(self.invalid_type_error(&"null")),
         }
     }
 
@@ -165,7 +178,7 @@ impl<'de> de::Deserializer<'de> for ScnValue {
                 };
                 visitor.visit_seq(&mut de)
             }
-            _ => Err(ScnError::Message(format!("expected array, got {:?}", self))),
+            _ => Err(self.invalid_type_error(&"a sequence")),
         }
     }
 
@@ -191,7 +204,7 @@ impl<'de> de::Deserializer<'de> for ScnValue {
                 };
                 visitor.visit_map(&mut de)
             }
-            _ => Err(ScnError::Message(format!("expected map, got {:?}", self))),
+            _ => Err(self.invalid_type_error(&"a map")),
         }
     }
 
@@ -229,10 +242,7 @@ impl<'de> de::Deserializer<'de> for ScnValue {
                     value: Some(value),
                 })
             }
-            _ => Err(ScnError::Message(format!(
-                "expected string, variant, or single-key map for enum, got {:?}",
-                self
-            ))),
+            _ => Err(self.invalid_type_error(&"a string, variant, or single-key map")),
         }
     }
 
@@ -383,10 +393,7 @@ impl<'de> de::VariantAccess<'de> for VariantDeserializer {
                 };
                 visitor.visit_seq(&mut de)
             }
-            Some(other) => Err(ScnError::Message(format!(
-                "expected array for tuple variant, got {:?}",
-                other
-            ))),
+            Some(other) => Err(other.invalid_type_error(&"a sequence")),
             None => Err(ScnError::Message(
                 "expected tuple variant value".to_string(),
             )),
@@ -406,10 +413,7 @@ impl<'de> de::VariantAccess<'de> for VariantDeserializer {
                 };
                 visitor.visit_map(&mut de)
             }
-            Some(other) => Err(ScnError::Message(format!(
-                "expected map for struct variant, got {:?}",
-                other
-            ))),
+            Some(other) => Err(other.invalid_type_error(&"a map")),
             None => Err(ScnError::Message(
                 "expected struct variant value".to_string(),
             )),
