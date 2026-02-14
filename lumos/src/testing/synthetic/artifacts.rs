@@ -2,9 +2,6 @@
 //!
 //! Provides various artifacts commonly found in astronomical images:
 //! - Cosmic rays
-//! - Hot/dead pixels
-//! - Bad columns/rows
-//! - Satellite/airplane trails
 //! - CFA (Bayer) pattern artifacts
 
 /// Add random cosmic ray hits to the image.
@@ -49,161 +46,10 @@ pub fn add_cosmic_rays(
     positions
 }
 
-/// Add hot pixels (constant high values) to the image.
-pub fn add_hot_pixels(
-    pixels: &mut [f32],
-    width: usize,
-    positions: &[(usize, usize)],
-    amplitude: f32,
-) {
-    let height = pixels.len() / width;
-    for &(x, y) in positions {
-        if x < width && y < height {
-            pixels[y * width + x] += amplitude;
-        }
-    }
-}
-
-/// Add dead pixels (zero response) to the image.
-pub fn add_dead_pixels(pixels: &mut [f32], width: usize, positions: &[(usize, usize)]) {
-    let height = pixels.len() / width;
-    for &(x, y) in positions {
-        if x < width && y < height {
-            pixels[y * width + x] = 0.0;
-        }
-    }
-}
-
-/// Add bad columns to the image.
-///
-/// Bad columns can be either hot (elevated values) or dead (zero).
-pub fn add_bad_columns(
-    pixels: &mut [f32],
-    width: usize,
-    columns: &[usize],
-    mode: BadPixelMode,
-    value: f32,
-) {
-    let height = pixels.len() / width;
-    for &col in columns {
-        if col < width {
-            for y in 0..height {
-                match mode {
-                    BadPixelMode::Hot => pixels[y * width + col] += value,
-                    BadPixelMode::Dead => pixels[y * width + col] = 0.0,
-                    BadPixelMode::Fixed => pixels[y * width + col] = value,
-                }
-            }
-        }
-    }
-}
-
-/// Add bad rows to the image.
-pub fn add_bad_rows(
-    pixels: &mut [f32],
-    width: usize,
-    rows: &[usize],
-    mode: BadPixelMode,
-    value: f32,
-) {
-    let height = pixels.len() / width;
-    for &row in rows {
-        if row < height {
-            for x in 0..width {
-                match mode {
-                    BadPixelMode::Hot => pixels[row * width + x] += value,
-                    BadPixelMode::Dead => pixels[row * width + x] = 0.0,
-                    BadPixelMode::Fixed => pixels[row * width + x] = value,
-                }
-            }
-        }
-    }
-}
-
-/// Mode for bad pixel behavior.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BadPixelMode {
-    /// Add value to existing pixel
-    Hot,
-    /// Set pixel to zero
-    Dead,
-    /// Set pixel to fixed value
-    Fixed,
-}
-
-/// Add a linear trail (satellite or airplane).
-///
-/// # Arguments
-/// * `pixels` - Mutable pixel buffer
-/// * `width` - Image width
-/// * `start` - Trail start position (x, y)
-/// * `end` - Trail end position (x, y)
-/// * `trail_width` - Width of the trail in pixels
-/// * `amplitude` - Peak brightness of the trail
-pub fn add_linear_trail(
-    pixels: &mut [f32],
-    width: usize,
-    start: (f32, f32),
-    end: (f32, f32),
-    trail_width: f32,
-    amplitude: f32,
-) {
-    let height = pixels.len() / width;
-
-    let dx = end.0 - start.0;
-    let dy = end.1 - start.1;
-    let length = (dx * dx + dy * dy).sqrt();
-
-    if length < 0.001 {
-        return;
-    }
-
-    // Unit vector along trail
-    let ux = dx / length;
-    let uy = dy / length;
-
-    // Perpendicular vector
-    let px = -uy;
-    let py = ux;
-
-    let half_width = trail_width / 2.0;
-
-    for y in 0..height {
-        for x in 0..width {
-            // Vector from start to this pixel
-            let vx = x as f32 - start.0;
-            let vy = y as f32 - start.1;
-
-            // Project onto trail direction
-            let along = vx * ux + vy * uy;
-
-            // Skip if outside trail length
-            if along < 0.0 || along > length {
-                continue;
-            }
-
-            // Distance perpendicular to trail
-            let perp = (vx * px + vy * py).abs();
-
-            // Apply Gaussian profile across width
-            if perp < half_width * 3.0 {
-                let profile = (-perp * perp / (2.0 * half_width * half_width / 4.0)).exp();
-                pixels[y * width + x] += amplitude * profile;
-            }
-        }
-    }
-}
-
 /// Add CFA (Bayer) pattern artifacts.
 ///
 /// This simulates the checkerboard pattern visible in debayered images
 /// when color channels have different sensitivities.
-///
-/// # Arguments
-/// * `pixels` - Mutable pixel buffer
-/// * `width` - Image width
-/// * `strength` - Amplitude of the pattern (0.0-1.0)
-/// * `pattern` - Bayer pattern type
 pub fn add_bayer_pattern(pixels: &mut [f32], width: usize, strength: f32, pattern: BayerPattern) {
     let height = pixels.len() / width;
 
@@ -248,26 +94,6 @@ pub enum BayerPattern {
     BGGR,
 }
 
-/// Generate random hot pixel positions.
-pub fn generate_random_hot_pixels(
-    width: usize,
-    height: usize,
-    count: usize,
-    seed: u64,
-) -> Vec<(usize, usize)> {
-    let mut positions = Vec::with_capacity(count);
-
-    let mut rng = crate::testing::TestRng::new(seed);
-
-    for _ in 0..count {
-        let x = (rng.next_f32() * width as f32) as usize;
-        let y = (rng.next_f32() * height as f32) as usize;
-        positions.push((x.min(width - 1), y.min(height - 1)));
-    }
-
-    positions
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,37 +111,5 @@ mod tests {
         // Check that pixels were modified
         let non_zero_count = pixels.iter().filter(|&&p| p > 0.0).count();
         assert!(non_zero_count >= 10);
-    }
-
-    #[test]
-    fn test_bad_column() {
-        let width = 64;
-        let height = 64;
-        let mut pixels = vec![0.1f32; width * height];
-
-        add_bad_columns(&mut pixels, width, &[10], BadPixelMode::Dead, 0.0);
-
-        // Column 10 should be zero
-        for y in 0..height {
-            assert_eq!(pixels[y * width + 10], 0.0);
-        }
-
-        // Other columns should be unchanged
-        assert_eq!(pixels[0], 0.1);
-    }
-
-    #[test]
-    fn test_linear_trail() {
-        let width = 64;
-        let height = 64;
-        let mut pixels = vec![0.0f32; width * height];
-
-        add_linear_trail(&mut pixels, width, (0.0, 32.0), (63.0, 32.0), 3.0, 0.5);
-
-        // Center of trail should have elevated values
-        assert!(pixels[32 * width + 32] > 0.3);
-
-        // Far from trail should be zero
-        assert!(pixels[0] < 0.01);
     }
 }

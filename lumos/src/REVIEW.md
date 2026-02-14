@@ -23,29 +23,14 @@ Comprehensive code quality review across submodules (~40k+ lines). The codebase 
 #### ~~[F4] Wasteful clone in AstroImage::save()~~ --- FIXED
 - Added `to_image(&self)` that borrows pixel data; `save()` no longer clones.
 
-#### [F5] Duplicate `use rayon::prelude::*` import
-- **Location**: `star_detection/threshold_mask/mod.rs:10,24`
-- **Category**: Dead code
-- **Impact**: 1/5 --- No runtime effect
-- **Meaningfulness**: 3/5 --- Indicates copy-paste
-- **Invasiveness**: 1/5 --- Delete one line
-- **Description**: Rayon prelude imported twice in the same file.
+#### ~~[F5] Duplicate `use rayon::prelude::*` import~~ --- FIXED
+- Removed duplicate import in `star_detection/threshold_mask/mod.rs`.
 
-#### [F6] Unused imports in calibration_masters
-- **Location**: `calibration_masters/defect_map.rs:31,35`
-- **Category**: Dead code
-- **Impact**: 2/5 --- No runtime effect but misleading
-- **Meaningfulness**: 3/5 --- Indicates stale code
-- **Invasiveness**: 1/5 --- Delete two lines
-- **Description**: `use crate::stacking::cache::StackableImage` and `use rayon::prelude::*` are never used in the module.
+#### ~~[F6] Unused imports in calibration_masters~~ --- FIXED
+- Removed unused `StackableImage` and `rayon::prelude::*` imports from `calibration_masters/defect_map.rs`.
 
-#### [F8] Unnecessary clone in DefectMap::correct()
-- **Location**: `calibration_masters/defect_map.rs:134`
-- **Category**: Simplification
-- **Impact**: 2/5 --- Minor, CfaType is small
-- **Meaningfulness**: 2/5 --- Trivial to fix
-- **Invasiveness**: 1/5 --- Change `.clone().unwrap()` to `.as_ref().unwrap()`
-- **Description**: `cfa_type` is cloned but only used by reference. Use `.as_ref().unwrap()` instead.
+#### ~~[F8] Unnecessary clone in DefectMap::correct()~~ --- FIXED
+- Changed `.clone().unwrap()` to `.as_ref().unwrap()` and switched from trait method to direct field access.
 
 ### Priority 2 --- High Impact, Moderate Invasiveness
 
@@ -140,17 +125,11 @@ Comprehensive code quality review across submodules (~40k+ lines). The codebase 
 
 ### Priority 4 --- Low Priority
 
-#### [F26] Misleading `#[allow(dead_code)]` in star_detection background SIMD
-- **Location**: `star_detection/background/simd/mod.rs:20-21,46-47,70`
-- **Category**: Dead code annotation
-- **Impact**: 1/5 | **Meaningfulness**: 4/5 | **Invasiveness**: 1/5
-- **Description**: Functions like `sum_and_sum_sq_scalar` are actively dispatched at runtime but marked `#[allow(dead_code)]`. Remove the misleading annotations.
+#### [F26] `#[allow(dead_code)]` in star_detection background SIMD --- NOT A BUG
+- Functions `sum_and_sum_sq_simd` and `sum_abs_deviations_simd` are genuinely unused in production (the pipeline uses scalar `math/statistics` instead). Annotations are correct per project rules: kept intentionally for future use with explanatory comments.
 
-#### [F27] Unused artifact functions in testing
-- **Location**: `testing/synthetic/artifacts.rs:58-257`
-- **Category**: Dead code
-- **Impact**: 1/5 | **Meaningfulness**: 2/5 | **Invasiveness**: 1/5
-- **Description**: `add_hot_pixels`, `add_dead_pixels`, `add_bad_columns`, `add_bad_rows`, `add_linear_trail`, `add_bayer_pattern`, `generate_random_hot_pixels` are defined but never exported or used (~190 lines). Only `add_cosmic_rays` is exported.
+#### ~~[F27] Unused artifact functions in testing~~ --- FIXED
+- Removed `add_hot_pixels`, `add_dead_pixels`, `add_bad_columns`, `add_bad_rows`, `BadPixelMode`, `add_linear_trail`, `generate_random_hot_pixels` and their tests (~190 lines). Kept `add_cosmic_rays`, `add_bayer_pattern`, `BayerPattern` (used by star_field.rs).
 
 #### [F30] `scalar` module unnecessarily public in math/sum
 - **Location**: `math/sum/mod.rs`

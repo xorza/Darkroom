@@ -28,11 +28,8 @@
 
 use crate::astro_image::cfa::{CfaImage, CfaType};
 use crate::common::Buffer2;
-use crate::stacking::cache::StackableImage;
 
 use arrayvec::ArrayVec;
-
-use rayon::prelude::*;
 
 /// A mask of defective pixels (hot and cold/dead) detected from a master dark frame.
 ///
@@ -131,12 +128,12 @@ impl DefectMap {
             return;
         }
 
-        let cfa_type = image.metadata().cfa_type.clone().unwrap();
+        let cfa_type = image.metadata.cfa_type.as_ref().unwrap();
 
         for &idx in self.hot_indices.iter().chain(self.cold_indices.iter()) {
             let x = idx % image.data.width();
             let y = idx / image.data.width();
-            image.data[idx] = median_same_color_neighbors(&image.data, x, y, &cfa_type);
+            image.data[idx] = median_same_color_neighbors(&image.data, x, y, cfa_type);
         }
     }
 }

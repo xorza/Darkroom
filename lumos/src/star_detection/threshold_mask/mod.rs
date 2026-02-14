@@ -21,7 +21,6 @@ mod bench;
 mod tests;
 
 use crate::common::{BitBuffer2, Buffer2};
-use rayon::prelude::*;
 
 #[cfg(target_arch = "x86_64")]
 use common::cpu_features;
