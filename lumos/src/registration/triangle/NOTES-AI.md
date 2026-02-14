@@ -61,9 +61,11 @@ intermediate between 2-3, longest between 3-1. Voting: matched triangle pair cas
 - We implement Groth's R=10 elongation filter (`geometry.rs:71`). Correct.
 - We do NOT implement Groth's C<0.99 cosine filter. Our Heron's formula area check
   (`geometry.rs:81`) serves a similar but not identical purpose -- it rejects flat
-  triangles, while C<0.99 rejects triangles where the angle between the two longest
-  sides is very small. The area check is actually more robust because it catches all
-  degenerate configurations, not just one specific angle.
+  triangles, while C<0.99 rejects triangles where the angle at vertex 1 (between the
+  longest and shortest sides) is very small (<~8 degrees). There is a small gap: a
+  triangle with sides ~(5, 4, 1) has R=5 < 10, area^2 >> 1e-6, but cos(angle) = 1.0
+  >= 0.99. In practice the R + area combination catches the vast majority of problematic
+  cases. See Issue 6 for analysis.
 - Our vertex labeling differs from Groth: we order by "opposite side length" (opp shortest,
   opp middle, opp longest), while Groth orders by "adjacent side" (shortest between 1-2,
   etc.). Both establish deterministic vertex correspondence from sorted side lengths.
@@ -139,7 +141,7 @@ shortest/longest), both in [0, 1]. Used geometric hashing with 2D bins.
   in dense fields.
 - Their Bayesian verification is more principled than our vote counting + RANSAC.
 
-### PixInsight StarAlignment
+### PixInsight StarAlignment (v1.9.0 "Lockhart", Dec 2024)
 
 **Implementation:** Polygon descriptors (quad through octagon, default pentagon).
 - Two most distant stars define local coordinate frame.
@@ -147,6 +149,7 @@ shortest/longest), both in [0, 1]. Used geometric hashing with 2D bins.
 - Pentagon: 6D (3x discriminating power of triangles). Uncertainty = 1/(N-2) of triangle.
 - Cannot handle specular (mirror) transformations -- falls back to triangles.
 - RANSAC for outlier rejection.
+- v1.9.0: Added Thin Plate Spline distortion correction, new star detection algorithm.
 
 **Our implementation vs PixInsight:**
 - Our 2D triangles have 3x higher uncertainty than PixInsight's default pentagon.
@@ -154,12 +157,14 @@ shortest/longest), both in [0, 1]. Used geometric hashing with 2D bins.
   robustness. Our triangles are only invariant to similarity transforms.
 - PixInsight cannot handle mirrors; we can (orientation toggle).
 
-### Siril
+### Siril (v1.4, 2024-2025)
 
 **Implementation:** Based on Michael Richmond's `match` program.
 - Takes brightest 20 stars, forms ALL N*(N-1)*(N-2)/6 triangles (brute force O(n^3)).
 - Uses triangle similarity for matching, then RANSAC.
-- Simple but limited to ~20 stars due to cubic complexity.
+- Supports Shift(2), Euclidean(3), Similarity(4), Affine(6), Homography(8) DOF.
+- v1.4: Added astrometric registration with up to 5th-order SIP distortion correction,
+  proper Drizzle algorithm, mosaic stacking, Gaia DR3 offline catalogs.
 
 **Our implementation vs Siril:**
 - Our KNN approach scales to 200+ stars; Siril's brute-force is limited to ~20.
@@ -167,37 +172,53 @@ shortest/longest), both in [0, 1]. Used geometric hashing with 2D bins.
 
 ### ASTAP (Han Kleijn)
 
-**Implementation:** Supports both triangle and quad descriptors (since 2024 updates).
-- Triangle mode: similar to Groth/Valdes, hash-based indexing.
-- Quad mode: 4-star descriptors analogous to Astrometry.net's approach. Noted by the
-  author as providing better uniqueness than triangles for large star fields.
+**Implementation:** Uses tetrahedron (4-star) hash codes.
+- Six distances between 4 stars, normalized by the largest, yield 5 ratios invariant
+  to rotation, scaling, and flipping. Effectively 5D feature space.
+- Hash-based indexing similar in spirit to Valdes' geometric hashing.
 - Supports SIP distortion correction.
-- 2025 update: "full implementation of reverse mapping with bilinear interpolation."
+- 2024: ~20% stacking speed improvement, CSV star position export, improved solver
+  for near-celestial-pole regions, XISF format support.
 
 **Our implementation vs ASTAP:**
-- We only support triangles; ASTAP's dual triangle/quad approach provides fallback
-  for difficult fields. For our 50-200 star image-to-image matching, triangles suffice.
-- ASTAP's hash-based lookup is similar in spirit to Valdes' geometric hashing.
+- We use 2D triangles; ASTAP's 5D tetrahedron hash has ~2.5x the discriminating power.
+  For our 50-200 star image-to-image matching, triangles suffice.
+- ASTAP's 5D hash is invariant to flipping; our orientation check handles this differently.
 
 ### starmatch (PyPI 2024-2025)
 
-**Implementation:** Python library (v1.0+, 2024-2025) for star pattern matching.
-- Multi-pass matching with different pixel tolerances for initial and secondary
-  matching passes. This adaptive tolerance strategy improves match success rate
-  on difficult fields.
-- Uses triangle similarity matching with iterative refinement.
+**Implementation:** Python library (v1.0+) for star map matching and positioning.
+- Supports both **triangle and quad** geometric invariant modes.
+- Blind matching uses hierarchical HEALPix levels with precomputed HDF5 hash files.
+- Selects brightest 30 sources; 15 nearest neighbors via k-d tree.
+- Multi-pass matching: blind=60px, primary=20px, secondary=3px pixel tolerances.
+- RANSAC verification (triangles: 8 min inliers, quads: 2).
+- Distortion calibration: Gaussian Process Regression, piecewise-affine, 2nd-order poly.
 
 **Our implementation vs starmatch:**
-- We use a single fixed tolerance (ratio_tolerance=0.01). Multi-pass matching
-  with relaxed tolerances on retry could improve robustness for difficult cases
-  (very noisy centroids, moderate distortion).
+- We use a single fixed tolerance. Multi-pass with relaxed tolerances on retry
+  could improve robustness for difficult cases.
+- starmatch's quad mode gives higher-DOF matching when triangles are insufficient.
 
 ### GMTV (2022) -- Global Multi-Triangle Voting
 
-- Uses PCA-reduced triangle features for efficient search.
-- Weights votes by triangle selectivity (inverse density in feature space).
-- Designed for star sensor "lost in space" problem (different domain, but voting
-  methodology is relevant).
+**Paper:** Applied Sciences, 12(19), 9993. Designed for star sensor "lost in space" problem.
+- Builds triangles from several bright stars in FOV as basic match elements.
+- **PCA-based feature extraction**: reduces triangle features to invariant descriptors,
+  more robust to noise than raw side ratios.
+- **K-vector accelerated search**: 2D lookup table for fast feature matching.
+- **Weighted voting**: triangles that appear infrequently in the catalog get higher vote
+  weight (inverse density in feature space). Reduces false matches from common shapes.
+- **Largest cluster verification**: filters initial voting results to remove false matches.
+- Database: reference catalog + triangle unit database, only 1.5 MB.
+- "Performs much better than geometric voting and grid algorithms in the presence of
+  positional noise, magnitude noise, and false stars."
+
+**Our implementation vs GMTV:**
+- We use uniform vote weights; GMTV's selectivity weighting would reduce false matches
+  from common near-equilateral triangles. See "Weighted Voting" in improvements section.
+- GMTV's PCA features are more noise-robust than raw side ratios, but add complexity.
+- GMTV targets star sensor domain; our image-to-image domain has different constraints.
 
 ## Issues Found
 

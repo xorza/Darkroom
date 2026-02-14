@@ -216,7 +216,7 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
     let a_minus_1 = A as i32 - 1;
 
     #[cfg(target_arch = "x86_64")]
-    let use_fma = A == 3 && cpu_features::has_avx2_fma();
+    let use_fma = cpu_features::has_avx2_fma();
 
     // Pre-compute clamping threshold parameters (only used when DERINGING=true)
     let clamp_th = params.method.deringing().clamp(0.0, 1.0);
@@ -284,20 +284,22 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
             1.0
         };
 
-        // SIMD fast path (Lanczos3 only): needs kx0+7 < iw for 128-bit loads (6 valid + 2 padding)
+        // SIMD fast path: needs all SIZE rows and enough columns for 128-bit loads.
+        // SIZE=4: reads 4 floats/row (one __m128), needs kx0 + 3 < iw
+        // SIZE=6: reads 8 floats/row (two __m128, 2 zero-padded), needs kx0 + 7 < iw
+        // SIZE=8: reads 8 floats/row (two __m128), needs kx0 + 7 < iw
+        let simd_cols: i32 = if SIZE > 4 { 8 } else { SIZE as i32 };
         #[cfg(target_arch = "x86_64")]
-        if use_fma && kx0 >= 0 && ky0 >= 0 && kx0 + 8 < iw && ky0 + 5 < ih {
-            // SAFETY: A == 3 is guaranteed by `use_fma` check above, so SIZE == 6.
-            let wx6: &[f32; 6] = wx[..6].try_into().unwrap();
-            let wy6: &[f32; 6] = wy[..6].try_into().unwrap();
+        if use_fma && kx0 >= 0 && ky0 >= 0 && kx0 + simd_cols - 1 < iw && ky0 + SIZE as i32 - 1 < ih
+        {
             let acc = unsafe {
-                sse::lanczos3_kernel_fma::<DERINGING>(
+                sse::lanczos_kernel_fma::<A, SIZE, DERINGING>(
                     pixels,
                     input_width,
                     kx0 as usize,
                     ky0 as usize,
-                    wx6,
-                    wy6,
+                    &wx,
+                    &wy,
                 )
             };
             *out_pixel = if DERINGING {

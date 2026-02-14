@@ -279,41 +279,42 @@ pub unsafe fn warp_row_bilinear_sse(
 
 use super::super::sample_pixel;
 
-/// Compute the Lanczos3 6x6 weighted sum for a single pixel using FMA.
+/// Compute the Lanczos SIZE×SIZE weighted sum for a single pixel using SSE FMA.
 ///
-/// Pre-loads `wx` weights into SSE registers, then for each of the 6 source rows:
-/// loads pixels, multiplies by `wx`, scales by `wy[j]` (broadcast), and accumulates.
+/// Generic over kernel size: Lanczos2 (SIZE=4), Lanczos3 (SIZE=6), Lanczos4 (SIZE=8).
+/// - SIZE=4: single `__m128` (4 weights), one 128-bit load per row
+/// - SIZE=6: two `__m128` (4+2 weights, 2 zero-padded), two 128-bit loads per row
+/// - SIZE=8: two `__m128` (4+4 weights), two 128-bit loads per row
 ///
 /// When `DERINGING=true`, tracks positive and negative weighted contributions
 /// separately for PixInsight-style soft clamping.
 ///
-/// Returns `(sp, sn, wp, wn)`:
-/// - `sp`: sum of positive weighted contributions
-/// - `sn`: sum of |negative weighted contributions|
-/// - `wp`: sum of weights for positive contributions
-/// - `wn`: sum of |weights| for negative contributions
-///
-/// When `DERINGING=false`, returns `(total_sum, 0.0, 0.0, 0.0)`.
-///
 /// # Safety
 /// - Caller must ensure FMA is available.
-/// - The 6x6 pixel window at `(kx, ky)` must be fully in bounds,
-///   plus 2 extra columns for the 128-bit load at offset +4: `kx + 7 < input_width`.
+/// - The SIZE×SIZE pixel window at `(kx, ky)` must be fully in bounds.
+/// - For SIZE > 4: `kx + 7 < input_width` (reads 8 floats per row).
+/// - For SIZE = 4: `kx + 3 < input_width` (reads 4 floats per row).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
 #[inline]
 #[allow(unsafe_op_in_unsafe_fn)]
-pub unsafe fn lanczos3_kernel_fma<const DERINGING: bool>(
+pub unsafe fn lanczos_kernel_fma<const A: usize, const SIZE: usize, const DERINGING: bool>(
     pixels: &[f32],
     input_width: usize,
     kx: usize,
     ky: usize,
-    wx: &[f32; 6],
-    wy: &[f32; 6],
+    wx: &[f32; SIZE],
+    wy: &[f32; SIZE],
 ) -> SoftClampAccum {
-    // Pre-load wx weights into SSE registers (constant across all 6 rows)
-    let wx_lo = _mm_set_ps(wx[3], wx[2], wx[1], wx[0]);
-    let wx_hi = _mm_setr_ps(wx[4], wx[5], 0.0, 0.0);
+    // Pre-load wx weights into SSE registers (constant across all rows)
+    let wx_lo = _mm_loadu_ps(wx.as_ptr());
+    let wx_hi = if SIZE == 8 {
+        _mm_loadu_ps(wx.as_ptr().add(4))
+    } else if SIZE == 6 {
+        _mm_setr_ps(wx[4], wx[5], 0.0, 0.0)
+    } else {
+        _mm_setzero_ps()
+    };
 
     let zero = _mm_setzero_ps();
     let mut acc_lo = zero;
@@ -329,55 +330,72 @@ pub unsafe fn lanczos3_kernel_fma<const DERINGING: bool>(
     let mut wn_lo = zero;
     let mut wn_hi = zero;
 
-    for j in 0..6 {
+    for j in 0..SIZE {
         let row_ptr = pixels.as_ptr().add((ky + j) * input_width + kx);
         let src_lo = _mm_loadu_ps(row_ptr);
-        let src_hi = _mm_loadu_ps(row_ptr.add(4));
-
         let wyj = _mm_set1_ps(wy[j]);
 
         if DERINGING {
             let w_lo = _mm_mul_ps(wx_lo, wyj);
-            let w_hi = _mm_mul_ps(wx_hi, wyj);
             let s_lo = _mm_mul_ps(src_lo, w_lo);
-            let s_hi = _mm_mul_ps(src_hi, w_hi);
 
-            // Split into positive (s >= 0) and negative (s < 0) contributions
             let pos_lo = _mm_cmpge_ps(s_lo, zero);
             let neg_lo = _mm_cmplt_ps(s_lo, zero);
             sp_lo = _mm_add_ps(sp_lo, _mm_and_ps(pos_lo, s_lo));
             wp_lo = _mm_add_ps(wp_lo, _mm_and_ps(pos_lo, w_lo));
-            // For negative: accumulate -s and -w (both positive values)
             sn_lo = _mm_sub_ps(sn_lo, _mm_and_ps(neg_lo, s_lo));
             wn_lo = _mm_sub_ps(wn_lo, _mm_and_ps(neg_lo, w_lo));
 
-            let pos_hi = _mm_cmpge_ps(s_hi, zero);
-            let neg_hi = _mm_cmplt_ps(s_hi, zero);
-            sp_hi = _mm_add_ps(sp_hi, _mm_and_ps(pos_hi, s_hi));
-            wp_hi = _mm_add_ps(wp_hi, _mm_and_ps(pos_hi, w_hi));
-            sn_hi = _mm_sub_ps(sn_hi, _mm_and_ps(neg_hi, s_hi));
-            wn_hi = _mm_sub_ps(wn_hi, _mm_and_ps(neg_hi, w_hi));
+            if SIZE > 4 {
+                let src_hi = _mm_loadu_ps(row_ptr.add(4));
+                let w_hi = _mm_mul_ps(wx_hi, wyj);
+                let s_hi = _mm_mul_ps(src_hi, w_hi);
+
+                let pos_hi = _mm_cmpge_ps(s_hi, zero);
+                let neg_hi = _mm_cmplt_ps(s_hi, zero);
+                sp_hi = _mm_add_ps(sp_hi, _mm_and_ps(pos_hi, s_hi));
+                wp_hi = _mm_add_ps(wp_hi, _mm_and_ps(pos_hi, w_hi));
+                sn_hi = _mm_sub_ps(sn_hi, _mm_and_ps(neg_hi, s_hi));
+                wn_hi = _mm_sub_ps(wn_hi, _mm_and_ps(neg_hi, w_hi));
+            }
         } else {
-            // FMA: acc += (src * wx) * wy
-            // Fuses the wy multiply + accumulate into one FMA, saving one mul per pair.
             let sx_lo = _mm_mul_ps(src_lo, wx_lo);
-            let sx_hi = _mm_mul_ps(src_hi, wx_hi);
             acc_lo = _mm_fmadd_ps(sx_lo, wyj, acc_lo);
-            acc_hi = _mm_fmadd_ps(sx_hi, wyj, acc_hi);
+
+            if SIZE > 4 {
+                let src_hi = _mm_loadu_ps(row_ptr.add(4));
+                let sx_hi = _mm_mul_ps(src_hi, wx_hi);
+                acc_hi = _mm_fmadd_ps(sx_hi, wyj, acc_hi);
+            }
         }
     }
 
     if DERINGING {
-        // Horizontal reductions for all 4 accumulators
+        if SIZE > 4 {
+            SoftClampAccum {
+                sp: hsum_ps(_mm_add_ps(sp_lo, sp_hi)),
+                sn: hsum_ps(_mm_add_ps(sn_lo, sn_hi)),
+                wp: hsum_ps(_mm_add_ps(wp_lo, wp_hi)),
+                wn: hsum_ps(_mm_add_ps(wn_lo, wn_hi)),
+            }
+        } else {
+            SoftClampAccum {
+                sp: hsum_ps(sp_lo),
+                sn: hsum_ps(sn_lo),
+                wp: hsum_ps(wp_lo),
+                wn: hsum_ps(wn_lo),
+            }
+        }
+    } else if SIZE > 4 {
         SoftClampAccum {
-            sp: hsum_ps(_mm_add_ps(sp_lo, sp_hi)),
-            sn: hsum_ps(_mm_add_ps(sn_lo, sn_hi)),
-            wp: hsum_ps(_mm_add_ps(wp_lo, wp_hi)),
-            wn: hsum_ps(_mm_add_ps(wn_lo, wn_hi)),
+            sp: hsum_ps(_mm_add_ps(acc_lo, acc_hi)),
+            sn: 0.0,
+            wp: 0.0,
+            wn: 0.0,
         }
     } else {
         SoftClampAccum {
-            sp: hsum_ps(_mm_add_ps(acc_lo, acc_hi)),
+            sp: hsum_ps(acc_lo),
             sn: 0.0,
             wp: 0.0,
             wn: 0.0,
@@ -531,17 +549,16 @@ mod tests {
         assert_sse_matches_scalar(&input, &transform, 15, 1e-5, "SSE width=11");
     }
 
-    #[test]
+    /// Helper: compute scalar Lanczos weighted sum and compare against SIMD kernel.
     #[cfg(target_arch = "x86_64")]
-    fn test_lanczos3_kernel_fma_matches_scalar() {
-        // Test the SIMD lanczos3_kernel_fma against a scalar reference implementation.
+    fn assert_lanczos_kernel_fma_matches_scalar<const A: usize, const SIZE: usize>(label: &str) {
         if !cpu_features::has_avx2_fma() {
             return;
         }
 
-        // 16x16 image: pixel(x, y) = x + y * 0.1
-        let width = 16;
-        let height = 16;
+        // 20x20 image: pixel(x, y) = x + y * 0.1
+        let width = 20;
+        let height = 20;
         let data: Vec<f32> = (0..width * height)
             .map(|i| {
                 let x = (i % width) as f32;
@@ -550,57 +567,76 @@ mod tests {
             })
             .collect();
 
-        let lut = super::super::get_lanczos_lut(3);
+        let lut = super::super::get_lanczos_lut(A);
+        let a_minus_1 = A as i32 - 1;
 
-        // Test at interior position (5, 5), fx=0.3, fy=0.7
-        let kx: usize = 3; // x0 - 2 = 5 - 2 = 3
-        let ky: usize = 3; // y0 - 2 = 5 - 2 = 3
+        // Test at interior position: x0=6, y0=6, fx=0.3, fy=0.7
+        // kx0 = x0 - (A-1), ky0 = y0 - (A-1)
+        let kx = (6 - a_minus_1) as usize;
+        let ky = (6 - a_minus_1) as usize;
         let fx = 0.3f32;
         let fy = 0.7f32;
 
-        let wx = [
-            lut.lookup(fx + 2.0),
-            lut.lookup(fx + 1.0),
-            lut.lookup(fx),
-            lut.lookup(fx - 1.0),
-            lut.lookup(fx - 2.0),
-            lut.lookup(fx - 3.0),
-        ];
-        let wy = [
-            lut.lookup(fy + 2.0),
-            lut.lookup(fy + 1.0),
-            lut.lookup(fy),
-            lut.lookup(fy - 1.0),
-            lut.lookup(fy - 2.0),
-            lut.lookup(fy - 3.0),
-        ];
+        // Compute weights same as warp_row_lanczos_inner
+        let mut wx = [0.0f32; SIZE];
+        let mut wy = [0.0f32; SIZE];
+        for i in 0..SIZE {
+            wx[i] = if i < A {
+                lut.lookup_positive((a_minus_1 - i as i32) as f32 + fx)
+            } else {
+                lut.lookup_positive((i as i32 - a_minus_1) as f32 - fx)
+            };
+            wy[i] = if i < A {
+                lut.lookup_positive((a_minus_1 - i as i32) as f32 + fy)
+            } else {
+                lut.lookup_positive((i as i32 - a_minus_1) as f32 - fy)
+            };
+        }
 
         // Scalar reference (no deringing)
         let mut scalar_sum = 0.0f32;
-        for j in 0..6 {
-            for k in 0..6 {
+        for j in 0..SIZE {
+            for k in 0..SIZE {
                 let v = data[(ky + j) * width + kx + k];
                 scalar_sum += v * wx[k] * wy[j];
             }
         }
 
-        // SIMD
-        let simd_acc = unsafe { lanczos3_kernel_fma::<false>(&data, width, kx, ky, &wx, &wy) };
-
+        // SIMD no-deringing
+        let simd_acc =
+            unsafe { lanczos_kernel_fma::<A, SIZE, false>(&data, width, kx, ky, &wx, &wy) };
         assert!(
             (simd_acc.sp - scalar_sum).abs() < 1e-4,
-            "FMA no-dering: SIMD {} vs scalar {scalar_sum}",
+            "{label} no-dering: SIMD {} vs scalar {scalar_sum}",
             simd_acc.sp
         );
         assert_eq!(simd_acc.sn, 0.0);
 
-        // Test with deringing: verify sp + sn covers all contributions
-        let simd_dering = unsafe { lanczos3_kernel_fma::<true>(&data, width, kx, ky, &wx, &wy) };
-        // sp - sn should equal scalar_sum (total = positive - negative)
+        // SIMD with deringing: sp - sn should equal scalar_sum
+        let simd_dering =
+            unsafe { lanczos_kernel_fma::<A, SIZE, true>(&data, width, kx, ky, &wx, &wy) };
         let dering_total = simd_dering.sp - simd_dering.sn;
         assert!(
             (dering_total - scalar_sum).abs() < 1e-4,
-            "FMA dering: sp-sn={dering_total} vs scalar {scalar_sum}"
+            "{label} dering: sp-sn={dering_total} vs scalar {scalar_sum}"
         );
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_lanczos2_kernel_fma_matches_scalar() {
+        assert_lanczos_kernel_fma_matches_scalar::<2, 4>("Lanczos2");
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_lanczos3_kernel_fma_matches_scalar() {
+        assert_lanczos_kernel_fma_matches_scalar::<3, 6>("Lanczos3");
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_lanczos4_kernel_fma_matches_scalar() {
+        assert_lanczos_kernel_fma_matches_scalar::<4, 8>("Lanczos4");
     }
 }

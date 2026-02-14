@@ -13,7 +13,7 @@ Nearest and Bicubic go through a generic per-pixel loop with incremental steppin
 **Files:**
 - `mod.rs` -- Kernel functions, LUT, per-pixel interpolation, `warp_image` dispatcher
 - `warp/mod.rs` -- Row-level warping: bilinear scalar, Lanczos generic optimized, SIMD dispatch
-- `warp/sse.rs` -- AVX2/SSE4.1 SIMD bilinear + SSE FMA Lanczos3 kernel
+- `warp/sse.rs` -- AVX2/SSE4.1 SIMD bilinear + SSE FMA Lanczos kernel (generic for all sizes)
 - `tests.rs` -- Unit and quality tests for kernels, interpolation, and warping
 - `bench.rs` -- Benchmarks for 1k/2k/4k Lanczos3 warps, bilinear, LUT lookup
 
@@ -21,7 +21,7 @@ Nearest and Bicubic go through a generic per-pixel loop with incremental steppin
 1. `warp_image()` (`mod.rs:288`) dispatches per-row via rayon `par_chunks_mut`
 2. For Bilinear: `warp_row_bilinear()` -> SIMD (AVX2/SSE4.1) or scalar
 3. For Lanczos2/3/4: `warp_row_lanczos()` -> const-generic `<A, SIZE, DERINGING>` dispatch ->
-   SIMD FMA kernel (Lanczos3 interior only) or scalar fast path (interior) or slow path (border)
+   SIMD FMA kernel (all sizes, interior) or scalar fast path (interior) or slow path (border)
 4. For Nearest/Bicubic: generic per-pixel `interpolate()` loop with incremental stepping
 5. All paths use inverse mapping: output pixel -> transform -> sample input
 
@@ -228,29 +228,24 @@ accumulates the absolute values (since `s < 0` means `and(neg, s)` is negative, 
 
 ## SIMD Implementation Analysis
 
-### Lanczos3 FMA Kernel (`warp/sse.rs:306-381`)
+### Generic Lanczos FMA Kernel (`warp/sse.rs`)
 
-Uses actual `_mm_fmadd_ps` FMA intrinsics in the non-deringing path. The no-deringing
-inner loop restructures `acc += src * wx * wy` as `sx = mul(src, wx); acc = fmadd(sx, wy, acc)`,
-saving one multiply per lo/hi pair vs the naive `w = mul(wx, wy); s = mul(src, w); acc = add(acc, s)`.
-Result: 12 `vmulps` + 12 `vfmadd132ps` (24 total) vs previous 24 `vmulps` + 12 `vaddps` (36 total).
-Measured improvement: ~2.5% on 1k single-threaded no-deringing benchmark.
+`lanczos_kernel_fma<A, SIZE, DERINGING>` — const-generic over all Lanczos sizes:
+- **Lanczos2 (SIZE=4):** Single `__m128` (4 weights), one 128-bit load per row. Bounds: `kx + 3 < iw`.
+- **Lanczos3 (SIZE=6):** Two `__m128` (lo: 4 weights, hi: 2 weights + 2 zeros via `_mm_setr_ps`). Bounds: `kx + 7 < iw`.
+- **Lanczos4 (SIZE=8):** Two `__m128` (lo: 4, hi: 4 via `_mm_loadu_ps`). Bounds: `kx + 7 < iw`.
 
-The deringing path still uses `_mm_mul_ps` + `_mm_add_ps` because it needs both `w` and `s`
-as separate values for mask-based positive/negative contribution tracking. FMA cannot fuse
-the masked accumulation pattern `add(acc, and(mask, val))`.
+The `SIZE > 4` branches are const-evaluable — LLVM eliminates dead paths for each
+monomorphization. Lanczos2 skips all hi-register code entirely.
 
-**Architecture:** Two `__m128` accumulators (lo/hi) process 4+4 = 8 floats per row.
-No-deringing: 6 rows x (2 loads + 2 src*wx muls + 2 FMAs) = 12 muls + 12 FMAs.
-Deringing: 6 rows x (2 loads + 2 weight muls + 2 src*weight muls + 8 masked accums) = 24 muls + 12 adds + 48 mask ops.
+Uses `_mm_fmadd_ps` FMA intrinsics in the non-deringing path. The no-deringing
+inner loop: `sx = mul(src, wx); acc = fmadd(sx, wy, acc)`.
 
-**Register pressure:** Without deringing: 2 accumulators + 2 wx + 2 src + 2
-temps = ~8 XMM registers. With deringing: adds 8 accumulators (sp/sn/wp/wn lo/hi) = 17
-registers. x86_64 has 16 XMM registers, so LLVM must spill 1 register. This is minimal
-overhead.
+The deringing path uses `_mm_mul_ps` + `_mm_add_ps` because it needs both `w` and `s`
+as separate values for mask-based positive/negative contribution tracking.
 
 **Horizontal sum** (`hsum_ps`): Standard SSE horizontal reduction using
-`movehdup + add + movehl + add_ss`. 3 instructions. Correct and efficient.
+`movehdup + add + movehl + add_ss`. 3 instructions. For SIZE=4, sums lo only (no add with hi).
 
 ### AVX2 Bilinear (`warp/sse.rs:21-153`)
 
