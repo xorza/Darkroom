@@ -96,7 +96,7 @@ Umeyama 1991, Shupe et al. 2005 (SIP standard), starmatch (PyPI 2025).
 14. **Remove duplicate bilinear** (interpolation/mod.rs:155-170 vs warp/mod.rs:109-127) -- consolidate
 15. **LO-RANSAC buffer replacement** (ransac/mod.rs:335) -- `inlier_buf = lo_inliers` defeats pre-allocation
 16. **Increase default ratio_tolerance to 0.02** (config.rs) -- **DECLINED**: 0.01 is conservative but `precise_wide_field()` preset already offers 0.02 for noisy data
-17. **Add point normalization to affine estimation** (ransac/transforms.rs:166) -- Hartley-style, improves conditioning
+17. ~~**Add point normalization to affine estimation** (ransac/transforms.rs:166)~~ -- **FIXED** (Hartley normalization + denormalize via compose)
 18. **Weighted triangle voting** (triangle/voting.rs) -- weight by inverse density in invariant space (GMTV 2022)
 19. **SIP fit quality return type** -- return rms_residual, points_rejected, condition_number instead of just Option
 20. **Spatial coverage in quality score** (result.rs:150) -- prevent degenerate registrations with clustered matches
@@ -150,7 +150,7 @@ Umeyama 1991, Shupe et al. 2005 (SIP standard), starmatch (PyPI 2025).
 | Module | Correctness | Issues | Top Priority |
 |--------|------------|--------|-------------|
 | triangle/ | All correct | Tight default tolerance (0.01), excessive triangles at k=20 | Benchmark k=8-10 |
-| ransac/ | All 5 estimators verified, MAGSAC++ correct (confirmed by SupeRANSAC 2025) | LO buffer replacement, dead_code annotations, affine lacks normalization | Fix LO buffer, add affine normalization |
+| ransac/ | All 5 estimators verified, MAGSAC++ correct (confirmed by SupeRANSAC 2025) | LO buffer replacement, dead_code annotations | Fix LO buffer |
 | distortion/ | SIP direction/coords/solver all correct, TPS correct | No inverse SIP, no fit diagnostics, TPS not integrated | Add fit quality return |
 | interpolation/ | All kernels correct, deringing matches PixInsight | SIMD kernel doesn't use FMA, duplicate bilinear | Use actual FMA intrinsics |
 | spatial/ | No bugs found, all algorithms textbook correct | None (minor: could add L-inf radius search) | L-infinity radius search |
@@ -203,12 +203,12 @@ All 5 estimators are mathematically correct:
 - **Translation**: exact average displacement
 - **Euclidean**: constrained Procrustes (Umeyama 1991)
 - **Similarity**: Procrustes + scale (Umeyama 1991)
-- **Affine**: normal equations with 3x3 explicit inverse (adequate conditioning for star coords)
+- **Affine**: normal equations with Hartley normalization + 3x3 explicit inverse
 - **Homography**: DLT with Hartley normalization + direct SVD (Hartley & Zisserman 2003)
 
-The affine estimator lacks point normalization (unlike the homography path), which could
-cause precision loss for very large coordinate ranges (>1e6 pixels). This is the only
-remaining numerical concern.
+All estimators now use appropriate normalization: homography uses Hartley normalization
+for DLT, and affine uses the same normalize_points() + denormalize pattern for numerical
+stability with large coordinate ranges.
 
 ### Distortion Correction Quality
 

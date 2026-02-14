@@ -582,6 +582,43 @@ fn test_estimate_affine_insufficient_points() {
 }
 
 #[test]
+fn test_estimate_affine_ill_conditioned() {
+    // Points spanning a large range -- stresses numerical stability.
+    // Without Hartley normalization, normal equations A^T A become ill-conditioned
+    // (condition number κ(A^T A) ≈ κ(A)²) and precision degrades.
+    let ref_points = [
+        DVec2::new(0.01, 0.02),
+        DVec2::new(5000.0, 0.01),
+        DVec2::new(5000.0, 4000.0),
+        DVec2::new(0.01, 4000.0),
+        DVec2::new(2500.0, 2000.0),
+        DVec2::new(1000.0, 3000.0),
+        DVec2::new(4000.0, 1000.0),
+        DVec2::new(100.0, 100.0),
+    ];
+
+    // Affine: x' = 1.05*x + 0.02*y + 10.0, y' = -0.01*x + 0.98*y + 5.0
+    let known = Transform::affine([1.05, 0.02, 10.0, -0.01, 0.98, 5.0]);
+    let target_points = apply_all(&known, &ref_points);
+
+    let estimated = estimate_transform(&ref_points, &target_points, TransformType::Affine).unwrap();
+
+    for (&rp, &tp) in ref_points.iter().zip(target_points.iter()) {
+        let pp = estimated.apply(rp);
+        assert!(
+            (pp.x - tp.x).abs() < 1e-6 && (pp.y - tp.y).abs() < 1e-6,
+            "At ({},{:.1}): expected ({:.4},{:.4}), got ({:.4},{:.4})",
+            rp.x,
+            rp.y,
+            tp.x,
+            tp.y,
+            pp.x,
+            pp.y,
+        );
+    }
+}
+
+#[test]
 fn test_estimate_homography_hand_computed() {
     let ref_points = [
         DVec2::new(0.0, 0.0),

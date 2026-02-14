@@ -162,22 +162,30 @@ pub(crate) fn estimate_similarity(
     Some(Transform::similarity(t, angle, scale))
 }
 
-/// Estimate affine transform using least squares.
+/// Estimate affine transform using least squares with Hartley normalization.
+///
+/// Points are normalized (centered, scaled to avg distance √2) before solving
+/// the normal equations, then the solution is denormalized. This dramatically
+/// improves numerical stability for large coordinate ranges.
 pub(crate) fn estimate_affine(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<Transform> {
     if ref_points.len() < 3 {
         return None;
     }
 
-    // Solve: target = A * ref + b
+    // Normalize points for numerical stability (same pattern as homography)
+    let (ref_norm, ref_t) = normalize_points(ref_points);
+    let (tar_norm, tar_t) = normalize_points(target_points);
+
+    // Solve: target = A * ref + b in normalized space
     // In matrix form: [tx] = [a b] [rx] + [e]
     //                 [ty]   [c d] [ry]   [f]
     //
     // We solve two systems: one for x-coordinates, one for y-coordinates
     // Using normal equations: A^T A x = A^T b
 
-    let n = ref_points.len() as f64;
+    let n = ref_norm.len() as f64;
 
-    // Compute sums
+    // Compute sums on normalized points
     let mut sum_x = 0.0;
     let mut sum_y = 0.0;
     let mut sum_xx = 0.0;
@@ -190,7 +198,7 @@ pub(crate) fn estimate_affine(ref_points: &[DVec2], target_points: &[DVec2]) -> 
     let mut sum_x_ty = 0.0;
     let mut sum_y_ty = 0.0;
 
-    for (r, t) in ref_points.iter().zip(target_points.iter()) {
+    for (r, t) in ref_norm.iter().zip(tar_norm.iter()) {
         sum_x += r.x;
         sum_y += r.y;
         sum_xx += r.x * r.x;
@@ -229,17 +237,20 @@ pub(crate) fn estimate_affine(ref_points: &[DVec2], target_points: &[DVec2]) -> 
     let m21 = (sum_xy * sum_x - sum_y * sum_xx) * inv_det;
     let m22 = (sum_xx * sum_yy - sum_xy * sum_xy) * inv_det;
 
-    // Solve for x-coordinate parameters
+    // Solve for x-coordinate parameters (in normalized space)
     let a = m00 * sum_x_tx + m01 * sum_y_tx + m02 * sum_tx;
     let b = m10 * sum_x_tx + m11 * sum_y_tx + m12 * sum_tx;
     let e = m20 * sum_x_tx + m21 * sum_y_tx + m22 * sum_tx;
 
-    // Solve for y-coordinate parameters
+    // Solve for y-coordinate parameters (in normalized space)
     let c = m00 * sum_x_ty + m01 * sum_y_ty + m02 * sum_ty;
     let d = m10 * sum_x_ty + m11 * sum_y_ty + m12 * sum_ty;
     let f = m20 * sum_x_ty + m21 * sum_y_ty + m22 * sum_ty;
 
-    let transform = Transform::affine([a, b, e, c, d, f]);
+    // Denormalize: A = T_target^{-1} * A_norm * T_ref
+    let a_norm = Transform::affine([a, b, e, c, d, f]);
+    let tar_t_inv = tar_t.inverse();
+    let transform = tar_t_inv.compose(&a_norm).compose(&ref_t);
 
     if transform.is_valid() {
         Some(transform)

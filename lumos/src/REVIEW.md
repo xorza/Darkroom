@@ -91,6 +91,12 @@ Comprehensive code quality review across submodules (~40k+ lines). The codebase 
 - Added heuristic: compute max, normalize by dividing by max if max > 2.0. Threshold of 2.0 provides headroom for HDR overexposure while catching [0,65535] and [0,255] ranges.
 - 10 tests covering: [0,1] unchanged, HDR headroom, threshold boundary, [0,65535], [0,255], negative values, Float64, UInt16 regression, all-zero, single pixel.
 
+#### ~~[F34] Affine estimator lacks Hartley normalization~~ --- FIXED
+- **Location**: `registration/ransac/transforms.rs` — `estimate_affine()`
+- Homography estimator already used Hartley normalization (center + scale to avg distance √2) for numerical stability, but affine worked directly on raw coordinates. Normal equations `A^T A` become ill-conditioned for large coordinate ranges (κ(A^T A) ≈ κ(A)²).
+- Added same `normalize_points()` + denormalize pattern: normalize both point sets, solve normal equations in normalized space, denormalize via `T_target_inv * A_norm * T_ref`.
+- Added ill-conditioned test (points spanning 0.01 to 5000) verifying sub-1e-6 accuracy.
+
 #### ~~[F33] Background mask fallback uses contaminated pixels~~ --- FIXED
 - **Location**: `star_detection/background/tile_grid.rs` — `compute_tile_stats()`
 - When a tile had fewer unmasked pixels than `min_pixels` (30% of tile), it discarded the good background pixels and fell back to sampling ALL pixels including bright stars. This biased the background estimate upward in crowded regions.
