@@ -113,15 +113,27 @@ fn image_type_to_bitpix(image_type: &ImageType) -> BitPix {
     }
 }
 
-/// Normalize integer FITS pixel data to [0,1] range.
+/// Normalize FITS pixel data to [0,1] range.
 ///
-/// cfitsio already applies BZERO/BSCALE, so values are in the correct integer
-/// range. We divide by the max value for the BITPIX type. Float data is assumed
-/// to already be in the correct range and is returned unchanged.
+/// Integer types: cfitsio already applies BZERO/BSCALE, so values are in the
+/// correct integer range. We divide by the max value for the BITPIX type.
+///
+/// Float types: the FITS standard does not define a normalization convention.
+/// Data may be in [0,1] (PixInsight), [0,65535] (DeepSkyStacker), [0,255],
+/// or arbitrary physical units. We detect the actual max value and normalize
+/// if it exceeds 2.0 (threshold provides headroom for HDR/overexposed pixels
+/// while catching the common integer-like ranges).
 fn normalize_fits_pixels(mut pixels: Vec<f32>, bitpix: BitPix) -> Vec<f32> {
     if let Some(max_val) = bitpix.normalization_max() {
         let inv_max = 1.0 / max_val;
         pixels.iter_mut().for_each(|p| *p *= inv_max);
+    } else {
+        // Float types: detect range and normalize if needed
+        let max = pixels.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        if max > 2.0 {
+            let inv_max = 1.0 / max;
+            pixels.iter_mut().for_each(|p| *p *= inv_max);
+        }
     }
     pixels
 }
@@ -166,4 +178,122 @@ fn read_key_optional<T: fitsio::headers::ReadsKey>(
     key: &str,
 ) -> Option<T> {
     hdu.read_key(fptr, key).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ====================================================================
+    // normalize_fits_pixels tests
+    // ====================================================================
+
+    #[test]
+    fn test_normalize_float_already_01() {
+        // Pixels already in [0, 1] — should be unchanged
+        let pixels = vec![0.0, 0.25, 0.5, 0.75, 1.0];
+        let result = normalize_fits_pixels(pixels.clone(), BitPix::Float32);
+        assert_eq!(result, pixels);
+    }
+
+    #[test]
+    fn test_normalize_float_hdr_headroom() {
+        // max = 1.5 (HDR overexposure) — below threshold 2.0, unchanged
+        let pixels = vec![0.0, 0.5, 1.0, 1.5];
+        let result = normalize_fits_pixels(pixels.clone(), BitPix::Float32);
+        assert_eq!(result, pixels);
+    }
+
+    #[test]
+    fn test_normalize_float_at_threshold() {
+        // max = 2.0 — at threshold, should NOT normalize (threshold is > 2.0, not >=)
+        let pixels = vec![0.0, 1.0, 2.0];
+        let result = normalize_fits_pixels(pixels.clone(), BitPix::Float32);
+        assert_eq!(result, pixels);
+    }
+
+    #[test]
+    fn test_normalize_float_0_65535_range() {
+        // DeepSkyStacker output: [0, 65535] — should normalize by dividing by max
+        // inv_max = 1.0 / 65535.0
+        let pixels = vec![0.0, 32767.5, 65535.0];
+        let result = normalize_fits_pixels(pixels, BitPix::Float32);
+        // 0.0 / 65535.0 = 0.0
+        assert!((result[0] - 0.0).abs() < 1e-7);
+        // 32767.5 / 65535.0 = 0.5
+        assert!((result[1] - 0.5).abs() < 1e-4);
+        // 65535.0 / 65535.0 = 1.0
+        assert!((result[2] - 1.0).abs() < 1e-7);
+    }
+
+    #[test]
+    fn test_normalize_float_0_255_range() {
+        // 8-bit style float: [0, 255] — should normalize
+        // inv_max = 1.0 / 255.0
+        let pixels = vec![0.0, 127.5, 255.0];
+        let result = normalize_fits_pixels(pixels, BitPix::Float32);
+        // 0.0 / 255.0 = 0.0
+        assert!((result[0] - 0.0).abs() < 1e-7);
+        // 127.5 / 255.0 = 0.5
+        assert!((result[1] - 0.5).abs() < 1e-4);
+        // 255.0 / 255.0 = 1.0
+        assert!((result[2] - 1.0).abs() < 1e-7);
+    }
+
+    #[test]
+    fn test_normalize_float_negative_values_preserved() {
+        // Dark-subtracted data can have negative values.
+        // max = 100.0 > 2.0 → normalize by max. Negatives scale proportionally.
+        let pixels = vec![-5.0, 0.0, 50.0, 100.0];
+        let result = normalize_fits_pixels(pixels, BitPix::Float32);
+        // inv_max = 1.0 / 100.0 = 0.01
+        // -5.0 * 0.01 = -0.05
+        assert!((result[0] - (-0.05)).abs() < 1e-7);
+        // 0.0 * 0.01 = 0.0
+        assert!((result[1] - 0.0).abs() < 1e-7);
+        // 50.0 * 0.01 = 0.5
+        assert!((result[2] - 0.5).abs() < 1e-7);
+        // 100.0 * 0.01 = 1.0
+        assert!((result[3] - 1.0).abs() < 1e-7);
+    }
+
+    #[test]
+    fn test_normalize_float64_same_behavior() {
+        // Float64 (BITPIX -64) should behave identically to Float32
+        let pixels = vec![0.0, 32767.5, 65535.0];
+        let result = normalize_fits_pixels(pixels, BitPix::Float64);
+        assert!((result[0] - 0.0).abs() < 1e-7);
+        assert!((result[1] - 0.5).abs() < 1e-4);
+        assert!((result[2] - 1.0).abs() < 1e-7);
+    }
+
+    #[test]
+    fn test_normalize_uint16_unchanged() {
+        // Integer types still use fixed normalization_max, not heuristic
+        // UInt16: max = 65535.0
+        let pixels = vec![0.0, 32767.5, 65535.0];
+        let result = normalize_fits_pixels(pixels, BitPix::UInt16);
+        // 0.0 / 65535.0 = 0.0
+        assert!((result[0] - 0.0).abs() < 1e-7);
+        // 32767.5 / 65535.0 ≈ 0.49999
+        assert!((result[1] - 32767.5 / 65535.0).abs() < 1e-7);
+        // 65535.0 / 65535.0 = 1.0
+        assert!((result[2] - 1.0).abs() < 1e-7);
+    }
+
+    #[test]
+    fn test_normalize_float_all_zero() {
+        // All zeros: max = 0.0, which is <= 2.0, so unchanged
+        let pixels = vec![0.0, 0.0, 0.0];
+        let result = normalize_fits_pixels(pixels.clone(), BitPix::Float32);
+        assert_eq!(result, pixels);
+    }
+
+    #[test]
+    fn test_normalize_float_single_pixel() {
+        // Single pixel at 50000 → normalizes to 1.0
+        let pixels = vec![50000.0];
+        let result = normalize_fits_pixels(pixels, BitPix::Float32);
+        assert!((result[0] - 1.0).abs() < 1e-7);
+    }
 }

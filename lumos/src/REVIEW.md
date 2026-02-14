@@ -4,7 +4,7 @@
 
 Comprehensive code quality review across submodules (~40k+ lines). The codebase is well-structured with strong SIMD optimizations, good test coverage, and clear module boundaries. The main improvement areas are: **code duplication** across SIMD implementations and test utilities, **incomplete Bayer demosaic** in raw, and several **API inconsistencies** across modules.
 
-**Findings by severity:** 8 Critical/High, 18 Medium, 30+ Low/Minor (only significant findings listed below).
+**Findings by severity:** 8 Critical/High, 20 Medium, 30+ Low/Minor (only significant findings listed below).
 
 ---
 
@@ -84,6 +84,18 @@ Comprehensive code quality review across submodules (~40k+ lines). The codebase 
 
 #### ~~[F24] HashSet reallocation in registration recover_matches loop~~ --- FIXED
 - Pre-allocated 3 HashSets before loop with `with_capacity()`, reusing via `.clear()` + `.extend()` each iteration.
+
+#### ~~[F31] Float FITS data not normalized~~ --- FIXED
+- **Location**: `astro_image/fits.rs` — `normalize_fits_pixels()`
+- Float FITS data (BITPIX -32/-64) passed through unchanged. DeepSkyStacker outputs [0,65535], other tools use arbitrary ranges. Downstream assumes [0,1].
+- Added heuristic: compute max, normalize by dividing by max if max > 2.0. Threshold of 2.0 provides headroom for HDR overexposure while catching [0,65535] and [0,255] ranges.
+- 10 tests covering: [0,1] unchanged, HDR headroom, threshold boundary, [0,65535], [0,255], negative values, Float64, UInt16 regression, all-zero, single pixel.
+
+#### ~~[F32] Per-CFA-channel flat normalization missing~~ --- FIXED
+- **Location**: `astro_image/cfa.rs` — `divide_by_normalized()`
+- Single global mean across all CFA pixels caused color shift with non-white flat light sources (LED panels, twilight flats).
+- Refactored into `divide_by_normalized_mono()` (unchanged single-mean path) and `divide_by_normalized_cfa()` (per-R/G/B means). CFA path computes independent per-color sums/counts, then normalizes each pixel by its own color's mean. Row-parallel via rayon.
+- 6 tests: non-white flat (uniform light unchanged), vignetting + color, with bias, mono regression, color shift correction (key test demonstrating the fix).
 
 #### ~~[F25] Drizzle add_image_* methods take redundant parameters~~ --- MOSTLY FIXED
 - Kernel methods refactored: `add_image_radial()` takes `(&AstroImage, &Transform, weight, scale, radius, kernel_fn)` — input dims read from the image. `add_image_turbo/point` similarly simplified. Only `compute_square_overlap` retains `#[allow(clippy::too_many_arguments)]` (8 coordinate values, inherent to the function).

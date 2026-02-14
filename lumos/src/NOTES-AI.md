@@ -8,7 +8,7 @@ patterns and the highest-priority **unfixed** issues across all modules.
 | Module | Issue | Severity |
 |--------|-------|----------|
 | raw | Bayer demosaic not implemented (`todo!()`) - affects >95% of cameras | Critical |
-| astro_image | Float FITS data not validated or normalized (out-of-range values) | Moderate |
+| ~~astro_image~~ | ~~Float FITS data not validated or normalized~~ → FIXED (heuristic normalization when max > 2.0) | ~~Moderate~~ |
 
 ## Already Fixed
 
@@ -68,6 +68,8 @@ patterns and the highest-priority **unfixed** issues across all modules.
 - calibration_masters: Unused `StackableImage` and `rayon::prelude::*` imports in defect_map.rs → removed
 - calibration_masters: Unnecessary `.clone().unwrap()` in DefectMap::correct() → `.as_ref().unwrap()`
 - star_detection: Duplicate `use rayon::prelude::*` in threshold_mask → removed
+- astro_image: Float FITS data not normalized → heuristic normalization (divide by max when max > 2.0)
+- calibration: Per-CFA-channel flat normalization missing → `divide_by_normalized_cfa()` with independent R/G/B means
 
 </details>
 
@@ -96,7 +98,7 @@ patterns and the highest-priority **unfixed** issues across all modules.
 | Bayer demosaic (RCD) | raw | Critical | Siril default, 4-step algorithm |
 | FITS writing | astro_image | High | Primary astro interchange format |
 | Rejection maps | stacking | Medium | PixInsight/Siril diagnostic output |
-| Per-CFA-channel flat normalization | calibration | Medium | PixInsight "Separate CFA flat scaling" |
+| ~~Per-CFA-channel flat normalization~~ | ~~calibration~~ | ~~Medium~~ | ~~PixInsight "Separate CFA flat scaling"~~ — DONE |
 | Noise-based auto weighting | stacking | Medium | PixInsight inverse-variance weighting |
 | Context/contribution image | drizzle | Medium | STScI 32-bit bitmask per pixel |
 | Per-pixel weight maps | drizzle | Medium | STScI inverse-variance maps |
@@ -110,8 +112,8 @@ patterns and the highest-priority **unfixed** issues across all modules.
 | registration | None critical | All 5 estimators verified | MAGSAC++ (validated by SupeRANSAC 2025) | FMA intrinsics in Lanczos SIMD |
 | star_detection | None remaining | Pipeline matches SExtractor | SIMD in every hot path | No weight/variance map input |
 | stacking | None remaining | All 6 rejection algos verified | MAD-based sigma (more robust than DSS/Siril default) | Rejection maps, auto weighting |
-| calibration | None remaining | Formula matches PixInsight/Siril | Per-CFA-color MAD detection | Per-CFA flat normalization |
-| astro_image | 1 moderate | FITS loading correct | Comprehensive metadata parsing | Float FITS normalization, FITS writing |
+| calibration | None remaining | Formula matches PixInsight/Siril | Per-CFA-color MAD detection, per-CFA flat normalization | — |
+| astro_image | None remaining | FITS loading correct | Comprehensive metadata parsing, float normalization | FITS writing |
 | raw | 1 critical | X-Trans verified, pipeline correct | 2.1x faster than libraw | Bayer demosaic todo!() |
 | drizzle | None remaining | All 4 kernels verified correct | Projective transform, rayon finalization | True Square kernel, Jacobian correction |
 
@@ -121,12 +123,12 @@ patterns and the highest-priority **unfixed** issues across all modules.
 1. Implement Bayer demosaic (RCD recommended; libraw fallback as interim)
 
 ### Short-term (correctness improvements)
-2. Add float FITS normalization heuristic (detect range, normalize if max > 2.0)
+2. ~~Add float FITS normalization heuristic~~ — DONE
+3. ~~Add per-CFA-channel flat normalization~~ — DONE
 
 ### Medium-term (quality & interoperability)
-3. Add FITS writing support
-4. Add stacking rejection maps (per-pixel high/low counts)
-5. Add per-CFA-channel flat normalization
+4. Add FITS writing support
+5. Add stacking rejection maps (per-pixel high/low counts)
 6. ~~Use actual FMA intrinsics in registration Lanczos3 SIMD kernel~~ -- DONE (no-dering path)
 7. Implement true drizzle Square kernel (4-corner transform + polygon clipping)
 8. Add drizzle context image (per-pixel contributing-frame bitmask)
