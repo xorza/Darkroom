@@ -53,6 +53,11 @@ patterns and the highest-priority **unfixed** issues across all modules.
 - drizzle: Interleaved pixel layout → per-channel `Buffer2<f32>` (no interleaved allocation)
 - drizzle: `into_interleaved_pixels()` allocation per frame → `add_image()` reads channels directly
 - drizzle: Finalization single-threaded → rayon row-parallel normalization and coverage
+- drizzle: Kernel implementations duplicated 4× → extracted `accumulate()` + `add_image_radial()` with closure
+- drizzle: add_image_* methods had 8-10 redundant params → refactored to read dims from AstroImage
+- drizzle: Coverage averaged across channels → uses channel 0 weights only (correct: same geometry)
+- astro_image: `save()` cloned entire image → `to_image(&self)` borrows pixel data
+- testing: 16 inline LCG RNG implementations → `TestRng` struct in `testing/mod.rs`
 
 </details>
 

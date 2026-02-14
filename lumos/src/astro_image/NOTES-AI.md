@@ -173,11 +173,11 @@ check DATAMAX/DATAMIN keywords if present, or compute actual min/max and decide.
 
 ### Issue 3: No FITS Writing Support
 
-**File:** `mod.rs` line 523-527
+**File:** `mod.rs`
 
 `save()` only supports PNG/JPEG/TIFF via the `imaginarium` crate. FITS is the primary
-interchange format for astrophotography. Also: `save()` clones the entire image (`self.clone()`)
-which is wasteful -- could take `&self` and build the Image directly.
+interchange format for astrophotography. ~~`save()` cloned the entire image~~ -- FIXED:
+`to_image(&self)` borrows pixel data directly, no clone.
 
 ### Issue 4: Missing Metadata Keywords Compared to Industry Tools
 

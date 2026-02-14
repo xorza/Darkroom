@@ -20,13 +20,8 @@ Comprehensive code quality review across submodules (~40k+ lines). The codebase 
 - **Invasiveness**: 4/5 --- Requires implementing RCD or falling back to libraw
 - **Description**: `demosaic_bayer()` is `todo!()`. Either implement RCD demosaicing or add libraw fallback for Bayer sensors. X-Trans path works correctly.
 
-#### [F4] Wasteful clone in AstroImage::save()
-- **Location**: `astro_image/mod.rs:523-527`
-- **Category**: Performance
-- **Impact**: 4/5 --- Clones entire image (potentially GBs) before saving
-- **Meaningfulness**: 4/5 --- Real memory waste on large images
-- **Invasiveness**: 2/5 --- Change `self.clone().into()` to consume self or add borrow-based path
-- **Description**: `save()` clones the entire AstroImage before converting to Image format. For 4K+ images this allocates and copies gigabytes unnecessarily.
+#### ~~[F4] Wasteful clone in AstroImage::save()~~ --- FIXED
+- Added `to_image(&self)` that borrows pixel data; `save()` no longer clones.
 
 #### [F5] Duplicate `use rayon::prelude::*` import
 - **Location**: `star_detection/threshold_mask/mod.rs:10,24`
@@ -54,13 +49,8 @@ Comprehensive code quality review across submodules (~40k+ lines). The codebase 
 
 ### Priority 2 --- High Impact, Moderate Invasiveness
 
-#### [F9] Drizzle kernel implementations duplicated 4x
-- **Location**: `drizzle/mod.rs:241-525`
-- **Category**: Generalization
-- **Impact**: 3/5 --- ~280 lines of near-identical code across square/point/gaussian/lanczos
-- **Meaningfulness**: 4/5 --- Real maintenance burden; adding new kernels requires copy-paste
-- **Invasiveness**: 3/5 --- Extract kernel trait with `compute_weight(dx, dy) -> f32`
-- **Description**: All four kernel methods follow identical loop structure: iterate input pixels, transform to output coords, compute overlap/weight, accumulate. Only the weight function differs. A `DrizzleKernel` trait would eliminate ~200 lines of duplication.
+#### ~~[F9] Drizzle kernel implementations duplicated 4x~~ --- FIXED
+- Extracted `accumulate()` helper and `add_image_radial()` with closure-based kernel. Gaussian and Lanczos unified; ~120 lines removed.
 
 #### [F10] SIMD Neumaier/Kahan reduction duplicated across AVX2/SSE/NEON
 - **Location**: `math/sum/avx2.rs:33-51`, `math/sum/sse.rs:34-52`, `math/sum/neon.rs:34-50`
@@ -78,13 +68,8 @@ Comprehensive code quality review across submodules (~40k+ lines). The codebase 
 - **Invasiveness**: 3/5 --- Unify with `Option<&[f32]>` for background parameter
 - **Description**: Each platform has two nearly identical functions: one with background subtraction and one without. Unifying via an optional background parameter would eliminate half the SIMD code.
 
-#### [F12] RNG code duplicated 16x across testing module
-- **Location**: `testing/synthetic/` (artifacts.rs, backgrounds.rs, star_field.rs, patterns.rs, stamps.rs, transforms.rs)
-- **Category**: Generalization
-- **Impact**: 4/5 --- 16 separate LCG implementations with inconsistent naming (next_f32/next_rand/next_random)
-- **Meaningfulness**: 4/5 --- Prevents copy-paste bugs and inconsistent normalization
-- **Invasiveness**: 3/5 --- Extract shared `TestRng` struct
-- **Description**: The LCG pattern `state.wrapping_mul(6364136223846793005).wrapping_add(1)` with various normalization schemes is duplicated across every test data generation file. Return types vary (f32/f64/u64) and ranges differ (0-1 vs -1 to 1).
+#### ~~[F12] RNG code duplicated 16x across testing module~~ --- FIXED
+- Extracted `TestRng` struct in `testing/mod.rs` with `next_u64()`, `next_f32()`, `next_f64()`. Replaced all 16+ inline LCG closures across `testing/synthetic/`, `star_detection/`, and `registration/` test files.
 
 #### [F13] DVec2/Star transform functions duplicated in testing
 - **Location**: `testing/synthetic/transforms.rs:66-501`
@@ -94,21 +79,11 @@ Comprehensive code quality review across submodules (~40k+ lines). The codebase 
 - **Invasiveness**: 4/5 --- Generic `Positioned` trait or closure-based approach
 - **Description**: Functions like `translate_stars`/`translate_star_list`, `add_position_noise`/`add_star_noise`, etc. are pair-wise duplicates. The Star versions are identical logic but access `.pos` field instead of using the value directly.
 
-#### [F14] Drizzle coverage incorrectly averages across channels
-- **Location**: `drizzle/mod.rs:541-546`
-- **Category**: Data flow / Correctness
-- **Impact**: 3/5 --- Coverage is spatial, not per-channel
-- **Meaningfulness**: 4/5 --- All channels undergo same geometric transform
-- **Invasiveness**: 1/5 --- Use single weight per spatial pixel
-- **Description**: Coverage is computed as average weight across R/G/B channels, but all channels share the same geometric transform and overlap. Weights should be identical per-channel. Use `Vec<f32>` of length W*H (not W*H*C) to reduce memory by 1/C.
+#### ~~[F14] Drizzle coverage incorrectly averages across channels~~ --- FIXED
+- Coverage now uses `self.weights[0]` only (channel 0). All channels share identical geometric overlap, so a single `Buffer2<f32>` coverage map is correct.
 
-#### [F15] min_coverage semantics misleading in drizzle
-- **Location**: `drizzle/mod.rs:68-70, 553`
-- **Category**: API clarity
-- **Impact**: 3/5 --- Users will misunderstand the parameter
-- **Meaningfulness**: 4/5 --- Name suggests 0.0-1.0 but comparison is against raw weight
-- **Invasiveness**: 2/5 --- Normalize or rename parameter
-- **Description**: Documentation says `min_coverage` is "0.0-1.0 normalized" but the comparison is `weight >= min_coverage` against raw accumulated weight (~10.0 for 10 frames). Either rename to `min_weight` or normalize before comparison.
+#### ~~[F15] min_coverage semantics misleading in drizzle~~ --- FIXED
+- `min_coverage` is now compared against `min_coverage * max_weight`, normalizing the threshold to the 0.0–1.0 range as documented.
 
 #### [F17] `#[cfg(test)]` helper functions in star_detection production code
 - **Location**: `star_detection/detector/stages/detect.rs:348`, `star_detection/labeling/mod.rs:24`
@@ -160,13 +135,8 @@ Comprehensive code quality review across submodules (~40k+ lines). The codebase 
 - **Invasiveness**: 2/5 --- Pre-allocate before loop and clear per iteration
 - **Description**: The recovery loop creates 3 fresh HashSets each iteration. Pre-allocating and clearing would avoid 15 allocations for typical 5-iteration runs.
 
-#### [F25] Drizzle add_image_* methods take redundant parameters
-- **Location**: `drizzle/mod.rs:241-250, 311-320, 349-358, 441-450`
-- **Category**: API cleanliness
-- **Impact**: 3/5 --- 8-10 parameters per method, most derivable from self
-- **Meaningfulness**: 4/5 --- Obscures core algorithm
-- **Invasiveness**: 2/5 --- Store input dims on accumulator, extract config fields locally
-- **Description**: All four kernel methods receive `input_width`, `input_height`, `scale`, `drop_size` as parameters despite being available on `self.config` or computable from the first image. Reducing to 3 parameters (pixels, transform, weight) would clarify the API.
+#### ~~[F25] Drizzle add_image_* methods take redundant parameters~~ --- MOSTLY FIXED
+- Kernel methods refactored: `add_image_radial()` takes `(&AstroImage, &Transform, weight, scale, radius, kernel_fn)` — input dims read from the image. `add_image_turbo/point` similarly simplified. Only `compute_square_overlap` retains `#[allow(clippy::too_many_arguments)]` (8 coordinate values, inherent to the function).
 
 ### Priority 4 --- Low Priority
 
@@ -196,10 +166,10 @@ Comprehensive code quality review across submodules (~40k+ lines). The codebase 
 The most pervasive issue: SIMD implementations (AVX2/SSE/NEON) duplicate logic across platform files. Affects: `math/sum/`, `star_detection/threshold_mask/`, `star_detection/background/simd/`, `star_detection/centroid/gaussian_fit/`. Consider macros or generic helpers for common patterns like Neumaier reduction, weighted accumulation, and paired with/without-background variants.
 
 ### 2. Test Utility Duplication
-The `testing/synthetic/` module has 16 independent LCG RNG implementations and duplicate DVec2/Star transform functions. The `star_detection/tests/` has helper functions (`to_gray_image`, `match_stars`, `mask_to_gray`) redefined in multiple test files instead of importing from `tests/common/`.
+~~LCG RNG duplication~~ (FIXED — `TestRng` in `testing/mod.rs`). Remaining: duplicate DVec2/Star transform functions in `testing/synthetic/transforms.rs` (F13), and `star_detection/tests/` helper functions (`to_gray_image`, `match_stars`, `mask_to_gray`) redefined in multiple test files instead of importing from `tests/common/`.
 
 ### 3. `#[allow(clippy::too_many_arguments)]` Proliferation
-Functions with 7-10 parameters appear in: `drizzle/mod.rs` (kernel methods), `star_detection/convolution/` (matched_filter), `raw/demosaic/xtrans/` (XTransImage constructors), `testing/synthetic/stamps.rs` (stamp generators). Consider parameter structs for the most egregious cases.
+~~Drizzle kernel methods~~ (FIXED — refactored to `add_image_radial` with fewer params; only `compute_square_overlap` retains annotation). Remaining: `star_detection/convolution/` (matched_filter), `raw/demosaic/xtrans/` (XTransImage constructors), `testing/synthetic/stamps.rs` (stamp generators). Consider parameter structs for the most egregious cases.
 
 ### 4. Inconsistent `#[allow(dead_code)]` Usage
 Some annotations mark truly unused code, others mark actively-used runtime-dispatched code, and some mark test-only code in production modules. Three different patterns for the same concept across `star_detection`, `raw`, and `common`.

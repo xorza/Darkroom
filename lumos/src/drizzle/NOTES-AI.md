@@ -14,6 +14,9 @@ Turbo, Point, Gaussian, Lanczos.
   - `new(input_dims: ImageDimensions, config)` / `dimensions() -> ImageDimensions`
 - `DrizzleResult.coverage: Buffer2<f32>` -- normalized [0,1] coverage map
 - `add_image()` consumes `AstroImage` (owned); kernel methods borrow `&AstroImage`
+- `accumulate()` helper: shared channel iteration for all 4 kernels
+- `add_image_radial()`: unified Gaussian/Lanczos two-pass logic with closure-based `kernel_fn`
+- Turbo/Point kept separate (structurally different) but share `accumulate()`
 - No interleaved allocation -- kernel inner loops use `image.channel(c)[(ix, iy)]` directly
 - Transform via `Transform::apply(DVec2) -> DVec2` (projective, f64 precision, cast to f32)
 - Builder pattern for configuration with validation
