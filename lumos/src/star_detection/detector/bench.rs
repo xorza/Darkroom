@@ -58,6 +58,7 @@ fn bench_detect_6k_globular_cluster(b: ::bench::Bencher) {
         min_snr: 10.0,
         max_eccentricity: 0.6,
         max_sharpness: 0.7,
+        max_laplacian_snr: 0.0,
         max_roundness: 1.0,
         max_fwhm_deviation: 3.0,
         duplicate_min_separation: 8.0,

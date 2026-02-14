@@ -139,9 +139,11 @@ to PSF-fitting on focused, properly sampled star images."
 
 ## Quality Metrics (mod.rs:537-757)
 
-- **FWHM** (lines 618-620): `2.355 * sqrt(sum_r2/flux/2)`. Known P3 limitations:
-  no pixel discretization correction, fit params discarded.
-- **Eccentricity** (lines 622-637): Covariance eigenvalues, `e = sqrt(1-l2/l1)`.
+- **FWHM**: Fit-derived when GaussianFit/MoffatFit converges (geometric mean sigma or
+  alpha_beta_to_fwhm), falls back to moments `2.355 * sqrt(sum_r2/flux/2)`.
+  Known limitation: no pixel discretization correction.
+- **Eccentricity**: Fit-derived `sqrt(1 - sigma_min/sigma_max)` for GaussianFit,
+  covariance eigenvalues `e = sqrt(1-l2/l1)` for Moffat/moments.
 - **SNR** (lines 728-757): Three models (full CCD / shot+sky / background-dominated).
   Known P2: uses full square stamp area as npix.
 - **Sharpness** (lines 652-656): `peak/core_3x3`. Differs from DAOFIND.
@@ -230,10 +232,11 @@ rejected steps prevents infinite loops. Lambda cap at 1e10.
   used for ranking/filtering (not photometry), the systematic offset doesn't affect
   relative ordering.
 
-### LOW-MEDIUM: Fit Parameters Discarded
-- Already documented in top-level NOTES-AI.md P3.
-- GaussianFit provides sigma_x/sigma_y, MoffatFit provides alpha/beta, but only
-  position (x0, y0) is used. FWHM and eccentricity recomputed from second moments.
+### ~~LOW-MEDIUM: Fit Parameters Discarded~~ — FIXED
+- GaussianFit: FWHM from geometric mean sigma, eccentricity from sigma ratio.
+- MoffatFit: FWHM from alpha_beta_to_fwhm(). Eccentricity stays moment-based
+  (Moffat is radially symmetric, single alpha).
+- WeightedMoments: unchanged, all metrics from moments.
 
 ### LOW-MEDIUM: No Formal Parameter Uncertainties from Covariance Matrix
 - The L-M optimizer converges to best-fit parameters but does not compute the

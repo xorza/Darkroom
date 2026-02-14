@@ -379,6 +379,11 @@ pub fn measure_star(
     };
 
     // Refine with profile fitting if requested.
+    // When fit converges, also extract FWHM and eccentricity from fit parameters
+    // (more accurate than moment-based estimates).
+    let mut fit_fwhm: Option<f32> = None;
+    let mut fit_eccentricity: Option<f32> = None;
+
     match config.centroid_method {
         CentroidMethod::GaussianFit => {
             let fit_config = GaussianFitConfig {
@@ -389,6 +394,18 @@ pub fn measure_star(
                 .filter(|r| r.converged)
             {
                 pos = result.pos;
+                // FWHM from geometric mean of sigma_x, sigma_y
+                let geo_sigma = (result.sigma.x * result.sigma.y).sqrt();
+                fit_fwhm = Some(crate::math::sigma_to_fwhm(geo_sigma));
+                // Eccentricity from sigma ratio: e = sqrt(1 - min/max)
+                let (s_min, s_max) = if result.sigma.x < result.sigma.y {
+                    (result.sigma.x, result.sigma.y)
+                } else {
+                    (result.sigma.y, result.sigma.x)
+                };
+                if s_max > f32::EPSILON {
+                    fit_eccentricity = Some((1.0 - s_min / s_max).sqrt().clamp(0.0, 1.0));
+                }
             }
         }
         CentroidMethod::MoffatFit { beta } => {
@@ -404,6 +421,8 @@ pub fn measure_star(
                 .filter(|r| r.converged)
             {
                 pos = result.pos;
+                fit_fwhm = Some(result.fwhm);
+                // Moffat is radially symmetric (single alpha) — eccentricity stays moment-based
             }
         }
         CentroidMethod::WeightedMoments => {
@@ -411,14 +430,22 @@ pub fn measure_star(
         }
     };
 
-    // Compute quality metrics
+    // Compute quality metrics (flux, SNR, sharpness, roundness always from moments)
     let (gain, read_noise) = config
         .noise_model
         .as_ref()
         .map(|nm| (Some(nm.gain), Some(nm.read_noise)))
         .unwrap_or((None, None));
 
-    let metrics = compute_metrics(pixels, background, pos, stamp_radius, gain, read_noise)?;
+    let mut metrics = compute_metrics(pixels, background, pos, stamp_radius, gain, read_noise)?;
+
+    // Override FWHM and eccentricity with fit-derived values when available
+    if let Some(fwhm) = fit_fwhm {
+        metrics.fwhm = fwhm;
+    }
+    if let Some(ecc) = fit_eccentricity {
+        metrics.eccentricity = ecc;
+    }
 
     // Compute L.A.Cosmic Laplacian SNR for cosmic ray detection
     let pos_int = Vec2us::new(pos.x.round() as usize, pos.y.round() as usize);

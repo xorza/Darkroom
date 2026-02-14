@@ -77,6 +77,8 @@ patterns and the highest-priority **unfixed** issues across all modules.
 - registration: HashSet reallocation in `recover_matches` loop -> pre-allocated with `with_capacity()`
 - star_detection: Background mask fallback used contaminated pixels -> uses unmasked pixels first
 - star_detection: Bilinear background interpolation (C0) -> natural bicubic spline (C2), matches SEP/SExtractor
+- star_detection: Fit params discarded (FWHM/eccentricity from moments) -> fit-derived when available
+- star_detection: L.A.Cosmic laplacian_snr computed but unused -> wired into filter stage (`max_laplacian_snr` config)
 
 </details>
 

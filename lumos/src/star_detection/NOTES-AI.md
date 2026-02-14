@@ -32,7 +32,8 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
    L-M fitting), quality metrics (flux, FWHM, eccentricity, SNR, sharpness, roundness,
    L.A.Cosmic Laplacian SNR)
 6. **filter** - Cascading quality filters (saturation, SNR, eccentricity, sharpness,
-   roundness), MAD-based FWHM outlier removal, spatial-hash duplicate removal
+   L.A.Cosmic Laplacian SNR, roundness), MAD-based FWHM outlier removal, spatial-hash
+   duplicate removal
 
 #### Key Subsystems
 - **convolution/** - Separable Gaussian O(n*k), elliptical 2D O(n*k^2), SIMD row/col passes
@@ -279,13 +280,13 @@ cap at 1e10 prevents infinite loops. Gaussian elimination with partial pivoting 
 
 | Metric | Formula | Notes |
 |--------|---------|-------|
-| FWHM | `2.355 * sqrt(sum_r2/flux/2)` from moments | Discretization not corrected; fit params discarded |
-| Eccentricity | `sqrt(1 - lambda2/lambda1)` from covariance eigenvalues | Standard definition |
+| FWHM | Fit-derived (Gaussian sigma / Moffat alpha+beta) when available, moments fallback | Discretization not corrected |
+| Eccentricity | Fit-derived `sqrt(1 - sigma_min/sigma_max)` for Gaussian, moments eigenvalues otherwise | Standard definition |
 | SNR | Three CCD noise models (Howell 2006) | Uses full square stamp area as npix |
 | Sharpness | `peak / core_3x3_flux` | Differs from DAOFIND: `(peak - mean_4neighbors) / peak` |
 | Roundness1 | GROUND: from marginal max ratio | Differs from DAOFIND (density-enhancement image) |
 | Roundness2 | SROUND: from marginal asymmetry | Custom definition |
-| Laplacian SNR | L.A.Cosmic (van Dokkum 2001) | Computed but not used in filter stage |
+| Laplacian SNR | L.A.Cosmic (van Dokkum 2001) | Configurable filter: `max_laplacian_snr` (default 0 = disabled) |
 
 ### Comparison with Industry
 
@@ -304,8 +305,6 @@ cap at 1e10 prevents infinite loops. Gaussian elimination with partial pivoting 
 - **P2: No weighted least squares**: Fitting is unweighted (`chi2 = sum((data-model)^2)`).
   Industry tools use inverse-variance weighting. Impact: small for bright stars, significant
   for faint stars near detection threshold.
-- **P3: Fit parameters discarded**: GaussianFit/MoffatFit provide sigma/alpha/beta but only
-  position is used. FWHM/eccentricity recomputed from second moments instead.
 - **P3: No formal parameter uncertainties**: L-M Hessian available at convergence but not
   inverted for covariance matrix. Would enable per-star position uncertainty for weighted
   registration.
@@ -479,35 +478,28 @@ MAX_TILE_SAMPLES=1024 cap.
 
 ### Short-term (high impact, low effort)
 
-1. **Wire L.A.Cosmic laplacian_snr into filter stage**: Already computed but unused.
-   Would improve cosmic ray rejection over the current sharpness-based approach.
-
-2. **Use fit parameters for FWHM/eccentricity**: GaussianFit provides sigma_x/sigma_y and
-   MoffatFit provides alpha/beta. Currently discarded; FWHM recomputed from moments.
-   Would give more accurate FWHM values for filtering.
-
-3. **Add parameter uncertainties**: Invert J^T*J at L-M convergence. Trivial computation
+1. **Add parameter uncertainties**: Invert J^T*J at L-M convergence. Trivial computation
    for N=5-6. Enables weighted star matching in registration.
 
 ### Medium-term (moderate impact, moderate effort)
 
-4. **Implement weighted least squares**: Add per-pixel variance weighting to L-M models.
+2. **Implement weighted least squares**: Add per-pixel variance weighting to L-M models.
    Requires `gain` and `read_noise` parameters. Main change in `batch_build_normal_equations`
    methods.
 
-5. **Implement SExtractor mode estimator as option**: Simple formula
+3. **Implement SExtractor mode estimator as option**: Simple formula
    `mode = 2.5*med - 1.5*mean` after sigma clipping, with fallback to median when they
    disagree by >30%. ~5 lines in `compute_tile_stats`. Add to Config as `TileStatistic`
    enum.
 
-6. **Intensity-weighted pixel assignment in deblending**: Replace Voronoi
+4. **Intensity-weighted pixel assignment in deblending**: Replace Voronoi
    (`min(dist)`) with `max(peak_flux * exp(-dist^2 / (2*sigma^2)))`. Small change in
    `local_maxima/mod.rs:find_nearest_peak` and `multi_threshold/mod.rs:assign_pixels_to_objects`.
 
 ### Long-term (significant effort, diminishing returns for registration)
 
-7. **Variance map support**: Pervasive change across convolution, threshold, background.
-8. **SExtractor cleaning pass**: New pipeline stage between measure and filter.
+5. **Variance map support**: Pervasive change across convolution, threshold, background.
+6. **SExtractor cleaning pass**: New pipeline stage between measure and filter.
 
 ---
 

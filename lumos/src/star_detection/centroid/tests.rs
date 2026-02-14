@@ -3930,3 +3930,290 @@ fn test_moffat_fit_bad_initial_guess() {
         error
     );
 }
+
+// =========================================================================
+// Fit-derived FWHM and Eccentricity Tests
+// =========================================================================
+
+/// Helper: create a Gaussian star image with separate sigma_x, sigma_y.
+fn make_elliptical_gaussian(
+    width: usize,
+    height: usize,
+    pos: Vec2,
+    sigma_x: f32,
+    sigma_y: f32,
+    amplitude: f32,
+    background: f32,
+) -> Buffer2<f32> {
+    let mut pixels = vec![background; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f32 - pos.x;
+            let dy = y as f32 - pos.y;
+            let exponent = -0.5 * (dx * dx / (sigma_x * sigma_x) + dy * dy / (sigma_y * sigma_y));
+            pixels[y * width + x] += amplitude * exponent.exp();
+        }
+    }
+    Buffer2::new(width, height, pixels)
+}
+
+/// Helper: create a Moffat star image with given alpha, beta.
+fn make_moffat_star(
+    width: usize,
+    height: usize,
+    pos: Vec2,
+    alpha: f32,
+    beta: f32,
+    amplitude: f32,
+    background: f32,
+) -> Buffer2<f32> {
+    let mut pixels = vec![background; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f32 - pos.x;
+            let dy = y as f32 - pos.y;
+            let r2 = dx * dx + dy * dy;
+            pixels[y * width + x] += amplitude * (1.0 + r2 / (alpha * alpha)).powf(-beta);
+        }
+    }
+    Buffer2::new(width, height, pixels)
+}
+
+/// Helper: run measure_star on a single-star image with given centroid method.
+fn measure_single_star(
+    pixels: &Buffer2<f32>,
+    bg_value: f32,
+    noise: f32,
+    peak_pos: Vec2,
+    centroid_method: CentroidMethod,
+) -> Star {
+    let width = pixels.width();
+    let height = pixels.height();
+    let bg = make_uniform_background(width, height, bg_value, noise);
+    let config = Config {
+        centroid_method,
+        tile_size: 32,
+        edge_margin: 10,
+        ..Default::default()
+    };
+    let region = Region {
+        bbox: Aabb::new(
+            Vec2us::new(
+                (peak_pos.x as usize).saturating_sub(5),
+                (peak_pos.y as usize).saturating_sub(5),
+            ),
+            Vec2us::new(
+                (peak_pos.x as usize + 5).min(width - 1),
+                (peak_pos.y as usize + 5).min(height - 1),
+            ),
+        ),
+        peak: Vec2us::new(peak_pos.x.round() as usize, peak_pos.y.round() as usize),
+        peak_value: pixels[peak_pos.y.round() as usize * width + peak_pos.x.round() as usize],
+        area: 50,
+    };
+    measure_star(pixels, &bg, &region, &config).expect("measure_star should succeed")
+}
+
+/// GaussianFit: FWHM should come from fit sigma, not moments.
+///
+/// Circular Gaussian with sigma=2.0. True FWHM = 2.35482 * 2.0 = 4.70964.
+/// The fit recovers sigma accurately; moments are biased by the finite stamp.
+#[test]
+fn test_gaussian_fit_fwhm_from_fit_params() {
+    let sigma = 2.0f32;
+    // True FWHM = FWHM_TO_SIGMA * sigma = 2.35482 * 2.0 = 4.70964
+    let true_fwhm = FWHM_TO_SIGMA * sigma;
+
+    let pos = Vec2::new(64.0, 64.0);
+    let pixels = make_elliptical_gaussian(128, 128, pos, sigma, sigma, 0.8, 0.1);
+
+    let star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::GaussianFit);
+
+    // Fit-derived FWHM should be close to the true value
+    let fwhm_error = (star.fwhm - true_fwhm).abs();
+    assert!(
+        fwhm_error < 0.05,
+        "GaussianFit FWHM should match true value: got {}, expected {}, error {}",
+        star.fwhm,
+        true_fwhm,
+        fwhm_error
+    );
+}
+
+/// GaussianFit: eccentricity should come from fit sigma_x/sigma_y ratio.
+///
+/// Elongated Gaussian with sigma_x=2.0, sigma_y=4.0.
+/// True eccentricity = sqrt(1 - sigma_min/sigma_max) = sqrt(1 - 2/4) = sqrt(0.5) ≈ 0.7071.
+#[test]
+fn test_gaussian_fit_eccentricity_from_fit_params() {
+    let sigma_x = 2.0f32;
+    let sigma_y = 4.0f32;
+    // e = sqrt(1 - min/max) = sqrt(1 - 2/4) = sqrt(0.5) = 0.7071
+    let true_ecc = (1.0 - sigma_x / sigma_y).sqrt();
+
+    let pos = Vec2::new(64.0, 64.0);
+    let pixels = make_elliptical_gaussian(128, 128, pos, sigma_x, sigma_y, 0.8, 0.1);
+
+    let star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::GaussianFit);
+
+    let ecc_error = (star.eccentricity - true_ecc).abs();
+    assert!(
+        ecc_error < 0.05,
+        "GaussianFit eccentricity should match true value: got {}, expected {}, error {}",
+        star.eccentricity,
+        true_ecc,
+        ecc_error
+    );
+}
+
+/// GaussianFit: FWHM from fit is more accurate than from moments.
+///
+/// Moments-based FWHM is biased because:
+/// 1. Finite stamp includes wings that bias sum_r2 upward
+/// 2. Background subtraction imperfections
+///
+/// The fit models the Gaussian directly, recovering sigma more accurately.
+#[test]
+fn test_gaussian_fit_fwhm_more_accurate_than_moments() {
+    let sigma = 2.5f32;
+    let true_fwhm = FWHM_TO_SIGMA * sigma;
+
+    let pos = Vec2::new(64.0, 64.0);
+    let pixels = make_elliptical_gaussian(128, 128, pos, sigma, sigma, 0.8, 0.1);
+
+    let fit_star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::GaussianFit);
+    let moments_star =
+        measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::WeightedMoments);
+
+    let fit_error = (fit_star.fwhm - true_fwhm).abs();
+    let moments_error = (moments_star.fwhm - true_fwhm).abs();
+
+    assert!(
+        fit_error < moments_error,
+        "GaussianFit FWHM error ({}) should be smaller than moments error ({}). \
+         fit_fwhm={}, moments_fwhm={}, true_fwhm={}",
+        fit_error,
+        moments_error,
+        fit_star.fwhm,
+        moments_star.fwhm,
+        true_fwhm
+    );
+}
+
+/// MoffatFit: FWHM should come from alpha_beta_to_fwhm(), not moments.
+///
+/// Moffat star with alpha=3.0, beta=2.5.
+/// True FWHM = 2 * alpha * sqrt(2^(1/beta) - 1)
+///           = 2 * 3.0 * sqrt(2^0.4 - 1)
+///           = 6.0 * sqrt(1.31951 - 1)
+///           = 6.0 * sqrt(0.31951)
+///           = 6.0 * 0.56525 ≈ 3.3915
+///
+/// Moments-based FWHM is severely biased for Moffat profiles because
+/// the extended wings contribute disproportionately to sum_r2.
+#[test]
+fn test_moffat_fit_fwhm_from_fit_params() {
+    let alpha = 3.0f32;
+    let beta = 2.5f32;
+    let true_fwhm = super::moffat_fit::alpha_beta_to_fwhm(alpha, beta);
+    // Verify: 2 * 3.0 * sqrt(2^0.4 - 1) ≈ 3.3915
+    assert!(
+        (true_fwhm - 3.3915).abs() < 0.001,
+        "FWHM formula check: {}",
+        true_fwhm
+    );
+
+    let pos = Vec2::new(64.0, 64.0);
+    let pixels = make_moffat_star(128, 128, pos, alpha, beta, 0.8, 0.1);
+
+    let star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::MoffatFit { beta });
+
+    let fwhm_error = (star.fwhm - true_fwhm).abs();
+    assert!(
+        fwhm_error < 0.15,
+        "MoffatFit FWHM should match true value: got {}, expected {}, error {}",
+        star.fwhm,
+        true_fwhm,
+        fwhm_error
+    );
+}
+
+/// MoffatFit: eccentricity stays moment-based (Moffat is circular).
+///
+/// For a circular Moffat profile, eccentricity should be near zero
+/// regardless of whether it comes from fit or moments.
+#[test]
+fn test_moffat_fit_eccentricity_stays_moment_based() {
+    let alpha = 3.0f32;
+    let beta = 2.5f32;
+    let pos = Vec2::new(64.0, 64.0);
+    let pixels = make_moffat_star(128, 128, pos, alpha, beta, 0.8, 0.1);
+
+    let star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::MoffatFit { beta });
+
+    // Circular source → low eccentricity
+    assert!(
+        star.eccentricity < 0.15,
+        "Circular Moffat should have low eccentricity: got {}",
+        star.eccentricity
+    );
+}
+
+/// WeightedMoments: FWHM should be unchanged (no regression).
+///
+/// Circular Gaussian with sigma=2.5. True FWHM = 2.35482 * 2.5 = 5.887.
+/// Moments-based FWHM is biased upward by finite stamp size — the pre-existing
+/// behavior should be preserved exactly.
+#[test]
+fn test_moments_only_fwhm_unchanged() {
+    let sigma = 2.5f32;
+    let true_fwhm = FWHM_TO_SIGMA * sigma;
+
+    let pos = Vec2::new(64.0, 64.0);
+    let pixels = make_elliptical_gaussian(128, 128, pos, sigma, sigma, 0.8, 0.1);
+
+    let star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::WeightedMoments);
+
+    // Moments-based FWHM has some bias from finite stamp and background subtraction.
+    // Verify it's reasonable (within 5% of true value).
+    let rel_error = (star.fwhm - true_fwhm).abs() / true_fwhm;
+    assert!(
+        rel_error < 0.05,
+        "WeightedMoments FWHM should be within 5% of true: got {}, true {}, rel_error {:.4}",
+        star.fwhm,
+        true_fwhm,
+        rel_error
+    );
+}
+
+/// MoffatFit: FWHM from fit is more accurate than moments for Moffat profiles.
+///
+/// Moffat profiles have heavy wings that heavily bias moment-based FWHM upward.
+/// The fit directly recovers alpha, giving accurate FWHM.
+#[test]
+fn test_moffat_fit_fwhm_more_accurate_than_moments() {
+    let alpha = 3.0f32;
+    let beta = 2.5f32;
+    let true_fwhm = super::moffat_fit::alpha_beta_to_fwhm(alpha, beta);
+
+    let pos = Vec2::new(64.0, 64.0);
+    let pixels = make_moffat_star(128, 128, pos, alpha, beta, 0.8, 0.1);
+
+    let fit_star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::MoffatFit { beta });
+    let moments_star =
+        measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::WeightedMoments);
+
+    let fit_error = (fit_star.fwhm - true_fwhm).abs();
+    let moments_error = (moments_star.fwhm - true_fwhm).abs();
+
+    assert!(
+        fit_error < moments_error,
+        "MoffatFit FWHM error ({}) should be smaller than moments error ({}). \
+         fit_fwhm={}, moments_fwhm={}, true_fwhm={}",
+        fit_error,
+        moments_error,
+        fit_star.fwhm,
+        moments_star.fwhm,
+        true_fwhm
+    );
+}

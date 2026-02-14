@@ -246,6 +246,10 @@ pub struct Config {
     pub max_eccentricity: f32,
     /// Maximum sharpness. Cosmic rays have sharpness > 0.7.
     pub max_sharpness: f32,
+    /// Maximum L.A.Cosmic Laplacian SNR. Cosmic rays have sharp edges producing
+    /// high Laplacian values (>5-10), while stars smoothed by the PSF have lower
+    /// values. 0 = disabled. Based on van Dokkum 2001.
+    pub max_laplacian_snr: f32,
     /// Maximum roundness for shape filtering.
     pub max_roundness: f32,
     /// Maximum FWHM deviation from median in MAD units. 0 = disabled.
@@ -299,6 +303,7 @@ impl Default for Config {
             min_snr: 10.0,
             max_eccentricity: 0.6,
             max_sharpness: 0.7,
+            max_laplacian_snr: 0.0,
             max_roundness: 0.5,
             max_fwhm_deviation: 3.0,
             duplicate_min_separation: 8.0,
@@ -417,6 +422,11 @@ impl Config {
             self.max_sharpness > 0.0 && self.max_sharpness <= 1.0,
             "max_sharpness must be in (0, 1], got {}",
             self.max_sharpness
+        );
+        assert!(
+            self.max_laplacian_snr >= 0.0,
+            "max_laplacian_snr must be non-negative, got {}",
+            self.max_laplacian_snr
         );
         assert!(
             self.max_roundness > 0.0 && self.max_roundness <= 1.0,
@@ -844,6 +854,16 @@ mod tests {
     fn test_config_invalid_max_sharpness_zero() {
         Config {
             max_sharpness: 0.0,
+            ..Default::default()
+        }
+        .validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "max_laplacian_snr must be non-negative")]
+    fn test_config_invalid_max_laplacian_snr_negative() {
+        Config {
+            max_laplacian_snr: -1.0,
             ..Default::default()
         }
         .validate();
