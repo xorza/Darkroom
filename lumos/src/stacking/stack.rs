@@ -184,7 +184,7 @@ fn select_reference_frame(stats: &[FrameStats]) -> usize {
 ///
 /// - **Global**: `gain = ref_mad / frame_mad`, `offset = ref_median - frame_median * gain`
 /// - **Multiplicative**: `gain = ref_median / frame_median`, `offset = 0`
-fn compute_norm_params(
+fn compute_frame_norms(
     stats: &[FrameStats],
     normalization: Normalization,
 ) -> Option<Vec<FrameNorm>> {
@@ -312,13 +312,13 @@ pub(crate) fn run_stacking<I: StackableImage>(cache: &ImageCache<I>, config: &St
         None
     };
 
-    let norm_params = match stats.as_deref() {
-        Some(s) => compute_norm_params(s, config.normalization),
+    let frame_norms = match stats.as_deref() {
+        Some(s) => compute_frame_norms(s, config.normalization),
         None => None,
     };
     let weights = resolve_weights(&config.weighting, stats.as_deref());
 
-    let pixels = dispatch_stacking(cache, &weights, config, norm_params.as_deref());
+    let pixels = dispatch_stacking(cache, &weights, config, frame_norms.as_deref());
     I::from_stacked(pixels, cache.metadata().clone(), cache.dimensions())
 }
 
@@ -329,16 +329,16 @@ fn dispatch_stacking(
     cache: &ImageCache<impl StackableImage>,
     weights: &Option<Vec<f32>>,
     config: &StackConfig,
-    norm_params: Option<&[FrameNorm]>,
+    frame_norms: Option<&[FrameNorm]>,
 ) -> crate::astro_image::PixelData {
     match config.method {
-        CombineMethod::Median => cache.process_chunked(None, norm_params, |values, _, _| {
+        CombineMethod::Median => cache.process_chunked(None, frame_norms, |values, _, _| {
             math::median_f32_mut(values)
         }),
 
         CombineMethod::Mean(rejection) => cache.process_chunked(
             weights.as_deref(),
-            norm_params,
+            frame_norms,
             move |values, w, scratch| rejection.combine_mean(values, w, scratch),
         ),
     }
@@ -362,7 +362,7 @@ mod tests {
         normalization: Normalization,
     ) -> Option<Vec<FrameNorm>> {
         let stats = cache.compute_channel_stats();
-        compute_norm_params(&stats, normalization)
+        compute_frame_norms(&stats, normalization)
     }
 
     fn make_uniform_frames(pixel_counts: usize, values: &[f32]) -> ImageCache<AstroImage> {

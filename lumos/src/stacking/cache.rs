@@ -338,7 +338,7 @@ impl<I: StackableImage> ImageCache<I> {
     pub fn process_chunked<F>(
         &self,
         weights: Option<&[f32]>,
-        norm_params: Option<&[FrameNorm]>,
+        frame_norms: Option<&[FrameNorm]>,
         combine: F,
     ) -> PixelData
     where
@@ -362,10 +362,10 @@ impl<I: StackableImage> ImageCache<I> {
 
                         for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
                             let pixel_idx = row_offset + pixel_in_row;
-                            if let Some(norms) = norm_params {
+                            if let Some(frame_norm) = frame_norms {
                                 for (frame_idx, chunk) in chunks.iter().enumerate() {
-                                    let np = norms[frame_idx].channels[channel];
-                                    values[frame_idx] = chunk[pixel_idx] * np.gain + np.offset;
+                                    let cn = frame_norm[frame_idx].channels[channel];
+                                    values[frame_idx] = chunk[pixel_idx] * cn.gain + cn.offset;
                                 }
                             } else {
                                 for (frame_idx, chunk) in chunks.iter().enumerate() {
