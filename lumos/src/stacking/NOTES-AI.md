@@ -3,7 +3,8 @@
 ## Module Overview
 
 Unified image stacking pipeline with six rejection algorithms, two combination methods,
-three normalization modes, per-frame weighting, and automatic memory management.
+three normalization modes, three weighting strategies (equal/noise/manual), and automatic
+memory management.
 
 ### Files
 - `mod.rs` - Public API, `FrameType` enum, re-exports
@@ -211,7 +212,7 @@ quality, not rejection quality. Our MAD-based approach matches Siril's "fast mod
 | GESD relaxation | Yes (default 1.5 for low pixels) | Yes (default 1.5 for low pixels) |
 | Normalization | 3 modes (None/Global/Mult) | 5 modes + Local normalization |
 | Rejection normalization | Same as combination | Separate from combination normalization |
-| Weighting | Manual per-frame weights | Noise eval (MRS), PSF signal, PSF SNR |
+| Weighting | Equal, Noise (1/σ²), Manual | Noise eval (MRS), PSF signal, PSF SNR |
 | Reference frame | Auto-select by lowest noise (MAD) | Auto-select by quality metric |
 | Combine methods | Mean, Median | Mean, Median, Min, Max |
 | Rejection maps | Not generated | Low/High rejection maps + slope map |
@@ -229,7 +230,7 @@ quality, not rejection quality. Our MAD-based approach matches Siril's "fast mod
 | Normalization modes | 3 (None/Global/Mult) | 5 (None/Add/Mult/Add+Scale/Mult+Scale) |
 | Winsorized correction | Yes, 1.134 * stddev | Yes, 1.134 * stddev |
 | Linear fit sigma | Mean absolute deviation from fit | Mean absolute deviation, per-pixel |
-| Weighting | Manual | Automatic: noise, FWHM, star count, integration time |
+| Weighting | Equal, Noise (1/σ²), Manual | Automatic: noise, FWHM, star count, integration time |
 | Rejection maps | No | Yes (low/high, mergeable) |
 | Percentile clipping | Rank-based | Distance-based from median |
 | Block processing | Per-channel sequential | Channel-in-block (parallel channels) |
@@ -246,7 +247,7 @@ quality, not rejection quality. Our MAD-based approach matches Siril's "fast mod
 | Rejection algorithms | 6 (sigma, winsorized, linear fit, percentile, GESD, none) | 4 (kappa-sigma, median kappa-sigma, auto adaptive, entropy) |
 | Winsorized | Full two-phase | "Median Kappa-Sigma" replaces rejected with median |
 | Calibration defaults | Frame-type presets | Median for bias/dark/flat masters |
-| Weighting | Manual | None (equal weight) |
+| Weighting | Equal, Noise (1/σ²), Manual | None (equal weight) |
 | Normalization | 3 modes | Basic (match average luminosity) |
 
 Our sigma clip is strictly more robust than DSS's kappa-sigma (median+MAD vs mean+stddev).
@@ -261,7 +262,7 @@ a unique approach not found in PixInsight or Siril but effective for mixed-expos
 | LNC | Not implemented | 8th degree polynomial local correction |
 | Rejection | 6 algorithms | Sigma clip, winsorized sigma clip |
 | Multi-band blending | Not implemented | MBB for mosaic seams |
-| Weighting | Manual | Automatic quality-based |
+| Weighting | Equal, Noise (1/σ²), Manual | Automatic quality-based |
 | Mosaic support | Not applicable | Full mosaic integration |
 
 APP's key differentiator is Local Normalization Correction (LNC) which corrects per-region
@@ -304,16 +305,14 @@ generates a slope map for linear fit. Diagnostic only -- does not affect stackin
 Most requested feature for parameter tuning. Fix: track rejected counts during `combine_mean`,
 return alongside combined value.
 
-### P2: Missing Automatic Weighting -- MEDIUM SEVERITY
+### ~~P2: Missing Automatic Weighting~~ -- IMPLEMENTED
 
-All industry tools (PixInsight, Siril, APP) offer automatic weighting based on noise,
-FWHM, or PSF quality. Current implementation requires manual weights.
+Noise-based inverse variance weighting `w = 1/sigma_bg^2` implemented via `Weighting::Noise`.
+Computes weights from per-channel MAD (already computed for normalization — zero extra I/O).
+`StackConfig::light()` preset uses `Weighting::Noise` by default.
 
-Highest-impact scheme: noise-based inverse variance `w = 1/sigma_bg^2`. This is the
-theoretically optimal Maximum Likelihood Estimator for SNR maximization (Zackay & Ofek 2017).
-
-The `weights` field in `StackConfig` provides the integration point. Automatic weight computation
-belongs in a separate quality-assessment module.
+Still missing vs industry: FWHM-based weighting, PSF signal/SNR weighting (PixInsight),
+star count weighting (Siril). These require star detection per frame.
 
 ### P2: Missing Separate Rejection vs Combination Normalization -- LOW SEVERITY
 
@@ -424,8 +423,7 @@ Per pixel, per iteration:
 
 1. **Add rejection maps** (P2) -- per-pixel high/low rejection counts for diagnostics.
    Most requested feature for parameter tuning.
-2. **Add noise-based auto weighting** (P2) -- `w = 1/sigma_bg^2`. Highest-impact
-   automatic weighting scheme. Requires reliable background noise estimator.
+2. ~~**Add noise-based auto weighting**~~ -- **DONE** (`Weighting::Noise`, `w = 1/sigma_bg^2`)
 3. **Add variance propagation** (P1 for science, P3 for visual) -- track per-pixel noise
    through the pipeline. Enables downstream noise-aware processing.
 4. **Add additive-only normalization** (P3) -- trivial.
@@ -471,17 +469,27 @@ Per pixel, per iteration:
 
 ## Weighting
 
-- Manual per-frame weights via `StackConfig::weights`
-- Weights normalized to sum to 1.0 before use
-- Index tracking preserves correct weight-to-value mapping after rejection reordering
-- `weighted_mean_indexed()` uses the index co-array to look up original frame weights
-  after rejection functions have reordered the values array
-- Missing: automatic noise-based weighting (`w = 1/sigma_bg^2`, inverse variance --
-  theoretically optimal for maximizing SNR)
-- Missing: FWHM-based weighting (`w = 1/(sigma_bg^2 * FWHM^2)` for point sources)
-- Missing: PSF-based weighting (PixInsight: PSF signal weight, PSF SNR)
-- The `weights` field provides the integration point; automatic computation belongs
-  in a separate quality-assessment module
+Three strategies via `Weighting` enum in `StackConfig`:
+- **Equal** (default for bias/dark/flat): No weighting. All frames contribute equally.
+- **Noise** (default for light): Automatic `w = 1/sigma_bg^2` where sigma is the average
+  MAD-derived sigma across channels. Computed from channel stats already available from
+  normalization — zero extra I/O. Weights normalized to sum=1.
+- **Manual**: User-provided per-frame weights, normalized to sum=1.
+
+Resolution happens in `resolve_weights()` in `stack.rs`:
+- `Equal` → `None` (no weight array, falls through to unweighted mean)
+- `Noise` → computes from `ChannelStats` (shared with normalization)
+- `Manual` → normalizes user weights
+
+Index tracking preserves correct weight-to-value mapping after rejection reordering.
+`weighted_mean_indexed()` uses the index co-array to look up original frame weights
+after rejection functions have reordered the values array.
+
+Still missing vs industry:
+- FWHM-based weighting (`w = 1/(sigma_bg^2 * FWHM^2)` for point sources)
+- PSF-based weighting (PixInsight: PSF signal weight, PSF SNR)
+- Star count weighting (Siril)
+These require per-frame star detection.
 
 ## Normalization Details
 
@@ -505,7 +513,7 @@ Frame-type presets set appropriate defaults:
 - `StackConfig::bias()`: Winsorized sigma=3.0, no normalization
 - `StackConfig::dark()`: Winsorized sigma=3.0, no normalization
 - `StackConfig::flat()`: Sigma clip sigma=2.5, multiplicative normalization
-- `StackConfig::light()`: Sigma clip sigma=2.5, global normalization
+- `StackConfig::light()`: Sigma clip sigma=2.5, global normalization, noise weighting
 
 This matches the industry approach. PixInsight and Siril also separate frame type labeling
 from algorithm configuration.

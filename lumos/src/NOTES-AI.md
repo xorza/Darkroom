@@ -136,10 +136,10 @@ None remaining.
 | ~~P2~~ | ~~Jacobian correction for non-affine~~ | ~~drizzle~~ | **DONE** — Square kernel uses Jacobian | STScI, Siril, PixInsight |
 | P2 | CFA/Bayer drizzle | drizzle | Bypass demosaic artifacts for OSC cameras | Siril, PixInsight, DSS, APP |
 | P2 | Rejection maps output | stacking | Per-pixel high/low counts for diagnostics | PixInsight, Siril |
-| P2 | Noise-based auto weighting | stacking | w = 1/sigma_bg^2 (optimal MLE) | PixInsight, Siril, APP |
+| ~~P2~~ | ~~Noise-based auto weighting~~ | ~~stacking~~ | **DONE** — `Weighting::Noise`, `w = 1/σ²` | PixInsight, Siril, APP |
 | P2 | Weighted least squares in L-M fitting | star_detection | Unweighted is suboptimal for faint stars | DAOPHOT, SExtractor |
-| P2 | RA/DEC metadata | astro_image | Essential for plate solving, mosaic planning | All capture software |
-| P2 | Pixel size metadata (XPIXSZ/YPIXSZ) | astro_image | Plate scale calculation | NINA, MaximDL |
+| ~~P2~~ | ~~RA/DEC metadata~~ | ~~astro_image~~ | **DONE** — `ra_deg`/`dec_deg` with HMS/DMS parsing | All capture software |
+| ~~P2~~ | ~~Pixel size metadata (XPIXSZ/YPIXSZ)~~ | ~~astro_image~~ | **DONE** — `pixel_size_x`/`pixel_size_y` | NINA, MaximDL |
 | P2 | Parameter uncertainties from L-M | star_detection | Position uncertainty for weighted registration | DAOPHOT |
 | P3 | Context/contribution image | drizzle | Per-pixel contributing-frame bitmask | STScI |
 | P3 | Variance/error output | drizzle | Propagated variance for photometry | STScI |
@@ -160,9 +160,9 @@ None remaining.
 | math | None | All verified correct | Hybrid Kahan/Neumaier SIMD, SIMD Cephes exp() | None |
 | registration | None critical | All 5 estimators + MAGSAC++ verified | Validated by SupeRANSAC 2025 | Generic incremental stepping |
 | star_detection | None remaining | Pipeline matches SExtractor | SIMD in every hot path, dual deblending | Weighted least squares |
-| stacking | None remaining | All 6 rejection algos verified | MAD-based sigma (more robust than DSS/Siril default) | Rejection maps, auto weighting, variance |
+| stacking | None remaining | All 6 rejection algos verified | MAD-based sigma (more robust than DSS/Siril default) | Rejection maps, variance propagation |
 | calibration | None remaining | Formula matches PixInsight/Siril | Per-CFA-color MAD detection, per-CFA flat | Configurable sigma threshold |
-| astro_image | None remaining | FITS loading correct | Comprehensive metadata parsing, float normalization | FITS writing, RA/DEC metadata |
+| astro_image | None remaining | FITS loading correct | Comprehensive metadata parsing, float normalization | FITS writing |
 | raw | None remaining | X-Trans + Bayer RCD verified | 2.1x faster than libraw (X-Trans), 216 MP/s (Bayer) | None critical |
 | drizzle | None remaining | All 5 kernels verified correct | Projective transform, per-pixel weights, polygon clipping, Jacobian | CFA/Bayer drizzle |
 | common | None | All correct | CPU feature detection, Buffer2/BitBuffer2 | None |
@@ -175,12 +175,12 @@ None remaining.
 
 ### Short-term (quality improvements)
 1. Add FITS writing support
-2. Add RA/DEC and pixel size metadata reading
+2. ~~Add RA/DEC and pixel size metadata reading~~ — **DONE**
 3. Expose configurable sigma threshold for defect map detection
 
 ### Medium-term (feature parity)
 4. Add stacking rejection maps (per-pixel high/low counts)
-5. Add noise-based auto weighting to stacking (`w = 1/sigma_bg^2`)
+5. ~~Add noise-based auto weighting to stacking~~ — **DONE** (`Weighting::Noise`)
 6. Add weighted least squares to L-M fitting (inverse-variance weighting)
 7. Add parameter uncertainties from L-M covariance matrix
 8. Implement CFA/Bayer drizzle
@@ -196,7 +196,7 @@ None remaining.
 16. ~~Add NaN/Inf handling in FITS float loader~~ **Done**
 17. Add multi-HDU FITS support
 18. Add large-scale rejection for satellite trails
-19. Add missing FITS metadata (DATAMAX, ISOSPEED, CALSTAT, FOCRATIO)
+19. Add missing FITS metadata (CALSTAT, FOCRATIO) — DATAMAX and ISOSPEED now read
 
 ## Verified Correct (no action needed)
 
@@ -226,6 +226,7 @@ These were investigated and confirmed correct against industry references:
 - **drizzle output**: Lanczos clamped [0,+inf), rayon-parallel finalization, Buffer2 per-channel
 - **stacking all 6 rejection algorithms**: sigma clip, winsorized, linear fit, percentile, GESD, none
 - **stacking normalization formulas**: global matches Siril "additive with scaling"
+- **stacking noise weighting**: `Weighting::Noise` computes `w = 1/sigma_bg^2` from channel MAD stats
 - **stacking winsorized**: full two-phase with Huber c=1.5, 1.134 correction, convergence
 - **star_detection pipeline order**: matches SExtractor (background -> filter -> threshold -> label -> deblend -> centroid)
 - **star_detection background MAD**: 50% breakdown point, superior to SExtractor clipped stddev

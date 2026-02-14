@@ -9,7 +9,7 @@ pub(crate) mod stack;
 use strum_macros::Display;
 
 // ========== Public API ==========
-pub use config::{CombineMethod, Normalization, StackConfig};
+pub use config::{CombineMethod, Normalization, StackConfig, Weighting};
 pub use rejection::Rejection;
 pub use stack::{stack, stack_with_progress};
 

@@ -17,6 +17,20 @@ pub enum CombineMethod {
     Median,
 }
 
+/// Frame weighting strategy.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum Weighting {
+    /// Equal weights for all frames (default).
+    #[default]
+    Equal,
+    /// Automatic weighting by inverse background noise variance: w = 1/sigma^2.
+    /// Frames with lower noise get higher weight. Uses per-frame MAD statistics
+    /// that are already computed during normalization.
+    Noise,
+    /// Explicit per-frame weights provided by the user.
+    Manual(Vec<f32>),
+}
+
 /// Frame normalization method applied before stacking.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum Normalization {
@@ -58,8 +72,8 @@ pub struct StackConfig {
     /// How to combine pixel values across frames.
     /// For `Mean`, includes the rejection algorithm.
     pub method: CombineMethod,
-    /// Per-frame weights (empty = equal weights).
-    pub weights: Vec<f32>,
+    /// Frame weighting strategy.
+    pub weighting: Weighting,
     /// Frame normalization before stacking.
     pub normalization: Normalization,
     /// Cache/memory behavior.
@@ -70,7 +84,7 @@ impl Default for StackConfig {
     fn default() -> Self {
         Self {
             method: CombineMethod::Mean(Rejection::default()),
-            weights: vec![],
+            weighting: Weighting::Equal,
             normalization: Normalization::None,
             cache: CacheConfig::default(),
         }
@@ -107,7 +121,7 @@ impl StackConfig {
     /// Preset: weighted mean with explicit weights.
     pub fn weighted(weights: Vec<f32>) -> Self {
         Self {
-            weights,
+            weighting: Weighting::Manual(weights),
             ..Default::default()
         }
     }
@@ -173,10 +187,11 @@ impl StackConfig {
         }
     }
 
-    /// Preset for light frames: σ-clip σ=2.5, global normalization.
+    /// Preset for light frames: σ-clip σ=2.5, global normalization, noise weighting.
     pub fn light() -> Self {
         Self {
             method: CombineMethod::Mean(Rejection::sigma_clip(2.5)),
+            weighting: Weighting::Noise,
             normalization: Normalization::Global,
             ..Default::default()
         }
@@ -230,23 +245,8 @@ impl StackConfig {
             }
         }
 
-        if !self.weights.is_empty() {
-            assert!(
-                self.weights.iter().all(|&w| w >= 0.0),
-                "Weights must be non-negative"
-            );
-        }
-    }
-
-    /// Get normalized weights (sum to 1.0).
-    pub fn normalized_weights(&self) -> Vec<f32> {
-        assert!(!self.weights.is_empty(), "Cannot normalize empty weights");
-        let sum: f32 = self.weights.iter().sum();
-        if sum > f32::EPSILON {
-            self.weights.iter().map(|w| w / sum).collect()
-        } else {
-            let n = self.weights.len();
-            vec![1.0 / n as f32; n]
+        if let Weighting::Manual(ref w) = self.weighting {
+            assert!(w.iter().all(|&v| v >= 0.0), "Weights must be non-negative");
         }
     }
 }
@@ -263,7 +263,7 @@ mod tests {
             config.method,
             CombineMethod::Mean(Rejection::SigmaClip(..))
         ));
-        assert!(config.weights.is_empty());
+        assert_eq!(config.weighting, Weighting::Equal);
         assert_eq!(config.normalization, Normalization::None);
     }
 
@@ -287,7 +287,7 @@ mod tests {
     fn test_weighted_preset() {
         let config = StackConfig::weighted(vec![1.0, 2.0, 3.0]);
         assert!(matches!(config.method, CombineMethod::Mean(..)));
-        assert_eq!(config.weights.len(), 3);
+        assert!(matches!(config.weighting, Weighting::Manual(ref w) if w.len() == 3));
     }
 
     #[test]
@@ -304,24 +304,6 @@ mod tests {
             CombineMethod::Mean(Rejection::SigmaClip(..))
         ));
         assert_eq!(config.normalization, Normalization::Global);
-    }
-
-    #[test]
-    #[should_panic(expected = "Cannot normalize empty weights")]
-    fn test_normalized_weights_empty_panics() {
-        let config = StackConfig::default();
-        config.normalized_weights();
-    }
-
-    #[test]
-    fn test_normalized_weights_provided() {
-        let config = StackConfig::weighted(vec![1.0, 2.0, 3.0]);
-        let weights = config.normalized_weights();
-        assert_eq!(weights.len(), 3);
-        assert!((weights.iter().sum::<f32>() - 1.0).abs() < f32::EPSILON);
-        // First weight should be smallest
-        assert!(weights[0] < weights[1]);
-        assert!(weights[1] < weights[2]);
     }
 
     #[test]
@@ -385,6 +367,7 @@ mod tests {
             CombineMethod::Mean(Rejection::SigmaClip(c))
                 if (c.sigma_low - 2.5).abs() < f32::EPSILON
         ));
+        assert_eq!(config.weighting, Weighting::Noise);
         assert_eq!(config.normalization, Normalization::Global);
     }
 

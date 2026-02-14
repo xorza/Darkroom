@@ -9,7 +9,7 @@ use crate::AstroImage;
 
 use super::FrameType;
 use super::cache::{ChannelStats, ImageCache, StackableImage};
-use super::config::{CombineMethod, Normalization, StackConfig};
+use super::config::{CombineMethod, Normalization, StackConfig, Weighting};
 use super::error::Error;
 use super::progress::ProgressCallback;
 use crate::math;
@@ -114,11 +114,13 @@ pub fn stack_with_progress<P: AsRef<Path> + Sync>(
     // Validate configuration
     config.validate();
 
-    // Validate weights if provided
-    if !config.weights.is_empty() && config.weights.len() != paths.len() {
-        panic!(
+    // Validate manual weights count
+    if let Weighting::Manual(ref w) = config.weighting {
+        assert_eq!(
+            w.len(),
+            paths.len(),
             "Weight count ({}) must match frame count ({})",
-            config.weights.len(),
+            w.len(),
             paths.len()
         );
     }
@@ -127,9 +129,9 @@ pub fn stack_with_progress<P: AsRef<Path> + Sync>(
     tracing::info!(
         frame_type = %frame_type,
         method = ?config.method,
+        weighting = ?config.weighting,
         normalization = ?config.normalization,
         frame_count = paths.len(),
-        has_weights = !config.weights.is_empty(),
         "Starting unified stack"
     );
 
@@ -170,7 +172,7 @@ fn select_reference_frame(stats: &[ChannelStats], frame_count: usize, channels: 
     best_frame
 }
 
-/// Compute per-frame normalization parameters based on the normalization mode.
+/// Compute per-frame normalization parameters from pre-computed channel stats.
 ///
 /// Auto-selects the lowest-noise frame as reference. Returns `None` for
 /// `Normalization::None`.
@@ -178,17 +180,15 @@ fn select_reference_frame(stats: &[ChannelStats], frame_count: usize, channels: 
 /// - **Global**: `gain = ref_mad / frame_mad`, `offset = ref_median - frame_median * gain`
 /// - **Multiplicative**: `gain = ref_median / frame_median`, `offset = 0`
 fn compute_norm_params(
-    cache: &ImageCache<impl StackableImage>,
+    stats: &[ChannelStats],
     normalization: Normalization,
+    frame_count: usize,
+    channels: usize,
 ) -> Option<Vec<NormParams>> {
     if normalization == Normalization::None {
         return None;
     }
-
-    let stats = cache.compute_channel_stats();
-    let channels = cache.dimensions().channels;
-    let frame_count = cache.frame_count();
-    let ref_frame = select_reference_frame(&stats, frame_count, channels);
+    let ref_frame = select_reference_frame(stats, frame_count, channels);
     let mut params = vec![NormParams::IDENTITY; frame_count * channels];
 
     for channel in 0..channels {
@@ -245,13 +245,76 @@ fn compute_norm_params(
     Some(params)
 }
 
+/// Resolve weights from the weighting strategy and pre-computed channel stats.
+///
+/// Returns normalized weights (sum to 1.0) or `None` for equal weighting.
+fn resolve_weights(
+    weighting: &Weighting,
+    stats: Option<&[ChannelStats]>,
+    frame_count: usize,
+    channels: usize,
+) -> Option<Vec<f32>> {
+    match weighting {
+        Weighting::Equal => None,
+        Weighting::Noise => {
+            let stats = stats.expect("channel stats required for noise weighting");
+            // w = 1/sigma^2 where sigma = average MAD-based sigma across channels
+            let weights: Vec<f32> = (0..frame_count)
+                .map(|f| {
+                    let mut sigma_sum = 0.0f32;
+                    for c in 0..channels {
+                        sigma_sum += math::mad_to_sigma(stats[f * channels + c].mad);
+                    }
+                    let avg_sigma = sigma_sum / channels as f32;
+                    if avg_sigma > f32::EPSILON {
+                        1.0 / (avg_sigma * avg_sigma)
+                    } else {
+                        0.0
+                    }
+                })
+                .collect();
+            normalize_weights(&weights)
+        }
+        Weighting::Manual(w) => normalize_weights(w),
+    }
+}
+
+/// Normalize weights to sum to 1.0. Returns `None` if total weight is zero.
+fn normalize_weights(weights: &[f32]) -> Option<Vec<f32>> {
+    let sum: f32 = weights.iter().sum();
+    if sum > f32::EPSILON {
+        Some(weights.iter().map(|w| w / sum).collect())
+    } else {
+        None
+    }
+}
+
 /// Run the full stacking pipeline: compute normalization, dispatch combining,
 /// and construct the output image.
 ///
 /// Generic over any `StackableImage` type.
 pub(crate) fn run_stacking<I: StackableImage>(cache: &ImageCache<I>, config: &StackConfig) -> I {
-    let norm_params = compute_norm_params(cache, config.normalization);
-    let pixels = dispatch_stacking(cache, config, norm_params.as_deref());
+    let frame_count = cache.frame_count();
+    let channels = cache.dimensions().channels;
+
+    // Compute channel stats once (shared by normalization and noise weighting)
+    let stats = if config.normalization != Normalization::None
+        || matches!(config.weighting, Weighting::Noise)
+    {
+        Some(cache.compute_channel_stats())
+    } else {
+        None
+    };
+
+    let norm_params = compute_norm_params(
+        stats.as_deref().unwrap_or(&[]),
+        config.normalization,
+        frame_count,
+        channels,
+    );
+    let weights = resolve_weights(&config.weighting, stats.as_deref(), frame_count, channels);
+
+    let pixels = dispatch_stacking(cache, &weights, config, norm_params.as_deref());
     I::from_stacked(pixels, cache.metadata().clone(), cache.dimensions())
 }
 
@@ -260,6 +323,7 @@ pub(crate) fn run_stacking<I: StackableImage>(cache: &ImageCache<I>, config: &St
 /// Returns `PixelData` with the combined result.
 fn dispatch_stacking(
     cache: &ImageCache<impl StackableImage>,
+    weights: &Option<Vec<f32>>,
     config: &StackConfig,
     norm_params: Option<&[NormParams]>,
 ) -> crate::astro_image::PixelData {
@@ -268,19 +332,11 @@ fn dispatch_stacking(
             math::median_f32_mut(values)
         }),
 
-        CombineMethod::Mean(rejection) => {
-            let weights = if config.weights.is_empty() {
-                None
-            } else {
-                Some(config.normalized_weights())
-            };
-
-            cache.process_chunked(
-                weights.as_deref(),
-                norm_params,
-                move |values, w, scratch| rejection.combine_mean(values, w, scratch),
-            )
-        }
+        CombineMethod::Mean(rejection) => cache.process_chunked(
+            weights.as_deref(),
+            norm_params,
+            move |values, w, scratch| rejection.combine_mean(values, w, scratch),
+        ),
     }
 }
 
@@ -295,6 +351,20 @@ mod tests {
     use std::path::PathBuf;
 
     // ========== Helpers ==========
+
+    /// Convenience wrapper: compute stats + norm params from cache (for tests).
+    fn norm_params_for(
+        cache: &ImageCache<AstroImage>,
+        normalization: Normalization,
+    ) -> Option<Vec<NormParams>> {
+        let stats = cache.compute_channel_stats();
+        compute_norm_params(
+            &stats,
+            normalization,
+            cache.frame_count(),
+            cache.dimensions().channels,
+        )
+    }
 
     fn make_uniform_frames(pixel_counts: usize, values: &[f32]) -> ImageCache<AstroImage> {
         let dims = ImageDimensions::new(pixel_counts, 1, 1);
@@ -373,7 +443,8 @@ mod tests {
             PathBuf::from("/b.fits"),
             PathBuf::from("/c.fits"),
         ];
-        let config = StackConfig::weighted(vec![1.0, 2.0]); // Wrong count
+        let mut config = StackConfig::weighted(vec![1.0, 2.0]); // Wrong count
+        config.normalization = Normalization::None; // avoid loading files for stats
         let _ = stack(&paths, FrameType::Light, config);
     }
 
@@ -385,7 +456,7 @@ mod tests {
         let cache = make_uniform_frames(16, &[5.0, 5.0, 5.0]);
 
         for mode in [Normalization::Global, Normalization::Multiplicative] {
-            let params = compute_norm_params(&cache, mode).unwrap();
+            let params = norm_params_for(&cache, mode).unwrap();
             assert_eq!(params.len(), 3);
             assert_norm_identity(&params);
         }
@@ -403,7 +474,7 @@ mod tests {
             AstroImage::from_pixels(dims, frame0),
             AstroImage::from_pixels(dims, frame1),
         ]);
-        let params = compute_norm_params(&cache, Normalization::Global).unwrap();
+        let params = norm_params_for(&cache, Normalization::Global).unwrap();
 
         assert_norm_identity(&params[..1]);
         assert!(
@@ -428,7 +499,7 @@ mod tests {
             AstroImage::from_pixels(dims, frame0),
             AstroImage::from_pixels(dims, frame1),
         ]);
-        let params = compute_norm_params(&cache, Normalization::Global).unwrap();
+        let params = norm_params_for(&cache, Normalization::Global).unwrap();
 
         assert!(
             (params[1].gain - 0.5).abs() < 0.15,
@@ -441,7 +512,7 @@ mod tests {
     fn test_global_norm_stacking_corrects_offset() {
         // After normalization, both frames should be brought to reference level
         let cache = make_uniform_frames(16, &[100.0, 150.0]);
-        let norm_params = compute_norm_params(&cache, Normalization::Global).unwrap();
+        let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
 
         let result = cache.process_chunked(None, Some(&norm_params), |values, _, _| {
             math::mean_f32(values)
@@ -454,7 +525,7 @@ mod tests {
     #[test]
     fn test_multiplicative_norm_scales_by_median_ratio() {
         let cache = make_uniform_frames(16, &[100.0, 200.0]);
-        let params = compute_norm_params(&cache, Normalization::Multiplicative).unwrap();
+        let params = norm_params_for(&cache, Normalization::Multiplicative).unwrap();
 
         assert_norm_identity(&params[..1]);
         assert!(
@@ -479,7 +550,7 @@ mod tests {
             AstroImage::from_pixels(dims, frame0),
             AstroImage::from_pixels(dims, frame1),
         ]);
-        let params = compute_norm_params(&cache, Normalization::Multiplicative).unwrap();
+        let params = norm_params_for(&cache, Normalization::Multiplicative).unwrap();
 
         for np in &params {
             assert!(
@@ -493,7 +564,7 @@ mod tests {
     #[test]
     fn test_multiplicative_stacking_normalizes_flat_levels() {
         let cache = make_uniform_frames(16, &[100.0, 200.0]);
-        let norm_params = compute_norm_params(&cache, Normalization::Multiplicative).unwrap();
+        let norm_params = norm_params_for(&cache, Normalization::Multiplicative).unwrap();
 
         let result = cache.process_chunked(None, Some(&norm_params), |values, _, _| {
             math::mean_f32(values)
@@ -515,7 +586,7 @@ mod tests {
             (Normalization::Multiplicative, [150.0, 100.0, 600.0]),
         ] {
             let cache = make_rgb_frames(16, &[ref_rgb, frame1_rgb]);
-            let norm_params = compute_norm_params(&cache, mode).unwrap();
+            let norm_params = norm_params_for(&cache, mode).unwrap();
 
             let result = cache.process_chunked(None, Some(&norm_params), |values, _, _| {
                 math::mean_f32(values)
@@ -532,16 +603,17 @@ mod tests {
     #[test]
     fn test_dispatch_normalized_vs_unnormalized() {
         let cache = make_uniform_frames(16, &[100.0, 200.0]);
-        let norm_params = compute_norm_params(&cache, Normalization::Global).unwrap();
+        let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
 
         let config = StackConfig {
             method: CombineMethod::Mean(Rejection::None),
             normalization: Normalization::Global,
             ..Default::default()
         };
+        let no_weights = None;
 
-        let result_norm = dispatch_stacking(&cache, &config, Some(&norm_params));
-        let result_unnorm = dispatch_stacking(&cache, &config, None);
+        let result_norm = dispatch_stacking(&cache, &no_weights, &config, Some(&norm_params));
+        let result_unnorm = dispatch_stacking(&cache, &no_weights, &config, None);
 
         let norm_pixel = result_norm.channel(0)[0];
         let unnorm_pixel = result_unnorm.channel(0)[0];
@@ -633,7 +705,7 @@ mod tests {
             AstroImage::from_pixels(dims, f2),
         ]);
 
-        let params = compute_norm_params(&cache, Normalization::Global).unwrap();
+        let params = norm_params_for(&cache, Normalization::Global).unwrap();
 
         // Frame 1 (lowest noise) should have identity params
         assert!(
@@ -678,12 +750,140 @@ mod tests {
             AstroImage::from_pixels(dims, f0),
             AstroImage::from_pixels(dims, f1),
         ]);
-        let norm_params = compute_norm_params(&cache, Normalization::Global).unwrap();
+        let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
 
         // Frame 1 is reference (lower noise), so stacked result should be ~200
         let result = cache.process_chunked(None, Some(&norm_params), |values, _, _| {
             math::mean_f32(values)
         });
         assert_channel_near(&result, 0, 200.0, 2.0);
+    }
+
+    // ========== Noise Weighting ==========
+
+    #[test]
+    fn test_noise_weighting_downweights_noisy_frame() {
+        // Frame 0: clean, values ~100 (spread 0.5)
+        // Frame 1: noisy, values ~200 (spread 20.0)
+        // With equal weight: mean ≈ 150
+        // With noise weight: w0 = 1/sigma0^2 >> w1 = 1/sigma1^2, so result ≈ 100
+        let dims = ImageDimensions::new(100, 1, 1);
+        let f0: Vec<f32> = (0..100).map(|i| 99.75 + (i as f32) * 0.5 / 99.0).collect();
+        let f1: Vec<f32> = (0..100).map(|i| 190.0 + (i as f32) * 20.0 / 99.0).collect();
+        let cache = make_test_cache(vec![
+            AstroImage::from_pixels(dims, f0),
+            AstroImage::from_pixels(dims, f1),
+        ]);
+
+        let stats = cache.compute_channel_stats();
+        // sigma0 ≈ MAD*1.4826 (small), sigma1 ≈ MAD*1.4826 (large)
+        let sigma0 = math::mad_to_sigma(stats[0].mad);
+        let sigma1 = math::mad_to_sigma(stats[1].mad);
+        assert!(
+            sigma1 > sigma0 * 5.0,
+            "Frame 1 should be much noisier: sigma0={sigma0}, sigma1={sigma1}"
+        );
+
+        let weights =
+            resolve_weights(&Weighting::Noise, Some(&stats), cache.frame_count(), 1).unwrap();
+        // Frame 0 should get much higher weight
+        assert!(
+            weights[0] > weights[1] * 10.0,
+            "Clean frame weight ({}) should be >> noisy frame weight ({})",
+            weights[0],
+            weights[1]
+        );
+        // Weights sum to 1.0
+        assert!((weights.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_noise_weighting_equal_noise_gives_equal_weights() {
+        // 3 identical frames → equal noise → equal weights
+        let cache = make_uniform_frames(100, &[50.0, 50.0, 50.0]);
+        let stats = cache.compute_channel_stats();
+        // All MADs are 0 for uniform frames → all weights are 0 → returns None
+        let weights = resolve_weights(&Weighting::Noise, Some(&stats), 3, 1);
+        assert!(
+            weights.is_none(),
+            "Uniform frames have zero MAD → no weights (equal weighting fallback)"
+        );
+    }
+
+    #[test]
+    fn test_noise_weighting_with_spread_equal_noise() {
+        // 3 frames with identical spread → equal weights
+        let dims = ImageDimensions::new(100, 1, 1);
+        let make_frame =
+            |base: f32| -> Vec<f32> { (0..100).map(|i| base + (i as f32) * 10.0 / 99.0).collect() };
+        let cache = make_test_cache(vec![
+            AstroImage::from_pixels(dims, make_frame(100.0)),
+            AstroImage::from_pixels(dims, make_frame(200.0)),
+            AstroImage::from_pixels(dims, make_frame(300.0)),
+        ]);
+        let stats = cache.compute_channel_stats();
+        let weights = resolve_weights(&Weighting::Noise, Some(&stats), 3, 1).unwrap();
+        // All should be ≈ 1/3
+        for (i, &w) in weights.iter().enumerate() {
+            assert!(
+                (w - 1.0 / 3.0).abs() < 1e-4,
+                "Frame {i} weight should be ~0.333, got {w}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_noise_weighting_with_rejection() {
+        // Verify noise weights survive through rejection pipeline.
+        // Frame 0: clean (narrow spread ~100)
+        // Frame 1: noisy (wide spread ~100)
+        // Frame 2: has outlier pixel but clean otherwise (~100)
+        // Sigma-clip should reject the outlier; noise weights should favor frame 0.
+        let dims = ImageDimensions::new(16, 1, 1);
+        let f0: Vec<f32> = (0..16).map(|i| 99.9 + (i as f32) * 0.2 / 15.0).collect();
+        let f1: Vec<f32> = (0..16).map(|i| 90.0 + (i as f32) * 20.0 / 15.0).collect();
+        let mut f2: Vec<f32> = (0..16).map(|i| 99.8 + (i as f32) * 0.4 / 15.0).collect();
+        f2[0] = 999.0; // outlier
+
+        let cache = make_test_cache(vec![
+            AstroImage::from_pixels(dims, f0),
+            AstroImage::from_pixels(dims, f1),
+            AstroImage::from_pixels(dims, f2),
+        ]);
+
+        let config = StackConfig {
+            method: CombineMethod::Mean(Rejection::sigma_clip(2.0)),
+            weighting: Weighting::Noise,
+            ..Default::default()
+        };
+        let result = run_stacking(&cache, &config);
+        let pixel = result.channel(0).pixels()[0];
+        // Result should be near 100 (clean frame value), not near 999 (outlier)
+        assert!(
+            (pixel - 100.0).abs() < 10.0,
+            "Noise-weighted + sigma-clip should be ~100, got {pixel}"
+        );
+    }
+
+    #[test]
+    fn test_manual_weighting_unchanged() {
+        // Manual(vec![1.0, 2.0, 3.0]) should produce normalized [1/6, 2/6, 3/6]
+        let weights = resolve_weights(&Weighting::Manual(vec![1.0, 2.0, 3.0]), None, 3, 1).unwrap();
+        assert_eq!(weights.len(), 3);
+        assert!((weights[0] - 1.0 / 6.0).abs() < 1e-6);
+        assert!((weights[1] - 2.0 / 6.0).abs() < 1e-6);
+        assert!((weights[2] - 3.0 / 6.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_equal_weighting_returns_none() {
+        let weights = resolve_weights(&Weighting::Equal, None, 3, 1);
+        assert!(weights.is_none());
+    }
+
+    #[test]
+    fn test_light_preset_uses_noise_weighting() {
+        let config = StackConfig::light();
+        assert_eq!(config.weighting, Weighting::Noise);
     }
 }
