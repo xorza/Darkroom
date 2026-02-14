@@ -1494,4 +1494,183 @@ pub(crate) mod tests {
         // Cleanup
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    #[test]
+    fn test_frame_stats_sidecar_roundtrip() {
+        let temp_dir = std::env::temp_dir().join("lumos_stats_roundtrip_test");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let base = "test_frame.bin";
+
+        // 1-channel stats
+        let stats_1ch = FrameStats {
+            channels: [ChannelStats {
+                median: 42.5,
+                mad: 3.25,
+            }]
+            .into_iter()
+            .collect(),
+        };
+        write_frame_stats(&temp_dir, base, &stats_1ch);
+        let read_1ch = read_frame_stats(&temp_dir, base).unwrap();
+        assert_eq!(read_1ch.channels.len(), 1);
+        assert_eq!(read_1ch.channels[0].median, 42.5);
+        assert_eq!(read_1ch.channels[0].mad, 3.25);
+
+        // 3-channel stats (overwrites the file)
+        let stats_3ch = FrameStats {
+            channels: [
+                ChannelStats {
+                    median: 100.0,
+                    mad: 1.5,
+                },
+                ChannelStats {
+                    median: 200.0,
+                    mad: 2.5,
+                },
+                ChannelStats {
+                    median: 300.0,
+                    mad: 3.5,
+                },
+            ]
+            .into_iter()
+            .collect(),
+        };
+        write_frame_stats(&temp_dir, base, &stats_3ch);
+        let read_3ch = read_frame_stats(&temp_dir, base).unwrap();
+        assert_eq!(read_3ch.channels.len(), 3);
+        // Verify exact f32 roundtrip for each channel
+        for (i, (got, expected)) in read_3ch
+            .channels
+            .iter()
+            .zip(stats_3ch.channels.iter())
+            .enumerate()
+        {
+            assert_eq!(got.median, expected.median, "channel {i} median");
+            assert_eq!(got.mad, expected.mad, "channel {i} mad");
+        }
+
+        // Missing file returns None
+        assert!(read_frame_stats(&temp_dir, "nonexistent.bin").is_none());
+
+        // Corrupt file returns None
+        let corrupt_path = stats_path(&temp_dir, "corrupt.bin");
+        std::fs::write(&corrupt_path, b"bad").unwrap();
+        assert!(read_frame_stats(&temp_dir, "corrupt.bin").is_none());
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_load_and_cache_frame_reuse_preserves_stats() {
+        // Verify that stats computed on first load match stats read from sidecar on reuse.
+        let temp_dir = std::env::temp_dir().join("lumos_cache_reuse_stats_test");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Non-uniform data so median and MAD are non-trivial
+        let dims = ImageDimensions::new(4, 3, 1);
+        // [0,1,2,3,4,5,6,7,8,9,10,11] → median=5.5, deviations=[5.5,4.5,3.5,2.5,1.5,0.5,0.5,1.5,2.5,3.5,4.5,5.5] → MAD=3.0
+        let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
+        let image = AstroImage::from_pixels(dims, pixels);
+
+        let source_path = temp_dir.join("source.tiff");
+        image.save(&source_path).unwrap();
+
+        let base_filename = "stats_test.bin";
+
+        // First call — loads image, computes stats, writes sidecar
+        let (_, first_stats) = load_and_cache_frame::<AstroImage>(
+            &temp_dir,
+            base_filename,
+            &source_path,
+            dims,
+            FrameType::Light,
+            0,
+        )
+        .unwrap();
+
+        assert_eq!(first_stats.channels.len(), 1);
+        assert!((first_stats.channels[0].median - 5.5).abs() < f32::EPSILON);
+        assert!((first_stats.channels[0].mad - 3.0).abs() < f32::EPSILON);
+
+        // Second call — reuses cache, reads stats from sidecar
+        let (_, reused_stats) = load_and_cache_frame::<AstroImage>(
+            &temp_dir,
+            base_filename,
+            &source_path,
+            dims,
+            FrameType::Light,
+            0,
+        )
+        .unwrap();
+
+        // Stats must be identical (exact f32 roundtrip via le_bytes)
+        assert_eq!(reused_stats.channels.len(), first_stats.channels.len());
+        assert_eq!(
+            reused_stats.channels[0].median,
+            first_stats.channels[0].median
+        );
+        assert_eq!(reused_stats.channels[0].mad, first_stats.channels[0].mad);
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_missing_stats_sidecar_forces_reload() {
+        // If the .stats file is deleted but .meta and .bin remain,
+        // load_and_cache_frame should NOT reuse cache (can_reuse = false).
+        let temp_dir = std::env::temp_dir().join("lumos_missing_stats_test");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let dims = ImageDimensions::new(4, 3, 1);
+        let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
+        let image = AstroImage::from_pixels(dims, pixels);
+
+        let source_path = temp_dir.join("source.tiff");
+        image.save(&source_path).unwrap();
+
+        let base_filename = "missing_stats.bin";
+
+        // First call — creates cache + sidecars
+        let (_, first_stats) = load_and_cache_frame::<AstroImage>(
+            &temp_dir,
+            base_filename,
+            &source_path,
+            dims,
+            FrameType::Light,
+            0,
+        )
+        .unwrap();
+
+        // Delete only the .stats sidecar
+        let sp = stats_path(&temp_dir, base_filename);
+        assert!(sp.exists());
+        std::fs::remove_file(&sp).unwrap();
+
+        // Second call — should reload (not panic) and recompute stats
+        let (_, reloaded_stats) = load_and_cache_frame::<AstroImage>(
+            &temp_dir,
+            base_filename,
+            &source_path,
+            dims,
+            FrameType::Light,
+            0,
+        )
+        .unwrap();
+
+        // Stats should match (same source image)
+        assert_eq!(
+            reloaded_stats.channels[0].median,
+            first_stats.channels[0].median
+        );
+        assert_eq!(reloaded_stats.channels[0].mad, first_stats.channels[0].mad);
+
+        // .stats file should be recreated
+        assert!(sp.exists());
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }
