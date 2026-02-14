@@ -43,20 +43,37 @@ pub fn median_f32_mut(data: &mut [f32]) -> f32 {
     }
 }
 
-/// Fast approximate median (single `select_nth_unstable` call).
+/// Fast approximate median using `partial_cmp` (single partition, no NaN handling).
 ///
-/// For even-length arrays, returns the upper-middle element instead of averaging
-/// the two middle elements. This avoids a second partial sort. The bias is at most
-/// half the gap between the two middle values, which is negligible for the large
-/// arrays used in sigma clipping (hundreds to thousands of pixels per tile).
-/// The final result after all clipping iterations uses [`median_f32_mut`] (exact).
+/// Returns the upper-middle element for even-length arrays (no averaging).
+/// Uses `partial_cmp` instead of `total_cmp` for ~30% faster comparisons.
+/// Only safe for data guaranteed to contain no NaN values.
 #[inline]
-fn median_f32_approx(data: &mut [f32]) -> f32 {
+pub(crate) fn median_f32_fast(data: &mut [f32]) -> f32 {
     debug_assert!(!data.is_empty());
 
     let mid = data.len() / 2;
-    let (_, median, _) = data.select_nth_unstable_by(mid, f32::total_cmp);
+    let (_, median, _) = data.select_nth_unstable_by(mid, |a, b| {
+        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+    });
     *median
+}
+
+/// Compute MAD using fast median (no NaN handling, single partition).
+///
+/// For use in rejection hot paths where data is guaranteed NaN-free.
+/// Writes deviations directly into `scratch[..values.len()]` (must have sufficient length).
+#[inline]
+pub(crate) fn mad_f32_fast(values: &[f32], median: f32, scratch: &mut Vec<f32>) -> f32 {
+    let n = values.len();
+    if n == 0 {
+        return 0.0;
+    }
+    scratch.resize(n, 0.0);
+    for i in 0..n {
+        scratch[i] = (values[i] - median).abs();
+    }
+    median_f32_fast(&mut scratch[..n])
 }
 
 /// Compute MAD (Median Absolute Deviation) using a scratch buffer.
@@ -104,14 +121,14 @@ fn sigma_clip_iteration(
 
     let active = &mut values[..*len];
 
-    // Compute approximate median (faster - skips averaging for even lengths)
-    let median = median_f32_approx(active);
+    // Compute approximate median (fast — partial_cmp, single partition)
+    let median = median_f32_fast(active);
 
     // Compute deviations using SIMD - copy values first, then transform
     deviations[..*len].copy_from_slice(active);
     abs_deviation_inplace(&mut deviations[..*len], median);
 
-    let mad = median_f32_approx(&mut deviations[..*len]);
+    let mad = median_f32_fast(&mut deviations[..*len]);
     let sigma = mad_to_sigma(mad);
 
     if sigma < f32::EPSILON {

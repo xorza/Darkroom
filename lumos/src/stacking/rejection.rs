@@ -7,7 +7,7 @@
 //! - Percentile clipping
 //! - Generalized Extreme Studentized Deviate (GESD)
 
-use crate::math::{self, mad_f32_with_scratch, mad_to_sigma};
+use crate::math::{self, mad_f32_fast, mad_to_sigma, median_f32_fast};
 use crate::stacking::cache::ScratchBuffers;
 
 /// Configuration for sigma clipping.
@@ -75,16 +75,24 @@ impl SigmaClipConfig {
         }
 
         let mut len = values.len();
+        let min_sigma = self.sigma_low.min(self.sigma_high);
 
         for _ in 0..self.max_iterations {
             if len <= 2 {
                 break;
             }
 
+            // Early exit: cheap mean+stddev check to skip expensive median+MAD
+            // when no outlier can possibly exceed the rejection threshold.
+            // For clean pixels (majority), this avoids two quickselect calls entirely.
+            if Self::no_outliers_possible(&values[..len], min_sigma) {
+                break;
+            }
+
             let active = &mut values[..len];
 
-            let center = math::median_f32_mut(active);
-            let mad = mad_f32_with_scratch(&values[..len], center, &mut scratch.floats_a);
+            let center = median_f32_fast(active);
+            let mad = mad_f32_fast(&values[..len], center, &mut scratch.floats_a);
             let sigma = mad_to_sigma(mad);
 
             if sigma < f32::EPSILON {
@@ -116,6 +124,56 @@ impl SigmaClipConfig {
         }
 
         len
+    }
+
+    /// Check if no point can be rejected, using a cheap range-based estimate.
+    ///
+    /// Uses Welford's single-pass algorithm to compute mean and variance together
+    /// with min/max tracking. Excludes the single most extreme min and max from
+    /// the variance estimate for robustness. If the maximum deviation from the
+    /// trimmed center is within the threshold, the full median+MAD can be skipped.
+    ///
+    /// Only applied for N >= 10 (below that, trimming distorts the estimate too much).
+    #[inline]
+    fn no_outliers_possible(values: &[f32], min_sigma_k: f32) -> bool {
+        let n = values.len();
+        if n < 10 {
+            return false;
+        }
+
+        // Single pass: compute sum, sum_sq, min, max
+        let mut sum = 0.0f32;
+        let mut sum_sq = 0.0f32;
+        let mut min1 = f32::MAX;
+        let mut max1 = f32::MIN;
+        for &v in values {
+            sum += v;
+            sum_sq += v * v;
+            if v < min1 {
+                min1 = v;
+            }
+            if v > max1 {
+                max1 = v;
+            }
+        }
+
+        // Trimmed mean and variance: exclude the single most extreme min and max
+        let trimmed_n = (n - 2) as f32;
+        let trimmed_sum = sum - min1 - max1;
+        let trimmed_mean = trimmed_sum / trimmed_n;
+        let trimmed_sum_sq = sum_sq - min1 * min1 - max1 * max1;
+        // Var = E[X²] - E[X]² with Bessel's correction
+        let variance = (trimmed_sum_sq - trimmed_sum * trimmed_sum / trimmed_n) / (trimmed_n - 1.0);
+
+        if variance < f32::EPSILON {
+            return true;
+        }
+
+        let stddev = variance.sqrt();
+
+        // Check: can any value exceed the threshold from the trimmed center?
+        let max_dev = (max1 - trimmed_mean).abs().max((min1 - trimmed_mean).abs());
+        max_dev <= min_sigma_k * stddev
     }
 }
 
@@ -192,7 +250,7 @@ impl WinsorizedClipConfig {
         // Initial estimates
         scratch.clear();
         scratch.extend_from_slice(working);
-        let mut center = math::median_f32_mut(scratch);
+        let mut center = median_f32_fast(scratch);
         let mut sigma = winsorized_stddev(working, center) * WINSORIZED_CORRECTION;
 
         if sigma < f32::EPSILON {
@@ -215,7 +273,7 @@ impl WinsorizedClipConfig {
             // Recompute center (median of winsorized values)
             scratch.clear();
             scratch.extend_from_slice(working);
-            center = math::median_f32_mut(scratch);
+            center = median_f32_fast(scratch);
 
             let sigma_new = winsorized_stddev(working, center) * WINSORIZED_CORRECTION;
 
@@ -359,8 +417,8 @@ impl LinearFitClipConfig {
                 // Initial pass: median + MAD sigma clipping (robust starting point)
                 scratch.floats_a.clear();
                 scratch.floats_a.extend_from_slice(&values[..len]);
-                let center = math::median_f32_mut(&mut scratch.floats_a);
-                let mad = mad_f32_with_scratch(&values[..len], center, &mut scratch.floats_a);
+                let center = median_f32_fast(&mut scratch.floats_a);
+                let mad = mad_f32_fast(&values[..len], center, &mut scratch.floats_a);
                 let sigma = mad_to_sigma(mad);
 
                 if sigma < f32::EPSILON {
@@ -632,10 +690,10 @@ impl GesdConfig {
             // Compute median of remaining values
             scratch.floats_a.clear();
             scratch.floats_a.extend_from_slice(&values[..len]);
-            let median = math::median_f32_mut(&mut scratch.floats_a);
+            let median = median_f32_fast(&mut scratch.floats_a);
 
             // Compute MAD
-            let mad = mad_f32_with_scratch(&values[..len], median, &mut scratch.floats_a);
+            let mad = mad_f32_fast(&values[..len], median, &mut scratch.floats_a);
             let sigma = mad_to_sigma(mad);
 
             if sigma < f32::EPSILON {

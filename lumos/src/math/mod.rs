@@ -29,6 +29,7 @@ pub use statistics::{
     MAD_TO_SIGMA, mad_f32_with_scratch, mad_to_sigma, median_and_mad_f32_mut, median_f32_mut,
     sigma_clipped_median_mad, sigma_clipped_median_mad_arrayvec,
 };
+pub(crate) use statistics::{mad_f32_fast, median_f32_fast};
 pub use sum::{mean_f32, sum_f32, weighted_mean_f32};
 
 // =============================================================================
