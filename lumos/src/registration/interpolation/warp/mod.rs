@@ -2,7 +2,8 @@
 //!
 //! Runtime dispatch to the best available implementation:
 //! - **Bilinear**: AVX2/SSE4.1 on x86_64, scalar with incremental stepping elsewhere
-//! - **Lanczos3**: Scalar with incremental stepping, fast-path interior bounds skipping
+//! - **Lanczos2/3/4**: Scalar with incremental stepping, fast-path interior bounds
+//!   skipping, const-generic deringing, and SIMD FMA (Lanczos3 only on x86_64)
 //!
 //! When SIP distortion correction is active, incremental stepping is disabled
 //! (SIP is nonlinear) and SIMD paths fall back to scalar.
@@ -160,28 +161,44 @@ fn soft_clamp(sp: f32, sn: f32, wp: f32, wn: f32, th: f32, th_inv: f32) -> f32 {
     (sp - sn) / (wp - wn)
 }
 
-/// Optimized Lanczos3 row warping with incremental coordinate stepping.
+/// Optimized Lanczos row warping with incremental coordinate stepping.
+///
+/// Dispatches to the appropriate monomorphization based on `lanczos_param()` and
+/// `deringing_enabled()`. Works for Lanczos2 (4×4), Lanczos3 (6×6), and Lanczos4 (8×8).
 ///
 /// Key optimizations:
 /// 1. Const-generic DERINGING: eliminates inner-loop branch, letting LLVM fully vectorize
 /// 2. PixInsight-style soft clamping (positive/negative contribution tracking)
 /// 3. Incremental source coordinate stepping (avoid per-pixel matrix multiply)
 /// 4. Fast-path for interior pixels (skip bounds checks, use direct row pointers)
-pub(crate) fn warp_row_lanczos3(
+/// 5. `lookup_positive()` — skips abs() and bounds check in LUT lookup
+/// 6. SIMD FMA fast path for Lanczos3 on x86_64
+pub(crate) fn warp_row_lanczos(
     input: &Buffer2<f32>,
     output_row: &mut [f32],
     output_y: usize,
     wt: &WarpTransform,
     params: &WarpParams,
 ) {
-    if params.method.deringing_enabled() {
-        warp_row_lanczos3_inner::<true>(input, output_row, output_y, wt, params);
-    } else {
-        warp_row_lanczos3_inner::<false>(input, output_row, output_y, wt, params);
+    let a = params.method.lanczos_param().unwrap();
+    match (a, params.method.deringing_enabled()) {
+        (2, false) => {
+            warp_row_lanczos_inner::<2, 4, false>(input, output_row, output_y, wt, params)
+        }
+        (2, true) => warp_row_lanczos_inner::<2, 4, true>(input, output_row, output_y, wt, params),
+        (3, false) => {
+            warp_row_lanczos_inner::<3, 6, false>(input, output_row, output_y, wt, params)
+        }
+        (3, true) => warp_row_lanczos_inner::<3, 6, true>(input, output_row, output_y, wt, params),
+        (4, false) => {
+            warp_row_lanczos_inner::<4, 8, false>(input, output_row, output_y, wt, params)
+        }
+        (4, true) => warp_row_lanczos_inner::<4, 8, true>(input, output_row, output_y, wt, params),
+        _ => panic!("Unsupported Lanczos parameter: {a}"),
     }
 }
 
-fn warp_row_lanczos3_inner<const DERINGING: bool>(
+fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bool>(
     input: &Buffer2<f32>,
     output_row: &mut [f32],
     output_y: usize,
@@ -193,12 +210,13 @@ fn warp_row_lanczos3_inner<const DERINGING: bool>(
     let input_height = input.height();
     let border_value = params.border_value;
 
-    let lut = get_lanczos_lut(3);
+    let lut = get_lanczos_lut(A);
     let iw = input_width as i32;
     let ih = input_height as i32;
+    let a_minus_1 = A as i32 - 1;
 
     #[cfg(target_arch = "x86_64")]
-    let use_fma = cpu_features::has_avx2_fma();
+    let use_fma = A == 3 && cpu_features::has_avx2_fma();
 
     // Pre-compute clamping threshold parameters (only used when DERINGING=true)
     let clamp_th = params.method.deringing().clamp(0.0, 1.0);
@@ -232,30 +250,33 @@ fn warp_row_lanczos3_inner<const DERINGING: bool>(
         let fx = sx - x0 as f32;
         let fy = sy - y0 as f32;
 
-        let kx0 = x0 - 2;
-        let ky0 = y0 - 2;
+        let kx0 = x0 - a_minus_1;
+        let ky0 = y0 - a_minus_1;
 
-        // fx, fy are in [0, 1), so all absolute distances are known without abs():
-        // fx+2 ∈ [2,3), fx+1 ∈ [1,2), fx ∈ [0,1), 1-fx ∈ (0,1], 2-fx ∈ (1,2], 3-fx ∈ (2,3]
-        let wx = [
-            lut.lookup_positive(fx + 2.0),
-            lut.lookup_positive(fx + 1.0),
-            lut.lookup_positive(fx),
-            lut.lookup_positive(1.0 - fx),
-            lut.lookup_positive(2.0 - fx),
-            lut.lookup_positive(3.0 - fx),
-        ];
-        let wy = [
-            lut.lookup_positive(fy + 2.0),
-            lut.lookup_positive(fy + 1.0),
-            lut.lookup_positive(fy),
-            lut.lookup_positive(1.0 - fy),
-            lut.lookup_positive(2.0 - fy),
-            lut.lookup_positive(3.0 - fy),
-        ];
+        // Compute kernel weights using lookup_positive() (no abs, no bounds check).
+        // For i < A: distance = (A-1-i) + fx ∈ [0, A), non-negative
+        // For i ≥ A: distance = (i - A+1) + (1-fx) ∈ (0, A], non-negative
+        let mut wx = [0.0f32; SIZE];
+        let mut wy = [0.0f32; SIZE];
+        for i in 0..SIZE {
+            wx[i] = if i < A {
+                lut.lookup_positive((a_minus_1 - i as i32) as f32 + fx)
+            } else {
+                lut.lookup_positive((i as i32 - a_minus_1) as f32 - fx)
+            };
+            wy[i] = if i < A {
+                lut.lookup_positive((a_minus_1 - i as i32) as f32 + fy)
+            } else {
+                lut.lookup_positive((i as i32 - a_minus_1) as f32 - fy)
+            };
+        }
 
-        let wx_sum = wx[0] + wx[1] + wx[2] + wx[3] + wx[4] + wx[5];
-        let wy_sum = wy[0] + wy[1] + wy[2] + wy[3] + wy[4] + wy[5];
+        let mut wx_sum = 0.0f32;
+        let mut wy_sum = 0.0f32;
+        for i in 0..SIZE {
+            wx_sum += wx[i];
+            wy_sum += wy[i];
+        }
         let total_sum = wx_sum * wy_sum;
         let inv_total = if total_sum.abs() > 1e-10 {
             1.0 / total_sum
@@ -263,17 +284,20 @@ fn warp_row_lanczos3_inner<const DERINGING: bool>(
             1.0
         };
 
-        // SIMD fast path: needs kx0+7 < iw for 128-bit loads (6 valid + 2 padding)
+        // SIMD fast path (Lanczos3 only): needs kx0+7 < iw for 128-bit loads (6 valid + 2 padding)
         #[cfg(target_arch = "x86_64")]
-        if kx0 >= 0 && ky0 >= 0 && kx0 + 8 < iw && ky0 + 5 < ih && use_fma {
+        if use_fma && kx0 >= 0 && ky0 >= 0 && kx0 + 8 < iw && ky0 + 5 < ih {
+            // SAFETY: A == 3 is guaranteed by `use_fma` check above, so SIZE == 6.
+            let wx6: &[f32; 6] = wx[..6].try_into().unwrap();
+            let wy6: &[f32; 6] = wy[..6].try_into().unwrap();
             let acc = unsafe {
                 sse::lanczos3_kernel_fma::<DERINGING>(
                     pixels,
                     input_width,
                     kx0 as usize,
                     ky0 as usize,
-                    &wx,
-                    &wy,
+                    wx6,
+                    wy6,
                 )
             };
             *out_pixel = if DERINGING {
@@ -289,8 +313,8 @@ fn warp_row_lanczos3_inner<const DERINGING: bool>(
             continue;
         }
 
-        if kx0 >= 0 && ky0 >= 0 && kx0 + 5 < iw && ky0 + 5 < ih {
-            // Scalar fast path: all 6x6 pixels in bounds, direct indexing
+        if kx0 >= 0 && ky0 >= 0 && kx0 + SIZE as i32 - 1 < iw && ky0 + SIZE as i32 - 1 < ih {
+            // Scalar fast path: all SIZE×SIZE pixels in bounds, direct indexing
             let kx = kx0 as usize;
             let ky = ky0 as usize;
             let w = input_width;
@@ -372,7 +396,7 @@ mod tests {
     use crate::testing::synthetic::patterns;
 
     /// Naive scalar Lanczos3 row warp used as reference for testing the optimized version.
-    fn warp_row_lanczos3_scalar(
+    fn warp_row_lanczos_scalar(
         input: &Buffer2<f32>,
         output_row: &mut [f32],
         output_y: usize,
@@ -571,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn test_warp_row_lanczos3_scalar_identity() {
+    fn test_warp_row_lanczos_scalar_identity() {
         let width = 100;
         let height = 100;
         let input = patterns::diagonal_gradient(width, height);
@@ -580,7 +604,7 @@ mod tests {
         let mut output_row = vec![0.0f32; width];
         let y = 50;
 
-        warp_row_lanczos3_scalar(&input, &mut output_row, y, &identity);
+        warp_row_lanczos_scalar(&input, &mut output_row, y, &identity);
 
         // With identity transform, output should match input (within Lanczos ringing tolerance)
         for x in 3..width - 3 {
@@ -596,7 +620,7 @@ mod tests {
     }
 
     #[test]
-    fn test_warp_row_lanczos3_scalar_various_sizes_match_optimized() {
+    fn test_warp_row_lanczos_scalar_various_sizes_match_optimized() {
         // Verify scalar and optimized Lanczos3 produce identical results across widths.
         // This replaces a weaker test that only checked is_finite().
         let height = 64;
@@ -621,8 +645,8 @@ mod tests {
             let mut output_fast = vec![0.0f32; width];
             let y = height / 2;
 
-            warp_row_lanczos3_scalar(&input, &mut output_scalar, y, &inverse);
-            warp_row_lanczos3(&input, &mut output_fast, y, &inverse, &params);
+            warp_row_lanczos_scalar(&input, &mut output_scalar, y, &inverse);
+            warp_row_lanczos(&input, &mut output_fast, y, &inverse, &params);
 
             for x in 0..width {
                 assert!(
@@ -636,7 +660,7 @@ mod tests {
     }
 
     #[test]
-    fn test_warp_row_lanczos3_matches_scalar() {
+    fn test_warp_row_lanczos_matches_scalar() {
         let width = 128;
         let height = 128;
         let input = patterns::diagonal_gradient(width, height);
@@ -656,8 +680,8 @@ mod tests {
                 let mut output_fast = vec![0.0f32; width];
                 let mut output_scalar = vec![0.0f32; width];
 
-                warp_row_lanczos3(&input, &mut output_fast, y, &inverse, &params);
-                warp_row_lanczos3_scalar(&input, &mut output_scalar, y, &inverse);
+                warp_row_lanczos(&input, &mut output_fast, y, &inverse, &params);
+                warp_row_lanczos_scalar(&input, &mut output_scalar, y, &inverse);
 
                 for x in 0..width {
                     assert!(
@@ -672,7 +696,7 @@ mod tests {
     }
 
     #[test]
-    fn test_warp_row_lanczos3_various_sizes() {
+    fn test_warp_row_lanczos_various_sizes() {
         let height = 64;
         let input_base = patterns::diagonal_gradient(256, height);
         // Disable clamping to match unclamped scalar reference
@@ -696,8 +720,8 @@ mod tests {
             let mut output_scalar = vec![0.0f32; width];
             let y = height / 2;
 
-            warp_row_lanczos3(&input, &mut output_fast, y, &inverse, &params);
-            warp_row_lanczos3_scalar(&input, &mut output_scalar, y, &inverse);
+            warp_row_lanczos(&input, &mut output_fast, y, &inverse, &params);
+            warp_row_lanczos_scalar(&input, &mut output_scalar, y, &inverse);
 
             for x in 0..width {
                 assert!(
@@ -864,7 +888,7 @@ mod tests {
     }
 
     /// Naive scalar Lanczos3 with deringing for reference testing.
-    fn warp_row_lanczos3_scalar_deringing(
+    fn warp_row_lanczos_scalar_deringing(
         input: &Buffer2<f32>,
         output_row: &mut [f32],
         output_y: usize,
@@ -930,7 +954,7 @@ mod tests {
     }
 
     #[test]
-    fn test_warp_row_lanczos3_deringing_simd_vs_scalar() {
+    fn test_warp_row_lanczos_deringing_simd_vs_scalar() {
         let width = 128;
         let height = 128;
         let input = patterns::checkerboard(width, height, 8, 0.0, 1.0);
@@ -946,8 +970,8 @@ mod tests {
             for y in [20, 50, 80] {
                 let mut output_fast = vec![0.0f32; width];
                 let mut output_scalar = vec![0.0f32; width];
-                warp_row_lanczos3(&input, &mut output_fast, y, &inverse, &params);
-                warp_row_lanczos3_scalar_deringing(
+                warp_row_lanczos(&input, &mut output_fast, y, &inverse, &params);
+                warp_row_lanczos_scalar_deringing(
                     &input,
                     &mut output_scalar,
                     y,
@@ -979,14 +1003,14 @@ mod tests {
         // Without deringing: expect negative ringing
         let params_off = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: -1.0 });
         let mut row_off = vec![0.0f32; size];
-        warp_row_lanczos3(&input, &mut row_off, size / 2, &inverse, &params_off);
+        warp_row_lanczos(&input, &mut row_off, size / 2, &inverse, &params_off);
         let min_off = row_off.iter().copied().fold(f32::INFINITY, f32::min);
         assert!(min_off < -0.001, "Expected negative ringing, min={min_off}");
 
         // With deringing: negative values should be suppressed
         let params_on = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 });
         let mut row_on = vec![0.0f32; size];
-        warp_row_lanczos3(&input, &mut row_on, size / 2, &inverse, &params_on);
+        warp_row_lanczos(&input, &mut row_on, size / 2, &inverse, &params_on);
         let min_on = row_on.iter().copied().fold(f32::INFINITY, f32::min);
         assert!(
             min_on > min_off,
@@ -1008,8 +1032,8 @@ mod tests {
         let y = height / 2;
         let mut row_on = vec![0.0f32; width];
         let mut row_off = vec![0.0f32; width];
-        warp_row_lanczos3(&input, &mut row_on, y, &inverse, &params_on);
-        warp_row_lanczos3(&input, &mut row_off, y, &inverse, &params_off);
+        warp_row_lanczos(&input, &mut row_on, y, &inverse, &params_on);
+        warp_row_lanczos(&input, &mut row_off, y, &inverse, &params_off);
 
         // Smooth gradient: deringing should produce nearly identical results
         let max_diff = row_on[5..width - 5]
@@ -1123,8 +1147,8 @@ mod tests {
         let mut row_high = vec![0.0f32; size];
         let y = size / 2;
 
-        warp_row_lanczos3(&input, &mut row_low, y, &inverse, &params_low);
-        warp_row_lanczos3(&input, &mut row_high, y, &inverse, &params_high);
+        warp_row_lanczos(&input, &mut row_low, y, &inverse, &params_low);
+        warp_row_lanczos(&input, &mut row_high, y, &inverse, &params_high);
 
         // They should differ: more aggressive clamping (lower th) should produce
         // different values than less aggressive (higher th).
@@ -1136,6 +1160,293 @@ mod tests {
         assert!(
             max_diff > 0.001,
             "Different thresholds should produce different results, max_diff={max_diff}"
+        );
+    }
+
+    // --- Lanczos2/4 optimized path tests ---
+
+    /// Naive scalar Lanczos row warp for arbitrary `a`, used as reference.
+    fn warp_row_lanczos_scalar_ref(
+        input: &Buffer2<f32>,
+        output_row: &mut [f32],
+        output_y: usize,
+        wt: &WarpTransform,
+        a: usize,
+    ) {
+        let pixels = input.pixels();
+        let input_width = input.width();
+        let input_height = input.height();
+        let y = output_y as f64;
+        let size = 2 * a;
+        let a_i32 = a as i32;
+        let lut = get_lanczos_lut(a);
+
+        for (x, out_pixel) in output_row.iter_mut().enumerate() {
+            let src = wt.apply(DVec2::new(x as f64, y));
+            let sx = src.x as f32;
+            let sy = src.y as f32;
+            let x0 = sx.floor() as i32;
+            let y0 = sy.floor() as i32;
+            let fx = sx - x0 as f32;
+            let fy = sy - y0 as f32;
+
+            let mut wx = vec![0.0f32; size];
+            for (i, w) in wx.iter_mut().enumerate() {
+                *w = lut.lookup(fx - (i as i32 - a_i32 + 1) as f32);
+            }
+            let mut wy = vec![0.0f32; size];
+            for (j, w) in wy.iter_mut().enumerate() {
+                *w = lut.lookup(fy - (j as i32 - a_i32 + 1) as f32);
+            }
+            let wx_sum: f32 = wx.iter().sum();
+            let wy_sum: f32 = wy.iter().sum();
+            if wx_sum.abs() > 1e-10 {
+                wx.iter_mut().for_each(|w| *w /= wx_sum);
+            }
+            if wy_sum.abs() > 1e-10 {
+                wy.iter_mut().for_each(|w| *w /= wy_sum);
+            }
+
+            let mut sum = 0.0f32;
+            for (j, &wyj) in wy.iter().enumerate() {
+                let py = y0 - a_i32 + 1 + j as i32;
+                for (i, &wxi) in wx.iter().enumerate() {
+                    let px = x0 - a_i32 + 1 + i as i32;
+                    sum += sample_pixel(pixels, input_width, input_height, px, py, 0.0) * wxi * wyj;
+                }
+            }
+            *out_pixel = sum;
+        }
+    }
+
+    #[test]
+    fn test_warp_row_lanczos2_matches_scalar_reference() {
+        let width = 128;
+        let height = 128;
+        let input = patterns::diagonal_gradient(width, height);
+        let params = WarpParams::new(InterpolationMethod::Lanczos2 { deringing: -1.0 });
+
+        for transform in [
+            Transform::identity(),
+            Transform::translation(DVec2::new(2.5, 1.7)),
+            Transform::similarity(DVec2::new(3.0, 2.0), 0.1, 1.05),
+        ] {
+            let inverse = WarpTransform::new(transform.inverse());
+            for y in [0, 50, height - 1] {
+                let mut output_fast = vec![0.0f32; width];
+                let mut output_scalar = vec![0.0f32; width];
+                warp_row_lanczos(&input, &mut output_fast, y, &inverse, &params);
+                warp_row_lanczos_scalar_ref(&input, &mut output_scalar, y, &inverse, 2);
+                for x in 0..width {
+                    assert!(
+                        (output_fast[x] - output_scalar[x]).abs() < 1e-4,
+                        "L2 row {y}, x={x}: fast {} vs scalar {}",
+                        output_fast[x],
+                        output_scalar[x]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_warp_row_lanczos4_matches_scalar_reference() {
+        let width = 128;
+        let height = 128;
+        let input = patterns::diagonal_gradient(width, height);
+        let params = WarpParams::new(InterpolationMethod::Lanczos4 { deringing: -1.0 });
+
+        for transform in [
+            Transform::identity(),
+            Transform::translation(DVec2::new(2.5, 1.7)),
+            Transform::similarity(DVec2::new(3.0, 2.0), 0.1, 1.05),
+        ] {
+            let inverse = WarpTransform::new(transform.inverse());
+            for y in [0, 50, height - 1] {
+                let mut output_fast = vec![0.0f32; width];
+                let mut output_scalar = vec![0.0f32; width];
+                warp_row_lanczos(&input, &mut output_fast, y, &inverse, &params);
+                warp_row_lanczos_scalar_ref(&input, &mut output_scalar, y, &inverse, 4);
+                for x in 0..width {
+                    assert!(
+                        (output_fast[x] - output_scalar[x]).abs() < 1e-4,
+                        "L4 row {y}, x={x}: fast {} vs scalar {}",
+                        output_fast[x],
+                        output_scalar[x]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_warp_row_lanczos2_various_sizes() {
+        let height = 64;
+        let input_base = patterns::diagonal_gradient(256, height);
+        let params = WarpParams::new(InterpolationMethod::Lanczos2 { deringing: -1.0 });
+
+        for width in [1, 2, 3, 7, 8, 16, 33, 64, 100] {
+            let input = Buffer2::new(
+                width,
+                height,
+                input_base
+                    .pixels()
+                    .iter()
+                    .take(width * height)
+                    .copied()
+                    .collect(),
+            );
+            let transform = Transform::translation(DVec2::new(1.5, 0.5));
+            let inverse = WarpTransform::new(transform.inverse());
+
+            let mut output_fast = vec![0.0f32; width];
+            let mut output_scalar = vec![0.0f32; width];
+            let y = height / 2;
+
+            warp_row_lanczos(&input, &mut output_fast, y, &inverse, &params);
+            warp_row_lanczos_scalar_ref(&input, &mut output_scalar, y, &inverse, 2);
+
+            for x in 0..width {
+                assert!(
+                    (output_fast[x] - output_scalar[x]).abs() < 1e-4,
+                    "L2 width {width}, x={x}: fast {} vs scalar {}",
+                    output_fast[x],
+                    output_scalar[x]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_warp_row_lanczos4_various_sizes() {
+        let height = 64;
+        let input_base = patterns::diagonal_gradient(256, height);
+        let params = WarpParams::new(InterpolationMethod::Lanczos4 { deringing: -1.0 });
+
+        for width in [1, 2, 3, 7, 8, 16, 33, 64, 100] {
+            let input = Buffer2::new(
+                width,
+                height,
+                input_base
+                    .pixels()
+                    .iter()
+                    .take(width * height)
+                    .copied()
+                    .collect(),
+            );
+            let transform = Transform::translation(DVec2::new(1.5, 0.5));
+            let inverse = WarpTransform::new(transform.inverse());
+
+            let mut output_fast = vec![0.0f32; width];
+            let mut output_scalar = vec![0.0f32; width];
+            let y = height / 2;
+
+            warp_row_lanczos(&input, &mut output_fast, y, &inverse, &params);
+            warp_row_lanczos_scalar_ref(&input, &mut output_scalar, y, &inverse, 4);
+
+            for x in 0..width {
+                assert!(
+                    (output_fast[x] - output_scalar[x]).abs() < 1e-4,
+                    "L4 width {width}, x={x}: fast {} vs scalar {}",
+                    output_fast[x],
+                    output_scalar[x]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_lanczos2_deringing_suppresses_ringing() {
+        // Same test as Lanczos3 deringing but for Lanczos2.
+        let size = 32;
+        let mut input = patterns::uniform(size, size, 0.0);
+        input[(size / 2, size / 2)] = 1.0;
+
+        let transform = Transform::translation(DVec2::new(0.3, 0.3));
+        let inverse = WarpTransform::new(transform.inverse());
+
+        // Without deringing: expect negative ringing
+        let params_off = WarpParams::new(InterpolationMethod::Lanczos2 { deringing: -1.0 });
+        let mut row_off = vec![0.0f32; size];
+        warp_row_lanczos(&input, &mut row_off, size / 2, &inverse, &params_off);
+        let min_off = row_off.iter().copied().fold(f32::INFINITY, f32::min);
+        assert!(
+            min_off < -0.001,
+            "L2: Expected negative ringing, min={min_off}"
+        );
+
+        // With deringing: negative values should be suppressed
+        let params_on = WarpParams::new(InterpolationMethod::Lanczos2 { deringing: 0.3 });
+        let mut row_on = vec![0.0f32; size];
+        warp_row_lanczos(&input, &mut row_on, size / 2, &inverse, &params_on);
+        let min_on = row_on.iter().copied().fold(f32::INFINITY, f32::min);
+        assert!(
+            min_on > min_off,
+            "L2: Deringing should help: {min_on} vs {min_off}"
+        );
+        assert!(
+            min_on >= -0.01,
+            "L2: Should suppress negatives, got {min_on}"
+        );
+    }
+
+    #[test]
+    fn test_lanczos4_deringing_suppresses_ringing() {
+        let size = 32;
+        let mut input = patterns::uniform(size, size, 0.0);
+        input[(size / 2, size / 2)] = 1.0;
+
+        let transform = Transform::translation(DVec2::new(0.3, 0.3));
+        let inverse = WarpTransform::new(transform.inverse());
+
+        let params_off = WarpParams::new(InterpolationMethod::Lanczos4 { deringing: -1.0 });
+        let mut row_off = vec![0.0f32; size];
+        warp_row_lanczos(&input, &mut row_off, size / 2, &inverse, &params_off);
+        let min_off = row_off.iter().copied().fold(f32::INFINITY, f32::min);
+        assert!(
+            min_off < -0.001,
+            "L4: Expected negative ringing, min={min_off}"
+        );
+
+        let params_on = WarpParams::new(InterpolationMethod::Lanczos4 { deringing: 0.3 });
+        let mut row_on = vec![0.0f32; size];
+        warp_row_lanczos(&input, &mut row_on, size / 2, &inverse, &params_on);
+        let min_on = row_on.iter().copied().fold(f32::INFINITY, f32::min);
+        assert!(
+            min_on > min_off,
+            "L4: Deringing should help: {min_on} vs {min_off}"
+        );
+        assert!(
+            min_on >= -0.01,
+            "L4: Should suppress negatives, got {min_on}"
+        );
+    }
+
+    #[test]
+    fn test_lanczos2_deringing_threshold_sensitivity() {
+        let size = 64;
+        let input = patterns::checkerboard(size, size, 4, 0.0, 1.0);
+        let transform = Transform::translation(DVec2::new(0.3, 0.3));
+        let inverse = WarpTransform::new(transform.inverse());
+
+        let params_low = WarpParams::new(InterpolationMethod::Lanczos2 { deringing: 0.1 });
+        let params_high = WarpParams::new(InterpolationMethod::Lanczos2 { deringing: 0.9 });
+
+        let mut row_low = vec![0.0f32; size];
+        let mut row_high = vec![0.0f32; size];
+        let y = size / 2;
+
+        warp_row_lanczos(&input, &mut row_low, y, &inverse, &params_low);
+        warp_row_lanczos(&input, &mut row_high, y, &inverse, &params_high);
+
+        let max_diff = row_low
+            .iter()
+            .zip(&row_high)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            max_diff > 0.001,
+            "L2: Different thresholds should produce different results, max_diff={max_diff}"
         );
     }
 }

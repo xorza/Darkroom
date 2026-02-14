@@ -315,8 +315,8 @@ pub fn warp_image(
         .for_each(|(y, row)| {
             if params.method == InterpolationMethod::Bilinear {
                 warp::warp_row_bilinear(input, row, y, warp_transform, params.border_value);
-            } else if matches!(params.method, InterpolationMethod::Lanczos3 { .. }) {
-                warp::warp_row_lanczos3(input, row, y, warp_transform, params);
+            } else if params.method.lanczos_param().is_some() {
+                warp::warp_row_lanczos(input, row, y, warp_transform, params);
             } else {
                 let m = warp_transform.transform.matrix.as_array();
                 let can_step = warp_transform.is_linear();

@@ -127,7 +127,7 @@ fn bench_warp_lanczos3_1k_single_thread(b: bench::Bencher) {
             .chunks_mut(width)
             .enumerate()
         {
-            warp::warp_row_lanczos3(black_box(&input), row, y, &wt, &params);
+            warp::warp_row_lanczos(black_box(&input), row, y, &wt, &params);
         }
     });
 }
@@ -148,7 +148,7 @@ fn bench_warp_lanczos3_1k_no_dering(b: bench::Bencher) {
             .chunks_mut(width)
             .enumerate()
         {
-            warp::warp_row_lanczos3(black_box(&input), row, y, &wt, &params);
+            warp::warp_row_lanczos(black_box(&input), row, y, &wt, &params);
         }
     });
 }

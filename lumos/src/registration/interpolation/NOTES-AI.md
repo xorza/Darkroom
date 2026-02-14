@@ -5,12 +5,14 @@
 This module provides image interpolation and warping for astronomical image registration.
 It supports six interpolation methods: Nearest, Bilinear, Bicubic (Catmull-Rom a=-0.5),
 Lanczos2, Lanczos3 (default), and Lanczos4. Warping is performed via `warp_image()` which
-parallelizes row processing with rayon. Bilinear and Lanczos3 have dedicated optimized
-row-warping paths; all others go through a generic per-pixel loop.
+parallelizes row processing with rayon. Bilinear has a dedicated SIMD path; all three
+Lanczos kernels (2/3/4) share a single const-generic optimized path with incremental
+coordinate stepping, `lookup_positive()`, interior fast-path, and deringing support.
+Nearest and Bicubic go through a generic per-pixel loop with incremental stepping.
 
 **Files:**
 - `mod.rs` -- Kernel functions, LUT, per-pixel interpolation, `warp_image` dispatcher
-- `warp/mod.rs` -- Row-level warping: bilinear scalar, Lanczos3 optimized, SIMD dispatch
+- `warp/mod.rs` -- Row-level warping: bilinear scalar, Lanczos generic optimized, SIMD dispatch
 - `warp/sse.rs` -- AVX2/SSE4.1 SIMD bilinear + SSE FMA Lanczos3 kernel
 - `tests.rs` -- Unit and quality tests for kernels, interpolation, and warping
 - `bench.rs` -- Benchmarks for 1k/2k/4k Lanczos3 warps, bilinear, LUT lookup
@@ -18,9 +20,9 @@ row-warping paths; all others go through a generic per-pixel loop.
 **Data flow:**
 1. `warp_image()` (`mod.rs:288`) dispatches per-row via rayon `par_chunks_mut`
 2. For Bilinear: `warp_row_bilinear()` -> SIMD (AVX2/SSE4.1) or scalar
-3. For Lanczos3: `warp_row_lanczos3()` -> const-generic `DERINGING` dispatch ->
-   SIMD FMA kernel (interior) or scalar fast path (interior) or slow path (border)
-4. For other methods: generic per-pixel `interpolate()` loop
+3. For Lanczos2/3/4: `warp_row_lanczos()` -> const-generic `<A, SIZE, DERINGING>` dispatch ->
+   SIMD FMA kernel (Lanczos3 interior only) or scalar fast path (interior) or slow path (border)
+4. For Nearest/Bicubic: generic per-pixel `interpolate()` loop with incremental stepping
 5. All paths use inverse mapping: output pixel -> transform -> sample input
 
 **Key types:**
@@ -362,9 +364,11 @@ universal default for astrophotography, this has no practical impact.
 1. ~~**Use actual FMA intrinsics in Lanczos3 SIMD kernel**~~ -- DONE. Measured ~2.5%
    end-to-end improvement (no-dering path). Kernel instruction count reduced 33%.
 
-2. **Generic incremental stepping** for Lanczos2/Lanczos4/Bicubic: Factor out stepping
-   logic from the Lanczos3-specific row warper so all methods benefit from avoiding
-   per-pixel matrix multiply. Estimated ~38% speedup for non-Lanczos3 methods.
+2. ~~**Generic incremental stepping** for Lanczos2/Lanczos4/Bicubic~~ -- DONE.
+   Incremental coordinate stepping added to generic loop (-14.5% to -20.7%).
+   Lanczos2/4 generalized to share Lanczos3's optimized path with const-generic
+   `<A, SIZE, DERINGING>` dispatch. Results: Lanczos2 -29.3%, Lanczos4 -45.4%,
+   Lanczos3 -6.3% (no regression, slight improvement from code restructuring).
 
 3. **Remove duplicate bilinear**: Consolidate `mod.rs:interpolate_bilinear` and
    `warp/mod.rs:bilinear_sample` into a single function.
