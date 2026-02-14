@@ -604,6 +604,449 @@ fn test_iterative_background_no_refinement() {
 // Sigma-Clipped Statistics Tests (tests common::sigma_clipped_median_mad)
 // =============================================================================
 
+// =============================================================================
+// Bicubic Spline Interpolation Tests
+// =============================================================================
+
+#[test]
+fn test_bicubic_reproduces_linear_gradient() {
+    // A linear gradient f(x,y) = ax + by + c should be reproduced exactly by
+    // natural cubic spline (cubic of a linear = linear, d2 = 0 everywhere)
+    let width = 128;
+    let height = 128;
+
+    // Linear gradient: f(x,y) = 0.001*x + 0.002*y + 0.1
+    let data: Vec<f32> = (0..height)
+        .flat_map(|y| (0..width).map(move |x| 0.001 * x as f32 + 0.002 * y as f32 + 0.1))
+        .collect();
+
+    let pixels = Buffer2::new(width, height, data.clone());
+    let bg = crate::testing::estimate_background(
+        &pixels,
+        &Config {
+            tile_size: 32,
+            ..Default::default()
+        },
+    );
+
+    // The gradient should be monotonically increasing and close to original.
+    // Note: The 3x3 median filter on tile statistics slightly smooths the gradient,
+    // so we verify monotonicity and bounded error rather than exact reproduction.
+    let corner_00 = bg.background[(32, 32)];
+    let corner_end = bg.background[(96, 96)];
+    let expected_00 = 0.001 * 32.0 + 0.002 * 32.0 + 0.1;
+    let expected_end = 0.001 * 96.0 + 0.002 * 96.0 + 0.1;
+
+    assert!(
+        corner_end > corner_00,
+        "Gradient not monotonically increasing: ({:.4}) vs ({:.4})",
+        corner_00,
+        corner_end
+    );
+
+    // Both endpoints should be in the right ballpark (within tile-level precision)
+    assert!(
+        (corner_00 - expected_00).abs() < 0.1,
+        "Interior point (32,32): expected ~{:.4}, got {:.4}",
+        expected_00,
+        corner_00
+    );
+    assert!(
+        (corner_end - expected_end).abs() < 0.1,
+        "Interior point (96,96): expected ~{:.4}, got {:.4}",
+        expected_end,
+        corner_end
+    );
+
+    // Key test: adjacent pixels should have very small differences (C2 smooth)
+    let mut max_jump = 0.0f32;
+    for y in 1..height - 1 {
+        for x in 1..width - 1 {
+            let jump_x = (bg.background[(x, y)] - bg.background[(x - 1, y)]).abs();
+            let jump_y = (bg.background[(x, y)] - bg.background[(x, y - 1)]).abs();
+            max_jump = max_jump.max(jump_x).max(jump_y);
+        }
+    }
+    assert!(
+        max_jump < 0.01,
+        "Max pixel-to-pixel jump {:.6} too large for smooth bicubic",
+        max_jump
+    );
+}
+
+#[test]
+fn test_bicubic_c1_continuity_at_tile_boundaries() {
+    // Verify first derivatives are continuous at tile boundaries.
+    // Numerical derivative across boundary should be smooth — the jump
+    // in the derivative should be small compared to the derivative itself.
+    let width = 256;
+    let height = 256;
+
+    // Quadratic background: f(x,y) = 0.00005*(x² + y²) + 0.1
+    let data: Vec<f32> = (0..height)
+        .flat_map(|y| (0..width).map(move |x| 0.00005 * (x * x + y * y) as f32 + 0.1))
+        .collect();
+
+    let pixels = Buffer2::new(width, height, data);
+    let bg = crate::testing::estimate_background(
+        &pixels,
+        &Config {
+            tile_size: 64,
+            ..Default::default()
+        },
+    );
+
+    // Check derivative continuity in X at tile boundary columns
+    // Tile size 64 → centers at 32, 96, 160, 224
+    // Boundaries are midway between centers: 64, 128, 192
+    let boundary_xs = [64, 128, 192];
+    let mut max_d2_jump = 0.0f32;
+
+    for &bx in &boundary_xs {
+        if bx + 2 >= width || bx < 2 {
+            continue;
+        }
+        for y in (40..height - 40).step_by(10) {
+            // Numerical second derivative: f''(x) ≈ f(x-1) - 2*f(x) + f(x+1)
+            let d2_left = bg.background[(bx - 2, y)] - 2.0 * bg.background[(bx - 1, y)]
+                + bg.background[(bx, y)];
+            let d2_right = bg.background[(bx, y)] - 2.0 * bg.background[(bx + 1, y)]
+                + bg.background[(bx + 2, y)];
+            let jump = (d2_right - d2_left).abs();
+            max_d2_jump = max_d2_jump.max(jump);
+        }
+    }
+
+    // With C2 bicubic spline, the second derivative jump should be very small
+    assert!(
+        max_d2_jump < 0.001,
+        "Max second derivative jump at tile boundary: {:.6} (should be < 0.001 for C2 spline)",
+        max_d2_jump
+    );
+}
+
+#[test]
+fn test_bicubic_smoother_than_bilinear_would_be() {
+    // Bicubic spline should produce smoother results (smaller max second derivative)
+    // than bilinear would. We verify this indirectly by checking that the second
+    // derivative is bounded, as bilinear would have discontinuous first derivatives.
+    let width = 128;
+    let height = 128;
+
+    let data: Vec<f32> = (0..height)
+        .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 256.0))
+        .collect();
+
+    let pixels = Buffer2::new(width, height, data);
+    let bg = crate::testing::estimate_background(
+        &pixels,
+        &Config {
+            tile_size: 32,
+            ..Default::default()
+        },
+    );
+
+    // Compute max numerical second derivative in X across the entire image
+    let mut max_d2 = 0.0f32;
+    for y in 0..height {
+        for x in 1..width - 1 {
+            let d2 = (bg.background[(x - 1, y)] - 2.0 * bg.background[(x, y)]
+                + bg.background[(x + 1, y)])
+                .abs();
+            max_d2 = max_d2.max(d2);
+        }
+    }
+
+    // With bicubic spline on a linear gradient, second derivative should be near zero
+    assert!(
+        max_d2 < 0.005,
+        "Max second derivative {:.6} too large for C2 spline on linear gradient",
+        max_d2
+    );
+}
+
+#[test]
+fn test_bicubic_c2_continuity_y_direction() {
+    // Same as test_bicubic_c1_continuity_at_tile_boundaries but for Y direction.
+    // With natural bicubic spline, second derivative should be continuous at Y tile boundaries.
+    let width = 256;
+    let height = 256;
+
+    // Quadratic background: f(x,y) = 0.00005*(x² + y²) + 0.1
+    let data: Vec<f32> = (0..height)
+        .flat_map(|y| (0..width).map(move |x| 0.00005 * (x * x + y * y) as f32 + 0.1))
+        .collect();
+
+    let pixels = Buffer2::new(width, height, data);
+    let bg = crate::testing::estimate_background(
+        &pixels,
+        &Config {
+            tile_size: 64,
+            ..Default::default()
+        },
+    );
+
+    // Tile size 64 → Y centers at 32, 96, 160, 224
+    // Boundaries midway: 64, 128, 192
+    let boundary_ys = [64, 128, 192];
+    let mut max_d2_jump = 0.0f32;
+
+    for &by in &boundary_ys {
+        if by + 2 >= height || by < 2 {
+            continue;
+        }
+        for x in (40..width - 40).step_by(10) {
+            // Numerical second derivative in Y: f''(y) ≈ f(y-1) - 2*f(y) + f(y+1)
+            let d2_above = bg.background[(x, by - 2)] - 2.0 * bg.background[(x, by - 1)]
+                + bg.background[(x, by)];
+            let d2_below = bg.background[(x, by)] - 2.0 * bg.background[(x, by + 1)]
+                + bg.background[(x, by + 2)];
+            let jump = (d2_below - d2_above).abs();
+            max_d2_jump = max_d2_jump.max(jump);
+        }
+    }
+
+    // With C2 bicubic spline, the second derivative jump should be very small
+    assert!(
+        max_d2_jump < 0.001,
+        "Max Y-direction second derivative jump at tile boundary: {:.6} (should be < 0.001 for C2 spline)",
+        max_d2_jump
+    );
+}
+
+#[test]
+fn test_noise_map_bicubic_interpolation() {
+    // Verify that the noise map is also interpolated with bicubic spline,
+    // not just constant or linear. Create an image with spatially varying noise.
+    let width = 128;
+    let height = 128;
+
+    // Background constant at 0.5, noise varies: left half has low noise, right half high noise.
+    // We achieve this by making pixel values in right tiles more spread out.
+    let data: Vec<f32> = (0..height)
+        .flat_map(|y| {
+            (0..width).map(move |x| {
+                // Deterministic pseudo-noise that increases with x
+                let base = 0.5;
+                let noise_amp = if x < 64 { 0.001 } else { 0.05 };
+                let noise = ((x * 7919 + y * 104729) % 1000) as f32 / 1000.0 - 0.5;
+                base + noise * noise_amp
+            })
+        })
+        .collect();
+
+    let pixels = Buffer2::new(width, height, data);
+    let bg = crate::testing::estimate_background(
+        &pixels,
+        &Config {
+            tile_size: 32,
+            ..Default::default()
+        },
+    );
+
+    // Noise at left side should be lower than noise at right side
+    let noise_left = bg.noise[(16, 64)];
+    let noise_right = bg.noise[(112, 64)];
+    assert!(
+        noise_right > noise_left,
+        "Noise should increase left→right: left={}, right={}",
+        noise_left,
+        noise_right
+    );
+
+    // Noise should be smoothly interpolated (no discontinuities)
+    let mut max_jump = 0.0f32;
+    for y in 1..height {
+        for x in 1..width {
+            let jump_x = (bg.noise[(x, y)] - bg.noise[(x - 1, y)]).abs();
+            let jump_y = (bg.noise[(x, y)] - bg.noise[(x, y - 1)]).abs();
+            max_jump = max_jump.max(jump_x).max(jump_y);
+        }
+    }
+    assert!(
+        max_jump < 0.01,
+        "Noise map max pixel-to-pixel jump {:.6} too large for smooth bicubic",
+        max_jump
+    );
+
+    // Noise values should all be finite. Small negatives are possible from
+    // cubic spline overshoot near zero but should be negligible.
+    for y in (0..height).step_by(4) {
+        for x in (0..width).step_by(4) {
+            let n = bg.noise[(x, y)];
+            assert!(n.is_finite(), "NaN/Inf noise at ({},{})", x, y);
+            assert!(n > -0.01, "Large negative noise at ({},{}): {}", x, y, n);
+        }
+    }
+}
+
+#[test]
+fn test_bicubic_single_tile_column() {
+    // With tiles_x=1, the X-direction solve gets n=1. Should produce constant fill.
+    let width = 32; // 1 tile column
+    let height = 128;
+    let pixels = Buffer2::new(width, height, vec![0.42; width * height]);
+
+    let bg = crate::testing::estimate_background(
+        &pixels,
+        &Config {
+            tile_size: 32,
+            ..Default::default()
+        },
+    );
+
+    // All background values should be ~0.42 (constant, no X interpolation)
+    for y in (0..height).step_by(8) {
+        for x in (0..width).step_by(8) {
+            let val = bg.background[(x, y)];
+            assert!(
+                (val - 0.42).abs() < 1e-3,
+                "Single tile column: bg({},{}) = {}, expected 0.42",
+                x,
+                y,
+                val
+            );
+        }
+    }
+}
+
+#[test]
+fn test_bicubic_two_tile_columns() {
+    // With tiles_x=2, natural spline has d2=0 at both endpoints (no interior points).
+    // Interpolation degenerates to linear between the two tile centers.
+    let width = 64; // 2 tile columns
+    let height = 64;
+
+    // Left tile at value 100, right tile at value 200
+    let data: Vec<f32> = (0..height)
+        .flat_map(|_| (0..width).map(|x| if x < 32 { 100.0 } else { 200.0 }))
+        .collect();
+
+    let pixels = Buffer2::new(width, height, data);
+    let bg = crate::testing::estimate_background(
+        &pixels,
+        &Config {
+            tile_size: 32,
+            ..Default::default()
+        },
+    );
+
+    // At left center (x=16): should be ~100
+    // At right center (x=48): should be ~200
+    // At midpoint (x=32): should be ~150 (linear interp between two tiles)
+    let left = bg.background[(16, 32)];
+    let mid = bg.background[(32, 32)];
+    let right = bg.background[(48, 32)];
+
+    assert!(
+        (left - 100.0).abs() < 5.0,
+        "Left center: expected ~100, got {}",
+        left
+    );
+    assert!(
+        (right - 200.0).abs() < 5.0,
+        "Right center: expected ~200, got {}",
+        right
+    );
+    // With only 2 tiles, natural spline = linear, so midpoint = average
+    assert!(
+        (mid - 150.0).abs() < 10.0,
+        "Midpoint: expected ~150 (linear), got {}",
+        mid
+    );
+    // Verify monotonicity
+    assert!(
+        right > mid && mid > left,
+        "Should be monotonic: left={}, mid={}, right={}",
+        left,
+        mid,
+        right
+    );
+}
+
+#[test]
+fn test_bicubic_single_tile_row() {
+    // With tiles_y=1, Y direction should be constant (no Y interpolation needed)
+    let width = 128;
+    let height = 32; // 1 tile row
+    let pixels = Buffer2::new(width, height, vec![0.77; width * height]);
+
+    let bg = crate::testing::estimate_background(
+        &pixels,
+        &Config {
+            tile_size: 32,
+            ..Default::default()
+        },
+    );
+
+    for y in (0..height).step_by(8) {
+        for x in (0..width).step_by(8) {
+            let val = bg.background[(x, y)];
+            assert!(
+                (val - 0.77).abs() < 1e-3,
+                "Single tile row: bg({},{}) = {}, expected 0.77",
+                x,
+                y,
+                val
+            );
+        }
+    }
+}
+
+#[test]
+fn test_bicubic_two_tile_rows() {
+    // With tiles_y=2, natural spline has d2=0 at both endpoints.
+    // Y interpolation degenerates to linear.
+    let width = 64;
+    let height = 64; // 2 tile rows
+
+    // Top tile at 50, bottom tile at 150
+    let data: Vec<f32> = (0..height)
+        .flat_map(|y| {
+            let val = if y < 32 { 50.0 } else { 150.0 };
+            std::iter::repeat_n(val, width)
+        })
+        .collect();
+
+    let pixels = Buffer2::new(width, height, data);
+    let bg = crate::testing::estimate_background(
+        &pixels,
+        &Config {
+            tile_size: 32,
+            ..Default::default()
+        },
+    );
+
+    // At top center (y=16): should be ~50
+    // At bottom center (y=48): should be ~150
+    let top = bg.background[(32, 16)];
+    let mid = bg.background[(32, 32)];
+    let bot = bg.background[(32, 48)];
+
+    assert!(
+        (top - 50.0).abs() < 5.0,
+        "Top center: expected ~50, got {}",
+        top
+    );
+    assert!(
+        (bot - 150.0).abs() < 5.0,
+        "Bottom center: expected ~150, got {}",
+        bot
+    );
+    assert!(
+        (mid - 100.0).abs() < 10.0,
+        "Midpoint: expected ~100 (linear), got {}",
+        mid
+    );
+    assert!(
+        bot > mid && mid > top,
+        "Should be monotonic: top={}, mid={}, bot={}",
+        top,
+        mid,
+        bot
+    );
+}
+
 use crate::math::sigma_clipped_median_mad;
 
 #[test]

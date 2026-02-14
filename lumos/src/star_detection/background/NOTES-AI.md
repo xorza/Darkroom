@@ -2,16 +2,16 @@
 
 ## Module Overview
 
-Tile-based background and noise estimation for astronomical images. Divides image into tiles, computes sigma-clipped median + MAD per tile, applies 3x3 median filter to tiles, then bilinearly interpolates per-pixel background and noise maps. Supports iterative refinement with source masking.
+Tile-based background and noise estimation for astronomical images. Divides image into tiles, computes sigma-clipped median + MAD per tile, applies 3x3 median filter to tiles, then interpolates per-pixel background and noise maps using natural bicubic spline (matching SExtractor/SEP). Supports iterative refinement with source masking.
 
 ## File Map
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `mod.rs` | 252 | Entry points (`estimate_background`, `refine_background`), row interpolation, object masking |
+| `mod.rs` | ~260 | Entry points (`estimate_background`, `refine_background`), bicubic spline row interpolation, object masking |
 | `estimate.rs` | 27 | `BackgroundEstimate` struct (background + noise buffers) |
-| `tile_grid.rs` | 1233 | `TileGrid` struct, sigma-clipped stats, 3x3 median filter, pixel collection, unit tests |
-| `simd/mod.rs` | 823 | Runtime SIMD dispatch, `interpolate_segment_simd`, `sum_and_sum_sq_simd`, scalar fallbacks, tests |
+| `tile_grid.rs` | ~1650 | `TileGrid` struct with Y-spline precomputation, tridiagonal solver, sigma-clipped stats, 3x3 median filter, pixel collection, unit tests |
+| `simd/mod.rs` | ~950 | Runtime SIMD dispatch, `interpolate_segment_cubic_simd`, `sum_and_sum_sq_simd`, scalar fallbacks, tests |
 | `simd/sse.rs` | 275 | SSE4.1 + AVX2 implementations for sum/sum_sq, sum_abs_deviations |
 | `simd/neon.rs` | 124 | ARM NEON implementations for sum/sum_sq, sum_abs_deviations |
 | `tests.rs` | 878 | Integration tests for full pipeline, sigma-clipped statistics |
@@ -32,8 +32,11 @@ estimate_background (mod.rs:29)
   |     +-> apply_median_filter (tile_grid.rs:178)  -- 3x3 median on tile grid
   |
   +-> interpolate_from_grid (mod.rs:105)  -- parallel per-row
-        +-> interpolate_row (mod.rs:151)  -- segment-based bilinear
-              +-> simd::interpolate_segment_simd (simd/mod.rs:108)
+        +-> interpolate_row (mod.rs:151)  -- natural bicubic spline (SEP-matching)
+              |  Step 1: Evaluate Y spline at each tile column
+              |  Step 2: Solve tridiagonal system in X (per-row)
+              +-> simd::interpolate_segment_cubic_simd (simd/mod.rs)
+                    f(t) = (1-t)*f0 + t*f1 - t*(1-t)*((2-t)*a + (1+t)*b)
 
 refine_background (mod.rs:59)  -- optional iterative refinement
   for each iteration:
@@ -55,7 +58,7 @@ refine_background (mod.rs:59)  -- optional iterative refinement
 | **Scale estimator** | Clipped std dev | Same as SExtractor | Pluggable (3 estimators) | MAD * 1.4826 |
 | **Sigma clipping** | 3-sigma, iterate to convergence | Same as SExtractor | sigma=3, maxiters=10 | kappa=3, 2-3 iterations |
 | **Tile filter** | 3x3 median (configurable) | fw, fh (default 3x3) | filter_size (default 3x3) | 3x3 median (fixed) |
-| **Interpolation** | Bicubic spline | Bicubic spline | BkgZoomInterpolator (spline) | Bilinear |
+| **Interpolation** | Bicubic spline | Bicubic spline | BkgZoomInterpolator (spline) | Natural bicubic spline (C2) |
 | **Edge handling** | Partial meshes supported | Same as SExtractor | edge_method param | Partial tiles with adjusted centers |
 | **Source masking** | Automatic via mode estimator | Same | External mask parameter | Iterative refinement with mask |
 | **RMS map** | sigma from clipped std dev | Same | Separate RMS estimator | MAD-based sigma per tile |
@@ -94,17 +97,15 @@ refine_background (mod.rs:59)  -- optional iterative refinement
 
 **Verdict**: Fixed iteration count with MAD is a reasonable approach. The early-exit on convergence (math/statistics/mod.rs:136-139) provides the same effect as convergence-based stopping.
 
-#### 4. Interpolation: Bilinear vs Bicubic Spline
+#### 4. Interpolation: Natural Bicubic Spline (Matching SEP)
 
-**SExtractor/SEP** use natural bicubic spline interpolation between mesh points. This produces C1-continuous surfaces (continuous first derivatives).
+**SExtractor/SEP** use natural bicubic spline interpolation between mesh points. This produces C2-continuous surfaces (continuous second derivatives).
 
-**This module** uses bilinear interpolation (mod.rs:151-231). Bilinear produces C0-continuous surfaces (continuous values but discontinuous derivatives at tile boundaries).
+**This module** uses the same natural bicubic spline approach (mod.rs `interpolate_row`). Two-pass: Y-spline second derivatives precomputed once per `TileGrid::compute()` using Thomas algorithm tridiagonal solver (tile_grid.rs `compute_y_spline_derivatives`), then per-row: evaluate Y spline at each tile column, solve tridiagonal in X (O(tiles_x)), evaluate cubic polynomial per pixel segment via SIMD.
 
 **photutils** defaults to `BkgZoomInterpolator` (spline) but also offers `BkgIDWInterpolator` (inverse distance weighting).
 
-**Impact**: Bicubic spline provides smoother interpolation that better handles strong gradients. The difference is most visible at tile boundaries where bilinear creates subtle discontinuities in the derivative. However, the 3x3 median filter on tiles smooths out the most problematic tile-to-tile variations. For typical astronomical images with smooth backgrounds, the practical difference is small. The test `test_interpolation_smooth_at_tile_boundaries` (tests.rs:340) verifies continuity with a max_jump of 0.05.
-
-**Performance trade-off**: Bilinear is significantly cheaper (2 multiplies + 2 adds per dimension) vs bicubic (requires solving 4x4 system per tile). The SIMD-accelerated bilinear (simd/mod.rs:211-299) processes 8 pixels per AVX2 iteration.
+**Performance**: The cubic polynomial `f(t) = ct*f0 + t*f1 - t*ct*((2-t)*a + (1+t)*b)` is ~9 muls + 5 adds per value (vs 2 muls + 1 add for bilinear), but still highly SIMD-friendly. AVX2 uses `_mm256_fnmadd_ps` for the subtracted FMA. AVX2 processes 8 pixels/iter, SSE4.1/NEON 4 pixels/iter. The per-row tridiagonal solve is O(tiles_x) — negligible overhead.
 
 #### 5. Tile Filter
 
@@ -137,7 +138,7 @@ refine_background (mod.rs:59)  -- optional iterative refinement
 **No other tool** (SExtractor, SEP, photutils) uses SIMD for background estimation.
 
 This module provides SIMD for:
-- **Bilinear interpolation**: AVX2 (8 floats), SSE4.1 (4 floats), NEON (4 floats) -- simd/mod.rs:211-418
+- **Cubic spline interpolation**: AVX2 (8 floats), SSE4.1 (4 floats), NEON (4 floats) -- simd/mod.rs
 - **Sum + sum-of-squares**: AVX2, SSE4.1, NEON -- simd/sse.rs:14-105, simd/neon.rs:13-45
 - **Sum of absolute deviations**: AVX2, SSE4.1, NEON -- simd/sse.rs:125-189, simd/neon.rs:52-79
 
@@ -174,13 +175,19 @@ refinement with source masking partially compensates.
 **Recommendation**: For highest impact with least effort, implement SExtractor mode first.
 Biweight location is a future enhancement for photometry-grade accuracy.
 
-### 2. Bilinear Interpolation (vs Bicubic Spline)
+### ~~2. Bilinear Interpolation (vs Bicubic Spline)~~ — FIXED
 
-Bilinear interpolation produces C0 surfaces with derivative discontinuities at tile boundaries. SExtractor and SEP both use bicubic spline for smoother results.
+Replaced bilinear interpolation with natural bicubic spline matching SExtractor/SEP.
+Two-pass approach: Y-spline second derivatives precomputed per tile column (Thomas
+algorithm tridiagonal solver), then per-row: evaluate Y spline at each tile column,
+solve tridiagonal in X, evaluate cubic polynomial per pixel segment.
 
-**Severity**: Low-Medium. The 3x3 median filter mitigates the worst artifacts. With default 64px tiles on typical images, the difference is minor. More noticeable with large tile sizes or strong gradients.
+Standard cubic spline formula (matching SEP/Numerical Recipes):
+`f(t) = (1-t)*f0 + t*f1 - t*(1-t)*((2-t)*a + (1+t)*b)` where `a = h²/6*d2_0`,
+`b = h²/6*d2_1`, and d2_0/d2_1 are natural spline second derivatives.
 
-**Fix**: Implement natural bicubic spline interpolation. Would require storing 4x4 tile neighborhoods instead of 2x2. Higher computational cost but could still be SIMD-accelerated.
+SIMD-accelerated cubic evaluation: AVX2 (8 pixels/iter), SSE4.1 (4 pixels/iter),
+NEON (4 pixels/iter). Produces C2-continuous surfaces (continuous second derivatives).
 
 ### 3. Fixed 3x3 Median Filter
 
@@ -231,7 +238,7 @@ modest compared to the rest of the pipeline.
 ## Strengths vs Industry
 
 1. **MAD-based sigma** is more robust than SExtractor's clipped std dev (tile_grid.rs:269, math/statistics/mod.rs:174-196)
-2. **SIMD-accelerated interpolation** with AVX2/SSE4.1/NEON -- unique among background estimators
+2. **Natural bicubic spline interpolation** matching SExtractor/SEP, with SIMD-accelerated cubic evaluation (AVX2/SSE4.1/NEON) -- unique among background estimators
 3. **Rayon parallelism** for both tile stats (tile_grid.rs:142-175) and row interpolation (mod.rs:108-116)
 4. **Iterative refinement** with source masking + dilation (mod.rs:59-102) matches photutils best practices
 5. **Bit-packed mask collection** with word-level operations (tile_grid.rs:319-371) is very efficient

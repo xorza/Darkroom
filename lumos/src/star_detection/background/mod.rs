@@ -1,7 +1,8 @@
 //! Background estimation for star detection.
 //!
 //! Estimates the sky background using a tiled approach with sigma-clipped
-//! statistics, then bilinearly interpolates to create a smooth background map.
+//! statistics, then interpolates using natural bicubic spline to create a
+//! C2-continuous background map (matching SExtractor/SEP).
 //!
 //! Uses SIMD acceleration when available for statistics computation.
 
@@ -24,7 +25,7 @@ use tile_grid::TileGrid;
 
 /// Estimate background and noise for the image.
 ///
-/// Performs tiled sigma-clipped statistics with bilinear interpolation.
+/// Performs tiled sigma-clipped statistics with natural bicubic spline interpolation.
 /// All buffer management is contained within this function.
 pub(crate) fn estimate_background(
     pixels: &Buffer2<f32>,
@@ -136,84 +137,117 @@ fn create_object_mask(
     }
 }
 
-/// Interpolate an entire row using segment-based bilinear interpolation.
+/// Interpolate an entire row using natural bicubic spline interpolation.
 ///
-/// Instead of computing tile indices per-pixel, we process the row in segments
-/// where each segment has constant tile corners. This amortizes tile lookups
-/// and Y-weight calculations across many pixels.
+/// Two-pass approach matching SExtractor/SEP:
+/// 1. Evaluate Y spline at this row for each tile column → node values
+/// 2. Solve tridiagonal system in X for second derivatives
+/// 3. Evaluate X spline per-pixel using SIMD-accelerated segments
 fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &TileGrid) {
     let fy = y as f32;
     let width = bg_row.len();
+    let tiles_x = grid.tiles_x();
 
-    // Compute Y tile indices and weight once for the entire row
+    // --- Step 1: Evaluate Y spline at each tile column ---
+
     let ty0 = grid.find_lower_tile_y(fy);
     let ty1 = (ty0 + 1).min(grid.tiles_y() - 1);
-
-    let center_y0 = grid.center_y(ty0);
-    let center_y1 = grid.center_y(ty1);
-    let wy = if ty1 != ty0 {
-        ((fy - center_y0) / (center_y1 - center_y0)).clamp(0.0, 1.0)
+    let cy0 = grid.center_y(ty0);
+    let cy1 = grid.center_y(ty1);
+    let hy = cy1 - cy0;
+    let ty = if ty1 != ty0 {
+        ((fy - cy0) / hy).clamp(0.0, 1.0)
     } else {
         0.0
     };
-    let wy_inv = 1.0 - wy;
 
-    // Process row in segments between tile center X boundaries
+    // Evaluate Y cubic spline at each tile column
+    // For small tile counts (common), use stack-friendly SmallVec-style approach
+    let mut node_bg = vec![0.0f32; tiles_x];
+    let mut node_noise = vec![0.0f32; tiles_x];
+
+    for tx in 0..tiles_x {
+        let f0_bg = grid.get(tx, ty0).median;
+        let f1_bg = grid.get(tx, ty1).median;
+        let d0_bg = grid.d2y_median(tx, ty0);
+        let d1_bg = grid.d2y_median(tx, ty1);
+        node_bg[tx] = tile_grid::cubic_spline_eval(f0_bg, f1_bg, d0_bg, d1_bg, hy, ty);
+
+        let f0_n = grid.get(tx, ty0).sigma;
+        let f1_n = grid.get(tx, ty1).sigma;
+        let d0_n = grid.d2y_sigma(tx, ty0);
+        let d1_n = grid.d2y_sigma(tx, ty1);
+        node_noise[tx] = tile_grid::cubic_spline_eval(f0_n, f1_n, d0_n, d1_n, hy, ty);
+    }
+
+    // --- Step 2: Solve tridiagonal system in X for second derivatives ---
+
+    let centers_x: Vec<f32> = (0..tiles_x).map(|tx| grid.center_x(tx)).collect();
+    let mut d2x_bg = vec![0.0f32; tiles_x];
+    let mut d2x_noise = vec![0.0f32; tiles_x];
+
+    tile_grid::solve_natural_spline_d2(&node_bg, &centers_x, &mut d2x_bg);
+    tile_grid::solve_natural_spline_d2(&node_noise, &centers_x, &mut d2x_noise);
+
+    // --- Step 3: Evaluate X spline per segment ---
+
     let mut x = 0usize;
 
-    for tx0 in 0..grid.tiles_x() {
-        let tx1 = (tx0 + 1).min(grid.tiles_x() - 1);
+    for tx0 in 0..tiles_x {
+        let tx1 = (tx0 + 1).min(tiles_x - 1);
 
-        // Segment runs from current x to next tile center (or end of row)
-        let segment_end = if tx0 + 1 < grid.tiles_x() {
-            // Segment ends at next tile center
+        let segment_end = if tx0 + 1 < tiles_x {
             (grid.center_x(tx0 + 1).floor() as usize).min(width)
         } else {
             width
         };
 
-        // Skip if segment is empty or we've passed it
         if segment_end <= x {
             continue;
         }
 
-        // Fetch the four corner tiles for this segment
-        let t00 = grid.get(tx0, ty0);
-        let t10 = grid.get(tx1, ty0);
-        let t01 = grid.get(tx0, ty1);
-        let t11 = grid.get(tx1, ty1);
-
-        // Precompute Y-blended values for left and right tile columns
-        let left_bg = wy_inv * t00.median + wy * t01.median;
-        let right_bg = wy_inv * t10.median + wy * t11.median;
-        let left_noise = wy_inv * t00.sigma + wy * t01.sigma;
-        let right_noise = wy_inv * t10.sigma + wy * t11.sigma;
-
         let bg_segment = &mut bg_row[x..segment_end];
         let noise_segment = &mut noise_row[x..segment_end];
 
-        let center_x0 = grid.center_x(tx0);
-        let center_x1 = grid.center_x(tx1);
-        if tx1 != tx0 {
-            // Interpolation needed - use SIMD-accelerated version
-            let inv_dx = 1.0 / (center_x1 - center_x0);
-            let wx_start = (x as f32 - center_x0) * inv_dx;
-            let wx_step = inv_dx;
+        let cx0 = centers_x[tx0];
+        let cx1 = centers_x[tx1];
 
-            simd::interpolate_segment_simd(
+        if tx1 != tx0 {
+            let hx = cx1 - cx0;
+            let hx2_6 = hx * hx / 6.0;
+            let inv_hx = 1.0 / hx;
+            let tx_start = (x as f32 - cx0) * inv_hx;
+            let tx_step = inv_hx;
+
+            // Precompute spline coefficients: a = h²/6 * d2[left], b = h²/6 * d2[right]
+            let bg_f0 = node_bg[tx0];
+            let bg_f1 = node_bg[tx1];
+            let bg_a = hx2_6 * d2x_bg[tx0];
+            let bg_b = hx2_6 * d2x_bg[tx1];
+
+            let noise_f0 = node_noise[tx0];
+            let noise_f1 = node_noise[tx1];
+            let noise_a = hx2_6 * d2x_noise[tx0];
+            let noise_b = hx2_6 * d2x_noise[tx1];
+
+            simd::interpolate_segment_cubic_simd(
                 bg_segment,
                 noise_segment,
-                left_bg,
-                right_bg,
-                left_noise,
-                right_noise,
-                wx_start,
-                wx_step,
+                bg_f0,
+                bg_f1,
+                bg_a,
+                bg_b,
+                noise_f0,
+                noise_f1,
+                noise_a,
+                noise_b,
+                tx_start,
+                tx_step,
             );
         } else {
-            // Constant fill (single tile column)
-            bg_segment.fill(left_bg);
-            noise_segment.fill(left_noise);
+            // Single tile column — constant fill
+            bg_segment.fill(node_bg[tx0]);
+            noise_segment.fill(node_noise[tx0]);
         }
 
         x = segment_end;
