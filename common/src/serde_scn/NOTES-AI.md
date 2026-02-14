@@ -28,12 +28,12 @@ Two-phase approach: `T → ScnValue → text` (serialize) and `text → ScnValue
 
 ## Serde Convention Notes (de.rs)
 
-### `deserialize_any` for `Variant(tag, None)` returns `visit_string` (de.rs:58)
+### `deserialize_any` for `Variant(tag, None)` returns `visit_string` (de.rs:58) — POSTPONED
 
-Loses variant semantics. Can cause issues with `#[serde(untagged)]` where a String variant may
-match before an enum variant. The Variant-with-payload case correctly uses single-entry map.
-
-**Low priority** — only affects advanced serde attributes with variants inside `deserialize_any`.
+Loses variant semantics. `#[serde(untagged)]` with a `String` arm competing against an enum arm
+will match String first. Serde's visitor protocol has no `visit_variant` — this is a serde
+limitation, not an SCN bug. Normal `deserialize_enum` works correctly. Workaround: put enum variant
+before String variant in `#[serde(untagged)]`.
 
 ---
 
