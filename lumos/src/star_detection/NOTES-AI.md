@@ -21,8 +21,8 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 
 #### Pipeline Stages (detector/mod.rs -> stages/)
 1. **prepare** - RGB to luminance, optional 3x3 median filter for CFA sensors
-2. **background** - Tiled sigma-clipped statistics, bilinear interpolation, optional
-   iterative refinement with source masking and dilation
+2. **background** - Tiled sigma-clipped statistics, natural bicubic spline interpolation,
+   optional iterative refinement with source masking and dilation
 3. **fwhm** - Auto-estimation from bright stars (2x sigma first-pass, MAD outlier rejection)
    or manual FWHM, or disabled (no matched filter)
 4. **detect** - Optional matched filter convolution (noise-normalized output),
@@ -45,7 +45,8 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
   partitioning) and multi-threshold tree (exponential spacing, BFS on PixelGrid with
   generation-counter O(1) clearing, contrast criterion)
 - **background/** - TileGrid with sigma-clipped median+MAD, 3x3 median filter on tiles,
-  SIMD bilinear interpolation, masked pixel collection with word-level bit ops
+  SIMD natural bicubic spline interpolation (C2-continuous), masked pixel collection with
+  word-level bit ops
 - **threshold_mask/** - SIMD bit-packed mask creation (SSE4.1 / NEON), with and without
   background subtraction variants
 - **median_filter/** - 3x3 median for CFA artifacts, SIMD sorting network (AVX2/SSE4.1/NEON)
@@ -71,7 +72,7 @@ photutils.
 
 | Stage | This Pipeline | SExtractor | Verdict |
 |-------|--------------|------------|---------|
-| 1. Background | Tiled sigma-clipped median+MAD, 3x3 tile filter, bilinear interpolation, optional iterative refinement with source masking | Tiled sigma-clipped mode (2.5*med-1.5*mean), configurable filter, bicubic spline | Correct order. Median vs mode is a valid alternative (more robust, slightly higher bias in crowded fields). |
+| 1. Background | Tiled sigma-clipped median+MAD, 3x3 tile filter, natural bicubic spline interpolation, optional iterative refinement with source masking | Tiled sigma-clipped mode (2.5*med-1.5*mean), configurable filter, bicubic spline | Correct order. Median vs mode is a valid alternative (more robust, slightly higher bias in crowded fields). Interpolation matches SExtractor/SEP (C2-continuous natural cubic spline). |
 | 2. Matched filter | Gaussian convolution, output / sqrt(sum(K^2)) noise normalization | User-supplied filter (default Gaussian .conv), convolved variance map | Correct: filtering before threshold boosts SNR. Noise normalization follows SEP approach. |
 | 3. Threshold | Per-pixel local: `pixel > bg + sigma * noise`, bit-packed mask | Same formula: `pixel > bg + DETECT_THRESH * sigma` | Identical approach. Default 4.0 sigma (vs SExtractor 1.5) compensated by matched filter SNR boost. |
 | 4. Labeling | RLE + union-find CCL, 8-connectivity, parallel for >65K pixels | Line-by-line streaming, 8-connectivity | Both 8-connectivity. This implementation stores full label map enabling parallelism. |
@@ -125,7 +126,7 @@ refine_background (optional, iterative):
 | Scale estimator | Clipped std dev | Same | Pluggable (3 estimators) | MAD * 1.4826 |
 | Sigma clipping | 3-sigma, iterate to convergence | Same | sigma=3, maxiters=10 | kappa=3, 2-3 iters, early exit |
 | Tile filter | Configurable (BACK_FILTERSIZE) | fw, fh (default 3x3) | filter_size param | Fixed 3x3 median |
-| Interpolation | Bicubic spline | Bicubic spline | BkgZoomInterpolator (spline) | Bilinear |
+| Interpolation | Bicubic spline | Bicubic spline | BkgZoomInterpolator (spline) | Natural bicubic spline (C2) |
 | Source masking | Automatic via mode estimator | Same | External mask param | Iterative refinement + dilation |
 | RMS map | Clipped std dev | Same | Separate RMS estimator | MAD-based sigma per tile |
 | SIMD | No | No | No (NumPy) | AVX2, SSE4.1, NEON |
@@ -145,6 +146,9 @@ refine_background (optional, iterative):
    background estimation.
 5. **Bit-packed mask collection**: Word-level operations skip 64 background pixels at a
    time during masked pixel collection.
+6. **Natural bicubic spline interpolation**: Matches SExtractor/SEP C2-continuous surfaces.
+   Two-pass algorithm: Y-direction spline precomputed per column, X-direction solved per row.
+   SIMD-accelerated cubic polynomial evaluation (AVX2/SSE4.1/NEON).
 
 ### What We Do Differently (Trade-offs)
 
@@ -152,10 +156,6 @@ refine_background (optional, iterative):
    SExtractor's mode estimator. The mode (`2.5*med - 1.5*mean`) is ~30% noisier but less
    affected by source crowding. Iterative refinement with source masking partially
    compensates. Impact: negligible in sparse fields; 1-5% bias in globular cluster cores.
-2. **Bilinear vs Bicubic Spline**: Bilinear produces C0 surfaces (continuous values,
-   discontinuous derivatives at tile boundaries). Bicubic spline (SExtractor, SEP, photutils)
-   produces C1 surfaces. The 3x3 median filter on tiles mitigates the worst artifacts.
-   Impact: minor for 64px tiles with smooth backgrounds. More visible with strong gradients.
 
 ### Known Issues
 
@@ -370,7 +370,7 @@ MAX_TILE_SAMPLES=1024 cap.
 
 | Feature | SExtractor | SEP | photutils | PixInsight | DAOFIND | This Module |
 |---------|-----------|-----|-----------|-----------|---------|-------------|
-| **Background** | Mode + spline | Mode + spline | Pluggable + spline | Thin plate spline (DBE) | Local annulus | Median + bilinear |
+| **Background** | Mode + spline | Mode + spline | Pluggable + spline | Thin plate spline (DBE) | Local annulus | Median + bicubic spline |
 | **Detection** | Matched filter | Matched filter | DAOStarFinder or detect_sources | Wavelet (a trous) | Zero-sum kernel | Matched filter |
 | **Labeling** | Streaming 8-conn | Same | scipy.ndimage.label | Internal | Peak-based | RLE + union-find |
 | **Deblending** | Multi-threshold tree | Multi-threshold tree | Multi-threshold + watershed | Wavelet layers | N/A | Dual: local maxima + multi-threshold |
@@ -410,25 +410,23 @@ MAX_TILE_SAMPLES=1024 cap.
 1. **Variance/weight map support** (SExtractor, SEP, photutils): Per-pixel noise handling
    for mosaics, vignetted fields, bad columns. Our uniform-noise assumption is correct for
    flat-fielded astrophotography but insufficient for survey data.
-2. **Bicubic spline background interpolation** (SExtractor, SEP, photutils): C1-continuous
-   surfaces vs our C0 bilinear. Minor impact with 64px tiles.
-3. **Weighted least squares in fitting** (DAOPHOT, SExtractor): Inverse-variance weighting
+2. **Weighted least squares in fitting** (DAOPHOT, SExtractor): Inverse-variance weighting
    `chi2 = sum(((data-model)/sigma_i)^2)`. Improves accuracy for faint stars.
-4. **Gaussian template pixel assignment** (SExtractor) / **Watershed** (photutils): Better
+3. **Gaussian template pixel assignment** (SExtractor) / **Watershed** (photutils): Better
    than our Voronoi for asymmetric blends.
-5. **Wavelet multiscale detection** (PixInsight): Can detect sources at multiple scales
+4. **Wavelet multiscale detection** (PixInsight): Can detect sources at multiple scales
    simultaneously. Matched filter is optimal for known PSF but cannot handle scale variation
    across the field.
-6. **Cleaning pass** (SExtractor): Removes spurious detections near bright star wings.
+5. **Cleaning pass** (SExtractor): Removes spurious detections near bright star wings.
    Quality filter stage partially compensates.
-7. **Pluggable background estimators** (photutils): 6 location + 3 scale estimators vs
+6. **Pluggable background estimators** (photutils): 6 location + 3 scale estimators vs
    our fixed median+MAD.
-8. **Mode estimator** (SExtractor): `2.5*med - 1.5*mean` is less biased than median in
+7. **Mode estimator** (SExtractor): `2.5*med - 1.5*mean` is less biased than median in
    crowded fields, at cost of 30% more noise.
-9. **CLASS_STAR classifier** (SExtractor): 10-input MLP for star/galaxy separation.
+8. **CLASS_STAR classifier** (SExtractor): 10-input MLP for star/galaxy separation.
    Not needed for registration use case.
-10. **Root-relative contrast** (SExtractor/SEP): Standard approach vs our parent-relative.
-    Difference only affects deeply nested 3+ level splits.
+9. **Root-relative contrast** (SExtractor/SEP): Standard approach vs our parent-relative.
+   Difference only affects deeply nested 3+ level splits.
 
 ---
 
@@ -457,17 +455,15 @@ MAX_TILE_SAMPLES=1024 cap.
 5. **Mode/biweight location estimator** for crowded field backgrounds. Iterative refinement
    already compensates. SExtractor mode: `2.5*med - 1.5*mean`. Biweight location (Tukey
    1977) is the most statistically robust option (98.2% efficiency vs median's 64%).
-6. **Bicubic spline background interpolation**: C1-continuous vs C0 bilinear. Negligible
-   with 64px tiles and smooth backgrounds.
-7. **Gaussian fit rotation angle**: 7th parameter (theta). Adequate for near-circular
+6. **Gaussian fit rotation angle**: 7th parameter (theta). Adequate for near-circular
    ground-based PSFs; needed for optical systems with astigmatism.
-8. **Watershed/flux-weighted pixel assignment**: Better than Voronoi for asymmetric blends.
+7. **Watershed/flux-weighted pixel assignment**: Better than Voronoi for asymmetric blends.
    Simple improvement: assign by `peak_flux * exp(-dist^2/(2*sigma^2))` instead of
    `min(dist)`.
-9. **DAOFIND-style zero-sum kernel**: Implicit local background subtraction during
+8. **DAOFIND-style zero-sum kernel**: Implicit local background subtraction during
    convolution. Our explicit background subtraction is equally valid.
-10. **Formal DAOFIND sharpness/roundness**: Current custom metrics work for filtering but
-    published DAOFIND thresholds aren't transferable.
+9. **Formal DAOFIND sharpness/roundness**: Current custom metrics work for filtering but
+   published DAOFIND thresholds aren't transferable.
 
 ### NOT NEEDED for registration
 
@@ -511,9 +507,7 @@ MAX_TILE_SAMPLES=1024 cap.
 ### Long-term (significant effort, diminishing returns for registration)
 
 7. **Variance map support**: Pervasive change across convolution, threshold, background.
-8. **Bicubic spline interpolation**: Replace bilinear in background. Higher computation
-   but still SIMD-accelerable.
-9. **SExtractor cleaning pass**: New pipeline stage between measure and filter.
+8. **SExtractor cleaning pass**: New pipeline stage between measure and filter.
 
 ---
 
@@ -525,7 +519,7 @@ All core algorithms verified against reference implementations:
 |-----------|--------|-------------|
 | Sigma clipping | Correct | Median center, MAD scale, convergence detection |
 | MAD constant | Correct | 1.4826022 = 1/Phi^-1(3/4), f32 precision limit |
-| Bilinear interpolation | Correct | Weight clamping, segment-based, SIMD-validated |
+| Natural bicubic spline interpolation | Correct | C2-continuous, matches SEP formula, SIMD-validated, tridiagonal solver verified |
 | Gaussian Jacobian (6 params) | Correct | All 6 partial derivatives hand-verified |
 | Moffat Jacobian (5/6 params) | Correct | All partial derivatives hand-verified |
 | L-M damping | Correct | Marquardt multiplicative form H[i][i] *= (1+lambda) |

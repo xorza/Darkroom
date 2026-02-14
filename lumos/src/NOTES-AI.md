@@ -76,6 +76,7 @@ patterns and the highest-priority **unfixed** issues across all modules.
 - astro_image: `CfaImage::demosaic()` unhelpful panic -> descriptive `.expect()` message
 - registration: HashSet reallocation in `recover_matches` loop -> pre-allocated with `with_capacity()`
 - star_detection: Background mask fallback used contaminated pixels -> uses unmasked pixels first
+- star_detection: Bilinear background interpolation (C0) -> natural bicubic spline (C2), matches SEP/SExtractor
 
 </details>
 
@@ -227,6 +228,7 @@ These were investigated and confirmed correct against industry references:
 - **stacking winsorized**: full two-phase with Huber c=1.5, 1.134 correction, convergence
 - **star_detection pipeline order**: matches SExtractor (background -> filter -> threshold -> label -> deblend -> centroid)
 - **star_detection background MAD**: 50% breakdown point, superior to SExtractor clipped stddev
+- **star_detection background interpolation**: Natural bicubic spline (C2-continuous), matches SEP formula exactly
 - **star_detection matched filter**: noise normalization matches SEP approach
 - **star_detection CCL**: RLE + atomic union-find, lock-free, ABA-safe
 - **star_detection deblending**: multi-threshold tree matches SExtractor algorithm
