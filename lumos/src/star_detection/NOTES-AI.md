@@ -437,13 +437,13 @@ MAX_TILE_SAMPLES=1024 cap.
 
 ## Missing Features
 
-### HIGH Priority (would improve accuracy in common scenarios)
+### HIGH Priority -- POSTPONED
 
 1. **Weighted least squares in L-M fitting** (centroid/): Industry tools use inverse-variance
    weighting. Unweighted fitting is suboptimal for faint stars with Poisson statistics.
    Location: `lm_optimizer.rs`, `gaussian_fit/mod.rs`, `moffat_fit/mod.rs`.
 
-### MEDIUM Priority (important for specific use cases)
+### MEDIUM Priority -- POSTPONED
 
 2. **Variance/weight map input**: Per-pixel noise handling for mosaics, vignetted fields,
    images with bad columns. Requires changes in: convolution (convolve variance map),
@@ -455,7 +455,7 @@ MAX_TILE_SAMPLES=1024 cap.
    position uncertainties. Enables weighted registration (`weight = 1/sigma_pos^2`).
    Trivial computation (~1us for 6x6 matrix) since Hessian already available.
 
-### LOW Priority (marginal improvement for registration use case)
+### LOW Priority -- POSTPONED
 
 5. **Mode/biweight location estimator** for crowded field backgrounds. Iterative refinement
    already compensates. SExtractor mode: `2.5*med - 1.5*mean`. Biweight location (Tukey
@@ -482,12 +482,12 @@ MAX_TILE_SAMPLES=1024 cap.
 
 ## Recommendations
 
-### Short-term (high impact, low effort)
+### Short-term (high impact, low effort) -- POSTPONED
 
 1. **Add parameter uncertainties**: Invert J^T*J at L-M convergence. Trivial computation
    for N=5-6. Enables weighted star matching in registration.
 
-### Medium-term (moderate impact, moderate effort)
+### Medium-term (moderate impact, moderate effort) -- POSTPONED
 
 2. **Implement weighted least squares**: Add per-pixel variance weighting to L-M models.
    Requires `gain` and `read_noise` parameters. Main change in `batch_build_normal_equations`
@@ -502,7 +502,7 @@ MAX_TILE_SAMPLES=1024 cap.
    (`min(dist)`) with `max(peak_flux * exp(-dist^2 / (2*sigma^2)))`. Small change in
    `local_maxima/mod.rs:find_nearest_peak` and `multi_threshold/mod.rs:assign_pixels_to_objects`.
 
-### Long-term (significant effort, diminishing returns for registration)
+### Long-term (significant effort, diminishing returns for registration) -- POSTPONED
 
 5. **Variance map support**: Pervasive change across convolution, threshold, background.
 6. **SExtractor cleaning pass**: New pipeline stage between measure and filter.

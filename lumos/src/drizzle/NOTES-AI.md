@@ -383,7 +383,7 @@ recommended), PixInsight (BayerDrizzlePrep), DeepSkyStacker, and AstroPixelProce
 color to the corresponding output channel index. Requires CFA pattern knowledge from the
 image metadata.
 
-### P3 (Nice-to-have): Context / Contribution Image
+### P3 (Nice-to-have): Context / Contribution Image -- POSTPONED
 
 **What**: 32-bit bitmask (or count) per output pixel recording which input frames contributed.
 
@@ -393,7 +393,7 @@ Standard STScI output. Less critical for amateur astrophotography.
 **Implementation**: Add `context: Buffer2<u32>` to accumulator. Set bit `i` when frame `i`
 contributes. Return in `DrizzleResult`.
 
-### P3 (Nice-to-have): Variance / Error Output
+### P3 (Nice-to-have): Variance / Error Output -- POSTPONED
 
 **What**: Propagate variance through the drizzle weighted averaging using squared weights.
 
@@ -406,7 +406,7 @@ var_new = (old_var * vc^2 + dow^2 * input_var) / (vc + dow)^2
 amateur astrophotography workflows. Would require switching to incremental accumulation
 (STScI style) or storing additional variance buffers.
 
-### P3 (Nice-to-have): Parallel Accumulation
+### P3 (Nice-to-have): Parallel Accumulation -- POSTPONED
 
 **What**: Currently `add_image_*` loops over all input pixels sequentially.
 
@@ -426,7 +426,7 @@ tens of frames but slow for hundreds.
    find all contributing input pixels. Inverts the loop direction. Natural parallelism
    but requires inverse transform and spatial indexing.
 
-### P4 (Minor): Lanczos Constraint Enforcement
+### P4 (Minor): Lanczos Constraint Enforcement -- POSTPONED
 
 **What**: Currently warns but allows Lanczos with pixfrac != 1.0 or scale != 1.0.
 
@@ -499,14 +499,14 @@ The `finalize()` method uses `par_chunks_mut` for row-parallel normalization and
 
 ## Recommendations
 
-### Short-term (correctness/quality)
+### Short-term (correctness/quality) -- POSTPONED
 
 1. **Enforce Lanczos constraints** (P4) -- trivial change, prevents user confusion.
 
 2. **Add Lanczos-2 option** -- simple parameter change (`a = 2.0` instead of `a = 3.0`),
    matches Siril/STScI option set. Lanczos-2 is faster (5x5 vs 7x7) and often sufficient.
 
-### Medium-term (feature parity)
+### Medium-term (feature parity) -- POSTPONED
 
 3. **Row-parallel accumulation** (P3) -- biggest performance win with minimal complexity.
    Use rayon `par_iter()` over input rows with atomic accumulation or band partitioning.
@@ -515,10 +515,10 @@ The `finalize()` method uses `par_chunks_mut` for row-parallel normalization and
 
 4. **CFA/Bayer drizzle** (P2) -- significant feature for OSC camera users.
 
-5. **Variance propagation** (P3) -- needed for scientific photometry. May require switching
+5. **Variance propagation** (P3) -- POSTPONED. Needed for scientific photometry. May require switching
    to incremental accumulation (STScI style) for numerical stability with variance.
 
-6. **SIMD for multi-channel accumulate** -- minor gain for RGB, bigger gain if extended to
+6. **SIMD for multi-channel accumulate** -- POSTPONED. Minor gain for RGB, bigger gain if extended to
    process multiple input pixels per iteration.
 
 ---

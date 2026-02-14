@@ -288,7 +288,7 @@ This is more principled than statistical rejection for single-exposure cosmic ra
 
 ## Missing Features
 
-### P1: No Variance Propagation -- MEDIUM SEVERITY
+### P1: No Variance Propagation -- POSTPONED
 
 Neither the combined pixel value nor a per-pixel noise estimate is produced. PixInsight
 propagates variance through the full pipeline, producing noise estimates for the integrated
@@ -299,7 +299,7 @@ image. IRAF's imcombine can output sigma images. Without variance propagation:
 
 Impact: Significant for scientific use cases; less important for visual astrophotography.
 
-### P2: Missing Rejection Maps Output -- MEDIUM SEVERITY
+### P2: Missing Rejection Maps Output -- POSTPONED
 
 Both PixInsight and Siril generate per-pixel rejection count maps (low/high). PixInsight also
 generates a slope map for linear fit. Diagnostic only -- does not affect stacking results.
@@ -315,37 +315,37 @@ Computes weights from per-channel MAD (already computed for normalization — ze
 Still missing vs industry: FWHM-based weighting, PSF signal/SNR weighting (PixInsight),
 star count weighting (Siril). These require star detection per frame.
 
-### P2: Missing Separate Rejection vs Combination Normalization -- LOW SEVERITY
+### P2: Missing Separate Rejection vs Combination Normalization -- POSTPONED
 
 PixInsight provides two independent normalization controls. In practice, using the same
 normalization for both works for the vast majority of workflows. Separate controls only matter
 for preserving absolute flux while using normalized rejection -- a niche advanced use case.
 
-### P3: Missing Additive-Only Normalization -- LOW SEVERITY
+### P3: Missing Additive-Only Normalization -- POSTPONED
 
 Formula: `offset = ref_median - frame_median`, `gain = 1.0`. Useful for calibration frames
 with varying pedestal but consistent gain. Trivial to add to `Normalization` enum.
 
-### P3: Missing Min/Max/Sum Combine Methods -- LOW SEVERITY
+### P3: Missing Min/Max/Sum Combine Methods -- POSTPONED
 
 - Maximum: star-trail images, hot pixel identification
 - Minimum: dark current floor, cold pixel identification
 - Sum: total signal accumulation (trivial `CombineMethod::Sum` variant)
 - DSS offers "Auto Adaptive Weighted Average" and "Entropy Weighted Average" -- niche methods
 
-### P3: Missing Sigma Clipping Convergence Mode -- LOW SEVERITY
+### P3: Missing Sigma Clipping Convergence Mode -- POSTPONED
 
 Astropy supports `maxiters=None` (iterate until no values rejected). Siril iterates until
 convergence. Our implementation only supports fixed iteration count. For most astrophotography
 stacks (10-50 frames), 3 iterations is sufficient.
 
-### P3: Missing IKSS/BWMV Statistics Estimators -- LOW SEVERITY
+### P3: Missing IKSS/BWMV Statistics Estimators -- POSTPONED
 
 Siril's default normalization uses IKSS (clip 6*MAD, recompute with BWMV). Our median+MAD
 matches Siril's fast fallback mode. Impact is marginal for typical data but could improve
 normalization quality when bright nebulosity or dense star fields are present.
 
-### P3: Missing Large-Scale Rejection -- MEDIUM SEVERITY (niche)
+### P3: Missing Large-Scale Rejection -- POSTPONED
 
 PixInsight offers "large-scale rejection" for satellite trails and aircraft: wavelet
 decomposition into layers, then growth/dilation to reject connected bright structures.
@@ -355,7 +355,7 @@ feature gap for light-polluted imaging sites with many satellite passes.
 
 APP also handles this via its Multi-Band Blending approach which removes stack artifacts.
 
-### P3: Missing CCD Noise Model Rejection -- LOW SEVERITY
+### P3: Missing CCD Noise Model Rejection -- POSTPONED
 
 IRAF's `ccdclip`/`crreject` use gain + readnoise + scintillation to compute per-pixel
 expected variance. More principled than statistical rejection for cosmic ray detection,
@@ -423,17 +423,10 @@ Per pixel, per iteration:
 
 ### Priority Order
 
-1. **Add rejection maps** (P2) -- per-pixel high/low rejection counts for diagnostics.
-   Most requested feature for parameter tuning.
-2. ~~**Add noise-based auto weighting**~~ -- **DONE** (`Weighting::Noise`, `w = 1/sigma_bg^2`)
-3. **Add variance propagation** (P1 for science, P3 for visual) -- track per-pixel noise
-   through the pipeline. Enables downstream noise-aware processing.
-4. **Add additive-only normalization** (P3) -- trivial.
-5. **Add Min/Max/Sum combine methods** (P3) -- trivial.
-6. **Add IKSS/BWMV statistics** (P3) -- moderate effort, marginal improvement.
-7. **Add sigma clip convergence mode** (P3) -- iterate until no rejection.
-8. **Add large-scale rejection** (P3) -- significant effort, high value for satellite sites.
-9. **Consider compensated summation in weighted_mean_indexed** (P3) -- minor consistency fix.
+1. ~~**Add noise-based auto weighting**~~ -- **DONE** (`Weighting::Noise`, `w = 1/sigma_bg^2`)
+2. All remaining items **POSTPONED** (rejection maps, variance propagation, additive-only
+   normalization, min/max/sum combine, IKSS/BWMV, sigma clip convergence, large-scale
+   rejection, compensated summation).
 
 ### What We Do Well
 

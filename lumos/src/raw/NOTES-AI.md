@@ -161,14 +161,14 @@ Missing AVX2 path (8/iteration) -- low priority, normalization is not the bottle
 
 ## Missing Features (with Severity)
 
-### Medium
+### Medium -- POSTPONED
 
 | Feature | Effort | Details |
 |---------|--------|---------|
 | **Raw CA correction** | Medium (1-2 days) | Pre-demosaic, lateral CA on fast optics |
 | **Hot pixel detection** | Low-Medium (1 day) | Median filter on same-color CFA neighbors |
 
-### Low
+### Low -- POSTPONED
 
 | Feature | Effort | Details |
 |---------|--------|---------|
@@ -181,7 +181,7 @@ Missing AVX2 path (8/iteration) -- low priority, normalization is not the bottle
 
 Color matrix (cam->sRGB), gamma/tone curve, highlight recovery, output color space.
 
-## Recommendations
+## Recommendations -- POSTPONED
 
 1. **Hot pixel pre-demosaic correction** -- simple median filter on same-color neighbors.
 2. **Raw CA correction** -- pre-demosaic lateral CA correction for fast optics.

@@ -205,7 +205,7 @@ cosmetic correction after demosaicing.
 
 ## Missing Features (with severity)
 
-### High: No User-Configurable Sigma Threshold
+### High: No User-Configurable Sigma Threshold -- POSTPONED
 
 The default 5.0-sigma threshold is hardcoded in `DEFAULT_HOT_PIXEL_SIGMA`. PixInsight
 defaults to 3 sigma, APP uses 2-3 kappa. Different sensors and conditions need different
@@ -214,7 +214,7 @@ thresholds (clean cooled CCD vs warm CMOS with many hot pixels).
 **Impact:** Users cannot tune detection sensitivity. A sigma parameter on `calibrate()` or
 `CalibrationMasters::new()` would be trivial to add.
 
-### Medium: Cold Pixel Detection Only from Master Dark
+### Medium: Cold Pixel Detection Only from Master Dark -- POSTPONED
 
 Cold/dead pixels are detected from low values in the master dark. However, dead pixels
 (zero sensitivity) are more reliably detected from master flats, where they appear as
@@ -227,7 +227,7 @@ pixels with abnormally low response to uniform illumination.
   `flat_pixel < threshold * median(flat)` (APP uses 50% as default).
 - **Impact:** May miss dead pixels that have normal dark current but zero photon sensitivity.
 
-### Medium: No Defect Correction Applied to Master Flat
+### Medium: No Defect Correction Applied to Master Flat -- POSTPONED
 
 The defect map is applied only to light frames during `calibrate()`. Hot pixels in the
 master flat itself are not corrected, which means the flat division at hot pixel locations
@@ -241,7 +241,7 @@ uses a corrupted flat value before the defect correction step replaces it.
   defects are small. Still, applying defect correction to the master flat after stacking
   would be more rigorous.
 
-### Low: No Dark Frame Scaling
+### Low: No Dark Frame Scaling -- POSTPONED
 
 No support for scaling dark frames to different exposure times or temperatures.
 
@@ -251,21 +251,21 @@ No support for scaling dark frames to different exposure times or temperatures.
 - Modern practice: use matched darks (same exposure/temp).
 - **Status:** Acceptable for CMOS workflows. Metadata fields already exist for future CCD support.
 
-### Low: No Overscan Subtraction
+### Low: No Overscan Subtraction -- POSTPONED
 
 Professional CCD calibration subtracts the overscan region to track per-frame bias drift.
 Not relevant for CMOS cameras or DSLR raw files.
 
 - **Status:** Not needed for target use case (CMOS astro cameras, DSLRs).
 
-### Low: No Output Pedestal
+### Low: No Output Pedestal -- POSTPONED
 
 PixInsight can add a positive pedestal to prevent negative values when saving to unsigned
 integer formats. This implementation uses f32 throughout.
 
 - **Status:** Not needed while pipeline uses f32 internally.
 
-### Low: No Bad Column/Row Detection
+### Low: No Bad Column/Row Detection -- POSTPONED
 
 Some sensors have entire bad columns or rows. Professional tools detect and interpolate
 these separately.
@@ -273,7 +273,7 @@ these separately.
 - PixInsight: LinearDefectDetection + LinearPatternSubtraction
 - **Status:** Low priority unless users report column defects.
 
-### Low: No Auto-Detect Mode for Cosmetic Correction
+### Low: No Auto-Detect Mode for Cosmetic Correction -- POSTPONED
 
 PixInsight CosmeticCorrection offers "auto-detect" which uses local window statistics on
 each light frame (not just the master dark) to find defects. This catches intermittent
@@ -348,7 +348,7 @@ not a complexity issue.
 
 ## Recommendations
 
-### Short-term (easy, high value)
+### Short-term (easy, high value) -- POSTPONED
 
 1. **Expose sigma threshold parameter** -- Allow `CalibrationMasters::new()` and
    `from_raw_files()` to accept a sigma threshold (default 5.0). Trivial change, high
@@ -357,7 +357,7 @@ not a complexity issue.
    CFA mode (count pixels first, compute stride, collect every Nth). Saves ~24MB per color
    channel on large images.
 
-### Medium-term (moderate effort)
+### Medium-term (moderate effort) -- POSTPONED
 
 3. **Flat-based cold pixel detection** -- Add `DefectMap::from_master_flat()` that flags
    pixels below `threshold * median(flat)` per CFA channel. Merge with dark-based map.
@@ -367,7 +367,7 @@ not a complexity issue.
 5. **Parallel master stacking** -- Use `rayon::join` or `std::thread::scope` to stack
    darks, flats, biases, and flat-darks in parallel in `from_raw_files()`.
 
-### Long-term (if needed for CCD support)
+### Long-term (if needed for CCD support) -- POSTPONED
 
 6. **Dark frame scaling** -- `dark_scaled = bias + (dark - bias) * t_light / t_dark`.
    Requires separate bias frame. Useful for CCD dark libraries.
