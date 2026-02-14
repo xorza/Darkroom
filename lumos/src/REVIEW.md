@@ -89,21 +89,11 @@ Comprehensive code quality review across submodules (~40k+ lines). The codebase 
 - **Invasiveness**: 2/5 --- Add explicit checks to 2 functions
 - **Description**: `median_f32_mut` and `median_and_mad_f32_mut` use `debug_assert!(!data.is_empty())` while `sigma_clipped_median_mad` and `mad_f32_with_scratch` explicitly handle empty arrays. The debug_assert functions will index out of bounds in release builds if passed empty arrays.
 
-#### [F23] CfaImage::demosaic() panics on missing cfa_type
-- **Location**: `astro_image/cfa.rs:91-135`
-- **Category**: Error handling
-- **Impact**: 3/5 --- Unhelpful "called unwrap() on None" panic
-- **Meaningfulness**: 4/5 --- Real error path; cfa_type is Option
-- **Invasiveness**: 2/5 --- Return Result or require at construction
-- **Description**: `demosaic()` calls `.unwrap()` on `metadata.cfa_type` which is `Option<CfaType>`. If a CfaImage is created without setting cfa_type, it panics with a generic message instead of a descriptive error.
+#### ~~[F23] CfaImage::demosaic() panics on missing cfa_type~~ --- FIXED
+- Changed `.unwrap()` to `.expect("CfaImage missing cfa_type: set metadata.cfa_type before calling demosaic()")`.
 
-#### [F24] HashSet reallocation in registration recover_matches loop
-- **Location**: `registration/mod.rs:374-381`
-- **Category**: Data flow / Performance
-- **Impact**: 3/5 --- 3 HashSets allocated per iteration (max 5 iterations)
-- **Meaningfulness**: 3/5 --- Real but only matters for large star counts
-- **Invasiveness**: 2/5 --- Pre-allocate before loop and clear per iteration
-- **Description**: The recovery loop creates 3 fresh HashSets each iteration. Pre-allocating and clearing would avoid 15 allocations for typical 5-iteration runs.
+#### ~~[F24] HashSet reallocation in registration recover_matches loop~~ --- FIXED
+- Pre-allocated 3 HashSets before loop with `with_capacity()`, reusing via `.clear()` + `.extend()` each iteration.
 
 #### ~~[F25] Drizzle add_image_* methods take redundant parameters~~ --- MOSTLY FIXED
 - Kernel methods refactored: `add_image_radial()` takes `(&AstroImage, &Transform, weight, scale, radius, kernel_fn)` — input dims read from the image. `add_image_turbo/point` similarly simplified. Only `compute_square_overlap` retains `#[allow(clippy::too_many_arguments)]` (8 coordinate values, inherent to the function).

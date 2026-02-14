@@ -91,7 +91,10 @@ impl CfaImage {
     pub fn demosaic(self) -> AstroImage {
         let width = self.data.width();
         let height = self.data.height();
-        let cfa_type = self.metadata.cfa_type.clone().unwrap();
+        let cfa_type =
+            self.metadata.cfa_type.clone().expect(
+                "CfaImage missing cfa_type: set metadata.cfa_type before calling demosaic()",
+            );
         let pixels = self.data.into_vec();
 
         match &cfa_type {

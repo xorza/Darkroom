@@ -367,18 +367,23 @@ pub(crate) fn recover_matches(
     let mut current_transform = *transform;
     let mut current_matches: Vec<(usize, usize)> = inlier_matches.to_vec();
 
+    let mut matched_target: std::collections::HashSet<usize> =
+        std::collections::HashSet::with_capacity(current_matches.len());
+    let mut matched_ref: std::collections::HashSet<usize> =
+        std::collections::HashSet::with_capacity(current_matches.len());
+    let mut newly_matched_targets: std::collections::HashSet<usize> =
+        std::collections::HashSet::new();
+
     for _ in 0..RECOVERY_MAX_ITERATIONS {
         let prev_count = current_matches.len();
 
-        // Collect all matched target indices for exclusion
-        let matched_target: std::collections::HashSet<usize> =
-            current_matches.iter().map(|&(_, t)| t).collect();
+        matched_target.clear();
+        matched_target.extend(current_matches.iter().map(|&(_, t)| t));
 
-        // Try to recover unmatched ref stars
-        let matched_ref: std::collections::HashSet<usize> =
-            current_matches.iter().map(|&(r, _)| r).collect();
+        matched_ref.clear();
+        matched_ref.extend(current_matches.iter().map(|&(r, _)| r));
 
-        let mut newly_matched_targets = std::collections::HashSet::new();
+        newly_matched_targets.clear();
 
         for (ref_idx, &ref_pos) in ref_stars.iter().enumerate() {
             if matched_ref.contains(&ref_idx) {
