@@ -68,7 +68,7 @@ Umeyama 1991, Shupe et al. 2005 (SIP standard), starmatch (PyPI 2025).
 - **Bicubic Catmull-Rom** correct (a=-0.5, verified K(0)=1, K(1)=0, K(2)=0)
 - **Incremental stepping** mathematically correct for affine transforms
 - **Adaptive iteration count** matches standard formula (Fischler & Bolles 1981)
-- **Hartley normalization** for DLT homography standard and correct; direct SVD on 2n x 9 A
+- **Hartley normalization** for both affine and homography estimation; direct SVD on 2n x 9 A for homography
 - **Triangle vertex ordering** by geometric role (opposite shortest/middle/longest side)
 - **Groth R=10 elongation filter** and Heron's formula degeneracy check
 - **Pipeline architecture** matches industry standard (detect -> match -> estimate -> warp)
@@ -91,7 +91,7 @@ Umeyama 1991, Shupe et al. 2005 (SIP standard), starmatch (PyPI 2025).
 #### Medium Effort (moderate changes, meaningful impact)
 10. ~~**Soft deringing threshold**~~ -- **DONE** (matches PixInsight exactly)
 11. ~~**Direct SVD for homography DLT**~~ -- **DONE**
-12. **Use actual FMA intrinsics in Lanczos3 SIMD kernel** (interpolation/warp/sse.rs:338-341) -- function requires FMA but uses mul+add instead of fmadd. ~5-10% speedup + accuracy improvement.
+12. ~~**Use actual FMA intrinsics in Lanczos3 SIMD kernel**~~ -- **DONE** (no-dering path uses _mm_fmadd_ps, ~2.5% improvement)
 13. **Generic incremental stepping** (interpolation) -- benefit Lanczos2/4/Bicubic with ~38% speedup
 14. **Remove duplicate bilinear** (interpolation/mod.rs:155-170 vs warp/mod.rs:109-127) -- consolidate
 15. **LO-RANSAC buffer replacement** (ransac/mod.rs:335) -- `inlier_buf = lo_inliers` defeats pre-allocation
@@ -139,7 +139,7 @@ Umeyama 1991, Shupe et al. 2005 (SIP standard), starmatch (PyPI 2025).
 - **Triangle matching works for our scale** (50-200 stars) -- quads/polygons only needed for dense fields or blind solving; ASTAP supports both triangles and quads, noting quads work best for uniqueness
 - **Soft deringing matches PixInsight exactly** -- previously the biggest gap, now resolved
 - **No critical bugs found across any submodule** -- all issues are improvements, not correctness failures
-- **Most impactful open improvement**: use actual FMA intrinsics in Lanczos3 SIMD kernel (interpolation/warp/sse.rs)
+- **Most impactful open improvement**: generic incremental stepping for Lanczos2/4/Bicubic (~38% estimated speedup for non-Lanczos3 methods)
 - **K-d tree is solid** -- no bugs, appropriate for our scale, only potential improvement is L-infinity search
 - **SupeRANSAC (2025) validates our approach**: their comprehensive evaluation found MAGSAC++ achieves "the best trade-off in terms of average model accuracy and robustness to parameter choices" -- the same scorer we use
 - **Multi-pass tolerance** (starmatch 2024) is a potentially useful refinement not yet implemented
@@ -152,7 +152,7 @@ Umeyama 1991, Shupe et al. 2005 (SIP standard), starmatch (PyPI 2025).
 | triangle/ | All correct | Tight default tolerance (0.01), excessive triangles at k=20 | Benchmark k=8-10 |
 | ransac/ | All 5 estimators verified, MAGSAC++ correct (confirmed by SupeRANSAC 2025) | LO buffer replacement, dead_code annotations | Fix LO buffer |
 | distortion/ | SIP direction/coords/solver all correct, TPS correct | No inverse SIP, no fit diagnostics, TPS not integrated | Add fit quality return |
-| interpolation/ | All kernels correct, deringing matches PixInsight | SIMD kernel doesn't use FMA, duplicate bilinear | Use actual FMA intrinsics |
+| interpolation/ | All kernels correct, deringing matches PixInsight | Duplicate bilinear, no generic incremental stepping | Generic incremental stepping |
 | spatial/ | No bugs found, all algorithms textbook correct | None (minor: could add L-inf radius search) | L-infinity radius search |
 
 ## Detailed Analysis: What We Have vs What Industry Tools Offer
@@ -216,7 +216,9 @@ stability with large coordinate ranges.
 avg-distance normalization. No inverse polynomial (AP/BP), no FITS I/O.
 
 **Siril SIP**: Since v1.3, applies SIP correction before linear transform (same direction).
-Reads from WCS headers. The correction follows the same convention we implement.
+Reads from WCS headers. Since v1.4 (Dec 2025), supports distortion correction during
+alignment using WCS SIP data with cubic SIP as default. The correction follows the same
+convention we implement.
 
 **Astrometry.net SIP**: Full A/B/AP/BP with QR solver, no normalization (raw pixel offsets).
 Higher order support (up to 9). Grid-sampled inverse fitting.
@@ -247,10 +249,9 @@ quality difference at the cost of more compute per pixel.
 **ASTAP**: Bilinear only (simpler but lower quality). 2025 update added "full implementation
 of reverse mapping with bilinear interpolation for less background noise."
 
-**Assessment**: Our interpolation is at parity with PixInsight, the gold standard. The
-main open item is using actual FMA intrinsics in the SIMD kernel (currently tagged with
-FMA target feature but uses separate mul+add). This is a performance optimization, not
-a correctness issue.
+**Assessment**: Our interpolation is at parity with PixInsight, the gold standard. FMA
+intrinsics are now used in the Lanczos3 SIMD kernel (no-dering path). The main remaining
+open item is generic incremental stepping for Lanczos2/4/Bicubic (~38% estimated speedup).
 
 ## File Map
 
@@ -287,7 +288,7 @@ a correctness issue.
 
 ### Software
 - PixInsight StarAlignment (polygon descriptors, TPS distortion, soft Lanczos clamping)
-- Siril 1.5 (triangle matching, OpenCV RANSAC, SIP since v1.3)
+- Siril 1.4.1 (triangle matching, OpenCV RANSAC, SIP since v1.3, distortion correction since v1.4)
 - Astrometry.net (quad descriptors, Bayesian verification, SIP A/B/AP/BP)
 - Astroalign (Python triangle matching, scipy k-d tree)
 - AstroPixelProcessor 2.0 (DDC distortion, Lanczos/Mitchell-Netravali, drizzle)

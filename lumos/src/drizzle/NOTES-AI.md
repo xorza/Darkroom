@@ -1,274 +1,571 @@
 # drizzle Module - Implementation Notes
 
-## Overview
-Implements Variable-Pixel Linear Reconstruction (Drizzle algorithm, Fruchter & Hook 2002,
-PASP 114:144). Takes dithered input images with geometric transforms, shrinks input pixels
-into "drops" (controlled by pixfrac), maps them onto a higher-resolution output grid
-(controlled by scale), and accumulates weighted contributions. Supports four kernels:
-Turbo, Point, Gaussian, Lanczos.
+## Module Overview
 
-## Architecture
-- `DrizzleAccumulator`: Accumulate contributions from multiple frames, then finalize
-  - `data: ArrayVec<Buffer2<f32>, 3>` -- per-channel accumulated weighted flux
-  - `weights: ArrayVec<Buffer2<f32>, 3>` -- per-channel accumulated weights
-  - `new(input_dims: ImageDimensions, config)` / `dimensions() -> ImageDimensions`
-- `DrizzleResult.coverage: Buffer2<f32>` -- normalized [0,1] coverage map
-- `add_image()` consumes `AstroImage` (owned); kernel methods borrow `&AstroImage`
-- `accumulate()` helper: shared channel iteration for all 4 kernels
-- `add_image_radial()`: unified Gaussian/Lanczos two-pass logic with closure-based `kernel_fn`
-- Turbo/Point kept separate (structurally different) but share `accumulate()`
-- No interleaved allocation -- kernel inner loops use `image.channel(c)[(ix, iy)]` directly
-- Transform via `Transform::apply(DVec2) -> DVec2` (projective, f64 precision, cast to f32)
-- Builder pattern for configuration with validation
-- `drizzle_stack()`: High-level API that loads images, applies transforms, and finalizes
-- Rayon-parallel finalization (row-parallel normalization and coverage computation)
-- Output built via `AstroImage::from_planar_channels()` (no interleaving step)
+Single-file module (`mod.rs`, ~1450 lines incl. tests) implementing Variable-Pixel Linear
+Reconstruction (the Drizzle algorithm, Fruchter & Hook 2002, PASP 114:144-152). Takes
+dithered input images with geometric transforms, shrinks input pixels into "drops" (controlled
+by `pixfrac`), maps them onto a higher-resolution output grid (controlled by `scale`), and
+accumulates weighted contributions.
 
-## Kernels
+### Architecture
 
-### Turbo (default)
-Axis-aligned rectangular drop centered on the transformed pixel center. Transforms only
-the center point, creates axis-aligned bounding box of size `drop_size` in output space.
-Fast and adequate when rotation between frames is small. Named "turbo" per STScI DrizzlePac
-convention -- STScI's "square" kernel uses full polygon clipping (not implemented here).
+- `DrizzleConfig`: Builder-pattern configuration (scale, pixfrac, kernel, fill_value, min_coverage)
+- `DrizzleAccumulator`: Core accumulator with per-channel `data` and `weights` buffers
+  - `data: ArrayVec<Buffer2<f32>, 3>` -- accumulated `flux * weight` per channel
+  - `weights: ArrayVec<Buffer2<f32>, 3>` -- accumulated weight per channel
+  - `add_image(image, transform, weight)` -- dispatches to kernel-specific method
+  - `accumulate()` -- shared inline helper iterating over channels
+  - `finalize()` -- normalizes `data / weights`, applies min_coverage, returns DrizzleResult
+- `DrizzleResult`: Final image + normalized [0,1] coverage map (channel 0 weights)
+- `drizzle_stack()`: High-level API loading images from paths, sequential accumulation
+- `add_image_radial()`: Unified two-pass Gaussian/Lanczos via closure-based `kernel_fn`
+- Transform via `Transform::apply(DVec2) -> DVec2` (f64 precision, supports up to Homography)
+- Rayon-parallel finalization only; accumulation is single-threaded
+- Output built via `AstroImage::from_planar_channels()` (planar, no interleaving)
 
-### Point
-Degenerate case: each input pixel contributes to exactly one output pixel (the nearest
-to the transformed center). Fastest kernel, requires very well-dithered data.
+### Kernels
 
-### Gaussian
-Gaussian droplet with FWHM equal to `pixfrac` in input pixels (= `pixfrac * scale` in
-output pixels). sigma = `drop_size / 2.3548`. Uses two-pass normalization: first computes
-total Gaussian weight across the kernel support, then distributes flux proportionally.
-DrizzlePac warns "flux conservation cannot be guaranteed" with Gaussian kernels.
+| Kernel   | Method              | Drop Shape             | Complexity per input pixel |
+|----------|---------------------|------------------------|---------------------------|
+| Turbo    | `add_image_turbo`   | Axis-aligned rectangle | O(drop_size^2) overlaps   |
+| Point    | `add_image_point`   | Delta function         | O(1) -- single pixel      |
+| Gaussian | `add_image_radial`  | Gaussian bell          | O((3*sigma)^2) two-pass   |
+| Lanczos  | `add_image_radial`  | Lanczos-3 sinc window  | O(49) two-pass (7x7)      |
 
-### Lanczos
-Lanczos-3 kernel for high-quality bandlimited interpolation. Support radius = 3 pixels.
-**Only valid at pixfrac=1.0, scale=1.0** -- a runtime warning is emitted if these
-constraints are violated. Output is clamped to `[0, +inf)` in `finalize()` to suppress
-negative ringing artifacts from the sinc lobes.
+---
 
-## Key Formulas
+## Algorithm Reference (Fruchter & Hook 2002)
 
-### Drop Size
-```rust
-let drop_size = pixfrac * scale;  // in output pixels
+### Core Equations
+
+The paper defines these key quantities (Equations 3-5):
+
+**Drop overlap weight** (Eq. 3-4):
 ```
-- `pixfrac` = fraction of input pixel size (0.0-1.0)
-- `scale` = output resolution multiplier (e.g., 2.0 for 2x)
-- Drop area in output pixels = `drop_size^2`
-- STScI equivalent: `pfo = pixel_fraction / pscale_ratio / 2.0` (half-width)
-  where `pscale_ratio = 1/scale`
+a_xy = overlap_area(drop, output_pixel) / drop_area
+```
+Each input pixel `i(x,y)` with per-pixel weight `w(x,y)` contributes to output pixel `I(x,y)`:
 
-### Convention Mapping: Paper vs This Codebase
+**Incremental update** (STScI `update_data_var`):
+```
+I'(x,y) = (I(x,y) * W(x,y) + s^2 * i * a * w) / (W(x,y) + a * w)
+W'(x,y) = W(x,y) + a * w
+```
 
-| Paper (STScI)        | This codebase    | Relationship            |
-|----------------------|------------------|-------------------------|
-| s (scale)            | 1/scale          | s_paper = 1/scale_code  |
-| p (pixfrac)          | pixfrac          | Same                    |
-| Drop in output px    | p/s = pixfrac * scale | Same formula      |
-| pscale_ratio (code)  | 1/scale          | pscale_ratio = s_paper  |
+Where:
+- `s` = output pixel size / input pixel size ratio = `1/scale` (our convention: `s = pscale_ratio`)
+- `p` = pixfrac (drop linear fraction of input pixel)
+- `a` = fractional overlap area between the drop and the output pixel
+- `w` = per-pixel input weight (exposure time * inverse variance)
+- `s^2` factor converts counts to surface brightness (for photon-counting detectors)
 
-### Weight Accumulation
-Two-pass approach: accumulate `data += flux * weight` and `weights += weight`, then in
-finalize compute `output = data / weight`. Algebraically equivalent to STScI single-pass
-incremental formula `I' = (I*W + i*a*w) / (W + a*w)` for the expected frame counts in
-amateur astrophotography (tens to hundreds).
+**Drop size in output pixels**: `drop = p / s = pixfrac * scale`
 
-### min_coverage
-Compared against normalized weight: `weight_threshold = min_coverage * max_weight`.
-Coverage map uses channel 0 weight as representative (all channels have identical
-geometric overlap). Normalized to [0, 1] in the output.
+**This codebase uses two-pass accumulation** (algebraically equivalent for typical frame counts):
+```
+data  += flux * pixel_weight
+weight += pixel_weight
+output = data / weight       (in finalize)
+```
 
-## STScI Reference Implementation (cdrizzlebox.c)
+### Convention Mapping
 
-### Core Accumulation (update_data_var)
+| Paper / STScI C code         | This codebase       | Relationship              |
+|------------------------------|---------------------|---------------------------|
+| `s` (pscale_ratio)           | `1.0 / scale`       | Reciprocal                |
+| `p` (pixel_fraction)         | `pixfrac`           | Same                      |
+| Drop in output px: `p/s`     | `pixfrac * scale`   | Same formula              |
+| `pfo` (half-width)           | `half_drop`         | `pixfrac * scale / 2`    |
+| `ac` = `1/p^2`               | `inv_area`          | `1 / drop_size^2`        |
+| `dover_scale` = `ac * s^2`   | `inv_area`          | Same (since `ac*s^2 = 1/(p*1/s)^2 = 1/drop_size^2`) |
+| `iscale` = `s^2`             | Not applied          | See s^2 discussion below  |
+
+---
+
+## Industry Standard Comparison
+
+### STScI cdrizzle (Reference Implementation)
+
+Source: `cdrizzlebox.c` in [spacetelescope/drizzle](https://github.com/spacetelescope/drizzle)
+
+**Turbo kernel** (`do_kernel_turbo`):
 ```c
-// Flux: weighted incremental average
+pfo = pixel_fraction / pscale_ratio / 2.0;    // half-width in output pixels
+ac  = 1.0 / (pixel_fraction * pixel_fraction); // inverse drop area (input units)
+dover_scale = ac * pscale_ratio * pscale_ratio; // = 1/(pixfrac*scale)^2
+dow = over(ii, jj, xxi, xxa, yyi, yya) * dover_scale * w;
+```
+The `over()` function computes axis-aligned rectangle overlap:
+```c
+dx = MIN(xmax, i + 0.5) - MAX(xmin, i - 0.5);
+dy = MIN(ymax, j + 0.5) - MAX(ymin, j - 0.5);
+return (dx > 0 && dy > 0) ? dx * dy : 0.0;
+```
+
+**Square kernel** (`do_kernel_square`) -- NOT in our implementation:
+```c
+// Transform ALL 4 corners through geometric mapping
+interpolate_four_points(p, i, j, xin, yin, xout, yout);
+jaco = 0.5 * ((xout[1]-xout[3])*(yout[0]-yout[2]) - (xout[0]-xout[2])*(yout[1]-yout[3]));
+w = weight_scale / jaco;     // Jacobian-corrected weight
+dover = boxer(ii, jj, xout, yout);  // polygon-pixel overlap via sgarea()
+```
+The `boxer()` function computes exact quadrilateral-to-unit-square overlap using
+`sgarea()` (signed area under line segments clipped to the unit square). This is
+Sutherland-Hodgman-style polygon clipping -- NOT simple AABB intersection.
+
+**Gaussian kernel** (`do_kernel_gaussian`):
+```c
+pfo = nsig * pixel_fraction / 2.3548 / pscale_ratio;  // nsig = 2.5
+gaussian_efac = (2.3548*2.3548) * kscale2 * ac / 2.0;
+gaussian_es = gaussian_efac / M_PI;  // analytical normalization constant
+dover = gaussian_es * exp(-r2 * gaussian_efac);  // single-pass, NO normalization loop
+```
+
+**Lanczos kernel** (`do_kernel_lanczos`):
+```c
+pfo = kernel_order / pscale_ratio;  // order = 2 or 3
+// Uses precomputed LUT with delta = 0.003
+dover = lut[ix] * lut[iy];  // separable product
+```
+
+**Point kernel** (`do_kernel_point`):
+```c
+ii = nintd(ox);  jj = nintd(oy);  // nearest output pixel
+dow = get_pixel(weights, i, j) * weight_scale;
+```
+
+**Core accumulation** (`update_data_var`):
+```c
+// Incremental weighted average:
 value = (output_data[ii,jj] * vc + dow * d) / (vc + dow);
-// Variance: squared-weight propagation (3 components: read, Poisson, flat)
+// Variance propagation (3 components):
 var_new = (old_var * vc^2 + dow^2 * new_var) / (vc + dow)^2;
-// DQ: bitwise OR of contributing frames
+// DQ bitmask:
 output_dq |= input_dq;
 ```
 
-### Turbo Kernel (matches our implementation)
-```c
-pfo = pixel_fraction / pscale_ratio / 2.0;   // half-width in output pixels
-ac = 1.0 / (pixel_fraction * pixel_fraction); // inverse drop area in input pixel units
-dover_scale = ac * pscale_ratio * pscale_ratio;
-dow = over(ii, jj, xxi, xxa, yyi, yya) * dover_scale * w;
+### Siril (v1.4+)
+
+Source: [GitLab free-astro/siril](https://gitlab.com/free-astro/siril)
+
+- Replaced simplified drizzle with full HST-style algorithm in v1.4.0
+- Supports 6 kernels: point, turbo, **square** (default), gaussian, lanczos2, lanczos3
+- Square kernel is default; uses polygon clipping like STScI
+- CFA/Bayer drizzle: routes raw CFA pixel to appropriate RGB channel based on CFA position
+- Per-pixel weighting via master flat
+- Lanczos restricted to scale=1, pixfrac=1 (same as STScI)
+- Found and fixed a bug in the original STScI drizzle code during development
+
+### PixInsight (v1.9 Lockhart)
+
+Source: [PCL DrizzleIntegrationInstance.cpp](https://github.com/PixInsight/PCL)
+
+- Kernels: **square** (default), circular, gaussian, variable-shape
+- No turbo, no point, no Lanczos
+- Variable-shape kernel: constant shape per image, kurtosis parameter varies global shape
+- Gaussian/variable-shape: grid-based numerical integration (default 16x16 = 256 samples)
+- CFA/Bayer drizzle: BayerDrizzlePrep script + DrizzleIntegration
+- "Fast Drizzle" algorithm by Roberto Sartori (2024): significantly faster than classical drizzle
+  with parallel execution; enables practical use of circular/gaussian/variable-shape kernels
+- Drop shrink factor = pixfrac (default 0.9, range 0.7-1.0 typical)
+- Integer scale factors only (2x, 3x) in typical usage
+- Adaptive thread execution optimization (v1.9.3)
+
+### Feature Comparison
+
+| Feature                      | This Code      | STScI          | Siril          | PixInsight     |
+|------------------------------|----------------|----------------|----------------|----------------|
+| **Turbo kernel**             | Yes            | Yes            | Yes            | No             |
+| **Point kernel**             | Yes            | Yes            | Yes            | No             |
+| **Gaussian kernel**          | Yes (2-pass)   | Yes (analytic) | Yes            | Yes (grid)     |
+| **Lanczos kernel**           | Lanczos-3      | Lanczos-2/3    | Lanczos-2/3    | No             |
+| **Square kernel (polygon)**  | **No**         | Yes            | Yes (default)  | Yes (default)  |
+| **Circular kernel**          | No             | No             | No             | Yes            |
+| **Variable-shape kernel**    | No             | No             | No             | Yes            |
+| **Per-pixel input weights**  | **No**         | Yes            | Flat-based     | Via II process |
+| **Variance/error output**    | **No**         | 3-component    | No             | No             |
+| **Context/contribution map** | No             | Yes (bitmask)  | Rejection maps | Rejection maps |
+| **Coverage map**             | Yes            | Yes            | No             | Yes            |
+| **CFA/Bayer drizzle**        | **No**         | N/A (HST)      | Yes            | Yes            |
+| **Jacobian correction**      | **No**         | Yes (per-pixel)| Yes            | Yes (splines)  |
+| **Parallel accumulation**    | **No**         | No             | Unknown        | Fast Drizzle   |
+| **Scale range**              | Any f32        | Continuous     | 0.1-3.0        | Typically int  |
+
+---
+
+## Kernel Correctness Analysis
+
+### Turbo Kernel -- CORRECT
+
+Matches STScI `do_kernel_turbo` exactly:
+- Transforms only center point: `transform.apply(DVec2(ix+0.5, iy+0.5))`
+- Drop is axis-aligned rectangle of size `drop_size = pixfrac * scale` output pixels
+- Overlap via `compute_square_overlap()` -- identical to STScI `over()` function
+- Weight: `overlap * inv_area` where `inv_area = 1/drop_size^2` = STScI `dover_scale`
+- Correctly ignores rotation (by design -- that is the turbo approximation)
+
+**Verified**: `dover_scale = ac * pscale_ratio^2 = (1/p^2) * (1/scale)^2 = 1/(p*scale)^2 = inv_area`
+
+### Point Kernel -- CORRECT
+
+Matches STScI `do_kernel_point`:
+- Maps center to `floor(transformed * scale)` -- nearest output pixel
+- Full frame weight applied to single pixel
+- Correctly checks bounds before accumulation
+
+### Gaussian Kernel -- CORRECT (different approach, same result)
+
+**Difference from STScI**: Two-pass normalization vs analytical constant.
+
+Our approach:
+```rust
+// Pass 1: total_weight = sum(gauss(dx, dy)) over support
+// Pass 2: pixel_weight = weight * gauss(dx, dy) / total_weight
 ```
 
-### Gaussian Kernel (differs from ours)
+STScI approach:
 ```c
-// STScI: analytical normalization with pi-based constant
-pfo = nsig * pixel_fraction / 2.3548 / pscale_ratio;  // nsig = 2.5 (wider support)
-gaussian_efac = (2.3548^2) * kscale2 * ac / 2.0;
-gaussian_es = gaussian_efac / M_PI;
-dover = gaussian_es * exp(-r2 * gaussian_efac);  // single-pass, no normalization loop
-// Ours: per-pixel normalization (two-pass, sum of Gaussian weights = 1.0)
+gaussian_es = gaussian_efac / M_PI;  // analytical normalization
+dover = gaussian_es * exp(-r2 * gaussian_efac);  // no normalization loop
 ```
 
-### Square Kernel (NOT implemented)
+**Analysis**: Both are correct. Our approach is more accurate near image borders where the
+Gaussian support is clipped (adaptive normalization ensures weights sum to 1.0 even with
+truncated support). STScI is faster (single pass) but allows small flux leaks at borders.
+For interior pixels, results are identical to machine precision.
+
+**Support radius difference**: Our `ceil(3 * sigma)` vs STScI `nsig=2.5` sigma. Our support
+is ~20% wider, which captures more of the Gaussian tail (99.7% vs 98.8%). Negligible impact.
+
+**FWHM parameter**: Both use `FWHM = pixfrac * scale` (in output pixels), converted via
+`sigma = FWHM / 2.3548`. Correct.
+
+### Lanczos Kernel -- CORRECT (with appropriate constraints)
+
+Matches STScI `do_kernel_lanczos` with separable Lanczos-3:
+- `lanczos_kernel(x, a)` = `sinc(x) * sinc(x/a)` for |x| < a, else 0
+- Singularity at x=0 handled: returns 1.0 (correct limit)
+- Symmetry: f(x) = f(-x) -- verified in tests
+- Support: radius = 3 pixels (Lanczos-3, `a = 3.0`)
+- Two-pass normalization ensures sum of weights = 1.0 (same approach as Gaussian)
+- Output clamped to [0, +inf) in `finalize()` to suppress negative ringing
+
+**STScI uses LUT** (`lut_delta = 0.003`) instead of computing sin/cos per pixel. Our approach
+computes the kernel analytically, which is slower but more precise. For typical Lanczos use
+(scale=1, pixfrac=1), the 7x7 kernel per pixel makes this a minor difference.
+
+**Warning vs assertion**: Our code warns on Lanczos with pixfrac!=1.0 or scale!=1.0 but
+does not prevent it. STScI docs state it "should never be used" outside these constraints.
+
+### Rectangle Overlap (`compute_square_overlap`) -- CORRECT
+
+Exact match to STScI `over()`:
+```rust
+// Ours:
+x_overlap = min(ax2, bx2) - max(ax1, bx1)  // clamped to 0
+y_overlap = min(ay2, by2) - max(ay1, by1)
+area = x_overlap * y_overlap
+
+// STScI:
+dx = MIN(xmax, i + 0.5) - MAX(xmin, i - 0.5)
+dy = MIN(ymax, j + 0.5) - MAX(ymin, j - 0.5)
+area = dx * dy
+```
+Our function takes explicit rectangle bounds; STScI `over()` takes pixel index and implicitly
+constructs [i-0.5, i+0.5] x [j-0.5, j+0.5]. Mathematically identical.
+
+### Weight Accumulation -- CORRECT
+
+Two-pass accumulation (`data += flux * w; weights += w; output = data / weights`) is
+algebraically equivalent to STScI's incremental formula for any number of frames:
+```
+STScI: I' = (I*W + d*dow) / (W + dow)
+Ours:  I  = sum(d_k * dow_k) / sum(dow_k)
+```
+Both compute the weighted mean. Our approach avoids division per pixel during accumulation
+(slightly faster inner loop) and avoids numerical issues when W is very small in early frames.
+
+### The s^2 Factor -- INTENTIONALLY OMITTED (correct for our use case)
+
+The paper's Equation 5 includes `s^2` (`iscale` in STScI code) to convert photon counts to
+surface brightness when changing pixel scale. Our images are pre-normalized floating-point
+surface brightness values (not raw photon counts), so dividing by accumulated weights in
+`finalize()` already preserves surface brightness correctly. This is standard practice in
+amateur astrophotography software (Siril, DeepSkyStacker, etc.).
+
+---
+
+## Missing Features (with severity)
+
+### P1 (Critical): Per-Pixel Input Weights / Bad Pixel Masks
+
+**What**: Per-pixel weight map `w(x,y)` multiplied into the contribution weight. Allows
+masking bad pixels (hot/dead/cosmic rays), satellite trails, and weighting by flat field.
+
+**Impact**: Without this, a single hot pixel or cosmic ray hit contributes fully to the
+output, creating artifacts. All competing tools support this:
+- STScI: `get_pixel(p->weights, i, j)` -- full 2D weight map
+- Siril: master flat weighting
+- PixInsight: via ImageIntegration rejection + weight maps
+
+**Implementation**: Add `Option<&Buffer2<f32>>` parameter to `add_image()`. Multiply
+`pixel_weight *= input_weight_map[(ix, iy)]` in `accumulate()`. Minimal code change.
+
+### P2 (Important): True Square Kernel (Polygon Clipping)
+
+**What**: Transform all 4 corners of each input pixel, compute exact quadrilateral-to-pixel
+overlap via polygon clipping (STScI's `boxer()` / `sgarea()`).
+
+**Impact**: Turbo kernel ignores rotation and shear. For rotation > ~1-2 degrees, the
+axis-aligned approximation introduces systematic errors in overlap computation. The square
+kernel is the default in both STScI and Siril for good reason.
+
+**Implementation**: Port STScI `sgarea()` and `boxer()` functions (well-documented, ~80 lines
+of C). Add `DrizzleKernel::Square` variant. Transform 4 corners per input pixel via
+`transform.apply()`. Compute Jacobian from the 4 transformed corners for weight correction.
+
+### P2 (Important): Jacobian / Geometric Distortion Correction
+
+**What**: For non-affine transforms (homography, SIP distortion), the local pixel scale varies
+across the image. The weight should be scaled by `1/jacobian` to preserve surface brightness.
+
+**Impact**: Currently uses constant `drop_size` everywhere. For homography transforms with
+even modest perspective parameters, pixels near edges are magnified or compressed differently
+than center pixels. The error is proportional to the perspective distortion magnitude.
+Negligible for translation/rotation/similarity (constant Jacobian).
+
+**Implementation**: Compute Jacobian from 4 transformed corners:
+```rust
+let jaco = 0.5 * ((xout[1]-xout[3])*(yout[0]-yout[2]) - (xout[0]-xout[2])*(yout[1]-yout[3]));
+let w_corrected = weight / jaco;
+```
+Only needed when `transform_type == Homography` or SIP is present. For affine and below,
+Jacobian is constant and already absorbed into the weight.
+
+### P2 (Important): CFA/Bayer Drizzle
+
+**What**: Route raw CFA pixels directly to the appropriate RGB channel in the output based
+on the Bayer/X-Trans CFA pattern position, bypassing demosaicing entirely.
+
+**Impact**: Eliminates demosaicing artifacts, improves color accuracy, particularly valuable
+for one-shot-color (OSC) camera users. Supported by Siril (with scale=1 pixfrac=1
+recommended), PixInsight (BayerDrizzlePrep), DeepSkyStacker, and AstroPixelProcessor.
+
+**Implementation**: Add CFA pattern parameter to `add_image()`. Map each raw pixel's CFA
+color to the corresponding output channel index. Requires CFA pattern knowledge from the
+image metadata.
+
+### P3 (Nice-to-have): Context / Contribution Image
+
+**What**: 32-bit bitmask (or count) per output pixel recording which input frames contributed.
+
+**Impact**: Useful for identifying artifacts, estimating errors, debugging alignment issues.
+Standard STScI output. Less critical for amateur astrophotography.
+
+**Implementation**: Add `context: Buffer2<u32>` to accumulator. Set bit `i` when frame `i`
+contributes. Return in `DrizzleResult`.
+
+### P3 (Nice-to-have): Variance / Error Output
+
+**What**: Propagate variance through the drizzle weighted averaging using squared weights.
+
+**STScI formula**:
 ```c
-// Transform ALL 4 corners through geometric mapping
-jaco = 0.5 * ((xout[1]-xout[3])*(yout[0]-yout[2]) - (xout[0]-xout[2])*(yout[1]-yout[3]));
-w = weight_scale / jaco;  // Jacobian-corrected weight
-dover = boxer(ii, jj, xout, yout);  // polygon-pixel overlap via sgarea()
+var_new = (old_var * vc^2 + dow^2 * input_var) / (vc + dow)^2
 ```
 
-### Jacobian / pscale_ratio Computation
-```c
-// Estimated from transformation determinant at polygon centroid
-pscale_ratio = sqrt(|cd11*cd22 - cd12*cd21|);
+**Impact**: Required for scientific photometry with proper error bars. Not typically used in
+amateur astrophotography workflows. Would require switching to incremental accumulation
+(STScI style) or storing additional variance buffers.
+
+### P3 (Nice-to-have): Parallel Accumulation
+
+**What**: Currently `add_image_*` loops over all input pixels sequentially.
+
+**Impact**: For large images (6000x4000 with scale=2 -> 12000x8000 output), the inner loop
+processes 24M input pixels per frame. With turbo kernel touching ~4 output pixels each, this
+is ~96M accumulations per frame. At ~10ns each, ~1 second per frame -- acceptable for
+tens of frames but slow for hundreds.
+
+**Options** (ordered by implementation ease):
+1. **Row-parallel input**: Process input rows in parallel, each row writes to different output
+   rows (slight overlap at drop boundaries needs synchronization)
+2. **Per-thread accumulators**: Clone accumulator per thread, merge after each frame.
+   2x memory but trivially correct. Best for small frame counts.
+3. **Tile-based parallelism**: Divide output into tiles, process input pixels per tile.
+   Complex but optimal for large images.
+4. **Output-pixel parallel** (PixInsight Fast Drizzle approach): For each output pixel,
+   find all contributing input pixels. Inverts the loop direction. Natural parallelism
+   but requires inverse transform and spatial indexing.
+
+### P4 (Minor): Lanczos Constraint Enforcement
+
+**What**: Currently warns but allows Lanczos with pixfrac != 1.0 or scale != 1.0.
+
+**Impact**: Output is mathematically questionable but not catastrophically wrong. STScI docs:
+"should never be used for pixfrac != 1.0, and is not recommended for scale != 1.0."
+
+**Implementation**: Change `tracing::warn!` to `assert!` in `add_image()`, or make it a
+configuration-time validation in `DrizzleConfig::with_kernel()`.
+
+---
+
+## Performance Opportunities
+
+### SIMD Vectorization (Turbo Kernel)
+
+The turbo kernel inner loop iterates over output pixels within the drop footprint, computing
+axis-aligned rectangle overlap and accumulating weighted flux. For each input pixel:
+
+```rust
+for oy in oy_min..oy_max {
+    for ox in ox_min..ox_max {
+        let overlap = compute_square_overlap(...);
+        if overlap > 0.0 {
+            pixel_weight = weight * overlap * inv_area;
+            accumulate(image, ix, iy, ox, oy, pixel_weight);
+        }
+    }
+}
 ```
 
-## Comparison with Other Tools
+**Opportunity**: The typical drop (pixfrac=0.8, scale=2) spans ~2x2 output pixels. The
+overlap computation is 4 min/max + 2 multiplies -- very cheap scalar. SIMD gains would come
+from processing multiple input pixels simultaneously (vectorizing the outer `ix` loop), but
+the variable output footprint and scattered writes make this challenging.
 
-| Feature | Us | STScI | Siril | PixInsight |
-|---------|-----|-------|-------|------------|
-| **Turbo kernel** | Yes | Yes | Yes | No |
-| **Point kernel** | Yes | Yes | Yes | No |
-| **Gaussian kernel** | Yes (2-pass) | Yes (analytical) | Yes | Yes |
-| **Lanczos kernel** | Lanczos-3 | Lanczos-2/3 | Lanczos-2/3 | No |
-| **Square kernel** | No | Yes | Yes | Yes |
-| **Circular kernel** | No | No | No | Yes |
-| **Variable-shape** | No | No | No | Yes |
-| **Per-pixel weights** | No | Yes | Flat-based | Via ImageIntegration |
-| **Variance output** | No | 3-component | No | No |
-| **Context image** | No | Yes (bitmask) | Rejection maps | Rejection maps |
-| **Coverage map** | Yes | Yes | No | Yes (normalized) |
-| **CFA/Bayer drizzle** | No | N/A | Yes | Yes |
-| **Jacobian correction** | No | Yes (per-pixel) | Unknown | Yes (splines) |
-| **Scale range** | Any f32 | Continuous | 0.1-3.0 | Integer (2x, 3x) |
-| **Parallel accumulation** | No | No | Unknown | Fast Drizzle (Sartori) |
+**Better target**: Vectorize the `accumulate()` function for multi-channel (RGB) images.
+Currently iterates channels with `zip`. For 3 channels, could use SSE to process all 3
+simultaneously (load flux[3], multiply by weight, add to data[3], add weight to weights[3]).
 
-## What's Correct
+### Row-Parallel Accumulation
 
-- **Turbo kernel**: Correct axis-aligned drop, drop_size = pixfrac * scale, inv_area normalization
-- **Point kernel**: Correct nearest-pixel contribution at transformed center
-- **Gaussian kernel**: Correct FWHM = pixfrac * scale, sigma = FWHM / 2.3548
-- **Lanczos kernel**: Correct sinc-windowed Lanczos-3 formula, singularity handling at x=0
-- **Rectangle overlap**: Correct AABB intersection (matches STScI `over()` function)
-- **Two-pass weighted normalization**: Correct weighted-mean formula (data/weight), algebraically
-  equivalent to STScI incremental formula for typical frame counts
-- **min_coverage**: Correctly compared against normalized weight (fraction of max_weight)
-- **Coverage map**: Per-spatial-pixel (channel 0), correctly normalized to [0, 1]
-- **Output dimensions**: Correct: `ceil(input_dim * scale)`
-- **Finalize**: Row-parallel via rayon, Lanczos clamping to [0, +inf)
+The simplest performance win: parallelize the outer `iy` loop with rayon. Each input row's
+drops typically land on different output rows (at most overlapping by `drop_size` rows with
+neighboring input rows).
 
-## What Differs from Reference
+**Approach**: Use `par_iter()` over input rows. Each thread needs its own mutable accumulator
+slice, or use atomic f32 (available via `AtomicU32` with `f32::to_bits/from_bits` CAS loops).
+Alternatively, partition output rows into non-overlapping bands and process corresponding
+input rows in parallel.
 
-### Gaussian Normalization Approach
-**Our approach**: Two-pass -- first sum all Gaussian weights in support, then distribute
-flux proportionally (`pixel_weight = weight * gauss / total_gauss`). Ensures weights sum
-to 1.0 per input pixel.
+**Estimated speedup**: Near-linear with core count for the accumulation phase. Currently
+accumulation is 100% of `add_image` time.
 
-**STScI approach**: Single-pass with analytical normalization constant
-`gaussian_es = gaussian_efac / PI`. Does not explicitly normalize to 1.0. Faster (one pass)
-but less numerically precise near image borders where support is truncated.
+### LUT for Lanczos Kernel
 
-**Impact**: Both produce correct results for interior pixels. Ours is more accurate near
-borders (adaptive normalization), STScI is faster. Effectively equivalent for practical use.
+STScI uses a precomputed lookup table (`lut_delta = 0.003`) for Lanczos kernel values.
+Our implementation computes `sin()` analytically per pixel. For Lanczos-3 with radius=3,
+each input pixel touches up to 49 output pixels, requiring 14 sin() calls (7 x-values + 7
+y-values, separable). A LUT would reduce this to 14 table lookups.
 
-### Gaussian Support Radius
-**Ours**: `radius = ceil(3 * sigma)` where sigma = drop_size / 2.3548
-**STScI**: `pfo = nsig * pixel_fraction / 2.3548 / pscale_ratio` with nsig = 2.5
-STScI also has minimum floor: `pfo = max(pfo, 1.2 / pscale_ratio)`.
-**Impact**: Our support may be slightly wider (3-sigma vs 2.5-sigma). Minor.
+**Estimated speedup**: ~3-5x for Lanczos kernel specifically (sin() is ~20 cycles, table
+lookup is ~4 cycles with L1 hit).
 
-### Turbo Kernel Weight Scale
-**Ours**: `pixel_weight = weight * overlap * inv_area` where `inv_area = 1/(drop_size^2)`
-**STScI**: `dow = over() * dover_scale * w` where `dover_scale = ac * pscale_ratio^2`
-  = `(1/pixfrac^2) * (1/scale)^2` = `1/(pixfrac*scale)^2` = `1/drop_size^2`
-**Impact**: Identical formula. Confirmed equivalent.
+### Finalization Already Parallel
 
-### No s^2 Surface Brightness Factor
-The paper's Equation 5 includes an explicit `s^2` factor (s = output/input pixel size ratio)
-to conserve surface brightness for count-based (photon counting) images. STScI implements
-this via `iscale` parameter: `d = pixel_value * iscale`. Our code does NOT include `s^2`
-because input images are already normalized surface brightness (f32 values), and we divide
-by accumulated weights in finalize. This is correct for amateur astrophotography with
-normalized images but would be wrong for raw photon-count images.
+The `finalize()` method uses `par_chunks_mut` for row-parallel normalization and
+`par_iter_mut` for coverage normalization. This is already optimal.
 
-## Missing Features (Priority Order)
+---
 
-### P1: Per-Pixel Input Weights / Bad Pixel Masks
-Only scalar weight per frame. Cannot mask bad/hot/dead pixels, cosmic rays, satellite
-trails. STScI, Siril, and PixInsight all accept per-pixel weight maps. Critical for
-real-world astrophotography data quality.
+## Recommendations
 
-### P2: True Square Kernel (Polygon Clipping)
-Current Turbo kernel is axis-aligned approximation. True Square kernel transforms all
-4 corners and computes polygon-polygon overlap. Implemented in STScI and Siril. Important
-when rotation between frames exceeds ~1 degree. Requires Sutherland-Hodgman clipping.
+### Short-term (correctness/quality)
 
-### P2: Jacobian / Geometric Distortion Correction
-Constant `drop_size` for all pixels. For non-affine transforms (homography) with spatially
-varying magnification, should compute local Jacobian: weight = overlap / jaco. STScI uses
-`jaco = 0.5*((x1-x3)*(y0-y2) - (x0-x2)*(y1-y3))` from 4 transformed corners.
-Correct for translation/rotation/similarity (constant Jacobian).
+1. **Add per-pixel weight map support** (P1) -- most impactful quality improvement. Without
+   bad pixel masking, real-world results will have artifacts.
 
-### P2: CFA/Bayer Drizzle
-Raw CFA pixels used directly without debayering, filling RGB grid via dithering offsets.
-Reduces debayering artifacts and improves color rendering. Supported by Siril, PixInsight,
-DSS, and APP. Important for OSC camera users.
+2. **Enforce Lanczos constraints** (P4) -- trivial change, prevents user confusion.
 
-### P3: Context/Contribution Image
-32-bit bitmask of contributing frames per output pixel. Useful for identifying artifacts,
-error estimation, and debugging alignment. STScI standard output.
+3. **Add Lanczos-2 option** -- simple parameter change (`a = 2.0` instead of `a = 3.0`),
+   matches Siril/STScI option set. Lanczos-2 is faster (5x5 vs 7x7) and often sufficient.
 
-### P3: Variance/Error Output
-STScI/JWST propagates 3 variance components (read noise, Poisson, flat) using squared
-weights: `var_new = (old_var * w^2 + new_var * dow^2) / (w + dow)^2`. Produces error
-image as sqrt(sum of variances). Important for scientific photometry.
+### Medium-term (feature parity)
 
-### P3: Parallel Accumulation
-`add_image_*` loops are single-threaded. Options: per-thread accumulators (2x memory),
-atomic operations (slow for f32), or output-pixel-parallel with conflict avoidance.
-PixInsight's Fast Drizzle (Sartori, 2024) achieved significant speedup.
+4. **Implement Square kernel** (P2) -- port STScI `sgarea()` + `boxer()` (~80 lines).
+   Make it the default kernel, matching STScI and Siril. Demote Turbo to "fast" option.
 
-### P4: Lanczos Constraint Enforcement
-Currently warns but doesn't error on Lanczos with pixfrac != 1.0 or scale != 1.0.
-Should assert at config time since output is mathematically invalid.
+5. **Add Jacobian correction** (P2) -- needed for homography transforms. Only ~10 lines
+   of additional code per kernel, but requires transforming 4 corners per input pixel.
+
+6. **Row-parallel accumulation** (P3) -- biggest performance win with minimal complexity.
+   Use rayon `par_iter()` over input rows with atomic accumulation or band partitioning.
+
+### Long-term (advanced)
+
+7. **CFA/Bayer drizzle** (P2) -- significant feature for OSC camera users.
+
+8. **Variance propagation** (P3) -- needed for scientific photometry. May require switching
+   to incremental accumulation (STScI style) for numerical stability with variance.
+
+9. **SIMD for multi-channel accumulate** -- minor gain for RGB, bigger gain if extended to
+   process multiple input pixels per iteration.
+
+---
 
 ## Design Notes
 
 ### Two-Pass vs Incremental Accumulation
-STScI uses single-pass incremental: `I' = (I*W + i*a*w) / (W + a*w)`. We accumulate
-`data += flux * weight` and `weights += weight`, then divide. Both are algebraically
-equivalent. Two-pass avoids division per-pixel during accumulation (faster inner loop)
-and avoids numerical issues when W is very small. For N < ~1000 frames (typical amateur),
-no precision difference. The STScI approach uses less memory for variance (no separate
-data/weight arrays needed), but we don't implement variance yet.
+
+STScI uses single-pass incremental: `I' = (I*W + i*dow) / (W + dow)`. We accumulate
+`data += flux * weight` and `weights += weight`, then divide in `finalize()`.
+
+Both are algebraically equivalent. Our approach:
+- Avoids division per-pixel during accumulation (faster inner loop)
+- Avoids numerical issues when W is very small (early frames)
+- Requires 2x memory (separate data + weights buffers)
+- Cannot do incremental variance propagation (would need STScI approach for that)
+
+For N < ~1000 frames (typical amateur astrophotography), there is no precision difference.
 
 ### Correlated Noise
-Drizzle output has correlated noise between adjacent pixels. The noise correlation ratio R
-depends on pixfrac (p) and scale (s). For p=0.6, s=0.5: R=1.662. Weight maps should be
-used for proper photometric error estimation. Not currently tracked or warned about.
+
+Drizzle output has correlated noise between adjacent pixels. The noise correlation depends
+on pixfrac and scale. Smaller pixfrac reduces correlation but increases noise. Weight maps
+should be used for proper photometric error estimation, not simple pixel statistics.
+
+Key relationships:
+- `pixfrac=1.0`: maximum correlation (shift-and-add equivalent)
+- `pixfrac->0`: minimum correlation but requires perfect dithering coverage
+- `pixfrac=0.8, scale=2`: reasonable balance for 4+ frame dithers
+- Fewer than ~15 frames with small pixfrac risks "dry" (uncovered) output pixels
 
 ### When NOT to Drizzle
+
 - Images already well-sampled (FWHM > 2-3 pixels): noise penalty without resolution gain
-- Fewer than ~15 frames: insufficient dithering coverage
-- Without sub-pixel dithering: grid-aligned frames produce no benefit
+- Fewer than ~15 frames: insufficient dithering coverage for small pixfrac
+- Without sub-pixel dithering: grid-aligned frames produce checkerboard artifacts
 - Large rotations (>5 degrees) with Turbo kernel: use Square kernel instead
 
+---
+
 ## Dependencies
-- `Transform`: 6 types (Translation through Homography), f64 precision `apply(DVec2)`
-- `AstroImage`: Planar storage, `channel(c) -> &Buffer2<f32>`, owned consumption
-- `Buffer2<T>`: Row-major `y * width + x`, `get_mut(x, y)` for accumulation
-- `drizzle_stack` exported from lumos crate but no external callers yet
+
+- `Transform`: 6 types (Translation, Euclidean, Similarity, Affine, Homography, Auto),
+  f64 precision `apply(DVec2) -> DVec2`. Homography includes perspective division.
+- `AstroImage`: Planar f32 storage, `channel(c) -> &Buffer2<f32>`, `from_planar_channels()`
+- `Buffer2<T>`: Row-major `[(x, y)]` indexing = `y * width + x`, `get_mut(x, y)` returns `&mut T`
+- `ArrayVec<Buffer2<f32>, 3>`: Fixed-capacity per-channel storage (max RGB = 3)
+- `rayon`: Row-parallel finalization
+- `drizzle_stack()` is the public API; `DrizzleAccumulator` is also public for manual use
 
 ## References
-- Fruchter & Hook 2002, PASP 114:144-152 -- Original drizzle paper (arXiv: astro-ph/9808087)
+
+- Fruchter & Hook 2002, PASP 114:144-152 -- [Original drizzle paper](https://arxiv.org/abs/astro-ph/9808087)
 - Fruchter 2011, PASP 123:497-502 -- iDrizzle: iterative band-limited imaging
 - STScI DrizzlePac Handbook -- https://hst-docs.stsci.edu/drizzpac
 - STScI drizzle C library (cdrizzlebox.c) -- https://github.com/spacetelescope/drizzle
 - STScI DrizzlePac kernel docs -- https://drizzlepac.readthedocs.io/en/latest/drizzlepac_api/adrizzle.html
 - JWST Resample step -- https://jwst-pipeline.readthedocs.io/en/stable/jwst/resample/main.html
 - Siril drizzle docs -- https://siril.readthedocs.io/en/latest/preprocessing/drizzle.html
-- PixInsight DrizzleIntegration -- https://pixinsight.com/forum/index.php?threads/drizzleintegration-kernels.20837/
+- Siril GitLab -- https://gitlab.com/free-astro/siril
+- PixInsight DrizzleIntegration kernels -- https://pixinsight.com/forum/index.php?threads/drizzleintegration-kernels.20837/
+- PixInsight PCL source -- https://github.com/PixInsight/PCL
 - PixInsight Fast Drizzle (Sartori 2024) -- https://www.diyphotography.net/pixinsight-1-9-lockhart-released
 - DeepSkyStacker -- https://github.com/deepskystacker/DSS
 - AstroPixelProcessor -- https://www.astropixelprocessor.com/community/tutorials-workflows/drizzle-for-mono-cameras/
+- Casertano et al. 2000, AJ 120:2747 -- Noise properties of drizzled images
+- Drizzle: A Gentle Introduction -- https://every-algorithm.github.io/2025/01/06/drizzle.html

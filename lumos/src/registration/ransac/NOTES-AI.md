@@ -290,23 +290,30 @@ Min points: 2. **Correct**.
 Minor: allocates `Vec<DVec2>` for centered points. Negligible for the
 small point sets in RANSAC (2-50 points typically).
 
-### Affine (`transforms.rs:166-249`)
+### Affine (`transforms.rs:170-260`)
 
-Solves `target = A * ref + b` via normal equations with explicit 3x3
-matrix inverse (cofactor expansion).
+Solves `target = A * ref + b` via normal equations with Hartley
+normalization and explicit 3x3 matrix inverse (cofactor expansion).
 
-System: `[sum_xx sum_xy sum_x] [a]   [sum_x_tx]`
-        `[sum_xy sum_yy sum_y] [b] = [sum_y_tx]`
-        `[sum_x  sum_y  n    ] [e]   [sum_tx  ]`
+1. **Normalize** both point sets using `normalize_points()`: translate
+   centroid to origin, scale so average distance = sqrt(2). Same
+   normalization as the homography estimator.
 
-Two systems solved (one for target x, one for target y) using the same
-inverse. Determinant check: `|det| < 1e-10`.
+2. **Solve** the 3x3 normal equations in normalized space:
+
+   System: `[sum_xx sum_xy sum_x] [a]   [sum_x_tx]`
+           `[sum_xy sum_yy sum_y] [b] = [sum_y_tx]`
+           `[sum_x  sum_y  n    ] [e]   [sum_tx  ]`
+
+   Two systems solved (one for target x, one for target y) using the same
+   inverse. Determinant check: `|det| < 1e-10`.
+
+3. **Denormalize**: `A = T_target^{-1} * A_norm * T_ref`
 
 **Comparison with OpenCV**: OpenCV uses SVD for affine estimation, which
-has better numerical conditioning (condition number kappa vs kappa^2 for
-normal equations). However, for typical star coordinate ranges (0-10000
-pixels), the normal equations approach is adequate. The 3x3 inverse is
-verified by cofactor analysis.
+avoids squaring the condition number. With Hartley normalization, the
+normal equations approach is well-conditioned for all practical
+coordinate ranges. The 3x3 inverse is verified by cofactor analysis.
 
 Min points: 3. **Correct**.
 
@@ -347,7 +354,7 @@ Min points: 4. **Correct**.
 | Translation | 2 | 1 | Average displacement | Exact |
 | Euclidean | 3 | 2 | Constrained Procrustes | Excellent |
 | Similarity | 4 | 2 | Procrustes + scale | Excellent |
-| Affine | 6 | 3 | Normal equations (3x3 inverse) | Adequate |
+| Affine | 6 | 3 | Hartley norm + normal equations (3x3 inverse) | Excellent |
 | Homography | 8 | 4 | DLT + Hartley norm + SVD | Excellent |
 
 ## Comparison with Industry Implementations
@@ -429,11 +436,10 @@ spatially well-separated, so spatial coherence constraints add nothing.
    misleading. If diagnostic-only, use `pub(crate)`.
    **Severity**: Code quality only.
 
-4. **Affine estimation uses normal equations** (`transforms.rs:212-217`):
-   Condition number squared compared to SVD approach. For extreme
-   coordinate ranges (>1e6), could lose precision. Currently mitigated by
-   the homography estimator using SVD+normalization, but the affine path
-   lacks normalization. **Severity**: Low (rare edge case).
+4. ~~**Affine estimation uses normal equations without normalization**~~ -- **FIXED**.
+   Now uses Hartley normalization (`normalize_points()` + denormalize via
+   `compose`), same pattern as the homography estimator. Condition number
+   is well-controlled for all practical coordinate ranges.
 
 ### Resolved Issues (from previous analysis)
 
@@ -461,10 +467,8 @@ IRWLS would help in scenarios with gradual inlier/outlier transition
    output parameter to `local_optimization` or use `extend_from_slice`.
    Eliminates unnecessary allocations. Effort: 15 minutes.
 
-2. **Add point normalization to affine estimation** (`transforms.rs:166`):
-   Apply Hartley-style normalization (centroid=0, avg_dist=sqrt(2)) before
-   solving normal equations, then denormalize. Improves conditioning for
-   large coordinates. Effort: 30 minutes.
+2. ~~**Add point normalization to affine estimation**~~ -- **DONE**.
+   Hartley normalization + denormalize via compose, same as homography.
 
 3. **IRWLS final polish**: After RANSAC selects the best model, run 3-5
    IRWLS iterations with sigma-marginalized weights from MAGSAC++. Would
