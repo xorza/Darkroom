@@ -228,38 +228,51 @@ mod tests {
     #[test]
     fn test_fwhm_estimation_filters_saturated() {
         // Saturated stars (peak > 0.95) are excluded
+        // 9 good stars at FWHM=3.0 + 1 saturated at FWHM=10.0
         let mut stars: Vec<Star> = (0..10).map(|_| make_good_star(3.0)).collect();
         stars[0] = make_star(10.0, 0.1, 0.3, 0.98); // Saturated with bad FWHM
 
         let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
 
-        // Should estimate ~3.0, not affected by saturated star's 10.0 FWHM
+        // All 9 good stars have FWHM=3.0, so median should be exactly 3.0
         assert!(result.fwhm.is_some());
-        assert!((result.fwhm.unwrap() - 3.0).abs() < 0.5);
+        assert!(
+            (result.fwhm.unwrap() - 3.0).abs() < 0.01,
+            "FWHM {} should be 3.0 (saturated star filtered)",
+            result.fwhm.unwrap()
+        );
     }
 
     #[test]
     fn test_fwhm_estimation_filters_high_eccentricity() {
-        // High eccentricity stars (> max_eccentricity) are excluded
+        // High eccentricity stars (> max_eccentricity=0.8) are excluded
         let mut stars: Vec<Star> = (0..10).map(|_| make_good_star(3.0)).collect();
         stars[0] = make_star(10.0, 0.9, 0.3, 0.5); // High eccentricity
 
         let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
 
         assert!(result.fwhm.is_some());
-        assert!((result.fwhm.unwrap() - 3.0).abs() < 0.5);
+        assert!(
+            (result.fwhm.unwrap() - 3.0).abs() < 0.01,
+            "FWHM {} should be 3.0 (high-ecc star filtered)",
+            result.fwhm.unwrap()
+        );
     }
 
     #[test]
     fn test_fwhm_estimation_filters_cosmic_rays() {
-        // High sharpness (cosmic rays) are excluded
+        // High sharpness (cosmic rays, sharpness >= 0.7) are excluded
         let mut stars: Vec<Star> = (0..10).map(|_| make_good_star(3.0)).collect();
         stars[0] = make_star(1.0, 0.1, 0.9, 0.5); // Cosmic ray (high sharpness)
 
         let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
 
         assert!(result.fwhm.is_some());
-        assert!((result.fwhm.unwrap() - 3.0).abs() < 0.5);
+        assert!(
+            (result.fwhm.unwrap() - 3.0).abs() < 0.01,
+            "FWHM {} should be 3.0 (cosmic ray filtered)",
+            result.fwhm.unwrap()
+        );
     }
 
     #[test]
@@ -271,23 +284,31 @@ mod tests {
 
         let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
 
+        // 8 remaining stars all at FWHM=3.0
         assert!(result.fwhm.is_some());
-        assert!((result.fwhm.unwrap() - 3.0).abs() < 0.5);
+        assert!(
+            (result.fwhm.unwrap() - 3.0).abs() < 0.01,
+            "FWHM {} should be 3.0 (invalid FWHM stars filtered)",
+            result.fwhm.unwrap()
+        );
     }
 
     #[test]
     fn test_fwhm_estimation_rejects_outliers() {
-        // Stars with FWHM far from median are rejected
+        // 10 stars at FWHM=3.0 + 2 outliers at 12.0 and 15.0
         let mut stars: Vec<Star> = (0..10).map(|_| make_good_star(3.0)).collect();
-        // Add some outliers (still valid FWHM range but far from median)
         stars.push(make_good_star(12.0));
         stars.push(make_good_star(15.0));
 
         let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
 
+        // MAD-based rejection should remove the 12.0 and 15.0 outliers
         assert!(result.fwhm.is_some());
-        // Final estimate should be close to 3.0, outliers rejected
-        assert!((result.fwhm.unwrap() - 3.0).abs() < 0.5);
+        assert!(
+            (result.fwhm.unwrap() - 3.0).abs() < 0.01,
+            "FWHM {} should be 3.0 (outliers rejected)",
+            result.fwhm.unwrap()
+        );
     }
 
     #[test]
@@ -304,15 +325,23 @@ mod tests {
 
     #[test]
     fn test_fwhm_estimation_varying_values() {
-        // FWHM values with some spread
+        // FWHM values: [2.8, 2.9, 2.9, 3.0, 3.0, 3.0, 3.1, 3.1, 3.2, 3.3]
+        // Sorted: median is average of values at indices 4,5 = (3.0+3.0)/2 = 3.0
+        // No outliers, so all 10 stars should be used
         let fwhms = [2.8, 3.0, 3.1, 3.2, 2.9, 3.3, 3.0, 3.1, 2.9, 3.0];
         let stars: Vec<Star> = fwhms.iter().map(|&f| make_good_star(f)).collect();
 
         let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
 
         assert!(result.fwhm.is_some());
-        // Median should be around 3.0
-        assert!((result.fwhm.unwrap() - 3.0).abs() < 0.2);
+        // Median of sorted [2.8, 2.9, 2.9, 3.0, 3.0, 3.0, 3.1, 3.1, 3.2, 3.3]
+        // = value at index 5 = 3.0
+        assert!(
+            (result.fwhm.unwrap() - 3.0).abs() < 0.05,
+            "FWHM {} should be ~3.0 (median of varied values)",
+            result.fwhm.unwrap()
+        );
+        assert_eq!(result.stars_used, 10, "All 10 stars should be used");
     }
 
     #[test]

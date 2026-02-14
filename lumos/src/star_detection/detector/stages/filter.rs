@@ -381,7 +381,8 @@ mod tests {
 
     #[test]
     fn test_filter_fwhm_outliers_stricter_deviation() {
-        // With stricter deviation (1.5 instead of 3.0), more stars are removed
+        // Stars: FWHM 3.0, 3.2, 3.4, ..., 4.4 (8 stars) + outliers 6.0, 7.0
+        // Strict (1.5) should remove more than loose (5.0)
         let mut stars1: Vec<Star> = (0..8)
             .map(|i| make_test_star(3.0 + (i as f32 * 0.2), 100.0 - i as f32))
             .collect();
@@ -393,9 +394,23 @@ mod tests {
         let removed_strict = filter_fwhm_outliers(&mut stars1, 1.5);
         let removed_loose = filter_fwhm_outliers(&mut stars2, 5.0);
 
+        // Reference: first 5 stars (FWHM 3.0, 3.2, 3.4, 3.6, 3.8).
+        // median = 3.4, MAD = 0.2, effective_mad = max(0.2, 0.34) = 0.34.
+        // Strict: max_fwhm = 3.4 + 1.5 * 0.34 = 3.91 → removes 4.0, 4.2, 4.4, 6.0, 7.0 = 5
+        // Loose:  max_fwhm = 3.4 + 5.0 * 0.34 = 5.10 → removes 6.0, 7.0 = 2
         assert!(
-            removed_strict >= removed_loose,
-            "Stricter deviation should remove at least as many stars"
+            removed_strict > removed_loose,
+            "Strict ({}) should remove more than loose ({})",
+            removed_strict,
+            removed_loose
+        );
+        assert_eq!(
+            removed_loose, 2,
+            "Loose should remove 2 outliers (6.0, 7.0)"
+        );
+        assert_eq!(
+            removed_strict, 5,
+            "Strict should remove 5 stars (FWHM > 3.91)"
         );
     }
 
@@ -646,16 +661,29 @@ mod tests {
 
     #[test]
     fn test_remove_duplicate_stars_many_duplicates() {
-        // Many stars clustered around one point
+        // 20 stars along x=10..19.5, y=10, spacing=0.5px, all within 8px of star[0]
+        // Star[0] at x=10 has highest flux (100), so it survives.
+        // Stars at x=10.5..19.5 are within 9.5px of star[0].
+        // All stars within 8px of any brighter star get removed.
+        // Star at x=18.0 is 8.0px from star[0] — at boundary (not removed since
+        // distance must be strictly less). But star at x=17.5 is 7.5 < 8.0 → removed.
         let mut stars: Vec<Star> = (0..20)
             .map(|i| make_star_at(10.0 + (i as f32 * 0.5), 10.0, 100.0 - i as f32))
             .collect();
 
         let removed = remove_duplicate_stars(&mut stars, 8.0);
 
-        // Many should be removed since they're within 8 pixels of each other
-        assert!(removed > 10);
-        assert!(stars.len() < 10);
+        // Star[0] (x=10.0, flux=100): kept.
+        // Stars[1..16] (x=10.5..17.5): dist < 8.0 from star[0] → removed (15 stars).
+        // Star[16] (x=18.0, flux=84): dist = 8.0 from star[0]. 8^2 = 64 is NOT < 64 → kept.
+        // Stars[17..20] (x=18.5..19.5): dist < 8.0 from star[16] → removed (3 stars).
+        // Total: 15 + 3 = 18 removed, 2 survivors.
+        assert_eq!(
+            removed, 18,
+            "Should remove 18 of 20 clustered stars, removed {}",
+            removed
+        );
+        assert_eq!(stars.len(), 2, "Star[0] and star[16] should survive");
     }
 
     #[test]

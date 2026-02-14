@@ -126,14 +126,16 @@ fn test_gaussian_convolve_preserves_total_flux() {
 
 #[test]
 fn test_gaussian_convolve_spreads_point_source() {
+    // Convolving a delta at (16,16) with Gaussian of sigma=2 should produce
+    // the Gaussian kernel itself centered at (16,16).
+    // For a 1D Gaussian: G(0) = 1/(sigma*sqrt(2pi)) ≈ 1/(2*2.5066) ≈ 0.19947
+    // For separable 2D: peak = G(0)^2 ≈ 0.03979
+    // But the kernel is discretized and normalized, so verify peak matches
+    // the product of 1D kernel center values.
     let width = 32;
     let height = 32;
     let mut pixels = vec![0.0f32; width * height];
-
-    // Point source at center
-    let cx = 16;
-    let cy = 16;
-    pixels[cy * width + cx] = 1.0;
+    pixels[16 * width + 16] = 1.0;
 
     let sigma = 2.0;
     let pixels = Buffer2::new(width, height, pixels);
@@ -141,16 +143,28 @@ fn test_gaussian_convolve_spreads_point_source() {
     let mut temp = Buffer2::new_default(width, height);
     gaussian_convolve(&pixels, sigma, &mut result, &mut temp);
 
-    // Peak should be at center but reduced
-    let peak = result[cy * width + cx];
-    assert!(peak < 1.0, "Peak should be reduced after convolution");
-    assert!(peak > 0.01, "Peak should still be significant");
+    let kernel = gaussian_kernel_1d(sigma);
+    let center_val = kernel[kernel.len() / 2];
+    // For separable convolution, peak = center_val^2
+    let expected_peak = center_val * center_val;
+    let peak = result[16 * width + 16];
+    assert!(
+        (peak - expected_peak).abs() < 1e-5,
+        "Peak {} should equal kernel center^2 = {}",
+        peak,
+        expected_peak
+    );
 
-    // Neighbors should have non-zero values
-    assert!(result[cy * width + cx + 1] > 0.0);
-    assert!(result[cy * width + cx - 1] > 0.0);
-    assert!(result[(cy + 1) * width + cx] > 0.0);
-    assert!(result[(cy - 1) * width + cx] > 0.0);
+    // Value at (17,16) = center_val * kernel[center+1] (one step in x, zero in y)
+    let one_step_val = kernel[kernel.len() / 2 + 1];
+    let expected_neighbor = center_val * one_step_val;
+    let actual_neighbor = result[16 * width + 17];
+    assert!(
+        (actual_neighbor - expected_neighbor).abs() < 1e-5,
+        "Neighbor {} should equal {} (kernel product)",
+        actual_neighbor,
+        expected_neighbor
+    );
 }
 
 #[test]
@@ -183,38 +197,42 @@ fn test_gaussian_convolve_symmetry() {
 }
 
 #[test]
-fn test_gaussian_convolve_larger_sigma_more_spread() {
+fn test_gaussian_convolve_peak_matches_kernel_product() {
+    // Verify that different sigmas produce peaks matching kernel center^2
     let width = 64;
     let height = 64;
     let mut pixels = vec![0.0f32; width * height];
     pixels[32 * width + 32] = 1.0;
 
     let pixels = Buffer2::new(width, height, pixels);
-    let mut result_small = Buffer2::new_default(width, height);
-    let mut result_large = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
-    gaussian_convolve(&pixels, 1.0, &mut result_small, &mut temp);
-    gaussian_convolve(&pixels, 3.0, &mut result_large, &mut temp);
 
-    // Larger sigma should result in lower peak
-    let peak_small = result_small[32 * width + 32];
-    let peak_large = result_large[32 * width + 32];
+    for sigma in [1.0f32, 2.0, 3.0] {
+        let mut result = Buffer2::new_default(width, height);
+        gaussian_convolve(&pixels, sigma, &mut result, &mut temp);
 
-    assert!(
-        peak_large < peak_small,
-        "Larger sigma should spread more: small={}, large={}",
-        peak_small,
-        peak_large
-    );
+        let kernel = gaussian_kernel_1d(sigma);
+        let center = kernel[kernel.len() / 2];
+        let expected_peak = center * center;
+        let actual_peak = result[32 * width + 32];
+
+        assert!(
+            (actual_peak - expected_peak).abs() < 1e-5,
+            "sigma={}: peak {} should match kernel center^2 = {}",
+            sigma,
+            actual_peak,
+            expected_peak
+        );
+    }
 }
 
 #[test]
 fn test_gaussian_convolve_edge_handling() {
+    // Point source near edge (2,2) in 16×16 image — mirror boundary should
+    // preserve total flux and maintain symmetry where possible
     let width = 16;
     let height = 16;
     let mut pixels = vec![0.0f32; width * height];
-
-    // Point source near edge
     pixels[2 * width + 2] = 1.0;
 
     let pixels = Buffer2::new(width, height, pixels);
@@ -222,17 +240,29 @@ fn test_gaussian_convolve_edge_handling() {
     let mut temp = Buffer2::new_default(width, height);
     gaussian_convolve(&pixels, 1.5, &mut result, &mut temp);
 
-    // Should not have NaN or Inf
-    for v in result.iter() {
-        assert!(v.is_finite(), "All values should be finite");
-    }
+    // No NaN or Inf
+    assert!(result.iter().all(|v| v.is_finite()));
 
-    // Corner should have some value due to mirror boundary
-    assert!(result[0] > 0.0, "Corner should receive some flux");
+    // Peak should still be at (2,2)
+    let peak = result[2 * width + 2];
+    let kernel = gaussian_kernel_1d(1.5);
+    let center = kernel[kernel.len() / 2];
+    assert!(
+        (peak - center * center).abs() < 0.02,
+        "Edge peak {} should be near kernel center^2 = {}",
+        peak,
+        center * center
+    );
+
+    // Total flux may exceed 1.0 near edges due to mirror boundary conditions
+    // (reflected virtual pixels add energy). Just verify it's positive and finite.
+    let total: f32 = result.iter().sum();
+    assert!(total > 0.0, "Total flux should be positive, got {}", total);
 }
 
 #[test]
 fn test_gaussian_convolve_non_square_image() {
+    // 64×32 non-square image with point source at (32,16)
     let width = 64;
     let height = 32;
     let mut pixels = vec![0.0f32; width * height];
@@ -245,14 +275,22 @@ fn test_gaussian_convolve_non_square_image() {
 
     assert_eq!(result.len(), width * height);
 
-    // Check it worked
+    // Peak should match kernel center^2
+    let kernel = gaussian_kernel_1d(2.0);
+    let center = kernel[kernel.len() / 2];
     let peak = result[16 * width + 32];
-    assert!(peak > 0.0 && peak < 1.0);
+    assert!(
+        (peak - center * center).abs() < 1e-5,
+        "Non-square peak {} should match kernel center^2 = {}",
+        peak,
+        center * center
+    );
 }
 
 #[test]
 fn test_gaussian_convolve_small_image() {
-    // Test with image smaller than typical kernel
+    // Uniform image smaller than kernel radius (sigma=2, radius=6, size=13)
+    // Should trigger direct 2D fallback and preserve uniform values exactly
     let width = 8;
     let height = 8;
     let pixels = Buffer2::new(width, height, vec![1.0f32; width * height]);
@@ -261,10 +299,14 @@ fn test_gaussian_convolve_small_image() {
     let mut temp = Buffer2::new_default(width, height);
     gaussian_convolve(&pixels, 2.0, &mut result, &mut temp);
 
-    // Should still work and preserve value approximately
-    for v in result.iter() {
-        assert!(v.is_finite());
-        assert!((*v - 1.0).abs() < 0.1, "Uniform should stay ~uniform");
+    // Convolution of uniform image with normalized kernel should give exactly 1.0
+    for (i, v) in result.iter().enumerate() {
+        assert!(
+            (*v - 1.0).abs() < 1e-4,
+            "Pixel {} should be 1.0, got {}",
+            i,
+            v
+        );
     }
 }
 
@@ -326,12 +368,18 @@ fn test_matched_filter_detects_star() {
         &mut temp,
     );
 
-    // Peak should be positive and significant
+    // Peak at star location should be the maximum in the image
     let peak = result[cy * width + cx];
-    assert!(peak > 0.0, "Star should show as positive peak");
-
-    // Background regions should be near zero
-    assert!(result[0].abs() < 0.01, "Background should be near zero");
+    let max_val = result.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let max_idx = result.iter().position(|&v| v == max_val).unwrap();
+    assert_eq!(
+        max_idx,
+        cy * width + cx,
+        "Maximum should be at star center ({},{})",
+        cx,
+        cy
+    );
+    assert!(peak > 0.1, "Star peak {} should be substantial", peak);
 }
 
 #[test]
@@ -766,33 +814,45 @@ fn test_elliptical_convolve_rotation_invariance() {
 
 #[test]
 fn test_elliptical_convolve_various_axis_ratios() {
+    // For a point source at (16,16), elliptical convolution should preserve flux
     let width = 32;
     let height = 32;
     let mut pixels = vec![0.0f32; width * height];
     pixels[16 * width + 16] = 1.0;
     let pixels = Buffer2::new(width, height, pixels);
 
-    for axis_ratio in [0.2, 0.4, 0.6, 0.8, 1.0] {
+    let mut peaks = Vec::new();
+    for axis_ratio in [1.0, 0.8, 0.6, 0.4, 0.2] {
         let mut result = Buffer2::new_default(width, height);
         let mut temp = Buffer2::new_default(width, height);
         elliptical_gaussian_convolve(&pixels, 2.0, axis_ratio, 0.0, &mut result, &mut temp);
 
-        // Check finite values
-        for v in result.iter() {
-            assert!(
-                v.is_finite(),
-                "All values should be finite for axis_ratio={}",
-                axis_ratio
-            );
-        }
-
-        // Check flux preservation
         let sum: f32 = result.iter().sum();
         assert!(
             (sum - 1.0).abs() < 0.01,
-            "Flux should be preserved for axis_ratio={}: {}",
+            "Flux should be 1.0 for axis_ratio={}: got {}",
             axis_ratio,
             sum
+        );
+
+        let peak = result[16 * width + 16];
+        assert!(
+            peak > 0.0,
+            "Peak should be positive for axis_ratio={}",
+            axis_ratio
+        );
+        peaks.push((axis_ratio, peak));
+    }
+
+    // Different axis ratios should produce different peaks
+    // (axis_ratio=1.0 delegates to separable gaussian_convolve)
+    for i in 1..peaks.len() {
+        assert!(
+            (peaks[i].1 - peaks[0].1).abs() > 1e-6,
+            "axis_ratio={} peak {} should differ from axis_ratio=1.0 peak {}",
+            peaks[i].0,
+            peaks[i].1,
+            peaks[0].1
         );
     }
 }

@@ -792,5 +792,160 @@ mod tests {
         assert_eq!(config.local_background, LocalBackgroundMethod::LocalAnnulus);
         assert_eq!(config.deblend_n_thresholds, 32);
         assert!((config.min_snr - 15.0).abs() < 1e-6);
+        assert_eq!(config.tile_size, 128);
+        assert!((config.sigma_threshold - 3.0).abs() < 1e-6);
+        assert!(config.auto_estimate_fwhm);
+        assert_eq!(config.min_stars_for_fwhm, 30);
+    }
+
+    #[test]
+    fn test_config_high_resolution_values() {
+        let config = Config::high_resolution();
+        assert!((config.expected_fwhm - 2.5).abs() < 1e-6);
+        assert!(config.auto_estimate_fwhm);
+        assert_eq!(config.min_area, 3);
+        assert_eq!(config.max_area, 200);
+        assert!((config.min_snr - 15.0).abs() < 1e-6);
+        assert!((config.max_eccentricity - 0.5).abs() < 1e-6);
+        assert!((config.max_roundness - 0.3).abs() < 1e-6);
+        assert!(matches!(
+            config.centroid_method,
+            CentroidMethod::GaussianFit
+        ));
+    }
+
+    #[test]
+    fn test_config_crowded_field_values() {
+        let config = Config::crowded_field();
+        assert_eq!(config.deblend_n_thresholds, 32);
+        assert_eq!(config.deblend_min_separation, 2);
+        assert!((config.deblend_min_prominence - 0.15).abs() < 1e-6);
+        assert!((config.deblend_min_contrast - 0.005).abs() < 1e-6);
+        assert!(matches!(
+            config.refinement,
+            BackgroundRefinement::Iterative { iterations: 2 }
+        ));
+        assert!((config.duplicate_min_separation - 3.0).abs() < 1e-6);
+        assert!(config.auto_estimate_fwhm);
+    }
+
+    #[test]
+    #[should_panic(expected = "max_eccentricity must be in [0, 1]")]
+    fn test_config_invalid_max_eccentricity() {
+        Config {
+            max_eccentricity: 1.5,
+            ..Default::default()
+        }
+        .validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "max_sharpness must be in (0, 1]")]
+    fn test_config_invalid_max_sharpness_zero() {
+        Config {
+            max_sharpness: 0.0,
+            ..Default::default()
+        }
+        .validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "max_roundness must be in (0, 1]")]
+    fn test_config_invalid_max_roundness_zero() {
+        Config {
+            max_roundness: 0.0,
+            ..Default::default()
+        }
+        .validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "deblend_min_prominence must be in [0, 1]")]
+    fn test_config_invalid_deblend_min_prominence() {
+        Config {
+            deblend_min_prominence: 1.5,
+            ..Default::default()
+        }
+        .validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "deblend_min_contrast must be in [0, 1]")]
+    fn test_config_invalid_deblend_min_contrast() {
+        Config {
+            deblend_min_contrast: -0.1,
+            ..Default::default()
+        }
+        .validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "fwhm_estimation_sigma_factor must be >= 1.0")]
+    fn test_config_invalid_fwhm_estimation_sigma_factor() {
+        Config {
+            fwhm_estimation_sigma_factor: 0.5,
+            ..Default::default()
+        }
+        .validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "sigma_clip_iterations must be <= 10")]
+    fn test_config_invalid_sigma_clip_iterations() {
+        Config {
+            sigma_clip_iterations: 15,
+            ..Default::default()
+        }
+        .validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "min_unmasked_fraction must be in [0, 1]")]
+    fn test_config_invalid_min_unmasked_fraction() {
+        Config {
+            min_unmasked_fraction: 1.5,
+            ..Default::default()
+        }
+        .validate();
+    }
+
+    #[test]
+    fn test_background_refinement_iterations() {
+        // BackgroundRefinement::None returns 0 iterations
+        assert_eq!(BackgroundRefinement::None.iterations(), 0);
+        // Iterative returns configured count
+        assert_eq!(
+            BackgroundRefinement::Iterative { iterations: 3 }.iterations(),
+            3
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "iterations must be > 0")]
+    fn test_background_refinement_zero_iterations() {
+        BackgroundRefinement::Iterative { iterations: 0 }.validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "iterations must be <= 10")]
+    fn test_background_refinement_too_many_iterations() {
+        BackgroundRefinement::Iterative { iterations: 11 }.validate();
+    }
+
+    #[test]
+    fn test_is_multi_threshold() {
+        // 0 = disabled → false
+        let config = Config {
+            deblend_n_thresholds: 0,
+            ..Default::default()
+        };
+        assert!(!config.is_multi_threshold());
+
+        // >= 2 → true
+        let config = Config {
+            deblend_n_thresholds: 2,
+            ..Default::default()
+        };
+        assert!(config.is_multi_threshold());
     }
 }

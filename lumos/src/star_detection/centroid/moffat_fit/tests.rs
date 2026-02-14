@@ -235,14 +235,16 @@ fn test_moffat_fit_high_noise_still_converges() {
 
 #[test]
 fn test_moffat_fit_low_snr() {
+    // Low SNR (amp=0.1, bg=0.5, SNR~0.2) - L-M should still converge
+    // but with reduced accuracy compared to high-SNR case
     let width = 21;
     let height = 21;
     let true_cx = 10.0;
     let true_cy = 10.0;
-    let true_amp = 0.1; // Low amplitude
+    let true_amp = 0.1;
     let true_alpha = 2.5;
     let true_beta = 2.5;
-    let true_bg = 0.5; // High background (SNR ~ 0.2)
+    let true_bg = 0.5;
 
     let pixels = make_moffat_stamp(
         width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
@@ -256,13 +258,19 @@ fn test_moffat_fit_low_snr() {
     };
     let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
-    // Low SNR should still produce a result (may not be accurate)
-    assert!(result.is_some());
-    let result = result.unwrap();
-    // Just verify it doesn't crash and produces finite values
-    assert!((result.pos.x as f32).is_finite());
-    assert!((result.pos.y as f32).is_finite());
-    assert!(result.alpha.is_finite());
+    // Even at low SNR, the noiseless Moffat should still be recoverable
+    let result = result.expect("Low-SNR Moffat should converge");
+    let pos_error = ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
+    assert!(
+        pos_error < 0.5,
+        "Low-SNR position error {:.3} should be < 0.5 px",
+        pos_error
+    );
+    assert!(
+        (result.alpha - true_alpha).abs() < 1.0,
+        "Low-SNR alpha error {:.3} too large",
+        (result.alpha - true_alpha).abs()
+    );
 }
 
 #[test]

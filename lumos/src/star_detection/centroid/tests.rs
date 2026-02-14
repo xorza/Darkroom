@@ -151,7 +151,9 @@ fn test_circular_star_eccentricity() {
 }
 
 #[test]
-fn test_snr_positive() {
+fn test_snr_and_flux_values() {
+    // A bright star (amplitude 0.8, sigma 2.5) on background 0.0 should have
+    // substantial SNR (>> 10) and measurable flux
     let width = 64;
     let height = 64;
     let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8);
@@ -169,8 +171,24 @@ fn test_snr_positive() {
     let star =
         measure_star(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
 
-    assert!(star.snr > 0.0, "SNR should be positive");
-    assert!(star.flux > 0.0, "Flux should be positive");
+    // Bright star with amplitude 0.8 on zero background should have high SNR
+    assert!(
+        star.snr > 50.0,
+        "Bright star SNR {} should be > 50",
+        star.snr
+    );
+    // Flux should be substantial for amplitude=0.8 Gaussian
+    assert!(
+        star.flux > 1.0,
+        "Bright star flux {} should be > 1.0",
+        star.flux
+    );
+    // Peak should be close to star amplitude
+    assert!(
+        star.peak > 0.5,
+        "Peak {} should be close to amplitude 0.8",
+        star.peak
+    );
 }
 
 // =============================================================================
