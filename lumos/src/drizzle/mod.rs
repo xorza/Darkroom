@@ -42,6 +42,11 @@ const MAX_CHANNELS: usize = 3;
 /// Drizzle kernel type for distributing flux.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DrizzleKernel {
+    /// Square kernel: true polygon clipping via Sutherland-Hodgman / Green's theorem.
+    /// Transforms all 4 corners of each input pixel drop, computes exact quadrilateral-
+    /// to-output-pixel overlap area. Correct for any transform including rotation and shear.
+    /// Reference: STScI cdrizzlebox.c `do_kernel_square` / `boxer` / `sgarea`.
+    Square,
     /// Turbo kernel: axis-aligned rectangular drop centered on the transformed pixel center.
     /// Approximation of true square kernel — always aligned with output X/Y axes regardless
     /// of rotation. Fast and adequate when rotation between frames is small. Default.
@@ -252,6 +257,9 @@ impl DrizzleAccumulator {
         }
 
         match self.config.kernel {
+            DrizzleKernel::Square => {
+                self.add_image_square(&image, transform, weight, pixel_weights, scale);
+            }
             DrizzleKernel::Turbo => {
                 self.add_image_turbo(&image, transform, weight, pixel_weights, scale, drop_size);
             }
@@ -342,6 +350,94 @@ impl DrizzleAccumulator {
 
                         if overlap > 0.0 {
                             let pixel_weight = effective_weight * overlap * inv_area;
+                            self.accumulate(image, ix, iy, ox, oy, pixel_weight);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Add image using square kernel (true polygon clipping).
+    ///
+    /// For each input pixel, transforms all 4 corners of the (pixfrac-shrunken) drop
+    /// to output coordinates, computes the Jacobian (signed area of the output
+    /// quadrilateral), then iterates output pixels in the bounding box and computes
+    /// exact overlap via `boxer()`.
+    ///
+    /// Reference: STScI cdrizzlebox.c `do_kernel_square`.
+    fn add_image_square(
+        &mut self,
+        image: &AstroImage,
+        transform: &Transform,
+        weight: f32,
+        pixel_weights: Option<&Buffer2<f32>>,
+        scale: f32,
+    ) {
+        let pixfrac = self.config.pixfrac;
+        let dh = 0.5 * pixfrac as f64;
+        let scale_f64 = scale as f64;
+        let output_width = self.width();
+        let output_height = self.height();
+        let input_width = image.width();
+        let input_height = image.height();
+
+        for iy in 0..input_height {
+            for ix in 0..input_width {
+                let pw = pixel_weights.map_or(1.0, |w| w[(ix, iy)]);
+                if pw == 0.0 {
+                    continue;
+                }
+
+                // Compute 4 corners of the shrunken drop in input space.
+                // Input pixel (ix, iy) has center at (ix+0.5, iy+0.5).
+                // Winding order: BL, BR, TR, TL (counterclockwise).
+                let cx = ix as f64 + 0.5;
+                let cy = iy as f64 + 0.5;
+                let corners_in = [
+                    DVec2::new(cx - dh, cy - dh),
+                    DVec2::new(cx + dh, cy - dh),
+                    DVec2::new(cx + dh, cy + dh),
+                    DVec2::new(cx - dh, cy + dh),
+                ];
+
+                // Transform all 4 corners to output coordinates and scale
+                let mut xout = [0.0f64; 4];
+                let mut yout = [0.0f64; 4];
+                for (k, corner) in corners_in.iter().enumerate() {
+                    let t = transform.apply(*corner);
+                    xout[k] = t.x * scale_f64;
+                    yout[k] = t.y * scale_f64;
+                }
+
+                // Jacobian: signed area of the output quadrilateral via diagonal cross product
+                let jaco = 0.5
+                    * ((xout[1] - xout[3]) * (yout[0] - yout[2])
+                        - (xout[0] - xout[2]) * (yout[1] - yout[3]));
+                let abs_jaco = jaco.abs();
+                if abs_jaco < 1e-30 {
+                    continue; // Degenerate quadrilateral
+                }
+
+                // Bounding box of the output quadrilateral
+                let xmin = xout.iter().copied().fold(f64::INFINITY, f64::min);
+                let xmax = xout.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                let ymin = yout.iter().copied().fold(f64::INFINITY, f64::min);
+                let ymax = yout.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+
+                let ox_min = (xmin.floor().max(0.0)) as usize;
+                let oy_min = (ymin.floor().max(0.0)) as usize;
+                let ox_max = (xmax.ceil().min(output_width as f64)) as usize;
+                let oy_max = (ymax.ceil().min(output_height as f64)) as usize;
+
+                let effective_weight = weight as f64 * pw as f64;
+                let w_over_jaco = effective_weight / abs_jaco;
+
+                for oy in oy_min..oy_max {
+                    for ox in ox_min..ox_max {
+                        let overlap = boxer(ox as f64, oy as f64, &xout, &yout);
+                        if overlap > 0.0 {
+                            let pixel_weight = (overlap * w_over_jaco) as f32;
                             self.accumulate(image, ix, iy, ox, oy, pixel_weight);
                         }
                     }
@@ -606,6 +702,106 @@ fn lanczos_kernel(x: f32, a: f32) -> f32 {
     let pi_x = std::f32::consts::PI * x;
     let pi_x_a = pi_x / a;
     (pi_x.sin() / pi_x) * (pi_x_a.sin() / pi_x_a)
+}
+
+/// Compute signed area between a line segment and the x-axis, clipped to the unit square
+/// [0,1]×[0,1]. Uses Green's theorem. Port of STScI `sgarea()` from cdrizzlebox.c.
+///
+/// The sign depends on the direction of traversal (left-to-right = positive).
+/// When summed over all 4 edges of a convex quadrilateral (counterclockwise winding),
+/// the total gives the overlap area between the quadrilateral and the unit square.
+#[inline]
+fn sgarea(x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+
+    // Vertical line contributes no area
+    if dx == 0.0 {
+        return 0.0;
+    }
+
+    // Determine traversal direction and sort x endpoints
+    let (sgn_dx, xlo, xhi) = if dx < 0.0 {
+        (-1.0, x2, x1)
+    } else {
+        (1.0, x1, x2)
+    };
+
+    // Segment entirely outside unit square horizontally
+    if xlo >= 1.0 || xhi <= 0.0 {
+        return 0.0;
+    }
+
+    // Clip x to [0, 1]
+    let xlo = xlo.max(0.0);
+    let xhi = xhi.min(1.0);
+
+    // Compute y at clipped x positions via line equation
+    let slope = dy / dx;
+    let ylo = y1 + slope * (xlo - x1);
+    let yhi = y1 + slope * (xhi - x1);
+
+    // Segment entirely below x-axis
+    if ylo <= 0.0 && yhi <= 0.0 {
+        return 0.0;
+    }
+
+    // Segment entirely above y=1: full rectangle contribution
+    if ylo >= 1.0 && yhi >= 1.0 {
+        return sgn_dx * (xhi - xlo);
+    }
+
+    // det = x1*y2 - y1*x2 (used for x-intercept and y=1 intercept)
+    let det = x1 * y2 - y1 * x2;
+
+    // Clip to y >= 0 (adjust x endpoint where segment crosses y=0)
+    let (xlo, ylo) = if ylo < 0.0 {
+        (det / dy, 0.0)
+    } else {
+        (xlo, ylo)
+    };
+    let (xhi, yhi) = if yhi < 0.0 {
+        (det / dy, 0.0)
+    } else {
+        (xhi, yhi)
+    };
+
+    if ylo <= 1.0 {
+        if yhi <= 1.0 {
+            // Case A: both y in [0,1] — trapezoid area
+            return sgn_dx * 0.5 * (xhi - xlo) * (yhi + ylo);
+        }
+        // Case B: enters inside, exits above y=1
+        // Split at x where y=1: xtop = (dx + det) / dy
+        let xtop = (dx + det) / dy;
+        return sgn_dx * (0.5 * (xtop - xlo) * (1.0 + ylo) + xhi - xtop);
+    }
+
+    // Case C: enters above y=1, exits inside
+    let xtop = (dx + det) / dy;
+    sgn_dx * (0.5 * (xhi - xtop) * (1.0 + yhi) + xtop - xlo)
+}
+
+/// Compute overlap area between a convex quadrilateral and an output pixel.
+///
+/// Shifts the quadrilateral so that output pixel (ox, oy) becomes the unit square
+/// [0,1]×[0,1], then sums signed areas from each edge via `sgarea()`.
+///
+/// Port of STScI `boxer()` from cdrizzlebox.c. The STScI version uses pixel-centered
+/// coordinates (pixel `(i,j)` spans `[i-0.5, i+0.5]`), but our code uses pixel-corner
+/// coordinates (pixel `(ox, oy)` spans `[ox, ox+1]`), so we shift by `ox` / `oy`
+/// directly (no 0.5 adjustment needed).
+#[inline]
+fn boxer(ox: f64, oy: f64, x: &[f64; 4], y: &[f64; 4]) -> f64 {
+    let px = [x[0] - ox, x[1] - ox, x[2] - ox, x[3] - ox];
+    let py = [y[0] - oy, y[1] - oy, y[2] - oy, y[3] - oy];
+
+    let mut sum = 0.0;
+    for i in 0..4 {
+        let j = (i + 1) & 3;
+        sum += sgarea(px[i], py[i], px[j], py[j]);
+    }
+    sum.abs()
 }
 
 /// Drizzle stack images from paths with transforms.
@@ -1761,5 +1957,915 @@ mod tests {
         let config = DrizzleConfig::x2();
         let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
         acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
+    }
+
+    // ==================== sgarea() unit tests ====================
+
+    /// Test sgarea with a horizontal segment from (0,0.5) to (1,0.5).
+    ///
+    /// This is a left-to-right segment at y=0.5 across the full unit square.
+    /// Case A (both y in [0,1]): trapezoid = 0.5 * (1-0) * (0.5+0.5) = 0.5
+    #[test]
+    fn test_sgarea_horizontal_midpoint() {
+        let area = sgarea(0.0, 0.5, 1.0, 0.5);
+        assert!((area - 0.5).abs() < 1e-12, "Expected 0.5, got {}", area);
+    }
+
+    /// Test sgarea with reversed direction: (1,0.5) to (0,0.5).
+    ///
+    /// Same segment but right-to-left → negative sign.
+    /// sgn_dx = -1, trapezoid = -0.5 * (1-0) * (0.5+0.5) = -0.5
+    #[test]
+    fn test_sgarea_horizontal_reversed() {
+        let area = sgarea(1.0, 0.5, 0.0, 0.5);
+        assert!((area - (-0.5)).abs() < 1e-12, "Expected -0.5, got {}", area);
+    }
+
+    /// Test sgarea with a vertical segment (dx=0) → area = 0.
+    #[test]
+    fn test_sgarea_vertical() {
+        let area = sgarea(0.5, 0.0, 0.5, 1.0);
+        assert!(
+            area.abs() < 1e-12,
+            "Vertical segment should have area 0, got {}",
+            area
+        );
+    }
+
+    /// Test sgarea with segment entirely outside (x > 1).
+    #[test]
+    fn test_sgarea_outside_right() {
+        let area = sgarea(1.5, 0.0, 2.5, 1.0);
+        assert!(
+            area.abs() < 1e-12,
+            "Outside segment should have area 0, got {}",
+            area
+        );
+    }
+
+    /// Test sgarea with segment entirely below y=0.
+    #[test]
+    fn test_sgarea_below_axis() {
+        let area = sgarea(0.0, -1.0, 1.0, -0.5);
+        assert!(
+            area.abs() < 1e-12,
+            "Below-axis segment should have area 0, got {}",
+            area
+        );
+    }
+
+    /// Test sgarea with segment entirely above y=1.
+    ///
+    /// Both y >= 1 → full rectangle: sgn_dx * (xhi - xlo) = 1.0 * (1-0) = 1.0
+    #[test]
+    fn test_sgarea_above_top() {
+        let area = sgarea(0.0, 1.5, 1.0, 2.0);
+        assert!(
+            (area - 1.0).abs() < 1e-12,
+            "Above-top segment should give 1.0, got {}",
+            area
+        );
+    }
+
+    /// Test sgarea Case A: diagonal from (0,0) to (1,1).
+    ///
+    /// Segment entirely within [0,1]×[0,1]. Case A trapezoid:
+    /// 0.5 * (1-0) * (1+0) = 0.5
+    #[test]
+    fn test_sgarea_case_a_diagonal() {
+        let area = sgarea(0.0, 0.0, 1.0, 1.0);
+        assert!((area - 0.5).abs() < 1e-12, "Expected 0.5, got {}", area);
+    }
+
+    /// Test sgarea Case B: segment enters inside, exits above y=1.
+    ///
+    /// Segment from (0, 0.5) to (1, 1.5). Slope = 1.
+    /// Clipped x: [0, 1]. ylo = 0.5, yhi = 1.5.
+    /// ylo <= 1.0, yhi > 1.0 → Case B.
+    /// det = 0*1.5 - 0.5*1 = -0.5
+    /// xtop = (dx + det) / dy = (1 + (-0.5)) / 1 = 0.5
+    /// area = sgn_dx * (0.5*(xtop-xlo)*(1+ylo) + xhi-xtop)
+    ///       = 1 * (0.5*(0.5-0)*(1+0.5) + 1-0.5)
+    ///       = 0.5*0.5*1.5 + 0.5
+    ///       = 0.375 + 0.5 = 0.875
+    #[test]
+    fn test_sgarea_case_b() {
+        let area = sgarea(0.0, 0.5, 1.0, 1.5);
+        assert!((area - 0.875).abs() < 1e-12, "Expected 0.875, got {}", area);
+    }
+
+    /// Test sgarea Case C: segment enters above y=1, exits inside.
+    ///
+    /// Segment from (0, 1.5) to (1, 0.5). Slope = -1.
+    /// Clipped x: [0, 1]. ylo = 1.5, yhi = 0.5.
+    /// ylo > 1.0 → Case C.
+    /// det = 0*0.5 - 1.5*1 = -1.5
+    /// xtop = (dx + det) / dy = (1 + (-1.5)) / (-1) = (-0.5)/(-1) = 0.5
+    /// area = sgn_dx * (0.5*(xhi-xtop)*(1+yhi) + xtop-xlo)
+    ///       = 1 * (0.5*(1-0.5)*(1+0.5) + 0.5-0)
+    ///       = 0.5*0.5*1.5 + 0.5
+    ///       = 0.375 + 0.5 = 0.875
+    #[test]
+    fn test_sgarea_case_c() {
+        let area = sgarea(0.0, 1.5, 1.0, 0.5);
+        assert!((area - 0.875).abs() < 1e-12, "Expected 0.875, got {}", area);
+    }
+
+    /// Test sgarea with segment crossing y=0 (clip to y >= 0).
+    ///
+    /// Segment from (0, -0.5) to (1, 0.5). Slope = 1.
+    /// Clipped x: [0, 1]. ylo = -0.5, yhi = 0.5.
+    /// ylo < 0 → clip: det = 0*0.5 - (-0.5)*1 = 0.5, xlo_new = det/dy = 0.5/1 = 0.5, ylo=0.
+    /// Now xlo=0.5, ylo=0, xhi=1, yhi=0.5. Case A:
+    /// 0.5*(1-0.5)*(0.5+0) = 0.5*0.5*0.5 = 0.125
+    #[test]
+    fn test_sgarea_crosses_y_zero() {
+        let area = sgarea(0.0, -0.5, 1.0, 0.5);
+        assert!((area - 0.125).abs() < 1e-12, "Expected 0.125, got {}", area);
+    }
+
+    // ==================== boxer() unit tests ====================
+
+    /// Test boxer: quadrilateral exactly overlapping output pixel → area = 1.0.
+    ///
+    /// Quad corners at (0,0), (1,0), (1,1), (0,1). Output pixel (0,0) = [0,1]×[0,1].
+    /// Perfect overlap → area = 1.0.
+    #[test]
+    fn test_boxer_exact_overlap() {
+        let x = [0.0, 1.0, 1.0, 0.0];
+        let y = [0.0, 0.0, 1.0, 1.0];
+        let area = boxer(0.0, 0.0, &x, &y);
+        assert!(
+            (area - 1.0).abs() < 1e-12,
+            "Exact overlap should give area 1.0, got {}",
+            area
+        );
+    }
+
+    /// Test boxer: quad shifted right by 0.5 → overlap = 0.5.
+    ///
+    /// Quad at (0.5,0)→(1.5,0)→(1.5,1)→(0.5,1). Output pixel (0,0) = [0,1]×[0,1].
+    /// x overlap: [0.5, 1.0] = 0.5, y overlap: [0, 1] = 1.0. Total = 0.5.
+    #[test]
+    fn test_boxer_half_overlap_x() {
+        let x = [0.5, 1.5, 1.5, 0.5];
+        let y = [0.0, 0.0, 1.0, 1.0];
+        let area = boxer(0.0, 0.0, &x, &y);
+        assert!(
+            (area - 0.5).abs() < 1e-12,
+            "Half x-overlap should give area 0.5, got {}",
+            area
+        );
+    }
+
+    /// Test boxer: quad shifted right 0.5 AND up 0.5 → overlap = 0.25.
+    ///
+    /// Quad at (0.5,0.5)→(1.5,0.5)→(1.5,1.5)→(0.5,1.5). Output pixel (0,0).
+    /// x overlap: 0.5, y overlap: 0.5. Total = 0.25.
+    #[test]
+    fn test_boxer_quarter_overlap() {
+        let x = [0.5, 1.5, 1.5, 0.5];
+        let y = [0.5, 0.5, 1.5, 1.5];
+        let area = boxer(0.0, 0.0, &x, &y);
+        assert!(
+            (area - 0.25).abs() < 1e-12,
+            "Quarter overlap should give area 0.25, got {}",
+            area
+        );
+    }
+
+    /// Test boxer with a different output pixel index.
+    ///
+    /// Quad at (3,5)→(4,5)→(4,6)→(3,6). Output pixel (3,5) = [3,4]×[5,6].
+    /// After shifting: [0,1]×[0,1] exactly. Area = 1.0.
+    #[test]
+    fn test_boxer_nonzero_pixel() {
+        let x = [3.0, 4.0, 4.0, 3.0];
+        let y = [5.0, 5.0, 6.0, 6.0];
+        let area = boxer(3.0, 5.0, &x, &y);
+        assert!(
+            (area - 1.0).abs() < 1e-12,
+            "Exact overlap at (3,5) should give area 1.0, got {}",
+            area
+        );
+    }
+
+    /// Test boxer with no overlap → area = 0.
+    #[test]
+    fn test_boxer_no_overlap() {
+        let x = [5.0, 6.0, 6.0, 5.0];
+        let y = [5.0, 5.0, 6.0, 6.0];
+        let area = boxer(0.0, 0.0, &x, &y);
+        assert!(
+            area.abs() < 1e-12,
+            "No overlap should give area 0, got {}",
+            area
+        );
+    }
+
+    /// Test boxer with a 45° rotated square.
+    ///
+    /// Diamond centered at (0.5, 0.5) with vertices at distance 0.5*sqrt(2)/sqrt(2) = 0.5:
+    /// (0.5, 0), (1, 0.5), (0.5, 1), (0, 0.5).
+    /// This diamond is inscribed in the unit square, with area = 0.5.
+    #[test]
+    fn test_boxer_rotated_diamond() {
+        let x = [0.5, 1.0, 0.5, 0.0];
+        let y = [0.0, 0.5, 1.0, 0.5];
+        let area = boxer(0.0, 0.0, &x, &y);
+        assert!(
+            (area - 0.5).abs() < 1e-12,
+            "Diamond inscribed in unit square should have area 0.5, got {}",
+            area
+        );
+    }
+
+    // ==================== Square kernel integration tests ====================
+
+    /// Test square kernel with identity transform, uniform image, scale=1, pixfrac=1.
+    ///
+    /// Each input pixel maps to exactly one output pixel with overlap = 1.0.
+    /// Jacobian = scale² * pixfrac² = 1.0 (area of unit square in output space).
+    /// Weight = overlap / jaco = 1.0 / 1.0 = 1.0.
+    /// Output = input value.
+    #[test]
+    fn test_square_kernel_identity_uniform() {
+        let pixels: Vec<f32> = (0..25).map(|i| i as f32).collect();
+        let image = AstroImage::from_pixels(ImageDimensions::new(5, 5, 1), pixels.clone());
+
+        let config = DrizzleConfig {
+            scale: 1.0,
+            pixfrac: 1.0,
+            kernel: DrizzleKernel::Square,
+            fill_value: 0.0,
+            min_coverage: 0.0,
+        };
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(5, 5, 1), config);
+        acc.add_image(image, &Transform::identity(), 1.0, None);
+        let result = acc.finalize();
+        let out = result.image.channel(0);
+
+        for (i, (&actual, &expected)) in out.iter().zip(pixels.iter()).enumerate() {
+            assert!(
+                (actual - expected).abs() < 1e-4,
+                "Pixel {} should be {}, got {}",
+                i,
+                expected,
+                actual
+            );
+        }
+    }
+
+    /// Test square kernel matches turbo kernel with pure translation (no rotation).
+    ///
+    /// For axis-aligned drops (no rotation/shear), the Square kernel should produce
+    /// the same output as the Turbo kernel since the quadrilateral is an axis-aligned
+    /// rectangle in both cases.
+    #[test]
+    fn test_square_kernel_matches_turbo_no_rotation() {
+        let pixels: Vec<f32> = (0..100).map(|i| (i as f32) * 0.01).collect();
+        let image1 = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), pixels.clone());
+        let image2 = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), pixels);
+        let transform = Transform::translation(DVec2::new(0.3, -0.2));
+
+        // Turbo
+        let config_turbo = DrizzleConfig {
+            scale: 2.0,
+            pixfrac: 0.8,
+            kernel: DrizzleKernel::Turbo,
+            fill_value: 0.0,
+            min_coverage: 0.0,
+        };
+        let mut acc_turbo = DrizzleAccumulator::new(ImageDimensions::new(10, 10, 1), config_turbo);
+        acc_turbo.add_image(image1, &transform, 1.0, None);
+        let result_turbo = acc_turbo.finalize();
+
+        // Square
+        let config_square = DrizzleConfig {
+            scale: 2.0,
+            pixfrac: 0.8,
+            kernel: DrizzleKernel::Square,
+            fill_value: 0.0,
+            min_coverage: 0.0,
+        };
+        let mut acc_square =
+            DrizzleAccumulator::new(ImageDimensions::new(10, 10, 1), config_square);
+        acc_square.add_image(image2, &transform, 1.0, None);
+        let result_square = acc_square.finalize();
+
+        let out_turbo = result_turbo.image.channel(0);
+        let out_square = result_square.image.channel(0);
+
+        for i in 0..out_turbo.len() {
+            assert!(
+                (out_turbo[i] - out_square[i]).abs() < 1e-3,
+                "Pixel {} turbo={} square={} differ by {}",
+                i,
+                out_turbo[i],
+                out_square[i],
+                (out_turbo[i] - out_square[i]).abs()
+            );
+        }
+    }
+
+    /// Test square kernel with 45° rotation on uniform image.
+    ///
+    /// Uniform value 3.0. After 45° rotation, the weighted mean at every covered
+    /// interior pixel should still be 3.0 (weighted average of identical values).
+    /// Also verify that there is meaningful coverage in the output interior.
+    #[test]
+    fn test_square_kernel_rotation() {
+        let image = AstroImage::from_pixels(ImageDimensions::new(20, 20, 1), vec![3.0; 20 * 20]);
+
+        // 45° rotation around center (10, 10)
+        let angle = std::f64::consts::FRAC_PI_4;
+        let cos_a = angle.cos();
+        let sin_a = angle.sin();
+        let cx = 10.0;
+        let cy = 10.0;
+        // Rotation matrix (row-major): translate to origin, rotate, translate back
+        // x' = cos*(x-cx) - sin*(y-cy) + cx
+        // y' = sin*(x-cx) + cos*(y-cy) + cy
+        use crate::math::DMat3;
+        use crate::registration::TransformType;
+        let matrix = DMat3::from_rows(
+            [cos_a, -sin_a, cx * (1.0 - cos_a) + cy * sin_a],
+            [sin_a, cos_a, -cx * sin_a + cy * (1.0 - cos_a)],
+            [0.0, 0.0, 1.0],
+        );
+        let transform = Transform::from_matrix(matrix, TransformType::Euclidean);
+
+        let config = DrizzleConfig {
+            scale: 1.0,
+            pixfrac: 1.0,
+            kernel: DrizzleKernel::Square,
+            fill_value: 0.0,
+            min_coverage: 0.0,
+        };
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(20, 20, 1), config);
+        acc.add_image(image, &transform, 1.0, None);
+        let result = acc.finalize();
+        let out = result.image.channel(0);
+
+        // Verify coverage exists in the interior (rotated image should still cover center)
+        let center_coverage = result.coverage_at(10, 10);
+        assert!(
+            center_coverage > 0.0,
+            "Center should have coverage, got {}",
+            center_coverage
+        );
+
+        // All covered pixels should have value ~3.0 (uniform weighted mean)
+        let covered_pixels: Vec<f32> = out.iter().copied().filter(|&v| v > 0.01).collect();
+        assert!(
+            !covered_pixels.is_empty(),
+            "Should have some covered pixels"
+        );
+        for (i, &val) in covered_pixels.iter().enumerate() {
+            assert!(
+                (val - 3.0).abs() < 0.05,
+                "Covered pixel {} should be ~3.0, got {}",
+                i,
+                val
+            );
+        }
+    }
+
+    /// Test square kernel with pixfrac < 1.0 produces smaller drops.
+    ///
+    /// pixfrac=0.5 produces drops that are 0.5× the input pixel size, so they
+    /// cover fewer output pixels than pixfrac=1.0.
+    #[test]
+    fn test_square_kernel_pixfrac() {
+        // Use translation (0.1, 0.1) to avoid perfectly centered drops
+        let transform = Transform::translation(DVec2::new(0.1, 0.1));
+
+        // Single bright pixel at (2,2)
+        let mut pixels1 = vec![0.0f32; 6 * 6];
+        pixels1[2 * 6 + 2] = 1.0;
+        let image1 = AstroImage::from_pixels(ImageDimensions::new(6, 6, 1), pixels1);
+
+        let config1 = DrizzleConfig {
+            scale: 2.0,
+            pixfrac: 1.0,
+            kernel: DrizzleKernel::Square,
+            fill_value: 0.0,
+            min_coverage: 0.0,
+        };
+        let mut acc1 = DrizzleAccumulator::new(ImageDimensions::new(6, 6, 1), config1);
+        acc1.add_image(image1, &transform, 1.0, None);
+        let r1 = acc1.finalize();
+        let covered_1 = r1.image.channel(0).iter().filter(|&&v| v > 0.01).count();
+
+        let mut pixels2 = vec![0.0f32; 6 * 6];
+        pixels2[2 * 6 + 2] = 1.0;
+        let image2 = AstroImage::from_pixels(ImageDimensions::new(6, 6, 1), pixels2);
+
+        let config2 = DrizzleConfig {
+            scale: 2.0,
+            pixfrac: 0.5,
+            kernel: DrizzleKernel::Square,
+            fill_value: 0.0,
+            min_coverage: 0.0,
+        };
+        let mut acc2 = DrizzleAccumulator::new(ImageDimensions::new(6, 6, 1), config2);
+        acc2.add_image(image2, &transform, 1.0, None);
+        let r2 = acc2.finalize();
+        let covered_2 = r2.image.channel(0).iter().filter(|&&v| v > 0.01).count();
+
+        assert!(
+            covered_1 > covered_2,
+            "pixfrac=1.0 should cover more pixels ({}) than pixfrac=0.5 ({})",
+            covered_1,
+            covered_2
+        );
+    }
+
+    /// Test square kernel with per-pixel weights.
+    ///
+    /// Uniform image = 5.0, pixel (1,1) excluded via weight=0.
+    /// scale=1, pixfrac=1. Output (1,1) should be fill_value, others = 5.0.
+    #[test]
+    fn test_square_kernel_with_pixel_weights() {
+        let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), vec![5.0; 16]);
+
+        let mut pw = Buffer2::new_filled(4, 4, 1.0f32);
+        *pw.get_mut(1, 1) = 0.0;
+
+        let config = DrizzleConfig {
+            scale: 1.0,
+            pixfrac: 1.0,
+            kernel: DrizzleKernel::Square,
+            fill_value: -1.0,
+            min_coverage: 0.0,
+        };
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
+        acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
+        let result = acc.finalize();
+        let out = result.image.channel(0);
+
+        // (1,1) excluded → fill_value = -1.0
+        assert!(
+            (out[5] - (-1.0)).abs() < 1e-5,
+            "Excluded pixel (1,1) should be fill_value -1.0, got {}",
+            out[5]
+        );
+        // (0,0) normal → 5.0
+        assert!(
+            (out[0] - 5.0).abs() < 1e-5,
+            "Normal pixel (0,0) should be 5.0, got {}",
+            out[0]
+        );
+        // (2,2) normal → 5.0
+        assert!(
+            (out[2 * 4 + 2] - 5.0).abs() < 1e-5,
+            "Normal pixel (2,2) should be 5.0, got {}",
+            out[2 * 4 + 2]
+        );
+    }
+
+    /// Test square kernel with scale=2 on a single bright pixel.
+    ///
+    /// scale=2, pixfrac=0.8: drop in input space is 0.8×0.8 centered at pixel center.
+    /// Input pixel (1,1) center at (1.5, 1.5). Drop corners:
+    ///   (1.1, 1.1), (1.9, 1.1), (1.9, 1.9), (1.1, 1.9)
+    /// Identity transform, scaled to output: × 2.0 →
+    ///   (2.2, 2.2), (3.8, 2.2), (3.8, 3.8), (2.2, 3.8)
+    /// Jacobian = (3.8-2.2) * (2.2-3.8) - (2.2-3.8) * (2.2-3.8)
+    ///          ... via formula: 0.5 * ((x1-x3)*(y0-y2) - (x0-x2)*(y1-y3))
+    ///   x1-x3 = 3.8-2.2 = 1.6, y0-y2 = 2.2-3.8 = -1.6
+    ///   x0-x2 = 2.2-3.8 = -1.6, y1-y3 = 2.2-3.8 = -1.6
+    ///   jaco = 0.5 * (1.6*(-1.6) - (-1.6)*(-1.6)) = 0.5 * (-2.56 - 2.56) = -2.56
+    ///   abs_jaco = 2.56 = (1.6)² = (pixfrac * scale)²  ✓
+    ///
+    /// Output pixel (2,2) overlap with quad: both span [2.2,3] in x and [2.2,3] in y → 0.8*0.8 = 0.64
+    /// weight = overlap / jaco = 0.64 / 2.56 = 0.25
+    /// Finalized = value * weight / weight = value = 2.0  (same as turbo)
+    #[test]
+    fn test_square_kernel_scale2_single_pixel() {
+        let mut pixels = vec![0.0f32; 4 * 4];
+        pixels[5] = 2.0; // pixel (1,1)
+        let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), pixels);
+
+        let config = DrizzleConfig {
+            scale: 2.0,
+            pixfrac: 0.8,
+            kernel: DrizzleKernel::Square,
+            fill_value: 0.0,
+            min_coverage: 0.0,
+        };
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
+        acc.add_image(image, &Transform::identity(), 1.0, None);
+        let result = acc.finalize();
+        let out = result.image.channel(0);
+        let w = 8usize;
+
+        // Output pixels (2,2), (3,2), (2,3), (3,3) should all be 2.0
+        assert!(
+            (out[2 * w + 2] - 2.0).abs() < 1e-4,
+            "Expected 2.0 at (2,2), got {}",
+            out[2 * w + 2]
+        );
+        assert!(
+            (out[2 * w + 3] - 2.0).abs() < 1e-4,
+            "Expected 2.0 at (3,2), got {}",
+            out[2 * w + 3]
+        );
+        assert!(
+            (out[3 * w + 2] - 2.0).abs() < 1e-4,
+            "Expected 2.0 at (2,3), got {}",
+            out[3 * w + 2]
+        );
+        assert!(
+            (out[3 * w + 3] - 2.0).abs() < 1e-4,
+            "Expected 2.0 at (3,3), got {}",
+            out[3 * w + 3]
+        );
+
+        // Pixels outside the drop should be 0.0
+        assert!(out[w + 2].abs() < 1e-5, "No flux at (2,1)");
+        assert!(out[4 * w + 3].abs() < 1e-5, "No flux at (3,4)");
+    }
+
+    /// Test Jacobian correctness by verifying weights at output pixels where two
+    /// input pixels with different values overlap.
+    ///
+    /// scale=2, pixfrac=1.0. Input: pixel (0,0)=10.0, pixel (1,0)=20.0.
+    /// Each input pixel has dh = 0.5. Identity transform.
+    ///
+    /// Input pixel (0,0): center (0.5, 0.5), corners (0,0)→(1,0)→(1,1)→(0,1).
+    ///   Scaled to output: (0,0)→(2,0)→(2,2)→(0,2). Jaco = 0.5*((2-0)*(0-2)-(0-2)*(0-2))
+    ///   = 0.5*(2*(-2)-(-2)*(-2)) = 0.5*(-4-4) = -4.0. abs_jaco = 4.0.
+    ///   At output (1,0): overlap with quad [0,2]×[0,2] on pixel [1,2]×[0,1] = 1.0×1.0 = 1.0.
+    ///   weight_00 = 1.0 * 1.0 / 4.0 = 0.25.
+    ///
+    /// Input pixel (1,0): center (1.5, 0.5), corners (1,0)→(2,0)→(2,1)→(1,1).
+    ///   Scaled: (2,0)→(4,0)→(4,2)→(2,2). Same jaco = 4.0.
+    ///   At output (2,0): overlap with quad [2,4]×[0,2] on pixel [2,3]×[0,1] = 1.0×1.0 = 1.0.
+    ///   weight_10 = 0.25.
+    ///
+    /// Output pixel (1,0) [spans [1,2]×[0,1]]: only pixel (0,0) contributes.
+    ///   finalized = (10.0 * 0.25) / 0.25 = 10.0  ✓
+    /// Output pixel (2,0) [spans [2,3]×[0,1]]: only pixel (1,0) contributes.
+    ///   finalized = (20.0 * 0.25) / 0.25 = 20.0  ✓
+    ///
+    /// Now the critical test: output pixel at the boundary where BOTH overlap.
+    /// For output pixel (1,0) = [1,2]×[0,1]:
+    ///   pixel (0,0) quad [0,2]×[0,2]: overlap = min(2,2)-max(0,1) × min(2,1)-max(0,0) = 1×1 = 1.0
+    ///   → BUT that's only pixel (0,0). Pixel (1,0) quad [2,4]×[0,2]: overlap with [1,2]×[0,1]
+    ///   = min(4,2)-max(2,1) = 0 (the quad starts at x=2, pixel ends at x=2, overlap = 0).
+    /// So output (1,0) = 10.0 only. No mixing.
+    ///
+    /// For non-trivial mixing, use pixfrac=1 + fractional translation:
+    /// Translation (0.25, 0): pixel (0,0) center at (0.75, 0.5), scaled to (1.5, 1.0).
+    /// Quad corners in output: (0.5,0)→(2.5,0)→(2.5,2)→(0.5,2).
+    /// Pixel (1,0) center at (1.75, 0.5), scaled to (3.5, 1.0).
+    /// Quad corners in output: (2.5,0)→(4.5,0)→(4.5,2)→(2.5,2).
+    ///
+    /// Output pixel (2,0) = [2,3]×[0,1]:
+    ///   From pixel (0,0): overlap with [0.5,2.5]×[0,2] on [2,3]×[0,1]
+    ///     = (min(2.5,3)-max(0.5,2)) × (min(2,1)-max(0,0)) = 0.5 × 1.0 = 0.5
+    ///     weight = 0.5 / 4.0 = 0.125. data += 10.0 * 0.125 = 1.25
+    ///   From pixel (1,0): overlap with [2.5,4.5]×[0,2] on [2,3]×[0,1]
+    ///     = (min(4.5,3)-max(2.5,2)) × (min(2,1)-max(0,0)) = 0.5 × 1.0 = 0.5
+    ///     weight = 0.5 / 4.0 = 0.125. data += 20.0 * 0.125 = 2.50
+    ///   finalized = (1.25 + 2.50) / (0.125 + 0.125) = 3.75 / 0.25 = 15.0
+    ///
+    /// This is the correct weighted average: equal overlap areas → average = (10+20)/2 = 15.0  ✓
+    #[test]
+    fn test_square_kernel_jacobian_weighted_average() {
+        let mut pixels = vec![0.0f32; 4 * 4];
+        pixels[0] = 10.0; // pixel (0,0)
+        pixels[1] = 20.0; // pixel (1,0)
+        let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), pixels);
+
+        let config = DrizzleConfig {
+            scale: 2.0,
+            pixfrac: 1.0,
+            kernel: DrizzleKernel::Square,
+            fill_value: 0.0,
+            min_coverage: 0.0,
+        };
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
+        let transform = Transform::translation(DVec2::new(0.25, 0.0));
+        acc.add_image(image, &transform, 1.0, None);
+        let result = acc.finalize();
+        let out = result.image.channel(0);
+
+        // Output pixel (2,0): weighted average of pixel(0,0)=10 and pixel(1,0)=20
+        // with equal overlap 0.5 each → (10*0.125 + 20*0.125) / 0.25 = 15.0
+        assert!(
+            (out[2] - 15.0).abs() < 1e-3,
+            "Output (2,0) should be 15.0 (equal-weight avg of 10 and 20), got {}",
+            out[2]
+        );
+
+        // Output pixel (1,0): only pixel(0,0) contributes (overlap 1.0)
+        // finalized = 10.0
+        assert!(
+            (out[1] - 10.0).abs() < 1e-3,
+            "Output (1,0) should be 10.0 (only pixel 0,0), got {}",
+            out[1]
+        );
+
+        // Output pixel (3,0): only pixel(1,0) contributes (overlap 1.0)
+        // finalized = 20.0
+        assert!(
+            (out[3] - 20.0).abs() < 1e-3,
+            "Output (3,0) should be 20.0 (only pixel 1,0), got {}",
+            out[3]
+        );
+    }
+
+    /// Test boxer with a rotated rectangle that partially clips output pixel.
+    ///
+    /// A square rotated 30° centered at (0.5, 0.5) with half-side 0.5.
+    /// Corners at center ± rotated (±0.5, ±0.5):
+    ///   cos30 = √3/2 ≈ 0.8660, sin30 = 0.5
+    ///   BL: (0.5 + (-0.5*cos30 - (-0.5)*sin30), 0.5 + (-0.5*sin30 + (-0.5)*cos30))
+    ///     = (0.5 + (-0.4330 + 0.25), 0.5 + (-0.25 - 0.4330))
+    ///     = (0.3170, -0.1830)
+    ///   BR: (0.5 + (0.5*cos30 - (-0.5)*sin30), 0.5 + (0.5*sin30 + (-0.5)*cos30))
+    ///     = (0.5 + (0.4330 + 0.25), 0.5 + (0.25 - 0.4330))
+    ///     = (1.1830, 0.3170)
+    ///   TR: (0.5 + (0.5*cos30 - 0.5*sin30), 0.5 + (0.5*sin30 + 0.5*cos30))
+    ///     = (0.5 + (0.4330 - 0.25), 0.5 + (0.25 + 0.4330))
+    ///     = (0.6830, 1.1830)
+    ///   TL: (0.5 + (-0.5*cos30 - 0.5*sin30), 0.5 + (-0.5*sin30 + 0.5*cos30))
+    ///     = (0.5 + (-0.4330 - 0.25), 0.5 + (-0.25 + 0.4330))
+    ///     = (-0.1830, 0.6830)
+    ///
+    /// The quad area = 1.0 (unit square rotated). The overlap with the unit square
+    /// [0,1]×[0,1] must be strictly between 0 and 1 since corners extend beyond.
+    /// By symmetry (30° rotation around center), the overlap should be ~0.933.
+    /// (Exact: 1 - 2 triangles clipped, each triangle has base 0.183 and height ~0.183*tan60)
+    ///
+    /// Rather than computing the exact analytical value, we verify:
+    /// 1) 0 < overlap < 1 (it's a partial clip)
+    /// 2) overlap is close to the quad area minus the clipped triangles
+    #[test]
+    fn test_boxer_rotated_partial_clip() {
+        let cos30 = (std::f64::consts::PI / 6.0).cos();
+        let sin30 = (std::f64::consts::PI / 6.0).sin();
+        let cx = 0.5;
+        let cy = 0.5;
+
+        // Rotate (±0.5, ±0.5) by 30° around (cx, cy)
+        let corners = [
+            (-0.5, -0.5), // BL
+            (0.5, -0.5),  // BR
+            (0.5, 0.5),   // TR
+            (-0.5, 0.5),  // TL
+        ];
+
+        let x: [f64; 4] = std::array::from_fn(|i| cx + corners[i].0 * cos30 - corners[i].1 * sin30);
+        let y: [f64; 4] = std::array::from_fn(|i| cy + corners[i].0 * sin30 + corners[i].1 * cos30);
+
+        let area = boxer(0.0, 0.0, &x, &y);
+
+        // The rotated square extends beyond [0,1]×[0,1], so overlap < 1.0
+        assert!(
+            area < 1.0,
+            "30° rotated square should partially clip, got area {}",
+            area
+        );
+        // But the center is at (0.5,0.5) so most of the area is inside
+        assert!(
+            area > 0.8,
+            "Most of the rotated square should be inside, got area {}",
+            area
+        );
+
+        // Verified by Python reference implementation of sgarea/boxer:
+        //   Edge 0→1: sgarea(0.3170,-0.1830,1.1830,0.3170) = 0.038675
+        //   Edge 1→2: sgarea(1.1830,0.3170,0.6830,1.1830) = -0.278312
+        //   Edge 2→3: sgarea(0.6830,1.1830,-0.1830,0.6830) = -0.644338
+        //   Edge 3→0: sgarea(-0.1830,0.6830,0.3170,-0.1830) = 0.038675
+        //   Sum = -0.845299, abs = 0.845299
+        let expected = 0.845299;
+        assert!(
+            (area - expected).abs() < 1e-4,
+            "Expected overlap ~{:.6}, got {:.6}",
+            expected,
+            area
+        );
+    }
+
+    /// Test that Square kernel produces DIFFERENT output from Turbo under rotation.
+    ///
+    /// This is the entire motivation for the Square kernel: with rotation, the
+    /// quadrilateral footprint is not axis-aligned, so Turbo (axis-aligned box) is wrong.
+    ///
+    /// Use a non-uniform image (gradient) with a small rotation. The Turbo kernel
+    /// approximates the drop as an axis-aligned box, while the Square kernel correctly
+    /// computes the rotated quadrilateral overlap. The outputs must differ.
+    #[test]
+    fn test_square_differs_from_turbo_under_rotation() {
+        // Horizontal gradient: value increases with x
+        let pixels: Vec<f32> = (0..100)
+            .map(|i| {
+                let x = i % 10;
+                x as f32
+            })
+            .collect();
+        let image1 = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), pixels.clone());
+        let image2 = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), pixels);
+
+        // 15° rotation around center — enough to produce measurable overlap differences
+        let angle = 15.0_f64.to_radians();
+        let cos_a = angle.cos();
+        let sin_a = angle.sin();
+        let cx = 5.0;
+        let cy = 5.0;
+        use crate::math::DMat3;
+        use crate::registration::TransformType;
+        let matrix = DMat3::from_rows(
+            [cos_a, -sin_a, cx * (1.0 - cos_a) + cy * sin_a],
+            [sin_a, cos_a, -cx * sin_a + cy * (1.0 - cos_a)],
+            [0.0, 0.0, 1.0],
+        );
+        let transform = Transform::from_matrix(matrix, TransformType::Euclidean);
+
+        let config_turbo = DrizzleConfig {
+            scale: 1.0,
+            pixfrac: 1.0,
+            kernel: DrizzleKernel::Turbo,
+            fill_value: 0.0,
+            min_coverage: 0.0,
+        };
+        let mut acc_turbo = DrizzleAccumulator::new(ImageDimensions::new(10, 10, 1), config_turbo);
+        acc_turbo.add_image(image1, &transform, 1.0, None);
+        let result_turbo = acc_turbo.finalize();
+
+        let config_square = DrizzleConfig {
+            scale: 1.0,
+            pixfrac: 1.0,
+            kernel: DrizzleKernel::Square,
+            fill_value: 0.0,
+            min_coverage: 0.0,
+        };
+        let mut acc_square =
+            DrizzleAccumulator::new(ImageDimensions::new(10, 10, 1), config_square);
+        acc_square.add_image(image2, &transform, 1.0, None);
+        let result_square = acc_square.finalize();
+
+        let out_turbo = result_turbo.image.channel(0);
+        let out_square = result_square.image.channel(0);
+
+        // Find the maximum difference between Turbo and Square on covered pixels
+        let mut max_diff = 0.0f32;
+        let mut n_covered = 0;
+        for i in 0..out_turbo.len() {
+            // Only compare covered pixels (both non-zero)
+            if out_turbo[i].abs() > 0.01 && out_square[i].abs() > 0.01 {
+                let diff = (out_turbo[i] - out_square[i]).abs();
+                if diff > max_diff {
+                    max_diff = diff;
+                }
+                n_covered += 1;
+            }
+        }
+
+        assert!(
+            n_covered > 20,
+            "Should have many covered pixels, got {}",
+            n_covered
+        );
+        assert!(
+            max_diff > 0.01,
+            "Square and Turbo should differ under 5° rotation with gradient image, max_diff={}",
+            max_diff
+        );
+    }
+
+    /// Test flux conservation under rotation with non-uniform image.
+    ///
+    /// A 20×20 image with a bright 4×4 patch (value=10.0) at center, rest=1.0.
+    /// Rotate 15° around center. Total input flux = 4*4*10 + (400-16)*1 = 544.
+    ///
+    /// After drizzle at scale=1, pixfrac=1 with Square kernel, the total weighted flux
+    /// should be conserved: sum(data) = sum(original_flux * weight), and since each
+    /// input pixel's total weight contribution sums to ~1.0 (for interior pixels where
+    /// the full drop lands on the output grid), the total output flux should approximate
+    /// the total input flux.
+    ///
+    /// We check sum(output * coverage_weight) ≈ sum(input).
+    /// More precisely: sum(data_buf) should equal sum(input * per_pixel_total_weight).
+    /// For fully-covered interior pixels, each input pixel's overlap sums to jaco
+    /// (the drop area in output space), and weight = overlap/jaco, so total weight = 1.0.
+    /// Therefore sum(output_pixel * weight) ≈ sum(input_pixel) for interior pixels.
+    #[test]
+    fn test_square_kernel_flux_conservation() {
+        let mut pixels = vec![1.0f32; 20 * 20];
+        // Bright 4×4 patch at center (8..12, 8..12)
+        for y in 8..12 {
+            for x in 8..12 {
+                pixels[y * 20 + x] = 10.0;
+            }
+        }
+        let total_input_flux: f32 = pixels.iter().sum();
+        // = 16 * 10 + 384 * 1 = 544.0
+        assert!((total_input_flux - 544.0).abs() < f32::EPSILON);
+
+        let image = AstroImage::from_pixels(ImageDimensions::new(20, 20, 1), pixels);
+
+        // 15° rotation around center
+        let angle = 15.0_f64.to_radians();
+        let cos_a = angle.cos();
+        let sin_a = angle.sin();
+        let cx = 10.0;
+        let cy = 10.0;
+        use crate::math::DMat3;
+        use crate::registration::TransformType;
+        let matrix = DMat3::from_rows(
+            [cos_a, -sin_a, cx * (1.0 - cos_a) + cy * sin_a],
+            [sin_a, cos_a, -cx * sin_a + cy * (1.0 - cos_a)],
+            [0.0, 0.0, 1.0],
+        );
+        let transform = Transform::from_matrix(matrix, TransformType::Euclidean);
+
+        let config = DrizzleConfig {
+            scale: 1.0,
+            pixfrac: 1.0,
+            kernel: DrizzleKernel::Square,
+            fill_value: 0.0,
+            min_coverage: 0.0,
+        };
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(20, 20, 1), config);
+        acc.add_image(image, &transform, 1.0, None);
+
+        // Before finalize, check raw weighted flux sum.
+        // data[c] = sum(flux * weight) per output pixel, weights[c] = sum(weight).
+        // total_data = sum over all output pixels of data = sum over all input pixels of
+        //   flux * sum_over_output_of(overlap/jaco)
+        // For each input pixel, sum_over_output_of(overlap) = total_overlap = jaco (the quad
+        // area), so sum_over_output_of(overlap/jaco) = 1.0 for fully interior pixels.
+        // Therefore total_data ≈ sum(flux) = 544 for interior pixels.
+        let data_sum: f32 = acc.data[0].pixels().iter().sum();
+
+        // Allow ~10% margin for edge effects (rotated image has border pixels that
+        // partially fall outside the output grid)
+        assert!(
+            (data_sum - total_input_flux).abs() / total_input_flux < 0.10,
+            "Total weighted flux should be ~{}, got {} (error {:.1}%)",
+            total_input_flux,
+            data_sum,
+            (data_sum - total_input_flux).abs() / total_input_flux * 100.0
+        );
+
+        // Now finalize and check the bright patch is still bright
+        let result = acc.finalize();
+        let out = result.image.channel(0);
+
+        // The center pixel (10,10) should be close to 10.0 since it's in the middle of
+        // the bright patch (rotation around center preserves center pixel)
+        let center_val = out[10 * 20 + 10];
+        assert!(
+            (center_val - 10.0).abs() < 0.5,
+            "Center pixel should be ~10.0 (bright patch), got {}",
+            center_val
+        );
+    }
+
+    /// Test two-frame weighted mean with Square kernel.
+    ///
+    /// Frame 1: uniform 2.0, weight 1.0
+    /// Frame 2: uniform 8.0, weight 3.0
+    /// scale=1, pixfrac=1, identity transform.
+    ///
+    /// Expected: (2.0 * 1.0 + 8.0 * 3.0) / (1.0 + 3.0) = 26.0 / 4.0 = 6.5
+    #[test]
+    fn test_square_kernel_two_frame_weighted_mean() {
+        let image1 = AstroImage::from_pixels(ImageDimensions::new(6, 6, 1), vec![2.0; 36]);
+        let image2 = AstroImage::from_pixels(ImageDimensions::new(6, 6, 1), vec![8.0; 36]);
+
+        let config = DrizzleConfig {
+            scale: 1.0,
+            pixfrac: 1.0,
+            kernel: DrizzleKernel::Square,
+            fill_value: 0.0,
+            min_coverage: 0.0,
+        };
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(6, 6, 1), config);
+        acc.add_image(image1, &Transform::identity(), 1.0, None);
+        acc.add_image(image2, &Transform::identity(), 3.0, None);
+        let result = acc.finalize();
+        let out = result.image.channel(0);
+
+        // All interior pixels should be 6.5
+        // (2*1 + 8*3) / (1+3) = 26/4 = 6.5
+        let center = out[3 * 6 + 3];
+        assert!(
+            (center - 6.5).abs() < 1e-4,
+            "Weighted mean should be 6.5, got {}",
+            center
+        );
+
+        // Check a corner pixel too
+        assert!(
+            (out[0] - 6.5).abs() < 1e-4,
+            "Corner pixel should also be 6.5, got {}",
+            out[0]
+        );
     }
 }

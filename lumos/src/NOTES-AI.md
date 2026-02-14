@@ -13,6 +13,7 @@ patterns and the highest-priority **unfixed** issues across all modules.
 
 <details><summary>Click to expand</summary>
 
+- drizzle: Square kernel (polygon clipping) — `sgarea()`/`boxer()` ported from STScI, Jacobian correction
 - drizzle: Per-pixel weight maps (`Option<&Buffer2<f32>>`) on `add_image()` and `drizzle_stack()`
 - raw: Bayer RCD demosaic implemented (111ms/24MP, 216 MP/s)
 - testing: `TestRng::next_f64` fixed to 53-bit precision (was 31-bit)
@@ -129,8 +130,8 @@ patterns and the highest-priority **unfixed** issues across all modules.
 |----------|---------|--------|--------|-------------------|
 | P1 | FITS writing | astro_image | Primary astro interchange format | All tools |
 | P1 | Variance propagation | stacking | No per-pixel noise estimate for downstream use | PixInsight, IRAF |
-| P2 | True Square kernel (polygon clipping) | drizzle | Turbo kernel inaccurate for rotation >1-2 deg | STScI default, Siril default |
-| P2 | Jacobian correction for non-affine | drizzle | Pixels magnified differently at edges | STScI, Siril, PixInsight |
+| ~~P2~~ | ~~True Square kernel (polygon clipping)~~ | ~~drizzle~~ | **DONE** — `DrizzleKernel::Square` | STScI default, Siril default |
+| ~~P2~~ | ~~Jacobian correction for non-affine~~ | ~~drizzle~~ | **DONE** — Square kernel uses Jacobian | STScI, Siril, PixInsight |
 | P2 | CFA/Bayer drizzle | drizzle | Bypass demosaic artifacts for OSC cameras | Siril, PixInsight, DSS, APP |
 | P2 | Rejection maps output | stacking | Per-pixel high/low counts for diagnostics | PixInsight, Siril |
 | P2 | Noise-based auto weighting | stacking | w = 1/sigma_bg^2 (optimal MLE) | PixInsight, Siril, APP |
@@ -161,7 +162,7 @@ patterns and the highest-priority **unfixed** issues across all modules.
 | calibration | None remaining | Formula matches PixInsight/Siril | Per-CFA-color MAD detection, per-CFA flat | Configurable sigma threshold |
 | astro_image | None remaining | FITS loading correct | Comprehensive metadata parsing, float normalization | FITS writing, RA/DEC metadata |
 | raw | None remaining | X-Trans + Bayer RCD verified | 2.1x faster than libraw (X-Trans), 216 MP/s (Bayer) | None critical |
-| drizzle | None remaining | All 4 kernels verified correct | Projective transform, per-pixel weights, rayon finalization | Square kernel, Jacobian |
+| drizzle | None remaining | All 5 kernels verified correct | Projective transform, per-pixel weights, polygon clipping, Jacobian | CFA/Bayer drizzle |
 | common | None | All correct | CPU feature detection, Buffer2/BitBuffer2 | None |
 | testing | None | Deterministic RNG, comprehensive synthetic data | Centralized TestRng, StarFieldBuilder, next_gaussian_f32 | Poisson noise, DetectionMetrics consolidation |
 
@@ -176,26 +177,24 @@ None remaining.
 3. Expose configurable sigma threshold for defect map detection
 
 ### Medium-term (feature parity)
-4. Implement true drizzle Square kernel (port STScI `sgarea()` + `boxer()`)
-5. Add stacking rejection maps (per-pixel high/low counts)
-6. Add noise-based auto weighting to stacking (`w = 1/sigma_bg^2`)
-7. Add weighted least squares to L-M fitting (inverse-variance weighting)
-8. Add parameter uncertainties from L-M covariance matrix
-9. Add drizzle Jacobian correction for non-affine transforms
-10. Implement CFA/Bayer drizzle
-11. Generic incremental stepping for registration interpolation
-12. Parallelize drizzle accumulation loops
+4. Add stacking rejection maps (per-pixel high/low counts)
+5. Add noise-based auto weighting to stacking (`w = 1/sigma_bg^2`)
+6. Add weighted least squares to L-M fitting (inverse-variance weighting)
+7. Add parameter uncertainties from L-M covariance matrix
+8. Implement CFA/Bayer drizzle
+9. Generic incremental stepping for registration interpolation
+10. Parallelize drizzle accumulation loops
 
 ### Long-term (completeness)
-13. Add variance propagation to stacking
-14. Add drizzle variance/error propagation
-15. Add drizzle context image (per-pixel contributing-frame bitmask)
-16. Add stacking Min/Max/Sum combine methods and additive-only normalization
-17. Add cold pixel detection from flats in calibration
-18. Add NaN/Inf handling in FITS float loader
-19. Add multi-HDU FITS support
-20. Add large-scale rejection for satellite trails
-21. Add missing FITS metadata (DATAMAX, ISOSPEED, CALSTAT, FOCRATIO)
+11. Add variance propagation to stacking
+12. Add drizzle variance/error propagation
+13. Add drizzle context image (per-pixel contributing-frame bitmask)
+14. Add stacking Min/Max/Sum combine methods and additive-only normalization
+15. Add cold pixel detection from flats in calibration
+16. Add NaN/Inf handling in FITS float loader
+17. Add multi-HDU FITS support
+18. Add large-scale rejection for satellite trails
+19. Add missing FITS metadata (DATAMAX, ISOSPEED, CALSTAT, FOCRATIO)
 
 ## Verified Correct (no action needed)
 

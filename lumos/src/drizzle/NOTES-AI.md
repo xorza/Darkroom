@@ -29,6 +29,7 @@ accumulates weighted contributions.
 
 | Kernel   | Method              | Drop Shape             | Complexity per input pixel |
 |----------|---------------------|------------------------|---------------------------|
+| Square   | `add_image_square`  | True quadrilateral     | O(bbox) polygon clipping  |
 | Turbo    | `add_image_turbo`   | Axis-aligned rectangle | O(drop_size^2) overlaps   |
 | Point    | `add_image_point`   | Delta function         | O(1) -- single pixel      |
 | Gaussian | `add_image_radial`  | Gaussian bell          | O((3*sigma)^2) two-pass   |
@@ -104,7 +105,7 @@ dy = MIN(ymax, j + 0.5) - MAX(ymin, j - 0.5);
 return (dx > 0 && dy > 0) ? dx * dy : 0.0;
 ```
 
-**Square kernel** (`do_kernel_square`) -- NOT in our implementation:
+**Square kernel** (`do_kernel_square`) -- ported to `add_image_square`:
 ```c
 // Transform ALL 4 corners through geometric mapping
 interpolate_four_points(p, i, j, xin, yin, xout, yout);
@@ -182,7 +183,7 @@ Source: [PCL DrizzleIntegrationInstance.cpp](https://github.com/PixInsight/PCL)
 | **Point kernel**             | Yes            | Yes            | Yes            | No             |
 | **Gaussian kernel**          | Yes (2-pass)   | Yes (analytic) | Yes            | Yes (grid)     |
 | **Lanczos kernel**           | Lanczos-3      | Lanczos-2/3    | Lanczos-2/3    | No             |
-| **Square kernel (polygon)**  | **No**         | Yes            | Yes (default)  | Yes (default)  |
+| **Square kernel (polygon)**  | Yes            | Yes            | Yes (default)  | Yes (default)  |
 | **Circular kernel**          | No             | No             | No             | Yes            |
 | **Variable-shape kernel**    | No             | No             | No             | Yes            |
 | **Per-pixel input weights**  | Yes            | Yes            | Flat-based     | Via II process |
@@ -190,13 +191,41 @@ Source: [PCL DrizzleIntegrationInstance.cpp](https://github.com/PixInsight/PCL)
 | **Context/contribution map** | No             | Yes (bitmask)  | Rejection maps | Rejection maps |
 | **Coverage map**             | Yes            | Yes            | No             | Yes            |
 | **CFA/Bayer drizzle**        | **No**         | N/A (HST)      | Yes            | Yes            |
-| **Jacobian correction**      | **No**         | Yes (per-pixel)| Yes            | Yes (splines)  |
+| **Jacobian correction**      | Square kernel  | Yes (per-pixel)| Yes            | Yes (splines)  |
 | **Parallel accumulation**    | **No**         | No             | Unknown        | Fast Drizzle   |
 | **Scale range**              | Any f32        | Continuous     | 0.1-3.0        | Typically int  |
 
 ---
 
 ## Kernel Correctness Analysis
+
+### Square Kernel -- CORRECT
+
+Ported from STScI `do_kernel_square`, `boxer()`, and `sgarea()`:
+
+- `sgarea(x1, y1, x2, y2) -> f64`: Signed area between line segment and x-axis, clipped to
+  unit square [0,1]×[0,1]. Uses Green's theorem. Three cases: trapezoid (both y in [0,1]),
+  enters-inside-exits-above, enters-above-exits-inside. ~40 lines, all f64.
+
+- `boxer(ox, oy, x[4], y[4]) -> f64`: Shifts quadrilateral so output pixel becomes unit
+  square, sums 4 `sgarea()` calls, returns absolute overlap area. Adapted from STScI
+  pixel-centered convention (pixel `(i,j)` spans `[i-0.5, i+0.5]`) to our pixel-corner
+  convention (pixel `(ox, oy)` spans `[ox, ox+1]`).
+
+- `add_image_square()`: For each input pixel:
+  1. Compute 4 corners of shrunken drop: `center ± 0.5*pixfrac` (BL, BR, TR, TL winding)
+  2. Transform all 4 corners via `transform.apply()` and scale to output coords
+  3. Compute Jacobian: `0.5 * ((x1-x3)*(y0-y2) - (x0-x2)*(y1-y3))` (signed area)
+  4. Iterate bounding box, call `boxer()` per output pixel
+  5. Weight = `overlap * effective_weight / abs_jaco` (Jacobian-corrected)
+
+**Verified against Turbo kernel**: For pure translation (no rotation), Square produces
+identical output to Turbo (< 1e-3 error). For identity + scale, exact pixel values match
+hand-computed overlap/Jacobian ratios.
+
+**Key difference from Turbo**: Turbo transforms only the center point and constructs an
+axis-aligned box. Square transforms all 4 corners, so the output quadrilateral correctly
+reflects rotation and shear. Weight includes Jacobian correction for area distortion.
 
 ### Turbo Kernel -- CORRECT
 
@@ -309,36 +338,21 @@ kernel accumulation. Weight of 0.0 fully excludes a pixel (early-out skip in all
 Lanczos), the per-pixel weight scales the frame weight, not the kernel shape — kernel
 normalization remains purely geometric.
 
-### P2 (Important): True Square Kernel (Polygon Clipping)
+### ~~P2 (Important): True Square Kernel (Polygon Clipping)~~ -- DONE
 
-**What**: Transform all 4 corners of each input pixel, compute exact quadrilateral-to-pixel
-overlap via polygon clipping (STScI's `boxer()` / `sgarea()`).
+Implemented as `DrizzleKernel::Square` with `add_image_square()`. Ported STScI `sgarea()`
+and `boxer()` functions. Transforms all 4 corners per input pixel, computes exact
+quadrilateral-to-pixel overlap via polygon clipping, with Jacobian correction for weight.
+Correct for arbitrary transforms including rotation and shear. Also subsumes Jacobian
+correction (below) for the Square kernel path.
 
-**Impact**: Turbo kernel ignores rotation and shear. For rotation > ~1-2 degrees, the
-axis-aligned approximation introduces systematic errors in overlap computation. The square
-kernel is the default in both STScI and Siril for good reason.
+### ~~P2 (Important): Jacobian / Geometric Distortion Correction~~ -- DONE (Square kernel)
 
-**Implementation**: Port STScI `sgarea()` and `boxer()` functions (well-documented, ~80 lines
-of C). Add `DrizzleKernel::Square` variant. Transform 4 corners per input pixel via
-`transform.apply()`. Compute Jacobian from the 4 transformed corners for weight correction.
-
-### P2 (Important): Jacobian / Geometric Distortion Correction
-
-**What**: For non-affine transforms (homography, SIP distortion), the local pixel scale varies
-across the image. The weight should be scaled by `1/jacobian` to preserve surface brightness.
-
-**Impact**: Currently uses constant `drop_size` everywhere. For homography transforms with
-even modest perspective parameters, pixels near edges are magnified or compressed differently
-than center pixels. The error is proportional to the perspective distortion magnitude.
-Negligible for translation/rotation/similarity (constant Jacobian).
-
-**Implementation**: Compute Jacobian from 4 transformed corners:
-```rust
-let jaco = 0.5 * ((xout[1]-xout[3])*(yout[0]-yout[2]) - (xout[0]-xout[2])*(yout[1]-yout[3]));
-let w_corrected = weight / jaco;
-```
-Only needed when `transform_type == Homography` or SIP is present. For affine and below,
-Jacobian is constant and already absorbed into the weight.
+The Square kernel computes the Jacobian from the 4 transformed corners and divides the
+overlap weight by `abs(jaco)`. This correctly handles non-affine transforms (homography,
+SIP distortion) where local pixel scale varies across the image. For other kernels (Turbo,
+Point, Gaussian, Lanczos), Jacobian correction is not yet implemented — these still assume
+constant pixel scale.
 
 ### P2 (Important): CFA/Bayer Drizzle
 
@@ -478,23 +492,17 @@ The `finalize()` method uses `par_chunks_mut` for row-parallel normalization and
 
 ### Medium-term (feature parity)
 
-4. **Implement Square kernel** (P2) -- port STScI `sgarea()` + `boxer()` (~80 lines).
-   Make it the default kernel, matching STScI and Siril. Demote Turbo to "fast" option.
-
-5. **Add Jacobian correction** (P2) -- needed for homography transforms. Only ~10 lines
-   of additional code per kernel, but requires transforming 4 corners per input pixel.
-
-6. **Row-parallel accumulation** (P3) -- biggest performance win with minimal complexity.
+3. **Row-parallel accumulation** (P3) -- biggest performance win with minimal complexity.
    Use rayon `par_iter()` over input rows with atomic accumulation or band partitioning.
 
 ### Long-term (advanced)
 
-7. **CFA/Bayer drizzle** (P2) -- significant feature for OSC camera users.
+4. **CFA/Bayer drizzle** (P2) -- significant feature for OSC camera users.
 
-8. **Variance propagation** (P3) -- needed for scientific photometry. May require switching
+5. **Variance propagation** (P3) -- needed for scientific photometry. May require switching
    to incremental accumulation (STScI style) for numerical stability with variance.
 
-9. **SIMD for multi-channel accumulate** -- minor gain for RGB, bigger gain if extended to
+6. **SIMD for multi-channel accumulate** -- minor gain for RGB, bigger gain if extended to
    process multiple input pixels per iteration.
 
 ---
