@@ -18,6 +18,7 @@ use std::mem::size_of;
 use std::path::{Path, PathBuf};
 
 use arrayvec::ArrayVec;
+use common::fnv::FnvHasher;
 use common::parallel::try_par_map_limited;
 use memmap2::Mmap;
 use rayon::prelude::*;
@@ -29,13 +30,19 @@ use crate::stacking::cache_config::{
 };
 use crate::stacking::error::Error;
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
-use crate::stacking::stack::NormParams;
+use crate::stacking::stack::FrameNorm;
 
-/// Per-frame, per-channel robust statistics (median and MAD).
+/// Per-channel robust statistics (median and MAD).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ChannelStats {
     pub median: f32,
     pub mad: f32,
+}
+
+/// Per-frame statistics: one `ChannelStats` per channel.
+#[derive(Debug, Clone)]
+pub(crate) struct FrameStats {
+    pub channels: ArrayVec<ChannelStats, 3>,
 }
 
 /// Per-thread scratch buffers for stacking combine closures.
@@ -81,29 +88,6 @@ pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
     /// In-memory size of this image's pixel data in bytes.
     fn size_in_bytes(&self) -> usize {
         self.dimensions().sample_count() * size_of::<f32>()
-    }
-}
-
-/// Deterministic FNV-1a hasher for cache filenames.
-/// DefaultHasher uses random seeds, producing different hashes across process
-/// invocations — making keep_cache useless. FNV-1a is deterministic.
-struct FnvHasher(u64);
-
-impl FnvHasher {
-    fn new() -> Self {
-        Self(0xcbf29ce484222325)
-    }
-}
-
-impl Hasher for FnvHasher {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-    fn write(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            self.0 ^= b as u64;
-            self.0 = self.0.wrapping_mul(0x100000001b3);
-        }
     }
 }
 
@@ -349,13 +333,12 @@ impl<I: StackableImage> ImageCache<I> {
     ///
     /// Optional `weights` provide per-frame weights for weighted combining.
     /// Optional `norm_params` apply per-frame affine normalization before combining.
-    /// Indexed as `[frame * channels + channel]`.
     ///
     /// Processing is done per-channel, parallelized per-row with rayon.
     pub fn process_chunked<F>(
         &self,
         weights: Option<&[f32]>,
-        norm_params: Option<&[NormParams]>,
+        norm_params: Option<&[FrameNorm]>,
         combine: F,
     ) -> PixelData
     where
@@ -368,7 +351,6 @@ impl<I: StackableImage> ImageCache<I> {
                 "Weight count must match frame count"
             );
         }
-        let channels = self.dimensions.channels;
         self.process_chunks_internal(|output_slice, chunks, frame_count, width, channel| {
             output_slice
                 .par_chunks_mut(width)
@@ -382,7 +364,7 @@ impl<I: StackableImage> ImageCache<I> {
                             let pixel_idx = row_offset + pixel_in_row;
                             if let Some(norms) = norm_params {
                                 for (frame_idx, chunk) in chunks.iter().enumerate() {
-                                    let np = norms[frame_idx * channels + channel];
+                                    let np = norms[frame_idx].channels[channel];
                                     values[frame_idx] = chunk[pixel_idx] * np.gain + np.offset;
                                 }
                             } else {
@@ -458,31 +440,29 @@ impl<I: StackableImage> ImageCache<I> {
 
     /// Compute per-frame, per-channel median and MAD (robust scale).
     ///
-    /// Returns a vec of `ChannelStats` indexed as `[frame * channels + channel]`.
-    pub fn compute_channel_stats(&self) -> Vec<ChannelStats> {
+    /// Returns one `FrameStats` per frame, each containing per-channel statistics.
+    pub fn compute_channel_stats(&self) -> Vec<FrameStats> {
         let frame_count = self.frame_count();
         let channels = self.dimensions.channels;
         let height = self.dimensions.height;
         let pixel_count = self.dimensions.width * height;
-        let mut stats = vec![
-            ChannelStats {
-                median: 0.0,
-                mad: 0.0
-            };
-            frame_count * channels
-        ];
+        let mut stats = Vec::with_capacity(frame_count);
         let mut buf = Vec::with_capacity(pixel_count);
         let mut scratch = Vec::with_capacity(pixel_count);
 
         for frame_idx in 0..frame_count {
+            let mut frame_channels = ArrayVec::new();
             for channel in 0..channels {
                 let data = self.read_channel_chunk(frame_idx, channel, 0, height);
                 buf.clear();
                 buf.extend_from_slice(data);
                 let median = crate::math::median_f32_mut(&mut buf);
                 let mad = crate::math::mad_f32_with_scratch(data, median, &mut scratch);
-                stats[frame_idx * channels + channel] = ChannelStats { median, mad };
+                frame_channels.push(ChannelStats { median, mad });
             }
+            stats.push(FrameStats {
+                channels: frame_channels,
+            });
         }
 
         stats
@@ -1274,13 +1254,14 @@ pub(crate) mod tests {
         let cache = make_test_cache(vec![frame0, frame1, frame2]);
         let stats = cache.compute_channel_stats();
 
-        assert_eq!(stats.len(), 3); // 3 frames × 1 channel
-        assert!((stats[0].median - 5.0).abs() < f32::EPSILON);
-        assert!((stats[0].mad - 0.0).abs() < f32::EPSILON);
-        assert!((stats[1].median - 5.0).abs() < f32::EPSILON);
-        assert!((stats[1].mad - 2.0).abs() < f32::EPSILON);
-        assert!((stats[2].median - 20.0).abs() < f32::EPSILON);
-        assert!((stats[2].mad - 10.0).abs() < f32::EPSILON);
+        assert_eq!(stats.len(), 3); // 3 frames
+        assert_eq!(stats[0].channels.len(), 1);
+        assert!((stats[0].channels[0].median - 5.0).abs() < f32::EPSILON);
+        assert!((stats[0].channels[0].mad - 0.0).abs() < f32::EPSILON);
+        assert!((stats[1].channels[0].median - 5.0).abs() < f32::EPSILON);
+        assert!((stats[1].channels[0].mad - 2.0).abs() < f32::EPSILON);
+        assert!((stats[2].channels[0].median - 20.0).abs() < f32::EPSILON);
+        assert!((stats[2].channels[0].mad - 10.0).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -1319,24 +1300,60 @@ pub(crate) mod tests {
         let cache = make_test_cache(vec![frame0, frame1]);
         let stats = cache.compute_channel_stats();
 
-        // Indexed as [frame * channels + channel]
-        assert_eq!(stats.len(), 6); // 2 frames × 3 channels
+        assert_eq!(stats.len(), 2); // 2 frames
+        assert_eq!(stats[0].channels.len(), 3); // 3 channels each
 
         // Frame 0
-        assert!((stats[0].median - 4.0).abs() < f32::EPSILON, "F0 R median");
-        assert!((stats[0].mad - 2.0).abs() < f32::EPSILON, "F0 R MAD");
-        assert!((stats[1].median - 10.0).abs() < f32::EPSILON, "F0 G median");
-        assert!((stats[1].mad - 0.0).abs() < f32::EPSILON, "F0 G MAD");
-        assert!((stats[2].median - 50.0).abs() < f32::EPSILON, "F0 B median");
-        assert!((stats[2].mad - 50.0).abs() < f32::EPSILON, "F0 B MAD");
+        assert!(
+            (stats[0].channels[0].median - 4.0).abs() < f32::EPSILON,
+            "F0 R median"
+        );
+        assert!(
+            (stats[0].channels[0].mad - 2.0).abs() < f32::EPSILON,
+            "F0 R MAD"
+        );
+        assert!(
+            (stats[0].channels[1].median - 10.0).abs() < f32::EPSILON,
+            "F0 G median"
+        );
+        assert!(
+            (stats[0].channels[1].mad - 0.0).abs() < f32::EPSILON,
+            "F0 G MAD"
+        );
+        assert!(
+            (stats[0].channels[2].median - 50.0).abs() < f32::EPSILON,
+            "F0 B median"
+        );
+        assert!(
+            (stats[0].channels[2].mad - 50.0).abs() < f32::EPSILON,
+            "F0 B MAD"
+        );
 
         // Frame 1
-        assert!((stats[3].median - 2.0).abs() < f32::EPSILON, "F1 R median");
-        assert!((stats[3].mad - 0.0).abs() < f32::EPSILON, "F1 R MAD");
-        assert!((stats[4].median - 2.5).abs() < f32::EPSILON, "F1 G median");
-        assert!((stats[4].mad - 1.0).abs() < f32::EPSILON, "F1 G MAD");
-        assert!((stats[5].median - 25.0).abs() < f32::EPSILON, "F1 B median");
-        assert!((stats[5].mad - 10.0).abs() < f32::EPSILON, "F1 B MAD");
+        assert!(
+            (stats[1].channels[0].median - 2.0).abs() < f32::EPSILON,
+            "F1 R median"
+        );
+        assert!(
+            (stats[1].channels[0].mad - 0.0).abs() < f32::EPSILON,
+            "F1 R MAD"
+        );
+        assert!(
+            (stats[1].channels[1].median - 2.5).abs() < f32::EPSILON,
+            "F1 G median"
+        );
+        assert!(
+            (stats[1].channels[1].mad - 1.0).abs() < f32::EPSILON,
+            "F1 G MAD"
+        );
+        assert!(
+            (stats[1].channels[2].median - 25.0).abs() < f32::EPSILON,
+            "F1 B median"
+        );
+        assert!(
+            (stats[1].channels[2].mad - 10.0).abs() < f32::EPSILON,
+            "F1 B MAD"
+        );
     }
 
     #[test]

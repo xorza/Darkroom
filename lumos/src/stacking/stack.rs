@@ -5,10 +5,12 @@
 
 use std::path::Path;
 
+use arrayvec::ArrayVec;
+
 use crate::AstroImage;
 
 use super::FrameType;
-use super::cache::{ChannelStats, ImageCache, StackableImage};
+use super::cache::{ChannelStats, FrameStats, ImageCache, StackableImage};
 use super::config::{CombineMethod, Normalization, StackConfig, Weighting};
 use super::error::Error;
 use super::progress::ProgressCallback;
@@ -18,16 +20,22 @@ use crate::math;
 ///
 /// Applied as `normalized = raw * gain + offset`.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct NormParams {
+pub(crate) struct ChannelNorm {
     pub gain: f32,
     pub offset: f32,
 }
 
-impl NormParams {
-    pub const IDENTITY: NormParams = NormParams {
+impl ChannelNorm {
+    pub const IDENTITY: ChannelNorm = ChannelNorm {
         gain: 1.0,
         offset: 0.0,
     };
+}
+
+/// Per-frame normalization: one `ChannelNorm` per channel.
+#[derive(Debug, Clone)]
+pub(crate) struct FrameNorm {
+    pub channels: ArrayVec<ChannelNorm, 3>,
 }
 
 /// Stack multiple images into a single result.
@@ -152,17 +160,14 @@ pub fn stack_with_progress<P: AsRef<Path> + Sync>(
 /// For each frame, computes the mean MAD across all channels. The frame with the
 /// lowest mean MAD is selected — it has the most stable background and will produce
 /// the best normalization for all other frames.
-fn select_reference_frame(stats: &[ChannelStats], frame_count: usize, channels: usize) -> usize {
-    assert!(frame_count > 0);
+fn select_reference_frame(stats: &[FrameStats]) -> usize {
+    assert!(!stats.is_empty());
     let mut best_frame = 0;
     let mut best_mad = f32::MAX;
 
-    for frame_idx in 0..frame_count {
-        let mut mad_sum = 0.0f32;
-        for channel in 0..channels {
-            mad_sum += stats[frame_idx * channels + channel].mad;
-        }
-        let avg_mad = mad_sum / channels as f32;
+    for (frame_idx, fs) in stats.iter().enumerate() {
+        let mad_sum: f32 = fs.channels.iter().map(|c| c.mad).sum();
+        let avg_mad = mad_sum / fs.channels.len() as f32;
         if avg_mad < best_mad {
             best_mad = avg_mad;
             best_frame = frame_idx;
@@ -180,24 +185,34 @@ fn select_reference_frame(stats: &[ChannelStats], frame_count: usize, channels: 
 /// - **Global**: `gain = ref_mad / frame_mad`, `offset = ref_median - frame_median * gain`
 /// - **Multiplicative**: `gain = ref_median / frame_median`, `offset = 0`
 fn compute_norm_params(
-    stats: &[ChannelStats],
+    stats: &[FrameStats],
     normalization: Normalization,
-    frame_count: usize,
-    channels: usize,
-) -> Option<Vec<NormParams>> {
+) -> Option<Vec<FrameNorm>> {
     if normalization == Normalization::None {
         return None;
     }
-    let ref_frame = select_reference_frame(stats, frame_count, channels);
-    let mut params = vec![NormParams::IDENTITY; frame_count * channels];
+    let ref_frame = select_reference_frame(stats);
+    let channels = stats[0].channels.len();
+
+    let mut params: Vec<FrameNorm> = stats
+        .iter()
+        .map(|fs| {
+            let mut channels = ArrayVec::new();
+            channels.extend(std::iter::repeat_n(
+                ChannelNorm::IDENTITY,
+                fs.channels.len(),
+            ));
+            FrameNorm { channels }
+        })
+        .collect();
 
     for channel in 0..channels {
         let ChannelStats {
             median: ref_median,
             mad: ref_mad,
-        } = stats[ref_frame * channels + channel];
+        } = stats[ref_frame].channels[channel];
 
-        for frame_idx in 0..frame_count {
+        for (frame_idx, fs) in stats.iter().enumerate() {
             if frame_idx == ref_frame {
                 continue; // Reference frame keeps IDENTITY
             }
@@ -205,7 +220,7 @@ fn compute_norm_params(
             let ChannelStats {
                 median: frame_median,
                 mad: frame_mad,
-            } = stats[frame_idx * channels + channel];
+            } = fs.channels[channel];
 
             let np = match normalization {
                 Normalization::Global => {
@@ -214,7 +229,7 @@ fn compute_norm_params(
                     } else {
                         1.0
                     };
-                    NormParams {
+                    ChannelNorm {
                         gain,
                         offset: ref_median - frame_median * gain,
                     }
@@ -225,17 +240,17 @@ fn compute_norm_params(
                     } else {
                         1.0
                     };
-                    NormParams { gain, offset: 0.0 }
+                    ChannelNorm { gain, offset: 0.0 }
                 }
                 Normalization::None => unreachable!(),
             };
 
-            params[frame_idx * channels + channel] = np;
+            params[frame_idx].channels[channel] = np;
         }
     }
 
     tracing::info!(
-        frame_count,
+        frame_count = stats.len(),
         channels,
         ref_frame,
         ?normalization,
@@ -248,24 +263,18 @@ fn compute_norm_params(
 /// Resolve weights from the weighting strategy and pre-computed channel stats.
 ///
 /// Returns normalized weights (sum to 1.0) or `None` for equal weighting.
-fn resolve_weights(
-    weighting: &Weighting,
-    stats: Option<&[ChannelStats]>,
-    frame_count: usize,
-    channels: usize,
-) -> Option<Vec<f32>> {
+fn resolve_weights(weighting: &Weighting, stats: Option<&[FrameStats]>) -> Option<Vec<f32>> {
     match weighting {
         Weighting::Equal => None,
         Weighting::Noise => {
             let stats = stats.expect("channel stats required for noise weighting");
             // w = 1/sigma^2 where sigma = average MAD-based sigma across channels
-            let weights: Vec<f32> = (0..frame_count)
-                .map(|f| {
-                    let mut sigma_sum = 0.0f32;
-                    for c in 0..channels {
-                        sigma_sum += math::mad_to_sigma(stats[f * channels + c].mad);
-                    }
-                    let avg_sigma = sigma_sum / channels as f32;
+            let weights: Vec<f32> = stats
+                .iter()
+                .map(|fs| {
+                    let sigma_sum: f32 =
+                        fs.channels.iter().map(|c| math::mad_to_sigma(c.mad)).sum();
+                    let avg_sigma = sigma_sum / fs.channels.len() as f32;
                     if avg_sigma > f32::EPSILON {
                         1.0 / (avg_sigma * avg_sigma)
                     } else {
@@ -294,9 +303,6 @@ fn normalize_weights(weights: &[f32]) -> Option<Vec<f32>> {
 ///
 /// Generic over any `StackableImage` type.
 pub(crate) fn run_stacking<I: StackableImage>(cache: &ImageCache<I>, config: &StackConfig) -> I {
-    let frame_count = cache.frame_count();
-    let channels = cache.dimensions().channels;
-
     // Compute channel stats once (shared by normalization and noise weighting)
     let stats = if config.normalization != Normalization::None
         || matches!(config.weighting, Weighting::Noise)
@@ -306,13 +312,11 @@ pub(crate) fn run_stacking<I: StackableImage>(cache: &ImageCache<I>, config: &St
         None
     };
 
-    let norm_params = compute_norm_params(
-        stats.as_deref().unwrap_or(&[]),
-        config.normalization,
-        frame_count,
-        channels,
-    );
-    let weights = resolve_weights(&config.weighting, stats.as_deref(), frame_count, channels);
+    let norm_params = match stats.as_deref() {
+        Some(s) => compute_norm_params(s, config.normalization),
+        None => None,
+    };
+    let weights = resolve_weights(&config.weighting, stats.as_deref());
 
     let pixels = dispatch_stacking(cache, &weights, config, norm_params.as_deref());
     I::from_stacked(pixels, cache.metadata().clone(), cache.dimensions())
@@ -325,7 +329,7 @@ fn dispatch_stacking(
     cache: &ImageCache<impl StackableImage>,
     weights: &Option<Vec<f32>>,
     config: &StackConfig,
-    norm_params: Option<&[NormParams]>,
+    norm_params: Option<&[FrameNorm]>,
 ) -> crate::astro_image::PixelData {
     match config.method {
         CombineMethod::Median => cache.process_chunked(None, norm_params, |values, _, _| {
@@ -356,14 +360,9 @@ mod tests {
     fn norm_params_for(
         cache: &ImageCache<AstroImage>,
         normalization: Normalization,
-    ) -> Option<Vec<NormParams>> {
+    ) -> Option<Vec<FrameNorm>> {
         let stats = cache.compute_channel_stats();
-        compute_norm_params(
-            &stats,
-            normalization,
-            cache.frame_count(),
-            cache.dimensions().channels,
-        )
+        compute_norm_params(&stats, normalization)
     }
 
     fn make_uniform_frames(pixel_counts: usize, values: &[f32]) -> ImageCache<AstroImage> {
@@ -387,18 +386,20 @@ mod tests {
         make_test_cache(images)
     }
 
-    fn assert_norm_identity(params: &[NormParams]) {
-        for np in params {
-            assert!(
-                (np.gain - 1.0).abs() < 1e-5,
-                "Gain should be ~1.0, got {}",
-                np.gain
-            );
-            assert!(
-                np.offset.abs() < 1e-5,
-                "Offset should be ~0.0, got {}",
-                np.offset
-            );
+    fn assert_norm_identity(params: &[FrameNorm]) {
+        for fn_ in params {
+            for np in &fn_.channels {
+                assert!(
+                    (np.gain - 1.0).abs() < 1e-5,
+                    "Gain should be ~1.0, got {}",
+                    np.gain
+                );
+                assert!(
+                    np.offset.abs() < 1e-5,
+                    "Offset should be ~0.0, got {}",
+                    np.offset
+                );
+            }
         }
     }
 
@@ -478,14 +479,14 @@ mod tests {
 
         assert_norm_identity(&params[..1]);
         assert!(
-            (params[1].gain - 1.0).abs() < 0.1,
+            (params[1].channels[0].gain - 1.0).abs() < 0.1,
             "Gain should be ~1.0, got {}",
-            params[1].gain
+            params[1].channels[0].gain
         );
         assert!(
-            (params[1].offset - (-100.0)).abs() < 1.0,
+            (params[1].channels[0].offset - (-100.0)).abs() < 1.0,
             "Offset should be ~-100.0, got {}",
-            params[1].offset
+            params[1].channels[0].offset
         );
     }
 
@@ -502,9 +503,9 @@ mod tests {
         let params = norm_params_for(&cache, Normalization::Global).unwrap();
 
         assert!(
-            (params[1].gain - 0.5).abs() < 0.15,
+            (params[1].channels[0].gain - 0.5).abs() < 0.15,
             "Gain should be ~0.5, got {}",
-            params[1].gain
+            params[1].channels[0].gain
         );
     }
 
@@ -529,14 +530,14 @@ mod tests {
 
         assert_norm_identity(&params[..1]);
         assert!(
-            (params[1].gain - 0.5).abs() < 1e-5,
+            (params[1].channels[0].gain - 0.5).abs() < 1e-5,
             "Gain should be 0.5, got {}",
-            params[1].gain
+            params[1].channels[0].gain
         );
         assert!(
-            params[1].offset.abs() < 1e-5,
+            params[1].channels[0].offset.abs() < 1e-5,
             "Offset should be 0.0, got {}",
-            params[1].offset
+            params[1].channels[0].offset
         );
     }
 
@@ -552,12 +553,14 @@ mod tests {
         ]);
         let params = norm_params_for(&cache, Normalization::Multiplicative).unwrap();
 
-        for np in &params {
-            assert!(
-                np.offset.abs() < f32::EPSILON,
-                "Multiplicative offset must be 0, got {}",
-                np.offset
-            );
+        for fn_ in &params {
+            for np in &fn_.channels {
+                assert!(
+                    np.offset.abs() < f32::EPSILON,
+                    "Multiplicative offset must be 0, got {}",
+                    np.offset
+                );
+            }
         }
     }
 
@@ -635,14 +638,17 @@ mod tests {
     fn test_select_reference_frame_picks_lowest_noise() {
         // 3 frames, 1 channel: MADs are 2.0, 0.5, 1.0
         // Frame 1 (MAD=0.5) should be selected.
-        use super::ChannelStats;
+        use super::{ChannelStats, FrameStats};
         let s = |median, mad| ChannelStats { median, mad };
+        let fs = |median, mad| FrameStats {
+            channels: [s(median, mad)].into_iter().collect(),
+        };
         let stats = vec![
-            s(100.0, 2.0), // frame 0: high noise
-            s(100.0, 0.5), // frame 1: lowest noise
-            s(100.0, 1.0), // frame 2: medium noise
+            fs(100.0, 2.0), // frame 0: high noise
+            fs(100.0, 0.5), // frame 1: lowest noise
+            fs(100.0, 1.0), // frame 2: medium noise
         ];
-        assert_eq!(select_reference_frame(&stats, 3, 1), 1);
+        assert_eq!(select_reference_frame(&stats), 1);
     }
 
     #[test]
@@ -651,36 +657,47 @@ mod tests {
         // Frame 0: MADs = [1.0, 1.0, 5.0] → avg = 2.333
         // Frame 1: MADs = [2.0, 2.0, 2.0] → avg = 2.000
         // Frame 1 should be selected (lower average).
-        use super::ChannelStats;
+        use super::{ChannelStats, FrameStats};
         let s = |median, mad| ChannelStats { median, mad };
         let stats = vec![
-            s(100.0, 1.0), // frame 0, R
-            s(100.0, 1.0), // frame 0, G
-            s(100.0, 5.0), // frame 0, B
-            s(100.0, 2.0), // frame 1, R
-            s(100.0, 2.0), // frame 1, G
-            s(100.0, 2.0), // frame 1, B
+            FrameStats {
+                channels: [s(100.0, 1.0), s(100.0, 1.0), s(100.0, 5.0)]
+                    .into_iter()
+                    .collect(),
+            },
+            FrameStats {
+                channels: [s(100.0, 2.0), s(100.0, 2.0), s(100.0, 2.0)]
+                    .into_iter()
+                    .collect(),
+            },
         ];
-        assert_eq!(select_reference_frame(&stats, 2, 3), 1);
+        assert_eq!(select_reference_frame(&stats), 1);
     }
 
     #[test]
     fn test_select_reference_frame_single_frame() {
-        use super::ChannelStats;
-        let stats = vec![ChannelStats {
-            median: 50.0,
-            mad: 3.0,
+        use super::{ChannelStats, FrameStats};
+        let stats = vec![FrameStats {
+            channels: [ChannelStats {
+                median: 50.0,
+                mad: 3.0,
+            }]
+            .into_iter()
+            .collect(),
         }];
-        assert_eq!(select_reference_frame(&stats, 1, 1), 0);
+        assert_eq!(select_reference_frame(&stats), 0);
     }
 
     #[test]
     fn test_select_reference_frame_equal_noise() {
         // All frames have same MAD → picks first (frame 0).
-        use super::ChannelStats;
+        use super::{ChannelStats, FrameStats};
         let s = |median, mad| ChannelStats { median, mad };
-        let stats = vec![s(100.0, 1.5), s(200.0, 1.5), s(300.0, 1.5)];
-        assert_eq!(select_reference_frame(&stats, 3, 1), 0);
+        let fs = |median, mad| FrameStats {
+            channels: [s(median, mad)].into_iter().collect(),
+        };
+        let stats = vec![fs(100.0, 1.5), fs(200.0, 1.5), fs(300.0, 1.5)];
+        assert_eq!(select_reference_frame(&stats), 0);
     }
 
     #[test]
@@ -709,30 +726,32 @@ mod tests {
 
         // Frame 1 (lowest noise) should have identity params
         assert!(
-            (params[1].gain - 1.0).abs() < 1e-5,
+            (params[1].channels[0].gain - 1.0).abs() < 1e-5,
             "Reference frame (1) should have gain=1.0, got {}",
-            params[1].gain
+            params[1].channels[0].gain
         );
         assert!(
-            params[1].offset.abs() < 1e-5,
+            params[1].channels[0].offset.abs() < 1e-5,
             "Reference frame (1) should have offset=0.0, got {}",
-            params[1].offset
+            params[1].channels[0].offset
         );
 
         // Frame 0 should NOT have identity (it's not the reference)
         assert!(
-            (params[0].gain - 1.0).abs() > 0.01 || params[0].offset.abs() > 0.1,
+            (params[0].channels[0].gain - 1.0).abs() > 0.01
+                || params[0].channels[0].offset.abs() > 0.1,
             "Frame 0 should not have identity params: gain={}, offset={}",
-            params[0].gain,
-            params[0].offset
+            params[0].channels[0].gain,
+            params[0].channels[0].offset
         );
 
         // Frame 2 should NOT have identity either
         assert!(
-            (params[2].gain - 1.0).abs() > 0.01 || params[2].offset.abs() > 0.1,
+            (params[2].channels[0].gain - 1.0).abs() > 0.01
+                || params[2].channels[0].offset.abs() > 0.1,
             "Frame 2 should not have identity params: gain={}, offset={}",
-            params[2].gain,
-            params[2].offset
+            params[2].channels[0].gain,
+            params[2].channels[0].offset
         );
     }
 
@@ -777,15 +796,14 @@ mod tests {
 
         let stats = cache.compute_channel_stats();
         // sigma0 ≈ MAD*1.4826 (small), sigma1 ≈ MAD*1.4826 (large)
-        let sigma0 = math::mad_to_sigma(stats[0].mad);
-        let sigma1 = math::mad_to_sigma(stats[1].mad);
+        let sigma0 = math::mad_to_sigma(stats[0].channels[0].mad);
+        let sigma1 = math::mad_to_sigma(stats[1].channels[0].mad);
         assert!(
             sigma1 > sigma0 * 5.0,
             "Frame 1 should be much noisier: sigma0={sigma0}, sigma1={sigma1}"
         );
 
-        let weights =
-            resolve_weights(&Weighting::Noise, Some(&stats), cache.frame_count(), 1).unwrap();
+        let weights = resolve_weights(&Weighting::Noise, Some(&stats)).unwrap();
         // Frame 0 should get much higher weight
         assert!(
             weights[0] > weights[1] * 10.0,
@@ -803,7 +821,7 @@ mod tests {
         let cache = make_uniform_frames(100, &[50.0, 50.0, 50.0]);
         let stats = cache.compute_channel_stats();
         // All MADs are 0 for uniform frames → all weights are 0 → returns None
-        let weights = resolve_weights(&Weighting::Noise, Some(&stats), 3, 1);
+        let weights = resolve_weights(&Weighting::Noise, Some(&stats));
         assert!(
             weights.is_none(),
             "Uniform frames have zero MAD → no weights (equal weighting fallback)"
@@ -822,7 +840,7 @@ mod tests {
             AstroImage::from_pixels(dims, make_frame(300.0)),
         ]);
         let stats = cache.compute_channel_stats();
-        let weights = resolve_weights(&Weighting::Noise, Some(&stats), 3, 1).unwrap();
+        let weights = resolve_weights(&Weighting::Noise, Some(&stats)).unwrap();
         // All should be ≈ 1/3
         for (i, &w) in weights.iter().enumerate() {
             assert!(
@@ -868,7 +886,7 @@ mod tests {
     #[test]
     fn test_manual_weighting_unchanged() {
         // Manual(vec![1.0, 2.0, 3.0]) should produce normalized [1/6, 2/6, 3/6]
-        let weights = resolve_weights(&Weighting::Manual(vec![1.0, 2.0, 3.0]), None, 3, 1).unwrap();
+        let weights = resolve_weights(&Weighting::Manual(vec![1.0, 2.0, 3.0]), None).unwrap();
         assert_eq!(weights.len(), 3);
         assert!((weights[0] - 1.0 / 6.0).abs() < 1e-6);
         assert!((weights[1] - 2.0 / 6.0).abs() < 1e-6);
@@ -877,7 +895,7 @@ mod tests {
 
     #[test]
     fn test_equal_weighting_returns_none() {
-        let weights = resolve_weights(&Weighting::Equal, None, 3, 1);
+        let weights = resolve_weights(&Weighting::Equal, None);
         assert!(weights.is_none());
     }
 
