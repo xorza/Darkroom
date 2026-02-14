@@ -677,9 +677,15 @@ impl<'a> Parser<'a> {
                 return Ok(ScnValue::Array(items));
             }
             items.push(self.parse_value()?);
-            // Optional comma after item (separator or trailing)
-            if matches!(self.peek()?, Token::Comma) {
-                self.next()?;
+            // Require comma between items; trailing comma before ] is optional
+            match self.peek()? {
+                Token::Comma => {
+                    self.next()?;
+                }
+                Token::RBracket => {} // handled at top of loop
+                _ => {
+                    return Err(self.lexer.error("expected ',' or ']' after array item"));
+                }
             }
         }
     }
@@ -704,9 +710,15 @@ impl<'a> Parser<'a> {
             let value = self.parse_value()?;
             entries.push((key, value));
 
-            // Optional comma after entry (separator or trailing)
-            if matches!(self.peek()?, Token::Comma) {
-                self.next()?;
+            // Require comma between entries; trailing comma before } is optional
+            match self.peek()? {
+                Token::Comma => {
+                    self.next()?;
+                }
+                Token::RBrace => {} // handled at top of loop
+                _ => {
+                    return Err(self.lexer.error("expected ',' or '}' after map entry"));
+                }
             }
         }
     }

@@ -44,7 +44,8 @@ flatten/untagged.
 
 The emitter omits trailing commas after the last item in arrays and maps. Industry best practice
 (rustfmt, Prettier) is to always emit trailing commas in multiline mode for cleaner diffs and
-easier appending. Currently safe since the parser accepts trailing commas.
+easier appending. Since the parser now requires commas between items, trailing commas on the last
+item are optional but recommended for consistency.
 
 ### Emitter never emits triple-quoted strings
 
@@ -140,24 +141,20 @@ Not adding `/* */` comments. Line comments (`//`) are sufficient for a config fo
 
 ---
 
-## Greedy Variant Parsing -- Foot-Guns
+## Greedy Variant Parsing
 
-SCN's greedy variant parsing is its most unique and most dangerous feature. After consuming an
-identifier, if the next token can start a value, it is consumed as the variant's payload.
+SCN's greedy variant parsing is its most distinctive feature. After consuming an identifier, if the
+next token can start a value, it is consumed as the variant's payload. This enables concise nested
+variant syntax: `Const Int -7` → `Variant("Const", Variant("Int", -7))`.
 
-**Array of unit variants without commas**: `[Red Green Blue]` parses as `[Red(Green(Blue))]`.
-Always use commas: `[Red, Green, Blue]`.
+**Commas are required** between items in arrays and entries in maps. The parser enforces this by
+checking that each item/entry is followed by `,` or the closing bracket. This prevents the greedy
+parsing foot-gun in maps (e.g., `{ mode: Fast count: 10 }` → error, because `Fast` consumes
+`count` as payload and then `:` is not `,` or `}`).
 
-**Map value followed by next key without comma**:
-```
-{ mode: Fast
-  count: 10 }
-```
-Parses `Fast` greedily consuming `count` as payload. The emitter always emits commas, so
-roundtripped output is safe.
-
-**Spec should be strengthened**: "Commas between items are required when variant values are present,
-because the parser greedily consumes following tokens as variant payloads."
+**Note**: In arrays, `[Red Green Blue]` still silently parses as one nested variant
+`Red(Green(Blue))` because greedy consumption happens within `parse_variant` before the comma check.
+The comma check catches the case when there are leftover tokens (like in maps with `:`).
 
 ---
 

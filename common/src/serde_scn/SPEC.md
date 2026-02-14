@@ -150,7 +150,7 @@ Comma-separated values between `[` and `]`. Trailing commas allowed. Newlines ar
 []
 ```
 
-**Note:** Commas between items are required when variant values are present, because the parser greedily consumes following tokens as variant payloads. Simple values (numbers, strings, booleans, null) can be separated by whitespace alone, but commas are always recommended for clarity.
+**Note:** Commas between items are always required. The parser greedily consumes following tokens as variant payloads, so omitting commas would cause ambiguous parsing (e.g., `[Red Green Blue]` would parse as a single nested variant `Red(Green(Blue))` instead of three items).
 
 ## Maps
 
@@ -251,9 +251,22 @@ Line comments start with `//` and extend to end of line.
 
 ## Separators
 
-Items in arrays and key-value pairs in maps are separated by commas. Trailing commas are always allowed. Whitespace (including newlines) separates tokens but does not serve as an item separator.
+Items in arrays and key-value pairs in maps **must** be separated by commas. Trailing commas are always allowed. Whitespace (including newlines) separates tokens but does not serve as an item separator.
 
-For simple values (no variants), omitting commas between items works in practice because the parser can unambiguously determine where each value ends. However, commas are always recommended and the canonical output always includes them.
+```
+// Correct:
+[1, 2, 3]
+[Red, Green, Blue]
+{ mode: Fast, count: 10 }
+
+// Also correct (trailing commas):
+[1, 2, 3,]
+{ mode: Fast, count: 10, }
+
+// INVALID — missing commas:
+[1 2 3]
+{ mode: Fast count: 10 }
+```
 
 ## Whitespace
 

@@ -332,8 +332,8 @@ fn comments_ignored() {
     let scn = r#"
 {
   // This is a comment
-  name: "hello" // inline comment
-  value: 42
+  name: "hello", // inline comment
+  value: 42,
   flag: true
 }
 "#;
@@ -524,19 +524,40 @@ fn trailing_commas_map() {
 }
 
 // ===========================================================================
-// Newline-separated (no commas)
+// Missing commas rejected
 // ===========================================================================
 
 #[test]
-fn newline_separated_array() {
-    let scn = "[\n  1\n  2\n  3\n]";
-    let v: Vec<i32> = from_str(scn).unwrap();
-    assert_eq!(v, vec![1, 2, 3]);
+fn error_missing_comma_array() {
+    // Newline-separated without commas must be rejected
+    let result = from_str::<Vec<i32>>("[\n  1\n  2\n  3\n]");
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("expected ',' or ']'"),
+        "expected comma error, got: {err}"
+    );
 }
 
 #[test]
-fn newline_separated_map() {
-    let scn = "{\n  name: \"test\"\n  value: 42\n  flag: true\n}";
+fn error_missing_comma_map() {
+    let result = from_str::<Simple>("{\n  name: \"test\"\n  value: 42\n  flag: true\n}");
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("expected ',' or '}'"),
+        "expected comma error, got: {err}"
+    );
+}
+
+#[test]
+fn newline_separated_with_commas() {
+    // Newlines with commas work fine
+    let scn = "[\n  1,\n  2,\n  3\n]";
+    let v: Vec<i32> = from_str(scn).unwrap();
+    assert_eq!(v, vec![1, 2, 3]);
+
+    let scn = "{\n  name: \"test\",\n  value: 42,\n  flag: true\n}";
     let s: Simple = from_str(scn).unwrap();
     assert_eq!(s.name, "test");
     assert_eq!(s.value, 42);
@@ -838,7 +859,8 @@ fn error_unknown_escape() {
 
 #[test]
 fn error_position_accuracy() {
-    let input = "{\n  name: \"ok\"\n  value: }\n}";
+    // Comma after first field, error on line 3 (unexpected } after value:)
+    let input = "{\n  name: \"ok\",\n  value: }\n}";
     let result = from_str::<Simple>(input);
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -974,13 +996,12 @@ fn variant_with_string_payload() {
 
 #[test]
 fn greedy_variant_parsing() {
-    // Spec says: [None Const 10] parses as single nested variant
+    // [None Const 10] still parses as single nested variant (greedy consumes everything)
     let val = super::parse::parse("[None Const 10]").unwrap();
     let ScnValue::Array(items) = val else {
         panic!("expected array");
     };
     assert_eq!(items.len(), 1);
-    // None consumed Const as payload, Const consumed 10 as payload
     let ScnValue::Variant(ref outer, Some(ref inner)) = items[0] else {
         panic!("expected variant, got: {:?}", items[0]);
     };
@@ -1002,6 +1023,214 @@ fn greedy_variant_parsing() {
         }
         other => panic!("expected array, got: {other:?}"),
     }
+
+    // Greedy parsing still works for nested variants at top level
+    // Const Int -7 → Variant("Const", Variant("Int", -7))
+    let val = super::parse::parse("Const Int -7").unwrap();
+    let ScnValue::Variant(ref outer, Some(ref inner)) = val else {
+        panic!("expected variant, got: {val:?}");
+    };
+    assert_eq!(outer, "Const");
+    let ScnValue::Variant(ref tag, Some(ref payload)) = **inner else {
+        panic!("expected inner variant, got: {inner:?}");
+    };
+    assert_eq!(tag, "Int");
+    assert_eq!(**payload, ScnValue::Int(-7));
+}
+
+#[test]
+fn missing_comma_in_map_with_variant_caught() {
+    // The key fix: { mode: Fast count: 10 } is now an error.
+    // Without commas, "Fast" greedily consumes "count" as payload, then
+    // the parser sees ":" which is not "," or "}" → error.
+    let result = super::parse::parse("{ mode: Fast\n  count: 10 }");
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("expected ',' or '}'"),
+        "expected comma error, got: {err}"
+    );
+
+    // With commas it works correctly
+    let val = super::parse::parse("{ mode: Fast, count: 10 }").unwrap();
+    let ScnValue::Map(entries) = val else {
+        panic!("expected map");
+    };
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].0, "mode");
+    assert!(matches!(&entries[0].1, ScnValue::Variant(tag, None) if tag == "Fast"));
+    assert_eq!(entries[1].0, "count");
+    assert_eq!(entries[1].1, ScnValue::Int(10));
+}
+
+#[test]
+fn missing_comma_between_simple_values_caught() {
+    // Even for non-variant values, commas are now required
+    let result = from_str::<Vec<i32>>("[1 2 3]");
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("expected ',' or ']'"),
+        "expected comma error, got: {err}"
+    );
+}
+
+#[test]
+fn comma_required_single_item_no_comma_needed() {
+    // Single-item collections don't need a comma
+    assert_eq!(from_str::<Vec<i32>>("[42]").unwrap(), vec![42]);
+    assert_eq!(
+        from_str::<std::collections::HashMap<String, i32>>("{ x: 1 }")
+            .unwrap()
+            .get("x")
+            .copied(),
+        Some(1)
+    );
+    // Single variant in array
+    let val = super::parse::parse("[None]").unwrap();
+    assert!(matches!(
+        val,
+        ScnValue::Array(ref items) if items.len() == 1
+            && matches!(&items[0], ScnValue::Variant(tag, None) if tag == "None")
+    ));
+}
+
+#[test]
+fn comma_required_between_various_value_types() {
+    // Strings without comma
+    let result = super::parse::parse(r#"["a" "b"]"#);
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("expected ',' or ']'")
+    );
+
+    // Booleans without comma
+    let result = super::parse::parse("[true false]");
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("expected ',' or ']'")
+    );
+
+    // Nulls without comma
+    let result = super::parse::parse("[null null]");
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("expected ',' or ']'")
+    );
+
+    // Nested arrays without comma
+    let result = super::parse::parse("[[1] [2]]");
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("expected ',' or ']'")
+    );
+
+    // Maps without comma
+    let result = super::parse::parse("[{a: 1} {b: 2}]");
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("expected ',' or ']'")
+    );
+
+    // All with commas work
+    assert!(super::parse::parse(r#"["a", "b"]"#).is_ok());
+    assert!(super::parse::parse("[true, false]").is_ok());
+    assert!(super::parse::parse("[null, null]").is_ok());
+    assert!(super::parse::parse("[[1], [2]]").is_ok());
+    assert!(super::parse::parse("[{a: 1}, {b: 2}]").is_ok());
+}
+
+#[test]
+fn comma_required_partial_commas_caught() {
+    // Some commas present, one missing: [1, 2 3]
+    // Parser accepts 1 and 2 (comma between them), then 2's comma check
+    // sees 3 (Int) which is not ',' or ']' → error
+    let result = super::parse::parse("[1, 2 3]");
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("expected ',' or ']'")
+    );
+
+    // Missing comma in map: { a: 1, b: 2 c: 3 }
+    let result = super::parse::parse("{ a: 1, b: 2 c: 3 }");
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("expected ',' or '}'")
+    );
+}
+
+#[test]
+fn comma_required_variant_then_nonvariant_in_array() {
+    // Variant followed by non-variant without comma: [None 42]
+    // "None" greedily consumes 42 as payload → Variant("None", Int(42))
+    // Result: single-item array (greedy parsing wins)
+    let val = super::parse::parse("[None 42]").unwrap();
+    let ScnValue::Array(items) = val else {
+        panic!("expected array");
+    };
+    assert_eq!(items.len(), 1);
+    assert!(matches!(
+        &items[0],
+        ScnValue::Variant(tag, Some(payload))
+            if tag == "None" && **payload == ScnValue::Int(42)
+    ));
+
+    // With comma: two separate items
+    let val = super::parse::parse("[None, 42]").unwrap();
+    let ScnValue::Array(items) = val else {
+        panic!("expected array");
+    };
+    assert_eq!(items.len(), 2);
+    assert!(matches!(&items[0], ScnValue::Variant(tag, None) if tag == "None"));
+    assert_eq!(items[1], ScnValue::Int(42));
+}
+
+#[test]
+fn comma_required_in_nested_collections() {
+    // Missing comma in inner array
+    let result = super::parse::parse("[[1 2], [3, 4]]");
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("expected ',' or ']'")
+    );
+
+    // Missing comma in nested map
+    let result = super::parse::parse("{ outer: { a: 1 b: 2 } }");
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("expected ',' or '}'")
+    );
+
+    // Nested collections with all commas work
+    assert!(super::parse::parse("[[1, 2], [3, 4]]").is_ok());
+    assert!(super::parse::parse("{ outer: { a: 1, b: 2 } }").is_ok());
 }
 
 // ===========================================================================
@@ -1103,19 +1332,23 @@ fn tab_and_cr_as_whitespace() {
     let v: i32 = from_str("\t42\t").unwrap();
     assert_eq!(v, 42);
 
-    // Tab-separated struct fields
-    let scn = "{\tname:\t\"test\"\tvalue:\t42\tflag:\ttrue\t}";
+    // Tab-separated struct fields (with commas)
+    let scn = "{\tname:\t\"test\",\tvalue:\t42,\tflag:\ttrue\t}";
     let s: Simple = from_str(scn).unwrap();
     assert_eq!(s.name, "test");
     assert_eq!(s.value, 42);
     assert!(s.flag);
 
-    // CR+LF line endings
-    let scn = "{\r\n  name: \"test\"\r\n  value: 42\r\n  flag: true\r\n}";
+    // CR+LF line endings (with commas)
+    let scn = "{\r\n  name: \"test\",\r\n  value: 42,\r\n  flag: true\r\n}";
     let s: Simple = from_str(scn).unwrap();
     assert_eq!(s.name, "test");
     assert_eq!(s.value, 42);
     assert!(s.flag);
+
+    // Tab-separated without commas is now rejected
+    let result = from_str::<Simple>("{\tname:\t\"test\"\tvalue:\t42\tflag:\ttrue\t}");
+    assert!(result.is_err());
 }
 
 // ===========================================================================
