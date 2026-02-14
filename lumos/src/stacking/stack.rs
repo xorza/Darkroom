@@ -307,17 +307,9 @@ fn normalize_weights(weights: &[f32]) -> Option<Vec<f32>> {
 ///
 /// Generic over any `StackableImage` type.
 pub(crate) fn run_stacking<I: StackableImage>(cache: &ImageCache<I>, config: &StackConfig) -> I {
-    let needs_stats =
-        config.normalization != Normalization::None || matches!(config.weighting, Weighting::Noise);
-
-    let stats = if needs_stats {
-        cache.compute_channel_stats()
-    } else {
-        vec![]
-    };
-
-    let frame_norms = compute_frame_norms(&stats, config.normalization);
-    let weights = resolve_weights(&config.weighting, &stats);
+    let stats = cache.channel_stats();
+    let frame_norms = compute_frame_norms(stats, config.normalization);
+    let weights = resolve_weights(&config.weighting, stats);
 
     let pixels = dispatch_stacking(cache, &weights, config, frame_norms.as_deref());
     I::from_stacked(pixels, cache.metadata().clone(), cache.dimensions())
@@ -362,7 +354,7 @@ mod tests {
         cache: &ImageCache<AstroImage>,
         normalization: Normalization,
     ) -> Option<Vec<FrameNorm>> {
-        let stats = cache.compute_channel_stats();
+        let stats = cache.channel_stats().to_vec();
         compute_frame_norms(&stats, normalization)
     }
 
@@ -795,7 +787,7 @@ mod tests {
             AstroImage::from_pixels(dims, f1),
         ]);
 
-        let stats = cache.compute_channel_stats();
+        let stats = cache.channel_stats().to_vec();
         // sigma0 ≈ MAD*1.4826 (small), sigma1 ≈ MAD*1.4826 (large)
         let sigma0 = math::mad_to_sigma(stats[0].channels[0].mad);
         let sigma1 = math::mad_to_sigma(stats[1].channels[0].mad);
@@ -820,7 +812,7 @@ mod tests {
     fn test_noise_weighting_equal_noise_gives_equal_weights() {
         // 3 identical frames → equal noise → equal weights
         let cache = make_uniform_frames(100, &[50.0, 50.0, 50.0]);
-        let stats = cache.compute_channel_stats();
+        let stats = cache.channel_stats().to_vec();
         // All MADs are 0 for uniform frames → all weights are 0 → returns None
         let weights = resolve_weights(&Weighting::Noise, &stats);
         assert!(
@@ -840,7 +832,7 @@ mod tests {
             AstroImage::from_pixels(dims, make_frame(200.0)),
             AstroImage::from_pixels(dims, make_frame(300.0)),
         ]);
-        let stats = cache.compute_channel_stats();
+        let stats = cache.channel_stats().to_vec();
         let weights = resolve_weights(&Weighting::Noise, &stats).unwrap();
         // All should be ≈ 1/3
         for (i, &w) in weights.iter().enumerate() {

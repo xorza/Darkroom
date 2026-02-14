@@ -39,6 +39,23 @@ pub(crate) struct FrameStats {
     pub channels: ArrayVec<ChannelStats, 3>,
 }
 
+/// Compute per-channel median + MAD for a single image.
+fn compute_frame_stats(image: &impl StackableImage) -> FrameStats {
+    let dims = image.dimensions();
+    let mut channels = ArrayVec::new();
+    let mut buf = Vec::with_capacity(dims.width * dims.height);
+    for c in 0..dims.channels {
+        let data = image.channel(c);
+        buf.clear();
+        buf.extend_from_slice(data);
+        let median = crate::math::median_f32_mut(&mut buf);
+        // Reuse buf as scratch — it's already reordered by median and no longer needed
+        let mad = crate::math::mad_f32_with_scratch(data, median, &mut buf);
+        channels.push(ChannelStats { median, mad });
+    }
+    FrameStats { channels }
+}
+
 /// Per-thread scratch buffers for stacking combine closures.
 ///
 /// Allocated once per rayon thread via `for_each_init` and reused across all pixels.
@@ -121,6 +138,8 @@ pub(crate) struct ImageCache<I> {
     dimensions: ImageDimensions,
     /// Metadata from first frame.
     metadata: AstroImageMetadata,
+    /// Per-frame channel statistics (median + MAD), computed at load time.
+    channel_stats: Vec<FrameStats>,
     /// Configuration for cache operations.
     config: CacheConfig,
     /// Progress callback.
@@ -176,7 +195,7 @@ impl<I: StackableImage> ImageCache<I> {
             "Image cache storage decision"
         );
 
-        let storage = if use_in_memory {
+        let (storage, channel_stats) = if use_in_memory {
             Self::load_in_memory(paths, &progress, frame_type, dimensions, first_image)?
         } else {
             Self::load_to_disk(
@@ -193,19 +212,21 @@ impl<I: StackableImage> ImageCache<I> {
             storage,
             dimensions,
             metadata,
+            channel_stats,
             config: config.clone(),
             progress,
         })
     }
 
-    /// Load all images into memory.
+    /// Load all images into memory and compute per-frame channel statistics.
     fn load_in_memory<P: AsRef<Path> + Sync>(
         paths: &[P],
         progress: &ProgressCallback,
         frame_type: FrameType,
         dimensions: ImageDimensions,
         first_image: I,
-    ) -> Result<Storage<I>, Error> {
+    ) -> Result<(Storage<I>, Vec<FrameStats>), Error> {
+        let first_stats = compute_frame_stats(&first_image);
         report_progress(progress, 1, paths.len(), StackingStage::Loading);
 
         // Load remaining images in parallel, at most 3 at a time to cap memory/IO pressure
@@ -225,18 +246,24 @@ impl<I: StackableImage> ImageCache<I> {
                     actual: image.dimensions(),
                 });
             }
-            Ok(image)
+            let stats = compute_frame_stats(&image);
+            Ok((image, stats))
         })?;
 
-        // Build final vector
+        // Build final vectors
         let mut images = Vec::with_capacity(paths.len());
+        let mut all_stats = Vec::with_capacity(paths.len());
         images.push(first_image);
-        images.extend(remaining);
+        all_stats.push(first_stats);
+        for (image, stats) in remaining {
+            images.push(image);
+            all_stats.push(stats);
+        }
 
         report_progress(progress, paths.len(), paths.len(), StackingStage::Loading);
 
         tracing::info!("Loaded {} frames into memory", images.len());
-        Ok(Storage::InMemory(images))
+        Ok((Storage::InMemory(images), all_stats))
     }
 
     /// Load images to disk cache with memory-mapped access.
@@ -249,14 +276,15 @@ impl<I: StackableImage> ImageCache<I> {
         frame_type: FrameType,
         dimensions: ImageDimensions,
         first_image: I,
-    ) -> Result<Storage<I>, Error> {
+    ) -> Result<(Storage<I>, Vec<FrameStats>), Error> {
         let cache_dir = &config.cache_dir;
         std::fs::create_dir_all(cache_dir).map_err(|e| Error::CreateCacheDir {
             path: cache_dir.to_path_buf(),
             source: e,
         })?;
 
-        // Cache first image
+        // Cache first image and compute stats
+        let first_stats = compute_frame_stats(&first_image);
         let first_path = paths[0].as_ref();
         let base_filename = cache_filename_for_path(first_path);
         let first_cached =
@@ -283,10 +311,15 @@ impl<I: StackableImage> ImageCache<I> {
             )
         })?;
 
-        // Build final frames vector
+        // Build final vectors
         let mut cached_frames = Vec::with_capacity(paths.len());
+        let mut all_stats = Vec::with_capacity(paths.len());
         cached_frames.push(first_cached);
-        cached_frames.extend(remaining);
+        all_stats.push(first_stats);
+        for (frame, stats) in remaining {
+            cached_frames.push(frame);
+            all_stats.push(stats);
+        }
 
         report_progress(progress, paths.len(), paths.len(), StackingStage::Loading);
 
@@ -297,10 +330,13 @@ impl<I: StackableImage> ImageCache<I> {
             cache_dir
         );
 
-        Ok(Storage::DiskBacked {
-            frames: cached_frames,
-            cache_dir: cache_dir.to_path_buf(),
-        })
+        Ok((
+            Storage::DiskBacked {
+                frames: cached_frames,
+                cache_dir: cache_dir.to_path_buf(),
+            },
+            all_stats,
+        ))
     }
 
     /// Get image dimensions (same for all frames).
@@ -435,31 +471,8 @@ impl<I: StackableImage> ImageCache<I> {
     /// Compute per-frame, per-channel median and MAD (robust scale).
     ///
     /// Returns one `FrameStats` per frame, each containing per-channel statistics.
-    pub fn compute_channel_stats(&self) -> Vec<FrameStats> {
-        let frame_count = self.frame_count();
-        let channels = self.dimensions.channels;
-        let height = self.dimensions.height;
-        let pixel_count = self.dimensions.width * height;
-        let mut stats = Vec::with_capacity(frame_count);
-        let mut buf = Vec::with_capacity(pixel_count);
-        let mut scratch = Vec::with_capacity(pixel_count);
-
-        for frame_idx in 0..frame_count {
-            let mut frame_channels = ArrayVec::new();
-            for channel in 0..channels {
-                let data = self.read_channel_chunk(frame_idx, channel, 0, height);
-                buf.clear();
-                buf.extend_from_slice(data);
-                let median = crate::math::median_f32_mut(&mut buf);
-                let mad = crate::math::mad_f32_with_scratch(data, median, &mut scratch);
-                frame_channels.push(ChannelStats { median, mad });
-            }
-            stats.push(FrameStats {
-                channels: frame_channels,
-            });
-        }
-
-        stats
+    pub fn channel_stats(&self) -> &[FrameStats] {
+        &self.channel_stats
     }
 
     /// Read a horizontal chunk (rows start_row..end_row) of a single channel from a frame.
@@ -625,12 +638,14 @@ fn load_and_cache_frame<I: StackableImage>(
     dimensions: ImageDimensions,
     frame_type: FrameType,
     frame_index: usize,
-) -> Result<CachedFrame, Error> {
+) -> Result<(CachedFrame, FrameStats), Error> {
     let channels = dimensions.channels;
 
     // Check if all channel files exist, have correct size, and source hasn't changed
     let meta_valid = validate_source_meta(cache_dir, base_filename, source_path);
+    let has_stats = stats_path(cache_dir, base_filename).exists();
     let can_reuse = meta_valid
+        && has_stats
         && (0..channels).all(|c| {
             let channel_path = cache_dir.join(channel_cache_filename(base_filename, c));
             try_reuse_channel_cache_file(&channel_path, dimensions)
@@ -647,9 +662,12 @@ fn load_and_cache_frame<I: StackableImage>(
             source = %source_path.display(),
             "Reusing existing cache files"
         );
-        Ok(CachedFrame {
+        let frame = CachedFrame {
             channels: cached_channels,
-        })
+        };
+        let stats = read_frame_stats(cache_dir, base_filename)
+            .expect("stats sidecar missing for valid cache");
+        Ok((frame, stats))
     } else {
         // Load image and write to cache
         let image = I::load(source_path)?;
@@ -663,15 +681,57 @@ fn load_and_cache_frame<I: StackableImage>(
             });
         }
 
+        let stats = compute_frame_stats(&image);
         let result = cache_image_channels(cache_dir, base_filename, &image, dimensions)?;
 
-        // Record source mtime so future runs can detect stale cache
+        // Record source mtime and stats so future runs skip recomputation
         if let Some(mtime) = source_mtime(source_path) {
             write_source_meta(cache_dir, base_filename, mtime);
         }
+        write_frame_stats(cache_dir, base_filename, &stats);
 
-        Ok(result)
+        Ok((result, stats))
     }
+}
+
+/// Path for the sidecar stats file.
+fn stats_path(cache_dir: &Path, base_filename: &str) -> PathBuf {
+    cache_dir.join(format!("{}.stats", base_filename.trim_end_matches(".bin")))
+}
+
+/// Write frame stats to a sidecar file.
+/// Format: [n_channels: u8] [median_0: f32] [mad_0: f32] [median_1: f32] ...
+fn write_frame_stats(cache_dir: &Path, base_filename: &str, stats: &FrameStats) {
+    let path = stats_path(cache_dir, base_filename);
+    let n = stats.channels.len();
+    let mut buf = Vec::with_capacity(1 + n * 8);
+    buf.push(n as u8);
+    for ch in &stats.channels {
+        buf.extend_from_slice(&ch.median.to_le_bytes());
+        buf.extend_from_slice(&ch.mad.to_le_bytes());
+    }
+    let _ = std::fs::write(&path, buf);
+}
+
+/// Read frame stats from a sidecar file.
+fn read_frame_stats(cache_dir: &Path, base_filename: &str) -> Option<FrameStats> {
+    let path = stats_path(cache_dir, base_filename);
+    let bytes = std::fs::read(&path).ok()?;
+    if bytes.is_empty() {
+        return None;
+    }
+    let n = bytes[0] as usize;
+    if bytes.len() != 1 + n * 8 {
+        return None;
+    }
+    let mut channels = ArrayVec::new();
+    for i in 0..n {
+        let off = 1 + i * 8;
+        let median = f32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
+        let mad = f32::from_le_bytes(bytes[off + 4..off + 8].try_into().unwrap());
+        channels.push(ChannelStats { median, mad });
+    }
+    Some(FrameStats { channels })
 }
 
 /// Cache all channels of an image to separate files and return a CachedFrame.
@@ -712,10 +772,13 @@ pub(crate) mod tests {
     pub(crate) fn make_test_cache<I: StackableImage>(images: Vec<I>) -> ImageCache<I> {
         let dimensions = images[0].dimensions();
         let metadata = images[0].metadata().clone();
+        let channel_stats: Vec<FrameStats> =
+            images.iter().map(|img| compute_frame_stats(img)).collect();
         ImageCache {
             storage: Storage::InMemory(images),
             dimensions,
             metadata,
+            channel_stats,
             config: CacheConfig::default(),
             progress: ProgressCallback::default(),
         }
@@ -996,6 +1059,7 @@ pub(crate) mod tests {
             },
             dimensions: dims,
             metadata: AstroImageMetadata::default(),
+            channel_stats: vec![],
             config,
             progress: ProgressCallback::default(),
         };
@@ -1049,6 +1113,7 @@ pub(crate) mod tests {
             },
             dimensions: dims,
             metadata: AstroImageMetadata::default(),
+            channel_stats: vec![],
             config: CacheConfig::default(),
             progress: ProgressCallback::default(),
         };
@@ -1094,6 +1159,7 @@ pub(crate) mod tests {
             },
             dimensions: dims,
             metadata: AstroImageMetadata::default(),
+            channel_stats: vec![],
             config: CacheConfig::default(),
             progress: ProgressCallback::default(),
         };
@@ -1130,6 +1196,7 @@ pub(crate) mod tests {
         )
         .unwrap();
 
+        let (cached_frame, _stats) = cached_frame;
         assert_eq!(cached_frame.channels.len(), 1);
 
         // Verify cached data matches original
@@ -1179,8 +1246,8 @@ pub(crate) mod tests {
         .unwrap();
 
         // Both should have same data
-        let first_data: &[f32] = bytemuck::cast_slice(&first_frame.channels[0][..]);
-        let second_data: &[f32] = bytemuck::cast_slice(&second_frame.channels[0][..]);
+        let first_data: &[f32] = bytemuck::cast_slice(&first_frame.0.channels[0][..]);
+        let second_data: &[f32] = bytemuck::cast_slice(&second_frame.0.channels[0][..]);
         assert_eq!(first_data, second_data);
         assert_eq!(first_data, &pixels[..]);
 
@@ -1246,7 +1313,7 @@ pub(crate) mod tests {
         );
 
         let cache = make_test_cache(vec![frame0, frame1, frame2]);
-        let stats = cache.compute_channel_stats();
+        let stats = cache.channel_stats();
 
         assert_eq!(stats.len(), 3); // 3 frames
         assert_eq!(stats[0].channels.len(), 1);
@@ -1292,7 +1359,7 @@ pub(crate) mod tests {
         //   B: median=25.0, deviations=[15,5,5,15] → MAD=10.0
 
         let cache = make_test_cache(vec![frame0, frame1]);
-        let stats = cache.compute_channel_stats();
+        let stats = cache.channel_stats();
 
         assert_eq!(stats.len(), 2); // 2 frames
         assert_eq!(stats[0].channels.len(), 3); // 3 channels each
