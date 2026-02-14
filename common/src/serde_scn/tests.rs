@@ -1,4 +1,3 @@
-use super::value::ScnValue;
 use super::*;
 use serde::{Deserialize, Serialize};
 
@@ -1718,6 +1717,264 @@ fn utf8_many_multibyte_chars() {
     // Fast path
     let v: String = from_str(&scn).unwrap();
     assert_eq!(v, content);
+}
+
+// ===========================================================================
+// Public API: to_value, from_value, ScnValue Display
+// ===========================================================================
+
+#[test]
+fn to_value_struct() {
+    #[derive(Serialize)]
+    struct Point {
+        x: i32,
+        y: i32,
+    }
+    let v = to_value(&Point { x: 10, y: 20 }).unwrap();
+    // Struct serializes as Map with field names as keys
+    assert_eq!(
+        v,
+        ScnValue::Map(vec![
+            ("x".to_string(), ScnValue::Int(10)),
+            ("y".to_string(), ScnValue::Int(20)),
+        ])
+    );
+}
+
+#[test]
+fn from_value_struct() {
+    #[derive(Debug, Deserialize, PartialEq)]
+    struct Point {
+        x: i32,
+        y: i32,
+    }
+    let v = ScnValue::Map(vec![
+        ("x".to_string(), ScnValue::Int(10)),
+        ("y".to_string(), ScnValue::Int(20)),
+    ]);
+    let p: Point = from_value(v).unwrap();
+    assert_eq!(p, Point { x: 10, y: 20 });
+}
+
+#[test]
+fn to_from_value_roundtrip() {
+    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    struct Config {
+        name: String,
+        count: u32,
+        enabled: bool,
+    }
+    let original = Config {
+        name: "test".to_string(),
+        count: 42,
+        enabled: true,
+    };
+    let v = to_value(&original).unwrap();
+    let restored: Config = from_value(v).unwrap();
+    assert_eq!(original, restored);
+}
+
+#[test]
+fn to_value_enum_variant() {
+    #[derive(Serialize)]
+    enum Action {
+        Stop,
+        Move { x: f64, y: f64 },
+    }
+    let v = to_value(&Action::Stop).unwrap();
+    assert_eq!(v, ScnValue::Variant("Stop".to_string(), None));
+
+    let v = to_value(&Action::Move { x: 1.0, y: 2.0 }).unwrap();
+    assert_eq!(
+        v,
+        ScnValue::Variant(
+            "Move".to_string(),
+            Some(Box::new(ScnValue::Map(vec![
+                ("x".to_string(), ScnValue::Float(1.0)),
+                ("y".to_string(), ScnValue::Float(2.0)),
+            ])))
+        )
+    );
+}
+
+#[test]
+fn scn_value_display() {
+    // Null
+    assert_eq!(ScnValue::Null.to_string(), "null");
+    // Bool
+    assert_eq!(ScnValue::Bool(true).to_string(), "true");
+    // Int
+    assert_eq!(ScnValue::Int(-42).to_string(), "-42");
+    // Uint
+    assert_eq!(ScnValue::Uint(255).to_string(), "255");
+    // Float
+    assert_eq!(ScnValue::Float(1.5).to_string(), "1.5");
+    // String (with escaping)
+    assert_eq!(
+        ScnValue::String("hello\nworld".to_string()).to_string(),
+        r#""hello\nworld""#
+    );
+    // Array (inline for small simple values)
+    assert_eq!(
+        ScnValue::Array(vec![ScnValue::Int(1), ScnValue::Int(2)]).to_string(),
+        "[1, 2]"
+    );
+    // Variant
+    assert_eq!(
+        ScnValue::Variant("None".to_string(), None).to_string(),
+        "None"
+    );
+    assert_eq!(
+        ScnValue::Variant("Some".to_string(), Some(Box::new(ScnValue::Int(42)))).to_string(),
+        "Some 42"
+    );
+}
+
+#[test]
+fn scn_value_display_map() {
+    // Map emits multiline with indentation
+    let v = ScnValue::Map(vec![
+        ("a".to_string(), ScnValue::Int(1)),
+        ("b".to_string(), ScnValue::Int(2)),
+    ]);
+    let s = v.to_string();
+    // Should contain key: value pairs
+    assert!(s.contains("a: 1"), "got: {s}");
+    assert!(s.contains("b: 2"), "got: {s}");
+    assert!(s.starts_with('{'), "got: {s}");
+    assert!(s.ends_with('}'), "got: {s}");
+}
+
+#[test]
+fn scn_value_display_special_floats() {
+    assert_eq!(ScnValue::Float(f64::NAN).to_string(), "nan");
+    assert_eq!(ScnValue::Float(f64::INFINITY).to_string(), "inf");
+    assert_eq!(ScnValue::Float(f64::NEG_INFINITY).to_string(), "-inf");
+}
+
+#[test]
+fn from_value_enum_variant() {
+    #[derive(Debug, Deserialize, PartialEq)]
+    enum Color {
+        Red,
+        Rgb { r: u8, g: u8, b: u8 },
+    }
+    // Unit variant
+    let v = ScnValue::Variant("Red".to_string(), None);
+    let c: Color = from_value(v).unwrap();
+    assert_eq!(c, Color::Red);
+    // Struct variant
+    let v = ScnValue::Variant(
+        "Rgb".to_string(),
+        Some(Box::new(ScnValue::Map(vec![
+            ("r".to_string(), ScnValue::Uint(255)),
+            ("g".to_string(), ScnValue::Uint(128)),
+            ("b".to_string(), ScnValue::Uint(0)),
+        ]))),
+    );
+    let c: Color = from_value(v).unwrap();
+    assert_eq!(
+        c,
+        Color::Rgb {
+            r: 255,
+            g: 128,
+            b: 0
+        }
+    );
+}
+
+#[test]
+fn from_value_type_mismatch() {
+    // Trying to deserialize an Int as a String should fail
+    let v = ScnValue::Int(42);
+    let result: std::result::Result<String, _> = from_value(v);
+    assert!(result.is_err());
+    // Trying to deserialize a String as a struct should fail
+    let v = ScnValue::String("not a struct".to_string());
+    let result: std::result::Result<Vec<i32>, _> = from_value(v);
+    assert!(result.is_err());
+}
+
+#[test]
+fn display_output_is_parseable() {
+    // Display output of various ScnValue types should parse back correctly.
+    // Note: Uint→text→parse produces Int (parser uses Int for positive values that fit i64),
+    // so we test Uint separately below.
+    let values = vec![
+        ScnValue::Null,
+        ScnValue::Bool(false),
+        ScnValue::Int(-42),
+        ScnValue::Int(999),
+        ScnValue::Float(2.5),
+        ScnValue::String("hello \"world\"".to_string()),
+        ScnValue::Array(vec![ScnValue::Int(1), ScnValue::Int(2), ScnValue::Int(3)]),
+        ScnValue::Variant("Stop".to_string(), None),
+        ScnValue::Variant("Go".to_string(), Some(Box::new(ScnValue::Int(5)))),
+    ];
+    for original in &values {
+        let displayed = original.to_string();
+        let parsed = super::parse::parse(&displayed).unwrap();
+        assert_eq!(
+            *original, parsed,
+            "Display→parse roundtrip failed for {original:?}\ndisplayed: {displayed}"
+        );
+    }
+
+    // Uint that fits in i64 parses back as Int (correct — no Uint literal in grammar)
+    let displayed = ScnValue::Uint(999).to_string();
+    assert_eq!(displayed, "999");
+    assert_eq!(super::parse::parse(&displayed).unwrap(), ScnValue::Int(999));
+
+    // Uint > i64::MAX parses back as Uint
+    let big = u64::MAX; // 18446744073709551615
+    let displayed = ScnValue::Uint(big).to_string();
+    assert_eq!(
+        super::parse::parse(&displayed).unwrap(),
+        ScnValue::Uint(big)
+    );
+}
+
+#[test]
+fn display_map_is_parseable() {
+    let v = ScnValue::Map(vec![
+        ("name".to_string(), ScnValue::String("Alice".to_string())),
+        ("age".to_string(), ScnValue::Int(30)),
+    ]);
+    let displayed = v.to_string();
+    let parsed = super::parse::parse(&displayed).unwrap();
+    assert_eq!(v, parsed);
+}
+
+#[test]
+fn display_nested_variant_with_map() {
+    // Variant with struct payload — multiline output
+    let v = ScnValue::Variant(
+        "Move".to_string(),
+        Some(Box::new(ScnValue::Map(vec![
+            ("x".to_string(), ScnValue::Float(1.0)),
+            ("y".to_string(), ScnValue::Float(2.0)),
+        ]))),
+    );
+    let displayed = v.to_string();
+    let parsed = super::parse::parse(&displayed).unwrap();
+    assert_eq!(v, parsed);
+}
+
+#[test]
+fn display_large_array_multiline() {
+    // >8 items with non-simple values triggers multiline formatting
+    let items: Vec<ScnValue> = (0..10)
+        .map(|i| ScnValue::Array(vec![ScnValue::Int(i), ScnValue::Int(i * 2)]))
+        .collect();
+    let v = ScnValue::Array(items);
+    let displayed = v.to_string();
+    // Should be multiline (contains newlines)
+    assert!(
+        displayed.contains('\n'),
+        "expected multiline, got: {displayed}"
+    );
+    let parsed = super::parse::parse(&displayed).unwrap();
+    assert_eq!(v, parsed);
 }
 
 // ===========================================================================

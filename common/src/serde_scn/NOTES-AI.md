@@ -39,13 +39,11 @@ match before an enum variant. The Variant-with-payload case correctly uses singl
 
 ## Missing Features
 
-### Public API gaps
+### Public API — IMPLEMENTED
 
-- **`to_value<T>` / `from_value<T>`**: One-liners wrapping existing infrastructure. serde_json has
-  these. Useful for programmatic ScnValue manipulation.
-- **`ScnValue` not public from module**: `value` module has no `pub use`. Should re-export
-  `ScnValue` from `mod.rs`.
-- **`Display` for `ScnValue`**: Would enable `println!("{value}")`. Delegate to `emit_value`.
+- `to_value<T>` / `from_value<T>`: Convert between Rust types and `ScnValue` without going through text.
+- `ScnValue` re-exported from `mod.rs` via `pub use value::ScnValue`.
+- `Display` for `ScnValue`: Delegates to `emit_value`, enables `println!("{value}")`.
 
 ### Recursion depth limit — IMPLEMENTED
 
@@ -66,13 +64,10 @@ a parse error. Protects against stack overflow from malicious/deeply nested inpu
 `read_prefixed_integer()`. Negative allowed: `-0x10`. Emitter always outputs decimal.
 `make_integer_token()` handles Int vs Uint selection and overflow for negative values.
 
-### No block comments
+### Block comments — REJECTED
 
-Only `//` line comments. RON supports `/* */` with nesting. Block comments are useful for
-temporarily disabling large sections of config.
-
-**Optional enhancement**: Add nested `/* */` comments. Simple lexer addition. Must be nested
-(unlike C) so commenting out content containing `*/` doesn't silently break.
+Not adding `/* */` comments. Line comments (`//`) are sufficient for a config format. Block comments
+add lexer complexity (must be nested) and SCN files are small enough that line comments suffice.
 
 ### Underscore digit separators — IMPLEMENTED
 

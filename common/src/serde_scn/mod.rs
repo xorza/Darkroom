@@ -10,6 +10,15 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 pub use error::{Result, ScnError};
+pub use value::ScnValue;
+
+pub fn to_value<T: Serialize>(value: &T) -> Result<ScnValue> {
+    value.serialize(value::ValueSerializer)
+}
+
+pub fn from_value<T: DeserializeOwned>(value: ScnValue) -> Result<T> {
+    T::deserialize(value)
+}
 
 pub fn to_string<T: Serialize>(value: &T) -> Result<String> {
     let mut out = Vec::new();
