@@ -57,13 +57,12 @@ impl TileGrid {
         &mut self,
         pixels: &Buffer2<f32>,
         mask: Option<&BitBuffer2>,
-        min_pixels: usize,
         sigma_clip_iterations: usize,
     ) {
         debug_assert_eq!(pixels.width(), self.width);
         debug_assert_eq!(pixels.height(), self.height);
 
-        self.fill_tile_stats(pixels, mask, min_pixels, sigma_clip_iterations);
+        self.fill_tile_stats(pixels, mask, sigma_clip_iterations);
         self.apply_median_filter();
     }
 
@@ -130,7 +129,6 @@ impl TileGrid {
         &mut self,
         pixels: &Buffer2<f32>,
         mask: Option<&BitBuffer2>,
-        min_pixels: usize,
         sigma_clip_iterations: usize,
     ) {
         let tiles_x = self.tiles_x();
@@ -166,7 +164,6 @@ impl TileGrid {
                         x_end,
                         y_start,
                         y_end,
-                        min_pixels,
                         sigma_clip_iterations,
                         values,
                         deviations,
@@ -224,6 +221,11 @@ impl TileGrid {
 // ============================================================================
 
 /// Compute sigma-clipped statistics for a tile region.
+///
+/// When a mask is provided, only unmasked pixels are used. If all pixels
+/// are masked, falls back to sampling all pixels (including masked) as a
+/// last resort. A noisy estimate from few background pixels is far better
+/// than a biased estimate contaminated by star flux.
 #[allow(clippy::too_many_arguments)]
 fn compute_tile_stats(
     pixels: &Buffer2<f32>,
@@ -232,7 +234,6 @@ fn compute_tile_stats(
     x_end: usize,
     y_start: usize,
     y_end: usize,
-    min_pixels: usize,
     sigma_clip_iterations: usize,
     values: &mut Vec<f32>,
     deviations: &mut Vec<f32>,
@@ -246,8 +247,8 @@ fn compute_tile_stats(
         Some(m) => {
             collect_unmasked_pixels(pixels, m, x_start, x_end, y_start, y_end, width, values);
 
-            if values.len() < min_pixels {
-                values.clear();
+            if values.is_empty() {
+                // All pixels masked — no choice but to use all pixels
                 collect_sampled_pixels(pixels, x_start, x_end, y_start, y_end, width, values);
             } else if values.len() > MAX_TILE_SAMPLES {
                 subsample_in_place(values, MAX_TILE_SAMPLES);
@@ -410,19 +411,14 @@ mod tests {
     /// Create a TileGrid with default test parameters (no mask, default sigma clip iterations)
     fn make_grid(pixels: &Buffer2<f32>, tile_size: usize) -> TileGrid {
         let mut grid = TileGrid::new_uninit(pixels.width(), pixels.height(), tile_size);
-        grid.compute(pixels, None, 0, TEST_SIGMA_CLIP_ITERATIONS);
+        grid.compute(pixels, None, TEST_SIGMA_CLIP_ITERATIONS);
         grid
     }
 
     /// Create a TileGrid with mask
-    fn make_grid_with_mask(
-        pixels: &Buffer2<f32>,
-        tile_size: usize,
-        mask: &BitBuffer2,
-        min_pixels: usize,
-    ) -> TileGrid {
+    fn make_grid_with_mask(pixels: &Buffer2<f32>, tile_size: usize, mask: &BitBuffer2) -> TileGrid {
         let mut grid = TileGrid::new_uninit(pixels.width(), pixels.height(), tile_size);
-        grid.compute(pixels, Some(mask), min_pixels, TEST_SIGMA_CLIP_ITERATIONS);
+        grid.compute(pixels, Some(mask), TEST_SIGMA_CLIP_ITERATIONS);
         grid
     }
 
@@ -575,34 +571,51 @@ mod tests {
             }
         }
 
-        let grid = make_grid_with_mask(&pixels, 32, &mask, 100);
+        let grid = make_grid_with_mask(&pixels, 32, &mask);
 
         let stats_11 = grid.get(1, 1);
         assert!((stats_11.median - 0.2).abs() < 0.05);
     }
 
     #[test]
-    fn test_tile_grid_with_mask_fallback_when_too_few_unmasked() {
+    fn test_tile_uses_few_unmasked_pixels_over_all_pixels() {
+        // Tile (0,0) has 95% masked "star" pixels at 0.9, 5% unmasked background at 0.2.
+        // The unmasked pixels should be used for background estimation (median ≈ 0.2),
+        // NOT falling back to all pixels which would give a biased median toward 0.9.
         let width = 64;
         let height = 64;
-        let mut data = vec![0.5; width * height];
-        data[0] = 0.9;
 
-        let pixels = Buffer2::new(width, height, data);
+        // Start with all pixels at "star" value
+        let mut data = vec![0.9f32; width * height];
 
+        // Set ~5% of the top-left tile (32×32 = 1024 pixels) to background value
+        // 5% of 1024 = ~51 pixels. Use a stripe: first 2 rows unmasked.
+        // 2 rows × 32 cols = 64 pixels of background
         let mut mask = BitBuffer2::new_filled(width, height, false);
         for y in 0..32 {
             for x in 0..32 {
-                if !(x == 0 && y == 0) {
+                if y < 2 {
+                    // Background pixels: unmasked, value 0.2
+                    data[y * width + x] = 0.2;
+                    // mask stays false (unmasked)
+                } else {
+                    // Star pixels: masked, value 0.9
                     mask.set_xy(x, y, true);
                 }
             }
         }
 
-        let grid = make_grid_with_mask(&pixels, 32, &mask, 100);
+        let pixels = Buffer2::new(width, height, data);
+        let grid = make_grid_with_mask(&pixels, 32, &mask);
 
         let stats = grid.get(0, 0);
-        assert!((stats.median - 0.5).abs() < 0.05);
+        // With the fix: uses the 64 unmasked background pixels → median ≈ 0.2
+        // Without the fix: falls back to all 1024 pixels → median biased toward 0.9
+        assert!(
+            (stats.median - 0.2).abs() < 0.05,
+            "Tile (0,0) median should be ~0.2 (background), got {}",
+            stats.median
+        );
     }
 
     #[test]
@@ -612,7 +625,7 @@ mod tests {
         let pixels = create_uniform_image(width, height, 0.4);
         let mask = BitBuffer2::new_filled(width, height, true);
 
-        let grid = make_grid_with_mask(&pixels, 32, &mask, 100);
+        let grid = make_grid_with_mask(&pixels, 32, &mask);
 
         let stats = grid.get(0, 0);
         assert!((stats.median - 0.4).abs() < 0.05);
@@ -625,7 +638,7 @@ mod tests {
         let grid_none = make_grid(&pixels, 32);
 
         let mut grid_empty = TileGrid::new_uninit(64, 64, 32);
-        grid_empty.compute(&pixels, None, 0, TEST_SIGMA_CLIP_ITERATIONS);
+        grid_empty.compute(&pixels, None, TEST_SIGMA_CLIP_ITERATIONS);
 
         for ty in 0..grid_none.tiles_y() {
             for tx in 0..grid_none.tiles_x() {
@@ -1176,10 +1189,10 @@ mod tests {
             }
         }
 
-        let grid = make_grid_with_mask(&pixels, 32, &mask, 100);
+        let grid = make_grid_with_mask(&pixels, 32, &mask);
 
-        // Top-left tile (0,0) should fallback to all pixels due to mask
-        // Bottom-right tile (1,1) should have background value
+        // Top-left tile (0,0): all pixels masked → falls back to all pixels (200.0)
+        // Bottom-right tile (1,1): no masked pixels → uses background value
         let br = grid.get(1, 1);
         assert!(
             (br.median - 50.0).abs() < 5.0,

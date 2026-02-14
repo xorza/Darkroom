@@ -208,15 +208,15 @@ The module does not support input weight or variance maps. Some astronomical ima
 
 **Severity**: Low for typical astrophotography. Higher for survey data.
 
-### 7. Mask Fallback Includes Star Pixels
+### ~~7. Mask Fallback Includes Star Pixels~~ — FIXED
 
-When too few unmasked pixels remain in a tile during refinement (tile_grid.rs line
-249-251), the fallback calls `collect_sampled_pixels`, which collects **all** pixels
-including masked star pixels. This biases the tile's background estimate upward in
-heavily crowded regions. A better fallback would interpolate from neighboring tiles.
+Previously, when fewer than `min_pixels` unmasked pixels remained in a tile, the fallback
+discarded them and sampled ALL pixels (including masked stars), biasing the estimate upward.
 
-**Severity**: Low. Only triggers when most of a tile is covered by detected sources.
-The `min_unmasked_fraction` parameter (default 0.3) limits how often this occurs.
+**Fix**: Changed to use whatever unmasked pixels are available, only falling back to
+all-pixels sampling when there are literally zero unmasked pixels. Removed the `min_pixels`
+parameter from `compute_tile_stats`, `fill_tile_stats`, and `TileGrid::compute`. The
+`min_unmasked_fraction` config field remains but is no longer used internally.
 
 ### 8. No Convergence Check Across Refinement Iterations
 

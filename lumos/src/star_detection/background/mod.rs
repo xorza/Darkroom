@@ -45,7 +45,7 @@ pub(crate) fn estimate_background(
 
     // Create tile grid and compute statistics
     let mut tile_grid = TileGrid::new_uninit(width, height, config.tile_size);
-    tile_grid.compute(pixels, None, 0, config.sigma_clip_iterations);
+    tile_grid.compute(pixels, None, config.sigma_clip_iterations);
 
     // Interpolate from tile grid to per-pixel values
     interpolate_from_grid(&tile_grid, &mut background, &mut noise);
@@ -69,8 +69,6 @@ pub(crate) fn refine_background(
 
     let width = pixels.width();
     let height = pixels.height();
-    let max_tile_pixels = config.tile_size * config.tile_size;
-    let min_pixels = (max_tile_pixels as f32 * config.min_unmasked_fraction) as usize;
 
     let mut tile_grid = TileGrid::new_uninit(width, height, config.tile_size);
     let mut mask = pool.acquire_bit();
@@ -87,12 +85,7 @@ pub(crate) fn refine_background(
             &mut scratch,
         );
 
-        tile_grid.compute(
-            pixels,
-            Some(&mask),
-            min_pixels,
-            config.sigma_clip_iterations,
-        );
+        tile_grid.compute(pixels, Some(&mask), config.sigma_clip_iterations);
 
         interpolate_from_grid(&tile_grid, &mut estimate.background, &mut estimate.noise);
     }

@@ -70,6 +70,7 @@ patterns and the highest-priority **unfixed** issues across all modules.
 - star_detection: Duplicate `use rayon::prelude::*` in threshold_mask → removed
 - astro_image: Float FITS data not normalized → heuristic normalization (divide by max when max > 2.0)
 - calibration: Per-CFA-channel flat normalization missing → `divide_by_normalized_cfa()` with independent R/G/B means
+- star_detection: Background mask fallback used contaminated star pixels → now uses available unmasked pixels, only falls back when tile 100% masked
 
 </details>
 

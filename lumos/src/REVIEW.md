@@ -91,6 +91,12 @@ Comprehensive code quality review across submodules (~40k+ lines). The codebase 
 - Added heuristic: compute max, normalize by dividing by max if max > 2.0. Threshold of 2.0 provides headroom for HDR overexposure while catching [0,65535] and [0,255] ranges.
 - 10 tests covering: [0,1] unchanged, HDR headroom, threshold boundary, [0,65535], [0,255], negative values, Float64, UInt16 regression, all-zero, single pixel.
 
+#### ~~[F33] Background mask fallback uses contaminated pixels~~ --- FIXED
+- **Location**: `star_detection/background/tile_grid.rs` — `compute_tile_stats()`
+- When a tile had fewer unmasked pixels than `min_pixels` (30% of tile), it discarded the good background pixels and fell back to sampling ALL pixels including bright stars. This biased the background estimate upward in crowded regions.
+- Changed fallback condition from `values.len() < min_pixels` to `values.is_empty()`. Now uses whatever unmasked pixels are available; only falls back to all-pixels when the tile is 100% masked. Removed `min_pixels` parameter from internal APIs.
+- Updated test to verify that a 95%-masked tile uses the 5% unmasked background pixels (median ≈ 0.2) instead of falling back to star-contaminated samples (median ≈ 0.9).
+
 #### ~~[F32] Per-CFA-channel flat normalization missing~~ --- FIXED
 - **Location**: `astro_image/cfa.rs` — `divide_by_normalized()`
 - Single global mean across all CFA pixels caused color shift with non-white flat light sources (LED panels, twilight flats).

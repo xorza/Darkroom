@@ -101,7 +101,7 @@ With ~1000 samples, median accuracy is within 1-2%.
 When a source mask is provided:
 
 1. **Collect unmasked pixels** using word-level bit operations
-2. **Fallback** to all pixels if too few unmasked (< min_pixels)
+2. **Fallback** to all pixels only if zero unmasked pixels remain
 3. **Subsample** if too many unmasked (> MAX_TILE_SAMPLES)
 
 Word-level operations process 64 mask bits at a time:
