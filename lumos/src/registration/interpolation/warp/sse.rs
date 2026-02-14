@@ -74,7 +74,7 @@ pub unsafe fn warp_row_bilinear_avx2(
                 base_x as f32,
             );
 
-            // Compute source coordinates
+            // Compute source coordinates:
             // src_x = (a*x + by_c) / (g*x + hy_1)
             // src_y = (d*x + ey_f) / (g*x + hy_1)
             let ax = _mm256_mul_ps(a_vec, x_coords);
@@ -131,7 +131,7 @@ pub unsafe fn warp_row_bilinear_avx2(
             let p01_vec = _mm256_loadu_ps(p01.as_ptr());
             let p11_vec = _mm256_loadu_ps(p11.as_ptr());
 
-            // Bilinear interpolation
+            // Bilinear interpolation:
             // top = p00 + fx * (p10 - p00)
             // bottom = p01 + fx * (p11 - p01)
             // result = top + fy * (bottom - top)
@@ -335,12 +335,13 @@ pub unsafe fn lanczos3_kernel_fma<const DERINGING: bool>(
         let src_hi = _mm_loadu_ps(row_ptr.add(4));
 
         let wyj = _mm_set1_ps(wy[j]);
-        let w_lo = _mm_mul_ps(wx_lo, wyj);
-        let w_hi = _mm_mul_ps(wx_hi, wyj);
-        let s_lo = _mm_mul_ps(src_lo, w_lo);
-        let s_hi = _mm_mul_ps(src_hi, w_hi);
 
         if DERINGING {
+            let w_lo = _mm_mul_ps(wx_lo, wyj);
+            let w_hi = _mm_mul_ps(wx_hi, wyj);
+            let s_lo = _mm_mul_ps(src_lo, w_lo);
+            let s_hi = _mm_mul_ps(src_hi, w_hi);
+
             // Split into positive (s >= 0) and negative (s < 0) contributions
             let pos_lo = _mm_cmpge_ps(s_lo, zero);
             let neg_lo = _mm_cmplt_ps(s_lo, zero);
@@ -357,8 +358,12 @@ pub unsafe fn lanczos3_kernel_fma<const DERINGING: bool>(
             sn_hi = _mm_sub_ps(sn_hi, _mm_and_ps(neg_hi, s_hi));
             wn_hi = _mm_sub_ps(wn_hi, _mm_and_ps(neg_hi, w_hi));
         } else {
-            acc_lo = _mm_add_ps(acc_lo, s_lo);
-            acc_hi = _mm_add_ps(acc_hi, s_hi);
+            // FMA: acc += (src * wx) * wy
+            // Fuses the wy multiply + accumulate into one FMA, saving one mul per pair.
+            let sx_lo = _mm_mul_ps(src_lo, wx_lo);
+            let sx_hi = _mm_mul_ps(src_hi, wx_hi);
+            acc_lo = _mm_fmadd_ps(sx_lo, wyj, acc_lo);
+            acc_hi = _mm_fmadd_ps(sx_hi, wyj, acc_hi);
         }
     }
 

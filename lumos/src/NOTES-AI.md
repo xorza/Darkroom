@@ -79,7 +79,7 @@ patterns and the highest-priority **unfixed** issues across all modules.
 - raw normalization: SSE4.1 only, no AVX2 path (2x throughput available)
 - drizzle: accumulation loops single-threaded (finalization is rayon-parallel)
 - gradient_removal: TPS evaluation O(n*W*H) with no spatial optimization
-- registration: Lanczos3 SIMD kernel uses mul+add instead of actual FMA intrinsics
+- registration: Lanczos3 SIMD kernel — no-dering path now uses FMA; dering path still mul+add (masked accumulation)
 - **Well-covered**: math sums, convolution, threshold mask, median filter, profile fitting,
   background interpolation, warp interpolation, X-Trans demosaic
 
@@ -130,7 +130,7 @@ patterns and the highest-priority **unfixed** issues across all modules.
 10. Add iterative gradient sample rejection (sigma=3, max 10 iterations)
 11. Coarse-grid TPS evaluation (evaluate on 64px grid, bilinearly interpolate)
 12. Fix gradient_removal division correction (mean → median)
-13. Use actual FMA intrinsics in registration Lanczos3 SIMD kernel
+13. ~~Use actual FMA intrinsics in registration Lanczos3 SIMD kernel~~ -- DONE (no-dering path)
 14. Implement true drizzle Square kernel (4-corner transform + polygon clipping)
 15. Add drizzle context image (per-pixel contributing-frame bitmask)
 16. Add drizzle per-pixel weight maps

@@ -228,23 +228,22 @@ accumulates the absolute values (since `s < 0` means `and(neg, s)` is negative, 
 
 ### Lanczos3 FMA Kernel (`warp/sse.rs:306-381`)
 
-**Naming issue:** The function is named `lanczos3_kernel_fma` and tagged with
-`#[target_feature(enable = "avx2,fma")]`, but **does not use any FMA intrinsics**.
-The accumulation uses `_mm_mul_ps` + `_mm_add_ps` (separate multiply and add), not
-`_mm_fmadd_ps`. This means:
-1. The function requires FMA support at runtime (dispatch checks `has_avx2_fma()`)
-   but does not benefit from it.
-2. Renaming to `lanczos3_kernel_sse` and changing the target feature to just `"sse4.1"`
-   would make it available on more hardware without any loss.
-3. Alternatively, replacing the mul+add pairs with actual FMA intrinsics would improve
-   both accuracy (single rounding) and throughput (1 instruction instead of 2).
+Uses actual `_mm_fmadd_ps` FMA intrinsics in the non-deringing path. The no-deringing
+inner loop restructures `acc += src * wx * wy` as `sx = mul(src, wx); acc = fmadd(sx, wy, acc)`,
+saving one multiply per lo/hi pair vs the naive `w = mul(wx, wy); s = mul(src, w); acc = add(acc, s)`.
+Result: 12 `vmulps` + 12 `vfmadd132ps` (24 total) vs previous 24 `vmulps` + 12 `vaddps` (36 total).
+Measured improvement: ~2.5% on 1k single-threaded no-deringing benchmark.
+
+The deringing path still uses `_mm_mul_ps` + `_mm_add_ps` because it needs both `w` and `s`
+as separate values for mask-based positive/negative contribution tracking. FMA cannot fuse
+the masked accumulation pattern `add(acc, and(mask, val))`.
 
 **Architecture:** Two `__m128` accumulators (lo/hi) process 4+4 = 8 floats per row.
-6 rows x (2 loads + 2 weight muls + 2 src*weight muls) = 36 multiplies, 12 adds.
-With deringing: additional 8 comparisons + 8 masked adds per row = 48 extra ops.
+No-deringing: 6 rows x (2 loads + 2 src*wx muls + 2 FMAs) = 12 muls + 12 FMAs.
+Deringing: 6 rows x (2 loads + 2 weight muls + 2 src*weight muls + 8 masked accums) = 24 muls + 12 adds + 48 mask ops.
 
-**Register pressure:** Without deringing: 2 accumulators + 2 wx + 1 zero + 2 src + 2
-temps = ~9 XMM registers. With deringing: adds 8 accumulators (sp/sn/wp/wn lo/hi) = 17
+**Register pressure:** Without deringing: 2 accumulators + 2 wx + 2 src + 2
+temps = ~8 XMM registers. With deringing: adds 8 accumulators (sp/sn/wp/wn lo/hi) = 17
 registers. x86_64 has 16 XMM registers, so LLVM must spill 1 register. This is minimal
 overhead.
 
@@ -309,25 +308,12 @@ processing would help but adds complexity.
 
 ## Issues Found
 
-### 1. SIMD Kernel Does Not Actually Use FMA (Medium - Correctness/Naming)
+### ~~1. SIMD Kernel Does Not Actually Use FMA~~ -- FIXED
 
-**File:** `warp/sse.rs:306-381`
-**Lines:** 338-341
-
-The function `lanczos3_kernel_fma` requires `#[target_feature(enable = "avx2,fma")]`
-but uses `_mm_mul_ps` + `_mm_add_ps` instead of `_mm_fmadd_ps`. This:
-- Restricts the function to CPUs with FMA support unnecessarily
-- Misses the accuracy benefit of FMA (single rounding instead of double)
-- Misses the throughput benefit (FMA is 1 uop on modern CPUs)
-- The function name is misleading
-
-**Fix:** Either:
-(a) Replace `_mm_mul_ps(src, w) -> acc = _mm_add_ps(acc, s)` with
-    `acc = _mm_fmadd_ps(src, w, acc)` to actually use FMA, or
-(b) Change target feature to `"sse4.1"` and rename to drop "fma" if FMA is not needed.
-
-Option (a) is preferred: FMA would improve both speed and accuracy, and the dispatch
-already requires FMA.
+No-deringing path now uses `_mm_fmadd_ps` with restructured computation:
+`sx = mul(src, wx); acc = fmadd(sx, wy, acc)`. Saves 12 instructions per kernel call.
+Measured: ~2.5% improvement on 1k single-threaded no-deringing benchmark.
+Deringing path unchanged (needs separate `w` and `s` values for mask branches).
 
 ### 2. Duplicate Bilinear Implementations (Low - Code Quality)
 
@@ -373,10 +359,8 @@ universal default for astrophotography, this has no practical impact.
 
 ### Worth Doing
 
-1. **Use actual FMA intrinsics in Lanczos3 SIMD kernel** (`warp/sse.rs:338-341`):
-   Replace `_mm_mul_ps` + `_mm_add_ps` with `_mm_fmadd_ps`. Gives both accuracy
-   (single rounding) and throughput improvements. The dispatch already requires FMA.
-   Estimated improvement: ~5-10% for the SIMD kernel path.
+1. ~~**Use actual FMA intrinsics in Lanczos3 SIMD kernel**~~ -- DONE. Measured ~2.5%
+   end-to-end improvement (no-dering path). Kernel instruction count reduced 33%.
 
 2. **Generic incremental stepping** for Lanczos2/Lanczos4/Bicubic: Factor out stepping
    logic from the Lanczos3-specific row warper so all methods benefit from avoiding
