@@ -14,7 +14,8 @@ accumulates weighted contributions.
 - `DrizzleAccumulator`: Core accumulator with per-channel `data` and `weights` buffers
   - `data: ArrayVec<Buffer2<f32>, 3>` -- accumulated `flux * weight` per channel
   - `weights: ArrayVec<Buffer2<f32>, 3>` -- accumulated weight per channel
-  - `add_image(image, transform, weight)` -- dispatches to kernel-specific method
+  - `add_image(image, transform, weight, pixel_weights)` -- dispatches to kernel-specific method
+  - `pixel_weights: Option<&Buffer2<f32>>` -- per-pixel weight map (0=exclude, 1=normal)
   - `accumulate()` -- shared inline helper iterating over channels
   - `finalize()` -- normalizes `data / weights`, applies min_coverage, returns DrizzleResult
 - `DrizzleResult`: Final image + normalized [0,1] coverage map (channel 0 weights)
@@ -184,7 +185,7 @@ Source: [PCL DrizzleIntegrationInstance.cpp](https://github.com/PixInsight/PCL)
 | **Square kernel (polygon)**  | **No**         | Yes            | Yes (default)  | Yes (default)  |
 | **Circular kernel**          | No             | No             | No             | Yes            |
 | **Variable-shape kernel**    | No             | No             | No             | Yes            |
-| **Per-pixel input weights**  | **No**         | Yes            | Flat-based     | Via II process |
+| **Per-pixel input weights**  | Yes            | Yes            | Flat-based     | Via II process |
 | **Variance/error output**    | **No**         | 3-component    | No             | No             |
 | **Context/contribution map** | No             | Yes (bitmask)  | Rejection maps | Rejection maps |
 | **Coverage map**             | Yes            | Yes            | No             | Yes            |
@@ -299,19 +300,14 @@ amateur astrophotography software (Siril, DeepSkyStacker, etc.).
 
 ## Missing Features (with severity)
 
-### P1 (Critical): Per-Pixel Input Weights / Bad Pixel Masks
+### ~~P1 (Critical): Per-Pixel Input Weights / Bad Pixel Masks~~ -- DONE
 
-**What**: Per-pixel weight map `w(x,y)` multiplied into the contribution weight. Allows
-masking bad pixels (hot/dead/cosmic rays), satellite trails, and weighting by flat field.
-
-**Impact**: Without this, a single hot pixel or cosmic ray hit contributes fully to the
-output, creating artifacts. All competing tools support this:
-- STScI: `get_pixel(p->weights, i, j)` -- full 2D weight map
-- Siril: master flat weighting
-- PixInsight: via ImageIntegration rejection + weight maps
-
-**Implementation**: Add `Option<&Buffer2<f32>>` parameter to `add_image()`. Multiply
-`pixel_weight *= input_weight_map[(ix, iy)]` in `accumulate()`. Minimal code change.
+Implemented via `pixel_weights: Option<&Buffer2<f32>>` parameter on `add_image()` and
+`drizzle_stack()`. Per-pixel weight multiplies into the effective frame weight before
+kernel accumulation. Weight of 0.0 fully excludes a pixel (early-out skip in all kernels);
+1.0 is normal; intermediate values allow soft weighting. For radial kernels (Gaussian,
+Lanczos), the per-pixel weight scales the frame weight, not the kernel shape — kernel
+normalization remains purely geometric.
 
 ### P2 (Important): True Square Kernel (Polygon Clipping)
 
@@ -475,12 +471,9 @@ The `finalize()` method uses `par_chunks_mut` for row-parallel normalization and
 
 ### Short-term (correctness/quality)
 
-1. **Add per-pixel weight map support** (P1) -- most impactful quality improvement. Without
-   bad pixel masking, real-world results will have artifacts.
+1. **Enforce Lanczos constraints** (P4) -- trivial change, prevents user confusion.
 
-2. **Enforce Lanczos constraints** (P4) -- trivial change, prevents user confusion.
-
-3. **Add Lanczos-2 option** -- simple parameter change (`a = 2.0` instead of `a = 3.0`),
+2. **Add Lanczos-2 option** -- simple parameter change (`a = 2.0` instead of `a = 3.0`),
    matches Siril/STScI option set. Lanczos-2 is faster (5x5 vs 7x7) and often sufficient.
 
 ### Medium-term (feature parity)
