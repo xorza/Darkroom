@@ -1,5 +1,6 @@
 //! Bayer CFA demosaicing module.
 
+mod rcd;
 #[cfg(test)]
 mod tests;
 
@@ -90,7 +91,6 @@ impl CfaPattern {
 
 /// Raw Bayer image data with metadata needed for demosaicing.
 #[derive(Debug)]
-#[allow(dead_code)] // Used by tests only; needed once demosaicing is implemented.
 pub(crate) struct BayerImage<'a> {
     /// Raw Bayer pixel data (normalized to 0.0-1.0)
     pub(crate) data: &'a [f32],
@@ -183,9 +183,9 @@ impl<'a> BayerImage<'a> {
     }
 }
 
-/// Demosaic a Bayer CFA image to RGB.
+/// Demosaic a Bayer CFA image to RGB using the RCD algorithm.
 ///
 /// The output has 3 channels (RGB) interleaved: [R0, G0, B0, R1, G1, B1, ...].
-pub(crate) fn demosaic_bayer(_bayer: &BayerImage) -> Vec<f32> {
-    todo!("Bayer DCB demosaicing not yet implemented")
+pub(crate) fn demosaic_bayer(bayer: &BayerImage) -> Vec<f32> {
+    rcd::rcd_demosaic(bayer)
 }
