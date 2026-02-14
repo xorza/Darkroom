@@ -190,27 +190,19 @@ pub fn add_complex_nebula(
     base_amplitude: f32,
     seed: u64,
 ) {
-    // Simple LCG for reproducible randomness
-    let mut rng = seed;
-    let next_f32 = |s: &mut u64| -> f32 {
-        *s = s.wrapping_mul(6364136223846793005).wrapping_add(1);
-        (*s >> 33) as f32 / (1u64 << 31) as f32
-    };
+    let mut rng = crate::testing::TestRng::new(seed);
 
     // Add 3-5 overlapping nebula patches
-    let num_patches = 3 + (next_f32(&mut rng) * 3.0) as usize;
+    let num_patches = 3 + (rng.next_f32() * 3.0) as usize;
 
     for _ in 0..num_patches {
         let config = NebulaConfig {
-            center: Vec2::new(
-                0.2 + next_f32(&mut rng) * 0.6,
-                0.2 + next_f32(&mut rng) * 0.6,
-            ),
-            radius: 0.1 + next_f32(&mut rng) * 0.2,
-            amplitude: base_amplitude * (0.3 + next_f32(&mut rng) * 0.7),
-            softness: 1.5 + next_f32(&mut rng) * 2.0,
-            aspect_ratio: 0.5 + next_f32(&mut rng) * 0.5,
-            angle: next_f32(&mut rng) * PI,
+            center: Vec2::new(0.2 + rng.next_f32() * 0.6, 0.2 + rng.next_f32() * 0.6),
+            radius: 0.1 + rng.next_f32() * 0.2,
+            amplitude: base_amplitude * (0.3 + rng.next_f32() * 0.7),
+            softness: 1.5 + rng.next_f32() * 2.0,
+            aspect_ratio: 0.5 + rng.next_f32() * 0.5,
+            angle: rng.next_f32() * PI,
         };
         add_nebula_background(pixels, width, height, &config);
     }

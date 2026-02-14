@@ -115,17 +115,11 @@ fn add_gaussian_star(pixels: &mut [f32], width: usize, height: usize, star: &Syn
 fn add_noise(pixels: &mut [f32], sigma: f32) {
     use std::f32::consts::PI;
 
-    // Simple Box-Muller transform for Gaussian noise
-    // Using a simple LCG for reproducibility in tests
-    let mut seed: u64 = 12345;
-    let lcg_next = |s: &mut u64| -> f32 {
-        *s = s.wrapping_mul(6364136223846793005).wrapping_add(1);
-        (*s >> 33) as f32 / (1u64 << 31) as f32
-    };
+    let mut rng = crate::testing::TestRng::new(12345);
 
     for p in pixels.iter_mut() {
-        let u1 = lcg_next(&mut seed).max(1e-10);
-        let u2 = lcg_next(&mut seed);
+        let u1 = rng.next_f32().max(1e-10);
+        let u2 = rng.next_f32();
 
         let z = (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).cos();
         *p += z * sigma;

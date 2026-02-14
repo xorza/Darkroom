@@ -521,9 +521,28 @@ impl AstroImage {
 
     /// Save to file (PNG, JPEG, TIFF supported).
     pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        let image: Image = self.clone().into();
+        let image = self.to_image();
         image.save_file(path)?;
         Ok(())
+    }
+
+    /// Convert to an `Image` by borrowing pixel data (no clone).
+    pub fn to_image(&self) -> Image {
+        let width = self.dimensions.width;
+        let height = self.dimensions.height;
+
+        let (color_format, interleaved) = match &self.pixels {
+            PixelData::L(data) => (ColorFormat::L_F32, data.pixels().to_vec()),
+            PixelData::Rgb([r, g, b]) => {
+                let mut interleaved = vec![0.0f32; r.len() * 3];
+                interleave_rgb(r.pixels(), g.pixels(), b.pixels(), &mut interleaved);
+                (ColorFormat::RGB_F32, interleaved)
+            }
+        };
+
+        let desc = ImageDesc::new_with_stride(width, height, color_format);
+        let bytes: Vec<u8> = bytemuck::cast_slice(&interleaved).to_vec();
+        Image::new_with_data(desc, bytes).expect("Failed to create Image")
     }
 
     /// Consume and return interleaved pixels (RGBRGBRGB...).

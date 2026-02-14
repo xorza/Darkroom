@@ -163,17 +163,13 @@ fn test_registration_with_noise() {
     let dx = 50.0;
     let dy = 35.0;
 
-    let mut state = 11111u64;
-    let mut next_random = || {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        ((state >> 33) as f64 / (1u64 << 31) as f64) * 2.0 - 1.0 // -1 to 1
-    };
+    let mut rng = crate::testing::TestRng::new(11111);
 
     let target_stars: Vec<Star> = ref_stars
         .iter()
         .map(|s| {
-            let noise_x = next_random() * 0.5; // +/- 0.5 pixel noise
-            let noise_y = next_random() * 0.5;
+            let noise_x = (rng.next_f64() * 2.0 - 1.0) * 0.5; // +/- 0.5 pixel noise
+            let noise_y = (rng.next_f64() * 2.0 - 1.0) * 0.5;
             Star {
                 pos: DVec2::new(s.pos.x + dx + noise_x, s.pos.y + dy + noise_y),
                 ..*s

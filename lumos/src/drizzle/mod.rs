@@ -237,10 +237,22 @@ impl DrizzleAccumulator {
                 self.add_image_point(&image, transform, weight, scale);
             }
             DrizzleKernel::Gaussian => {
-                self.add_image_gaussian(&image, transform, weight, scale, drop_size);
+                // Per STScI: Gaussian FWHM = drop_size in output pixels.
+                // sigma = FWHM / (2 * sqrt(2 * ln(2))) = FWHM / 2.3548
+                let sigma = drop_size / 2.3548;
+                let radius = (3.0 * sigma).ceil() as isize;
+                let inv_2sigma_sq = 1.0 / (2.0 * sigma * sigma);
+                self.add_image_radial(&image, transform, weight, scale, radius, |dx, dy| {
+                    let dist_sq = dx * dx + dy * dy;
+                    (-dist_sq * inv_2sigma_sq).exp()
+                });
             }
             DrizzleKernel::Lanczos => {
-                self.add_image_lanczos(&image, transform, weight, scale);
+                // Lanczos-3: support radius 3, kernel defined on [-3, 3].
+                let a = 3.0f32;
+                self.add_image_radial(&image, transform, weight, scale, a as isize, |dx, dy| {
+                    lanczos_kernel(dx, a) * lanczos_kernel(dy, a)
+                });
             }
         }
     }
@@ -260,24 +272,20 @@ impl DrizzleAccumulator {
         let output_height = self.height();
         let input_width = image.width();
         let input_height = image.height();
-        // Process each input pixel
+
         for iy in 0..input_height {
             for ix in 0..input_width {
-                // Transform input pixel center to output coordinates, scale to output grid
                 let t = transform.apply(DVec2::new(ix as f64 + 0.5, iy as f64 + 0.5));
                 let ox_center = t.x as f32 * scale;
                 let oy_center = t.y as f32 * scale;
 
-                // Compute drop bounding box in output pixels
                 let ox_min = (ox_center - half_drop).floor().max(0.0) as usize;
                 let oy_min = (oy_center - half_drop).floor().max(0.0) as usize;
                 let ox_max = (ox_center + half_drop).ceil().min(output_width as f32) as usize;
                 let oy_max = (oy_center + half_drop).ceil().min(output_height as f32) as usize;
 
-                // Distribute flux to overlapping output pixels
                 for oy in oy_min..oy_max {
                     for ox in ox_min..ox_max {
-                        // Compute overlap area between drop and output pixel
                         let overlap = compute_square_overlap(
                             ox_center - half_drop,
                             oy_center - half_drop,
@@ -290,19 +298,8 @@ impl DrizzleAccumulator {
                         );
 
                         if overlap > 0.0 {
-                            // Weight by overlap area normalized by drop area
                             let pixel_weight = weight * overlap * inv_area;
-
-                            for (c, (d, w)) in self
-                                .data
-                                .iter_mut()
-                                .zip(self.weights.iter_mut())
-                                .enumerate()
-                            {
-                                let flux = image.channel(c)[(ix, iy)];
-                                *d.get_mut(ox, oy) += flux * pixel_weight;
-                                *w.get_mut(ox, oy) += pixel_weight;
-                            }
+                            self.accumulate(image, ix, iy, ox, oy, pixel_weight);
                         }
                     }
                 }
@@ -325,142 +322,33 @@ impl DrizzleAccumulator {
 
         for iy in 0..input_height {
             for ix in 0..input_width {
-                // Transform and scale to output coordinates
                 let t = transform.apply(DVec2::new(ix as f64 + 0.5, iy as f64 + 0.5));
                 let ox = (t.x as f32 * scale).floor() as isize;
                 let oy = (t.y as f32 * scale).floor() as isize;
 
                 if ox >= 0 && ox < output_width as isize && oy >= 0 && oy < output_height as isize {
-                    let ox = ox as usize;
-                    let oy = oy as usize;
-
-                    for (c, (d, w)) in self
-                        .data
-                        .iter_mut()
-                        .zip(self.weights.iter_mut())
-                        .enumerate()
-                    {
-                        let flux = image.channel(c)[(ix, iy)];
-                        *d.get_mut(ox, oy) += flux * weight;
-                        *w.get_mut(ox, oy) += weight;
-                    }
+                    self.accumulate(image, ix, iy, ox as usize, oy as usize, weight);
                 }
             }
         }
     }
 
-    /// Add image using Gaussian kernel (smoother output).
-    fn add_image_gaussian(
-        &mut self,
-        image: &AstroImage,
-        transform: &Transform,
-        weight: f32,
-        scale: f32,
-        drop_size: f32,
-    ) {
-        // Per STScI: Gaussian FWHM = pixfrac in input pixels = drop_size in output pixels.
-        // sigma = FWHM / (2 * sqrt(2 * ln(2))) = FWHM / 2.3548
-        let sigma = drop_size / 2.3548;
-        let radius = (3.0 * sigma).ceil() as isize;
-        let inv_2sigma_sq = 1.0 / (2.0 * sigma * sigma);
-        let output_width = self.width();
-        let output_height = self.height();
-        let input_width = image.width();
-        let input_height = image.height();
-
-        for iy in 0..input_height {
-            for ix in 0..input_width {
-                let t = transform.apply(DVec2::new(ix as f64 + 0.5, iy as f64 + 0.5));
-                let ox_center = t.x as f32 * scale;
-                let oy_center = t.y as f32 * scale;
-
-                let ox_int = ox_center.floor() as isize;
-                let oy_int = oy_center.floor() as isize;
-
-                // Accumulate Gaussian weights for normalization
-                let mut total_gauss_weight = 0.0f32;
-
-                // First pass: compute total weight
-                for dy in -radius..=radius {
-                    let oy = oy_int + dy;
-                    if oy < 0 || oy >= output_height as isize {
-                        continue;
-                    }
-                    for dx in -radius..=radius {
-                        let ox = ox_int + dx;
-                        if ox < 0 || ox >= output_width as isize {
-                            continue;
-                        }
-
-                        let dist_x = (ox as f32 + 0.5) - ox_center;
-                        let dist_y = (oy as f32 + 0.5) - oy_center;
-                        let dist_sq = dist_x * dist_x + dist_y * dist_y;
-                        let gauss_weight = (-dist_sq * inv_2sigma_sq).exp();
-                        total_gauss_weight += gauss_weight;
-                    }
-                }
-
-                if total_gauss_weight < 1e-10 {
-                    continue;
-                }
-
-                // Second pass: distribute flux
-                for dy in -radius..=radius {
-                    let oy = oy_int + dy;
-                    if oy < 0 || oy >= output_height as isize {
-                        continue;
-                    }
-                    for dx in -radius..=radius {
-                        let ox = ox_int + dx;
-                        if ox < 0 || ox >= output_width as isize {
-                            continue;
-                        }
-
-                        let ox = ox as usize;
-                        let oy = oy as usize;
-
-                        let dist_x = (ox as f32 + 0.5) - ox_center;
-                        let dist_y = (oy as f32 + 0.5) - oy_center;
-                        let dist_sq = dist_x * dist_x + dist_y * dist_y;
-                        let gauss_weight = (-dist_sq * inv_2sigma_sq).exp();
-
-                        let pixel_weight = weight * gauss_weight / total_gauss_weight;
-
-                        for (c, (d, w)) in self
-                            .data
-                            .iter_mut()
-                            .zip(self.weights.iter_mut())
-                            .enumerate()
-                        {
-                            let flux = image.channel(c)[(ix, iy)];
-                            *d.get_mut(ox, oy) += flux * pixel_weight;
-                            *w.get_mut(ox, oy) += pixel_weight;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Add image using Lanczos kernel (highest quality).
+    /// Add image using a radial kernel with two-pass normalization.
     ///
-    /// Per STScI DrizzlePac: "should never be used for pixfrac != 1.0, and is not
-    /// recommended for scale != 1.0." At pixfrac=scale=1.0 it acts as an optimal
-    /// bandlimited resampling filter.
-    fn add_image_lanczos(
+    /// Shared implementation for Gaussian and Lanczos kernels. Both iterate output
+    /// pixels within `radius` of the transformed center, compute a per-pixel weight
+    /// via `kernel_fn(dx, dy)`, normalize so weights sum to 1, then accumulate.
+    fn add_image_radial(
         &mut self,
         image: &AstroImage,
         transform: &Transform,
         weight: f32,
         scale: f32,
+        radius: isize,
+        kernel_fn: impl Fn(f32, f32) -> f32,
     ) {
-        // Use Lanczos-3 (support radius 3)
-        let a = 3.0f32;
-        // Lanczos support radius is always `a` pixels (the kernel order).
-        // The kernel is defined on [-a, a] and zero outside.
-        let radius = a.ceil() as isize;
-        let output_width = self.width();
-        let output_height = self.height();
+        let output_width = self.width() as isize;
+        let output_height = self.height() as isize;
         let input_width = image.width();
         let input_height = image.height();
 
@@ -473,64 +361,70 @@ impl DrizzleAccumulator {
                 let ox_int = ox_center.floor() as isize;
                 let oy_int = oy_center.floor() as isize;
 
-                // Compute Lanczos weights and normalize
-                let mut total_lanczos_weight = 0.0f32;
-
+                // First pass: compute total weight for normalization
+                let mut total_weight = 0.0f32;
                 for dy in -radius..=radius {
                     let oy = oy_int + dy;
-                    if oy < 0 || oy >= output_height as isize {
+                    if oy < 0 || oy >= output_height {
                         continue;
                     }
                     for dx in -radius..=radius {
                         let ox = ox_int + dx;
-                        if ox < 0 || ox >= output_width as isize {
+                        if ox < 0 || ox >= output_width {
                             continue;
                         }
-
-                        let dist_x = ox_center - (ox as f32 + 0.5);
-                        let dist_y = oy_center - (oy as f32 + 0.5);
-                        let lanczos_weight = lanczos_kernel(dist_x, a) * lanczos_kernel(dist_y, a);
-                        total_lanczos_weight += lanczos_weight;
+                        let dist_x = (ox as f32 + 0.5) - ox_center;
+                        let dist_y = (oy as f32 + 0.5) - oy_center;
+                        total_weight += kernel_fn(dist_x, dist_y);
                     }
                 }
 
-                if total_lanczos_weight.abs() < 1e-10 {
+                if total_weight.abs() < 1e-10 {
                     continue;
                 }
 
+                // Second pass: distribute flux with normalized weights
+                let inv_total = weight / total_weight;
                 for dy in -radius..=radius {
                     let oy = oy_int + dy;
-                    if oy < 0 || oy >= output_height as isize {
+                    if oy < 0 || oy >= output_height {
                         continue;
                     }
                     for dx in -radius..=radius {
                         let ox = ox_int + dx;
-                        if ox < 0 || ox >= output_width as isize {
+                        if ox < 0 || ox >= output_width {
                             continue;
                         }
-
-                        let ox = ox as usize;
-                        let oy = oy as usize;
-
-                        let dist_x = ox_center - (ox as f32 + 0.5);
-                        let dist_y = oy_center - (oy as f32 + 0.5);
-                        let lanczos_weight = lanczos_kernel(dist_x, a) * lanczos_kernel(dist_y, a);
-
-                        let pixel_weight = weight * lanczos_weight / total_lanczos_weight;
-
-                        for (c, (d, w)) in self
-                            .data
-                            .iter_mut()
-                            .zip(self.weights.iter_mut())
-                            .enumerate()
-                        {
-                            let flux = image.channel(c)[(ix, iy)];
-                            *d.get_mut(ox, oy) += flux * pixel_weight;
-                            *w.get_mut(ox, oy) += pixel_weight;
-                        }
+                        let dist_x = (ox as f32 + 0.5) - ox_center;
+                        let dist_y = (oy as f32 + 0.5) - oy_center;
+                        let pixel_weight = kernel_fn(dist_x, dist_y) * inv_total;
+                        self.accumulate(image, ix, iy, ox as usize, oy as usize, pixel_weight);
                     }
                 }
             }
+        }
+    }
+
+    /// Accumulate weighted flux from input pixel (ix, iy) into output pixel (ox, oy).
+    #[inline]
+    fn accumulate(
+        &mut self,
+        image: &AstroImage,
+        ix: usize,
+        iy: usize,
+        ox: usize,
+        oy: usize,
+        pixel_weight: f32,
+    ) {
+        for (c, (d, w)) in self
+            .data
+            .iter_mut()
+            .zip(self.weights.iter_mut())
+            .enumerate()
+        {
+            let flux = image.channel(c)[(ix, iy)];
+            *d.get_mut(ox, oy) += flux * pixel_weight;
+            *w.get_mut(ox, oy) += pixel_weight;
         }
     }
 

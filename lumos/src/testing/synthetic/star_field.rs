@@ -149,12 +149,7 @@ pub fn generate_star_field(config: &StarFieldConfig) -> (Buffer2<f32>, Vec<Groun
     let mut pixels = vec![0.0f32; config.width * config.height];
     let mut ground_truth = Vec::with_capacity(config.num_stars);
 
-    // Initialize RNG
-    let mut rng = config.seed;
-    let next_f32 = |s: &mut u64| -> f32 {
-        *s = s.wrapping_mul(6364136223846793005).wrapping_add(1);
-        (*s >> 33) as f32 / (1u64 << 31) as f32
-    };
+    let mut rng = crate::testing::TestRng::new(config.seed);
 
     // Add background
     match (&config.gradient, &config.vignette) {
@@ -189,22 +184,22 @@ pub fn generate_star_field(config: &StarFieldConfig) -> (Buffer2<f32>, Vec<Groun
     }
 
     // Generate star positions based on crowding type
-    let positions = generate_star_positions(config, &mut rng, next_f32);
+    let positions = generate_star_positions(config, &mut rng);
 
     // Generate stars
     for (x, y) in positions.iter() {
         // Random magnitude -> flux
         let mag = config.magnitude_range.0
-            + next_f32(&mut rng) * (config.magnitude_range.1 - config.magnitude_range.0);
+            + rng.next_f32() * (config.magnitude_range.1 - config.magnitude_range.0);
         let flux = 10.0f32.powf((config.mag_zero_point - mag) / 2.5);
 
         // Random FWHM
         let fwhm =
-            config.fwhm_range.0 + next_f32(&mut rng) * (config.fwhm_range.1 - config.fwhm_range.0);
+            config.fwhm_range.0 + rng.next_f32() * (config.fwhm_range.1 - config.fwhm_range.0);
 
         // Determine if saturated
         let is_saturated =
-            config.saturation_fraction > 0.0 && next_f32(&mut rng) < config.saturation_fraction;
+            config.saturation_fraction > 0.0 && rng.next_f32() < config.saturation_fraction;
 
         // Determine elongation
         let (eccentricity, angle) = match config.elongation {
@@ -212,9 +207,8 @@ pub fn generate_star_field(config: &StarFieldConfig) -> (Buffer2<f32>, Vec<Groun
             ElongationType::Uniform => config.uniform_elongation,
             ElongationType::Varying => {
                 let ecc = config.eccentricity_range.0
-                    + next_f32(&mut rng)
-                        * (config.eccentricity_range.1 - config.eccentricity_range.0);
-                let ang = next_f32(&mut rng) * PI;
+                    + rng.next_f32() * (config.eccentricity_range.1 - config.eccentricity_range.0);
+                let ang = rng.next_f32() * PI;
                 (ecc, ang)
             }
             ElongationType::FieldRotation => {
@@ -332,14 +326,10 @@ pub fn generate_star_field(config: &StarFieldConfig) -> (Buffer2<f32>, Vec<Groun
 }
 
 /// Generate star positions based on crowding type.
-fn generate_star_positions<F>(
+fn generate_star_positions(
     config: &StarFieldConfig,
-    rng: &mut u64,
-    mut next_f32: F,
-) -> Vec<(f32, f32)>
-where
-    F: FnMut(&mut u64) -> f32,
-{
+    rng: &mut crate::testing::TestRng,
+) -> Vec<(f32, f32)> {
     let mut positions = Vec::with_capacity(config.num_stars);
 
     let margin = config.edge_margin as f32;
@@ -349,8 +339,8 @@ where
     match config.crowding {
         CrowdingType::Uniform => {
             for _ in 0..config.num_stars {
-                let x = margin + next_f32(rng) * x_range;
-                let y = margin + next_f32(rng) * y_range;
+                let x = margin + rng.next_f32() * x_range;
+                let y = margin + rng.next_f32() * y_range;
                 positions.push((x, y));
             }
         }
@@ -364,8 +354,8 @@ where
             // Central cluster (Gaussian distribution)
             for _ in 0..cluster_count {
                 loop {
-                    let u1 = next_f32(rng).max(1e-10);
-                    let u2 = next_f32(rng);
+                    let u1 = rng.next_f32().max(1e-10);
+                    let u2 = rng.next_f32();
                     let z1 = (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).cos();
                     let z2 = (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).sin();
 
@@ -386,8 +376,8 @@ where
             // Sparse halo (uniform)
             let halo_count = config.num_stars - cluster_count;
             for _ in 0..halo_count {
-                let x = margin + next_f32(rng) * x_range;
-                let y = margin + next_f32(rng) * y_range;
+                let x = margin + rng.next_f32() * x_range;
+                let y = margin + rng.next_f32() * y_range;
                 positions.push((x, y));
             }
         }
@@ -395,11 +385,11 @@ where
             // More stars on left side than right
             for _ in 0..config.num_stars {
                 // Use inverse transform sampling for gradient distribution
-                let u = next_f32(rng);
+                let u = rng.next_f32();
                 // Quadratic CDF: P(X < x) = x^2, so x = sqrt(u)
                 // This gives more stars at higher x values, invert for left-heavy
                 let x = margin + (1.0 - u.sqrt()) * x_range;
-                let y = margin + next_f32(rng) * y_range;
+                let y = margin + rng.next_f32() * y_range;
                 positions.push((x, y));
             }
         }
@@ -410,15 +400,11 @@ where
 
 /// Add Gaussian noise to pixels.
 fn add_gaussian_noise(pixels: &mut [f32], sigma: f32, seed: u64) {
-    let mut rng = seed;
-    let next_f32 = |s: &mut u64| -> f32 {
-        *s = s.wrapping_mul(6364136223846793005).wrapping_add(1);
-        (*s >> 33) as f32 / (1u64 << 31) as f32
-    };
+    let mut rng = crate::testing::TestRng::new(seed);
 
     for p in pixels.iter_mut() {
-        let u1 = next_f32(&mut rng).max(1e-10);
-        let u2 = next_f32(&mut rng);
+        let u1 = rng.next_f32().max(1e-10);
+        let u2 = rng.next_f32();
         let z = (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).cos();
         *p += z * sigma;
     }
@@ -531,13 +517,7 @@ pub fn generate_globular_cluster(
     let background = 0.02f32;
     let mut pixels = vec![background; width * height];
 
-    // LCG for reproducible random positions
-    let mut state = seed;
-    let mut next_rand = || -> f64 {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        // Use full 64-bit state for better distribution
-        (state as f64) / (u64::MAX as f64)
-    };
+    let mut rng = crate::testing::TestRng::new(seed);
 
     let center_x = width as f64 / 2.0;
     let center_y = height as f64 / 2.0;
@@ -549,8 +529,8 @@ pub fn generate_globular_cluster(
     for _ in 0..num_stars {
         // Exponential radial distribution: r = -scale * ln(u)
         // This gives high density at center
-        let u1 = next_rand().max(1e-10);
-        let u2 = next_rand();
+        let u1 = rng.next_f64().max(1e-10);
+        let u2 = rng.next_f64();
 
         let scale = core_radius * 2.5;
         let r = -scale * u1.ln();
@@ -575,11 +555,11 @@ pub fn generate_globular_cluster(
         // Brightness increases toward center (brighter giants in core)
         let dist_from_center = ((cx - center_x).powi(2) + (cy - center_y).powi(2)).sqrt();
         let brightness_boost = 1.0 + 2.0 * (1.0 - (dist_from_center / halo_radius).min(1.0));
-        let base_brightness = 0.15 + next_rand() * 0.6;
+        let base_brightness = 0.15 + rng.next_f64() * 0.6;
         let brightness = (base_brightness * brightness_boost).min(1.0) as f32;
 
         // Smaller sigma for tighter stars, slight variation
-        let sigma = 1.8 + next_rand() as f32 * 0.8;
+        let sigma = 1.8 + rng.next_f32() * 0.8;
         let two_sigma_sq = 2.0 * sigma * sigma;
 
         let radius = (sigma * 4.0).ceil() as i32;

@@ -3,6 +3,45 @@
 pub mod real_data;
 pub mod synthetic;
 
+// ============================================================================
+// Deterministic test RNG
+// ============================================================================
+
+/// Deterministic LCG random number generator for reproducible test data.
+///
+/// Uses the Knuth LCG: `state = state * 6364136223846793005 + 1`.
+/// All synthetic data generators should use this instead of inline LCG closures.
+#[derive(Debug, Clone)]
+pub struct TestRng {
+    state: u64,
+}
+
+impl TestRng {
+    /// Create a new RNG with the given seed.
+    pub fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    /// Advance state and return raw u64.
+    #[inline]
+    pub fn next_u64(&mut self) -> u64 {
+        self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        self.state
+    }
+
+    /// Return a random f32 in [0, 1).
+    #[inline]
+    pub fn next_f32(&mut self) -> f32 {
+        (self.next_u64() >> 33) as f32 / (1u64 << 31) as f32
+    }
+
+    /// Return a random f64 in [0, 1).
+    #[inline]
+    pub fn next_f64(&mut self) -> f64 {
+        (self.next_u64() >> 33) as f64 / (1u64 << 31) as f64
+    }
+}
+
 use std::path::PathBuf;
 
 use crate::AstroImage;

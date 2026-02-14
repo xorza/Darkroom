@@ -51,12 +51,10 @@ fn test_centroid_accuracy() {
     }
 
     // Add small amount of noise
-    let mut rng = 42u64;
+    let mut rng = crate::testing::TestRng::new(42);
     for p in &mut pixels {
-        rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let u1 = ((rng >> 33) as f32 / (1u64 << 31) as f32).max(1e-10);
-        rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let u2 = (rng >> 33) as f32 / (1u64 << 31) as f32;
+        let u1 = rng.next_f32().max(1e-10);
+        let u2 = rng.next_f32();
         let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
         *p += z * 0.01;
         *p = p.clamp(0.0, 1.0);
@@ -211,12 +209,10 @@ fn test_centroid_snr() {
 
     // Add noise
     let noise_sigma = 0.02;
-    let mut rng = 42u64;
+    let mut rng = crate::testing::TestRng::new(42);
     for p in &mut pixels {
-        rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let u1 = ((rng >> 33) as f32 / (1u64 << 31) as f32).max(1e-10);
-        rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let u2 = (rng >> 33) as f32 / (1u64 << 31) as f32;
+        let u1 = rng.next_f32().max(1e-10);
+        let u2 = rng.next_f32();
         let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
         *p += z * noise_sigma;
         *p = p.clamp(0.0, 1.0);

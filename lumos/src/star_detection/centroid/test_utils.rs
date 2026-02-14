@@ -2,15 +2,13 @@
 
 /// Add Gaussian noise to pixel values using a simple LCG PRNG.
 pub fn add_noise(pixels: &mut [f32], noise_sigma: f32, seed: u64) {
-    let mut state = seed;
+    let mut rng = crate::testing::TestRng::new(seed);
     for pixel in pixels.iter_mut() {
-        // Box-Muller transform with LCG
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let u1 = (state as f32) / (u64::MAX as f32);
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let u2 = (state as f32) / (u64::MAX as f32);
+        // Box-Muller transform
+        let u1 = rng.next_f32().max(1e-10);
+        let u2 = rng.next_f32();
 
-        let z = (-2.0 * u1.max(1e-10).ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
+        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
         *pixel += z * noise_sigma;
     }
 }

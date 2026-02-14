@@ -36,18 +36,12 @@ pub fn generate_random_positions_with_margin(
     seed: u64,
     margin: f64,
 ) -> Vec<DVec2> {
-    // Simple LCG random number generator for reproducibility
-    let mut state = seed;
-    let mut next_random = || {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        (state >> 33) as f64 / (1u64 << 31) as f64
-    };
-
+    let mut rng = crate::testing::TestRng::new(seed);
     let mut stars = Vec::with_capacity(num_stars);
 
     for _ in 0..num_stars {
-        let x = margin + next_random() * (width - 2.0 * margin);
-        let y = margin + next_random() * (height - 2.0 * margin);
+        let x = margin + rng.next_f64() * (width - 2.0 * margin);
+        let y = margin + rng.next_f64() * (height - 2.0 * margin);
         stars.push(DVec2::new(x, y));
     }
 
@@ -144,18 +138,14 @@ pub fn scale_stars(stars: &[DVec2], scale: f64, center_x: f64, center_y: f64) ->
 /// * `noise_amplitude` - Maximum noise in each direction (pixels)
 /// * `seed` - Random seed
 pub fn add_position_noise(stars: &[DVec2], noise_amplitude: f64, seed: u64) -> Vec<DVec2> {
-    let mut state = seed;
-    let mut next_random = || {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        ((state >> 33) as f64 / (1u64 << 31) as f64) * 2.0 - 1.0 // -1 to 1
-    };
+    let mut rng = crate::testing::TestRng::new(seed);
 
     stars
         .iter()
         .map(|p| {
             let noise = DVec2::new(
-                next_random() * noise_amplitude,
-                next_random() * noise_amplitude,
+                (rng.next_f64() * 2.0 - 1.0) * noise_amplitude,
+                (rng.next_f64() * 2.0 - 1.0) * noise_amplitude,
             );
             *p + noise
         })
@@ -177,15 +167,11 @@ pub fn remove_random_stars(stars: &[DVec2], fraction: f64, seed: u64) -> Vec<DVe
         "fraction must be between 0.0 and 1.0"
     );
 
-    let mut state = seed;
-    let mut next_random = || {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        (state >> 33) as f64 / (1u64 << 31) as f64
-    };
+    let mut rng = crate::testing::TestRng::new(seed);
 
     stars
         .iter()
-        .filter(|_| next_random() >= fraction)
+        .filter(|_| rng.next_f64() >= fraction)
         .copied()
         .collect()
 }
@@ -210,16 +196,11 @@ pub fn add_spurious_stars(
 ) -> Vec<DVec2> {
     let margin = 10.0;
     let mut result = stars.to_vec();
-
-    let mut state = seed;
-    let mut next_random = || {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        (state >> 33) as f64 / (1u64 << 31) as f64
-    };
+    let mut rng = crate::testing::TestRng::new(seed);
 
     for _ in 0..count {
-        let x = margin + next_random() * (width - 2.0 * margin);
-        let y = margin + next_random() * (height - 2.0 * margin);
+        let x = margin + rng.next_f64() * (width - 2.0 * margin);
+        let y = margin + rng.next_f64() * (height - 2.0 * margin);
         result.push(DVec2::new(x, y));
     }
 
@@ -381,18 +362,14 @@ pub fn transform_star_list(
 
 /// Add positional noise to Stars.
 pub fn add_star_noise(stars: &[Star], noise_amplitude: f64, seed: u64) -> Vec<Star> {
-    let mut state = seed;
-    let mut next_random = || {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        ((state >> 33) as f64 / (1u64 << 31) as f64) * 2.0 - 1.0
-    };
+    let mut rng = crate::testing::TestRng::new(seed);
 
     stars
         .iter()
         .map(|s| {
             let noise = DVec2::new(
-                next_random() * noise_amplitude,
-                next_random() * noise_amplitude,
+                (rng.next_f64() * 2.0 - 1.0) * noise_amplitude,
+                (rng.next_f64() * 2.0 - 1.0) * noise_amplitude,
             );
             Star {
                 pos: s.pos + noise,
@@ -409,15 +386,11 @@ pub fn remove_random_star_list(stars: &[Star], fraction: f64, seed: u64) -> Vec<
         "fraction must be between 0.0 and 1.0"
     );
 
-    let mut state = seed;
-    let mut next_random = || {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        (state >> 33) as f64 / (1u64 << 31) as f64
-    };
+    let mut rng = crate::testing::TestRng::new(seed);
 
     stars
         .iter()
-        .filter(|_| next_random() >= fraction)
+        .filter(|_| rng.next_f64() >= fraction)
         .cloned()
         .collect()
 }
@@ -433,16 +406,11 @@ pub fn add_spurious_star_list(
 ) -> Vec<Star> {
     let margin = 10.0;
     let mut result = stars.to_vec();
-
-    let mut state = seed;
-    let mut next_random = || {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        (state >> 33) as f64 / (1u64 << 31) as f64
-    };
+    let mut rng = crate::testing::TestRng::new(seed);
 
     for i in 0..count {
-        let x = margin + next_random() * (width - 2.0 * margin);
-        let y = margin + next_random() * (height - 2.0 * margin);
+        let x = margin + rng.next_f64() * (width - 2.0 * margin);
+        let y = margin + rng.next_f64() * (height - 2.0 * margin);
         result.push(Star {
             pos: DVec2::new(x, y),
             flux: 100.0 - i as f32, // Low flux for spurious stars

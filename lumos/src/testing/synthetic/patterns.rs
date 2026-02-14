@@ -121,11 +121,9 @@ pub fn checkerboard_offset(
 ///
 /// Uses a simple LCG-based hash for reproducible noise.
 pub fn add_noise(pixels: &mut Buffer2<f32>, amplitude: f32, seed: u64) {
-    let mut state = seed;
+    let mut rng = crate::testing::TestRng::new(seed);
     for p in pixels.iter_mut() {
-        // Simple LCG step
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let hash = (state >> 33) as f32 / (u32::MAX as f32);
+        let hash = rng.next_f32();
         *p += (hash - 0.5) * 2.0 * amplitude;
     }
 }

@@ -151,22 +151,18 @@ pub fn star_field(
 ) -> (Buffer2<f32>, Vec<(f32, f32)>) {
     let mut pixels = vec![background; width * height];
     let mut positions = Vec::with_capacity(num_stars);
-    let mut state = seed;
-
-    // Simple LCG for reproducible random numbers
-    let mut next_rand = || -> f32 {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        (state >> 33) as f32 / (u32::MAX as f32)
-    };
+    let mut rng = crate::testing::TestRng::new(seed);
 
     let margin = (sigma * 4.0).ceil() as usize;
     let two_sigma_sq = 2.0 * sigma * sigma;
 
     for _ in 0..num_stars {
         // Random position with margin from edges
-        let cx = margin as f32 + next_rand() * (width - 2 * margin) as f32 + next_rand() * 0.5;
-        let cy = margin as f32 + next_rand() * (height - 2 * margin) as f32 + next_rand() * 0.5;
-        let brightness = 0.5 + next_rand() * 0.5;
+        let cx =
+            margin as f32 + rng.next_f32() * (width - 2 * margin) as f32 + rng.next_f32() * 0.5;
+        let cy =
+            margin as f32 + rng.next_f32() * (height - 2 * margin) as f32 + rng.next_f32() * 0.5;
+        let brightness = 0.5 + rng.next_f32() * 0.5;
 
         // Add Gaussian star
         let radius = (sigma * 4.0).ceil() as i32;
@@ -255,19 +251,15 @@ pub fn benchmark_star_field(
         *p += (hash - 0.5) * 2.0 * noise_amplitude;
     }
 
-    // Add synthetic stars using LCG
-    let mut state = seed;
-    let mut next_rand = || -> u64 {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        state >> 33
-    };
+    // Add synthetic stars
+    let mut rng = crate::testing::TestRng::new(seed);
 
     let margin = 15;
     for _ in 0..num_stars {
-        let cx = margin + (next_rand() as usize % (width - 2 * margin));
-        let cy = margin + (next_rand() as usize % (height - 2 * margin));
-        let brightness = 0.5 + (next_rand() % 500) as f32 / 1000.0;
-        let sigma = 1.5 + (next_rand() % 100) as f32 / 100.0;
+        let cx = margin + ((rng.next_u64() >> 33) as usize % (width - 2 * margin));
+        let cy = margin + ((rng.next_u64() >> 33) as usize % (height - 2 * margin));
+        let brightness = 0.5 + rng.next_f32() * 0.5;
+        let sigma = 1.5 + rng.next_f32();
         let two_sigma_sq = 2.0 * sigma * sigma;
 
         // Render star with limited radius for efficiency
