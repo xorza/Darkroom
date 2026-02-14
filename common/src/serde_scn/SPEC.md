@@ -152,7 +152,7 @@ Comma-separated values between `[` and `]`. Trailing commas allowed. Newlines ar
 
 ## Maps
 
-Key-value pairs between `{` and `}`. Keys followed by `:` then value. Pairs separated by commas. Trailing commas allowed.
+Key-value pairs between `{` and `}`. Keys followed by `:` then value. Pairs separated by commas. Trailing commas allowed. **Duplicate keys are an error.**
 
 **Keys** are either:
 - Bare identifiers: `[a-zA-Z_][a-zA-Z0-9_]*` (cannot be `true`, `false`, `null`)

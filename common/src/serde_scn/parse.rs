@@ -697,6 +697,9 @@ impl<'a> Parser<'a> {
             }
 
             let key = self.parse_key()?;
+            if entries.iter().any(|(k, _)| k == &key) {
+                return Err(self.lexer.error(format!("duplicate map key: {key:?}")));
+            }
             self.expect(&Token::Colon)?;
             let value = self.parse_value()?;
             entries.push((key, value));

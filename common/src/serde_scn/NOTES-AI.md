@@ -184,8 +184,7 @@ triggered when `deserialize_enum` is called (serde knows the target type). Keep 
 
 ## Spec Completeness Gaps
 
-- **Duplicate map keys**: Spec does not define behavior. Current parser silently accepts last value.
-  Should spec say "implementation-defined" or "error"?
+- **Duplicate map keys**: Parser rejects with error. Checked before parsing value (O(n) per key).
 - **Maximum nesting depth**: Spec does not define. Implementation enforces 128-level limit.
 - **Number limits**: Spec does not define max integer or float precision. i64 and u64 ranges are
   implicit from implementation.

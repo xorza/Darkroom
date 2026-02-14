@@ -456,6 +456,31 @@ fn error_trailing_garbage() {
 }
 
 #[test]
+fn error_duplicate_map_keys() {
+    // Duplicate bare key
+    let result = from_str::<std::collections::HashMap<String, i32>>("{ a: 1, a: 2 }");
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("duplicate"),
+        "expected duplicate error, got: {err}"
+    );
+
+    // Duplicate quoted key
+    let result = from_str::<std::collections::HashMap<String, i32>>(r#"{ "x": 1, "x": 2 }"#);
+    assert!(result.is_err());
+
+    // Duplicate with mixed bare/quoted (same string value)
+    let result = from_str::<std::collections::HashMap<String, i32>>(r#"{ foo: 1, "foo": 2 }"#);
+    assert!(result.is_err());
+
+    // Non-duplicate is fine
+    let v: std::collections::HashMap<String, i32> = from_str("{ a: 1, b: 2 }").unwrap();
+    assert_eq!(v["a"], 1);
+    assert_eq!(v["b"], 2);
+}
+
+#[test]
 fn error_trailing_dot_float() {
     // "1." must be rejected — require at least one digit after dot
     let result = from_str::<f64>("1.");
