@@ -14,11 +14,11 @@ mod bench;
 
 use std::path::Path;
 
-use anyhow::Result;
 use arrayvec::ArrayVec;
 use serde::{Deserialize, Serialize};
 
 use crate::astro_image::AstroImage;
+use crate::astro_image::error::ImageLoadError;
 
 use super::buffer_pool::BufferPool;
 use super::config::Config;
@@ -244,11 +244,19 @@ impl StarDetector {
     ///
     /// The sidecar is written to `{path}.detection` in SCN format.
     /// Returns the detection result.
-    pub fn detect_file(&mut self, path: impl AsRef<Path>) -> Result<DetectionResult> {
+    pub fn detect_file(
+        &mut self,
+        path: impl AsRef<Path>,
+    ) -> Result<DetectionResult, ImageLoadError> {
         let path = path.as_ref();
         let image = AstroImage::from_file(path)?;
         let result = self.detect(&image);
-        super::detection_file::save_detection_result(path, &result)?;
+        super::detection_file::save_detection_result(path, &result).map_err(|e| {
+            ImageLoadError::Io {
+                path: path.to_path_buf(),
+                source: e,
+            }
+        })?;
         Ok(result)
     }
 }

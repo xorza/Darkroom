@@ -1,18 +1,24 @@
-use anyhow::{Context, Result};
 use fitsio::FitsFile;
 use fitsio::hdu::HduInfo;
 use fitsio::images::ImageType;
 use std::path::Path;
 
 use super::cfa::CfaType;
+use super::error::ImageLoadError;
 use super::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 
-/// Load an astronomical image from a FITS file.
-pub fn load_fits(path: &Path) -> Result<AstroImage> {
-    let mut fptr = FitsFile::open(path)
-        .with_context(|| format!("Failed to open FITS file: {}", path.display()))?;
+fn fits_err(path: &Path, source: fitsio::errors::Error) -> ImageLoadError {
+    ImageLoadError::Fits {
+        path: path.to_path_buf(),
+        source,
+    }
+}
 
-    let hdu = fptr.primary_hdu().context("Failed to access primary HDU")?;
+/// Load an astronomical image from a FITS file.
+pub fn load_fits(path: &Path) -> Result<AstroImage, ImageLoadError> {
+    let mut fptr = FitsFile::open(path).map_err(|e| fits_err(path, e))?;
+
+    let hdu = fptr.primary_hdu().map_err(|e| fits_err(path, e))?;
 
     let (dimensions, bitpix) = match &hdu.info {
         HduInfo::ImageInfo { shape, image_type } => {
@@ -20,10 +26,16 @@ pub fn load_fits(path: &Path) -> Result<AstroImage> {
             (shape.clone(), bitpix)
         }
         HduInfo::TableInfo { .. } => {
-            anyhow::bail!("Primary HDU is a table, not an image");
+            return Err(fits_err(
+                path,
+                fitsio::errors::Error::Message("Primary HDU is a table, not an image".into()),
+            ));
         }
         HduInfo::AnyInfo => {
-            anyhow::bail!("Unknown HDU type");
+            return Err(fits_err(
+                path,
+                fitsio::errors::Error::Message("Unknown HDU type".into()),
+            ));
         }
     };
 
@@ -37,13 +49,16 @@ pub fn load_fits(path: &Path) -> Result<AstroImage> {
     let img_dims = match dimensions.len() {
         2 => ImageDimensions::new(dimensions[1], dimensions[0], 1),
         3 => ImageDimensions::new(dimensions[2], dimensions[1], dimensions[0]),
-        n => anyhow::bail!("Unsupported number of dimensions: {}", n),
+        n => {
+            return Err(fits_err(
+                path,
+                fitsio::errors::Error::Message(format!("Unsupported number of dimensions: {}", n)),
+            ));
+        }
     };
 
     // Read pixel data as f32
-    let pixels: Vec<f32> = hdu
-        .read_image(&mut fptr)
-        .context("Failed to read image data")?;
+    let pixels: Vec<f32> = hdu.read_image(&mut fptr).map_err(|e| fits_err(path, e))?;
 
     let plane_size = img_dims.width * img_dims.height;
     assert_eq!(

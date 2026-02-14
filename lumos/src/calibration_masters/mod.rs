@@ -7,8 +7,6 @@ mod tests;
 
 use std::path::Path;
 
-use anyhow::Result;
-
 use crate::astro_image::cfa::CfaImage;
 use crate::stacking::FrameType;
 use crate::stacking::cache::ImageCache;
@@ -49,7 +47,7 @@ fn stack_cfa_frames(
     paths: &[impl AsRef<Path> + Sync],
     frame_type: FrameType,
     config: StackConfig,
-) -> Result<Option<CfaImage>> {
+) -> Result<Option<CfaImage>, crate::stacking::Error> {
     if paths.is_empty() {
         return Ok(None);
     }
@@ -68,8 +66,7 @@ fn stack_cfa_frames(
         &config.cache,
         frame_type,
         ProgressCallback::default(),
-    )
-    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    )?;
 
     let result = run_stacking(&cache, &config);
 
@@ -115,7 +112,7 @@ impl CalibrationMasters {
         flats: &[impl AsRef<Path> + Sync],
         biases: &[impl AsRef<Path> + Sync],
         flat_darks: &[impl AsRef<Path> + Sync],
-    ) -> Result<Self> {
+    ) -> Result<Self, crate::stacking::Error> {
         let dark = stack_cfa_frames(darks, FrameType::Dark, StackConfig::dark())?;
         let flat = stack_cfa_frames(flats, FrameType::Flat, StackConfig::flat())?;
         let bias = stack_cfa_frames(biases, FrameType::Bias, StackConfig::bias())?;

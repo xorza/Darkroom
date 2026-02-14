@@ -1,9 +1,11 @@
 pub mod cfa;
+pub mod error;
 mod fits;
 pub(crate) mod sensor;
 
-use anyhow::Result;
 use rayon::prelude::*;
+
+use error::ImageLoadError;
 
 use imaginarium::{ChannelCount, ColorFormat, Image, ImageDesc};
 use std::ops::SubAssign;
@@ -263,7 +265,7 @@ impl AstroImage {
     /// - FITS: .fit, .fits
     /// - RAW: .raf, .cr2, .cr3, .nef, .arw, .dng
     /// - Standard: .tiff, .tif, .png, .jpg, .jpeg
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ImageLoadError> {
         let path = path.as_ref();
         let ext = path
             .extension()
@@ -275,10 +277,13 @@ impl AstroImage {
             "fit" | "fits" => fits::load_fits(path),
             "raf" | "cr2" | "cr3" | "nef" | "arw" | "dng" => crate::raw::load_raw(path),
             "tiff" | "tif" | "png" | "jpg" | "jpeg" => {
-                let image = Image::read_file(path)?;
+                let image = Image::read_file(path).map_err(|e| ImageLoadError::Image {
+                    path: path.to_path_buf(),
+                    source: e,
+                })?;
                 Ok(image.into())
             }
-            _ => anyhow::bail!("Unsupported file extension: {}", ext),
+            _ => Err(ImageLoadError::UnsupportedFormat { extension: ext }),
         }
     }
 
@@ -530,7 +535,7 @@ impl AstroImage {
     // ------------------------------------------------------------------------
 
     /// Save to file (PNG, JPEG, TIFF supported).
-    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<(), imaginarium::Error> {
         let image = self.to_image();
         image.save_file(path)?;
         Ok(())
@@ -588,7 +593,7 @@ impl crate::stacking::cache::StackableImage for AstroImage {
     fn load(path: &Path) -> Result<Self, crate::stacking::Error> {
         AstroImage::from_file(path).map_err(|e| crate::stacking::Error::ImageLoad {
             path: path.to_path_buf(),
-            source: std::io::Error::other(e.to_string()),
+            source: std::io::Error::other(e),
         })
     }
 

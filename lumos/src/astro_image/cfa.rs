@@ -69,7 +69,7 @@ impl crate::stacking::cache::StackableImage for CfaImage {
     fn load(path: &std::path::Path) -> Result<Self, crate::stacking::Error> {
         crate::raw::load_raw_cfa(path).map_err(|e| crate::stacking::Error::ImageLoad {
             path: path.to_path_buf(),
-            source: std::io::Error::other(e.to_string()),
+            source: std::io::Error::other(e),
         })
     }
 

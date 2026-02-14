@@ -2021,7 +2021,6 @@ dependencies = [
 name = "lumos"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "arrayvec",
  "bench",
  "bytemuck",

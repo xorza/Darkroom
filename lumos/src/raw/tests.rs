@@ -7,7 +7,7 @@ fn test_load_raw_invalid_path() {
     let result = load_raw(Path::new("/nonexistent/path/to/file.raf"));
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
-    assert!(err.contains("Failed to read raw file"));
+    assert!(err.contains("Failed to read file"));
 }
 
 #[test]

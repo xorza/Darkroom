@@ -893,7 +893,7 @@ pub fn drizzle_stack<P: AsRef<Path> + Sync>(
     // Load first image to get dimensions
     let first_image = AstroImage::from_file(paths[0].as_ref()).map_err(|e| Error::ImageLoad {
         path: paths[0].as_ref().to_path_buf(),
-        source: std::io::Error::other(e.to_string()),
+        source: std::io::Error::other(e),
     })?;
 
     let input_dims = first_image.dimensions;
@@ -927,7 +927,7 @@ pub fn drizzle_stack<P: AsRef<Path> + Sync>(
     for (i, path) in paths.iter().enumerate().skip(1) {
         let image = AstroImage::from_file(path.as_ref()).map_err(|e| Error::ImageLoad {
             path: path.as_ref().to_path_buf(),
-            source: std::io::Error::other(e.to_string()),
+            source: std::io::Error::other(e),
         })?;
 
         // Validate dimensions match

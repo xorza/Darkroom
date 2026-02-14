@@ -17,7 +17,6 @@ imaginarium = { workspace = true }
 fitsio = { workspace = true }
 libraw-rs-sys = { workspace = true }
 
-anyhow = { workspace = true }
 thiserror = { workspace = true }
 bytemuck = { workspace = true }
 rayon = { workspace = true }

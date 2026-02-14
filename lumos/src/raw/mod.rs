@@ -6,12 +6,13 @@ mod benches;
 #[cfg(test)]
 mod tests;
 
-use anyhow::{Context, Result};
 use libraw_sys as sys;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::slice;
 use std::time::Instant;
+
+use crate::astro_image::error::ImageLoadError;
 
 use rayon::prelude::*;
 
@@ -266,12 +267,20 @@ fn fc(filters: u32, row: usize, col: usize) -> usize {
     ((filters >> (((row << 1 & 14) | (col & 1)) << 1)) & 3) as usize
 }
 
+fn raw_err(path: &Path, reason: impl Into<String>) -> ImageLoadError {
+    ImageLoadError::Raw {
+        path: path.to_path_buf(),
+        reason: reason.into(),
+    }
+}
+
 /// Unpacked raw file data from libraw, ready for sensor-specific processing.
 #[derive(Debug)]
 struct UnpackedRaw {
     inner: *mut sys::libraw_data_t,
     guard: Option<LibrawGuard>,
     buf: Option<Vec<u8>>,
+    path: PathBuf,
     raw_width: usize,
     raw_height: usize,
     width: usize,
@@ -288,11 +297,11 @@ struct UnpackedRaw {
 impl UnpackedRaw {
     /// Get the raw u16 image pointer and total pixel count.
     /// Returns the pointer and count, or an error if null.
-    fn raw_image_slice(&self) -> Result<&[u16]> {
+    fn raw_image_slice(&self) -> Result<&[u16], ImageLoadError> {
         // SAFETY: inner is valid and unpack succeeded.
         let raw_image_ptr = unsafe { (*self.inner).rawdata.raw_image };
         if raw_image_ptr.is_null() {
-            anyhow::bail!("libraw: raw_image is null");
+            return Err(raw_err(&self.path, "libraw: raw_image is null"));
         }
 
         let pixel_count = self
@@ -308,7 +317,7 @@ impl UnpackedRaw {
     ///
     /// Applies per-channel black correction but NO white balance (used for
     /// calibration frames where raw data integrity is required).
-    fn extract_cfa_pixels(&self) -> Result<Vec<f32>> {
+    fn extract_cfa_pixels(&self) -> Result<Vec<f32>, ImageLoadError> {
         let raw_data = self.raw_image_slice()?;
 
         // Pass 1: SIMD normalize with common black level
@@ -355,7 +364,7 @@ impl UnpackedRaw {
     }
 
     /// Process Bayer sensor data using our fast SIMD demosaic.
-    fn demosaic_bayer(&self, cfa_pattern: CfaPattern) -> Result<Vec<f32>> {
+    fn demosaic_bayer(&self, cfa_pattern: CfaPattern) -> Result<Vec<f32>, ImageLoadError> {
         let raw_data = self.raw_image_slice()?;
 
         // Pass 1: SIMD normalize with common black level
@@ -420,7 +429,7 @@ impl UnpackedRaw {
     ///
     /// Drops guard and buf before the expensive demosaicing step,
     /// reducing peak memory by ~77 MB.
-    fn demosaic_xtrans(&mut self) -> Result<Vec<f32>> {
+    fn demosaic_xtrans(&mut self) -> Result<Vec<f32>, ImageLoadError> {
         let raw_data = self.raw_image_slice()?;
         let xtrans_pattern = self.xtrans_pattern();
 
@@ -460,7 +469,7 @@ impl UnpackedRaw {
     /// Process unknown CFA pattern using libraw's built-in demosaic.
     /// This is slower but handles exotic sensor patterns correctly.
     /// Returns (pixels, width, height, num_channels).
-    fn demosaic_libraw_fallback(&self) -> Result<(Vec<f32>, usize, usize, usize)> {
+    fn demosaic_libraw_fallback(&self) -> Result<(Vec<f32>, usize, usize, usize), ImageLoadError> {
         let demosaic_start = Instant::now();
 
         // Configure libraw for linear output (no gamma, no color conversion)
@@ -485,7 +494,10 @@ impl UnpackedRaw {
         // SAFETY: inner is valid and configured
         let ret = unsafe { sys::libraw_dcraw_process(self.inner) };
         if ret != 0 {
-            anyhow::bail!("libraw: dcraw_process failed, error code: {}", ret);
+            return Err(raw_err(
+                &self.path,
+                format!("libraw: dcraw_process failed, error code: {}", ret),
+            ));
         }
 
         // Get the processed image
@@ -493,7 +505,10 @@ impl UnpackedRaw {
         let mut errc: i32 = 0;
         let processed_ptr = unsafe { sys::libraw_dcraw_make_mem_image(self.inner, &mut errc) };
         if processed_ptr.is_null() || errc != 0 {
-            anyhow::bail!("libraw: dcraw_make_mem_image failed, error code: {}", errc);
+            return Err(raw_err(
+                &self.path,
+                format!("libraw: dcraw_make_mem_image failed, error code: {}", errc),
+            ));
         }
 
         // Guard ensures cleanup even on early return or panic
@@ -583,14 +598,16 @@ impl UnpackedRaw {
 ///
 /// Performs: file read, libraw init, open_buffer, unpack, dimension/color
 /// validation, sensor type detection, and ISO extraction.
-fn open_raw(path: &Path) -> Result<UnpackedRaw> {
-    let buf =
-        fs::read(path).with_context(|| format!("Failed to read raw file: {}", path.display()))?;
+fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageLoadError> {
+    let buf = fs::read(path).map_err(|e| ImageLoadError::Io {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
 
     // SAFETY: libraw_init returns a valid pointer or null on failure.
     let inner = unsafe { sys::libraw_init(0) };
     if inner.is_null() {
-        anyhow::bail!("libraw: Failed to initialize");
+        return Err(raw_err(path, "libraw: Failed to initialize"));
     }
 
     // Guard ensures cleanup even on early return or panic
@@ -599,13 +616,19 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw> {
     // SAFETY: inner is valid (checked above), buf is valid for the duration of this call.
     let ret = unsafe { sys::libraw_open_buffer(inner, buf.as_ptr() as *const _, buf.len()) };
     if ret != 0 {
-        anyhow::bail!("libraw: Failed to open buffer, error code: {}", ret);
+        return Err(raw_err(
+            path,
+            format!("libraw: Failed to open buffer, error code: {}", ret),
+        ));
     }
 
     // SAFETY: inner is valid and open_buffer succeeded.
     let ret = unsafe { sys::libraw_unpack(inner) };
     if ret != 0 {
-        anyhow::bail!("libraw: Failed to unpack, error code: {}", ret);
+        return Err(raw_err(
+            path,
+            format!("libraw: Failed to unpack, error code: {}", ret),
+        ));
     }
 
     // SAFETY: inner is valid and unpack succeeded, sizes struct is initialized.
@@ -618,25 +641,28 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw> {
 
     // Validate dimensions
     if raw_width == 0 || raw_height == 0 {
-        anyhow::bail!(
-            "libraw: Invalid raw dimensions: {}x{}",
-            raw_width,
-            raw_height
-        );
+        return Err(raw_err(
+            path,
+            format!(
+                "libraw: Invalid raw dimensions: {}x{}",
+                raw_width, raw_height
+            ),
+        ));
     }
     if width == 0 || height == 0 {
-        anyhow::bail!("libraw: Invalid output dimensions: {}x{}", width, height);
+        return Err(raw_err(
+            path,
+            format!("libraw: Invalid output dimensions: {}x{}", width, height),
+        ));
     }
     if top_margin + height > raw_height || left_margin + width > raw_width {
-        anyhow::bail!(
-            "libraw: Margins exceed raw dimensions: margins ({}, {}) + size ({}, {}) > raw ({}, {})",
-            top_margin,
-            left_margin,
-            width,
-            height,
-            raw_width,
-            raw_height
-        );
+        return Err(raw_err(
+            path,
+            format!(
+                "libraw: Margins exceed raw dimensions: margins ({}, {}) + size ({}, {}) > raw ({}, {})",
+                top_margin, left_margin, width, height, raw_width, raw_height
+            ),
+        ));
     }
 
     // SAFETY: inner is valid, color struct is initialized after unpack.
@@ -672,6 +698,7 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw> {
         inner,
         guard: Some(guard),
         buf: Some(buf),
+        path: path.to_path_buf(),
         raw_width,
         raw_height,
         width,
@@ -692,7 +719,7 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw> {
 /// - Monochrome sensors: no demosaic needed, returns grayscale
 /// - Known Bayer patterns (RGGB, BGGR, GRBG, GBRG): fast SIMD demosaic
 /// - Unknown patterns (X-Trans, etc.): libraw's built-in demosaic (slower but correct)
-pub fn load_raw(path: &Path) -> Result<AstroImage> {
+pub fn load_raw(path: &Path) -> Result<AstroImage, ImageLoadError> {
     let mut raw = open_raw(path)?;
 
     let sensor_type = raw.sensor_type.clone();
@@ -762,7 +789,7 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
 ///
 /// For Unknown sensor types, falls back to `load_raw()` then wraps
 /// the demosaiced result as a Mono CfaImage.
-pub fn load_raw_cfa(path: &Path) -> Result<CfaImage> {
+pub fn load_raw_cfa(path: &Path) -> Result<CfaImage, ImageLoadError> {
     let raw = open_raw(path)?;
 
     let cfa_type = match &raw.sensor_type {
