@@ -63,24 +63,18 @@ uses a similar `disable_recursion_limit` mechanism.
 **Fix**: Add optional recursion limit to Parser (default ~128). Decrement on `parse_value` for
 arrays, maps, variants; increment on return.
 
-### No NaN/Infinity literals
+### NaN/Infinity literals — IMPLEMENTED
 
-NaN and Infinity serialize as `null` (lossy). This is documented in the spec. Compare:
-- RON: `inf`, `-inf`, `nan`
-- TOML: `inf`, `+inf`, `-inf`, `nan`
-- JSON5: `Infinity`, `-Infinity`, `NaN`
-- JSON: no support (same as SCN)
+`nan`, `inf`, `-inf` are float keywords. `-nan` also accepted. Parsed in `read_ident_or_keyword()`
+(for `nan`/`inf`) and `read_number()` (for `-inf`/`-nan`). Emitted by `emit_float()`.
+`is_bare_key()` excludes `nan`/`inf` to prevent collision with map keys.
+`parse_key()` handles `Token::Float(NaN/Infinity)` for hand-written SCN with bare nan/inf as keys.
 
-**Optional enhancement**: Add `inf`/`-inf`/`nan` as float literals. Natural fit for a Rust-centric
-format. Would require parser changes (recognize as keywords), emitter changes (emit literals), and
-spec update.
+### Hex/octal/binary integer literals — IMPLEMENTED
 
-### No hex/octal/binary integer literals
-
-RON supports `0xFF`, `0o777`, `0b1010`, plus underscore separators (`1_000_000`). SCN does not.
-These are useful for colors, bit flags, and large numbers.
-
-**Optional enhancement**: Low priority. Most SCN use cases (graph serialization) don't need these.
+`0xFF`, `0o777`, `0b1010` with case-insensitive prefixes. Parsed in `read_number()` → dispatches to
+`read_prefixed_integer()`. Negative allowed: `-0x10`. Emitter always outputs decimal.
+`make_integer_token()` handles Int vs Uint selection and overflow for negative values.
 
 ### No block comments
 
@@ -90,14 +84,11 @@ temporarily disabling large sections of config.
 **Optional enhancement**: Add nested `/* */` comments. Simple lexer addition. Must be nested
 (unlike C) so commenting out content containing `*/` doesn't silently break.
 
-### No hex/octal/binary literals or underscore separators
+### Underscore digit separators — IMPLEMENTED
 
-RON supports `0xFF`, `0o77`, `0b1010`, `1_000_000`. TOML supports all of these too.
-Hex is useful for colors and bit flags.
-
-**Optional enhancement**: Add `0x`/`0o`/`0b` prefixes in `read_number()` (check after leading `0`).
-Parser should accept, emitter should always emit decimal for roundtrip consistency. Underscore
-separators are trivial to add (skip `_` between digits).
+`1_000_000`, `0xFF_FF`, `1.23_45`, `1_0e1_0`. Parsed by `scan_digits_with_underscores()` which
+validates no leading/trailing/consecutive underscores. Stripped before `.parse()`. Works in all
+numeric contexts: decimal int/float, hex, octal, binary, exponents.
 
 ---
 
@@ -245,8 +236,8 @@ triggered when `deserialize_enum` is called (serde knows the target type). Keep 
 | Option Some | `Some(42)` | `42` (transparent) |
 | Option None | `None` | `null` |
 | Struct | `MyStruct(field: val)` | `{ field: val }` |
-| Hex literals | `0xFF` | Not supported |
-| `inf`/`nan` | `inf`, `NaN` | Not supported (→ `null`) |
+| Hex literals | `0xFF` | `0xFF` |
+| `inf`/`nan` | `inf`, `NaN` | `inf`, `nan` |
 | Raw strings | `r"..."`, `r#"..."#` | Not supported |
 | Multiline strings | Not built-in | `"""..."""` |
 | Block comments | `/* */` (nested) | Not supported |

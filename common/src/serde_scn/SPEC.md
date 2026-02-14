@@ -49,7 +49,7 @@ Only these two keywords. No `yes`/`no`/`on`/`off`.
 0
 42
 -7
-1000000
+1_000_000
 ```
 
 **Floats:** Must contain `.` or `e`/`E`. Optional leading `-`.
@@ -64,7 +64,38 @@ Only these two keywords. No `yes`/`no`/`on`/`off`.
 
 Integer vs float is distinguished by the presence of `.` or `e`/`E`.
 
-**Special values:** NaN and Infinity are not representable. They serialize as `null`.
+**Special float values:** `nan`, `inf`, `-inf` are keywords for IEEE 754 special values. `-nan` is also accepted (NaN has no meaningful sign).
+
+```
+nan
+inf
+-inf
+```
+
+**Hex/octal/binary integers:** Prefix `0x`/`0X`, `0o`/`0O`, `0b`/`0B` followed by digits in the appropriate base. Case-insensitive for both prefix and hex digits. Can be negative with leading `-`.
+
+```
+0xFF
+0o777
+0b1010
+-0x10
+0XAB
+```
+
+**Underscore digit separators:** Underscores `_` can appear between digits for readability, in any numeric literal (decimal, hex, octal, binary, float). Rules (matching Rust):
+- No leading underscore in a digit group
+- No trailing underscore in a digit group
+- No consecutive underscores
+
+```
+1_000_000
+0xFF_FF
+3.14_15
+1_0e1_0
+0b1111_0000
+```
+
+The emitter always outputs decimal integers and standard floats (no hex/octal/binary, no underscores). Roundtrip: `0xFF` → parse → emit → `255`.
 
 ## Strings
 
@@ -246,8 +277,15 @@ key       = IDENT | STRING
 
 variant   = IDENT value?       // greedy: consumes next value if present
 
-IDENT     = [a-zA-Z_][a-zA-Z0-9_]*   // excluding 'true', 'false', 'null'
-NUMBER    = '-'? ('0' | [1-9][0-9]*) ('.' [0-9]+)? ([eE] [+-]? [0-9]+)?
+IDENT     = [a-zA-Z_][a-zA-Z0-9_]*   // excluding 'true', 'false', 'null', 'nan', 'inf'
+NUMBER    = '-'? ( HEX_INT | OCT_INT | BIN_INT | DEC_NUMBER )
+          | 'nan' | 'inf' | '-inf' | '-nan'
+DEC_NUMBER = ('0' | [1-9] DIG*) ('.' [0-9] DIG*)? ([eE] [+-]? [0-9] DIG*)?
+HEX_INT   = '0' [xX] HDIG+
+OCT_INT   = '0' [oO] [0-7_]+        // same underscore rules
+BIN_INT   = '0' [bB] [01_]+         // same underscore rules
+DIG       = [0-9_]                   // no leading/trailing/consecutive underscores
+HDIG      = [0-9a-fA-F_]            // no leading/trailing/consecutive underscores
 STRING    = '"' (escape | [^"\\])* '"'
           | '"""' raw_content '"""'
 ```
@@ -261,6 +299,7 @@ The first token determines the production:
 - digit or `-` → number
 - `true`/`false` → boolean
 - `null` → null
+- `nan`/`inf` → float (special values)
 - identifier → variant (greedy: if next token starts a value, consume it as payload; otherwise unit variant)
 
 ## Full Example

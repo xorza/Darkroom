@@ -47,9 +47,12 @@ fn emit_float<W: Write>(w: &mut W, f: f64, indent: usize, at_start: bool) -> Res
     if at_start {
         write_indent(w, indent)?;
     }
-    if !f.is_finite() {
-        // SCN doesn't have NaN/Infinity literals — emit null.
-        w.write_all(b"null")?;
+    if f.is_nan() {
+        w.write_all(b"nan")?;
+    } else if f == f64::INFINITY {
+        w.write_all(b"inf")?;
+    } else if f == f64::NEG_INFINITY {
+        w.write_all(b"-inf")?;
     } else {
         // ryu produces the shortest roundtrip-safe decimal (max 24 bytes).
         let mut buf = ryu::Buffer::new();
@@ -216,7 +219,7 @@ fn is_bare_key(s: &str) -> bool {
     {
         return false;
     }
-    !matches!(s, "true" | "false" | "null")
+    !matches!(s, "true" | "false" | "null" | "nan" | "inf")
 }
 
 fn is_simple(v: &ScnValue) -> bool {

@@ -644,24 +644,75 @@ fn nested_variants() {
 }
 
 // ===========================================================================
-// NaN and Infinity (lossy — serialized as null)
+// NaN and Infinity literals
 // ===========================================================================
 
 #[test]
-fn nan_serializes_as_null() {
+fn nan_roundtrip() {
     let scn = to_string(&f64::NAN).unwrap();
-    assert_eq!(scn, "null\n");
-    // Deserializes back as Option::None since null can't represent a float
-    let v: Option<f64> = from_str(&scn).unwrap();
-    assert_eq!(v, None);
+    assert_eq!(scn, "nan\n");
+    let v: f64 = from_str(&scn).unwrap();
+    assert!(v.is_nan());
 }
 
 #[test]
-fn infinity_serializes_as_null() {
+fn infinity_roundtrip() {
     let scn = to_string(&f64::INFINITY).unwrap();
-    assert_eq!(scn, "null\n");
+    assert_eq!(scn, "inf\n");
+    let v: f64 = from_str(&scn).unwrap();
+    assert_eq!(v, f64::INFINITY);
+
     let scn = to_string(&f64::NEG_INFINITY).unwrap();
-    assert_eq!(scn, "null\n");
+    assert_eq!(scn, "-inf\n");
+    let v: f64 = from_str(&scn).unwrap();
+    assert_eq!(v, f64::NEG_INFINITY);
+}
+
+#[test]
+fn nan_inf_parse_bare() {
+    // nan as bare keyword
+    let val = super::parse::parse("nan").unwrap();
+    assert!(matches!(val, ScnValue::Float(f) if f.is_nan()));
+
+    // inf as bare keyword
+    let val = super::parse::parse("inf").unwrap();
+    assert!(matches!(val, ScnValue::Float(f) if f == f64::INFINITY));
+
+    // -inf from read_number path
+    let val = super::parse::parse("-inf").unwrap();
+    assert!(matches!(val, ScnValue::Float(f) if f == f64::NEG_INFINITY));
+
+    // -nan accepted (NaN has no meaningful sign)
+    let val = super::parse::parse("-nan").unwrap();
+    assert!(matches!(val, ScnValue::Float(f) if f.is_nan()));
+}
+
+#[test]
+fn nan_inf_in_array() {
+    // [nan, inf, -inf] → array of 3 floats
+    let val = super::parse::parse("[nan, inf, -inf]").unwrap();
+    let ScnValue::Array(items) = val else {
+        panic!("expected array");
+    };
+    assert_eq!(items.len(), 3);
+    assert!(matches!(items[0], ScnValue::Float(f) if f.is_nan()));
+    assert!(matches!(items[1], ScnValue::Float(f) if f == f64::INFINITY));
+    assert!(matches!(items[2], ScnValue::Float(f) if f == f64::NEG_INFINITY));
+}
+
+#[test]
+fn nan_inf_not_partial_ident() {
+    // "infinity" should parse as identifier, not "inf" + "inity"
+    let val = super::parse::parse("infinity").unwrap();
+    assert!(matches!(val, ScnValue::Variant(ref tag, None) if tag == "infinity"));
+
+    // "nana" should parse as identifier
+    let val = super::parse::parse("nana").unwrap();
+    assert!(matches!(val, ScnValue::Variant(ref tag, None) if tag == "nana"));
+
+    // "info" should parse as identifier
+    let val = super::parse::parse("info").unwrap();
+    assert!(matches!(val, ScnValue::Variant(ref tag, None) if tag == "info"));
 }
 
 // ===========================================================================
@@ -1171,4 +1222,334 @@ fn full_spec_example() {
 "#;
     let parsed: Graph = from_str(scn).unwrap();
     assert_eq!(parsed, graph);
+}
+
+// ===========================================================================
+// Hex/octal/binary integer literals
+// ===========================================================================
+
+#[test]
+fn hex_integer_literals() {
+    // 0xFF = 15*16 + 15 = 255
+    let val = super::parse::parse("0xFF").unwrap();
+    assert_eq!(val, ScnValue::Int(255));
+
+    // Case-insensitive prefix and digits
+    let val = super::parse::parse("0XFF").unwrap();
+    assert_eq!(val, ScnValue::Int(255));
+    let val = super::parse::parse("0xff").unwrap();
+    assert_eq!(val, ScnValue::Int(255));
+    let val = super::parse::parse("0xAb").unwrap();
+    assert_eq!(val, ScnValue::Int(0xAB)); // 10*16 + 11 = 171
+
+    // Negative hex: -0x10 = -16
+    let val = super::parse::parse("-0x10").unwrap();
+    assert_eq!(val, ScnValue::Int(-16));
+
+    // Max u64: 0xFFFFFFFFFFFFFFFF
+    let val = super::parse::parse("0xFFFFFFFFFFFFFFFF").unwrap();
+    assert_eq!(val, ScnValue::Uint(u64::MAX));
+
+    // Hex with underscores: 0xFF_FF = 65535
+    let val = super::parse::parse("0xFF_FF").unwrap();
+    assert_eq!(val, ScnValue::Int(65535));
+}
+
+#[test]
+fn octal_integer_literals() {
+    // 0o777 = 7*64 + 7*8 + 7 = 511
+    let val = super::parse::parse("0o777").unwrap();
+    assert_eq!(val, ScnValue::Int(511));
+
+    // Case-insensitive prefix
+    let val = super::parse::parse("0O10").unwrap();
+    assert_eq!(val, ScnValue::Int(8)); // octal 10 = 8
+
+    // Negative: -0o10 = -8
+    let val = super::parse::parse("-0o10").unwrap();
+    assert_eq!(val, ScnValue::Int(-8));
+}
+
+#[test]
+fn binary_integer_literals() {
+    // 0b1010 = 8 + 2 = 10
+    let val = super::parse::parse("0b1010").unwrap();
+    assert_eq!(val, ScnValue::Int(10));
+
+    // Case-insensitive prefix
+    let val = super::parse::parse("0B1111").unwrap();
+    assert_eq!(val, ScnValue::Int(15)); // 8+4+2+1
+
+    // Negative: -0b100 = -4
+    let val = super::parse::parse("-0b100").unwrap();
+    assert_eq!(val, ScnValue::Int(-4));
+}
+
+#[test]
+fn prefixed_integer_roundtrip_emits_decimal() {
+    // Parse hex, emit decimal
+    let val = super::parse::parse("0xFF").unwrap();
+    let mut buf = Vec::new();
+    super::emit::emit_value(&mut buf, &val, 0, true).unwrap();
+    assert_eq!(std::str::from_utf8(&buf).unwrap(), "255");
+
+    // Parse binary, emit decimal
+    let val = super::parse::parse("0b1010").unwrap();
+    let mut buf = Vec::new();
+    super::emit::emit_value(&mut buf, &val, 0, true).unwrap();
+    assert_eq!(std::str::from_utf8(&buf).unwrap(), "10");
+}
+
+#[test]
+fn error_prefixed_integer_no_digits() {
+    assert!(from_str::<i32>("0x").is_err());
+    assert!(from_str::<i32>("0o").is_err());
+    assert!(from_str::<i32>("0b").is_err());
+}
+
+#[test]
+fn error_prefixed_integer_invalid_digits() {
+    // G is not a hex digit
+    assert!(from_str::<i32>("0xGG").is_err());
+    // 8 is not an octal digit
+    assert!(from_str::<i32>("0o8").is_err());
+    // 2 is not a binary digit
+    assert!(from_str::<i32>("0b2").is_err());
+}
+
+#[test]
+fn error_negative_hex_overflow() {
+    // -0xFFFFFFFFFFFFFFFF overflows i64
+    assert!(from_str::<i64>("-0xFFFFFFFFFFFFFFFF").is_err());
+}
+
+// ===========================================================================
+// Underscore digit separators
+// ===========================================================================
+
+#[test]
+fn underscore_integer_separators() {
+    // 1_000_000 = 1000000
+    let val = super::parse::parse("1_000_000").unwrap();
+    assert_eq!(val, ScnValue::Int(1_000_000));
+
+    // Single underscore: 1_0 = 10
+    let val = super::parse::parse("1_0").unwrap();
+    assert_eq!(val, ScnValue::Int(10));
+
+    // Negative with underscores: -1_000 = -1000
+    let val = super::parse::parse("-1_000").unwrap();
+    assert_eq!(val, ScnValue::Int(-1000));
+}
+
+#[test]
+fn underscore_float_separators() {
+    // 1.23_45 = 1.2345
+    let val = super::parse::parse("1.23_45").unwrap();
+    assert_eq!(val, ScnValue::Float(1.2345));
+
+    // 1_0e1_0 = 10e10 = 1e11
+    let val = super::parse::parse("1_0e1_0").unwrap();
+    assert_eq!(val, ScnValue::Float(10e10));
+
+    // Underscore in integer part of float: 1_000.5
+    let val = super::parse::parse("1_000.5").unwrap();
+    assert_eq!(val, ScnValue::Float(1000.5));
+}
+
+#[test]
+fn underscore_in_prefixed_integers() {
+    // 0xFF_FF = 65535
+    let val = super::parse::parse("0xFF_FF").unwrap();
+    assert_eq!(val, ScnValue::Int(65535));
+
+    // 0b1111_0000 = 240
+    let val = super::parse::parse("0b1111_0000").unwrap();
+    assert_eq!(val, ScnValue::Int(0b1111_0000)); // 240
+
+    // 0o77_77 = 4095
+    let val = super::parse::parse("0o77_77").unwrap();
+    assert_eq!(val, ScnValue::Int(0o7777)); // 4095
+}
+
+#[test]
+fn error_leading_underscore_in_number() {
+    // _123 parses as identifier, not number — verify it fails as i32
+    assert!(from_str::<i32>("_123").is_err());
+}
+
+#[test]
+fn error_trailing_underscore_in_number() {
+    assert!(from_str::<i32>("123_").is_err());
+    assert!(from_str::<i32>("0xFF_").is_err());
+}
+
+#[test]
+fn error_consecutive_underscores() {
+    assert!(from_str::<i32>("1__2").is_err());
+    assert!(from_str::<i32>("0x1__2").is_err());
+}
+
+#[test]
+fn error_underscore_after_prefix() {
+    // 0x_FF: underscore immediately after prefix
+    assert!(from_str::<i32>("0x_FF").is_err());
+    assert!(from_str::<i32>("0o_7").is_err());
+    assert!(from_str::<i32>("0b_1").is_err());
+}
+
+#[test]
+fn error_underscore_adjacent_to_dot() {
+    // 1_.0: trailing underscore before dot
+    assert!(from_str::<f64>("1_.0").is_err());
+    // 1._0: underscore after dot (first fractional char must be digit)
+    assert!(from_str::<f64>("1._0").is_err());
+}
+
+// ===========================================================================
+// nan/inf as map keys
+// ===========================================================================
+
+#[test]
+fn nan_inf_serde_roundtrip() {
+    // nan through full serde path
+    let scn = to_string(&f64::NAN).unwrap();
+    assert_eq!(scn, "nan\n");
+    let v: f64 = from_str("nan").unwrap();
+    assert!(v.is_nan());
+
+    // inf through serde
+    assert_eq!(from_str::<f64>("inf").unwrap(), f64::INFINITY);
+    assert_eq!(from_str::<f64>("-inf").unwrap(), f64::NEG_INFINITY);
+
+    // nan/inf in struct field
+    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    struct WithFloat {
+        x: f64,
+        y: f64,
+        z: f64,
+    }
+    let val = WithFloat {
+        x: f64::NAN,
+        y: f64::INFINITY,
+        z: f64::NEG_INFINITY,
+    };
+    let scn = to_string(&val).unwrap();
+    assert!(scn.contains("nan"), "NaN field: {scn}");
+    assert!(scn.contains("inf"), "inf field: {scn}");
+    assert!(scn.contains("-inf"), "-inf field: {scn}");
+    let parsed: WithFloat = from_str(&scn).unwrap();
+    assert!(parsed.x.is_nan());
+    assert_eq!(parsed.y, f64::INFINITY);
+    assert_eq!(parsed.z, f64::NEG_INFINITY);
+}
+
+#[test]
+fn nan_inf_as_variant_payload() {
+    // Variant consuming nan as payload: "Const nan" → Variant("Const", Float(NaN))
+    let val = super::parse::parse("Const nan").unwrap();
+    let ScnValue::Variant(ref tag, Some(ref payload)) = val else {
+        panic!("expected variant, got {val:?}");
+    };
+    assert_eq!(tag, "Const");
+    assert!(matches!(**payload, ScnValue::Float(f) if f.is_nan()));
+
+    // Variant consuming inf
+    let val = super::parse::parse("Const inf").unwrap();
+    let ScnValue::Variant(_, Some(ref payload)) = val else {
+        panic!("expected variant");
+    };
+    assert!(matches!(**payload, ScnValue::Float(f) if f == f64::INFINITY));
+}
+
+#[test]
+fn hex_serde_deserialization() {
+    // Full serde path, not just parse::parse
+    assert_eq!(from_str::<i32>("0xFF").unwrap(), 255);
+    assert_eq!(from_str::<i32>("-0x10").unwrap(), -16);
+    assert_eq!(from_str::<u64>("0xFFFFFFFFFFFFFFFF").unwrap(), u64::MAX);
+    assert_eq!(from_str::<i32>("0o77").unwrap(), 63); // 7*8 + 7
+    assert_eq!(from_str::<i32>("0b1010").unwrap(), 10);
+    assert_eq!(from_str::<i32>("1_000").unwrap(), 1000);
+}
+
+#[test]
+fn hex_boundary_values() {
+    // -0x8000000000000000 = -2^63 = i64::MIN
+    let val = super::parse::parse("-0x8000000000000000").unwrap();
+    assert_eq!(val, ScnValue::Int(i64::MIN));
+
+    // 0x7FFFFFFFFFFFFFFF = i64::MAX → Int (not Uint)
+    let val = super::parse::parse("0x7FFFFFFFFFFFFFFF").unwrap();
+    assert_eq!(val, ScnValue::Int(i64::MAX));
+
+    // 0x8000000000000000 = 2^63 → Uint (exceeds i64::MAX)
+    let val = super::parse::parse("0x8000000000000000").unwrap();
+    assert_eq!(val, ScnValue::Uint(0x8000000000000000));
+
+    // -0x8000000000000001 → overflow error (exceeds i64::MIN magnitude)
+    assert!(super::parse::parse("-0x8000000000000001").is_err());
+}
+
+#[test]
+fn prefixed_zero_and_minimal() {
+    // Zero in all bases
+    let val = super::parse::parse("0x0").unwrap();
+    assert_eq!(val, ScnValue::Int(0));
+    let val = super::parse::parse("0o0").unwrap();
+    assert_eq!(val, ScnValue::Int(0));
+    let val = super::parse::parse("0b0").unwrap();
+    assert_eq!(val, ScnValue::Int(0));
+
+    // Negative zero → still Int(0) (i64 has no -0)
+    let val = super::parse::parse("-0x0").unwrap();
+    assert_eq!(val, ScnValue::Int(0));
+
+    // Single digit
+    let val = super::parse::parse("0x1").unwrap();
+    assert_eq!(val, ScnValue::Int(1));
+    let val = super::parse::parse("0o7").unwrap();
+    assert_eq!(val, ScnValue::Int(7));
+    let val = super::parse::parse("0b1").unwrap();
+    assert_eq!(val, ScnValue::Int(1));
+
+    // Leading zeros after prefix (valid in hex/oct/bin, unlike decimal)
+    let val = super::parse::parse("0x0F").unwrap();
+    assert_eq!(val, ScnValue::Int(15));
+    let val = super::parse::parse("0o007").unwrap();
+    assert_eq!(val, ScnValue::Int(7));
+    let val = super::parse::parse("0b0001").unwrap();
+    assert_eq!(val, ScnValue::Int(1));
+}
+
+#[test]
+fn underscore_near_exponent() {
+    // Underscore before 'e': 1_0e5 = 10e5 = 1_000_000
+    let val = super::parse::parse("1_0e5").unwrap();
+    assert_eq!(val, ScnValue::Float(10e5)); // 1_000_000.0
+
+    // Underscore in exponent with sign: 1e+1_0 = 1e10
+    let val = super::parse::parse("1e+1_0").unwrap();
+    assert_eq!(val, ScnValue::Float(1e10));
+
+    // Negative exponent with underscore: 1e-1_0 = 1e-10
+    let val = super::parse::parse("1e-1_0").unwrap();
+    assert_eq!(val, ScnValue::Float(1e-10));
+
+    // Underscore before e is trailing for integer group → error
+    assert!(super::parse::parse("1_e5").is_err());
+}
+
+#[test]
+fn nan_inf_as_map_keys() {
+    use std::collections::BTreeMap;
+    let mut map = BTreeMap::new();
+    map.insert("nan".to_string(), 1i32);
+    map.insert("inf".to_string(), 2);
+    roundtrip(&map);
+
+    // Verify they're quoted in output (since nan/inf are keywords)
+    let scn = to_string(&map).unwrap();
+    assert!(scn.contains("\"inf\""), "inf key should be quoted: {scn}");
+    assert!(scn.contains("\"nan\""), "nan key should be quoted: {scn}");
 }

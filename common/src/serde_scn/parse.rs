@@ -306,6 +306,19 @@ impl<'a> Lexer<'a> {
         let negative = self.input[self.pos] == b'-';
         if negative {
             self.advance();
+            // Check for -inf / -nan
+            if self.input[self.pos..].starts_with(b"inf") && !self.is_ident_byte_at(self.pos + 3) {
+                self.advance();
+                self.advance();
+                self.advance();
+                return Ok(Token::Float(f64::NEG_INFINITY));
+            }
+            if self.input[self.pos..].starts_with(b"nan") && !self.is_ident_byte_at(self.pos + 3) {
+                self.advance();
+                self.advance();
+                self.advance();
+                return Ok(Token::Float(f64::NAN));
+            }
         }
 
         // Must have at least one digit
@@ -313,20 +326,38 @@ impl<'a> Lexer<'a> {
             return Err(self.error("expected digit after '-'"));
         }
 
-        // Reject leading zeros (except 0 itself, 0.x, 0eN)
         let first_digit = self.input[self.pos];
         self.advance();
+
+        // Check for hex/octal/binary prefix after leading 0
+        if first_digit == b'0' && self.pos < self.input.len() {
+            match self.input[self.pos] {
+                b'x' | b'X' => {
+                    self.advance();
+                    return self.read_prefixed_integer(negative, 16, |d| d.is_ascii_hexdigit());
+                }
+                b'o' | b'O' => {
+                    self.advance();
+                    return self.read_prefixed_integer(negative, 8, |d| matches!(d, b'0'..=b'7'));
+                }
+                b'b' | b'B' => {
+                    self.advance();
+                    return self.read_prefixed_integer(negative, 2, |d| matches!(d, b'0' | b'1'));
+                }
+                _ => {}
+            }
+        }
+
+        // Reject leading zeros (except 0 itself, 0.x, 0eN)
         if first_digit == b'0'
             && self.pos < self.input.len()
-            && self.input[self.pos].is_ascii_digit()
+            && (self.input[self.pos].is_ascii_digit() || self.input[self.pos] == b'_')
         {
             return Err(self.error("leading zeros are not allowed"));
         }
 
-        // Remaining integer digits
-        while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
-            self.advance();
-        }
+        // Remaining integer digits with underscores
+        self.scan_digits_with_underscores()?;
 
         let mut is_float = false;
 
@@ -337,9 +368,8 @@ impl<'a> Lexer<'a> {
             if self.pos >= self.input.len() || !self.input[self.pos].is_ascii_digit() {
                 return Err(self.error("expected digit after '.'"));
             }
-            while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
-                self.advance();
-            }
+            self.advance();
+            self.scan_digits_with_underscores()?;
         }
 
         // Exponent
@@ -349,22 +379,33 @@ impl<'a> Lexer<'a> {
             if self.pos < self.input.len() && matches!(self.input[self.pos], b'+' | b'-') {
                 self.advance();
             }
-            while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
-                self.advance();
+            if self.pos >= self.input.len() || !self.input[self.pos].is_ascii_digit() {
+                return Err(self.error("expected digit in exponent"));
             }
+            self.advance();
+            self.scan_digits_with_underscores()?;
         }
 
-        let text = std::str::from_utf8(&self.input[start..self.pos]).unwrap();
+        let raw = std::str::from_utf8(&self.input[start..self.pos]).unwrap();
+
+        // Strip underscores for parsing
+        let owned;
+        let text = if raw.contains('_') {
+            owned = raw.replace('_', "");
+            owned.as_str()
+        } else {
+            raw
+        };
 
         if is_float {
             let f: f64 = text
                 .parse()
-                .map_err(|_| self.error(format!("invalid float: {text}")))?;
+                .map_err(|_| self.error(format!("invalid float: {raw}")))?;
             Ok(Token::Float(f))
         } else if negative {
             let i: i64 = text
                 .parse()
-                .map_err(|_| self.error(format!("invalid integer: {text}")))?;
+                .map_err(|_| self.error(format!("invalid integer: {raw}")))?;
             Ok(Token::Int(i))
         } else {
             // Try u64 first for large positive numbers, fall back to i64
@@ -375,7 +416,7 @@ impl<'a> Lexer<'a> {
                     Ok(Token::Int(u as i64))
                 }
             } else {
-                Err(self.error(format!("invalid integer: {text}")))
+                Err(self.error(format!("invalid integer: {raw}")))
             }
         }
     }
@@ -392,7 +433,103 @@ impl<'a> Lexer<'a> {
             "null" => Ok(Token::Null),
             "true" => Ok(Token::True),
             "false" => Ok(Token::False),
+            "nan" => Ok(Token::Float(f64::NAN)),
+            "inf" => Ok(Token::Float(f64::INFINITY)),
             _ => Ok(Token::Ident(ident.to_string())),
+        }
+    }
+
+    fn is_ident_byte_at(&self, pos: usize) -> bool {
+        pos < self.input.len()
+            && matches!(self.input[pos], b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
+    }
+
+    /// Scan additional digits and underscores after an already-consumed digit.
+    /// Validates no trailing underscore and no consecutive underscores.
+    fn scan_digits_with_underscores(&mut self) -> Result<()> {
+        let mut prev_underscore = false;
+        while self.pos < self.input.len() {
+            let b = self.input[self.pos];
+            if b.is_ascii_digit() {
+                prev_underscore = false;
+                self.advance();
+            } else if b == b'_' {
+                if prev_underscore {
+                    return Err(self.error("consecutive underscores in number"));
+                }
+                prev_underscore = true;
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        if prev_underscore {
+            return Err(self.error("trailing underscore in number"));
+        }
+        Ok(())
+    }
+
+    /// Read a hex/octal/binary integer after the `0x`/`0o`/`0b` prefix has been consumed.
+    fn read_prefixed_integer(
+        &mut self,
+        negative: bool,
+        radix: u32,
+        is_valid_digit: fn(u8) -> bool,
+    ) -> Result<Token> {
+        if self.pos >= self.input.len() || !is_valid_digit(self.input[self.pos]) {
+            return Err(self.error(format!("expected base-{radix} digit after prefix")));
+        }
+
+        let digit_start = self.pos;
+        let mut prev_underscore = false;
+        while self.pos < self.input.len() {
+            let b = self.input[self.pos];
+            if is_valid_digit(b) {
+                prev_underscore = false;
+                self.advance();
+            } else if b == b'_' {
+                if prev_underscore {
+                    return Err(self.error("consecutive underscores in number"));
+                }
+                prev_underscore = true;
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        if prev_underscore {
+            return Err(self.error("trailing underscore in number"));
+        }
+
+        let raw = std::str::from_utf8(&self.input[digit_start..self.pos]).unwrap();
+        let owned;
+        let digits = if raw.contains('_') {
+            owned = raw.replace('_', "");
+            owned.as_str()
+        } else {
+            raw
+        };
+
+        let value = u64::from_str_radix(digits, radix)
+            .map_err(|_| self.error(format!("invalid base-{radix} integer")))?;
+
+        self.make_integer_token(negative, value)
+    }
+
+    fn make_integer_token(&self, negative: bool, value: u64) -> Result<Token> {
+        if negative {
+            if value <= i64::MAX as u64 {
+                Ok(Token::Int(-(value as i64)))
+            } else if value == i64::MAX as u64 + 1 {
+                Ok(Token::Int(i64::MIN))
+            } else {
+                Err(self.error("integer overflow: value too large for signed integer"))
+            }
+        } else if value > i64::MAX as u64 {
+            Ok(Token::Uint(value))
+        } else {
+            Ok(Token::Int(value as i64))
         }
     }
 }
@@ -528,6 +665,8 @@ impl<'a> Parser<'a> {
             Token::True => Ok("true".to_string()),
             Token::False => Ok("false".to_string()),
             Token::Null => Ok("null".to_string()),
+            Token::Float(f) if f.is_nan() => Ok("nan".to_string()),
+            Token::Float(f) if f == f64::INFINITY => Ok("inf".to_string()),
             other => Err(self.lexer.error(format!("expected key, got {other:?}"))),
         }
     }
