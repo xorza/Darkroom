@@ -36,11 +36,18 @@ raw/
       hex_lookup.rs   - HexLookup (3x3 repeating hex neighbor offsets), 6 tests
 ```
 
+### Error Handling
+
+All public functions (`open_raw`, `load_raw`, `load_raw_cfa`) return
+`Result<..., ImageLoadError>`. Libraw FFI failures map to `ImageLoadError::Raw { path, reason }`;
+file I/O errors map to `ImageLoadError::Io { path, source }`.
+
 ### Key Types
 
 - `LibrawGuard` / `ProcessedImageGuard` -- RAII for libraw pointers
 - `BlackLevel` -- Consolidated per-channel black with common/delta/inv_range for two-pass normalization
 - `UnpackedRaw` -- Intermediate state after `libraw_unpack`, methods for each sensor path
+  (carries `path: PathBuf` for error reporting)
 - `CfaPattern` -- Enum (Rggb/Bggr/Grbg/Gbrg), pattern queries, flip ops, FITS parsing
 - `BayerImage` -- Borrowed view into normalized Bayer data with margins and CFA pattern
 - `XTransPattern` -- 6x6 pattern wrapper with `color_at()`

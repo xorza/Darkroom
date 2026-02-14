@@ -33,6 +33,14 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 6. **filter** - Cascading quality filters (saturation, SNR, eccentricity, sharpness,
    roundness), MAD-based FWHM outlier removal, spatial-hash duplicate removal
 
+#### Key Types (detector/mod.rs)
+- `ChannelStats { median, mad }` -- per-channel robust statistics
+- `DetectionResult` -- stars + config + channel_stats + sidecar save/load
+- `detect_file(path) -> Result<DetectionResult, ImageLoadError>` -- loads image, detects,
+  saves sidecar
+- `compute_channel_stats(image) -> ArrayVec<ChannelStats, 3>` -- public standalone function,
+  parallel via rayon
+
 #### Key Subsystems
 - **convolution/** - Separable Gaussian O(n*k), elliptical 2D O(n*k^2), SIMD row/col passes
 - **centroid/** - Weighted moments, Gaussian 6-param L-M, Moffat 5/6-param L-M with

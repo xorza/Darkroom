@@ -21,8 +21,9 @@ memory management.
 ### Data Flow
 1. `stack_with_progress()` validates config, creates `ImageCache` from paths
 2. `ImageCache::from_paths()` loads images; picks in-memory (<75% RAM) or disk-backed (mmap)
-3. `compute_norm_params()` derives per-frame per-channel `NormParams { gain, offset }`
-4. `dispatch_stacking()` calls `cache.process_chunked()` with combine closure
+3. Per-frame channel stats (median + MAD) computed at load time, stored in `ImageCache.channel_stats`
+4. `compute_frame_norms()` derives per-frame per-channel `ChannelNorm { gain, offset }`
+5. `dispatch_stacking()` calls `cache.process_chunked()` with combine closure
 5. `process_chunked()` iterates channel-by-channel, chunk-by-chunk; rayon parallelizes rows
 6. Per-pixel: gather values from all frames, apply normalization, call combine function
 7. Combine function calls `rejection.combine_mean()` which rejects then computes (weighted) mean
@@ -414,8 +415,9 @@ Per pixel, per iteration:
 4. **Configurable I/O parallelism**: 3 concurrent loading threads is conservative for NVMe SSD.
    Auto-detection of storage type or user configuration could improve loading throughput.
 
-5. **Normalization statistics caching**: `compute_channel_stats()` is sequential and computes
-   statistics for all frames one by one. Could be parallelized across frames.
+5. ~~**Normalization statistics caching**~~: **DONE** -- `compute_frame_stats()` runs at load
+   time for each frame (parallel via `try_par_map_limited`). Stats stored in `ImageCache.channel_stats`.
+   Disk-backed cache persists stats to `.stats` sidecar files for reuse across runs.
 
 ## Recommendations
 
@@ -461,7 +463,10 @@ Per pixel, per iteration:
   Conservative for HDD (prevents seek thrashing); suboptimal for NVMe SSD (could use 6-8)
 - **Per-thread scratch**: `ScratchBuffers` allocated once per rayon thread via `for_each_init`
 - **Cache cleanup**: `Drop` impl removes cache files unless `keep_cache` set
-- **Cache validation**: `.meta` sidecar files store source mtime for staleness detection
+- **Cache validation**: `.meta` sidecar files store source mtime for staleness detection;
+  `.stats` sidecar files persist per-frame channel stats (median + MAD) for reuse
+- **Channel stats at load time**: `compute_frame_stats()` runs during `from_paths()` for each
+  frame. `channel_stats()` accessor returns `&[FrameStats]`. Avoids recomputation during stacking.
 - **bytemuck alignment**: mmap returns page-aligned addresses (4096-byte); f32 needs
   4-byte alignment. Always safe.
 - **Memory budget**: 75% vs Siril's 90%. More conservative but safer across platforms.
@@ -499,7 +504,7 @@ These require per-frame star detection.
 - **Multiplicative**: `gain = ref_median / frame_median`, `offset = 0`
   Best for flat frames where exposure varies.
 - Reference frame: auto-selected by lowest average MAD across channels
-- Statistics: per-channel median and MAD via `compute_channel_stats()`
+- Statistics: per-channel median and MAD via `compute_frame_stats()` (computed at load time)
 - Missing: separate rejection vs combination normalization (PixInsight feature)
 - Missing: IKSS estimator (6*MAD clip, then recompute with median + sqrt(BWMV) -- Siril default)
 - Missing: pure additive mode, multiplicative+scaling mode, local normalization
@@ -546,6 +551,9 @@ from algorithm configuration.
 - Dispatch: normalized vs unnormalized stacking comparison
 - Cache: in-memory and disk-backed roundtrip, reuse detection, dimension mismatch, cleanup
 - Cache: FNV-1a determinism pinned, source mtime validation
+- Cache: stats sidecar roundtrip (1ch, 3ch, corrupt, missing), reuse preserves stats,
+  missing sidecar forces reload
+- Channel stats: grayscale and RGB hand-computed median+MAD verification
 - Large-N tests: sort_with_indices (N=100, N=200), percentile (N=100), linear fit (N=100)
 - GESD: relaxation correctness, boundary, symmetry, bright-only invariance
 - Winsorized: robust estimate uses stddev not MAD, 1.134 correction applied, Huber c invariance

@@ -12,8 +12,9 @@ MAD-based statistics. Operates on raw single-channel CFA data before demosaicing
 
 ```
 CalibrationMasters::from_raw_files()     CalibrationMasters::new()
-  stack_cfa_frames(darks, ...)             Takes pre-built CfaImages
-  stack_cfa_frames(flats, ...)             Generates DefectMap from dark
+  -> Result<Self, stacking::Error>           Takes pre-built CfaImages
+  stack_cfa_frames(darks, ...)               Generates DefectMap from dark
+  stack_cfa_frames(flats, ...)
   stack_cfa_frames(biases, ...)
   stack_cfa_frames(flat_darks, ...)
          |                                          |

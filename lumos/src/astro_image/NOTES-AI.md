@@ -7,6 +7,7 @@ storage, FITS/RAW/standard image I/O, CFA handling, calibration operations.
 
 **Files:**
 - `mod.rs` -- AstroImage, PixelData, ImageDimensions, BitPix, conversions, arithmetic ops
+- `error.rs` -- `ImageLoadError` enum (Fits/Image/Raw/Io/UnsupportedFormat) via thiserror
 - `fits.rs` -- FITS loading via cfitsio/fitsio-rs, normalization, CFA header parsing
 - `sensor.rs` -- libraw sensor type detection from filters/colors fields
 - `cfa.rs` -- CfaImage for raw CFA data, calibration ops (dark/flat), demosaic dispatch
@@ -18,6 +19,11 @@ storage, FITS/RAW/standard image I/O, CFA handling, calibration operations.
 - `ImageDimensions`: width/height/channels (only 1 or 3)
 - `BitPix`: UInt8/Int16/UInt16/Int32/UInt32/Int64/Float32/Float64
 - All pixel data stored as f32 normalized to [0,1]
+- `ImageLoadError`: Typed error enum replacing `anyhow` for all image loading paths.
+  Variants: `Fits { path, source }`, `Image { path, source }`, `Raw { path, reason }`,
+  `Io { path, source }`, `UnsupportedFormat { extension }`. Every variant carries the file path.
+- `from_file()` returns `Result<Self, ImageLoadError>`
+- `save()` returns `Result<(), imaginarium::Error>`
 
 **FITS metadata currently read:**
 OBJECT, INSTRUME, TELESCOP, DATE-OBS, EXPTIME, FILTER, GAIN, EGAIN,
