@@ -516,15 +516,12 @@ from algorithm configuration.
 - **Single frame**: All rejection algorithms return all values; normalization produces identity
 - **Two frames**: Sigma clip, winsorized, and GESD skip rejection (min 2-3 preserved)
 - **All identical values**: MAD=0, sigma=0 triggers early exit in all algorithms (no rejection)
-- **All frames rejected**: `weighted_mean_indexed` would divide by zero if all surviving
-  weights are zero. In practice, min-preserved guards prevent this.
-- **Zero-weight frames**: `weighted_mean_indexed` does not protect against `weight_sum == 0`.
-  If all surviving frames after rejection happen to have weight 0, division by zero occurs.
-  The `math::weighted_mean_f32` function handles this (returns 0.0 if weight_sum <= EPSILON)
-  but `weighted_mean_indexed` does not.
-- **NaN values**: Not explicitly handled. `median_f32_fast` uses `partial_cmp` with
-  `unwrap_or(Ordering::Equal)` which treats NaN as equal to everything. This could produce
-  incorrect medians if NaN is present. Source images are expected to be NaN-free.
+- **All frames rejected**: `weighted_mean_indexed` returns 0.0 when all surviving weights
+  are zero (epsilon guard, matches `math::weighted_mean_f32`).
+- **Zero-weight frames**: `weighted_mean_indexed` guards against `weight_sum == 0` with
+  epsilon check; returns 0.0 if all surviving weights are zero.
+- **NaN values**: Source images are NaN-free (enforced by FITS float loader sanitization).
+  `median_f32_fast` uses `partial_cmp` with `unwrap_or(Ordering::Equal)` — safe given this invariant.
 - **Dimension mismatch**: Caught during loading; returns `Error::DimensionMismatch`
 - **Weight count mismatch**: Caught by panic in `stack_with_progress`
 

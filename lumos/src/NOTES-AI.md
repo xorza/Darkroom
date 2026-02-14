@@ -5,9 +5,7 @@ patterns and the highest-priority **unfixed** issues across all modules.
 
 ## Top Priority Bugs & Correctness Issues
 
-| Module | Issue | Severity |
-|--------|-------|----------|
-| stacking | `weighted_mean_indexed()` no guard against `weight_sum == 0` | Low |
+None remaining.
 
 ## Already Fixed
 
@@ -79,6 +77,8 @@ patterns and the highest-priority **unfixed** issues across all modules.
 - star_detection: Bilinear background interpolation (C0) -> natural bicubic spline (C2), matches SEP/SExtractor
 - star_detection: Fit params discarded (FWHM/eccentricity from moments) -> fit-derived when available
 - star_detection: L.A.Cosmic laplacian_snr -> REJECTED and removed (raw Laplacian/noise scales with brightness, not sharpness; sharpness filter already achieves 100% CR rejection)
+- stacking: `weighted_mean_indexed()` div-by-zero when all surviving weights=0 -> epsilon guard (matches `math::weighted_mean_f32`)
+- astro_image: Float FITS NaN/Inf not sanitized -> replaced with 0.0 before normalization
 
 </details>
 
@@ -95,8 +95,8 @@ patterns and the highest-priority **unfixed** issues across all modules.
   calibration operations
 - f64 used throughout fitting pipeline (L-M optimizer, Gaussian/Moffat fitting)
 - Compensated summation (Kahan SIMD + Neumaier scalar hybrid) in math module
-- Minor inconsistency: `weighted_mean_indexed()` in stacking uses naive summation while
-  `math::weighted_mean_f32()` uses Neumaier. Negligible for N < 100 but inconsistent.
+- Minor: `weighted_mean_indexed()` in stacking uses naive summation while
+  `math::weighted_mean_f32()` uses Neumaier. Negligible for N < 100.
 
 ### 3. SIMD Coverage
 - **Well-covered**: math sums, convolution, threshold mask, median filter, profile fitting,
@@ -113,11 +113,10 @@ patterns and the highest-priority **unfixed** issues across all modules.
 - Comprehensive property-based and ground-truth tests in star_detection and registration.
 
 ### 5. NaN/Inf Handling
-- No module explicitly handles NaN/Inf in input data.
-- Float FITS data can contain NaN (FITS standard null indicator).
-- stacking `median_f32_fast` uses `partial_cmp` with NaN treated as equal (incorrect median if NaN present).
-- Expected invariant: source images are NaN-free after loading. Not enforced.
-- **Recommendation**: Scan for NaN/Inf in FITS float loader, replace with 0.0.
+- Float FITS loader sanitizes NaN/Inf to 0.0 before normalization (float BitPix types only).
+- Integer FITS types are not sanitized (cfitsio should never produce NaN for integer data).
+- Invariant: source images are NaN-free after loading. Enforced at FITS loader level.
+- stacking `median_f32_fast` uses `partial_cmp` with NaN treated as equal — safe given NaN-free invariant.
 
 ### 6. Memory Management Patterns
 - stacking: in-memory (<75% RAM) or disk-backed (mmap with MADV_SEQUENTIAL)
@@ -150,7 +149,7 @@ patterns and the highest-priority **unfixed** issues across all modules.
 | P3 | Cold pixel detection from flats | calibration | Dead pixels more reliably detected from flats | APP |
 | P3 | Generic incremental stepping | registration | Benefit Lanczos2/4/Bicubic (~38% speedup) | Performance optimization |
 | Low | Configurable sigma threshold for defect map | calibration | 5.0 hardcoded; PixInsight uses 3.0 | PixInsight, APP |
-| Low | NaN/Inf handling in FITS float data | astro_image | Prevents NaN contamination in stacking | Astropy, Siril |
+| ~~Low~~ | ~~NaN/Inf handling in FITS float data~~ | ~~astro_image~~ | **Done** — sanitized to 0.0 in float FITS loader | — |
 | Low | Multi-HDU FITS support | astro_image | Compressed FITS, observatory formats | cfitsio, Astropy |
 | Low | Large-scale rejection (satellite trails) | stacking | Wavelet + growth for coherent structures | PixInsight |
 
@@ -194,7 +193,7 @@ None remaining.
 13. Add drizzle context image (per-pixel contributing-frame bitmask)
 14. Add stacking Min/Max/Sum combine methods and additive-only normalization
 15. Add cold pixel detection from flats in calibration
-16. Add NaN/Inf handling in FITS float loader
+16. ~~Add NaN/Inf handling in FITS float loader~~ **Done**
 17. Add multi-HDU FITS support
 18. Add large-scale rejection for satellite trails
 19. Add missing FITS metadata (DATAMAX, ISOSPEED, CALSTAT, FOCRATIO)

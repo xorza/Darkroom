@@ -55,12 +55,13 @@ See `stacking/NOTES-AI.md` for detailed documentation.
 
 ## Demosaic Module (raw/demosaic/)
 
-X-Trans demosaicing implemented; Bayer demosaicing is `todo!()`.
+Both X-Trans (Markesteijn 1-pass) and Bayer (RCD) demosaicing are implemented.
 
 | Module | Description |
 |--------|-------------|
-| `bayer/mod.rs` | `CfaPattern` enum, `BayerImage` struct, `demosaic_bayer()` **[todo!()]** |
-| `bayer/tests.rs` | 11 tests for CFA patterns and BayerImage validation |
+| `bayer/mod.rs` | `CfaPattern` enum, `BayerImage` struct, `demosaic_bayer()` entry point |
+| `bayer/rcd.rs` | RCD algorithm (5 steps, rayon row-parallel, ~650 lines) |
+| `bayer/tests.rs` | 20 tests (11 CFA pattern + 9 RCD correctness) |
 | `xtrans/mod.rs` | X-Trans entry point, `XTransPattern`, `XTransImage` |
 | `xtrans/markesteijn.rs` | Markesteijn 1-pass orchestrator, `DemosaicArena` preallocation |
 | `xtrans/markesteijn_steps.rs` | Algorithm steps: green interp, R/B, derivatives, homogeneity, blend |
@@ -68,11 +69,10 @@ X-Trans demosaicing implemented; Bayer demosaicing is `todo!()`.
 
 CFA Patterns: RGGB, BGGR, GRBG, GBRG
 
-### Bayer Demosaic Status
+### Bayer Demosaic — RCD
 
-**Not implemented.** `demosaic_bayer()` contains `todo!()` — any Bayer RAW file panics.
-The `CfaPattern` enum and `BayerImage` struct are complete with full validation.
-RCD (Ratio Corrected Demosaicing) is the recommended algorithm for implementation.
+RCD (Ratio Corrected Demosaicing) v2.3 by Luis Sanz Rodriguez. Rayon-parallel, 111ms/24MP
+(216 MP/s). Buffer triple-reuse, 11 rayon dispatches. See `demosaic/bayer/NOTES-AI.md`.
 
 ### X-Trans Markesteijn 1-Pass Algorithm
 

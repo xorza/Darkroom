@@ -945,7 +945,11 @@ fn weighted_mean_indexed(values: &[f32], weights: &[f32], indices: &[usize]) -> 
         weight_sum += w;
     }
 
-    sum / weight_sum
+    if weight_sum > f32::EPSILON {
+        sum / weight_sum
+    } else {
+        0.0
+    }
 }
 
 #[cfg(test)]
@@ -2220,5 +2224,30 @@ mod tests {
         for &v in &values {
             assert!((v - 10.0).abs() < f32::EPSILON);
         }
+    }
+
+    #[test]
+    fn test_weighted_mean_indexed_all_zero_weights() {
+        // All weights zero → should return 0.0, not NaN/Inf
+        let values = [5.0f32, 10.0, 15.0];
+        let weights = [0.0f32, 0.0, 0.0];
+        let indices = [0, 1, 2];
+        let result = weighted_mean_indexed(&values, &weights, &indices);
+        assert!(
+            (result - 0.0).abs() < 1e-6,
+            "Should return 0.0, got {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_weighted_mean_indexed_partial_zero_weights() {
+        // values=[5, 10, 15], weights=[0, 2, 0], indices=[0, 1, 2]
+        // Only middle value has nonzero weight → mean = 10*2 / 2 = 10.0
+        let values = [5.0f32, 10.0, 15.0];
+        let weights = [0.0f32, 2.0, 0.0];
+        let indices = [0, 1, 2];
+        let result = weighted_mean_indexed(&values, &weights, &indices);
+        assert!((result - 10.0).abs() < 1e-6);
     }
 }

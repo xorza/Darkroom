@@ -233,16 +233,11 @@ The asymmetry is 1 part in 32768, which is negligible for astronomical processin
 path is also very rare -- nearly all astronomical cameras use the BZERO=32768 unsigned
 convention, which maps to UInt16.
 
-### Issue 3: No NaN/Inf Handling in FITS Data
+### Issue 3: NaN/Inf Handling in FITS Data — FIXED
 
-**Severity: Low**
-
-Float FITS data can contain NaN or Inf values (e.g., from division by zero in calibration
-pipelines, or IEEE special values used as null indicators per FITS standard). The loader
-does not detect or handle these. They would propagate through all processing and produce
-NaN contamination in stacking results.
-
-Astropy preserves NaN as-is. Siril replaces them. PixInsight has NaN-aware statistics.
+`normalize_fits_pixels()` sanitizes NaN/Inf to 0.0 for float BitPix types before
+normalization. Integer types are not sanitized (cfitsio should never produce NaN for
+integer data). This ensures the invariant that source images are NaN-free after loading.
 
 ### Issue 4: ROWORDER Handling is Correct
 
@@ -302,10 +297,9 @@ reliable than scanning all pixels and handles the standard correctly.
 Trivial fix: add `read_key_optional(&hdu, &mut fptr, "ISOSPEED")` for the `iso` field
 in the FITS metadata reader.
 
-### Priority 5: NaN Handling
+### ~~Priority 5: NaN Handling~~ — DONE
 
-After reading float FITS data, scan for NaN/Inf and replace with 0.0 (or a configurable
-sentinel value). This prevents NaN contamination in stacking pipelines.
+Float FITS NaN/Inf sanitized to 0.0 in `normalize_fits_pixels()`. 6 tests added.
 
 ### Priority 6: Multi-HDU Support (When Needed)
 

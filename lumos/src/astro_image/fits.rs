@@ -124,17 +124,21 @@ fn image_type_to_bitpix(image_type: &ImageType) -> BitPix {
 /// if it exceeds 2.0 (threshold provides headroom for HDR/overexposed pixels
 /// while catching the common integer-like ranges).
 fn normalize_fits_pixels(mut pixels: Vec<f32>, bitpix: BitPix) -> Vec<f32> {
-    if let Some(max_val) = bitpix.normalization_max() {
-        let inv_max = 1.0 / max_val;
-        pixels.iter_mut().for_each(|p| *p *= inv_max);
+    let inv_max = if let Some(max_val) = bitpix.normalization_max() {
+        1.0 / max_val
     } else {
-        // Float types: detect range and normalize if needed
-        let max = pixels.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        if max > 2.0 {
-            let inv_max = 1.0 / max;
-            pixels.iter_mut().for_each(|p| *p *= inv_max);
+        // Float types: sanitize NaN/Inf to 0.0 and find max in one pass
+        let mut max = f32::NEG_INFINITY;
+        for p in pixels.iter_mut() {
+            if p.is_finite() {
+                max = max.max(*p);
+            } else {
+                *p = 0.0;
+            }
         }
-    }
+        if max > 2.0 { 1.0 / max } else { return pixels }
+    };
+    pixels.iter_mut().for_each(|p| *p *= inv_max);
     pixels
 }
 
@@ -295,5 +299,66 @@ mod tests {
         let pixels = vec![50000.0];
         let result = normalize_fits_pixels(pixels, BitPix::Float32);
         assert!((result[0] - 1.0).abs() < 1e-7);
+    }
+
+    // ====================================================================
+    // NaN/Inf sanitization tests (float FITS only)
+    // ====================================================================
+
+    #[test]
+    fn test_normalize_float_nan_replaced_with_zero() {
+        // FITS uses NaN as null indicator for float images.
+        // NaN pixels should become 0.0. Valid pixels unchanged (max=0.8 < 2.0).
+        let pixels = vec![0.0, f32::NAN, 0.5, f32::NAN, 0.8];
+        let result = normalize_fits_pixels(pixels, BitPix::Float32);
+        assert_eq!(result, vec![0.0, 0.0, 0.5, 0.0, 0.8]);
+    }
+
+    #[test]
+    fn test_normalize_float_inf_replaced_with_zero() {
+        // +Inf and -Inf should become 0.0. Valid pixels unchanged (max=1.0 < 2.0).
+        let pixels = vec![0.5, f32::INFINITY, 1.0, f32::NEG_INFINITY];
+        let result = normalize_fits_pixels(pixels, BitPix::Float32);
+        assert_eq!(result, vec![0.5, 0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn test_normalize_float_nan_with_normalization() {
+        // NaN replaced before normalization. max of valid pixels = 100.0 > 2.0.
+        // inv_max = 1/100 = 0.01
+        // [NaN→0.0, 50.0, 100.0] → [0.0*0.01, 50.0*0.01, 100.0*0.01] = [0.0, 0.5, 1.0]
+        let pixels = vec![f32::NAN, 50.0, 100.0];
+        let result = normalize_fits_pixels(pixels, BitPix::Float32);
+        assert!((result[0] - 0.0).abs() < 1e-7);
+        assert!((result[1] - 0.5).abs() < 1e-7);
+        assert!((result[2] - 1.0).abs() < 1e-7);
+    }
+
+    #[test]
+    fn test_normalize_float_all_nan() {
+        // All NaN → all become 0.0. max of remaining = 0.0 < 2.0, no normalization.
+        let pixels = vec![f32::NAN, f32::NAN, f32::NAN];
+        let result = normalize_fits_pixels(pixels, BitPix::Float32);
+        assert_eq!(result, vec![0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_normalize_float64_nan_replaced() {
+        // Float64 follows same path as Float32
+        let pixels = vec![0.0, f32::NAN, 0.5];
+        let result = normalize_fits_pixels(pixels, BitPix::Float64);
+        assert_eq!(result, vec![0.0, 0.0, 0.5]);
+    }
+
+    #[test]
+    fn test_normalize_uint16_nan_not_sanitized() {
+        // Integer types use fixed normalization_max, NaN handling is float-only.
+        // NaN * inv_max = NaN — integer FITS should never contain NaN from cfitsio,
+        // so we don't sanitize (would mask a real bug).
+        let pixels = vec![0.0, f32::NAN, 65535.0];
+        let result = normalize_fits_pixels(pixels, BitPix::UInt16);
+        assert!((result[0] - 0.0).abs() < 1e-7);
+        assert!(result[1].is_nan()); // Not sanitized for integer types
+        assert!((result[2] - 1.0).abs() < 1e-7);
     }
 }

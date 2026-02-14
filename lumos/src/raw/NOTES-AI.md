@@ -9,7 +9,7 @@ for calibration frames where hot pixel correction must precede demosaicing).
 
 See subdirectory NOTES-AI.md files for detailed analysis:
 - `demosaic/xtrans/NOTES-AI.md` -- X-Trans Markesteijn implementation review
-- `demosaic/bayer/NOTES-AI.md` -- Missing Bayer demosaic analysis and RCD recommendation
+- `demosaic/bayer/NOTES-AI.md` -- RCD implementation details and benchmarks
 
 ### Module Structure
 
@@ -24,8 +24,9 @@ raw/
   demosaic/
     mod.rs            - Re-exports CfaPattern, BayerImage, demosaic_bayer
     bayer/
-      mod.rs          - CfaPattern enum, BayerImage struct, demosaic_bayer() [todo!()]
-      tests.rs        - 11 tests for CFA patterns and BayerImage validation
+      mod.rs          - CfaPattern enum, BayerImage struct, demosaic_bayer() entry point
+      rcd.rs          - RCD algorithm (5 steps, rayon row-parallel, ~650 lines)
+      tests.rs        - 20 tests (11 CFA pattern + 9 RCD correctness)
     xtrans/
       mod.rs          - XTransPattern, XTransImage, PixelSource, process_xtrans(),
                         process_xtrans_f32() entry points
@@ -55,7 +56,7 @@ File -> libraw_open_buffer -> libraw_unpack -> detect_sensor_type(filters, color
   -> consolidate_black_levels(cblack[4104], black, maximum, filters)
   -> compute_wb_multipliers(cam_mul[4])
   -> Monochrome:  normalize_u16(common_black) -> extract active area -> 1-channel output
-  -> Bayer:       normalize_u16(common_black) -> apply_channel_corrections(delta+WB) -> demosaic_bayer() [todo!()]
+  -> Bayer:       normalize_u16(common_black) -> apply_channel_corrections(delta+WB) -> demosaic_bayer(RCD)
   -> XTrans:      copy raw u16 -> drop libraw -> process_xtrans(channel_black, wb_mul)
   -> CFA (calib): normalize_u16(common_black) -> per-channel delta (NO WB) -> CfaImage
   -> Unknown:     libraw_dcraw_process fallback -> normalize 16/8-bit -> RGB output
@@ -120,7 +121,7 @@ Missing AVX2 path (8/iteration) -- low priority, normalization is not the bottle
 |---------|-------------|-----------|-------|
 | Black level | Full | Full (via libraw values) | Inherits libraw's computation |
 | White balance | Camera/daylight/custom | Camera only | Adequate for astro |
-| Bayer demosaic | AHD/VNG/PPG/DCB/DHT/AAHD | **todo!()** | Critical gap |
+| Bayer demosaic | AHD/VNG/PPG/DCB/DHT/AAHD | **RCD** | 1.6-5.9x faster than libraw |
 | X-Trans demosaic | Markesteijn 1/3-pass | Markesteijn 1-pass | 2.1x faster |
 | Color matrix | cam_xyz -> sRGB | None | By design (astro linear) |
 | Hot pixel removal | Bad pixel map | None | Done at calibration stage |
@@ -129,7 +130,7 @@ Missing AVX2 path (8/iteration) -- low priority, normalization is not the bottle
 
 | Feature | RawTherapee | This impl |
 |---------|------------|-----------|
-| Bayer demosaic | AMaZE/RCD/DCB/VNG4/LMMSE/IGV | **todo!()** |
+| Bayer demosaic | AMaZE/RCD/DCB/VNG4/LMMSE/IGV | **RCD** |
 | X-Trans demosaic | Markesteijn 1/3-pass | Markesteijn 1-pass |
 | Dual demosaic | RCD+VNG4 | None |
 | Raw CA correction | Pre-demosaic | None |
@@ -138,7 +139,7 @@ Missing AVX2 path (8/iteration) -- low priority, normalization is not the bottle
 
 | Feature | darktable | This impl |
 |---------|----------|-----------|
-| Bayer demosaic | RCD/AMaZE/PPG | **todo!()** |
+| Bayer demosaic | RCD/AMaZE/PPG | **RCD** |
 | X-Trans demosaic | Markesteijn 1/3-pass | Markesteijn 1-pass |
 | Raw CA correction | Pre-demosaic module | None |
 | Hot pixel removal | Hot pixels module | None |
@@ -147,23 +148,11 @@ Missing AVX2 path (8/iteration) -- low priority, normalization is not the bottle
 
 | Feature | Siril | This impl |
 |---------|------|-----------|
-| Bayer demosaic | **RCD** (default) | **todo!()** |
+| Bayer demosaic | **RCD** (default) | **RCD** |
 | X-Trans demosaic | Markesteijn | Markesteijn 1-pass |
 | Hot pixel removal | Cosmetic correction | None |
 
 ## Missing Features (with Severity)
-
-### Critical
-
-| Feature | Effort | Details |
-|---------|--------|---------|
-| **Bayer demosaic (RCD)** | Medium (2-3 days) | >95% of cameras panic. See `demosaic/bayer/NOTES-AI.md` |
-
-### High
-
-| Feature | Effort | Details |
-|---------|--------|---------|
-| **Interim Bayer fallback** | Low (hours) | Route to libraw AHD as stopgap |
 
 ### Medium
 
@@ -187,22 +176,20 @@ Color matrix (cam->sRGB), gamma/tone curve, highlight recovery, output color spa
 
 ## Recommendations
 
-1. **Implement RCD Bayer demosaic** -- only critical blocker. All infrastructure ready.
-   See `demosaic/bayer/NOTES-AI.md` for algorithm details and implementation plan.
-2. **Interim libraw fallback** -- if RCD takes time, route Bayer to libraw AHD.
-3. **Hot pixel pre-demosaic correction** -- simple median filter on same-color neighbors.
+1. **Hot pixel pre-demosaic correction** -- simple median filter on same-color neighbors.
+2. **Raw CA correction** -- pre-demosaic lateral CA correction for fast optics.
 
 ## Issues and Gaps
 
-- **Critical**: `demosaic_bayer()` is `todo!()` at `bayer/mod.rs:189`
+- ~~`demosaic_bayer()` `todo!()`~~ — **Fixed**: RCD implemented (111ms/24MP, 216 MP/s)
 - **Low**: `alloc_uninit_vec` safety (5 call sites, all with SAFETY comments)
 - **Low**: Libraw fallback normalizes by 65535.0 (may not use full range)
 - **Low**: Output copy in Markesteijn (`arena[4P..7P].to_vec()`, ~70 MB)
 
 ## Test Coverage
 
-80+ tests: normalization, black level consolidation, WB multipliers, channel corrections,
-FC macro, CFA patterns, BayerImage validation, XTrans pattern/image/normalization,
+100+ tests: normalization, black level consolidation, WB multipliers, channel corrections,
+FC macro, CFA patterns, BayerImage validation, RCD correctness, XTrans pattern/image/normalization,
 Markesteijn steps (green minmax, interpolation, derivatives, homogeneity, SATs, blend),
 integration tests, benchmarks. Real-data tests require `--features real-data`.
 
