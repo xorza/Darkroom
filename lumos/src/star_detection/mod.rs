@@ -75,10 +75,7 @@ pub mod tests;
 
 // Main detector types
 pub(crate) use buffer_pool::BufferPool;
-pub use detection_file::{load_detection_result, save_detection_result};
-pub use detector::{
-    ChannelStats, DetectionResult, Diagnostics, StarDetector, compute_channel_stats,
-};
+pub use detector::{ChannelStats, DetectionResult, Diagnostics, StarDetector};
 
 // Configuration
 pub use config::BackgroundRefinement;

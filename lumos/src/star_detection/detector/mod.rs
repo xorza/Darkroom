@@ -38,8 +38,6 @@ pub struct DetectionResult {
     pub stars: Vec<Star>,
     /// Diagnostic information from the detection pipeline.
     pub diagnostics: Diagnostics,
-    /// Per-channel image statistics (median + MAD).
-    pub channel_stats: ArrayVec<ChannelStats, 3>,
 }
 
 /// Diagnostic information from star detection.
@@ -231,13 +229,7 @@ impl StarDetector {
             diagnostics.median_snr = crate::math::median_f32_mut(&mut buf);
         }
 
-        let channel_stats = compute_channel_stats(image);
-
-        DetectionResult {
-            stars,
-            diagnostics,
-            channel_stats,
-        }
+        DetectionResult { stars, diagnostics }
     }
 
     /// Load an image from `path`, run detection, and save the result as a sidecar file.
@@ -259,30 +251,4 @@ impl StarDetector {
         )?;
         Ok(result)
     }
-}
-
-/// Compute per-channel median and MAD statistics (channels in parallel).
-pub fn compute_channel_stats(image: &AstroImage) -> ArrayVec<ChannelStats, 3> {
-    use rayon::prelude::*;
-
-    let channels: Vec<&[f32]> = (0..image.channels())
-        .map(|c| image.channel(c).pixels())
-        .collect();
-
-    let stats: Vec<ChannelStats> = channels
-        .into_par_iter()
-        .map(|data| {
-            let mut buf = data.to_vec();
-            let median = crate::math::median_f32_mut(&mut buf);
-            let mut scratch = Vec::with_capacity(data.len());
-            let mad = crate::math::mad_f32_with_scratch(data, median, &mut scratch);
-            ChannelStats { median, mad }
-        })
-        .collect();
-
-    let mut result = ArrayVec::new();
-    for s in stats {
-        result.push(s);
-    }
-    result
 }
