@@ -4,9 +4,9 @@ use std::fmt;
 pub enum ScnError {
     #[error("{0}")]
     Message(String),
-    #[error("IO error")]
+    #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Invalid UTF-8")]
+    #[error("invalid UTF-8: {0}")]
     Utf8(#[from] std::str::Utf8Error),
     #[error("Parse error at line {line}, col {col}: {message}")]
     Parse {

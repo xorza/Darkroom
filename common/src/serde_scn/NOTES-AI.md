@@ -22,14 +22,7 @@ Two-phase approach: `T → ScnValue → text` (serialize) and `text → ScnValue
 
 ## Known Issues
 
-### LOW: O(n²) UTF-8 re-validation in string slow path (parse.rs:215)
-
-For each multi-byte character, `std::str::from_utf8(&self.input[self.pos..])` validates the ENTIRE
-remaining input. A string of N multi-byte characters (e.g., CJK text) hits O(n²) validation.
-
-**Fix**: Decode UTF-8 character directly from leading byte pattern (`0xC0..=0xDF` → 2-byte,
-`0xE0..=0xEF` → 3-byte, `0xF0..=0xF7` → 4-byte) instead of calling `from_utf8` on the tail.
-Not urgent — only affects strings with many non-ASCII characters.
+(none)
 
 ---
 
@@ -54,14 +47,11 @@ match before an enum variant. The Variant-with-payload case correctly uses singl
   `ScnValue` from `mod.rs`.
 - **`Display` for `ScnValue`**: Would enable `println!("{value}")`. Delegate to `emit_value`.
 
-### No recursion depth limit (parse.rs)
+### Recursion depth limit — IMPLEMENTED
 
-Deeply nested input can cause stack overflow. RON uses a `guard_recursion!` macro that decrements a
-counter before entering nested structures and returns `ExceededRecursionLimit` at zero. serde_json
-uses a similar `disable_recursion_limit` mechanism.
-
-**Fix**: Add optional recursion limit to Parser (default ~128). Decrement on `parse_value` for
-arrays, maps, variants; increment on return.
+`MAX_DEPTH = 128`. Parser tracks `depth` counter, incremented by `enter_nested()` in `parse_array`,
+`parse_map`, `parse_variant`; decremented by `leave_nested()` on return. Exceeding the limit returns
+a parse error. Protects against stack overflow from malicious/deeply nested input.
 
 ### NaN/Infinity literals — IMPLEMENTED
 
@@ -180,10 +170,6 @@ efficient than serde_json's per-level write approach. Adequate for config files.
 
 ## Minor Improvements
 
-### Io error display (error.rs:8)
-
-`#[error("IO error")]` hides the underlying error. Change to `#[error("IO error: {0}")]`.
-
 ### JSON-style map fallback in `deserialize_enum` (de.rs:225-231)
 
 Accepts `ScnValue::Map` with 1 entry as an enum. Useful for JSON interop. Safe because only
@@ -205,8 +191,7 @@ triggered when `deserialize_enum` is called (serde knows the target type). Keep 
 
 - **Duplicate map keys**: Spec does not define behavior. Current parser silently accepts last value.
   Should spec say "implementation-defined" or "error"?
-- **Maximum nesting depth**: Spec does not define. Should mention stack overflow risk for untrusted
-  input.
+- **Maximum nesting depth**: Spec does not define. Implementation enforces 128-level limit.
 - **Number limits**: Spec does not define max integer or float precision. i64 and u64 ranges are
   implicit from implementation.
 - **Grammar**: The EBNF in SPEC.md is complete and correct for the implemented features.
@@ -217,6 +202,7 @@ triggered when `deserialize_enum` is called (serde knows the target type). Keep 
 
 - **Parser**: Hand-written recursive descent, byte-level scanning, single lookahead. Appropriate for
   config files. Fast-path string scanning avoids per-char allocation for simple strings.
+  Slow-path multi-byte UTF-8 uses direct byte-pattern decoding (`decode_utf8_char()`) — O(n) not O(n²).
 - **Emitter**: Stack buffer for indentation (64 bytes, handles 32 levels). Direct `Write` trait.
   Content-dependent formatting (inline vs multiline arrays).
 - **Overall**: Two-phase approach adds allocation overhead vs single-pass, but enables

@@ -209,18 +209,11 @@ impl<'a> Lexer<'a> {
                     if b < 0x80 {
                         result.push(b as char);
                     } else {
-                        // Multi-byte UTF-8: rewind and decode the full codepoint
+                        // Multi-byte UTF-8: decode from leading byte pattern.
+                        // Rewind the byte we already consumed via advance().
                         self.pos -= 1;
                         self.col -= 1;
-                        let s = std::str::from_utf8(&self.input[self.pos..])
-                            .map_err(|_| self.error("invalid UTF-8 in string"))?;
-                        let ch = s
-                            .chars()
-                            .next()
-                            .ok_or_else(|| self.error("unexpected end of string"))?;
-                        for _ in 0..ch.len_utf8() {
-                            self.advance();
-                        }
+                        let ch = self.decode_utf8_char()?;
                         result.push(ch);
                     }
                 }
@@ -299,6 +292,41 @@ impl<'a> Lexer<'a> {
             .map_err(|_| self.error(format!("invalid hex in unicode escape: {hex}")))?;
         char::from_u32(codepoint)
             .ok_or_else(|| self.error(format!("invalid unicode codepoint: U+{codepoint:X}")))
+    }
+
+    /// Decode a single UTF-8 character at the current position.
+    /// O(1) per character — decodes from leading byte pattern directly.
+    /// Note: error paths are unreachable from the public API since `parse()` takes `&str`
+    /// (guaranteed valid UTF-8). The checks are defensive for correctness.
+    fn decode_utf8_char(&mut self) -> Result<char> {
+        let b0 = self.input[self.pos];
+        let (len, min_cp) = match b0 {
+            0xC0..=0xDF => (2, 0x80u32),
+            0xE0..=0xEF => (3, 0x800),
+            0xF0..=0xF7 => (4, 0x1_0000),
+            _ => return Err(self.error("invalid UTF-8 byte")),
+        };
+        if self.pos + len > self.input.len() {
+            return Err(self.error("truncated UTF-8 sequence"));
+        }
+        // Decode: extract payload bits from leading byte, then continuation bytes
+        let mut cp = (b0 as u32) & (0x7F >> len);
+        for i in 1..len {
+            let b = self.input[self.pos + i];
+            if b & 0xC0 != 0x80 {
+                return Err(self.error("invalid UTF-8 continuation byte"));
+            }
+            cp = (cp << 6) | (b as u32 & 0x3F);
+        }
+        // Reject overlong encodings and surrogates
+        if cp < min_cp || (0xD800..=0xDFFF).contains(&cp) {
+            return Err(self.error("invalid UTF-8 encoding"));
+        }
+        let ch = char::from_u32(cp).ok_or_else(|| self.error("invalid UTF-8 codepoint"))?;
+        for _ in 0..len {
+            self.advance();
+        }
+        Ok(ch)
     }
 
     fn read_number(&mut self) -> Result<Token> {
@@ -538,10 +566,14 @@ impl<'a> Lexer<'a> {
 // Parser: tokens → ScnValue
 // ===========================================================================
 
+const MAX_DEPTH: usize = 128;
+
 struct Parser<'a> {
     lexer: Lexer<'a>,
     /// Peeked token (single lookahead).
     peeked: Option<Token>,
+    /// Current nesting depth (arrays, maps, variants).
+    depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -549,7 +581,23 @@ impl<'a> Parser<'a> {
         Self {
             lexer: Lexer::new(input),
             peeked: None,
+            depth: 0,
         }
+    }
+
+    fn enter_nested(&mut self) -> Result<()> {
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            Err(self
+                .lexer
+                .error(format!("exceeded maximum nesting depth of {MAX_DEPTH}")))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn leave_nested(&mut self) {
+        self.depth -= 1;
     }
 
     fn peek(&mut self) -> Result<&Token> {
@@ -619,11 +667,13 @@ impl<'a> Parser<'a> {
 
     fn parse_array(&mut self) -> Result<ScnValue> {
         self.expect(&Token::LBracket)?;
+        self.enter_nested()?;
         let mut items = Vec::new();
 
         loop {
             if matches!(self.peek()?, Token::RBracket) {
                 self.next()?;
+                self.leave_nested();
                 return Ok(ScnValue::Array(items));
             }
             items.push(self.parse_value()?);
@@ -636,11 +686,13 @@ impl<'a> Parser<'a> {
 
     fn parse_map(&mut self) -> Result<ScnValue> {
         self.expect(&Token::LBrace)?;
+        self.enter_nested()?;
         let mut entries = Vec::new();
 
         loop {
             if matches!(self.peek()?, Token::RBrace) {
                 self.next()?;
+                self.leave_nested();
                 return Ok(ScnValue::Map(entries));
             }
 
@@ -687,7 +739,9 @@ impl<'a> Parser<'a> {
             | Token::Float(_)
             | Token::String(_)
             | Token::Ident(_) => {
+                self.enter_nested()?;
                 let payload = self.parse_value()?;
+                self.leave_nested();
                 Ok(ScnValue::Variant(tag, Some(Box::new(payload))))
             }
             // Anything else (comma, colon, rbrace, rbracket, eof) → unit variant

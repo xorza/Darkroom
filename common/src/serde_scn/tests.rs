@@ -1553,3 +1553,184 @@ fn nan_inf_as_map_keys() {
     assert!(scn.contains("\"inf\""), "inf key should be quoted: {scn}");
     assert!(scn.contains("\"nan\""), "nan key should be quoted: {scn}");
 }
+
+// ===========================================================================
+// Recursion depth limit
+// ===========================================================================
+
+#[test]
+fn deeply_nested_within_limit() {
+    // 20 levels deep — well within the 128 limit
+    // Already tested by `deeply_nested` test above, but verify explicitly
+    let mut scn = String::new();
+    for _ in 0..20 {
+        scn.push('[');
+    }
+    scn.push('1');
+    for _ in 0..20 {
+        scn.push(']');
+    }
+    let v = super::parse::parse(&scn).unwrap();
+    // Innermost is Int(1)
+    let mut cur = &v;
+    for _ in 0..20 {
+        match cur {
+            ScnValue::Array(items) => {
+                assert_eq!(items.len(), 1);
+                cur = &items[0];
+            }
+            other => panic!("expected array, got {other:?}"),
+        }
+    }
+    assert_eq!(*cur, ScnValue::Int(1));
+}
+
+#[test]
+fn error_exceeds_recursion_depth() {
+    // 200 nested arrays — exceeds the 128 limit
+    let mut scn = String::new();
+    for _ in 0..200 {
+        scn.push('[');
+    }
+    scn.push('1');
+    for _ in 0..200 {
+        scn.push(']');
+    }
+    let result = super::parse::parse(&scn);
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("nesting depth"),
+        "expected depth error, got: {err}"
+    );
+}
+
+#[test]
+fn error_exceeds_recursion_depth_maps() {
+    // Deeply nested maps: {a: {a: {a: ...}}}
+    let mut scn = String::new();
+    for _ in 0..200 {
+        scn.push_str("{a: ");
+    }
+    scn.push('1');
+    for _ in 0..200 {
+        scn.push('}');
+    }
+    let result = super::parse::parse(&scn);
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("nesting depth"),
+        "expected depth error, got: {err}"
+    );
+}
+
+#[test]
+fn error_exceeds_recursion_depth_variants() {
+    // Deeply nested variants: A A A A ... 1
+    let mut scn = String::new();
+    for _ in 0..200 {
+        scn.push_str("A ");
+    }
+    scn.push('1');
+    let result = super::parse::parse(&scn);
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("nesting depth"),
+        "expected depth error, got: {err}"
+    );
+}
+
+// ===========================================================================
+// UTF-8 string parsing (O(1) per character)
+// ===========================================================================
+
+#[test]
+fn utf8_decode_2byte() {
+    // decode_utf8_char 2-byte path: 0xC0..=0xDF leading byte
+    // Smallest 2-byte: U+0080 = 0xC2 0x80
+    let v: String = from_str("\"\\n\u{0080}\"").unwrap(); // escape forces slow path
+    assert_eq!(v, "\n\u{0080}");
+    // Largest 2-byte: U+07FF = 0xDF 0xBF
+    let v: String = from_str("\"\\n\u{07FF}\"").unwrap();
+    assert_eq!(v, "\n\u{07FF}");
+    // Typical 2-byte: é = U+00E9 = 0xC3 0xA9
+    let v: String = from_str("\"\\ncafé\"").unwrap();
+    assert_eq!(v, "\ncafé");
+}
+
+#[test]
+fn utf8_decode_3byte() {
+    // decode_utf8_char 3-byte path: 0xE0..=0xEF leading byte
+    // Smallest 3-byte: U+0800 = 0xE0 0xA0 0x80
+    let v: String = from_str("\"\\n\u{0800}\"").unwrap();
+    assert_eq!(v, "\n\u{0800}");
+    // Largest 3-byte: U+FFFD (replacement character) = 0xEF 0xBF 0xBD
+    let v: String = from_str("\"\\n\u{FFFD}\"").unwrap();
+    assert_eq!(v, "\n\u{FFFD}");
+    // Typical 3-byte: 世 = U+4E16
+    let v: String = from_str("\"\\n世界\"").unwrap();
+    assert_eq!(v, "\n世界");
+}
+
+#[test]
+fn utf8_decode_4byte() {
+    // decode_utf8_char 4-byte path: 0xF0..=0xF7 leading byte
+    // Smallest 4-byte: U+10000 = 0xF0 0x90 0x80 0x80
+    let v: String = from_str("\"\\n\u{10000}\"").unwrap();
+    assert_eq!(v, "\n\u{10000}");
+    // Largest valid: U+10FFFF = 0xF4 0x8F 0xBF 0xBF
+    let v: String = from_str("\"\\n\u{10FFFF}\"").unwrap();
+    assert_eq!(v, "\n\u{10FFFF}");
+    // Typical 4-byte: 😀 = U+1F600
+    let v: String = from_str("\"\\n😀\"").unwrap();
+    assert_eq!(v, "\n😀");
+}
+
+#[test]
+fn utf8_decode_mixed_boundaries() {
+    // Mixed: ASCII + all three multibyte sizes, verifying decode_utf8_char
+    // handles transitions between byte lengths correctly.
+    // Forces slow path with leading escape.
+    let input = "\"\\nA\u{00E9}\u{4E16}\u{1F600}B\u{07FF}\u{FFFD}\u{10FFFF}\"";
+    let v: String = from_str(input).unwrap();
+    assert_eq!(v, "\nA\u{00E9}\u{4E16}\u{1F600}B\u{07FF}\u{FFFD}\u{10FFFF}");
+}
+
+#[test]
+fn utf8_string_with_escapes_and_multibyte() {
+    // String that exercises the slow path: escape followed by multibyte
+    let v: String = from_str("\"line1\\nCafé 世界\"").unwrap();
+    assert_eq!(v, "line1\nCafé 世界");
+}
+
+#[test]
+fn utf8_many_multibyte_chars() {
+    // Previously O(n²) — verify it works correctly for longer strings.
+    // 100 CJK characters: 你 = U+4F60 (3-byte UTF-8)
+    let content = "你".repeat(100);
+    let scn = format!("\"{}\"", content);
+    // Force slow path by adding an escape at the start
+    let scn_slow = format!("\"\\n{}\"", content);
+    let v: String = from_str(&scn_slow).unwrap();
+    assert_eq!(v, format!("\n{}", content));
+    // Fast path
+    let v: String = from_str(&scn).unwrap();
+    assert_eq!(v, content);
+}
+
+// ===========================================================================
+// IO error display
+// ===========================================================================
+
+#[test]
+fn io_error_includes_message() {
+    let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+    let scn_err = ScnError::Io(io_err);
+    let msg = scn_err.to_string();
+    assert!(
+        msg.contains("file not found"),
+        "IO error should include underlying message, got: {msg}"
+    );
+}
