@@ -147,46 +147,44 @@ astrophotography. Stacking results, calibrated masters, and processed images sho
 be saveable as FITS with metadata preserved. Every other tool in this space (Siril,
 PixInsight, DSS, ASTAP) writes FITS output.
 
-**H2: Missing RA/DEC Metadata.**
-RA and DEC (telescope pointing coordinates) are written by every capture application
-(NINA, MaximDL, SGP, APT). They are essential for: plate solving initialization,
-mosaic planning, target identification, and sky atlas overlays.
+**~~H2: Missing RA/DEC Metadata.~~** -- DONE
+Read from FITS: `RA` (degrees, NINA/SGP), `OBJCTRA` (HMS string, MaximDL/ASCOM),
+`CRVAL1` (WCS, plate-solved). DEC: `DEC`, `OBJCTDEC` (DMS), `CRVAL2`. HMS/DMS parsers
+handle space and colon delimited formats. Fields: `ra_deg`, `dec_deg` in metadata.
 
-**H3: Missing Pixel Size (XPIXSZ/YPIXSZ).**
-Needed for plate scale calculation: `plate_scale = pixel_size / focal_length * 206.265`.
-Written by NINA, MaximDL, and most camera drivers. Required for automated field
-identification and astrometry.
+**~~H3: Missing Pixel Size (XPIXSZ/YPIXSZ).~~** -- DONE
+Read from FITS: `XPIXSZ`, `YPIXSZ` (microns). Fields: `pixel_size_x`, `pixel_size_y`
+in metadata.
 
 ### Medium
 
-**M1: Missing DATAMAX/DATAMIN Keywords.**
-DATAMAX indicates the saturation threshold. Essential for star detection (distinguishing
-saturated stars), ADU clipping detection, and data range validation. DeepSkyStacker uses
-these keywords for float FITS range detection.
+**~~M1: Missing DATAMAX/DATAMIN Keywords.~~** -- DONE (DATAMAX)
+DATAMAX read from FITS into `data_max` field. DATAMIN not read (not needed for current
+use cases).
 
-**Apple laptop: Missing FOCRATIO (Focal Ratio).**
+**Apple laptop: Missing FOCRATIO (Focal Ratio).** -- POSTPONED
 Written by NINA. Useful for optical calculations and metadata display.
 
-**M3: Missing OBJCTRA/OBJCTDEC (Target Coordinates).**
+**M3: Missing OBJCTRA/OBJCTDEC (Target Coordinates).** -- POSTPONED
 Target coordinates in sexagesimal format (HH MM SS / DD MM SS). Distinct from RA/DEC
 (which are telescope pointing). Used by plate solvers and catalog cross-referencing.
 
-**M4: Missing SITELAT/SITELONG/SITEELEV (Observatory Location).**
+**M4: Missing SITELAT/SITELONG/SITEELEV (Observatory Location).** -- POSTPONED
 Written by NINA. Needed for atmospheric refraction correction and precise timing.
 
-**Apple laptop: No Multi-HDU Support.**
+**Apple laptop: No Multi-HDU Support.** -- POSTPONED
 Only the primary HDU is read. Compressed FITS stores the image in an extension HDU.
 Some observatories use multi-extension FITS. cfitsio can read named/numbered HDUs but
 the loader does not attempt this.
 
-**M6: Missing CALSTAT (Calibration Status).**
+**M6: Missing CALSTAT (Calibration Status).** -- POSTPONED
 Tracks which calibration frames have been applied (B=bias, D=dark, F=flat). Prevents
 accidental double-calibration.
 
-**M7: ISO Not Read from FITS.**
-The `iso` field is always `None` for FITS files. NINA writes ISOSPEED for DSLR cameras.
+**~~M7: ISO Not Read from FITS.~~** -- DONE
+Read from FITS: `ISOSPEED` keyword, mapped to `iso: Option<u32>`.
 
-### Low
+### Low -- POSTPONED
 
 **L1: Missing READOUTM (Readout Mode).**
 Camera readout mode (e.g., "Normal", "Low Noise"). Written by NINA.
@@ -283,31 +281,28 @@ from `AstroImageMetadata`. Write as BITPIX=-32 (float32) normalized [0,1] to mat
 PixInsight convention. Consider optional BITPIX=16 with BZERO=32768 for compatibility
 with tools that prefer integer FITS.
 
-### Priority 2: Add RA/DEC and Pixel Size Metadata
+### ~~Priority 2: Add RA/DEC and Pixel Size Metadata~~ — DONE
 
-Add fields to `AstroImageMetadata`:
-- `ra: Option<f64>` (degrees), `dec: Option<f64>` (degrees)
-- `pixel_size_x: Option<f64>` (microns), `pixel_size_y: Option<f64>` (microns)
-- `focal_ratio: Option<f64>`
+Fields added to `AstroImageMetadata`: `ra_deg`, `dec_deg`, `pixel_size_x`, `pixel_size_y`.
+Read from FITS: RA/OBJCTRA/CRVAL1, DEC/OBJCTDEC/CRVAL2, XPIXSZ, YPIXSZ.
+HMS/DMS parsers with full test coverage.
 
-Read from FITS: RA, DEC, XPIXSZ, YPIXSZ, FOCRATIO.
-
-### Priority 3: Read DATAMAX/DATAMIN for Float Normalization
+### Priority 3: Read DATAMAX/DATAMIN for Float Normalization -- POSTPONED
 
 When loading float FITS, check DATAMAX keyword first. If present and > 2.0, use it as
 the normalization divisor instead of computing max from pixel data. This is more
 reliable than scanning all pixels and handles the standard correctly.
+(Note: DATAMAX is now read into `data_max` field but not yet used for normalization.)
 
-### Priority 4: Read ISOSPEED from FITS
+### ~~Priority 4: Read ISOSPEED from FITS~~ — DONE
 
-Trivial fix: add `read_key_optional(&hdu, &mut fptr, "ISOSPEED")` for the `iso` field
-in the FITS metadata reader.
+`ISOSPEED` keyword read into `iso: Option<u32>`.
 
 ### ~~Priority 5: NaN Handling~~ — DONE
 
 Float FITS NaN/Inf sanitized to 0.0 in `normalize_fits_pixels()`. 6 tests added.
 
-### Priority 6: Multi-HDU Support (When Needed)
+### Priority 6: Multi-HDU Support (When Needed) -- POSTPONED
 
 When encountering an empty primary HDU, try reading the first image extension. This
 handles compressed FITS and some observatory formats.
