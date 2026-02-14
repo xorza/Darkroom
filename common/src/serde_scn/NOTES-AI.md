@@ -53,15 +53,6 @@ fn emit_float<W: Write>(w: &mut W, f: f64, indent: usize, at_start: bool) -> Res
 Note: Rust std Display uses Grisu3+Dragon, which IS roundtrip-safe, but doesn't use scientific
 notation, causing the buffer overflow for extreme values.
 
-### MEDIUM: Emitter trailing commas inconsistent with spec (emit.rs:141-143, 172-174)
-
-Emitter omits trailing comma on the last item in multiline arrays/maps. But:
-- The spec's own examples always show trailing commas on all items
-- Trailing commas produce cleaner git diffs
-- The parser already accepts trailing commas
-
-**Fix**: Unconditionally emit comma after every item in multiline mode.
-
 ### MEDIUM: Parser accepts trailing dot as float (parse.rs:334-339)
 
 `1.` (dot with no fractional digits) is accepted because the digit-scanning `while` loop runs zero
