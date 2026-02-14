@@ -181,6 +181,14 @@ STScI also has minimum floor: `pfo = max(pfo, 1.2 / pscale_ratio)`.
   = `(1/pixfrac^2) * (1/scale)^2` = `1/(pixfrac*scale)^2` = `1/drop_size^2`
 **Impact**: Identical formula. Confirmed equivalent.
 
+### No s^2 Surface Brightness Factor
+The paper's Equation 5 includes an explicit `s^2` factor (s = output/input pixel size ratio)
+to conserve surface brightness for count-based (photon counting) images. STScI implements
+this via `iscale` parameter: `d = pixel_value * iscale`. Our code does NOT include `s^2`
+because input images are already normalized surface brightness (f32 values), and we divide
+by accumulated weights in finalize. This is correct for amateur astrophotography with
+normalized images but would be wrong for raw photon-count images.
+
 ## Missing Features (Priority Order)
 
 ### P1: Per-Pixel Input Weights / Bad Pixel Masks
