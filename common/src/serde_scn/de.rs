@@ -12,8 +12,8 @@ impl ScnValue {
         match self {
             ScnValue::Null => de::Unexpected::Unit,
             ScnValue::Bool(b) => de::Unexpected::Bool(*b),
-            ScnValue::Int(i) => de::Unexpected::Signed(*i),
-            ScnValue::Uint(u) => de::Unexpected::Unsigned(*u),
+            ScnValue::Int(i) => de::Unexpected::Other(if *i >= 0 { "positive integer" } else { "negative integer" }),
+            ScnValue::Uint(_) => de::Unexpected::Other("unsigned integer"),
             ScnValue::Float(f) => de::Unexpected::Float(*f),
             ScnValue::String(s) => de::Unexpected::Str(s),
             ScnValue::Array(_) => de::Unexpected::Seq,
@@ -38,8 +38,20 @@ impl<'de> de::Deserializer<'de> for ScnValue {
         match self {
             ScnValue::Null => visitor.visit_unit(),
             ScnValue::Bool(b) => visitor.visit_bool(b),
-            ScnValue::Int(i) => visitor.visit_i64(i),
-            ScnValue::Uint(u) => visitor.visit_u64(u),
+            ScnValue::Int(i) => {
+                if (i64::MIN as i128..=i64::MAX as i128).contains(&i) {
+                    visitor.visit_i64(i as i64)
+                } else {
+                    visitor.visit_i128(i)
+                }
+            }
+            ScnValue::Uint(u) => {
+                if u <= u64::MAX as u128 {
+                    visitor.visit_u64(u as u64)
+                } else {
+                    visitor.visit_u128(u)
+                }
+            }
             ScnValue::Float(f) => visitor.visit_f64(f),
             ScnValue::String(s) => visitor.visit_string(s),
             ScnValue::Array(items) => {
@@ -85,8 +97,15 @@ impl<'de> de::Deserializer<'de> for ScnValue {
     }
     fn deserialize_i64<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
-            ScnValue::Int(i) => visitor.visit_i64(i),
-            ScnValue::Uint(u) => visitor.visit_u64(u),
+            ScnValue::Int(i) => visitor.visit_i128(i),
+            ScnValue::Uint(u) => visitor.visit_u128(u),
+            _ => self.deserialize_any(visitor),
+        }
+    }
+    fn deserialize_i128<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+        match self {
+            ScnValue::Int(i) => visitor.visit_i128(i),
+            ScnValue::Uint(u) => visitor.visit_u128(u),
             _ => self.deserialize_any(visitor),
         }
     }
@@ -101,8 +120,15 @@ impl<'de> de::Deserializer<'de> for ScnValue {
     }
     fn deserialize_u64<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
-            ScnValue::Uint(u) => visitor.visit_u64(u),
-            ScnValue::Int(i) => visitor.visit_i64(i),
+            ScnValue::Uint(u) => visitor.visit_u128(u),
+            ScnValue::Int(i) => visitor.visit_i128(i),
+            _ => self.deserialize_any(visitor),
+        }
+    }
+    fn deserialize_u128<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+        match self {
+            ScnValue::Uint(u) => visitor.visit_u128(u),
+            ScnValue::Int(i) => visitor.visit_i128(i),
             _ => self.deserialize_any(visitor),
         }
     }
@@ -112,8 +138,8 @@ impl<'de> de::Deserializer<'de> for ScnValue {
     fn deserialize_f64<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             ScnValue::Float(f) => visitor.visit_f64(f),
-            ScnValue::Int(i) => visitor.visit_i64(i),
-            ScnValue::Uint(u) => visitor.visit_u64(u),
+            ScnValue::Int(i) => visitor.visit_i128(i),
+            ScnValue::Uint(u) => visitor.visit_u128(u),
             _ => self.deserialize_any(visitor),
         }
     }

@@ -16,8 +16,8 @@ enum Token {
     Null,
     True,
     False,
-    Int(i64),
-    Uint(u64),
+    Int(i128),
+    Uint(u128),
     Float(f64),
     String(String),
     /// Identifier that is not a keyword — used for variant tags and bare keys.
@@ -431,17 +431,17 @@ impl<'a> Lexer<'a> {
                 .map_err(|_| self.error(format!("invalid float: {raw}")))?;
             Ok(Token::Float(f))
         } else if negative {
-            let i: i64 = text
+            let i: i128 = text
                 .parse()
                 .map_err(|_| self.error(format!("invalid integer: {raw}")))?;
             Ok(Token::Int(i))
         } else {
-            // Try u64 first for large positive numbers, fall back to i64
-            if let Ok(u) = text.parse::<u64>() {
-                if u > i64::MAX as u64 {
+            // Try u128 first for large positive numbers, fall back to i128
+            if let Ok(u) = text.parse::<u128>() {
+                if u > i128::MAX as u128 {
                     Ok(Token::Uint(u))
                 } else {
-                    Ok(Token::Int(u as i64))
+                    Ok(Token::Int(u as i128))
                 }
             } else {
                 Err(self.error(format!("invalid integer: {raw}")))
@@ -539,25 +539,25 @@ impl<'a> Lexer<'a> {
             raw
         };
 
-        let value = u64::from_str_radix(digits, radix)
+        let value = u128::from_str_radix(digits, radix)
             .map_err(|_| self.error(format!("invalid base-{radix} integer")))?;
 
         self.make_integer_token(negative, value)
     }
 
-    fn make_integer_token(&self, negative: bool, value: u64) -> Result<Token> {
+    fn make_integer_token(&self, negative: bool, value: u128) -> Result<Token> {
         if negative {
-            if value <= i64::MAX as u64 {
-                Ok(Token::Int(-(value as i64)))
-            } else if value == i64::MAX as u64 + 1 {
-                Ok(Token::Int(i64::MIN))
+            if value <= i128::MAX as u128 {
+                Ok(Token::Int(-(value as i128)))
+            } else if value == i128::MAX as u128 + 1 {
+                Ok(Token::Int(i128::MIN))
             } else {
                 Err(self.error("integer overflow: value too large for signed integer"))
             }
-        } else if value > i64::MAX as u64 {
+        } else if value > i128::MAX as u128 {
             Ok(Token::Uint(value))
         } else {
-            Ok(Token::Int(value as i64))
+            Ok(Token::Int(value as i128))
         }
     }
 }

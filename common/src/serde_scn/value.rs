@@ -8,8 +8,8 @@ use super::error::{Result, ScnError};
 pub enum ScnValue {
     Null,
     Bool(bool),
-    Int(i64),
-    Uint(u64),
+    Int(i128),
+    Uint(u128),
     Float(f64),
     String(String),
     Array(Vec<ScnValue>),
@@ -50,27 +50,33 @@ impl serde::Serializer for ValueSerializer {
         Ok(ScnValue::Bool(v))
     }
     fn serialize_i8(self, v: i8) -> Result<ScnValue> {
-        Ok(ScnValue::Int(v as i64))
+        Ok(ScnValue::Int(v as i128))
     }
     fn serialize_i16(self, v: i16) -> Result<ScnValue> {
-        Ok(ScnValue::Int(v as i64))
+        Ok(ScnValue::Int(v as i128))
     }
     fn serialize_i32(self, v: i32) -> Result<ScnValue> {
-        Ok(ScnValue::Int(v as i64))
+        Ok(ScnValue::Int(v as i128))
     }
     fn serialize_i64(self, v: i64) -> Result<ScnValue> {
+        Ok(ScnValue::Int(v as i128))
+    }
+    fn serialize_i128(self, v: i128) -> Result<ScnValue> {
         Ok(ScnValue::Int(v))
     }
     fn serialize_u8(self, v: u8) -> Result<ScnValue> {
-        Ok(ScnValue::Uint(v as u64))
+        Ok(ScnValue::Uint(v as u128))
     }
     fn serialize_u16(self, v: u16) -> Result<ScnValue> {
-        Ok(ScnValue::Uint(v as u64))
+        Ok(ScnValue::Uint(v as u128))
     }
     fn serialize_u32(self, v: u32) -> Result<ScnValue> {
-        Ok(ScnValue::Uint(v as u64))
+        Ok(ScnValue::Uint(v as u128))
     }
     fn serialize_u64(self, v: u64) -> Result<ScnValue> {
+        Ok(ScnValue::Uint(v as u128))
+    }
+    fn serialize_u128(self, v: u128) -> Result<ScnValue> {
         Ok(ScnValue::Uint(v))
     }
     fn serialize_f32(self, v: f32) -> Result<ScnValue> {

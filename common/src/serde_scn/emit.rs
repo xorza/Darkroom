@@ -13,20 +13,8 @@ pub fn emit_value<W: Write>(
         ScnValue::Null => emit_atom(w, b"null", indent, at_start),
         ScnValue::Bool(true) => emit_atom(w, b"true", indent, at_start),
         ScnValue::Bool(false) => emit_atom(w, b"false", indent, at_start),
-        ScnValue::Int(i) => {
-            if at_start {
-                write_indent(w, indent)?;
-            }
-            write!(w, "{i}")?;
-            Ok(())
-        }
-        ScnValue::Uint(u) => {
-            if at_start {
-                write_indent(w, indent)?;
-            }
-            write!(w, "{u}")?;
-            Ok(())
-        }
+        ScnValue::Int(i) => emit_int(w, *i, indent, at_start),
+        ScnValue::Uint(u) => emit_uint(w, *u, indent, at_start),
         ScnValue::Float(f) => emit_float(w, *f, indent, at_start),
         ScnValue::String(s) => emit_string(w, s, indent, at_start),
         ScnValue::Array(items) => emit_array(w, items, indent, at_start),
@@ -40,6 +28,22 @@ fn emit_atom<W: Write>(w: &mut W, text: &[u8], indent: usize, at_start: bool) ->
         write_indent(w, indent)?;
     }
     w.write_all(text)?;
+    Ok(())
+}
+
+fn emit_int<W: Write>(w: &mut W, i: i128, indent: usize, at_start: bool) -> Result<()> {
+    if at_start {
+        write_indent(w, indent)?;
+    }
+    write!(w, "{i}")?;
+    Ok(())
+}
+
+fn emit_uint<W: Write>(w: &mut W, u: u128, indent: usize, at_start: bool) -> Result<()> {
+    if at_start {
+        write_indent(w, indent)?;
+    }
+    write!(w, "{u}")?;
     Ok(())
 }
 
