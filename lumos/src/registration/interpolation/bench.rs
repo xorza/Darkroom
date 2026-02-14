@@ -153,6 +153,62 @@ fn bench_warp_lanczos3_1k_no_dering(b: bench::Bencher) {
     });
 }
 
+// ============================================================================
+// Bicubic and Lanczos4 benchmarks (generic warp loop)
+// ============================================================================
+
+#[quick_bench(warmup_iters = 2, iters = 10)]
+fn bench_warp_bicubic_2k(b: bench::Bencher) {
+    let input = create_test_image(2048, 2048);
+    let mut output = Buffer2::new_default(2048, 2048);
+    let transform = create_test_transform();
+
+    b.bench(|| {
+        warp_image(
+            black_box(&input),
+            black_box(&mut output),
+            &black_box(WarpTransform::new(transform)),
+            &WarpParams::new(InterpolationMethod::Bicubic),
+        );
+    });
+}
+
+#[quick_bench(warmup_iters = 2, iters = 10)]
+fn bench_warp_lanczos4_2k(b: bench::Bencher) {
+    let input = create_test_image(2048, 2048);
+    let mut output = Buffer2::new_default(2048, 2048);
+    let transform = create_test_transform();
+
+    b.bench(|| {
+        warp_image(
+            black_box(&input),
+            black_box(&mut output),
+            &black_box(WarpTransform::new(transform)),
+            &WarpParams::new(InterpolationMethod::Lanczos4 { deringing: -1.0 }),
+        );
+    });
+}
+
+#[quick_bench(warmup_iters = 2, iters = 10)]
+fn bench_warp_lanczos2_2k(b: bench::Bencher) {
+    let input = create_test_image(2048, 2048);
+    let mut output = Buffer2::new_default(2048, 2048);
+    let transform = create_test_transform();
+
+    b.bench(|| {
+        warp_image(
+            black_box(&input),
+            black_box(&mut output),
+            &black_box(WarpTransform::new(transform)),
+            &WarpParams::new(InterpolationMethod::Lanczos2 { deringing: -1.0 }),
+        );
+    });
+}
+
+// ============================================================================
+// Micro-benchmarks for specific functions
+// ============================================================================
+
 #[quick_bench(warmup_iters = 3, iters = 20)]
 fn bench_lut_lookup(b: bench::Bencher) {
     let lut = get_lanczos_lut(3);

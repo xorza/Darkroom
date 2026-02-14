@@ -318,10 +318,27 @@ pub fn warp_image(
             } else if matches!(params.method, InterpolationMethod::Lanczos3 { .. }) {
                 warp::warp_row_lanczos3(input, row, y, warp_transform, params);
             } else {
+                let m = warp_transform.transform.matrix.as_array();
+                let can_step = warp_transform.is_linear();
+                let src0 = warp_transform.apply(glam::DVec2::new(0.0, y as f64));
+                let mut src_x = src0.x;
+                let mut src_y = src0.y;
+                let dx_step = m[0];
+                let dy_step = m[3];
+
                 for (x, pixel) in row.iter_mut().enumerate() {
-                    let p = glam::DVec2::new(x as f64, y as f64);
-                    let src = warp_transform.apply(p);
-                    *pixel = interpolate(input, src.x as f32, src.y as f32, params);
+                    if !can_step {
+                        let src = warp_transform.apply(glam::DVec2::new(x as f64, y as f64));
+                        src_x = src.x;
+                        src_y = src.y;
+                    }
+
+                    *pixel = interpolate(input, src_x as f32, src_y as f32, params);
+
+                    if can_step {
+                        src_x += dx_step;
+                        src_y += dy_step;
+                    }
                 }
             }
         });

@@ -831,3 +831,185 @@ fn test_warp_params_new() {
     assert_eq!(p.method, InterpolationMethod::Bicubic);
     assert_eq!(p.border_value, 0.0);
 }
+
+// ============================================================================
+// Generic incremental stepping tests
+//
+// The generic warp loop (used for Bicubic, Lanczos2, Lanczos4, Nearest)
+// uses incremental stepping for linear transforms. These tests verify
+// that the stepped output matches per-pixel transform.apply() exactly.
+// ============================================================================
+
+/// Reference per-pixel warp without incremental stepping.
+/// This is the old code path before the optimization.
+fn warp_image_per_pixel_reference(
+    input: &Buffer2<f32>,
+    output: &mut Buffer2<f32>,
+    warp_transform: &WarpTransform,
+    params: &WarpParams,
+) {
+    let width = input.width();
+    let height = input.height();
+    for y in 0..height {
+        for x in 0..width {
+            let src = warp_transform.apply(DVec2::new(x as f64, y as f64));
+            output[(x, y)] = interpolate(input, src.x as f32, src.y as f32, params);
+        }
+    }
+}
+
+#[test]
+fn test_generic_stepping_bicubic_matches_per_pixel() {
+    // Bicubic with a similarity transform (translation + rotation + scale).
+    // Stepped output should match per-pixel reference exactly (same f32 path).
+    let width = 64;
+    let height = 64;
+    let input: Vec<f32> = (0..width * height)
+        .map(|i| ((i as f32 * 0.037).sin() + 1.0) * 0.5)
+        .collect();
+    let input_buf = Buffer2::new(width, height, input);
+    let transform = Transform::similarity(DVec2::new(3.0, 2.0), 0.05, 1.02);
+    let wt = WarpTransform::new(transform);
+    assert!(wt.is_linear());
+    let params = WarpParams::new(InterpolationMethod::Bicubic);
+
+    let mut output_stepped = Buffer2::new_default(width, height);
+    let mut output_reference = Buffer2::new_default(width, height);
+    warp_image(&input_buf, &mut output_stepped, &wt, &params);
+    warp_image_per_pixel_reference(&input_buf, &mut output_reference, &wt, &params);
+
+    for y in 0..height {
+        for x in 0..width {
+            let stepped = output_stepped[(x, y)];
+            let reference = output_reference[(x, y)];
+            assert!(
+                (stepped - reference).abs() < 1e-4,
+                "Bicubic mismatch at ({x}, {y}): stepped={stepped}, reference={reference}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_generic_stepping_lanczos2_matches_per_pixel() {
+    let width = 64;
+    let height = 64;
+    let input: Vec<f32> = (0..width * height)
+        .map(|i| ((i as f32 * 0.023).sin() + 1.0) * 0.5)
+        .collect();
+    let input_buf = Buffer2::new(width, height, input);
+    let transform = Transform::similarity(DVec2::new(5.0, -1.0), 0.03, 0.98);
+    let wt = WarpTransform::new(transform);
+    assert!(wt.is_linear());
+    let params = WarpParams::new(InterpolationMethod::Lanczos2 { deringing: -1.0 });
+
+    let mut output_stepped = Buffer2::new_default(width, height);
+    let mut output_reference = Buffer2::new_default(width, height);
+    warp_image(&input_buf, &mut output_stepped, &wt, &params);
+    warp_image_per_pixel_reference(&input_buf, &mut output_reference, &wt, &params);
+
+    for y in 0..height {
+        for x in 0..width {
+            let stepped = output_stepped[(x, y)];
+            let reference = output_reference[(x, y)];
+            assert!(
+                (stepped - reference).abs() < 1e-4,
+                "Lanczos2 mismatch at ({x}, {y}): stepped={stepped}, reference={reference}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_generic_stepping_lanczos4_matches_per_pixel() {
+    let width = 64;
+    let height = 64;
+    let input: Vec<f32> = (0..width * height)
+        .map(|i| ((i as f32 * 0.041).sin() + 1.0) * 0.5)
+        .collect();
+    let input_buf = Buffer2::new(width, height, input);
+    let transform = Transform::similarity(DVec2::new(2.0, 3.0), -0.02, 1.01);
+    let wt = WarpTransform::new(transform);
+    assert!(wt.is_linear());
+    let params = WarpParams::new(InterpolationMethod::Lanczos4 { deringing: -1.0 });
+
+    let mut output_stepped = Buffer2::new_default(width, height);
+    let mut output_reference = Buffer2::new_default(width, height);
+    warp_image(&input_buf, &mut output_stepped, &wt, &params);
+    warp_image_per_pixel_reference(&input_buf, &mut output_reference, &wt, &params);
+
+    for y in 0..height {
+        for x in 0..width {
+            let stepped = output_stepped[(x, y)];
+            let reference = output_reference[(x, y)];
+            assert!(
+                (stepped - reference).abs() < 1e-4,
+                "Lanczos4 mismatch at ({x}, {y}): stepped={stepped}, reference={reference}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_generic_stepping_nearest_matches_per_pixel() {
+    let width = 64;
+    let height = 64;
+    let input: Vec<f32> = (0..width * height)
+        .map(|i| ((i as f32 * 0.013).sin() + 1.0) * 0.5)
+        .collect();
+    let input_buf = Buffer2::new(width, height, input);
+    let transform = Transform::similarity(DVec2::new(1.0, 2.0), 0.01, 1.0);
+    let wt = WarpTransform::new(transform);
+    assert!(wt.is_linear());
+    let params = WarpParams::new(InterpolationMethod::Nearest);
+
+    let mut output_stepped = Buffer2::new_default(width, height);
+    let mut output_reference = Buffer2::new_default(width, height);
+    warp_image(&input_buf, &mut output_stepped, &wt, &params);
+    warp_image_per_pixel_reference(&input_buf, &mut output_reference, &wt, &params);
+
+    for y in 0..height {
+        for x in 0..width {
+            let stepped = output_stepped[(x, y)];
+            let reference = output_reference[(x, y)];
+            // Nearest is exact — no floating point interpolation
+            assert!(
+                (stepped - reference).abs() < 1e-6,
+                "Nearest mismatch at ({x}, {y}): stepped={stepped}, reference={reference}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_generic_stepping_disabled_for_homography() {
+    // With a homography, is_linear() returns false, so stepping is disabled.
+    // Output should match per-pixel reference exactly.
+    let width = 32;
+    let height = 32;
+    let input: Vec<f32> = (0..width * height)
+        .map(|i| ((i as f32 * 0.029).sin() + 1.0) * 0.5)
+        .collect();
+    let input_buf = Buffer2::new(width, height, input);
+    // Homography with small perspective component
+    let transform = Transform::homography([1.0, 0.0, 2.0, 0.0, 1.0, 1.0, 0.001, 0.0005]);
+    let wt = WarpTransform::new(transform);
+    assert!(!wt.is_linear());
+    let params = WarpParams::new(InterpolationMethod::Bicubic);
+
+    let mut output_stepped = Buffer2::new_default(width, height);
+    let mut output_reference = Buffer2::new_default(width, height);
+    warp_image(&input_buf, &mut output_stepped, &wt, &params);
+    warp_image_per_pixel_reference(&input_buf, &mut output_reference, &wt, &params);
+
+    for y in 0..height {
+        for x in 0..width {
+            let stepped = output_stepped[(x, y)];
+            let reference = output_reference[(x, y)];
+            assert!(
+                (stepped - reference).abs() < 1e-6,
+                "Homography mismatch at ({x}, {y}): stepped={stepped}, reference={reference}"
+            );
+        }
+    }
+}
