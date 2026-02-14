@@ -79,9 +79,8 @@ pub(super) fn rcd_demosaic(bayer: &BayerImage) -> Vec<f32> {
     let w4 = 4 * rw;
 
     // Allocate working buffers in raw coordinate space.
+    // RGB channels are zero-initialized because CFA copy only writes matching positions.
     let mut vh_dir = vec![0.0f32; npix];
-    let mut lpf = vec![0.0f32; npix];
-    // Planar RGB output.
     let mut rgb_r = vec![0.0f32; npix];
     let mut rgb_g = vec![0.0f32; npix];
     let mut rgb_b = vec![0.0f32; npix];
@@ -89,10 +88,6 @@ pub(super) fn rcd_demosaic(bayer: &BayerImage) -> Vec<f32> {
     // ── Copy CFA values to the appropriate RGB channel ───────────────────
 
     let rgb_slices: [&mut [f32]; 3] = [&mut rgb_r, &mut rgb_g, &mut rgb_b];
-    // We need to write to different channels from the same row. Since channels
-    // are separate buffers, we can iterate rows in parallel.
-    // But since we need mutable access to 3 separate Vecs keyed by CFA color,
-    // the simplest parallel approach is to iterate pixels by row.
     rgb_slices.into_iter().enumerate().for_each(|(ch, rgb_ch)| {
         rgb_ch.par_chunks_mut(rw).enumerate().for_each(|(ry, row)| {
             for (rx, pixel) in row.iter_mut().enumerate() {
@@ -103,30 +98,29 @@ pub(super) fn rcd_demosaic(bayer: &BayerImage) -> Vec<f32> {
         });
     });
 
-    // ── Step 1: V/H Direction Detection ──────────────────────────────────
+    // ── Step 1: Fused V/H Direction Detection ───────────────────────────
+    // Computes V-HPF², H-HPF², and VH_Dir in a single parallel pass per row.
+    // Each row computes its own H-HPF² inline and reads V-HPF² from ±1 neighbor
+    // rows via a full V-HPF buffer. This eliminates two extra full-image passes.
 
-    // Step 1.1: Compute all vertical HPF values (each row independent, needs ±3 rows).
-    let mut v_hpf_buf = vec![0.0f32; npix];
-    v_hpf_buf
-        .par_chunks_mut(rw)
-        .enumerate()
-        .for_each(|(ry, row)| {
-            if ry < 3 || ry + 3 >= rh {
-                return;
-            }
-            for (rx, val) in row.iter_mut().enumerate() {
-                let idx = ry * rw + rx;
-                let v = (cfa[idx - w3] - cfa[idx - w1] - cfa[idx + w1] + cfa[idx + w3])
-                    - 3.0 * (cfa[idx - w2] + cfa[idx + w2])
-                    + 6.0 * cfa[idx];
-                *val = v * v;
-            }
-        });
+    let mut v_hpf = vec![0.0f32; npix];
 
-    // Step 1.2: Compute VH_Dir from V and H HPF sums.
-    // V_Stat at (ry, rx) = v_hpf[ry-1][rx] + v_hpf[ry][rx] + v_hpf[ry+1][rx]
-    // H_Stat at (ry, rx) = h_hpf[ry][rx-1] + h_hpf[ry][rx] + h_hpf[ry][rx+1]
-    // H HPF is computed inline per row (only needs horizontal neighbors).
+    // Step 1a: Compute V-HPF² for all rows (needed by Step 1b for ±1 row reads).
+    v_hpf.par_chunks_mut(rw).enumerate().for_each(|(ry, row)| {
+        if ry < 3 || ry + 3 >= rh {
+            return;
+        }
+        for (rx, val) in row.iter_mut().enumerate() {
+            let idx = ry * rw + rx;
+            let v = (cfa[idx - w3] - cfa[idx - w1] - cfa[idx + w1] + cfa[idx + w3])
+                - 3.0 * (cfa[idx - w2] + cfa[idx + w2])
+                + 6.0 * cfa[idx];
+            *val = v * v;
+        }
+    });
+
+    // Step 1b: Fused H-HPF² + VH_Dir computation. H-HPF² is computed per-row
+    // inline (no extra buffer), combined with V-HPF² from v_hpf to produce VH_Dir.
     vh_dir
         .par_chunks_mut(rw)
         .enumerate()
@@ -134,31 +128,32 @@ pub(super) fn rcd_demosaic(bayer: &BayerImage) -> Vec<f32> {
             if ry < BORDER || ry + BORDER >= rh {
                 return;
             }
-            // Compute horizontal HPF for this row
-            let mut h_hpf = vec![0.0f32; rw];
-            for (rx, h_val) in h_hpf
-                .iter_mut()
-                .enumerate()
-                .take(rw.saturating_sub(3))
-                .skip(3)
-            {
+            // Inline H-HPF² computation (no per-row allocation).
+            let h_hpf_sq = |rx: usize| -> f32 {
                 let idx = ry * rw + rx;
                 let v = (cfa[idx - 3] - cfa[idx - 1] - cfa[idx + 1] + cfa[idx + 3])
                     - 3.0 * (cfa[idx - 2] + cfa[idx + 2])
                     + 6.0 * cfa[idx];
-                *h_val = v * v;
-            }
+                v * v
+            };
+            // Sliding window of 3 H-HPF² values to avoid per-row buffer.
+            let mut h_prev = h_hpf_sq(BORDER - 1);
+            let mut h_curr = h_hpf_sq(BORDER);
             for rx in BORDER..rw.saturating_sub(BORDER) {
-                let v_stat = (v_hpf_buf[(ry - 1) * rw + rx]
-                    + v_hpf_buf[ry * rw + rx]
-                    + v_hpf_buf[(ry + 1) * rw + rx])
-                    .max(EPSSQ);
-                let h_stat = (h_hpf[rx - 1] + h_hpf[rx] + h_hpf[rx + 1]).max(EPSSQ);
+                let h_next = h_hpf_sq(rx + 1);
+                let v_stat =
+                    (v_hpf[(ry - 1) * rw + rx] + v_hpf[ry * rw + rx] + v_hpf[(ry + 1) * rw + rx])
+                        .max(EPSSQ);
+                let h_stat = (h_prev + h_curr + h_next).max(EPSSQ);
                 vh_row[rx] = v_stat / (v_stat + h_stat);
+                h_prev = h_curr;
+                h_curr = h_next;
             }
         });
 
-    drop(v_hpf_buf);
+    // v_hpf is dead — reuse as scratch for PQ-Dir later.
+    let mut scratch = v_hpf;
+    let mut lpf = vec![0.0f32; npix];
 
     // ── Step 2: Low-Pass Filter ──────────────────────────────────────────
 
@@ -252,7 +247,9 @@ pub(super) fn rcd_demosaic(bayer: &BayerImage) -> Vec<f32> {
     // ── Step 4: Red and Blue Channel Interpolation ───────────────────────
 
     // Step 4.0-4.1: P/Q diagonal direction detection.
-    let mut pq_dir = vec![0.0f32; npix];
+    // Reuse scratch buffer (was V-HPF, now dead) for pq_dir.
+    scratch.fill(0.0);
+    let mut pq_dir = scratch;
 
     {
         let half_w = rw.div_ceil(2);
@@ -587,33 +584,40 @@ fn border_interpolate(
     } = s;
     let border = BORDER;
     let rgb_channels: [&mut [f32]; 3] = [rgb_r, rgb_g, rgb_b];
-    // Border is small (4 rows on each side), not worth parallelizing.
-    // Process top and bottom border bands plus left/right edges.
+
     for (ic, rgb_ch) in rgb_channels.into_iter().enumerate() {
-        for ry in 0..height {
-            // Skip interior rows entirely for top/bottom optimization
-            let in_vertical_border = ry < border || ry >= height - border;
-            for rx in 0..width {
-                if !in_vertical_border && rx >= border && rx < width - border {
-                    continue;
-                }
-
-                let idx = ry * width + rx;
-                let c = pattern.color_at(ry, rx);
-
-                if ic == c {
-                    rgb_ch[idx] = cfa[idx];
-                    continue;
-                }
-
-                let mut sum = 0.0f32;
-                let mut count = 0u32;
-
-                for dy in -1i32..=1 {
-                    for dx in -1i32..=1 {
-                        if dy == 0 && dx == 0 {
-                            continue;
+        // Only iterate actual border pixels: top/bottom bands + left/right edges.
+        // This avoids walking the entire image just to skip interior pixels.
+        let mut border_pixel = |ry: usize, rx: usize| {
+            let idx = ry * width + rx;
+            let c = pattern.color_at(ry, rx);
+            if ic == c {
+                rgb_ch[idx] = cfa[idx];
+                return;
+            }
+            let mut sum = 0.0f32;
+            let mut count = 0u32;
+            for dy in -1i32..=1 {
+                for dx in -1i32..=1 {
+                    if dy == 0 && dx == 0 {
+                        continue;
+                    }
+                    let ny = ry as i32 + dy;
+                    let nx = rx as i32 + dx;
+                    if ny >= 0 && ny < height as i32 && nx >= 0 && nx < width as i32 {
+                        let nidx = ny as usize * width + nx as usize;
+                        if pattern.color_at(ny as usize, nx as usize) == ic {
+                            sum += cfa[nidx];
+                            count += 1;
                         }
+                    }
+                }
+            }
+            if count > 0 {
+                rgb_ch[idx] = sum / count as f32;
+            } else {
+                for dy in -2i32..=2 {
+                    for dx in -2i32..=2 {
                         let ny = ry as i32 + dy;
                         let nx = rx as i32 + dx;
                         if ny >= 0 && ny < height as i32 && nx >= 0 && nx < width as i32 {
@@ -625,25 +629,29 @@ fn border_interpolate(
                         }
                     }
                 }
+                rgb_ch[idx] = if count > 0 { sum / count as f32 } else { 0.0 };
+            }
+        };
 
-                if count > 0 {
-                    rgb_ch[idx] = sum / count as f32;
-                } else {
-                    for dy in -2i32..=2 {
-                        for dx in -2i32..=2 {
-                            let ny = ry as i32 + dy;
-                            let nx = rx as i32 + dx;
-                            if ny >= 0 && ny < height as i32 && nx >= 0 && nx < width as i32 {
-                                let nidx = ny as usize * width + nx as usize;
-                                if pattern.color_at(ny as usize, nx as usize) == ic {
-                                    sum += cfa[nidx];
-                                    count += 1;
-                                }
-                            }
-                        }
-                    }
-                    rgb_ch[idx] = if count > 0 { sum / count as f32 } else { 0.0 };
-                }
+        // Top border band (full rows).
+        for ry in 0..border {
+            for rx in 0..width {
+                border_pixel(ry, rx);
+            }
+        }
+        // Bottom border band (full rows).
+        for ry in height.saturating_sub(border)..height {
+            for rx in 0..width {
+                border_pixel(ry, rx);
+            }
+        }
+        // Left and right edges on interior rows.
+        for ry in border..height.saturating_sub(border) {
+            for rx in 0..border {
+                border_pixel(ry, rx);
+            }
+            for rx in width.saturating_sub(border)..width {
+                border_pixel(ry, rx);
             }
         }
     }
