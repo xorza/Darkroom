@@ -41,4 +41,6 @@ pub enum FrameType {
 }
 
 #[cfg(test)]
+mod bench;
+#[cfg(test)]
 mod tests;
