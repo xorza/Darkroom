@@ -420,3 +420,167 @@ fn test_sigma_clipped_arrayvec_matches_vec_version() {
     assert!((median_vec - median_arrayvec).abs() < 1e-6);
     assert!((sigma_vec - sigma_arrayvec).abs() < 1e-6);
 }
+
+// ---------------------------------------------------------------------------
+// median_f32_fast tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_median_f32_fast_odd() {
+    // Sorted: [1, 2, 3, 5, 8], mid=2, median=3
+    let mut values = [5.0f32, 2.0, 8.0, 1.0, 3.0];
+    assert!((median_f32_fast(&mut values) - 3.0).abs() < f32::EPSILON);
+}
+
+#[test]
+fn test_median_f32_fast_even_returns_upper_middle() {
+    // Sorted: [1, 2, 5, 8], mid=2, returns values[2]=5 (upper-middle)
+    // This differs from median_f32_mut which returns (2+5)/2 = 3.5
+    let mut values = [5.0f32, 2.0, 8.0, 1.0];
+    let fast = median_f32_fast(&mut values);
+    assert!(
+        (fast - 5.0).abs() < f32::EPSILON,
+        "expected 5.0, got {fast}"
+    );
+}
+
+#[test]
+fn test_median_f32_fast_differs_from_exact_on_even() {
+    // Sorted: [1, 3, 7, 9], mid=2
+    // Exact: (3+7)/2 = 5.0
+    // Fast: values[2] = 7.0
+    let mut values_fast = [9.0f32, 1.0, 7.0, 3.0];
+    let mut values_exact = values_fast;
+    let fast = median_f32_fast(&mut values_fast);
+    let exact = median_f32_mut(&mut values_exact);
+    assert!((exact - 5.0).abs() < f32::EPSILON);
+    assert!((fast - 7.0).abs() < f32::EPSILON);
+    assert!(
+        (fast - exact).abs() > 1.0,
+        "fast and exact should differ for even N"
+    );
+}
+
+#[test]
+fn test_median_f32_fast_agrees_with_exact_on_odd() {
+    // For odd N, both return the same middle element
+    // Sorted: [2, 4, 6, 8, 10], mid=2, median=6
+    let mut values_fast = [10.0f32, 4.0, 6.0, 2.0, 8.0];
+    let mut values_exact = values_fast;
+    let fast = median_f32_fast(&mut values_fast);
+    let exact = median_f32_mut(&mut values_exact);
+    assert!((fast - exact).abs() < f32::EPSILON);
+    assert!((fast - 6.0).abs() < f32::EPSILON);
+}
+
+#[test]
+fn test_median_f32_fast_single() {
+    let mut values = [42.0f32];
+    assert!((median_f32_fast(&mut values) - 42.0).abs() < f32::EPSILON);
+}
+
+#[test]
+fn test_median_f32_fast_two_elements() {
+    // Sorted: [3, 7], mid=1, returns 7 (upper-middle)
+    let mut values = [7.0f32, 3.0];
+    assert!((median_f32_fast(&mut values) - 7.0).abs() < f32::EPSILON);
+}
+
+#[test]
+fn test_median_f32_fast_all_equal() {
+    let mut values = [5.0f32; 20];
+    assert!((median_f32_fast(&mut values) - 5.0).abs() < f32::EPSILON);
+}
+
+#[test]
+fn test_median_f32_fast_negative_values() {
+    // Sorted: [-10, -5, -2, 3, 7], mid=2, median=-2
+    let mut values = [3.0f32, -5.0, 7.0, -10.0, -2.0];
+    assert!((median_f32_fast(&mut values) - (-2.0)).abs() < f32::EPSILON);
+}
+
+// ---------------------------------------------------------------------------
+// mad_f32_fast tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_mad_f32_fast_hand_computed() {
+    // values = [2, 3, 4], median = 3
+    // deviations = |2-3|, |3-3|, |4-3| = [1, 0, 1]
+    // sorted deviations: [0, 1, 1], mid=1, MAD = 1
+    let values = [2.0f32, 3.0, 4.0];
+    let mut scratch = Vec::new();
+    let mad = mad_f32_fast(&values, 3.0, &mut scratch);
+    assert!((mad - 1.0).abs() < f32::EPSILON);
+}
+
+#[test]
+fn test_mad_f32_fast_five_values() {
+    // values = [1, 2, 3, 4, 5], median = 3
+    // deviations = [2, 1, 0, 1, 2]
+    // sorted deviations: [0, 1, 1, 2, 2], mid=2, MAD = 1
+    let values = [1.0f32, 2.0, 3.0, 4.0, 5.0];
+    let mut scratch = Vec::new();
+    let mad = mad_f32_fast(&values, 3.0, &mut scratch);
+    assert!((mad - 1.0).abs() < f32::EPSILON);
+}
+
+#[test]
+fn test_mad_f32_fast_uniform() {
+    // All same → all deviations = 0 → MAD = 0
+    let values = [7.0f32; 10];
+    let mut scratch = Vec::new();
+    let mad = mad_f32_fast(&values, 7.0, &mut scratch);
+    assert!(mad.abs() < f32::EPSILON);
+}
+
+#[test]
+fn test_mad_f32_fast_empty() {
+    let values: [f32; 0] = [];
+    let mut scratch = Vec::new();
+    let mad = mad_f32_fast(&values, 0.0, &mut scratch);
+    assert!(mad.abs() < f32::EPSILON);
+}
+
+#[test]
+fn test_mad_f32_fast_single() {
+    // Single value: deviation = 0, MAD = 0
+    let values = [5.0f32];
+    let mut scratch = Vec::new();
+    let mad = mad_f32_fast(&values, 5.0, &mut scratch);
+    assert!(mad.abs() < f32::EPSILON);
+}
+
+#[test]
+fn test_mad_f32_fast_scratch_reused() {
+    // Verify scratch buffer is reused (capacity preserved across calls)
+    let mut scratch = Vec::new();
+
+    let values1 = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
+    mad_f32_fast(&values1, 5.5, &mut scratch);
+    let cap = scratch.capacity();
+    assert!(cap >= 10);
+
+    let values2 = [1.0f32, 2.0, 3.0];
+    mad_f32_fast(&values2, 2.0, &mut scratch);
+    assert!(scratch.capacity() >= cap, "capacity should not shrink");
+}
+
+#[test]
+fn test_mad_f32_fast_matches_regular_on_odd() {
+    // For odd N, median_f32_fast and median_f32_mut agree,
+    // so mad_f32_fast should match mad_f32_with_scratch exactly.
+    let values = [10.0f32, 2.0, 7.0, 15.0, 3.0];
+    let median = 7.0; // sorted: [2, 3, 7, 10, 15], mid=2
+    let mut scratch1 = Vec::new();
+    let mut scratch2 = Vec::new();
+    let mad_fast = mad_f32_fast(&values, median, &mut scratch1);
+    let mad_regular = mad_f32_with_scratch(&values, median, &mut scratch2);
+    // deviations = |10-7|, |2-7|, |7-7|, |15-7|, |3-7| = [3, 5, 0, 8, 4]
+    // sorted = [0, 3, 4, 5, 8], mid=2 → MAD = 4
+    assert!(
+        (mad_fast - mad_regular).abs() < f32::EPSILON,
+        "fast={mad_fast}, regular={mad_regular}"
+    );
+    assert!((mad_fast - 4.0).abs() < f32::EPSILON);
+}

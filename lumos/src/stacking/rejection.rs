@@ -166,6 +166,8 @@ impl SigmaClipConfig {
         let variance = (trimmed_sum_sq - trimmed_sum * trimmed_sum / trimmed_n) / (trimmed_n - 1.0);
 
         if variance < f32::EPSILON {
+            // Trimmed data is constant. The full path would compute MAD=0, sigma=0
+            // and break without rejecting. Early exit matches that behavior.
             return true;
         }
 
@@ -2074,5 +2076,149 @@ mod tests {
             !s.indices[..remaining].contains(&50),
             "Frame 50 (the outlier) should be rejected"
         );
+    }
+
+    // ========== reset_indices tests ==========
+
+    #[test]
+    fn test_reset_indices_basic() {
+        let mut indices = Vec::new();
+        reset_indices(&mut indices, 5);
+        assert_eq!(indices, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_reset_indices_reuses_allocation() {
+        let mut indices = Vec::with_capacity(100);
+        reset_indices(&mut indices, 5);
+        assert_eq!(indices, vec![0, 1, 2, 3, 4]);
+        assert!(indices.capacity() >= 100, "should preserve allocation");
+
+        // Reset to different size — should reuse existing allocation
+        reset_indices(&mut indices, 3);
+        assert_eq!(indices, vec![0, 1, 2]);
+        assert!(indices.capacity() >= 100);
+    }
+
+    #[test]
+    fn test_reset_indices_overwrites_stale_data() {
+        let mut indices = vec![99, 88, 77, 66, 55];
+        reset_indices(&mut indices, 5);
+        assert_eq!(indices, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_reset_indices_empty() {
+        let mut indices = vec![1, 2, 3];
+        reset_indices(&mut indices, 0);
+        assert!(indices.is_empty());
+    }
+
+    // ========== no_outliers_possible tests ==========
+
+    #[test]
+    fn test_no_outliers_possible_tight_cluster() {
+        // 20 values all equal to 10.0 → stddev=0 → returns true
+        let values = vec![10.0f32; 20];
+        assert!(SigmaClipConfig::no_outliers_possible(&values, 2.5));
+    }
+
+    #[test]
+    fn test_no_outliers_possible_small_spread() {
+        // values = [10, 10, 10, ..., 10, 11, 9] (18×10 + 11 + 9), N=20
+        // trimmed (exclude min=9, max=11): 18×10 + one of {9,11} excluded
+        // Actually exclude the single min (9) and single max (11):
+        //   trimmed = 18×10.0 = 180, trimmed_n = 18, trimmed_mean = 10.0
+        //   trimmed variance: 18 × (10-10)² / 17 = 0
+        //   stddev = 0 → returns true
+        let mut values = vec![10.0f32; 18];
+        values.push(11.0);
+        values.push(9.0);
+        assert!(SigmaClipConfig::no_outliers_possible(&values, 2.5));
+    }
+
+    #[test]
+    fn test_no_outliers_possible_clear_outlier() {
+        // 17×10.0 + [9.0, 11.0, 100.0], N=20
+        // min=9.0, max=100.0, excluded from trimmed stats.
+        // trimmed: 17×10.0 + 11.0 = 181, trimmed_n=18, trimmed_mean=181/18 ≈ 10.056
+        // trimmed sum_sq = 17×100 + 121 = 1821
+        // trimmed var = (1821 - 181²/18) / 17 = (1821 - 1820.056) / 17 ≈ 0.056
+        // trimmed stddev ≈ 0.236
+        // max_dev = |100.0 - 10.056| = 89.94
+        // threshold = 2.5 × 0.236 = 0.59
+        // 89.94 > 0.59 → returns false (outlier detected)
+        let mut values = vec![10.0f32; 17];
+        values.extend([9.0, 11.0, 100.0]);
+        assert!(!SigmaClipConfig::no_outliers_possible(&values, 2.5));
+    }
+
+    #[test]
+    fn test_no_outliers_possible_returns_false_for_small_n() {
+        // N < 10 always returns false (trimming would distort too much)
+        let values = vec![10.0f32; 5];
+        assert!(!SigmaClipConfig::no_outliers_possible(&values, 2.5));
+
+        let values = vec![10.0f32; 9];
+        assert!(!SigmaClipConfig::no_outliers_possible(&values, 2.5));
+    }
+
+    #[test]
+    fn test_no_outliers_possible_moderate_spread() {
+        // Linearly spaced: [0, 1, 2, ..., 19], N=20
+        // min=0, max=19, excluded → trimmed = [1..18], trimmed_n=18
+        // trimmed_sum = 1+2+...+18 = 171, trimmed_mean = 171/18 = 9.5
+        // trimmed_sum_sq = 1+4+9+...+324 = 2109
+        // trimmed_var = (2109 - 171²/18) / 17 = (2109 - 1624.5) / 17 = 484.5/17 ≈ 28.5
+        // trimmed_stddev ≈ 5.34
+        // max_dev = max(|0 - 9.5|, |19 - 9.5|) = 9.5
+        // threshold = 2.5 × 5.34 = 13.35
+        // 9.5 < 13.35 → returns true (no outlier exceeds threshold)
+        let values: Vec<f32> = (0..20).map(|i| i as f32).collect();
+        assert!(SigmaClipConfig::no_outliers_possible(&values, 2.5));
+    }
+
+    #[test]
+    fn test_no_outliers_possible_asymmetric_outliers() {
+        // [1, 1.5, 2, 2.5, 3, 50, 80, 100, 1, 1] — N=10
+        // min=1.0, max=100.0, excluded
+        // trimmed: [1.5, 2, 2.5, 3, 50, 80, 1, 1] — n=8
+        // trimmed_sum = 141, trimmed_mean = 17.625
+        // Outlier 80 is still in trimmed set → large stddev
+        // max_dev = |100 - 17.625| = 82.375
+        // Should return false (outliers present)
+        let values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 50.0, 80.0, 100.0, 1.0, 1.0];
+        assert!(!SigmaClipConfig::no_outliers_possible(&values, 2.0));
+    }
+
+    #[test]
+    fn test_no_outliers_possible_does_not_break_rejection() {
+        // End-to-end: early exit must not prevent correct rejection.
+        // Need data with non-zero MAD so sigma clipping can define a threshold.
+        // 47 values at 9.0 + 47 values at 11.0 + 6 outliers = 100 values.
+        // median = 11 (or 9, depending on order), MAD ≈ 1, sigma ≈ 1.48
+        // threshold = 2.5 × 1.48 = 3.7 → outliers at 100+ are clearly rejected.
+        let mut values: Vec<f32> = vec![9.0; 47];
+        values.extend(vec![11.0; 47]);
+        values.extend([100.0, 200.0, 500.0, 600.0, 700.0, 800.0]);
+        let remaining = SigmaClipConfig::new(2.5, 3).reject(&mut values, &mut scratch());
+        // All 6 large outliers must be rejected
+        for &v in &values[..remaining] {
+            assert!(v < 20.0, "Outlier {v} should have been clipped");
+        }
+        assert_eq!(remaining, 94);
+    }
+
+    #[test]
+    fn test_no_outliers_possible_clean_data_skips_quickselect() {
+        // 100×10.0 (perfectly uniform) — early exit should trigger,
+        // meaning reject returns all values with no changes.
+        let mut values = vec![10.0f32; 100];
+        let remaining = SigmaClipConfig::new(2.5, 3).reject(&mut values, &mut scratch());
+        assert_eq!(remaining, 100);
+        // All values unchanged
+        for &v in &values {
+            assert!((v - 10.0).abs() < f32::EPSILON);
+        }
     }
 }
