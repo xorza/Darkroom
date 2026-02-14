@@ -20,44 +20,7 @@ Two-phase approach: `T → ScnValue → text` (serialize) and `text → ScnValue
 
 ---
 
-## Bugs
-
-### CRITICAL: Float emit buffer overflow (emit.rs:56-61)
-
-The 32-byte stack buffer will **panic** for extreme f64 values:
-- `f64::MAX` ≈ 1.8e308 → Display format produces ~309 characters
-- `5e-324` (smallest subnormal) → ~326 characters
-- `write!(cursor, "{f}").unwrap()` panics when `Cursor` returns `Err` on overflow
-
-**Fix**: Switch to the `ryu` crate (used by serde_json). Max output 24 bytes, always roundtrip-safe,
-uses scientific notation for extreme values, 2-5x faster than std Display. Ryu uses the Ryū algorithm
-which produces the shortest decimal that round-trips exactly.
-
-```rust
-fn emit_float<W: Write>(w: &mut W, f: f64, indent: usize, at_start: bool) -> Result<()> {
-    if at_start { write_indent(w, indent)?; }
-    if !f.is_finite() {
-        w.write_all(b"null")?;
-    } else {
-        let mut buf = ryu::Buffer::new();
-        let s = buf.format(f);
-        w.write_all(s.as_bytes())?;
-        if !s.contains('.') && !s.contains('e') && !s.contains('E') {
-            w.write_all(b".0")?;
-        }
-    }
-    Ok(())
-}
-```
-
-Note: Rust std Display uses Grisu3+Dragon, which IS roundtrip-safe, but doesn't use scientific
-notation, causing the buffer overflow for extreme values.
-
-### MEDIUM: Parser accepts trailing dot as float (parse.rs:334-339)
-
-`1.` (dot with no fractional digits) is accepted because the digit-scanning `while` loop runs zero
-times, and Rust's `str::parse::<f64>()` accepts `"1."`. JSON rejects this. Most strict parsers do
-too. Should either reject (require at least one digit after dot) or document as intentional.
+## Known Issues
 
 ### LOW: O(n²) UTF-8 re-validation in string slow path (parse.rs:215)
 
