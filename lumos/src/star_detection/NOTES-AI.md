@@ -106,8 +106,8 @@ but enables parallel processing and buffer reuse.
   background estimate upward in heavily crowded regions.
 - **Fix**: Interpolate from neighboring tiles instead of using contaminated pixels.
 
-### P3: Duplicate Import in threshold_mask/mod.rs
-- Lines 10 and 24 both have `use rayon::prelude::*;`. Harmless but should be cleaned.
+### ~~P3: Duplicate Import in threshold_mask/mod.rs~~ FIXED
+- Duplicate `use rayon::prelude::*;` removed.
 
 ## Completed Fixes
 1. ~~**Matched filter noise scaling** (P1)~~ **DONE** -- output normalized by sqrt(sum(K^2)).

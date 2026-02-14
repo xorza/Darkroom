@@ -433,9 +433,22 @@ for the entire parallel block.
 
 ## Minor Code Quality Issues
 
-### Duplicate Import in threshold_mask/mod.rs
-Lines 10 and 24 both have `use rayon::prelude::*;`. Harmless but should be cleaned.
+### ~~Duplicate Import in threshold_mask/mod.rs~~ FIXED
+- Duplicate `use rayon::prelude::*;` removed.
 
 ### NEON Double Reinterpret in threshold_mask/neon.rs
 Line 41: `vreinterpretq_u32_f32(vreinterpretq_f32_u32(cmp))` — `cmp` is already
 `uint32x4_t`, so this is a no-op. Should be `let mask_u32 = cmp;`.
+
+## Recent Refactoring
+
+### Run-Merge Deduplication (F18)
+Extracted `merge_runs_with_prev()` helper function for the run-merging logic shared
+between `label_mask_sequential()` and `label_strip()`. Uses `RunMergeUF` trait to
+abstract over `UnionFind` (`&mut self`) and `AtomicUnionFind` (`&self`), with
+`AtomicUFRef` adapter wrapper for the parallel path.
+
+### Test Helpers Moved (F17)
+`label_map_from_raw()` and `label_map_from_mask_with_connectivity()` moved from
+`labeling/mod.rs` (production code with `#[cfg(test)]`) to `labeling/test_utils.rs`
+(`#[cfg(test)]` submodule). Import path: `labeling::test_utils::*`.

@@ -12,7 +12,7 @@ patterns and the highest-priority **unfixed** issues across all modules.
 
 ## Already Fixed
 
-<details><summary>Click to expand (42 items)</summary>
+<details><summary>Click to expand</summary>
 
 - astro_image: 3-channel FITS loaded as interleaved → loads planar via `from_planar_channels`
 - astro_image: FITS integer data not normalized → `BitPix::normalization_max()` normalizes to [0,1]
@@ -62,6 +62,12 @@ patterns and the highest-priority **unfixed** issues across all modules.
 - star_detection: `#[cfg(test)]` helpers in production code → moved to `detect_test_utils.rs` and `labeling/test_utils.rs`
 - star_detection: CCL run-merge logic duplicated in sequential/parallel → `merge_runs_with_prev()` with `RunMergeUF` trait
 - math: `pub mod scalar` in sum exposed implementation detail → `pub(super) mod scalar`
+- astro_image: `CfaImage::demosaic()` unhelpful panic on missing cfa_type → descriptive `.expect()` message
+- registration: HashSet reallocation in `recover_matches` loop → pre-allocated with `with_capacity()`, reused via `.clear()`
+- star_detection: Duplicate test helpers (`to_gray_image`, `to_gray_stretched`, `mask_to_gray`) → import from `common/output/image_writer.rs`
+- calibration_masters: Unused `StackableImage` and `rayon::prelude::*` imports in defect_map.rs → removed
+- calibration_masters: Unnecessary `.clone().unwrap()` in DefectMap::correct() → `.as_ref().unwrap()`
+- star_detection: Duplicate `use rayon::prelude::*` in threshold_mask → removed
 
 </details>
 
