@@ -220,7 +220,7 @@ impl<I: StackableImage> ImageCache<I> {
             .enumerate()
             .map(|(i, p)| (i + 1, p))
             .collect();
-        let remaining = try_par_map_limited(&indexed_paths, 3, |&(idx, ref path)| {
+        let remaining = try_par_map_limited(&indexed_paths, 3, |&(idx, path)| {
             let path_ref = path.as_ref();
             let image = I::load(path_ref)?;
             if image.dimensions() != dimensions {
