@@ -11,23 +11,14 @@ mod subpixel_accuracy;
 
 pub use star_field::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 
+use crate::star_detection::tests::common::output::to_gray_image;
 use crate::star_detection::tests::common::{gray_to_rgb_image_stretched, save_image};
 use crate::star_detection::{Config, StarDetector};
 use crate::testing::init_tracing;
 use crate::{AstroImage, ImageDimensions};
 use glam::Vec2;
-use image::GrayImage;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
-
-/// Convert f32 grayscale pixels to u8 grayscale image.
-fn to_gray_image(pixels: &[f32], width: usize, height: usize) -> GrayImage {
-    let bytes: Vec<u8> = pixels
-        .iter()
-        .map(|&p| (p.clamp(0.0, 1.0) * 255.0) as u8)
-        .collect();
-    GrayImage::from_raw(width as u32, height as u32, bytes).unwrap()
-}
 
 #[test]
 fn test_synthetic_star_detection() {

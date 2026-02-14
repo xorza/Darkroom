@@ -2,6 +2,7 @@
 
 use super::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 use crate::common::{BitBuffer2, Buffer2};
+use crate::star_detection::tests::common::output::{mask_to_gray, to_gray_stretched};
 use crate::star_detection::tests::common::{gray_to_rgb_image_stretched, save_image};
 use crate::{AstroImage, ImageDimensions};
 
@@ -10,29 +11,8 @@ use crate::star_detection::mask_dilation::dilate_mask;
 use crate::star_detection::{StarDetector, config::Config};
 use crate::testing::init_tracing;
 use glam::Vec2;
-use image::GrayImage;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
-
-/// Convert f32 pixels to grayscale image (auto-stretched to full range).
-fn to_gray_stretched(pixels: &[f32], width: usize, height: usize) -> GrayImage {
-    let min = pixels.iter().cloned().fold(f32::INFINITY, f32::min);
-    let max = pixels.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-    let range = (max - min).max(1e-10);
-
-    let bytes: Vec<u8> = pixels
-        .iter()
-        .map(|&p| (((p - min) / range) * 255.0) as u8)
-        .collect();
-
-    GrayImage::from_raw(width as u32, height as u32, bytes).unwrap()
-}
-
-/// Convert bool mask to grayscale image.
-fn mask_to_gray(mask: &[bool], width: usize, height: usize) -> GrayImage {
-    let bytes: Vec<u8> = mask.iter().map(|&b| if b { 255 } else { 0 }).collect();
-    GrayImage::from_raw(width as u32, height as u32, bytes).unwrap()
-}
 
 /// Create threshold mask (same logic as detection.rs).
 fn create_threshold_mask(

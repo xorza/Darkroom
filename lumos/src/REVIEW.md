@@ -37,21 +37,11 @@ Comprehensive code quality review across submodules (~40k+ lines). The codebase 
 #### ~~[F9] Drizzle kernel implementations duplicated 4x~~ --- FIXED
 - Extracted `accumulate()` helper and `add_image_radial()` with closure-based kernel. Gaussian and Lanczos unified; ~120 lines removed.
 
-#### [F10] SIMD Neumaier/Kahan reduction duplicated across AVX2/SSE/NEON
-- **Location**: `math/sum/avx2.rs:33-51`, `math/sum/sse.rs:34-52`, `math/sum/neon.rs:34-50`
-- **Category**: Generalization
-- **Impact**: 4/5 --- ~90 lines duplicated across 3 files for compensated summation
-- **Meaningfulness**: 4/5 --- Numerical code; any bug fix must be replicated 3x
-- **Invasiveness**: 3/5 --- Extract macro or generic helper
-- **Description**: Horizontal SIMD lane reduction with Neumaier compensation is identically implemented in AVX2, SSE, and NEON files. The `weighted_mean_f32` function is also nearly identical across all three (~75 additional duplicated lines).
+#### [F10] SIMD Neumaier/Kahan reduction duplicated across AVX2/SSE/NEON --- REVIEWED, NO ACTION
+- ~290 lines duplicated across 3 platforms. Macro/trait dedup viable but high risk for working, tested numerical code. Platform intrinsics differ only in type names and lane widths. Keeping as-is.
 
-#### [F11] Paired SIMD functions duplicated in star_detection threshold_mask
-- **Location**: `star_detection/threshold_mask/` (SSE, NEON, scalar)
-- **Category**: Generalization
-- **Impact**: 4/5 --- ~300 lines of near-identical code (process_words vs process_words_filtered)
-- **Meaningfulness**: 5/5 --- Duplicated across 3 platform implementations
-- **Invasiveness**: 3/5 --- Unify with `Option<&[f32]>` for background parameter
-- **Description**: Each platform has two nearly identical functions: one with background subtraction and one without. Unifying via an optional background parameter would eliminate half the SIMD code.
+#### [F11] Paired SIMD functions duplicated in star_detection threshold_mask --- REVIEWED, NO ACTION
+- ~400 lines duplicated (with/without background variants × 3 platforms). Difference is one threshold computation line per SIMD group. Macro dedup viable but SIMD hot-path code benefits from explicit, auditable implementations. Keeping as-is.
 
 #### ~~[F12] RNG code duplicated 16x across testing module~~ --- FIXED
 - Extracted `TestRng` struct in `testing/mod.rs` with `next_u64()`, `next_f32()`, `next_f64()`. Replaced all 16+ inline LCG closures across `testing/synthetic/`, `star_detection/`, and `registration/` test files.
@@ -113,14 +103,14 @@ Comprehensive code quality review across submodules (~40k+ lines). The codebase 
 
 ## Cross-Cutting Patterns
 
-### 1. SIMD Code Duplication
-The most pervasive issue: SIMD implementations (AVX2/SSE/NEON) duplicate logic across platform files. Affects: `math/sum/`, `star_detection/threshold_mask/`, `star_detection/background/simd/`, `star_detection/centroid/gaussian_fit/`. Consider macros or generic helpers for common patterns like Neumaier reduction, weighted accumulation, and paired with/without-background variants.
+### 1. SIMD Code Duplication --- REVIEWED, NO ACTION
+Reviewed all ~690 lines of duplication across AVX2/SSE/NEON (F10: `math/sum/` ~290 lines, F11: `threshold_mask/` ~400 lines). Macro-based dedup is viable but high risk for low reward: the code is correct, tested, and rarely changes. Platform-specific intrinsics make generic abstractions complex. Keeping as-is.
 
-### 2. Test Utility Duplication
-~~LCG RNG duplication~~ (FIXED — `TestRng` in `testing/mod.rs`). ~~DVec2/Star transform duplication~~ (FIXED — `Positioned` trait in `transforms.rs`). Remaining: `star_detection/tests/` helper functions (`to_gray_image`, `match_stars`, `mask_to_gray`) redefined in multiple test files instead of importing from `tests/common/`.
+### 2. Test Utility Duplication --- FIXED
+~~LCG RNG duplication~~ (FIXED — `TestRng` in `testing/mod.rs`). ~~DVec2/Star transform duplication~~ (FIXED — `Positioned` trait in `transforms.rs`). ~~Image conversion helpers~~ (FIXED — removed duplicate `to_gray_image`, `to_gray_stretched`, `mask_to_gray` from `synthetic/`, now imported from `common/output/image_writer.rs`). `match_stars` in `subpixel_accuracy.rs` is NOT a duplicate (different signature and purpose from `comparison.rs` version).
 
-### 3. `#[allow(clippy::too_many_arguments)]` Proliferation
-~~Drizzle kernel methods~~ (FIXED — refactored to `add_image_radial` with fewer params; only `compute_square_overlap` retains annotation). Remaining: `star_detection/convolution/` (matched_filter), `raw/demosaic/xtrans/` (XTransImage constructors), `testing/synthetic/stamps.rs` (stamp generators). Consider parameter structs for the most egregious cases.
+### 3. `#[allow(clippy::too_many_arguments)]` --- REVIEWED, NO ACTION
+~~Drizzle kernel methods~~ (FIXED). Reviewed all 37 remaining occurrences. All are justified: SIMD dispatch functions (identical signatures across platform variants), hot-path pixel operations (struct wrapping adds indirection), constructors with heterogeneous parameters (XTransImage), test-only generators, and sorting networks (`median9_scalar` where params ARE the data). No refactoring needed.
 
-### 4. Inconsistent `#[allow(dead_code)]` Usage
-Some annotations mark truly unused code, others mark actively-used runtime-dispatched code, and some mark test-only code in production modules. Three different patterns for the same concept across `star_detection`, `raw`, and `common`.
+### 4. `#[allow(dead_code)]` --- REVIEWED, NO ACTION
+Reviewed all 24 occurrences. All annotations are correct and well-justified: public API methods available for downstream use (`Aabb`), struct fields used by tests (`GaussianFitResult`, `MoffatFitResult`), SIMD fallbacks kept for testing, diagnostic fields (`iterations`, `inlier_ratio`), WIP modules with documentation (`tps`), and `#[cfg_attr(test, allow(dead_code))]` for production-only code paths. No changes needed.
