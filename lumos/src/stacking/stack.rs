@@ -263,11 +263,14 @@ fn compute_frame_norms(
 /// Resolve weights from the weighting strategy and pre-computed channel stats.
 ///
 /// Returns normalized weights (sum to 1.0) or `None` for equal weighting.
-fn resolve_weights(weighting: &Weighting, stats: Option<&[FrameStats]>) -> Option<Vec<f32>> {
+fn resolve_weights(weighting: &Weighting, stats: &[FrameStats]) -> Option<Vec<f32>> {
     match weighting {
         Weighting::Equal => None,
         Weighting::Noise => {
-            let stats = stats.expect("channel stats required for noise weighting");
+            assert!(
+                !stats.is_empty(),
+                "channel stats required for noise weighting"
+            );
             // w = 1/sigma^2 where sigma = average MAD-based sigma across channels
             let weights: Vec<f32> = stats
                 .iter()
@@ -303,20 +306,17 @@ fn normalize_weights(weights: &[f32]) -> Option<Vec<f32>> {
 ///
 /// Generic over any `StackableImage` type.
 pub(crate) fn run_stacking<I: StackableImage>(cache: &ImageCache<I>, config: &StackConfig) -> I {
-    // Compute channel stats once (shared by normalization and noise weighting)
-    let stats = if config.normalization != Normalization::None
-        || matches!(config.weighting, Weighting::Noise)
-    {
-        Some(cache.compute_channel_stats())
+    let needs_stats =
+        config.normalization != Normalization::None || matches!(config.weighting, Weighting::Noise);
+
+    let stats = if needs_stats {
+        cache.compute_channel_stats()
     } else {
-        None
+        vec![]
     };
 
-    let frame_norms = match stats.as_deref() {
-        Some(s) => compute_frame_norms(s, config.normalization),
-        None => None,
-    };
-    let weights = resolve_weights(&config.weighting, stats.as_deref());
+    let frame_norms = compute_frame_norms(&stats, config.normalization);
+    let weights = resolve_weights(&config.weighting, &stats);
 
     let pixels = dispatch_stacking(cache, &weights, config, frame_norms.as_deref());
     I::from_stacked(pixels, cache.metadata().clone(), cache.dimensions())
@@ -803,7 +803,7 @@ mod tests {
             "Frame 1 should be much noisier: sigma0={sigma0}, sigma1={sigma1}"
         );
 
-        let weights = resolve_weights(&Weighting::Noise, Some(&stats)).unwrap();
+        let weights = resolve_weights(&Weighting::Noise, &stats).unwrap();
         // Frame 0 should get much higher weight
         assert!(
             weights[0] > weights[1] * 10.0,
@@ -821,7 +821,7 @@ mod tests {
         let cache = make_uniform_frames(100, &[50.0, 50.0, 50.0]);
         let stats = cache.compute_channel_stats();
         // All MADs are 0 for uniform frames → all weights are 0 → returns None
-        let weights = resolve_weights(&Weighting::Noise, Some(&stats));
+        let weights = resolve_weights(&Weighting::Noise, &stats);
         assert!(
             weights.is_none(),
             "Uniform frames have zero MAD → no weights (equal weighting fallback)"
@@ -840,7 +840,7 @@ mod tests {
             AstroImage::from_pixels(dims, make_frame(300.0)),
         ]);
         let stats = cache.compute_channel_stats();
-        let weights = resolve_weights(&Weighting::Noise, Some(&stats)).unwrap();
+        let weights = resolve_weights(&Weighting::Noise, &stats).unwrap();
         // All should be ≈ 1/3
         for (i, &w) in weights.iter().enumerate() {
             assert!(
@@ -886,7 +886,7 @@ mod tests {
     #[test]
     fn test_manual_weighting_unchanged() {
         // Manual(vec![1.0, 2.0, 3.0]) should produce normalized [1/6, 2/6, 3/6]
-        let weights = resolve_weights(&Weighting::Manual(vec![1.0, 2.0, 3.0]), None).unwrap();
+        let weights = resolve_weights(&Weighting::Manual(vec![1.0, 2.0, 3.0]), &[]).unwrap();
         assert_eq!(weights.len(), 3);
         assert!((weights[0] - 1.0 / 6.0).abs() < 1e-6);
         assert!((weights[1] - 2.0 / 6.0).abs() < 1e-6);
@@ -895,7 +895,7 @@ mod tests {
 
     #[test]
     fn test_equal_weighting_returns_none() {
-        let weights = resolve_weights(&Weighting::Equal, None);
+        let weights = resolve_weights(&Weighting::Equal, &[]);
         assert!(weights.is_none());
     }
 
