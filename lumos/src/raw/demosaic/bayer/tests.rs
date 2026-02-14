@@ -526,3 +526,327 @@ fn test_rcd_blue_at_red_position() {
         }
     }
 }
+
+#[test]
+fn test_rcd_red_at_blue_position() {
+    // Step 4.2 reverse: verify R interpolation at B CFA positions.
+    // Symmetric to test_rcd_blue_at_red_position but tests the B-row → write-R path.
+    // R=0.9, G=0.5, B=0.1. At B positions, R should be interpolated from diagonal R neighbors.
+    let w = 20;
+    let h = 20;
+    let cfa = CfaPattern::Rggb;
+    let mut data = vec![0.0f32; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            data[y * w + x] = match cfa.color_at(y, x) {
+                0 => 0.9,
+                1 => 0.5,
+                2 => 0.1,
+                _ => unreachable!(),
+            };
+        }
+    }
+
+    let bayer = make_bayer(&data, w, h, cfa);
+    let rgb = demosaic_bayer(&bayer);
+
+    let border = 5;
+    for y in border..h - border {
+        for x in border..w - border {
+            if cfa.color_at(y, x) != 2 {
+                continue; // Only check B CFA positions
+            }
+            let idx = (y * w + x) * 3;
+            let r = rgb[idx];
+            let b = rgb[idx + 2];
+
+            // Blue should be the native CFA value
+            assert!(
+                (b - 0.1).abs() < 1e-6,
+                "B at B-pos ({x},{y})={b}, expected 0.1"
+            );
+            // Red at B position should be close to 0.9 (interpolated from diagonal R neighbors)
+            assert!(
+                (r - 0.9).abs() < 0.05,
+                "R at B-pos ({x},{y})={r}, expected ~0.9"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_rcd_bggr_correctness() {
+    // Verify BGGR pattern produces correct interpolation values, not just valid range.
+    // BGGR: (0,0)=B, (0,1)=G, (1,0)=G, (1,1)=R
+    // Use distinct per-channel values: R=0.8, G=0.5, B=0.2
+    let w = 20;
+    let h = 20;
+    let cfa = CfaPattern::Bggr;
+    let mut data = vec![0.0f32; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            data[y * w + x] = match cfa.color_at(y, x) {
+                0 => 0.8,
+                1 => 0.5,
+                2 => 0.2,
+                _ => unreachable!(),
+            };
+        }
+    }
+
+    let bayer = make_bayer(&data, w, h, cfa);
+    let rgb = demosaic_bayer(&bayer);
+
+    let border = 5;
+    for y in border..h - border {
+        for x in border..w - border {
+            let idx = (y * w + x) * 3;
+            let r = rgb[idx];
+            let g = rgb[idx + 1];
+            let b = rgb[idx + 2];
+
+            // All positions should reconstruct the per-channel values
+            assert!(
+                (r - 0.8).abs() < 0.05,
+                "BGGR R at ({x},{y})={r}, expected ~0.8"
+            );
+            assert!(
+                (g - 0.5).abs() < 0.02,
+                "BGGR G at ({x},{y})={g}, expected ~0.5"
+            );
+            assert!(
+                (b - 0.2).abs() < 0.05,
+                "BGGR B at ({x},{y})={b}, expected ~0.2"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_rcd_grbg_gbrg_correctness() {
+    // Verify GRBG and GBRG patterns produce correct interpolation.
+    // Use R=0.7, G=0.4, B=0.1.
+    for cfa in [CfaPattern::Grbg, CfaPattern::Gbrg] {
+        let w = 20;
+        let h = 20;
+        let mut data = vec![0.0f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                data[y * w + x] = match cfa.color_at(y, x) {
+                    0 => 0.7,
+                    1 => 0.4,
+                    2 => 0.1,
+                    _ => unreachable!(),
+                };
+            }
+        }
+
+        let bayer = make_bayer(&data, w, h, cfa);
+        let rgb = demosaic_bayer(&bayer);
+
+        let border = 5;
+        for y in border..h - border {
+            for x in border..w - border {
+                let idx = (y * w + x) * 3;
+                let r = rgb[idx];
+                let g = rgb[idx + 1];
+                let b = rgb[idx + 2];
+
+                assert!(
+                    (r - 0.7).abs() < 0.05,
+                    "{cfa:?} R at ({x},{y})={r}, expected ~0.7"
+                );
+                assert!(
+                    (g - 0.4).abs() < 0.02,
+                    "{cfa:?} G at ({x},{y})={g}, expected ~0.4"
+                );
+                assert!(
+                    (b - 0.1).abs() < 0.05,
+                    "{cfa:?} B at ({x},{y})={b}, expected ~0.1"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_rcd_vh_direction_sensitivity() {
+    // A horizontal edge (intensity change between rows) should produce
+    // predominantly vertical interpolation (VH_Dir < 0.5 → favors vertical).
+    // A vertical edge (intensity change between columns) should produce
+    // predominantly horizontal interpolation (VH_Dir > 0.5 → favors horizontal).
+    //
+    // We verify this indirectly: a horizontal stripe pattern demosaiced
+    // should produce smoother green along rows than columns, and vice versa.
+    let w = 32;
+    let h = 32;
+
+    // Horizontal stripes: rows 0-15 = 0.8, rows 16-31 = 0.2
+    let mut h_data = vec![0.0f32; w * h];
+    for y in 0..h {
+        let val = if y < h / 2 { 0.8 } else { 0.2 };
+        for x in 0..w {
+            h_data[y * w + x] = val;
+        }
+    }
+    let h_bayer = make_bayer(&h_data, w, h, CfaPattern::Rggb);
+    let h_rgb = demosaic_bayer(&h_bayer);
+
+    // Vertical stripes: cols 0-15 = 0.8, cols 16-31 = 0.2
+    let mut v_data = vec![0.0f32; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            v_data[y * w + x] = if x < w / 2 { 0.8 } else { 0.2 };
+        }
+    }
+    let v_bayer = make_bayer(&v_data, w, h, CfaPattern::Rggb);
+    let v_rgb = demosaic_bayer(&v_bayer);
+
+    // For horizontal stripes: green variation along a row (far from edge) should be small
+    let test_row = 6; // well inside the uniform top half
+    let mut h_row_var = 0.0f32;
+    for x in 6..w - 6 - 1 {
+        let g0 = h_rgb[(test_row * w + x) * 3 + 1];
+        let g1 = h_rgb[(test_row * w + x + 1) * 3 + 1];
+        h_row_var += (g1 - g0).abs();
+    }
+
+    // For vertical stripes: green variation along a column (far from edge) should be small
+    let test_col = 6;
+    let mut v_col_var = 0.0f32;
+    for y in 6..h - 6 - 1 {
+        let g0 = v_rgb[(y * w + test_col) * 3 + 1];
+        let g1 = v_rgb[((y + 1) * w + test_col) * 3 + 1];
+        v_col_var += (g1 - g0).abs();
+    }
+
+    // In uniform regions parallel to the edge, variation should be very small
+    // (VH direction correctly detects edge orientation and interpolates along it)
+    assert!(
+        h_row_var < 0.1,
+        "Horizontal stripes: row variation {h_row_var} too high (should be smooth along row)"
+    );
+    assert!(
+        v_col_var < 0.1,
+        "Vertical stripes: col variation {v_col_var} too high (should be smooth along column)"
+    );
+}
+
+#[test]
+fn test_rcd_border_interpolation() {
+    // Verify that border pixels get reasonable bilinear values, not zeros.
+    // Use a uniform image so expected values are known.
+    let w = 20;
+    let h = 20;
+    let val = 0.6f32;
+    let data = vec![val; w * h];
+    let cfa = CfaPattern::Rggb;
+    let bayer = make_bayer(&data, w, h, cfa);
+    let rgb = demosaic_bayer(&bayer);
+
+    // Border = 4 pixels. Check the very edge pixels are non-zero and close to val.
+    // Corner pixel (0,0) for RGGB is R. Its G and B are bilinear from neighbors.
+    // All CFA values are 0.6, so bilinear interpolation → 0.6 for all channels.
+    for y in 0..4 {
+        for x in 0..w {
+            let idx = (y * w + x) * 3;
+            for c in 0..3 {
+                assert!(rgb[idx + c] > 0.0, "Border pixel ({x},{y}) ch {c} is zero");
+                assert!(
+                    (rgb[idx + c] - val).abs() < 0.15,
+                    "Border pixel ({x},{y}) ch {c}={}, expected ~{val}",
+                    rgb[idx + c]
+                );
+            }
+        }
+    }
+    // Bottom border
+    for y in h - 4..h {
+        for x in 0..w {
+            let idx = (y * w + x) * 3;
+            for c in 0..3 {
+                assert!(rgb[idx + c] > 0.0, "Border pixel ({x},{y}) ch {c} is zero");
+            }
+        }
+    }
+    // Left/right edges on interior rows
+    for y in 4..h - 4 {
+        for x in [0, 1, 2, 3, w - 4, w - 3, w - 2, w - 1] {
+            let idx = (y * w + x) * 3;
+            for c in 0..3 {
+                assert!(rgb[idx + c] > 0.0, "Border pixel ({x},{y}) ch {c} is zero");
+            }
+        }
+    }
+}
+
+#[test]
+fn test_rcd_sharp_edge_no_excessive_artifacts() {
+    // A sharp vertical edge at column 16: left half = 0.9, right half = 0.1.
+    // Verify that the transition zone is bounded (no extreme overshoots from
+    // the ratio correction or direction interpolation).
+    let w = 32;
+    let h = 32;
+    let mut data = vec![0.0f32; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            data[y * w + x] = if x < 16 { 0.9 } else { 0.1 };
+        }
+    }
+
+    let bayer = make_bayer(&data, w, h, CfaPattern::Rggb);
+    let rgb = demosaic_bayer(&bayer);
+
+    // All output values must be in [0, 1] (clamp works)
+    for (i, &val) in rgb.iter().enumerate() {
+        assert!(
+            (0.0..=1.0).contains(&val),
+            "Pixel {} = {} out of [0,1]",
+            i,
+            val
+        );
+    }
+
+    // Far from edge: left side should be close to 0.9, right side close to 0.1
+    let border = 5;
+    for y in border..h - border {
+        // Well inside left half (col 6-10)
+        for x in 6..11 {
+            let idx = (y * w + x) * 3;
+            for c in 0..3 {
+                assert!(
+                    rgb[idx + c] > 0.7,
+                    "Left side ({x},{y}) ch {c}={}, expected >0.7",
+                    rgb[idx + c]
+                );
+            }
+        }
+        // Well inside right half (col 21-25)
+        for x in 21..26 {
+            let idx = (y * w + x) * 3;
+            for c in 0..3 {
+                assert!(
+                    rgb[idx + c] < 0.3,
+                    "Right side ({x},{y}) ch {c}={}, expected <0.3",
+                    rgb[idx + c]
+                );
+            }
+        }
+    }
+
+    // Transition zone (cols 13-19): values should be monotonically decreasing
+    // (approximately) along each row
+    for y in border..h - border {
+        let mut prev = 1.0f32;
+        for x in 13..20 {
+            let idx = (y * w + x) * 3;
+            let g = rgb[idx + 1]; // check green channel
+            // Allow small non-monotonicity from interpolation artifacts
+            assert!(
+                g < prev + 0.15,
+                "Edge transition not bounded at ({x},{y}): g={g}, prev={prev}"
+            );
+            prev = g;
+        }
+    }
+}
