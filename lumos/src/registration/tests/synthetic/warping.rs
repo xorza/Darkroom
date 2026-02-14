@@ -824,7 +824,8 @@ fn test_warp_with_sip_correction() {
     };
     let sip =
         SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &sip_config)
-            .expect("SIP fitting should succeed");
+            .expect("SIP fitting should succeed")
+            .polynomial;
 
     // Verify SIP correction is non-trivial
     let max_correction = sip.max_correction(width, height, 10.0);
@@ -922,7 +923,8 @@ fn test_warp_api_with_sip() {
     };
     let sip =
         SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &sip_config)
-            .expect("SIP fitting should succeed");
+            .expect("SIP fitting should succeed")
+            .polynomial;
 
     // Create a grayscale image
     let (pixels, _) = stamps::star_field(width, height, 20, 2.5, 0.05, 12321);

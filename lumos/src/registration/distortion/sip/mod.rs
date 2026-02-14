@@ -113,6 +113,23 @@ pub struct SipPolynomial {
     coeffs_v: ArrayVec<f64, MAX_TERMS>,
 }
 
+/// Result of a SIP polynomial fit, including quality diagnostics.
+#[derive(Debug, Clone)]
+pub struct SipFitResult {
+    /// The fitted polynomial.
+    pub polynomial: SipPolynomial,
+    /// RMS residual in pixels (after SIP correction, across surviving points).
+    pub rms_residual: f64,
+    /// Maximum residual in pixels (worst surviving point).
+    pub max_residual: f64,
+    /// Number of points used in the final fit (after sigma-clipping).
+    pub points_used: usize,
+    /// Number of points rejected by sigma-clipping.
+    pub points_rejected: usize,
+    /// Maximum correction magnitude in pixels (across fitted points).
+    pub max_correction: f64,
+}
+
 impl SipPolynomial {
     /// Fit SIP polynomial directly from matched point pairs and a transform.
     ///
@@ -125,7 +142,7 @@ impl SipPolynomial {
         target_points: &[DVec2],
         transform: &Transform,
         config: &SipConfig,
-    ) -> Option<Self> {
+    ) -> Option<SipFitResult> {
         config.validate();
         assert_eq!(
             ref_points.len(),
@@ -237,12 +254,47 @@ impl SipPolynomial {
             coeffs_v = new_v;
         }
 
-        Some(Self {
+        let polynomial = Self {
             reference_point: ref_pt,
             norm_scale,
             terms,
             coeffs_u,
             coeffs_v,
+        };
+
+        // Compute quality metrics from final fit
+        let points_used = mask.iter().filter(|&&m| m).count();
+        let points_rejected = n - points_used;
+
+        let mut sum_sq = 0.0;
+        let mut max_residual = 0.0f64;
+        let mut max_correction = 0.0f64;
+        for i in 0..n {
+            if !mask[i] {
+                continue;
+            }
+            let corrected = polynomial.correct(ref_points[i]);
+            let mapped = transform.apply(corrected);
+            let residual = (mapped - target_points[i]).length();
+            sum_sq += residual * residual;
+            max_residual = max_residual.max(residual);
+
+            let correction = polynomial.correction_at(ref_points[i]).length();
+            max_correction = max_correction.max(correction);
+        }
+        let rms_residual = if points_used > 0 {
+            (sum_sq / points_used as f64).sqrt()
+        } else {
+            0.0
+        };
+
+        Some(SipFitResult {
+            polynomial,
+            rms_residual,
+            max_residual,
+            points_used,
+            points_rejected,
+            max_correction,
         })
     }
 

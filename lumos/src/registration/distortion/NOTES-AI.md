@@ -14,7 +14,9 @@ Two distortion correction models for astronomical image registration:
 ### Pipeline Integration
 
 ```
-registration/mod.rs:312-328  -->  SipPolynomial::fit_from_transform()
+registration/mod.rs:312-347  -->  SipPolynomial::fit_from_transform() -> Option<SipFitResult>
+                                  result.sip_correction = sip_fit.polynomial.clone()
+                                  result.sip_fit = sip_fit
 result.rs:172-177             -->  RegistrationResult::warp_transform() -> WarpTransform
 transform.rs:346-352          -->  WarpTransform::apply(p) = transform.apply(sip.correct(p))
 ```
@@ -380,17 +382,16 @@ that uses it (`#![allow(dead_code)]`). PixInsight uses TPS as its primary
 distortion model. Integration would provide an alternative for cases where SIP
 polynomial residuals remain high.
 
-### Issue 5: No fit quality diagnostics returned
+### ~~Issue 5: No fit quality diagnostics returned~~ RESOLVED
 
-`SipPolynomial::fit_from_transform` returns `Option<Self>` but provides no
-information about:
-- RMS/max residual after fitting
-- Number of points rejected by sigma-clipping
-- Condition number of the normal equations matrix
-- Whether the LU fallback was triggered
+`SipPolynomial::fit_from_transform` now returns `Option<SipFitResult>` with:
+- `rms_residual`, `max_residual` (pixel-space, after SIP correction)
+- `points_used`, `points_rejected` (sigma-clipping counts)
+- `max_correction` (maximum correction magnitude across surviving points)
+- `polynomial` (the fitted `SipPolynomial`)
 
-This makes it difficult for callers to assess fit quality or decide whether to
-increase/decrease polynomial order.
+`RegistrationResult` stores both `sip_correction: Option<SipPolynomial>` (for
+`warp_transform()`) and `sip_fit: Option<SipFitResult>` (for diagnostics).
 
 ---
 
@@ -405,9 +406,8 @@ increase/decrease polynomial order.
 
 ### Priority 2 (useful features)
 
-3. Add fit quality return type: `SipFitResult { polynomial, rms_residual,
-   max_residual, points_rejected, lu_fallback_used }` instead of
-   `Option<SipPolynomial>`.
+3. ~~Add fit quality return type~~ DONE — `SipFitResult` with 5 quality
+   metrics, stored on `RegistrationResult.sip_fit`.
 4. Consider returning condition number estimate from the solver.
 
 ### Priority 3 (future interoperability)
@@ -460,12 +460,12 @@ remain high. Astrometry.net defaults to SIP order 2; PixInsight defaults to TPS.
 
 ```
 distortion/
-  mod.rs           Re-exports: SipConfig, SipPolynomial, TpsConfig,
-                   ThinPlateSpline, DistortionMap, tps_kernel (pub(crate))
+  mod.rs           Re-exports: SipConfig, SipFitResult, SipPolynomial,
+                   TpsConfig, ThinPlateSpline, DistortionMap, tps_kernel (pub(crate))
   NOTES-AI.md      This file
   README.md        Human-readable overview (STALE -- references nonexistent methods)
   sip/
-    mod.rs         SipPolynomial, SipConfig, solvers, helpers (528 lines)
+    mod.rs         SipPolynomial, SipFitResult, SipConfig, solvers, helpers (~580 lines)
     README.md      SIP standard overview (STALE -- see Issue 1)
     tests.rs       15 tests: barrel, pincushion, orders, edge cases, CRPIX,
                    sigma-clipping (4 tests), ill-conditioned LU fallback

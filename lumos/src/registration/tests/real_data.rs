@@ -192,8 +192,11 @@ fn test_register_two_calibrated_lights() {
     );
 
     if let Some(ref sip) = sip {
-        let corrected_residuals =
-            sip.compute_corrected_residuals(&inlier_ref, &inlier_target, &result.transform);
+        let corrected_residuals = sip.polynomial.compute_corrected_residuals(
+            &inlier_ref,
+            &inlier_target,
+            &result.transform,
+        );
         let sip_rms = (corrected_residuals.iter().map(|r| r * r).sum::<f64>()
             / corrected_residuals.len() as f64)
             .sqrt();
@@ -206,7 +209,8 @@ fn test_register_two_calibrated_lights() {
         println!("  Improvement:       {:.1}%", improvement);
         println!(
             "  Max SIP correction: {:.4} pixels",
-            sip.max_correction(img1.width(), img1.height(), 50.0)
+            sip.polynomial
+                .max_correction(img1.width(), img1.height(), 50.0)
         );
 
         assert!(

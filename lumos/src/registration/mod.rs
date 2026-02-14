@@ -309,7 +309,7 @@ fn estimate_and_refine(
         transform_type,
     );
 
-    let sip_correction = if config.sip_enabled {
+    let sip_fit = if config.sip_enabled {
         let inlier_ref: Vec<DVec2> = inlier_matches.iter().map(|&(r, _)| ref_stars[r]).collect();
         let inlier_target: Vec<DVec2> = inlier_matches
             .iter()
@@ -327,12 +327,14 @@ fn estimate_and_refine(
         None
     };
 
+    let sip_polynomial = sip_fit.as_ref().map(|r| &r.polynomial);
+
     let residuals: Vec<f64> = inlier_matches
         .iter()
         .map(|&(r, t)| {
             let ref_pos = ref_stars[r];
             let target_pos = target_stars[t];
-            let corrected_r = match &sip_correction {
+            let corrected_r = match sip_polynomial {
                 Some(sip) => sip.correct(ref_pos),
                 None => ref_pos,
             };
@@ -342,7 +344,8 @@ fn estimate_and_refine(
         .collect();
 
     let mut result = RegistrationResult::new(transform, inlier_matches, residuals);
-    result.sip_correction = sip_correction;
+    result.sip_correction = sip_fit.as_ref().map(|r| r.polynomial.clone());
+    result.sip_fit = sip_fit;
     Ok(result)
 }
 

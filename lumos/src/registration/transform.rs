@@ -540,8 +540,9 @@ mod tests {
             reference_point: Some(DVec2::new(cx, cy)),
             ..Default::default()
         };
-        let sip =
-            SipPolynomial::fit_from_transform(&ref_pts, &tgt_pts, &transform, &sip_config).unwrap();
+        let sip = SipPolynomial::fit_from_transform(&ref_pts, &tgt_pts, &transform, &sip_config)
+            .unwrap()
+            .polynomial;
 
         let wt = WarpTransform::with_sip(transform, sip);
         assert!(wt.has_sip());

@@ -29,6 +29,6 @@
 mod sip;
 mod tps;
 
-pub use sip::{SipConfig, SipPolynomial};
+pub use sip::{SipConfig, SipFitResult, SipPolynomial};
 pub(crate) use tps::tps_kernel;
 pub use tps::{DistortionMap, ThinPlateSpline, TpsConfig};
