@@ -10,7 +10,8 @@ use crate::common::{BitBuffer2, Buffer2};
 use crate::math::{Aabb, Vec2us};
 use crate::star_detection::config::Connectivity;
 use crate::star_detection::deblend::ComponentData;
-use crate::star_detection::labeling::{LabelMap, label_map_from_mask_with_connectivity};
+use crate::star_detection::labeling::LabelMap;
+use crate::star_detection::labeling::test_utils::label_map_from_mask_with_connectivity;
 use crate::testing::synthetic::generate_globular_cluster;
 
 /// Create components from a pixel buffer for benchmarking.

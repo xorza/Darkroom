@@ -56,13 +56,8 @@ Comprehensive code quality review across submodules (~40k+ lines). The codebase 
 #### ~~[F12] RNG code duplicated 16x across testing module~~ --- FIXED
 - Extracted `TestRng` struct in `testing/mod.rs` with `next_u64()`, `next_f32()`, `next_f64()`. Replaced all 16+ inline LCG closures across `testing/synthetic/`, `star_detection/`, and `registration/` test files.
 
-#### [F13] DVec2/Star transform functions duplicated in testing
-- **Location**: `testing/synthetic/transforms.rs:66-501`
-- **Category**: Generalization
-- **Impact**: 5/5 --- ~160 lines of identical logic with only position field access differing
-- **Meaningfulness**: 5/5 --- Every function implemented twice (DVec2 and Star variants)
-- **Invasiveness**: 4/5 --- Generic `Positioned` trait or closure-based approach
-- **Description**: Functions like `translate_stars`/`translate_star_list`, `add_position_noise`/`add_star_noise`, etc. are pair-wise duplicates. The Star versions are identical logic but access `.pos` field instead of using the value directly.
+#### ~~[F13] DVec2/Star transform functions duplicated in testing~~ --- FIXED
+- Added `Positioned` trait (`pos()`, `with_pos()`) implemented for `DVec2` and `Star`. Six function pairs unified via generic `_impl` functions. `add_spurious_*` kept separate (structurally different). ~100 lines removed.
 
 #### ~~[F14] Drizzle coverage incorrectly averages across channels~~ --- FIXED
 - Coverage now uses `self.weights[0]` only (channel 0). All channels share identical geometric overlap, so a single `Buffer2<f32>` coverage map is correct.
@@ -70,21 +65,11 @@ Comprehensive code quality review across submodules (~40k+ lines). The codebase 
 #### ~~[F15] min_coverage semantics misleading in drizzle~~ --- FIXED
 - `min_coverage` is now compared against `min_coverage * max_weight`, normalizing the threshold to the 0.0–1.0 range as documented.
 
-#### [F17] `#[cfg(test)]` helper functions in star_detection production code
-- **Location**: `star_detection/detector/stages/detect.rs:348`, `star_detection/labeling/mod.rs:24`
-- **Category**: API cleanliness
-- **Impact**: 4/5 --- Violates CLAUDE.md rule against `#[cfg(test)]` in production modules
-- **Meaningfulness**: 5/5 --- Project rule violation
-- **Invasiveness**: 1/5 --- Move helpers to test modules
-- **Description**: Functions like `detect_stars_test()` and `label_map_from_raw()` are defined in production files with `#[cfg(test)]`. Per project rules, these should be in test module files.
+#### ~~[F17] `#[cfg(test)]` helper functions in star_detection production code~~ --- FIXED
+- Moved `detect_stars_test()` to `detect_test_utils.rs` and `label_map_from_raw()`/`label_map_from_mask_with_connectivity()` to `labeling/test_utils.rs`. Both are `#[cfg(test)]` submodules. Updated all import sites.
 
-#### [F18] Duplicated CCL run-merging logic in star_detection
-- **Location**: `star_detection/labeling/mod.rs:336-359` vs `513-533`
-- **Category**: Generalization
-- **Impact**: 4/5 --- 25-line identical block in sequential and parallel paths
-- **Meaningfulness**: 5/5 --- Bug fixes must be applied twice
-- **Invasiveness**: 2/5 --- Extract `merge_runs_with_prev()` helper
-- **Description**: The run-merging logic for connected component labeling is identically duplicated between the sequential and parallel code paths.
+#### ~~[F18] Duplicated CCL run-merging logic in star_detection~~ --- FIXED
+- Extracted `merge_runs_with_prev()` helper with `RunMergeUF` trait. Sequential path passes `&mut UnionFind` directly; parallel path wraps `&AtomicUnionFind` via `AtomicUFRef` adapter.
 
 ### Priority 3 --- Moderate Impact
 
@@ -131,11 +116,8 @@ Comprehensive code quality review across submodules (~40k+ lines). The codebase 
 #### ~~[F27] Unused artifact functions in testing~~ --- FIXED
 - Removed `add_hot_pixels`, `add_dead_pixels`, `add_bad_columns`, `add_bad_rows`, `BadPixelMode`, `add_linear_trail`, `generate_random_hot_pixels` and their tests (~190 lines). Kept `add_cosmic_rays`, `add_bayer_pattern`, `BayerPattern` (used by star_field.rs).
 
-#### [F30] `scalar` module unnecessarily public in math/sum
-- **Location**: `math/sum/mod.rs`
-- **Category**: API cleanliness
-- **Impact**: 2/5 | **Meaningfulness**: 2/5 | **Invasiveness**: 2/5
-- **Description**: `pub mod scalar` exposes implementation detail. External code should use dispatch functions, not call scalar paths directly.
+#### ~~[F30] `scalar` module unnecessarily public in math/sum~~ --- FIXED
+- Changed `pub mod scalar` to `pub(super) mod scalar` in `math/sum/mod.rs`.
 
 ---
 
@@ -145,7 +127,7 @@ Comprehensive code quality review across submodules (~40k+ lines). The codebase 
 The most pervasive issue: SIMD implementations (AVX2/SSE/NEON) duplicate logic across platform files. Affects: `math/sum/`, `star_detection/threshold_mask/`, `star_detection/background/simd/`, `star_detection/centroid/gaussian_fit/`. Consider macros or generic helpers for common patterns like Neumaier reduction, weighted accumulation, and paired with/without-background variants.
 
 ### 2. Test Utility Duplication
-~~LCG RNG duplication~~ (FIXED — `TestRng` in `testing/mod.rs`). Remaining: duplicate DVec2/Star transform functions in `testing/synthetic/transforms.rs` (F13), and `star_detection/tests/` helper functions (`to_gray_image`, `match_stars`, `mask_to_gray`) redefined in multiple test files instead of importing from `tests/common/`.
+~~LCG RNG duplication~~ (FIXED — `TestRng` in `testing/mod.rs`). ~~DVec2/Star transform duplication~~ (FIXED — `Positioned` trait in `transforms.rs`). Remaining: `star_detection/tests/` helper functions (`to_gray_image`, `match_stars`, `mask_to_gray`) redefined in multiple test files instead of importing from `tests/common/`.
 
 ### 3. `#[allow(clippy::too_many_arguments)]` Proliferation
 ~~Drizzle kernel methods~~ (FIXED — refactored to `add_image_radial` with fewer params; only `compute_square_overlap` retains annotation). Remaining: `star_detection/convolution/` (matched_filter), `raw/demosaic/xtrans/` (XTransImage constructors), `testing/synthetic/stamps.rs` (stamp generators). Consider parameter structs for the most egregious cases.

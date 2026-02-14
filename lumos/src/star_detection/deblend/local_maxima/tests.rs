@@ -2,7 +2,8 @@
 
 use super::*;
 use crate::math::Vec2us;
-use crate::star_detection::labeling::{LabelMap, label_map_from_raw};
+use crate::star_detection::labeling::LabelMap;
+use crate::star_detection::labeling::test_utils::label_map_from_raw;
 
 use super::is_local_maximum;
 

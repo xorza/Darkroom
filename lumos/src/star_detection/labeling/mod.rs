@@ -19,22 +19,10 @@ use rayon::prelude::*;
 use crate::common::{BitBuffer2, Buffer2};
 use crate::star_detection::buffer_pool::BufferPool;
 
-/// Create a label map from pre-computed labels (for testing).
-#[cfg(test)]
-pub(crate) fn label_map_from_raw(labels: Buffer2<u32>, num_labels: usize) -> LabelMap {
-    LabelMap { labels, num_labels }
-}
-
-/// Create a label map from a mask with specified connectivity (for testing).
-#[cfg(test)]
-pub(crate) fn label_map_from_mask_with_connectivity(
-    mask: &BitBuffer2,
-    connectivity: Connectivity,
-) -> LabelMap {
-    let labels = Buffer2::new_filled(mask.width(), mask.height(), 0u32);
-    LabelMap::from_buffer(mask, connectivity, labels)
-}
 use crate::star_detection::config::Connectivity;
+
+#[cfg(test)]
+pub(crate) mod test_utils;
 
 // ============================================================================
 // Run-Length Encoding
@@ -299,6 +287,78 @@ impl std::ops::Index<usize> for LabelMap {
 }
 
 // ============================================================================
+// Shared run-merge helper
+// ============================================================================
+
+/// Trait abstracting union-find operations for run merging.
+trait RunMergeUF {
+    fn union(&mut self, a: u32, b: u32);
+    fn make_set(&mut self) -> u32;
+}
+
+impl RunMergeUF for UnionFind {
+    #[inline]
+    fn union(&mut self, a: u32, b: u32) {
+        UnionFind::union(self, a, b);
+    }
+    #[inline]
+    fn make_set(&mut self) -> u32 {
+        UnionFind::make_set(self)
+    }
+}
+
+/// Wrapper to adapt `&AtomicUnionFind` (which uses `&self`) to `RunMergeUF` (which uses `&mut self`).
+struct AtomicUFRef<'a>(&'a AtomicUnionFind);
+
+impl RunMergeUF for AtomicUFRef<'_> {
+    #[inline]
+    fn union(&mut self, a: u32, b: u32) {
+        self.0.union(a, b);
+    }
+    #[inline]
+    fn make_set(&mut self) -> u32 {
+        self.0.make_set()
+    }
+}
+
+/// Merge current row's runs with previous row's runs via union-find.
+///
+/// For each run in `curr_runs`, finds overlapping runs in `prev_runs` and merges
+/// their labels. Runs without overlap get a new label via `uf.make_set()`.
+#[inline]
+fn merge_runs_with_prev(
+    curr_runs: &mut [Run],
+    prev_runs: &[Run],
+    connectivity: Connectivity,
+    uf: &mut impl RunMergeUF,
+) {
+    let mut prev_idx = 0;
+    for run in curr_runs.iter_mut() {
+        let (search_start, search_end) = run.search_window(connectivity);
+
+        while prev_idx < prev_runs.len() && prev_runs[prev_idx].end <= search_start {
+            prev_idx += 1;
+        }
+
+        let mut assigned_label = None;
+        let mut check_idx = prev_idx;
+        while check_idx < prev_runs.len() && prev_runs[check_idx].start < search_end {
+            let prev_run = &prev_runs[check_idx];
+            if runs_connected(prev_run, run, connectivity) {
+                match assigned_label {
+                    Some(label) if label != prev_run.label => uf.union(label, prev_run.label),
+                    None => assigned_label = Some(prev_run.label),
+                    _ => {}
+                }
+            }
+            check_idx += 1;
+        }
+
+        run.label = assigned_label.unwrap_or_else(|| uf.make_set());
+    }
+}
+
+// ============================================================================
 // Sequential labeling (small images)
 // ============================================================================
 
@@ -332,37 +392,11 @@ pub(super) fn label_mask_sequential(
             continue;
         }
 
-        // Label runs and merge with overlapping runs from previous row
-        let mut prev_idx = 0;
-        for run in &mut curr_runs {
-            let (search_start, search_end) = run.search_window(connectivity);
+        merge_runs_with_prev(&mut curr_runs, &prev_runs, connectivity, &mut uf);
 
-            // Skip runs that end before our search window
-            while prev_idx < prev_runs.len() && prev_runs[prev_idx].end <= search_start {
-                prev_idx += 1;
-            }
-
-            // Find all overlapping runs and merge their labels
-            let mut assigned_label = None;
-            let mut check_idx = prev_idx;
-            while check_idx < prev_runs.len() && prev_runs[check_idx].start < search_end {
-                let prev_run = &prev_runs[check_idx];
-                if runs_connected(prev_run, run, connectivity) {
-                    match assigned_label {
-                        Some(label) if label != prev_run.label => {
-                            uf.union(label, prev_run.label);
-                        }
-                        None => assigned_label = Some(prev_run.label),
-                        _ => {}
-                    }
-                }
-                check_idx += 1;
-            }
-
-            run.label = assigned_label.unwrap_or_else(|| uf.make_set());
-
-            // Write labels to output
-            let row_start = y * width;
+        // Write labels to output
+        let row_start = y * width;
+        for run in &curr_runs {
             for x in run.start..run.end {
                 labels[row_start + x as usize] = run.label;
             }
@@ -510,29 +544,14 @@ fn label_strip(
             continue;
         }
 
-        let mut prev_idx = 0;
-        for run in &mut curr_runs {
-            let (search_start, search_end) = run.search_window(connectivity);
+        merge_runs_with_prev(
+            &mut curr_runs,
+            &prev_runs,
+            connectivity,
+            &mut AtomicUFRef(uf),
+        );
 
-            while prev_idx < prev_runs.len() && prev_runs[prev_idx].end <= search_start {
-                prev_idx += 1;
-            }
-
-            let mut assigned_label = None;
-            let mut check_idx = prev_idx;
-            while check_idx < prev_runs.len() && prev_runs[check_idx].start < search_end {
-                let prev_run = &prev_runs[check_idx];
-                if runs_connected(prev_run, run, connectivity) {
-                    match assigned_label {
-                        Some(label) if label != prev_run.label => uf.union(label, prev_run.label),
-                        None => assigned_label = Some(prev_run.label),
-                        _ => {}
-                    }
-                }
-                check_idx += 1;
-            }
-
-            run.label = assigned_label.unwrap_or_else(|| uf.make_set());
+        for run in &curr_runs {
             result.runs.push((y as u32, *run));
         }
 

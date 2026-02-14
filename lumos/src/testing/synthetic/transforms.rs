@@ -2,23 +2,155 @@
 //!
 //! Provides functions to apply geometric transforms (translation, rotation, scale)
 //! to star positions for testing registration algorithms.
+//!
+//! Most functions are generic over the `Positioned` trait, supporting both
+//! `DVec2` (bare positions) and `Star` (full star structs) transparently.
 
 use crate::star_detection::Star;
 use glam::DVec2;
 
+// ============================================================================
+// Positioned trait — abstracts over DVec2 and Star
+// ============================================================================
+
+/// Trait for types that have a 2D position and can be reconstructed with a new position.
+pub trait Positioned: Clone {
+    fn pos(&self) -> DVec2;
+    fn with_pos(&self, pos: DVec2) -> Self;
+}
+
+impl Positioned for DVec2 {
+    #[inline]
+    fn pos(&self) -> DVec2 {
+        *self
+    }
+    #[inline]
+    fn with_pos(&self, pos: DVec2) -> Self {
+        pos
+    }
+}
+
+impl Positioned for Star {
+    #[inline]
+    fn pos(&self) -> DVec2 {
+        self.pos
+    }
+    #[inline]
+    fn with_pos(&self, pos: DVec2) -> Self {
+        Star { pos, ..*self }
+    }
+}
+
+// ============================================================================
+// Generic implementations
+// ============================================================================
+
+fn translate_impl<T: Positioned>(items: &[T], dx: f64, dy: f64) -> Vec<T> {
+    let offset = DVec2::new(dx, dy);
+    items.iter().map(|p| p.with_pos(p.pos() + offset)).collect()
+}
+
+fn transform_impl<T: Positioned>(
+    items: &[T],
+    dx: f64,
+    dy: f64,
+    angle_rad: f64,
+    scale: f64,
+    center_x: f64,
+    center_y: f64,
+) -> Vec<T> {
+    let cos_a = angle_rad.cos() * scale;
+    let sin_a = angle_rad.sin() * scale;
+    let center = DVec2::new(center_x, center_y);
+    let offset = DVec2::new(dx, dy);
+
+    items
+        .iter()
+        .map(|p| {
+            let r = p.pos() - center;
+            let new_x = cos_a * r.x - sin_a * r.y + center.x + offset.x;
+            let new_y = sin_a * r.x + cos_a * r.y + center.y + offset.y;
+            p.with_pos(DVec2::new(new_x, new_y))
+        })
+        .collect()
+}
+
+fn add_noise_impl<T: Positioned>(items: &[T], noise_amplitude: f64, seed: u64) -> Vec<T> {
+    let mut rng = crate::testing::TestRng::new(seed);
+
+    items
+        .iter()
+        .map(|p| {
+            let noise = DVec2::new(
+                (rng.next_f64() * 2.0 - 1.0) * noise_amplitude,
+                (rng.next_f64() * 2.0 - 1.0) * noise_amplitude,
+            );
+            p.with_pos(p.pos() + noise)
+        })
+        .collect()
+}
+
+fn remove_random_impl<T: Positioned>(items: &[T], fraction: f64, seed: u64) -> Vec<T> {
+    assert!(
+        (0.0..=1.0).contains(&fraction),
+        "fraction must be between 0.0 and 1.0"
+    );
+
+    let mut rng = crate::testing::TestRng::new(seed);
+
+    items
+        .iter()
+        .filter(|_| rng.next_f64() >= fraction)
+        .cloned()
+        .collect()
+}
+
+fn filter_to_bounds_impl<T: Positioned>(
+    items: &[T],
+    min_x: f64,
+    max_x: f64,
+    min_y: f64,
+    max_y: f64,
+) -> Vec<T> {
+    items
+        .iter()
+        .filter(|p| {
+            let pos = p.pos();
+            pos.x >= min_x && pos.x <= max_x && pos.y >= min_y && pos.y <= max_y
+        })
+        .cloned()
+        .collect()
+}
+
+fn translate_with_overlap_impl<T: Positioned>(
+    items: &[T],
+    dx: f64,
+    dy: f64,
+    width: f64,
+    height: f64,
+    margin: f64,
+) -> Vec<T> {
+    let offset = DVec2::new(dx, dy);
+    items
+        .iter()
+        .map(|p| p.with_pos(p.pos() + offset))
+        .filter(|p| {
+            let pos = p.pos();
+            pos.x >= margin
+                && pos.x <= width - margin
+                && pos.y >= margin
+                && pos.y <= height - margin
+        })
+        .collect()
+}
+
+// ============================================================================
+// DVec2 public API
+// ============================================================================
+
 /// Generate random star positions within a bounded area.
 ///
 /// Uses a deterministic LCG random number generator for reproducibility.
-///
-/// # Arguments
-/// * `num_stars` - Number of star positions to generate
-/// * `width` - Image width in pixels
-/// * `height` - Image height in pixels
-/// * `seed` - Random seed for reproducibility
-/// * `margin` - Margin from edges (default 50.0 if not specified)
-///
-/// # Returns
-/// Vector of DVec2 coordinates
 pub fn generate_random_positions(
     num_stars: usize,
     width: f64,
@@ -49,17 +181,8 @@ pub fn generate_random_positions_with_margin(
 }
 
 /// Apply a translation transform to a star field.
-///
-/// # Arguments
-/// * `stars` - Input star positions
-/// * `dx` - Translation in X direction (pixels)
-/// * `dy` - Translation in Y direction (pixels)
-///
-/// # Returns
-/// Translated star positions
 pub fn translate_stars(stars: &[DVec2], dx: f64, dy: f64) -> Vec<DVec2> {
-    let offset = DVec2::new(dx, dy);
-    stars.iter().map(|p| *p + offset).collect()
+    translate_impl(stars, dx, dy)
 }
 
 /// Apply a similarity transform (translation + rotation + scale) to a star field.
@@ -69,18 +192,6 @@ pub fn translate_stars(stars: &[DVec2], dx: f64, dy: f64) -> Vec<DVec2> {
 /// 2. Apply rotation and scale
 /// 3. Translate back to center
 /// 4. Apply translation offset
-///
-/// # Arguments
-/// * `stars` - Input star positions
-/// * `dx` - Translation in X direction (pixels)
-/// * `dy` - Translation in Y direction (pixels)
-/// * `angle_rad` - Rotation angle in radians
-/// * `scale` - Scale factor (1.0 = no change)
-/// * `center_x` - X coordinate of rotation center
-/// * `center_y` - Y coordinate of rotation center
-///
-/// # Returns
-/// Transformed star positions
 pub fn transform_stars(
     stars: &[DVec2],
     dx: f64,
@@ -90,103 +201,30 @@ pub fn transform_stars(
     center_x: f64,
     center_y: f64,
 ) -> Vec<DVec2> {
-    let cos_a = angle_rad.cos() * scale;
-    let sin_a = angle_rad.sin() * scale;
-    let center = DVec2::new(center_x, center_y);
-    let offset = DVec2::new(dx, dy);
-
-    stars
-        .iter()
-        .map(|p| {
-            // Translate to origin, rotate+scale, translate back, then apply offset
-            let r = *p - center;
-            let new_x = cos_a * r.x - sin_a * r.y + center.x + offset.x;
-            let new_y = sin_a * r.x + cos_a * r.y + center.y + offset.y;
-            DVec2::new(new_x, new_y)
-        })
-        .collect()
+    transform_impl(stars, dx, dy, angle_rad, scale, center_x, center_y)
 }
 
 /// Apply rotation only (no translation or scale) around a center point.
-///
-/// # Arguments
-/// * `stars` - Input star positions
-/// * `angle_rad` - Rotation angle in radians
-/// * `center_x` - X coordinate of rotation center
-/// * `center_y` - Y coordinate of rotation center
 pub fn rotate_stars(stars: &[DVec2], angle_rad: f64, center_x: f64, center_y: f64) -> Vec<DVec2> {
-    transform_stars(stars, 0.0, 0.0, angle_rad, 1.0, center_x, center_y)
+    transform_impl(stars, 0.0, 0.0, angle_rad, 1.0, center_x, center_y)
 }
 
 /// Apply scale only (no translation or rotation) around a center point.
-///
-/// # Arguments
-/// * `stars` - Input star positions
-/// * `scale` - Scale factor
-/// * `center_x` - X coordinate of scale center
-/// * `center_y` - Y coordinate of scale center
 pub fn scale_stars(stars: &[DVec2], scale: f64, center_x: f64, center_y: f64) -> Vec<DVec2> {
-    transform_stars(stars, 0.0, 0.0, 0.0, scale, center_x, center_y)
+    transform_impl(stars, 0.0, 0.0, 0.0, scale, center_x, center_y)
 }
 
 /// Add positional noise to star coordinates.
-///
-/// Uses deterministic LCG for reproducibility.
-///
-/// # Arguments
-/// * `stars` - Input star positions
-/// * `noise_amplitude` - Maximum noise in each direction (pixels)
-/// * `seed` - Random seed
 pub fn add_position_noise(stars: &[DVec2], noise_amplitude: f64, seed: u64) -> Vec<DVec2> {
-    let mut rng = crate::testing::TestRng::new(seed);
-
-    stars
-        .iter()
-        .map(|p| {
-            let noise = DVec2::new(
-                (rng.next_f64() * 2.0 - 1.0) * noise_amplitude,
-                (rng.next_f64() * 2.0 - 1.0) * noise_amplitude,
-            );
-            *p + noise
-        })
-        .collect()
+    add_noise_impl(stars, noise_amplitude, seed)
 }
 
 /// Remove random stars from a list (simulate missed detections).
-///
-/// # Arguments
-/// * `stars` - Input star positions
-/// * `fraction` - Fraction of stars to remove (0.0 to 1.0)
-/// * `seed` - Random seed for reproducibility
-///
-/// # Returns
-/// Filtered star list with approximately (1 - fraction) of original stars
 pub fn remove_random_stars(stars: &[DVec2], fraction: f64, seed: u64) -> Vec<DVec2> {
-    assert!(
-        (0.0..=1.0).contains(&fraction),
-        "fraction must be between 0.0 and 1.0"
-    );
-
-    let mut rng = crate::testing::TestRng::new(seed);
-
-    stars
-        .iter()
-        .filter(|_| rng.next_f64() >= fraction)
-        .copied()
-        .collect()
+    remove_random_impl(stars, fraction, seed)
 }
 
-/// Add random spurious stars (simulate false detections like hot pixels, cosmic rays).
-///
-/// # Arguments
-/// * `stars` - Input star positions
-/// * `count` - Number of spurious stars to add
-/// * `width` - Image width for bounds
-/// * `height` - Image height for bounds
-/// * `seed` - Random seed for reproducibility
-///
-/// # Returns
-/// Star list with additional spurious positions appended
+/// Add random spurious stars (simulate false detections).
 pub fn add_spurious_stars(
     stars: &[DVec2],
     count: usize,
@@ -208,16 +246,6 @@ pub fn add_spurious_stars(
 }
 
 /// Filter stars to a bounding box (simulate partial overlap).
-///
-/// # Arguments
-/// * `stars` - Input star positions
-/// * `min_x` - Minimum X coordinate
-/// * `max_x` - Maximum X coordinate
-/// * `min_y` - Minimum Y coordinate
-/// * `max_y` - Maximum Y coordinate
-///
-/// # Returns
-/// Stars within the specified bounds
 pub fn filter_to_bounds(
     stars: &[DVec2],
     min_x: f64,
@@ -225,28 +253,10 @@ pub fn filter_to_bounds(
     min_y: f64,
     max_y: f64,
 ) -> Vec<DVec2> {
-    stars
-        .iter()
-        .filter(|p| p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y)
-        .copied()
-        .collect()
+    filter_to_bounds_impl(stars, min_x, max_x, min_y, max_y)
 }
 
 /// Simulate partial overlap by shifting stars and keeping only those in bounds.
-///
-/// This simulates what happens when two images have partial overlap:
-/// stars at edges are not visible in both images.
-///
-/// # Arguments
-/// * `stars` - Input star positions
-/// * `dx` - Translation in X
-/// * `dy` - Translation in Y
-/// * `width` - Image width
-/// * `height` - Image height
-/// * `margin` - Edge margin for valid positions
-///
-/// # Returns
-/// Translated stars that remain within bounds
 pub fn translate_with_overlap(
     stars: &[DVec2],
     dx: f64,
@@ -255,34 +265,24 @@ pub fn translate_with_overlap(
     height: f64,
     margin: f64,
 ) -> Vec<DVec2> {
-    let offset = DVec2::new(dx, dy);
-    stars
-        .iter()
-        .map(|p| *p + offset)
-        .filter(|p| {
-            p.x >= margin && p.x <= width - margin && p.y >= margin && p.y <= height - margin
-        })
-        .collect()
+    translate_with_overlap_impl(stars, dx, dy, width, height, margin)
 }
+
+// ============================================================================
+// Star public API (delegates to generic implementations)
+// ============================================================================
 
 /// Convert positions to Star structs with uniform properties.
 ///
 /// Creates Star structs suitable for registration testing with default properties.
 /// The FWHM is set uniformly to allow `register()` to derive `max_sigma` correctly.
-///
-/// # Arguments
-/// * `positions` - Star positions as DVec2
-/// * `fwhm` - FWHM value to use for all stars (controls max_sigma in registration)
-///
-/// # Returns
-/// Vector of Star structs
 pub fn positions_to_stars(positions: &[DVec2], fwhm: f32) -> Vec<Star> {
     positions
         .iter()
         .enumerate()
         .map(|(i, &pos)| Star {
             pos,
-            flux: 10000.0 - i as f32 * 10.0, // Decreasing flux for sorting
+            flux: 10000.0 - i as f32 * 10.0,
             fwhm,
             eccentricity: 0.0,
             snr: 100.0,
@@ -296,18 +296,6 @@ pub fn positions_to_stars(positions: &[DVec2], fwhm: f32) -> Vec<Star> {
 }
 
 /// Generate random star positions and convert to Star structs.
-///
-/// Convenience function combining `generate_random_positions` and `positions_to_stars`.
-///
-/// # Arguments
-/// * `num_stars` - Number of stars to generate
-/// * `width` - Image width in pixels
-/// * `height` - Image height in pixels
-/// * `seed` - Random seed for reproducibility
-/// * `fwhm` - FWHM value to use for all stars
-///
-/// # Returns
-/// Vector of Star structs with random positions
 pub fn generate_random_stars(
     num_stars: usize,
     width: f64,
@@ -321,14 +309,7 @@ pub fn generate_random_stars(
 
 /// Apply a translation transform to Stars.
 pub fn translate_star_list(stars: &[Star], dx: f64, dy: f64) -> Vec<Star> {
-    let offset = DVec2::new(dx, dy);
-    stars
-        .iter()
-        .map(|s| Star {
-            pos: s.pos + offset,
-            ..*s
-        })
-        .collect()
+    translate_impl(stars, dx, dy)
 }
 
 /// Apply a similarity transform to Stars.
@@ -341,58 +322,17 @@ pub fn transform_star_list(
     center_x: f64,
     center_y: f64,
 ) -> Vec<Star> {
-    let cos_a = angle_rad.cos() * scale;
-    let sin_a = angle_rad.sin() * scale;
-    let center = DVec2::new(center_x, center_y);
-    let offset = DVec2::new(dx, dy);
-
-    stars
-        .iter()
-        .map(|s| {
-            let r = s.pos - center;
-            let new_x = cos_a * r.x - sin_a * r.y + center.x + offset.x;
-            let new_y = sin_a * r.x + cos_a * r.y + center.y + offset.y;
-            Star {
-                pos: DVec2::new(new_x, new_y),
-                ..*s
-            }
-        })
-        .collect()
+    transform_impl(stars, dx, dy, angle_rad, scale, center_x, center_y)
 }
 
 /// Add positional noise to Stars.
 pub fn add_star_noise(stars: &[Star], noise_amplitude: f64, seed: u64) -> Vec<Star> {
-    let mut rng = crate::testing::TestRng::new(seed);
-
-    stars
-        .iter()
-        .map(|s| {
-            let noise = DVec2::new(
-                (rng.next_f64() * 2.0 - 1.0) * noise_amplitude,
-                (rng.next_f64() * 2.0 - 1.0) * noise_amplitude,
-            );
-            Star {
-                pos: s.pos + noise,
-                ..*s
-            }
-        })
-        .collect()
+    add_noise_impl(stars, noise_amplitude, seed)
 }
 
 /// Remove random stars from a list.
 pub fn remove_random_star_list(stars: &[Star], fraction: f64, seed: u64) -> Vec<Star> {
-    assert!(
-        (0.0..=1.0).contains(&fraction),
-        "fraction must be between 0.0 and 1.0"
-    );
-
-    let mut rng = crate::testing::TestRng::new(seed);
-
-    stars
-        .iter()
-        .filter(|_| rng.next_f64() >= fraction)
-        .cloned()
-        .collect()
+    remove_random_impl(stars, fraction, seed)
 }
 
 /// Add random spurious stars.
@@ -413,7 +353,7 @@ pub fn add_spurious_star_list(
         let y = margin + rng.next_f64() * (height - 2.0 * margin);
         result.push(Star {
             pos: DVec2::new(x, y),
-            flux: 100.0 - i as f32, // Low flux for spurious stars
+            flux: 100.0 - i as f32,
             fwhm,
             eccentricity: 0.0,
             snr: 10.0,
@@ -436,11 +376,7 @@ pub fn filter_stars_to_bounds(
     min_y: f64,
     max_y: f64,
 ) -> Vec<Star> {
-    stars
-        .iter()
-        .filter(|s| s.pos.x >= min_x && s.pos.x <= max_x && s.pos.y >= min_y && s.pos.y <= max_y)
-        .cloned()
-        .collect()
+    filter_to_bounds_impl(stars, min_x, max_x, min_y, max_y)
 }
 
 /// Translate Stars with overlap filtering.
@@ -452,20 +388,7 @@ pub fn translate_stars_with_overlap(
     height: f64,
     margin: f64,
 ) -> Vec<Star> {
-    let offset = DVec2::new(dx, dy);
-    stars
-        .iter()
-        .map(|s| Star {
-            pos: s.pos + offset,
-            ..*s
-        })
-        .filter(|s| {
-            s.pos.x >= margin
-                && s.pos.x <= width - margin
-                && s.pos.y >= margin
-                && s.pos.y <= height - margin
-        })
-        .collect()
+    translate_with_overlap_impl(stars, dx, dy, width, height, margin)
 }
 
 #[cfg(test)]
@@ -543,5 +466,43 @@ mod tests {
             assert!((orig.y - noisy.y).abs() <= 1.0);
         }
         assert!(has_different);
+    }
+
+    #[test]
+    fn test_positioned_trait_dvec2_and_star_consistent() {
+        // Verify that DVec2 and Star versions produce identical positions
+        let positions = vec![DVec2::new(100.0, 200.0), DVec2::new(300.0, 400.0)];
+        let stars = positions_to_stars(&positions, 3.0);
+
+        // translate
+        let dvec_result = translate_stars(&positions, 10.0, -5.0);
+        let star_result = translate_star_list(&stars, 10.0, -5.0);
+        for (d, s) in dvec_result.iter().zip(star_result.iter()) {
+            assert_eq!(*d, s.pos);
+        }
+
+        // transform
+        let dvec_result = transform_stars(&positions, 5.0, 3.0, 0.1, 1.05, 200.0, 300.0);
+        let star_result = transform_star_list(&stars, 5.0, 3.0, 0.1, 1.05, 200.0, 300.0);
+        for (d, s) in dvec_result.iter().zip(star_result.iter()) {
+            assert!((d.x - s.pos.x).abs() < 1e-10);
+            assert!((d.y - s.pos.y).abs() < 1e-10);
+        }
+
+        // noise (same seed → same positions)
+        let dvec_noisy = add_position_noise(&positions, 0.5, 42);
+        let star_noisy = add_star_noise(&stars, 0.5, 42);
+        for (d, s) in dvec_noisy.iter().zip(star_noisy.iter()) {
+            assert!((d.x - s.pos.x).abs() < 1e-10);
+            assert!((d.y - s.pos.y).abs() < 1e-10);
+        }
+
+        // remove_random (same seed → same survivors)
+        let dvec_filtered = remove_random_stars(&positions, 0.3, 99);
+        let star_filtered = remove_random_star_list(&stars, 0.3, 99);
+        assert_eq!(dvec_filtered.len(), star_filtered.len());
+        for (d, s) in dvec_filtered.iter().zip(star_filtered.iter()) {
+            assert_eq!(*d, s.pos);
+        }
     }
 }

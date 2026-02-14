@@ -5,6 +5,8 @@
 
 pub(crate) mod background;
 pub(crate) mod detect;
+#[cfg(test)]
+pub(crate) mod detect_test_utils;
 pub(crate) mod filter;
 pub(crate) mod fwhm;
 pub(crate) mod measure;

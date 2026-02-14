@@ -6,6 +6,9 @@
 use super::*;
 use crate::common::BitBuffer2;
 use crate::star_detection::config::Connectivity;
+use crate::star_detection::labeling::test_utils::{
+    label_map_from_mask_with_connectivity, label_map_from_raw,
+};
 
 #[test]
 fn empty_mask() {

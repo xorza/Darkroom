@@ -335,21 +335,3 @@ fn collect_component_data(label_map: &LabelMap, max_area: usize) -> Vec<Componen
 
     component_data
 }
-
-// =============================================================================
-// Test helpers
-// =============================================================================
-
-/// Test utility: detect stars with automatic buffer pool management.
-///
-/// Creates a temporary buffer pool internally. For benchmarks, use
-/// `detect` directly with a pre-allocated pool.
-#[cfg(test)]
-pub(crate) fn detect_stars_test(
-    pixels: &Buffer2<f32>,
-    background: &BackgroundEstimate,
-    config: &Config,
-) -> Vec<Region> {
-    let mut pool = BufferPool::new(pixels.width(), pixels.height());
-    detect(pixels, background, None, config, &mut pool).regions
-}

@@ -58,6 +58,10 @@ patterns and the highest-priority **unfixed** issues across all modules.
 - drizzle: Coverage averaged across channels → uses channel 0 weights only (correct: same geometry)
 - astro_image: `save()` cloned entire image → `to_image(&self)` borrows pixel data
 - testing: 16 inline LCG RNG implementations → `TestRng` struct in `testing/mod.rs`
+- testing: DVec2/Star transform functions duplicated 6× → `Positioned` trait with generic `_impl` functions
+- star_detection: `#[cfg(test)]` helpers in production code → moved to `detect_test_utils.rs` and `labeling/test_utils.rs`
+- star_detection: CCL run-merge logic duplicated in sequential/parallel → `merge_runs_with_prev()` with `RunMergeUF` trait
+- math: `pub mod scalar` in sum exposed implementation detail → `pub(super) mod scalar`
 
 </details>
 
