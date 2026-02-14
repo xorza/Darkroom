@@ -584,11 +584,13 @@ mod tests {
     }
 
     #[test]
-    fn test_warp_row_lanczos3_scalar_various_sizes() {
+    fn test_warp_row_lanczos3_scalar_various_sizes_match_optimized() {
+        // Verify scalar and optimized Lanczos3 produce identical results across widths.
+        // This replaces a weaker test that only checked is_finite().
         let height = 64;
         let input_base = patterns::diagonal_gradient(256, height);
+        let params = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: -1.0 });
 
-        // Test various widths
         for width in [1, 2, 3, 4, 5, 7, 8, 16, 33, 64, 100] {
             let input = Buffer2::new(
                 width,
@@ -603,24 +605,19 @@ mod tests {
             let transform = Transform::translation(DVec2::new(1.5, 0.5));
             let inverse = WarpTransform::new(transform.inverse());
 
-            let mut output = vec![0.0f32; width];
+            let mut output_scalar = vec![0.0f32; width];
+            let mut output_fast = vec![0.0f32; width];
             let y = height / 2;
 
-            warp_row_lanczos3_scalar(&input, &mut output, y, &inverse);
+            warp_row_lanczos3_scalar(&input, &mut output_scalar, y, &inverse);
+            warp_row_lanczos3(&input, &mut output_fast, y, &inverse, &params);
 
-            // Just verify no panics and output is reasonable
-            for (x, &val) in output
-                .iter()
-                .enumerate()
-                .take(width.saturating_sub(3))
-                .skip(3)
-            {
+            for x in 0..width {
                 assert!(
-                    val.is_finite(),
-                    "Width {}, x={}: output is not finite: {}",
-                    width,
-                    x,
-                    val
+                    (output_fast[x] - output_scalar[x]).abs() < 1e-4,
+                    "Width {width}, x={x}: fast {} vs scalar {}",
+                    output_fast[x],
+                    output_scalar[x]
                 );
             }
         }
@@ -727,6 +724,14 @@ mod tests {
 
     #[test]
     fn test_soft_clamp_above_threshold() {
+        // sp=1.0, sn=0.5 => r = 0.5/1.0 = 0.5 > th=0.3 => fade branch
+        // fade = (0.5 - 0.3) * (1.0 / 0.7) = 0.2 / 0.7 = 2/7 ~ 0.28571
+        // c = 1 - (2/7)^2 = 1 - 4/49 = 45/49 ~ 0.91837
+        // result = (1.0 - 0.5 * 45/49) / (0.8 - 0.3 * 45/49)
+        //        = (1.0 - 22.5/49) / (0.8 - 13.5/49)
+        //        = (49/49 - 22.5/49) / (39.2/49 - 13.5/49)
+        //        = (26.5/49) / (25.7/49)
+        //        = 26.5 / 25.7 ~ 1.03113
         let th = 0.3f32;
         let th_inv = 1.0 / (1.0 - th);
         let sp = 1.0f32;
@@ -742,6 +747,11 @@ mod tests {
         assert!(
             (result - expected).abs() < 1e-6,
             "got {result}, expected {expected}"
+        );
+        // Sanity: result should be between sp/wp=1.25 (all positive) and (sp-sn)/(wp-wn)=1.0
+        assert!(
+            result > 1.0 && result < 1.25,
+            "result={result} not in (1.0, 1.25)"
         );
     }
 
@@ -782,25 +792,63 @@ mod tests {
     }
 
     #[test]
-    fn test_soft_clamp_result_bounded() {
-        // soft_clamp output should always be >= 0 for non-negative sp,
-        // and <= sp/wp (the "only positive" baseline)
+    fn test_soft_clamp_monotonic_in_negative_contribution() {
+        // As sn increases (more negative contribution), the result should decrease
+        // monotonically until it hits the sp/wp floor.
+        // We test three specific sn values and verify ordering.
         let th = 0.3f32;
         let th_inv = 1.0 / (1.0 - th);
         let sp = 1.0f32;
         let wp = 0.9f32;
-        let positive_only = sp / wp;
 
-        for i in 0..20 {
-            let sn = i as f32 * 0.05;
-            let wn = sn * 0.5;
-            let result = soft_clamp(sp, sn, wp, wn, th, th_inv);
-            assert!(result >= 0.0, "negative output at sn={sn}: {result}");
-            assert!(
-                result <= positive_only + 1e-6,
-                "exceeds positive-only baseline at sn={sn}: {result} > {positive_only}"
-            );
-        }
+        // sn=0: r=0, below threshold => (1.0 - 0.0) / (0.9 - 0.0) = 1.1111
+        let r0 = soft_clamp(sp, 0.0, wp, 0.0, th, th_inv);
+        let expected_0 = 1.0 / 0.9;
+        assert!(
+            (r0 - expected_0).abs() < 1e-6,
+            "sn=0: expected {expected_0}, got {r0}"
+        );
+
+        // sn=0.2: r=0.2 < 0.3 => no fade => (1.0 - 0.2) / (0.9 - 0.1) = 0.8/0.8 = 1.0
+        let r1 = soft_clamp(sp, 0.2, wp, 0.1, th, th_inv);
+        let expected_1 = 0.8 / 0.8;
+        assert!(
+            (r1 - expected_1).abs() < 1e-6,
+            "sn=0.2: expected {expected_1}, got {r1}"
+        );
+
+        // sn=0.5: r=0.5 > 0.3 => fade branch
+        // fade = (0.5 - 0.3) / 0.7 = 0.2/0.7 = 2/7
+        // c = 1 - (2/7)^2 = 1 - 4/49 = 45/49
+        // result = (1.0 - 0.5 * 45/49) / (0.9 - 0.25 * 45/49)
+        let r2 = soft_clamp(sp, 0.5, wp, 0.25, th, th_inv);
+
+        // Monotonic decrease: r0 > r1 > r2
+        assert!(r0 > r1, "r0={r0} should be > r1={r1}");
+        assert!(r1 > r2, "r1={r1} should be > r2={r2}");
+        assert!(r2 >= 0.0, "result should be non-negative: {r2}");
+    }
+
+    #[test]
+    fn test_soft_clamp_at_exact_threshold() {
+        // When r == th exactly, the fade branch gives fade=0, c=1.
+        // So result = (sp - sn * 1) / (wp - wn * 1) = (sp - sn) / (wp - wn),
+        // same as below-threshold branch. Continuity check.
+        let th = 0.3f32;
+        let th_inv = 1.0 / (1.0 - th);
+        let sp = 1.0;
+        let sn = 0.3; // r = 0.3 / 1.0 = 0.3 = th exactly
+        let wp = 0.8;
+        let wn = 0.2;
+
+        // fade = (0.3 - 0.3) * th_inv = 0, c = 1.0
+        // result = (1.0 - 0.3 * 1.0) / (0.8 - 0.2 * 1.0) = 0.7 / 0.6
+        let expected = 0.7 / 0.6;
+        let result = soft_clamp(sp, sn, wp, wn, th, th_inv);
+        assert!(
+            (result - expected).abs() < 1e-6,
+            "At threshold: expected {expected}, got {result}"
+        );
     }
 
     /// Naive scalar Lanczos3 with deringing for reference testing.
@@ -966,5 +1014,116 @@ mod tests {
                 "Monotonicity broken at x={x}"
             );
         }
+    }
+
+    // --- bilinear_sample direct tests ---
+
+    #[test]
+    fn test_bilinear_sample_hand_computed() {
+        // 3x3 image:
+        //   0  1  2
+        //   3  4  5
+        //   6  7  8
+        let data = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let input = Buffer2::new(3, 3, data);
+
+        // At integer pixel (1, 1): exactly 4.0
+        assert!(
+            (bilinear_sample(&input, 1.0, 1.0, 0.0) - 4.0).abs() < 1e-6,
+            "At (1,1): expected 4.0, got {}",
+            bilinear_sample(&input, 1.0, 1.0, 0.0)
+        );
+
+        // At (0.5, 0.5): bilinear of [0,1,3,4]
+        // x0=0, y0=0, fx=0.5, fy=0.5
+        // p00=0, p10=1, p01=3, p11=4
+        // top = 0 + 0.5*(1-0) = 0.5
+        // bottom = 3 + 0.5*(4-3) = 3.5
+        // result = 0.5 + 0.5*(3.5 - 0.5) = 0.5 + 1.5 = 2.0
+        assert!(
+            (bilinear_sample(&input, 0.5, 0.5, 0.0) - 2.0).abs() < 1e-6,
+            "At (0.5, 0.5): expected 2.0, got {}",
+            bilinear_sample(&input, 0.5, 0.5, 0.0)
+        );
+
+        // At (1.5, 0.5): bilinear of [1,2,4,5]
+        // x0=1, y0=0, fx=0.5, fy=0.5
+        // p00=1, p10=2, p01=4, p11=5
+        // top = 1 + 0.5*(2-1) = 1.5
+        // bottom = 4 + 0.5*(5-4) = 4.5
+        // result = 1.5 + 0.5*(4.5 - 1.5) = 1.5 + 1.5 = 3.0
+        assert!(
+            (bilinear_sample(&input, 1.5, 0.5, 0.0) - 3.0).abs() < 1e-6,
+            "At (1.5, 0.5): expected 3.0, got {}",
+            bilinear_sample(&input, 1.5, 0.5, 0.0)
+        );
+
+        // At (0.25, 0.75): bilinear of [0,1,3,4]
+        // x0=0, y0=0, fx=0.25, fy=0.75
+        // top = 0 + 0.25*(1-0) = 0.25
+        // bottom = 3 + 0.25*(4-3) = 3.25
+        // result = 0.25 + 0.75*(3.25-0.25) = 0.25 + 2.25 = 2.5
+        assert!(
+            (bilinear_sample(&input, 0.25, 0.75, 0.0) - 2.5).abs() < 1e-6,
+            "At (0.25, 0.75): expected 2.5, got {}",
+            bilinear_sample(&input, 0.25, 0.75, 0.0)
+        );
+    }
+
+    #[test]
+    fn test_bilinear_sample_border_value() {
+        // 2x2 image: [[10, 20], [30, 40]]
+        let input = Buffer2::new(2, 2, vec![10.0, 20.0, 30.0, 40.0]);
+
+        // Sampling outside uses border_value
+        // At (-1.0, 0.0): x0 = floor(-1.0) = -1, y0 = 0
+        // All four neighbors involve x=-1 or x=0
+        // p00 = sample(-1, 0) = border = -5.0
+        // p10 = sample(0, 0) = 10.0
+        // p01 = sample(-1, 1) = border = -5.0
+        // p11 = sample(0, 1) = 30.0
+        // fx = -1.0 - (-1) = 0.0, fy = 0.0
+        // top = -5.0 + 0.0*(10.0 - (-5.0)) = -5.0
+        // bottom = -5.0 + 0.0*(30.0 - (-5.0)) = -5.0
+        // result = -5.0 + 0.0*(...) = -5.0
+        assert!(
+            (bilinear_sample(&input, -1.0, 0.0, -5.0) - (-5.0)).abs() < 1e-6,
+            "At (-1.0, 0.0): expected -5.0, got {}",
+            bilinear_sample(&input, -1.0, 0.0, -5.0)
+        );
+    }
+
+    // --- Deringing threshold sensitivity ---
+
+    #[test]
+    fn test_deringing_threshold_sensitivity() {
+        // Different deringing thresholds should produce different results
+        // on data with ringing (checkerboard = worst case for Lanczos).
+        let size = 64;
+        let input = patterns::checkerboard(size, size, 4, 0.0, 1.0);
+        let transform = Transform::translation(DVec2::new(0.3, 0.3));
+        let inverse = WarpTransform::new(transform.inverse());
+
+        let params_low = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.1 });
+        let params_high = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.9 });
+
+        let mut row_low = vec![0.0f32; size];
+        let mut row_high = vec![0.0f32; size];
+        let y = size / 2;
+
+        warp_row_lanczos3(&input, &mut row_low, y, &inverse, &params_low);
+        warp_row_lanczos3(&input, &mut row_high, y, &inverse, &params_high);
+
+        // They should differ: more aggressive clamping (lower th) should produce
+        // different values than less aggressive (higher th).
+        let max_diff = row_low
+            .iter()
+            .zip(&row_high)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            max_diff > 0.001,
+            "Different thresholds should produce different results, max_diff={max_diff}"
+        );
     }
 }

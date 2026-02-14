@@ -392,11 +392,6 @@ mod tests {
     }
 
     #[test]
-    fn test_config_validation() {
-        Config::default().validate();
-    }
-
-    #[test]
     fn test_config_fast_preset() {
         let config = Config::fast();
         assert_eq!(config.ransac_iterations, 500);
@@ -513,5 +508,181 @@ mod tests {
                 < f32::EPSILON
         );
         assert!(InterpolationMethod::Nearest.deringing() < 0.0);
+    }
+
+    #[test]
+    fn test_lanczos_param() {
+        // Non-Lanczos methods return None
+        assert_eq!(InterpolationMethod::Nearest.lanczos_param(), None);
+        assert_eq!(InterpolationMethod::Bilinear.lanczos_param(), None);
+        assert_eq!(InterpolationMethod::Bicubic.lanczos_param(), None);
+        // Lanczos methods return their parameter a
+        assert_eq!(
+            InterpolationMethod::Lanczos2 { deringing: 0.3 }.lanczos_param(),
+            Some(2)
+        );
+        assert_eq!(
+            InterpolationMethod::Lanczos3 { deringing: -1.0 }.lanczos_param(),
+            Some(3)
+        );
+        assert_eq!(
+            InterpolationMethod::Lanczos4 { deringing: 0.0 }.lanczos_param(),
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn test_interpolation_method_default() {
+        let method = InterpolationMethod::default();
+        assert_eq!(
+            method,
+            InterpolationMethod::Lanczos3 {
+                deringing: DEFAULT_DERINGING_THRESHOLD
+            }
+        );
+        // DEFAULT_DERINGING_THRESHOLD = 0.3
+        assert!((DEFAULT_DERINGING_THRESHOLD - 0.3).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    #[should_panic(expected = "min_stars must be >= 3")]
+    fn test_config_invalid_min_stars() {
+        let config = Config {
+            min_stars: 2,
+            ..Config::default()
+        };
+        config.validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "max_stars")]
+    fn test_config_max_stars_less_than_min_stars() {
+        let config = Config {
+            max_stars: 5,
+            min_stars: 10,
+            ..Config::default()
+        };
+        config.validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "ratio_tolerance must be in (0, 1)")]
+    fn test_config_invalid_ratio_tolerance_zero() {
+        let config = Config {
+            ratio_tolerance: 0.0,
+            ..Config::default()
+        };
+        config.validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "ratio_tolerance must be in (0, 1)")]
+    fn test_config_invalid_ratio_tolerance_one() {
+        let config = Config {
+            ratio_tolerance: 1.0,
+            ..Config::default()
+        };
+        config.validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "confidence must be in [0, 1]")]
+    fn test_config_invalid_confidence() {
+        let config = Config {
+            confidence: 1.5,
+            ..Config::default()
+        };
+        config.validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "min_inlier_ratio must be in (0, 1]")]
+    fn test_config_invalid_min_inlier_ratio_zero() {
+        let config = Config {
+            min_inlier_ratio: 0.0,
+            ..Config::default()
+        };
+        config.validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "max_rotation must be positive")]
+    fn test_config_invalid_max_rotation_negative() {
+        let config = Config {
+            max_rotation: Some(-0.1),
+            ..Config::default()
+        };
+        config.validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "scale_range must have 0 < min < max")]
+    fn test_config_invalid_scale_range_inverted() {
+        let config = Config {
+            scale_range: Some((1.5, 0.5)),
+            ..Config::default()
+        };
+        config.validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "max_rms_error must be positive")]
+    fn test_config_invalid_max_rms_error() {
+        let config = Config {
+            max_rms_error: 0.0,
+            ..Config::default()
+        };
+        config.validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "sip_order must be 2-5")]
+    fn test_config_invalid_sip_order() {
+        let config = Config {
+            sip_enabled: true,
+            sip_order: 6,
+            ..Config::default()
+        };
+        config.validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "min_matches")]
+    fn test_config_min_matches_less_than_transform_min_points() {
+        // Homography needs 4 points, min_matches = 3 should fail
+        let config = Config {
+            transform_type: TransformType::Homography,
+            min_matches: 3,
+            ..Config::default()
+        };
+        config.validate();
+    }
+
+    #[test]
+    fn test_config_presets_differ() {
+        // Verify presets produce different configs (parameter sensitivity)
+        let default = Config::default();
+        let fast = Config::fast();
+        let precise = Config::precise();
+
+        // fast has fewer iterations than default
+        assert!(fast.ransac_iterations < default.ransac_iterations);
+        // precise has more iterations than default
+        assert!(precise.ransac_iterations > default.ransac_iterations);
+        // precise has tighter RMS tolerance
+        assert!(precise.max_rms_error < default.max_rms_error);
+        // fast disables LO, default enables it
+        assert!(!fast.local_optimization);
+        assert!(default.local_optimization);
+    }
+
+    #[test]
+    fn test_config_all_presets_validate() {
+        Config::default().validate();
+        Config::fast().validate();
+        Config::precise().validate();
+        Config::wide_field().validate();
+        Config::precise_wide_field().validate();
+        Config::mosaic().validate();
     }
 }

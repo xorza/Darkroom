@@ -585,19 +585,19 @@ fn test_interpolation_quality_ordering() {
 // ============================================================================
 
 #[test]
-fn test_warp_grayscale() {
+fn test_warp_grayscale_translation() {
     use crate::registration::Config as RegConfig;
 
     let (ref_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 88888);
     let width = ref_buf.width();
     let height = ref_buf.height();
+    let ref_pixels = ref_buf.into_vec();
     let ref_image =
-        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), ref_buf.into_vec());
+        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), ref_pixels.clone());
 
-    // Apply a translation
+    // Apply a translation of (5, -3) pixels
     let transform = Transform::translation(DVec2::new(5.0, -3.0));
 
-    // Warp the image
     let warp_config = RegConfig {
         interpolation: InterpolationMethod::Lanczos3 { deringing: 0.3 },
         ..Default::default()
@@ -610,10 +610,34 @@ fn test_warp_grayscale() {
         &warp_config,
     );
 
-    // Verify dimensions and basic properties
+    // Verify dimensions preserved
     assert_eq!(warped.width(), width);
     assert_eq!(warped.height(), height);
     assert_eq!(warped.channels(), 1);
+
+    // Verify pixels actually moved: the warped image should differ from input
+    // in the central region (not just "it doesn't panic")
+    let warped_pixels = warped.channel(0);
+    let mut diff_count = 0usize;
+    let margin = 20;
+    for y in margin..height - margin {
+        for x in margin..width - margin {
+            let idx = y * width + x;
+            if (ref_pixels[idx] - warped_pixels[idx]).abs() > 1e-4 {
+                diff_count += 1;
+            }
+        }
+    }
+    let total_central = (height - 2 * margin) * (width - 2 * margin);
+    // With a 5-pixel translation on star field, some pixels near stars should differ.
+    // Star field is mostly background (zero), so only pixels near stars change.
+    // 30 stars with ~5px radius gives ~2300 affected pixels minimum.
+    assert!(
+        diff_count > 1000,
+        "Expected some differing pixels after translation, got {}/{}",
+        diff_count,
+        total_central
+    );
 }
 
 #[test]
@@ -658,16 +682,30 @@ fn test_warp_rgb() {
     assert_eq!(warped.width(), width);
     assert_eq!(warped.height(), height);
     assert_eq!(warped.channels(), 3);
-    // Verify each channel was warped (non-zero values should exist)
-    for c in 0..3 {
-        let warped_channel = warped.channel(c);
-        let non_zero_count = warped_channel.iter().filter(|&&v| v > 0.0).count();
-        assert!(
-            non_zero_count > 0,
-            "Channel {} should have non-zero values after warping",
-            c
-        );
+
+    // Verify each channel was warped independently:
+    // Channels have different input values, so warped channels should differ from each other
+    let ch0 = warped.channel(0);
+    let ch1 = warped.channel(1);
+
+    // Count pixels where channels differ (G channel had +0.1 offset)
+    let margin = 10;
+    let mut differ_count = 0usize;
+    for y in margin..height - margin {
+        for x in margin..width - margin {
+            let idx = y * width + x;
+            if (ch0[idx] - ch1[idx]).abs() > 0.01 {
+                differ_count += 1;
+            }
+        }
     }
+    let total_inner = (height - 2 * margin) * (width - 2 * margin);
+    assert!(
+        differ_count > total_inner / 2,
+        "Channels should differ after warping (independent processing), only {}/{} differ",
+        differ_count,
+        total_inner
+    );
 }
 
 #[test]

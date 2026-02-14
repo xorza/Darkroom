@@ -396,41 +396,71 @@ unsafe fn hsum_ps(v: __m128) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::Buffer2;
     use crate::testing::synthetic::patterns;
     #[cfg(target_arch = "x86_64")]
     use common::cpu_features;
 
-    #[test]
+    /// Helper: compare SIMD output against scalar reference for a given transform.
     #[cfg(target_arch = "x86_64")]
-    fn test_avx2_warp_row() {
+    fn assert_avx2_matches_scalar(
+        input: &Buffer2<f32>,
+        transform: &Transform,
+        y: usize,
+        tol: f32,
+        label: &str,
+    ) {
         if !cpu_features::has_avx2() {
-            eprintln!("Skipping AVX2 test - not available");
             return;
         }
-
-        let width = 128;
-        let height = 64;
-        let input = patterns::diagonal_gradient(width, height);
-        let transform = Transform::translation(DVec2::new(2.5, 1.5));
+        let width = input.width();
         let inverse = transform.inverse();
-
         let mut output_avx2 = vec![0.0f32; width];
         let mut output_scalar = vec![0.0f32; width];
-        let y = 30;
 
         unsafe {
-            warp_row_bilinear_avx2(&input, &mut output_avx2, y, &inverse);
+            warp_row_bilinear_avx2(input, &mut output_avx2, y, &inverse);
         }
-
         let inverse_wt = super::super::WarpTransform::new(inverse);
-        super::super::warp_row_bilinear_scalar(&input, &mut output_scalar, y, &inverse_wt, 0.0);
+        super::super::warp_row_bilinear_scalar(input, &mut output_scalar, y, &inverse_wt, 0.0);
 
         for x in 0..width {
             assert!(
-                (output_avx2[x] - output_scalar[x]).abs() < 1e-5,
-                "x={}: AVX2 {} vs Scalar {}",
-                x,
+                (output_avx2[x] - output_scalar[x]).abs() < tol,
+                "{label}: x={x}: AVX2 {} vs Scalar {}",
                 output_avx2[x],
+                output_scalar[x]
+            );
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn assert_sse_matches_scalar(
+        input: &Buffer2<f32>,
+        transform: &Transform,
+        y: usize,
+        tol: f32,
+        label: &str,
+    ) {
+        if !cpu_features::has_sse4_1() {
+            return;
+        }
+        let width = input.width();
+        let inverse = transform.inverse();
+        let mut output_sse = vec![0.0f32; width];
+        let mut output_scalar = vec![0.0f32; width];
+
+        unsafe {
+            warp_row_bilinear_sse(input, &mut output_sse, y, &inverse);
+        }
+        let inverse_wt = super::super::WarpTransform::new(inverse);
+        super::super::warp_row_bilinear_scalar(input, &mut output_scalar, y, &inverse_wt, 0.0);
+
+        for x in 0..width {
+            assert!(
+                (output_sse[x] - output_scalar[x]).abs() < tol,
+                "{label}: x={x}: SSE {} vs Scalar {}",
+                output_sse[x],
                 output_scalar[x]
             );
         }
@@ -438,37 +468,134 @@ mod tests {
 
     #[test]
     #[cfg(target_arch = "x86_64")]
-    fn test_sse_warp_row() {
-        if !cpu_features::has_sse4_1() {
-            eprintln!("Skipping SSE test - not available");
+    fn test_avx2_warp_row_translation() {
+        let input = patterns::diagonal_gradient(128, 64);
+        let transform = Transform::translation(DVec2::new(2.5, 1.5));
+        assert_avx2_matches_scalar(&input, &transform, 30, 1e-5, "AVX2 translation");
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_avx2_warp_row_identity() {
+        let input = patterns::diagonal_gradient(128, 64);
+        let transform = Transform::identity();
+        assert_avx2_matches_scalar(&input, &transform, 30, 1e-5, "AVX2 identity");
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_avx2_warp_row_similarity() {
+        let input = patterns::diagonal_gradient(128, 64);
+        let transform = Transform::similarity(DVec2::new(3.0, 2.0), 0.1, 1.05);
+        assert_avx2_matches_scalar(&input, &transform, 30, 1e-4, "AVX2 similarity");
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_avx2_warp_row_remainder_pixels() {
+        // Width not a multiple of 8: tests the scalar remainder path.
+        // Width=13: 1 chunk of 8 + 5 remainder pixels.
+        let input = patterns::diagonal_gradient(13, 32);
+        let transform = Transform::translation(DVec2::new(1.5, 0.5));
+        assert_avx2_matches_scalar(&input, &transform, 15, 1e-5, "AVX2 width=13");
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_sse_warp_row_similarity() {
+        let input = patterns::diagonal_gradient(64, 64);
+        let transform = Transform::similarity(DVec2::new(1.0, 2.0), 0.05, 1.02);
+        assert_sse_matches_scalar(&input, &transform, 25, 1e-5, "SSE similarity");
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_sse_warp_row_identity() {
+        let input = patterns::diagonal_gradient(64, 64);
+        let transform = Transform::identity();
+        assert_sse_matches_scalar(&input, &transform, 25, 1e-5, "SSE identity");
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_sse_warp_row_remainder_pixels() {
+        // Width not a multiple of 4: tests the scalar remainder path.
+        // Width=11: 2 chunks of 4 + 3 remainder pixels.
+        let input = patterns::diagonal_gradient(11, 32);
+        let transform = Transform::translation(DVec2::new(1.5, 0.5));
+        assert_sse_matches_scalar(&input, &transform, 15, 1e-5, "SSE width=11");
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_lanczos3_kernel_fma_matches_scalar() {
+        // Test the SIMD lanczos3_kernel_fma against a scalar reference implementation.
+        if !cpu_features::has_avx2_fma() {
             return;
         }
 
-        let width = 64;
-        let height = 64;
-        let input = patterns::diagonal_gradient(width, height);
-        let transform = Transform::similarity(DVec2::new(1.0, 2.0), 0.05, 1.02);
-        let inverse = transform.inverse();
+        // 16x16 image: pixel(x, y) = x + y * 0.1
+        let width = 16;
+        let height = 16;
+        let data: Vec<f32> = (0..width * height)
+            .map(|i| {
+                let x = (i % width) as f32;
+                let y = (i / width) as f32;
+                x + y * 0.1
+            })
+            .collect();
 
-        let mut output_sse = vec![0.0f32; width];
-        let mut output_scalar = vec![0.0f32; width];
-        let y = 25;
+        let lut = super::super::get_lanczos_lut(3);
 
-        unsafe {
-            warp_row_bilinear_sse(&input, &mut output_sse, y, &inverse);
+        // Test at interior position (5, 5), fx=0.3, fy=0.7
+        let kx: usize = 3; // x0 - 2 = 5 - 2 = 3
+        let ky: usize = 3; // y0 - 2 = 5 - 2 = 3
+        let fx = 0.3f32;
+        let fy = 0.7f32;
+
+        let wx = [
+            lut.lookup(fx + 2.0),
+            lut.lookup(fx + 1.0),
+            lut.lookup(fx),
+            lut.lookup(fx - 1.0),
+            lut.lookup(fx - 2.0),
+            lut.lookup(fx - 3.0),
+        ];
+        let wy = [
+            lut.lookup(fy + 2.0),
+            lut.lookup(fy + 1.0),
+            lut.lookup(fy),
+            lut.lookup(fy - 1.0),
+            lut.lookup(fy - 2.0),
+            lut.lookup(fy - 3.0),
+        ];
+
+        // Scalar reference (no deringing)
+        let mut scalar_sum = 0.0f32;
+        for j in 0..6 {
+            for k in 0..6 {
+                let v = data[(ky + j) * width + kx + k];
+                scalar_sum += v * wx[k] * wy[j];
+            }
         }
 
-        let inverse_wt = super::super::WarpTransform::new(inverse);
-        super::super::warp_row_bilinear_scalar(&input, &mut output_scalar, y, &inverse_wt, 0.0);
+        // SIMD
+        let simd_acc = unsafe { lanczos3_kernel_fma::<false>(&data, width, kx, ky, &wx, &wy) };
 
-        for x in 0..width {
-            assert!(
-                (output_sse[x] - output_scalar[x]).abs() < 1e-5,
-                "x={}: SSE {} vs Scalar {}",
-                x,
-                output_sse[x],
-                output_scalar[x]
-            );
-        }
+        assert!(
+            (simd_acc.sp - scalar_sum).abs() < 1e-4,
+            "FMA no-dering: SIMD {} vs scalar {scalar_sum}",
+            simd_acc.sp
+        );
+        assert_eq!(simd_acc.sn, 0.0);
+
+        // Test with deringing: verify sp + sn covers all contributions
+        let simd_dering = unsafe { lanczos3_kernel_fma::<true>(&data, width, kx, ky, &wx, &wy) };
+        // sp - sn should equal scalar_sum (total = positive - negative)
+        let dering_total = simd_dering.sp - simd_dering.sn;
+        assert!(
+            (dering_total - scalar_sum).abs() < 1e-4,
+            "FMA dering: sp-sn={dering_total} vs scalar {scalar_sum}"
+        );
     }
 }

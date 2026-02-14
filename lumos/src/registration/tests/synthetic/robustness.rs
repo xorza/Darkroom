@@ -16,6 +16,8 @@ use crate::testing::synthetic::{
 };
 use glam::DVec2;
 
+use super::helpers::{apply_affine, apply_homography};
+
 // FWHM values that control max_sigma in registration:
 // max_sigma = fwhm * 0.5, floor at 0.5
 const FWHM_TIGHT: f32 = 1.34; // max_sigma ~0.67
@@ -1024,21 +1026,6 @@ fn test_extreme_scale_with_rotation() {
 // Affine Robustness Tests
 // ============================================================================
 
-/// Apply an affine transform to Stars.
-fn apply_affine(stars: &[Star], params: [f64; 6]) -> Vec<Star> {
-    let [a, b, tx, c, d, ty] = params;
-    stars
-        .iter()
-        .map(|s| Star {
-            pos: DVec2::new(
-                a * s.pos.x + b * s.pos.y + tx,
-                c * s.pos.x + d * s.pos.y + ty,
-            ),
-            ..*s
-        })
-        .collect()
-}
-
 #[test]
 fn test_affine_with_outliers() {
     // Affine transform with differential scale + shear, plus 15% spurious stars
@@ -1124,22 +1111,6 @@ fn test_affine_with_noise_and_missing() {
 // ============================================================================
 // Homography Robustness Tests
 // ============================================================================
-
-/// Apply a homography to Stars.
-fn apply_homography(stars: &[Star], params: [f64; 8]) -> Vec<Star> {
-    stars
-        .iter()
-        .map(|s| {
-            let w = params[6] * s.pos.x + params[7] * s.pos.y + 1.0;
-            let x_prime = (params[0] * s.pos.x + params[1] * s.pos.y + params[2]) / w;
-            let y_prime = (params[3] * s.pos.x + params[4] * s.pos.y + params[5]) / w;
-            Star {
-                pos: DVec2::new(x_prime, y_prime),
-                ..*s
-            }
-        })
-        .collect()
-}
 
 #[test]
 fn test_homography_with_outliers() {

@@ -92,80 +92,186 @@ impl MagsacScorer {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_gamma_k2_boundaries() {
-        assert!((gamma_k2(0.0) - 0.0).abs() < 1e-10);
-        assert!((gamma_k2(-1.0) - 0.0).abs() < 1e-10);
-        assert!((gamma_k2(100.0) - 1.0).abs() < 1e-10);
+    const TOL: f64 = 1e-10;
 
-        let expected = 1.0 - (-1.0_f64).exp();
-        assert!((gamma_k2(1.0) - expected).abs() < 1e-10);
+    #[test]
+    fn test_gamma_k2_exact_values() {
+        // γ(1, x) = 1 - exp(-x) for x > 0, else 0
+        assert_eq!(gamma_k2(0.0), 0.0);
+        assert_eq!(gamma_k2(-1.0), 0.0);
+        assert_eq!(gamma_k2(-100.0), 0.0);
+
+        // γ(1, 1) = 1 - exp(-1) = 1 - 0.367879441... = 0.632120558...
+        let expected_1 = 1.0 - 1.0_f64 / std::f64::consts::E;
+        assert!((gamma_k2(1.0) - expected_1).abs() < TOL);
+
+        // γ(1, 2) = 1 - exp(-2) = 1 - 0.135335283... = 0.864664716...
+        let expected_2 = 1.0 - (-2.0_f64).exp();
+        assert!((gamma_k2(2.0) - expected_2).abs() < TOL);
+
+        // γ(1, 0.5) = 1 - exp(-0.5) = 1 - 0.606530659... = 0.393469340...
+        let expected_half = 1.0 - (-0.5_f64).exp();
+        assert!((gamma_k2(0.5) - expected_half).abs() < TOL);
+
+        // Large x: γ(1, 100) ≈ 1.0 (exp(-100) ≈ 0)
+        assert!((gamma_k2(100.0) - 1.0).abs() < TOL);
     }
 
     #[test]
-    fn test_scorer_loss_bounded() {
+    fn test_scorer_construction_exact() {
+        // MagsacScorer::new(σ_max) stores:
+        //   max_sigma_sq = σ_max²
+        //   threshold_sq = χ²₀.₉₉(2) * σ_max² = 9.21 * σ_max²
+        //   outlier_loss = σ_max² / 2
+
+        let scorer = MagsacScorer::new(2.0);
+        // σ_max = 2.0 → σ²_max = 4.0
+        // threshold_sq = 9.21 * 4.0 = 36.84
+        assert!((scorer.threshold_sq() - 36.84).abs() < TOL);
+        // outlier_loss = 4.0 / 2.0 = 2.0
+        assert!((scorer.outlier_loss - 2.0).abs() < TOL);
+
+        let scorer = MagsacScorer::new(0.5);
+        // σ_max = 0.5 → σ²_max = 0.25
+        // threshold_sq = 9.21 * 0.25 = 2.3025
+        #[allow(clippy::approx_constant)]
+        let expected_threshold = 2.3025;
+        assert!((scorer.threshold_sq() - expected_threshold).abs() < TOL);
+        // outlier_loss = 0.25 / 2.0 = 0.125
+        assert!((scorer.outlier_loss - 0.125).abs() < TOL);
+    }
+
+    #[test]
+    fn test_scorer_loss_hand_computed() {
+        // With σ_max = 1.0: σ²_max = 1.0, threshold_sq = 9.21
         let scorer = MagsacScorer::new(1.0);
 
-        // MAGSAC++ loss is bounded: 0 at r=0, and at most outlier_loss (0.5) at threshold
-        // The loss is NOT monotonically increasing - it can decrease near the outlier threshold
-        // This is expected behavior for the marginalized likelihood function
+        // loss(r²) = σ²_max/2 * γ(1, x) + r²/4 * (1 - γ(1, x))
+        // where x = r² / (2 * σ²_max) = r² / 2
 
-        // Loss at r=0 should be 0
-        assert!(scorer.loss(0.0) < 1e-10);
+        // r² = 0: x = 0, γ(1,0) = 0 → loss = 0.5*0 + 0/4*(1-0) = 0
+        assert!((scorer.loss(0.0)).abs() < TOL);
 
-        // Loss should be positive for non-zero residuals
-        for i in 1..100 {
-            let r_sq = i as f64 * 0.1;
-            let loss = scorer.loss(r_sq);
-            assert!(loss >= 0.0, "Loss should be non-negative");
-            assert!(loss <= 1.0, "Loss should be bounded by outlier_loss");
-        }
-
-        // Outlier loss should be constant
-        let threshold_sq = scorer.threshold_sq();
-        let outlier_loss_1 = scorer.loss(threshold_sq + 1.0);
-        let outlier_loss_2 = scorer.loss(threshold_sq + 10.0);
+        // r² = 1.0: x = 0.5, γ(1,0.5) = 1 - exp(-0.5)
+        // γ = 0.393469340...
+        // loss = 0.5 * 0.393469340 + 0.25 * (1 - 0.393469340)
+        //      = 0.196734670 + 0.25 * 0.606530659
+        //      = 0.196734670 + 0.151632664
+        //      = 0.348367335
+        let g_half = 1.0 - (-0.5_f64).exp();
+        let expected = 0.5 * g_half + 0.25 * (1.0 - g_half);
         assert!(
-            (outlier_loss_1 - outlier_loss_2).abs() < 1e-10,
-            "Outlier loss should be constant"
+            (scorer.loss(1.0) - expected).abs() < TOL,
+            "loss(1.0) = {}, expected {}",
+            scorer.loss(1.0),
+            expected
+        );
+
+        // r² = 4.0: x = 2.0, γ(1,2) = 1 - exp(-2)
+        // γ = 0.864664716...
+        // loss = 0.5 * 0.864664716 + 1.0 * (1 - 0.864664716)
+        //      = 0.432332358 + 0.135335283
+        //      = 0.567667641
+        let g_2 = 1.0 - (-2.0_f64).exp();
+        let expected_4 = 0.5 * g_2 + 1.0 * (1.0 - g_2);
+        assert!(
+            (scorer.loss(4.0) - expected_4).abs() < TOL,
+            "loss(4.0) = {}, expected {}",
+            scorer.loss(4.0),
+            expected_4
+        );
+
+        // r² > threshold_sq (9.21): returns outlier_loss = 0.5
+        assert!((scorer.loss(10.0) - 0.5).abs() < TOL);
+        assert!((scorer.loss(100.0) - 0.5).abs() < TOL);
+        assert!((scorer.loss(9.22) - 0.5).abs() < TOL);
+    }
+
+    #[test]
+    fn test_scorer_loss_at_threshold_boundary() {
+        // Verify loss is continuous at the threshold boundary.
+        // Just below threshold should be close to outlier_loss.
+        let scorer = MagsacScorer::new(1.0);
+        let threshold_sq = scorer.threshold_sq(); // 9.21
+
+        // Loss just below threshold:
+        // x = 9.20 / 2 = 4.60, γ(1, 4.60) = 1 - exp(-4.60) ≈ 0.98994...
+        // loss = 0.5 * 0.98994 + 9.20/4 * (1-0.98994)
+        //      ≈ 0.49497 + 2.30 * 0.01006 ≈ 0.49497 + 0.02314 ≈ 0.51811
+        // This is slightly above outlier_loss (0.5), which is expected
+        // (the MAGSAC formula can overshoot slightly near the boundary)
+        let loss_just_below = scorer.loss(threshold_sq - 0.01);
+        let loss_just_above = scorer.loss(threshold_sq + 0.01);
+
+        // Just above threshold returns exactly outlier_loss = 0.5
+        assert!((loss_just_above - 0.5).abs() < TOL);
+
+        // The discontinuity at the boundary should be small (< 0.03)
+        assert!(
+            (loss_just_below - loss_just_above).abs() < 0.03,
+            "Discontinuity at threshold: just_below={}, just_above={}",
+            loss_just_below,
+            loss_just_above
         );
     }
 
     #[test]
-    fn test_scorer_loss_boundaries() {
-        let scorer = MagsacScorer::new(1.0);
+    fn test_scorer_different_sigma_changes_loss() {
+        // Verify that different sigma values produce different losses for the same residual.
+        // With σ=1: loss(r²=2) uses x = 2/2 = 1
+        // With σ=2: loss(r²=2) uses x = 2/8 = 0.25
+        let scorer_1 = MagsacScorer::new(1.0);
+        let scorer_2 = MagsacScorer::new(2.0);
 
-        // Loss at r=0 should be 0
-        assert!((scorer.loss(0.0) - 0.0).abs() < 1e-10);
+        let loss_1 = scorer_1.loss(2.0);
+        let loss_2 = scorer_2.loss(2.0);
 
-        // Loss at outlier should be outlier_loss = σ²_max/2 = 0.5
-        let outlier_r_sq = scorer.threshold_sq() * 2.0;
-        assert!((scorer.loss(outlier_r_sq) - 0.5).abs() < 1e-10);
+        // σ=1: x=1.0, γ(1,1)=0.63212..., loss = 0.5*0.63212 + 0.5*(1-0.63212) = 0.50000 (coincidence?)
+        // Recompute: loss = 0.5*0.63212 + 0.5*0.36788 = 0.31606 + 0.18394 = 0.50000
+        // σ=2: σ²=4, x=2/(2*4)=0.25, γ(1,0.25)=1-exp(-0.25)=0.22119
+        // loss = 4/2*0.22119 + 2/4*(1-0.22119) = 2*0.22119 + 0.5*0.77880 = 0.44239 + 0.38940 = 0.83179
+        // Different as expected
+        assert!(
+            (loss_1 - loss_2).abs() > 0.1,
+            "Different sigma must produce different losses: loss_1={}, loss_2={}",
+            loss_1,
+            loss_2
+        );
     }
 
     #[test]
-    fn test_scorer_is_inlier() {
+    fn test_is_inlier_exact_threshold() {
         let scorer = MagsacScorer::new(1.0);
+        // threshold_sq = 9.21
 
-        // Points within threshold are inliers
         assert!(scorer.is_inlier(0.0));
-        assert!(scorer.is_inlier(1.0));
-        assert!(scorer.is_inlier(scorer.threshold_sq()));
-
-        // Points beyond threshold are outliers
-        assert!(!scorer.is_inlier(scorer.threshold_sq() + 0.1));
+        assert!(scorer.is_inlier(5.0));
+        assert!(scorer.is_inlier(9.21)); // exactly at threshold
+        assert!(!scorer.is_inlier(9.22)); // just above
+        assert!(!scorer.is_inlier(100.0));
     }
 
     #[test]
-    fn test_effective_threshold() {
-        // With max_sigma = 1.0, effective threshold ≈ 3.03 pixels
-        let scorer = MagsacScorer::new(1.0);
-        let effective_threshold = scorer.threshold_sq().sqrt();
-        assert!((effective_threshold - 3.03).abs() < 0.1);
+    fn test_effective_threshold_exact() {
+        // threshold_sq = CHI_QUANTILE_SQ * σ² = 9.21 * σ²
+        // effective threshold (pixels) = sqrt(threshold_sq) = sqrt(9.21) * σ
 
-        // With max_sigma = 0.67, effective threshold ≈ 2.0 pixels
-        let scorer = MagsacScorer::new(0.67);
-        let effective_threshold = scorer.threshold_sq().sqrt();
-        assert!((effective_threshold - 2.03).abs() < 0.1);
+        // sqrt(9.21) = 3.03480...
+        let sqrt_chi = 9.21_f64.sqrt(); // 3.03480...
+
+        let scorer_1 = MagsacScorer::new(1.0);
+        assert!(
+            (scorer_1.threshold_sq().sqrt() - sqrt_chi * 1.0).abs() < 1e-6,
+            "σ=1: threshold={}",
+            scorer_1.threshold_sq().sqrt()
+        );
+
+        let scorer_3 = MagsacScorer::new(3.0);
+        // threshold = sqrt(9.21 * 9) = sqrt(82.89) = 9.104...
+        assert!(
+            (scorer_3.threshold_sq().sqrt() - sqrt_chi * 3.0).abs() < 1e-6,
+            "σ=3: threshold={}",
+            scorer_3.threshold_sq().sqrt()
+        );
     }
 }

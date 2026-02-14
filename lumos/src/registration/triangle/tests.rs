@@ -23,8 +23,17 @@ fn vote_matrix_from_entries(
     vm
 }
 
+// ============================================================================
+// Triangle::from_positions tests
+// ============================================================================
+
 #[test]
-fn test_triangle_from_positions() {
+fn test_triangle_from_positions_3_4_5() {
+    // 3-4-5 right triangle:
+    // p0=(0,0), p1=(3,0), p2=(0,4)
+    // d01 = 3, d12 = sqrt(9+16) = 5, d20 = 4
+    // Sorted sides: [3, 4, 5]
+    // ratios = (3/5, 4/5) = (0.6, 0.8)
     let tri = Triangle::from_positions(
         [0, 1, 2],
         [
@@ -32,18 +41,43 @@ fn test_triangle_from_positions() {
             DVec2::new(3.0, 0.0),
             DVec2::new(0.0, 4.0),
         ],
-    );
+    )
+    .unwrap();
 
-    assert!(tri.is_some());
-    let tri = tri.unwrap();
-
-    // 3-4-5 right triangle: ratios = (3/5, 4/5)
     assert!((tri.ratios.0 - 0.6).abs() < 1e-10);
     assert!((tri.ratios.1 - 0.8).abs() < 1e-10);
 }
 
 #[test]
+fn test_triangle_equilateral_ratios() {
+    // Equilateral triangle: all sides equal = 10.0
+    // ratios = (10/10, 10/10) = (1.0, 1.0)
+    let tri = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(10.0, 0.0),
+            // height = 10 * sqrt(3)/2 = 8.6602540378...
+            DVec2::new(5.0, 8.660254037844386),
+        ],
+    )
+    .unwrap();
+
+    assert!(
+        (tri.ratios.0 - 1.0).abs() < 1e-10,
+        "Expected ratio.0 = 1.0, got {}",
+        tri.ratios.0
+    );
+    assert!(
+        (tri.ratios.1 - 1.0).abs() < 1e-10,
+        "Expected ratio.1 = 1.0, got {}",
+        tri.ratios.1
+    );
+}
+
+#[test]
 fn test_triangle_ratios_scale_invariant() {
+    // 3-4-5 triangle at scale 1 and scale 10 should have identical ratios = (0.6, 0.8)
     let tri1 = Triangle::from_positions(
         [0, 1, 2],
         [
@@ -54,7 +88,6 @@ fn test_triangle_ratios_scale_invariant() {
     )
     .unwrap();
 
-    // Same triangle, 10x larger
     let tri2 = Triangle::from_positions(
         [0, 1, 2],
         [
@@ -67,10 +100,182 @@ fn test_triangle_ratios_scale_invariant() {
 
     assert!((tri1.ratios.0 - tri2.ratios.0).abs() < 1e-10);
     assert!((tri1.ratios.1 - tri2.ratios.1).abs() < 1e-10);
+    // Both should be exactly the 3-4-5 ratios
+    assert!((tri1.ratios.0 - 0.6).abs() < 1e-10);
+    assert!((tri1.ratios.1 - 0.8).abs() < 1e-10);
 }
 
 #[test]
-fn test_triangle_similarity_check() {
+fn test_triangle_orientation_exact() {
+    // 3-4-5 right triangle: p0=(0,0), p1=(3,0), p2=(0,4)
+    // Sorted sides: d01=3 (opp vtx 2), d20=4 (opp vtx 1), d12=5 (opp vtx 0)
+    // Reordered vertices: [2, 1, 0] → positions [p2, p1, p0] = [(0,4), (3,0), (0,0)]
+    // Cross product: rp0=(0,4), rp1=(3,0), rp2=(0,0)
+    // rv01 = (3,0)-(0,4) = (3,-4), rv02 = (0,0)-(0,4) = (0,-4)
+    // cross = 3*(-4) - (-4)*0 = -12 < 0 → Clockwise
+    let tri = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(3.0, 0.0),
+            DVec2::new(0.0, 4.0),
+        ],
+    )
+    .unwrap();
+
+    assert_eq!(tri.orientation, Orientation::Clockwise);
+
+    // Mirror x → p0=(0,0), p1=(-3,0), p2=(0,4)
+    // Sorted sides are the same lengths: d01=3, d12=5, d20=4
+    // Reordered vertices: [2, 1, 0] → positions [p2, p1, p0] = [(0,4), (-3,0), (0,0)]
+    // rv01 = (-3,0)-(0,4) = (-3,-4), rv02 = (0,0)-(0,4) = (0,-4)
+    // cross = (-3)*(-4) - (-4)*0 = 12 > 0 → CounterClockwise
+    let mirrored = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(-3.0, 0.0),
+            DVec2::new(0.0, 4.0),
+        ],
+    )
+    .unwrap();
+
+    assert_eq!(mirrored.orientation, Orientation::CounterClockwise);
+}
+
+#[test]
+fn test_degenerate_triangle_collinear() {
+    let tri = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(1.0, 1.0),
+            DVec2::new(2.0, 2.0),
+        ],
+    );
+    assert!(tri.is_none());
+}
+
+#[test]
+fn test_degenerate_triangle_duplicate_point() {
+    let tri = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(0.0, 0.0),
+            DVec2::new(1.0, 1.0),
+        ],
+    );
+    assert!(tri.is_none());
+}
+
+#[test]
+fn test_triangle_very_flat_rejected() {
+    // Nearly collinear: height = 1e-10 on base = 100
+    // area = 0.5 * 100 * 1e-10 = 5e-9, area^2 = 2.5e-17 < MIN_TRIANGLE_AREA_SQ (1e-6)
+    let tri = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(100.0, 0.0),
+            DVec2::new(50.0, 1e-10),
+        ],
+    );
+    assert!(tri.is_none());
+}
+
+#[test]
+fn test_triangle_near_collinear_accepted() {
+    // Thin triangle with height=1 on base=100
+    // Sides: d01=100, d02=sqrt(2500+1)~50.01, d12=sqrt(2500+1)~50.01
+    // Sorted: [50.01, 50.01, 100] → ratio ≈ (0.5001, 0.5001)
+    // area = 0.5 * 100 * 1 = 50, area^2 = 2500 > 1e-6 → accepted
+    // side ratio: 100/50.01 ≈ 2.0 < 10 → accepted
+    let tri = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(100.0, 0.0),
+            DVec2::new(50.0, 1.0),
+        ],
+    );
+    assert!(tri.is_some());
+
+    let tri = tri.unwrap();
+    // d01 = 100 (longest), d02 = sqrt(50^2 + 1) ≈ 50.00999, d12 = sqrt(50^2 + 1) ≈ 50.00999
+    // ratios ≈ (50.01/100, 50.01/100) ≈ (0.5001, 0.5001)
+    assert!((tri.ratios.0 - 0.5001).abs() < 0.001);
+    assert!((tri.ratios.1 - 0.5001).abs() < 0.001);
+}
+
+#[test]
+fn test_triangle_side_ratio_filter_rejects_elongated() {
+    // Very elongated: p0=(0,0), p1=(100,0), p2=(100,1)
+    // d01=100, d12=1, d20=sqrt(10001)≈100.005
+    // longest/shortest = 100.005/1 ≈ 100 >> 10 → rejected
+    let tri = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(100.0, 0.0),
+            DVec2::new(100.0, 1.0),
+        ],
+    );
+    assert!(tri.is_none());
+}
+
+#[test]
+fn test_triangle_side_ratio_filter_accepts_moderate() {
+    // Moderate: p0=(0,0), p1=(5,0), p2=(5,1)
+    // d01=5, d12=1, d20=sqrt(26)≈5.099
+    // longest/shortest = 5.099/1 ≈ 5.1 < 10 → accepted
+    let tri = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(5.0, 0.0),
+            DVec2::new(5.0, 1.0),
+        ],
+    );
+    assert!(tri.is_some());
+}
+
+#[test]
+fn test_triangle_side_ratio_filter_boundary() {
+    // At boundary: p0=(0,0), p1=(10,0), p2=(10,1)
+    // d01=10, d12=1, d20=sqrt(101)≈10.05
+    // longest/shortest = 10.05/1 ≈ 10.05 > 10 → rejected
+    let tri_over = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(10.0, 0.0),
+            DVec2::new(10.0, 1.0),
+        ],
+    );
+    assert!(tri_over.is_none());
+
+    // Wider: p0=(0,0), p1=(10,0), p2=(10,2)
+    // d01=10, d12=2, d20=sqrt(104)≈10.198
+    // longest/shortest = 10.198/2 ≈ 5.1 < 10 → accepted
+    let tri_under = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(10.0, 0.0),
+            DVec2::new(10.0, 2.0),
+        ],
+    );
+    assert!(tri_under.is_some());
+}
+
+// ============================================================================
+// Triangle::is_similar tests
+// ============================================================================
+
+#[test]
+fn test_is_similar_identical_triangles() {
+    // 3-4-5 at two scales: ratios both (0.6, 0.8) → difference = (0, 0) < any tolerance
     let tri1 = Triangle::from_positions(
         [0, 1, 2],
         [
@@ -92,10 +297,15 @@ fn test_triangle_similarity_check() {
     .unwrap();
 
     assert!(tri1.is_similar(&tri2, 0.01));
+    // Even with the tightest tolerance above zero
+    assert!(tri1.is_similar(&tri2, 1e-9));
 }
 
 #[test]
-fn test_triangle_not_similar() {
+fn test_is_similar_different_triangles() {
+    // 1-1-sqrt(2) isoceles right triangle:
+    // d01=1, d12=1, d20=sqrt(2)
+    // ratios = (1/sqrt(2), 1/sqrt(2)) ≈ (0.7071, 0.7071)
     let tri1 = Triangle::from_positions(
         [0, 1, 2],
         [
@@ -106,7 +316,11 @@ fn test_triangle_not_similar() {
     )
     .unwrap();
 
-    // Different shape
+    // Very thin triangle (rejected elongated ones filtered out, so use something different)
+    // 2-1-sqrt(5) triangle:
+    // p0=(0,0), p1=(2,0), p2=(1,0.1)
+    // d01=2, d12=sqrt(1+0.01)≈1.005, d20=sqrt(1+0.01)≈1.005
+    // ratios ≈ (1.005/2, 1.005/2) ≈ (0.5025, 0.5025)
     let tri2 = Triangle::from_positions(
         [0, 1, 2],
         [
@@ -117,1103 +331,15 @@ fn test_triangle_not_similar() {
     )
     .unwrap();
 
+    // Ratio difference ≈ |0.7071 - 0.5025| ≈ 0.205 → not similar at 0.01 tolerance
     assert!(!tri1.is_similar(&tri2, 0.01));
+    // But should match at 0.3 tolerance
+    assert!(tri1.is_similar(&tri2, 0.3));
 }
 
 #[test]
-fn test_triangle_orientation() {
-    // Orientation is computed from geometrically-reordered vertices
-    // (opposite shortest, opposite middle, opposite longest), not input order.
-    // Use a scalene triangle (all sides different) for unambiguous geometric ordering.
-    // 3-4-5 right triangle: sides 3, 4, 5 — all distinct.
-    let tri = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(3.0, 0.0),
-            DVec2::new(0.0, 4.0),
-        ],
-    )
-    .unwrap();
-
-    // Verify orientation is deterministic (just check it's valid)
-    assert!(
-        tri.orientation == Orientation::Clockwise
-            || tri.orientation == Orientation::CounterClockwise
-    );
-
-    // Mirrored triangle should have opposite orientation
-    let mirrored = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(-3.0, 0.0),
-            DVec2::new(0.0, 4.0),
-        ],
-    )
-    .unwrap();
-    assert_ne!(tri.orientation, mirrored.orientation);
-}
-
-#[test]
-fn test_degenerate_triangle_detection() {
-    // Collinear points
-    let tri = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(1.0, 1.0),
-            DVec2::new(2.0, 2.0),
-        ],
-    );
-    assert!(tri.is_none());
-
-    // Duplicate point
-    let tri = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(0.0, 0.0),
-            DVec2::new(1.0, 1.0),
-        ],
-    );
-    assert!(tri.is_none());
-}
-
-#[test]
-fn test_invariant_tree_build() {
-    let positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-    ];
-    let triangles = form_triangles_kdtree(&positions, 4);
-
-    assert!(!triangles.is_empty());
-
-    let tree = build_invariant_tree(&triangles);
-    assert!(tree.is_some());
-    assert_eq!(tree.unwrap().len(), triangles.len());
-}
-
-#[test]
-fn test_invariant_tree_lookup() {
-    let positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(3.0, 0.0),
-        DVec2::new(0.0, 4.0),
-    ];
-    let triangles = form_triangles_kdtree(&positions, 3);
-    assert!(!triangles.is_empty());
-    let tree = build_invariant_tree(&triangles).unwrap();
-
-    // Same triangle's invariants should find itself within small tolerance
-    let query = DVec2::new(triangles[0].ratios.0, triangles[0].ratios.1);
-    let mut candidates = Vec::new();
-    tree.radius_indices_into(query, 0.01, &mut candidates);
-    assert!(candidates.contains(&0));
-}
-
-#[test]
-fn test_invariant_tree_empty() {
-    let tree = build_invariant_tree(&[]);
-    assert!(tree.is_none());
-}
-
-#[test]
-fn test_too_few_stars() {
-    let positions = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 0.0)];
-    let matches = match_triangles(&positions, &positions, &TriangleParams::default());
-    assert!(matches.is_empty());
-}
-
-#[test]
-fn test_all_collinear_stars() {
-    let positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(1.0, 0.0),
-        DVec2::new(2.0, 0.0),
-        DVec2::new(3.0, 0.0),
-    ];
-    let triangles = form_triangles_kdtree(&positions, 4);
-    assert!(triangles.is_empty());
-}
-
-#[test]
-fn test_kdtree_match_identical_star_lists() {
-    let positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-
-    let matches = match_triangles(&positions, &positions, &TriangleParams::default());
-
-    // Should match all stars
-    assert_eq!(matches.len(), 5);
-
-    // Each star should match itself
-    for m in &matches {
-        assert_eq!(m.ref_idx, m.target_idx);
-    }
-}
-
-#[test]
-fn test_kdtree_match_translated_stars() {
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-
-    // Translate by (100, 50)
-    let offset = DVec2::new(100.0, 50.0);
-    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
-
-    let matches = match_triangles(
-        &ref_positions,
-        &target_positions,
-        &TriangleParams::default(),
-    );
-
-    assert_eq!(matches.len(), 5);
-    for m in &matches {
-        assert_eq!(m.ref_idx, m.target_idx);
-    }
-}
-
-#[test]
-fn test_kdtree_match_scaled_stars() {
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-
-    // Scale by 2x
-    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p * 2.0).collect();
-
-    let matches = match_triangles(
-        &ref_positions,
-        &target_positions,
-        &TriangleParams::default(),
-    );
-
-    assert_eq!(matches.len(), 5);
-}
-
-#[test]
-fn test_form_triangles_kdtree_basic() {
-    let positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-
-    let triangles = form_triangles_kdtree(&positions, 4);
-
-    // Should form at least some triangles
-    assert!(!triangles.is_empty());
-
-    // All triangles should have valid ratios
-    for tri in &triangles {
-        assert!(tri.ratios.0 > 0.0 && tri.ratios.0 <= 1.0);
-        assert!(tri.ratios.1 > 0.0 && tri.ratios.1 <= 1.0);
-    }
-}
-
-#[test]
-fn test_form_triangles_kdtree_empty() {
-    let positions: Vec<DVec2> = vec![];
-    let triangles = form_triangles_kdtree(&positions, 5);
-    assert!(triangles.is_empty());
-}
-
-#[test]
-fn test_form_triangles_kdtree_too_few() {
-    let positions = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 1.0)];
-    let triangles = form_triangles_kdtree(&positions, 5);
-    assert!(triangles.is_empty());
-}
-
-#[test]
-fn test_kdtree_match_rotated_stars() {
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-
-    // Rotate by 90 degrees around origin
-    let target_positions: Vec<DVec2> = ref_positions
-        .iter()
-        .map(|p| DVec2::new(-p.y, p.x))
-        .collect();
-
-    let config = TriangleParams {
-        check_orientation: false, // Symmetric test pattern creates ambiguous correspondences
-        ..Default::default()
-    };
-
-    let matches = match_triangles(&ref_positions, &target_positions, &config);
-
-    assert_eq!(matches.len(), 5);
-}
-
-#[test]
-fn test_kdtree_match_with_missing_stars() {
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-
-    // Only 4 stars in target (missing one)
-    let target_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-    ];
-
-    let matches = match_triangles(
-        &ref_positions,
-        &target_positions,
-        &TriangleParams::default(),
-    );
-
-    // Should match the 4 common stars
-    assert!(matches.len() >= 4);
-}
-
-#[test]
-fn test_kdtree_match_with_extra_stars() {
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-    ];
-
-    // Target has extra stars
-    let target_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-        DVec2::new(15.0, 15.0),
-    ];
-
-    let matches = match_triangles(
-        &ref_positions,
-        &target_positions,
-        &TriangleParams::default(),
-    );
-
-    // Should match all 4 reference stars
-    assert_eq!(matches.len(), 4);
-}
-
-#[test]
-fn test_kdtree_match_mirrored_image() {
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-
-    // Mirror horizontally
-    let target_positions: Vec<DVec2> = ref_positions
-        .iter()
-        .map(|p| DVec2::new(-p.x, p.y))
-        .collect();
-
-    // With orientation check, mirrored triangles should be rejected
-    let config_with_orientation = TriangleParams {
-        check_orientation: true,
-        min_votes: 1,
-        ..Default::default()
-    };
-    let matches_with = match_triangles(&ref_positions, &target_positions, &config_with_orientation);
-
-    // Without orientation check, should match more
-    let config_no_orientation = TriangleParams {
-        check_orientation: false,
-        min_votes: 1,
-        ..Default::default()
-    };
-    let matches_without =
-        match_triangles(&ref_positions, &target_positions, &config_no_orientation);
-
-    // With mirroring and orientation check, we should get fewer matches than without
-    assert!(
-        matches_without.len() >= matches_with.len(),
-        "Expected more matches without orientation check"
-    );
-}
-
-// ============================================================================
-// Tests recommended from algorithm review
-// ============================================================================
-
-/// Test with sparse star field (exactly 10 stars)
-#[test]
-fn test_match_sparse_field_10_stars() {
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(50.0, 0.0),
-        DVec2::new(100.0, 0.0),
-        DVec2::new(0.0, 50.0),
-        DVec2::new(50.0, 50.0),
-        DVec2::new(100.0, 50.0),
-        DVec2::new(0.0, 100.0),
-        DVec2::new(50.0, 100.0),
-        DVec2::new(100.0, 100.0),
-        DVec2::new(50.0, 25.0),
-    ];
-
-    // Translate
-    let offset = DVec2::new(10.0, 20.0);
-    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
-
-    let config = TriangleParams {
-        min_votes: 2,
-        ..Default::default()
-    };
-
-    let matches = match_triangles(&ref_positions, &target_positions, &config);
-
-    // Should match most stars
-    assert!(
-        matches.len() >= 7,
-        "Sparse field matching found only {} matches",
-        matches.len()
-    );
-}
-
-/// Test with 40% outliers (spurious stars)
-#[test]
-fn test_match_with_40_percent_outliers() {
-    // 6 real stars
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(20.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(20.0, 10.0),
-    ];
-
-    // Same 6 stars plus 4 random outliers (40% noise)
-    let mut target_positions = ref_positions.clone();
-    target_positions.push(DVec2::new(100.0, 100.0));
-    target_positions.push(DVec2::new(150.0, 50.0));
-    target_positions.push(DVec2::new(75.0, 125.0));
-    target_positions.push(DVec2::new(200.0, 200.0));
-
-    let config = TriangleParams {
-        min_votes: 2,
-        ..Default::default()
-    };
-
-    let matches = match_triangles(&ref_positions, &target_positions, &config);
-
-    // Should match the 6 real stars
-    assert!(
-        matches.len() >= 4,
-        "With 40% outliers, found only {} matches",
-        matches.len()
-    );
-
-    // Verify matches are correct (indices should match)
-    for m in &matches {
-        if m.ref_idx < 6 && m.target_idx < 6 {
-            assert_eq!(
-                m.ref_idx, m.target_idx,
-                "Incorrect match: ref {} != target {}",
-                m.ref_idx, m.target_idx
-            );
-        }
-    }
-}
-
-/// Test vertex correspondence correctness
-#[test]
-fn test_vertex_correspondence_correctness() {
-    // Create a distinctive asymmetric triangle pattern
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),   // A
-        DVec2::new(10.0, 0.0),  // B
-        DVec2::new(5.0, 20.0),  // C - tall isosceles
-        DVec2::new(15.0, 10.0), // D - offset point
-    ];
-
-    // Same positions, different order
-    let target_positions = vec![
-        DVec2::new(0.0, 0.0),   // A
-        DVec2::new(10.0, 0.0),  // B
-        DVec2::new(5.0, 20.0),  // C
-        DVec2::new(15.0, 10.0), // D
-    ];
-
-    let config = TriangleParams {
-        min_votes: 1,
-        ..Default::default()
-    };
-
-    let matches = match_triangles(&ref_positions, &target_positions, &config);
-
-    // Each match should be correct (same index)
-    for m in &matches {
-        assert_eq!(
-            m.ref_idx, m.target_idx,
-            "Vertex correspondence error: ref {} matched to target {}",
-            m.ref_idx, m.target_idx
-        );
-    }
-}
-
-// ============================================================================
-// Stress tests
-// ============================================================================
-
-/// Test with very dense star field (500+ stars) - stress test for k-d tree
-#[test]
-fn test_match_very_dense_field_500_stars() {
-    use std::f64::consts::PI;
-
-    // Generate 500 stars in a semi-random grid pattern
-    let mut ref_positions = Vec::with_capacity(500);
-    for i in 0..25 {
-        for j in 0..20 {
-            // Add some deterministic "noise" to positions
-            let noise_x = ((i * 7 + j * 13) as f64 * 0.1).sin() * 3.0;
-            let noise_y = ((i * 11 + j * 17) as f64 * 0.1).cos() * 3.0;
-            let x = i as f64 * 40.0 + noise_x;
-            let y = j as f64 * 50.0 + noise_y;
-            ref_positions.push(DVec2::new(x, y));
-        }
-    }
-
-    assert_eq!(ref_positions.len(), 500);
-
-    // Apply a similarity transform (rotation + scale + translation)
-    let angle = PI / 20.0; // 9 degrees
-    let scale = 1.05;
-    let cos_a = angle.cos();
-    let sin_a = angle.sin();
-
-    let target_positions: Vec<DVec2> = ref_positions
-        .iter()
-        .map(|p| {
-            let nx = scale * (cos_a * p.x - sin_a * p.y) + 100.0;
-            let ny = scale * (sin_a * p.x + cos_a * p.y) + 50.0;
-            DVec2::new(nx, ny)
-        })
-        .collect();
-
-    // Simulate pipeline limiting to brightest 150 stars
-    let ref_limited: Vec<DVec2> = ref_positions.iter().take(150).copied().collect();
-    let target_limited: Vec<DVec2> = target_positions.iter().take(150).copied().collect();
-
-    let config = TriangleParams {
-        min_votes: 3,
-        ..Default::default()
-    };
-
-    let matches = match_triangles(&ref_limited, &target_limited, &config);
-
-    // Should find a substantial number of matches
-    assert!(
-        matches.len() >= 50,
-        "Dense field (500 stars) matching found only {} matches",
-        matches.len()
-    );
-
-    // Verify match correctness
-    let correct_matches = matches.iter().filter(|m| m.ref_idx == m.target_idx).count();
-    let accuracy = correct_matches as f64 / matches.len() as f64;
-    assert!(
-        accuracy >= 0.9,
-        "Match accuracy too low: {:.1}% ({} correct out of {})",
-        accuracy * 100.0,
-        correct_matches,
-        matches.len()
-    );
-}
-
-/// Test with clustered star distribution (simulating star clusters)
-#[test]
-fn test_match_clustered_stars() {
-    use std::f64::consts::PI;
-
-    // Create 3 clusters of stars
-    let mut ref_positions = Vec::new();
-
-    // Cluster 1: center at (50, 50)
-    for i in 0..10 {
-        let angle = i as f64 * PI / 5.0;
-        let r = 5.0 + (i as f64 * 0.5);
-        ref_positions.push(DVec2::new(50.0 + r * angle.cos(), 50.0 + r * angle.sin()));
-    }
-
-    // Cluster 2: center at (200, 50)
-    for i in 0..10 {
-        let angle = i as f64 * PI / 5.0;
-        let r = 5.0 + (i as f64 * 0.5);
-        ref_positions.push(DVec2::new(200.0 + r * angle.cos(), 50.0 + r * angle.sin()));
-    }
-
-    // Cluster 3: center at (125, 150)
-    for i in 0..10 {
-        let angle = i as f64 * PI / 5.0;
-        let r = 5.0 + (i as f64 * 0.5);
-        ref_positions.push(DVec2::new(125.0 + r * angle.cos(), 150.0 + r * angle.sin()));
-    }
-
-    // Apply translation
-    let offset = DVec2::new(20.0, 15.0);
-    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
-
-    let config = TriangleParams {
-        min_votes: 2,
-        ..Default::default()
-    };
-
-    let matches = match_triangles(&ref_positions, &target_positions, &config);
-
-    // Should match most stars despite clustering
-    assert!(
-        matches.len() >= 20,
-        "Clustered star matching found only {} matches",
-        matches.len()
-    );
-}
-
-/// Test matching with pre-limited star count (simulating pipeline's max_stars selection)
-#[test]
-fn test_match_brightness_weighted_selection() {
-    let all_positions: Vec<DVec2> = (0..50)
-        .map(|i| {
-            let x = (i % 10) as f64 * 30.0;
-            let y = (i / 10) as f64 * 30.0;
-            DVec2::new(x, y)
-        })
-        .collect();
-
-    // Simulate pipeline limiting to brightest 20 stars
-    let ref_positions: Vec<DVec2> = all_positions.iter().take(20).copied().collect();
-
-    let offset = DVec2::new(10.0, 5.0);
-    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
-
-    let config = TriangleParams {
-        min_votes: 2,
-        ..Default::default()
-    };
-
-    let matches = match_triangles(&ref_positions, &target_positions, &config);
-
-    assert!(
-        matches.len() >= 10,
-        "Brightness-limited matching found only {} matches",
-        matches.len()
-    );
-}
-
-// ============================================================================
-// Numerical Stability Tests
-// ============================================================================
-
-/// Test triangle formation with very flat triangles
-#[test]
-fn test_triangle_very_flat() {
-    // Nearly collinear points - should reject very flat triangles
-    // Use even smaller offset to ensure rejection
-    let positions: [DVec2; 3] = [
-        DVec2::new(0.0, 0.0),
-        DVec2::new(100.0, 0.0),
-        DVec2::new(50.0, 1e-10), // Extremely small offset - nearly collinear
-    ];
-
-    let tri = Triangle::from_positions([0, 1, 2], [positions[0], positions[1], positions[2]]);
-
-    // Very flat triangle should be rejected (area too small)
-    assert!(
-        tri.is_none(),
-        "Should reject extremely flat triangle (height ~0)"
-    );
-}
-
-/// Test triangle formation with nearly degenerate points
-#[test]
-fn test_triangle_near_collinear() {
-    // Points that are almost but not quite collinear
-    let positions: [DVec2; 3] = [
-        DVec2::new(0.0, 0.0),
-        DVec2::new(100.0, 0.0),
-        DVec2::new(50.0, 1.0), // Small but valid offset
-    ];
-
-    let tri = Triangle::from_positions([0, 1, 2], [positions[0], positions[1], positions[2]]);
-
-    // This should form a valid (though thin) triangle
-    assert!(tri.is_some(), "Should accept thin but valid triangle");
-
-    // Verify area is reasonable: base=100, height=1, area=50
-    let _tri = tri.unwrap();
-    let area = 0.5
-        * ((positions[1] - positions[0]).x * (positions[2] - positions[0]).y
-            - (positions[1] - positions[0]).y * (positions[2] - positions[0]).x)
-            .abs();
-    assert!((area - 50.0).abs() < 1.0, "Expected area ~50, got {}", area);
-}
-
-#[test]
-fn test_triangle_side_ratio_filter_rejects_elongated() {
-    // Very elongated triangle: sides ~1, ~100, ~100. Ratio = 100/1 = 100 > 10.
-    let tri = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(100.0, 0.0),
-            DVec2::new(100.0, 1.0),
-        ],
-    );
-    assert!(tri.is_none(), "Should reject triangle with side ratio > 10");
-}
-
-#[test]
-fn test_triangle_side_ratio_filter_accepts_moderate() {
-    // Triangle with ratio just under 10: sides ~1, ~5, ~5. Ratio ~5.
-    let tri = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(5.0, 0.0),
-            DVec2::new(5.0, 1.0),
-        ],
-    );
-    assert!(tri.is_some(), "Should accept triangle with side ratio < 10");
-}
-
-#[test]
-fn test_triangle_side_ratio_filter_boundary() {
-    // Triangle near the boundary: longest/shortest ≈ 10.
-    // sides: ~1, ~10, ~10. Ratio = ~10.05.
-    let tri_over = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(10.0, 0.0),
-            DVec2::new(10.0, 1.0),
-        ],
-    );
-    assert!(tri_over.is_none(), "Should reject triangle at ratio ~10.05");
-
-    // Slightly wider: sides ~2, ~10, ~10. Ratio = ~5.1.
-    let tri_under = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(10.0, 0.0),
-            DVec2::new(10.0, 2.0),
-        ],
-    );
-    assert!(tri_under.is_some(), "Should accept triangle at ratio ~5.1");
-}
-
-/// Test matching with large coordinate values
-#[test]
-fn test_match_large_coordinates() {
-    // Coordinates typical of high-resolution sensors (4K+)
-    let base_offset = 5000.0;
-    let ref_positions: Vec<DVec2> = (0..25)
-        .map(|i| {
-            let x = base_offset + (i % 5) as f64 * 100.0;
-            let y = base_offset + (i / 5) as f64 * 100.0;
-            DVec2::new(x, y)
-        })
-        .collect();
-
-    // Apply small translation
-    let offset = DVec2::new(10.0, -5.0);
-    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
-
-    let config = TriangleParams::default();
-    let matches = match_triangles(&ref_positions, &target_positions, &config);
-
-    assert!(
-        matches.len() >= 20,
-        "Large coordinate matching found only {} matches",
-        matches.len()
-    );
-
-    // Verify all matches are correct
-    for m in &matches {
-        assert_eq!(
-            m.ref_idx, m.target_idx,
-            "Incorrect match at large coordinates: ref {} != target {}",
-            m.ref_idx, m.target_idx
-        );
-    }
-}
-
-/// Test matching with small but reasonable coordinate values
-#[test]
-fn test_match_small_coordinates() {
-    // Small but non-trivial coordinates (scaled down star field)
-    let ref_positions: Vec<DVec2> = (0..25)
-        .map(|i| {
-            let x = (i % 5) as f64 * 10.0;
-            let y = (i / 5) as f64 * 10.0;
-            DVec2::new(x, y)
-        })
-        .collect();
-
-    // Apply translation
-    let offset = DVec2::new(1.0, -0.5);
-    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
-
-    let config = TriangleParams::default();
-    let matches = match_triangles(&ref_positions, &target_positions, &config);
-
-    assert!(
-        matches.len() >= 15,
-        "Small coordinate matching found only {} matches",
-        matches.len()
-    );
-}
-
-/// Test matching with sub-pixel noise on target positions.
-/// Real star centroids have jitter from photon noise and centroid estimation.
-#[test]
-fn test_match_with_subpixel_noise() {
-    // Use irregular positions to avoid ambiguous matches on a regular grid
-    let ref_positions: Vec<DVec2> = (0..25)
-        .map(|i| {
-            let base_x = (i % 5) as f64 * 80.0 + 100.0;
-            let base_y = (i / 5) as f64 * 80.0 + 100.0;
-            // Add deterministic position jitter to break grid symmetry
-            let jitter_x = ((i * 13 + 7) as f64 * 0.37).sin() * 15.0;
-            let jitter_y = ((i * 17 + 3) as f64 * 0.53).cos() * 15.0;
-            DVec2::new(base_x + jitter_x, base_y + jitter_y)
-        })
-        .collect();
-
-    // Add sub-pixel noise (±0.3 pixels)
-    let target_positions: Vec<DVec2> = ref_positions
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            let noise_x = ((i * 7 + 3) as f64 * 0.73).sin() * 0.3;
-            let noise_y = ((i * 11 + 5) as f64 * 0.91).cos() * 0.3;
-            DVec2::new(p.x + noise_x, p.y + noise_y)
-        })
-        .collect();
-
-    let config = TriangleParams::default();
-    let matches = match_triangles(&ref_positions, &target_positions, &config);
-
-    assert!(
-        matches.len() >= 15,
-        "Noisy matching found only {} matches",
-        matches.len()
-    );
-
-    // Most matches should still be correct despite sub-pixel noise
-    let correct = matches.iter().filter(|m| m.ref_idx == m.target_idx).count();
-    let accuracy = correct as f64 / matches.len() as f64;
-    assert!(
-        accuracy >= 0.8,
-        "Noisy match accuracy too low: {:.0}% ({correct}/{})",
-        accuracy * 100.0,
-        matches.len()
-    );
-}
-
-/// Test triangle similarity with very similar but different triangles
-#[test]
-fn test_triangle_similarity_threshold_boundary() {
-    // Create an equilateral triangle: sides all equal, ratios = (1.0, 1.0)
-    let tri1 = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(10.0, 0.0),
-            DVec2::new(5.0, 8.66),
-        ],
-    )
-    .unwrap();
-
-    // Create a similar but slightly distorted triangle
-    // Ratios are sides[0]/sides[2] and sides[1]/sides[2]
-    // Distort to change ratios by ~0.05
-    let tri2 = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(10.0, 0.0),
-            DVec2::new(4.5, 8.0),
-        ],
-    )
-    .unwrap();
-
-    // Print ratios for debugging
-    let dr0 = (tri1.ratios.0 - tri2.ratios.0).abs();
-    let dr1 = (tri1.ratios.1 - tri2.ratios.1).abs();
-
-    // With large tolerance, these should be similar
-    assert!(
-        tri1.is_similar(&tri2, 0.15),
-        "Triangles should be similar with 15% tolerance (dr0={}, dr1={})",
-        dr0,
-        dr1
-    );
-
-    // With tight tolerance, these should NOT be similar
-    assert!(
-        !tri1.is_similar(&tri2, 0.01),
-        "Distorted triangles should not match 1% tolerance (dr0={}, dr1={})",
-        dr0,
-        dr1
-    );
-}
-
-/// Test matching with extreme scale difference between reference and target
-#[test]
-fn test_match_large_scale_difference() {
-    // Reference stars at normal scale
-    let ref_positions: Vec<DVec2> = (0..20)
-        .map(|i| {
-            let x = (i % 5) as f64 * 50.0;
-            let y = (i / 5) as f64 * 50.0;
-            DVec2::new(x, y)
-        })
-        .collect();
-
-    // Target stars scaled by 2x (large scale difference)
-    let scale = 2.0;
-    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p * scale).collect();
-
-    let config = TriangleParams::default();
-    let matches = match_triangles(&ref_positions, &target_positions, &config);
-
-    // Triangle matching is scale-invariant, should still find matches
-    assert!(
-        matches.len() >= 15,
-        "Scale-invariant matching with 2x scale found only {} matches",
-        matches.len()
-    );
-}
-
-/// Test matching with 180 degree rotation
-#[test]
-fn test_match_180_degree_rotation() {
-    let ref_positions: Vec<DVec2> = (0..16)
-        .map(|i| {
-            let x = 100.0 + (i % 4) as f64 * 50.0;
-            let y = 100.0 + (i / 4) as f64 * 50.0;
-            DVec2::new(x, y)
-        })
-        .collect();
-
-    // Center of the pattern
-    let center = DVec2::new(175.0, 175.0);
-
-    // 180 degree rotation around center
-    let target_positions: Vec<DVec2> = ref_positions
-        .iter()
-        .map(|p| {
-            let d = *p - center;
-            center - d // 180 degree rotation
-        })
-        .collect();
-
-    let config = TriangleParams {
-        check_orientation: false, // Symmetric pattern creates ambiguous correspondences under 180° rotation
-        ..Default::default()
-    };
-
-    let matches = match_triangles(&ref_positions, &target_positions, &config);
-
-    // Should still find matches despite 180 degree rotation
-    assert!(
-        matches.len() >= 10,
-        "180 degree rotation matching found only {} matches",
-        matches.len()
-    );
-}
-
-// ============================================================================
-// resolve_matches tests
-// ============================================================================
-
-#[test]
-fn test_resolve_matches_one_to_one() {
-    let vm = vote_matrix_from_entries(3, 3, &[(0, 0, 10), (1, 1, 8), (2, 2, 6)]);
-
-    let matches = resolve_matches(vm, 3, 3, 1);
-    assert_eq!(matches.len(), 3);
-
-    // Highest votes should come first
-    assert_eq!(matches[0].ref_idx, 0);
-    assert_eq!(matches[0].votes, 10);
-}
-
-#[test]
-fn test_resolve_matches_conflict_resolution() {
-    // Two candidates for the same target star: ref 0 and ref 1 both want target 0
-    let vm = vote_matrix_from_entries(3, 3, &[(0, 0, 10), (1, 0, 5), (1, 1, 3)]);
-
-    let matches = resolve_matches(vm, 3, 3, 1);
-
-    // ref 0 -> target 0 wins (10 votes)
-    // ref 1 -> target 0 is blocked, so ref 1 doesn't get target 0
-    // ref 1 -> target 1 is still available (3 votes)
-    assert_eq!(matches.len(), 2);
-
-    let m0 = matches.iter().find(|m| m.ref_idx == 0).unwrap();
-    assert_eq!(m0.target_idx, 0);
-    assert_eq!(m0.votes, 10);
-
-    let m1 = matches.iter().find(|m| m.ref_idx == 1).unwrap();
-    assert_eq!(m1.target_idx, 1);
-    assert_eq!(m1.votes, 3);
-}
-
-#[test]
-fn test_resolve_matches_min_votes_filter() {
-    let vm = vote_matrix_from_entries(3, 3, &[(0, 0, 10), (1, 1, 2), (2, 2, 1)]);
-
-    let matches = resolve_matches(vm, 3, 3, 3);
-    assert_eq!(matches.len(), 1);
-    assert_eq!(matches[0].ref_idx, 0);
-}
-
-#[test]
-fn test_resolve_matches_empty() {
-    let vm = VoteMatrix::new(5, 5);
-    let matches = resolve_matches(vm, 5, 5, 1);
-    assert!(matches.is_empty());
-}
-
-#[test]
-fn test_resolve_matches_confidence() {
-    let vm = vote_matrix_from_entries(5, 5, &[(0, 0, 10)]);
-
-    let matches = resolve_matches(vm, 5, 5, 1);
-    assert_eq!(matches.len(), 1);
-    assert!(matches[0].confidence > 0.0);
-    assert!(matches[0].confidence <= 1.0);
-}
-
-#[test]
-fn test_resolve_matches_confidence_relative() {
-    // Confidence should be relative to max votes in the set.
-    // Top match gets 1.0, others are proportional.
-    let vm = vote_matrix_from_entries(5, 5, &[(0, 0, 20), (1, 1, 10), (2, 2, 5)]);
-
-    let matches = resolve_matches(vm, 5, 5, 1);
-    assert_eq!(matches.len(), 3);
-
-    // Sorted by votes descending, so matches[0] has 20 votes
-    assert_eq!(matches[0].votes, 20);
-    assert!((matches[0].confidence - 1.0).abs() < 1e-10);
-
-    assert_eq!(matches[1].votes, 10);
-    assert!((matches[1].confidence - 0.5).abs() < 1e-10);
-
-    assert_eq!(matches[2].votes, 5);
-    assert!((matches[2].confidence - 0.25).abs() < 1e-10);
-}
-
-// ============================================================================
-// VoteMatrix tests
-// ============================================================================
-
-#[test]
-fn test_vote_matrix_dense_mode() {
-    // Small enough for dense mode
-    let mut vm = VoteMatrix::new(10, 10);
-    assert!(matches!(vm, VoteMatrix::Dense { .. }));
-
-    vm.increment(0, 0);
-    vm.increment(0, 0);
-    vm.increment(5, 7);
-
-    let entries = vm.iter_nonzero();
-    let get = |r, t| entries.iter().find(|e| e.0 == r && e.1 == t).map(|e| e.2);
-    assert_eq!(get(0, 0), Some(2));
-    assert_eq!(get(5, 7), Some(1));
-    assert_eq!(entries.len(), 2);
-}
-
-#[test]
-fn test_vote_matrix_sparse_mode() {
-    // Large enough to trigger sparse mode (>250_000 entries)
-    let mut vm = VoteMatrix::new(600, 600);
-    assert!(matches!(vm, VoteMatrix::Sparse(_)));
-
-    vm.increment(0, 0);
-    vm.increment(0, 0);
-    vm.increment(100, 200);
-
-    let entries = vm.iter_nonzero();
-    let get = |r, t| entries.iter().find(|e| e.0 == r && e.1 == t).map(|e| e.2);
-    assert_eq!(get(0, 0), Some(2));
-    assert_eq!(get(100, 200), Some(1));
-    assert_eq!(entries.len(), 2);
-}
-
-#[test]
-fn test_vote_matrix_dense_empty() {
-    let vm = VoteMatrix::new(5, 5);
-    assert!(vm.iter_nonzero().is_empty());
-}
-
-#[test]
-fn test_vote_matrix_threshold_boundary() {
-    // Threshold is size < 250,000 → dense, size >= 250,000 → sparse.
-
-    // Just below threshold: 499*500 = 249,500 < 250,000 → dense
-    let vm_below = VoteMatrix::new(499, 500);
-    assert!(
-        matches!(vm_below, VoteMatrix::Dense { .. }),
-        "499x500 (249.5K) should be dense"
-    );
-
-    // Exactly at threshold: 500*500 = 250,000 — not < 250,000 → sparse
-    let vm_at = VoteMatrix::new(500, 500);
-    assert!(
-        matches!(vm_at, VoteMatrix::Sparse(_)),
-        "500x500 (250K) should be sparse"
-    );
-}
-
-// ============================================================================
-// Invariant tree tests
-// ============================================================================
-
-#[test]
-fn test_invariant_tree_finds_similar_triangles() {
-    // Two similar triangles (same shape, different scale) should be found by radius search
+fn test_is_similar_with_exact_tolerance_boundary() {
+    // 3-4-5: ratios = (0.6, 0.8)
     let tri1 = Triangle::from_positions(
         [0, 1, 2],
         [
@@ -1224,427 +350,36 @@ fn test_invariant_tree_finds_similar_triangles() {
     )
     .unwrap();
 
-    // Same shape, different scale
+    // Equilateral: ratios = (1.0, 1.0)
     let tri2 = Triangle::from_positions(
-        [3, 4, 5],
+        [0, 1, 2],
         [
             DVec2::new(0.0, 0.0),
-            DVec2::new(30.0, 0.0),
-            DVec2::new(0.0, 40.0),
+            DVec2::new(10.0, 0.0),
+            DVec2::new(5.0, 8.660254037844386),
         ],
     )
     .unwrap();
 
-    // Ratios should be identical
-    assert!(
-        (tri1.ratios.0 - tri2.ratios.0).abs() < 1e-10,
-        "Same-shape triangles should have identical ratios"
-    );
-
-    let tree = build_invariant_tree(&[tri1.clone(), tri2]).unwrap();
-    let query = DVec2::new(tri1.ratios.0, tri1.ratios.1);
-    let mut candidates = Vec::new();
-    tree.radius_indices_into(query, 0.01, &mut candidates);
-
-    // Should find both triangles
-    assert_eq!(candidates.len(), 2, "Should find both similar triangles");
+    // dr0 = |0.6 - 1.0| = 0.4, dr1 = |0.8 - 1.0| = 0.2
+    // is_similar requires BOTH dr0 < tol AND dr1 < tol
+    // At tol=0.3, dr0=0.4 >= 0.3 → not similar
+    assert!(!tri1.is_similar(&tri2, 0.3));
+    // At tol=0.5, both dr0=0.4 < 0.5 and dr1=0.2 < 0.5 → similar
+    assert!(tri1.is_similar(&tri2, 0.5));
 }
 
 // ============================================================================
-// Invariant tree radius search boundary tests
+// Vertex ordering tests
 // ============================================================================
 
-#[test]
-fn test_invariant_search_zero_tolerance() {
-    let positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(3.0, 0.0),
-        DVec2::new(0.0, 4.0),
-    ];
-    let triangles = form_triangles_kdtree(&positions, 3);
-    assert!(!triangles.is_empty());
-
-    let tree = build_invariant_tree(&triangles).unwrap();
-
-    // Zero tolerance should still find exact match (distance = 0 <= 0)
-    let query = DVec2::new(triangles[0].ratios.0, triangles[0].ratios.1);
-    let mut candidates = Vec::new();
-    tree.radius_indices_into(query, 0.0, &mut candidates);
-    assert!(
-        candidates.contains(&0),
-        "Zero tolerance should still find the triangle itself"
-    );
-}
-
-#[test]
-fn test_invariant_search_large_tolerance() {
-    let positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-    let triangles = form_triangles_kdtree(&positions, 4);
-    assert!(!triangles.is_empty());
-
-    let tree = build_invariant_tree(&triangles).unwrap();
-
-    // Large tolerance covers the entire ratio space, should find all triangles
-    let query = DVec2::new(triangles[0].ratios.0, triangles[0].ratios.1);
-    let mut candidates = Vec::new();
-    tree.radius_indices_into(query, 2.0, &mut candidates);
-    assert_eq!(
-        candidates.len(),
-        triangles.len(),
-        "Full tolerance should return all triangles"
-    );
-}
-
-#[test]
-fn test_invariant_search_clears_buffer() {
-    let positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-    ];
-    let triangles = form_triangles_kdtree(&positions, 4);
-    let tree = build_invariant_tree(&triangles).unwrap();
-
-    let mut candidates = vec![999, 888, 777]; // Pre-filled garbage
-    let query = DVec2::new(triangles[0].ratios.0, triangles[0].ratios.1);
-    tree.radius_indices_into(query, 0.01, &mut candidates);
-
-    // Should not contain the garbage values
-    assert!(
-        !candidates.contains(&999),
-        "Buffer should be cleared before use"
-    );
-}
-
-// ============================================================================
-// VoteMatrix edge case tests
-// ============================================================================
-
-#[test]
-fn test_vote_matrix_dense_saturating_add() {
-    // Dense mode uses u16, verify saturating_add behavior
-    let mut vm = VoteMatrix::new(2, 2);
-
-    // Increment many times (won't reach u16::MAX in practice, but test saturation logic)
-    for _ in 0..1000 {
-        vm.increment(0, 0);
-    }
-
-    let entries = vm.iter_nonzero();
-    let votes = entries.iter().find(|e| e.0 == 0 && e.1 == 0).unwrap().2;
-    assert_eq!(votes, 1000);
-}
-
-#[test]
-fn test_vote_matrix_sparse_empty() {
-    let vm = VoteMatrix::new(600, 600); // Sparse mode
-    assert!(vm.iter_nonzero().is_empty());
-}
-
-#[test]
-fn test_vote_matrix_dense_boundary_indices() {
-    // Test accessing the last valid index in dense mode
-    let n = 10;
-    let mut vm = VoteMatrix::new(n, n);
-    vm.increment(n - 1, n - 1);
-    vm.increment(0, n - 1);
-    vm.increment(n - 1, 0);
-
-    let entries = vm.iter_nonzero();
-    let get = |r, t| entries.iter().find(|e| e.0 == r && e.1 == t).map(|e| e.2);
-    assert_eq!(get(n - 1, n - 1), Some(1));
-    assert_eq!(get(0, n - 1), Some(1));
-    assert_eq!(get(n - 1, 0), Some(1));
-}
-
-// ============================================================================
-// vote_for_correspondences isolated unit tests
-// ============================================================================
-
-#[test]
-fn test_vote_for_correspondences_identical_triangles() {
-    // Create identical triangle sets — every triangle matches itself
-    let positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-
-    let triangles = form_triangles_kdtree(&positions, 4);
-    assert!(!triangles.is_empty());
-
-    let invariant_tree = build_invariant_tree(&triangles).unwrap();
-
-    let config = TriangleParams::default();
-    let vm = vote_for_correspondences(
-        &triangles,
-        &triangles,
-        &invariant_tree,
-        &config,
-        positions.len(),
-        positions.len(),
-    );
-
-    // Collect into map for inspection
-    let votes: std::collections::HashMap<(usize, usize), usize> = vm
-        .iter_nonzero()
-        .into_iter()
-        .map(|(r, t, v)| ((r, t), v))
-        .collect();
-
-    // Diagonal entries (i, i) should have votes (point matched to itself)
-    let diagonal_votes: usize = (0..positions.len())
-        .filter_map(|i| votes.get(&(i, i)))
-        .sum();
-    assert!(
-        diagonal_votes > 0,
-        "Identical triangles should produce diagonal votes"
-    );
-
-    // Diagonal should dominate off-diagonal for each point
-    for i in 0..positions.len() {
-        let self_votes = votes.get(&(i, i)).copied().unwrap_or(0);
-        for j in 0..positions.len() {
-            if i != j {
-                let cross_votes = votes.get(&(i, j)).copied().unwrap_or(0);
-                assert!(
-                    self_votes >= cross_votes,
-                    "Point {i}: self-votes ({self_votes}) should >= cross-votes to {j} ({cross_votes})"
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn test_vote_for_correspondences_no_matching_triangles() {
-    // Create two sets of triangles with very different shapes
-    let positions_a = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(5.0, 8.66), // equilateral-ish
-    ];
-
-    let positions_b = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(100.0, 0.0),
-        DVec2::new(50.0, 1.0), // very thin
-    ];
-
-    let tri_a = form_triangles_kdtree(&positions_a, 3);
-    let tri_b = form_triangles_kdtree(&positions_b, 3);
-    assert!(!tri_a.is_empty());
-    assert!(!tri_b.is_empty());
-
-    let invariant_tree = build_invariant_tree(&tri_a).unwrap();
-
-    let config = TriangleParams {
-        ratio_tolerance: 0.01, // Very tight
-        ..Default::default()
-    };
-
-    let vm = vote_for_correspondences(
-        &tri_b,
-        &tri_a,
-        &invariant_tree,
-        &config,
-        positions_a.len(),
-        positions_b.len(),
-    );
-
-    // With very different shapes and tight tolerance, should get no votes
-    let entries = vm.iter_nonzero();
-    assert!(
-        entries.is_empty(),
-        "Dissimilar triangles should produce no votes, got {} entries",
-        entries.len()
-    );
-}
-
-#[test]
-fn test_vote_for_correspondences_orientation_filtering() {
-    let positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-
-    // Mirror to flip orientation
-    let mirrored: Vec<DVec2> = positions.iter().map(|p| DVec2::new(-p.x, p.y)).collect();
-
-    let ref_triangles = form_triangles_kdtree(&positions, 4);
-    let target_triangles = form_triangles_kdtree(&mirrored, 4);
-    let invariant_tree = build_invariant_tree(&ref_triangles).unwrap();
-
-    // With orientation check: should get fewer votes
-    let config_with = TriangleParams {
-        check_orientation: true,
-        ..Default::default()
-    };
-    let vm_with = vote_for_correspondences(
-        &target_triangles,
-        &ref_triangles,
-        &invariant_tree,
-        &config_with,
-        positions.len(),
-        mirrored.len(),
-    );
-
-    // Without orientation check: should get more votes
-    let config_without = TriangleParams {
-        check_orientation: false,
-        ..Default::default()
-    };
-    let vm_without = vote_for_correspondences(
-        &target_triangles,
-        &ref_triangles,
-        &invariant_tree,
-        &config_without,
-        positions.len(),
-        mirrored.len(),
-    );
-
-    let total_with: usize = vm_with.iter_nonzero().iter().map(|&(_, _, v)| v).sum();
-    let total_without: usize = vm_without.iter_nonzero().iter().map(|&(_, _, v)| v).sum();
-
-    assert!(
-        total_without >= total_with,
-        "Disabling orientation check should produce >= votes: with={total_with}, without={total_without}"
-    );
-}
-
-// ============================================================================
-// form_triangles_from_neighbors tests
-// ============================================================================
-
-#[test]
-fn test_form_triangles_from_neighbors_basic() {
-    let points = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(1.0, 0.0),
-        DVec2::new(0.5, 0.866), // Equilateral triangle
-    ];
-    let tree = KdTree::build(&points).unwrap();
-
-    let triangles = form_triangles_from_neighbors(&tree, 3);
-
-    assert_eq!(triangles.len(), 1);
-    assert_eq!(triangles[0], [0, 1, 2]);
-}
-
-#[test]
-fn test_form_triangles_from_neighbors_square() {
-    let points = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(1.0, 0.0),
-        DVec2::new(1.0, 1.0),
-        DVec2::new(0.0, 1.0),
-    ];
-    let tree = KdTree::build(&points).unwrap();
-
-    let triangles = form_triangles_from_neighbors(&tree, 3);
-
-    assert!(triangles.len() >= 4);
-
-    for tri in &triangles {
-        assert!(tri[0] < tri[1] && tri[1] < tri[2]);
-        assert!(tri[2] < 4);
-    }
-}
-
-#[test]
-fn test_form_triangles_from_neighbors_too_few_points() {
-    let points = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 0.0)];
-    let tree = KdTree::build(&points).unwrap();
-
-    let triangles = form_triangles_from_neighbors(&tree, 3);
-    assert!(triangles.is_empty());
-}
-
-#[test]
-fn test_form_triangles_from_neighbors_no_duplicates() {
-    let points = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(1.0, 0.0),
-        DVec2::new(2.0, 0.0),
-        DVec2::new(0.0, 1.0),
-        DVec2::new(1.0, 1.0),
-        DVec2::new(2.0, 1.0),
-    ];
-    let tree = KdTree::build(&points).unwrap();
-
-    let triangles = form_triangles_from_neighbors(&tree, 5);
-
-    let mut sorted = triangles.clone();
-    sorted.sort();
-    sorted.dedup();
-    assert_eq!(sorted.len(), triangles.len(), "Found duplicate triangles");
-}
-
-#[test]
-fn test_form_triangles_scaling_vs_brute_force() {
-    let points = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(1.0, 0.0),
-        DVec2::new(2.0, 0.0),
-        DVec2::new(0.0, 1.0),
-        DVec2::new(1.0, 1.0),
-        DVec2::new(2.0, 1.0),
-    ];
-
-    let n = points.len();
-    let brute_force_count = n * (n - 1) * (n - 2) / 6;
-
-    let tree = KdTree::build(&points).unwrap();
-
-    let triangles = form_triangles_from_neighbors(&tree, n - 1);
-    assert_eq!(triangles.len(), brute_force_count);
-}
-
-#[test]
-fn test_form_triangles_sparse_neighbors() {
-    let mut points = Vec::new();
-    for y in 0..5 {
-        for x in 0..5 {
-            points.push(DVec2::new(x as f64 * 100.0, y as f64 * 100.0));
-        }
-    }
-
-    let tree = KdTree::build(&points).unwrap();
-
-    let triangles = form_triangles_from_neighbors(&tree, 2);
-
-    assert!(!triangles.is_empty());
-
-    for tri in &triangles {
-        assert!(tri[0] < tri[1] && tri[1] < tri[2]);
-    }
-}
-
-// ============================================================================
-// Geometric role ordering tests
-// ============================================================================
-
-/// Verify that from_positions reorders indices by geometric role (scalene triangle).
-/// indices[0] = opposite shortest side, indices[2] = opposite longest side.
 #[test]
 fn test_vertex_ordering_by_geometric_role() {
-    // 3-4-5 right triangle with positions:
+    // 3-4-5 right triangle with arbitrary indices [10, 20, 30]:
     // p0=(0,0), p1=(3,0), p2=(0,4)
-    // sides: d01=3 (opp vtx 2), d12=5 (opp vtx 0), d20=4 (opp vtx 1)
-    // shortest=3 (opp 2), middle=4 (opp 1), longest=5 (opp 0)
-    // So reordered: [2, 1, 0]
+    // d01=3 (opp vtx 2=idx30), d12=5 (opp vtx 0=idx10), d20=4 (opp vtx 1=idx20)
+    // Sorted by side length: shortest=3(opp idx30), middle=4(opp idx20), longest=5(opp idx10)
+    // Reordered indices: [30, 20, 10]
     let tri = Triangle::from_positions(
         [10, 20, 30],
         [
@@ -1655,12 +390,11 @@ fn test_vertex_ordering_by_geometric_role() {
     )
     .unwrap();
 
-    assert_eq!(tri.indices[0], 30); // opposite shortest (d01=3)
-    assert_eq!(tri.indices[1], 20); // opposite middle (d20=4)
-    assert_eq!(tri.indices[2], 10); // opposite longest (d12=5)
+    assert_eq!(tri.indices[0], 30); // opposite shortest side (d01=3)
+    assert_eq!(tri.indices[1], 20); // opposite middle side (d20=4)
+    assert_eq!(tri.indices[2], 10); // opposite longest side (d12=5)
 }
 
-/// Same geometric triangle with shuffled input order produces the same indices.
 #[test]
 fn test_vertex_ordering_deterministic_across_input_orders() {
     let p_a = DVec2::new(0.0, 0.0);
@@ -1700,11 +434,1005 @@ fn test_vertex_ordering_deterministic_across_input_orders() {
     }
 }
 
-/// Verify that voting produces correct correspondences when ref and target
-/// have the same geometric points but different index numbering.
+// ============================================================================
+// form_triangles_from_neighbors tests
+// ============================================================================
+
 #[test]
-fn test_vertex_correspondence_with_permuted_indices() {
-    // 5 distinctive points forming an asymmetric pattern
+fn test_form_triangles_from_neighbors_single_triangle() {
+    // 3 points → exactly 1 triangle: [0, 1, 2]
+    let points = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(1.0, 0.0),
+        DVec2::new(0.5, 0.866),
+    ];
+    let tree = KdTree::build(&points).unwrap();
+
+    let triangles = form_triangles_from_neighbors(&tree, 3);
+    assert_eq!(triangles.len(), 1);
+    assert_eq!(triangles[0], [0, 1, 2]);
+}
+
+#[test]
+fn test_form_triangles_from_neighbors_square() {
+    // 4 points forming a square → C(4,3) = 4 triangles with k=3 (all neighbors)
+    let points = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(1.0, 0.0),
+        DVec2::new(1.0, 1.0),
+        DVec2::new(0.0, 1.0),
+    ];
+    let tree = KdTree::build(&points).unwrap();
+
+    let triangles = form_triangles_from_neighbors(&tree, 3);
+
+    // With 4 points and k=3 (all neighbors), all C(4,3)=4 triangles should be found
+    assert_eq!(triangles.len(), 4);
+
+    // All indices should be sorted and valid
+    for tri in &triangles {
+        assert!(tri[0] < tri[1] && tri[1] < tri[2]);
+        assert!(tri[2] < 4);
+    }
+}
+
+#[test]
+fn test_form_triangles_from_neighbors_too_few_points() {
+    let points = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 0.0)];
+    let tree = KdTree::build(&points).unwrap();
+    let triangles = form_triangles_from_neighbors(&tree, 3);
+    assert!(triangles.is_empty());
+}
+
+#[test]
+fn test_form_triangles_from_neighbors_k1_insufficient() {
+    // With k=1, each point only has 1 neighbor. Need 2 neighbors to form a triangle.
+    // So no triangles should be formed (you need at least 2 neighbors of point i
+    // to pair them into a triangle).
+    let points = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(100.0, 0.0),
+        DVec2::new(200.0, 0.0),
+        DVec2::new(0.0, 100.0),
+        DVec2::new(100.0, 100.0),
+    ];
+    let tree = KdTree::build(&points).unwrap();
+
+    // k=1: each point gets 1 neighbor. With only 1 neighbor per point,
+    // we need pairs of neighbors, so can't form triangles from just 1 neighbor.
+    // Actually the loop needs at least 2 neighbors (ni and n2 must be different).
+    // But k=1 means k_nearest returns point itself + 1 neighbor = 2 results,
+    // so after filtering self, only 1 neighbor remains. Skip(ni+1) means no n2 → no triangles.
+    let triangles = form_triangles_from_neighbors(&tree, 1);
+    assert!(
+        triangles.is_empty(),
+        "k=1 should produce no triangles, got {}",
+        triangles.len()
+    );
+}
+
+#[test]
+fn test_form_triangles_from_neighbors_no_duplicates() {
+    let points = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(1.0, 0.0),
+        DVec2::new(2.0, 0.0),
+        DVec2::new(0.0, 1.0),
+        DVec2::new(1.0, 1.0),
+        DVec2::new(2.0, 1.0),
+    ];
+    let tree = KdTree::build(&points).unwrap();
+
+    let triangles = form_triangles_from_neighbors(&tree, 5);
+
+    let mut sorted = triangles.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), triangles.len(), "Found duplicate triangles");
+}
+
+#[test]
+fn test_form_triangles_full_k_equals_brute_force() {
+    // With k = n-1 (all neighbors), should produce C(n,3) = n*(n-1)*(n-2)/6 triangles
+    let points = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(1.0, 0.0),
+        DVec2::new(2.0, 0.0),
+        DVec2::new(0.0, 1.0),
+        DVec2::new(1.0, 1.0),
+        DVec2::new(2.0, 1.0),
+    ];
+
+    let n = points.len();
+    // C(6,3) = 6*5*4/6 = 20
+    let brute_force_count = n * (n - 1) * (n - 2) / 6;
+    assert_eq!(brute_force_count, 20);
+
+    let tree = KdTree::build(&points).unwrap();
+    let triangles = form_triangles_from_neighbors(&tree, n - 1);
+    assert_eq!(triangles.len(), brute_force_count);
+}
+
+// ============================================================================
+// form_triangles_kdtree tests
+// ============================================================================
+
+#[test]
+fn test_form_triangles_kdtree_empty() {
+    let positions: Vec<DVec2> = vec![];
+    let triangles = form_triangles_kdtree(&positions, 5);
+    assert!(triangles.is_empty());
+}
+
+#[test]
+fn test_form_triangles_kdtree_too_few() {
+    let positions = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 1.0)];
+    let triangles = form_triangles_kdtree(&positions, 5);
+    assert!(triangles.is_empty());
+}
+
+#[test]
+fn test_form_triangles_kdtree_single_triangle() {
+    // 3 points forming a 3-4-5 triangle
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(3.0, 0.0),
+        DVec2::new(0.0, 4.0),
+    ];
+
+    let triangles = form_triangles_kdtree(&positions, 3);
+
+    // Exactly 1 valid triangle from 3 points
+    assert_eq!(triangles.len(), 1);
+    // Ratios should be (3/5, 4/5) = (0.6, 0.8)
+    assert!((triangles[0].ratios.0 - 0.6).abs() < 1e-10);
+    assert!((triangles[0].ratios.1 - 0.8).abs() < 1e-10);
+}
+
+#[test]
+fn test_form_triangles_kdtree_all_collinear() {
+    // All collinear points produce no valid triangles
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(1.0, 0.0),
+        DVec2::new(2.0, 0.0),
+        DVec2::new(3.0, 0.0),
+    ];
+    let triangles = form_triangles_kdtree(&positions, 4);
+    assert!(triangles.is_empty());
+}
+
+#[test]
+fn test_form_triangles_kdtree_ratios_in_valid_range() {
+    // 5 points forming a non-degenerate pattern
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+    ];
+
+    let triangles = form_triangles_kdtree(&positions, 4);
+
+    // Should form multiple triangles from 5 points
+    assert!(triangles.len() >= 4);
+
+    // All ratios must satisfy 0 < ratio.0 <= ratio.1 <= 1.0
+    // (sides are sorted, so ratio.0 = shortest/longest <= ratio.1 = middle/longest <= 1.0)
+    for tri in &triangles {
+        assert!(
+            tri.ratios.0 > 0.0 && tri.ratios.0 <= 1.0,
+            "ratio.0 = {} out of (0, 1] range",
+            tri.ratios.0
+        );
+        assert!(
+            tri.ratios.1 > 0.0 && tri.ratios.1 <= 1.0,
+            "ratio.1 = {} out of (0, 1] range",
+            tri.ratios.1
+        );
+        assert!(
+            tri.ratios.0 <= tri.ratios.1 + 1e-10,
+            "ratio.0 ({}) > ratio.1 ({})",
+            tri.ratios.0,
+            tri.ratios.1
+        );
+    }
+}
+
+// ============================================================================
+// Invariant tree tests
+// ============================================================================
+
+#[test]
+fn test_invariant_tree_empty() {
+    let tree = build_invariant_tree(&[]);
+    assert!(tree.is_none());
+}
+
+#[test]
+fn test_invariant_tree_build_and_size() {
+    // Build from known triangles, verify tree size matches triangle count
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(3.0, 0.0),
+        DVec2::new(0.0, 4.0),
+    ];
+    let triangles = form_triangles_kdtree(&positions, 3);
+    assert_eq!(triangles.len(), 1);
+
+    let tree = build_invariant_tree(&triangles).unwrap();
+    assert_eq!(tree.len(), 1);
+}
+
+#[test]
+fn test_invariant_tree_lookup_finds_self() {
+    // A triangle's own ratios should always find itself
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(3.0, 0.0),
+        DVec2::new(0.0, 4.0),
+    ];
+    let triangles = form_triangles_kdtree(&positions, 3);
+    let tree = build_invariant_tree(&triangles).unwrap();
+
+    // Query with the triangle's own ratios (0.6, 0.8)
+    let query = DVec2::new(triangles[0].ratios.0, triangles[0].ratios.1);
+    let mut candidates = Vec::new();
+    tree.radius_indices_into(query, 0.01, &mut candidates);
+    assert!(candidates.contains(&0));
+}
+
+#[test]
+fn test_invariant_tree_finds_similar_triangles() {
+    // Two 3-4-5 triangles at different scales have identical ratios (0.6, 0.8)
+    let tri1 = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(3.0, 0.0),
+            DVec2::new(0.0, 4.0),
+        ],
+    )
+    .unwrap();
+
+    let tri2 = Triangle::from_positions(
+        [3, 4, 5],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(30.0, 0.0),
+            DVec2::new(0.0, 40.0),
+        ],
+    )
+    .unwrap();
+
+    // Both should have identical ratios
+    assert!((tri1.ratios.0 - tri2.ratios.0).abs() < 1e-10);
+
+    let tree = build_invariant_tree(&[tri1.clone(), tri2]).unwrap();
+    let query = DVec2::new(tri1.ratios.0, tri1.ratios.1);
+    let mut candidates = Vec::new();
+    tree.radius_indices_into(query, 0.01, &mut candidates);
+
+    assert_eq!(candidates.len(), 2);
+}
+
+#[test]
+fn test_invariant_search_zero_tolerance() {
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(3.0, 0.0),
+        DVec2::new(0.0, 4.0),
+    ];
+    let triangles = form_triangles_kdtree(&positions, 3);
+    let tree = build_invariant_tree(&triangles).unwrap();
+
+    // Zero tolerance should still find exact match (distance = 0 <= 0)
+    let query = DVec2::new(triangles[0].ratios.0, triangles[0].ratios.1);
+    let mut candidates = Vec::new();
+    tree.radius_indices_into(query, 0.0, &mut candidates);
+    assert!(candidates.contains(&0));
+}
+
+#[test]
+fn test_invariant_search_large_tolerance_finds_all() {
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+    ];
+    let triangles = form_triangles_kdtree(&positions, 4);
+    let n_triangles = triangles.len();
+    assert!(n_triangles > 0);
+
+    let tree = build_invariant_tree(&triangles).unwrap();
+
+    // Tolerance of 2.0 covers entire ratio space [0,1]x[0,1] → find all
+    let query = DVec2::new(triangles[0].ratios.0, triangles[0].ratios.1);
+    let mut candidates = Vec::new();
+    tree.radius_indices_into(query, 2.0, &mut candidates);
+    assert_eq!(candidates.len(), n_triangles);
+}
+
+#[test]
+fn test_invariant_search_clears_buffer() {
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+    ];
+    let triangles = form_triangles_kdtree(&positions, 4);
+    let tree = build_invariant_tree(&triangles).unwrap();
+
+    let mut candidates = vec![999, 888, 777]; // Pre-filled garbage
+    let query = DVec2::new(triangles[0].ratios.0, triangles[0].ratios.1);
+    tree.radius_indices_into(query, 0.01, &mut candidates);
+
+    assert!(
+        !candidates.contains(&999),
+        "Buffer should be cleared before use"
+    );
+}
+
+// ============================================================================
+// VoteMatrix tests
+// ============================================================================
+
+#[test]
+fn test_vote_matrix_dense_mode() {
+    // 10*10 = 100 < 250,000 → dense
+    let mut vm = VoteMatrix::new(10, 10);
+    assert!(matches!(vm, VoteMatrix::Dense { .. }));
+
+    vm.increment(0, 0);
+    vm.increment(0, 0);
+    vm.increment(5, 7);
+
+    let entries = vm.iter_nonzero();
+    let get = |r, t| entries.iter().find(|e| e.0 == r && e.1 == t).map(|e| e.2);
+    assert_eq!(get(0, 0), Some(2));
+    assert_eq!(get(5, 7), Some(1));
+    assert_eq!(entries.len(), 2);
+}
+
+#[test]
+fn test_vote_matrix_sparse_mode() {
+    // 600*600 = 360,000 >= 250,000 → sparse
+    let mut vm = VoteMatrix::new(600, 600);
+    assert!(matches!(vm, VoteMatrix::Sparse(_)));
+
+    vm.increment(0, 0);
+    vm.increment(0, 0);
+    vm.increment(100, 200);
+
+    let entries = vm.iter_nonzero();
+    let get = |r, t| entries.iter().find(|e| e.0 == r && e.1 == t).map(|e| e.2);
+    assert_eq!(get(0, 0), Some(2));
+    assert_eq!(get(100, 200), Some(1));
+    assert_eq!(entries.len(), 2);
+}
+
+#[test]
+fn test_vote_matrix_empty() {
+    let vm_dense = VoteMatrix::new(5, 5);
+    assert!(vm_dense.iter_nonzero().is_empty());
+
+    let vm_sparse = VoteMatrix::new(600, 600);
+    assert!(vm_sparse.iter_nonzero().is_empty());
+}
+
+#[test]
+fn test_vote_matrix_threshold_boundary() {
+    // size < 250,000 → dense, size >= 250,000 → sparse
+
+    // 499*500 = 249,500 < 250,000 → dense
+    let vm_below = VoteMatrix::new(499, 500);
+    assert!(matches!(vm_below, VoteMatrix::Dense { .. }));
+
+    // 500*500 = 250,000, not < 250,000 → sparse
+    let vm_at = VoteMatrix::new(500, 500);
+    assert!(matches!(vm_at, VoteMatrix::Sparse(_)));
+}
+
+#[test]
+fn test_vote_matrix_dense_index_mapping() {
+    // Verify that dense mode correctly maps (ref_idx, target_idx) → flat index
+    // Formula: flat_idx = ref_idx * n_target + target_idx
+    let n_ref = 3;
+    let n_target = 4;
+    let mut vm = VoteMatrix::new(n_ref, n_target);
+
+    // Set specific cells with different vote counts to verify index mapping
+    // (0,0) → idx 0, (0,3) → idx 3, (1,2) → idx 6, (2,0) → idx 8, (2,3) → idx 11
+    vm.increment(0, 0); // 1 vote at (0,0)
+    vm.increment(0, 3);
+    vm.increment(0, 3); // 2 votes at (0,3)
+    vm.increment(1, 2);
+    vm.increment(1, 2);
+    vm.increment(1, 2); // 3 votes at (1,2)
+    vm.increment(2, 0); // 1 vote at (2,0)
+    vm.increment(2, 3);
+    vm.increment(2, 3);
+    vm.increment(2, 3);
+    vm.increment(2, 3); // 4 votes at (2,3)
+
+    let entries = vm.iter_nonzero();
+    let get = |r, t| entries.iter().find(|e| e.0 == r && e.1 == t).map(|e| e.2);
+
+    assert_eq!(get(0, 0), Some(1));
+    assert_eq!(get(0, 3), Some(2));
+    assert_eq!(get(1, 2), Some(3));
+    assert_eq!(get(2, 0), Some(1));
+    assert_eq!(get(2, 3), Some(4));
+    assert_eq!(entries.len(), 5);
+}
+
+#[test]
+fn test_vote_matrix_dense_boundary_indices() {
+    // Test accessing corners: (0,0), (0,n-1), (n-1,0), (n-1,n-1)
+    let n = 10;
+    let mut vm = VoteMatrix::new(n, n);
+    vm.increment(0, 0);
+    vm.increment(0, n - 1);
+    vm.increment(n - 1, 0);
+    vm.increment(n - 1, n - 1);
+
+    let entries = vm.iter_nonzero();
+    let get = |r, t| entries.iter().find(|e| e.0 == r && e.1 == t).map(|e| e.2);
+    assert_eq!(get(0, 0), Some(1));
+    assert_eq!(get(0, n - 1), Some(1));
+    assert_eq!(get(n - 1, 0), Some(1));
+    assert_eq!(get(n - 1, n - 1), Some(1));
+    assert_eq!(entries.len(), 4);
+}
+
+#[test]
+fn test_vote_matrix_dense_saturating_add() {
+    // Dense mode uses u16. Verify exact count for reasonable values.
+    let mut vm = VoteMatrix::new(2, 2);
+    for _ in 0..1000 {
+        vm.increment(0, 0);
+    }
+    let entries = vm.iter_nonzero();
+    let votes = entries.iter().find(|e| e.0 == 0 && e.1 == 0).unwrap().2;
+    assert_eq!(votes, 1000);
+}
+
+// ============================================================================
+// resolve_matches tests
+// ============================================================================
+
+#[test]
+fn test_resolve_matches_one_to_one() {
+    // 3 non-conflicting matches sorted by descending votes
+    let vm = vote_matrix_from_entries(3, 3, &[(0, 0, 10), (1, 1, 8), (2, 2, 6)]);
+
+    let matches = resolve_matches(vm, 3, 3, 1);
+    assert_eq!(matches.len(), 3);
+
+    // Sorted by votes descending
+    assert_eq!(matches[0].ref_idx, 0);
+    assert_eq!(matches[0].target_idx, 0);
+    assert_eq!(matches[0].votes, 10);
+
+    assert_eq!(matches[1].ref_idx, 1);
+    assert_eq!(matches[1].target_idx, 1);
+    assert_eq!(matches[1].votes, 8);
+
+    assert_eq!(matches[2].ref_idx, 2);
+    assert_eq!(matches[2].target_idx, 2);
+    assert_eq!(matches[2].votes, 6);
+}
+
+#[test]
+fn test_resolve_matches_target_conflict() {
+    // Two ref points compete for the same target:
+    // ref 0 → target 0 (10 votes), ref 1 → target 0 (5 votes), ref 1 → target 1 (3 votes)
+    // Greedy: ref 0 wins target 0, ref 1 falls back to target 1
+    let vm = vote_matrix_from_entries(3, 3, &[(0, 0, 10), (1, 0, 5), (1, 1, 3)]);
+
+    let matches = resolve_matches(vm, 3, 3, 1);
+    assert_eq!(matches.len(), 2);
+
+    let m0 = matches.iter().find(|m| m.ref_idx == 0).unwrap();
+    assert_eq!(m0.target_idx, 0);
+    assert_eq!(m0.votes, 10);
+
+    let m1 = matches.iter().find(|m| m.ref_idx == 1).unwrap();
+    assert_eq!(m1.target_idx, 1);
+    assert_eq!(m1.votes, 3);
+}
+
+#[test]
+fn test_resolve_matches_ref_conflict() {
+    // Two target points compete for the same ref:
+    // ref 0 → target 0 (10 votes), ref 0 → target 1 (5 votes), ref 1 → target 1 (3 votes)
+    // Greedy: ref 0 gets target 0 (highest), ref 0 → target 1 blocked (ref 0 used), ref 1 gets target 1
+    let vm = vote_matrix_from_entries(3, 3, &[(0, 0, 10), (0, 1, 5), (1, 1, 3)]);
+
+    let matches = resolve_matches(vm, 3, 3, 1);
+    assert_eq!(matches.len(), 2);
+
+    let m0 = matches.iter().find(|m| m.ref_idx == 0).unwrap();
+    assert_eq!(m0.target_idx, 0);
+    assert_eq!(m0.votes, 10);
+
+    let m1 = matches.iter().find(|m| m.ref_idx == 1).unwrap();
+    assert_eq!(m1.target_idx, 1);
+    assert_eq!(m1.votes, 3);
+}
+
+#[test]
+fn test_resolve_matches_min_votes_filter() {
+    // Only ref 0 → target 0 (10 votes) survives min_votes = 3
+    let vm = vote_matrix_from_entries(3, 3, &[(0, 0, 10), (1, 1, 2), (2, 2, 1)]);
+
+    let matches = resolve_matches(vm, 3, 3, 3);
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].ref_idx, 0);
+    assert_eq!(matches[0].target_idx, 0);
+    assert_eq!(matches[0].votes, 10);
+}
+
+#[test]
+fn test_resolve_matches_empty() {
+    let vm = VoteMatrix::new(5, 5);
+    let matches = resolve_matches(vm, 5, 5, 1);
+    assert!(matches.is_empty());
+}
+
+#[test]
+fn test_resolve_matches_confidence_relative() {
+    // Confidence = votes / max_votes in resolved set
+    // Three matches: 20, 10, 5 votes → confidence = 1.0, 0.5, 0.25
+    let vm = vote_matrix_from_entries(5, 5, &[(0, 0, 20), (1, 1, 10), (2, 2, 5)]);
+
+    let matches = resolve_matches(vm, 5, 5, 1);
+    assert_eq!(matches.len(), 3);
+
+    // matches[0]: 20 votes → 20/20 = 1.0
+    assert_eq!(matches[0].votes, 20);
+    assert!((matches[0].confidence - 1.0).abs() < 1e-10);
+
+    // matches[1]: 10 votes → 10/20 = 0.5
+    assert_eq!(matches[1].votes, 10);
+    assert!((matches[1].confidence - 0.5).abs() < 1e-10);
+
+    // matches[2]: 5 votes → 5/20 = 0.25
+    assert_eq!(matches[2].votes, 5);
+    assert!((matches[2].confidence - 0.25).abs() < 1e-10);
+}
+
+#[test]
+fn test_resolve_matches_single_entry_confidence_is_1() {
+    // Single match: confidence = votes/max_votes = 10/10 = 1.0
+    let vm = vote_matrix_from_entries(5, 5, &[(0, 0, 10)]);
+
+    let matches = resolve_matches(vm, 5, 5, 1);
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].votes, 10);
+    assert!((matches[0].confidence - 1.0).abs() < 1e-10);
+}
+
+// ============================================================================
+// vote_for_correspondences tests
+// ============================================================================
+
+#[test]
+fn test_vote_for_correspondences_identical_triangles() {
+    // Identical point sets → every triangle matches itself → diagonal dominates
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+    ];
+
+    let triangles = form_triangles_kdtree(&positions, 4);
+    assert!(!triangles.is_empty());
+    let invariant_tree = build_invariant_tree(&triangles).unwrap();
+
+    let config = TriangleParams::default();
+    let vm = vote_for_correspondences(
+        &triangles,
+        &triangles,
+        &invariant_tree,
+        &config,
+        positions.len(),
+        positions.len(),
+    );
+
+    let votes: std::collections::HashMap<(usize, usize), usize> = vm
+        .iter_nonzero()
+        .into_iter()
+        .map(|(r, t, v)| ((r, t), v))
+        .collect();
+
+    // Diagonal should dominate: self-votes >= any cross-vote for each point
+    for i in 0..positions.len() {
+        let self_votes = votes.get(&(i, i)).copied().unwrap_or(0);
+        assert!(self_votes > 0, "Point {i} should have self-votes");
+        for j in 0..positions.len() {
+            if i != j {
+                let cross_votes = votes.get(&(i, j)).copied().unwrap_or(0);
+                assert!(
+                    self_votes >= cross_votes,
+                    "Point {i}: self-votes ({self_votes}) < cross-votes to {j} ({cross_votes})"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_vote_for_correspondences_no_matching_triangles() {
+    // Equilateral-ish triangle vs very thin triangle → no matches at tight tolerance
+    let positions_a = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(5.0, 8.66), // equilateral, ratios ≈ (1.0, 1.0)
+    ];
+
+    let positions_b = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(100.0, 0.0),
+        DVec2::new(50.0, 1.0), // very thin, ratios ≈ (0.5, 0.5)
+    ];
+
+    let tri_a = form_triangles_kdtree(&positions_a, 3);
+    let tri_b = form_triangles_kdtree(&positions_b, 3);
+    assert!(!tri_a.is_empty());
+    assert!(!tri_b.is_empty());
+
+    let invariant_tree = build_invariant_tree(&tri_a).unwrap();
+
+    let config = TriangleParams {
+        ratio_tolerance: 0.01,
+        ..Default::default()
+    };
+
+    let vm = vote_for_correspondences(
+        &tri_b,
+        &tri_a,
+        &invariant_tree,
+        &config,
+        positions_a.len(),
+        positions_b.len(),
+    );
+
+    assert!(vm.iter_nonzero().is_empty());
+}
+
+#[test]
+fn test_vote_for_correspondences_orientation_filtering() {
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+    ];
+
+    // Mirror x to flip all triangle orientations
+    let mirrored: Vec<DVec2> = positions.iter().map(|p| DVec2::new(-p.x, p.y)).collect();
+
+    let ref_triangles = form_triangles_kdtree(&positions, 4);
+    let target_triangles = form_triangles_kdtree(&mirrored, 4);
+    let invariant_tree = build_invariant_tree(&ref_triangles).unwrap();
+
+    // With orientation check: mirrored triangles rejected → fewer/no votes
+    let config_with = TriangleParams {
+        check_orientation: true,
+        ..Default::default()
+    };
+    let vm_with = vote_for_correspondences(
+        &target_triangles,
+        &ref_triangles,
+        &invariant_tree,
+        &config_with,
+        positions.len(),
+        mirrored.len(),
+    );
+
+    // Without orientation check: all matching triangles accepted → more votes
+    let config_without = TriangleParams {
+        check_orientation: false,
+        ..Default::default()
+    };
+    let vm_without = vote_for_correspondences(
+        &target_triangles,
+        &ref_triangles,
+        &invariant_tree,
+        &config_without,
+        positions.len(),
+        mirrored.len(),
+    );
+
+    let total_with: usize = vm_with.iter_nonzero().iter().map(|&(_, _, v)| v).sum();
+    let total_without: usize = vm_without.iter_nonzero().iter().map(|&(_, _, v)| v).sum();
+
+    // With mirroring, orientation check should block matches
+    assert!(
+        total_without > total_with,
+        "Orientation filtering should reduce votes: with={total_with}, without={total_without}"
+    );
+}
+
+// ============================================================================
+// match_triangles integration tests
+// ============================================================================
+
+#[test]
+fn test_match_triangles_too_few_points() {
+    let two = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 0.0)];
+    let three = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(1.0, 0.0),
+        DVec2::new(0.0, 1.0),
+    ];
+
+    // Both sides need >= 3 points
+    assert!(match_triangles(&two, &three, &TriangleParams::default()).is_empty());
+    assert!(match_triangles(&three, &two, &TriangleParams::default()).is_empty());
+    assert!(match_triangles(&two, &two, &TriangleParams::default()).is_empty());
+}
+
+#[test]
+fn test_match_triangles_empty_inputs() {
+    let empty: Vec<DVec2> = vec![];
+    let three = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(1.0, 0.0),
+        DVec2::new(0.0, 1.0),
+    ];
+    assert!(match_triangles(&empty, &three, &TriangleParams::default()).is_empty());
+    assert!(match_triangles(&three, &empty, &TriangleParams::default()).is_empty());
+}
+
+#[test]
+fn test_match_identical_star_lists() {
+    // 5 points with asymmetric pattern → each matches itself
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+    ];
+
+    let matches = match_triangles(&positions, &positions, &TriangleParams::default());
+
+    assert_eq!(matches.len(), 5);
+    for m in &matches {
+        assert_eq!(m.ref_idx, m.target_idx);
+    }
+}
+
+#[test]
+fn test_match_translated_stars() {
+    // Translation preserves triangle ratios → all 5 match
+    let ref_positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+    ];
+
+    let offset = DVec2::new(100.0, 50.0);
+    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
+
+    let matches = match_triangles(
+        &ref_positions,
+        &target_positions,
+        &TriangleParams::default(),
+    );
+
+    assert_eq!(matches.len(), 5);
+    for m in &matches {
+        assert_eq!(m.ref_idx, m.target_idx);
+    }
+}
+
+#[test]
+fn test_match_scaled_stars() {
+    // Uniform scaling preserves triangle ratios → all 5 match
+    let ref_positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+    ];
+
+    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p * 2.0).collect();
+
+    let matches = match_triangles(
+        &ref_positions,
+        &target_positions,
+        &TriangleParams::default(),
+    );
+
+    assert_eq!(matches.len(), 5);
+    for m in &matches {
+        assert_eq!(m.ref_idx, m.target_idx);
+    }
+}
+
+#[test]
+fn test_match_rotated_stars() {
+    // 90-degree rotation: (x,y) → (-y,x). Preserves ratios. Orientation check off
+    // for symmetric pattern to avoid ambiguous correspondence.
+    let ref_positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+    ];
+
+    let target_positions: Vec<DVec2> = ref_positions
+        .iter()
+        .map(|p| DVec2::new(-p.y, p.x))
+        .collect();
+
+    let config = TriangleParams {
+        check_orientation: false,
+        ..Default::default()
+    };
+
+    let matches = match_triangles(&ref_positions, &target_positions, &config);
+    assert_eq!(matches.len(), 5);
+}
+
+#[test]
+fn test_match_with_missing_stars() {
+    // Target has 4 of 5 reference stars → should match exactly 4
+    let ref_positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+    ];
+
+    let target_positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+    ];
+
+    let matches = match_triangles(
+        &ref_positions,
+        &target_positions,
+        &TriangleParams::default(),
+    );
+
+    assert_eq!(matches.len(), 4);
+    for m in &matches {
+        assert_eq!(m.ref_idx, m.target_idx);
+    }
+}
+
+#[test]
+fn test_match_with_extra_stars() {
+    // Target has all 4 ref stars plus 2 extras → should match all 4 ref stars
+    let ref_positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+    ];
+
+    let target_positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+        DVec2::new(15.0, 15.0),
+    ];
+
+    let matches = match_triangles(
+        &ref_positions,
+        &target_positions,
+        &TriangleParams::default(),
+    );
+
+    assert_eq!(matches.len(), 4);
+    for m in &matches {
+        assert_eq!(m.ref_idx, m.target_idx);
+    }
+}
+
+#[test]
+fn test_match_mirrored_image_orientation_effect() {
+    // Mirror flips orientation. With orientation check on, mirrored should get
+    // fewer matches than with it off.
+    let ref_positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+    ];
+
+    let target_positions: Vec<DVec2> = ref_positions
+        .iter()
+        .map(|p| DVec2::new(-p.x, p.y))
+        .collect();
+
+    let config_with = TriangleParams {
+        check_orientation: true,
+        min_votes: 1,
+        ..Default::default()
+    };
+    let matches_with = match_triangles(&ref_positions, &target_positions, &config_with);
+
+    let config_without = TriangleParams {
+        check_orientation: false,
+        min_votes: 1,
+        ..Default::default()
+    };
+    let matches_without = match_triangles(&ref_positions, &target_positions, &config_without);
+
+    assert!(
+        matches_without.len() >= matches_with.len(),
+        "Orientation check should not increase matches: with={}, without={}",
+        matches_with.len(),
+        matches_without.len()
+    );
+}
+
+#[test]
+fn test_match_with_outliers() {
+    // 6 real stars + 4 far-away outliers. Matches among real stars should be correct.
+    let ref_positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(20.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(20.0, 10.0),
+    ];
+
+    let mut target_positions = ref_positions.clone();
+    target_positions.push(DVec2::new(100.0, 100.0));
+    target_positions.push(DVec2::new(150.0, 50.0));
+    target_positions.push(DVec2::new(75.0, 125.0));
+    target_positions.push(DVec2::new(200.0, 200.0));
+
+    let config = TriangleParams {
+        min_votes: 2,
+        ..Default::default()
+    };
+
+    let matches = match_triangles(&ref_positions, &target_positions, &config);
+
+    // Should match at least 4 of the 6 real stars
+    assert!(
+        matches.len() >= 4,
+        "With outliers, found only {} matches",
+        matches.len()
+    );
+
+    // All matches among the 6 real stars should be correct (same index)
+    for m in &matches {
+        if m.ref_idx < 6 && m.target_idx < 6 {
+            assert_eq!(m.ref_idx, m.target_idx);
+        }
+    }
+}
+
+#[test]
+fn test_match_permuted_indices() {
+    // Same 5 geometric points, target in reversed order.
+    // ref[i] corresponds to target[4-i]
     let points = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(30.0, 0.0),
@@ -1713,10 +1441,7 @@ fn test_vertex_correspondence_with_permuted_indices() {
         DVec2::new(10.0, 25.0),
     ];
 
-    // Target has the same points but in reversed order
     let target_points: Vec<DVec2> = points.iter().rev().copied().collect();
-    // target[0] = points[4], target[1] = points[3], ..., target[4] = points[0]
-    // So ref_idx i corresponds to target_idx (4 - i)
 
     let config = TriangleParams {
         min_votes: 1,
@@ -1735,8 +1460,207 @@ fn test_vertex_correspondence_with_permuted_indices() {
         let expected_target = 4 - m.ref_idx;
         assert_eq!(
             m.target_idx, expected_target,
-            "ref {} should match target {} (same point), got target {}",
+            "ref {} should match target {} (same geometric point), got target {}",
             m.ref_idx, expected_target, m.target_idx
         );
     }
+}
+
+#[test]
+fn test_match_ratio_tolerance_sensitivity() {
+    // Different ratio_tolerance values should produce different match counts.
+    // Tighter tolerance → fewer matches (or same), looser → more (or same).
+    let ref_positions: Vec<DVec2> = (0..25)
+        .map(|i| {
+            let base_x = (i % 5) as f64 * 80.0 + 100.0;
+            let base_y = (i / 5) as f64 * 80.0 + 100.0;
+            // Deterministic jitter to break grid symmetry
+            let jitter_x = ((i * 13 + 7) as f64 * 0.37).sin() * 15.0;
+            let jitter_y = ((i * 17 + 3) as f64 * 0.53).cos() * 15.0;
+            DVec2::new(base_x + jitter_x, base_y + jitter_y)
+        })
+        .collect();
+
+    // Add sub-pixel noise to break exact ratio equality
+    let target_positions: Vec<DVec2> = ref_positions
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let noise_x = ((i * 7 + 3) as f64 * 0.73).sin() * 0.3;
+            let noise_y = ((i * 11 + 5) as f64 * 0.91).cos() * 0.3;
+            DVec2::new(p.x + noise_x, p.y + noise_y)
+        })
+        .collect();
+
+    let tight = TriangleParams {
+        ratio_tolerance: 0.001,
+        min_votes: 2,
+        ..Default::default()
+    };
+    let loose = TriangleParams {
+        ratio_tolerance: 0.1,
+        min_votes: 2,
+        ..Default::default()
+    };
+
+    let matches_tight = match_triangles(&ref_positions, &target_positions, &tight);
+    let matches_loose = match_triangles(&ref_positions, &target_positions, &loose);
+
+    // Loose tolerance should find at least as many matches
+    assert!(
+        matches_loose.len() >= matches_tight.len(),
+        "Loose tolerance ({}) should find >= tight tolerance ({}) matches",
+        matches_loose.len(),
+        matches_tight.len()
+    );
+}
+
+#[test]
+fn test_match_min_votes_sensitivity() {
+    // Higher min_votes should produce fewer (or equal) matches
+    let ref_positions: Vec<DVec2> = (0..20)
+        .map(|i| {
+            let x = (i % 5) as f64 * 50.0;
+            let y = (i / 5) as f64 * 50.0;
+            DVec2::new(x, y)
+        })
+        .collect();
+
+    let target_positions = ref_positions.clone();
+
+    let low_min = TriangleParams {
+        min_votes: 1,
+        ..Default::default()
+    };
+    let high_min = TriangleParams {
+        min_votes: 5,
+        ..Default::default()
+    };
+
+    let matches_low = match_triangles(&ref_positions, &target_positions, &low_min);
+    let matches_high = match_triangles(&ref_positions, &target_positions, &high_min);
+
+    assert!(
+        matches_low.len() >= matches_high.len(),
+        "min_votes=1 ({}) should find >= min_votes=5 ({}) matches",
+        matches_low.len(),
+        matches_high.len()
+    );
+}
+
+#[test]
+fn test_match_sparse_field_10_stars() {
+    // 10 stars in a grid-like pattern with one off-grid point for asymmetry
+    let ref_positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(50.0, 0.0),
+        DVec2::new(100.0, 0.0),
+        DVec2::new(0.0, 50.0),
+        DVec2::new(50.0, 50.0),
+        DVec2::new(100.0, 50.0),
+        DVec2::new(0.0, 100.0),
+        DVec2::new(50.0, 100.0),
+        DVec2::new(100.0, 100.0),
+        DVec2::new(50.0, 25.0), // Breaks grid symmetry
+    ];
+
+    let offset = DVec2::new(10.0, 20.0);
+    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
+
+    let config = TriangleParams {
+        min_votes: 2,
+        ..Default::default()
+    };
+
+    let matches = match_triangles(&ref_positions, &target_positions, &config);
+
+    // Translation-invariant matching should find all 10 stars
+    assert_eq!(matches.len(), 10);
+    for m in &matches {
+        assert_eq!(m.ref_idx, m.target_idx);
+    }
+}
+
+#[test]
+fn test_match_with_subpixel_noise() {
+    // 25 irregular positions with +-0.3 pixel noise
+    let ref_positions: Vec<DVec2> = (0..25)
+        .map(|i| {
+            let base_x = (i % 5) as f64 * 80.0 + 100.0;
+            let base_y = (i / 5) as f64 * 80.0 + 100.0;
+            let jitter_x = ((i * 13 + 7) as f64 * 0.37).sin() * 15.0;
+            let jitter_y = ((i * 17 + 3) as f64 * 0.53).cos() * 15.0;
+            DVec2::new(base_x + jitter_x, base_y + jitter_y)
+        })
+        .collect();
+
+    let target_positions: Vec<DVec2> = ref_positions
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let noise_x = ((i * 7 + 3) as f64 * 0.73).sin() * 0.3;
+            let noise_y = ((i * 11 + 5) as f64 * 0.91).cos() * 0.3;
+            DVec2::new(p.x + noise_x, p.y + noise_y)
+        })
+        .collect();
+
+    let config = TriangleParams::default();
+    let matches = match_triangles(&ref_positions, &target_positions, &config);
+
+    // With 80-pixel spacing and 0.3-pixel noise, ratios change by < 0.01 tolerance
+    // Should match most of the 25 stars
+    assert!(
+        matches.len() >= 20,
+        "Noisy matching found only {} matches",
+        matches.len()
+    );
+
+    // All matches should be correct (noise is small relative to spacing)
+    for m in &matches {
+        assert_eq!(
+            m.ref_idx, m.target_idx,
+            "Incorrect noisy match: ref {} != target {}",
+            m.ref_idx, m.target_idx
+        );
+    }
+}
+
+#[test]
+fn test_triangle_similarity_threshold_boundary() {
+    // Equilateral: all sides equal → ratios = (1.0, 1.0)
+    let tri1 = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(10.0, 0.0),
+            DVec2::new(5.0, 8.66),
+        ],
+    )
+    .unwrap();
+
+    // Distorted: slightly changed apex
+    let tri2 = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(10.0, 0.0),
+            DVec2::new(4.5, 8.0),
+        ],
+    )
+    .unwrap();
+
+    let dr0 = (tri1.ratios.0 - tri2.ratios.0).abs();
+    let dr1 = (tri1.ratios.1 - tri2.ratios.1).abs();
+
+    // Large tolerance: should match
+    assert!(
+        tri1.is_similar(&tri2, 0.15),
+        "Should be similar at 15% tol (dr0={dr0:.4}, dr1={dr1:.4})"
+    );
+
+    // Tight tolerance: should not match
+    assert!(
+        !tri1.is_similar(&tri2, 0.01),
+        "Should not be similar at 1% tol (dr0={dr0:.4}, dr1={dr1:.4})"
+    );
 }

@@ -12,10 +12,10 @@
 
 use crate::registration::{Config, TransformType, register};
 use crate::star_detection::Star;
-use crate::testing::synthetic::{
-    generate_random_stars, positions_to_stars, transform_star_list, translate_star_list,
-};
+use crate::testing::synthetic::{generate_random_stars, transform_star_list, translate_star_list};
 use glam::DVec2;
+
+use super::helpers::{apply_affine, apply_homography};
 
 // FWHM values that control max_sigma in registration:
 // max_sigma = fwhm * 0.5, floor at 0.5
@@ -259,34 +259,6 @@ fn test_registration_large_translation() {
     );
 }
 
-#[test]
-fn test_registration_transform_display() {
-    let ref_stars = generate_random_stars(50, 1000.0, 1000.0, 12345, FWHM_NORMAL);
-    let target_stars = translate_star_list(&ref_stars, 10.0, -5.0);
-
-    let config = Config {
-        transform_type: TransformType::Similarity,
-        min_stars: 6,
-        min_matches: 4,
-        ..Default::default()
-    };
-
-    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
-
-    // Test that Display works
-    let display_str = format!("{}", result.transform);
-    assert!(
-        display_str.contains("dx="),
-        "Display should contain dx: {}",
-        display_str
-    );
-    assert!(
-        display_str.contains("dy="),
-        "Display should contain dy: {}",
-        display_str
-    );
-}
-
 // ============================================================================
 // TransformType::Euclidean tests (translation + rotation, no scale)
 // ============================================================================
@@ -394,24 +366,6 @@ fn test_registration_euclidean_translation_and_rotation() {
 // ============================================================================
 // TransformType::Affine tests (6 DOF: differential scaling, shear)
 // ============================================================================
-
-/// Apply an affine transform to star positions.
-/// Affine: [a, b, tx, c, d, ty] where the transform is:
-/// x' = a*x + b*y + tx
-/// y' = c*x + d*y + ty
-fn apply_affine(stars: &[Star], params: [f64; 6]) -> Vec<Star> {
-    let [a, b, tx, c, d, ty] = params;
-    stars
-        .iter()
-        .map(|s| Star {
-            pos: DVec2::new(
-                a * s.pos.x + b * s.pos.y + tx,
-                c * s.pos.x + d * s.pos.y + ty,
-            ),
-            ..*s
-        })
-        .collect()
-}
 
 #[test]
 fn test_registration_affine_differential_scale() {
@@ -559,25 +513,6 @@ fn test_registration_affine_rotation_and_differential_scale() {
 // TransformType::Homography tests (8 DOF: perspective)
 // ============================================================================
 
-/// Apply a homography (projective transform) to star positions.
-/// H = [h0, h1, h2, h3, h4, h5, h6, h7, 1.0]
-/// x' = (h0*x + h1*y + h2) / (h6*x + h7*y + 1)
-/// y' = (h3*x + h4*y + h5) / (h6*x + h7*y + 1)
-fn apply_homography(stars: &[Star], params: [f64; 8]) -> Vec<Star> {
-    stars
-        .iter()
-        .map(|s| {
-            let w = params[6] * s.pos.x + params[7] * s.pos.y + 1.0;
-            let x_prime = (params[0] * s.pos.x + params[1] * s.pos.y + params[2]) / w;
-            let y_prime = (params[3] * s.pos.x + params[4] * s.pos.y + params[5]) / w;
-            Star {
-                pos: DVec2::new(x_prime, y_prime),
-                ..*s
-            }
-        })
-        .collect()
-}
-
 #[test]
 fn test_registration_homography_mild_perspective() {
     // Test homography with mild perspective distortion
@@ -669,25 +604,6 @@ fn test_registration_homography_with_rotation() {
 // ============================================================================
 // Cross-type validation tests
 // ============================================================================
-
-#[test]
-fn test_transform_type_min_points() {
-    // Verify min_points requirements for each transform type
-    assert_eq!(TransformType::Translation.min_points(), 1);
-    assert_eq!(TransformType::Euclidean.min_points(), 2);
-    assert_eq!(TransformType::Similarity.min_points(), 2);
-    assert_eq!(TransformType::Affine.min_points(), 3);
-    assert_eq!(TransformType::Homography.min_points(), 4);
-}
-
-#[test]
-fn test_transform_type_degrees_of_freedom() {
-    assert_eq!(TransformType::Translation.degrees_of_freedom(), 2);
-    assert_eq!(TransformType::Euclidean.degrees_of_freedom(), 3);
-    assert_eq!(TransformType::Similarity.degrees_of_freedom(), 4);
-    assert_eq!(TransformType::Affine.degrees_of_freedom(), 6);
-    assert_eq!(TransformType::Homography.degrees_of_freedom(), 8);
-}
 
 #[test]
 fn test_similarity_recovers_from_euclidean_data() {
