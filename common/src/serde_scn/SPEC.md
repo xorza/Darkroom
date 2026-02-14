@@ -64,6 +64,8 @@ Only these two keywords. No `yes`/`no`/`on`/`off`.
 
 Integer vs float is distinguished by the presence of `.` or `e`/`E`.
 
+**Integer range:** Signed integers up to 128-bit (`i128`): −170141183460469231731687303715884105728 to 170141183460469231731687303715884105727. Unsigned integers up to 128-bit (`u128`): 0 to 340282366920938463463374607431768211455. Values beyond these ranges are a parse error. Floats are IEEE 754 double-precision (`f64`).
+
 **Special float values:** `nan`, `inf`, `-inf` are keywords for IEEE 754 special values. `-nan` is also accepted (NaN has no meaningful sign).
 
 ```

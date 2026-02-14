@@ -124,9 +124,12 @@ non-string keys to strings. No need for Value-typed keys like RON.
 
 Standard practice. Generates identical code to hand-written impls.
 
-### No i128/u128 support
+### Full i128/u128 support — IMPLEMENTED
 
-serde_json also lacks this. Extremely rare in config data. serde fallback to i64/u64 is sufficient.
+`ScnValue::Int(i128)` and `ScnValue::Uint(u128)`. Parser uses `i128`/`u128` for all integer paths.
+Deserializer uses narrowest visit method: `visit_i64`/`visit_u64` when value fits (serde visitor
+compatibility), `visit_i128`/`visit_u128` only for overflow. `deserialize_u64` with positive `Int(i128)`
+tries `u64::try_from` first. Serializer has `serialize_i128`/`serialize_u128`. Spec documents ranges.
 
 ### Fast-path string scanning (parse.rs:146-174)
 
@@ -186,8 +189,7 @@ triggered when `deserialize_enum` is called (serde knows the target type). Keep 
 
 - **Duplicate map keys**: Parser rejects with error. Checked before parsing value (O(n) per key).
 - **Maximum nesting depth**: Spec does not define. Implementation enforces 128-level limit.
-- **Number limits**: Spec does not define max integer or float precision. i64 and u64 ranges are
-  implicit from implementation.
+- **Number limits**: Spec documents i128/u128 integer ranges and f64 float precision.
 - **Grammar**: The EBNF in SPEC.md is complete and correct for the implemented features.
 
 ---

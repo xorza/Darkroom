@@ -12,7 +12,11 @@ impl ScnValue {
         match self {
             ScnValue::Null => de::Unexpected::Unit,
             ScnValue::Bool(b) => de::Unexpected::Bool(*b),
-            ScnValue::Int(i) => de::Unexpected::Other(if *i >= 0 { "positive integer" } else { "negative integer" }),
+            ScnValue::Int(i) => de::Unexpected::Other(if *i >= 0 {
+                "positive integer"
+            } else {
+                "negative integer"
+            }),
             ScnValue::Uint(_) => de::Unexpected::Other("unsigned integer"),
             ScnValue::Float(f) => de::Unexpected::Float(*f),
             ScnValue::String(s) => de::Unexpected::Str(s),
@@ -97,8 +101,20 @@ impl<'de> de::Deserializer<'de> for ScnValue {
     }
     fn deserialize_i64<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
-            ScnValue::Int(i) => visitor.visit_i128(i),
-            ScnValue::Uint(u) => visitor.visit_u128(u),
+            ScnValue::Int(i) => {
+                if let Ok(v) = i64::try_from(i) {
+                    visitor.visit_i64(v)
+                } else {
+                    visitor.visit_i128(i)
+                }
+            }
+            ScnValue::Uint(u) => {
+                if let Ok(v) = u64::try_from(u) {
+                    visitor.visit_u64(v)
+                } else {
+                    visitor.visit_u128(u)
+                }
+            }
             _ => self.deserialize_any(visitor),
         }
     }
@@ -120,8 +136,26 @@ impl<'de> de::Deserializer<'de> for ScnValue {
     }
     fn deserialize_u64<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
-            ScnValue::Uint(u) => visitor.visit_u128(u),
-            ScnValue::Int(i) => visitor.visit_i128(i),
+            ScnValue::Uint(u) => {
+                if let Ok(v) = u64::try_from(u) {
+                    visitor.visit_u64(v)
+                } else {
+                    visitor.visit_u128(u)
+                }
+            }
+            ScnValue::Int(i) => {
+                // Positive i128 that fits in u64 — use visit_u64 (expected by u* visitors)
+                if i >= 0
+                    && let Ok(v) = u64::try_from(i)
+                {
+                    return visitor.visit_u64(v);
+                }
+                if let Ok(v) = i64::try_from(i) {
+                    visitor.visit_i64(v)
+                } else {
+                    visitor.visit_i128(i)
+                }
+            }
             _ => self.deserialize_any(visitor),
         }
     }
@@ -138,8 +172,9 @@ impl<'de> de::Deserializer<'de> for ScnValue {
     fn deserialize_f64<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             ScnValue::Float(f) => visitor.visit_f64(f),
-            ScnValue::Int(i) => visitor.visit_i128(i),
-            ScnValue::Uint(u) => visitor.visit_u128(u),
+            // Caller wants f64 — convert integer to f64 directly
+            ScnValue::Int(i) => visitor.visit_f64(i as f64),
+            ScnValue::Uint(u) => visitor.visit_f64(u as f64),
             _ => self.deserialize_any(visitor),
         }
     }

@@ -1270,9 +1270,9 @@ fn hex_integer_literals() {
     let val = super::parse::parse("-0x10").unwrap();
     assert_eq!(val, ScnValue::Int(-16));
 
-    // Max u64: 0xFFFFFFFFFFFFFFFF
+    // Max u64: 0xFFFFFFFFFFFFFFFF — fits in i128, so Int
     let val = super::parse::parse("0xFFFFFFFFFFFFFFFF").unwrap();
-    assert_eq!(val, ScnValue::Uint(u64::MAX));
+    assert_eq!(val, ScnValue::Int(u64::MAX as i128));
 
     // Hex with underscores: 0xFF_FF = 65535
     let val = super::parse::parse("0xFF_FF").unwrap();
@@ -1499,20 +1499,150 @@ fn hex_serde_deserialization() {
 
 #[test]
 fn hex_boundary_values() {
-    // -0x8000000000000000 = -2^63 = i64::MIN
+    // -0x8000000000000000 = -2^63 = i64::MIN — fits in i128
     let val = super::parse::parse("-0x8000000000000000").unwrap();
-    assert_eq!(val, ScnValue::Int(i64::MIN));
+    assert_eq!(val, ScnValue::Int(i64::MIN as i128));
 
-    // 0x7FFFFFFFFFFFFFFF = i64::MAX → Int (not Uint)
+    // 0x7FFFFFFFFFFFFFFF = i64::MAX → Int
     let val = super::parse::parse("0x7FFFFFFFFFFFFFFF").unwrap();
-    assert_eq!(val, ScnValue::Int(i64::MAX));
+    assert_eq!(val, ScnValue::Int(i64::MAX as i128));
 
-    // 0x8000000000000000 = 2^63 → Uint (exceeds i64::MAX)
+    // 0x8000000000000000 = 2^63 → Int (fits in i128)
     let val = super::parse::parse("0x8000000000000000").unwrap();
-    assert_eq!(val, ScnValue::Uint(0x8000000000000000));
+    assert_eq!(val, ScnValue::Int(0x8000000000000000_i128));
 
-    // -0x8000000000000001 → overflow error (exceeds i64::MIN magnitude)
-    assert!(super::parse::parse("-0x8000000000000001").is_err());
+    // -0x8000000000000001 → fits in i128 (no longer overflow)
+    let val = super::parse::parse("-0x8000000000000001").unwrap();
+    assert_eq!(val, ScnValue::Int(-0x8000000000000001_i128));
+}
+
+#[test]
+fn i128_boundary_values() {
+    // Values beyond i64 range — parse as Int(i128)
+    // i64::MAX + 1 = 9223372036854775808
+    let val = super::parse::parse("9223372036854775808").unwrap();
+    assert_eq!(val, ScnValue::Int(i64::MAX as i128 + 1));
+
+    // i64::MIN - 1 = -9223372036854775809
+    let val = super::parse::parse("-9223372036854775809").unwrap();
+    assert_eq!(val, ScnValue::Int(i64::MIN as i128 - 1));
+
+    // u64::MAX = 18446744073709551615 — fits in i128, so Int
+    let val = super::parse::parse("18446744073709551615").unwrap();
+    assert_eq!(val, ScnValue::Int(u64::MAX as i128));
+
+    // u64::MAX + 1 = 18446744073709551616 — still fits in i128
+    let val = super::parse::parse("18446744073709551616").unwrap();
+    assert_eq!(val, ScnValue::Int(u64::MAX as i128 + 1));
+
+    // i128::MAX = 170141183460469231731687303715884105727 — Int
+    let val = super::parse::parse("170141183460469231731687303715884105727").unwrap();
+    assert_eq!(val, ScnValue::Int(i128::MAX));
+
+    // i128::MAX + 1 = 170141183460469231731687303715884105728 — Uint (exceeds i128::MAX)
+    let val = super::parse::parse("170141183460469231731687303715884105728").unwrap();
+    assert_eq!(val, ScnValue::Uint(i128::MAX as u128 + 1));
+
+    // i128::MIN = -170141183460469231731687303715884105728
+    let val = super::parse::parse("-170141183460469231731687303715884105728").unwrap();
+    assert_eq!(val, ScnValue::Int(i128::MIN));
+
+    // Beyond i128::MIN → error
+    assert!(super::parse::parse("-170141183460469231731687303715884105729").is_err());
+
+    // u128::MAX = 340282366920938463463374607431768211455 — Uint
+    let val = super::parse::parse("340282366920938463463374607431768211455").unwrap();
+    assert_eq!(val, ScnValue::Uint(u128::MAX));
+
+    // Beyond u128::MAX → error
+    assert!(super::parse::parse("340282366920938463463374607431768211456").is_err());
+}
+
+#[test]
+fn i128_serde_roundtrip() {
+    // i128 roundtrip through serde
+    let big_pos: i128 = i64::MAX as i128 + 1000;
+    let scn = to_string(&big_pos).unwrap();
+    assert_eq!(from_str::<i128>(&scn).unwrap(), big_pos);
+
+    let big_neg: i128 = i64::MIN as i128 - 1000;
+    let scn = to_string(&big_neg).unwrap();
+    assert_eq!(from_str::<i128>(&scn).unwrap(), big_neg);
+
+    // u128 roundtrip
+    let big_u: u128 = u64::MAX as u128 + 1000;
+    let scn = to_string(&big_u).unwrap();
+    assert_eq!(from_str::<u128>(&scn).unwrap(), big_u);
+
+    // i128::MAX and i128::MIN roundtrip
+    let scn = to_string(&i128::MAX).unwrap();
+    assert_eq!(from_str::<i128>(&scn).unwrap(), i128::MAX);
+
+    let scn = to_string(&i128::MIN).unwrap();
+    assert_eq!(from_str::<i128>(&scn).unwrap(), i128::MIN);
+}
+
+#[test]
+fn i128_serde_deserialization_paths() {
+    // i128 struct field with value beyond i64 range
+    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    struct BigInts {
+        signed: i128,
+        unsigned: u128,
+    }
+
+    let input = "{ signed: 9223372036854775808, unsigned: 18446744073709551616 }";
+    let val: BigInts = from_str(input).unwrap();
+    // signed: i64::MAX + 1 = 9223372036854775808
+    assert_eq!(val.signed, i64::MAX as i128 + 1);
+    // unsigned: u64::MAX + 1 = 18446744073709551616
+    assert_eq!(val.unsigned, u64::MAX as u128 + 1);
+
+    // Positive Int(i128) fitting in u64 — tests deserialize_u64 visit_u64 path
+    // Parser returns Int(18446744073709551615) for u64::MAX (fits in i128)
+    // deserialize_u64 must route this through visit_u64
+    assert_eq!(from_str::<u64>("18446744073709551615").unwrap(), u64::MAX);
+
+    // Negative i128 through serde
+    assert_eq!(
+        from_str::<i128>("-9223372036854775809").unwrap(),
+        i64::MIN as i128 - 1
+    );
+
+    // Overflow: i128 value too large for i64 target
+    assert!(from_str::<i64>("9223372036854775808").is_err());
+
+    // Overflow: u128 value too large for u64 target
+    assert!(from_str::<u64>("18446744073709551616").is_err());
+
+    // Large int into f64 — value beyond i64 but deserialize_f64 handles it
+    assert_eq!(
+        from_str::<f64>("9223372036854775808").unwrap(),
+        9223372036854775808.0_f64
+    );
+}
+
+#[test]
+fn i128_hex_values() {
+    // Hex values beyond u64 range
+    // 0x1_0000_0000_0000_0000 = 2^64 = u64::MAX + 1
+    let val = super::parse::parse("0x10000000000000000").unwrap();
+    assert_eq!(val, ScnValue::Int(u64::MAX as i128 + 1));
+
+    // Max i128 in hex: 0x7FFF...F (32 F's)
+    let val = super::parse::parse("0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").unwrap();
+    assert_eq!(val, ScnValue::Int(i128::MAX));
+
+    // i128::MAX + 1 in hex → Uint
+    let val = super::parse::parse("0x80000000000000000000000000000000").unwrap();
+    assert_eq!(val, ScnValue::Uint(i128::MAX as u128 + 1));
+
+    // u128::MAX in hex: 0xFFFF...F (32 F's) → Uint
+    let val = super::parse::parse("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").unwrap();
+    assert_eq!(val, ScnValue::Uint(u128::MAX));
+
+    // Beyond u128::MAX in hex → error
+    assert!(super::parse::parse("0x1FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").is_err());
 }
 
 #[test]
@@ -1945,17 +2075,17 @@ fn display_output_is_parseable() {
         );
     }
 
-    // Uint that fits in i64 parses back as Int (correct — no Uint literal in grammar)
+    // Uint that fits in i128 parses back as Int (correct — no Uint literal in grammar)
     let displayed = ScnValue::Uint(999).to_string();
     assert_eq!(displayed, "999");
     assert_eq!(super::parse::parse(&displayed).unwrap(), ScnValue::Int(999));
 
-    // Uint > i64::MAX parses back as Uint
-    let big = u64::MAX; // 18446744073709551615
+    // Uint(u64::MAX) fits in i128, so parses back as Int
+    let big = u64::MAX as u128;
     let displayed = ScnValue::Uint(big).to_string();
     assert_eq!(
         super::parse::parse(&displayed).unwrap(),
-        ScnValue::Uint(big)
+        ScnValue::Int(big as i128)
     );
 }
 
