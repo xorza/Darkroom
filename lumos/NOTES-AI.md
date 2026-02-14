@@ -16,7 +16,6 @@ Astrophotography image processing library for loading, calibrating, and stacking
 | `star_detection/` | Star detection and centroid computation |
 | `registration/` | Image registration, alignment, and astrometry |
 | `drizzle/` | Variable-Pixel Linear Reconstruction (Fruchter & Hook 2002) |
-| `gradient_removal/` | Background gradient extraction and removal (polynomial + TPS) |
 
 ## Key Types
 

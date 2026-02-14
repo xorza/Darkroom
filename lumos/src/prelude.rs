@@ -33,8 +33,3 @@ pub use crate::{
     CacheConfig, CombineMethod, FrameType, Normalization, ProgressCallback, Rejection, StackConfig,
     StackingProgress, StackingStage, stack, stack_with_progress,
 };
-
-// Gradient removal
-pub use crate::{
-    GradientRemovalConfig, GradientRemovalError, remove_gradient, remove_gradient_image,
-};

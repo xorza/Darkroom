@@ -8,9 +8,6 @@ patterns and the highest-priority **unfixed** issues across all modules.
 | Module | Issue | Severity |
 |--------|-------|----------|
 | raw | Bayer demosaic not implemented (`todo!()`) - affects >95% of cameras | Critical |
-| gradient_removal | Normal equations solver squares condition number | Significant |
-| gradient_removal | TPS coordinates not normalized (5 orders of magnitude mismatch) | Significant |
-| gradient_removal | TPS regularization scaling is arbitrary (magic constant) | Significant |
 | astro_image | Float FITS data not validated or normalized (out-of-range values) | Moderate |
 
 ## Already Fixed
@@ -63,22 +60,17 @@ patterns and the highest-priority **unfixed** issues across all modules.
 
 ### 1. Negative Values Not Handled Consistently
 - calibration_masters: dark subtraction doesn't clamp to zero (intentional, matches PixInsight)
-- gradient_removal: subtraction correction can produce negatives
 - stacking: no post-combination clamping
 - **Decision**: Preserving negatives in the linear pipeline is correct (prevents positive bias).
   Clamping should only happen at output boundaries (FITS/TIFF export, display).
 
 ### 2. Numerical Stability
-- gradient_removal: Normal equations (A^T*A) squares condition number → use QR/SVD
-- gradient_removal: TPS coordinates not normalized (huge scale mismatch)
-- gradient_removal: TPS regularization uses magic constant unrelated to data scale
 - registration affine estimator: lacks Hartley-style point normalization (homography has it)
 - All other modules verified correct (math sums, registration transforms, stacking formulas)
 
 ### 3. SIMD Coverage
 - raw normalization: SSE4.1 only, no AVX2 path (2x throughput available)
 - drizzle: accumulation loops single-threaded (finalization is rayon-parallel)
-- gradient_removal: TPS evaluation O(n*W*H) with no spatial optimization
 - registration: Lanczos3 SIMD kernel — no-dering path now uses FMA; dering path still mul+add (masked accumulation)
 - **Well-covered**: math sums, convolution, threshold mask, median filter, profile fitting,
   background interpolation, warp interpolation, X-Trans demosaic
@@ -90,12 +82,10 @@ patterns and the highest-priority **unfixed** issues across all modules.
 | FITS writing | astro_image | High | Primary astro interchange format |
 | Rejection maps | stacking | Medium | PixInsight/Siril diagnostic output |
 | Per-CFA-channel flat normalization | calibration | Medium | PixInsight "Separate CFA flat scaling" |
-| Iterative sample rejection | gradient_removal | Medium | photutils sigma=3, maxiters=10 |
 | Noise-based auto weighting | stacking | Medium | PixInsight inverse-variance weighting |
 | Context/contribution image | drizzle | Medium | STScI 32-bit bitmask per pixel |
 | Per-pixel weight maps | drizzle | Medium | STScI inverse-variance maps |
 | Cold pixel detection from flats | calibration | Low | APP combines hot (dark) + cold (flat) maps |
-| Coarse-grid TPS evaluation | gradient_removal | Low | PixInsight GridInterpolation |
 
 ## Module Health Summary
 
@@ -108,7 +98,6 @@ patterns and the highest-priority **unfixed** issues across all modules.
 | calibration | None remaining | Formula matches PixInsight/Siril | Per-CFA-color MAD detection | Per-CFA flat normalization |
 | astro_image | 1 moderate | FITS loading correct | Comprehensive metadata parsing | Float FITS normalization, FITS writing |
 | raw | 1 critical | X-Trans verified, pipeline correct | 2.1x faster than libraw | Bayer demosaic todo!() |
-| gradient_removal | 3 significant | Algorithms correct but numerically fragile | Dual-method (polynomial + TPS) | Normal equations, TPS conditioning |
 | drizzle | None remaining | All 4 kernels verified correct | Projective transform, rayon finalization | True Square kernel, Jacobian correction |
 
 ## Recommendations by Priority
@@ -117,34 +106,27 @@ patterns and the highest-priority **unfixed** issues across all modules.
 1. Implement Bayer demosaic (RCD recommended; libraw fallback as interim)
 
 ### Short-term (correctness improvements)
-2. Replace gradient_removal normal equations with QR/SVD (nalgebra)
-3. Normalize gradient_removal TPS coordinates to [0,1]
-4. Use data-dependent TPS regularization (MATLAB tpaps-style)
-5. Increase gradient_removal sample box radius (5x5 → 11x11+)
-6. Add float FITS normalization heuristic (detect range, normalize if max > 2.0)
+2. Add float FITS normalization heuristic (detect range, normalize if max > 2.0)
 
 ### Medium-term (quality & interoperability)
-7. Add FITS writing support
-8. Add stacking rejection maps (per-pixel high/low counts)
-9. Add per-CFA-channel flat normalization
-10. Add iterative gradient sample rejection (sigma=3, max 10 iterations)
-11. Coarse-grid TPS evaluation (evaluate on 64px grid, bilinearly interpolate)
-12. Fix gradient_removal division correction (mean → median)
-13. ~~Use actual FMA intrinsics in registration Lanczos3 SIMD kernel~~ -- DONE (no-dering path)
-14. Implement true drizzle Square kernel (4-corner transform + polygon clipping)
-15. Add drizzle context image (per-pixel contributing-frame bitmask)
-16. Add drizzle per-pixel weight maps
-17. Parallelize drizzle accumulation loops (per-thread accumulators or atomics)
+3. Add FITS writing support
+4. Add stacking rejection maps (per-pixel high/low counts)
+5. Add per-CFA-channel flat normalization
+6. ~~Use actual FMA intrinsics in registration Lanczos3 SIMD kernel~~ -- DONE (no-dering path)
+7. Implement true drizzle Square kernel (4-corner transform + polygon clipping)
+8. Add drizzle context image (per-pixel contributing-frame bitmask)
+9. Add drizzle per-pixel weight maps
+10. Parallelize drizzle accumulation loops (per-thread accumulators or atomics)
 
 ### Long-term (completeness)
-18. Add noise-based auto weighting to stacking (`w = 1/sigma_bg^2`)
-19. Add drizzle Jacobian correction for non-affine transforms
-20. Add drizzle variance/error propagation
-21. Add stacking additive-only normalization mode
-22. Add stacking Min/Max/Sum combine methods
-23. Generic incremental stepping for registration interpolation (benefit Lanczos2/4/Bicubic)
-24. Add cold pixel detection from flats in calibration
-25. Add missing FITS metadata (RA/DEC, XPIXSZ/YPIXSZ, READOUTM, DATAMAX)
+11. Add noise-based auto weighting to stacking (`w = 1/sigma_bg^2`)
+12. Add drizzle Jacobian correction for non-affine transforms
+13. Add drizzle variance/error propagation
+14. Add stacking additive-only normalization mode
+15. Add stacking Min/Max/Sum combine methods
+16. Generic incremental stepping for registration interpolation (benefit Lanczos2/4/Bicubic)
+17. Add cold pixel detection from flats in calibration
+18. Add missing FITS metadata (RA/DEC, XPIXSZ/YPIXSZ, READOUTM, DATAMAX)
 
 ## Verified Correct (no action needed)
 

@@ -26,7 +26,6 @@ mod astro_image;
 mod calibration_masters;
 pub(crate) mod common;
 pub mod drizzle;
-pub mod gradient_removal;
 pub(crate) mod math;
 pub mod raw;
 pub(crate) mod registration;
@@ -122,12 +121,3 @@ pub use stacking::{
 // ============================================================================
 
 pub use drizzle::{DrizzleAccumulator, DrizzleConfig, DrizzleKernel, DrizzleResult, drizzle_stack};
-
-// ============================================================================
-// Gradient Removal
-// ============================================================================
-
-pub use gradient_removal::{
-    CorrectionMethod, GradientModel, GradientRemovalConfig, GradientRemovalError,
-    GradientRemovalResult, remove_gradient, remove_gradient_image, remove_gradient_simple,
-};
