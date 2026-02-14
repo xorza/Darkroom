@@ -311,7 +311,7 @@ pub(crate) fn run_stacking<I: StackableImage>(cache: &ImageCache<I>, config: &St
     let frame_norms = compute_frame_norms(stats, config.normalization);
     let weights = resolve_weights(&config.weighting, stats);
 
-    let pixels = dispatch_stacking(cache, &weights, config, frame_norms.as_deref());
+    let pixels = dispatch_stacking(cache, weights.as_deref(), config, frame_norms.as_deref());
     I::from_stacked(pixels, cache.metadata().clone(), cache.dimensions())
 }
 
@@ -320,7 +320,7 @@ pub(crate) fn run_stacking<I: StackableImage>(cache: &ImageCache<I>, config: &St
 /// Returns `PixelData` with the combined result.
 fn dispatch_stacking(
     cache: &ImageCache<impl StackableImage>,
-    weights: &Option<Vec<f32>>,
+    weights: Option<&[f32]>,
     config: &StackConfig,
     frame_norms: Option<&[FrameNorm]>,
 ) -> crate::astro_image::PixelData {
@@ -329,11 +329,11 @@ fn dispatch_stacking(
             math::median_f32_mut(values)
         }),
 
-        CombineMethod::Mean(rejection) => cache.process_chunked(
-            weights.as_deref(),
-            frame_norms,
-            move |values, w, scratch| rejection.combine_mean(values, w, scratch),
-        ),
+        CombineMethod::Mean(rejection) => {
+            cache.process_chunked(weights, frame_norms, move |values, w, scratch| {
+                rejection.combine_mean(values, w, scratch)
+            })
+        }
     }
 }
 
@@ -606,10 +606,8 @@ mod tests {
             normalization: Normalization::Global,
             ..Default::default()
         };
-        let no_weights = None;
-
-        let result_norm = dispatch_stacking(&cache, &no_weights, &config, Some(&norm_params));
-        let result_unnorm = dispatch_stacking(&cache, &no_weights, &config, None);
+        let result_norm = dispatch_stacking(&cache, None, &config, Some(&norm_params));
+        let result_unnorm = dispatch_stacking(&cache, None, &config, None);
 
         let norm_pixel = result_norm.channel(0)[0];
         let unnorm_pixel = result_unnorm.channel(0)[0];

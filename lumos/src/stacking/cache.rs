@@ -284,6 +284,7 @@ impl<I: StackableImage> ImageCache<I> {
         })?;
 
         // Cache first image and compute stats
+        // (frame 0 is always loaded fresh in from_paths for dimensions, so no sidecars needed)
         let first_stats = compute_frame_stats(&first_image);
         let first_path = paths[0].as_ref();
         let base_filename = cache_filename_for_path(first_path);
@@ -685,9 +686,8 @@ fn load_and_cache_frame<I: StackableImage>(
         let result = cache_image_channels(cache_dir, base_filename, &image, dimensions)?;
 
         // Record source mtime and stats so future runs skip recomputation
-        if let Some(mtime) = source_mtime(source_path) {
-            write_source_meta(cache_dir, base_filename, mtime);
-        }
+        let mtime = source_mtime(source_path).expect("source file must have mtime");
+        write_source_meta(cache_dir, base_filename, mtime);
         write_frame_stats(cache_dir, base_filename, &stats);
 
         Ok((result, stats))
