@@ -92,6 +92,18 @@ impl LanczosLut {
         let idx = (abs_x * LANCZOS_LUT_RESOLUTION as f32 + 0.5) as usize;
         unsafe { *self.values.get_unchecked(idx) }
     }
+
+    /// Fast lookup for known non-negative distance within [0, a].
+    ///
+    /// Skips the `abs()` and `>= a` branch. The caller must guarantee that
+    /// `abs_x` is in `[0, a]`. Used in the Lanczos3 inner loop where fractional
+    /// parts are computed such that all distances are known-positive.
+    #[inline(always)]
+    pub(super) fn lookup_positive(&self, abs_x: f32) -> f32 {
+        debug_assert!(abs_x >= 0.0 && abs_x <= self.a as f32);
+        let idx = (abs_x * LANCZOS_LUT_RESOLUTION as f32 + 0.5) as usize;
+        unsafe { *self.values.get_unchecked(idx) }
+    }
 }
 
 static LANCZOS2_LUT: OnceLock<LanczosLut> = OnceLock::new();

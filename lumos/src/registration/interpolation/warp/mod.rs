@@ -19,6 +19,16 @@ use crate::registration::interpolation::get_lanczos_lut;
 use crate::registration::transform::WarpTransform;
 use glam::DVec2;
 
+/// Fast inline floor-to-i32, avoiding libc `floorf` function call.
+///
+/// Truncates toward zero then corrects for negative values.
+/// For `x = -0.5`: `i = 0`, `x < 0.0` is true, result = `-1`. Correct.
+#[inline(always)]
+fn fast_floor_i32(x: f32) -> i32 {
+    let i = x as i32;
+    i - (x < i as f32) as i32
+}
+
 /// Positive/negative weighted contribution accumulators for soft clamping.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SoftClampAccum {
@@ -111,8 +121,8 @@ pub(crate) fn bilinear_sample(input: &Buffer2<f32>, x: f32, y: f32, border_value
     let width = input.width();
     let height = input.height();
 
-    let x0 = x.floor() as i32;
-    let y0 = y.floor() as i32;
+    let x0 = fast_floor_i32(x);
+    let y0 = fast_floor_i32(y);
     let fx = x - x0 as f32;
     let fy = y - y0 as f32;
 
@@ -217,29 +227,31 @@ fn warp_row_lanczos3_inner<const DERINGING: bool>(
         let sx = src_x as f32;
         let sy = src_y as f32;
 
-        let x0 = sx.floor() as i32;
-        let y0 = sy.floor() as i32;
+        let x0 = fast_floor_i32(sx);
+        let y0 = fast_floor_i32(sy);
         let fx = sx - x0 as f32;
         let fy = sy - y0 as f32;
 
         let kx0 = x0 - 2;
         let ky0 = y0 - 2;
 
+        // fx, fy are in [0, 1), so all absolute distances are known without abs():
+        // fx+2 ∈ [2,3), fx+1 ∈ [1,2), fx ∈ [0,1), 1-fx ∈ (0,1], 2-fx ∈ (1,2], 3-fx ∈ (2,3]
         let wx = [
-            lut.lookup(fx + 2.0),
-            lut.lookup(fx + 1.0),
-            lut.lookup(fx),
-            lut.lookup(fx - 1.0),
-            lut.lookup(fx - 2.0),
-            lut.lookup(fx - 3.0),
+            lut.lookup_positive(fx + 2.0),
+            lut.lookup_positive(fx + 1.0),
+            lut.lookup_positive(fx),
+            lut.lookup_positive(1.0 - fx),
+            lut.lookup_positive(2.0 - fx),
+            lut.lookup_positive(3.0 - fx),
         ];
         let wy = [
-            lut.lookup(fy + 2.0),
-            lut.lookup(fy + 1.0),
-            lut.lookup(fy),
-            lut.lookup(fy - 1.0),
-            lut.lookup(fy - 2.0),
-            lut.lookup(fy - 3.0),
+            lut.lookup_positive(fy + 2.0),
+            lut.lookup_positive(fy + 1.0),
+            lut.lookup_positive(fy),
+            lut.lookup_positive(1.0 - fy),
+            lut.lookup_positive(2.0 - fy),
+            lut.lookup_positive(3.0 - fy),
         ];
 
         let wx_sum = wx[0] + wx[1] + wx[2] + wx[3] + wx[4] + wx[5];
