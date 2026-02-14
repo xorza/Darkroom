@@ -290,7 +290,6 @@ pub fn positions_to_stars(positions: &[DVec2], fwhm: f32) -> Vec<Star> {
             sharpness: 0.5,
             roundness1: 0.0,
             roundness2: 0.0,
-            laplacian_snr: 50.0,
         })
         .collect()
 }
@@ -361,7 +360,6 @@ pub fn add_spurious_star_list(
             sharpness: 0.5,
             roundness1: 0.0,
             roundness2: 0.0,
-            laplacian_snr: 5.0,
         });
     }
 

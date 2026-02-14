@@ -1,6 +1,6 @@
 //! Cosmic ray rejection stage tests.
 //!
-//! Tests the cosmic ray detection via Laplacian SNR filtering.
+//! Tests the cosmic ray detection via sharpness filtering.
 
 use crate::{AstroImage, ImageDimensions};
 
@@ -155,10 +155,10 @@ fn test_cosmic_ray_rejection() {
     );
 }
 
-/// Test Laplacian SNR visualization.
+/// Test sharpness visualization.
 #[test]
 
-fn test_laplacian_snr_visualization() {
+fn test_sharpness_visualization() {
     init_tracing();
 
     let width = 256;
@@ -188,7 +188,7 @@ fn test_laplacian_snr_visualization() {
         &pixels_vec,
         width,
         height,
-        &test_output_path("synthetic_starfield/stage_laplacian_snr_input.png"),
+        &test_output_path("synthetic_starfield/stage_sharpness_input.png"),
     );
 
     // Run detection - disable CFA filter and matched filter for synthetic images
@@ -202,8 +202,8 @@ fn test_laplacian_snr_visualization() {
     let result = detector.detect(&image);
     let stars = result.stars;
 
-    println!("\nLaplacian SNR Analysis:");
-    println!("Stars (should have low Laplacian SNR):");
+    println!("\nSharpness Analysis:");
+    println!("Stars (should have low sharpness):");
     for (i, star) in stars.iter().enumerate() {
         // Check if this star matches a ground truth star
         let is_real = ground_truth.iter().any(|t| {
@@ -214,15 +214,8 @@ fn test_laplacian_snr_visualization() {
 
         let label = if is_real { "STAR" } else { "CR?" };
         println!(
-            "  {}: ({:.1}, {:.1}) FWHM={:.2} SNR={:.1} Lap_SNR={:.1} sharp={:.3} [{}]",
-            i,
-            star.pos.x,
-            star.pos.y,
-            star.fwhm,
-            star.snr,
-            star.laplacian_snr,
-            star.sharpness,
-            label
+            "  {}: ({:.1}, {:.1}) FWHM={:.2} SNR={:.1} sharp={:.3} [{}]",
+            i, star.pos.x, star.pos.y, star.fwhm, star.snr, star.sharpness, label
         );
     }
 
@@ -235,15 +228,15 @@ fn test_laplacian_snr_visualization() {
         draw_cross(&mut img, Vec2::new(*x as f32, *y as f32), 3.0, red, 1.0);
     }
 
-    // Mark detected stars colored by Laplacian SNR
+    // Mark detected stars colored by sharpness
     for star in &stars {
-        // High Laplacian SNR = likely cosmic ray (red), low = likely star (green)
-        let color = if star.laplacian_snr > 5.0 {
-            Color::RED // High Lap_SNR: likely CR
-        } else if star.laplacian_snr > 2.0 {
+        // High sharpness = likely cosmic ray (red), low = likely star (green)
+        let color = if star.sharpness > 0.7 {
+            Color::RED // High sharpness: likely CR
+        } else if star.sharpness > 0.4 {
             Color::YELLOW // Medium: uncertain
         } else {
-            Color::GREEN // Low: likely real star
+            Color::GREEN // Low sharpness: likely real star
         };
         draw_circle(
             &mut img,
@@ -256,12 +249,12 @@ fn test_laplacian_snr_visualization() {
 
     save_image(
         img,
-        &test_output_path("synthetic_starfield/stage_laplacian_snr_overlay.png"),
+        &test_output_path("synthetic_starfield/stage_sharpness_overlay.png"),
     );
 
     println!("\nColor legend:");
-    println!("  Green circles: Low Laplacian SNR (likely real star)");
-    println!("  Yellow circles: Medium Laplacian SNR (uncertain)");
-    println!("  Red circles: High Laplacian SNR (likely cosmic ray)");
+    println!("  Green circles: Low sharpness (likely real star)");
+    println!("  Yellow circles: Medium sharpness (uncertain)");
+    println!("  Red circles: High sharpness (likely cosmic ray)");
     println!("  Red crosses: True cosmic ray positions");
 }

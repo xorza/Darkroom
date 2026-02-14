@@ -27,7 +27,6 @@ let result = detector.detect(&image);
 // - snr: signal-to-noise ratio
 // - peak: peak pixel value
 // - sharpness, roundness1, roundness2: morphological metrics
-// - laplacian_snr: L.A.Cosmic cosmic ray metric
 for star in &result.stars {
     println!("Star at ({:.1}, {:.1}), SNR={:.1}, FWHM={:.2}",
         star.pos.x, star.pos.y, star.snr, star.fwhm);
@@ -304,15 +303,15 @@ Refines star positions to sub-pixel accuracy and computes quality metrics.
 - Sharpness: peak / core_flux (cosmic ray discriminator)
 - Roundness1 (GROUND): (Hx - Hy) / (Hx + Hy) from marginal distributions
 - Roundness2 (SROUND): bilateral symmetry metric
-- Laplacian SNR: L.A.Cosmic metric per star
-
 ### Cosmic Ray Detection
 
-L.A.Cosmic-based cosmic ray identification (van Dokkum 2001, PASP 113, 1420).
+Cosmic rays are rejected by the **sharpness filter** (`peak / core_3x3_flux`). Cosmic rays
+have sharpness > 0.7 (single-pixel spikes), while PSF-smoothed stars typically have 0.2–0.5.
 
-Implemented as `compute_laplacian_snr()` in `centroid/mod.rs`. Computes the discrete Laplacian at each star's peak position during centroiding. Stars with high Laplacian SNR (>50) are flagged as cosmic rays and rejected during the filter stage.
-
-**Core principle:** Cosmic rays have sharper edges than astronomical sources (which are smoothed by the PSF). The Laplacian responds strongly to these sharp edges.
+A L.A.Cosmic Laplacian SNR metric was previously implemented but removed: the naive
+`Laplacian / noise` ratio scales with star brightness rather than measuring sharpness,
+making it redundant with and inferior to the sharpness filter (which already achieves
+100% cosmic ray rejection in synthetic tests).
 
 ### `median_filter/` - Median Filtering
 
@@ -352,8 +351,6 @@ pub struct Star {
     pub roundness1: f32,
     /// DAOFIND SROUND symmetry-based roundness.
     pub roundness2: f32,
-    /// L.A.Cosmic Laplacian SNR metric.
-    pub laplacian_snr: f32,
 }
 ```
 

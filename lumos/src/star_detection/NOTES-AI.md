@@ -29,11 +29,9 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
    threshold mask creation, CCL with 8-connectivity (RLE + union-find), deblending,
    size/edge filtering
 5. **measure** - Parallel centroid computation (weighted moments + optional Gaussian/Moffat
-   L-M fitting), quality metrics (flux, FWHM, eccentricity, SNR, sharpness, roundness,
-   L.A.Cosmic Laplacian SNR)
+   L-M fitting), quality metrics (flux, FWHM, eccentricity, SNR, sharpness, roundness)
 6. **filter** - Cascading quality filters (saturation, SNR, eccentricity, sharpness,
-   L.A.Cosmic Laplacian SNR, roundness), MAD-based FWHM outlier removal, spatial-hash
-   duplicate removal
+   roundness), MAD-based FWHM outlier removal, spatial-hash duplicate removal
 
 #### Key Subsystems
 - **convolution/** - Separable Gaussian O(n*k), elliptical 2D O(n*k^2), SIMD row/col passes
@@ -286,7 +284,7 @@ cap at 1e10 prevents infinite loops. Gaussian elimination with partial pivoting 
 | Sharpness | `peak / core_3x3_flux` | Differs from DAOFIND: `(peak - mean_4neighbors) / peak` |
 | Roundness1 | GROUND: from marginal max ratio | Differs from DAOFIND (density-enhancement image) |
 | Roundness2 | SROUND: from marginal asymmetry | Custom definition |
-| Laplacian SNR | L.A.Cosmic (van Dokkum 2001) | Configurable filter: `max_laplacian_snr` (default 0 = disabled) |
+| Laplacian SNR | REJECTED | Implementation was flawed: raw Laplacian/noise scales with star brightness, not sharpness. Sharpness filter (`peak/core_flux`) already achieves 100% CR rejection. Removed. |
 
 ### Comparison with Industry
 

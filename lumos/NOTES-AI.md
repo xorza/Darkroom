@@ -125,7 +125,6 @@ Custom implementation of the Markesteijn demosaic for Fujifilm X-Trans 6x6 CFA s
 | `centroid/` | WeightedMoments, GaussianFit (AVX2 SIMD), MoffatFit (AVX2 SIMD) |
 | `convolution/` | Separable + elliptical Gaussian convolution (SIMD) |
 | `deblend/` | Local maxima + SExtractor-style multi-threshold deblending |
-| `cosmic_ray/` | L.A.Cosmic Laplacian-based cosmic ray detection (SIMD) |
 | `median_filter/` | 3x3 median filter for Bayer artifacts (SIMD) |
 | `fwhm_estimation.rs` | Auto FWHM estimation from bright stars |
 | `buffer_pool.rs` | Buffer reuse pool for batch processing |
@@ -134,7 +133,7 @@ Custom implementation of the Markesteijn demosaic for Fujifilm X-Trans 6x6 CFA s
 ### Star Detection Key Types
 
 ```rust
-Star                  // { pos: DVec2, flux, fwhm, eccentricity, snr, peak, sharpness, roundness1, roundness2, laplacian_snr }
+Star                  // { pos: DVec2, flux, fwhm, eccentricity, snr, peak, sharpness, roundness1, roundness2 }
 StarDetector          // Main detector with buffer pool for batch processing
 StarDetectionResult   // { stars: Vec<Star>, diagnostics: StarDetectionDiagnostics }
 StarDetectionConfig   // Groups BackgroundConfig, PsfConfig, FilteringConfig, CentroidConfig, DeblendConfig
@@ -158,7 +157,7 @@ NoiseModel            // { gain, read_noise } for CCD noise equation
 8. Connected component labeling - RLE-based with lock-free union-find
 9. Candidate extraction + deblending - Local maxima or multi-threshold
 10. Centroid refinement - WeightedMoments, GaussianFit, or MoffatFit
-11. Quality filtering - SNR, eccentricity, saturation, sharpness, roundness, Laplacian SNR
+11. Quality filtering - SNR, eccentricity, saturation, sharpness, roundness
 12. FWHM outlier rejection - MAD-based
 13. Duplicate removal - Spatial hashing deduplication
 

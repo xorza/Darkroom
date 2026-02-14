@@ -257,7 +257,6 @@ mod tests {
                 sharpness: 0.3,
                 roundness1: 0.0,
                 roundness2: 0.0,
-                laplacian_snr: 0.0,
             },
             Star {
                 pos: glam::DVec2::new(50.2, 49.8),
@@ -269,7 +268,6 @@ mod tests {
                 sharpness: 0.3,
                 roundness1: 0.0,
                 roundness2: 0.0,
-                laplacian_snr: 0.0,
             },
         ];
 
@@ -301,7 +299,6 @@ mod tests {
                 sharpness: 0.3,
                 roundness1: 0.0,
                 roundness2: 0.0,
-                laplacian_snr: 0.0,
             },
             Star {
                 pos: glam::DVec2::new(100.0, 100.0),
@@ -313,7 +310,6 @@ mod tests {
                 sharpness: 0.3,
                 roundness1: 0.0,
                 roundness2: 0.0,
-                laplacian_snr: 0.0,
             }, // False positive
         ];
 

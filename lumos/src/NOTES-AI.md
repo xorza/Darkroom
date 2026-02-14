@@ -78,7 +78,7 @@ patterns and the highest-priority **unfixed** issues across all modules.
 - star_detection: Background mask fallback used contaminated pixels -> uses unmasked pixels first
 - star_detection: Bilinear background interpolation (C0) -> natural bicubic spline (C2), matches SEP/SExtractor
 - star_detection: Fit params discarded (FWHM/eccentricity from moments) -> fit-derived when available
-- star_detection: L.A.Cosmic laplacian_snr computed but unused -> wired into filter stage (`max_laplacian_snr` config)
+- star_detection: L.A.Cosmic laplacian_snr -> REJECTED and removed (raw Laplacian/noise scales with brightness, not sharpness; sharpness filter already achieves 100% CR rejection)
 
 </details>
 

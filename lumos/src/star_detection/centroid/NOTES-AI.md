@@ -32,7 +32,6 @@ measure_star -> Phase 1: Weighted Moments (10 or 2 iters, 0.0001 px threshold)
              -> Local Background (GlobalMap or LocalAnnulus with sigma-clipped MAD)
              -> Phase 2: Profile Fitting (GaussianFit/MoffatFit via L-M)
              -> Metrics (flux, FWHM, eccentricity, SNR, sharpness, roundness)
-             -> L.A.Cosmic Laplacian SNR
 ```
 
 ## Levenberg-Marquardt Optimizer (lm_optimizer.rs)
@@ -220,10 +219,12 @@ rejected steps prevents infinite loops. Lambda cap at 1e10.
 - For the centroid use case, the position accuracy impact is small for bright stars
   (SNR > 20) but becomes significant for faint stars near the detection threshold.
 
-### HIGH: L.A.Cosmic Laplacian SNR Missing Fine Structure Ratio — POSTPONED
-- `laplacian_snr` is computed but not used in the filter stage (filter uses sharpness
-  instead). Adding fine-structure ratio to an unused metric would be dead code.
-  Revisit when laplacian_snr is wired into the filtering pipeline.
+### ~~HIGH: L.A.Cosmic Laplacian SNR~~ — REJECTED
+- Removed entirely. The implementation divided raw Laplacian magnitude by background noise,
+  which scales linearly with star brightness (real stars produced values 2–19, correlating
+  with SNR rather than sharpness). The proper van Dokkum 2001 approach requires 2x-upsampled
+  Laplacian divided by a fine-structure image, not background noise. The existing sharpness
+  filter (`peak / core_3x3_flux`) already achieves 100% cosmic ray rejection in tests.
 
 ### ~~MEDIUM: SNR Uses Full Square Stamp Area~~ — REJECTED
 - Flux is summed over the full square stamp. Using circular npix with square flux

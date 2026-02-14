@@ -46,8 +46,6 @@ pub struct Diagnostics {
     pub rejected_high_eccentricity: usize,
     /// Number of stars rejected as cosmic rays (high sharpness).
     pub rejected_cosmic_rays: usize,
-    /// Number of stars rejected as cosmic rays (high Laplacian SNR).
-    pub rejected_laplacian_cosmic_rays: usize,
     /// Number of stars rejected as saturated.
     pub rejected_saturated: usize,
     /// Number of stars rejected for non-circular shape (roundness).
@@ -190,7 +188,6 @@ impl StarDetector {
         diagnostics.rejected_low_snr = filter_stats.low_snr;
         diagnostics.rejected_high_eccentricity = filter_stats.high_eccentricity;
         diagnostics.rejected_cosmic_rays = filter_stats.cosmic_rays;
-        diagnostics.rejected_laplacian_cosmic_rays = filter_stats.laplacian_cosmic_rays;
         diagnostics.rejected_roundness = filter_stats.roundness;
         diagnostics.rejected_fwhm_outliers = filter_stats.fwhm_outliers;
         diagnostics.rejected_duplicates = filter_stats.duplicates;

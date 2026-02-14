@@ -27,10 +27,6 @@ pub struct Star {
     /// Roundness based on symmetry (DAOFIND SROUND).
     /// Measures bilateral vs four-fold symmetry. Circular → 0, asymmetric → non-zero.
     pub roundness2: f32,
-    /// L.A.Cosmic Laplacian SNR metric for cosmic ray detection.
-    /// Cosmic rays have very sharp edges (high Laplacian), stars have smooth edges.
-    /// Values > 50 typically indicate cosmic rays. Based on van Dokkum 2001.
-    pub laplacian_snr: f32,
 }
 
 impl Star {
@@ -47,15 +43,6 @@ impl Star {
     /// Cosmic rays typically have sharpness > 0.7, while real stars are 0.2-0.5.
     pub fn is_cosmic_ray(&self, max_sharpness: f32) -> bool {
         self.sharpness > max_sharpness
-    }
-
-    /// Check if star is likely a cosmic ray using L.A.Cosmic Laplacian metric.
-    ///
-    /// Based on van Dokkum 2001: cosmic rays have very sharp edges that produce
-    /// high Laplacian values. Stars, being smoothed by the PSF, have lower values.
-    /// Threshold of ~50 is typical for rejecting cosmic rays.
-    pub fn is_cosmic_ray_laplacian(&self, max_laplacian_snr: f32) -> bool {
-        self.laplacian_snr > max_laplacian_snr
     }
 
     /// Check if star passes roundness filters.
@@ -81,7 +68,6 @@ mod tests {
             sharpness: 0.3,
             roundness1: 0.0,
             roundness2: 0.0,
-            laplacian_snr: 0.0,
         }
     }
 
@@ -132,31 +118,6 @@ mod tests {
                 ..make_test_star()
             }
             .is_cosmic_ray(0.7)
-        );
-    }
-
-    #[test]
-    fn test_is_cosmic_ray_laplacian() {
-        assert!(
-            Star {
-                laplacian_snr: 60.0,
-                ..make_test_star()
-            }
-            .is_cosmic_ray_laplacian(50.0)
-        );
-        assert!(
-            !Star {
-                laplacian_snr: 50.0,
-                ..make_test_star()
-            }
-            .is_cosmic_ray_laplacian(50.0)
-        );
-        assert!(
-            !Star {
-                laplacian_snr: 10.0,
-                ..make_test_star()
-            }
-            .is_cosmic_ray_laplacian(50.0)
         );
     }
 

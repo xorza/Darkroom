@@ -333,16 +333,12 @@ eccentricity = sqrt(1 - λ₂/λ₁)
 - 0.3-0.5: Typical seeing-induced elongation
 - >0.7: Trailing, bad tracking, or cosmic ray
 
-### Laplacian SNR (L.A.Cosmic)
+### Cosmic Ray Detection
 
-For cosmic ray detection, we compute the Laplacian SNR based on van Dokkum (2001):
-
-```
-laplacian = pixel - (1/4) × Σ(neighbors)
-laplacian_snr = max(laplacian) / noise
-```
-
-Cosmic rays have sharp edges and high Laplacian SNR (typically >5-10), while stars have smooth profiles and lower values.
+Cosmic rays are detected and rejected by the **sharpness filter** (`peak / core_3x3_flux > 0.7`).
+A Laplacian SNR metric (van Dokkum 2001) was previously implemented but removed because the
+naive `Laplacian / noise` ratio scales with star brightness rather than sharpness, making it
+inferior to the existing sharpness filter.
 
 ---
 

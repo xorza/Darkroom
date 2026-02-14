@@ -1416,36 +1416,6 @@ fn test_asymmetric_star_roundness2() {
 }
 
 #[test]
-fn test_laplacian_snr_computed_for_star() {
-    // Verify that laplacian_snr is computed for detected stars
-    let width = 64;
-    let height = 64;
-    let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8);
-    let bg = crate::testing::estimate_background(
-        &pixels,
-        &Config {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-    let config = Config::default();
-    let candidates = detect_stars_test(&pixels, &bg, &config);
-
-    assert_eq!(candidates.len(), 1);
-
-    let star =
-        measure_star(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
-
-    // Laplacian SNR should be computed (non-negative value)
-    // The actual value depends on the noise estimate from background
-    assert!(
-        star.laplacian_snr >= 0.0,
-        "Laplacian SNR should be non-negative, got {}",
-        star.laplacian_snr
-    );
-}
-
-#[test]
 fn test_star_is_round() {
     use crate::star_detection::Star;
 
@@ -1459,7 +1429,6 @@ fn test_star_is_round() {
         sharpness: 0.3,
         roundness1: 0.05,
         roundness2: 0.03,
-        laplacian_snr: 0.0,
     };
 
     let non_round_star = Star {

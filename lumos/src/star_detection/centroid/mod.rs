@@ -33,7 +33,7 @@ use super::config::Config;
 use super::deblend::Region;
 use super::{CentroidMethod, LocalBackgroundMethod, Star};
 use crate::common::Buffer2;
-use crate::math::{FWHM_TO_SIGMA, Vec2us};
+use crate::math::FWHM_TO_SIGMA;
 
 // =============================================================================
 // Stamp and Centroid Constants
@@ -84,54 +84,6 @@ const MOMENTS_ITERATIONS_BEFORE_FIT: usize = 2;
 /// Convergence threshold in pixels squared.
 pub(crate) const CONVERGENCE_THRESHOLD_SQ: f32 =
     CENTROID_CONVERGENCE_THRESHOLD * CENTROID_CONVERGENCE_THRESHOLD;
-
-// =============================================================================
-// Laplacian SNR for Cosmic Ray Detection
-// =============================================================================
-
-/// Compute L.A.Cosmic-style Laplacian SNR for a single star candidate.
-///
-/// Cosmic rays have very sharp edges compared to astronomical sources
-/// (which are smoothed by the PSF). The Laplacian (second derivative)
-/// responds strongly to these sharp edges.
-///
-/// High values (>5) indicate cosmic ray-like sharp edges.
-///
-/// Reference: van Dokkum 2001, PASP 113, 1420
-fn compute_laplacian_snr(
-    pixels: &Buffer2<f32>,
-    pos: Vec2us,
-    stamp_radius: usize,
-    background: f32,
-    noise: f32,
-) -> f32 {
-    let width = pixels.width();
-    let height = pixels.height();
-
-    // Check bounds
-    if pos.x < stamp_radius
-        || pos.y < stamp_radius
-        || pos.x + stamp_radius >= width
-        || pos.y + stamp_radius >= height
-    {
-        return 0.0;
-    }
-
-    // Compute Laplacian at center (peak of star)
-    let idx = pos.to_index(width);
-    let center = pixels[idx] - background;
-
-    let left = pixels[idx - 1] - background;
-    let right = pixels[idx + 1] - background;
-    let up = pixels[idx - width] - background;
-    let down = pixels[idx + width] - background;
-
-    // Laplacian at peak (negative for peaks)
-    let laplacian = left + right + up + down - 4.0 * center;
-
-    // Return normalized magnitude
-    (-laplacian).max(0.0) / noise.max(1e-10)
-}
 
 /// Compute stamp radius from expected FWHM.
 #[inline]
@@ -368,7 +320,7 @@ pub fn measure_star(
     let idx = icy as usize * width + icx as usize;
     let global_fallback = || (background.background[idx], background.noise[idx]);
 
-    let (local_bg, local_noise) = match config.local_background {
+    let (local_bg, _local_noise) = match config.local_background {
         LocalBackgroundMethod::GlobalMap => global_fallback(),
         LocalBackgroundMethod::LocalAnnulus => {
             let inner_radius = stamp_radius;
@@ -447,11 +399,6 @@ pub fn measure_star(
         metrics.eccentricity = ecc;
     }
 
-    // Compute L.A.Cosmic Laplacian SNR for cosmic ray detection
-    let pos_int = Vec2us::new(pos.x.round() as usize, pos.y.round() as usize);
-    let laplacian_snr_value =
-        compute_laplacian_snr(pixels, pos_int, stamp_radius, local_bg, local_noise);
-
     Some(Star {
         pos: pos.as_dvec2(),
         flux: metrics.flux,
@@ -462,7 +409,6 @@ pub fn measure_star(
         sharpness: metrics.sharpness,
         roundness1: metrics.roundness1,
         roundness2: metrics.roundness2,
-        laplacian_snr: laplacian_snr_value,
     })
 }
 

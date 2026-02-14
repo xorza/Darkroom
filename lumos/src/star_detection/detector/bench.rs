@@ -58,7 +58,6 @@ fn bench_detect_6k_globular_cluster(b: ::bench::Bencher) {
         min_snr: 10.0,
         max_eccentricity: 0.6,
         max_sharpness: 0.7,
-        max_laplacian_snr: 0.0,
         max_roundness: 1.0,
         max_fwhm_deviation: 3.0,
         duplicate_min_separation: 8.0,
@@ -126,7 +125,6 @@ fn bench_remove_duplicate_stars_5000(b: ::bench::Bencher) {
             sharpness: rng.random_range(0.2..0.5),
             roundness1: rng.random_range(-0.1..0.1),
             roundness2: rng.random_range(-0.1..0.1),
-            laplacian_snr: rng.random_range(0.0..20.0),
         })
         .collect();
 
@@ -157,7 +155,6 @@ fn bench_remove_duplicate_stars_10000(b: ::bench::Bencher) {
             sharpness: rng.random_range(0.2..0.5),
             roundness1: rng.random_range(-0.1..0.1),
             roundness2: rng.random_range(-0.1..0.1),
-            laplacian_snr: rng.random_range(0.0..20.0),
         })
         .collect();
 

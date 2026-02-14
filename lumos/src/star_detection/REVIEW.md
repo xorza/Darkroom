@@ -39,7 +39,7 @@ No algorithmic bugs were found. All unsafe code is correctly justified.
 - **Impact**: 3/5 — Saturation level varies by camera/bit-depth; 0.95 is arbitrary
 - **Meaningfulness**: 4/5 — All other filter methods take threshold parameters; this one doesn't
 - **Invasiveness**: 1/5 — Add parameter: `is_saturated(threshold: f32) -> bool`
-- **Description**: `is_saturated()` hardcodes `self.peak > 0.95` while `is_cosmic_ray()`, `is_cosmic_ray_laplacian()`, and `is_round()` all accept threshold parameters. The API is inconsistent. Config already has filtering thresholds for other metrics but not saturation level.
+- **Description**: `is_saturated()` hardcodes `self.peak > 0.95` while `is_cosmic_ray()` and `is_round()` accept threshold parameters. The API is inconsistent. Config already has filtering thresholds for other metrics but not saturation level.
 
 #### [F4] Misleading parameter name `max_deviation` in FWHM outlier filter
 - **Location**: `detector/stages/filter.rs:81`

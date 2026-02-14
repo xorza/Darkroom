@@ -12,7 +12,6 @@ pub(crate) struct QualityFilterStats {
     pub low_snr: usize,
     pub high_eccentricity: usize,
     pub cosmic_rays: usize,
-    pub laplacian_cosmic_rays: usize,
     pub roundness: usize,
     pub fwhm_outliers: usize,
     pub duplicates: usize,
@@ -38,11 +37,6 @@ pub(crate) fn filter(mut stars: Vec<Star>, config: &Config) -> (Vec<Star>, Quali
             false
         } else if star.is_cosmic_ray(config.max_sharpness) {
             stats.cosmic_rays += 1;
-            false
-        } else if config.max_laplacian_snr > 0.0
-            && star.is_cosmic_ray_laplacian(config.max_laplacian_snr)
-        {
-            stats.laplacian_cosmic_rays += 1;
             false
         } else if !star.is_round(config.max_roundness) {
             stats.roundness += 1;
@@ -229,7 +223,6 @@ mod tests {
             sharpness: 0.3,
             roundness1: 0.0,
             roundness2: 0.0,
-            laplacian_snr: 0.0,
         }
     }
 
@@ -244,7 +237,6 @@ mod tests {
             sharpness: 0.3,
             roundness1: 0.0,
             roundness2: 0.0,
-            laplacian_snr: 0.0,
         }
     }
 
@@ -813,131 +805,5 @@ mod tests {
                 s.pos.y
             );
         }
-    }
-
-    // =========================================================================
-    // Laplacian SNR Filtering Tests
-    // =========================================================================
-
-    /// Laplacian filtering disabled by default (max_laplacian_snr=0).
-    #[test]
-    fn test_laplacian_filter_disabled_by_default() {
-        let stars = vec![
-            Star {
-                laplacian_snr: 100.0, // Very high — would be filtered if enabled
-                ..make_star_at(10.0, 10.0, 100.0)
-            },
-            Star {
-                laplacian_snr: 200.0,
-                ..make_star_at(50.0, 50.0, 90.0)
-            },
-        ];
-
-        let config = Config::default(); // max_laplacian_snr = 0.0 (disabled)
-        assert_eq!(config.max_laplacian_snr, 0.0);
-
-        let (result, stats) = filter(stars, &config);
-
-        assert_eq!(stats.laplacian_cosmic_rays, 0);
-        assert_eq!(result.len(), 2);
-    }
-
-    /// Laplacian filtering rejects cosmic rays with high Laplacian SNR.
-    ///
-    /// Cosmic rays have sharp single-pixel peaks producing high Laplacian values.
-    /// Stars smoothed by the PSF have lower values. Threshold of 10.0 used here.
-    #[test]
-    fn test_laplacian_filter_rejects_cosmic_rays() {
-        // 3 stars + 2 cosmic rays, each at a unique position
-        let stars = vec![
-            Star {
-                laplacian_snr: 2.0, // Real star
-                ..make_star_at(10.0, 10.0, 100.0)
-            },
-            Star {
-                laplacian_snr: 15.0, // Cosmic ray
-                ..make_star_at(50.0, 10.0, 90.0)
-            },
-            Star {
-                laplacian_snr: 3.0, // Real star
-                ..make_star_at(90.0, 10.0, 80.0)
-            },
-            Star {
-                laplacian_snr: 50.0, // Cosmic ray
-                ..make_star_at(10.0, 50.0, 70.0)
-            },
-            Star {
-                laplacian_snr: 1.0, // Real star
-                ..make_star_at(50.0, 50.0, 60.0)
-            },
-        ];
-
-        let config = Config {
-            max_laplacian_snr: 10.0,
-            ..Config::default()
-        };
-
-        let (result, stats) = filter(stars, &config);
-
-        assert_eq!(
-            stats.laplacian_cosmic_rays, 2,
-            "Should reject 2 cosmic rays with laplacian_snr > 10"
-        );
-        // All 3 real stars should survive
-        assert!(result.iter().all(|s| s.laplacian_snr <= 10.0));
-        assert_eq!(result.len(), 3);
-    }
-
-    /// Laplacian filter at boundary: exact threshold value is NOT rejected.
-    /// `is_cosmic_ray_laplacian` uses `>` (strictly greater than).
-    #[test]
-    fn test_laplacian_filter_boundary() {
-        let stars = vec![
-            Star {
-                laplacian_snr: 10.0, // Exactly at threshold — keep
-                ..make_star_at(10.0, 10.0, 100.0)
-            },
-            Star {
-                laplacian_snr: 10.001, // Just above — reject
-                ..make_star_at(50.0, 10.0, 90.0)
-            },
-            Star {
-                laplacian_snr: 9.999, // Just below — keep
-                ..make_star_at(90.0, 10.0, 80.0)
-            },
-        ];
-
-        let config = Config {
-            max_laplacian_snr: 10.0,
-            ..Config::default()
-        };
-
-        let (result, stats) = filter(stars, &config);
-
-        assert_eq!(stats.laplacian_cosmic_rays, 1);
-        assert_eq!(result.len(), 2);
-    }
-
-    /// Sharpness filter runs before Laplacian filter.
-    /// A star rejected by sharpness is counted as cosmic_rays, not laplacian.
-    #[test]
-    fn test_sharpness_filter_takes_priority_over_laplacian() {
-        let stars = vec![Star {
-            sharpness: 0.9,      // Exceeds max_sharpness (0.7)
-            laplacian_snr: 50.0, // Also exceeds max_laplacian_snr
-            ..make_star_at(10.0, 10.0, 100.0)
-        }];
-
-        let config = Config {
-            max_laplacian_snr: 10.0,
-            ..Config::default()
-        };
-
-        let (result, stats) = filter(stars, &config);
-
-        assert_eq!(result.len(), 0);
-        // Counted under sharpness, not laplacian
-        assert_eq!(stats.cosmic_rays, 1);
-        assert_eq!(stats.laplacian_cosmic_rays, 0);
     }
 }

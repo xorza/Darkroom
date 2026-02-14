@@ -456,7 +456,6 @@ mod fwhm_tests {
             sharpness: 0.5,
             roundness1: 0.0,
             roundness2: 0.0,
-            laplacian_snr: 50.0,
         }
     }
 
