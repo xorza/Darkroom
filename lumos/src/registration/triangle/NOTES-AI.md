@@ -283,9 +283,26 @@ duplicates. HashSet hashing overhead is non-trivial. Alternative: collect all so
 triples into a Vec, sort, dedup. Or generate triangles only when the central star has the
 smallest index among the three -- avoids duplicates by construction.
 
-### Issue 5: Duplicate Issue Number in Previous NOTES-AI.md
+### Issue 5: Missing Groth C<0.99 Cosine Filter
 
-**Severity:** Cosmetic. Previous version had two "Issue 4" entries. Fixed in this version.
+**Severity:** Low (minor gap in degeneracy filtering)
+**Location:** `geometry.rs:68-83`
+
+Groth's C<0.99 filter rejects triangles where cos(angle at vertex 1) >= 0.99, i.e.,
+the angle between the longest and shortest sides is < ~8 degrees. Our R>10 + Heron's
+area check covers most degenerate cases but not all.
+
+**Gap analysis:** A triangle with sides (5, 4, 1) has R=5 < 10, area=1.98
+(area^2=3.9 >> 1e-6), but cos(angle) = (25+1-16)/10 = 1.0 >= 0.99. Such triangles
+pass both our filters but would be rejected by Groth.
+
+**However:** This is a borderline case. The triangle (5, 4, 1) is nearly degenerate and
+would produce imprecise invariant ratios, but in practice rarely causes matching problems
+because (a) the R>10 filter catches the extreme cases, (b) such triangles are uncommon
+in KNN-formed triangle sets, and (c) Astroalign uses NO degeneracy filters and works fine.
+
+**If desired:** Add after line 71: `let cos_v1 = (sides[0]*sides[0] + sides[2]*sides[2]
+- sides[1]*sides[1]) / (2.0 * sides[0] * sides[2]); if cos_v1 > 0.99 { return None; }`
 
 ## What We Do Correctly
 
@@ -298,8 +315,11 @@ smallest index among the three -- avoids duplicates by construction.
 3. **Groth R=10 elongation filter** (`geometry.rs:71`): Rejects very elongated triangles
    where small perturbations cause large ratio changes. Matches the original paper.
 
-4. **Heron's formula degeneracy check** (`geometry.rs:78-83`): More robust than Groth's
-   C<0.99 cosine filter. Catches all near-degenerate triangles, not just one angle.
+4. **Heron's formula degeneracy check** (`geometry.rs:78-83`): Catches near-collinear
+   triangles regardless of which angle is small. Combined with R>10 filter, covers the
+   vast majority of degenerate cases. Standard formula is numerically adequate for
+   rejection testing (cancellation error inflates area, safe direction for threshold).
+   Small gap vs Groth's C<0.99 -- see Issue 5.
 
 5. **K-d tree invariant lookup** (`voting.rs:96-102`): O(log n) per query, no bin boundary
    artifacts. Better than Valdes' hash bins. Same approach as Astroalign.
@@ -319,7 +339,9 @@ smallest index among the three -- avoids duplicates by construction.
    Practical engineering not found in reference implementations.
 
 10. **Greedy conflict resolution** (`voting.rs:163-210`): Sort by votes, one-to-one
-    assignment. Standard approach matching Groth/Valdes.
+    assignment. Confirmed standard across Groth, Valdes, LSST, Kolomenkin (2008), and
+    multilayer voting (2021). Hungarian algorithm (optimal) would be O(n^3) vs O(n^2 log n)
+    with negligible quality improvement due to downstream RANSAC.
 
 ## What We Do Not Do But Should Consider
 
@@ -376,7 +398,8 @@ not add algorithmic complexity -- just constant-factor overhead.
 4. **Weighted voting** (Missing Feature 1) -- Medium effort, meaningful quality improvement
    for clustered/gridded fields.
 5. **Replace HashSet dedup with sort+dedup** (Issue 4) -- Minor perf, optional.
-6. **Quad descriptors** (Missing Feature 2) -- Large effort, only if dense fields are a problem.
+6. **Add C<0.99 cosine filter** (Issue 5) -- One-line, marginal improvement, low priority.
+7. **Quad descriptors** (Missing Feature 2) -- Large effort, only if dense fields are a problem.
 
 ## References
 
@@ -413,6 +436,22 @@ not add algorithmic complexity -- just constant-factor overhead.
 - Siril registration documentation.
   [Docs](https://siril.readthedocs.io/en/latest/preprocessing/registration.html)
 
-- LSST MatchOptimisticBTask (Tabur OPM-B implementation).
+- LSST MatchOptimisticBTask (Tabur OPM-B). Note: uses **pair-based** matching with
+  sequential consistency checking, not triangle voting. Sources processed brightest-first.
   [LSST](https://pipelines.lsst.io/modules/lsst.meas.astrom/index.html) |
-  [Python OPM-B](https://github.com/morriscb/PythonOptimisticPatternMatcherB)
+  [Source](https://github.com/lsst/meas_astrom/blob/main/src/matchOptimisticB.cc)
+
+- Kolomenkin, M., & Pollak, S. (2008). "Geometric voting algorithm for star trackers."
+  *IEEE Transactions on Aerospace and Electronic Systems*, 44(2), 441-456.
+
+- Multilayer Voting (2021). "Star Identification Based on Multilayer Voting Algorithm
+  for Star Sensors." *Sensors*, 21(9), 3084.
+  [PMC](https://pmc.ncbi.nlm.nih.gov/articles/PMC8124596/)
+
+- Rijlaarsdam, D. et al. (2020). "A Survey of Lost-in-Space Star Identification
+  Algorithms Since 2009." *Sensors*, 20(9), 2579.
+  [PMC](https://pmc.ncbi.nlm.nih.gov/articles/PMC7248786/)
+
+- Dense Star Scene Matching (2024). "A Robust High-Accuracy Star Map Matching Algorithm
+  for Dense Star Scenes." *Remote Sensing*, 16(11), 2035.
+  [MDPI](https://www.mdpi.com/2072-4292/16/11/2035)
