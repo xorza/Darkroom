@@ -25,19 +25,29 @@
 
 use std::path::Path;
 
+use arrayvec::ArrayVec;
+use glam::DVec2;
+use rayon::prelude::*;
+
 use crate::ImageDimensions;
 use crate::astro_image::AstroImage;
+use crate::common::Buffer2;
 use crate::registration::transform::Transform;
 use crate::stacking::progress::report_progress;
 use crate::stacking::{Error, ProgressCallback, StackingStage};
 
+/// Maximum number of channels (RGB = 3).
+const MAX_CHANNELS: usize = 3;
+
 /// Drizzle kernel type for distributing flux.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DrizzleKernel {
-    /// Square droplet aligned with input pixel.
-    /// Most accurate, preserves flux exactly. Default.
+    /// Turbo kernel: axis-aligned rectangular drop centered on the transformed pixel center.
+    /// Approximation of true square kernel — always aligned with output X/Y axes regardless
+    /// of rotation. Fast and adequate when rotation between frames is small. Default.
+    /// (Named "turbo" in STScI DrizzlePac; "square" there uses full polygon clipping.)
     #[default]
-    Square,
+    Turbo,
     /// Point kernel - single pixel contribution.
     /// Fastest but requires very good dithering.
     Point,
@@ -45,7 +55,7 @@ pub enum DrizzleKernel {
     /// Smoother output, slight flux redistribution.
     Gaussian,
     /// Lanczos kernel for high-quality interpolation.
-    /// Best quality but slowest.
+    /// Best quality but slowest. Only valid at pixfrac=1.0, scale=1.0.
     Lanczos,
 }
 
@@ -75,7 +85,7 @@ impl Default for DrizzleConfig {
         Self {
             scale: 2.0,
             pixfrac: 0.8,
-            kernel: DrizzleKernel::Square,
+            kernel: DrizzleKernel::Turbo,
             fill_value: 0.0,
             min_coverage: 0.1,
         }
@@ -135,45 +145,55 @@ impl DrizzleConfig {
 /// Drizzle accumulator for building the output image.
 #[derive(Debug)]
 pub struct DrizzleAccumulator {
-    /// Accumulated weighted flux values.
-    data: Vec<f32>,
-    /// Accumulated weights (coverage map).
-    weights: Vec<f32>,
-    /// Output image width.
-    width: usize,
-    /// Output image height.
-    height: usize,
-    /// Number of channels.
-    channels: usize,
+    /// Accumulated weighted flux values, one Buffer2 per channel.
+    data: ArrayVec<Buffer2<f32>, MAX_CHANNELS>,
+    /// Accumulated weights, one Buffer2 per channel.
+    weights: ArrayVec<Buffer2<f32>, MAX_CHANNELS>,
     /// Configuration.
     config: DrizzleConfig,
 }
 
 impl DrizzleAccumulator {
     /// Create a new drizzle accumulator for the given input dimensions.
-    pub fn new(
-        input_width: usize,
-        input_height: usize,
-        channels: usize,
-        config: DrizzleConfig,
-    ) -> Self {
-        let output_width = (input_width as f32 * config.scale).ceil() as usize;
-        let output_height = (input_height as f32 * config.scale).ceil() as usize;
-        let total_pixels = output_width * output_height * channels;
+    pub fn new(input_dims: ImageDimensions, config: DrizzleConfig) -> Self {
+        assert!(
+            input_dims.channels <= MAX_CHANNELS,
+            "channels ({}) exceeds MAX_CHANNELS ({})",
+            input_dims.channels,
+            MAX_CHANNELS
+        );
+        let output_width = (input_dims.width as f32 * config.scale).ceil() as usize;
+        let output_height = (input_dims.height as f32 * config.scale).ceil() as usize;
+
+        let mut data = ArrayVec::new();
+        let mut weights = ArrayVec::new();
+        for _ in 0..input_dims.channels {
+            data.push(Buffer2::new_default(output_width, output_height));
+            weights.push(Buffer2::new_default(output_width, output_height));
+        }
 
         Self {
-            data: vec![0.0; total_pixels],
-            weights: vec![0.0; total_pixels],
-            width: output_width,
-            height: output_height,
-            channels,
+            data,
+            weights,
             config,
         }
     }
 
+    fn width(&self) -> usize {
+        self.data[0].width()
+    }
+
+    fn height(&self) -> usize {
+        self.data[0].height()
+    }
+
+    fn channels(&self) -> usize {
+        self.data.len()
+    }
+
     /// Output dimensions.
-    pub fn dimensions(&self) -> (usize, usize, usize) {
-        (self.width, self.height, self.channels)
+    pub fn dimensions(&self) -> ImageDimensions {
+        ImageDimensions::new(self.width(), self.height(), self.channels())
     }
 
     /// Add an image to the drizzle accumulator with the given transform.
@@ -181,99 +201,78 @@ impl DrizzleAccumulator {
     /// The transform maps input pixel coordinates to reference (output) coordinates.
     /// It should include any registration alignment computed from star matching.
     pub fn add_image(&mut self, image: AstroImage, transform: &Transform, weight: f32) {
-        let input_width = image.width();
-        let input_height = image.height();
-        let input_channels = image.channels();
-
+        let n_channels = self.channels();
         assert_eq!(
-            input_channels, self.channels,
+            image.channels(),
+            n_channels,
             "Channel count mismatch: expected {}, got {}",
-            self.channels, input_channels
+            n_channels,
+            image.channels()
         );
 
         let scale = self.config.scale;
         let pixfrac = self.config.pixfrac;
-        let drop_size = pixfrac / scale; // Drop size in output pixels
+        // Drop size in output pixels: pixfrac is the fraction of input pixel size,
+        // and each input pixel maps to `scale` output pixels, so drop = pixfrac * scale.
+        // (STScI: pfo = pixel_fraction / pscale_ratio / 2, where pscale_ratio = 1/scale)
+        let drop_size = pixfrac * scale;
 
-        let pixels = image.into_interleaved_pixels();
+        if self.config.kernel == DrizzleKernel::Lanczos
+            && ((pixfrac - 1.0).abs() > f32::EPSILON || (scale - 1.0).abs() > f32::EPSILON)
+        {
+            // Per STScI DrizzlePac: Lanczos "should never be used for pixfrac != 1.0,
+            // and is not recommended for scale != 1.0."
+            tracing::warn!(
+                pixfrac,
+                scale,
+                "Lanczos kernel should only be used with pixfrac=1.0 and scale=1.0"
+            );
+        }
 
         match self.config.kernel {
-            DrizzleKernel::Square => {
-                self.add_image_square(
-                    &pixels,
-                    transform,
-                    weight,
-                    input_width,
-                    input_height,
-                    scale,
-                    drop_size,
-                );
+            DrizzleKernel::Turbo => {
+                self.add_image_turbo(&image, transform, weight, scale, drop_size);
             }
             DrizzleKernel::Point => {
-                self.add_image_point(&pixels, transform, weight, input_width, input_height, scale);
+                self.add_image_point(&image, transform, weight, scale);
             }
             DrizzleKernel::Gaussian => {
-                self.add_image_gaussian(
-                    &pixels,
-                    transform,
-                    weight,
-                    input_width,
-                    input_height,
-                    scale,
-                    drop_size,
-                );
+                self.add_image_gaussian(&image, transform, weight, scale, drop_size);
             }
             DrizzleKernel::Lanczos => {
-                self.add_image_lanczos(
-                    &pixels,
-                    transform,
-                    weight,
-                    input_width,
-                    input_height,
-                    scale,
-                    drop_size,
-                );
+                self.add_image_lanczos(&image, transform, weight, scale);
             }
         }
     }
 
-    /// Add image using square kernel (most accurate).
-    #[allow(clippy::too_many_arguments)]
-    fn add_image_square(
+    /// Add image using turbo kernel (axis-aligned rectangular drop).
+    fn add_image_turbo(
         &mut self,
-        pixels: &[f32],
+        image: &AstroImage,
         transform: &Transform,
         weight: f32,
-        input_width: usize,
-        input_height: usize,
         scale: f32,
         drop_size: f32,
     ) {
         let half_drop = drop_size / 2.0;
         let inv_area = 1.0 / (drop_size * drop_size);
-        let output_width = self.width;
-        let output_height = self.height;
-        let channels = self.channels;
-
+        let output_width = self.width();
+        let output_height = self.height();
+        let input_width = image.width();
+        let input_height = image.height();
         // Process each input pixel
         for iy in 0..input_height {
             for ix in 0..input_width {
-                // Transform input pixel center to output coordinates
-                let (ox_center, oy_center) =
-                    transform_point(transform, ix as f32 + 0.5, iy as f32 + 0.5);
-
-                // Scale to output grid
-                let ox_center = ox_center * scale;
-                let oy_center = oy_center * scale;
+                // Transform input pixel center to output coordinates, scale to output grid
+                let t = transform.apply(DVec2::new(ix as f64 + 0.5, iy as f64 + 0.5));
+                let ox_center = t.x as f32 * scale;
+                let oy_center = t.y as f32 * scale;
 
                 // Compute drop bounding box in output pixels
                 let ox_min = (ox_center - half_drop).floor().max(0.0) as usize;
                 let oy_min = (oy_center - half_drop).floor().max(0.0) as usize;
                 let ox_max = (ox_center + half_drop).ceil().min(output_width as f32) as usize;
                 let oy_max = (oy_center + half_drop).ceil().min(output_height as f32) as usize;
-
-                // Get input pixel values
-                let input_idx_base = (iy * input_width + ix) * channels;
 
                 // Distribute flux to overlapping output pixels
                 for oy in oy_min..oy_max {
@@ -293,12 +292,16 @@ impl DrizzleAccumulator {
                         if overlap > 0.0 {
                             // Weight by overlap area normalized by drop area
                             let pixel_weight = weight * overlap * inv_area;
-                            let output_idx_base = (oy * output_width + ox) * channels;
 
-                            for c in 0..channels {
-                                let flux = pixels[input_idx_base + c];
-                                self.data[output_idx_base + c] += flux * pixel_weight;
-                                self.weights[output_idx_base + c] += pixel_weight;
+                            for (c, (d, w)) in self
+                                .data
+                                .iter_mut()
+                                .zip(self.weights.iter_mut())
+                                .enumerate()
+                            {
+                                let flux = image.channel(c)[(ix, iy)];
+                                *d.get_mut(ox, oy) += flux * pixel_weight;
+                                *w.get_mut(ox, oy) += pixel_weight;
                             }
                         }
                     }
@@ -310,34 +313,36 @@ impl DrizzleAccumulator {
     /// Add image using point kernel (fastest, needs good dithering).
     fn add_image_point(
         &mut self,
-        pixels: &[f32],
+        image: &AstroImage,
         transform: &Transform,
         weight: f32,
-        input_width: usize,
-        input_height: usize,
         scale: f32,
     ) {
-        let output_width = self.width;
-        let output_height = self.height;
-        let channels = self.channels;
+        let output_width = self.width();
+        let output_height = self.height();
+        let input_width = image.width();
+        let input_height = image.height();
 
         for iy in 0..input_height {
             for ix in 0..input_width {
                 // Transform and scale to output coordinates
-                let (ox, oy) = transform_point(transform, ix as f32 + 0.5, iy as f32 + 0.5);
-                let ox = (ox * scale).floor() as isize;
-                let oy = (oy * scale).floor() as isize;
+                let t = transform.apply(DVec2::new(ix as f64 + 0.5, iy as f64 + 0.5));
+                let ox = (t.x as f32 * scale).floor() as isize;
+                let oy = (t.y as f32 * scale).floor() as isize;
 
                 if ox >= 0 && ox < output_width as isize && oy >= 0 && oy < output_height as isize {
                     let ox = ox as usize;
                     let oy = oy as usize;
-                    let input_idx_base = (iy * input_width + ix) * channels;
-                    let output_idx_base = (oy * output_width + ox) * channels;
 
-                    for c in 0..channels {
-                        let flux = pixels[input_idx_base + c];
-                        self.data[output_idx_base + c] += flux * weight;
-                        self.weights[output_idx_base + c] += weight;
+                    for (c, (d, w)) in self
+                        .data
+                        .iter_mut()
+                        .zip(self.weights.iter_mut())
+                        .enumerate()
+                    {
+                        let flux = image.channel(c)[(ix, iy)];
+                        *d.get_mut(ox, oy) += flux * weight;
+                        *w.get_mut(ox, oy) += weight;
                     }
                 }
             }
@@ -345,35 +350,32 @@ impl DrizzleAccumulator {
     }
 
     /// Add image using Gaussian kernel (smoother output).
-    #[allow(clippy::too_many_arguments)]
     fn add_image_gaussian(
         &mut self,
-        pixels: &[f32],
+        image: &AstroImage,
         transform: &Transform,
         weight: f32,
-        input_width: usize,
-        input_height: usize,
         scale: f32,
         drop_size: f32,
     ) {
-        let sigma = drop_size / 2.355; // FWHM to sigma
+        // Per STScI: Gaussian FWHM = pixfrac in input pixels = drop_size in output pixels.
+        // sigma = FWHM / (2 * sqrt(2 * ln(2))) = FWHM / 2.3548
+        let sigma = drop_size / 2.3548;
         let radius = (3.0 * sigma).ceil() as isize;
         let inv_2sigma_sq = 1.0 / (2.0 * sigma * sigma);
-        let output_width = self.width;
-        let output_height = self.height;
-        let channels = self.channels;
+        let output_width = self.width();
+        let output_height = self.height();
+        let input_width = image.width();
+        let input_height = image.height();
 
         for iy in 0..input_height {
             for ix in 0..input_width {
-                let (ox_center, oy_center) =
-                    transform_point(transform, ix as f32 + 0.5, iy as f32 + 0.5);
-                let ox_center = ox_center * scale;
-                let oy_center = oy_center * scale;
+                let t = transform.apply(DVec2::new(ix as f64 + 0.5, iy as f64 + 0.5));
+                let ox_center = t.x as f32 * scale;
+                let oy_center = t.y as f32 * scale;
 
                 let ox_int = ox_center.floor() as isize;
                 let oy_int = oy_center.floor() as isize;
-
-                let input_idx_base = (iy * input_width + ix) * channels;
 
                 // Accumulate Gaussian weights for normalization
                 let mut total_gauss_weight = 0.0f32;
@@ -423,12 +425,16 @@ impl DrizzleAccumulator {
                         let gauss_weight = (-dist_sq * inv_2sigma_sq).exp();
 
                         let pixel_weight = weight * gauss_weight / total_gauss_weight;
-                        let output_idx_base = (oy * output_width + ox) * channels;
 
-                        for c in 0..channels {
-                            let flux = pixels[input_idx_base + c];
-                            self.data[output_idx_base + c] += flux * pixel_weight;
-                            self.weights[output_idx_base + c] += pixel_weight;
+                        for (c, (d, w)) in self
+                            .data
+                            .iter_mut()
+                            .zip(self.weights.iter_mut())
+                            .enumerate()
+                        {
+                            let flux = image.channel(c)[(ix, iy)];
+                            *d.get_mut(ox, oy) += flux * pixel_weight;
+                            *w.get_mut(ox, oy) += pixel_weight;
                         }
                     }
                 }
@@ -437,35 +443,35 @@ impl DrizzleAccumulator {
     }
 
     /// Add image using Lanczos kernel (highest quality).
-    #[allow(clippy::too_many_arguments)]
+    ///
+    /// Per STScI DrizzlePac: "should never be used for pixfrac != 1.0, and is not
+    /// recommended for scale != 1.0." At pixfrac=scale=1.0 it acts as an optimal
+    /// bandlimited resampling filter.
     fn add_image_lanczos(
         &mut self,
-        pixels: &[f32],
+        image: &AstroImage,
         transform: &Transform,
         weight: f32,
-        input_width: usize,
-        input_height: usize,
         scale: f32,
-        drop_size: f32,
     ) {
         // Use Lanczos-3 (support radius 3)
         let a = 3.0f32;
-        let radius = (a * drop_size / scale).max(a).ceil() as isize;
-        let output_width = self.width;
-        let output_height = self.height;
-        let channels = self.channels;
+        // Lanczos support radius is always `a` pixels (the kernel order).
+        // The kernel is defined on [-a, a] and zero outside.
+        let radius = a.ceil() as isize;
+        let output_width = self.width();
+        let output_height = self.height();
+        let input_width = image.width();
+        let input_height = image.height();
 
         for iy in 0..input_height {
             for ix in 0..input_width {
-                let (ox_center, oy_center) =
-                    transform_point(transform, ix as f32 + 0.5, iy as f32 + 0.5);
-                let ox_center = ox_center * scale;
-                let oy_center = oy_center * scale;
+                let t = transform.apply(DVec2::new(ix as f64 + 0.5, iy as f64 + 0.5));
+                let ox_center = t.x as f32 * scale;
+                let oy_center = t.y as f32 * scale;
 
                 let ox_int = ox_center.floor() as isize;
                 let oy_int = oy_center.floor() as isize;
-
-                let input_idx_base = (iy * input_width + ix) * channels;
 
                 // Compute Lanczos weights and normalize
                 let mut total_lanczos_weight = 0.0f32;
@@ -481,8 +487,8 @@ impl DrizzleAccumulator {
                             continue;
                         }
 
-                        let dist_x = (ox_center - (ox as f32 + 0.5)) / drop_size;
-                        let dist_y = (oy_center - (oy as f32 + 0.5)) / drop_size;
+                        let dist_x = ox_center - (ox as f32 + 0.5);
+                        let dist_y = oy_center - (oy as f32 + 0.5);
                         let lanczos_weight = lanczos_kernel(dist_x, a) * lanczos_kernel(dist_y, a);
                         total_lanczos_weight += lanczos_weight;
                     }
@@ -506,17 +512,21 @@ impl DrizzleAccumulator {
                         let ox = ox as usize;
                         let oy = oy as usize;
 
-                        let dist_x = (ox_center - (ox as f32 + 0.5)) / drop_size;
-                        let dist_y = (oy_center - (oy as f32 + 0.5)) / drop_size;
+                        let dist_x = ox_center - (ox as f32 + 0.5);
+                        let dist_y = oy_center - (oy as f32 + 0.5);
                         let lanczos_weight = lanczos_kernel(dist_x, a) * lanczos_kernel(dist_y, a);
 
                         let pixel_weight = weight * lanczos_weight / total_lanczos_weight;
-                        let output_idx_base = (oy * output_width + ox) * channels;
 
-                        for c in 0..channels {
-                            let flux = pixels[input_idx_base + c];
-                            self.data[output_idx_base + c] += flux * pixel_weight;
-                            self.weights[output_idx_base + c] += pixel_weight;
+                        for (c, (d, w)) in self
+                            .data
+                            .iter_mut()
+                            .zip(self.weights.iter_mut())
+                            .enumerate()
+                        {
+                            let flux = image.channel(c)[(ix, iy)];
+                            *d.get_mut(ox, oy) += flux * pixel_weight;
+                            *w.get_mut(ox, oy) += pixel_weight;
                         }
                     }
                 }
@@ -526,50 +536,72 @@ impl DrizzleAccumulator {
 
     /// Finalize the drizzle result, normalizing by coverage weights.
     pub fn finalize(self) -> DrizzleResult {
-        let total_pixels = self.width * self.height * self.channels;
-        let mut output_data = vec![0.0f32; total_pixels];
-        let mut coverage = vec![0.0f32; self.width * self.height];
-
+        let width = self.width();
+        let height = self.height();
+        let n_channels = self.channels();
+        let needs_clamping = self.config.kernel == DrizzleKernel::Lanczos;
         let min_coverage = self.config.min_coverage;
         let fill_value = self.config.fill_value;
 
-        for y in 0..self.height {
-            for x in 0..self.width {
-                let pixel_idx = y * self.width + x;
+        // Coverage from channel 0 weights (all channels share identical geometric overlap).
+        let weights0 = self.weights[0].pixels();
+        let mut coverage = Buffer2::new_default(width, height);
+        coverage.pixels_mut().copy_from_slice(weights0);
 
-                // Compute coverage as average weight across channels
-                let mut total_weight = 0.0f32;
-                for c in 0..self.channels {
-                    total_weight += self.weights[pixel_idx * self.channels + c];
-                }
-                let avg_weight = total_weight / self.channels as f32;
-                coverage[pixel_idx] = avg_weight;
+        // Find max weight for normalizing min_coverage threshold
+        let max_weight = coverage
+            .pixels()
+            .par_iter()
+            .copied()
+            .reduce(|| 0.0f32, f32::max);
 
-                // Normalize flux by weight or fill with fill_value
-                for c in 0..self.channels {
-                    let data_idx = pixel_idx * self.channels + c;
-                    let weight = self.weights[data_idx];
+        // min_coverage is 0.0-1.0, compare against normalized weight
+        let weight_threshold = if max_weight > 0.0 {
+            min_coverage * max_weight
+        } else {
+            0.0
+        };
 
-                    if weight >= min_coverage {
-                        output_data[data_idx] = self.data[data_idx] / weight;
-                    } else {
-                        output_data[data_idx] = fill_value;
-                    }
-                }
-            }
+        // Build per-channel output (row-parallel normalization)
+        let output_channels: Vec<Vec<f32>> = (0..n_channels)
+            .map(|c| {
+                let data_pixels = self.data[c].pixels();
+                let weight_pixels = self.weights[c].pixels();
+                let mut out = vec![fill_value; width * height];
+
+                out.par_chunks_mut(width)
+                    .enumerate()
+                    .for_each(|(y, out_row)| {
+                        let row_start = y * width;
+                        for (x, out_val) in out_row.iter_mut().enumerate() {
+                            let idx = row_start + x;
+                            let w = weight_pixels[idx];
+                            if w >= weight_threshold && w > 0.0 {
+                                let mut val = data_pixels[idx] / w;
+                                if needs_clamping {
+                                    val = val.max(0.0);
+                                }
+                                *out_val = val;
+                            }
+                        }
+                    });
+
+                out
+            })
+            .collect();
+
+        // Normalize coverage to [0, 1]
+        if max_weight > 0.0 {
+            let inv_max = 1.0 / max_weight;
+            coverage
+                .pixels_mut()
+                .par_iter_mut()
+                .for_each(|c| *c *= inv_max);
         }
 
-        // Find max coverage for normalization
-        let max_coverage = coverage.iter().copied().fold(0.0f32, f32::max);
-        if max_coverage > 0.0 {
-            for c in &mut coverage {
-                *c /= max_coverage;
-            }
-        }
-
-        let image = AstroImage::from_pixels(
-            ImageDimensions::new(self.width, self.height, self.channels),
-            output_data,
+        let image = AstroImage::from_planar_channels(
+            ImageDimensions::new(width, height, n_channels),
+            output_channels,
         );
 
         DrizzleResult { image, coverage }
@@ -582,14 +614,13 @@ pub struct DrizzleResult {
     /// The drizzled output image.
     pub image: AstroImage,
     /// Normalized coverage map (0.0 = no data, 1.0 = maximum coverage).
-    pub coverage: Vec<f32>,
+    pub coverage: Buffer2<f32>,
 }
 
 impl DrizzleResult {
     /// Get coverage at a specific pixel.
     pub fn coverage_at(&self, x: usize, y: usize) -> f32 {
-        let idx = y * self.image.width() + x;
-        self.coverage.get(idx).copied().unwrap_or(0.0)
+        self.coverage[(x, y)]
     }
 }
 
@@ -609,23 +640,6 @@ fn compute_square_overlap(
     let x_overlap = (ax2.min(bx2) - ax1.max(bx1)).max(0.0);
     let y_overlap = (ay2.min(by2) - ay1.max(by1)).max(0.0);
     x_overlap * y_overlap
-}
-
-/// Transform a point using the transformation matrix.
-///
-/// The matrix is stored in row-major order:
-/// | a  b  c |   | m[0] m[1] m[2] |
-/// | d  e  f | = | m[3] m[4] m[5] |
-/// | g  h  1 |   | m[6] m[7] m[8] |
-#[inline]
-fn transform_point(transform: &Transform, x: f32, y: f32) -> (f32, f32) {
-    let m = transform.matrix.as_array();
-    let x64 = x as f64;
-    let y64 = y as f64;
-    let w = m[6] * x64 + m[7] * y64 + m[8];
-    let out_x = ((m[0] * x64 + m[1] * y64 + m[2]) / w) as f32;
-    let out_y = ((m[3] * x64 + m[4] * y64 + m[5]) / w) as f32;
-    (out_x, out_y)
 }
 
 /// Lanczos kernel function.
@@ -690,14 +704,12 @@ pub fn drizzle_stack<P: AsRef<Path> + Sync>(
         source: std::io::Error::other(e.to_string()),
     })?;
 
-    let input_width = first_image.width();
-    let input_height = first_image.height();
-    let channels = first_image.channels();
+    let input_dims = first_image.dimensions;
 
     tracing::info!(
-        input_width,
-        input_height,
-        channels,
+        input_width = input_dims.width,
+        input_height = input_dims.height,
+        channels = input_dims.channels,
         output_scale = config.scale,
         pixfrac = config.pixfrac,
         kernel = ?config.kernel,
@@ -705,12 +717,11 @@ pub fn drizzle_stack<P: AsRef<Path> + Sync>(
         "Starting drizzle stacking"
     );
 
-    let mut accumulator =
-        DrizzleAccumulator::new(input_width, input_height, channels, config.clone());
-    let (out_w, out_h, _) = accumulator.dimensions();
+    let mut accumulator = DrizzleAccumulator::new(input_dims, config.clone());
+    let out_dims = accumulator.dimensions();
     tracing::info!(
-        output_width = out_w,
-        output_height = out_h,
+        output_width = out_dims.width,
+        output_height = out_dims.height,
         "Output dimensions"
     );
 
@@ -727,13 +738,13 @@ pub fn drizzle_stack<P: AsRef<Path> + Sync>(
         })?;
 
         // Validate dimensions match
-        if image.width() != input_width || image.height() != input_height {
+        if image.width() != input_dims.width || image.height() != input_dims.height {
             return Err(Error::ImageLoad {
                 path: path.as_ref().to_path_buf(),
                 source: std::io::Error::other(format!(
                     "Dimension mismatch: expected {}x{}, got {}x{}",
-                    input_width,
-                    input_height,
+                    input_dims.width,
+                    input_dims.height,
                     image.width(),
                     image.height()
                 )),
@@ -752,8 +763,6 @@ pub fn drizzle_stack<P: AsRef<Path> + Sync>(
 
 #[cfg(test)]
 mod tests {
-    use glam::DVec2;
-
     use super::*;
 
     #[test]
@@ -761,7 +770,7 @@ mod tests {
         let config = DrizzleConfig::default();
         assert!((config.scale - 2.0).abs() < f32::EPSILON);
         assert!((config.pixfrac - 0.8).abs() < f32::EPSILON);
-        assert_eq!(config.kernel, DrizzleKernel::Square);
+        assert_eq!(config.kernel, DrizzleKernel::Turbo);
     }
 
     #[test]
@@ -797,11 +806,11 @@ mod tests {
     #[test]
     fn test_drizzle_accumulator_dimensions() {
         let config = DrizzleConfig::x2();
-        let acc = DrizzleAccumulator::new(100, 80, 3, config);
-        let (w, h, c) = acc.dimensions();
-        assert_eq!(w, 200);
-        assert_eq!(h, 160);
-        assert_eq!(c, 3);
+        let acc = DrizzleAccumulator::new(ImageDimensions::new(100, 80, 3), config);
+        let dims = acc.dimensions();
+        assert_eq!(dims.width, 200);
+        assert_eq!(dims.height, 160);
+        assert_eq!(dims.channels, 3);
     }
 
     #[test]
@@ -838,29 +847,13 @@ mod tests {
     }
 
     #[test]
-    fn test_transform_point_identity() {
-        let identity = Transform::identity();
-        let (x, y) = transform_point(&identity, 10.0, 20.0);
-        assert!((x - 10.0).abs() < f32::EPSILON);
-        assert!((y - 20.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_transform_point_translation() {
-        let translation = Transform::translation(DVec2::new(5.0, -3.0));
-        let (x, y) = transform_point(&translation, 10.0, 20.0);
-        assert!((x - 15.0).abs() < f32::EPSILON);
-        assert!((y - 17.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
     fn test_drizzle_single_image() {
         // Create a simple test image
         let image =
             AstroImage::from_pixels(ImageDimensions::new(100, 100, 1), vec![0.5; 100 * 100]);
 
         let config = DrizzleConfig::x2();
-        let mut acc = DrizzleAccumulator::new(100, 100, 1, config);
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(100, 100, 1), config);
 
         let identity = Transform::identity();
         acc.add_image(image, &identity, 1.0);
@@ -871,9 +864,11 @@ mod tests {
         assert_eq!(result.image.width(), 200);
         assert_eq!(result.image.height(), 200);
 
-        // With scale=2, pixfrac=0.8: drop_size=0.4, each input pixel center
-        // at (2*ix+1, 2*iy+1) contributes to a 2×2 output block with weight 0.25 each.
-        // Every output pixel receives exactly one contribution.
+        // With scale=2, pixfrac=0.8: drop_size = 0.8*2 = 1.6 output pixels.
+        // Input pixel (ix,iy) center at (ix+0.5, iy+0.5), scaled to (2*ix+1, 2*iy+1).
+        // Drop covers (center ± 0.8), spanning a 2×2 output block.
+        // Each overlap = 0.8 * 0.8 = 0.64, inv_area = 1/2.56, weight = 0.64/2.56 = 0.25.
+        // Interior output pixels receive exactly one contribution.
         // Finalized output = (0.5 * 0.25) / 0.25 = 0.5
         let pixels = result.image.channel(0);
         let avg: f32 = pixels.iter().sum::<f32>() / pixels.len() as f32;
@@ -895,7 +890,7 @@ mod tests {
         let image = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), vec![1.0; 10 * 10]);
 
         let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
-        let mut acc = DrizzleAccumulator::new(10, 10, 1, config);
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(10, 10, 1), config);
 
         let identity = Transform::identity();
         acc.add_image(image, &identity, 1.0);
@@ -954,7 +949,7 @@ mod tests {
         let image = AstroImage::from_pixels(ImageDimensions::new(50, 50, 3), pixels);
 
         let config = DrizzleConfig::x2();
-        let mut acc = DrizzleAccumulator::new(50, 50, 3, config);
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(50, 50, 3), config);
 
         let identity = Transform::identity();
         acc.add_image(image, &identity, 1.0);
@@ -973,13 +968,14 @@ mod tests {
         pixels[10 * 20 + 10] = 1.0;
         let image = AstroImage::from_pixels(ImageDimensions::new(20, 20, 1), pixels);
 
-        // scale=2, pixfrac=0.8: drop_size=0.4, half_drop=0.2
+        // scale=2, pixfrac=0.8: drop_size = 0.8*2 = 1.6, half_drop = 0.8
         let config = DrizzleConfig::x2();
-        let mut acc = DrizzleAccumulator::new(20, 20, 1, config);
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(20, 20, 1), config);
 
         // Translation (0.5, 0.5): pixel (10,10) center at (10.5+0.5, 10.5+0.5) = (11, 11)
-        // Scaled to output: (22, 22). Drop from (21.8, 21.8) to (22.2, 22.2).
-        // Overlaps output pixels (21,21), (22,21), (21,22), (22,22) — each with weight 0.25.
+        // Scaled to output: (22, 22). Drop from (21.2, 21.2) to (22.8, 22.8).
+        // Overlaps output pixels (21,21), (22,21), (21,22), (22,22).
+        // Each overlap = 0.8 * 0.8 = 0.64, inv_area = 1/2.56, weight = 0.25.
         let transform = Transform::translation(DVec2::new(0.5, 0.5));
         acc.add_image(image, &transform, 1.0);
 
@@ -1018,7 +1014,7 @@ mod tests {
         // Point kernel with identity: covered at odd coords, uncovered at even
         let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), vec![1.0; 16]);
         let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
-        let mut acc = DrizzleAccumulator::new(4, 4, 1, config);
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
         acc.add_image(image, &Transform::identity(), 1.0);
         let result = acc.finalize();
 
@@ -1028,5 +1024,530 @@ mod tests {
         assert!((result.coverage_at(0, 0)).abs() < f32::EPSILON); // uncovered
         assert!((result.coverage_at(3, 3) - 1.0).abs() < f32::EPSILON); // covered
         assert!((result.coverage_at(2, 2)).abs() < f32::EPSILON); // uncovered
+    }
+
+    /// Test turbo kernel drop size and overlap with hand-computed values.
+    ///
+    /// Setup: 4×4 input, scale=2, pixfrac=0.8 → drop_size = 1.6, half_drop = 0.8
+    /// Output: 8×8. Input pixel (1,1) center at (1.5, 1.5), scaled to (3.0, 3.0).
+    /// Drop covers (2.2, 2.2) to (3.8, 3.8).
+    ///
+    /// Overlapping output pixels and their overlap areas:
+    ///   (2,2): x_overlap = min(3.8,3)-max(2.2,2) = 0.8, y = 0.8, area = 0.64
+    ///   (3,2): x_overlap = min(3.8,4)-max(2.2,3) = 0.8, y = 0.8, area = 0.64
+    ///   (2,3): same as (3,2) by symmetry, area = 0.64
+    ///   (3,3): x = min(3.8,4)-max(2.2,3) = 0.8, y = 0.8, area = 0.64
+    /// Total area = 4 * 0.64 = 2.56 = 1.6^2 ✓
+    /// inv_area = 1/2.56 ≈ 0.390625
+    /// pixel_weight = overlap * inv_area = 0.64 * 0.390625 = 0.25
+    #[test]
+    fn test_turbo_kernel_overlap_exact() {
+        // Single bright pixel at (1,1) with value 2.0
+        let mut pixels = vec![0.0f32; 4 * 4];
+        pixels[5] = 2.0; // pixel (1,1) = index 1*4+1 = 5
+        let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), pixels);
+
+        let config = DrizzleConfig::x2(); // scale=2, pixfrac=0.8
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
+        acc.add_image(image, &Transform::identity(), 1.0);
+
+        let result = acc.finalize();
+        let out = result.image.channel(0);
+        let w = 8usize;
+
+        // Drop from (2.2,2.2) to (3.8,3.8) → overlaps (2,2), (3,2), (2,3), (3,3).
+        // Each receives: flux=2.0, weight=0.25 → finalized = 2.0*0.25/0.25 = 2.0
+        assert!(
+            (out[2 * w + 2] - 2.0).abs() < 1e-5,
+            "Expected 2.0 at (2,2), got {}",
+            out[2 * w + 2]
+        );
+        assert!(
+            (out[2 * w + 3] - 2.0).abs() < 1e-5,
+            "Expected 2.0 at (3,2), got {}",
+            out[2 * w + 3]
+        );
+        assert!(
+            (out[3 * w + 2] - 2.0).abs() < 1e-5,
+            "Expected 2.0 at (2,3), got {}",
+            out[3 * w + 2]
+        );
+        assert!(
+            (out[3 * w + 3] - 2.0).abs() < 1e-5,
+            "Expected 2.0 at (3,3), got {}",
+            out[3 * w + 3]
+        );
+
+        // Adjacent pixels outside the drop should be zero (or fill_value)
+        assert!(out[w + 2].abs() < 1e-5, "No flux at (2,1)");
+        assert!(out[4 * w + 3].abs() < 1e-5, "No flux at (3,4)");
+    }
+
+    /// Test turbo kernel with non-integer translation producing asymmetric overlap.
+    ///
+    /// Uniform image value=1.0, translation=(0.25, 0.0).
+    /// scale=2, pixfrac=1.0 → drop_size = 2.0, half_drop = 1.0
+    /// Pixel (0,0) center at (0.5+0.25, 0.5) = (0.75, 0.5), scaled to (1.5, 1.0).
+    /// Drop from (0.5, 0.0) to (2.5, 2.0).
+    ///
+    /// Output pixel (0,0) receives contributions from input (0,0) only:
+    ///   area = 0.5 * 1.0 = 0.5, weight = 0.5 * 0.25 = 0.125
+    /// Output pixel (1,0) receives from (0,0) and (1,0):
+    ///   from (0,0): area=1.0, weight=0.25; from (1,0): area=1.0, weight=0.25
+    ///   total data = 1.0*0.25 + 1.0*0.25 = 0.5, total weight = 0.5 → output = 1.0
+    ///
+    /// For uniform image, all covered pixels should be 1.0 (weighted mean of same value).
+    /// Coverage varies: (0,0) has weight 0.125, (1,0) has weight 0.50.
+    #[test]
+    fn test_turbo_kernel_fractional_shift() {
+        // Uniform image so weighted mean is always 1.0 regardless of overlap pattern
+        let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), vec![1.0; 4 * 4]);
+
+        let config = DrizzleConfig::x2().with_pixfrac(1.0); // drop_size = 2.0
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
+        let transform = Transform::translation(DVec2::new(0.25, 0.0));
+        acc.add_image(image, &transform, 1.0);
+
+        let result = acc.finalize();
+        let out = result.image.channel(0);
+        let w = 8usize;
+
+        // All covered interior pixels should be 1.0
+        assert!(
+            (out[2 * w + 3] - 1.0).abs() < 1e-5,
+            "Interior pixel should be 1.0, got {}",
+            out[2 * w + 3]
+        );
+
+        // Verify asymmetric coverage from the fractional shift.
+        // Input pixel (0,0) → output center (1.5, 1.0). Drop (0.5, 0.0)→(2.5, 2.0).
+        // Output (0,0) gets weight 0.5*1.0*0.25 = 0.125 from input (0,0) only.
+        // Output (1,0) gets weight 1.0*1.0*0.25 = 0.25 from input (0,0) AND (1,0).
+        // So total weight at (1,0) = 0.25+0.25 = 0.50.
+        // Coverage normalization: max_weight across all pixels.
+        // Interior pixel (3,2) gets contributions from two input pixels, total weight 0.50.
+        // Coverage at edge (0,0) = 0.125 / max_weight.
+        // The exact max depends on full overlap pattern — just verify (0,0) < (1,0).
+        assert!(
+            result.coverage_at(0, 0) < result.coverage_at(1, 0),
+            "Edge pixel should have less coverage than interior"
+        );
+    }
+
+    /// Test that min_coverage works with normalized weights.
+    ///
+    /// With pixfrac=1.0, scale=2: single frame, max weight = 0.25.
+    /// min_coverage=0.6: threshold = 0.6 * 0.25 = 0.15.
+    /// A pixel with overlap 0.5 → weight = 0.5*0.25 = 0.125 < 0.15 → rejected.
+    /// A pixel with overlap 1.0 → weight = 1.0*0.25 = 0.25 >= 0.15 → kept.
+    #[test]
+    fn test_min_coverage_normalized() {
+        // Single pixel at (0,0) with fractional shift to create unequal overlaps
+        let mut pixels = vec![0.0f32; 4 * 4];
+        pixels[0] = 1.0;
+        let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), pixels);
+
+        let config = DrizzleConfig::x2().with_pixfrac(1.0).with_min_coverage(0.6);
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
+
+        // Translation (0.25, 0): creates overlaps of 0.5 and 1.0 (see previous test)
+        let transform = Transform::translation(DVec2::new(0.25, 0.0));
+        acc.add_image(image, &transform, 1.0);
+        let result = acc.finalize();
+        let out = result.image.channel(0);
+
+        // Pixel (1,0) has weight 0.25 (max), pixel (0,0) has weight 0.125.
+        // Threshold = 0.6 * 0.25 = 0.15. So (0,0) with 0.125 < 0.15 → fill_value.
+        // Pixel (1,0) with 0.25 >= 0.15 → kept.
+        assert!((out[1] - 1.0).abs() < 1e-5, "Pixel (1,0) kept: {}", out[1]);
+        assert!(
+            out[0].abs() < 1e-5,
+            "Pixel (0,0) rejected (below min_coverage): {}",
+            out[0]
+        );
+    }
+
+    /// Test Gaussian kernel produces flux-preserving smooth output.
+    ///
+    /// A uniform 10×10 image with value 3.0 through Gaussian kernel should produce
+    /// approximately 3.0 everywhere in the interior (edges may differ due to truncation).
+    #[test]
+    fn test_gaussian_kernel_uniform_preserves_value() {
+        let image = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), vec![3.0; 10 * 10]);
+
+        let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Gaussian);
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(10, 10, 1), config);
+        acc.add_image(image, &Transform::identity(), 1.0);
+        let result = acc.finalize();
+
+        // Interior pixels should be ≈ 3.0 (Gaussian is normalized per-pixel)
+        let out = result.image.channel(0);
+        let w = 20usize;
+        // Check a pixel well inside the interior
+        let center_val = out[10 * w + 10];
+        assert!(
+            (center_val - 3.0).abs() < 0.05,
+            "Interior Gaussian value should be ~3.0, got {}",
+            center_val
+        );
+    }
+
+    /// Test Lanczos kernel with scale=1, pixfrac=1.
+    ///
+    /// For a uniform image at scale=1 pixfrac=1, Lanczos should also produce the same
+    /// uniform value, since the normalized Lanczos weights sum to 1.
+    #[test]
+    fn test_lanczos_kernel_uniform_preserves_value() {
+        let image = AstroImage::from_pixels(ImageDimensions::new(20, 20, 1), vec![5.0; 20 * 20]);
+
+        let config = DrizzleConfig {
+            scale: 1.0,
+            pixfrac: 1.0,
+            kernel: DrizzleKernel::Lanczos,
+            fill_value: 0.0,
+            min_coverage: 0.0,
+        };
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(20, 20, 1), config);
+        acc.add_image(image, &Transform::identity(), 1.0);
+        let result = acc.finalize();
+
+        let out = result.image.channel(0);
+        // Interior pixel well away from borders
+        let center_val = out[10 * 20 + 10];
+        assert!(
+            (center_val - 5.0).abs() < 0.01,
+            "Lanczos uniform should be ~5.0, got {}",
+            center_val
+        );
+    }
+
+    /// Test that Lanczos clamping prevents negative output.
+    ///
+    /// A single bright pixel surrounded by zeros will produce negative lobes
+    /// in the Lanczos output. After clamping, all output should be >= 0.
+    #[test]
+    fn test_lanczos_clamping_no_negative_output() {
+        let mut pixels = vec![0.0f32; 20 * 20];
+        pixels[10 * 20 + 10] = 100.0; // bright point source
+        let image = AstroImage::from_pixels(ImageDimensions::new(20, 20, 1), pixels);
+
+        let config = DrizzleConfig {
+            scale: 1.0,
+            pixfrac: 1.0,
+            kernel: DrizzleKernel::Lanczos,
+            fill_value: 0.0,
+            min_coverage: 0.0,
+        };
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(20, 20, 1), config);
+        acc.add_image(image, &Transform::identity(), 1.0);
+        let result = acc.finalize();
+
+        let out = result.image.channel(0);
+        let min_val = out.iter().copied().fold(f32::INFINITY, f32::min);
+        assert!(
+            min_val >= 0.0,
+            "Lanczos output should be clamped to >= 0.0, got min={}",
+            min_val
+        );
+    }
+
+    /// Test two-frame accumulation with different weights.
+    ///
+    /// Frame 1: uniform value 2.0, weight 1.0
+    /// Frame 2: uniform value 6.0, weight 3.0
+    /// Expected weighted mean: (2.0*w1 + 6.0*w3) / (w1+w3) at each pixel.
+    /// Since pixel_weight = frame_weight * overlap * inv_area, and both frames
+    /// have the same overlap geometry, the weighted mean simplifies to:
+    /// (2.0 * 1.0 + 6.0 * 3.0) / (1.0 + 3.0) = (2 + 18) / 4 = 5.0
+    #[test]
+    fn test_two_frame_weighted_mean() {
+        let image1 = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), vec![2.0; 10 * 10]);
+        let image2 = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), vec![6.0; 10 * 10]);
+
+        let config = DrizzleConfig::x2();
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(10, 10, 1), config);
+        acc.add_image(image1, &Transform::identity(), 1.0);
+        acc.add_image(image2, &Transform::identity(), 3.0);
+        let result = acc.finalize();
+
+        let out = result.image.channel(0);
+        // Interior pixel
+        let center_val = out[10 * 20 + 10];
+        assert!(
+            (center_val - 5.0).abs() < 1e-5,
+            "Weighted mean should be 5.0, got {}",
+            center_val
+        );
+    }
+
+    /// Test pixfrac changes the drop size and thus the weight distribution.
+    ///
+    /// With scale=2 and non-integer-centered drop (via translation):
+    /// pixfrac=1.0 → drop_size=2.0: large drop hits many output pixels
+    /// pixfrac=0.3 → drop_size=0.6: small drop hits fewer output pixels
+    #[test]
+    fn test_pixfrac_changes_weight_distribution() {
+        // Use translation (0.1, 0.1) to avoid integer-centered drops
+        let transform = Transform::translation(DVec2::new(0.1, 0.1));
+
+        // pixfrac=1.0: drop_size=2.0, half=1.0
+        // Input (2,2) center (2.6,2.6) → output (5.2,5.2). Drop (4.2,4.2)→(6.2,6.2).
+        // Covers output pixels (4,4),(5,4),(6,4),(4,5),(5,5),(6,5),(4,6),(5,6),(6,6) = 9 pixels
+        let mut pixels1 = vec![0.0f32; 6 * 6];
+        pixels1[2 * 6 + 2] = 1.0;
+        let image1 = AstroImage::from_pixels(ImageDimensions::new(6, 6, 1), pixels1);
+
+        let config1 = DrizzleConfig::x2().with_pixfrac(1.0);
+        let mut acc1 = DrizzleAccumulator::new(ImageDimensions::new(6, 6, 1), config1);
+        acc1.add_image(image1, &transform, 1.0);
+        let r1 = acc1.finalize();
+        let out1 = r1.image.channel(0);
+        let covered_1 = out1.iter().filter(|&&v| v > 0.01).count();
+
+        // pixfrac=0.3: drop_size=0.6, half=0.3
+        // Drop (4.9,4.9)→(5.5,5.5): overlaps (4,4),(5,4),(4,5),(5,5) = 4 pixels
+        let mut pixels2 = vec![0.0f32; 6 * 6];
+        pixels2[2 * 6 + 2] = 1.0;
+        let image2 = AstroImage::from_pixels(ImageDimensions::new(6, 6, 1), pixels2);
+
+        let config2 = DrizzleConfig::x2().with_pixfrac(0.3);
+        let mut acc2 = DrizzleAccumulator::new(ImageDimensions::new(6, 6, 1), config2);
+        acc2.add_image(image2, &transform, 1.0);
+        let r2 = acc2.finalize();
+        let out2 = r2.image.channel(0);
+        let covered_2 = out2.iter().filter(|&&v| v > 0.01).count();
+
+        // pixfrac=1.0 should cover more output pixels than pixfrac=0.3
+        assert!(
+            covered_1 > covered_2,
+            "pixfrac=1.0 should cover more pixels ({}) than pixfrac=0.3 ({})",
+            covered_1,
+            covered_2
+        );
+    }
+
+    /// Test RGB channels are handled independently.
+    #[test]
+    fn test_rgb_channels_independent() {
+        let mut pixels = vec![0.0f32; 4 * 4 * 3];
+        // Set pixel (1,1) to (1.0, 2.0, 3.0). Index = (1*4+1)*3 = 15.
+        let idx = 15;
+        pixels[idx] = 1.0;
+        pixels[idx + 1] = 2.0;
+        pixels[idx + 2] = 3.0;
+        let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 3), pixels);
+
+        let config = DrizzleConfig::x2();
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 3), config);
+        acc.add_image(image, &Transform::identity(), 1.0);
+        let result = acc.finalize();
+
+        // Pixel (2,2) in output should have (1.0, 2.0, 3.0) (normalized by equal weight)
+        let r = result.image.channel(0);
+        let g = result.image.channel(1);
+        let b = result.image.channel(2);
+        let w = 8usize;
+        assert!(
+            (r[2 * w + 2] - 1.0).abs() < 1e-5,
+            "R should be 1.0, got {}",
+            r[2 * w + 2]
+        );
+        assert!(
+            (g[2 * w + 2] - 2.0).abs() < 1e-5,
+            "G should be 2.0, got {}",
+            g[2 * w + 2]
+        );
+        assert!(
+            (b[2 * w + 2] - 3.0).abs() < 1e-5,
+            "B should be 3.0, got {}",
+            b[2 * w + 2]
+        );
+    }
+
+    /// Test scale=1 with pixfrac=1 (shift-and-add equivalent).
+    ///
+    /// At scale=1, pixfrac=1: drop_size=1.0, covering exactly one output pixel per input pixel.
+    /// With identity transform, output should exactly equal input.
+    #[test]
+    fn test_scale1_pixfrac1_identity() {
+        let pixels: Vec<f32> = (0..25).map(|i| i as f32).collect();
+        let image = AstroImage::from_pixels(ImageDimensions::new(5, 5, 1), pixels.clone());
+
+        let config = DrizzleConfig {
+            scale: 1.0,
+            pixfrac: 1.0,
+            kernel: DrizzleKernel::Turbo,
+            fill_value: 0.0,
+            min_coverage: 0.0,
+        };
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(5, 5, 1), config);
+        acc.add_image(image, &Transform::identity(), 1.0);
+        let result = acc.finalize();
+
+        let out = result.image.channel(0);
+        // Each input pixel center (ix+0.5, iy+0.5) → same in output.
+        // drop_size=1.0, half=0.5: drop from (ix, iy) to (ix+1, iy+1).
+        // Overlaps exactly output pixel (ix, iy) with area 1.0.
+        // inv_area = 1.0. weight = 1.0. output = value * 1.0 / 1.0 = value.
+        for (i, (&actual, &expected)) in out.iter().zip(pixels.iter()).enumerate() {
+            assert!(
+                (actual - expected).abs() < 1e-5,
+                "Pixel {} should be {}, got {}",
+                i,
+                expected,
+                actual
+            );
+        }
+    }
+
+    /// Test that custom fill_value appears in uncovered pixels.
+    ///
+    /// Point kernel at scale=2 leaves gaps (even-coordinate pixels uncovered).
+    /// With fill_value = -999.0, those gaps should contain -999.0 instead of 0.0.
+    #[test]
+    fn test_fill_value_in_uncovered_pixels() {
+        let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), vec![1.0; 16]);
+
+        let config = DrizzleConfig {
+            scale: 2.0,
+            pixfrac: 0.8,
+            kernel: DrizzleKernel::Point,
+            fill_value: -999.0,
+            min_coverage: 0.0,
+        };
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
+        acc.add_image(image, &Transform::identity(), 1.0);
+        let result = acc.finalize();
+
+        let out = result.image.channel(0);
+        let w = 8usize;
+
+        // Point kernel: input (ix,iy) → output (2*ix+1, 2*iy+1).
+        // Covered pixel (1,1): value = 1.0
+        assert!(
+            (out[w + 1] - 1.0).abs() < f32::EPSILON,
+            "Covered pixel should be 1.0, got {}",
+            out[w + 1]
+        );
+        // Uncovered pixel (0,0): fill_value = -999.0
+        assert!(
+            (out[0] - (-999.0)).abs() < f32::EPSILON,
+            "Uncovered pixel should be -999.0, got {}",
+            out[0]
+        );
+        // Uncovered pixel (2,2): fill_value = -999.0
+        assert!(
+            (out[2 * w + 2] - (-999.0)).abs() < f32::EPSILON,
+            "Uncovered pixel (2,2) should be -999.0, got {}",
+            out[2 * w + 2]
+        );
+    }
+
+    /// Test that a zero-weight frame does not affect the output.
+    ///
+    /// Frame 1: uniform 3.0, weight 1.0
+    /// Frame 2: uniform 100.0, weight 0.0
+    /// Result should be 3.0 everywhere (zero-weight frame contributes nothing).
+    #[test]
+    fn test_zero_weight_frame_ignored() {
+        let image1 = AstroImage::from_pixels(ImageDimensions::new(8, 8, 1), vec![3.0; 64]);
+        let image2 = AstroImage::from_pixels(ImageDimensions::new(8, 8, 1), vec![100.0; 64]);
+
+        let config = DrizzleConfig::x2();
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(8, 8, 1), config);
+        acc.add_image(image1, &Transform::identity(), 1.0);
+        acc.add_image(image2, &Transform::identity(), 0.0);
+        let result = acc.finalize();
+
+        let out = result.image.channel(0);
+        // Interior pixel: should be 3.0, not influenced by the 100.0 frame
+        let center = out[8 * 16 + 8];
+        assert!(
+            (center - 3.0).abs() < 1e-5,
+            "Zero-weight frame should not affect output, got {}",
+            center
+        );
+    }
+
+    /// Test Gaussian kernel with translation on a uniform image.
+    ///
+    /// Uniform value 4.0, translation (1.0, 0.5), scale=2, pixfrac=0.8.
+    /// For a uniform image, the Gaussian-weighted mean at every interior pixel
+    /// is 4.0 (weighted average of identical values).
+    /// This tests that Gaussian + translation still preserves uniform values.
+    #[test]
+    fn test_gaussian_kernel_with_translation() {
+        let image = AstroImage::from_pixels(ImageDimensions::new(12, 12, 1), vec![4.0; 144]);
+
+        let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Gaussian);
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(12, 12, 1), config);
+        let transform = Transform::translation(DVec2::new(1.0, 0.5));
+        acc.add_image(image, &transform, 1.0);
+        let result = acc.finalize();
+
+        let out = result.image.channel(0);
+        let w = 24usize;
+
+        // Interior pixel well inside the translated region: should be ~4.0
+        let center = out[12 * w + 14];
+        assert!(
+            (center - 4.0).abs() < 0.05,
+            "Gaussian interior with translation should be ~4.0, got {}",
+            center
+        );
+
+        // Another interior pixel
+        let other = out[10 * w + 10];
+        assert!(
+            (other - 4.0).abs() < 0.05,
+            "Gaussian interior pixel should be ~4.0, got {}",
+            other
+        );
+
+        // Pixel far outside the translated input region: should be fill_value (0.0)
+        // Translation (1.0, 0.5) shifts input right+down. Output pixel (0,0) is far from any input.
+        assert!(
+            out[0].abs() < 1e-5,
+            "Far pixel should be 0.0, got {}",
+            out[0]
+        );
+    }
+
+    /// Test Lanczos kernel with translation preserves value for a uniform image.
+    ///
+    /// Uniform image value 7.0, translation (0.3, -0.2), scale=1, pixfrac=1.
+    /// Interior pixels should still be ~7.0 since the weighted mean of uniform values is invariant.
+    #[test]
+    fn test_lanczos_kernel_with_translation() {
+        let image = AstroImage::from_pixels(ImageDimensions::new(20, 20, 1), vec![7.0; 400]);
+
+        let config = DrizzleConfig {
+            scale: 1.0,
+            pixfrac: 1.0,
+            kernel: DrizzleKernel::Lanczos,
+            fill_value: 0.0,
+            min_coverage: 0.0,
+        };
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(20, 20, 1), config);
+        let transform = Transform::translation(DVec2::new(0.3, -0.2));
+        acc.add_image(image, &transform, 1.0);
+        let result = acc.finalize();
+
+        let out = result.image.channel(0);
+        // Interior pixel well away from borders (Lanczos radius=3, so stay 4+ pixels inside)
+        let center = out[10 * 20 + 10];
+        assert!(
+            (center - 7.0).abs() < 0.05,
+            "Lanczos with translation should preserve uniform value ~7.0, got {}",
+            center
+        );
+
+        // Another interior pixel
+        let other = out[8 * 20 + 12];
+        assert!(
+            (other - 7.0).abs() < 0.05,
+            "Lanczos interior pixel should be ~7.0, got {}",
+            other
+        );
     }
 }
