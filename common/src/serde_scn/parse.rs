@@ -334,6 +334,9 @@ impl<'a> Lexer<'a> {
         if self.pos < self.input.len() && self.input[self.pos] == b'.' {
             is_float = true;
             self.advance();
+            if self.pos >= self.input.len() || !self.input[self.pos].is_ascii_digit() {
+                return Err(self.error("expected digit after '.'"));
+            }
             while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
                 self.advance();
             }

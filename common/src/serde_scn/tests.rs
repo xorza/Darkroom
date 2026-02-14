@@ -457,6 +457,17 @@ fn error_trailing_garbage() {
 }
 
 #[test]
+fn error_trailing_dot_float() {
+    // "1." must be rejected — require at least one digit after dot
+    let result = from_str::<f64>("1.");
+    assert!(result.is_err(), "trailing dot should be rejected");
+    let result = from_str::<f64>("-3.");
+    assert!(result.is_err(), "negative trailing dot should be rejected");
+    // "1.0" is fine
+    assert_eq!(from_str::<f64>("1.0").unwrap(), 1.0);
+}
+
+#[test]
 fn error_leading_zeros() {
     let result = from_str::<i32>("007");
     assert!(result.is_err());
