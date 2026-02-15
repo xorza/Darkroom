@@ -11,14 +11,14 @@ by scale-invariant side ratios, indexed in a k-d tree, matched via vote accumula
 - `geometry.rs` -- `Triangle` struct: side ratio invariants, orientation, degeneracy filters
 - `matching.rs` -- Triangle formation via KNN k-d tree, `match_triangles()` entry point
 - `voting.rs` -- Vote matrix (dense/sparse), invariant k-d tree, correspondence voting
-- `tests.rs` -- 40+ tests: transforms, noise, outliers, edge cases, stress tests
+- `tests.rs` -- 40+ tests: transforms, noise, outliers, edge cases, parameter sensitivity
 
 ## Algorithm Description
 
-### Step 1: Triangle Formation (`matching.rs:99-133`)
+### Step 1: Triangle Formation (`matching.rs:102-138`)
 Build spatial k-d tree on star positions. For each star i, find k nearest neighbors.
 For each pair of neighbors (j, k), form triangle (i, j, k). Normalize to sorted indices
-[min, mid, max] and deduplicate via `HashSet`. Adaptive k = clamp(min(n_ref, n_target)/3, 5, 20).
+[min, mid, max] and deduplicate via sort+dedup. Adaptive k = clamp(min(n_ref, n_target)/3, 5, 10).
 
 ### Step 2: Invariant Computation (`geometry.rs:32-117`)
 For each triangle:
@@ -62,7 +62,10 @@ Confidence = votes / max_votes_in_set.
 ### Groth (1986) -- Original Triangle Algorithm
 
 Forms ALL O(n^3) triangles. Features: R = longest/shortest, C = cosine of angle between
-longest and shortest sides. Filters: R < 10, C < 0.99. Voting: matched pair casts 3 votes.
+longest and shortest sides. Filters: R < 10 (some implementations use R < 8), C < 0.99.
+Voting: each matched triangle pair casts 3 votes, one per vertex correspondence. Vertex
+labeling reduces false matches by factor of 6: vertices A-B define shortest side, B-C
+longest, A-C intermediate.
 
 **vs ours:** We use Valdes (s0/s2, s1/s2) convention instead of (R, C) -- equivalent 2 DOF.
 KNN O(n*k^2) formation vs O(n^3). We implement R=10 filter but NOT C<0.99. Our Heron's
@@ -72,138 +75,168 @@ area check covers most cases but has a small gap (see Issue 5). Vertex labeling 
 ### Valdes et al. (1995) -- FOCAS
 
 Ratios (b/a, c/a) in [0,1] with geometric hash bins. Our (s0/s2, s1/s2) is the same
-convention with swapped axes. K-d tree is better than hash bins (no boundary artifacts).
+convention. K-d tree is better than hash bins (no boundary artifacts). Valdes took a
+subsample of brightest objects for initial matching, then matched all objects using the
+derived transformation -- same as our pipeline (triangle match -> RANSAC -> recovery).
 
 ### Tabur (2007) -- Optimistic Pattern Matching
 
-OPM-A uses rarity-ordered search: rare triangles processed first (fewer candidates = fast
-rejection). Optimistic early termination when good match found. 100% success on 10,063
-images, mean 6ms. **vs ours:** We process all triangles in arbitrary order, no early
+OPM-A uses a cosine metric that reduces density in invariant space, and rarity-ordered
+search: rare triangles processed first (fewer candidates = fast rejection). Optimistic
+early termination when good match found. 100% success on 10,063 images, mean 6ms. Lists
+of 10-200 points. **vs ours:** We process all triangles in arbitrary order, no early
 termination. Full voting is more robust but slower. Adequate for our 50-200 star use case.
 
 ### Astroalign (Beroiz et al. 2020)
 
-Python. Fixed k=5, C(5,3)=10 triangles/star. Invariant: (L2/L1, L1/L0) >= 1. K-d tree
-ball query r=0.1 (~5% relative tolerance). No degeneracy filters. RANSAC verification.
-**vs ours:** Our k is adaptive (5-20), tolerance tighter (0.01 vs ~5%), we have degeneracy
+Python. Fixed k=5 (NUM_NEAREST_NEIGHBORS=5 including self), C(5,3)=10 triangles/star.
+Invariant: (L2/L1, L1/L0) = (longest/middle, middle/shortest) -- ratios >= 1. K-d tree
+ball query r=0.1 (~5% relative tolerance). No explicit degeneracy filters (duplicates
+removed). RANSAC on triangle matches directly: each iteration picks one triangle match,
+tests remaining against transformation. Acceptance: 80% of matches or 10 (whichever lower).
+MAX_CONTROL_POINTS=50.
+**vs ours:** Our k is adaptive (5-10), tolerance tighter (0.01 vs ~5%), we have degeneracy
 filters. We use voting+greedy; they use RANSAC on triangle matches directly.
 
 ### Astrometry.net (Lang et al. 2010)
 
-4-star quads: two most distant stars define frame, two inner stars give 4D hash code.
-Dramatically higher discriminating power. Bayesian verification (odds > 10^9). Designed
-for blind all-sky solving. Not directly comparable to our image-to-image use case.
+4-star quads: two most distant stars (A, B) define a local coordinate system where (A,B)
+maps to origin and (1,1). Positions of stars C, D in this frame give 4D hash code
+(xC, yC, xD, yD). Hash code is invariant under translation, rotation, and scale.
+Dramatically higher discriminating power than triangles. Bayesian verification (log-odds
+test). 99.9% success rate for blind all-sky solving with no false positives.
+Not directly comparable to our image-to-image use case.
 
-### PixInsight StarAlignment (v1.9.0, Dec 2024)
+### PixInsight StarAlignment
 
-Polygon descriptors (default pentagon = 6D, 3x discriminating power of triangles). RANSAC.
-v1.9.0 added TPS distortion correction. Cannot handle mirrors (falls back to triangles).
+Polygon descriptors (default pentagon = 6D, 3x discriminating power of triangles). A
+polygon with N stars associates N-2 triangles, so quad = 2 triangles = half the
+uncertainty. RANSAC. Cannot handle mirrors (falls back to triangles for mirrored images).
+v1.9.0 added TPS distortion correction.
 **vs ours:** Higher discriminating power but we handle mirrors via orientation toggle.
 
-### Siril (v1.4, 2024-2025)
+### Siril (v1.4-1.5)
 
-Brute-force O(n^3) on brightest 20 stars. Triangle similarity + RANSAC. v1.4 added
-5th-order SIP distortion, Drizzle, Gaia DR3. **vs ours:** Same pipeline, our KNN scales
-to 200+ stars while Siril is limited to ~20.
+Brute-force O(n^3) on brightest 20 stars. Triangle similarity + RANSAC. Based on Michael
+Richmond's match program. v1.4 added 5th-order SIP distortion, Drizzle, Gaia DR3.
+**vs ours:** Same pipeline, our KNN scales to 200+ stars while Siril is limited to ~20.
 
 ### ASTAP (Han Kleijn)
 
-Tetrahedron (4-star) hash: 6 distances normalized by largest yield 5 ratios (5D). ~2.5x
-discriminating power. Hash-based indexing. SIP distortion. 2024: 20% speed improvement.
+Tetrahedron (4-star) hash: takes 500 brightest stars, creates ~300 tetrahedron figures.
+6 distances between 4 stars, normalized by largest, yield 5 ratios (5D). ~2.5x
+discriminating power vs triangles. Hash-based indexing. SIP distortion.
 
-### starmatch (PyPI 2024-2025)
+### starmatch (PyPI)
 
-Supports triangle and quad modes. HEALPix hierarchical blind matching. Multi-pass
-tolerances (60px/20px/3px). GPR distortion calibration. **vs ours:** Single fixed
-tolerance; multi-pass could improve robustness.
+Supports triangle and quad modes. HEALPix hierarchical blind matching with pre-divided
+celestial sphere. Multi-pass tolerances. GPR distortion calibration.
+**vs ours:** Single fixed tolerance; multi-pass could improve robustness.
 
 ### GMTV (2022) -- Global Multi-Triangle Voting
 
-PCA-based feature extraction (more noise-robust than raw ratios). K-vector accelerated
-search. **Weighted voting** by selectivity (1/density): rare triangles get higher weight.
-Largest cluster verification. **vs ours:** We use uniform weights; selectivity weighting
-would reduce false matches from common near-equilateral triangles.
+PCA-based feature extraction from triangle units (more noise-robust than raw ratios).
+2D lookup table + fuzzy match strategy. PCA invariants are rotation-invariant and robust
+to noise. K-vector accelerated search. **Weighted voting** by selectivity: rare triangles
+get higher weight, common near-equilateral triangles get lower weight.
+**vs ours:** We use uniform weights; selectivity weighting would reduce false matches.
 
 ## Issues Found
 
-### Issue 1: Misleading Test Comments About Rotation and Orientation
-**Severity:** Medium | **Location:** `tests.rs:364` and `tests.rs:1050`
-
-```rust
-check_orientation: false, // Rotation changes orientation   // WRONG
-check_orientation: false, // Must disable for 180 degree rotation  // WRONG
-```
-
-Pure rotations preserve orientation (det = +1). The tests use a symmetric pattern (square
-+ center) creating ambiguous correspondences among identical isosceles right triangles.
-The orientation check rejects valid matches to different vertex permutations of the
-symmetric pattern -- it's a symmetry issue, not a rotation issue.
-**Fix:** Correct comments. Add asymmetric-pattern rotation test with `check_orientation: true`.
-
-### Issue 2: Default ratio_tolerance (0.01) Is Too Tight
+### Issue 1: Default ratio_tolerance (0.01) May Be Too Tight
 **Severity:** Medium | **Location:** `mod.rs:36`
 
 Sub-pixel centroid noise (~0.3px) on 50px sides gives ratio errors of ~0.006 = 60% of
-tolerance. Astroalign uses ~5% relative tolerance. Our `precise_wide_field` relaxes to 0.02.
-**Recommendation:** Increase default to 0.02.
+tolerance. Astroalign uses ~5% relative tolerance (r=0.1 in their unit space). Our
+`precise_wide_field` preset relaxes to 0.02. The tight default works for clean data with
+well-separated stars but may miss valid matches in noisy or crowded fields.
+**Note:** The current value is conservative by design -- downstream RANSAC handles the
+case where some true matches are missed. A tighter tolerance means fewer false positives
+in the vote matrix, so this is a precision vs recall tradeoff.
+**Recommendation:** Consider increasing default to 0.015 or 0.02.
 
-### Issue 3: Adaptive k Produces Excessive Triangles
-**Severity:** Low | **Location:** `matching.rs:60`
-
-For 150 stars: k=20, C(20,2)=190 triangles/star. After dedup: 5K-10K unique. This is
-10-19x more than Astroalign's C(5,3)=10. Diminishing returns past k~8-10.
-
-### Issue 4: HashSet Deduplication Overhead
-**Severity:** Low | **Location:** `matching.rs:108,127`
-
->50% duplicate inserts for large k. Alternative: Vec sort+dedup, or generate only when
-central star has smallest index (avoids duplicates by construction).
-
-### Issue 5: Missing Groth C<0.99 Cosine Filter
+### Issue 2: Missing Groth C<0.99 Cosine Filter
 **Severity:** Low | **Location:** `geometry.rs:68-83`
 
-Gap: triangle (5, 4, 1) has R=5 < 10, area^2=3.9 >> 1e-6, but cos(angle)=1.0 >= 0.99.
-Passes our filters, rejected by Groth. Rare in KNN sets; Astroalign uses no filters at all.
+Gap: a triangle with sides (5, 4, 1) has R=5 < 10, area^2=3.9 >> 1e-6, but
+cos(angle_between_longest_and_shortest)=1.0 >= 0.99. Passes our filters, rejected by
+Groth. Rare in KNN sets because KNN produces compact local triangles rather than
+long-thin ones. Astroalign uses no filters at all and works fine.
 **If desired:** `let cos_v1 = (s0*s0 + s2*s2 - s1*s1) / (2.0*s0*s2); if cos_v1 > 0.99 { return None; }`
+
+### Issue 3: No Configurable k_neighbors
+**Severity:** Low | **Location:** `matching.rs:63`
+
+The k value is hardcoded as `clamp(min(n_ref, n_target)/3, 5, 10)`. This is not exposed
+in `TriangleParams`. For dense fields a higher k might help; for sparse fields lower k
+saves computation. The current adaptive formula is reasonable for the 50-200 star range.
+Not a bug, but inflexible.
+
+### Issue 4: VoteMatrix Dense Overflow Check Is debug_assert Only
+**Severity:** Low | **Location:** `voting.rs:61-67`
+
+The dense vote matrix uses u16 with saturating_add, and the overflow check is only a
+debug_assert. In release mode, votes silently saturate at 65535. For typical use (200
+stars, k=10), max votes per pair ~= 45 triangles/star = well under u16::MAX. The
+saturating_add is intentional (safe behavior), and the debug_assert catches logic errors
+during development. No actual bug, but worth noting.
 
 ## What We Do Correctly
 
-1. **KNN triangle formation** -- O(n*k^2) vs Groth's O(n^3). Standard modern approach.
-2. **Valdes invariant convention** -- (s0/s2, s1/s2) in [0,1]. Canonical formulation.
-3. **R=10 elongation filter** -- Matches Groth's original paper.
-4. **Heron's area check** -- Catches near-collinear triangles. Numerically adequate for
-   rejection (cancellation inflates area = safe direction). Small gap vs C<0.99 (Issue 5).
-5. **K-d tree invariant lookup** -- O(log n), no bin boundary artifacts. Better than hash bins.
-6. **L2/L-inf sqrt(2) correction** -- Mathematically correct circumscription.
-7. **Deterministic vertex ordering** -- Geometric role + index tiebreak. All 6 permutations
-   produce identical output.
-8. **Orientation check** -- Optional CW/CCW filter. Not found in Astroalign.
-9. **Dense/sparse vote matrix** -- Auto-switching at 250K. Not in reference implementations.
+1. **KNN triangle formation** -- O(n*k^2) vs Groth's O(n^3). Standard modern approach
+   (same as Astroalign). Scales to 200+ stars.
+2. **Valdes invariant convention** -- (s0/s2, s1/s2) in [0,1]. Canonical formulation,
+   same as Siril and standard references.
+3. **R=10 elongation filter** -- Matches Groth's original paper. Rejects triangles where
+   small perturbations cause large ratio changes.
+4. **Heron's area check** -- Catches near-collinear triangles. Numerically stable for
+   rejection. Small gap vs C<0.99 (Issue 2) but rare in KNN-formed triangles.
+5. **K-d tree invariant lookup** -- O(log n) radius queries, no bin boundary artifacts.
+   Better than Valdes hash bins and Siril brute-force.
+6. **L2/L-inf sqrt(2) correction** -- Mathematically correct: L2 ball radius = tolerance
+   * sqrt(2) circumscribes the L-inf tolerance square. Ensures no valid candidates missed.
+7. **Deterministic vertex ordering** -- Geometric role (opposite shortest/middle/longest
+   side) + index tiebreak for equal sides. All 6 input permutations produce identical
+   output. Tests verify this explicitly.
+8. **Orientation check** -- Optional CW/CCW filter prevents mirror-image matches. Not
+   found in Astroalign (they use affine model), not found in Siril. Useful for
+   same-camera registration where mirrors are not expected.
+9. **Dense/sparse vote matrix** -- Auto-switching at 250K entries. Dense for direct O(1)
+   indexing on small sets, sparse HashMap for memory efficiency on large sets. Practical
+   optimization not in reference implementations.
 10. **Greedy resolution** -- Standard across Groth, Valdes, LSST, Kolomenkin (2008),
-    multilayer voting (2021). Hungarian O(n^3) gives negligible improvement with RANSAC.
+    multilayer voting (2021). Hungarian O(n^3) gives negligible improvement when
+    downstream RANSAC handles outliers.
+11. **Sort+dedup for triangle deduplication** -- More cache-friendly and lower overhead
+    than HashSet for the ~50% duplication rate typical of KNN-formed triangles.
+12. **No unnecessary complexity** -- Implementation is lean. No redundant two-step
+    refinement (removed; RANSAC handles this). No hash table (replaced by k-d tree).
 
 ## What We Should Consider Adding
 
 1. **Weighted voting by triangle rarity** (Medium priority) -- GMTV weights by 1/density
-   in feature space. Reduces false matches from common near-equilateral triangles.
-2. **Quad descriptors** (Low) -- 4 DOF vs 2 DOF. Only needed for dense fields or blind solving.
-3. **Tabur-style ordered search** (Low) -- Rare triangles first + early termination.
-4. **Global triangles from brightest stars** (Low) -- Coarse anchors for ambiguous KNN fields.
+   in feature space. Reduces false matches from common near-equilateral triangles. Could
+   be computed cheaply: count how many reference triangles fall within each triangle's
+   tolerance radius, use inverse as weight.
 
-## What We Do Unnecessarily
+2. **Quad descriptors** (Low) -- 4 DOF vs 2 DOF. Higher discriminating power. Used by
+   Astrometry.net (4D hash), ASTAP (5D hash), starmatch, PixInsight (N-gon). Only needed
+   for dense fields or when false positive rate from triangles is too high.
 
-Nothing identified. Implementation is lean. Only arguable excess is high k for moderate
-star counts (Issue 3) -- constant-factor overhead, not algorithmic complexity.
+3. **Tabur-style ordered search** (Low) -- Process rare triangles first + early
+   termination when sufficient matches found. Tabur achieves 6ms on 200 stars. Our
+   full voting is fast enough for current use case but this could help at scale.
 
-## Prioritized Improvements
+4. **Global triangles from brightest stars** (Low) -- Form a few triangles from the 5-10
+   brightest stars (large-scale structure) in addition to KNN local triangles. Provides
+   coarse anchors for ambiguous local KNN neighborhoods.
 
-1. **Fix test comments** (Issue 1) -- Trivial, prevents confusion.
-2. **Increase default tolerance to 0.02** (Issue 2) -- One-line change, improves robustness.
-3. **Reduce k or benchmark k=8** (Issue 3) -- May cut triangle count 4x.
-4. **Weighted voting** -- Medium effort, meaningful quality improvement.
-5. **Replace HashSet dedup** (Issue 4) -- Minor perf, optional.
-6. **Add C<0.99 filter** (Issue 5) -- One-line, marginal improvement.
-7. **Quad descriptors** -- Large effort, only if dense fields are a problem.
+## What We Do NOT Need
+
+Nothing identified as unnecessary. The implementation follows industry standards without
+excess complexity. The only arguable overhead is forming more triangles than strictly
+necessary when k=10 for moderate star counts, but this is a constant factor, not an
+algorithmic issue.
 
 ## References
 
@@ -231,3 +264,5 @@ star counts (Issue 3) -- constant-factor overhead, not algorithmic complexity.
 - Siril. [Docs](https://siril.readthedocs.io/en/latest/preprocessing/registration.html)
 - LSST MatchOptimisticBTask (pairs, not triangles).
   [Source](https://github.com/lsst/meas_astrom/blob/main/src/matchOptimisticB.cc)
+- ASTAP. [Algorithm](https://www.hnsky.org/astap_astrometric_solving.htm)
+- starmatch. [PyPI](https://pypi.org/project/starmatch/)
