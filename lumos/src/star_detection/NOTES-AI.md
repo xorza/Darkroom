@@ -470,6 +470,15 @@ MAX_TILE_SAMPLES=1024 cap.
 9. **Formal DAOFIND sharpness/roundness**: Current custom metrics work for filtering but
    published DAOFIND thresholds aren't transferable.
 
+10. **Two-sided FWHM outlier filter**: Current filter is upper-bound only (`s.fwhm <= max_fwhm`).
+    Stars with abnormally small FWHM (hot pixels surviving sharpness filter) are not rejected.
+    Add `min_fwhm = median - max_deviation * effective_mad`, clamped to >= 0.5 pixels.
+11. **FWHM estimation fallback is hardcoded**: When too few stars are found for auto-estimation,
+    a fallback FWHM of 4.0 pixels is hardcoded in `estimate_from_bright_stars`. Should use
+    `config.expected_fwhm` or a configurable parameter.
+12. **Unused `min_unmasked_fraction` config field**: Declared, validated, but never read
+    by any code. See background/NOTES-AI.md issue 8.
+
 ### NOT NEEDED for registration
 
 - Isophotal/Kron/Petrosian photometry
@@ -529,7 +538,8 @@ All core algorithms verified against reference implementations:
 | RLE + union-find CCL | Correct | Property-based + ground-truth flood-fill validation |
 | AtomicUnionFind | Correct | No ABA problem (monotonic parent invariant) |
 | Multi-threshold tree | Correct | Exponential spacing matches SExtractor |
-| Sorting network median9 | Correct | Both 21 and 25-comparator networks |
+| Sorting network median9 (25-comp) | Correct | Used in all SIMD paths and scalar fallback |
+| Sorting network median9 (21-comp) | **BUG (dormant)** | Wrong anti-diagonal sort in step 3; unreachable in production (edge pixels have ≤6 neighbors) |
 | Matched filter normalization | Correct | `output / sqrt(sum(K^2))` matches SEP approach |
 | Mirror boundary convolution | Correct | Preserves flux for sum=1 kernels |
 | Separable decomposition | Correct | axis_ratio >= 0.99 dispatches to separable path |
@@ -538,9 +548,14 @@ All core algorithms verified against reference implementations:
 
 - Separation metric: Chebyshev (multi-threshold) vs Euclidean (local maxima) -- minor,
   both err on the side of merging close peaks.
-- Two different median9 sorting networks (21 vs 25 comparators) -- both correct.
+- Two different median9 sorting networks: 25-comparator (correct, used everywhere) vs
+  21-comparator (dormant bug in `mod.rs:median9`, unreachable in production).
 - Sharpness and roundness metrics differ from DAOFIND definitions -- custom definitions
   are effective for filtering but published threshold values aren't transferable.
+- FWHM outlier filter is one-sided (upper bound only) -- stars with abnormally small
+  FWHM are not rejected.
+- Roundness naming swapped vs photutils: `roundness1` here = GROUND in photutils,
+  `roundness2` here = SROUND.
 
 ## References
 

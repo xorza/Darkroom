@@ -225,7 +225,36 @@ all-pixels sampling when there are literally zero unmasked pixels. Removed the `
 parameter from `compute_tile_stats`, `fill_tile_stats`, and `TileGrid::compute`. The
 `min_unmasked_fraction` config field remains but is no longer used internally.
 
-### 8. No Convergence Check Across Refinement Iterations
+### 8. `min_unmasked_fraction` Config Field is Unused
+
+The `min_unmasked_fraction` field in Config (config.rs:195) is declared, validated, and
+set to 0.3 by default, but no code reads it. It was originally used in the mask fallback
+logic that was subsequently fixed (Issue 7 above). Should be removed from Config or
+repurposed.
+
+**Severity**: Low. Dead configuration that could confuse users.
+
+### 9. Per-Row Vec Allocations in interpolate_row
+
+`interpolate_row` (mod.rs:166-188) allocates 5 `Vec<f32>` per row: `node_bg`, `node_noise`,
+`centers_x`, `d2x_bg`, `d2x_noise`. With tiles_x typically 4-96 elements, these are small
+but multiply by image height (e.g., 6000 rows = 30,000 allocations). Could use thread-local
+scratch buffers, `ArrayVec`, or `SmallVec` for typical tile counts.
+
+**Severity**: Low. Each allocation is tiny (4-96 floats). Profile before optimizing.
+
+### 10. No NaN/Inf Handling in Input Pixels
+
+The module does not check for NaN/Inf in input pixels. SEP explicitly ignores pixels
+<= -1e30 and NaN. If NaN pixels reach `median_f32_fast` (used in sigma clipping), the
+`partial_cmp` comparator treats NaN as Equal, potentially corrupting the median. The
+final `median_f32_mut` uses `total_cmp` (sorts NaN after all values) but the fast path
+does not.
+
+**Severity**: Medium if input can contain NaN (from calibration pipelines, bad pixels).
+Low if caller guarantees clean data.
+
+### 11. No Convergence Check Across Refinement Iterations
 
 The refinement loop (mod.rs lines 79-98) runs for a fixed number of iterations without
 checking whether the background estimate has converged between iterations. Adding an
