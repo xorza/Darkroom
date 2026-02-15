@@ -117,14 +117,27 @@ pub fn checkerboard_offset(
     Buffer2::new(width, height, pixels)
 }
 
-/// Add deterministic noise to an image buffer.
+/// Add deterministic uniform noise to an image buffer.
 ///
 /// Uses a simple LCG-based hash for reproducible noise.
+/// Each pixel gets a random offset in `[-amplitude, +amplitude]`.
 pub fn add_noise(pixels: &mut Buffer2<f32>, amplitude: f32, seed: u64) {
     let mut rng = crate::testing::TestRng::new(seed);
     for p in pixels.iter_mut() {
         let hash = rng.next_f32();
         *p += (hash - 0.5) * 2.0 * amplitude;
+    }
+}
+
+/// Add deterministic Gaussian noise to a pixel slice.
+///
+/// Uses Box-Muller transform via `TestRng::next_gaussian_f32()`.
+/// This is the canonical noise helper — all test code should use this
+/// instead of reimplementing Gaussian noise locally.
+pub fn add_gaussian_noise(pixels: &mut [f32], sigma: f32, seed: u64) {
+    let mut rng = crate::testing::TestRng::new(seed);
+    for p in pixels.iter_mut() {
+        *p += rng.next_gaussian_f32() * sigma;
     }
 }
 

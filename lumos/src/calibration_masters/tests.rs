@@ -2,18 +2,8 @@ use crate::astro_image::cfa::{CfaImage, CfaType};
 use crate::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
 use crate::calibration_masters::DefectMap;
 use crate::common::Buffer2;
+use crate::testing::constant_cfa;
 use crate::{AstroImageMetadata, CalibrationMasters};
-
-/// Helper to create a CfaImage filled with a constant value.
-fn constant_cfa(width: usize, height: usize, value: f32, cfa_type: CfaType) -> CfaImage {
-    CfaImage {
-        data: Buffer2::new_filled(width, height, value),
-        metadata: AstroImageMetadata {
-            cfa_type: Some(cfa_type),
-            ..Default::default()
-        },
-    }
-}
 
 #[test]
 fn test_new_constructor() {

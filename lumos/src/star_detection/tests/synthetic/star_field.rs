@@ -71,7 +71,11 @@ pub fn generate_star_field(config: &SyntheticFieldConfig, stars: &[SyntheticStar
 
     // Add noise if configured
     if config.noise_sigma > 0.0 {
-        add_noise(&mut pixels, config.noise_sigma);
+        crate::testing::synthetic::patterns::add_gaussian_noise(
+            &mut pixels,
+            config.noise_sigma,
+            12345,
+        );
     }
 
     // Clamp to valid range
@@ -107,15 +111,6 @@ fn add_gaussian_star(pixels: &mut [f32], width: usize, height: usize, star: &Syn
             let value = star.brightness * (-r_sq / two_sigma_sq).exp();
             pixels[y * width + x] += value;
         }
-    }
-}
-
-/// Add Gaussian noise to the image.
-#[allow(dead_code)]
-fn add_noise(pixels: &mut [f32], sigma: f32) {
-    let mut rng = crate::testing::TestRng::new(12345);
-    for p in pixels.iter_mut() {
-        *p += rng.next_gaussian_f32() * sigma;
     }
 }
 

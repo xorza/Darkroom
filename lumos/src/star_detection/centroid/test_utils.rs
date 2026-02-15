@@ -2,10 +2,7 @@
 
 /// Add Gaussian noise to pixel values using a simple LCG PRNG.
 pub fn add_noise(pixels: &mut [f32], noise_sigma: f32, seed: u64) {
-    let mut rng = crate::testing::TestRng::new(seed);
-    for pixel in pixels.iter_mut() {
-        *pixel += rng.next_gaussian_f32() * noise_sigma;
-    }
+    crate::testing::synthetic::patterns::add_gaussian_noise(pixels, noise_sigma, seed);
 }
 
 /// Compare two f64 values with absolute + relative tolerance.

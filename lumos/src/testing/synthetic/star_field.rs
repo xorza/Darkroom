@@ -311,7 +311,7 @@ pub fn generate_star_field(config: &StarFieldConfig) -> (Buffer2<f32>, Vec<Groun
 
     // Add noise
     if config.noise_sigma > 0.0 {
-        add_gaussian_noise(&mut pixels, config.noise_sigma, config.seed + 2000);
+        super::patterns::add_gaussian_noise(&mut pixels, config.noise_sigma, config.seed + 2000);
     }
 
     // Clamp to valid range
@@ -391,14 +391,6 @@ fn generate_star_positions(
     }
 
     positions
-}
-
-/// Add Gaussian noise to pixels.
-fn add_gaussian_noise(pixels: &mut [f32], sigma: f32, seed: u64) {
-    let mut rng = crate::testing::TestRng::new(seed);
-    for p in pixels.iter_mut() {
-        *p += rng.next_gaussian_f32() * sigma;
-    }
 }
 
 /// Generate a specific test configuration: sparse field with well-separated stars.

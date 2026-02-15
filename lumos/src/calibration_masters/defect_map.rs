@@ -378,16 +378,7 @@ fn xtrans_same_color_median(pixels: &Buffer2<f32>, x: usize, y: usize, pattern: 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn make_cfa(width: usize, height: usize, pixels: Vec<f32>, cfa_type: CfaType) -> CfaImage {
-        CfaImage {
-            data: crate::common::Buffer2::new(width, height, pixels),
-            metadata: crate::astro_image::AstroImageMetadata {
-                cfa_type: Some(cfa_type),
-                ..Default::default()
-            },
-        }
-    }
+    use crate::testing::make_cfa;
 
     fn is_hot(hot_map: &DefectMap, pixel_idx: usize) -> bool {
         hot_map.hot_indices.binary_search(&pixel_idx).is_ok()

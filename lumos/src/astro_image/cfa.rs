@@ -315,16 +315,7 @@ impl CfaImage {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn make_cfa(width: usize, height: usize, pixels: Vec<f32>, cfa_type: CfaType) -> CfaImage {
-        CfaImage {
-            data: Buffer2::new(width, height, pixels),
-            metadata: AstroImageMetadata {
-                cfa_type: Some(cfa_type),
-                ..Default::default()
-            },
-        }
-    }
+    use crate::testing::make_cfa;
 
     // ====================================================================
     // CfaType tests

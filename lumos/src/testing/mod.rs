@@ -55,6 +55,8 @@ impl TestRng {
 use std::path::PathBuf;
 
 use crate::AstroImage;
+use crate::astro_image::AstroImageMetadata;
+use crate::astro_image::cfa::{CfaImage, CfaType};
 use crate::common::Buffer2;
 use crate::star_detection::detector::stages;
 use crate::star_detection::{BackgroundEstimate, BufferPool, Config};
@@ -66,6 +68,28 @@ use crate::star_detection::{BackgroundEstimate, BufferPool, Config};
 pub fn estimate_background(pixels: &Buffer2<f32>, config: &Config) -> BackgroundEstimate {
     let mut pool = BufferPool::new(pixels.width(), pixels.height());
     stages::background::estimate_background(pixels, config, &mut pool)
+}
+
+/// Create a CfaImage from raw pixel data and CFA type.
+pub fn make_cfa(width: usize, height: usize, pixels: Vec<f32>, cfa_type: CfaType) -> CfaImage {
+    CfaImage {
+        data: Buffer2::new(width, height, pixels),
+        metadata: AstroImageMetadata {
+            cfa_type: Some(cfa_type),
+            ..Default::default()
+        },
+    }
+}
+
+/// Create a CfaImage filled with a constant value.
+pub fn constant_cfa(width: usize, height: usize, value: f32, cfa_type: CfaType) -> CfaImage {
+    CfaImage {
+        data: Buffer2::new_filled(width, height, value),
+        metadata: AstroImageMetadata {
+            cfa_type: Some(cfa_type),
+            ..Default::default()
+        },
+    }
 }
 
 /// Returns the calibration directory from LUMOS_CALIBRATION_DIR env var.

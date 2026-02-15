@@ -17,7 +17,7 @@ pub fn uniform(width: usize, height: usize, background: f32, noise: f32) -> Back
     }
 }
 
-/// Create an BackgroundEstimate with a horizontal gradient in the background.
+/// Create a BackgroundEstimate with a horizontal gradient in the background.
 pub fn horizontal_gradient(
     width: usize,
     height: usize,
@@ -25,18 +25,8 @@ pub fn horizontal_gradient(
     bg_right: f32,
     noise: f32,
 ) -> BackgroundEstimate {
-    let mut bg_buf = Buffer2::new_default(width, height);
+    let bg_buf = super::patterns::horizontal_gradient(width, height, bg_left, bg_right);
     let mut noise_buf = Buffer2::new_default(width, height);
-    for y in 0..height {
-        for x in 0..width {
-            let t = if width > 1 {
-                x as f32 / (width - 1) as f32
-            } else {
-                0.5
-            };
-            bg_buf[(x, y)] = bg_left + t * (bg_right - bg_left);
-        }
-    }
     noise_buf.fill(noise);
     BackgroundEstimate {
         background: bg_buf,
@@ -44,7 +34,7 @@ pub fn horizontal_gradient(
     }
 }
 
-/// Create an BackgroundEstimate with a vertical gradient in the background.
+/// Create a BackgroundEstimate with a vertical gradient in the background.
 pub fn vertical_gradient(
     width: usize,
     height: usize,
@@ -52,19 +42,8 @@ pub fn vertical_gradient(
     bg_bottom: f32,
     noise: f32,
 ) -> BackgroundEstimate {
-    let mut bg_buf = Buffer2::new_default(width, height);
+    let bg_buf = super::patterns::vertical_gradient(width, height, bg_top, bg_bottom);
     let mut noise_buf = Buffer2::new_default(width, height);
-    for y in 0..height {
-        let t = if height > 1 {
-            y as f32 / (height - 1) as f32
-        } else {
-            0.5
-        };
-        let value = bg_top + t * (bg_bottom - bg_top);
-        for x in 0..width {
-            bg_buf[(x, y)] = value;
-        }
-    }
     noise_buf.fill(noise);
     BackgroundEstimate {
         background: bg_buf,
