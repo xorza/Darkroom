@@ -71,7 +71,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 1/5 — Change `unwrap_or(...)` to `.unwrap()` or `.expect()`
 - **Description**: `ComponentData::find_peak` and `find_region_peak` use fallback values for empty iterators. All callers guarantee non-empty components via area checks, so empty iteration is a logic error.
 
-#### [F4] Wasted `batch_compute_chi2` on first L-M iteration
+#### [F4] ~~Wasted `batch_compute_chi2` on first L-M iteration~~ DONE
 - **Location**: `centroid/lm_optimizer.rs:142-157`
 - **Category**: Simplification / Performance
 - **Impact**: 3/5 — Eliminates one full pass over stamp data on every star fit
@@ -87,7 +87,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 1/5 — Move functions to their respective `tests.rs` modules
 - **Description**: Three modules define `pub(crate)` test helper functions guarded by `#[cfg(test)]` in production source files.
 
-#### [F6] Hardcoded saturation threshold in `Star::is_saturated()`
+#### [F6] ~~Hardcoded saturation threshold in `Star::is_saturated()`~~ DONE
 - **Location**: `star.rs:38-40`
 - **Category**: Consistency
 - **Impact**: 3/5 — Saturation level varies by camera/bit-depth; 0.95 is arbitrary
@@ -111,7 +111,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 1/5 — Replace fwhm's private `compute_centroids` with `measure::measure()`
 - **Description**: Both functions do `regions.par_iter().filter_map(|r| measure_star(...)).collect()` with identical logic. The fwhm module maintains its own private copy.
 
-#### [F9] Misleading parameter name `total_pixels` in threshold_mask
+#### [F9] ~~Misleading parameter name `total_pixels` in threshold_mask~~ DONE
 - **Location**: `threshold_mask/mod.rs:39,66,104,176`, `threshold_mask/sse.rs:16,76`, `threshold_mask/neon.rs:15,79`
 - **Category**: Consistency / Naming
 - **Impact**: 3/5 — Name suggests total image pixel count; it's actually `row_end_index`

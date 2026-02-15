@@ -106,7 +106,7 @@ No critical bugs found. Most findings are maintainability improvements.
 - **Description**: Both `to_image()` and the `From` impl perform identical
   grayscale/RGB conversion and image construction. Only one should exist.
 
-#### [F6] Inconsistent variable naming `hot_map` in defect map tests
+#### [F6] ~~Inconsistent variable naming `hot_map` in defect map tests~~ DONE
 - **Location**: `calibration_masters/defect_map.rs:392-704`
 - **Category**: Consistency
 - **Impact**: 2/5 — Module was renamed from "hot pixel" to "defect" but tests lag
@@ -115,7 +115,7 @@ No critical bugs found. Most findings are maintainability improvements.
 - **Description**: Test variables use `hot_map` for `DefectMap` instances. The struct
   handles both hot AND cold pixels. Rename to `defect_map` for consistency.
 
-#### [F7] Missing `.expect()` messages on non-obvious unwraps
+#### [F7] ~~Missing `.expect()` messages on non-obvious unwraps~~ DONE
 - **Location**: `calibration_masters/defect_map.rs:131`,
   `testing/real_data/pipeline_bench.rs:32,79,123,175`
 - **Category**: Error handling
@@ -194,7 +194,7 @@ No critical bugs found. Most findings are maintainability improvements.
   returns `Result<_, imaginarium::Error>`. The external type leaks into the public
   API. Wrap it in an `ImageLoadError::Save` variant.
 
-#### [F14] Silent fallback when CFA type is `None` in defect correction
+#### [F14] ~~Silent fallback when CFA type is `None` in defect correction~~ DONE
 - **Location**: `calibration_masters/defect_map.rs:146-152`
 - **Category**: Error handling
 - **Impact**: 2/5 — Treats missing CFA as monochrome silently

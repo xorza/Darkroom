@@ -22,6 +22,8 @@ None remaining. All algorithms verified correct against industry references.
 - astro_image: Missing BAYERPAT/FILTER/GAIN/CCD-TEMP -> comprehensive FITS metadata parsing
 - astro_image: Float FITS data not normalized -> heuristic normalization (divide by max when max > 2.0)
 - math: sigma_clip_iteration index mismatch -> deviations recomputed after quickselect
+- math: sigma_clip_iteration ambiguous Option return -> `ClipResult` enum (Converged/Clipped/TooFew)
+- math: `sort_with_indices` NaN handling -> `total_cmp()` instead of `partial_cmp().unwrap()`
 - math: No compensated summation -> Neumaier scalar + Kahan SIMD hybrid
 - star_detection: Matched filter noise not scaled -> normalized by `sqrt(sum(K^2))`
 - star_detection: Hardcoded radius-1 dilation -> removed from detect stage
@@ -50,6 +52,11 @@ None remaining. All algorithms verified correct against industry references.
 - registration: Direct SVD for homography DLT -> Hartley normalization + SVD
 - registration: Affine estimator lacked Hartley normalization -> normalize_points() + denormalize
 - registration: FMA intrinsics in Lanczos3 SIMD kernel -> no-dering path uses `_mm_fmadd_ps`
+- registration: `warp_image` was `pub` but only used internally -> changed to `pub(crate)`
+- registration: Config `precise_wide_field()` built on `default()` -> now builds on `wide_field()`
+- registration: Redundant SIP clone in result -> `sip_correction` field removed, derived from `sip_fit`
+- registration: BoundedMaxHeap capacity+1 off-by-one -> fixed allocation
+- registration: TPS compute_residuals denormalize roundtrip -> direct evaluation in normalized space
 - calibration: Single-channel MAD across CFA -> per-CFA-color statistics
 - calibration: Sigma floor fails when median=0 -> added absolute floor `1e-4`
 - calibration: Per-CFA-channel flat normalization missing -> `divide_by_normalized_cfa()`
@@ -66,9 +73,11 @@ None remaining. All algorithms verified correct against industry references.
 - drizzle: add_image_* methods had 8-10 redundant params -> refactored to read dims from AstroImage
 - drizzle: Coverage averaged across channels -> uses channel 0 weights only
 - astro_image: `save()` cloned entire image -> `to_image(&self)` borrows pixel data
+- astro_image: `save()` returned `imaginarium::Error` -> `ImageLoadError::Save` variant wraps it
 - testing: 16 inline LCG RNG implementations -> `TestRng` struct in `testing/mod.rs`
 - testing: DVec2/Star transform functions duplicated 6x -> `Positioned` trait with generic `_impl`
 - star_detection: Duplicate test helpers -> import from `common/output/image_writer.rs`
+- star_detection: 3 different UnsafeSendPtr patterns -> consolidated into shared `common::UnsafeSendPtr<T>`
 - calibration_masters: Unused imports and unnecessary `.clone().unwrap()` -> cleaned up
 - math: `pub mod scalar` in sum exposed detail -> `pub(super) mod scalar`
 - astro_image: `CfaImage::demosaic()` unhelpful panic -> descriptive `.expect()` message
@@ -185,7 +194,7 @@ None remaining. All algorithms verified correct against industry references.
 | registration | None | All 5 estimators + MAGSAC++ verified (SupeRANSAC 2025) | Full pipeline at PixInsight parity | Output framing, stale READMEs |
 | star_detection | None | Pipeline matches SExtractor/SEP | SIMD in every hot path, dual deblending | Weighted L-M, variance maps |
 | stacking | None | All 6 rejection algos verified | MAD-based sigma, robust Winsorized | Rejection maps, variance propagation |
-| calibration | None | Formula matches PixInsight/Siril | Per-CFA-color MAD detection, X-Trans support | Configurable sigma, flat-based cold detection |
+| calibration | None | Formula matches PixInsight/Siril | Per-CFA-color MAD detection, X-Trans support, configurable sigma threshold | Flat-based cold detection |
 | astro_image | None | FITS loading correct, comprehensive metadata | Adaptive float normalization | FITS writing |
 | raw | None | X-Trans + Bayer RCD verified | 2.1x faster than libraw, 216 MP/s Bayer | Raw CA correction |
 | drizzle | None | All 5 kernels verified vs STScI reference | Polygon clipping, Jacobian, per-pixel weights | CFA drizzle, parallel accumulation |
