@@ -37,6 +37,8 @@ No critical bugs found. Most findings are maintainability improvements.
 - **[F28]** Investigated — `w > 0.0` is NOT redundant (prevents division by zero when `min_coverage=0.0`)
 - **[F30]** Fixed ProgressCallback doc signature to match `StackingProgress` struct API
 - **[F32]** Fixed `sort_with_indices` NaN handling: `partial_cmp().unwrap()` → `total_cmp()`
+- **[F26]** Removed redundant SIP clone: eliminated `sip_correction` field from `RegistrationResult`, derived from `sip_fit` in `warp_transform()`
+- **[F31]** Changed `warp_image` from `pub` to `pub(crate)`
 
 ---
 
@@ -312,7 +314,7 @@ No critical bugs found. Most findings are maintainability improvements.
   `degrees_of_freedom()` and Display both panic. Add validation in constructors
   to prevent `Auto` from being stored.
 
-#### [F26] Redundant clone in SIP result creation (registration)
+#### [F26] ~~Redundant clone in SIP result creation (registration)~~ DONE
 - **Location**: `registration/mod.rs:368-369`
 - **Category**: Data flow / Performance
 - **Impact**: 2/5 — Polynomial stored twice in memory
@@ -363,7 +365,7 @@ No critical bugs found. Most findings are maintainability improvements.
 - **Invasiveness**: 1/5 — Update the doc example
 - **Description**: Fix the example to use the correct signature.
 
-#### [F31] `warp_image` is `pub` but only called internally
+#### [F31] ~~`warp_image` is `pub` but only called internally~~ DONE
 - **Location**: `registration/interpolation/mod.rs:300-320`
 - **Category**: API cleanliness
 - **Impact**: 1/5 — Over-exposed internal function

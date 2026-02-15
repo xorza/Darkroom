@@ -24,6 +24,13 @@ use crate::star_detection::config::Connectivity;
 #[cfg(test)]
 pub(crate) mod test_utils;
 
+/// Pixel count below which sequential CCL is faster than parallel.
+/// Determined by benchmark: parallel overhead dominates for small images.
+const PARALLEL_CCL_THRESHOLD: usize = 65_000;
+
+/// Minimum rows per strip in parallel CCL to avoid excessive strip overhead.
+const MIN_ROWS_PER_STRIP: usize = 64;
+
 // ============================================================================
 // Run-Length Encoding
 // ============================================================================
@@ -239,8 +246,7 @@ impl LabelMap {
             };
         }
 
-        // Threshold determined by benchmark: parallel wins at ~65k pixels
-        let num_labels = if width * height < 65_000 {
+        let num_labels = if width * height < PARALLEL_CCL_THRESHOLD {
             label_mask_sequential(mask, &mut labels, connectivity)
         } else {
             label_mask_parallel(mask, &mut labels, connectivity)
@@ -435,9 +441,8 @@ pub(super) fn label_mask_parallel(
     let words_per_row = mask.words_per_row();
     let mask_words = mask.words();
 
-    // Strip configuration: min 64 rows per strip, max num_threads strips
     let num_threads = rayon::current_num_threads();
-    let num_strips = (height / 64).clamp(1, num_threads);
+    let num_strips = (height / MIN_ROWS_PER_STRIP).clamp(1, num_threads);
     let rows_per_strip = height / num_strips;
 
     // Atomic union-find for parallel merging (5% of pixels as upper bound)
@@ -762,6 +767,7 @@ impl AtomicUnionFind {
 
     #[inline]
     fn make_set(&self) -> u32 {
+        // SeqCst: labels must be globally unique across threads.
         let label = self.next_label.fetch_add(1, Ordering::SeqCst);
         assert!(
             (label as usize) <= self.parent.len(),
@@ -780,6 +786,8 @@ impl AtomicUnionFind {
             if idx >= self.parent.len() {
                 return current;
             }
+            // Relaxed: find is idempotent — stale reads just cause extra
+            // iterations, union's CAS provides the synchronization.
             let parent = self.parent[idx].load(Ordering::Relaxed);
             if parent == current || parent == 0 {
                 return current;
@@ -802,6 +810,8 @@ impl AtomicUnionFind {
                 break;
             }
 
+            // AcqRel: acquire sees prior unions, release publishes this union.
+            // Relaxed on failure: we re-find roots anyway.
             match self.parent[idx_b].compare_exchange_weak(
                 root_b,
                 root_a,

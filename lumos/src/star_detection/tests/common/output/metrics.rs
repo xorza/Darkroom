@@ -1,6 +1,6 @@
 //! Detection metrics computation for visual tests.
 
-use super::comparison::{MatchResult, match_stars};
+use super::comparison::match_stars;
 use crate::star_detection::Star;
 use crate::testing::synthetic::GroundTruthStar;
 use std::fmt;
@@ -34,8 +34,6 @@ pub struct DetectionMetrics {
     pub false_positive_rate: f32,
 
     // Positional accuracy
-    /// Centroid errors for matched stars (in pixels)
-    pub centroid_errors: Vec<f32>,
     /// Mean centroid error
     pub mean_centroid_error: f32,
     /// Median centroid error
@@ -46,18 +44,10 @@ pub struct DetectionMetrics {
     pub std_centroid_error: f32,
 
     // Property accuracy (for matched stars)
-    /// FWHM relative errors: (detected - true) / true
-    pub fwhm_errors: Vec<f32>,
     /// Mean FWHM error
     pub mean_fwhm_error: f32,
-    /// Flux relative errors
-    pub flux_errors: Vec<f32>,
     /// Mean flux error
     pub mean_flux_error: f32,
-
-    // Detailed match information
-    /// Match result for detailed analysis
-    pub match_result: Option<MatchResult>,
 }
 
 impl Default for DetectionMetrics {
@@ -72,16 +62,12 @@ impl Default for DetectionMetrics {
             precision: 0.0,
             f1_score: 0.0,
             false_positive_rate: 0.0,
-            centroid_errors: Vec::new(),
             mean_centroid_error: 0.0,
             median_centroid_error: 0.0,
             max_centroid_error: 0.0,
             std_centroid_error: 0.0,
-            fwhm_errors: Vec::new(),
             mean_fwhm_error: 0.0,
-            flux_errors: Vec::new(),
             mean_flux_error: 0.0,
-            match_result: None,
         }
     }
 }
@@ -256,16 +242,12 @@ pub fn compute_detection_metrics(
         precision,
         f1_score,
         false_positive_rate,
-        centroid_errors,
         mean_centroid_error,
         median_centroid_error,
         max_centroid_error,
         std_centroid_error,
-        fwhm_errors,
         mean_fwhm_error,
-        flux_errors,
         mean_flux_error,
-        match_result: Some(match_result),
     }
 }
 

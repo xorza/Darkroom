@@ -577,13 +577,14 @@ fn test_invalid_order_high() {
 }
 
 #[test]
-#[should_panic(expected = "ref_points and target_points must have the same length")]
-fn test_mismatched_point_counts_panics() {
+fn test_mismatched_point_counts_returns_none() {
     let config = SipConfig::default();
     let ref_points = vec![DVec2::ZERO; 30];
     let target_points = vec![DVec2::ZERO; 20];
     let transform = Transform::identity();
-    SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config);
+    let result =
+        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config);
+    assert!(result.is_none());
 }
 
 // ============================================================================

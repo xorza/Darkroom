@@ -38,7 +38,7 @@ Parameters: `pixels`, `background`, `fwhm`, `axis_ratio` (1.0=circular), `angle`
 ### `gaussian_convolve()` (mod.rs:89-117)
 Separable convolution for circular Gaussians. Two passes:
 1. Horizontal (row) pass: `convolve_rows_parallel()` -> `temp` buffer
-2. Vertical (column) pass: `convolve_cols_parallel()` -> `output` buffer
+2. Vertical (column) pass: `convolve_cols()` -> `output` buffer
 
 Falls back to direct 2D if kernel radius >= `min(width, height) / 2` (line 107).
 

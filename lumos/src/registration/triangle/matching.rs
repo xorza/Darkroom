@@ -16,7 +16,7 @@ use super::voting::{PointMatch, build_invariant_tree, resolve_matches, vote_for_
 ///
 /// # Returns
 /// Vector of triangles formed from neighboring points
-pub fn form_triangles_kdtree(positions: &[DVec2], k_neighbors: usize) -> Vec<Triangle> {
+pub(crate) fn form_triangles_kdtree(positions: &[DVec2], k_neighbors: usize) -> Vec<Triangle> {
     let tree = match KdTree::build(positions) {
         Some(t) => t,
         None => return Vec::new(),

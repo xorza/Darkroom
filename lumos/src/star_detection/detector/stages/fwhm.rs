@@ -15,9 +15,9 @@ const FWHM_MIN: f32 = 0.5;
 const FWHM_MAX: f32 = 20.0;
 
 use super::detect::detect;
+use super::measure;
 use crate::star_detection::background::BackgroundEstimate;
 use crate::star_detection::buffer_pool::BufferPool;
-use crate::star_detection::centroid::measure_star;
 use crate::star_detection::config::Config;
 use crate::star_detection::deblend::Region;
 use crate::star_detection::star::Star;
@@ -85,7 +85,7 @@ fn estimate_from_bright_stars(
         regions.len()
     );
 
-    let stars = compute_centroids(&regions, pixels, stats, &first_pass_config);
+    let stars = measure::measure(&regions, pixels, stats, &first_pass_config);
 
     estimate_fwhm_from_stars(
         &stars,
@@ -94,21 +94,6 @@ fn estimate_from_bright_stars(
         config.max_eccentricity,
         config.max_sharpness,
     )
-}
-
-/// Compute centroids for star candidates in parallel.
-fn compute_centroids(
-    regions: &[Region],
-    pixels: &Buffer2<f32>,
-    background: &BackgroundEstimate,
-    config: &Config,
-) -> Vec<Star> {
-    use rayon::prelude::*;
-
-    regions
-        .par_iter()
-        .filter_map(|region| measure_star(pixels, background, region, config))
-        .collect()
 }
 
 /// Estimate FWHM from a set of detected stars.

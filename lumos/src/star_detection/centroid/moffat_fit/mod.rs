@@ -387,25 +387,23 @@ pub fn fit_moffat_2d(
     background: f32,
     config: &MoffatFitConfig,
 ) -> Option<MoffatFitResult> {
-    let (data_x_f32, data_y_f32, data_z_f32, peak_value) =
-        extract_stamp(pixels, pos, stamp_radius)?;
+    let stamp = extract_stamp(pixels, pos, stamp_radius)?;
 
-    let n = data_x_f32.len();
+    let n = stamp.x.len();
     let n_params = if config.fit_beta { 6 } else { 5 };
     if n < n_params + 1 {
         return None;
     }
 
     // Convert stamp data to f64 for fitting
-    let data_x: Vec<f64> = data_x_f32.iter().map(|&v| v as f64).collect();
-    let data_y: Vec<f64> = data_y_f32.iter().map(|&v| v as f64).collect();
-    let data_z: Vec<f64> = data_z_f32.iter().map(|&v| v as f64).collect();
+    let data_x: Vec<f64> = stamp.x.iter().map(|&v| v as f64).collect();
+    let data_y: Vec<f64> = stamp.y.iter().map(|&v| v as f64).collect();
+    let data_z: Vec<f64> = stamp.z.iter().map(|&v| v as f64).collect();
 
-    let initial_amplitude = (peak_value - background).max(0.01);
+    let initial_amplitude = (stamp.peak - background).max(0.01);
 
     // Estimate sigma from moments, then convert to alpha
-    let sigma_est =
-        estimate_sigma_from_moments(&data_x_f32, &data_y_f32, &data_z_f32, pos, background);
+    let sigma_est = estimate_sigma_from_moments(&stamp.x, &stamp.y, &stamp.z, pos, background);
     let fwhm_est = sigma_est * FWHM_TO_SIGMA;
     let initial_alpha =
         fwhm_beta_to_alpha(fwhm_est, config.fixed_beta).clamp(0.5, stamp_radius as f32);

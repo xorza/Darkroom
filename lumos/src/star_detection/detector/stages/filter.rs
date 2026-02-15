@@ -5,6 +5,10 @@
 use crate::star_detection::config::Config;
 use crate::star_detection::star::Star;
 
+/// Below this star count, use O(n²) brute-force duplicate removal
+/// instead of spatial hashing. Determined by benchmark crossover point.
+const SPATIAL_HASH_CROSSOVER: usize = 100;
+
 /// Statistics from quality filtering (for diagnostics).
 #[derive(Debug, Default)]
 pub(crate) struct QualityFilterStats {
@@ -91,7 +95,7 @@ pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32)
         return 0;
     }
 
-    if stars.len() < 100 {
+    if stars.len() < SPATIAL_HASH_CROSSOVER {
         return remove_duplicate_stars_simple(stars, min_separation);
     }
 
@@ -154,20 +158,7 @@ pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32)
         }
     }
 
-    let removed_count = kept.iter().filter(|&&k| !k).count();
-
-    let mut write_idx = 0;
-    for read_idx in 0..stars.len() {
-        if kept[read_idx] {
-            if write_idx != read_idx {
-                stars[write_idx] = stars[read_idx];
-            }
-            write_idx += 1;
-        }
-    }
-    stars.truncate(write_idx);
-
-    removed_count
+    compact_by_mask(stars, &kept)
 }
 
 /// Simple O(n²) duplicate removal for small star counts.
@@ -191,6 +182,11 @@ pub(crate) fn remove_duplicate_stars_simple(stars: &mut Vec<Star>, min_separatio
         }
     }
 
+    compact_by_mask(stars, &kept)
+}
+
+/// In-place compaction: remove stars where `kept[i]` is false. Returns removed count.
+fn compact_by_mask(stars: &mut Vec<Star>, kept: &[bool]) -> usize {
     let removed_count = kept.iter().filter(|&&k| !k).count();
 
     let mut write_idx = 0;

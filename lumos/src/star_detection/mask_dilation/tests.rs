@@ -6,6 +6,32 @@
 use super::dilate_mask;
 use crate::common::BitBuffer2;
 
+/// Verify dilation result against naive O(n²×r²) box dilation.
+fn assert_naive_dilation(mask: &BitBuffer2, dilated: &BitBuffer2, radius: usize, ctx: &str) {
+    let (width, height) = (mask.width(), mask.height());
+    for y in 0..height {
+        for x in 0..width {
+            let mut expected = false;
+            for sy in y.saturating_sub(radius)..=(y + radius).min(height - 1) {
+                for sx in x.saturating_sub(radius)..=(x + radius).min(width - 1) {
+                    if mask.get_xy(sx, sy) {
+                        expected = true;
+                        break;
+                    }
+                }
+                if expected {
+                    break;
+                }
+            }
+            assert_eq!(
+                dilated.get_xy(x, y),
+                expected,
+                "{ctx} mismatch at ({x}, {y})"
+            );
+        }
+    }
+}
+
 // =============================================================================
 // Basic Dilate Mask Tests
 // =============================================================================
@@ -578,30 +604,7 @@ fn test_dilate_mask_sliding_window_dense_column() {
     let mut dilated = BitBuffer2::new_filled(width, height, false);
     dilate_mask(&mask, radius, &mut dilated);
 
-    // Verify with naive check
-    for y in 0..height {
-        for x in 0..width {
-            let mut expected = false;
-            for sy in y.saturating_sub(radius)..=(y + radius).min(height - 1) {
-                for sx in x.saturating_sub(radius)..=(x + radius).min(width - 1) {
-                    if mask.get_xy(sx, sy) {
-                        expected = true;
-                        break;
-                    }
-                }
-                if expected {
-                    break;
-                }
-            }
-            assert_eq!(
-                dilated.get_xy(x, y),
-                expected,
-                "Dense column mismatch at ({}, {})",
-                x,
-                y
-            );
-        }
-    }
+    assert_naive_dilation(&mask, &dilated, radius, "Dense column");
 }
 
 #[test]
@@ -657,30 +660,7 @@ fn test_dilate_mask_sliding_window_sparse_then_dense() {
     let mut dilated = BitBuffer2::new_filled(width, height, false);
     dilate_mask(&mask, radius, &mut dilated);
 
-    // Verify against naive
-    for y in 0..height {
-        for x in 0..width {
-            let mut expected = false;
-            for sy in y.saturating_sub(radius)..=(y + radius).min(height - 1) {
-                for sx in x.saturating_sub(radius)..=(x + radius).min(width - 1) {
-                    if mask.get_xy(sx, sy) {
-                        expected = true;
-                        break;
-                    }
-                }
-                if expected {
-                    break;
-                }
-            }
-            assert_eq!(
-                dilated.get_xy(x, y),
-                expected,
-                "Sparse/dense transition mismatch at ({}, {})",
-                x,
-                y
-            );
-        }
-    }
+    assert_naive_dilation(&mask, &dilated, radius, "Sparse/dense transition");
 }
 
 #[test]
@@ -798,31 +778,5 @@ fn test_dilate_mask_compare_with_naive() {
     let mut dilated = BitBuffer2::new_filled(width, height, false);
     dilate_mask(&mask, radius, &mut dilated);
 
-    // Naive verification
-    for y in 0..height {
-        for x in 0..width {
-            let mut expected = false;
-            // Check if any source pixel within radius is set
-            for sy in y.saturating_sub(radius)..=(y + radius).min(height - 1) {
-                for sx in x.saturating_sub(radius)..=(x + radius).min(width - 1) {
-                    if mask.get_xy(sx, sy) {
-                        expected = true;
-                        break;
-                    }
-                }
-                if expected {
-                    break;
-                }
-            }
-            assert_eq!(
-                dilated.get_xy(x, y),
-                expected,
-                "Mismatch at ({}, {}): got {}, expected {}",
-                x,
-                y,
-                dilated.get_xy(x, y),
-                expected
-            );
-        }
-    }
+    assert_naive_dilation(&mask, &dilated, radius, "Random pattern");
 }

@@ -19,7 +19,8 @@ mod matching;
 mod tests;
 mod voting;
 
-pub use matching::{form_triangles_kdtree, match_triangles};
+pub(crate) use matching::form_triangles_kdtree;
+pub use matching::match_triangles;
 pub use voting::PointMatch;
 
 /// Triangle matching parameters extracted from Config.

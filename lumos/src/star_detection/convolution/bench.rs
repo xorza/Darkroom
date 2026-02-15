@@ -2,8 +2,8 @@
 
 use super::simd::convolve_row;
 use super::{
-    convolve_cols_parallel, convolve_rows_parallel, elliptical_gaussian_convolve,
-    gaussian_convolve, gaussian_kernel_1d, matched_filter,
+    convolve_cols, convolve_rows_parallel, elliptical_gaussian_convolve, gaussian_convolve,
+    gaussian_kernel_1d, matched_filter,
 };
 use crate::common::Buffer2;
 use crate::star_detection::convolution::simd::convolve_row_scalar;
@@ -76,7 +76,7 @@ fn bench_convolve_cols_1k(b: ::bench::Bencher) {
     let mut output = Buffer2::new_default(1024, 1024);
 
     b.bench(|| {
-        convolve_cols_parallel(
+        convolve_cols(
             black_box(&pixels),
             black_box(&mut output),
             black_box(&kernel),
@@ -91,7 +91,7 @@ fn bench_convolve_cols_4k(b: ::bench::Bencher) {
     let mut output = Buffer2::new_default(4096, 4096);
 
     b.bench(|| {
-        convolve_cols_parallel(
+        convolve_cols(
             black_box(&pixels),
             black_box(&mut output),
             black_box(&kernel),
@@ -116,7 +116,7 @@ fn bench_row_vs_col_1k(b: ::bench::Bencher) {
     });
 
     b.bench_labeled("cols", || {
-        convolve_cols_parallel(
+        convolve_cols(
             black_box(&pixels),
             black_box(&mut output),
             black_box(&kernel),

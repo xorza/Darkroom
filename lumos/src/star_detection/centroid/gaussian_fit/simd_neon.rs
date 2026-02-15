@@ -5,32 +5,10 @@
 //! (Cephes-derived, ~1e-13 relative accuracy) fully vectorized in NEON.
 
 use super::super::lm_optimizer::LMModel;
-use super::Gaussian2D;
+use super::{EXP_P0, EXP_P1, EXP_P2, EXP_Q0, EXP_Q1, EXP_Q2, EXP_Q3, Gaussian2D, LN2_HI, LN2_LO};
 use std::arch::aarch64::*;
 
-// ============================================================================
-// Fast SIMD exp() for f64 — Cephes-derived polynomial approximation
-// ============================================================================
-//
-// Same algorithm as the AVX2 version but using float64x2_t (2 lanes).
-// See simd_avx2.rs for full algorithm documentation.
-
-// Cephes P coefficients for exp (numerator)
-const EXP_P0: f64 = 1.261_771_930_748_105_8e-4;
-const EXP_P1: f64 = 3.029_944_077_074_419_5e-2;
-const EXP_P2: f64 = 1.0;
-
-// Cephes Q coefficients for exp (denominator)
-const EXP_Q0: f64 = 3.001_985_051_386_644_6e-6;
-const EXP_Q1: f64 = 2.524_483_403_496_841e-3;
-const EXP_Q2: f64 = 2.272_655_482_081_550_3e-1;
-const EXP_Q3: f64 = 2.0;
-
 const LOG2E: f64 = std::f64::consts::LOG2_E;
-
-// ln(2) split into high and low parts for exact range reduction
-const LN2_HI: f64 = 6.931_457_519_531_25e-1;
-const LN2_LO: f64 = 1.428_606_820_309_417_3e-6;
 
 /// Fast vectorized exp() for 2 f64 lanes using Cephes polynomial approximation.
 #[inline]

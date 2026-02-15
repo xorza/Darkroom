@@ -108,18 +108,23 @@ pub(crate) fn is_valid_stamp_position(
         && icy < (height - stamp_radius) as isize
 }
 
-/// Stack-allocated stamp data: (x coords, y coords, values, peak value).
+/// Stack-allocated stamp data extracted around a star candidate.
 /// Uses ArrayVec to avoid heap allocations for typical stamp sizes.
-pub(crate) type StampData = (
-    ArrayVec<f32, MAX_STAMP_PIXELS>,
-    ArrayVec<f32, MAX_STAMP_PIXELS>,
-    ArrayVec<f32, MAX_STAMP_PIXELS>,
-    f32,
-);
+#[derive(Debug)]
+pub(crate) struct StampData {
+    /// X coordinates of stamp pixels (relative to image origin).
+    pub x: ArrayVec<f32, MAX_STAMP_PIXELS>,
+    /// Y coordinates of stamp pixels.
+    pub y: ArrayVec<f32, MAX_STAMP_PIXELS>,
+    /// Pixel values (background-subtracted at the caller if needed).
+    pub z: ArrayVec<f32, MAX_STAMP_PIXELS>,
+    /// Peak pixel value within the stamp.
+    pub peak: f32,
+}
 
 /// Extract a square stamp of pixel data around a position.
 ///
-/// Returns (x_coords, y_coords, values, peak_value) or None if position is invalid.
+/// Returns [`StampData`] or None if position is outside the valid stamp region.
 /// Uses stack-allocated ArrayVec to avoid heap allocations.
 pub(crate) fn extract_stamp(
     pixels: &Buffer2<f32>,
@@ -154,7 +159,12 @@ pub(crate) fn extract_stamp(
         }
     }
 
-    Some((data_x, data_y, data_z, peak_value))
+    Some(StampData {
+        x: data_x,
+        y: data_y,
+        z: data_z,
+        peak: peak_value,
+    })
 }
 
 /// Estimate sigma from weighted second moments of the stamp data.

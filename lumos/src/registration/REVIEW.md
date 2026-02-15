@@ -17,6 +17,8 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **[F5]** Extracted shared `SINGULAR_THRESHOLD` constant in `distortion/mod.rs`, used in SIP and TPS
 - **[F8]** Documented quality score formula with factor explanations
 - **[F23]** Changed `panic!` → `unreachable!` for Auto in `transform.rs` (2 locations) and `ransac/transforms.rs` (1 location)
+- **[F7]** Changed `assert_eq!` for mismatched point lengths to `return None` in SIP `fit_from_transform` for consistent error handling
+- **[F30]** Made `form_triangles_kdtree` `pub(crate)` — internal implementation detail, `match_triangles` is the public API
 
 ## Findings
 
@@ -70,7 +72,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 1/5 -- remove one line
 - **Description**: `WarpParams::new()` is used extensively in `interpolation/tests.rs` and `tests/warping.rs`. The `#[allow(dead_code)]` is incorrect and should be removed.
 
-#### [F7] SIP error handling mixes `assert!` and `Option` in same function
+#### [F7] ~~SIP error handling mixes `assert!` and `Option` in same function~~ DONE
 - **Location**: `distortion/sip/mod.rs:147-159`
 - **Category**: Consistency
 - **Impact**: 3/5 -- same function panics on some bad input, returns None on other bad input
@@ -186,7 +188,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 3/5 -- either document the design or make configurable
 - **Description**: The sampling phases (0-33%, 33-66%, 66-100%) and pool selection (25%, 50%, full) are hardcoded with magic numbers in `estimate()`. Line 468: `let phase = iteration * 3 / max_iter;`. Either document the rationale with references or extract the strategy into a configurable component.
 
-#### [F21] Robustness test validates transform on outlier stars
+#### [F21] ~~Robustness test validates transform on outlier stars~~ SKIPPED — False positive: the verification loop uses `ref_stars.iter().zip(target_stars.iter())` which iterates only the 80 genuine correspondences; `target_with_spurious` (96 stars) is only passed to `register()`, not to the error loop.
 - **Location**: `tests/robustness.rs:179-190`
 - **Category**: Test quality
 - **Impact**: 3/5 -- test doesn't verify what it claims
@@ -260,7 +262,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 2/5 -- could reuse with `.clear()`
 - **Description**: Each iteration of the recovery loop creates fresh `matched_target` and `matched_ref` `HashSet`s. For typical counts (50-200), this is cheap, but reusing preallocated sets would be cleaner.
 
-#### [F30] `form_triangles_kdtree` exposes `k_neighbors` parameter
+#### [F30] ~~`form_triangles_kdtree` exposes `k_neighbors` parameter~~ DONE
 - **Location**: `triangle/matching.rs:19`
 - **Category**: API cleanliness
 - **Impact**: 2/5 -- public function exposes implementation detail

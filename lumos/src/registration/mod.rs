@@ -369,7 +369,6 @@ fn estimate_and_refine(
     );
 
     let mut result = RegistrationResult::new(transform, inlier_matches, residuals);
-    result.sip_correction = sip_fit.as_ref().map(|r| r.polynomial.clone());
     result.sip_fit = sip_fit;
     Ok(result)
 }

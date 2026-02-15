@@ -17,6 +17,30 @@ mod simd_avx2;
 #[cfg(target_arch = "aarch64")]
 mod simd_neon;
 
+// ============================================================================
+// Cephes exp() polynomial coefficients (shared by AVX2 and NEON SIMD)
+// ============================================================================
+//
+// Algorithm: range reduction via x = n*ln2 + r, then rational approximation
+//   exp(r) ≈ 1 + 2r * P(r²) / (Q(r²) - P(r²))
+// Coefficients from Cephes library (Stephen Moshier), public domain.
+// Max relative error < 2e-13.
+
+// P coefficients (numerator)
+pub(super) const EXP_P0: f64 = 1.261_771_930_748_105_8e-4;
+pub(super) const EXP_P1: f64 = 3.029_944_077_074_419_5e-2;
+pub(super) const EXP_P2: f64 = 1.0;
+
+// Q coefficients (denominator)
+pub(super) const EXP_Q0: f64 = 3.001_985_051_386_644_6e-6;
+pub(super) const EXP_Q1: f64 = 2.524_483_403_496_841e-3;
+pub(super) const EXP_Q2: f64 = 2.272_655_482_081_550_3e-1;
+pub(super) const EXP_Q3: f64 = 2.0;
+
+// ln(2) split into high and low parts for exact range reduction
+pub(super) const LN2_HI: f64 = 6.931_457_519_531_25e-1;
+pub(super) const LN2_LO: f64 = 1.428_606_820_309_417_3e-6;
+
 use super::lm_optimizer::{LMConfig, LMModel, LMResult, optimize};
 use super::{estimate_sigma_from_moments, extract_stamp};
 use crate::common::Buffer2;
@@ -207,27 +231,25 @@ pub fn fit_gaussian_2d(
     background: f32,
     config: &GaussianFitConfig,
 ) -> Option<GaussianFitResult> {
-    let (data_x_f32, data_y_f32, data_z_f32, peak_value) =
-        extract_stamp(pixels, pos, stamp_radius)?;
+    let stamp = extract_stamp(pixels, pos, stamp_radius)?;
 
-    let n = data_x_f32.len();
+    let n = stamp.x.len();
     if n < 7 {
         return None;
     }
 
     // Convert stamp data to f64 for fitting
-    let data_x: Vec<f64> = data_x_f32.iter().map(|&v| v as f64).collect();
-    let data_y: Vec<f64> = data_y_f32.iter().map(|&v| v as f64).collect();
-    let data_z: Vec<f64> = data_z_f32.iter().map(|&v| v as f64).collect();
+    let data_x: Vec<f64> = stamp.x.iter().map(|&v| v as f64).collect();
+    let data_y: Vec<f64> = stamp.y.iter().map(|&v| v as f64).collect();
+    let data_z: Vec<f64> = stamp.z.iter().map(|&v| v as f64).collect();
 
     // Estimate sigma from moments for better initial guess
-    let sigma_est =
-        estimate_sigma_from_moments(&data_x_f32, &data_y_f32, &data_z_f32, pos, background);
+    let sigma_est = estimate_sigma_from_moments(&stamp.x, &stamp.y, &stamp.z, pos, background);
 
     let initial_params: [f64; 6] = [
         pos.x as f64,
         pos.y as f64,
-        (peak_value - background).max(0.01) as f64,
+        (stamp.peak - background).max(0.01) as f64,
         sigma_est as f64,
         sigma_est as f64,
         background as f64,

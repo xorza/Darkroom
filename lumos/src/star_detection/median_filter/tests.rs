@@ -37,8 +37,8 @@ fn test_single_hot_pixel() {
 }
 
 #[test]
-fn test_preserves_edges() {
-    // Gradient image - edges should be mostly preserved
+fn test_gradient_image() {
+    // 10x10 gradient: pixel(x,y) = (x+y)/20.0
     let width = 10;
     let height = 10;
     let data: Vec<f32> = (0..height)
@@ -49,8 +49,30 @@ fn test_preserves_edges() {
     let mut output = Buffer2::new_default(width, height);
     median_filter_3x3(&pixels, &mut output);
 
-    // Check that general gradient direction is preserved
-    assert!(output[0] < output[99], "Gradient should be preserved");
+    // Interior pixel (3,3): 3x3 neighborhood values = (x+y)/20 for
+    // x in 2..=4, y in 2..=4:
+    //   (2+2)/20=0.20, (3+2)/20=0.25, (4+2)/20=0.30,
+    //   (2+3)/20=0.25, (3+3)/20=0.30, (4+3)/20=0.35,
+    //   (2+4)/20=0.30, (3+4)/20=0.35, (4+4)/20=0.40
+    // Sorted: [0.20, 0.25, 0.25, 0.30, 0.30, 0.30, 0.35, 0.35, 0.40]
+    // Median = 0.30
+    assert!(
+        (output[(3, 3)] - 0.30).abs() < 1e-6,
+        "Interior (3,3) median should be 0.30, got {}",
+        output[(3, 3)]
+    );
+
+    // Interior pixel (5,5): neighborhood x in 4..=6, y in 4..=6:
+    //   (4+4)/20=0.40, (5+4)/20=0.45, (6+4)/20=0.50,
+    //   (4+5)/20=0.45, (5+5)/20=0.50, (6+5)/20=0.55,
+    //   (4+6)/20=0.50, (5+6)/20=0.55, (6+6)/20=0.60
+    // Sorted: [0.40, 0.45, 0.45, 0.50, 0.50, 0.50, 0.55, 0.55, 0.60]
+    // Median = 0.50
+    assert!(
+        (output[(5, 5)] - 0.50).abs() < 1e-6,
+        "Interior (5,5) median should be 0.50, got {}",
+        output[(5, 5)]
+    );
 }
 
 #[test]
@@ -59,8 +81,11 @@ fn test_small_image_2x2() {
     let mut output = Buffer2::new_default(2, 2);
     median_filter_3x3(&pixels, &mut output);
 
-    // Image too small, should return copy
-    assert_eq!(output.len(), 4);
+    // Image too small for 3×3 filter, should return exact copy
+    assert_eq!(output[(0, 0)], 0.1);
+    assert_eq!(output[(1, 0)], 0.2);
+    assert_eq!(output[(0, 1)], 0.3);
+    assert_eq!(output[(1, 1)], 0.4);
 }
 
 #[test]
@@ -176,7 +201,8 @@ fn test_salt_and_pepper_noise() {
 
 #[test]
 fn test_large_image_parallel() {
-    // Test that parallel processing works correctly
+    // 256x256 sawtooth: pixel[i] = (i % 256) / 255.0
+    // Each row repeats [0/255, 1/255, ..., 255/255].
     let width = 256;
     let height = 256;
     let data: Vec<f32> = (0..width * height)
@@ -189,16 +215,36 @@ fn test_large_image_parallel() {
 
     assert_eq!(output.len(), width * height);
 
-    // Check no NaN or Inf
-    for (i, &val) in output.iter().enumerate() {
-        assert!(val.is_finite(), "Pixel {} is not finite: {}", i, val);
-        assert!(
-            (0.0..=1.0).contains(&val),
-            "Pixel {} out of range: {}",
-            i,
-            val
-        );
-    }
+    // Verify against scalar reference for specific interior pixels.
+    // Interior pixel (x,y) with x in 1..255, y in 1..255 has 9 neighbors.
+    // All rows are identical so the 3 rows in the neighborhood are the same.
+    // Neighborhood at (128,128): 3 copies of [127/255, 128/255, 129/255]
+    //   = [127/255]*3, [128/255]*3, [129/255]*3 → median = 128/255
+    let expected_128 = 128.0 / 255.0;
+    assert!(
+        (output[(128, 128)] - expected_128).abs() < 1e-6,
+        "Pixel (128,128) should be {}, got {}",
+        expected_128,
+        output[(128, 128)]
+    );
+
+    // Pixel (64,64): median of 3×[63,64,65]/255 = 64/255
+    let expected_64 = 64.0 / 255.0;
+    assert!(
+        (output[(64, 64)] - expected_64).abs() < 1e-6,
+        "Pixel (64,64) should be {}, got {}",
+        expected_64,
+        output[(64, 64)]
+    );
+
+    // Pixel (200,100): median of 3×[199,200,201]/255 = 200/255
+    let expected_200 = 200.0 / 255.0;
+    assert!(
+        (output[(200, 100)] - expected_200).abs() < 1e-6,
+        "Pixel (200,100) should be {}, got {}",
+        expected_200,
+        output[(200, 100)]
+    );
 }
 
 #[test]
@@ -255,6 +301,7 @@ fn test_median9_reverse_sorted() {
 
 #[test]
 fn test_non_square_image() {
+    // 20x10 uniform image: median of all 0.5 values = 0.5 everywhere
     let width = 20;
     let height = 10;
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
@@ -263,6 +310,14 @@ fn test_non_square_image() {
     median_filter_3x3(&pixels, &mut output);
 
     assert_eq!(output.len(), width * height);
+    for (i, &val) in output.iter().enumerate() {
+        assert!(
+            (val - 0.5).abs() < 1e-6,
+            "Pixel {} should be 0.5, got {}",
+            i,
+            val
+        );
+    }
 }
 
 #[test]
@@ -275,7 +330,7 @@ fn test_wrong_pixel_count() {
 
 #[test]
 fn test_bayer_pattern_removal() {
-    // Simulate Bayer pattern with alternating row brightness
+    // Alternating row brightness: even rows = 0.4, odd rows = 0.6
     let width = 10;
     let height = 10;
     let data: Vec<f32> = (0..height)
@@ -289,15 +344,24 @@ fn test_bayer_pattern_removal() {
     let mut output = Buffer2::new_default(width, height);
     median_filter_3x3(&pixels, &mut output);
 
-    // After filtering, the pattern should be smoothed
-    // Interior pixels should be close to 0.5
-    let interior_mean: f32 =
-        output[11..89].iter().filter(|&&v| v > 0.0).sum::<f32>() / output[11..89].len() as f32;
-
+    // Interior pixel at (5,3) — odd row (y=3, value=0.6).
+    // 3×3 neighborhood rows: y=2 (0.4), y=3 (0.6), y=4 (0.4)
+    // 9 values: [0.4, 0.4, 0.4, 0.6, 0.6, 0.6, 0.4, 0.4, 0.4]
+    // Sorted: [0.4]*6, [0.6]*3 → median = 0.4
     assert!(
-        (interior_mean - 0.5).abs() < 0.15,
-        "Bayer pattern should be smoothed, got mean {}",
-        interior_mean
+        (output[(5, 3)] - 0.4).abs() < 1e-6,
+        "Interior odd-row pixel should be 0.4, got {}",
+        output[(5, 3)]
+    );
+
+    // Interior pixel at (5,4) — even row (y=4, value=0.4).
+    // 3×3 neighborhood rows: y=3 (0.6), y=4 (0.4), y=5 (0.6)
+    // 9 values: [0.6, 0.6, 0.6, 0.4, 0.4, 0.4, 0.6, 0.6, 0.6]
+    // Sorted: [0.4]*3, [0.6]*6 → median = 0.6
+    assert!(
+        (output[(5, 4)] - 0.6).abs() < 1e-6,
+        "Interior even-row pixel should be 0.6, got {}",
+        output[(5, 4)]
     );
 }
 
@@ -621,32 +685,43 @@ fn test_filter_edge_row_bottom() {
 // --- Additional edge case tests ---
 
 #[test]
-fn test_4x4_all_corners_and_edges() {
-    // Test all positions in a 4x4 image
+fn test_4x4_interior_pixels() {
+    // 4x4 image: pixel(x,y) = y*4 + x + 1
     #[rustfmt::skip]
     let pixels = Buffer2::new(4, 4, vec![
-        1.0, 2.0, 3.0, 4.0,
-        5.0, 6.0, 7.0, 8.0,
-        9.0, 10.0, 11.0, 12.0,
+        1.0,  2.0,  3.0,  4.0,
+        5.0,  6.0,  7.0,  8.0,
+        9.0,  10.0, 11.0, 12.0,
         13.0, 14.0, 15.0, 16.0,
     ]);
 
     let mut output = Buffer2::new_default(4, 4);
     median_filter_3x3(&pixels, &mut output);
 
-    // All 16 pixels should be computed
-    assert_eq!(output.len(), 16);
-
-    // Check all values are finite and reasonable
-    for (i, &val) in output.iter().enumerate() {
-        assert!(val.is_finite(), "Pixel {} is not finite", i);
-        assert!(
-            (1.0..=16.0).contains(&val),
-            "Pixel {} out of range: {}",
-            i,
-            val
-        );
-    }
+    // Interior (1,1): neighbors [1,2,3,5,6,7,9,10,11] → median = 6.0
+    assert!(
+        (output[(1, 1)] - 6.0).abs() < 1e-6,
+        "Interior (1,1) should be 6.0, got {}",
+        output[(1, 1)]
+    );
+    // Interior (2,2): neighbors [6,7,8,10,11,12,14,15,16] → median = 11.0
+    assert!(
+        (output[(2, 2)] - 11.0).abs() < 1e-6,
+        "Interior (2,2) should be 11.0, got {}",
+        output[(2, 2)]
+    );
+    // Interior (1,2): neighbors [5,6,7,9,10,11,13,14,15] → median = 10.0
+    assert!(
+        (output[(1, 2)] - 10.0).abs() < 1e-6,
+        "Interior (1,2) should be 10.0, got {}",
+        output[(1, 2)]
+    );
+    // Interior (2,1): neighbors [2,3,4,6,7,8,10,11,12] → median = 7.0
+    assert!(
+        (output[(2, 1)] - 7.0).abs() < 1e-6,
+        "Interior (2,1) should be 7.0, got {}",
+        output[(2, 1)]
+    );
 }
 
 #[test]

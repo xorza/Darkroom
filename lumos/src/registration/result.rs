@@ -1,6 +1,6 @@
 //! Registration result and error types.
 
-use crate::registration::distortion::{SipFitResult, SipPolynomial};
+use crate::registration::distortion::SipFitResult;
 use crate::registration::transform::{Transform, WarpTransform};
 
 /// Reason for RANSAC failure.
@@ -98,12 +98,9 @@ pub struct RegistrationResult {
     /// Computed transformation matrix.
     pub transform: Transform,
 
-    /// SIP polynomial distortion correction (if enabled).
-    /// When present, apply SIP correction to reference coordinates *before*
-    /// the homography: `target = transform(sip.correct(ref))`.
-    pub sip_correction: Option<SipPolynomial>,
-
     /// SIP fit quality diagnostics (if SIP was fitted).
+    /// When present, `sip_fit.polynomial` provides the distortion correction:
+    /// `target = transform(sip.correct(ref))`.
     pub sip_fit: Option<SipFitResult>,
 
     /// Matched star pairs as (reference_idx, target_idx).
@@ -163,7 +160,6 @@ impl RegistrationResult {
 
         Self {
             transform,
-            sip_correction: None,
             sip_fit: None,
             matched_stars,
             residuals,
@@ -179,7 +175,7 @@ impl RegistrationResult {
     pub fn warp_transform(&self) -> WarpTransform {
         WarpTransform {
             transform: self.transform,
-            sip: self.sip_correction.clone(),
+            sip: self.sip_fit.as_ref().map(|r| r.polynomial.clone()),
         }
     }
 

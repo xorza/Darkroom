@@ -24,6 +24,18 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **[F10]** Changed `debug_assert!` → `assert!` for buffer dimension checks in `LabelMap::from_pool` and `from_buffer`
 - **[F11]** Cleaned dead code: fixed detection_file.rs doc, removed unused imports (detection_file tests, detector/mod.rs ArrayVec), fixed stale comments (labeling bench, median_filter tests), removed duplicate benchmark (local_maxima bench)
 - **[F12]** Added `#[derive(Debug)]` to `StripResult`, `UnionFind`, `AtomicUFRef`, `SendPtr`; manual Debug impl for `AtomicUnionFind`
+- **[F7]** Extracted `compact_by_mask` helper in `filter.rs`
+- **[F8]** `fwhm.rs` now calls `measure::measure()` instead of duplicating centroid logic
+- **[F22]** Documented rationale for each atomic ordering in `AtomicUnionFind`
+- **[F26]** Deleted 6 dead functions, removed blanket `#![allow(dead_code)]`, cleaned up exposed dead fields
+- **[F28]** Moved ~330 lines of `sigma_clipped_median_mad` tests to `math/statistics/tests.rs`
+- **[F29]** Extracted `assert_naive_dilation()` helper in `mask_dilation/tests.rs`
+- **[F30]** Converted `StampData` from tuple alias to named struct with fields `x`, `y`, `z`, `peak`
+- **[F31]** Renamed `convolve_cols_parallel` → `convolve_cols`
+- **[F32]** Extracted named constants: `PARALLEL_CCL_THRESHOLD`, `MIN_ROWS_PER_STRIP`, `SPATIAL_HASH_CROSSOVER`, `CIRCULAR_KERNEL_THRESHOLD`
+- **[F34]** Fixed bench name "6k" → "4k", updated stale "100k" comment to "65k"
+- **[F16]** Shared Cephes exp() constants between AVX2 and NEON in `gaussian_fit/mod.rs`
+- **[F24]** Replaced vague median filter tests with hand-computed expected values
 
 ---
 
@@ -79,7 +91,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 1/5 — Add parameter: `is_saturated(threshold: f32) -> bool`
 - **Description**: `is_saturated()` hardcodes `self.peak > 0.95` while `is_cosmic_ray()` and `is_round()` accept threshold parameters. Config has thresholds for sharpness, roundness, eccentricity, SNR, and FWHM deviation, but not saturation.
 
-#### [F7] Duplicate compaction logic in star filtering
+#### [F7] ~~Duplicate compaction logic in star filtering~~ DONE
 - **Location**: `detector/stages/filter.rs:157-170` and `filter.rs:194-207`
 - **Category**: Generalization
 - **Impact**: 3/5 — 10 lines of identical code duplicated verbatim
@@ -87,7 +99,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 1/5 — Extract `compact_by_mask(stars, kept) -> usize`
 - **Description**: `remove_duplicate_stars` and `remove_duplicate_stars_simple` end with identical 10-line compaction blocks (count removed, in-place swap, truncate).
 
-#### [F8] Duplicated centroid computation in fwhm.rs vs measure.rs
+#### [F8] ~~Duplicated centroid computation in fwhm.rs vs measure.rs~~ DONE
 - **Location**: `detector/stages/fwhm.rs:92-104` vs `detector/stages/measure.rs:18-30`
 - **Category**: Generalization
 - **Impact**: 3/5 — Identical `par_iter().filter_map(measure_star).collect()` pattern
@@ -155,7 +167,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 3/5 — Macro or `Option<&[f32]>` for background would halve the code
 - **Description**: `process_words`/`process_words_filtered` exist in scalar, SSE, and NEON variants. The only difference is whether a background array is loaded and added. The dispatch logic is also duplicated. The SIMD functions also inline scalar remainder code that duplicates the standalone scalar functions.
 
-#### [F16] Duplicated Cephes exp() constants and simd_int_pow across AVX2/NEON
+#### [F16] ~~Duplicated Cephes exp() constants and simd_int_pow across AVX2/NEON~~ DONE — Constants shared in `gaussian_fit/mod.rs`; `simd_int_pow` inherently platform-specific
 - **Location**: `centroid/gaussian_fit/simd_avx2.rs:26-40` vs `simd_neon.rs:18-33`, `centroid/moffat_fit/simd_avx2.rs:10-42` vs `simd_neon.rs:10-41`
 - **Category**: Generalization
 - **Impact**: 3/5 — Identical polynomial coefficients and power function duplicated across platforms
@@ -203,7 +215,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 2/5 — Standardize on `UnsafeSendPtr<T>` from common module
 - **Description**: Three modules solve "pass mutable pointer through Rayon closure" differently. The generic `UnsafeSendPtr<T>` from xtrans demosaic should be shared. The mask_dilation `SendPtr` accesses the field via `.0` which will break under Edition 2024 closure capture rules.
 
-#### [F22] Mixed atomic orderings in parallel union-find
+#### [F22] ~~Mixed atomic orderings in parallel union-find~~ DONE — Documented rationale for each ordering
 - **Location**: `labeling/mod.rs:750,756,768,790-795`
 - **Category**: Consistency / Correctness
 - **Impact**: 3/5 — `SeqCst` in make_set, `Relaxed` in find, `AcqRel` in union
@@ -223,7 +235,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 2/5 — Use SmallVec or stack arrays for small tile counts; precompute `centers_x` on TileGrid
 - **Description**: `interpolate_row` allocates 5 Vecs per row (node_bg, node_noise, centers_x, d2x_bg, d2x_noise). The comment says "SmallVec-style approach" but uses plain Vec. Also `centers_x` is recomputed for every row despite depending only on grid geometry.
 
-#### [F24] Median filter tests check vague properties instead of exact values
+#### [F24] ~~Median filter tests check vague properties instead of exact values~~ DONE
 - **Location**: `median_filter/tests.rs:40-54,178-202,256-266,294-302`
 - **Category**: Test quality
 - **Impact**: 3/5 — Tests give false confidence without catching regressions
@@ -239,7 +251,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 2/5 — Merge into parameterized helper; centralize TILE_SIZE; extract `estimate_bg_default()`
 - **Description**: Two near-identical pipeline test wrappers differ only in output prefix and pass-criteria handling. All stage tests repeat the same background estimation boilerplate and TILE_SIZE constant.
 
-#### [F26] Dead functions and blanket `#[allow(dead_code)]` in test output utilities
+#### [F26] ~~Dead functions and blanket `#[allow(dead_code)]` in test output utilities~~ DONE
 - **Location**: `tests/common/output/comparison.rs:96,123,202`, `tests/common/output/image_writer.rs:127,206,239`, `tests/common/output/mod.rs:2`
 - **Category**: Dead code
 - **Impact**: 3/5 — Six unused functions; blanket allow suppresses all future dead code warnings
@@ -255,7 +267,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 2/5 — Extract to constants with comments explaining derivation
 - **Description**: Default FWHM (4.0), valid FWHM range (0.5..20.0), MAD multiplier (3.0), and MAD floor (0.1) are inline magic numbers. These could diverge from similar values in centroid code.
 
-#### [F28] Background module tests 330 lines of `sigma_clipped_median_mad` from math module
+#### [F28] ~~Background module tests 330 lines of `sigma_clipped_median_mad` from math module~~ DONE
 - **Location**: `background/tests.rs:1050-1377`
 - **Category**: Consistency
 - **Impact**: 2/5 — Tests belong with the function they test
@@ -263,7 +275,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 2/5 — Move to math module's test file
 - **Description**: ~330 lines of `background/tests.rs` test `sigma_clipped_median_mad` which is defined in the `math` module, not `background`. These tests should live alongside the function definition.
 
-#### [F29] Duplicated naive verification pattern in mask_dilation tests
+#### [F29] ~~Duplicated naive verification pattern in mask_dilation tests~~ DONE
 - **Location**: `mask_dilation/tests.rs:582-604,661-683,802-828`
 - **Category**: Generalization
 - **Impact**: 2/5 — Same ~20-line naive dilation verification loop copy-pasted 3 times
@@ -271,7 +283,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 1/5 — Simple extraction
 - **Description**: Three tests contain identical nested loops that compare dilated output against naive O(n*r^2) reference. A shared helper would eliminate ~40 lines of duplication.
 
-#### [F30] `StampData` is a 4-element tuple; should be a named struct
+#### [F30] ~~`StampData` is a 4-element tuple; should be a named struct~~ DONE
 - **Location**: `centroid/mod.rs:113-118`
 - **Category**: API cleanliness
 - **Impact**: 2/5 — Callers destructure with positional names; intent unclear without context
@@ -279,7 +291,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 2/5 — Define struct, update extract_stamp and callers
 - **Description**: `type StampData = (ArrayVec<f32, N>, ArrayVec<f32, N>, ArrayVec<f32, N>, f32)` is opaque. Both gaussian_fit and moffat_fit destructure it identically.
 
-#### [F31] `convolve_cols_parallel` name is misleading (not actually parallel)
+#### [F31] ~~`convolve_cols_parallel` name is misleading (not actually parallel)~~ DONE
 - **Location**: `convolution/mod.rs:246-264`
 - **Category**: Consistency / Naming
 - **Impact**: 2/5 — Name implies parallelism but delegates to single-threaded SIMD column processing
@@ -291,7 +303,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 
 ### Priority 4 — Low Priority
 
-#### [F32] Magic numbers without named constants
+#### [F32] ~~Magic numbers without named constants~~ DONE
 - **Location**: `labeling/mod.rs:254` (65000), `labeling/mod.rs:404` (64 rows/strip), `detector/stages/filter.rs:94` (100), `convolution/mod.rs:86` (0.01)
 - **Category**: Consistency
 - **Impact**: 2/5 — Undocumented thresholds are hard to tune
@@ -307,7 +319,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 2/5 — Audit and standardize
 - **Description**: Test tolerances vary widely. For uniform/deterministic data, tolerances should be tighter.
 
-#### [F34] Benchmark naming mismatch and stale comments
+#### [F34] ~~Benchmark naming mismatch and stale comments~~ DONE
 - **Location**: `labeling/bench.rs:75` ("6k" is 4k), `labeling/bench.rs:93` ("100k" threshold is 65k)
 - **Category**: Consistency
 - **Impact**: 1/5 — Misleading names/comments

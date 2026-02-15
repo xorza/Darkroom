@@ -6,21 +6,18 @@ use super::image_writer::gray_to_rgb_image_stretched;
 use crate::star_detection::Star;
 use crate::testing::synthetic::GroundTruthStar;
 use glam::Vec2;
-use imaginarium::drawing::{draw_circle, draw_cross, draw_line};
+use imaginarium::drawing::{draw_circle, draw_cross};
 use imaginarium::{Color, Image};
 
 /// Colors for comparison images.
 pub mod colors {
     use imaginarium::Color;
 
-    pub const BLUE: Color = Color::rgb(0.2, 0.4, 1.0); // Ground truth
     pub const GREEN: Color = Color::rgb(0.0, 1.0, 0.0); // Correctly detected
     pub const RED: Color = Color::rgb(1.0, 0.2, 0.2); // Missed (false negative)
     pub const YELLOW: Color = Color::rgb(1.0, 1.0, 0.0); // False positive
     pub const CYAN: Color = Color::rgb(0.0, 1.0, 1.0); // Detected centroid
     pub const MAGENTA: Color = Color::rgb(1.0, 0.0, 1.0); // True centroid
-    pub const WHITE: Color = Color::rgb(1.0, 1.0, 1.0);
-    pub const ORANGE: Color = Color::rgb(1.0, 0.65, 0.0); // Saturated
 }
 
 /// Create a comparison image showing ground truth and detected stars.
@@ -92,54 +89,6 @@ pub fn create_comparison_image(
     image
 }
 
-/// Create an image showing only ground truth positions.
-pub fn create_ground_truth_image(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
-    ground_truth: &[GroundTruthStar],
-) -> Image {
-    let mut image = gray_to_rgb_image_stretched(pixels, width, height);
-
-    for truth in ground_truth {
-        let cx = truth.pos.x as f32;
-        let cy = truth.pos.y as f32;
-        let radius = (truth.fwhm * 1.5).max(5.0);
-
-        let color = if truth.is_saturated {
-            colors::ORANGE
-        } else {
-            colors::BLUE
-        };
-
-        draw_circle(&mut image, Vec2::new(cx, cy), radius, color, 1.0);
-        draw_cross(&mut image, Vec2::new(cx, cy), 3.0, color, 1.0);
-    }
-
-    image
-}
-
-/// Create an image showing only detected stars.
-pub fn create_detection_image(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
-    detected: &[Star],
-) -> Image {
-    let mut image = gray_to_rgb_image_stretched(pixels, width, height);
-
-    for det in detected {
-        let cx = det.pos.x as f32;
-        let cy = det.pos.y as f32;
-        let radius = (det.fwhm * 0.7).max(4.0);
-
-        draw_circle(&mut image, Vec2::new(cx, cy), radius, colors::GREEN, 1.0);
-        draw_cross(&mut image, Vec2::new(cx, cy), 3.0, colors::GREEN, 1.0);
-    }
-
-    image
-}
-
 /// Result of matching detected stars to ground truth.
 #[derive(Debug, Clone)]
 pub struct MatchResult {
@@ -195,29 +144,6 @@ pub fn match_stars(
         matched_truth,
         matched_detected,
         pairs,
-    }
-}
-
-/// Draw centroid refinement path on an image.
-pub fn draw_centroid_path(image: &mut Image, positions: &[Vec2], color: Color) {
-    for window in positions.windows(2) {
-        let start = window[0];
-        let end = window[1];
-
-        // Draw line between consecutive positions
-        draw_line(image, start, end, color, 1.0);
-    }
-
-    // Mark each position with a small dot
-    for (i, &pos) in positions.iter().enumerate() {
-        let intensity = (i as f32 / positions.len() as f32) * 0.5 + 0.5;
-        let scaled_color = Color::rgb(
-            color.r * intensity,
-            color.g * intensity,
-            color.b * intensity,
-        );
-
-        imaginarium::drawing::draw_dot(image, pos, 1.0, scaled_color);
     }
 }
 

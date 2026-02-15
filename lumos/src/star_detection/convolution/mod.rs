@@ -18,6 +18,10 @@ mod tests;
 use rayon::prelude::*;
 
 use crate::common::Buffer2;
+
+/// Maximum deviation of axis_ratio from 1.0 to use the faster separable
+/// (circular) kernel path instead of full 2D elliptical convolution.
+const CIRCULAR_KERNEL_THRESHOLD: f32 = 0.01;
 use crate::math::fwhm_to_sigma;
 
 // ============================================================================
@@ -83,7 +87,8 @@ pub fn matched_filter(
 
     // Compute noise normalization factor: sqrt(sum(K^2))
     // For separable kernel: sum_2d(K^2) = sum_1d(K^2)^2
-    let noise_norm = if (axis_ratio - 1.0).abs() < 0.01 {
+    // axis_ratio close to 1.0 → circular kernel; use faster separable path
+    let noise_norm = if (axis_ratio - 1.0).abs() < CIRCULAR_KERNEL_THRESHOLD {
         let kernel_1d = gaussian_kernel_1d(sigma);
         let sum_k_sq: f32 = kernel_1d.iter().map(|&k| k * k).sum();
         (sum_k_sq * sum_k_sq).sqrt()
@@ -141,7 +146,7 @@ pub(super) fn gaussian_convolve(
     convolve_rows_parallel(pixels, temp, &kernel);
 
     // Step 2: Convolve columns (vertical pass)
-    convolve_cols_parallel(temp, output, &kernel);
+    convolve_cols(temp, output, &kernel);
 }
 
 /// Apply elliptical Gaussian convolution to an image.
@@ -163,7 +168,7 @@ pub(super) fn elliptical_gaussian_convolve(
     assert_eq!(height, output.height());
 
     // For axis_ratio very close to 1.0, use faster separable convolution
-    if (axis_ratio - 1.0).abs() < 0.01 {
+    if (axis_ratio - 1.0).abs() < CIRCULAR_KERNEL_THRESHOLD {
         gaussian_convolve(pixels, sigma, output, temp);
         return;
     }
@@ -243,11 +248,7 @@ pub(super) fn convolve_rows_parallel(
 /// Processes multiple columns simultaneously using SIMD vectors.
 /// Each SIMD lane handles a different column with row-major traversal for cache locality.
 #[cfg_attr(test, allow(dead_code))]
-pub(super) fn convolve_cols_parallel(
-    input: &Buffer2<f32>,
-    output: &mut Buffer2<f32>,
-    kernel: &[f32],
-) {
+pub(super) fn convolve_cols(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
     let width = input.width();
     let height = input.height();
     let radius = kernel.len() / 2;

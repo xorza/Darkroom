@@ -12,13 +12,6 @@ pub fn output_path(base: &Path) -> std::path::PathBuf {
     base.with_extension(TEST_OUTPUT_IMAGE_EXT)
 }
 
-/// Convert f32 grayscale pixels to imaginarium RGB_F32 image (for drawing).
-pub fn gray_to_rgb_image(pixels: &[f32], width: usize, height: usize) -> Image {
-    let desc = ImageDesc::new_packed(width, height, ColorFormat::RGB_F32);
-    let rgb_pixels: Vec<f32> = pixels.iter().flat_map(|&v| [v, v, v]).collect();
-    Image::new_with_data(desc, bytemuck::cast_slice(&rgb_pixels).to_vec()).unwrap()
-}
-
 /// Convert f32 grayscale pixels to imaginarium RGB_F32 image with auto-stretching.
 pub fn gray_to_rgb_image_stretched(pixels: &[f32], width: usize, height: usize) -> Image {
     let min = pixels.iter().cloned().fold(f32::INFINITY, f32::min);
@@ -123,36 +116,6 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> Rgb<u8> {
     ])
 }
 
-/// Convert grayscale f32 pixels to RGB image.
-pub fn gray_to_rgb(pixels: &[f32], width: usize, height: usize) -> RgbImage {
-    let data: Vec<u8> = pixels
-        .iter()
-        .flat_map(|&p| {
-            let v = (p.clamp(0.0, 1.0) * 255.0) as u8;
-            [v, v, v]
-        })
-        .collect();
-
-    RgbImage::from_raw(width as u32, height as u32, data).unwrap()
-}
-
-/// Convert grayscale f32 pixels to RGB image with auto-stretching.
-pub fn gray_to_rgb_stretched(pixels: &[f32], width: usize, height: usize) -> RgbImage {
-    let min = pixels.iter().cloned().fold(f32::INFINITY, f32::min);
-    let max = pixels.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-    let range = (max - min).max(1e-10);
-
-    let data: Vec<u8> = pixels
-        .iter()
-        .flat_map(|&p| {
-            let v = (((p - min) / range) * 255.0) as u8;
-            [v, v, v]
-        })
-        .collect();
-
-    RgbImage::from_raw(width as u32, height as u32, data).unwrap()
-}
-
 /// Save grayscale image to file using the configured test output format.
 pub fn save_grayscale(pixels: &[f32], width: usize, height: usize, path: &Path) {
     let out = output_path(path);
@@ -200,72 +163,6 @@ pub fn save_mask(mask: &[bool], width: usize, height: usize, path: &Path) {
     let out = output_path(path);
     let img = mask_to_gray(mask, width, height);
     img.save(&out).expect("Failed to save mask image");
-}
-
-/// Create a side-by-side comparison image.
-pub fn side_by_side(left: &GrayImage, right: &GrayImage) -> GrayImage {
-    let w1 = left.width();
-    let w2 = right.width();
-    let h = left.height().max(right.height());
-    let gap = 4;
-
-    let mut result = GrayImage::new(w1 + w2 + gap, h);
-
-    // Copy left image
-    for y in 0..left.height() {
-        for x in 0..w1 {
-            result.put_pixel(x, y, *left.get_pixel(x, y));
-        }
-    }
-
-    // Add gap (white line)
-    for y in 0..h {
-        for x in 0..gap {
-            result.put_pixel(w1 + x, y, image::Luma([128]));
-        }
-    }
-
-    // Copy right image
-    for y in 0..right.height() {
-        for x in 0..w2 {
-            result.put_pixel(w1 + gap + x, y, *right.get_pixel(x, y));
-        }
-    }
-
-    result
-}
-
-/// Create a side-by-side RGB comparison image.
-pub fn side_by_side_rgb(left: &RgbImage, right: &RgbImage) -> RgbImage {
-    let w1 = left.width();
-    let w2 = right.width();
-    let h = left.height().max(right.height());
-    let gap = 4;
-
-    let mut result = RgbImage::new(w1 + w2 + gap, h);
-
-    // Copy left image
-    for y in 0..left.height() {
-        for x in 0..w1 {
-            result.put_pixel(x, y, *left.get_pixel(x, y));
-        }
-    }
-
-    // Add gap (gray line)
-    for y in 0..h {
-        for x in 0..gap {
-            result.put_pixel(w1 + x, y, Rgb([128, 128, 128]));
-        }
-    }
-
-    // Copy right image
-    for y in 0..right.height() {
-        for x in 0..w2 {
-            result.put_pixel(w1 + gap + x, y, *right.get_pixel(x, y));
-        }
-    }
-
-    result
 }
 
 #[cfg(test)]

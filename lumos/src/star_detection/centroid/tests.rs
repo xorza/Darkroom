@@ -2264,12 +2264,15 @@ fn test_extract_stamp_valid_center() {
     let result = extract_stamp(&pixels, Vec2::splat(32.0), 5);
     assert!(result.is_some(), "Should extract stamp at center");
 
-    let (data_x, data_y, data_z, peak) = result.unwrap();
+    let stamp = result.unwrap();
     let expected_size = (2 * 5 + 1) * (2 * 5 + 1); // 11x11 = 121
-    assert_eq!(data_x.len(), expected_size);
-    assert_eq!(data_y.len(), expected_size);
-    assert_eq!(data_z.len(), expected_size);
-    assert!((peak - 0.5).abs() < f32::EPSILON, "Peak should be 0.5");
+    assert_eq!(stamp.x.len(), expected_size);
+    assert_eq!(stamp.y.len(), expected_size);
+    assert_eq!(stamp.z.len(), expected_size);
+    assert!(
+        (stamp.peak - 0.5).abs() < f32::EPSILON,
+        "Peak should be 0.5"
+    );
 }
 
 #[test]
@@ -2301,8 +2304,11 @@ fn test_extract_stamp_peak_value() {
     let result = extract_stamp(&pixels, Vec2::splat(32.0), 5);
     assert!(result.is_some());
 
-    let (_, _, _, peak) = result.unwrap();
-    assert!((peak - 0.9).abs() < f32::EPSILON, "Peak should be 0.9");
+    let stamp = result.unwrap();
+    assert!(
+        (stamp.peak - 0.9).abs() < f32::EPSILON,
+        "Peak should be 0.9"
+    );
 }
 
 #[test]
@@ -2316,17 +2322,17 @@ fn test_extract_stamp_coordinates() {
     let result = extract_stamp(&pixels, Vec2::splat(32.0), 2);
     assert!(result.is_some());
 
-    let (data_x, data_y, _, _) = result.unwrap();
+    let stamp = result.unwrap();
     // For radius=2, stamp is 5x5, centered at (32,32)
     // x coords should be 30,31,32,33,34 (repeated for each row)
     // y coords should be 30,30,30,30,30, 31,31,31,31,31, etc.
-    assert_eq!(data_x.len(), 25);
+    assert_eq!(stamp.x.len(), 25);
 
     // Check that coordinates are correct
-    let min_x = data_x.iter().fold(f32::MAX, |a, &b| a.min(b));
-    let max_x = data_x.iter().fold(f32::MIN, |a, &b| a.max(b));
-    let min_y = data_y.iter().fold(f32::MAX, |a, &b| a.min(b));
-    let max_y = data_y.iter().fold(f32::MIN, |a, &b| a.max(b));
+    let min_x = stamp.x.iter().fold(f32::MAX, |a, &b| a.min(b));
+    let max_x = stamp.x.iter().fold(f32::MIN, |a, &b| a.max(b));
+    let min_y = stamp.y.iter().fold(f32::MAX, |a, &b| a.min(b));
+    let max_y = stamp.y.iter().fold(f32::MIN, |a, &b| a.max(b));
 
     assert_eq!(min_x, 30.0);
     assert_eq!(max_x, 34.0);
@@ -2346,12 +2352,12 @@ fn test_extract_stamp_fractional_position() {
     let result = extract_stamp(&pixels, Vec2::new(32.3, 32.7), 2);
     assert!(result.is_some());
 
-    let (data_x, data_y, _, _) = result.unwrap();
+    let stamp = result.unwrap();
     // Center should be at rounded position (32, 33)
-    let min_x = data_x.iter().fold(f32::MAX, |a, &b| a.min(b));
-    let max_x = data_x.iter().fold(f32::MIN, |a, &b| a.max(b));
-    let min_y = data_y.iter().fold(f32::MAX, |a, &b| a.min(b));
-    let max_y = data_y.iter().fold(f32::MIN, |a, &b| a.max(b));
+    let min_x = stamp.x.iter().fold(f32::MAX, |a, &b| a.min(b));
+    let max_x = stamp.x.iter().fold(f32::MIN, |a, &b| a.max(b));
+    let min_y = stamp.y.iter().fold(f32::MAX, |a, &b| a.min(b));
+    let max_y = stamp.y.iter().fold(f32::MIN, |a, &b| a.max(b));
 
     assert_eq!(min_x, 30.0); // 32 - 2 = 30
     assert_eq!(max_x, 34.0); // 32 + 2 = 34

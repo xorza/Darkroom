@@ -297,7 +297,7 @@ fn interpolate(data: &Buffer2<f32>, x: f32, y: f32, params: &WarpParams) -> f32 
 /// For each output pixel `p`, computes `src = warp_transform.apply(p)` and samples
 /// the input image at `src`. Parallelized with rayon. Bilinear and Lanczos3 use
 /// optimized row-warping paths.
-pub fn warp_image(
+pub(crate) fn warp_image(
     input: &Buffer2<f32>,
     output: &mut Buffer2<f32>,
     warp_transform: &WarpTransform,

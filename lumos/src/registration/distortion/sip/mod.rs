@@ -141,12 +141,12 @@ impl SipPolynomial {
     /// Given matched inlier positions and a homography, fits a polynomial
     /// correction to minimize residual errors.
     ///
-    /// Returns `None` if the system is underdetermined or singular.
+    /// Returns `None` if `ref_points` and `target_points` have different lengths,
+    /// or if the system is underdetermined or singular.
     ///
     /// # Panics
     ///
     /// - If `config` fails validation (see [`SipConfig`]: order must be 2..=5).
-    /// - If `ref_points` and `target_points` have different lengths.
     pub fn fit_from_transform(
         ref_points: &[DVec2],
         target_points: &[DVec2],
@@ -154,11 +154,9 @@ impl SipPolynomial {
         config: &SipConfig,
     ) -> Option<SipFitResult> {
         config.validate();
-        assert_eq!(
-            ref_points.len(),
-            target_points.len(),
-            "ref_points and target_points must have the same length"
-        );
+        if ref_points.len() != target_points.len() {
+            return None;
+        }
 
         let n = ref_points.len();
         let terms = term_exponents(config.order);

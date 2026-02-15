@@ -72,7 +72,7 @@ fn bench_label_map_from_buffer_4k(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 1, iters = 10)]
-fn bench_label_map_from_buffer_6k_globular(b: ::bench::Bencher) {
+fn bench_label_map_from_buffer_4k_globular(b: ::bench::Bencher) {
     use super::label_mask_parallel;
 
     let pixels = benchmark_star_field(4096, 4096, 50000, 0.1, 0.01, 42);
