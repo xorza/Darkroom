@@ -42,18 +42,36 @@ pub(crate) struct FrameStats {
 /// Compute per-channel median + MAD for a single image.
 fn compute_frame_stats(image: &impl StackableImage) -> FrameStats {
     let dims = image.dimensions();
-    let mut channels = ArrayVec::new();
-    let mut buf = Vec::with_capacity(dims.width * dims.height);
-    for c in 0..dims.channels {
-        let data = image.channel(c);
-        buf.clear();
+    let n = dims.channels;
+
+    if n == 1 {
+        // Single channel — no parallelism needed, avoid rayon overhead.
+        let data = image.channel(0);
+        let mut buf = Vec::with_capacity(dims.width * dims.height);
         buf.extend_from_slice(data);
         let median = crate::math::median_f32_mut(&mut buf);
-        // Reuse buf as scratch — it's already reordered by median and no longer needed
         let mad = crate::math::mad_f32_with_scratch(data, median, &mut buf);
+        let mut channels = ArrayVec::new();
         channels.push(ChannelStats { median, mad });
+        return FrameStats { channels };
     }
-    FrameStats { channels }
+
+    // Multi-channel: compute stats in parallel.
+    let results: Vec<ChannelStats> = (0..n)
+        .into_par_iter()
+        .map(|c| {
+            let data = image.channel(c);
+            let mut buf = Vec::with_capacity(dims.width * dims.height);
+            buf.extend_from_slice(data);
+            let median = crate::math::median_f32_mut(&mut buf);
+            let mad = crate::math::mad_f32_with_scratch(data, median, &mut buf);
+            ChannelStats { median, mad }
+        })
+        .collect();
+
+    FrameStats {
+        channels: results.into_iter().collect(),
+    }
 }
 
 /// Per-thread scratch buffers for stacking combine closures.

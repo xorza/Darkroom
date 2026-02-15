@@ -2,7 +2,10 @@
 
 use std::time::Instant;
 
+use crate::astro_image::cfa::CfaImage;
 use crate::raw::load_raw_cfa;
+use crate::stacking::cache::ImageCache;
+use crate::stacking::stack::run_stacking;
 use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
 use crate::{
     AstroImage, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, FrameType, Normalization,
@@ -157,15 +160,57 @@ fn bench_full_pipeline() {
     let flat_paths = calibration_image_paths("Flats").unwrap_or_default();
     let bias_paths = calibration_image_paths("Bias").unwrap_or_default();
 
-    let empty: Vec<String> = Vec::new();
-    let masters = CalibrationMasters::from_files(
-        &dark_paths,
-        &flat_paths,
-        &bias_paths,
-        &empty,
-        DEFAULT_SIGMA_THRESHOLD,
-    )
-    .expect("Failed to create calibration masters");
+    // Time each master separately to find the bottleneck
+    let stack_cfa = |name: &str,
+                     paths: &[std::path::PathBuf],
+                     frame_type: FrameType,
+                     config: StackConfig|
+     -> Option<CfaImage> {
+        if paths.is_empty() {
+            println!("  {name}: no frames, skipping");
+            return None;
+        }
+        let config = if paths.len() < 8 {
+            StackConfig {
+                normalization: config.normalization,
+                ..StackConfig::median()
+            }
+        } else {
+            config
+        };
+
+        let t0 = Instant::now();
+        let cache = ImageCache::<CfaImage>::from_paths(
+            paths,
+            &config.cache,
+            frame_type,
+            ProgressCallback::default(),
+        )
+        .unwrap();
+        let load_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+        let t1 = Instant::now();
+        let result = run_stacking(&cache, &config);
+        let stack_ms = t1.elapsed().as_secs_f64() * 1000.0;
+
+        println!(
+            "  {name}: {} frames, load={load_ms:.0}ms, stack={stack_ms:.0}ms, total={:.0}ms",
+            paths.len(),
+            t0.elapsed().as_secs_f64() * 1000.0
+        );
+        Some(result)
+    };
+
+    let dark = stack_cfa("Dark", &dark_paths, FrameType::Dark, StackConfig::dark());
+    let flat = stack_cfa("Flat", &flat_paths, FrameType::Flat, StackConfig::flat());
+    let bias = stack_cfa("Bias", &bias_paths, FrameType::Bias, StackConfig::bias());
+
+    let t_defect = Instant::now();
+    let masters = CalibrationMasters::from_images(dark, flat, bias, None, DEFAULT_SIGMA_THRESHOLD);
+    println!(
+        "  DefectMap: {:.0}ms",
+        t_defect.elapsed().as_secs_f64() * 1000.0
+    );
 
     println!(
         "  Masters: dark={}, flat={}, bias={}",
@@ -177,7 +222,7 @@ fn bench_full_pipeline() {
     if let Some(ref hp) = masters.defect_map {
         println!("  Hot pixels: {} ({:.4}%)", hp.count(), hp.percentage());
     }
-    println!("  Elapsed: {:?}", step_start.elapsed());
+    println!("  Step 1 total: {:?}", step_start.elapsed());
 
     // =========================================================================
     // Step 2: Calibrate light frames (CFA pipeline)
