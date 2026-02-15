@@ -12,12 +12,20 @@ impl ScnValue {
         match self {
             ScnValue::Null => de::Unexpected::Unit,
             ScnValue::Bool(b) => de::Unexpected::Bool(*b),
-            ScnValue::Int(i) => de::Unexpected::Other(if *i >= 0 {
-                "positive integer"
-            } else {
-                "negative integer"
-            }),
-            ScnValue::Uint(_) => de::Unexpected::Other("unsigned integer"),
+            ScnValue::Int(i) => {
+                if let Ok(v) = i64::try_from(*i) {
+                    de::Unexpected::Signed(v)
+                } else {
+                    de::Unexpected::Other("128-bit integer")
+                }
+            }
+            ScnValue::Uint(u) => {
+                if let Ok(v) = u64::try_from(*u) {
+                    de::Unexpected::Unsigned(v)
+                } else {
+                    de::Unexpected::Other("128-bit unsigned integer")
+                }
+            }
             ScnValue::Float(f) => de::Unexpected::Float(*f),
             ScnValue::String(s) => de::Unexpected::Str(s),
             ScnValue::Array(_) => de::Unexpected::Seq,

@@ -40,12 +40,9 @@ when deserialized through these serde features. This is a serde-core bug, not an
 Tracked: serde issues #2576, #2230. No workaround; values must fit in i64/u64 when used with
 flatten/untagged.
 
-### Emitter does not emit trailing commas
+### Emitter does not emit trailing commas -- REJECTED
 
-The emitter omits trailing commas after the last item in arrays and maps. Industry best practice
-(rustfmt, Prettier) is to always emit trailing commas in multiline mode for cleaner diffs and
-easier appending. Since the parser now requires commas between items, trailing commas on the last
-item are optional but recommended for consistency.
+The emitter omits trailing commas after the last item in arrays and maps. Keeping as-is.
 
 ### Emitter never emits triple-quoted strings
 
@@ -99,6 +96,13 @@ would silently break serialization of these types.
 ---
 
 ## Implemented Features
+
+### Variant name validation
+
+Serializer validates variant names against SCN keywords (`true`, `false`, `null`, `nan`, `inf`)
+and identifier rules. `#[serde(rename = "true")]` on a variant produces a clear error at
+serialization time instead of silently emitting unparseable output. Validation uses
+`emit::is_bare_key()` (made `pub(super)`) from `validate_variant_name()` in `value.rs`.
 
 ### Public API
 

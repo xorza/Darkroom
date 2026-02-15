@@ -209,7 +209,7 @@ fn emit_key<W: Write>(w: &mut W, key: &str) -> Result<()> {
     Ok(())
 }
 
-fn is_bare_key(s: &str) -> bool {
+pub(super) fn is_bare_key(s: &str) -> bool {
     let bytes = s.as_bytes();
     if bytes.is_empty() {
         return false;

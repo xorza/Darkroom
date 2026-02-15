@@ -3,6 +3,15 @@ use serde::Serialize;
 use super::emit;
 use super::error::{Result, ScnError};
 
+fn validate_variant_name(name: &str) -> Result<()> {
+    if !emit::is_bare_key(name) {
+        return Err(ScnError::Message(format!(
+            "variant name {name:?} is not a valid SCN identifier (conflicts with keyword or contains invalid characters)"
+        )));
+    }
+    Ok(())
+}
+
 /// Intermediate representation for SCN values.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ScnValue {
@@ -112,6 +121,7 @@ impl serde::Serializer for ValueSerializer {
         _variant_index: u32,
         variant: &'static str,
     ) -> Result<ScnValue> {
+        validate_variant_name(variant)?;
         Ok(ScnValue::Variant(variant.to_string(), None))
     }
     fn serialize_newtype_struct<T: ?Sized + Serialize>(
@@ -128,6 +138,7 @@ impl serde::Serializer for ValueSerializer {
         variant: &'static str,
         value: &T,
     ) -> Result<ScnValue> {
+        validate_variant_name(variant)?;
         let inner = value.serialize(ValueSerializer)?;
         Ok(ScnValue::Variant(
             variant.to_string(),
@@ -152,6 +163,7 @@ impl serde::Serializer for ValueSerializer {
         variant: &'static str,
         len: usize,
     ) -> Result<TupleVariantBuilder> {
+        validate_variant_name(variant)?;
         Ok(TupleVariantBuilder {
             variant: variant.to_string(),
             items: Vec::with_capacity(len),
@@ -173,6 +185,7 @@ impl serde::Serializer for ValueSerializer {
         variant: &'static str,
         len: usize,
     ) -> Result<StructVariantBuilder> {
+        validate_variant_name(variant)?;
         Ok(StructVariantBuilder {
             variant: variant.to_string(),
             entries: Vec::with_capacity(len),
@@ -184,6 +197,7 @@ impl serde::Serializer for ValueSerializer {
 // Sequence builder
 // ---------------------------------------------------------------------------
 
+#[derive(Debug)]
 pub struct SeqBuilder {
     items: Vec<ScnValue>,
 }
@@ -226,6 +240,7 @@ impl serde::ser::SerializeTupleStruct for SeqBuilder {
 // Tuple variant builder
 // ---------------------------------------------------------------------------
 
+#[derive(Debug)]
 pub struct TupleVariantBuilder {
     variant: String,
     items: Vec<ScnValue>,
@@ -250,6 +265,7 @@ impl serde::ser::SerializeTupleVariant for TupleVariantBuilder {
 // Map builder
 // ---------------------------------------------------------------------------
 
+#[derive(Debug)]
 pub struct MapBuilder {
     entries: Vec<(String, ScnValue)>,
     current_key: Option<String>,
@@ -309,6 +325,7 @@ impl serde::ser::SerializeStruct for MapBuilder {
 // Struct variant builder
 // ---------------------------------------------------------------------------
 
+#[derive(Debug)]
 pub struct StructVariantBuilder {
     variant: String,
     entries: Vec<(String, ScnValue)>,

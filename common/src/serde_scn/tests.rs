@@ -2379,3 +2379,115 @@ fn io_error_includes_message() {
         "IO error should include underlying message, got: {msg}"
     );
 }
+
+// ===========================================================================
+// Keyword variant names rejected at serialization time
+// ===========================================================================
+
+#[test]
+fn error_keyword_variant_name_unit() {
+    // Unit variants renamed to keywords must be rejected
+    #[derive(Serialize)]
+    enum Bad {
+        #[serde(rename = "true")]
+        Yes,
+    }
+    let result = to_string(&Bad::Yes);
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("not a valid SCN identifier"),
+        "expected identifier error, got: {err}"
+    );
+}
+
+#[test]
+fn error_keyword_variant_name_newtype() {
+    // Newtype variants renamed to keywords must be rejected
+    #[derive(Serialize)]
+    enum Bad {
+        #[serde(rename = "null")]
+        Val(i32),
+    }
+    let result = to_string(&Bad::Val(42));
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("not a valid SCN identifier"),
+        "expected identifier error, got: {err}"
+    );
+}
+
+#[test]
+fn error_keyword_variant_name_struct() {
+    // Struct variants renamed to keywords must be rejected
+    #[derive(Serialize)]
+    enum Bad {
+        #[serde(rename = "nan")]
+        Data { x: i32 },
+    }
+    let result = to_string(&Bad::Data { x: 1 });
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("not a valid SCN identifier"),
+        "expected identifier error, got: {err}"
+    );
+}
+
+#[test]
+fn error_keyword_variant_name_tuple() {
+    // Tuple variants renamed to keywords must be rejected
+    #[derive(Serialize)]
+    enum Bad {
+        #[serde(rename = "false")]
+        Pair(i32, String),
+    }
+    let result = to_string(&Bad::Pair(1, "hi".to_string()));
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("not a valid SCN identifier"),
+        "expected identifier error, got: {err}"
+    );
+}
+
+#[test]
+fn error_keyword_variant_name_all_keywords() {
+    // All SCN keywords should be rejected: true, false, null, nan, inf
+    #[derive(Serialize)]
+    enum Keywords {
+        #[serde(rename = "true")]
+        A,
+        #[serde(rename = "false")]
+        B,
+        #[serde(rename = "null")]
+        C,
+        #[serde(rename = "nan")]
+        D,
+        #[serde(rename = "inf")]
+        E,
+    }
+    assert!(to_string(&Keywords::A).is_err());
+    assert!(to_string(&Keywords::B).is_err());
+    assert!(to_string(&Keywords::C).is_err());
+    assert!(to_string(&Keywords::D).is_err());
+    assert!(to_string(&Keywords::E).is_err());
+}
+
+#[test]
+fn valid_variant_names_accepted() {
+    // Normal variant names must still work
+    #[derive(Serialize)]
+    enum Good {
+        Normal,
+        #[serde(rename = "CamelCase")]
+        Renamed,
+        #[serde(rename = "_private")]
+        UnderscoreStart,
+    }
+    assert!(to_string(&Good::Normal).is_ok());
+    assert!(to_string(&Good::Renamed).is_ok());
+    assert!(to_string(&Good::UnderscoreStart).is_ok());
+}
+
