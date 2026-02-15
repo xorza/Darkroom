@@ -101,13 +101,22 @@ and cosmetic correction with raw CFA data, then debayer."
   Each pixel is divided by `(flat[i] - bias[i]) / mean_of_same_color_channel`.
 
 **PixInsight:** "Separate CFA flat scaling factors" (since v1.8.8-6) computes 3 independent
-CFA channel scaling factors. This avoids color shifts when flat light source is not white.
+CFA channel scaling factors. When enabled, three separate master flat scaling factors are
+computed for the red, green and blue CFA components, avoiding color shifts from non-white
+light sources (LED panels, twilight flats). PixInsight uses the full image for computing
+scaling factors.
 
 **Siril:** `equalize_cfa` / `grey_flat` equalizes mean intensity of RGB layers in the
-master flat to prevent color tinting.
+master flat. Siril uses a **central region** of the flat for computing per-channel averages,
+avoiding statistics being "distorted by too big vignetting." This is a workaround for when
+a single global mean is used across all channels. When per-channel means are computed
+independently (as in this implementation and PixInsight), the vignetting affects each
+channel's mean equally and cancels out during normalization, so a central-region approach
+is unnecessary.
 
 **Verdict: Correct and complete.** Per-CFA-channel normalization matches PixInsight's
-approach and addresses the same problem as Siril's equalize_cfa.
+approach and addresses the same problem as Siril's equalize_cfa. The full-image mean is
+correct because vignetting is an optical effect that scales all CFA channels identically.
 
 ### Negative Value Handling
 
@@ -127,12 +136,18 @@ for photometric accuracy. Clamping introduces systematic positive bias.
 **This implementation:** Darks stored raw (bias + thermal). No dark scaling by exposure
 time or temperature. Darks must match light exposure time and temperature.
 
-**PixInsight:** Dark frame optimization: purely numeric scaling of thermal component to
-minimize residual noise in calibrated output. Also supports exposure-time-based scaling:
+**PixInsight:** Dark frame optimization: purely numeric variance-minimization scaling of
+thermal component using golden section search. Also supports exposure-time-based scaling:
 `dark_scaled = bias + (dark - bias) * t_light / t_dark`. Requires bias-subtracted dark.
+Uses optimization threshold to zero out low-signal dark pixels before computing the
+scaling coefficient.
 
-**Siril:** Dark optimization with `-opt` flag. Coefficient scaling. `-opt=exp` uses FITS
-exposure keywords.
+**Siril:** Dark optimization with `-opt` flag. Coefficient scaling to minimize residual
+noise. `-opt=exp` uses FITS exposure keywords for exposure-time-based scaling.
+
+**Deep Sky Stacker:** Supports dark flat frames (darks taken at flat exposure time) as an
+alternative to bias. When using dark flats, bias frames are not required since the dark
+flat captures both electronic offset and thermal noise at the flat exposure time.
 
 **CMOS reality:** Dark scaling is unreliable for CMOS sensors due to amp glow (non-linear
 with time), non-linear dark current, and different behavior of sense-node vs photodiode dark
@@ -155,30 +170,43 @@ are already present if scaling is needed later for CCD users.
 **PixInsight CosmeticCorrection:**
 - Three modes: auto-detect (local window), master dark, defect list
 - Auto-detect uses local window statistics with sigma-based thresholds
-- 3 sigma default threshold
+- 3 sigma default threshold (adjustable; values up to 25+ for challenging cases)
 - Replaces with average of surrounding pixels
+- Local window approach: examines small pixel neighborhoods independently, which catches
+  spatially varying defects but can misidentify small star peaks as defects in
+  undersampled images
 
 **Siril Cosmetic Correction:**
 - Uses average deviation (avgDev), not MAD
 - Hot: `pixel > m_5x5 + max(avgDev, sigma_high * avgDev)`
 - Cold: `pixel < m_5x5 - sigma_low * avgDev`
-- Hot replaced by 3x3 average (with validation check)
+- Hot replaced by 3x3 average (with validation check: `a_3x3 < m_5x5 + avgDev/2`)
 - Cold replaced by 5x5 median
 - Global statistics, not per-CFA-channel
 - CFA mode uses stride-2 for Bayer, but does NOT support X-Trans
+- Has "Amount" parameter (0-1) for partial correction intensity
 
 **AstroPixelProcessor (APP):**
 - Cold pixels from flats: `pixel < cold_pct * median(flat)` (typically 50%)
-- Hot pixels from darks: kappa-sigma detection (MRS noise estimate)
-- Separate maps combined from multiple sources
+- Hot pixels from darks: kappa-sigma detection (MRS noise estimate), 2-3 kappa
+- Separate maps combined from multiple sources (darks for hot, flats for cold)
+- Bad column detection: dedicated kappa value for detecting defective columns
+- Requires at least 20 darks for reliable hot pixel detection
 
 **Astropy CCD Guide:**
 - Direct dark current threshold (e.g., > 4 e-/sec)
-- Compares dark current rates across different exposure times
+- Compares dark current rates across different exposure times to identify non-linear pixels
+- Physical threshold approach rather than statistical
+
+**Deep Sky Stacker:**
+- Sigma-based detection similar to others
+- Relies primarily on dithering + sigma-clipped stacking to reject hot pixels during
+  integration rather than per-frame cosmetic correction
 
 **Verdict:**
 - MAD is statistically superior to avgDev (Siril) for outlier detection. MAD has a
   breakdown point of 50% vs avgDev's sensitivity to the outliers being detected.
+  GNU Astronomy Utilities explicitly uses MAD-based clipping for this reason.
 - Per-CFA-color statistics is better than Siril's global approach and matches PixInsight.
 - The 5-sigma default is conservative compared to PixInsight's 3-sigma and APP's 2-3 kappa.
   This reduces false positives but may miss marginal hot pixels.
@@ -192,14 +220,33 @@ are already present if scaling is needed later for CCD users.
 - Mono: 8-connected neighbor median
 
 **Industry comparison:**
-- PixInsight: Average of surrounding pixels
-- Siril: Average for hot (3x3), median for cold (5x5)
+- PixInsight: Average of surrounding pixels (simpler, but less robust to clusters)
+- Siril: Average for hot (3x3 with validation), median for cold (5x5). Validation check
+  prevents over-correction when the 3x3 average is itself contaminated.
 - Scientific standard: Median preferred for robustness against clusters of nearby defects
+- Academic literature (Tanbakuchi et al.): Cluster-aware detection handles adjacent defects
+  more rigorously, but adds significant complexity.
 
 **Verdict: Correct and robust.** Median replacement is the best choice. CFA-aware correction
 at stride-2 for Bayer is correct and essential for preserving the mosaic pattern before
 demosaicing. X-Trans support is a differentiator. This is better than tools that perform
 cosmetic correction after demosaicing.
+
+### Dithering Interaction
+
+**Context:** With dithering (small random pointing shifts between exposures), hot pixels
+land on different sky positions across frames. Sigma-clipped stacking then rejects these
+outliers naturally. This means cosmetic correction and dithering are complementary:
+
+- Without dithering: cosmetic correction is essential (hot pixels stack coherently)
+- With dithering: cosmetic correction is optional (sigma rejection handles it)
+- Best practice: use both -- cosmetic correction cleans individual frames (important for
+  frame inspection, sub-selection, and drizzle), while dithering provides a second layer
+  of protection during stacking
+
+**This implementation:** Performs cosmetic correction before stacking, which is correct.
+The correction is applied to individual light frames during `calibrate()`, before any
+registration or stacking occurs.
 
 ---
 
@@ -245,7 +292,8 @@ uses a corrupted flat value before the defect correction step replaces it.
 
 No support for scaling dark frames to different exposure times or temperatures.
 
-- PixInsight formula: `dark_scaled = bias + (dark - bias) * t_light / t_dark`
+- PixInsight: Numeric variance-minimization (golden section search) to find optimal scaling
+  coefficient. Also supports exposure-time-based: `dark_scaled = bias + (dark - bias) * t_light / t_dark`
 - Siril: dark optimization coefficient, `-opt=exp` for FITS keywords
 - For CMOS: scaling is unreliable (amp glow, non-linear dark current).
 - Modern practice: use matched darks (same exposure/temp).
@@ -254,7 +302,8 @@ No support for scaling dark frames to different exposure times or temperatures.
 ### Low: No Overscan Subtraction -- POSTPONED
 
 Professional CCD calibration subtracts the overscan region to track per-frame bias drift.
-Not relevant for CMOS cameras or DSLR raw files.
+Not relevant for CMOS cameras or DSLR raw files. Astropy/ccdproc emphasizes: if you subtract
+overscan from any frame type, you must subtract it from all frame types consistently.
 
 - **Status:** Not needed for target use case (CMOS astro cameras, DSLRs).
 
@@ -271,6 +320,7 @@ Some sensors have entire bad columns or rows. Professional tools detect and inte
 these separately.
 
 - PixInsight: LinearDefectDetection + LinearPatternSubtraction
+- APP (2025): Added bad column detection with dedicated kappa value
 - **Status:** Low priority unless users report column defects.
 
 ### Low: No Auto-Detect Mode for Cosmetic Correction -- POSTPONED
@@ -282,6 +332,18 @@ defects or pixels that become hot during acquisition.
 - **Status:** The master dark approach catches persistent defects. Auto-detect on individual
   frames before stacking could catch intermittent ones, but sigma-clipped stacking already
   rejects transient outliers.
+
+### Low: No SuperBias Support -- POSTPONED
+
+PixInsight's SuperBias module creates a noise-free bias master by modeling the 2D bias
+structure (vertical/horizontal stripe patterns) and removing random noise. Equivalent to
+stacking infinite bias frames.
+
+- Only works for sensors with dominant row/column bias pattern (common in CCDs, some DSLRs)
+- Not beneficial for modern CMOS sensors where bias behavior at sub-millisecond exposures
+  can be non-ideal
+- **Status:** Niche feature. Dark flats are the preferred modern alternative for flat
+  calibration without bias frames.
 
 ---
 
@@ -297,11 +359,14 @@ and match industry standards. Specific verifications:
 2. **Flat normalization with bias/flat-dark subtraction** -- correct. `normalize(Flat - Bias)`
    produces a pure sensitivity profile.
 3. **Per-CFA-channel flat normalization** -- correct. Prevents color shifts from non-white
-   flat sources.
+   flat sources. Uses full-image mean (correct because vignetting scales all channels
+   equally), unlike Siril's central-region approach (a workaround for single-mean normalization).
 4. **Flat dark takes priority over bias for flat normalization** -- correct. Flat dark
-   captures both bias and dark current at the flat's exposure time.
+   captures both bias and dark current at the flat's exposure time. Matches PixInsight and
+   DSS recommendations for narrowband imaging.
 5. **Defect correction after flat division** -- correct. Industry standard order.
-6. **f64 accumulation for flat means** -- correct numerical practice.
+6. **f64 accumulation for flat means** -- correct numerical practice. Prevents f32
+   precision loss when summing millions of pixels.
 7. **Divide-by-zero guard** -- `norm_flat > f32::EPSILON` check present.
 
 ### Minor: Defect Map Ordering Assumption
@@ -313,8 +378,11 @@ the already-corrected value of the first. This is a known issue in sequential co
 - **Impact:** Negligible. Hot pixels are sparse (typically <0.1% of pixels). Adjacent
   same-color defects (stride-2 for Bayer) are extremely rare. The median of N-1 good
   neighbors is still robust even if one neighbor was previously corrected.
+- **Comparison:** Siril also processes pixels sequentially. PixInsight applies corrections
+  independently (reads original values). A copy-then-correct approach would fix this but
+  requires a full image clone.
 
-### Minor: lower threshold clamps to 0.0
+### Minor: Lower Threshold Clamps to 0.0
 
 In `compute_per_color_thresholds`, the lower threshold is: `(median - sigma_threshold * sigma).max(0.0)`.
 For normalized data in [0,1] range this is fine. But if data contains negative values
@@ -322,6 +390,13 @@ For normalized data in [0,1] range this is fine. But if data contains negative v
 
 - **Impact:** Negligible. The defect map is built from master darks (before subtraction),
   which have non-negative values.
+
+### Minor: CFA Mean Accumulation Not Parallelized
+
+In `divide_by_normalized_cfa()`, the per-channel sum accumulation loop is sequential (single-
+threaded), while the per-pixel division is row-parallel via rayon. For a 24MP image, the
+accumulation is ~24M iterations of simple arithmetic -- fast enough (~10ms) that parallelizing
+would add overhead without meaningful benefit.
 
 ---
 
@@ -332,7 +407,8 @@ For normalized data in [0,1] range this is fine. But if data contains negative v
 The module is lean and well-structured:
 
 - **`stack_cfa_frames`** is a thin wrapper that delegates to the existing stacking pipeline.
-  The < 8 frame fallback to median is a pragmatic choice.
+  The < 8 frame fallback to median is a pragmatic choice, matching the industry consensus
+  that sigma-clipped rejection needs ~10+ frames to estimate statistics reliably.
 - **`CalibrationMasters::calibrate()`** is 15 lines with clear step ordering.
 - **`DefectMap::from_master_dark()`** separates concerns cleanly: threshold computation
   (per-color) is in its own function, sample collection is separate, correction is separate.
@@ -340,9 +416,10 @@ The module is lean and well-structured:
   neighbor selection for each.
 - **Adaptive sampling** is a reasonable optimization to avoid O(n log n) sort on 24M pixels.
 
-The only borderline complexity is `collect_color_samples` which allocates the full channel
-Vec before subsampling for CFA mode (see Low issue above), but this is a performance issue
-not a complexity issue.
+The only borderline issue is `collect_color_samples` which allocates the full channel
+Vec before subsampling for CFA mode. For a 24MP Bayer image, the green channel produces
+a ~48MB temporary Vec. This is a performance issue, not a complexity issue. A strided
+iteration approach (count pixels first, compute stride, collect every Nth) would fix it.
 
 ---
 
@@ -372,7 +449,8 @@ not a complexity issue.
 6. **Dark frame scaling** -- `dark_scaled = bias + (dark - bias) * t_light / t_dark`.
    Requires separate bias frame. Useful for CCD dark libraries.
 7. **Dark optimization** -- Numeric optimization of dark scaling factor to minimize
-   residual noise (a la PixInsight). More robust than simple exposure scaling.
+   residual noise (a la PixInsight's golden section search on variance). More robust than
+   simple exposure scaling.
 
 ---
 
@@ -396,14 +474,23 @@ not a complexity issue.
 - [PixInsight dark optimization algorithm](https://pixinsight.com/forum/index.php?threads/dark-frame-optimization-algorithm.8529/)
 - [PixInsight CFA flat scaling discussion](https://pixinsight.com/forum/index.php?threads/when-to-check-enable-cfa-separate-cfa-flat-and-dslr-cmos-calibration-needs.16397/)
 - [PixInsight CosmeticCorrection guide](https://chaoticnebula.com/cosmetic-correction/)
+- [PixInsight SuperBias DSLR workflow](https://www.blackwaterskies.co.uk/2015/02/pixinsight-dslr-workflow-part-1b-superbias/)
+- [PixInsight ImageCalibration guide (Bernd Landmann)](https://sh-cosmiccanvas.s3.us-west-2.amazonaws.com/Resources/20210928_GuideToPIsImageCalibration.pdf)
 - [Siril calibration docs (1.5.0)](https://siril.readthedocs.io/en/latest/preprocessing/calibration.html)
 - [Siril cosmetic correction docs (1.5.0)](https://siril.readthedocs.io/en/latest/processing/cc.html)
+- [Siril CFA flat equalization (1.0)](https://free-astro.org/siril_doc-en/co/Pre-processing_5.html)
 - [Astropy CCD Reduction Guide](https://www.astropy.org/ccd-reduction-and-photometry-guide/)
+- [Astropy hot pixel identification](https://www.astropy.org/ccd-reduction-and-photometry-guide/v/dev/notebooks/08-01-Identifying-hot-pixels.html)
 - [ccdproc reduction toolbox](https://ccdproc.readthedocs.io/en/latest/reduction_toolbox.html)
 - [APP bad pixel map tutorial](https://www.astropixelprocessor.com/community/tutorials-workflows/creating-a-bad-pixel-map/)
+- [DSS dark flat frames](https://groups.io/g/DeepSkyStacker/topic/how_to_use_dark_flats/81053126)
 - [CMOS bias frames and scaled darks (AAVSO)](https://www.aavso.org/bias-frames-and-cmos-cameras-scaled-and-unscaled-darks)
 - [CMOS calibration workflow](https://astrobasics.de/en/basics/bias-flats-darks-darkflats/)
 - [Dark subtraction negative values](https://www.cloudynights.com/topic/638193-dark-subtraction-do-not-cut-off-negative-values/)
 - [Flat-field correction (Wikipedia)](https://en.wikipedia.org/wiki/Flat-field_correction)
 - [MAD for outlier detection](https://en.wikipedia.org/wiki/Median_absolute_deviation)
+- [GNU Astronomy Utilities MAD clipping](https://www.gnu.org/software/gnuastro/manual/html_node/MAD-clipping.html)
 - [Cosmetic correction timing (Telescope Live)](https://telescope.live/blog/when-best-time-do-cosmetic-correction-and-linear-defect-removal)
+- [Dithering for hot pixel removal (DSLR-Astrophotography)](https://dslr-astrophotography.com/power-dithering/)
+- [Dithering in astrophotography (Sky & Telescope)](https://skyandtelescope.org/astronomy-blogs/astrophotography-jerry-lodriguss/why-how-dither-astro-images/)
+- [Defect pixel cluster detection for Bayer CFA (Tanbakuchi et al.)](https://www.researchgate.net/publication/253063591_Efficient_defect_pixel_cluster_detection_and_correction_for_Bayer_CFA_image_sequences)

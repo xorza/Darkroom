@@ -17,9 +17,9 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 - `labeling/NOTES-AI.md` - CCL, threshold mask, mask dilation, pipeline integration
 - `median_filter/NOTES-AI.md` - CFA artifact removal, sorting networks, SIMD
 
-### Architecture
+## Architecture
 
-#### Pipeline Stages (detector/mod.rs -> stages/)
+### Pipeline Stages (detector/mod.rs -> stages/)
 1. **prepare** - RGB to luminance, optional 3x3 median filter for CFA sensors
 2. **background** - Tiled sigma-clipped statistics, natural bicubic spline interpolation,
    optional iterative refinement with source masking and dilation
@@ -33,15 +33,13 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 6. **filter** - Cascading quality filters (saturation, SNR, eccentricity, sharpness,
    roundness), MAD-based FWHM outlier removal, spatial-hash duplicate removal
 
-#### Key Types (detector/mod.rs)
+### Key Types (detector/mod.rs)
 - `ChannelStats { median, mad }` -- per-channel robust statistics
-- `DetectionResult` -- stars + config + channel_stats + sidecar save/load
-- `detect_file(path) -> Result<DetectionResult, ImageLoadError>` -- loads image, detects,
-  saves sidecar
-- `compute_channel_stats(image) -> ArrayVec<ChannelStats, 3>` -- public standalone function,
-  parallel via rayon
+- `DetectionResult` -- stars + diagnostics + sidecar save/load
+- `StarDetector` -- stateful detector with buffer pool, `detect()` and `detect_file()` methods
+- `Diagnostics` -- counts for each pipeline stage (components, candidates, rejections)
 
-#### Key Subsystems
+### Key Subsystems
 - **convolution/** - Separable Gaussian O(n*k), elliptical 2D O(n*k^2), SIMD row/col passes
 - **centroid/** - Weighted moments, Gaussian 6-param L-M, Moffat 5/6-param L-M with
   PowStrategy (integer/half-integer beta optimization), SIMD normal equation building
@@ -59,7 +57,7 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 - **median_filter/** - 3x3 median for CFA artifacts, SIMD sorting network (AVX2/SSE4.1/NEON)
 - **buffer_pool** - BufferPool for f32/u32/bit buffer reuse across frames
 
-#### Configuration
+### Configuration
 Flat `Config` struct with enums: `Connectivity` (Four/Eight), `CentroidMethod`
 (WeightedMoments/GaussianFit/MoffatFit{beta}), `LocalBackgroundMethod`
 (GlobalMap/LocalAnnulus), `BackgroundRefinement` (None/Iterative{iterations}), `NoiseModel`.
@@ -227,6 +225,11 @@ extracts runs from bit-packed masks, skipping 64-pixel background blocks.
 **Strengths**: Lock-free atomic union-find (ABA-safe due to monotonic parent invariant).
 RLE + word-level scanning is state-of-the-art (He et al. 2017). Benchmarked crossover.
 
+**Note**: Recent research (Lacassagne et al. 2020, "How to speed CCL up with SIMD RLE
+algorithms") shows SIMD-accelerated RLE extraction can further speed up CCL by ~1.7x on
+AVX2. The current implementation uses scalar CTZ bit scanning for RLE extraction. SIMD
+RLE extraction would be a future optimization opportunity.
+
 ### Deblending (deblend/)
 
 Two algorithms, selected by `deblend_n_thresholds`:
@@ -275,6 +278,22 @@ adequate for similar-brightness point sources.
    Default beta=2.5 (ground-based seeing). Centroid accuracy barely affected by wrong
    beta: <0.15 px even with beta 2.5 vs true 4.0.
 
+### Comparison with Other Astrophotography Tools
+
+**Siril** (v1.4+): Uses 2D Gaussian fitting via GNU Scientific Library L-M optimizer.
+Two-step fit: first without rotation to establish starting values, then optionally with
+rotation. Also supports Moffat profile. Key difference: Siril uses GSL for L-M (external
+C library), while this module has a custom L-M with SIMD-fused normal equations.
+
+**PHD2**: Uses weighted centroid (HFD-based) for guide star tracking. Multi-star mode
+computes weighted average centroid position of up to 12 stars. Selection based on SNR and
+HFD (Half-Flux Diameter) filtering. Simpler than this module since guiding only needs
+centroid, not full characterization.
+
+**PixInsight**: Uses Gaussian and Moffat fitting with PSF characterization. The newer star
+detection algorithm is no longer wavelet-based but uses scale-aware peak detection.
+Parameters are still expressed as wavelet layers for compatibility.
+
 ### Levenberg-Marquardt Optimizer
 
 Fused normal-equation building: J^T*J, J^T*r, and chi2 computed in single pass, avoiding
@@ -292,19 +311,18 @@ cap at 1e10 prevents infinite loops. Gaussian elimination with partial pivoting 
 | Sharpness | `peak / core_3x3_flux` | Differs from DAOFIND: `(peak - mean_4neighbors) / peak` |
 | Roundness1 | GROUND: from marginal max ratio | Differs from DAOFIND (density-enhancement image) |
 | Roundness2 | SROUND: from marginal asymmetry | Custom definition |
-| Laplacian SNR | REJECTED | Implementation was flawed: raw Laplacian/noise scales with star brightness, not sharpness. Sharpness filter (`peak/core_flux`) already achieves 100% CR rejection. Removed. |
 
 ### Comparison with Industry
 
-| Feature | DAOPHOT | SExtractor | photutils | This Module |
-|---------|---------|-----------|-----------|-------------|
-| Centroid method | Empirical PSF | XWIN/YWIN | centroid_2dg / fit_2dgaussian | WeightedMoments + Gaussian/Moffat L-M |
-| Fitting | Simultaneous multi-star | Per-pixel weighted | scipy.optimize | Custom L-M with SIMD |
-| Parameters | Empirical template | 7-param (with rotation) | 7-param | 5-6 param (no rotation) |
-| Weighting | Inverse-variance | Inverse-variance | Inverse-variance | Unweighted (flat) |
-| Position accuracy | 0.005-0.02 px | 0.02-0.1 px (XWIN) | 0.01-0.05 px (fit) | 0.01-0.05 px (fit), 0.05 px (moments) |
-| Heap allocation | Yes | Yes | Yes (Python) | Zero (ArrayVec stack stamps) |
-| SIMD | No | No | No | AVX2+FMA, NEON |
+| Feature | DAOPHOT | SExtractor | photutils | Siril | This Module |
+|---------|---------|-----------|-----------|-------|-------------|
+| Centroid method | Empirical PSF | XWIN/YWIN | centroid_2dg / fit_2dgaussian | Gaussian/Moffat L-M (GSL) | WeightedMoments + Gaussian/Moffat L-M |
+| Fitting | Simultaneous multi-star | Per-pixel weighted | scipy.optimize | Single-star GSL L-M | Custom L-M with SIMD |
+| Parameters | Empirical template | 7-param (with rotation) | 7-param | 7-param (with rotation) | 5-6 param (no rotation) |
+| Weighting | Inverse-variance | Inverse-variance | Inverse-variance | Unknown | Unweighted (flat) |
+| Position accuracy | 0.005-0.02 px | 0.02-0.1 px (XWIN) | 0.01-0.05 px (fit) | ~0.01 px (fit) | 0.01-0.05 px (fit), 0.05 px (moments) |
+| Heap allocation | Yes | Yes | Yes (Python) | Yes (GSL) | Zero (ArrayVec stack stamps) |
+| SIMD | No | No | No | No | AVX2+FMA, NEON |
 
 ### Known Issues
 
@@ -315,9 +333,12 @@ cap at 1e10 prevents infinite loops. Gaussian elimination with partial pivoting 
   inverted for covariance matrix. Would enable per-star position uncertainty for weighted
   registration.
 - **P3: Sharpness/roundness differ from DAOFIND**: Custom definitions effective for
-  filtering but published DAOFIND thresholds not transferable.
-- **P3: No rotation angle in Gaussian fit**: 6 vs 7 params. Adequate for near-circular
-  ground-based PSFs.
+  filtering but published DAOFIND thresholds not transferable. photutils DAOStarFinder
+  calculates sharpness and roundness from the density-enhancement convolved image, while
+  IRAFStarFinder uses image moments (closer to this module's approach).
+- **P3: No rotation angle in Gaussian fit**: 6 vs 7 params. Siril fits with rotation
+  as second step. Adequate for near-circular ground-based PSFs; needed for optical systems
+  with astigmatism or tracking-elongated stars.
 
 ---
 
@@ -373,28 +394,28 @@ MAX_TILE_SAMPLES=1024 cap.
 
 ### Comprehensive Feature Matrix
 
-| Feature | SExtractor | SEP | photutils | PixInsight | DAOFIND | This Module |
-|---------|-----------|-----|-----------|-----------|---------|-------------|
-| **Background** | Mode + spline | Mode + spline | Pluggable + spline | Thin plate spline (DBE) | Local annulus | Median + bicubic spline |
-| **Detection** | Matched filter | Matched filter | DAOStarFinder or detect_sources | Wavelet (a trous) | Zero-sum kernel | Matched filter |
-| **Labeling** | Streaming 8-conn | Same | scipy.ndimage.label | Internal | Peak-based | RLE + union-find |
-| **Deblending** | Multi-threshold tree | Multi-threshold tree | Multi-threshold + watershed | Wavelet layers | N/A | Dual: local maxima + multi-threshold |
-| **Centroiding** | XWIN/YWIN | XWIN/YWIN | centroid_2dg | Gaussian/Moffat fit | Marginal centroid | WeightedMoments + Gaussian/Moffat L-M |
-| **Noise model** | Clipped std dev | Clipped std dev | MAD/std/biweight | MRS starlet | Empirical | MAD * 1.4826 |
-| **Parallelism** | Single-threaded | Single-threaded | NumPy vectorized | Multi-threaded | Single-threaded | Rayon (all stages) |
-| **SIMD** | None | None | None | Unknown | None | AVX2/SSE4.1/NEON |
-| **Variance maps** | Yes | Yes | Yes | Yes | No | No |
-| **Star/galaxy class** | CLASS_STAR (MLP) | No | No | No | No | No |
-| **Cleaning** | CLEAN pass | No | No | No | No | No |
-| **Photometry** | ISO/AUTO/Kron | ISO/AUTO/Kron | Aperture/PSF | Aperture/PSF | PSF | Stamp flux only |
+| Feature | SExtractor | SEP | photutils | PixInsight | DAOFIND | Siril | PHD2 | This Module |
+|---------|-----------|-----|-----------|-----------|---------|-------|------|-------------|
+| **Background** | Mode + spline | Mode + spline | Pluggable + spline | Thin plate spline (DBE) | Local annulus | Polynomial/spline | Per-frame median | Median + bicubic spline |
+| **Detection** | Matched filter | Matched filter | DAOStarFinder or detect_sources | Scale-aware peak detection | Zero-sum kernel | Peak detector (Mighell) | SNR + HFD filter | Matched filter |
+| **Labeling** | Streaming 8-conn | Same | scipy.ndimage.label | Internal | Peak-based | Internal | N/A | RLE + union-find |
+| **Deblending** | Multi-threshold tree | Multi-threshold tree | Multi-threshold + watershed | Wavelet layers | N/A | N/A | N/A | Dual: local maxima + multi-threshold |
+| **Centroiding** | XWIN/YWIN | XWIN/YWIN | centroid_2dg | Gaussian/Moffat fit | Marginal centroid | Gaussian/Moffat L-M (GSL) | Weighted centroid | WeightedMoments + Gaussian/Moffat L-M |
+| **Noise model** | Clipped std dev | Clipped std dev | MAD/std/biweight | MRS starlet | Empirical | Unknown | SNR-based | MAD * 1.4826 |
+| **Parallelism** | Single-threaded | Single-threaded | NumPy vectorized | Multi-threaded | Single-threaded | Single-threaded | Single-threaded | Rayon (all stages) |
+| **SIMD** | None | None | None | Unknown | None | None | None | AVX2/SSE4.1/NEON |
+| **Variance maps** | Yes | Yes | Yes | Yes | No | No | No | No |
+| **Star/galaxy class** | CLASS_STAR (MLP) / SPREAD_MODEL | No | No | No | No | No | No | No |
+| **Cleaning** | CLEAN pass | No | No | No | No | No | No | No |
+| **Photometry** | ISO/AUTO/Kron | ISO/AUTO/Kron | Aperture/PSF | Aperture/PSF | PSF | Aperture | N/A | Stamp flux only |
 
 ### What We Do Better Than Industry
 
 1. **SIMD acceleration throughout**: No other source extraction tool has SIMD in hot paths.
    AVX2/SSE4.1/NEON in convolution, threshold mask, median filter, profile fitting,
    background interpolation.
-2. **Rayon parallelism in every stage**: SExtractor and SEP are single-threaded. photutils
-   relies on NumPy/scipy parallelism.
+2. **Rayon parallelism in every stage**: SExtractor, SEP, Siril are single-threaded.
+   photutils relies on NumPy/scipy parallelism.
 3. **MAD-based noise estimation**: 50% breakdown point vs ~0% for SExtractor's clipped std
    dev. More robust to source contamination.
 4. **Dual deblending modes**: Local maxima for fast sparse-field processing + multi-threshold
@@ -419,19 +440,25 @@ MAX_TILE_SAMPLES=1024 cap.
    `chi2 = sum(((data-model)/sigma_i)^2)`. Improves accuracy for faint stars.
 3. **Gaussian template pixel assignment** (SExtractor) / **Watershed** (photutils): Better
    than our Voronoi for asymmetric blends.
-4. **Wavelet multiscale detection** (PixInsight): Can detect sources at multiple scales
-   simultaneously. Matched filter is optimal for known PSF but cannot handle scale variation
+4. **Wavelet multiscale detection** (PixInsight historical): Can detect sources at multiple
+   scales simultaneously. Note: PixInsight has since moved to a non-wavelet scale-aware
+   approach. Matched filter is optimal for known PSF but cannot handle scale variation
    across the field.
 5. **Cleaning pass** (SExtractor): Removes spurious detections near bright star wings.
    Quality filter stage partially compensates.
 6. **Pluggable background estimators** (photutils): 6 location + 3 scale estimators vs
    our fixed median+MAD.
 7. **Mode estimator** (SExtractor): `2.5*med - 1.5*mean` is less biased than median in
-   crowded fields, at cost of 30% more noise.
-8. **CLASS_STAR classifier** (SExtractor): 10-input MLP for star/galaxy separation.
-   Not needed for registration use case.
+   crowded fields, at cost of 30% more noise. Note: SExtractor v2.28 added configurable
+   BACK_PEARSON parameter (default 2.5) controlling the mode formula multiplier.
+8. **CLASS_STAR / SPREAD_MODEL** (SExtractor): Neural network and PSF-based star/galaxy
+   classification. SPREAD_MODEL has superseded CLASS_STAR in modern SExtractor. Not needed
+   for registration use case.
 9. **Root-relative contrast** (SExtractor/SEP): Standard approach vs our parent-relative.
    Difference only affects deeply nested 3+ level splits.
+10. **Rotation angle in Gaussian fit** (SExtractor, photutils, Siril): 7th parameter for
+    PSF orientation. Siril does two-step fitting: first without rotation for stable initial
+    values, then with rotation.
 
 ---
 
@@ -461,14 +488,17 @@ MAX_TILE_SAMPLES=1024 cap.
    already compensates. SExtractor mode: `2.5*med - 1.5*mean`. Biweight location (Tukey
    1977) is the most statistically robust option (98.2% efficiency vs median's 64%).
 6. **Gaussian fit rotation angle**: 7th parameter (theta). Adequate for near-circular
-   ground-based PSFs; needed for optical systems with astigmatism.
+   ground-based PSFs; needed for optical systems with astigmatism. Siril's two-step
+   approach (fit without rotation first, then with) is a good pattern to follow.
 7. **Watershed/flux-weighted pixel assignment**: Better than Voronoi for asymmetric blends.
    Simple improvement: assign by `peak_flux * exp(-dist^2/(2*sigma^2))` instead of
    `min(dist)`.
 8. **DAOFIND-style zero-sum kernel**: Implicit local background subtraction during
    convolution. Our explicit background subtraction is equally valid.
 9. **Formal DAOFIND sharpness/roundness**: Current custom metrics work for filtering but
-   published DAOFIND thresholds aren't transferable.
+   published DAOFIND thresholds aren't transferable. photutils IRAFStarFinder uses
+   image-moments-based metrics (closer to our approach); DAOStarFinder uses density-
+   enhancement-based metrics.
 
 10. **Two-sided FWHM outlier filter**: Current filter is upper-bound only (`s.fwhm <= max_fwhm`).
     Stars with abnormally small FWHM (hot pixels surviving sharpness filter) are not rejected.
@@ -482,10 +512,37 @@ MAX_TILE_SAMPLES=1024 cap.
 ### NOT NEEDED for registration
 
 - Isophotal/Kron/Petrosian photometry
-- CLASS_STAR neural network classifier
+- CLASS_STAR / SPREAD_MODEL neural network classifier
 - Windowed position parameters (WeightedMoments ~= XWIN)
 - Wavelet multiscale detection (matched filter is optimal for known PSF)
 - Multi-band deblending (scarlet/scarlet2)
+- Neural network star detection (YOLO, CNN-based): appropriate for survey data processing
+  at scale but far too heavy for real-time astrophotography stacking
+
+---
+
+## Code Quality Issues
+
+Issues identified during code review. See `REVIEW.md` for full details.
+
+### Active Issues
+
+| ID | Severity | Description | Location |
+|----|----------|-------------|----------|
+| F3 | P2 | Hardcoded saturation threshold 0.95 in `is_saturated()` (should be configurable like other filter thresholds) | star.rs:42 |
+| F8 | P2 | ~300 lines of near-identical SIMD code duplicated for with/without-background threshold mask variants | threshold_mask/ |
+| F11 | P3 | `matched_filter` has 8 parameters with clippy suppression | convolution/mod.rs:49-56 |
+| F14 | P3 | NEON double-reinterpret no-op in threshold_mask | threshold_mask/neon.rs:41 |
+| F15 | P3 | `debug_assert!` for buffer dimensions should be `assert!` per project rules | median_filter, threshold_mask |
+| F17 | P3 | `BufferPool` u32 uses `Option` not `Vec`, inconsistent with f32/bit pools | buffer_pool.rs:89-103 |
+| F21 | P4 | Magic numbers without named constants (65000 CCL threshold, 100 spatial hash crossover, etc.) | labeling, filter, convolution |
+
+### Resolved Issues
+
+- F1: `#[cfg(test)]` helpers in production code -- labeling helpers moved to test_utils.rs
+- F5: Duplicate `use rayon::prelude::*` -- noted for cleanup
+- F9: Duplicated CCL run-merging logic -- extracted to `merge_runs_with_prev()` helper
+- F7: `BackgroundRefinement::iterations()` -- used by detector/mod.rs:150
 
 ---
 
@@ -539,10 +596,14 @@ All core algorithms verified against reference implementations:
 | AtomicUnionFind | Correct | No ABA problem (monotonic parent invariant) |
 | Multi-threshold tree | Correct | Exponential spacing matches SExtractor |
 | Sorting network median9 (25-comp) | Correct | Used in all SIMD paths and scalar fallback |
-| Sorting network median9 (21-comp) | **BUG (dormant)** | Wrong anti-diagonal sort in step 3; unreachable in production (edge pixels have ≤6 neighbors) |
+| Sorting network median9 (21-comp) | **BUG (dormant)** | Wrong anti-diagonal sort in step 3; unreachable in production (edge pixels have <=6 neighbors) |
 | Matched filter normalization | Correct | `output / sqrt(sum(K^2))` matches SEP approach |
 | Mirror boundary convolution | Correct | Preserves flux for sum=1 kernels |
 | Separable decomposition | Correct | axis_ratio >= 0.99 dispatches to separable path |
+| Noise floor clamp in threshold | Correct | `max(noise, 1e-6)` prevents division-by-zero |
+| Weighted moments convergence | Correct | 0.0001 px threshold with max-move rejection |
+| Stamp radius computation | Correct | `clamp(ceil(FWHM * 1.75), 4, 15)` captures ~99% Gaussian flux |
+| PowStrategy dispatch | Correct | Int/HalfInt/General correctly selected by beta value |
 
 ## Consistency Issues Across Modules
 
@@ -551,11 +612,18 @@ All core algorithms verified against reference implementations:
 - Two different median9 sorting networks: 25-comparator (correct, used everywhere) vs
   21-comparator (dormant bug in `mod.rs:median9`, unreachable in production).
 - Sharpness and roundness metrics differ from DAOFIND definitions -- custom definitions
-  are effective for filtering but published threshold values aren't transferable.
+  are effective for filtering but published threshold values aren't transferable. Note:
+  photutils IRAFStarFinder uses moments-based metrics (similar to this module) while
+  DAOStarFinder uses density-enhancement-based metrics.
 - FWHM outlier filter is one-sided (upper bound only) -- stars with abnormally small
   FWHM are not rejected.
 - Roundness naming swapped vs photutils: `roundness1` here = GROUND in photutils,
   `roundness2` here = SROUND.
+- Hardcoded saturation threshold (0.95) in `Star::is_saturated()` while all other
+  filter methods (`is_cosmic_ray`, `is_round`) accept threshold parameters.
+- Parameter name `max_fwhm_deviation` in Config / `max_deviation` in filter.rs is
+  misleading -- it is a MAD multiplier (sigma factor), not an absolute deviation.
+- `BackgroundRefinement::iterations()` returns 0 for None variant, used by detector.
 
 ## References
 
@@ -573,3 +641,6 @@ All core algorithms verified against reference implementations:
 - Thomas et al. 2006: Comparison of centroid algorithms, MNRAS 371, 323
 - Melchior et al. 2018 (scarlet): Astronomy and Computing 24, 129
 - Lupton et al. (SDSS deblender): Princeton deblender documentation
+- Lacassagne et al. 2020: How to speed CCL up with SIMD RLE algorithms, WPMVP
+- Richard et al. 2024 (Siril): JOSS, Siril: An Advanced Tool for Astronomical Image Processing
+- Codish et al. 2014: Sorting networks - optimal 25-comparator S(9) proof

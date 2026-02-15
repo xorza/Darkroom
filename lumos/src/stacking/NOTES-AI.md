@@ -182,9 +182,10 @@ from median, giving less influence to borderline outliers. sqrt(BWMV) is a more 
 scale estimator than MAD for approximately Gaussian data.
 
 Impact assessment: For typical astrophotography data (mostly Gaussian background + sparse bright
-objects), the difference between MAD and IKSS/BWMV is marginal. The 6*MAD clipping step helps
-when bright nebulosity or star fields skew statistics, but this primarily affects normalization
-quality, not rejection quality. Our MAD-based approach matches Siril's "fast mode" option.
+objects), the difference between MAD and clipped-BWMV is marginal. The 6*MAD clipping step
+helps when bright nebulosity or star fields skew statistics, but this primarily affects
+normalization quality, not rejection quality. Our MAD-based approach matches Siril's "faster
+normalization" option.
 
 ### Normalization Mode Coverage
 
@@ -195,7 +196,7 @@ quality, not rejection quality. Our MAD-based approach matches Siril's "fast mod
 | Multiplicative only | Yes | Yes | Yes | Yes |
 | Additive + Scaling | Yes (Global) | Yes (default for lights) | Yes | Yes |
 | Multiplicative + Scaling | No | Yes | Yes | No |
-| Local normalization | No | No | Yes (separate process) | Yes (LNC) |
+| Local normalization | No | No | Yes (LocalNorm/NSG) | Yes (LNC) |
 
 ## Industry Comparison
 
@@ -213,7 +214,7 @@ quality, not rejection quality. Our MAD-based approach matches Siril's "fast mod
 | GESD relaxation | Yes (default 1.5 for low pixels) | Yes (default 1.5 for low pixels) |
 | Normalization | 3 modes (None/Global/Mult) | 5 modes + Local normalization |
 | Rejection normalization | Same as combination | Separate from combination normalization |
-| Weighting | Equal, Noise (1/σ²), Manual | Noise eval (MRS), PSF signal, PSF SNR |
+| Weighting | Equal, Noise (1/σ²), Manual | MRS noise eval, PSFSW, PSF SNR |
 | Reference frame | Auto-select by lowest noise (MAD) | Auto-select by quality metric |
 | Combine methods | Mean, Median | Mean, Median, Min, Max |
 | Rejection maps | Not generated | Low/High rejection maps + slope map |
@@ -226,8 +227,8 @@ quality, not rejection quality. Our MAD-based approach matches Siril's "fast mod
 
 | Feature | This Implementation | Siril |
 |---------|-------------------|-------|
-| Scale estimator | MAD | IKSS (default), MAD (fast mode), sqrt(BWMV) |
-| Location estimator | Median | IKSS (default), Median (fast mode) |
+| Scale estimator | MAD | Clipped sqrt(BWMV) (default), MAD (faster) |
+| Location estimator | Median | Clipped median (default), Median (faster) |
 | Normalization modes | 3 (None/Global/Mult) | 5 (None/Add/Mult/Add+Scale/Mult+Scale) |
 | Winsorized correction | Yes, 1.134 * stddev | Yes, 1.134 * stddev |
 | Linear fit sigma | Mean absolute deviation from fit | Mean absolute deviation, per-pixel |
@@ -339,11 +340,14 @@ Astropy supports `maxiters=None` (iterate until no values rejected). Siril itera
 convergence. Our implementation only supports fixed iteration count. For most astrophotography
 stacks (10-50 frames), 3 iterations is sufficient.
 
-### P3: Missing IKSS/BWMV Statistics Estimators -- POSTPONED
+### P3: Missing Clipped BWMV Statistics Estimators -- POSTPONED
 
-Siril's default normalization uses IKSS (clip 6*MAD, recompute with BWMV). Our median+MAD
-matches Siril's fast fallback mode. Impact is marginal for typical data but could improve
-normalization quality when bright nebulosity or dense star fields are present.
+Siril's default normalization clips pixels > 6*MAD from median, then recomputes location
+as median and scale as sqrt(BWMV) on the clipped dataset. (Siril's documentation does not
+use the term "IKSS" -- this appears to be an informal community label for the clipped-BWMV
+estimator.) Our median+MAD matches Siril's "faster normalization" fallback mode. Impact is
+marginal for typical data but could improve normalization quality when bright nebulosity or
+dense star fields are present.
 
 ### P3: Missing Large-Scale Rejection -- POSTPONED
 
@@ -390,6 +394,8 @@ Per pixel, per iteration:
 4. **Chunked processing**: In-memory mode processes all rows in one chunk. Disk-backed mode
    uses adaptive chunk sizing based on available memory: `chunk_rows = usable_memory /
    (width * sizeof(f32) * frame_count)`. Minimum 64 rows to avoid excessive I/O overhead.
+   Note: chunk calculation uses `channels=1` because `process_chunks_internal` iterates
+   channels sequentially in the outer loop, loading one channel at a time per chunk.
 
 5. **Memory-mapped I/O**: Disk-backed mode uses `mmap` with `MADV_SEQUENTIAL` for kernel
    read-ahead. bytemuck zero-copy f32 access from page-aligned mappings.
@@ -485,9 +491,13 @@ after rejection functions have reordered the values array.
 
 Still missing vs industry:
 - FWHM-based weighting (`w = 1/(sigma_bg^2 * FWHM^2)` for point sources)
-- PSF-based weighting (PixInsight: PSF signal weight, PSF SNR)
+- PSF-based weighting (PixInsight formulas from official docs):
+  - `PSFSignalWeight = (sum_PSF_flux + sum_mean_PSF_flux) / (noise * background)`
+  - `PSF_SNR = (sum_PSF_flux)^2 / noise^2`
+  - Noise measured via MRS (Multiresolution Support) wavelet-based algorithm
+  - Flux measured in elliptical regions at FWTM (Full Width at Tenth Maximum)
 - Star count weighting (Siril)
-These require per-frame star detection.
+These require per-frame star detection and PSF fitting.
 
 ## Normalization Details
 
@@ -499,7 +509,7 @@ These require per-frame star detection.
 - Reference frame: auto-selected by lowest average MAD across channels
 - Statistics: per-channel median and MAD via `compute_frame_stats()` (computed at load time)
 - Missing: separate rejection vs combination normalization (PixInsight feature)
-- Missing: IKSS estimator (6*MAD clip, then recompute with median + sqrt(BWMV) -- Siril default)
+- Missing: Clipped BWMV estimator (6*MAD clip, then recompute with median + sqrt(BWMV) -- Siril default)
 - Missing: pure additive mode, multiplicative+scaling mode, local normalization
 
 ## Frame Type Handling
