@@ -17,7 +17,11 @@ use crate::stacking::stack::run_stacking;
 pub use defect_map::DefectMap;
 
 /// Default sigma threshold for hot pixel detection.
-const DEFAULT_HOT_PIXEL_SIGMA: f32 = 5.0;
+///
+/// A pixel is flagged as defective if it deviates from the per-color median
+/// by more than `sigma_threshold × σ` (where σ is estimated from MAD).
+/// PixInsight uses 3.0; 5.0 is more conservative (fewer false positives).
+pub const DEFAULT_HOT_PIXEL_SIGMA: f32 = 5.0;
 
 /// Holds master calibration frames (dark, flat, bias) and hot pixel map.
 ///
@@ -79,15 +83,18 @@ impl CalibrationMasters {
     /// Generates hot pixel map from the CFA dark if provided.
     /// `flat_dark` is a dark frame taken at the flat's exposure time — used instead
     /// of bias for flat normalization when provided.
+    /// `hot_pixel_sigma` controls defect detection sensitivity (see
+    /// [`DEFAULT_HOT_PIXEL_SIGMA`]).
     pub fn new(
         dark: Option<CfaImage>,
         flat: Option<CfaImage>,
         bias: Option<CfaImage>,
         flat_dark: Option<CfaImage>,
+        hot_pixel_sigma: f32,
     ) -> Self {
         let defect_map = dark
             .as_ref()
-            .map(|d| DefectMap::from_master_dark(d, DEFAULT_HOT_PIXEL_SIGMA));
+            .map(|d| DefectMap::from_master_dark(d, hot_pixel_sigma));
 
         Self {
             master_dark: dark,
@@ -107,17 +114,20 @@ impl CalibrationMasters {
     /// `flat_darks` are dark frames taken at the flat exposure time. When provided,
     /// they are subtracted from the flat instead of bias during normalization.
     /// Important for narrowband imaging where flat exposures accumulate dark current.
+    /// `hot_pixel_sigma` controls defect detection sensitivity (see
+    /// [`DEFAULT_HOT_PIXEL_SIGMA`]).
     pub fn from_raw_files(
         darks: &[impl AsRef<Path> + Sync],
         flats: &[impl AsRef<Path> + Sync],
         biases: &[impl AsRef<Path> + Sync],
         flat_darks: &[impl AsRef<Path> + Sync],
+        hot_pixel_sigma: f32,
     ) -> Result<Self, crate::stacking::Error> {
         let dark = stack_cfa_frames(darks, FrameType::Dark, StackConfig::dark())?;
         let flat = stack_cfa_frames(flats, FrameType::Flat, StackConfig::flat())?;
         let bias = stack_cfa_frames(biases, FrameType::Bias, StackConfig::bias())?;
         let flat_dark = stack_cfa_frames(flat_darks, FrameType::Dark, StackConfig::dark())?;
-        Ok(Self::new(dark, flat, bias, flat_dark))
+        Ok(Self::new(dark, flat, bias, flat_dark, hot_pixel_sigma))
     }
 
     /// Calibrate a raw CFA light frame in place.

@@ -1,4 +1,5 @@
 use crate::astro_image::cfa::{CfaImage, CfaType};
+use crate::calibration_masters::DEFAULT_HOT_PIXEL_SIGMA;
 use crate::calibration_masters::DefectMap;
 use crate::common::Buffer2;
 use crate::{AstroImageMetadata, CalibrationMasters};
@@ -19,7 +20,8 @@ fn test_new_constructor() {
     let dark = constant_cfa(4, 4, 0.1, CfaType::Mono);
     let flat = constant_cfa(4, 4, 0.8, CfaType::Mono);
 
-    let masters = CalibrationMasters::new(Some(dark), Some(flat), None, None);
+    let masters =
+        CalibrationMasters::new(Some(dark), Some(flat), None, None, DEFAULT_HOT_PIXEL_SIGMA);
 
     assert!(masters.master_dark.is_some());
     assert!(masters.master_flat.is_some());
@@ -32,7 +34,7 @@ fn test_new_constructor() {
 fn test_new_no_dark_no_hot_pixels() {
     let flat = constant_cfa(4, 4, 0.8, CfaType::Mono);
 
-    let masters = CalibrationMasters::new(None, Some(flat), None, None);
+    let masters = CalibrationMasters::new(None, Some(flat), None, None, DEFAULT_HOT_PIXEL_SIGMA);
 
     assert!(masters.master_dark.is_none());
     assert!(masters.master_flat.is_some());
@@ -42,7 +44,7 @@ fn test_new_no_dark_no_hot_pixels() {
 #[test]
 fn test_calibrate_dark_subtraction() {
     let dark = constant_cfa(4, 4, 0.1, CfaType::Mono);
-    let masters = CalibrationMasters::new(Some(dark), None, None, None);
+    let masters = CalibrationMasters::new(Some(dark), None, None, None, DEFAULT_HOT_PIXEL_SIGMA);
 
     let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
     masters.calibrate(&mut light);
@@ -57,7 +59,7 @@ fn test_calibrate_dark_subtraction() {
 fn test_calibrate_bias_only() {
     // No dark → bias is subtracted instead
     let bias = constant_cfa(4, 4, 0.05, CfaType::Mono);
-    let masters = CalibrationMasters::new(None, None, Some(bias), None);
+    let masters = CalibrationMasters::new(None, None, Some(bias), None, DEFAULT_HOT_PIXEL_SIGMA);
 
     let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
     masters.calibrate(&mut light);
@@ -73,7 +75,8 @@ fn test_calibrate_dark_takes_priority_over_bias() {
     // When both dark and bias exist, only dark is subtracted
     let dark = constant_cfa(4, 4, 0.1, CfaType::Mono);
     let bias = constant_cfa(4, 4, 0.05, CfaType::Mono);
-    let masters = CalibrationMasters::new(Some(dark), None, Some(bias), None);
+    let masters =
+        CalibrationMasters::new(Some(dark), None, Some(bias), None, DEFAULT_HOT_PIXEL_SIGMA);
 
     let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
     masters.calibrate(&mut light);
@@ -98,7 +101,7 @@ fn test_calibrate_flat_correction() {
         },
     };
 
-    let masters = CalibrationMasters::new(None, Some(flat), None, None);
+    let masters = CalibrationMasters::new(None, Some(flat), None, None, DEFAULT_HOT_PIXEL_SIGMA);
 
     let mut light = constant_cfa(2, 2, 0.3, CfaType::Mono);
     masters.calibrate(&mut light);
@@ -144,7 +147,13 @@ fn test_calibrate_full_pipeline() {
     };
     let bias = constant_cfa(2, 1, bias_val, CfaType::Mono);
 
-    let masters = CalibrationMasters::new(Some(dark), Some(flat), Some(bias), None);
+    let masters = CalibrationMasters::new(
+        Some(dark),
+        Some(flat),
+        Some(bias),
+        None,
+        DEFAULT_HOT_PIXEL_SIGMA,
+    );
 
     let mut light = CfaImage {
         data: Buffer2::new(2, 1, light_pixels),
@@ -175,6 +184,41 @@ fn test_calibrate_full_pipeline() {
         "Expected {expected_1}, got {}",
         light.data[1]
     );
+}
+
+#[test]
+fn test_sigma_threshold_affects_detection() {
+    // 6×6 mono dark: background=100.0, one "warm" pixel at 250.0.
+    // Per-color stats (mono, all same channel):
+    //   median ≈ 100.0, MAD ≈ 0.0 → floored sigma = max(0.0, 100*0.1, 5e-4) = 10.0
+    //   upper(sigma=3) = 100 + 3×10 = 130 → 250 > 130 → detected
+    //   upper(sigma=20) = 100 + 20×10 = 300 → 250 < 300 → NOT detected
+    let mut pixels = vec![100.0f32; 36];
+    pixels[14] = 250.0; // warm pixel at index 14
+
+    let dark_strict = constant_cfa(6, 6, 0.0, CfaType::Mono);
+    let dark_loose = constant_cfa(6, 6, 0.0, CfaType::Mono);
+
+    // Build actual CfaImages with our pixel data
+    let dark_strict = CfaImage {
+        data: Buffer2::new(6, 6, pixels.clone()),
+        ..dark_strict
+    };
+    let dark_loose = CfaImage {
+        data: Buffer2::new(6, 6, pixels),
+        ..dark_loose
+    };
+
+    let masters_strict = CalibrationMasters::new(Some(dark_strict), None, None, None, 3.0);
+    let masters_loose = CalibrationMasters::new(Some(dark_loose), None, None, None, 20.0);
+
+    let strict_count = masters_strict.defect_map.as_ref().unwrap().hot_count();
+    let loose_count = masters_loose.defect_map.as_ref().unwrap().hot_count();
+
+    // sigma=3: 250 > 130, warm pixel detected as hot
+    assert_eq!(strict_count, 1, "sigma=3 should detect the warm pixel");
+    // sigma=20: 250 < 300, warm pixel NOT detected
+    assert_eq!(loose_count, 0, "sigma=20 should not detect the warm pixel");
 }
 
 #[test]
@@ -232,7 +276,7 @@ fn test_calibrate_hot_pixel_correction() {
         },
     };
 
-    let masters = CalibrationMasters::new(Some(dark), None, None, None);
+    let masters = CalibrationMasters::new(Some(dark), None, None, None, DEFAULT_HOT_PIXEL_SIGMA);
 
     assert!(masters.defect_map.is_some());
     let hot_map = masters.defect_map.as_ref().unwrap();
@@ -294,7 +338,13 @@ fn test_calibrate_flat_dark() {
     };
     let flat_dark = constant_cfa(2, 1, flat_dark_val, CfaType::Mono);
 
-    let masters = CalibrationMasters::new(Some(dark), Some(flat), None, Some(flat_dark));
+    let masters = CalibrationMasters::new(
+        Some(dark),
+        Some(flat),
+        None,
+        Some(flat_dark),
+        DEFAULT_HOT_PIXEL_SIGMA,
+    );
 
     let mut light = CfaImage {
         data: Buffer2::new(2, 1, light_pixels),
@@ -339,7 +389,13 @@ fn test_flat_dark_takes_priority_over_bias() {
     let bias = constant_cfa(2, 2, 0.05, CfaType::Mono);
     let flat_dark = constant_cfa(2, 2, 0.10, CfaType::Mono);
 
-    let masters = CalibrationMasters::new(None, Some(flat), Some(bias), Some(flat_dark));
+    let masters = CalibrationMasters::new(
+        None,
+        Some(flat),
+        Some(bias),
+        Some(flat_dark),
+        DEFAULT_HOT_PIXEL_SIGMA,
+    );
 
     let mut light = constant_cfa(2, 2, 0.5, CfaType::Mono);
     masters.calibrate(&mut light);

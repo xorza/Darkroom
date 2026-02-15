@@ -51,7 +51,7 @@ pub use raw::demosaic::CfaPattern;
 // Calibration
 // ============================================================================
 
-pub use calibration_masters::CalibrationMasters;
+pub use calibration_masters::{CalibrationMasters, DEFAULT_HOT_PIXEL_SIGMA};
 
 // ============================================================================
 // Star detection
