@@ -182,7 +182,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 2/5 -- extract helper `fn evaluate_basis(u, v, terms) -> ArrayVec<f64, N>`
 - **Description**: The monomial basis evaluation loop (iterate terms, compute `monomial(u, v, p, q)`) appears in residual computation, correction, and normal equations. Similarly, the coordinate normalization `(point - ref_pt) / scale` appears in 3 places (lines 194-195, 344-345, 432-433). Extract small helpers.
 
-#### [F19] `RngWrapper` enum dispatch overhead in RANSAC hot loop
+#### [F19] ~~`RngWrapper` enum dispatch overhead in RANSAC hot loop~~ DONE — Removed `RngWrapper` enum (~40 lines); replaced with `make_rng()` that always returns `ChaCha8Rng` (seeded from `thread_rng()` when no user seed)
 - **Location**: `ransac/mod.rs:74-116`
 - **Category**: Simplification / performance
 - **Impact**: 3/5 -- runtime match on every RNG call across thousands of iterations

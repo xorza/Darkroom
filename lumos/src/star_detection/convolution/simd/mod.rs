@@ -175,10 +175,12 @@ pub(super) fn convolve_cols_scalar(
     width: usize,
     height: usize,
     kernel: &[f32],
-    radius: usize,
+s    radius: usize,
 ) {
-    for x in 0..width {
-        for y in 0..height {
+    // Row-major traversal: y outer loop ensures sequential writes to output
+    // and mostly-sequential reads from input (kernel rows are close in memory).
+    for y in 0..height {
+        for x in 0..width {
             let mut sum = 0.0f32;
             for (k, &kval) in kernel.iter().enumerate() {
                 let sy = y as isize + k as isize - radius as isize;

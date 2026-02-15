@@ -240,7 +240,7 @@ No critical bugs found. Most findings are maintainability improvements.
   `== 0.0` for various near-zero checks. Named constants with semantic meaning
   (`JACOBIAN_THRESHOLD`, `WEIGHT_EPSILON`) would improve clarity.
 
-#### [F18] `abs_deviation_inplace` computed twice in sigma clipping
+#### [F18] ~~`abs_deviation_inplace` computed twice in sigma clipping~~ DONE — Inlined deviation computation in clipping loop; eliminates second `copy_from_slice` + `abs_deviation_inplace` pass
 - **Location**: `math/statistics/mod.rs:128-141`
 - **Category**: Data flow / Efficiency
 - **Impact**: 3/5 — Redundant work in hot path
@@ -333,7 +333,7 @@ No critical bugs found. Most findings are maintainability improvements.
 
 ### Priority 4 — Low Priority
 
-#### [F27] `PixelSource` enum branching overhead in X-Trans inner loop
+#### [F27] ~~`PixelSource` enum branching overhead in X-Trans inner loop~~ SKIPPED — Branch predictor handles invariant variant perfectly (<2% estimated gain for f32 path); monomorphizing requires touching 5+ functions across 3 files, not worth complexity
 - **Location**: `raw/demosaic/xtrans/mod.rs:147-155`
 - **Category**: Performance
 - **Impact**: 2/5 — Branch per pixel in hot path

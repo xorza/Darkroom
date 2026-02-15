@@ -231,7 +231,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 
 ### Priority 3 — Moderate Impact
 
-#### [F23] Per-row heap allocations in background interpolation hot path
+#### [F23] ~~Per-row heap allocations in background interpolation hot path~~ DONE — Precomputed `centers_x` on TileGrid; `interpolate_from_grid` uses `for_each_init` with per-thread `InterpolateScratch` (5 Vecs + spline scratch); `solve_natural_spline_d2` takes external scratch buffer
 - **Location**: `background/mod.rs:166-190`, `background/tile_grid.rs:343`
 - **Category**: Performance
 - **Impact**: 3/5 — Five Vec allocations per row in parallel iterator; `solve_natural_spline_d2` allocates scratch Vec per call
@@ -331,7 +331,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 1/5 — Rename and fix comments
 - **Description**: `bench_label_map_from_buffer_6k_globular` creates 4096x4096 (4k). Comments reference old 100k threshold when actual is 65k.
 
-#### [F35] Scalar column convolution fallback is cache-hostile
+#### [F35] ~~Scalar column convolution fallback is cache-hostile~~ DONE — Swapped loop order to y-outer, x-inner (row-major traversal)
 - **Location**: `convolution/simd/mod.rs:180-190`
 - **Category**: Data flow
 - **Impact**: 2/5 — Iterates x-then-y on row-major data

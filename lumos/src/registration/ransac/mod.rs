@@ -76,48 +76,15 @@ impl Default for RansacParams {
     }
 }
 
-// Wrapper for seeded vs non-seeded RNG.
-// ChaCha8Rng is 304 bytes; Box avoids large enum variant size difference.
-enum RngWrapper {
-    Seeded(Box<rand_chacha::ChaCha8Rng>),
-    Thread(rand::rngs::ThreadRng),
-}
-
-impl RngWrapper {
-    fn new(seed: Option<u64>) -> Self {
-        match seed {
-            Some(s) => {
-                use rand_chacha::rand_core::SeedableRng;
-                RngWrapper::Seeded(Box::new(rand_chacha::ChaCha8Rng::seed_from_u64(s)))
-            }
-            None => RngWrapper::Thread(rand::rng()),
-        }
-    }
-}
-
-impl rand::TryRng for RngWrapper {
-    type Error = core::convert::Infallible;
-
-    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
-        Ok(match self {
-            RngWrapper::Seeded(rng) => rng.next_u32(),
-            RngWrapper::Thread(rng) => rng.next_u32(),
-        })
-    }
-
-    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
-        Ok(match self {
-            RngWrapper::Seeded(rng) => rng.next_u64(),
-            RngWrapper::Thread(rng) => rng.next_u64(),
-        })
-    }
-
-    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
-        match self {
-            RngWrapper::Seeded(rng) => rng.fill_bytes(dest),
-            RngWrapper::Thread(rng) => rng.fill_bytes(dest),
-        }
-        Ok(())
+/// Create a ChaCha8Rng from an optional seed.
+///
+/// When `seed` is `None`, seeds from `thread_rng()` for non-deterministic behavior.
+/// Always using ChaCha8Rng avoids enum dispatch overhead on every RNG call.
+fn make_rng(seed: Option<u64>) -> rand_chacha::ChaCha8Rng {
+    use rand_chacha::rand_core::SeedableRng;
+    match seed {
+        Some(s) => rand_chacha::ChaCha8Rng::seed_from_u64(s),
+        None => rand_chacha::ChaCha8Rng::seed_from_u64(rand::rng().next_u64()),
     }
 }
 
@@ -440,7 +407,7 @@ impl RansacEstimator {
             return None;
         }
 
-        let mut rng = RngWrapper::new(self.params.seed);
+        let mut rng = make_rng(self.params.seed);
 
         // Build sorted index by confidence (descending)
         let mut sorted_indices: Vec<usize> = (0..n).collect();

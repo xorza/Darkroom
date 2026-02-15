@@ -143,16 +143,13 @@ fn sigma_clip_iteration(
         return ClipResult::Converged(median, 0.0);
     }
 
-    // Recompute deviations from values: median_f32_approx destroyed the index
-    // correspondence between deviations[i] and values[i] via partial sort.
-    deviations[..*len].copy_from_slice(&values[..*len]);
-    abs_deviation_inplace(&mut deviations[..*len], median);
-
-    // Clip values outside threshold using recomputed deviations
+    // Clip values outside threshold, computing deviations on-the-fly.
+    // (The deviations buffer was scrambled by median_f32_fast above,
+    // so we recompute each deviation inline instead of a separate pass.)
     let threshold = kappa * sigma;
     let mut write_idx = 0;
     for i in 0..*len {
-        if deviations[i] <= threshold {
+        if (values[i] - median).abs() <= threshold {
             values[write_idx] = values[i];
             write_idx += 1;
         }

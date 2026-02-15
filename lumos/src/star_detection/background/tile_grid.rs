@@ -32,6 +32,8 @@ pub(super) struct TileGrid {
     d2y_median: Vec<f32>,
     /// Second derivatives in Y direction for natural cubic spline (sigma).
     d2y_sigma: Vec<f32>,
+    /// Precomputed X-coordinates of tile centers (one per tile column).
+    centers_x: Vec<f32>,
     tile_size: usize,
     width: usize,
     height: usize,
@@ -50,10 +52,20 @@ impl TileGrid {
         let tiles_y = height.div_ceil(tile_size);
         let n = tiles_x * tiles_y;
 
+        // Precompute tile center X-coordinates (invariant across rows)
+        let centers_x: Vec<f32> = (0..tiles_x)
+            .map(|tx| {
+                let x_start = tx * tile_size;
+                let x_end = (x_start + tile_size).min(width);
+                (x_start + x_end) as f32 * 0.5
+            })
+            .collect();
+
         Self {
             stats: Buffer2::new_default(tiles_x, tiles_y),
             d2y_median: vec![0.0; n],
             d2y_sigma: vec![0.0; n],
+            centers_x,
             tile_size,
             width,
             height,
@@ -94,11 +106,10 @@ impl TileGrid {
         self.stats.height()
     }
 
+    /// Precomputed X-coordinates of all tile centers.
     #[inline]
-    pub fn center_x(&self, tx: usize) -> f32 {
-        let x_start = tx * self.tile_size;
-        let x_end = (x_start + self.tile_size).min(self.width);
-        (x_start + x_end) as f32 * 0.5
+    pub fn centers_x(&self) -> &[f32] {
+        &self.centers_x
     }
 
     #[inline]
@@ -255,13 +266,14 @@ impl TileGrid {
         // Scratch buffers for tridiagonal solver (reused per column)
         let mut values = vec![0.0f32; tiles_y];
         let mut d2 = vec![0.0f32; tiles_y];
+        let mut scratch = vec![0.0f32; tiles_y.saturating_sub(2)];
 
         for tx in 0..tiles_x {
             // Solve for median
             for (ty, val) in values.iter_mut().enumerate() {
                 *val = self.stats[(tx, ty)].median;
             }
-            solve_natural_spline_d2(&values, &centers_y, &mut d2);
+            solve_natural_spline_d2(&values, &centers_y, &mut d2, &mut scratch);
             for (ty, &d) in d2.iter().enumerate() {
                 self.d2y_median[ty * tiles_x + tx] = d;
             }
@@ -270,7 +282,7 @@ impl TileGrid {
             for (ty, val) in values.iter_mut().enumerate() {
                 *val = self.stats[(tx, ty)].sigma;
             }
-            solve_natural_spline_d2(&values, &centers_y, &mut d2);
+            solve_natural_spline_d2(&values, &centers_y, &mut d2, &mut scratch);
             for (ty, &d) in d2.iter().enumerate() {
                 self.d2y_sigma[ty * tiles_x + tx] = d;
             }
@@ -313,8 +325,17 @@ pub(super) fn cubic_spline_eval(f0: f32, f1: f32, d0: f32, d1: f32, h: f32, t: f
 /// derivatives `d2[0..n]` using a tridiagonal solver with natural boundary
 /// conditions (d2[0] = d2[n-1] = 0).
 ///
+/// `scratch` must have length >= `n - 2` (used for modified upper diagonal
+/// coefficients in the Thomas algorithm). Pass a reusable buffer to avoid
+/// per-call heap allocation.
+///
 /// Supports non-uniform spacing. O(n) forward elimination + back substitution.
-pub(super) fn solve_natural_spline_d2(values: &[f32], centers: &[f32], d2: &mut [f32]) {
+pub(super) fn solve_natural_spline_d2(
+    values: &[f32],
+    centers: &[f32],
+    d2: &mut [f32],
+    scratch: &mut [f32],
+) {
     let n = values.len();
     debug_assert_eq!(centers.len(), n);
     debug_assert!(d2.len() >= n);
@@ -336,11 +357,12 @@ pub(super) fn solve_natural_spline_d2(values: &[f32], centers: &[f32], d2: &mut 
     // This reduces to (n-2) equations for d2[1..n-2].
 
     let m = n - 2; // number of interior unknowns
+    debug_assert!(scratch.len() >= m);
 
     // Forward elimination (Thomas algorithm)
     // We store modified diagonal and RHS in d2[] (reusing output buffer)
-    // and use a temporary buffer for the modified upper diagonal.
-    let mut cp = vec![0.0f32; m]; // modified upper diagonal coefficients
+    // and use `scratch` for the modified upper diagonal.
+    let cp = &mut scratch[..m];
 
     // First interior equation (i=1):
     let h0 = centers[1] - centers[0];
@@ -622,10 +644,10 @@ mod tests {
         let pixels = create_uniform_image(128, 64, 0.5);
         let grid = make_grid(&pixels, 32);
 
-        assert!((grid.center_x(0) - 16.0).abs() < 0.01);
-        assert!((grid.center_x(1) - 48.0).abs() < 0.01);
-        assert!((grid.center_x(2) - 80.0).abs() < 0.01);
-        assert!((grid.center_x(3) - 112.0).abs() < 0.01);
+        assert!((grid.centers_x()[0] - 16.0).abs() < 0.01);
+        assert!((grid.centers_x()[1] - 48.0).abs() < 0.01);
+        assert!((grid.centers_x()[2] - 80.0).abs() < 0.01);
+        assert!((grid.centers_x()[3] - 112.0).abs() < 0.01);
     }
 
     #[test]
@@ -633,7 +655,7 @@ mod tests {
         let pixels = create_uniform_image(100, 64, 0.5);
         let grid = make_grid(&pixels, 32);
 
-        assert!((grid.center_x(3) - 98.0).abs() < 0.01);
+        assert!((grid.centers_x()[3] - 98.0).abs() < 0.01);
     }
 
     #[test]
@@ -866,7 +888,7 @@ mod tests {
 
         let stats = grid.get(0, 0);
         assert!((stats.median - 0.6).abs() < 0.01);
-        assert!((grid.center_x(0) - 16.0).abs() < 0.01);
+        assert!((grid.centers_x()[0] - 16.0).abs() < 0.01);
         assert!((grid.center_y(0) - 16.0).abs() < 0.01);
     }
 
@@ -905,7 +927,7 @@ mod tests {
 
         let stats = grid.get(0, 0);
         assert!((stats.median - 0.7).abs() < 0.01);
-        assert!((grid.center_x(0) - 10.0).abs() < 0.01);
+        assert!((grid.centers_x()[0] - 10.0).abs() < 0.01);
         assert!((grid.center_y(0) - 10.0).abs() < 0.01);
     }
 
@@ -1368,8 +1390,9 @@ mod tests {
         let values = [10.0, 20.0];
         let centers = [0.0, 1.0];
         let mut d2 = [999.0; 2];
+        let mut scratch = [0.0; 1];
 
-        solve_natural_spline_d2(&values, &centers, &mut d2);
+        solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
         assert_eq!(d2[0], 0.0);
         assert_eq!(d2[1], 0.0);
     }
@@ -1381,8 +1404,9 @@ mod tests {
         let values = [1.0, 3.0, 5.0, 7.0];
         let centers = [0.0, 1.0, 2.0, 3.0];
         let mut d2 = [0.0; 4];
+        let mut scratch = [0.0; 2];
 
-        solve_natural_spline_d2(&values, &centers, &mut d2);
+        solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
 
         for (i, &d) in d2.iter().enumerate() {
             assert!(
@@ -1414,8 +1438,9 @@ mod tests {
         let values = [0.0, 1.0, 4.0, 9.0];
         let centers = [0.0, 1.0, 2.0, 3.0];
         let mut d2 = [0.0; 4];
+        let mut scratch = [0.0; 2];
 
-        solve_natural_spline_d2(&values, &centers, &mut d2);
+        solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
 
         assert!(d2[0].abs() < 1e-6, "d2[0] = {}, expected 0", d2[0]);
         assert!(d2[3].abs() < 1e-6, "d2[3] = {}, expected 0", d2[3]);
@@ -1442,8 +1467,9 @@ mod tests {
         let values = [0.0, 1.0, 9.0];
         let centers = [0.0, 1.0, 3.0];
         let mut d2 = [0.0; 3];
+        let mut scratch = [0.0; 1];
 
-        solve_natural_spline_d2(&values, &centers, &mut d2);
+        solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
 
         assert!(d2[0].abs() < 1e-6, "d2[0] = {}, expected 0", d2[0]);
         assert!(d2[2].abs() < 1e-6, "d2[2] = {}, expected 0", d2[2]);
@@ -1612,8 +1638,9 @@ mod tests {
         let values = [42.0];
         let centers = [5.0];
         let mut d2 = [999.0; 1];
+        let mut scratch = [0.0; 1];
 
-        solve_natural_spline_d2(&values, &centers, &mut d2);
+        solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
         assert_eq!(d2[0], 0.0);
     }
 
@@ -1622,8 +1649,9 @@ mod tests {
         let values: [f32; 0] = [];
         let centers: [f32; 0] = [];
         let mut d2: [f32; 0] = [];
+        let mut scratch: [f32; 0] = [];
 
-        solve_natural_spline_d2(&values, &centers, &mut d2);
+        solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
         // No-op, just shouldn't panic
     }
 
@@ -1656,8 +1684,9 @@ mod tests {
         let values = [0.0, 1.0, 8.0, 27.0, 64.0];
         let centers = [0.0, 1.0, 2.0, 3.0, 4.0];
         let mut d2 = [0.0; 5];
+        let mut scratch = [0.0; 3];
 
-        solve_natural_spline_d2(&values, &centers, &mut d2);
+        solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
 
         assert!(d2[0].abs() < 1e-5, "d2[0] = {}, expected 0", d2[0]);
         assert!(d2[4].abs() < 1e-5, "d2[4] = {}, expected 0", d2[4]);
@@ -1703,8 +1732,9 @@ mod tests {
         let values = [1.0, 4.0, 9.0, 4.0, 1.0];
         let centers = [0.0, 1.0, 2.0, 3.0, 4.0];
         let mut d2 = [0.0; 5];
+        let mut scratch = [0.0; 3];
 
-        solve_natural_spline_d2(&values, &centers, &mut d2);
+        solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
 
         let expected_sym = 54.0 / 7.0; // d2[1] = d2[3]
         let expected_center = -132.0 / 7.0; // d2[2]
@@ -1761,8 +1791,9 @@ mod tests {
         let values = [0.0f32, 1.0, 8.0, 27.0, 64.0];
         let centers = [0.0f32, 1.0, 2.0, 3.0, 4.0];
         let mut d2 = [0.0f32; 5];
+        let mut scratch = [0.0f32; 3];
 
-        solve_natural_spline_d2(&values, &centers, &mut d2);
+        solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
 
         // At each node i, evaluate spline from interval [i-1, i] at t=1
         // and from interval [i, i+1] at t=0. Both should give values[i].
@@ -1802,8 +1833,9 @@ mod tests {
         let values = [2.0f32, 5.0, 3.0, 8.0, 1.0, 6.0];
         let centers = [0.0f32, 1.0, 2.0, 3.0, 4.0, 5.0];
         let mut d2 = [0.0f32; 6];
+        let mut scratch = [0.0f32; 4];
 
-        solve_natural_spline_d2(&values, &centers, &mut d2);
+        solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
 
         for i in 1..5 {
             let h_left = centers[i] - centers[i - 1];

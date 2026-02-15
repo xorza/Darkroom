@@ -95,18 +95,45 @@ pub(crate) fn refine_background(
     pool.release_bit(mask);
 }
 
+/// Per-thread scratch buffers for `interpolate_row`, avoiding heap allocations per row.
+#[derive(Debug)]
+struct InterpolateScratch {
+    node_bg: Vec<f32>,
+    node_noise: Vec<f32>,
+    d2x_bg: Vec<f32>,
+    d2x_noise: Vec<f32>,
+    spline_scratch: Vec<f32>,
+}
+
+impl InterpolateScratch {
+    fn new(tiles_x: usize) -> Self {
+        let spline_n = tiles_x.saturating_sub(2);
+        Self {
+            node_bg: vec![0.0; tiles_x],
+            node_noise: vec![0.0; tiles_x],
+            d2x_bg: vec![0.0; tiles_x],
+            d2x_noise: vec![0.0; tiles_x],
+            spline_scratch: vec![0.0; spline_n],
+        }
+    }
+}
+
 /// Interpolate background map from tile grid into output buffers.
 fn interpolate_from_grid(grid: &TileGrid, background: &mut Buffer2<f32>, noise: &mut Buffer2<f32>) {
     let width = background.width();
+    let tiles_x = grid.tiles_x();
 
     background
         .pixels_mut()
         .par_chunks_mut(width)
         .zip(noise.pixels_mut().par_chunks_mut(width))
         .enumerate()
-        .for_each(|(y, (bg_row, noise_row))| {
-            interpolate_row(bg_row, noise_row, y, grid);
-        });
+        .for_each_init(
+            || InterpolateScratch::new(tiles_x),
+            |scratch, (y, (bg_row, noise_row))| {
+                interpolate_row(bg_row, noise_row, y, grid, scratch);
+            },
+        );
 }
 
 /// Create a mask of pixels that are likely objects (above threshold).
@@ -143,10 +170,19 @@ fn create_object_mask(
 /// 1. Evaluate Y spline at this row for each tile column → node values
 /// 2. Solve tridiagonal system in X for second derivatives
 /// 3. Evaluate X spline per-pixel using SIMD-accelerated segments
-fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &TileGrid) {
+///
+/// Uses pre-allocated `scratch` buffers to avoid heap allocations per row.
+fn interpolate_row(
+    bg_row: &mut [f32],
+    noise_row: &mut [f32],
+    y: usize,
+    grid: &TileGrid,
+    scratch: &mut InterpolateScratch,
+) {
     let fy = y as f32;
     let width = bg_row.len();
     let tiles_x = grid.tiles_x();
+    let centers_x = grid.centers_x();
 
     // --- Step 1: Evaluate Y spline at each tile column ---
 
@@ -162,9 +198,8 @@ fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &T
     };
 
     // Evaluate Y cubic spline at each tile column
-    // For small tile counts (common), use stack-friendly SmallVec-style approach
-    let mut node_bg = vec![0.0f32; tiles_x];
-    let mut node_noise = vec![0.0f32; tiles_x];
+    let node_bg = &mut scratch.node_bg[..tiles_x];
+    let node_noise = &mut scratch.node_noise[..tiles_x];
 
     for tx in 0..tiles_x {
         let f0_bg = grid.get(tx, ty0).median;
@@ -182,12 +217,16 @@ fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &T
 
     // --- Step 2: Solve tridiagonal system in X for second derivatives ---
 
-    let centers_x: Vec<f32> = (0..tiles_x).map(|tx| grid.center_x(tx)).collect();
-    let mut d2x_bg = vec![0.0f32; tiles_x];
-    let mut d2x_noise = vec![0.0f32; tiles_x];
+    let d2x_bg = &mut scratch.d2x_bg[..tiles_x];
+    let d2x_noise = &mut scratch.d2x_noise[..tiles_x];
 
-    tile_grid::solve_natural_spline_d2(&node_bg, &centers_x, &mut d2x_bg);
-    tile_grid::solve_natural_spline_d2(&node_noise, &centers_x, &mut d2x_noise);
+    tile_grid::solve_natural_spline_d2(node_bg, centers_x, d2x_bg, &mut scratch.spline_scratch);
+    tile_grid::solve_natural_spline_d2(
+        node_noise,
+        centers_x,
+        d2x_noise,
+        &mut scratch.spline_scratch,
+    );
 
     // --- Step 3: Evaluate X spline per segment ---
 
@@ -197,7 +236,7 @@ fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &T
         let tx1 = (tx0 + 1).min(tiles_x - 1);
 
         let segment_end = if tx0 + 1 < tiles_x {
-            (grid.center_x(tx0 + 1).floor() as usize).min(width)
+            (centers_x[tx0 + 1].floor() as usize).min(width)
         } else {
             width
         };
