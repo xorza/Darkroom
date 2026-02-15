@@ -86,6 +86,10 @@ use triangle::{PointMatch, TriangleParams, match_triangles};
 /// The RANSAC `max_sigma` parameter is automatically derived from the median FWHM
 /// of the input stars, providing optimal noise tolerance for the seeing conditions.
 ///
+/// # Panics
+///
+/// If `config` fails validation (see [`Config::validate`]).
+///
 /// # Example
 ///
 /// ```ignore

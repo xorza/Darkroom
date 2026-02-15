@@ -137,6 +137,11 @@ impl SipPolynomial {
     /// correction to minimize residual errors.
     ///
     /// Returns `None` if the system is underdetermined or singular.
+    ///
+    /// # Panics
+    ///
+    /// - If `config` fails validation (see [`SipConfig`]: order must be 2..=5).
+    /// - If `ref_points` and `target_points` have different lengths.
     pub fn fit_from_transform(
         ref_points: &[DVec2],
         target_points: &[DVec2],

@@ -266,6 +266,22 @@ impl Config {
     }
 
     /// Validate all configuration parameters.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any parameter is invalid:
+    /// - `max_stars` or `min_stars` < 3
+    /// - `max_stars` < `min_stars`
+    /// - `min_matches` < transform minimum points
+    /// - `ratio_tolerance` not in (0, 1)
+    /// - `min_votes` < 1
+    /// - `ransac_iterations` < 1
+    /// - `confidence` not in \[0, 1\]
+    /// - `min_inlier_ratio` not in (0, 1\]
+    /// - `max_rotation` <= 0 (when set)
+    /// - `scale_range` with min <= 0 or max <= min (when set)
+    /// - `max_rms_error` <= 0
+    /// - `sip_order` not in 2..=5 (when SIP enabled)
     pub fn validate(&self) {
         // Star matching
         assert!(

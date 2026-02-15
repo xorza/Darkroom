@@ -54,6 +54,11 @@ pub(crate) struct FrameNorm {
 ///
 /// The stacked result as an `AstroImage`.
 ///
+/// # Panics
+///
+/// - If `config` fails validation (see [`StackConfig::validate`]).
+/// - If `config.weighting` is `Manual` and the weight count doesn't match `paths.len()`.
+///
 /// # Errors
 ///
 /// Returns an error if:
@@ -98,6 +103,11 @@ pub fn stack<P: AsRef<Path> + Sync>(
 /// * `frame_type` - Type of frame being stacked
 /// * `config` - Stacking configuration
 /// * `progress` - Progress callback
+///
+/// # Panics
+///
+/// - If `config` fails validation (see [`StackConfig::validate`]).
+/// - If `config.weighting` is `Manual` and the weight count doesn't match `paths.len()`.
 ///
 /// # Examples
 ///

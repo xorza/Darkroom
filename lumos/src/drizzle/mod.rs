@@ -225,6 +225,11 @@ impl DrizzleAccumulator {
     /// `pixel_weights` is an optional per-pixel weight map (same dimensions as input image).
     /// Values of 0.0 fully exclude a pixel (e.g. hot/dead pixels, cosmic rays);
     /// 1.0 is normal weight; intermediate values allow soft weighting.
+    ///
+    /// # Panics
+    ///
+    /// - If `image` channel count doesn't match the accumulator.
+    /// - If `pixel_weights` dimensions don't match `image` dimensions.
     pub fn add_image(
         &mut self,
         image: AstroImage,
