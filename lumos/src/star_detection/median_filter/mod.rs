@@ -22,7 +22,6 @@ pub fn median_filter_3x3(pixels: &Buffer2<f32>, output: &mut Buffer2<f32>) {
     debug_assert_eq!(height, output.height());
 
     if width < 3 || height < 3 {
-        // todo swap?
         output.copy_from_slice(pixels);
         return;
     }

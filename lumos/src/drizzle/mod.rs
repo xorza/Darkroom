@@ -21,8 +21,6 @@
 //!   of Undersampled Images"
 //! - HST DrizzlePac Handbook (2025)
 
-// Allow dead code for now - this is a new module with public API
-
 use std::path::Path;
 
 use arrayvec::ArrayVec;

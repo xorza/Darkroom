@@ -32,7 +32,7 @@ raw/
 | Sensor Type | Normalization | Demosaic | Output |
 |------------|---------------|----------|--------|
 | Monochrome | `normalize_u16_to_f32_parallel()` + crop | None | 1-channel grayscale |
-| Bayer | `normalize_u16_to_f32_parallel()` (SIMD) | **TODO: DCB** | 3-channel RGB |
+| Bayer | `normalize_u16_to_f32_parallel()` (SIMD) | RCD (Ratio Corrected Demosaicing) | 3-channel RGB |
 | X-Trans | `normalize_u16_to_f32_parallel()` (SIMD) | Markesteijn 1-pass (rayon) | 3-channel RGB |
 | Unknown | libraw `dcraw_process` | libraw built-in | 3-channel RGB |
 
