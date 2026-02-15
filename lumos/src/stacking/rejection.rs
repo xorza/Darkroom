@@ -810,7 +810,7 @@ fn sort_with_indices(
         // Build position permutation, sort by values, apply to both arrays.
         // Reuse scratch_buf for the value copy; allocate perm on stack-like Vec.
         let mut perm: Vec<usize> = (0..n).collect();
-        perm.sort_unstable_by(|&a, &b| values[a].partial_cmp(&values[b]).unwrap());
+        perm.sort_unstable_by(|&a, &b| values[a].total_cmp(&values[b]));
 
         scratch_buf.clear();
         scratch_buf.extend_from_slice(&values[..n]);

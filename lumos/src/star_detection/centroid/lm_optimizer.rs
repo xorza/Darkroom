@@ -139,7 +139,7 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
 ) -> LMResult<N> {
     let mut params = initial_params;
     let mut lambda = config.initial_lambda;
-    let mut prev_chi2 = model.batch_compute_chi2(data_x, data_y, data_z, &params);
+    let mut prev_chi2 = f64::MAX;
     let mut converged = false;
     let mut iterations = 0;
 
@@ -151,7 +151,7 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
         let (hessian, gradient, current_chi2) =
             model.batch_build_normal_equations(data_x, data_y, data_z, &params);
 
-        // On first iteration, use chi² from the fused pass (same params).
+        // On first iteration, initialize prev_chi2 from the fused pass.
         if iter == 0 {
             prev_chi2 = current_chi2;
         }

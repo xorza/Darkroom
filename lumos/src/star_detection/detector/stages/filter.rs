@@ -26,7 +26,7 @@ pub(crate) fn filter(mut stars: Vec<Star>, config: &Config) -> (Vec<Star>, Quali
 
     // Apply quality filters
     stars.retain(|star| {
-        if star.is_saturated() {
+        if star.is_saturated(0.95) {
             stats.saturated += 1;
             false
         } else if star.snr < config.min_snr {

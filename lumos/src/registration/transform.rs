@@ -11,23 +11,23 @@ use crate::registration::distortion::SipPolynomial;
 /// more complex type). `Auto` is a pipeline-level directive that resolves
 /// to a concrete type at runtime — it must not reach RANSAC or transform
 /// estimation directly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum TransformType {
     /// Translation only (2 DOF: dx, dy)
-    Translation,
+    Translation = 0,
     /// Translation + Rotation (3 DOF: dx, dy, angle)
-    Euclidean,
+    Euclidean = 1,
     /// Translation + Rotation + Uniform Scale (4 DOF)
-    Similarity,
+    Similarity = 2,
     /// Full affine (6 DOF: handles differential scaling and shear)
-    Affine,
+    Affine = 3,
     /// Projective/Homography (8 DOF: handles perspective)
-    Homography,
+    Homography = 4,
     /// Automatic model selection: starts with Similarity, upgrades to
     /// Homography if residuals exceed the threshold. Resolved by the
     /// pipeline before RANSAC estimation.
     #[default]
-    Auto,
+    Auto = 5,
 }
 
 impl TransformType {
@@ -52,7 +52,7 @@ impl TransformType {
             TransformType::Affine => 6,
             TransformType::Homography => 8,
             TransformType::Auto => {
-                panic!("Auto must be resolved to a concrete type before querying DOF")
+                unreachable!("Auto must be resolved to a concrete type before querying DOF")
             }
         }
     }
@@ -119,7 +119,7 @@ impl std::fmt::Display for Transform {
                 )
             }
             TransformType::Auto => {
-                panic!("Auto should be resolved before creating a Transform")
+                unreachable!("Auto should be resolved before creating a Transform")
             }
         }
     }
@@ -271,11 +271,7 @@ impl Transform {
     /// Compose two transforms: self * other (apply other first, then self).
     pub fn compose(&self, other: &Self) -> Self {
         // Result type is the more complex of the two
-        let transform_type = if self.transform_type as u8 > other.transform_type as u8 {
-            self.transform_type
-        } else {
-            other.transform_type
-        };
+        let transform_type = self.transform_type.max(other.transform_type);
 
         Self {
             matrix: self.matrix.mul_mat(&other.matrix),

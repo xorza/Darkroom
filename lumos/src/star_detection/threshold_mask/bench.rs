@@ -33,7 +33,7 @@ fn create_bench_data(size: usize) -> (Buffer2<f32>, Buffer2<f32>, Buffer2<f32>) 
 fn bench_threshold_mask_4k(b: ::bench::Bencher) {
     let (pixels, bg, noise) = create_bench_data(4096 * 4096);
     let mut mask = BitBuffer2::new_filled(4096, 4096, false);
-    let total_pixels = pixels.len();
+    let pixel_end = pixels.len();
 
     b.bench_labeled("simd", || {
         let words = black_box(&mut mask).words_mut();
@@ -44,7 +44,7 @@ fn bench_threshold_mask_4k(b: ::bench::Bencher) {
             black_box(3.0),
             words,
             0,
-            total_pixels,
+            pixel_end,
         );
     });
 
@@ -57,7 +57,7 @@ fn bench_threshold_mask_4k(b: ::bench::Bencher) {
             black_box(3.0),
             words,
             0,
-            total_pixels,
+            pixel_end,
         );
     });
 
@@ -69,7 +69,7 @@ fn bench_threshold_mask_4k(b: ::bench::Bencher) {
             black_box(3.0),
             words,
             0,
-            total_pixels,
+            pixel_end,
         );
     });
 
@@ -81,7 +81,7 @@ fn bench_threshold_mask_4k(b: ::bench::Bencher) {
             black_box(3.0),
             words,
             0,
-            total_pixels,
+            pixel_end,
         );
     });
 }

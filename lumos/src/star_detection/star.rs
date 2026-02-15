@@ -33,10 +33,10 @@ pub struct Star {
 impl Star {
     /// Check if star is likely saturated.
     ///
-    /// Stars with peak values near the maximum (>0.95 for normalized data)
-    /// have unreliable centroids.
-    pub fn is_saturated(&self) -> bool {
-        self.peak > 0.95
+    /// Stars with peak values near the maximum have unreliable centroids.
+    /// Typical threshold: 0.95 for normalized data.
+    pub fn is_saturated(&self, threshold: f32) -> bool {
+        self.peak > threshold
     }
 
     /// Check if star is likely a cosmic ray (very sharp, single-pixel spike).
@@ -79,21 +79,36 @@ mod tests {
                 peak: 0.96,
                 ..make_test_star()
             }
-            .is_saturated()
+            .is_saturated(0.95)
         );
         assert!(
             !Star {
                 peak: 0.95,
                 ..make_test_star()
             }
-            .is_saturated()
+            .is_saturated(0.95)
         );
         assert!(
             !Star {
                 peak: 0.5,
                 ..make_test_star()
             }
-            .is_saturated()
+            .is_saturated(0.95)
+        );
+        // Different threshold changes behavior
+        assert!(
+            Star {
+                peak: 0.85,
+                ..make_test_star()
+            }
+            .is_saturated(0.80)
+        );
+        assert!(
+            !Star {
+                peak: 0.85,
+                ..make_test_star()
+            }
+            .is_saturated(0.90)
         );
     }
 

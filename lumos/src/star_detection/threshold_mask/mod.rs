@@ -35,7 +35,7 @@ pub(super) fn process_words_scalar(
     sigma_threshold: f32,
     words: &mut [u64],
     pixel_offset: usize,
-    total_pixels: usize,
+    pixel_end: usize,
 ) {
     for (word_idx, word) in words.iter_mut().enumerate() {
         let base_pixel = pixel_offset + word_idx * 64;
@@ -43,7 +43,7 @@ pub(super) fn process_words_scalar(
 
         for bit in 0..64 {
             let px_idx = base_pixel + bit;
-            if px_idx >= total_pixels {
+            if px_idx >= pixel_end {
                 break;
             }
 
@@ -68,7 +68,7 @@ pub(super) fn process_words_filtered_scalar(
     sigma_threshold: f32,
     words: &mut [u64],
     pixel_offset: usize,
-    total_pixels: usize,
+    pixel_end: usize,
 ) {
     for (word_idx, word) in words.iter_mut().enumerate() {
         let base_pixel = pixel_offset + word_idx * 64;
@@ -76,7 +76,7 @@ pub(super) fn process_words_filtered_scalar(
 
         for bit in 0..64 {
             let px_idx = base_pixel + bit;
-            if px_idx >= total_pixels {
+            if px_idx >= pixel_end {
                 break;
             }
 
@@ -101,7 +101,7 @@ pub(super) fn process_words(
     sigma_threshold: f32,
     words: &mut [u64],
     pixel_offset: usize,
-    total_pixels: usize,
+    pixel_end: usize,
 ) {
     let pixels = pixels.pixels();
     let bg = bg.pixels();
@@ -118,7 +118,7 @@ pub(super) fn process_words(
                 sigma_threshold,
                 words,
                 pixel_offset,
-                total_pixels,
+                pixel_end,
             );
         }
     }
@@ -135,7 +135,7 @@ pub(super) fn process_words(
                     sigma_threshold,
                     words,
                     pixel_offset,
-                    total_pixels,
+                    pixel_end,
                 );
             }
             return;
@@ -148,7 +148,7 @@ pub(super) fn process_words(
             sigma_threshold,
             words,
             pixel_offset,
-            total_pixels,
+            pixel_end,
         );
     }
 
@@ -161,7 +161,7 @@ pub(super) fn process_words(
             sigma_threshold,
             words,
             pixel_offset,
-            total_pixels,
+            pixel_end,
         );
     }
 }
@@ -174,7 +174,7 @@ pub(super) fn process_words_filtered(
     sigma_threshold: f32,
     words: &mut [u64],
     pixel_offset: usize,
-    total_pixels: usize,
+    pixel_end: usize,
 ) {
     let pixels = pixels.pixels();
     let noise = noise.pixels();
@@ -189,7 +189,7 @@ pub(super) fn process_words_filtered(
                 sigma_threshold,
                 words,
                 pixel_offset,
-                total_pixels,
+                pixel_end,
             );
         }
     }
@@ -205,7 +205,7 @@ pub(super) fn process_words_filtered(
                     sigma_threshold,
                     words,
                     pixel_offset,
-                    total_pixels,
+                    pixel_end,
                 );
             }
             return;
@@ -217,7 +217,7 @@ pub(super) fn process_words_filtered(
             sigma_threshold,
             words,
             pixel_offset,
-            total_pixels,
+            pixel_end,
         );
     }
 
@@ -229,7 +229,7 @@ pub(super) fn process_words_filtered(
             sigma_threshold,
             words,
             pixel_offset,
-            total_pixels,
+            pixel_end,
         );
     }
 }

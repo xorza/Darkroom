@@ -12,7 +12,7 @@ pub unsafe fn process_words_neon(
     sigma_threshold: f32,
     words: &mut [u64],
     pixel_offset: usize,
-    total_pixels: usize,
+    pixel_end: usize,
 ) {
     let sigma_vec = vdupq_n_f32(sigma_threshold);
     let min_noise_vec = vdupq_n_f32(1e-6);
@@ -24,7 +24,7 @@ pub unsafe fn process_words_neon(
     for (word_idx, word) in words.iter_mut().enumerate() {
         let base_pixel = pixel_offset + word_idx * 64;
 
-        if base_pixel + 64 <= total_pixels {
+        if base_pixel + 64 <= pixel_end {
             let mut bits = 0u64;
 
             for group in 0..16 {
@@ -52,7 +52,7 @@ pub unsafe fn process_words_neon(
             let mut bits = 0u64;
             for bit in 0..64 {
                 let px_idx = base_pixel + bit;
-                if px_idx >= total_pixels {
+                if px_idx >= pixel_end {
                     break;
                 }
 
@@ -77,7 +77,7 @@ pub unsafe fn process_words_filtered_neon(
     sigma_threshold: f32,
     words: &mut [u64],
     pixel_offset: usize,
-    total_pixels: usize,
+    pixel_end: usize,
 ) {
     let sigma_vec = vdupq_n_f32(sigma_threshold);
     let min_noise_vec = vdupq_n_f32(1e-6);
@@ -88,7 +88,7 @@ pub unsafe fn process_words_filtered_neon(
     for (word_idx, word) in words.iter_mut().enumerate() {
         let base_pixel = pixel_offset + word_idx * 64;
 
-        if base_pixel + 64 <= total_pixels {
+        if base_pixel + 64 <= pixel_end {
             let mut bits = 0u64;
 
             for group in 0..16 {
@@ -115,7 +115,7 @@ pub unsafe fn process_words_filtered_neon(
             let mut bits = 0u64;
             for bit in 0..64 {
                 let px_idx = base_pixel + bit;
-                if px_idx >= total_pixels {
+                if px_idx >= pixel_end {
                     break;
                 }
 

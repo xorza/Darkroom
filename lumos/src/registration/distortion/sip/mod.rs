@@ -89,6 +89,11 @@ impl SipConfig {
             "SIP order must be 2-5, got {}",
             self.order
         );
+        assert!(
+            self.clip_sigma > 0.0,
+            "clip_sigma must be positive, got {}",
+            self.clip_sigma
+        );
     }
 }
 
@@ -495,7 +500,7 @@ fn solve_cholesky(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TE
         diag_min = diag_min.min(d);
         diag_max = diag_max.max(d);
     }
-    if diag_min < 1e-12 || (diag_max / diag_min) > 1e5 {
+    if diag_min < super::SINGULAR_THRESHOLD || (diag_max / diag_min) > 1e5 {
         // cond(A) ≈ (1e5)^2 = 1e10, unreliable — fall back to LU
         return solve_lu(a, b, n);
     }
@@ -548,7 +553,7 @@ fn solve_lu(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TERMS>> 
             }
         }
 
-        if max_val < 1e-12 {
+        if max_val < super::SINGULAR_THRESHOLD {
             return None; // Singular matrix
         }
 

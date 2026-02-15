@@ -102,27 +102,6 @@ fn bench_deblend_local_maxima_6k_dense(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
-fn bench_deblend_local_maxima_6k_dense_tight_separation(b: ::bench::Bencher) {
-    let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
-    let (labels, components) = create_components_from_pixels(&pixels, 0.05);
-    // Crowded field config: tighter separation, lower prominence threshold
-
-    println!("Number of components: {}", components.len());
-
-    b.bench(|| {
-        for component in &components {
-            black_box(deblend_local_maxima(
-                black_box(component),
-                black_box(&pixels),
-                black_box(&labels),
-                black_box(3),
-                black_box(0.3),
-            ));
-        }
-    });
-}
-
-#[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_local_maxima_4k_dense(b: ::bench::Bencher) {
     let pixels = generate_globular_cluster(4096, 4096, 20000, 42);
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);

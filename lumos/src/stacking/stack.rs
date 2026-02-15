@@ -114,8 +114,8 @@ pub fn stack<P: AsRef<Path> + Sync>(
 /// ```ignore
 /// use lumos::stacking::{stack_with_progress, StackConfig, FrameType, ProgressCallback};
 ///
-/// let progress = ProgressCallback::new(|stage, current, total| {
-///     println!("{}: {}/{}", stage, current, total);
+/// let progress = ProgressCallback::from(|p: StackingProgress| {
+///     println!("{:?}: {}/{}", p.stage, p.current, p.total);
 /// });
 ///
 /// let result = stack_with_progress(&paths, FrameType::Light, StackConfig::default(), progress)?;

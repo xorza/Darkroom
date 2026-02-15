@@ -133,7 +133,7 @@ fn estimate_fwhm_from_stars(
     let mut fwhms: Vec<f32> = stars
         .iter()
         .filter(|s| {
-            !s.is_saturated()
+            !s.is_saturated(0.95)
                 && s.eccentricity <= max_eccentricity
                 && s.sharpness < max_sharpness
                 && (FWHM_MIN..FWHM_MAX).contains(&s.fwhm)

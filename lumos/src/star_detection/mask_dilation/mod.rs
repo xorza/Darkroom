@@ -13,7 +13,7 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 
 /// Wrapper to send raw pointers across thread boundaries.
 /// SAFETY: Caller must ensure disjoint access from each thread.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct SendPtr(*mut u64);
 unsafe impl Send for SendPtr {}
 unsafe impl Sync for SendPtr {}

@@ -199,8 +199,8 @@ impl LabelMap {
     /// * `connectivity` - Four (default) or Eight connectivity
     /// * `pool` - Buffer pool to acquire the u32 buffer from
     pub fn from_pool(mask: &BitBuffer2, connectivity: Connectivity, pool: &mut BufferPool) -> Self {
-        debug_assert_eq!(mask.width(), pool.width());
-        debug_assert_eq!(mask.height(), pool.height());
+        assert_eq!(mask.width(), pool.width());
+        assert_eq!(mask.height(), pool.height());
 
         let mut labels = pool.acquire_u32();
         // Clear the buffer (it may contain old labels)
@@ -229,8 +229,8 @@ impl LabelMap {
         let width = mask.width();
         let height = mask.height();
 
-        debug_assert_eq!(width, labels.width());
-        debug_assert_eq!(height, labels.height());
+        assert_eq!(width, labels.width());
+        assert_eq!(height, labels.height());
 
         if width == 0 || height == 0 {
             return Self {
@@ -308,6 +308,7 @@ impl RunMergeUF for UnionFind {
 }
 
 /// Wrapper to adapt `&AtomicUnionFind` (which uses `&self`) to `RunMergeUF` (which uses `&mut self`).
+#[derive(Debug)]
 struct AtomicUFRef<'a>(&'a AtomicUnionFind);
 
 impl RunMergeUF for AtomicUFRef<'_> {
@@ -413,6 +414,7 @@ pub(super) fn label_mask_sequential(
 // ============================================================================
 
 /// Result from labeling a strip.
+#[derive(Debug)]
 struct StripResult {
     /// All runs with their row indices
     runs: Vec<(u32, Run)>,
@@ -487,7 +489,10 @@ pub(super) fn label_mask_parallel(
     strip_results.par_iter().for_each(|strip| {
         for &(y, run) in &strip.runs {
             let row_start = y as usize * width;
-            let final_label = label_map.get(run.label as usize).copied().unwrap_or(0);
+            let final_label = label_map
+                .get(run.label as usize)
+                .copied()
+                .expect("label out of range in label_map");
             // SAFETY: Each run writes to disjoint pixels
             let ptr = labels_ptr as *mut u32;
             for x in run.start..run.end {
@@ -621,6 +626,7 @@ fn merge_strip_boundary_sorted(
 // ============================================================================
 
 /// Sequential union-find for small images.
+#[derive(Debug)]
 struct UnionFind {
     parent: Vec<u32>,
     next_label: u32,
@@ -735,6 +741,15 @@ impl UnionFind {
 struct AtomicUnionFind {
     parent: Vec<AtomicU32>,
     next_label: AtomicU32,
+}
+
+impl std::fmt::Debug for AtomicUnionFind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AtomicUnionFind")
+            .field("len", &self.parent.len())
+            .field("next_label", &self.next_label.load(Ordering::Relaxed))
+            .finish()
+    }
 }
 
 impl AtomicUnionFind {

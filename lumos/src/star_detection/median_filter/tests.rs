@@ -736,7 +736,7 @@ fn test_extreme_values() {
 
 #[test]
 fn test_chunk_boundary() {
-    // Test image height that's not a multiple of ROWS_PER_CHUNK (8)
+    // Test image height that's not a multiple of the chunk size (8)
     // This ensures chunk boundary handling is correct
     for height in [7, 9, 15, 17, 23, 25] {
         let width = 10;

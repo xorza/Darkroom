@@ -284,8 +284,8 @@ fn test_calibrate_hot_pixel_correction() {
         CalibrationMasters::from_images(Some(dark), None, None, None, DEFAULT_SIGMA_THRESHOLD);
 
     assert!(masters.defect_map.is_some());
-    let hot_map = masters.defect_map.as_ref().unwrap();
-    assert!(hot_map.count() >= 1, "Should detect the hot pixel");
+    let defect_map = masters.defect_map.as_ref().unwrap();
+    assert!(defect_map.count() >= 1, "Should detect the hot pixel");
 
     // Create light with corrupted hot pixel
     let mut light_pixels = vec![0.5_f32; w * h];

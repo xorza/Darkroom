@@ -29,6 +29,14 @@ No critical bugs found. Most findings are maintainability improvements.
 - **[F22]** Extracted `FWHM_MIN`/`FWHM_MAX` constants in star detection
 - **[F23]** Extracted `COLLINEARITY_THRESHOLD` constant in RANSAC
 - **[F24]** Consolidated noise generation: canonical `add_gaussian_noise` in `patterns.rs`
+- **[F6]** Renamed `hot_map` → `defect_map` in defect map tests
+- **[F7]** Added `.expect()` messages to non-obvious unwraps in `defect_map.rs`
+- **[F14]** Documented CFA `None` → mono fallback in `cfa_color_at()`
+- **[F19]** Fixed drizzle dimension mismatch: `Error::ImageLoad` → `Error::DimensionMismatch`
+- **[F21]** Documented magic constant 24 in X-Trans same-color median
+- **[F28]** Investigated — `w > 0.0` is NOT redundant (prevents division by zero when `min_coverage=0.0`)
+- **[F30]** Fixed ProgressCallback doc signature to match `StackingProgress` struct API
+- **[F32]** Fixed `sort_with_indices` NaN handling: `partial_cmp().unwrap()` → `total_cmp()`
 
 ---
 

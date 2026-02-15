@@ -692,7 +692,9 @@ fn create_child_nodes(
             let sibling = &tree[idx];
             let dx = (child_peak.pos.x as i32 - sibling.peak.pos.x as i32).unsigned_abs() as usize;
             let dy = (child_peak.pos.y as i32 - sibling.peak.pos.y as i32).unsigned_abs() as usize;
-            dx < min_separation && dy < min_separation
+            // Chebyshev distance (max of dx, dy): matches the separation metric
+            // used in local_maxima peak detection for consistency.
+            dx.max(dy) < min_separation
         });
 
         if too_close {
@@ -1068,10 +1070,7 @@ fn find_region_peak(region: &[Pixel]) -> Pixel {
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
         .copied()
-        .unwrap_or(Pixel {
-            pos: Vec2us::new(0, 0),
-            value: 0.0,
-        })
+        .expect("region must not be empty")
 }
 
 /// Create a single object from all pixels (no deblending).

@@ -149,7 +149,10 @@ impl RegistrationResult {
 
         let num_inliers = matched_stars.len();
 
-        // Simple quality score based on RMS error and match count
+        // Quality score: product of error and count factors in [0, 1].
+        // - error_factor = exp(-rms/2): exponential decay, 1.0 at rms=0, ~0.37 at rms=2px
+        // - count_factor = min(inliers/20, 1): linear ramp, saturates at 20 matches
+        // Below 4 inliers the fit is unreliable so score is zero.
         let quality_score = if num_inliers < 4 {
             0.0
         } else {

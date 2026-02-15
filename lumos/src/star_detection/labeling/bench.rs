@@ -90,7 +90,7 @@ fn bench_label_map_from_buffer_6k_globular(b: ::bench::Bencher) {
 }
 
 /// Benchmark to find optimal sequential/parallel threshold.
-/// Tests various image sizes around the current threshold (100k pixels).
+/// Tests various image sizes to find optimal sequential/parallel crossover.
 #[test]
 #[ignore]
 fn bench_threshold_sweep() {
@@ -113,7 +113,7 @@ fn bench_threshold_sweep() {
         (200, 200),   // 40k
         (250, 250),   // 62.5k
         (300, 300),   // 90k
-        (316, 316),   // ~100k (current threshold)
+        (316, 316),   // ~100k
         (350, 350),   // 122.5k
         (400, 400),   // 160k
         (450, 450),   // 202.5k

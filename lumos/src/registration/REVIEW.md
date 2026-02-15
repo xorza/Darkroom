@@ -12,6 +12,11 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 
 - **[F3]** `#[allow(dead_code)]` on `RansacResult` fields → targeted per-field `#[allow(dead_code)] // Used in tests`
 - **[F6]** Stale `#[allow(dead_code)]` on `WarpParams::new()` → targeted annotation with comment
+- **[F1]** TransformType: added `#[derive(PartialOrd, Ord)]` with explicit discriminants, replaced `as u8` cast with `.max()`
+- **[F4]** Added `clip_sigma > 0.0` assertion to `SipConfig::validate()`
+- **[F5]** Extracted shared `SINGULAR_THRESHOLD` constant in `distortion/mod.rs`, used in SIP and TPS
+- **[F8]** Documented quality score formula with factor explanations
+- **[F23]** Changed `panic!` → `unreachable!` for Auto in `transform.rs` (2 locations) and `ransac/transforms.rs` (1 location)
 
 ## Findings
 

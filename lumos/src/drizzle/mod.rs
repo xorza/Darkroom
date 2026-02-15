@@ -32,7 +32,7 @@ use crate::astro_image::AstroImage;
 use crate::common::Buffer2;
 use crate::registration::transform::Transform;
 use crate::stacking::progress::report_progress;
-use crate::stacking::{Error, ProgressCallback, StackingStage};
+use crate::stacking::{Error, FrameType, ProgressCallback, StackingStage};
 
 /// Maximum number of channels (RGB = 3).
 const MAX_CHANNELS: usize = 3;
@@ -660,7 +660,7 @@ impl DrizzleAccumulator {
                         for (x, out_val) in out_row.iter_mut().enumerate() {
                             let idx = row_start + x;
                             let w = weight_pixels[idx];
-                            if w >= weight_threshold && w > 0.0 {
+                            if w > 0.0 && w >= weight_threshold {
                                 let mut val = data_pixels[idx] / w;
                                 if needs_clamping {
                                     val = val.max(0.0);
@@ -952,16 +952,12 @@ pub fn drizzle_stack<P: AsRef<Path> + Sync>(
         })?;
 
         // Validate dimensions match
-        if image.width() != input_dims.width || image.height() != input_dims.height {
-            return Err(Error::ImageLoad {
-                path: path.as_ref().to_path_buf(),
-                source: std::io::Error::other(format!(
-                    "Dimension mismatch: expected {}x{}, got {}x{}",
-                    input_dims.width,
-                    input_dims.height,
-                    image.width(),
-                    image.height()
-                )),
+        if image.dimensions != input_dims {
+            return Err(Error::DimensionMismatch {
+                frame_type: FrameType::Light,
+                index: i,
+                expected: input_dims,
+                actual: image.dimensions,
             });
         }
 

@@ -309,7 +309,7 @@ fn solve_linear_system(a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
             }
         }
 
-        if max_val < 1e-12 {
+        if max_val < super::SINGULAR_THRESHOLD {
             return None; // Singular matrix
         }
 

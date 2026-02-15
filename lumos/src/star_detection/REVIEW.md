@@ -15,6 +15,15 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 ### Completed Findings
 
 - **[F36]** Cleaned up `#[allow(dead_code)]` in `buffer_pool.rs`, `gaussian_fit/mod.rs`, `moffat_fit/mod.rs`, `tests/synthetic/star_field.rs` — removed blanket suppressions, added targeted per-field/per-method annotations
+- **[F1]** Changed Chebyshev to Chebyshev distance (with comment) in multi_threshold deblend — matches local_maxima's metric
+- **[F2]** Changed `unwrap_or(0)` → `.expect("label out of range in label_map")` in labeling
+- **[F3]** Changed `unwrap_or(...)` → `.expect()` in deblend peak-finding (`ComponentData::find_peak`, `find_region_peak`)
+- **[F4]** Removed wasted initial `batch_compute_chi2` in L-M optimizer (replaced with `f64::MAX`)
+- **[F6]** Added `threshold` parameter to `Star::is_saturated()`, updated all callers, added threshold-varies-behavior tests
+- **[F9]** Renamed `total_pixels` → `pixel_end` in threshold_mask (mod.rs, sse.rs, neon.rs, bench.rs)
+- **[F10]** Changed `debug_assert!` → `assert!` for buffer dimension checks in `LabelMap::from_pool` and `from_buffer`
+- **[F11]** Cleaned dead code: fixed detection_file.rs doc, removed unused imports (detection_file tests, detector/mod.rs ArrayVec), fixed stale comments (labeling bench, median_filter tests), removed duplicate benchmark (local_maxima bench)
+- **[F12]** Added `#[derive(Debug)]` to `StripResult`, `UnionFind`, `AtomicUFRef`, `SendPtr`; manual Debug impl for `AtomicUnionFind`
 
 ---
 

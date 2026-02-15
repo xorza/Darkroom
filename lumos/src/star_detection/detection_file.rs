@@ -1,4 +1,4 @@
-//! Save and load `DetectionResult` as sidecar files.
+//! Save `DetectionResult` as sidecar files.
 //!
 //! Sidecar path: `{image_path}.detection` using SCN text format.
 
@@ -22,11 +22,6 @@ fn sidecar_path(image_path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::star_detection::detector::{ChannelStats, Diagnostics};
-    use crate::star_detection::star::Star;
-    use arrayvec::ArrayVec;
-    use glam::DVec2;
-    use std::sync::atomic::{AtomicU32, Ordering};
 
     #[test]
     fn test_sidecar_path_format() {

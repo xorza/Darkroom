@@ -94,9 +94,6 @@ impl ComponentData {
                     .partial_cmp(&b.value)
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
-            .unwrap_or(Pixel {
-                pos: self.bbox.min,
-                value: 0.0,
-            })
+            .expect("component must have at least one pixel")
     }
 }

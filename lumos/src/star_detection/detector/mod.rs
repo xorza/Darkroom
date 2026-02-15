@@ -14,7 +14,6 @@ mod bench;
 
 use std::path::Path;
 
-use arrayvec::ArrayVec;
 use serde::{Deserialize, Serialize};
 
 use crate::astro_image::AstroImage;
