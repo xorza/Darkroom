@@ -50,7 +50,7 @@ use std::time::Instant;
 
 use lumos::raw::load_raw_cfa;
 use lumos::{
-    AstroImage, CalibrationMasters, DEFAULT_HOT_PIXEL_SIGMA, FrameType, ProgressCallback,
+    AstroImage, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, FrameType, ProgressCallback,
     RegistrationConfig, StackConfig, StackingProgress, StackingStage, Star, StarDetectionConfig,
     StarDetector, TransformType, stack_with_progress,
 };
@@ -163,12 +163,12 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
     );
 
     let empty: Vec<String> = Vec::new();
-    let masters = CalibrationMasters::from_raw_files(
+    let masters = CalibrationMasters::from_files(
         &dark_paths,
         &flat_paths,
         &bias_paths,
         &empty,
-        DEFAULT_HOT_PIXEL_SIGMA,
+        DEFAULT_SIGMA_THRESHOLD,
     )
     .expect("Failed to create calibration masters");
 

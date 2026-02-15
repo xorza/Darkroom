@@ -5,7 +5,7 @@ use std::time::Instant;
 use crate::raw::load_raw_cfa;
 use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
 use crate::{
-    AstroImage, CalibrationMasters, DEFAULT_HOT_PIXEL_SIGMA, FrameType, Normalization,
+    AstroImage, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, FrameType, Normalization,
     ProgressCallback, RegistrationConfig, StackConfig, Star, StarDetectionConfig, StarDetector,
     register, stack_with_progress, warp,
 };
@@ -21,12 +21,12 @@ fn diag_dark_pixel_distribution() {
     let bias_paths = calibration_image_paths("Bias").unwrap();
 
     let empty: Vec<String> = Vec::new();
-    let masters = CalibrationMasters::from_raw_files(
+    let masters = CalibrationMasters::from_files(
         &dark_paths,
         &empty,
         &bias_paths,
         &empty,
-        DEFAULT_HOT_PIXEL_SIGMA,
+        DEFAULT_SIGMA_THRESHOLD,
     )
     .expect("Failed to create masters");
 
@@ -158,12 +158,12 @@ fn bench_full_pipeline() {
     let bias_paths = calibration_image_paths("Bias").unwrap_or_default();
 
     let empty: Vec<String> = Vec::new();
-    let masters = CalibrationMasters::from_raw_files(
+    let masters = CalibrationMasters::from_files(
         &dark_paths,
         &flat_paths,
         &bias_paths,
         &empty,
-        DEFAULT_HOT_PIXEL_SIGMA,
+        DEFAULT_SIGMA_THRESHOLD,
     )
     .expect("Failed to create calibration masters");
 
