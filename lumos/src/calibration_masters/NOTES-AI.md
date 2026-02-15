@@ -11,7 +11,7 @@ MAD-based statistics. Operates on raw single-channel CFA data before demosaicing
 ### Architecture
 
 ```
-CalibrationMasters::from_raw_files()     CalibrationMasters::new()
+CalibrationMasters::from_raw_files()     CalibrationMasters::from_images()
   -> Result<Self, stacking::Error>           Takes pre-built CfaImages
   stack_cfa_frames(darks, ...)               Generates DefectMap from dark
   stack_cfa_frames(flats, ...)
@@ -52,7 +52,7 @@ and Siril's `equalize_cfa`.
 
 | Constant | Value | Justification |
 |----------|-------|---------------|
-| DEFAULT_HOT_PIXEL_SIGMA | 5.0 | Conservative; industry range is 3-5 |
+| DEFAULT_SIGMA_THRESHOLD | 5.0 | Conservative default; configurable via `sigma_threshold` parameter |
 | MAD_TO_SIGMA | 1.4826 | 1/Phi^-1(0.75), standard for normal distributions |
 | MAX_MEDIAN_SAMPLES | 100,000 | Adaptive sampling for images >200K pixels |
 | Sigma floor (relative) | median * 0.1 | Prevents MAD=0 over-detection on uniform darks |
@@ -252,14 +252,10 @@ registration or stacking occurs.
 
 ## Missing Features (with severity)
 
-### High: No User-Configurable Sigma Threshold -- POSTPONED
+### ~~High: No User-Configurable Sigma Threshold~~ -- DONE
 
-The default 5.0-sigma threshold is hardcoded in `DEFAULT_HOT_PIXEL_SIGMA`. PixInsight
-defaults to 3 sigma, APP uses 2-3 kappa. Different sensors and conditions need different
-thresholds (clean cooled CCD vs warm CMOS with many hot pixels).
-
-**Impact:** Users cannot tune detection sensitivity. A sigma parameter on `calibrate()` or
-`CalibrationMasters::new()` would be trivial to add.
+Both `CalibrationMasters::from_images()` and `from_raw_files()` accept a `sigma_threshold: f32`
+parameter. `DEFAULT_SIGMA_THRESHOLD` (5.0) is public and re-exported from `lib.rs`.
 
 ### Medium: Cold Pixel Detection Only from Master Dark -- POSTPONED
 
@@ -427,9 +423,7 @@ iteration approach (count pixels first, compute stride, collect every Nth) would
 
 ### Short-term (easy, high value) -- POSTPONED
 
-1. **Expose sigma threshold parameter** -- Allow `CalibrationMasters::new()` and
-   `from_raw_files()` to accept a sigma threshold (default 5.0). Trivial change, high
-   user value.
+1. ~~**Expose sigma threshold parameter**~~ -- DONE (`sigma_threshold` on `from_images()` and `from_raw_files()`)
 2. **Strided CFA sampling** -- Fix `collect_color_samples` to use strided iteration for
    CFA mode (count pixels first, compute stride, collect every Nth). Saves ~24MB per color
    channel on large images.

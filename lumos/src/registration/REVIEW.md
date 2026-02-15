@@ -8,6 +8,11 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 
 **Files reviewed**: 33 source files across 7 submodules (distortion, interpolation, ransac, spatial, triangle, tests) + 4 top-level files.
 
+### Completed Findings
+
+- **[F3]** `#[allow(dead_code)]` on `RansacResult` fields → targeted per-field `#[allow(dead_code)] // Used in tests`
+- **[F6]** Stale `#[allow(dead_code)]` on `WarpParams::new()` → targeted annotation with comment
+
 ## Findings
 
 ### Priority 1 -- High Impact, Low Invasiveness
@@ -28,7 +33,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 1/5 -- remove parameter, read from config at call sites
 - **Description**: `estimate_and_refine(ref_stars, target_stars, matches, transform_type, max_sigma, config)` accepts an explicit `transform_type` while `config` also has a `transform_type` field. The parameter overrides config in some calls (Auto logic), creating ambiguity. Either remove the parameter and use a temporary config copy, or remove the field from Config and always pass explicitly.
 
-#### [F3] `#[allow(dead_code)]` on `RansacResult` fields instead of `pub(crate)`
+#### [F3] ~~`#[allow(dead_code)]` on `RansacResult` fields instead of `pub(crate)`~~ DONE
 - **Location**: `ransac/mod.rs:126-131`
 - **Category**: API cleanliness
 - **Impact**: 3/5 -- `#[allow(dead_code)]` hides genuinely unused code
@@ -52,7 +57,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 1/5 -- extract one `const SINGULAR_THRESHOLD: f64 = 1e-12;`
 - **Description**: Both SIP (Cholesky and LU) and TPS (LU) solvers hardcode `1e-12` as the singular matrix detection threshold. Extract to a shared constant with a comment explaining the choice.
 
-#### [F6] Stale `#[allow(dead_code)]` on `WarpParams::new()`
+#### [F6] ~~Stale `#[allow(dead_code)]` on `WarpParams::new()`~~ DONE
 - **Location**: `interpolation/mod.rs:33`
 - **Category**: Dead code annotation
 - **Impact**: 2/5 -- misleading lint signal; `WarpParams::new()` IS used in tests

@@ -92,7 +92,7 @@ Bookstein 1989, GNU Astronomy Utilities, AVIR, Intel IPP.
 6. ~~**Add `nearest_one()`** to k-d tree~~ -- **FIXED**
 7. ~~**Use `f64::total_cmp()`** in k-d tree~~ -- **FIXED**
 8. **Fix stale README.md files** (distortion/README.md references nonexistent methods; sip/README.md says "no sigma-clipping" but it's implemented)
-9. **`#[allow(dead_code)]` on pub fields** (ransac/mod.rs:127,130) -- use `pub(crate)` instead
+9. ~~**`#[allow(dead_code)]` on pub fields**~~ -- **FIXED** (targeted per-field `#[allow(dead_code)] // Used in tests`)
 10. **Fix misleading MAGSAC++ continuity comment** (ransac/magsac.rs:46) -- says "ensuring continuity" but outlier_loss has ~3.6% discontinuity at threshold boundary
 11. **Fix `capacity + 1` in BoundedMaxHeap::Large** (spatial/mod.rs:349) -- the `+ 1` is unused
 12. **Move heap allocation after empty check** (spatial/mod.rs:128-132) -- `k_nearest` creates heap before checking empty tree

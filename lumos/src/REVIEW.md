@@ -15,13 +15,28 @@ patterns, and solid test coverage. The main themes across modules are:
 
 No critical bugs found. Most findings are maintainability improvements.
 
+### Completed Findings
+
+- **[F1]** Added `# Panics` docs to all panicking public functions (stack, register, validate, fit_from_transform, add_image)
+- **[F2]** Cleaned up `#[allow(dead_code)]`: removed blanket suppressions, added targeted per-item annotations with comments
+- **[F3]** Fixed float equality in `sgarea()`: `dx == 0.0` → `dx.abs() < SGAREA_DX_MIN`
+- **[F4]** Cleaned up stale comments/TODOs (drizzle "Allow dead code", median filter "todo swap?")
+- **[F5]** Removed redundant `to_image()`; `save()` now uses `self.clone().into()`
+- **[F8]** Changed `debug_assert!` → `assert!` for w≈0 in `DMat3::transform_point`
+- **[F15]** Deduplicated gradient logic: `background_map.rs` reuses `patterns.rs` gradients
+- **[F17]** Extracted named constants in drizzle: `JACOBIAN_MIN`, `KERNEL_WEIGHT_MIN`, `SINC_ZERO_THRESHOLD`, `SGAREA_DX_MIN`
+- **[F20]** Consolidated duplicate `make_cfa()`/`constant_cfa()` into `testing/mod.rs`
+- **[F22]** Extracted `FWHM_MIN`/`FWHM_MAX` constants in star detection
+- **[F23]** Extracted `COLLINEARITY_THRESHOLD` constant in RANSAC
+- **[F24]** Consolidated noise generation: canonical `add_gaussian_noise` in `patterns.rs`
+
 ---
 
 ## Findings
 
 ### Priority 1 — High Impact, Low Invasiveness
 
-#### [F1] Inconsistent panic-vs-Result for input validation (stacking, registration)
+#### [F1] ~~Inconsistent panic-vs-Result for input validation (stacking, registration)~~ DONE
 - **Location**: `stacking/stack.rs:128-135`, `registration/config.rs:112`,
   `registration/mod.rs:220`
 - **Category**: Consistency
@@ -33,7 +48,7 @@ No critical bugs found. Most findings are maintainability improvements.
   `config.validate()`. Either all user-facing validation should return `Result`, or
   the panic-based APIs need clear `# Panics` documentation.
 
-#### [F2] `#[allow(dead_code)]` on public API items
+#### [F2] ~~`#[allow(dead_code)]` on public API items~~ DONE
 - **Location**: `registration/ransac/mod.rs:126-130`,
   `registration/interpolation/mod.rs:33`, `star_detection/buffer_pool.rs:38-52`
 - **Category**: Dead code / API cleanliness
@@ -45,7 +60,7 @@ No critical bugs found. Most findings are maintainability improvements.
   they're unused (remove the code). `RansacResult.iterations` and `.inlier_ratio`
   are documented as "diagnostics" but never read outside tests.
 
-#### [F3] Float equality in drizzle `sgarea()`
+#### [F3] ~~Float equality in drizzle `sgarea()`~~ DONE
 - **Location**: `drizzle/mod.rs:750`
 - **Category**: Correctness
 - **Impact**: 3/5 — Exact `== 0.0` check on computed float can miss near-zero cases
@@ -55,7 +70,7 @@ No critical bugs found. Most findings are maintainability improvements.
   segment detection. After floating-point arithmetic, `dx` may be very small but
   non-zero, causing the function to proceed with a near-zero denominator.
 
-#### [F4] Stale `// Allow dead code` and TODO comments
+#### [F4] ~~Stale `// Allow dead code` and TODO comments~~ DONE
 - **Location**: `drizzle/mod.rs:24`, `star_detection/median_filter/mod.rs:25`,
   `raw/README.md:35`
 - **Category**: Dead code / Documentation
@@ -66,7 +81,7 @@ No critical bugs found. Most findings are maintainability improvements.
   implemented. Median filter has `// todo swap?` with no context. Raw README
   references "TODO: DCB" but uses RCD demosaicing.
 
-#### [F5] Redundant `to_image()` alongside `From<AstroImage> for Image`
+#### [F5] ~~Redundant `to_image()` alongside `From<AstroImage> for Image`~~ DONE
 - **Location**: `astro_image/mod.rs:538-561` vs `639-657`
 - **Category**: Duplication
 - **Impact**: 2/5 — Two implementations of identical logic can diverge
@@ -94,7 +109,7 @@ No critical bugs found. Most findings are maintainability improvements.
 - **Description**: Several `.unwrap()` calls on `Option`/`Result` that are not
   obviously infallible lack `.expect()` messages explaining the invariant.
 
-#### [F8] `DMat3::transform_point` uses `debug_assert!` for w≈0 check
+#### [F8] ~~`DMat3::transform_point` uses `debug_assert!` for w≈0 check~~ DONE
 - **Location**: `math/dmat3.rs:138-141`
 - **Category**: Robustness
 - **Impact**: 2/5 — Silent NaN/infinity in release builds
@@ -173,7 +188,7 @@ No critical bugs found. Most findings are maintainability improvements.
   the image as monochrome. If metadata is accidentally missing, this produces wrong
   defect correction without any warning.
 
-#### [F15] Gradient/vignette logic duplicated 3 times in testing module
+#### [F15] ~~Gradient/vignette logic duplicated 3 times in testing module~~ DONE
 - **Location**: `testing/synthetic/patterns.rs:14-76`,
   `testing/synthetic/backgrounds.rs:28-80`,
   `testing/synthetic/background_map.rs:21-103`
@@ -199,7 +214,7 @@ No critical bugs found. Most findings are maintainability improvements.
 
 ### Priority 3 — Moderate Impact
 
-#### [F17] Inconsistent epsilon/tolerance constants (drizzle)
+#### [F17] ~~Inconsistent epsilon/tolerance constants (drizzle)~~ DONE
 - **Location**: `drizzle/mod.rs:248,333,423,481,523,727,750`
 - **Category**: Consistency / Maintainability
 - **Impact**: 2/5 — Seven different threshold values scattered through one module
@@ -229,7 +244,7 @@ No critical bugs found. Most findings are maintainability improvements.
   error. The image loaded fine; the problem is post-load validation. Use a
   dedicated error variant.
 
-#### [F20] Duplicate `make_cfa()` / `constant_cfa()` test helpers
+#### [F20] ~~Duplicate `make_cfa()` / `constant_cfa()` test helpers~~ DONE
 - **Location**: `calibration_masters/defect_map.rs:382-390` vs
   `calibration_masters/tests.rs:7-15`
 - **Category**: Duplication
@@ -249,7 +264,7 @@ No critical bugs found. Most findings are maintainability improvements.
   to 24. The comment says "avoid directional bias" but doesn't explain why 24
   specifically (e.g., ~4 per cardinal/diagonal direction in 6x6 pattern).
 
-#### [F22] FWHM range `0.5..20.0` hardcoded in star detection
+#### [F22] ~~FWHM range `0.5..20.0` hardcoded in star detection~~ DONE
 - **Location**: `star_detection/detector/stages/fwhm.rs:131`
 - **Category**: Consistency / Magic numbers
 - **Impact**: 2/5 — Limits aren't configurable or documented
@@ -259,7 +274,7 @@ No critical bugs found. Most findings are maintainability improvements.
   Extract to `FWHM_MIN_PHYSICAL` / `FWHM_MAX_REASONABLE` constants with
   documentation explaining the astronomical rationale.
 
-#### [F23] Collinearity check uses absolute threshold (RANSAC)
+#### [F23] ~~Collinearity check uses absolute threshold (RANSAC)~~ DONE
 - **Location**: `registration/ransac/mod.rs:600-604`
 - **Category**: Numerical stability
 - **Impact**: 2/5 — Threshold `1.0` is coordinate-scale-dependent
@@ -269,7 +284,7 @@ No critical bugs found. Most findings are maintainability improvements.
   threshold. For small coordinate ranges (sub-pixel), nearly all triangles would
   appear collinear. Scale by vector magnitudes for robustness.
 
-#### [F24] Inconsistent noise generation in testing module
+#### [F24] ~~Inconsistent noise generation in testing module~~ DONE
 - **Location**: `testing/synthetic/star_field.rs:397-402` vs
   `testing/synthetic/patterns.rs:120-136`
 - **Category**: Duplication

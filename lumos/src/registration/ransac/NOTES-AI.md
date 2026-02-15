@@ -553,10 +553,8 @@ beneficial for dense correspondence sets.
    be pre-allocated in `ransac_loop` and passed as a parameter.
    **Severity**: Negligible (micro-optimization).
 
-4. **`#[allow(dead_code)]` on pub fields** (`mod.rs:127,130`):
-   `RansacResult::iterations` and `inlier_ratio` are `pub` but only used
-   in tests, requiring `#[allow(dead_code)]`. Should be `pub(crate)`.
-   **Severity**: Style.
+4. ~~**`#[allow(dead_code)]` on pub fields**~~ -- **FIXED**: targeted per-field
+   `#[allow(dead_code)] // Used in tests` annotations.
 
 ### Resolved Issues (from previous analysis)
 

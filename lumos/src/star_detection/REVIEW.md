@@ -12,6 +12,10 @@ The main opportunities for improvement fall into four categories:
 
 No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Chebyshev distance in deblend) affects detection results.
 
+### Completed Findings
+
+- **[F36]** Cleaned up `#[allow(dead_code)]` in `buffer_pool.rs`, `gaussian_fit/mod.rs`, `moffat_fit/mod.rs`, `tests/synthetic/star_field.rs` — removed blanket suppressions, added targeted per-field/per-method annotations
+
 ---
 
 ## Findings
@@ -310,7 +314,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 2/5 — Swap loop order to match SIMD versions
 - **Description**: Scalar column convolution iterates `for x in 0..width { for y in 0..height }`, which is column-major traversal on row-major data. SIMD versions iterate correctly (y outer, x inner).
 
-#### [F36] Inconsistent `#[allow(dead_code)]` and visibility across modules
+#### [F36] ~~Inconsistent `#[allow(dead_code)]` and visibility across modules~~ DONE
 - **Location**: `buffer_pool.rs:38-55` (allow on used methods), `background/simd/mod.rs:20-21` (allow on dispatched functions), `median_filter/mod.rs:126` (pub unnecessarily), `deblend/local_maxima/mod.rs:53` vs `multi_threshold/mod.rs:370` (pub vs pub(crate))
 - **Category**: Consistency
 - **Impact**: 2/5 — Incorrect annotations confuse maintainers

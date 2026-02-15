@@ -152,8 +152,8 @@ None remaining. All algorithms verified correct against industry references.
 | P2 | Rejection maps output | stacking | Per-pixel high/low counts for diagnostics | PixInsight, Siril |
 | P2 | Weighted least squares in L-M fitting | star_detection | Unweighted is suboptimal for faint stars | DAOPHOT, SExtractor |
 | P2 | Parameter uncertainties from L-M | star_detection | Position uncertainty for weighted registration | DAOPHOT |
-| P2 | Configurable sigma threshold for defect map | calibration | 5.0 hardcoded; PixInsight uses 3.0 | PixInsight, APP |
-| P2 | `Buffer2::row(y)` / `row_mut(y)` | common | 251 manual row-indexing calculations across 55 files | image crate, ndarray |
+| ~~P2~~ | ~~Configurable sigma threshold for defect map~~ | ~~calibration~~ | ~~DONE: `sigma_threshold` parameter on `CalibrationMasters`~~ | ~~PixInsight, APP~~ |
+| ~~P2~~ | ~~`Buffer2::row(y)` / `row_mut(y)`~~ | ~~common~~ | ~~DONE: added accessors~~ | ~~image crate, ndarray~~ |
 | P3 | Variance propagation | stacking | Per-pixel noise estimate for downstream use | PixInsight, IRAF |
 | P3 | Context/contribution image | drizzle | Per-pixel contributing-frame bitmask | STScI |
 | P3 | Variance/error output | drizzle | Propagated variance for photometry | STScI |
@@ -196,10 +196,10 @@ None remaining. All algorithms verified correct against industry references.
 
 ### Short-term (high value, low effort)
 1. **Add FITS writing** — primary interchange format, every other tool has this
-2. **Add `Buffer2::row(y)` / `row_mut(y)`** — eliminates 251 manual calculations, trivial implementation
-3. **Expose configurable sigma threshold** for defect map detection
+2. ~~**Add `Buffer2::row(y)` / `row_mut(y)`**~~ — DONE
+3. ~~**Expose configurable sigma threshold**~~ — DONE (`sigma_threshold` param on `CalibrationMasters`)
 4. **Fix stale README.md files** in registration/distortion and raw
-5. **Consolidate noise generation** in testing/ (3 different methods)
+5. ~~**Consolidate noise generation**~~ — DONE (canonical `add_gaussian_noise` in `patterns.rs`)
 
 ### Medium-term (feature parity)
 6. Add stacking rejection maps (per-pixel high/low counts)

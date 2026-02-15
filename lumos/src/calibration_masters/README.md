@@ -43,7 +43,7 @@ With bias removed: `(Flat - Bias) / mean(Flat - Bias) = pure vignetting profile`
 ## Flat Dark Support
 
 Flat dark frames (darks taken at the flat's exposure time) can be provided to
-`CalibrationMasters::new()` or `from_raw_files()`. When available, the flat dark is
+`CalibrationMasters::from_images()` or `from_raw_files()`. When available, the flat dark is
 subtracted from the flat instead of bias during normalization:
 
 ```
