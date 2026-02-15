@@ -95,14 +95,42 @@ fn all_interpolation_methods() -> Vec<InterpolationMethod> {
     ]
 }
 
-/// Representative interpolation methods for roundtrip tests.
-/// Tests Nearest (baseline), Bilinear (fast), and Lanczos3 (quality).
-fn representative_interpolation_methods() -> Vec<InterpolationMethod> {
-    vec![
-        InterpolationMethod::Nearest,
-        InterpolationMethod::Bilinear,
-        InterpolationMethod::Lanczos3 { deringing: 0.3 },
-    ]
+/// Per-method PSNR and NCC thresholds for roundtrip warp tests.
+type MethodThresholds = &'static [(InterpolationMethod, f64, f64)];
+
+/// Common helper for roundtrip warp tests.
+///
+/// Creates a star field, warps forward then inverse, and checks that the
+/// central region matches the original within per-method thresholds.
+fn assert_roundtrip(
+    seed: u64,
+    forward: Transform,
+    label: &str,
+    margin: usize,
+    thresholds: MethodThresholds,
+) {
+    let (ref_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, seed);
+    let width = ref_buf.width();
+    let height = ref_buf.height();
+    let inverse = forward.inverse();
+
+    for &(method, min_psnr, min_ncc) in thresholds {
+        let warped = do_warp(&ref_buf, &forward, method);
+        let restored = do_warp(&warped, &inverse, method);
+
+        let (central_ref, central_restored) =
+            extract_central_region(ref_buf.pixels(), restored.pixels(), width, height, margin);
+
+        let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
+        let ncc = compute_ncc(&central_ref, &central_restored);
+
+        assert!(
+            psnr > min_psnr,
+            "{label} {:?}: PSNR {psnr} < {min_psnr} dB",
+            method,
+        );
+        assert!(ncc > min_ncc, "{label} {:?}: NCC {ncc} < {min_ncc}", method,);
+    }
 }
 
 /// Test that warping with identity transform preserves the image.
@@ -149,56 +177,17 @@ fn test_warp_identity_all_methods() {
 
 #[test]
 fn test_warp_translation_roundtrip() {
-    let (ref_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 11111);
-    let width = ref_buf.width();
-    let height = ref_buf.height();
-
-    let dx = 10.5;
-    let dy = -7.3;
-
-    // Forward transform: moves image by (dx, dy)
-    let forward = Transform::translation(DVec2::new(dx, dy));
-    // Inverse brings it back
-    let inverse = forward.inverse();
-
-    for method in representative_interpolation_methods() {
-        // Warp forward, then inverse
-        let warped = do_warp(&ref_buf, &forward, method);
-        let restored = do_warp(&warped, &inverse, method);
-
-        // Compare central region (avoid border artifacts)
-        let margin = 20;
-        let (central_ref, central_restored) =
-            extract_central_region(ref_buf.pixels(), restored.pixels(), width, height, margin);
-
-        let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
-        let ncc = compute_ncc(&central_ref, &central_restored);
-
-        // Roundtrip warping introduces cumulative error from two interpolation passes.
-        // Quality depends on method, but all lose some detail.
-        // We use modest thresholds that verify the warp is working correctly.
-        let (min_psnr, min_ncc) = match method {
-            InterpolationMethod::Nearest => (15.0, 0.25),
-            InterpolationMethod::Bilinear => (22.0, 0.70),
-            InterpolationMethod::Bicubic => (25.0, 0.80),
-            _ => (25.0, 0.80), // Lanczos variants
-        };
-
-        assert!(
-            psnr > min_psnr,
-            "Translation {:?}: PSNR {} < {} dB",
-            method,
-            psnr,
-            min_psnr
-        );
-        assert!(
-            ncc > min_ncc,
-            "Translation {:?}: NCC {} < {}",
-            method,
-            ncc,
-            min_ncc
-        );
-    }
+    assert_roundtrip(
+        11111,
+        Transform::translation(DVec2::new(10.5, -7.3)),
+        "Translation",
+        20,
+        &[
+            (InterpolationMethod::Nearest, 15.0, 0.25),
+            (InterpolationMethod::Bilinear, 22.0, 0.70),
+            (InterpolationMethod::Lanczos3 { deringing: 0.3 }, 25.0, 0.80),
+        ],
+    );
 }
 
 // ============================================================================
@@ -207,50 +196,17 @@ fn test_warp_translation_roundtrip() {
 
 #[test]
 fn test_warp_euclidean_roundtrip() {
-    let (ref_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 22222);
-    let width = ref_buf.width();
-    let height = ref_buf.height();
-
-    let dx = 5.0;
-    let dy = -3.0;
-    let angle_rad = 2.0_f64.to_radians();
-
-    let forward = Transform::euclidean(DVec2::new(dx, dy), angle_rad);
-    let inverse = forward.inverse();
-
-    for method in representative_interpolation_methods() {
-        let warped = do_warp(&ref_buf, &forward, method);
-        let restored = do_warp(&warped, &inverse, method);
-
-        let margin = 30;
-        let (central_ref, central_restored) =
-            extract_central_region(ref_buf.pixels(), restored.pixels(), width, height, margin);
-
-        let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
-        let ncc = compute_ncc(&central_ref, &central_restored);
-
-        // Note: Nearest neighbor has very poor sub-pixel accuracy
-        let (min_psnr, min_ncc) = match method {
-            InterpolationMethod::Nearest => (12.0, 0.25),
-            InterpolationMethod::Bilinear => (25.0, 0.85),
-            _ => (30.0, 0.90),
-        };
-
-        assert!(
-            psnr > min_psnr,
-            "Euclidean {:?}: PSNR {} < {} dB",
-            method,
-            psnr,
-            min_psnr
-        );
-        assert!(
-            ncc > min_ncc,
-            "Euclidean {:?}: NCC {} < {}",
-            method,
-            ncc,
-            min_ncc
-        );
-    }
+    assert_roundtrip(
+        22222,
+        Transform::euclidean(DVec2::new(5.0, -3.0), 2.0_f64.to_radians()),
+        "Euclidean",
+        30,
+        &[
+            (InterpolationMethod::Nearest, 12.0, 0.25),
+            (InterpolationMethod::Bilinear, 25.0, 0.85),
+            (InterpolationMethod::Lanczos3 { deringing: 0.3 }, 30.0, 0.90),
+        ],
+    );
 }
 
 // ============================================================================
@@ -259,44 +215,17 @@ fn test_warp_euclidean_roundtrip() {
 
 #[test]
 fn test_warp_similarity_roundtrip() {
-    let (ref_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 33333);
-    let width = ref_buf.width();
-    let height = ref_buf.height();
-
-    let dx = 8.0;
-    let dy = -5.0;
-    let angle_rad = 1.5_f64.to_radians();
-    let scale = 1.02;
-
-    let forward = Transform::similarity(DVec2::new(dx, dy), angle_rad, scale);
-    let inverse = forward.inverse();
-
-    for method in representative_interpolation_methods() {
-        let warped = do_warp(&ref_buf, &forward, method);
-        let restored = do_warp(&warped, &inverse, method);
-
-        let margin = 40;
-        let (central_ref, central_restored) =
-            extract_central_region(ref_buf.pixels(), restored.pixels(), width, height, margin);
-
-        let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
-        let ncc = compute_ncc(&central_ref, &central_restored);
-
-        let min_psnr = match method {
-            InterpolationMethod::Nearest => 12.0,
-            InterpolationMethod::Bilinear => 22.0,
-            _ => 28.0,
-        };
-
-        assert!(
-            psnr > min_psnr,
-            "Similarity {:?}: PSNR {} < {} dB",
-            method,
-            psnr,
-            min_psnr
-        );
-        assert!(ncc > 0.85, "Similarity {:?}: NCC {} < 0.85", method, ncc);
-    }
+    assert_roundtrip(
+        33333,
+        Transform::similarity(DVec2::new(8.0, -5.0), 1.5_f64.to_radians(), 1.02),
+        "Similarity",
+        40,
+        &[
+            (InterpolationMethod::Nearest, 12.0, 0.85),
+            (InterpolationMethod::Bilinear, 22.0, 0.85),
+            (InterpolationMethod::Lanczos3 { deringing: 0.3 }, 28.0, 0.85),
+        ],
+    );
 }
 
 // ============================================================================
@@ -305,59 +234,30 @@ fn test_warp_similarity_roundtrip() {
 
 #[test]
 fn test_warp_affine_roundtrip() {
-    let (ref_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 44444);
-    let width = ref_buf.width();
-    let height = ref_buf.height();
-
     // Affine with slight differential scaling
-    let scale_x = 1.01;
-    let scale_y = 0.99;
     let angle_rad = 0.5_f64.to_radians();
-    let dx = 6.0;
-    let dy = -4.0;
-
-    let cos_a = angle_rad.cos();
-    let sin_a = angle_rad.sin();
-
-    let params = [
-        scale_x * cos_a,
-        -scale_y * sin_a,
-        dx,
-        scale_x * sin_a,
-        scale_y * cos_a,
-        dy,
-    ];
-    let forward = Transform::affine(params);
-    let inverse = forward.inverse();
-
+    let (cos_a, sin_a) = (angle_rad.cos(), angle_rad.sin());
+    let forward = Transform::affine([
+        1.01 * cos_a,
+        -0.99 * sin_a,
+        6.0,
+        1.01 * sin_a,
+        0.99 * cos_a,
+        -4.0,
+    ]);
     assert_eq!(forward.transform_type, TransformType::Affine);
 
-    for method in representative_interpolation_methods() {
-        let warped = do_warp(&ref_buf, &forward, method);
-        let restored = do_warp(&warped, &inverse, method);
-
-        let margin = 40;
-        let (central_ref, central_restored) =
-            extract_central_region(ref_buf.pixels(), restored.pixels(), width, height, margin);
-
-        let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
-        let ncc = compute_ncc(&central_ref, &central_restored);
-
-        let min_psnr = match method {
-            InterpolationMethod::Nearest => 12.0,
-            InterpolationMethod::Bilinear => 22.0,
-            _ => 26.0,
-        };
-
-        assert!(
-            psnr > min_psnr,
-            "Affine {:?}: PSNR {} < {} dB",
-            method,
-            psnr,
-            min_psnr
-        );
-        assert!(ncc > 0.85, "Affine {:?}: NCC {} < 0.85", method, ncc);
-    }
+    assert_roundtrip(
+        44444,
+        forward,
+        "Affine",
+        40,
+        &[
+            (InterpolationMethod::Nearest, 12.0, 0.85),
+            (InterpolationMethod::Bilinear, 22.0, 0.85),
+            (InterpolationMethod::Lanczos3 { deringing: 0.3 }, 26.0, 0.85),
+        ],
+    );
 }
 
 // ============================================================================
@@ -366,48 +266,21 @@ fn test_warp_affine_roundtrip() {
 
 #[test]
 fn test_warp_homography_roundtrip() {
-    let (ref_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 55555);
-    let width = ref_buf.width();
-    let height = ref_buf.height();
-
     // Mild perspective distortion
-    let dx = 5.0;
-    let dy = -3.0;
-    let h6 = 0.00005;
-    let h7 = 0.00003;
-
-    let params = [1.0, 0.0, dx, 0.0, 1.0, dy, h6, h7];
-    let forward = Transform::homography(params);
-    let inverse = forward.inverse();
-
+    let forward = Transform::homography([1.0, 0.0, 5.0, 0.0, 1.0, -3.0, 0.00005, 0.00003]);
     assert_eq!(forward.transform_type, TransformType::Homography);
 
-    for method in representative_interpolation_methods() {
-        let warped = do_warp(&ref_buf, &forward, method);
-        let restored = do_warp(&warped, &inverse, method);
-
-        let margin = 50;
-        let (central_ref, central_restored) =
-            extract_central_region(ref_buf.pixels(), restored.pixels(), width, height, margin);
-
-        let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
-        let ncc = compute_ncc(&central_ref, &central_restored);
-
-        let min_psnr = match method {
-            InterpolationMethod::Nearest => 10.0,
-            InterpolationMethod::Bilinear => 20.0,
-            _ => 24.0,
-        };
-
-        assert!(
-            psnr > min_psnr,
-            "Homography {:?}: PSNR {} < {} dB",
-            method,
-            psnr,
-            min_psnr
-        );
-        assert!(ncc > 0.80, "Homography {:?}: NCC {} < 0.80", method, ncc);
-    }
+    assert_roundtrip(
+        55555,
+        forward,
+        "Homography",
+        50,
+        &[
+            (InterpolationMethod::Nearest, 10.0, 0.80),
+            (InterpolationMethod::Bilinear, 20.0, 0.80),
+            (InterpolationMethod::Lanczos3 { deringing: 0.3 }, 24.0, 0.80),
+        ],
+    );
 }
 
 // ============================================================================

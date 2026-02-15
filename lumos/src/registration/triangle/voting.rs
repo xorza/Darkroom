@@ -73,18 +73,51 @@ impl VoteMatrix {
     }
 
     /// Iterate over all non-zero entries as `(ref_idx, target_idx, votes)`.
-    pub fn iter_nonzero(&self) -> Vec<(usize, usize, usize)> {
+    pub fn iter_nonzero(&self) -> VoteIter<'_> {
         match self {
-            VoteMatrix::Dense { votes, n_target } => votes
-                .iter()
-                .enumerate()
-                .filter(|(_, count)| **count > 0)
-                .map(|(idx, &count)| (idx / n_target, idx % n_target, count as usize))
-                .collect(),
-            VoteMatrix::Sparse(map) => map
-                .iter()
-                .map(|(&(r, t), &count)| (r, t, count as usize))
-                .collect(),
+            VoteMatrix::Dense { votes, n_target } => VoteIter::Dense(DenseVoteIter {
+                iter: votes.iter().enumerate(),
+                n_target: *n_target,
+            }),
+            VoteMatrix::Sparse(map) => VoteIter::Sparse(map.iter()),
+        }
+    }
+}
+
+/// Iterator over non-zero entries in a dense vote matrix.
+#[derive(Debug)]
+pub struct DenseVoteIter<'a> {
+    iter: std::iter::Enumerate<std::slice::Iter<'a, u16>>,
+    n_target: usize,
+}
+
+impl Iterator for DenseVoteIter<'_> {
+    type Item = (usize, usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        for (idx, &count) in self.iter.by_ref() {
+            if count > 0 {
+                return Some((idx / self.n_target, idx % self.n_target, count as usize));
+            }
+        }
+        None
+    }
+}
+
+/// Either-style iterator for [`VoteMatrix::iter_nonzero`].
+#[derive(Debug)]
+pub enum VoteIter<'a> {
+    Dense(DenseVoteIter<'a>),
+    Sparse(std::collections::hash_map::Iter<'a, (usize, usize), u32>),
+}
+
+impl Iterator for VoteIter<'_> {
+    type Item = (usize, usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            VoteIter::Dense(it) => it.next(),
+            VoteIter::Sparse(it) => it.next().map(|(&(r, t), &count)| (r, t, count as usize)),
         }
     }
 }
@@ -169,7 +202,6 @@ pub(crate) fn resolve_matches(
     // Filter by minimum votes and collect matches
     let mut matches: Vec<PointMatch> = vote_matrix
         .iter_nonzero()
-        .into_iter()
         .filter(|&(_, _, votes)| votes >= min_votes)
         .map(|(ref_idx, target_idx, votes)| PointMatch {
             ref_idx,

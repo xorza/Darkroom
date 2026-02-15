@@ -11,8 +11,7 @@ use crate::testing::init_tracing;
 use crate::testing::synthetic::{StarFieldConfig, generate_star_field};
 use common::test_utils::test_output_path;
 
-/// Default tile size for background estimation
-const TILE_SIZE: usize = 64;
+use super::TILE_SIZE;
 
 /// Normalize filtered output for visualization (handle negative values).
 fn normalize_for_display(pixels: &[f32]) -> Vec<f32> {

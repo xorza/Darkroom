@@ -119,7 +119,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     use crate::common::Buffer2;
     use crate::star_detection::BufferPool;
     use crate::star_detection::background::estimate_background;
-    use crate::star_detection::convolution::matched_filter;
+    use crate::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
     use crate::star_detection::detector::stages::fwhm::estimate_fwhm;
     use crate::star_detection::detector::stages::prepare;
     use crate::star_detection::labeling::LabelMap;
@@ -212,9 +212,11 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
             fwhm_val,
             config.psf_axis_ratio,
             config.psf_angle,
-            &mut scratch,
-            &mut conv_scratch,
-            &mut conv_temp,
+            &mut MatchedFilterBuffers {
+                output: &mut scratch,
+                subtraction_scratch: &mut conv_scratch,
+                temp: &mut conv_temp,
+            },
         );
         pool.release_f32(conv_temp);
         pool.release_f32(conv_scratch);

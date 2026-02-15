@@ -330,9 +330,11 @@ fn test_matched_filter_subtracts_background() {
         3.0,
         1.0,
         0.0,
-        &mut result,
-        &mut scratch,
-        &mut temp,
+        &mut MatchedFilterBuffers {
+            output: &mut result,
+            subtraction_scratch: &mut scratch,
+            temp: &mut temp,
+        },
     );
 
     // Result should be near zero
@@ -363,9 +365,11 @@ fn test_matched_filter_detects_star() {
         3.0,
         1.0,
         0.0,
-        &mut result,
-        &mut scratch,
-        &mut temp,
+        &mut MatchedFilterBuffers {
+            output: &mut result,
+            subtraction_scratch: &mut scratch,
+            temp: &mut temp,
+        },
     );
 
     // Peak at star location should be the maximum in the image
@@ -421,9 +425,11 @@ fn test_matched_filter_boosts_snr() {
         fwhm,
         1.0,
         0.0,
-        &mut result,
-        &mut scratch,
-        &mut temp,
+        &mut MatchedFilterBuffers {
+            output: &mut result,
+            subtraction_scratch: &mut scratch,
+            temp: &mut temp,
+        },
     );
 
     // Peak should be at star location
@@ -461,9 +467,11 @@ fn test_matched_filter_preserves_negative_residuals() {
         2.0,
         1.0,
         0.0,
-        &mut result,
-        &mut scratch,
-        &mut temp,
+        &mut MatchedFilterBuffers {
+            output: &mut result,
+            subtraction_scratch: &mut scratch,
+            temp: &mut temp,
+        },
     );
 
     // Negative residuals are preserved for correct noise statistics.
@@ -515,9 +523,11 @@ fn test_matched_filter_noise_normalization() {
         fwhm,
         1.0,
         0.0,
-        &mut result,
-        &mut scratch,
-        &mut temp,
+        &mut MatchedFilterBuffers {
+            output: &mut result,
+            subtraction_scratch: &mut scratch,
+            temp: &mut temp,
+        },
     );
 
     // Compute standard deviation of output (excluding border region affected by mirror)

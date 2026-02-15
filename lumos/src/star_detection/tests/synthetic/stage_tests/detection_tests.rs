@@ -16,8 +16,7 @@ use glam::{DVec2, Vec2};
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
-/// Default tile size for background estimation
-const TILE_SIZE: usize = 64;
+use super::TILE_SIZE;
 
 /// Create a detection overlay image showing candidates.
 fn create_detection_overlay(

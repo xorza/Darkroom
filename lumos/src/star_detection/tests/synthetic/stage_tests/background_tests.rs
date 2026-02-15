@@ -14,8 +14,7 @@ use crate::testing::synthetic::{
 };
 use common::test_utils::test_output_path;
 
-/// Default tile size for background estimation
-const TILE_SIZE: usize = 64;
+use super::TILE_SIZE;
 
 /// Test background estimation on uniform background.
 #[test]

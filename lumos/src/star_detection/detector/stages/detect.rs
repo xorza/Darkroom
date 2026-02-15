@@ -11,7 +11,7 @@ use crate::math::{Aabb, Vec2us};
 use crate::star_detection::background::BackgroundEstimate;
 use crate::star_detection::buffer_pool::BufferPool;
 use crate::star_detection::config::Config;
-use crate::star_detection::convolution::matched_filter;
+use crate::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
 use crate::star_detection::deblend::Region;
 use crate::star_detection::deblend::{
     ComponentData, DeblendBuffers, deblend_local_maxima, deblend_multi_threshold,
@@ -76,9 +76,11 @@ pub(crate) fn detect(
             fwhm,
             config.psf_axis_ratio,
             config.psf_angle,
-            &mut scratch,
-            &mut convolution_scratch,
-            &mut convolution_temp,
+            &mut MatchedFilterBuffers {
+                output: &mut scratch,
+                subtraction_scratch: &mut convolution_scratch,
+                temp: &mut convolution_temp,
+            },
         );
         pool.release_f32(convolution_temp);
         pool.release_f32(convolution_scratch);

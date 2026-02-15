@@ -199,15 +199,16 @@ impl SipPolynomial {
                     residuals.push(f64::INFINITY);
                     continue;
                 }
-                let u = (ref_points[i].x - ref_pt.x) / norm_scale;
-                let v = (ref_points[i].y - ref_pt.y) / norm_scale;
+                let (u, v) = normalize_point(ref_points[i], ref_pt, norm_scale);
+
+                let mut basis = [0.0; MAX_TERMS];
+                evaluate_basis(u, v, &terms, &mut basis[..terms.len()]);
 
                 let mut pred_u = 0.0;
                 let mut pred_v = 0.0;
-                for (j, &(p, q)) in terms.iter().enumerate() {
-                    let basis = monomial(u, v, p, q);
-                    pred_u += coeffs_u[j] * basis;
-                    pred_v += coeffs_v[j] * basis;
+                for j in 0..terms.len() {
+                    pred_u += coeffs_u[j] * basis[j];
+                    pred_v += coeffs_v[j] * basis[j];
                 }
 
                 let du = pred_u - targets_u[i];
@@ -349,15 +350,16 @@ impl SipPolynomial {
 
     /// Compute the correction vector at a point (without applying it).
     fn correction_at(&self, p: DVec2) -> DVec2 {
-        let u = (p.x - self.reference_point.x) / self.norm_scale;
-        let v = (p.y - self.reference_point.y) / self.norm_scale;
+        let (u, v) = normalize_point(p, self.reference_point, self.norm_scale);
+
+        let mut basis = [0.0; MAX_TERMS];
+        evaluate_basis(u, v, &self.terms, &mut basis[..self.terms.len()]);
 
         let mut du = 0.0;
         let mut dv = 0.0;
-        for (i, &(exp_p, exp_q)) in self.terms.iter().enumerate() {
-            let basis = monomial(u, v, exp_p, exp_q);
-            du += self.coeffs_u[i] * basis;
-            dv += self.coeffs_v[i] * basis;
+        for (i, &b) in basis[..self.terms.len()].iter().enumerate() {
+            du += self.coeffs_u[i] * b;
+            dv += self.coeffs_v[i] * b;
         }
 
         DVec2::new(du * self.norm_scale, dv * self.norm_scale)
@@ -385,6 +387,20 @@ fn term_exponents(order: usize) -> ArrayVec<(usize, usize), MAX_TERMS> {
 #[inline]
 fn monomial(u: f64, v: f64, p: usize, q: usize) -> f64 {
     u.powi(p as i32) * v.powi(q as i32)
+}
+
+/// Normalize a point relative to the SIP reference point and scale.
+#[inline]
+fn normalize_point(p: DVec2, ref_pt: DVec2, norm_scale: f64) -> (f64, f64) {
+    ((p.x - ref_pt.x) / norm_scale, (p.y - ref_pt.y) / norm_scale)
+}
+
+/// Evaluate all monomial basis functions for a normalized point.
+#[inline]
+fn evaluate_basis(u: f64, v: f64, terms: &[(usize, usize)], basis: &mut [f64]) {
+    for (j, &(p, q)) in terms.iter().enumerate() {
+        basis[j] = monomial(u, v, p, q);
+    }
 }
 
 /// Compute average distance from a set of points to a reference point.
@@ -437,13 +453,8 @@ fn build_normal_equations(
         if !mask[i] {
             continue;
         }
-        let u = (point.x - ref_pt.x) / norm_scale;
-        let v = (point.y - ref_pt.y) / norm_scale;
-
-        // Compute basis functions for this point
-        for (j, &(p, q)) in terms.iter().enumerate() {
-            basis[j] = monomial(u, v, p, q);
-        }
+        let (u, v) = normalize_point(*point, ref_pt, norm_scale);
+        evaluate_basis(u, v, terms, &mut basis[..n_terms]);
 
         // Accumulate A^T*A and A^T*b
         for j in 0..n_terms {

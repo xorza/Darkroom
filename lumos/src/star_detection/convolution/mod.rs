@@ -28,6 +28,18 @@ use crate::math::fwhm_to_sigma;
 // Public API
 // ============================================================================
 
+/// Scratch buffers for [`matched_filter`]. All three must have the same
+/// dimensions as the input image.
+#[derive(Debug)]
+pub struct MatchedFilterBuffers<'a> {
+    /// Convolved output (the result).
+    pub output: &'a mut Buffer2<f32>,
+    /// Scratch space for background subtraction.
+    pub subtraction_scratch: &'a mut Buffer2<f32>,
+    /// Temporary buffer for separable convolution passes.
+    pub temp: &'a mut Buffer2<f32>,
+}
+
 /// Apply matched filter convolution optimized for star detection.
 ///
 /// Convolves the background-subtracted image with a Gaussian kernel matching
@@ -47,19 +59,18 @@ use crate::math::fwhm_to_sigma;
 /// * `fwhm` - Full width at half maximum of PSF
 /// * `axis_ratio` - PSF ellipticity (1.0 = circular)
 /// * `angle` - PSF rotation angle in radians
-/// * `output` - Output buffer for convolved result
-/// * `subtraction_scratch` - Scratch buffer for background subtraction (reuse to avoid allocation)
-#[allow(clippy::too_many_arguments)]
+/// * `buffers` - Pre-allocated scratch buffers (same dimensions as input)
 pub fn matched_filter(
     pixels: &Buffer2<f32>,
     background: &Buffer2<f32>,
     fwhm: f32,
     axis_ratio: f32,
     angle: f32,
-    output: &mut Buffer2<f32>,
-    subtraction_scratch: &mut Buffer2<f32>,
-    temp: &mut Buffer2<f32>,
+    buffers: &mut MatchedFilterBuffers<'_>,
 ) {
+    let output = &mut *buffers.output;
+    let subtraction_scratch = &mut *buffers.subtraction_scratch;
+    let temp = &mut *buffers.temp;
     assert_eq!(pixels.width(), background.width());
     assert_eq!(pixels.height(), background.height());
     assert_eq!(pixels.width(), output.width());

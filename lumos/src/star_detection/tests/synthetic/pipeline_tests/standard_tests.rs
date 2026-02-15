@@ -1,76 +1,9 @@
 //! Standard pipeline tests - tests full star detection on typical scenarios.
 
-use crate::{AstroImage, ImageDimensions};
-
-use crate::star_detection::tests::common::output::{
-    DetectionMetrics, check_pass, compute_detection_metrics, save_comparison, save_grayscale,
-    save_metrics, standard_criteria,
-};
-use crate::star_detection::{StarDetector, config::Config};
+use crate::star_detection::config::Config;
+use crate::star_detection::tests::common::output::{check_pass, standard_criteria};
 use crate::testing::init_tracing;
-use crate::testing::synthetic::{
-    StarFieldConfig, dense_field_config, generate_star_field, sparse_field_config,
-};
-use common::test_utils::test_output_path;
-
-/// Run full pipeline and evaluate metrics.
-fn run_pipeline_test(
-    name: &str,
-    field_config: &StarFieldConfig,
-    detection_config: &Config,
-) -> DetectionMetrics {
-    let (pixels, ground_truth) = generate_star_field(field_config);
-    let pixels_vec = pixels.into_vec();
-
-    // Save input
-    save_grayscale(
-        &pixels_vec,
-        field_config.width,
-        field_config.height,
-        &test_output_path(&format!("synthetic_starfield/pipeline_{}_input.png", name)),
-    );
-
-    // Run detection
-    let image = AstroImage::from_pixels(
-        ImageDimensions::new(field_config.width, field_config.height, 1),
-        pixels_vec.clone(),
-    );
-    let mut detector = StarDetector::from_config(detection_config.clone());
-    let result = detector.detect(&image);
-    let stars = result.stars;
-
-    // Compute metrics
-    let match_radius = field_config.fwhm_range.1 * 2.0;
-    let metrics = compute_detection_metrics(&ground_truth, &stars, match_radius);
-
-    // Save comparison image
-    save_comparison(
-        &pixels_vec,
-        field_config.width,
-        field_config.height,
-        &ground_truth,
-        &stars,
-        match_radius,
-        &test_output_path(&format!(
-            "synthetic_starfield/pipeline_{}_comparison.png",
-            name
-        )),
-    );
-
-    // Save metrics
-    save_metrics(
-        &metrics,
-        &test_output_path(&format!(
-            "synthetic_starfield/pipeline_{}_metrics.txt",
-            name
-        )),
-    );
-
-    println!("\n{} results:", name);
-    println!("{}", metrics);
-
-    metrics
-}
+use crate::testing::synthetic::{StarFieldConfig, dense_field_config, sparse_field_config};
 
 /// Test: Sparse field with well-separated stars.
 #[test]
@@ -85,7 +18,7 @@ fn test_pipeline_sparse_field() {
         ..Config::default()
     };
 
-    let metrics = run_pipeline_test("sparse_field", &field_config, &detection_config);
+    let metrics = super::run_test("sparse_field", "pipeline", &field_config, &detection_config);
 
     // Check against standard criteria
     let criteria = standard_criteria();
@@ -110,7 +43,7 @@ fn test_pipeline_dense_field() {
         ..Config::default()
     };
 
-    let metrics = run_pipeline_test("dense_field", &field_config, &detection_config);
+    let metrics = super::run_test("dense_field", "pipeline", &field_config, &detection_config);
 
     // Relaxed criteria for dense field
     let criteria = crate::star_detection::tests::common::output::crowded_criteria();
@@ -149,7 +82,12 @@ fn test_pipeline_moffat_profile() {
         ..Config::default()
     };
 
-    let metrics = run_pipeline_test("moffat_profile", &field_config, &detection_config);
+    let metrics = super::run_test(
+        "moffat_profile",
+        "pipeline",
+        &field_config,
+        &detection_config,
+    );
 
     // Moffat profile has extended wings that can affect FWHM estimation
     let criteria = crate::star_detection::tests::common::output::PassCriteria {
@@ -191,7 +129,7 @@ fn test_pipeline_fwhm_range() {
         ..Config::default()
     };
 
-    let metrics = run_pipeline_test("fwhm_range", &field_config, &detection_config);
+    let metrics = super::run_test("fwhm_range", "pipeline", &field_config, &detection_config);
 
     // Relaxed for FWHM variation - centroid matching can have outliers with varying PSF
     let criteria = crate::star_detection::tests::common::output::PassCriteria {
@@ -236,7 +174,12 @@ fn test_pipeline_dynamic_range() {
         ..Config::default()
     };
 
-    let metrics = run_pipeline_test("dynamic_range", &field_config, &detection_config);
+    let metrics = super::run_test(
+        "dynamic_range",
+        "pipeline",
+        &field_config,
+        &detection_config,
+    );
 
     // Faint stars are hard to detect, so relaxed criteria
     let criteria = crate::star_detection::tests::common::output::faint_star_criteria();
@@ -273,7 +216,7 @@ fn test_pipeline_low_noise() {
         ..Config::default()
     };
 
-    let metrics = run_pipeline_test("low_noise", &field_config, &detection_config);
+    let metrics = super::run_test("low_noise", "pipeline", &field_config, &detection_config);
 
     // Good criteria for low noise - some outlier matches can skew mean centroid error
     let criteria = crate::star_detection::tests::common::output::PassCriteria {

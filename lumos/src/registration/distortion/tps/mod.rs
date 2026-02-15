@@ -1,4 +1,6 @@
-// WIP: TPS distortion modeling is not yet integrated into the public API.
+// WIP: TPS distortion modeling is not yet integrated into the registration pipeline.
+// Blanket allow because no code outside this module (or its tests) calls TPS yet.
+// Remove once TPS is integrated as a post-RANSAC distortion correction option.
 #![allow(dead_code)]
 
 //! Thin-Plate Spline (TPS) distortion modeling.

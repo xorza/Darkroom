@@ -31,6 +31,32 @@ use rand::prelude::*;
 use crate::registration::transform::{Transform, TransformType};
 use crate::registration::triangle::PointMatch;
 
+/// Progressive sampling: 3 phases from high-confidence pool to full pool.
+/// This front-loads good candidates, improving early convergence.
+const SAMPLING_PHASES: usize = 3;
+/// Pool fraction per phase: top 25% → top 50% → full pool.
+const PHASE_POOL_FRACTIONS: [f64; 3] = [0.25, 0.50, 1.0];
+/// Whether each phase uses weighted sampling (vs uniform random).
+const PHASE_WEIGHTED: [bool; 3] = [true, true, false];
+
+/// Pre-allocated buffers for local optimization (LO-RANSAC) to avoid per-iteration allocations.
+#[derive(Debug)]
+struct LocalOptBuffers {
+    inlier_buf: Vec<usize>,
+    point_buf_ref: Vec<DVec2>,
+    point_buf_target: Vec<DVec2>,
+}
+
+impl LocalOptBuffers {
+    fn with_capacity(n: usize) -> Self {
+        Self {
+            inlier_buf: Vec::with_capacity(n),
+            point_buf_ref: Vec::with_capacity(n),
+            point_buf_target: Vec::with_capacity(n),
+        }
+    }
+}
+
 /// Minimum cross-product magnitude to consider points non-collinear.
 /// For points separated by ~1 pixel, a cross product of 1.0 corresponds
 /// to ~1 pixel perpendicular offset — below this, the sample is too
@@ -142,7 +168,6 @@ impl RansacEstimator {
     ///
     /// On return, `inlier_buf` contains the best inlier set found.
     /// Typically improves inlier count by 5-15%.
-    #[allow(clippy::too_many_arguments)]
     fn local_optimization(
         &self,
         ref_points: &[DVec2],
@@ -150,18 +175,16 @@ impl RansacEstimator {
         initial_transform: &Transform,
         initial_inliers: &[usize],
         scorer: &MagsacScorer,
-        inlier_buf: &mut Vec<usize>,
-        point_buf_ref: &mut Vec<DVec2>,
-        point_buf_target: &mut Vec<DVec2>,
+        buffers: &mut LocalOptBuffers,
     ) -> (Transform, f64) {
         let transform_type = initial_transform.transform_type;
         let min_samples = transform_type.min_points();
         let mut current_transform = *initial_transform;
 
         // Use inlier_buf as the "current best" and a local scratch for scoring.
-        inlier_buf.clear();
-        inlier_buf.extend_from_slice(initial_inliers);
-        let mut scratch_inliers = Vec::with_capacity(inlier_buf.len());
+        buffers.inlier_buf.clear();
+        buffers.inlier_buf.extend_from_slice(initial_inliers);
+        let mut scratch_inliers = Vec::with_capacity(buffers.inlier_buf.len());
 
         // Compute initial score
         let initial_score = score_hypothesis(
@@ -175,20 +198,23 @@ impl RansacEstimator {
         let mut current_score = initial_score;
 
         for _ in 0..self.params.lo_max_iterations {
-            if inlier_buf.len() < min_samples {
+            if buffers.inlier_buf.len() < min_samples {
                 break;
             }
 
             // Re-estimate transform using all current inliers
-            point_buf_ref.clear();
-            point_buf_target.clear();
-            for &i in inlier_buf.iter() {
-                point_buf_ref.push(ref_points[i]);
-                point_buf_target.push(target_points[i]);
+            buffers.point_buf_ref.clear();
+            buffers.point_buf_target.clear();
+            for &i in buffers.inlier_buf.iter() {
+                buffers.point_buf_ref.push(ref_points[i]);
+                buffers.point_buf_target.push(target_points[i]);
             }
 
-            let refined = match estimate_transform(point_buf_ref, point_buf_target, transform_type)
-            {
+            let refined = match estimate_transform(
+                &buffers.point_buf_ref,
+                &buffers.point_buf_target,
+                transform_type,
+            ) {
                 Some(t) => t,
                 None => break,
             };
@@ -204,13 +230,13 @@ impl RansacEstimator {
             );
 
             // Check for convergence (no improvement)
-            if scratch_inliers.len() <= inlier_buf.len() && new_score <= current_score {
+            if scratch_inliers.len() <= buffers.inlier_buf.len() && new_score <= current_score {
                 break;
             }
 
             // Update if improved
             current_transform = refined;
-            std::mem::swap(inlier_buf, &mut scratch_inliers);
+            std::mem::swap(&mut buffers.inlier_buf, &mut scratch_inliers);
             current_score = new_score;
         }
 
@@ -242,9 +268,7 @@ impl RansacEstimator {
         let mut sample_ref: Vec<DVec2> = Vec::with_capacity(min_samples);
         let mut sample_target: Vec<DVec2> = Vec::with_capacity(min_samples);
         let mut inlier_buf: Vec<usize> = Vec::with_capacity(n);
-        let mut lo_inlier_buf: Vec<usize> = Vec::with_capacity(n);
-        let mut lo_point_buf_ref: Vec<DVec2> = Vec::with_capacity(n);
-        let mut lo_point_buf_target: Vec<DVec2> = Vec::with_capacity(n);
+        let mut lo_buffers = LocalOptBuffers::with_capacity(n);
 
         let mut iterations = 0;
         let max_iter = self.params.max_iterations;
@@ -302,14 +326,12 @@ impl RansacEstimator {
                     &current_transform,
                     &inlier_buf,
                     &scorer,
-                    &mut lo_inlier_buf,
-                    &mut lo_point_buf_ref,
-                    &mut lo_point_buf_target,
+                    &mut lo_buffers,
                 );
                 // Only accept LO result if it's still plausible
                 if self.is_plausible(&lo_transform) {
                     current_transform = lo_transform;
-                    std::mem::swap(&mut inlier_buf, &mut lo_inlier_buf);
+                    std::mem::swap(&mut inlier_buf, &mut lo_buffers.inlier_buf);
                     score = lo_score;
                 }
             }
@@ -336,16 +358,19 @@ impl RansacEstimator {
         if let Some(transform) = best_transform
             && best_inliers.len() >= min_samples
         {
-            lo_point_buf_ref.clear();
-            lo_point_buf_target.clear();
+            lo_buffers.point_buf_ref.clear();
+            lo_buffers.point_buf_target.clear();
             for &i in &best_inliers {
-                lo_point_buf_ref.push(ref_points[i]);
-                lo_point_buf_target.push(target_points[i]);
+                lo_buffers.point_buf_ref.push(ref_points[i]);
+                lo_buffers.point_buf_target.push(target_points[i]);
             }
 
-            let refined =
-                estimate_transform(&lo_point_buf_ref, &lo_point_buf_target, transform_type)
-                    .unwrap_or(transform);
+            let refined = estimate_transform(
+                &lo_buffers.point_buf_ref,
+                &lo_buffers.point_buf_target,
+                transform_type,
+            )
+            .unwrap_or(transform);
 
             score_hypothesis(
                 ref_points,
@@ -434,16 +459,11 @@ impl RansacEstimator {
             min_samples,
             transform_type,
             |iteration, max_iter, sample_buf| {
-                // Progressive sampling strategy (3-phase approach):
-                // Phase 1 (0-33%): Sample from top 25% high-confidence matches
-                // Phase 2 (33-66%): Sample from top 50% matches
-                // Phase 3 (66-100%): Uniform random sampling
-                let phase = iteration * 3 / max_iter;
-                let (pool_size, use_weighted) = match phase {
-                    0 => ((n / 4).max(min_samples), true), // Top 25%
-                    1 => ((n / 2).max(min_samples), true), // Top 50%
-                    _ => (n, false),                       // Full pool
-                };
+                // Progressive sampling: phases ramp from high-confidence pool to full pool
+                let phase = (iteration * SAMPLING_PHASES / max_iter).min(SAMPLING_PHASES - 1);
+                let pool_size =
+                    ((n as f64 * PHASE_POOL_FRACTIONS[phase]).ceil() as usize).max(min_samples);
+                let use_weighted = PHASE_WEIGHTED[phase];
 
                 if use_weighted {
                     weighted_sample_into(

@@ -29,6 +29,14 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **[F27]** Reordered `k_nearest` to check `k == 0` before `self.indices.is_empty()`
 - **[F28]** `compute_residuals` evaluates TPS directly in normalized space (avoids denormalize→renormalize roundtrip), documented `control_points()` returns normalized coords
 - **[F29]** SKIPPED — HashSets already allocated before loop and reused with `.clear()`
+- **[F8]** Extracted `QUALITY_MIN_INLIERS`, `QUALITY_ERROR_SCALE`, `QUALITY_INLIER_SATURATION` constants with doc comments
+- **[F10]** Moved `FWHM_TIGHT`/`FWHM_NORMAL` to shared `helpers.rs`
+- **[F11]** Changed `VoteMatrix::iter_nonzero()` to return `Box<dyn Iterator>` instead of `Vec`
+- **[F13]** Bundled `local_optimization` buffer params into `LocalOptBuffers` struct
+- **[F16]** Removed blanket `#![allow(dead_code)]` in TPS; added targeted per-item annotations
+- **[F18]** Extracted `normalize_point()` and `evaluate_basis()` SIP helpers
+- **[F20]** Extracted progressive sampling constants with documentation
+- **[F24]** Extracted `assert_roundtrip` helper for roundtrip warp tests
 
 ## Findings
 
@@ -90,7 +98,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 1/5 -- convert asserts to early-return None or vice versa
 - **Description**: `fit_from_transform` uses `assert_eq!` for ref/target length mismatch (line 147-150) but returns `None` for insufficient points (line 157-159). Both are caller-error conditions. Pick one pattern: either panic on all precondition violations (per project convention) or return `None` for all.
 
-#### [F8] Quality score formula undocumented
+#### [F8] ~~Quality score formula undocumented~~ DONE — Extracted `QUALITY_MIN_INLIERS`, `QUALITY_ERROR_SCALE`, `QUALITY_INLIER_SATURATION` constants with doc comments explaining formula rationale.
 - **Location**: `result.rs:152-159`
 - **Category**: Documentation / maintainability
 - **Impact**: 3/5 -- magic constants with no justification
@@ -108,7 +116,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 3/5 -- different backing stores (flat array vs Vec<Vec<f64>>)
 - **Description**: Both modules implement LU decomposition with partial pivoting. The SIP version works on flat `[f64]` arrays with `ArrayVec` return, while TPS uses `Vec<Vec<f64>>` with heap allocation. Same pivoting logic, same threshold, same back-substitution. Extract a shared solver, or have TPS call the SIP solver after converting its matrix to flat layout.
 
-#### [F10] Duplicate test helper functions across test modules
+#### [F10] ~~Duplicate test helper functions across test modules~~ DONE — Moved `FWHM_TIGHT` and `FWHM_NORMAL` to `tests/synthetic/helpers.rs`; updated `robustness.rs` and `transform_types.rs` to import from helpers.
 - **Location**: `tests/robustness.rs` vs `tests/transform_types.rs` (`apply_affine`, `apply_homography`, FWHM constants)
 - **Category**: Generalization
 - **Impact**: 3/5 -- identical implementations, maintenance sync risk
@@ -116,7 +124,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 3/5 -- extract to shared test helpers module
 - **Description**: `apply_affine` and `apply_homography` are copied verbatim between test files. FWHM constants (`FWHM_TIGHT`, `FWHM_NORMAL`, `FWHM_SUBPIXEL`, `FWHM_LOOSE`) are duplicated between `robustness.rs` (lines 23-26) and `transform_types.rs` (lines 20-24). The `max_error` computation pattern (iterate pairs, apply transform, compute distance, track max) is repeated 5+ times. Extract into `tests/helpers.rs`.
 
-#### [F11] `VoteMatrix::iter_nonzero()` returns `Vec` instead of iterator
+#### [F11] ~~`VoteMatrix::iter_nonzero()` returns `Vec` instead of iterator~~ DONE — Changed return type to `Box<dyn Iterator<Item = (usize, usize, usize)> + '_>`; updated caller in `resolve_matches` and all test sites.
 - **Location**: `triangle/voting.rs:76-89`
 - **Category**: Data flow / simplification
 - **Impact**: 3/5 -- allocates intermediate Vec, then immediately filtered and collected again
@@ -132,7 +140,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 2/5 -- extract one `#[inline] fn dim_value(p: DVec2, dim: usize) -> f64`
 - **Description**: The split dimension extraction pattern appears in `k_nearest_range`, `nearest_one_range`, `radius_indices_range`, and the build comparator. Extract to a shared helper. Similarly, the near/far subtree selection (lines 169-173, 232-236) is duplicated.
 
-#### [F13] `local_optimization()` takes 8 parameters
+#### [F13] ~~`local_optimization()` takes 8 parameters~~ DONE — Bundled `inlier_buf`, `point_buf_ref`, `point_buf_target` into `LocalOptBuffers` struct; reduced `local_optimization` from 8 to 6 params.
 - **Location**: `ransac/mod.rs:170-183`
 - **Category**: API cleanliness
 - **Impact**: 3/5 -- hard to read, easy to swap arguments
@@ -158,7 +166,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 
 ### Priority 3 -- Moderate Impact
 
-#### [F16] TPS module blanket `#[allow(dead_code)]` suppression
+#### [F16] ~~TPS module blanket `#[allow(dead_code)]` suppression~~ DONE — Removed blanket `#![allow(dead_code)]`; added targeted `#[allow(dead_code)]` on each unused public item (`transform_points`, `bending_energy`, `compute_residuals`, `DistortionMap` and its methods).
 - **Location**: `distortion/tps/mod.rs:1-2`
 - **Category**: Dead code
 - **Impact**: 3/5 -- 445-line module with blanket suppression; new dead code accumulates undetected
@@ -174,7 +182,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 2/5 -- evaluate directly in normalized space, denormalize only the result
 - **Description**: `compute_residuals` stores normalized control points, denormalizes to pixel space (line 247), then `transform()` re-normalizes internally (line 173). Direct evaluation in normalized space would eliminate 2n denormalization operations and simplify the data flow.
 
-#### [F18] SIP monomial basis evaluation duplicated 3 times
+#### [F18] ~~SIP monomial basis evaluation duplicated 3 times~~ DONE — Extracted `normalize_point()` and `evaluate_basis()` helpers; replaced 3 normalization sites and 2 basis evaluation sites.
 - **Location**: `distortion/sip/mod.rs:199-202,349-352,436-437`
 - **Category**: Generalization
 - **Impact**: 2/5 -- same loop with identical logic
@@ -190,7 +198,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 3/5 -- would require generic parameter or always-seeded approach
 - **Description**: `RngWrapper` wraps `ChaCha8Rng` or `ThreadRng` in an enum, forcing a match on every RNG call. Alternative: always use `ChaCha8Rng`, seeding from `thread_rng()` when no user seed is provided. This eliminates the enum entirely and makes RANSAC deterministic-by-default.
 
-#### [F20] Hardcoded progressive sampling strategy in RANSAC
+#### [F20] ~~Hardcoded progressive sampling strategy in RANSAC~~ DONE — Extracted `SAMPLING_PHASES`, `PHASE_POOL_FRACTIONS`, `PHASE_WEIGHTED` constants with doc comments explaining the progressive sampling rationale.
 - **Location**: `ransac/mod.rs:437-487`
 - **Category**: API cleanliness / simplification
 - **Impact**: 2/5 -- magic numbers (3 phases, 25%/50%/full pools) with no configuration
@@ -222,7 +230,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 1/5 -- change one line
 - **Description**: `estimate_transform` panics for `TransformType::Auto` with a message "Auto must be resolved..." This is correct but should use `unreachable!("Auto must be resolved before calling estimate_transform")` to communicate that this is a logic error, not a runtime possibility.
 
-#### [F24] Three nearly identical rotation tests could be parametrized
+#### [F24] ~~Three nearly identical rotation tests could be parametrized~~ DONE — Extracted `assert_roundtrip` helper with `MethodThresholds` type alias; replaced 5 roundtrip tests (translation, euclidean, similarity, affine, homography) with thin wrappers.
 - **Location**: `tests/synthetic/warping.rs:735-872`
 - **Category**: Generalization / test quality
 - **Impact**: 2/5 -- 137 lines of triplicated test logic

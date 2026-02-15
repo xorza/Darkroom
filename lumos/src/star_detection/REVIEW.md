@@ -40,6 +40,9 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **[F20]** Added `QualityFilterStats::apply_to(&self, &mut Diagnostics)` method, replacing 7-line field-by-field copy
 - **[F21]** Consolidated 3 different `UnsafeSendPtr` patterns into shared `common::UnsafeSendPtr<T>`
 - **[F27]** Extracted `DEFAULT_FWHM`, `FWHM_MAD_MULTIPLIER`, `FWHM_MAD_FLOOR_FRACTION` constants in `fwhm.rs`
+- **[F17]** SKIPPED — Simpler star field generator serves different use case (explicit star placement)
+- **[F18]** Consolidated centroid stamp generators into `test_utils.rs`; updated 6 callers as thin wrappers
+- **[F25]** Centralized `TILE_SIZE` in `stage_tests/mod.rs`; unified pipeline test wrappers into shared `run_test`
 
 ---
 
@@ -179,7 +182,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 2/5 — Extract constants to shared parent module; intrinsic logic must remain per-platform
 - **Description**: Cephes exp() polynomial coefficients (9 constants) are duplicated between AVX2 and NEON. The `simd_int_pow`/`simd_fast_pow_neg` functions share identical match structure. `hsum` helper is defined differently (module-level vs inline) between gaussian and moffat AVX2.
 
-#### [F17] Two separate star field generation systems in tests
+#### [F17] ~~Two separate star field generation systems in tests~~ SKIPPED — Simpler system supports explicit star placement at exact positions (needed by subpixel_accuracy and shift-detection tests); richer system generates random positions. Migrating would require adding `explicit_stars` override to `StarFieldConfig` = over-engineering for cleanup.
 - **Location**: `tests/synthetic/star_field.rs` vs `crate::testing::synthetic`
 - **Category**: Consistency / Simplification
 - **Impact**: 4/5 — Two `generate_star_field` functions, two star structs, two config structs
@@ -187,7 +190,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 3/5 — Update callers in mod.rs, debug_steps.rs, subpixel_accuracy.rs
 - **Description**: `tests/synthetic/star_field.rs` has a simple star generation system (returns `Vec<f32>`, `SyntheticStar`), while `crate::testing::synthetic` has a richer one (Moffat, nebula, cosmic rays, returns `Buffer2` + `GroundTruthStar`). All pipeline and stage tests use the richer system; only 3 older tests use the simpler one.
 
-#### [F18] Duplicated test helpers across deblend, centroid, and integration tests
+#### [F18] ~~Duplicated test helpers across deblend, centroid, and integration tests~~ DONE — Added `make_gaussian_star`, `make_elliptical_star`, `make_moffat_star` to `centroid/test_utils.rs`; updated callers in `centroid/tests.rs`, `centroid/bench.rs`, `gaussian_fit/bench.rs`, `moffat_fit/bench.rs` as thin wrappers. Kept `make_gaussian_stamp_data`/`make_stamp_data` local (different return types).
 - **Location**: `deblend/tests.rs`, `deblend/local_maxima/tests.rs`, `deblend/multi_threshold/tests.rs` (3x `make_test_component`), `centroid/tests.rs`, `centroid/bench.rs`, `centroid/gaussian_fit/tests.rs`, `centroid/gaussian_fit/bench.rs`, `centroid/moffat_fit/tests.rs`, `centroid/moffat_fit/bench.rs` (6x `make_*_star`/`make_*_stamp`), `tests/synthetic/subpixel_accuracy.rs:17` (duplicate `match_stars`)
 - **Category**: Generalization
 - **Impact**: 3/5 — 10+ duplicated helper functions across test files
@@ -247,7 +250,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 3/5 — Need to compute and assert exact expected medians
 - **Description**: `test_preserves_edges` checks `output[0] < output[99]`. `test_large_image_parallel` checks `is_finite()`. `test_non_square_image` checks only `.len()`. `test_bayer_pattern_removal` checks mean within 0.15 of 0.5. All violate project testing rules.
 
-#### [F25] Duplicated pipeline test wrappers and background boilerplate in tests
+#### [F25] ~~Duplicated pipeline test wrappers and background boilerplate in tests~~ DONE — Centralized `TILE_SIZE` in `stage_tests/mod.rs`; unified `run_pipeline_test`/`run_challenging_test` into shared `run_test` in `pipeline_tests/mod.rs` with prefix parameter.
 - **Location**: `tests/synthetic/pipeline_tests/standard_tests.rs:17-73` vs `challenging_tests.rs:20-92`, all `stage_tests/` files (5x `const TILE_SIZE`, 15x background estimation pattern)
 - **Category**: Generalization
 - **Impact**: 3/5 — ~90% shared logic between run_pipeline_test and run_challenging_test; TILE_SIZE=64 in 5 files

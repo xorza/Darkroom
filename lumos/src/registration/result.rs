@@ -3,6 +3,13 @@
 use crate::registration::distortion::SipFitResult;
 use crate::registration::transform::{Transform, WarpTransform};
 
+/// Minimum inlier count for a meaningful quality score (below this the fit is unreliable).
+const QUALITY_MIN_INLIERS: usize = 4;
+/// RMS error decay scale: `quality_error = exp(-rms / SCALE)`. At rms=2.0, factor ≈ 0.37.
+const QUALITY_ERROR_SCALE: f64 = 2.0;
+/// Inlier saturation point: `quality_count = min(inliers / SAT, 1.0)`. Full credit at 20+ inliers.
+const QUALITY_INLIER_SATURATION: f64 = 20.0;
+
 /// Reason for RANSAC failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RansacFailureReason {
@@ -147,14 +154,14 @@ impl RegistrationResult {
         let num_inliers = matched_stars.len();
 
         // Quality score: product of error and count factors in [0, 1].
-        // - error_factor = exp(-rms/2): exponential decay, 1.0 at rms=0, ~0.37 at rms=2px
-        // - count_factor = min(inliers/20, 1): linear ramp, saturates at 20 matches
-        // Below 4 inliers the fit is unreliable so score is zero.
-        let quality_score = if num_inliers < 4 {
+        // - error_factor = exp(-rms/SCALE): exponential decay, 1.0 at rms=0, ~0.37 at rms=2px
+        // - count_factor = min(inliers/SAT, 1): linear ramp, saturates at 20 matches
+        // Below QUALITY_MIN_INLIERS the fit is unreliable so score is zero.
+        let quality_score = if num_inliers < QUALITY_MIN_INLIERS {
             0.0
         } else {
-            let error_factor = (-rms_error / 2.0).exp();
-            let count_factor = (num_inliers as f64 / 20.0).min(1.0);
+            let error_factor = (-rms_error / QUALITY_ERROR_SCALE).exp();
+            let count_factor = (num_inliers as f64 / QUALITY_INLIER_SATURATION).min(1.0);
             error_factor * count_factor
         };
 

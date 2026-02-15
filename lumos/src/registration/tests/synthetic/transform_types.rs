@@ -15,15 +15,7 @@ use crate::star_detection::Star;
 use crate::testing::synthetic::{generate_random_stars, transform_star_list, translate_star_list};
 use glam::DVec2;
 
-use super::helpers::{apply_affine, apply_homography};
-
-// FWHM values that control max_sigma in registration:
-// max_sigma = fwhm * 0.5, floor at 0.5
-// FWHM 2.0 -> max_sigma 1.0
-// FWHM 1.34 -> max_sigma 0.67
-// FWHM 0.66 -> max_sigma 0.5 (floor)
-const FWHM_TIGHT: f32 = 1.34; // max_sigma ~0.67
-const FWHM_NORMAL: f32 = 2.0; // max_sigma ~1.0
+use super::helpers::{FWHM_NORMAL, FWHM_TIGHT, apply_affine, apply_homography};
 
 #[test]
 fn test_registration_translation_only() {

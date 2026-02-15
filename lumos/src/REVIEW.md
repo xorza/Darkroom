@@ -45,6 +45,7 @@ No critical bugs found. Most findings are maintainability improvements.
 - **[F32]** Fixed `sort_with_indices` NaN handling: `partial_cmp().unwrap()` → `total_cmp()`
 - **[F26]** Removed redundant SIP clone: eliminated `sip_correction` field from `RegistrationResult`, derived from `sip_fit` in `warp_transform()`
 - **[F31]** Changed `warp_image` from `pub` to `pub(crate)`
+- **[F9]** Extracted `MatchedFilterBuffers` struct; updated `matched_filter` and all 10 callers
 
 ---
 
@@ -139,7 +140,7 @@ No critical bugs found. Most findings are maintainability improvements.
 
 ### Priority 2 — High Impact, Moderate Invasiveness
 
-#### [F9] Scratch buffers in public function signatures
+#### [F9] ~~Scratch buffers in public function signatures~~ DONE — Extracted `MatchedFilterBuffers` struct; updated `matched_filter` and all 10 callers. Skipped `process_xtrans` (true public API with meaningful distinct parameters).
 - **Location**: `star_detection/convolution/mod.rs:49-58` (8 params),
   `raw/demosaic/xtrans/mod.rs:27-75` (10 params)
 - **Category**: API cleanliness

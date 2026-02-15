@@ -2,19 +2,15 @@
 
 use glam::Vec2;
 
-use crate::{AstroImage, ImageDimensions};
-
+use crate::star_detection::config::Config;
 use crate::star_detection::tests::common::output::{
-    PassCriteria, check_pass, compute_detection_metrics, crowded_criteria, faint_star_criteria,
-    save_comparison, save_grayscale, save_metrics,
+    PassCriteria, check_pass, crowded_criteria, faint_star_criteria,
 };
-use crate::star_detection::{StarDetector, config::Config};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{
     CrowdingType, ElongationType, NebulaConfig, StarFieldConfig, crowded_cluster_config,
-    elliptical_stars_config, faint_stars_config, generate_star_field,
+    elliptical_stars_config, faint_stars_config,
 };
-use common::test_utils::test_output_path;
 
 /// Run full pipeline and evaluate metrics for challenging cases.
 fn run_challenging_test(
@@ -23,60 +19,7 @@ fn run_challenging_test(
     detection_config: &Config,
     criteria: &PassCriteria,
 ) -> bool {
-    let (pixels, ground_truth) = generate_star_field(field_config);
-    let pixels_vec = pixels.into_vec();
-
-    // Save input
-    save_grayscale(
-        &pixels_vec,
-        field_config.width,
-        field_config.height,
-        &test_output_path(&format!(
-            "synthetic_starfield/challenging_{}_input.png",
-            name
-        )),
-    );
-
-    // Run detection
-    let image = AstroImage::from_pixels(
-        ImageDimensions::new(field_config.width, field_config.height, 1),
-        pixels_vec.clone(),
-    );
-    let mut detector = StarDetector::from_config(detection_config.clone());
-    let result = detector.detect(&image);
-    let stars = result.stars;
-
-    // Compute metrics
-    let match_radius = field_config.fwhm_range.1 * 2.0;
-    let metrics = compute_detection_metrics(&ground_truth, &stars, match_radius);
-
-    // Save comparison image
-    save_comparison(
-        &pixels_vec,
-        field_config.width,
-        field_config.height,
-        &ground_truth,
-        &stars,
-        match_radius,
-        &test_output_path(&format!(
-            "synthetic_starfield/challenging_{}_comparison.png",
-            name
-        )),
-    );
-
-    // Save metrics
-    save_metrics(
-        &metrics,
-        &test_output_path(&format!(
-            "synthetic_starfield/challenging_{}_metrics.txt",
-            name
-        )),
-    );
-
-    println!("\n{} results:", name);
-    println!("{}", metrics);
-
-    // Check against criteria
+    let metrics = super::run_test(name, "challenging", field_config, detection_config);
     match check_pass(&metrics, criteria) {
         Ok(()) => {
             println!("PASS: All criteria met");

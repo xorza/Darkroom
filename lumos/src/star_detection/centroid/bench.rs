@@ -10,35 +10,13 @@ use super::gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
 use super::measure_star;
 use super::moffat_fit::{MoffatFitConfig, fit_moffat_2d};
 use super::refine_centroid;
+use super::test_utils::make_gaussian_star;
 use crate::common::Buffer2;
 use crate::star_detection::BackgroundEstimate;
 use crate::star_detection::config::{CentroidMethod, Config, LocalBackgroundMethod};
 use crate::star_detection::deblend::Region;
 use crate::star_detection::detector::stages::detect_test_utils::detect_stars_test;
 use crate::testing::synthetic::stamps::benchmark_star_field;
-
-/// Create a synthetic Gaussian star for benchmarking.
-fn make_gaussian_star(
-    width: usize,
-    height: usize,
-    pos: Vec2,
-    sigma: f32,
-    amplitude: f32,
-    background: f32,
-) -> Buffer2<f32> {
-    let mut pixels = vec![background; width * height];
-    for y in 0..height {
-        for x in 0..width {
-            let pixel_pos = Vec2::new(x as f32, y as f32);
-            let r2 = pixel_pos.distance_squared(pos);
-            let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
-            if value > 0.001 {
-                pixels[y * width + x] += value;
-            }
-        }
-    }
-    Buffer2::new(width, height, pixels)
-}
 
 // =============================================================================
 // Single Star Centroid Benchmarks

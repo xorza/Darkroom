@@ -175,7 +175,7 @@ pub(super) fn convolve_cols_scalar(
     width: usize,
     height: usize,
     kernel: &[f32],
-s    radius: usize,
+    radius: usize,
 ) {
     // Row-major traversal: y outer loop ensures sequential writes to output
     // and mostly-sequential reads from input (kernel rows are close in memory).

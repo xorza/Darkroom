@@ -2,8 +2,8 @@
 
 use super::simd::convolve_row;
 use super::{
-    convolve_cols, convolve_rows_parallel, elliptical_gaussian_convolve, gaussian_convolve,
-    gaussian_kernel_1d, matched_filter,
+    MatchedFilterBuffers, convolve_cols, convolve_rows_parallel, elliptical_gaussian_convolve,
+    gaussian_convolve, gaussian_kernel_1d, matched_filter,
 };
 use crate::common::Buffer2;
 use crate::star_detection::convolution::simd::convolve_row_scalar;
@@ -229,9 +229,11 @@ fn bench_matched_filter_1k(b: ::bench::Bencher) {
             black_box(fwhm),
             black_box(1.0),
             black_box(0.0),
-            black_box(&mut output),
-            black_box(&mut scratch),
-            black_box(&mut temp),
+            black_box(&mut MatchedFilterBuffers {
+                output: &mut output,
+                subtraction_scratch: &mut scratch,
+                temp: &mut temp,
+            }),
         );
     });
 
@@ -242,9 +244,11 @@ fn bench_matched_filter_1k(b: ::bench::Bencher) {
             black_box(fwhm),
             black_box(0.7),
             black_box(0.5),
-            black_box(&mut output),
-            black_box(&mut scratch),
-            black_box(&mut temp),
+            black_box(&mut MatchedFilterBuffers {
+                output: &mut output,
+                subtraction_scratch: &mut scratch,
+                temp: &mut temp,
+            }),
         );
     });
 }
@@ -265,9 +269,11 @@ fn bench_matched_filter_4k(b: ::bench::Bencher) {
             black_box(fwhm),
             black_box(1.0),
             black_box(0.0),
-            black_box(&mut output),
-            black_box(&mut scratch),
-            black_box(&mut temp),
+            black_box(&mut MatchedFilterBuffers {
+                output: &mut output,
+                subtraction_scratch: &mut scratch,
+                temp: &mut temp,
+            }),
         );
     });
 }

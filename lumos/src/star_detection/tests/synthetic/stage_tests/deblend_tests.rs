@@ -16,8 +16,7 @@ use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
-/// Default tile size for background estimation
-const TILE_SIZE: usize = 64;
+use super::TILE_SIZE;
 
 /// Test deblending on a pair of overlapping stars.
 #[test]

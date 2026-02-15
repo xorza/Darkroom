@@ -3,6 +3,11 @@
 use crate::star_detection::Star;
 use glam::DVec2;
 
+/// FWHM for tight/compact stars (~max_sigma 0.67).
+pub const FWHM_TIGHT: f32 = 1.34;
+/// FWHM for normal/typical stars (~max_sigma 1.0).
+pub const FWHM_NORMAL: f32 = 2.0;
+
 /// Apply an affine transform to star positions.
 /// Affine: [a, b, tx, c, d, ty] where the transform is:
 /// x' = a*x + b*y + tx
