@@ -13,10 +13,10 @@ pub struct Aabb {
     pub max: Vec2us,
 }
 
-#[allow(dead_code)] // Public API - used by tests and downstream code
 impl Aabb {
     /// Create a new bounding box with the given bounds.
     #[inline]
+    #[allow(dead_code)] // Used in tests
     pub const fn new(min: Vec2us, max: Vec2us) -> Self {
         Self { min, max }
     }
@@ -35,6 +35,7 @@ impl Aabb {
 
     /// Check if this bounding box is empty (no points included).
     #[inline]
+    #[allow(dead_code)] // Used in tests
     pub const fn is_empty(&self) -> bool {
         self.min.x > self.max.x || self.min.y > self.max.y
     }
@@ -50,6 +51,7 @@ impl Aabb {
 
     /// Width of the bounding box (number of columns). Returns 0 for empty boxes.
     #[inline]
+    #[allow(dead_code)] // Used in tests
     pub const fn width(&self) -> usize {
         if self.is_empty() {
             return 0;
@@ -59,6 +61,7 @@ impl Aabb {
 
     /// Height of the bounding box (number of rows). Returns 0 for empty boxes.
     #[inline]
+    #[allow(dead_code)] // Used in tests
     pub const fn height(&self) -> usize {
         if self.is_empty() {
             return 0;
@@ -68,12 +71,14 @@ impl Aabb {
 
     /// Check if a point is inside the bounding box.
     #[inline]
+    #[allow(dead_code)] // Used in tests
     pub const fn contains(&self, pos: Vec2us) -> bool {
         pos.x >= self.min.x && pos.x <= self.max.x && pos.y >= self.min.y && pos.y <= self.max.y
     }
 
     /// Area of the bounding box (width * height).
     #[inline]
+    #[allow(dead_code)] // Used in tests
     pub const fn area(&self) -> usize {
         self.width() * self.height()
     }

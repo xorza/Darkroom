@@ -4,7 +4,6 @@ use crate::math::FWHM_TO_SIGMA;
 use glam::Vec2;
 
 /// A synthetic star to be placed in a generated image.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct SyntheticStar {
     /// Position (center).
@@ -15,7 +14,6 @@ pub struct SyntheticStar {
     pub sigma: f32,
 }
 
-#[allow(dead_code)]
 impl SyntheticStar {
     /// Create a new synthetic star.
     pub fn new(x: f32, y: f32, brightness: f32, sigma: f32) -> Self {
@@ -33,7 +31,6 @@ impl SyntheticStar {
 }
 
 /// Configuration for synthetic star field generation.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct SyntheticFieldConfig {
     /// Image width in pixels.
@@ -60,7 +57,6 @@ impl Default for SyntheticFieldConfig {
 /// Generate a synthetic star field image.
 ///
 /// Returns a grayscale image as a Vec<f32> with values in range 0.0-1.0.
-#[allow(dead_code)]
 pub fn generate_star_field(config: &SyntheticFieldConfig, stars: &[SyntheticStar]) -> Vec<f32> {
     let mut pixels = vec![config.background; config.width * config.height];
 
@@ -87,7 +83,6 @@ pub fn generate_star_field(config: &SyntheticFieldConfig, stars: &[SyntheticStar
 }
 
 /// Add a Gaussian star profile to the image.
-#[allow(dead_code)]
 fn add_gaussian_star(pixels: &mut [f32], width: usize, height: usize, star: &SyntheticStar) {
     // Only render within 4 sigma of center (covers >99.99% of flux)
     let radius = (4.0 * star.sigma).ceil() as i32;

@@ -27,21 +27,24 @@ pub type GaussianFitConfig = LMConfig;
 
 /// Result of 2D Gaussian fitting.
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)] // Fields used by tests; struct is the natural fitting output
 pub struct GaussianFitResult {
     /// Position of Gaussian center (sub-pixel).
     pub pos: Vec2,
     /// Amplitude of Gaussian.
+    #[allow(dead_code)] // Used in tests
     pub amplitude: f32,
     /// Sigma in X and Y directions.
     pub sigma: Vec2,
     /// Background level.
+    #[allow(dead_code)] // Used in tests
     pub background: f32,
     /// RMS residual of fit.
+    #[allow(dead_code)] // Used in tests
     pub rms_residual: f32,
     /// Whether the fit converged.
     pub converged: bool,
     /// Number of iterations used.
+    #[allow(dead_code)] // Used in tests
     pub iterations: usize,
 }
 

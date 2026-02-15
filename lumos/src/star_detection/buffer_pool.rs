@@ -35,21 +35,18 @@ impl BufferPool {
 
     /// Get the expected width for buffers in this pool.
     #[inline]
-    #[allow(dead_code)]
     pub fn width(&self) -> usize {
         self.width
     }
 
     /// Get the expected height for buffers in this pool.
     #[inline]
-    #[allow(dead_code)]
     pub fn height(&self) -> usize {
         self.height
     }
 
     /// Check if the pool matches the given dimensions.
     #[inline]
-    #[allow(dead_code)]
     pub fn matches_dimensions(&self, width: usize, height: usize) -> bool {
         self.width == width && self.height == height
     }

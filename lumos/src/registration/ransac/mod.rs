@@ -129,10 +129,10 @@ pub struct RansacResult {
     /// Indices of inlier matches.
     pub inliers: Vec<usize>,
     /// Number of iterations performed. Used for diagnostics and testing.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Used in tests
     pub iterations: usize,
     /// Final inlier ratio. Used for diagnostics and testing.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Used in tests
     pub inlier_ratio: f64,
 }
 

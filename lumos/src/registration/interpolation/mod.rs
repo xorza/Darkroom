@@ -30,7 +30,7 @@ impl Default for WarpParams {
 }
 
 impl WarpParams {
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Used in tests
     pub fn new(method: InterpolationMethod) -> Self {
         Self {
             method,

@@ -50,25 +50,30 @@ impl Default for MoffatFitConfig {
 
 /// Result of 2D Moffat profile fitting.
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)] // Fields used by tests; struct is the natural fitting output
 pub struct MoffatFitResult {
     /// Position of profile center (sub-pixel).
     pub pos: Vec2,
     /// Amplitude of profile.
+    #[allow(dead_code)] // Used in tests
     pub amplitude: f32,
     /// Core width parameter (alpha).
+    #[allow(dead_code)] // Used in tests
     pub alpha: f32,
     /// Power law slope (beta).
+    #[allow(dead_code)] // Used in tests
     pub beta: f32,
     /// Background level.
+    #[allow(dead_code)] // Used in tests
     pub background: f32,
     /// FWHM computed from alpha and beta.
     pub fwhm: f32,
     /// RMS residual of fit.
+    #[allow(dead_code)] // Used in tests
     pub rms_residual: f32,
     /// Whether the fit converged.
     pub converged: bool,
     /// Number of iterations used.
+    #[allow(dead_code)] // Used in tests
     pub iterations: usize,
 }
 
