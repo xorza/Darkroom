@@ -1,140 +1,396 @@
-# Code Review: lumos
+# Code Review: lumos/src
 
 ## Summary
 
-Comprehensive code quality review across submodules (~40k+ lines). The codebase is well-structured with strong SIMD optimizations, good test coverage, and clear module boundaries. The main improvement areas are: **code duplication** across SIMD implementations and test utilities, **incomplete Bayer demosaic** in raw, and several **API inconsistencies** across modules.
+Comprehensive review of all 10 submodules (~189 files, ~88k lines). The codebase is
+generally well-structured with clear separation of concerns, good SIMD optimization
+patterns, and solid test coverage. The main themes across modules are:
 
-**Findings by severity:** 8 Critical/High, 20 Medium, 30+ Low/Minor (only significant findings listed below).
+1. **Inconsistent error handling** — mix of `assert!`/`unwrap` for user-facing errors vs
+   `Result` returns, sometimes within the same module
+2. **API surface leakage** — internal types, `#[allow(dead_code)]` on public items,
+   scratch buffers in function signatures
+3. **Minor duplication** — gradient generation, Neumaier reduction, margin checks
+4. **Magic constants** — numerical thresholds without documented rationale
+
+No critical bugs found. Most findings are maintainability improvements.
 
 ---
 
 ## Findings
 
-### Priority 1 --- High Impact, Low Invasiveness
+### Priority 1 — High Impact, Low Invasiveness
 
-#### [F1] Incomplete Bayer demosaicing panics at runtime
-- **Location**: `raw/demosaic/bayer/mod.rs:189-191`
-- **Category**: Dead code / Correctness
-- **Impact**: 5/5 --- Bayer sensors are >95% of cameras; any Bayer RAW file panics
-- **Meaningfulness**: 5/5 --- Showstopper for most users
-- **Invasiveness**: 4/5 --- Requires implementing RCD or falling back to libraw
-- **Description**: `demosaic_bayer()` is `todo!()`. Either implement RCD demosaicing or add libraw fallback for Bayer sensors. X-Trans path works correctly.
-
-#### ~~[F4] Wasteful clone in AstroImage::save()~~ --- FIXED
-- Added `to_image(&self)` that borrows pixel data; `save()` no longer clones.
-
-#### ~~[F5] Duplicate `use rayon::prelude::*` import~~ --- FIXED
-- Removed duplicate import in `star_detection/threshold_mask/mod.rs`.
-
-#### ~~[F6] Unused imports in calibration_masters~~ --- FIXED
-- Removed unused `StackableImage` and `rayon::prelude::*` imports from `calibration_masters/defect_map.rs`.
-
-#### ~~[F8] Unnecessary clone in DefectMap::correct()~~ --- FIXED
-- Changed `.clone().unwrap()` to `.as_ref().unwrap()` and switched from trait method to direct field access.
-
-### Priority 2 --- High Impact, Moderate Invasiveness
-
-#### ~~[F9] Drizzle kernel implementations duplicated 4x~~ --- FIXED
-- Extracted `accumulate()` helper and `add_image_radial()` with closure-based kernel. Gaussian and Lanczos unified; ~120 lines removed.
-
-#### [F10] SIMD Neumaier/Kahan reduction duplicated across AVX2/SSE/NEON --- REVIEWED, NO ACTION
-- ~290 lines duplicated across 3 platforms. Macro/trait dedup viable but high risk for working, tested numerical code. Platform intrinsics differ only in type names and lane widths. Keeping as-is.
-
-#### [F11] Paired SIMD functions duplicated in star_detection threshold_mask --- REVIEWED, NO ACTION
-- ~400 lines duplicated (with/without background variants × 3 platforms). Difference is one threshold computation line per SIMD group. Macro dedup viable but SIMD hot-path code benefits from explicit, auditable implementations. Keeping as-is.
-
-#### ~~[F12] RNG code duplicated 16x across testing module~~ --- FIXED
-- Extracted `TestRng` struct in `testing/mod.rs` with `next_u64()`, `next_f32()`, `next_f64()`. Replaced all 16+ inline LCG closures across `testing/synthetic/`, `star_detection/`, and `registration/` test files.
-
-#### ~~[F13] DVec2/Star transform functions duplicated in testing~~ --- FIXED
-- Added `Positioned` trait (`pos()`, `with_pos()`) implemented for `DVec2` and `Star`. Six function pairs unified via generic `_impl` functions. `add_spurious_*` kept separate (structurally different). ~100 lines removed.
-
-#### ~~[F14] Drizzle coverage incorrectly averages across channels~~ --- FIXED
-- Coverage now uses `self.weights[0]` only (channel 0). All channels share identical geometric overlap, so a single `Buffer2<f32>` coverage map is correct.
-
-#### ~~[F15] min_coverage semantics misleading in drizzle~~ --- FIXED
-- `min_coverage` is now compared against `min_coverage * max_weight`, normalizing the threshold to the 0.0–1.0 range as documented.
-
-#### ~~[F17] `#[cfg(test)]` helper functions in star_detection production code~~ --- FIXED
-- Moved `detect_stars_test()` to `detect_test_utils.rs` and `label_map_from_raw()`/`label_map_from_mask_with_connectivity()` to `labeling/test_utils.rs`. Both are `#[cfg(test)]` submodules. Updated all import sites.
-
-#### ~~[F18] Duplicated CCL run-merging logic in star_detection~~ --- FIXED
-- Extracted `merge_runs_with_prev()` helper with `RunMergeUF` trait. Sequential path passes `&mut UnionFind` directly; parallel path wraps `&AtomicUnionFind` via `AtomicUFRef` adapter.
-
-### Priority 3 --- Moderate Impact
-
-#### [F21] Serde error handling inconsistency in common crate
-- **Location**: `common/src/serde.rs:34-60`
+#### [F1] Inconsistent panic-vs-Result for input validation (stacking, registration)
+- **Location**: `stacking/stack.rs:128-135`, `registration/config.rs:112`,
+  `registration/mod.rs:220`
 - **Category**: Consistency
-- **Impact**: 2/5 --- Serialization panics, deserialization returns Result
-- **Meaningfulness**: 2/5 --- Asymmetric behavior
-- **Invasiveness**: 2/5 --- Change serialize to return Result
-- **Description**: `serialize()` uses `.unwrap()` extensively while `deserialize()` returns `Result<T>` properly. Serialization failures panic instead of returning errors.
+- **Impact**: 3/5 — Different failure modes for similar errors confuse callers
+- **Meaningfulness**: 3/5 — Empty paths return `Err`, wrong weight count panics
+- **Invasiveness**: 2/5 — Convert asserts to `Err` variants or document panic contracts
+- **Description**: `stack()` returns `Err(Error::NoPaths)` for empty paths but
+  `assert_eq!` panics for wrong weight count. `register()` panics via
+  `config.validate()`. Either all user-facing validation should return `Result`, or
+  the panic-based APIs need clear `# Panics` documentation.
 
-#### [F22] Empty-input handling inconsistent in math/statistics
-- **Location**: `math/statistics/mod.rs` (multiple functions)
+#### [F2] `#[allow(dead_code)]` on public API items
+- **Location**: `registration/ransac/mod.rs:126-130`,
+  `registration/interpolation/mod.rs:33`, `star_detection/buffer_pool.rs:38-52`
+- **Category**: Dead code / API cleanliness
+- **Impact**: 3/5 — Unclear what's part of the real API vs. leftover
+- **Meaningfulness**: 3/5 — Suppressed warnings hide genuine dead code
+- **Invasiveness**: 1/5 — Remove unused items or remove the allow attribute
+- **Description**: Several public struct fields and methods carry
+  `#[allow(dead_code)]`. Either these are part of the API (remove the allow) or
+  they're unused (remove the code). `RansacResult.iterations` and `.inlier_ratio`
+  are documented as "diagnostics" but never read outside tests.
+
+#### [F3] Float equality in drizzle `sgarea()`
+- **Location**: `drizzle/mod.rs:750`
+- **Category**: Correctness
+- **Impact**: 3/5 — Exact `== 0.0` check on computed float can miss near-zero cases
+- **Meaningfulness**: 4/5 — Could produce wrong overlap areas for near-vertical segments
+- **Invasiveness**: 1/5 — Change `dx == 0.0` to `dx.abs() < 1e-14`
+- **Description**: `sgarea()` checks `if dx == 0.0 { return 0.0; }` for vertical
+  segment detection. After floating-point arithmetic, `dx` may be very small but
+  non-zero, causing the function to proceed with a near-zero denominator.
+
+#### [F4] Stale `// Allow dead code` and TODO comments
+- **Location**: `drizzle/mod.rs:24`, `star_detection/median_filter/mod.rs:25`,
+  `raw/README.md:35`
+- **Category**: Dead code / Documentation
+- **Impact**: 2/5 — Misleading or stale information
+- **Meaningfulness**: 3/5 — Comments that contradict reality erode trust
+- **Invasiveness**: 1/5 — Delete or update one-liners
+- **Description**: Drizzle has "Allow dead code for now - new module" but is fully
+  implemented. Median filter has `// todo swap?` with no context. Raw README
+  references "TODO: DCB" but uses RCD demosaicing.
+
+#### [F5] Redundant `to_image()` alongside `From<AstroImage> for Image`
+- **Location**: `astro_image/mod.rs:538-561` vs `639-657`
+- **Category**: Duplication
+- **Impact**: 2/5 — Two implementations of identical logic can diverge
+- **Meaningfulness**: 2/5 — Maintenance hazard
+- **Invasiveness**: 1/5 — Remove `to_image()`, use `.into()` instead
+- **Description**: Both `to_image()` and the `From` impl perform identical
+  grayscale/RGB conversion and image construction. Only one should exist.
+
+#### [F6] Inconsistent variable naming `hot_map` in defect map tests
+- **Location**: `calibration_masters/defect_map.rs:392-704`
 - **Category**: Consistency
-- **Impact**: 3/5 --- Could cause panics in release builds
-- **Meaningfulness**: 3/5 --- `debug_assert!` stripped in release
-- **Invasiveness**: 2/5 --- Add explicit checks to 2 functions
-- **Description**: `median_f32_mut` and `median_and_mad_f32_mut` use `debug_assert!(!data.is_empty())` while `sigma_clipped_median_mad` and `mad_f32_with_scratch` explicitly handle empty arrays. The debug_assert functions will index out of bounds in release builds if passed empty arrays.
+- **Impact**: 2/5 — Module was renamed from "hot pixel" to "defect" but tests lag
+- **Meaningfulness**: 3/5 — Confusing when reading test code
+- **Invasiveness**: 1/5 — Simple rename of test variables
+- **Description**: Test variables use `hot_map` for `DefectMap` instances. The struct
+  handles both hot AND cold pixels. Rename to `defect_map` for consistency.
 
-#### ~~[F23] CfaImage::demosaic() panics on missing cfa_type~~ --- FIXED
-- Changed `.unwrap()` to `.expect("CfaImage missing cfa_type: set metadata.cfa_type before calling demosaic()")`.
+#### [F7] Missing `.expect()` messages on non-obvious unwraps
+- **Location**: `calibration_masters/defect_map.rs:131`,
+  `testing/real_data/pipeline_bench.rs:32,79,123,175`
+- **Category**: Error handling
+- **Impact**: 2/5 — Bare `.unwrap()` gives no context on panic
+- **Meaningfulness**: 2/5 — Per CLAUDE.md, non-obvious cases need messages
+- **Invasiveness**: 1/5 — Add `.expect("reason")` to each
+- **Description**: Several `.unwrap()` calls on `Option`/`Result` that are not
+  obviously infallible lack `.expect()` messages explaining the invariant.
 
-#### ~~[F24] HashSet reallocation in registration recover_matches loop~~ --- FIXED
-- Pre-allocated 3 HashSets before loop with `with_capacity()`, reusing via `.clear()` + `.extend()` each iteration.
+#### [F8] `DMat3::transform_point` uses `debug_assert!` for w≈0 check
+- **Location**: `math/dmat3.rs:138-141`
+- **Category**: Robustness
+- **Impact**: 2/5 — Silent NaN/infinity in release builds
+- **Meaningfulness**: 3/5 — Point-at-infinity division produces garbage silently
+- **Invasiveness**: 1/5 — Change to runtime `assert!` or return `Option<DVec2>`
+- **Description**: The function divides by the homogeneous coordinate `w`. In debug
+  builds, a `debug_assert!` catches `w ≈ 0`, but release builds divide by near-zero
+  silently, producing infinity or NaN values that propagate through the pipeline.
 
-#### ~~[F31] Float FITS data not normalized~~ --- FIXED
-- **Location**: `astro_image/fits.rs` — `normalize_fits_pixels()`
-- Float FITS data (BITPIX -32/-64) passed through unchanged. DeepSkyStacker outputs [0,65535], other tools use arbitrary ranges. Downstream assumes [0,1].
-- Added heuristic: compute max, normalize by dividing by max if max > 2.0. Threshold of 2.0 provides headroom for HDR overexposure while catching [0,65535] and [0,255] ranges.
-- 10 tests covering: [0,1] unchanged, HDR headroom, threshold boundary, [0,65535], [0,255], negative values, Float64, UInt16 regression, all-zero, single pixel.
+---
 
-#### ~~[F34] Affine estimator lacks Hartley normalization~~ --- FIXED
-- **Location**: `registration/ransac/transforms.rs` — `estimate_affine()`
-- Homography estimator already used Hartley normalization (center + scale to avg distance √2) for numerical stability, but affine worked directly on raw coordinates. Normal equations `A^T A` become ill-conditioned for large coordinate ranges (κ(A^T A) ≈ κ(A)²).
-- Added same `normalize_points()` + denormalize pattern: normalize both point sets, solve normal equations in normalized space, denormalize via `T_target_inv * A_norm * T_ref`.
-- Added ill-conditioned test (points spanning 0.01 to 5000) verifying sub-1e-6 accuracy.
+### Priority 2 — High Impact, Moderate Invasiveness
 
-#### ~~[F33] Background mask fallback uses contaminated pixels~~ --- FIXED
-- **Location**: `star_detection/background/tile_grid.rs` — `compute_tile_stats()`
-- When a tile had fewer unmasked pixels than `min_pixels` (30% of tile), it discarded the good background pixels and fell back to sampling ALL pixels including bright stars. This biased the background estimate upward in crowded regions.
-- Changed fallback condition from `values.len() < min_pixels` to `values.is_empty()`. Now uses whatever unmasked pixels are available; only falls back to all-pixels when the tile is 100% masked. Removed `min_pixels` parameter from internal APIs.
-- Updated test to verify that a 95%-masked tile uses the 5% unmasked background pixels (median ≈ 0.2) instead of falling back to star-contaminated samples (median ≈ 0.9).
+#### [F9] Scratch buffers in public function signatures
+- **Location**: `star_detection/convolution/mod.rs:49-58` (8 params),
+  `raw/demosaic/xtrans/mod.rs:27-75` (10 params)
+- **Category**: API cleanliness
+- **Impact**: 3/5 — Implementation details leak into API
+- **Meaningfulness**: 3/5 — Hard to use correctly, easy to pass wrong buffers
+- **Invasiveness**: 3/5 — Requires grouping into config/buffer structs
+- **Description**: `matched_filter()` takes 3 scratch buffers as separate parameters.
+  `process_xtrans()` takes 10 parameters. Grouping into structs
+  (`ConvolutionBuffers`, `XTransConfig`) would improve usability.
 
-#### ~~[F32] Per-CFA-channel flat normalization missing~~ --- FIXED
-- **Location**: `astro_image/cfa.rs` — `divide_by_normalized()`
-- Single global mean across all CFA pixels caused color shift with non-white flat light sources (LED panels, twilight flats).
-- Refactored into `divide_by_normalized_mono()` (unchanged single-mean path) and `divide_by_normalized_cfa()` (per-R/G/B means). CFA path computes independent per-color sums/counts, then normalizes each pixel by its own color's mean. Row-parallel via rayon.
-- 6 tests: non-white flat (uniform light unchanged), vignetting + color, with bias, mono regression, color shift correction (key test demonstrating the fix).
+#### [F10] Neumaier/Kahan reduction logic duplicated across 4 SIMD files
+- **Location**: `math/sum/scalar.rs`, `math/sum/avx2.rs`, `math/sum/sse.rs`,
+  `math/sum/neon.rs`
+- **Category**: Generalization
+- **Impact**: 4/5 — ~150 LOC of identical algorithm with different intrinsic names
+- **Meaningfulness**: 4/5 — Real maintenance burden across 4 files
+- **Invasiveness**: 3/5 — Requires macro or trait-based generation
+- **Description**: The Kahan reduction and Neumaier compensation logic appears
+  identically in every SIMD backend. A macro `define_reduce_kahan!(T, N)` or a
+  generic function parameterized by lane count would eliminate the duplication.
+  **Previously reviewed and deferred** — low risk for working numerical code.
 
-#### ~~[F25] Drizzle add_image_* methods take redundant parameters~~ --- MOSTLY FIXED
-- Kernel methods refactored: `add_image_radial()` takes `(&AstroImage, &Transform, weight, scale, radius, kernel_fn)` — input dims read from the image. `add_image_turbo/point` similarly simplified. Only `compute_square_overlap` retains `#[allow(clippy::too_many_arguments)]` (8 coordinate values, inherent to the function).
+#### [F11] Config preset composition is fragile (registration)
+- **Location**: `registration/config.rs:245-256`
+- **Category**: Consistency / Hidden complexity
+- **Impact**: 3/5 — Silent divergence when defaults change
+- **Meaningfulness**: 3/5 — `precise_wide_field()` claims to combine presets but
+  uses `..Self::default()` instead
+- **Invasiveness**: 3/5 — Refactor to call `Self::precise()` then override
+- **Description**: `precise_wide_field()` documents itself as combining `precise()`
+  and `wide_field()` but actually starts from `Default` and overrides individual
+  fields. If any preset gains new fields, this silently diverges.
 
-### Priority 4 --- Low Priority
+#### [F12] `sigma_clip_iteration` return semantics are ambiguous
+- **Location**: `math/statistics/mod.rs:112-160`
+- **Category**: Code clarity
+- **Impact**: 2/5 — `None` means both "continue iterating" and "too few items"
+- **Meaningfulness**: 3/5 — Could cause unnecessary iterations or subtle bugs
+- **Invasiveness**: 2/5 — Change early return for `len < 3` to return `Some`
+- **Description**: The function returns `None` to mean "not converged, keep going"
+  and `Some(result)` for convergence. But it also returns `None` when `len < 3`,
+  which causes the caller's loop to keep iterating even though no further progress
+  is possible.
 
-#### [F26] `#[allow(dead_code)]` in star_detection background SIMD --- NOT A BUG
-- Functions `sum_and_sum_sq_simd` and `sum_abs_deviations_simd` are genuinely unused in production (the pipeline uses scalar `math/statistics` instead). Annotations are correct per project rules: kept intentionally for future use with explanatory comments.
+#### [F13] Inconsistent error wrapping — `save()` leaks `imaginarium::Error`
+- **Location**: `astro_image/mod.rs` (save method), `astro_image/error.rs`
+- **Category**: API consistency
+- **Impact**: 2/5 — External error type in public API
+- **Meaningfulness**: 2/5 — Breaks error type consistency
+- **Invasiveness**: 2/5 — Add wrapping variant to `ImageLoadError`
+- **Description**: `from_file()` returns `Result<_, ImageLoadError>` but `save()`
+  returns `Result<_, imaginarium::Error>`. The external type leaks into the public
+  API. Wrap it in an `ImageLoadError::Save` variant.
 
-#### ~~[F27] Unused artifact functions in testing~~ --- FIXED
-- Removed `add_hot_pixels`, `add_dead_pixels`, `add_bad_columns`, `add_bad_rows`, `BadPixelMode`, `add_linear_trail`, `generate_random_hot_pixels` and their tests (~190 lines). Kept `add_cosmic_rays`, `add_bayer_pattern`, `BayerPattern` (used by star_field.rs).
+#### [F14] Silent fallback when CFA type is `None` in defect correction
+- **Location**: `calibration_masters/defect_map.rs:146-152`
+- **Category**: Error handling
+- **Impact**: 2/5 — Treats missing CFA as monochrome silently
+- **Meaningfulness**: 3/5 — Could hide metadata bugs
+- **Invasiveness**: 1/5 — Add assertion or document behavior
+- **Description**: `cfa_color_at()` returns 0 for `None` CFA type, silently treating
+  the image as monochrome. If metadata is accidentally missing, this produces wrong
+  defect correction without any warning.
 
-#### ~~[F30] `scalar` module unnecessarily public in math/sum~~ --- FIXED
-- Changed `pub mod scalar` to `pub(super) mod scalar` in `math/sum/mod.rs`.
+#### [F15] Gradient/vignette logic duplicated 3 times in testing module
+- **Location**: `testing/synthetic/patterns.rs:14-76`,
+  `testing/synthetic/backgrounds.rs:28-80`,
+  `testing/synthetic/background_map.rs:21-103`
+- **Category**: Generalization
+- **Impact**: 3/5 — Identical math in 3 places
+- **Meaningfulness**: 4/5 — Real maintenance burden
+- **Invasiveness**: 3/5 — Extract shared gradient primitives
+- **Description**: Horizontal/vertical/radial gradient generation is implemented
+  three times: as in-place modifications, as additive operations, and as
+  `BackgroundEstimate` constructors. All share the same underlying math.
+
+#### [F16] `generate_globular_cluster()` returns fewer stars than `num_stars`
+- **Location**: `testing/synthetic/star_field.rs:502-573`
+- **Category**: API contract violation
+- **Impact**: 3/5 — Parameter name and behavior don't match
+- **Meaningfulness**: 3/5 — Misleading API
+- **Invasiveness**: 2/5 — Fix loop or rename parameter
+- **Description**: The function iterates `num_stars` times but `continue`s on
+  out-of-bounds positions, returning fewer stars than requested. Either retry
+  failed iterations, rename to `max_stars`, or document the behavior.
+
+---
+
+### Priority 3 — Moderate Impact
+
+#### [F17] Inconsistent epsilon/tolerance constants (drizzle)
+- **Location**: `drizzle/mod.rs:248,333,423,481,523,727,750`
+- **Category**: Consistency / Maintainability
+- **Impact**: 2/5 — Seven different threshold values scattered through one module
+- **Meaningfulness**: 3/5 — Hard to audit numerical stability
+- **Invasiveness**: 2/5 — Extract named constants
+- **Description**: Drizzle uses `f32::EPSILON`, `1e-30`, `1e-6`, `1e-10`, and
+  `== 0.0` for various near-zero checks. Named constants with semantic meaning
+  (`JACOBIAN_THRESHOLD`, `WEIGHT_EPSILON`) would improve clarity.
+
+#### [F18] `abs_deviation_inplace` computed twice in sigma clipping
+- **Location**: `math/statistics/mod.rs:128-141`
+- **Category**: Data flow / Efficiency
+- **Impact**: 3/5 — Redundant work in hot path
+- **Meaningfulness**: 4/5 — Documented as intentional but still wasteful
+- **Invasiveness**: 2/5 — Restructure to preserve index correspondence
+- **Description**: After `median_f32_fast` destroys array order, deviations must be
+  recomputed from scratch. This doubles the work. Tracking indices during the
+  partial sort could eliminate the second pass.
+
+#### [F19] Error type mismatch in drizzle dimension check
+- **Location**: `drizzle/mod.rs:935-944`
+- **Category**: Correctness
+- **Impact**: 2/5 — Dimension mismatch reported as `Error::ImageLoad`
+- **Meaningfulness**: 2/5 — Confusing error messages
+- **Invasiveness**: 1/5 — Use or add a validation error variant
+- **Description**: `drizzle_stack()` reports a dimension mismatch as an image load
+  error. The image loaded fine; the problem is post-load validation. Use a
+  dedicated error variant.
+
+#### [F20] Duplicate `make_cfa()` / `constant_cfa()` test helpers
+- **Location**: `calibration_masters/defect_map.rs:382-390` vs
+  `calibration_masters/tests.rs:7-15`
+- **Category**: Duplication
+- **Impact**: 2/5 — Two identical test helpers
+- **Meaningfulness**: 2/5 — Consolidation improves clarity
+- **Invasiveness**: 1/5 — Use one, delete the other
+- **Description**: Both files define a function that creates a constant-value
+  `CfaImage` for testing. Consolidate into a single helper in `tests.rs`.
+
+#### [F21] Magic constant `24` in X-Trans same-color median
+- **Location**: `calibration_masters/defect_map.rs:370`
+- **Category**: Documentation
+- **Impact**: 2/5 — Undocumented magic number
+- **Meaningfulness**: 2/5 — No derivation for why 24 neighbors
+- **Invasiveness**: 1/5 — Add comment
+- **Description**: `candidates.len().min(24)` limits X-Trans same-color neighbors
+  to 24. The comment says "avoid directional bias" but doesn't explain why 24
+  specifically (e.g., ~4 per cardinal/diagonal direction in 6x6 pattern).
+
+#### [F22] FWHM range `0.5..20.0` hardcoded in star detection
+- **Location**: `star_detection/detector/stages/fwhm.rs:131`
+- **Category**: Consistency / Magic numbers
+- **Impact**: 2/5 — Limits aren't configurable or documented
+- **Meaningfulness**: 2/5 — Could reject valid stars on unusual setups
+- **Invasiveness**: 1/5 — Extract to named constants
+- **Description**: The FWHM estimation filter uses hardcoded `(0.5..20.0)` range.
+  Extract to `FWHM_MIN_PHYSICAL` / `FWHM_MAX_REASONABLE` constants with
+  documentation explaining the astronomical rationale.
+
+#### [F23] Collinearity check uses absolute threshold (RANSAC)
+- **Location**: `registration/ransac/mod.rs:600-604`
+- **Category**: Numerical stability
+- **Impact**: 2/5 — Threshold `1.0` is coordinate-scale-dependent
+- **Meaningfulness**: 2/5 — May fail for very small or very large coordinate ranges
+- **Invasiveness**: 2/5 — Scale threshold by vector magnitudes
+- **Description**: Cross product `> 1.0` for collinearity detection is an absolute
+  threshold. For small coordinate ranges (sub-pixel), nearly all triangles would
+  appear collinear. Scale by vector magnitudes for robustness.
+
+#### [F24] Inconsistent noise generation in testing module
+- **Location**: `testing/synthetic/star_field.rs:397-402` vs
+  `testing/synthetic/patterns.rs:120-136`
+- **Category**: Duplication
+- **Impact**: 2/5 — Same logic in two places
+- **Meaningfulness**: 2/5 — Maintenance hazard
+- **Invasiveness**: 2/5 — Reuse `patterns::add_noise()`
+- **Description**: `star_field.rs` implements its own `add_gaussian_noise()` instead
+  of reusing the identical function from `patterns.rs`.
+
+#### [F25] `TransformType::Auto` panics in `degrees_of_freedom()` and `Display`
+- **Location**: `registration/transform.rs:55-56,121-122`
+- **Category**: Robustness
+- **Impact**: 2/5 — Panic in unexpected places if Auto leaks through
+- **Meaningfulness**: 2/5 — Should be caught at construction time
+- **Invasiveness**: 1/5 — Add validation in Transform constructors
+- **Description**: If a `Transform` is somehow created with `Auto` type,
+  `degrees_of_freedom()` and Display both panic. Add validation in constructors
+  to prevent `Auto` from being stored.
+
+#### [F26] Redundant clone in SIP result creation (registration)
+- **Location**: `registration/mod.rs:368-369`
+- **Category**: Data flow / Performance
+- **Impact**: 2/5 — Polynomial stored twice in memory
+- **Meaningfulness**: 2/5 — Unnecessary allocation
+- **Invasiveness**: 1/5 — Reconstruct via `as_ref()` in `warp_transform()`
+- **Description**: SIP polynomial is cloned into `sip_correction` and also stored
+  inside `sip_fit`. Store once and reconstruct the reference lazily.
+
+---
+
+### Priority 4 — Low Priority
+
+#### [F27] `PixelSource` enum branching overhead in X-Trans inner loop
+- **Location**: `raw/demosaic/xtrans/mod.rs:147-155`
+- **Category**: Performance
+- **Impact**: 2/5 — Branch per pixel in hot path
+- **Meaningfulness**: 2/5 — May be offset by avoiding f32→u16→f32 roundtrip
+- **Invasiveness**: 3/5 — Would require splitting into two functions
+- **Description**: `read_normalized()` branches on `PixelSource::U16` vs `F32` for
+  every pixel during demosaic. The branch predictor handles this well, but
+  monomorphized functions would eliminate it entirely.
+
+#### [F28] Redundant condition in drizzle `finalize()`
+- **Location**: `drizzle/mod.rs:642`
+- **Category**: Simplification
+- **Impact**: 2/5 — `w > 0.0` is implied by `w >= weight_threshold` when threshold >= 0
+- **Meaningfulness**: 3/5 — Unnecessary branch
+- **Invasiveness**: 1/5 — Remove `&& w > 0.0`
+- **Description**: `if w >= weight_threshold && w > 0.0` — the second condition is
+  redundant since `weight_threshold = min_coverage * max_weight >= 0.0`.
+
+#### [F29] Inconsistent parameter ordering in deblend functions
+- **Location**: `star_detection/deblend/local_maxima/mod.rs:53-59` vs
+  `deblend/multi_threshold/mod.rs`
+- **Category**: Consistency
+- **Impact**: 1/5 — Minor API friction
+- **Meaningfulness**: 2/5 — Confusing when switching between deblend modes
+- **Invasiveness**: 1/5 — Reorder parameters
+- **Description**: Deblend functions place threshold parameters in different
+  positions. Standardize: `(data, pixels, labels, ...config...)`.
+
+#### [F30] ProgressCallback documentation shows wrong callback signature
+- **Location**: `stacking/stack.rs:107-109`
+- **Category**: Documentation
+- **Impact**: 2/5 — Doc example shows `|stage, current, total|` but type takes
+  `StackingProgress` struct
+- **Meaningfulness**: 3/5 — Confuses users trying to use the API
+- **Invasiveness**: 1/5 — Update the doc example
+- **Description**: Fix the example to use the correct signature.
+
+#### [F31] `warp_image` is `pub` but only called internally
+- **Location**: `registration/interpolation/mod.rs:300-320`
+- **Category**: API cleanliness
+- **Impact**: 1/5 — Over-exposed internal function
+- **Meaningfulness**: 2/5 — Clutters public API
+- **Invasiveness**: 1/5 — Change to `pub(crate)`
+- **Description**: The public API is `warp()`. The internal `warp_image()` should be
+  `pub(crate)` to avoid exposing implementation details.
+
+#### [F32] `sort_with_indices` panics on NaN (stacking rejection)
+- **Location**: `stacking/rejection.rs:813`
+- **Category**: Robustness
+- **Impact**: 2/5 — NaN unlikely but possible after normalization edge cases
+- **Meaningfulness**: 2/5 — Panic in production pipeline
+- **Invasiveness**: 1/5 — Use `.unwrap_or(Ordering::Equal)` or pre-validate
+- **Description**: `partial_cmp().unwrap()` panics if any value is NaN. While
+  unlikely in practice, a normalization edge case (0/0) could produce NaN.
+  Either handle gracefully or add a finite-values precondition.
 
 ---
 
 ## Cross-Cutting Patterns
 
-### 1. SIMD Code Duplication --- REVIEWED, NO ACTION
-Reviewed all ~690 lines of duplication across AVX2/SSE/NEON (F10: `math/sum/` ~290 lines, F11: `threshold_mask/` ~400 lines). Macro-based dedup is viable but high risk for low reward: the code is correct, tested, and rarely changes. Platform-specific intrinsics make generic abstractions complex. Keeping as-is.
+### Error handling inconsistency
+The codebase mixes three error patterns without clear rules:
+- `assert!` / `panic!` for input validation (stacking weights, registration config)
+- `Result<T, E>` for I/O and expected failures
+- `debug_assert!` for invariants that disappear in release
 
-### 2. Test Utility Duplication --- FIXED
-~~LCG RNG duplication~~ (FIXED — `TestRng` in `testing/mod.rs`). ~~DVec2/Star transform duplication~~ (FIXED — `Positioned` trait in `transforms.rs`). ~~Image conversion helpers~~ (FIXED — removed duplicate `to_gray_image`, `to_gray_stretched`, `mask_to_gray` from `synthetic/`, now imported from `common/output/image_writer.rs`). `match_stars` in `subpixel_accuracy.rs` is NOT a duplicate (different signature and purpose from `comparison.rs` version).
+**Recommendation**: Adopt a clear rule: public API validation returns `Result`.
+Internal invariants use `assert!` (not `debug_assert!` for division-by-zero
+cases). Add `# Panics` docs to all panicking public functions.
 
-### 3. `#[allow(clippy::too_many_arguments)]` --- REVIEWED, NO ACTION
-~~Drizzle kernel methods~~ (FIXED). Reviewed all 37 remaining occurrences. All are justified: SIMD dispatch functions (identical signatures across platform variants), hot-path pixel operations (struct wrapping adds indirection), constructors with heterogeneous parameters (XTransImage), test-only generators, and sorting networks (`median9_scalar` where params ARE the data). No refactoring needed.
+### `#[allow(dead_code)]` proliferation
+Found across registration, star_detection, and math modules. Each should be
+resolved: either the code is used (remove the allow) or it's dead (remove the
+code). Keeping `#[allow(dead_code)]` on public items is an anti-pattern.
 
-### 4. `#[allow(dead_code)]` --- REVIEWED, NO ACTION
-Reviewed all 24 occurrences. All annotations are correct and well-justified: public API methods available for downstream use (`Aabb`), struct fields used by tests (`GaussianFitResult`, `MoffatFitResult`), SIMD fallbacks kept for testing, diagnostic fields (`iterations`, `inlier_ratio`), WIP modules with documentation (`tps`), and `#[cfg_attr(test, allow(dead_code))]` for production-only code paths. No changes needed.
+### Magic numerical constants
+Multiple modules use bare floating-point constants for thresholds (`1e-10`,
+`1e-6`, `1e-30`, `1.0`, `24`, `5.0`). Extract to named constants with doc
+comments explaining the choice. This applies especially to drizzle (7 different
+epsilons), star_detection (FWHM range), and RANSAC (collinearity threshold).
+
+### Scratch buffer management
+Several modules pass scratch buffers as function parameters (convolution,
+drizzle, statistics). While this avoids allocation, it creates unwieldy APIs
+with 8-10 parameters. Consider grouping into workspace structs that can be
+reused across calls.
+
+### Test helper duplication
+Test utilities (`make_cfa`, `approx_eq`, noise generation) are reimplemented in
+multiple modules. Consider expanding `testing/` with shared helpers and
+importing them where needed.
