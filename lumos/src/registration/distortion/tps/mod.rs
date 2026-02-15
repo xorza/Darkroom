@@ -228,7 +228,7 @@ impl ThinPlateSpline {
         self.control_points.len()
     }
 
-    /// Get the control points.
+    /// Get the control points (in normalized coordinates, not pixel space).
     pub fn control_points(&self) -> &[DVec2] {
         &self.control_points
     }
@@ -242,10 +242,20 @@ impl ThinPlateSpline {
         self.control_points
             .iter()
             .zip(target_points.iter())
-            .map(|(&src_norm, &tgt)| {
-                // Denormalize stored control point back to pixel space for transform()
-                let src = src_norm * self.norm_scale + self.norm_center;
-                self.transform(src).distance(tgt)
+            .map(|(&pn, &tgt)| {
+                // Evaluate TPS directly in normalized space (control points
+                // are already normalized, skip denormalize→renormalize roundtrip)
+                let affine_x = DVec2::new(self.affine_x[1], self.affine_x[2]);
+                let affine_y = DVec2::new(self.affine_y[1], self.affine_y[2]);
+                let mut tx = self.affine_x[0] + affine_x.dot(pn);
+                let mut ty = self.affine_y[0] + affine_y.dot(pn);
+                for (i, &cp) in self.control_points.iter().enumerate() {
+                    let u = tps_kernel(pn.distance(cp));
+                    tx += self.weights_x[i] * u;
+                    ty += self.weights_y[i] * u;
+                }
+                let result = DVec2::new(tx, ty) * self.norm_scale + self.norm_center;
+                result.distance(tgt)
             })
             .collect()
     }

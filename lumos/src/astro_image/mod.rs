@@ -5,7 +5,7 @@ pub(crate) mod sensor;
 
 use rayon::prelude::*;
 
-use error::ImageLoadError;
+use error::ImageError;
 
 use imaginarium::{ChannelCount, ColorFormat, Image, ImageDesc};
 use std::ops::SubAssign;
@@ -265,7 +265,7 @@ impl AstroImage {
     /// - FITS: .fit, .fits
     /// - RAW: .raf, .cr2, .cr3, .nef, .arw, .dng
     /// - Standard: .tiff, .tif, .png, .jpg, .jpeg
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ImageLoadError> {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ImageError> {
         let path = path.as_ref();
         let ext = path
             .extension()
@@ -277,13 +277,13 @@ impl AstroImage {
             "fit" | "fits" => fits::load_fits(path),
             "raf" | "cr2" | "cr3" | "nef" | "arw" | "dng" => crate::raw::load_raw(path),
             "tiff" | "tif" | "png" | "jpg" | "jpeg" => {
-                let image = Image::read_file(path).map_err(|e| ImageLoadError::Image {
+                let image = Image::read_file(path).map_err(|e| ImageError::Image {
                     path: path.to_path_buf(),
                     source: e,
                 })?;
                 Ok(image.into())
             }
-            _ => Err(ImageLoadError::UnsupportedFormat { extension: ext }),
+            _ => Err(ImageError::UnsupportedFormat { extension: ext }),
         }
     }
 
@@ -535,10 +535,11 @@ impl AstroImage {
     // ------------------------------------------------------------------------
 
     /// Save to file (PNG, JPEG, TIFF supported).
-    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<(), imaginarium::Error> {
+    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<(), ImageError> {
         let image: Image = self.clone().into();
-        image.save_file(path)?;
-        Ok(())
+        image
+            .save_file(path)
+            .map_err(|source| ImageError::Save { source })
     }
 
     /// Consume and return interleaved pixels (RGBRGBRGB...).

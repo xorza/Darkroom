@@ -38,6 +38,10 @@ No critical bugs found. Most findings are maintainability improvements.
 - **[F30]** Fixed ProgressCallback doc signature to match `StackingProgress` struct API
 - **[F12]** Replaced ambiguous `Option<(f32, f32)>` return in `sigma_clip_iteration` with `ClipResult` enum (Converged/Clipped/TooFew)
 - **[F25]** Added `assert!` in `Transform::from_matrix()` to prevent `TransformType::Auto` from being stored
+- **[F11]** `precise_wide_field()` now builds on `Self::wide_field()` instead of `Self::default()`
+- **[F13]** `save()` now returns `Result<(), ImageLoadError>` with `Save` variant wrapping `imaginarium::Error`
+- **[F16]** Documented `num_stars` as maximum attempt count in `generate_globular_cluster()`
+- **[F29]** SKIPPED — deblend param ordering already consistent: `(data, pixels, labels, ...config...)`
 - **[F32]** Fixed `sort_with_indices` NaN handling: `partial_cmp().unwrap()` → `total_cmp()`
 - **[F26]** Removed redundant SIP clone: eliminated `sip_correction` field from `RegistrationResult`, derived from `sip_fit` in `warp_transform()`
 - **[F31]** Changed `warp_image` from `pub` to `pub(crate)`
@@ -158,7 +162,7 @@ No critical bugs found. Most findings are maintainability improvements.
   generic function parameterized by lane count would eliminate the duplication.
   **Previously reviewed and deferred** — low risk for working numerical code.
 
-#### [F11] Config preset composition is fragile (registration)
+#### [F11] ~~Config preset composition is fragile (registration)~~ DONE
 - **Location**: `registration/config.rs:245-256`
 - **Category**: Consistency / Hidden complexity
 - **Impact**: 3/5 — Silent divergence when defaults change
@@ -180,7 +184,7 @@ No critical bugs found. Most findings are maintainability improvements.
   which causes the caller's loop to keep iterating even though no further progress
   is possible.
 
-#### [F13] Inconsistent error wrapping — `save()` leaks `imaginarium::Error`
+#### [F13] ~~Inconsistent error wrapping — `save()` leaks `imaginarium::Error`~~ DONE
 - **Location**: `astro_image/mod.rs` (save method), `astro_image/error.rs`
 - **Category**: API consistency
 - **Impact**: 2/5 — External error type in public API
@@ -212,7 +216,7 @@ No critical bugs found. Most findings are maintainability improvements.
   three times: as in-place modifications, as additive operations, and as
   `BackgroundEstimate` constructors. All share the same underlying math.
 
-#### [F16] `generate_globular_cluster()` returns fewer stars than `num_stars`
+#### [F16] ~~`generate_globular_cluster()` returns fewer stars than `num_stars`~~ DONE
 - **Location**: `testing/synthetic/star_field.rs:502-573`
 - **Category**: API contract violation
 - **Impact**: 3/5 — Parameter name and behavior don't match
@@ -339,7 +343,7 @@ No critical bugs found. Most findings are maintainability improvements.
   every pixel during demosaic. The branch predictor handles this well, but
   monomorphized functions would eliminate it entirely.
 
-#### [F28] Redundant condition in drizzle `finalize()`
+#### [F28] ~~Redundant condition in drizzle `finalize()`~~ DONE
 - **Location**: `drizzle/mod.rs:642`
 - **Category**: Simplification
 - **Impact**: 2/5 — `w > 0.0` is implied by `w >= weight_threshold` when threshold >= 0
@@ -348,7 +352,7 @@ No critical bugs found. Most findings are maintainability improvements.
 - **Description**: `if w >= weight_threshold && w > 0.0` — the second condition is
   redundant since `weight_threshold = min_coverage * max_weight >= 0.0`.
 
-#### [F29] Inconsistent parameter ordering in deblend functions
+#### [F29] ~~Inconsistent parameter ordering in deblend functions~~ SKIPPED
 - **Location**: `star_detection/deblend/local_maxima/mod.rs:53-59` vs
   `deblend/multi_threshold/mod.rs`
 - **Category**: Consistency

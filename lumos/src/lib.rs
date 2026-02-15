@@ -42,7 +42,7 @@ pub mod prelude;
 // ============================================================================
 
 pub use astro_image::cfa::{CfaImage, CfaType};
-pub use astro_image::error::ImageLoadError;
+pub use astro_image::error::ImageError;
 pub use astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 pub use calibration_masters::DefectMap;
 pub use raw::demosaic::CfaPattern;

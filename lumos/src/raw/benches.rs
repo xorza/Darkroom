@@ -394,7 +394,7 @@ fn bench_rcd_demosaic_core() {
 }
 
 /// Load raw file using libraw's built-in demosaic (for benchmarking comparison).
-fn load_raw_libraw_demosaic(path: &Path, user_qual: i32) -> Result<AstroImage, ImageLoadError> {
+fn load_raw_libraw_demosaic(path: &Path, user_qual: i32) -> Result<AstroImage, ImageError> {
     let raw = open_raw(path)?;
 
     // Set demosaic quality before processing

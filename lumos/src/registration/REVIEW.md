@@ -24,6 +24,11 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **[F14]** Already resolved — `normalize_points` was already a shared function
 - **[F15]** Extracted `robustness_config()` and `unconstrained_config()` helpers, replacing 20+ inline Config blocks
 - **[F21]** SKIPPED — false positive; test correctly validates on genuine correspondences only
+- **[F25]** SKIPPED — `n_ref`/`n_target` are original point counts, not derivable from triangle arrays
+- **[F26]** Fixed `BoundedMaxHeap::Large` allocation: `capacity + 1` → `capacity`
+- **[F27]** Reordered `k_nearest` to check `k == 0` before `self.indices.is_empty()`
+- **[F28]** `compute_residuals` evaluates TPS directly in normalized space (avoids denormalize→renormalize roundtrip), documented `control_points()` returns normalized coords
+- **[F29]** SKIPPED — HashSets already allocated before loop and reused with `.clear()`
 
 ## Findings
 
@@ -53,7 +58,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 1/5 -- change 2 annotations to `pub(crate)` visibility
 - **Description**: `iterations` and `inlier_ratio` fields on `RansacResult` are marked `#[allow(dead_code)]` but are useful diagnostics. Change to `pub(crate)` so they're available to the parent module and tests without suppressing lint warnings.
 
-#### [F4] Incomplete `SipConfig` validation
+#### [F4] ~~Incomplete `SipConfig` validation~~ DONE
 - **Location**: `distortion/sip/mod.rs:85-93`
 - **Category**: Consistency / validation
 - **Impact**: 3/5 -- zero or negative `clip_sigma` produces NaN in threshold calculation
@@ -227,7 +232,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 
 ### Priority 4 -- Low Priority
 
-#### [F25] `vote_for_correspondences` takes redundant `n_ref` / `n_target`
+#### [F25] ~~`vote_for_correspondences` takes redundant `n_ref` / `n_target`~~ SKIPPED
 - **Location**: `triangle/voting.rs:111-118`
 - **Category**: API cleanliness
 - **Impact**: 2/5 -- 6 parameters including 2 derivable from input
@@ -235,7 +240,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 2/5 -- change signature and single call site
 - **Description**: The function takes `n_ref` and `n_target` explicitly, but these are always `ref_positions.len()` and `target_positions.len()` from the caller.
 
-#### [F26] `BoundedMaxHeap::Large` allocates `capacity + 1`
+#### [F26] ~~`BoundedMaxHeap::Large` allocates `capacity + 1`~~ DONE
 - **Location**: `spatial/mod.rs:347-351`
 - **Category**: Data flow
 - **Impact**: 1/5 -- wastes 8-16 bytes per large heap
@@ -243,7 +248,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 1/5 -- change to `Vec::with_capacity(capacity)`
 - **Description**: The `Large` variant allocates `capacity + 1` elements but only uses up to `capacity`. The `+1` appears unnecessary.
 
-#### [F27] `k_nearest` allocates heap before empty check
+#### [F27] ~~`k_nearest` allocates heap before empty check~~ DONE
 - **Location**: `spatial/mod.rs:127-138`
 - **Category**: Data flow
 - **Impact**: 1/5 -- minor inefficiency for empty tree case
@@ -251,7 +256,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 1/5 -- reorder two lines
 - **Description**: The empty tree check happens after `BoundedMaxHeap::new(k)` is created. Move the check before heap creation.
 
-#### [F28] `ThinPlateSpline::control_points()` returns normalized coordinates
+#### [F28] ~~`ThinPlateSpline::control_points()` returns normalized coordinates~~ DONE
 - **Location**: `distortion/tps/mod.rs:39-52,232-233`
 - **Category**: API cleanliness
 - **Impact**: 3/5 -- public getter returns `[-1,1]` range, not pixel space
@@ -259,7 +264,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 2/5 -- add denormalization in getter or document clearly
 - **Description**: After fitting, `control_points()` returns normalized coordinates while `compute_residuals()` expects pixel-space target points and internally denormalizes. Either store in pixel space, denormalize in the getter, or add explicit documentation.
 
-#### [F29] `recover_matches` creates new `HashSet`s every iteration
+#### [F29] ~~`recover_matches` creates new `HashSet`s every iteration~~ SKIPPED
 - **Location**: `mod.rs:374-381`
 - **Category**: Data flow
 - **Impact**: 2/5 -- allocates two HashSets per iteration (up to 5 iterations)

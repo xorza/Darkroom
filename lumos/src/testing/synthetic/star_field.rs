@@ -486,7 +486,9 @@ pub fn faint_stars_config() -> StarFieldConfig {
 /// # Arguments
 /// * `width` - Image width in pixels
 /// * `height` - Image height in pixels
-/// * `num_stars` - Number of stars to generate (typically 20000-100000)
+/// * `num_stars` - Maximum number of stars to attempt (typically 20000-100000).
+///   Actual count may be lower because stars outside the image or far
+///   from center are skipped.
 /// * `seed` - Random seed for reproducibility
 ///
 /// # Returns

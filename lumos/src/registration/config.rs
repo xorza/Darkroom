@@ -239,20 +239,20 @@ impl Config {
 
     /// Precise wide-field configuration: high accuracy with lens distortion handling.
     ///
-    /// Combines `precise()` (more iterations, SIP, tight RMS) with `wide_field()`
-    /// (Homography, unlimited rotation/scale). Uses more stars and tighter matching
-    /// for best results on wide-field ground-based astrophotography.
+    /// Builds on `wide_field()` (Homography, unlimited rotation/scale) with
+    /// tighter matching from `precise()` plus extra stars and stricter confidence.
     pub fn precise_wide_field() -> Self {
         Self {
-            transform_type: TransformType::Homography,
+            // From precise(): tighter convergence
+            ransac_iterations: 5000,
+            max_rms_error: 1.0,
+            // Stricter than precise(): more stars, tighter matching
             max_stars: 500,
             min_matches: 20,
             ratio_tolerance: 0.02,
-            ransac_iterations: 5000,
             confidence: 0.9999,
-            sip_enabled: true,
-            max_rms_error: 1.0,
-            ..Self::default()
+            // From wide_field(): Homography, SIP, unlimited rotation/scale
+            ..Self::wide_field()
         }
     }
 
@@ -448,9 +448,9 @@ mod tests {
         assert!((config.confidence - 0.9999).abs() < 1e-10);
         assert!(config.sip_enabled);
         assert!((config.max_rms_error - 1.0).abs() < 1e-10);
-        // Inherits default rotation/scale constraints for RANSAC stability
-        assert!(config.max_rotation.is_some());
-        assert!(config.scale_range.is_some());
+        // Inherits unlimited rotation/scale from wide_field()
+        assert!(config.max_rotation.is_none());
+        assert!(config.scale_range.is_none());
         config.validate();
     }
 

@@ -121,7 +121,7 @@ impl KdTree {
     /// # Returns
     /// Vector of `Neighbor` results sorted by distance
     pub fn k_nearest(&self, query: DVec2, k: usize) -> Vec<Neighbor> {
-        if self.indices.is_empty() || k == 0 {
+        if k == 0 || self.indices.is_empty() {
             return Vec::new();
         }
 
@@ -336,7 +336,7 @@ impl BoundedMaxHeap {
         } else {
             BoundedMaxHeap::Large {
                 capacity,
-                items: Vec::with_capacity(capacity + 1),
+                items: Vec::with_capacity(capacity),
             }
         }
     }

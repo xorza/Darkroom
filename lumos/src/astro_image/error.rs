@@ -4,7 +4,7 @@ use thiserror::Error;
 
 /// Errors that can occur when loading an astronomical image from disk.
 #[derive(Debug, Error)]
-pub enum ImageLoadError {
+pub enum ImageError {
     #[error("Failed to load FITS file '{path}': {source}")]
     Fits {
         path: PathBuf,
@@ -28,4 +28,7 @@ pub enum ImageLoadError {
 
     #[error("Unsupported file extension: '{extension}'")]
     UnsupportedFormat { extension: String },
+
+    #[error("Failed to save image: {source}")]
+    Save { source: imaginarium::Error },
 }

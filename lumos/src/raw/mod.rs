@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::slice;
 use std::time::Instant;
 
-use crate::astro_image::error::ImageLoadError;
+use crate::astro_image::error::ImageError;
 
 use rayon::prelude::*;
 
@@ -267,8 +267,8 @@ fn fc(filters: u32, row: usize, col: usize) -> usize {
     ((filters >> (((row << 1 & 14) | (col & 1)) << 1)) & 3) as usize
 }
 
-fn raw_err(path: &Path, reason: impl Into<String>) -> ImageLoadError {
-    ImageLoadError::Raw {
+fn raw_err(path: &Path, reason: impl Into<String>) -> ImageError {
+    ImageError::Raw {
         path: path.to_path_buf(),
         reason: reason.into(),
     }
@@ -297,7 +297,7 @@ struct UnpackedRaw {
 impl UnpackedRaw {
     /// Get the raw u16 image pointer and total pixel count.
     /// Returns the pointer and count, or an error if null.
-    fn raw_image_slice(&self) -> Result<&[u16], ImageLoadError> {
+    fn raw_image_slice(&self) -> Result<&[u16], ImageError> {
         // SAFETY: inner is valid and unpack succeeded.
         let raw_image_ptr = unsafe { (*self.inner).rawdata.raw_image };
         if raw_image_ptr.is_null() {
@@ -317,7 +317,7 @@ impl UnpackedRaw {
     ///
     /// Applies per-channel black correction but NO white balance (used for
     /// calibration frames where raw data integrity is required).
-    fn extract_cfa_pixels(&self) -> Result<Vec<f32>, ImageLoadError> {
+    fn extract_cfa_pixels(&self) -> Result<Vec<f32>, ImageError> {
         let raw_data = self.raw_image_slice()?;
 
         // Pass 1: SIMD normalize with common black level
@@ -364,7 +364,7 @@ impl UnpackedRaw {
     }
 
     /// Process Bayer sensor data using our fast SIMD demosaic.
-    fn demosaic_bayer(&self, cfa_pattern: CfaPattern) -> Result<Vec<f32>, ImageLoadError> {
+    fn demosaic_bayer(&self, cfa_pattern: CfaPattern) -> Result<Vec<f32>, ImageError> {
         let raw_data = self.raw_image_slice()?;
 
         // Pass 1: SIMD normalize with common black level
@@ -429,7 +429,7 @@ impl UnpackedRaw {
     ///
     /// Drops guard and buf before the expensive demosaicing step,
     /// reducing peak memory by ~77 MB.
-    fn demosaic_xtrans(&mut self) -> Result<Vec<f32>, ImageLoadError> {
+    fn demosaic_xtrans(&mut self) -> Result<Vec<f32>, ImageError> {
         let raw_data = self.raw_image_slice()?;
         let xtrans_pattern = self.xtrans_pattern();
 
@@ -469,7 +469,7 @@ impl UnpackedRaw {
     /// Process unknown CFA pattern using libraw's built-in demosaic.
     /// This is slower but handles exotic sensor patterns correctly.
     /// Returns (pixels, width, height, num_channels).
-    fn demosaic_libraw_fallback(&self) -> Result<(Vec<f32>, usize, usize, usize), ImageLoadError> {
+    fn demosaic_libraw_fallback(&self) -> Result<(Vec<f32>, usize, usize, usize), ImageError> {
         let demosaic_start = Instant::now();
 
         // Configure libraw for linear output (no gamma, no color conversion)
@@ -598,8 +598,8 @@ impl UnpackedRaw {
 ///
 /// Performs: file read, libraw init, open_buffer, unpack, dimension/color
 /// validation, sensor type detection, and ISO extraction.
-fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageLoadError> {
-    let buf = fs::read(path).map_err(|e| ImageLoadError::Io {
+fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
+    let buf = fs::read(path).map_err(|e| ImageError::Io {
         path: path.to_path_buf(),
         source: e,
     })?;
@@ -719,7 +719,7 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageLoadError> {
 /// - Monochrome sensors: no demosaic needed, returns grayscale
 /// - Known Bayer patterns (RGGB, BGGR, GRBG, GBRG): fast SIMD demosaic
 /// - Unknown patterns (X-Trans, etc.): libraw's built-in demosaic (slower but correct)
-pub fn load_raw(path: &Path) -> Result<AstroImage, ImageLoadError> {
+pub fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
     let mut raw = open_raw(path)?;
 
     let sensor_type = raw.sensor_type.clone();
@@ -789,7 +789,7 @@ pub fn load_raw(path: &Path) -> Result<AstroImage, ImageLoadError> {
 ///
 /// For Unknown sensor types, falls back to `load_raw()` then wraps
 /// the demosaiced result as a Mono CfaImage.
-pub fn load_raw_cfa(path: &Path) -> Result<CfaImage, ImageLoadError> {
+pub fn load_raw_cfa(path: &Path) -> Result<CfaImage, ImageError> {
     let raw = open_raw(path)?;
 
     let cfa_type = match &raw.sensor_type {

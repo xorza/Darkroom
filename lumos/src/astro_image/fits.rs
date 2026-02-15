@@ -4,18 +4,18 @@ use fitsio::images::ImageType;
 use std::path::Path;
 
 use super::cfa::CfaType;
-use super::error::ImageLoadError;
+use super::error::ImageError;
 use super::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 
-fn fits_err(path: &Path, source: fitsio::errors::Error) -> ImageLoadError {
-    ImageLoadError::Fits {
+fn fits_err(path: &Path, source: fitsio::errors::Error) -> ImageError {
+    ImageError::Fits {
         path: path.to_path_buf(),
         source,
     }
 }
 
 /// Load an astronomical image from a FITS file.
-pub fn load_fits(path: &Path) -> Result<AstroImage, ImageLoadError> {
+pub fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
     let mut fptr = FitsFile::open(path).map_err(|e| fits_err(path, e))?;
 
     let hdu = fptr.primary_hdu().map_err(|e| fits_err(path, e))?;
