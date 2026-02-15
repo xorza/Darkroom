@@ -746,8 +746,8 @@ fn sgarea(x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {
     let dx = x2 - x1;
     let dy = y2 - y1;
 
-    // Vertical line contributes no area
-    if dx == 0.0 {
+    // Near-vertical line contributes negligible area
+    if dx.abs() < 1e-14 {
         return 0.0;
     }
 

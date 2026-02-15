@@ -1063,6 +1063,29 @@ fn test_sgarea_vertical() {
     );
 }
 
+/// Test sgarea with near-vertical segment (dx ≈ 1e-16) → area ≈ 0.
+/// Floating-point arithmetic can produce tiny nonzero dx for segments that
+/// should be vertical. Without the tolerance check, this would divide by
+/// near-zero dx and produce a huge slope, yielding a wrong area.
+#[test]
+fn test_sgarea_near_vertical() {
+    // Simulate floating-point jitter: x2 = x1 + tiny epsilon
+    let area = sgarea(0.5, 0.0, 0.5 + 1e-16, 1.0);
+    assert!(
+        area.abs() < 1e-12,
+        "Near-vertical segment should have area ~0, got {}",
+        area
+    );
+
+    // Negative near-zero dx
+    let area = sgarea(0.5, 0.0, 0.5 - 1e-16, 1.0);
+    assert!(
+        area.abs() < 1e-12,
+        "Near-vertical segment (negative dx) should have area ~0, got {}",
+        area
+    );
+}
+
 /// Test sgarea with segment entirely outside (x > 1).
 #[test]
 fn test_sgarea_outside_right() {
