@@ -148,7 +148,14 @@ pub fn register(
         min_votes: config.min_votes,
         check_orientation: config.check_orientation,
     };
+    let t0 = Instant::now();
     let matches = match_triangles(&ref_positions, &target_positions, &triangle_params);
+    let triangle_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    tracing::debug!(
+        triangle_ms,
+        num_matches = matches.len(),
+        "Triangle matching complete"
+    );
 
     if matches.len() < config.min_matches {
         return Err(RegistrationError::NoMatchingPatterns);
@@ -283,6 +290,7 @@ fn estimate_and_refine(
         scale_range: config.scale_range,
     };
 
+    let t0 = Instant::now();
     let ransac = RansacEstimator::new(ransac_params);
     let ransac_result = ransac
         .estimate(matches, ref_stars, target_stars, transform_type)
@@ -291,6 +299,7 @@ fn estimate_and_refine(
             iterations: config.ransac_iterations,
             best_inlier_count: 0,
         })?;
+    let ransac_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
     let inlier_matches: Vec<_> = ransac_result
         .inliers
@@ -300,6 +309,7 @@ fn estimate_and_refine(
 
     // Effective threshold for match recovery: ~3 * max_sigma (χ² quantile)
     let effective_threshold = max_sigma * 3.03;
+    let t0 = Instant::now();
     let (transform, inlier_matches) = recover_matches(
         ref_stars,
         target_stars,
@@ -308,7 +318,9 @@ fn estimate_and_refine(
         effective_threshold,
         transform_type,
     );
+    let recovery_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
+    let t0 = Instant::now();
     let sip_fit = if config.sip_enabled {
         let inlier_ref: Vec<DVec2> = inlier_matches.iter().map(|&(r, _)| ref_stars[r]).collect();
         let inlier_target: Vec<DVec2> = inlier_matches
@@ -342,6 +354,15 @@ fn estimate_and_refine(
             (p - target_pos).length()
         })
         .collect();
+
+    let sip_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    tracing::debug!(
+        ransac_ms,
+        recovery_ms,
+        sip_ms,
+        ransac_inliers = ransac_result.inliers.len(),
+        "Registration sub-step timing"
+    );
 
     let mut result = RegistrationResult::new(transform, inlier_matches, residuals);
     result.sip_correction = sip_fit.as_ref().map(|r| r.polynomial.clone());

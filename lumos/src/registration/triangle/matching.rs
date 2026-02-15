@@ -56,8 +56,11 @@ pub fn match_triangles(
         return Vec::new();
     }
 
-    // k_neighbors scales with point count but is capped for efficiency
-    let k_neighbors = (n_ref.min(n_target) / 3).clamp(5, 20);
+    // k_neighbors scales with point count but is capped for efficiency.
+    // k=10 gives C(10,2)=45 triangles/star — sufficient for robust matching
+    // (Astroalign uses k=5). Higher k increases triangle count quadratically
+    // with diminishing returns (k=20 → C(20,2)=190, 4.2× more triangles).
+    let k_neighbors = (n_ref.min(n_target) / 3).clamp(5, 10);
 
     let ref_triangles = form_triangles_kdtree(ref_positions, k_neighbors);
     let target_triangles = form_triangles_kdtree(target_positions, k_neighbors);
@@ -97,15 +100,13 @@ pub fn match_triangles(
 /// # Returns
 /// Vector of triangle vertex indices [i, j, k] where i < j < k
 pub(crate) fn form_triangles_from_neighbors(tree: &KdTree, k: usize) -> Vec<[usize; 3]> {
-    use std::collections::HashSet;
-
     let n = tree.len();
     if n < 3 {
         return Vec::new();
     }
 
     let k = k.min(n - 1);
-    let mut triangles = HashSet::new();
+    let mut triangles = Vec::new();
 
     for i in 0..n {
         let point_i = tree.get_point(i);
@@ -124,10 +125,14 @@ pub(crate) fn form_triangles_from_neighbors(tree: &KdTree, k: usize) -> Vec<[usi
                 // Normalize triangle indices to avoid duplicates
                 let mut tri = [i, n1.index, n2.index];
                 tri.sort();
-                triangles.insert(tri);
+                triangles.push(tri);
             }
         }
     }
 
-    triangles.into_iter().collect()
+    // Sort + dedup is faster than HashSet for this pattern (cache-friendly,
+    // no hashing overhead, and ~50% of entries are duplicates).
+    triangles.sort_unstable();
+    triangles.dedup();
+    triangles
 }

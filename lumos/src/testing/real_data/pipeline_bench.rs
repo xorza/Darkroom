@@ -237,12 +237,14 @@ fn bench_full_pipeline() {
         common::parallel::par_map_limited(&to_register, 3, |(img, stars)| {
             let result = register(ref_stars, stars, &reg_config)
                 .unwrap_or_else(|e| panic!("Registration failed: {e}"));
-            println!(
-                "  {} inliers, RMS={:.3}px, {:.1}ms",
-                result.num_inliers, result.rms_error, result.elapsed_ms,
-            );
+            let warp_start = Instant::now();
             let mut warped = (*img).clone();
             warp(img, &mut warped, &result.warp_transform(), &reg_config);
+            let warp_ms = warp_start.elapsed().as_secs_f64() * 1000.0;
+            println!(
+                "  {} inliers, RMS={:.3}px, reg={:.1}ms, warp={:.1}ms",
+                result.num_inliers, result.rms_error, result.elapsed_ms, warp_ms,
+            );
             warped
         });
 
