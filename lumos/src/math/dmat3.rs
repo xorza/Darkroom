@@ -135,7 +135,7 @@ impl DMat3 {
     pub fn transform_point(&self, p: DVec2) -> DVec2 {
         let d = &self.data;
         let w = d[6] * p.x + d[7] * p.y + d[8];
-        debug_assert!(
+        assert!(
             w.abs() > f64::EPSILON,
             "transform_point: w ≈ 0 (point at infinity)"
         );
