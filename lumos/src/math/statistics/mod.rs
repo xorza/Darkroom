@@ -105,18 +105,26 @@ pub fn median_and_mad_f32_mut(data: &mut [f32]) -> (f32, f32) {
     (median, mad)
 }
 
+/// Result of a single sigma-clipping iteration.
+enum ClipResult {
+    /// Converged: no values were clipped (or sigma ≈ 0). Final stats.
+    Converged(f32, f32),
+    /// Values were clipped; continue iterating.
+    Clipped,
+    /// Too few values remain (< 3) to compute meaningful statistics.
+    TooFew,
+}
+
 /// Core sigma-clipping iteration logic shared between Vec and ArrayVec versions.
-///
-/// Returns (median, sigma, converged) where converged indicates no clipping occurred.
 #[inline]
 fn sigma_clip_iteration(
     values: &mut [f32],
     len: &mut usize,
     deviations: &mut [f32],
     kappa: f32,
-) -> Option<(f32, f32)> {
+) -> ClipResult {
     if *len < 3 {
-        return None;
+        return ClipResult::TooFew;
     }
 
     let active = &mut values[..*len];
@@ -132,7 +140,7 @@ fn sigma_clip_iteration(
     let sigma = mad_to_sigma(mad);
 
     if sigma < f32::EPSILON {
-        return Some((median, 0.0));
+        return ClipResult::Converged(median, 0.0);
     }
 
     // Recompute deviations from values: median_f32_approx destroyed the index
@@ -152,11 +160,11 @@ fn sigma_clip_iteration(
 
     if write_idx == *len {
         // Converged - no values clipped
-        return Some((median, sigma));
+        return ClipResult::Converged(median, sigma);
     }
 
     *len = write_idx;
-    None
+    ClipResult::Clipped
 }
 
 /// Compute final statistics from remaining values.
@@ -204,8 +212,10 @@ pub fn sigma_clipped_median_mad(
     deviations.resize(len, 0.0);
 
     for _ in 0..iterations {
-        if let Some(result) = sigma_clip_iteration(values, &mut len, deviations, kappa) {
-            return result;
+        match sigma_clip_iteration(values, &mut len, deviations, kappa) {
+            ClipResult::Converged(median, sigma) => return (median, sigma),
+            ClipResult::TooFew => break,
+            ClipResult::Clipped => {}
         }
     }
 
@@ -242,10 +252,10 @@ pub fn sigma_clipped_median_mad_arrayvec<const N: usize>(
     deviations.extend(std::iter::repeat_n(0.0f32, len.min(N)));
 
     for _ in 0..iterations {
-        if let Some(result) =
-            sigma_clip_iteration(values, &mut len, deviations.as_mut_slice(), kappa)
-        {
-            return result;
+        match sigma_clip_iteration(values, &mut len, deviations.as_mut_slice(), kappa) {
+            ClipResult::Converged(median, sigma) => return (median, sigma),
+            ClipResult::TooFew => break,
+            ClipResult::Clipped => {}
         }
     }
 

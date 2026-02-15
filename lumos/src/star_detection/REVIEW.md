@@ -36,6 +36,10 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **[F34]** Fixed bench name "6k" → "4k", updated stale "100k" comment to "65k"
 - **[F16]** Shared Cephes exp() constants between AVX2 and NEON in `gaussian_fit/mod.rs`
 - **[F24]** Replaced vague median filter tests with hand-computed expected values
+- **[F5]** Moved `estimate_background_test` from `background/mod.rs` to `background/bench.rs`
+- **[F20]** Added `QualityFilterStats::apply_to(&self, &mut Diagnostics)` method, replacing 7-line field-by-field copy
+- **[F21]** Consolidated 3 different `UnsafeSendPtr` patterns into shared `common::UnsafeSendPtr<T>`
+- **[F27]** Extracted `DEFAULT_FWHM`, `FWHM_MAD_MULTIPLIER`, `FWHM_MAD_FLOOR_FRACTION` constants in `fwhm.rs`
 
 ---
 
@@ -75,7 +79,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 1/5 — Remove one line and the `if iter == 0` block
 - **Description**: Line 142 calls `batch_compute_chi2` to initialize `prev_chi2`, but the first iteration of the loop (line 155) overwrites it with `current_chi2` from `batch_build_normal_equations`. The initial call is wasted work.
 
-#### [F5] `#[cfg(test)]` helper functions in production modules
+#### [F5] ~~`#[cfg(test)]` helper functions in production modules~~ DONE
 - **Location**: `detector/stages/detect.rs:343-355`, `background/mod.rs:237-251`, `labeling/mod.rs:23-36`
 - **Category**: API cleanliness
 - **Impact**: 4/5 — Violates project rule "Never use `#[cfg(test)]` on functions in production code"
@@ -199,7 +203,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 3/5 — Either filter in one place or the other; replace Mutex with fold/reduce
 - **Description**: Components with `area > max_area` are clamped to `max_area + 1` in `collect_component_data`, then immediately filtered out by `extract_candidates`. The sentinel value is confusing. Separately, the parallel aggregation uses a `Mutex<Vec>` for what is conceptually a parallel fold/reduce.
 
-#### [F20] Manual field-by-field copy between QualityFilterStats and Diagnostics
+#### [F20] ~~Manual field-by-field copy between QualityFilterStats and Diagnostics~~ DONE
 - **Location**: `detector/mod.rs:200-206`
 - **Category**: Generalization
 - **Impact**: 3/5 — Seven lines of fragile field-by-field copying
@@ -207,7 +211,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 2/5 — Embed QualityFilterStats in Diagnostics or add From impl
 - **Description**: Six fields are manually copied with different naming prefixes (`rejected_` vs none). A `From` impl, embedding, or unified naming would eliminate the brittle copy block.
 
-#### [F21] Unsafe raw pointer patterns for Rayon — three different approaches
+#### [F21] ~~Unsafe raw pointer patterns for Rayon — three different approaches~~ DONE
 - **Location**: `labeling/mod.rs:451-465` (usize cast), `mask_dilation/mod.rs:14-19` (SendPtr), xtrans `UnsafeSendPtr`
 - **Category**: Simplification / Data flow
 - **Impact**: 3/5 — Three different patterns for the same problem
@@ -259,7 +263,7 @@ No algorithmic bugs were found. One behavioral inconsistency (Euclidean vs Cheby
 - **Invasiveness**: 2/5 — Delete functions, remove `#![allow(dead_code)]`
 - **Description**: `create_ground_truth_image`, `create_detection_image`, `draw_centroid_path`, `gray_to_rgb`, `side_by_side`, `side_by_side_rgb` are never called. The module-level `#![allow(dead_code)]` was added to suppress their warnings but also hides future dead code.
 
-#### [F27] Hard-coded magic numbers in FWHM estimation
+#### [F27] ~~Hard-coded magic numbers in FWHM estimation~~ DONE
 - **Location**: `detector/stages/fwhm.rs:85` (4.0), `fwhm.rs:131` (0.5..20.0), `fwhm.rs:157` (3.0, 0.1)
 - **Category**: Consistency
 - **Impact**: 2/5 — Undocumented thresholds that may need to match values elsewhere

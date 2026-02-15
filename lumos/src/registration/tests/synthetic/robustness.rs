@@ -25,6 +25,28 @@ const FWHM_NORMAL: f32 = 2.0; // max_sigma ~1.0
 const FWHM_LOOSE: f32 = 3.34; // max_sigma ~1.67
 const FWHM_SUBPIXEL: f32 = 0.66; // max_sigma ~0.33
 
+/// Standard config for robustness tests: min_stars=6, min_matches=4.
+fn robustness_config(transform_type: TransformType) -> Config {
+    Config {
+        transform_type,
+        min_stars: 6,
+        min_matches: 4,
+        ..Default::default()
+    }
+}
+
+/// Config with no rotation/scale constraints (for large-angle tests).
+fn unconstrained_config(transform_type: TransformType) -> Config {
+    Config {
+        transform_type,
+        min_stars: 6,
+        min_matches: 4,
+        max_rotation: None,
+        scale_range: None,
+        ..Default::default()
+    }
+}
+
 // ============================================================================
 // Outlier Rejection Tests
 // ============================================================================
@@ -42,12 +64,7 @@ fn test_outlier_rejection_spurious_stars() {
     let target_with_spurious =
         add_spurious_star_list(&target_stars, 10, 2000.0, 2000.0, 22222, FWHM_NORMAL);
 
-    let config = Config {
-        transform_type: TransformType::Translation,
-        min_stars: 6,
-        min_matches: 4,
-        ..Default::default()
-    };
+    let config = robustness_config(TransformType::Translation);
 
     let result = register(&ref_stars, &target_with_spurious, &config)
         .expect("Registration should succeed despite spurious stars");
@@ -85,12 +102,7 @@ fn test_outlier_rejection_missing_stars() {
     // Remove ~10% of stars
     let target_with_missing = remove_random_star_list(&target_stars, 0.1, 44444);
 
-    let config = Config {
-        transform_type: TransformType::Translation,
-        min_stars: 6,
-        min_matches: 4,
-        ..Default::default()
-    };
+    let config = robustness_config(TransformType::Translation);
 
     let result = register(&ref_stars, &target_with_missing, &config)
         .expect("Registration should succeed despite missing stars");
@@ -125,12 +137,7 @@ fn test_outlier_rejection_combined() {
     let target_modified =
         add_spurious_star_list(&target_modified, 10, 2000.0, 2000.0, 77777, FWHM_NORMAL);
 
-    let config = Config {
-        transform_type: TransformType::Translation,
-        min_stars: 6,
-        min_matches: 4,
-        ..Default::default()
-    };
+    let config = robustness_config(TransformType::Translation);
 
     let result = register(&ref_stars, &target_modified, &config)
         .expect("Registration should succeed despite combined outliers");
@@ -165,12 +172,7 @@ fn test_outlier_rejection_20_percent_spurious() {
     let target_with_spurious =
         add_spurious_star_list(&target_stars, 16, 2000.0, 2000.0, 99999, FWHM_NORMAL);
 
-    let config = Config {
-        transform_type: TransformType::Euclidean,
-        min_stars: 6,
-        min_matches: 4,
-        ..Default::default()
-    };
+    let config = robustness_config(TransformType::Euclidean);
 
     let result = register(&ref_stars, &target_with_spurious, &config)
         .expect("Registration should succeed with 20% spurious stars");
@@ -215,12 +217,7 @@ fn test_partial_overlap_75_percent() {
         target_stars.len()
     );
 
-    let config = Config {
-        transform_type: TransformType::Translation,
-        min_stars: 6,
-        min_matches: 4,
-        ..Default::default()
-    };
+    let config = robustness_config(TransformType::Translation);
 
     let result = register(&ref_in_overlap, &target_stars, &config)
         .expect("Registration should succeed with 75% overlap");
@@ -262,12 +259,7 @@ fn test_partial_overlap_50_percent() {
         target_stars.len()
     );
 
-    let config = Config {
-        transform_type: TransformType::Translation,
-        min_stars: 6,
-        min_matches: 4,
-        ..Default::default()
-    };
+    let config = robustness_config(TransformType::Translation);
 
     let result = register(&ref_in_overlap, &target_stars, &config)
         .expect("Registration should succeed with 50% overlap");
@@ -306,12 +298,7 @@ fn test_partial_overlap_diagonal() {
         2000.0 - dy - 50.0,
     );
 
-    let config = Config {
-        transform_type: TransformType::Translation,
-        min_stars: 6,
-        min_matches: 4,
-        ..Default::default()
-    };
+    let config = robustness_config(TransformType::Translation);
 
     let result = register(&ref_in_overlap, &target_stars, &config)
         .expect("Registration should succeed with diagonal overlap");
@@ -347,12 +334,7 @@ fn test_subpixel_translation_quarter_pixel() {
     let dy = -5.75;
     let target_stars = translate_star_list(&ref_stars, dx, dy);
 
-    let config = Config {
-        transform_type: TransformType::Translation,
-        min_stars: 6,
-        min_matches: 4,
-        ..Default::default()
-    };
+    let config = robustness_config(TransformType::Translation);
 
     let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
@@ -385,12 +367,7 @@ fn test_subpixel_translation_half_pixel() {
     let dy = -15.5;
     let target_stars = translate_star_list(&ref_stars, dx, dy);
 
-    let config = Config {
-        transform_type: TransformType::Translation,
-        min_stars: 6,
-        min_matches: 4,
-        ..Default::default()
-    };
+    let config = robustness_config(TransformType::Translation);
 
     let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
@@ -421,12 +398,7 @@ fn test_subpixel_rotation() {
     let angle_rad = angle_deg.to_radians();
     let target_stars = transform_star_list(&ref_stars, 5.0, -3.0, angle_rad, 1.0, 1000.0, 1000.0);
 
-    let config = Config {
-        transform_type: TransformType::Euclidean,
-        min_stars: 6,
-        min_matches: 4,
-        ..Default::default()
-    };
+    let config = robustness_config(TransformType::Euclidean);
 
     let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
@@ -451,12 +423,7 @@ fn test_subpixel_scale() {
     let scale = 1.001; // 0.1% scale change
     let target_stars = transform_star_list(&ref_stars, 0.0, 0.0, 0.0, scale, 1000.0, 1000.0);
 
-    let config = Config {
-        transform_type: TransformType::Similarity,
-        min_stars: 6,
-        min_matches: 4,
-        ..Default::default()
-    };
+    let config = robustness_config(TransformType::Similarity);
 
     let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
@@ -595,12 +562,7 @@ fn test_stress_transform_noise_outliers() {
     let target_modified =
         add_spurious_star_list(&target_modified, 5, 2000.0, 2000.0, 55554, FWHM_NORMAL);
 
-    let config = Config {
-        transform_type: TransformType::Euclidean,
-        min_stars: 6,
-        min_matches: 4,
-        ..Default::default()
-    };
+    let config = robustness_config(TransformType::Euclidean);
 
     let result = register(&ref_stars, &target_modified, &config)
         .expect("Registration should succeed under stress conditions");
@@ -668,12 +630,7 @@ fn test_stress_partial_overlap_with_noise() {
         .cloned()
         .collect();
 
-    let config = Config {
-        transform_type: TransformType::Euclidean,
-        min_stars: 6,
-        min_matches: 4,
-        ..Default::default()
-    };
+    let config = robustness_config(TransformType::Euclidean);
 
     let result = register(&ref_in_overlap, &target_noisy, &config)
         .expect("Registration should succeed with partial overlap and noise");
@@ -745,14 +702,7 @@ fn test_large_rotation_45_degrees() {
 
     let target_stars = transform_star_list(&ref_stars, dx, dy, angle_rad, 1.0, center_x, center_y);
 
-    let config = Config {
-        transform_type: TransformType::Euclidean,
-        min_stars: 6,
-        min_matches: 4,
-        max_rotation: None,
-        scale_range: None,
-        ..Default::default()
-    };
+    let config = unconstrained_config(TransformType::Euclidean);
 
     let result = register(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed with 45° rotation");
@@ -797,14 +747,7 @@ fn test_large_rotation_90_degrees() {
 
     let target_stars = transform_star_list(&ref_stars, dx, dy, angle_rad, 1.0, center_x, center_y);
 
-    let config = Config {
-        transform_type: TransformType::Euclidean,
-        min_stars: 6,
-        min_matches: 4,
-        max_rotation: None,
-        scale_range: None,
-        ..Default::default()
-    };
+    let config = unconstrained_config(TransformType::Euclidean);
 
     let result = register(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed with 90° rotation");
@@ -847,14 +790,7 @@ fn test_large_rotation_negative_45_degrees() {
     let target_stars =
         transform_star_list(&ref_stars, 0.0, 0.0, angle_rad, 1.0, center_x, center_y);
 
-    let config = Config {
-        transform_type: TransformType::Euclidean,
-        min_stars: 6,
-        min_matches: 4,
-        max_rotation: None,
-        scale_range: None,
-        ..Default::default()
-    };
+    let config = unconstrained_config(TransformType::Euclidean);
 
     let result = register(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed with -45° rotation");
@@ -886,14 +822,7 @@ fn test_extreme_scale_2x() {
 
     let target_stars = transform_star_list(&ref_stars, 0.0, 0.0, 0.0, scale, center_x, center_y);
 
-    let config = Config {
-        transform_type: TransformType::Similarity,
-        min_stars: 6,
-        min_matches: 4,
-        max_rotation: None,
-        scale_range: None,
-        ..Default::default()
-    };
+    let config = unconstrained_config(TransformType::Similarity);
 
     // Allow more residual for large scale (FWHM_LOOSE -> max_sigma ~1.67)
     let result = register(&ref_stars, &target_stars, &config)
@@ -936,14 +865,7 @@ fn test_extreme_scale_half() {
 
     let target_stars = transform_star_list(&ref_stars, 0.0, 0.0, 0.0, scale, center_x, center_y);
 
-    let config = Config {
-        transform_type: TransformType::Similarity,
-        min_stars: 6,
-        min_matches: 4,
-        max_rotation: None,
-        scale_range: None,
-        ..Default::default()
-    };
+    let config = unconstrained_config(TransformType::Similarity);
 
     let result = register(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed with 0.5x scale");
@@ -989,14 +911,7 @@ fn test_extreme_scale_with_rotation() {
     let target_stars =
         transform_star_list(&ref_stars, dx, dy, angle_rad, scale, center_x, center_y);
 
-    let config = Config {
-        transform_type: TransformType::Similarity,
-        min_stars: 6,
-        min_matches: 4,
-        max_rotation: None,
-        scale_range: None,
-        ..Default::default()
-    };
+    let config = unconstrained_config(TransformType::Similarity);
 
     let result = register(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed with 1.5x scale + 30° rotation");
@@ -1044,12 +959,7 @@ fn test_affine_with_outliers() {
     let target_with_spurious =
         add_spurious_star_list(&target_stars, 15, 2000.0, 2000.0, 30002, FWHM_LOOSE);
 
-    let config = Config {
-        transform_type: TransformType::Affine,
-        min_stars: 6,
-        min_matches: 4,
-        ..Default::default()
-    };
+    let config = robustness_config(TransformType::Affine);
 
     let result = register(&ref_stars, &target_with_spurious, &config)
         .expect("Affine registration should succeed with 15% spurious stars");
@@ -1090,12 +1000,7 @@ fn test_affine_with_noise_and_missing() {
     // Remove 10%
     let target_modified = remove_random_star_list(&target_noisy, 0.1, 30005);
 
-    let config = Config {
-        transform_type: TransformType::Affine,
-        min_stars: 6,
-        min_matches: 4,
-        ..Default::default()
-    };
+    let config = robustness_config(TransformType::Affine);
 
     let result = register(&ref_stars, &target_modified, &config)
         .expect("Affine registration should succeed with noise and missing stars");

@@ -19,6 +19,11 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **[F23]** Changed `panic!` → `unreachable!` for Auto in `transform.rs` (2 locations) and `ransac/transforms.rs` (1 location)
 - **[F7]** Changed `assert_eq!` for mismatched point lengths to `return None` in SIP `fit_from_transform` for consistent error handling
 - **[F30]** Made `form_triangles_kdtree` `pub(crate)` — internal implementation detail, `match_triangles` is the public API
+- **[F2]** Documented why `transform_type` param is separate from `config.transform_type` (Auto resolution)
+- **[F12]** Extracted `dim_value()` helper in spatial module, replacing 4 duplicate `if split_dim == 0 { p.x } else { p.y }` patterns
+- **[F14]** Already resolved — `normalize_points` was already a shared function
+- **[F15]** Extracted `robustness_config()` and `unconstrained_config()` helpers, replacing 20+ inline Config blocks
+- **[F21]** SKIPPED — false positive; test correctly validates on genuine correspondences only
 
 ## Findings
 
@@ -32,7 +37,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 1/5 -- add `#[derive(PartialOrd, Ord)]` and use `.max()`
 - **Description**: `compose()` compares transform types via `self.transform_type as u8 > other.transform_type as u8`. This depends on discriminant ordering with no compile-time guarantee. Add `#[derive(PartialOrd, Ord)]` to `TransformType` and replace with `self.transform_type.max(other.transform_type)`.
 
-#### [F2] `estimate_and_refine` takes `transform_type` AND `config` redundantly
+#### [F2] ~~`estimate_and_refine` takes `transform_type` AND `config` redundantly~~ DONE
 - **Location**: `mod.rs:273-280`
 - **Category**: API cleanliness
 - **Impact**: 3/5 -- parameter overrides config field of same name; confusing for maintainers
@@ -114,7 +119,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 3/5 -- change return type and update `resolve_matches` caller
 - **Description**: `iter_nonzero()` collects all non-zero entries into a `Vec<(usize, usize, usize)>`, then `resolve_matches` immediately `.into_iter().filter().map().collect()` into another Vec. Return an `impl Iterator` or add `iter_nonzero_filtered(min_votes)` that combines both steps.
 
-#### [F12] Duplicate dimension extraction logic in spatial module
+#### [F12] ~~Duplicate dimension extraction logic in spatial module~~ DONE
 - **Location**: `spatial/mod.rs:81-92,164-165,228-229,282-283`
 - **Category**: Simplification / generalization
 - **Impact**: 3/5 -- same `if split_dim == 0 { p.x } else { p.y }` in 4 places
@@ -130,7 +135,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 3/5 -- introduce a context struct or builder
 - **Description**: The method signature spans 12 lines with 8 parameters: `ref_points`, `target_points`, `initial_transform`, `initial_inliers`, `scorer`, `inlier_buf`, `point_buf_ref`, `point_buf_target`. Group the buffer parameters into a reusable `RansacBuffers` struct, or pass the point slices as a `(&[DVec2], &[DVec2])` tuple.
 
-#### [F14] Duplicate point normalization in affine and homography estimation
+#### [F14] ~~Duplicate point normalization in affine and homography estimation~~ DONE
 - **Location**: `ransac/transforms.rs:176-177,272-273`
 - **Category**: Generalization
 - **Impact**: 3/5 -- same normalization pattern in both estimators
@@ -138,7 +143,7 @@ The main improvement opportunities are: eliminating code duplication (LU solvers
 - **Invasiveness**: 2/5 -- extract shared `normalize_points()` helper
 - **Description**: Both `estimate_affine()` and `estimate_homography()` compute Hartley normalization with identical centering and scaling logic. Extract into a shared `fn normalize_points(points: &[DVec2]) -> (Vec<DVec2>, DVec2, f64)` helper.
 
-#### [F15] Config boilerplate repeated 18+ times in robustness tests
+#### [F15] ~~Config boilerplate repeated 18+ times in robustness tests~~ DONE
 - **Location**: `tests/robustness.rs` (lines 45, 88, 128, 168, 218, 265, 309, 350, 388, 424, 454, 490, 530, 561, 598, 671, 702, 748, 800, 850, 889, 939, 992)
 - **Category**: Generalization / test quality
 - **Impact**: 3/5 -- massive boilerplate obscures test intent

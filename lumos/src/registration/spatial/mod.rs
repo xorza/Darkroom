@@ -8,6 +8,12 @@ use glam::DVec2;
 #[cfg(test)]
 mod tests;
 
+/// Extract the coordinate for the given split dimension (0 = x, 1 = y).
+#[inline(always)]
+fn dim_value(p: DVec2, dim: usize) -> f64 {
+    if dim == 0 { p.x } else { p.y }
+}
+
 /// A nearest-neighbor result: the original point index and squared distance to the query.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Neighbor {
@@ -79,17 +85,7 @@ impl KdTree {
 
             // Partition around the median — O(n) per level instead of O(n log n) sort.
             indices[range.start..range.end].select_nth_unstable_by(median, |&a, &b| {
-                let va = if split_dim == 0 {
-                    points_vec[a].x
-                } else {
-                    points_vec[a].y
-                };
-                let vb = if split_dim == 0 {
-                    points_vec[b].x
-                } else {
-                    points_vec[b].y
-                };
-                va.total_cmp(&vb)
+                dim_value(points_vec[a], split_dim).total_cmp(&dim_value(points_vec[b], split_dim))
             });
 
             let mid = range.start + median;
@@ -161,9 +157,7 @@ impl KdTree {
         });
 
         let split_dim = depth % 2;
-        let query_val = if split_dim == 0 { query.x } else { query.y };
-        let point_val = if split_dim == 0 { point.x } else { point.y };
-        let diff = query_val - point_val;
+        let diff = dim_value(query, split_dim) - dim_value(point, split_dim);
 
         // Search the nearer subtree first
         let (first_start, first_end, second_start, second_end) = if diff < 0.0 {
@@ -225,9 +219,7 @@ impl KdTree {
         }
 
         let split_dim = depth % 2;
-        let query_val = if split_dim == 0 { query.x } else { query.y };
-        let point_val = if split_dim == 0 { point.x } else { point.y };
-        let diff = query_val - point_val;
+        let diff = dim_value(query, split_dim) - dim_value(point, split_dim);
 
         let (first_start, first_end, second_start, second_end) = if diff < 0.0 {
             (start, mid, mid + 1, end)
@@ -279,9 +271,7 @@ impl KdTree {
         }
 
         let split_dim = depth % 2;
-        let query_val = if split_dim == 0 { query.x } else { query.y };
-        let point_val = if split_dim == 0 { point.x } else { point.y };
-        let diff = query_val - point_val;
+        let diff = dim_value(query, split_dim) - dim_value(point, split_dim);
         let diff_sq = diff * diff;
 
         if diff <= 0.0 || diff_sq <= radius_sq {

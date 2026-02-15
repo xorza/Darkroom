@@ -274,6 +274,10 @@ pub fn warp(
 
 // === Internal Functions ===
 
+/// Run RANSAC estimation followed by match recovery and optional SIP fitting.
+///
+/// `transform_type` is passed separately from `config.transform_type` because
+/// the Auto resolution logic resolves to a concrete type before calling this.
 fn estimate_and_refine(
     ref_stars: &[DVec2],
     target_stars: &[DVec2],

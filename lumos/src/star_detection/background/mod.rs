@@ -256,23 +256,3 @@ fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &T
         }
     }
 }
-
-// =============================================================================
-// Test helpers
-// =============================================================================
-
-/// Test utility: estimate background with automatic buffer pool management.
-#[cfg(test)]
-pub(crate) fn estimate_background_test(
-    pixels: &Buffer2<f32>,
-    config: &Config,
-) -> BackgroundEstimate {
-    let mut pool = BufferPool::new(pixels.width(), pixels.height());
-    let mut estimate = estimate_background(pixels, config, &mut pool);
-
-    if config.refinement.iterations() > 0 {
-        refine_background(pixels, &mut estimate, config, &mut pool);
-    }
-
-    estimate
-}

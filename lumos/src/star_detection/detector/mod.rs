@@ -196,13 +196,7 @@ impl StarDetector {
 
         // Step 6: Apply quality filters, sort, and remove duplicates
         let (stars, filter_stats) = stages::filter::filter(stars, &self.config);
-        diagnostics.rejected_saturated = filter_stats.saturated;
-        diagnostics.rejected_low_snr = filter_stats.low_snr;
-        diagnostics.rejected_high_eccentricity = filter_stats.high_eccentricity;
-        diagnostics.rejected_cosmic_rays = filter_stats.cosmic_rays;
-        diagnostics.rejected_roundness = filter_stats.roundness;
-        diagnostics.rejected_fwhm_outliers = filter_stats.fwhm_outliers;
-        diagnostics.rejected_duplicates = filter_stats.duplicates;
+        filter_stats.apply_to(&mut diagnostics);
 
         if filter_stats.fwhm_outliers > 0 {
             tracing::debug!(

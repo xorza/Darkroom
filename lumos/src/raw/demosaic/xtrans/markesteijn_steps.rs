@@ -9,20 +9,7 @@ use super::XTransImage;
 use super::hex_lookup::HexLookup;
 use super::markesteijn::NDIR;
 
-/// Wrapper to send raw pointers across rayon threads.
-/// SAFETY: Caller must ensure no data races (each thread writes to unique indices).
-/// Access inner value via `.get()` — never `.0` — so that Edition 2024 closures
-/// capture `&UnsafeSendPtr` (which is Sync) rather than the inner pointer field.
-#[derive(Clone, Copy)]
-struct UnsafeSendPtr<T: Copy>(T);
-unsafe impl<T: Copy> Send for UnsafeSendPtr<T> {}
-unsafe impl<T: Copy> Sync for UnsafeSendPtr<T> {}
-
-impl<T: Copy> UnsafeSendPtr<T> {
-    fn get(&self) -> T {
-        self.0
-    }
-}
+use crate::common::UnsafeSendPtr;
 
 /// Direction offsets for derivative computation.
 /// Maps direction index to (dy, dx) offset for the spatial Laplacian.
@@ -247,7 +234,7 @@ pub(super) fn interpolate_green(
         let (dir0, rest) = green_dir.split_at_mut(pixels);
         let (dir1, rest) = rest.split_at_mut(pixels);
         let (dir2, dir3) = rest.split_at_mut(pixels);
-        UnsafeSendPtr([
+        UnsafeSendPtr::new([
             dir0.as_mut_ptr(),
             dir1.as_mut_ptr(),
             dir2.as_mut_ptr(),
@@ -354,7 +341,7 @@ pub(super) fn compute_derivatives(
     let width = xtrans.width;
     let height = xtrans.height;
     let pixels = width * height;
-    let drv_ptr = UnsafeSendPtr(drv.as_mut_ptr());
+    let drv_ptr = UnsafeSendPtr::new(drv.as_mut_ptr());
 
     // Split each direction's rows into chunks for parallelism, and within each
     // chunk process rows sequentially with a sliding 3-row YPbPr cache.

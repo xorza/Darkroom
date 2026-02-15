@@ -4,11 +4,22 @@
 use bench::quick_bench;
 use std::hint::black_box;
 
-use super::estimate_background_test;
 use super::tile_grid::TileGrid;
-use crate::common::BitBuffer2;
+use super::{BufferPool, estimate_background, refine_background};
+use crate::common::{BitBuffer2, Buffer2};
+use crate::star_detection::background::BackgroundEstimate;
 use crate::star_detection::config::Config;
 use crate::testing::synthetic::{generate_globular_cluster, stamps};
+
+/// Estimate background with automatic buffer pool management (bench helper).
+fn estimate_background_test(pixels: &Buffer2<f32>, config: &Config) -> BackgroundEstimate {
+    let mut pool = BufferPool::new(pixels.width(), pixels.height());
+    let mut estimate = estimate_background(pixels, config, &mut pool);
+    if config.refinement.iterations() > 0 {
+        refine_background(pixels, &mut estimate, config, &mut pool);
+    }
+    estimate
+}
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_background_estimate_6k(b: ::bench::Bencher) {

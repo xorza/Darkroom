@@ -14,6 +14,17 @@ const FWHM_MIN: f32 = 0.5;
 /// galaxies, nebulae, or artifacts rather than point sources.
 const FWHM_MAX: f32 = 20.0;
 
+/// Default FWHM used when auto-estimation has insufficient stars.
+const DEFAULT_FWHM: f32 = 4.0;
+
+/// MAD multiplier for outlier rejection in FWHM estimation.
+/// Stars with FWHM deviating more than this many MADs from the median are rejected.
+const FWHM_MAD_MULTIPLIER: f32 = 3.0;
+
+/// Minimum MAD as a fraction of median FWHM. Prevents zero-threshold
+/// when all FWHM values are near-identical (uniform distribution).
+const FWHM_MAD_FLOOR_FRACTION: f32 = 0.1;
+
 use super::detect::detect;
 use super::measure;
 use crate::star_detection::background::BackgroundEstimate;
@@ -90,7 +101,7 @@ fn estimate_from_bright_stars(
     estimate_fwhm_from_stars(
         &stars,
         config.min_stars_for_fwhm,
-        4.0,
+        DEFAULT_FWHM,
         config.max_eccentricity,
         config.max_sharpness,
     )
@@ -147,7 +158,7 @@ fn estimate_fwhm_from_stars(
     let mad = mad_f32_with_scratch(&fwhms, median, &mut scratch);
 
     // Reject outliers: keep within 3×MAD of median (with floor for uniform distributions)
-    let threshold = 3.0 * mad.max(median * 0.1);
+    let threshold = FWHM_MAD_MULTIPLIER * mad.max(median * FWHM_MAD_FLOOR_FRACTION);
     let count_before = fwhms.len();
     fwhms.retain(|&f| (f - median).abs() <= threshold);
 

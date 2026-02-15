@@ -21,6 +21,19 @@ pub(crate) struct QualityFilterStats {
     pub duplicates: usize,
 }
 
+impl QualityFilterStats {
+    /// Write rejection counts into the corresponding Diagnostics fields.
+    pub fn apply_to(&self, d: &mut super::super::Diagnostics) {
+        d.rejected_saturated = self.saturated;
+        d.rejected_low_snr = self.low_snr;
+        d.rejected_high_eccentricity = self.high_eccentricity;
+        d.rejected_cosmic_rays = self.cosmic_rays;
+        d.rejected_roundness = self.roundness;
+        d.rejected_fwhm_outliers = self.fwhm_outliers;
+        d.rejected_duplicates = self.duplicates;
+    }
+}
+
 /// Filter stars by quality metrics, remove duplicates, and sort by flux.
 ///
 /// Returns the filtered stars and rejection statistics. Stars are returned

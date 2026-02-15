@@ -206,6 +206,10 @@ impl Transform {
 
     /// Create transform from a [`DMat3`] matrix.
     pub fn from_matrix(matrix: DMat3, transform_type: TransformType) -> Self {
+        assert!(
+            transform_type != TransformType::Auto,
+            "Auto must be resolved to a concrete type before creating a Transform"
+        );
         Self {
             matrix,
             transform_type,

@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use rayon::prelude::*;
 
-use crate::common::{BitBuffer2, Buffer2};
+use crate::common::{BitBuffer2, Buffer2, UnsafeSendPtr};
 use crate::star_detection::buffer_pool::BufferPool;
 
 use crate::star_detection::config::Connectivity;
@@ -489,7 +489,7 @@ pub(super) fn label_mask_parallel(
     let label_map = uf.build_label_map(total_labels);
 
     // Phase 4: Write labels in parallel - iterate strips directly
-    let labels_ptr = labels.pixels_mut().as_mut_ptr() as usize;
+    let labels_ptr = UnsafeSendPtr::new(labels.pixels_mut().as_mut_ptr());
 
     strip_results.par_iter().for_each(|strip| {
         for &(y, run) in &strip.runs {
@@ -499,7 +499,7 @@ pub(super) fn label_mask_parallel(
                 .copied()
                 .expect("label out of range in label_map");
             // SAFETY: Each run writes to disjoint pixels
-            let ptr = labels_ptr as *mut u32;
+            let ptr = labels_ptr.get();
             for x in run.start..run.end {
                 unsafe {
                     *ptr.add(row_start + x as usize) = final_label;

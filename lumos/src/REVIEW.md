@@ -36,6 +36,8 @@ No critical bugs found. Most findings are maintainability improvements.
 - **[F21]** Documented magic constant 24 in X-Trans same-color median
 - **[F28]** Investigated — `w > 0.0` is NOT redundant (prevents division by zero when `min_coverage=0.0`)
 - **[F30]** Fixed ProgressCallback doc signature to match `StackingProgress` struct API
+- **[F12]** Replaced ambiguous `Option<(f32, f32)>` return in `sigma_clip_iteration` with `ClipResult` enum (Converged/Clipped/TooFew)
+- **[F25]** Added `assert!` in `Transform::from_matrix()` to prevent `TransformType::Auto` from being stored
 - **[F32]** Fixed `sort_with_indices` NaN handling: `partial_cmp().unwrap()` → `total_cmp()`
 - **[F26]** Removed redundant SIP clone: eliminated `sip_correction` field from `RegistrationResult`, derived from `sip_fit` in `warp_transform()`
 - **[F31]** Changed `warp_image` from `pub` to `pub(crate)`
@@ -167,7 +169,7 @@ No critical bugs found. Most findings are maintainability improvements.
   and `wide_field()` but actually starts from `Default` and overrides individual
   fields. If any preset gains new fields, this silently diverges.
 
-#### [F12] `sigma_clip_iteration` return semantics are ambiguous
+#### [F12] ~~`sigma_clip_iteration` return semantics are ambiguous~~ DONE
 - **Location**: `math/statistics/mod.rs:112-160`
 - **Category**: Code clarity
 - **Impact**: 2/5 — `None` means both "continue iterating" and "too few items"
@@ -304,7 +306,7 @@ No critical bugs found. Most findings are maintainability improvements.
 - **Description**: `star_field.rs` implements its own `add_gaussian_noise()` instead
   of reusing the identical function from `patterns.rs`.
 
-#### [F25] `TransformType::Auto` panics in `degrees_of_freedom()` and `Display`
+#### [F25] ~~`TransformType::Auto` panics in `degrees_of_freedom()` and `Display`~~ DONE
 - **Location**: `registration/transform.rs:55-56,121-122`
 - **Category**: Robustness
 - **Impact**: 2/5 — Panic in unexpected places if Auto leaks through
