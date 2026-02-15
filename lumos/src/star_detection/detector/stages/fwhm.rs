@@ -6,6 +6,14 @@
 use crate::common::Buffer2;
 use crate::math::{mad_f32_with_scratch, median_f32_mut};
 
+/// Minimum plausible FWHM in pixels. Stars narrower than this are likely
+/// cosmic rays or hot pixels.
+const FWHM_MIN: f32 = 0.5;
+
+/// Maximum plausible FWHM in pixels. Sources broader than this are likely
+/// galaxies, nebulae, or artifacts rather than point sources.
+const FWHM_MAX: f32 = 20.0;
+
 use super::detect::detect;
 use crate::star_detection::background::BackgroundEstimate;
 use crate::star_detection::buffer_pool::BufferPool;
@@ -128,7 +136,7 @@ fn estimate_fwhm_from_stars(
             !s.is_saturated()
                 && s.eccentricity <= max_eccentricity
                 && s.sharpness < max_sharpness
-                && (0.5..20.0).contains(&s.fwhm)
+                && (FWHM_MIN..FWHM_MAX).contains(&s.fwhm)
         })
         .map(|s| s.fwhm)
         .collect();

@@ -31,6 +31,12 @@ use rand::prelude::*;
 use crate::registration::transform::{Transform, TransformType};
 use crate::registration::triangle::PointMatch;
 
+/// Minimum cross-product magnitude to consider points non-collinear.
+/// For points separated by ~1 pixel, a cross product of 1.0 corresponds
+/// to ~1 pixel perpendicular offset — below this, the sample is too
+/// close to a line for reliable transform estimation.
+const COLLINEARITY_THRESHOLD: f64 = 1.0;
+
 /// RANSAC parameters extracted from Config.
 #[derive(Debug, Clone)]
 pub struct RansacParams {
@@ -598,7 +604,7 @@ fn is_sample_degenerate(points: &[DVec2]) -> bool {
         for p in &points[2..] {
             let v = *p - points[0];
             let cross = v0.x * v.y - v0.y * v.x;
-            if cross.abs() > 1.0 {
+            if cross.abs() > COLLINEARITY_THRESHOLD {
                 all_collinear = false;
                 break;
             }

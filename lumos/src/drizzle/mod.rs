@@ -37,6 +37,24 @@ use crate::stacking::{Error, ProgressCallback, StackingStage};
 /// Maximum number of channels (RGB = 3).
 const MAX_CHANNELS: usize = 3;
 
+/// Minimum Jacobian (area magnification) to accept a pixel mapping.
+/// Below this, the transform is degenerate (e.g. maps to a line or point).
+const JACOBIAN_MIN: f64 = 1e-30;
+
+/// Minimum total kernel weight for radial kernels (Gaussian, Lanczos).
+/// If the sum of kernel weights is below this, the pixel is skipped
+/// to avoid division by near-zero.
+const KERNEL_WEIGHT_MIN: f32 = 1e-10;
+
+/// Threshold for treating `sin(pi*x)/(pi*x)` as 1.0 in Lanczos kernel.
+/// When |x| < this value, the sinc function is indistinguishable from 1.0.
+const SINC_ZERO_THRESHOLD: f32 = 1e-6;
+
+/// Minimum |dx| in `sgarea()` to compute a meaningful slope.
+/// Below this the line segment is effectively vertical and contributes
+/// negligible area.
+const SGAREA_DX_MIN: f64 = 1e-14;
+
 /// Drizzle kernel type for distributing flux.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DrizzleKernel {
@@ -328,7 +346,7 @@ impl DrizzleAccumulator {
                 let oy_center = t.y as f32 * scale;
 
                 let jaco = local_jacobian(transform, t, ix, iy, scale as f64) as f32;
-                if jaco < 1e-30 {
+                if jaco < JACOBIAN_MIN as f32 {
                     continue;
                 }
 
@@ -418,7 +436,7 @@ impl DrizzleAccumulator {
                     * ((xout[1] - xout[3]) * (yout[0] - yout[2])
                         - (xout[0] - xout[2]) * (yout[1] - yout[3]));
                 let abs_jaco = jaco.abs();
-                if abs_jaco < 1e-30 {
+                if abs_jaco < JACOBIAN_MIN {
                     continue; // Degenerate quadrilateral
                 }
 
@@ -476,7 +494,7 @@ impl DrizzleAccumulator {
 
                 if ox >= 0 && ox < output_width as isize && oy >= 0 && oy < output_height as isize {
                     let jaco = local_jacobian(transform, t, ix, iy, scale as f64) as f32;
-                    if jaco < 1e-30 {
+                    if jaco < JACOBIAN_MIN as f32 {
                         continue;
                     }
                     self.accumulate(image, ix, iy, ox as usize, oy as usize, weight * pw / jaco);
@@ -518,7 +536,7 @@ impl DrizzleAccumulator {
                 let oy_center = t.y as f32 * scale;
 
                 let jaco = local_jacobian(transform, t, ix, iy, scale as f64) as f32;
-                if jaco < 1e-30 {
+                if jaco < JACOBIAN_MIN as f32 {
                     continue;
                 }
 
@@ -544,7 +562,7 @@ impl DrizzleAccumulator {
                     }
                 }
 
-                if total_weight.abs() < 1e-10 {
+                if total_weight.abs() < KERNEL_WEIGHT_MIN {
                     continue;
                 }
 
@@ -722,7 +740,7 @@ fn compute_square_overlap(
 /// Lanczos kernel function.
 #[inline]
 fn lanczos_kernel(x: f32, a: f32) -> f32 {
-    if x.abs() < 1e-6 {
+    if x.abs() < SINC_ZERO_THRESHOLD {
         return 1.0;
     }
     if x.abs() >= a {
@@ -745,7 +763,7 @@ fn sgarea(x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {
     let dy = y2 - y1;
 
     // Near-vertical line contributes negligible area
-    if dx.abs() < 1e-14 {
+    if dx.abs() < SGAREA_DX_MIN {
         return 0.0;
     }
 
