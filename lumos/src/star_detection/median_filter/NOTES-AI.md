@@ -35,14 +35,24 @@ Processes 8 (AVX2) or 4 (SSE4.1) independent median computations in parallel.
 ### Two Different Sorting Networks
 The codebase has two median9 implementations with different comparator counts:
 1. **mod.rs `median9`** (lines 267-342): 21-comparator partial sort (column-row structured)
-   - Sorts three 3-element columns, then cross-compares, then resolves middle
+   - Sorts three 3-element rows, then sorts columns, then sorts {v[3],v[4],v[5]}
 2. **simd/mod.rs `median9_scalar`** (lines 112-148): 25-comparator full sort
    - Used in SIMD scalar fallback
 
-Both produce correct results. The 21-comparator version is theoretically optimal for
-finding just the median (no need to fully sort), while the 25-comparator version fully
-sorts all 9 elements. The 25-comparator version is used in the SIMD path because the
-same network is vectorized into min/max operations.
+**BUG (dormant):** The 21-comparator `median9` in `mod.rs` is **incorrect**. After
+forming a Young tableau (sort rows, sort columns), the median of all 9 elements is the
+median of the anti-diagonal {v[2], v[4], v[6]}. But step 3 sorts {v[3], v[4], v[5]}
+(the middle row), which is already sorted and thus a no-op. Counter-example: input
+`[0.1, 0.2, 0.9, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]` produces v[4]=0.4, true median=0.5.
+
+**Impact: NONE in production.** The `median9` in `mod.rs` is reachable only through
+`median_of_n` with exactly 9 elements, called from `median_at_edge`. Edge pixels have
+at most 6 neighbors (top/bottom rows: 2 rows × 3 columns = 6), never 9. All interior
+pixels use the correct 25-comparator `median9_scalar` from `simd/mod.rs`.
+
+The 25-comparator network is the proven optimal S(9)=25 full sorting network (Codish,
+Cruz-Filipe, Frank, and Schneider-Kamp 2014). It is used in all SIMD paths and the
+scalar fallback. It is correct.
 
 ### Edge Handling
 - **Interior rows** (y > 0 and y < height-1): full 9-element neighborhood, SIMD fast path
@@ -90,12 +100,12 @@ and merge close star pairs.
 
 ## Issues
 
-### P3: Two Inconsistent Sorting Networks
-- `mod.rs:median9` uses 21 comparators (partial sort, finds median only)
-- `simd/mod.rs:median9_scalar` uses 25 comparators (full sort)
-- Both are correct, but the inconsistency may cause confusion
-- The 21-comparator version could replace the 25-comparator scalar fallback for
-  marginal performance gain in the non-SIMD path
+### P3: Dormant Bug in `mod.rs:median9`
+- `mod.rs:median9` uses 21 comparators and is **incorrect** (wrong anti-diagonal sort)
+- `simd/mod.rs:median9_scalar` uses 25 comparators and is correct
+- The buggy function is unreachable in production (edge pixels have at most 6 neighbors)
+- Fix: either replace step 3 to sort {v[2],v[4],v[6]} instead of {v[3],v[4],v[5]},
+  or remove the `median9` branch from `median_of_n` entirely (dead code elimination)
 
 ### P3: No 5x5 Option
 - Fixed 3x3 kernel. No option for 5x5 median for extremely noisy images or

@@ -165,6 +165,21 @@ fn emit_map<W: Write>(
         return Ok(());
     }
 
+    // Inline small maps of simple values
+    if entries.len() <= 3 && entries.iter().all(|(_, v)| is_simple(v)) {
+        w.write_all(b"{ ")?;
+        for (i, (key, value)) in entries.iter().enumerate() {
+            if i > 0 {
+                w.write_all(b", ")?;
+            }
+            emit_key(w, key)?;
+            w.write_all(b": ")?;
+            emit_value(w, value, 0, false)?;
+        }
+        w.write_all(b" }")?;
+        return Ok(());
+    }
+
     w.write_all(b"{\n")?;
     let next = indent + 1;
     for (i, (key, value)) in entries.iter().enumerate() {

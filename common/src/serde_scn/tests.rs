@@ -407,6 +407,58 @@ fn output_format_empty_map() {
     assert_eq!(scn, "{}\n");
 }
 
+#[test]
+fn output_format_small_map_inline() {
+    // 1-entry map: inline
+    use std::collections::BTreeMap;
+    let mut map = BTreeMap::new();
+    map.insert("x".to_string(), 1i32);
+    let scn = to_string(&map).unwrap();
+    assert_eq!(scn, "{ x: 1 }\n");
+
+    // 2-entry map: inline
+    map.insert("y".to_string(), 2);
+    let scn = to_string(&map).unwrap();
+    assert_eq!(scn, "{ x: 1, y: 2 }\n");
+
+    // 3-entry map: inline
+    map.insert("z".to_string(), 3);
+    let scn = to_string(&map).unwrap();
+    assert_eq!(scn, "{ x: 1, y: 2, z: 3 }\n");
+
+    // 4-entry map: multiline
+    map.insert("w".to_string(), 4);
+    let scn = to_string(&map).unwrap();
+    assert!(scn.contains('\n'), "4-entry map should be multiline: {scn}");
+    assert!(
+        !scn.starts_with("{ "),
+        "4-entry map should not be inline: {scn}"
+    );
+}
+
+#[test]
+fn output_format_map_with_complex_values_multiline() {
+    // Map with non-simple values should always be multiline, even if ≤3 entries
+    use std::collections::BTreeMap;
+    let mut map = BTreeMap::new();
+    map.insert("a".to_string(), vec![1i32, 2]);
+    let scn = to_string(&map).unwrap();
+    assert!(
+        scn.contains('\n'),
+        "map with array value should be multiline: {scn}"
+    );
+}
+
+#[test]
+fn output_format_small_map_inline_roundtrip() {
+    // Inline map output must parse back correctly
+    use std::collections::BTreeMap;
+    let mut map = BTreeMap::new();
+    map.insert("a".to_string(), 10i32);
+    map.insert("b".to_string(), 20);
+    roundtrip(&map);
+}
+
 // ===========================================================================
 // IO round trips
 // ===========================================================================
@@ -2490,4 +2542,3 @@ fn valid_variant_names_accepted() {
     assert!(to_string(&Good::Renamed).is_ok());
     assert!(to_string(&Good::UnderscoreStart).is_ok());
 }
-
