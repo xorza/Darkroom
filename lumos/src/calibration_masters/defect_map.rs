@@ -362,7 +362,7 @@ fn xtrans_same_color_median(pixels: &Buffer2<f32>, x: usize, y: usize, pattern: 
     }
 
     if candidates.is_empty() {
-        return pixels[y * width + x];
+        return pixels.row(y)[x];
     }
 
     // Sort by Manhattan distance, take closest 24

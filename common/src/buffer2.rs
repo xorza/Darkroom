@@ -40,6 +40,20 @@ impl<T> Buffer2<T> {
     }
 
     #[inline]
+    pub fn row(&self, y: usize) -> &[T] {
+        debug_assert!(y < self.height);
+        let start = y * self.width;
+        &self.pixels[start..start + self.width]
+    }
+
+    #[inline]
+    pub fn row_mut(&mut self, y: usize) -> &mut [T] {
+        debug_assert!(y < self.height);
+        let start = y * self.width;
+        &mut self.pixels[start..start + self.width]
+    }
+
+    #[inline]
     pub fn index(&self, x: usize, y: usize) -> usize {
         y * self.width + x
     }
@@ -396,5 +410,24 @@ mod tests {
         let buf = Buffer2::new(2, 2, vec![1, 2, 3, 4]);
         let cloned = buf.clone();
         assert_eq!(buf, cloned);
+    }
+
+    #[test]
+    fn test_row() {
+        // 3x2 buffer: row 0 = [10, 20, 30], row 1 = [40, 50, 60]
+        let buf = Buffer2::new(3, 2, vec![10, 20, 30, 40, 50, 60]);
+        assert_eq!(buf.row(0), &[10, 20, 30]);
+        assert_eq!(buf.row(1), &[40, 50, 60]);
+    }
+
+    #[test]
+    fn test_row_mut() {
+        let mut buf = Buffer2::new(3, 2, vec![10, 20, 30, 40, 50, 60]);
+        buf.row_mut(1)[0] = 99;
+        buf.row_mut(1)[2] = 77;
+        // row 0 unchanged
+        assert_eq!(buf.row(0), &[10, 20, 30]);
+        // row 1 modified at indices 0 and 2
+        assert_eq!(buf.row(1), &[99, 50, 77]);
     }
 }

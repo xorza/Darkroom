@@ -264,12 +264,13 @@ impl CfaImage {
         let mut counts = [0u64; 3];
 
         for y in 0..height {
+            let flat_row = flat.data.row(y);
+            let bias_row = bias.map(|b| b.data.row(y));
             for x in 0..width {
-                let idx = y * width + x;
                 let color = cfa_type.color_at(x, y) as usize;
-                let val = match bias {
-                    Some(b) => (flat.data[idx] - b.data[idx]) as f64,
-                    None => flat.data[idx] as f64,
+                let val = match bias_row {
+                    Some(br) => (flat_row[x] - br[x]) as f64,
+                    None => flat_row[x] as f64,
                 };
                 sums[color] += val;
                 counts[color] += 1;
@@ -295,12 +296,13 @@ impl CfaImage {
             .par_chunks_mut(width)
             .enumerate()
             .for_each(|(y, row)| {
+                let flat_row = flat_data.row(y);
+                let bias_row = bias_data.map(|b| b.row(y));
                 for (x, pixel) in row.iter_mut().enumerate() {
-                    let idx = y * width + x;
                     let color = cfa_type.color_at(x, y) as usize;
-                    let norm_flat = match bias_data {
-                        Some(b) => (flat_data[idx] - b[idx]) * inv_means[color],
-                        None => flat_data[idx] * inv_means[color],
+                    let norm_flat = match bias_row {
+                        Some(br) => (flat_row[x] - br[x]) * inv_means[color],
+                        None => flat_row[x] * inv_means[color],
                     };
                     if norm_flat > f32::EPSILON {
                         *pixel /= norm_flat;

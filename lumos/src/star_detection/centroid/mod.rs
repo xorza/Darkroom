@@ -145,7 +145,7 @@ pub(crate) fn extract_stamp(
         for dx in -stamp_radius_i32..=stamp_radius_i32 {
             let x = (icx + dx as isize) as usize;
             let y = (icy + dy as isize) as usize;
-            let value = pixels[y * width + x];
+            let value = pixels.row(y)[x];
 
             data_x.push(x as f32);
             data_y.push(y as f32);
@@ -317,8 +317,14 @@ pub fn measure_star(
     // Compute local background based on configured method
     let icx = pos.x.round() as isize;
     let icy = pos.y.round() as isize;
-    let idx = icy as usize * width + icx as usize;
-    let global_fallback = || (background.background[idx], background.noise[idx]);
+    let bg_y = icy as usize;
+    let bg_x = icx as usize;
+    let global_fallback = || {
+        (
+            background.background.row(bg_y)[bg_x],
+            background.noise.row(bg_y)[bg_x],
+        )
+    };
 
     let (local_bg, _local_noise) = match config.local_background {
         LocalBackgroundMethod::GlobalMap => global_fallback(),
@@ -545,13 +551,15 @@ pub(crate) fn compute_metrics(
     let stamp_radius_i32 = stamp_radius as i32;
     let outer_ring_threshold = (stamp_radius_i32 - 2) * (stamp_radius_i32 - 2);
     for dy in -stamp_radius_i32..=stamp_radius_i32 {
+        let y = (icy + dy as isize) as usize;
+        let px_row = pixels.row(y);
+        let bg_row = background.background.row(y);
+        let noise_row = background.noise.row(y);
         for dx in -stamp_radius_i32..=stamp_radius_i32 {
             let x = (icx + dx as isize) as usize;
-            let y = (icy + dy as isize) as usize;
-            let idx = y * width + x;
 
-            let bg = background.background[idx];
-            let value = (pixels[idx] - bg).max(0.0) as f64;
+            let bg = bg_row[x];
+            let value = (px_row[x] - bg).max(0.0) as f64;
 
             flux += value;
             peak_value = peak_value.max(value);
@@ -578,7 +586,7 @@ pub(crate) fn compute_metrics(
             // Collect noise from background region (outer ring)
             let r2 = dx * dx + dy * dy;
             if r2 > outer_ring_threshold {
-                noise_sum += background.noise[idx] as f64;
+                noise_sum += noise_row[x] as f64;
                 noise_count += 1;
             }
         }
@@ -613,7 +621,7 @@ pub(crate) fn compute_metrics(
     let avg_noise = if noise_count > 0 {
         (noise_sum / noise_count as f64) as f32
     } else {
-        background.noise[icy as usize * width + icx as usize]
+        background.noise.row(icy as usize)[icx as usize]
     };
 
     let npix = (2 * stamp_radius + 1).pow(2) as f32;

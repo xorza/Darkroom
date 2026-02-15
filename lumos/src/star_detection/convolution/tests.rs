@@ -147,7 +147,7 @@ fn test_gaussian_convolve_spreads_point_source() {
     let center_val = kernel[kernel.len() / 2];
     // For separable convolution, peak = center_val^2
     let expected_peak = center_val * center_val;
-    let peak = result[16 * width + 16];
+    let peak = result.row(16)[16];
     assert!(
         (peak - expected_peak).abs() < 1e-5,
         "Peak {} should equal kernel center^2 = {}",
@@ -158,7 +158,7 @@ fn test_gaussian_convolve_spreads_point_source() {
     // Value at (17,16) = center_val * kernel[center+1] (one step in x, zero in y)
     let one_step_val = kernel[kernel.len() / 2 + 1];
     let expected_neighbor = center_val * one_step_val;
-    let actual_neighbor = result[16 * width + 17];
+    let actual_neighbor = result.row(16)[17];
     assert!(
         (actual_neighbor - expected_neighbor).abs() < 1e-5,
         "Neighbor {} should equal {} (kernel product)",
@@ -184,10 +184,10 @@ fn test_gaussian_convolve_symmetry() {
     // Check symmetry around center
     for dy in 1..8 {
         for dx in 1..8 {
-            let v1 = result[(16 + dy) * width + (16 + dx)];
-            let v2 = result[(16 - dy) * width + (16 + dx)];
-            let v3 = result[(16 + dy) * width + (16 - dx)];
-            let v4 = result[(16 - dy) * width + (16 - dx)];
+            let v1 = result.row(16 + dy)[16 + dx];
+            let v2 = result.row(16 - dy)[16 + dx];
+            let v3 = result.row(16 + dy)[16 - dx];
+            let v4 = result.row(16 - dy)[16 - dx];
 
             assert!((v1 - v2).abs() < 1e-6, "Should be symmetric vertically");
             assert!((v1 - v3).abs() < 1e-6, "Should be symmetric horizontally");
@@ -214,7 +214,7 @@ fn test_gaussian_convolve_peak_matches_kernel_product() {
         let kernel = gaussian_kernel_1d(sigma);
         let center = kernel[kernel.len() / 2];
         let expected_peak = center * center;
-        let actual_peak = result[32 * width + 32];
+        let actual_peak = result.row(32)[32];
 
         assert!(
             (actual_peak - expected_peak).abs() < 1e-5,
@@ -244,7 +244,7 @@ fn test_gaussian_convolve_edge_handling() {
     assert!(result.iter().all(|v| v.is_finite()));
 
     // Peak should still be at (2,2)
-    let peak = result[2 * width + 2];
+    let peak = result.row(2)[2];
     let kernel = gaussian_kernel_1d(1.5);
     let center = kernel[kernel.len() / 2];
     assert!(
@@ -278,7 +278,7 @@ fn test_gaussian_convolve_non_square_image() {
     // Peak should match kernel center^2
     let kernel = gaussian_kernel_1d(2.0);
     let center = kernel[kernel.len() / 2];
-    let peak = result[16 * width + 32];
+    let peak = result.row(16)[32];
     assert!(
         (peak - center * center).abs() < 1e-5,
         "Non-square peak {} should match kernel center^2 = {}",
@@ -369,7 +369,7 @@ fn test_matched_filter_detects_star() {
     );
 
     // Peak at star location should be the maximum in the image
-    let peak = result[cy * width + cx];
+    let peak = result.row(cy)[cx];
     let max_val = result.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let max_idx = result.iter().position(|&v| v == max_val).unwrap();
     assert_eq!(
@@ -432,7 +432,7 @@ fn test_matched_filter_boosts_snr() {
     let mut max_y = 0;
     for y in 0..height {
         for x in 0..width {
-            let v = result[y * width + x];
+            let v = result.row(y)[x];
             if v > max_val {
                 max_val = v;
                 max_x = x;
@@ -527,7 +527,7 @@ fn test_matched_filter_noise_normalization() {
     let mut count = 0usize;
     for y in margin..height - margin {
         for x in margin..width - margin {
-            let v = result[y * width + x] as f64;
+            let v = result.row(y)[x] as f64;
             sum += v;
             sum_sq += v * v;
             count += 1;
@@ -717,13 +717,13 @@ fn test_elliptical_convolve_spreads_point_source() {
     elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.0, &mut result, &mut temp);
 
     // Peak should be reduced
-    let peak = result[cy * width + cx];
+    let peak = result.row(cy)[cx];
     assert!(peak < 1.0, "Peak should be reduced after convolution");
     assert!(peak > 0.01, "Peak should still be significant");
 
     // Neighbors should have non-zero values
-    assert!(result[cy * width + cx + 1] > 0.0);
-    assert!(result[(cy + 1) * width + cx] > 0.0);
+    assert!(result.row(cy)[cx + 1] > 0.0);
+    assert!(result.row(cy + 1)[cx] > 0.0);
 }
 
 #[test]
@@ -796,11 +796,11 @@ fn test_elliptical_convolve_rotation_invariance() {
     // The patterns should be rotated 90 degrees
     // At angle=0, horizontal spread > vertical
     // At angle=90, vertical spread > horizontal
-    let h_spread_0 = result_0[32 * width + 34]; // +2 in x
-    let v_spread_0 = result_0[34 * width + 32]; // +2 in y
+    let h_spread_0 = result_0.row(32)[34]; // +2 in x
+    let v_spread_0 = result_0.row(34)[32]; // +2 in y
 
-    let h_spread_90 = result_90[32 * width + 34];
-    let v_spread_90 = result_90[34 * width + 32];
+    let h_spread_90 = result_90.row(32)[34];
+    let v_spread_90 = result_90.row(34)[32];
 
     assert!(
         h_spread_0 > v_spread_0,
@@ -835,7 +835,7 @@ fn test_elliptical_convolve_various_axis_ratios() {
             sum
         );
 
-        let peak = result[16 * width + 16];
+        let peak = result.row(16)[16];
         assert!(
             peak > 0.0,
             "Peak should be positive for axis_ratio={}",

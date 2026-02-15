@@ -234,8 +234,7 @@ pub(super) fn convolve_rows_parallel(
         .par_chunks_mut(width)
         .enumerate()
         .for_each(|(y, out_row)| {
-            let in_row = &input[y * width..(y + 1) * width];
-            simd::convolve_row(in_row, out_row, kernel, radius);
+            simd::convolve_row(input.row(y), out_row, kernel, radius);
         });
 }
 
@@ -295,7 +294,7 @@ fn gaussian_convolve_2d_direct(pixels: &Buffer2<f32>, sigma: f32, output: &mut B
                         let sx = mirror_index(sx, width);
                         let sy = mirror_index(sy, height);
 
-                        sum += pixels[sy * width + sx] * kernel_2d[ky * ksize + kx];
+                        sum += pixels.row(sy)[sx] * kernel_2d[ky * ksize + kx];
                     }
                 }
 
