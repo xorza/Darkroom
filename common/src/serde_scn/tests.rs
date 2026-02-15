@@ -395,6 +395,44 @@ fn output_format_small_array_inline() {
 }
 
 #[test]
+fn output_format_wide_array_goes_multiline() {
+    // 8 strings of ~12 chars each = ~130 chars total, exceeds 80-char limit
+    // Each element: "long_string_N" = 13 chars + 2 quotes = 15 chars
+    // 8 * 15 + 7 * 2 (separators) + 2 (brackets) = 136 > 80
+    let items: Vec<String> = (0..8).map(|i| format!("long_string_{i}")).collect();
+    let scn = to_string(&items).unwrap();
+    assert!(scn.contains('\n'), "wide array should be multiline: {scn}");
+    // Verify it roundtrips
+    let parsed: Vec<String> = from_str(&scn).unwrap();
+    assert_eq!(parsed, items);
+}
+
+#[test]
+fn output_format_narrow_array_stays_inline() {
+    // 3 short strings: ["ab", "cd", "ef"] = 3*4 + 2*2 + 2 = 18 < 80
+    let items = vec!["ab".to_string(), "cd".to_string(), "ef".to_string()];
+    let scn = to_string(&items).unwrap();
+    assert_eq!(scn, "[\"ab\", \"cd\", \"ef\"]\n");
+}
+
+#[test]
+fn output_format_wide_map_goes_multiline() {
+    // 3-entry map with long keys/values exceeding 80 chars
+    // { long_key_one: "long_value_one", long_key_two: "long_value_two", k: "v" }
+    // = 4 + (12+2+16) + 2 + (12+2+16) + 2 + (1+2+3) = 4+30+2+30+2+6 = 74
+    // Actually let's make it clearly over 80:
+    use std::collections::BTreeMap;
+    let mut map = BTreeMap::new();
+    map.insert("long_key_alpha".to_string(), "long_value_alpha".to_string());
+    map.insert("long_key_bravo".to_string(), "long_value_bravo".to_string());
+    map.insert("long_key_chars".to_string(), "long_value_chars".to_string());
+    // 4 + 3*(14 + 2 + 18) + 2*2 = 4 + 3*34 + 4 = 110 > 80
+    let scn = to_string(&map).unwrap();
+    assert!(scn.contains('\n'), "wide map should be multiline: {scn}");
+    roundtrip(&map);
+}
+
+#[test]
 fn output_format_empty_array() {
     let scn = to_string(&Vec::<i32>::new()).unwrap();
     assert_eq!(scn, "[]\n");
@@ -457,6 +495,139 @@ fn output_format_small_map_inline_roundtrip() {
     map.insert("a".to_string(), 10i32);
     map.insert("b".to_string(), 20);
     roundtrip(&map);
+}
+
+#[test]
+fn inline_width_boundary_array() {
+    // Construct arrays at exactly the 80-char boundary.
+    // Width formula: 2 (brackets) + sum(element widths) + 2*(n-1) (separators)
+
+    // 78 chars of content + 2 brackets = 80 → inline
+    // Use a single string: "x" * 76 → width = 76 + 2 quotes = 78, + 2 brackets = 80
+    let s = "x".repeat(76);
+    let scn = to_string(&vec![s.clone()]).unwrap();
+    let body = scn.trim_end_matches('\n');
+    assert!(
+        !body.contains('\n'),
+        "exactly 80 chars should be inline: {scn}"
+    );
+
+    // 79 chars of content + 2 brackets = 81 → multiline
+    let s = "x".repeat(77);
+    let scn = to_string(&vec![s.clone()]).unwrap();
+    let body = scn.trim_end_matches('\n');
+    assert!(body.contains('\n'), "81 chars should be multiline: {scn}");
+}
+
+#[test]
+fn inline_width_boundary_map() {
+    // Width formula: 4 ("{ " + " }") + key_width + 2 (": ") + value_width
+    // Single entry: { k: "vvv..." }
+    // bare key "k" = 1 char, ": " = 2, total overhead = 4 + 1 + 2 = 7
+    // So value width 73 → total 80 → inline. value = string of 71 chars + 2 quotes = 73.
+    use std::collections::BTreeMap;
+    let mut map = BTreeMap::new();
+    map.insert("k".to_string(), "v".repeat(71));
+    let scn = to_string(&map).unwrap();
+    let body = scn.trim_end_matches('\n');
+    assert!(
+        !body.contains('\n'),
+        "exactly 80 chars should be inline: {scn}"
+    );
+
+    // value = string of 72 chars + 2 quotes = 74, total = 81 → multiline
+    let mut map = BTreeMap::new();
+    map.insert("k".to_string(), "v".repeat(72));
+    let scn = to_string(&map).unwrap();
+    let body = scn.trim_end_matches('\n');
+    assert!(body.contains('\n'), "81 chars should be multiline: {scn}");
+}
+
+#[test]
+fn inline_width_integer_widths() {
+    // Verify integer width contributes correctly to inline decision.
+    // 7 single-digit ints: [1, 2, 3, 4, 5, 6, 7]
+    // Width: 2 + 7*1 + 6*2 = 21 → inline
+    let scn = to_string(&vec![1i32, 2, 3, 4, 5, 6, 7]).unwrap();
+    assert_eq!(scn, "[1, 2, 3, 4, 5, 6, 7]\n");
+
+    // Large negative: -1000000000 = 11 chars
+    // Single element: [-1000000000] = 2 + 11 = 13 → inline
+    let scn = to_string(&vec![-1_000_000_000i32]).unwrap();
+    assert_eq!(scn, "[-1000000000]\n");
+}
+
+#[test]
+fn inline_width_mixed_types_in_map() {
+    // Map with bool, null, int values — all simple, check width.
+    // { flag: true, count: 42, tag: null }
+    // = 4 + (4+2+4) + 2 + (5+2+2) + 2 + (3+2+4) = 4 + 10 + 2 + 9 + 2 + 9 = 36 → inline
+    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    struct MixedSmall {
+        flag: bool,
+        count: i32,
+        tag: Option<String>,
+    }
+    let val = MixedSmall {
+        flag: true,
+        count: 42,
+        tag: None,
+    };
+    let scn = to_string(&val).unwrap();
+    let body = scn.trim_end_matches('\n');
+    assert!(
+        !body.contains('\n'),
+        "small mixed map should be inline: {scn}"
+    );
+    roundtrip(&val);
+}
+
+#[test]
+fn inline_width_quoted_key_adds_width() {
+    // Quoted keys are 2 chars wider than bare keys.
+    // Build a map where bare keys fit in 80 but quoted keys push it over.
+    use std::collections::BTreeMap;
+
+    // Bare key "abcdefghijklmnop" (16 chars) + ": " + "x"*50 (52 with quotes)
+    // = 4 + 16 + 2 + 52 = 74 → inline
+    let mut map = BTreeMap::new();
+    map.insert("abcdefghijklmnop".to_string(), "x".repeat(50));
+    let scn = to_string(&map).unwrap();
+    let body = scn.trim_end_matches('\n');
+    assert!(!body.contains('\n'), "bare key map should be inline: {scn}");
+
+    // Quoted key "has-dash" (8 chars + 2 quotes = 10) + ": " + "x"*64 (66 with quotes)
+    // = 4 + 10 + 2 + 66 = 82 → multiline
+    let mut map = BTreeMap::new();
+    map.insert("has-dash".to_string(), "x".repeat(64));
+    let scn = to_string(&map).unwrap();
+    let body = scn.trim_end_matches('\n');
+    assert!(
+        body.contains('\n'),
+        "quoted key map exceeding 80 should be multiline: {scn}"
+    );
+}
+
+#[test]
+fn inline_width_special_floats() {
+    // nan = 3 chars, inf = 3 chars, -inf = 4 chars
+    // [nan, inf, -inf] = 2 + 3 + 2 + 3 + 2 + 4 = 16 → inline
+    let scn = to_string(&vec![f64::NAN, f64::INFINITY, f64::NEG_INFINITY]).unwrap();
+    // Can't do exact equality because NaN != NaN, but check format
+    let body = scn.trim_end_matches('\n');
+    assert!(
+        !body.contains('\n'),
+        "small float array should be inline: {scn}"
+    );
+    assert!(scn.starts_with("[nan, inf, -inf]"), "got: {scn}");
+}
+
+#[test]
+fn inline_width_unit_variants() {
+    // Unit variants: tag length contributes to width.
+    // [Red, Green, Blue] = 2 + 3 + 2 + 5 + 2 + 4 = 18 → inline
+    let scn = to_string(&vec![Color::Red, Color::Green, Color::Blue]).unwrap();
+    assert_eq!(scn, "[Red, Green, Blue]\n");
 }
 
 // ===========================================================================

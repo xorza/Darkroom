@@ -124,8 +124,8 @@ fn emit_array<W: Write>(
         return Ok(());
     }
 
-    // Inline small arrays of simple values
-    if items.len() <= 8 && items.iter().all(is_simple) {
+    // Inline small arrays of simple values that fit in one line
+    if items.len() <= 8 && fits_inline_array(items) {
         w.write_all(b"[")?;
         for (i, item) in items.iter().enumerate() {
             if i > 0 {
@@ -165,8 +165,8 @@ fn emit_map<W: Write>(
         return Ok(());
     }
 
-    // Inline small maps of simple values
-    if entries.len() <= 3 && entries.iter().all(|(_, v)| is_simple(v)) {
+    // Inline small maps of simple values that fit in one line
+    if entries.len() <= 3 && fits_inline_map(entries) {
         w.write_all(b"{ ")?;
         for (i, (key, value)) in entries.iter().enumerate() {
             if i > 0 {
@@ -241,17 +241,116 @@ pub(super) fn is_bare_key(s: &str) -> bool {
     !matches!(s, "true" | "false" | "null" | "nan" | "inf")
 }
 
-fn is_simple(v: &ScnValue) -> bool {
-    matches!(
-        v,
-        ScnValue::Null
-            | ScnValue::Bool(_)
-            | ScnValue::Int(_)
-            | ScnValue::Uint(_)
-            | ScnValue::Float(_)
-            | ScnValue::String(_)
-            | ScnValue::Variant(_, None)
-    )
+const MAX_INLINE_WIDTH: usize = 80;
+
+/// Estimate character width of a simple value when emitted inline.
+/// Returns None for non-simple values (they are never inlined).
+fn inline_value_width(v: &ScnValue) -> Option<usize> {
+    match v {
+        ScnValue::Null => Some(4),        // "null"
+        ScnValue::Bool(true) => Some(4),  // "true"
+        ScnValue::Bool(false) => Some(5), // "false"
+        ScnValue::Int(i) => Some(count_int_digits(*i)),
+        ScnValue::Uint(u) => Some(count_uint_digits(*u)),
+        ScnValue::Float(f) => Some(float_width(*f)),
+        ScnValue::String(s) => Some(s.len() + 2), // quotes; escape expansion ignored (rare)
+        ScnValue::Variant(tag, None) => Some(tag.len()),
+        _ => None,
+    }
+}
+
+fn count_int_digits(mut i: i128) -> usize {
+    if i == 0 {
+        return 1;
+    }
+    let neg = i < 0;
+    if neg {
+        i = i.wrapping_abs();
+    }
+    let mut n = 0;
+    while i > 0 {
+        i /= 10;
+        n += 1;
+    }
+    n + neg as usize
+}
+
+fn count_uint_digits(mut u: u128) -> usize {
+    if u == 0 {
+        return 1;
+    }
+    let mut n = 0;
+    while u > 0 {
+        u /= 10;
+        n += 1;
+    }
+    n
+}
+
+fn float_width(f: f64) -> usize {
+    if f.is_nan() {
+        return 3;
+    } // "nan"
+    if f == f64::INFINITY {
+        return 3;
+    } // "inf"
+    if f == f64::NEG_INFINITY {
+        return 4;
+    } // "-inf"
+    let mut buf = ryu::Buffer::new();
+    let s = buf.format(f);
+    let w = s.len();
+    if !s.contains('.') && !s.contains('e') && !s.contains('E') {
+        w + 2
+    } else {
+        w
+    }
+}
+
+/// Check if array items are all simple and fit within MAX_INLINE_WIDTH.
+/// Total width: `[` + items joined by `, ` + `]`
+fn fits_inline_array(items: &[ScnValue]) -> bool {
+    // 2 for brackets
+    let mut width = 2usize;
+    for (i, item) in items.iter().enumerate() {
+        let Some(w) = inline_value_width(item) else {
+            return false;
+        };
+        if i > 0 {
+            width += 2; // ", "
+        }
+        width += w;
+        if width > MAX_INLINE_WIDTH {
+            return false;
+        }
+    }
+    true
+}
+
+/// Check if map entries are all simple and fit within MAX_INLINE_WIDTH.
+/// Total width: `{ ` + entries joined by `, ` + ` }`
+fn fits_inline_map(entries: &[(String, ScnValue)]) -> bool {
+    // 4 for "{ " and " }"
+    let mut width = 4usize;
+    for (i, (key, value)) in entries.iter().enumerate() {
+        let Some(vw) = inline_value_width(value) else {
+            return false;
+        };
+        if i > 0 {
+            width += 2; // ", "
+        }
+        // key width: bare key = key.len(), quoted = key.len() + 2
+        let kw = if is_bare_key(key) {
+            key.len()
+        } else {
+            key.len() + 2
+        };
+        width += kw + 2 + vw; // key + ": " + value
+        if width > MAX_INLINE_WIDTH {
+            return false;
+        }
+    }
+    true
 }
 
 const INDENT_BUF: &[u8; 64] = b"                                                                ";
