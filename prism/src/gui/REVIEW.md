@@ -1,230 +1,221 @@
-# GUI Module Review (Round 2)
-
-Post-cleanup review after implementing suggestions 1-3, 5, 7, 9-12 from the first review.
-
-## Current State
-
-The architecture is clean. `GraphUi::render()` has clear 3-phase structure with scoped scaling. `GraphContext` is the sole data conduit. `GraphUiInteraction` lives on `GraphUi` where it belongs. Breaker results are collected in one pass. Action coalescing is explicit with named stacks.
-
----
-
-## Remaining Suggestions
-
-### 1. ConnectionUi::render() mixes rendering with mutation
-
-**Problem:** `ConnectionUi::render()` (~110 lines) does three things in one loop:
-1. Renders bezier curves (visual)
-2. Detects breaker intersections (state mutation on `curve.broke`)
-3. Applies double-click deletion (graph mutation via `input.binding = Binding::None`)
-
-The double-click deletion directly mutates `node.inputs` and pushes actions to `ui_interaction` from inside the render pass. This means the render method has side effects on the graph model — a connection can disappear mid-render while other connections are still being drawn.
-
-**Suggestion:** Collect double-click deletions into a `Vec` during the render loop and apply them afterward (similar to how `node_ids_to_remove` works in `NodeUi`). This separates "what to draw" from "what to change".
-
-```rust
-// During render loop:
-if response.double_clicked_by(PointerButton::Primary) {
-    deletions.push((node_id, input_idx, input.binding.clone()));
-}
-
-// After render loop:
-for (node_id, input_idx, before) in deletions {
-    // apply mutation + push action
-}
-```
-
-**Impact:** Medium — cleaner separation of rendering and mutation  
-**Effort:** Low
-
----
-
-### 2. `NodeUi::render_nodes()` passes too many &mut params through the call chain
-
-**Problem:** `render_nodes()` takes 5 parameters (`gui`, `ctx`, `graph_layout`, `interaction`, `breaker`), then passes subsets of these to `handle_node_drag()` (4 params), `const_bind_frame.render()` (6 params), `render_cache_btn()` (3 params), etc. Most of these functions need the same 3-4 things.
-
-**Suggestion:** Bundle the rendering context into a short-lived struct:
-
-```rust
-struct NodeRenderCtx<'a> {
-    gui: &'a mut Gui<'a>,
-    ctx: &'a mut GraphContext<'a>,
-    graph_layout: &'a mut GraphLayout,
-    interaction: &'a mut GraphUiInteraction,
-    breaker: Option<&'a ConnectionBreaker>,
-}
-```
-
-This reduces all the 4-6 param signatures to a single `&mut NodeRenderCtx`. The struct is constructed at the start of `render_nodes()` and dropped at the end.
-
-**Impact:** Medium — reduces noise in function signatures  
-**Effort:** Medium (borrow checker may resist bundling `&mut` references)
-
----
-
-### 3. PortInteractCommand priority values are magic numbers
-
-**Problem:** `PortInteractCommand::priority()` returns magic values `0, 5, 8, 10, 15` without explanation. The `prefer()` method picks the higher-priority command but doesn't document why these specific values exist or what invariants they encode.
-
-**Suggestion:** Add named constants and a comment explaining the priority order:
-
-```rust
-impl PortInteractCommand {
-    // Click > DragStop > DragStart > Hover > None
-    // Higher priority wins when multiple ports report commands in the same frame.
-    const PRIORITY_NONE: u8 = 0;
-    const PRIORITY_HOVER: u8 = 5;
-    const PRIORITY_DRAG_START: u8 = 8;
-    const PRIORITY_DRAG_STOP: u8 = 10;
-    const PRIORITY_CLICK: u8 = 15;
-}
-```
-
-**Impact:** Low — readability  
-**Effort:** Low
-
----
-
-### 4. ConstBindFrame relies on Drop for side effects
-
-**Problem:** `ConstBindFrame` uses `Drop` to commit the `currently_hovered_connection` state back to `ConstBindUi.hovered_link`. This is the only side effect in the `Drop` impl. It works correctly but is non-obvious — a reader won't expect `drop(const_bind_frame)` to update hover state.
-
-**Suggestion:** Replace with an explicit `finish()` method that consumes `self`:
-
-```rust
-impl<'a> ConstBindFrame<'a> {
-    fn finish(self) {
-        *self.prev_hovered_connection = self.currently_hovered_connection;
-        std::mem::forget(self); // skip Drop
-    }
-}
-```
-
-Or simpler: just add a comment at the `drop(const_bind_frame)` call site explaining the RAII contract:
-
-```rust
-// Commits hovered_link state back to ConstBindUi on drop
-drop(const_bind_frame);
-```
-
-**Impact:** Low — readability  
-**Effort:** Low
-
----
-
-### 5. `render_buttons()` mixes view-action logic with button rendering
-
-**Problem:** `render_buttons()` renders two button groups (top: view controls, bottom: execution controls), then applies view actions (`reset_view`, `view_selected`, `fit_all`) at the end. The view-action application calls free functions (`view_selected_node`, `fit_all_nodes`) that mutate `ctx.view_graph`. This mixes "render buttons" with "apply navigation commands".
-
-**Suggestion:** Have `render_buttons()` return a small struct describing what was clicked, and apply the view actions in the caller:
-
-```rust
-struct ButtonResult {
-    response: Response,
-    fit_all: bool,
-    view_selected: bool,
-    reset_view: bool,
-}
-```
-
-Then in `render()`:
-```rust
-let buttons = self.render_buttons(gui, &mut ctx);
-if buttons.reset_view { ... }
-if buttons.view_selected { view_selected_node(gui, &mut ctx, ...) }
-// etc.
-```
-
-This makes `render_buttons` purely about rendering and the caller responsible for applying effects.
-
-**Impact:** Low-Medium — cleaner separation  
-**Effort:** Low
-
----
-
-### 6. `new_node_ui.rs` accesses `gui.ui` directly
-
-**Problem:** In `NewNodeUi::show()`, there's a direct access to `gui.ui` (the private field) instead of going through `gui.ui()`:
-
-```rust
-gui.ui.interact(
-    gui.rect,
-    Id::new("temp background for new node ui"),
-    Sense::all(),
-);
-```
-
-This bypasses the `Gui` wrapper's public API. The `ui` field is not `pub` (it's only accessible within the module due to Rust's struct field visibility within the same crate), suggesting this was not intentional.
-
-**Suggestion:** Change to `gui.ui().interact(...)`. If there's a borrow issue with `gui.rect`, extract it to a local first (same pattern used in `capture_overlay`).
-
-**Impact:** Low — consistency  
-**Effort:** Low
-
----
-
-### 7. `LogUi` accesses `gui.ui` directly, bypasses Gui wrapper entirely
-
-**Problem:** `LogUi::render()` uses `gui.ui` (the raw field) exclusively via `frame.show(gui.ui, ...)`. It never calls `gui.ui()` or uses any `Gui` methods. The entire render method works directly on the underlying egui `Ui`.
-
-**Suggestion:** Either:
-- **(a)** Have `LogUi::render()` take `&mut Ui` and `&Style` directly instead of `&mut Gui`, making explicit that it doesn't use the Gui wrapper.
-- **(b)** Refactor to use `gui.ui()` properly and use Gui helpers where applicable.
-
-Option (a) is simpler and more honest about the actual dependency.
-
-**Impact:** Low — API clarity  
-**Effort:** Low
-
----
-
-### 8. `handle_node_drag` is a long free function that could be a method
-
-**Problem:** `handle_node_drag()` (50 lines) is a free function taking 5 parameters. It handles selection, drag state, position updates, and layout refresh. It's the most complex free function in `node_ui.rs` and is only called from `render_nodes()`.
-
-**Suggestion:** Make it a method on `NodeUi` (or on a `NodeRenderCtx` if suggestion 2 is adopted). This would let it access `self` state directly and reduce the parameter count.
-
-Alternatively, split it into two parts: `handle_selection()` and `handle_drag()`, since these are independent concerns that happen to share the same `response`.
-
-**Impact:** Low — readability  
-**Effort:** Low
-
----
-
-### 9. GraphBackgroundRenderer has excessive assertions for scale normalization
-
-**Problem:** `wrap_scale_multiplier()` has 10 assertions for what is a simple "find nearest power-of-2 multiplier" operation. While correctness-focused, this is excessive for a pure math function with bounded inputs (scale is clamped to `0.2..4.0` by the zoom logic).
-
-**Suggestion:** Keep the pre-condition asserts (finite, positive) but remove the intermediate ones (`k_low.is_finite`, `k_low <= k_high`, `contains(&k)`) since they can't fail if the inputs are valid. Add a unit test instead that covers the edge cases.
-
-**Impact:** Low — readability  
-**Effort:** Low
-
----
-
-### 10. Style is fully rebuilt on every scale change
-
-**Problem:** `Style::set_scale()` calls `Style::new()` which reconstructs the entire `Style` struct (all fonts, colors, shadows, sub-styles). Most fields don't depend on scale — colors, corner radius ratios, etc. are scale-independent. Only ~15 of ~50 fields actually change with scale.
-
-**Suggestion:** Split `Style` into `StyleBase` (scale-independent) and `ScaledStyle` (scale-dependent). `set_scale()` would only rebuild `ScaledStyle`. Or simpler: cache the last-used scale and skip rebuild if unchanged (which `Gui::set_scale` already checks via `ui_equals`, but `with_scale` calls `set_scale` twice per frame — once to set graph scale, once to restore).
-
-This is a micro-optimization and only matters if profiling shows it as a hotspot. The `Rc::make_mut` pattern means the clone only happens when the `Rc` is shared, which is every frame due to child Gui construction.
-
-**Impact:** Low (potential perf, no correctness issue)  
-**Effort:** Medium
-
----
-
-## Summary: Priority Ranking
-
-| # | Suggestion | Impact | Effort |
-|---|-----------|--------|--------|
-| 1 | Separate double-click deletion from render pass | Medium | Low |
-| 5 | Return button results instead of applying inline | Low-Med | Low |
-| 2 | Bundle NodeUi render params into context struct | Medium | Medium |
-| 3 | Named constants for port priority values | Low | Low |
-| 4 | Make ConstBindFrame Drop explicit | Low | Low |
-| 6 | Fix `gui.ui` direct access in new_node_ui | Low | Low |
-| 7 | LogUi should take `&mut Ui` instead of `&mut Gui` | Low | Low |
-| 8 | Make handle_node_drag a method or split it | Low | Low |
-| 9 | Reduce assertions in wrap_scale_multiplier | Low | Low |
-| 10 | Avoid full Style rebuild on scale change | Low | Medium |
+# Code Review: prism/src/gui (Round 3)
+
+## Summary
+
+The GUI module is well-structured with clean separation between layout, rendering, and interaction. The 3-phase render pipeline in `GraphUi::render()` is clear, and the action coalescing in `GraphUiInteraction` is solid. The previous review's key suggestions (deferred deletions, explicit `ConstBindFrame::finish()`, `ButtonResult` extraction, assertion cleanup) have been implemented.
+
+The main remaining issues are: dead code, duplicated connection deletion logic, hardcoded style values bypassing the style system, and several simplification opportunities.
+
+## Findings
+
+### Priority 1 — High Impact, Low Invasiveness
+
+#### [F1] Duplicated connection deletion logic
+- **Location**: `graph_ui.rs:355-421` and `connection_ui.rs:335-377`
+- **Category**: Generalization
+- **Impact**: 4/5 — Two independent code paths do the exact same graph mutation (disconnect Input bindings, remove Event subscribers) with the same action emission. A bug fix in one must be mirrored in the other.
+- **Meaningfulness**: 5/5 — Real duplication with real maintenance risk.
+- **Invasiveness**: 2/5 — Extract a shared `disconnect_connection(ctx, key, interaction)` function. Both call sites become one-liners.
+- **Description**: `apply_breaker_results` (breaker tool) and `apply_connection_deletions` (double-click) both iterate `ConnectionKey` variants and perform identical disconnect + action-emit logic. Extract to a shared helper:
+  ```rust
+  fn disconnect(ctx: &mut GraphContext, key: ConnectionKey, interaction: &mut GraphUiInteraction) {
+      match key {
+          ConnectionKey::Input { input_node_id, input_idx } => { /* shared logic */ }
+          ConnectionKey::Event { .. } => { /* shared logic */ }
+      }
+  }
+  ```
+
+#### [F2] Dead code: `brighten` function
+- **Location**: `style.rs:10-17`
+- **Category**: Dead code
+- **Impact**: 3/5 — Dead code adds noise when reading the style module.
+- **Meaningfulness**: 5/5 — Grep confirms zero callers in the entire codebase.
+- **Invasiveness**: 1/5 — Delete 8 lines.
+- **Description**: `pub fn brighten(color: Color32, amount: f32) -> Color32` is defined but never called anywhere. Remove it.
+
+#### [F3] Dead code: `_scaled_u8` closure in `Style::new`
+- **Location**: `style.rs:182-189`
+- **Category**: Dead code
+- **Impact**: 3/5 — Prefixed with `_` to suppress the warning, suggesting it was once used and is now stale.
+- **Meaningfulness**: 5/5 — Unused code with assert logic that will never execute.
+- **Invasiveness**: 1/5 — Delete 7 lines.
+- **Description**: The `_scaled_u8` closure is defined inside `Style::new()` but never called. The `Shadow` fields that likely used it now use inline expressions like `(10.0 * scale).ceil() as u8`. Remove the dead closure.
+
+#### [F4] Hardcoded colors in `node_details_ui.rs` bypass the style system
+- **Location**: `node_details_ui.rs:150,160`
+- **Category**: Consistency
+- **Impact**: 4/5 — These colors won't change when the user edits `StyleSettings`, breaking theming.
+- **Meaningfulness**: 4/5 — The style system already has matching colors for these exact states.
+- **Invasiveness**: 1/5 — Two one-line changes.
+- **Description**: `show_execution_info` uses hardcoded `Color32::from_rgb(255, 100, 100)` for errors and `Color32::from_rgb(255, 180, 70)` for missing inputs. The style already defines `node.errored_shadow.color` and `node.missing_inputs_shadow.color` for these states. Use them instead:
+  ```rust
+  // line 150: replace Color32::from_rgb(255, 100, 100) with:
+  gui.style.node.errored_shadow.color
+  // line 160: replace Color32::from_rgb(255, 180, 70) with:
+  gui.style.node.missing_inputs_shadow.color
+  ```
+
+#### [F5] `PointerButtonState` enum and `get_primary_button_state` are over-abstracted
+- **Location**: `graph_ui.rs:54-58, 202-214`
+- **Category**: Simplification
+- **Impact**: 3/5 — 20 lines of code for what should be a single boolean check.
+- **Meaningfulness**: 4/5 — The `Released` variant is never matched; `Pressed` and `Down` are always grouped together.
+- **Invasiveness**: 1/5 — Inline at the single call site.
+- **Description**: The only usage of `get_primary_button_state` is:
+  ```rust
+  let primary_down = matches!(
+      Self::get_primary_button_state(gui),
+      Some(PointerButtonState::Pressed | PointerButtonState::Down)
+  );
+  ```
+  Replace the entire enum + function with:
+  ```rust
+  let primary_down = gui.ui().input(|i| i.pointer.primary_pressed() || i.pointer.primary_down());
+  ```
+  Delete `PointerButtonState` and `get_primary_button_state`.
+
+#### [F6] Unused parameter `_ctx` in `rebuild_texture`
+- **Location**: `graph_background.rs:58`
+- **Category**: Dead code
+- **Impact**: 2/5 — Minor but misleading — suggests the texture depends on graph context.
+- **Meaningfulness**: 4/5 — The parameter is explicitly prefixed with `_`.
+- **Invasiveness**: 1/5 — Remove parameter from signature and call site.
+- **Description**: `GraphBackgroundRenderer::rebuild_texture` takes `_ctx: &GraphContext<'_>` but never uses it. The texture only depends on `gui.style`. Remove the parameter.
+
+### Priority 2 — High Impact, Moderate Invasiveness
+
+#### [F7] Duplicated breaker/hover/double-click pattern in `ConnectionUi::render`
+- **Location**: `connection_ui.rs:155-197` (data connections) and `connection_ui.rs:200-242` (event connections)
+- **Category**: Generalization
+- **Impact**: 4/5 — The same 10-line interaction pattern (update curve, check breaker, handle hover/double-click) is copy-pasted for data and event connections.
+- **Meaningfulness**: 4/5 — Real duplication of non-trivial interaction logic.
+- **Invasiveness**: 3/5 — Requires extracting a helper that takes `key`, `start_pos`, `end_pos`, `port_kind`, and returns whether a deletion was requested.
+- **Description**: Extract the shared pattern into a helper:
+  ```rust
+  fn update_curve_interaction(
+      gui: &mut Gui, curves: &mut CompactInsert<..>, deletions: &mut Vec<ConnectionKey>,
+      key: ConnectionKey, start_pos: Pos2, end_pos: Pos2, port_kind: PortKind,
+      breaker: Option<&ConnectionBreaker>,
+  ) { ... }
+  ```
+
+#### [F8] `path_length()` recomputed from scratch on every `add_point` call
+- **Location**: `connection_breaker.rs:126-133`
+- **Category**: Simplification / Data flow
+- **Impact**: 3/5 — O(n) recompute per point addition; becomes quadratic over the full breaker stroke.
+- **Meaningfulness**: 3/5 — Breaker lines are short (max 900px / 4px = 225 points), so not a perf issue in practice, but the fix is trivial.
+- **Invasiveness**: 2/5 — Add a `cached_length: f32` field, update in `add_point`, reset in `reset`.
+- **Description**: `add_point` calls `self.path_length()` which sums all segment lengths from scratch. Instead, maintain a running `cached_length` field:
+  ```rust
+  // In add_point, after pushing the new point:
+  self.cached_length += segment_len;
+  ```
+
+#### [F9] Four identical shadow constructions differ only by color
+- **Location**: `style.rs:258-281`
+- **Category**: Simplification
+- **Impact**: 3/5 — Four 5-line blocks with identical structure; changing blur/spread requires editing all four.
+- **Meaningfulness**: 3/5 — Real duplication with change-amplification risk.
+- **Invasiveness**: 2/5 — Extract a `make_status_shadow(color, scale, settings)` helper.
+- **Description**: `executed_shadow`, `cached_shadow`, `missing_inputs_shadow`, and `errored_shadow` all have `offset: [0, 0]`, same `blur`, same `spread`, different `color`. Extract:
+  ```rust
+  let status_shadow = |color| Shadow {
+      color,
+      offset: [0, 0],
+      blur: scaled(style_settings.shadow_blur).ceil() as u8,
+      spread: scaled(style_settings.shadow_spread).ceil() as u8,
+  };
+  ```
+
+#### [F10] Three near-identical port label rendering loops
+- **Location**: `node_ui.rs:531-553`
+- **Category**: Generalization
+- **Impact**: 3/5 — Three loops with identical structure, differing only in (a) galley list and (b) x-offset direction (left-aligned for inputs, right-aligned for outputs/events).
+- **Meaningfulness**: 3/5 — Duplication that will need triple-editing if label positioning logic changes.
+- **Invasiveness**: 2/5 — Extract a `render_label_column(gui, galleys, center_fn, align_left, padding)` helper.
+- **Description**: The input loop uses `+padding` offset (left-aligned), while output and event loops use `-padding - width` (right-aligned). A shared helper could take an alignment enum or sign parameter.
+
+### Priority 3 — Moderate Impact
+
+#### [F11] `log_ui.rs` bypasses the `Gui` wrapper entirely
+- **Location**: `log_ui.rs:30`
+- **Category**: Consistency
+- **Impact**: 2/5 — Works correctly, but `LogUi::render` takes `&mut Gui` then immediately accesses the private `gui.ui` field, never using any `Gui` methods.
+- **Meaningfulness**: 3/5 — The function signature claims a `Gui` dependency it doesn't actually use.
+- **Invasiveness**: 2/5 — Change signature to take `(ui: &mut Ui, style: &Style, status: &str)`, or refactor to use `gui.ui()`.
+- **Description**: `LogUi::render` extracts `gui.style` then passes `gui.ui` (private field) to `frame.show()`. The rest of the function works on raw `egui::Ui`. Either change the signature to honestly reflect dependencies, or use `gui.ui()` properly.
+
+#### [F12] `new_node_ui.rs` accesses `gui.ui` field directly
+- **Location**: `new_node_ui.rs:225-227`
+- **Category**: Consistency
+- **Impact**: 2/5 — Works due to submodule visibility, but inconsistent with the rest of the file which uses `gui.ui()`.
+- **Meaningfulness**: 3/5 — One direct field access among ~10 method calls in the same file.
+- **Invasiveness**: 1/5 — Change `gui.ui.make_persistent_id(...)` to `gui.ui().make_persistent_id(...)`.
+- **Description**: `show_category_functions` accesses `gui.ui` (private field) on line 226 while every other access in the file uses the `gui.ui()` method. Change for consistency.
+
+#### [F13] Redundant `PhantomData<&'a mut Ui>` in `Gui` struct
+- **Location**: `mod.rs:31`
+- **Category**: Dead code
+- **Impact**: 2/5 — Confusing to readers — the lifetime is already captured by `ui: &'a mut Ui`.
+- **Meaningfulness**: 3/5 — PhantomData is typically used when a lifetime isn't otherwise constrained. Here it's redundant.
+- **Invasiveness**: 1/5 — Remove the field and its initialization in constructors.
+- **Description**: `Gui<'a>` has `ui: &'a mut Ui` which already constrains `'a`. The `_marker: PhantomData<&'a mut Ui>` adds nothing. Remove it.
+
+#### [F14] Hardcoded spacing values in `node_details_ui.rs`
+- **Location**: `node_details_ui.rs:205,293,303-306`
+- **Category**: Consistency
+- **Impact**: 2/5 — Magic numbers `4.0`, `8.0` for spacing when `style.padding` and `style.small_padding` exist.
+- **Meaningfulness**: 3/5 — These won't scale with the style system.
+- **Invasiveness**: 1/5 — Replace literals with style references.
+- **Description**: `add_space(4.0)` and `add_space(8.0)` should use `gui.style.small_padding` and `gui.style.padding` (or multiples thereof) for consistency with the rest of the UI.
+
+#### [F15] `Gui::new` and `Gui::new_with_scale` near-duplication
+- **Location**: `mod.rs:35-56`
+- **Category**: Simplification
+- **Impact**: 2/5 — Two constructors with identical bodies except one hardcodes `scale: 1.0`.
+- **Meaningfulness**: 2/5 — Minor DRY violation.
+- **Invasiveness**: 1/5 — Have `new` call `new_with_scale(ui, style, 1.0)`.
+- **Description**: `Gui::new` is identical to `Gui::new_with_scale` except for the default scale. Simplify:
+  ```rust
+  pub fn new(ui: &'a mut Ui, style: &Rc<Style>) -> Self {
+      Self::new_with_scale(ui, style, 1.0)
+  }
+  ```
+
+### Priority 4 — Low Priority
+
+#### [F16] Commented-out `#[derive(Debug)]` on `Gui` struct
+- **Location**: `mod.rs:25`
+- **Category**: Dead code
+- **Impact**: 1/5 — Stale comment adds minor noise.
+- **Meaningfulness**: 2/5 — Cosmetic.
+- **Invasiveness**: 1/5 — Delete the comment line.
+- **Description**: `// #[derive(Debug)]` is commented out (because `egui::Ui` doesn't implement `Debug`). Either add a manual `Debug` impl (like `GraphBackgroundRenderer` does) or just remove the comment.
+
+#### [F17] `GraphUiInteraction` has inconsistent field visibility
+- **Location**: `graph_ui_interaction.rs:13-21`
+- **Category**: API cleanliness
+- **Impact**: 1/5 — Works fine; the public fields are simple values, the private ones have invariants.
+- **Meaningfulness**: 2/5 — The mixed visibility is intentional (actions need careful coalescing) but could be cleaner.
+- **Invasiveness**: 2/5 — Add accessors for `errors`, `run_cmd`, `request_argument_values` and make them private.
+- **Description**: `errors: Vec<Error>`, `run_cmd: Option<RunCommand>`, and `request_argument_values: Option<NodeId>` are `pub` while `coalesced_actions`, `immediate_actions`, and `pending_action` are private. Adding simple accessors/setters would make the encapsulation consistent.
+
+#### [F18] `NonNull` import unused in `mod.rs`
+- **Location**: `mod.rs:1`
+- **Category**: Dead code
+- **Impact**: 1/5 — Unused import.
+- **Meaningfulness**: 2/5 — Compiler may already warn about this.
+- **Invasiveness**: 1/5 — Remove `NonNull` from the import line.
+- **Description**: `use std::ptr::NonNull` is imported but never used in `mod.rs`. Remove it.
+
+## Cross-Cutting Patterns
+
+### Connection manipulation duplication
+The most impactful cross-cutting issue is the duplicated connection disconnect logic. Three places touch connections: breaker tool (`graph_ui.rs`), double-click deletion (`connection_ui.rs`), and const-bind clearing (`const_bind_ui.rs`). The first two share near-identical code for Input and Event disconnection. A single `disconnect_connection` helper would unify them and reduce the surface area for bugs.
+
+### Inconsistent `gui.ui` vs `gui.ui()` access
+Two files (`log_ui.rs`, `new_node_ui.rs`) access the private `gui.ui` field directly, while the rest of the codebase consistently uses the `gui.ui()` accessor. This is possible because submodules can see parent module's private fields, but it breaks the abstraction boundary that `Gui` establishes.
+
+### Style bypass in details panel
+`node_details_ui.rs` has both hardcoded colors and hardcoded spacing values, making it the only rendering file that partially ignores the style system. Bringing it in line would make the theming story complete.
