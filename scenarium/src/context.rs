@@ -30,12 +30,15 @@ impl Debug for ContextType {
         )
     }
 }
+
 impl PartialEq for ContextType {
     fn eq(&self, other: &Self) -> bool {
         self.ctx_id == other.ctx_id
     }
 }
+
 impl Eq for ContextType {}
+
 impl Hash for ContextType {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.ctx_id.hash(state);

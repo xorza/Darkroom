@@ -267,6 +267,7 @@ impl From<PortAddress> for Binding {
         Binding::Bind(value)
     }
 }
+
 impl From<(NodeId, usize)> for Binding {
     fn from((output_node_id, output_idx): (NodeId, usize)) -> Self {
         Binding::Bind(PortAddress {
@@ -275,16 +276,19 @@ impl From<(NodeId, usize)> for Binding {
         })
     }
 }
+
 impl From<&DataType> for Binding {
     fn from(value: &DataType) -> Self {
         Binding::Const(value.into())
     }
 }
+
 impl From<StaticValue> for Binding {
     fn from(value: StaticValue) -> Self {
         Binding::Const(value)
     }
 }
+
 impl From<i64> for Binding {
     fn from(value: i64) -> Self {
         Binding::Const(value.into())

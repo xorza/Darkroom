@@ -144,6 +144,7 @@ where
         func_lib
     }
 }
+
 pub struct TestFuncHooks {
     pub get_a: Arc<dyn Fn() -> anyhow::Result<i64> + Send + Sync + 'static>,
     pub get_b: Arc<dyn Fn() -> i64 + Send + Sync + 'static>,

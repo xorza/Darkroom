@@ -86,7 +86,7 @@ pub enum FsPathMode {
     Directory,
 }
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FsPathConfig {
     pub mode: FsPathMode,
     pub extensions: Vec<String>,
@@ -102,21 +102,6 @@ impl FsPathConfig {
 
     pub fn with_extensions(mode: FsPathMode, extensions: Vec<String>) -> Self {
         Self { mode, extensions }
-    }
-}
-
-impl PartialEq for FsPathConfig {
-    fn eq(&self, other: &Self) -> bool {
-        self.mode == other.mode && self.extensions == other.extensions
-    }
-}
-
-impl Eq for FsPathConfig {}
-
-impl Hash for FsPathConfig {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.mode.hash(state);
-        self.extensions.hash(state);
     }
 }
 
@@ -193,7 +178,6 @@ pub enum DynamicValue {
     Bool(bool),
     String(String),
     FsPath(String),
-    // Array(Vec<DynamicValue>),
     Custom {
         type_id: TypeId,
         data: Arc<dyn Any + Send + Sync>,
@@ -358,11 +342,14 @@ impl From<&DataType> for StaticValue {
             DataType::Bool => StaticValue::Bool(false),
             DataType::String => StaticValue::String(String::new()),
             DataType::FsPath(_) => StaticValue::FsPath(String::new()),
+            DataType::Null => StaticValue::Null,
             DataType::Enum(enum_def) => StaticValue::Enum {
                 type_id: enum_def.type_id,
                 variant_name: enum_def.variants[0].clone(),
             },
-            _ => panic!("No value for {:?}", data_type),
+            DataType::Array { .. } | DataType::Custom(_) => {
+                panic!("No default StaticValue for {:?}", data_type)
+            }
         }
     }
 }
