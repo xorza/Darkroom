@@ -1,5 +1,3 @@
-use std::panic;
-
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use common::{BoolExt, SerdeFormat, is_debug};
 use hashbrown::HashSet;
@@ -40,13 +38,6 @@ pub struct ArgumentValues {
     pub outputs: Vec<DynamicValue>,
 }
 
-#[derive(Debug, Clone, Default, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum InputState {
-    #[default]
-    Changed,
-    Unchanged,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OutputUsage {
     Skip,
@@ -72,22 +63,11 @@ pub enum ExecutionBinding {
 }
 
 impl ExecutionBinding {
-    pub fn as_const(&self) -> Option<&StaticValue> {
-        match self {
-            ExecutionBinding::Const(v) => Some(v),
-            _ => None,
-        }
-    }
-
     pub fn as_bind(&self) -> Option<&ExecutionPortAddress> {
         match self {
             ExecutionBinding::Bind(addr) => Some(addr),
             _ => None,
         }
-    }
-
-    pub fn is_none(&self) -> bool {
-        matches!(self, ExecutionBinding::None)
     }
 }
 

@@ -17,7 +17,7 @@ pub mod prelude {
     pub use crate::context::ContextType;
     pub use crate::data::{CustomValue, DataType, DynamicValue, StaticValue, TypeId};
     pub use crate::execution_graph::{
-        ExecutionGraph, ExecutionInput, ExecutionNode, ExecutionOutput, InputState,
+        ExecutionGraph, ExecutionInput, ExecutionNode, ExecutionOutput,
     };
     pub use crate::execution_stats::{ExecutedNodeStats, ExecutionStats, NodeError};
     pub use crate::func_lambda::{FuncLambda, InvokeError, InvokeInput, InvokeResult};
