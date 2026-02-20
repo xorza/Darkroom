@@ -311,10 +311,6 @@ impl ExecutionGraph {
         self.e_nodes.by_key(node_id)
     }
 
-    pub fn by_id_mut(&mut self, node_id: &NodeId) -> Option<&mut ExecutionNode> {
-        self.e_nodes.by_key_mut(node_id)
-    }
-
     pub fn by_name(&self, node_name: &str) -> Option<&ExecutionNode> {
         self.e_nodes.iter().find(|node| node.name == node_name)
     }

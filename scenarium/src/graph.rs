@@ -153,7 +153,7 @@ impl Graph {
     }
 
     pub fn validate(&self) {
-        if is_debug() {
+        if !is_debug() {
             return;
         }
 
@@ -246,42 +246,13 @@ impl Binding {
             _ => None,
         }
     }
-    pub fn as_output_binding_mut(&mut self) -> Option<&mut PortAddress> {
-        match self {
-            Binding::Bind(output_binding) => Some(output_binding),
-            _ => None,
-        }
-    }
-    pub fn as_const(&self) -> Option<&StaticValue> {
-        match self {
-            Binding::Const(static_value) => Some(static_value),
-            _ => None,
-        }
-    }
-    pub fn as_const_mut(&mut self) -> Option<&mut StaticValue> {
-        match self {
-            Binding::Const(static_value) => Some(static_value),
-            _ => None,
-        }
-    }
 
-    pub fn is_output_binding(&self) -> bool {
-        matches!(self, Binding::Bind(_))
-    }
-    pub fn is_const(&self) -> bool {
-        matches!(self, Binding::Const(_))
-    }
     pub fn is_some(&self) -> bool {
         !self.is_none()
     }
+
     pub fn is_none(&self) -> bool {
         matches!(self, Binding::None)
-    }
-}
-
-impl NodeBehavior {
-    pub fn is_default(value: &Self) -> bool {
-        matches!(value, NodeBehavior::AsFunction)
     }
 }
 

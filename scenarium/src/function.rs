@@ -77,11 +77,13 @@ pub struct Func {
     #[serde(skip, default)]
     pub lambda: FuncLambda,
 }
+
 impl KeyIndexKey<FuncId> for Func {
     fn key(&self) -> &FuncId {
         &self.id
     }
 }
+
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct FuncLib {
     pub funcs: KeyIndexVec<FuncId, Func>,
@@ -107,10 +109,6 @@ impl FuncLib {
     pub fn by_id(&self, id: &FuncId) -> Option<&Func> {
         assert!(!id.is_nil());
         self.funcs.by_key(id)
-    }
-    pub fn by_id_mut(&mut self, id: &FuncId) -> Option<&mut Func> {
-        assert!(!id.is_nil());
-        self.funcs.by_key_mut(id)
     }
     pub fn by_name(&self, name: &str) -> Option<&Func> {
         assert!(!name.is_empty());
@@ -204,7 +202,6 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 assert_eq!(outputs.len(), 1);
 
                 let a: i64 = inputs[0].value.as_i64().unwrap();
-                // let b: i64 = inputs[1].value.as_int();
                 let b: i64 = inputs[1].value.as_i64().unwrap_or(1);
                 outputs[0] = (a * b).into();
                 state.set(a * b);
@@ -293,7 +290,6 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 assert_eq!(outputs.len(), 1);
                 let a: i64 = inputs[0].value.as_i64().unwrap();
                 let b: i64 = inputs[1].value.as_i64().unwrap_or_default();
-                // let b: i64 = inputs[1].value.as_int();
                 state.set(a + b);
                 outputs[0] = (a + b).into();
                 Ok(())
@@ -319,7 +315,6 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             required_contexts: vec![],
             lambda: async_lambda!(
                 move |_, _, _, inputs, _, _| { print = Arc::clone(&print) } => {
-                    // tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                     assert_eq!(inputs.len(), 1);
                     print(inputs[0].value.as_i64().unwrap());
                     Ok(())

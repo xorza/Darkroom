@@ -107,7 +107,7 @@ impl FsPathConfig {
 
 impl PartialEq for FsPathConfig {
     fn eq(&self, other: &Self) -> bool {
-        self.mode == other.mode
+        self.mode == other.mode && self.extensions == other.extensions
     }
 }
 
@@ -328,56 +328,6 @@ impl DynamicValue {
             None
         }
     }
-
-    pub fn convert_type(self, dst_data_type: &DataType) -> DynamicValue {
-        match (&self, dst_data_type) {
-            (DynamicValue::None, _) => DynamicValue::None,
-
-            (DynamicValue::Bool(_), DataType::Bool) => self,
-            (DynamicValue::Bool(v), DataType::Int) => DynamicValue::Int(*v as i64),
-            (DynamicValue::Bool(v), DataType::Float) => DynamicValue::Float(*v as i64 as f64),
-            (DynamicValue::Bool(v), DataType::String) => DynamicValue::String(v.to_string()),
-
-            (DynamicValue::Int(_), DataType::Int) => self,
-            (DynamicValue::Int(v), DataType::Bool) => DynamicValue::Bool(*v != 0),
-            (DynamicValue::Int(v), DataType::Float) => DynamicValue::Float(*v as f64),
-            (DynamicValue::Int(v), DataType::String) => DynamicValue::String(v.to_string()),
-
-            (DynamicValue::Float(_), DataType::Float) => self,
-            (DynamicValue::Float(v), DataType::Bool) => DynamicValue::Bool(v.abs() > f64::EPSILON),
-            (DynamicValue::Float(v), DataType::Int) => DynamicValue::Int(*v as i64),
-            (DynamicValue::Float(v), DataType::String) => DynamicValue::String(v.to_string()),
-
-            (DynamicValue::String(_), DataType::String) => self,
-            (DynamicValue::String(s), DataType::Int) => DynamicValue::Int(s.parse().unwrap_or(0)),
-            (DynamicValue::String(s), DataType::Float) => {
-                DynamicValue::Float(s.parse().unwrap_or(0.0))
-            }
-            (DynamicValue::String(s), DataType::Bool) => {
-                DynamicValue::Bool(s == "true" || s == "1")
-            }
-            (DynamicValue::String(s), DataType::FsPath(_)) => DynamicValue::FsPath(s.clone()),
-
-            (DynamicValue::FsPath(_), DataType::FsPath(_)) => self,
-            (DynamicValue::FsPath(s), DataType::String) => DynamicValue::String(s.clone()),
-
-            (DynamicValue::Enum { type_id, .. }, DataType::Enum(enum_def))
-                if *type_id == enum_def.type_id =>
-            {
-                self.clone()
-            }
-
-            (DynamicValue::Custom { type_id, .. }, DataType::Custom(type_def))
-                if *type_id == type_def.type_id =>
-            {
-                self.clone()
-            }
-
-            (src, dst) => {
-                panic!("Unsupported conversion from {:?} to {:?}", src, dst);
-            }
-        }
-    }
 }
 
 impl From<&StaticValue> for DynamicValue {
@@ -525,10 +475,6 @@ impl DataType {
     pub fn default_value(&self) -> StaticValue {
         StaticValue::from(self)
     }
-
-    pub fn is_custom(&self) -> bool {
-        matches!(self, DataType::Custom(_))
-    }
 }
 
 impl Display for DynamicValue {
@@ -557,16 +503,17 @@ impl Display for DynamicValue {
 
 impl Display for DataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let str = match &self {
-            DataType::Float => "float".to_string(),
-            DataType::Int => "int".to_string(),
-            DataType::Bool => "bool".to_string(),
-            DataType::String => "string".to_string(),
-            DataType::FsPath(_) => "path".to_string(),
-            DataType::Custom(def) => def.display_name.clone(),
-            _ => panic!("No string representation for {:?}", self),
-        };
-        write!(f, "{}", str)
+        match &self {
+            DataType::Null => write!(f, "null"),
+            DataType::Float => write!(f, "float"),
+            DataType::Int => write!(f, "int"),
+            DataType::Bool => write!(f, "bool"),
+            DataType::String => write!(f, "string"),
+            DataType::FsPath(_) => write!(f, "path"),
+            DataType::Array { element_type, .. } => write!(f, "array<{element_type}>"),
+            DataType::Custom(def) => write!(f, "{}", def.display_name),
+            DataType::Enum(def) => write!(f, "{}", def.display_name),
+        }
     }
 }
 
