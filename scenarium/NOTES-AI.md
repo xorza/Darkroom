@@ -72,10 +72,10 @@ DynamicValue: Runtime values including Arc<dyn Any + Send + Sync> for Custom var
 
 ### Execution Graph Scheduling
 - DFS-based topological ordering with cycle detection
-- Three-phase scheduling: backward (identify needs), forward (mark execution), terminal discovery
+- Three-phase scheduling: backward (collect order), forward (propagate state), backward (collect execute order)
 - Input state tracking for pure function optimization
 - Output usage counting to skip unnecessary computations
-- Reusable `processing_stack` cache for cycle detection
+- See `src/execution_graph_NOTES-AI.md` for detailed research and industry comparison
 
 ### Event System
 - Nodes emit named events with subscriber lists
