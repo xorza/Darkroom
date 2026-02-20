@@ -1,28 +1,28 @@
 {
-  "env": {
-    "RUST_BACKTRACE": "1",
-    "CARGO_TERM_COLOR": "always"
-  },
-  "permissions": {
-    "defaultMode": "acceptEdits",
-    "allow": [
-      "mcp__acp__Edit",
-      "mcp__acp__Write",
-      "mcp__acp__Read",
-      "WebSearch",
-      "WebFetch",
-      "Bash(cargo test:*)",
-      "Bash(cargo nextest:*)",
-      "Bash(cargo build:*)",
-      "Bash(cargo run:*)",
-      "Bash(cargo clippy:*)",
-      "Bash(cargo fmt:*)",
-      "Bash(cargo check:*)"
-    ],
-    "deny": ["Read(./.env)", "Read(./.env.*)"]
-  },
-  "sandbox": {
-    "enabled": true,
-    "autoAllowBashIfSandboxed": true
-  }
+    "env": {
+        "RUST_BACKTRACE": "1",
+        "CARGO_TERM_COLOR": "always"
+    },
+    "permissions": {
+        "defaultMode": "acceptEdits",
+        "allow": [
+            "mcp__acp__Edit",
+            "mcp__acp__Write",
+            "mcp__acp__Read",
+            "WebSearch",
+            "WebFetch",
+            "Bash(cargo test:*)",
+            "Bash(cargo nextest:*)",
+            "Bash(cargo build:*)",
+            "Bash(cargo run:*)",
+            "Bash(cargo clippy:*)",
+            "Bash(cargo fmt:*)",
+            "Bash(cargo check:*)"
+        ],
+        "deny": ["Read(./.env)"]
+    },
+    "sandbox": {
+        "enabled": true,
+        "autoAllowBashIfSandboxed": true
+    }
 }
