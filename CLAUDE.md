@@ -40,6 +40,34 @@ AI coding rules for Rust projects:
 - For numerical code: validate against known-good reference values or analytical solutions.
 - Do NOT write tests that only check `result < 10` or `remaining > 0`. These catch nothing.
 
+## UI conventions (egui, prism crate)
+
+- **Every widget id must come from `StableId`** (`prism/src/common/id_salt.rs`).
+  Sanctioned constructors:
+  - `StableId::new(name)` — `#[track_caller]` mixes `file!()`/`line!()` into
+    the hash. Use a tuple for per-instance widgets:
+    `StableId::new(("cache_btn", node.id))`.
+  - `StableId::from_id(id)` — wrap an existing `egui::Id` (e.g. inherited
+    from a caller). No rehash.
+- **Never call `UiBuilder::new()` directly.** Use `Gui::scoped_with(id, customize, |gui| ...)`.
+  It applies `UiBuilder::id(id.id())` (`global_scope=true`) so the scope's
+  registered widget id equals the salt verbatim — bypassing egui's
+  `unique_id = stable_id.with(parent_counter)` formula
+  (`egui-0.34.1/src/ui.rs:297`) that drifts whenever conditional siblings
+  appear/disappear in the parent and trips the
+  "widget rect changed id between passes" warning.
+- **Never call bare `ui.allocate_rect`/`allocate_exact_size`/`allocate_space`
+  on a `Gui<'_>`'s parent ui.** Wrap in a `Gui::scoped_with(StableId::new(..), ...)`
+  first so the auto-id starts from a stable seed.
+- **Don't bake transient runtime keys (e.g. `selected_node_id`) into a
+  fixed-rect widget's salt.** The widget id changes on every selection
+  while its rect stays constant → "rect changed id" warning. Use a stable
+  string salt; let the *content* change instead.
+- **Whitelisting**: if you genuinely need raw `UiBuilder::new(` (e.g.
+  inside a function that takes raw `egui::Ui`, not our `Gui`), put
+  `// id-drift-ok` on the same line OR up to two lines above. The
+  tripwire test `no_bare_ui_builder_in_crate` enforces all of this.
+
 ## Documentation
 
 - Read `NOTES-AI.md` files for summarized project knowledge. Check current directory and relevant subdirectories.

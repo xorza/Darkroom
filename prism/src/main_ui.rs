@@ -116,40 +116,38 @@ impl MainUi {
                 // with the panel's auto-id counter.
                 // ui is raw egui::Ui (not our Gui), and `.id(...)` is the
                 // safe pattern, so direct UiBuilder use is intentional here.
-                let _ = ui.scope_builder(
-                    UiBuilder::new().id(Id::new("menu_bar_scope")), // id-drift-ok
-                    |ui| {
-                        egui::MenuBar::new().ui(ui, |ui| {
+                // id-drift-ok
+                let _ = ui.scope_builder(UiBuilder::new().id(Id::new("menu_bar_scope")), |ui| {
+                    egui::MenuBar::new().ui(ui, |ui| {
+                        style.apply_menu_style(ui);
+
+                        ui.menu_button("File", |ui| {
                             style.apply_menu_style(ui);
 
-                            ui.menu_button("File", |ui| {
-                                style.apply_menu_style(ui);
-
-                                ui.set_min_width(100.0);
-                                if ui.button("New").clicked() {
-                                    self.empty(app_data);
-                                    ui.close();
-                                }
-                                if ui.button("Save").clicked() {
-                                    self.save(app_data);
-                                    ui.close();
-                                }
-                                if ui.button("Save as").clicked() {
-                                    self.save_as(app_data);
-                                    ui.close();
-                                }
-                                if ui.button("Open").clicked() {
-                                    self.load(app_data);
-                                    ui.close();
-                                }
-                                if ui.button("Exit").clicked() {
-                                    ui.close();
-                                    self.ui_context.close_app();
-                                }
-                            });
+                            ui.set_min_width(100.0);
+                            if ui.button("New").clicked() {
+                                self.empty(app_data);
+                                ui.close();
+                            }
+                            if ui.button("Save").clicked() {
+                                self.save(app_data);
+                                ui.close();
+                            }
+                            if ui.button("Save as").clicked() {
+                                self.save_as(app_data);
+                                ui.close();
+                            }
+                            if ui.button("Open").clicked() {
+                                self.load(app_data);
+                                ui.close();
+                            }
+                            if ui.button("Exit").clicked() {
+                                ui.close();
+                                self.ui_context.close_app();
+                            }
                         });
-                    },
-                );
+                    });
+                });
             });
 
         Panel::bottom("status_panel")

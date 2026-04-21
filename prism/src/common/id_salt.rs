@@ -77,28 +77,48 @@ mod tests {
 
     /// Tripwire for the egui widget-id drift bug.
     ///
-    /// Every `UiBuilder` we construct should go through `Gui::scoped_with`,
-    /// which uses `.id(Id::new(salt))` (global_scope) — pinning the
-    /// scope's widget id verbatim. Direct `UiBuilder::new()` chains
-    /// risk silently using `.id_salt(...)`, whose `unique_id =
-    /// stable_id.with(parent_counter)` drifts when conditional siblings
-    /// come and go and trips egui's "widget rect changed id between
-    /// passes" warning.
+    /// Flags any of these patterns outside whitelisted files:
     ///
-    /// This test fails on any bare `UiBuilder::new()` outside the
-    /// whitelisted definition sites in `gui::Gui`. That forces a switch
-    /// to `Gui::scoped_with`, or an explicit whitelist with `// id-drift-ok`
-    /// justifying why direct UiBuilder use is intended.
+    /// - `UiBuilder::new(` — the underlying drift culprit (its `id_salt`
+    ///   produces `unique_id = stable_id.with(parent_counter)`, see
+    ///   `egui-0.34.1/src/ui.rs:297`). Use `Gui::scoped_with` instead.
+    /// - `.allocate_rect(`, `.allocate_exact_size(`, `.allocate_space(`
+    ///   — these emit a counter-based auto-id widget that drifts the
+    ///   same way. Wrap the call in a `Gui::scoped_with` first so the
+    ///   scope's stable seed gives a stable counter=0 auto-id.
+    /// - `.scope_builder(` — egui's raw scope API. Use our
+    ///   `Gui::scoped_with` so we pass a `StableId` and `global_scope`.
+    ///
+    /// Annotate intentional exceptions with `// id-drift-ok` on the
+    /// same line or up to two non-blank lines above (e.g. when working
+    /// with raw `egui::Ui`, not our `Gui`).
     #[test]
-    fn no_bare_ui_builder_in_crate() {
+    fn no_drifting_widget_ids_in_crate() {
         let crate_root: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        // The two files that legitimately construct `UiBuilder` (the
-        // `Gui::scoped_with` body lives in gui/mod.rs).
         let whitelist: &[&Path] = &[
+            // Sanctioned home of the helper definitions:
             Path::new("gui/mod.rs"),
-            // This test file references the literal pattern in its
+            // This test file references the literal patterns in its
             // own scanner code.
             Path::new("common/id_salt.rs"),
+            // Allocates inside an already-scoped child Ui — the
+            // canonical pattern this whole test exists to enforce.
+            Path::new("common/button.rs"),
+            // Fork of egui's TextEdit; its allocations live inside
+            // egui's own widget-id discipline, configured per-call
+            // via `.id_salt(StableId)` on the public API.
+            Path::new("common/text_edit.rs"),
+            // Expander uses a stable `Id::new(text)` and `interact`
+            // with that id directly. The auto-id from allocate_space
+            // is discarded; left as-is for now.
+            Path::new("common/expander.rs"),
+        ];
+        const PATTERNS: &[&str] = &[
+            "UiBuilder::new(",
+            ".allocate_rect(",
+            ".allocate_exact_size(",
+            ".allocate_space(",
+            ".scope_builder(",
         ];
 
         let mut offenders = Vec::new();
@@ -106,9 +126,9 @@ mod tests {
 
         assert!(
             offenders.is_empty(),
-            "Found bare `UiBuilder` construction. Use `Gui::scoped_with` instead, \
-             or annotate the line with `// id-drift-ok` if direct use is intentional. \
-             Call sites:\n{}",
+            "Found drifting widget-id pattern. Use `Gui::scoped_with` (and \
+             allocate inside the scope) instead, or annotate the line with \
+             `// id-drift-ok` if intentional. Call sites:\n{}",
             offenders.join("\n"),
         );
 
@@ -138,12 +158,11 @@ mod tests {
                     if trimmed.starts_with("//") || trimmed.starts_with('*') {
                         continue;
                     }
-                    if !line.contains("UiBuilder::new(") {
+                    let Some(matched) = PATTERNS.iter().find(|p| line.contains(*p)) else {
                         continue;
-                    }
+                    };
                     // Allow whitelist on the same line OR up to two
-                    // preceding non-blank lines (so we can put the
-                    // justification comment above the call).
+                    // preceding non-blank lines.
                     let same_line = line.contains("// id-drift-ok");
                     let preceding_ok = lines[..lineno]
                         .iter()
@@ -152,7 +171,13 @@ mod tests {
                         .take(2)
                         .any(|l| l.contains("// id-drift-ok"));
                     if !same_line && !preceding_ok {
-                        offenders.push(format!("{}:{}: {}", path.display(), lineno + 1, trimmed));
+                        offenders.push(format!(
+                            "{}:{}: [{}] {}",
+                            path.display(),
+                            lineno + 1,
+                            matched,
+                            trimmed
+                        ));
                     }
                 }
             }
