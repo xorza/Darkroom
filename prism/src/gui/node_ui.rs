@@ -528,26 +528,45 @@ fn render_ports(
     result
 }
 
+/// Which side of the port the label is drawn on. Inputs put the label to the
+/// right of the port; outputs and events put it to the left.
+#[derive(Copy, Clone)]
+enum LabelSide {
+    RightOfPort,
+    LeftOfPort,
+}
+
 fn render_port_labels(gui: &Gui<'_>, layout: &NodeLayout) {
     let padding = gui.style.node.port_label_side_padding;
+    let color = gui.style.text_color;
 
-    for (idx, galley) in layout.input_galleys.iter().enumerate() {
-        let pos = layout.input_center(idx) + vec2(padding, -galley.size().y * 0.5);
-        gui.painter()
-            .galley(pos, galley.clone(), gui.style.text_color);
-    }
+    let draw = |galleys: &[std::sync::Arc<egui::Galley>],
+                center: &dyn Fn(usize) -> egui::Pos2,
+                side: LabelSide| {
+        for (idx, galley) in galleys.iter().enumerate() {
+            let size = galley.size();
+            let x_offset = match side {
+                LabelSide::RightOfPort => padding,
+                LabelSide::LeftOfPort => -padding - size.x,
+            };
+            let pos = center(idx) + vec2(x_offset, -size.y * 0.5);
+            gui.painter().galley(pos, galley.clone(), color);
+        }
+    };
 
-    for (idx, galley) in layout.output_galleys.iter().enumerate() {
-        let pos =
-            layout.output_center(idx) + vec2(-padding - galley.size().x, -galley.size().y * 0.5);
-        gui.painter()
-            .galley(pos, galley.clone(), gui.style.text_color);
-    }
-
-    for (idx, galley) in layout.event_galleys.iter().enumerate() {
-        let pos =
-            layout.event_center(idx) + vec2(-padding - galley.size().x, -galley.size().y * 0.5);
-        gui.painter()
-            .galley(pos, galley.clone(), gui.style.text_color);
-    }
+    draw(
+        &layout.input_galleys,
+        &|idx| layout.input_center(idx),
+        LabelSide::RightOfPort,
+    );
+    draw(
+        &layout.output_galleys,
+        &|idx| layout.output_center(idx),
+        LabelSide::LeftOfPort,
+    );
+    draw(
+        &layout.event_galleys,
+        &|idx| layout.event_center(idx),
+        LabelSide::LeftOfPort,
+    );
 }

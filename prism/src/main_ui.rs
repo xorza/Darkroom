@@ -210,13 +210,15 @@ impl MainUi {
 
         if toggle_autorun_pressed {
             let interaction = self.graph_ui.ui_interaction();
-            if app_data.autorun {
-                interaction.run_cmd = Some(RunCommand::StopAutorun);
+            interaction.set_run_cmd(if app_data.autorun {
+                RunCommand::StopAutorun
             } else {
-                interaction.run_cmd = Some(RunCommand::StartAutorun);
-            }
+                RunCommand::StartAutorun
+            });
         } else if run_once_pressed {
-            self.graph_ui.ui_interaction().run_cmd = Some(RunCommand::RunOnce);
+            self.graph_ui
+                .ui_interaction()
+                .set_run_cmd(RunCommand::RunOnce);
         }
     }
 

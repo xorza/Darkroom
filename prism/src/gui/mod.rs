@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, ptr::NonNull, rc::Rc};
+use std::rc::Rc;
 
 use egui::{Align, FontId, InnerResponse, Layout, Painter, Rect, Ui, UiBuilder};
 
@@ -22,27 +22,18 @@ pub mod polyline_mesh;
 pub mod style;
 pub mod style_settings;
 
-// #[derive(Debug)]
 pub struct Gui<'a> {
     ui: &'a mut Ui,
     pub style: Rc<Style>,
     pub rect: Rect,
     scale: f32,
-    _marker: PhantomData<&'a mut Ui>,
 }
 
 impl<'a> Gui<'a> {
     pub fn new(ui: &'a mut Ui, style: &Rc<Style>) -> Self {
-        let rect = ui.available_rect_before_wrap();
-
-        Self {
-            ui,
-            style: Rc::clone(style),
-            rect,
-            scale: 1.0,
-            _marker: PhantomData,
-        }
+        Self::new_with_scale(ui, style, 1.0)
     }
+
     pub fn new_with_scale(ui: &'a mut Ui, style: &Rc<Style>, scale: f32) -> Self {
         let rect = ui.available_rect_before_wrap();
 
@@ -51,7 +42,6 @@ impl<'a> Gui<'a> {
             style: Rc::clone(style),
             rect,
             scale,
-            _marker: PhantomData,
         }
     }
 

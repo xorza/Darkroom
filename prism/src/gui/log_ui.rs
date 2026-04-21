@@ -27,7 +27,7 @@ impl LogUi {
             })
             .inner_margin(style.corner_radius);
 
-        frame.show(gui.ui, |ui| {
+        frame.show(gui.ui(), |ui| {
             ui.take_available_width();
             ui.horizontal(|ui| {
                 let mut state = CollapsingState::load_with_default_open(

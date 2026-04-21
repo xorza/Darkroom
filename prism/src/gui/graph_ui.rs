@@ -18,7 +18,9 @@ use crate::common::UiEquals;
 
 use crate::common::button::Button;
 
-use crate::gui::connection_ui::{BrokeItem, ConnectionDragUpdate, ConnectionUi};
+use crate::gui::connection_ui::{
+    BrokeItem, ConnectionDragUpdate, ConnectionUi, disconnect_connection,
+};
 use crate::gui::connection_ui::{ConnectionKey, PortKind};
 use crate::gui::graph_background::GraphBackgroundRenderer;
 use crate::gui::graph_layout::{GraphLayout, PortRef};
@@ -49,13 +51,6 @@ struct ButtonResult {
 // ============================================================================
 // Types
 // ============================================================================
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PointerButtonState {
-    Pressed,
-    Down,
-    Released,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Error {
@@ -199,20 +194,6 @@ impl GraphUi {
             .input(|input| input.key_pressed(Key::Escape) || input.pointer.secondary_pressed())
     }
 
-    fn get_primary_button_state(gui: &mut Gui<'_>) -> Option<PointerButtonState> {
-        gui.ui().input(|input| {
-            if input.pointer.primary_pressed() {
-                Some(PointerButtonState::Pressed)
-            } else if input.pointer.primary_released() {
-                Some(PointerButtonState::Released)
-            } else if input.pointer.primary_down() {
-                Some(PointerButtonState::Down)
-            } else {
-                None
-            }
-        })
-    }
-
     // ------------------------------------------------------------------------
     // Background setup
     // ------------------------------------------------------------------------
@@ -280,10 +261,9 @@ impl GraphUi {
         pointer_pos: Pos2,
         port_interact_cmd: PortInteractCommand,
     ) {
-        let primary_down = matches!(
-            Self::get_primary_button_state(gui),
-            Some(PointerButtonState::Pressed | PointerButtonState::Down)
-        );
+        let primary_down = gui
+            .ui()
+            .input(|i| i.pointer.primary_pressed() || i.pointer.primary_down());
 
         match self.interaction.mode() {
             InteractionMode::PanningGraph => {}
@@ -367,50 +347,8 @@ impl GraphUi {
 
         for item in items {
             match item {
-                BrokeItem::Connection(ConnectionKey::Input {
-                    input_node_id,
-                    input_idx,
-                }) => {
-                    let node = ctx
-                        .view_graph
-                        .graph
-                        .nodes
-                        .by_key_mut(&input_node_id)
-                        .unwrap();
-                    let input = &mut node.inputs[input_idx];
-                    let before = input.binding.clone();
-                    input.binding = Binding::None;
-
-                    self.ui_interaction.add_action(GraphUiAction::InputChanged {
-                        node_id: input_node_id,
-                        input_idx,
-                        before,
-                        after: Binding::None,
-                    });
-                }
-                BrokeItem::Connection(ConnectionKey::Event {
-                    event_node_id,
-                    event_idx,
-                    trigger_node_id,
-                }) => {
-                    let node = ctx
-                        .view_graph
-                        .graph
-                        .nodes
-                        .by_key_mut(&event_node_id)
-                        .unwrap();
-                    let event = &mut node.events[event_idx];
-
-                    if event.subscribers.contains(&trigger_node_id) {
-                        event.subscribers.retain(|sub| *sub != trigger_node_id);
-                        self.ui_interaction
-                            .add_action(GraphUiAction::EventConnectionChanged {
-                                event_node_id,
-                                event_idx,
-                                subscriber: trigger_node_id,
-                                change: EventSubscriberChange::Removed,
-                            });
-                    }
+                BrokeItem::Connection(key) => {
+                    disconnect_connection(key, ctx, &mut self.ui_interaction);
                 }
                 BrokeItem::Node(node_id) => {
                     let action = ctx.view_graph.removal_action(&node_id);
@@ -560,7 +498,7 @@ impl GraphUi {
                     gui.horizontal(|gui| {
                         let response = Button::default().text("run").show(gui);
                         if response.clicked() {
-                            self.ui_interaction.run_cmd = Some(RunCommand::RunOnce);
+                            self.ui_interaction.set_run_cmd(RunCommand::RunOnce);
                         }
 
                         let response = Button::default()
@@ -569,7 +507,7 @@ impl GraphUi {
                             .show(gui);
 
                         if response.clicked() {
-                            self.ui_interaction.run_cmd = Some(if autorun {
+                            self.ui_interaction.set_run_cmd(if autorun {
                                 RunCommand::StartAutorun
                             } else {
                                 RunCommand::StopAutorun

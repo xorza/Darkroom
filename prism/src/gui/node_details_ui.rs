@@ -1,4 +1,4 @@
-use egui::{Color32, Pos2, Rect, Response, Sense, TextureOptions, Vec2};
+use egui::{Pos2, Rect, Response, Sense, TextureOptions, Vec2};
 use palantir::Image;
 use scenarium::data::DynamicValue;
 use scenarium::graph::{Node, NodeId};
@@ -78,7 +78,7 @@ impl NodeDetailsUi {
         }
 
         let Some(node_cache) = ctx.argument_values_cache.get_mut(&node_id) else {
-            interaction.request_argument_values = Some(node_id);
+            interaction.set_request_argument_values(node_id);
             return;
         };
 
@@ -147,17 +147,16 @@ fn show_execution_info(
                 }
                 scenarium::execution_graph::Error::CycleDetected { .. } => "cycle".to_string(),
             };
-            gui.ui().colored_label(
-                Color32::from_rgb(255, 100, 100),
-                format!("  {func_name}: {}", node_error.error),
-            );
+            let color = gui.style.node.errored_shadow.color;
+            gui.ui()
+                .colored_label(color, format!("  {func_name}: {}", node_error.error));
         }
         NodeExecutionInfo::Cached => {
             gui.ui().label("  Status: cached");
         }
         NodeExecutionInfo::MissingInputs => {
-            gui.ui()
-                .colored_label(Color32::from_rgb(255, 180, 70), "  Status: missing inputs");
+            let color = gui.style.node.missing_inputs_shadow.color;
+            gui.ui().colored_label(color, "  Status: missing inputs");
         }
         NodeExecutionInfo::Executed(executed) => {
             let elapsed_ms = executed.elapsed_secs * 1000.0;
@@ -202,7 +201,8 @@ fn show_image_previews(gui: &mut Gui<'_>, node: &Node, func: &Func, node_cache: 
     );
 
     if !node_cache.arg_values.outputs.is_empty() {
-        gui.ui().add_space(4.0);
+        let space = gui.style.small_padding;
+        gui.ui().add_space(space);
     }
 
     show_values_section(
@@ -290,7 +290,8 @@ fn show_value_with_preview(
     let display_width = PREVIEW_MAX_WIDTH.min(texture.desc.width as f32);
     let display_height = display_width / aspect;
 
-    gui.ui().add_space(4.0);
+    let space = gui.style.small_padding;
+    gui.ui().add_space(space);
     gui.ui().image((
         texture.handle.id(),
         Vec2::new(display_width, display_height),
@@ -300,7 +301,9 @@ fn show_value_with_preview(
 // === Helpers ===
 
 fn add_section_separator(gui: &mut Gui<'_>) {
-    gui.ui().add_space(8.0);
+    let big = gui.style.padding;
+    let small = gui.style.small_padding;
+    gui.ui().add_space(big);
     gui.ui().separator();
-    gui.ui().add_space(4.0);
+    gui.ui().add_space(small);
 }

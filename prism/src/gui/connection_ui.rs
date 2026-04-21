@@ -176,24 +176,16 @@ impl ConnectionUi {
                     render_highlight_curve(gui, &mut highlights, key, output_pos, input_pos);
                 }
 
-                let curve = get_or_create_curve(&mut curves, key);
-                curve
-                    .bezier
-                    .update_points(output_pos, input_pos, gui.scale());
-                curve.broke = curve.bezier.intersects_breaker(breaker);
-
-                let response = show_curve(gui, curve, PortKind::Input);
-
-                if breaker.is_some() {
-                    curve.hovered = false;
-                } else {
-                    curve.hovered = response.hovered();
-
-                    if response.double_clicked_by(PointerButton::Primary) {
-                        deletions.push(key);
-                        curve.hovered = false;
-                    }
-                }
+                update_curve_interaction(
+                    gui,
+                    &mut curves,
+                    &mut deletions,
+                    key,
+                    output_pos,
+                    input_pos,
+                    PortKind::Input,
+                    breaker,
+                );
             }
 
             // Render event connections
@@ -220,24 +212,16 @@ impl ConnectionUi {
                         render_highlight_curve(gui, &mut highlights, key, event_pos, trigger_pos);
                     }
 
-                    let curve = get_or_create_curve(&mut curves, key);
-                    curve
-                        .bezier
-                        .update_points(event_pos, trigger_pos, gui.scale());
-                    curve.broke = curve.bezier.intersects_breaker(breaker);
-
-                    let response = show_curve(gui, curve, PortKind::Trigger);
-
-                    if breaker.is_some() {
-                        curve.hovered = false;
-                    } else {
-                        curve.hovered = response.hovered();
-
-                        if response.double_clicked_by(PointerButton::Primary) {
-                            deletions.push(key);
-                            curve.hovered = false;
-                        }
-                    }
+                    update_curve_interaction(
+                        gui,
+                        &mut curves,
+                        &mut deletions,
+                        key,
+                        event_pos,
+                        trigger_pos,
+                        PortKind::Trigger,
+                        breaker,
+                    );
                 }
             }
         }
@@ -332,47 +316,64 @@ impl ConnectionUi {
 
 // === Helpers ===
 
+/// Clears the connection identified by `key` and emits the matching undoable action.
+///
+/// Used both by the breaker tool and by double-click deletion — any change here
+/// applies uniformly to both.
+pub(crate) fn disconnect_connection(
+    key: ConnectionKey,
+    ctx: &mut GraphContext,
+    ui_interaction: &mut GraphUiInteraction,
+) {
+    match key {
+        ConnectionKey::Input {
+            input_node_id,
+            input_idx,
+        } => {
+            let node = ctx.view_graph.graph.by_id_mut(&input_node_id).unwrap();
+            let before = node.inputs[input_idx].binding.clone();
+            if matches!(before, Binding::None) {
+                return;
+            }
+            node.inputs[input_idx].binding = Binding::None;
+            ui_interaction.add_action(GraphUiAction::InputChanged {
+                node_id: input_node_id,
+                input_idx,
+                before,
+                after: Binding::None,
+            });
+        }
+        ConnectionKey::Event {
+            event_node_id,
+            event_idx,
+            trigger_node_id,
+        } => {
+            let node = ctx.view_graph.graph.by_id_mut(&event_node_id).unwrap();
+            let Some(pos) = node.events[event_idx]
+                .subscribers
+                .iter()
+                .position(|&id| id == trigger_node_id)
+            else {
+                return;
+            };
+            node.events[event_idx].subscribers.remove(pos);
+            ui_interaction.add_action(GraphUiAction::EventConnectionChanged {
+                event_node_id,
+                event_idx,
+                subscriber: trigger_node_id,
+                change: EventSubscriberChange::Removed,
+            });
+        }
+    }
+}
+
 fn apply_connection_deletions(
     deletions: Vec<ConnectionKey>,
     ctx: &mut GraphContext,
     ui_interaction: &mut GraphUiInteraction,
 ) {
     for key in deletions {
-        match key {
-            ConnectionKey::Input {
-                input_node_id,
-                input_idx,
-            } => {
-                let node = ctx.view_graph.graph.by_id_mut(&input_node_id).unwrap();
-                let before = node.inputs[input_idx].binding.clone();
-                node.inputs[input_idx].binding = Binding::None;
-                ui_interaction.add_action(GraphUiAction::InputChanged {
-                    node_id: input_node_id,
-                    input_idx,
-                    before,
-                    after: Binding::None,
-                });
-            }
-            ConnectionKey::Event {
-                event_node_id,
-                event_idx,
-                trigger_node_id,
-            } => {
-                let node = ctx.view_graph.graph.by_id_mut(&event_node_id).unwrap();
-                let pos = node.events[event_idx]
-                    .subscribers
-                    .iter()
-                    .position(|&id| id == trigger_node_id)
-                    .expect("subscriber not found for double-click deletion");
-                node.events[event_idx].subscribers.remove(pos);
-                ui_interaction.add_action(GraphUiAction::EventConnectionChanged {
-                    event_node_id,
-                    event_idx,
-                    subscriber: trigger_node_id,
-                    change: EventSubscriberChange::Removed,
-                });
-            }
-        }
+        disconnect_connection(key, ctx, ui_interaction);
     }
 }
 
@@ -391,6 +392,39 @@ fn get_or_create_curve<'a>(
     key: ConnectionKey,
 ) -> &'a mut ConnectionCurve {
     compact.insert_with(&key, || ConnectionCurve::new(key)).1
+}
+
+/// Shared update-and-interact pass for one connection curve.
+///
+/// Used by both data (input-binding) and event (trigger) connections — they
+/// differ only in which endpoints feed `start_pos` / `end_pos` and which
+/// `port_kind` is used for styling.
+#[allow(clippy::too_many_arguments)]
+fn update_curve_interaction(
+    gui: &mut Gui<'_>,
+    curves: &mut CompactInsert<'_, ConnectionKey, ConnectionCurve>,
+    deletions: &mut Vec<ConnectionKey>,
+    key: ConnectionKey,
+    start_pos: Pos2,
+    end_pos: Pos2,
+    port_kind: PortKind,
+    breaker: Option<&ConnectionBreaker>,
+) {
+    let curve = get_or_create_curve(curves, key);
+    curve.bezier.update_points(start_pos, end_pos, gui.scale());
+    curve.broke = curve.bezier.intersects_breaker(breaker);
+
+    let response = show_curve(gui, curve, port_kind);
+
+    if breaker.is_some() {
+        curve.hovered = false;
+    } else {
+        curve.hovered = response.hovered();
+        if response.double_clicked_by(PointerButton::Primary) {
+            deletions.push(key);
+            curve.hovered = false;
+        }
+    }
 }
 
 fn render_highlight_curve(

@@ -212,7 +212,7 @@ impl AppData {
     }
 
     pub fn handle_interaction(&mut self, interaction: &mut GraphUiInteraction) {
-        while let Some(err) = interaction.errors.pop() {
+        while let Some(err) = interaction.pop_error() {
             self.add_status(format!("Error: {err}"));
         }
 
@@ -221,7 +221,7 @@ impl AppData {
         let mut update_if_dirty = self.autorun;
         let mut msgs: Vec<WorkerMessage> = Vec::default();
 
-        if let Some(run_cmd) = interaction.run_cmd {
+        if let Some(run_cmd) = interaction.run_cmd() {
             match run_cmd {
                 RunCommand::StartAutorun => {
                     assert!(!self.autorun);
@@ -252,7 +252,7 @@ impl AppData {
         }
 
         // Handle argument values request (only if not already pending)
-        if let Some(node_id) = interaction.request_argument_values
+        if let Some(node_id) = interaction.request_argument_values()
             && self.argument_values_cache.mark_pending(node_id)
         {
             msgs.push(WorkerMessage::RequestArgumentValues {

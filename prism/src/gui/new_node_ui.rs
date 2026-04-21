@@ -223,7 +223,7 @@ fn show_category_functions<'a>(
 
     ColumnFlow::new(button_width, button_height)
         .id(gui
-            .ui
+            .ui()
             .make_persistent_id(("new_node_ui_funcs_category_scroll", category)))
         .max_columns(MAX_COLUMNS)
         .show(

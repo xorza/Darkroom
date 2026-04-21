@@ -13,9 +13,9 @@ pub enum RunCommand {
 pub(crate) struct GraphUiInteraction {
     coalesced_actions: Vec<GraphUiAction>,
     immediate_actions: Vec<GraphUiAction>,
-    pub errors: Vec<Error>,
-    pub run_cmd: Option<RunCommand>,
-    pub request_argument_values: Option<NodeId>,
+    errors: Vec<Error>,
+    run_cmd: Option<RunCommand>,
+    request_argument_values: Option<NodeId>,
 
     pending_action: Option<GraphUiAction>,
 }
@@ -49,6 +49,26 @@ impl GraphUiInteraction {
 
     pub fn add_error(&mut self, error: Error) {
         self.errors.push(error);
+    }
+
+    pub fn pop_error(&mut self) -> Option<Error> {
+        self.errors.pop()
+    }
+
+    pub fn run_cmd(&self) -> Option<RunCommand> {
+        self.run_cmd
+    }
+
+    pub fn set_run_cmd(&mut self, cmd: RunCommand) {
+        self.run_cmd = Some(cmd);
+    }
+
+    pub fn request_argument_values(&self) -> Option<NodeId> {
+        self.request_argument_values
+    }
+
+    pub fn set_request_argument_values(&mut self, node_id: NodeId) {
+        self.request_argument_values = Some(node_id);
     }
 
     fn add_pending_action(&mut self, action: GraphUiAction) {

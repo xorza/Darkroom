@@ -7,15 +7,6 @@ use crate::common::UiEquals;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::style_settings::StyleSettings;
 
-pub fn brighten(color: Color32, amount: f32) -> Color32 {
-    let t = amount.clamp(0.0, 1.0);
-    let lerp = |c: u8| -> u8 {
-        let c = c as f32;
-        (c + (255.0 - c) * t).round().clamp(0.0, 255.0) as u8
-    };
-    Color32::from_rgba_unmultiplied(lerp(color.r()), lerp(color.g()), lerp(color.b()), color.a())
-}
-
 #[derive(Debug, Clone)]
 pub struct Style {
     style_settings: Rc<StyleSettings>,
@@ -179,13 +170,11 @@ impl Style {
         assert!(scale > 0.0, "style scale must be greater than 0");
 
         let scaled = |value: f32| value * scale;
-        let _scaled_u8 = |value: u8| {
-            let scaled_value = (f32::from(value) * scale).ceil();
-            assert!(
-                scaled_value <= u8::MAX as f32,
-                "style scale too large for shadow values"
-            );
-            scaled_value as u8
+        let status_shadow = |color: Color32| Shadow {
+            color,
+            offset: [0, 0],
+            blur: scaled(style_settings.shadow_blur).ceil() as u8,
+            spread: scaled(style_settings.shadow_spread).ceil() as u8,
         };
 
         let inactive_bg_stroke = Stroke::new(
@@ -255,30 +244,10 @@ impl Style {
                     spread: (5.0 * scale).ceil() as u8,
                     color: Color32::from_black_alpha(96),
                 },
-                executed_shadow: Shadow {
-                    color: style_settings.color_shadow_executed,
-                    offset: [0, 0],
-                    blur: scaled(style_settings.shadow_blur).ceil() as u8,
-                    spread: scaled(style_settings.shadow_spread).ceil() as u8,
-                },
-                cached_shadow: Shadow {
-                    color: style_settings.color_shadow_cached,
-                    offset: [0, 0],
-                    blur: scaled(style_settings.shadow_blur).ceil() as u8,
-                    spread: scaled(style_settings.shadow_spread).ceil() as u8,
-                },
-                missing_inputs_shadow: Shadow {
-                    color: style_settings.color_shadow_missing,
-                    offset: [0, 0],
-                    blur: scaled(style_settings.shadow_blur).ceil() as u8,
-                    spread: scaled(style_settings.shadow_spread).ceil() as u8,
-                },
-                errored_shadow: Shadow {
-                    color: style_settings.color_shadow_errored,
-                    offset: [0, 0],
-                    blur: scaled(style_settings.shadow_blur).ceil() as u8,
-                    spread: scaled(style_settings.shadow_spread).ceil() as u8,
-                },
+                executed_shadow: status_shadow(style_settings.color_shadow_executed),
+                cached_shadow: status_shadow(style_settings.color_shadow_cached),
+                missing_inputs_shadow: status_shadow(style_settings.color_shadow_missing),
+                errored_shadow: status_shadow(style_settings.color_shadow_errored),
                 cache_btn_width: scaled(style_settings.cache_btn_width),
                 remove_btn_size: scaled(style_settings.remove_btn_size),
                 port_radius: scaled(style_settings.port_radius),

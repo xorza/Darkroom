@@ -27,7 +27,7 @@ impl GraphBackgroundRenderer {
         assert!(ctx.view_graph.scale > common::EPSILON);
 
         if self.texture.is_none() {
-            self.rebuild_texture(gui, ctx);
+            self.rebuild_texture(gui);
         }
         if self.quad_mesh.is_none() {
             let mut mesh = Mesh::default();
@@ -55,7 +55,7 @@ impl GraphBackgroundRenderer {
         2.0_f32.powi(k)
     }
 
-    fn rebuild_texture(&mut self, gui: &mut Gui<'_>, _ctx: &GraphContext<'_>) {
+    fn rebuild_texture(&mut self, gui: &mut Gui<'_>) {
         let radius = gui.style.graph_background.dotted_radius_base;
         let color = gui.style.graph_background.dotted_color;
 
