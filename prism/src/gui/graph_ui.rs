@@ -58,6 +58,10 @@ pub(crate) enum Error {
         input_node_id: NodeId,
         output_node_id: NodeId,
     },
+    /// One of the ports the action refers to no longer exists. Happens if
+    /// a node is deleted (e.g. via undo/redo) while the user is holding
+    /// an in-flight drag whose endpoints referenced that node.
+    StaleNode { node_id: NodeId },
 }
 
 impl std::fmt::Display for Error {
@@ -70,6 +74,10 @@ impl std::fmt::Display for Error {
                 f,
                 "connection would create a cycle between {} and {}",
                 input_node_id, output_node_id
+            ),
+            Error::StaleNode { node_id } => write!(
+                f,
+                "node {node_id} referenced by in-flight drag no longer exists"
             ),
         }
     }
@@ -101,6 +109,28 @@ impl GraphUi {
         self.interaction.cancel();
     }
 
+    /// Cancels the current interaction if it references nodes that no
+    /// longer exist in `view_graph`. See `Error::StaleNode`.
+    fn drop_stale_interaction(&mut self, view_graph: &model::ViewGraph) {
+        let stale = match &self.interaction {
+            Interaction::Idle | Interaction::Panning | Interaction::BreakingConnections(_) => false,
+            Interaction::DraggingNode(drag) => view_graph.graph.by_id(&drag.node_id).is_none(),
+            Interaction::DraggingConnection(drag) => {
+                let start_missing = view_graph
+                    .graph
+                    .by_id(&drag.start_port.port.node_id)
+                    .is_none();
+                let end_missing = drag
+                    .end_port
+                    .is_some_and(|p| view_graph.graph.by_id(&p.port.node_id).is_none());
+                start_missing || end_missing
+            }
+        };
+        if stale {
+            self.interaction.cancel();
+        }
+    }
+
     // ------------------------------------------------------------------------
     // Main render entry point
     // ------------------------------------------------------------------------
@@ -117,6 +147,12 @@ impl GraphUi {
         if input.cancel_requested() {
             self.cancel_interaction();
         }
+
+        // Drop any interaction state that references nodes that have
+        // since been removed (e.g. by an undo/redo that ran between
+        // frames). Keeping stale IDs in `Interaction` would propagate to
+        // downstream `.unwrap()` sites in drag/commit code paths.
+        self.drop_stale_interaction(&app_data.view_graph);
 
         let rect = self.draw_background_frame(gui);
 
@@ -595,7 +631,11 @@ impl GraphUi {
         }
 
         let input_port = connection_drag.start_port.port;
-        let input_node = ctx.view_graph.graph.by_id(&input_port.node_id).unwrap();
+        // Defensive: the drag's node could have vanished between start
+        // and commit (undo/redo). Silently drop — nothing to bind.
+        let Some(input_node) = ctx.view_graph.graph.by_id(&input_port.node_id) else {
+            return;
+        };
         let func_input =
             &ctx.func_lib.by_id(&input_node.func_id).unwrap().inputs[input_port.port_idx];
         let before = input_node.inputs[input_port.port_idx].binding.clone();
@@ -749,6 +789,20 @@ fn apply_data_connection(
         });
     }
 
+    // Defensive: the drag that produced these ports could have been
+    // invalidated by an intervening undo/redo. Bail gracefully instead
+    // of panicking.
+    if view_graph.graph.by_id(&input_port.node_id).is_none() {
+        return Err(Error::StaleNode {
+            node_id: input_port.node_id,
+        });
+    }
+    if view_graph.graph.by_id(&output_port.node_id).is_none() {
+        return Err(Error::StaleNode {
+            node_id: output_port.node_id,
+        });
+    }
+
     let dependents = view_graph.graph.dependent_nodes(&input_port.node_id);
     if dependents.contains(&output_port.node_id) {
         return Err(Error::CycleDetected {
@@ -789,7 +843,17 @@ fn apply_event_connection(
         });
     }
 
-    let output_node = view_graph.graph.by_id(&output_port.node_id).unwrap();
+    // Defensive — see comment in `apply_data_connection`.
+    if view_graph.graph.by_id(&input_port.node_id).is_none() {
+        return Err(Error::StaleNode {
+            node_id: input_port.node_id,
+        });
+    }
+    let Some(output_node) = view_graph.graph.by_id(&output_port.node_id) else {
+        return Err(Error::StaleNode {
+            node_id: output_port.node_id,
+        });
+    };
     assert!(
         output_port.port_idx < output_node.events.len(),
         "event index out of range for apply_event_connection"
@@ -1037,6 +1101,40 @@ mod tests {
         )
         .unwrap();
         assert!(result.is_none(), "re-subscribing must be a no-op");
+    }
+
+    #[test]
+    fn apply_data_connection_stale_input_node_yields_stale_error() {
+        // Drag started from node A, but A was removed between frames —
+        // only B is left. We should get Error::StaleNode, not a panic.
+        let b = make_node_with(0, 0);
+        let b_id = b.id;
+        let vg = view_graph_with_nodes(vec![b]);
+        let missing = NodeId::unique();
+
+        let err = apply_data_connection(
+            &vg,
+            port(missing, PortKind::Input, 0),
+            port(b_id, PortKind::Output, 0),
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::StaleNode { node_id } if node_id == missing));
+    }
+
+    #[test]
+    fn apply_event_connection_stale_output_node_yields_stale_error() {
+        let a = make_node_with(0, 0);
+        let a_id = a.id;
+        let vg = view_graph_with_nodes(vec![a]);
+        let missing = NodeId::unique();
+
+        let err = apply_event_connection(
+            &vg,
+            port(a_id, PortKind::Trigger, 0),
+            port(missing, PortKind::Event, 0),
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::StaleNode { node_id } if node_id == missing));
     }
 
     #[test]

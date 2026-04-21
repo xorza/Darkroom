@@ -623,7 +623,38 @@ number of call sites that thread `Gui`.
 
 ---
 
-### Step 9 — Replace ad-hoc `.unwrap()`s on lookups with a `GraphView` helper
+### Step 9 — Graceful handling of stale node references ✅ (narrow scope)
+
+**Original scope vs. shipped scope.** The original plan called for a
+`GraphView` wrapper around `&ViewGraph` that would turn every `.by_id()`
+into `Option<...>`. On closer inspection most of the in-render unwraps
+are invariant-backed: layouts / curves / caches all refresh from
+`view_graph.view_nodes` via `compact_insert_start` each frame, and
+`selected_node_id` is cleared by `remove_node`, so IDs iterated within a
+frame are always valid. The real stale-ID risk lives in `Interaction`
+variants (`DraggingNode`, `DraggingConnection`) — their stored IDs
+could outlive the referenced node if undo/redo fires mid-drag.
+
+**Work done.**
+- New `Error::StaleNode { node_id: NodeId }` variant. `apply_data_connection`
+  and `apply_event_connection` validate both endpoints and return it
+  instead of panicking on a vanished node.
+- `create_const_binding` silently bails when the drag's input node is
+  missing — no action emitted.
+- `GraphUi::drop_stale_interaction` runs at the top of every render:
+  it inspects `Interaction` and cancels if the held `DraggingNode` or
+  `DraggingConnection` port refs point at nodes that have been removed.
+  Combined with `Error::StaleNode`, the undo-during-drag race cannot
+  panic.
+- Full `GraphView` wrapper deferred — the surface area the original
+  audit pointed at was mostly invariant-safe, and the remaining genuine
+  risks are now handled directly at the narrow sites.
+
+**Tests.** Two new regression tests (`apply_data_connection_stale_input_node_yields_stale_error`,
+`apply_event_connection_stale_output_node_yields_stale_error`) assert the
+graceful-return contract.
+
+**Verify.** `cargo nextest run -p prism` → 54 passing; clippy clean.
 
 **Problem.** The audit's Finding #1: `graph.by_id().unwrap()`,
 `func_lib.by_id().unwrap()`, `node_layouts.by_key().unwrap()` are scattered
