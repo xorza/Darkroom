@@ -63,7 +63,10 @@ impl<'a> Gui<'a> {
         self.scale
     }
 
-    pub fn set_scale(&mut self, scale: f32) {
+    /// Internal — the only legitimate scale transition is `with_scale`,
+    /// which saves/restores automatically. External callers build a
+    /// child `Gui` at the desired scale via `Gui::new_with_scale`.
+    fn set_scale(&mut self, scale: f32) {
         assert!(scale.is_finite(), "gui scale must be finite");
         assert!(scale > 0.0, "gui scale must be greater than 0");
 
@@ -73,6 +76,10 @@ impl<'a> Gui<'a> {
             return;
         }
 
+        // `Rc::make_mut` mutates in place when refcount == 1 (the normal
+        // case inside `with_scale`: no child `Gui`s exist yet). If a
+        // child is still alive, this allocates a scaled clone — also
+        // correct, just not free.
         Rc::make_mut(&mut self.style).set_scale(scale);
     }
 

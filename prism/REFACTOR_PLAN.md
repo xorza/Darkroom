@@ -59,7 +59,7 @@ lives.
 | 3 | Input sampled once per frame | ✅ **done** | `grep '\.input(|' prism/src/gui prism/src/main_ui.rs` (excluding widget internals like `text_edit` / `drag_value` / `popup_menu` / `connection_bezier`) returns **0 hits** in the view/interaction layer. Widget internals still call `ui.input` directly — acceptable, they are self-contained. |
 | 4 | Real state machine with atomic cancel | ✅ **done** | `Interaction` enum with variant-local data; `cancel()` is one assignment; no remaining `cancel_interaction + stop_drag` pairs. |
 | 5 | Actions as the persistence seam | ✅ **done** | Undo/redo goes through `GraphUiAction`; `apply()` is the single mutation site. Save/load uses snapshot serde of `ViewGraph`, which is a different seam by design (not actions-as-changelog). |
-| 6 | Boring lifetimes | **partial** | `PhantomData` gone; `Rc<Style>` clone topology simplified but `Rc` itself still in place (Step 8.2). `GraphContext.view_graph` is now `&ViewGraph`; only `&mut ArgumentValuesCache` remains, and only `node_details_ui` actually needs the `mut` (lazy preview cache). Could be split further but at diminishing returns. |
+| 6 | Boring lifetimes | ✅ **done (pragmatically)** | `PhantomData` gone. `Rc<Style>` is kept — Step 8.2 evaluated and closed the full `&Style` conversion as not worth the churn (see that section for measurements). `GraphContext.view_graph` is `&ViewGraph`; only `&mut ArgumentValuesCache` remains and only `node_details_ui` needs the `mut` (lazy preview cache). |
 
 **Deviations from the original plan — on purpose.**
 
@@ -83,10 +83,10 @@ lives.
 
 **What remains in one sentence.**
 
-Principles 1–5 are at 100% (render no longer mutates `ViewGraph`). What
-remains is test coverage (Step 7 — first render-boundary unit tests now
-possible because the seam is clean) and the lifetime polish in principle
-6 (`Rc<Style>` → `&Style`, Step 8.2).
+All six principles are at 100% (principle 6 pragmatically so — see
+Step 8.2 for why the `Rc<Style>` conversion isn't worth the churn).
+Remaining work is deeper test coverage (Step 7.2 — snapshot tests against
+`egui::__run_test_ui`, apply/undo round-trips per action variant).
 
 ## 3. Target module layout
 
@@ -610,17 +610,44 @@ above had bumped refcount ≥ 2. `PhantomData` was already dropped in Step 1.
 - Public API (`new`, `new_with_scale`, `set_scale`, `with_scale`) unchanged;
   only the internal clone topology moved.
 
-**Kept for Step 8.2 (not done here).** Replacing `Rc<Style>` with a plain
-`&'a Style` borrow is still the end-state, but it requires threading a
-lifetime through every layout helper and reworking `with_scale` to
-construct a fresh scaled `Style` rather than mutating in place. That is
-more invasive and belongs after Step 3 (interaction refactor) reduces the
-number of call sites that thread `Gui`.
-
 **Verification.** `cargo nextest run -p prism` (22/22),
 `cargo clippy --all-targets -- -D warnings` — green.
 
 **Size / risk.** Shipped; 3 files touched.
+
+---
+
+### Step 8.2 — `Rc<Style>` → `&'a Style`: reconsidered and closed
+
+**Decision after Step 8 landed and the rest of the refactor is done:
+not worth doing.**
+
+The original plan assumed `Rc<Style>` was hiding a real cost. Step 8
+measured and fixed the actual one — the redundant outer-then-inner
+clone, plus the `make_mut` re-allocation that `positioned_ui` /
+`scroll_area` used to trigger each frame. After those fixes, what
+remains is **one** `Rc::clone` per child-`Gui` construction (an
+atomic-refcount bump, ~5ns) and one `make_mut` call inside
+`with_scale` per scale transition (zero-cost when no child exists, an
+allocation if one does). A 60fps UI with ~100 child-Guis per frame is
+~600ns/s of Rc overhead — not measurable.
+
+The full conversion to `&'a Style` would require either:
+- threading a lifetime through every layout helper and allocating a
+  fresh `Style` on every scale transition (per-frame cost stays the
+  same, just shifted from `make_mut` to `Style::new`), or
+- a bigger API change where `Gui` carries scale separately and
+  everything reads `style.field * scale` (hundreds of call sites
+  touched, real cognitive load added).
+
+Neither delivers a measurable perf win, a testability improvement, or
+a simpler API. Closing.
+
+**What did ship in this pass.** Marked `Gui::set_scale` private — the
+only legitimate scale transition is via `with_scale`, which
+saves/restores. External code that needs a child at a different scale
+constructs it via `Gui::new_with_scale`. One-line API tightening;
+removes a public method nobody outside this module should call.
 
 ---
 
@@ -706,8 +733,8 @@ user interactions — should never panic.
 | `GraphInteractionState::breaker()` accessor | Variant-local data (Step 3) |
 | `ConnectionUi::temp_connection` field | Lives in `Interaction::DraggingConnection` |
 | `Gui::_marker: PhantomData` | Redundant (Step 8) |
-| `Rc<Style>` in `Gui` | `&Style` is enough (Step 8) |
-| Direct `.unwrap()` on ID lookups in render/interaction | `GraphView` helper (Step 9) |
+| ~~`Rc<Style>` in `Gui` → `&Style`~~ | Evaluated in Step 8.2, closed as not worth the churn |
+| Direct `.unwrap()` on ID lookups in render/interaction | Addressed narrowly via `Error::StaleNode` guards (Step 9) |
 | `_scaled_u8` / `brighten` dead code in `style.rs` | Dead (Step 1) |
 
 ## 7. Expected payoff, in order of user-visible benefit
