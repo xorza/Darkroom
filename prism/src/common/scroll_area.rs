@@ -92,8 +92,7 @@ impl ScrollArea {
 
         scroll_area
             .show(gui.ui(), |ui| {
-                let mut child_gui = Gui::new(ui, &style);
-                child_gui.set_scale(scale);
+                let mut child_gui = Gui::new_with_scale(ui, &style, scale);
                 add_contents(&mut child_gui)
             })
             .inner

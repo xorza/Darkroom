@@ -406,32 +406,39 @@ across tests.
 
 ---
 
-### Step 8 — Drop the `Rc<Style>` clones and `PhantomData` in `Gui<'a>`
+### Step 8 — Drop the redundant `Rc<Style>` clones and `PhantomData` in `Gui<'a>` ✅ DONE
 
-**Problem.** `Gui<'a>` (`src/gui/mod.rs:26-32`) holds
-`_marker: PhantomData<&'a mut Ui>` (redundant because `ui: &'a mut Ui`
-already constrains the lifetime) and clones `Rc<Style>` on every
-`new_child` / `with_scale` / layout helper. The audit's Finding #5.
+**Problem.** `Gui<'a>` cloned `Rc<Style>` twice per child: the parent
+bumped it before the closure, then `new_with_scale` bumped it again inside.
+Worse, `positioned_ui` and `scroll_area` did `Gui::new(ui, &style)` (scale
+1.0) immediately followed by `set_scale(scale)`, which triggered
+`Rc::make_mut` and forced a full `Style` re-allocation because the clone
+above had bumped refcount ≥ 2. `PhantomData` was already dropped in Step 1.
 
-**Target.**
-```rust
-pub struct Gui<'a> {
-    ui: &'a mut Ui,
-    style: &'a Style,      // borrow from the frame-level Style
-    rect: Rect,
-    scale: f32,
-}
-```
-`Style` is owned once per frame by `MainUi` and borrowed down. Scale
-variation uses a stack-allocated `ScaledStyle` wrapper, not
-`Rc::make_mut`.
+**Work done.**
+- Added a private `Gui::with_style(ui, Rc<Style>, scale)` constructor that
+  takes the `Rc<Style>` by value — one bump total.
+- `horizontal` / `horizontal_justified` / `vertical` / `new_child` now clone
+  the `Rc` once and move it into the child `Gui` via `with_style`, instead
+  of the old clone-then-clone-inside pattern.
+- `positioned_ui::show` and `scroll_area::show` replaced the
+  `Gui::new(ui, &style) + set_scale(scale)` pair with a single
+  `Gui::new_with_scale(ui, &style, scale)` call — eliminates the `Style`
+  re-allocation the make_mut used to force every frame.
+- Public API (`new`, `new_with_scale`, `set_scale`, `with_scale`) unchanged;
+  only the internal clone topology moved.
 
-**Work.** Mechanical; touches every `Gui::new` / `new_child` call.
+**Kept for Step 8.2 (not done here).** Replacing `Rc<Style>` with a plain
+`&'a Style` borrow is still the end-state, but it requires threading a
+lifetime through every layout helper and reworking `with_scale` to
+construct a fresh scaled `Style` rather than mutating in place. That is
+more invasive and belongs after Step 3 (interaction refactor) reduces the
+number of call sites that thread `Gui`.
 
-**Verify.** Smoke-test the app; run a frame-time micro-benchmark on a
-100-node graph to confirm the Rc clones were measurable and are now gone.
+**Verification.** `cargo nextest run -p prism` (22/22),
+`cargo clippy --all-targets -- -D warnings` — green.
 
-**Size / risk.** ~1 day. Low-medium — pervasive but trivial.
+**Size / risk.** Shipped; 3 files touched.
 
 ---
 
@@ -514,11 +521,12 @@ Step 1 ✅ ┐
           │          │          ├─ Step 4 ─┐
           │          │          │          ├─ Step 5 ─┐
           │          │          │          │          ├─ Step 7
-Step 8 ───┘          │          │          └─ Step 6 ─┘
+Step 8 ✅ ┘          │          │          └─ Step 6 ─┘
                      │          └─ Step 9
 ```
 
-- Step 1 shipped. Step 8 remains an independent sweep that can go anywhere.
+- Steps 1 and 8 shipped. The end-state of Step 8 (full `&'a Style` borrow
+  instead of `Rc<Style>`) is deferred to Step 8.2 — do it after Step 3.
 - Step 2 (InputSnapshot) is a hard prerequisite for Step 3's clean
   interaction API.
 - Step 3 (interaction enum) is a prerequisite for Step 4's pure renders.

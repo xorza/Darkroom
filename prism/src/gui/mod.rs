@@ -31,15 +31,21 @@ pub struct Gui<'a> {
 
 impl<'a> Gui<'a> {
     pub fn new(ui: &'a mut Ui, style: &Rc<Style>) -> Self {
-        Self::new_with_scale(ui, style, 1.0)
+        Self::with_style(ui, Rc::clone(style), 1.0)
     }
 
     pub fn new_with_scale(ui: &'a mut Ui, style: &Rc<Style>, scale: f32) -> Self {
-        let rect = ui.available_rect_before_wrap();
+        Self::with_style(ui, Rc::clone(style), scale)
+    }
 
+    /// Build a `Gui` that takes ownership of a cloned `Rc<Style>`. Prefer this
+    /// in hot paths — it avoids the outer-then-inner double Rc bump that
+    /// `new_with_scale` produces.
+    fn with_style(ui: &'a mut Ui, style: Rc<Style>, scale: f32) -> Self {
+        let rect = ui.available_rect_before_wrap();
         Self {
             ui,
-            style: Rc::clone(style),
+            style,
             rect,
             scale,
         }
@@ -79,8 +85,9 @@ impl<'a> Gui<'a> {
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<R> {
         let style = Rc::clone(&self.style);
+        let scale = self.scale;
         self.ui.horizontal(|ui| {
-            let mut gui = Gui::new_with_scale(ui, &style, self.scale);
+            let mut gui = Gui::with_style(ui, style, scale);
             add_contents(&mut gui)
         })
     }
@@ -92,10 +99,11 @@ impl<'a> Gui<'a> {
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<R> {
         let style = Rc::clone(&self.style);
+        let scale = self.scale;
         self.ui.with_layout(
             Layout::left_to_right(Align::Min).with_cross_justify(true),
             |ui| {
-                let mut gui = Gui::new_with_scale(ui, &style, self.scale);
+                let mut gui = Gui::with_style(ui, style, scale);
                 add_contents(&mut gui)
             },
         )
@@ -106,8 +114,9 @@ impl<'a> Gui<'a> {
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<R> {
         let style = Rc::clone(&self.style);
+        let scale = self.scale;
         self.ui.vertical(|ui| {
-            let mut gui = Gui::new_with_scale(ui, &style, self.scale);
+            let mut gui = Gui::with_style(ui, style, scale);
             add_contents(&mut gui)
         })
     }
@@ -118,8 +127,9 @@ impl<'a> Gui<'a> {
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> R {
         let style = Rc::clone(&self.style);
+        let scale = self.scale;
         let mut child_ui = self.ui.new_child(builder);
-        let mut gui = Gui::new_with_scale(&mut child_ui, &style, self.scale);
+        let mut gui = Gui::with_style(&mut child_ui, style, scale);
         add_contents(&mut gui)
     }
 

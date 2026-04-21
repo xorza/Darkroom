@@ -82,8 +82,7 @@ impl PositionedUi {
             });
 
         gui.ui().scope_builder(builder, |ui| {
-            let mut child_gui = Gui::new(ui, &style);
-            child_gui.set_scale(scale);
+            let mut child_gui = Gui::new_with_scale(ui, &style, scale);
             let result = add_contents(&mut child_gui);
 
             // Store measured size for next frame
