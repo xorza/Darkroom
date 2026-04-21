@@ -491,3 +491,297 @@ fn finish_drag(drag: &ConnectionDrag) -> ConnectionDragUpdate {
         }
     }
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
+//
+// Exercise the drag state machine plus the disconnect-action emission.
+// No egui runtime required — `advance_drag` is a pure transition over
+// `ConnectionDrag`, and `disconnect_connection` reads `&GraphContext`
+// and emits actions into a buffer.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gui::graph_layout::PortInfo;
+    use crate::model::{ArgumentValuesCache, ViewGraph, ViewNode};
+    use scenarium::function::FuncId;
+    use scenarium::graph::{Event, Input, Node, NodeBehavior};
+    use scenarium::prelude::FuncLib;
+
+    fn port_info(node_id: NodeId, kind: PortKind, port_idx: usize) -> PortInfo {
+        PortInfo {
+            port: PortRef {
+                node_id,
+                kind,
+                port_idx,
+            },
+            center: Pos2::ZERO,
+        }
+    }
+
+    // --- advance_drag ----------------------------------------------------
+
+    #[test]
+    fn advance_drag_none_clears_end_port_and_continues() {
+        let start = port_info(NodeId::unique(), PortKind::Output, 0);
+        let mut drag = ConnectionDrag::new(start);
+        drag.end_port = Some(port_info(NodeId::unique(), PortKind::Input, 0));
+
+        let update = advance_drag(&mut drag, Pos2::new(5.0, 6.0), PortInteractCommand::None);
+
+        assert!(matches!(update, ConnectionDragUpdate::InProgress));
+        assert!(drag.end_port.is_none());
+        assert_eq!(drag.current_pos, Pos2::new(5.0, 6.0));
+    }
+
+    #[test]
+    fn advance_drag_hover_snaps_to_compatible_port() {
+        let start = port_info(NodeId::unique(), PortKind::Output, 0);
+        let target = port_info(NodeId::unique(), PortKind::Input, 1);
+        let mut drag = ConnectionDrag::new(start);
+
+        let update = advance_drag(
+            &mut drag,
+            Pos2::new(3.0, 4.0),
+            PortInteractCommand::Hover(target),
+        );
+
+        assert!(matches!(update, ConnectionDragUpdate::InProgress));
+        assert_eq!(drag.end_port.unwrap().port, target.port);
+    }
+
+    #[test]
+    fn advance_drag_hover_rejects_same_kind_port() {
+        // Output → Output is invalid.
+        let start = port_info(NodeId::unique(), PortKind::Output, 0);
+        let same_kind = port_info(NodeId::unique(), PortKind::Output, 1);
+        let mut drag = ConnectionDrag::new(start);
+
+        let update = advance_drag(&mut drag, Pos2::ZERO, PortInteractCommand::Hover(same_kind));
+
+        assert!(matches!(update, ConnectionDragUpdate::InProgress));
+        assert!(drag.end_port.is_none(), "incompatible port must not snap");
+    }
+
+    #[test]
+    fn advance_drag_stop_with_snap_returns_finished_with() {
+        let start = port_info(NodeId::unique(), PortKind::Output, 0);
+        let mut drag = ConnectionDrag::new(start);
+        drag.end_port = Some(port_info(NodeId::unique(), PortKind::Input, 0));
+
+        let update = advance_drag(&mut drag, Pos2::ZERO, PortInteractCommand::DragStop);
+        assert!(matches!(update, ConnectionDragUpdate::FinishedWith { .. }));
+    }
+
+    #[test]
+    fn advance_drag_stop_without_snap_from_input_asks_for_output_source() {
+        let start = port_info(NodeId::unique(), PortKind::Input, 0);
+        let mut drag = ConnectionDrag::new(start);
+
+        let update = advance_drag(&mut drag, Pos2::ZERO, PortInteractCommand::DragStop);
+
+        match update {
+            ConnectionDragUpdate::FinishedWithEmptyOutput { input_port } => {
+                assert_eq!(input_port, start.port);
+            }
+            other => panic!("expected FinishedWithEmptyOutput, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn advance_drag_stop_without_snap_from_output_asks_for_input_target() {
+        let start = port_info(NodeId::unique(), PortKind::Output, 0);
+        let mut drag = ConnectionDrag::new(start);
+
+        let update = advance_drag(&mut drag, Pos2::ZERO, PortInteractCommand::DragStop);
+
+        match update {
+            ConnectionDragUpdate::FinishedWithEmptyInput { output_port } => {
+                assert_eq!(output_port, start.port);
+            }
+            other => panic!("expected FinishedWithEmptyInput, got {other:?}"),
+        }
+    }
+
+    // --- disconnect_connection ------------------------------------------
+
+    fn make_node(input_count: usize, event_count: usize) -> Node {
+        Node {
+            id: NodeId::unique(),
+            func_id: FuncId::unique(),
+            name: String::new(),
+            behavior: NodeBehavior::AsFunction,
+            inputs: (0..input_count).map(|_| Input::default()).collect(),
+            events: (0..event_count)
+                .map(|_| Event {
+                    name: String::new(),
+                    subscribers: Vec::new(),
+                })
+                .collect(),
+        }
+    }
+
+    fn with_ctx<R>(vg: &ViewGraph, f: impl FnOnce(&GraphContext<'_>) -> R) -> R {
+        let func_lib = FuncLib::default();
+        let mut cache = ArgumentValuesCache::default();
+        let ctx = GraphContext {
+            func_lib: &func_lib,
+            view_graph: vg,
+            execution_stats: None,
+            autorun: false,
+            argument_values_cache: &mut cache,
+        };
+        f(&ctx)
+    }
+
+    #[test]
+    fn disconnect_connection_input_emits_clear_action() {
+        let source = make_node(0, 0);
+        let mut target = make_node(1, 0);
+        let source_id = source.id;
+        let target_id = target.id;
+        target.inputs[0].binding = Binding::Bind(PortAddress {
+            target_id: source_id,
+            port_idx: 0,
+        });
+
+        let mut vg = ViewGraph::default();
+        for n in [source, target] {
+            let vn = ViewNode {
+                id: n.id,
+                pos: Pos2::ZERO,
+            };
+            vg.view_nodes.add(vn);
+            vg.graph.add(n);
+        }
+
+        let mut buf = GraphUiInteraction::default();
+        with_ctx(&vg, |ctx| {
+            disconnect_connection(
+                ConnectionKey::Input {
+                    input_node_id: target_id,
+                    input_idx: 0,
+                },
+                ctx,
+                &mut buf,
+            );
+        });
+
+        let actions: Vec<_> = buf.action_stacks().flatten().cloned().collect();
+        assert_eq!(actions.len(), 1, "expected exactly one emitted action");
+        match &actions[0] {
+            GraphUiAction::InputChanged { after, node_id, .. } => {
+                assert_eq!(*node_id, target_id);
+                assert!(matches!(after, Binding::None));
+            }
+            other => panic!("expected InputChanged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn disconnect_connection_input_is_noop_when_already_none() {
+        let node = make_node(1, 0);
+        let node_id = node.id;
+        let mut vg = ViewGraph::default();
+        vg.view_nodes.add(ViewNode {
+            id: node_id,
+            pos: Pos2::ZERO,
+        });
+        vg.graph.add(node);
+
+        let mut buf = GraphUiInteraction::default();
+        with_ctx(&vg, |ctx| {
+            disconnect_connection(
+                ConnectionKey::Input {
+                    input_node_id: node_id,
+                    input_idx: 0,
+                },
+                ctx,
+                &mut buf,
+            );
+        });
+        assert_eq!(buf.action_stacks().count(), 0);
+    }
+
+    #[test]
+    fn disconnect_connection_event_emits_removed_action() {
+        let mut emitter = make_node(0, 1);
+        let subscriber = make_node(0, 0);
+        let emitter_id = emitter.id;
+        let subscriber_id = subscriber.id;
+        emitter.events[0].subscribers.push(subscriber_id);
+
+        let mut vg = ViewGraph::default();
+        for n in [emitter, subscriber] {
+            let vn = ViewNode {
+                id: n.id,
+                pos: Pos2::ZERO,
+            };
+            vg.view_nodes.add(vn);
+            vg.graph.add(n);
+        }
+
+        let mut buf = GraphUiInteraction::default();
+        with_ctx(&vg, |ctx| {
+            disconnect_connection(
+                ConnectionKey::Event {
+                    event_node_id: emitter_id,
+                    event_idx: 0,
+                    trigger_node_id: subscriber_id,
+                },
+                ctx,
+                &mut buf,
+            );
+        });
+
+        let actions: Vec<_> = buf.action_stacks().flatten().cloned().collect();
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            GraphUiAction::EventConnectionChanged {
+                event_node_id,
+                subscriber,
+                change,
+                ..
+            } => {
+                assert_eq!(*event_node_id, emitter_id);
+                assert_eq!(*subscriber, subscriber_id);
+                assert_eq!(*change, EventSubscriberChange::Removed);
+            }
+            other => panic!("expected EventConnectionChanged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn disconnect_connection_event_is_noop_when_not_subscribed() {
+        let emitter = make_node(0, 1);
+        let subscriber = make_node(0, 0);
+        let emitter_id = emitter.id;
+        let subscriber_id = subscriber.id;
+
+        let mut vg = ViewGraph::default();
+        for n in [emitter, subscriber] {
+            let vn = ViewNode {
+                id: n.id,
+                pos: Pos2::ZERO,
+            };
+            vg.view_nodes.add(vn);
+            vg.graph.add(n);
+        }
+
+        let mut buf = GraphUiInteraction::default();
+        with_ctx(&vg, |ctx| {
+            disconnect_connection(
+                ConnectionKey::Event {
+                    event_node_id: emitter_id,
+                    event_idx: 0,
+                    trigger_node_id: subscriber_id,
+                },
+                ctx,
+                &mut buf,
+            );
+        });
+        assert_eq!(buf.action_stacks().count(), 0);
+    }
+}

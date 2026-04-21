@@ -871,3 +871,295 @@ fn fit_all_nodes_target(
     let target_pan = gui.rect.center() - gui.rect.min - bounds_center * target_scale;
     (target_scale, target_pan)
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
+//
+// These exercise the pure helpers that sit at the render → action boundary:
+// they take an immutable `ViewGraph` and `PortRef`s and return actions, so
+// they're unit-testable without any egui runtime. Historically these paths
+// carried the cycle-detection and subscribe/unsubscribe logic, which is
+// where most connection-related bugs live.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gui::graph_layout::PortInfo;
+    use scenarium::function::FuncId;
+    use scenarium::graph::{Event, Input, Node, NodeBehavior};
+
+    fn make_node_with(input_count: usize, event_count: usize) -> Node {
+        Node {
+            id: NodeId::unique(),
+            func_id: FuncId::unique(),
+            name: String::new(),
+            behavior: NodeBehavior::AsFunction,
+            inputs: (0..input_count).map(|_| Input::default()).collect(),
+            events: (0..event_count)
+                .map(|_| Event {
+                    name: String::new(),
+                    subscribers: Vec::new(),
+                })
+                .collect(),
+        }
+    }
+
+    fn view_graph_with_nodes(nodes: Vec<Node>) -> model::ViewGraph {
+        let mut vg = model::ViewGraph::default();
+        for node in nodes {
+            let view_node = model::ViewNode {
+                id: node.id,
+                pos: Pos2::ZERO,
+            };
+            vg.view_nodes.add(view_node);
+            vg.graph.add(node);
+        }
+        vg
+    }
+
+    fn port(node_id: NodeId, kind: PortKind, port_idx: usize) -> PortRef {
+        PortRef {
+            node_id,
+            kind,
+            port_idx,
+        }
+    }
+
+    // --- apply_data_connection ------------------------------------------
+
+    #[test]
+    fn apply_data_connection_rejects_self_loop() {
+        let a = make_node_with(1, 0);
+        let a_id = a.id;
+        let vg = view_graph_with_nodes(vec![a]);
+
+        let err = apply_data_connection(
+            &vg,
+            port(a_id, PortKind::Input, 0),
+            port(a_id, PortKind::Output, 0),
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::CycleDetected { .. }));
+    }
+
+    #[test]
+    fn apply_data_connection_detects_transitive_cycle() {
+        // a.input0 <- b.output0 already wired; trying to wire
+        // b.input0 <- a.output0 would create a cycle.
+        let mut a = make_node_with(1, 0);
+        let b = make_node_with(1, 0);
+        let a_id = a.id;
+        let b_id = b.id;
+
+        a.inputs[0].binding = Binding::Bind(PortAddress {
+            target_id: b_id,
+            port_idx: 0,
+        });
+        let vg = view_graph_with_nodes(vec![a, b]);
+
+        let err = apply_data_connection(
+            &vg,
+            port(b_id, PortKind::Input, 0),
+            port(a_id, PortKind::Output, 0),
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::CycleDetected { .. }));
+    }
+
+    #[test]
+    fn apply_data_connection_produces_input_changed() {
+        let a = make_node_with(1, 0);
+        let b = make_node_with(1, 0);
+        let a_id = a.id;
+        let b_id = b.id;
+        let vg = view_graph_with_nodes(vec![a, b]);
+
+        let action = apply_data_connection(
+            &vg,
+            port(a_id, PortKind::Input, 0),
+            port(b_id, PortKind::Output, 0),
+        )
+        .unwrap();
+
+        match action {
+            GraphUiAction::InputChanged {
+                node_id,
+                input_idx,
+                before,
+                after,
+            } => {
+                assert_eq!(node_id, a_id);
+                assert_eq!(input_idx, 0);
+                assert!(matches!(before, Binding::None));
+                match after {
+                    Binding::Bind(addr) => {
+                        assert_eq!(addr.target_id, b_id);
+                        assert_eq!(addr.port_idx, 0);
+                    }
+                    _ => panic!("expected Binding::Bind"),
+                }
+            }
+            other => panic!("expected InputChanged, got {other:?}"),
+        }
+    }
+
+    // --- apply_event_connection -----------------------------------------
+
+    #[test]
+    fn apply_event_connection_rejects_self_loop() {
+        let a = make_node_with(0, 1);
+        let a_id = a.id;
+        let vg = view_graph_with_nodes(vec![a]);
+
+        let err = apply_event_connection(
+            &vg,
+            port(a_id, PortKind::Trigger, 0),
+            port(a_id, PortKind::Event, 0),
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::CycleDetected { .. }));
+    }
+
+    #[test]
+    fn apply_event_connection_no_op_when_already_subscribed() {
+        let mut a = make_node_with(0, 1);
+        let b = make_node_with(0, 0);
+        let a_id = a.id;
+        let b_id = b.id;
+        a.events[0].subscribers.push(b_id);
+        let vg = view_graph_with_nodes(vec![a, b]);
+
+        let result = apply_event_connection(
+            &vg,
+            port(b_id, PortKind::Trigger, 0),
+            port(a_id, PortKind::Event, 0),
+        )
+        .unwrap();
+        assert!(result.is_none(), "re-subscribing must be a no-op");
+    }
+
+    #[test]
+    fn apply_event_connection_subscribes() {
+        let a = make_node_with(0, 1);
+        let b = make_node_with(0, 0);
+        let a_id = a.id;
+        let b_id = b.id;
+        let vg = view_graph_with_nodes(vec![a, b]);
+
+        let action = apply_event_connection(
+            &vg,
+            port(b_id, PortKind::Trigger, 0),
+            port(a_id, PortKind::Event, 0),
+        )
+        .unwrap()
+        .unwrap();
+
+        match action {
+            GraphUiAction::EventConnectionChanged {
+                event_node_id,
+                event_idx,
+                subscriber,
+                change,
+            } => {
+                assert_eq!(event_node_id, a_id);
+                assert_eq!(event_idx, 0);
+                assert_eq!(subscriber, b_id);
+                assert_eq!(change, EventSubscriberChange::Added);
+            }
+            other => panic!("expected EventConnectionChanged, got {other:?}"),
+        }
+    }
+
+    // --- round-trip: apply(apply_data_connection) matches the expected graph
+
+    // --- handle_idle (free function, pure state machine transition) -----
+
+    #[test]
+    fn handle_idle_primary_not_down_keeps_idle() {
+        let mut interaction = Interaction::default();
+        handle_idle(
+            &mut interaction,
+            Pos2::new(10.0, 20.0),
+            false,
+            true,
+            PortInteractCommand::None,
+        );
+        assert!(interaction.is_idle());
+    }
+
+    #[test]
+    fn handle_idle_drag_start_transitions_to_dragging_connection() {
+        let mut interaction = Interaction::default();
+        let port_info = PortInfo {
+            port: port(NodeId::unique(), PortKind::Output, 0),
+            center: Pos2::new(1.0, 2.0),
+        };
+        handle_idle(
+            &mut interaction,
+            Pos2::new(10.0, 20.0),
+            true,
+            true, // on background, but DragStart wins
+            PortInteractCommand::DragStart(port_info),
+        );
+        assert!(interaction.is_dragging_connection());
+    }
+
+    #[test]
+    fn handle_idle_background_click_transitions_to_breaking() {
+        let mut interaction = Interaction::default();
+        handle_idle(
+            &mut interaction,
+            Pos2::new(10.0, 20.0),
+            true,
+            true,
+            PortInteractCommand::None,
+        );
+        assert!(interaction.is_breaking());
+    }
+
+    #[test]
+    fn handle_idle_port_hover_without_drag_start_stays_idle() {
+        let mut interaction = Interaction::default();
+        let port_info = PortInfo {
+            port: port(NodeId::unique(), PortKind::Input, 0),
+            center: Pos2::ZERO,
+        };
+        handle_idle(
+            &mut interaction,
+            Pos2::new(10.0, 20.0),
+            true,
+            false, // not on background
+            PortInteractCommand::Hover(port_info),
+        );
+        // Not on background, no drag start — shouldn't transition.
+        assert!(interaction.is_idle());
+    }
+
+    #[test]
+    fn apply_data_connection_action_applies_to_bound_binding() {
+        let a = make_node_with(1, 0);
+        let b = make_node_with(1, 0);
+        let a_id = a.id;
+        let b_id = b.id;
+        let mut vg = view_graph_with_nodes(vec![a, b]);
+
+        let action = apply_data_connection(
+            &vg,
+            port(a_id, PortKind::Input, 0),
+            port(b_id, PortKind::Output, 0),
+        )
+        .unwrap();
+
+        action.apply(&mut vg);
+
+        let a_input = &vg.graph.by_id(&a_id).unwrap().inputs[0];
+        match &a_input.binding {
+            Binding::Bind(addr) => {
+                assert_eq!(addr.target_id, b_id);
+                assert_eq!(addr.port_idx, 0);
+            }
+            other => panic!("expected Bind, got {other:?}"),
+        }
+    }
+}

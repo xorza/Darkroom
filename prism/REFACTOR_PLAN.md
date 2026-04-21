@@ -427,29 +427,26 @@ lives in `Interaction` and render composes it — no 1-frame lag.
 
 ---
 
-#### Step 4.2 — Phase B: Tighten render signatures
+#### Step 4.2 — Phase B: Tighten render signatures ✅ DONE (steps 1-2)
 
-**Problem.** Even after 4.1, render takes `&mut GraphContext` which
-carries `&mut ViewGraph`. Nothing uses the mut, but the signature permits
-it.
+**Problem.** Even after 4.1, render took `&mut GraphContext` which
+carried `&mut ViewGraph`. Nothing used the `mut`, but the signature
+permitted it.
 
-**Work.**
-1. `GraphContext.view_graph: &'a ViewGraph` (drop the `mut`).
-2. Every `render_*` function that currently takes `&mut GraphContext`
-   takes `&GraphContext`.
-3. Split `argument_values_cache` out of `GraphContext` — it's the one
-   remaining `&mut` field. Thread it explicitly where needed.
-4. Add render-boundary unit tests — build a `ViewGraph` + `Interaction`
-   + `InputSnapshot` fixture, call `render_nodes` with an egui mock
-   `Ui`, assert on the returned `NodesFrameResult`. Add at least one
-   test per render function that emits intents.
+**Work done.**
+1. `GraphContext.view_graph: &'a ViewGraph` (dropped the `mut`).
+2. Every `render_*` function in `graph_ui.rs` / `node_ui.rs` /
+   `connection_ui.rs` that took `&mut GraphContext` now takes
+   `&GraphContext`. Only `node_details_ui::show` / `show_content` still
+   take `&mut` — needed for `ctx.argument_values_cache.get_mut` (lazy
+   preview-texture fill, UI cache state not domain state).
 
-**Verify.** `grep "&mut GraphContext\|&mut ViewGraph" prism/src/gui/`
-returns zero hits in render call sites. New tests cover the render →
-intent translation for every known intent source.
+**Out of scope for now.** The cache split (original item 3) gives
+diminishing returns; two leaf functions still needing `&mut` is
+acceptable. If it proves painful later, split the cache into an
+`&mut ArgumentValuesCache` side channel.
 
-**Size / risk.** Mostly mechanical after 4.1; the test fixtures are the
-real work and the payoff.
+See Step 7 for the test additions that made this step pay off.
 
 ---
 
@@ -546,29 +543,47 @@ tokio.
 
 ---
 
-### Step 7 — Deterministic snapshot tests
+### Step 7 — Deterministic snapshot tests ✅ PARTIAL
 
-**Problem.** The audit's Finding #10: zero tests for any GUI interaction path.
-After Steps 2–6 there is finally something testable: the pipeline
-`InputSnapshot + AppState + Interaction → Vec<Intent> → Vec<GraphUiAction> →
-AppState'`. All egui-free.
+**Problem.** The audit's Finding #10: zero tests for any GUI interaction
+path. After Steps 2–4.2 there is finally something testable: the helper
+functions that sit right at the render → action boundary take `&ViewGraph`
++ port refs / input + drag + commands and return actions or state
+transitions. No egui runtime needed.
 
-**Target.**
-- `tests/graph_intents.rs`: given a fixture `AppState` plus an
-  `InputSnapshot`, assert the intents produced by each render phase.
-- `tests/action_apply.rs`: given `AppState` + `Vec<GraphUiAction>`, assert
-  that `apply_all` + `undo_all` round-trips to the original state (key
-  invariant for undo correctness; currently only spot-checked).
-- `tests/session_worker.rs`: tokio test that sends a graph update, receives
-  `ExecutionStats`, and asserts the cache is invalidated.
+**Work done in the initial pass (21 new tests, 52 total from 31):**
 
-**Work.** Build two or three realistic `AppState` fixtures (empty, small
-graph, graph with event subscribers + bindings + selection); reuse them
-across tests.
+- `graph_ui.rs` test module:
+  - `apply_data_connection` — rejects self-loop, detects transitive
+    cycle, produces correct `InputChanged`, round-trips through `apply`
+    so the binding lands correctly.
+  - `apply_event_connection` — rejects self-loop, no-op when already
+    subscribed, produces correct `EventConnectionChanged { Added }`.
+  - `handle_idle` — stays idle when primary not down, transitions to
+    `DraggingConnection` on `DragStart`, to `BreakingConnections` on
+    background click, stays idle on hover-only.
+- `connection_ui.rs` test module:
+  - `advance_drag` — `None` clears end-port, `Hover` snaps to compatible
+    / rejects same-kind, `DragStop` with snap returns `FinishedWith`,
+    without snap returns the right `FinishedWithEmpty*` for either drag
+    direction.
+  - `disconnect_connection` — input variant emits `InputChanged::None`
+    (no-op when already `None`), event variant emits
+    `EventConnectionChanged::Removed` (no-op when not subscribed).
 
-**Verify.** CI; aim for at least one test per `GraphUiAction` variant.
+**What's still unaddressed (Step 7.2 — optional, not yet shipped):**
 
-**Size / risk.** ~2 days. Low, pure addition.
+- `tests/action_apply.rs`: `apply_all` + `undo_all` round-trip for every
+  action variant on a realistic fixture. A weaker version already exists
+  in `common/undo_stack/action_undo_stack.rs::undo_roundtrip_all_action_variants_with_json_snapshots`
+  which does JSON-snapshot comparison. Could be extended to cover the
+  new paths (particularly `ZoomPanChanged` + `NodeSelected`).
+- `tests/session_worker.rs`: tokio integration test that sends a graph
+  update and asserts cache invalidation. Requires exposing more of
+  `AppData`'s worker channel — deferred until Step 6.
+- True render-boundary tests (feed an egui mock `Ui` into
+  `GraphUi::render`, assert emitted actions). Achievable via
+  `egui::__run_test_ui` helpers; this is the natural follow-up.
 
 ---
 
