@@ -143,13 +143,21 @@ impl GraphUi {
                 self.dots_background.render(gui, &ctx);
                 self.render_connections(gui, &mut ctx);
 
-                let port_interact_cmd = self.node_ui.render_nodes(
+                let nodes_result = self.node_ui.render_nodes(
                     gui,
                     &mut ctx,
                     &mut self.graph_layout,
                     &mut self.ui_interaction,
                     self.interaction.breaker(),
                 );
+
+                // Apply explicit intents surfaced by rendering. Render never
+                // mutates graph structure itself — we do it here.
+                for node_id in &nodes_result.removed_nodes {
+                    let action = ctx.view_graph.removal_action(node_id);
+                    ctx.view_graph.remove_node(node_id);
+                    self.ui_interaction.add_action(action);
+                }
 
                 if let Some(pointer_pos) = pointer_pos {
                     self.process_connections(
@@ -158,7 +166,8 @@ impl GraphUi {
                         &mut ctx,
                         &background_response,
                         pointer_pos,
-                        port_interact_cmd,
+                        nodes_result.port_cmd,
+                        &nodes_result.broken_nodes,
                     );
                 }
             });
@@ -256,6 +265,7 @@ impl GraphUi {
     // Connection processing
     // ------------------------------------------------------------------------
 
+    #[allow(clippy::too_many_arguments)]
     fn process_connections(
         &mut self,
         gui: &mut Gui<'_>,
@@ -264,6 +274,7 @@ impl GraphUi {
         background_response: &Response,
         pointer_pos: Pos2,
         port_interact_cmd: PortInteractCommand,
+        broken_nodes: &[NodeId],
     ) {
         let primary_down = input.primary_pressed || input.primary_down;
 
@@ -286,7 +297,7 @@ impl GraphUi {
                     breaker.add_point(pointer_pos);
                 } else {
                     // Breaker released — collect results, then cancel.
-                    self.apply_breaker_results(ctx);
+                    self.apply_breaker_results(ctx, broken_nodes);
                     self.interaction.cancel();
                 }
             }
@@ -308,17 +319,13 @@ impl GraphUi {
 
     /// Collects all items hit by the breaker (connections, const bindings, nodes)
     /// and applies the corresponding removals in one pass.
-    fn apply_breaker_results(&mut self, ctx: &mut GraphContext<'_>) {
+    fn apply_breaker_results(&mut self, ctx: &mut GraphContext<'_>, broken_nodes: &[NodeId]) {
         let items: Vec<BrokeItem> = self
             .connections
             .broke_iter()
             .chain(self.node_ui.const_bind_ui.broke_iter())
             .map(|key| BrokeItem::Connection(*key))
-            .chain(
-                self.node_ui
-                    .broke_node_iter()
-                    .map(|id| BrokeItem::Node(*id)),
-            )
+            .chain(broken_nodes.iter().map(|id| BrokeItem::Node(*id)))
             .collect();
 
         for item in items {

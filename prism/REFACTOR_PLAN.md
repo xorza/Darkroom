@@ -266,47 +266,58 @@ observed; the dual-source-of-truth problem and the
 
 ---
 
-### Step 4 — Render functions become pure; mutations go through actions
+### Step 4 — Render functions become pure; mutations go through actions ✅ PARTIAL
 
-**Problem.** Several `render_*` functions mutate state mid-frame:
-- `node_ui.rs:125-173` accumulates `node_ids_to_remove` and removes nodes from
-  the layout during the render loop.
-- `const_bind_ui.rs:59-85` clears bindings inside render.
-- `graph_ui.rs:process_connections` issues graph mutations while drawing.
+**Scope limit.** The full "render takes `&ViewGraph`, returns intents,
+orchestrator applies them" model conflicts with the current undo
+architecture: `ActionUndoStack::push_current` expects actions to have
+*already* been applied (it stores a snapshot + action delta for undo/redo,
+it does not itself apply). Moving to pure-projection rendering means
+reversing that contract — `push_current` would need to `.apply()` the
+actions itself, and every existing mutation path (drag, selection, const
+edit, connection create/delete, zoom/pan) would have to stop mutating
+`ViewGraph` directly at render time. That touches every render site, the
+undo stack impl, and every action's apply/undo pair — a substantial
+change with real regression risk.
 
-This hides the origin of mutations (hard to grep for "where do nodes get
-deleted?"), makes render impossible to call speculatively (e.g. for a preview
-or a test double), and defers surprises until action-apply time.
+Rather than do that poorly, this pass extracts the clearest structural
+offender and flags the rest for Step 4.2.
 
-**Target.** Every `render_*` returns `Vec<Intent>` (or pushes into a
-`&mut IntentBuffer`). The orchestrator (`GraphUi::render` today,
-`view::graph::mod.rs` after Step 5) is the only place that converts intents
-to `GraphUiAction`s. The existing `GraphUiInteraction` becomes a thin wrapper
-over that buffer.
+**Work done in this pass.**
+- `NodeUi::render_nodes` used to hold two buffers (`node_ids_to_remove`,
+  `node_ids_hit_breaker`) and call `ctx.view_graph.remove_node()` itself
+  at the end of the render loop. It now returns a `NodesFrameResult`
+  containing `{ port_cmd, removed_nodes, broken_nodes }`. The orchestrator
+  (`GraphUi::render`) applies the removals explicitly right after the
+  render call, which is the only place `remove_node` is now invoked from
+  rendering. The buffers are gone — no hidden per-frame state on `NodeUi`.
+- `NodeUi::broke_node_iter` deleted; `apply_breaker_results` now takes
+  `&[NodeId]` directly from `NodesFrameResult.broken_nodes`.
+- `PortInteractCommand` gained `#[derive(Default)]` so the result struct
+  can be `Default`-constructed without a custom constructor.
 
-A single rule in CI: `grep -R 'fn render' prism/src/view/ | xargs -I{} check
-that body has no view_graph mutation`. (Can be enforced via a trait bound:
-make render take `&ViewGraph`, not `&mut ViewGraph`.)
+**What remains (Step 4.2).**
+1. `const_bind_ui.rs` still mutates `node.inputs[i].binding` mid-render
+   (via the `return true` signal back to `render_nodes`), and the
+   `StaticValueEditor` path edits `&mut StaticValue` in place while the
+   user types. Making these pure requires either (a) routing edits through
+   the action queue and reconciling the egui text buffer against the
+   post-apply state, or (b) keeping edits in place but clearly marking
+   them as "live-edit" mutations outside the intent model.
+2. `handle_node_drag` still writes `view_graph.view_nodes[i].pos` and
+   `view_graph.selected_node_id` directly during the render loop. Same
+   live-edit problem as (1).
+3. `GraphContext` still exposes `&mut ViewGraph` plus `&mut
+   ArgumentValuesCache`. Flattening it out of render is Step 4.3.
+4. The undo-stack contract change (`push_current` → `apply + record`) is
+   the prerequisite for (1) and (2). Do it as a standalone refactor.
 
-**Work.**
-1. Add `Intent` enum (a superset of `PortInteractCommand` + connection
-   creations + deletions + node removals).
-2. Change `node_ui::render_nodes` signature to take `&ViewGraph` + return
-   `Vec<Intent>`. Move the `remove_node` logic into the orchestrator.
-3. Same for `const_bind_ui`.
-4. Fold `process_connections` into the orchestrator; the render pass only
-   surfaces port interactions.
-5. Delete `GraphContext`'s `&mut view_graph` field — it becomes `&ViewGraph`.
-   The cache is the only remaining mutable field; lift it out of the
-   context too (pass it explicitly where needed, once per frame).
+**Verification.** 28 tests pass; `cargo clippy --all-targets -- -D warnings`
+green. No behaviour change expected or observed — the removal path
+executes at the same point, just one indirection further up.
 
-**Verify.** Regression: deleting a node while a new-node popup is open must
-still close the popup (currently emergent; now explicit via an intent).
-Add unit tests on the `Intent → GraphUiAction` translator — this is the first
-piece of the view layer that is egui-free and thus testable.
-
-**Size / risk.** ~3 days. Medium-high. This is the central payoff: render is
-now a pure projection. All state changes converge on one function.
+**Size / risk.** Shipped a narrow slice; 2 files touched. The full Step 4
+is retitled Step 4.2 and kept in the DAG.
 
 ---
 
@@ -527,17 +538,21 @@ user interactions — should never panic.
 Step 1 ✅ ┐
           ├─ Step 2 ✅ ┐
           │            ├─ Step 3 ✅ ┐
-          │            │            ├─ Step 4 ─┐
-          │            │            │          ├─ Step 5 ─┐
-          │            │            │          │          ├─ Step 7
-Step 8 ✅ ┘            │            │          └─ Step 6 ─┘
-                       │            └─ Step 9
+          │            │            ├─ Step 4 (partial ✅) ┐
+          │            │            │                       ├─ Step 4.2 ─┐
+          │            │            │                       │             ├─ Step 5 ─┐
+          │            │            │                       │             │          ├─ Step 7
+Step 8 ✅ ┘            │            │                       │             └─ Step 6 ─┘
+                       │            │                       └─ Step 9
+                       └─ Step 8.2
 ```
 
-- Steps 1, 2, 3, and 8 shipped. Step 8.2 (full `&'a Style` borrow instead
-  of `Rc<Style>`) can now go anytime — its blockers are gone.
-- Step 4 (pure renders + Intent buffer) is the next big payoff — it
-  collapses the rendering / mutation tangle that makes GraphUi untestable.
+- Steps 1, 2, 3, 8 shipped; Step 4 shipped a narrow slice. Step 8.2 (full
+  `&'a Style` borrow) and Step 4.2 (pure renders + undo-contract change)
+  are the next non-trivial pieces.
+- Step 4.2 depends on reworking `UndoStack::push_current` to apply
+  actions; once that lands, const-bind and node-drag mutations can move
+  out of render.
 - Step 3 (interaction enum) is a prerequisite for Step 4's pure renders.
 - Step 4 unblocks both the mechanical split (Step 5) and the state split
   (Step 6).

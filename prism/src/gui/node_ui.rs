@@ -24,8 +24,9 @@ use scenarium::prelude::{ExecutionStats, Func, FuncBehavior, NodeBehavior};
 // Types
 // ============================================================================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum PortInteractCommand {
+    #[default]
     None,
     Hover(PortInfo),
     DragStart(PortInfo),
@@ -104,16 +105,22 @@ impl<'a> NodeExecutionInfo<'a> {
 
 #[derive(Debug, Default)]
 pub(crate) struct NodeUi {
-    node_ids_to_remove: Vec<NodeId>,
-    node_ids_hit_breaker: Vec<NodeId>,
     pub(crate) const_bind_ui: ConstBindUi,
 }
 
-impl NodeUi {
-    pub(crate) fn broke_node_iter(&self) -> impl Iterator<Item = &NodeId> {
-        self.node_ids_hit_breaker.iter()
-    }
+/// The intents a single `render_nodes` pass surfaces back to the orchestrator.
+///
+/// Rendering never mutates the graph structure directly — it reports which
+/// nodes were asked to be removed or were hit by the breaker stroke, and
+/// the orchestrator turns those into actions after the render pass.
+#[derive(Debug, Default)]
+pub(crate) struct NodesFrameResult {
+    pub port_cmd: PortInteractCommand,
+    pub removed_nodes: Vec<NodeId>,
+    pub broken_nodes: Vec<NodeId>,
+}
 
+impl NodeUi {
     pub fn render_nodes(
         &mut self,
         gui: &mut Gui<'_>,
@@ -121,11 +128,8 @@ impl NodeUi {
         graph_layout: &mut GraphLayout,
         interaction: &mut GraphUiInteraction,
         breaker: Option<&ConnectionBreaker>,
-    ) -> PortInteractCommand {
-        self.node_ids_to_remove.clear();
-        self.node_ids_hit_breaker.clear();
-
-        let mut port_cmd = PortInteractCommand::None;
+    ) -> NodesFrameResult {
+        let mut result = NodesFrameResult::default();
         let mut const_bind_frame = self.const_bind_ui.start();
 
         for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
@@ -145,11 +149,11 @@ impl NodeUi {
             let exec_info = NodeExecutionInfo::from_stats(ctx.execution_stats, node_id);
 
             if render_body(gui, layout, is_selected, &exec_info, breaker) {
-                self.node_ids_hit_breaker.push(node_id);
+                result.broken_nodes.push(node_id);
             }
 
             if render_remove_btn(gui, layout) {
-                self.node_ids_to_remove.push(node_id);
+                result.removed_nodes.push(node_id);
             }
 
             render_status_hints(gui, layout, node_id, node.behavior, func);
@@ -157,19 +161,13 @@ impl NodeUi {
 
             let missing_inputs = get_missing_input_ports(ctx.execution_stats, node_id);
             let node_port_cmd = render_ports(gui, layout, node, func, &missing_inputs);
-            port_cmd = port_cmd.prefer(node_port_cmd);
+            result.port_cmd = std::mem::take(&mut result.port_cmd).prefer(node_port_cmd);
 
             render_port_labels(gui, layout);
         }
 
         const_bind_frame.finish();
-        for node_id in self.node_ids_to_remove.drain(..) {
-            let action = ctx.view_graph.removal_action(&node_id);
-            ctx.view_graph.remove_node(&node_id);
-            interaction.add_action(action);
-        }
-
-        port_cmd
+        result
     }
 
     fn handle_node_drag<'a>(
