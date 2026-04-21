@@ -464,35 +464,45 @@ green.
 
 ---
 
-### Step 5 — Split `graph_ui.rs` along phase boundaries
+### Step 5 — Split `graph_ui.rs` along phase boundaries ✅ DONE
 
-**Problem.** `src/gui/graph_ui.rs` is ~907 lines mixing orchestration,
-layout, rendering of four primitives (background, connections, nodes, ports),
-overlay handling, zoom/pan, and disconnection logic. The audit flagged module
-bloat plus the fact that zero tests exist for the file.
+**Problem.** `src/gui/graph_ui.rs` grew to ~1263 lines mixing
+orchestration with connection processing, overlay rendering, zoom/pan
+math, and test fixtures.
 
-**Target.** After Step 4 the file is almost entirely orchestration. Split it:
+**Shipped layout:** `src/gui/graph_ui/` directory:
 
 ```
-view/graph/
-├── mod.rs          ~150 lines — the three-phase orchestrator
-├── layout.rs       — was ::update / port resolution
-├── nodes.rs        — was ::node_ui render + port interaction decoding
-├── connections.rs  — drawing + drag preview
-├── overlays.rs     — buttons, details panel dispatch, new-node popup dispatch
-└── zoom_pan.rs     — was update_zoom_and_pan
+graph_ui/
+├── mod.rs          635 lines — orchestrator + struct + Error + 15 tests
+├── connections.rs  321 lines — process_connections, handle_drag_result,
+│                                apply_connection, apply_breaker_results,
+│                                render_connections, handle_idle,
+│                                apply_data_connection, apply_event_connection
+├── overlays.rs     209 lines — render_buttons, handle_new_node_popup,
+│                                handle_new_node_selection,
+│                                create_const_binding
+└── pan_zoom.rs     177 lines — update_zoom_and_pan,
+                                 drive_pan_interaction_state,
+                                 emit_zoom_pan, compute_scroll_zoom,
+                                 view_selected_node_target,
+                                 fit_all_nodes_target
 ```
 
-`mod.rs` only knows the pipeline; each sibling is < 300 lines and tested where
-non-egui logic lives (layout math, hit tests, intent decoding).
+`GraphUi` gets method definitions from all four files via inherent
+`impl` blocks; shared items (`Error`, `ButtonResult`, zoom constants) are
+`pub(super)` in `mod.rs`.
 
-**Work.** Mechanical move. Do it after Step 4 so what moves is already pure
-and easy to reason about.
+**Deviations from the original target layout.** The original plan
+called out `layout.rs`, `nodes.rs`, and a separate `overlays.rs`. In
+practice the layout + node rendering already lives in sibling
+`gui/graph_layout.rs` and `gui/node_ui.rs` files — `graph_ui/` only
+holds the orchestrator and what was *inside* it. Splitting further
+would fragment implementation across unrelated pieces.
 
-**Verify.** `cargo clippy --all-targets -- -D warnings` green; diff the
-render output on a snapshot test graph (see Step 7).
-
-**Size / risk.** ~1 day. Low after Step 4.
+**Verify.** `cargo nextest run -p prism` → 58/58; `cargo clippy
+--all-targets -- -D warnings` green. No behaviour change; the rename
+was a pure move of method / free-function definitions into submodules.
 
 ---
 
