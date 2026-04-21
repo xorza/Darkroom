@@ -112,12 +112,7 @@ impl NodeDetailsUi {
         });
 
         if name != original_name {
-            ctx.view_graph
-                .graph
-                .by_id_mut(&node_id)
-                .unwrap()
-                .name
-                .clone_from(&name);
+            // Mutation applied via NodeNameChanged::apply in handle_actions.
             interaction.add_action(GraphUiAction::NodeNameChanged {
                 node_id,
                 before: original_name,

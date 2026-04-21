@@ -316,13 +316,14 @@ pub(crate) fn advance_drag(
     }
 }
 
-/// Clears the connection identified by `key` and emits the matching undoable action.
+/// Emits the undoable action that clears the connection identified by `key`.
 ///
-/// Used both by the breaker tool and by double-click deletion — any change here
-/// applies uniformly to both.
+/// Used by the breaker tool and double-click deletion. The actual binding /
+/// subscriber mutation happens via the emitted action's `apply` in
+/// `handle_actions` — nothing here writes to the graph.
 pub(crate) fn disconnect_connection(
     key: ConnectionKey,
-    ctx: &mut GraphContext,
+    ctx: &GraphContext,
     ui_interaction: &mut GraphUiInteraction,
 ) {
     match key {
@@ -330,12 +331,11 @@ pub(crate) fn disconnect_connection(
             input_node_id,
             input_idx,
         } => {
-            let node = ctx.view_graph.graph.by_id_mut(&input_node_id).unwrap();
+            let node = ctx.view_graph.graph.by_id(&input_node_id).unwrap();
             let before = node.inputs[input_idx].binding.clone();
             if matches!(before, Binding::None) {
                 return;
             }
-            node.inputs[input_idx].binding = Binding::None;
             ui_interaction.add_action(GraphUiAction::InputChanged {
                 node_id: input_node_id,
                 input_idx,
@@ -348,15 +348,13 @@ pub(crate) fn disconnect_connection(
             event_idx,
             trigger_node_id,
         } => {
-            let node = ctx.view_graph.graph.by_id_mut(&event_node_id).unwrap();
-            let Some(pos) = node.events[event_idx]
+            let node = ctx.view_graph.graph.by_id(&event_node_id).unwrap();
+            if !node.events[event_idx]
                 .subscribers
-                .iter()
-                .position(|&id| id == trigger_node_id)
-            else {
+                .contains(&trigger_node_id)
+            {
                 return;
-            };
-            node.events[event_idx].subscribers.remove(pos);
+            }
             ui_interaction.add_action(GraphUiAction::EventConnectionChanged {
                 event_node_id,
                 event_idx,
@@ -369,7 +367,7 @@ pub(crate) fn disconnect_connection(
 
 fn apply_connection_deletions(
     deletions: Vec<ConnectionKey>,
-    ctx: &mut GraphContext,
+    ctx: &GraphContext,
     ui_interaction: &mut GraphUiInteraction,
 ) {
     for key in deletions {

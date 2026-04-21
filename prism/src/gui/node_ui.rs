@@ -347,7 +347,7 @@ fn render_cache_btn(
     gui: &mut Gui<'_>,
     interaction: &mut GraphUiInteraction,
     layout: &NodeLayout,
-    node: &mut Node,
+    node: &Node,
 ) {
     if !layout.has_cache_btn {
         return;
@@ -362,11 +362,12 @@ fn render_cache_btn(
 
     if response.clicked() {
         let before = node.behavior;
-        node.behavior.toggle();
+        let mut after = before;
+        after.toggle();
         interaction.add_action(GraphUiAction::CacheToggled {
             node_id: node.id,
             before,
-            after: node.behavior,
+            after,
         });
     }
 }

@@ -151,11 +151,11 @@ impl GraphUi {
                     &mut self.interaction,
                 );
 
-                // Apply explicit intents surfaced by rendering. Render never
-                // mutates graph structure itself — we do it here.
+                // Surface the render's removal intents as actions. The
+                // mutation itself happens in `NodeRemoved::apply` during
+                // `handle_actions`.
                 for node_id in &nodes_result.removed_nodes {
                     let action = ctx.view_graph.removal_action(node_id);
-                    ctx.view_graph.remove_node(node_id);
                     self.ui_interaction.add_action(action);
                 }
 
@@ -341,7 +341,6 @@ impl GraphUi {
                 }
                 BrokeItem::Node(node_id) => {
                     let action = ctx.view_graph.removal_action(&node_id);
-                    ctx.view_graph.remove_node(&node_id);
                     self.ui_interaction.add_action(action);
                 }
             }
@@ -568,13 +567,15 @@ impl GraphUi {
                 let origin = gui.rect.min;
                 let graph_pos = (screen_pos - origin - ctx.view_graph.pan) / ctx.view_graph.scale;
 
-                let (node, view_node) = ctx.view_graph.add_node_from_func(func);
-                view_node.pos = graph_pos.to_pos2();
+                // Build the new node + view-node locally; apply() inserts them.
+                let node: scenarium::graph::Node = func.into();
+                let view_node = model::ViewNode {
+                    id: node.id,
+                    pos: graph_pos.to_pos2(),
+                };
 
-                self.ui_interaction.add_action(GraphUiAction::NodeAdded {
-                    view_node: view_node.clone(),
-                    node: node.clone(),
-                });
+                self.ui_interaction
+                    .add_action(GraphUiAction::NodeAdded { view_node, node });
             }
             NewNodeSelection::ConstBind => {
                 self.create_const_binding(ctx);
@@ -593,18 +594,15 @@ impl GraphUi {
         }
 
         let input_port = connection_drag.start_port.port;
-        let input_node = ctx.view_graph.graph.by_id_mut(&input_port.node_id).unwrap();
+        let input_node = ctx.view_graph.graph.by_id(&input_port.node_id).unwrap();
         let func_input =
             &ctx.func_lib.by_id(&input_node.func_id).unwrap().inputs[input_port.port_idx];
-        let input = &mut input_node.inputs[input_port.port_idx];
-
-        let before = input.binding.clone();
-        input.binding = func_input
+        let before = input_node.inputs[input_port.port_idx].binding.clone();
+        let after: Binding = func_input
             .default_value
             .clone()
             .unwrap_or_else(|| StaticValue::from(&func_input.data_type))
             .into();
-        let after = input.binding.clone();
 
         self.ui_interaction.add_action(GraphUiAction::InputChanged {
             node_id: input_port.node_id,
@@ -736,9 +734,10 @@ fn handle_idle(
     }
 }
 
-/// Connects an output port to an input port in `view_graph`.
+/// Builds the `InputChanged` action that would bind `input_port` to
+/// `output_port`. No mutation — `apply` handles it.
 fn apply_data_connection(
-    view_graph: &mut model::ViewGraph,
+    view_graph: &model::ViewGraph,
     input_port: PortRef,
     output_port: PortRef,
 ) -> Result<GraphUiAction, Error> {
@@ -757,13 +756,12 @@ fn apply_data_connection(
         });
     }
 
-    let input_node = view_graph.graph.by_id_mut(&input_port.node_id).unwrap();
-    let input = &mut input_node.inputs[input_port.port_idx];
+    let input_node = view_graph.graph.by_id(&input_port.node_id).unwrap();
+    let before = input_node.inputs[input_port.port_idx].binding.clone();
     let after = Binding::Bind(PortAddress {
         target_id: output_port.node_id,
         port_idx: output_port.port_idx,
     });
-    let before = std::mem::replace(&mut input.binding, after.clone());
 
     Ok(GraphUiAction::InputChanged {
         node_id: input_port.node_id,
@@ -773,9 +771,10 @@ fn apply_data_connection(
     })
 }
 
-/// Connects an event output port to a trigger input port in `view_graph`.
+/// Builds the `EventConnectionChanged` action that would subscribe
+/// `input_port`'s node to `output_port`'s event. No mutation.
 fn apply_event_connection(
-    view_graph: &mut model::ViewGraph,
+    view_graph: &model::ViewGraph,
     input_port: PortRef,
     output_port: PortRef,
 ) -> Result<Option<GraphUiAction>, Error> {
@@ -789,18 +788,16 @@ fn apply_event_connection(
         });
     }
 
-    let output_node = view_graph.graph.by_id_mut(&output_port.node_id).unwrap();
+    let output_node = view_graph.graph.by_id(&output_port.node_id).unwrap();
     assert!(
         output_port.port_idx < output_node.events.len(),
         "event index out of range for apply_event_connection"
     );
-    let event = &mut output_node.events[output_port.port_idx];
+    let event = &output_node.events[output_port.port_idx];
 
     if event.subscribers.contains(&input_port.node_id) {
         return Ok(None);
     }
-
-    event.subscribers.push(input_port.node_id);
 
     Ok(Some(GraphUiAction::EventConnectionChanged {
         event_node_id: output_port.node_id,

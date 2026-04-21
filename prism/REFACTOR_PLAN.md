@@ -360,14 +360,18 @@ anymore.
    `view_graph.pan` / `scale` anywhere in render.
 4. **Const-bind editor** — the big one. Replace `StaticValueEditor`'s
    `&mut StaticValue` with `&mut draft: StaticValue` owned by
-   `Interaction::EditingConstBind`. On commit emit `InputChanged`.
-5. **Connection create/delete** — `apply_data_connection`,
-   `apply_event_connection`, `disconnect_connection` already emit
-   actions; remove the inline binding / subscriber mutation. Apply path
-   handles it.
-6. **Node add/remove** — already mostly extracted (Step 4 narrow); the
-   `handle_new_node_selection::Func` inline `add_node_from_func` call is
-   the last one. Change to "build node, emit NodeAdded, apply adds it".
+   `Interaction::EditingConstBind`. On commit emit `InputChanged`. Also
+   the node-name editor in `node_details_ui` — same pattern.
+5. **Connection create/delete** ✅ DONE. `apply_data_connection` /
+   `apply_event_connection` / `disconnect_connection` now take
+   `&ViewGraph` / `&GraphContext`, read the current state, and emit the
+   action — no inline binding / subscriber mutation.
+6. **Node add/remove** ✅ DONE. `handle_new_node_selection::Func` now
+   builds the `Node` + `ViewNode` locally and emits `NodeAdded`; apply
+   does the insert. The orchestrator's render-time removal loop and
+   `apply_breaker_results`' node path now just emit `NodeRemoved` —
+   `apply` does the `remove_node`. Also cleaned up the
+   `node_details_ui` name editor's inline `name.clone_from`.
 
 **Verify.** At the end of Step 4.1, `grep "view_graph\.\|view_nodes\." prism/src/gui/` returns nothing inside render functions.
 All mutations funnel through `handle_actions`. The per-frame double-work
