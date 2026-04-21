@@ -143,7 +143,7 @@ impl AppData {
     }
 
     pub fn empty_graph(&mut self) {
-        self.apply_mew_graph(ViewGraph::default(), true);
+        self.replace_graph(ViewGraph::default(), true);
         self.state.add_status("Created new graph");
     }
 
@@ -172,7 +172,7 @@ impl AppData {
             let format = SerdeFormat::from_file_name(path.to_string_lossy().as_ref())
                 .map_err(anyhow::Error::from)?;
             let payload = std::fs::read(path).map_err(anyhow::Error::from)?;
-            this.apply_mew_graph(ViewGraph::deserialize(format, &payload)?, true);
+            this.replace_graph(ViewGraph::deserialize(format, &payload)?, true);
 
             Ok(())
         }
@@ -355,7 +355,7 @@ impl AppData {
         )
     }
 
-    fn apply_mew_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
+    fn replace_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
         // todo!();
         // view_graph.update_from_func_lib(&self.func_lib);
 

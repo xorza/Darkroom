@@ -156,8 +156,13 @@ pub(super) fn fit_all_nodes_target(
         egui::Rect::from_min_max(egui::pos2(min.x, min.y), egui::pos2(max.x, max.y))
     };
 
+    // Defensive: `view_nodes` is non-empty but the layout cache hasn't
+    // necessarily been filled yet on the first frame after a load.
+    // Fall back to the empty-graph default rather than panic.
     let mut layouts = graph_layout.node_layouts.iter();
-    let first = layouts.next().unwrap();
+    let Some(first) = layouts.next() else {
+        return (1.0, Vec2::ZERO);
+    };
     let mut bounds = to_graph_rect(first.body_rect);
 
     for layout in layouts {

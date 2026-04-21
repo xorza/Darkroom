@@ -71,6 +71,13 @@ impl NodeDetailsUi {
         node_id: NodeId,
         interaction: &mut GraphUiInteraction,
     ) {
+        // `selected_node_id` is cleared by `remove_node`, so this
+        // lookup should always succeed — but an undo/redo between
+        // frames could invalidate the id before we land here.
+        if ctx.view_graph.graph.by_id(&node_id).is_none() {
+            return;
+        }
+
         self.show_name_editor(gui, ctx, node_id, interaction);
 
         if let Some(stats) = ctx.execution_stats {
@@ -84,8 +91,12 @@ impl NodeDetailsUi {
 
         add_section_separator(gui);
 
-        let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
-        let func = ctx.func_lib.by_id(&node.func_id).unwrap();
+        let Some(node) = ctx.view_graph.graph.by_id(&node_id) else {
+            return;
+        };
+        let Some(func) = ctx.func_lib.by_id(&node.func_id) else {
+            return;
+        };
         show_image_previews(gui, node, func, node_cache);
     }
 
@@ -96,7 +107,12 @@ impl NodeDetailsUi {
         node_id: NodeId,
         interaction: &mut GraphUiInteraction,
     ) {
-        let original_name = ctx.view_graph.graph.by_id(&node_id).unwrap().name.clone();
+        // Guarded in `show_content`; replicated here so the function
+        // is safe if called in isolation (e.g. from a future test).
+        let Some(node) = ctx.view_graph.graph.by_id(&node_id) else {
+            return;
+        };
+        let original_name = node.name.clone();
         let mut name = original_name.clone();
 
         gui.vertical(|gui| {
@@ -137,9 +153,10 @@ fn show_execution_info(
     match info {
         NodeExecutionInfo::Errored(node_error) => {
             let func_name = match &node_error.error {
-                scenarium::execution_graph::Error::Invoke { func_id, .. } => {
-                    ctx.func_lib.by_id(func_id).unwrap().name.clone()
-                }
+                scenarium::execution_graph::Error::Invoke { func_id, .. } => ctx
+                    .func_lib
+                    .by_id(func_id)
+                    .map_or_else(|| format!("<unknown func {func_id}>"), |f| f.name.clone()),
                 scenarium::execution_graph::Error::CycleDetected { .. } => "cycle".to_string(),
             };
             let color = gui.style.node.errored_shadow.color;

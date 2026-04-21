@@ -159,13 +159,13 @@ impl GraphUi {
 
         match output_port.kind {
             PortKind::Output => {
-                match apply_data_connection(ctx.view_graph, input_port, output_port) {
+                match build_data_connection_action(ctx.view_graph, input_port, output_port) {
                     Ok(action) => self.ui_interaction.add_action(action),
                     Err(err) => self.ui_interaction.add_error(err),
                 }
             }
             PortKind::Event => {
-                match apply_event_connection(ctx.view_graph, input_port, output_port) {
+                match build_event_connection_action(ctx.view_graph, input_port, output_port) {
                     Ok(Some(action)) => self.ui_interaction.add_action(action),
                     Ok(None) => {}
                     Err(err) => self.ui_interaction.add_error(err),
@@ -225,7 +225,7 @@ pub(super) fn handle_idle(
 
 /// Builds the `InputChanged` action that would bind `input_port` to
 /// `output_port`. No mutation — `apply` handles it.
-pub(super) fn apply_data_connection(
+pub(super) fn build_data_connection_action(
     view_graph: &crate::model::ViewGraph,
     input_port: PortRef,
     output_port: PortRef,
@@ -276,7 +276,7 @@ pub(super) fn apply_data_connection(
 
 /// Builds the `EventConnectionChanged` action that would subscribe
 /// `input_port`'s node to `output_port`'s event. No mutation.
-pub(super) fn apply_event_connection(
+pub(super) fn build_event_connection_action(
     view_graph: &crate::model::ViewGraph,
     input_port: PortRef,
     output_port: PortRef,
@@ -291,7 +291,7 @@ pub(super) fn apply_event_connection(
         });
     }
 
-    // Defensive — see comment in `apply_data_connection`.
+    // Defensive — see comment in `build_data_connection_action`.
     if view_graph.graph.by_id(&input_port.node_id).is_none() {
         return Err(Error::StaleNode {
             node_id: input_port.node_id,
@@ -304,7 +304,7 @@ pub(super) fn apply_event_connection(
     };
     assert!(
         output_port.port_idx < output_node.events.len(),
-        "event index out of range for apply_event_connection"
+        "event index out of range for build_event_connection_action"
     );
     let event = &output_node.events[output_port.port_idx];
 

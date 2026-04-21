@@ -319,7 +319,9 @@ impl GraphUi {
 
 #[cfg(test)]
 mod tests {
-    use super::connections::{apply_data_connection, apply_event_connection, handle_idle};
+    use super::connections::{
+        build_data_connection_action, build_event_connection_action, handle_idle,
+    };
     use super::*;
     use crate::gui::graph_layout::PortInfo;
     use scenarium::function::FuncId;
@@ -362,15 +364,15 @@ mod tests {
         }
     }
 
-    // --- apply_data_connection ------------------------------------------
+    // --- build_data_connection_action ------------------------------------------
 
     #[test]
-    fn apply_data_connection_rejects_self_loop() {
+    fn build_data_connection_action_rejects_self_loop() {
         let a = make_node_with(1, 0);
         let a_id = a.id;
         let vg = view_graph_with_nodes(vec![a]);
 
-        let err = apply_data_connection(
+        let err = build_data_connection_action(
             &vg,
             port(a_id, PortKind::Input, 0),
             port(a_id, PortKind::Output, 0),
@@ -380,7 +382,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_data_connection_detects_transitive_cycle() {
+    fn build_data_connection_action_detects_transitive_cycle() {
         // a.input0 <- b.output0 already wired; trying to wire
         // b.input0 <- a.output0 would create a cycle.
         let mut a = make_node_with(1, 0);
@@ -394,7 +396,7 @@ mod tests {
         });
         let vg = view_graph_with_nodes(vec![a, b]);
 
-        let err = apply_data_connection(
+        let err = build_data_connection_action(
             &vg,
             port(b_id, PortKind::Input, 0),
             port(a_id, PortKind::Output, 0),
@@ -404,14 +406,14 @@ mod tests {
     }
 
     #[test]
-    fn apply_data_connection_produces_input_changed() {
+    fn build_data_connection_action_produces_input_changed() {
         let a = make_node_with(1, 0);
         let b = make_node_with(1, 0);
         let a_id = a.id;
         let b_id = b.id;
         let vg = view_graph_with_nodes(vec![a, b]);
 
-        let action = apply_data_connection(
+        let action = build_data_connection_action(
             &vg,
             port(a_id, PortKind::Input, 0),
             port(b_id, PortKind::Output, 0),
@@ -440,15 +442,15 @@ mod tests {
         }
     }
 
-    // --- apply_event_connection -----------------------------------------
+    // --- build_event_connection_action -----------------------------------------
 
     #[test]
-    fn apply_event_connection_rejects_self_loop() {
+    fn build_event_connection_action_rejects_self_loop() {
         let a = make_node_with(0, 1);
         let a_id = a.id;
         let vg = view_graph_with_nodes(vec![a]);
 
-        let err = apply_event_connection(
+        let err = build_event_connection_action(
             &vg,
             port(a_id, PortKind::Trigger, 0),
             port(a_id, PortKind::Event, 0),
@@ -458,7 +460,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_event_connection_no_op_when_already_subscribed() {
+    fn build_event_connection_action_no_op_when_already_subscribed() {
         let mut a = make_node_with(0, 1);
         let b = make_node_with(0, 0);
         let a_id = a.id;
@@ -466,7 +468,7 @@ mod tests {
         a.events[0].subscribers.push(b_id);
         let vg = view_graph_with_nodes(vec![a, b]);
 
-        let result = apply_event_connection(
+        let result = build_event_connection_action(
             &vg,
             port(b_id, PortKind::Trigger, 0),
             port(a_id, PortKind::Event, 0),
@@ -476,7 +478,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_data_connection_stale_input_node_yields_stale_error() {
+    fn build_data_connection_action_stale_input_node_yields_stale_error() {
         // Drag started from node A, but A was removed between frames —
         // only B is left. We should get Error::StaleNode, not a panic.
         let b = make_node_with(0, 0);
@@ -484,7 +486,7 @@ mod tests {
         let vg = view_graph_with_nodes(vec![b]);
         let missing = NodeId::unique();
 
-        let err = apply_data_connection(
+        let err = build_data_connection_action(
             &vg,
             port(missing, PortKind::Input, 0),
             port(b_id, PortKind::Output, 0),
@@ -494,13 +496,13 @@ mod tests {
     }
 
     #[test]
-    fn apply_event_connection_stale_output_node_yields_stale_error() {
+    fn build_event_connection_action_stale_output_node_yields_stale_error() {
         let a = make_node_with(0, 0);
         let a_id = a.id;
         let vg = view_graph_with_nodes(vec![a]);
         let missing = NodeId::unique();
 
-        let err = apply_event_connection(
+        let err = build_event_connection_action(
             &vg,
             port(a_id, PortKind::Trigger, 0),
             port(missing, PortKind::Event, 0),
@@ -510,14 +512,14 @@ mod tests {
     }
 
     #[test]
-    fn apply_event_connection_subscribes() {
+    fn build_event_connection_action_subscribes() {
         let a = make_node_with(0, 1);
         let b = make_node_with(0, 0);
         let a_id = a.id;
         let b_id = b.id;
         let vg = view_graph_with_nodes(vec![a, b]);
 
-        let action = apply_event_connection(
+        let action = build_event_connection_action(
             &vg,
             port(b_id, PortKind::Trigger, 0),
             port(a_id, PortKind::Event, 0),
@@ -541,7 +543,7 @@ mod tests {
         }
     }
 
-    // --- round-trip: apply(apply_data_connection) matches the expected graph
+    // --- round-trip: apply(build_data_connection_action) matches the expected graph
 
     // --- handle_idle (free function, pure state machine transition) -----
 
@@ -607,14 +609,14 @@ mod tests {
     }
 
     #[test]
-    fn apply_data_connection_action_applies_to_bound_binding() {
+    fn build_data_connection_action_action_applies_to_bound_binding() {
         let a = make_node_with(1, 0);
         let b = make_node_with(1, 0);
         let a_id = a.id;
         let b_id = b.id;
         let mut vg = view_graph_with_nodes(vec![a, b]);
 
-        let action = apply_data_connection(
+        let action = build_data_connection_action(
             &vg,
             port(a_id, PortKind::Input, 0),
             port(b_id, PortKind::Output, 0),
