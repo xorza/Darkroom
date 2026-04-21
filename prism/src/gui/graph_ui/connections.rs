@@ -41,7 +41,6 @@ impl GraphUi {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn process_connections(
         &mut self,
-        gui: &mut Gui<'_>,
         input: &InputSnapshot,
         ctx: &GraphContext<'_>,
         background_response: &Response,
@@ -68,7 +67,6 @@ impl GraphUi {
                 );
             }
             Interaction::BreakingConnections(breaker) => {
-                Self::capture_overlay(gui);
                 if primary_down {
                     breaker.add_point(pointer_pos);
                 } else {
@@ -78,19 +76,29 @@ impl GraphUi {
                 }
             }
             Interaction::DraggingConnection(drag) => {
-                Self::capture_overlay(gui);
                 let result = advance_drag(drag, pointer_pos, port_interact_cmd);
                 self.handle_drag_result(ctx, pointer_pos, result);
             }
         }
     }
 
-    /// Captures all input over the graph area to prevent background interaction
-    /// while breaking connections or dragging a new connection.
-    fn capture_overlay(gui: &mut Gui<'_>) {
-        let id = gui.ui().make_persistent_id("temp overlay background");
-        let rect = gui.rect;
-        gui.ui().interact(rect, id, Sense::all());
+    /// Registers a full-area interact widget during connection-dragging
+    /// or breaker modes so stray clicks can't fall through to the
+    /// background (which would trigger background-click handlers).
+    /// Called from `render` in phase 1, between `render_connections`
+    /// and `render_nodes`, so that ports — registered afterwards — keep
+    /// a higher egui z-order than this overlay and still receive their
+    /// click/drag events. That subtlety is why this lives here and not
+    /// inside `process_connections`.
+    pub(super) fn maybe_capture_overlay(gui: &mut Gui<'_>, interaction: &Interaction) {
+        if matches!(
+            interaction,
+            Interaction::BreakingConnections(_) | Interaction::DraggingConnection(_)
+        ) {
+            let id = gui.ui().make_persistent_id("temp overlay background");
+            let rect = gui.rect;
+            gui.ui().interact(rect, id, Sense::all());
+        }
     }
 
     /// Collects all items hit by the breaker (connections, const bindings, nodes)

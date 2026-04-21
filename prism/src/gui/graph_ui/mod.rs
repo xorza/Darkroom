@@ -186,6 +186,13 @@ impl GraphUi {
                 self.dots_background.render(gui, &ctx);
                 self.render_connections(gui, &ctx);
 
+                // Overlay that swallows background click-through for
+                // active gestures. Registered HERE — before ports — so
+                // later-registered port widgets keep higher egui
+                // z-order and their click/drag responses still fire
+                // through. See `Self::maybe_capture_overlay`.
+                Self::maybe_capture_overlay(gui, &self.interaction);
+
                 let nodes_result = self.node_ui.render_nodes(
                     gui,
                     &ctx,
@@ -204,7 +211,6 @@ impl GraphUi {
 
                 if let Some(pointer_pos) = pointer_pos {
                     self.process_connections(
-                        gui,
                         input,
                         &ctx,
                         &background_response,
