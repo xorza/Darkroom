@@ -17,7 +17,17 @@ pub(crate) struct GraphUiInteraction {
     run_cmd: Option<RunCommand>,
     request_argument_values: Option<NodeId>,
 
+    /// In-flight non-immediate action that is still being coalesced
+    /// across frames (only `ZoomPanChanged` right now). Survives
+    /// `clear()` so a multi-frame gesture ends up as a single undo
+    /// entry; committed to `coalesced_actions` when the gesture ends
+    /// (see [`pending_touched_this_frame`]).
     pending_action: Option<GraphUiAction>,
+    /// Set by `add_pending_action`; cleared at frame start by
+    /// `clear()`. The orchestrator treats a *false* value as the
+    /// signal that the gesture ended this frame and flushes pending
+    /// into the action stacks.
+    pending_touched_this_frame: bool,
 }
 
 impl GraphUiInteraction {
@@ -27,6 +37,17 @@ impl GraphUiInteraction {
         self.errors.clear();
         self.run_cmd = None;
         self.request_argument_values = None;
+        self.pending_touched_this_frame = false;
+        // NB: `pending_action` intentionally NOT cleared — it spans
+        // frames for cross-frame coalescing.
+    }
+
+    pub fn pending_action(&self) -> Option<&GraphUiAction> {
+        self.pending_action.as_ref()
+    }
+
+    pub fn pending_touched_this_frame(&self) -> bool {
+        self.pending_touched_this_frame
     }
 
     pub fn action_stacks(&self) -> impl Iterator<Item = &'_ [GraphUiAction]> {
@@ -73,6 +94,7 @@ impl GraphUiInteraction {
 
     fn add_pending_action(&mut self, action: GraphUiAction) {
         assert!(!action.immediate());
+        self.pending_touched_this_frame = true;
 
         if self.pending_action.is_none() {
             self.pending_action = Some(action);
@@ -186,5 +208,29 @@ mod tests {
 
         assert_eq!(interaction.action_stacks().count(), 0);
         assert!(interaction.pending_action.is_some());
+        assert!(
+            interaction.pending_touched_this_frame(),
+            "add_pending_action must mark the frame as having touched pending"
+        );
+    }
+
+    /// `clear()` runs at frame start. Pending must survive it (for
+    /// cross-frame coalescing) but the `touched-this-frame` flag must
+    /// reset so the orchestrator can detect the frame *after* a gesture
+    /// ended.
+    #[test]
+    fn clear_preserves_pending_but_resets_touched_flag() {
+        let mut interaction = GraphUiInteraction::default();
+        interaction.add_action(GraphUiAction::ZoomPanChanged {
+            before_pan: egui::Vec2::ZERO,
+            before_scale: 1.0,
+            after_pan: egui::Vec2::new(5.0, 5.0),
+            after_scale: 1.2,
+        });
+        assert!(interaction.pending_touched_this_frame());
+
+        interaction.clear();
+        assert!(interaction.pending_action.is_some());
+        assert!(!interaction.pending_touched_this_frame());
     }
 }

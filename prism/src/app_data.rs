@@ -379,13 +379,30 @@ impl AppData {
     fn handle_actions(&mut self, interaction: &mut GraphUiInteraction) -> bool {
         let mut graph_updated = false;
 
+        // Apply any in-flight non-immediate action (ZoomPanChanged) to
+        // `view_graph` every frame so the *next* frame's emit reads
+        // current state rather than the stale pre-gesture state. The
+        // apply is idempotent, so replaying is safe — when the gesture
+        // eventually ends and the pending action is flushed into
+        // `coalesced_actions`, the subsequent apply+push below is a
+        // no-op on state but still records the undo entry.
+        if let Some(pending) = interaction.pending_action() {
+            pending.apply(&mut self.state.view_graph);
+            graph_updated |= pending.affects_computation();
+        }
+
+        // Gesture boundary: if render didn't touch pending this frame,
+        // the user stopped zooming / panning — commit it.
+        if interaction.pending_action().is_some() && !interaction.pending_touched_this_frame() {
+            interaction.flush();
+        }
+
         for actions in interaction.action_stacks() {
-            // Apply actions before recording. Every action's `apply` is
-            // idempotent, so this is a no-op for mutations that already
-            // happened inline during render — and the single source of
-            // truth for mutations that intentionally defer (e.g. the
-            // const-bind double-click clear). See Step 4.2 in
-            // REFACTOR_PLAN.md for why this is the contract.
+            // Apply + record. Idempotent apply means mutations that
+            // already happened inline during render are no-ops; the
+            // single source of truth for mutations that intentionally
+            // defer lives here. Re-applying a just-flushed pending
+            // action (see above) is also a no-op.
             let any_affecting = self.state.apply_actions(actions);
             self.undo_stack.clear_redo();
             self.undo_stack
