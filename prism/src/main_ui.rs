@@ -61,7 +61,7 @@ impl MainUi {
     }
 
     fn save(&mut self, app_data: &mut AppData) {
-        if let Some(path) = app_data.config.current_path.clone() {
+        if let Some(path) = app_data.state.config.current_path.clone() {
             app_data.save_graph(&path);
         } else {
             self.save_as(app_data);
@@ -147,7 +147,7 @@ impl MainUi {
             .frame(Frame::NONE)
             .show_inside(root_ui, |ui| {
                 self.log_ui
-                    .render(&mut Gui::new(ui, &style), &app_data.status);
+                    .render(&mut Gui::new(ui, &style), &app_data.state.status);
             });
 
         CentralPanel::default()
@@ -178,7 +178,7 @@ impl MainUi {
 
         if input.cmd_shift(egui::Key::Space) {
             let interaction = self.graph_ui.ui_interaction();
-            interaction.set_run_cmd(if app_data.autorun {
+            interaction.set_run_cmd(if app_data.state.autorun {
                 RunCommand::StopAutorun
             } else {
                 RunCommand::StartAutorun

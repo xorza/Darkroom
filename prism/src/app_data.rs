@@ -29,22 +29,67 @@ use scenarium::execution_graph::ArgumentValues;
 
 const UNDO_MAX_STEPS: usize = 256;
 
-#[derive(Debug)]
-pub struct AppData {
+/// Pure, testable domain state. No worker, no tokio, no async channels —
+/// anything in here can be constructed in a unit test, poked with actions,
+/// and inspected.
+///
+/// `AppData` wraps this with the session-level facilities (worker channels,
+/// undo stack, graph-dirty flag, redraw hook).
+#[derive(Debug, Default)]
+pub struct AppState {
     pub func_lib: FuncLib,
     pub view_graph: ViewGraph,
     pub execution_stats: Option<ExecutionStats>,
     pub argument_values_cache: ArgumentValuesCache,
-
     pub status: String,
-
     pub config: Config,
+    pub autorun: bool,
+}
+
+impl AppState {
+    /// Appends a status line. Keeps the buffer below a 2000-char cap by
+    /// draining oldest content.
+    pub fn add_status(&mut self, message: impl AsRef<str>) {
+        if !self.status.is_empty() {
+            self.status.push('\n');
+        }
+        self.status.push_str(message.as_ref());
+        if self.status.len() > 2000 {
+            self.status.drain(..self.status.len() - 2000);
+        }
+    }
+
+    /// Applies the emitted actions to `view_graph` in order (idempotent
+    /// apply contract; see `GraphUiAction::apply`). Returns `true` if any
+    /// applied action affects computation.
+    ///
+    /// Does *not* record undo history — that's a session concern, handled
+    /// by [`AppData::handle_actions`].
+    pub fn apply_actions(&mut self, actions: &[GraphUiAction]) -> bool {
+        let mut graph_updated = false;
+        for action in actions {
+            action.apply(&mut self.view_graph);
+            graph_updated |= action.affects_computation();
+        }
+        graph_updated
+    }
+
+    /// Resets execution caches after a mutation. Caller is responsible for
+    /// telling the worker to re-run (that's `AppData::graph_dirty`).
+    fn clear_execution_caches(&mut self) {
+        self.execution_stats = None;
+        self.argument_values_cache.clear();
+    }
+}
+
+#[derive(Debug)]
+pub struct AppData {
+    pub state: AppState,
 
     worker: Worker,
 
     pub ui_context: UiContext,
 
-    pub autorun: bool,
     graph_dirty: bool,
 
     undo_stack: Box<dyn UndoStack<ViewGraph, Action = GraphUiAction>>,
@@ -69,28 +114,28 @@ impl AppData {
         func_lib.merge(WorkerEventsFuncLib::default());
         func_lib.merge(ImageFuncLib::default());
 
-        let mut result = Self {
+        let state = AppState {
             func_lib,
             view_graph: ViewGraph::default(),
             execution_stats: None,
             argument_values_cache: ArgumentValuesCache::default(),
-            config,
-            worker,
-
-            autorun: false,
-            graph_dirty: true,
-
-            undo_stack: Box::new(ActionUndoStack::new(UNDO_MAX_STEPS)),
-
             status: String::new(),
+            config,
+            autorun: false,
+        };
 
+        let mut result = Self {
+            state,
+            worker,
+            graph_dirty: true,
+            undo_stack: Box::new(ActionUndoStack::new(UNDO_MAX_STEPS)),
             ui_context,
             execution_stats_rx,
             argument_values_rx,
             print_out_rx,
         };
 
-        if let Some(path) = result.config.current_path.clone() {
+        if let Some(path) = result.state.config.current_path.clone() {
             result.load_graph(&path);
         }
 
@@ -99,23 +144,26 @@ impl AppData {
 
     pub fn empty_graph(&mut self) {
         self.apply_mew_graph(ViewGraph::default(), true);
-        self.add_status("Created new graph");
+        self.state.add_status("Created new graph");
     }
 
     pub fn save_graph(&mut self, path: &Path) {
-        fn save_to_file(this: &mut AppData, path: &Path) -> Result<()> {
+        fn save_to_file(state: &AppState, path: &Path) -> Result<()> {
             let format = SerdeFormat::from_file_name(path.to_string_lossy().as_ref())
                 .map_err(anyhow::Error::from)?;
-            let payload = this.view_graph.serialize(format);
+            let payload = state.view_graph.serialize(format);
             std::fs::write(path, payload).map_err(anyhow::Error::from)
         }
 
-        match save_to_file(self, path) {
+        match save_to_file(&self.state, path) {
             Ok(()) => {
-                self.config.current_path = Some(path.to_path_buf());
-                self.add_status(format!("Saved graph to {}", path.display()));
+                self.state.config.current_path = Some(path.to_path_buf());
+                self.state
+                    .add_status(format!("Saved graph to {}", path.display()));
             }
-            Err(err) => self.add_status(format!("Save failed: {} {err}", path.display())),
+            Err(err) => self
+                .state
+                .add_status(format!("Save failed: {} {err}", path.display())),
         }
     }
 
@@ -131,23 +179,25 @@ impl AppData {
 
         match load_from_file(self, path) {
             Ok(()) => {
-                self.config.current_path = Some(path.to_path_buf());
-                self.add_status(format!("Loaded graph from {}", path.display()));
+                self.state.config.current_path = Some(path.to_path_buf());
+                self.state
+                    .add_status(format!("Loaded graph from {}", path.display()));
             }
             Err(err) => {
-                self.config.current_path = None;
-                self.add_status(format!("Load failed: {} {err}", path.display()));
+                self.state.config.current_path = None;
+                self.state
+                    .add_status(format!("Load failed: {} {err}", path.display()));
             }
         }
     }
 
     pub fn update_shared_status(&mut self) {
-        self.autorun = self.worker.is_event_loop_started();
+        self.state.autorun = self.worker.is_event_loop_started();
 
         loop {
             let result = self.print_out_rx.try_recv();
             match result {
-                Ok(print_out) => self.add_status(print_out),
+                Ok(print_out) => self.state.add_status(print_out),
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => panic!("Print output channel disconnected"),
             }
@@ -162,16 +212,19 @@ impl AppData {
                         execution_stats.elapsed_secs
                     );
 
-                    self.argument_values_cache
+                    self.state
+                        .argument_values_cache
                         .invalidate_changed(&execution_stats);
-                    self.execution_stats = Some(execution_stats);
+                    self.state.execution_stats = Some(execution_stats);
 
-                    self.status.push('\n');
-                    self.status.push_str(&message);
+                    self.state.status.push('\n');
+                    self.state.status.push_str(&message);
                 }
                 Err(err) => {
-                    self.status.push('\n');
-                    self.status.push_str(&format!("Compute failed: {err}"));
+                    self.state.status.push('\n');
+                    self.state
+                        .status
+                        .push_str(&format!("Compute failed: {err}"));
                 }
             }
         }
@@ -179,9 +232,11 @@ impl AppData {
         // Process argument values response
         if let Some((node_id, values)) = self.argument_values_rx.take() {
             if let Some(values) = values {
-                self.argument_values_cache.insert(node_id, values.into());
+                self.state
+                    .argument_values_cache
+                    .insert(node_id, values.into());
             } else {
-                self.argument_values_cache.clear_pending(node_id);
+                self.state.argument_values_cache.clear_pending(node_id);
             }
         }
     }
@@ -191,10 +246,12 @@ impl AppData {
         self.handle_actions(interaction);
 
         let mut affects_computation = false;
-        let undid = self.undo_stack.undo(&mut self.view_graph, &mut |action| {
-            affects_computation |= action.affects_computation();
-        });
-        self.view_graph.validate();
+        let undid = self
+            .undo_stack
+            .undo(&mut self.state.view_graph, &mut |action| {
+                affects_computation |= action.affects_computation();
+            });
+        self.state.view_graph.validate();
         if undid && affects_computation {
             self.refresh_graph();
         }
@@ -202,10 +259,12 @@ impl AppData {
 
     pub fn redo(&mut self) {
         let mut affects_computation = false;
-        let redid = self.undo_stack.redo(&mut self.view_graph, &mut |action| {
-            affects_computation |= action.affects_computation();
-        });
-        self.view_graph.validate();
+        let redid = self
+            .undo_stack
+            .redo(&mut self.state.view_graph, &mut |action| {
+                affects_computation |= action.affects_computation();
+            });
+        self.state.view_graph.validate();
         if redid && affects_computation {
             self.refresh_graph();
         }
@@ -213,28 +272,28 @@ impl AppData {
 
     pub fn handle_interaction(&mut self, interaction: &mut GraphUiInteraction) {
         while let Some(err) = interaction.pop_error() {
-            self.add_status(format!("Error: {err}"));
+            self.state.add_status(format!("Error: {err}"));
         }
 
         self.graph_dirty |= self.handle_actions(interaction);
 
-        let mut update_if_dirty = self.autorun;
+        let mut update_if_dirty = self.state.autorun;
         let mut msgs: Vec<WorkerMessage> = Vec::default();
 
         if let Some(run_cmd) = interaction.run_cmd() {
             match run_cmd {
                 RunCommand::StartAutorun => {
-                    assert!(!self.autorun);
+                    assert!(!self.state.autorun);
 
                     msgs.push(WorkerMessage::StartEventLoop);
                     update_if_dirty = true;
-                    self.autorun = true;
+                    self.state.autorun = true;
                 }
                 RunCommand::StopAutorun => {
-                    assert!(self.autorun);
+                    assert!(self.state.autorun);
 
                     msgs.push(WorkerMessage::StopEventLoop);
-                    self.autorun = false;
+                    self.state.autorun = false;
                 }
                 RunCommand::RunOnce => {
                     msgs.push(WorkerMessage::ExecuteTerminals);
@@ -245,15 +304,15 @@ impl AppData {
 
         if self.graph_dirty && update_if_dirty {
             msgs.push(WorkerMessage::Update {
-                graph: self.view_graph.graph.clone(),
-                func_lib: self.func_lib.clone(),
+                graph: self.state.view_graph.graph.clone(),
+                func_lib: self.state.func_lib.clone(),
             });
             self.graph_dirty = false;
         }
 
         // Handle argument values request (only if not already pending)
         if let Some(node_id) = interaction.request_argument_values()
-            && self.argument_values_cache.mark_pending(node_id)
+            && self.state.argument_values_cache.mark_pending(node_id)
         {
             msgs.push(WorkerMessage::RequestArgumentValues {
                 node_id,
@@ -275,7 +334,7 @@ impl AppData {
     }
 
     pub fn exit(&mut self) {
-        self.config.save();
+        self.state.config.save();
         self.worker.exit();
     }
 
@@ -296,24 +355,14 @@ impl AppData {
         )
     }
 
-    fn add_status(&mut self, message: impl AsRef<str>) {
-        if !self.status.is_empty() {
-            self.status.push('\n');
-        }
-        self.status.push_str(message.as_ref());
-        if self.status.len() > 2000 {
-            self.status.drain(..self.status.len() - 2000);
-        }
-    }
-
     fn apply_mew_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
         // todo!();
         // view_graph.update_from_func_lib(&self.func_lib);
 
-        self.view_graph = view_graph;
+        self.state.view_graph = view_graph;
 
         if reset_undo {
-            self.undo_stack.reset_with(&self.view_graph);
+            self.undo_stack.reset_with(&self.state.view_graph);
         }
 
         self.worker.send(WorkerMessage::Clear);
@@ -321,11 +370,10 @@ impl AppData {
     }
 
     fn refresh_graph(&mut self) {
-        self.view_graph.validate_with(&self.func_lib);
+        self.state.view_graph.validate_with(&self.state.func_lib);
 
         self.graph_dirty = true;
-        self.execution_stats = None;
-        self.argument_values_cache.clear();
+        self.state.clear_execution_caches();
     }
 
     fn handle_actions(&mut self, interaction: &mut GraphUiInteraction) -> bool {
@@ -338,13 +386,12 @@ impl AppData {
             // truth for mutations that intentionally defer (e.g. the
             // const-bind double-click clear). See Step 4.2 in
             // REFACTOR_PLAN.md for why this is the contract.
-            for action in actions {
-                action.apply(&mut self.view_graph);
-            }
+            let any_affecting = self.state.apply_actions(actions);
             self.undo_stack.clear_redo();
-            self.undo_stack.push_current(&self.view_graph, actions);
+            self.undo_stack
+                .push_current(&self.state.view_graph, actions);
 
-            graph_updated |= actions.iter().any(|action| action.affects_computation());
+            graph_updated |= any_affecting;
         }
 
         if graph_updated {
@@ -374,5 +421,72 @@ fn add_node_from_func_id(view_graph: &mut ViewGraph, func_lib: &FuncLib, func_id
     {
         let func = func_lib.by_id(&func_id).unwrap();
         view_graph.add_node_from_func(func);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::ViewNode;
+    use egui::Pos2;
+
+    // Pure AppState tests — no worker, no tokio, no egui.
+
+    #[test]
+    fn add_status_first_line_has_no_leading_newline() {
+        let mut state = AppState::default();
+        state.add_status("hello");
+        assert_eq!(state.status, "hello");
+    }
+
+    #[test]
+    fn add_status_appends_with_newline_separator() {
+        let mut state = AppState::default();
+        state.add_status("one");
+        state.add_status("two");
+        assert_eq!(state.status, "one\ntwo");
+    }
+
+    #[test]
+    fn add_status_caps_buffer_to_2000_chars() {
+        let mut state = AppState::default();
+        // Push ~3000 chars; each add is appended with a newline.
+        for _ in 0..300 {
+            state.add_status("0123456789");
+        }
+        assert!(state.status.len() <= 2000);
+    }
+
+    #[test]
+    fn apply_actions_reports_when_action_affects_computation() {
+        let mut state = AppState::default();
+
+        // NodeSelected is a UI-only action — should NOT report as affecting computation.
+        let selected_action = GraphUiAction::NodeSelected {
+            before: None,
+            after: None,
+        };
+        let affects = state.apply_actions(&[selected_action]);
+        assert!(!affects);
+
+        // NodeMoved is also UI-only.
+        let node_id = NodeId::unique();
+        let mut vg = ViewGraph::default();
+        vg.view_nodes.add(ViewNode {
+            id: node_id,
+            pos: Pos2::ZERO,
+        });
+        state.view_graph = vg;
+        let moved = GraphUiAction::NodeMoved {
+            node_id,
+            before: Pos2::ZERO,
+            after: Pos2::new(1.0, 2.0),
+        };
+        let affects = state.apply_actions(&[moved]);
+        assert!(!affects);
+        assert_eq!(
+            state.view_graph.view_nodes.by_key(&node_id).unwrap().pos,
+            Pos2::new(1.0, 2.0)
+        );
     }
 }

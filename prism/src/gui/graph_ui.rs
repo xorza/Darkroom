@@ -152,7 +152,7 @@ impl GraphUi {
         // since been removed (e.g. by an undo/redo that ran between
         // frames). Keeping stale IDs in `Interaction` would propagate to
         // downstream `.unwrap()` sites in drag/commit code paths.
-        self.drop_stale_interaction(&app_data.view_graph);
+        self.drop_stale_interaction(&app_data.state.view_graph);
 
         let rect = self.draw_background_frame(gui);
 
@@ -160,11 +160,11 @@ impl GraphUi {
             gui.ui().set_clip_rect(rect);
 
             let mut ctx = GraphContext {
-                func_lib: &app_data.func_lib,
-                view_graph: &app_data.view_graph,
-                execution_stats: app_data.execution_stats.as_ref(),
-                autorun: app_data.autorun,
-                argument_values_cache: &mut app_data.argument_values_cache,
+                func_lib: &app_data.state.func_lib,
+                view_graph: &app_data.state.view_graph,
+                execution_stats: app_data.state.execution_stats.as_ref(),
+                autorun: app_data.state.autorun,
+                argument_values_cache: &mut app_data.state.argument_values_cache,
             };
 
             let (background_response, pointer_pos) =

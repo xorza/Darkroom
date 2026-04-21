@@ -496,50 +496,41 @@ render output on a snapshot test graph (see Step 7).
 
 ---
 
-### Step 6 — `AppData` splits into `AppState` + `Session`
+### Step 6 — `AppData` splits into `AppState` + `Session` ✅ DONE (incremental)
 
-**Problem.** `AppData` (`src/app_data.rs:33-55`) bundles domain state
-(graph, lib, cache, config) with session/runtime concerns (worker, async
-channels, dirty flag, print buffer, undo stack). It's 400+ lines and the
-unit-testable parts are trapped behind the async parts.
+**Problem.** `AppData` bundled domain state (graph, lib, cache, config,
+status, autorun) with session/runtime concerns (worker, async channels,
+dirty flag, print buffer, undo stack). The unit-testable parts were
+trapped behind async machinery.
 
-**Target.**
-```rust
-pub struct AppState {          // pure; Serialize + Clone + testable
-    pub view_graph: ViewGraph,
-    pub func_lib: FuncLib,
-    pub argument_values_cache: ArgumentValuesCache,
-    pub execution_stats: Option<ExecutionStats>,
-    pub config: Config,
-    pub autorun: bool,
-    pub status: String,
-}
+**Work done.**
+- Added `pub struct AppState` with the seven pure-domain fields
+  (`func_lib`, `view_graph`, `execution_stats`, `argument_values_cache`,
+  `status`, `config`, `autorun`). Implements `Default` and has
+  `add_status` + `apply_actions` — the two methods that were previously
+  trapped in `AppData`. No worker, no tokio, no egui.
+- `AppData` now holds `pub state: AppState` as a field. All session
+  methods (`handle_actions`, `undo`, `redo`, `handle_interaction`,
+  `save_graph`, `load_graph`, `update_shared_status`, `exit`) keep their
+  previous behaviour but read/write through `self.state.*`.
+- Call sites (`main_ui.rs`, `gui/graph_ui.rs`) updated to reach state
+  via `app_data.state.*`. No behaviour change; just a single extra
+  field hop.
+- Four new unit tests on `AppState` (add_status base case + newline
+  append + 2000-char cap + apply_actions reports the
+  affects-computation flag correctly).
 
-pub struct Session {           // side-effectful; owns the worker + undo
-    pub state: AppState,
-    worker: Worker,
-    execution_rx: Slot<ExecutionStats>,
-    argument_rx: Slot<ArgumentValues>,
-    print_rx: UnboundedReceiver<String>,
-    undo_stack: Box<dyn UndoStack<ViewGraph>>,
-    graph_dirty: bool,
-}
-```
-`Session::apply(actions)` is the single entry point for action application:
-it pushes to the undo stack, refreshes if any action `affects_computation`,
-and drains worker callbacks. `AppState` alone is enough to unit-test
-everything the view layer cares about.
+**What wasn't done — kept as Step 6.2 if ever needed.**
 
-**Work.**
-1. Extract `AppState` first, leaving `AppData` as a facade.
-2. Move worker wiring to `Session`.
-3. Delete the facade once all call sites are updated.
+- Renaming `AppData` → `Session`. The name is historical; the current
+  shape is "AppData wraps AppState plus session concerns" which matches
+  the naming in the original plan. Renaming is a pure rename across the
+  whole crate — no semantic change, just churn, so deferred.
+- Moving more tests onto `AppState`. The seam is clean now; adding
+  richer pipeline tests (emit action → apply → undo → re-apply
+  invariants across the full `AppState`) is Step 7.2 work.
 
-**Verify.** Existing behaviour + new tests: apply a sequence of actions to an
-`AppState`, assert the resulting `ViewGraph` is what we expect; no egui, no
-tokio.
-
-**Size / risk.** ~2 days. Medium.
+**Verify.** 58 tests pass (54 → 58); clippy clean; behaviour unchanged.
 
 ---
 
