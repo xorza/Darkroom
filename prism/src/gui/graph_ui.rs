@@ -175,14 +175,16 @@ impl GraphUi {
             // Phase 2: Overlays (buttons, details panel, new-node popup)
             let buttons = self.render_buttons(gui, ctx.autorun);
             if buttons.reset_view {
-                ctx.view_graph.scale = 1.0;
-                ctx.view_graph.pan = Vec2::ZERO;
+                self.emit_zoom_pan(ctx.view_graph, Vec2::ZERO, 1.0);
             }
-            if buttons.view_selected {
-                view_selected_node(gui, &mut ctx, &self.graph_layout);
+            if buttons.view_selected
+                && let Some((scale, pan)) = view_selected_node_target(gui, &ctx, &self.graph_layout)
+            {
+                self.emit_zoom_pan(ctx.view_graph, pan, scale);
             }
             if buttons.fit_all {
-                fit_all_nodes(gui, &mut ctx, &self.graph_layout);
+                let (scale, pan) = fit_all_nodes_target(gui, &ctx, &self.graph_layout);
+                self.emit_zoom_pan(ctx.view_graph, pan, scale);
             }
 
             let mut overlay_hovered = buttons.response.hovered();
@@ -253,7 +255,8 @@ impl GraphUi {
 
         if ctx.view_graph.selected_node_id.is_some() {
             let before = ctx.view_graph.selected_node_id;
-            ctx.view_graph.selected_node_id = None;
+            // Emit-action-only: selected_node_id is mutated by
+            // `NodeSelected::apply` in handle_actions, not here.
             self.ui_interaction.add_action(GraphUiAction::NodeSelected {
                 before,
                 after: None,
@@ -623,72 +626,93 @@ impl GraphUi {
         background_response: &Response,
         pointer_pos: Option<Pos2>,
     ) {
-        let prev_scale = ctx.view_graph.scale;
-        let prev_pan = ctx.view_graph.pan;
+        self.drive_pan_interaction_state(background_response);
+
+        let mut new_scale = ctx.view_graph.scale;
+        let mut new_pan = ctx.view_graph.pan;
 
         if let Some(pointer_pos) = pointer_pos {
-            self.apply_scroll_zoom(gui, input, ctx, pointer_pos);
+            (new_scale, new_pan) = compute_scroll_zoom(gui, input, pointer_pos, new_scale, new_pan);
         }
 
-        self.handle_pan_state(ctx, background_response);
-
-        if !prev_scale.ui_equals(ctx.view_graph.scale) || !prev_pan.ui_equals(ctx.view_graph.pan) {
-            self.ui_interaction
-                .add_action(GraphUiAction::ZoomPanChanged {
-                    before_pan: prev_pan,
-                    before_scale: prev_scale,
-                    after_pan: ctx.view_graph.pan,
-                    after_scale: ctx.view_graph.scale,
-                });
+        if matches!(self.interaction, Interaction::Panning)
+            && background_response.dragged_by(PointerButton::Middle)
+        {
+            new_pan += background_response.drag_delta();
         }
+
+        self.emit_zoom_pan(ctx.view_graph, new_pan, new_scale);
     }
 
-    fn apply_scroll_zoom(
-        &self,
-        gui: &mut Gui<'_>,
-        input: &InputSnapshot,
-        ctx: &mut GraphContext<'_>,
-        pointer_pos: Pos2,
-    ) {
-        let (scroll_delta, mouse_wheel_delta) = (input.scroll_delta, input.wheel_lines);
-
-        let (zoom_delta, pan) = (mouse_wheel_delta.abs() > f32::EPSILON).then_else(
-            ((mouse_wheel_delta * WHEEL_ZOOM_SPEED).exp(), Vec2::ZERO),
-            (input.zoom_delta_unless_cmd(), scroll_delta),
-        );
-
-        if (zoom_delta - 1.0).abs() > f32::EPSILON {
-            let clamped_scale = (ctx.view_graph.scale * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
-            let origin = gui.rect.min;
-            let graph_pos = (pointer_pos - origin - ctx.view_graph.pan) / ctx.view_graph.scale;
-            ctx.view_graph.scale = clamped_scale;
-            ctx.view_graph.pan = pointer_pos - origin - graph_pos * ctx.view_graph.scale;
-        }
-
-        ctx.view_graph.pan += pan;
-    }
-
-    fn handle_pan_state(&mut self, ctx: &mut GraphContext<'_>, background_response: &Response) {
+    fn drive_pan_interaction_state(&mut self, background_response: &Response) {
         match &self.interaction {
             Interaction::Idle if background_response.drag_started_by(PointerButton::Middle) => {
                 self.interaction.start_panning();
             }
-            Interaction::Panning => {
-                if background_response.drag_stopped_by(PointerButton::Middle) {
-                    self.interaction.cancel();
-                }
-                if background_response.dragged_by(PointerButton::Middle) {
-                    ctx.view_graph.pan += background_response.drag_delta();
-                }
+            Interaction::Panning if background_response.drag_stopped_by(PointerButton::Middle) => {
+                self.interaction.cancel();
             }
             _ => {}
         }
+    }
+
+    /// Emit `ZoomPanChanged` iff the target differs from the current view.
+    /// `apply()` in `handle_actions` is the single site that writes
+    /// `pan` / `scale` onto `ViewGraph`.
+    fn emit_zoom_pan(
+        &mut self,
+        view_graph: &crate::model::ViewGraph,
+        new_pan: Vec2,
+        new_scale: f32,
+    ) {
+        if view_graph.scale.ui_equals(new_scale) && view_graph.pan.ui_equals(new_pan) {
+            return;
+        }
+        self.ui_interaction
+            .add_action(GraphUiAction::ZoomPanChanged {
+                before_pan: view_graph.pan,
+                before_scale: view_graph.scale,
+                after_pan: new_pan,
+                after_scale: new_scale,
+            });
     }
 }
 
 // ============================================================================
 // Free functions
 // ============================================================================
+
+/// Pure function: given the current (scale, pan) and this frame's scroll /
+/// zoom input, return the target (scale, pan). No mutation — the orchestrator
+/// emits a `ZoomPanChanged` action if the result differs from the current view.
+fn compute_scroll_zoom(
+    gui: &Gui<'_>,
+    input: &InputSnapshot,
+    pointer_pos: Pos2,
+    current_scale: f32,
+    current_pan: Vec2,
+) -> (f32, Vec2) {
+    let (scroll_delta, mouse_wheel_delta) = (input.scroll_delta, input.wheel_lines);
+
+    let (zoom_delta, pan_delta) = (mouse_wheel_delta.abs() > f32::EPSILON).then_else(
+        ((mouse_wheel_delta * WHEEL_ZOOM_SPEED).exp(), Vec2::ZERO),
+        (input.zoom_delta_unless_cmd(), scroll_delta),
+    );
+
+    let mut new_scale = current_scale;
+    let mut new_pan = current_pan;
+
+    if (zoom_delta - 1.0).abs() > f32::EPSILON {
+        let clamped_scale = (current_scale * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
+        let origin = gui.rect.min;
+        let graph_pos = (pointer_pos - origin - current_pan) / current_scale;
+        new_scale = clamped_scale;
+        new_pan = pointer_pos - origin - graph_pos * clamped_scale;
+    }
+
+    new_pan += pan_delta;
+    (new_scale, new_pan)
+}
 
 /// Idle-state transitions driven by primary-button pressure plus a port
 /// interaction command. Kept as a free function so it can borrow
@@ -786,13 +810,15 @@ fn apply_event_connection(
     }))
 }
 
-fn view_selected_node(gui: &Gui<'_>, ctx: &mut GraphContext<'_>, graph_layout: &GraphLayout) {
-    let Some(selected_id) = ctx.view_graph.selected_node_id else {
-        return;
-    };
-    let Some(node_view) = ctx.view_graph.view_nodes.by_key(&selected_id) else {
-        return;
-    };
+/// Computes target (scale, pan) to centre on the selected node, or `None`
+/// if nothing is selected / the layout isn't known.
+fn view_selected_node_target(
+    gui: &Gui<'_>,
+    ctx: &GraphContext<'_>,
+    graph_layout: &GraphLayout,
+) -> Option<(f32, Vec2)> {
+    let selected_id = ctx.view_graph.selected_node_id?;
+    let node_view = ctx.view_graph.view_nodes.by_key(&selected_id)?;
 
     let scale = ctx.view_graph.scale;
     let rect = graph_layout.node_layout(&node_view.id).body_rect;
@@ -802,15 +828,22 @@ fn view_selected_node(gui: &Gui<'_>, ctx: &mut GraphContext<'_>, graph_layout: &
         node_view.pos.y + size.y * 0.5,
     );
 
-    ctx.view_graph.scale = 1.0;
-    ctx.view_graph.pan = gui.rect.center() - gui.rect.min - center.to_vec2();
+    let target_scale = 1.0;
+    let target_pan = gui.rect.center() - gui.rect.min - center.to_vec2();
+    Some((target_scale, target_pan))
 }
 
-fn fit_all_nodes(gui: &Gui<'_>, ctx: &mut GraphContext<'_>, graph_layout: &GraphLayout) {
+/// Computes target (scale, pan) that fits all nodes on screen. Returns
+/// `(1.0, Vec2::ZERO)` when the graph is empty so the caller can still
+/// emit a normalised ZoomPanChanged when the user hits "fit all" on an
+/// empty graph.
+fn fit_all_nodes_target(
+    gui: &Gui<'_>,
+    ctx: &GraphContext<'_>,
+    graph_layout: &GraphLayout,
+) -> (f32, Vec2) {
     if ctx.view_graph.view_nodes.is_empty() {
-        ctx.view_graph.scale = 1.0;
-        ctx.view_graph.pan = egui::Vec2::ZERO;
-        return;
+        return (1.0, Vec2::ZERO);
     }
 
     let origin = graph_layout.origin;
@@ -835,9 +868,8 @@ fn fit_all_nodes(gui: &Gui<'_>, ctx: &mut GraphContext<'_>, graph_layout: &Graph
     let zoom_x = (bounds_size.x > 0.0).then_else(available.x / bounds_size.x, 1.0);
     let zoom_y = (bounds_size.y > 0.0).then_else(available.y / bounds_size.y, 1.0);
 
-    let target_zoom = zoom_x.min(zoom_y).clamp(MIN_ZOOM, MAX_ZOOM);
-    ctx.view_graph.scale = target_zoom;
-
+    let target_scale = zoom_x.min(zoom_y).clamp(MIN_ZOOM, MAX_ZOOM);
     let bounds_center = bounds.center().to_vec2();
-    ctx.view_graph.pan = gui.rect.center() - gui.rect.min - bounds_center * ctx.view_graph.scale;
+    let target_pan = gui.rect.center() - gui.rect.min - bounds_center * target_scale;
+    (target_scale, target_pan)
 }

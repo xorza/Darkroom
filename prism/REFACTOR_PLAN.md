@@ -344,15 +344,23 @@ anymore.
    cancels. `ViewGraph` is never written during the drag — the committed
    position lands via `NodeMoved::apply`. Deleted the now-unused
    `common::drag_state` module and the `NodeIds::drag_start` id salt.
-2. **Selection** — a distinct simple action: one of (a) keep selection
-   live-edit (it's a single `Option<NodeId>` — low risk), or (b) route
-   through `NodeSelected` action. Do (b) for consistency.
-3. **Const-bind editor** — the big one. Replace `StaticValueEditor`'s
+2. **Selection** ✅ DONE. `handle_background_click`'s inline
+   `view_graph.selected_node_id = None` removed; the emitted
+   `NodeSelected` action's apply handles it. Combined with the
+   node-drag commit which already dropped the inline write in
+   `handle_node_drag`, selection is now fully routed through actions.
+3. **Zoom / pan** ✅ DONE. Split `update_zoom_and_pan` into three
+   ingredients — `drive_pan_interaction_state` (Idle↔Panning
+   transitions), `compute_scroll_zoom` (pure `(scale, pan) → (scale,
+   pan)`), and middle-drag delta — then emit exactly one
+   `ZoomPanChanged` per frame via `emit_zoom_pan`. Buttons for reset /
+   view-selected / fit-all became pure target-computing functions
+   (`fit_all_nodes_target`, `view_selected_node_target`) whose result
+   flows into the same `emit_zoom_pan`. No more inline writes to
+   `view_graph.pan` / `scale` anywhere in render.
+4. **Const-bind editor** — the big one. Replace `StaticValueEditor`'s
    `&mut StaticValue` with `&mut draft: StaticValue` owned by
    `Interaction::EditingConstBind`. On commit emit `InputChanged`.
-4. **Zoom / pan** — move `view_graph.pan / scale` mutations to the
-   `ZoomPanChanged` action's apply (already does this) and remove the
-   inline writes in `apply_scroll_zoom` / `handle_pan_state`.
 5. **Connection create/delete** — `apply_data_connection`,
    `apply_event_connection`, `disconnect_connection` already emit
    actions; remove the inline binding / subscriber mutation. Apply path
