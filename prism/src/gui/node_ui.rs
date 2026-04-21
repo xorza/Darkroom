@@ -212,6 +212,7 @@ impl NodeUi {
             state.start_node_drag(*node_id, start_pos);
         }
 
+        let mut commit_on_release = false;
         if let Some(drag) = state.node_drag_mut()
             && drag.node_id == *node_id
         {
@@ -231,7 +232,12 @@ impl NodeUi {
                     before,
                     after: committed,
                 });
-                state.cancel();
+                // Defer `state.cancel()` until after the layout refresh
+                // below — otherwise the offset would be dropped and this
+                // final frame would draw the node at its pre-drag
+                // position for one flash, until apply() updates
+                // view_graph.pos at end of frame.
+                commit_on_release = true;
             }
         }
 
@@ -240,6 +246,10 @@ impl NodeUi {
         let drag_offset = state.node_drag_offset_for(node_id);
         let layout = graph_layout.node_layouts.by_key_mut(node_id).unwrap();
         layout.update(ctx, gui, graph_layout.origin, drag_offset);
+
+        if commit_on_release {
+            state.cancel();
+        }
 
         layout
     }
