@@ -53,8 +53,8 @@ fn test_moffat_fit_centered_fixed_beta() {
     assert!(result.is_some());
     let result = result.unwrap();
     assert!(result.converged);
-    assert!((result.pos.x as f32 - true_cx).abs() < 0.1);
-    assert!((result.pos.y as f32 - true_cy).abs() < 0.1);
+    assert!((result.pos.x - true_cx).abs() < 0.1);
+    assert!((result.pos.y - true_cy).abs() < 0.1);
     assert!((result.alpha - true_alpha).abs() < 0.3);
 }
 
@@ -84,8 +84,8 @@ fn test_moffat_fit_subpixel_offset() {
     assert!(result.is_some());
     let result = result.unwrap();
     assert!(result.converged);
-    assert!((result.pos.x as f32 - true_cx).abs() < 0.05);
-    assert!((result.pos.y as f32 - true_cy).abs() < 0.05);
+    assert!((result.pos.x - true_cx).abs() < 0.05);
+    assert!((result.pos.y - true_cy).abs() < 0.05);
 }
 
 #[test]
@@ -117,8 +117,8 @@ fn test_moffat_fit_with_beta() {
     assert!(result.is_some());
     let result = result.unwrap();
     assert!(result.converged);
-    assert!((result.pos.x as f32 - true_cx).abs() < 0.1);
-    assert!((result.pos.y as f32 - true_cy).abs() < 0.1);
+    assert!((result.pos.x - true_cx).abs() < 0.1);
+    assert!((result.pos.y - true_cy).abs() < 0.1);
     assert!((result.beta - true_beta).abs() < 0.5);
 }
 
@@ -179,14 +179,14 @@ fn test_moffat_fit_with_gaussian_noise() {
     assert!(result.converged);
     // With noise, allow larger tolerance
     assert!(
-        (result.pos.x as f32 - true_cx).abs() < 0.2,
+        (result.pos.x - true_cx).abs() < 0.2,
         "x error: {}",
-        (result.pos.x as f32 - true_cx).abs()
+        (result.pos.x - true_cx).abs()
     );
     assert!(
-        (result.pos.y as f32 - true_cy).abs() < 0.2,
+        (result.pos.y - true_cy).abs() < 0.2,
         "y error: {}",
-        (result.pos.y as f32 - true_cy).abs()
+        (result.pos.y - true_cy).abs()
     );
 }
 
@@ -222,14 +222,14 @@ fn test_moffat_fit_high_noise_still_converges() {
     assert!(result.converged);
     // Centroid should still be reasonable (within 0.5 pixel)
     assert!(
-        (result.pos.x as f32 - true_cx).abs() < 0.5,
+        (result.pos.x - true_cx).abs() < 0.5,
         "x error too large: {}",
-        (result.pos.x as f32 - true_cx).abs()
+        (result.pos.x - true_cx).abs()
     );
     assert!(
-        (result.pos.y as f32 - true_cy).abs() < 0.5,
+        (result.pos.y - true_cy).abs() < 0.5,
         "y error too large: {}",
-        (result.pos.y as f32 - true_cy).abs()
+        (result.pos.y - true_cy).abs()
     );
 }
 
@@ -305,14 +305,14 @@ fn test_moffat_fit_wrong_background_estimate() {
     assert!(result.converged);
     // Centroid should still be accurate
     assert!(
-        (result.pos.x as f32 - true_cx).abs() < 0.1,
+        (result.pos.x - true_cx).abs() < 0.1,
         "x error: {}",
-        (result.pos.x as f32 - true_cx).abs()
+        (result.pos.x - true_cx).abs()
     );
     assert!(
-        (result.pos.y as f32 - true_cy).abs() < 0.1,
+        (result.pos.y - true_cy).abs() < 0.1,
         "y error: {}",
-        (result.pos.y as f32 - true_cy).abs()
+        (result.pos.y - true_cy).abs()
     );
     // Fitted background should be close to true value
     assert!(
@@ -350,14 +350,14 @@ fn test_moffat_fit_wrong_beta_still_finds_centroid() {
     assert!(result.converged);
     // Centroid should still be reasonably accurate even with wrong beta
     assert!(
-        (result.pos.x as f32 - true_cx).abs() < 0.15,
+        (result.pos.x - true_cx).abs() < 0.15,
         "x error: {}",
-        (result.pos.x as f32 - true_cx).abs()
+        (result.pos.x - true_cx).abs()
     );
     assert!(
-        (result.pos.y as f32 - true_cy).abs() < 0.15,
+        (result.pos.y - true_cy).abs() < 0.15,
         "y error: {}",
-        (result.pos.y as f32 - true_cy).abs()
+        (result.pos.y - true_cy).abs()
     );
 }
 
@@ -391,8 +391,8 @@ fn test_moffat_fit_very_high_amplitude() {
     assert!(result.is_some());
     let result = result.unwrap();
     assert!(result.converged);
-    assert!((result.pos.x as f32 - true_cx).abs() < 0.1);
-    assert!((result.pos.y as f32 - true_cy).abs() < 0.1);
+    assert!((result.pos.x - true_cx).abs() < 0.1);
+    assert!((result.pos.y - true_cy).abs() < 0.1);
     assert!((result.amplitude - true_amp).abs() / true_amp < 0.01);
 }
 
@@ -422,8 +422,8 @@ fn test_moffat_fit_very_low_amplitude() {
     assert!(result.is_some());
     let result = result.unwrap();
     assert!(result.converged);
-    assert!((result.pos.x as f32 - true_cx).abs() < 0.1);
-    assert!((result.pos.y as f32 - true_cy).abs() < 0.1);
+    assert!((result.pos.x - true_cx).abs() < 0.1);
+    assert!((result.pos.y - true_cy).abs() < 0.1);
 }
 
 #[test]
@@ -452,8 +452,8 @@ fn test_moffat_fit_narrow_psf() {
     assert!(result.is_some());
     let result = result.unwrap();
     assert!(result.converged);
-    assert!((result.pos.x as f32 - true_cx).abs() < 0.1);
-    assert!((result.pos.y as f32 - true_cy).abs() < 0.1);
+    assert!((result.pos.x - true_cx).abs() < 0.1);
+    assert!((result.pos.y - true_cy).abs() < 0.1);
 }
 
 #[test]
@@ -482,8 +482,8 @@ fn test_moffat_fit_wide_psf() {
     assert!(result.is_some());
     let result = result.unwrap();
     assert!(result.converged);
-    assert!((result.pos.x as f32 - true_cx).abs() < 0.1);
-    assert!((result.pos.y as f32 - true_cy).abs() < 0.1);
+    assert!((result.pos.x - true_cx).abs() < 0.1);
+    assert!((result.pos.y - true_cy).abs() < 0.1);
     assert!(
         (result.alpha - true_alpha).abs() < 0.5,
         "alpha error: {}",
@@ -523,10 +523,10 @@ fn test_moffat_fit_various_beta_values() {
             true_beta
         );
         assert!(
-            (result.pos.x as f32 - true_cx).abs() < 0.1,
+            (result.pos.x - true_cx).abs() < 0.1,
             "beta={}: x error={}",
             true_beta,
-            (result.pos.x as f32 - true_cx).abs()
+            (result.pos.x - true_cx).abs()
         );
     }
 }
@@ -600,14 +600,14 @@ fn test_moffat_fit_bad_initial_guess_still_converges() {
     let result = result.unwrap();
     assert!(result.converged);
     assert!(
-        (result.pos.x as f32 - true_cx).abs() < 0.1,
+        (result.pos.x - true_cx).abs() < 0.1,
         "x error: {}",
-        (result.pos.x as f32 - true_cx).abs()
+        (result.pos.x - true_cx).abs()
     );
     assert!(
-        (result.pos.y as f32 - true_cy).abs() < 0.1,
+        (result.pos.y - true_cy).abs() < 0.1,
         "y error: {}",
-        (result.pos.y as f32 - true_cy).abs()
+        (result.pos.y - true_cy).abs()
     );
 }
 

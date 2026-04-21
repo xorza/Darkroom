@@ -28,9 +28,9 @@ imaginarium = { path = "imaginarium" }
 palantir = { path = "palantir" }
 
 # wgpu version should be in sync with egui
-wgpu = { version = "27.0", features = ["metal", "vulkan", "dx12"] }
-eframe = { version = "0.33", default-features = false, features = ["default_fonts", "persistence", "wgpu", "wayland"] }
-egui = { version = "0.33", default-features = false, features = ["default_fonts", "rayon", "serde"] }
+wgpu = { version = "29.0", features = ["metal", "vulkan", "dx12"] }
+eframe = { version = "0.34", default-features = false, features = ["default_fonts", "persistence", "wgpu", "wayland"] }
+egui = { version = "0.34", default-features = false, features = ["default_fonts", "rayon", "serde"] }
 
 # gh repo recommends using development version
 fitsio = { git = "https://github.com/simonrw/rust-fitsio", features = ["fitsio-src", "src-cmake"] }
@@ -102,8 +102,6 @@ opt-level = 3
 [profile.dev.package.wgpu-types]
 opt-level = 3
 [profile.dev.package.naga]
-opt-level = 3
-[profile.dev.package.gpu-alloc]
 opt-level = 3
 [profile.dev.package.gpu-descriptor]
 opt-level = 3

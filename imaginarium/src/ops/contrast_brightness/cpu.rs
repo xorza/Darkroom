@@ -1576,7 +1576,7 @@ mod tests {
 
             // Check alpha bytes for each pixel
             for row in 0..4 {
-                let row_start = row * input.desc().stride as usize;
+                let row_start = row * input.desc().stride;
                 for x in 0..16 {
                     let pixel_start = row_start + x * pixel_size;
                     let alpha_start = pixel_start + alpha_offset;

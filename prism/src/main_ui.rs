@@ -7,7 +7,7 @@ use crate::gui::log_ui::LogUi;
 use crate::gui::style::Style;
 use crate::{app_data::AppData, gui::style_settings::StyleSettings};
 use eframe::egui;
-use egui::{CentralPanel, Frame, TopBottomPanel, ViewportCommand};
+use egui::{CentralPanel, Frame, Panel, ViewportCommand};
 
 #[derive(Clone, Debug)]
 pub struct UiContext {
@@ -95,9 +95,9 @@ impl MainUi {
         }
     }
 
-    pub fn render(&mut self, app_data: &mut AppData, ctx: &egui::Context) {
+    pub fn render(&mut self, app_data: &mut AppData, root_ui: &mut egui::Ui) {
         let style = Rc::new(Style::new(self.style_settings.clone(), 1.0));
-        ctx.style_mut(|egui_style| {
+        root_ui.ctx().global_style_mut(|egui_style| {
             style.apply_to_egui(egui_style);
         });
 
@@ -105,9 +105,9 @@ impl MainUi {
 
         self.handle_shortcuts(app_data);
 
-        egui::TopBottomPanel::top("top_panel")
+        Panel::top("top_panel")
             .show_separator_line(false)
-            .show(ctx, |ui| {
+            .show_inside(root_ui, |ui| {
                 egui::MenuBar::new().ui(ui, |ui| {
                     style.apply_menu_style(ui);
 
@@ -139,18 +139,20 @@ impl MainUi {
                 });
             });
 
-        TopBottomPanel::bottom("status_panel")
+        Panel::bottom("status_panel")
             .show_separator_line(false)
             .frame(Frame::NONE)
-            .show(ctx, |ui| {
+            .show_inside(root_ui, |ui| {
                 self.log_ui
                     .render(&mut Gui::new(ui, &style), &app_data.status);
             });
 
-        CentralPanel::default().frame(Frame::NONE).show(ctx, |ui| {
-            self.graph_ui
-                .render(&mut Gui::new(ui, &style), app_data, &self.arena)
-        });
+        CentralPanel::default()
+            .frame(Frame::NONE)
+            .show_inside(root_ui, |ui| {
+                self.graph_ui
+                    .render(&mut Gui::new(ui, &style), app_data, &self.arena)
+            });
 
         app_data.handle_interaction(self.graph_ui.ui_interaction());
         self.arena.reset();

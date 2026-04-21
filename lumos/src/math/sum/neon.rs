@@ -68,31 +68,33 @@ pub unsafe fn sum_f32(values: &[f32]) -> f32 {
 #[inline]
 #[target_feature(enable = "neon")]
 unsafe fn reduce_kahan_neon(sum_vec: float32x4_t, c_vec: float32x4_t) -> (f32, f32) {
-    let mut s_arr = [0.0f32; 4];
-    let mut c_arr = [0.0f32; 4];
-    vst1q_f32(s_arr.as_mut_ptr(), sum_vec);
-    vst1q_f32(c_arr.as_mut_ptr(), c_vec);
+    unsafe {
+        let mut s_arr = [0.0f32; 4];
+        let mut c_arr = [0.0f32; 4];
+        vst1q_f32(s_arr.as_mut_ptr(), sum_vec);
+        vst1q_f32(c_arr.as_mut_ptr(), c_vec);
 
-    let mut s = 0.0f32;
-    let mut c = 0.0f32;
-    for i in 0..4 {
-        let t = s + s_arr[i];
-        if s.abs() >= s_arr[i].abs() {
-            c += (s - t) + s_arr[i];
-        } else {
-            c += (s_arr[i] - t) + s;
+        let mut s = 0.0f32;
+        let mut c = 0.0f32;
+        for i in 0..4 {
+            let t = s + s_arr[i];
+            if s.abs() >= s_arr[i].abs() {
+                c += (s - t) + s_arr[i];
+            } else {
+                c += (s_arr[i] - t) + s;
+            }
+            s = t;
+            let ci = -c_arr[i];
+            let t = s + ci;
+            if s.abs() >= ci.abs() {
+                c += (s - t) + ci;
+            } else {
+                c += (ci - t) + s;
+            }
+            s = t;
         }
-        s = t;
-        let ci = -c_arr[i];
-        let t = s + ci;
-        if s.abs() >= ci.abs() {
-            c += (s - t) + ci;
-        } else {
-            c += (ci - t) + s;
-        }
-        s = t;
+        (s, c)
     }
-    (s, c)
 }
 
 /// Weighted mean using NEON SIMD with Kahan compensated summation.

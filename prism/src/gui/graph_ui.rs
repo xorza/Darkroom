@@ -732,10 +732,8 @@ impl GraphUi {
 
     fn handle_pan_state(&mut self, ctx: &mut GraphContext<'_>, background_response: &Response) {
         match self.interaction.mode() {
-            InteractionMode::Idle => {
-                if background_response.drag_started_by(PointerButton::Middle) {
-                    self.interaction.start_panning();
-                }
+            InteractionMode::Idle if background_response.drag_started_by(PointerButton::Middle) => {
+                self.interaction.start_panning();
             }
             InteractionMode::PanningGraph => {
                 if background_response.drag_stopped_by(PointerButton::Middle) {
@@ -756,7 +754,7 @@ impl GraphUi {
 
 /// Returns smooth scroll delta plus an accumulated mouse-wheel line/page magnitude.
 fn collect_scroll_mouse_wheel_deltas(gui: &mut Gui<'_>) -> (Vec2, f32) {
-    let base_scroll_delta = gui.ui().input(|input| input.raw_scroll_delta);
+    let base_scroll_delta = gui.ui().input(|input| input.smooth_scroll_delta);
 
     gui.ui().input(|input| {
         input.events.iter().fold(

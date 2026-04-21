@@ -68,9 +68,9 @@ fn configure_fonts(ctx: &egui::Context) {
 }
 
 fn configure_visuals(ctx: &egui::Context) {
-    let mut style = (*ctx.style()).clone();
+    let mut style = (*ctx.global_style()).clone();
     style.visuals.override_text_color = Some(egui::Color32::from_rgb(200, 200, 200));
-    ctx.set_style(style);
+    ctx.set_global_style(style);
 }
 
 #[derive(Debug)]
@@ -96,8 +96,8 @@ impl ScenariumEditor {
 }
 
 impl eframe::App for ScenariumEditor {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.main_ui.render(&mut self.app_data, ctx);
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.main_ui.render(&mut self.app_data, ui);
     }
 
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {

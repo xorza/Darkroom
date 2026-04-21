@@ -134,7 +134,7 @@ impl<'a> ComboBox<'a> {
             let item_height = gui.font_height(&item_font) + small_padding * 2.0;
             let item_size = vec2(item_width, item_height);
 
-            for (option, galley) in options.iter().zip(galleys.into_iter()) {
+            for (option, galley) in options.iter().zip(galleys) {
                 let is_selected = option == &selected;
                 if ListItem::from_galley(galley)
                     .selected(is_selected)

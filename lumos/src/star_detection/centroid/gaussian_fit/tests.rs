@@ -72,8 +72,8 @@ fn test_gaussian_fit_centered() {
     let result = result.unwrap();
     // Note: converged flag may be false if initial guess was already close
     // What matters is the accuracy of the result
-    assert!((result.pos.x as f32 - true_cx).abs() < 0.1);
-    assert!((result.pos.y as f32 - true_cy).abs() < 0.1);
+    assert!((result.pos.x - true_cx).abs() < 0.1);
+    assert!((result.pos.y - true_cy).abs() < 0.1);
     assert!((result.sigma.x - true_sigma).abs() < 0.2);
     assert!((result.sigma.y - true_sigma).abs() < 0.2);
 }
@@ -99,8 +99,8 @@ fn test_gaussian_fit_subpixel_offset() {
     assert!(result.is_some());
     let result = result.unwrap();
     assert!(result.converged);
-    assert!((result.pos.x as f32 - true_cx).abs() < 0.05);
-    assert!((result.pos.y as f32 - true_cy).abs() < 0.05);
+    assert!((result.pos.x - true_cx).abs() < 0.05);
+    assert!((result.pos.y - true_cy).abs() < 0.05);
 }
 
 #[test]
@@ -173,8 +173,8 @@ fn test_gaussian_fit_high_snr() {
 
     assert!(result.is_some());
     let result = result.unwrap();
-    assert!((result.pos.x as f32 - true_cx).abs() < 0.02);
-    assert!((result.pos.y as f32 - true_cy).abs() < 0.02);
+    assert!((result.pos.x - true_cx).abs() < 0.02);
+    assert!((result.pos.y - true_cy).abs() < 0.02);
     assert!((result.amplitude - true_amp).abs() < 1.0);
 }
 
@@ -220,8 +220,8 @@ fn test_gaussian_fit_large_sigma() {
 
     assert!(result.is_some());
     let result = result.unwrap();
-    assert!((result.pos.x as f32 - true_cx).abs() < 0.2);
-    assert!((result.pos.y as f32 - true_cy).abs() < 0.2);
+    assert!((result.pos.x - true_cx).abs() < 0.2);
+    assert!((result.pos.y - true_cy).abs() < 0.2);
     assert!((result.sigma.x - true_sigma).abs() < 0.5);
 }
 
@@ -246,8 +246,8 @@ fn test_gaussian_fit_small_sigma() {
     assert!(result.is_some());
     let result = result.unwrap();
     // Smaller sigma means less pixels with signal, so accuracy may be lower
-    assert!((result.pos.x as f32 - true_cx).abs() < 0.15);
-    assert!((result.pos.y as f32 - true_cy).abs() < 0.15);
+    assert!((result.pos.x - true_cx).abs() < 0.15);
+    assert!((result.pos.y - true_cy).abs() < 0.15);
 }
 
 #[test]
@@ -278,8 +278,8 @@ fn test_gaussian_fit_with_noise() {
     assert!(result.is_some());
     let result = result.unwrap();
     // With noise, accuracy is slightly reduced but should still be reasonable
-    assert!((result.pos.x as f32 - true_cx).abs() < 0.2);
-    assert!((result.pos.y as f32 - true_cy).abs() < 0.2);
+    assert!((result.pos.x - true_cx).abs() < 0.2);
+    assert!((result.pos.y - true_cy).abs() < 0.2);
 }
 
 #[test]
@@ -316,8 +316,8 @@ fn test_gaussian_fit_zero_background() {
 
     assert!(result.is_some());
     let result = result.unwrap();
-    assert!((result.pos.x as f32 - true_cx).abs() < 0.1);
-    assert!((result.pos.y as f32 - true_cy).abs() < 0.1);
+    assert!((result.pos.x - true_cx).abs() < 0.1);
+    assert!((result.pos.y - true_cy).abs() < 0.1);
     assert!(result.background.abs() < 0.05);
 }
 
@@ -341,8 +341,8 @@ fn test_gaussian_fit_high_background() {
 
     assert!(result.is_some());
     let result = result.unwrap();
-    assert!((result.pos.x as f32 - true_cx).abs() < 0.1);
-    assert!((result.pos.y as f32 - true_cy).abs() < 0.1);
+    assert!((result.pos.x - true_cx).abs() < 0.1);
+    assert!((result.pos.y - true_cy).abs() < 0.1);
 }
 
 #[test]
@@ -386,14 +386,14 @@ fn test_gaussian_fit_with_gaussian_noise() {
     assert!(result.converged);
     // With noise, allow larger tolerance
     assert!(
-        (result.pos.x as f32 - true_cx).abs() < 0.2,
+        (result.pos.x - true_cx).abs() < 0.2,
         "x error: {}",
-        (result.pos.x as f32 - true_cx).abs()
+        (result.pos.x - true_cx).abs()
     );
     assert!(
-        (result.pos.y as f32 - true_cy).abs() < 0.2,
+        (result.pos.y - true_cy).abs() < 0.2,
         "y error: {}",
-        (result.pos.y as f32 - true_cy).abs()
+        (result.pos.y - true_cy).abs()
     );
 }
 
@@ -424,14 +424,14 @@ fn test_gaussian_fit_high_noise_still_converges() {
     assert!(result.converged);
     // Centroid should still be reasonable (within 0.5 pixel)
     assert!(
-        (result.pos.x as f32 - true_cx).abs() < 0.5,
+        (result.pos.x - true_cx).abs() < 0.5,
         "x error too large: {}",
-        (result.pos.x as f32 - true_cx).abs()
+        (result.pos.x - true_cx).abs()
     );
     assert!(
-        (result.pos.y as f32 - true_cy).abs() < 0.5,
+        (result.pos.y - true_cy).abs() < 0.5,
         "y error too large: {}",
-        (result.pos.y as f32 - true_cy).abs()
+        (result.pos.y - true_cy).abs()
     );
 }
 
@@ -457,8 +457,8 @@ fn test_gaussian_fit_low_snr() {
     assert!(result.is_some());
     let result = result.unwrap();
     // Just verify it doesn't crash and produces finite values
-    assert!((result.pos.x as f32).is_finite());
-    assert!((result.pos.y as f32).is_finite());
+    assert!(result.pos.x.is_finite());
+    assert!(result.pos.y.is_finite());
     assert!(result.sigma.x.is_finite());
     assert!(result.sigma.y.is_finite());
 }
@@ -490,14 +490,14 @@ fn test_gaussian_fit_wrong_background_estimate() {
     assert!(result.converged);
     // Centroid should still be accurate
     assert!(
-        (result.pos.x as f32 - true_cx).abs() < 0.1,
+        (result.pos.x - true_cx).abs() < 0.1,
         "x error: {}",
-        (result.pos.x as f32 - true_cx).abs()
+        (result.pos.x - true_cx).abs()
     );
     assert!(
-        (result.pos.y as f32 - true_cy).abs() < 0.1,
+        (result.pos.y - true_cy).abs() < 0.1,
         "y error: {}",
-        (result.pos.y as f32 - true_cy).abs()
+        (result.pos.y - true_cy).abs()
     );
     // Fitted background should be close to true value
     assert!(
@@ -532,8 +532,8 @@ fn test_gaussian_fit_very_high_amplitude() {
     assert!(result.is_some());
     let result = result.unwrap();
     assert!(result.converged);
-    assert!((result.pos.x as f32 - true_cx).abs() < 0.1);
-    assert!((result.pos.y as f32 - true_cy).abs() < 0.1);
+    assert!((result.pos.x - true_cx).abs() < 0.1);
+    assert!((result.pos.y - true_cy).abs() < 0.1);
     assert!((result.amplitude - true_amp).abs() / true_amp < 0.01);
 }
 
@@ -558,8 +558,8 @@ fn test_gaussian_fit_narrow_psf() {
     assert!(result.is_some());
     let result = result.unwrap();
     assert!(result.converged);
-    assert!((result.pos.x as f32 - true_cx).abs() < 0.15);
-    assert!((result.pos.y as f32 - true_cy).abs() < 0.15);
+    assert!((result.pos.x - true_cx).abs() < 0.15);
+    assert!((result.pos.y - true_cy).abs() < 0.15);
 }
 
 // ============================================================================
@@ -621,14 +621,14 @@ fn test_gaussian_fit_bad_initial_guess_still_converges() {
     let result = result.unwrap();
     assert!(result.converged);
     assert!(
-        (result.pos.x as f32 - true_cx).abs() < 0.1,
+        (result.pos.x - true_cx).abs() < 0.1,
         "x error: {}",
-        (result.pos.x as f32 - true_cx).abs()
+        (result.pos.x - true_cx).abs()
     );
     assert!(
-        (result.pos.y as f32 - true_cy).abs() < 0.1,
+        (result.pos.y - true_cy).abs() < 0.1,
         "y error: {}",
-        (result.pos.y as f32 - true_cy).abs()
+        (result.pos.y - true_cy).abs()
     );
 }
 
@@ -746,16 +746,16 @@ fn test_gaussian_fit_multiple_positions() {
         );
         let result = result.unwrap();
         assert!(
-            (result.pos.x as f32 - true_cx).abs() < 0.1,
+            (result.pos.x - true_cx).abs() < 0.1,
             "X error {} for offset ({}, {})",
-            (result.pos.x as f32 - true_cx).abs(),
+            (result.pos.x - true_cx).abs(),
             offset_x,
             offset_y
         );
         assert!(
-            (result.pos.y as f32 - true_cy).abs() < 0.1,
+            (result.pos.y - true_cy).abs() < 0.1,
             "Y error {} for offset ({}, {})",
-            (result.pos.y as f32 - true_cy).abs(),
+            (result.pos.y - true_cy).abs(),
             offset_x,
             offset_y
         );
@@ -1106,8 +1106,8 @@ fn test_gaussian_fit_sigma_at_lower_bound() {
     assert!(result.sigma.x >= 0.5);
     assert!(result.sigma.y >= 0.5);
     // Centroid should still be reasonable
-    assert!((result.pos.x as f32 - true_cx).abs() < 0.2);
-    assert!((result.pos.y as f32 - true_cy).abs() < 0.2);
+    assert!((result.pos.x - true_cx).abs() < 0.2);
+    assert!((result.pos.y - true_cy).abs() < 0.2);
 }
 
 #[test]
@@ -1142,8 +1142,8 @@ fn test_gaussian_fit_sigma_at_upper_bound() {
     assert!(result.sigma.x <= stamp_radius as f32);
     assert!(result.sigma.y <= stamp_radius as f32);
     // Centroid should still be found
-    assert!((result.pos.x as f32 - true_cx).abs() < 0.5);
-    assert!((result.pos.y as f32 - true_cy).abs() < 0.5);
+    assert!((result.pos.x - true_cx).abs() < 0.5);
+    assert!((result.pos.y - true_cy).abs() < 0.5);
 }
 
 #[test]
@@ -1169,12 +1169,12 @@ fn test_gaussian_fit_extreme_amplitude_range() {
         assert!(result.is_some(), "Failed for amplitude=10^{}", amp_exp);
         let result = result.unwrap();
         assert!(
-            (result.pos.x as f32).is_finite(),
+            result.pos.x.is_finite(),
             "Non-finite x for amplitude=10^{}",
             amp_exp
         );
         assert!(
-            (result.pos.y as f32).is_finite(),
+            result.pos.y.is_finite(),
             "Non-finite y for amplitude=10^{}",
             amp_exp
         );
@@ -1208,10 +1208,10 @@ fn test_gaussian_fit_high_sigma_low_amplitude() {
     assert!(result.is_some());
     let result = result.unwrap();
     // With wide PSF and low amplitude, accuracy is reduced but should still work
-    assert!((result.pos.x as f32).is_finite());
-    assert!((result.pos.y as f32).is_finite());
-    assert!((result.pos.x as f32 - true_cx).abs() < 1.0);
-    assert!((result.pos.y as f32 - true_cy).abs() < 1.0);
+    assert!(result.pos.x.is_finite());
+    assert!(result.pos.y.is_finite());
+    assert!((result.pos.x - true_cx).abs() < 1.0);
+    assert!((result.pos.y - true_cy).abs() < 1.0);
 }
 
 #[test]

@@ -212,7 +212,7 @@ pub(crate) fn resolve_matches(
         .collect();
 
     // Sort by votes (descending)
-    matches.sort_by(|a, b| b.votes.cmp(&a.votes));
+    matches.sort_by_key(|m| std::cmp::Reverse(m.votes));
 
     // Resolve one-to-many conflicts (greedy approach)
     let mut used_ref = vec![false; n_ref];
