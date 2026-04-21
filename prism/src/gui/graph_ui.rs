@@ -131,7 +131,8 @@ impl GraphUi {
                 argument_values_cache: &mut app_data.argument_values_cache,
             };
 
-            let (background_response, pointer_pos) = self.setup_background_interaction(gui, rect);
+            let (background_response, pointer_pos) =
+                self.setup_background_interaction(gui, input, rect);
 
             if background_response.clicked() {
                 self.handle_background_click(&mut ctx);
@@ -232,13 +233,13 @@ impl GraphUi {
     fn setup_background_interaction(
         &self,
         gui: &mut Gui<'_>,
+        input: &InputSnapshot,
         rect: Rect,
     ) -> (Response, Option<Pos2>) {
         let graph_bg_id = gui.ui().make_persistent_id("graph_bg");
 
-        let pointer_pos = gui
-            .ui()
-            .input(|input| input.pointer.hover_pos())
+        let pointer_pos = input
+            .pointer_pos
             .and_then(|pos| rect.contains(pos).then_else(Some(pos), None));
 
         let response = gui.ui().interact(

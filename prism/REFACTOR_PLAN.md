@@ -46,6 +46,49 @@ any of them it needs justification.
    no `Rc<Style>` clones on hot paths; no context struct with five live
    `&mut` fields.
 
+## 2a. Progress audit against principles
+
+Updated after each commit. `grep` counts are taken from `prism/src/gui/`
+plus `main_ui.rs` and `app_data.rs` — i.e. everywhere the view layer
+lives.
+
+| # | Principle | Status | Remaining debt |
+|---|---|---|---|
+| 1 | One writer per concern | **~95% done** | `grep 'view_graph\.graph\.by_id_mut\|view_graph\.view_nodes\.by_key_mut'` in `gui/` returns **1 hit** (`node_ui.rs:146`, used only to hand `&mut Node` to the `StaticValueEditor` live-edit). `grep 'view_graph\.\(pan\|scale\|selected_node_id\)\s*='` → **0 hits**. Everything else goes through `apply`. |
+| 2 | Render reads, doesn't mutate | **in progress** | `render_nodes` still takes `&mut GraphContext` because of the `StaticValueEditor` path — same blocker as principle 1. Once that moves into `Interaction::EditingConstBind`, the whole chain can flip to `&GraphContext` (Step 4.2). |
+| 3 | Input sampled once per frame | ✅ **done** | `grep '\.input(|' prism/src/gui prism/src/main_ui.rs` (excluding widget internals like `text_edit` / `drag_value` / `popup_menu` / `connection_bezier`) returns **0 hits** in the view/interaction layer. Widget internals still call `ui.input` directly — acceptable, they are self-contained. |
+| 4 | Real state machine with atomic cancel | ✅ **done** | `Interaction` enum with variant-local data; `cancel()` is one assignment; no remaining `cancel_interaction + stop_drag` pairs. |
+| 5 | Actions as the persistence seam | ✅ **done** | Undo/redo goes through `GraphUiAction`; `apply()` is the single mutation site. Save/load uses snapshot serde of `ViewGraph`, which is a different seam by design (not actions-as-changelog). |
+| 6 | Boring lifetimes | **partial** | `PhantomData` gone; `Rc<Style>` clone topology simplified but `Rc` itself still in place (Step 8.2). `GraphContext` still exposes `&mut ViewGraph` + `&mut ArgumentValuesCache` — flattens in Step 4.2. |
+
+**Deviations from the original plan — on purpose.**
+
+1. **No separate `Intent` enum.** The original Step 4 described a new `Intent`
+   type distinct from `GraphUiAction`. In practice `GraphUiAction` +
+   `GraphUiInteraction` buffer already behave exactly like an intent
+   pipeline, so we kept one concept instead of two. The only place the
+   render pass surfaces a typed "intent" is `NodesFrameResult` (removed /
+   broken node IDs + preferred port command) — small, localised.
+2. **Idempotent `apply()` + `handle_actions` applies (Step 4.0).** Wasn't
+   in the original Step 4. Became necessary once we committed to moving
+   mutations out of render: `push_current` assumed actions had already
+   been applied, so render was the *only* place mutations could happen.
+   Flipping the contract (apply in `handle_actions`; idempotent guards so
+   replay is safe) is what lets every Step 4.1 migration remove an inline
+   write without deadlocking on "who runs `apply`?".
+3. **Migration order vs. plan list.** Plan enumerated 6 classes; we
+   actually migrated 7 (added node-name editor). The `StaticValueEditor`
+   migration remains — it's the sole blocker for principles 1 + 2
+   reaching 100%.
+
+**What remains in one sentence.**
+
+Finish migrating the `StaticValueEditor` (const-bind value editing) to an
+`Interaction::EditingConstBind` draft; then tighten every render signature
+to `&GraphContext` / `&ViewGraph` and add the first render-boundary unit
+tests. At that point principles 1, 2, 3, 4, 5 are all at 100% and
+principle 6 only needs the `Rc<Style>` → `&Style` sweep.
+
 ## 3. Target module layout
 
 ```
