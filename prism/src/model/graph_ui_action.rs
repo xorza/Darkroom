@@ -271,6 +271,17 @@ impl GraphUiAction {
         }
     }
 
+    /// Non-immediate actions go into `GraphUiInteraction::pending_action`
+    /// where same-discriminant emissions coalesce across frames — used so a
+    /// multi-frame zoom/pan gesture ends up as one undo entry.
+    ///
+    /// `NodeMoved` used to be non-immediate because the pre-Step-4.1 drag
+    /// code emitted it every frame. After Step 4.1, the drag offset lives
+    /// in `Interaction::DraggingNode` and `NodeMoved` is emitted exactly
+    /// once on release — so it must be immediate, otherwise it would sit
+    /// pending indefinitely and only commit when a subsequent action
+    /// flushed it. `ZoomPanChanged` still fires per-frame and still needs
+    /// coalescing.
     pub fn immediate(&self) -> bool {
         match self {
             GraphUiAction::CacheToggled { .. }
@@ -279,8 +290,9 @@ impl GraphUiAction {
             | GraphUiAction::NodeRemoved { .. }
             | GraphUiAction::EventConnectionChanged { .. }
             | GraphUiAction::NodeSelected { .. }
-            | GraphUiAction::NodeNameChanged { .. } => true,
-            GraphUiAction::NodeMoved { .. } | GraphUiAction::ZoomPanChanged { .. } => false,
+            | GraphUiAction::NodeNameChanged { .. }
+            | GraphUiAction::NodeMoved { .. } => true,
+            GraphUiAction::ZoomPanChanged { .. } => false,
         }
     }
 }

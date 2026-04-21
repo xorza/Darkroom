@@ -138,3 +138,53 @@ impl GraphUiInteraction {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::Pos2;
+
+    /// Regression: `NodeMoved` used to sit forever in `pending_action`
+    /// because it was marked non-immediate, so a drag release never
+    /// committed to the action stacks until a *subsequent* action
+    /// flushed it — the node visually snapped back on release and then
+    /// jumped forward on the next interaction. After Step 4.1 drag
+    /// fires a single `NodeMoved` on release, so it must be immediate.
+    #[test]
+    fn node_moved_lands_in_action_stacks_immediately() {
+        let mut interaction = GraphUiInteraction::default();
+        interaction.add_action(GraphUiAction::NodeMoved {
+            node_id: NodeId::unique(),
+            before: Pos2::ZERO,
+            after: Pos2::new(10.0, 20.0),
+        });
+
+        let actions: Vec<_> = interaction.action_stacks().flatten().collect();
+        assert_eq!(
+            actions.len(),
+            1,
+            "NodeMoved must be visible in action_stacks() on the frame it is emitted"
+        );
+        assert!(
+            interaction.pending_action.is_none(),
+            "NodeMoved is immediate — nothing should linger in pending_action"
+        );
+    }
+
+    /// `ZoomPanChanged` keeps the cross-frame coalescing behaviour: one
+    /// emission on its own sits in `pending_action` so that follow-ups
+    /// can merge into a single undoable change.
+    #[test]
+    fn zoom_pan_changed_stays_pending_for_coalescing() {
+        let mut interaction = GraphUiInteraction::default();
+        interaction.add_action(GraphUiAction::ZoomPanChanged {
+            before_pan: egui::Vec2::ZERO,
+            before_scale: 1.0,
+            after_pan: egui::Vec2::new(5.0, 5.0),
+            after_scale: 1.2,
+        });
+
+        assert_eq!(interaction.action_stacks().count(), 0);
+        assert!(interaction.pending_action.is_some());
+    }
+}
