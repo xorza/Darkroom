@@ -299,6 +299,16 @@ impl Style {
     }
 
     pub fn apply_to_egui(&self, egui_style: &mut egui::Style) {
+        // Disable egui's debug warning that flashes a red rect when a
+        // screen rect is claimed by a different widget Id than last
+        // pass. Our chrome relies on egui's auto-generated widget IDs
+        // (counter-based per Ui), and any action that changes the
+        // widget-tree shape (execution stats appearing/disappearing,
+        // conditional status hints, etc.) ripples through those
+        // auto-IDs. Fixing every call site to use explicit id_salts
+        // would be sweeping; the warning itself is a dev-only diagnostic.
+        egui_style.debug.warn_if_rect_changes_id = false;
+
         egui_style.spacing.item_spacing = Vec2::splat(self.padding);
         egui_style.spacing.button_padding = Vec2::new(self.padding, self.small_padding);
         egui_style.spacing.indent = self.padding;

@@ -260,12 +260,37 @@ impl ConnectionUi {
 
         self.temp_connection_bezier
             .update_points(start, end, gui.scale());
-        self.temp_connection_bezier.show(
-            gui,
-            Sense::hover(),
-            "temp_connection",
-            ConnectionBezierStyle::build(&gui.style, drag.start_port.port.kind, false, false),
-        );
+        // ID-salt trick: when the drag is snapped to a compatible
+        // end port, use the same salt that the permanent connection
+        // will use once committed. Without this, the frame on which
+        // the permanent connection appears would register a widget at
+        // the same rect with a different id than last frame's
+        // temp-connection, tripping egui's "Widget rect changed id
+        // between passes" warning (red-rect flash).
+        let snapped_key = drag.end_port.and_then(|end| {
+            let (input_port, output_port) = order_ports(drag.start_port.port, end.port);
+            match output_port.kind {
+                PortKind::Output => Some(ConnectionKey::Input {
+                    input_node_id: input_port.node_id,
+                    input_idx: input_port.port_idx,
+                }),
+                PortKind::Event => Some(ConnectionKey::Event {
+                    event_node_id: output_port.node_id,
+                    event_idx: output_port.port_idx,
+                    trigger_node_id: input_port.node_id,
+                }),
+                _ => None,
+            }
+        });
+        let style =
+            ConnectionBezierStyle::build(&gui.style, drag.start_port.port.kind, false, false);
+        if let Some(key) = snapped_key {
+            self.temp_connection_bezier
+                .show(gui, Sense::hover(), ("connection", key), style);
+        } else {
+            self.temp_connection_bezier
+                .show(gui, Sense::hover(), "temp_connection", style);
+        }
     }
 
     pub(crate) fn any_hovered(&self) -> bool {
