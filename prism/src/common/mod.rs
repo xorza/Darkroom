@@ -22,6 +22,7 @@ pub mod value_editor;
 
 pub use combo_box::ComboBox;
 pub use file_picker::FilePicker;
+pub use id_salt::StableId;
 pub use popup_menu::{ListItem, PopupMenu};
 pub use text_edit::TextEdit;
 pub use ui_equals::UiEquals;

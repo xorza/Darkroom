@@ -8,7 +8,7 @@ use crate::gui::style::Style;
 use crate::input::InputSnapshot;
 use crate::{app_data::AppData, gui::style_settings::StyleSettings};
 use eframe::egui;
-use egui::{CentralPanel, Frame, Panel, ViewportCommand};
+use egui::{CentralPanel, Frame, Id, Panel, UiBuilder, ViewportCommand};
 
 #[derive(Clone, Debug)]
 pub struct UiContext {
@@ -111,35 +111,45 @@ impl MainUi {
         Panel::top("top_panel")
             .show_separator_line(false)
             .show_inside(root_ui, |ui| {
-                egui::MenuBar::new().ui(ui, |ui| {
-                    style.apply_menu_style(ui);
+                // Anchor a global-scope id for the MenuBar so its
+                // internal horizontal layout's widget id doesn't drift
+                // with the panel's auto-id counter.
+                // ui is raw egui::Ui (not our Gui), and `.id(...)` is the
+                // safe pattern, so direct UiBuilder use is intentional here.
+                let _ = ui.scope_builder(
+                    UiBuilder::new().id(Id::new("menu_bar_scope")), // id-drift-ok
+                    |ui| {
+                        egui::MenuBar::new().ui(ui, |ui| {
+                            style.apply_menu_style(ui);
 
-                    ui.menu_button("File", |ui| {
-                        style.apply_menu_style(ui);
+                            ui.menu_button("File", |ui| {
+                                style.apply_menu_style(ui);
 
-                        ui.set_min_width(100.0);
-                        if ui.button("New").clicked() {
-                            self.empty(app_data);
-                            ui.close();
-                        }
-                        if ui.button("Save").clicked() {
-                            self.save(app_data);
-                            ui.close();
-                        }
-                        if ui.button("Save as").clicked() {
-                            self.save_as(app_data);
-                            ui.close();
-                        }
-                        if ui.button("Open").clicked() {
-                            self.load(app_data);
-                            ui.close();
-                        }
-                        if ui.button("Exit").clicked() {
-                            ui.close();
-                            self.ui_context.close_app();
-                        }
-                    });
-                });
+                                ui.set_min_width(100.0);
+                                if ui.button("New").clicked() {
+                                    self.empty(app_data);
+                                    ui.close();
+                                }
+                                if ui.button("Save").clicked() {
+                                    self.save(app_data);
+                                    ui.close();
+                                }
+                                if ui.button("Save as").clicked() {
+                                    self.save_as(app_data);
+                                    ui.close();
+                                }
+                                if ui.button("Open").clicked() {
+                                    self.load(app_data);
+                                    ui.close();
+                                }
+                                if ui.button("Exit").clicked() {
+                                    ui.close();
+                                    self.ui_context.close_app();
+                                }
+                            });
+                        });
+                    },
+                );
             });
 
         Panel::bottom("status_panel")

@@ -8,7 +8,7 @@ use egui::{
 };
 
 use crate::{
-    common::TextEdit,
+    common::{StableId, TextEdit},
     gui::{Gui, style::DragValueStyle},
 };
 
@@ -139,7 +139,9 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
         let inner_rect = rect.shrink2(padding);
 
         if !gui.ui().is_rect_visible(rect) {
-            return gui.ui().allocate_rect(rect, Sense::hover());
+            return gui
+                .ui()
+                .interact(rect, id.with("drag_interact"), Sense::hover());
         }
 
         let id = gui.ui().make_persistent_id(id_salt);
@@ -180,10 +182,9 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
                 .margin(0.0)
                 .frame(false);
 
-            let mut text_edit_response = gui.new_child(
-                UiBuilder::new()
-                    .id_salt("drag_value_text")
-                    .max_rect(inner_rect),
+            let mut text_edit_response = gui.scoped_with(
+                StableId::from_id(id.with("drag_value_text")),
+                |b| b.max_rect(inner_rect),
                 |gui| text_edit.show(gui).response,
             );
 
@@ -231,9 +232,11 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
             return text_edit_response;
         }
 
-        let mut response = gui
-            .ui()
-            .allocate_rect(inner_rect, Sense::click_and_drag() | Sense::hover());
+        let mut response = gui.ui().interact(
+            inner_rect,
+            id.with("drag_interact"),
+            Sense::click_and_drag() | Sense::hover(),
+        );
 
         if response.clicked() {
             gui.ui().data_mut(|data| {

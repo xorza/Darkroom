@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 
 use egui::{Align2, Color32, FontId, Pos2, Response, Sense, StrokeKind, Vec2, vec2};
 
+use crate::common::StableId;
 use crate::common::popup_menu::{ListItem, PopupMenu};
 use crate::gui::Gui;
 use crate::gui::style::DragValueStyle;
@@ -67,6 +68,7 @@ impl<'a> ComboBox<'a> {
     }
 
     pub fn show(self, gui: &mut Gui<'_>, id_salt: impl std::hash::Hash) -> Response {
+        let id = gui.ui().make_persistent_id(&id_salt);
         let font = self.font.unwrap_or_else(|| gui.style.sub_font.clone());
         let color = self.color.unwrap_or(gui.style.text_color);
         let padding = self
@@ -86,7 +88,9 @@ impl<'a> ComboBox<'a> {
         let inner_rect = rect.shrink2(padding);
 
         if !gui.ui().is_rect_visible(rect) {
-            return gui.ui().allocate_rect(rect, Sense::hover());
+            return gui
+                .ui()
+                .interact(rect, id.with("combo_interact"), Sense::hover());
         }
 
         gui.painter().rect(
@@ -101,7 +105,9 @@ impl<'a> ComboBox<'a> {
         let text_rect = self.align.anchor_size(text_anchor, galley.size());
         gui.painter().galley(text_rect.min, galley, color);
 
-        let mut response = gui.ui().allocate_rect(rect, Sense::click());
+        let mut response = gui
+            .ui()
+            .interact(rect, id.with("combo_interact"), Sense::click());
 
         let mut selected_option: Option<String> = None;
         let selected = self.selected.clone();
@@ -139,7 +145,7 @@ impl<'a> ComboBox<'a> {
                 if ListItem::from_galley(galley)
                     .selected(is_selected)
                     .size(item_size)
-                    .show(gui)
+                    .show(gui, StableId::new(("combo_option", option)))
                     .clicked()
                 {
                     selected_option = Some(option.clone());

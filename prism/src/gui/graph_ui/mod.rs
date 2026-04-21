@@ -6,6 +6,7 @@ use egui::{
 use scenarium::data::StaticValue;
 
 use crate::app_data::AppData;
+use crate::common::StableId;
 use crate::common::frame::Frame;
 use crate::common::positioned_ui::PositionedUi;
 use crate::model::EventSubscriberChange;
@@ -162,99 +163,105 @@ impl GraphUi {
 
         let rect = self.draw_background_frame(gui);
 
-        gui.new_child(UiBuilder::new().id_salt("graph_ui").max_rect(rect), |gui| {
-            gui.ui().set_clip_rect(rect);
+        gui.scoped_with(
+            StableId::new("graph_ui"),
+            |b| b.max_rect(rect),
+            |gui| {
+                gui.ui().set_clip_rect(rect);
 
-            let mut ctx = GraphContext {
-                func_lib: &app_data.state.func_lib,
-                view_graph: &app_data.state.view_graph,
-                execution_stats: app_data.state.execution_stats.as_ref(),
-                autorun: app_data.state.autorun,
-                argument_values_cache: &mut app_data.state.argument_values_cache,
-            };
+                let mut ctx = GraphContext {
+                    func_lib: &app_data.state.func_lib,
+                    view_graph: &app_data.state.view_graph,
+                    execution_stats: app_data.state.execution_stats.as_ref(),
+                    autorun: app_data.state.autorun,
+                    argument_values_cache: &mut app_data.state.argument_values_cache,
+                };
 
-            let (background_response, pointer_pos) =
-                self.setup_background_interaction(gui, input, rect);
+                let (background_response, pointer_pos) =
+                    self.setup_background_interaction(gui, input, rect);
 
-            if background_response.clicked() {
-                self.handle_background_click(&ctx);
-            }
+                if background_response.clicked() {
+                    self.handle_background_click(&ctx);
+                }
 
-            // Phase 1: Graph content (layout, background, connections, nodes)
-            gui.with_scale(ctx.view_graph.scale, |gui| {
-                self.graph_layout.update(gui, &ctx, &self.interaction);
-                self.dots_background.render(gui, &ctx);
-                self.render_connections(gui, &ctx);
+                // Phase 1: Graph content (layout, background, connections, nodes)
+                gui.with_scale(ctx.view_graph.scale, |gui| {
+                    self.graph_layout.update(gui, &ctx, &self.interaction);
+                    self.dots_background.render(gui, &ctx);
+                    self.render_connections(gui, &ctx);
 
-                // Overlay that swallows background click-through for
-                // active gestures. Registered HERE — before ports — so
-                // later-registered port widgets keep higher egui
-                // z-order and their click/drag responses still fire
-                // through. See `Self::maybe_capture_overlay`.
-                Self::maybe_capture_overlay(gui, &self.interaction);
+                    // Overlay that swallows background click-through for
+                    // active gestures. Registered HERE — before ports — so
+                    // later-registered port widgets keep higher egui
+                    // z-order and their click/drag responses still fire
+                    // through. See `Self::maybe_capture_overlay`.
+                    Self::maybe_capture_overlay(gui, &self.interaction);
 
-                let nodes_result = self.node_ui.render_nodes(
+                    let nodes_result = self.node_ui.render_nodes(
+                        gui,
+                        &ctx,
+                        &mut self.graph_layout,
+                        &mut self.ui_interaction,
+                        &mut self.interaction,
+                    );
+
+                    // Surface the render's removal intents as actions. The
+                    // mutation itself happens in `NodeRemoved::apply` during
+                    // `handle_actions`.
+                    for node_id in &nodes_result.removed_nodes {
+                        let action = ctx.view_graph.removal_action(node_id);
+                        self.ui_interaction.add_action(action);
+                    }
+
+                    if let Some(pointer_pos) = pointer_pos {
+                        self.process_connections(
+                            input,
+                            &ctx,
+                            &background_response,
+                            pointer_pos,
+                            nodes_result.port_cmd,
+                            &nodes_result.broken_nodes,
+                        );
+                    }
+                });
+
+                // Phase 2: Overlays (buttons, details panel, new-node popup)
+                let buttons = self.render_buttons(gui, ctx.autorun);
+                if buttons.reset_view {
+                    self.emit_zoom_pan(ctx.view_graph, Vec2::ZERO, 1.0);
+                }
+                if buttons.view_selected
+                    && let Some((scale, pan)) =
+                        view_selected_node_target(gui, &ctx, &self.graph_layout)
+                {
+                    self.emit_zoom_pan(ctx.view_graph, pan, scale);
+                }
+                if buttons.fit_all {
+                    let (scale, pan) = fit_all_nodes_target(gui, &ctx, &self.graph_layout);
+                    self.emit_zoom_pan(ctx.view_graph, pan, scale);
+                }
+
+                let mut overlay_hovered = buttons.response.hovered();
+                overlay_hovered |= self
+                    .node_details_ui
+                    .show(gui, &mut ctx, &mut self.ui_interaction)
+                    .hovered();
+                overlay_hovered |= self.handle_new_node_popup(
                     gui,
+                    input,
                     &ctx,
-                    &mut self.graph_layout,
-                    &mut self.ui_interaction,
-                    &mut self.interaction,
+                    pointer_pos,
+                    &background_response,
+                    arena,
                 );
 
-                // Surface the render's removal intents as actions. The
-                // mutation itself happens in `NodeRemoved::apply` during
-                // `handle_actions`.
-                for node_id in &nodes_result.removed_nodes {
-                    let action = ctx.view_graph.removal_action(node_id);
-                    self.ui_interaction.add_action(action);
+                // Phase 3: Zoom and pan (only when no overlay is hovered)
+                if !overlay_hovered && (self.interaction.is_idle() || self.interaction.is_panning())
+                {
+                    self.update_zoom_and_pan(gui, input, &ctx, &background_response, pointer_pos);
                 }
-
-                if let Some(pointer_pos) = pointer_pos {
-                    self.process_connections(
-                        input,
-                        &ctx,
-                        &background_response,
-                        pointer_pos,
-                        nodes_result.port_cmd,
-                        &nodes_result.broken_nodes,
-                    );
-                }
-            });
-
-            // Phase 2: Overlays (buttons, details panel, new-node popup)
-            let buttons = self.render_buttons(gui, ctx.autorun);
-            if buttons.reset_view {
-                self.emit_zoom_pan(ctx.view_graph, Vec2::ZERO, 1.0);
-            }
-            if buttons.view_selected
-                && let Some((scale, pan)) = view_selected_node_target(gui, &ctx, &self.graph_layout)
-            {
-                self.emit_zoom_pan(ctx.view_graph, pan, scale);
-            }
-            if buttons.fit_all {
-                let (scale, pan) = fit_all_nodes_target(gui, &ctx, &self.graph_layout);
-                self.emit_zoom_pan(ctx.view_graph, pan, scale);
-            }
-
-            let mut overlay_hovered = buttons.response.hovered();
-            overlay_hovered |= self
-                .node_details_ui
-                .show(gui, &mut ctx, &mut self.ui_interaction)
-                .hovered();
-            overlay_hovered |= self.handle_new_node_popup(
-                gui,
-                input,
-                &ctx,
-                pointer_pos,
-                &background_response,
-                arena,
-            );
-
-            // Phase 3: Zoom and pan (only when no overlay is hovered)
-            if !overlay_hovered && (self.interaction.is_idle() || self.interaction.is_panning()) {
-                self.update_zoom_and_pan(gui, input, &ctx, &background_response, pointer_pos);
-            }
-        });
+            },
+        );
     }
 
     // ------------------------------------------------------------------------

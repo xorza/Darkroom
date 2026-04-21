@@ -8,6 +8,7 @@ use egui::{Galley, Id, Order, Pos2, Sense, vec2};
 use scenarium::function::Func;
 use scenarium::prelude::FuncLib;
 
+use crate::common::StableId;
 use crate::common::area::Area;
 use crate::common::column_flow::ColumnFlow;
 use crate::common::expander::Expander;
@@ -114,9 +115,10 @@ impl NewNodeUi {
             .fixed_pos(self.position)
             .order(Order::Foreground)
             .show(gui, |gui| {
-                Frame::popup(&gui.style.popup)
-                    .sense(Sense::all())
-                    .show(gui, |gui| {
+                Frame::popup(&gui.style.popup).sense(Sense::all()).show(
+                    gui,
+                    StableId::new("new_node_popup_frame"),
+                    |gui| {
                         gui.ui().set_min_width(POPUP_MIN_WIDTH);
                         gui.ui().set_min_height(POPUP_MIN_HEIGHT);
                         gui.ui().set_max_height(POPUP_MAX_HEIGHT);
@@ -127,7 +129,8 @@ impl NewNodeUi {
                             }
                             show_function_categories(gui, func_lib, arena, selection);
                         });
-                    });
+                    },
+                );
             })
     }
 }
@@ -162,7 +165,7 @@ fn show_const_bind_option<'a>(gui: &mut Gui<'_>, selection: &mut Option<NewNodeS
 
         if ListItem::from_str("Const")
             .size(vec2(button_width, button_height))
-            .show(gui)
+            .show(gui, StableId::new("const_bind_option"))
             .clicked()
         {
             *selection = Some(NewNodeSelection::ConstBind);
@@ -239,7 +242,10 @@ fn show_category_functions<'a>(
                     item = item.tooltip(tooltip);
                 }
 
-                if item.show(gui).clicked() {
+                if item
+                    .show(gui, StableId::new(("func_btn", func.id)))
+                    .clicked()
+                {
                     *selection = Some(NewNodeSelection::Func(func));
                 }
             },

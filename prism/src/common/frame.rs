@@ -1,7 +1,8 @@
 use std::rc::Rc;
 
-use egui::{Color32, CornerRadius, InnerResponse, Margin, Response, Sense, Stroke, UiBuilder};
+use egui::{Color32, CornerRadius, InnerResponse, Margin, Response, Sense, Stroke};
 
+use crate::common::StableId;
 use crate::gui::{
     Gui,
     style::{PopupStyle, Style},
@@ -65,26 +66,30 @@ impl Frame {
     pub fn show<R>(
         self,
         gui: &mut Gui<'_>,
+        id: StableId,
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<R> {
-        let style = gui.style.clone();
         let sense = self.sense.unwrap_or(Sense::empty());
+        let inner_frame = self.inner;
 
-        let mut result = self.inner.show(gui.ui(), |ui| {
-            // Create child UI with sense registered BELOW content widgets.
-            // An explicit `id_salt` pins the child Ui's ID across egui
-            // multi-pass — otherwise egui auto-derives an ID whose hash
-            // can depend on the rect (which varies between measurement
-            // passes), producing "widget rect changed id between passes"
-            // warnings and red-rect debug flashes.
-            ui.scope_builder(UiBuilder::new().id_salt("frame_inner").sense(sense), |ui| {
-                let mut gui = Gui::new(ui, &style);
-                add_contents(&mut gui)
-            })
-        });
-
-        // Merge the background response into the frame response
-        result.response |= result.inner.response;
-        InnerResponse::new(result.inner.inner, result.response)
+        // Anchor a stable-id scope OUTSIDE egui::Frame via
+        // `Gui::scoped_with`. egui::Frame::begin builds its content_ui
+        // with `UiBuilder::new()` (no id_salt), so without this outer
+        // scope the content_ui's widget id would be auto-generated from
+        // the parent's widget counter — drifting whenever sibling
+        // widgets toggled. `scoped_with` sets `global_scope=true`
+        // internally, pinning the outer scope's id verbatim.
+        gui.scoped_with(
+            id,
+            |b| b.sense(sense),
+            |gui| {
+                let style = gui.style.clone();
+                let result = inner_frame.show(gui.ui(), |ui| {
+                    let mut gui = Gui::new(ui, &style);
+                    add_contents(&mut gui)
+                });
+                InnerResponse::new(result.inner, result.response)
+            },
+        )
     }
 }

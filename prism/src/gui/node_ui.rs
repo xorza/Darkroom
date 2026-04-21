@@ -1,5 +1,5 @@
+use crate::common::StableId;
 use crate::common::button::Button;
-use crate::common::id_salt::{NodeIds, PortIds};
 use crate::common::primitives::draw_circle_with_gradient_shadow;
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
@@ -159,7 +159,7 @@ impl NodeUi {
                 result.broken_nodes.push(node_id);
             }
 
-            if render_remove_btn(gui, layout) {
+            if render_remove_btn(gui, layout, node_id) {
                 result.removed_nodes.push(node_id);
             }
 
@@ -185,7 +185,7 @@ impl NodeUi {
         state: &mut Interaction,
         node_id: &NodeId,
     ) -> &'a NodeLayout {
-        let body_id = gui.ui().make_persistent_id(NodeIds::body(*node_id));
+        let body_id = gui.ui().make_persistent_id(("node_body", *node_id));
         let body_rect = graph_layout.node_layouts.by_key(node_id).unwrap().body_rect;
         let response = gui.ui().interact(
             body_rect,
@@ -368,7 +368,7 @@ fn render_cache_btn(
         .toggle(&mut checked)
         .text("cache")
         .rect(layout.cache_button_rect)
-        .show(gui);
+        .show(gui, StableId::new(("cache_btn", node.id)));
 
     if response.clicked() {
         let before = node.behavior;
@@ -382,7 +382,7 @@ fn render_cache_btn(
     }
 }
 
-fn render_remove_btn(gui: &mut Gui<'_>, layout: &NodeLayout) -> bool {
+fn render_remove_btn(gui: &mut Gui<'_>, layout: &NodeLayout, node_id: NodeId) -> bool {
     let rect = layout.remove_btn_rect;
     let margin = rect.width() * 0.3;
 
@@ -402,7 +402,7 @@ fn render_remove_btn(gui: &mut Gui<'_>, layout: &NodeLayout) -> bool {
         .tooltip("Remove node")
         .rect(rect)
         .shapes(shapes)
-        .show(gui)
+        .show(gui, StableId::new(("remove_btn", node_id)))
         .clicked()
 }
 
@@ -431,7 +431,7 @@ fn render_status_hints(
 
     // Tooltip on hover
     let dot_rect = Rect::from_center_size(center, vec2(dot_radius * 2.0, dot_radius * 2.0));
-    let dot_id = gui.ui().make_persistent_id(NodeIds::status_impure(node_id));
+    let dot_id = gui.ui().make_persistent_id(("node_status_impure", node_id));
     let response = gui.ui().interact(dot_rect, dot_id, Sense::hover());
 
     if response.hovered() {
@@ -479,7 +479,7 @@ fn render_ports(
         let port_rect = Rect::from_center_size(center, port_rect_size);
         let port_id = gui
             .ui()
-            .make_persistent_id(PortIds::port(node.id, kind, idx));
+            .make_persistent_id(("node_port", kind, node.id, idx));
         let response = gui.ui().interact(
             port_rect,
             port_id,

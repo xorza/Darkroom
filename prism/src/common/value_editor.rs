@@ -3,6 +3,7 @@ use std::sync::Arc;
 use egui::{Align2, Pos2, Response, vec2};
 use scenarium::data::{DataType, EnumDef, StaticValue};
 
+use crate::common::StableId;
 use crate::common::combo_box::ComboBox;
 use crate::common::drag_value::DragValue;
 use crate::common::file_picker::FilePicker;
@@ -52,7 +53,7 @@ impl<'a> StaticValueEditor<'a> {
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>, id_salt: impl std::hash::Hash) -> Response {
+    pub fn show(self, gui: &mut Gui<'_>, id: StableId) -> Response {
         let small_padding = gui.style.small_padding;
         let mono_font = gui.style.mono_font.clone();
         let text_color = gui.style.text_color;
@@ -69,7 +70,7 @@ impl<'a> StaticValueEditor<'a> {
                 .pos(self.pos)
                 .align(self.align)
                 .style(style)
-                .show(gui, id_salt),
+                .show(gui, id),
 
             StaticValue::Float(float_value) => DragValue::new(float_value)
                 .font(mono_font)
@@ -79,7 +80,7 @@ impl<'a> StaticValueEditor<'a> {
                 .pos(self.pos)
                 .align(self.align)
                 .style(style)
-                .show(gui, id_salt),
+                .show(gui, id),
 
             StaticValue::Enum {
                 type_id,
@@ -90,7 +91,7 @@ impl<'a> StaticValueEditor<'a> {
                 };
                 assert_eq!(*type_id, enum_def.type_id, "Type ID mismatch");
 
-                render_enum_dropdown(gui, id_salt, enum_def, variant_name, self.pos, &style)
+                render_enum_dropdown(gui, id, enum_def, variant_name, self.pos, &style)
             }
 
             StaticValue::FsPath(path) => {
@@ -101,7 +102,7 @@ impl<'a> StaticValueEditor<'a> {
                     .pos(self.pos)
                     .align(self.align)
                     .style(style)
-                    .show(gui, id_salt)
+                    .show(gui, id)
             }
 
             _ => {
@@ -116,7 +117,7 @@ impl<'a> StaticValueEditor<'a> {
 
 fn render_enum_dropdown(
     gui: &mut Gui<'_>,
-    id_salt: impl std::hash::Hash,
+    id: StableId,
     enum_def: &Arc<EnumDef>,
     variant_name: &mut String,
     pos: Pos2,
@@ -129,5 +130,5 @@ fn render_enum_dropdown(
         .pos(pos)
         .align(Align2::RIGHT_CENTER)
         .style(style.clone())
-        .show(gui, id_salt)
+        .show(gui, id)
 }

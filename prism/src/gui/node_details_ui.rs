@@ -4,6 +4,7 @@ use scenarium::data::DynamicValue;
 use scenarium::graph::{Node, NodeId};
 use scenarium::prelude::{ExecutionStats, Func};
 
+use crate::common::StableId;
 use crate::common::TextEdit;
 use crate::common::frame::Frame;
 use crate::common::image_utils::to_color_image;
@@ -38,14 +39,14 @@ impl NodeDetailsUi {
 
         let scroll_id = gui.ui().make_persistent_id("node_details_scroll");
 
-        PositionedUi::new(popup_id, panel_rect.min)
+        PositionedUi::new(StableId::from_id(popup_id), panel_rect.min)
             .rect(panel_rect)
             .max_size(panel_rect.size())
             .show(gui, |gui| {
                 Frame::popup(&gui.style.popup)
                     .inner_margin(gui.style.padding)
                     .sense(Sense::all())
-                    .show(gui, |gui| {
+                    .show(gui, StableId::new("node_details_frame"), |gui| {
                         ScrollArea::vertical().id(scroll_id).show(gui, |gui| {
                             self.show_content(gui, ctx, node_id, interaction);
                         });
@@ -120,7 +121,13 @@ impl NodeDetailsUi {
             let text_color = gui.style.text_color;
 
             gui.ui().label("Name:");
+            // Stable salt (not keyed on node_id) — the textbox is the
+            // same chrome widget regardless of which node is selected;
+            // only its content changes. Keying on node_id would shift
+            // the widget id on every selection change, tripping egui's
+            // "widget rect changed id between passes" warning.
             TextEdit::singleline(&mut name)
+                .id_salt(StableId::new("node_name_edit"))
                 .font(font)
                 .text_color(text_color)
                 .char_limit(20)

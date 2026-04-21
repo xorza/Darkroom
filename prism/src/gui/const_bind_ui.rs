@@ -3,9 +3,8 @@ use scenarium::data::StaticValue;
 use scenarium::graph::{Binding, Node, NodeId};
 use scenarium::prelude::Func;
 
-use crate::common::StaticValueEditor;
 use crate::common::connection_bezier::ConnectionBezierStyle;
-use crate::common::id_salt::ConstBindIds;
+use crate::common::{StableId, StaticValueEditor};
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::{ConnectionCurve, ConnectionKey, PortKind};
@@ -119,7 +118,7 @@ impl<'a> ConstBindFrame<'a> {
         let bezier_response = curve.bezier.show(
             gui,
             Sense::click() | Sense::hover(),
-            ConstBindIds::link(ctx.node_id, ctx.input_idx),
+            ("const_link", ctx.node_id, ctx.input_idx),
             style,
         );
 
@@ -153,7 +152,10 @@ impl<'a> ConstBindFrame<'a> {
         let editor_response = StaticValueEditor::new(&mut draft, data_type)
             .pos(connection_start)
             .style(const_bind_style)
-            .show(gui, ConstBindIds::value(ctx.node_id, ctx.input_idx));
+            .show(
+                gui,
+                StableId::new(("const_value", ctx.node_id, ctx.input_idx)),
+            );
 
         if let Some(breaker) = ctx.breaker {
             currently_broke |= breaker.intersects_rect(editor_response.rect);

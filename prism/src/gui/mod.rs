@@ -2,7 +2,10 @@ use std::rc::Rc;
 
 use egui::{Align, FontId, InnerResponse, Layout, Painter, Rect, Ui, UiBuilder};
 
-use crate::{common::UiEquals, gui::style::Style};
+use crate::{
+    common::{StableId, UiEquals},
+    gui::style::Style,
+};
 
 pub mod connection_breaker;
 pub mod connection_ui;
@@ -135,9 +138,36 @@ impl<'a> Gui<'a> {
     ) -> R {
         let style = Rc::clone(&self.style);
         let scale = self.scale;
-        let mut child_ui = self.ui.new_child(builder);
-        let mut gui = Gui::with_style(&mut child_ui, style, scale);
-        add_contents(&mut gui)
+        // Delegate to `scope_builder`, NOT `Ui::new_child` directly: only
+        // `scope_builder` calls `remember_min_rect` + `advance_cursor_after_rect`
+        // when the closure returns. Without those the parent's cursor never
+        // moves past us, so siblings stack on top of each other and inner
+        // layouts (Frame, horizontal, etc.) render at the wrong position.
+        self.ui
+            .scope_builder(builder, |ui| {
+                let mut gui = Gui::with_style(ui, style, scale);
+                add_contents(&mut gui)
+            })
+            .inner
+    }
+
+    /// Create a child Ui whose widget-registered id equals `id`'s
+    /// inner [`egui::Id`] verbatim (`global_scope=true`) — **not**
+    /// `parent.id.with(salt).with(parent_counter)` like egui's default
+    /// `UiBuilder::id_salt` produces. That distinction shields our
+    /// chrome from "widget rect changed id between passes" warnings
+    /// when adjacent conditional siblings come and go.
+    ///
+    /// `customize` receives a builder pre-populated with the stable
+    /// id; do not overwrite it with `.id_salt` or `.id`.
+    pub fn scoped_with<R>(
+        &mut self,
+        id: StableId,
+        customize: impl FnOnce(UiBuilder) -> UiBuilder,
+        add_contents: impl FnOnce(&mut Gui<'_>) -> R,
+    ) -> R {
+        let builder = customize(UiBuilder::new().id(id.id()));
+        self.new_child(builder, add_contents)
     }
 
     /// Runs a closure with a temporarily changed scale, restoring the original scale afterward.

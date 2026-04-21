@@ -7,6 +7,7 @@ use egui::{Align2, Id, PointerButton, Pos2, Response, Sense, pos2, vec2};
 use scenarium::data::StaticValue;
 use scenarium::graph::Binding;
 
+use crate::common::StableId;
 use crate::common::button::Button;
 use crate::common::frame::Frame;
 use crate::common::positioned_ui::PositionedUi;
@@ -29,50 +30,51 @@ impl GraphUi {
         let mut reset_view = false;
 
         // Top buttons (view controls)
-        let mut response = PositionedUi::new(Id::new("graph_ui_top_buttons"), rect.left_top())
-            .pivot(Align2::LEFT_TOP)
-            .interactable(false)
-            .show(gui, |gui| {
-                gui.ui().take_available_width();
-                let padding = gui.style.padding;
+        let mut response =
+            PositionedUi::new(StableId::new("graph_ui_top_buttons"), rect.left_top())
+                .pivot(Align2::LEFT_TOP)
+                .interactable(false)
+                .show(gui, |gui| {
+                    gui.ui().take_available_width();
+                    let padding = gui.style.padding;
 
-                Frame::none()
-                    .sense(Sense::all())
-                    .inner_margin(padding)
-                    .show(gui, |gui| {
-                        gui.horizontal(|gui| {
-                            let btn_size = vec2(20.0, 20.0);
-                            let mono_font = gui.style.mono_font.clone();
+                    Frame::none()
+                        .sense(Sense::all())
+                        .inner_margin(padding)
+                        .show(gui, StableId::new("top_buttons_frame"), |gui| {
+                            gui.horizontal(|gui| {
+                                let btn_size = vec2(20.0, 20.0);
+                                let mono_font = gui.style.mono_font.clone();
 
-                            let response = Button::default()
-                                .text("a")
-                                .font(mono_font.clone())
-                                .size(btn_size)
-                                .show(gui);
-                            fit_all = response.clicked();
+                                let response = Button::default()
+                                    .text("a")
+                                    .font(mono_font.clone())
+                                    .size(btn_size)
+                                    .show(gui, StableId::new("fit_all_btn"));
+                                fit_all = response.clicked();
 
-                            let response = Button::default()
-                                .text("s")
-                                .font(mono_font.clone())
-                                .size(btn_size)
-                                .show(gui);
-                            view_selected = response.clicked();
+                                let response = Button::default()
+                                    .text("s")
+                                    .font(mono_font.clone())
+                                    .size(btn_size)
+                                    .show(gui, StableId::new("view_selected_btn"));
+                                view_selected = response.clicked();
 
-                            let response = Button::default()
-                                .text("r")
-                                .font(mono_font)
-                                .size(btn_size)
-                                .show(gui);
-                            reset_view = response.clicked();
-                        });
-                    })
-                    .response
-            })
-            .inner;
+                                let response = Button::default()
+                                    .text("r")
+                                    .font(mono_font)
+                                    .size(btn_size)
+                                    .show(gui, StableId::new("reset_view_btn"));
+                                reset_view = response.clicked();
+                            });
+                        })
+                        .response
+                })
+                .inner;
 
         // Bottom buttons (execution controls)
         response |= PositionedUi::new(
-            Id::new("graph_ui_bottom_buttons"),
+            StableId::new("graph_ui_bottom_buttons"),
             pos2(rect.left(), rect.bottom()),
         )
         .pivot(Align2::LEFT_BOTTOM)
@@ -83,9 +85,11 @@ impl GraphUi {
             Frame::none()
                 .sense(Sense::all())
                 .inner_margin(padding)
-                .show(gui, |gui| {
+                .show(gui, StableId::new("bottom_buttons_frame"), |gui| {
                     gui.horizontal(|gui| {
-                        let response = Button::default().text("run").show(gui);
+                        let response = Button::default()
+                            .text("run")
+                            .show(gui, StableId::new("run_btn"));
                         if response.clicked() {
                             self.ui_interaction.set_run_cmd(RunCommand::RunOnce);
                         }
@@ -93,7 +97,7 @@ impl GraphUi {
                         let response = Button::default()
                             .toggle(&mut autorun)
                             .text("autorun")
-                            .show(gui);
+                            .show(gui, StableId::new("autorun_btn"));
 
                         if response.clicked() {
                             self.ui_interaction.set_run_cmd(if autorun {

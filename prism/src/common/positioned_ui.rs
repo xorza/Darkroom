@@ -1,12 +1,13 @@
-use egui::{Align2, Id, InnerResponse, Pos2, Rect, Sense, UiBuilder, Vec2};
+use egui::{Align2, InnerResponse, Pos2, Rect, Sense, Vec2};
 
+use crate::common::StableId;
 use crate::gui::Gui;
 
 /// A lightweight alternative to `egui::Area` that places UI at a specified position
 /// without using egui's Area (which has memory/state overhead).
 #[derive(Debug)]
 pub struct PositionedUi {
-    id: Id,
+    id: StableId,
     position: Pos2,
     pivot: Align2,
     max_size: Vec2,
@@ -15,7 +16,7 @@ pub struct PositionedUi {
 }
 
 impl PositionedUi {
-    pub fn new(id: Id, position: Pos2) -> Self {
+    pub fn new(id: StableId, position: Pos2) -> Self {
         Self {
             id,
             position,
@@ -61,7 +62,7 @@ impl PositionedUi {
             let content_size = gui
                 .ui()
                 .ctx()
-                .memory(|mem| mem.data.get_temp::<Vec2>(self.id));
+                .memory(|mem| mem.data.get_temp::<Vec2>(self.id.id()));
 
             let top_left = if let Some(size) = content_size {
                 self.compute_top_left(size)
@@ -72,37 +73,40 @@ impl PositionedUi {
             Rect::from_min_size(top_left, self.max_size)
         };
 
-        let builder = UiBuilder::new()
-            .id_salt(self.id)
-            .max_rect(initial_rect)
-            .sense(if self.interactable {
-                Sense::click_and_drag()
-            } else {
-                Sense::hover()
-            });
+        let sense = if self.interactable {
+            Sense::click_and_drag()
+        } else {
+            Sense::hover()
+        };
 
-        gui.ui().scope_builder(builder, |ui| {
-            let mut child_gui = Gui::new_with_scale(ui, &style, scale);
-            let result = add_contents(&mut child_gui);
+        gui.scoped_with(
+            self.id,
+            |b| b.max_rect(initial_rect).sense(sense),
+            |gui| {
+                let mut child_gui = Gui::new_with_scale(gui.ui(), &style, scale);
+                let result = add_contents(&mut child_gui);
 
-            // Store measured size for next frame — but ONLY on the
-            // final pass. egui runs the UI callback multiple times
-            // within one logical frame (for auto-sizing / discard-pass
-            // re-layout). If we wrote memory on every pass, the stored
-            // size would update mid-frame, causing the next pass to
-            // read a different size → different top_left (for non-LEFT
-            // pivots) → widget positions shift → "Widget rect changed
-            // id between passes" warnings with red-rect flashes.
-            // `will_discard()` is false only on the last pass.
-            if !ui.ctx().will_discard() {
-                let measured_size = ui.min_size();
-                ui.ctx().memory_mut(|mem| {
-                    mem.data.insert_temp(self.id, measured_size);
-                });
-            }
+                // Store measured size for next frame — but ONLY on the
+                // final pass. egui runs the UI callback multiple times
+                // within one logical frame (for auto-sizing /
+                // discard-pass re-layout). If we wrote memory on every
+                // pass, the stored size would update mid-frame, causing
+                // the next pass to read a different size → different
+                // top_left (for non-LEFT pivots) → widget positions
+                // shift → "Widget rect changed id between passes"
+                // warnings. `will_discard()` is false only on the last
+                // pass.
+                let ui = gui.ui();
+                if !ui.ctx().will_discard() {
+                    let measured_size = ui.min_size();
+                    ui.ctx().memory_mut(|mem| {
+                        mem.data.insert_temp(self.id.id(), measured_size);
+                    });
+                }
 
-            result
-        })
+                InnerResponse::new(result, ui.response())
+            },
+        )
     }
 
     fn compute_top_left(&self, size: Vec2) -> Pos2 {

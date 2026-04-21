@@ -64,8 +64,10 @@ impl Expander {
         };
         let header_size = vec2(header_width, header_height);
 
-        let (header_rect, header_response) =
-            gui.ui().allocate_exact_size(header_size, Sense::click());
+        let (_auto_id, header_rect) = gui.ui().allocate_space(header_size);
+        let header_response = gui
+            .ui()
+            .interact(header_rect, id.with("header"), Sense::click());
 
         if header_response.clicked() {
             open = !open;

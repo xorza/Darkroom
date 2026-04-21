@@ -3,6 +3,7 @@ use std::path::Path;
 use egui::{Align2, Color32, Pos2, Response, Sense, Stroke, StrokeKind, pos2, vec2};
 use scenarium::data::{FsPathConfig, FsPathMode};
 
+use crate::common::StableId;
 use crate::common::button::Button;
 use crate::gui::Gui;
 use crate::gui::style::{ButtonStyle, DragValueStyle};
@@ -42,7 +43,7 @@ impl<'a> FilePicker<'a> {
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>, _id_salt: impl std::hash::Hash) -> Response {
+    pub fn show(self, gui: &mut Gui<'_>, id: StableId) -> Response {
         let display_name = Path::new(self.path.as_str())
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
@@ -110,7 +111,7 @@ impl<'a> FilePicker<'a> {
             .text(browse_text)
             .font(font)
             .rect(browse_rect)
-            .show(gui);
+            .show(gui, StableId::from_id(id.id().with("browse")));
 
         if browse_response.clicked() {
             let mut dialog = rfd::FileDialog::new();

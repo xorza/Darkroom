@@ -3,6 +3,7 @@ use std::sync::Arc;
 use eframe::egui;
 use egui::{Align, FontId, Galley, Rect, Response, Sense, Shape, StrokeKind, Vec2, vec2};
 
+use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::style::ButtonStyle;
 
@@ -96,7 +97,12 @@ impl<'a> Button<'a> {
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>) -> Response {
+    /// `id` gives the button a stable widget id. Construct via
+    /// [`StableId::new`] (call-site salted) or
+    /// [`StableId::new((tag, runtime_key))`] for per-instance widgets.
+    /// See [`StableId`] for why this shields the button from egui's
+    /// counter-based auto-id drift.
+    pub fn show(self, gui: &mut Gui<'_>, id: StableId) -> Response {
         let is_checked = self.toggle_value.as_deref().copied().unwrap_or(false);
 
         let text_color = if !self.enabled {
@@ -122,19 +128,43 @@ impl<'a> Button<'a> {
             Sense::hover()
         };
 
-        let (rect, response) = if let Some(rect) = self.rect {
-            let response = gui.ui().allocate_rect(rect, sense);
-            (rect, response)
-        } else if let Some(size) = self.size {
-            gui.ui().allocate_exact_size(size, sense)
-        } else {
-            // Autosize: calculate button size based on text
+        // Run the button inside a child scope whose Id is pinned to the
+        // caller-supplied salt via `Gui::scoped_with`. Inside that scope
+        // there is at most one widget, so egui's auto-id (counter=0 from
+        // a stable seed) is stable across frames — even when sibling
+        // widgets in the *outer* Ui come and go. We deliberately *don't*
+        // call `ui.interact(rect, our_id, ...)` afterwards because that
+        // would register a second widget at the same rect with a
+        // different id, producing the exact "rect changed id between
+        // passes" warning we're trying to avoid.
+        let autosize = self.size.unwrap_or_else(|| {
             // todo also include provided shapes size
             let text_size = galley.as_ref().map(|g| g.size()).unwrap_or_default();
             let padding = vec2(gui.style.padding * 2.0, gui.style.small_padding * 2.0);
-            let button_size = text_size + padding;
-            gui.ui().allocate_exact_size(button_size, sense)
-        };
+            text_size + padding
+        });
+        let explicit_rect = self.rect;
+
+        let (rect, response) = gui.scoped_with(
+            id,
+            |b| {
+                let b = b.sense(sense);
+                if let Some(rect) = explicit_rect {
+                    b.max_rect(rect)
+                } else {
+                    b
+                }
+            },
+            |gui| {
+                let rect = if let Some(rect) = explicit_rect {
+                    rect
+                } else {
+                    let (_id, rect) = gui.ui().allocate_space(autosize);
+                    rect
+                };
+                (rect, gui.ui().response())
+            },
+        );
 
         if !gui.ui().is_rect_visible(rect) {
             return response;

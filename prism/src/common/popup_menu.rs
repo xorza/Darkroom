@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use egui::{Align, FontId, Galley, Id, Key, Order, Pos2, Response, Sense, Vec2, vec2};
 
+use crate::common::StableId;
 use crate::common::area::Area;
 use crate::common::button::Button;
 use crate::common::frame::Frame;
@@ -79,12 +80,16 @@ impl PopupMenu {
             .fixed_pos(anchor_rect.left_bottom())
             .order(Order::Foreground)
             .show(gui, |gui| {
-                Frame::popup(&popup_style).show(gui, |gui| {
-                    if let Some(width) = min_width {
-                        gui.ui().set_min_width(width);
-                    }
-                    content(gui)
-                })
+                Frame::popup(&popup_style).show(
+                    gui,
+                    StableId::from_id(popup_id.with("popup_menu_frame")),
+                    |gui| {
+                        if let Some(width) = min_width {
+                            gui.ui().set_min_width(width);
+                        }
+                        content(gui)
+                    },
+                )
             });
 
         let inner = popup_response.inner.inner;
@@ -203,7 +208,7 @@ impl<'a> ListItem<'a> {
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>) -> Response {
+    pub fn show(self, gui: &mut Gui<'_>, id: StableId) -> Response {
         let style = self.style.unwrap_or(gui.style.list_button);
 
         // Calculate size like new_node_ui does
@@ -257,6 +262,6 @@ impl<'a> ListItem<'a> {
             btn = btn.tooltip(tooltip);
         }
 
-        btn.show(gui)
+        btn.show(gui, id)
     }
 }
