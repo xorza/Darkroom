@@ -1,8 +1,7 @@
 use bumpalo::Bump;
 use eframe::egui;
 use egui::{
-    Align2, Id, Key, PointerButton, Pos2, Rect, Response, Sense, StrokeKind, UiBuilder, Vec2, pos2,
-    vec2,
+    Align2, Id, PointerButton, Pos2, Rect, Response, Sense, StrokeKind, UiBuilder, Vec2, pos2, vec2,
 };
 use scenarium::data::StaticValue;
 
@@ -29,6 +28,7 @@ use crate::gui::interaction_state::{GraphInteractionState, InteractionMode};
 use crate::gui::new_node_ui::{NewNodeSelection, NewNodeUi};
 use crate::gui::node_details_ui::NodeDetailsUi;
 use crate::gui::node_ui::{NodeUi, PortInteractCommand};
+use crate::input::InputSnapshot;
 use crate::{gui::Gui, gui::graph_ctx::GraphContext, model};
 use common::BoolExt;
 
@@ -106,10 +106,16 @@ impl GraphUi {
     // Main render entry point
     // ------------------------------------------------------------------------
 
-    pub fn render(&mut self, gui: &mut Gui<'_>, app_data: &mut AppData, arena: &Bump) {
+    pub fn render(
+        &mut self,
+        gui: &mut Gui<'_>,
+        app_data: &mut AppData,
+        input: &InputSnapshot,
+        arena: &Bump,
+    ) {
         self.ui_interaction.clear();
 
-        if self.should_cancel_interaction(gui) {
+        if input.cancel_requested() {
             self.cancel_interaction();
         }
 
@@ -149,6 +155,7 @@ impl GraphUi {
                 if let Some(pointer_pos) = pointer_pos {
                     self.process_connections(
                         gui,
+                        input,
                         &mut ctx,
                         &background_response,
                         pointer_pos,
@@ -175,23 +182,20 @@ impl GraphUi {
                 .node_details_ui
                 .show(gui, &mut ctx, &mut self.ui_interaction)
                 .hovered();
-            overlay_hovered |=
-                self.handle_new_node_popup(gui, &mut ctx, pointer_pos, &background_response, arena);
+            overlay_hovered |= self.handle_new_node_popup(
+                gui,
+                input,
+                &mut ctx,
+                pointer_pos,
+                &background_response,
+                arena,
+            );
 
             // Phase 3: Zoom and pan (only when no overlay is hovered)
             if !overlay_hovered && (self.interaction.is_idle() || self.interaction.is_panning()) {
-                self.update_zoom_and_pan(gui, &mut ctx, &background_response, pointer_pos);
+                self.update_zoom_and_pan(gui, input, &mut ctx, &background_response, pointer_pos);
             }
         });
-    }
-
-    // ------------------------------------------------------------------------
-    // Input helpers
-    // ------------------------------------------------------------------------
-
-    fn should_cancel_interaction(&self, gui: &mut Gui<'_>) -> bool {
-        gui.ui()
-            .input(|input| input.key_pressed(Key::Escape) || input.pointer.secondary_pressed())
     }
 
     // ------------------------------------------------------------------------
@@ -256,14 +260,13 @@ impl GraphUi {
     fn process_connections(
         &mut self,
         gui: &mut Gui<'_>,
+        input: &InputSnapshot,
         ctx: &mut GraphContext<'_>,
         background_response: &Response,
         pointer_pos: Pos2,
         port_interact_cmd: PortInteractCommand,
     ) {
-        let primary_down = gui
-            .ui()
-            .input(|i| i.pointer.primary_pressed() || i.pointer.primary_down());
+        let primary_down = input.primary_pressed || input.primary_down;
 
         match self.interaction.mode() {
             InteractionMode::PanningGraph => {}
@@ -534,6 +537,7 @@ impl GraphUi {
     fn handle_new_node_popup(
         &mut self,
         gui: &mut Gui<'_>,
+        input: &InputSnapshot,
         ctx: &mut GraphContext<'_>,
         pointer_pos: Option<Pos2>,
         background_response: &Response,
@@ -547,7 +551,7 @@ impl GraphUi {
 
         let was_open = self.new_node_ui.is_open();
 
-        if let Some(selection) = self.new_node_ui.show(gui, ctx.func_lib, arena) {
+        if let Some(selection) = self.new_node_ui.show(gui, input, ctx.func_lib, arena) {
             self.handle_new_node_selection(gui, ctx, selection);
         } else if was_open && !self.new_node_ui.is_open() {
             self.cancel_interaction();
@@ -621,6 +625,7 @@ impl GraphUi {
     fn update_zoom_and_pan(
         &mut self,
         gui: &mut Gui<'_>,
+        input: &InputSnapshot,
         ctx: &mut GraphContext<'_>,
         background_response: &Response,
         pointer_pos: Option<Pos2>,
@@ -629,7 +634,7 @@ impl GraphUi {
         let prev_pan = ctx.view_graph.pan;
 
         if let Some(pointer_pos) = pointer_pos {
-            self.apply_scroll_zoom(gui, ctx, pointer_pos);
+            self.apply_scroll_zoom(gui, input, ctx, pointer_pos);
         }
 
         self.handle_pan_state(ctx, background_response);
@@ -645,16 +650,18 @@ impl GraphUi {
         }
     }
 
-    fn apply_scroll_zoom(&self, gui: &mut Gui<'_>, ctx: &mut GraphContext<'_>, pointer_pos: Pos2) {
-        let (scroll_delta, mouse_wheel_delta) = collect_scroll_mouse_wheel_deltas(gui);
+    fn apply_scroll_zoom(
+        &self,
+        gui: &mut Gui<'_>,
+        input: &InputSnapshot,
+        ctx: &mut GraphContext<'_>,
+        pointer_pos: Pos2,
+    ) {
+        let (scroll_delta, mouse_wheel_delta) = (input.scroll_delta, input.wheel_lines);
 
         let (zoom_delta, pan) = (mouse_wheel_delta.abs() > f32::EPSILON).then_else(
             ((mouse_wheel_delta * WHEEL_ZOOM_SPEED).exp(), Vec2::ZERO),
-            (
-                gui.ui()
-                    .input(|input| input.modifiers.command.then_else(1.0, input.zoom_delta())),
-                scroll_delta,
-            ),
+            (input.zoom_delta_unless_cmd(), scroll_delta),
         );
 
         if (zoom_delta - 1.0).abs() > f32::EPSILON {
@@ -689,30 +696,6 @@ impl GraphUi {
 // ============================================================================
 // Free functions
 // ============================================================================
-
-/// Returns smooth scroll delta plus an accumulated mouse-wheel line/page magnitude.
-fn collect_scroll_mouse_wheel_deltas(gui: &mut Gui<'_>) -> (Vec2, f32) {
-    let base_scroll_delta = gui.ui().input(|input| input.smooth_scroll_delta);
-
-    gui.ui().input(|input| {
-        input.events.iter().fold(
-            (base_scroll_delta, 0.0),
-            |(point, lines), event| match event {
-                egui::Event::MouseWheel {
-                    unit,
-                    delta: event_delta,
-                    ..
-                } => match unit {
-                    egui::MouseWheelUnit::Point => (point + *event_delta, lines),
-                    egui::MouseWheelUnit::Line | egui::MouseWheelUnit::Page => {
-                        (point, event_delta.y)
-                    }
-                },
-                _ => (point, lines),
-            },
-        )
-    })
-}
 
 /// Connects an output port to an input port in `view_graph`.
 fn apply_data_connection(

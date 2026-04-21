@@ -4,7 +4,7 @@ use std::sync::Arc;
 use bumpalo::Bump;
 use bumpalo::collections::CollectIn;
 use bumpalo::collections::Vec as BumpVec;
-use egui::{Galley, Id, Key, Order, Pos2, Sense, vec2};
+use egui::{Galley, Id, Order, Pos2, Sense, vec2};
 use scenarium::function::Func;
 use scenarium::prelude::FuncLib;
 
@@ -14,6 +14,7 @@ use crate::common::expander::Expander;
 use crate::common::frame::Frame;
 use crate::common::popup_menu::ListItem;
 use crate::gui::Gui;
+use crate::input::InputSnapshot;
 
 const POPUP_MIN_WIDTH: f32 = 150.0;
 const POPUP_MIN_HEIGHT: f32 = 150.0;
@@ -69,6 +70,7 @@ impl NewNodeUi {
     pub fn show<'a>(
         &mut self,
         gui: &mut Gui<'_>,
+        input: &InputSnapshot,
         func_lib: &'a FuncLib,
         arena: &Bump,
     ) -> Option<NewNodeSelection<'a>> {
@@ -88,7 +90,7 @@ impl NewNodeUi {
 
         let popup_response = self.show_popup(gui, func_lib, arena, &mut selection);
 
-        if should_close_popup(gui, &popup_response.response.rect) {
+        if should_close_popup(input, &popup_response.response.rect) {
             self.close();
         }
 
@@ -132,13 +134,13 @@ impl NewNodeUi {
 
 // === Helpers ===
 
-fn should_close_popup(gui: &mut Gui<'_>, popup_rect: &egui::Rect) -> bool {
-    if gui.ui().input(|i| i.key_pressed(Key::Escape)) {
+fn should_close_popup(input: &InputSnapshot, popup_rect: &egui::Rect) -> bool {
+    if input.escape_pressed() {
         return true;
     }
 
-    if gui.ui().input(|i| i.pointer.any_pressed())
-        && let Some(pos) = gui.ui().input(|i| i.pointer.interact_pos())
+    if input.any_pointer_pressed
+        && let Some(pos) = input.interact_pos
         && !popup_rect.contains(pos)
     {
         return true;

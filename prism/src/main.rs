@@ -6,6 +6,7 @@ mod common;
 mod elements;
 mod gui;
 mod init;
+mod input;
 mod main_ui;
 mod model;
 

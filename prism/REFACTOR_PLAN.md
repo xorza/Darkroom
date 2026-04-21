@@ -158,45 +158,53 @@ or observed.
 
 ---
 
-### Step 2 — `InputSnapshot`: sample input once per frame
+### Step 2 — `InputSnapshot`: sample input once per frame ✅ DONE
 
-**Problem.** `gui.ui().input(|i| …)` is called from many call sites (shortcut
-handlers in `main_ui.rs:166-229`, three sequential closures in
-`new_node_ui.rs:136-141`, wheel/pointer reads in `graph_ui.rs:759-778`, pointer
-state in `graph_ui.rs:202-214`). Between closures egui can deliver new events,
-so the same logical frame observes different input. The audit called this out
-as a concrete race risk.
+**Problem.** `gui.ui().input(|i| …)` was called from many call sites
+(shortcut handlers in `main_ui.rs`, three sequential closures in
+`new_node_ui.rs::should_close_popup`, wheel/pointer reads scattered through
+`graph_ui.rs`, plus the now-removed `PointerButtonState` helper). Between
+closures egui can deliver new events, so the same logical frame observed
+different input — a concrete race risk called out by the audit.
 
-**Target.**
-```rust
-pub struct InputSnapshot {
-    pub pointer_pos: Option<Pos2>,
-    pub primary: ButtonPhase,   // Pressed | Down | Released | None
-    pub secondary_pressed: bool,
-    pub modifiers: egui::Modifiers,
-    pub keys_pressed: SmallVec<[Key; 4]>,
-    pub scroll: Vec2,
-    pub wheel_lines: f32,
-    pub escape_pressed: bool,
-}
-```
-Captured once at the top of `MainUi::render` and threaded to `GraphUi::render`
-and every sub-view. Removes the `PointerButtonState` helper entirely (REVIEW F5).
+**Work done.**
+- Added `prism/src/input/{mod,snapshot}.rs` with
+  `InputSnapshot::capture(&egui::Context)`. Single pass over the event
+  stream collects: pointer state (hover/interact pos, primary
+  pressed/down/released/clicked, secondary_pressed, any_pressed, any_click),
+  modifiers, `keys_pressed: Vec<Key>`, combined `scroll_delta` (smooth plus
+  any `MouseWheelUnit::Point` events), `wheel_lines` (line/page magnitude),
+  and raw `zoom_delta`.
+- Helpers on the snapshot: `key_pressed`, `escape_pressed`, `cmd`,
+  `cmd_only`, `cmd_shift`, `cancel_requested`, `zoom_delta_unless_cmd`.
+- `MainUi::render` now captures the snapshot once at frame start and passes
+  it into `handle_shortcuts` and `graph_ui.render`.
+- `handle_shortcuts` shrank from five separate `input(|…|)` closures per
+  shortcut to straight-line `if input.cmd_only(Key::S) { … }` checks.
+- `GraphUi::render` threads `&InputSnapshot` into `process_connections`,
+  `update_zoom_and_pan`, `apply_scroll_zoom`, and `handle_new_node_popup`.
+- `GraphUi::should_cancel_interaction` removed — call site uses
+  `input.cancel_requested()` directly.
+- Removed the free function `collect_scroll_mouse_wheel_deltas`; replaced
+  with `(input.scroll_delta, input.wheel_lines)`.
+- `NewNodeUi::show` + `should_close_popup` take `&InputSnapshot`; the
+  three-closure race in `should_close_popup` collapsed to three field
+  reads from the same snapshot.
+- `PointerButtonState` was already deleted in Step 1; `primary_down` inline
+  now reads `input.primary_pressed || input.primary_down`.
+- 5 new unit tests in `input::snapshot::tests` covering the cmd/cmd_only/
+  cmd_shift boolean matrix, `escape_and_cancel`, and
+  `zoom_delta_unless_cmd`.
 
-**Work.**
-1. Add `prism/src/input/snapshot.rs` with `InputSnapshot::capture(&egui::Ui)`.
-2. Replace every `ui.input(|i| …)` in `gui/` and `main_ui.rs` with reads from
-   the snapshot. (~30 call sites based on current grep.)
-3. Collapse `collect_scroll_mouse_wheel_deltas`
-   (`graph_ui.rs:757-778`) into `InputSnapshot::capture`.
-4. Delete `PointerButtonState` + `get_primary_button_state`.
+**Out of scope for this pass.** `common/text_edit.rs`, `common/drag_value.rs`,
+`common/popup_menu.rs`, and `common/connection_bezier.rs` still call
+`ui.input(|…|)` internally. They're widget-internal and not on the race
+paths the audit flagged; migrating them is mechanical follow-up.
 
-**Verify.** Interactions — click, drag connection, scroll zoom, ctrl-Z, ESC
-cancel — all work identically. Add one unit test of the capture function by
-feeding a synthetic `egui::RawInput` through a minimal `Context::run` and
-asserting field contents.
+**Verification.** 27 tests pass (22 pre-existing + 5 new),
+`cargo clippy --all-targets -- -D warnings` green.
 
-**Size / risk.** ~1 day. Medium — touches many files, all mechanical.
+**Size / risk.** Shipped; 7 files touched plus the new `input/` module.
 
 ---
 
@@ -516,19 +524,20 @@ user interactions — should never panic.
 
 ```
 Step 1 ✅ ┐
-          ├─ Step 2 ─┐
-          │          ├─ Step 3 ─┐
-          │          │          ├─ Step 4 ─┐
-          │          │          │          ├─ Step 5 ─┐
-          │          │          │          │          ├─ Step 7
-Step 8 ✅ ┘          │          │          └─ Step 6 ─┘
-                     │          └─ Step 9
+          ├─ Step 2 ✅ ┐
+          │            ├─ Step 3 ─┐
+          │            │          ├─ Step 4 ─┐
+          │            │          │          ├─ Step 5 ─┐
+          │            │          │          │          ├─ Step 7
+Step 8 ✅ ┘            │          │          └─ Step 6 ─┘
+                       │          └─ Step 9
 ```
 
-- Steps 1 and 8 shipped. The end-state of Step 8 (full `&'a Style` borrow
-  instead of `Rc<Style>`) is deferred to Step 8.2 — do it after Step 3.
-- Step 2 (InputSnapshot) is a hard prerequisite for Step 3's clean
-  interaction API.
+- Steps 1, 2, and 8 shipped. The end-state of Step 8 (full `&'a Style`
+  borrow instead of `Rc<Style>`) is deferred to Step 8.2 — do it after
+  Step 3.
+- Step 3 (interaction enum-with-data) is the next big payoff — removes the
+  `breaker()` foot-gun and atomic cancel.
 - Step 3 (interaction enum) is a prerequisite for Step 4's pure renders.
 - Step 4 unblocks both the mechanical split (Step 5) and the state split
   (Step 6).

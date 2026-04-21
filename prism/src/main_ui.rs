@@ -5,6 +5,7 @@ use crate::gui::graph_ui::GraphUi;
 use crate::gui::graph_ui_interaction::RunCommand;
 use crate::gui::log_ui::LogUi;
 use crate::gui::style::Style;
+use crate::input::InputSnapshot;
 use crate::{app_data::AppData, gui::style_settings::StyleSettings};
 use eframe::egui;
 use egui::{CentralPanel, Frame, Panel, ViewportCommand};
@@ -101,9 +102,11 @@ impl MainUi {
             style.apply_to_egui(egui_style);
         });
 
+        let input = InputSnapshot::capture(root_ui.ctx());
+
         app_data.update_shared_status();
 
-        self.handle_shortcuts(app_data);
+        self.handle_shortcuts(&input, app_data);
 
         Panel::top("top_panel")
             .show_separator_line(false)
@@ -151,84 +154,42 @@ impl MainUi {
             .frame(Frame::NONE)
             .show_inside(root_ui, |ui| {
                 self.graph_ui
-                    .render(&mut Gui::new(ui, &style), app_data, &self.arena)
+                    .render(&mut Gui::new(ui, &style), app_data, &input, &self.arena)
             });
 
         app_data.handle_interaction(self.graph_ui.ui_interaction());
         self.arena.reset();
     }
 
-    fn handle_shortcuts(&mut self, app_data: &mut AppData) {
-        self.handle_undo_shortcut(app_data);
-        self.handle_save_load_shortcuts(app_data);
-        self.handle_run_shortcuts(app_data);
-        self.handle_quit_shortcuts(app_data);
-    }
-
-    fn handle_undo_shortcut(&mut self, app_data: &mut AppData) {
-        let undo_pressed = self.ui_context.ctx.input(|input| {
-            input.key_pressed(egui::Key::Z) && input.modifiers.command && !input.modifiers.shift
-        });
-        let redo_pressed = self.ui_context.ctx.input(|input| {
-            input.key_pressed(egui::Key::Z) && input.modifiers.command && input.modifiers.shift
-        });
-        if undo_pressed {
+    fn handle_shortcuts(&mut self, input: &InputSnapshot, app_data: &mut AppData) {
+        if input.cmd_only(egui::Key::Z) {
             app_data.undo(self.graph_ui.ui_interaction());
-        } else if redo_pressed {
+        } else if input.cmd_shift(egui::Key::Z) {
             app_data.redo();
         }
-    }
 
-    fn handle_save_load_shortcuts(&mut self, app_data: &mut AppData) {
-        let save_as_pressed = self.ui_context.ctx.input(|input| {
-            input.key_pressed(egui::Key::S) && input.modifiers.command && input.modifiers.shift
-        });
-        let save_pressed = self.ui_context.ctx.input(|input| {
-            input.key_pressed(egui::Key::S) && input.modifiers.command && !input.modifiers.shift
-        });
-        let open_pressed = self
-            .ui_context
-            .ctx
-            .input(|input| input.key_pressed(egui::Key::O) && input.modifiers.command);
-
-        if save_as_pressed {
+        if input.cmd_shift(egui::Key::S) {
             self.save_as(app_data);
-        } else if save_pressed {
+        } else if input.cmd_only(egui::Key::S) {
             self.save(app_data);
-        } else if open_pressed {
+        } else if input.cmd(egui::Key::O) {
             self.load(app_data);
         }
-    }
 
-    fn handle_run_shortcuts(&mut self, app_data: &mut AppData) {
-        let toggle_autorun_pressed = self.ui_context.ctx.input(|input| {
-            input.key_pressed(egui::Key::Space) && input.modifiers.command && input.modifiers.shift
-        });
-        let run_once_pressed = self.ui_context.ctx.input(|input| {
-            input.key_pressed(egui::Key::Space) && input.modifiers.command && !input.modifiers.shift
-        });
-
-        if toggle_autorun_pressed {
+        if input.cmd_shift(egui::Key::Space) {
             let interaction = self.graph_ui.ui_interaction();
             interaction.set_run_cmd(if app_data.autorun {
                 RunCommand::StopAutorun
             } else {
                 RunCommand::StartAutorun
             });
-        } else if run_once_pressed {
+        } else if input.cmd_only(egui::Key::Space) {
             self.graph_ui
                 .ui_interaction()
                 .set_run_cmd(RunCommand::RunOnce);
         }
-    }
 
-    fn handle_quit_shortcuts(&mut self, _app_data: &mut AppData) {
-        let quit_pressed = self
-            .ui_context
-            .ctx
-            .input(|input| input.key_pressed(egui::Key::Q) && input.modifiers.command);
-
-        if quit_pressed {
+        if input.cmd(egui::Key::Q) {
             self.ui_context.close_app();
         }
     }
