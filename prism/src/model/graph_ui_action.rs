@@ -84,20 +84,19 @@ impl GraphUiAction {
                     "event index out of range for EventConnectionChanged apply"
                 );
                 let subscribers = &mut node.events[*event_idx].subscribers;
+                // Idempotent: re-applying an already-applied action is a
+                // no-op. Needed so handle_actions can apply uniformly
+                // without tracking whether the render pass already did so.
                 match change {
                     EventSubscriberChange::Added => {
-                        assert!(
-                            !subscribers.contains(subscriber),
-                            "event subscriber already present on add"
-                        );
-                        subscribers.push(*subscriber);
+                        if !subscribers.contains(subscriber) {
+                            subscribers.push(*subscriber);
+                        }
                     }
                     EventSubscriberChange::Removed => {
-                        let index = subscribers
-                            .iter()
-                            .position(|node_id| node_id == subscriber)
-                            .expect("event subscriber missing on remove");
-                        subscribers.remove(index);
+                        if let Some(index) = subscribers.iter().position(|id| id == subscriber) {
+                            subscribers.remove(index);
+                        }
                     }
                 }
             }
@@ -115,11 +114,16 @@ impl GraphUiAction {
                 node.inputs[*input_idx].binding = after.clone();
             }
             GraphUiAction::NodeAdded { view_node, node } => {
-                view_graph.graph.add(node.clone());
-                view_graph.view_nodes.add(view_node.clone());
+                // Idempotent — see EventConnectionChanged comment.
+                if view_graph.graph.by_id(&node.id).is_none() {
+                    view_graph.graph.add(node.clone());
+                    view_graph.view_nodes.add(view_node.clone());
+                }
             }
             GraphUiAction::NodeRemoved { node, .. } => {
-                view_graph.remove_node(&node.id);
+                if view_graph.graph.by_id(&node.id).is_some() {
+                    view_graph.remove_node(&node.id);
+                }
             }
             GraphUiAction::NodeMoved { node_id, after, .. } => {
                 let view_node = view_graph.view_nodes.by_key_mut(node_id).unwrap();
@@ -278,5 +282,122 @@ impl GraphUiAction {
             | GraphUiAction::NodeNameChanged { .. } => true,
             GraphUiAction::NodeMoved { .. } | GraphUiAction::ZoomPanChanged { .. } => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scenarium::graph::{Event, Node, NodeBehavior};
+
+    fn empty_graph() -> ViewGraph {
+        ViewGraph::default()
+    }
+
+    fn make_node(name: &str) -> (Node, ViewNode) {
+        let node = Node {
+            id: scenarium::graph::NodeId::unique(),
+            name: name.into(),
+            func_id: scenarium::function::FuncId::unique(),
+            behavior: NodeBehavior::AsFunction,
+            inputs: Vec::new(),
+            events: Vec::new(),
+        };
+        let view_node = ViewNode {
+            id: node.id,
+            pos: egui::Pos2::ZERO,
+        };
+        (node, view_node)
+    }
+
+    /// Applying an action twice must be equivalent to applying it once —
+    /// this is the contract `handle_actions` relies on to dispatch
+    /// `apply` unconditionally regardless of whether the render pass did
+    /// the mutation inline.
+    #[test]
+    fn node_added_apply_is_idempotent() {
+        let mut vg = empty_graph();
+        let (node, view_node) = make_node("foo");
+        let action = GraphUiAction::NodeAdded {
+            node: node.clone(),
+            view_node,
+        };
+
+        action.apply(&mut vg);
+        let after_first = vg.graph.nodes.len();
+        action.apply(&mut vg);
+        assert_eq!(
+            after_first,
+            vg.graph.nodes.len(),
+            "double-apply must not duplicate the node"
+        );
+    }
+
+    #[test]
+    fn node_removed_apply_is_idempotent() {
+        let mut vg = empty_graph();
+        let (node, view_node) = make_node("foo");
+        vg.graph.add(node.clone());
+        vg.view_nodes.add(view_node.clone());
+
+        let action = GraphUiAction::NodeRemoved {
+            node: node.clone(),
+            view_node,
+            incoming_connections: Vec::new(),
+            incoming_events: Vec::new(),
+            was_selected: false,
+        };
+
+        action.apply(&mut vg);
+        assert!(vg.graph.by_id(&node.id).is_none());
+        // Second apply must not panic despite the node already being gone.
+        action.apply(&mut vg);
+        assert!(vg.graph.by_id(&node.id).is_none());
+    }
+
+    #[test]
+    fn event_connection_changed_apply_is_idempotent() {
+        let mut vg = empty_graph();
+        let (mut event_node, event_view) = make_node("emitter");
+        event_node.events.push(Event {
+            subscribers: Vec::new(),
+            name: "tick".into(),
+        });
+        let event_node_id = event_node.id;
+        vg.graph.add(event_node);
+        vg.view_nodes.add(event_view);
+
+        let (subscriber_node, subscriber_view) = make_node("subscriber");
+        let subscriber_id = subscriber_node.id;
+        vg.graph.add(subscriber_node);
+        vg.view_nodes.add(subscriber_view);
+
+        let add = GraphUiAction::EventConnectionChanged {
+            event_node_id,
+            event_idx: 0,
+            subscriber: subscriber_id,
+            change: EventSubscriberChange::Added,
+        };
+
+        add.apply(&mut vg);
+        let subs = &vg.graph.by_id(&event_node_id).unwrap().events[0].subscribers;
+        assert_eq!(subs, &vec![subscriber_id]);
+
+        // Second apply: still exactly one subscriber — no panic, no dup.
+        add.apply(&mut vg);
+        let subs = &vg.graph.by_id(&event_node_id).unwrap().events[0].subscribers;
+        assert_eq!(subs, &vec![subscriber_id]);
+
+        let remove = GraphUiAction::EventConnectionChanged {
+            event_node_id,
+            event_idx: 0,
+            subscriber: subscriber_id,
+            change: EventSubscriberChange::Removed,
+        };
+        remove.apply(&mut vg);
+        // Double-remove: no panic.
+        remove.apply(&mut vg);
+        let subs = &vg.graph.by_id(&event_node_id).unwrap().events[0].subscribers;
+        assert!(subs.is_empty());
     }
 }

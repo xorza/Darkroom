@@ -266,58 +266,144 @@ observed; the dual-source-of-truth problem and the
 
 ---
 
-### Step 4 — Render functions become pure; mutations go through actions ✅ PARTIAL
+### Step 4 — Render functions become pure; mutations go through actions
 
-**Scope limit.** The full "render takes `&ViewGraph`, returns intents,
-orchestrator applies them" model conflicts with the current undo
-architecture: `ActionUndoStack::push_current` expects actions to have
-*already* been applied (it stores a snapshot + action delta for undo/redo,
-it does not itself apply). Moving to pure-projection rendering means
-reversing that contract — `push_current` would need to `.apply()` the
-actions itself, and every existing mutation path (drag, selection, const
-edit, connection create/delete, zoom/pan) would have to stop mutating
-`ViewGraph` directly at render time. That touches every render site, the
-undo stack impl, and every action's apply/undo pair — a substantial
-change with real regression risk.
+Split into two phases. The key insight: render functions mutate `ViewGraph`
+today because in-flight UI state (drag delta, text-edit draft, hover) has
+nowhere else to live. Move that state into the `Interaction` enum; then
+render stops having a reason to mutate the domain.
 
-Rather than do that poorly, this pass extracts the clearest structural
-offender and flags the rest for Step 4.2.
+---
 
-**Work done in this pass.**
-- `NodeUi::render_nodes` used to hold two buffers (`node_ids_to_remove`,
-  `node_ids_hit_breaker`) and call `ctx.view_graph.remove_node()` itself
-  at the end of the render loop. It now returns a `NodesFrameResult`
-  containing `{ port_cmd, removed_nodes, broken_nodes }`. The orchestrator
-  (`GraphUi::render`) applies the removals explicitly right after the
-  render call, which is the only place `remove_node` is now invoked from
-  rendering. The buffers are gone — no hidden per-frame state on `NodeUi`.
-- `NodeUi::broke_node_iter` deleted; `apply_breaker_results` now takes
-  `&[NodeId]` directly from `NodesFrameResult.broken_nodes`.
-- `PortInteractCommand` gained `#[derive(Default)]` so the result struct
-  can be `Default`-constructed without a custom constructor.
+#### Step 4.0 — Foundation: idempotent `apply` + `handle_actions` applies ✅ DONE
 
-**What remains (Step 4.2).**
-1. `const_bind_ui.rs` still mutates `node.inputs[i].binding` mid-render
-   (via the `return true` signal back to `render_nodes`), and the
-   `StaticValueEditor` path edits `&mut StaticValue` in place while the
-   user types. Making these pure requires either (a) routing edits through
-   the action queue and reconciling the egui text buffer against the
-   post-apply state, or (b) keeping edits in place but clearly marking
-   them as "live-edit" mutations outside the intent model.
-2. `handle_node_drag` still writes `view_graph.view_nodes[i].pos` and
-   `view_graph.selected_node_id` directly during the render loop. Same
-   live-edit problem as (1).
-3. `GraphContext` still exposes `&mut ViewGraph` plus `&mut
-   ArgumentValuesCache`. Flattening it out of render is Step 4.3.
-4. The undo-stack contract change (`push_current` → `apply + record`) is
-   the prerequisite for (1) and (2). Do it as a standalone refactor.
+The undo stack historically assumed actions were applied inline during
+render — `push_current` just recorded them. That made it impossible for a
+render function to *defer* a mutation: if it didn't mutate inline, the
+mutation never happened. This step fixes the contract.
 
-**Verification.** 28 tests pass; `cargo clippy --all-targets -- -D warnings`
-green. No behaviour change expected or observed — the removal path
-executes at the same point, just one indirection further up.
+**Work done.**
+- Made `GraphUiAction::apply` idempotent for the three non-idempotent
+  variants (`NodeAdded` / `NodeRemoved` / `EventConnectionChanged`). Each
+  guards its mutation on "is this the current state?"; replay is a no-op.
+- `AppData::handle_actions` now calls `action.apply(&mut view_graph)` for
+  every action in the frame's action stacks, before `push_current`. This
+  is the single authoritative mutation site. Inline mutations that
+  currently exist become redundant no-ops (idempotency makes this safe);
+  migrating them off is Step 4.1.
+- 3 unit tests for the idempotency contract (the three non-trivial
+  variants).
 
-**Size / risk.** Shipped a narrow slice; 2 files touched. The full Step 4
-is retitled Step 4.2 and kept in the DAG.
+**Cost.** Every emitted action is re-applied once per frame. For
+idempotent actions re-applying already-applied state is fast (a lookup and
+an equality-type check), but it is not free — the full benefit only
+materializes once Step 4.1 removes inline mutations, at which point this
+double-work disappears.
+
+---
+
+#### Step 4.1 — Phase A: Interaction state owns in-flight edits
+
+**Problem.** `handle_node_drag` writes `view_node.pos` every frame during
+a drag. `StaticValueEditor` hands egui a `&mut StaticValue` that is
+mutated on every keystroke. `handle_background_click` / drag code writes
+`view_graph.selected_node_id`. These are UI-in-flight states masquerading
+as domain state.
+
+**Target.** Each in-flight edit is a variant of `Interaction` with its
+own transient buffer:
+
+```rust
+pub enum Interaction {
+    Idle,
+    Panning,
+    DraggingConnection(ConnectionDrag),
+    BreakingConnections(ConnectionBreaker),
+    DraggingNodes { /* node_id → accumulated offset */ },       // NEW
+    EditingConstBind { node_id, input_idx, draft: StaticValue }, // NEW
+}
+```
+
+Render reads `(ViewGraph, Interaction)` together when presenting:
+- Node position = `view_node.pos + interaction.drag_offset_for(id)`.
+- Const value = `interaction.draft_for(id, idx).unwrap_or(&binding.value)`.
+
+Commit moments (drag release, Enter, focus loss) emit the action; the
+action's `apply` mutates `ViewGraph`; `Interaction` returns to `Idle`.
+Nothing in the render path needs `&mut ViewGraph` for these paths
+anymore.
+
+**Work plan (one commit per class of mutation).**
+
+1. **Node drag** — `Interaction::DraggingNodes { drags: SmallMap<NodeId, Vec2> }`.
+   Render reads combined pos. Release → emit `NodeMoved(before, after)`;
+   apply updates `view_node.pos`; Interaction returns to Idle.
+2. **Selection** — a distinct simple action: one of (a) keep selection
+   live-edit (it's a single `Option<NodeId>` — low risk), or (b) route
+   through `NodeSelected` action. Do (b) for consistency.
+3. **Const-bind editor** — the big one. Replace `StaticValueEditor`'s
+   `&mut StaticValue` with `&mut draft: StaticValue` owned by
+   `Interaction::EditingConstBind`. On commit emit `InputChanged`.
+4. **Zoom / pan** — move `view_graph.pan / scale` mutations to the
+   `ZoomPanChanged` action's apply (already does this) and remove the
+   inline writes in `apply_scroll_zoom` / `handle_pan_state`.
+5. **Connection create/delete** — `apply_data_connection`,
+   `apply_event_connection`, `disconnect_connection` already emit
+   actions; remove the inline binding / subscriber mutation. Apply path
+   handles it.
+6. **Node add/remove** — already mostly extracted (Step 4 narrow); the
+   `handle_new_node_selection::Func` inline `add_node_from_func` call is
+   the last one. Change to "build node, emit NodeAdded, apply adds it".
+
+**Verify.** At the end of Step 4.1, `grep "view_graph\.\|view_nodes\." prism/src/gui/` returns nothing inside render functions.
+All mutations funnel through `handle_actions`. The per-frame double-work
+from 4.0 disappears (inline mutations are gone, so apply does the real
+work once).
+
+**Size / risk.** 6 commits, each one self-contained and verifiable. Main
+risk is the const-bind editor rewrite — it's the only place that needs a
+non-mechanical change. Drag lag concern is moot because the drag offset
+lives in `Interaction` and render composes it — no 1-frame lag.
+
+---
+
+#### Step 4.2 — Phase B: Tighten render signatures
+
+**Problem.** Even after 4.1, render takes `&mut GraphContext` which
+carries `&mut ViewGraph`. Nothing uses the mut, but the signature permits
+it.
+
+**Work.**
+1. `GraphContext.view_graph: &'a ViewGraph` (drop the `mut`).
+2. Every `render_*` function that currently takes `&mut GraphContext`
+   takes `&GraphContext`.
+3. Split `argument_values_cache` out of `GraphContext` — it's the one
+   remaining `&mut` field. Thread it explicitly where needed.
+4. Add render-boundary unit tests — build a `ViewGraph` + `Interaction`
+   + `InputSnapshot` fixture, call `render_nodes` with an egui mock
+   `Ui`, assert on the returned `NodesFrameResult`. Add at least one
+   test per render function that emits intents.
+
+**Verify.** `grep "&mut GraphContext\|&mut ViewGraph" prism/src/gui/`
+returns zero hits in render call sites. New tests cover the render →
+intent translation for every known intent source.
+
+**Size / risk.** Mostly mechanical after 4.1; the test fixtures are the
+real work and the payoff.
+
+---
+
+#### Step 4 work done in this pass
+
+- Step 4.0 shipped (idempotent apply + `handle_actions` applies).
+- Step 4 narrow: `NodeUi::render_nodes` → `NodesFrameResult`; orchestrator
+  applies removals. (Done earlier in this step before the rethink.)
+- First 4.1 migration: `const_bind_ui` no longer does inline
+  `input.binding = Binding::None`; the emitted `InputChanged` action
+  does it via `apply`.
+
+**Verification.** 31 tests pass; `cargo clippy --all-targets -- -D warnings`
+green.
 
 ---
 
@@ -538,21 +624,24 @@ user interactions — should never panic.
 Step 1 ✅ ┐
           ├─ Step 2 ✅ ┐
           │            ├─ Step 3 ✅ ┐
-          │            │            ├─ Step 4 (partial ✅) ┐
-          │            │            │                       ├─ Step 4.2 ─┐
-          │            │            │                       │             ├─ Step 5 ─┐
-          │            │            │                       │             │          ├─ Step 7
-Step 8 ✅ ┘            │            │                       │             └─ Step 6 ─┘
-                       │            │                       └─ Step 9
-                       └─ Step 8.2
+          │            │            ├─ Step 4.0 ✅ ─┐
+          │            │            │               ├─ Step 4.1 (Interaction) ─┐
+          │            │            │               │                            ├─ Step 4.2 ─┐
+          │            │            │               │                            │  (signatures) ├─ Step 5 ─┐
+          │            │            │               │                            │               │           ├─ Step 7
+Step 8 ✅ ┘            │            │               │                            │               └─ Step 6 ─┘
+                       │            │               │                            └─ Step 9
+                       └─ Step 8.2                   └ — (each 4.1 site is one commit)
 ```
 
-- Steps 1, 2, 3, 8 shipped; Step 4 shipped a narrow slice. Step 8.2 (full
-  `&'a Style` borrow) and Step 4.2 (pure renders + undo-contract change)
-  are the next non-trivial pieces.
-- Step 4.2 depends on reworking `UndoStack::push_current` to apply
-  actions; once that lands, const-bind and node-drag mutations can move
-  out of render.
+- Shipped: 1, 2, 3, 8, Step 4 narrow, Step 4.0.
+- Next: Step 4.1 migrations, one mutation class per commit. Order:
+  node drag → selection → const-bind editor → zoom/pan → connection
+  add/delete → node add/remove. The big one (const-bind editor) is the
+  only non-mechanical change.
+- Step 4.2 (signatures + render tests) is the payoff — clean
+  `&ViewGraph` signatures and the first unit tests for render behaviour.
+- Step 8.2 (`Rc<Style>` → `&Style`) is unblocked; run anytime.
 - Step 3 (interaction enum) is a prerequisite for Step 4's pure renders.
 - Step 4 unblocks both the mechanical split (Step 5) and the state split
   (Step 6).

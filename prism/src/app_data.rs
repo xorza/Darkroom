@@ -332,6 +332,15 @@ impl AppData {
         let mut graph_updated = false;
 
         for actions in interaction.action_stacks() {
+            // Apply actions before recording. Every action's `apply` is
+            // idempotent, so this is a no-op for mutations that already
+            // happened inline during render — and the single source of
+            // truth for mutations that intentionally defer (e.g. the
+            // const-bind double-click clear). See Step 4.2 in
+            // REFACTOR_PLAN.md for why this is the contract.
+            for action in actions {
+                action.apply(&mut self.view_graph);
+            }
             self.undo_stack.clear_redo();
             self.undo_stack.push_current(&self.view_graph, actions);
 

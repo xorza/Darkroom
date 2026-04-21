@@ -77,8 +77,13 @@ impl<'a> ConstBindFrame<'a> {
                 breaker,
             };
 
+            // `render_const_input` emits an `InputChanged` action when the
+            // user double-clicks to clear the binding; the actual
+            // `binding = Binding::None` mutation happens via the action's
+            // `apply` in `handle_actions`, not here. If cleared, stop this
+            // loop — the current `node.inputs` borrow is stale w.r.t. the
+            // upcoming mutation.
             if self.render_const_input(gui, ui_interaction, node_layout, &ctx, value) {
-                input.binding = Binding::None;
                 return;
             }
         }
