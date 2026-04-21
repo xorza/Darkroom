@@ -16,11 +16,6 @@ impl NodeIds {
         ("node_body", node_id)
     }
 
-    /// ID for storing drag start position during node dragging.
-    pub fn drag_start(node_id: NodeId) -> (&'static str, NodeId) {
-        ("node_drag_start", node_id)
-    }
-
     /// ID for the impure status dot tooltip.
     pub fn status_impure(node_id: NodeId) -> (&'static str, NodeId) {
         ("node_status_impure", node_id)

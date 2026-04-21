@@ -6,6 +6,10 @@ use scenarium::graph::NodeId;
 use scenarium::prelude::FuncBehavior;
 use std::sync::Arc;
 
+// note: NodeLayout::update accepts a drag offset that is composed onto
+// `view_node.pos`. The offset comes from the Interaction state machine
+// (see `Interaction::node_drag_offset_for`).
+
 use crate::common::UiEquals;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::PortRef;
@@ -104,7 +108,7 @@ impl NodeLayout {
 
     // === Update logic ===
 
-    pub fn update(&mut self, ctx: &GraphContext, gui: &mut Gui, origin: Pos2) {
+    pub fn update(&mut self, ctx: &GraphContext, gui: &mut Gui, origin: Pos2, drag_offset: Vec2) {
         let view_node = ctx.view_graph.view_nodes.by_key(&self.node_id).unwrap();
         let node = ctx.view_graph.graph.by_id(&self.node_id).unwrap();
         let func = ctx.func_lib.by_id(&node.func_id).unwrap();
@@ -126,7 +130,7 @@ impl NodeLayout {
         }
 
         assert!(self.inited);
-        self.compute_layout(gui, func, origin, view_node.pos);
+        self.compute_layout(gui, func, origin, view_node.pos + drag_offset);
     }
 
     fn rebuild_port_galleys(&mut self, gui: &Gui, func: &scenarium::prelude::Func) {

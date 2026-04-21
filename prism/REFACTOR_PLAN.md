@@ -335,9 +335,15 @@ anymore.
 
 **Work plan (one commit per class of mutation).**
 
-1. **Node drag** — `Interaction::DraggingNodes { drags: SmallMap<NodeId, Vec2> }`.
-   Render reads combined pos. Release → emit `NodeMoved(before, after)`;
-   apply updates `view_node.pos`; Interaction returns to Idle.
+1. **Node drag** ✅ DONE. `Interaction::DraggingNode(NodeDrag { node_id, start_pos, offset })`.
+   `GraphLayout::update` takes `&Interaction`; each `NodeLayout::update`
+   composes `view_node.pos + interaction.node_drag_offset_for(id)`. On
+   drag start `handle_node_drag` calls `state.start_node_drag`; on each
+   frame it accumulates `offset += delta / scale`; on release it emits
+   `NodeMoved { before: start_pos, after: start_pos + offset }` and
+   cancels. `ViewGraph` is never written during the drag — the committed
+   position lands via `NodeMoved::apply`. Deleted the now-unused
+   `common::drag_state` module and the `NodeIds::drag_start` id salt.
 2. **Selection** — a distinct simple action: one of (a) keep selection
    live-edit (it's a single `Option<NodeId>` — low risk), or (b) route
    through `NodeSelected` action. Do (b) for consistency.

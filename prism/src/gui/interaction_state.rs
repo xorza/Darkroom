@@ -7,11 +7,30 @@
 //! one. There is no separate "stop drag" / "reset breaker" dance:
 //! transitions replace the variant atomically.
 
-use egui::Pos2;
+use egui::{Pos2, Vec2};
+use scenarium::graph::NodeId;
 
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::ConnectionDrag;
 use crate::gui::graph_layout::PortInfo;
+
+/// In-flight node drag. `start_pos` is the node's position at drag start
+/// (used as the `before` of the emitted `NodeMoved` action); `offset`
+/// accumulates per-frame drag deltas. Render composes
+/// `view_node.pos + offset` to show the dragged position; `ViewGraph`
+/// itself is untouched until the drag commits on release.
+#[derive(Debug, Clone, Copy)]
+pub struct NodeDrag {
+    pub node_id: NodeId,
+    pub start_pos: Pos2,
+    pub offset: Vec2,
+}
+
+impl NodeDrag {
+    pub fn committed_pos(&self) -> Pos2 {
+        self.start_pos + self.offset
+    }
+}
 
 #[derive(Debug, Default)]
 pub enum Interaction {
@@ -20,6 +39,7 @@ pub enum Interaction {
     Panning,
     DraggingConnection(ConnectionDrag),
     BreakingConnections(ConnectionBreaker),
+    DraggingNode(NodeDrag),
 }
 
 impl Interaction {
@@ -35,8 +55,12 @@ impl Interaction {
         matches!(self, Self::BreakingConnections(_))
     }
 
-    pub fn is_dragging(&self) -> bool {
+    pub fn is_dragging_connection(&self) -> bool {
         matches!(self, Self::DraggingConnection(_))
+    }
+
+    pub fn is_dragging_node(&self) -> bool {
+        matches!(self, Self::DraggingNode(_))
     }
 
     /// Cancels whatever the user was doing. One assignment — there is no
@@ -57,6 +81,40 @@ impl Interaction {
         let mut breaker = ConnectionBreaker::default();
         breaker.start(start_pos);
         *self = Self::BreakingConnections(breaker);
+    }
+
+    pub fn start_node_drag(&mut self, node_id: NodeId, start_pos: Pos2) {
+        *self = Self::DraggingNode(NodeDrag {
+            node_id,
+            start_pos,
+            offset: Vec2::ZERO,
+        });
+    }
+
+    pub fn node_drag(&self) -> Option<&NodeDrag> {
+        if let Self::DraggingNode(d) = self {
+            Some(d)
+        } else {
+            None
+        }
+    }
+
+    pub fn node_drag_mut(&mut self) -> Option<&mut NodeDrag> {
+        if let Self::DraggingNode(d) = self {
+            Some(d)
+        } else {
+            None
+        }
+    }
+
+    /// Per-node drag offset, or `Vec2::ZERO` when the node isn't being
+    /// dragged. Render uses this to compose an effective position on top
+    /// of `view_node.pos` without touching the graph.
+    pub fn node_drag_offset_for(&self, node_id: &NodeId) -> Vec2 {
+        self.node_drag()
+            .filter(|d| d.node_id == *node_id)
+            .map(|d| d.offset)
+            .unwrap_or(Vec2::ZERO)
     }
 
     pub fn breaker(&self) -> Option<&ConnectionBreaker> {
@@ -131,7 +189,7 @@ mod tests {
     fn start_dragging_installs_drag_only() {
         let mut i = Interaction::default();
         i.start_dragging(dummy_port());
-        assert!(i.is_dragging());
+        assert!(i.is_dragging_connection());
         assert!(i.drag().is_some());
         assert!(i.breaker().is_none());
     }
@@ -155,7 +213,7 @@ mod tests {
         let mut i = Interaction::default();
         i.start_breaking(Pos2::ZERO);
         i.start_dragging(dummy_port());
-        assert!(i.is_dragging());
+        assert!(i.is_dragging_connection());
         assert!(i.breaker().is_none());
 
         i.start_panning();

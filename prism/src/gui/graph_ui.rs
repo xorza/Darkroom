@@ -139,7 +139,7 @@ impl GraphUi {
 
             // Phase 1: Graph content (layout, background, connections, nodes)
             gui.with_scale(ctx.view_graph.scale, |gui| {
-                self.graph_layout.update(gui, &ctx);
+                self.graph_layout.update(gui, &ctx, &self.interaction);
                 self.dots_background.render(gui, &ctx);
                 self.render_connections(gui, &mut ctx);
 
@@ -148,7 +148,7 @@ impl GraphUi {
                     &mut ctx,
                     &mut self.graph_layout,
                     &mut self.ui_interaction,
-                    self.interaction.breaker(),
+                    &mut self.interaction,
                 );
 
                 // Apply explicit intents surfaced by rendering. Render never
@@ -279,7 +279,10 @@ impl GraphUi {
         let primary_down = input.primary_pressed || input.primary_down;
 
         match &mut self.interaction {
-            Interaction::Panning => {}
+            // Node drag and view pan advance through egui response events
+            // elsewhere in the frame; process_connections has nothing to
+            // add for them.
+            Interaction::Panning | Interaction::DraggingNode(_) => {}
             Interaction::Idle => {
                 let pointer_on_background =
                     background_response.hovered() && !self.connections.any_hovered();
