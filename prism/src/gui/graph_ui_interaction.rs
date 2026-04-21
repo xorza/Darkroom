@@ -9,63 +9,45 @@ pub enum RunCommand {
     RunOnce,
 }
 
+/// Buffer of what render emitted this frame: actions that will apply
+/// to `ViewGraph` at end-of-frame (via `AppData::handle_actions`),
+/// plus side-channel signals (errors, run command, argument-values
+/// request).
+///
+/// Every action is *immediate* — it lands in `actions` on emission
+/// and is applied + recorded at end of frame. Cross-frame coalescing
+/// for continuous gestures (zoom, pan) happens at the undo-stack
+/// level via [`GraphUiAction::gesture_key`]. That split is deliberate:
+/// keeping the action buffer stateless across frames makes it
+/// compatible with egui's multi-pass rendering, where the same UI
+/// callback can run more than once per logical frame.
 #[derive(Debug, Default)]
 pub(crate) struct GraphUiInteraction {
-    coalesced_actions: Vec<GraphUiAction>,
-    immediate_actions: Vec<GraphUiAction>,
+    actions: Vec<GraphUiAction>,
     errors: Vec<Error>,
     run_cmd: Option<RunCommand>,
     request_argument_values: Option<NodeId>,
-
-    /// In-flight non-immediate action that is still being coalesced
-    /// across frames (only `ZoomPanChanged` right now). Survives
-    /// `clear()` so a multi-frame gesture ends up as a single undo
-    /// entry; committed to `coalesced_actions` when the gesture ends
-    /// (see [`pending_touched_this_frame`]).
-    pending_action: Option<GraphUiAction>,
-    /// Set by `add_pending_action`; cleared at frame start by
-    /// `clear()`. The orchestrator treats a *false* value as the
-    /// signal that the gesture ended this frame and flushes pending
-    /// into the action stacks.
-    pending_touched_this_frame: bool,
 }
 
 impl GraphUiInteraction {
     pub fn clear(&mut self) {
-        self.coalesced_actions.clear();
-        self.immediate_actions.clear();
+        self.actions.clear();
         self.errors.clear();
         self.run_cmd = None;
         self.request_argument_values = None;
-        self.pending_touched_this_frame = false;
-        // NB: `pending_action` intentionally NOT cleared — it spans
-        // frames for cross-frame coalescing.
     }
 
-    pub fn pending_action(&self) -> Option<&GraphUiAction> {
-        self.pending_action.as_ref()
-    }
-
-    pub fn pending_touched_this_frame(&self) -> bool {
-        self.pending_touched_this_frame
-    }
-
+    /// Iterates the emitted actions. Returned as an iterator of slices
+    /// to stay compatible with the old two-stack API while simplifying
+    /// the internals — callers just flatten.
     pub fn action_stacks(&self) -> impl Iterator<Item = &'_ [GraphUiAction]> {
-        [
-            (!self.coalesced_actions.is_empty()).then_some(self.coalesced_actions.as_slice()),
-            (!self.immediate_actions.is_empty()).then_some(self.immediate_actions.as_slice()),
-        ]
-        .into_iter()
-        .flatten()
+        (!self.actions.is_empty())
+            .then_some(self.actions.as_slice())
+            .into_iter()
     }
 
     pub fn add_action(&mut self, action: GraphUiAction) {
-        if action.immediate() {
-            self.flush();
-            self.immediate_actions.push(action);
-        } else {
-            self.add_pending_action(action);
-        }
+        self.actions.push(action);
     }
 
     pub fn add_error(&mut self, error: Error) {
@@ -91,74 +73,6 @@ impl GraphUiInteraction {
     pub fn set_request_argument_values(&mut self, node_id: NodeId) {
         self.request_argument_values = Some(node_id);
     }
-
-    fn add_pending_action(&mut self, action: GraphUiAction) {
-        assert!(!action.immediate());
-        self.pending_touched_this_frame = true;
-
-        if self.pending_action.is_none() {
-            self.pending_action = Some(action);
-            return;
-        }
-
-        let pending = self.pending_action.take().unwrap();
-        assert!(!pending.immediate());
-        if std::mem::discriminant(&pending) != std::mem::discriminant(&action) {
-            self.coalesced_actions.push(pending);
-            self.pending_action = Some(action);
-            return;
-        }
-
-        match (&pending, &action) {
-            (
-                GraphUiAction::NodeMoved {
-                    node_id: node_id1,
-                    before,
-                    ..
-                },
-                GraphUiAction::NodeMoved {
-                    node_id: node_id2,
-                    after,
-                    ..
-                },
-            ) if node_id1 == node_id2 => {
-                self.pending_action = Some(GraphUiAction::NodeMoved {
-                    node_id: *node_id1,
-                    before: *before,
-                    after: *after,
-                });
-            }
-            (
-                GraphUiAction::ZoomPanChanged {
-                    before_pan,
-                    before_scale,
-                    ..
-                },
-                GraphUiAction::ZoomPanChanged {
-                    after_pan,
-                    after_scale,
-                    ..
-                },
-            ) => {
-                self.pending_action = Some(GraphUiAction::ZoomPanChanged {
-                    before_pan: *before_pan,
-                    before_scale: *before_scale,
-                    after_pan: *after_pan,
-                    after_scale: *after_scale,
-                });
-            }
-            _ => {
-                self.coalesced_actions.push(pending);
-                self.pending_action = Some(action);
-            }
-        }
-    }
-
-    pub fn flush(&mut self) {
-        if let Some(pending) = self.pending_action.take() {
-            self.coalesced_actions.push(pending);
-        }
-    }
 }
 
 #[cfg(test)]
@@ -166,14 +80,8 @@ mod tests {
     use super::*;
     use egui::Pos2;
 
-    /// Regression: `NodeMoved` used to sit forever in `pending_action`
-    /// because it was marked non-immediate, so a drag release never
-    /// committed to the action stacks until a *subsequent* action
-    /// flushed it — the node visually snapped back on release and then
-    /// jumped forward on the next interaction. After Step 4.1 drag
-    /// fires a single `NodeMoved` on release, so it must be immediate.
     #[test]
-    fn node_moved_lands_in_action_stacks_immediately() {
+    fn actions_land_immediately_in_action_stacks() {
         let mut interaction = GraphUiInteraction::default();
         interaction.add_action(GraphUiAction::NodeMoved {
             node_id: NodeId::unique(),
@@ -182,22 +90,11 @@ mod tests {
         });
 
         let actions: Vec<_> = interaction.action_stacks().flatten().collect();
-        assert_eq!(
-            actions.len(),
-            1,
-            "NodeMoved must be visible in action_stacks() on the frame it is emitted"
-        );
-        assert!(
-            interaction.pending_action.is_none(),
-            "NodeMoved is immediate — nothing should linger in pending_action"
-        );
+        assert_eq!(actions.len(), 1);
     }
 
-    /// `ZoomPanChanged` keeps the cross-frame coalescing behaviour: one
-    /// emission on its own sits in `pending_action` so that follow-ups
-    /// can merge into a single undoable change.
     #[test]
-    fn zoom_pan_changed_stays_pending_for_coalescing() {
+    fn clear_empties_action_buffer() {
         let mut interaction = GraphUiInteraction::default();
         interaction.add_action(GraphUiAction::ZoomPanChanged {
             before_pan: egui::Vec2::ZERO,
@@ -205,32 +102,8 @@ mod tests {
             after_pan: egui::Vec2::new(5.0, 5.0),
             after_scale: 1.2,
         });
-
-        assert_eq!(interaction.action_stacks().count(), 0);
-        assert!(interaction.pending_action.is_some());
-        assert!(
-            interaction.pending_touched_this_frame(),
-            "add_pending_action must mark the frame as having touched pending"
-        );
-    }
-
-    /// `clear()` runs at frame start. Pending must survive it (for
-    /// cross-frame coalescing) but the `touched-this-frame` flag must
-    /// reset so the orchestrator can detect the frame *after* a gesture
-    /// ended.
-    #[test]
-    fn clear_preserves_pending_but_resets_touched_flag() {
-        let mut interaction = GraphUiInteraction::default();
-        interaction.add_action(GraphUiAction::ZoomPanChanged {
-            before_pan: egui::Vec2::ZERO,
-            before_scale: 1.0,
-            after_pan: egui::Vec2::new(5.0, 5.0),
-            after_scale: 1.2,
-        });
-        assert!(interaction.pending_touched_this_frame());
 
         interaction.clear();
-        assert!(interaction.pending_action.is_some());
-        assert!(!interaction.pending_touched_this_frame());
+        assert_eq!(interaction.action_stacks().count(), 0);
     }
 }

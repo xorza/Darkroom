@@ -271,30 +271,27 @@ impl GraphUiAction {
         }
     }
 
-    /// Non-immediate actions go into `GraphUiInteraction::pending_action`
-    /// where same-discriminant emissions coalesce across frames — used so a
-    /// multi-frame zoom/pan gesture ends up as one undo entry.
-    ///
-    /// `NodeMoved` used to be non-immediate because the pre-Step-4.1 drag
-    /// code emitted it every frame. After Step 4.1, the drag offset lives
-    /// in `Interaction::DraggingNode` and `NodeMoved` is emitted exactly
-    /// once on release — so it must be immediate, otherwise it would sit
-    /// pending indefinitely and only commit when a subsequent action
-    /// flushed it. `ZoomPanChanged` still fires per-frame and still needs
-    /// coalescing.
-    pub fn immediate(&self) -> bool {
+    /// Returns a key that identifies "same semantic gesture" for the
+    /// purposes of undo-history coalescing. When two adjacent undo
+    /// entries are both a single action with the same `gesture_key`,
+    /// the undo stack merges them into a single entry (keeping the
+    /// earlier `before` and the later `after`). This is what lets a
+    /// multi-frame zoom/pan scroll end up as one undoable step without
+    /// any cross-frame state in the action buffer.
+    pub fn gesture_key(&self) -> Option<GestureKey> {
         match self {
-            GraphUiAction::CacheToggled { .. }
-            | GraphUiAction::InputChanged { .. }
-            | GraphUiAction::NodeAdded { .. }
-            | GraphUiAction::NodeRemoved { .. }
-            | GraphUiAction::EventConnectionChanged { .. }
-            | GraphUiAction::NodeSelected { .. }
-            | GraphUiAction::NodeNameChanged { .. }
-            | GraphUiAction::NodeMoved { .. } => true,
-            GraphUiAction::ZoomPanChanged { .. } => false,
+            GraphUiAction::ZoomPanChanged { .. } => Some(GestureKey::ZoomPan),
+            _ => None,
         }
     }
+}
+
+/// Discriminant for actions that coalesce with their predecessor in
+/// the undo history. Currently only zoom/pan; added as an enum so new
+/// variants (e.g. continuous slider drags) can join the scheme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GestureKey {
+    ZoomPan,
 }
 
 #[cfg(test)]

@@ -5,7 +5,7 @@ use common::SerdeFormat;
 use crate::common::undo_stack::FullSerdeUndoStack;
 use crate::common::undo_stack::UndoStack;
 use crate::model::ViewGraph;
-use crate::model::graph_ui_action::GraphUiAction;
+use crate::model::graph_ui_action::{GestureKey, GraphUiAction};
 
 #[derive(Debug)]
 pub struct ActionUndoStack {
@@ -103,6 +103,54 @@ impl ActionUndoStack {
         }
     }
 
+    /// If the most recent undo entry is a single action with the same
+    /// `gesture_key` as `new_action`, replace it with a merged version
+    /// (keeping the older `before`, taking the newer `after`). Returns
+    /// `true` on a successful merge — the caller should NOT push the
+    /// new action separately.
+    ///
+    /// Only defined for `ZoomPanChanged` right now; the merge preserves
+    /// the `before_*` of the previous entry and the `after_*` of the
+    /// new emission, so undoing the merged entry reverses the full
+    /// continuous gesture in one step.
+    fn try_merge_with_last(&mut self, new_action: &GraphUiAction, key: GestureKey) -> bool {
+        let Some(last_range) = self.undo_stack.last().cloned() else {
+            return false;
+        };
+        let last_bytes = Self::slice_bytes(&self.undo_actions, &last_range);
+        let last_actions = Self::deserialize_actions(last_bytes, &mut self.temp_buffer);
+        if last_actions.len() != 1 || last_actions[0].gesture_key() != Some(key) {
+            return false;
+        }
+        let merged = match (&last_actions[0], new_action) {
+            (
+                GraphUiAction::ZoomPanChanged {
+                    before_pan,
+                    before_scale,
+                    ..
+                },
+                GraphUiAction::ZoomPanChanged {
+                    after_pan,
+                    after_scale,
+                    ..
+                },
+            ) => GraphUiAction::ZoomPanChanged {
+                before_pan: *before_pan,
+                before_scale: *before_scale,
+                after_pan: *after_pan,
+                after_scale: *after_scale,
+            },
+            _ => return false,
+        };
+
+        // Drop the old entry, append the merged one in its place.
+        Self::pop_tail_actions(&mut self.undo_actions, &last_range);
+        self.undo_stack.pop();
+        let range = Self::append_actions(&mut self.undo_actions, &[merged], &mut self.temp_buffer);
+        self.undo_stack.push(range);
+        true
+    }
+
     fn compact_undo_buffer_if_needed(&mut self) {
         // Skip compaction if there is no logical prefix to drop.
         if self.undo_base_offset == 0 {
@@ -141,6 +189,21 @@ impl UndoStack<ViewGraph> for ActionUndoStack {
         }
         self.redo_actions.clear();
         self.redo_stack.clear();
+
+        // Gesture coalescing: if we're pushing a single action that
+        // identifies as part of a continuous gesture, and the previous
+        // undo entry is the exact same kind of single action, merge
+        // the two (keep the earlier `before`, take the new `after`).
+        // This turns a multi-frame zoom/pan scroll into one undo step
+        // without any cross-frame state in the action buffer, which is
+        // what makes the scheme compatible with egui's multi-pass.
+        if actions.len() == 1
+            && let Some(key) = actions[0].gesture_key()
+            && self.try_merge_with_last(&actions[0], key)
+        {
+            return;
+        }
+
         let range = Self::append_actions(&mut self.undo_actions, actions, &mut self.temp_buffer);
         self.undo_stack.push(range);
         self.trim_to_limit();
@@ -600,5 +663,99 @@ mod tests {
             assert_eq!(view_graph.selected_node_id, snapshot_graph.selected_node_id);
         }
         assert!(!stack.undo(&mut view_graph, &mut |_| {}));
+    }
+
+    /// Continuous ZoomPanChanged emissions merge into a single undo
+    /// entry — one gesture, one undo step. This is how the UI avoids
+    /// needing any cross-frame pending-action state in the action
+    /// buffer (which would fight egui multi-pass rendering).
+    #[test]
+    fn zoom_pan_changed_merges_into_single_undo_entry() {
+        use egui::Vec2;
+
+        let mut vg = ViewGraph::default();
+        let mut stack = ActionUndoStack::new(32);
+        stack.reset_with(&vg);
+
+        let frame_deltas = [
+            (Vec2::ZERO, 1.0, Vec2::new(10.0, 0.0), 1.1),
+            (Vec2::new(10.0, 0.0), 1.1, Vec2::new(25.0, -5.0), 1.25),
+            (Vec2::new(25.0, -5.0), 1.25, Vec2::new(40.0, -10.0), 1.4),
+        ];
+        for (before_pan, before_scale, after_pan, after_scale) in frame_deltas {
+            let action = GraphUiAction::ZoomPanChanged {
+                before_pan,
+                before_scale,
+                after_pan,
+                after_scale,
+            };
+            action.apply(&mut vg);
+            stack.push_current(&vg, std::slice::from_ref(&action));
+        }
+
+        assert_eq!(
+            stack.undo_stack.len(),
+            1,
+            "three consecutive ZoomPanChanged emissions must merge into one undo entry"
+        );
+
+        assert!(stack.undo(&mut vg, &mut |_| {}));
+        assert!(vg.pan.ui_equals(Vec2::ZERO));
+        assert!(vg.scale.ui_equals(1.0));
+    }
+
+    /// Merging only happens between ZoomPanChanged on ZoomPanChanged —
+    /// any other action in between creates a new undo entry.
+    #[test]
+    fn zoom_pan_merge_does_not_span_other_actions() {
+        use egui::{Pos2, Vec2};
+
+        let node = scenarium::graph::Node {
+            id: scenarium::graph::NodeId::unique(),
+            func_id: scenarium::function::FuncId::unique(),
+            name: String::new(),
+            behavior: scenarium::graph::NodeBehavior::AsFunction,
+            inputs: Vec::new(),
+            events: Vec::new(),
+        };
+        let view_node = crate::model::ViewNode {
+            id: node.id,
+            pos: Pos2::ZERO,
+        };
+
+        let mut vg = ViewGraph::default();
+        let mut stack = ActionUndoStack::new(32);
+        stack.reset_with(&vg);
+
+        let zoom = GraphUiAction::ZoomPanChanged {
+            before_pan: Vec2::ZERO,
+            before_scale: 1.0,
+            after_pan: Vec2::new(10.0, 0.0),
+            after_scale: 1.1,
+        };
+        zoom.apply(&mut vg);
+        stack.push_current(&vg, std::slice::from_ref(&zoom));
+
+        let add = GraphUiAction::NodeAdded {
+            view_node: view_node.clone(),
+            node: node.clone(),
+        };
+        add.apply(&mut vg);
+        stack.push_current(&vg, std::slice::from_ref(&add));
+
+        let zoom2 = GraphUiAction::ZoomPanChanged {
+            before_pan: Vec2::new(10.0, 0.0),
+            before_scale: 1.1,
+            after_pan: Vec2::new(20.0, 0.0),
+            after_scale: 1.2,
+        };
+        zoom2.apply(&mut vg);
+        stack.push_current(&vg, std::slice::from_ref(&zoom2));
+
+        assert_eq!(
+            stack.undo_stack.len(),
+            3,
+            "NodeAdded between zooms must prevent merge"
+        );
     }
 }

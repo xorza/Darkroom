@@ -242,7 +242,8 @@ impl AppData {
     }
 
     pub fn undo(&mut self, interaction: &mut GraphUiInteraction) {
-        interaction.flush();
+        // Commit anything queued this frame before stepping back so
+        // the undo target is the pre-current-frame state.
         self.handle_actions(interaction);
 
         let mut affects_computation = false;
@@ -379,30 +380,15 @@ impl AppData {
     fn handle_actions(&mut self, interaction: &mut GraphUiInteraction) -> bool {
         let mut graph_updated = false;
 
-        // Apply any in-flight non-immediate action (ZoomPanChanged) to
-        // `view_graph` every frame so the *next* frame's emit reads
-        // current state rather than the stale pre-gesture state. The
-        // apply is idempotent, so replaying is safe — when the gesture
-        // eventually ends and the pending action is flushed into
-        // `coalesced_actions`, the subsequent apply+push below is a
-        // no-op on state but still records the undo entry.
-        if let Some(pending) = interaction.pending_action() {
-            pending.apply(&mut self.state.view_graph);
-            graph_updated |= pending.affects_computation();
-        }
-
-        // Gesture boundary: if render didn't touch pending this frame,
-        // the user stopped zooming / panning — commit it.
-        if interaction.pending_action().is_some() && !interaction.pending_touched_this_frame() {
-            interaction.flush();
-        }
-
         for actions in interaction.action_stacks() {
             // Apply + record. Idempotent apply means mutations that
             // already happened inline during render are no-ops; the
             // single source of truth for mutations that intentionally
-            // defer lives here. Re-applying a just-flushed pending
-            // action (see above) is also a no-op.
+            // defer lives here. Cross-frame coalescing for continuous
+            // gestures (zoom/pan) happens at the undo stack level via
+            // `GraphUiAction::gesture_key`, not here, so this loop
+            // doesn't need any pending-action state — which is what
+            // makes it safe under egui's multi-pass rendering.
             let any_affecting = self.state.apply_actions(actions);
             self.undo_stack.clear_redo();
             self.undo_stack
