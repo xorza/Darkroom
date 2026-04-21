@@ -130,31 +130,25 @@ impl<'a> Button<'a> {
 
         // Run the button inside a child scope whose Id is pinned to the
         // caller-supplied salt via `Gui::scoped_with`. Inside that scope
-        // there is at most one widget, so egui's auto-id (counter=0 from
-        // a stable seed) is stable across frames — even when sibling
-        // widgets in the *outer* Ui come and go. We deliberately *don't*
-        // call `ui.interact(rect, our_id, ...)` afterwards because that
-        // would register a second widget at the same rect with a
-        // different id, producing the exact "rect changed id between
-        // passes" warning we're trying to avoid.
-        let autosize = self.size.unwrap_or_else(|| {
+        // egui's auto-id starts at counter=0 from a stable seed, so the
+        // single `allocate_rect` below produces a stable widget id every
+        // frame — even when sibling widgets in the *outer* Ui come and
+        // go. The scope itself also registers a widget at the same rect
+        // with its (stable) global-scope id; both are stable, so egui's
+        // "rect changed id between passes" check is satisfied.
+        let explicit_rect = self.rect;
+        let autosize = if explicit_rect.is_none() {
             // todo also include provided shapes size
             let text_size = galley.as_ref().map(|g| g.size()).unwrap_or_default();
             let padding = vec2(gui.style.padding * 2.0, gui.style.small_padding * 2.0);
-            text_size + padding
-        });
-        let explicit_rect = self.rect;
+            self.size.unwrap_or(text_size + padding)
+        } else {
+            Vec2::ZERO
+        };
 
         let (rect, response) = gui.scoped_with(
             id,
-            |b| {
-                let b = b.sense(sense);
-                if let Some(rect) = explicit_rect {
-                    b.max_rect(rect)
-                } else {
-                    b
-                }
-            },
+            |b| b.sense(sense),
             |gui| {
                 let rect = if let Some(rect) = explicit_rect {
                     rect
@@ -162,7 +156,8 @@ impl<'a> Button<'a> {
                     let (_id, rect) = gui.ui().allocate_space(autosize);
                     rect
                 };
-                (rect, gui.ui().response())
+                let response = gui.ui().allocate_rect(rect, sense);
+                (rect, response)
             },
         );
 
