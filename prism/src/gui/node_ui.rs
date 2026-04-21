@@ -124,7 +124,7 @@ impl NodeUi {
     pub fn render_nodes(
         &mut self,
         gui: &mut Gui<'_>,
-        ctx: &mut GraphContext,
+        ctx: &GraphContext,
         graph_layout: &mut GraphLayout,
         interaction: &mut GraphUiInteraction,
         state: &mut Interaction,
@@ -143,7 +143,7 @@ impl NodeUi {
             // reborrow.
             let breaker = state.breaker();
 
-            let node = ctx.view_graph.graph.by_id_mut(&node_id).unwrap();
+            let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
             const_bind_frame.render(gui, interaction, layout, node, func, breaker);
@@ -179,7 +179,7 @@ impl NodeUi {
 
     fn handle_node_drag<'a>(
         gui: &mut Gui<'_>,
-        ctx: &mut GraphContext<'_>,
+        ctx: &GraphContext<'_>,
         graph_layout: &'a mut GraphLayout,
         interaction: &mut GraphUiInteraction,
         state: &mut Interaction,

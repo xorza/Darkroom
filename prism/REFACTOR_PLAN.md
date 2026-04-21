@@ -54,12 +54,12 @@ lives.
 
 | # | Principle | Status | Remaining debt |
 |---|---|---|---|
-| 1 | One writer per concern | **~95% done** | `grep 'view_graph\.graph\.by_id_mut\|view_graph\.view_nodes\.by_key_mut'` in `gui/` returns **1 hit** (`node_ui.rs:146`, used only to hand `&mut Node` to the `StaticValueEditor` live-edit). `grep 'view_graph\.\(pan\|scale\|selected_node_id\)\s*='` → **0 hits**. Everything else goes through `apply`. |
-| 2 | Render reads, doesn't mutate | **in progress** | `render_nodes` still takes `&mut GraphContext` because of the `StaticValueEditor` path — same blocker as principle 1. Once that moves into `Interaction::EditingConstBind`, the whole chain can flip to `&GraphContext` (Step 4.2). |
+| 1 | One writer per concern | ✅ **done** | `grep 'view_graph\.\(graph\.\(add\|remove_node\|by_id_mut\)\|view_nodes\.\(add\|by_key_mut\)\|pan\|scale\|selected_node_id\)\s*='` in `gui/` returns **0 hits**. Every `ViewGraph` mutation in the view layer goes through `GraphUiAction::apply`. |
+| 2 | Render reads, doesn't mutate | ✅ **done** | `GraphContext.view_graph: &ViewGraph` (not `&mut`). Render paths take `&GraphContext`. The const-bind value editor (previously the last holdout) now uses a per-frame local `StaticValue` draft; the widget mutates the draft and an `InputChanged` action carries the change. The only remaining `&mut GraphContext` is `node_details_ui::show` / `show_content` because of `ctx.argument_values_cache.get_mut` for lazy preview textures — that's UI cache state, not domain. |
 | 3 | Input sampled once per frame | ✅ **done** | `grep '\.input(|' prism/src/gui prism/src/main_ui.rs` (excluding widget internals like `text_edit` / `drag_value` / `popup_menu` / `connection_bezier`) returns **0 hits** in the view/interaction layer. Widget internals still call `ui.input` directly — acceptable, they are self-contained. |
 | 4 | Real state machine with atomic cancel | ✅ **done** | `Interaction` enum with variant-local data; `cancel()` is one assignment; no remaining `cancel_interaction + stop_drag` pairs. |
 | 5 | Actions as the persistence seam | ✅ **done** | Undo/redo goes through `GraphUiAction`; `apply()` is the single mutation site. Save/load uses snapshot serde of `ViewGraph`, which is a different seam by design (not actions-as-changelog). |
-| 6 | Boring lifetimes | **partial** | `PhantomData` gone; `Rc<Style>` clone topology simplified but `Rc` itself still in place (Step 8.2). `GraphContext` still exposes `&mut ViewGraph` + `&mut ArgumentValuesCache` — flattens in Step 4.2. |
+| 6 | Boring lifetimes | **partial** | `PhantomData` gone; `Rc<Style>` clone topology simplified but `Rc` itself still in place (Step 8.2). `GraphContext.view_graph` is now `&ViewGraph`; only `&mut ArgumentValuesCache` remains, and only `node_details_ui` actually needs the `mut` (lazy preview cache). Could be split further but at diminishing returns. |
 
 **Deviations from the original plan — on purpose.**
 
@@ -83,11 +83,10 @@ lives.
 
 **What remains in one sentence.**
 
-Finish migrating the `StaticValueEditor` (const-bind value editing) to an
-`Interaction::EditingConstBind` draft; then tighten every render signature
-to `&GraphContext` / `&ViewGraph` and add the first render-boundary unit
-tests. At that point principles 1, 2, 3, 4, 5 are all at 100% and
-principle 6 only needs the `Rc<Style>` → `&Style` sweep.
+Principles 1–5 are at 100% (render no longer mutates `ViewGraph`). What
+remains is test coverage (Step 7 — first render-boundary unit tests now
+possible because the seam is clean) and the lifetime polish in principle
+6 (`Rc<Style>` → `&Style`, Step 8.2).
 
 ## 3. Target module layout
 

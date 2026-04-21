@@ -125,7 +125,7 @@ impl GraphUi {
 
             let mut ctx = GraphContext {
                 func_lib: &app_data.func_lib,
-                view_graph: &mut app_data.view_graph,
+                view_graph: &app_data.view_graph,
                 execution_stats: app_data.execution_stats.as_ref(),
                 autorun: app_data.autorun,
                 argument_values_cache: &mut app_data.argument_values_cache,
@@ -135,18 +135,18 @@ impl GraphUi {
                 self.setup_background_interaction(gui, input, rect);
 
             if background_response.clicked() {
-                self.handle_background_click(&mut ctx);
+                self.handle_background_click(&ctx);
             }
 
             // Phase 1: Graph content (layout, background, connections, nodes)
             gui.with_scale(ctx.view_graph.scale, |gui| {
                 self.graph_layout.update(gui, &ctx, &self.interaction);
                 self.dots_background.render(gui, &ctx);
-                self.render_connections(gui, &mut ctx);
+                self.render_connections(gui, &ctx);
 
                 let nodes_result = self.node_ui.render_nodes(
                     gui,
-                    &mut ctx,
+                    &ctx,
                     &mut self.graph_layout,
                     &mut self.ui_interaction,
                     &mut self.interaction,
@@ -164,7 +164,7 @@ impl GraphUi {
                     self.process_connections(
                         gui,
                         input,
-                        &mut ctx,
+                        &ctx,
                         &background_response,
                         pointer_pos,
                         nodes_result.port_cmd,
@@ -196,7 +196,7 @@ impl GraphUi {
             overlay_hovered |= self.handle_new_node_popup(
                 gui,
                 input,
-                &mut ctx,
+                &ctx,
                 pointer_pos,
                 &background_response,
                 arena,
@@ -204,7 +204,7 @@ impl GraphUi {
 
             // Phase 3: Zoom and pan (only when no overlay is hovered)
             if !overlay_hovered && (self.interaction.is_idle() || self.interaction.is_panning()) {
-                self.update_zoom_and_pan(gui, input, &mut ctx, &background_response, pointer_pos);
+                self.update_zoom_and_pan(gui, input, &ctx, &background_response, pointer_pos);
             }
         });
     }
@@ -251,7 +251,7 @@ impl GraphUi {
         (response, pointer_pos)
     }
 
-    fn handle_background_click(&mut self, ctx: &mut GraphContext<'_>) {
+    fn handle_background_click(&mut self, ctx: &GraphContext<'_>) {
         self.cancel_interaction();
 
         if ctx.view_graph.selected_node_id.is_some() {
@@ -274,7 +274,7 @@ impl GraphUi {
         &mut self,
         gui: &mut Gui<'_>,
         input: &InputSnapshot,
-        ctx: &mut GraphContext<'_>,
+        ctx: &GraphContext<'_>,
         background_response: &Response,
         pointer_pos: Pos2,
         port_interact_cmd: PortInteractCommand,
@@ -326,7 +326,7 @@ impl GraphUi {
 
     /// Collects all items hit by the breaker (connections, const bindings, nodes)
     /// and applies the corresponding removals in one pass.
-    fn apply_breaker_results(&mut self, ctx: &mut GraphContext<'_>, broken_nodes: &[NodeId]) {
+    fn apply_breaker_results(&mut self, ctx: &GraphContext<'_>, broken_nodes: &[NodeId]) {
         let items: Vec<BrokeItem> = self
             .connections
             .broke_iter()
@@ -350,7 +350,7 @@ impl GraphUi {
 
     fn handle_drag_result(
         &mut self,
-        ctx: &mut GraphContext<'_>,
+        ctx: &GraphContext<'_>,
         pointer_pos: Pos2,
         result: ConnectionDragUpdate,
     ) {
@@ -382,7 +382,7 @@ impl GraphUi {
 
     fn apply_connection(
         &mut self,
-        ctx: &mut GraphContext<'_>,
+        ctx: &GraphContext<'_>,
         input_port: PortRef,
         output_port: PortRef,
     ) {
@@ -410,7 +410,7 @@ impl GraphUi {
     // Rendering
     // ------------------------------------------------------------------------
 
-    fn render_connections(&mut self, gui: &mut Gui<'_>, ctx: &mut GraphContext<'_>) {
+    fn render_connections(&mut self, gui: &mut Gui<'_>, ctx: &GraphContext<'_>) {
         self.connections.render(
             gui,
             ctx,
@@ -534,7 +534,7 @@ impl GraphUi {
         &mut self,
         gui: &mut Gui<'_>,
         input: &InputSnapshot,
-        ctx: &mut GraphContext<'_>,
+        ctx: &GraphContext<'_>,
         pointer_pos: Option<Pos2>,
         background_response: &Response,
         arena: &Bump,
@@ -559,7 +559,7 @@ impl GraphUi {
     fn handle_new_node_selection(
         &mut self,
         gui: &Gui<'_>,
-        ctx: &mut GraphContext<'_>,
+        ctx: &GraphContext<'_>,
         selection: NewNodeSelection,
     ) {
         match selection {
@@ -585,7 +585,7 @@ impl GraphUi {
         }
     }
 
-    fn create_const_binding(&mut self, ctx: &mut GraphContext<'_>) {
+    fn create_const_binding(&mut self, ctx: &GraphContext<'_>) {
         let Some(connection_drag) = self.interaction.drag() else {
             return;
         };
@@ -621,7 +621,7 @@ impl GraphUi {
         &mut self,
         gui: &mut Gui<'_>,
         input: &InputSnapshot,
-        ctx: &mut GraphContext<'_>,
+        ctx: &GraphContext<'_>,
         background_response: &Response,
         pointer_pos: Option<Pos2>,
     ) {

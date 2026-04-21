@@ -61,12 +61,12 @@ impl<'a> ConstBindFrame<'a> {
         gui: &mut Gui<'_>,
         ui_interaction: &mut GraphUiInteraction,
         node_layout: &NodeLayout,
-        node: &mut Node,
+        node: &Node,
         func: &Func,
         breaker: Option<&ConnectionBreaker>,
     ) {
-        for (input_idx, input) in node.inputs.iter_mut().enumerate() {
-            let Binding::Const(value) = &mut input.binding else {
+        for (input_idx, input) in node.inputs.iter().enumerate() {
+            let Binding::Const(value) = &input.binding else {
                 continue;
             };
 
@@ -77,12 +77,10 @@ impl<'a> ConstBindFrame<'a> {
                 breaker,
             };
 
-            // `render_const_input` emits an `InputChanged` action when the
-            // user double-clicks to clear the binding; the actual
-            // `binding = Binding::None` mutation happens via the action's
-            // `apply` in `handle_actions`, not here. If cleared, stop this
-            // loop — the current `node.inputs` borrow is stale w.r.t. the
-            // upcoming mutation.
+            // The editor operates on a per-frame local draft of the
+            // value; `ViewGraph` is never mutated from here. Any edit
+            // produces an `InputChanged` action; double-click-to-clear
+            // produces one too and short-circuits the loop.
             if self.render_const_input(gui, ui_interaction, node_layout, &ctx, value) {
                 return;
             }
@@ -95,7 +93,7 @@ impl<'a> ConstBindFrame<'a> {
         ui_interaction: &mut GraphUiInteraction,
         node_layout: &NodeLayout,
         ctx: &InputContext<'_>,
-        value: &mut StaticValue,
+        current_value: &StaticValue,
     ) -> bool {
         let connection_key = ConnectionKey::Input {
             input_node_id: ctx.node_id,
@@ -133,7 +131,7 @@ impl<'a> ConstBindFrame<'a> {
             ui_interaction.add_action(GraphUiAction::InputChanged {
                 node_id: ctx.node_id,
                 input_idx: ctx.input_idx,
-                before: Binding::Const(value.clone()),
+                before: Binding::Const(current_value.clone()),
                 after: Binding::None,
             });
             return true;
@@ -145,9 +143,14 @@ impl<'a> ConstBindFrame<'a> {
             prev_hovered || currently_hovered,
         );
 
-        let before_value = value.clone();
+        // Per-frame draft: egui's widgets need `&mut StaticValue` and
+        // keep their own edit state (cursor / partial input) keyed by
+        // `Id` in egui memory, so a fresh local copy each frame works
+        // cleanly without touching `ViewGraph`. On change, we emit
+        // `InputChanged` and let `apply` update the binding.
+        let mut draft = current_value.clone();
         let data_type = &ctx.func.inputs[ctx.input_idx].data_type;
-        let editor_response = StaticValueEditor::new(value, data_type)
+        let editor_response = StaticValueEditor::new(&mut draft, data_type)
             .pos(connection_start)
             .style(const_bind_style)
             .show(gui, ConstBindIds::value(ctx.node_id, ctx.input_idx));
@@ -157,13 +160,13 @@ impl<'a> ConstBindFrame<'a> {
         }
         currently_hovered |= editor_response.hovered();
 
-        if before_value != *value {
+        if draft != *current_value {
             currently_hovered = true;
             ui_interaction.add_action(GraphUiAction::InputChanged {
                 node_id: ctx.node_id,
                 input_idx: ctx.input_idx,
-                before: Binding::Const(before_value),
-                after: Binding::Const(value.clone()),
+                before: Binding::Const(current_value.clone()),
+                after: Binding::Const(draft),
             });
         }
 

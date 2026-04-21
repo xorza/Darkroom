@@ -92,7 +92,7 @@ impl NodeDetailsUi {
     fn show_name_editor(
         &self,
         gui: &mut Gui<'_>,
-        ctx: &mut GraphContext<'_>,
+        ctx: &GraphContext<'_>,
         node_id: NodeId,
         interaction: &mut GraphUiInteraction,
     ) {

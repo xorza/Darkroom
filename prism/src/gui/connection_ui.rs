@@ -138,7 +138,7 @@ impl ConnectionUi {
     pub(crate) fn render(
         &mut self,
         gui: &mut Gui<'_>,
-        ctx: &mut GraphContext,
+        ctx: &GraphContext,
         graph_layout: &GraphLayout,
         ui_interaction: &mut GraphUiInteraction,
         breaker: Option<&ConnectionBreaker>,
