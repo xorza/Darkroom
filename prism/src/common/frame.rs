@@ -71,8 +71,13 @@ impl Frame {
         let sense = self.sense.unwrap_or(Sense::empty());
 
         let mut result = self.inner.show(gui.ui(), |ui| {
-            // Create child UI with sense registered BELOW content widgets
-            ui.scope_builder(UiBuilder::new().sense(sense), |ui| {
+            // Create child UI with sense registered BELOW content widgets.
+            // An explicit `id_salt` pins the child Ui's ID across egui
+            // multi-pass — otherwise egui auto-derives an ID whose hash
+            // can depend on the rect (which varies between measurement
+            // passes), producing "widget rect changed id between passes"
+            // warnings and red-rect debug flashes.
+            ui.scope_builder(UiBuilder::new().id_salt("frame_inner").sense(sense), |ui| {
                 let mut gui = Gui::new(ui, &style);
                 add_contents(&mut gui)
             })

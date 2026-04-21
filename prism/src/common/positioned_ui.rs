@@ -85,11 +85,21 @@ impl PositionedUi {
             let mut child_gui = Gui::new_with_scale(ui, &style, scale);
             let result = add_contents(&mut child_gui);
 
-            // Store measured size for next frame
-            let measured_size = ui.min_size();
-            ui.ctx().memory_mut(|mem| {
-                mem.data.insert_temp(self.id, measured_size);
-            });
+            // Store measured size for next frame — but ONLY on the
+            // final pass. egui runs the UI callback multiple times
+            // within one logical frame (for auto-sizing / discard-pass
+            // re-layout). If we wrote memory on every pass, the stored
+            // size would update mid-frame, causing the next pass to
+            // read a different size → different top_left (for non-LEFT
+            // pivots) → widget positions shift → "Widget rect changed
+            // id between passes" warnings with red-rect flashes.
+            // `will_discard()` is false only on the last pass.
+            if !ui.ctx().will_discard() {
+                let measured_size = ui.min_size();
+                ui.ctx().memory_mut(|mem| {
+                    mem.data.insert_temp(self.id, measured_size);
+                });
+            }
 
             result
         })

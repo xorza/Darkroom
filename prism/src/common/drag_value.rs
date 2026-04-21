@@ -180,10 +180,12 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
                 .margin(0.0)
                 .frame(false);
 
-            let mut text_edit_response = gui
-                .new_child(UiBuilder::new().max_rect(inner_rect), |gui| {
-                    text_edit.show(gui).response
-                });
+            let mut text_edit_response = gui.new_child(
+                UiBuilder::new()
+                    .id_salt("drag_value_text")
+                    .max_rect(inner_rect),
+                |gui| text_edit.show(gui).response,
+            );
 
             let should_confirm = text_edit_response.lost_focus()
                 && gui
