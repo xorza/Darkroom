@@ -128,7 +128,9 @@ pub(crate) struct ConnectionUi {
     curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
     highlight_curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
 
-    pub temp_connection: Option<ConnectionDrag>,
+    /// Cached mesh buffer for the in-flight drag preview — reused across
+    /// frames while a drag is active. The drag data itself lives in
+    /// [`crate::gui::interaction_state::Interaction::DraggingConnection`].
     temp_connection_bezier: ConnectionBezier,
 }
 
@@ -230,15 +232,16 @@ impl ConnectionUi {
         drop(highlights);
 
         apply_connection_deletions(deletions, ctx, ui_interaction);
-
-        self.render_temp_connection(gui, graph_layout);
     }
 
-    fn render_temp_connection(&mut self, gui: &mut Gui<'_>, graph_layout: &GraphLayout) {
-        let Some(drag) = &mut self.temp_connection else {
-            return;
-        };
-
+    /// Draws the in-flight connection preview for a drag owned by
+    /// [`crate::gui::interaction_state::Interaction`].
+    pub(crate) fn render_temp_connection(
+        &mut self,
+        gui: &mut Gui<'_>,
+        graph_layout: &GraphLayout,
+        drag: &mut ConnectionDrag,
+    ) {
         // Update port positions from layout
         let start_layout = graph_layout.node_layout(&drag.start_port.port.node_id);
         drag.start_port.center = start_layout.port_center(&drag.start_port.port);
@@ -265,44 +268,6 @@ impl ConnectionUi {
         );
     }
 
-    pub(crate) fn update_drag(
-        &mut self,
-        pointer_pos: Pos2,
-        cmd: PortInteractCommand,
-    ) -> ConnectionDragUpdate {
-        if let PortInteractCommand::DragStart(port_info) = cmd {
-            self.temp_connection = Some(ConnectionDrag::new(port_info));
-            return ConnectionDragUpdate::InProgress;
-        }
-
-        let drag = self.temp_connection.as_mut().expect("missing DragStart");
-        drag.current_pos = pointer_pos;
-
-        match cmd {
-            PortInteractCommand::None => {
-                drag.end_port = None;
-                ConnectionDragUpdate::InProgress
-            }
-            PortInteractCommand::DragStart(_) => unreachable!(),
-            PortInteractCommand::Hover(port_info) => {
-                try_snap_to_port(drag, port_info);
-                ConnectionDragUpdate::InProgress
-            }
-            PortInteractCommand::DragStop => finish_drag(drag),
-            PortInteractCommand::Click(port_info) => {
-                if try_snap_to_port(drag, port_info) {
-                    finish_drag(drag)
-                } else {
-                    ConnectionDragUpdate::Finished
-                }
-            }
-        }
-    }
-
-    pub(crate) fn stop_drag(&mut self) {
-        self.temp_connection = None;
-    }
-
     pub(crate) fn any_hovered(&self) -> bool {
         self.curves.iter().any(|c| c.hovered)
     }
@@ -315,6 +280,41 @@ impl ConnectionUi {
 }
 
 // === Helpers ===
+
+/// Advances an in-flight connection drag based on the pointer and the latest
+/// port interaction command. The drag lives inside
+/// [`crate::gui::interaction_state::Interaction::DraggingConnection`] — this
+/// is a free function so the caller owns both the drag and any transition
+/// decision (e.g. cancelling the interaction on `Finished`).
+pub(crate) fn advance_drag(
+    drag: &mut ConnectionDrag,
+    pointer_pos: Pos2,
+    cmd: PortInteractCommand,
+) -> ConnectionDragUpdate {
+    drag.current_pos = pointer_pos;
+
+    match cmd {
+        PortInteractCommand::None => {
+            drag.end_port = None;
+            ConnectionDragUpdate::InProgress
+        }
+        PortInteractCommand::DragStart(_) => {
+            panic!("advance_drag received DragStart — caller must start the interaction instead")
+        }
+        PortInteractCommand::Hover(port_info) => {
+            try_snap_to_port(drag, port_info);
+            ConnectionDragUpdate::InProgress
+        }
+        PortInteractCommand::DragStop => finish_drag(drag),
+        PortInteractCommand::Click(port_info) => {
+            if try_snap_to_port(drag, port_info) {
+                finish_drag(drag)
+            } else {
+                ConnectionDragUpdate::Finished
+            }
+        }
+    }
+}
 
 /// Clears the connection identified by `key` and emits the matching undoable action.
 ///

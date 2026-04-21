@@ -208,60 +208,61 @@ paths the audit flagged; migrating them is mechanical follow-up.
 
 ---
 
-### Step 3 — Interaction as a real enum-with-data state machine
+### Step 3 — Interaction as a real enum-with-data state machine ✅ DONE
 
-**Problem.** `GraphInteractionState` (`src/gui/interaction_state.rs:29-36`)
-keeps `mode: InteractionMode` **plus** a `connection_breaker: ConnectionBreaker`
-field that is only meaningful in `BreakingConnections`. Callers reach for
-`self.interaction.breaker()` in places where the breaker mustn't exist
-(`graph_ui.rs:151` passes it into `render_nodes` regardless of mode).
-Cancellation is spread across `cancel_interaction` (`graph_ui.rs:105-108`),
-`should_cancel_interaction` (`:197`), and a handful of inline
-`reset_to_idle()` calls (`:259, 350, 433, 740`) — each must remember to also
-call `connections.stop_drag()`. The audit's Finding #3.
+**Problem.** `GraphInteractionState` kept `mode: InteractionMode` **plus**
+a `connection_breaker: ConnectionBreaker` field that was only meaningful in
+`BreakingConnections`, and the in-flight drag lived on `ConnectionUi` under
+`temp_connection`. That produced a dual-source-of-truth — "what is the UI
+doing?" had to be read from both `interaction.mode()` and
+`connections.temp_connection` — and cancellation had to remember to reset
+both (`reset_to_idle() + connections.stop_drag()`).
 
-**Target.**
-```rust
-pub enum Interaction {
-    Idle,
-    Panning { anchor: Pos2 },
-    DraggingConnection { drag: ConnectionDrag },
-    BreakingConnections { breaker: ConnectionBreaker },
-}
+**Work done.**
+- Rewrote `gui/interaction_state.rs` as an enum-with-data:
+  ```rust
+  pub enum Interaction {
+      Idle,
+      Panning,
+      DraggingConnection(ConnectionDrag),
+      BreakingConnections(ConnectionBreaker),
+  }
+  ```
+- Deleted `InteractionMode`, `GraphInteractionState`, `breaker_mut`,
+  `add_breaker_point`, `transition_to`, `reset_to_idle`,
+  `is_breaking_connections`, `is_dragging_connection`. The breaker and
+  drag accessors (`breaker`, `breaker_mut`, `drag`, `drag_mut`) now return
+  `Option<&T>` / `Option<&mut T>` — variant-local, so `Idle.breaker()` is
+  literally `None`.
+- `Interaction::cancel()` is one assignment: `*self = Self::Idle`. Every
+  call site that used to do `reset_to_idle() + connections.stop_drag()`
+  now calls `cancel()` and drops the variant data in one shot.
+- Moved the in-flight `ConnectionDrag` out of `ConnectionUi` and into
+  `Interaction::DraggingConnection`. `ConnectionUi` is now a stateless
+  renderer plus a mesh-buffer cache (`temp_connection_bezier`); the drag
+  flow hits the variant via `self.interaction.drag_mut()`.
+- Split `ConnectionUi::update_drag` into two pieces: the idle→Dragging
+  transition moves into a free function `handle_idle` in `graph_ui.rs`
+  that calls `Interaction::start_dragging`; the in-drag advancement is a
+  free function `connection_ui::advance_drag(&mut ConnectionDrag, …)`.
+- `process_connections` now matches directly on `&mut self.interaction`,
+  binding the breaker / drag by reference — impossible to call the wrong
+  helper from the wrong variant.
+- `render_connections` likewise matches the enum to pick between showing
+  the breaker mesh and the temp-connection preview.
+- `create_const_binding` reads from `self.interaction.drag()` instead of
+  the removed `ConnectionUi.temp_connection` field.
+- Tests in `interaction_state` rewritten (5 tests): default idle, start
+  variants install only their own data, cancel drops data, cross-variant
+  transition replaces data.
 
-impl Interaction {
-    pub fn cancel(&mut self) { *self = Self::Idle; }
-    pub fn update(&mut self, input: &InputSnapshot, /*…*/) -> Option<Transition>;
-}
-```
-Variant-local data means the breaker literally cannot be reached from `Idle`.
-`cancel` is one atomic assignment; there is nothing else to forget.
+**Verification.** 28 tests pass; `cargo clippy --all-targets -- -D warnings`
+green.
 
-Additionally, `ConnectionUi::temp_connection` moves **into**
-`DraggingConnection`. That removes the dual-source-of-truth problem where
-"what is the UI doing?" must be inferred from both `interaction.mode()` and
-`connections.temp_connection`.
-
-**Work.**
-1. Introduce the new enum in `prism/src/interaction/mod.rs`; keep the old
-   module as a thin shim that delegates, so callers can be migrated one file
-   at a time.
-2. Move `ConnectionBreaker` state into `BreakingConnections`; remove the
-   always-present field.
-3. Move `temp_connection` into `DraggingConnection`; `ConnectionUi` becomes a
-   stateless renderer that takes `Option<&ConnectionDrag>`.
-4. Delete every explicit `connections.stop_drag()` call — variant replacement
-   handles it.
-5. Delete `GraphInteractionState::breaker()`.
-
-**Verify.** The existing tests in `interaction_state.rs` migrate and should
-still pass (expanded: "BreakingConnections → Idle drops breaker", "Idle has
-no breaker accessor — compile-time check via trybuild", "cancel from
-DraggingConnection also drops pending temp").
-
-**Size / risk.** ~2 days. Medium. Touches `graph_ui.rs`, `connection_ui.rs`,
-`interaction_state.rs`. Public surface is internal, so refactor can be
-mechanical.
+**Size / risk.** Shipped; 3 files rewritten (`interaction_state.rs`,
+`connection_ui.rs`, `graph_ui.rs`). No behaviour change intended or
+observed; the dual-source-of-truth problem and the
+`reset_to_idle + stop_drag` pair are now impossible by construction.
 
 ---
 
@@ -525,19 +526,18 @@ user interactions — should never panic.
 ```
 Step 1 ✅ ┐
           ├─ Step 2 ✅ ┐
-          │            ├─ Step 3 ─┐
-          │            │          ├─ Step 4 ─┐
-          │            │          │          ├─ Step 5 ─┐
-          │            │          │          │          ├─ Step 7
-Step 8 ✅ ┘            │          │          └─ Step 6 ─┘
-                       │          └─ Step 9
+          │            ├─ Step 3 ✅ ┐
+          │            │            ├─ Step 4 ─┐
+          │            │            │          ├─ Step 5 ─┐
+          │            │            │          │          ├─ Step 7
+Step 8 ✅ ┘            │            │          └─ Step 6 ─┘
+                       │            └─ Step 9
 ```
 
-- Steps 1, 2, and 8 shipped. The end-state of Step 8 (full `&'a Style`
-  borrow instead of `Rc<Style>`) is deferred to Step 8.2 — do it after
-  Step 3.
-- Step 3 (interaction enum-with-data) is the next big payoff — removes the
-  `breaker()` foot-gun and atomic cancel.
+- Steps 1, 2, 3, and 8 shipped. Step 8.2 (full `&'a Style` borrow instead
+  of `Rc<Style>`) can now go anytime — its blockers are gone.
+- Step 4 (pure renders + Intent buffer) is the next big payoff — it
+  collapses the rendering / mutation tangle that makes GraphUi untestable.
 - Step 3 (interaction enum) is a prerequisite for Step 4's pure renders.
 - Step 4 unblocks both the mechanical split (Step 5) and the state split
   (Step 6).

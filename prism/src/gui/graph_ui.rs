@@ -18,13 +18,13 @@ use crate::common::UiEquals;
 use crate::common::button::Button;
 
 use crate::gui::connection_ui::{
-    BrokeItem, ConnectionDragUpdate, ConnectionUi, disconnect_connection,
+    BrokeItem, ConnectionDragUpdate, ConnectionUi, advance_drag, disconnect_connection,
 };
 use crate::gui::connection_ui::{ConnectionKey, PortKind};
 use crate::gui::graph_background::GraphBackgroundRenderer;
 use crate::gui::graph_layout::{GraphLayout, PortRef};
 use crate::gui::graph_ui_interaction::{GraphUiInteraction, RunCommand};
-use crate::gui::interaction_state::{GraphInteractionState, InteractionMode};
+use crate::gui::interaction_state::Interaction;
 use crate::gui::new_node_ui::{NewNodeSelection, NewNodeUi};
 use crate::gui::node_details_ui::NodeDetailsUi;
 use crate::gui::node_ui::{NodeUi, PortInteractCommand};
@@ -81,8 +81,8 @@ impl std::fmt::Display for Error {
 
 #[derive(Debug, Default)]
 pub struct GraphUi {
-    /// Centralized interaction state management.
-    interaction: GraphInteractionState,
+    /// Centralized interaction state machine.
+    interaction: Interaction,
     connections: ConnectionUi,
     graph_layout: GraphLayout,
     node_ui: NodeUi,
@@ -98,8 +98,7 @@ impl GraphUi {
     }
 
     fn cancel_interaction(&mut self) {
-        self.interaction.reset_to_idle();
-        self.connections.stop_drag();
+        self.interaction.cancel();
     }
 
     // ------------------------------------------------------------------------
@@ -268,25 +267,33 @@ impl GraphUi {
     ) {
         let primary_down = input.primary_pressed || input.primary_down;
 
-        match self.interaction.mode() {
-            InteractionMode::PanningGraph => {}
-            InteractionMode::Idle => {
+        match &mut self.interaction {
+            Interaction::Panning => {}
+            Interaction::Idle => {
                 let pointer_on_background =
                     background_response.hovered() && !self.connections.any_hovered();
-                self.handle_idle_state(
+                handle_idle(
+                    &mut self.interaction,
                     pointer_pos,
                     primary_down,
                     pointer_on_background,
                     port_interact_cmd,
                 );
             }
-            InteractionMode::BreakingConnections => {
+            Interaction::BreakingConnections(breaker) => {
                 Self::capture_overlay(gui);
-                self.handle_breaking_connections(ctx, pointer_pos, primary_down);
+                if primary_down {
+                    breaker.add_point(pointer_pos);
+                } else {
+                    // Breaker released — collect results, then cancel.
+                    self.apply_breaker_results(ctx);
+                    self.interaction.cancel();
+                }
             }
-            InteractionMode::DraggingNewConnection => {
+            Interaction::DraggingConnection(drag) => {
                 Self::capture_overlay(gui);
-                self.handle_dragging_connection(ctx, pointer_pos, port_interact_cmd);
+                let result = advance_drag(drag, pointer_pos, port_interact_cmd);
+                self.handle_drag_result(ctx, pointer_pos, result);
             }
         }
     }
@@ -297,40 +304,6 @@ impl GraphUi {
         let id = gui.ui().make_persistent_id("temp overlay background");
         let rect = gui.rect;
         gui.ui().interact(rect, id, Sense::all());
-    }
-
-    fn handle_idle_state(
-        &mut self,
-        pointer_pos: Pos2,
-        primary_down: bool,
-        pointer_on_background: bool,
-        port_interact_cmd: PortInteractCommand,
-    ) {
-        if !primary_down {
-            return;
-        }
-
-        if let PortInteractCommand::DragStart(_) = port_interact_cmd {
-            self.interaction.start_dragging_connection();
-            self.connections.update_drag(pointer_pos, port_interact_cmd);
-        } else if pointer_on_background {
-            self.interaction.start_breaking(pointer_pos);
-        }
-    }
-
-    fn handle_breaking_connections(
-        &mut self,
-        ctx: &mut GraphContext<'_>,
-        pointer_pos: Pos2,
-        primary_down: bool,
-    ) {
-        if primary_down {
-            self.interaction.add_breaker_point(pointer_pos);
-            return;
-        }
-
-        self.apply_breaker_results(ctx);
-        self.cancel_interaction();
     }
 
     /// Collects all items hit by the breaker (connections, const bindings, nodes)
@@ -362,19 +335,22 @@ impl GraphUi {
         }
     }
 
-    fn handle_dragging_connection(
+    fn handle_drag_result(
         &mut self,
         ctx: &mut GraphContext<'_>,
         pointer_pos: Pos2,
-        port_interact_cmd: PortInteractCommand,
+        result: ConnectionDragUpdate,
     ) {
-        match self.connections.update_drag(pointer_pos, port_interact_cmd) {
+        match result {
             ConnectionDragUpdate::InProgress => {}
             ConnectionDragUpdate::Finished => {
-                self.cancel_interaction();
+                self.interaction.cancel();
             }
             ConnectionDragUpdate::FinishedWithEmptyOutput { input_port } => {
                 assert_eq!(input_port.kind, PortKind::Input);
+                // NB: interaction stays in DraggingConnection so the ports
+                // are available to `create_const_binding` if the user picks
+                // ConstBind in the popup.
                 self.new_node_ui.open_from_connection(pointer_pos);
             }
             ConnectionDragUpdate::FinishedWithEmptyInput { output_port } => {
@@ -386,7 +362,7 @@ impl GraphUi {
                 output_port,
             } => {
                 self.apply_connection(ctx, input_port, output_port);
-                self.cancel_interaction();
+                self.interaction.cancel();
             }
         }
     }
@@ -430,8 +406,15 @@ impl GraphUi {
             self.interaction.breaker(),
         );
 
-        if self.interaction.is_breaking_connections() {
-            self.interaction.breaker_mut().show(gui);
+        match &mut self.interaction {
+            Interaction::BreakingConnections(breaker) => {
+                breaker.show(gui);
+            }
+            Interaction::DraggingConnection(drag) => {
+                self.connections
+                    .render_temp_connection(gui, &self.graph_layout, drag);
+            }
+            _ => {}
         }
     }
 
@@ -588,7 +571,7 @@ impl GraphUi {
     }
 
     fn create_const_binding(&mut self, ctx: &mut GraphContext<'_>) {
-        let Some(connection_drag) = self.connections.temp_connection.as_ref() else {
+        let Some(connection_drag) = self.interaction.drag() else {
             return;
         };
 
@@ -676,13 +659,13 @@ impl GraphUi {
     }
 
     fn handle_pan_state(&mut self, ctx: &mut GraphContext<'_>, background_response: &Response) {
-        match self.interaction.mode() {
-            InteractionMode::Idle if background_response.drag_started_by(PointerButton::Middle) => {
+        match &self.interaction {
+            Interaction::Idle if background_response.drag_started_by(PointerButton::Middle) => {
                 self.interaction.start_panning();
             }
-            InteractionMode::PanningGraph => {
+            Interaction::Panning => {
                 if background_response.drag_stopped_by(PointerButton::Middle) {
-                    self.cancel_interaction();
+                    self.interaction.cancel();
                 }
                 if background_response.dragged_by(PointerButton::Middle) {
                     ctx.view_graph.pan += background_response.drag_delta();
@@ -696,6 +679,28 @@ impl GraphUi {
 // ============================================================================
 // Free functions
 // ============================================================================
+
+/// Idle-state transitions driven by primary-button pressure plus a port
+/// interaction command. Kept as a free function so it can borrow
+/// `interaction` mutably without the enclosing `GraphUi::process_connections`
+/// match needing to drop its discriminant borrow.
+fn handle_idle(
+    interaction: &mut Interaction,
+    pointer_pos: Pos2,
+    primary_down: bool,
+    pointer_on_background: bool,
+    port_interact_cmd: PortInteractCommand,
+) {
+    if !primary_down {
+        return;
+    }
+
+    if let PortInteractCommand::DragStart(port_info) = port_interact_cmd {
+        interaction.start_dragging(port_info);
+    } else if pointer_on_background {
+        interaction.start_breaking(pointer_pos);
+    }
+}
 
 /// Connects an output port to an input port in `view_graph`.
 fn apply_data_connection(
