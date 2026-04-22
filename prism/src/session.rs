@@ -2,7 +2,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use common::SerdeFormat;
@@ -14,6 +13,7 @@ use scenarium::graph::NodeId;
 use scenarium::prelude::{ExecutionStats, FuncLib, TestFuncHooks, test_func_lib};
 use scenarium::worker::{ArgumentValuesCallback, Worker, WorkerMessage};
 
+use crate::config::Config;
 use crate::gui::frame_output::{FrameOutput, RunCommand};
 use crate::gui::graph_ctx::GraphContext;
 use crate::model::{ActionStack, ArgumentValuesCache, ViewGraph, graph_ui_action::GraphUiAction};
@@ -29,30 +29,6 @@ const SCRIPT_TCP_PORT: u16 = 32853;
 
 /// Status buffer size cap (UI-visible log).
 const STATUS_CAP: usize = 2000;
-
-/// App preferences persisted between editor runs (last-opened graph
-/// path today; probably grows to include window geometry, recent
-/// files, etc.). Lives here because only `Session` reads/writes it.
-#[derive(Debug, Default, Serialize, Deserialize)]
-pub(crate) struct Config {
-    pub current_path: Option<std::path::PathBuf>,
-}
-
-impl Config {
-    pub fn load_or_default() -> Self {
-        Self::load().unwrap_or_default()
-    }
-
-    pub fn save(&self) {
-        let serialized = common::serde::serialize(self, SerdeFormat::Toml);
-        std::fs::write("config.toml", serialized).ok();
-    }
-
-    fn load() -> Result<Self> {
-        let serialized = std::fs::read("config.toml")?;
-        common::serde::deserialize(&serialized, SerdeFormat::Toml)
-    }
-}
 
 /// Everything the worker-side plumbing pushes back into the session.
 /// One enum, one channel — `update_shared_status` drains it in a

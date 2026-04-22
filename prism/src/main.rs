@@ -1,4 +1,5 @@
 mod common;
+mod config;
 mod gui;
 mod init;
 mod input;
