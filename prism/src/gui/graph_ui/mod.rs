@@ -1,41 +1,31 @@
+//! Top-level graph view. Owns the per-frame render pipeline
+//! (content → overlays → zoom/pan) and the interaction state machine.
+//!
+//! The heavy logic lives in submodules:
+//! - `connections` — drag/snap/commit for data + event wires, breaker
+//! - `overlays`    — button bars, new-node popup, const-bind routing
+//! - `pan_zoom`    — viewport transforms and fit/reset targets
+
 use bumpalo::Bump;
+use common::BoolExt;
 use eframe::egui;
-use egui::{
-    Align2, Id, PointerButton, Pos2, Rect, Response, Sense, StrokeKind, UiBuilder, Vec2, pos2, vec2,
-};
-use scenarium::data::StaticValue;
+use egui::{Pos2, Rect, Response, Sense, StrokeKind, Vec2};
+use scenarium::graph::NodeId;
 
 use crate::app_data::AppData;
 use crate::common::StableId;
-use crate::common::frame::Frame;
-use crate::common::positioned_ui::PositionedUi;
-use crate::model::EventSubscriberChange;
-use crate::model::graph_ui_action::GraphUiAction;
-use scenarium::graph::NodeId;
-use scenarium::prelude::{Binding, PortAddress};
-
-use crate::common::UiEquals;
-
-use crate::common::button::Button;
-
-use crate::gui::connection_ui::{
-    BrokeItem, ConnectionDragUpdate, ConnectionUi, advance_drag, disconnect_connection,
-};
-use crate::gui::connection_ui::{ConnectionKey, PortKind};
+use crate::gui::Gui;
+use crate::gui::connection_ui::ConnectionUi;
 use crate::gui::graph_background::GraphBackgroundRenderer;
-use crate::gui::graph_layout::{GraphLayout, PortRef};
-use crate::gui::graph_ui_interaction::{GraphUiInteraction, RunCommand};
+use crate::gui::graph_ctx::GraphContext;
+use crate::gui::graph_layout::GraphLayout;
+use crate::gui::graph_ui_interaction::GraphUiInteraction;
 use crate::gui::interaction_state::Interaction;
-use crate::gui::new_node_ui::{NewNodeSelection, NewNodeUi};
+use crate::gui::new_node_ui::NewNodeUi;
 use crate::gui::node_details_ui::NodeDetailsUi;
-use crate::gui::node_ui::{NodeUi, PortInteractCommand};
+use crate::gui::node_ui::NodeUi;
 use crate::input::InputSnapshot;
-use crate::{gui::Gui, gui::graph_ctx::GraphContext, model};
-use common::BoolExt;
-
-// ============================================================================
-// Constants
-// ============================================================================
+use crate::model;
 
 mod connections;
 mod overlays;
@@ -54,10 +44,6 @@ pub(super) struct ButtonResult {
     pub(super) view_selected: bool,
     pub(super) reset_view: bool,
 }
-
-// ============================================================================
-// Types
-// ============================================================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Error {
@@ -79,8 +65,7 @@ impl std::fmt::Display for Error {
                 output_node_id,
             } => write!(
                 f,
-                "connection would create a cycle between {} and {}",
-                input_node_id, output_node_id
+                "connection would create a cycle between {input_node_id} and {output_node_id}"
             ),
             Error::StaleNode { node_id } => write!(
                 f,
@@ -89,10 +74,6 @@ impl std::fmt::Display for Error {
         }
     }
 }
-
-// ============================================================================
-// GraphUi
-// ============================================================================
 
 #[derive(Debug, Default)]
 pub struct GraphUi {
@@ -112,36 +93,14 @@ impl GraphUi {
         &mut self.ui_interaction
     }
 
-    fn cancel_interaction(&mut self) {
+    pub(super) fn cancel_interaction(&mut self) {
         self.interaction.cancel();
     }
 
-    /// Cancels the current interaction if it references nodes that no
-    /// longer exist in `view_graph`. See `Error::StaleNode`.
-    fn drop_stale_interaction(&mut self, view_graph: &model::ViewGraph) {
-        let stale = match &self.interaction {
-            Interaction::Idle | Interaction::Panning | Interaction::BreakingConnections(_) => false,
-            Interaction::DraggingNode(drag) => view_graph.graph.by_id(&drag.node_id).is_none(),
-            Interaction::DraggingConnection(drag) => {
-                let start_missing = view_graph
-                    .graph
-                    .by_id(&drag.start_port.port.node_id)
-                    .is_none();
-                let end_missing = drag
-                    .end_port
-                    .is_some_and(|p| view_graph.graph.by_id(&p.port.node_id).is_none());
-                start_missing || end_missing
-            }
-        };
-        if stale {
-            self.interaction.cancel();
-        }
-    }
-
-    // ------------------------------------------------------------------------
-    // Main render entry point
-    // ------------------------------------------------------------------------
-
+    /// Per-frame entry point. The body splits into three ordered phases:
+    ///   1. content — layout, background, connections, nodes
+    ///   2. overlays — buttons, details panel, new-node popup
+    ///   3. zoom/pan — only when no overlay is hovered
     pub fn render(
         &mut self,
         gui: &mut Gui<'_>,
@@ -183,78 +142,17 @@ impl GraphUi {
                     self.handle_background_click(&ctx);
                 }
 
-                // Phase 1: Graph content (layout, background, connections, nodes)
-                gui.with_scale(ctx.view_graph.scale, |gui| {
-                    self.graph_layout.update(gui, &ctx, &self.interaction);
-                    self.dots_background.render(gui, &ctx);
-                    self.render_connections(gui, &ctx);
+                self.render_content(gui, &ctx, input, &background_response, pointer_pos);
 
-                    // Overlay that swallows background click-through for
-                    // active gestures. Registered HERE — before ports — so
-                    // later-registered port widgets keep higher egui
-                    // z-order and their click/drag responses still fire
-                    // through. See `Self::maybe_capture_overlay`.
-                    Self::maybe_capture_overlay(gui, &self.interaction);
-
-                    let nodes_result = self.node_ui.render_nodes(
-                        gui,
-                        &ctx,
-                        &mut self.graph_layout,
-                        &mut self.ui_interaction,
-                        &mut self.interaction,
-                    );
-
-                    // Surface the render's removal intents as actions. The
-                    // mutation itself happens in `NodeRemoved::apply` during
-                    // `handle_actions`.
-                    for node_id in &nodes_result.removed_nodes {
-                        let action = ctx.view_graph.removal_action(node_id);
-                        self.ui_interaction.add_action(action);
-                    }
-
-                    if let Some(pointer_pos) = pointer_pos {
-                        self.process_connections(
-                            input,
-                            &ctx,
-                            &background_response,
-                            pointer_pos,
-                            nodes_result.port_cmd,
-                            &nodes_result.broken_nodes,
-                        );
-                    }
-                });
-
-                // Phase 2: Overlays (buttons, details panel, new-node popup)
-                let buttons = self.render_buttons(gui, ctx.autorun);
-                if buttons.reset_view {
-                    self.emit_zoom_pan(ctx.view_graph, Vec2::ZERO, 1.0);
-                }
-                if buttons.view_selected
-                    && let Some((scale, pan)) =
-                        view_selected_node_target(gui, &ctx, &self.graph_layout)
-                {
-                    self.emit_zoom_pan(ctx.view_graph, pan, scale);
-                }
-                if buttons.fit_all {
-                    let (scale, pan) = fit_all_nodes_target(gui, &ctx, &self.graph_layout);
-                    self.emit_zoom_pan(ctx.view_graph, pan, scale);
-                }
-
-                let mut overlay_hovered = buttons.response.hovered();
-                overlay_hovered |= self
-                    .node_details_ui
-                    .show(gui, &mut ctx, &mut self.ui_interaction)
-                    .hovered();
-                overlay_hovered |= self.handle_new_node_popup(
+                let overlay_hovered = self.render_overlays(
                     gui,
+                    &mut ctx,
                     input,
-                    &ctx,
                     pointer_pos,
                     &background_response,
                     arena,
                 );
 
-                // Phase 3: Zoom and pan (only when no overlay is hovered)
                 if !overlay_hovered && (self.interaction.is_idle() || self.interaction.is_panning())
                 {
                     self.update_zoom_and_pan(gui, input, &ctx, &background_response, pointer_pos);
@@ -263,7 +161,95 @@ impl GraphUi {
     }
 
     // ------------------------------------------------------------------------
-    // Background setup
+    // Render phases
+    // ------------------------------------------------------------------------
+
+    /// Phase 1 — graph content rendered at the graph's zoom scale.
+    fn render_content(
+        &mut self,
+        gui: &mut Gui<'_>,
+        ctx: &GraphContext<'_>,
+        input: &InputSnapshot,
+        background_response: &Response,
+        pointer_pos: Option<Pos2>,
+    ) {
+        gui.with_scale(ctx.view_graph.scale, |gui| {
+            self.graph_layout.update(gui, ctx, &self.interaction);
+            self.dots_background.render(gui, ctx);
+            self.render_connections(gui, ctx);
+
+            // Overlay that swallows background click-through for active
+            // gestures. Registered HERE — before ports — so later-registered
+            // port widgets keep higher egui z-order and their click/drag
+            // responses still fire through. See `maybe_capture_overlay`.
+            Self::maybe_capture_overlay(gui, &self.interaction);
+
+            let nodes_result = self.node_ui.render_nodes(
+                gui,
+                ctx,
+                &mut self.graph_layout,
+                &mut self.ui_interaction,
+                &mut self.interaction,
+            );
+
+            // Surface render-time removal intents as actions. The mutation
+            // itself happens in `NodeRemoved::apply` during `handle_actions`.
+            for node_id in &nodes_result.removed_nodes {
+                let action = ctx.view_graph.removal_action(node_id);
+                self.ui_interaction.add_action(action);
+            }
+
+            if let Some(pointer_pos) = pointer_pos {
+                self.process_connections(
+                    input,
+                    ctx,
+                    background_response,
+                    pointer_pos,
+                    nodes_result.port_cmd,
+                    &nodes_result.broken_nodes,
+                );
+            }
+        });
+    }
+
+    /// Phase 2 — overlay UI. Returns `true` if any overlay is hovered,
+    /// which suppresses zoom/pan input in phase 3.
+    fn render_overlays(
+        &mut self,
+        gui: &mut Gui<'_>,
+        ctx: &mut GraphContext<'_>,
+        input: &InputSnapshot,
+        pointer_pos: Option<Pos2>,
+        background_response: &Response,
+        arena: &Bump,
+    ) -> bool {
+        let buttons = self.render_buttons(gui, ctx.autorun);
+
+        if buttons.reset_view {
+            self.emit_zoom_pan(ctx.view_graph, Vec2::ZERO, 1.0);
+        }
+        if buttons.view_selected
+            && let Some((scale, pan)) = view_selected_node_target(gui, ctx, &self.graph_layout)
+        {
+            self.emit_zoom_pan(ctx.view_graph, pan, scale);
+        }
+        if buttons.fit_all {
+            let (scale, pan) = fit_all_nodes_target(gui, ctx, &self.graph_layout);
+            self.emit_zoom_pan(ctx.view_graph, pan, scale);
+        }
+
+        let mut hovered = buttons.response.hovered();
+        hovered |= self
+            .node_details_ui
+            .show(gui, ctx, &mut self.ui_interaction)
+            .hovered();
+        hovered |=
+            self.handle_new_node_popup(gui, input, ctx, pointer_pos, background_response, arena);
+        hovered
+    }
+
+    // ------------------------------------------------------------------------
+    // Background
     // ------------------------------------------------------------------------
 
     fn draw_background_frame(&self, gui: &mut Gui<'_>) -> Rect {
@@ -304,19 +290,32 @@ impl GraphUi {
         (response, pointer_pos)
     }
 
-    // NB: connection-related methods (handle_background_click,
-    // process_connections, render_connections, apply_breaker_results,
-    // handle_drag_result, apply_connection, capture_overlay) live in
-    // the `connections` submodule.
+    // ------------------------------------------------------------------------
+    // Interaction hygiene
+    // ------------------------------------------------------------------------
 
-    // NB: render_buttons / handle_new_node_popup / handle_new_node_selection /
-    // create_const_binding live in the `overlays` submodule; pan/zoom methods
-    // in the `pan_zoom` submodule; connection methods in `connections`.
+    /// Cancels the current interaction if it references nodes that no
+    /// longer exist in `view_graph`. See `Error::StaleNode`.
+    fn drop_stale_interaction(&mut self, view_graph: &model::ViewGraph) {
+        let stale = match &self.interaction {
+            Interaction::Idle | Interaction::Panning | Interaction::BreakingConnections(_) => false,
+            Interaction::DraggingNode(drag) => view_graph.graph.by_id(&drag.node_id).is_none(),
+            Interaction::DraggingConnection(drag) => {
+                let start_missing = view_graph
+                    .graph
+                    .by_id(&drag.start_port.port.node_id)
+                    .is_none();
+                let end_missing = drag
+                    .end_port
+                    .is_some_and(|p| view_graph.graph.by_id(&p.port.node_id).is_none());
+                start_missing || end_missing
+            }
+        };
+        if stale {
+            self.interaction.cancel();
+        }
+    }
 }
-
-// ============================================================================
-// Free functions
-// ============================================================================
 
 // ============================================================================
 // Tests
@@ -334,9 +333,14 @@ mod tests {
         build_data_connection_action, build_event_connection_action, handle_idle,
     };
     use super::*;
-    use crate::gui::graph_layout::PortInfo;
+    use crate::gui::connection_ui::PortKind;
+    use crate::gui::graph_layout::{PortInfo, PortRef};
+    use crate::gui::node_ui::PortInteractCommand;
+    use crate::model::EventSubscriberChange;
+    use crate::model::graph_ui_action::GraphUiAction;
     use scenarium::function::FuncId;
     use scenarium::graph::{Event, Input, Node, NodeBehavior};
+    use scenarium::prelude::{Binding, PortAddress};
 
     fn make_node_with(input_count: usize, event_count: usize) -> Node {
         Node {
@@ -453,6 +457,51 @@ mod tests {
         }
     }
 
+    #[test]
+    fn build_data_connection_action_stale_input_node_yields_stale_error() {
+        // Drag started from node A, but A was removed between frames —
+        // only B is left. We should get Error::StaleNode, not a panic.
+        let b = make_node_with(0, 0);
+        let b_id = b.id;
+        let vg = view_graph_with_nodes(vec![b]);
+        let missing = NodeId::unique();
+
+        let err = build_data_connection_action(
+            &vg,
+            port(missing, PortKind::Input, 0),
+            port(b_id, PortKind::Output, 0),
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::StaleNode { node_id } if node_id == missing));
+    }
+
+    #[test]
+    fn build_data_connection_action_action_applies_to_bound_binding() {
+        let a = make_node_with(1, 0);
+        let b = make_node_with(1, 0);
+        let a_id = a.id;
+        let b_id = b.id;
+        let mut vg = view_graph_with_nodes(vec![a, b]);
+
+        let action = build_data_connection_action(
+            &vg,
+            port(a_id, PortKind::Input, 0),
+            port(b_id, PortKind::Output, 0),
+        )
+        .unwrap();
+
+        action.apply(&mut vg);
+
+        let a_input = &vg.graph.by_id(&a_id).unwrap().inputs[0];
+        match &a_input.binding {
+            Binding::Bind(addr) => {
+                assert_eq!(addr.target_id, b_id);
+                assert_eq!(addr.port_idx, 0);
+            }
+            other => panic!("expected Bind, got {other:?}"),
+        }
+    }
+
     // --- build_event_connection_action -----------------------------------------
 
     #[test]
@@ -486,24 +535,6 @@ mod tests {
         )
         .unwrap();
         assert!(result.is_none(), "re-subscribing must be a no-op");
-    }
-
-    #[test]
-    fn build_data_connection_action_stale_input_node_yields_stale_error() {
-        // Drag started from node A, but A was removed between frames —
-        // only B is left. We should get Error::StaleNode, not a panic.
-        let b = make_node_with(0, 0);
-        let b_id = b.id;
-        let vg = view_graph_with_nodes(vec![b]);
-        let missing = NodeId::unique();
-
-        let err = build_data_connection_action(
-            &vg,
-            port(missing, PortKind::Input, 0),
-            port(b_id, PortKind::Output, 0),
-        )
-        .unwrap_err();
-        assert!(matches!(err, Error::StaleNode { node_id } if node_id == missing));
     }
 
     #[test]
@@ -554,9 +585,7 @@ mod tests {
         }
     }
 
-    // --- round-trip: apply(build_data_connection_action) matches the expected graph
-
-    // --- handle_idle (free function, pure state machine transition) -----
+    // --- handle_idle (pure state-machine transition) ----------------------------
 
     #[test]
     fn handle_idle_primary_not_down_keeps_idle() {
@@ -617,32 +646,5 @@ mod tests {
         );
         // Not on background, no drag start — shouldn't transition.
         assert!(interaction.is_idle());
-    }
-
-    #[test]
-    fn build_data_connection_action_action_applies_to_bound_binding() {
-        let a = make_node_with(1, 0);
-        let b = make_node_with(1, 0);
-        let a_id = a.id;
-        let b_id = b.id;
-        let mut vg = view_graph_with_nodes(vec![a, b]);
-
-        let action = build_data_connection_action(
-            &vg,
-            port(a_id, PortKind::Input, 0),
-            port(b_id, PortKind::Output, 0),
-        )
-        .unwrap();
-
-        action.apply(&mut vg);
-
-        let a_input = &vg.graph.by_id(&a_id).unwrap().inputs[0];
-        match &a_input.binding {
-            Binding::Bind(addr) => {
-                assert_eq!(addr.target_id, b_id);
-                assert_eq!(addr.port_idx, 0);
-            }
-            other => panic!("expected Bind, got {other:?}"),
-        }
     }
 }
