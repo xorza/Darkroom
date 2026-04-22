@@ -100,9 +100,9 @@ impl MainUi {
         }
     }
 
-    pub fn render(&mut self, app_data: &mut AppData, root_gui: &mut Gui<'_>) {
-        let style = root_gui.style.clone();
-        let input = root_gui.input_snapshot();
+    pub fn render(&mut self, app_data: &mut AppData, gui: &mut Gui<'_>) {
+        let style = gui.style.clone();
+        let input = gui.input_snapshot();
 
         app_data.update_shared_status();
 
@@ -110,7 +110,7 @@ impl MainUi {
 
         Panel::top(StableId::new("top_panel"))
             .show_separator_line(false)
-            .show(root_gui, |gui| {
+            .show(gui, |gui| {
                 // Anchor a global-scope id for the MenuBar so its
                 // internal horizontal layout's widget id doesn't drift
                 // with the panel's auto-id counter. MenuBar is raw
@@ -153,11 +153,11 @@ impl MainUi {
         Panel::bottom(StableId::new("status_panel"))
             .show_separator_line(false)
             .no_frame()
-            .show(root_gui, |gui| {
+            .show(gui, |gui| {
                 self.log_ui.render(gui, &app_data.state.status);
             });
 
-        Panel::central().no_frame().show(root_gui, |gui| {
+        Panel::central().no_frame().show(gui, |gui| {
             self.graph_ui.render(gui, app_data, &input, &self.arena)
         });
 

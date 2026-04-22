@@ -47,7 +47,7 @@ impl<'a> Gui<'a> {
     /// is the reference (at scale=1.0) loaded from TOML; it is
     /// `Rc::clone`d into the wrapper at scale 1.0 and pushed into
     /// egui's global style (one call per frame, not per child `Gui`).
-    pub fn new_root(ui: &'a mut Ui, style: &Rc<Style>) -> Self {
+    pub fn new(ui: &'a mut Ui, style: &Rc<Style>) -> Self {
         ui.ctx().global_style_mut(|egui_style| {
             style.apply_to_egui(egui_style);
         });

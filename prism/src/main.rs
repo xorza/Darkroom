@@ -99,7 +99,7 @@ impl ScenariumEditor {
 
 impl eframe::App for ScenariumEditor {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let mut gui = Gui::new_root(ui, &self.main_ui.style);
+        let mut gui = Gui::new(ui, &self.main_ui.style);
         self.main_ui.render(&mut self.app_data, &mut gui);
     }
 
