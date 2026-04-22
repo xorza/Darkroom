@@ -69,6 +69,42 @@ impl<'a> Gui<'a> {
         self.ui.painter()
     }
 
+    /// Load a persisted value (survives app restarts) from
+    /// `egui::Memory::data` keyed by `id`. Returns `default` when the
+    /// slot is empty.
+    pub fn load_persistent<T>(&self, id: egui::Id, default: T) -> T
+    where
+        T: 'static + Clone + Send + Sync + serde::Serialize + for<'de> serde::Deserialize<'de>,
+    {
+        self.ui
+            .ctx()
+            .data_mut(|d| d.get_persisted::<T>(id).unwrap_or(default))
+    }
+
+    /// Write a persisted value to `egui::Memory::data` keyed by `id`.
+    pub fn store_persistent<T>(&self, id: egui::Id, value: T)
+    where
+        T: 'static + Clone + Send + Sync + serde::Serialize + for<'de> serde::Deserialize<'de>,
+    {
+        self.ui.ctx().data_mut(|d| d.insert_persisted(id, value));
+    }
+
+    /// Load a temporary value (cleared on app restart) from
+    /// `egui::Memory::data` keyed by `id`.
+    pub fn load_temp<T: 'static + Clone + Send + Sync>(&self, id: egui::Id) -> Option<T> {
+        self.ui.ctx().data_mut(|d| d.get_temp::<T>(id))
+    }
+
+    /// Write a temporary value to `egui::Memory::data` keyed by `id`.
+    pub fn store_temp<T: 'static + Clone + Send + Sync>(&self, id: egui::Id, value: T) {
+        self.ui.ctx().data_mut(|d| d.insert_temp(id, value));
+    }
+
+    /// Delete a temporary value of type `T` keyed by `id`.
+    pub fn remove_temp<T: 'static + Send + Sync>(&self, id: egui::Id) {
+        self.ui.ctx().data_mut(|d| d.remove::<T>(id));
+    }
+
     // === egui queries (read-only, not widgets) ===
 
     pub fn is_rect_visible(&self, rect: Rect) -> bool {

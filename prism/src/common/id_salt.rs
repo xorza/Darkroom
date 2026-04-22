@@ -74,6 +74,28 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
 
+    /// Egui chrome types app code must not import. POD types (`Rect`,
+    /// `Vec2`, `Color32`, `Sense`, `Key`, `Response`, ...) stay
+    /// allowed — see `prism/EGUI_ENCAPSULATION_PLAN.md` non-goals.
+    const EGUI_CHROME_TYPES: &[&str] = &[
+        "UiBuilder",
+        "Ui",
+        "Frame",
+        "ScrollArea",
+        "Window",
+        "Area",
+        "Panel",
+        "CentralPanel",
+        "SidePanel",
+        "TopBottomPanel",
+        "CollapsingHeader",
+        "CollapsingState",
+        "ComboBox",
+        "Button",
+        "TextEdit",
+        "collapsing_header",
+    ];
+
     /// Tripwire for the egui widget-id drift bug.
     ///
     /// Flags any of these patterns outside whitelisted files:
@@ -201,11 +223,6 @@ mod tests {
             // The accessor itself + doc mentions.
             Path::new("gui/mod.rs"),
             Path::new("common/id_salt.rs"),
-            // Legacy panel still built directly on raw egui chrome
-            // (CollapsingState, egui::Frame, egui::ScrollArea). Pending
-            // rewrite as a `StatusPanel` widget — see
-            // prism/EGUI_ENCAPSULATION_PLAN.md.
-            Path::new("gui/log_ui.rs"),
         ];
 
         let mut offenders = Vec::new();
@@ -265,6 +282,134 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// Tripwire for chrome-type imports outside the wrapper layer.
+    ///
+    /// `use egui::Frame;` (and friends) in app code bypasses the
+    /// widget wrapper and reintroduces the coupling we spent the plan
+    /// eliminating. Each banned name in `EGUI_CHROME_TYPES` has a
+    /// `widgets::<same-name>` shadow; use that.
+    ///
+    /// POD types (`Rect`, `Vec2`, `Color32`, `Sense`, `Key`,
+    /// `Response`, ...) are explicitly non-goals and stay allowed.
+    ///
+    /// Annotate intentional exceptions with `// egui-chrome-ok` on the
+    /// same line or up to two non-blank lines above.
+    #[test]
+    fn no_egui_chrome_outside_widgets() {
+        let crate_root: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let whitelist: &[&Path] = &[
+            // Root eframe integration — wraps the top-level egui::Ui
+            // and drives egui::CentralPanel / egui::Frame / etc. for
+            // the application shell.
+            Path::new("main_ui.rs"),
+            Path::new("main.rs"),
+            // Defines the `Gui` wrapper over `egui::Ui`; necessarily
+            // imports `Ui` and `UiBuilder`.
+            Path::new("gui/mod.rs"),
+            // Scanner defines the banned names as literals.
+            Path::new("common/id_salt.rs"),
+        ];
+
+        let mut offenders = Vec::new();
+        visit(&crate_root, &crate_root, whitelist, &mut offenders);
+
+        assert!(
+            offenders.is_empty(),
+            "Found `use egui::<chrome>` import outside `gui/widgets/`. \
+             Use the `widgets::` shadow (e.g. `widgets::Frame`), or annotate \
+             with `// egui-chrome-ok` if intentional. Banned names: {:?}. \
+             Call sites:\n{}",
+            EGUI_CHROME_TYPES,
+            offenders.join("\n"),
+        );
+
+        fn visit(dir: &Path, root: &Path, whitelist: &[&Path], offenders: &mut Vec<String>) {
+            let Ok(entries) = fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if path.ends_with("gui/widgets") {
+                        continue;
+                    }
+                    visit(&path, root, whitelist, offenders);
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                let rel = path.strip_prefix(root).unwrap_or(&path);
+                if whitelist.contains(&rel) {
+                    continue;
+                }
+                let Ok(contents) = fs::read_to_string(&path) else {
+                    continue;
+                };
+                let lines: Vec<&str> = contents.lines().collect();
+                for (lineno, line) in lines.iter().enumerate() {
+                    let trimmed = line.trim_start();
+                    if trimmed.starts_with("//") || trimmed.starts_with('*') {
+                        continue;
+                    }
+                    // Only scan `use` lines — chrome names appearing as
+                    // qualified paths (`egui::Ui::foo`) are rare and,
+                    // where they do appear, they still need an import
+                    // elsewhere which this test catches.
+                    if !trimmed.starts_with("use egui") && !trimmed.starts_with("pub use egui") {
+                        continue;
+                    }
+                    let banned = EGUI_CHROME_TYPES
+                        .iter()
+                        .find(|name| contains_ident(line, name));
+                    let Some(&matched) = banned else {
+                        continue;
+                    };
+                    let same_line = line.contains("// egui-chrome-ok");
+                    let preceding_ok = lines[..lineno]
+                        .iter()
+                        .rev()
+                        .filter(|l| !l.trim().is_empty())
+                        .take(2)
+                        .any(|l| l.contains("// egui-chrome-ok"));
+                    if !same_line && !preceding_ok {
+                        offenders.push(format!(
+                            "{}:{}: [{}] {}",
+                            path.display(),
+                            lineno + 1,
+                            matched,
+                            trimmed
+                        ));
+                    }
+                }
+            }
+        }
+
+        /// True iff `name` appears in `line` as a whole-word identifier,
+        /// not as a substring of a longer name (so `Ui` doesn't match
+        /// `UiBuilder`, `Frame` doesn't match `FramePainter`, etc.).
+        fn contains_ident(line: &str, name: &str) -> bool {
+            let bytes = line.as_bytes();
+            let nb = name.as_bytes();
+            let mut i = 0;
+            while let Some(off) = line[i..].find(name) {
+                let start = i + off;
+                let end = start + nb.len();
+                let before_ok = start == 0 || !is_ident_byte(bytes[start - 1]);
+                let after_ok = end >= bytes.len() || !is_ident_byte(bytes[end]);
+                if before_ok && after_ok {
+                    return true;
+                }
+                i = end;
+            }
+            false
+        }
+
+        fn is_ident_byte(b: u8) -> bool {
+            b.is_ascii_alphanumeric() || b == b'_'
         }
     }
 }

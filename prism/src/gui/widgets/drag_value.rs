@@ -122,10 +122,7 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
 
         // Check if we're currently dragging to display temporary value
         let drag_temp_id = id.with("drag_temp");
-        let display_value = gui
-            .ui_raw()
-            .data_mut(|data| data.get_temp::<T>(drag_temp_id))
-            .unwrap_or(*self.value);
+        let display_value = gui.load_temp::<T>(drag_temp_id).unwrap_or(*self.value);
 
         let value_text = display_value.display();
         let galley = gui
@@ -148,10 +145,7 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
         let edit_id = id.with("edit");
         let edit_text_id = id.with("edit_text");
         let edit_original_id = id.with("edit_original");
-        let mut edit_active = gui
-            .ui_raw()
-            .data_mut(|data| data.get_temp::<bool>(edit_id))
-            .unwrap_or(false);
+        let mut edit_active = gui.load_temp::<bool>(edit_id).unwrap_or(false);
 
         gui.painter().rect(
             rect,
@@ -163,13 +157,9 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
 
         if edit_active {
             let mut edit_text = gui
-                .ui_raw()
-                .data_mut(|data| data.get_temp::<String>(edit_text_id))
+                .load_temp::<String>(edit_text_id)
                 .unwrap_or_else(|| self.value.to_string());
-            let original_value = gui
-                .ui_raw()
-                .data_mut(|data| data.get_temp::<T>(edit_original_id))
-                .unwrap_or(*self.value);
+            let original_value = gui.load_temp::<T>(edit_original_id).unwrap_or(*self.value);
 
             let text_edit = TextEdit::singleline(&mut edit_text)
                 .id(edit_id)
@@ -206,17 +196,15 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
                 edit_active = false;
             }
 
-            gui.ui_raw().data_mut(|data| {
-                if edit_active {
-                    data.insert_temp(edit_id, true);
-                    data.insert_temp(edit_text_id, edit_text);
-                    data.insert_temp(edit_original_id, original_value);
-                } else {
-                    data.remove::<bool>(edit_id);
-                    data.remove::<String>(edit_text_id);
-                    data.remove::<T>(edit_original_id);
-                }
-            });
+            if edit_active {
+                gui.store_temp(edit_id, true);
+                gui.store_temp(edit_text_id, edit_text);
+                gui.store_temp(edit_original_id, original_value);
+            } else {
+                gui.remove_temp::<bool>(edit_id);
+                gui.remove_temp::<String>(edit_text_id);
+                gui.remove_temp::<T>(edit_original_id);
+            }
 
             // We need to return the text_edit_response to preserve editing functionality,
             // but TextEdit marks it as changed() when text is typed. Unfortunately we can't
@@ -237,55 +225,39 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
         );
 
         if response.clicked() {
-            gui.ui_raw().data_mut(|data| {
-                data.insert_temp(edit_id, true);
-                data.insert_temp(edit_text_id, self.value.to_string());
-                data.insert_temp(edit_original_id, *self.value);
-            });
+            gui.store_temp(edit_id, true);
+            gui.store_temp(edit_text_id, self.value.to_string());
+            gui.store_temp(edit_original_id, *self.value);
             gui.ui_raw()
                 .memory_mut(|memory| memory.request_focus(edit_id));
         }
 
         if response.drag_started() {
-            gui.ui_raw().data_mut(|data| {
-                data.insert_temp(id, *self.value);
-                data.insert_temp(drag_temp_id, *self.value);
-            });
+            gui.store_temp(id, *self.value);
+            gui.store_temp(drag_temp_id, *self.value);
         }
 
         if response.dragged() {
-            let start_value = gui
-                .ui_raw()
-                .data_mut(|data| data.get_temp::<T>(id))
-                .unwrap_or(*self.value);
+            let start_value = gui.load_temp::<T>(id).unwrap_or(*self.value);
             let delta = response
                 .total_drag_delta()
                 .expect("dragged response should have total delta")
                 .x;
             let new_value = T::from_drag(start_value, delta, self.speed);
-            let current_temp = gui
-                .ui_raw()
-                .data_mut(|data| data.get_temp::<T>(drag_temp_id))
-                .unwrap_or(*self.value);
+            let current_temp = gui.load_temp::<T>(drag_temp_id).unwrap_or(*self.value);
             if new_value != current_temp {
-                gui.ui_raw()
-                    .data_mut(|data| data.insert_temp(drag_temp_id, new_value));
+                gui.store_temp(drag_temp_id, new_value);
             }
         }
 
         if response.drag_stopped() {
-            let final_value = gui
-                .ui_raw()
-                .data_mut(|data| data.get_temp::<T>(drag_temp_id))
-                .unwrap_or(*self.value);
+            let final_value = gui.load_temp::<T>(drag_temp_id).unwrap_or(*self.value);
             if final_value != *self.value {
                 *self.value = final_value;
                 response.mark_changed();
             }
-            gui.ui_raw().data_mut(|data| {
-                data.remove::<T>(id);
-                data.remove::<T>(drag_temp_id);
-            });
+            gui.remove_temp::<T>(id);
+            gui.remove_temp::<T>(drag_temp_id);
         }
 
         let text_anchor = self.anchor.pos_in_rect(&inner_rect);

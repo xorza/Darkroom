@@ -40,10 +40,7 @@ impl Expander {
 
     pub fn show(self, gui: &mut Gui<'_>, add_contents: impl FnOnce(&mut Gui<'_>)) {
         let id = gui.ui_raw().id().with(self.id);
-        let mut open = gui
-            .ui_raw()
-            .ctx()
-            .data_mut(|d| d.get_persisted::<bool>(id).unwrap_or(self.default_open));
+        let mut open = gui.load_persistent(id, self.default_open);
 
         let icon_size = gui.style.body_font.size;
         let icon_spacing = gui.style.padding;
@@ -71,9 +68,7 @@ impl Expander {
 
         if header_response.clicked() {
             open = !open;
-            gui.ui_raw()
-                .ctx()
-                .data_mut(|d| d.insert_persisted(id, open));
+            gui.store_persistent(id, open);
         }
 
         if gui.ui_raw().is_rect_visible(header_rect) {

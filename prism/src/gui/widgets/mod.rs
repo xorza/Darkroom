@@ -15,6 +15,7 @@ pub mod positioned_ui;
 pub mod scroll_area;
 pub mod separator;
 pub mod space;
+pub mod status_panel;
 pub mod text_edit;
 pub mod texture;
 
@@ -27,5 +28,6 @@ pub use layout::Layout;
 pub use popup_menu::{ListItem, PopupMenu};
 pub use separator::Separator;
 pub use space::Space;
+pub use status_panel::StatusPanel;
 pub use text_edit::TextEdit;
 pub use texture::Texture;
