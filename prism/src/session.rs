@@ -17,7 +17,7 @@ use scenarium::worker::{ArgumentValuesCallback, Worker, WorkerMessage};
 use crate::gui::frame_output::{FrameOutput, RunCommand};
 use crate::gui::graph_ctx::GraphContext;
 use crate::model::{ActionStack, ArgumentValuesCache, ViewGraph, graph_ui_action::GraphUiAction};
-use crate::script::{ScriptExecutor, ScriptTransport, tcp::TcpTransport};
+use crate::script::{ScriptAction, ScriptExecutor, ScriptTransport, tcp::TcpTransport};
 use crate::ui_context::UiContext;
 
 const UNDO_MAX_STEPS: usize = 256;
@@ -83,6 +83,8 @@ pub struct Session {
     worker: Option<Worker>,
     worker_tx: UnboundedSender<WorkerEvent>,
     worker_rx: UnboundedReceiver<WorkerEvent>,
+    script_action_rx: UnboundedReceiver<ScriptAction>,
+
     ui_context: UiContext,
     _script_executor: Option<ScriptExecutor>,
 }
@@ -106,9 +108,13 @@ impl Session {
         func_lib.merge(WorkerEventsFuncLib::default());
         func_lib.merge(ImageFuncLib::default());
 
-        let script_executor = ScriptExecutor::new([Box::new(TcpTransport {
-            port: SCRIPT_TCP_PORT,
-        }) as Box<dyn ScriptTransport>]);
+        let (script_action_tx, script_action_rx) = unbounded_channel::<ScriptAction>();
+        let script_executor = ScriptExecutor::new(
+            [Box::new(TcpTransport {
+                port: SCRIPT_TCP_PORT,
+            }) as Box<dyn ScriptTransport>],
+            script_action_tx,
+        );
 
         let mut result = Self {
             func_lib,
@@ -123,6 +129,7 @@ impl Session {
             worker: Some(worker),
             worker_tx,
             worker_rx,
+            script_action_rx,
             ui_context,
             _script_executor: Some(script_executor),
         };
@@ -261,6 +268,12 @@ impl Session {
                 } => {
                     self.argument_values_cache.clear_pending(node_id);
                 }
+            }
+        }
+
+        while let Ok(action) = self.script_action_rx.try_recv() {
+            match action {
+                ScriptAction::Print(msg) => self.add_status(msg),
             }
         }
     }
@@ -423,6 +436,7 @@ mod tests {
     /// network listener, no config autoload.
     fn test_session() -> Session {
         let (worker_tx, worker_rx) = unbounded_channel::<WorkerEvent>();
+        let (_script_tx, script_action_rx) = unbounded_channel::<ScriptAction>();
         Session {
             func_lib: FuncLib::default(),
             view_graph: ViewGraph::default(),
@@ -436,6 +450,7 @@ mod tests {
             worker: None,
             worker_tx,
             worker_rx,
+            script_action_rx,
             ui_context: UiContext::new(&eframe::egui::Context::default()),
             _script_executor: None,
         }

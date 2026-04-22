@@ -1,21 +1,24 @@
-#![allow(dead_code)] // Prototype scaffolding — stubs aren't wired up yet.
+#![allow(dead_code)] // unused items on the transport API surface while the client CLI is still internal.
 
 //! Scripting boundary for prism.
 //!
 //! The executor is transport-agnostic: every transport produces
 //! [`ScriptRequest`] values into a shared bounded `tokio::mpsc` queue,
-//! and the executor, polled between frames, runs the source and
-//! replies on the request's [`tokio::sync::oneshot`] channel. Adding
-//! a new way to submit scripts (browser UI, named pipe, stdin) means
-//! implementing [`ScriptTransport`] — the executor, the Lua engine,
-//! and the undo/redo plumbing never change.
+//! and the executor runs each one inside a single `mlua::Lua` VM
+//! pinned to the executor task. Each request gets back a single
+//! [`ScriptResult`] on its [`tokio::sync::oneshot`] reply channel.
 //!
-//! Runtime: everything runs on the app-wide `#[tokio::main]` runtime,
-//! including the executor loop spawned by [`ScriptExecutor::new`].
-//! The loop `await`s the next request (zero CPU when idle), runs it,
-//! and yields back to the scheduler between requests so a stream of
-//! scripts can't starve other tokio tasks.
+//! Scripts talk back to [`crate::session::Session`] via a separate
+//! `ScriptAction` channel: functions registered into Lua (like
+//! `prism.print`) push actions; `Session` drains them each frame and
+//! applies them. This mirrors the Worker→Session shape and keeps the
+//! executor task off the main thread.
+//!
+//! Runtime: everything runs on the app-wide `#[tokio::main]` runtime.
+//! The executor loop `await`s the next request (zero CPU when idle),
+//! runs it, then yields back to the scheduler.
 
+use mlua::Lua;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::{JoinHandle, yield_now};
 use tokio_util::sync::CancellationToken;
@@ -42,6 +45,17 @@ pub struct ScriptRequest {
 pub struct ScriptResult {
     pub stdout: String,
     pub error: Option<String>,
+}
+
+/// Side-effect requests from Lua scripts into [`crate::session::Session`].
+/// Each registered Lua function pushes a variant here; Session drains
+/// the queue every frame and applies them. Kept separate from the
+/// request/reply channel so the executor can complete a script without
+/// round-tripping through Session for every side effect.
+#[derive(Debug)]
+pub enum ScriptAction {
+    /// `prism.print(msg)` — append `msg` as a status-log line.
+    Print(String),
 }
 
 /// Owns a transport's background task. Dropping it cancels the token
@@ -111,8 +125,9 @@ pub struct ScriptExecutor {
 impl ScriptExecutor {
     /// Create the executor, spawn every transport's listener task,
     /// and spawn the executor task itself. Must be called from a
-    /// tokio runtime context.
-    pub fn new<I>(transports: I) -> Self
+    /// tokio runtime context. `action_tx` is the Session-side
+    /// receiver for side-effect requests emitted by Lua functions.
+    pub fn new<I>(transports: I, action_tx: mpsc::UnboundedSender<ScriptAction>) -> Self
     where
         I: IntoIterator<Item = Box<dyn ScriptTransport>>,
     {
@@ -127,7 +142,7 @@ impl ScriptExecutor {
 
         let cancel = CancellationToken::new();
         let cancel_task = cancel.clone();
-        let task = tokio::spawn(async move { run_executor(rx, cancel_task).await });
+        let task = tokio::spawn(async move { run_executor(rx, cancel_task, action_tx).await });
 
         Self {
             cancel,
@@ -154,13 +169,25 @@ impl Drop for ScriptExecutor {
     }
 }
 
-async fn run_executor(mut rx: mpsc::Receiver<ScriptRequest>, cancel: CancellationToken) {
+async fn run_executor(
+    mut rx: mpsc::Receiver<ScriptRequest>,
+    cancel: CancellationToken,
+    action_tx: mpsc::UnboundedSender<ScriptAction>,
+) {
+    let lua = match build_lua(action_tx) {
+        Ok(lua) => lua,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to init Lua VM — script executor exiting");
+            return;
+        }
+    };
+
     loop {
         tokio::select! {
             _ = cancel.cancelled() => break,
             r = rx.recv() => {
                 let Some(req) = r else { break };
-                let result = run_lua_stub(&req.source);
+                let result = run_lua(&lua, &req.source);
                 let _ = req.reply.send(result);
             }
         }
@@ -168,11 +195,37 @@ async fn run_executor(mut rx: mpsc::Receiver<ScriptRequest>, cancel: Cancellatio
     }
 }
 
-/// Placeholder for the real `mlua` call. Returns the source unchanged
-/// as stdout so transports can be tested end-to-end before Lua lands.
-fn run_lua_stub(source: &str) -> ScriptResult {
-    ScriptResult {
-        stdout: format!("echo: {source}"),
-        error: None,
+/// Build a `mlua::Lua` and register the `prism` API table. Uses
+/// `Lua::new()` (not Luau's sandbox — that needs a different feature
+/// flag) so the base stdlib is available; we expose only the
+/// functions we intend as the public surface via `prism.*`.
+fn build_lua(action_tx: mpsc::UnboundedSender<ScriptAction>) -> mlua::Result<Lua> {
+    let lua = Lua::new();
+    let prism = lua.create_table()?;
+
+    let tx = action_tx.clone();
+    let print_fn = lua.create_function(move |_, msg: String| {
+        let _ = tx.send(ScriptAction::Print(msg));
+        Ok(())
+    })?;
+    prism.set("print", print_fn)?;
+
+    lua.globals().set("prism", prism)?;
+    Ok(lua)
+}
+
+/// Run one chunk of source. `exec()` discards expression values; a
+/// future richer API can swap to `eval()` and pack the return values
+/// into [`ScriptResult::stdout`].
+fn run_lua(lua: &Lua, source: &str) -> ScriptResult {
+    match lua.load(source).set_name("=<script>").exec() {
+        Ok(()) => ScriptResult {
+            stdout: String::new(),
+            error: None,
+        },
+        Err(err) => ScriptResult {
+            stdout: String::new(),
+            error: Some(err.to_string()),
+        },
     }
 }

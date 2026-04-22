@@ -3046,6 +3046,7 @@ dependencies = [
  "hashbrown 0.17.0",
  "imaginarium",
  "lz4_flex",
+ "mlua",
  "palantir",
  "rfd",
  "scenarium",
