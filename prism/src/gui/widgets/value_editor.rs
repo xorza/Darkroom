@@ -4,11 +4,11 @@ use egui::{Align2, Pos2, Response, vec2};
 use scenarium::data::{DataType, EnumDef, StaticValue};
 
 use crate::common::StableId;
-use crate::common::combo_box::ComboBox;
-use crate::common::drag_value::DragValue;
-use crate::common::file_picker::FilePicker;
 use crate::gui::Gui;
 use crate::gui::style::DragValueStyle;
+use crate::gui::widgets::combo_box::ComboBox;
+use crate::gui::widgets::drag_value::DragValue;
+use crate::gui::widgets::file_picker::FilePicker;
 
 /// Editor for `StaticValue` types with consistent styling.
 ///

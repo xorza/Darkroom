@@ -1,7 +1,7 @@
 use egui::Id;
 
-use crate::common::scroll_area::ScrollArea;
 use crate::gui::Gui;
+use crate::gui::widgets::scroll_area::ScrollArea;
 
 /// A layout control that renders items vertically, adding columns as needed when
 /// content overflows the available height. Adds a scroll area if max columns are exceeded.

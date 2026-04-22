@@ -1,5 +1,4 @@
 use crate::common::StableId;
-use crate::common::button::Button;
 use crate::common::primitives::draw_circle_with_gradient_shadow;
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
@@ -10,6 +9,7 @@ use crate::gui::gesture::Gesture;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::gui::node_layout::{NodeGalleys, NodeLayout};
+use crate::gui::widgets::button::Button;
 use crate::model::execution_info::NodeExecutionInfo;
 use crate::model::graph_ui_action::GraphUiAction;
 use common::BoolExt;

@@ -3,9 +3,9 @@ use std::cmp::Ordering;
 use egui::{Align2, Color32, FontId, Pos2, Response, Sense, StrokeKind, Vec2, vec2};
 
 use crate::common::StableId;
-use crate::common::popup_menu::{ListItem, PopupMenu};
 use crate::gui::Gui;
 use crate::gui::style::DragValueStyle;
+use crate::gui::widgets::popup_menu::{ListItem, PopupMenu};
 
 #[derive(Debug)]
 pub struct ComboBox<'a> {

@@ -7,10 +7,10 @@ use egui::{
     UiBuilder, Vec2, vec2,
 };
 
-use crate::{
-    common::{StableId, TextEdit},
-    gui::{Gui, style::DragValueStyle},
-};
+use crate::common::StableId;
+use crate::gui::Gui;
+use crate::gui::style::DragValueStyle;
+use crate::gui::widgets::TextEdit;
 
 /// Trait for numeric types that can be used with DragValue.
 pub trait DragValueNumeric: Copy + PartialEq + Display + FromStr + Send + Sync + 'static {

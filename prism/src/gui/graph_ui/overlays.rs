@@ -8,15 +8,15 @@ use scenarium::data::StaticValue;
 use scenarium::graph::Binding;
 
 use crate::common::StableId;
-use crate::common::button::Button;
-use crate::common::frame::Frame;
-use crate::common::positioned_ui::PositionedUi;
 use crate::gui::Gui;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::frame_output::RunCommand;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_ui::{ButtonResult, GraphUi, ViewButtonAction};
 use crate::gui::new_node_ui::NewNodeSelection;
+use crate::gui::widgets::button::Button;
+use crate::gui::widgets::frame::Frame;
+use crate::gui::widgets::positioned_ui::PositionedUi;
 use crate::input::InputSnapshot;
 use crate::model;
 use crate::model::graph_ui_action::GraphUiAction;

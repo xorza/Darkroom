@@ -5,14 +5,14 @@ use scenarium::graph::NodeId;
 use scenarium::prelude::{ExecutionStats, Func};
 
 use crate::common::StableId;
-use crate::common::TextEdit;
-use crate::common::frame::Frame;
 use crate::common::image_utils::to_color_image;
-use crate::common::positioned_ui::PositionedUi;
-use crate::common::scroll_area::ScrollArea;
 use crate::gui::Gui;
 use crate::gui::frame_output::FrameOutput;
 use crate::gui::graph_ctx::GraphContext;
+use crate::gui::widgets::TextEdit;
+use crate::gui::widgets::frame::Frame;
+use crate::gui::widgets::positioned_ui::PositionedUi;
+use crate::gui::widgets::scroll_area::ScrollArea;
 use crate::model::argument_values_cache::{CachedTexture, NodeCache};
 use crate::model::execution_info::NodeExecutionInfo;
 use crate::model::graph_ui_action::GraphUiAction;

@@ -3,11 +3,11 @@ use std::sync::Arc;
 use egui::{Align, FontId, Galley, Id, Key, Order, Pos2, Response, Sense, Vec2, vec2};
 
 use crate::common::StableId;
-use crate::common::area::Area;
-use crate::common::button::Button;
-use crate::common::frame::Frame;
 use crate::gui::Gui;
 use crate::gui::style::{ButtonStyle, PopupStyle};
+use crate::gui::widgets::area::Area;
+use crate::gui::widgets::button::Button;
+use crate::gui::widgets::frame::Frame;
 
 /// A custom popup menu that works with the Gui struct.
 /// Opens on click of the anchor response and closes on click outside or item selection.

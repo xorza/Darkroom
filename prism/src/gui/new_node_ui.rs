@@ -8,12 +8,12 @@ use scenarium::function::Func;
 use scenarium::prelude::FuncLib;
 
 use crate::common::StableId;
-use crate::common::area::Area;
-use crate::common::column_flow::ColumnFlow;
-use crate::common::expander::Expander;
-use crate::common::frame::Frame;
-use crate::common::popup_menu::ListItem;
 use crate::gui::Gui;
+use crate::gui::widgets::area::Area;
+use crate::gui::widgets::column_flow::ColumnFlow;
+use crate::gui::widgets::expander::Expander;
+use crate::gui::widgets::frame::Frame;
+use crate::gui::widgets::popup_menu::ListItem;
 use crate::input::InputSnapshot;
 
 const POPUP_MIN_WIDTH: f32 = 150.0;

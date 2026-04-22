@@ -4,9 +4,9 @@ use egui::{Align2, Color32, Pos2, Response, Sense, Stroke, StrokeKind, pos2, vec
 use scenarium::data::{FsPathConfig, FsPathMode};
 
 use crate::common::StableId;
-use crate::common::button::Button;
 use crate::gui::Gui;
 use crate::gui::style::{ButtonStyle, DragValueStyle};
+use crate::gui::widgets::button::Button;
 
 #[derive(Debug)]
 pub struct FilePicker<'a> {

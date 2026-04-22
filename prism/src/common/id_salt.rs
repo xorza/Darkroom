@@ -103,15 +103,15 @@ mod tests {
             Path::new("common/id_salt.rs"),
             // Allocates inside an already-scoped child Ui — the
             // canonical pattern this whole test exists to enforce.
-            Path::new("common/button.rs"),
+            Path::new("gui/widgets/button.rs"),
             // Fork of egui's TextEdit; its allocations live inside
             // egui's own widget-id discipline, configured per-call
             // via `.id_salt(StableId)` on the public API.
-            Path::new("common/text_edit.rs"),
+            Path::new("gui/widgets/text_edit.rs"),
             // Expander uses a stable `Id::new(text)` and `interact`
             // with that id directly. The auto-id from allocate_space
             // is discarded; left as-is for now.
-            Path::new("common/expander.rs"),
+            Path::new("gui/widgets/expander.rs"),
         ];
         const PATTERNS: &[&str] = &[
             "UiBuilder::new(",
