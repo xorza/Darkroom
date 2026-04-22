@@ -24,6 +24,13 @@ pub struct NodeDrag {
     pub node_id: NodeId,
     pub start_pos: Pos2,
     pub offset: Vec2,
+    /// Set on the frame the user releases the mouse: the `NodeMoved`
+    /// action has been emitted, but we must keep the offset alive
+    /// through this frame's render so the node doesn't flash back to
+    /// `view_node.pos` (old) before `apply()` updates it at end of
+    /// frame. Cleared + gesture cancelled at the start of the next
+    /// frame's interaction pass.
+    pub released: bool,
 }
 
 impl NodeDrag {
@@ -88,6 +95,7 @@ impl Gesture {
             node_id,
             start_pos,
             offset: Vec2::ZERO,
+            released: false,
         });
     }
 

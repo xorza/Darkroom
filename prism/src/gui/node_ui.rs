@@ -161,6 +161,14 @@ impl NodeUi {
         output: &mut FrameOutput,
         gesture: &mut Gesture,
     ) {
+        // A drag released on the previous frame kept its offset alive
+        // through that frame's render (see `NodeDrag::released`). By
+        // now `NodeMoved::apply` has run, so the offset is stale —
+        // cancel before we read any drag state.
+        if gesture.node_drag().is_some_and(|d| d.released) {
+            gesture.cancel();
+        }
+
         for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
             let node_id = ctx.view_graph.view_nodes[view_node_idx].id;
             // Galleys for brand-new nodes don't exist yet on the first
@@ -204,11 +212,10 @@ impl NodeUi {
                         before: drag.start_pos,
                         after: drag.committed_pos(),
                     });
+                    // Keep offset alive for this frame's render; the
+                    // cancel happens at the top of next frame's call.
+                    drag.released = true;
                 }
-            }
-
-            if events.stopped {
-                gesture.cancel();
             }
         }
     }
