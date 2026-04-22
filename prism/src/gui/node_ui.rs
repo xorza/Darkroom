@@ -9,7 +9,7 @@ use crate::gui::frame_output::FrameOutput;
 use crate::gui::gesture::Gesture;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
-use crate::gui::node_layout::NodeLayout;
+use crate::gui::node_layout::{NodeGalleys, NodeLayout};
 use crate::model::graph_ui_action::GraphUiAction;
 use common::BoolExt;
 use egui::epaint::CornerRadiusF32;
@@ -167,8 +167,8 @@ impl NodeUi {
             gesture.cancel();
         }
 
-        for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
-            let node_id = ctx.view_graph.view_nodes[view_node_idx].id;
+        for view_node in ctx.view_graph.view_nodes.iter() {
+            let node_id = view_node.id;
             let drag_offset = gesture.node_drag_offset_for(&node_id);
             let layout = graph_layout.node_layout(gui, ctx, &node_id, drag_offset);
 
@@ -225,8 +225,8 @@ impl NodeUi {
         let mut const_bind_frame = self.const_bind_ui.start();
         let breaker = gesture.breaker();
 
-        for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
-            let node_id = ctx.view_graph.view_nodes[view_node_idx].id;
+        for view_node in ctx.view_graph.view_nodes.iter() {
+            let node_id = view_node.id;
             let drag_offset = gesture.node_drag_offset_for(&node_id);
             let layout = graph_layout.node_layout(gui, ctx, &node_id, drag_offset);
             let galleys = graph_layout.node_galleys(&node_id);
@@ -274,7 +274,7 @@ impl NodeUi {
 fn render_body(
     gui: &Gui<'_>,
     layout: &NodeLayout,
-    galleys: &crate::gui::node_layout::NodeGalleys,
+    galleys: &NodeGalleys,
     selected: bool,
     exec_info: &NodeExecutionInfo<'_>,
     breaker: Option<&ConnectionBreaker>,
@@ -544,11 +544,7 @@ enum LabelSide {
     LeftOfPort,
 }
 
-fn render_port_labels(
-    gui: &Gui<'_>,
-    layout: &NodeLayout,
-    galleys: &crate::gui::node_layout::NodeGalleys,
-) {
+fn render_port_labels(gui: &Gui<'_>, layout: &NodeLayout, galleys: &NodeGalleys) {
     let padding = gui.style.node.port_label_side_padding;
     let color = gui.style.text_color;
 
