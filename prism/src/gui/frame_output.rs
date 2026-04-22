@@ -1,6 +1,6 @@
 use scenarium::graph::NodeId;
 
-use crate::{gui::graph_ui::Error, model::graph_ui_action::GraphUiAction};
+use crate::{gui::graph_ui::ConnectionError, model::graph_ui_action::GraphUiAction};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunCommand {
@@ -24,7 +24,7 @@ pub enum RunCommand {
 #[derive(Debug, Default)]
 pub(crate) struct FrameOutput {
     actions: Vec<GraphUiAction>,
-    errors: Vec<Error>,
+    errors: Vec<ConnectionError>,
     run_cmd: Option<RunCommand>,
     request_argument_values: Option<NodeId>,
 }
@@ -50,11 +50,11 @@ impl FrameOutput {
         self.actions.push(action);
     }
 
-    pub fn add_error(&mut self, error: Error) {
+    pub fn add_error(&mut self, error: ConnectionError) {
         self.errors.push(error);
     }
 
-    pub fn pop_error(&mut self) -> Option<Error> {
+    pub fn pop_error(&mut self) -> Option<ConnectionError> {
         self.errors.pop()
     }
 

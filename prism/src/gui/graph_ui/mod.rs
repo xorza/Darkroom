@@ -31,40 +31,27 @@ mod connections;
 mod overlays;
 mod pan_zoom;
 
+pub(crate) use connections::ConnectionError;
 use pan_zoom::{fit_all_nodes_target, view_selected_node_target};
 
 pub(crate) const MIN_ZOOM: f32 = 0.2;
 pub(crate) const MAX_ZOOM: f32 = 4.0;
 pub(crate) const WHEEL_ZOOM_SPEED: f32 = 0.08;
 
+/// View-control button clicks are mutually exclusive (the user can
+/// only click one button per frame). Encoded as an `Option<enum>`
+/// instead of three booleans so the compiler enforces that.
+#[derive(Debug)]
+pub(super) enum ViewButtonAction {
+    FitAll,
+    ViewSelected,
+    ResetView,
+}
+
 #[derive(Debug)]
 pub(super) struct ButtonResult {
     pub(super) response: Response,
-    pub(super) fit_all: bool,
-    pub(super) view_selected: bool,
-    pub(super) reset_view: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Error {
-    CycleDetected {
-        input_node_id: NodeId,
-        output_node_id: NodeId,
-    },
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::CycleDetected {
-                input_node_id,
-                output_node_id,
-            } => write!(
-                f,
-                "connection would create a cycle between {input_node_id} and {output_node_id}"
-            ),
-        }
-    }
+    pub(super) action: Option<ViewButtonAction>,
 }
 
 #[derive(Debug, Default)]
@@ -224,17 +211,21 @@ impl GraphUi {
     ) -> bool {
         let buttons = self.render_buttons(gui, ctx.autorun);
 
-        if buttons.reset_view {
-            self.emit_zoom_pan(ctx.view_graph, Vec2::ZERO, 1.0);
-        }
-        if buttons.view_selected
-            && let Some((scale, pan)) = view_selected_node_target(gui, ctx, &self.graph_layout)
-        {
-            self.emit_zoom_pan(ctx.view_graph, pan, scale);
-        }
-        if buttons.fit_all {
-            let (scale, pan) = fit_all_nodes_target(gui, ctx, &self.graph_layout);
-            self.emit_zoom_pan(ctx.view_graph, pan, scale);
+        match buttons.action {
+            Some(ViewButtonAction::ResetView) => {
+                self.emit_zoom_pan(ctx.view_graph, Vec2::ZERO, 1.0);
+            }
+            Some(ViewButtonAction::ViewSelected) => {
+                if let Some((scale, pan)) = view_selected_node_target(gui, ctx, &self.graph_layout)
+                {
+                    self.emit_zoom_pan(ctx.view_graph, pan, scale);
+                }
+            }
+            Some(ViewButtonAction::FitAll) => {
+                let (scale, pan) = fit_all_nodes_target(gui, ctx, &self.graph_layout);
+                self.emit_zoom_pan(ctx.view_graph, pan, scale);
+            }
+            None => {}
         }
 
         let mut hovered = buttons.response.hovered();
@@ -366,7 +357,7 @@ mod tests {
             port(a_id, PortKind::Output, 0),
         )
         .unwrap_err();
-        assert!(matches!(err, Error::CycleDetected { .. }));
+        assert!(matches!(err, ConnectionError::CycleDetected { .. }));
     }
 
     #[test]
@@ -390,7 +381,7 @@ mod tests {
             port(a_id, PortKind::Output, 0),
         )
         .unwrap_err();
-        assert!(matches!(err, Error::CycleDetected { .. }));
+        assert!(matches!(err, ConnectionError::CycleDetected { .. }));
     }
 
     #[test]
@@ -471,7 +462,7 @@ mod tests {
             port(a_id, PortKind::Event, 0),
         )
         .unwrap_err();
-        assert!(matches!(err, Error::CycleDetected { .. }));
+        assert!(matches!(err, ConnectionError::CycleDetected { .. }));
     }
 
     #[test]

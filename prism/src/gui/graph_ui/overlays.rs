@@ -15,7 +15,7 @@ use crate::gui::Gui;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::frame_output::RunCommand;
 use crate::gui::graph_ctx::GraphContext;
-use crate::gui::graph_ui::{ButtonResult, GraphUi};
+use crate::gui::graph_ui::{ButtonResult, GraphUi, ViewButtonAction};
 use crate::gui::new_node_ui::NewNodeSelection;
 use crate::input::InputSnapshot;
 use crate::model;
@@ -25,9 +25,7 @@ impl GraphUi {
     pub(super) fn render_buttons(&mut self, gui: &mut Gui<'_>, autorun: bool) -> ButtonResult {
         let mut autorun = autorun;
         let rect = gui.rect;
-        let mut fit_all = false;
-        let mut view_selected = false;
-        let mut reset_view = false;
+        let mut action: Option<ViewButtonAction> = None;
 
         // Top buttons (view controls)
         let mut response =
@@ -51,21 +49,27 @@ impl GraphUi {
                                     .font(mono_font.clone())
                                     .size(btn_size)
                                     .show(gui, StableId::new("fit_all_btn"));
-                                fit_all = response.clicked();
+                                if response.clicked() {
+                                    action = Some(ViewButtonAction::FitAll);
+                                }
 
                                 let response = Button::default()
                                     .text("s")
                                     .font(mono_font.clone())
                                     .size(btn_size)
                                     .show(gui, StableId::new("view_selected_btn"));
-                                view_selected = response.clicked();
+                                if response.clicked() {
+                                    action = Some(ViewButtonAction::ViewSelected);
+                                }
 
                                 let response = Button::default()
                                     .text("r")
                                     .font(mono_font)
                                     .size(btn_size)
                                     .show(gui, StableId::new("reset_view_btn"));
-                                reset_view = response.clicked();
+                                if response.clicked() {
+                                    action = Some(ViewButtonAction::ResetView);
+                                }
                             });
                         })
                         .response
@@ -112,12 +116,7 @@ impl GraphUi {
         })
         .inner;
 
-        ButtonResult {
-            response,
-            fit_all,
-            view_selected,
-            reset_view,
-        }
+        ButtonResult { response, action }
     }
 
     // ------------------------------------------------------------------------

@@ -17,7 +17,7 @@ use crate::gui::connection_ui::{
 use crate::gui::gesture::Gesture;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::PortRef;
-use crate::gui::graph_ui::{Error, GraphUi};
+use crate::gui::graph_ui::GraphUi;
 use crate::gui::node_ui::PortInteractCommand;
 use crate::input::InputSnapshot;
 use crate::model::EventSubscriberChange;
@@ -207,6 +207,32 @@ impl GraphUi {
 }
 
 // ============================================================================
+// Connection errors
+// ============================================================================
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConnectionError {
+    CycleDetected {
+        input_node_id: NodeId,
+        output_node_id: NodeId,
+    },
+}
+
+impl std::fmt::Display for ConnectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConnectionError::CycleDetected {
+                input_node_id,
+                output_node_id,
+            } => write!(
+                f,
+                "connection would create a cycle between {input_node_id} and {output_node_id}"
+            ),
+        }
+    }
+}
+
+// ============================================================================
 // Pure helpers (unit-testable — no egui runtime).
 // ============================================================================
 
@@ -238,9 +264,9 @@ pub(super) fn build_data_connection_action(
     view_graph: &crate::model::ViewGraph,
     input_port: PortRef,
     output_port: PortRef,
-) -> Result<GraphUiAction, Error> {
+) -> Result<GraphUiAction, ConnectionError> {
     if input_port.node_id == output_port.node_id {
-        return Err(Error::CycleDetected {
+        return Err(ConnectionError::CycleDetected {
             input_node_id: input_port.node_id,
             output_node_id: output_port.node_id,
         });
@@ -248,7 +274,7 @@ pub(super) fn build_data_connection_action(
 
     let dependents = view_graph.graph.dependent_nodes(&input_port.node_id);
     if dependents.contains(&output_port.node_id) {
-        return Err(Error::CycleDetected {
+        return Err(ConnectionError::CycleDetected {
             input_node_id: input_port.node_id,
             output_node_id: output_port.node_id,
         });
@@ -275,12 +301,12 @@ pub(super) fn build_event_connection_action(
     view_graph: &crate::model::ViewGraph,
     input_port: PortRef,
     output_port: PortRef,
-) -> Result<Option<GraphUiAction>, Error> {
+) -> Result<Option<GraphUiAction>, ConnectionError> {
     assert_eq!(input_port.kind, PortKind::Trigger);
     assert_eq!(output_port.kind, PortKind::Event);
 
     if input_port.node_id == output_port.node_id {
-        return Err(Error::CycleDetected {
+        return Err(ConnectionError::CycleDetected {
             input_node_id: input_port.node_id,
             output_node_id: output_port.node_id,
         });
