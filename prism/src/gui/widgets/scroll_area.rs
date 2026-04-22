@@ -1,10 +1,10 @@
-use egui::Id;
-
+use crate::common::StableId;
 use crate::gui::Gui;
 
 #[derive(Debug)]
+#[must_use = "ScrollArea does nothing until .show() is called"]
 pub struct ScrollArea {
-    id: Option<Id>,
+    id: StableId,
     min_height: Option<f32>,
     max_height: Option<f32>,
     max_width: Option<f32>,
@@ -12,10 +12,10 @@ pub struct ScrollArea {
     vertical: bool,
 }
 
-impl Default for ScrollArea {
-    fn default() -> Self {
+impl ScrollArea {
+    pub fn vertical(id: StableId) -> Self {
         Self {
-            id: None,
+            id,
             min_height: None,
             max_height: None,
             max_width: None,
@@ -23,32 +23,27 @@ impl Default for ScrollArea {
             vertical: true,
         }
     }
-}
 
-impl ScrollArea {
-    pub fn vertical() -> Self {
-        Self::default()
-    }
-
-    pub fn horizontal() -> Self {
+    pub fn horizontal(id: StableId) -> Self {
         Self {
+            id,
+            min_height: None,
+            max_height: None,
+            max_width: None,
             horizontal: true,
             vertical: false,
-            ..Default::default()
         }
     }
 
-    pub fn both() -> Self {
+    pub fn both(id: StableId) -> Self {
         Self {
+            id,
+            min_height: None,
+            max_height: None,
+            max_width: None,
             horizontal: true,
             vertical: true,
-            ..Default::default()
         }
-    }
-
-    pub fn id(mut self, id: Id) -> Self {
-        self.id = Some(id);
-        self
     }
 
     pub fn min_height(mut self, min_height: f32) -> Self {
@@ -70,11 +65,8 @@ impl ScrollArea {
         let style = gui.style.clone();
         let scale = gui.scale();
 
-        let mut scroll_area = egui::ScrollArea::new([self.horizontal, self.vertical]);
-
-        if let Some(id) = self.id {
-            scroll_area = scroll_area.id_salt(id);
-        }
+        let mut scroll_area =
+            egui::ScrollArea::new([self.horizontal, self.vertical]).id_salt(self.id);
 
         if let Some(min_height) = self.min_height {
             scroll_area = scroll_area.min_scrolled_height(min_height);

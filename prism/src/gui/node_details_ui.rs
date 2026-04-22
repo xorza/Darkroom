@@ -45,11 +45,11 @@ impl NodeDetailsUi {
             .rect(panel_rect)
             .max_size(panel_rect.size())
             .show(gui, |gui| {
-                Frame::popup(&gui.style.popup)
+                Frame::popup(StableId::new("node_details_frame"), &gui.style.popup)
                     .inner_margin(gui.style.padding)
                     .sense(Sense::all())
-                    .show(gui, StableId::new("node_details_frame"), |gui| {
-                        ScrollArea::vertical().id(scroll_id.id()).show(gui, |gui| {
+                    .show(gui, |gui| {
+                        ScrollArea::vertical(scroll_id).show(gui, |gui| {
                             show_content(gui, ctx, node_id, output);
                         });
                     })

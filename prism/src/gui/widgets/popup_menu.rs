@@ -79,16 +79,16 @@ impl PopupMenu {
             .fixed_pos(anchor_rect.left_bottom())
             .order(Order::Foreground)
             .show(gui, |gui| {
-                Frame::popup(&popup_style).show(
-                    gui,
+                Frame::popup(
                     StableId::from_id(popup_id.with("popup_menu_frame")),
-                    |gui| {
-                        if let Some(width) = min_width {
-                            gui.ui_raw().set_min_width(width);
-                        }
-                        content(gui)
-                    },
+                    &popup_style,
                 )
+                .show(gui, |gui| {
+                    if let Some(width) = min_width {
+                        gui.ui_raw().set_min_width(width);
+                    }
+                    content(gui)
+                })
             });
 
         let inner = popup_response.inner.inner;
@@ -130,7 +130,9 @@ impl PopupMenu {
 
 /// A list item widget for use inside PopupMenu or other list contexts.
 /// Uses Button internally to ensure consistent styling with new_node_ui.
+#[must_use = "ListItem does nothing until .show() is called"]
 pub struct ListItem<'a> {
+    id: StableId,
     text: Option<&'a str>,
     galley: Option<Arc<Galley>>,
     selected: bool,
@@ -143,8 +145,9 @@ pub struct ListItem<'a> {
 }
 
 impl<'a> ListItem<'a> {
-    pub fn from_str(text: &'a str) -> Self {
+    pub fn from_str(id: StableId, text: &'a str) -> Self {
         Self {
+            id,
             text: Some(text),
             galley: None,
             selected: false,
@@ -158,8 +161,9 @@ impl<'a> ListItem<'a> {
     }
 
     /// Create a ListItem with a pre-computed galley (for performance with ColumnFlow).
-    pub fn from_galley(galley: Arc<Galley>) -> Self {
+    pub fn from_galley(id: StableId, galley: Arc<Galley>) -> Self {
         Self {
+            id,
             text: None,
             galley: Some(galley),
             selected: false,
@@ -207,8 +211,9 @@ impl<'a> ListItem<'a> {
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>, id: StableId) -> Response {
+    pub fn show(self, gui: &mut Gui<'_>) -> Response {
         let style = self.style.unwrap_or(gui.style.list_button);
+        let id = self.id;
 
         // Calculate size like new_node_ui does
         let size = if let Some(size) = self.size {
@@ -239,7 +244,7 @@ impl<'a> ListItem<'a> {
 
         let mut selected = self.selected;
 
-        let mut btn = Button::default()
+        let mut btn = Button::new(id)
             .background(style)
             .enabled(self.enabled)
             .text_align(self.text_align)
@@ -261,6 +266,6 @@ impl<'a> ListItem<'a> {
             btn = btn.tooltip(tooltip);
         }
 
-        btn.show(gui, id)
+        btn.show(gui)
     }
 }

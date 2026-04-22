@@ -9,21 +9,25 @@ use crate::gui::{
 };
 
 #[derive(Debug, Clone)]
+#[must_use = "Frame does nothing until .show() is called"]
 pub struct Frame {
+    id: StableId,
     inner: egui::Frame,
     sense: Option<Sense>,
 }
 
 impl Frame {
-    pub fn none() -> Self {
+    pub fn none(id: StableId) -> Self {
         Self {
+            id,
             inner: egui::Frame::NONE,
             sense: None,
         }
     }
 
-    pub fn popup(style: &PopupStyle) -> Self {
+    pub fn popup(id: StableId, style: &PopupStyle) -> Self {
         Self {
+            id,
             inner: egui::Frame::NONE
                 .fill(style.fill)
                 .stroke(style.stroke)
@@ -66,7 +70,6 @@ impl Frame {
     pub fn show<R>(
         self,
         gui: &mut Gui<'_>,
-        id: StableId,
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<R> {
         let sense = self.sense.unwrap_or(Sense::empty());
@@ -79,7 +82,7 @@ impl Frame {
         // the parent's widget counter — drifting whenever sibling
         // widgets toggled. `Gui::scope` sets `global_scope=true`
         // internally, pinning the outer scope's id verbatim.
-        gui.scope(id).sense(sense).show(|gui| {
+        gui.scope(self.id).sense(sense).show(|gui| {
             let style = gui.style.clone();
             let result = inner_frame.show(gui.ui_raw(), |ui| {
                 let mut gui = Gui::new(ui, &style);

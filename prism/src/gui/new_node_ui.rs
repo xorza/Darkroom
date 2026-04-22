@@ -124,10 +124,9 @@ fn show_popup<'a>(
         .fixed_pos(position)
         .order(Order::Foreground)
         .show(gui, |gui| {
-            Frame::popup(&gui.style.popup).sense(Sense::all()).show(
-                gui,
-                StableId::new("new_node_popup_frame"),
-                |gui| {
+            Frame::popup(StableId::new("new_node_popup_frame"), &gui.style.popup)
+                .sense(Sense::all())
+                .show(gui, |gui| {
                     Layout::new()
                         .min_width(POPUP_MIN_WIDTH)
                         .min_height(POPUP_MIN_HEIGHT)
@@ -140,8 +139,7 @@ fn show_popup<'a>(
                         }
                         show_function_categories(gui, position, func_lib, arena, selection);
                     });
-                },
-            );
+                });
         })
 }
 
@@ -173,9 +171,9 @@ fn show_const_bind_option<'a>(gui: &mut Gui<'_>, selection: &mut Option<NewNodeS
 
         Layout::new().min_width(button_width).apply(gui);
 
-        if ListItem::from_str("Const")
+        if ListItem::from_str(StableId::new("const_bind_option"), "Const")
             .size(vec2(button_width, button_height))
-            .show(gui, StableId::new("const_bind_option"))
+            .show(gui)
             .clicked()
         {
             *selection = Some(NewNodeSelection::ConstBind);
@@ -194,9 +192,11 @@ fn show_function_categories<'a>(
 
     for category in categories {
         gui.vertical(|gui| {
-            Expander::new(category).default_open(true).show(gui, |gui| {
-                show_category_functions(gui, position, func_lib, category, arena, selection);
-            });
+            Expander::new(StableId::new(("func_category", category)), category)
+                .default_open(true)
+                .show(gui, |gui| {
+                    show_category_functions(gui, position, func_lib, category, arena, selection);
+                });
         });
     }
 }
@@ -238,29 +238,27 @@ fn show_category_functions<'a>(
     let button_width = max_width + gui.style.padding * 2.0;
     let button_height = gui.font_height(&btn_font) + gui.style.small_padding * 2.0;
 
-    ColumnFlow::new(button_width, button_height)
-        .id(StableId::new((
-            "new_node_ui_funcs_category_scroll",
-            category,
-        )))
-        .max_columns(MAX_COLUMNS)
-        .show(
-            gui,
-            galleys.iter().zip(funcs.iter()),
-            |gui, (galley, func)| {
-                let mut item = ListItem::from_galley(Arc::clone(galley))
+    ColumnFlow::new(
+        StableId::new(("new_node_ui_funcs_category_scroll", category)),
+        button_width,
+        button_height,
+    )
+    .max_columns(MAX_COLUMNS)
+    .show(
+        gui,
+        galleys.iter().zip(funcs.iter()),
+        |gui, (galley, func)| {
+            let mut item =
+                ListItem::from_galley(StableId::new(("func_btn", func.id)), Arc::clone(galley))
                     .size(vec2(button_width, button_height));
 
-                if let Some(tooltip) = func.description.as_ref() {
-                    item = item.tooltip(tooltip);
-                }
+            if let Some(tooltip) = func.description.as_ref() {
+                item = item.tooltip(tooltip);
+            }
 
-                if item
-                    .show(gui, StableId::new(("func_btn", func.id)))
-                    .clicked()
-                {
-                    *selection = Some(NewNodeSelection::Func { func, position });
-                }
-            },
-        );
+            if item.show(gui).clicked() {
+                *selection = Some(NewNodeSelection::Func { func, position });
+            }
+        },
+    );
 }

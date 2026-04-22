@@ -71,7 +71,7 @@ impl<'a> StaticValueEditor<'a> {
             .unwrap_or_else(|| gui.style.node.const_bind_style.clone());
 
         match self.value {
-            StaticValue::Int(int_value) => DragValue::new(int_value)
+            StaticValue::Int(int_value) => DragValue::new(id, int_value)
                 .font(mono_font)
                 .color(text_color)
                 .speed(1.0)
@@ -79,9 +79,9 @@ impl<'a> StaticValueEditor<'a> {
                 .pos(self.pos)
                 .anchor(self.anchor)
                 .style(style)
-                .show(gui, id),
+                .show(gui),
 
-            StaticValue::Float(float_value) => DragValue::new(float_value)
+            StaticValue::Float(float_value) => DragValue::new(id, float_value)
                 .font(mono_font)
                 .color(text_color)
                 .speed(0.01)
@@ -89,7 +89,7 @@ impl<'a> StaticValueEditor<'a> {
                 .pos(self.pos)
                 .anchor(self.anchor)
                 .style(style)
-                .show(gui, id),
+                .show(gui),
 
             StaticValue::Enum {
                 type_id,
@@ -107,11 +107,11 @@ impl<'a> StaticValueEditor<'a> {
                 let DataType::FsPath(config) = self.data_type else {
                     panic!("Expected FsPath data type for StaticValue::FsPath");
                 };
-                FilePicker::new(path, &config.extensions, picker_mode(config.mode))
+                FilePicker::new(id, path, &config.extensions, picker_mode(config.mode))
                     .pos(self.pos)
                     .anchor(self.anchor)
                     .style(style)
-                    .show(gui, id)
+                    .show(gui)
             }
 
             _ => {
@@ -131,12 +131,12 @@ fn render_enum_dropdown(
     pos: Pos2,
     style: &DragValueStyle,
 ) -> Response {
-    ComboBox::new(variant_name, &enum_def.variants)
+    ComboBox::new(id, variant_name, &enum_def.variants)
         .font(gui.style.sub_font.clone())
         .color(gui.style.text_color)
         .padding(vec2(gui.style.small_padding, 0.0))
         .pos(pos)
         .anchor(Align2::RIGHT_CENTER)
         .style(style.clone())
-        .show(gui, id)
+        .show(gui)
 }

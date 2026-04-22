@@ -1,5 +1,3 @@
-use egui::Id;
-
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::widgets::scroll_area::ScrollArea;
@@ -7,26 +5,22 @@ use crate::gui::widgets::scroll_area::ScrollArea;
 /// A layout control that renders items vertically, adding columns as needed when
 /// content overflows the available height. Adds a scroll area if max columns are exceeded.
 #[derive(Debug)]
+#[must_use = "ColumnFlow does nothing until .show() is called"]
 pub struct ColumnFlow {
-    id: Option<Id>,
+    id: StableId,
     max_columns: usize,
     item_height: f32,
     item_width: f32,
 }
 
 impl ColumnFlow {
-    pub fn new(item_width: f32, item_height: f32) -> Self {
+    pub fn new(id: StableId, item_width: f32, item_height: f32) -> Self {
         Self {
-            id: None,
+            id,
             max_columns: 2,
             item_height,
             item_width,
         }
-    }
-
-    pub fn id(mut self, id: StableId) -> Self {
-        self.id = Some(id.id());
-        self
     }
 
     pub fn max_columns(mut self, max_columns: usize) -> Self {
@@ -73,11 +67,7 @@ impl ColumnFlow {
         let needs_scroll = item_count > max_items_per_column * self.max_columns;
 
         if needs_scroll {
-            let mut scroll_area = ScrollArea::vertical();
-            if let Some(id) = self.id {
-                scroll_area = scroll_area.id(id);
-            }
-            scroll_area.show(gui, |gui| {
+            ScrollArea::vertical(self.id).show(gui, |gui| {
                 Self::render_columns(gui, &items_vec, rows_per_column, &mut add_item);
             });
         } else {

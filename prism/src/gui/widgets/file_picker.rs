@@ -16,7 +16,9 @@ pub enum FilePickerMode {
 }
 
 #[derive(Debug)]
+#[must_use = "FilePicker does nothing until .show() is called"]
 pub struct FilePicker<'a> {
+    id: StableId,
     path: &'a mut String,
     extensions: &'a [String],
     mode: FilePickerMode,
@@ -26,8 +28,14 @@ pub struct FilePicker<'a> {
 }
 
 impl<'a> FilePicker<'a> {
-    pub fn new(path: &'a mut String, extensions: &'a [String], mode: FilePickerMode) -> Self {
+    pub fn new(
+        id: StableId,
+        path: &'a mut String,
+        extensions: &'a [String],
+        mode: FilePickerMode,
+    ) -> Self {
         Self {
+            id,
             path,
             extensions,
             mode,
@@ -52,7 +60,8 @@ impl<'a> FilePicker<'a> {
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>, id: StableId) -> Response {
+    pub fn show(self, gui: &mut Gui<'_>) -> Response {
+        let id = self.id;
         let display_name = Path::new(self.path.as_str())
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
@@ -117,11 +126,11 @@ impl<'a> FilePicker<'a> {
         gui.painter()
             .galley(filename_pos, filename_galley, text_color);
 
-        let browse_response = Button::default()
+        let browse_response = Button::new(StableId::from_id(id.id().with("browse")))
             .text(browse_text)
             .font(font)
             .rect(browse_rect)
-            .show(gui, StableId::from_id(id.id().with("browse")));
+            .show(gui);
 
         if browse_response.clicked() {
             let mut dialog = rfd::FileDialog::new();

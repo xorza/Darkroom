@@ -37,37 +37,37 @@ impl GraphUi {
                     Layout::new().fill_width().apply(gui);
                     let padding = gui.style.padding;
 
-                    Frame::none()
+                    Frame::none(StableId::new("top_buttons_frame"))
                         .sense(Sense::all())
                         .inner_margin(padding)
-                        .show(gui, StableId::new("top_buttons_frame"), |gui| {
+                        .show(gui, |gui| {
                             gui.horizontal(|gui| {
                                 let btn_size = vec2(20.0, 20.0);
                                 let mono_font = gui.style.mono_font.clone();
 
-                                let response = Button::default()
+                                let response = Button::new(StableId::new("fit_all_btn"))
                                     .text("a")
                                     .font(mono_font.clone())
                                     .size(btn_size)
-                                    .show(gui, StableId::new("fit_all_btn"));
+                                    .show(gui);
                                 if response.clicked() {
                                     action = Some(ViewButtonAction::FitAll);
                                 }
 
-                                let response = Button::default()
+                                let response = Button::new(StableId::new("view_selected_btn"))
                                     .text("s")
                                     .font(mono_font.clone())
                                     .size(btn_size)
-                                    .show(gui, StableId::new("view_selected_btn"));
+                                    .show(gui);
                                 if response.clicked() {
                                     action = Some(ViewButtonAction::ViewSelected);
                                 }
 
-                                let response = Button::default()
+                                let response = Button::new(StableId::new("reset_view_btn"))
                                     .text("r")
                                     .font(mono_font)
                                     .size(btn_size)
-                                    .show(gui, StableId::new("reset_view_btn"));
+                                    .show(gui);
                                 if response.clicked() {
                                     action = Some(ViewButtonAction::ResetView);
                                 }
@@ -87,22 +87,20 @@ impl GraphUi {
         .show(gui, |gui| {
             let padding = gui.style.padding;
 
-            Frame::none()
+            Frame::none(StableId::new("bottom_buttons_frame"))
                 .sense(Sense::all())
                 .inner_margin(padding)
-                .show(gui, StableId::new("bottom_buttons_frame"), |gui| {
+                .show(gui, |gui| {
                     gui.horizontal(|gui| {
-                        let response = Button::default()
-                            .text("run")
-                            .show(gui, StableId::new("run_btn"));
+                        let response = Button::new(StableId::new("run_btn")).text("run").show(gui);
                         if response.clicked() {
                             self.output.set_run_cmd(RunCommand::RunOnce);
                         }
 
-                        let response = Button::default()
+                        let response = Button::new(StableId::new("autorun_btn"))
                             .toggle(&mut autorun)
                             .text("autorun")
-                            .show(gui, StableId::new("autorun_btn"));
+                            .show(gui);
 
                         if response.clicked() {
                             self.output.set_run_cmd(if autorun {

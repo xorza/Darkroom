@@ -1,31 +1,27 @@
 use std::f32::consts::TAU;
 
-use egui::{Color32, Id, Pos2, Rect, Sense, Shape, Stroke, Vec2, vec2};
+use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, Vec2, vec2};
 
+use crate::common::StableId;
 use crate::gui::Gui;
 
 #[derive(Debug)]
+#[must_use = "Expander does nothing until .show() is called"]
 pub struct Expander {
-    id: Id,
+    id: StableId,
     text: String,
     default_open: bool,
     min_width: Option<f32>,
 }
 
 impl Expander {
-    pub fn new(text: impl Into<String>) -> Self {
-        let text = text.into();
+    pub fn new(id: StableId, text: impl Into<String>) -> Self {
         Self {
-            id: Id::new(&text),
-            text,
+            id,
+            text: text.into(),
             default_open: false,
             min_width: None,
         }
-    }
-
-    pub fn id(mut self, id: Id) -> Self {
-        self.id = id;
-        self
     }
 
     pub fn default_open(mut self, default_open: bool) -> Self {
@@ -39,7 +35,7 @@ impl Expander {
     }
 
     pub fn show(self, gui: &mut Gui<'_>, add_contents: impl FnOnce(&mut Gui<'_>)) {
-        let id = gui.ui_raw().id().with(self.id);
+        let id = self.id.id();
         let mut open = gui.load_persistent(id, self.default_open);
 
         let icon_size = gui.style.body_font.size;

@@ -46,7 +46,7 @@ impl<'a> StatusPanel<'a> {
         let toggle_id = self.id.id().with("open");
         let mut open = gui.load_persistent(toggle_id, self.default_open);
 
-        let frame = Frame::none()
+        let frame = Frame::none(self.id)
             .fill(style.graph_background.bg_color)
             .stroke(style.inactive_bg_stroke)
             .corner_radius(style.corner_radius)
@@ -58,7 +58,7 @@ impl<'a> StatusPanel<'a> {
             })
             .inner_margin(style.corner_radius);
 
-        frame.show(gui, self.id, |gui| {
+        frame.show(gui, |gui| {
             let icon_size = style.body_font.size;
             let text_color = style.text_color;
 

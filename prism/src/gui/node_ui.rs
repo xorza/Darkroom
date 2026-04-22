@@ -340,11 +340,11 @@ fn render_cache_btn(gui: &mut Gui<'_>, output: &mut FrameOutput, layout: &NodeLa
     }
 
     let mut checked = node.behavior == NodeBehavior::Once;
-    let response = Button::default()
+    let response = Button::new(StableId::new(("cache_btn", node.id)))
         .toggle(&mut checked)
         .text("cache")
         .rect(layout.cache_button_rect)
-        .show(gui, StableId::new(("cache_btn", node.id)));
+        .show(gui);
 
     if response.clicked() {
         let before = node.behavior;
@@ -374,11 +374,11 @@ fn render_remove_btn(gui: &mut Gui<'_>, layout: &NodeLayout, node_id: NodeId) ->
         Shape::line_segment([bl, tr], stroke),
     ];
 
-    Button::default()
+    Button::new(StableId::new(("remove_btn", node_id)))
         .tooltip("Remove node")
         .rect(rect)
         .shapes(shapes)
-        .show(gui, StableId::new(("remove_btn", node_id)))
+        .show(gui)
         .clicked()
 }
 

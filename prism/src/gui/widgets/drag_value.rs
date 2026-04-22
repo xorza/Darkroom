@@ -37,7 +37,9 @@ impl DragValueNumeric for f64 {
 }
 
 #[derive(Debug)]
+#[must_use = "DragValue does nothing until .show() is called"]
 pub struct DragValue<'a, T: DragValueNumeric> {
+    id: StableId,
     value: &'a mut T,
     speed: f32,
     font: Option<FontId>,
@@ -50,8 +52,9 @@ pub struct DragValue<'a, T: DragValueNumeric> {
 }
 
 impl<'a, T: DragValueNumeric> DragValue<'a, T> {
-    pub fn new(value: &'a mut T) -> Self {
+    pub fn new(id: StableId, value: &'a mut T) -> Self {
         Self {
+            id,
             value,
             speed: 1.0,
             font: None,
@@ -103,7 +106,7 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>, id: StableId) -> Response {
+    pub fn show(self, gui: &mut Gui<'_>) -> Response {
         assert!(self.speed.is_finite());
 
         let font = self.font.unwrap_or_else(|| gui.style.mono_font.clone());
@@ -118,7 +121,7 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
             .unwrap_or(gui.style.node.const_bind_style.clone());
         assert!(background.radius.is_finite());
 
-        let id = id.id();
+        let id = self.id.id();
 
         // Check if we're currently dragging to display temporary value
         let drag_temp_id = id.with("drag_temp");

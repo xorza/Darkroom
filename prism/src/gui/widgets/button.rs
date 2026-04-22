@@ -7,7 +7,9 @@ use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::style::ButtonStyle;
 
+#[must_use = "Button does nothing until .show() is called"]
 pub struct Button<'a> {
+    id: StableId,
     enabled: bool,
     font: Option<FontId>,
     tooltip: Option<&'a str>,
@@ -22,9 +24,13 @@ pub struct Button<'a> {
     shapes: Vec<Shape>,
 }
 
-impl<'a> Default for Button<'a> {
-    fn default() -> Self {
+impl<'a> Button<'a> {
+    /// Construct a button. `id` pins the button's widget identity; see
+    /// [`StableId`] for why this shields it from egui's counter-based
+    /// auto-id drift.
+    pub fn new(id: StableId) -> Self {
         Self {
+            id,
             enabled: true,
             text: None,
             font: None,
@@ -38,9 +44,7 @@ impl<'a> Default for Button<'a> {
             custom_galley: None,
         }
     }
-}
 
-impl<'a> Button<'a> {
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
         self
@@ -97,12 +101,8 @@ impl<'a> Button<'a> {
         self
     }
 
-    /// `id` gives the button a stable widget id. Construct via
-    /// [`StableId::new`] (call-site salted) or
-    /// [`StableId::new((tag, runtime_key))`] for per-instance widgets.
-    /// See [`StableId`] for why this shields the button from egui's
-    /// counter-based auto-id drift.
-    pub fn show(self, gui: &mut Gui<'_>, id: StableId) -> Response {
+    pub fn show(self, gui: &mut Gui<'_>) -> Response {
+        let id = self.id;
         let is_checked = self.toggle_value.as_deref().copied().unwrap_or(false);
 
         let text_color = if !self.enabled {

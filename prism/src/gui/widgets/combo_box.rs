@@ -8,7 +8,9 @@ use crate::gui::style::DragValueStyle;
 use crate::gui::widgets::popup_menu::{ListItem, PopupMenu};
 
 #[derive(Debug)]
+#[must_use = "ComboBox does nothing until .show() is called"]
 pub struct ComboBox<'a> {
+    id: StableId,
     selected: &'a mut String,
     options: &'a [String],
     font: Option<FontId>,
@@ -20,8 +22,9 @@ pub struct ComboBox<'a> {
 }
 
 impl<'a> ComboBox<'a> {
-    pub fn new(selected: &'a mut String, options: &'a [String]) -> Self {
+    pub fn new(id: StableId, selected: &'a mut String, options: &'a [String]) -> Self {
         Self {
+            id,
             selected,
             options,
             font: None,
@@ -67,8 +70,8 @@ impl<'a> ComboBox<'a> {
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>, id: StableId) -> Response {
-        let id = id.id();
+    pub fn show(self, gui: &mut Gui<'_>) -> Response {
+        let id = self.id.id();
         let font = self.font.unwrap_or_else(|| gui.style.sub_font.clone());
         let color = self.color.unwrap_or(gui.style.text_color);
         let padding = self
@@ -142,10 +145,10 @@ impl<'a> ComboBox<'a> {
 
             for (option, galley) in options.iter().zip(galleys) {
                 let is_selected = option == &selected;
-                if ListItem::from_galley(galley)
+                if ListItem::from_galley(StableId::new(("combo_option", option)), galley)
                     .selected(is_selected)
                     .size(item_size)
-                    .show(gui, StableId::new(("combo_option", option)))
+                    .show(gui)
                     .clicked()
                 {
                     selected_option = Some(option.clone());
