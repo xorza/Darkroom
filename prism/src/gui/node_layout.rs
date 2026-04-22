@@ -124,9 +124,6 @@ pub struct NodeLayout {
     pub port_row_height: f32,
     pub port_activation_radius: f32,
     pub header_row_height: f32,
-    pub input_count: usize,
-    pub output_count: usize,
-    pub event_count: usize,
 }
 
 impl NodeLayout {
@@ -166,7 +163,17 @@ impl NodeLayout {
             .max(galleys.outputs.len() + galleys.events.len())
             .max(1);
 
-        let (max_left, max_right) = compute_max_galley_widths(galleys);
+        let max_left = galleys
+            .inputs
+            .iter()
+            .map(|g| g.size().x)
+            .fold(0.0_f32, f32::max);
+        let max_right = galleys
+            .outputs
+            .iter()
+            .chain(&galleys.events)
+            .map(|g| g.size().x)
+            .fold(0.0_f32, f32::max);
         let row_width = port_label_side_padding * 2.0
             + max_left
             + max_right
@@ -234,26 +241,20 @@ impl NodeLayout {
             port_row_height,
             port_activation_radius: port_row_height * 0.5,
             header_row_height,
-            input_count: galleys.inputs.len(),
-            output_count: galleys.outputs.len(),
-            event_count: galleys.events.len(),
         }
     }
 
     // === Port position accessors ===
 
     pub fn input_center(&self, index: usize) -> Pos2 {
-        debug_assert!(index < self.input_count);
         self.port_at_row(self.input_first_center, index)
     }
 
     pub fn output_center(&self, index: usize) -> Pos2 {
-        debug_assert!(index < self.output_count);
         self.port_at_row(self.output_first_center, index)
     }
 
     pub fn event_center(&self, index: usize) -> Pos2 {
-        debug_assert!(index < self.event_count);
         self.port_at_row(self.event_first_center, index)
     }
 
@@ -273,19 +274,4 @@ impl NodeLayout {
     fn port_at_row(&self, base: Pos2, row: usize) -> Pos2 {
         pos2(base.x, base.y + self.port_row_height * row as f32)
     }
-}
-
-fn compute_max_galley_widths(galleys: &NodeGalleys) -> (f32, f32) {
-    let max_left = galleys
-        .inputs
-        .iter()
-        .map(|g| g.size().x)
-        .fold(0.0_f32, f32::max);
-    let max_right = galleys
-        .outputs
-        .iter()
-        .chain(&galleys.events)
-        .map(|g| g.size().x)
-        .fold(0.0_f32, f32::max);
-    (max_left, max_right)
 }

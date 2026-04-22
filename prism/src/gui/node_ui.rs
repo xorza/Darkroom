@@ -523,13 +523,13 @@ fn render_ports(
     if func.terminal {
         draw_port(gui, PortKind::Trigger, 0, layout.trigger_center());
     }
-    for idx in 0..layout.input_count {
+    for idx in 0..func.inputs.len() {
         draw_port(gui, PortKind::Input, idx, layout.input_center(idx));
     }
-    for idx in 0..layout.output_count {
+    for idx in 0..func.outputs.len() {
         draw_port(gui, PortKind::Output, idx, layout.output_center(idx));
     }
-    for idx in 0..layout.event_count {
+    for idx in 0..func.events.len() {
         draw_port(gui, PortKind::Event, idx, layout.event_center(idx));
     }
 
