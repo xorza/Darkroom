@@ -36,28 +36,22 @@ pub struct Gui<'a> {
 }
 
 impl<'a> Gui<'a> {
-    pub fn new(ui: &'a mut Ui, style: &Rc<Style>) -> Self {
-        Self::with_style(ui, Rc::clone(style), 1.0)
-    }
-
     /// Root `Gui` constructor — use at the eframe boundary. Applies
     /// `style` to egui's global style for the frame (one call per
-    /// frame, not per child `Gui`), then builds the `Gui` wrapper.
+    /// frame, not per child `Gui`), then builds the `Gui` wrapper at
+    /// scale 1.0.
     pub fn new_root(ui: &'a mut Ui, style: &Rc<Style>) -> Self {
         ui.ctx().global_style_mut(|egui_style| {
             style.apply_to_egui(egui_style);
         });
-        Self::new(ui, style)
+        Self::child(ui, Rc::clone(style), 1.0)
     }
 
-    pub fn new_with_scale(ui: &'a mut Ui, style: &Rc<Style>, scale: f32) -> Self {
-        Self::with_style(ui, Rc::clone(style), scale)
-    }
-
-    /// Build a `Gui` that takes ownership of a cloned `Rc<Style>`. Prefer this
-    /// in hot paths — it avoids the outer-then-inner double Rc bump that
-    /// `new_with_scale` produces.
-    fn with_style(ui: &'a mut Ui, style: Rc<Style>, scale: f32) -> Self {
+    /// Build a child `Gui` that inherits `style` and `scale` from its
+    /// parent. Only container widgets (inside `gui/`) should call this
+    /// — app code gets child `Gui`s through widget closures
+    /// (`horizontal`, `Frame::show`, `Panel::show`, …).
+    pub(crate) fn child(ui: &'a mut Ui, style: Rc<Style>, scale: f32) -> Self {
         let rect = ui.available_rect_before_wrap();
         Self {
             ui,
@@ -140,8 +134,8 @@ impl<'a> Gui<'a> {
     }
 
     /// Internal — the only legitimate scale transition is `with_scale`,
-    /// which saves/restores automatically. External callers build a
-    /// child `Gui` at the desired scale via `Gui::new_with_scale`.
+    /// which saves/restores automatically. Child `Gui`s pick up the
+    /// current scale via `Gui::child`.
     fn set_scale(&mut self, scale: f32) {
         assert!(scale.is_finite(), "gui scale must be finite");
         assert!(scale > 0.0, "gui scale must be greater than 0");
@@ -170,7 +164,7 @@ impl<'a> Gui<'a> {
         let style = Rc::clone(&self.style);
         let scale = self.scale;
         self.ui.horizontal(|ui| {
-            let mut gui = Gui::with_style(ui, style, scale);
+            let mut gui = Gui::child(ui, style, scale);
             add_contents(&mut gui)
         })
     }
@@ -186,7 +180,7 @@ impl<'a> Gui<'a> {
         self.ui.with_layout(
             Layout::left_to_right(Align::Min).with_cross_justify(true),
             |ui| {
-                let mut gui = Gui::with_style(ui, style, scale);
+                let mut gui = Gui::child(ui, style, scale);
                 add_contents(&mut gui)
             },
         )
@@ -199,7 +193,7 @@ impl<'a> Gui<'a> {
         let style = Rc::clone(&self.style);
         let scale = self.scale;
         self.ui.vertical(|ui| {
-            let mut gui = Gui::with_style(ui, style, scale);
+            let mut gui = Gui::child(ui, style, scale);
             add_contents(&mut gui)
         })
     }
@@ -274,7 +268,7 @@ impl<'b, 'a> ScopedGui<'b, 'a> {
                 if let Some(clip) = clip_rect {
                     ui.set_clip_rect(clip);
                 }
-                let mut gui = Gui::with_style(ui, style, scale);
+                let mut gui = Gui::child(ui, style, scale);
                 add_contents(&mut gui)
             })
             .inner

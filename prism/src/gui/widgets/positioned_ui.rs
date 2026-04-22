@@ -83,7 +83,7 @@ impl PositionedUi {
             .max_rect(initial_rect)
             .sense(sense)
             .show(|gui| {
-                let mut child_gui = Gui::new_with_scale(gui.ui_raw(), &style, scale);
+                let mut child_gui = Gui::child(gui.ui_raw(), style, scale);
                 let result = add_contents(&mut child_gui);
 
                 // Store measured size for next frame — but ONLY on the
