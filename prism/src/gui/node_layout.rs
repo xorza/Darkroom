@@ -10,6 +10,7 @@ use crate::common::UiEquals;
 use crate::gui::Gui;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::PortRef;
+use crate::gui::style::Style;
 
 // ============================================================================
 // NodeGalleys — cached font layouts
@@ -29,10 +30,13 @@ pub struct NodeGalleys {
     pub inputs: Vec<Arc<Galley>>,
     pub outputs: Vec<Arc<Galley>>,
     pub events: Vec<Arc<Galley>>,
+    /// Row height of `style.sub_font` at the current scale — cached
+    /// here so `NodeLayout::compute` can stay pure (no `&mut Gui`).
+    pub sub_row_height: f32,
 }
 
 impl NodeGalleys {
-    pub fn new(gui: &Gui<'_>, node_id: NodeId, func: &Func, node_name: &str) -> Self {
+    pub fn new(gui: &mut Gui<'_>, node_id: NodeId, func: &Func, node_name: &str) -> Self {
         let mut this = Self {
             node_id,
             scale: gui.scale(),
@@ -40,13 +44,14 @@ impl NodeGalleys {
             inputs: Vec::new(),
             outputs: Vec::new(),
             events: Vec::new(),
+            sub_row_height: gui.font_height(&gui.style.sub_font.clone()),
         };
         this.rebuild_port_galleys(gui, func);
         this
     }
 
     /// Refresh cached galleys if the node name or GUI scale changed.
-    pub fn update(&mut self, gui: &Gui<'_>, func: &Func, node_name: &str) {
+    pub fn update(&mut self, gui: &mut Gui<'_>, func: &Func, node_name: &str) {
         let scale_changed = !self.scale.ui_equals(gui.scale());
 
         if self.title.text() != node_name || scale_changed {
@@ -55,6 +60,7 @@ impl NodeGalleys {
 
         if scale_changed {
             self.rebuild_port_galleys(gui, func);
+            self.sub_row_height = gui.font_height(&gui.style.sub_font.clone());
             self.scale = gui.scale();
         }
     }
@@ -132,21 +138,20 @@ impl NodeLayout {
         node_id: NodeId,
         galleys: &NodeGalleys,
         func: &Func,
-        gui: &mut Gui<'_>,
+        style: &Style,
+        scale: f32,
         origin: Pos2,
         node_pos: Pos2,
     ) -> Self {
-        let scale = gui.scale();
-        let padding = gui.style.padding;
-        let small_padding = gui.style.small_padding;
-        let remove_btn_size = gui.style.node.remove_btn_size;
-        let status_dot_radius = gui.style.node.status_dot_radius;
-        let port_label_side_padding = gui.style.node.port_label_side_padding;
-        let port_radius = gui.style.node.port_radius;
-        let cache_btn_width = gui.style.node.cache_btn_width;
-        let sub_font = gui.style.sub_font.clone();
-        let sub_font_size = sub_font.size;
-        let row_height = gui.font_height(&sub_font) + small_padding;
+        let padding = style.padding;
+        let small_padding = style.small_padding;
+        let remove_btn_size = style.node.remove_btn_size;
+        let status_dot_radius = style.node.status_dot_radius;
+        let port_label_side_padding = style.node.port_label_side_padding;
+        let port_radius = style.node.port_radius;
+        let cache_btn_width = style.node.cache_btn_width;
+        let sub_font_size = style.sub_font.size;
+        let row_height = galleys.sub_row_height + small_padding;
 
         // Header dimensions
         let remove_size = remove_btn_size + small_padding * 2.0;

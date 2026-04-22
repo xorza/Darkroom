@@ -176,7 +176,7 @@ impl GraphUi {
                 &mut self.gesture,
             );
 
-            self.graph_layout.update(gui, ctx, &self.gesture);
+            self.graph_layout.update(gui, ctx);
             self.dots_background.render(gui, ctx);
             self.render_connections(gui, ctx);
 
@@ -231,12 +231,13 @@ impl GraphUi {
             self.emit_zoom_pan(ctx.view_graph, Vec2::ZERO, 1.0);
         }
         if buttons.view_selected
-            && let Some((scale, pan)) = view_selected_node_target(gui, ctx, &self.graph_layout)
+            && let Some((scale, pan)) =
+                view_selected_node_target(gui, ctx, &self.graph_layout, &self.gesture)
         {
             self.emit_zoom_pan(ctx.view_graph, pan, scale);
         }
         if buttons.fit_all {
-            let (scale, pan) = fit_all_nodes_target(gui, ctx, &self.graph_layout);
+            let (scale, pan) = fit_all_nodes_target(gui, ctx, &self.graph_layout, &self.gesture);
             self.emit_zoom_pan(ctx.view_graph, pan, scale);
         }
 

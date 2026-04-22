@@ -188,6 +188,7 @@ impl GraphUi {
             gui,
             ctx,
             &self.graph_layout,
+            &self.gesture,
             &mut self.output,
             self.gesture.breaker(),
         );
@@ -197,8 +198,12 @@ impl GraphUi {
                 breaker.show(gui);
             }
             Gesture::DraggingConnection(drag) => {
+                // A connection drag never applies a node drag offset,
+                // so pass an idle gesture to `node_layout`. Avoids
+                // aliasing `&self.gesture` while holding `&mut drag`.
+                let idle = Gesture::default();
                 self.connections
-                    .render_temp_connection(gui, &self.graph_layout, drag);
+                    .render_temp_connection(gui, ctx, &self.graph_layout, &idle, drag);
             }
             _ => {}
         }

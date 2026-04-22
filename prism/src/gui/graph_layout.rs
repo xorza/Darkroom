@@ -29,56 +29,81 @@ pub struct PortInfo {
 // GraphLayout
 // ============================================================================
 
-/// Per-frame layout state for every node in the view.
-///
-/// `node_galleys` holds the only thing expensive to build — shaped text —
-/// and is updated lazily when a node's name or the GUI scale changes.
-/// `node_layouts` is purely derived from galleys + position + style and
-/// is recomputed from scratch every frame; it is stored only so that the
-/// next frame's interaction pass can hit-test against the previous
-/// frame's rects.
+/// Per-frame layout state. The only thing cached is `NodeGalleys` —
+/// shaped text that costs real work to build. Layouts (`NodeLayout`)
+/// are cheap arithmetic on top of galleys + positions + style, so
+/// they're computed on demand at each call site instead of stored.
 #[derive(Debug, Default)]
 pub struct GraphLayout {
     pub origin: Pos2,
     pub node_galleys: KeyIndexVec<NodeId, NodeGalleys>,
-    pub node_layouts: KeyIndexVec<NodeId, NodeLayout>,
 }
 
 impl GraphLayout {
-    pub fn update(&mut self, gui: &mut Gui<'_>, ctx: &GraphContext, gesture: &Gesture) {
+    /// Refreshes galley cache and the world-space `origin` for the
+    /// current frame. Galleys only rebuild when their node's name or
+    /// the GUI scale changes; `NodeLayout`s are not built here.
+    pub fn update(&mut self, gui: &mut Gui<'_>, ctx: &GraphContext) {
         self.origin = gui.rect.min + ctx.view_graph.pan;
 
-        let mut compact_galleys = self.node_galleys.compact_insert_start();
-        let mut compact_layouts = self.node_layouts.compact_insert_start();
-
+        let mut compact = self.node_galleys.compact_insert_start();
         for view_node in ctx.view_graph.view_nodes.iter() {
             let node = ctx.view_graph.graph.by_id(&view_node.id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
-            let (_, galleys) = compact_galleys.insert_with(&view_node.id, || {
+            let (_, galleys) = compact.insert_with(&view_node.id, || {
                 NodeGalleys::new(gui, view_node.id, func, &node.name)
             });
             galleys.update(gui, func, &node.name);
-
-            let drag_offset = gesture.node_drag_offset_for(&view_node.id);
-            let layout = NodeLayout::compute(
-                view_node.id,
-                galleys,
-                func,
-                gui,
-                self.origin,
-                view_node.pos + drag_offset,
-            );
-            let (_, slot) = compact_layouts.insert_with(&view_node.id, || layout);
-            *slot = layout;
         }
     }
 
-    pub fn node_layout(&self, node_id: &NodeId) -> &NodeLayout {
-        self.node_layouts.by_key(node_id).unwrap()
+    /// Compute the geometry for a single node from cached galleys +
+    /// current pan/drag state. Cheap enough to call per access; there
+    /// is no stored layout cache.
+    pub fn node_layout(
+        &self,
+        gui: &Gui<'_>,
+        ctx: &GraphContext<'_>,
+        gesture: &Gesture,
+        node_id: &NodeId,
+    ) -> NodeLayout {
+        let node = ctx.view_graph.graph.by_id(node_id).unwrap();
+        let func = ctx.func_lib.by_id(&node.func_id).unwrap();
+        let galleys = self.node_galleys.by_key(node_id).unwrap();
+        let view_node = ctx.view_graph.view_nodes.by_key(node_id).unwrap();
+        let drag_offset = gesture.node_drag_offset_for(node_id);
+        NodeLayout::compute(
+            *node_id,
+            galleys,
+            func,
+            &gui.style,
+            gui.scale(),
+            self.origin,
+            view_node.pos + drag_offset,
+        )
+    }
+
+    /// Iterate layouts for every visible node. Owned values — no cache.
+    pub fn iter_layouts<'a>(
+        &'a self,
+        gui: &'a Gui<'_>,
+        ctx: &'a GraphContext<'_>,
+        gesture: &'a Gesture,
+    ) -> impl Iterator<Item = NodeLayout> + 'a {
+        ctx.view_graph
+            .view_nodes
+            .iter()
+            .map(move |view_node| self.node_layout(gui, ctx, gesture, &view_node.id))
     }
 
     pub fn node_galleys(&self, node_id: &NodeId) -> &NodeGalleys {
         self.node_galleys.by_key(node_id).unwrap()
+    }
+
+    /// Whether a galley entry exists for this node yet. Used to skip
+    /// interaction on nodes whose first frame hasn't rendered yet.
+    pub fn has_galleys(&self, node_id: &NodeId) -> bool {
+        self.node_galleys.by_key(node_id).is_some()
     }
 }

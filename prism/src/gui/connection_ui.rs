@@ -8,6 +8,7 @@ use crate::common::connection_bezier::{ConnectionBezier, ConnectionBezierStyle};
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::frame_output::FrameOutput;
+use crate::gui::gesture::Gesture;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::gui::node_ui::PortInteractCommand;
@@ -140,6 +141,7 @@ impl ConnectionUi {
         gui: &mut Gui<'_>,
         ctx: &GraphContext,
         graph_layout: &GraphLayout,
+        gesture: &Gesture,
         output: &mut FrameOutput,
         breaker: Option<&ConnectionBreaker>,
     ) {
@@ -151,7 +153,7 @@ impl ConnectionUi {
         for node_view in &ctx.view_graph.view_nodes {
             let node_id = node_view.id;
             let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
-            let node_layout = graph_layout.node_layout(&node_id);
+            let node_layout = graph_layout.node_layout(gui, ctx, gesture, &node_id);
 
             // Render data connections
             for (input_idx, input) in node.inputs.iter().enumerate() {
@@ -163,7 +165,7 @@ impl ConnectionUi {
                     input_node_id: node_id,
                     input_idx,
                 };
-                let output_layout = graph_layout.node_layout(&binding.target_id);
+                let output_layout = graph_layout.node_layout(gui, ctx, gesture, &binding.target_id);
                 let input_pos = node_layout.input_center(input_idx);
                 let output_pos = output_layout.output_center(binding.port_idx);
 
@@ -195,7 +197,8 @@ impl ConnectionUi {
                 let event_pos = node_layout.event_center(event_idx);
 
                 for &trigger_node_id in &event.subscribers {
-                    let trigger_layout = graph_layout.node_layout(&trigger_node_id);
+                    let trigger_layout =
+                        graph_layout.node_layout(gui, ctx, gesture, &trigger_node_id);
                     let trigger_pos = trigger_layout.trigger_center();
 
                     let key = ConnectionKey::Event {
@@ -239,15 +242,18 @@ impl ConnectionUi {
     pub(crate) fn render_temp_connection(
         &mut self,
         gui: &mut Gui<'_>,
+        ctx: &GraphContext<'_>,
         graph_layout: &GraphLayout,
+        gesture: &Gesture,
         drag: &mut ConnectionDrag,
     ) {
         // Update port positions from layout
-        let start_layout = graph_layout.node_layout(&drag.start_port.port.node_id);
+        let start_layout =
+            graph_layout.node_layout(gui, ctx, gesture, &drag.start_port.port.node_id);
         drag.start_port.center = start_layout.port_center(&drag.start_port.port);
 
         if let Some(end) = drag.end_port.as_mut() {
-            let end_layout = graph_layout.node_layout(&end.port.node_id);
+            let end_layout = graph_layout.node_layout(gui, ctx, gesture, &end.port.node_id);
             end.center = end_layout.port_center(&end.port);
         }
 

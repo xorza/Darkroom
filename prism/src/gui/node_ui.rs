@@ -163,12 +163,13 @@ impl NodeUi {
     ) {
         for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
             let node_id = ctx.view_graph.view_nodes[view_node_idx].id;
-            // Layouts for brand-new nodes don't exist yet on the first
+            // Galleys for brand-new nodes don't exist yet on the first
             // frame after insertion — skip; they'll be interactable on
             // the next frame once `GraphLayout::update` allocates them.
-            let Some(layout) = graph_layout.node_layouts.by_key(&node_id) else {
+            if !graph_layout.has_galleys(&node_id) {
                 continue;
-            };
+            }
+            let layout = graph_layout.node_layout(gui, ctx, gesture, &node_id);
 
             let body_id = StableId::new(("node_body", node_id)).id();
             let response = gui.ui().interact(
@@ -226,13 +227,13 @@ impl NodeUi {
 
         for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
             let node_id = ctx.view_graph.view_nodes[view_node_idx].id;
-            let layout = graph_layout.node_layout(&node_id);
+            let layout = graph_layout.node_layout(gui, ctx, gesture, &node_id);
             let galleys = graph_layout.node_galleys(&node_id);
 
             let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
-            const_bind_frame.render(gui, output, layout, node, func, breaker);
+            const_bind_frame.render(gui, output, &layout, node, func, breaker);
 
             if !gui.ui().is_rect_visible(layout.body_rect) {
                 continue;
@@ -241,23 +242,23 @@ impl NodeUi {
             let is_selected = ctx.view_graph.selected_node_id == Some(node_id);
             let exec_info = NodeExecutionInfo::from_stats(ctx.execution_stats, node_id);
 
-            if render_body(gui, layout, galleys, is_selected, &exec_info, breaker) {
+            if render_body(gui, &layout, galleys, is_selected, &exec_info, breaker) {
                 result.broken_nodes.push(node_id);
             }
 
-            if render_remove_btn(gui, layout, node_id) {
+            if render_remove_btn(gui, &layout, node_id) {
                 result.removed_nodes.push(node_id);
             }
 
-            render_status_hints(gui, layout, node_id, node.behavior, func);
-            render_cache_btn(gui, output, layout, node);
+            render_status_hints(gui, &layout, node_id, node.behavior, func);
+            render_cache_btn(gui, output, &layout, node);
 
             let missing_inputs = get_missing_input_ports(ctx.execution_stats, node_id);
             result
                 .port_cmd
-                .prefer(render_ports(gui, layout, node, func, &missing_inputs));
+                .prefer(render_ports(gui, &layout, node, func, &missing_inputs));
 
-            render_port_labels(gui, layout, galleys);
+            render_port_labels(gui, &layout, galleys);
         }
 
         const_bind_frame.finish();
