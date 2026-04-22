@@ -1,3 +1,27 @@
+// Fork of egui's TextEdit. Why we maintain it:
+//
+// 1. Scale-aware chrome. Stock egui uses hardcoded margin/padding
+//    constants; the fork pulls margin from `gui.style.padding`, which
+//    propagates `Gui::set_scale` and so scales with the rest of our UI.
+//    Without this, padding around editable text becomes proportionally
+//    wrong when the user zooms.
+//
+// 2. Explicit text alignment within the widget rect. `drag_value` calls
+//    `.horizontal_align(...)` and `.vertical_align(...)` to anchor the
+//    edit text the same way the surrounding chip displays the value.
+//    Stock egui historically didn't expose these as builders that
+//    affect text positioning within the widget area.
+//
+// 3. Text color override. Egui's response-aware default
+//    (`ui.style().interact(&response).text_color()`) is too bright
+//    against our dark theme; we use the inactive-widget color instead.
+//
+// Trade-off: bug fixes and improvements in egui's TextEdit don't
+// propagate. When bumping egui, verify paste/cut/undo, multiline
+// editing, and IME (especially on macOS) still behave correctly.
+// If a future egui release closes the gaps above, this fork can be
+// retired in favor of a thin wrapper around `egui::TextEdit`.
+
 use std::sync::Arc;
 
 use egui::{emath, mutex::Mutex};
@@ -539,6 +563,8 @@ impl TextEdit<'_> {
     }
 
     fn show_content(self, gui: &mut Gui<'_>) -> TextEditOutput {
+        // Fork divergence: default margin reads from gui.style.padding so
+        // it scales with the UI. Stock egui uses hardcoded constants here.
         let margin = self.margin.unwrap_or_else(|| gui.style.padding.into());
         let ui = gui.ui();
         let TextEdit {
@@ -567,9 +593,11 @@ impl TextEdit<'_> {
             background_color: _,
         } = self;
 
+        // Fork divergence: fall back to the inactive-widget text color,
+        // not egui's response-aware default — the latter is too bright
+        // against our dark theme. See the module-level comment.
         let text_color = text_color
             .or(ui.visuals().override_text_color)
-            // .unwrap_or_else(|| ui.style().interact(&response).text_color()); // too bright
             .unwrap_or_else(|| ui.visuals().widgets.inactive.text_color());
 
         let prev_text = text.as_str().to_owned();
