@@ -13,8 +13,8 @@ use crate::common::scroll_area::ScrollArea;
 use crate::gui::Gui;
 use crate::gui::frame_output::FrameOutput;
 use crate::gui::graph_ctx::GraphContext;
-use crate::gui::node_ui::NodeExecutionInfo;
 use crate::model::argument_values_cache::{CachedTexture, NodeCache};
+use crate::model::execution_info::NodeExecutionInfo;
 use crate::model::graph_ui_action::GraphUiAction;
 
 const PANEL_WIDTH: f32 = 250.0;

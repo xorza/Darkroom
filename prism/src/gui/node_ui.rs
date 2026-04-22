@@ -10,13 +10,13 @@ use crate::gui::gesture::Gesture;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::gui::node_layout::{NodeGalleys, NodeLayout};
+use crate::model::execution_info::NodeExecutionInfo;
 use crate::model::graph_ui_action::GraphUiAction;
 use common::BoolExt;
 use egui::epaint::CornerRadiusF32;
 use egui::{
     Align2, PointerButton, Pos2, Rect, Response, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
-use scenarium::execution_stats::{ExecutedNodeStats, NodeError};
 use scenarium::graph::{Node, NodeId};
 use scenarium::prelude::{ExecutionStats, Func, FuncBehavior, NodeBehavior};
 
@@ -48,6 +48,11 @@ impl NodeDragEvents {
 // Types
 // ============================================================================
 
+/// Variants are declared in ascending priority order — `prefer` folds
+/// multiple port hits in a single frame down to the most-actionable
+/// one (e.g. a `Click` wins over a `Hover`). `PortInfo` can't derive
+/// `Ord` (it carries a `Pos2`), so priority is a discriminant-only
+/// mapping rather than a derived `Ord`.
 #[derive(Debug, Clone, Default)]
 pub enum PortInteractCommand {
     #[default]
@@ -62,16 +67,13 @@ impl PortInteractCommand {
     fn priority(&self) -> u8 {
         match self {
             Self::None => 0,
-            Self::Hover(_) => 5,
-            Self::DragStart(_) => 8,
-            Self::DragStop => 10,
-            Self::Click(_) => 15,
+            Self::Hover(_) => 1,
+            Self::DragStart(_) => 2,
+            Self::DragStop => 3,
+            Self::Click(_) => 4,
         }
     }
 
-    /// Keep whichever of `self` and `other` has the higher priority —
-    /// used to fold multiple port hits in a single frame down to the
-    /// most-actionable one (e.g. a `Click` wins over a `Hover`).
     fn prefer(&mut self, other: Self) {
         if other.priority() > self.priority() {
             *self = other;
@@ -79,48 +81,16 @@ impl PortInteractCommand {
     }
 }
 
-#[derive(Debug)]
-pub(crate) enum NodeExecutionInfo<'a> {
-    Errored(&'a NodeError),
-    MissingInputs,
-    Executed(&'a ExecutedNodeStats),
-    Cached,
-    None,
-}
-
-impl<'a> NodeExecutionInfo<'a> {
-    pub(crate) fn from_stats(stats: Option<&'a ExecutionStats>, node_id: NodeId) -> Self {
-        let Some(stats) = stats else {
-            return Self::None;
-        };
-
-        if let Some(err) = stats.node_errors.iter().find(|e| e.node_id == node_id) {
-            return Self::Errored(err);
-        }
-
-        if stats.missing_inputs.iter().any(|p| p.target_id == node_id) {
-            return Self::MissingInputs;
-        }
-
-        if let Some(executed) = stats.executed_nodes.iter().find(|s| s.node_id == node_id) {
-            return Self::Executed(executed);
-        }
-
-        if stats.cached_nodes.contains(&node_id) {
-            return Self::Cached;
-        }
-
-        Self::None
-    }
-
-    fn shadow<'b>(&self, gui: &'b Gui<'_>) -> Option<&'b egui::Shadow> {
-        match self {
-            Self::Errored(_) => Some(&gui.style.node.errored_shadow),
-            Self::MissingInputs => Some(&gui.style.node.missing_inputs_shadow),
-            Self::Executed(_) => Some(&gui.style.node.executed_shadow),
-            Self::Cached => Some(&gui.style.node.cached_shadow),
-            Self::None => None,
-        }
+fn exec_info_shadow<'a>(
+    info: &NodeExecutionInfo<'_>,
+    gui: &'a Gui<'_>,
+) -> Option<&'a egui::Shadow> {
+    match info {
+        NodeExecutionInfo::Errored(_) => Some(&gui.style.node.errored_shadow),
+        NodeExecutionInfo::MissingInputs => Some(&gui.style.node.missing_inputs_shadow),
+        NodeExecutionInfo::Executed(_) => Some(&gui.style.node.executed_shadow),
+        NodeExecutionInfo::Cached => Some(&gui.style.node.cached_shadow),
+        NodeExecutionInfo::None => None,
     }
 }
 
@@ -291,7 +261,7 @@ fn render_body(
     ));
 
     // Execution-state shadow
-    if let Some(shadow) = exec_info.shadow(gui) {
+    if let Some(shadow) = exec_info_shadow(exec_info, gui) {
         gui.painter().add(Shape::Rect(
             shadow.as_shape(layout.body_rect, corner_radius),
         ));
