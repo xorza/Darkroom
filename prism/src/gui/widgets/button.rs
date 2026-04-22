@@ -16,6 +16,11 @@ pub struct Button<'a> {
     background: Option<ButtonStyle>,
     rect: Option<Rect>,
     size: Option<Vec2>,
+    /// Per-side padding between the button's outer rect and its
+    /// content (text / shapes). Defaults to
+    /// `vec2(style.padding, style.small_padding)`. Ignored when
+    /// `.rect(..)` or `.size(..)` pin the outer rect explicitly.
+    padding: Option<Vec2>,
     toggle_value: Option<&'a mut bool>,
     content_align: Align,
 
@@ -38,6 +43,7 @@ impl<'a> Button<'a> {
             background: None,
             rect: None,
             size: None,
+            padding: None,
             shapes: Vec::new(),
             toggle_value: None,
             content_align: Align::Center,
@@ -62,6 +68,13 @@ impl<'a> Button<'a> {
 
     pub fn size(mut self, size: Vec2) -> Self {
         self.size = Some(size);
+        self
+    }
+
+    /// Per-side padding between the outer rect and the button's text /
+    /// shapes. Used only in autosize mode (no `.rect` / `.size` set).
+    pub fn padding(mut self, padding: Vec2) -> Self {
+        self.padding = Some(padding);
         self
     }
 
@@ -150,8 +163,11 @@ impl<'a> Button<'a> {
         } else {
             // todo also include provided shapes size
             let text_size = galley.as_ref().map(|g| g.size()).unwrap_or_default();
-            let padding = vec2(gui.style.padding * 2.0, gui.style.small_padding * 2.0);
-            let autosize = self.size.unwrap_or(text_size + padding);
+            // Per-side padding; doubled to get the outer rect.
+            let padding = self
+                .padding
+                .unwrap_or_else(|| vec2(gui.style.padding, gui.style.small_padding));
+            let autosize = self.size.unwrap_or(text_size + padding * 2.0);
             gui.scope(id).sense(sense).show(|gui| {
                 let (_id, rect) = gui.ui_raw().allocate_space(autosize);
                 let response = gui.ui_raw().allocate_rect(rect, sense);

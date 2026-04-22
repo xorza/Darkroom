@@ -6,11 +6,11 @@ use crate::gui::frame_output::RunCommand;
 use crate::gui::graph_ui::GraphUi;
 use crate::gui::log_ui::LogUi;
 use crate::gui::style::Style;
-use crate::gui::widgets::Panel;
+use crate::gui::widgets::{Button, ListItem, Panel, PopupMenu};
 use crate::input::InputSnapshot;
 use crate::session::Session;
 use eframe::egui;
-use egui::{Id, UiBuilder, ViewportCommand};
+use egui::{ViewportCommand, vec2};
 
 #[derive(Clone, Debug)]
 pub struct UiContext {
@@ -97,7 +97,6 @@ impl MainUi {
     }
 
     pub fn render(&mut self, session: &mut Session, gui: &mut Gui<'_>) {
-        let style = gui.style.clone();
         let input = gui.input_snapshot();
 
         session.update_shared_status();
@@ -107,42 +106,8 @@ impl MainUi {
         Panel::top(StableId::new("top_panel"))
             .show_separator_line(false)
             .show(gui, |gui| {
-                // Anchor a global-scope id for the MenuBar so its
-                // internal horizontal layout's widget id doesn't drift
-                // with the panel's auto-id counter. MenuBar is raw
-                // egui chrome and stays that way for now.
-                let ui = gui.ui_raw();
-                // id-drift-ok
-                let _ = ui.scope_builder(UiBuilder::new().id(Id::new("menu_bar_scope")), |ui| {
-                    egui::MenuBar::new().ui(ui, |ui| {
-                        style.apply_menu_style(ui);
-
-                        ui.menu_button("File", |ui| {
-                            style.apply_menu_style(ui);
-
-                            ui.set_min_width(100.0);
-                            if ui.button("New").clicked() {
-                                self.empty(session);
-                                ui.close();
-                            }
-                            if ui.button("Save").clicked() {
-                                self.save(session);
-                                ui.close();
-                            }
-                            if ui.button("Save as").clicked() {
-                                self.save_as(session);
-                                ui.close();
-                            }
-                            if ui.button("Open").clicked() {
-                                self.load(session);
-                                ui.close();
-                            }
-                            if ui.button("Exit").clicked() {
-                                ui.close();
-                                self.ui_context.close_app();
-                            }
-                        });
-                    });
+                gui.horizontal(|gui| {
+                    self.file_menu(session, gui);
                 });
             });
 
@@ -159,6 +124,59 @@ impl MainUi {
 
         session.handle_output(self.graph_ui.output());
         self.arena.reset();
+    }
+
+    /// Top-level "File" menu: button that anchors a popup with the
+    /// usual New / Save / Save as / Open / Exit entries. No raw egui
+    /// chrome — `Button` + `PopupMenu` + `ListItem` carry the whole
+    /// thing. `PopupMenu::close_on_click` (default true) closes the
+    /// dropdown whenever any entry fires.
+    ///
+    /// All styling — font, button preset, padding, popup width —
+    /// lives on [`MenuStyle`] (`gui.style.menu`). Entries are all
+    /// forced to `menu.popup_min_width` so hover highlights the
+    /// whole row, not just the text.
+    fn file_menu(&mut self, session: &mut Session, gui: &mut Gui<'_>) {
+        let menu = gui.style.menu.clone();
+        let file_btn = Button::new(StableId::new("menu_file"))
+            .text("File")
+            .font(menu.font.clone())
+            .background(menu.button)
+            .padding(menu.padding)
+            .show(gui);
+
+        let item_size = vec2(
+            menu.popup_min_width,
+            gui.font_height(&menu.font) + menu.padding.y * 2.0,
+        );
+        let entry = |gui: &mut Gui<'_>, id: &'static str, label: &str| -> bool {
+            ListItem::from_str(StableId::new(id), label)
+                .font(menu.font.clone())
+                .style(menu.button)
+                .size(item_size)
+                .show(gui)
+                .clicked()
+        };
+
+        PopupMenu::new(&file_btn, "menu_file_popup")
+            .min_width(menu.popup_min_width)
+            .show(gui, |gui| {
+                if entry(gui, "menu_file_new", "New") {
+                    self.empty(session);
+                }
+                if entry(gui, "menu_file_save", "Save") {
+                    self.save(session);
+                }
+                if entry(gui, "menu_file_save_as", "Save as") {
+                    self.save_as(session);
+                }
+                if entry(gui, "menu_file_open", "Open") {
+                    self.load(session);
+                }
+                if entry(gui, "menu_file_exit", "Exit") {
+                    self.ui_context.close_app();
+                }
+            });
     }
 
     fn handle_shortcuts(&mut self, input: &InputSnapshot, session: &mut Session) {

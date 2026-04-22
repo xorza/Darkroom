@@ -41,7 +41,7 @@ pub use image::Image;
 pub use label::Label;
 pub use layout::Layout;
 pub use panel::Panel;
-pub use popup_menu::ListItem;
+pub use popup_menu::{ListItem, PopupMenu};
 pub use positioned_ui::PositionedUi;
 pub use scroll_area::ScrollArea;
 pub use separator::Separator;

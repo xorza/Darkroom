@@ -13,7 +13,7 @@
 //! Fields are grouped to match how callers access them:
 //! - top-level: fonts, palette, common paddings/radii;
 //! - sub-structs (`GraphBackgroundStyle`, `ConnectionStyle`,
-//!   `NodeStyle`, `MenuStyle`, `PopupStyle`, `ButtonStyle`) for
+//!   `NodeStyle`, `PopupStyle`, `ButtonStyle`) for
 //!   cluster-specific concerns.
 
 use std::path::Path;
@@ -143,11 +143,17 @@ pub struct NodeStyle {
     pub const_bind_style: DragValueStyle,
 }
 
+/// Styling for the top-level menu bar + its dropdown entries: font,
+/// per-entry padding, popup width, and the button preset shared
+/// between the trigger button and each entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MenuStyle {
+    pub font: FontId,
     #[serde(with = "vec2_array")]
-    pub button_padding: Vec2,
+    pub padding: Vec2,
+    pub popup_min_width: f32,
+    pub button: ButtonStyle,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -320,7 +326,10 @@ impl Style {
                 },
             },
             menu: MenuStyle {
-                button_padding: r.menu.button_padding * scale,
+                font: scale_font(&r.menu.font, scale),
+                padding: r.menu.padding * scale,
+                popup_min_width: r.menu.popup_min_width * scale,
+                button: scale_button_style(&r.menu.button, scale),
             },
             popup: PopupStyle {
                 fill: r.popup.fill,
@@ -328,16 +337,7 @@ impl Style {
                 corner_radius: r.popup.corner_radius * scale,
                 padding: r.popup.padding * scale,
             },
-            list_button: ButtonStyle {
-                disabled_fill: r.list_button.disabled_fill,
-                idle_fill: r.list_button.idle_fill,
-                hover_fill: r.list_button.hover_fill,
-                active_fill: r.list_button.active_fill,
-                checked_fill: r.list_button.checked_fill,
-                inactive_stroke: scale_stroke(&r.list_button.inactive_stroke, scale),
-                hovered_stroke: scale_stroke(&r.list_button.hovered_stroke, scale),
-                radius: r.list_button.radius * scale,
-            },
+            list_button: scale_button_style(&r.list_button, scale),
 
             reference: Some(Rc::clone(reference)),
         })
@@ -389,10 +389,18 @@ impl Style {
         visuals.window_corner_radius = self.corner_radius.into();
         visuals.menu_corner_radius = self.small_corner_radius.into();
     }
+}
 
-    pub fn apply_menu_style(&self, ui: &mut egui::Ui) {
-        let style = ui.style_mut();
-        style.spacing.button_padding = self.menu.button_padding;
+fn scale_button_style(button: &ButtonStyle, scale: f32) -> ButtonStyle {
+    ButtonStyle {
+        disabled_fill: button.disabled_fill,
+        idle_fill: button.idle_fill,
+        hover_fill: button.hover_fill,
+        active_fill: button.active_fill,
+        checked_fill: button.checked_fill,
+        inactive_stroke: scale_stroke(&button.inactive_stroke, scale),
+        hovered_stroke: scale_stroke(&button.hovered_stroke, scale),
+        radius: button.radius * scale,
     }
 }
 
@@ -503,6 +511,20 @@ impl Default for ConnectionStyle {
     }
 }
 
+impl Default for MenuStyle {
+    fn default() -> Self {
+        Self {
+            font: FontId {
+                size: 15.0,
+                family: FontFamily::Proportional,
+            },
+            padding: Vec2::new(12.0, 3.0),
+            popup_min_width: 100.0,
+            button: ButtonStyle::default(),
+        }
+    }
+}
+
 impl Default for NodeStyle {
     fn default() -> Self {
         let status_shadow = |color: Color32| Shadow {
@@ -539,14 +561,6 @@ impl Default for NodeStyle {
             trigger_hover_color: Color32::from_rgb(255, 225, 120),
             event_hover_color: Color32::from_rgb(255, 175, 120),
             const_bind_style: DragValueStyle::default(),
-        }
-    }
-}
-
-impl Default for MenuStyle {
-    fn default() -> Self {
-        Self {
-            button_padding: Vec2::new(12.0, 3.0),
         }
     }
 }
