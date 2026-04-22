@@ -1,19 +1,20 @@
 mod common;
-mod editor_funclib;
 mod gui;
 mod init;
 mod input;
 mod main_ui;
 mod model;
 mod session;
+mod ui_context;
 
 use anyhow::Result;
 use eframe::{NativeOptions, egui};
 use std::sync::Arc;
 
 use crate::gui::Gui;
-use crate::main_ui::{MainUi, UiContext};
+use crate::main_ui::MainUi;
 use crate::session::Session;
+use crate::ui_context::UiContext;
 
 #[tokio::main]
 async fn main() -> Result<()> {

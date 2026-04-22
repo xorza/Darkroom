@@ -1,8 +1,6 @@
-use crate::editor_funclib::EditorFuncLib;
 use crate::gui::frame_output::{FrameOutput, RunCommand};
 use crate::model::ActionUndoStack;
 use crate::model::ArgumentValuesCache;
-use crate::model::config::Config;
 use crate::model::graph_ui_action::GraphUiAction;
 use anyhow::Result;
 use common::SerdeFormat;
@@ -16,17 +14,42 @@ use scenarium::prelude::{ExecutionStats, FuncLib};
 use scenarium::prelude::{TestFuncHooks, test_func_lib};
 use scenarium::worker::Worker;
 use scenarium::worker::{ArgumentValuesCallback, WorkerMessage};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
-use crate::main_ui::UiContext;
 use crate::model::ViewGraph;
+use crate::ui_context::UiContext;
 
 use scenarium::execution_graph::ArgumentValues;
 
 const UNDO_MAX_STEPS: usize = 256;
+
+/// App preferences persisted between editor runs (last-opened graph
+/// path today; probably grows to include window geometry, recent
+/// files, etc.). Lives here because only `Session` reads/writes it.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub(crate) struct Config {
+    pub current_path: Option<std::path::PathBuf>,
+}
+
+impl Config {
+    pub fn load_or_default() -> Self {
+        Self::load().unwrap_or_default()
+    }
+
+    pub fn save(&self) {
+        let serialized = common::serde::serialize(self, SerdeFormat::Toml);
+        std::fs::write("config.toml", serialized).ok();
+    }
+
+    fn load() -> Result<Self> {
+        let serialized = std::fs::read("config.toml")?;
+        common::serde::deserialize(&serialized, SerdeFormat::Toml)
+    }
+}
 
 /// Pure, testable domain state. No worker, no tokio, no async channels —
 /// anything in here can be constructed in a unit test, poked with actions,
@@ -108,7 +131,6 @@ impl Session {
 
         let mut func_lib = FuncLib::default();
         func_lib.merge(test_func_lib(sample_test_hooks(print_out_tx)));
-        func_lib.merge(EditorFuncLib::default());
         func_lib.merge(BasicFuncLib::default());
         func_lib.merge(WorkerEventsFuncLib::default());
         func_lib.merge(ImageFuncLib::default());

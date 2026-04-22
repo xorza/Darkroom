@@ -9,26 +9,9 @@ use crate::gui::style::Style;
 use crate::gui::widgets::{Button, ListItem, Panel, PopupMenu};
 use crate::input::InputSnapshot;
 use crate::session::Session;
+use crate::ui_context::UiContext;
 use eframe::egui;
-use egui::{ViewportCommand, vec2};
-
-#[derive(Clone, Debug)]
-pub struct UiContext {
-    ctx: egui::Context,
-}
-
-impl UiContext {
-    pub fn new(ctx: &egui::Context) -> Self {
-        Self { ctx: ctx.clone() }
-    }
-
-    pub fn request_redraw(&self) {
-        self.ctx.request_repaint();
-    }
-    pub fn close_app(&self) {
-        self.ctx.send_viewport_cmd(ViewportCommand::Close);
-    }
-}
+use egui::vec2;
 
 #[derive(Debug)]
 pub struct MainUi {
