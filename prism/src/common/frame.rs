@@ -73,23 +73,19 @@ impl Frame {
         let inner_frame = self.inner;
 
         // Anchor a stable-id scope OUTSIDE egui::Frame via
-        // `Gui::scoped_with`. egui::Frame::begin builds its content_ui
+        // `Gui::scope`. egui::Frame::begin builds its content_ui
         // with `UiBuilder::new()` (no id_salt), so without this outer
         // scope the content_ui's widget id would be auto-generated from
         // the parent's widget counter — drifting whenever sibling
-        // widgets toggled. `scoped_with` sets `global_scope=true`
+        // widgets toggled. `Gui::scope` sets `global_scope=true`
         // internally, pinning the outer scope's id verbatim.
-        gui.scoped_with(
-            id,
-            |b| b.sense(sense),
-            |gui| {
-                let style = gui.style.clone();
-                let result = inner_frame.show(gui.ui(), |ui| {
-                    let mut gui = Gui::new(ui, &style);
-                    add_contents(&mut gui)
-                });
-                InnerResponse::new(result.inner, result.response)
-            },
-        )
+        gui.scope(id).sense(sense).show(|gui| {
+            let style = gui.style.clone();
+            let result = inner_frame.show(gui.ui(), |ui| {
+                let mut gui = Gui::new(ui, &style);
+                add_contents(&mut gui)
+            });
+            InnerResponse::new(result.inner, result.response)
+        })
     }
 }

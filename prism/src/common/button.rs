@@ -129,7 +129,7 @@ impl<'a> Button<'a> {
         };
 
         // Run the button inside a child scope whose Id is pinned to the
-        // caller-supplied salt via `Gui::scoped_with`. Inside that scope
+        // caller-supplied salt via `Gui::scope`. Inside that scope
         // egui's auto-id starts at counter=0 from a stable seed, so the
         // single `allocate_rect` below produces a stable widget id every
         // frame — even when sibling widgets in the *outer* Ui come and
@@ -146,20 +146,16 @@ impl<'a> Button<'a> {
             Vec2::ZERO
         };
 
-        let (rect, response) = gui.scoped_with(
-            id,
-            |b| b.sense(sense),
-            |gui| {
-                let rect = if let Some(rect) = explicit_rect {
-                    rect
-                } else {
-                    let (_id, rect) = gui.ui().allocate_space(autosize);
-                    rect
-                };
-                let response = gui.ui().allocate_rect(rect, sense);
-                (rect, response)
-            },
-        );
+        let (rect, response) = gui.scope(id).sense(sense).show(|gui| {
+            let rect = if let Some(rect) = explicit_rect {
+                rect
+            } else {
+                let (_id, rect) = gui.ui().allocate_space(autosize);
+                rect
+            };
+            let response = gui.ui().allocate_rect(rect, sense);
+            (rect, response)
+        });
 
         if !gui.ui().is_rect_visible(rect) {
             return response;

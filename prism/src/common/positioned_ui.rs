@@ -79,10 +79,10 @@ impl PositionedUi {
             Sense::hover()
         };
 
-        gui.scoped_with(
-            self.id,
-            |b| b.max_rect(initial_rect).sense(sense),
-            |gui| {
+        gui.scope(self.id)
+            .max_rect(initial_rect)
+            .sense(sense)
+            .show(|gui| {
                 let mut child_gui = Gui::new_with_scale(gui.ui(), &style, scale);
                 let result = add_contents(&mut child_gui);
 
@@ -105,8 +105,7 @@ impl PositionedUi {
                 }
 
                 InnerResponse::new(result, ui.response())
-            },
-        )
+            })
     }
 
     fn compute_top_left(&self, size: Vec2) -> Pos2 {

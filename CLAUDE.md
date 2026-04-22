@@ -49,7 +49,8 @@ AI coding rules for Rust projects:
     `StableId::new(("cache_btn", node.id))`.
   - `StableId::from_id(id)` — wrap an existing `egui::Id` (e.g. inherited
     from a caller). No rehash.
-- **Never call `UiBuilder::new()` directly.** Use `Gui::scoped_with(id, customize, |gui| ...)`.
+- **Never call `UiBuilder::new()` directly.** Use `gui.scope(id).show(|gui| ...)`
+  (optionally chain `.max_rect(r)` / `.sense(s)` before `.show`).
   It applies `UiBuilder::id(id.id())` (`global_scope=true`) so the scope's
   registered widget id equals the salt verbatim — bypassing egui's
   `unique_id = stable_id.with(parent_counter)` formula
@@ -57,7 +58,7 @@ AI coding rules for Rust projects:
   appear/disappear in the parent and trips the
   "widget rect changed id between passes" warning.
 - **Never call bare `ui.allocate_rect`/`allocate_exact_size`/`allocate_space`
-  on a `Gui<'_>`'s parent ui.** Wrap in a `Gui::scoped_with(StableId::new(..), ...)`
+  on a `Gui<'_>`'s parent ui.** Wrap in a `gui.scope(StableId::new(..)).show(...)`
   first so the auto-id starts from a stable seed.
 - **Don't bake transient runtime keys (e.g. `selected_node_id`) into a
   fixed-rect widget's salt.** The widget id changes on every selection

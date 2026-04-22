@@ -81,13 +81,13 @@ mod tests {
     ///
     /// - `UiBuilder::new(` — the underlying drift culprit (its `id_salt`
     ///   produces `unique_id = stable_id.with(parent_counter)`, see
-    ///   `egui-0.34.1/src/ui.rs:297`). Use `Gui::scoped_with` instead.
+    ///   `egui-0.34.1/src/ui.rs:297`). Use `Gui::scope` instead.
     /// - `.allocate_rect(`, `.allocate_exact_size(`, `.allocate_space(`
     ///   — these emit a counter-based auto-id widget that drifts the
-    ///   same way. Wrap the call in a `Gui::scoped_with` first so the
+    ///   same way. Wrap the call in a `Gui::scope` first so the
     ///   scope's stable seed gives a stable counter=0 auto-id.
     /// - `.scope_builder(` — egui's raw scope API. Use our
-    ///   `Gui::scoped_with` so we pass a `StableId` and `global_scope`.
+    ///   `Gui::scope` so we pass a `StableId` and `global_scope`.
     ///
     /// Annotate intentional exceptions with `// id-drift-ok` on the
     /// same line or up to two non-blank lines above (e.g. when working
@@ -126,7 +126,7 @@ mod tests {
 
         assert!(
             offenders.is_empty(),
-            "Found drifting widget-id pattern. Use `Gui::scoped_with` (and \
+            "Found drifting widget-id pattern. Use `Gui::scope` (and \
              allocate inside the scope) instead, or annotate the line with \
              `// id-drift-ok` if intentional. Call sites:\n{}",
             offenders.join("\n"),

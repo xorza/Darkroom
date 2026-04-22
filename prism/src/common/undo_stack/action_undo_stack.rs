@@ -2,7 +2,6 @@ use std::fmt::Debug;
 
 use common::SerdeFormat;
 
-use crate::common::undo_stack::FullSerdeUndoStack;
 use crate::common::undo_stack::UndoStack;
 use crate::model::ViewGraph;
 use crate::model::graph_ui_action::{GestureKey, GraphUiAction};

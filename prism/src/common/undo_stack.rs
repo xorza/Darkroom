@@ -1,10 +1,8 @@
 use std::fmt::Debug;
 
 mod action_undo_stack;
-mod full_serde_undo_stack;
 
 pub use action_undo_stack::ActionUndoStack;
-pub use full_serde_undo_stack::FullSerdeUndoStack;
 
 pub trait UndoStack<T: Debug>: Debug {
     type Action;

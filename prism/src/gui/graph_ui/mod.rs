@@ -163,10 +163,9 @@ impl GraphUi {
 
         let rect = self.draw_background_frame(gui);
 
-        gui.scoped_with(
-            StableId::new("graph_ui"),
-            |b| b.max_rect(rect),
-            |gui| {
+        gui.scope(StableId::new("graph_ui"))
+            .max_rect(rect)
+            .show(|gui| {
                 gui.ui().set_clip_rect(rect);
 
                 let mut ctx = GraphContext {
@@ -260,8 +259,7 @@ impl GraphUi {
                 {
                     self.update_zoom_and_pan(gui, input, &ctx, &background_response, pointer_pos);
                 }
-            },
-        );
+            });
     }
 
     // ------------------------------------------------------------------------

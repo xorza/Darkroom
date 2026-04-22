@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use egui::{Align, FontId, InnerResponse, Layout, Painter, Rect, Ui, UiBuilder};
+use egui::{Align, FontId, InnerResponse, Layout, Painter, Rect, Sense, Ui, UiBuilder};
 
 use crate::{
     common::{StableId, UiEquals},
@@ -131,43 +131,19 @@ impl<'a> Gui<'a> {
         })
     }
 
-    pub fn new_child<R>(
-        &mut self,
-        builder: UiBuilder,
-        add_contents: impl FnOnce(&mut Gui<'_>) -> R,
-    ) -> R {
-        let style = Rc::clone(&self.style);
-        let scale = self.scale;
-        // Delegate to `scope_builder`, NOT `Ui::new_child` directly: only
-        // `scope_builder` calls `remember_min_rect` + `advance_cursor_after_rect`
-        // when the closure returns. Without those the parent's cursor never
-        // moves past us, so siblings stack on top of each other and inner
-        // layouts (Frame, horizontal, etc.) render at the wrong position.
-        self.ui
-            .scope_builder(builder, |ui| {
-                let mut gui = Gui::with_style(ui, style, scale);
-                add_contents(&mut gui)
-            })
-            .inner
-    }
-
-    /// Create a child Ui whose widget-registered id equals `id`'s
-    /// inner [`egui::Id`] verbatim (`global_scope=true`) — **not**
+    /// Begin a stable-id child scope. Returns a builder that applies
+    /// optional `.max_rect(..)` / `.sense(..)` tweaks and finishes with
+    /// `.show(|gui| ...)`, which creates the child `Gui` whose widget
+    /// id equals `id.id()` verbatim (`global_scope=true`) — **not**
     /// `parent.id.with(salt).with(parent_counter)` like egui's default
     /// `UiBuilder::id_salt` produces. That distinction shields our
     /// chrome from "widget rect changed id between passes" warnings
     /// when adjacent conditional siblings come and go.
-    ///
-    /// `customize` receives a builder pre-populated with the stable
-    /// id; do not overwrite it with `.id_salt` or `.id`.
-    pub fn scoped_with<R>(
-        &mut self,
-        id: StableId,
-        customize: impl FnOnce(UiBuilder) -> UiBuilder,
-        add_contents: impl FnOnce(&mut Gui<'_>) -> R,
-    ) -> R {
-        let builder = customize(UiBuilder::new().id(id.id()));
-        self.new_child(builder, add_contents)
+    pub fn scope(&mut self, id: StableId) -> ScopedGui<'_, 'a> {
+        ScopedGui {
+            gui: self,
+            builder: UiBuilder::new().id(id.id()),
+        }
     }
 
     /// Runs a closure with a temporarily changed scale, restoring the original scale afterward.
@@ -177,5 +153,44 @@ impl<'a> Gui<'a> {
         let result = f(self);
         self.set_scale(prev_scale);
         result
+    }
+}
+
+/// Builder returned by [`Gui::scope`]. Accumulates optional rect/sense
+/// tweaks, then runs the body under a child `Gui` whose widget id is
+/// pinned to the caller-supplied [`StableId`]. See `Gui::scope` for
+/// why the id-stability matters.
+#[must_use = "ScopedGui does nothing until .show() is called"]
+pub struct ScopedGui<'b, 'a> {
+    gui: &'b mut Gui<'a>,
+    builder: UiBuilder,
+}
+
+impl<'b, 'a> ScopedGui<'b, 'a> {
+    pub fn max_rect(mut self, rect: Rect) -> Self {
+        self.builder = self.builder.max_rect(rect);
+        self
+    }
+
+    pub fn sense(mut self, sense: Sense) -> Self {
+        self.builder = self.builder.sense(sense);
+        self
+    }
+
+    pub fn show<R>(self, add_contents: impl FnOnce(&mut Gui<'_>) -> R) -> R {
+        let style = Rc::clone(&self.gui.style);
+        let scale = self.gui.scale;
+        // Delegate to `scope_builder`, NOT `Ui::new_child` directly: only
+        // `scope_builder` calls `remember_min_rect` + `advance_cursor_after_rect`
+        // when the closure returns. Without those the parent's cursor never
+        // moves past us, so siblings stack on top of each other and inner
+        // layouts (Frame, horizontal, etc.) render at the wrong position.
+        self.gui
+            .ui
+            .scope_builder(self.builder, |ui| {
+                let mut gui = Gui::with_style(ui, style, scale);
+                add_contents(&mut gui)
+            })
+            .inner
     }
 }
