@@ -12,7 +12,7 @@ use crate::common::UiEquals;
 use crate::gui::Gui;
 use crate::gui::gesture::Gesture;
 use crate::gui::graph_ctx::GraphContext;
-use crate::gui::graph_layout::GraphLayout;
+use crate::gui::graph_layout::{self, GraphLayout};
 use crate::gui::graph_ui::{GraphUi, MAX_ZOOM, MIN_ZOOM, WHEEL_ZOOM_SPEED};
 use crate::input::InputSnapshot;
 use crate::model::graph_ui_action::GraphUiAction;
@@ -149,7 +149,7 @@ pub(super) fn fit_all_nodes_target(
         return (1.0, Vec2::ZERO);
     }
 
-    let origin = graph_layout.origin;
+    let origin = graph_layout::origin(gui, ctx);
     let scale = ctx.view_graph.scale;
     let to_graph_rect = |rect: egui::Rect| {
         let min = (rect.min - origin) / scale;
@@ -157,13 +157,14 @@ pub(super) fn fit_all_nodes_target(
         egui::Rect::from_min_max(egui::pos2(min.x, min.y), egui::pos2(max.x, max.y))
     };
 
-    // Defensive: `view_nodes` is non-empty but galleys haven't been
-    // built yet on the first frame after a load. Fall back to the
-    // empty-graph default rather than panic.
-    let mut layouts = graph_layout.iter_layouts(gui, ctx);
-    let Some(first) = layouts.next() else {
-        return (1.0, Vec2::ZERO);
-    };
+    let mut layouts = ctx
+        .view_graph
+        .view_nodes
+        .iter()
+        .map(|vn| graph_layout.node_layout(gui, ctx, &vn.id, Vec2::ZERO));
+    let first = layouts
+        .next()
+        .expect("view_nodes non-empty — checked above");
     let mut bounds = to_graph_rect(first.body_rect);
 
     for layout in layouts {

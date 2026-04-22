@@ -120,6 +120,7 @@ pub struct NodeLayout {
     pub status_dot_center: Pos2,
     pub input_first_center: Pos2,
     pub output_first_center: Pos2,
+    pub event_first_center: Pos2,
     pub port_row_height: f32,
     pub port_activation_radius: f32,
     pub header_row_height: f32,
@@ -214,6 +215,10 @@ impl NodeLayout {
         let port_base_y = header_row_height + cache_row_height + padding + port_row_height * 0.5;
         let input_first_local = pos2(0.0, port_base_y);
         let output_first_local = pos2(node_width, port_base_y);
+        let event_first_local = pos2(
+            node_width,
+            port_base_y + port_row_height * galleys.outputs.len() as f32,
+        );
 
         let global_offset = (origin + node_pos.to_vec2() * scale).to_vec2();
 
@@ -225,6 +230,7 @@ impl NodeLayout {
             status_dot_center: dot_first_local + global_offset,
             input_first_center: input_first_local + global_offset,
             output_first_center: output_first_local + global_offset,
+            event_first_center: event_first_local + global_offset,
             port_row_height,
             port_activation_radius: port_row_height * 0.5,
             header_row_height,
@@ -248,7 +254,7 @@ impl NodeLayout {
 
     pub fn event_center(&self, index: usize) -> Pos2 {
         debug_assert!(index < self.event_count);
-        self.port_at_row(self.output_first_center, index + self.output_count)
+        self.port_at_row(self.event_first_center, index)
     }
 
     pub fn trigger_center(&self) -> Pos2 {

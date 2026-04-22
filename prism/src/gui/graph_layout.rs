@@ -28,23 +28,26 @@ pub struct PortInfo {
 // GraphLayout
 // ============================================================================
 
-/// Per-frame layout state. The only thing cached is `NodeGalleys` —
-/// shaped text that costs real work to build. Layouts (`NodeLayout`)
-/// are cheap arithmetic on top of galleys + positions + style, so
-/// they're computed on demand at each call site instead of stored.
+/// Per-frame layout state. Caches only `NodeGalleys` (shaped text).
+/// `NodeLayout` is cheap arithmetic on top of galleys + positions +
+/// style and is computed on demand at each call site.
 #[derive(Debug, Default)]
 pub struct GraphLayout {
-    pub origin: Pos2,
-    pub node_galleys: KeyIndexVec<NodeId, NodeGalleys>,
+    node_galleys: KeyIndexVec<NodeId, NodeGalleys>,
+}
+
+/// World-space origin (where graph coord (0, 0) lands on screen) for
+/// the current frame. Derived; kept out of `GraphLayout` so there's
+/// no cached-then-stale foot-gun.
+pub fn origin(gui: &Gui<'_>, ctx: &GraphContext<'_>) -> Pos2 {
+    gui.rect.min + ctx.view_graph.pan
 }
 
 impl GraphLayout {
-    /// Refreshes galley cache and the world-space `origin` for the
-    /// current frame. Galleys only rebuild when their node's name or
-    /// the GUI scale changes; `NodeLayout`s are not built here.
-    pub fn update(&mut self, gui: &mut Gui<'_>, ctx: &GraphContext) {
-        self.origin = gui.rect.min + ctx.view_graph.pan;
-
+    /// Refresh galley cache: rebuild any stale entry (name or GUI
+    /// scale changed) and insert entries for newly added nodes.
+    /// Must be called once per frame before any `node_layout` read.
+    pub fn refresh_galleys(&mut self, gui: &mut Gui<'_>, ctx: &GraphContext) {
         let mut compact = self.node_galleys.compact_insert_start();
         for view_node in ctx.view_graph.view_nodes.iter() {
             let node = ctx.view_graph.graph.by_id(&view_node.id).unwrap();
@@ -57,9 +60,9 @@ impl GraphLayout {
         }
     }
 
-    /// Compute the geometry for a single node from cached galleys +
-    /// the caller-supplied drag offset. `update()` must have been
-    /// called this frame — it populates galleys for every view-node.
+    /// Compute geometry for a single node from cached galleys + the
+    /// caller-supplied drag offset. `refresh_galleys()` must have run
+    /// this frame — it populates galleys for every view-node.
     pub fn node_layout(
         &self,
         gui: &Gui<'_>,
@@ -76,21 +79,9 @@ impl GraphLayout {
             func,
             &gui.style,
             gui.scale(),
-            self.origin,
+            origin(gui, ctx),
             view_node.pos + drag_offset,
         )
-    }
-
-    /// Iterate layouts for every visible node with no drag offset.
-    pub fn iter_layouts<'a>(
-        &'a self,
-        gui: &'a Gui<'_>,
-        ctx: &'a GraphContext<'_>,
-    ) -> impl Iterator<Item = NodeLayout> + 'a {
-        ctx.view_graph
-            .view_nodes
-            .iter()
-            .map(move |view_node| self.node_layout(gui, ctx, &view_node.id, Vec2::ZERO))
     }
 
     pub fn node_galleys(&self, node_id: &NodeId) -> &NodeGalleys {

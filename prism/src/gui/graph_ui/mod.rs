@@ -165,9 +165,9 @@ impl GraphUi {
         pointer_pos: Option<Pos2>,
     ) {
         gui.with_scale(ctx.view_graph.scale, |gui| {
-            // Refresh galleys + origin first so every subsequent call
-            // site can assume galleys exist for every view-node.
-            self.graph_layout.update(gui, ctx);
+            // Refresh galleys first so every subsequent call site
+            // can assume galleys exist for every view-node.
+            self.graph_layout.refresh_galleys(gui, ctx);
 
             // Interact with fresh body rects — layouts are computed on
             // demand from the current gesture offset, so this frame's
