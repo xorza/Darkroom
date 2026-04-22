@@ -36,6 +36,7 @@ Plus the standard set: `rg`, `fd`, `jq`, `gh`, `cargo`, `cargo-nextest`, `rustfm
 - Remove unused code. If kept intentionally, add a comment explaining why and silence linter warnings.
 - Keep public API clean and consistent.
 - Never use `#[cfg(test)]` on functions in production code. If tests need convenience helpers, define them in the test module itself.
+- **No decorative section-divider comments.** Do not add `// =====…`, `// -----…`, or standalone `// Title` lines that exist only to group items inside a file. If a file has grown big enough to feel like it needs sections, split it into submodules instead. Module docs and `///` doc comments are the sanctioned ways to say what something is.
 
 ## Verification
 
