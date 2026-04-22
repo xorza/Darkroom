@@ -165,6 +165,17 @@ impl GraphUi {
         pointer_pos: Option<Pos2>,
     ) {
         gui.with_scale(ctx.view_graph.scale, |gui| {
+            // Interact with the *previous* frame's node rects so the drag
+            // delta accumulated here is reflected in this frame's layout
+            // update below. One pass, no stale-rect flash.
+            self.node_ui.handle_node_interactions(
+                gui,
+                ctx,
+                &self.graph_layout,
+                &mut self.output,
+                &mut self.gesture,
+            );
+
             self.graph_layout.update(gui, ctx, &self.gesture);
             self.dots_background.render(gui, ctx);
             self.render_connections(gui, ctx);
@@ -178,9 +189,9 @@ impl GraphUi {
             let nodes_result = self.node_ui.render_nodes(
                 gui,
                 ctx,
-                &mut self.graph_layout,
+                &self.graph_layout,
                 &mut self.output,
-                &mut self.gesture,
+                &self.gesture,
             );
 
             // Surface render-time removal intents as actions. The mutation

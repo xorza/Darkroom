@@ -25,7 +25,7 @@ use scenarium::prelude::{ExecutionStats, Func, FuncBehavior, NodeBehavior};
 const DRAG_BUTTONS: [PointerButton; 2] = [PointerButton::Primary, PointerButton::Middle];
 
 /// Drag lifecycle events for a node body response, collapsed to a
-/// single read of the response so the rest of `handle_node_drag`
+/// single read of the response so the rest of `handle_node_interactions`
 /// doesn't repeat the `primary || middle` check three times.
 #[derive(Debug, Clone, Copy)]
 struct NodeDragEvents {
@@ -146,26 +146,88 @@ pub(crate) struct NodesFrameResult {
 }
 
 impl NodeUi {
+    /// Per-frame interaction pass for node bodies. Runs BEFORE
+    /// `GraphLayout::update` so the drag delta accumulated here is
+    /// reflected in the same frame's layout, removing the need for a
+    /// second per-node layout recompute during rendering. Uses the
+    /// previous frame's `body_rect` as the interact target — that rect
+    /// already reflects the previous frame's drag offset, so there is
+    /// no visible lag when the offset is continuous.
+    pub fn handle_node_interactions(
+        &self,
+        gui: &mut Gui<'_>,
+        ctx: &GraphContext,
+        graph_layout: &GraphLayout,
+        output: &mut FrameOutput,
+        gesture: &mut Gesture,
+    ) {
+        for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
+            let node_id = ctx.view_graph.view_nodes[view_node_idx].id;
+            // Layouts for brand-new nodes don't exist yet on the first
+            // frame after insertion — skip; they'll be interactable on
+            // the next frame once `GraphLayout::update` allocates them.
+            let Some(layout) = graph_layout.node_layouts.by_key(&node_id) else {
+                continue;
+            };
+
+            let body_id = StableId::new(("node_body", node_id)).id();
+            let response = gui.ui().interact(
+                layout.body_rect,
+                body_id,
+                Sense::click() | Sense::hover() | Sense::drag(),
+            );
+            let events = NodeDragEvents::from_response(&response);
+
+            if (events.started || response.clicked())
+                && ctx.view_graph.selected_node_id != Some(node_id)
+            {
+                output.add_action(GraphUiAction::NodeSelected {
+                    before: ctx.view_graph.selected_node_id,
+                    after: Some(node_id),
+                });
+            }
+
+            if events.started {
+                let start_pos = ctx.view_graph.view_nodes.by_key(&node_id).unwrap().pos;
+                gesture.start_node_drag(node_id, start_pos);
+            }
+            if let Some(drag) = gesture.node_drag_mut()
+                && drag.node_id == node_id
+            {
+                if events.dragging {
+                    drag.offset += response.drag_delta() / gui.scale();
+                }
+                if events.stopped {
+                    output.add_action(GraphUiAction::NodeMoved {
+                        node_id,
+                        before: drag.start_pos,
+                        after: drag.committed_pos(),
+                    });
+                }
+            }
+
+            if events.stopped {
+                gesture.cancel();
+            }
+        }
+    }
+
     pub fn render_nodes(
         &mut self,
         gui: &mut Gui<'_>,
         ctx: &GraphContext,
-        graph_layout: &mut GraphLayout,
+        graph_layout: &GraphLayout,
         output: &mut FrameOutput,
-        gesture: &mut Gesture,
+        gesture: &Gesture,
     ) -> NodesFrameResult {
         let mut result = NodesFrameResult::default();
         let mut const_bind_frame = self.const_bind_ui.start();
+        let breaker = gesture.breaker();
 
         for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
             let node_id = ctx.view_graph.view_nodes[view_node_idx].id;
-            let layout = Self::handle_node_drag(gui, ctx, graph_layout, output, gesture, &node_id);
-
-            // Re-fetch the breaker fresh after every drag pass — the
-            // gesture machine is mutable, so any Option<&ConnectionBreaker>
-            // captured before the call would be invalidated by the
-            // reborrow.
-            let breaker = gesture.breaker();
+            let layout = graph_layout.node_layout(&node_id);
+            let galleys = graph_layout.node_galleys(&node_id);
 
             let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
@@ -179,7 +241,7 @@ impl NodeUi {
             let is_selected = ctx.view_graph.selected_node_id == Some(node_id);
             let exec_info = NodeExecutionInfo::from_stats(ctx.execution_stats, node_id);
 
-            if render_body(gui, layout, is_selected, &exec_info, breaker) {
+            if render_body(gui, layout, galleys, is_selected, &exec_info, breaker) {
                 result.broken_nodes.push(node_id);
             }
 
@@ -195,77 +257,11 @@ impl NodeUi {
                 .port_cmd
                 .prefer(render_ports(gui, layout, node, func, &missing_inputs));
 
-            render_port_labels(gui, layout);
+            render_port_labels(gui, layout, galleys);
         }
 
         const_bind_frame.finish();
         result
-    }
-
-    fn handle_node_drag<'a>(
-        gui: &mut Gui<'_>,
-        ctx: &GraphContext<'_>,
-        graph_layout: &'a mut GraphLayout,
-        output: &mut FrameOutput,
-        gesture: &mut Gesture,
-        node_id: &NodeId,
-    ) -> &'a NodeLayout {
-        let body_id = StableId::new(("node_body", *node_id)).id();
-        let body_rect = graph_layout.node_layouts.by_key(node_id).unwrap().body_rect;
-        let response = gui.ui().interact(
-            body_rect,
-            body_id,
-            Sense::click() | Sense::hover() | Sense::drag(),
-        );
-        let events = NodeDragEvents::from_response(&response);
-
-        // Selection — emit an action only; apply() updates
-        // `view_state.selected_node_id` at end of frame.
-        if (events.started || response.clicked())
-            && ctx.view_graph.selected_node_id != Some(*node_id)
-        {
-            output.add_action(GraphUiAction::NodeSelected {
-                before: ctx.view_graph.selected_node_id,
-                after: Some(*node_id),
-            });
-        }
-
-        // Drag lifecycle — the `Gesture` state machine owns the in-flight
-        // offset. `ViewGraph` stays untouched until the drag commits on
-        // release (the `NodeMoved` action applied at end of frame).
-        if events.started {
-            let start_pos = ctx.view_graph.view_nodes.by_key(node_id).unwrap().pos;
-            gesture.start_node_drag(*node_id, start_pos);
-        }
-        if let Some(drag) = gesture.node_drag_mut()
-            && drag.node_id == *node_id
-        {
-            if events.dragging {
-                drag.offset += response.drag_delta() / gui.scale();
-            }
-            if events.stopped {
-                output.add_action(GraphUiAction::NodeMoved {
-                    node_id: *node_id,
-                    before: drag.start_pos,
-                    after: drag.committed_pos(),
-                });
-            }
-        }
-
-        // Refresh this node's layout with the current drag offset so the
-        // rest of `render_nodes` sees the dragged rect. Must happen
-        // *before* we cancel the gesture on drop — otherwise the offset
-        // would be zero'd and this final frame would flash the node at
-        // its pre-drag position until apply() lands.
-        let drag_offset = gesture.node_drag_offset_for(node_id);
-        let layout = graph_layout.node_layouts.by_key_mut(node_id).unwrap();
-        layout.update(ctx, gui, graph_layout.origin, drag_offset);
-
-        if events.stopped {
-            gesture.cancel();
-        }
-
-        layout
     }
 }
 
@@ -276,6 +272,7 @@ impl NodeUi {
 fn render_body(
     gui: &Gui<'_>,
     layout: &NodeLayout,
+    galleys: &crate::gui::node_layout::NodeGalleys,
     selected: bool,
     exec_info: &NodeExecutionInfo<'_>,
     breaker: Option<&ConnectionBreaker>,
@@ -351,14 +348,11 @@ fn render_body(
     let title_pos = layout.body_rect.min
         + vec2(
             gui.style.padding,
-            (layout.header_row_height - layout.title_galley.size().y) * 0.5,
+            (layout.header_row_height - galleys.title.size().y) * 0.5,
         );
     let title_color = breaker_hit.then_else(gui.style.dark_text_color, gui.style.text_color);
-    gui.painter().galley_with_override_text_color(
-        title_pos,
-        layout.title_galley.clone(),
-        title_color,
-    );
+    gui.painter()
+        .galley_with_override_text_color(title_pos, galleys.title.clone(), title_color);
 
     breaker_hit
 }
@@ -528,13 +522,13 @@ fn render_ports(
     if func.terminal {
         draw_port(gui, PortKind::Trigger, 0, layout.trigger_center());
     }
-    for idx in 0..layout.input_galleys.len() {
+    for idx in 0..layout.input_count {
         draw_port(gui, PortKind::Input, idx, layout.input_center(idx));
     }
-    for idx in 0..layout.output_galleys.len() {
+    for idx in 0..layout.output_count {
         draw_port(gui, PortKind::Output, idx, layout.output_center(idx));
     }
-    for idx in 0..layout.event_galleys.len() {
+    for idx in 0..layout.event_count {
         draw_port(gui, PortKind::Event, idx, layout.event_center(idx));
     }
 
@@ -549,7 +543,11 @@ enum LabelSide {
     LeftOfPort,
 }
 
-fn render_port_labels(gui: &Gui<'_>, layout: &NodeLayout) {
+fn render_port_labels(
+    gui: &Gui<'_>,
+    layout: &NodeLayout,
+    galleys: &crate::gui::node_layout::NodeGalleys,
+) {
     let padding = gui.style.node.port_label_side_padding;
     let color = gui.style.text_color;
 
@@ -568,17 +566,17 @@ fn render_port_labels(gui: &Gui<'_>, layout: &NodeLayout) {
     };
 
     draw(
-        &layout.input_galleys,
+        &galleys.inputs,
         &|idx| layout.input_center(idx),
         LabelSide::RightOfPort,
     );
     draw(
-        &layout.output_galleys,
+        &galleys.outputs,
         &|idx| layout.output_center(idx),
         LabelSide::LeftOfPort,
     );
     draw(
-        &layout.event_galleys,
+        &galleys.events,
         &|idx| layout.event_center(idx),
         LabelSide::LeftOfPort,
     );
