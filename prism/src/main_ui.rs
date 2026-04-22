@@ -171,8 +171,10 @@ impl MainUi {
 
     fn handle_shortcuts(&mut self, input: &InputSnapshot, app_data: &mut AppData) {
         if input.cmd_only(egui::Key::Z) {
+            self.graph_ui.cancel_gesture();
             app_data.undo(self.graph_ui.output());
         } else if input.cmd_shift(egui::Key::Z) {
+            self.graph_ui.cancel_gesture();
             app_data.redo();
         }
 

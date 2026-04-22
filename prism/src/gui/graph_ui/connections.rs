@@ -245,20 +245,6 @@ pub(super) fn build_data_connection_action(
         });
     }
 
-    // Defensive: the drag that produced these ports could have been
-    // invalidated by an intervening undo/redo. Bail gracefully instead
-    // of panicking.
-    if view_graph.graph.by_id(&input_port.node_id).is_none() {
-        return Err(Error::StaleNode {
-            node_id: input_port.node_id,
-        });
-    }
-    if view_graph.graph.by_id(&output_port.node_id).is_none() {
-        return Err(Error::StaleNode {
-            node_id: output_port.node_id,
-        });
-    }
-
     let dependents = view_graph.graph.dependent_nodes(&input_port.node_id);
     if dependents.contains(&output_port.node_id) {
         return Err(Error::CycleDetected {
@@ -299,17 +285,14 @@ pub(super) fn build_event_connection_action(
         });
     }
 
-    // Defensive — see comment in `build_data_connection_action`.
-    if view_graph.graph.by_id(&input_port.node_id).is_none() {
-        return Err(Error::StaleNode {
-            node_id: input_port.node_id,
-        });
-    }
-    let Some(output_node) = view_graph.graph.by_id(&output_port.node_id) else {
-        return Err(Error::StaleNode {
-            node_id: output_port.node_id,
-        });
-    };
+    let output_node = view_graph
+        .graph
+        .by_id(&output_port.node_id)
+        .expect("event connection output node must exist");
+    assert!(
+        view_graph.graph.by_id(&input_port.node_id).is_some(),
+        "event connection input node must exist"
+    );
     assert!(
         output_port.port_idx < output_node.events.len(),
         "event index out of range for build_event_connection_action"

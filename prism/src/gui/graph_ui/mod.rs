@@ -51,10 +51,6 @@ pub(crate) enum Error {
         input_node_id: NodeId,
         output_node_id: NodeId,
     },
-    /// One of the ports the action refers to no longer exists. Happens if
-    /// a node is deleted (e.g. via undo/redo) while the user is holding
-    /// an in-flight drag whose endpoints referenced that node.
-    StaleNode { node_id: NodeId },
 }
 
 impl std::fmt::Display for Error {
@@ -66,10 +62,6 @@ impl std::fmt::Display for Error {
             } => write!(
                 f,
                 "connection would create a cycle between {input_node_id} and {output_node_id}"
-            ),
-            Error::StaleNode { node_id } => write!(
-                f,
-                "node {node_id} referenced by in-flight drag no longer exists"
             ),
         }
     }
@@ -93,7 +85,7 @@ impl GraphUi {
         &mut self.output
     }
 
-    pub(super) fn cancel_gesture(&mut self) {
+    pub fn cancel_gesture(&mut self) {
         self.gesture.cancel();
     }
 
@@ -113,12 +105,6 @@ impl GraphUi {
         if input.cancel_requested() {
             self.cancel_gesture();
         }
-
-        // Drop any interaction state that references nodes that have
-        // since been removed (e.g. by an undo/redo that ran between
-        // frames). Keeping stale IDs in `Gesture` would propagate to
-        // downstream `.unwrap()` sites in drag/commit code paths.
-        self.drop_stale_gesture(&app_data.state.view_graph);
 
         let rect = self.draw_background_frame(gui);
 
@@ -294,32 +280,6 @@ impl GraphUi {
 
         (response, pointer_pos)
     }
-
-    // ------------------------------------------------------------------------
-    // Gesture hygiene
-    // ------------------------------------------------------------------------
-
-    /// Cancels the current interaction if it references nodes that no
-    /// longer exist in `view_graph`. See `Error::StaleNode`.
-    fn drop_stale_gesture(&mut self, view_graph: &model::ViewGraph) {
-        let stale = match &self.gesture {
-            Gesture::Idle | Gesture::Panning | Gesture::BreakingConnections(_) => false,
-            Gesture::DraggingNode(drag) => view_graph.graph.by_id(&drag.node_id).is_none(),
-            Gesture::DraggingConnection(drag) => {
-                let start_missing = view_graph
-                    .graph
-                    .by_id(&drag.start_port.port.node_id)
-                    .is_none();
-                let end_missing = drag
-                    .end_port
-                    .is_some_and(|p| view_graph.graph.by_id(&p.port.node_id).is_none());
-                start_missing || end_missing
-            }
-        };
-        if stale {
-            self.gesture.cancel();
-        }
-    }
 }
 
 // ============================================================================
@@ -463,24 +423,6 @@ mod tests {
     }
 
     #[test]
-    fn build_data_connection_action_stale_input_node_yields_stale_error() {
-        // Drag started from node A, but A was removed between frames —
-        // only B is left. We should get Error::StaleNode, not a panic.
-        let b = make_node_with(0, 0);
-        let b_id = b.id;
-        let vg = view_graph_with_nodes(vec![b]);
-        let missing = NodeId::unique();
-
-        let err = build_data_connection_action(
-            &vg,
-            port(missing, PortKind::Input, 0),
-            port(b_id, PortKind::Output, 0),
-        )
-        .unwrap_err();
-        assert!(matches!(err, Error::StaleNode { node_id } if node_id == missing));
-    }
-
-    #[test]
     fn build_data_connection_action_action_applies_to_bound_binding() {
         let a = make_node_with(1, 0);
         let b = make_node_with(1, 0);
@@ -540,22 +482,6 @@ mod tests {
         )
         .unwrap();
         assert!(result.is_none(), "re-subscribing must be a no-op");
-    }
-
-    #[test]
-    fn build_event_connection_action_stale_output_node_yields_stale_error() {
-        let a = make_node_with(0, 0);
-        let a_id = a.id;
-        let vg = view_graph_with_nodes(vec![a]);
-        let missing = NodeId::unique();
-
-        let err = build_event_connection_action(
-            &vg,
-            port(a_id, PortKind::Trigger, 0),
-            port(missing, PortKind::Event, 0),
-        )
-        .unwrap_err();
-        assert!(matches!(err, Error::StaleNode { node_id } if node_id == missing));
     }
 
     #[test]
