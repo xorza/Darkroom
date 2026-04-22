@@ -44,7 +44,7 @@ impl NodeGalleys {
             inputs: Vec::new(),
             outputs: Vec::new(),
             events: Vec::new(),
-            sub_row_height: gui.font_height(&gui.style.sub_font.clone()),
+            sub_row_height: sub_row_height(gui),
         };
         this.rebuild_port_galleys(gui, func);
         this
@@ -60,28 +60,19 @@ impl NodeGalleys {
 
         if scale_changed {
             self.rebuild_port_galleys(gui, func);
-            self.sub_row_height = gui.font_height(&gui.style.sub_font.clone());
+            self.sub_row_height = sub_row_height(gui);
             self.scale = gui.scale();
         }
     }
 
     fn rebuild_port_galleys(&mut self, gui: &Gui<'_>, func: &Func) {
         let font = &gui.style.sub_font;
-        self.inputs = func
-            .inputs
-            .iter()
-            .map(|p| Self::make_sub(gui, &p.name, font))
-            .collect();
-        self.outputs = func
-            .outputs
-            .iter()
-            .map(|p| Self::make_sub(gui, &p.name, font))
-            .collect();
-        self.events = func
-            .events
-            .iter()
-            .map(|e| Self::make_sub(gui, &e.name, font))
-            .collect();
+        let collect = |names: &mut dyn Iterator<Item = &str>| -> Vec<Arc<Galley>> {
+            names.map(|n| Self::make_sub(gui, n, font)).collect()
+        };
+        self.inputs = collect(&mut func.inputs.iter().map(|p| p.name.as_str()));
+        self.outputs = collect(&mut func.outputs.iter().map(|p| p.name.as_str()));
+        self.events = collect(&mut func.events.iter().map(|e| e.name.as_str()));
     }
 
     fn make_title(gui: &Gui<'_>, text: &str) -> Arc<Galley> {
@@ -96,6 +87,10 @@ impl NodeGalleys {
         gui.painter()
             .layout_no_wrap(text.to_string(), font.clone(), gui.style.text_color)
     }
+}
+
+fn sub_row_height(gui: &mut Gui<'_>) -> f32 {
+    gui.font_height(&gui.style.sub_font.clone())
 }
 
 impl KeyIndexKey<NodeId> for NodeGalleys {
