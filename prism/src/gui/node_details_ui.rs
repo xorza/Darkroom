@@ -1,7 +1,7 @@
 use egui::{Pos2, Rect, Response, Sense, TextureOptions, Vec2};
 use palantir::Image;
 use scenarium::data::DynamicValue;
-use scenarium::graph::{Node, NodeId};
+use scenarium::graph::NodeId;
 use scenarium::prelude::{ExecutionStats, Func};
 
 use crate::common::StableId;
@@ -25,12 +25,12 @@ pub struct NodeDetailsUi;
 
 impl NodeDetailsUi {
     pub fn show(
-        &mut self,
+        &self,
         gui: &mut Gui<'_>,
         ctx: &mut GraphContext<'_>,
         output: &mut FrameOutput,
     ) -> Response {
-        let panel_rect = self.compute_panel_rect(gui);
+        let panel_rect = compute_panel_rect(gui);
         let popup_id = gui.ui().make_persistent_id("node_details_panel");
 
         let Some(node_id) = ctx.view_graph.selected_node_id else {
@@ -48,100 +48,90 @@ impl NodeDetailsUi {
                     .sense(Sense::all())
                     .show(gui, StableId::new("node_details_frame"), |gui| {
                         ScrollArea::vertical().id(scroll_id).show(gui, |gui| {
-                            self.show_content(gui, ctx, node_id, output);
+                            show_content(gui, ctx, node_id, output);
                         });
                     })
             })
             .inner
             .response
     }
+}
 
-    fn compute_panel_rect(&self, gui: &Gui<'_>) -> Rect {
-        let graph_rect = gui.rect;
-        let padding = gui.style.padding;
-        Rect::from_min_size(
-            Pos2::new(graph_rect.right() - PANEL_WIDTH, graph_rect.top() + padding),
-            Vec2::new(PANEL_WIDTH - padding, graph_rect.height() - padding * 2.0),
-        )
+fn compute_panel_rect(gui: &Gui<'_>) -> Rect {
+    let graph_rect = gui.rect;
+    let padding = gui.style.padding;
+    Rect::from_min_size(
+        Pos2::new(graph_rect.right() - PANEL_WIDTH, graph_rect.top() + padding),
+        Vec2::new(PANEL_WIDTH - padding, graph_rect.height() - padding * 2.0),
+    )
+}
+
+fn show_content(
+    gui: &mut Gui<'_>,
+    ctx: &mut GraphContext<'_>,
+    node_id: NodeId,
+    output: &mut FrameOutput,
+) {
+    // `selected_node_id` is cleared by `remove_node`, so this lookup
+    // should always succeed — but an undo/redo between frames can
+    // invalidate the id before we land here.
+    let Some(node) = ctx.view_graph.graph.by_id(&node_id) else {
+        return;
+    };
+    let original_name = node.name.clone();
+
+    show_name_editor(gui, node_id, &original_name, output);
+
+    if let Some(stats) = ctx.execution_stats {
+        show_execution_info(gui, ctx, node_id, stats);
     }
 
-    fn show_content(
-        &mut self,
-        gui: &mut Gui<'_>,
-        ctx: &mut GraphContext<'_>,
-        node_id: NodeId,
-        output: &mut FrameOutput,
-    ) {
-        // `selected_node_id` is cleared by `remove_node`, so this
-        // lookup should always succeed — but an undo/redo between
-        // frames could invalidate the id before we land here.
-        if ctx.view_graph.graph.by_id(&node_id).is_none() {
-            return;
-        }
+    let Some(func) = ctx.func_lib.by_id(&node.func_id) else {
+        return;
+    };
 
-        self.show_name_editor(gui, ctx, node_id, output);
+    let Some(node_cache) = ctx.argument_values_cache.get_mut(&node_id) else {
+        output.set_request_argument_values(node_id);
+        return;
+    };
 
-        if let Some(stats) = ctx.execution_stats {
-            show_execution_info(gui, ctx, node_id, stats);
-        }
+    add_section_separator(gui);
+    show_image_previews(gui, node_id, func, node_cache);
+}
 
-        let Some(node_cache) = ctx.argument_values_cache.get_mut(&node_id) else {
-            output.set_request_argument_values(node_id);
-            return;
-        };
+fn show_name_editor(
+    gui: &mut Gui<'_>,
+    node_id: NodeId,
+    original_name: &str,
+    output: &mut FrameOutput,
+) {
+    let mut name = original_name.to_string();
 
-        add_section_separator(gui);
+    gui.vertical(|gui| {
+        let font = gui.style.sub_font.clone();
+        let text_color = gui.style.text_color;
 
-        let Some(node) = ctx.view_graph.graph.by_id(&node_id) else {
-            return;
-        };
-        let Some(func) = ctx.func_lib.by_id(&node.func_id) else {
-            return;
-        };
-        show_image_previews(gui, node, func, node_cache);
-    }
+        gui.ui().label("Name:");
+        // Stable salt (not keyed on node_id) — the textbox is the
+        // same chrome widget regardless of which node is selected;
+        // only its content changes. Keying on node_id would shift
+        // the widget id on every selection change, tripping egui's
+        // "widget rect changed id between passes" warning.
+        TextEdit::singleline(&mut name)
+            .id_salt(StableId::new("node_name_edit"))
+            .font(font)
+            .text_color(text_color)
+            .char_limit(20)
+            .show(gui);
+    });
 
-    fn show_name_editor(
-        &self,
-        gui: &mut Gui<'_>,
-        ctx: &GraphContext<'_>,
-        node_id: NodeId,
-        output: &mut FrameOutput,
-    ) {
-        // Guarded in `show_content`; replicated here so the function
-        // is safe if called in isolation (e.g. from a future test).
-        let Some(node) = ctx.view_graph.graph.by_id(&node_id) else {
-            return;
-        };
-        let original_name = node.name.clone();
-        let mut name = original_name.clone();
-
-        gui.vertical(|gui| {
-            let font = gui.style.sub_font.clone();
-            let text_color = gui.style.text_color;
-
-            gui.ui().label("Name:");
-            // Stable salt (not keyed on node_id) — the textbox is the
-            // same chrome widget regardless of which node is selected;
-            // only its content changes. Keying on node_id would shift
-            // the widget id on every selection change, tripping egui's
-            // "widget rect changed id between passes" warning.
-            TextEdit::singleline(&mut name)
-                .id_salt(StableId::new("node_name_edit"))
-                .font(font)
-                .text_color(text_color)
-                .char_limit(20)
-                .show(gui);
+    if name != original_name {
+        // Mutation applied via NodeNameChanged::apply in handle_actions.
+        output.add_action(GraphUiAction::NodeNameChanged {
+            node_id,
+            before: original_name.to_string(),
+            after: name,
         });
-
-        if name != original_name {
-            // Mutation applied via NodeNameChanged::apply in handle_actions.
-            output.add_action(GraphUiAction::NodeNameChanged {
-                node_id,
-                before: original_name,
-                after: name,
-            });
-        }
     }
 }
 
@@ -189,10 +179,15 @@ fn show_execution_info(
 
 // === Image Previews ===
 
-fn show_image_previews(gui: &mut Gui<'_>, node: &Node, func: &Func, node_cache: &mut NodeCache) {
+fn show_image_previews(
+    gui: &mut Gui<'_>,
+    node_id: NodeId,
+    func: &Func,
+    node_cache: &mut NodeCache,
+) {
     cache_previews(
         gui,
-        &node.id,
+        &node_id,
         "input",
         node_cache
             .arg_values
@@ -203,7 +198,7 @@ fn show_image_previews(gui: &mut Gui<'_>, node: &Node, func: &Func, node_cache: 
     );
     cache_previews(
         gui,
-        &node.id,
+        &node_id,
         "output",
         node_cache.arg_values.outputs.iter().map(Some),
         &mut node_cache.output_previews,
