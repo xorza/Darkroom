@@ -1,14 +1,22 @@
 use std::sync::Arc;
 
 use egui::{Align2, Pos2, Response, vec2};
-use scenarium::data::{DataType, EnumDef, StaticValue};
+use scenarium::data::{DataType, EnumDef, FsPathMode, StaticValue};
 
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::style::DragValueStyle;
 use crate::gui::widgets::combo_box::ComboBox;
 use crate::gui::widgets::drag_value::DragValue;
-use crate::gui::widgets::file_picker::FilePicker;
+use crate::gui::widgets::file_picker::{FilePicker, FilePickerMode};
+
+fn picker_mode(mode: FsPathMode) -> FilePickerMode {
+    match mode {
+        FsPathMode::ExistingFile => FilePickerMode::ExistingFile,
+        FsPathMode::NewFile => FilePickerMode::NewFile,
+        FsPathMode::Directory => FilePickerMode::Directory,
+    }
+}
 
 /// Editor for `StaticValue` types with consistent styling.
 ///
@@ -98,7 +106,7 @@ impl<'a> StaticValueEditor<'a> {
                 let DataType::FsPath(config) = self.data_type else {
                     panic!("Expected FsPath data type for StaticValue::FsPath");
                 };
-                FilePicker::new(path, config)
+                FilePicker::new(path, &config.extensions, picker_mode(config.mode))
                     .pos(self.pos)
                     .align(self.align)
                     .style(style)

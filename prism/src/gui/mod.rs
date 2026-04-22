@@ -24,6 +24,7 @@ pub mod node_layout;
 pub mod node_ui;
 pub mod style;
 pub mod style_settings;
+pub mod value_editor;
 pub mod widgets;
 
 pub struct Gui<'a> {

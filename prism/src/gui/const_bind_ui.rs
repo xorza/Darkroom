@@ -11,7 +11,7 @@ use crate::gui::connection_ui::{ConnectionCurve, ConnectionKey, PortKind};
 use crate::gui::frame_output::FrameOutput;
 use crate::gui::node_layout::NodeLayout;
 use crate::gui::style::DragValueStyle;
-use crate::gui::widgets::StaticValueEditor;
+use crate::gui::value_editor::StaticValueEditor;
 use crate::model::graph_ui_action::GraphUiAction;
 use common::key_index_vec::{CompactInsert, KeyIndexVec};
 

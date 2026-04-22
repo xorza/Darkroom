@@ -1,5 +1,4 @@
 pub mod bezier_helper;
-pub mod font;
 pub mod id_salt;
 pub mod image_utils;
 pub mod polyline_mesh;

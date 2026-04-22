@@ -1,27 +1,36 @@
 use std::path::Path;
 
 use egui::{Align2, Color32, Pos2, Response, Sense, Stroke, StrokeKind, pos2, vec2};
-use scenarium::data::{FsPathConfig, FsPathMode};
 
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::style::{ButtonStyle, DragValueStyle};
 use crate::gui::widgets::button::Button;
 
+/// What kind of filesystem entry the picker accepts.
+#[derive(Debug, Clone, Copy)]
+pub enum FilePickerMode {
+    ExistingFile,
+    NewFile,
+    Directory,
+}
+
 #[derive(Debug)]
 pub struct FilePicker<'a> {
     path: &'a mut String,
-    config: &'a FsPathConfig,
+    extensions: &'a [String],
+    mode: FilePickerMode,
     pos: Pos2,
     align: Align2,
     style: Option<DragValueStyle>,
 }
 
 impl<'a> FilePicker<'a> {
-    pub fn new(path: &'a mut String, config: &'a FsPathConfig) -> Self {
+    pub fn new(path: &'a mut String, extensions: &'a [String], mode: FilePickerMode) -> Self {
         Self {
             path,
-            config,
+            extensions,
+            mode,
             pos: Pos2::ZERO,
             align: Align2::RIGHT_CENTER,
             style: None,
@@ -115,15 +124,14 @@ impl<'a> FilePicker<'a> {
 
         if browse_response.clicked() {
             let mut dialog = rfd::FileDialog::new();
-            if !self.config.extensions.is_empty() {
-                let extensions: Vec<&str> =
-                    self.config.extensions.iter().map(|s| s.as_str()).collect();
+            if !self.extensions.is_empty() {
+                let extensions: Vec<&str> = self.extensions.iter().map(|s| s.as_str()).collect();
                 dialog = dialog.add_filter("Allowed files", &extensions);
             }
-            let selected_path = match self.config.mode {
-                FsPathMode::ExistingFile => dialog.pick_file(),
-                FsPathMode::NewFile => dialog.save_file(),
-                FsPathMode::Directory => dialog.pick_folder(),
+            let selected_path = match self.mode {
+                FilePickerMode::ExistingFile => dialog.pick_file(),
+                FilePickerMode::NewFile => dialog.save_file(),
+                FilePickerMode::Directory => dialog.pick_folder(),
             };
             if let Some(selected_path) = selected_path {
                 *self.path = selected_path.to_string_lossy().to_string();
