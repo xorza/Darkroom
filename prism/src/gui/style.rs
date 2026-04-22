@@ -23,6 +23,7 @@ use eframe::egui;
 use egui::{Color32, FontFamily, FontId, Margin, Shadow, Stroke, Vec2};
 use serde::{Deserialize, Serialize};
 
+use crate::common::UiEquals;
 use crate::gui::connection_ui::PortKind;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -248,10 +249,14 @@ impl Style {
         // Always multiply from the reference. If `self` is itself the
         // reference, use it; otherwise follow the back-link.
         let reference: &Rc<Self> = self.reference.as_ref().unwrap_or(self);
-        let r = reference.as_ref();
 
-        let scaled_margin = Margin::same((r.popup.padding * scale).ceil() as i8);
-        let _ = scaled_margin; // margin is recomputed from padding at apply time
+        // Fast-path: at scale=1.0 the reference already holds every
+        // value at the right magnitude — no multiplication needed.
+        if scale.ui_equals(1.0) {
+            return Rc::clone(reference);
+        }
+
+        let r = reference.as_ref();
 
         Rc::new(Style {
             heading_font: scale_font(&r.heading_font, scale),
@@ -420,18 +425,17 @@ fn scale_shadow(shadow: &Shadow, scale: f32) -> Shadow {
     }
 }
 
+// Shared default values used by multiple sub-struct `Default` impls.
+const SMALL_CORNER_RADIUS: f32 = 2.0;
+fn default_inactive_stroke() -> Stroke {
+    Stroke::new(1.0, Color32::from_rgb(65, 65, 65))
+}
+fn default_active_stroke() -> Stroke {
+    Stroke::new(1.0, Color32::from_rgb(128, 128, 128))
+}
+
 impl Default for Style {
     fn default() -> Self {
-        let inactive_stroke = Stroke::new(1.0, Color32::from_rgb(65, 65, 65));
-        let active_stroke = Stroke::new(1.0, Color32::from_rgb(128, 128, 128));
-        let small_corner_radius = 2.0_f32;
-        let status_shadow = |color: Color32| Shadow {
-            color,
-            offset: [0, 0],
-            blur: 6,
-            spread: 2,
-        };
-
         Self {
             heading_font: FontId {
                 size: 18.0,
@@ -460,81 +464,21 @@ impl Default for Style {
             inactive_bg_fill: Color32::from_rgb(40, 40, 40),
             checked_bg_fill: Color32::from_rgb(240, 205, 90),
 
-            inactive_bg_stroke: inactive_stroke,
-            active_bg_stroke: active_stroke,
+            inactive_bg_stroke: default_inactive_stroke(),
+            active_bg_stroke: default_active_stroke(),
 
             big_padding: 5.0,
             padding: 4.0,
             small_padding: 2.0,
             corner_radius: 4.0,
-            small_corner_radius,
+            small_corner_radius: SMALL_CORNER_RADIUS,
 
-            graph_background: GraphBackgroundStyle {
-                bg_color: Color32::from_rgb(16, 16, 16),
-                dotted_color: Color32::from_rgb(48, 48, 48),
-                dotted_base_spacing: 24.0,
-                dotted_radius_base: 1.2,
-            },
-            connections: ConnectionStyle {
-                feather: 0.8,
-                stroke_width: 1.5,
-                highlight_feather: 3.6,
-                broke_clr: Color32::from_rgb(255, 90, 90),
-                hover_detection_width: 6.0,
-                breaker_stroke: Stroke::new(2.0, Color32::from_rgb(255, 120, 120)),
-            },
-            node: NodeStyle {
-                status_impure_color: Color32::from_rgb(255, 150, 70),
-                status_dot_radius: 4.0,
-                shadow: Shadow {
-                    offset: [3, 4],
-                    blur: 10,
-                    spread: 5,
-                    color: Color32::from_black_alpha(96),
-                },
-                executed_shadow: status_shadow(Color32::from_rgb(66, 216, 130)),
-                cached_shadow: status_shadow(Color32::from_rgb(100, 160, 255)),
-                missing_inputs_shadow: status_shadow(Color32::from_rgb(255, 180, 70)),
-                errored_shadow: status_shadow(Color32::from_rgb(238, 66, 66)),
-                cache_btn_width: 50.0,
-                remove_btn_size: 10.0,
-                port_radius: 5.0,
-                port_activation_radius: 7.0,
-                port_label_side_padding: 8.0,
-                const_badge_offset: Vec2::new(-10.0, 0.0),
-                input_port_color: Color32::from_rgb(70, 150, 255),
-                output_port_color: Color32::from_rgb(70, 200, 200),
-                input_hover_color: Color32::from_rgb(120, 190, 255),
-                output_hover_color: Color32::from_rgb(110, 230, 210),
-                trigger_port_color: Color32::from_rgb(235, 200, 70),
-                event_port_color: Color32::from_rgb(235, 140, 70),
-                trigger_hover_color: Color32::from_rgb(255, 225, 120),
-                event_hover_color: Color32::from_rgb(255, 175, 120),
-                const_bind_style: DragValueStyle {
-                    fill: Color32::from_rgb(40, 40, 40),
-                    stroke: inactive_stroke,
-                    radius: small_corner_radius,
-                },
-            },
-            menu: MenuStyle {
-                button_padding: Vec2::new(12.0, 3.0),
-            },
-            popup: PopupStyle {
-                fill: Color32::from_rgb(35, 35, 35),
-                stroke: inactive_stroke,
-                corner_radius: 4.0,
-                padding: 4.0,
-            },
-            list_button: ButtonStyle {
-                disabled_fill: Color32::TRANSPARENT,
-                idle_fill: Color32::TRANSPARENT,
-                hover_fill: Color32::from_rgb(50, 50, 50),
-                active_fill: Color32::from_rgb(60, 60, 60),
-                checked_fill: Color32::TRANSPARENT,
-                inactive_stroke: Stroke::NONE,
-                hovered_stroke: Stroke::NONE,
-                radius: 0.0,
-            },
+            graph_background: GraphBackgroundStyle::default(),
+            connections: ConnectionStyle::default(),
+            node: NodeStyle::default(),
+            menu: MenuStyle::default(),
+            popup: PopupStyle::default(),
+            list_button: ButtonStyle::default(),
 
             reference: None,
         }
@@ -543,43 +487,110 @@ impl Default for Style {
 
 impl Default for GraphBackgroundStyle {
     fn default() -> Self {
-        Style::default().graph_background
+        Self {
+            bg_color: Color32::from_rgb(16, 16, 16),
+            dotted_color: Color32::from_rgb(48, 48, 48),
+            dotted_base_spacing: 24.0,
+            dotted_radius_base: 1.2,
+        }
     }
 }
 
 impl Default for ConnectionStyle {
     fn default() -> Self {
-        Style::default().connections
+        Self {
+            feather: 0.8,
+            stroke_width: 1.5,
+            highlight_feather: 3.6,
+            broke_clr: Color32::from_rgb(255, 90, 90),
+            hover_detection_width: 6.0,
+            breaker_stroke: Stroke::new(2.0, Color32::from_rgb(255, 120, 120)),
+        }
     }
 }
 
 impl Default for NodeStyle {
     fn default() -> Self {
-        Style::default().node
+        let status_shadow = |color: Color32| Shadow {
+            color,
+            offset: [0, 0],
+            blur: 6,
+            spread: 2,
+        };
+        Self {
+            status_impure_color: Color32::from_rgb(255, 150, 70),
+            status_dot_radius: 4.0,
+            shadow: Shadow {
+                offset: [3, 4],
+                blur: 10,
+                spread: 5,
+                color: Color32::from_black_alpha(96),
+            },
+            executed_shadow: status_shadow(Color32::from_rgb(66, 216, 130)),
+            cached_shadow: status_shadow(Color32::from_rgb(100, 160, 255)),
+            missing_inputs_shadow: status_shadow(Color32::from_rgb(255, 180, 70)),
+            errored_shadow: status_shadow(Color32::from_rgb(238, 66, 66)),
+            cache_btn_width: 50.0,
+            remove_btn_size: 10.0,
+            port_radius: 5.0,
+            port_activation_radius: 7.0,
+            port_label_side_padding: 8.0,
+            const_badge_offset: Vec2::new(-10.0, 0.0),
+            input_port_color: Color32::from_rgb(70, 150, 255),
+            output_port_color: Color32::from_rgb(70, 200, 200),
+            input_hover_color: Color32::from_rgb(120, 190, 255),
+            output_hover_color: Color32::from_rgb(110, 230, 210),
+            trigger_port_color: Color32::from_rgb(235, 200, 70),
+            event_port_color: Color32::from_rgb(235, 140, 70),
+            trigger_hover_color: Color32::from_rgb(255, 225, 120),
+            event_hover_color: Color32::from_rgb(255, 175, 120),
+            const_bind_style: DragValueStyle::default(),
+        }
     }
 }
 
 impl Default for MenuStyle {
     fn default() -> Self {
-        Style::default().menu
+        Self {
+            button_padding: Vec2::new(12.0, 3.0),
+        }
     }
 }
 
 impl Default for PopupStyle {
     fn default() -> Self {
-        Style::default().popup
+        Self {
+            fill: Color32::from_rgb(35, 35, 35),
+            stroke: default_inactive_stroke(),
+            corner_radius: 4.0,
+            padding: 4.0,
+        }
     }
 }
 
 impl Default for ButtonStyle {
     fn default() -> Self {
-        Style::default().list_button
+        // The list-button variant (transparent fills, no strokes).
+        Self {
+            disabled_fill: Color32::TRANSPARENT,
+            idle_fill: Color32::TRANSPARENT,
+            hover_fill: Color32::from_rgb(50, 50, 50),
+            active_fill: Color32::from_rgb(60, 60, 60),
+            checked_fill: Color32::TRANSPARENT,
+            inactive_stroke: Stroke::NONE,
+            hovered_stroke: Stroke::NONE,
+            radius: 0.0,
+        }
     }
 }
 
 impl Default for DragValueStyle {
     fn default() -> Self {
-        Style::default().node.const_bind_style
+        Self {
+            fill: Color32::from_rgb(40, 40, 40),
+            stroke: default_inactive_stroke(),
+            radius: SMALL_CORNER_RADIUS,
+        }
     }
 }
 
