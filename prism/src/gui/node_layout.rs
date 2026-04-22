@@ -7,8 +7,8 @@ use scenarium::prelude::FuncBehavior;
 use std::sync::Arc;
 
 // note: NodeLayout::update accepts a drag offset that is composed onto
-// `view_node.pos`. The offset comes from the Interaction state machine
-// (see `Interaction::node_drag_offset_for`).
+// `view_node.pos`. The offset comes from the Gesture state machine
+// (see `Gesture::node_drag_offset_for`).
 
 use crate::common::UiEquals;
 use crate::gui::connection_ui::PortKind;

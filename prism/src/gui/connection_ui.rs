@@ -7,9 +7,9 @@ use scenarium::worker::EventRef;
 use crate::common::connection_bezier::{ConnectionBezier, ConnectionBezierStyle};
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
+use crate::gui::frame_output::FrameOutput;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
-use crate::gui::graph_ui_interaction::GraphUiInteraction;
 use crate::gui::node_ui::PortInteractCommand;
 use crate::model::EventSubscriberChange;
 use crate::model::graph_ui_action::GraphUiAction;
@@ -130,7 +130,7 @@ pub(crate) struct ConnectionUi {
 
     /// Cached mesh buffer for the in-flight drag preview — reused across
     /// frames while a drag is active. The drag data itself lives in
-    /// [`crate::gui::interaction_state::Interaction::DraggingConnection`].
+    /// [`crate::gui::gesture::Gesture::DraggingConnection`].
     temp_connection_bezier: ConnectionBezier,
 }
 
@@ -140,7 +140,7 @@ impl ConnectionUi {
         gui: &mut Gui<'_>,
         ctx: &GraphContext,
         graph_layout: &GraphLayout,
-        ui_interaction: &mut GraphUiInteraction,
+        output: &mut FrameOutput,
         breaker: Option<&ConnectionBreaker>,
     ) {
         let execution_stats = ctx.execution_stats;
@@ -231,11 +231,11 @@ impl ConnectionUi {
         drop(curves);
         drop(highlights);
 
-        apply_connection_deletions(deletions, ctx, ui_interaction);
+        apply_connection_deletions(deletions, ctx, output);
     }
 
     /// Draws the in-flight connection preview for a drag owned by
-    /// [`crate::gui::interaction_state::Interaction`].
+    /// [`crate::gui::gesture::Gesture`].
     pub(crate) fn render_temp_connection(
         &mut self,
         gui: &mut Gui<'_>,
@@ -308,7 +308,7 @@ impl ConnectionUi {
 
 /// Advances an in-flight connection drag based on the pointer and the latest
 /// port interaction command. The drag lives inside
-/// [`crate::gui::interaction_state::Interaction::DraggingConnection`] — this
+/// [`crate::gui::gesture::Gesture::DraggingConnection`] — this
 /// is a free function so the caller owns both the drag and any transition
 /// decision (e.g. cancelling the interaction on `Finished`).
 pub(crate) fn advance_drag(
@@ -349,7 +349,7 @@ pub(crate) fn advance_drag(
 pub(crate) fn disconnect_connection(
     key: ConnectionKey,
     ctx: &GraphContext,
-    ui_interaction: &mut GraphUiInteraction,
+    output: &mut FrameOutput,
 ) {
     match key {
         ConnectionKey::Input {
@@ -361,7 +361,7 @@ pub(crate) fn disconnect_connection(
             if matches!(before, Binding::None) {
                 return;
             }
-            ui_interaction.add_action(GraphUiAction::InputChanged {
+            output.add_action(GraphUiAction::InputChanged {
                 node_id: input_node_id,
                 input_idx,
                 before,
@@ -380,7 +380,7 @@ pub(crate) fn disconnect_connection(
             {
                 return;
             }
-            ui_interaction.add_action(GraphUiAction::EventConnectionChanged {
+            output.add_action(GraphUiAction::EventConnectionChanged {
                 event_node_id,
                 event_idx,
                 subscriber: trigger_node_id,
@@ -393,10 +393,10 @@ pub(crate) fn disconnect_connection(
 fn apply_connection_deletions(
     deletions: Vec<ConnectionKey>,
     ctx: &GraphContext,
-    ui_interaction: &mut GraphUiInteraction,
+    output: &mut FrameOutput,
 ) {
     for key in deletions {
-        disconnect_connection(key, ctx, ui_interaction);
+        disconnect_connection(key, ctx, output);
     }
 }
 
@@ -682,7 +682,7 @@ mod tests {
             vg.graph.add(n);
         }
 
-        let mut buf = GraphUiInteraction::default();
+        let mut buf = FrameOutput::default();
         with_ctx(&vg, |ctx| {
             disconnect_connection(
                 ConnectionKey::Input {
@@ -716,7 +716,7 @@ mod tests {
         });
         vg.graph.add(node);
 
-        let mut buf = GraphUiInteraction::default();
+        let mut buf = FrameOutput::default();
         with_ctx(&vg, |ctx| {
             disconnect_connection(
                 ConnectionKey::Input {
@@ -748,7 +748,7 @@ mod tests {
             vg.graph.add(n);
         }
 
-        let mut buf = GraphUiInteraction::default();
+        let mut buf = FrameOutput::default();
         with_ctx(&vg, |ctx| {
             disconnect_connection(
                 ConnectionKey::Event {
@@ -795,7 +795,7 @@ mod tests {
             vg.graph.add(n);
         }
 
-        let mut buf = GraphUiInteraction::default();
+        let mut buf = FrameOutput::default();
         with_ctx(&vg, |ctx| {
             disconnect_connection(
                 ConnectionKey::Event {

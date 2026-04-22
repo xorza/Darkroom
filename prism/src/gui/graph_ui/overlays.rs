@@ -13,9 +13,9 @@ use crate::common::frame::Frame;
 use crate::common::positioned_ui::PositionedUi;
 use crate::gui::Gui;
 use crate::gui::connection_ui::PortKind;
+use crate::gui::frame_output::RunCommand;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_ui::{ButtonResult, GraphUi};
-use crate::gui::graph_ui_interaction::RunCommand;
 use crate::gui::new_node_ui::NewNodeSelection;
 use crate::input::InputSnapshot;
 use crate::model;
@@ -91,7 +91,7 @@ impl GraphUi {
                             .text("run")
                             .show(gui, StableId::new("run_btn"));
                         if response.clicked() {
-                            self.ui_interaction.set_run_cmd(RunCommand::RunOnce);
+                            self.output.set_run_cmd(RunCommand::RunOnce);
                         }
 
                         let response = Button::default()
@@ -100,7 +100,7 @@ impl GraphUi {
                             .show(gui, StableId::new("autorun_btn"));
 
                         if response.clicked() {
-                            self.ui_interaction.set_run_cmd(if autorun {
+                            self.output.set_run_cmd(if autorun {
                                 RunCommand::StartAutorun
                             } else {
                                 RunCommand::StopAutorun
@@ -144,7 +144,7 @@ impl GraphUi {
         if let Some(selection) = self.new_node_ui.show(gui, input, ctx.func_lib, arena) {
             self.handle_new_node_selection(gui, ctx, selection);
         } else if was_open && !self.new_node_ui.is_open() {
-            self.cancel_interaction();
+            self.cancel_gesture();
         }
 
         self.new_node_ui.is_open()
@@ -169,18 +169,18 @@ impl GraphUi {
                     pos: graph_pos.to_pos2(),
                 };
 
-                self.ui_interaction
+                self.output
                     .add_action(GraphUiAction::NodeAdded { view_node, node });
             }
             NewNodeSelection::ConstBind => {
                 self.create_const_binding(ctx);
-                self.cancel_interaction();
+                self.cancel_gesture();
             }
         }
     }
 
     fn create_const_binding(&mut self, ctx: &GraphContext<'_>) {
-        let Some(connection_drag) = self.interaction.drag() else {
+        let Some(connection_drag) = self.gesture.drag() else {
             return;
         };
 
@@ -203,7 +203,7 @@ impl GraphUi {
             .unwrap_or_else(|| StaticValue::from(&func_input.data_type))
             .into();
 
-        self.ui_interaction.add_action(GraphUiAction::InputChanged {
+        self.output.add_action(GraphUiAction::InputChanged {
             node_id: input_port.node_id,
             input_idx: input_port.port_idx,
             before,

@@ -10,12 +10,12 @@ use crate::{
 pub mod connection_breaker;
 pub mod connection_ui;
 pub mod const_bind_ui;
+pub mod frame_output;
+pub mod gesture;
 pub mod graph_background;
 pub mod graph_ctx;
 pub mod graph_layout;
 pub mod graph_ui;
-pub mod graph_ui_interaction;
-pub mod interaction_state;
 pub mod log_ui;
 pub mod new_node_ui;
 pub mod node_details_ui;

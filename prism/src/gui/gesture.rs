@@ -1,7 +1,7 @@
-//! Graph UI interaction state machine.
+//! Graph UI pointer-gesture state machine.
 //!
 //! The user is always doing exactly one thing in the graph editor. Each
-//! [`Interaction`] variant carries the data that thing needs — so the
+//! [`Gesture`] variant carries the data that thing needs — so the
 //! breaker only exists while the user is breaking connections, and the
 //! in-flight connection drag only exists while the user is dragging a new
 //! one. There is no separate "stop drag" / "reset breaker" dance:
@@ -33,7 +33,7 @@ impl NodeDrag {
 }
 
 #[derive(Debug, Default)]
-pub enum Interaction {
+pub enum Gesture {
     #[default]
     Idle,
     Panning,
@@ -42,7 +42,7 @@ pub enum Interaction {
     DraggingNode(NodeDrag),
 }
 
-impl Interaction {
+impl Gesture {
     pub fn is_idle(&self) -> bool {
         matches!(self, Self::Idle)
     }
@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn default_is_idle() {
-        let i = Interaction::default();
+        let i = Gesture::default();
         assert!(i.is_idle());
         assert!(i.breaker().is_none());
         assert!(i.drag().is_none());
@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn start_breaking_installs_breaker() {
-        let mut i = Interaction::default();
+        let mut i = Gesture::default();
         i.start_breaking(Pos2::new(10.0, 20.0));
         assert!(i.is_breaking());
         assert!(i.breaker().is_some());
@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn start_dragging_installs_drag_only() {
-        let mut i = Interaction::default();
+        let mut i = Gesture::default();
         i.start_dragging(dummy_port());
         assert!(i.is_dragging_connection());
         assert!(i.drag().is_some());
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn cancel_drops_variant_data() {
-        let mut i = Interaction::default();
+        let mut i = Gesture::default();
         i.start_breaking(Pos2::ZERO);
         i.cancel();
         assert!(i.is_idle());
@@ -210,7 +210,7 @@ mod tests {
 
     #[test]
     fn transition_between_variants_replaces_data() {
-        let mut i = Interaction::default();
+        let mut i = Gesture::default();
         i.start_breaking(Pos2::ZERO);
         i.start_dragging(dummy_port());
         assert!(i.is_dragging_connection());

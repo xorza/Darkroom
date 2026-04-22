@@ -8,7 +8,7 @@ use crate::common::{StableId, StaticValueEditor};
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::{ConnectionCurve, ConnectionKey, PortKind};
-use crate::gui::graph_ui_interaction::GraphUiInteraction;
+use crate::gui::frame_output::FrameOutput;
 use crate::gui::node_layout::NodeLayout;
 use crate::gui::style::DragValueStyle;
 use crate::model::graph_ui_action::GraphUiAction;
@@ -58,7 +58,7 @@ impl<'a> ConstBindFrame<'a> {
     pub fn render(
         &mut self,
         gui: &mut Gui<'_>,
-        ui_interaction: &mut GraphUiInteraction,
+        output: &mut FrameOutput,
         node_layout: &NodeLayout,
         node: &Node,
         func: &Func,
@@ -80,7 +80,7 @@ impl<'a> ConstBindFrame<'a> {
             // value; `ViewGraph` is never mutated from here. Any edit
             // produces an `InputChanged` action; double-click-to-clear
             // produces one too and short-circuits the loop.
-            if self.render_const_input(gui, ui_interaction, node_layout, &ctx, value) {
+            if self.render_const_input(gui, output, node_layout, &ctx, value) {
                 return;
             }
         }
@@ -89,7 +89,7 @@ impl<'a> ConstBindFrame<'a> {
     fn render_const_input(
         &mut self,
         gui: &mut Gui<'_>,
-        ui_interaction: &mut GraphUiInteraction,
+        output: &mut FrameOutput,
         node_layout: &NodeLayout,
         ctx: &InputContext<'_>,
         current_value: &StaticValue,
@@ -127,7 +127,7 @@ impl<'a> ConstBindFrame<'a> {
 
         // Double-click to clear binding
         if bezier_response.double_clicked_by(PointerButton::Primary) {
-            ui_interaction.add_action(GraphUiAction::InputChanged {
+            output.add_action(GraphUiAction::InputChanged {
                 node_id: ctx.node_id,
                 input_idx: ctx.input_idx,
                 before: Binding::Const(current_value.clone()),
@@ -164,7 +164,7 @@ impl<'a> ConstBindFrame<'a> {
 
         if draft != *current_value {
             currently_hovered = true;
-            ui_interaction.add_action(GraphUiAction::InputChanged {
+            output.add_action(GraphUiAction::InputChanged {
                 node_id: ctx.node_id,
                 input_idx: ctx.input_idx,
                 before: Binding::Const(current_value.clone()),

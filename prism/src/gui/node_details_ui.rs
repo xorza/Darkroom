@@ -11,8 +11,8 @@ use crate::common::image_utils::to_color_image;
 use crate::common::positioned_ui::PositionedUi;
 use crate::common::scroll_area::ScrollArea;
 use crate::gui::Gui;
+use crate::gui::frame_output::FrameOutput;
 use crate::gui::graph_ctx::GraphContext;
-use crate::gui::graph_ui_interaction::GraphUiInteraction;
 use crate::gui::node_ui::NodeExecutionInfo;
 use crate::model::argument_values_cache::{CachedTexture, NodeCache};
 use crate::model::graph_ui_action::GraphUiAction;
@@ -28,7 +28,7 @@ impl NodeDetailsUi {
         &mut self,
         gui: &mut Gui<'_>,
         ctx: &mut GraphContext<'_>,
-        interaction: &mut GraphUiInteraction,
+        output: &mut FrameOutput,
     ) -> Response {
         let panel_rect = self.compute_panel_rect(gui);
         let popup_id = gui.ui().make_persistent_id("node_details_panel");
@@ -48,7 +48,7 @@ impl NodeDetailsUi {
                     .sense(Sense::all())
                     .show(gui, StableId::new("node_details_frame"), |gui| {
                         ScrollArea::vertical().id(scroll_id).show(gui, |gui| {
-                            self.show_content(gui, ctx, node_id, interaction);
+                            self.show_content(gui, ctx, node_id, output);
                         });
                     })
             })
@@ -70,7 +70,7 @@ impl NodeDetailsUi {
         gui: &mut Gui<'_>,
         ctx: &mut GraphContext<'_>,
         node_id: NodeId,
-        interaction: &mut GraphUiInteraction,
+        output: &mut FrameOutput,
     ) {
         // `selected_node_id` is cleared by `remove_node`, so this
         // lookup should always succeed — but an undo/redo between
@@ -79,14 +79,14 @@ impl NodeDetailsUi {
             return;
         }
 
-        self.show_name_editor(gui, ctx, node_id, interaction);
+        self.show_name_editor(gui, ctx, node_id, output);
 
         if let Some(stats) = ctx.execution_stats {
             show_execution_info(gui, ctx, node_id, stats);
         }
 
         let Some(node_cache) = ctx.argument_values_cache.get_mut(&node_id) else {
-            interaction.set_request_argument_values(node_id);
+            output.set_request_argument_values(node_id);
             return;
         };
 
@@ -106,7 +106,7 @@ impl NodeDetailsUi {
         gui: &mut Gui<'_>,
         ctx: &GraphContext<'_>,
         node_id: NodeId,
-        interaction: &mut GraphUiInteraction,
+        output: &mut FrameOutput,
     ) {
         // Guarded in `show_content`; replicated here so the function
         // is safe if called in isolation (e.g. from a future test).
@@ -136,7 +136,7 @@ impl NodeDetailsUi {
 
         if name != original_name {
             // Mutation applied via NodeNameChanged::apply in handle_actions.
-            interaction.add_action(GraphUiAction::NodeNameChanged {
+            output.add_action(GraphUiAction::NodeNameChanged {
                 node_id,
                 before: original_name,
                 after: name,

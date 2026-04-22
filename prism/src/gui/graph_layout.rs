@@ -3,8 +3,8 @@ use scenarium::graph::NodeId;
 
 use crate::gui::Gui;
 use crate::gui::connection_ui::PortKind;
+use crate::gui::gesture::Gesture;
 use crate::gui::graph_ctx::GraphContext;
-use crate::gui::interaction_state::Interaction;
 use crate::gui::node_layout::NodeLayout;
 use common::key_index_vec::KeyIndexVec;
 
@@ -36,14 +36,14 @@ pub struct GraphLayout {
 }
 
 impl GraphLayout {
-    pub fn update(&mut self, gui: &mut Gui<'_>, ctx: &GraphContext, interaction: &Interaction) {
+    pub fn update(&mut self, gui: &mut Gui<'_>, ctx: &GraphContext, gesture: &Gesture) {
         self.origin = gui.rect.min + ctx.view_graph.pan;
 
         let mut compact = self.node_layouts.compact_insert_start();
         for view_node in ctx.view_graph.view_nodes.iter() {
             let (_idx, layout) =
                 compact.insert_with(&view_node.id, || NodeLayout::new(gui, &view_node.id));
-            let drag_offset = interaction.node_drag_offset_for(&view_node.id);
+            let drag_offset = gesture.node_drag_offset_for(&view_node.id);
             layout.update(ctx, gui, self.origin, drag_offset);
         }
     }

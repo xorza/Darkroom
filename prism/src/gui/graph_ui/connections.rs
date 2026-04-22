@@ -1,8 +1,8 @@
-//! Connection-related interaction: drag → snap → commit pipeline for
+//! Connection-related gesture: drag → snap → commit pipeline for
 //! data (input-binding) and event (trigger) connections, plus the
 //! breaker tool's deletion pass.
 //!
-//! Every function here emits `GraphUiAction`s into the interaction
+//! Every function here emits `GraphUiAction`s into the gesture
 //! buffer; `ViewGraph` is never mutated directly. See Step 4.0 /
 //! 4.1 in `REFACTOR_PLAN.md` for the contract.
 
@@ -14,10 +14,10 @@ use crate::gui::Gui;
 use crate::gui::connection_ui::{
     BrokeItem, ConnectionDragUpdate, PortKind, advance_drag, disconnect_connection,
 };
+use crate::gui::gesture::Gesture;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::PortRef;
 use crate::gui::graph_ui::{Error, GraphUi};
-use crate::gui::interaction_state::Interaction;
 use crate::gui::node_ui::PortInteractCommand;
 use crate::input::InputSnapshot;
 use crate::model::EventSubscriberChange;
@@ -25,13 +25,13 @@ use crate::model::graph_ui_action::GraphUiAction;
 
 impl GraphUi {
     pub(super) fn handle_background_click(&mut self, ctx: &GraphContext<'_>) {
-        self.cancel_interaction();
+        self.cancel_gesture();
 
         if ctx.view_graph.selected_node_id.is_some() {
             let before = ctx.view_graph.selected_node_id;
             // Emit-action-only: selected_node_id is mutated by
             // `NodeSelected::apply` in handle_actions, not here.
-            self.ui_interaction.add_action(GraphUiAction::NodeSelected {
+            self.output.add_action(GraphUiAction::NodeSelected {
                 before,
                 after: None,
             });
@@ -50,32 +50,32 @@ impl GraphUi {
     ) {
         let primary_down = input.primary_pressed || input.primary_down;
 
-        match &mut self.interaction {
+        match &mut self.gesture {
             // Node drag and view pan advance through egui response events
             // elsewhere in the frame; process_connections has nothing to
             // add for them.
-            Interaction::Panning | Interaction::DraggingNode(_) => {}
-            Interaction::Idle => {
+            Gesture::Panning | Gesture::DraggingNode(_) => {}
+            Gesture::Idle => {
                 let pointer_on_background =
                     background_response.hovered() && !self.connections.any_hovered();
                 handle_idle(
-                    &mut self.interaction,
+                    &mut self.gesture,
                     pointer_pos,
                     primary_down,
                     pointer_on_background,
                     port_interact_cmd,
                 );
             }
-            Interaction::BreakingConnections(breaker) => {
+            Gesture::BreakingConnections(breaker) => {
                 if primary_down {
                     breaker.add_point(pointer_pos);
                 } else {
                     // Breaker released — collect results, then cancel.
                     self.apply_breaker_results(ctx, broken_nodes);
-                    self.interaction.cancel();
+                    self.gesture.cancel();
                 }
             }
-            Interaction::DraggingConnection(drag) => {
+            Gesture::DraggingConnection(drag) => {
                 let result = advance_drag(drag, pointer_pos, port_interact_cmd);
                 self.handle_drag_result(ctx, pointer_pos, result);
             }
@@ -90,10 +90,10 @@ impl GraphUi {
     /// a higher egui z-order than this overlay and still receive their
     /// click/drag events. That subtlety is why this lives here and not
     /// inside `process_connections`.
-    pub(super) fn maybe_capture_overlay(gui: &mut Gui<'_>, interaction: &Interaction) {
+    pub(super) fn maybe_capture_overlay(gui: &mut Gui<'_>, gesture: &Gesture) {
         if matches!(
-            interaction,
-            Interaction::BreakingConnections(_) | Interaction::DraggingConnection(_)
+            gesture,
+            Gesture::BreakingConnections(_) | Gesture::DraggingConnection(_)
         ) {
             let id = gui.ui().make_persistent_id("temp overlay background");
             let rect = gui.rect;
@@ -115,11 +115,11 @@ impl GraphUi {
         for item in items {
             match item {
                 BrokeItem::Connection(key) => {
-                    disconnect_connection(key, ctx, &mut self.ui_interaction);
+                    disconnect_connection(key, ctx, &mut self.output);
                 }
                 BrokeItem::Node(node_id) => {
                     let action = ctx.view_graph.removal_action(&node_id);
-                    self.ui_interaction.add_action(action);
+                    self.output.add_action(action);
                 }
             }
         }
@@ -134,11 +134,11 @@ impl GraphUi {
         match result {
             ConnectionDragUpdate::InProgress => {}
             ConnectionDragUpdate::Finished => {
-                self.interaction.cancel();
+                self.gesture.cancel();
             }
             ConnectionDragUpdate::FinishedWithEmptyOutput { input_port } => {
                 assert_eq!(input_port.kind, PortKind::Input);
-                // NB: interaction stays in DraggingConnection so the ports
+                // NB: gesture stays in DraggingConnection so the ports
                 // are available to `create_const_binding` if the user picks
                 // ConstBind in the popup.
                 self.new_node_ui.open_from_connection(pointer_pos);
@@ -152,7 +152,7 @@ impl GraphUi {
                 output_port,
             } => {
                 self.apply_connection(ctx, input_port, output_port);
-                self.interaction.cancel();
+                self.gesture.cancel();
             }
         }
     }
@@ -168,15 +168,15 @@ impl GraphUi {
         match output_port.kind {
             PortKind::Output => {
                 match build_data_connection_action(ctx.view_graph, input_port, output_port) {
-                    Ok(action) => self.ui_interaction.add_action(action),
-                    Err(err) => self.ui_interaction.add_error(err),
+                    Ok(action) => self.output.add_action(action),
+                    Err(err) => self.output.add_error(err),
                 }
             }
             PortKind::Event => {
                 match build_event_connection_action(ctx.view_graph, input_port, output_port) {
-                    Ok(Some(action)) => self.ui_interaction.add_action(action),
+                    Ok(Some(action)) => self.output.add_action(action),
                     Ok(None) => {}
-                    Err(err) => self.ui_interaction.add_error(err),
+                    Err(err) => self.output.add_error(err),
                 }
             }
             _ => unreachable!(),
@@ -188,15 +188,15 @@ impl GraphUi {
             gui,
             ctx,
             &self.graph_layout,
-            &mut self.ui_interaction,
-            self.interaction.breaker(),
+            &mut self.output,
+            self.gesture.breaker(),
         );
 
-        match &mut self.interaction {
-            Interaction::BreakingConnections(breaker) => {
+        match &mut self.gesture {
+            Gesture::BreakingConnections(breaker) => {
                 breaker.show(gui);
             }
-            Interaction::DraggingConnection(drag) => {
+            Gesture::DraggingConnection(drag) => {
                 self.connections
                     .render_temp_connection(gui, &self.graph_layout, drag);
             }
@@ -210,11 +210,11 @@ impl GraphUi {
 // ============================================================================
 
 /// Idle-state transitions driven by primary-button pressure plus a port
-/// interaction command. Kept as a free function so it can borrow
-/// `interaction` mutably without the enclosing `process_connections`
+/// gesture command. Kept as a free function so it can borrow
+/// `gesture` mutably without the enclosing `process_connections`
 /// match needing to drop its discriminant borrow.
 pub(super) fn handle_idle(
-    interaction: &mut Interaction,
+    gesture: &mut Gesture,
     pointer_pos: Pos2,
     primary_down: bool,
     pointer_on_background: bool,
@@ -225,9 +225,9 @@ pub(super) fn handle_idle(
     }
 
     if let PortInteractCommand::DragStart(port_info) = port_interact_cmd {
-        interaction.start_dragging(port_info);
+        gesture.start_dragging(port_info);
     } else if pointer_on_background {
-        interaction.start_breaking(pointer_pos);
+        gesture.start_breaking(pointer_pos);
     }
 }
 

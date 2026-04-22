@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use crate::gui::Gui;
+use crate::gui::frame_output::RunCommand;
 use crate::gui::graph_ui::GraphUi;
-use crate::gui::graph_ui_interaction::RunCommand;
 use crate::gui::log_ui::LogUi;
 use crate::gui::style::Style;
 use crate::input::InputSnapshot;
@@ -165,13 +165,13 @@ impl MainUi {
                     .render(&mut Gui::new(ui, &style), app_data, &input, &self.arena)
             });
 
-        app_data.handle_interaction(self.graph_ui.ui_interaction());
+        app_data.handle_output(self.graph_ui.output());
         self.arena.reset();
     }
 
     fn handle_shortcuts(&mut self, input: &InputSnapshot, app_data: &mut AppData) {
         if input.cmd_only(egui::Key::Z) {
-            app_data.undo(self.graph_ui.ui_interaction());
+            app_data.undo(self.graph_ui.output());
         } else if input.cmd_shift(egui::Key::Z) {
             app_data.redo();
         }
@@ -185,16 +185,14 @@ impl MainUi {
         }
 
         if input.cmd_shift(egui::Key::Space) {
-            let interaction = self.graph_ui.ui_interaction();
-            interaction.set_run_cmd(if app_data.state.autorun {
+            let output = self.graph_ui.output();
+            output.set_run_cmd(if app_data.state.autorun {
                 RunCommand::StopAutorun
             } else {
                 RunCommand::StartAutorun
             });
         } else if input.cmd_only(egui::Key::Space) {
-            self.graph_ui
-                .ui_interaction()
-                .set_run_cmd(RunCommand::RunOnce);
+            self.graph_ui.output().set_run_cmd(RunCommand::RunOnce);
         }
 
         if input.cmd(egui::Key::Q) {

@@ -22,14 +22,14 @@ pub enum RunCommand {
 /// compatible with egui's multi-pass rendering, where the same UI
 /// callback can run more than once per logical frame.
 #[derive(Debug, Default)]
-pub(crate) struct GraphUiInteraction {
+pub(crate) struct FrameOutput {
     actions: Vec<GraphUiAction>,
     errors: Vec<Error>,
     run_cmd: Option<RunCommand>,
     request_argument_values: Option<NodeId>,
 }
 
-impl GraphUiInteraction {
+impl FrameOutput {
     pub fn clear(&mut self) {
         self.actions.clear();
         self.errors.clear();
@@ -82,28 +82,28 @@ mod tests {
 
     #[test]
     fn actions_land_immediately_in_action_stacks() {
-        let mut interaction = GraphUiInteraction::default();
-        interaction.add_action(GraphUiAction::NodeMoved {
+        let mut output = FrameOutput::default();
+        output.add_action(GraphUiAction::NodeMoved {
             node_id: NodeId::unique(),
             before: Pos2::ZERO,
             after: Pos2::new(10.0, 20.0),
         });
 
-        let actions: Vec<_> = interaction.action_stacks().flatten().collect();
+        let actions: Vec<_> = output.action_stacks().flatten().collect();
         assert_eq!(actions.len(), 1);
     }
 
     #[test]
     fn clear_empties_action_buffer() {
-        let mut interaction = GraphUiInteraction::default();
-        interaction.add_action(GraphUiAction::ZoomPanChanged {
+        let mut output = FrameOutput::default();
+        output.add_action(GraphUiAction::ZoomPanChanged {
             before_pan: egui::Vec2::ZERO,
             before_scale: 1.0,
             after_pan: egui::Vec2::new(5.0, 5.0),
             after_scale: 1.2,
         });
 
-        interaction.clear();
-        assert_eq!(interaction.action_stacks().count(), 0);
+        output.clear();
+        assert_eq!(output.action_stacks().count(), 0);
     }
 }

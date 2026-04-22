@@ -10,10 +10,10 @@ use egui::{PointerButton, Pos2, Response, Vec2};
 
 use crate::common::UiEquals;
 use crate::gui::Gui;
+use crate::gui::gesture::Gesture;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::GraphLayout;
 use crate::gui::graph_ui::{GraphUi, MAX_ZOOM, MIN_ZOOM, WHEEL_ZOOM_SPEED};
-use crate::gui::interaction_state::Interaction;
 use crate::input::InputSnapshot;
 use crate::model::graph_ui_action::GraphUiAction;
 
@@ -35,7 +35,7 @@ impl GraphUi {
             (new_scale, new_pan) = compute_scroll_zoom(gui, input, pointer_pos, new_scale, new_pan);
         }
 
-        if matches!(self.interaction, Interaction::Panning)
+        if matches!(self.gesture, Gesture::Panning)
             && background_response.dragged_by(PointerButton::Middle)
         {
             new_pan += background_response.drag_delta();
@@ -45,12 +45,12 @@ impl GraphUi {
     }
 
     fn drive_pan_interaction_state(&mut self, background_response: &Response) {
-        match &self.interaction {
-            Interaction::Idle if background_response.drag_started_by(PointerButton::Middle) => {
-                self.interaction.start_panning();
+        match &self.gesture {
+            Gesture::Idle if background_response.drag_started_by(PointerButton::Middle) => {
+                self.gesture.start_panning();
             }
-            Interaction::Panning if background_response.drag_stopped_by(PointerButton::Middle) => {
-                self.interaction.cancel();
+            Gesture::Panning if background_response.drag_stopped_by(PointerButton::Middle) => {
+                self.gesture.cancel();
             }
             _ => {}
         }
@@ -68,13 +68,12 @@ impl GraphUi {
         if view_graph.scale.ui_equals(new_scale) && view_graph.pan.ui_equals(new_pan) {
             return;
         }
-        self.ui_interaction
-            .add_action(GraphUiAction::ZoomPanChanged {
-                before_pan: view_graph.pan,
-                before_scale: view_graph.scale,
-                after_pan: new_pan,
-                after_scale: new_scale,
-            });
+        self.output.add_action(GraphUiAction::ZoomPanChanged {
+            before_pan: view_graph.pan,
+            before_scale: view_graph.scale,
+            after_pan: new_pan,
+            after_scale: new_scale,
+        });
     }
 }
 

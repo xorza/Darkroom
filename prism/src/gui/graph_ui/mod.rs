@@ -16,11 +16,11 @@ use crate::app_data::AppData;
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::connection_ui::ConnectionUi;
+use crate::gui::frame_output::FrameOutput;
+use crate::gui::gesture::Gesture;
 use crate::gui::graph_background::GraphBackgroundRenderer;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::GraphLayout;
-use crate::gui::graph_ui_interaction::GraphUiInteraction;
-use crate::gui::interaction_state::Interaction;
 use crate::gui::new_node_ui::NewNodeUi;
 use crate::gui::node_details_ui::NodeDetailsUi;
 use crate::gui::node_ui::NodeUi;
@@ -78,23 +78,23 @@ impl std::fmt::Display for Error {
 #[derive(Debug, Default)]
 pub struct GraphUi {
     /// Centralized interaction state machine.
-    interaction: Interaction,
+    gesture: Gesture,
     connections: ConnectionUi,
     graph_layout: GraphLayout,
     node_ui: NodeUi,
     dots_background: GraphBackgroundRenderer,
     new_node_ui: NewNodeUi,
     node_details_ui: NodeDetailsUi,
-    ui_interaction: GraphUiInteraction,
+    output: FrameOutput,
 }
 
 impl GraphUi {
-    pub fn ui_interaction(&mut self) -> &mut GraphUiInteraction {
-        &mut self.ui_interaction
+    pub fn output(&mut self) -> &mut FrameOutput {
+        &mut self.output
     }
 
-    pub(super) fn cancel_interaction(&mut self) {
-        self.interaction.cancel();
+    pub(super) fn cancel_gesture(&mut self) {
+        self.gesture.cancel();
     }
 
     /// Per-frame entry point. The body splits into three ordered phases:
@@ -108,17 +108,17 @@ impl GraphUi {
         input: &InputSnapshot,
         arena: &Bump,
     ) {
-        self.ui_interaction.clear();
+        self.output.clear();
 
         if input.cancel_requested() {
-            self.cancel_interaction();
+            self.cancel_gesture();
         }
 
         // Drop any interaction state that references nodes that have
         // since been removed (e.g. by an undo/redo that ran between
-        // frames). Keeping stale IDs in `Interaction` would propagate to
+        // frames). Keeping stale IDs in `Gesture` would propagate to
         // downstream `.unwrap()` sites in drag/commit code paths.
-        self.drop_stale_interaction(&app_data.state.view_graph);
+        self.drop_stale_gesture(&app_data.state.view_graph);
 
         let rect = self.draw_background_frame(gui);
 
@@ -143,7 +143,7 @@ impl GraphUi {
                 // background's click state. Otherwise the background —
                 // the only widget in scope at this point — would claim
                 // clicks that should have gone to nodes, triggering a
-                // spurious deselect + cancel_interaction.
+                // spurious deselect + cancel_gesture.
                 self.render_content(gui, &ctx, input, &background_response, pointer_pos);
 
                 if background_response.clicked() {
@@ -159,8 +159,7 @@ impl GraphUi {
                     arena,
                 );
 
-                if !overlay_hovered && (self.interaction.is_idle() || self.interaction.is_panning())
-                {
+                if !overlay_hovered && (self.gesture.is_idle() || self.gesture.is_panning()) {
                     self.update_zoom_and_pan(gui, input, &ctx, &background_response, pointer_pos);
                 }
             });
@@ -180,7 +179,7 @@ impl GraphUi {
         pointer_pos: Option<Pos2>,
     ) {
         gui.with_scale(ctx.view_graph.scale, |gui| {
-            self.graph_layout.update(gui, ctx, &self.interaction);
+            self.graph_layout.update(gui, ctx, &self.gesture);
             self.dots_background.render(gui, ctx);
             self.render_connections(gui, ctx);
 
@@ -188,21 +187,21 @@ impl GraphUi {
             // gestures. Registered HERE — before ports — so later-registered
             // port widgets keep higher egui z-order and their click/drag
             // responses still fire through. See `maybe_capture_overlay`.
-            Self::maybe_capture_overlay(gui, &self.interaction);
+            Self::maybe_capture_overlay(gui, &self.gesture);
 
             let nodes_result = self.node_ui.render_nodes(
                 gui,
                 ctx,
                 &mut self.graph_layout,
-                &mut self.ui_interaction,
-                &mut self.interaction,
+                &mut self.output,
+                &mut self.gesture,
             );
 
             // Surface render-time removal intents as actions. The mutation
             // itself happens in `NodeRemoved::apply` during `handle_actions`.
             for node_id in &nodes_result.removed_nodes {
                 let action = ctx.view_graph.removal_action(node_id);
-                self.ui_interaction.add_action(action);
+                self.output.add_action(action);
             }
 
             if let Some(pointer_pos) = pointer_pos {
@@ -247,7 +246,7 @@ impl GraphUi {
         let mut hovered = buttons.response.hovered();
         hovered |= self
             .node_details_ui
-            .show(gui, ctx, &mut self.ui_interaction)
+            .show(gui, ctx, &mut self.output)
             .hovered();
         hovered |=
             self.handle_new_node_popup(gui, input, ctx, pointer_pos, background_response, arena);
@@ -297,16 +296,16 @@ impl GraphUi {
     }
 
     // ------------------------------------------------------------------------
-    // Interaction hygiene
+    // Gesture hygiene
     // ------------------------------------------------------------------------
 
     /// Cancels the current interaction if it references nodes that no
     /// longer exist in `view_graph`. See `Error::StaleNode`.
-    fn drop_stale_interaction(&mut self, view_graph: &model::ViewGraph) {
-        let stale = match &self.interaction {
-            Interaction::Idle | Interaction::Panning | Interaction::BreakingConnections(_) => false,
-            Interaction::DraggingNode(drag) => view_graph.graph.by_id(&drag.node_id).is_none(),
-            Interaction::DraggingConnection(drag) => {
+    fn drop_stale_gesture(&mut self, view_graph: &model::ViewGraph) {
+        let stale = match &self.gesture {
+            Gesture::Idle | Gesture::Panning | Gesture::BreakingConnections(_) => false,
+            Gesture::DraggingNode(drag) => view_graph.graph.by_id(&drag.node_id).is_none(),
+            Gesture::DraggingConnection(drag) => {
                 let start_missing = view_graph
                     .graph
                     .by_id(&drag.start_port.port.node_id)
@@ -318,7 +317,7 @@ impl GraphUi {
             }
         };
         if stale {
-            self.interaction.cancel();
+            self.gesture.cancel();
         }
     }
 }
@@ -595,7 +594,7 @@ mod tests {
 
     #[test]
     fn handle_idle_primary_not_down_keeps_idle() {
-        let mut interaction = Interaction::default();
+        let mut interaction = Gesture::default();
         handle_idle(
             &mut interaction,
             Pos2::new(10.0, 20.0),
@@ -608,7 +607,7 @@ mod tests {
 
     #[test]
     fn handle_idle_drag_start_transitions_to_dragging_connection() {
-        let mut interaction = Interaction::default();
+        let mut interaction = Gesture::default();
         let port_info = PortInfo {
             port: port(NodeId::unique(), PortKind::Output, 0),
             center: Pos2::new(1.0, 2.0),
@@ -625,7 +624,7 @@ mod tests {
 
     #[test]
     fn handle_idle_background_click_transitions_to_breaking() {
-        let mut interaction = Interaction::default();
+        let mut interaction = Gesture::default();
         handle_idle(
             &mut interaction,
             Pos2::new(10.0, 20.0),
@@ -638,7 +637,7 @@ mod tests {
 
     #[test]
     fn handle_idle_port_hover_without_drag_start_stays_idle() {
-        let mut interaction = Interaction::default();
+        let mut interaction = Gesture::default();
         let port_info = PortInfo {
             port: port(NodeId::unique(), PortKind::Input, 0),
             center: Pos2::ZERO,

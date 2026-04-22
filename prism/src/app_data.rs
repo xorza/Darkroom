@@ -1,6 +1,6 @@
 use crate::common::undo_stack::{ActionUndoStack, UndoStack};
 use crate::elements::editor_funclib::EditorFuncLib;
-use crate::gui::graph_ui_interaction::{GraphUiInteraction, RunCommand};
+use crate::gui::frame_output::{FrameOutput, RunCommand};
 use crate::model::ArgumentValuesCache;
 use crate::model::config::Config;
 use crate::model::graph_ui_action::GraphUiAction;
@@ -241,10 +241,10 @@ impl AppData {
         }
     }
 
-    pub fn undo(&mut self, interaction: &mut GraphUiInteraction) {
+    pub fn undo(&mut self, output: &mut FrameOutput) {
         // Commit anything queued this frame before stepping back so
         // the undo target is the pre-current-frame state.
-        self.handle_actions(interaction);
+        self.handle_actions(output);
 
         let mut affects_computation = false;
         let undid = self
@@ -271,17 +271,17 @@ impl AppData {
         }
     }
 
-    pub fn handle_interaction(&mut self, interaction: &mut GraphUiInteraction) {
-        while let Some(err) = interaction.pop_error() {
+    pub fn handle_output(&mut self, output: &mut FrameOutput) {
+        while let Some(err) = output.pop_error() {
             self.state.add_status(format!("Error: {err}"));
         }
 
-        self.graph_dirty |= self.handle_actions(interaction);
+        self.graph_dirty |= self.handle_actions(output);
 
         let mut update_if_dirty = self.state.autorun;
         let mut msgs: Vec<WorkerMessage> = Vec::default();
 
-        if let Some(run_cmd) = interaction.run_cmd() {
+        if let Some(run_cmd) = output.run_cmd() {
             match run_cmd {
                 RunCommand::StartAutorun => {
                     assert!(!self.state.autorun);
@@ -312,7 +312,7 @@ impl AppData {
         }
 
         // Handle argument values request (only if not already pending)
-        if let Some(node_id) = interaction.request_argument_values()
+        if let Some(node_id) = output.request_argument_values()
             && self.state.argument_values_cache.mark_pending(node_id)
         {
             msgs.push(WorkerMessage::RequestArgumentValues {
@@ -377,10 +377,10 @@ impl AppData {
         self.state.clear_execution_caches();
     }
 
-    fn handle_actions(&mut self, interaction: &mut GraphUiInteraction) -> bool {
+    fn handle_actions(&mut self, output: &mut FrameOutput) -> bool {
         let mut graph_updated = false;
 
-        for actions in interaction.action_stacks() {
+        for actions in output.action_stacks() {
             // Apply + record. Idempotent apply means mutations that
             // already happened inline during render are no-ops; the
             // single source of truth for mutations that intentionally

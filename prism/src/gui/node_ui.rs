@@ -5,10 +5,10 @@ use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::const_bind_ui::ConstBindUi;
+use crate::gui::frame_output::FrameOutput;
+use crate::gui::gesture::Gesture;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
-use crate::gui::graph_ui_interaction::GraphUiInteraction;
-use crate::gui::interaction_state::Interaction;
 use crate::gui::node_layout::NodeLayout;
 use crate::model::graph_ui_action::GraphUiAction;
 use common::BoolExt;
@@ -126,27 +126,26 @@ impl NodeUi {
         gui: &mut Gui<'_>,
         ctx: &GraphContext,
         graph_layout: &mut GraphLayout,
-        interaction: &mut GraphUiInteraction,
-        state: &mut Interaction,
+        output: &mut FrameOutput,
+        gesture: &mut Gesture,
     ) -> NodesFrameResult {
         let mut result = NodesFrameResult::default();
         let mut const_bind_frame = self.const_bind_ui.start();
 
         for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
             let node_id = ctx.view_graph.view_nodes[view_node_idx].id;
-            let layout =
-                Self::handle_node_drag(gui, ctx, graph_layout, interaction, state, &node_id);
+            let layout = Self::handle_node_drag(gui, ctx, graph_layout, output, gesture, &node_id);
 
             // Re-fetch the breaker fresh after every drag pass — the
-            // state machine is mutable, so any Option<&ConnectionBreaker>
+            // gesture machine is mutable, so any Option<&ConnectionBreaker>
             // captured before the call would be invalidated by the
             // reborrow.
-            let breaker = state.breaker();
+            let breaker = gesture.breaker();
 
             let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
-            const_bind_frame.render(gui, interaction, layout, node, func, breaker);
+            const_bind_frame.render(gui, output, layout, node, func, breaker);
 
             if !gui.ui().is_rect_visible(layout.body_rect) {
                 continue;
@@ -164,7 +163,7 @@ impl NodeUi {
             }
 
             render_status_hints(gui, layout, node_id, node.behavior, func);
-            render_cache_btn(gui, interaction, layout, node);
+            render_cache_btn(gui, output, layout, node);
 
             let missing_inputs = get_missing_input_ports(ctx.execution_stats, node_id);
             let node_port_cmd = render_ports(gui, layout, node, func, &missing_inputs);
@@ -181,8 +180,8 @@ impl NodeUi {
         gui: &mut Gui<'_>,
         ctx: &GraphContext<'_>,
         graph_layout: &'a mut GraphLayout,
-        interaction: &mut GraphUiInteraction,
-        state: &mut Interaction,
+        output: &mut FrameOutput,
+        gesture: &mut Gesture,
         node_id: &NodeId,
     ) -> &'a NodeLayout {
         let body_id = StableId::new(("node_body", *node_id)).id();
@@ -199,21 +198,21 @@ impl NodeUi {
         if (drag_started || response.clicked()) && ctx.view_graph.selected_node_id != Some(*node_id)
         {
             let before = ctx.view_graph.selected_node_id;
-            interaction.add_action(GraphUiAction::NodeSelected {
+            output.add_action(GraphUiAction::NodeSelected {
                 before,
                 after: Some(*node_id),
             });
         }
 
-        // Drag lifecycle — Interaction state owns the in-flight offset.
+        // Drag lifecycle — Gesture gesture owns the in-flight offset.
         // ViewGraph stays untouched until the drag commits on release.
         if drag_started {
             let start_pos = ctx.view_graph.view_nodes.by_key(node_id).unwrap().pos;
-            state.start_node_drag(*node_id, start_pos);
+            gesture.start_node_drag(*node_id, start_pos);
         }
 
         let mut commit_on_release = false;
-        if let Some(drag) = state.node_drag_mut()
+        if let Some(drag) = gesture.node_drag_mut()
             && drag.node_id == *node_id
         {
             let is_dragging = response.dragged_by(PointerButton::Primary)
@@ -227,12 +226,12 @@ impl NodeUi {
             if drag_stopped {
                 let committed = drag.committed_pos();
                 let before = drag.start_pos;
-                interaction.add_action(GraphUiAction::NodeMoved {
+                output.add_action(GraphUiAction::NodeMoved {
                     node_id: *node_id,
                     before,
                     after: committed,
                 });
-                // Defer `state.cancel()` until after the layout refresh
+                // Defer `gesture.cancel()` until after the layout refresh
                 // below — otherwise the offset would be dropped and this
                 // final frame would draw the node at its pre-drag
                 // position for one flash, until apply() updates
@@ -243,12 +242,12 @@ impl NodeUi {
 
         // Refresh this node's layout with the (possibly updated) drag
         // offset so the rest of render_nodes sees the dragged rect.
-        let drag_offset = state.node_drag_offset_for(node_id);
+        let drag_offset = gesture.node_drag_offset_for(node_id);
         let layout = graph_layout.node_layouts.by_key_mut(node_id).unwrap();
         layout.update(ctx, gui, graph_layout.origin, drag_offset);
 
         if commit_on_release {
-            state.cancel();
+            gesture.cancel();
         }
 
         layout
@@ -277,7 +276,7 @@ fn render_body(
             .as_shape(layout.body_rect, corner_radius),
     ));
 
-    // Execution state shadow
+    // Execution gesture shadow
     if let Some(shadow) = exec_info.shadow(gui) {
         gui.painter().add(Shape::Rect(
             shadow.as_shape(layout.body_rect, corner_radius),
@@ -353,12 +352,7 @@ fn render_body(
 // UI controls
 // ============================================================================
 
-fn render_cache_btn(
-    gui: &mut Gui<'_>,
-    interaction: &mut GraphUiInteraction,
-    layout: &NodeLayout,
-    node: &Node,
-) {
+fn render_cache_btn(gui: &mut Gui<'_>, output: &mut FrameOutput, layout: &NodeLayout, node: &Node) {
     if !layout.has_cache_btn {
         return;
     }
@@ -374,7 +368,7 @@ fn render_cache_btn(
         let before = node.behavior;
         let mut after = before;
         after.toggle();
-        interaction.add_action(GraphUiAction::CacheToggled {
+        output.add_action(GraphUiAction::CacheToggled {
             node_id: node.id,
             before,
             after,
