@@ -1,6 +1,7 @@
-use crate::common::undo_stack::{ActionUndoStack, UndoStack};
-use crate::elements::editor_funclib::EditorFuncLib;
+use crate::common::undo_stack::UndoStack;
+use crate::editor_funclib::EditorFuncLib;
 use crate::gui::frame_output::{FrameOutput, RunCommand};
+use crate::model::ActionUndoStack;
 use crate::model::ArgumentValuesCache;
 use crate::model::config::Config;
 use crate::model::graph_ui_action::GraphUiAction;

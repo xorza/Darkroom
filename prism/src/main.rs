@@ -3,7 +3,7 @@
 
 mod app_data;
 mod common;
-mod elements;
+mod editor_funclib;
 mod gui;
 mod init;
 mod input;

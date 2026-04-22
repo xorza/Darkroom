@@ -1,9 +1,5 @@
 use std::fmt::Debug;
 
-mod action_undo_stack;
-
-pub use action_undo_stack::ActionUndoStack;
-
 pub trait UndoStack<T: Debug>: Debug {
     type Action;
     fn reset_with(&mut self, value: &T);
