@@ -10,7 +10,7 @@ pub enum RunCommand {
 }
 
 /// Buffer of what render emitted this frame: actions that will apply
-/// to `ViewGraph` at end-of-frame (via `Session::handle_actions`),
+/// to `ViewGraph` at end-of-frame (via `Session::commit_actions`),
 /// plus side-channel signals (errors, run command, argument-values
 /// request).
 ///

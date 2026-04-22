@@ -4,7 +4,6 @@ use crate::model::ArgumentValuesCache;
 use crate::model::graph_ui_action::GraphUiAction;
 use anyhow::Result;
 use common::SerdeFormat;
-use common::slot::Slot;
 use palantir::ImageFuncLib;
 use scenarium::elements::basic_funclib::BasicFuncLib;
 use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
@@ -17,7 +16,6 @@ use scenarium::worker::{ArgumentValuesCallback, WorkerMessage};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::model::ViewGraph;
@@ -92,8 +90,8 @@ impl SessionState {
     /// applied action affects computation.
     ///
     /// Does *not* record undo history — that's a session concern, handled
-    /// by [`Session::handle_actions`].
-    pub fn apply_actions(&mut self, actions: &[GraphUiAction]) -> bool {
+    /// by [`Session::commit_actions`].
+    pub fn apply(&mut self, actions: &[GraphUiAction]) -> bool {
         let mut graph_updated = false;
         for action in actions {
             action.apply(&mut self.view_graph);
@@ -110,6 +108,19 @@ impl SessionState {
     }
 }
 
+/// Everything the worker-side plumbing pushes back into the session.
+/// One enum, one channel — `update_shared_status` drains it in a
+/// single loop. New worker→session signals add a variant, not a field.
+#[derive(Debug)]
+enum WorkerEvent {
+    ExecutionFinished(Result<ExecutionStats, execution_graph::Error>),
+    ArgumentValues {
+        node_id: NodeId,
+        values: Option<ArgumentValues>,
+    },
+    Print(String),
+}
+
 #[derive(Debug)]
 pub struct Session {
     pub state: SessionState,
@@ -122,9 +133,8 @@ pub struct Session {
 
     undo_stack: ActionUndoStack,
 
-    execution_stats_rx: Slot<Result<ExecutionStats, execution_graph::Error>>,
-    argument_values_rx: Slot<(NodeId, Option<ArgumentValues>)>,
-    print_out_rx: UnboundedReceiver<String>,
+    worker_tx: UnboundedSender<WorkerEvent>,
+    worker_rx: UnboundedReceiver<WorkerEvent>,
 
     /// Script executor + its transports. Held for `Drop` — drop
     /// cancels the listener and executor tasks at app exit.
@@ -135,12 +145,11 @@ impl Session {
     pub fn new(ui_context: UiContext) -> Self {
         let config = Config::load_or_default();
 
-        let (worker, execution_stats_rx) = Self::create_worker(ui_context.clone());
-        let argument_values_rx = Slot::default();
-        let (print_out_tx, print_out_rx) = unbounded_channel::<String>();
+        let (worker_tx, worker_rx) = unbounded_channel::<WorkerEvent>();
+        let worker = Self::create_worker(ui_context.clone(), worker_tx.clone());
 
         let mut func_lib = FuncLib::default();
-        func_lib.merge(test_func_lib(sample_test_hooks(print_out_tx)));
+        func_lib.merge(test_func_lib(sample_test_hooks(worker_tx.clone())));
         func_lib.merge(BasicFuncLib::default());
         func_lib.merge(WorkerEventsFuncLib::default());
         func_lib.merge(ImageFuncLib::default());
@@ -166,9 +175,8 @@ impl Session {
             graph_dirty: true,
             undo_stack: ActionUndoStack::new(UNDO_MAX_STEPS),
             ui_context,
-            execution_stats_rx,
-            argument_values_rx,
-            print_out_rx,
+            worker_tx,
+            worker_rx,
             _script_executor: script_executor,
         };
 
@@ -231,49 +239,42 @@ impl Session {
     pub fn update_shared_status(&mut self) {
         self.state.autorun = self.worker.is_event_loop_started();
 
-        loop {
-            let result = self.print_out_rx.try_recv();
-            match result {
-                Ok(print_out) => self.state.add_status(print_out),
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => panic!("Print output channel disconnected"),
-            }
-        }
-
-        if let Some(execution_stats) = self.execution_stats_rx.take() {
-            match execution_stats {
-                Ok(execution_stats) => {
+        while let Ok(event) = self.worker_rx.try_recv() {
+            match event {
+                WorkerEvent::Print(line) => self.state.add_status(line),
+                WorkerEvent::ExecutionFinished(Ok(execution_stats)) => {
                     let message = format!(
                         "Compute finished: {} nodes, {:.0}s",
                         execution_stats.executed_nodes.len(),
                         execution_stats.elapsed_secs
                     );
-
                     self.state
                         .argument_values_cache
                         .invalidate_changed(&execution_stats);
                     self.state.execution_stats = Some(execution_stats);
-
                     self.state.status.push('\n');
                     self.state.status.push_str(&message);
                 }
-                Err(err) => {
+                WorkerEvent::ExecutionFinished(Err(err)) => {
                     self.state.status.push('\n');
                     self.state
                         .status
                         .push_str(&format!("Compute failed: {err}"));
                 }
-            }
-        }
-
-        // Process argument values response
-        if let Some((node_id, values)) = self.argument_values_rx.take() {
-            if let Some(values) = values {
-                self.state
-                    .argument_values_cache
-                    .insert(node_id, values.into());
-            } else {
-                self.state.argument_values_cache.clear_pending(node_id);
+                WorkerEvent::ArgumentValues {
+                    node_id,
+                    values: Some(values),
+                } => {
+                    self.state
+                        .argument_values_cache
+                        .insert(node_id, values.into());
+                }
+                WorkerEvent::ArgumentValues {
+                    node_id,
+                    values: None,
+                } => {
+                    self.state.argument_values_cache.clear_pending(node_id);
+                }
             }
         }
     }
@@ -281,7 +282,7 @@ impl Session {
     pub fn undo(&mut self, output: &mut FrameOutput) {
         // Commit anything queued this frame before stepping back so
         // the undo target is the pre-current-frame state.
-        self.handle_actions(output);
+        self.commit_actions(output);
 
         let mut affects_computation = false;
         let undid = self
@@ -313,7 +314,7 @@ impl Session {
             self.state.add_status(format!("Error: {err}"));
         }
 
-        self.graph_dirty |= self.handle_actions(output);
+        self.graph_dirty |= self.commit_actions(output);
 
         let mut update_if_dirty = self.state.autorun;
         let mut msgs: Vec<WorkerMessage> = Vec::default();
@@ -356,10 +357,10 @@ impl Session {
                 node_id,
                 callback: ArgumentValuesCallback::new({
                     let ui_context = self.ui_context.clone();
-                    let slot = self.argument_values_rx.clone();
+                    let tx = self.worker_tx.clone();
 
                     move |values| {
-                        slot.send((node_id, values));
+                        let _ = tx.send(WorkerEvent::ArgumentValues { node_id, values });
                         ui_context.request_redraw();
                     }
                 }),
@@ -376,21 +377,11 @@ impl Session {
         self.worker.exit();
     }
 
-    fn create_worker(
-        ui_refresh: UiContext,
-    ) -> (Worker, Slot<Result<ExecutionStats, execution_graph::Error>>) {
-        let slot = Slot::default();
-
-        (
-            Worker::new({
-                let slot = slot.clone();
-                move |result| {
-                    slot.send(result);
-                    ui_refresh.request_redraw();
-                }
-            }),
-            slot,
-        )
+    fn create_worker(ui_refresh: UiContext, tx: UnboundedSender<WorkerEvent>) -> Worker {
+        Worker::new(move |result| {
+            let _ = tx.send(WorkerEvent::ExecutionFinished(result));
+            ui_refresh.request_redraw();
+        })
     }
 
     fn replace_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
@@ -414,7 +405,7 @@ impl Session {
         self.state.clear_execution_caches();
     }
 
-    fn handle_actions(&mut self, output: &mut FrameOutput) -> bool {
+    fn commit_actions(&mut self, output: &mut FrameOutput) -> bool {
         let mut graph_updated = false;
 
         for actions in output.action_stacks() {
@@ -426,7 +417,7 @@ impl Session {
             // `GraphUiAction::gesture_key`, not here, so this loop
             // doesn't need any pending-action state — which is what
             // makes it safe under egui's multi-pass rendering.
-            let any_affecting = self.state.apply_actions(actions);
+            let any_affecting = self.state.apply(actions);
             self.undo_stack.clear_redo();
             self.undo_stack.push_current(actions);
 
@@ -441,12 +432,12 @@ impl Session {
     }
 }
 
-fn sample_test_hooks(print_out_tx: UnboundedSender<String>) -> TestFuncHooks {
+fn sample_test_hooks(tx: UnboundedSender<WorkerEvent>) -> TestFuncHooks {
     TestFuncHooks {
         get_a: Arc::new(|| Ok(21)),
         get_b: Arc::new(|| 2),
         print: Arc::new(move |value| {
-            print_out_tx.send(value.to_string()).unwrap();
+            let _ = tx.send(WorkerEvent::Print(value.to_string()));
         }),
     }
 }
@@ -485,7 +476,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_actions_reports_when_action_affects_computation() {
+    fn apply_reports_when_action_affects_computation() {
         let mut state = SessionState::default();
 
         // NodeSelected is a UI-only action — should NOT report as affecting computation.
@@ -493,7 +484,7 @@ mod tests {
             before: None,
             after: None,
         };
-        let affects = state.apply_actions(&[selected_action]);
+        let affects = state.apply(&[selected_action]);
         assert!(!affects);
 
         // NodeMoved is also UI-only.
@@ -509,7 +500,7 @@ mod tests {
             before: Pos2::ZERO,
             after: Pos2::new(1.0, 2.0),
         };
-        let affects = state.apply_actions(&[moved]);
+        let affects = state.apply(&[moved]);
         assert!(!affects);
         assert_eq!(
             state.view_graph.view_nodes.by_key(&node_id).unwrap().pos,

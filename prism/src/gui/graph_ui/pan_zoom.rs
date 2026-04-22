@@ -3,7 +3,7 @@
 //! Everything in here is a pure projection of `(state, input)` → new
 //! target `(scale, pan)`, plus the state-machine transitions for the
 //! middle-button pan mode. Mutation of `view_graph.pan` / `scale` happens
-//! exclusively through `ZoomPanChanged::apply` in `Session::handle_actions`.
+//! exclusively through `ZoomPanChanged::apply` in `Session::commit_actions`.
 
 use common::BoolExt;
 use egui::{PointerButton, Pos2, Response, Vec2};
@@ -57,7 +57,7 @@ impl GraphUi {
     }
 
     /// Emit `ZoomPanChanged` iff the target differs from the current view.
-    /// `apply()` in `handle_actions` is the single site that writes
+    /// `apply()` in `commit_actions` is the single site that writes
     /// `pan` / `scale` onto `ViewGraph`.
     pub(super) fn emit_zoom_pan(
         &mut self,

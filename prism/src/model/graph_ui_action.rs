@@ -85,7 +85,7 @@ impl GraphUiAction {
                 );
                 let subscribers = &mut node.events[*event_idx].subscribers;
                 // Idempotent: re-applying an already-applied action is a
-                // no-op. Needed so handle_actions can apply uniformly
+                // no-op. Needed so commit_actions can apply uniformly
                 // without tracking whether the render pass already did so.
                 match change {
                     EventSubscriberChange::Added => {
@@ -320,7 +320,7 @@ mod tests {
     }
 
     /// Applying an action twice must be equivalent to applying it once —
-    /// this is the contract `handle_actions` relies on to dispatch
+    /// this is the contract `commit_actions` relies on to dispatch
     /// `apply` unconditionally regardless of whether the render pass did
     /// the mutation inline.
     #[test]

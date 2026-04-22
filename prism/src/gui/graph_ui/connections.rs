@@ -31,7 +31,7 @@ impl GraphUi {
         if ctx.view_graph.selected_node_id.is_some() {
             let before = ctx.view_graph.selected_node_id;
             // Emit-action-only: selected_node_id is mutated by
-            // `NodeSelected::apply` in handle_actions, not here.
+            // `NodeSelected::apply` in commit_actions, not here.
             self.output.add_action(GraphUiAction::NodeSelected {
                 before,
                 after: None,

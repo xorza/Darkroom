@@ -126,7 +126,7 @@ fn show_name_editor(
     });
 
     if name != original_name {
-        // Mutation applied via NodeNameChanged::apply in handle_actions.
+        // Mutation applied via NodeNameChanged::apply in commit_actions.
         output.add_action(GraphUiAction::NodeNameChanged {
             node_id,
             before: original_name.to_string(),

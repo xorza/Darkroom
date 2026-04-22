@@ -5,7 +5,7 @@ use scenarium::prelude::{ExecutionStats, FuncLib};
 /// Read-mostly bundle of frame-level dependencies for the view layer.
 ///
 /// `view_graph` is borrowed immutably: every mutation goes through
-/// `GraphUiAction::apply` in `Session::handle_actions`, not through this
+/// `GraphUiAction::apply` in `Session::commit_actions`, not through this
 /// context. `argument_values_cache` is still `&mut` because rendering
 /// lazily fills it (texture handles for node previews) — that is
 /// UI-owned cache state, not graph domain state.

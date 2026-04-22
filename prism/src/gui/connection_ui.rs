@@ -383,7 +383,7 @@ pub(crate) fn advance_drag(
 ///
 /// Used by the breaker tool and double-click deletion. The actual binding /
 /// subscriber mutation happens via the emitted action's `apply` in
-/// `handle_actions` — nothing here writes to the graph.
+/// `commit_actions` — nothing here writes to the graph.
 pub(crate) fn disconnect_connection(
     key: ConnectionKey,
     ctx: &GraphContext,
