@@ -411,14 +411,16 @@ fn sample_test_hooks(tx: UnboundedSender<WorkerEvent>) -> TestFuncHooks {
 }
 
 #[cfg(test)]
-impl Session {
-    /// Test-only constructor. Uses a stub worker so no tokio runtime
-    /// is required and nothing network-facing is spawned (no
-    /// `ScriptExecutor`). Skips the config load/autoload, so the
-    /// graph starts empty and `current_path` is `None`.
-    pub(crate) fn test() -> Self {
+mod tests {
+    use super::*;
+    use crate::model::ViewNode;
+    use egui::Pos2;
+
+    /// Stub-backed Session for unit tests: no tokio runtime, no
+    /// network listener, no config autoload.
+    fn test_session() -> Session {
         let (worker_tx, worker_rx) = unbounded_channel::<WorkerEvent>();
-        Self {
+        Session {
             func_lib: FuncLib::default(),
             view_graph: ViewGraph::default(),
             execution_stats: None,
@@ -435,24 +437,17 @@ impl Session {
             _script_executor: None,
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::ViewNode;
-    use egui::Pos2;
 
     #[test]
     fn add_status_first_line_has_no_leading_newline() {
-        let mut session = Session::test();
+        let mut session = test_session();
         session.add_status("hello");
         assert_eq!(session.status(), "hello");
     }
 
     #[test]
     fn add_status_appends_with_newline_separator() {
-        let mut session = Session::test();
+        let mut session = test_session();
         session.add_status("one");
         session.add_status("two");
         assert_eq!(session.status(), "one\ntwo");
@@ -460,7 +455,7 @@ mod tests {
 
     #[test]
     fn add_status_caps_buffer_to_2000_chars() {
-        let mut session = Session::test();
+        let mut session = test_session();
         for _ in 0..300 {
             session.add_status("0123456789");
         }
@@ -469,7 +464,7 @@ mod tests {
 
     #[test]
     fn apply_reports_when_action_affects_computation() {
-        let mut session = Session::test();
+        let mut session = test_session();
 
         // NodeSelected is a UI-only action — should NOT affect computation.
         let affects = session.apply(&[GraphUiAction::NodeSelected {
