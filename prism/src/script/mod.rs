@@ -10,24 +10,22 @@
 //! implementing [`ScriptTransport`] — the executor, the Lua engine,
 //! and the undo/redo plumbing never change.
 //!
-//! Runtime: everything async runs on the app-wide `#[tokio::main]`
-//! runtime. The executor itself is synchronous — `tick` is called
-//! from the egui render loop, uses `try_recv`, and never awaits.
+//! Runtime: everything runs on the app-wide `#[tokio::main]` runtime,
+//! including the executor loop spawned by [`ScriptExecutor::new`].
+//! The loop `await`s the next request (zero CPU when idle), runs it,
+//! and yields back to the scheduler between requests so a stream of
+//! scripts can't starve other tokio tasks.
 
 use tokio::sync::{mpsc, oneshot};
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, yield_now};
 use tokio_util::sync::CancellationToken;
 
 pub mod tcp;
 
-/// Capacity of the transport → executor queue. Bounded so a flooding
-/// client applies backpressure to its own sending task rather than
-/// growing the executor's memory without limit.
-const REQUEST_QUEUE_DEPTH: usize = 32;
-
-/// Max number of scripts the executor runs per frame. Caps the UI
-/// stall a single burst of queued requests can cause.
-const MAX_REQUESTS_PER_FRAME: usize = 4;
+/// Capacity of the transport → executor queue. Small on purpose so
+/// flooding clients feel backpressure on their own sending tasks
+/// instead of piling up memory in the server.
+const REQUEST_QUEUE_DEPTH: usize = 4;
 
 /// Work item sent from a transport to the executor. `reply` is a
 /// single-shot channel; the executor runs `source`, then sends one
@@ -101,16 +99,23 @@ pub trait ScriptTransport: Send {
 // Executor
 // ---------------------------------------------------------------------------
 
-/// Owns the request receiver and (eventually) the Lua state. Polled
-/// once per frame from `MainUi::render` — no blocking, no awaiting.
+/// Owns the background executor task plus every transport it feeds.
+/// Dropping it cancels everything and aborts the tasks.
 #[derive(Debug)]
 pub struct ScriptExecutor {
-    rx: mpsc::Receiver<ScriptRequest>,
+    cancel: CancellationToken,
+    task: Option<JoinHandle<()>>,
     _transports: Vec<TransportHandle>,
 }
 
 impl ScriptExecutor {
-    pub fn new(transports: Vec<Box<dyn ScriptTransport>>) -> Self {
+    /// Create the executor, spawn every transport's listener task,
+    /// and spawn the executor task itself. Must be called from a
+    /// tokio runtime context.
+    pub fn new<I>(transports: I) -> Self
+    where
+        I: IntoIterator<Item = Box<dyn ScriptTransport>>,
+    {
         let (tx, rx) = mpsc::channel(REQUEST_QUEUE_DEPTH);
         let handles = transports
             .into_iter()
@@ -119,20 +124,47 @@ impl ScriptExecutor {
                 t.start(tx.clone(), cancel)
             })
             .collect();
+
+        let cancel = CancellationToken::new();
+        let cancel_task = cancel.clone();
+        let task = tokio::spawn(async move { run_executor(rx, cancel_task).await });
+
         Self {
-            rx,
+            cancel,
+            task: Some(task),
             _transports: handles,
         }
     }
 
-    /// Drain up to [`MAX_REQUESTS_PER_FRAME`] requests and run them.
-    /// Called once per frame from the egui render loop.
-    pub fn tick(&mut self) {
-        for _ in 0..MAX_REQUESTS_PER_FRAME {
-            let Ok(req) = self.rx.try_recv() else { break };
-            let result = run_lua_stub(&req.source);
-            let _ = req.reply.send(result);
+    /// Cancel and await the executor task — graceful shutdown.
+    pub async fn shutdown(mut self) {
+        self.cancel.cancel();
+        if let Some(task) = self.task.take() {
+            let _ = task.await;
         }
+    }
+}
+
+impl Drop for ScriptExecutor {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+    }
+}
+
+async fn run_executor(mut rx: mpsc::Receiver<ScriptRequest>, cancel: CancellationToken) {
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => break,
+            r = rx.recv() => {
+                let Some(req) = r else { break };
+                let result = run_lua_stub(&req.source);
+                let _ = req.reply.send(result);
+            }
+        }
+        yield_now().await;
     }
 }
 
