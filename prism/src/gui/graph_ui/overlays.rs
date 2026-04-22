@@ -156,10 +156,9 @@ impl GraphUi {
         selection: NewNodeSelection,
     ) {
         match selection {
-            NewNodeSelection::Func(func) => {
-                let screen_pos = self.new_node_ui.position();
+            NewNodeSelection::Func { func, position } => {
                 let origin = gui.rect.min;
-                let graph_pos = (screen_pos - origin - ctx.view_graph.pan) / ctx.view_graph.scale;
+                let graph_pos = (position - origin - ctx.view_graph.pan) / ctx.view_graph.scale;
 
                 // Build the new node + view-node locally; apply() inserts them.
                 let node: scenarium::graph::Node = func.into();

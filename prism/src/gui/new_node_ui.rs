@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::sync::Arc;
 
 use bumpalo::Bump;
@@ -27,45 +26,48 @@ const MAX_COLUMNS: usize = 2;
 
 #[derive(Debug)]
 pub enum NewNodeSelection<'a> {
-    Func(&'a Func),
+    Func { func: &'a Func, position: Pos2 },
     ConstBind,
 }
 
 #[derive(Debug, Default)]
+enum NewNodeUiState {
+    #[default]
+    Closed,
+    Open {
+        position: Pos2,
+        from_connection: bool,
+    },
+}
+
+#[derive(Debug, Default)]
 pub struct NewNodeUi {
-    open: bool,
-    position: Pos2,
-    from_connection: bool,
+    state: NewNodeUiState,
 }
 
 // === NewNodeUi ===
 
 impl NewNodeUi {
     pub fn open(&mut self, position: Pos2) {
-        self.open_at(position, false);
+        self.state = NewNodeUiState::Open {
+            position,
+            from_connection: false,
+        };
     }
 
     pub fn open_from_connection(&mut self, position: Pos2) {
-        self.open_at(position, true);
-    }
-
-    fn open_at(&mut self, position: Pos2, from_connection: bool) {
-        self.open = true;
-        self.position = position;
-        self.from_connection = from_connection;
+        self.state = NewNodeUiState::Open {
+            position,
+            from_connection: true,
+        };
     }
 
     pub fn close(&mut self) {
-        self.open = false;
-        self.from_connection = false;
+        self.state = NewNodeUiState::Closed;
     }
 
     pub fn is_open(&self) -> bool {
-        self.open
-    }
-
-    pub fn position(&self) -> Pos2 {
-        self.position
+        matches!(self.state, NewNodeUiState::Open { .. })
     }
 
     pub fn show<'a>(
@@ -75,9 +77,13 @@ impl NewNodeUi {
         func_lib: &'a FuncLib,
         arena: &Bump,
     ) -> Option<NewNodeSelection<'a>> {
-        if !self.open {
+        let NewNodeUiState::Open {
+            position,
+            from_connection,
+        } = self.state
+        else {
             return None;
-        }
+        };
 
         // Capture interaction for the background
         let rect = gui.rect;
@@ -89,50 +95,54 @@ impl NewNodeUi {
 
         let mut selection: Option<NewNodeSelection<'a>> = None;
 
-        let popup_response = self.show_popup(gui, func_lib, arena, &mut selection);
+        let popup_response = show_popup(
+            gui,
+            position,
+            from_connection,
+            func_lib,
+            arena,
+            &mut selection,
+        );
 
-        if should_close_popup(input, &popup_response.response.rect) {
-            self.close();
-        }
-
-        if selection.is_some() {
+        if should_close_popup(input, &popup_response.response.rect) || selection.is_some() {
             self.close();
         }
 
         selection
     }
+}
 
-    fn show_popup<'a>(
-        &self,
-        gui: &mut Gui<'_>,
-        func_lib: &'a FuncLib,
-        arena: &Bump,
-        selection: &mut Option<NewNodeSelection<'a>>,
-    ) -> egui::InnerResponse<()> {
-        let popup_id = gui.ui().make_persistent_id("new_node_popup");
+fn show_popup<'a>(
+    gui: &mut Gui<'_>,
+    position: Pos2,
+    from_connection: bool,
+    func_lib: &'a FuncLib,
+    arena: &Bump,
+    selection: &mut Option<NewNodeSelection<'a>>,
+) -> egui::InnerResponse<()> {
+    let popup_id = gui.ui().make_persistent_id("new_node_popup");
 
-        Area::new(popup_id)
-            .fixed_pos(self.position)
-            .order(Order::Foreground)
-            .show(gui, |gui| {
-                Frame::popup(&gui.style.popup).sense(Sense::all()).show(
-                    gui,
-                    StableId::new("new_node_popup_frame"),
-                    |gui| {
-                        gui.ui().set_min_width(POPUP_MIN_WIDTH);
-                        gui.ui().set_min_height(POPUP_MIN_HEIGHT);
-                        gui.ui().set_max_height(POPUP_MAX_HEIGHT);
+    Area::new(popup_id)
+        .fixed_pos(position)
+        .order(Order::Foreground)
+        .show(gui, |gui| {
+            Frame::popup(&gui.style.popup).sense(Sense::all()).show(
+                gui,
+                StableId::new("new_node_popup_frame"),
+                |gui| {
+                    gui.ui().set_min_width(POPUP_MIN_WIDTH);
+                    gui.ui().set_min_height(POPUP_MIN_HEIGHT);
+                    gui.ui().set_max_height(POPUP_MAX_HEIGHT);
 
-                        gui.horizontal_justified(|gui| {
-                            if self.from_connection {
-                                show_const_bind_option(gui, selection);
-                            }
-                            show_function_categories(gui, func_lib, arena, selection);
-                        });
-                    },
-                );
-            })
-    }
+                    gui.horizontal_justified(|gui| {
+                        if from_connection {
+                            show_const_bind_option(gui, selection);
+                        }
+                        show_function_categories(gui, position, func_lib, arena, selection);
+                    });
+                },
+            );
+        })
 }
 
 // === Helpers ===
@@ -158,7 +168,7 @@ fn show_const_bind_option<'a>(gui: &mut Gui<'_>, selection: &mut Option<NewNodeS
         let small_padding = gui.style.small_padding;
         let btn_font = gui.style.sub_font.clone();
 
-        let button_width = 80.0 + padding * 2.0;
+        let button_width = BUTTON_MIN_WIDTH + padding * 2.0;
         let button_height = gui.font_height(&btn_font) + small_padding * 2.0;
 
         gui.ui().set_min_width(button_width);
@@ -175,6 +185,7 @@ fn show_const_bind_option<'a>(gui: &mut Gui<'_>, selection: &mut Option<NewNodeS
 
 fn show_function_categories<'a>(
     gui: &mut Gui<'_>,
+    position: Pos2,
     func_lib: &'a FuncLib,
     arena: &Bump,
     selection: &mut Option<NewNodeSelection<'a>>,
@@ -184,7 +195,7 @@ fn show_function_categories<'a>(
     for category in categories {
         gui.vertical(|gui| {
             Expander::new(category).default_open(true).show(gui, |gui| {
-                show_category_functions(gui, func_lib, category, arena, selection);
+                show_category_functions(gui, position, func_lib, category, arena, selection);
             });
         });
     }
@@ -200,6 +211,7 @@ fn collect_sorted_categories<'a>(func_lib: &'a FuncLib, arena: &'a Bump) -> Bump
 
 fn show_category_functions<'a>(
     gui: &mut Gui<'_>,
+    position: Pos2,
     func_lib: &'a FuncLib,
     category: &str,
     arena: &Bump,
@@ -246,7 +258,7 @@ fn show_category_functions<'a>(
                     .show(gui, StableId::new(("func_btn", func.id)))
                     .clicked()
                 {
-                    *selection = Some(NewNodeSelection::Func(func));
+                    *selection = Some(NewNodeSelection::Func { func, position });
                 }
             },
         );
