@@ -138,11 +138,17 @@ impl GraphUi {
                 let (background_response, pointer_pos) =
                     self.setup_background_interaction(gui, input, rect);
 
+                // Render nodes first so their widgets (body, cache button,
+                // remove button, ports) register before we read the
+                // background's click state. Otherwise the background —
+                // the only widget in scope at this point — would claim
+                // clicks that should have gone to nodes, triggering a
+                // spurious deselect + cancel_interaction.
+                self.render_content(gui, &ctx, input, &background_response, pointer_pos);
+
                 if background_response.clicked() {
                     self.handle_background_click(&ctx);
                 }
-
-                self.render_content(gui, &ctx, input, &background_response, pointer_pos);
 
                 let overlay_hovered = self.render_overlays(
                     gui,

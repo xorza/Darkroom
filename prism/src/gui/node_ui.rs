@@ -185,7 +185,7 @@ impl NodeUi {
         state: &mut Interaction,
         node_id: &NodeId,
     ) -> &'a NodeLayout {
-        let body_id = gui.ui().make_persistent_id(("node_body", *node_id));
+        let body_id = StableId::new(("node_body", *node_id)).id();
         let body_rect = graph_layout.node_layouts.by_key(node_id).unwrap().body_rect;
         let response = gui.ui().interact(
             body_rect,

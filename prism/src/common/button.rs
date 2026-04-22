@@ -128,34 +128,36 @@ impl<'a> Button<'a> {
             Sense::hover()
         };
 
-        // Run the button inside a child scope whose Id is pinned to the
-        // caller-supplied salt via `Gui::scope`. Inside that scope
-        // egui's auto-id starts at counter=0 from a stable seed, so the
-        // single `allocate_rect` below produces a stable widget id every
-        // frame — even when sibling widgets in the *outer* Ui come and
-        // go. The scope itself also registers a widget at the same rect
-        // with its (stable) global-scope id; both are stable, so egui's
-        // "rect changed id between passes" check is satisfied.
-        let explicit_rect = self.rect;
-        let autosize = if explicit_rect.is_none() {
+        // Two widget-id paths depending on layout mode:
+        //
+        // - Explicit rect (`.rect(..)`): the caller dictates the rect, so
+        //   we register *one* widget directly with the caller-supplied
+        //   `StableId`. No scope needed — no auto-id counter to worry
+        //   about, no second widget at the same rect. That matters: an
+        //   earlier scope-wrapping version emitted two click-sensitive
+        //   widgets at the same rect (the scope's own widget plus an
+        //   inner `allocate_rect`), which — once other nodes' bodies
+        //   register later in the frame — made per-node cache/remove
+        //   buttons unreliable.
+        //
+        // - Autosize (no explicit rect): the layout decides the rect
+        //   from the button's content size. We still need a scope so
+        //   `allocate_space` runs against a stable-id seed, otherwise
+        //   the resulting widget's id drifts with the parent's counter.
+        let (rect, response) = if let Some(rect) = self.rect {
+            let response = gui.ui().interact(rect, id.id(), sense);
+            (rect, response)
+        } else {
             // todo also include provided shapes size
             let text_size = galley.as_ref().map(|g| g.size()).unwrap_or_default();
             let padding = vec2(gui.style.padding * 2.0, gui.style.small_padding * 2.0);
-            self.size.unwrap_or(text_size + padding)
-        } else {
-            Vec2::ZERO
-        };
-
-        let (rect, response) = gui.scope(id).sense(sense).show(|gui| {
-            let rect = if let Some(rect) = explicit_rect {
-                rect
-            } else {
+            let autosize = self.size.unwrap_or(text_size + padding);
+            gui.scope(id).sense(sense).show(|gui| {
                 let (_id, rect) = gui.ui().allocate_space(autosize);
-                rect
-            };
-            let response = gui.ui().allocate_rect(rect, sense);
-            (rect, response)
-        });
+                let response = gui.ui().allocate_rect(rect, sense);
+                (rect, response)
+            })
+        };
 
         if !gui.ui().is_rect_visible(rect) {
             return response;
