@@ -80,14 +80,10 @@ pub struct Session {
     graph_dirty: bool,
     action_stack: ActionStack,
 
-    worker: Worker,
+    worker: Option<Worker>,
     worker_tx: UnboundedSender<WorkerEvent>,
     worker_rx: UnboundedReceiver<WorkerEvent>,
     ui_context: UiContext,
-
-    /// Script executor + its transports. Held for `Drop` — drop
-    /// cancels the listener and executor tasks at app exit. `None`
-    /// in tests (no tokio runtime, nothing to listen on).
     _script_executor: Option<ScriptExecutor>,
 }
 
@@ -124,7 +120,7 @@ impl Session {
             autorun: false,
             graph_dirty: true,
             action_stack: ActionStack::new(UNDO_MAX_STEPS),
-            worker,
+            worker: Some(worker),
             worker_tx,
             worker_rx,
             ui_context,
@@ -233,7 +229,10 @@ impl Session {
     }
 
     pub fn update_shared_status(&mut self) {
-        self.autorun = self.worker.is_event_loop_started();
+        self.autorun = self
+            .worker
+            .as_ref()
+            .is_some_and(Worker::is_event_loop_started);
 
         while let Ok(event) = self.worker_rx.try_recv() {
             match event {
@@ -346,14 +345,18 @@ impl Session {
             });
         }
 
-        if !msgs.is_empty() {
-            self.worker.send_many(msgs);
+        if !msgs.is_empty()
+            && let Some(worker) = &self.worker
+        {
+            worker.send_many(msgs);
         }
     }
 
     pub fn exit(&mut self) {
         self.config.save();
-        self.worker.exit();
+        if let Some(worker) = &mut self.worker {
+            worker.exit();
+        }
     }
 
     fn replace_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
@@ -361,7 +364,9 @@ impl Session {
         if reset_undo {
             self.action_stack.clear();
         }
-        self.worker.send(WorkerMessage::Clear);
+        if let Some(worker) = &self.worker {
+            worker.send(WorkerMessage::Clear);
+        }
         self.refresh_graph();
     }
 
@@ -428,7 +433,7 @@ mod tests {
             autorun: false,
             graph_dirty: false,
             action_stack: ActionStack::new(UNDO_MAX_STEPS),
-            worker: Worker::stub(),
+            worker: None,
             worker_tx,
             worker_rx,
             ui_context: UiContext::new(&eframe::egui::Context::default()),
