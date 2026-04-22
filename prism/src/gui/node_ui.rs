@@ -14,11 +14,35 @@ use crate::model::graph_ui_action::GraphUiAction;
 use common::BoolExt;
 use egui::epaint::CornerRadiusF32;
 use egui::{
-    Align2, Color32, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
+    Align2, PointerButton, Pos2, Rect, Response, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
 use scenarium::execution_stats::{ExecutedNodeStats, NodeError};
 use scenarium::graph::{Node, NodeId};
 use scenarium::prelude::{ExecutionStats, Func, FuncBehavior, NodeBehavior};
+
+/// Primary *or* middle — the two buttons we treat interchangeably for
+/// node body drag and selection.
+const DRAG_BUTTONS: [PointerButton; 2] = [PointerButton::Primary, PointerButton::Middle];
+
+/// Drag lifecycle events for a node body response, collapsed to a
+/// single read of the response so the rest of `handle_node_drag`
+/// doesn't repeat the `primary || middle` check three times.
+#[derive(Debug, Clone, Copy)]
+struct NodeDragEvents {
+    started: bool,
+    dragging: bool,
+    stopped: bool,
+}
+
+impl NodeDragEvents {
+    fn from_response(r: &Response) -> Self {
+        Self {
+            started: DRAG_BUTTONS.iter().any(|&b| r.drag_started_by(b)),
+            dragging: DRAG_BUTTONS.iter().any(|&b| r.dragged_by(b)),
+            stopped: DRAG_BUTTONS.iter().any(|&b| r.drag_stopped_by(b)),
+        }
+    }
+}
 
 // ============================================================================
 // Types
@@ -45,11 +69,12 @@ impl PortInteractCommand {
         }
     }
 
-    fn prefer(self, other: Self) -> Self {
+    /// Keep whichever of `self` and `other` has the higher priority —
+    /// used to fold multiple port hits in a single frame down to the
+    /// most-actionable one (e.g. a `Click` wins over a `Hover`).
+    fn prefer(&mut self, other: Self) {
         if other.priority() > self.priority() {
-            other
-        } else {
-            self
+            *self = other;
         }
     }
 }
@@ -166,8 +191,9 @@ impl NodeUi {
             render_cache_btn(gui, output, layout, node);
 
             let missing_inputs = get_missing_input_ports(ctx.execution_stats, node_id);
-            let node_port_cmd = render_ports(gui, layout, node, func, &missing_inputs);
-            result.port_cmd = std::mem::take(&mut result.port_cmd).prefer(node_port_cmd);
+            result
+                .port_cmd
+                .prefer(render_ports(gui, layout, node, func, &missing_inputs));
 
             render_port_labels(gui, layout);
         }
@@ -191,62 +217,51 @@ impl NodeUi {
             body_id,
             Sense::click() | Sense::hover() | Sense::drag(),
         );
+        let events = NodeDragEvents::from_response(&response);
 
-        // Selection — emit action only; apply() updates view_graph.selected_node_id.
-        let drag_started = response.drag_started_by(PointerButton::Primary)
-            || response.drag_started_by(PointerButton::Middle);
-        if (drag_started || response.clicked()) && ctx.view_graph.selected_node_id != Some(*node_id)
+        // Selection — emit an action only; apply() updates
+        // `view_state.selected_node_id` at end of frame.
+        if (events.started || response.clicked())
+            && ctx.view_graph.selected_node_id != Some(*node_id)
         {
-            let before = ctx.view_graph.selected_node_id;
             output.add_action(GraphUiAction::NodeSelected {
-                before,
+                before: ctx.view_graph.selected_node_id,
                 after: Some(*node_id),
             });
         }
 
-        // Drag lifecycle — Gesture gesture owns the in-flight offset.
-        // ViewGraph stays untouched until the drag commits on release.
-        if drag_started {
+        // Drag lifecycle — the `Gesture` state machine owns the in-flight
+        // offset. `ViewGraph` stays untouched until the drag commits on
+        // release (the `NodeMoved` action applied at end of frame).
+        if events.started {
             let start_pos = ctx.view_graph.view_nodes.by_key(node_id).unwrap().pos;
             gesture.start_node_drag(*node_id, start_pos);
         }
-
-        let mut commit_on_release = false;
         if let Some(drag) = gesture.node_drag_mut()
             && drag.node_id == *node_id
         {
-            let is_dragging = response.dragged_by(PointerButton::Primary)
-                || response.dragged_by(PointerButton::Middle);
-            if is_dragging {
+            if events.dragging {
                 drag.offset += response.drag_delta() / gui.scale();
             }
-
-            let drag_stopped = response.drag_stopped_by(PointerButton::Primary)
-                || response.drag_stopped_by(PointerButton::Middle);
-            if drag_stopped {
-                let committed = drag.committed_pos();
-                let before = drag.start_pos;
+            if events.stopped {
                 output.add_action(GraphUiAction::NodeMoved {
                     node_id: *node_id,
-                    before,
-                    after: committed,
+                    before: drag.start_pos,
+                    after: drag.committed_pos(),
                 });
-                // Defer `gesture.cancel()` until after the layout refresh
-                // below — otherwise the offset would be dropped and this
-                // final frame would draw the node at its pre-drag
-                // position for one flash, until apply() updates
-                // view_graph.pos at end of frame.
-                commit_on_release = true;
             }
         }
 
-        // Refresh this node's layout with the (possibly updated) drag
-        // offset so the rest of render_nodes sees the dragged rect.
+        // Refresh this node's layout with the current drag offset so the
+        // rest of `render_nodes` sees the dragged rect. Must happen
+        // *before* we cancel the gesture on drop — otherwise the offset
+        // would be zero'd and this final frame would flash the node at
+        // its pre-drag position until apply() lands.
         let drag_offset = gesture.node_drag_offset_for(node_id);
         let layout = graph_layout.node_layouts.by_key_mut(node_id).unwrap();
         layout.update(ctx, gui, graph_layout.origin, drag_offset);
 
-        if commit_on_release {
+        if events.stopped {
             gesture.cancel();
         }
 
@@ -276,7 +291,7 @@ fn render_body(
             .as_shape(layout.body_rect, corner_radius),
     ));
 
-    // Execution gesture shadow
+    // Execution-state shadow
     if let Some(shadow) = exec_info.shadow(gui) {
         gui.painter().add(Shape::Rect(
             shadow.as_shape(layout.body_rect, corner_radius),
@@ -463,13 +478,7 @@ fn render_ports(
 
     let mut result = PortInteractCommand::None;
 
-    // Helper closure for drawing a single port
-    let draw_port = |gui: &mut Gui<'_>,
-                     center: Pos2,
-                     kind: PortKind,
-                     idx: usize,
-                     show_missing_shadow: bool|
-     -> PortInteractCommand {
+    let mut draw_port = |gui: &mut Gui<'_>, kind: PortKind, idx: usize, center: Pos2| {
         let port_rect = Rect::from_center_size(center, port_rect_size);
         let port_id = gui
             .ui()
@@ -477,11 +486,11 @@ fn render_ports(
         let response = gui.ui().interact(
             port_rect,
             port_id,
-            Sense::drag() | Sense::hover() | Sense::click(),
+            Sense::click() | Sense::hover() | Sense::drag(),
         );
         let hovered = gui.ui().rect_contains_pointer(port_rect);
 
-        if show_missing_shadow {
+        if kind == PortKind::Input && missing_inputs.contains(&idx) {
             draw_circle_with_gradient_shadow(
                 gui.painter(),
                 center,
@@ -494,7 +503,7 @@ fn render_ports(
         let color = gui.style.node.port_colors(kind).select(hovered);
         gui.painter().circle_filled(center, port_radius, color);
 
-        let port_info = PortInfo {
+        let info = PortInfo {
             port: PortRef {
                 node_id: node.id,
                 port_idx: idx,
@@ -502,48 +511,31 @@ fn render_ports(
             },
             center,
         };
-
-        if response.drag_started_by(PointerButton::Primary) {
-            PortInteractCommand::DragStart(port_info)
+        let cmd = if response.drag_started_by(PointerButton::Primary) {
+            PortInteractCommand::DragStart(info)
         } else if response.drag_stopped_by(PointerButton::Primary) {
             PortInteractCommand::DragStop
         } else if !response.dragged() && response.clicked_by(PointerButton::Primary) {
-            PortInteractCommand::Click(port_info)
+            PortInteractCommand::Click(info)
         } else if hovered {
-            PortInteractCommand::Hover(port_info)
+            PortInteractCommand::Hover(info)
         } else {
             PortInteractCommand::None
-        }
+        };
+        result.prefer(cmd);
     };
 
-    // Trigger port (for terminal nodes)
     if func.terminal {
-        let cmd = draw_port(gui, layout.trigger_center(), PortKind::Trigger, 0, false);
-        result = result.prefer(cmd);
+        draw_port(gui, PortKind::Trigger, 0, layout.trigger_center());
     }
-
-    // Input ports
     for idx in 0..layout.input_galleys.len() {
-        let cmd = draw_port(
-            gui,
-            layout.input_center(idx),
-            PortKind::Input,
-            idx,
-            missing_inputs.contains(&idx),
-        );
-        result = result.prefer(cmd);
+        draw_port(gui, PortKind::Input, idx, layout.input_center(idx));
     }
-
-    // Output ports
     for idx in 0..layout.output_galleys.len() {
-        let cmd = draw_port(gui, layout.output_center(idx), PortKind::Output, idx, false);
-        result = result.prefer(cmd);
+        draw_port(gui, PortKind::Output, idx, layout.output_center(idx));
     }
-
-    // Event ports
     for idx in 0..layout.event_galleys.len() {
-        let cmd = draw_port(gui, layout.event_center(idx), PortKind::Event, idx, false);
-        result = result.prefer(cmd);
+        draw_port(gui, PortKind::Event, idx, layout.event_center(idx));
     }
 
     result
