@@ -10,7 +10,7 @@ const LINE_COUNT: usize = 6;
 pub struct LogUi;
 
 impl LogUi {
-    pub fn render(&mut self, gui: &mut Gui, status: &str) {
+    pub fn render(&self, gui: &mut Gui, status: &str) {
         let body_font = gui.style.body_font.clone();
         let line_height = gui.font_height(&body_font);
         let style = &gui.style;
