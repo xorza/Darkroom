@@ -102,14 +102,18 @@ fn compute_scroll_zoom(
     let mut new_pan = current_pan;
 
     if (zoom_delta - 1.0).abs() > f32::EPSILON {
+        // Zoom, pinned to cursor. Skip pan_delta — a wheel tick
+        // can produce both a zoom signal and a scroll signal;
+        // applying both would push the graph under the cursor.
         let clamped_scale = (current_scale * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
         let origin = gui.rect.min;
         let graph_pos = (pointer_pos - origin - current_pan) / current_scale;
         new_scale = clamped_scale;
         new_pan = pointer_pos - origin - graph_pos * clamped_scale;
+    } else {
+        new_pan += pan_delta;
     }
 
-    new_pan += pan_delta;
     (new_scale, new_pan)
 }
 

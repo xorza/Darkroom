@@ -17,11 +17,13 @@ pub struct InputSnapshot {
     /// Keys whose `pressed` event fired this frame.
     pub keys_pressed: Vec<Key>,
 
-    /// Accumulated smooth scroll delta plus any `MouseWheelUnit::Point` events.
+    /// Accumulated `MouseWheelUnit::Point` deltas for this frame (trackpad
+    /// pan). Deliberately does NOT include `smooth_scroll_delta`: egui
+    /// smooths wheel scrolls across several frames, so using it here would
+    /// leak wheel-tick residue into pan on the frames after the zoom fires.
     pub scroll_delta: Vec2,
-    /// Magnitude of any `MouseWheelUnit::Line`/`Page` events (y component of
-    /// the last such event in the frame; matches the prior behaviour of
-    /// `collect_scroll_mouse_wheel_deltas`).
+    /// Y component of the last `MouseWheelUnit::Line`/`Page` event this
+    /// frame (signed). Zero when no such event occurred.
     pub wheel_lines: f32,
 
     /// Raw egui zoom delta (pinch / scroll-zoom gesture) — 1.0 if no zoom.
@@ -32,7 +34,7 @@ impl InputSnapshot {
     /// Samples the context's current input state once.
     pub fn capture(ctx: &Context) -> Self {
         ctx.input(|i| {
-            let mut scroll_delta = i.smooth_scroll_delta;
+            let mut scroll_delta = Vec2::ZERO;
             let mut wheel_lines = 0.0_f32;
             let mut keys_pressed = Vec::new();
 
