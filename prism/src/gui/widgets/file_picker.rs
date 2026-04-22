@@ -132,6 +132,8 @@ impl<'a> FilePicker<'a> {
             .rect(browse_rect)
             .show(gui);
 
+        let outer_id = id.id().with("outer");
+
         if browse_response.clicked() {
             let mut dialog = rfd::FileDialog::new();
             if !self.extensions.is_empty() {
@@ -148,10 +150,11 @@ impl<'a> FilePicker<'a> {
             }
         }
 
-        // Return response for the entire widget rect, not just the browse button
-        let widget_response = gui
-            .ui_raw()
-            .interact(rect, browse_response.id, Sense::hover());
+        // Return response for the entire widget rect (hover tooltips,
+        // outer hit-testing), not just the browse button. The outer id
+        // is allocated from our own `id`, not reused from the inner
+        // Button — whose id scheme is its own internal detail.
+        let widget_response = gui.ui_raw().interact(rect, outer_id, Sense::hover());
         widget_response | browse_response
     }
 }
