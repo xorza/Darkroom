@@ -1,12 +1,7 @@
-use std::rc::Rc;
-
-use egui::{Color32, CornerRadius, InnerResponse, Margin, Response, Sense, Stroke};
+use egui::{Color32, CornerRadius, InnerResponse, Margin, Sense, Stroke};
 
 use crate::common::StableId;
-use crate::gui::{
-    Gui,
-    style::{PopupStyle, Style},
-};
+use crate::gui::{Gui, style::PopupStyle};
 
 #[derive(Debug, Clone)]
 #[must_use = "Frame does nothing until .show() is called"]

@@ -49,11 +49,6 @@ impl<'a> StaticValueEditor<'a> {
         self
     }
 
-    pub fn anchor(mut self, anchor: Align2) -> Self {
-        self.anchor = anchor;
-        self
-    }
-
     pub fn style(mut self, style: DragValueStyle) -> Self {
         self.style = Some(style);
         self

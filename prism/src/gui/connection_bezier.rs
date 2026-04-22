@@ -1,4 +1,3 @@
-use egui::epaint::Mesh;
 use egui::{Color32, Pos2, Rect, Response, Sense};
 
 use crate::common::polyline_mesh::PolylineMesh;
@@ -8,8 +7,6 @@ use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::style::Style;
 use crate::gui::widgets::HitRegion;
-
-const DEFAULT_FEATHER: f32 = 0.8;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ConnectionBezierStyle {
@@ -35,14 +32,6 @@ pub struct ConnectionBezier {
 
 impl ConnectionBezier {
     pub const DEFAULT_POINTS: usize = 35;
-
-    pub fn mesh(&self) -> &Mesh {
-        self.polyline.mesh()
-    }
-
-    pub fn points(&self) -> &[Pos2] {
-        self.polyline.points()
-    }
 
     pub fn update_points(&mut self, start: Pos2, end: Pos2, scale: f32) {
         self.update_points_with_count(start, end, scale, Self::DEFAULT_POINTS);

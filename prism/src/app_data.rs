@@ -5,25 +5,24 @@ use crate::model::ArgumentValuesCache;
 use crate::model::config::Config;
 use crate::model::graph_ui_action::GraphUiAction;
 use anyhow::Result;
+use common::SerdeFormat;
 use common::slot::Slot;
-use common::{SerdeFormat, Shared};
 use palantir::ImageFuncLib;
 use scenarium::elements::basic_funclib::BasicFuncLib;
-use scenarium::elements::worker_events_funclib::{FRAME_EVENT_FUNC_ID, WorkerEventsFuncLib};
-use scenarium::execution_graph::{self, Result as ExecutionGraphResult};
-use scenarium::graph::{Binding, Node, NodeId};
-use scenarium::prelude::{ExecutionStats, FuncId, FuncLib};
-use scenarium::prelude::{TestFuncHooks, test_func_lib, test_graph};
+use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
+use scenarium::execution_graph::{self};
+use scenarium::graph::NodeId;
+use scenarium::prelude::{ExecutionStats, FuncLib};
+use scenarium::prelude::{TestFuncHooks, test_func_lib};
+use scenarium::worker::Worker;
 use scenarium::worker::{ArgumentValuesCallback, WorkerMessage};
-use scenarium::worker::{EventRef, ProcessingCallback, Worker};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
-use tokio::sync::{Notify, watch};
 
 use crate::main_ui::UiContext;
-use crate::model::{ViewGraph, ViewNode};
+use crate::model::ViewGraph;
 
 use scenarium::execution_graph::ArgumentValues;
 
@@ -411,18 +410,6 @@ fn sample_test_hooks(print_out_tx: UnboundedSender<String>) -> TestFuncHooks {
         print: Arc::new(move |value| {
             print_out_tx.send(value.to_string()).unwrap();
         }),
-    }
-}
-
-fn add_node_from_func_id(view_graph: &mut ViewGraph, func_lib: &FuncLib, func_id: FuncId) {
-    if view_graph
-        .graph
-        .nodes
-        .iter_mut()
-        .all(|node| node.func_id != func_id)
-    {
-        let func = func_lib.by_id(&func_id).unwrap();
-        view_graph.add_node_from_func(func);
     }
 }
 

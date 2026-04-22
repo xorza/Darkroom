@@ -10,7 +10,6 @@ use bumpalo::Bump;
 use common::BoolExt;
 use eframe::egui;
 use egui::{Pos2, Rect, Response, Sense, StrokeKind, Vec2};
-use scenarium::graph::NodeId;
 
 use crate::app_data::AppData;
 use crate::common::StableId;
@@ -26,7 +25,6 @@ use crate::gui::node_details_ui::NodeDetailsUi;
 use crate::gui::node_ui::NodeUi;
 use crate::gui::widgets::HitRegion;
 use crate::input::InputSnapshot;
-use crate::model;
 
 mod connections;
 mod overlays;
@@ -296,10 +294,11 @@ mod tests {
     use crate::gui::connection_ui::PortKind;
     use crate::gui::graph_layout::{PortInfo, PortRef};
     use crate::gui::node_ui::PortInteractCommand;
+    use crate::model;
     use crate::model::EventSubscriberChange;
     use crate::model::graph_ui_action::GraphUiAction;
     use scenarium::function::FuncId;
-    use scenarium::graph::{Event, Input, Node, NodeBehavior};
+    use scenarium::graph::{Event, Input, Node, NodeBehavior, NodeId};
     use scenarium::prelude::{Binding, PortAddress};
 
     fn make_node_with(input_count: usize, event_count: usize) -> Node {
@@ -540,7 +539,7 @@ mod tests {
             true, // on background, but DragStart wins
             PortInteractCommand::DragStart(port_info),
         );
-        assert!(interaction.is_dragging_connection());
+        assert!(matches!(interaction, Gesture::DraggingConnection(_)));
     }
 
     #[test]
@@ -553,7 +552,7 @@ mod tests {
             true,
             PortInteractCommand::None,
         );
-        assert!(interaction.is_breaking());
+        assert!(matches!(interaction, Gesture::BreakingConnections(_)));
     }
 
     #[test]

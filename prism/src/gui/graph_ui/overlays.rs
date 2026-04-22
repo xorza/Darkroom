@@ -3,7 +3,7 @@
 //! the popup can route into.
 
 use bumpalo::Bump;
-use egui::{Align2, Id, PointerButton, Pos2, Response, Sense, pos2, vec2};
+use egui::{Align2, PointerButton, Pos2, Response, Sense, pos2, vec2};
 use scenarium::data::StaticValue;
 use scenarium::graph::Binding;
 

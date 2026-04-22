@@ -232,12 +232,6 @@ impl Style {
         Ok(style)
     }
 
-    pub fn to_file(&self, path: impl AsRef<Path>) -> anyhow::Result<()> {
-        let payload = toml::to_string(self)?;
-        std::fs::write(path, payload)?;
-        Ok(())
-    }
-
     /// Produce a runtime `Style` at the given scale, cloned from the
     /// reference. `self` can be either a reference (no back-link) or
     /// an already-scaled runtime instance — either way the multiply

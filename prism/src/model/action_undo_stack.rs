@@ -243,9 +243,8 @@ mod tests {
     use crate::common::UiEquals;
     use crate::model::EventSubscriberChange;
     use crate::model::graph_ui_action::GraphUiAction;
-    use crate::model::view_graph::{IncomingConnection, IncomingEvent};
     use common::SerdeFormat;
-    use egui::{Pos2, Vec2, vec2};
+    use egui::{Vec2, vec2};
     use scenarium::data::StaticValue;
     use scenarium::graph::{Binding, Event, Input, NodeBehavior};
     use scenarium::prelude::test_graph;
@@ -273,45 +272,6 @@ mod tests {
 
         assert_eq!(undo_actions_len, stack.undo_actions.len());
         assert_eq!(redo_actions_len, stack.redo_actions.len());
-    }
-
-    fn collect_incoming_connections(
-        view_graph: &ViewGraph,
-        removed_node_id: scenarium::graph::NodeId,
-    ) -> Vec<IncomingConnection> {
-        let mut incoming = Vec::new();
-        for node in view_graph.graph.nodes.iter() {
-            for (input_idx, input) in node.inputs.iter().enumerate() {
-                if let Binding::Bind(address) = &input.binding
-                    && address.target_id == removed_node_id
-                {
-                    incoming.push(IncomingConnection {
-                        node_id: node.id,
-                        input_idx,
-                        binding: input.binding.clone(),
-                    });
-                }
-            }
-        }
-        incoming
-    }
-
-    fn collect_incoming_events(
-        view_graph: &ViewGraph,
-        removed_node_id: scenarium::graph::NodeId,
-    ) -> Vec<IncomingEvent> {
-        let mut incoming = Vec::new();
-        for node in view_graph.graph.nodes.iter() {
-            for (event_idx, event) in node.events.iter().enumerate() {
-                if event.subscribers.contains(&removed_node_id) {
-                    incoming.push(IncomingEvent {
-                        node_id: node.id,
-                        event_idx,
-                    });
-                }
-            }
-        }
-        incoming
     }
 
     #[test]

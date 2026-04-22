@@ -23,10 +23,6 @@ impl PolylineMesh {
             points: Vec::with_capacity(points),
         }
     }
-    pub fn mesh(&self) -> &Mesh {
-        &self.mesh
-    }
-
     pub fn points(&self) -> &[Pos2] {
         self.points.as_slice()
     }

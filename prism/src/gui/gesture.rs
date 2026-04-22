@@ -58,18 +58,6 @@ impl Gesture {
         matches!(self, Self::Panning)
     }
 
-    pub fn is_breaking(&self) -> bool {
-        matches!(self, Self::BreakingConnections(_))
-    }
-
-    pub fn is_dragging_connection(&self) -> bool {
-        matches!(self, Self::DraggingConnection(_))
-    }
-
-    pub fn is_dragging_node(&self) -> bool {
-        matches!(self, Self::DraggingNode(_))
-    }
-
     /// Cancels whatever the user was doing. One assignment — there is no
     /// partial state left behind.
     pub fn cancel(&mut self) {
@@ -133,23 +121,7 @@ impl Gesture {
         }
     }
 
-    pub fn breaker_mut(&mut self) -> Option<&mut ConnectionBreaker> {
-        if let Self::BreakingConnections(b) = self {
-            Some(b)
-        } else {
-            None
-        }
-    }
-
     pub fn drag(&self) -> Option<&ConnectionDrag> {
-        if let Self::DraggingConnection(d) = self {
-            Some(d)
-        } else {
-            None
-        }
-    }
-
-    pub fn drag_mut(&mut self) -> Option<&mut ConnectionDrag> {
         if let Self::DraggingConnection(d) = self {
             Some(d)
         } else {
@@ -188,7 +160,7 @@ mod tests {
     fn start_breaking_installs_breaker() {
         let mut i = Gesture::default();
         i.start_breaking(Pos2::new(10.0, 20.0));
-        assert!(i.is_breaking());
+        assert!(matches!(i, Gesture::BreakingConnections(_)));
         assert!(i.breaker().is_some());
         assert!(i.drag().is_none());
     }
@@ -197,7 +169,7 @@ mod tests {
     fn start_dragging_installs_drag_only() {
         let mut i = Gesture::default();
         i.start_dragging(dummy_port());
-        assert!(i.is_dragging_connection());
+        assert!(matches!(i, Gesture::DraggingConnection(_)));
         assert!(i.drag().is_some());
         assert!(i.breaker().is_none());
     }
@@ -221,7 +193,7 @@ mod tests {
         let mut i = Gesture::default();
         i.start_breaking(Pos2::ZERO);
         i.start_dragging(dummy_port());
-        assert!(i.is_dragging_connection());
+        assert!(matches!(i, Gesture::DraggingConnection(_)));
         assert!(i.breaker().is_none());
 
         i.start_panning();

@@ -1,10 +1,10 @@
 use std::path::Path;
 
-use egui::{Align2, Color32, Pos2, Response, Sense, Stroke, StrokeKind, pos2, vec2};
+use egui::{Align2, Pos2, Response, Sense, StrokeKind, pos2, vec2};
 
 use crate::common::StableId;
 use crate::gui::Gui;
-use crate::gui::style::{ButtonStyle, DragValueStyle};
+use crate::gui::style::DragValueStyle;
 use crate::gui::widgets::button::Button;
 
 /// What kind of filesystem entry the picker accepts.

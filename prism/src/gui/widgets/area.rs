@@ -1,9 +1,7 @@
-use std::rc::Rc;
-
-use egui::{Align2, InnerResponse, Pos2, Response};
+use egui::{Align2, InnerResponse, Pos2};
 
 use crate::common::StableId;
-use crate::gui::{Gui, style::Style};
+use crate::gui::Gui;
 
 #[derive(Debug)]
 pub struct Area {

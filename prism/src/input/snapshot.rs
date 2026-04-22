@@ -9,13 +9,9 @@ pub struct InputSnapshot {
 
     pub primary_pressed: bool,
     pub primary_down: bool,
-    pub primary_released: bool,
-    pub primary_clicked: bool,
     pub secondary_pressed: bool,
     /// Any pointer button was newly pressed this frame.
     pub any_pointer_pressed: bool,
-    /// Any pointer button produced a click this frame.
-    pub any_pointer_click: bool,
 
     pub modifiers: Modifiers,
     /// Keys whose `pressed` event fired this frame.
@@ -62,11 +58,8 @@ impl InputSnapshot {
                 interact_pos: i.pointer.interact_pos(),
                 primary_pressed: i.pointer.primary_pressed(),
                 primary_down: i.pointer.primary_down(),
-                primary_released: i.pointer.primary_released(),
-                primary_clicked: i.pointer.primary_clicked(),
                 secondary_pressed: i.pointer.secondary_pressed(),
                 any_pointer_pressed: i.pointer.any_pressed(),
-                any_pointer_click: i.pointer.any_click(),
                 modifiers: i.modifiers,
                 keys_pressed,
                 scroll_delta,

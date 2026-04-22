@@ -1,6 +1,3 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
-
 mod app_data;
 mod common;
 mod editor_funclib;
@@ -12,8 +9,6 @@ mod model;
 
 use anyhow::Result;
 use eframe::{NativeOptions, egui};
-use egui::ViewportCommand;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::app_data::AppData;
@@ -39,7 +34,6 @@ async fn main() -> Result<()> {
         options,
         Box::new(|cc| {
             configure_fonts(&cc.egui_ctx);
-            configure_visuals(&cc.egui_ctx);
             Ok(Box::new(ScenariumEditor::new(&cc.egui_ctx)))
         }),
     )?;
@@ -69,12 +63,6 @@ fn configure_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-fn configure_visuals(ctx: &egui::Context) {
-    let mut style = (*ctx.global_style()).clone();
-    style.visuals.override_text_color = Some(egui::Color32::from_rgb(200, 200, 200));
-    ctx.set_global_style(style);
-}
-
 #[derive(Debug)]
 struct ScenariumEditor {
     app_data: AppData,
@@ -84,17 +72,9 @@ struct ScenariumEditor {
 impl ScenariumEditor {
     fn new(ui_context: &egui::Context) -> Self {
         let main_ui = MainUi::new(ui_context);
-        let mut app = Self {
-            app_data: AppData::new(main_ui.ui_context()),
-            main_ui,
-        };
-
-        app.init();
-
-        app
+        let app_data = AppData::new(main_ui.ui_context());
+        Self { app_data, main_ui }
     }
-
-    fn init(&mut self) {}
 }
 
 impl eframe::App for ScenariumEditor {

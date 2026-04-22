@@ -33,8 +33,8 @@ use epaint::{
 
 use egui::{
     Align, Align2, Color32, Context, CursorIcon, Event, EventFilter, FontSelection, Id, ImeEvent,
-    Key, KeyboardShortcut, Margin, Modifiers, NumExt as _, Response, Sense, Shape, TextBuffer,
-    TextStyle, TextWrapMode, Ui, Vec2, WidgetInfo, WidgetText, WidgetWithState, epaint,
+    Key, KeyboardShortcut, Margin, Modifiers, NumExt as _, Sense, Shape, TextBuffer, TextStyle,
+    TextWrapMode, Ui, Vec2, WidgetInfo, WidgetText, WidgetWithState, epaint,
     os::OperatingSystem,
     output::OutputEvent,
     response, text_selection,

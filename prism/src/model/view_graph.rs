@@ -1,7 +1,6 @@
 use anyhow::{Result, bail};
 use common::{SerdeFormat, is_debug, key_index_vec::KeyIndexVec};
-use scenarium::function::Func;
-use scenarium::graph::{Binding, Node};
+use scenarium::graph::Binding;
 use scenarium::prelude::{FuncLib, Graph as CoreGraph, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -46,27 +45,6 @@ impl Default for ViewGraph {
 }
 
 impl ViewGraph {
-    pub fn auto_place_nodes(&mut self) {
-        assert_eq!(
-            self.view_nodes.len(),
-            self.graph.nodes.len(),
-            "auto-place requires view nodes for every graph node"
-        );
-
-        for (idx, node) in self.graph.nodes.iter().enumerate() {
-            let column = idx % 3;
-            let row = idx / 3;
-            let pos = egui::pos2(80.0 + 240.0 * column as f32, 120.0 + 180.0 * row as f32);
-            let view_node = self
-                .view_nodes
-                .by_key_mut(&node.id)
-                .expect("auto-place expects a view node for each graph node");
-            view_node.pos = pos;
-        }
-
-        self.validate();
-    }
-
     pub fn validate(&self) {
         if !is_debug() {
             return;
@@ -153,17 +131,6 @@ impl ViewGraph {
         {
             self.selected_node_id = None;
         }
-    }
-
-    pub fn add_node_from_func(&mut self, func: &Func) -> (&Node, &mut ViewNode) {
-        let node: Node = func.into();
-        let node_id = node.id;
-        let view_node: ViewNode = (&node).into();
-        self.view_nodes.add(view_node);
-        self.graph.add(node);
-        let node = self.graph.by_id(&node_id).unwrap();
-        let view_node = self.view_nodes.by_key_mut(&node_id).unwrap();
-        (node, view_node)
     }
 
     pub fn removal_action(&self, node_id: &NodeId) -> GraphUiAction {

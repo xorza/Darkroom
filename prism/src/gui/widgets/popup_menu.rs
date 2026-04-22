@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use egui::{Align, FontId, Galley, Id, Key, Order, Pos2, Response, Sense, Vec2, vec2};
+use egui::{Align, FontId, Galley, Id, Key, Order, Response, Vec2, vec2};
 
 use crate::common::StableId;
 use crate::gui::Gui;
