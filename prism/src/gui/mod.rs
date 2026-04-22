@@ -7,6 +7,7 @@ use crate::{
     gui::style::Style,
 };
 
+pub mod connection_bezier;
 pub mod connection_breaker;
 pub mod connection_ui;
 pub mod const_bind_ui;
@@ -21,7 +22,6 @@ pub mod new_node_ui;
 pub mod node_details_ui;
 pub mod node_layout;
 pub mod node_ui;
-pub mod polyline_mesh;
 pub mod style;
 pub mod style_settings;
 

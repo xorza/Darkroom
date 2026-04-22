@@ -2,7 +2,8 @@ use eframe::egui;
 use egui::{Pos2, Rect};
 
 use crate::common::bezier_helper;
-use crate::gui::{Gui, polyline_mesh::PolylineMesh};
+use crate::common::polyline_mesh::PolylineMesh;
+use crate::gui::Gui;
 
 const MIN_POINT_DISTANCE: f32 = 4.0;
 const MAX_BREAKER_LENGTH: f32 = 900.0;

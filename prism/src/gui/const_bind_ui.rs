@@ -3,9 +3,9 @@ use scenarium::data::StaticValue;
 use scenarium::graph::{Binding, Node, NodeId};
 use scenarium::prelude::Func;
 
-use crate::common::connection_bezier::ConnectionBezierStyle;
 use crate::common::{StableId, StaticValueEditor};
 use crate::gui::Gui;
+use crate::gui::connection_bezier::ConnectionBezierStyle;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::{ConnectionCurve, ConnectionKey, PortKind};
 use crate::gui::frame_output::FrameOutput;

@@ -4,8 +4,8 @@ use scenarium::graph::{NodeId, PortAddress};
 use scenarium::prelude::{Binding, ExecutionStats};
 use scenarium::worker::EventRef;
 
-use crate::common::connection_bezier::{ConnectionBezier, ConnectionBezierStyle};
 use crate::gui::Gui;
+use crate::gui::connection_bezier::{ConnectionBezier, ConnectionBezierStyle};
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::frame_output::FrameOutput;
 use crate::gui::gesture::Gesture;

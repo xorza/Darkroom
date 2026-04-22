@@ -1,11 +1,11 @@
 use egui::epaint::Mesh;
 use egui::{Color32, Pos2, Rect, Response, Sense};
 
+use crate::common::polyline_mesh::PolylineMesh;
 use crate::common::{UiEquals, bezier_helper};
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::PortKind;
-use crate::gui::polyline_mesh::PolylineMesh;
 use crate::gui::style::Style;
 
 const DEFAULT_FEATHER: f32 = 0.8;
