@@ -4,6 +4,23 @@ AI coding rules for Rust projects:
 
 - Do not commit or push until the user explicitly asks ("commit", "commit push", etc.). Finish the change, run tests/clippy/fmt, then stop and wait for review. The user wants to inspect the diff before anything lands.
 
+## Available CLI tools
+
+These are installed and available — prefer them over slower/regex-based equivalents:
+
+- **`ast-grep`** — AST-aware structural code search. Use for "find all call sites of X", "find all `Arc::get_mut().unwrap()` patterns", or any search where regex is fragile. Beats `rg` for code-pattern matching.
+  - `ast-grep run --pattern 'Arc::get_mut($X).unwrap()' --lang rust`
+- **`scc`** — fast LOC counter with language stats. Use for design-review scope decisions (faster + smarter than `wc -l`).
+  - `scc prism/src/gui/`
+- **`hyperfine`** — statistical benchmarking. Use when validating performance claims rather than guessing.
+  - `hyperfine 'cargo test --release my_test'`
+- **`cargo-machete`** — finds unused crate dependencies.
+  - `cargo machete`
+- **`bacon`** — Rust-aware continuous build/test loop. Useful when iterating on a refactor.
+  - `bacon` (in repo root)
+
+Plus the standard set: `rg`, `fd`, `jq`, `gh`, `cargo`, `cargo-nextest`, `rustfmt`, `clippy`, `sqlite3`.
+
 ## Error Handling
 
 - Use `Result<>` only for expected failures (network, I/O, external services, user input).
