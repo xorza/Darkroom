@@ -6,6 +6,7 @@ use egui::{Color32, Pos2, Shape, TextureFilter, TextureHandle, TextureOptions};
 
 use crate::gui::Gui;
 use crate::gui::graph_ctx::GraphContext;
+use crate::gui::widgets::Texture;
 
 /// Target on-screen spacing range (in tile-widths) the dot pattern is
 /// wrapped to as the user zooms. `wrap_scale_multiplier` picks a
@@ -82,7 +83,7 @@ impl GraphBackgroundRenderer {
             mipmap_mode: Some(TextureFilter::Linear),
             wrap_mode: egui::TextureWrapMode::Repeat,
         };
-        let handle = gui.ui().ctx().load_texture("graph_dots", image, options);
+        let handle = Texture::new("graph_dots", image).options(options).load(gui);
         self.texture = Some(handle);
     }
 

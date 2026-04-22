@@ -60,7 +60,7 @@ impl PositionedUi {
         } else {
             // First pass: measure content size using invisible UI
             let content_size = gui
-                .ui()
+                .ui_raw()
                 .ctx()
                 .memory(|mem| mem.data.get_temp::<Vec2>(self.id.id()));
 
@@ -83,7 +83,7 @@ impl PositionedUi {
             .max_rect(initial_rect)
             .sense(sense)
             .show(|gui| {
-                let mut child_gui = Gui::new_with_scale(gui.ui(), &style, scale);
+                let mut child_gui = Gui::new_with_scale(gui.ui_raw(), &style, scale);
                 let result = add_contents(&mut child_gui);
 
                 // Store measured size for next frame — but ONLY on the
@@ -96,7 +96,7 @@ impl PositionedUi {
                 // shift → "Widget rect changed id between passes"
                 // warnings. `will_discard()` is false only on the last
                 // pass.
-                let ui = gui.ui();
+                let ui = gui.ui_raw();
                 if !ui.ctx().will_discard() {
                     let measured_size = ui.min_size();
                     ui.ctx().memory_mut(|mem| {

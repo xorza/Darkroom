@@ -24,6 +24,7 @@ use crate::gui::graph_layout::GraphLayout;
 use crate::gui::new_node_ui::NewNodeUi;
 use crate::gui::node_details_ui::NodeDetailsUi;
 use crate::gui::node_ui::NodeUi;
+use crate::gui::widgets::HitRegion;
 use crate::input::InputSnapshot;
 use crate::model;
 
@@ -97,9 +98,8 @@ impl GraphUi {
 
         gui.scope(StableId::new("graph_ui"))
             .max_rect(rect)
+            .clip_rect(rect)
             .show(|gui| {
-                gui.ui().set_clip_rect(rect);
-
                 let mut ctx = GraphContext {
                     func_lib: &app_data.state.func_lib,
                     view_graph: &app_data.state.view_graph,
@@ -243,10 +243,7 @@ impl GraphUi {
     // ------------------------------------------------------------------------
 
     fn draw_background_frame(&self, gui: &mut Gui<'_>) -> Rect {
-        let rect = gui
-            .ui()
-            .available_rect_before_wrap()
-            .shrink(gui.style.big_padding);
+        let rect = gui.rect.shrink(gui.style.big_padding);
 
         gui.painter().rect(
             rect,
@@ -265,17 +262,16 @@ impl GraphUi {
         input: &InputSnapshot,
         rect: Rect,
     ) -> (Response, Option<Pos2>) {
-        let graph_bg_id = gui.ui().make_persistent_id("graph_bg");
+        let graph_bg_id = StableId::new("graph_bg");
 
         let pointer_pos = input
             .pointer_pos
             .and_then(|pos| rect.contains(pos).then_else(Some(pos), None));
 
-        let response = gui.ui().interact(
-            rect,
-            graph_bg_id,
-            Sense::hover() | Sense::drag() | Sense::click(),
-        );
+        let response = HitRegion::new(graph_bg_id)
+            .rect(rect)
+            .sense(Sense::hover() | Sense::drag() | Sense::click())
+            .show(gui);
 
         (response, pointer_pos)
     }

@@ -14,6 +14,7 @@ use crate::gui::frame_output::RunCommand;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_ui::{ButtonResult, GraphUi, ViewButtonAction};
 use crate::gui::new_node_ui::NewNodeSelection;
+use crate::gui::widgets::Layout;
 use crate::gui::widgets::button::Button;
 use crate::gui::widgets::frame::Frame;
 use crate::gui::widgets::positioned_ui::PositionedUi;
@@ -33,7 +34,7 @@ impl GraphUi {
                 .pivot(Align2::LEFT_TOP)
                 .interactable(false)
                 .show(gui, |gui| {
-                    gui.ui().take_available_width();
+                    Layout::new().fill_width().apply(gui);
                     let padding = gui.style.padding;
 
                     Frame::none()

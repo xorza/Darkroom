@@ -6,6 +6,7 @@ use scenarium::data::{DataType, EnumDef, FsPathMode, StaticValue};
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::style::DragValueStyle;
+use crate::gui::widgets::HitRegion;
 use crate::gui::widgets::combo_box::ComboBox;
 use crate::gui::widgets::drag_value::DragValue;
 use crate::gui::widgets::file_picker::{FilePicker, FilePickerMode};
@@ -116,8 +117,7 @@ impl<'a> StaticValueEditor<'a> {
             _ => {
                 // For unsupported types, return a dummy response
                 // This allows gradual addition of new value types
-                gui.ui()
-                    .allocate_response(egui::Vec2::ZERO, egui::Sense::hover())
+                HitRegion::new(StableId::new("value_editor_unsupported")).show(gui)
             }
         }
     }

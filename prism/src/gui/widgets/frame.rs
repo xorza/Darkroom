@@ -81,7 +81,7 @@ impl Frame {
         // internally, pinning the outer scope's id verbatim.
         gui.scope(id).sense(sense).show(|gui| {
             let style = gui.style.clone();
-            let result = inner_frame.show(gui.ui(), |ui| {
+            let result = inner_frame.show(gui.ui_raw(), |ui| {
                 let mut gui = Gui::new(ui, &style);
                 add_contents(&mut gui)
             });

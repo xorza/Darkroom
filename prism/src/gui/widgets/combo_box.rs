@@ -78,18 +78,18 @@ impl<'a> ComboBox<'a> {
             .style
             .unwrap_or_else(|| gui.style.node.const_bind_style.clone());
 
-        let galley = gui
-            .ui()
-            .painter()
-            .layout_no_wrap(self.selected.clone(), font.clone(), color);
+        let galley =
+            gui.ui_raw()
+                .painter()
+                .layout_no_wrap(self.selected.clone(), font.clone(), color);
         let size = galley.size() + padding * 2.0;
 
         let rect = self.anchor.anchor_size(self.pos, size);
         let inner_rect = rect.shrink2(padding);
 
-        if !gui.ui().is_rect_visible(rect) {
+        if !gui.ui_raw().is_rect_visible(rect) {
             return gui
-                .ui()
+                .ui_raw()
                 .interact(rect, id.with("combo_interact"), Sense::hover());
         }
 
@@ -106,7 +106,7 @@ impl<'a> ComboBox<'a> {
         gui.painter().galley(text_rect.min, galley, color);
 
         let mut response = gui
-            .ui()
+            .ui_raw()
             .interact(rect, id.with("combo_interact"), Sense::click());
 
         let mut selected_option: Option<String> = None;

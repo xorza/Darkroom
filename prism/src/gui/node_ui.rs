@@ -9,6 +9,7 @@ use crate::gui::gesture::Gesture;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::gui::node_layout::{NodeGalleys, NodeLayout};
+use crate::gui::widgets::HitRegion;
 use crate::gui::widgets::button::Button;
 use crate::model::execution_info::NodeExecutionInfo;
 use crate::model::graph_ui_action::GraphUiAction;
@@ -139,12 +140,11 @@ impl NodeUi {
             let drag_offset = gesture.node_drag_offset_for(&node_id);
             let layout = graph_layout.node_layout(gui, ctx, &node_id, drag_offset);
 
-            let body_id = StableId::new(("node_body", node_id)).id();
-            let response = gui.ui().interact(
-                layout.body_rect,
-                body_id,
-                Sense::click() | Sense::hover() | Sense::drag(),
-            );
+            let body_id = StableId::new(("node_body", node_id));
+            let response = HitRegion::new(body_id)
+                .rect(layout.body_rect)
+                .sense(Sense::click() | Sense::hover() | Sense::drag())
+                .show(gui);
             let events = NodeDragEvents::from_response(&response);
 
             if (events.started || response.clicked())
@@ -207,7 +207,7 @@ impl NodeUi {
 
             const_bind_frame.render(gui, output, &layout, node, func, breaker);
 
-            if !gui.ui().is_rect_visible(layout.body_rect) {
+            if !gui.is_rect_visible(layout.body_rect) {
                 continue;
             }
 
@@ -406,8 +406,8 @@ fn render_status_hints(
 
     // Tooltip on hover
     let dot_rect = Rect::from_center_size(center, vec2(dot_radius * 2.0, dot_radius * 2.0));
-    let dot_id = gui.ui().make_persistent_id(("node_status_impure", node_id));
-    let response = gui.ui().interact(dot_rect, dot_id, Sense::hover());
+    let dot_id = StableId::new(("node_status_impure", node_id));
+    let response = HitRegion::new(dot_id).rect(dot_rect).show(gui);
 
     if response.hovered() {
         response.show_tooltip_text("impure");
@@ -446,15 +446,12 @@ fn render_ports(
 
     let mut draw_port = |gui: &mut Gui<'_>, kind: PortKind, idx: usize, center: Pos2| {
         let port_rect = Rect::from_center_size(center, port_rect_size);
-        let port_id = gui
-            .ui()
-            .make_persistent_id(("node_port", kind, node.id, idx));
-        let response = gui.ui().interact(
-            port_rect,
-            port_id,
-            Sense::click() | Sense::hover() | Sense::drag(),
-        );
-        let hovered = gui.ui().rect_contains_pointer(port_rect);
+        let port_id = StableId::new(("node_port", kind, node.id, idx));
+        let response = HitRegion::new(port_id)
+            .rect(port_rect)
+            .sense(Sense::click() | Sense::hover() | Sense::drag())
+            .show(gui);
+        let hovered = gui.rect_contains_pointer(port_rect);
 
         if kind == PortKind::Input && missing_inputs.contains(&idx) {
             draw_circle_with_gradient_shadow(

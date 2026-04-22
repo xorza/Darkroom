@@ -57,12 +57,30 @@ impl<'a> Gui<'a> {
         }
     }
 
-    pub fn ui(&mut self) -> &mut Ui {
+    /// Raw access to the underlying `egui::Ui`. Restricted to
+    /// `gui/widgets/` — every other caller must build a widget rather
+    /// than poke `Ui` directly. The `no_raw_ui_outside_widgets` tripwire
+    /// test enforces this.
+    pub fn ui_raw(&mut self) -> &mut Ui {
         self.ui
     }
 
     pub fn painter(&self) -> &Painter {
         self.ui.painter()
+    }
+
+    // === egui queries (read-only, not widgets) ===
+
+    pub fn is_rect_visible(&self, rect: Rect) -> bool {
+        self.ui.is_rect_visible(rect)
+    }
+
+    pub fn rect_contains_pointer(&self, rect: Rect) -> bool {
+        self.ui.rect_contains_pointer(rect)
+    }
+
+    pub fn pointer_hover_pos(&self) -> Option<egui::Pos2> {
+        self.ui.input(|i| i.pointer.hover_pos())
     }
 
     pub fn scale(&self) -> f32 {
@@ -146,6 +164,7 @@ impl<'a> Gui<'a> {
         ScopedGui {
             gui: self,
             builder: UiBuilder::new().id(id.id()),
+            clip_rect: None,
         }
     }
 
@@ -167,6 +186,7 @@ impl<'a> Gui<'a> {
 pub struct ScopedGui<'b, 'a> {
     gui: &'b mut Gui<'a>,
     builder: UiBuilder,
+    clip_rect: Option<Rect>,
 }
 
 impl<'b, 'a> ScopedGui<'b, 'a> {
@@ -180,9 +200,17 @@ impl<'b, 'a> ScopedGui<'b, 'a> {
         self
     }
 
+    /// Narrows the child scope's clip rect. Anything the body paints
+    /// outside this rect is culled.
+    pub fn clip_rect(mut self, rect: Rect) -> Self {
+        self.clip_rect = Some(rect);
+        self
+    }
+
     pub fn show<R>(self, add_contents: impl FnOnce(&mut Gui<'_>) -> R) -> R {
         let style = Rc::clone(&self.gui.style);
         let scale = self.gui.scale;
+        let clip_rect = self.clip_rect;
         // Delegate to `scope_builder`, NOT `Ui::new_child` directly: only
         // `scope_builder` calls `remember_min_rect` + `advance_cursor_after_rect`
         // when the closure returns. Without those the parent's cursor never
@@ -191,6 +219,9 @@ impl<'b, 'a> ScopedGui<'b, 'a> {
         self.gui
             .ui
             .scope_builder(self.builder, |ui| {
+                if let Some(clip) = clip_rect {
+                    ui.set_clip_rect(clip);
+                }
                 let mut gui = Gui::with_style(ui, style, scale);
                 add_contents(&mut gui)
             })

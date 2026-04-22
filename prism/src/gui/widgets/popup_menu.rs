@@ -61,7 +61,7 @@ impl PopupMenu {
     /// Show the popup menu if it's open.
     /// Returns Some(inner) if the popup was shown, None otherwise.
     pub fn show<R>(self, gui: &mut Gui<'_>, content: impl FnOnce(&mut Gui<'_>) -> R) -> Option<R> {
-        let ctx = gui.ui().ctx().clone();
+        let ctx = gui.ui_raw().ctx().clone();
         let is_open = ctx.memory(|mem| mem.data.get_temp::<bool>(self.id).unwrap_or(false));
 
         if !is_open {
@@ -76,7 +76,7 @@ impl PopupMenu {
         // Check if the popup was just opened on this frame (anchor was clicked)
         let just_opened = self.anchor_response.clicked();
 
-        let popup_response = Area::new(self.id)
+        let popup_response = Area::new(StableId::from_id(self.id))
             .fixed_pos(anchor_rect.left_bottom())
             .order(Order::Foreground)
             .show(gui, |gui| {
@@ -85,7 +85,7 @@ impl PopupMenu {
                     StableId::from_id(popup_id.with("popup_menu_frame")),
                     |gui| {
                         if let Some(width) = min_width {
-                            gui.ui().set_min_width(width);
+                            gui.ui_raw().set_min_width(width);
                         }
                         content(gui)
                     },
@@ -101,8 +101,8 @@ impl PopupMenu {
         }
 
         // Close on click outside
-        if gui.ui().input(|i| i.pointer.any_pressed())
-            && let Some(pointer_pos) = gui.ui().input(|i| i.pointer.interact_pos())
+        if gui.ui_raw().input(|i| i.pointer.any_pressed())
+            && let Some(pointer_pos) = gui.ui_raw().input(|i| i.pointer.interact_pos())
             && !popup_rect.contains(pointer_pos)
             && !anchor_rect.contains(pointer_pos)
         {
@@ -112,8 +112,8 @@ impl PopupMenu {
         // Close on click inside if close_on_click is true
         // But not if clicking on the anchor (which toggles the popup)
         if close_on_click
-            && gui.ui().input(|i| i.pointer.any_click())
-            && let Some(pointer_pos) = gui.ui().input(|i| i.pointer.interact_pos())
+            && gui.ui_raw().input(|i| i.pointer.any_click())
+            && let Some(pointer_pos) = gui.ui_raw().input(|i| i.pointer.interact_pos())
             && popup_rect.contains(pointer_pos)
             && !anchor_rect.contains(pointer_pos)
         {
@@ -121,7 +121,7 @@ impl PopupMenu {
         }
 
         // Close on Escape
-        if gui.ui().input(|i| i.key_pressed(Key::Escape)) {
+        if gui.ui_raw().input(|i| i.key_pressed(Key::Escape)) {
             ctx.memory_mut(|mem| mem.data.insert_temp(popup_id, false));
         }
 

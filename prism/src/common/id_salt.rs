@@ -182,4 +182,89 @@ mod tests {
             }
         }
     }
+
+    /// Tripwire for direct egui access outside the wrapper layer.
+    ///
+    /// App code must not call `gui.ui_raw()` — every interaction with
+    /// `egui::Ui` / `egui::Context` goes through a widget in
+    /// `gui/widgets/`. The `ui_raw()` accessor only exists so widgets
+    /// can talk to the underlying egui; it is not part of the app API.
+    ///
+    /// Annotate intentional exceptions with `// egui-direct-ok` on the
+    /// same line or up to two non-blank lines above.
+    #[test]
+    fn no_raw_ui_outside_widgets() {
+        let crate_root: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        // Files outside `gui/widgets/` that legitimately hold raw egui
+        // access. Keep this set small and justified.
+        let whitelist: &[&Path] = &[
+            // The accessor itself + doc mentions.
+            Path::new("gui/mod.rs"),
+            Path::new("common/id_salt.rs"),
+            // Legacy panel still built directly on raw egui chrome
+            // (CollapsingState, egui::Frame, egui::ScrollArea). Pending
+            // rewrite as a `StatusPanel` widget — see
+            // prism/EGUI_ENCAPSULATION_PLAN.md.
+            Path::new("gui/log_ui.rs"),
+        ];
+
+        let mut offenders = Vec::new();
+        visit(&crate_root, &crate_root, whitelist, &mut offenders);
+
+        assert!(
+            offenders.is_empty(),
+            "Found `gui.ui_raw()` outside `gui/widgets/`. Build a widget \
+             instead, or annotate with `// egui-direct-ok` if intentional. \
+             Call sites:\n{}",
+            offenders.join("\n"),
+        );
+
+        fn visit(dir: &Path, root: &Path, whitelist: &[&Path], offenders: &mut Vec<String>) {
+            let Ok(entries) = fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    // Skip the whole widgets subtree — that's where
+                    // `ui_raw()` is supposed to live.
+                    if path.ends_with("gui/widgets") {
+                        continue;
+                    }
+                    visit(&path, root, whitelist, offenders);
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                let rel = path.strip_prefix(root).unwrap_or(&path);
+                if whitelist.contains(&rel) {
+                    continue;
+                }
+                let Ok(contents) = fs::read_to_string(&path) else {
+                    continue;
+                };
+                let lines: Vec<&str> = contents.lines().collect();
+                for (lineno, line) in lines.iter().enumerate() {
+                    let trimmed = line.trim_start();
+                    if trimmed.starts_with("//") || trimmed.starts_with('*') {
+                        continue;
+                    }
+                    if !line.contains("ui_raw()") {
+                        continue;
+                    }
+                    let same_line = line.contains("// egui-direct-ok");
+                    let preceding_ok = lines[..lineno]
+                        .iter()
+                        .rev()
+                        .filter(|l| !l.trim().is_empty())
+                        .take(2)
+                        .any(|l| l.contains("// egui-direct-ok"));
+                    if !same_line && !preceding_ok {
+                        offenders.push(format!("{}:{}: {}", path.display(), lineno + 1, trimmed));
+                    }
+                }
+            }
+        }
+    }
 }

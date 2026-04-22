@@ -123,13 +123,13 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
         // Check if we're currently dragging to display temporary value
         let drag_temp_id = id.with("drag_temp");
         let display_value = gui
-            .ui()
+            .ui_raw()
             .data_mut(|data| data.get_temp::<T>(drag_temp_id))
             .unwrap_or(*self.value);
 
         let value_text = display_value.display();
         let galley = gui
-            .ui()
+            .ui_raw()
             .painter()
             .layout_no_wrap(value_text.clone(), font.clone(), color);
         let mut size = galley.size() + padding * 2.0; //+ vec2(0.0, 4.0 * gui.scale());
@@ -139,9 +139,9 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
         let rect = self.anchor.anchor_size(self.pos, size);
         let inner_rect = rect.shrink2(padding);
 
-        if !gui.ui().is_rect_visible(rect) {
+        if !gui.ui_raw().is_rect_visible(rect) {
             return gui
-                .ui()
+                .ui_raw()
                 .interact(rect, id.with("drag_interact"), Sense::hover());
         }
 
@@ -149,7 +149,7 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
         let edit_text_id = id.with("edit_text");
         let edit_original_id = id.with("edit_original");
         let mut edit_active = gui
-            .ui()
+            .ui_raw()
             .data_mut(|data| data.get_temp::<bool>(edit_id))
             .unwrap_or(false);
 
@@ -163,11 +163,11 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
 
         if edit_active {
             let mut edit_text = gui
-                .ui()
+                .ui_raw()
                 .data_mut(|data| data.get_temp::<String>(edit_text_id))
                 .unwrap_or_else(|| self.value.to_string());
             let original_value = gui
-                .ui()
+                .ui_raw()
                 .data_mut(|data| data.get_temp::<T>(edit_original_id))
                 .unwrap_or(*self.value);
 
@@ -188,10 +188,10 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
 
             let should_confirm = text_edit_response.lost_focus()
                 && gui
-                    .ui()
+                    .ui_raw()
                     .input(|input| input.key_pressed(Key::Enter) || input.pointer.any_click());
             let should_cancel = text_edit_response.has_focus()
-                && gui.ui().input(|input| input.key_pressed(Key::Escape));
+                && gui.ui_raw().input(|input| input.key_pressed(Key::Escape));
 
             let mut value_actually_changed = false;
             if should_confirm {
@@ -206,7 +206,7 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
                 edit_active = false;
             }
 
-            gui.ui().data_mut(|data| {
+            gui.ui_raw().data_mut(|data| {
                 if edit_active {
                     data.insert_temp(edit_id, true);
                     data.insert_temp(edit_text_id, edit_text);
@@ -230,23 +230,24 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
             return text_edit_response;
         }
 
-        let mut response = gui.ui().interact(
+        let mut response = gui.ui_raw().interact(
             inner_rect,
             id.with("drag_interact"),
             Sense::click_and_drag() | Sense::hover(),
         );
 
         if response.clicked() {
-            gui.ui().data_mut(|data| {
+            gui.ui_raw().data_mut(|data| {
                 data.insert_temp(edit_id, true);
                 data.insert_temp(edit_text_id, self.value.to_string());
                 data.insert_temp(edit_original_id, *self.value);
             });
-            gui.ui().memory_mut(|memory| memory.request_focus(edit_id));
+            gui.ui_raw()
+                .memory_mut(|memory| memory.request_focus(edit_id));
         }
 
         if response.drag_started() {
-            gui.ui().data_mut(|data| {
+            gui.ui_raw().data_mut(|data| {
                 data.insert_temp(id, *self.value);
                 data.insert_temp(drag_temp_id, *self.value);
             });
@@ -254,7 +255,7 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
 
         if response.dragged() {
             let start_value = gui
-                .ui()
+                .ui_raw()
                 .data_mut(|data| data.get_temp::<T>(id))
                 .unwrap_or(*self.value);
             let delta = response
@@ -263,25 +264,25 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
                 .x;
             let new_value = T::from_drag(start_value, delta, self.speed);
             let current_temp = gui
-                .ui()
+                .ui_raw()
                 .data_mut(|data| data.get_temp::<T>(drag_temp_id))
                 .unwrap_or(*self.value);
             if new_value != current_temp {
-                gui.ui()
+                gui.ui_raw()
                     .data_mut(|data| data.insert_temp(drag_temp_id, new_value));
             }
         }
 
         if response.drag_stopped() {
             let final_value = gui
-                .ui()
+                .ui_raw()
                 .data_mut(|data| data.get_temp::<T>(drag_temp_id))
                 .unwrap_or(*self.value);
             if final_value != *self.value {
                 *self.value = final_value;
                 response.mark_changed();
             }
-            gui.ui().data_mut(|data| {
+            gui.ui_raw().data_mut(|data| {
                 data.remove::<T>(id);
                 data.remove::<T>(drag_temp_id);
             });

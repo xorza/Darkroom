@@ -66,14 +66,15 @@ impl<'a> FilePicker<'a> {
             .unwrap_or_else(|| gui.style.node.const_bind_style.clone());
 
         let browse_text = "browse";
-        let browse_galley =
-            gui.ui()
-                .painter()
-                .layout_no_wrap(browse_text.to_string(), font.clone(), text_color);
+        let browse_galley = gui.ui_raw().painter().layout_no_wrap(
+            browse_text.to_string(),
+            font.clone(),
+            text_color,
+        );
         let browse_text_size = browse_galley.size();
 
         let filename_galley =
-            gui.ui()
+            gui.ui_raw()
                 .painter()
                 .layout_no_wrap(display_name.clone(), font.clone(), text_color);
         let filename_text_size = filename_galley.size();
@@ -139,7 +140,9 @@ impl<'a> FilePicker<'a> {
         }
 
         // Return response for the entire widget rect, not just the browse button
-        let widget_response = gui.ui().interact(rect, browse_response.id, Sense::hover());
+        let widget_response = gui
+            .ui_raw()
+            .interact(rect, browse_response.id, Sense::hover());
         widget_response | browse_response
     }
 }

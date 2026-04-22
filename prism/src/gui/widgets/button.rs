@@ -145,7 +145,7 @@ impl<'a> Button<'a> {
         //   `allocate_space` runs against a stable-id seed, otherwise
         //   the resulting widget's id drifts with the parent's counter.
         let (rect, response) = if let Some(rect) = self.rect {
-            let response = gui.ui().interact(rect, id.id(), sense);
+            let response = gui.ui_raw().interact(rect, id.id(), sense);
             (rect, response)
         } else {
             // todo also include provided shapes size
@@ -153,13 +153,13 @@ impl<'a> Button<'a> {
             let padding = vec2(gui.style.padding * 2.0, gui.style.small_padding * 2.0);
             let autosize = self.size.unwrap_or(text_size + padding);
             gui.scope(id).sense(sense).show(|gui| {
-                let (_id, rect) = gui.ui().allocate_space(autosize);
-                let response = gui.ui().allocate_rect(rect, sense);
+                let (_id, rect) = gui.ui_raw().allocate_space(autosize);
+                let response = gui.ui_raw().allocate_rect(rect, sense);
                 (rect, response)
             })
         };
 
-        if !gui.ui().is_rect_visible(rect) {
+        if !gui.ui_raw().is_rect_visible(rect) {
             return response;
         }
 

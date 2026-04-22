@@ -515,7 +515,7 @@ impl<'t> TextEdit<'t> {
 impl TextEdit<'_> {
     /// Show the [`TextEdit`], returning a rich [`TextEditOutput`].
     pub fn show(self, gui: &mut Gui<'_>) -> TextEditOutput {
-        let ui = gui.ui();
+        let ui = gui.ui_raw();
         let is_mutable = self.text.is_mutable();
         let frame = self.frame;
         let where_to_put_background = ui.painter().add(Shape::Noop);
@@ -525,7 +525,7 @@ impl TextEdit<'_> {
         let output = self.show_content(gui);
 
         if frame {
-            let ui = gui.ui();
+            let ui = gui.ui_raw();
             let visuals = ui.style().interact(&output.response);
             let frame_rect = output.response.rect.expand(visuals.expansion);
             let shape = if is_mutable {
@@ -566,7 +566,7 @@ impl TextEdit<'_> {
         // Fork divergence: default margin reads from gui.style.padding so
         // it scales with the UI. Stock egui uses hardcoded constants here.
         let margin = self.margin.unwrap_or_else(|| gui.style.padding.into());
-        let ui = gui.ui();
+        let ui = gui.ui_raw();
         let TextEdit {
             text,
             hint_text,

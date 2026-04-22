@@ -1,5 +1,6 @@
 use egui::Id;
 
+use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::widgets::scroll_area::ScrollArea;
 
@@ -23,8 +24,8 @@ impl ColumnFlow {
         }
     }
 
-    pub fn id(mut self, id: Id) -> Self {
-        self.id = Some(id);
+    pub fn id(mut self, id: StableId) -> Self {
+        self.id = Some(id.id());
         self
     }
 
@@ -45,7 +46,7 @@ impl ColumnFlow {
             return;
         }
 
-        let available_height = gui.ui().available_height();
+        let available_height = gui.ui_raw().available_height();
         let max_items_per_column = (available_height / self.item_height).floor().max(1.0) as usize;
 
         // Determine number of columns needed
@@ -64,7 +65,7 @@ impl ColumnFlow {
 
         // Set max width to constrain the layout
         let total_width = self.item_width * num_columns as f32;
-        gui.ui().set_max_width(total_width);
+        gui.ui_raw().set_max_width(total_width);
 
         // Collect items into a vec so we can chunk them
         let items_vec: Vec<T> = items.collect();

@@ -39,9 +39,9 @@ impl Expander {
     }
 
     pub fn show(self, gui: &mut Gui<'_>, add_contents: impl FnOnce(&mut Gui<'_>)) {
-        let id = gui.ui().id().with(self.id);
+        let id = gui.ui_raw().id().with(self.id);
         let mut open = gui
-            .ui()
+            .ui_raw()
             .ctx()
             .data_mut(|d| d.get_persisted::<bool>(id).unwrap_or(self.default_open));
 
@@ -64,17 +64,19 @@ impl Expander {
         };
         let header_size = vec2(header_width, header_height);
 
-        let (_auto_id, header_rect) = gui.ui().allocate_space(header_size);
+        let (_auto_id, header_rect) = gui.ui_raw().allocate_space(header_size);
         let header_response = gui
-            .ui()
+            .ui_raw()
             .interact(header_rect, id.with("header"), Sense::click());
 
         if header_response.clicked() {
             open = !open;
-            gui.ui().ctx().data_mut(|d| d.insert_persisted(id, open));
+            gui.ui_raw()
+                .ctx()
+                .data_mut(|d| d.insert_persisted(id, open));
         }
 
-        if gui.ui().is_rect_visible(header_rect) {
+        if gui.ui_raw().is_rect_visible(header_rect) {
             let icon_rect = Rect::from_min_size(header_rect.min, Vec2::splat(icon_size));
 
             paint_icon(gui, icon_rect, open, text_color);
@@ -88,7 +90,7 @@ impl Expander {
 
         if open {
             if let Some(min_width) = self.min_width {
-                gui.ui().set_min_width(min_width);
+                gui.ui_raw().set_min_width(min_width);
             }
             add_contents(gui);
         }

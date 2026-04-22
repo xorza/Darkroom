@@ -9,6 +9,7 @@ use egui::{Pos2, Response, Sense};
 use scenarium::graph::NodeId;
 use scenarium::prelude::{Binding, PortAddress};
 
+use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::connection_ui::{
     BrokeItem, ConnectionDragUpdate, PortKind, advance_drag, disconnect_connection,
@@ -18,6 +19,7 @@ use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::PortRef;
 use crate::gui::graph_ui::GraphUi;
 use crate::gui::node_ui::PortInteractCommand;
+use crate::gui::widgets::HitRegion;
 use crate::input::InputSnapshot;
 use crate::model::EventSubscriberChange;
 use crate::model::graph_ui_action::GraphUiAction;
@@ -94,9 +96,11 @@ impl GraphUi {
             gesture,
             Gesture::BreakingConnections(_) | Gesture::DraggingConnection(_)
         ) {
-            let id = gui.ui().make_persistent_id("temp overlay background");
             let rect = gui.rect;
-            gui.ui().interact(rect, id, Sense::all());
+            HitRegion::new(StableId::new("temp_overlay_background"))
+                .rect(rect)
+                .sense(Sense::all())
+                .show(gui);
         }
     }
 

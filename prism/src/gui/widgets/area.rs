@@ -1,7 +1,8 @@
 use std::rc::Rc;
 
-use egui::{Align2, Id, InnerResponse, Pos2, Response};
+use egui::{Align2, InnerResponse, Pos2, Response};
 
+use crate::common::StableId;
 use crate::gui::{Gui, style::Style};
 
 #[derive(Debug)]
@@ -10,9 +11,9 @@ pub struct Area {
 }
 
 impl Area {
-    pub fn new(id: Id) -> Self {
+    pub fn new(id: StableId) -> Self {
         Self {
-            inner: egui::Area::new(id),
+            inner: egui::Area::new(id.id()),
         }
     }
 
@@ -57,7 +58,7 @@ impl Area {
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<R> {
         let style = gui.style.clone();
-        self.inner.show(gui.ui().ctx(), |ui| {
+        self.inner.show(gui.ui_raw().ctx(), |ui| {
             let mut gui = Gui::new(ui, &style);
             add_contents(&mut gui)
         })

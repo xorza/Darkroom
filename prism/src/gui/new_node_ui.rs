@@ -3,7 +3,7 @@ use std::sync::Arc;
 use bumpalo::Bump;
 use bumpalo::collections::CollectIn;
 use bumpalo::collections::Vec as BumpVec;
-use egui::{Galley, Id, Order, Pos2, Sense, vec2};
+use egui::{Galley, Order, Pos2, Sense, vec2};
 use scenarium::function::Func;
 use scenarium::prelude::FuncLib;
 
@@ -14,6 +14,7 @@ use crate::gui::widgets::column_flow::ColumnFlow;
 use crate::gui::widgets::expander::Expander;
 use crate::gui::widgets::frame::Frame;
 use crate::gui::widgets::popup_menu::ListItem;
+use crate::gui::widgets::{HitRegion, Layout};
 use crate::input::InputSnapshot;
 
 const POPUP_MIN_WIDTH: f32 = 150.0;
@@ -87,11 +88,10 @@ impl NewNodeUi {
 
         // Capture interaction for the background
         let rect = gui.rect;
-        gui.ui().interact(
-            rect,
-            Id::new("temp background for new node ui"),
-            Sense::all(),
-        );
+        HitRegion::new(StableId::new("new_node_ui_bg"))
+            .rect(rect)
+            .sense(Sense::all())
+            .show(gui);
 
         let mut selection: Option<NewNodeSelection<'a>> = None;
 
@@ -120,9 +120,7 @@ fn show_popup<'a>(
     arena: &Bump,
     selection: &mut Option<NewNodeSelection<'a>>,
 ) -> egui::InnerResponse<()> {
-    let popup_id = gui.ui().make_persistent_id("new_node_popup");
-
-    Area::new(popup_id)
+    Area::new(StableId::new("new_node_popup"))
         .fixed_pos(position)
         .order(Order::Foreground)
         .show(gui, |gui| {
@@ -130,9 +128,11 @@ fn show_popup<'a>(
                 gui,
                 StableId::new("new_node_popup_frame"),
                 |gui| {
-                    gui.ui().set_min_width(POPUP_MIN_WIDTH);
-                    gui.ui().set_min_height(POPUP_MIN_HEIGHT);
-                    gui.ui().set_max_height(POPUP_MAX_HEIGHT);
+                    Layout::new()
+                        .min_width(POPUP_MIN_WIDTH)
+                        .min_height(POPUP_MIN_HEIGHT)
+                        .max_height(POPUP_MAX_HEIGHT)
+                        .apply(gui);
 
                     gui.horizontal_justified(|gui| {
                         if from_connection {
@@ -171,7 +171,7 @@ fn show_const_bind_option<'a>(gui: &mut Gui<'_>, selection: &mut Option<NewNodeS
         let button_width = BUTTON_MIN_WIDTH + padding * 2.0;
         let button_height = gui.font_height(&btn_font) + small_padding * 2.0;
 
-        gui.ui().set_min_width(button_width);
+        Layout::new().min_width(button_width).apply(gui);
 
         if ListItem::from_str("Const")
             .size(vec2(button_width, button_height))
@@ -239,9 +239,10 @@ fn show_category_functions<'a>(
     let button_height = gui.font_height(&btn_font) + gui.style.small_padding * 2.0;
 
     ColumnFlow::new(button_width, button_height)
-        .id(gui
-            .ui()
-            .make_persistent_id(("new_node_ui_funcs_category_scroll", category)))
+        .id(StableId::new((
+            "new_node_ui_funcs_category_scroll",
+            category,
+        )))
         .max_columns(MAX_COLUMNS)
         .show(
             gui,

@@ -1,4 +1,4 @@
-use egui::{Pos2, Rect, Response, Sense, TextureOptions, Vec2};
+use egui::{Pos2, Rect, Response, Sense, Vec2};
 use palantir::Image;
 use scenarium::data::DynamicValue;
 use scenarium::graph::NodeId;
@@ -9,10 +9,12 @@ use crate::gui::Gui;
 use crate::gui::frame_output::FrameOutput;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::image_utils::to_color_image;
-use crate::gui::widgets::TextEdit;
 use crate::gui::widgets::frame::Frame;
 use crate::gui::widgets::positioned_ui::PositionedUi;
 use crate::gui::widgets::scroll_area::ScrollArea;
+use crate::gui::widgets::{
+    HitRegion, Image as ImageWidget, Label, Separator, Space, TextEdit, Texture,
+};
 use crate::model::argument_values_cache::{CachedTexture, NodeCache};
 use crate::model::execution_info::NodeExecutionInfo;
 use crate::model::graph_ui_action::GraphUiAction;
@@ -31,15 +33,15 @@ impl NodeDetailsUi {
         output: &mut FrameOutput,
     ) -> Response {
         let panel_rect = compute_panel_rect(gui);
-        let popup_id = gui.ui().make_persistent_id("node_details_panel");
+        let popup_id = StableId::new("node_details_panel");
 
         let Some(node_id) = ctx.view_graph.selected_node_id else {
-            return gui.ui().interact(Rect::NOTHING, popup_id, Sense::empty());
+            return HitRegion::new(popup_id).sense(Sense::empty()).show(gui);
         };
 
-        let scroll_id = gui.ui().make_persistent_id("node_details_scroll");
+        let scroll_id = StableId::new("node_details_scroll");
 
-        PositionedUi::new(StableId::from_id(popup_id), panel_rect.min)
+        PositionedUi::new(popup_id, panel_rect.min)
             .rect(panel_rect)
             .max_size(panel_rect.size())
             .show(gui, |gui| {
@@ -47,7 +49,7 @@ impl NodeDetailsUi {
                     .inner_margin(gui.style.padding)
                     .sense(Sense::all())
                     .show(gui, StableId::new("node_details_frame"), |gui| {
-                        ScrollArea::vertical().id(scroll_id).show(gui, |gui| {
+                        ScrollArea::vertical().id(scroll_id.id()).show(gui, |gui| {
                             show_content(gui, ctx, node_id, output);
                         });
                     })
@@ -111,7 +113,7 @@ fn show_name_editor(
         let font = gui.style.sub_font.clone();
         let text_color = gui.style.text_color;
 
-        gui.ui().label("Name:");
+        Label::new("Name:").show(gui);
         // Stable salt (not keyed on node_id) — the textbox is the
         // same chrome widget regardless of which node is selected;
         // only its content changes. Keying on node_id would shift
@@ -144,7 +146,7 @@ fn show_execution_info(
     stats: &ExecutionStats,
 ) {
     add_section_separator(gui);
-    gui.ui().label("Execution:");
+    Label::new("Execution:").show(gui);
 
     let info = NodeExecutionInfo::from_stats(Some(stats), node_id);
     match info {
@@ -157,22 +159,25 @@ fn show_execution_info(
                 scenarium::execution_graph::Error::CycleDetected { .. } => "cycle".to_string(),
             };
             let color = gui.style.node.errored_shadow.color;
-            gui.ui()
-                .colored_label(color, format!("  {func_name}: {}", node_error.error));
+            Label::new(format!("  {func_name}: {}", node_error.error))
+                .color(color)
+                .show(gui);
         }
         NodeExecutionInfo::Cached => {
-            gui.ui().label("  Status: cached");
+            Label::new("  Status: cached").show(gui);
         }
         NodeExecutionInfo::MissingInputs => {
             let color = gui.style.node.missing_inputs_shadow.color;
-            gui.ui().colored_label(color, "  Status: missing inputs");
+            Label::new("  Status: missing inputs")
+                .color(color)
+                .show(gui);
         }
         NodeExecutionInfo::Executed(executed) => {
             let elapsed_ms = executed.elapsed_secs * 1000.0;
-            gui.ui().label(format!("  Time: {elapsed_ms:.2} ms"));
+            Label::new(format!("  Time: {elapsed_ms:.2} ms")).show(gui);
         }
         NodeExecutionInfo::None => {
-            gui.ui().label("  Status: not executed");
+            Label::new("  Status: not executed").show(gui);
         }
     }
 }
@@ -215,8 +220,7 @@ fn show_image_previews(
     );
 
     if !node_cache.arg_values.outputs.is_empty() {
-        let space = gui.style.small_padding;
-        gui.ui().add_space(space);
+        Space::new(gui.style.small_padding).show(gui);
     }
 
     show_values_section(
@@ -243,7 +247,7 @@ fn show_values_section<T, P>(
         return;
     }
 
-    gui.ui().label(label);
+    Label::new(label).show(gui);
     for (idx, value) in values.iter().enumerate() {
         let name = get_name(&ports[idx]);
         let value_str = format_value(value);
@@ -272,11 +276,11 @@ fn cache_previews<'a>(
         };
 
         let desc = *preview.desc();
-        let texture_handle = gui.ui().ctx().load_texture(
+        let texture_handle = Texture::new(
             format!("node_preview_{node_id}_{prefix}_{idx}"),
             to_color_image(preview),
-            TextureOptions::LINEAR,
-        );
+        )
+        .load(gui);
 
         if idx >= cache.len() {
             cache.resize(idx + 1, None);
@@ -294,7 +298,7 @@ fn show_value_with_preview(
     value_str: &str,
     texture: Option<&CachedTexture>,
 ) {
-    gui.ui().label(format!("  {name}: {value_str}"));
+    Label::new(format!("  {name}: {value_str}")).show(gui);
 
     let Some(texture) = texture else {
         return;
@@ -304,20 +308,18 @@ fn show_value_with_preview(
     let display_width = PREVIEW_MAX_WIDTH.min(texture.desc.width as f32);
     let display_height = display_width / aspect;
 
-    let space = gui.style.small_padding;
-    gui.ui().add_space(space);
-    gui.ui().image((
+    Space::new(gui.style.small_padding).show(gui);
+    ImageWidget::new(
         texture.handle.id(),
         Vec2::new(display_width, display_height),
-    ));
+    )
+    .show(gui);
 }
 
 // === Helpers ===
 
 fn add_section_separator(gui: &mut Gui<'_>) {
-    let big = gui.style.padding;
-    let small = gui.style.small_padding;
-    gui.ui().add_space(big);
-    gui.ui().separator();
-    gui.ui().add_space(small);
+    Space::new(gui.style.padding).show(gui);
+    Separator::new().show(gui);
+    Space::new(gui.style.small_padding).show(gui);
 }

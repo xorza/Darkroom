@@ -2,11 +2,12 @@ use egui::epaint::Mesh;
 use egui::{Color32, Pos2, Rect, Response, Sense};
 
 use crate::common::polyline_mesh::PolylineMesh;
-use crate::common::{UiEquals, bezier_helper};
+use crate::common::{StableId, UiEquals, bezier_helper};
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::style::Style;
+use crate::gui::widgets::HitRegion;
 
 const DEFAULT_FEATHER: f32 = 0.8;
 
@@ -88,16 +89,16 @@ impl ConnectionBezier {
         id_salt: impl std::hash::Hash,
         style: ConnectionBezierStyle,
     ) -> Response {
-        let id = gui.ui().make_persistent_id(id_salt);
+        let id = StableId::new(("connection_bezier", id_salt));
 
         let expanded_rect = self.bounding_rect.expand(style.stroke_width * 0.5);
-        if !gui.ui().is_rect_visible(expanded_rect) {
-            return gui.ui().interact(Rect::NOTHING, id, Sense::hover());
+        if !gui.is_rect_visible(expanded_rect) {
+            return HitRegion::new(id).show(gui);
         }
 
         self.rebuild_mesh_if_needed(style);
 
-        let pointer_pos = gui.ui().input(|input| input.pointer.hover_pos());
+        let pointer_pos = gui.pointer_hover_pos();
         let hit = pointer_pos.is_some_and(|pos| {
             self.hit_test(
                 pos,
@@ -106,9 +107,12 @@ impl ConnectionBezier {
         });
 
         let response = if hit {
-            gui.ui().interact(expanded_rect, id, sense)
+            HitRegion::new(id)
+                .rect(expanded_rect)
+                .sense(sense)
+                .show(gui)
         } else {
-            gui.ui().interact(Rect::NOTHING, id, Sense::hover())
+            HitRegion::new(id).show(gui)
         };
         self.polyline.render(gui.painter());
         response
