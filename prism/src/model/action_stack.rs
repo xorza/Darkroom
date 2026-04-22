@@ -15,7 +15,7 @@ struct UndoEntry {
 }
 
 #[derive(Debug)]
-pub struct ActionUndoStack {
+pub struct ActionStack {
     undo_actions: Vec<u8>,
     redo_actions: Vec<u8>,
     undo_stack: Vec<UndoEntry>,
@@ -25,7 +25,7 @@ pub struct ActionUndoStack {
     temp_buffer: Vec<u8>,
 }
 
-impl ActionUndoStack {
+impl ActionStack {
     pub fn new(max_steps: usize) -> Self {
         assert!(max_steps > 0, "undo stack must allow at least one step");
         Self {
@@ -249,7 +249,7 @@ mod tests {
     use scenarium::graph::{Binding, Event, Input, NodeBehavior};
     use scenarium::prelude::test_graph;
 
-    fn assert_ranges_match_actions(stack: &ActionUndoStack) {
+    fn assert_ranges_match_actions(stack: &ActionStack) {
         for entry in &stack.undo_stack {
             assert!(entry.range.start <= entry.range.end);
             assert!(entry.range.end <= stack.undo_actions.len());
@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn max_steps_must_be_positive() {
-        let result = std::panic::catch_unwind(|| ActionUndoStack::new(0));
+        let result = std::panic::catch_unwind(|| ActionStack::new(0));
         assert!(result.is_err());
     }
 
@@ -308,7 +308,7 @@ mod tests {
             },
         ];
 
-        let mut stack = ActionUndoStack::new(16);
+        let mut stack = ActionStack::new(16);
         stack.clear();
 
         for action in &actions {
@@ -335,7 +335,7 @@ mod tests {
         let node_id = view_graph.graph.nodes.iter().next().unwrap().id;
         let before_pos = view_graph.view_nodes.by_key(&node_id).unwrap().pos;
 
-        let mut stack = ActionUndoStack::new(1);
+        let mut stack = ActionStack::new(1);
 
         let first_actions = vec![GraphUiAction::NodeMoved {
             node_id,
@@ -377,7 +377,7 @@ mod tests {
         let view_graph: ViewGraph = graph.into();
         let node_id = view_graph.graph.nodes.iter().next().unwrap().id;
         let start_pos = view_graph.view_nodes.by_key(&node_id).unwrap().pos;
-        let mut stack = ActionUndoStack::new(2);
+        let mut stack = ActionStack::new(2);
 
         stack.clear();
 
@@ -405,7 +405,7 @@ mod tests {
     fn undo_roundtrip_all_action_variants_with_json_snapshots() {
         let graph = test_graph();
         let mut view_graph: ViewGraph = graph.into();
-        let mut stack = ActionUndoStack::new(32);
+        let mut stack = ActionStack::new(32);
 
         let node_ids: Vec<_> = view_graph.graph.nodes.iter().map(|node| node.id).collect();
         let primary_id = *node_ids.first().expect("test graph must have nodes");
@@ -573,7 +573,7 @@ mod tests {
         snapshots.push(view_graph.serialize(SerdeFormat::Json));
 
         for (entry_idx, entry) in stack.undo_stack.iter().enumerate() {
-            let bytes = ActionUndoStack::slice_bytes(&stack.undo_actions, &entry.range);
+            let bytes = ActionStack::slice_bytes(&stack.undo_actions, &entry.range);
             let decoded: Vec<GraphUiAction> =
                 common::serde::deserialize(bytes, SerdeFormat::Bitcode).unwrap_or_else(|err| {
                     panic!("undo entry {} failed to deserialize: {}", entry_idx, err)
@@ -603,7 +603,7 @@ mod tests {
         use egui::Vec2;
 
         let mut vg = ViewGraph::default();
-        let mut stack = ActionUndoStack::new(32);
+        let mut stack = ActionStack::new(32);
         stack.clear();
 
         let frame_deltas = [
@@ -653,7 +653,7 @@ mod tests {
         };
 
         let mut vg = ViewGraph::default();
-        let mut stack = ActionUndoStack::new(32);
+        let mut stack = ActionStack::new(32);
         stack.clear();
 
         let zoom = GraphUiAction::ZoomPanChanged {

@@ -16,9 +16,7 @@ use scenarium::worker::{ArgumentValuesCallback, Worker, WorkerMessage};
 
 use crate::gui::frame_output::{FrameOutput, RunCommand};
 use crate::gui::graph_ctx::GraphContext;
-use crate::model::{
-    ActionUndoStack, ArgumentValuesCache, ViewGraph, graph_ui_action::GraphUiAction,
-};
+use crate::model::{ActionStack, ArgumentValuesCache, ViewGraph, graph_ui_action::GraphUiAction};
 use crate::script::{ScriptExecutor, ScriptTransport, tcp::TcpTransport};
 use crate::ui_context::UiContext;
 
@@ -80,7 +78,7 @@ pub struct Session {
     autorun: bool,
 
     graph_dirty: bool,
-    undo_stack: ActionUndoStack,
+    action_stack: ActionStack,
 
     worker: Worker,
     worker_tx: UnboundedSender<WorkerEvent>,
@@ -125,7 +123,7 @@ impl Session {
             config: Config::load_or_default(),
             autorun: false,
             graph_dirty: true,
-            undo_stack: ActionUndoStack::new(UNDO_MAX_STEPS),
+            action_stack: ActionStack::new(UNDO_MAX_STEPS),
             worker,
             worker_tx,
             worker_rx,
@@ -274,7 +272,7 @@ impl Session {
         self.commit_actions(output);
 
         let mut affects_computation = false;
-        let undid = self.undo_stack.undo(&mut self.view_graph, &mut |action| {
+        let undid = self.action_stack.undo(&mut self.view_graph, &mut |action| {
             affects_computation |= action.affects_computation();
         });
         self.view_graph.validate();
@@ -285,7 +283,7 @@ impl Session {
 
     pub fn redo(&mut self) {
         let mut affects_computation = false;
-        let redid = self.undo_stack.redo(&mut self.view_graph, &mut |action| {
+        let redid = self.action_stack.redo(&mut self.view_graph, &mut |action| {
             affects_computation |= action.affects_computation();
         });
         self.view_graph.validate();
@@ -361,7 +359,7 @@ impl Session {
     fn replace_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
         self.view_graph = view_graph;
         if reset_undo {
-            self.undo_stack.clear();
+            self.action_stack.clear();
         }
         self.worker.send(WorkerMessage::Clear);
         self.refresh_graph();
@@ -387,8 +385,8 @@ impl Session {
             // doesn't need any pending-action state — which is what
             // makes it safe under egui's multi-pass rendering.
             let any_affecting = self.apply(actions);
-            self.undo_stack.clear_redo();
-            self.undo_stack.push_current(actions);
+            self.action_stack.clear_redo();
+            self.action_stack.push_current(actions);
             graph_updated |= any_affecting;
         }
 
@@ -429,7 +427,7 @@ mod tests {
             config: Config::default(),
             autorun: false,
             graph_dirty: false,
-            undo_stack: ActionUndoStack::new(UNDO_MAX_STEPS),
+            action_stack: ActionStack::new(UNDO_MAX_STEPS),
             worker: Worker::stub(),
             worker_tx,
             worker_rx,
