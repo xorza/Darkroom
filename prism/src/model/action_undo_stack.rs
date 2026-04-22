@@ -1,18 +1,25 @@
 use std::fmt::Debug;
+use std::ops::Range;
 
 use common::SerdeFormat;
 
-use crate::common::undo_stack::UndoStack;
 use crate::model::ViewGraph;
 use crate::model::graph_ui_action::{GestureKey, GraphUiAction};
+
+#[derive(Debug)]
+struct UndoEntry {
+    range: Range<usize>,
+    // Cached so gesture-merge can reject without deserializing the entry.
+    // Only set for single-action batches that identify as a gesture.
+    gesture_key: Option<GestureKey>,
+}
 
 #[derive(Debug)]
 pub struct ActionUndoStack {
     undo_actions: Vec<u8>,
     redo_actions: Vec<u8>,
-    undo_stack: Vec<std::ops::Range<usize>>,
-    redo_stack: Vec<std::ops::Range<usize>>,
-    undo_base_offset: usize,
+    undo_stack: Vec<UndoEntry>,
+    redo_stack: Vec<Range<usize>>,
     max_steps: usize,
 
     temp_buffer: Vec<u8>,
@@ -26,101 +33,132 @@ impl ActionUndoStack {
             redo_actions: Vec::new(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
-            undo_base_offset: 0,
             max_steps,
             temp_buffer: Vec::new(),
         }
     }
 
+    pub fn clear(&mut self) {
+        self.undo_actions.clear();
+        self.redo_actions.clear();
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+    }
+
+    pub fn push_current(&mut self, actions: &[GraphUiAction]) {
+        if actions.is_empty() {
+            return;
+        }
+        self.redo_actions.clear();
+        self.redo_stack.clear();
+
+        // Gesture coalescing: if this push is a single action matching
+        // the previous entry's cached gesture_key, merge in place.
+        // Cross-frame zoom/pan collapses to one undo step without any
+        // pending-action state outside the stack (important under
+        // egui multi-pass).
+        if actions.len() == 1
+            && let Some(key) = actions[0].gesture_key()
+            && self.try_merge_with_last(&actions[0], key)
+        {
+            return;
+        }
+
+        let range = Self::append_actions(&mut self.undo_actions, actions, &mut self.temp_buffer);
+        let gesture_key = if actions.len() == 1 {
+            actions[0].gesture_key()
+        } else {
+            None
+        };
+        self.undo_stack.push(UndoEntry { range, gesture_key });
+        self.trim_to_limit();
+    }
+
+    pub fn clear_redo(&mut self) {
+        self.redo_actions.clear();
+        self.redo_stack.clear();
+    }
+
+    pub fn undo(
+        &mut self,
+        value: &mut ViewGraph,
+        on_action: &mut dyn FnMut(&GraphUiAction),
+    ) -> bool {
+        let Some(entry) = self.undo_stack.pop() else {
+            return false;
+        };
+        let bytes = Self::slice_bytes(&self.undo_actions, &entry.range);
+        let actions = Self::deserialize_actions(bytes, &mut self.temp_buffer);
+        for action in actions.iter().rev() {
+            action.undo(value);
+            on_action(action);
+        }
+        let redo_range = Self::append_bytes(&mut self.redo_actions, bytes);
+        self.redo_stack.push(redo_range);
+        Self::pop_tail_actions(&mut self.undo_actions, &entry.range);
+
+        true
+    }
+
+    pub fn redo(
+        &mut self,
+        value: &mut ViewGraph,
+        on_action: &mut dyn FnMut(&GraphUiAction),
+    ) -> bool {
+        let Some(range) = self.redo_stack.pop() else {
+            return false;
+        };
+        let bytes = Self::slice_bytes(&self.redo_actions, &range);
+        let actions = Self::deserialize_actions(bytes, &mut self.temp_buffer);
+        let gesture_key = if actions.len() == 1 {
+            actions[0].gesture_key()
+        } else {
+            None
+        };
+        for action in actions.iter() {
+            action.apply(value);
+            on_action(action);
+        }
+        let undo_range = Self::append_bytes(&mut self.undo_actions, bytes);
+        self.undo_stack.push(UndoEntry {
+            range: undo_range,
+            gesture_key,
+        });
+        Self::pop_tail_actions(&mut self.redo_actions, &range);
+
+        true
+    }
+
     fn trim_to_limit(&mut self) {
         while self.undo_stack.len() > self.max_steps {
             let removed = self.undo_stack.remove(0);
-            assert_eq!(
-                removed.start, self.undo_base_offset,
-                "oldest undo range should start at base offset"
-            );
-            let offset = self
-                .undo_stack
-                .first()
-                .map(|range| range.start)
-                .unwrap_or(self.undo_actions.len());
-            assert!(
-                offset >= self.undo_base_offset,
-                "undo stack offset must not move backwards"
-            );
-            self.undo_base_offset = offset;
-        }
-
-        self.compact_undo_buffer_if_needed();
-    }
-
-    fn append_actions(
-        buffer: &mut Vec<u8>,
-        actions: &[GraphUiAction],
-        temp_buffer: &mut Vec<u8>,
-    ) -> std::ops::Range<usize> {
-        assert!(
-            !actions.is_empty(),
-            "undo stack should not store empty action batches"
-        );
-
-        let start = buffer.len();
-        common::serde::serialize_into(actions, SerdeFormat::Bitcode, buffer, temp_buffer);
-        let end = buffer.len();
-
-        start..end
-    }
-
-    fn deserialize_actions(bytes: &[u8], temp_buffer: &mut Vec<u8>) -> Vec<GraphUiAction> {
-        common::serde::deserialize_from(
-            &mut std::io::Cursor::new(bytes),
-            SerdeFormat::Bitcode,
-            temp_buffer,
-        )
-        .unwrap()
-    }
-
-    fn append_bytes(target: &mut Vec<u8>, bytes: &[u8]) -> std::ops::Range<usize> {
-        let start = target.len();
-        target.extend_from_slice(bytes);
-        let end = target.len();
-        start..end
-    }
-
-    fn slice_bytes<'a>(buffer: &'a [u8], range: &std::ops::Range<usize>) -> &'a [u8] {
-        assert!(range.start <= range.end, "undo stack range start > end");
-        assert!(
-            range.end <= buffer.len(),
-            "undo stack range exceeds buffer length"
-        );
-        &buffer[range.clone()]
-    }
-
-    fn pop_tail_actions(buffer: &mut Vec<u8>, range: &std::ops::Range<usize>) {
-        if range.end == buffer.len() {
-            buffer.truncate(range.start);
+            // Drain the dropped prefix immediately and renormalize the
+            // remaining ranges. max_steps is small (~100), so this is
+            // cheap and saves carrying a base_offset field.
+            let drop_end = removed.range.end;
+            self.undo_actions.drain(0..drop_end);
+            for entry in &mut self.undo_stack {
+                entry.range.start -= drop_end;
+                entry.range.end -= drop_end;
+            }
         }
     }
 
-    /// If the most recent undo entry is a single action with the same
-    /// `gesture_key` as `new_action`, replace it with a merged version
-    /// (keeping the older `before`, taking the newer `after`). Returns
-    /// `true` on a successful merge — the caller should NOT push the
-    /// new action separately.
-    ///
-    /// Only defined for `ZoomPanChanged` right now; the merge preserves
-    /// the `before_*` of the previous entry and the `after_*` of the
-    /// new emission, so undoing the merged entry reverses the full
-    /// continuous gesture in one step.
     fn try_merge_with_last(&mut self, new_action: &GraphUiAction, key: GestureKey) -> bool {
-        let Some(last_range) = self.undo_stack.last().cloned() else {
+        let Some(last) = self.undo_stack.last() else {
             return false;
         };
-        let last_bytes = Self::slice_bytes(&self.undo_actions, &last_range);
-        let last_actions = Self::deserialize_actions(last_bytes, &mut self.temp_buffer);
-        if last_actions.len() != 1 || last_actions[0].gesture_key() != Some(key) {
+        if last.gesture_key != Some(key) {
             return false;
         }
+        let last_range = last.range.clone();
+        let last_bytes = Self::slice_bytes(&self.undo_actions, &last_range);
+        let last_actions = Self::deserialize_actions(last_bytes, &mut self.temp_buffer);
+        assert_eq!(
+            last_actions.len(),
+            1,
+            "gesture-keyed entry must hold a single action"
+        );
         let merged = match (&last_actions[0], new_action) {
             (
                 GraphUiAction::ZoomPanChanged {
@@ -142,113 +180,60 @@ impl ActionUndoStack {
             _ => return false,
         };
 
-        // Drop the old entry, append the merged one in its place.
         Self::pop_tail_actions(&mut self.undo_actions, &last_range);
         self.undo_stack.pop();
         let range = Self::append_actions(&mut self.undo_actions, &[merged], &mut self.temp_buffer);
-        self.undo_stack.push(range);
+        self.undo_stack.push(UndoEntry {
+            range,
+            gesture_key: Some(key),
+        });
         true
     }
 
-    fn compact_undo_buffer_if_needed(&mut self) {
-        // Skip compaction if there is no logical prefix to drop.
-        if self.undo_base_offset == 0 {
-            return;
-        }
-        // Only compact when the unused prefix is at least half the buffer,
-        // to avoid frequent memmoves from small trims.
-        if self.undo_base_offset < self.undo_actions.len() / 2 {
-            return;
-        }
-        let offset = self.undo_base_offset;
-        // Drop the unused prefix and renormalize ranges to the new base.
-        self.undo_actions.drain(0..offset);
-        for range in &mut self.undo_stack {
-            range.start -= offset;
-            range.end -= offset;
-        }
-        self.undo_base_offset = 0;
-    }
-}
-
-impl UndoStack<ViewGraph> for ActionUndoStack {
-    type Action = GraphUiAction;
-
-    fn reset_with(&mut self, _value: &ViewGraph) {
-        self.undo_actions.clear();
-        self.redo_actions.clear();
-        self.undo_stack.clear();
-        self.redo_stack.clear();
-        self.undo_base_offset = 0;
-    }
-
-    fn push_current(&mut self, _value: &ViewGraph, actions: &[GraphUiAction]) {
-        if actions.is_empty() {
-            return;
-        }
-        self.redo_actions.clear();
-        self.redo_stack.clear();
-
-        // Gesture coalescing: if we're pushing a single action that
-        // identifies as part of a continuous gesture, and the previous
-        // undo entry is the exact same kind of single action, merge
-        // the two (keep the earlier `before`, take the new `after`).
-        // This turns a multi-frame zoom/pan scroll into one undo step
-        // without any cross-frame state in the action buffer, which is
-        // what makes the scheme compatible with egui's multi-pass.
-        if actions.len() == 1
-            && let Some(key) = actions[0].gesture_key()
-            && self.try_merge_with_last(&actions[0], key)
-        {
-            return;
-        }
-
-        let range = Self::append_actions(&mut self.undo_actions, actions, &mut self.temp_buffer);
-        self.undo_stack.push(range);
-        self.trim_to_limit();
-    }
-
-    fn clear_redo(&mut self) {
-        self.redo_actions.clear();
-        self.redo_stack.clear();
-    }
-
-    fn undo(&mut self, value: &mut ViewGraph, on_action: &mut dyn FnMut(&GraphUiAction)) -> bool {
-        let Some(actions_range) = self.undo_stack.pop() else {
-            return false;
-        };
+    fn append_actions(
+        buffer: &mut Vec<u8>,
+        actions: &[GraphUiAction],
+        temp_buffer: &mut Vec<u8>,
+    ) -> Range<usize> {
         assert!(
-            actions_range.start >= self.undo_base_offset,
-            "undo range starts before base offset"
+            !actions.is_empty(),
+            "undo stack should not store empty action batches"
         );
-        let actions_bytes = Self::slice_bytes(&self.undo_actions, &actions_range);
-        let actions = Self::deserialize_actions(actions_bytes, &mut self.temp_buffer);
-        for action in actions.iter().rev() {
-            action.undo(value);
-            on_action(action);
-        }
-        let redo_range = Self::append_bytes(&mut self.redo_actions, actions_bytes);
-        self.redo_stack.push(redo_range);
-        Self::pop_tail_actions(&mut self.undo_actions, &actions_range);
-
-        true
+        let start = buffer.len();
+        common::serde::serialize_into(actions, SerdeFormat::Bitcode, buffer, temp_buffer);
+        let end = buffer.len();
+        start..end
     }
 
-    fn redo(&mut self, value: &mut ViewGraph, on_action: &mut dyn FnMut(&GraphUiAction)) -> bool {
-        let Some(actions_range) = self.redo_stack.pop() else {
-            return false;
-        };
-        let actions_bytes = Self::slice_bytes(&self.redo_actions, &actions_range);
-        let actions = Self::deserialize_actions(actions_bytes, &mut self.temp_buffer);
-        for action in actions.iter() {
-            action.apply(value);
-            on_action(action);
-        }
-        let undo_range = Self::append_bytes(&mut self.undo_actions, actions_bytes);
-        self.undo_stack.push(undo_range);
-        Self::pop_tail_actions(&mut self.redo_actions, &actions_range);
+    fn deserialize_actions(bytes: &[u8], temp_buffer: &mut Vec<u8>) -> Vec<GraphUiAction> {
+        common::serde::deserialize_from(
+            &mut std::io::Cursor::new(bytes),
+            SerdeFormat::Bitcode,
+            temp_buffer,
+        )
+        .unwrap()
+    }
 
-        true
+    fn append_bytes(target: &mut Vec<u8>, bytes: &[u8]) -> Range<usize> {
+        let start = target.len();
+        target.extend_from_slice(bytes);
+        let end = target.len();
+        start..end
+    }
+
+    fn slice_bytes<'a>(buffer: &'a [u8], range: &Range<usize>) -> &'a [u8] {
+        assert!(range.start <= range.end, "undo stack range start > end");
+        assert!(
+            range.end <= buffer.len(),
+            "undo stack range exceeds buffer length"
+        );
+        &buffer[range.clone()]
+    }
+
+    fn pop_tail_actions(buffer: &mut Vec<u8>, range: &Range<usize>) {
+        if range.end == buffer.len() {
+            buffer.truncate(range.start);
+        }
     }
 }
 
@@ -266,10 +251,9 @@ mod tests {
     use scenarium::prelude::test_graph;
 
     fn assert_ranges_match_actions(stack: &ActionUndoStack) {
-        for range in &stack.undo_stack {
-            assert!(range.start <= range.end);
-            assert!(range.end <= stack.undo_actions.len());
-            assert!(range.start >= stack.undo_base_offset);
+        for entry in &stack.undo_stack {
+            assert!(entry.range.start <= entry.range.end);
+            assert!(entry.range.end <= stack.undo_actions.len());
         }
         for range in &stack.redo_stack {
             assert!(range.start <= range.end);
@@ -279,7 +263,7 @@ mod tests {
         let undo_actions_len: usize = stack
             .undo_stack
             .iter()
-            .map(|range| range.end - range.start)
+            .map(|entry| entry.range.end - entry.range.start)
             .sum();
         let redo_actions_len: usize = stack
             .redo_stack
@@ -287,10 +271,7 @@ mod tests {
             .map(|range| range.end - range.start)
             .sum();
 
-        assert_eq!(
-            undo_actions_len,
-            stack.undo_actions.len() - stack.undo_base_offset
-        );
+        assert_eq!(undo_actions_len, stack.undo_actions.len());
         assert_eq!(redo_actions_len, stack.redo_actions.len());
     }
 
@@ -368,14 +349,14 @@ mod tests {
         ];
 
         let mut stack = ActionUndoStack::new(16);
-        stack.reset_with(&view_graph);
+        stack.clear();
 
         for action in &actions {
             action.apply(&mut view_graph);
         }
         let modified = view_graph.serialize(SerdeFormat::Json);
 
-        stack.push_current(&view_graph, &actions);
+        stack.push_current(&actions);
 
         assert_ranges_match_actions(&stack);
         assert!(stack.undo(&mut view_graph, &mut |_| {}));
@@ -404,7 +385,7 @@ mod tests {
         for action in &first_actions {
             action.apply(&mut view_graph);
         }
-        stack.push_current(&view_graph, &first_actions);
+        stack.push_current(&first_actions);
         assert_ranges_match_actions(&stack);
 
         let second_actions = vec![GraphUiAction::NodeMoved {
@@ -415,7 +396,7 @@ mod tests {
         for action in &second_actions {
             action.apply(&mut view_graph);
         }
-        stack.push_current(&view_graph, &second_actions);
+        stack.push_current(&second_actions);
         assert_ranges_match_actions(&stack);
 
         assert!(stack.undo(&mut view_graph, &mut |_| {}));
@@ -428,19 +409,17 @@ mod tests {
         assert_ranges_match_actions(&stack);
     }
 
+    /// After many pushes past `max_steps`, the undo buffer must stay
+    /// bounded — the drained prefix is not supposed to accumulate.
     #[test]
-    fn undo_base_offset_compacts_when_prefix_large() {
+    fn undo_buffer_stays_bounded_past_max_steps() {
         let graph = test_graph();
         let view_graph: ViewGraph = graph.into();
         let node_id = view_graph.graph.nodes.iter().next().unwrap().id;
         let start_pos = view_graph.view_nodes.by_key(&node_id).unwrap().pos;
         let mut stack = ActionUndoStack::new(2);
 
-        stack.reset_with(&view_graph);
-
-        // Push actions and track if we ever see base_offset > 0 before compaction
-        let mut saw_nonzero_offset = false;
-        let mut saw_compaction = false;
+        stack.clear();
 
         for i in 0..20 {
             let action = GraphUiAction::NodeMoved {
@@ -448,26 +427,18 @@ mod tests {
                 before: start_pos + vec2(i as f32, 0.0),
                 after: start_pos + vec2((i + 1) as f32, 0.0),
             };
-
-            let offset_before = stack.undo_base_offset;
-            stack.push_current(&view_graph, &[action]);
-            let offset_after = stack.undo_base_offset;
-
-            if offset_before > 0 {
-                saw_nonzero_offset = true;
-            }
-            if offset_before > 0 && offset_after == 0 {
-                saw_compaction = true;
-            }
-
+            stack.push_current(&[action]);
             assert_ranges_match_actions(&stack);
+            assert!(stack.undo_stack.len() <= 2);
         }
 
-        // We should have seen at least one compaction cycle
-        assert!(
-            saw_nonzero_offset || saw_compaction,
-            "should have seen either non-zero offset or compaction"
-        );
+        // Sum of ranges must equal total buffer length — no orphan bytes.
+        let total: usize = stack
+            .undo_stack
+            .iter()
+            .map(|e| e.range.end - e.range.start)
+            .sum();
+        assert_eq!(total, stack.undo_actions.len());
     }
 
     #[test]
@@ -530,7 +501,7 @@ mod tests {
             node.inputs[input_idx].binding = Binding::None;
         }
 
-        stack.reset_with(&view_graph);
+        stack.clear();
         let mut snapshots = vec![view_graph.serialize(SerdeFormat::Json)];
 
         let cache_before = view_graph.graph.by_id(&primary_id).unwrap().behavior;
@@ -544,7 +515,7 @@ mod tests {
             after: cache_after,
         };
         action.apply(&mut view_graph);
-        stack.push_current(&view_graph, std::slice::from_ref(&action));
+        stack.push_current(std::slice::from_ref(&action));
         snapshots.push(view_graph.serialize(SerdeFormat::Json));
 
         let event_node = view_graph
@@ -572,7 +543,7 @@ mod tests {
             change,
         };
         action.apply(&mut view_graph);
-        stack.push_current(&view_graph, std::slice::from_ref(&action));
+        stack.push_current(std::slice::from_ref(&action));
         snapshots.push(view_graph.serialize(SerdeFormat::Json));
 
         let before_binding = Binding::None;
@@ -584,7 +555,7 @@ mod tests {
             after: after_binding,
         };
         action.apply(&mut view_graph);
-        stack.push_current(&view_graph, std::slice::from_ref(&action));
+        stack.push_current(std::slice::from_ref(&action));
         snapshots.push(view_graph.serialize(SerdeFormat::Json));
 
         let moved_before = view_graph.view_nodes.by_key(&primary_id).unwrap().pos;
@@ -595,7 +566,7 @@ mod tests {
             after: moved_after,
         };
         action.apply(&mut view_graph);
-        stack.push_current(&view_graph, std::slice::from_ref(&action));
+        stack.push_current(std::slice::from_ref(&action));
         snapshots.push(view_graph.serialize(SerdeFormat::Json));
 
         let selected_before = view_graph.selected_node_id;
@@ -608,7 +579,7 @@ mod tests {
             after: selected_after,
         };
         action.apply(&mut view_graph);
-        stack.push_current(&view_graph, std::slice::from_ref(&action));
+        stack.push_current(std::slice::from_ref(&action));
         snapshots.push(view_graph.serialize(SerdeFormat::Json));
 
         let zoom_before_pan = view_graph.pan;
@@ -620,7 +591,7 @@ mod tests {
             after_scale: zoom_before_scale + 0.25,
         };
         action.apply(&mut view_graph);
-        stack.push_current(&view_graph, std::slice::from_ref(&action));
+        stack.push_current(std::slice::from_ref(&action));
         snapshots.push(view_graph.serialize(SerdeFormat::Json));
 
         let mut bound_targets = std::collections::HashSet::new();
@@ -638,14 +609,14 @@ mod tests {
             .unwrap_or(secondary_id);
         let action = view_graph.removal_action(&removed_node_id);
         action.apply(&mut view_graph);
-        stack.push_current(&view_graph, std::slice::from_ref(&action));
+        stack.push_current(std::slice::from_ref(&action));
         snapshots.push(view_graph.serialize(SerdeFormat::Json));
 
-        for (range_idx, range) in stack.undo_stack.iter().enumerate() {
-            let bytes = ActionUndoStack::slice_bytes(&stack.undo_actions, range);
+        for (entry_idx, entry) in stack.undo_stack.iter().enumerate() {
+            let bytes = ActionUndoStack::slice_bytes(&stack.undo_actions, &entry.range);
             let decoded: Vec<GraphUiAction> =
                 common::serde::deserialize(bytes, SerdeFormat::Bitcode).unwrap_or_else(|err| {
-                    panic!("undo range {} failed to deserialize: {}", range_idx, err)
+                    panic!("undo entry {} failed to deserialize: {}", entry_idx, err)
                 });
             assert_eq!(decoded.len(), 1);
         }
@@ -665,16 +636,15 @@ mod tests {
     }
 
     /// Continuous ZoomPanChanged emissions merge into a single undo
-    /// entry — one gesture, one undo step. This is how the UI avoids
-    /// needing any cross-frame pending-action state in the action
-    /// buffer (which would fight egui multi-pass rendering).
+    /// entry — one gesture, one undo step. Cached gesture_key makes
+    /// the merge check O(1) (no deserialize).
     #[test]
     fn zoom_pan_changed_merges_into_single_undo_entry() {
         use egui::Vec2;
 
         let mut vg = ViewGraph::default();
         let mut stack = ActionUndoStack::new(32);
-        stack.reset_with(&vg);
+        stack.clear();
 
         let frame_deltas = [
             (Vec2::ZERO, 1.0, Vec2::new(10.0, 0.0), 1.1),
@@ -689,7 +659,7 @@ mod tests {
                 after_scale,
             };
             action.apply(&mut vg);
-            stack.push_current(&vg, std::slice::from_ref(&action));
+            stack.push_current(std::slice::from_ref(&action));
         }
 
         assert_eq!(
@@ -724,7 +694,7 @@ mod tests {
 
         let mut vg = ViewGraph::default();
         let mut stack = ActionUndoStack::new(32);
-        stack.reset_with(&vg);
+        stack.clear();
 
         let zoom = GraphUiAction::ZoomPanChanged {
             before_pan: Vec2::ZERO,
@@ -733,14 +703,14 @@ mod tests {
             after_scale: 1.1,
         };
         zoom.apply(&mut vg);
-        stack.push_current(&vg, std::slice::from_ref(&zoom));
+        stack.push_current(std::slice::from_ref(&zoom));
 
         let add = GraphUiAction::NodeAdded {
             view_node: view_node.clone(),
             node: node.clone(),
         };
         add.apply(&mut vg);
-        stack.push_current(&vg, std::slice::from_ref(&add));
+        stack.push_current(std::slice::from_ref(&add));
 
         let zoom2 = GraphUiAction::ZoomPanChanged {
             before_pan: Vec2::new(10.0, 0.0),
@@ -749,7 +719,7 @@ mod tests {
             after_scale: 1.2,
         };
         zoom2.apply(&mut vg);
-        stack.push_current(&vg, std::slice::from_ref(&zoom2));
+        stack.push_current(std::slice::from_ref(&zoom2));
 
         assert_eq!(
             stack.undo_stack.len(),

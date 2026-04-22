@@ -1,4 +1,3 @@
-use crate::common::undo_stack::UndoStack;
 use crate::editor_funclib::EditorFuncLib;
 use crate::gui::frame_output::{FrameOutput, RunCommand};
 use crate::model::ActionUndoStack;
@@ -93,7 +92,7 @@ pub struct AppData {
 
     graph_dirty: bool,
 
-    undo_stack: Box<dyn UndoStack<ViewGraph, Action = GraphUiAction>>,
+    undo_stack: ActionUndoStack,
 
     execution_stats_rx: Slot<Result<ExecutionStats, execution_graph::Error>>,
     argument_values_rx: Slot<(NodeId, Option<ArgumentValues>)>,
@@ -129,7 +128,7 @@ impl AppData {
             state,
             worker,
             graph_dirty: true,
-            undo_stack: Box::new(ActionUndoStack::new(UNDO_MAX_STEPS)),
+            undo_stack: ActionUndoStack::new(UNDO_MAX_STEPS),
             ui_context,
             execution_stats_rx,
             argument_values_rx,
@@ -364,7 +363,7 @@ impl AppData {
         self.state.view_graph = view_graph;
 
         if reset_undo {
-            self.undo_stack.reset_with(&self.state.view_graph);
+            self.undo_stack.clear();
         }
 
         self.worker.send(WorkerMessage::Clear);
@@ -392,8 +391,7 @@ impl AppData {
             // makes it safe under egui's multi-pass rendering.
             let any_affecting = self.state.apply_actions(actions);
             self.undo_stack.clear_redo();
-            self.undo_stack
-                .push_current(&self.state.view_graph, actions);
+            self.undo_stack.push_current(actions);
 
             graph_updated |= any_affecting;
         }

@@ -37,10 +37,9 @@ use egui::Id;
 /// our fixed-rect chrome.
 ///
 /// Constructing a `StableId` from a raw [`Id`] or arbitrary hashable
-/// value requires going through [`StableId::new`] (call-site salted),
-/// [`StableId::from_id`] (explicit), or [`StableId::default`] (call-site
-/// only). The type makes the "where did this id come from?" question
-/// answerable by the compiler.
+/// value requires going through [`StableId::new`] (call-site salted)
+/// or [`StableId::from_id`] (explicit). The type makes the "where did
+/// this id come from?" question answerable by the compiler.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct StableId(Id);
 

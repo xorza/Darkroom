@@ -17,6 +17,7 @@ pub mod graph_background;
 pub mod graph_ctx;
 pub mod graph_layout;
 pub mod graph_ui;
+pub mod image_utils;
 pub mod log_ui;
 pub mod new_node_ui;
 pub mod node_details_ui;

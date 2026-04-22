@@ -71,11 +71,11 @@ Visual egui-based editor for graph creation and execution.
 
 ## Undo System
 
-Two implementations available:
-- `FullSerdeUndoStack` - Stores full serialized snapshots
-- `ActionUndoStack` - Stores `GraphUiAction` values with binary compression
-
-Both support byte limits for memory management.
+`ActionUndoStack` stores `GraphUiAction` batches as bitcode-serialized bytes
+in a shared `Vec<u8>` with per-entry `Range<usize>` indices. Single-action
+entries cache their `gesture_key` so continuous gestures (zoom/pan) coalesce
+into one undo step without deserializing on every frame. Bounded by
+`max_steps`; oldest bytes are drained (not offset-tracked) on overflow.
 
 ## Editor Features
 

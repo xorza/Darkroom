@@ -5,10 +5,10 @@ use scenarium::graph::NodeId;
 use scenarium::prelude::{ExecutionStats, Func};
 
 use crate::common::StableId;
-use crate::common::image_utils::to_color_image;
 use crate::gui::Gui;
 use crate::gui::frame_output::FrameOutput;
 use crate::gui::graph_ctx::GraphContext;
+use crate::gui::image_utils::to_color_image;
 use crate::gui::widgets::TextEdit;
 use crate::gui::widgets::frame::Frame;
 use crate::gui::widgets::positioned_ui::PositionedUi;
