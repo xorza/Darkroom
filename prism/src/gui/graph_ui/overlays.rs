@@ -183,11 +183,11 @@ impl GraphUi {
             return;
         };
 
-        if connection_drag.start_port.port.kind != PortKind::Input {
+        if connection_drag.start_port.kind != PortKind::Input {
             return;
         }
 
-        let input_port = connection_drag.start_port.port;
+        let input_port = connection_drag.start_port;
         // Defensive: the drag's node could have vanished between start
         // and commit (undo/redo). Silently drop — nothing to bind.
         let Some(input_node) = ctx.view_graph.graph.by_id(&input_port.node_id) else {

@@ -62,18 +62,25 @@ impl PortKind {
 
 // === ConnectionDrag ===
 
+/// In-flight connection drag state.
+///
+/// Stores only identity (`PortRef`s) and the current cursor position —
+/// port centers are recomputed from the current `GraphLayout` at render
+/// time. The `current_pos` is initialized from the start port's center
+/// on construction and kept in sync with the pointer + snap targets by
+/// `advance_drag`.
 #[derive(Debug)]
 pub(crate) struct ConnectionDrag {
-    pub(crate) start_port: PortInfo,
-    pub(crate) end_port: Option<PortInfo>,
+    pub(crate) start_port: PortRef,
+    pub(crate) end_port: Option<PortRef>,
     pub(crate) current_pos: Pos2,
 }
 
 impl ConnectionDrag {
-    pub(crate) fn new(port: PortInfo) -> Self {
+    pub(crate) fn new(start: PortInfo) -> Self {
         Self {
-            current_pos: port.center,
-            start_port: port,
+            current_pos: start.center,
+            start_port: start.port,
             end_port: None,
         }
     }
@@ -122,12 +129,27 @@ impl KeyIndexKey<ConnectionKey> for ConnectionCurve {
     }
 }
 
+/// Decoration-only bezier keyed by the connection it overlays.
+/// Used for "missing input" / "triggered event" highlights — no
+/// interaction, so no `broke` / `hovered` state.
+#[derive(Debug)]
+struct HighlightCurve {
+    key: ConnectionKey,
+    bezier: ConnectionBezier,
+}
+
+impl KeyIndexKey<ConnectionKey> for HighlightCurve {
+    fn key(&self) -> &ConnectionKey {
+        &self.key
+    }
+}
+
 // === ConnectionUi ===
 
 #[derive(Debug, Default)]
 pub(crate) struct ConnectionUi {
     curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
-    highlight_curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
+    highlight_curves: KeyIndexVec<ConnectionKey, HighlightCurve>,
 
     /// Cached mesh buffer for the in-flight drag preview — reused across
     /// frames while a drag is active. The drag data itself lives in
@@ -258,25 +280,21 @@ impl ConnectionUi {
         gui: &mut Gui<'_>,
         ctx: &GraphContext<'_>,
         graph_layout: &GraphLayout,
-        drag: &mut ConnectionDrag,
+        drag: &ConnectionDrag,
     ) {
-        // Port positions: a connection drag doesn't coexist with a node
-        // drag, so drag_offset is always zero here.
-        let start_layout =
-            graph_layout.node_layout(gui, ctx, &drag.start_port.port.node_id, egui::Vec2::ZERO);
-        drag.start_port.center = start_layout.port_center(&drag.start_port.port);
-
-        if let Some(end) = drag.end_port.as_mut() {
-            let end_layout =
-                graph_layout.node_layout(gui, ctx, &end.port.node_id, egui::Vec2::ZERO);
-            end.center = end_layout.port_center(&end.port);
-        }
+        // Port centers come from fresh layout — a connection drag doesn't
+        // coexist with a node drag, so drag_offset is always zero here.
+        let port_center = |port: &PortRef| {
+            let layout = graph_layout.node_layout(gui, ctx, &port.node_id, egui::Vec2::ZERO);
+            layout.port_center(port)
+        };
+        let start_center = port_center(&drag.start_port);
 
         // Determine bezier direction based on port kind
-        let (start, end) = if drag.start_port.port.kind.is_source() {
-            (drag.start_port.center, drag.current_pos)
+        let (start, end) = if drag.start_port.kind.is_source() {
+            (start_center, drag.current_pos)
         } else {
-            (drag.current_pos, drag.start_port.center)
+            (drag.current_pos, start_center)
         };
 
         self.temp_connection_bezier
@@ -288,23 +306,22 @@ impl ConnectionUi {
         // the same rect with a different id than last frame's
         // temp-connection, tripping egui's "Widget rect changed id
         // between passes" warning (red-rect flash).
-        let snapped_key = drag.end_port.and_then(|end| {
-            let (input_port, output_port) = order_ports(drag.start_port.port, end.port);
+        let snapped_key = drag.end_port.map(|end| {
+            let (input_port, output_port) = order_ports(drag.start_port, end);
             match output_port.kind {
-                PortKind::Output => Some(ConnectionKey::Input {
+                PortKind::Output => ConnectionKey::Input {
                     input_node_id: input_port.node_id,
                     input_idx: input_port.port_idx,
-                }),
-                PortKind::Event => Some(ConnectionKey::Event {
+                },
+                PortKind::Event => ConnectionKey::Event {
                     event_node_id: output_port.node_id,
                     event_idx: output_port.port_idx,
                     trigger_node_id: input_port.node_id,
-                }),
-                _ => None,
+                },
+                _ => unreachable!("end port kinds are validated by try_snap_to_port"),
             }
         });
-        let style =
-            ConnectionBezierStyle::build(&gui.style, drag.start_port.port.kind, false, false);
+        let style = ConnectionBezierStyle::build(&gui.style, drag.start_port.kind, false, false);
         if let Some(key) = snapped_key {
             self.temp_connection_bezier
                 .show(gui, Sense::hover(), ("connection", key), style);
@@ -473,12 +490,15 @@ fn update_curve_interaction(
 
 fn render_highlight_curve(
     gui: &mut Gui<'_>,
-    highlights: &mut CompactInsert<'_, ConnectionKey, ConnectionCurve>,
+    highlights: &mut CompactInsert<'_, ConnectionKey, HighlightCurve>,
     key: ConnectionKey,
     start_pos: Pos2,
     end_pos: Pos2,
 ) {
-    let curve = get_or_create_curve(highlights, key);
+    let (_, curve) = highlights.insert_with(&key, || HighlightCurve {
+        key,
+        bezier: ConnectionBezier::default(),
+    });
     curve.bezier.update_points(start_pos, end_pos, gui.scale());
 
     let style = ConnectionBezierStyle {
@@ -509,8 +529,8 @@ fn show_curve(
 
 fn try_snap_to_port(drag: &mut ConnectionDrag, port_info: PortInfo) -> bool {
     drag.end_port = None;
-    if drag.start_port.port.kind.opposite() == port_info.port.kind {
-        drag.end_port = Some(port_info);
+    if drag.start_port.kind.opposite() == port_info.port.kind {
+        drag.end_port = Some(port_info.port);
         drag.current_pos = port_info.center;
         true
     } else {
@@ -520,18 +540,18 @@ fn try_snap_to_port(drag: &mut ConnectionDrag, port_info: PortInfo) -> bool {
 
 fn finish_drag(drag: &ConnectionDrag) -> ConnectionDragUpdate {
     if let Some(end_port) = drag.end_port {
-        let (input_port, output_port) = order_ports(drag.start_port.port, end_port.port);
+        let (input_port, output_port) = order_ports(drag.start_port, end_port);
         ConnectionDragUpdate::FinishedWith {
             input_port,
             output_port,
         }
     } else {
-        match drag.start_port.port.kind {
+        match drag.start_port.kind {
             PortKind::Input => ConnectionDragUpdate::FinishedWithEmptyOutput {
-                input_port: drag.start_port.port,
+                input_port: drag.start_port,
             },
             PortKind::Output => ConnectionDragUpdate::FinishedWithEmptyInput {
-                output_port: drag.start_port.port,
+                output_port: drag.start_port,
             },
             _ => ConnectionDragUpdate::Finished,
         }
@@ -573,7 +593,7 @@ mod tests {
     fn advance_drag_none_clears_end_port_and_continues() {
         let start = port_info(NodeId::unique(), PortKind::Output, 0);
         let mut drag = ConnectionDrag::new(start);
-        drag.end_port = Some(port_info(NodeId::unique(), PortKind::Input, 0));
+        drag.end_port = Some(port_info(NodeId::unique(), PortKind::Input, 0).port);
 
         let update = advance_drag(&mut drag, Pos2::new(5.0, 6.0), PortInteractCommand::None);
 
@@ -595,7 +615,7 @@ mod tests {
         );
 
         assert!(matches!(update, ConnectionDragUpdate::InProgress));
-        assert_eq!(drag.end_port.unwrap().port, target.port);
+        assert_eq!(drag.end_port.unwrap(), target.port);
     }
 
     #[test]
@@ -615,7 +635,7 @@ mod tests {
     fn advance_drag_stop_with_snap_returns_finished_with() {
         let start = port_info(NodeId::unique(), PortKind::Output, 0);
         let mut drag = ConnectionDrag::new(start);
-        drag.end_port = Some(port_info(NodeId::unique(), PortKind::Input, 0));
+        drag.end_port = Some(port_info(NodeId::unique(), PortKind::Input, 0).port);
 
         let update = advance_drag(&mut drag, Pos2::ZERO, PortInteractCommand::DragStop);
         assert!(matches!(update, ConnectionDragUpdate::FinishedWith { .. }));
