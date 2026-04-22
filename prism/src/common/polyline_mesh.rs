@@ -1,7 +1,14 @@
 use std::sync::Arc;
 
-use egui::epaint::{Mesh, Vertex, WHITE_UV};
+use egui::epaint::Mesh;
 use egui::{Color32, Painter, Pos2, Shape, Vec2};
+
+/// Each polyline segment is rendered as three quads: the inner solid
+/// stroke + two outer feathered edges. Capacity reservation and the
+/// segment-emitting code share these constants so they can't drift.
+const QUADS_PER_SEGMENT: usize = 3;
+const VERTICES_PER_QUAD: usize = 4;
+const INDICES_PER_QUAD: usize = 6;
 
 #[derive(Debug, Clone)]
 pub struct PolylineMesh {
@@ -30,7 +37,7 @@ impl PolylineMesh {
 
     pub fn rebuild(&mut self, start_color: Color32, end_color: Color32, width: f32, feather: f32) {
         let points = self.points.as_slice();
-        let mesh = Arc::get_mut(&mut self.mesh).unwrap();
+        let mesh = Arc::make_mut(&mut self.mesh);
         mesh.clear();
         add_curve_segments_to_mesh(mesh, points, 0, start_color, end_color, width, feather);
     }
@@ -44,7 +51,7 @@ impl PolylineMesh {
         feather: f32,
     ) {
         let points = self.points.as_slice();
-        let mesh = Arc::get_mut(&mut self.mesh).unwrap();
+        let mesh = Arc::make_mut(&mut self.mesh);
         add_curve_segments_to_mesh(
             mesh,
             points,
@@ -57,8 +64,7 @@ impl PolylineMesh {
     }
 
     pub fn clear_mesh(&mut self) {
-        let mesh = Arc::get_mut(&mut self.mesh).unwrap();
-        mesh.clear();
+        Arc::make_mut(&mut self.mesh).clear();
     }
 
     pub fn render(&self, painter: &Painter) {
@@ -70,17 +76,11 @@ fn polyline_mesh_with_capacity(points: usize) -> Mesh {
     assert!(points >= 2, "bezier point count must be at least 2");
 
     let segments = points - 1;
-    let quads_per_segment = 3;
-    let vertices_per_quad = 4;
-    let indices_per_quad = 6;
-    let (vertex_capacity, index_capacity) = (
-        segments * quads_per_segment * vertices_per_quad,
-        segments * quads_per_segment * indices_per_quad,
-    );
-
     let mut mesh = Mesh::default();
-    mesh.vertices.reserve(vertex_capacity);
-    mesh.indices.reserve(index_capacity);
+    mesh.vertices
+        .reserve(segments * QUADS_PER_SEGMENT * VERTICES_PER_QUAD);
+    mesh.indices
+        .reserve(segments * QUADS_PER_SEGMENT * INDICES_PER_QUAD);
     mesh
 }
 
@@ -206,26 +206,9 @@ fn compute_vertex_normals(points: &[Pos2]) -> Vec<Vec2> {
 
 fn add_quad(mesh: &mut Mesh, positions: [Pos2; 4], colors: [Color32; 4]) {
     let base = mesh.vertices.len() as u32;
-    mesh.vertices.push(Vertex {
-        pos: positions[0],
-        uv: WHITE_UV,
-        color: colors[0],
-    });
-    mesh.vertices.push(Vertex {
-        pos: positions[1],
-        uv: WHITE_UV,
-        color: colors[1],
-    });
-    mesh.vertices.push(Vertex {
-        pos: positions[2],
-        uv: WHITE_UV,
-        color: colors[2],
-    });
-    mesh.vertices.push(Vertex {
-        pos: positions[3],
-        uv: WHITE_UV,
-        color: colors[3],
-    });
+    for (&pos, &color) in positions.iter().zip(&colors) {
+        mesh.colored_vertex(pos, color);
+    }
     mesh.indices
         .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
 }
