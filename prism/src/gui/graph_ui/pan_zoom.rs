@@ -3,7 +3,7 @@
 //! Everything in here is a pure projection of `(state, input)` → new
 //! target `(scale, pan)`, plus the state-machine transitions for the
 //! middle-button pan mode. Mutation of `view_graph.pan` / `scale` happens
-//! exclusively through `ZoomPanChanged::apply` in `AppData::handle_actions`.
+//! exclusively through `ZoomPanChanged::apply` in `Session::handle_actions`.
 
 use common::BoolExt;
 use egui::{PointerButton, Pos2, Response, Vec2};

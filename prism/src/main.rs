@@ -1,4 +1,3 @@
-mod app_data;
 mod common;
 mod editor_funclib;
 mod gui;
@@ -6,14 +5,15 @@ mod init;
 mod input;
 mod main_ui;
 mod model;
+mod session;
 
 use anyhow::Result;
 use eframe::{NativeOptions, egui};
 use std::sync::Arc;
 
-use crate::app_data::AppData;
 use crate::gui::Gui;
-use crate::main_ui::MainUi;
+use crate::main_ui::{MainUi, UiContext};
+use crate::session::Session;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
         options,
         Box::new(|cc| {
             configure_fonts(&cc.egui_ctx);
-            Ok(Box::new(ScenariumEditor::new(&cc.egui_ctx)))
+            Ok(Box::new(PrismApp::new(&cc.egui_ctx)))
         }),
     )?;
 
@@ -63,24 +63,29 @@ fn configure_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
+/// The eframe integration layer. Two peers below — pure project
+/// state (`Session`), per-frame UI state + root theme (`MainUi`).
+/// Construction is symmetric: each peer mints its own [`UiContext`]
+/// from the eframe ctx, no hand-off required.
 #[derive(Debug)]
-struct ScenariumEditor {
-    app_data: AppData,
+struct PrismApp {
+    session: Session,
     main_ui: MainUi,
 }
 
-impl ScenariumEditor {
-    fn new(ui_context: &egui::Context) -> Self {
-        let main_ui = MainUi::new(ui_context);
-        let app_data = AppData::new(main_ui.ui_context());
-        Self { app_data, main_ui }
+impl PrismApp {
+    fn new(ctx: &egui::Context) -> Self {
+        Self {
+            session: Session::new(UiContext::new(ctx)),
+            main_ui: MainUi::new(UiContext::new(ctx)),
+        }
     }
 }
 
-impl eframe::App for ScenariumEditor {
+impl eframe::App for PrismApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let mut gui = Gui::new(ui, &self.main_ui.style);
-        self.main_ui.render(&mut self.app_data, &mut gui);
+        self.main_ui.render(&mut self.session, &mut gui);
     }
 
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
@@ -94,6 +99,6 @@ impl eframe::App for ScenariumEditor {
     }
 
     fn on_exit(&mut self) {
-        self.app_data.exit();
+        self.session.exit();
     }
 }

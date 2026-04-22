@@ -32,10 +32,10 @@ const UNDO_MAX_STEPS: usize = 256;
 /// anything in here can be constructed in a unit test, poked with actions,
 /// and inspected.
 ///
-/// `AppData` wraps this with the session-level facilities (worker channels,
+/// `Session` wraps this with the session-level facilities (worker channels,
 /// undo stack, graph-dirty flag, redraw hook).
 #[derive(Debug, Default)]
-pub struct AppState {
+pub struct SessionState {
     pub func_lib: FuncLib,
     pub view_graph: ViewGraph,
     pub execution_stats: Option<ExecutionStats>,
@@ -45,7 +45,7 @@ pub struct AppState {
     pub autorun: bool,
 }
 
-impl AppState {
+impl SessionState {
     /// Appends a status line. Keeps the buffer below a 2000-char cap by
     /// draining oldest content.
     pub fn add_status(&mut self, message: impl AsRef<str>) {
@@ -63,7 +63,7 @@ impl AppState {
     /// applied action affects computation.
     ///
     /// Does *not* record undo history — that's a session concern, handled
-    /// by [`AppData::handle_actions`].
+    /// by [`Session::handle_actions`].
     pub fn apply_actions(&mut self, actions: &[GraphUiAction]) -> bool {
         let mut graph_updated = false;
         for action in actions {
@@ -74,7 +74,7 @@ impl AppState {
     }
 
     /// Resets execution caches after a mutation. Caller is responsible for
-    /// telling the worker to re-run (that's `AppData::graph_dirty`).
+    /// telling the worker to re-run (that's `Session::graph_dirty`).
     fn clear_execution_caches(&mut self) {
         self.execution_stats = None;
         self.argument_values_cache.clear();
@@ -82,8 +82,8 @@ impl AppState {
 }
 
 #[derive(Debug)]
-pub struct AppData {
-    pub state: AppState,
+pub struct Session {
+    pub state: SessionState,
 
     worker: Worker,
 
@@ -98,7 +98,7 @@ pub struct AppData {
     print_out_rx: UnboundedReceiver<String>,
 }
 
-impl AppData {
+impl Session {
     pub fn new(ui_context: UiContext) -> Self {
         let config = Config::load_or_default();
 
@@ -113,7 +113,7 @@ impl AppData {
         func_lib.merge(WorkerEventsFuncLib::default());
         func_lib.merge(ImageFuncLib::default());
 
-        let state = AppState {
+        let state = SessionState {
             func_lib,
             view_graph: ViewGraph::default(),
             execution_stats: None,
@@ -147,7 +147,7 @@ impl AppData {
     }
 
     pub fn save_graph(&mut self, path: &Path) {
-        fn save_to_file(state: &AppState, path: &Path) -> Result<()> {
+        fn save_to_file(state: &SessionState, path: &Path) -> Result<()> {
             let format = SerdeFormat::from_file_name(path.to_string_lossy().as_ref())
                 .map_err(anyhow::Error::from)?;
             let payload = state.view_graph.serialize(format);
@@ -167,7 +167,7 @@ impl AppData {
     }
 
     pub fn load_graph(&mut self, path: &Path) {
-        fn load_from_file(this: &mut AppData, path: &Path) -> Result<()> {
+        fn load_from_file(this: &mut Session, path: &Path) -> Result<()> {
             let format = SerdeFormat::from_file_name(path.to_string_lossy().as_ref())
                 .map_err(anyhow::Error::from)?;
             let payload = std::fs::read(path).map_err(anyhow::Error::from)?;
@@ -419,18 +419,18 @@ mod tests {
     use crate::model::ViewNode;
     use egui::Pos2;
 
-    // Pure AppState tests — no worker, no tokio, no egui.
+    // Pure SessionState tests — no worker, no tokio, no egui.
 
     #[test]
     fn add_status_first_line_has_no_leading_newline() {
-        let mut state = AppState::default();
+        let mut state = SessionState::default();
         state.add_status("hello");
         assert_eq!(state.status, "hello");
     }
 
     #[test]
     fn add_status_appends_with_newline_separator() {
-        let mut state = AppState::default();
+        let mut state = SessionState::default();
         state.add_status("one");
         state.add_status("two");
         assert_eq!(state.status, "one\ntwo");
@@ -438,7 +438,7 @@ mod tests {
 
     #[test]
     fn add_status_caps_buffer_to_2000_chars() {
-        let mut state = AppState::default();
+        let mut state = SessionState::default();
         // Push ~3000 chars; each add is appended with a newline.
         for _ in 0..300 {
             state.add_status("0123456789");
@@ -448,7 +448,7 @@ mod tests {
 
     #[test]
     fn apply_actions_reports_when_action_affects_computation() {
-        let mut state = AppState::default();
+        let mut state = SessionState::default();
 
         // NodeSelected is a UI-only action — should NOT report as affecting computation.
         let selected_action = GraphUiAction::NodeSelected {

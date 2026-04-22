@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use crate::app_data::AppData;
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::frame_output::RunCommand;
@@ -9,6 +8,7 @@ use crate::gui::log_ui::LogUi;
 use crate::gui::style::Style;
 use crate::gui::widgets::Panel;
 use crate::input::InputSnapshot;
+use crate::session::Session;
 use eframe::egui;
 use egui::{Id, UiBuilder, ViewportCommand};
 
@@ -36,43 +36,39 @@ pub struct MainUi {
     pub log_ui: LogUi,
     pub ui_context: UiContext,
     /// Reference `Style` at scale=1.0, loaded from `style.toml` on
-    /// startup. Serves as the canonical source for [`Gui::new_root`]
-    /// every frame.
+    /// startup. Serves as the canonical source for [`Gui::new`] every
+    /// frame.
     pub style: Rc<Style>,
 
     pub arena: bumpalo::Bump,
 }
 
 impl MainUi {
-    pub fn new(ctx: &egui::Context) -> Self {
+    pub fn new(ui_context: UiContext) -> Self {
         let style = Style::from_file("style.toml").unwrap_or_default();
         Self {
             graph_ui: GraphUi::default(),
             log_ui: LogUi,
-            ui_context: UiContext::new(ctx),
+            ui_context,
             style: Rc::new(style),
             arena: bumpalo::Bump::new(),
         }
     }
 
-    pub fn ui_context(&self) -> UiContext {
-        self.ui_context.clone()
-    }
-
-    fn empty(&mut self, app_data: &mut AppData) {
+    fn empty(&mut self, session: &mut Session) {
         self.graph_ui = GraphUi::default();
-        app_data.empty_graph();
+        session.empty_graph();
     }
 
-    fn save(&mut self, app_data: &mut AppData) {
-        if let Some(path) = app_data.state.config.current_path.clone() {
-            app_data.save_graph(&path);
+    fn save(&mut self, session: &mut Session) {
+        if let Some(path) = session.state.config.current_path.clone() {
+            session.save_graph(&path);
         } else {
-            self.save_as(app_data);
+            self.save_as(session);
         }
     }
 
-    fn save_as(&mut self, app_data: &mut AppData) {
+    fn save_as(&mut self, session: &mut Session) {
         let file = rfd::FileDialog::new()
             .add_filter("Lua", &["lua"])
             .add_filter("Scn", &["scn"])
@@ -81,11 +77,11 @@ impl MainUi {
             .save_file();
 
         if let Some(path) = file {
-            app_data.save_graph(&path);
+            session.save_graph(&path);
         }
     }
 
-    pub fn load(&mut self, app_data: &mut AppData) {
+    pub fn load(&mut self, session: &mut Session) {
         let file = rfd::FileDialog::new()
             .add_filter("All supported", &["lua", "json", "scn", "lz4"])
             .add_filter("Lua", &["lua"])
@@ -96,17 +92,17 @@ impl MainUi {
 
         if let Some(path) = file {
             self.graph_ui = GraphUi::default();
-            app_data.load_graph(&path);
+            session.load_graph(&path);
         }
     }
 
-    pub fn render(&mut self, app_data: &mut AppData, gui: &mut Gui<'_>) {
+    pub fn render(&mut self, session: &mut Session, gui: &mut Gui<'_>) {
         let style = gui.style.clone();
         let input = gui.input_snapshot();
 
-        app_data.update_shared_status();
+        session.update_shared_status();
 
-        self.handle_shortcuts(&input, app_data);
+        self.handle_shortcuts(&input, session);
 
         Panel::top(StableId::new("top_panel"))
             .show_separator_line(false)
@@ -126,19 +122,19 @@ impl MainUi {
 
                             ui.set_min_width(100.0);
                             if ui.button("New").clicked() {
-                                self.empty(app_data);
+                                self.empty(session);
                                 ui.close();
                             }
                             if ui.button("Save").clicked() {
-                                self.save(app_data);
+                                self.save(session);
                                 ui.close();
                             }
                             if ui.button("Save as").clicked() {
-                                self.save_as(app_data);
+                                self.save_as(session);
                                 ui.close();
                             }
                             if ui.button("Open").clicked() {
-                                self.load(app_data);
+                                self.load(session);
                                 ui.close();
                             }
                             if ui.button("Exit").clicked() {
@@ -154,37 +150,37 @@ impl MainUi {
             .show_separator_line(false)
             .no_frame()
             .show(gui, |gui| {
-                self.log_ui.render(gui, &app_data.state.status);
+                self.log_ui.render(gui, &session.state.status);
             });
 
         Panel::central().no_frame().show(gui, |gui| {
-            self.graph_ui.render(gui, app_data, &input, &self.arena)
+            self.graph_ui.render(gui, session, &input, &self.arena)
         });
 
-        app_data.handle_output(self.graph_ui.output());
+        session.handle_output(self.graph_ui.output());
         self.arena.reset();
     }
 
-    fn handle_shortcuts(&mut self, input: &InputSnapshot, app_data: &mut AppData) {
+    fn handle_shortcuts(&mut self, input: &InputSnapshot, session: &mut Session) {
         if input.cmd_only(egui::Key::Z) {
             self.graph_ui.cancel_gesture();
-            app_data.undo(self.graph_ui.output());
+            session.undo(self.graph_ui.output());
         } else if input.cmd_shift(egui::Key::Z) {
             self.graph_ui.cancel_gesture();
-            app_data.redo();
+            session.redo();
         }
 
         if input.cmd_shift(egui::Key::S) {
-            self.save_as(app_data);
+            self.save_as(session);
         } else if input.cmd_only(egui::Key::S) {
-            self.save(app_data);
+            self.save(session);
         } else if input.cmd(egui::Key::O) {
-            self.load(app_data);
+            self.load(session);
         }
 
         if input.cmd_shift(egui::Key::Space) {
             let output = self.graph_ui.output();
-            output.set_run_cmd(if app_data.state.autorun {
+            output.set_run_cmd(if session.state.autorun {
                 RunCommand::StopAutorun
             } else {
                 RunCommand::StartAutorun

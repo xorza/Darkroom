@@ -34,3 +34,6 @@
 /hooks
 /objects
 /refs
+
+
+**/*.log

@@ -11,7 +11,6 @@ use common::BoolExt;
 use eframe::egui;
 use egui::{Pos2, Rect, Response, Sense, StrokeKind, Vec2};
 
-use crate::app_data::AppData;
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::connection_ui::ConnectionUi;
@@ -25,6 +24,7 @@ use crate::gui::node_details_ui::NodeDetailsUi;
 use crate::gui::node_ui::NodeUi;
 use crate::gui::widgets::HitRegion;
 use crate::input::InputSnapshot;
+use crate::session::Session;
 
 mod connections;
 mod overlays;
@@ -82,7 +82,7 @@ impl GraphUi {
     pub fn render(
         &mut self,
         gui: &mut Gui<'_>,
-        app_data: &mut AppData,
+        session: &mut Session,
         input: &InputSnapshot,
         arena: &Bump,
     ) {
@@ -99,11 +99,11 @@ impl GraphUi {
             .clip_rect(rect)
             .show(|gui| {
                 let mut ctx = GraphContext {
-                    func_lib: &app_data.state.func_lib,
-                    view_graph: &app_data.state.view_graph,
-                    execution_stats: app_data.state.execution_stats.as_ref(),
-                    autorun: app_data.state.autorun,
-                    argument_values_cache: &mut app_data.state.argument_values_cache,
+                    func_lib: &session.state.func_lib,
+                    view_graph: &session.state.view_graph,
+                    execution_stats: session.state.execution_stats.as_ref(),
+                    autorun: session.state.autorun,
+                    argument_values_cache: &mut session.state.argument_values_cache,
                 };
 
                 let (background_response, pointer_pos) =
