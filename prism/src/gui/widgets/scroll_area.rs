@@ -73,6 +73,7 @@ impl ScrollArea {
 
     pub fn show<R>(self, gui: &mut Gui<'_>, add_contents: impl FnOnce(&mut Gui<'_>) -> R) -> R {
         let style = gui.style.clone();
+        let scale = gui.scale();
 
         let mut scroll_area = egui::ScrollArea::new([self.horizontal, self.vertical])
             .id_salt(self.id)
@@ -91,7 +92,7 @@ impl ScrollArea {
 
         scroll_area
             .show(gui.ui_raw(), |ui| {
-                let mut child_gui = Gui::child(ui, style);
+                let mut child_gui = Gui::child(ui, style, scale);
                 add_contents(&mut child_gui)
             })
             .inner

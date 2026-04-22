@@ -1,11 +1,14 @@
+use std::rc::Rc;
+
+use crate::app_data::AppData;
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::frame_output::RunCommand;
 use crate::gui::graph_ui::GraphUi;
 use crate::gui::log_ui::LogUi;
+use crate::gui::style::Style;
 use crate::gui::widgets::Panel;
 use crate::input::InputSnapshot;
-use crate::{app_data::AppData, gui::style_settings::StyleSettings};
 use eframe::egui;
 use egui::{Id, UiBuilder, ViewportCommand};
 
@@ -32,18 +35,22 @@ pub struct MainUi {
     pub graph_ui: GraphUi,
     pub log_ui: LogUi,
     pub ui_context: UiContext,
-    pub style_settings: StyleSettings,
+    /// Reference `Style` at scale=1.0, loaded from `style.toml` on
+    /// startup. Serves as the canonical source for [`Gui::new_root`]
+    /// every frame.
+    pub style: Rc<Style>,
 
     pub arena: bumpalo::Bump,
 }
 
 impl MainUi {
     pub fn new(ctx: &egui::Context) -> Self {
+        let style = Style::from_file("style.toml").unwrap_or_default();
         Self {
             graph_ui: GraphUi::default(),
             log_ui: LogUi,
             ui_context: UiContext::new(ctx),
-            style_settings: StyleSettings::from_file("style.toml").unwrap_or_default(),
+            style: Rc::new(style),
             arena: bumpalo::Bump::new(),
         }
     }

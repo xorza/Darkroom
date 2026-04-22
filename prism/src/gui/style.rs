@@ -1,27 +1,56 @@
+//! Project-wide visual styling. A single `Style` type serves both as
+//! the serialized reference (loaded from `style.toml` at scale=1.0)
+//! and as the runtime view at the current scale. Scale-dependent
+//! values are baked into the `Style` instance; to render at a
+//! different scale, [`Style::at_scale`] produces a fresh `Rc<Style>`
+//! cloned from the reference with scale-dependent fields multiplied.
+//!
+//! The runtime `Style` carries a back-link to its reference
+//! ([`Style::reference`]) so subsequent `at_scale` calls always
+//! multiply from the canonical scale=1.0 values — no float drift from
+//! chained scalings.
+//!
+//! Fields are grouped to match how callers access them:
+//! - top-level: fonts, palette, common paddings/radii;
+//! - sub-structs (`GraphBackgroundStyle`, `ConnectionStyle`,
+//!   `NodeStyle`, `MenuStyle`, `PopupStyle`, `ButtonStyle`) for
+//!   cluster-specific concerns.
+
+use std::path::Path;
+use std::rc::Rc;
+
 use eframe::egui;
-use egui::{Color32, FontFamily, FontId, Shadow, Stroke, Vec2};
+use egui::{Color32, FontFamily, FontId, Margin, Shadow, Stroke, Vec2};
+use serde::{Deserialize, Serialize};
 
-use crate::common::UiEquals;
 use crate::gui::connection_ui::PortKind;
-use crate::gui::style_settings::StyleSettings;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Style {
-    style_settings: StyleSettings,
-    pub(crate) scale: f32,
-
     pub heading_font: FontId,
     pub body_font: FontId,
     pub sub_font: FontId,
     pub mono_font: FontId,
 
+    #[serde(with = "color_hex")]
     pub text_color: Color32,
+    #[serde(with = "color_hex")]
     pub noninteractive_text_color: Color32,
+    #[serde(with = "color_hex")]
+    pub dark_text_color: Color32,
 
+    #[serde(with = "color_hex")]
     pub noninteractive_bg_fill: Color32,
+    #[serde(with = "color_hex")]
     pub active_bg_fill: Color32,
+    #[serde(with = "color_hex")]
     pub hover_bg_fill: Color32,
+    #[serde(with = "color_hex")]
     pub inactive_bg_fill: Color32,
+    #[serde(with = "color_hex")]
+    pub checked_bg_fill: Color32,
+
     pub inactive_bg_stroke: Stroke,
     pub active_bg_stroke: Stroke,
 
@@ -31,37 +60,49 @@ pub struct Style {
     pub corner_radius: f32,
     pub small_corner_radius: f32,
 
-    pub checked_bg_fill: Color32,
-    pub dark_text_color: Color32,
-
     pub graph_background: GraphBackgroundStyle,
     pub connections: ConnectionStyle,
     pub node: NodeStyle,
     pub menu: MenuStyle,
     pub popup: PopupStyle,
     pub list_button: ButtonStyle,
+
+    /// Back-link to the reference copy at scale=1.0. `None` when
+    /// `self` *is* the reference. Runtime instances produced by
+    /// [`Style::at_scale`] carry `Some` so subsequent rescales
+    /// always multiply from canonical values (no chained float
+    /// drift, no lossy round-trips through `Shadow`'s `u8`).
+    #[serde(skip)]
+    reference: Option<Rc<Style>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GraphBackgroundStyle {
+    #[serde(with = "color_hex")]
     pub bg_color: Color32,
+    #[serde(with = "color_hex")]
     pub dotted_color: Color32,
     pub dotted_base_spacing: f32,
     pub dotted_radius_base: f32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ConnectionStyle {
     pub feather: f32,
     pub stroke_width: f32,
     pub highlight_feather: f32,
+    #[serde(with = "color_hex")]
     pub broke_clr: Color32,
     pub hover_detection_width: f32,
     pub breaker_stroke: Stroke,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct NodeStyle {
+    #[serde(with = "color_hex")]
     pub status_impure_color: Color32,
     pub status_dot_radius: f32,
 
@@ -77,48 +118,69 @@ pub struct NodeStyle {
     pub port_radius: f32,
     pub port_activation_radius: f32,
     pub port_label_side_padding: f32,
+    #[serde(with = "vec2_array")]
     pub const_badge_offset: Vec2,
 
+    #[serde(with = "color_hex")]
     pub input_port_color: Color32,
+    #[serde(with = "color_hex")]
     pub output_port_color: Color32,
+    #[serde(with = "color_hex")]
     pub input_hover_color: Color32,
+    #[serde(with = "color_hex")]
     pub output_hover_color: Color32,
 
+    #[serde(with = "color_hex")]
     pub trigger_port_color: Color32,
+    #[serde(with = "color_hex")]
     pub event_port_color: Color32,
+    #[serde(with = "color_hex")]
     pub trigger_hover_color: Color32,
+    #[serde(with = "color_hex")]
     pub event_hover_color: Color32,
 
     pub const_bind_style: DragValueStyle,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MenuStyle {
+    #[serde(with = "vec2_array")]
     pub button_padding: Vec2,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PopupStyle {
+    #[serde(with = "color_hex")]
     pub fill: Color32,
     pub stroke: Stroke,
     pub corner_radius: f32,
     pub padding: f32,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ButtonStyle {
+    #[serde(with = "color_hex")]
     pub disabled_fill: Color32,
+    #[serde(with = "color_hex")]
     pub idle_fill: Color32,
+    #[serde(with = "color_hex")]
     pub hover_fill: Color32,
+    #[serde(with = "color_hex")]
     pub active_fill: Color32,
+    #[serde(with = "color_hex")]
     pub checked_fill: Color32,
     pub inactive_stroke: Stroke,
     pub hovered_stroke: Stroke,
     pub radius: f32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub(crate) struct DragValueStyle {
+    #[serde(with = "color_hex")]
     pub(crate) fill: Color32,
     pub(crate) stroke: Stroke,
     pub(crate) radius: f32,
@@ -132,14 +194,12 @@ pub struct PortColors {
 }
 
 impl PortColors {
-    /// Select the appropriate color based on hover state.
     pub fn select(self, hovered: bool) -> Color32 {
         if hovered { self.hover } else { self.base }
     }
 }
 
 impl NodeStyle {
-    /// Get the colors for a port based on its kind.
     pub fn port_colors(&self, kind: PortKind) -> PortColors {
         match kind {
             PortKind::Input => PortColors {
@@ -163,145 +223,132 @@ impl NodeStyle {
 }
 
 impl Style {
-    pub fn new(style_settings: StyleSettings, scale: f32) -> Self {
+    /// Load a `Style` reference from a TOML file. The loaded values
+    /// are at scale=1.0. Returns a fresh reference (no back-link).
+    pub fn from_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let payload = std::fs::read_to_string(path)?;
+        let style: Style = toml::from_str(&payload)?;
+        Ok(style)
+    }
+
+    pub fn to_file(&self, path: impl AsRef<Path>) -> anyhow::Result<()> {
+        let payload = toml::to_string(self)?;
+        std::fs::write(path, payload)?;
+        Ok(())
+    }
+
+    /// Produce a runtime `Style` at the given scale, cloned from the
+    /// reference. `self` can be either a reference (no back-link) or
+    /// an already-scaled runtime instance — either way the multiply
+    /// starts from the canonical scale=1.0 values.
+    pub fn at_scale(self: &Rc<Self>, scale: f32) -> Rc<Self> {
         assert!(scale.is_finite(), "style scale must be finite");
         assert!(scale > 0.0, "style scale must be greater than 0");
 
-        let scaled = |value: f32| value * scale;
-        let status_shadow = |color: Color32| Shadow {
-            color,
-            offset: [0, 0],
-            blur: scaled(style_settings.shadow_blur).ceil() as u8,
-            spread: scaled(style_settings.shadow_spread).ceil() as u8,
-        };
+        // Always multiply from the reference. If `self` is itself the
+        // reference, use it; otherwise follow the back-link.
+        let reference: &Rc<Self> = self.reference.as_ref().unwrap_or(self);
+        let r = reference.as_ref();
 
-        let inactive_bg_stroke = Stroke::new(
-            scaled(style_settings.default_bg_stroke_width),
-            style_settings.color_stroke_inactive,
-        );
+        let scaled_margin = Margin::same((r.popup.padding * scale).ceil() as i8);
+        let _ = scaled_margin; // margin is recomputed from padding at apply time
 
-        Self {
-            scale,
-            heading_font: FontId {
-                size: scaled(18.0),
-                family: FontFamily::Proportional,
-            },
-            body_font: FontId {
-                size: scaled(15.0),
-                family: FontFamily::Proportional,
-            },
-            sub_font: FontId {
-                size: scaled(13.0),
-                family: FontFamily::Proportional,
-            },
-            mono_font: FontId {
-                size: scaled(12.0),
-                family: FontFamily::Monospace,
-            },
-            text_color: style_settings.color_text,
-            noninteractive_text_color: style_settings.color_text_noninteractive,
-            noninteractive_bg_fill: style_settings.color_bg_noninteractive,
-            hover_bg_fill: style_settings.color_bg_hover,
-            inactive_bg_fill: style_settings.color_bg_inactive,
-            inactive_bg_stroke,
-            active_bg_stroke: Stroke::new(
-                scaled(style_settings.default_bg_stroke_width),
-                style_settings.color_stroke_active,
-            ),
-            active_bg_fill: style_settings.color_bg_active,
-            dark_text_color: style_settings.color_text_checked,
-            checked_bg_fill: style_settings.color_bg_checked,
-            big_padding: scaled(style_settings.big_padding),
-            padding: scaled(style_settings.padding),
-            small_padding: scaled(style_settings.small_padding),
-            corner_radius: scaled(style_settings.corner_radius),
-            small_corner_radius: scaled(style_settings.small_corner_radius),
+        Rc::new(Style {
+            heading_font: scale_font(&r.heading_font, scale),
+            body_font: scale_font(&r.body_font, scale),
+            sub_font: scale_font(&r.sub_font, scale),
+            mono_font: scale_font(&r.mono_font, scale),
+
+            text_color: r.text_color,
+            noninteractive_text_color: r.noninteractive_text_color,
+            dark_text_color: r.dark_text_color,
+
+            noninteractive_bg_fill: r.noninteractive_bg_fill,
+            active_bg_fill: r.active_bg_fill,
+            hover_bg_fill: r.hover_bg_fill,
+            inactive_bg_fill: r.inactive_bg_fill,
+            checked_bg_fill: r.checked_bg_fill,
+
+            inactive_bg_stroke: scale_stroke(&r.inactive_bg_stroke, scale),
+            active_bg_stroke: scale_stroke(&r.active_bg_stroke, scale),
+
+            big_padding: r.big_padding * scale,
+            padding: r.padding * scale,
+            small_padding: r.small_padding * scale,
+            corner_radius: r.corner_radius * scale,
+            small_corner_radius: r.small_corner_radius * scale,
+
             graph_background: GraphBackgroundStyle {
-                dotted_color: style_settings.color_dotted,
-                dotted_base_spacing: style_settings.dotted_base_spacing,
-                dotted_radius_base: style_settings.dotted_radius_base,
-                bg_color: style_settings.color_bg_graph,
+                bg_color: r.graph_background.bg_color,
+                dotted_color: r.graph_background.dotted_color,
+                dotted_base_spacing: r.graph_background.dotted_base_spacing,
+                dotted_radius_base: r.graph_background.dotted_radius_base,
             },
             connections: ConnectionStyle {
-                feather: style_settings.connection_feather,
-                stroke_width: scaled(style_settings.connection_stroke_width),
-                highlight_feather: scaled(style_settings.connection_highlight_feather),
-                broke_clr: style_settings.color_stroke_broke,
-                hover_detection_width: style_settings.connection_hover_detection_width,
-                breaker_stroke: Stroke::new(
-                    scaled(style_settings.connection_breaker_stroke_width),
-                    style_settings.color_stroke_breaker,
-                ),
+                feather: r.connections.feather,
+                stroke_width: r.connections.stroke_width * scale,
+                highlight_feather: r.connections.highlight_feather * scale,
+                broke_clr: r.connections.broke_clr,
+                hover_detection_width: r.connections.hover_detection_width,
+                breaker_stroke: scale_stroke(&r.connections.breaker_stroke, scale),
             },
             node: NodeStyle {
-                status_dot_radius: scaled(style_settings.status_dot_radius),
-                status_impure_color: style_settings.color_dot_impure,
-                shadow: Shadow {
-                    offset: [(3.0 * scale).ceil() as i8, (4.0 * scale).ceil() as i8],
-                    blur: (10.0 * scale).ceil() as u8,
-                    spread: (5.0 * scale).ceil() as u8,
-                    color: Color32::from_black_alpha(96),
-                },
-                executed_shadow: status_shadow(style_settings.color_shadow_executed),
-                cached_shadow: status_shadow(style_settings.color_shadow_cached),
-                missing_inputs_shadow: status_shadow(style_settings.color_shadow_missing),
-                errored_shadow: status_shadow(style_settings.color_shadow_errored),
-                cache_btn_width: scaled(style_settings.cache_btn_width),
-                remove_btn_size: scaled(style_settings.remove_btn_size),
-                port_radius: scaled(style_settings.port_radius),
-                port_activation_radius: scaled(style_settings.port_activation_radius),
-                port_label_side_padding: scaled(style_settings.port_label_side_padding),
-                const_badge_offset: style_settings.const_badge_offset * scale,
-                input_port_color: style_settings.color_port_input,
-                output_port_color: style_settings.color_port_output,
-                input_hover_color: style_settings.color_port_input_hover,
-                output_hover_color: style_settings.color_port_output_hover,
-                trigger_port_color: style_settings.color_port_trigger,
-                event_port_color: style_settings.color_port_event,
-                trigger_hover_color: style_settings.color_port_trigger_hover,
-                event_hover_color: style_settings.color_port_event_hover,
+                status_impure_color: r.node.status_impure_color,
+                status_dot_radius: r.node.status_dot_radius * scale,
+                shadow: scale_shadow(&r.node.shadow, scale),
+                executed_shadow: scale_shadow(&r.node.executed_shadow, scale),
+                cached_shadow: scale_shadow(&r.node.cached_shadow, scale),
+                missing_inputs_shadow: scale_shadow(&r.node.missing_inputs_shadow, scale),
+                errored_shadow: scale_shadow(&r.node.errored_shadow, scale),
+                cache_btn_width: r.node.cache_btn_width * scale,
+                remove_btn_size: r.node.remove_btn_size * scale,
+                port_radius: r.node.port_radius * scale,
+                port_activation_radius: r.node.port_activation_radius * scale,
+                port_label_side_padding: r.node.port_label_side_padding * scale,
+                const_badge_offset: r.node.const_badge_offset * scale,
+                input_port_color: r.node.input_port_color,
+                output_port_color: r.node.output_port_color,
+                input_hover_color: r.node.input_hover_color,
+                output_hover_color: r.node.output_hover_color,
+                trigger_port_color: r.node.trigger_port_color,
+                event_port_color: r.node.event_port_color,
+                trigger_hover_color: r.node.trigger_hover_color,
+                event_hover_color: r.node.event_hover_color,
                 const_bind_style: DragValueStyle {
-                    fill: style_settings.color_bg_inactive,
-                    stroke: inactive_bg_stroke,
-                    radius: scaled(style_settings.small_corner_radius),
+                    fill: r.node.const_bind_style.fill,
+                    stroke: scale_stroke(&r.node.const_bind_style.stroke, scale),
+                    radius: r.node.const_bind_style.radius * scale,
                 },
             },
             menu: MenuStyle {
-                button_padding: Vec2::new(scaled(12.0), scaled(3.0)),
+                button_padding: r.menu.button_padding * scale,
             },
             popup: PopupStyle {
-                fill: style_settings.color_bg_noninteractive,
-                stroke: inactive_bg_stroke,
-                corner_radius: scaled(style_settings.corner_radius),
-                padding: scaled(style_settings.padding),
+                fill: r.popup.fill,
+                stroke: scale_stroke(&r.popup.stroke, scale),
+                corner_radius: r.popup.corner_radius * scale,
+                padding: r.popup.padding * scale,
             },
             list_button: ButtonStyle {
-                disabled_fill: Color32::TRANSPARENT,
-                idle_fill: Color32::TRANSPARENT,
-                hover_fill: style_settings.color_bg_hover,
-                active_fill: style_settings.color_bg_active,
-                checked_fill: Color32::TRANSPARENT,
-                inactive_stroke: Stroke::NONE,
-                hovered_stroke: Stroke::NONE,
-                radius: 0.0,
+                disabled_fill: r.list_button.disabled_fill,
+                idle_fill: r.list_button.idle_fill,
+                hover_fill: r.list_button.hover_fill,
+                active_fill: r.list_button.active_fill,
+                checked_fill: r.list_button.checked_fill,
+                inactive_stroke: scale_stroke(&r.list_button.inactive_stroke, scale),
+                hovered_stroke: scale_stroke(&r.list_button.hovered_stroke, scale),
+                radius: r.list_button.radius * scale,
             },
-            style_settings: style_settings.clone(),
-        }
-    }
 
-    pub fn set_scale(&mut self, scale: f32) {
-        if self.scale.ui_equals(scale) {
-            return;
-        }
-        let rebuilt = Self::new(self.style_settings.clone(), scale);
-        *self = rebuilt;
+            reference: Some(Rc::clone(reference)),
+        })
     }
 
     pub fn apply_to_egui(&self, egui_style: &mut egui::Style) {
         egui_style.spacing.item_spacing = Vec2::splat(self.padding);
         egui_style.spacing.button_padding = Vec2::new(self.padding, self.small_padding);
         egui_style.spacing.indent = self.padding;
-        egui_style.spacing.window_margin = egui::Margin::same(self.padding as i8);
+        egui_style.spacing.window_margin = Margin::same(self.padding as i8);
 
         let visuals = &mut egui_style.visuals;
         visuals.dark_mode = true;
@@ -347,5 +394,329 @@ impl Style {
     pub fn apply_menu_style(&self, ui: &mut egui::Ui) {
         let style = ui.style_mut();
         style.spacing.button_padding = self.menu.button_padding;
+    }
+}
+
+fn scale_font(font: &FontId, scale: f32) -> FontId {
+    FontId {
+        size: font.size * scale,
+        family: font.family.clone(),
+    }
+}
+
+fn scale_stroke(stroke: &Stroke, scale: f32) -> Stroke {
+    Stroke::new(stroke.width * scale, stroke.color)
+}
+
+fn scale_shadow(shadow: &Shadow, scale: f32) -> Shadow {
+    Shadow {
+        offset: [
+            (shadow.offset[0] as f32 * scale).ceil() as i8,
+            (shadow.offset[1] as f32 * scale).ceil() as i8,
+        ],
+        blur: (shadow.blur as f32 * scale).ceil() as u8,
+        spread: (shadow.spread as f32 * scale).ceil() as u8,
+        color: shadow.color,
+    }
+}
+
+impl Default for Style {
+    fn default() -> Self {
+        let inactive_stroke = Stroke::new(1.0, Color32::from_rgb(65, 65, 65));
+        let active_stroke = Stroke::new(1.0, Color32::from_rgb(128, 128, 128));
+        let small_corner_radius = 2.0_f32;
+        let status_shadow = |color: Color32| Shadow {
+            color,
+            offset: [0, 0],
+            blur: 6,
+            spread: 2,
+        };
+
+        Self {
+            heading_font: FontId {
+                size: 18.0,
+                family: FontFamily::Proportional,
+            },
+            body_font: FontId {
+                size: 15.0,
+                family: FontFamily::Proportional,
+            },
+            sub_font: FontId {
+                size: 13.0,
+                family: FontFamily::Proportional,
+            },
+            mono_font: FontId {
+                size: 12.0,
+                family: FontFamily::Monospace,
+            },
+
+            text_color: Color32::from_rgb(192, 192, 192),
+            noninteractive_text_color: Color32::from_rgb(140, 140, 140),
+            dark_text_color: Color32::from_rgb(60, 50, 20),
+
+            noninteractive_bg_fill: Color32::from_rgb(35, 35, 35),
+            active_bg_fill: Color32::from_rgb(60, 60, 60),
+            hover_bg_fill: Color32::from_rgb(50, 50, 50),
+            inactive_bg_fill: Color32::from_rgb(40, 40, 40),
+            checked_bg_fill: Color32::from_rgb(240, 205, 90),
+
+            inactive_bg_stroke: inactive_stroke,
+            active_bg_stroke: active_stroke,
+
+            big_padding: 5.0,
+            padding: 4.0,
+            small_padding: 2.0,
+            corner_radius: 4.0,
+            small_corner_radius,
+
+            graph_background: GraphBackgroundStyle {
+                bg_color: Color32::from_rgb(16, 16, 16),
+                dotted_color: Color32::from_rgb(48, 48, 48),
+                dotted_base_spacing: 24.0,
+                dotted_radius_base: 1.2,
+            },
+            connections: ConnectionStyle {
+                feather: 0.8,
+                stroke_width: 1.5,
+                highlight_feather: 3.6,
+                broke_clr: Color32::from_rgb(255, 90, 90),
+                hover_detection_width: 6.0,
+                breaker_stroke: Stroke::new(2.0, Color32::from_rgb(255, 120, 120)),
+            },
+            node: NodeStyle {
+                status_impure_color: Color32::from_rgb(255, 150, 70),
+                status_dot_radius: 4.0,
+                shadow: Shadow {
+                    offset: [3, 4],
+                    blur: 10,
+                    spread: 5,
+                    color: Color32::from_black_alpha(96),
+                },
+                executed_shadow: status_shadow(Color32::from_rgb(66, 216, 130)),
+                cached_shadow: status_shadow(Color32::from_rgb(100, 160, 255)),
+                missing_inputs_shadow: status_shadow(Color32::from_rgb(255, 180, 70)),
+                errored_shadow: status_shadow(Color32::from_rgb(238, 66, 66)),
+                cache_btn_width: 50.0,
+                remove_btn_size: 10.0,
+                port_radius: 5.0,
+                port_activation_radius: 7.0,
+                port_label_side_padding: 8.0,
+                const_badge_offset: Vec2::new(-10.0, 0.0),
+                input_port_color: Color32::from_rgb(70, 150, 255),
+                output_port_color: Color32::from_rgb(70, 200, 200),
+                input_hover_color: Color32::from_rgb(120, 190, 255),
+                output_hover_color: Color32::from_rgb(110, 230, 210),
+                trigger_port_color: Color32::from_rgb(235, 200, 70),
+                event_port_color: Color32::from_rgb(235, 140, 70),
+                trigger_hover_color: Color32::from_rgb(255, 225, 120),
+                event_hover_color: Color32::from_rgb(255, 175, 120),
+                const_bind_style: DragValueStyle {
+                    fill: Color32::from_rgb(40, 40, 40),
+                    stroke: inactive_stroke,
+                    radius: small_corner_radius,
+                },
+            },
+            menu: MenuStyle {
+                button_padding: Vec2::new(12.0, 3.0),
+            },
+            popup: PopupStyle {
+                fill: Color32::from_rgb(35, 35, 35),
+                stroke: inactive_stroke,
+                corner_radius: 4.0,
+                padding: 4.0,
+            },
+            list_button: ButtonStyle {
+                disabled_fill: Color32::TRANSPARENT,
+                idle_fill: Color32::TRANSPARENT,
+                hover_fill: Color32::from_rgb(50, 50, 50),
+                active_fill: Color32::from_rgb(60, 60, 60),
+                checked_fill: Color32::TRANSPARENT,
+                inactive_stroke: Stroke::NONE,
+                hovered_stroke: Stroke::NONE,
+                radius: 0.0,
+            },
+
+            reference: None,
+        }
+    }
+}
+
+impl Default for GraphBackgroundStyle {
+    fn default() -> Self {
+        Style::default().graph_background
+    }
+}
+
+impl Default for ConnectionStyle {
+    fn default() -> Self {
+        Style::default().connections
+    }
+}
+
+impl Default for NodeStyle {
+    fn default() -> Self {
+        Style::default().node
+    }
+}
+
+impl Default for MenuStyle {
+    fn default() -> Self {
+        Style::default().menu
+    }
+}
+
+impl Default for PopupStyle {
+    fn default() -> Self {
+        Style::default().popup
+    }
+}
+
+impl Default for ButtonStyle {
+    fn default() -> Self {
+        Style::default().list_button
+    }
+}
+
+impl Default for DragValueStyle {
+    fn default() -> Self {
+        Style::default().node.const_bind_style
+    }
+}
+
+mod color_hex {
+    use egui::Color32;
+    use serde::de::{self, Visitor};
+    use serde::{Deserializer, Serializer};
+    use std::fmt;
+
+    pub fn serialize<S>(color: &Color32, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let hex = format!(
+            "#{:02X}{:02X}{:02X}{:02X}",
+            color.r(),
+            color.g(),
+            color.b(),
+            color.a()
+        );
+        serializer.serialize_str(&hex)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Color32, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(ColorVisitor)
+    }
+
+    struct ColorVisitor;
+
+    impl<'de> Visitor<'de> for ColorVisitor {
+        type Value = Color32;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a color hex string like #RRGGBBAA")
+        }
+
+        fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+            parse_hex_color(value).map_err(de::Error::custom)
+        }
+
+        fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
+            self.visit_str(&value)
+        }
+    }
+
+    fn parse_hex_color(value: &str) -> Result<Color32, String> {
+        let value = value.trim();
+        let hex = value.strip_prefix('#').unwrap_or(value);
+        match hex.len() {
+            6 => {
+                let r = parse_pair(&hex[0..2])?;
+                let g = parse_pair(&hex[2..4])?;
+                let b = parse_pair(&hex[4..6])?;
+                Ok(Color32::from_rgba_unmultiplied(r, g, b, 255))
+            }
+            8 => {
+                let r = parse_pair(&hex[0..2])?;
+                let g = parse_pair(&hex[2..4])?;
+                let b = parse_pair(&hex[4..6])?;
+                let a = parse_pair(&hex[6..8])?;
+                Ok(Color32::from_rgba_unmultiplied(r, g, b, a))
+            }
+            _ => Err(format!(
+                "expected 6 or 8 hex digits for color, got {}",
+                hex.len()
+            )),
+        }
+    }
+
+    fn parse_pair(value: &str) -> Result<u8, String> {
+        u8::from_str_radix(value, 16).map_err(|err| err.to_string())
+    }
+}
+
+mod vec2_array {
+    use egui::Vec2;
+    use serde::de::{self, SeqAccess, Visitor};
+    use serde::{Deserializer, Serialize, Serializer};
+    use std::fmt;
+
+    pub fn serialize<S>(value: &Vec2, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        [value.x, value.y].serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec2, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(Vec2Visitor)
+    }
+
+    struct Vec2Visitor;
+
+    impl<'de> Visitor<'de> for Vec2Visitor {
+        type Value = Vec2;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a 2-element float array [x, y]")
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let x: f32 = seq
+                .next_element()?
+                .ok_or_else(|| de::Error::custom("missing x value"))?;
+            let y: f32 = seq
+                .next_element()?
+                .ok_or_else(|| de::Error::custom("missing y value"))?;
+            Ok(Vec2::new(x, y))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Style;
+
+    #[test]
+    fn style_toml_roundtrip() {
+        let style = Style::default();
+        let serialized = toml::to_string(&style).expect("should serialize");
+        assert!(!serialized.trim().is_empty());
+        let deserialized: Style = toml::from_str(&serialized).expect("should deserialize");
+        assert_eq!(style.padding, deserialized.padding);
+        assert_eq!(style.text_color, deserialized.text_color);
+        assert_eq!(style.node.port_radius, deserialized.node.port_radius);
+        assert_eq!(
+            style.node.const_badge_offset,
+            deserialized.node.const_badge_offset
+        );
     }
 }
