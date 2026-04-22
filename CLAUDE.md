@@ -1,5 +1,9 @@
 AI coding rules for Rust projects:
 
+## Workflow
+
+- Do not commit or push until the user explicitly asks ("commit", "commit push", etc.). Finish the change, run tests/clippy/fmt, then stop and wait for review. The user wants to inspect the diff before anything lands.
+
 ## Error Handling
 
 - Use `Result<>` only for expected failures (network, I/O, external services, user input).

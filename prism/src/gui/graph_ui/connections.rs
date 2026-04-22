@@ -3,8 +3,7 @@
 //! breaker tool's deletion pass.
 //!
 //! Every function here emits `GraphUiAction`s into the gesture
-//! buffer; `ViewGraph` is never mutated directly. See Step 4.0 /
-//! 4.1 in `REFACTOR_PLAN.md` for the contract.
+//! buffer; `ViewGraph` is never mutated directly.
 
 use egui::{Pos2, Response, Sense};
 use scenarium::graph::NodeId;
@@ -259,7 +258,8 @@ pub(super) fn handle_idle(
 }
 
 /// Builds the `InputChanged` action that would bind `input_port` to
-/// `output_port`. No mutation — `apply` handles it.
+/// `output_port`. No mutation — `apply` handles it. Always produces
+/// an action; re-binding to the same source is a harmless overwrite.
 pub(super) fn build_data_connection_action(
     view_graph: &crate::model::ViewGraph,
     input_port: PortRef,
@@ -297,6 +297,9 @@ pub(super) fn build_data_connection_action(
 
 /// Builds the `EventConnectionChanged` action that would subscribe
 /// `input_port`'s node to `output_port`'s event. No mutation.
+/// Returns `Ok(None)` when the subscriber is already present —
+/// event subscriptions are list membership, unlike data bindings
+/// which are overwrites.
 pub(super) fn build_event_connection_action(
     view_graph: &crate::model::ViewGraph,
     input_port: PortRef,
