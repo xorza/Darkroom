@@ -20,6 +20,17 @@ pub trait DragValueNumeric: Copy + PartialEq + Display + FromStr + Send + Sync +
     }
 }
 
+/// Widget-internal state machine. Lives in `egui::Memory::data` under
+/// one temp key per `DragValue`, replacing four loose keys. Variants
+/// are mutually exclusive — dragging and editing can't happen at the
+/// same time, which is enforced by the enum rather than by convention.
+#[derive(Clone, Debug)]
+enum DragValueState<T> {
+    Idle,
+    Dragging { start: T, current: T },
+    Editing { text: String, original: T },
+}
+
 impl DragValueNumeric for i64 {
     fn from_drag(start: Self, delta: f32, speed: f32) -> Self {
         start + (delta * speed).round() as i64
@@ -122,17 +133,23 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
         assert!(background.radius.is_finite());
 
         let id = self.id.id();
+        let state_id = id.with("state");
+        let edit_id = id.with("edit");
+        let state = gui
+            .load_temp::<DragValueState<T>>(state_id)
+            .unwrap_or(DragValueState::Idle);
 
-        // Check if we're currently dragging to display temporary value
-        let drag_temp_id = id.with("drag_temp");
-        let display_value = gui.load_temp::<T>(drag_temp_id).unwrap_or(*self.value);
+        let display_value = match &state {
+            DragValueState::Dragging { current, .. } => *current,
+            _ => *self.value,
+        };
 
         let value_text = display_value.display();
         let galley = gui
             .ui_raw()
             .painter()
             .layout_no_wrap(value_text.clone(), font.clone(), color);
-        let mut size = galley.size() + padding * 2.0; //+ vec2(0.0, 4.0 * gui.scale());
+        let mut size = galley.size() + padding * 2.0;
         size.x = size.x.max(30.0 * gui.scale());
         assert!(size.x.is_finite() && size.y.is_finite());
 
@@ -145,11 +162,6 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
                 .interact(rect, id.with("drag_interact"), Sense::hover());
         }
 
-        let edit_id = id.with("edit");
-        let edit_text_id = id.with("edit_text");
-        let edit_original_id = id.with("edit_original");
-        let mut edit_active = gui.load_temp::<bool>(edit_id).unwrap_or(false);
-
         gui.painter().rect(
             rect,
             background.radius,
@@ -158,67 +170,18 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
             StrokeKind::Outside,
         );
 
-        if edit_active {
-            let mut edit_text = gui
-                .load_temp::<String>(edit_text_id)
-                .unwrap_or_else(|| self.value.to_string());
-            let original_value = gui.load_temp::<T>(edit_original_id).unwrap_or(*self.value);
-
-            let text_edit = TextEdit::singleline(&mut edit_text)
-                .id(edit_id)
-                .font(font.clone())
-                .desired_width(inner_rect.width())
-                .horizontal_align(self.anchor.x())
-                .vertical_align(self.anchor.y())
-                .clip_text(true)
-                .margin(0.0)
-                .frame(false);
-
-            let mut text_edit_response = gui
-                .scope(StableId::from_id(id.with("drag_value_text")))
-                .max_rect(inner_rect)
-                .show(|gui| text_edit.show(gui).response);
-
-            let should_confirm = text_edit_response.lost_focus()
-                && gui
-                    .ui_raw()
-                    .input(|input| input.key_pressed(Key::Enter) || input.pointer.any_click());
-            let should_cancel = text_edit_response.has_focus()
-                && gui.ui_raw().input(|input| input.key_pressed(Key::Escape));
-
-            let mut value_actually_changed = false;
-            if should_confirm {
-                if let Ok(parsed) = edit_text.trim().parse::<T>()
-                    && parsed != original_value
-                {
-                    *self.value = parsed;
-                    value_actually_changed = true;
-                }
-                edit_active = false;
-            } else if should_cancel {
-                edit_active = false;
-            }
-
-            if edit_active {
-                gui.store_temp(edit_id, true);
-                gui.store_temp(edit_text_id, edit_text);
-                gui.store_temp(edit_original_id, original_value);
-            } else {
-                gui.remove_temp::<bool>(edit_id);
-                gui.remove_temp::<String>(edit_text_id);
-                gui.remove_temp::<T>(edit_original_id);
-            }
-
-            // We need to return the text_edit_response to preserve editing functionality,
-            // but TextEdit marks it as changed() when text is typed. Unfortunately we can't
-            // easily clear the changed flag. The best we can do is only explicitly mark
-            // as changed when value is committed, but changed() might still be true while typing.
-            // A better solution would be to track edit state externally in the caller.
-            if value_actually_changed {
-                text_edit_response.mark_changed();
-            }
-
-            return text_edit_response;
+        if let DragValueState::Editing { text, original } = state {
+            return show_editing(
+                gui,
+                id,
+                edit_id,
+                inner_rect,
+                font,
+                self.anchor,
+                self.value,
+                text,
+                original,
+            );
         }
 
         let mut response = gui.ui_raw().interact(
@@ -227,46 +190,130 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
             Sense::click_and_drag() | Sense::hover(),
         );
 
+        // Drive the state machine. Each response check computes the
+        // next state; we write it at the bottom of the function.
+        let mut next_state = state;
+
         if response.clicked() {
-            gui.store_temp(edit_id, true);
-            gui.store_temp(edit_text_id, self.value.to_string());
-            gui.store_temp(edit_original_id, *self.value);
+            next_state = DragValueState::Editing {
+                text: self.value.to_string(),
+                original: *self.value,
+            };
             gui.ui_raw()
                 .memory_mut(|memory| memory.request_focus(edit_id));
         }
 
         if response.drag_started() {
-            gui.store_temp(id, *self.value);
-            gui.store_temp(drag_temp_id, *self.value);
+            next_state = DragValueState::Dragging {
+                start: *self.value,
+                current: *self.value,
+            };
         }
 
-        if response.dragged() {
-            let start_value = gui.load_temp::<T>(id).unwrap_or(*self.value);
+        if response.dragged()
+            && let DragValueState::Dragging { start, .. } = &next_state
+        {
             let delta = response
                 .total_drag_delta()
                 .expect("dragged response should have total delta")
                 .x;
-            let new_value = T::from_drag(start_value, delta, self.speed);
-            let current_temp = gui.load_temp::<T>(drag_temp_id).unwrap_or(*self.value);
-            if new_value != current_temp {
-                gui.store_temp(drag_temp_id, new_value);
-            }
+            next_state = DragValueState::Dragging {
+                start: *start,
+                current: T::from_drag(*start, delta, self.speed),
+            };
         }
 
         if response.drag_stopped() {
-            let final_value = gui.load_temp::<T>(drag_temp_id).unwrap_or(*self.value);
-            if final_value != *self.value {
-                *self.value = final_value;
+            if let DragValueState::Dragging { current, .. } = &next_state
+                && *current != *self.value
+            {
+                *self.value = *current;
                 response.mark_changed();
             }
-            gui.remove_temp::<T>(id);
-            gui.remove_temp::<T>(drag_temp_id);
+            next_state = DragValueState::Idle;
         }
+
+        write_state(gui, state_id, next_state);
 
         let text_anchor = self.anchor.pos_in_rect(&inner_rect);
         let text_rect = self.anchor.anchor_size(text_anchor, galley.size());
         gui.painter().galley(text_rect.min, galley, color);
 
         response
+    }
+}
+
+#[expect(clippy::too_many_arguments)]
+fn show_editing<T: DragValueNumeric>(
+    gui: &mut Gui<'_>,
+    id: egui::Id,
+    edit_id: egui::Id,
+    inner_rect: egui::Rect,
+    font: FontId,
+    anchor: Align2,
+    value: &mut T,
+    mut text: String,
+    original: T,
+) -> Response {
+    let state_id = id.with("state");
+    let text_edit = TextEdit::singleline(&mut text)
+        .id(edit_id)
+        .font(font)
+        .desired_width(inner_rect.width())
+        .horizontal_align(anchor.x())
+        .vertical_align(anchor.y())
+        .clip_text(true)
+        .margin(0.0)
+        .frame(false);
+
+    let mut text_edit_response = gui
+        .scope(StableId::from_id(id.with("drag_value_text")))
+        .max_rect(inner_rect)
+        .show(|gui| text_edit.show(gui).response);
+
+    let should_confirm = text_edit_response.lost_focus()
+        && gui
+            .ui_raw()
+            .input(|input| input.key_pressed(Key::Enter) || input.pointer.any_click());
+    let should_cancel = text_edit_response.has_focus()
+        && gui.ui_raw().input(|input| input.key_pressed(Key::Escape));
+
+    let mut value_actually_changed = false;
+    let next_state = if should_confirm {
+        if let Ok(parsed) = text.trim().parse::<T>()
+            && parsed != original
+        {
+            *value = parsed;
+            value_actually_changed = true;
+        }
+        DragValueState::<T>::Idle
+    } else if should_cancel {
+        DragValueState::<T>::Idle
+    } else {
+        DragValueState::Editing { text, original }
+    };
+
+    write_state(gui, state_id, next_state);
+
+    // TextEdit marks the response changed() on every keystroke; we
+    // only want changed() set when the value actually commits.
+    // Clearing egui's bit isn't exposed, so the best we can do is
+    // set our own flag on commit — callers that care should check
+    // response transitions, not just .changed().
+    if value_actually_changed {
+        text_edit_response.mark_changed();
+    }
+
+    text_edit_response
+}
+
+fn write_state<T: DragValueNumeric>(
+    gui: &mut Gui<'_>,
+    state_id: egui::Id,
+    state: DragValueState<T>,
+) {
+    match state {
+        DragValueState::Idle => gui.remove_temp::<DragValueState<T>>(state_id),
+        other => gui.store_temp(state_id, other),
     }
 }
