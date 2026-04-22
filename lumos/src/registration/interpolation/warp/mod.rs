@@ -289,7 +289,8 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
         // SIZE=4: reads 4 floats/row (one __m128), needs kx0 + 3 < iw
         // SIZE=6: reads 8 floats/row (two __m128, 2 zero-padded), needs kx0 + 7 < iw
         // SIZE=8: reads 8 floats/row (two __m128), needs kx0 + 7 < iw
-        let _simd_cols: i32 = if SIZE > 4 { 8 } else { SIZE as i32 };
+        #[cfg(target_arch = "x86_64")]
+        let simd_cols: i32 = if SIZE > 4 { 8 } else { SIZE as i32 };
         #[cfg(target_arch = "x86_64")]
         if use_fma && kx0 >= 0 && ky0 >= 0 && kx0 + simd_cols - 1 < iw && ky0 + SIZE as i32 - 1 < ih
         {
