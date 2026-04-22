@@ -14,12 +14,10 @@ use anyhow::Result;
 use eframe::{NativeOptions, egui};
 use egui::ViewportCommand;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::app_data::AppData;
 use crate::gui::Gui;
-use crate::gui::style::Style;
 use crate::main_ui::MainUi;
 
 #[tokio::main]
@@ -101,8 +99,7 @@ impl ScenariumEditor {
 
 impl eframe::App for ScenariumEditor {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let style = Rc::new(Style::new(self.main_ui.style_settings.clone(), 1.0));
-        let mut gui = Gui::new_root(ui, &style);
+        let mut gui = Gui::new_root(ui, self.main_ui.style_settings.clone());
         self.main_ui.render(&mut self.app_data, &mut gui);
     }
 

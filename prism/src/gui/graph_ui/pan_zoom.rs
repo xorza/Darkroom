@@ -134,7 +134,8 @@ pub(super) fn view_selected_node_target(
     );
 
     let target_scale = 1.0;
-    let target_pan = gui.rect.center() - gui.rect.min - center.to_vec2();
+    let available = gui.rect;
+    let target_pan = available.center() - available.min - center.to_vec2();
     Some((target_scale, target_pan))
 }
 
@@ -173,12 +174,13 @@ pub(super) fn fit_all_nodes_target(
 
     let bounds_size = bounds.size();
     let padding = 24.0;
-    let available = gui.rect.size() - egui::vec2(padding * 2.0, padding * 2.0);
+    let gui_rect = gui.rect;
+    let available = gui_rect.size() - egui::vec2(padding * 2.0, padding * 2.0);
     let zoom_x = (bounds_size.x > 0.0).then_else(available.x / bounds_size.x, 1.0);
     let zoom_y = (bounds_size.y > 0.0).then_else(available.y / bounds_size.y, 1.0);
 
     let target_scale = zoom_x.min(zoom_y).clamp(MIN_ZOOM, MAX_ZOOM);
     let bounds_center = bounds.center().to_vec2();
-    let target_pan = gui.rect.center() - gui.rect.min - bounds_center * target_scale;
+    let target_pan = gui_rect.center() - gui_rect.min - bounds_center * target_scale;
     (target_scale, target_pan)
 }

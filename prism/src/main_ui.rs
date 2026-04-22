@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::frame_output::RunCommand;
@@ -34,20 +32,18 @@ pub struct MainUi {
     pub graph_ui: GraphUi,
     pub log_ui: LogUi,
     pub ui_context: UiContext,
-    pub style_settings: Rc<StyleSettings>,
+    pub style_settings: StyleSettings,
 
     pub arena: bumpalo::Bump,
 }
 
 impl MainUi {
     pub fn new(ctx: &egui::Context) -> Self {
-        let style_settings = StyleSettings::from_file("style.toml").unwrap_or_default();
-
         Self {
             graph_ui: GraphUi::default(),
             log_ui: LogUi,
             ui_context: UiContext::new(ctx),
-            style_settings: Rc::new(style_settings),
+            style_settings: StyleSettings::from_file("style.toml").unwrap_or_default(),
             arena: bumpalo::Bump::new(),
         }
     }

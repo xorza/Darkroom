@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use eframe::egui;
 use egui::{Color32, FontFamily, FontId, Shadow, Stroke, Vec2};
 
@@ -9,7 +7,7 @@ use crate::gui::style_settings::StyleSettings;
 
 #[derive(Debug, Clone)]
 pub struct Style {
-    style_settings: Rc<StyleSettings>,
+    style_settings: StyleSettings,
     pub(crate) scale: f32,
 
     pub heading_font: FontId,
@@ -165,7 +163,7 @@ impl NodeStyle {
 }
 
 impl Style {
-    pub fn new(style_settings: Rc<StyleSettings>, scale: f32) -> Self {
+    pub fn new(style_settings: StyleSettings, scale: f32) -> Self {
         assert!(scale.is_finite(), "style scale must be finite");
         assert!(scale > 0.0, "style scale must be greater than 0");
 
@@ -287,7 +285,7 @@ impl Style {
                 hovered_stroke: Stroke::NONE,
                 radius: 0.0,
             },
-            style_settings,
+            style_settings: style_settings.clone(),
         }
     }
 
@@ -295,7 +293,8 @@ impl Style {
         if self.scale.ui_equals(scale) {
             return;
         }
-        *self = Self::new(Rc::clone(&self.style_settings), scale);
+        let rebuilt = Self::new(self.style_settings.clone(), scale);
+        *self = rebuilt;
     }
 
     pub fn apply_to_egui(&self, egui_style: &mut egui::Style) {

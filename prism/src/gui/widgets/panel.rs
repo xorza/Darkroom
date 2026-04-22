@@ -59,9 +59,8 @@ impl Panel {
 
     pub fn show<R>(self, gui: &mut Gui<'_>, body: impl FnOnce(&mut Gui<'_>) -> R) -> R {
         let style = gui.style.clone();
-        let scale = gui.scale();
         let run = |ui: &mut egui::Ui| {
-            let mut child = Gui::child(ui, style, scale);
+            let mut child = Gui::child(ui, style);
             body(&mut child)
         };
 

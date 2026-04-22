@@ -3,8 +3,8 @@ use std::rc::Rc;
 use egui::{Align, FontId, InnerResponse, Layout, Painter, Rect, Sense, Ui, UiBuilder};
 
 use crate::{
-    common::{StableId, UiEquals},
-    gui::style::Style,
+    common::StableId,
+    gui::{style::Style, style_settings::StyleSettings},
 };
 
 pub mod connection_bezier;
@@ -31,34 +31,37 @@ pub mod widgets;
 pub struct Gui<'a> {
     ui: &'a mut Ui,
     pub style: Rc<Style>,
+    /// Rect the wrapper was given at construction. Stable within
+    /// this `Gui`'s lifetime — callers expect "the rect of this
+    /// Gui", not "what's left in the parent Ui after other widgets
+    /// rendered." For live queries of the wrapped Ui's remaining
+    /// space, use [`Gui::ui_raw`] directly inside widgets.
     pub rect: Rect,
-    scale: f32,
 }
 
 impl<'a> Gui<'a> {
-    /// Root `Gui` constructor — use at the eframe boundary. Applies
-    /// `style` to egui's global style for the frame (one call per
-    /// frame, not per child `Gui`), then builds the `Gui` wrapper at
-    /// scale 1.0.
-    pub fn new_root(ui: &'a mut Ui, style: &Rc<Style>) -> Self {
+    /// Root `Gui` constructor — use at the eframe boundary. Builds a
+    /// `Style` from `settings` at scale 1.0, applies it to egui's
+    /// global style for the frame (one call per frame, not per child
+    /// `Gui`), then wraps the `Ui`. The `Style` is constructed here
+    /// rather than passed in: scale at the root is always 1.0, so
+    /// there's no legitimate reason for the caller to hand-build it.
+    pub fn new_root(ui: &'a mut Ui, settings: StyleSettings) -> Self {
+        let style = Rc::new(Style::new(settings, 1.0));
         ui.ctx().global_style_mut(|egui_style| {
             style.apply_to_egui(egui_style);
         });
-        Self::child(ui, Rc::clone(style), 1.0)
+        Self::child(ui, style)
     }
 
-    /// Build a child `Gui` that inherits `style` and `scale` from its
-    /// parent. Only container widgets (inside `gui/`) should call this
-    /// — app code gets child `Gui`s through widget closures
-    /// (`horizontal`, `Frame::show`, `Panel::show`, …).
-    pub(crate) fn child(ui: &'a mut Ui, style: Rc<Style>, scale: f32) -> Self {
+    /// Build a child `Gui` that inherits `style` from its parent.
+    /// Scale lives inside `style`, so no separate scale arg. Only
+    /// container widgets (inside `gui/`) should call this — app code
+    /// gets child `Gui`s through widget closures (`horizontal`,
+    /// `Frame::show`, `Panel::show`, …).
+    pub(crate) fn child(ui: &'a mut Ui, style: Rc<Style>) -> Self {
         let rect = ui.available_rect_before_wrap();
-        Self {
-            ui,
-            style,
-            rect,
-            scale,
-        }
+        Self { ui, style, rect }
     }
 
     /// Raw access to the underlying `egui::Ui`. Restricted to
@@ -130,26 +133,17 @@ impl<'a> Gui<'a> {
     }
 
     pub fn scale(&self) -> f32 {
-        self.scale
+        self.style.scale
     }
 
     /// Internal — the only legitimate scale transition is `with_scale`,
-    /// which saves/restores automatically. Child `Gui`s pick up the
-    /// current scale via `Gui::child`.
+    /// which saves/restores automatically. `Rc::make_mut` mutates in
+    /// place when refcount == 1 (the normal case: no child `Gui`s
+    /// alive yet); otherwise allocates a scaled clone — also correct,
+    /// just not free.
     fn set_scale(&mut self, scale: f32) {
         assert!(scale.is_finite(), "gui scale must be finite");
         assert!(scale > 0.0, "gui scale must be greater than 0");
-
-        self.scale = scale;
-
-        if self.style.scale.ui_equals(scale) {
-            return;
-        }
-
-        // `Rc::make_mut` mutates in place when refcount == 1 (the normal
-        // case inside `with_scale`: no child `Gui`s exist yet). If a
-        // child is still alive, this allocates a scaled clone — also
-        // correct, just not free.
         Rc::make_mut(&mut self.style).set_scale(scale);
     }
 
@@ -162,9 +156,8 @@ impl<'a> Gui<'a> {
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<R> {
         let style = Rc::clone(&self.style);
-        let scale = self.scale;
         self.ui.horizontal(|ui| {
-            let mut gui = Gui::child(ui, style, scale);
+            let mut gui = Gui::child(ui, style);
             add_contents(&mut gui)
         })
     }
@@ -176,11 +169,10 @@ impl<'a> Gui<'a> {
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<R> {
         let style = Rc::clone(&self.style);
-        let scale = self.scale;
         self.ui.with_layout(
             Layout::left_to_right(Align::Min).with_cross_justify(true),
             |ui| {
-                let mut gui = Gui::child(ui, style, scale);
+                let mut gui = Gui::child(ui, style);
                 add_contents(&mut gui)
             },
         )
@@ -191,9 +183,8 @@ impl<'a> Gui<'a> {
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<R> {
         let style = Rc::clone(&self.style);
-        let scale = self.scale;
         self.ui.vertical(|ui| {
-            let mut gui = Gui::child(ui, style, scale);
+            let mut gui = Gui::child(ui, style);
             add_contents(&mut gui)
         })
     }
@@ -214,12 +205,14 @@ impl<'a> Gui<'a> {
         }
     }
 
-    /// Runs a closure with a temporarily changed scale, restoring the original scale afterward.
+    /// Runs a closure with a temporarily changed scale. Saves the
+    /// current `Rc<Style>` and restores it by assignment after the
+    /// closure returns — no second rebuild on the restore path.
     pub fn with_scale<R>(&mut self, scale: f32, f: impl FnOnce(&mut Gui<'_>) -> R) -> R {
-        let prev_scale = self.scale;
+        let prev = Rc::clone(&self.style);
         self.set_scale(scale);
         let result = f(self);
-        self.set_scale(prev_scale);
+        self.style = prev;
         result
     }
 }
@@ -255,7 +248,6 @@ impl<'b, 'a> ScopedGui<'b, 'a> {
 
     pub fn show<R>(self, add_contents: impl FnOnce(&mut Gui<'_>) -> R) -> R {
         let style = Rc::clone(&self.gui.style);
-        let scale = self.gui.scale;
         let clip_rect = self.clip_rect;
         // Delegate to `scope_builder`, NOT `Ui::new_child` directly: only
         // `scope_builder` calls `remember_min_rect` + `advance_cursor_after_rect`
@@ -268,7 +260,7 @@ impl<'b, 'a> ScopedGui<'b, 'a> {
                 if let Some(clip) = clip_rect {
                     ui.set_clip_rect(clip);
                 }
-                let mut gui = Gui::child(ui, style, scale);
+                let mut gui = Gui::child(ui, style);
                 add_contents(&mut gui)
             })
             .inner
