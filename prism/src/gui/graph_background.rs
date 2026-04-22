@@ -2,16 +2,20 @@ use std::sync::Arc;
 
 use eframe::egui;
 use egui::epaint::{ColorImage, Mesh, Vertex};
-use egui::{Color32, Pos2, Shape, TextureFilter, TextureHandle, TextureOptions, Vec2};
+use egui::{Color32, Pos2, Shape, TextureFilter, TextureHandle, TextureOptions};
 
-use crate::common::UiEquals;
 use crate::gui::Gui;
 use crate::gui::graph_ctx::GraphContext;
+
+/// Target on-screen spacing range (in tile-widths) the dot pattern is
+/// wrapped to as the user zooms. `wrap_scale_multiplier` picks a
+/// power-of-2 multiplier that lands in this range.
+const MIN_WRAP_SPACING: f32 = 0.5;
+const MAX_WRAP_SPACING: f32 = 3.0;
 
 #[derive(Default)]
 pub struct GraphBackgroundRenderer {
     texture: Option<TextureHandle>,
-    quad_mesh: Option<Arc<Mesh>>,
 }
 
 impl std::fmt::Debug for GraphBackgroundRenderer {
@@ -29,14 +33,6 @@ impl GraphBackgroundRenderer {
         if self.texture.is_none() {
             self.rebuild_texture(gui);
         }
-        if self.quad_mesh.is_none() {
-            let mut mesh = Mesh::default();
-            mesh.vertices.resize(4, Vertex::default());
-            mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
-            let arc = Arc::new(mesh);
-            self.quad_mesh = Some(arc);
-        }
-
         self.draw_tiled(gui, ctx);
     }
 
@@ -90,13 +86,12 @@ impl GraphBackgroundRenderer {
         self.texture = Some(handle);
     }
 
-    fn draw_tiled(&mut self, gui: &mut Gui<'_>, ctx: &GraphContext<'_>) {
+    fn draw_tiled(&self, gui: &mut Gui<'_>, ctx: &GraphContext<'_>) {
         let texture = self.texture.as_ref().unwrap();
 
-        let min = 0.5;
-        let max = 3.0;
         let view_scale = ctx.view_graph.scale;
-        let scale_multiplier = Self::wrap_scale_multiplier(view_scale, min, max);
+        let scale_multiplier =
+            Self::wrap_scale_multiplier(view_scale, MIN_WRAP_SPACING, MAX_WRAP_SPACING);
 
         let base_spacing = gui.style.graph_background.dotted_base_spacing;
         assert!(base_spacing > common::EPSILON);
@@ -106,33 +101,25 @@ impl GraphBackgroundRenderer {
 
         let uv = |p: Pos2| {
             let graph_pos = (p - origin) / view_scale;
-            let offset = graph_pos / world_spacing;
-            Pos2::new(offset.x, offset.y)
+            Pos2::new(graph_pos.x / world_spacing, graph_pos.y / world_spacing)
         };
 
-        {
-            let mesh = Arc::make_mut(self.quad_mesh.as_mut().unwrap());
-            mesh.texture_id = texture.id();
+        let rect = gui.rect;
+        let vertex = |pos: Pos2| Vertex {
+            pos,
+            uv: uv(pos),
+            color: Color32::WHITE,
+        };
+        let mut mesh = Mesh::with_texture(texture.id());
+        mesh.vertices = vec![
+            vertex(rect.left_top()),
+            vertex(rect.right_top()),
+            vertex(rect.right_bottom()),
+            vertex(rect.left_bottom()),
+        ];
+        mesh.indices = vec![0, 1, 2, 0, 2, 3];
 
-            mesh.vertices[0].pos = gui.rect.left_top();
-            mesh.vertices[0].uv = uv(gui.rect.left_top());
-            mesh.vertices[0].color = Color32::WHITE;
-
-            mesh.vertices[1].pos = gui.rect.right_top();
-            mesh.vertices[1].uv = uv(gui.rect.right_top());
-            mesh.vertices[1].color = Color32::WHITE;
-
-            mesh.vertices[2].pos = gui.rect.right_bottom();
-            mesh.vertices[2].uv = uv(gui.rect.right_bottom());
-            mesh.vertices[2].color = Color32::WHITE;
-
-            mesh.vertices[3].pos = gui.rect.left_bottom();
-            mesh.vertices[3].uv = uv(gui.rect.left_bottom());
-            mesh.vertices[3].color = Color32::WHITE;
-        }
-
-        gui.painter()
-            .add(Shape::mesh(Arc::clone(self.quad_mesh.as_ref().unwrap())));
+        gui.painter().add(Shape::mesh(Arc::new(mesh)));
     }
 }
 
@@ -142,19 +129,22 @@ mod tests {
 
     #[test]
     fn wrap_scale_multiplier_identity_at_scale_1() {
-        let m = GraphBackgroundRenderer::wrap_scale_multiplier(1.0, 0.5, 3.0);
+        let m =
+            GraphBackgroundRenderer::wrap_scale_multiplier(1.0, MIN_WRAP_SPACING, MAX_WRAP_SPACING);
         assert_eq!(m, 1.0);
     }
 
     #[test]
     fn wrap_scale_multiplier_result_in_bounds() {
-        let min = 0.5;
-        let max = 3.0;
         for &scale in &[0.2, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0] {
-            let m = GraphBackgroundRenderer::wrap_scale_multiplier(scale, min, max);
+            let m = GraphBackgroundRenderer::wrap_scale_multiplier(
+                scale,
+                MIN_WRAP_SPACING,
+                MAX_WRAP_SPACING,
+            );
             let normalized = scale * m;
             assert!(
-                normalized >= min && normalized <= max,
+                (MIN_WRAP_SPACING..=MAX_WRAP_SPACING).contains(&normalized),
                 "scale={scale} m={m} normalized={normalized}"
             );
         }
@@ -163,7 +153,11 @@ mod tests {
     #[test]
     fn wrap_scale_multiplier_is_power_of_two() {
         for &scale in &[0.2, 0.5, 1.0, 2.0, 4.0] {
-            let m = GraphBackgroundRenderer::wrap_scale_multiplier(scale, 0.5, 3.0);
+            let m = GraphBackgroundRenderer::wrap_scale_multiplier(
+                scale,
+                MIN_WRAP_SPACING,
+                MAX_WRAP_SPACING,
+            );
             assert!(
                 m.log2().fract().abs() < f32::EPSILON,
                 "m={m} not power of 2"
