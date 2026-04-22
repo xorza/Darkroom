@@ -13,6 +13,7 @@ use crate::gui::widgets::frame::Frame;
 /// Opens on click of the anchor response and closes on click outside or item selection.
 /// Styled like new_node_ui popup.
 #[derive(Debug)]
+#[must_use = "PopupMenu does nothing until .show() is called"]
 pub struct PopupMenu {
     id: Id,
     anchor_response: Response,
@@ -22,20 +23,12 @@ pub struct PopupMenu {
 }
 
 impl PopupMenu {
-    /// Create a new popup menu anchored to the given response.
-    /// The popup will open when the response is clicked.
+    /// Create a new popup menu anchored to the given response. Pure
+    /// construction — the open/closed toggle runs inside `.show()`, so
+    /// an abandoned builder leaves no stored state behind.
     pub fn new(anchor_response: &Response, id_salt: impl std::hash::Hash) -> Self {
-        let id = anchor_response.id.with(id_salt);
-
-        // Toggle popup on click using egui memory (like new_node_ui does)
-        if anchor_response.clicked() {
-            let ctx = &anchor_response.ctx;
-            let is_open = ctx.memory(|mem| mem.data.get_temp::<bool>(id).unwrap_or(false));
-            ctx.memory_mut(|mem| mem.data.insert_temp(id, !is_open));
-        }
-
         Self {
-            id,
+            id: anchor_response.id.with(id_salt),
             anchor_response: anchor_response.clone(),
             style: None,
             close_on_click: true,
@@ -61,9 +54,15 @@ impl PopupMenu {
     /// Show the popup menu if it's open.
     /// Returns Some(inner) if the popup was shown, None otherwise.
     pub fn show<R>(self, gui: &mut Gui<'_>, content: impl FnOnce(&mut Gui<'_>) -> R) -> Option<R> {
-        let ctx = gui.ui_raw().ctx().clone();
-        let is_open = ctx.memory(|mem| mem.data.get_temp::<bool>(self.id).unwrap_or(false));
+        // Toggle the stored open/closed bool on anchor click. Deferred
+        // from `new` so that abandoning the builder before `.show()` is
+        // called doesn't commit the toggle.
+        if self.anchor_response.clicked() {
+            let is_open = gui.load_temp::<bool>(self.id).unwrap_or(false);
+            gui.store_temp(self.id, !is_open);
+        }
 
+        let is_open = gui.load_temp::<bool>(self.id).unwrap_or(false);
         if !is_open {
             return None;
         }
@@ -106,7 +105,7 @@ impl PopupMenu {
             && !popup_rect.contains(pointer_pos)
             && !anchor_rect.contains(pointer_pos)
         {
-            ctx.memory_mut(|mem| mem.data.insert_temp(popup_id, false));
+            gui.store_temp(popup_id, false);
         }
 
         // Close on click inside if close_on_click is true
@@ -117,12 +116,12 @@ impl PopupMenu {
             && popup_rect.contains(pointer_pos)
             && !anchor_rect.contains(pointer_pos)
         {
-            ctx.memory_mut(|mem| mem.data.insert_temp(popup_id, false));
+            gui.store_temp(popup_id, false);
         }
 
         // Close on Escape
         if gui.ui_raw().input(|i| i.key_pressed(Key::Escape)) {
-            ctx.memory_mut(|mem| mem.data.insert_temp(popup_id, false));
+            gui.store_temp(popup_id, false);
         }
 
         Some(inner)
