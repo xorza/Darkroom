@@ -107,7 +107,7 @@ impl GraphUi {
         let items: Vec<BrokeItem> = self
             .connections
             .broke_iter()
-            .chain(self.node_ui.const_bind_ui.broke_iter())
+            .chain(self.const_bind_ui.broke_iter())
             .map(|key| BrokeItem::Connection(*key))
             .chain(broken_nodes.iter().map(|id| BrokeItem::Node(*id)))
             .collect();

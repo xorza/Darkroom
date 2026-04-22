@@ -16,6 +16,7 @@ use crate::app_data::AppData;
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::connection_ui::ConnectionUi;
+use crate::gui::const_bind_ui::ConstBindUi;
 use crate::gui::frame_output::FrameOutput;
 use crate::gui::gesture::Gesture;
 use crate::gui::graph_background::GraphBackgroundRenderer;
@@ -23,7 +24,7 @@ use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::GraphLayout;
 use crate::gui::new_node_ui::NewNodeUi;
 use crate::gui::node_details_ui::NodeDetailsUi;
-use crate::gui::node_ui::NodeUi;
+use crate::gui::node_ui;
 use crate::input::InputSnapshot;
 use crate::model;
 
@@ -73,7 +74,7 @@ pub struct GraphUi {
     gesture: Gesture,
     connections: ConnectionUi,
     graph_layout: GraphLayout,
-    node_ui: NodeUi,
+    pub(crate) const_bind_ui: ConstBindUi,
     dots_background: GraphBackgroundRenderer,
     new_node_ui: NewNodeUi,
     node_details_ui: NodeDetailsUi,
@@ -173,7 +174,7 @@ impl GraphUi {
             // demand from the current gesture offset, so this frame's
             // drag delta accumulates into the gesture before rendering
             // reads it again. No stale-rect flash, no dual pass.
-            self.node_ui.handle_node_interactions(
+            node_ui::handle_node_interactions(
                 gui,
                 ctx,
                 &self.graph_layout,
@@ -190,20 +191,14 @@ impl GraphUi {
             // responses still fire through. See `maybe_capture_overlay`.
             Self::maybe_capture_overlay(gui, &self.gesture);
 
-            let nodes_result = self.node_ui.render_nodes(
+            let nodes_result = node_ui::render_nodes(
                 gui,
                 ctx,
                 &self.graph_layout,
+                &mut self.const_bind_ui,
                 &mut self.output,
                 &self.gesture,
             );
-
-            // Surface render-time removal intents as actions. The mutation
-            // itself happens in `NodeRemoved::apply` during `handle_actions`.
-            for node_id in &nodes_result.removed_nodes {
-                let action = ctx.view_graph.removal_action(node_id);
-                self.output.add_action(action);
-            }
 
             if let Some(pointer_pos) = pointer_pos {
                 self.process_connections(

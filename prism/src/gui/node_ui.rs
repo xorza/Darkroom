@@ -95,146 +95,139 @@ fn exec_info_shadow<'a>(
 }
 
 // ============================================================================
-// NodeUi
+// Pass outputs
 // ============================================================================
 
+/// Produced by `render_nodes` and consumed by the orchestrator's
+/// connection-handling pass. `removed_nodes` flows through actions
+/// directly; only port + breaker-hit state is returned.
 #[derive(Debug, Default)]
-pub(crate) struct NodeUi {
-    pub(crate) const_bind_ui: ConstBindUi,
-}
-
-/// The intents a single `render_nodes` pass surfaces back to the orchestrator.
-///
-/// Rendering never mutates the graph structure directly — it reports which
-/// nodes were asked to be removed or were hit by the breaker stroke, and
-/// the orchestrator turns those into actions after the render pass.
-#[derive(Debug, Default)]
-pub(crate) struct NodesFrameResult {
+pub(crate) struct RenderNodesResult {
     pub port_cmd: PortInteractCommand,
-    pub removed_nodes: Vec<NodeId>,
     pub broken_nodes: Vec<NodeId>,
 }
 
-impl NodeUi {
-    /// Per-frame interaction pass for node bodies. Must run AFTER
-    /// `GraphLayout::update` so every view-node has a galley entry
-    /// and the current-frame `origin` is in place. The drag delta
-    /// accumulated here feeds back into the gesture before
-    /// `render_nodes` recomputes layouts for drawing.
-    pub fn handle_node_interactions(
-        &self,
-        gui: &mut Gui<'_>,
-        ctx: &GraphContext,
-        graph_layout: &GraphLayout,
-        output: &mut FrameOutput,
-        gesture: &mut Gesture,
-    ) {
-        // A drag released on the previous frame kept its offset alive
-        // through that frame's render (see `NodeDrag::released`). By
-        // now `NodeMoved::apply` has run, so the offset is stale —
-        // cancel before we read any drag state.
-        if gesture.node_drag().is_some_and(|d| d.released) {
-            gesture.cancel();
+/// Per-frame interaction pass for node bodies. Must run AFTER
+/// `GraphLayout::refresh_galleys` so every view-node has a galley
+/// entry and the current-frame `origin` is in place. The drag delta
+/// accumulated here feeds back into the gesture before
+/// `render_nodes` recomputes layouts for drawing.
+pub(crate) fn handle_node_interactions(
+    gui: &mut Gui<'_>,
+    ctx: &GraphContext,
+    graph_layout: &GraphLayout,
+    output: &mut FrameOutput,
+    gesture: &mut Gesture,
+) {
+    // A drag released on the previous frame kept its offset alive
+    // through that frame's render (see `NodeDrag::released`). By
+    // now `NodeMoved::apply` has run, so the offset is stale —
+    // cancel before we read any drag state.
+    if gesture.node_drag().is_some_and(|d| d.released) {
+        gesture.cancel();
+    }
+
+    for view_node in ctx.view_graph.view_nodes.iter() {
+        let node_id = view_node.id;
+        let drag_offset = gesture.node_drag_offset_for(&node_id);
+        let layout = graph_layout.node_layout(gui, ctx, &node_id, drag_offset);
+
+        let body_id = StableId::new(("node_body", node_id)).id();
+        let response = gui.ui().interact(
+            layout.body_rect,
+            body_id,
+            Sense::click() | Sense::hover() | Sense::drag(),
+        );
+        let events = NodeDragEvents::from_response(&response);
+
+        if (events.started || response.clicked())
+            && ctx.view_graph.selected_node_id != Some(node_id)
+        {
+            output.add_action(GraphUiAction::NodeSelected {
+                before: ctx.view_graph.selected_node_id,
+                after: Some(node_id),
+            });
         }
 
-        for view_node in ctx.view_graph.view_nodes.iter() {
-            let node_id = view_node.id;
-            let drag_offset = gesture.node_drag_offset_for(&node_id);
-            let layout = graph_layout.node_layout(gui, ctx, &node_id, drag_offset);
-
-            let body_id = StableId::new(("node_body", node_id)).id();
-            let response = gui.ui().interact(
-                layout.body_rect,
-                body_id,
-                Sense::click() | Sense::hover() | Sense::drag(),
-            );
-            let events = NodeDragEvents::from_response(&response);
-
-            if (events.started || response.clicked())
-                && ctx.view_graph.selected_node_id != Some(node_id)
-            {
-                output.add_action(GraphUiAction::NodeSelected {
-                    before: ctx.view_graph.selected_node_id,
-                    after: Some(node_id),
+        if events.started {
+            let start_pos = ctx.view_graph.view_nodes.by_key(&node_id).unwrap().pos;
+            gesture.start_node_drag(node_id, start_pos);
+        }
+        if let Some(drag) = gesture.node_drag_mut()
+            && drag.node_id == node_id
+        {
+            if events.dragging {
+                drag.offset += response.drag_delta() / gui.scale();
+            }
+            if events.stopped {
+                output.add_action(GraphUiAction::NodeMoved {
+                    node_id,
+                    before: drag.start_pos,
+                    after: drag.committed_pos(),
                 });
-            }
-
-            if events.started {
-                let start_pos = ctx.view_graph.view_nodes.by_key(&node_id).unwrap().pos;
-                gesture.start_node_drag(node_id, start_pos);
-            }
-            if let Some(drag) = gesture.node_drag_mut()
-                && drag.node_id == node_id
-            {
-                if events.dragging {
-                    drag.offset += response.drag_delta() / gui.scale();
-                }
-                if events.stopped {
-                    output.add_action(GraphUiAction::NodeMoved {
-                        node_id,
-                        before: drag.start_pos,
-                        after: drag.committed_pos(),
-                    });
-                    // Keep offset alive for this frame's render; the
-                    // cancel happens at the top of next frame's call.
-                    drag.released = true;
-                }
+                // Keep offset alive for this frame's render; the
+                // cancel happens at the top of next frame's call.
+                drag.released = true;
             }
         }
     }
+}
 
-    pub fn render_nodes(
-        &mut self,
-        gui: &mut Gui<'_>,
-        ctx: &GraphContext,
-        graph_layout: &GraphLayout,
-        output: &mut FrameOutput,
-        gesture: &Gesture,
-    ) -> NodesFrameResult {
-        let mut result = NodesFrameResult::default();
-        let mut const_bind_frame = self.const_bind_ui.start();
-        let breaker = gesture.breaker();
+/// Per-frame render pass for node bodies + ports + labels. Emits
+/// `NodeRemoved` actions directly for clicked remove-buttons; port
+/// interaction commands and breaker hits flow back through the
+/// returned `RenderNodesResult`.
+pub(crate) fn render_nodes(
+    gui: &mut Gui<'_>,
+    ctx: &GraphContext,
+    graph_layout: &GraphLayout,
+    const_bind_ui: &mut ConstBindUi,
+    output: &mut FrameOutput,
+    gesture: &Gesture,
+) -> RenderNodesResult {
+    let mut result = RenderNodesResult::default();
+    let mut const_bind_frame = const_bind_ui.start();
+    let breaker = gesture.breaker();
 
-        for view_node in ctx.view_graph.view_nodes.iter() {
-            let node_id = view_node.id;
-            let drag_offset = gesture.node_drag_offset_for(&node_id);
-            let layout = graph_layout.node_layout(gui, ctx, &node_id, drag_offset);
-            let galleys = graph_layout.node_galleys(&node_id);
+    for view_node in ctx.view_graph.view_nodes.iter() {
+        let node_id = view_node.id;
+        let drag_offset = gesture.node_drag_offset_for(&node_id);
+        let layout = graph_layout.node_layout(gui, ctx, &node_id, drag_offset);
+        let galleys = graph_layout.node_galleys(&node_id);
 
-            let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
-            let func = ctx.func_lib.by_id(&node.func_id).unwrap();
+        let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
+        let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
-            const_bind_frame.render(gui, output, &layout, node, func, breaker);
+        const_bind_frame.render(gui, output, &layout, node, func, breaker);
 
-            if !gui.ui().is_rect_visible(layout.body_rect) {
-                continue;
-            }
-
-            let is_selected = ctx.view_graph.selected_node_id == Some(node_id);
-            let exec_info = NodeExecutionInfo::from_stats(ctx.execution_stats, node_id);
-
-            if render_body(gui, &layout, galleys, is_selected, &exec_info, breaker) {
-                result.broken_nodes.push(node_id);
-            }
-
-            if render_remove_btn(gui, &layout, node_id) {
-                result.removed_nodes.push(node_id);
-            }
-
-            render_status_hints(gui, &layout, node_id, node.behavior, func);
-            render_cache_btn(gui, output, &layout, node);
-
-            let missing_inputs = get_missing_input_ports(ctx.execution_stats, node_id);
-            result
-                .port_cmd
-                .prefer(render_ports(gui, &layout, node, func, &missing_inputs));
-
-            render_port_labels(gui, &layout, galleys);
+        if !gui.ui().is_rect_visible(layout.body_rect) {
+            continue;
         }
 
-        const_bind_frame.finish();
+        let is_selected = ctx.view_graph.selected_node_id == Some(node_id);
+        let exec_info = NodeExecutionInfo::from_stats(ctx.execution_stats, node_id);
+
+        if render_body(gui, &layout, galleys, is_selected, &exec_info, breaker) {
+            result.broken_nodes.push(node_id);
+        }
+
+        if render_remove_btn(gui, &layout, node_id) {
+            output.add_action(ctx.view_graph.removal_action(&node_id));
+        }
+
+        render_status_hints(gui, &layout, node_id, node.behavior, func);
+        render_cache_btn(gui, output, &layout, node);
+
+        let missing_inputs = get_missing_input_ports(ctx.execution_stats, node_id);
         result
+            .port_cmd
+            .prefer(render_ports(gui, &layout, node, func, &missing_inputs));
+
+        render_port_labels(gui, &layout, galleys);
     }
+
+    const_bind_frame.finish();
+    result
 }
 
 // ============================================================================
