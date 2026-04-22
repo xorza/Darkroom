@@ -65,29 +65,40 @@ fn configure_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-/// The eframe integration layer. Two peers below — pure project
-/// state (`Session`), per-frame UI state + root theme (`MainUi`).
-/// Construction is symmetric: each peer mints its own [`UiContext`]
-/// from the eframe ctx, no hand-off required.
 #[derive(Debug)]
 struct PrismApp {
-    session: Session,
-    main_ui: MainUi,
+    ctx: egui::Context,
+
+    session: Option<Session>,
+    main_ui: Option<MainUi>,
 }
 
 impl PrismApp {
     fn new(ctx: &egui::Context) -> Self {
         Self {
-            session: Session::new(UiContext::new(ctx)),
-            main_ui: MainUi::new(UiContext::new(ctx)),
+            ctx: ctx.clone(),
+            session: None,
+            main_ui: None,
         }
     }
 }
 
 impl eframe::App for PrismApp {
+    fn logic(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.session.is_none() {
+            self.session = Some(Session::new(UiContext::new(&self.ctx)));
+        }
+        if self.main_ui.is_none() {
+            self.main_ui = Some(MainUi::new(UiContext::new(&self.ctx)));
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let mut gui = Gui::new(ui, &self.main_ui.style);
-        self.main_ui.render(&mut self.session, &mut gui);
+        let mut gui = Gui::new(ui, &self.main_ui.as_ref().unwrap().style);
+        self.main_ui
+            .as_mut()
+            .unwrap()
+            .render(self.session.as_mut().unwrap(), &mut gui);
     }
 
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
@@ -101,6 +112,7 @@ impl eframe::App for PrismApp {
     }
 
     fn on_exit(&mut self) {
-        self.session.exit();
+        self.session.as_mut().unwrap().exit();
+        self.session = None;
     }
 }

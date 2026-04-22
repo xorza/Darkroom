@@ -21,11 +21,17 @@ use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::model::ViewGraph;
+use crate::script::{ScriptExecutor, tcp::TcpTransport};
 use crate::ui_context::UiContext;
 
 use scenarium::execution_graph::ArgumentValues;
 
 const UNDO_MAX_STEPS: usize = 256;
+
+/// TCP port the scripting transport listens on. Fixed for now so the
+/// CLI client has a known target; swap for `0` + a discovery file
+/// once more than one prism instance needs to coexist.
+const SCRIPT_TCP_PORT: u16 = 32853;
 
 /// App preferences persisted between editor runs (last-opened graph
 /// path today; probably grows to include window geometry, recent
@@ -119,6 +125,10 @@ pub struct Session {
     execution_stats_rx: Slot<Result<ExecutionStats, execution_graph::Error>>,
     argument_values_rx: Slot<(NodeId, Option<ArgumentValues>)>,
     print_out_rx: UnboundedReceiver<String>,
+
+    /// Script executor + its transports. Held for `Drop` — drop
+    /// cancels the listener and executor tasks at app exit.
+    _script_executor: ScriptExecutor,
 }
 
 impl Session {
@@ -145,6 +155,11 @@ impl Session {
             autorun: false,
         };
 
+        let script_executor = ScriptExecutor::new([Box::new(TcpTransport {
+            port: SCRIPT_TCP_PORT,
+        })
+            as Box<dyn crate::script::ScriptTransport>]);
+
         let mut result = Self {
             state,
             worker,
@@ -154,6 +169,7 @@ impl Session {
             execution_stats_rx,
             argument_values_rx,
             print_out_rx,
+            _script_executor: script_executor,
         };
 
         if let Some(path) = result.state.config.current_path.clone() {
