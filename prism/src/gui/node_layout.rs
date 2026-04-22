@@ -108,19 +108,16 @@ impl KeyIndexKey<NodeId> for NodeGalleys {
 // NodeLayout — pure per-frame geometry
 // ============================================================================
 //
-// Plain data. Recomputed each frame from `NodeGalleys` + `ViewNode.pos`
-// + drag offset + style. Kept in `GraphLayout`'s cache only so that
-// the next frame's interaction pass can read the previous frame's
-// `body_rect` without a round-trip through egui's memory.
+// Plain data produced by `compute`, materialized on demand by
+// `GraphLayout::node_layout`. No caching, no mutation.
 
 #[derive(Debug, Clone, Copy)]
 pub struct NodeLayout {
-    pub node_id: NodeId,
     pub body_rect: Rect,
     pub remove_btn_rect: Rect,
     pub has_cache_btn: bool,
     pub cache_button_rect: Rect,
-    pub dot_first_center: Pos2,
+    pub status_dot_center: Pos2,
     pub input_first_center: Pos2,
     pub output_first_center: Pos2,
     pub port_row_height: f32,
@@ -135,7 +132,6 @@ impl NodeLayout {
     /// Pure function: returns the full geometry for a node given its
     /// cached galleys, function signature, and world-space position.
     pub fn compute(
-        node_id: NodeId,
         galleys: &NodeGalleys,
         func: &Func,
         style: &Style,
@@ -169,7 +165,7 @@ impl NodeLayout {
             .max(galleys.outputs.len() + galleys.events.len())
             .max(1);
 
-        let (max_left, max_right) = compute_max_galley_widths(galleys, row_count);
+        let (max_left, max_right) = compute_max_galley_widths(galleys);
         let row_width = port_label_side_padding * 2.0
             + max_left
             + max_right
@@ -222,12 +218,11 @@ impl NodeLayout {
         let global_offset = (origin + node_pos.to_vec2() * scale).to_vec2();
 
         Self {
-            node_id,
             body_rect: body_local.translate(global_offset),
             remove_btn_rect: remove_local.translate(global_offset),
             has_cache_btn,
             cache_button_rect: cache_button_local.translate(global_offset),
-            dot_first_center: dot_first_local + global_offset,
+            status_dot_center: dot_first_local + global_offset,
             input_first_center: input_first_local + global_offset,
             output_first_center: output_first_local + global_offset,
             port_row_height,
@@ -260,13 +255,6 @@ impl NodeLayout {
         self.body_rect.min
     }
 
-    pub fn dot_center(&self, index: usize, dot_step: f32) -> Pos2 {
-        pos2(
-            self.dot_first_center.x - dot_step * index as f32,
-            self.dot_first_center.y,
-        )
-    }
-
     pub fn port_center(&self, port: &PortRef) -> Pos2 {
         match port.kind {
             PortKind::Input => self.input_center(port.port_idx),
@@ -281,29 +269,17 @@ impl NodeLayout {
     }
 }
 
-impl KeyIndexKey<NodeId> for NodeLayout {
-    fn key(&self) -> &NodeId {
-        &self.node_id
-    }
-}
-
-fn compute_max_galley_widths(galleys: &NodeGalleys, row_count: usize) -> (f32, f32) {
-    let mut max_left: f32 = 0.0;
-    let mut max_right: f32 = 0.0;
-
-    for row in 0..row_count {
-        let left = galleys.inputs.get(row).map_or(0.0, |g| g.size().x);
-
-        let right = if row < galleys.outputs.len() {
-            galleys.outputs.get(row).map_or(0.0, |g| g.size().x)
-        } else {
-            let event_row = row - galleys.outputs.len();
-            galleys.events.get(event_row).map_or(0.0, |g| g.size().x)
-        };
-
-        max_left = max_left.max(left);
-        max_right = max_right.max(right);
-    }
-
+fn compute_max_galley_widths(galleys: &NodeGalleys) -> (f32, f32) {
+    let max_left = galleys
+        .inputs
+        .iter()
+        .map(|g| g.size().x)
+        .fold(0.0_f32, f32::max);
+    let max_right = galleys
+        .outputs
+        .iter()
+        .chain(&galleys.events)
+        .map(|g| g.size().x)
+        .fold(0.0_f32, f32::max);
     (max_left, max_right)
 }

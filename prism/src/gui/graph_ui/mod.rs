@@ -165,9 +165,14 @@ impl GraphUi {
         pointer_pos: Option<Pos2>,
     ) {
         gui.with_scale(ctx.view_graph.scale, |gui| {
-            // Interact with the *previous* frame's node rects so the drag
-            // delta accumulated here is reflected in this frame's layout
-            // update below. One pass, no stale-rect flash.
+            // Refresh galleys + origin first so every subsequent call
+            // site can assume galleys exist for every view-node.
+            self.graph_layout.update(gui, ctx);
+
+            // Interact with fresh body rects — layouts are computed on
+            // demand from the current gesture offset, so this frame's
+            // drag delta accumulates into the gesture before rendering
+            // reads it again. No stale-rect flash, no dual pass.
             self.node_ui.handle_node_interactions(
                 gui,
                 ctx,
@@ -176,7 +181,6 @@ impl GraphUi {
                 &mut self.gesture,
             );
 
-            self.graph_layout.update(gui, ctx);
             self.dots_background.render(gui, ctx);
             self.render_connections(gui, ctx);
 
@@ -231,13 +235,12 @@ impl GraphUi {
             self.emit_zoom_pan(ctx.view_graph, Vec2::ZERO, 1.0);
         }
         if buttons.view_selected
-            && let Some((scale, pan)) =
-                view_selected_node_target(gui, ctx, &self.graph_layout, &self.gesture)
+            && let Some((scale, pan)) = view_selected_node_target(gui, ctx, &self.graph_layout)
         {
             self.emit_zoom_pan(ctx.view_graph, pan, scale);
         }
         if buttons.fit_all {
-            let (scale, pan) = fit_all_nodes_target(gui, ctx, &self.graph_layout, &self.gesture);
+            let (scale, pan) = fit_all_nodes_target(gui, ctx, &self.graph_layout);
             self.emit_zoom_pan(ctx.view_graph, pan, scale);
         }
 

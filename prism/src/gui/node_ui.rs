@@ -146,13 +146,11 @@ pub(crate) struct NodesFrameResult {
 }
 
 impl NodeUi {
-    /// Per-frame interaction pass for node bodies. Runs BEFORE
-    /// `GraphLayout::update` so the drag delta accumulated here is
-    /// reflected in the same frame's layout, removing the need for a
-    /// second per-node layout recompute during rendering. Uses the
-    /// previous frame's `body_rect` as the interact target — that rect
-    /// already reflects the previous frame's drag offset, so there is
-    /// no visible lag when the offset is continuous.
+    /// Per-frame interaction pass for node bodies. Must run AFTER
+    /// `GraphLayout::update` so every view-node has a galley entry
+    /// and the current-frame `origin` is in place. The drag delta
+    /// accumulated here feeds back into the gesture before
+    /// `render_nodes` recomputes layouts for drawing.
     pub fn handle_node_interactions(
         &self,
         gui: &mut Gui<'_>,
@@ -171,13 +169,8 @@ impl NodeUi {
 
         for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
             let node_id = ctx.view_graph.view_nodes[view_node_idx].id;
-            // Galleys for brand-new nodes don't exist yet on the first
-            // frame after insertion — skip; they'll be interactable on
-            // the next frame once `GraphLayout::update` allocates them.
-            if !graph_layout.has_galleys(&node_id) {
-                continue;
-            }
-            let layout = graph_layout.node_layout(gui, ctx, gesture, &node_id);
+            let drag_offset = gesture.node_drag_offset_for(&node_id);
+            let layout = graph_layout.node_layout(gui, ctx, &node_id, drag_offset);
 
             let body_id = StableId::new(("node_body", node_id)).id();
             let response = gui.ui().interact(
@@ -234,7 +227,8 @@ impl NodeUi {
 
         for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
             let node_id = ctx.view_graph.view_nodes[view_node_idx].id;
-            let layout = graph_layout.node_layout(gui, ctx, gesture, &node_id);
+            let drag_offset = gesture.node_drag_offset_for(&node_id);
+            let layout = graph_layout.node_layout(gui, ctx, &node_id, drag_offset);
             let galleys = graph_layout.node_galleys(&node_id);
 
             let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
@@ -434,8 +428,7 @@ fn render_status_hints(
     }
 
     let dot_radius = gui.style.node.status_dot_radius;
-    let dot_step = dot_radius * 2.0 + gui.style.small_padding;
-    let center = layout.dot_center(0, dot_step);
+    let center = layout.status_dot_center;
 
     gui.painter()
         .circle_filled(center, dot_radius, gui.style.node.status_impure_color);

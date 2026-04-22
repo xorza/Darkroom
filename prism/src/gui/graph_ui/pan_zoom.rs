@@ -119,17 +119,13 @@ pub(super) fn view_selected_node_target(
     gui: &Gui<'_>,
     ctx: &GraphContext<'_>,
     graph_layout: &GraphLayout,
-    gesture: &Gesture,
 ) -> Option<(f32, Vec2)> {
     let selected_id = ctx.view_graph.selected_node_id?;
     let node_view = ctx.view_graph.view_nodes.by_key(&selected_id)?;
 
     let scale = ctx.view_graph.scale;
-    if !graph_layout.has_galleys(&node_view.id) {
-        return None;
-    }
     let rect = graph_layout
-        .node_layout(gui, ctx, gesture, &node_view.id)
+        .node_layout(gui, ctx, &node_view.id, Vec2::ZERO)
         .body_rect;
     let size = rect.size() / scale;
     let center = egui::pos2(
@@ -148,7 +144,6 @@ pub(super) fn fit_all_nodes_target(
     gui: &Gui<'_>,
     ctx: &GraphContext<'_>,
     graph_layout: &GraphLayout,
-    gesture: &Gesture,
 ) -> (f32, Vec2) {
     if ctx.view_graph.view_nodes.is_empty() {
         return (1.0, Vec2::ZERO);
@@ -165,7 +160,7 @@ pub(super) fn fit_all_nodes_target(
     // Defensive: `view_nodes` is non-empty but galleys haven't been
     // built yet on the first frame after a load. Fall back to the
     // empty-graph default rather than panic.
-    let mut layouts = graph_layout.iter_layouts(gui, ctx, gesture);
+    let mut layouts = graph_layout.iter_layouts(gui, ctx);
     let Some(first) = layouts.next() else {
         return (1.0, Vec2::ZERO);
     };
