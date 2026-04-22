@@ -139,7 +139,7 @@ pub struct ListItem<'a> {
     font: Option<FontId>,
     style: Option<ButtonStyle>,
     size: Option<Vec2>,
-    align: Align,
+    text_align: Align,
     tooltip: Option<&'a str>,
 }
 
@@ -153,7 +153,7 @@ impl<'a> ListItem<'a> {
             font: None,
             style: None,
             size: None,
-            align: Align::Min,
+            text_align: Align::Min,
             tooltip: None,
         }
     }
@@ -168,7 +168,7 @@ impl<'a> ListItem<'a> {
             font: None,
             style: None,
             size: None,
-            align: Align::Min,
+            text_align: Align::Min,
             tooltip: None,
         }
     }
@@ -198,8 +198,8 @@ impl<'a> ListItem<'a> {
         self
     }
 
-    pub fn align(mut self, align: Align) -> Self {
-        self.align = align;
+    pub fn text_align(mut self, align: Align) -> Self {
+        self.text_align = align;
         self
     }
 
@@ -243,7 +243,7 @@ impl<'a> ListItem<'a> {
         let mut btn = Button::default()
             .background(style)
             .enabled(self.enabled)
-            .align(self.align)
+            .text_align(self.text_align)
             .size(size)
             .toggle(&mut selected);
 

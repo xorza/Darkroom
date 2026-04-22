@@ -16,7 +16,7 @@ pub struct ComboBox<'a> {
     style: Option<DragValueStyle>,
     padding: Option<Vec2>,
     pos: Pos2,
-    align: Align2,
+    anchor: Align2,
 }
 
 impl<'a> ComboBox<'a> {
@@ -29,7 +29,7 @@ impl<'a> ComboBox<'a> {
             style: None,
             padding: None,
             pos: Pos2::ZERO,
-            align: Align2::CENTER_CENTER,
+            anchor: Align2::CENTER_CENTER,
         }
     }
 
@@ -62,13 +62,13 @@ impl<'a> ComboBox<'a> {
         self
     }
 
-    pub fn align(mut self, align: Align2) -> Self {
-        self.align = align;
+    pub fn anchor(mut self, anchor: Align2) -> Self {
+        self.anchor = anchor;
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>, id_salt: impl std::hash::Hash) -> Response {
-        let id = gui.ui().make_persistent_id(&id_salt);
+    pub fn show(self, gui: &mut Gui<'_>, id: StableId) -> Response {
+        let id = id.id();
         let font = self.font.unwrap_or_else(|| gui.style.sub_font.clone());
         let color = self.color.unwrap_or(gui.style.text_color);
         let padding = self
@@ -84,7 +84,7 @@ impl<'a> ComboBox<'a> {
             .layout_no_wrap(self.selected.clone(), font.clone(), color);
         let size = galley.size() + padding * 2.0;
 
-        let rect = self.align.anchor_size(self.pos, size);
+        let rect = self.anchor.anchor_size(self.pos, size);
         let inner_rect = rect.shrink2(padding);
 
         if !gui.ui().is_rect_visible(rect) {
@@ -101,8 +101,8 @@ impl<'a> ComboBox<'a> {
             StrokeKind::Outside,
         );
 
-        let text_anchor = self.align.pos_in_rect(&inner_rect);
-        let text_rect = self.align.anchor_size(text_anchor, galley.size());
+        let text_anchor = self.anchor.pos_in_rect(&inner_rect);
+        let text_rect = self.anchor.anchor_size(text_anchor, galley.size());
         gui.painter().galley(text_rect.min, galley, color);
 
         let mut response = gui
@@ -113,7 +113,7 @@ impl<'a> ComboBox<'a> {
         let selected = self.selected.clone();
         let options = self.options;
 
-        PopupMenu::new(&response, id_salt).show(gui, |gui| {
+        PopupMenu::new(&response, id.with("combo_popup")).show(gui, |gui| {
             // Pre-compute galleys for all items (reuse like new_node_ui)
             let item_font = gui.style.sub_font.clone();
             let padding = gui.style.padding;

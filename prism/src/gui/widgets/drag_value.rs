@@ -45,7 +45,7 @@ pub struct DragValue<'a, T: DragValueNumeric> {
     background: Option<DragValueStyle>,
     padding: Option<Vec2>,
     pos: Pos2,
-    align: Align2,
+    anchor: Align2,
     hover: bool,
 }
 
@@ -59,7 +59,7 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
             background: None,
             padding: None,
             pos: Pos2::ZERO,
-            align: Align2::CENTER_CENTER,
+            anchor: Align2::CENTER_CENTER,
             hover: true,
         }
     }
@@ -98,12 +98,12 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
         self
     }
 
-    pub fn align(mut self, align: Align2) -> Self {
-        self.align = align;
+    pub fn anchor(mut self, anchor: Align2) -> Self {
+        self.anchor = anchor;
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>, id_salt: impl std::hash::Hash) -> Response {
+    pub fn show(self, gui: &mut Gui<'_>, id: StableId) -> Response {
         assert!(self.speed.is_finite());
 
         let font = self.font.unwrap_or_else(|| gui.style.mono_font.clone());
@@ -118,8 +118,9 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
             .unwrap_or(gui.style.node.const_bind_style.clone());
         assert!(background.radius.is_finite());
 
+        let id = id.id();
+
         // Check if we're currently dragging to display temporary value
-        let id = gui.ui().make_persistent_id(&id_salt);
         let drag_temp_id = id.with("drag_temp");
         let display_value = gui
             .ui()
@@ -135,7 +136,7 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
         size.x = size.x.max(30.0 * gui.scale());
         assert!(size.x.is_finite() && size.y.is_finite());
 
-        let rect = self.align.anchor_size(self.pos, size);
+        let rect = self.anchor.anchor_size(self.pos, size);
         let inner_rect = rect.shrink2(padding);
 
         if !gui.ui().is_rect_visible(rect) {
@@ -144,11 +145,9 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
                 .interact(rect, id.with("drag_interact"), Sense::hover());
         }
 
-        let id = gui.ui().make_persistent_id(id_salt);
         let edit_id = id.with("edit");
         let edit_text_id = id.with("edit_text");
         let edit_original_id = id.with("edit_original");
-        let drag_temp_id = id.with("drag_temp");
         let mut edit_active = gui
             .ui()
             .data_mut(|data| data.get_temp::<bool>(edit_id))
@@ -176,8 +175,8 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
                 .id(edit_id)
                 .font(font.clone())
                 .desired_width(inner_rect.width())
-                .horizontal_align(self.align.x())
-                .vertical_align(self.align.y())
+                .horizontal_align(self.anchor.x())
+                .vertical_align(self.anchor.y())
                 .clip_text(true)
                 .margin(0.0)
                 .frame(false);
@@ -288,8 +287,8 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
             });
         }
 
-        let text_anchor = self.align.pos_in_rect(&inner_rect);
-        let text_rect = self.align.anchor_size(text_anchor, galley.size());
+        let text_anchor = self.anchor.pos_in_rect(&inner_rect);
+        let text_rect = self.anchor.anchor_size(text_anchor, galley.size());
         gui.painter().galley(text_rect.min, galley, color);
 
         response

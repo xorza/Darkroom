@@ -87,7 +87,7 @@ impl<'a> Button<'a> {
         self
     }
 
-    pub fn align(mut self, align: Align) -> Self {
+    pub fn text_align(mut self, align: Align) -> Self {
         self.content_align = align;
         self
     }

@@ -30,7 +30,7 @@ pub struct StaticValueEditor<'a> {
     value: &'a mut StaticValue,
     data_type: &'a DataType,
     pos: Pos2,
-    align: Align2,
+    anchor: Align2,
     style: Option<DragValueStyle>,
 }
 
@@ -40,7 +40,7 @@ impl<'a> StaticValueEditor<'a> {
             value,
             data_type,
             pos: Pos2::ZERO,
-            align: Align2::RIGHT_CENTER,
+            anchor: Align2::RIGHT_CENTER,
             style: None,
         }
     }
@@ -51,8 +51,8 @@ impl<'a> StaticValueEditor<'a> {
         self
     }
 
-    pub fn align(mut self, align: Align2) -> Self {
-        self.align = align;
+    pub fn anchor(mut self, anchor: Align2) -> Self {
+        self.anchor = anchor;
         self
     }
 
@@ -76,7 +76,7 @@ impl<'a> StaticValueEditor<'a> {
                 .speed(1.0)
                 .padding(vec2(small_padding, 0.0))
                 .pos(self.pos)
-                .align(self.align)
+                .anchor(self.anchor)
                 .style(style)
                 .show(gui, id),
 
@@ -86,7 +86,7 @@ impl<'a> StaticValueEditor<'a> {
                 .speed(0.01)
                 .padding(vec2(small_padding, 0.0))
                 .pos(self.pos)
-                .align(self.align)
+                .anchor(self.anchor)
                 .style(style)
                 .show(gui, id),
 
@@ -108,7 +108,7 @@ impl<'a> StaticValueEditor<'a> {
                 };
                 FilePicker::new(path, &config.extensions, picker_mode(config.mode))
                     .pos(self.pos)
-                    .align(self.align)
+                    .anchor(self.anchor)
                     .style(style)
                     .show(gui, id)
             }
@@ -136,7 +136,7 @@ fn render_enum_dropdown(
         .color(gui.style.text_color)
         .padding(vec2(gui.style.small_padding, 0.0))
         .pos(pos)
-        .align(Align2::RIGHT_CENTER)
+        .anchor(Align2::RIGHT_CENTER)
         .style(style.clone())
         .show(gui, id)
 }

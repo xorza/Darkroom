@@ -21,7 +21,7 @@ pub struct FilePicker<'a> {
     extensions: &'a [String],
     mode: FilePickerMode,
     pos: Pos2,
-    align: Align2,
+    anchor: Align2,
     style: Option<DragValueStyle>,
 }
 
@@ -32,7 +32,7 @@ impl<'a> FilePicker<'a> {
             extensions,
             mode,
             pos: Pos2::ZERO,
-            align: Align2::RIGHT_CENTER,
+            anchor: Align2::RIGHT_CENTER,
             style: None,
         }
     }
@@ -42,8 +42,8 @@ impl<'a> FilePicker<'a> {
         self
     }
 
-    pub fn align(mut self, align: Align2) -> Self {
-        self.align = align;
+    pub fn anchor(mut self, anchor: Align2) -> Self {
+        self.anchor = anchor;
         self
     }
 
@@ -90,7 +90,7 @@ impl<'a> FilePicker<'a> {
             inner_height + padding * 2.0,
         );
 
-        let rect = self.align.anchor_size(self.pos, total_size);
+        let rect = self.anchor.anchor_size(self.pos, total_size);
 
         // Calculate separator position
         let separator_x = rect.min.x + padding + filename_text_size.x + padding;
