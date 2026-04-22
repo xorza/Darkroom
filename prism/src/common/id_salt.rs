@@ -223,6 +223,11 @@ mod tests {
             // The accessor itself + doc mentions.
             Path::new("gui/mod.rs"),
             Path::new("common/id_salt.rs"),
+            // eframe boundary: wraps the root `egui::Ui` handed to
+            // `impl App::ui` and drives egui::Panel / MenuBar that
+            // need `&mut egui::Ui` arguments. Downstream of the
+            // panels everything is Gui.
+            Path::new("main_ui.rs"),
         ];
 
         let mut offenders = Vec::new();

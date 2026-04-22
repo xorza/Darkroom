@@ -98,11 +98,10 @@ impl MainUi {
 
     pub fn render(&mut self, app_data: &mut AppData, root_ui: &mut egui::Ui) {
         let style = Rc::new(Style::new(self.style_settings.clone(), 1.0));
-        root_ui.ctx().global_style_mut(|egui_style| {
-            style.apply_to_egui(egui_style);
-        });
+        let mut root_gui = Gui::new(root_ui, &style);
 
-        let input = InputSnapshot::capture(root_ui.ctx());
+        root_gui.apply_global_style(&style);
+        let input = root_gui.input_snapshot();
 
         app_data.update_shared_status();
 
@@ -110,7 +109,7 @@ impl MainUi {
 
         Panel::top("top_panel")
             .show_separator_line(false)
-            .show_inside(root_ui, |ui| {
+            .show_inside(root_gui.ui_raw(), |ui| {
                 // Anchor a global-scope id for the MenuBar so its
                 // internal horizontal layout's widget id doesn't drift
                 // with the panel's auto-id counter.
@@ -153,14 +152,14 @@ impl MainUi {
         Panel::bottom("status_panel")
             .show_separator_line(false)
             .frame(Frame::NONE)
-            .show_inside(root_ui, |ui| {
+            .show_inside(root_gui.ui_raw(), |ui| {
                 self.log_ui
                     .render(&mut Gui::new(ui, &style), &app_data.state.status);
             });
 
         CentralPanel::default()
             .frame(Frame::NONE)
-            .show_inside(root_ui, |ui| {
+            .show_inside(root_gui.ui_raw(), |ui| {
                 self.graph_ui
                     .render(&mut Gui::new(ui, &style), app_data, &input, &self.arena)
             });
