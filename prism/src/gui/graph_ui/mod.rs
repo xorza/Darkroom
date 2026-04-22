@@ -98,13 +98,7 @@ impl GraphUi {
             .max_rect(rect)
             .clip_rect(rect)
             .show(|gui| {
-                let mut ctx = GraphContext {
-                    func_lib: &session.state.func_lib,
-                    view_graph: &session.state.view_graph,
-                    execution_stats: session.state.execution_stats.as_ref(),
-                    autorun: session.state.autorun,
-                    argument_values_cache: &mut session.state.argument_values_cache,
-                };
+                let mut ctx = session.graph_context();
 
                 let (background_response, pointer_pos) =
                     self.setup_background_interaction(gui, input, rect);

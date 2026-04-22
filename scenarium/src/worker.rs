@@ -131,6 +131,22 @@ impl Worker {
             thread_handle.abort();
         }
     }
+
+    /// No-op worker for unit tests — no tokio task, no event loop.
+    /// `send` silently succeeds (messages go into a held rx that's
+    /// never drained), `is_event_loop_started` stays false, `exit`
+    /// does nothing. Leaks the receiver on purpose so `send` never
+    /// panics on a closed channel.
+    pub fn stub() -> Self {
+        let (tx, rx) = unbounded_channel();
+        // Keep the channel open for the lifetime of the test process.
+        std::mem::forget(rx);
+        Self {
+            thread_handle: None,
+            tx,
+            event_loop_started: Arc::new(AtomicBool::new(false)),
+        }
+    }
 }
 
 impl Drop for Worker {

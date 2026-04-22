@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::rc::Rc;
 
 use crate::common::StableId;
@@ -44,7 +45,7 @@ impl MainUi {
     }
 
     fn save(&mut self, session: &mut Session) {
-        if let Some(path) = session.state.config.current_path.clone() {
+        if let Some(path) = session.current_path().map(Path::to_path_buf) {
             session.save_graph(&path);
         } else {
             self.save_as(session);
@@ -98,7 +99,7 @@ impl MainUi {
             .show_separator_line(false)
             .no_frame()
             .show(gui, |gui| {
-                self.log_ui.render(gui, &session.state.status);
+                self.log_ui.render(gui, session.status());
             });
 
         Panel::central().no_frame().show(gui, |gui| {
@@ -181,7 +182,7 @@ impl MainUi {
 
         if input.cmd_shift(egui::Key::Space) {
             let output = self.graph_ui.output();
-            output.set_run_cmd(if session.state.autorun {
+            output.set_run_cmd(if session.autorun() {
                 RunCommand::StopAutorun
             } else {
                 RunCommand::StartAutorun
