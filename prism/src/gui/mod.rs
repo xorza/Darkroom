@@ -40,6 +40,16 @@ impl<'a> Gui<'a> {
         Self::with_style(ui, Rc::clone(style), 1.0)
     }
 
+    /// Root `Gui` constructor — use at the eframe boundary. Applies
+    /// `style` to egui's global style for the frame (one call per
+    /// frame, not per child `Gui`), then builds the `Gui` wrapper.
+    pub fn new_root(ui: &'a mut Ui, style: &Rc<Style>) -> Self {
+        ui.ctx().global_style_mut(|egui_style| {
+            style.apply_to_egui(egui_style);
+        });
+        Self::new(ui, style)
+    }
+
     pub fn new_with_scale(ui: &'a mut Ui, style: &Rc<Style>, scale: f32) -> Self {
         Self::with_style(ui, Rc::clone(style), scale)
     }
@@ -103,15 +113,6 @@ impl<'a> Gui<'a> {
     /// Delete a temporary value of type `T` keyed by `id`.
     pub fn remove_temp<T: 'static + Send + Sync>(&self, id: egui::Id) {
         self.ui.ctx().data_mut(|d| d.remove::<T>(id));
-    }
-
-    /// Apply `style` to the egui global style for this frame. Wraps
-    /// `ctx().global_style_mut(..)` so callers don't need direct
-    /// `egui::Context` access.
-    pub fn apply_global_style(&self, style: &crate::gui::style::Style) {
-        self.ui.ctx().global_style_mut(|egui_style| {
-            style.apply_to_egui(egui_style);
-        });
     }
 
     /// Capture the current frame's input into an [`InputSnapshot`].

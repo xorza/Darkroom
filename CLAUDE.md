@@ -2,7 +2,7 @@ AI coding rules for Rust projects:
 
 ## Workflow
 
-- Do not commit or push until the user explicitly asks ("commit", "commit push", etc.). Finish the change, run tests/clippy/fmt, then stop and wait for review. The user wants to inspect the diff before anything lands.
+- **Never commit or push without explicit user confirmation.** This rule is non-negotiable and overrides auto mode, "just do it" instructions, or any implied approval from earlier in the conversation. The trigger must be a fresh, unambiguous command like "commit", "commit push", "ship it". "Do the refactor" / "apply F3" / "go" authorize the code change, not the commit. Finish the change, run tests/clippy/fmt, then stop and wait for the user to inspect the diff and explicitly say to commit.
 
 ## Available CLI tools
 

@@ -1,14 +1,15 @@
 use std::rc::Rc;
 
+use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::frame_output::RunCommand;
 use crate::gui::graph_ui::GraphUi;
 use crate::gui::log_ui::LogUi;
-use crate::gui::style::Style;
+use crate::gui::widgets::Panel;
 use crate::input::InputSnapshot;
 use crate::{app_data::AppData, gui::style_settings::StyleSettings};
 use eframe::egui;
-use egui::{CentralPanel, Frame, Id, Panel, UiBuilder, ViewportCommand};
+use egui::{Id, UiBuilder, ViewportCommand};
 
 #[derive(Clone, Debug)]
 pub struct UiContext {
@@ -96,25 +97,22 @@ impl MainUi {
         }
     }
 
-    pub fn render(&mut self, app_data: &mut AppData, root_ui: &mut egui::Ui) {
-        let style = Rc::new(Style::new(self.style_settings.clone(), 1.0));
-        let mut root_gui = Gui::new(root_ui, &style);
-
-        root_gui.apply_global_style(&style);
+    pub fn render(&mut self, app_data: &mut AppData, root_gui: &mut Gui<'_>) {
+        let style = root_gui.style.clone();
         let input = root_gui.input_snapshot();
 
         app_data.update_shared_status();
 
         self.handle_shortcuts(&input, app_data);
 
-        Panel::top("top_panel")
+        Panel::top(StableId::new("top_panel"))
             .show_separator_line(false)
-            .show_inside(root_gui.ui_raw(), |ui| {
+            .show(root_gui, |gui| {
                 // Anchor a global-scope id for the MenuBar so its
                 // internal horizontal layout's widget id doesn't drift
-                // with the panel's auto-id counter.
-                // ui is raw egui::Ui (not our Gui), and `.id(...)` is the
-                // safe pattern, so direct UiBuilder use is intentional here.
+                // with the panel's auto-id counter. MenuBar is raw
+                // egui chrome and stays that way for now.
+                let ui = gui.ui_raw();
                 // id-drift-ok
                 let _ = ui.scope_builder(UiBuilder::new().id(Id::new("menu_bar_scope")), |ui| {
                     egui::MenuBar::new().ui(ui, |ui| {
@@ -149,20 +147,16 @@ impl MainUi {
                 });
             });
 
-        Panel::bottom("status_panel")
+        Panel::bottom(StableId::new("status_panel"))
             .show_separator_line(false)
-            .frame(Frame::NONE)
-            .show_inside(root_gui.ui_raw(), |ui| {
-                self.log_ui
-                    .render(&mut Gui::new(ui, &style), &app_data.state.status);
+            .no_frame()
+            .show(root_gui, |gui| {
+                self.log_ui.render(gui, &app_data.state.status);
             });
 
-        CentralPanel::default()
-            .frame(Frame::NONE)
-            .show_inside(root_gui.ui_raw(), |ui| {
-                self.graph_ui
-                    .render(&mut Gui::new(ui, &style), app_data, &input, &self.arena)
-            });
+        Panel::central().no_frame().show(root_gui, |gui| {
+            self.graph_ui.render(gui, app_data, &input, &self.arena)
+        });
 
         app_data.handle_output(self.graph_ui.output());
         self.arena.reset();
