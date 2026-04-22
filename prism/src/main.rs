@@ -4,6 +4,7 @@ mod init;
 mod input;
 mod main_ui;
 mod model;
+mod script;
 mod session;
 mod ui_context;
 

@@ -49,6 +49,7 @@ strum = { version = "*" }
 strum_macros = { version = "*" }
 rand = { version = "*" }
 tokio = { version = "*", features = ["full"] }
+tokio-util = { version = "*", features = ["rt"] }
 tracing = { version = "*" }
 tracing-subscriber = { version = "*", features = ["env-filter", "fmt", "time"] }
 tracing-appender = { version = "*" }
