@@ -1,3 +1,5 @@
+use egui::Vec2b;
+
 use crate::common::StableId;
 use crate::gui::Gui;
 
@@ -10,39 +12,33 @@ pub struct ScrollArea {
     max_width: Option<f32>,
     horizontal: bool,
     vertical: bool,
+    auto_shrink: Vec2b,
+    stick_to_bottom: bool,
 }
 
 impl ScrollArea {
     pub fn vertical(id: StableId) -> Self {
-        Self {
-            id,
-            min_height: None,
-            max_height: None,
-            max_width: None,
-            horizontal: false,
-            vertical: true,
-        }
+        Self::new(id, false, true)
     }
 
     pub fn horizontal(id: StableId) -> Self {
-        Self {
-            id,
-            min_height: None,
-            max_height: None,
-            max_width: None,
-            horizontal: true,
-            vertical: false,
-        }
+        Self::new(id, true, false)
     }
 
     pub fn both(id: StableId) -> Self {
+        Self::new(id, true, true)
+    }
+
+    fn new(id: StableId, horizontal: bool, vertical: bool) -> Self {
         Self {
             id,
             min_height: None,
             max_height: None,
             max_width: None,
-            horizontal: true,
-            vertical: true,
+            horizontal,
+            vertical,
+            auto_shrink: Vec2b::FALSE,
+            stick_to_bottom: false,
         }
     }
 
@@ -61,26 +57,38 @@ impl ScrollArea {
         self
     }
 
+    /// Shrink the scroll area to fit its content along the given axes.
+    /// Default is `Vec2b::FALSE` (fill available space on both axes).
+    pub fn auto_shrink(mut self, auto_shrink: Vec2b) -> Self {
+        self.auto_shrink = auto_shrink;
+        self
+    }
+
+    /// Scroll to the bottom on first render and keep it there when new
+    /// content is appended.
+    pub fn stick_to_bottom(mut self, stick: bool) -> Self {
+        self.stick_to_bottom = stick;
+        self
+    }
+
     pub fn show<R>(self, gui: &mut Gui<'_>, add_contents: impl FnOnce(&mut Gui<'_>) -> R) -> R {
         let style = gui.style.clone();
         let scale = gui.scale();
 
-        let mut scroll_area =
-            egui::ScrollArea::new([self.horizontal, self.vertical]).id_salt(self.id);
+        let mut scroll_area = egui::ScrollArea::new([self.horizontal, self.vertical])
+            .id_salt(self.id)
+            .auto_shrink(self.auto_shrink)
+            .stick_to_bottom(self.stick_to_bottom);
 
         if let Some(min_height) = self.min_height {
             scroll_area = scroll_area.min_scrolled_height(min_height);
         }
-
         if let Some(max_height) = self.max_height {
             scroll_area = scroll_area.max_height(max_height);
         }
-
         if let Some(max_width) = self.max_width {
             scroll_area = scroll_area.max_width(max_width);
         }
-
-        scroll_area = scroll_area.auto_shrink([false, false]);
 
         scroll_area
             .show(gui.ui_raw(), |ui| {

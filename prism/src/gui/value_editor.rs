@@ -6,10 +6,7 @@ use scenarium::data::{DataType, EnumDef, FsPathMode, StaticValue};
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::style::DragValueStyle;
-use crate::gui::widgets::HitRegion;
-use crate::gui::widgets::combo_box::ComboBox;
-use crate::gui::widgets::drag_value::DragValue;
-use crate::gui::widgets::file_picker::{FilePicker, FilePickerMode};
+use crate::gui::widgets::{ComboBox, DragValue, FilePicker, FilePickerMode, HitRegion};
 
 fn picker_mode(mode: FsPathMode) -> FilePickerMode {
     match mode {

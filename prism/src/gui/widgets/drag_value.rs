@@ -2,10 +2,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use eframe::egui;
-use egui::{
-    Align, Align2, Color32, CursorIcon, FontId, Key, Pos2, Response, Sense, Stroke, StrokeKind,
-    UiBuilder, Vec2, vec2,
-};
+use egui::{Align2, Color32, FontId, Key, Pos2, Response, Sense, StrokeKind, Vec2};
 
 use crate::common::StableId;
 use crate::gui::Gui;
@@ -59,7 +56,6 @@ pub struct DragValue<'a, T: DragValueNumeric> {
     padding: Option<Vec2>,
     pos: Pos2,
     anchor: Align2,
-    hover: bool,
 }
 
 impl<'a, T: DragValueNumeric> DragValue<'a, T> {
@@ -74,7 +70,6 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
             padding: None,
             pos: Pos2::ZERO,
             anchor: Align2::CENTER_CENTER,
-            hover: true,
         }
     }
 

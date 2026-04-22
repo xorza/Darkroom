@@ -9,11 +9,9 @@ use crate::gui::Gui;
 use crate::gui::frame_output::FrameOutput;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::image_utils::to_color_image;
-use crate::gui::widgets::frame::Frame;
-use crate::gui::widgets::positioned_ui::PositionedUi;
-use crate::gui::widgets::scroll_area::ScrollArea;
 use crate::gui::widgets::{
-    HitRegion, Image as ImageWidget, Label, Separator, Space, TextEdit, Texture,
+    Frame, HitRegion, Image as ImageWidget, Label, PositionedUi, ScrollArea, Separator, Space,
+    TextEdit, Texture,
 };
 use crate::model::argument_values_cache::{CachedTexture, NodeCache};
 use crate::model::execution_info::NodeExecutionInfo;

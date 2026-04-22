@@ -7,6 +7,7 @@ pub struct Label {
     text: String,
     color: Option<Color32>,
     font: Option<FontId>,
+    truncate: bool,
 }
 
 impl Label {
@@ -15,6 +16,7 @@ impl Label {
             text: text.into(),
             color: None,
             font: None,
+            truncate: false,
         }
     }
 
@@ -28,6 +30,11 @@ impl Label {
         self
     }
 
+    pub fn truncate(mut self, truncate: bool) -> Self {
+        self.truncate = truncate;
+        self
+    }
+
     pub fn show(self, gui: &mut Gui<'_>) -> Response {
         let mut rich = egui::RichText::new(self.text);
         if let Some(color) = self.color {
@@ -36,6 +43,10 @@ impl Label {
         if let Some(font) = self.font {
             rich = rich.font(font);
         }
-        gui.ui_raw().label(rich)
+        let mut label = egui::Label::new(rich);
+        if self.truncate {
+            label = label.truncate();
+        }
+        gui.ui_raw().add(label)
     }
 }

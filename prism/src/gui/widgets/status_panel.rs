@@ -11,6 +11,9 @@ use common::StrExt;
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::widgets::frame::Frame;
+use crate::gui::widgets::label::Label;
+use crate::gui::widgets::scroll_area::ScrollArea;
+use crate::gui::widgets::space::Space;
 
 #[derive(Debug)]
 pub struct StatusPanel<'a> {
@@ -58,41 +61,42 @@ impl<'a> StatusPanel<'a> {
             })
             .inner_margin(style.corner_radius);
 
+        let scroll_id = StableId::from_id(self.id.id().with("scroll"));
         frame.show(gui, |gui| {
             let icon_size = style.body_font.size;
             let text_color = style.text_color;
 
-            let ui = gui.ui_raw();
-            ui.take_available_width();
-            ui.horizontal(|ui| {
+            gui.ui_raw().take_available_width();
+            gui.horizontal(|gui| {
                 // Fixed-size icon drawn inside our already-scoped Frame child.
                 let (icon_rect, icon_response) =
                     // id-drift-ok
-                    ui.allocate_exact_size(Vec2::splat(icon_size), Sense::click());
+                    gui.ui_raw()
+                        .allocate_exact_size(Vec2::splat(icon_size), Sense::click());
                 if icon_response.clicked() {
                     open = !open;
                 }
-                paint_triangle(ui.painter(), icon_rect, open, text_color);
-                ui.expand_to_include_rect(icon_rect);
+                paint_triangle(gui.painter(), icon_rect, open, text_color);
+                gui.ui_raw().expand_to_include_rect(icon_rect);
 
                 if open {
                     let max_height = line_height * self.line_count as f32;
-                    ui.set_height(max_height);
+                    gui.ui_raw().set_height(max_height);
 
-                    egui::ScrollArea::vertical()
+                    ScrollArea::vertical(scroll_id)
                         .auto_shrink(Vec2b::TRUE)
                         .stick_to_bottom(true)
-                        .show(ui, |ui| {
-                            ui.take_available_width();
-                            ui.vertical(|ui| {
+                        .show(gui, |gui| {
+                            gui.ui_raw().take_available_width();
+                            gui.vertical(|gui| {
                                 let lines = self.status.line_count().saturating_sub(1) as f32;
                                 let spacer = (max_height - lines * line_height).max(0.0);
-                                ui.add_space(spacer);
-                                ui.label(self.status);
+                                Space::new(spacer).show(gui);
+                                Label::new(self.status).show(gui);
                             });
                         });
                 } else {
-                    ui.add(egui::Label::new(self.status.last_line()).truncate());
+                    Label::new(self.status.last_line()).truncate(true).show(gui);
                 }
             });
         });

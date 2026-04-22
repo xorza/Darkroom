@@ -9,12 +9,7 @@ use scenarium::prelude::FuncLib;
 
 use crate::common::StableId;
 use crate::gui::Gui;
-use crate::gui::widgets::area::Area;
-use crate::gui::widgets::column_flow::ColumnFlow;
-use crate::gui::widgets::expander::Expander;
-use crate::gui::widgets::frame::Frame;
-use crate::gui::widgets::popup_menu::ListItem;
-use crate::gui::widgets::{HitRegion, Layout};
+use crate::gui::widgets::{Area, ColumnFlow, Expander, Frame, HitRegion, Layout, ListItem};
 use crate::input::InputSnapshot;
 
 const POPUP_MIN_WIDTH: f32 = 150.0;
