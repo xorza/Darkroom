@@ -1,19 +1,21 @@
-use crate::common::shared_any_state::SharedAnyState;
+use std::collections::{HashSet, VecDeque};
+use std::mem::take;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
+use tokio::task::JoinHandle;
+
+use common::ReadyState;
+use common::pause_gate::PauseGate;
+
+use crate::common::shared_any_state::SharedAnyState;
 use crate::event_lambda::EventLambda;
 use crate::execution_graph::{ArgumentValues, ExecutionGraph, Result};
 use crate::execution_stats::ExecutionStats;
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
-use common::ReadyState;
-use common::pause_gate::PauseGate;
-use serde::{Deserialize, Serialize};
-use std::collections::{HashSet, VecDeque};
-use std::mem::take;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
-use tokio::task::JoinHandle;
 
 /// Max messages drained per worker-loop iteration. Bounds latency
 /// between a `send` and the loop observing it.
@@ -24,49 +26,10 @@ const WORKER_MSG_BATCH: usize = 10;
 /// backpressure when a lambda fires faster than the worker drains.
 const EVENT_LOOP_BACKPRESSURE: usize = 10;
 
-/// Command enum sent into the worker loop.
-///
-/// Cancel-safety: `Update`, `Clear`, `StopEventLoop`, and `Exit` tear
-/// down the currently-running event loop, which aborts every lambda
-/// task at its next `.await`. Lambda authors must therefore write
-/// cancel-safe code — any state held across `.await` can be dropped
-/// without cleanup. See [`EventLoopHandle::stop`].
-#[derive(Debug)]
-pub enum WorkerMessage {
-    Exit,
-    Event {
-        event: EventRef,
-    },
-    Events {
-        events: Vec<EventRef>,
-    },
-    EventFromLoop {
-        loop_id: u64,
-        event: EventRef,
-    },
-    EventsFromLoop {
-        loop_id: u64,
-        events: Vec<EventRef>,
-    },
-
-    Update {
-        graph: Graph,
-        func_lib: Arc<FuncLib>,
-    },
-    Clear,
-    ExecuteTerminals,
-    StartEventLoop,
-    StopEventLoop,
-    ProcessingCallback {
-        callback: ProcessingCallback,
-    },
-    Multi {
-        msgs: Vec<WorkerMessage>,
-    },
-    RequestArgumentValues {
-        node_id: NodeId,
-        callback: ArgumentValuesCallback,
-    },
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct EventRef {
+    pub node_id: NodeId,
+    pub event_idx: usize,
 }
 
 macro_rules! define_callback {
@@ -115,10 +78,49 @@ macro_rules! define_callback {
 define_callback!(ProcessingCallback);
 define_callback!(ArgumentValuesCallback, Option<ArgumentValues>);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct EventRef {
-    pub node_id: NodeId,
-    pub event_idx: usize,
+/// Command enum sent into the worker loop.
+///
+/// Cancel-safety: `Update`, `Clear`, `StopEventLoop`, and `Exit` tear
+/// down the currently-running event loop, which aborts every lambda
+/// task at its next `.await`. Lambda authors must therefore write
+/// cancel-safe code — any state held across `.await` can be dropped
+/// without cleanup. See [`EventLoopHandle::stop`].
+#[derive(Debug)]
+pub enum WorkerMessage {
+    Exit,
+    Event {
+        event: EventRef,
+    },
+    Events {
+        events: Vec<EventRef>,
+    },
+    EventFromLoop {
+        loop_id: u64,
+        event: EventRef,
+    },
+    EventsFromLoop {
+        loop_id: u64,
+        events: Vec<EventRef>,
+    },
+
+    Update {
+        graph: Graph,
+        func_lib: Arc<FuncLib>,
+    },
+    Clear,
+    ExecuteTerminals,
+    StartEventLoop,
+    StopEventLoop,
+    ProcessingCallback {
+        callback: ProcessingCallback,
+    },
+    Multi {
+        msgs: Vec<WorkerMessage>,
+    },
+    RequestArgumentValues {
+        node_id: NodeId,
+        callback: ArgumentValuesCallback,
+    },
 }
 
 #[derive(Debug)]
@@ -126,11 +128,6 @@ pub struct Worker {
     thread_handle: Option<JoinHandle<()>>,
     tx: UnboundedSender<WorkerMessage>,
     event_loop_started: Arc<AtomicBool>,
-}
-
-#[derive(Debug)]
-struct EventLoopHandle {
-    join_handles: Vec<JoinHandle<()>>,
 }
 
 impl Worker {
@@ -189,6 +186,46 @@ impl Drop for Worker {
     }
 }
 
+#[derive(Debug)]
+struct EventLoopHandle {
+    join_handles: Vec<JoinHandle<()>>,
+}
+
+impl EventLoopHandle {
+    /// Cancels every spawned lambda task. Each task's in-flight
+    /// `.await` is aborted — lambda authors must write cancel-safe
+    /// code. Panics are re-raised on the caller.
+    async fn stop(&mut self) {
+        for ah in self.join_handles.drain(..) {
+            ah.abort();
+            if let Err(err) = ah.await {
+                if err.is_panic() {
+                    std::panic::resume_unwind(err.into_panic());
+                } else {
+                    assert!(err.is_cancelled(), "event task join error: {err}");
+                }
+            }
+        }
+    }
+}
+
+/// Per-iteration accumulator for the worker loop's scan phase. Every
+/// command goes into a field here; side effects (reset, execute,
+/// start loop, run callbacks) happen in the commit phase below.
+#[derive(Default)]
+struct BatchIntent {
+    update: Option<(Graph, Arc<FuncLib>)>,
+    clear: bool,
+    start_loop: bool,
+    stop_loop: bool,
+    execute_terminals: bool,
+    exit: bool,
+    events: HashSet<EventRef>,
+    processing_callbacks: Vec<ProcessingCallback>,
+}
+
+type EventTrigger = (EventRef, EventLambda, SharedAnyState);
+
 async fn worker_loop<ExecutionCallback>(
     mut worker_message_rx: UnboundedReceiver<WorkerMessage>,
     worker_message_tx: UnboundedSender<WorkerMessage>,
@@ -209,7 +246,7 @@ async fn worker_loop<ExecutionCallback>(
     let mut execution_graph_clear = true;
 
     loop {
-        assert!(events_from_loop.is_empty() || event_loop_handle.is_some());
+        assert!(events_from_loop.is_empty());
         assert!(pending.is_empty());
 
         event_loop_started.store(event_loop_handle.is_some(), Ordering::Relaxed);
@@ -361,16 +398,24 @@ async fn worker_loop<ExecutionCallback>(
     }
 }
 
-#[derive(Default)]
-struct BatchIntent {
-    update: Option<(Graph, Arc<FuncLib>)>,
-    clear: bool,
-    start_loop: bool,
-    stop_loop: bool,
-    execute_terminals: bool,
-    exit: bool,
-    events: HashSet<EventRef>,
-    processing_callbacks: Vec<ProcessingCallback>,
+/// Tears down any running event loop, bumps `current_loop_id` so that
+/// stale `EventFromLoop`/`EventsFromLoop` still queued from the old
+/// loop get filtered out, and clears any previously-buffered ones.
+/// Returns `true` if a loop was actually running, which the commit
+/// phase uses to decide whether to implicitly restart.
+async fn reset_event_loop(
+    current_loop_id: &mut u64,
+    event_loop_handle: &mut Option<EventLoopHandle>,
+    events_from_loop: &mut HashSet<(u64, EventRef)>,
+) -> bool {
+    let was_running = event_loop_handle.is_some();
+    if let Some(mut handle) = event_loop_handle.take() {
+        handle.stop().await;
+        tracing::info!("Event loop stopped");
+    }
+    *current_loop_id += 1;
+    events_from_loop.clear();
+    was_running
 }
 
 async fn collect_arguments(
@@ -399,8 +444,6 @@ async fn collect_arguments(
     values
 }
 
-type EventTrigger = (EventRef, EventLambda, SharedAnyState);
-
 async fn start_event_loop(
     worker_message_tx: UnboundedSender<WorkerMessage>,
     event_triggers: Vec<EventTrigger>,
@@ -411,15 +454,17 @@ async fn start_event_loop(
 
     let mut join_handles: Vec<JoinHandle<()>> = Vec::default();
 
-    // Bounded channel provides backpressure for event lambdas.
-    // When the event loop is stopped, this channel is dropped along with event_rx,
-    // causing all event lambda tasks to exit. A new event loop gets a fresh channel,
-    // so old events don't leak into the new one.
+    // Bounded channel provides backpressure for event lambdas. When
+    // the event loop is stopped, this channel is dropped along with
+    // event_rx, causing all event lambda tasks to exit. A new event
+    // loop gets a fresh channel, so old events don't leak into the
+    // new one.
     let (event_tx, mut event_rx) = channel::<EventRef>(EVENT_LOOP_BACKPRESSURE);
 
-    // Forwarder task: batches events from the bounded channel and forwards them
-    // to the main worker queue. This decouples the bounded backpressure from the
-    // unbounded worker queue while allowing efficient batching.
+    // Forwarder task: batches events from the bounded channel and
+    // forwards them to the main worker queue. Decouples the bounded
+    // backpressure from the unbounded worker queue while allowing
+    // efficient batching.
     let join_handle = tokio::spawn({
         let worker_message_tx = worker_message_tx.clone();
         async move {
@@ -460,8 +505,10 @@ async fn start_event_loop(
 
     let ready = ReadyState::new(event_triggers.len());
 
-    // Spawn one task per event lambda. Each task repeatedly invokes its lambda
-    // and sends the event to the bounded channel.
+    // Spawn one task per event lambda: invoke, send, pause-gate-wait,
+    // yield. The pause gate blocks new iterations while the main
+    // worker is processing so events don't build up during graph
+    // execution.
     for (event_ref, event_lambda, event_state) in event_triggers {
         let join_handle = tokio::spawn({
             let event_tx = event_tx.clone();
@@ -477,8 +524,6 @@ async fn start_event_loop(
                     if result.is_err() {
                         return;
                     }
-                    // Pause gate blocks new iterations while the main worker is processing.
-                    // This prevents event buildup during graph execution.
                     pause_gate.wait().await;
                     tokio::task::yield_now().await;
                 }
@@ -492,45 +537,6 @@ async fn start_event_loop(
 
     EventLoopHandle { join_handles }
 }
-
-/// Tears down any running event loop, bumps `current_loop_id` so that
-/// stale `EventFromLoop`/`EventsFromLoop` still queued from the old
-/// loop get filtered out, and clears any previously-buffered ones.
-/// Returns `true` if a loop was actually running, which the commit
-/// phase uses to decide whether to implicitly restart.
-async fn reset_event_loop(
-    current_loop_id: &mut u64,
-    event_loop_handle: &mut Option<EventLoopHandle>,
-    events_from_loop: &mut HashSet<(u64, EventRef)>,
-) -> bool {
-    let was_running = event_loop_handle.is_some();
-    if let Some(mut handle) = event_loop_handle.take() {
-        handle.stop().await;
-        tracing::info!("Event loop stopped");
-    }
-    *current_loop_id += 1;
-    events_from_loop.clear();
-    was_running
-}
-
-impl EventLoopHandle {
-    /// Cancels every spawned lambda task. Each task's in-flight
-    /// `.await` is aborted — lambda authors must write cancel-safe
-    /// code. Panics are re-raised on the caller.
-    async fn stop(&mut self) {
-        for ah in self.join_handles.drain(..) {
-            ah.abort();
-            if let Err(err) = ah.await {
-                if err.is_panic() {
-                    std::panic::resume_unwind(err.into_panic());
-                } else {
-                    assert!(err.is_cancelled(), "event task join error: {err}");
-                }
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
