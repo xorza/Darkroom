@@ -59,6 +59,7 @@ rayon = { version = "*" }
 toml = { version = "*" }
 hashbrown = { version = "*", features = ["serde"] }
 mlua = { version = "*", features = ["serialize", "send", "anyhow", "async", "lua54", "vendored"] }
+rhai = { version = "*", features = ["sync"] }
 syn = { version = "*", features = ["full"] }
 quote = { version = "*" }
 memmap2 = { version = "*" }

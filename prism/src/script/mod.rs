@@ -3,22 +3,29 @@
 //! Scripting boundary for prism.
 //!
 //! The executor is transport-agnostic: every transport produces
-//! [`ScriptRequest`] values into a shared bounded `tokio::mpsc` queue,
-//! and the executor runs each one inside a single `mlua::Lua` VM
-//! pinned to the executor task. Each request gets back a single
-//! [`ScriptResult`] on its [`tokio::sync::oneshot`] reply channel.
+//! [`ScriptRequest`] values into a shared bounded `tokio::mpsc`
+//! queue, and the executor runs each one inside a single
+//! `rhai::Engine` pinned to the executor task. Each request gets
+//! back a single [`ScriptResult`] on its [`tokio::sync::oneshot`]
+//! reply channel.
 //!
 //! Scripts talk back to [`crate::session::Session`] via a separate
-//! `ScriptAction` channel: functions registered into Lua (like
-//! `prism.print`) push actions; `Session` drains them each frame and
-//! applies them. This mirrors the Worker→Session shape and keeps the
-//! executor task off the main thread.
+//! `ScriptAction` channel: functions registered on the engine (like
+//! `prism::print`) push actions; `Session` drains them each frame
+//! and applies them. This mirrors the Worker→Session shape and
+//! keeps the executor task off the main thread.
 //!
-//! Runtime: everything runs on the app-wide `#[tokio::main]` runtime.
-//! The executor loop `await`s the next request (zero CPU when idle),
-//! runs it, then yields back to the scheduler.
+//! Rhai is sandbox-by-default (no filesystem, process, or network
+//! access unless the host opts in), so there's no nil-globals /
+//! whitelist-`_ENV` ceremony. We just layer a few resource caps on
+//! top: max operations, max string/array/map size — see
+//! [`build_engine`].
+//!
+//! Runtime: everything runs on the app-wide `#[tokio::main]`
+//! runtime. The executor loop `await`s the next request (zero CPU
+//! when idle), runs it, then yields back to the scheduler.
 
-use mlua::Lua;
+use rhai::{Engine, Scope};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::{JoinHandle, yield_now};
 use tokio_util::sync::CancellationToken;
@@ -29,6 +36,20 @@ pub mod tcp;
 /// flooding clients feel backpressure on their own sending tasks
 /// instead of piling up memory in the server.
 const REQUEST_QUEUE_DEPTH: usize = 4;
+
+/// Upper bound on the number of Rhai operations a single chunk can
+/// perform. Rhai counts operations at every AST node, so this is
+/// a rough proxy for CPU time. 10M lets legitimate scripts run for
+/// several seconds on modern hardware; infinite loops trip long
+/// before that.
+const MAX_OPERATIONS: u64 = 10_000_000;
+
+/// Largest string / array / object-map a script can construct. Picks
+/// a point where honest usage fits comfortably but DoS attacks
+/// (`"a".repeat(2 ^ 30)`) trip immediately.
+const MAX_STRING_SIZE: usize = 1 << 20; // 1 MiB
+const MAX_ARRAY_LEN: usize = 100_000;
+const MAX_MAP_LEN: usize = 100_000;
 
 /// Work item sent from a transport to the executor. `reply` is a
 /// single-shot channel; the executor runs `source`, then sends one
@@ -174,20 +195,15 @@ async fn run_executor(
     cancel: CancellationToken,
     action_tx: mpsc::UnboundedSender<ScriptAction>,
 ) {
-    let lua = match build_lua(action_tx) {
-        Ok(lua) => lua,
-        Err(err) => {
-            tracing::error!(error = %err, "failed to init Lua VM — script executor exiting");
-            return;
-        }
-    };
+    let engine = build_engine(&action_tx);
+    let mut scope = Scope::new();
 
     loop {
         tokio::select! {
             _ = cancel.cancelled() => break,
             r = rx.recv() => {
                 let Some(req) = r else { break };
-                let result = run_lua(&lua, &req.source);
+                let result = run_script(&engine, &mut scope, &req.source);
                 let _ = req.reply.send(result);
             }
         }
@@ -195,30 +211,41 @@ async fn run_executor(
     }
 }
 
-/// Build a `mlua::Lua` and register the `prism` API table. Uses
-/// `Lua::new()` (not Luau's sandbox — that needs a different feature
-/// flag) so the base stdlib is available; we expose only the
-/// functions we intend as the public surface via `prism.*`.
-fn build_lua(action_tx: mpsc::UnboundedSender<ScriptAction>) -> mlua::Result<Lua> {
-    let lua = Lua::new();
-    let prism = lua.create_table()?;
+/// Build the Rhai engine with resource caps and the `print`
+/// callback wired to Session. Rhai is already sandboxed by default
+/// (no stdlib filesystem, process, or network access), so this
+/// function's job is just to layer runtime limits on top and route
+/// `print(...)` / `debug(...)` to the status log.
+fn build_engine(action_tx: &mpsc::UnboundedSender<ScriptAction>) -> Engine {
+    let mut engine = Engine::new();
+    engine.set_max_operations(MAX_OPERATIONS);
+    engine.set_max_string_size(MAX_STRING_SIZE);
+    engine.set_max_array_size(MAX_ARRAY_LEN);
+    engine.set_max_map_size(MAX_MAP_LEN);
 
-    let tx = action_tx.clone();
-    let print_fn = lua.create_function(move |_, msg: String| {
-        let _ = tx.send(ScriptAction::Print(msg));
-        Ok(())
-    })?;
-    prism.set("print", print_fn)?;
+    let print_tx = action_tx.clone();
+    engine.on_print(move |msg| {
+        let _ = print_tx.send(ScriptAction::Print(msg.to_string()));
+    });
 
-    lua.globals().set("prism", prism)?;
-    Ok(lua)
+    engine.on_debug(|msg, src, pos| {
+        tracing::debug!(
+            target: "prism::script",
+            src = src.unwrap_or("<script>"),
+            line = pos.line().unwrap_or(0),
+            col = pos.position().unwrap_or(0),
+            "{msg}"
+        );
+    });
+
+    engine
 }
 
-/// Run one chunk of source. `exec()` discards expression values; a
-/// future richer API can swap to `eval()` and pack the return values
-/// into [`ScriptResult::stdout`].
-fn run_lua(lua: &Lua, source: &str) -> ScriptResult {
-    match lua.load(source).set_name("=<script>").exec() {
+/// Run one chunk of source inside the persistent scope. Rhai's
+/// `run_with_scope` discards the expression value; swap to
+/// `eval_with_scope::<Dynamic>` later if we want to return values.
+fn run_script(engine: &Engine, scope: &mut Scope, source: &str) -> ScriptResult {
+    match engine.run_with_scope(scope, source) {
         Ok(()) => ScriptResult {
             stdout: String::new(),
             error: None,
