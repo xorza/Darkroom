@@ -7,7 +7,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use strum::VariantNames;
 
-use common::{SharedFn, id_type};
+use common::id_type;
 
 use crate::context::ContextManager;
 
@@ -25,10 +25,6 @@ impl<T: VariantNames> EnumVariants for T {
 
 id_type!(TypeId);
 
-pub type PreviewFn = SharedFn<
-    dyn Fn(&dyn Any, &mut ContextManager) -> Option<Box<dyn PendingPreview>> + Send + Sync,
->;
-
 /// Trait for pending preview generation that requires polling to complete.
 #[async_trait::async_trait]
 pub trait PendingPreview: Send {
@@ -43,6 +39,7 @@ pub trait CustomValue: Any + Send + Sync + Display {
     fn gen_preview(&self, _ctx_manager: &mut ContextManager) -> Option<Box<dyn PendingPreview>> {
         None
     }
+    fn as_any(&self) -> &dyn Any;
 }
 
 /// Definition of a custom type for `DataType::Custom`.
@@ -178,8 +175,6 @@ impl PartialEq for StaticValue {
 
 impl Eq for StaticValue {}
 
-type DisplayFn = SharedFn<dyn Fn(&dyn Any) -> String + Send + Sync>;
-
 #[derive(Default, Clone)]
 pub enum DynamicValue {
     #[default]
@@ -193,12 +188,7 @@ pub enum DynamicValue {
         config: Arc<FsPathConfig>,
         path: String,
     },
-    Custom {
-        type_id: TypeId,
-        data: Arc<dyn Any + Send + Sync>,
-        display_fn: DisplayFn,
-        preview_fn: PreviewFn,
-    },
+    Custom(Arc<dyn CustomValue>),
     Enum {
         type_id: TypeId,
         variant_name: String,
@@ -215,9 +205,9 @@ impl std::fmt::Debug for DynamicValue {
             DynamicValue::Bool(v) => f.debug_tuple("Bool").field(v).finish(),
             DynamicValue::String(v) => f.debug_tuple("String").field(v).finish(),
             DynamicValue::FsPath { path, .. } => f.debug_tuple("FsPath").field(path).finish(),
-            DynamicValue::Custom { type_id, .. } => f
+            DynamicValue::Custom(data) => f
                 .debug_struct("Custom")
-                .field("type_id", type_id)
+                .field("data_type", &data.data_type())
                 .finish_non_exhaustive(),
             DynamicValue::Enum {
                 type_id,
@@ -233,29 +223,7 @@ impl std::fmt::Debug for DynamicValue {
 
 impl DynamicValue {
     pub fn from_custom<T: CustomValue + 'static>(value: T) -> Self {
-        let DataType::Custom(type_def) = &value.data_type() else {
-            panic!("value expected to be of custom type");
-        };
-
-        let type_id = type_def.type_id;
-        let display_fn: DisplayFn = SharedFn::new(Arc::new(|data: &dyn Any| {
-            data.downcast_ref::<T>()
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "<invalid>".to_string())
-        }));
-        let preview_fn: PreviewFn = SharedFn::new(Arc::new(
-            |data: &dyn Any, ctx_manager: &mut ContextManager| {
-                data.downcast_ref::<T>()
-                    .and_then(|custom_value| custom_value.gen_preview(ctx_manager))
-            },
-        ));
-
-        DynamicValue::Custom {
-            type_id,
-            data: Arc::new(value),
-            display_fn,
-            preview_fn,
-        }
+        DynamicValue::Custom(Arc::new(value))
     }
 
     pub fn as_f64(&self) -> Option<f64> {
@@ -294,7 +262,7 @@ impl DynamicValue {
 
     pub fn as_custom<T: CustomValue>(&self) -> Option<&T> {
         match self {
-            DynamicValue::Custom { data, .. } => data.downcast_ref::<T>(),
+            DynamicValue::Custom(data) => data.as_any().downcast_ref::<T>(),
             _ => None,
         }
     }
@@ -317,14 +285,9 @@ impl DynamicValue {
         &mut self,
         ctx_manager: &mut ContextManager,
     ) -> Option<Box<dyn PendingPreview>> {
-        if let DynamicValue::Custom {
-            data, preview_fn, ..
-        } = self
-            && let Some(preview_fn) = preview_fn.as_ref()
-        {
-            (preview_fn)(data.as_ref(), ctx_manager)
-        } else {
-            None
+        match self {
+            DynamicValue::Custom(data) => data.gen_preview(ctx_manager),
+            _ => None,
         }
     }
 }
@@ -495,15 +458,7 @@ impl Display for DynamicValue {
             DynamicValue::Bool(v) => write!(f, "{v}"),
             DynamicValue::String(s) => write!(f, "\"{s}\""),
             DynamicValue::FsPath { path, .. } => write!(f, "\"{path}\""),
-            DynamicValue::Custom {
-                data, display_fn, ..
-            } => {
-                if let Some(display_fn) = display_fn.as_ref() {
-                    write!(f, "{}", display_fn(data.as_ref()))
-                } else {
-                    write!(f, "<custom>")
-                }
-            }
+            DynamicValue::Custom(data) => write!(f, "{data}"),
             DynamicValue::Enum { variant_name, .. } => write!(f, "{variant_name}"),
         }
     }

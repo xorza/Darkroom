@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::sync::LazyLock;
@@ -72,6 +73,10 @@ impl Image {
 impl CustomValue for Image {
     fn data_type(&self) -> DataType {
         IMAGE_DATA_TYPE.clone()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 
     fn gen_preview(&self, ctx_manager: &mut ContextManager) -> Option<Box<dyn PendingPreview>> {
