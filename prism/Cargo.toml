@@ -26,3 +26,6 @@ hashbrown = { workspace = true }
 bumpalo = { workspace = true }
 lz4_flex = { workspace = true }
 rfd = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+clap = { workspace = true }

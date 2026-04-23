@@ -81,6 +81,9 @@ parking_lot = { version = "*" }
 rand_chacha = { version = "*" }
 nalgebra = { version = "*" }
 ryu = { version = "*" }
+ratatui = { version = "*" }
+crossterm = { version = "*" }
+clap = { version = "*", features = ["derive"] }
 
 
 [profile.bench]
