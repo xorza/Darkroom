@@ -11,7 +11,8 @@ use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
 use scenarium::execution_graph::{self, ArgumentValues};
 use scenarium::graph::NodeId;
 use scenarium::prelude::{ExecutionStats, FuncLib, TestFuncHooks, test_func_lib};
-use scenarium::worker::{ArgumentValuesCallback, Worker, WorkerMessage};
+use scenarium::worker::{Worker, WorkerMessage};
+use tokio::sync::oneshot;
 
 use crate::config::Config;
 use crate::gui::frame_output::{FrameOutput, RunCommand};
@@ -323,16 +324,15 @@ impl Session {
         if let Some(node_id) = output.request_argument_values()
             && self.argument_values_cache.mark_pending(node_id)
         {
-            msgs.push(WorkerMessage::RequestArgumentValues {
-                node_id,
-                callback: ArgumentValuesCallback::new({
-                    let ui = self.ui_context.clone();
-                    let tx = self.worker_tx.clone();
-                    move |values| {
-                        let _ = tx.send(WorkerEvent::ArgumentValues { node_id, values });
-                        ui.request_redraw();
-                    }
-                }),
+            let (reply, rx) = oneshot::channel();
+            msgs.push(WorkerMessage::RequestArgumentValues { node_id, reply });
+            let ui = self.ui_context.clone();
+            let tx = self.worker_tx.clone();
+            tokio::spawn(async move {
+                if let Ok(values) = rx.await {
+                    let _ = tx.send(WorkerEvent::ArgumentValues { node_id, values });
+                    ui.request_redraw();
+                }
             });
         }
 

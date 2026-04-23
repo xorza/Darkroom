@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use common::ReadyState;
@@ -12,7 +13,7 @@ use common::pause_gate::PauseGate;
 
 use crate::common::shared_any_state::SharedAnyState;
 use crate::event_lambda::EventLambda;
-use crate::execution_graph::{ArgumentValues, ExecutionGraph, Result};
+use crate::execution_graph::{ArgumentValues, Error, ExecutionGraph, Result};
 use crate::execution_stats::ExecutionStats;
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
@@ -31,52 +32,6 @@ pub struct EventRef {
     pub node_id: NodeId,
     pub event_idx: usize,
 }
-
-macro_rules! define_callback {
-    ($name:ident) => {
-        pub struct $name {
-            inner: Box<dyn FnOnce() + Send + Sync + 'static>,
-        }
-        impl $name {
-            pub fn new(callback: impl FnOnce() + Send + Sync + 'static) -> Self {
-                Self {
-                    inner: Box::new(callback),
-                }
-            }
-            fn call(self) {
-                (self.inner)();
-            }
-        }
-        impl std::fmt::Debug for $name {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.debug_struct(stringify!($name)).finish()
-            }
-        }
-    };
-    ($name:ident, $arg:ty) => {
-        pub struct $name {
-            inner: Box<dyn FnOnce($arg) + Send + Sync + 'static>,
-        }
-        impl $name {
-            pub fn new(callback: impl FnOnce($arg) + Send + Sync + 'static) -> Self {
-                Self {
-                    inner: Box::new(callback),
-                }
-            }
-            fn call(self, arg: $arg) {
-                (self.inner)(arg);
-            }
-        }
-        impl std::fmt::Debug for $name {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.debug_struct(stringify!($name)).finish()
-            }
-        }
-    };
-}
-
-define_callback!(ProcessingCallback);
-define_callback!(ArgumentValuesCallback, Option<ArgumentValues>);
 
 /// Command enum sent into the worker loop.
 ///
@@ -111,15 +66,15 @@ pub enum WorkerMessage {
     ExecuteTerminals,
     StartEventLoop,
     StopEventLoop,
-    ProcessingCallback {
-        callback: ProcessingCallback,
+    Ack {
+        reply: oneshot::Sender<()>,
     },
     Multi {
         msgs: Vec<WorkerMessage>,
     },
     RequestArgumentValues {
         node_id: NodeId,
-        callback: ArgumentValuesCallback,
+        reply: oneshot::Sender<Option<ArgumentValues>>,
     },
 }
 
@@ -221,7 +176,8 @@ struct BatchIntent {
     execute_terminals: bool,
     exit: bool,
     events: HashSet<EventRef>,
-    processing_callbacks: Vec<ProcessingCallback>,
+    acks: Vec<oneshot::Sender<()>>,
+    argument_requests: Vec<(NodeId, oneshot::Sender<Option<ArgumentValues>>)>,
 }
 
 /// One `(event, lambda, state)` triple spawned as a looping task.
@@ -302,14 +258,11 @@ async fn worker_loop<ExecutionCallback>(
                 WorkerMessage::StartEventLoop => intent.start_loop = true,
                 WorkerMessage::StopEventLoop => intent.stop_loop = true,
                 WorkerMessage::Multi { msgs: nested } => pending.extend(nested),
-                WorkerMessage::ProcessingCallback { callback } => {
-                    intent.processing_callbacks.push(callback);
+                WorkerMessage::Ack { reply } => {
+                    intent.acks.push(reply);
                 }
-                WorkerMessage::RequestArgumentValues { node_id, callback } => {
-                    let values = execution_graph
-                        .get_argument_values_with_previews(&node_id)
-                        .await;
-                    callback.call(values);
+                WorkerMessage::RequestArgumentValues { node_id, reply } => {
+                    intent.argument_requests.push((node_id, reply));
                 }
             }
         }
@@ -351,7 +304,7 @@ async fn worker_loop<ExecutionCallback>(
 
         if intent.execute_terminals || !events.is_empty() {
             if execution_graph.is_empty() {
-                tracing::error!("Execution graph is clear, cannot execute graph");
+                (execution_callback)(Err(Error::EmptyGraph));
             } else {
                 let result = execution_graph
                     .execute(
@@ -368,7 +321,7 @@ async fn worker_loop<ExecutionCallback>(
             assert!(event_loop_handle.is_none());
 
             if execution_graph.is_empty() {
-                tracing::error!("Execution graph is clear, cannot start event loop");
+                (execution_callback)(Err(Error::EmptyGraph));
             } else {
                 let result = execution_graph.execute(false, true, []).await;
 
@@ -394,8 +347,15 @@ async fn worker_loop<ExecutionCallback>(
             }
         }
 
-        for callback in intent.processing_callbacks.drain(..) {
-            callback.call();
+        for (node_id, reply) in intent.argument_requests.drain(..) {
+            let values = execution_graph
+                .get_argument_values_with_previews(&node_id)
+                .await;
+            let _ = reply.send(values);
+        }
+
+        for reply in intent.acks.drain(..) {
+            let _ = reply.send(());
         }
 
         drop(event_loop_pause_guard);
@@ -527,18 +487,19 @@ mod tests {
 
     use common::output_stream::OutputStream;
     use common::pause_gate::PauseGate;
-    use tokio::sync::Notify;
     use tokio::sync::mpsc::unbounded_channel;
+    use tokio::sync::{Notify, oneshot};
     use tokio::time::{Duration, timeout};
 
     use crate::common::shared_any_state::SharedAnyState;
     use crate::elements::basic_funclib::BasicFuncLib;
     use crate::elements::worker_events_funclib::WorkerEventsFuncLib;
     use crate::event_lambda::EventLambda;
+    use crate::execution_graph::Error;
     use crate::function::FuncLib;
     use crate::graph::{Graph, Node, NodeId};
 
-    use crate::worker::{EventRef, EventTrigger, ProcessingCallback, Worker, WorkerMessage};
+    use crate::worker::{EventRef, EventTrigger, Worker, WorkerMessage};
 
     fn log_frame_no_graph(func_lib: &FuncLib) -> Graph {
         let mut graph = Graph::default();
@@ -701,9 +662,6 @@ mod tests {
         let event_state = SharedAnyState::default();
 
         let notify_for_callback = Arc::clone(&notify);
-        let callback = ProcessingCallback::new(move || {
-            notify_for_callback.notify_waiters();
-        });
 
         let (tx, mut rx) = unbounded_channel();
         let mut handle = super::start_event_loop(
@@ -721,7 +679,7 @@ mod tests {
         )
         .await;
 
-        callback.call();
+        notify_for_callback.notify_waiters();
 
         let msg = timeout(Duration::from_millis(200), rx.recv())
             .await
@@ -1043,8 +1001,6 @@ mod tests {
 
     #[tokio::test]
     async fn request_argument_values_invokes_callback() {
-        use std::sync::atomic::{AtomicBool, Ordering};
-
         let timers_invoker = WorkerEventsFuncLib::default();
         let basic_invoker = BasicFuncLib::default();
 
@@ -1075,33 +1031,24 @@ mod tests {
         // Wait for execution
         let _ = compute_finish_rx.recv().await;
 
-        let callback_invoked = Arc::new(AtomicBool::new(false));
-        let callback_invoked_clone = Arc::clone(&callback_invoked);
-
-        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        let (reply, rx) = oneshot::channel();
         worker.send(WorkerMessage::RequestArgumentValues {
             node_id: frame_event_node_id,
-            callback: super::ArgumentValuesCallback::new(move |values| {
-                callback_invoked_clone.store(true, Ordering::SeqCst);
-                tx.try_send(values).ok();
-            }),
+            reply,
         });
 
-        let values = timeout(Duration::from_millis(200), rx.recv())
+        let values = timeout(Duration::from_millis(200), rx)
             .await
-            .expect("Callback timeout")
-            .expect("Channel closed");
+            .expect("Reply timeout")
+            .expect("Reply sender dropped");
 
-        assert!(callback_invoked.load(Ordering::SeqCst));
         assert!(values.is_some());
 
         worker.exit();
     }
 
     #[tokio::test]
-    async fn processing_callback_is_invoked_after_execution() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
+    async fn ack_fires_after_execution() {
         let timers_invoker = WorkerEventsFuncLib::default();
         let basic_invoker = BasicFuncLib::default();
 
@@ -1116,9 +1063,7 @@ mod tests {
             compute_finish_tx.try_send(result).ok();
         });
 
-        let callback_count = Arc::new(AtomicUsize::new(0));
-        let callback_count_clone = Arc::clone(&callback_count);
-
+        let (reply, rx) = oneshot::channel();
         worker.send_many([
             WorkerMessage::Update {
                 graph: graph.clone(),
@@ -1130,18 +1075,14 @@ mod tests {
                     event_idx: 0,
                 },
             },
-            WorkerMessage::ProcessingCallback {
-                callback: ProcessingCallback::new(move || {
-                    callback_count_clone.fetch_add(1, Ordering::SeqCst);
-                }),
-            },
+            WorkerMessage::Ack { reply },
         ]);
 
-        // Wait for execution
         let _ = compute_finish_rx.recv().await;
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        assert_eq!(callback_count.load(Ordering::SeqCst), 1);
+        timeout(Duration::from_millis(200), rx)
+            .await
+            .expect("Ack timeout")
+            .expect("Ack sender dropped");
 
         worker.exit();
     }
@@ -1325,18 +1266,13 @@ mod tests {
 
         worker.send_many(std::iter::empty::<WorkerMessage>());
 
-        // Subsequent ProcessingCallback still fires → worker is alive.
-        let notify = Arc::new(Notify::new());
-        let notify_clone = Arc::clone(&notify);
-        worker.send(WorkerMessage::ProcessingCallback {
-            callback: ProcessingCallback::new(move || {
-                notify_clone.notify_one();
-            }),
-        });
-
-        timeout(Duration::from_millis(500), notify.notified())
+        // Subsequent Ack still fires → worker is alive.
+        let (reply, rx) = oneshot::channel();
+        worker.send(WorkerMessage::Ack { reply });
+        timeout(Duration::from_millis(500), rx)
             .await
-            .expect("ProcessingCallback should fire after empty send_many");
+            .expect("Ack should fire after empty send_many")
+            .expect("Ack sender dropped");
 
         worker.exit();
     }
@@ -1349,17 +1285,12 @@ mod tests {
         assert!(!worker.is_event_loop_started());
 
         // Worker still responsive after a no-op stop.
-        let notify = Arc::new(Notify::new());
-        let notify_clone = Arc::clone(&notify);
-        worker.send(WorkerMessage::ProcessingCallback {
-            callback: ProcessingCallback::new(move || {
-                notify_clone.notify_one();
-            }),
-        });
-
-        timeout(Duration::from_millis(500), notify.notified())
+        let (reply, rx) = oneshot::channel();
+        worker.send(WorkerMessage::Ack { reply });
+        timeout(Duration::from_millis(500), rx)
             .await
-            .expect("StopEventLoop with no running loop should be a no-op");
+            .expect("StopEventLoop with no running loop should be a no-op")
+            .expect("Ack sender dropped");
 
         worker.exit();
     }
@@ -1383,18 +1314,16 @@ mod tests {
             func_lib: Arc::new(func_lib),
         });
 
-        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        let (reply, rx) = oneshot::channel();
         worker.send(WorkerMessage::RequestArgumentValues {
             node_id: NodeId::unique(),
-            callback: super::ArgumentValuesCallback::new(move |values| {
-                tx.try_send(values).ok();
-            }),
+            reply,
         });
 
-        let values = timeout(Duration::from_millis(500), rx.recv())
+        let values = timeout(Duration::from_millis(500), rx)
             .await
-            .expect("Callback timeout")
-            .expect("Channel closed");
+            .expect("Reply timeout")
+            .expect("Reply sender dropped");
 
         assert!(values.is_none(), "unknown node should yield None");
 
@@ -1402,40 +1331,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn multiple_processing_callbacks_in_batch_all_run() {
-        // All ProcessingCallbacks in a batch fire exactly once.
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
+    async fn multiple_acks_in_batch_all_run() {
         let mut worker = Worker::new(|_| {});
 
-        let first_count = Arc::new(AtomicUsize::new(0));
-        let second_count = Arc::new(AtomicUsize::new(0));
-        let first_clone = Arc::clone(&first_count);
-        let second_clone = Arc::clone(&second_count);
-
-        let notify = Arc::new(Notify::new());
-        let notify_clone = Arc::clone(&notify);
+        let (reply_a, rx_a) = oneshot::channel();
+        let (reply_b, rx_b) = oneshot::channel();
 
         worker.send_many([
-            WorkerMessage::ProcessingCallback {
-                callback: ProcessingCallback::new(move || {
-                    first_clone.fetch_add(1, Ordering::SeqCst);
-                }),
-            },
-            WorkerMessage::ProcessingCallback {
-                callback: ProcessingCallback::new(move || {
-                    second_clone.fetch_add(1, Ordering::SeqCst);
-                    notify_clone.notify_one();
-                }),
-            },
+            WorkerMessage::Ack { reply: reply_a },
+            WorkerMessage::Ack { reply: reply_b },
         ]);
 
-        timeout(Duration::from_millis(500), notify.notified())
+        timeout(Duration::from_millis(500), rx_a)
             .await
-            .expect("Second ProcessingCallback should fire");
-
-        assert_eq!(first_count.load(Ordering::SeqCst), 1);
-        assert_eq!(second_count.load(Ordering::SeqCst), 1);
+            .expect("First Ack should fire")
+            .expect("First sender dropped");
+        timeout(Duration::from_millis(500), rx_b)
+            .await
+            .expect("Second Ack should fire")
+            .expect("Second sender dropped");
 
         worker.exit();
     }
@@ -1523,7 +1437,7 @@ mod tests {
             },
         });
 
-        // Flush: a ProcessingCallback batched after the stale event
+        // Flush: an Ack batched after the stale event
         // fires at end-of-iteration only if no execute happened
         // spuriously — we don't care about that here; what we care
         // about is that no compute completion fires for the stale
@@ -1535,6 +1449,194 @@ mod tests {
             "stale EventFromLoop must not trigger execution"
         );
         assert!(output_stream.take().await.is_empty());
+
+        worker.exit();
+    }
+
+    // F3: RequestArgumentValues batched with Update must observe the
+    // post-Update graph. Before the fix this ran inline during the scan
+    // phase and returned `None` because the Update was still pending in
+    // `BatchIntent`; after the fix it runs in commit phase and returns
+    // `Some`.
+    #[tokio::test]
+    async fn request_argument_values_batched_with_update_sees_new_graph() {
+        let timers_invoker = WorkerEventsFuncLib::default();
+        let basic_invoker = BasicFuncLib::default();
+        let mut func_lib = basic_invoker.into_func_lib();
+        func_lib.merge(timers_invoker.into_func_lib());
+
+        let graph = log_frame_no_graph(&func_lib);
+        let frame_event_node_id = graph.by_name("frame event").unwrap().id;
+
+        let (compute_finish_tx, _rx) = tokio::sync::mpsc::channel(8);
+        let mut worker = Worker::new(move |result| {
+            compute_finish_tx.try_send(result).ok();
+        });
+
+        // Worker starts with an empty ExecutionGraph. Batch Update +
+        // RequestArgumentValues together: only works if the scan phase
+        // defers the request until after Update commits.
+        let (reply, rx) = oneshot::channel();
+        worker.send_many([
+            WorkerMessage::Update {
+                graph,
+                func_lib: Arc::new(func_lib),
+            },
+            WorkerMessage::RequestArgumentValues {
+                node_id: frame_event_node_id,
+                reply,
+            },
+        ]);
+
+        let values = timeout(Duration::from_millis(500), rx)
+            .await
+            .expect("Reply timeout")
+            .expect("Reply sender dropped");
+
+        assert!(
+            values.is_some(),
+            "request batched with Update must see the newly-loaded graph"
+        );
+
+        worker.exit();
+    }
+
+    // F3: Clear batched after an Update+Execute must clear the graph
+    // before a same-batch RequestArgumentValues runs → request returns
+    // None.
+    #[tokio::test]
+    async fn request_argument_values_batched_with_clear_sees_empty_graph() {
+        let timers_invoker = WorkerEventsFuncLib::default();
+        let basic_invoker = BasicFuncLib::default();
+        let mut func_lib = basic_invoker.into_func_lib();
+        func_lib.merge(timers_invoker.into_func_lib());
+
+        let graph = log_frame_no_graph(&func_lib);
+        let frame_event_node_id = graph.by_name("frame event").unwrap().id;
+
+        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
+        let mut worker = Worker::new(move |result| {
+            compute_finish_tx.try_send(result).ok();
+        });
+
+        // First populate the graph.
+        worker.send(WorkerMessage::Update {
+            graph,
+            func_lib: Arc::new(func_lib),
+        });
+        // Sanity: prior request sees values.
+        let (reply_before, rx_before) = oneshot::channel();
+        worker.send(WorkerMessage::RequestArgumentValues {
+            node_id: frame_event_node_id,
+            reply: reply_before,
+        });
+        assert!(
+            timeout(Duration::from_millis(500), rx_before)
+                .await
+                .expect("pre-clear reply timeout")
+                .expect("pre-clear sender dropped")
+                .is_some()
+        );
+
+        // Now batch Clear + RequestArgumentValues. Request must see the
+        // post-clear state (None), not the pre-clear state (Some).
+        let (reply_after, rx_after) = oneshot::channel();
+        worker.send_many([
+            WorkerMessage::Clear,
+            WorkerMessage::RequestArgumentValues {
+                node_id: frame_event_node_id,
+                reply: reply_after,
+            },
+        ]);
+        let values = timeout(Duration::from_millis(500), rx_after)
+            .await
+            .expect("post-clear reply timeout")
+            .expect("post-clear sender dropped");
+        assert!(
+            values.is_none(),
+            "request batched after Clear must observe empty graph"
+        );
+
+        // Drain any execution-finished callbacks the test produced.
+        while compute_finish_rx.try_recv().is_ok() {}
+
+        worker.exit();
+    }
+
+    // F4: Firing events or ExecuteTerminals against an empty graph
+    // must produce exactly one callback with `Err(EmptyGraph)` — not
+    // silent log-and-drop.
+    #[tokio::test]
+    async fn execute_terminals_on_empty_graph_reports_empty_graph_error() {
+        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
+        let mut worker = Worker::new(move |result| {
+            compute_finish_tx.try_send(result).ok();
+        });
+
+        worker.send(WorkerMessage::ExecuteTerminals);
+
+        let result = timeout(Duration::from_millis(500), compute_finish_rx.recv())
+            .await
+            .expect("ExecuteTerminals on empty graph must fire callback")
+            .expect("callback channel closed");
+
+        assert!(
+            matches!(result, Err(Error::EmptyGraph)),
+            "empty-graph execution must yield Err(EmptyGraph), got {result:?}"
+        );
+
+        worker.exit();
+    }
+
+    #[tokio::test]
+    async fn event_on_empty_graph_reports_empty_graph_error() {
+        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
+        let mut worker = Worker::new(move |result| {
+            compute_finish_tx.try_send(result).ok();
+        });
+
+        worker.send(WorkerMessage::Event {
+            event: EventRef {
+                node_id: NodeId::unique(),
+                event_idx: 0,
+            },
+        });
+
+        let result = timeout(Duration::from_millis(500), compute_finish_rx.recv())
+            .await
+            .expect("Event on empty graph must fire callback")
+            .expect("callback channel closed");
+
+        assert!(
+            matches!(result, Err(Error::EmptyGraph)),
+            "empty-graph event must yield Err(EmptyGraph), got {result:?}"
+        );
+
+        worker.exit();
+    }
+
+    #[tokio::test]
+    async fn start_event_loop_on_empty_graph_reports_empty_graph_error() {
+        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
+        let mut worker = Worker::new(move |result| {
+            compute_finish_tx.try_send(result).ok();
+        });
+
+        worker.send(WorkerMessage::StartEventLoop);
+
+        let result = timeout(Duration::from_millis(500), compute_finish_rx.recv())
+            .await
+            .expect("StartEventLoop on empty graph must fire callback")
+            .expect("callback channel closed");
+
+        assert!(
+            matches!(result, Err(Error::EmptyGraph)),
+            "empty-graph start-loop must yield Err(EmptyGraph), got {result:?}"
+        );
+        assert!(
+            !worker.is_event_loop_started(),
+            "no loop should actually have started"
+        );
 
         worker.exit();
     }
