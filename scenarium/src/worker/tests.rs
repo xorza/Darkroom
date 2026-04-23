@@ -996,6 +996,68 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
     worker.exit();
 }
 
+// F2: when two separate send_many calls queue messages before the
+// worker wakes, the worker's drain-on-wake pulls both into a single
+// BatchIntent — reducing per-slot. Under current_thread scheduling,
+// the test task's synchronous sends all land in the channel before
+// the worker task is polled, so this tests the drain path
+// deterministically.
+#[tokio::test(flavor = "current_thread")]
+async fn drain_on_wake_folds_queued_batches_into_one_commit() {
+    use crate::data::StaticValue;
+
+    let output_stream = OutputStream::new();
+    let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
+    let func_lib = basic_invoker.into_func_lib();
+
+    // Terminal-only graph — one execute produces one line of output.
+    let mut graph = Graph::default();
+    let print_func = func_lib.by_name("print").unwrap();
+    let mut print_node: Node = print_func.into();
+    print_node.id = NodeId::unique();
+    print_node.inputs[0].binding = StaticValue::String("once".to_string()).into();
+    graph.add(print_node);
+
+    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
+    let mut worker = Worker::new(move |result| {
+        compute_finish_tx.try_send(result).ok();
+    });
+
+    // Three separate send_many calls, all synchronous — they all
+    // land in the channel before the worker task is polled.
+    worker.send_many([WorkerMessage::Update {
+        graph,
+        func_lib: Arc::new(func_lib),
+    }]);
+    worker.send_many([WorkerMessage::ExecuteTerminals]);
+    let (reply, sync_rx) = oneshot::channel();
+    worker.send_many([
+        WorkerMessage::ExecuteTerminals,
+        WorkerMessage::Sync { reply },
+    ]);
+
+    // Sync barrier: fires after the commit covering everything above.
+    timeout(Duration::from_millis(500), sync_rx)
+        .await
+        .expect("Sync timeout")
+        .expect("Sync sender dropped");
+
+    // Two ExecuteTerminals across the drained batch reduce to one
+    // idempotent flag → one execute → one callback.
+    let first = compute_finish_rx
+        .try_recv()
+        .expect("batch must fire callback");
+    assert!(first.is_ok(), "{first:?}");
+    assert!(
+        compute_finish_rx.try_recv().is_err(),
+        "two ExecuteTerminals across batches must reduce to one callback"
+    );
+    // Graph ran exactly once.
+    assert_eq!(output_stream.take().await, ["once"]);
+
+    worker.exit();
+}
+
 #[tokio::test]
 async fn execute_terminals_with_start_event_loop_on_empty_graph_is_silent_noop() {
     // F5 + F4: a batch with ExecuteTerminals + StartEventLoop on an

@@ -279,6 +279,12 @@ async fn worker_loop<ExecutionCallback>(
                     Some(b) => cmd_batch = b,
                     None => return,
                 }
+                // Opportunistically fold any additional batches that
+                // queued up during the prior commit. Per-slot
+                // reduction in `BatchIntent` handles the merge.
+                while let Ok(more) = worker_message_rx.try_recv() {
+                    cmd_batch.extend(more);
+                }
             }
             n = async {
                 event_loop.as_mut().unwrap().1
