@@ -925,6 +925,41 @@ impl ExecutionGraph {
         Some(ArgumentValues { inputs, outputs })
     }
 
+    /// Collect every (event → lambda → state) triple that is currently
+    /// "live" — node was executed or cached this run, the event has at
+    /// least one subscriber, and its lambda is populated. Used by the
+    /// worker to spawn the tasks that drive the event loop.
+    pub fn active_event_triggers(
+        &self,
+        stats: &ExecutionStats,
+    ) -> Vec<(EventRef, EventLambda, SharedAnyState)> {
+        stats
+            .cached_nodes
+            .iter()
+            .copied()
+            .chain(stats.executed_nodes.iter().map(|n| n.node_id))
+            .flat_map(|node_id| {
+                let e_node = self.by_id(&node_id).unwrap();
+                let event_state = e_node.event_state.clone();
+                e_node
+                    .events
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, event)| !event.subscribers.is_empty() && !event.lambda.is_none())
+                    .map(move |(event_idx, event)| {
+                        (
+                            EventRef {
+                                node_id: e_node.id,
+                                event_idx,
+                            },
+                            event.lambda.clone(),
+                            event_state.clone(),
+                        )
+                    })
+            })
+            .collect()
+    }
+
     // === Validation ===
 
     fn validate_with(&self, graph: &Graph, func_lib: &FuncLib) {

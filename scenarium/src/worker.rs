@@ -8,19 +8,31 @@ use crate::graph::{Graph, NodeId};
 use common::ReadyState;
 use common::pause_gate::PauseGate;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::mem::take;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
 use tokio::task::JoinHandle;
 
-const MAX_EVENTS_PER_LOOP: usize = 10;
+/// Max messages drained per worker-loop iteration. Bounds latency
+/// between a `send` and the loop observing it.
+const WORKER_MSG_BATCH: usize = 10;
 
-#[derive(Debug, Default)]
+/// Capacity of the bounded channel from each event-lambda task into
+/// the forwarder, and the forwarder's own batch size. Provides
+/// backpressure when a lambda fires faster than the worker drains.
+const EVENT_LOOP_BACKPRESSURE: usize = 10;
+
+/// Command enum sent into the worker loop.
+///
+/// Cancel-safety: `Update`, `Clear`, `StopEventLoop`, and `Exit` tear
+/// down the currently-running event loop, which aborts every lambda
+/// task at its next `.await`. Lambda authors must therefore write
+/// cancel-safe code — any state held across `.await` can be dropped
+/// without cleanup. See [`EventLoopHandle::stop`].
+#[derive(Debug)]
 pub enum WorkerMessage {
-    #[default]
-    Noop,
     Exit,
     Event {
         event: EventRef,
@@ -57,13 +69,51 @@ pub enum WorkerMessage {
     },
 }
 
-pub struct ProcessingCallback {
-    inner: Box<dyn FnOnce() + Send + Sync + 'static>,
+macro_rules! define_callback {
+    ($name:ident) => {
+        pub struct $name {
+            inner: Box<dyn FnOnce() + Send + Sync + 'static>,
+        }
+        impl $name {
+            pub fn new(callback: impl FnOnce() + Send + Sync + 'static) -> Self {
+                Self {
+                    inner: Box::new(callback),
+                }
+            }
+            fn call(self) {
+                (self.inner)();
+            }
+        }
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct(stringify!($name)).finish()
+            }
+        }
+    };
+    ($name:ident, $arg:ty) => {
+        pub struct $name {
+            inner: Box<dyn FnOnce($arg) + Send + Sync + 'static>,
+        }
+        impl $name {
+            pub fn new(callback: impl FnOnce($arg) + Send + Sync + 'static) -> Self {
+                Self {
+                    inner: Box::new(callback),
+                }
+            }
+            fn call(self, arg: $arg) {
+                (self.inner)(arg);
+            }
+        }
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct(stringify!($name)).finish()
+            }
+        }
+    };
 }
 
-pub struct ArgumentValuesCallback {
-    inner: Box<dyn FnOnce(Option<ArgumentValues>) + Send + Sync + 'static>,
-}
+define_callback!(ProcessingCallback);
+define_callback!(ArgumentValuesCallback, Option<ArgumentValues>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EventRef {
@@ -149,26 +199,24 @@ async fn worker_loop<ExecutionCallback>(
 {
     let mut execution_graph = ExecutionGraph::default();
 
-    let mut msgs: Vec<WorkerMessage> = Vec::with_capacity(MAX_EVENTS_PER_LOOP);
+    let mut msgs: Vec<WorkerMessage> = Vec::with_capacity(WORKER_MSG_BATCH);
+    let mut pending: VecDeque<WorkerMessage> = VecDeque::with_capacity(WORKER_MSG_BATCH);
 
-    let mut events: HashSet<EventRef> = HashSet::default();
     let mut events_from_loop: HashSet<(u64, EventRef)> = HashSet::default();
     let mut event_loop_handle: Option<EventLoopHandle> = None;
-    let mut processing_callback: Option<ProcessingCallback> = None;
     let event_loop_pause_gate = PauseGate::default();
     let mut current_loop_id: u64 = 0;
     let mut execution_graph_clear = true;
 
     loop {
-        assert!(events.is_empty());
-        assert!(events_from_loop.is_empty());
-        assert!(processing_callback.is_none());
+        assert!(events_from_loop.is_empty() || event_loop_handle.is_some());
+        assert!(pending.is_empty());
 
         event_loop_started.store(event_loop_handle.is_some(), Ordering::Relaxed);
 
         msgs.clear();
         if worker_message_rx
-            .recv_many(&mut msgs, MAX_EVENTS_PER_LOOP)
+            .recv_many(&mut msgs, WORKER_MSG_BATCH)
             .await
             == 0
         {
@@ -177,87 +225,43 @@ async fn worker_loop<ExecutionCallback>(
 
         let event_loop_pause_guard = event_loop_pause_gate.close();
 
-        let mut execute_terminals: bool = false;
-        let mut update_graph: Option<(Graph, Arc<FuncLib>)> = None;
-        let mut should_start_event_loop = false;
-
-        let mut msg_idx = 0;
-        while msg_idx < msgs.len() {
-            let msg = take(&mut msgs[msg_idx]);
-            msg_idx += 1;
-
+        // --- Scan: accumulate intent, no event-loop side effects.
+        // Breaks on Exit so messages queued after it are discarded.
+        let mut intent = BatchIntent::default();
+        pending.extend(msgs.drain(..));
+        while let Some(msg) = pending.pop_front() {
             match msg {
-                WorkerMessage::Noop => {}
                 WorkerMessage::Exit => {
-                    reset_event_loop(
-                        &mut current_loop_id,
-                        &mut event_loop_handle,
-                        &mut events_from_loop,
-                    )
-                    .await;
-                    return;
+                    intent.exit = true;
+                    pending.clear();
+                    break;
                 }
                 WorkerMessage::Event { event } => {
-                    events.insert(event);
+                    intent.events.insert(event);
                 }
-                WorkerMessage::Events { events: new_events } => events.extend(new_events),
+                WorkerMessage::Events { events } => intent.events.extend(events),
                 WorkerMessage::EventFromLoop { loop_id, event } => {
                     if current_loop_id == loop_id {
                         events_from_loop.insert((loop_id, event));
                     }
                 }
-                WorkerMessage::EventsFromLoop {
-                    loop_id,
-                    events: mut new_events,
-                } => {
+                WorkerMessage::EventsFromLoop { loop_id, events } => {
                     if current_loop_id == loop_id {
-                        for event in new_events.drain(..) {
+                        for event in events {
                             events_from_loop.insert((loop_id, event));
                         }
                     }
                 }
                 WorkerMessage::Update { graph, func_lib } => {
-                    should_start_event_loop |= event_loop_handle.is_some();
-                    reset_event_loop(
-                        &mut current_loop_id,
-                        &mut event_loop_handle,
-                        &mut events_from_loop,
-                    )
-                    .await;
-                    update_graph = Some((graph, func_lib));
+                    intent.update = Some((graph, func_lib));
                 }
-                WorkerMessage::Clear => {
-                    should_start_event_loop |= event_loop_handle.is_some();
-                    reset_event_loop(
-                        &mut current_loop_id,
-                        &mut event_loop_handle,
-                        &mut events_from_loop,
-                    )
-                    .await;
-                    execution_graph.clear();
-                    execution_graph_clear = true;
-                }
-                WorkerMessage::ExecuteTerminals => execute_terminals = true,
-                WorkerMessage::StartEventLoop => {
-                    reset_event_loop(
-                        &mut current_loop_id,
-                        &mut event_loop_handle,
-                        &mut events_from_loop,
-                    )
-                    .await;
-                    should_start_event_loop = true;
-                }
-                WorkerMessage::StopEventLoop => {
-                    reset_event_loop(
-                        &mut current_loop_id,
-                        &mut event_loop_handle,
-                        &mut events_from_loop,
-                    )
-                    .await;
-                }
-                WorkerMessage::Multi { msgs: new_msgs } => msgs.extend(new_msgs),
+                WorkerMessage::Clear => intent.clear = true,
+                WorkerMessage::ExecuteTerminals => intent.execute_terminals = true,
+                WorkerMessage::StartEventLoop => intent.start_loop = true,
+                WorkerMessage::StopEventLoop => intent.stop_loop = true,
+                WorkerMessage::Multi { msgs: nested } => pending.extend(nested),
                 WorkerMessage::ProcessingCallback { callback } => {
-                    processing_callback = Some(callback)
+                    intent.processing_callbacks.push(callback);
                 }
                 WorkerMessage::RequestArgumentValues { node_id, callback } => {
                     let values = collect_arguments(&mut execution_graph, node_id).await;
@@ -266,25 +270,50 @@ async fn worker_loop<ExecutionCallback>(
             }
         }
 
-        if let Some((graph, func_lib)) = update_graph.take() {
+        // --- Commit: one reset if any command touches the loop, then
+        // apply Clear → Update → StartEventLoop in stable order.
+        let needs_reset = intent.update.is_some()
+            || intent.clear
+            || intent.start_loop
+            || intent.stop_loop
+            || intent.exit;
+        let was_running = needs_reset
+            && reset_event_loop(
+                &mut current_loop_id,
+                &mut event_loop_handle,
+                &mut events_from_loop,
+            )
+            .await;
+
+        if intent.exit {
+            return;
+        }
+
+        if intent.clear {
+            execution_graph.clear();
+            execution_graph_clear = true;
+        }
+        if let Some((graph, func_lib)) = intent.update {
             tracing::info!("Graph updated");
             execution_graph.update(&graph, &func_lib);
             execution_graph_clear = false;
         }
+        let should_start_event_loop = intent.start_loop || (was_running && !intent.stop_loop);
 
+        let mut events = intent.events;
         events.extend(
             events_from_loop
                 .drain()
                 .filter_map(|(loop_id, event)| (loop_id == current_loop_id).then_some(event)),
         );
 
-        if execute_terminals || !events.is_empty() {
+        if intent.execute_terminals || !events.is_empty() {
             if execution_graph_clear {
                 tracing::error!("Execution graph is clear, cannot execute graph");
             } else {
                 let result = execution_graph
                     .execute(
-                        execute_terminals,
+                        intent.execute_terminals,
                         event_loop_handle.is_some(),
                         events.drain(),
                     )
@@ -302,14 +331,13 @@ async fn worker_loop<ExecutionCallback>(
                 let result = execution_graph.execute(false, true, []).await;
 
                 if let Ok(execution_stats) = &result {
-                    let events_triggers =
-                        collect_active_event_triggers(&execution_graph, execution_stats);
+                    let event_triggers = execution_graph.active_event_triggers(execution_stats);
 
-                    if !events_triggers.is_empty() {
+                    if !event_triggers.is_empty() {
                         event_loop_handle = Some(
                             start_event_loop(
                                 worker_message_tx.clone(),
-                                events_triggers,
+                                event_triggers,
                                 event_loop_pause_gate.clone(),
                                 current_loop_id,
                             )
@@ -324,13 +352,25 @@ async fn worker_loop<ExecutionCallback>(
             }
         }
 
-        if let Some(callback) = processing_callback.take() {
+        for callback in intent.processing_callbacks.drain(..) {
             callback.call();
         }
 
         drop(event_loop_pause_guard);
         tokio::task::yield_now().await;
     }
+}
+
+#[derive(Default)]
+struct BatchIntent {
+    update: Option<(Graph, Arc<FuncLib>)>,
+    clear: bool,
+    start_loop: bool,
+    stop_loop: bool,
+    execute_terminals: bool,
+    exit: bool,
+    events: HashSet<EventRef>,
+    processing_callbacks: Vec<ProcessingCallback>,
 }
 
 async fn collect_arguments(
@@ -375,7 +415,7 @@ async fn start_event_loop(
     // When the event loop is stopped, this channel is dropped along with event_rx,
     // causing all event lambda tasks to exit. A new event loop gets a fresh channel,
     // so old events don't leak into the new one.
-    let (event_tx, mut event_rx) = channel::<EventRef>(MAX_EVENTS_PER_LOOP);
+    let (event_tx, mut event_rx) = channel::<EventRef>(EVENT_LOOP_BACKPRESSURE);
 
     // Forwarder task: batches events from the bounded channel and forwards them
     // to the main worker queue. This decouples the bounded backpressure from the
@@ -387,7 +427,11 @@ async fn start_event_loop(
             let mut seen: HashSet<EventRef> = HashSet::default();
             loop {
                 events.clear();
-                if event_rx.recv_many(&mut events, MAX_EVENTS_PER_LOOP).await == 0 {
+                if event_rx
+                    .recv_many(&mut events, EVENT_LOOP_BACKPRESSURE)
+                    .await
+                    == 0
+                {
                     return;
                 }
 
@@ -449,76 +493,30 @@ async fn start_event_loop(
     EventLoopHandle { join_handles }
 }
 
+/// Tears down any running event loop, bumps `current_loop_id` so that
+/// stale `EventFromLoop`/`EventsFromLoop` still queued from the old
+/// loop get filtered out, and clears any previously-buffered ones.
+/// Returns `true` if a loop was actually running, which the commit
+/// phase uses to decide whether to implicitly restart.
 async fn reset_event_loop(
     current_loop_id: &mut u64,
     event_loop_handle: &mut Option<EventLoopHandle>,
     events_from_loop: &mut HashSet<(u64, EventRef)>,
-) {
-    if let Some(mut event_loop_handle) = event_loop_handle.take() {
-        event_loop_handle.stop().await;
+) -> bool {
+    let was_running = event_loop_handle.is_some();
+    if let Some(mut handle) = event_loop_handle.take() {
+        handle.stop().await;
         tracing::info!("Event loop stopped");
     }
-
     *current_loop_id += 1;
     events_from_loop.clear();
-}
-
-fn collect_active_event_triggers(
-    execution_graph: &ExecutionGraph,
-    execution_stats: &ExecutionStats,
-) -> Vec<EventTrigger> {
-    execution_stats
-        .cached_nodes
-        .iter()
-        .copied()
-        .chain(execution_stats.executed_nodes.iter().map(|n| n.node_id))
-        .flat_map(|node_id| {
-            let e_node = execution_graph.by_id(&node_id).unwrap();
-            let event_state = e_node.event_state.clone();
-            e_node
-                .events
-                .iter()
-                .enumerate()
-                .filter(|(_, event)| !event.subscribers.is_empty() && !event.lambda.is_none())
-                .map(move |(event_idx, event)| {
-                    (
-                        EventRef {
-                            node_id: e_node.id,
-                            event_idx,
-                        },
-                        event.lambda.clone(),
-                        event_state.clone(),
-                    )
-                })
-        })
-        .collect()
-}
-
-impl ProcessingCallback {
-    pub fn new(callback: impl FnOnce() + Send + Sync + 'static) -> Self {
-        Self {
-            inner: Box::new(callback),
-        }
-    }
-
-    fn call(self) {
-        (self.inner)();
-    }
-}
-
-impl ArgumentValuesCallback {
-    pub fn new(callback: impl FnOnce(Option<ArgumentValues>) + Send + Sync + 'static) -> Self {
-        Self {
-            inner: Box::new(callback),
-        }
-    }
-
-    fn call(self, values: Option<ArgumentValues>) {
-        (self.inner)(values);
-    }
+    was_running
 }
 
 impl EventLoopHandle {
+    /// Cancels every spawned lambda task. Each task's in-flight
+    /// `.await` is aborted — lambda authors must write cancel-safe
+    /// code. Panics are re-raised on the caller.
     async fn stop(&mut self) {
         for ah in self.join_handles.drain(..) {
             ah.abort();
@@ -530,18 +528,6 @@ impl EventLoopHandle {
                 }
             }
         }
-    }
-}
-
-impl std::fmt::Debug for ProcessingCallback {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ProcessingCallback").finish()
-    }
-}
-
-impl std::fmt::Debug for ArgumentValuesCallback {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ArgumentValuesCallback").finish()
     }
 }
 
@@ -1426,10 +1412,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn multiple_processing_callbacks_in_batch_only_last_runs() {
-        // Pins current contract: ProcessingCallback is stored in an Option
-        // so a later entry in the same batch overwrites earlier ones. If
-        // this policy changes to "run all", update this test.
+    async fn multiple_processing_callbacks_in_batch_all_run() {
+        // All ProcessingCallbacks in a batch fire exactly once.
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         let mut worker = Worker::new(|_| {});
@@ -1460,11 +1444,7 @@ mod tests {
             .await
             .expect("Second ProcessingCallback should fire");
 
-        assert_eq!(
-            first_count.load(Ordering::SeqCst),
-            0,
-            "earlier ProcessingCallback in the same batch is currently dropped"
-        );
+        assert_eq!(first_count.load(Ordering::SeqCst), 1);
         assert_eq!(second_count.load(Ordering::SeqCst), 1);
 
         worker.exit();
