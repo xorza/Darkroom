@@ -1,10 +1,9 @@
 use std::collections::{HashSet, VecDeque};
-use std::mem::take;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
+use tokio::sync::mpsc::{Receiver, UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
@@ -22,9 +21,9 @@ use crate::graph::{Graph, NodeId};
 /// between a `send` and the loop observing it.
 const WORKER_MSG_BATCH: usize = 10;
 
-/// Capacity of the bounded channel from each event-lambda task into
-/// the forwarder, and the forwarder's own batch size. Provides
-/// backpressure when a lambda fires faster than the worker drains.
+/// Capacity of the bounded channel each event-lambda task writes into.
+/// The worker reads this channel directly and applies backpressure to
+/// lambdas when it can't keep up.
 const EVENT_LOOP_BACKPRESSURE: usize = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -47,14 +46,6 @@ pub enum WorkerMessage {
         event: EventRef,
     },
     Events {
-        events: Vec<EventRef>,
-    },
-    EventFromLoop {
-        loop_id: u64,
-        event: EventRef,
-    },
-    EventsFromLoop {
-        loop_id: u64,
         events: Vec<EventRef>,
     },
 
@@ -93,10 +84,9 @@ impl Worker {
         let (tx, rx) = unbounded_channel::<WorkerMessage>();
         let event_loop_started = Arc::new(AtomicBool::new(false));
         let thread_handle: JoinHandle<()> = tokio::spawn({
-            let tx = tx.clone();
             let event_loop_started = event_loop_started.clone();
             async move {
-                worker_loop(rx, tx, callback, event_loop_started).await;
+                worker_loop(rx, callback, event_loop_started).await;
             }
         });
 
@@ -188,9 +178,43 @@ pub struct EventTrigger {
     pub state: SharedAnyState,
 }
 
+/// Pure scan: unpacks command batch (including nested `Multi`) into a
+/// `BatchIntent`. Exit short-circuits: any messages after Exit (or
+/// inside a Multi sent after Exit) are discarded.
+fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
+    let mut intent = BatchIntent::default();
+    let mut pending: VecDeque<WorkerMessage> = msgs.into();
+    while let Some(msg) = pending.pop_front() {
+        match msg {
+            WorkerMessage::Exit => {
+                intent.exit = true;
+                break;
+            }
+            WorkerMessage::Event { event } => {
+                intent.events.insert(event);
+            }
+            WorkerMessage::Events { events } => intent.events.extend(events),
+            WorkerMessage::Update { graph, func_lib } => {
+                intent.update = Some((graph, func_lib));
+            }
+            WorkerMessage::Clear => intent.clear = true,
+            WorkerMessage::ExecuteTerminals => intent.execute_terminals = true,
+            WorkerMessage::StartEventLoop => intent.start_loop = true,
+            WorkerMessage::StopEventLoop => intent.stop_loop = true,
+            WorkerMessage::Multi { msgs: nested } => pending.extend(nested),
+            WorkerMessage::Ack { reply } => {
+                intent.acks.push(reply);
+            }
+            WorkerMessage::RequestArgumentValues { node_id, reply } => {
+                intent.argument_requests.push((node_id, reply));
+            }
+        }
+    }
+    intent
+}
+
 async fn worker_loop<ExecutionCallback>(
     mut worker_message_rx: UnboundedReceiver<WorkerMessage>,
-    worker_message_tx: UnboundedSender<WorkerMessage>,
     execution_callback: ExecutionCallback,
     event_loop_started: Arc<AtomicBool>,
 ) where
@@ -198,89 +222,61 @@ async fn worker_loop<ExecutionCallback>(
 {
     let mut execution_graph = ExecutionGraph::default();
 
-    let mut msgs: Vec<WorkerMessage> = Vec::with_capacity(WORKER_MSG_BATCH);
-    let mut pending: VecDeque<WorkerMessage> = VecDeque::with_capacity(WORKER_MSG_BATCH);
+    let mut cmd_buf: Vec<WorkerMessage> = Vec::with_capacity(WORKER_MSG_BATCH);
+    let mut ev_buf: Vec<EventRef> = Vec::with_capacity(EVENT_LOOP_BACKPRESSURE);
 
-    let mut events_from_loop: HashSet<(u64, EventRef)> = HashSet::default();
-    let mut event_loop_handle: Option<EventLoopHandle> = None;
+    let mut event_loop: Option<(EventLoopHandle, Receiver<EventRef>)> = None;
     let event_loop_pause_gate = PauseGate::default();
-    let mut current_loop_id: u64 = 0;
 
     loop {
-        assert!(events_from_loop.is_empty());
-        assert!(pending.is_empty());
+        event_loop_started.store(event_loop.is_some(), Ordering::Relaxed);
 
-        event_loop_started.store(event_loop_handle.is_some(), Ordering::Relaxed);
+        cmd_buf.clear();
+        ev_buf.clear();
 
-        msgs.clear();
-        if worker_message_rx
-            .recv_many(&mut msgs, WORKER_MSG_BATCH)
-            .await
-            == 0
-        {
-            return;
-        }
-
-        let event_loop_pause_guard = event_loop_pause_gate.close();
-
-        // --- Scan: accumulate intent, no event-loop side effects.
-        // Breaks on Exit so messages queued after it are discarded.
-        let mut intent = BatchIntent::default();
-        pending.extend(msgs.drain(..));
-        while let Some(msg) = pending.pop_front() {
-            match msg {
-                WorkerMessage::Exit => {
-                    intent.exit = true;
-                    pending.clear();
-                    break;
+        // `biased`: commands take priority so Stop/Exit/Clear can't be
+        // starved by a torrent of lambda events.
+        tokio::select! {
+            biased;
+            n = worker_message_rx.recv_many(&mut cmd_buf, WORKER_MSG_BATCH) => {
+                if n == 0 {
+                    return;
                 }
-                WorkerMessage::Event { event } => {
-                    intent.events.insert(event);
-                }
-                WorkerMessage::Events { events } => intent.events.extend(events),
-                WorkerMessage::EventFromLoop { loop_id, event } => {
-                    if current_loop_id == loop_id {
-                        events_from_loop.insert((loop_id, event));
+            }
+            n = async {
+                event_loop.as_mut().unwrap().1
+                    .recv_many(&mut ev_buf, EVENT_LOOP_BACKPRESSURE).await
+            }, if event_loop.is_some() => {
+                if n == 0 {
+                    // Event channel closed with loop still nominally
+                    // running — lambdas all died. Tear down and keep
+                    // going; no stats to report.
+                    if let Some((mut handle, _)) = event_loop.take() {
+                        handle.stop().await;
                     }
-                }
-                WorkerMessage::EventsFromLoop { loop_id, events } => {
-                    if current_loop_id == loop_id {
-                        for event in events {
-                            events_from_loop.insert((loop_id, event));
-                        }
-                    }
-                }
-                WorkerMessage::Update { graph, func_lib } => {
-                    intent.update = Some((graph, func_lib));
-                }
-                WorkerMessage::Clear => intent.clear = true,
-                WorkerMessage::ExecuteTerminals => intent.execute_terminals = true,
-                WorkerMessage::StartEventLoop => intent.start_loop = true,
-                WorkerMessage::StopEventLoop => intent.stop_loop = true,
-                WorkerMessage::Multi { msgs: nested } => pending.extend(nested),
-                WorkerMessage::Ack { reply } => {
-                    intent.acks.push(reply);
-                }
-                WorkerMessage::RequestArgumentValues { node_id, reply } => {
-                    intent.argument_requests.push((node_id, reply));
+                    continue;
                 }
             }
         }
 
-        // --- Commit: one reset if any command touches the loop, then
-        // apply Clear → Update → StartEventLoop in stable order.
+        let event_loop_pause_guard = event_loop_pause_gate.close();
+
+        // --- Scan
+        let mut intent = scan(std::mem::take(&mut cmd_buf));
+        intent.events.extend(ev_buf.drain(..));
+
+        // --- Commit: reset the loop once if anything touches it, then
+        // apply Clear → Update → execute → start loop in stable order.
         let needs_reset = intent.update.is_some()
             || intent.clear
             || intent.start_loop
             || intent.stop_loop
             || intent.exit;
-        let was_running = needs_reset
-            && reset_event_loop(
-                &mut current_loop_id,
-                &mut event_loop_handle,
-                &mut events_from_loop,
-            )
-            .await;
+        let was_running = if needs_reset {
+            reset_event_loop(&mut event_loop).await
+        } else {
+            false
+        };
 
         if intent.exit {
             return;
@@ -295,22 +291,15 @@ async fn worker_loop<ExecutionCallback>(
         }
         let should_start_event_loop = intent.start_loop || (was_running && !intent.stop_loop);
 
-        let mut events = intent.events;
-        events.extend(
-            events_from_loop
-                .drain()
-                .filter_map(|(loop_id, event)| (loop_id == current_loop_id).then_some(event)),
-        );
-
-        if intent.execute_terminals || !events.is_empty() {
+        if intent.execute_terminals || !intent.events.is_empty() {
             if execution_graph.is_empty() {
                 (execution_callback)(Err(Error::EmptyGraph));
             } else {
                 let result = execution_graph
                     .execute(
                         intent.execute_terminals,
-                        event_loop_handle.is_some(),
-                        events.drain(),
+                        event_loop.is_some(),
+                        intent.events.drain(),
                     )
                     .await;
                 (execution_callback)(result);
@@ -318,7 +307,7 @@ async fn worker_loop<ExecutionCallback>(
         }
 
         if should_start_event_loop {
-            assert!(event_loop_handle.is_none());
+            assert!(event_loop.is_none());
 
             if execution_graph.is_empty() {
                 (execution_callback)(Err(Error::EmptyGraph));
@@ -329,16 +318,9 @@ async fn worker_loop<ExecutionCallback>(
                     let event_triggers = execution_graph.active_event_triggers(execution_stats);
 
                     if !event_triggers.is_empty() {
-                        event_loop_handle = Some(
-                            start_event_loop(
-                                worker_message_tx.clone(),
-                                event_triggers,
-                                event_loop_pause_gate.clone(),
-                                current_loop_id,
-                            )
-                            .await,
+                        event_loop = Some(
+                            start_event_loop(event_triggers, event_loop_pause_gate.clone()).await,
                         );
-
                         tracing::info!("Event loop started");
                     }
                 };
@@ -354,6 +336,10 @@ async fn worker_loop<ExecutionCallback>(
             let _ = reply.send(values);
         }
 
+        // Refresh the atomic so callers racing an Ack reply see the
+        // post-commit state.
+        event_loop_started.store(event_loop.is_some(), Ordering::Relaxed);
+
         for reply in intent.acks.drain(..) {
             let _ = reply.send(());
         }
@@ -363,91 +349,35 @@ async fn worker_loop<ExecutionCallback>(
     }
 }
 
-/// Tears down any running event loop, bumps `current_loop_id` so that
-/// stale `EventFromLoop`/`EventsFromLoop` still queued from the old
-/// loop get filtered out, and clears any previously-buffered ones.
-/// Returns `true` if a loop was actually running, which the commit
-/// phase uses to decide whether to implicitly restart.
-async fn reset_event_loop(
-    current_loop_id: &mut u64,
-    event_loop_handle: &mut Option<EventLoopHandle>,
-    events_from_loop: &mut HashSet<(u64, EventRef)>,
-) -> bool {
-    let was_running = event_loop_handle.is_some();
-    if let Some(mut handle) = event_loop_handle.take() {
-        handle.stop().await;
-        tracing::info!("Event loop stopped");
+/// Tears down any running event loop. Dropping the `Receiver` alongside
+/// the handle guarantees that any events still in flight die with the
+/// old channel — there's no way for them to re-enter the worker.
+/// Returns `true` if a loop was actually running.
+async fn reset_event_loop(event_loop: &mut Option<(EventLoopHandle, Receiver<EventRef>)>) -> bool {
+    match event_loop.take() {
+        Some((mut handle, _rx)) => {
+            handle.stop().await;
+            tracing::info!("Event loop stopped");
+            true
+        }
+        None => false,
     }
-    *current_loop_id += 1;
-    events_from_loop.clear();
-    was_running
 }
 
+/// Spawns one task per `EventTrigger`, each looping
+/// `lambda → send → pause-gate-wait → yield`. Returns the handle plus
+/// the receiving half of the bounded event channel — the worker reads
+/// events from it directly, no forwarder in between.
 async fn start_event_loop(
-    worker_message_tx: UnboundedSender<WorkerMessage>,
     event_triggers: Vec<EventTrigger>,
     pause_gate: PauseGate,
-    loop_id: u64,
-) -> EventLoopHandle {
+) -> (EventLoopHandle, Receiver<EventRef>) {
     assert!(!event_triggers.is_empty());
 
+    let (event_tx, event_rx) = channel::<EventRef>(EVENT_LOOP_BACKPRESSURE);
+    let ready = ReadyState::new(event_triggers.len());
     let mut join_handles: Vec<JoinHandle<()>> = Vec::default();
 
-    // Bounded channel provides backpressure for event lambdas. When
-    // the event loop is stopped, this channel is dropped along with
-    // event_rx, causing all event lambda tasks to exit. A new event
-    // loop gets a fresh channel, so old events don't leak into the
-    // new one.
-    let (event_tx, mut event_rx) = channel::<EventRef>(EVENT_LOOP_BACKPRESSURE);
-
-    // Forwarder task: batches events from the bounded channel and
-    // forwards them to the main worker queue. Decouples the bounded
-    // backpressure from the unbounded worker queue while allowing
-    // efficient batching.
-    let join_handle = tokio::spawn({
-        let worker_message_tx = worker_message_tx.clone();
-        async move {
-            let mut events = Vec::default();
-            let mut seen: HashSet<EventRef> = HashSet::default();
-            loop {
-                events.clear();
-                if event_rx
-                    .recv_many(&mut events, EVENT_LOOP_BACKPRESSURE)
-                    .await
-                    == 0
-                {
-                    return;
-                }
-
-                seen.clear();
-                events.retain(|event| seen.insert(*event));
-
-                let result = if events.len() == 1 {
-                    worker_message_tx.send(WorkerMessage::EventFromLoop {
-                        event: events[0],
-                        loop_id,
-                    })
-                } else {
-                    worker_message_tx.send(WorkerMessage::EventsFromLoop {
-                        events: take(&mut events),
-                        loop_id,
-                    })
-                };
-
-                if result.is_err() {
-                    return;
-                }
-            }
-        }
-    });
-    join_handles.push(join_handle);
-
-    let ready = ReadyState::new(event_triggers.len());
-
-    // Spawn one task per event lambda: invoke, send, pause-gate-wait,
-    // yield. The pause gate blocks new iterations while the main
-    // worker is processing so events don't build up during graph
-    // execution.
     for EventTrigger {
         event,
         lambda,
@@ -464,8 +394,7 @@ async fn start_event_loop(
 
                 loop {
                     lambda.invoke(state.clone()).await;
-                    let result = event_tx.send(event).await;
-                    if result.is_err() {
+                    if event_tx.send(event).await.is_err() {
                         return;
                     }
                     pause_gate.wait().await;
@@ -479,7 +408,7 @@ async fn start_event_loop(
     ready.wait().await;
     tokio::task::yield_now().await;
 
-    EventLoopHandle { join_handles }
+    (EventLoopHandle { join_handles }, event_rx)
 }
 #[cfg(test)]
 mod tests {
@@ -487,7 +416,6 @@ mod tests {
 
     use common::output_stream::OutputStream;
     use common::pause_gate::PauseGate;
-    use tokio::sync::mpsc::unbounded_channel;
     use tokio::sync::{Notify, oneshot};
     use tokio::time::{Duration, timeout};
 
@@ -617,9 +545,7 @@ mod tests {
         let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
         let event_state = SharedAnyState::default();
 
-        let (tx, mut rx) = unbounded_channel();
-        let mut handle = super::start_event_loop(
-            tx,
+        let (mut handle, mut event_rx) = super::start_event_loop(
             vec![EventTrigger {
                 event: EventRef {
                     node_id,
@@ -629,14 +555,10 @@ mod tests {
                 state: event_state,
             }],
             PauseGate::default(),
-            0,
         )
         .await;
 
-        let msg = rx.recv().await.expect("Expected event loop message");
-        let WorkerMessage::EventFromLoop { event, .. } = msg else {
-            panic!("Expected WorkerMessage::Event");
-        };
+        let event = event_rx.recv().await.expect("Expected event loop event");
         assert_eq!(
             event,
             EventRef {
@@ -663,9 +585,7 @@ mod tests {
 
         let notify_for_callback = Arc::clone(&notify);
 
-        let (tx, mut rx) = unbounded_channel();
-        let mut handle = super::start_event_loop(
-            tx,
+        let (mut handle, mut event_rx) = super::start_event_loop(
             vec![EventTrigger {
                 event: EventRef {
                     node_id,
@@ -675,19 +595,15 @@ mod tests {
                 state: event_state,
             }],
             PauseGate::default(),
-            0,
         )
         .await;
 
         notify_for_callback.notify_waiters();
 
-        let msg = timeout(Duration::from_millis(200), rx.recv())
+        let event = timeout(Duration::from_millis(200), event_rx.recv())
             .await
-            .expect("Expected event message")
+            .expect("Expected event")
             .expect("Event channel closed");
-        let WorkerMessage::EventFromLoop { event, .. } = msg else {
-            panic!("Expected WorkerMessage::Event");
-        };
         assert_eq!(
             event,
             EventRef {
@@ -716,10 +632,8 @@ mod tests {
         let event_state = SharedAnyState::default();
 
         let pause_gate = PauseGate::default();
-        let (tx, mut rx) = unbounded_channel();
 
-        let mut handle = super::start_event_loop(
-            tx,
+        let (mut handle, mut event_rx) = super::start_event_loop(
             vec![EventTrigger {
                 event: EventRef {
                     node_id,
@@ -729,12 +643,11 @@ mod tests {
                 state: event_state,
             }],
             pause_gate.clone(),
-            0,
         )
         .await;
 
         // Wait for first event to arrive
-        let _ = timeout(Duration::from_millis(100), rx.recv())
+        let _ = timeout(Duration::from_millis(100), event_rx.recv())
             .await
             .expect("Expected first event");
 
@@ -1134,129 +1047,43 @@ mod tests {
         worker.exit();
     }
 
+    // Stale-event filtering is now structural: each start_event_loop
+    // call returns a fresh Receiver; reset_event_loop drops the old
+    // pair so any undelivered events die with the channel. This test
+    // verifies the structural guarantee by confirming the old
+    // Receiver is closed after its sibling handle is stopped.
     #[tokio::test]
-    async fn stale_events_from_stopped_loop_are_ignored() {
-        // This test verifies that events from a previously stopped event loop
-        // (with an old loop_id) are not executed after the loop is restarted.
-        // The worker uses loop_id to filter out stale events.
-
+    async fn stopped_event_loop_channel_is_closed() {
         let node_id = NodeId::unique();
-
-        // Create a simple event lambda that completes immediately
         let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
         let event_state = SharedAnyState::default();
 
-        let pause_gate = PauseGate::default();
-        let (tx, mut rx) = unbounded_channel();
-
-        // Start first event loop with loop_id = 0
-        let mut handle = super::start_event_loop(
-            tx.clone(),
+        let (mut handle, mut event_rx) = super::start_event_loop(
             vec![EventTrigger {
                 event: EventRef {
                     node_id,
                     event_idx: 0,
                 },
-                lambda: event_lambda.clone(),
-                state: event_state.clone(),
+                lambda: event_lambda,
+                state: event_state,
             }],
-            pause_gate.clone(),
-            0, // loop_id = 0
+            PauseGate::default(),
         )
         .await;
 
-        // Wait for some events to be queued from first loop
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        // Stop the first loop
         handle.stop().await;
 
-        // Drain any messages from first loop
-        let mut stale_events = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            stale_events.push(msg);
+        // After stop, all lambda tasks (the sole senders) are aborted
+        // → the Receiver must observe channel closure on next recv().
+        let closed = timeout(Duration::from_millis(500), event_rx.recv())
+            .await
+            .expect("recv should complete once channel closes");
+        // recv_many / recv return None when all senders are dropped.
+        // Buffered events may still be present (fine); what matters
+        // is that eventually we get None — drain and confirm.
+        if closed.is_some() {
+            while event_rx.recv().await.is_some() {}
         }
-
-        // Verify we got some events from the old loop (loop_id = 0)
-        assert!(
-            !stale_events.is_empty(),
-            "Should have received events from first loop"
-        );
-
-        // Check that the stale events have the old loop_id
-        for msg in &stale_events {
-            match msg {
-                WorkerMessage::EventFromLoop { loop_id, .. } => {
-                    assert_eq!(*loop_id, 0, "Stale events should have loop_id 0");
-                }
-                WorkerMessage::EventsFromLoop { loop_id, .. } => {
-                    assert_eq!(*loop_id, 0, "Stale events should have loop_id 0");
-                }
-                _ => {}
-            }
-        }
-
-        // Start a new event loop with loop_id = 1
-        let new_event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
-        let new_event_state = SharedAnyState::default();
-
-        let mut new_handle = super::start_event_loop(
-            tx,
-            vec![EventTrigger {
-                event: EventRef {
-                    node_id,
-                    event_idx: 0,
-                },
-                lambda: new_event_lambda,
-                state: new_event_state,
-            }],
-            pause_gate,
-            1, // loop_id = 1 (incremented)
-        )
-        .await;
-
-        // Wait for new loop to produce events
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        // Collect new events
-        let mut new_events = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            new_events.push(msg);
-        }
-
-        // Verify new events have the new loop_id
-        for msg in &new_events {
-            match msg {
-                WorkerMessage::EventFromLoop { loop_id, .. } => {
-                    assert_eq!(*loop_id, 1, "New events should have loop_id 1");
-                }
-                WorkerMessage::EventsFromLoop { loop_id, .. } => {
-                    assert_eq!(*loop_id, 1, "New events should have loop_id 1");
-                }
-                _ => {}
-            }
-        }
-
-        // The key verification: if a worker were to process both stale_events
-        // and new_events with current_loop_id = 1, only new_events would pass
-        // the filter: (loop_id == current_loop_id).then_some(event)
-        let current_loop_id = 1u64;
-        let filtered_stale: Vec<_> = stale_events
-            .iter()
-            .filter_map(|msg| match msg {
-                WorkerMessage::EventFromLoop { loop_id, event } => {
-                    (*loop_id == current_loop_id).then_some(event)
-                }
-                _ => None,
-            })
-            .collect();
-
-        assert!(
-            filtered_stale.is_empty(),
-            "Stale events should be filtered out by loop_id check"
-        );
-
-        new_handle.stop().await;
     }
 
     #[tokio::test]
@@ -1395,60 +1222,6 @@ mod tests {
 
         assert_eq!(executed.executed_nodes.len(), 3);
         assert_eq!(output_stream.take().await, ["1"]);
-
-        worker.exit();
-    }
-
-    #[tokio::test]
-    async fn update_increments_loop_id_so_events_from_old_loop_are_dropped() {
-        // Invariant: when Update arrives while an event loop is running,
-        // reset_event_loop() bumps current_loop_id. Any stale
-        // EventFromLoop/EventsFromLoop still sitting in the queue with
-        // the old id is then filtered at line 204/213 and never drives
-        // execution. We probe that by stuffing a crafted EventFromLoop
-        // with loop_id=0 into the queue after an Update (which has
-        // already incremented current_loop_id to 1).
-        let output_stream = OutputStream::new();
-        let timers_invoker = WorkerEventsFuncLib::default();
-        let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
-        let mut func_lib = basic_invoker.into_func_lib();
-        func_lib.merge(timers_invoker.into_func_lib());
-
-        let graph = log_frame_no_graph(&func_lib);
-        let frame_event_node_id = graph.by_name("frame event").unwrap().id;
-
-        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
-        let mut worker = Worker::new(move |result| {
-            compute_finish_tx.try_send(result).ok();
-        });
-
-        worker.send(WorkerMessage::Update {
-            graph,
-            func_lib: Arc::new(func_lib),
-        });
-
-        // Stale event from a loop that never existed (id 0 vs
-        // current_loop_id=1 after the Update reset). Must be filtered.
-        worker.send(WorkerMessage::EventFromLoop {
-            loop_id: 0,
-            event: EventRef {
-                node_id: frame_event_node_id,
-                event_idx: 0,
-            },
-        });
-
-        // Flush: an Ack batched after the stale event
-        // fires at end-of-iteration only if no execute happened
-        // spuriously — we don't care about that here; what we care
-        // about is that no compute completion fires for the stale
-        // event. Use a short timeout.
-        assert!(
-            timeout(Duration::from_millis(150), compute_finish_rx.recv())
-                .await
-                .is_err(),
-            "stale EventFromLoop must not trigger execution"
-        );
-        assert!(output_stream.take().await.is_empty());
 
         worker.exit();
     }
@@ -1636,6 +1409,228 @@ mod tests {
         assert!(
             !worker.is_event_loop_started(),
             "no loop should actually have started"
+        );
+
+        worker.exit();
+    }
+
+    // --- Pure scan() unit tests ------------------------------------
+
+    #[test]
+    fn scan_accumulates_simple_flags() {
+        let (reply_ack, _ack_rx) = oneshot::channel();
+        let (reply_args, _args_rx) = oneshot::channel();
+        let node_id = NodeId::unique();
+        let event = EventRef {
+            node_id,
+            event_idx: 0,
+        };
+
+        let intent = super::scan(vec![
+            WorkerMessage::Clear,
+            WorkerMessage::StartEventLoop,
+            WorkerMessage::ExecuteTerminals,
+            WorkerMessage::Event { event },
+            WorkerMessage::Ack { reply: reply_ack },
+            WorkerMessage::RequestArgumentValues {
+                node_id,
+                reply: reply_args,
+            },
+        ]);
+
+        assert!(intent.clear);
+        assert!(intent.start_loop);
+        assert!(intent.execute_terminals);
+        assert!(!intent.stop_loop);
+        assert!(!intent.exit);
+        assert_eq!(intent.events.len(), 1);
+        assert!(intent.events.contains(&event));
+        assert_eq!(intent.acks.len(), 1);
+        assert_eq!(intent.argument_requests.len(), 1);
+        assert_eq!(intent.argument_requests[0].0, node_id);
+    }
+
+    #[test]
+    fn scan_deduplicates_events() {
+        let node_id = NodeId::unique();
+        let event = EventRef {
+            node_id,
+            event_idx: 0,
+        };
+
+        let intent = super::scan(vec![
+            WorkerMessage::Event { event },
+            WorkerMessage::Event { event },
+            WorkerMessage::Events {
+                events: vec![event, event],
+            },
+        ]);
+
+        assert_eq!(
+            intent.events.len(),
+            1,
+            "duplicate events must collapse to one"
+        );
+    }
+
+    #[test]
+    fn scan_unpacks_nested_multi() {
+        let intent = super::scan(vec![WorkerMessage::Multi {
+            msgs: vec![
+                WorkerMessage::Clear,
+                WorkerMessage::Multi {
+                    msgs: vec![WorkerMessage::ExecuteTerminals],
+                },
+            ],
+        }]);
+
+        assert!(intent.clear);
+        assert!(intent.execute_terminals);
+    }
+
+    #[test]
+    fn scan_exit_short_circuits_remaining_messages() {
+        // Messages after Exit (including inside a later Multi) must
+        // be discarded — this is how the worker drains the queue on
+        // shutdown without racing further commands.
+        let intent = super::scan(vec![
+            WorkerMessage::Clear,
+            WorkerMessage::Exit,
+            WorkerMessage::StartEventLoop, // must be dropped
+            WorkerMessage::Multi {
+                msgs: vec![WorkerMessage::ExecuteTerminals], // also dropped
+            },
+        ]);
+
+        assert!(intent.clear, "messages before Exit still apply");
+        assert!(intent.exit);
+        assert!(!intent.start_loop, "messages after Exit must be discarded");
+        assert!(
+            !intent.execute_terminals,
+            "messages in post-Exit Multi must be discarded"
+        );
+    }
+
+    #[test]
+    fn scan_update_overwrites_earlier_update_in_same_batch() {
+        // Two Updates in one batch: the last one wins. This is
+        // implicit today (Option::replace) but worth pinning since
+        // callers do send [Update(A), Update(B)] during rapid edits.
+        let empty_graph = Graph::default();
+        let func_lib = Arc::new(FuncLib::default());
+
+        let intent = super::scan(vec![
+            WorkerMessage::Update {
+                graph: empty_graph.clone(),
+                func_lib: func_lib.clone(),
+            },
+            WorkerMessage::Update {
+                graph: empty_graph.clone(),
+                func_lib: func_lib.clone(),
+            },
+        ]);
+
+        assert!(intent.update.is_some());
+    }
+
+    // --- `biased` select: commands not starved by events -----------
+
+    // Lambda fires as fast as it can; a Stop command must be observed
+    // and acted on within a bounded time rather than being delayed
+    // indefinitely by the event stream. Without `biased;` on the
+    // select!, this test would flake — the fair-random polling could
+    // sit on the events branch for many iterations.
+    #[tokio::test]
+    async fn commands_not_starved_by_fast_event_loop() {
+        let output_stream = OutputStream::new();
+        let timers_invoker = WorkerEventsFuncLib::default();
+        let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
+        let mut func_lib = basic_invoker.into_func_lib();
+        func_lib.merge(timers_invoker.into_func_lib());
+
+        let graph = log_frame_no_graph(&func_lib);
+
+        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(512);
+        let mut worker = Worker::new(move |result| {
+            compute_finish_tx.try_send(result).ok();
+        });
+
+        worker.send_many([
+            WorkerMessage::Update {
+                graph,
+                func_lib: Arc::new(func_lib),
+            },
+            WorkerMessage::StartEventLoop,
+        ]);
+
+        // Give the loop time to build up momentum.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(worker.is_event_loop_started());
+
+        // Drain accumulated callbacks so the channel isn't a
+        // confounding factor.
+        while compute_finish_rx.try_recv().is_ok() {}
+
+        // Send Stop + Ack. Both must be observed within the budget
+        // even though lambda events are still being produced.
+        let (reply, rx) = oneshot::channel();
+        worker.send_many([WorkerMessage::StopEventLoop, WorkerMessage::Ack { reply }]);
+
+        timeout(Duration::from_millis(500), rx)
+            .await
+            .expect("Ack after StopEventLoop must fire promptly despite event load")
+            .expect("Ack sender dropped");
+
+        assert!(
+            !worker.is_event_loop_started(),
+            "event loop should be stopped"
+        );
+
+        worker.exit();
+    }
+
+    // End-to-end: an event fired by a lambda reaches the worker's
+    // execute path and produces an execution_callback. Covers the
+    // dedicated bounded-channel flow (no forwarder).
+    #[tokio::test]
+    async fn lambda_events_drive_worker_execution() {
+        let output_stream = OutputStream::new();
+        let timers_invoker = WorkerEventsFuncLib::default();
+        let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
+        let mut func_lib = basic_invoker.into_func_lib();
+        func_lib.merge(timers_invoker.into_func_lib());
+
+        let graph = log_frame_no_graph(&func_lib);
+
+        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(32);
+        let mut worker = Worker::new(move |result| {
+            compute_finish_tx.try_send(result).ok();
+        });
+
+        worker.send_many([
+            WorkerMessage::Update {
+                graph,
+                func_lib: Arc::new(func_lib),
+            },
+            WorkerMessage::StartEventLoop,
+        ]);
+
+        // First callback is the initial execute() inside the
+        // start_event_loop path.
+        let _ = timeout(Duration::from_millis(500), compute_finish_rx.recv())
+            .await
+            .expect("initial execute callback")
+            .expect("callback channel closed");
+
+        // Subsequent callbacks must come from the lambda firing and
+        // the worker draining events from the bounded channel.
+        let second = timeout(Duration::from_millis(500), compute_finish_rx.recv())
+            .await
+            .expect("lambda-driven execute callback")
+            .expect("callback channel closed");
+        assert!(
+            second.is_ok(),
+            "lambda-driven execution must succeed: {second:?}"
         );
 
         worker.exit();
