@@ -45,7 +45,7 @@ enum WorkerEvent {
 
 #[derive(Debug)]
 pub struct Session {
-    func_lib: FuncLib,
+    func_lib: Arc<FuncLib>,
     view_graph: ViewGraph,
     execution_stats: Option<ExecutionStats>,
     argument_values_cache: ArgumentValuesCache,
@@ -83,6 +83,7 @@ impl Session {
         func_lib.merge(BasicFuncLib::default());
         func_lib.merge(WorkerEventsFuncLib::default());
         func_lib.merge(ImageFuncLib::default());
+        let func_lib = Arc::new(func_lib);
 
         let (script_action_tx, script_action_rx) = unbounded_channel::<ScriptAction>();
         let script_executor = ScriptExecutor::new(
@@ -414,7 +415,7 @@ mod tests {
         let (worker_tx, worker_rx) = unbounded_channel::<WorkerEvent>();
         let (_script_tx, script_action_rx) = unbounded_channel::<ScriptAction>();
         Session {
-            func_lib: FuncLib::default(),
+            func_lib: Arc::new(FuncLib::default()),
             view_graph: ViewGraph::default(),
             execution_stats: None,
             argument_values_cache: ArgumentValuesCache::default(),

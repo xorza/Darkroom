@@ -39,7 +39,7 @@ pub enum WorkerMessage {
 
     Update {
         graph: Graph,
-        func_lib: FuncLib,
+        func_lib: Arc<FuncLib>,
     },
     Clear,
     ExecuteTerminals,
@@ -178,7 +178,7 @@ async fn worker_loop<ExecutionCallback>(
         let event_loop_pause_guard = event_loop_pause_gate.close();
 
         let mut execute_terminals: bool = false;
-        let mut update_graph: Option<(Graph, FuncLib)> = None;
+        let mut update_graph: Option<(Graph, Arc<FuncLib>)> = None;
         let mut should_start_event_loop = false;
 
         let mut msg_idx = 0;
@@ -617,7 +617,7 @@ mod tests {
         worker.send_many([
             WorkerMessage::Update {
                 graph: graph.clone(),
-                func_lib: func_lib.clone(),
+                func_lib: Arc::new(func_lib.clone()),
             },
             WorkerMessage::Event {
                 event: EventRef {
@@ -862,7 +862,7 @@ mod tests {
         worker.send_many([
             WorkerMessage::Update {
                 graph: graph.clone(),
-                func_lib: func_lib.clone(),
+                func_lib: Arc::new(func_lib.clone()),
             },
             WorkerMessage::Event {
                 event: EventRef {
@@ -916,7 +916,7 @@ mod tests {
             msgs: vec![
                 WorkerMessage::Update {
                     graph: graph.clone(),
-                    func_lib: func_lib.clone(),
+                    func_lib: Arc::new(func_lib.clone()),
                 },
                 WorkerMessage::Multi {
                     msgs: vec![WorkerMessage::Event {
@@ -961,7 +961,7 @@ mod tests {
 
         worker.send(WorkerMessage::Update {
             graph: graph.clone(),
-            func_lib: func_lib.clone(),
+            func_lib: Arc::new(func_lib.clone()),
         });
 
         // Send the same event multiple times in one batch
@@ -1008,7 +1008,7 @@ mod tests {
         worker.send_many([
             WorkerMessage::Update {
                 graph: graph.clone(),
-                func_lib: func_lib.clone(),
+                func_lib: Arc::new(func_lib.clone()),
             },
             WorkerMessage::ExecuteTerminals,
         ]);
@@ -1045,7 +1045,7 @@ mod tests {
         worker.send_many([
             WorkerMessage::Update {
                 graph: graph.clone(),
-                func_lib: func_lib.clone(),
+                func_lib: Arc::new(func_lib.clone()),
             },
             WorkerMessage::StartEventLoop,
         ]);
@@ -1086,7 +1086,7 @@ mod tests {
         worker.send_many([
             WorkerMessage::Update {
                 graph: graph.clone(),
-                func_lib: func_lib.clone(),
+                func_lib: Arc::new(func_lib.clone()),
             },
             WorkerMessage::Event {
                 event: EventRef {
@@ -1146,7 +1146,7 @@ mod tests {
         worker.send_many([
             WorkerMessage::Update {
                 graph: graph.clone(),
-                func_lib: func_lib.clone(),
+                func_lib: Arc::new(func_lib.clone()),
             },
             WorkerMessage::Event {
                 event: EventRef {
@@ -1191,7 +1191,7 @@ mod tests {
         worker.send_many([
             WorkerMessage::Update {
                 graph: graph.clone(),
-                func_lib: func_lib.clone(),
+                func_lib: Arc::new(func_lib.clone()),
             },
             WorkerMessage::StartEventLoop,
         ]);
@@ -1203,7 +1203,7 @@ mod tests {
         // Update graph - should restart event loop
         worker.send(WorkerMessage::Update {
             graph: graph.clone(),
-            func_lib: func_lib.clone(),
+            func_lib: Arc::new(func_lib.clone()),
         });
 
         // Drain the channel
