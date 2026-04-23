@@ -1,11 +1,9 @@
 //! Terminal frontend (stub). Selected by passing `tui` on the
 //! command line; bypasses eframe entirely and drives [`Session`]
-//! through a [`TuiUiHost`] that signals shutdown via an
-//! `AtomicBool` the command loop polls.
+//! through a [`TuiUiHost`] that drops non-terminal signals on the
+//! floor.
 
 use std::io::{BufRead, Write};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
 
@@ -13,28 +11,17 @@ use crate::session::Session;
 use crate::ui_host::UiHost;
 
 #[derive(Debug)]
-pub struct TuiUiHost {
-    should_close: Arc<AtomicBool>,
-}
+pub struct TuiUiHost;
 
 impl TuiUiHost {
     pub fn new() -> Self {
-        Self {
-            should_close: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    pub fn should_close(&self) -> Arc<AtomicBool> {
-        self.should_close.clone()
+        Self
     }
 }
 
 impl UiHost for TuiUiHost {
     fn request_redraw(&self) {}
-
-    fn close_app(&self) {
-        self.should_close.store(true, Ordering::Relaxed);
-    }
+    fn close_app(&self) {}
 }
 
 #[derive(Debug)]
@@ -45,16 +32,13 @@ impl MainTui {
         Self
     }
 
-    pub fn run(&mut self, session: &mut Session, should_close: &AtomicBool) -> Result<()> {
+    pub fn run(&mut self, session: &mut Session) -> Result<()> {
         println!("Prism TUI (stub). Type 'help' for commands.");
         let stdin = std::io::stdin();
         let mut stdout = std::io::stdout();
         let mut line = String::new();
 
         loop {
-            if should_close.load(Ordering::Relaxed) {
-                break;
-            }
             print!("> ");
             stdout.flush()?;
 

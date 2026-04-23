@@ -13,8 +13,6 @@ use anyhow::Result;
 use eframe::{NativeOptions, egui};
 use std::sync::Arc;
 
-use std::sync::atomic::AtomicBool;
-
 use crate::gui::Gui;
 use crate::gui::main_window::MainWindow;
 use crate::session::Session;
@@ -26,8 +24,8 @@ async fn main() -> Result<()> {
     init::init()?;
 
     if std::env::args().skip(1).any(|a| a == "tui") {
-        let (mut app, should_close) = PrismApp::new_tui();
-        return app.run_tui(&should_close);
+        let mut app = PrismApp::new_tui();
+        return app.run_tui();
     }
 
     let app_icon = load_window_icon();
@@ -115,21 +113,15 @@ impl PrismApp {
         }
     }
 
-    fn new_tui() -> (Self, Arc<AtomicBool>) {
-        let host = TuiUiHost::new();
-        let should_close = host.should_close();
-        let app = Self {
-            session: Session::new(host),
+    fn new_tui() -> Self {
+        Self {
+            session: Session::new(TuiUiHost::new()),
             frontend: Frontend::Tui(Box::new(MainTui::new())),
-        };
-        (app, should_close)
+        }
     }
 
-    fn run_tui(&mut self, should_close: &AtomicBool) -> Result<()> {
-        let result = self
-            .frontend
-            .as_tui_mut()
-            .run(&mut self.session, should_close);
+    fn run_tui(&mut self) -> Result<()> {
+        let result = self.frontend.as_tui_mut().run(&mut self.session);
         self.session.exit();
         result
     }
