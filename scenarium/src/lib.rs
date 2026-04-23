@@ -9,6 +9,7 @@ pub mod func_lambda;
 pub mod function;
 pub mod graph;
 pub mod macros;
+pub mod testing;
 pub mod worker;
 
 pub mod prelude {
@@ -21,8 +22,6 @@ pub mod prelude {
     };
     pub use crate::execution_stats::{ExecutedNodeStats, ExecutionStats, NodeError};
     pub use crate::func_lambda::{FuncLambda, InvokeError, InvokeInput, InvokeResult};
-    pub use crate::function::{Func, FuncBehavior, FuncId, FuncLib, TestFuncHooks, test_func_lib};
-    pub use crate::graph::{
-        Binding, Event, Graph, Input, Node, NodeBehavior, NodeId, PortAddress, test_graph,
-    };
+    pub use crate::function::{Func, FuncBehavior, FuncId, FuncLib};
+    pub use crate::graph::{Binding, Event, Graph, Input, Node, NodeBehavior, NodeId, PortAddress};
 }

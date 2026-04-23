@@ -1,11 +1,9 @@
-use std::sync::Arc;
-
 use crate::context::ContextType;
 
+use crate::data::*;
 use crate::event_lambda::EventLambda;
 use crate::func_lambda::FuncLambda;
 use crate::graph::NodeBehavior;
-use crate::{async_lambda, data::*};
 use common::id_type;
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use common::{SerdeFormat, deserialize, serialize};
@@ -145,196 +143,14 @@ where
     }
 }
 
-pub struct TestFuncHooks {
-    pub get_a: Arc<dyn Fn() -> anyhow::Result<i64> + Send + Sync + 'static>,
-    pub get_b: Arc<dyn Fn() -> i64 + Send + Sync + 'static>,
-    pub print: Arc<dyn Fn(i64) + Send + Sync + 'static>,
-}
-
-impl Default for TestFuncHooks {
-    fn default() -> Self {
-        Self {
-            get_a: Arc::new(|| panic!("Unexpected call to get_a")),
-            get_b: Arc::new(|| panic!("Unexpected call to get_b")),
-            print: Arc::new(|_| panic!("Unexpected call to print")),
-        }
-    }
-}
-
-pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
-    let TestFuncHooks {
-        get_a,
-        get_b,
-        print,
-    } = hooks;
-
-    [
-        Func {
-            id: "432b9bf1-f478-476c-a9c9-9a6e190124fc".into(),
-            name: "mult".to_string(),
-            description: Some("Multiplies two integer values (A * B)".to_string()),
-            category: "Debug".to_string(),
-            behavior: FuncBehavior::Pure,
-            terminal: false,
-            inputs: vec![
-                FuncInput {
-                    name: "A".to_string(),
-                    required: true,
-                    data_type: DataType::Int,
-                    default_value: None,
-                    value_options: vec![],
-                },
-                FuncInput {
-                    name: "B".to_string(),
-                    required: false,
-                    data_type: DataType::Int,
-                    default_value: None,
-                    value_options: vec![],
-                },
-            ],
-            outputs: vec![FuncOutput {
-                name: "Prod".to_string(),
-                data_type: DataType::Int,
-            }],
-            events: vec![],
-            required_contexts: vec![],
-            lambda: async_lambda!(move |_, state, _, inputs, _, outputs| {
-                assert_eq!(inputs.len(), 2);
-                assert_eq!(outputs.len(), 1);
-
-                let a: i64 = inputs[0].value.as_i64().unwrap();
-                let b: i64 = inputs[1].value.as_i64().unwrap_or(1);
-                outputs[0] = (a * b).into();
-                state.set(a * b);
-
-                Ok(())
-            }),
-            ..Default::default()
-        },
-        Func {
-            id: "d4d27137-5a14-437a-8bb5-b2f7be0941a2".into(),
-            name: "get_a".to_string(),
-            description: Some("Returns the value from test hook A".to_string()),
-            category: "Debug".to_string(),
-            behavior: FuncBehavior::Pure,
-            terminal: false,
-            inputs: vec![],
-            outputs: vec![FuncOutput {
-                name: "Int32 Value".to_string(),
-                data_type: DataType::Int,
-            }],
-            events: vec![],
-            required_contexts: vec![],
-            lambda: async_lambda!(
-                move |_, _, _, _, _, outputs| { get_a = Arc::clone(&get_a) } => {
-                    assert_eq!(outputs.len(), 1);
-                    outputs[0] = (get_a()? as f64).into();
-                    Ok(())
-                }
-            ),
-            ..Default::default()
-        },
-        Func {
-            id: "a937baff-822d-48fd-9154-58751539b59b".into(),
-            name: "get_b".to_string(),
-            description: Some("Returns the value from test hook B (impure)".to_string()),
-            category: "Debug".to_string(),
-            behavior: FuncBehavior::Impure,
-            terminal: false,
-            inputs: vec![],
-            outputs: vec![FuncOutput {
-                name: "Int32 Value".to_string(),
-                data_type: DataType::Int,
-            }],
-            events: vec![],
-            required_contexts: vec![],
-            lambda: async_lambda!(
-                move |_, _, _, _, _, outputs| { get_b = Arc::clone(&get_b) } => {
-                    assert_eq!(outputs.len(), 1);
-                    outputs[0] = (get_b() as f64).into();
-                    Ok(())
-                }
-            ),
-            ..Default::default()
-        },
-        Func {
-            id: "2d3b389d-7b58-44d9-b3d1-a595765b21a5".into(),
-            name: "sum".to_string(),
-            description: Some("Adds two integer values (A + B)".to_string()),
-            category: "Debug".to_string(),
-            behavior: FuncBehavior::Pure,
-            terminal: false,
-            inputs: vec![
-                FuncInput {
-                    name: "A".to_string(),
-                    required: true,
-                    data_type: DataType::Int,
-                    default_value: None,
-                    value_options: vec![],
-                },
-                FuncInput {
-                    name: "B".to_string(),
-                    required: false,
-                    data_type: DataType::Int,
-                    default_value: None,
-                    value_options: vec![],
-                },
-            ],
-            outputs: vec![FuncOutput {
-                name: "Sum".to_string(),
-                data_type: DataType::Int,
-            }],
-            events: vec![],
-            required_contexts: vec![],
-            lambda: async_lambda!(move |_, state, _, inputs, _, outputs| {
-                assert_eq!(inputs.len(), 2);
-                assert_eq!(outputs.len(), 1);
-                let a: i64 = inputs[0].value.as_i64().unwrap();
-                let b: i64 = inputs[1].value.as_i64().unwrap_or_default();
-                state.set(a + b);
-                outputs[0] = (a + b).into();
-                Ok(())
-            }),
-            ..Default::default()
-        },
-        Func {
-            id: "f22cd316-1cdf-4a80-b86c-1277acd1408a".into(),
-            name: "print".to_string(),
-            description: Some("Outputs an integer value via the test print hook".to_string()),
-            category: "Debug".to_string(),
-            behavior: FuncBehavior::Impure,
-            terminal: true,
-            inputs: vec![FuncInput {
-                name: "message".to_string(),
-                required: true,
-                data_type: DataType::Int,
-                default_value: None,
-                value_options: vec![],
-            }],
-            outputs: vec![],
-            events: vec![],
-            required_contexts: vec![],
-            lambda: async_lambda!(
-                move |_, _, _, inputs, _, _| { print = Arc::clone(&print) } => {
-                    assert_eq!(inputs.len(), 1);
-                    print(inputs[0].value.as_i64().unwrap());
-                    Ok(())
-                }
-            ),
-            ..Default::default()
-        },
-    ]
-    .into()
-}
-
 #[cfg(test)]
 mod tests {
     use crate::context::ContextManager;
     use crate::data::DynamicValue;
     use crate::execution_graph::OutputUsage;
     use crate::func_lambda::InvokeInput;
-    use crate::function::{TestFuncHooks, test_func_lib};
     use crate::prelude::AnyState;
+    use crate::testing::{TestFuncHooks, test_func_lib};
     use common::SerdeFormat;
 
     #[test]

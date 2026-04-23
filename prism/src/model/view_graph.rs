@@ -157,7 +157,7 @@ impl From<CoreGraph> for ViewGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scenarium::prelude::test_graph as core_test_graph;
+    use scenarium::testing::test_graph as core_test_graph;
 
     #[test]
     fn graph_view_test() {

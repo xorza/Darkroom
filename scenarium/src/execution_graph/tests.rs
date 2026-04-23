@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use super::*;
 use crate::data::{DynamicValue, StaticValue};
-use crate::function::{TestFuncHooks, test_func_lib};
-use crate::graph::{NodeBehavior, test_graph};
+use crate::graph::NodeBehavior;
+use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use common::{FloatExt, SerdeFormat};
 use tokio::sync::Mutex;
 

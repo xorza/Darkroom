@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::data::{DataType, StaticValue};
 use crate::function::{Func, FuncId, FuncLib};
-use crate::prelude::{TestFuncHooks, test_func_lib};
 use common::{Result, SerdeFormat, deserialize, serialize};
 use common::{id_type, is_debug};
 
@@ -304,63 +303,15 @@ impl NodeBehavior {
     }
 }
 
-pub fn test_graph() -> Graph {
-    let func_lib = test_func_lib(TestFuncHooks::default());
-
-    let mut graph = Graph::default();
-
-    let mult_node_id: NodeId = "579ae1d6-10a3-4906-8948-135cb7d7508b".into();
-    let get_a_node_id: NodeId = "5f110618-8faa-4629-8f5d-473c236de7d1".into();
-    let get_b_node_id: NodeId = "6fc6b533-c375-451c-ba3a-a14ea217cb30".into();
-    let sum_node_id: NodeId = "999c4d37-e0eb-4856-be3f-ad2090c84d8c".into();
-    let print_node_id: NodeId = "b88ab7e2-17b7-46cb-bc8e-b428bb45141e".into();
-
-    let get_a_func = func_lib.by_name("get_a").unwrap();
-    let get_b_func = func_lib.by_name("get_b").unwrap();
-    let sum_func = func_lib.by_name("sum").unwrap();
-    let mult_func = func_lib.by_name("mult").unwrap();
-    let print_func = func_lib.by_name("print").unwrap();
-
-    let mut get_a_node: Node = get_a_func.into();
-    get_a_node.id = get_a_node_id;
-    get_a_node.behavior = NodeBehavior::Once;
-    graph.add(get_a_node);
-
-    let mut get_b_node: Node = get_b_func.into();
-    get_b_node.id = get_b_node_id;
-    get_b_node.behavior = NodeBehavior::Once;
-    graph.add(get_b_node);
-
-    let mut sum_node: Node = sum_func.into();
-    sum_node.id = sum_node_id;
-    sum_node.inputs[0].binding = (get_a_node_id, 0).into();
-    sum_node.inputs[1].binding = (get_b_node_id, 0).into();
-    graph.add(sum_node);
-
-    let mut mult_node: Node = mult_func.into();
-    mult_node.id = mult_node_id;
-    mult_node.inputs[0].binding = (sum_node_id, 0).into();
-    mult_node.inputs[1].binding = (get_b_node_id, 0).into();
-    graph.add(mult_node);
-
-    let mut print_node: Node = print_func.into();
-    print_node.id = print_node_id;
-    print_node.inputs[0].binding = (mult_node_id, 0).into();
-    graph.add(print_node);
-
-    graph.validate();
-
-    graph
-}
-
 #[cfg(test)]
 mod tests {
     use crate::graph::Graph;
+    use crate::testing::test_graph;
     use common::SerdeFormat;
 
     #[test]
     fn roundtrip_serialization() -> anyhow::Result<()> {
-        let graph = super::test_graph();
+        let graph = test_graph();
 
         for format in SerdeFormat::all_formats_for_testing() {
             let serialized = graph.serialize(format);
@@ -378,7 +329,7 @@ mod tests {
 
     #[test]
     fn node_remove_test() -> anyhow::Result<()> {
-        let mut graph = super::test_graph();
+        let mut graph = test_graph();
 
         let node_id = graph.by_name("sum").unwrap().id;
         graph.remove_by_id(node_id);
@@ -397,7 +348,7 @@ mod tests {
 
     #[test]
     fn dependent_nodes() {
-        let graph = super::test_graph();
+        let graph = test_graph();
 
         let get_id = |name: &str| {
             graph

@@ -248,7 +248,7 @@ mod tests {
     use egui::{Vec2, vec2};
     use scenarium::data::StaticValue;
     use scenarium::graph::{Binding, Event, Input, NodeBehavior};
-    use scenarium::prelude::test_graph;
+    use scenarium::testing::test_graph;
 
     fn assert_ranges_match_actions(stack: &ActionStack) {
         for entry in &stack.undo_stack {

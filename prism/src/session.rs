@@ -10,7 +10,8 @@ use scenarium::elements::basic_funclib::BasicFuncLib;
 use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
 use scenarium::execution_graph::{self, ArgumentValues};
 use scenarium::graph::NodeId;
-use scenarium::prelude::{ExecutionStats, FuncLib, TestFuncHooks, test_func_lib};
+use scenarium::prelude::{ExecutionStats, FuncLib};
+use scenarium::testing::{TestFuncHooks, test_func_lib};
 use scenarium::worker::{Worker, WorkerMessage};
 use tokio::sync::oneshot;
 
