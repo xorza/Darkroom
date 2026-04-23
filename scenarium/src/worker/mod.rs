@@ -302,8 +302,6 @@ async fn worker_loop<ExecutionCallback>(
             }
         }
 
-        let event_loop_pause_guard = event_loop_pause_gate.close();
-
         // --- Scan
         let mut intent = scan(std::mem::take(&mut cmd_batch));
         intent.events.extend(ev_buf.drain(..));
@@ -346,6 +344,13 @@ async fn worker_loop<ExecutionCallback>(
         // silently. Events/terminals/StartEventLoop are no-ops until
         // a graph is loaded.
         if needs_execute && !execution_graph.is_empty() {
+            // Pause running lambdas only around execute(): the gate
+            // stops them kicking off new iterations while execute
+            // walks the graph, giving it a consistent view of
+            // per-node SharedAnyState. No-op when the loop was torn
+            // down above (needs_stop path) or wasn't running.
+            let _pause_guard = event_loop_pause_gate.close();
+
             let in_loop = should_start_event_loop || event_loop.is_some();
             let result = execution_graph
                 .execute(intent.execute_terminals, in_loop, intent.events.drain())
@@ -379,7 +384,6 @@ async fn worker_loop<ExecutionCallback>(
             let _ = reply.send(());
         }
 
-        drop(event_loop_pause_guard);
         tokio::task::yield_now().await;
     }
 }
