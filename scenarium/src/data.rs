@@ -1,6 +1,5 @@
 use std::any::Any;
 use std::fmt::Display;
-use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -111,11 +110,6 @@ pub enum DataType {
     Bool,
     String,
     FsPath(Arc<FsPathConfig>),
-    Array {
-        element_type: Box<DataType>,
-        // length is not included in the hash or equality check
-        length: usize,
-    },
     Custom(Arc<TypeDef>),
     Enum(Arc<EnumDef>),
 }
@@ -331,9 +325,7 @@ impl From<&DataType> for StaticValue {
                 type_id: enum_def.type_id,
                 variant_name: enum_def.variants[0].clone(),
             },
-            DataType::Array { .. } | DataType::Custom(_) => {
-                panic!("No default StaticValue for {:?}", data_type)
-            }
+            DataType::Custom(_) => panic!("No default StaticValue for {:?}", data_type),
         }
     }
 }
@@ -473,7 +465,6 @@ impl Display for DataType {
             DataType::Bool => write!(f, "bool"),
             DataType::String => write!(f, "string"),
             DataType::FsPath(_) => write!(f, "path"),
-            DataType::Array { element_type, .. } => write!(f, "array<{element_type}>"),
             DataType::Custom(def) => write!(f, "{}", def.display_name),
             DataType::Enum(def) => write!(f, "{}", def.display_name),
         }
@@ -485,8 +476,7 @@ impl FromStr for DataType {
 
     fn from_str(s: &str) -> Result<DataType, Self::Err> {
         match s {
-            "float" => Ok(DataType::Float),
-            "number" => Ok(DataType::Float),
+            "float" | "number" => Ok(DataType::Float),
             "int" => Ok(DataType::Int),
             "bool" => Ok(DataType::Bool),
             "string" => Ok(DataType::String),
@@ -505,58 +495,11 @@ impl PartialEq for DataType {
             (DataType::Bool, DataType::Bool) => true,
             (DataType::String, DataType::String) => true,
             (DataType::FsPath(config_a), DataType::FsPath(config_b)) => config_a == config_b,
-
             (DataType::Custom(def1), DataType::Custom(def2)) => def1.type_id == def2.type_id,
-
-            (
-                DataType::Array {
-                    element_type: element_type_a,
-                    ..
-                },
-                DataType::Array {
-                    element_type: element_type_b,
-                    ..
-                },
-            ) => element_type_a == element_type_b,
-
             (DataType::Enum(def_a), DataType::Enum(def_b)) => def_a.type_id == def_b.type_id,
-
             _ => false,
         }
     }
 }
 
 impl Eq for DataType {}
-
-impl Hash for DataType {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        match self {
-            DataType::Null => 0.hash(state),
-            DataType::Float => 1.hash(state),
-            DataType::Int => 2.hash(state),
-            DataType::Bool => 3.hash(state),
-            DataType::String => 4.hash(state),
-            DataType::FsPath(config) => {
-                5.hash(state);
-                config.hash(state);
-            }
-
-            DataType::Array { element_type, .. } => {
-                6.hash(state);
-                element_type.hash(state);
-                // length is not included in the hash
-            }
-
-            DataType::Custom(def) => {
-                7.hash(state);
-                def.type_id.hash(state);
-            }
-
-            DataType::Enum(def) => {
-                8.hash(state);
-                def.type_id.hash(state);
-                // type_name and variants are not included in the hash
-            }
-        }
-    }
-}
