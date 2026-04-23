@@ -35,7 +35,7 @@ pub trait PendingPreview: Send {
 /// Trait for custom types that can be stored in `DynamicValue::Custom`.
 /// Implementors provide their `DataType` so it doesn't need to be passed separately.
 pub trait CustomValue: Any + Send + Sync + Display {
-    fn data_type(&self) -> DataType;
+    fn type_def(&self) -> Arc<TypeDef>;
     fn gen_preview(&self, _ctx_manager: &mut ContextManager) -> Option<Box<dyn PendingPreview>> {
         None
     }
@@ -207,7 +207,7 @@ impl std::fmt::Debug for DynamicValue {
             DynamicValue::FsPath { path, .. } => f.debug_tuple("FsPath").field(path).finish(),
             DynamicValue::Custom(data) => f
                 .debug_struct("Custom")
-                .field("data_type", &data.data_type())
+                .field("type_def", &data.type_def())
                 .finish_non_exhaustive(),
             DynamicValue::Enum {
                 type_id,

@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 use common::slot::Slot;
 use imaginarium::{ColorFormat, ImageBuffer, ImageDesc, Transform, Vec2};
 use scenarium::context::ContextManager;
-use scenarium::data::{CustomValue, DataType, PendingPreview};
+use scenarium::data::{CustomValue, DataType, PendingPreview, TypeDef};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
@@ -38,8 +38,15 @@ impl PendingPreview for ImagePendingPreview {
     }
 }
 
+pub static IMAGE_TYPE_DEF: LazyLock<Arc<TypeDef>> = LazyLock::new(|| {
+    Arc::new(TypeDef {
+        type_id: "a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2".into(),
+        display_name: "Image".to_string(),
+    })
+});
+
 pub static IMAGE_DATA_TYPE: LazyLock<DataType> =
-    LazyLock::new(|| DataType::from_custom("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2", "Image"));
+    LazyLock::new(|| DataType::Custom(IMAGE_TYPE_DEF.clone()));
 
 const PREVIEW_SIZE: usize = 256;
 
@@ -71,8 +78,8 @@ impl Image {
 }
 
 impl CustomValue for Image {
-    fn data_type(&self) -> DataType {
-        IMAGE_DATA_TYPE.clone()
+    fn type_def(&self) -> Arc<TypeDef> {
+        IMAGE_TYPE_DEF.clone()
     }
 
     fn as_any(&self) -> &dyn Any {
