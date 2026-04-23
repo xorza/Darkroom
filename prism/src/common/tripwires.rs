@@ -173,7 +173,7 @@ fn no_raw_ui_outside_widgets() {
         // `impl App::ui` and drives egui::Panel / MenuBar that
         // need `&mut egui::Ui` arguments. Downstream of the
         // panels everything is Gui.
-        Path::new("main_gui.rs"),
+        Path::new("main_window.rs"),
     ];
     let skip_dirs: &[&Path] = &[Path::new("gui/widgets")];
 
@@ -231,7 +231,7 @@ fn no_egui_chrome_outside_widgets() {
         // Root eframe integration — wraps the top-level egui::Ui
         // and drives egui::CentralPanel / egui::Frame / etc. for
         // the application shell.
-        Path::new("main_gui.rs"),
+        Path::new("main_window.rs"),
         Path::new("main.rs"),
         // Defines the `Gui` wrapper over `egui::Ui`; necessarily
         // imports `Ui` and `UiBuilder`.

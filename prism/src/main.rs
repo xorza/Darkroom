@@ -3,24 +3,32 @@ mod config;
 mod gui;
 mod init;
 mod input;
-mod main_gui;
 mod model;
 mod script;
 mod session;
+mod tui;
 mod ui_host;
 
 use anyhow::Result;
 use eframe::{NativeOptions, egui};
 use std::sync::Arc;
 
+use std::sync::atomic::AtomicBool;
+
 use crate::gui::Gui;
-use crate::main_gui::MainGui;
+use crate::gui::main_window::MainWindow;
 use crate::session::Session;
+use crate::tui::{MainTui, TuiUiHost};
 use crate::ui_host::EguiUiHost;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     init::init()?;
+
+    if std::env::args().skip(1).any(|a| a == "tui") {
+        let (mut app, should_close) = PrismApp::new_tui();
+        return app.run_tui(&should_close);
+    }
 
     let app_icon = load_window_icon();
     let options = NativeOptions {
@@ -37,7 +45,7 @@ async fn main() -> Result<()> {
         options,
         Box::new(|cc| {
             configure_fonts(&cc.egui_ctx);
-            Ok(Box::new(PrismApp::new(&cc.egui_ctx)))
+            Ok(Box::new(PrismApp::new_gui(&cc.egui_ctx)))
         }),
     )?;
 
@@ -66,24 +74,29 @@ fn configure_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-/// Runtime UI mode. Today only `Gui` is wired to an entry point;
-/// `Headless` and `Tui` are placeholders for the planned non-egui
-/// modes driven through the `UiHost` abstraction.
+/// Runtime UI mode. `Headless` is scaffolding for the future
+/// non-interactive entry point; `Gui` runs under eframe and `Tui`
+/// drives a console loop from `main`.
 #[derive(Debug)]
 #[allow(dead_code)]
 enum Frontend {
     Headless,
-    Tui,
-    Gui(Box<MainGui>),
+    Tui(Box<MainTui>),
+    Gui(Box<MainWindow>),
 }
 
 impl Frontend {
-    fn as_gui_mut(&mut self) -> &mut MainGui {
+    fn as_gui_mut(&mut self) -> &mut MainWindow {
         match self {
-            Frontend::Gui(main_gui) => main_gui,
-            Frontend::Headless | Frontend::Tui => {
-                unreachable!("eframe::App methods should only run when the frontend is Gui")
-            }
+            Frontend::Gui(main_window) => main_window,
+            _ => unreachable!("eframe::App methods should only run when the frontend is Gui"),
+        }
+    }
+
+    fn as_tui_mut(&mut self) -> &mut MainTui {
+        match self {
+            Frontend::Tui(main_tui) => main_tui,
+            _ => unreachable!("run_tui called when the frontend is not Tui"),
         }
     }
 }
@@ -95,11 +108,30 @@ struct PrismApp {
 }
 
 impl PrismApp {
-    fn new(ctx: &egui::Context) -> Self {
+    fn new_gui(ctx: &egui::Context) -> Self {
         Self {
             session: Session::new(EguiUiHost::new(ctx)),
-            frontend: Frontend::Gui(Box::new(MainGui::new(EguiUiHost::new(ctx)))),
+            frontend: Frontend::Gui(Box::new(MainWindow::new(EguiUiHost::new(ctx)))),
         }
+    }
+
+    fn new_tui() -> (Self, Arc<AtomicBool>) {
+        let host = TuiUiHost::new();
+        let should_close = host.should_close();
+        let app = Self {
+            session: Session::new(host),
+            frontend: Frontend::Tui(Box::new(MainTui::new())),
+        };
+        (app, should_close)
+    }
+
+    fn run_tui(&mut self, should_close: &AtomicBool) -> Result<()> {
+        let result = self
+            .frontend
+            .as_tui_mut()
+            .run(&mut self.session, should_close);
+        self.session.exit();
+        result
     }
 }
 
@@ -109,9 +141,9 @@ impl eframe::App for PrismApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let main_gui = self.frontend.as_gui_mut();
-        let mut gui = Gui::new(ui, &main_gui.style);
-        main_gui.render(&mut self.session, &mut gui);
+        let main_window = self.frontend.as_gui_mut();
+        let mut gui = Gui::new(ui, &main_window.style);
+        main_window.render(&mut self.session, &mut gui);
     }
 
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {

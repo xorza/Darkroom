@@ -16,7 +16,7 @@ use eframe::egui;
 use egui::vec2;
 
 #[derive(Debug)]
-pub struct MainGui {
+pub struct MainWindow {
     pub graph_ui: GraphUi,
     pub log_ui: LogUi,
     pub ui_host: EguiUiHost,
@@ -28,7 +28,7 @@ pub struct MainGui {
     pub arena: bumpalo::Bump,
 }
 
-impl MainGui {
+impl MainWindow {
     pub fn new(ui_host: EguiUiHost) -> Self {
         let style = Style::from_file("style.toml").unwrap_or_default();
         Self {
