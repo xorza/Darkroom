@@ -6,6 +6,11 @@
 **/target/
 **/bench-results/
 
+# Workspace members must not carry their own Cargo.lock — the workspace-root
+# lockfile is authoritative. Stray package-level locks confuse scanners
+# (e.g. Dependabot) into reporting against stale resolutions.
+prism/Cargo.lock
+
 /.claude/settings.local.json
 
 /test_output/
