@@ -224,7 +224,13 @@ struct BatchIntent {
     processing_callbacks: Vec<ProcessingCallback>,
 }
 
-type EventTrigger = (EventRef, EventLambda, SharedAnyState);
+/// One `(event, lambda, state)` triple spawned as a looping task.
+#[derive(Debug)]
+pub struct EventTrigger {
+    pub event: EventRef,
+    pub lambda: EventLambda,
+    pub state: SharedAnyState,
+}
 
 async fn worker_loop<ExecutionCallback>(
     mut worker_message_rx: UnboundedReceiver<WorkerMessage>,
@@ -243,7 +249,6 @@ async fn worker_loop<ExecutionCallback>(
     let mut event_loop_handle: Option<EventLoopHandle> = None;
     let event_loop_pause_gate = PauseGate::default();
     let mut current_loop_id: u64 = 0;
-    let mut execution_graph_clear = true;
 
     loop {
         assert!(events_from_loop.is_empty());
@@ -301,7 +306,9 @@ async fn worker_loop<ExecutionCallback>(
                     intent.processing_callbacks.push(callback);
                 }
                 WorkerMessage::RequestArgumentValues { node_id, callback } => {
-                    let values = collect_arguments(&mut execution_graph, node_id).await;
+                    let values = execution_graph
+                        .get_argument_values_with_previews(&node_id)
+                        .await;
                     callback.call(values);
                 }
             }
@@ -328,12 +335,10 @@ async fn worker_loop<ExecutionCallback>(
 
         if intent.clear {
             execution_graph.clear();
-            execution_graph_clear = true;
         }
         if let Some((graph, func_lib)) = intent.update {
             tracing::info!("Graph updated");
             execution_graph.update(&graph, &func_lib);
-            execution_graph_clear = false;
         }
         let should_start_event_loop = intent.start_loop || (was_running && !intent.stop_loop);
 
@@ -345,7 +350,7 @@ async fn worker_loop<ExecutionCallback>(
         );
 
         if intent.execute_terminals || !events.is_empty() {
-            if execution_graph_clear {
+            if execution_graph.is_empty() {
                 tracing::error!("Execution graph is clear, cannot execute graph");
             } else {
                 let result = execution_graph
@@ -362,7 +367,7 @@ async fn worker_loop<ExecutionCallback>(
         if should_start_event_loop {
             assert!(event_loop_handle.is_none());
 
-            if execution_graph_clear {
+            if execution_graph.is_empty() {
                 tracing::error!("Execution graph is clear, cannot start event loop");
             } else {
                 let result = execution_graph.execute(false, true, []).await;
@@ -416,32 +421,6 @@ async fn reset_event_loop(
     *current_loop_id += 1;
     events_from_loop.clear();
     was_running
-}
-
-async fn collect_arguments(
-    execution_graph: &mut ExecutionGraph,
-    node_id: NodeId,
-) -> Option<ArgumentValues> {
-    let mut values = execution_graph.get_argument_values(&node_id);
-
-    let mut pending_previews = Vec::new();
-    for value in values.iter_mut() {
-        for input in value.inputs.iter_mut().flatten() {
-            if let Some(pending) = input.gen_preview(&mut execution_graph.ctx_manager) {
-                pending_previews.push(pending);
-            }
-        }
-        for output in value.outputs.iter_mut() {
-            if let Some(pending) = output.gen_preview(&mut execution_graph.ctx_manager) {
-                pending_previews.push(pending);
-            }
-        }
-    }
-    for pending in pending_previews {
-        pending.wait(&mut execution_graph.ctx_manager).await;
-    }
-
-    values
 }
 
 async fn start_event_loop(
@@ -509,7 +488,12 @@ async fn start_event_loop(
     // yield. The pause gate blocks new iterations while the main
     // worker is processing so events don't build up during graph
     // execution.
-    for (event_ref, event_lambda, event_state) in event_triggers {
+    for EventTrigger {
+        event,
+        lambda,
+        state,
+    } in event_triggers
+    {
         let join_handle = tokio::spawn({
             let event_tx = event_tx.clone();
             let ready = ready.clone();
@@ -519,8 +503,8 @@ async fn start_event_loop(
                 ready.signal();
 
                 loop {
-                    event_lambda.invoke(event_state.clone()).await;
-                    let result = event_tx.send(event_ref).await;
+                    lambda.invoke(state.clone()).await;
+                    let result = event_tx.send(event).await;
                     if result.is_err() {
                         return;
                     }
@@ -554,7 +538,7 @@ mod tests {
     use crate::function::FuncLib;
     use crate::graph::{Graph, Node, NodeId};
 
-    use crate::worker::{EventRef, ProcessingCallback, Worker, WorkerMessage};
+    use crate::worker::{EventRef, EventTrigger, ProcessingCallback, Worker, WorkerMessage};
 
     fn log_frame_no_graph(func_lib: &FuncLib) -> Graph {
         let mut graph = Graph::default();
@@ -675,14 +659,14 @@ mod tests {
         let (tx, mut rx) = unbounded_channel();
         let mut handle = super::start_event_loop(
             tx,
-            vec![(
-                EventRef {
+            vec![EventTrigger {
+                event: EventRef {
                     node_id,
                     event_idx: 0,
                 },
-                event_lambda,
-                event_state,
-            )],
+                lambda: event_lambda,
+                state: event_state,
+            }],
             PauseGate::default(),
             0,
         )
@@ -724,14 +708,14 @@ mod tests {
         let (tx, mut rx) = unbounded_channel();
         let mut handle = super::start_event_loop(
             tx,
-            vec![(
-                EventRef {
+            vec![EventTrigger {
+                event: EventRef {
                     node_id,
                     event_idx: 0,
                 },
-                event_lambda,
-                event_state,
-            )],
+                lambda: event_lambda,
+                state: event_state,
+            }],
             PauseGate::default(),
             0,
         )
@@ -778,14 +762,14 @@ mod tests {
 
         let mut handle = super::start_event_loop(
             tx,
-            vec![(
-                EventRef {
+            vec![EventTrigger {
+                event: EventRef {
                     node_id,
                     event_idx: 0,
                 },
-                event_lambda,
-                event_state,
-            )],
+                lambda: event_lambda,
+                state: event_state,
+            }],
             pause_gate.clone(),
             0,
         )
@@ -1227,14 +1211,14 @@ mod tests {
         // Start first event loop with loop_id = 0
         let mut handle = super::start_event_loop(
             tx.clone(),
-            vec![(
-                EventRef {
+            vec![EventTrigger {
+                event: EventRef {
                     node_id,
                     event_idx: 0,
                 },
-                event_lambda.clone(),
-                event_state.clone(),
-            )],
+                lambda: event_lambda.clone(),
+                state: event_state.clone(),
+            }],
             pause_gate.clone(),
             0, // loop_id = 0
         )
@@ -1277,14 +1261,14 @@ mod tests {
 
         let mut new_handle = super::start_event_loop(
             tx,
-            vec![(
-                EventRef {
+            vec![EventTrigger {
+                event: EventRef {
                     node_id,
                     event_idx: 0,
                 },
-                new_event_lambda,
-                new_event_state,
-            )],
+                lambda: new_event_lambda,
+                state: new_event_state,
+            }],
             pause_gate,
             1, // loop_id = 1 (incremented)
         )

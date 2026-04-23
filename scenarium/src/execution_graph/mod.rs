@@ -13,7 +13,7 @@ use crate::func_lambda::InvokeInput;
 use crate::function::{Func, FuncBehavior, FuncLib};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId, PortAddress};
 use crate::prelude::{AnyState, FuncId, FuncLambda};
-use crate::worker::EventRef;
+use crate::worker::{EventRef, EventTrigger};
 
 #[cfg(test)]
 mod tests;
@@ -299,7 +299,7 @@ pub struct ExecutionGraph {
     pub e_node_terminal_idx: HashSet<usize>,
 
     #[serde(skip)]
-    pub ctx_manager: ContextManager,
+    ctx_manager: ContextManager,
     #[serde(skip)]
     stack: Vec<Visit>,
 }
@@ -309,6 +309,10 @@ impl ExecutionGraph {
 
     pub fn by_id(&self, node_id: &NodeId) -> Option<&ExecutionNode> {
         self.e_nodes.by_key(node_id)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.e_nodes.is_empty()
     }
 
     pub fn by_name(&self, node_name: &str) -> Option<&ExecutionNode> {
@@ -925,14 +929,34 @@ impl ExecutionGraph {
         Some(ArgumentValues { inputs, outputs })
     }
 
+    /// `get_argument_values` plus awaited preview resolution.
+    pub async fn get_argument_values_with_previews(
+        &mut self,
+        node_id: &NodeId,
+    ) -> Option<ArgumentValues> {
+        let mut values = self.get_argument_values(node_id)?;
+        let mut pending_previews = Vec::new();
+        for value in values
+            .inputs
+            .iter_mut()
+            .flatten()
+            .chain(values.outputs.iter_mut())
+        {
+            if let Some(pending) = value.gen_preview(&mut self.ctx_manager) {
+                pending_previews.push(pending);
+            }
+        }
+        for pending in pending_previews {
+            pending.wait(&mut self.ctx_manager).await;
+        }
+        Some(values)
+    }
+
     /// Collect every (event → lambda → state) triple that is currently
     /// "live" — node was executed or cached this run, the event has at
     /// least one subscriber, and its lambda is populated. Used by the
     /// worker to spawn the tasks that drive the event loop.
-    pub fn active_event_triggers(
-        &self,
-        stats: &ExecutionStats,
-    ) -> Vec<(EventRef, EventLambda, SharedAnyState)> {
+    pub fn active_event_triggers(&self, stats: &ExecutionStats) -> Vec<EventTrigger> {
         stats
             .cached_nodes
             .iter()
@@ -946,15 +970,13 @@ impl ExecutionGraph {
                     .iter()
                     .enumerate()
                     .filter(|(_, event)| !event.subscribers.is_empty() && !event.lambda.is_none())
-                    .map(move |(event_idx, event)| {
-                        (
-                            EventRef {
-                                node_id: e_node.id,
-                                event_idx,
-                            },
-                            event.lambda.clone(),
-                            event_state.clone(),
-                        )
+                    .map(move |(event_idx, event)| EventTrigger {
+                        event: EventRef {
+                            node_id: e_node.id,
+                            event_idx,
+                        },
+                        lambda: event.lambda.clone(),
+                        state: event_state.clone(),
                     })
             })
             .collect()
