@@ -68,7 +68,7 @@ impl ViewGraph {
         }
 
         let mut graph_nodes = HashMap::new();
-        for node in self.graph.nodes.iter() {
+        for node in self.graph.iter() {
             let prior = graph_nodes.insert(node.id, ());
             assert!(prior.is_none(), "duplicate node id detected in graph");
         }
@@ -138,8 +138,8 @@ impl Eq for ViewGraph {}
 
 impl From<CoreGraph> for ViewGraph {
     fn from(graph: CoreGraph) -> Self {
-        let mut view_nodes = KeyIndexVec::with_capacity(graph.nodes.len());
-        for node in graph.nodes.iter() {
+        let mut view_nodes = KeyIndexVec::with_capacity(graph.len());
+        for node in graph.iter() {
             let view_node = ViewNode::from(node);
             view_nodes.add(view_node);
         }
@@ -196,8 +196,8 @@ mod tests {
             "node view ids should round-trip"
         );
         assert_eq!(
-            graph.graph.nodes.len(),
-            deserialized.graph.nodes.len(),
+            graph.graph.len(),
+            deserialized.graph.len(),
             "graph nodes should round-trip"
         );
         assert_eq!(graph.scale, deserialized.scale, "zoom should round-trip");

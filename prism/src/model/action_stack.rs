@@ -287,7 +287,7 @@ mod tests {
         let mut view_graph: ViewGraph = graph.into();
         let original = view_graph.serialize(SerdeFormat::Json);
 
-        let node_id = view_graph.graph.nodes.iter().next().unwrap().id;
+        let node_id = view_graph.graph.iter().next().unwrap().id;
         let before_pos = view_graph.view_nodes.by_key(&node_id).unwrap().pos;
         let after_pos = before_pos + vec2(10.0, 5.0);
 
@@ -333,7 +333,7 @@ mod tests {
     fn max_steps_limits_history() {
         let graph = test_graph();
         let mut view_graph: ViewGraph = graph.into();
-        let node_id = view_graph.graph.nodes.iter().next().unwrap().id;
+        let node_id = view_graph.graph.iter().next().unwrap().id;
         let before_pos = view_graph.view_nodes.by_key(&node_id).unwrap().pos;
 
         let mut stack = ActionStack::new(1);
@@ -376,7 +376,7 @@ mod tests {
     fn undo_buffer_stays_bounded_past_max_steps() {
         let graph = test_graph();
         let view_graph: ViewGraph = graph.into();
-        let node_id = view_graph.graph.nodes.iter().next().unwrap().id;
+        let node_id = view_graph.graph.iter().next().unwrap().id;
         let start_pos = view_graph.view_nodes.by_key(&node_id).unwrap().pos;
         let mut stack = ActionStack::new(2);
 
@@ -408,7 +408,7 @@ mod tests {
         let mut view_graph: ViewGraph = graph.into();
         let mut stack = ActionStack::new(32);
 
-        let node_ids: Vec<_> = view_graph.graph.nodes.iter().map(|node| node.id).collect();
+        let node_ids: Vec<_> = view_graph.graph.iter().map(|node| node.id).collect();
         let primary_id = *node_ids.first().expect("test graph must have nodes");
         let secondary_id = node_ids
             .iter()
@@ -416,12 +416,7 @@ mod tests {
             .find(|node_id| *node_id != primary_id)
             .unwrap_or(primary_id);
 
-        if view_graph
-            .graph
-            .nodes
-            .iter()
-            .all(|node| node.events.is_empty())
-        {
+        if view_graph.graph.iter().all(|node| node.events.is_empty()) {
             let node = view_graph
                 .graph
                 .by_id_mut(&primary_id)
@@ -431,12 +426,7 @@ mod tests {
                 name: "input a".into(),
             });
         }
-        if view_graph
-            .graph
-            .nodes
-            .iter()
-            .all(|node| node.inputs.is_empty())
-        {
+        if view_graph.graph.iter().all(|node| node.inputs.is_empty()) {
             let node = view_graph
                 .graph
                 .by_id_mut(&primary_id)
@@ -448,7 +438,6 @@ mod tests {
         }
         let input_node_id = view_graph
             .graph
-            .nodes
             .iter()
             .find(|node| !node.inputs.is_empty())
             .map(|node| node.id)
@@ -481,7 +470,6 @@ mod tests {
 
         let event_node = view_graph
             .graph
-            .nodes
             .iter()
             .find(|node| !node.events.is_empty())
             .expect("test graph must include event nodes");
@@ -556,7 +544,7 @@ mod tests {
         snapshots.push(view_graph.serialize(SerdeFormat::Json));
 
         let mut bound_targets = std::collections::HashSet::new();
-        for node in view_graph.graph.nodes.iter() {
+        for node in view_graph.graph.iter() {
             for input in &node.inputs {
                 if let Binding::Bind(address) = &input.binding {
                     bound_targets.insert(address.target_id);

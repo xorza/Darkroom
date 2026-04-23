@@ -533,10 +533,9 @@ mod tests {
         assert_eq!(result, 15);
 
         let graph = invoker.map_graph()?;
-        assert_eq!(graph.nodes.len(), 5);
+        assert_eq!(graph.len(), 5);
 
         let mult_node = graph
-            .nodes
             .iter()
             .find(|node| node.name == "mult")
             .expect("Missing mult node");

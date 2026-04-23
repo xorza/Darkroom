@@ -99,7 +99,7 @@ impl GraphUiAction {
             .clone();
         let mut incoming_connections = Vec::new();
         let mut incoming_events = Vec::new();
-        for other in view_graph.graph.nodes.iter() {
+        for other in view_graph.graph.iter() {
             for (input_idx, input) in other.inputs.iter().enumerate() {
                 let Binding::Bind(binding) = &input.binding else {
                     continue;

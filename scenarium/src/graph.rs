@@ -61,12 +61,31 @@ pub struct Node {
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Graph {
-    pub nodes: KeyIndexVec<NodeId, Node>,
+    nodes: KeyIndexVec<NodeId, Node>,
 }
 
 impl Graph {
     pub fn add(&mut self, node: Node) {
         self.nodes.add(node);
+    }
+
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
+    /// Iterate nodes in insertion order. This order is load-bearing:
+    /// `dependent_nodes` returns matches in this order, and callers
+    /// (prism rendering, action-stack replay) rely on it.
+    pub fn iter(&self) -> impl Iterator<Item = &Node> {
+        self.nodes.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Node> {
+        self.nodes.iter_mut()
     }
     pub fn remove_by_id(&mut self, id: NodeId) {
         assert!(!id.is_nil());
@@ -335,9 +354,9 @@ mod tests {
         graph.remove_by_id(node_id);
 
         assert!(graph.by_name("sum").is_none());
-        assert_eq!(graph.nodes.len(), 4);
+        assert_eq!(graph.len(), 4);
 
-        for input in graph.nodes.iter().flat_map(|node| node.inputs.iter()) {
+        for input in graph.iter().flat_map(|node| node.inputs.iter()) {
             if let Some(binding) = input.binding.as_output_binding() {
                 assert_ne!(binding.target_id, node_id);
             }

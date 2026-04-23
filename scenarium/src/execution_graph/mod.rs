@@ -373,7 +373,7 @@ impl ExecutionGraph {
     fn build_execution_nodes(&mut self, graph: &Graph, func_lib: &FuncLib) {
         let mut compact = self.e_nodes.compact_insert_start();
 
-        for node in graph.nodes.iter() {
+        for node in graph.iter() {
             let (e_node_idx, e_node) = compact.insert_with(&node.id, || ExecutionNode {
                 id: node.id,
                 ..Default::default()
@@ -975,7 +975,7 @@ impl ExecutionGraph {
             return;
         }
 
-        assert!(self.e_nodes.len() == graph.nodes.len());
+        assert!(self.e_nodes.len() == graph.len());
         assert!(self.e_node_process_order.len() <= self.e_nodes.len());
 
         let mut seen_node_ids: HashSet<NodeId> = HashSet::with_capacity(self.e_nodes.len());
