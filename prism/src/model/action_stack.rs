@@ -177,25 +177,8 @@ impl ActionStack {
             1,
             "gesture-keyed entry must hold a single action"
         );
-        let merged = match (&last_actions[0], new_action) {
-            (
-                GraphUiAction::ZoomPanChanged {
-                    before_pan,
-                    before_scale,
-                    ..
-                },
-                GraphUiAction::ZoomPanChanged {
-                    after_pan,
-                    after_scale,
-                    ..
-                },
-            ) => GraphUiAction::ZoomPanChanged {
-                before_pan: *before_pan,
-                before_scale: *before_scale,
-                after_pan: *after_pan,
-                after_scale: *after_scale,
-            },
-            _ => return false,
+        let Some(merged) = last_actions[0].merge(new_action) else {
+            return false;
         };
 
         Self::pop_tail_actions(&mut self.undo_actions, &last_range);

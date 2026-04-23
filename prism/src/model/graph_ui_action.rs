@@ -272,15 +272,42 @@ impl GraphUiAction {
     }
 
     /// Returns a key that identifies "same semantic gesture" for the
-    /// purposes of undo-history coalescing. When two adjacent undo
-    /// entries are both a single action with the same `gesture_key`,
-    /// the undo stack merges them into a single entry (keeping the
-    /// earlier `before` and the later `after`). This is what lets a
-    /// multi-frame zoom/pan scroll end up as one undoable step without
-    /// any cross-frame state in the action buffer.
+    /// purposes of undo-history coalescing. Used by `ActionStack` as an
+    /// O(1) preflight — if the cached key on the tail entry doesn't
+    /// match, no deserialize happens. Actual merge combinatorics live
+    /// in [`GraphUiAction::merge`].
     pub fn gesture_key(&self) -> Option<GestureKey> {
         match self {
             GraphUiAction::ZoomPanChanged { .. } => Some(GestureKey::ZoomPan),
+            _ => None,
+        }
+    }
+
+    /// Coalesce `self` (the earlier gesture) with `next` (the later
+    /// gesture) into one action. `Some(merged)` keeps the earlier
+    /// `before` and the later `after`; `None` means the pair doesn't
+    /// coalesce. This is what lets a multi-frame zoom/pan scroll end
+    /// up as one undoable step without any cross-frame state in the
+    /// action buffer.
+    pub fn merge(&self, next: &Self) -> Option<Self> {
+        match (self, next) {
+            (
+                GraphUiAction::ZoomPanChanged {
+                    before_pan,
+                    before_scale,
+                    ..
+                },
+                GraphUiAction::ZoomPanChanged {
+                    after_pan,
+                    after_scale,
+                    ..
+                },
+            ) => Some(GraphUiAction::ZoomPanChanged {
+                before_pan: *before_pan,
+                before_scale: *before_scale,
+                after_pan: *after_pan,
+                after_scale: *after_scale,
+            }),
             _ => None,
         }
     }
