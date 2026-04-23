@@ -75,12 +75,12 @@ impl PopupMenu {
         // Check if the popup was just opened on this frame (anchor was clicked)
         let just_opened = self.anchor_response.clicked();
 
-        let popup_response = Area::new(StableId::from_id(self.id))
+        let popup_response = Area::new(StableId::from_egui_id(self.id))
             .fixed_pos(anchor_rect.left_bottom())
             .order(Order::Foreground)
             .show(gui, |gui| {
                 Frame::popup(
-                    StableId::from_id(popup_id.with("popup_menu_frame")),
+                    StableId::from_egui_id(popup_id.with("popup_menu_frame")),
                     &popup_style,
                 )
                 .show(gui, |gui| {

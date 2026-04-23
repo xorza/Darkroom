@@ -262,7 +262,7 @@ fn show_editing<T: DragValueNumeric>(
         .frame(false);
 
     let mut text_edit_response = gui
-        .scope(StableId::from_id(id.with("drag_value_text")))
+        .scope(StableId::from_egui_id(id.with("drag_value_text")))
         .max_rect(inner_rect)
         .show(|gui| text_edit.show(gui).response);
 

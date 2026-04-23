@@ -61,7 +61,7 @@ impl<'a> StatusPanel<'a> {
             })
             .inner_margin(style.corner_radius);
 
-        let scroll_id = StableId::from_id(self.id.id().with("scroll"));
+        let scroll_id = self.id.with("scroll");
         frame.show(gui, |gui| {
             let icon_size = style.body_font.size;
             let text_color = style.text_color;

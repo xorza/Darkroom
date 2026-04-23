@@ -126,7 +126,7 @@ impl<'a> FilePicker<'a> {
         gui.painter()
             .galley(filename_pos, filename_galley, text_color);
 
-        let browse_response = Button::new(StableId::from_id(id.id().with("browse")))
+        let browse_response = Button::new(id.with("browse"))
             .text(browse_text)
             .font(font)
             .rect(browse_rect)
