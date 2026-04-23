@@ -65,6 +65,13 @@ pub enum WorkerMessage {
     },
 }
 
+/// Returned when a send target a worker whose task has already exited
+/// (via `Exit` message or abort). Callers can treat this as a
+/// harmless no-op on shutdown paths.
+#[derive(Debug, thiserror::Error)]
+#[error("worker task has exited")]
+pub struct WorkerExited;
+
 /// The wire format is `Vec<WorkerMessage>`: one send = one commit unit.
 /// Batch atomicity is type-enforced — the worker cannot split a batch
 /// across two scan/commit cycles.
@@ -100,19 +107,19 @@ impl Worker {
         self.event_loop_started.load(Ordering::Relaxed)
     }
 
-    pub fn send(&self, msg: WorkerMessage) {
-        self.tx
-            .send(vec![msg])
-            .expect("Failed to send message to worker, it probably exited");
+    pub fn send(&self, msg: WorkerMessage) -> std::result::Result<(), WorkerExited> {
+        self.tx.send(vec![msg]).map_err(|_| WorkerExited)
     }
 
-    pub fn send_many<T: IntoIterator<Item = WorkerMessage>>(&self, msgs: T) {
+    pub fn send_many<T: IntoIterator<Item = WorkerMessage>>(
+        &self,
+        msgs: T,
+    ) -> std::result::Result<(), WorkerExited> {
         let msgs: Vec<WorkerMessage> = msgs.into_iter().collect();
-        if !msgs.is_empty() {
-            self.tx
-                .send(msgs)
-                .expect("Failed to send message to worker, it probably exited");
+        if msgs.is_empty() {
+            return Ok(());
         }
+        self.tx.send(msgs).map_err(|_| WorkerExited)
     }
 
     pub fn exit(&mut self) {

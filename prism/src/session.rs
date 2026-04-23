@@ -339,7 +339,8 @@ impl Session {
         if !msgs.is_empty()
             && let Some(worker) = &self.worker
         {
-            worker.send_many(msgs);
+            // todo handle
+            let _ = worker.send_many(msgs);
         }
     }
 
@@ -360,7 +361,7 @@ impl Session {
             self.action_stack.clear();
         }
         if let Some(worker) = &self.worker {
-            worker.send(WorkerMessage::Clear);
+            let _ = worker.send(WorkerMessage::Clear);
         }
         self.refresh_graph();
     }

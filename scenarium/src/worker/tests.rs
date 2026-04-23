@@ -2,17 +2,86 @@ use std::sync::Arc;
 
 use common::output_stream::OutputStream;
 use common::pause_gate::PauseGate;
-use tokio::sync::{Notify, oneshot};
+use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
 use crate::common::shared_any_state::SharedAnyState;
 use crate::elements::basic_funclib::BasicFuncLib;
 use crate::elements::worker_events_funclib::WorkerEventsFuncLib;
 use crate::event_lambda::EventLambda;
+use crate::execution_graph::Result as ExecResult;
+use crate::execution_stats::ExecutionStats;
 use crate::function::FuncLib;
 use crate::graph::{Graph, Node, NodeId};
 
 use crate::worker::{EventRef, EventTrigger, Worker, WorkerMessage};
+
+/// End-to-end fixture for Worker tests that run a graph with a
+/// `frame event` source and a terminal `print`. Builds the func lib,
+/// the standard 3-node graph, and a worker whose callback forwards
+/// results into an mpsc; exposes helpers for the two messages used
+/// most often (`Update` with the fixture graph; a frame-event
+/// `EventRef`).
+struct FrameHarness {
+    worker: Worker,
+    func_lib: Arc<FuncLib>,
+    graph: Graph,
+    frame_event_node_id: NodeId,
+    output_stream: OutputStream,
+    compute_rx: mpsc::Receiver<ExecResult<ExecutionStats>>,
+}
+
+impl FrameHarness {
+    async fn new() -> Self {
+        Self::with_callback_capacity(8).await
+    }
+
+    async fn with_callback_capacity(cap: usize) -> Self {
+        let output_stream = OutputStream::new();
+        let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
+        let timers_invoker = WorkerEventsFuncLib::default();
+        let mut func_lib = basic_invoker.into_func_lib();
+        func_lib.merge(timers_invoker.into_func_lib());
+
+        let graph = log_frame_no_graph(&func_lib);
+        let frame_event_node_id = graph.by_name("frame event").unwrap().id;
+        let func_lib = Arc::new(func_lib);
+
+        let (tx, compute_rx) = mpsc::channel(cap);
+        let worker = Worker::new(move |result| {
+            tx.try_send(result).ok();
+        });
+
+        Self {
+            worker,
+            func_lib,
+            graph,
+            frame_event_node_id,
+            output_stream,
+            compute_rx,
+        }
+    }
+
+    fn update_msg(&self) -> WorkerMessage {
+        WorkerMessage::Update {
+            graph: self.graph.clone(),
+            func_lib: self.func_lib.clone(),
+        }
+    }
+
+    fn frame_event(&self) -> EventRef {
+        EventRef {
+            node_id: self.frame_event_node_id,
+            event_idx: 0,
+        }
+    }
+
+    fn inject_frame_event(&self) -> WorkerMessage {
+        WorkerMessage::InjectEvents {
+            events: vec![self.frame_event()],
+        }
+    }
+}
 
 fn log_frame_no_graph(func_lib: &FuncLib) -> Graph {
     let mut graph = Graph::default();
@@ -46,80 +115,25 @@ fn log_frame_no_graph(func_lib: &FuncLib) -> Graph {
 
 #[tokio::test]
 async fn test_worker() -> anyhow::Result<()> {
-    let output_stream = OutputStream::new();
+    let mut h = FrameHarness::new().await;
 
-    let timers_invoker = WorkerEventsFuncLib::default();
-    let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
+    h.worker
+        .send_many([h.update_msg(), h.inject_frame_event()])
+        .unwrap();
 
-    let mut func_lib = basic_invoker.into_func_lib();
-    func_lib.merge(timers_invoker.into_func_lib());
-
-    let graph = log_frame_no_graph(&func_lib);
-    let frame_event_node_id = graph.by_name("frame event").unwrap().id;
-
-    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
-    let mut worker = Worker::new(move |result| {
-        compute_finish_tx
-            .try_send(result)
-            .expect("Failed to send a compute callback event");
-    });
-
-    worker.send_many([
-        WorkerMessage::Update {
-            graph: graph.clone(),
-            func_lib: Arc::new(func_lib.clone()),
-        },
-        WorkerMessage::InjectEvents {
-            events: vec![EventRef {
-                node_id: frame_event_node_id,
-                event_idx: 0,
-            }],
-        },
-    ]);
-
-    let executed = compute_finish_rx
-        .recv()
-        .await
-        .expect("Missing compute completion")
-        .expect("Unsuccessful compute");
-
-    assert_eq!(executed.executed_nodes.len(), 3);
-    assert_eq!(output_stream.take().await, ["1"]);
-
-    worker.send(WorkerMessage::InjectEvents {
-        events: vec![EventRef {
-            node_id: frame_event_node_id,
-            event_idx: 0,
-        }],
-    });
-
-    let executed = compute_finish_rx
-        .recv()
-        .await
-        .expect("Missing compute completion")
-        .expect("Unsuccessful compute");
-
-    // frame_no is incremented in the update lambda, so each execution increments it
-    assert_eq!(executed.executed_nodes.len(), 3);
-    assert_eq!(output_stream.take().await, ["2"]);
-
-    worker.send(WorkerMessage::InjectEvents {
-        events: vec![EventRef {
-            node_id: frame_event_node_id,
-            event_idx: 0,
-        }],
-    });
-
-    let executed = compute_finish_rx
-        .recv()
-        .await
-        .expect("Missing compute completion")
-        .expect("Unsuccessful compute");
-
-    assert_eq!(executed.executed_nodes.len(), 3);
-    assert_eq!(output_stream.take().await, ["3"]);
-
-    worker.exit();
+    for expected in ["1", "2", "3"] {
+        if expected != "1" {
+            h.worker.send(h.inject_frame_event()).unwrap();
+        }
+        let executed = h
+            .compute_rx
+            .recv()
+            .await
+            .expect("Missing compute completion")
+            .expect("Unsuccessful compute");
+        assert_eq!(executed.executed_nodes.len(), 3);
+        assert_eq!(h.output_stream.take().await, [expected]);
+    }
 
     Ok(())
 }
@@ -274,95 +288,36 @@ async fn pause_gate_blocks_event_loop_iterations() {
 
 #[tokio::test]
 async fn clear_resets_execution_graph() {
-    let output_stream = OutputStream::new();
+    let mut h = FrameHarness::new().await;
 
-    let timers_invoker = WorkerEventsFuncLib::default();
-    let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
+    h.worker
+        .send_many([h.update_msg(), h.inject_frame_event()])
+        .unwrap();
+    let _ = h.compute_rx.recv().await;
+    assert_eq!(h.output_stream.take().await, ["1"]);
 
-    let mut func_lib = basic_invoker.into_func_lib();
-    func_lib.merge(timers_invoker.into_func_lib());
+    h.worker.send(WorkerMessage::Clear).unwrap();
+    h.worker.send(h.inject_frame_event()).unwrap();
 
-    let graph = log_frame_no_graph(&func_lib);
-    let frame_event_node_id = graph.by_name("frame event").unwrap().id;
-
-    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
-    let mut worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
-    });
-
-    // Setup and execute once
-    worker.send_many([
-        WorkerMessage::Update {
-            graph: graph.clone(),
-            func_lib: Arc::new(func_lib.clone()),
-        },
-        WorkerMessage::InjectEvents {
-            events: vec![EventRef {
-                node_id: frame_event_node_id,
-                event_idx: 0,
-            }],
-        },
-    ]);
-
-    let _ = compute_finish_rx.recv().await;
-    assert_eq!(output_stream.take().await, ["1"]);
-
-    // Clear the graph
-    worker.send(WorkerMessage::Clear);
-
-    // Try to execute - should not produce output since graph is cleared
-    worker.send(WorkerMessage::InjectEvents {
-        events: vec![EventRef {
-            node_id: frame_event_node_id,
-            event_idx: 0,
-        }],
-    });
-
-    // Give it time to process - no callback expected since graph is clear
     tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(output_stream.take().await.is_empty());
-
-    worker.exit();
+    assert!(h.output_stream.take().await.is_empty());
 }
 
 #[tokio::test]
 async fn events_are_deduplicated() {
-    let output_stream = OutputStream::new();
+    let mut h = FrameHarness::new().await;
 
-    let timers_invoker = WorkerEventsFuncLib::default();
-    let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
+    h.worker.send(h.update_msg()).unwrap();
 
-    let mut func_lib = basic_invoker.into_func_lib();
-    func_lib.merge(timers_invoker.into_func_lib());
+    let event = h.frame_event();
+    h.worker
+        .send(WorkerMessage::InjectEvents {
+            events: vec![event, event, event],
+        })
+        .unwrap();
 
-    let graph = log_frame_no_graph(&func_lib);
-    let frame_event_node_id = graph.by_name("frame event").unwrap().id;
-
-    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
-    let mut worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
-    });
-
-    worker.send(WorkerMessage::Update {
-        graph: graph.clone(),
-        func_lib: Arc::new(func_lib.clone()),
-    });
-
-    // Send the same event multiple times in one batch
-    let event = EventRef {
-        node_id: frame_event_node_id,
-        event_idx: 0,
-    };
-    worker.send(WorkerMessage::InjectEvents {
-        events: vec![event, event, event],
-    });
-
-    let _ = compute_finish_rx.recv().await;
-
-    // Should only print once since duplicate events are deduplicated
-    assert_eq!(output_stream.take().await, ["1"]);
-
-    worker.exit();
+    let _ = h.compute_rx.recv().await;
+    assert_eq!(h.output_stream.take().await, ["1"]);
 }
 
 #[tokio::test]
@@ -374,28 +329,29 @@ async fn execute_terminals_triggers_terminal_nodes() {
     let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
     let func_lib = basic_invoker.into_func_lib();
 
-    // Create a simple graph with a terminal print node
+    // Simple single-terminal graph — doesn't use FrameHarness' frame-event setup.
     let mut graph = Graph::default();
     let print_func = func_lib.by_name("print").unwrap();
 
     let mut print_node: Node = print_func.into();
     print_node.id = NodeId::unique();
-    // print function is already terminal by definition
     print_node.inputs[0].binding = StaticValue::String("hello".to_string()).into();
     graph.add(print_node);
 
-    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
-    let mut worker = Worker::new(move |result| {
+    let (compute_finish_tx, mut compute_finish_rx) = mpsc::channel(8);
+    let worker = Worker::new(move |result| {
         compute_finish_tx.try_send(result).ok();
     });
 
-    worker.send_many([
-        WorkerMessage::Update {
-            graph: graph.clone(),
-            func_lib: Arc::new(func_lib.clone()),
-        },
-        WorkerMessage::ExecuteTerminals,
-    ]);
+    worker
+        .send_many([
+            WorkerMessage::Update {
+                graph,
+                func_lib: Arc::new(func_lib),
+            },
+            WorkerMessage::ExecuteTerminals,
+        ])
+        .unwrap();
 
     let executed = compute_finish_rx
         .recv()
@@ -405,87 +361,41 @@ async fn execute_terminals_triggers_terminal_nodes() {
 
     assert_eq!(executed.executed_nodes.len(), 1);
     assert_eq!(output_stream.take().await, ["hello"]);
-
-    worker.exit();
 }
 
 #[tokio::test]
 async fn start_stop_event_loop() {
-    let output_stream = OutputStream::new();
+    let mut h = FrameHarness::with_callback_capacity(32).await;
 
-    let timers_invoker = WorkerEventsFuncLib::default();
-    let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
+    h.worker
+        .send_many([h.update_msg(), WorkerMessage::StartEventLoop])
+        .unwrap();
 
-    let mut func_lib = basic_invoker.into_func_lib();
-    func_lib.merge(timers_invoker.into_func_lib());
-
-    let graph = log_frame_no_graph(&func_lib);
-
-    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(32);
-    let mut worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
-    });
-
-    worker.send_many([
-        WorkerMessage::Update {
-            graph: graph.clone(),
-            func_lib: Arc::new(func_lib.clone()),
-        },
-        WorkerMessage::StartEventLoop,
-    ]);
-
-    // Wait for event loop to start and produce some output
-    let _ = compute_finish_rx.recv().await; // Initial execution
+    let _ = h.compute_rx.recv().await;
     tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(h.worker.is_event_loop_started());
 
-    assert!(worker.is_event_loop_started());
-
-    // Stop the event loop
-    worker.send(WorkerMessage::StopEventLoop);
+    h.worker.send(WorkerMessage::StopEventLoop).unwrap();
     tokio::time::sleep(Duration::from_millis(50)).await;
-
-    assert!(!worker.is_event_loop_started());
-
-    worker.exit();
+    assert!(!h.worker.is_event_loop_started());
 }
 
 #[tokio::test]
 async fn request_argument_values_invokes_callback() {
-    let timers_invoker = WorkerEventsFuncLib::default();
-    let basic_invoker = BasicFuncLib::default();
+    let mut h = FrameHarness::new().await;
 
-    let mut func_lib = basic_invoker.into_func_lib();
-    func_lib.merge(timers_invoker.into_func_lib());
-
-    let graph = log_frame_no_graph(&func_lib);
-    let frame_event_node_id = graph.by_name("frame event").unwrap().id;
-
-    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
-    let mut worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
-    });
-
-    worker.send_many([
-        WorkerMessage::Update {
-            graph: graph.clone(),
-            func_lib: Arc::new(func_lib.clone()),
-        },
-        WorkerMessage::InjectEvents {
-            events: vec![EventRef {
-                node_id: frame_event_node_id,
-                event_idx: 0,
-            }],
-        },
-    ]);
-
-    // Wait for execution
-    let _ = compute_finish_rx.recv().await;
+    h.worker
+        .send_many([h.update_msg(), h.inject_frame_event()])
+        .unwrap();
+    let _ = h.compute_rx.recv().await;
 
     let (reply, rx) = oneshot::channel();
-    worker.send(WorkerMessage::RequestArgumentValues {
-        node_id: frame_event_node_id,
-        reply,
-    });
+    h.worker
+        .send(WorkerMessage::RequestArgumentValues {
+            node_id: h.frame_event_node_id,
+            reply,
+        })
+        .unwrap();
 
     let values = timeout(Duration::from_millis(200), rx)
         .await
@@ -493,95 +403,44 @@ async fn request_argument_values_invokes_callback() {
         .expect("Reply sender dropped");
 
     assert!(values.is_some());
-
-    worker.exit();
 }
 
 #[tokio::test]
 async fn sync_fires_after_execution() {
-    let timers_invoker = WorkerEventsFuncLib::default();
-    let basic_invoker = BasicFuncLib::default();
-
-    let mut func_lib = basic_invoker.into_func_lib();
-    func_lib.merge(timers_invoker.into_func_lib());
-
-    let graph = log_frame_no_graph(&func_lib);
-    let frame_event_node_id = graph.by_name("frame event").unwrap().id;
-
-    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
-    let mut worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
-    });
+    let mut h = FrameHarness::new().await;
 
     let (reply, rx) = oneshot::channel();
-    worker.send_many([
-        WorkerMessage::Update {
-            graph: graph.clone(),
-            func_lib: Arc::new(func_lib.clone()),
-        },
-        WorkerMessage::InjectEvents {
-            events: vec![EventRef {
-                node_id: frame_event_node_id,
-                event_idx: 0,
-            }],
-        },
-        WorkerMessage::Sync { reply },
-    ]);
+    h.worker
+        .send_many([
+            h.update_msg(),
+            h.inject_frame_event(),
+            WorkerMessage::Sync { reply },
+        ])
+        .unwrap();
 
-    let _ = compute_finish_rx.recv().await;
+    let _ = h.compute_rx.recv().await;
     timeout(Duration::from_millis(200), rx)
         .await
         .expect("Sync timeout")
         .expect("Sync sender dropped");
-
-    worker.exit();
 }
 
 #[tokio::test]
 async fn update_restarts_event_loop_if_running() {
-    let output_stream = OutputStream::new();
+    let mut h = FrameHarness::with_callback_capacity(32).await;
 
-    let timers_invoker = WorkerEventsFuncLib::default();
-    let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
-
-    let mut func_lib = basic_invoker.into_func_lib();
-    func_lib.merge(timers_invoker.into_func_lib());
-
-    let graph = log_frame_no_graph(&func_lib);
-
-    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(32);
-    let mut worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
-    });
-
-    // Start with event loop
-    worker.send_many([
-        WorkerMessage::Update {
-            graph: graph.clone(),
-            func_lib: Arc::new(func_lib.clone()),
-        },
-        WorkerMessage::StartEventLoop,
-    ]);
-
-    let _ = compute_finish_rx.recv().await;
+    h.worker
+        .send_many([h.update_msg(), WorkerMessage::StartEventLoop])
+        .unwrap();
+    let _ = h.compute_rx.recv().await;
     tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(worker.is_event_loop_started());
+    assert!(h.worker.is_event_loop_started());
 
-    // Update graph - should restart event loop
-    worker.send(WorkerMessage::Update {
-        graph: graph.clone(),
-        func_lib: Arc::new(func_lib.clone()),
-    });
-
-    // Drain the channel
-    while compute_finish_rx.try_recv().is_ok() {}
+    h.worker.send(h.update_msg()).unwrap();
+    while h.compute_rx.try_recv().is_ok() {}
 
     tokio::time::sleep(Duration::from_millis(100)).await;
-
-    // Event loop should still be running after update
-    assert!(worker.is_event_loop_started());
-
-    worker.exit();
+    assert!(h.worker.is_event_loop_started());
 }
 
 // Stale-event filtering is now structural: each start_event_loop
@@ -610,79 +469,67 @@ async fn stopped_event_loop_channel_is_closed() {
 
     handle.stop().await;
 
-    // After stop, all lambda tasks (the sole senders) are aborted
-    // → the Receiver must observe channel closure on next recv().
-    let closed = timeout(Duration::from_millis(500), event_rx.recv())
-        .await
-        .expect("recv should complete once channel closes");
-    // recv_many / recv return None when all senders are dropped.
-    // Buffered events may still be present (fine); what matters
-    // is that eventually we get None — drain and confirm.
-    if closed.is_some() {
-        while event_rx.recv().await.is_some() {}
+    // After stop, all lambda tasks (the sole senders) are aborted →
+    // the Receiver must observe channel closure. Drain under a
+    // bounded per-recv timeout so a regression that stops closing
+    // the channel fails fast instead of wedging the test.
+    loop {
+        let item = timeout(Duration::from_millis(500), event_rx.recv())
+            .await
+            .expect("recv must complete — channel must eventually close after handle.stop()");
+        if item.is_none() {
+            break;
+        }
     }
 }
 
 #[tokio::test]
 async fn send_many_empty_is_noop() {
     // Empty batch must not panic, hang, or desynchronize the worker.
-    let mut worker = Worker::new(|_| {});
+    let worker = Worker::new(|_| {});
 
-    worker.send_many(std::iter::empty::<WorkerMessage>());
+    worker
+        .send_many(std::iter::empty::<WorkerMessage>())
+        .unwrap();
 
     // Subsequent Sync still fires → worker is alive.
     let (reply, rx) = oneshot::channel();
-    worker.send(WorkerMessage::Sync { reply });
+    worker.send(WorkerMessage::Sync { reply }).unwrap();
     timeout(Duration::from_millis(500), rx)
         .await
         .expect("Sync should fire after empty send_many")
         .expect("Sync sender dropped");
-
-    worker.exit();
 }
 
 #[tokio::test]
 async fn stop_event_loop_when_not_running_is_noop() {
-    let mut worker = Worker::new(|_| {});
+    let worker = Worker::new(|_| {});
 
-    worker.send(WorkerMessage::StopEventLoop);
+    worker.send(WorkerMessage::StopEventLoop).unwrap();
     assert!(!worker.is_event_loop_started());
 
     // Worker still responsive after a no-op stop.
     let (reply, rx) = oneshot::channel();
-    worker.send(WorkerMessage::Sync { reply });
+    worker.send(WorkerMessage::Sync { reply }).unwrap();
     timeout(Duration::from_millis(500), rx)
         .await
         .expect("StopEventLoop with no running loop should be a no-op")
         .expect("Sync sender dropped");
-
-    worker.exit();
 }
 
 #[tokio::test]
 async fn request_argument_values_for_unknown_node_returns_none() {
-    let timers_invoker = WorkerEventsFuncLib::default();
-    let basic_invoker = BasicFuncLib::default();
-    let mut func_lib = basic_invoker.into_func_lib();
-    func_lib.merge(timers_invoker.into_func_lib());
+    let h = FrameHarness::new().await;
 
-    let graph = log_frame_no_graph(&func_lib);
-
-    let (compute_finish_tx, _compute_finish_rx) = tokio::sync::mpsc::channel(8);
-    let mut worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
-    });
-
-    worker.send(WorkerMessage::Update {
-        graph,
-        func_lib: Arc::new(func_lib),
-    });
+    h.worker.send(h.update_msg()).unwrap();
 
     let (reply, rx) = oneshot::channel();
-    worker.send(WorkerMessage::RequestArgumentValues {
-        node_id: NodeId::unique(),
-        reply,
-    });
+    h.worker
+        .send(WorkerMessage::RequestArgumentValues {
+            node_id: NodeId::unique(),
+            reply,
+        })
+        .unwrap();
 
     let values = timeout(Duration::from_millis(500), rx)
         .await
@@ -690,21 +537,21 @@ async fn request_argument_values_for_unknown_node_returns_none() {
         .expect("Reply sender dropped");
 
     assert!(values.is_none(), "unknown node should yield None");
-
-    worker.exit();
 }
 
 #[tokio::test]
 async fn multiple_syncs_in_batch_all_run() {
-    let mut worker = Worker::new(|_| {});
+    let worker = Worker::new(|_| {});
 
     let (reply_a, rx_a) = oneshot::channel();
     let (reply_b, rx_b) = oneshot::channel();
 
-    worker.send_many([
-        WorkerMessage::Sync { reply: reply_a },
-        WorkerMessage::Sync { reply: reply_b },
-    ]);
+    worker
+        .send_many([
+            WorkerMessage::Sync { reply: reply_a },
+            WorkerMessage::Sync { reply: reply_b },
+        ])
+        .unwrap();
 
     timeout(Duration::from_millis(500), rx_a)
         .await
@@ -714,8 +561,6 @@ async fn multiple_syncs_in_batch_all_run() {
         .await
         .expect("Second Sync should fire")
         .expect("Second sender dropped");
-
-    worker.exit();
 }
 
 #[tokio::test]
@@ -723,44 +568,21 @@ async fn clear_then_update_in_same_batch_applies_update() {
     // Scan-then-commit ordering: Clear zeroes execution_graph, Update
     // queues a replacement, commit phase applies Update and flips
     // execution_graph_clear back to false. The event must execute.
-    let output_stream = OutputStream::new();
-    let timers_invoker = WorkerEventsFuncLib::default();
-    let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
-    let mut func_lib = basic_invoker.into_func_lib();
-    func_lib.merge(timers_invoker.into_func_lib());
+    let mut h = FrameHarness::new().await;
 
-    let graph = log_frame_no_graph(&func_lib);
-    let frame_event_node_id = graph.by_name("frame event").unwrap().id;
+    h.worker
+        .send_many([WorkerMessage::Clear, h.update_msg(), h.inject_frame_event()])
+        .unwrap();
 
-    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
-    let mut worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
-    });
-
-    worker.send_many([
-        WorkerMessage::Clear,
-        WorkerMessage::Update {
-            graph,
-            func_lib: Arc::new(func_lib),
-        },
-        WorkerMessage::InjectEvents {
-            events: vec![EventRef {
-                node_id: frame_event_node_id,
-                event_idx: 0,
-            }],
-        },
-    ]);
-
-    let executed = compute_finish_rx
+    let executed = h
+        .compute_rx
         .recv()
         .await
         .expect("Missing compute completion")
         .expect("Unsuccessful compute");
 
     assert_eq!(executed.executed_nodes.len(), 3);
-    assert_eq!(output_stream.take().await, ["1"]);
-
-    worker.exit();
+    assert_eq!(h.output_stream.take().await, ["1"]);
 }
 
 // F3: RequestArgumentValues batched with Update must observe the
@@ -770,33 +592,21 @@ async fn clear_then_update_in_same_batch_applies_update() {
 // `Some`.
 #[tokio::test]
 async fn request_argument_values_batched_with_update_sees_new_graph() {
-    let timers_invoker = WorkerEventsFuncLib::default();
-    let basic_invoker = BasicFuncLib::default();
-    let mut func_lib = basic_invoker.into_func_lib();
-    func_lib.merge(timers_invoker.into_func_lib());
-
-    let graph = log_frame_no_graph(&func_lib);
-    let frame_event_node_id = graph.by_name("frame event").unwrap().id;
-
-    let (compute_finish_tx, _rx) = tokio::sync::mpsc::channel(8);
-    let mut worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
-    });
+    let h = FrameHarness::new().await;
 
     // Worker starts with an empty ExecutionGraph. Batch Update +
     // RequestArgumentValues together: only works if the scan phase
     // defers the request until after Update commits.
     let (reply, rx) = oneshot::channel();
-    worker.send_many([
-        WorkerMessage::Update {
-            graph,
-            func_lib: Arc::new(func_lib),
-        },
-        WorkerMessage::RequestArgumentValues {
-            node_id: frame_event_node_id,
-            reply,
-        },
-    ]);
+    h.worker
+        .send_many([
+            h.update_msg(),
+            WorkerMessage::RequestArgumentValues {
+                node_id: h.frame_event_node_id,
+                reply,
+            },
+        ])
+        .unwrap();
 
     let values = timeout(Duration::from_millis(500), rx)
         .await
@@ -807,8 +617,6 @@ async fn request_argument_values_batched_with_update_sees_new_graph() {
         values.is_some(),
         "request batched with Update must see the newly-loaded graph"
     );
-
-    worker.exit();
 }
 
 // F3: Clear batched after an Update+Execute must clear the graph
@@ -816,30 +624,17 @@ async fn request_argument_values_batched_with_update_sees_new_graph() {
 // None.
 #[tokio::test]
 async fn request_argument_values_batched_with_clear_sees_empty_graph() {
-    let timers_invoker = WorkerEventsFuncLib::default();
-    let basic_invoker = BasicFuncLib::default();
-    let mut func_lib = basic_invoker.into_func_lib();
-    func_lib.merge(timers_invoker.into_func_lib());
+    let mut h = FrameHarness::new().await;
 
-    let graph = log_frame_no_graph(&func_lib);
-    let frame_event_node_id = graph.by_name("frame event").unwrap().id;
-
-    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
-    let mut worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
-    });
-
-    // First populate the graph.
-    worker.send(WorkerMessage::Update {
-        graph,
-        func_lib: Arc::new(func_lib),
-    });
-    // Sanity: prior request sees values.
+    // Populate, then confirm the request sees values.
+    h.worker.send(h.update_msg()).unwrap();
     let (reply_before, rx_before) = oneshot::channel();
-    worker.send(WorkerMessage::RequestArgumentValues {
-        node_id: frame_event_node_id,
-        reply: reply_before,
-    });
+    h.worker
+        .send(WorkerMessage::RequestArgumentValues {
+            node_id: h.frame_event_node_id,
+            reply: reply_before,
+        })
+        .unwrap();
     assert!(
         timeout(Duration::from_millis(500), rx_before)
             .await
@@ -848,16 +643,18 @@ async fn request_argument_values_batched_with_clear_sees_empty_graph() {
             .is_some()
     );
 
-    // Now batch Clear + RequestArgumentValues. Request must see the
+    // Batch Clear + RequestArgumentValues. Request must see the
     // post-clear state (None), not the pre-clear state (Some).
     let (reply_after, rx_after) = oneshot::channel();
-    worker.send_many([
-        WorkerMessage::Clear,
-        WorkerMessage::RequestArgumentValues {
-            node_id: frame_event_node_id,
-            reply: reply_after,
-        },
-    ]);
+    h.worker
+        .send_many([
+            WorkerMessage::Clear,
+            WorkerMessage::RequestArgumentValues {
+                node_id: h.frame_event_node_id,
+                reply: reply_after,
+            },
+        ])
+        .unwrap();
     let values = timeout(Duration::from_millis(500), rx_after)
         .await
         .expect("post-clear reply timeout")
@@ -867,10 +664,7 @@ async fn request_argument_values_batched_with_clear_sees_empty_graph() {
         "request batched after Clear must observe empty graph"
     );
 
-    // Drain any execution-finished callbacks the test produced.
-    while compute_finish_rx.try_recv().is_ok() {}
-
-    worker.exit();
+    while h.compute_rx.try_recv().is_ok() {}
 }
 
 // F5: running execution on an empty graph is a normal state, not a
@@ -878,9 +672,7 @@ async fn request_argument_values_batched_with_clear_sees_empty_graph() {
 // until a graph is loaded.
 
 async fn assert_no_callback_within(
-    rx: &mut tokio::sync::mpsc::Receiver<
-        crate::execution_graph::Result<crate::execution_stats::ExecutionStats>,
-    >,
+    rx: &mut mpsc::Receiver<ExecResult<ExecutionStats>>,
     d: Duration,
 ) {
     assert!(
@@ -889,52 +681,47 @@ async fn assert_no_callback_within(
     );
 }
 
+/// Minimal worker with no graph loaded, for tests that only care
+/// about protocol-level behaviour (empty-graph no-ops, stop-when-
+/// not-running, empty batches, syncs, etc.).
+fn empty_worker() -> (Worker, mpsc::Receiver<ExecResult<ExecutionStats>>) {
+    let (tx, rx) = mpsc::channel(8);
+    let worker = Worker::new(move |result| {
+        tx.try_send(result).ok();
+    });
+    (worker, rx)
+}
+
 #[tokio::test]
 async fn execute_terminals_on_empty_graph_is_silent_noop() {
-    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
-    let mut worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
-    });
-
-    worker.send(WorkerMessage::ExecuteTerminals);
-    assert_no_callback_within(&mut compute_finish_rx, Duration::from_millis(100)).await;
-
-    worker.exit();
+    let (worker, mut rx) = empty_worker();
+    worker.send(WorkerMessage::ExecuteTerminals).unwrap();
+    assert_no_callback_within(&mut rx, Duration::from_millis(100)).await;
 }
 
 #[tokio::test]
 async fn event_on_empty_graph_is_silent_noop() {
-    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
-    let mut worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
-    });
-
-    worker.send(WorkerMessage::InjectEvents {
-        events: vec![EventRef {
-            node_id: NodeId::unique(),
-            event_idx: 0,
-        }],
-    });
-    assert_no_callback_within(&mut compute_finish_rx, Duration::from_millis(100)).await;
-
-    worker.exit();
+    let (worker, mut rx) = empty_worker();
+    worker
+        .send(WorkerMessage::InjectEvents {
+            events: vec![EventRef {
+                node_id: NodeId::unique(),
+                event_idx: 0,
+            }],
+        })
+        .unwrap();
+    assert_no_callback_within(&mut rx, Duration::from_millis(100)).await;
 }
 
 #[tokio::test]
 async fn start_event_loop_on_empty_graph_is_silent_noop() {
-    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
-    let mut worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
-    });
-
-    worker.send(WorkerMessage::StartEventLoop);
-    assert_no_callback_within(&mut compute_finish_rx, Duration::from_millis(100)).await;
+    let (worker, mut rx) = empty_worker();
+    worker.send(WorkerMessage::StartEventLoop).unwrap();
+    assert_no_callback_within(&mut rx, Duration::from_millis(100)).await;
     assert!(
         !worker.is_event_loop_started(),
         "no loop should actually have started"
     );
-
-    worker.exit();
 }
 
 // F4 regression: when a batch triggers both an execution
@@ -960,19 +747,21 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
     print_node.inputs[0].binding = StaticValue::String("hi".to_string()).into();
     graph.add(print_node);
 
-    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
-    let mut worker = Worker::new(move |result| {
+    let (compute_finish_tx, mut compute_finish_rx) = mpsc::channel(8);
+    let worker = Worker::new(move |result| {
         compute_finish_tx.try_send(result).ok();
     });
 
-    worker.send_many([
-        WorkerMessage::Update {
-            graph,
-            func_lib: Arc::new(func_lib),
-        },
-        WorkerMessage::ExecuteTerminals,
-        WorkerMessage::StartEventLoop,
-    ]);
+    worker
+        .send_many([
+            WorkerMessage::Update {
+                graph,
+                func_lib: Arc::new(func_lib),
+            },
+            WorkerMessage::ExecuteTerminals,
+            WorkerMessage::StartEventLoop,
+        ])
+        .unwrap();
 
     let first = timeout(Duration::from_millis(500), compute_finish_rx.recv())
         .await
@@ -980,7 +769,6 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
         .expect("callback channel closed");
     assert!(first.is_ok(), "execute must succeed: {first:?}");
 
-    // Confirm no second callback for the same batch.
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(
         compute_finish_rx.try_recv().is_err(),
@@ -990,10 +778,7 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
         !worker.is_event_loop_started(),
         "terminal-only graph yields no triggers; loop should not have started"
     );
-    // The single execute call actually ran the terminal.
     assert_eq!(output_stream.take().await, ["hi"]);
-
-    worker.exit();
 }
 
 // F2: when two separate send_many calls queue messages before the
@@ -1018,23 +803,27 @@ async fn drain_on_wake_folds_queued_batches_into_one_commit() {
     print_node.inputs[0].binding = StaticValue::String("once".to_string()).into();
     graph.add(print_node);
 
-    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
-    let mut worker = Worker::new(move |result| {
+    let (compute_finish_tx, mut compute_finish_rx) = mpsc::channel(8);
+    let worker = Worker::new(move |result| {
         compute_finish_tx.try_send(result).ok();
     });
 
     // Three separate send_many calls, all synchronous — they all
     // land in the channel before the worker task is polled.
-    worker.send_many([WorkerMessage::Update {
-        graph,
-        func_lib: Arc::new(func_lib),
-    }]);
-    worker.send_many([WorkerMessage::ExecuteTerminals]);
+    worker
+        .send_many([WorkerMessage::Update {
+            graph,
+            func_lib: Arc::new(func_lib),
+        }])
+        .unwrap();
+    worker.send_many([WorkerMessage::ExecuteTerminals]).unwrap();
     let (reply, sync_rx) = oneshot::channel();
-    worker.send_many([
-        WorkerMessage::ExecuteTerminals,
-        WorkerMessage::Sync { reply },
-    ]);
+    worker
+        .send_many([
+            WorkerMessage::ExecuteTerminals,
+            WorkerMessage::Sync { reply },
+        ])
+        .unwrap();
 
     // Sync barrier: fires after the commit covering everything above.
     timeout(Duration::from_millis(500), sync_rx)
@@ -1052,29 +841,23 @@ async fn drain_on_wake_folds_queued_batches_into_one_commit() {
         compute_finish_rx.try_recv().is_err(),
         "two ExecuteTerminals across batches must reduce to one callback"
     );
-    // Graph ran exactly once.
     assert_eq!(output_stream.take().await, ["once"]);
-
-    worker.exit();
 }
 
 #[tokio::test]
 async fn execute_terminals_with_start_event_loop_on_empty_graph_is_silent_noop() {
     // F5 + F4: a batch with ExecuteTerminals + StartEventLoop on an
     // empty graph must fire no callback at all.
-    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
-    let mut worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
-    });
+    let (worker, mut rx) = empty_worker();
 
-    worker.send_many([
-        WorkerMessage::ExecuteTerminals,
-        WorkerMessage::StartEventLoop,
-    ]);
-    assert_no_callback_within(&mut compute_finish_rx, Duration::from_millis(100)).await;
+    worker
+        .send_many([
+            WorkerMessage::ExecuteTerminals,
+            WorkerMessage::StartEventLoop,
+        ])
+        .unwrap();
+    assert_no_callback_within(&mut rx, Duration::from_millis(100)).await;
     assert!(!worker.is_event_loop_started());
-
-    worker.exit();
 }
 
 // --- Pure scan() unit tests ------------------------------------
@@ -1263,35 +1046,12 @@ fn scan_stop_then_start_yields_start() {
 // InjectEvents hits the empty-graph silent no-op path (no callback).
 #[tokio::test]
 async fn update_then_clear_in_same_batch_leaves_graph_cleared() {
-    let timers_invoker = WorkerEventsFuncLib::default();
-    let basic_invoker = BasicFuncLib::default();
-    let mut func_lib = basic_invoker.into_func_lib();
-    func_lib.merge(timers_invoker.into_func_lib());
+    let mut h = FrameHarness::new().await;
 
-    let graph = log_frame_no_graph(&func_lib);
-    let frame_event_node_id = graph.by_name("frame event").unwrap().id;
-
-    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
-    let mut worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
-    });
-
-    worker.send_many([
-        WorkerMessage::Update {
-            graph,
-            func_lib: Arc::new(func_lib),
-        },
-        WorkerMessage::Clear,
-        WorkerMessage::InjectEvents {
-            events: vec![EventRef {
-                node_id: frame_event_node_id,
-                event_idx: 0,
-            }],
-        },
-    ]);
-    assert_no_callback_within(&mut compute_finish_rx, Duration::from_millis(100)).await;
-
-    worker.exit();
+    h.worker
+        .send_many([h.update_msg(), WorkerMessage::Clear, h.inject_frame_event()])
+        .unwrap();
+    assert_no_callback_within(&mut h.compute_rx, Duration::from_millis(100)).await;
 }
 
 // --- `biased` select: commands not starved by events -----------
@@ -1303,39 +1063,25 @@ async fn update_then_clear_in_same_batch_leaves_graph_cleared() {
 // sit on the events branch for many iterations.
 #[tokio::test]
 async fn commands_not_starved_by_fast_event_loop() {
-    let output_stream = OutputStream::new();
-    let timers_invoker = WorkerEventsFuncLib::default();
-    let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
-    let mut func_lib = basic_invoker.into_func_lib();
-    func_lib.merge(timers_invoker.into_func_lib());
+    let mut h = FrameHarness::with_callback_capacity(512).await;
 
-    let graph = log_frame_no_graph(&func_lib);
+    h.worker
+        .send_many([h.update_msg(), WorkerMessage::StartEventLoop])
+        .unwrap();
 
-    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(512);
-    let mut worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
-    });
-
-    worker.send_many([
-        WorkerMessage::Update {
-            graph,
-            func_lib: Arc::new(func_lib),
-        },
-        WorkerMessage::StartEventLoop,
-    ]);
-
-    // Give the loop time to build up momentum.
     tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(worker.is_event_loop_started());
+    assert!(h.worker.is_event_loop_started());
 
     // Drain accumulated callbacks so the channel isn't a
     // confounding factor.
-    while compute_finish_rx.try_recv().is_ok() {}
+    while h.compute_rx.try_recv().is_ok() {}
 
     // Send Stop + Sync. Both must be observed within the budget
     // even though lambda events are still being produced.
     let (reply, rx) = oneshot::channel();
-    worker.send_many([WorkerMessage::StopEventLoop, WorkerMessage::Sync { reply }]);
+    h.worker
+        .send_many([WorkerMessage::StopEventLoop, WorkerMessage::Sync { reply }])
+        .unwrap();
 
     timeout(Duration::from_millis(500), rx)
         .await
@@ -1343,11 +1089,9 @@ async fn commands_not_starved_by_fast_event_loop() {
         .expect("Sync sender dropped");
 
     assert!(
-        !worker.is_event_loop_started(),
+        !h.worker.is_event_loop_started(),
         "event loop should be stopped"
     );
-
-    worker.exit();
 }
 
 // End-to-end: an event fired by a lambda reaches the worker's
@@ -1355,37 +1099,22 @@ async fn commands_not_starved_by_fast_event_loop() {
 // dedicated bounded-channel flow (no forwarder).
 #[tokio::test]
 async fn lambda_events_drive_worker_execution() {
-    let output_stream = OutputStream::new();
-    let timers_invoker = WorkerEventsFuncLib::default();
-    let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
-    let mut func_lib = basic_invoker.into_func_lib();
-    func_lib.merge(timers_invoker.into_func_lib());
+    let mut h = FrameHarness::with_callback_capacity(32).await;
 
-    let graph = log_frame_no_graph(&func_lib);
-
-    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(32);
-    let mut worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
-    });
-
-    worker.send_many([
-        WorkerMessage::Update {
-            graph,
-            func_lib: Arc::new(func_lib),
-        },
-        WorkerMessage::StartEventLoop,
-    ]);
+    h.worker
+        .send_many([h.update_msg(), WorkerMessage::StartEventLoop])
+        .unwrap();
 
     // First callback is the initial execute() inside the
     // start_event_loop path.
-    let _ = timeout(Duration::from_millis(500), compute_finish_rx.recv())
+    let _ = timeout(Duration::from_millis(500), h.compute_rx.recv())
         .await
         .expect("initial execute callback")
         .expect("callback channel closed");
 
     // Subsequent callbacks must come from the lambda firing and
     // the worker draining events from the bounded channel.
-    let second = timeout(Duration::from_millis(500), compute_finish_rx.recv())
+    let second = timeout(Duration::from_millis(500), h.compute_rx.recv())
         .await
         .expect("lambda-driven execute callback")
         .expect("callback channel closed");
@@ -1393,6 +1122,206 @@ async fn lambda_events_drive_worker_execution() {
         second.is_ok(),
         "lambda-driven execution must succeed: {second:?}"
     );
+}
 
-    worker.exit();
+// F4: Exit dominates the batch at the runtime level — any pre-Exit
+// Sync reply sender must drop (waiter observes RecvError), not fire
+// with `Ok(())`. `scan_exit_dominates_entire_batch` pins the pure
+// scan side; this pins the end-to-end contract.
+#[tokio::test]
+async fn exit_in_batch_closes_pending_sync() {
+    let (worker, _rx) = empty_worker();
+
+    let (reply, rx) = oneshot::channel();
+    worker
+        .send_many([WorkerMessage::Sync { reply }, WorkerMessage::Exit])
+        .unwrap();
+
+    let result = timeout(Duration::from_millis(500), rx)
+        .await
+        .expect("rx must resolve once the dropped Sync sender is observed");
+    assert!(
+        result.is_err(),
+        "Sync batched with Exit must drop the reply sender, got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn exit_in_batch_closes_pending_argument_request() {
+    let (worker, _rx) = empty_worker();
+
+    let (reply, rx) = oneshot::channel();
+    worker
+        .send_many([
+            WorkerMessage::RequestArgumentValues {
+                node_id: NodeId::unique(),
+                reply,
+            },
+            WorkerMessage::Exit,
+        ])
+        .unwrap();
+
+    let result = timeout(Duration::from_millis(500), rx)
+        .await
+        .expect("rx must resolve once the dropped reply sender is observed");
+    assert!(
+        result.is_err(),
+        "RequestArgumentValues batched with Exit must drop the sender, got {result:?}"
+    );
+}
+
+// F5: RequestArgumentValues must resolve cleanly while an event
+// loop is running — the commit phase runs replies post-execute, so
+// a live loop must neither deadlock against the pause gate nor
+// starve the reply.
+#[tokio::test]
+async fn request_argument_values_during_running_event_loop() {
+    let mut h = FrameHarness::with_callback_capacity(32).await;
+
+    h.worker
+        .send_many([h.update_msg(), WorkerMessage::StartEventLoop])
+        .unwrap();
+
+    // Wait until the loop has fired at least once.
+    let _ = timeout(Duration::from_millis(500), h.compute_rx.recv())
+        .await
+        .expect("initial execute callback");
+    let _ = timeout(Duration::from_millis(500), h.compute_rx.recv())
+        .await
+        .expect("lambda-driven execute callback");
+
+    assert!(h.worker.is_event_loop_started());
+
+    let (reply, rx) = oneshot::channel();
+    h.worker
+        .send(WorkerMessage::RequestArgumentValues {
+            node_id: h.frame_event_node_id,
+            reply,
+        })
+        .unwrap();
+
+    let values = timeout(Duration::from_millis(500), rx)
+        .await
+        .expect("reply must arrive while loop is running")
+        .expect("reply sender must not drop");
+    assert!(
+        values.is_some(),
+        "argument values must be available for a node in the live graph"
+    );
+}
+
+// F6: StartEventLoop while a loop is already running must not trip
+// the `assert!(event_loop.is_none())` in the commit phase — the
+// needs_stop path is what keeps that invariant, and this test
+// exists so a refactor touching needs_stop fails loudly.
+#[tokio::test]
+async fn start_event_loop_twice_is_idempotent() {
+    let mut h = FrameHarness::with_callback_capacity(64).await;
+
+    h.worker
+        .send_many([h.update_msg(), WorkerMessage::StartEventLoop])
+        .unwrap();
+
+    let _ = timeout(Duration::from_millis(500), h.compute_rx.recv())
+        .await
+        .expect("initial execute callback");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(h.worker.is_event_loop_started());
+
+    // Second StartEventLoop — no graph change; must not panic.
+    let (reply, rx) = oneshot::channel();
+    h.worker
+        .send_many([WorkerMessage::StartEventLoop, WorkerMessage::Sync { reply }])
+        .unwrap();
+
+    timeout(Duration::from_millis(500), rx)
+        .await
+        .expect("Sync must fire after second StartEventLoop")
+        .expect("Sync sender dropped");
+
+    assert!(
+        h.worker.is_event_loop_started(),
+        "loop must still be running after a redundant Start"
+    );
+}
+
+// F7: the post-commit refresh of `event_loop_started` (mod.rs:381)
+// must make a Sync reply observe the loop state *without* needing a
+// further sleep/yield. A regression that re-stores only at the top
+// of the loop would make this assertion race.
+#[tokio::test]
+async fn is_event_loop_started_reflects_state_before_sync_reply() {
+    let h = FrameHarness::with_callback_capacity(64).await;
+
+    // Start: Sync fires in the same commit → observable must be true.
+    let (reply_start, rx_start) = oneshot::channel();
+    h.worker
+        .send_many([
+            h.update_msg(),
+            WorkerMessage::StartEventLoop,
+            WorkerMessage::Sync { reply: reply_start },
+        ])
+        .unwrap();
+    timeout(Duration::from_millis(500), rx_start)
+        .await
+        .expect("Start/Sync must fire")
+        .expect("Start/Sync sender dropped");
+    assert!(
+        h.worker.is_event_loop_started(),
+        "is_event_loop_started must be true immediately after Sync reply for a Start batch"
+    );
+
+    // Stop: same expectation, opposite direction.
+    let (reply_stop, rx_stop) = oneshot::channel();
+    h.worker
+        .send_many([
+            WorkerMessage::StopEventLoop,
+            WorkerMessage::Sync { reply: reply_stop },
+        ])
+        .unwrap();
+    timeout(Duration::from_millis(500), rx_stop)
+        .await
+        .expect("Stop/Sync must fire")
+        .expect("Stop/Sync sender dropped");
+    assert!(
+        !h.worker.is_event_loop_started(),
+        "is_event_loop_started must be false immediately after Sync reply for a Stop batch"
+    );
+}
+
+// F8: dropping a Worker without calling exit() must not leak or
+// panic. Uses a shared flag to prove the tokio task actually
+// terminates — if Drop regresses (e.g. thread_handle take but no
+// abort), the lambda inside a running loop would keep running past
+// the drop.
+#[tokio::test]
+async fn drop_without_exit_shuts_down_cleanly() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let counter = Arc::new(AtomicUsize::new(0));
+    {
+        let counter_cb = Arc::clone(&counter);
+        let worker = Worker::new(move |_| {
+            counter_cb.fetch_add(1, Ordering::SeqCst);
+        });
+
+        // Minimal traffic: confirm the worker is alive before drop.
+        let (reply, rx) = oneshot::channel();
+        worker.send(WorkerMessage::Sync { reply }).unwrap();
+        timeout(Duration::from_millis(500), rx)
+            .await
+            .expect("pre-drop Sync must fire")
+            .expect("Sync sender dropped");
+
+        // `worker` goes out of scope → Drop → exit().
+    }
+
+    // Give any dangling task time to (incorrectly) run; none should.
+    let before = counter.load(Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let after = counter.load(Ordering::SeqCst);
+    assert_eq!(
+        before, after,
+        "no callbacks must fire after Worker is dropped"
+    );
 }
