@@ -154,15 +154,53 @@ impl EventLoopHandle {
     }
 }
 
+/// Graph-state intent after a batch is scanned.
+///
+/// Reduction rule: last-write-wins. Whichever of `Clear` / `Replace`
+/// appears last in send order is the final value.
+#[derive(Debug)]
+enum GraphOp {
+    Clear,
+    Replace(Graph, Arc<FuncLib>),
+}
+
+/// Event-loop intent after a batch is scanned.
+///
+/// Reduction rule: last-write-wins. Absence means "leave running
+/// state as-is."
+#[derive(Debug)]
+enum LoopCommand {
+    Start,
+    Stop,
+}
+
 /// Per-iteration accumulator for the worker loop's scan phase. Every
 /// command goes into a field here; side effects (reset, execute,
 /// start loop, run callbacks) happen in the commit phase below.
-#[derive(Default)]
+///
+/// Reduction table — when multiple commands in one batch target the
+/// same slot, `scan()` collapses them per-slot. Add a row here
+/// before adding a new variant that can conflict with an existing
+/// one.
+///
+/// Exit is special: it dominates the entire batch. If Exit appears
+/// anywhere in the batch, the scanned intent is pure Exit and every
+/// other command in the same batch is discarded — whether sent
+/// before or after Exit.
+///
+/// | Slot                  | Variants that write it      | Rule          |
+/// | --------------------- | --------------------------- | ------------- |
+/// | `graph_state`         | Update, Clear               | last-write-wins |
+/// | `loop_request`        | StartEventLoop, StopEventLoop | last-write-wins |
+/// | `execute_terminals`   | ExecuteTerminals            | idempotent flag |
+/// | `events`              | Event, Events               | set union (dedup) |
+/// | `acks`                | Ack                         | all fire      |
+/// | `argument_requests`   | RequestArgumentValues       | all fire, post-commit snapshot |
+/// | `exit`                | Exit                        | dominates entire batch |
+#[derive(Debug, Default)]
 struct BatchIntent {
-    update: Option<(Graph, Arc<FuncLib>)>,
-    clear: bool,
-    start_loop: bool,
-    stop_loop: bool,
+    graph_state: Option<GraphOp>,
+    loop_request: Option<LoopCommand>,
     execute_terminals: bool,
     exit: bool,
     events: HashSet<EventRef>,
@@ -179,28 +217,33 @@ pub struct EventTrigger {
 }
 
 /// Pure scan: unpacks command batch (including nested `Multi`) into a
-/// `BatchIntent`. Exit short-circuits: any messages after Exit (or
-/// inside a Multi sent after Exit) are discarded.
+/// `BatchIntent`. Exit dominates the entire batch: if Exit appears
+/// anywhere, the returned intent is pure Exit — every other command
+/// in the same batch is discarded (including those before Exit).
+/// Oneshot senders in dropped variants close silently; waiters get
+/// "sender dropped," which is the right signal on shutdown.
 fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
     let mut intent = BatchIntent::default();
     let mut pending: VecDeque<WorkerMessage> = msgs.into();
     while let Some(msg) = pending.pop_front() {
         match msg {
             WorkerMessage::Exit => {
-                intent.exit = true;
-                break;
+                return BatchIntent {
+                    exit: true,
+                    ..BatchIntent::default()
+                };
             }
             WorkerMessage::Event { event } => {
                 intent.events.insert(event);
             }
             WorkerMessage::Events { events } => intent.events.extend(events),
             WorkerMessage::Update { graph, func_lib } => {
-                intent.update = Some((graph, func_lib));
+                intent.graph_state = Some(GraphOp::Replace(graph, func_lib));
             }
-            WorkerMessage::Clear => intent.clear = true,
+            WorkerMessage::Clear => intent.graph_state = Some(GraphOp::Clear),
             WorkerMessage::ExecuteTerminals => intent.execute_terminals = true,
-            WorkerMessage::StartEventLoop => intent.start_loop = true,
-            WorkerMessage::StopEventLoop => intent.stop_loop = true,
+            WorkerMessage::StartEventLoop => intent.loop_request = Some(LoopCommand::Start),
+            WorkerMessage::StopEventLoop => intent.loop_request = Some(LoopCommand::Stop),
             WorkerMessage::Multi { msgs: nested } => pending.extend(nested),
             WorkerMessage::Ack { reply } => {
                 intent.acks.push(reply);
@@ -266,12 +309,9 @@ async fn worker_loop<ExecutionCallback>(
         intent.events.extend(ev_buf.drain(..));
 
         // --- Commit: reset the loop once if anything touches it, then
-        // apply Clear → Update → execute → start loop in stable order.
-        let needs_reset = intent.update.is_some()
-            || intent.clear
-            || intent.start_loop
-            || intent.stop_loop
-            || intent.exit;
+        // apply graph op → execute → start loop in stable order.
+        let needs_reset =
+            intent.graph_state.is_some() || intent.loop_request.is_some() || intent.exit;
         let was_running = if needs_reset {
             reset_event_loop(&mut event_loop).await
         } else {
@@ -282,14 +322,19 @@ async fn worker_loop<ExecutionCallback>(
             return;
         }
 
-        if intent.clear {
-            execution_graph.clear();
+        match intent.graph_state.take() {
+            Some(GraphOp::Clear) => execution_graph.clear(),
+            Some(GraphOp::Replace(graph, func_lib)) => {
+                tracing::info!("Graph updated");
+                execution_graph.update(&graph, &func_lib);
+            }
+            None => {}
         }
-        if let Some((graph, func_lib)) = intent.update {
-            tracing::info!("Graph updated");
-            execution_graph.update(&graph, &func_lib);
-        }
-        let should_start_event_loop = intent.start_loop || (was_running && !intent.stop_loop);
+        let should_start_event_loop = match intent.loop_request {
+            Some(LoopCommand::Start) => true,
+            Some(LoopCommand::Stop) => false,
+            None => was_running,
+        };
 
         if intent.execute_terminals || !intent.events.is_empty() {
             if execution_graph.is_empty() {
@@ -1438,10 +1483,12 @@ mod tests {
             },
         ]);
 
-        assert!(intent.clear);
-        assert!(intent.start_loop);
+        assert!(matches!(intent.graph_state, Some(super::GraphOp::Clear)));
+        assert!(matches!(
+            intent.loop_request,
+            Some(super::LoopCommand::Start)
+        ));
         assert!(intent.execute_terminals);
-        assert!(!intent.stop_loop);
         assert!(!intent.exit);
         assert_eq!(intent.events.len(), 1);
         assert!(intent.events.contains(&event));
@@ -1484,31 +1531,43 @@ mod tests {
             ],
         }]);
 
-        assert!(intent.clear);
+        assert!(matches!(intent.graph_state, Some(super::GraphOp::Clear)));
         assert!(intent.execute_terminals);
     }
 
     #[test]
-    fn scan_exit_short_circuits_remaining_messages() {
-        // Messages after Exit (including inside a later Multi) must
-        // be discarded — this is how the worker drains the queue on
-        // shutdown without racing further commands.
+    fn scan_exit_dominates_entire_batch() {
+        // Exit is sticky across the whole batch: every other command
+        // in the batch is discarded, whether sent before or after.
         let intent = super::scan(vec![
             WorkerMessage::Clear,
+            WorkerMessage::ExecuteTerminals,
             WorkerMessage::Exit,
-            WorkerMessage::StartEventLoop, // must be dropped
+            WorkerMessage::StartEventLoop, // post-Exit: dropped
             WorkerMessage::Multi {
-                msgs: vec![WorkerMessage::ExecuteTerminals], // also dropped
+                msgs: vec![WorkerMessage::Update {
+                    graph: Graph::default(),
+                    func_lib: Arc::new(FuncLib::default()),
+                }],
             },
         ]);
 
-        assert!(intent.clear, "messages before Exit still apply");
         assert!(intent.exit);
-        assert!(!intent.start_loop, "messages after Exit must be discarded");
+        assert!(
+            intent.graph_state.is_none(),
+            "pre-Exit graph ops must be discarded"
+        );
+        assert!(
+            intent.loop_request.is_none(),
+            "post-Exit loop ops must be discarded"
+        );
         assert!(
             !intent.execute_terminals,
-            "messages in post-Exit Multi must be discarded"
+            "pre-Exit execute_terminals must be discarded"
         );
+        assert!(intent.events.is_empty());
+        assert!(intent.acks.is_empty());
+        assert!(intent.argument_requests.is_empty());
     }
 
     #[test]
@@ -1530,7 +1589,110 @@ mod tests {
             },
         ]);
 
-        assert!(intent.update.is_some());
+        assert!(matches!(
+            intent.graph_state,
+            Some(super::GraphOp::Replace(_, _))
+        ));
+    }
+
+    // Slot reduction: last-write-wins for graph_state and loop_request.
+
+    #[test]
+    fn scan_clear_then_update_yields_replace() {
+        let intent = super::scan(vec![
+            WorkerMessage::Clear,
+            WorkerMessage::Update {
+                graph: Graph::default(),
+                func_lib: Arc::new(FuncLib::default()),
+            },
+        ]);
+        assert!(
+            matches!(intent.graph_state, Some(super::GraphOp::Replace(_, _))),
+            "last write (Update) wins over earlier Clear"
+        );
+    }
+
+    #[test]
+    fn scan_update_then_clear_yields_clear() {
+        let intent = super::scan(vec![
+            WorkerMessage::Update {
+                graph: Graph::default(),
+                func_lib: Arc::new(FuncLib::default()),
+            },
+            WorkerMessage::Clear,
+        ]);
+        assert!(
+            matches!(intent.graph_state, Some(super::GraphOp::Clear)),
+            "last write (Clear) wins over earlier Update"
+        );
+    }
+
+    #[test]
+    fn scan_start_then_stop_yields_stop() {
+        let intent = super::scan(vec![
+            WorkerMessage::StartEventLoop,
+            WorkerMessage::StopEventLoop,
+        ]);
+        assert!(
+            matches!(intent.loop_request, Some(super::LoopCommand::Stop)),
+            "last write (Stop) wins over earlier Start"
+        );
+    }
+
+    #[test]
+    fn scan_stop_then_start_yields_start() {
+        let intent = super::scan(vec![
+            WorkerMessage::StopEventLoop,
+            WorkerMessage::StartEventLoop,
+        ]);
+        assert!(
+            matches!(intent.loop_request, Some(super::LoopCommand::Start)),
+            "last write (Start) wins over earlier Stop"
+        );
+    }
+
+    // Integration: end-to-end confirmation that Update-then-Clear in
+    // one batch leaves the execution graph empty — a subsequent Event
+    // sees the empty graph and yields Err(EmptyGraph).
+    #[tokio::test]
+    async fn update_then_clear_in_same_batch_leaves_graph_cleared() {
+        let timers_invoker = WorkerEventsFuncLib::default();
+        let basic_invoker = BasicFuncLib::default();
+        let mut func_lib = basic_invoker.into_func_lib();
+        func_lib.merge(timers_invoker.into_func_lib());
+
+        let graph = log_frame_no_graph(&func_lib);
+        let frame_event_node_id = graph.by_name("frame event").unwrap().id;
+
+        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
+        let mut worker = Worker::new(move |result| {
+            compute_finish_tx.try_send(result).ok();
+        });
+
+        worker.send_many([
+            WorkerMessage::Update {
+                graph,
+                func_lib: Arc::new(func_lib),
+            },
+            WorkerMessage::Clear,
+            WorkerMessage::Event {
+                event: EventRef {
+                    node_id: frame_event_node_id,
+                    event_idx: 0,
+                },
+            },
+        ]);
+
+        let result = timeout(Duration::from_millis(500), compute_finish_rx.recv())
+            .await
+            .expect("event on post-Clear graph must fire callback")
+            .expect("callback channel closed");
+        assert!(
+            matches!(result, Err(Error::EmptyGraph)),
+            "Update followed by Clear must leave the graph empty, got {result:?}"
+        );
+
+        worker.exit();
     }
 
     // --- `biased` select: commands not starved by events -----------
