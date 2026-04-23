@@ -10,15 +10,15 @@ use crate::gui::style::Style;
 use crate::gui::widgets::{Button, ListItem, Panel, PopupMenu};
 use crate::input::InputSnapshot;
 use crate::session::Session;
-use crate::ui_host::UiContext;
+use crate::ui_host::{EguiUiHost, UiHost};
 use eframe::egui;
 use egui::vec2;
 
 #[derive(Debug)]
-pub struct MainUi {
+pub struct MainGui {
     pub graph_ui: GraphUi,
     pub log_ui: LogUi,
-    pub ui_context: UiContext,
+    pub ui_host: EguiUiHost,
     /// Reference `Style` at scale=1.0, loaded from `style.toml` on
     /// startup. Serves as the canonical source for [`Gui::new`] every
     /// frame.
@@ -27,13 +27,13 @@ pub struct MainUi {
     pub arena: bumpalo::Bump,
 }
 
-impl MainUi {
-    pub fn new(ui_context: UiContext) -> Self {
+impl MainGui {
+    pub fn new(ui_host: EguiUiHost) -> Self {
         let style = Style::from_file("style.toml").unwrap_or_default();
         Self {
             graph_ui: GraphUi::default(),
             log_ui: LogUi,
-            ui_context,
+            ui_host,
             style: Rc::new(style),
             arena: bumpalo::Bump::new(),
         }
@@ -160,7 +160,7 @@ impl MainUi {
                     self.load(session);
                 }
                 if entry(gui, "menu_file_exit", "Exit") {
-                    self.ui_context.close_app();
+                    self.ui_host.close_app();
                 }
             });
     }
@@ -194,7 +194,7 @@ impl MainUi {
         }
 
         if input.cmd(egui::Key::Q) {
-            self.ui_context.close_app();
+            self.ui_host.close_app();
         }
     }
 }

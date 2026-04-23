@@ -3,7 +3,7 @@ mod config;
 mod gui;
 mod init;
 mod input;
-mod main_ui;
+mod main_gui;
 mod model;
 mod script;
 mod session;
@@ -14,7 +14,7 @@ use eframe::{NativeOptions, egui};
 use std::sync::Arc;
 
 use crate::gui::Gui;
-use crate::main_ui::MainUi;
+use crate::main_gui::MainGui;
 use crate::session::Session;
 use crate::ui_host::EguiUiHost;
 
@@ -69,26 +69,26 @@ fn configure_fonts(ctx: &egui::Context) {
 #[derive(Debug)]
 struct PrismApp {
     session: Session,
-    main_ui: MainUi,
+    main_gui: MainGui,
 }
 
 impl PrismApp {
     fn new(ctx: &egui::Context) -> Self {
         Self {
             session: Session::new(Arc::new(EguiUiHost::new(ctx))),
-            main_ui: MainUi::new(Arc::new(EguiUiHost::new(ctx))),
+            main_gui: MainGui::new(EguiUiHost::new(ctx)),
         }
     }
 }
 
 impl eframe::App for PrismApp {
     fn logic(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.main_ui.pre_frame(&mut self.session);
+        self.main_gui.pre_frame(&mut self.session);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let mut gui = Gui::new(ui, &self.main_ui.style);
-        self.main_ui.render(&mut self.session, &mut gui);
+        let mut gui = Gui::new(ui, &self.main_gui.style);
+        self.main_gui.render(&mut self.session, &mut gui);
     }
 
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
