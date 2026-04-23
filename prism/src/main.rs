@@ -66,29 +66,52 @@ fn configure_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
+/// Runtime UI mode. Today only `Gui` is wired to an entry point;
+/// `Headless` and `Tui` are placeholders for the planned non-egui
+/// modes driven through the `UiHost` abstraction.
+#[derive(Debug)]
+#[allow(dead_code)]
+enum Frontend {
+    Headless,
+    Tui,
+    Gui(Box<MainGui>),
+}
+
+impl Frontend {
+    fn as_gui_mut(&mut self) -> &mut MainGui {
+        match self {
+            Frontend::Gui(main_gui) => main_gui,
+            Frontend::Headless | Frontend::Tui => {
+                unreachable!("eframe::App methods should only run when the frontend is Gui")
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 struct PrismApp {
     session: Session,
-    main_gui: MainGui,
+    frontend: Frontend,
 }
 
 impl PrismApp {
     fn new(ctx: &egui::Context) -> Self {
         Self {
             session: Session::new(EguiUiHost::new(ctx)),
-            main_gui: MainGui::new(EguiUiHost::new(ctx)),
+            frontend: Frontend::Gui(Box::new(MainGui::new(EguiUiHost::new(ctx)))),
         }
     }
 }
 
 impl eframe::App for PrismApp {
     fn logic(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.main_gui.pre_frame(&mut self.session);
+        self.frontend.as_gui_mut().pre_frame(&mut self.session);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let mut gui = Gui::new(ui, &self.main_gui.style);
-        self.main_gui.render(&mut self.session, &mut gui);
+        let main_gui = self.frontend.as_gui_mut();
+        let mut gui = Gui::new(ui, &main_gui.style);
+        main_gui.render(&mut self.session, &mut gui);
     }
 
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
