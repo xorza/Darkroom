@@ -83,7 +83,9 @@ pub enum GraphUiAction {
 impl GraphUiAction {
     /// Build a `NodeRemoved` action for `node_id`. Walks the graph once
     /// to collect the connections and event subscriptions that referenced
-    /// the node so undo can re-establish them.
+    /// the node so undo can re-establish them. Sole constructor method
+    /// on this enum — every other variant is built via struct-literal
+    /// syntax at the call site.
     pub fn node_removal(view_graph: &ViewGraph, node_id: &NodeId) -> Self {
         let view_node = view_graph
             .view_nodes
