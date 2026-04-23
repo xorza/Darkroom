@@ -26,8 +26,6 @@ pub enum Error {
     Invoke { func_id: FuncId, message: String },
     #[error("Cycle detected while building execution graph at node {node_id:?}")]
     CycleDetected { node_id: NodeId },
-    #[error("Cannot execute: execution graph is empty")]
-    EmptyGraph,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

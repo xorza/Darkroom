@@ -150,7 +150,6 @@ fn show_execution_info(gui: &mut Gui<'_>, ctx: &GraphContext<'_>, node_id: NodeI
                     .by_id(func_id)
                     .map_or_else(|| format!("<unknown func {func_id}>"), |f| f.name.clone()),
                 scenarium::execution_graph::Error::CycleDetected { .. } => "cycle".to_string(),
-                scenarium::execution_graph::Error::EmptyGraph => "empty graph".to_string(),
             };
             let color = gui.style.node.errored_shadow.color;
             Label::new(format!("  {func_name}: {}", node_error.error))

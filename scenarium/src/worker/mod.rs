@@ -12,7 +12,7 @@ use common::pause_gate::PauseGate;
 
 use crate::common::shared_any_state::SharedAnyState;
 use crate::event_lambda::EventLambda;
-use crate::execution_graph::{ArgumentValues, Error, ExecutionGraph, Result};
+use crate::execution_graph::{ArgumentValues, ExecutionGraph, Result};
 use crate::execution_stats::ExecutionStats;
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
@@ -174,7 +174,7 @@ enum LoopCommand {
 }
 
 /// Per-iteration accumulator for the worker loop's scan phase. Every
-/// command goes into a field here; side effects (reset, execute,
+/// command goes into a field here; side effects (stop loop, execute,
 /// start loop, run callbacks) happen in the commit phase below.
 ///
 /// Reduction table — when multiple commands in one batch target the
@@ -302,12 +302,12 @@ async fn worker_loop<ExecutionCallback>(
         let mut intent = scan(std::mem::take(&mut cmd_batch));
         intent.events.extend(ev_buf.drain(..));
 
-        // --- Commit: reset the loop once if anything touches it, then
+        // --- Commit: stop the loop once if anything touches it, then
         // apply graph op → execute → start loop in stable order.
-        let needs_reset =
+        let needs_stop =
             intent.graph_state.is_some() || intent.loop_request.is_some() || intent.exit;
-        let loop_was_running_before_reset = if needs_reset {
-            reset_event_loop(&mut event_loop).await
+        let loop_was_running_before_stop = if needs_stop {
+            stop_event_loop(&mut event_loop).await
         } else {
             false
         };
@@ -330,33 +330,32 @@ async fn worker_loop<ExecutionCallback>(
             // No explicit request: preserve the prior running state.
             // Combined with "Update forces a reset," this is what
             // makes an Update restart a running loop on the new graph.
-            None => loop_was_running_before_reset,
+            None => loop_was_running_before_stop,
         };
 
         let needs_execute =
             intent.execute_terminals || !intent.events.is_empty() || should_start_event_loop;
 
-        if needs_execute {
-            if execution_graph.is_empty() {
-                (execution_callback)(Err(Error::EmptyGraph));
-            } else {
-                let in_loop = should_start_event_loop || event_loop.is_some();
-                let result = execution_graph
-                    .execute(intent.execute_terminals, in_loop, intent.events.drain())
-                    .await;
+        // Empty graph is a normal state, not a failure: skip execute
+        // silently. Events/terminals/StartEventLoop are no-ops until
+        // a graph is loaded.
+        if needs_execute && !execution_graph.is_empty() {
+            let in_loop = should_start_event_loop || event_loop.is_some();
+            let result = execution_graph
+                .execute(intent.execute_terminals, in_loop, intent.events.drain())
+                .await;
 
-                if should_start_event_loop && let Ok(stats) = &result {
-                    assert!(event_loop.is_none());
-                    let triggers = execution_graph.active_event_triggers(stats);
-                    if !triggers.is_empty() {
-                        event_loop =
-                            Some(start_event_loop(triggers, event_loop_pause_gate.clone()).await);
-                        tracing::info!("Event loop started");
-                    }
+            if should_start_event_loop && let Ok(stats) = &result {
+                assert!(event_loop.is_none());
+                let triggers = execution_graph.active_event_triggers(stats);
+                if !triggers.is_empty() {
+                    event_loop =
+                        Some(start_event_loop(triggers, event_loop_pause_gate.clone()).await);
+                    tracing::info!("Event loop started");
                 }
-
-                (execution_callback)(result);
             }
+
+            (execution_callback)(result);
         }
 
         for (node_id, reply) in intent.argument_requests.drain(..) {
@@ -383,7 +382,7 @@ async fn worker_loop<ExecutionCallback>(
 /// the handle guarantees that any events still in flight die with the
 /// old channel — there's no way for them to re-enter the worker.
 /// Returns `true` if a loop was actually running.
-async fn reset_event_loop(event_loop: &mut Option<(EventLoopHandle, Receiver<EventRef>)>) -> bool {
+async fn stop_event_loop(event_loop: &mut Option<(EventLoopHandle, Receiver<EventRef>)>) -> bool {
     match event_loop.take() {
         Some((mut handle, _rx)) => {
             handle.stop().await;

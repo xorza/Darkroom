@@ -9,7 +9,6 @@ use crate::common::shared_any_state::SharedAnyState;
 use crate::elements::basic_funclib::BasicFuncLib;
 use crate::elements::worker_events_funclib::WorkerEventsFuncLib;
 use crate::event_lambda::EventLambda;
-use crate::execution_graph::Error;
 use crate::function::FuncLib;
 use crate::graph::{Graph, Node, NodeId};
 
@@ -586,7 +585,7 @@ async fn update_restarts_event_loop_if_running() {
 }
 
 // Stale-event filtering is now structural: each start_event_loop
-// call returns a fresh Receiver; reset_event_loop drops the old
+// call returns a fresh Receiver; stop_event_loop drops the old
 // pair so any undelivered events die with the channel. This test
 // verifies the structural guarantee by confirming the old
 // Receiver is closed after its sibling handle is stopped.
@@ -874,33 +873,37 @@ async fn request_argument_values_batched_with_clear_sees_empty_graph() {
     worker.exit();
 }
 
-// F4: Firing events or ExecuteTerminals against an empty graph
-// must produce exactly one callback with `Err(EmptyGraph)` — not
-// silent log-and-drop.
+// F5: running execution on an empty graph is a normal state, not a
+// failure — the worker must skip execute silently. No callback fires
+// until a graph is loaded.
+
+async fn assert_no_callback_within(
+    rx: &mut tokio::sync::mpsc::Receiver<
+        crate::execution_graph::Result<crate::execution_stats::ExecutionStats>,
+    >,
+    d: Duration,
+) {
+    assert!(
+        timeout(d, rx.recv()).await.is_err(),
+        "empty-graph commands must be silent no-ops, but a callback fired"
+    );
+}
+
 #[tokio::test]
-async fn execute_terminals_on_empty_graph_reports_empty_graph_error() {
+async fn execute_terminals_on_empty_graph_is_silent_noop() {
     let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
     let mut worker = Worker::new(move |result| {
         compute_finish_tx.try_send(result).ok();
     });
 
     worker.send(WorkerMessage::ExecuteTerminals);
-
-    let result = timeout(Duration::from_millis(500), compute_finish_rx.recv())
-        .await
-        .expect("ExecuteTerminals on empty graph must fire callback")
-        .expect("callback channel closed");
-
-    assert!(
-        matches!(result, Err(Error::EmptyGraph)),
-        "empty-graph execution must yield Err(EmptyGraph), got {result:?}"
-    );
+    assert_no_callback_within(&mut compute_finish_rx, Duration::from_millis(100)).await;
 
     worker.exit();
 }
 
 #[tokio::test]
-async fn event_on_empty_graph_reports_empty_graph_error() {
+async fn event_on_empty_graph_is_silent_noop() {
     let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
     let mut worker = Worker::new(move |result| {
         compute_finish_tx.try_send(result).ok();
@@ -912,38 +915,20 @@ async fn event_on_empty_graph_reports_empty_graph_error() {
             event_idx: 0,
         }],
     });
-
-    let result = timeout(Duration::from_millis(500), compute_finish_rx.recv())
-        .await
-        .expect("Event on empty graph must fire callback")
-        .expect("callback channel closed");
-
-    assert!(
-        matches!(result, Err(Error::EmptyGraph)),
-        "empty-graph event must yield Err(EmptyGraph), got {result:?}"
-    );
+    assert_no_callback_within(&mut compute_finish_rx, Duration::from_millis(100)).await;
 
     worker.exit();
 }
 
 #[tokio::test]
-async fn start_event_loop_on_empty_graph_reports_empty_graph_error() {
+async fn start_event_loop_on_empty_graph_is_silent_noop() {
     let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
     let mut worker = Worker::new(move |result| {
         compute_finish_tx.try_send(result).ok();
     });
 
     worker.send(WorkerMessage::StartEventLoop);
-
-    let result = timeout(Duration::from_millis(500), compute_finish_rx.recv())
-        .await
-        .expect("StartEventLoop on empty graph must fire callback")
-        .expect("callback channel closed");
-
-    assert!(
-        matches!(result, Err(Error::EmptyGraph)),
-        "empty-graph start-loop must yield Err(EmptyGraph), got {result:?}"
-    );
+    assert_no_callback_within(&mut compute_finish_rx, Duration::from_millis(100)).await;
     assert!(
         !worker.is_event_loop_started(),
         "no loop should actually have started"
@@ -1012,11 +997,9 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
 }
 
 #[tokio::test]
-async fn execute_terminals_with_start_event_loop_on_empty_graph_fires_once() {
-    // Empty-graph variant of the F4 regression: a batch that would
-    // previously have produced TWO Err(EmptyGraph) callbacks (one for
-    // the terminals path, one for the start-loop path) now produces
-    // exactly one.
+async fn execute_terminals_with_start_event_loop_on_empty_graph_is_silent_noop() {
+    // F5 + F4: a batch with ExecuteTerminals + StartEventLoop on an
+    // empty graph must fire no callback at all.
     let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
     let mut worker = Worker::new(move |result| {
         compute_finish_tx.try_send(result).ok();
@@ -1026,21 +1009,8 @@ async fn execute_terminals_with_start_event_loop_on_empty_graph_fires_once() {
         WorkerMessage::ExecuteTerminals,
         WorkerMessage::StartEventLoop,
     ]);
-
-    let first = timeout(Duration::from_millis(500), compute_finish_rx.recv())
-        .await
-        .expect("batch must fire callback")
-        .expect("callback channel closed");
-    assert!(
-        matches!(first, Err(Error::EmptyGraph)),
-        "expected Err(EmptyGraph), got {first:?}"
-    );
-
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(
-        compute_finish_rx.try_recv().is_err(),
-        "empty-graph ExecuteTerminals+StartEventLoop must fire EmptyGraph exactly once"
-    );
+    assert_no_callback_within(&mut compute_finish_rx, Duration::from_millis(100)).await;
+    assert!(!worker.is_event_loop_started());
 
     worker.exit();
 }
@@ -1227,8 +1197,8 @@ fn scan_stop_then_start_yields_start() {
 }
 
 // Integration: end-to-end confirmation that Update-then-Clear in
-// one batch leaves the execution graph empty — a subsequent Event
-// sees the empty graph and yields Err(EmptyGraph).
+// one batch leaves the execution graph empty — a subsequent
+// InjectEvents hits the empty-graph silent no-op path (no callback).
 #[tokio::test]
 async fn update_then_clear_in_same_batch_leaves_graph_cleared() {
     let timers_invoker = WorkerEventsFuncLib::default();
@@ -1257,15 +1227,7 @@ async fn update_then_clear_in_same_batch_leaves_graph_cleared() {
             }],
         },
     ]);
-
-    let result = timeout(Duration::from_millis(500), compute_finish_rx.recv())
-        .await
-        .expect("event on post-Clear graph must fire callback")
-        .expect("callback channel closed");
-    assert!(
-        matches!(result, Err(Error::EmptyGraph)),
-        "Update followed by Clear must leave the graph empty, got {result:?}"
-    );
+    assert_no_callback_within(&mut compute_finish_rx, Duration::from_millis(100)).await;
 
     worker.exit();
 }
