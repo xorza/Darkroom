@@ -47,23 +47,15 @@ If `get_b` (Impure) re-executes but returns the same value, `sum`, `mult`, and `
 
 **Fix approach**: After execution, compare new output with previous. If identical, mark node as "output unchanged" so downstream Pure nodes remain cached. Requires splitting the current single-pass prepare + execute into an interleaved approach, or a post-execution pruning step.
 
-## Second Backward Pass is Unnecessary
+## Second Backward Pass is Load-Bearing (previously misdiagnosed)
 
-`walk_backward_collect_execute_order()` (lines 708-766) duplicates `walk_backward_collect_order()` structure. After the forward pass computes `wants_execute` for every node, the execute order is simply:
+An earlier version of this doc claimed `walk_backward_collect_execute_order()` could be replaced by `e_node_process_order.filter(wants_execute)`. **That is wrong** and the test `once_node_toggle_refreshes_upstream` (tests.rs:638) is the counter-example.
 
-```rust
-e_node_execute_order = e_node_process_order
-    .iter()
-    .copied()
-    .filter(|&idx| self.e_nodes[idx].wants_execute)
-    .collect();
-```
+The forward pass computes `wants_execute` as a local property: (Pure/Impure/Once) × (cache state) × (inputs_updated via `dep_wants_execute` from upstream). It cannot observe "my consumer is Once-cached and won't read me" — that's a backward fact. When `mult` is Once-cached, its upstream `sum` may have `wants_execute = true` (not cached itself) yet executing `sum` is useless because nobody will read its output this run. Pass 2 prunes exactly this case by walking only edges where `dependency_wants_execute` is set on the consumer side.
 
-The second backward walk re-traverses edges and re-does cycle checking (via unreachable panics). The only theoretical difference would be if a node `wants_execute` but isn't reachable from a terminal through `wants_execute` edges -- but this can't happen because `wants_execute` is only set on nodes in `e_node_process_order` (which are terminal-reachable), and if a node wants to execute, its needed dependencies also want to execute (ensured by forward propagation).
+So pass 2 is doing real pruning work — it should be named for what it does (e.g. `prune_to_consumer_needed_order`) and commented to point at the regression test, but not removed.
 
-**Recommendation**: Replace pass 2 with a filter over `e_node_process_order`.
-
-Also: `e_node_terminal_idx.drain()` in pass 2 (line 712) already empties the set, making `e_node_terminal_idx.clear()` in `execute()` (line 526) redundant.
+Minor: `e_node_terminal_idx.drain()` in pass 2 already empties the set, making `e_node_terminal_idx.clear()` in `execute()` redundant — that one line is safe to drop.
 
 ## Sequential Execution
 
@@ -167,7 +159,7 @@ For DynamicValue::Custom (which holds `Arc<dyn Any>`), this could hold large all
 
 1. **Change pruning** (high impact): Compare output values after execution; suppress downstream cascade when unchanged. Single biggest improvement for interactive use.
 
-2. **Simplify: remove second backward pass** (low risk, reduces ~60 lines): Replace `walk_backward_collect_execute_order()` with a filter over `e_node_process_order`.
+2. **Rename + comment second backward pass** (trivial): It's not redundant — it prunes nodes whose consumer is Once-cached and won't read them. Name should reflect that; comment should point at the regression test.
 
 3. **Fix stale comment** (trivial): Line 619 "should be Forward" -> "should be Ready".
 

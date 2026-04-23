@@ -688,6 +688,13 @@ impl ExecutionGraph {
         }
     }
 
+    // Prunes `e_node_process_order` to only nodes whose output is actually
+    // read by an executing consumer this run. A filter over `wants_execute`
+    // is not equivalent: a Pure/Impure node can have `wants_execute = true`
+    // while its sole consumer is Once-cached and won't read it — the forward
+    // pass can't see that because "needed by consumer" is a backward fact.
+    // See `once_node_toggle_refreshes_upstream` in tests.rs for the case
+    // this pass exists to handle.
     fn walk_backward_collect_execute_order(&mut self) {
         self.e_node_execute_order.clear();
         self.stack.clear();
