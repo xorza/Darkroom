@@ -10,7 +10,7 @@ use crate::gui::style::Style;
 use crate::gui::widgets::{Button, ListItem, Panel, PopupMenu};
 use crate::input::InputSnapshot;
 use crate::session::Session;
-use crate::ui_context::UiContext;
+use crate::ui_host::UiContext;
 use eframe::egui;
 use egui::vec2;
 

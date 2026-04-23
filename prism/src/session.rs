@@ -20,7 +20,7 @@ use crate::gui::frame_output::{FrameOutput, RunCommand};
 use crate::gui::graph_ctx::GraphContext;
 use crate::model::{ActionStack, ArgumentValuesCache, ViewGraph, graph_ui_action::GraphUiAction};
 use crate::script::{ScriptAction, ScriptExecutor, ScriptTransport, tcp::TcpTransport};
-use crate::ui_context::UiContext;
+use crate::ui_host::UiContext;
 
 const UNDO_MAX_STEPS: usize = 256;
 
@@ -413,7 +413,15 @@ fn sample_test_hooks(tx: UnboundedSender<WorkerEvent>) -> TestFuncHooks {
 mod tests {
     use super::*;
     use crate::model::ViewNode;
+    use crate::ui_host::UiHost;
     use egui::Pos2;
+
+    #[derive(Debug)]
+    struct NoopUiHost;
+    impl UiHost for NoopUiHost {
+        fn request_redraw(&self) {}
+        fn close_app(&self) {}
+    }
 
     /// Stub-backed Session for unit tests: no tokio runtime, no
     /// network listener, no config autoload.
@@ -434,7 +442,7 @@ mod tests {
             worker_tx,
             worker_rx,
             script_action_rx,
-            ui_context: UiContext::new(&eframe::egui::Context::default()),
+            ui_context: Arc::new(NoopUiHost),
             script_executor: None,
         }
     }

@@ -7,7 +7,7 @@ mod main_ui;
 mod model;
 mod script;
 mod session;
-mod ui_context;
+mod ui_host;
 
 use anyhow::Result;
 use eframe::{NativeOptions, egui};
@@ -16,7 +16,7 @@ use std::sync::Arc;
 use crate::gui::Gui;
 use crate::main_ui::MainUi;
 use crate::session::Session;
-use crate::ui_context::UiContext;
+use crate::ui_host::EguiUiHost;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -75,8 +75,8 @@ struct PrismApp {
 impl PrismApp {
     fn new(ctx: &egui::Context) -> Self {
         Self {
-            session: Session::new(UiContext::new(ctx)),
-            main_ui: MainUi::new(UiContext::new(ctx)),
+            session: Session::new(Arc::new(EguiUiHost::new(ctx))),
+            main_ui: MainUi::new(Arc::new(EguiUiHost::new(ctx))),
         }
     }
 }
