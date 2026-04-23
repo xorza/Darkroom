@@ -56,7 +56,6 @@ pub struct ExecutionPortAddress {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub enum ExecutionBinding {
     #[default]
-    Undefined,
     None,
     Const(StaticValue),
     Bind(ExecutionPortAddress),
@@ -83,6 +82,9 @@ pub struct ExecutionInput {
     pub data_type: DataType,
 }
 
+// Count (not bool) — only `> 0` is read today for Skip/Needed, but tests
+// assert exact counts and future change-pruning / refcount-based eviction
+// will want the multiplicity.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct ExecutionOutput {
     usage_count: usize,
@@ -296,12 +298,9 @@ pub struct ExecutionGraph {
     pub e_nodes: KeyIndexVec<NodeId, ExecutionNode>,
     pub e_node_process_order: Vec<usize>,
     pub e_node_execute_order: Vec<usize>,
-    pub e_node_terminal_idx: HashSet<usize>,
 
     #[serde(skip)]
     ctx_manager: ContextManager,
-    #[serde(skip)]
-    stack: Vec<Visit>,
 }
 
 impl ExecutionGraph {
@@ -339,8 +338,6 @@ impl ExecutionGraph {
         self.e_nodes.clear();
         self.e_node_process_order.clear();
         self.e_node_execute_order.clear();
-        self.e_node_terminal_idx.clear();
-        self.stack.clear();
     }
 
     pub fn reset_states(&mut self) {
@@ -423,61 +420,47 @@ impl ExecutionGraph {
         input_idx: usize,
         binding: &Binding,
     ) {
-        let e_input = &mut compact[e_node_idx].inputs[input_idx];
-
-        e_input.binding_changed |= match (binding, &e_input.binding) {
-            (Binding::None, ExecutionBinding::None) => false,
-            (Binding::None, _) => {
-                e_input.binding = ExecutionBinding::None;
-                true
+        match binding {
+            Binding::None => {
+                let e_input = &mut compact[e_node_idx].inputs[input_idx];
+                if !matches!(e_input.binding, ExecutionBinding::None) {
+                    e_input.binding = ExecutionBinding::None;
+                    e_input.binding_changed = true;
+                }
             }
-            (Binding::Const(v), ExecutionBinding::Const(existing)) if v == existing => false,
-            (Binding::Const(v), _) => {
-                e_input.binding = ExecutionBinding::Const(v.clone());
-                true
+            Binding::Const(v) => {
+                let e_input = &mut compact[e_node_idx].inputs[input_idx];
+                if !matches!(&e_input.binding, ExecutionBinding::Const(existing) if existing == v) {
+                    e_input.binding = ExecutionBinding::Const(v.clone());
+                    e_input.binding_changed = true;
+                }
             }
-            (Binding::Bind(_), ExecutionBinding::Bind(_)) => false,
-            (Binding::Bind(_), _) => {
-                e_input.binding = ExecutionBinding::Undefined;
-                true
-            }
-        };
-
-        let Binding::Bind(port_address) = binding else {
-            return;
-        };
-
-        let (output_e_node_idx, _) =
-            compact.insert_with(&port_address.target_id, || ExecutionNode {
-                id: port_address.target_id,
-                ..Default::default()
-            });
-
-        let e_input = &mut compact[e_node_idx].inputs[input_idx];
-        let desired = ExecutionPortAddress {
-            target_id: port_address.target_id,
-            target_idx: output_e_node_idx,
-            port_idx: port_address.port_idx,
-        };
-
-        match &mut e_input.binding {
-            ExecutionBinding::Bind(existing)
-                if existing.target_id == desired.target_id
-                    && existing.port_idx == desired.port_idx =>
-            {
-                existing.target_idx = desired.target_idx;
-            }
-            ExecutionBinding::Bind(existing) => {
-                e_input.binding_changed = true;
-                *existing = desired;
-            }
-            _ => {
-                e_input.binding_changed = true;
-                e_input.binding = ExecutionBinding::Bind(desired);
+            Binding::Bind(port_address) => {
+                let (output_e_node_idx, _) =
+                    compact.insert_with(&port_address.target_id, || ExecutionNode {
+                        id: port_address.target_id,
+                        ..Default::default()
+                    });
+                let desired = ExecutionPortAddress {
+                    target_id: port_address.target_id,
+                    target_idx: output_e_node_idx,
+                    port_idx: port_address.port_idx,
+                };
+                let e_input = &mut compact[e_node_idx].inputs[input_idx];
+                match &mut e_input.binding {
+                    ExecutionBinding::Bind(existing)
+                        if existing.target_id == desired.target_id
+                            && existing.port_idx == desired.port_idx =>
+                    {
+                        existing.target_idx = desired.target_idx;
+                    }
+                    _ => {
+                        e_input.binding = ExecutionBinding::Bind(desired);
+                        e_input.binding_changed = true;
+                    }
+                }
             }
         }
-
-        assert!(!matches!(e_input.binding, ExecutionBinding::Undefined));
     }
 
     // === Execution ===
@@ -506,8 +489,6 @@ impl ExecutionGraph {
         let mut stats = self.run_execution().await;
         stats.triggered_events = events;
 
-        self.e_node_terminal_idx.clear();
-
         Ok(stats)
     }
 
@@ -517,15 +498,16 @@ impl ExecutionGraph {
         event_triggers: bool,
         events: &[EventRef],
     ) -> Result<()> {
-        self.collect_terminal_nodes(terminals, event_triggers, events);
+        let terminal_idx = self.collect_terminal_nodes(terminals, event_triggers, events);
 
         self.e_nodes
             .iter_mut()
             .for_each(|e| e.reset_for_execution());
 
-        self.walk_backward_collect_order()?;
+        let mut stack: Vec<Visit> = Vec::new();
+        self.walk_backward_collect_order(&terminal_idx, &mut stack)?;
         self.propagate_input_state_forward();
-        self.walk_backward_collect_execute_order();
+        self.walk_backward_collect_execute_order(&terminal_idx, &mut stack);
 
         self.validate_for_execution();
 
@@ -533,25 +515,24 @@ impl ExecutionGraph {
     }
 
     fn collect_terminal_nodes(
-        &mut self,
+        &self,
         terminals: bool,
         event_triggers: bool,
         events: &[EventRef],
-    ) {
-        self.e_node_terminal_idx.clear();
+    ) -> HashSet<usize> {
+        let mut terminal_idx: HashSet<usize> = HashSet::new();
 
         // Add event subscribers
-        self.e_node_terminal_idx
-            .extend(events.iter().flat_map(|event| {
-                self.e_nodes.by_key(&event.node_id).unwrap().events[event.event_idx]
-                    .subscribers
-                    .iter()
-                    .map(|id| self.e_nodes.index_of_key(id).unwrap())
-            }));
+        terminal_idx.extend(events.iter().flat_map(|event| {
+            self.e_nodes.by_key(&event.node_id).unwrap().events[event.event_idx]
+                .subscribers
+                .iter()
+                .map(|id| self.e_nodes.index_of_key(id).unwrap())
+        }));
 
         // Add terminal nodes
         if terminals {
-            self.e_node_terminal_idx.extend(
+            terminal_idx.extend(
                 self.e_nodes
                     .iter()
                     .enumerate()
@@ -561,7 +542,7 @@ impl ExecutionGraph {
 
         // Add nodes with event triggers
         if event_triggers {
-            self.e_node_terminal_idx.extend(
+            terminal_idx.extend(
                 self.e_nodes
                     .iter()
                     .enumerate()
@@ -569,20 +550,26 @@ impl ExecutionGraph {
                     .map(|(idx, _)| idx),
             );
         }
+
+        terminal_idx
     }
 
-    fn walk_backward_collect_order(&mut self) -> Result<()> {
+    fn walk_backward_collect_order(
+        &mut self,
+        terminal_idx: &HashSet<usize>,
+        stack: &mut Vec<Visit>,
+    ) -> Result<()> {
         self.e_node_process_order.clear();
-        self.stack.clear();
+        stack.clear();
 
-        for e_node_idx in self.e_node_terminal_idx.iter().copied() {
-            self.stack.push(Visit {
+        for e_node_idx in terminal_idx.iter().copied() {
+            stack.push(Visit {
                 e_node_idx,
                 cause: VisitCause::Terminal,
             });
         }
 
-        while let Some(visit) = self.stack.pop() {
+        while let Some(visit) = stack.pop() {
             match visit.cause {
                 VisitCause::Terminal => {}
                 VisitCause::OutputRequest { output_idx } => {
@@ -608,14 +595,14 @@ impl ExecutionGraph {
             }
 
             e_node.process_state = ProcessState::Visiting;
-            self.stack.push(Visit {
+            stack.push(Visit {
                 e_node_idx: visit.e_node_idx,
                 cause: VisitCause::Done,
             });
 
             for e_input in e_node.inputs.iter() {
                 if let ExecutionBinding::Bind(addr) = &e_input.binding {
-                    self.stack.push(Visit {
+                    stack.push(Visit {
                         e_node_idx: addr.target_idx,
                         cause: VisitCause::OutputRequest {
                             output_idx: addr.port_idx,
@@ -643,7 +630,6 @@ impl ExecutionGraph {
             for input_idx in 0..e_node.inputs.len() {
                 let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
                 let (dep_wants_execute, missing) = match &e_input.binding {
-                    ExecutionBinding::Undefined => unreachable!("uninitialized binding"),
                     ExecutionBinding::None => (false, e_input.required),
                     ExecutionBinding::Const(_) => (false, false),
                     ExecutionBinding::Bind(addr) => {
@@ -695,18 +681,22 @@ impl ExecutionGraph {
     // pass can't see that because "needed by consumer" is a backward fact.
     // See `once_node_toggle_refreshes_upstream` in tests.rs for the case
     // this pass exists to handle.
-    fn walk_backward_collect_execute_order(&mut self) {
+    fn walk_backward_collect_execute_order(
+        &mut self,
+        terminal_idx: &HashSet<usize>,
+        stack: &mut Vec<Visit>,
+    ) {
         self.e_node_execute_order.clear();
-        self.stack.clear();
+        stack.clear();
 
-        for e_node_idx in self.e_node_terminal_idx.drain() {
-            self.stack.push(Visit {
+        for e_node_idx in terminal_idx.iter().copied() {
+            stack.push(Visit {
                 e_node_idx,
                 cause: VisitCause::Terminal,
             });
         }
 
-        while let Some(visit) = self.stack.pop() {
+        while let Some(visit) = stack.pop() {
             let e_node = &mut self.e_nodes[visit.e_node_idx];
 
             match visit.cause {
@@ -734,7 +724,7 @@ impl ExecutionGraph {
             }
 
             e_node.process_state = ProcessState::Visiting;
-            self.stack.push(Visit {
+            stack.push(Visit {
                 e_node_idx: visit.e_node_idx,
                 cause: VisitCause::Done,
             });
@@ -744,7 +734,7 @@ impl ExecutionGraph {
                 if e_input.dependency_wants_execute
                     && let Some(addr) = e_input.binding.as_bind()
                 {
-                    self.stack.push(Visit {
+                    stack.push(Visit {
                         e_node_idx: addr.target_idx,
                         cause: VisitCause::OutputRequest {
                             output_idx: addr.port_idx,
@@ -808,7 +798,6 @@ impl ExecutionGraph {
             e_node.run_time = start.elapsed().as_secs_f64();
 
             for e_input in &mut e_node.inputs {
-                assert!(!matches!(e_input.binding, ExecutionBinding::Undefined));
                 e_input.binding_changed = false;
             }
 
@@ -831,7 +820,6 @@ impl ExecutionGraph {
         inputs.clear();
         for input in self.e_nodes[e_node_idx].inputs.iter() {
             let value = match &input.binding {
-                ExecutionBinding::Undefined => unreachable!("uninitialized binding"),
                 ExecutionBinding::None => DynamicValue::None,
                 ExecutionBinding::Const(v) => v.into(),
                 ExecutionBinding::Bind(addr) => {
@@ -917,7 +905,7 @@ impl ExecutionGraph {
             .inputs
             .iter()
             .map(|input| match &input.binding {
-                ExecutionBinding::Undefined | ExecutionBinding::None => None,
+                ExecutionBinding::None => None,
                 ExecutionBinding::Const(v) => Some(DynamicValue::from(v)),
                 ExecutionBinding::Bind(addr) => self.e_nodes[addr.target_idx]
                     .output_values
@@ -1046,13 +1034,9 @@ impl ExecutionGraph {
         for &idx in &self.e_node_process_order {
             assert!(idx < self.e_nodes.len());
             for input in self.e_nodes[idx].inputs.iter() {
-                match &input.binding {
-                    ExecutionBinding::Undefined => panic!("uninitialized binding"),
-                    ExecutionBinding::Bind(addr) => {
-                        assert!(addr.target_idx < self.e_nodes.len());
-                        assert!(seen_in_order.contains(&addr.target_idx));
-                    }
-                    _ => {}
+                if let ExecutionBinding::Bind(addr) = &input.binding {
+                    assert!(addr.target_idx < self.e_nodes.len());
+                    assert!(seen_in_order.contains(&addr.target_idx));
                 }
             }
             assert!(seen_in_order.insert(idx));
@@ -1075,7 +1059,6 @@ impl ExecutionGraph {
             }
 
             for e_input in e_node.inputs.iter() {
-                assert!(!matches!(e_input.binding, ExecutionBinding::Undefined));
                 if let ExecutionBinding::Bind(addr) = &e_input.binding {
                     assert!(addr.target_idx < self.e_nodes.len());
                     assert!(addr.port_idx < self.e_nodes[addr.target_idx].outputs.len());

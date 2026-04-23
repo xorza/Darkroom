@@ -800,7 +800,6 @@ mod invalidation {
         assert!(execution_graph.e_nodes.is_empty());
         assert!(execution_graph.e_node_process_order.is_empty());
         assert!(execution_graph.e_node_execute_order.is_empty());
-        assert!(execution_graph.e_node_terminal_idx.is_empty());
 
         Ok(())
     }
