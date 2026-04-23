@@ -105,29 +105,14 @@ pub enum ExecutionBehavior {
     Once,
 }
 
-/// State machine for graph traversal during execution preparation.
-///
-/// The execution graph uses a two-phase traversal:
-/// 1. Backward pass: Collect nodes in dependency order, detect cycles
-/// 2. Forward pass: Propagate input state changes through the graph
-///
-/// State transitions:
-/// ```text
-/// Unvisited ──► Visiting ──► DependenciesResolved ──► Ready
-///                  │
-///                  └──► (cycle detected if revisited while Visiting)
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-enum ProcessState {
-    /// Node has not been visited yet in current traversal
-    #[default]
-    Unvisited,
-    /// Node is currently being visited (used for cycle detection)
-    Visiting,
-    /// Backward pass complete - all dependencies have been collected
-    DependenciesResolved,
-    /// Forward pass complete - input states have been propagated
-    Ready,
+/// DFS coloring for the two backward passes. White = unvisited, Gray = on
+/// stack (Done pushed, children pending), Black = children done. Lives
+/// only within a single pass as a local `Vec<Color>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Color {
+    White,
+    Gray,
+    Black,
 }
 
 // === Execution Node ===
@@ -136,7 +121,6 @@ enum ProcessState {
 pub struct ExecutionNode {
     pub id: NodeId,
     inited: bool,
-    process_state: ProcessState,
 
     pub terminal: bool,
     pub missing_required_inputs: bool,
@@ -176,7 +160,6 @@ impl KeyIndexKey<NodeId> for ExecutionNode {
 impl ExecutionNode {
     fn invalidate(&mut self) {
         self.output_values = None;
-        self.process_state = ProcessState::Unvisited;
         self.inputs.clear();
         self.outputs.clear();
         self.reset_for_execution();
@@ -190,7 +173,6 @@ impl ExecutionNode {
         self.cached = false;
         self.run_time = 0.0;
         self.error = None;
-        self.process_state = ProcessState::Ready;
 
         for e_input in &mut self.inputs {
             e_input.dependency_wants_execute = false;
@@ -215,7 +197,6 @@ impl ExecutionNode {
         }
 
         self.terminal = func.terminal;
-        self.process_state = ProcessState::Unvisited;
         self.behavior = Self::compute_behavior(node.behavior, func.behavior);
 
         for (event_idx, event) in node.events.iter().enumerate() {
@@ -390,10 +371,6 @@ impl ExecutionGraph {
     }
 
     fn build_execution_nodes(&mut self, graph: &Graph, func_lib: &FuncLib) {
-        self.e_nodes
-            .iter_mut()
-            .for_each(|e| e.process_state = ProcessState::Unvisited);
-
         let mut compact = self.e_nodes.compact_insert_start();
 
         for node in graph.nodes.iter() {
@@ -402,11 +379,9 @@ impl ExecutionGraph {
                 ..Default::default()
             });
 
-            assert_eq!(e_node.process_state, ProcessState::Unvisited);
             let node = graph.by_id(&e_node.id).unwrap();
             let func = func_lib.by_id(&node.func_id).unwrap();
             e_node.refresh(node, func);
-            e_node.process_state = ProcessState::Ready;
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 Self::update_input_binding(&mut compact, e_node_idx, input_idx, &input.binding);
@@ -562,6 +537,8 @@ impl ExecutionGraph {
         self.e_node_process_order.clear();
         stack.clear();
 
+        let mut color = vec![Color::White; self.e_nodes.len()];
+
         for e_node_idx in terminal_idx.iter().copied() {
             stack.push(Visit {
                 e_node_idx,
@@ -576,31 +553,31 @@ impl ExecutionGraph {
                     self.e_nodes[visit.e_node_idx].outputs[output_idx].usage_count += 1;
                 }
                 VisitCause::Done => {
-                    let e_node = &mut self.e_nodes[visit.e_node_idx];
-                    assert_eq!(e_node.process_state, ProcessState::Visiting);
-                    e_node.process_state = ProcessState::DependenciesResolved;
+                    assert_eq!(color[visit.e_node_idx], Color::Gray);
+                    color[visit.e_node_idx] = Color::Black;
                     self.e_node_process_order.push(visit.e_node_idx);
                     continue;
                 }
             }
 
-            let e_node = &mut self.e_nodes[visit.e_node_idx];
-            match e_node.process_state {
-                ProcessState::Unvisited => unreachable!("should be Forward"),
-                ProcessState::Visiting => {
-                    return Err(Error::CycleDetected { node_id: e_node.id });
+            let idx = visit.e_node_idx;
+            match color[idx] {
+                Color::Gray => {
+                    return Err(Error::CycleDetected {
+                        node_id: self.e_nodes[idx].id,
+                    });
                 }
-                ProcessState::DependenciesResolved => continue,
-                ProcessState::Ready => {}
+                Color::Black => continue,
+                Color::White => {}
             }
 
-            e_node.process_state = ProcessState::Visiting;
+            color[idx] = Color::Gray;
             stack.push(Visit {
-                e_node_idx: visit.e_node_idx,
+                e_node_idx: idx,
                 cause: VisitCause::Done,
             });
 
-            for e_input in e_node.inputs.iter() {
+            for e_input in self.e_nodes[idx].inputs.iter() {
                 if let ExecutionBinding::Bind(addr) = &e_input.binding {
                     stack.push(Visit {
                         e_node_idx: addr.target_idx,
@@ -616,12 +593,18 @@ impl ExecutionGraph {
     }
 
     fn propagate_input_state_forward(&mut self) {
+        // Debug-only: verify every Bind dep was already processed in this
+        // forward pass. Guaranteed by process_order being post-order DFS
+        // (deps before consumers), but worth checking — if this flips, the
+        // forward pass is reading a stale `wants_execute`/`missing_required`.
+        let mut processed = if is_debug() {
+            vec![false; self.e_nodes.len()]
+        } else {
+            Vec::new()
+        };
+
         for e_node_idx in self.e_node_process_order.iter().copied() {
             let e_node = &self.e_nodes[e_node_idx];
-            assert!(!matches!(
-                e_node.process_state,
-                ProcessState::Unvisited | ProcessState::Visiting
-            ));
 
             let mut inputs_updated = false;
             let mut bindings_changed = false;
@@ -634,8 +617,13 @@ impl ExecutionGraph {
                     ExecutionBinding::Const(_) => (false, false),
                     ExecutionBinding::Bind(addr) => {
                         let output_node = &self.e_nodes[addr.target_idx];
-                        assert_eq!(output_node.process_state, ProcessState::Ready);
                         assert!(addr.port_idx < output_node.outputs.len());
+                        if is_debug() {
+                            assert!(
+                                processed[addr.target_idx],
+                                "forward pass: dep not yet processed"
+                            );
+                        }
                         (
                             output_node.wants_execute,
                             e_input.required && output_node.missing_required_inputs,
@@ -652,7 +640,6 @@ impl ExecutionGraph {
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
-            e_node.process_state = ProcessState::Ready;
             e_node.inputs_updated = inputs_updated;
             e_node.bindings_changed = bindings_changed;
             e_node.missing_required_inputs = missing_required;
@@ -670,6 +657,10 @@ impl ExecutionGraph {
                     ExecutionBehavior::Once => e_node.output_values.is_some(),
                 };
                 e_node.wants_execute = !e_node.cached;
+            }
+
+            if is_debug() {
+                processed[e_node_idx] = true;
             }
         }
     }
@@ -689,6 +680,8 @@ impl ExecutionGraph {
         self.e_node_execute_order.clear();
         stack.clear();
 
+        let mut color = vec![Color::White; self.e_nodes.len()];
+
         for e_node_idx in terminal_idx.iter().copied() {
             stack.push(Visit {
                 e_node_idx,
@@ -697,40 +690,38 @@ impl ExecutionGraph {
         }
 
         while let Some(visit) = stack.pop() {
-            let e_node = &mut self.e_nodes[visit.e_node_idx];
+            let idx = visit.e_node_idx;
 
             match visit.cause {
                 VisitCause::Terminal | VisitCause::OutputRequest { .. } => {}
                 VisitCause::Done => {
-                    assert_eq!(e_node.process_state, ProcessState::Visiting);
-                    self.e_node_execute_order.push(visit.e_node_idx);
-                    e_node.process_state = ProcessState::DependenciesResolved;
+                    assert_eq!(color[idx], Color::Gray);
+                    self.e_node_execute_order.push(idx);
+                    color[idx] = Color::Black;
                     continue;
                 }
             }
 
-            match e_node.process_state {
-                ProcessState::Visiting => {
-                    unreachable!("cycle should be detected in walk_backward_collect_order")
-                }
-                ProcessState::Unvisited => unreachable!("should have been processed"),
-                ProcessState::DependenciesResolved => continue,
-                ProcessState::Ready => {}
+            match color[idx] {
+                Color::White => {}
+                Color::Black => continue,
+                // Pass 1 would have rejected any cycle; a Gray revisit in
+                // pass 2 means our DFS invariant is broken.
+                Color::Gray => unreachable!("cycle should be detected in pass 1"),
             }
 
-            if !e_node.wants_execute {
-                e_node.process_state = ProcessState::DependenciesResolved;
+            if !self.e_nodes[idx].wants_execute {
+                color[idx] = Color::Black;
                 continue;
             }
 
-            e_node.process_state = ProcessState::Visiting;
+            color[idx] = Color::Gray;
             stack.push(Visit {
-                e_node_idx: visit.e_node_idx,
+                e_node_idx: idx,
                 cause: VisitCause::Done,
             });
 
-            let e_node = &self.e_nodes[visit.e_node_idx];
-            for e_input in e_node.inputs.iter() {
+            for e_input in self.e_nodes[idx].inputs.iter() {
                 if e_input.dependency_wants_execute
                     && let Some(addr) = e_input.binding.as_bind()
                 {
@@ -995,9 +986,6 @@ impl ExecutionGraph {
                 assert_eq!(output_values.len(), e_node.outputs.len());
             }
 
-            assert_ne!(e_node.process_state, ProcessState::Visiting);
-            assert_ne!(e_node.process_state, ProcessState::Unvisited);
-
             let node = graph.by_id(&e_node.id).unwrap();
             let func = func_lib.by_id(&e_node.func_id).unwrap();
 
@@ -1049,11 +1037,6 @@ impl ExecutionGraph {
         }
 
         for e_node in self.e_nodes.iter() {
-            assert!(!matches!(
-                e_node.process_state,
-                ProcessState::Visiting | ProcessState::Unvisited
-            ));
-
             if e_node.missing_required_inputs {
                 assert!(!e_node.wants_execute);
             }
@@ -1076,7 +1059,6 @@ impl ExecutionGraph {
             pending.remove(&idx);
 
             let e_node = &self.e_nodes[idx];
-            assert_eq!(e_node.process_state, ProcessState::DependenciesResolved);
             assert!(e_node.wants_execute);
             assert!(!e_node.missing_required_inputs);
 
