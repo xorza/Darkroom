@@ -158,13 +158,6 @@ impl KeyIndexKey<NodeId> for ExecutionNode {
 }
 
 impl ExecutionNode {
-    fn invalidate(&mut self) {
-        self.output_values = None;
-        self.inputs.clear();
-        self.outputs.clear();
-        self.reset_for_execution();
-    }
-
     fn reset_for_execution(&mut self) {
         self.wants_execute = false;
         self.inputs_updated = false;
@@ -324,37 +317,6 @@ impl ExecutionGraph {
     pub fn reset_states(&mut self) {
         for e_node in &mut self.e_nodes {
             e_node.reset_state();
-        }
-    }
-
-    pub fn invalidate_recursively<I>(&mut self, node_ids: I)
-    where
-        I: IntoIterator<Item = NodeId>,
-    {
-        let mut stack: Vec<usize> = node_ids
-            .into_iter()
-            .filter_map(|id| self.e_nodes.index_of_key(&id))
-            .collect();
-        let mut seen = vec![false; self.e_nodes.len()];
-
-        while let Some(e_node_idx) = stack.pop() {
-            if seen[e_node_idx] {
-                continue;
-            }
-            seen[e_node_idx] = true;
-            self.e_nodes[e_node_idx].invalidate();
-
-            for (idx, e_node) in self.e_nodes.iter().enumerate() {
-                if seen[idx] {
-                    continue;
-                }
-                let depends = e_node.inputs.iter().any(|input| {
-                    matches!(&input.binding, ExecutionBinding::Bind(addr) if addr.target_idx == e_node_idx)
-                });
-                if depends {
-                    stack.push(idx);
-                }
-            }
         }
     }
 

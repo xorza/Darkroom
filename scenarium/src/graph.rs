@@ -1,5 +1,5 @@
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
-use hashbrown::HashSet;
+use hashbrown::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::data::{DataType, StaticValue};
@@ -128,6 +128,9 @@ impl Graph {
         self.nodes.by_key_mut(id)
     }
 
+    /// All nodes that transitively depend on `node_id` (excluding itself),
+    /// returned in `iter()` insertion order. Callers rely on this order —
+    /// see the `iter()` doc comment.
     pub fn dependent_nodes(&self, node_id: &NodeId) -> Vec<NodeId> {
         assert!(!node_id.is_nil());
         assert!(
@@ -135,30 +138,33 @@ impl Graph {
             "node must exist to find dependents"
         );
 
-        let mut seen = HashSet::new();
-        let mut stack = vec![*node_id];
-
-        while let Some(current) = stack.pop() {
-            for node in self.nodes.iter() {
-                let depends = node.inputs.iter().any(|input| {
-                    matches!(
-                        &input.binding,
-                        Binding::Bind(binding) if binding.target_id == current
-                    )
-                });
-                if depends && seen.insert(node.id) {
-                    stack.push(node.id);
+        // Build reverse adjacency once: consumers[X] = nodes that Bind to X.
+        // O(N·d) up front vs. the previous O(N²·d) repeated linear scans.
+        let mut consumers: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        for node in self.nodes.iter() {
+            for input in &node.inputs {
+                if let Binding::Bind(addr) = &input.binding {
+                    consumers.entry(addr.target_id).or_default().push(node.id);
                 }
             }
         }
 
-        let mut ordered = Vec::with_capacity(seen.len());
-        for node in self.nodes.iter() {
-            if seen.contains(&node.id) {
-                ordered.push(node.id);
+        let mut seen: HashSet<NodeId> = HashSet::new();
+        let mut stack = vec![*node_id];
+        while let Some(current) = stack.pop() {
+            if let Some(next) = consumers.get(&current) {
+                for &id in next {
+                    if seen.insert(id) {
+                        stack.push(id);
+                    }
+                }
             }
         }
-        ordered
+
+        self.nodes
+            .iter()
+            .filter_map(|n| seen.contains(&n.id).then_some(n.id))
+            .collect()
     }
 
     pub fn serialize(&self, format: SerdeFormat) -> Vec<u8> {
