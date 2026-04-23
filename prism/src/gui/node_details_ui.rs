@@ -2,7 +2,7 @@ use egui::{Pos2, Rect, Response, Sense, Vec2};
 use palantir::Image;
 use scenarium::data::DynamicValue;
 use scenarium::graph::NodeId;
-use scenarium::prelude::{ExecutionStats, Func};
+use scenarium::prelude::Func;
 
 use crate::common::StableId;
 use crate::gui::Gui;
@@ -14,8 +14,8 @@ use crate::gui::widgets::{
     TextEdit, Texture,
 };
 use crate::model::argument_values_cache::{CachedTexture, NodeCache};
-use crate::model::execution_info::NodeExecutionInfo;
 use crate::model::graph_ui_action::GraphUiAction;
+use crate::model::node_execution::NodeExecutionInfo;
 
 const PANEL_WIDTH: f32 = 250.0;
 const PREVIEW_MAX_WIDTH: f32 = PANEL_WIDTH - 32.0;
@@ -82,8 +82,8 @@ fn show_content(
 
     show_name_editor(gui, node_id, &original_name, output);
 
-    if let Some(stats) = ctx.execution_stats {
-        show_execution_info(gui, ctx, node_id, stats);
+    if ctx.execution_stats.is_some() {
+        show_execution_info(gui, ctx, node_id);
     }
 
     let Some(func) = ctx.func_lib.by_id(&node.func_id) else {
@@ -137,16 +137,11 @@ fn show_name_editor(
 
 // === Execution Info ===
 
-fn show_execution_info(
-    gui: &mut Gui<'_>,
-    ctx: &GraphContext<'_>,
-    node_id: NodeId,
-    stats: &ExecutionStats,
-) {
+fn show_execution_info(gui: &mut Gui<'_>, ctx: &GraphContext<'_>, node_id: NodeId) {
     add_section_separator(gui);
     Label::new("Execution:").show(gui);
 
-    let info = NodeExecutionInfo::from_stats(Some(stats), node_id);
+    let info = ctx.exec_info_index.get(node_id);
     match info {
         NodeExecutionInfo::Errored(node_error) => {
             let func_name = match &node_error.error {

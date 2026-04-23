@@ -696,6 +696,7 @@ mod tests {
             func_lib: &func_lib,
             view_graph: vg,
             execution_stats: None,
+            exec_info_index: crate::model::NodeExecutionIndex::new(None),
             autorun: false,
             argument_values_cache: &mut cache,
         };

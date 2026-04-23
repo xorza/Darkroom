@@ -134,10 +134,12 @@ impl Session {
     /// in `commit_actions`); `argument_values_cache` is `&mut` because
     /// rendering lazily fills it with texture handles.
     pub fn graph_context(&mut self) -> GraphContext<'_> {
+        let execution_stats = self.execution_stats.as_ref();
         GraphContext {
             func_lib: &self.func_lib,
             view_graph: &self.view_graph,
-            execution_stats: self.execution_stats.as_ref(),
+            execution_stats,
+            exec_info_index: crate::model::NodeExecutionIndex::new(execution_stats),
             autorun: self.autorun,
             argument_values_cache: &mut self.argument_values_cache,
         }

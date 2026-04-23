@@ -1,5 +1,5 @@
 use egui::TextureHandle;
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashMap;
 use imaginarium::ImageDesc;
 use scenarium::execution_graph::ArgumentValues;
 use scenarium::execution_stats::ExecutionStats;
@@ -18,62 +18,74 @@ pub struct NodeCache {
     pub output_previews: Vec<Option<CachedTexture>>,
 }
 
+/// Per-node cache lifecycle. A node is in exactly one state — or absent.
+enum CacheState {
+    Pending,
+    Ready(NodeCache),
+}
+
 #[derive(Default)]
 pub struct ArgumentValuesCache {
-    pub values: HashMap<NodeId, NodeCache>,
-    pending_requests: HashSet<NodeId>,
+    entries: HashMap<NodeId, CacheState>,
 }
 
 impl std::fmt::Debug for ArgumentValuesCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ready = self
+            .entries
+            .values()
+            .filter(|s| matches!(s, CacheState::Ready(_)))
+            .count();
         f.debug_struct("ArgumentValuesCache")
-            .field("values_count", &self.values.len())
+            .field("ready_count", &ready)
+            .field("pending_count", &(self.entries.len() - ready))
             .finish()
     }
 }
 
 impl ArgumentValuesCache {
     pub fn get_mut(&mut self, node_id: &NodeId) -> Option<&mut NodeCache> {
-        self.values.get_mut(node_id)
+        match self.entries.get_mut(node_id)? {
+            CacheState::Ready(cache) => Some(cache),
+            CacheState::Pending => None,
+        }
     }
 
     pub fn insert(&mut self, node_id: NodeId, node_cache: NodeCache) {
-        self.pending_requests.remove(&node_id);
-        self.values.insert(node_id, node_cache);
+        self.entries.insert(node_id, CacheState::Ready(node_cache));
     }
 
-    /// Returns true if this is a new request (not already pending).
-    /// Call this before sending a request to avoid duplicates.
+    /// Returns true if this is a new request (not already pending or ready).
+    /// Call before sending a request to avoid duplicates.
     pub fn mark_pending(&mut self, node_id: NodeId) -> bool {
-        self.pending_requests.insert(node_id)
+        use hashbrown::hash_map::Entry;
+        match self.entries.entry(node_id) {
+            Entry::Occupied(_) => false,
+            Entry::Vacant(slot) => {
+                slot.insert(CacheState::Pending);
+                true
+            }
+        }
     }
 
-    /// Removes a node from pending requests without inserting a value.
+    /// Drop any state (pending or ready) for `node_id`.
     pub fn clear_pending(&mut self, node_id: NodeId) {
-        self.pending_requests.remove(&node_id);
+        self.entries.remove(&node_id);
     }
 
     pub fn clear(&mut self) {
-        self.values.clear();
-        self.pending_requests.clear();
+        self.entries.clear();
     }
 
     pub fn invalidate_changed(&mut self, execution_stats: &ExecutionStats) {
-        // Remove cached values for executed nodes (their values may have changed)
         for executed in &execution_stats.executed_nodes {
-            self.values.remove(&executed.node_id);
-            self.pending_requests.remove(&executed.node_id);
+            self.entries.remove(&executed.node_id);
         }
-
         for error in &execution_stats.node_errors {
-            self.values.remove(&error.node_id);
-            self.pending_requests.remove(&error.node_id);
+            self.entries.remove(&error.node_id);
         }
-
-        // Remove cached values for nodes with missing inputs
         for port_address in &execution_stats.missing_inputs {
-            self.values.remove(&port_address.target_id);
-            self.pending_requests.remove(&port_address.target_id);
+            self.entries.remove(&port_address.target_id);
         }
     }
 }

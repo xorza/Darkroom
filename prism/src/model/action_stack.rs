@@ -14,6 +14,24 @@ struct UndoEntry {
     gesture_key: Option<GestureKey>,
 }
 
+/// Undo history kept as two flat byte buffers with per-entry ranges,
+/// rather than `VecDeque<Vec<GraphUiAction>>`.
+///
+/// Why: `GraphUiAction::NodeRemoved` carries a full `Node` + per-edge
+/// `Vec<IncomingConnection>` / `Vec<IncomingEvent>`; a naive enum-storage
+/// history hits the allocator once per field per pushed action and leaves
+/// the heap fragmented as the ring trims old entries. Bitcode-packing
+/// into one contiguous buffer keeps the whole history in two allocations
+/// (undo + redo) regardless of entry count, makes `trim_to_limit` a
+/// single `Vec::drain` of the packed prefix, and keeps cache locality
+/// when we walk the stack. The bitcode encode/decode cost is bounded
+/// (one batch per push, undo, or redo — not per frame).
+///
+/// Consequences to respect:
+/// - `undo_stack[i].range.end <= undo_actions.len()` is a non-local
+///   invariant; `assert_ranges_match_actions` in tests watches for drift.
+/// - Gesture-merge deserializes the tail entry, edits, re-serializes.
+///   O(1) check via the cached `gesture_key` avoids that on the miss path.
 #[derive(Debug)]
 pub struct ActionStack {
     undo_actions: Vec<u8>,

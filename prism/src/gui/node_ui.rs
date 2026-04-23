@@ -10,8 +10,8 @@ use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::gui::node_layout::{NodeGalleys, NodeLayout};
 use crate::gui::widgets::{Button, HitRegion};
-use crate::model::execution_info::NodeExecutionInfo;
 use crate::model::graph_ui_action::GraphUiAction;
+use crate::model::node_execution::NodeExecutionInfo;
 use common::BoolExt;
 use egui::epaint::CornerRadiusF32;
 use egui::{
@@ -211,7 +211,7 @@ impl NodeUi {
             }
 
             let is_selected = ctx.view_graph.selected_node_id == Some(node_id);
-            let exec_info = NodeExecutionInfo::from_stats(ctx.execution_stats, node_id);
+            let exec_info = ctx.exec_info_index.get(node_id);
 
             if render_body(gui, &layout, galleys, is_selected, &exec_info, breaker) {
                 result.broken_nodes.push(node_id);
