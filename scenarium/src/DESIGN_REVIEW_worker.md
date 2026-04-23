@@ -16,14 +16,9 @@ The weaknesses are at the wire format and the external API surface, not in the l
 
 ## Findings
 
-### [F1] `WORKER_MSG_BATCH` + `Multi` is the wrong batching primitive
+### [F1] `WORKER_MSG_BATCH` + `Multi` is the wrong batching primitive — DONE
 - **Category**: Data structures / Contract
-- **Impact**: 4/5 — removes a latent atomicity landmine and deletes the `Multi`-unpack VecDeque walk
-- **Effort**: 2/5 — channel signature change, `scan` simplification, two call sites (worker.rs, session.rs)
-- **Current**: Callers group messages with `WorkerMessage::Multi { msgs: Vec<WorkerMessage> }` (worker.rs:63). The worker reads up to 10 messages per `recv_many` and unpacks nested `Multi` during scan (worker.rs:186, 204). `send_many` itself wraps its argument in a single `Multi` (worker.rs:110–117).
-- **Problem**: Atomicity of a batch is two coincidences away from breaking. If a caller ever sends 11+ loose messages, `recv_many` splits them across two commit phases silently. Atomicity is preserved today only because `session.rs` builds batches of ≤3 (session.rs:294–337) and wraps in `Multi`. `Multi` as an enum variant means the scanner carries a `VecDeque` just to flatten nesting. Two orthogonal mechanisms (channel batching + enum nesting) to express one concept ("this commit unit").
-- **Alternative**: Change the channel to `UnboundedSender<Vec<WorkerMessage>>`. One send = one commit unit, period. `send_many` sends a `Vec` directly. `WorkerMessage::Multi` is deleted. `WORKER_MSG_BATCH` is deleted. `scan` walks a flat `Vec` instead of a `VecDeque`. The contract becomes load-bearing in the type: a batch *is* the `Vec`, not "whatever `recv_many` happened to pull".
-- **Recommendation**: Do it. The current arrangement compiles but the semantics are fragile; the refactor is local and the API survives unchanged for `send` / `send_many`.
+- **Status**: Landed — channel is now `UnboundedSender<Vec<WorkerMessage>>`. `WorkerMessage::Multi`, `WORKER_MSG_BATCH`, and the `VecDeque`-unpack loop in `scan` all deleted. One send = one commit unit, type-enforced. Public `Worker` API unchanged.
 
 ### [F2] Batch reduction rules are implicit across several pairs — DONE
 - **Category**: Contract

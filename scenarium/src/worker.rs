@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -16,10 +16,6 @@ use crate::execution_graph::{ArgumentValues, Error, ExecutionGraph, Result};
 use crate::execution_stats::ExecutionStats;
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
-
-/// Max messages drained per worker-loop iteration. Bounds latency
-/// between a `send` and the loop observing it.
-const WORKER_MSG_BATCH: usize = 10;
 
 /// Capacity of the bounded channel each event-lambda task writes into.
 /// The worker reads this channel directly and applies backpressure to
@@ -60,19 +56,19 @@ pub enum WorkerMessage {
     Ack {
         reply: oneshot::Sender<()>,
     },
-    Multi {
-        msgs: Vec<WorkerMessage>,
-    },
     RequestArgumentValues {
         node_id: NodeId,
         reply: oneshot::Sender<Option<ArgumentValues>>,
     },
 }
 
+/// The wire format is `Vec<WorkerMessage>`: one send = one commit unit.
+/// Batch atomicity is type-enforced — the worker cannot split a batch
+/// across two scan/commit cycles.
 #[derive(Debug)]
 pub struct Worker {
     thread_handle: Option<JoinHandle<()>>,
-    tx: UnboundedSender<WorkerMessage>,
+    tx: UnboundedSender<Vec<WorkerMessage>>,
     event_loop_started: Arc<AtomicBool>,
 }
 
@@ -81,7 +77,7 @@ impl Worker {
     where
         ExecutionCallback: Fn(Result<ExecutionStats>) + Send + 'static,
     {
-        let (tx, rx) = unbounded_channel::<WorkerMessage>();
+        let (tx, rx) = unbounded_channel::<Vec<WorkerMessage>>();
         let event_loop_started = Arc::new(AtomicBool::new(false));
         let thread_handle: JoinHandle<()> = tokio::spawn({
             let event_loop_started = event_loop_started.clone();
@@ -103,7 +99,7 @@ impl Worker {
 
     pub fn send(&self, msg: WorkerMessage) {
         self.tx
-            .send(msg)
+            .send(vec![msg])
             .expect("Failed to send message to worker, it probably exited");
     }
 
@@ -111,13 +107,13 @@ impl Worker {
         let msgs: Vec<WorkerMessage> = msgs.into_iter().collect();
         if !msgs.is_empty() {
             self.tx
-                .send(WorkerMessage::Multi { msgs })
+                .send(msgs)
                 .expect("Failed to send message to worker, it probably exited");
         }
     }
 
     pub fn exit(&mut self) {
-        self.tx.send(WorkerMessage::Exit).ok();
+        self.tx.send(vec![WorkerMessage::Exit]).ok();
 
         if let Some(thread_handle) = self.thread_handle.take() {
             thread_handle.abort();
@@ -216,16 +212,15 @@ pub struct EventTrigger {
     pub state: SharedAnyState,
 }
 
-/// Pure scan: unpacks command batch (including nested `Multi`) into a
-/// `BatchIntent`. Exit dominates the entire batch: if Exit appears
-/// anywhere, the returned intent is pure Exit — every other command
-/// in the same batch is discarded (including those before Exit).
-/// Oneshot senders in dropped variants close silently; waiters get
-/// "sender dropped," which is the right signal on shutdown.
+/// Pure scan: folds a command batch into a `BatchIntent`. Exit
+/// dominates the entire batch: if Exit appears anywhere, the returned
+/// intent is pure Exit — every other command in the same batch is
+/// discarded (including those before Exit). Oneshot senders in
+/// dropped variants close silently; waiters get "sender dropped,"
+/// which is the right signal on shutdown.
 fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
     let mut intent = BatchIntent::default();
-    let mut pending: VecDeque<WorkerMessage> = msgs.into();
-    while let Some(msg) = pending.pop_front() {
+    for msg in msgs {
         match msg {
             WorkerMessage::Exit => {
                 return BatchIntent {
@@ -244,7 +239,6 @@ fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
             WorkerMessage::ExecuteTerminals => intent.execute_terminals = true,
             WorkerMessage::StartEventLoop => intent.loop_request = Some(LoopCommand::Start),
             WorkerMessage::StopEventLoop => intent.loop_request = Some(LoopCommand::Stop),
-            WorkerMessage::Multi { msgs: nested } => pending.extend(nested),
             WorkerMessage::Ack { reply } => {
                 intent.acks.push(reply);
             }
@@ -257,7 +251,7 @@ fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
 }
 
 async fn worker_loop<ExecutionCallback>(
-    mut worker_message_rx: UnboundedReceiver<WorkerMessage>,
+    mut worker_message_rx: UnboundedReceiver<Vec<WorkerMessage>>,
     execution_callback: ExecutionCallback,
     event_loop_started: Arc<AtomicBool>,
 ) where
@@ -265,7 +259,7 @@ async fn worker_loop<ExecutionCallback>(
 {
     let mut execution_graph = ExecutionGraph::default();
 
-    let mut cmd_buf: Vec<WorkerMessage> = Vec::with_capacity(WORKER_MSG_BATCH);
+    let mut cmd_batch: Vec<WorkerMessage> = Vec::new();
     let mut ev_buf: Vec<EventRef> = Vec::with_capacity(EVENT_LOOP_BACKPRESSURE);
 
     let mut event_loop: Option<(EventLoopHandle, Receiver<EventRef>)> = None;
@@ -274,16 +268,16 @@ async fn worker_loop<ExecutionCallback>(
     loop {
         event_loop_started.store(event_loop.is_some(), Ordering::Relaxed);
 
-        cmd_buf.clear();
         ev_buf.clear();
 
         // `biased`: commands take priority so Stop/Exit/Clear can't be
         // starved by a torrent of lambda events.
         tokio::select! {
             biased;
-            n = worker_message_rx.recv_many(&mut cmd_buf, WORKER_MSG_BATCH) => {
-                if n == 0 {
-                    return;
+            batch = worker_message_rx.recv() => {
+                match batch {
+                    Some(b) => cmd_batch = b,
+                    None => return,
                 }
             }
             n = async {
@@ -305,7 +299,7 @@ async fn worker_loop<ExecutionCallback>(
         let event_loop_pause_guard = event_loop_pause_gate.close();
 
         // --- Scan
-        let mut intent = scan(std::mem::take(&mut cmd_buf));
+        let mut intent = scan(std::mem::take(&mut cmd_batch));
         intent.events.extend(ev_buf.drain(..));
 
         // --- Commit: reset the loop once if anything touches it, then
@@ -781,54 +775,6 @@ mod tests {
         // Give it time to process - no callback expected since graph is clear
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(output_stream.take().await.is_empty());
-
-        worker.exit();
-    }
-
-    #[tokio::test]
-    async fn multi_message_processes_nested_messages() {
-        let output_stream = OutputStream::new();
-
-        let timers_invoker = WorkerEventsFuncLib::default();
-        let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
-
-        let mut func_lib = basic_invoker.into_func_lib();
-        func_lib.merge(timers_invoker.into_func_lib());
-
-        let graph = log_frame_no_graph(&func_lib);
-        let frame_event_node_id = graph.by_name("frame event").unwrap().id;
-
-        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
-        let mut worker = Worker::new(move |result| {
-            compute_finish_tx.try_send(result).ok();
-        });
-
-        // Send nested Multi messages
-        worker.send(WorkerMessage::Multi {
-            msgs: vec![
-                WorkerMessage::Update {
-                    graph: graph.clone(),
-                    func_lib: Arc::new(func_lib.clone()),
-                },
-                WorkerMessage::Multi {
-                    msgs: vec![WorkerMessage::Event {
-                        event: EventRef {
-                            node_id: frame_event_node_id,
-                            event_idx: 0,
-                        },
-                    }],
-                },
-            ],
-        });
-
-        let executed = compute_finish_rx
-            .recv()
-            .await
-            .expect("Missing compute completion")
-            .expect("Unsuccessful compute");
-
-        assert_eq!(executed.executed_nodes.len(), 3);
-        assert_eq!(output_stream.take().await, ["1"]);
 
         worker.exit();
     }
@@ -1521,21 +1467,6 @@ mod tests {
     }
 
     #[test]
-    fn scan_unpacks_nested_multi() {
-        let intent = super::scan(vec![WorkerMessage::Multi {
-            msgs: vec![
-                WorkerMessage::Clear,
-                WorkerMessage::Multi {
-                    msgs: vec![WorkerMessage::ExecuteTerminals],
-                },
-            ],
-        }]);
-
-        assert!(matches!(intent.graph_state, Some(super::GraphOp::Clear)));
-        assert!(intent.execute_terminals);
-    }
-
-    #[test]
     fn scan_exit_dominates_entire_batch() {
         // Exit is sticky across the whole batch: every other command
         // in the batch is discarded, whether sent before or after.
@@ -1544,11 +1475,9 @@ mod tests {
             WorkerMessage::ExecuteTerminals,
             WorkerMessage::Exit,
             WorkerMessage::StartEventLoop, // post-Exit: dropped
-            WorkerMessage::Multi {
-                msgs: vec![WorkerMessage::Update {
-                    graph: Graph::default(),
-                    func_lib: Arc::new(FuncLib::default()),
-                }],
+            WorkerMessage::Update {
+                graph: Graph::default(),
+                func_lib: Arc::new(FuncLib::default()),
             },
         ]);
 
