@@ -157,8 +157,7 @@ impl Session {
         }
     }
 
-    /// Applies the emitted actions to `view_graph` in order
-    /// (idempotent apply contract; see `GraphUiAction::apply`).
+    /// Applies the emitted actions to `view_graph` in order.
     /// Returns `true` if any applied action affects computation.
     ///
     /// Does *not* record undo history — that's the job of
@@ -372,14 +371,13 @@ impl Session {
         let mut graph_updated = false;
 
         for actions in output.action_stacks() {
-            // Apply + record. Idempotent apply means mutations that
-            // already happened inline during render are no-ops; the
-            // single source of truth for mutations that intentionally
-            // defer lives here. Cross-frame coalescing for continuous
-            // gestures (zoom/pan) happens at the undo stack level via
-            // `GraphUiAction::gesture_key`, not here, so this loop
-            // doesn't need any pending-action state — which is what
-            // makes it safe under egui's multi-pass rendering.
+            // Apply + record. Renderer never mutates ViewGraph (GraphContext
+            // holds &ViewGraph), so this is the one site that writes each
+            // action exactly once. Cross-frame coalescing for continuous
+            // gestures (zoom/pan) happens at the undo-stack level via
+            // `GraphUiAction::gesture_key`, not here, so this loop doesn't
+            // need any pending-action state — which is what makes it safe
+            // under egui's multi-pass rendering.
             let any_affecting = self.apply(actions);
             self.action_stack.clear_redo();
             self.action_stack.push_current(actions);
