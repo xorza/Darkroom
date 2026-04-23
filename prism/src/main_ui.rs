@@ -80,10 +80,12 @@ impl MainUi {
         }
     }
 
+    pub fn pre_frame(&mut self, session: &mut Session) {
+        session.update_shared_status();
+    }
+
     pub fn render(&mut self, session: &mut Session, gui: &mut Gui<'_>) {
         let input = gui.input_snapshot();
-
-        session.update_shared_status();
 
         self.handle_shortcuts(&input, session);
 
