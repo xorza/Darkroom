@@ -952,6 +952,99 @@ async fn start_event_loop_on_empty_graph_reports_empty_graph_error() {
     worker.exit();
 }
 
+// F4 regression: when a batch triggers both an execution
+// (ExecuteTerminals or InjectEvents) and StartEventLoop, the commit
+// phase must run execute() once and fire the callback once — not twice.
+
+#[tokio::test]
+async fn execute_terminals_with_start_event_loop_fires_callback_once() {
+    use crate::data::StaticValue;
+
+    // Terminal-only graph: active_event_triggers() returns empty, so
+    // the loop never actually spawns. This removes lambda-driven
+    // callbacks as a confounding factor while still exercising the
+    // should_start_event_loop branch.
+    let output_stream = OutputStream::new();
+    let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
+    let func_lib = basic_invoker.into_func_lib();
+
+    let mut graph = Graph::default();
+    let print_func = func_lib.by_name("print").unwrap();
+    let mut print_node: Node = print_func.into();
+    print_node.id = NodeId::unique();
+    print_node.inputs[0].binding = StaticValue::String("hi".to_string()).into();
+    graph.add(print_node);
+
+    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
+    let mut worker = Worker::new(move |result| {
+        compute_finish_tx.try_send(result).ok();
+    });
+
+    worker.send_many([
+        WorkerMessage::Update {
+            graph,
+            func_lib: Arc::new(func_lib),
+        },
+        WorkerMessage::ExecuteTerminals,
+        WorkerMessage::StartEventLoop,
+    ]);
+
+    let first = timeout(Duration::from_millis(500), compute_finish_rx.recv())
+        .await
+        .expect("batch must fire callback")
+        .expect("callback channel closed");
+    assert!(first.is_ok(), "execute must succeed: {first:?}");
+
+    // Confirm no second callback for the same batch.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        compute_finish_rx.try_recv().is_err(),
+        "ExecuteTerminals+StartEventLoop must fire callback exactly once"
+    );
+    assert!(
+        !worker.is_event_loop_started(),
+        "terminal-only graph yields no triggers; loop should not have started"
+    );
+    // The single execute call actually ran the terminal.
+    assert_eq!(output_stream.take().await, ["hi"]);
+
+    worker.exit();
+}
+
+#[tokio::test]
+async fn execute_terminals_with_start_event_loop_on_empty_graph_fires_once() {
+    // Empty-graph variant of the F4 regression: a batch that would
+    // previously have produced TWO Err(EmptyGraph) callbacks (one for
+    // the terminals path, one for the start-loop path) now produces
+    // exactly one.
+    let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
+    let mut worker = Worker::new(move |result| {
+        compute_finish_tx.try_send(result).ok();
+    });
+
+    worker.send_many([
+        WorkerMessage::ExecuteTerminals,
+        WorkerMessage::StartEventLoop,
+    ]);
+
+    let first = timeout(Duration::from_millis(500), compute_finish_rx.recv())
+        .await
+        .expect("batch must fire callback")
+        .expect("callback channel closed");
+    assert!(
+        matches!(first, Err(Error::EmptyGraph)),
+        "expected Err(EmptyGraph), got {first:?}"
+    );
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        compute_finish_rx.try_recv().is_err(),
+        "empty-graph ExecuteTerminals+StartEventLoop must fire EmptyGraph exactly once"
+    );
+
+    worker.exit();
+}
+
 // --- Pure scan() unit tests ------------------------------------
 
 #[test]

@@ -306,7 +306,7 @@ async fn worker_loop<ExecutionCallback>(
         // apply graph op → execute → start loop in stable order.
         let needs_reset =
             intent.graph_state.is_some() || intent.loop_request.is_some() || intent.exit;
-        let was_running = if needs_reset {
+        let loop_was_running_before_reset = if needs_reset {
             reset_event_loop(&mut event_loop).await
         } else {
             false
@@ -327,42 +327,33 @@ async fn worker_loop<ExecutionCallback>(
         let should_start_event_loop = match intent.loop_request {
             Some(LoopCommand::Start) => true,
             Some(LoopCommand::Stop) => false,
-            None => was_running,
+            // No explicit request: preserve the prior running state.
+            // Combined with "Update forces a reset," this is what
+            // makes an Update restart a running loop on the new graph.
+            None => loop_was_running_before_reset,
         };
 
-        if intent.execute_terminals || !intent.events.is_empty() {
+        let needs_execute =
+            intent.execute_terminals || !intent.events.is_empty() || should_start_event_loop;
+
+        if needs_execute {
             if execution_graph.is_empty() {
                 (execution_callback)(Err(Error::EmptyGraph));
             } else {
+                let in_loop = should_start_event_loop || event_loop.is_some();
                 let result = execution_graph
-                    .execute(
-                        intent.execute_terminals,
-                        event_loop.is_some(),
-                        intent.events.drain(),
-                    )
+                    .execute(intent.execute_terminals, in_loop, intent.events.drain())
                     .await;
-                (execution_callback)(result);
-            }
-        }
 
-        if should_start_event_loop {
-            assert!(event_loop.is_none());
-
-            if execution_graph.is_empty() {
-                (execution_callback)(Err(Error::EmptyGraph));
-            } else {
-                let result = execution_graph.execute(false, true, []).await;
-
-                if let Ok(execution_stats) = &result {
-                    let event_triggers = execution_graph.active_event_triggers(execution_stats);
-
-                    if !event_triggers.is_empty() {
-                        event_loop = Some(
-                            start_event_loop(event_triggers, event_loop_pause_gate.clone()).await,
-                        );
+                if should_start_event_loop && let Ok(stats) = &result {
+                    assert!(event_loop.is_none());
+                    let triggers = execution_graph.active_event_triggers(stats);
+                    if !triggers.is_empty() {
+                        event_loop =
+                            Some(start_event_loop(triggers, event_loop_pause_gate.clone()).await);
                         tracing::info!("Event loop started");
                     }
-                };
+                }
 
                 (execution_callback)(result);
             }
