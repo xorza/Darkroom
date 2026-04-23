@@ -38,10 +38,10 @@ pub struct EventRef {
 #[derive(Debug)]
 pub enum WorkerMessage {
     Exit,
-    Event {
-        event: EventRef,
-    },
-    Events {
+    /// External event injection side-door (scripting, replay, tests).
+    /// Events produced by running lambdas reach the worker on the
+    /// internal bounded channel, not through this variant.
+    InjectEvents {
         events: Vec<EventRef>,
     },
 
@@ -53,7 +53,10 @@ pub enum WorkerMessage {
     ExecuteTerminals,
     StartEventLoop,
     StopEventLoop,
-    Ack {
+    /// Reserved external sync primitive: the oneshot fires after every
+    /// command sent before this one has committed. No current prod
+    /// caller — anticipated use is the script transport.
+    Sync {
         reply: oneshot::Sender<()>,
     },
     RequestArgumentValues {
@@ -189,8 +192,8 @@ enum LoopCommand {
 /// | `graph_state`         | Update, Clear               | last-write-wins |
 /// | `loop_request`        | StartEventLoop, StopEventLoop | last-write-wins |
 /// | `execute_terminals`   | ExecuteTerminals            | idempotent flag |
-/// | `events`              | Event, Events               | set union (dedup) |
-/// | `acks`                | Ack                         | all fire      |
+/// | `events`              | InjectEvents                | set union (dedup) |
+/// | `syncs`               | Sync                        | all fire      |
 /// | `argument_requests`   | RequestArgumentValues       | all fire, post-commit snapshot |
 /// | `exit`                | Exit                        | dominates entire batch |
 #[derive(Debug, Default)]
@@ -200,7 +203,7 @@ struct BatchIntent {
     execute_terminals: bool,
     exit: bool,
     events: HashSet<EventRef>,
-    acks: Vec<oneshot::Sender<()>>,
+    syncs: Vec<oneshot::Sender<()>>,
     argument_requests: Vec<(NodeId, oneshot::Sender<Option<ArgumentValues>>)>,
 }
 
@@ -228,10 +231,7 @@ fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
                     ..BatchIntent::default()
                 };
             }
-            WorkerMessage::Event { event } => {
-                intent.events.insert(event);
-            }
-            WorkerMessage::Events { events } => intent.events.extend(events),
+            WorkerMessage::InjectEvents { events } => intent.events.extend(events),
             WorkerMessage::Update { graph, func_lib } => {
                 intent.graph_state = Some(GraphOp::Replace(graph, func_lib));
             }
@@ -239,8 +239,8 @@ fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
             WorkerMessage::ExecuteTerminals => intent.execute_terminals = true,
             WorkerMessage::StartEventLoop => intent.loop_request = Some(LoopCommand::Start),
             WorkerMessage::StopEventLoop => intent.loop_request = Some(LoopCommand::Stop),
-            WorkerMessage::Ack { reply } => {
-                intent.acks.push(reply);
+            WorkerMessage::Sync { reply } => {
+                intent.syncs.push(reply);
             }
             WorkerMessage::RequestArgumentValues { node_id, reply } => {
                 intent.argument_requests.push((node_id, reply));
@@ -375,11 +375,11 @@ async fn worker_loop<ExecutionCallback>(
             let _ = reply.send(values);
         }
 
-        // Refresh the atomic so callers racing an Ack reply see the
+        // Refresh the atomic so callers racing a Sync reply see the
         // post-commit state.
         event_loop_started.store(event_loop.is_some(), Ordering::Relaxed);
 
-        for reply in intent.acks.drain(..) {
+        for reply in intent.syncs.drain(..) {
             let _ = reply.send(());
         }
 

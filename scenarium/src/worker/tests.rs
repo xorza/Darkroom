@@ -70,11 +70,11 @@ async fn test_worker() -> anyhow::Result<()> {
             graph: graph.clone(),
             func_lib: Arc::new(func_lib.clone()),
         },
-        WorkerMessage::Event {
-            event: EventRef {
+        WorkerMessage::InjectEvents {
+            events: vec![EventRef {
                 node_id: frame_event_node_id,
                 event_idx: 0,
-            },
+            }],
         },
     ]);
 
@@ -87,11 +87,11 @@ async fn test_worker() -> anyhow::Result<()> {
     assert_eq!(executed.executed_nodes.len(), 3);
     assert_eq!(output_stream.take().await, ["1"]);
 
-    worker.send(WorkerMessage::Event {
-        event: EventRef {
+    worker.send(WorkerMessage::InjectEvents {
+        events: vec![EventRef {
             node_id: frame_event_node_id,
             event_idx: 0,
-        },
+        }],
     });
 
     let executed = compute_finish_rx
@@ -104,11 +104,11 @@ async fn test_worker() -> anyhow::Result<()> {
     assert_eq!(executed.executed_nodes.len(), 3);
     assert_eq!(output_stream.take().await, ["2"]);
 
-    worker.send(WorkerMessage::Event {
-        event: EventRef {
+    worker.send(WorkerMessage::InjectEvents {
+        events: vec![EventRef {
             node_id: frame_event_node_id,
             event_idx: 0,
-        },
+        }],
     });
 
     let executed = compute_finish_rx
@@ -297,11 +297,11 @@ async fn clear_resets_execution_graph() {
             graph: graph.clone(),
             func_lib: Arc::new(func_lib.clone()),
         },
-        WorkerMessage::Event {
-            event: EventRef {
+        WorkerMessage::InjectEvents {
+            events: vec![EventRef {
                 node_id: frame_event_node_id,
                 event_idx: 0,
-            },
+            }],
         },
     ]);
 
@@ -312,11 +312,11 @@ async fn clear_resets_execution_graph() {
     worker.send(WorkerMessage::Clear);
 
     // Try to execute - should not produce output since graph is cleared
-    worker.send(WorkerMessage::Event {
-        event: EventRef {
+    worker.send(WorkerMessage::InjectEvents {
+        events: vec![EventRef {
             node_id: frame_event_node_id,
             event_idx: 0,
-        },
+        }],
     });
 
     // Give it time to process - no callback expected since graph is clear
@@ -354,7 +354,7 @@ async fn events_are_deduplicated() {
         node_id: frame_event_node_id,
         event_idx: 0,
     };
-    worker.send(WorkerMessage::Events {
+    worker.send(WorkerMessage::InjectEvents {
         events: vec![event, event, event],
     });
 
@@ -471,11 +471,11 @@ async fn request_argument_values_invokes_callback() {
             graph: graph.clone(),
             func_lib: Arc::new(func_lib.clone()),
         },
-        WorkerMessage::Event {
-            event: EventRef {
+        WorkerMessage::InjectEvents {
+            events: vec![EventRef {
                 node_id: frame_event_node_id,
                 event_idx: 0,
-            },
+            }],
         },
     ]);
 
@@ -499,7 +499,7 @@ async fn request_argument_values_invokes_callback() {
 }
 
 #[tokio::test]
-async fn ack_fires_after_execution() {
+async fn sync_fires_after_execution() {
     let timers_invoker = WorkerEventsFuncLib::default();
     let basic_invoker = BasicFuncLib::default();
 
@@ -520,20 +520,20 @@ async fn ack_fires_after_execution() {
             graph: graph.clone(),
             func_lib: Arc::new(func_lib.clone()),
         },
-        WorkerMessage::Event {
-            event: EventRef {
+        WorkerMessage::InjectEvents {
+            events: vec![EventRef {
                 node_id: frame_event_node_id,
                 event_idx: 0,
-            },
+            }],
         },
-        WorkerMessage::Ack { reply },
+        WorkerMessage::Sync { reply },
     ]);
 
     let _ = compute_finish_rx.recv().await;
     timeout(Duration::from_millis(200), rx)
         .await
-        .expect("Ack timeout")
-        .expect("Ack sender dropped");
+        .expect("Sync timeout")
+        .expect("Sync sender dropped");
 
     worker.exit();
 }
@@ -631,13 +631,13 @@ async fn send_many_empty_is_noop() {
 
     worker.send_many(std::iter::empty::<WorkerMessage>());
 
-    // Subsequent Ack still fires → worker is alive.
+    // Subsequent Sync still fires → worker is alive.
     let (reply, rx) = oneshot::channel();
-    worker.send(WorkerMessage::Ack { reply });
+    worker.send(WorkerMessage::Sync { reply });
     timeout(Duration::from_millis(500), rx)
         .await
-        .expect("Ack should fire after empty send_many")
-        .expect("Ack sender dropped");
+        .expect("Sync should fire after empty send_many")
+        .expect("Sync sender dropped");
 
     worker.exit();
 }
@@ -651,11 +651,11 @@ async fn stop_event_loop_when_not_running_is_noop() {
 
     // Worker still responsive after a no-op stop.
     let (reply, rx) = oneshot::channel();
-    worker.send(WorkerMessage::Ack { reply });
+    worker.send(WorkerMessage::Sync { reply });
     timeout(Duration::from_millis(500), rx)
         .await
         .expect("StopEventLoop with no running loop should be a no-op")
-        .expect("Ack sender dropped");
+        .expect("Sync sender dropped");
 
     worker.exit();
 }
@@ -696,24 +696,24 @@ async fn request_argument_values_for_unknown_node_returns_none() {
 }
 
 #[tokio::test]
-async fn multiple_acks_in_batch_all_run() {
+async fn multiple_syncs_in_batch_all_run() {
     let mut worker = Worker::new(|_| {});
 
     let (reply_a, rx_a) = oneshot::channel();
     let (reply_b, rx_b) = oneshot::channel();
 
     worker.send_many([
-        WorkerMessage::Ack { reply: reply_a },
-        WorkerMessage::Ack { reply: reply_b },
+        WorkerMessage::Sync { reply: reply_a },
+        WorkerMessage::Sync { reply: reply_b },
     ]);
 
     timeout(Duration::from_millis(500), rx_a)
         .await
-        .expect("First Ack should fire")
+        .expect("First Sync should fire")
         .expect("First sender dropped");
     timeout(Duration::from_millis(500), rx_b)
         .await
-        .expect("Second Ack should fire")
+        .expect("Second Sync should fire")
         .expect("Second sender dropped");
 
     worker.exit();
@@ -744,11 +744,11 @@ async fn clear_then_update_in_same_batch_applies_update() {
             graph,
             func_lib: Arc::new(func_lib),
         },
-        WorkerMessage::Event {
-            event: EventRef {
+        WorkerMessage::InjectEvents {
+            events: vec![EventRef {
                 node_id: frame_event_node_id,
                 event_idx: 0,
-            },
+            }],
         },
     ]);
 
@@ -906,11 +906,11 @@ async fn event_on_empty_graph_reports_empty_graph_error() {
         compute_finish_tx.try_send(result).ok();
     });
 
-    worker.send(WorkerMessage::Event {
-        event: EventRef {
+    worker.send(WorkerMessage::InjectEvents {
+        events: vec![EventRef {
             node_id: NodeId::unique(),
             event_idx: 0,
-        },
+        }],
     });
 
     let result = timeout(Duration::from_millis(500), compute_finish_rx.recv())
@@ -968,8 +968,10 @@ fn scan_accumulates_simple_flags() {
         WorkerMessage::Clear,
         WorkerMessage::StartEventLoop,
         WorkerMessage::ExecuteTerminals,
-        WorkerMessage::Event { event },
-        WorkerMessage::Ack { reply: reply_ack },
+        WorkerMessage::InjectEvents {
+            events: vec![event],
+        },
+        WorkerMessage::Sync { reply: reply_ack },
         WorkerMessage::RequestArgumentValues {
             node_id,
             reply: reply_args,
@@ -985,7 +987,7 @@ fn scan_accumulates_simple_flags() {
     assert!(!intent.exit);
     assert_eq!(intent.events.len(), 1);
     assert!(intent.events.contains(&event));
-    assert_eq!(intent.acks.len(), 1);
+    assert_eq!(intent.syncs.len(), 1);
     assert_eq!(intent.argument_requests.len(), 1);
     assert_eq!(intent.argument_requests[0].0, node_id);
 }
@@ -999,9 +1001,13 @@ fn scan_deduplicates_events() {
     };
 
     let intent = super::scan(vec![
-        WorkerMessage::Event { event },
-        WorkerMessage::Event { event },
-        WorkerMessage::Events {
+        WorkerMessage::InjectEvents {
+            events: vec![event],
+        },
+        WorkerMessage::InjectEvents {
+            events: vec![event],
+        },
+        WorkerMessage::InjectEvents {
             events: vec![event, event],
         },
     ]);
@@ -1042,7 +1048,7 @@ fn scan_exit_dominates_entire_batch() {
         "pre-Exit execute_terminals must be discarded"
     );
     assert!(intent.events.is_empty());
-    assert!(intent.acks.is_empty());
+    assert!(intent.syncs.is_empty());
     assert!(intent.argument_requests.is_empty());
 }
 
@@ -1151,11 +1157,11 @@ async fn update_then_clear_in_same_batch_leaves_graph_cleared() {
             func_lib: Arc::new(func_lib),
         },
         WorkerMessage::Clear,
-        WorkerMessage::Event {
-            event: EventRef {
+        WorkerMessage::InjectEvents {
+            events: vec![EventRef {
                 node_id: frame_event_node_id,
                 event_idx: 0,
-            },
+            }],
         },
     ]);
 
@@ -1209,15 +1215,15 @@ async fn commands_not_starved_by_fast_event_loop() {
     // confounding factor.
     while compute_finish_rx.try_recv().is_ok() {}
 
-    // Send Stop + Ack. Both must be observed within the budget
+    // Send Stop + Sync. Both must be observed within the budget
     // even though lambda events are still being produced.
     let (reply, rx) = oneshot::channel();
-    worker.send_many([WorkerMessage::StopEventLoop, WorkerMessage::Ack { reply }]);
+    worker.send_many([WorkerMessage::StopEventLoop, WorkerMessage::Sync { reply }]);
 
     timeout(Duration::from_millis(500), rx)
         .await
-        .expect("Ack after StopEventLoop must fire promptly despite event load")
-        .expect("Ack sender dropped");
+        .expect("Sync after StopEventLoop must fire promptly despite event load")
+        .expect("Sync sender dropped");
 
     assert!(
         !worker.is_event_loop_started(),
