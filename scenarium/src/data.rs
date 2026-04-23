@@ -113,7 +113,7 @@ pub enum DataType {
     Int,
     Bool,
     String,
-    FsPath(FsPathConfig),
+    FsPath(Arc<FsPathConfig>),
     Array {
         element_type: Box<DataType>,
         // length is not included in the hash or equality check
@@ -131,7 +131,10 @@ pub enum StaticValue {
     Int(i64),
     Bool(bool),
     String(String),
-    FsPath(String),
+    FsPath {
+        config: Arc<FsPathConfig>,
+        path: String,
+    },
     Enum {
         type_id: TypeId,
         variant_name: String,
@@ -148,7 +151,16 @@ impl PartialEq for StaticValue {
             (StaticValue::Int(left), StaticValue::Int(right)) => left == right,
             (StaticValue::Bool(left), StaticValue::Bool(right)) => left == right,
             (StaticValue::String(left), StaticValue::String(right)) => left == right,
-            (StaticValue::FsPath(left), StaticValue::FsPath(right)) => left == right,
+            (
+                StaticValue::FsPath {
+                    config: config_left,
+                    path: path_left,
+                },
+                StaticValue::FsPath {
+                    config: config_right,
+                    path: path_right,
+                },
+            ) => config_left == config_right && path_left == path_right,
             (
                 StaticValue::Enum {
                     type_id: type_id_left,
@@ -177,7 +189,10 @@ pub enum DynamicValue {
     Int(i64),
     Bool(bool),
     String(String),
-    FsPath(String),
+    FsPath {
+        config: Arc<FsPathConfig>,
+        path: String,
+    },
     Custom {
         type_id: TypeId,
         data: Arc<dyn Any + Send + Sync>,
@@ -199,7 +214,7 @@ impl std::fmt::Debug for DynamicValue {
             DynamicValue::Int(v) => f.debug_tuple("Int").field(v).finish(),
             DynamicValue::Bool(v) => f.debug_tuple("Bool").field(v).finish(),
             DynamicValue::String(v) => f.debug_tuple("String").field(v).finish(),
-            DynamicValue::FsPath(v) => f.debug_tuple("FsPath").field(v).finish(),
+            DynamicValue::FsPath { path, .. } => f.debug_tuple("FsPath").field(path).finish(),
             DynamicValue::Custom { type_id, .. } => f
                 .debug_struct("Custom")
                 .field("type_id", type_id)
@@ -293,7 +308,7 @@ impl DynamicValue {
 
     pub fn as_fs_path(&self) -> Option<&str> {
         match self {
-            DynamicValue::FsPath(value) => Some(value),
+            DynamicValue::FsPath { path, .. } => Some(path),
             _ => None,
         }
     }
@@ -322,7 +337,10 @@ impl From<&StaticValue> for DynamicValue {
             StaticValue::Int(value) => DynamicValue::Int(*value),
             StaticValue::Bool(value) => DynamicValue::Bool(*value),
             StaticValue::String(value) => DynamicValue::String(value.clone()),
-            StaticValue::FsPath(value) => DynamicValue::FsPath(value.clone()),
+            StaticValue::FsPath { config, path } => DynamicValue::FsPath {
+                config: config.clone(),
+                path: path.clone(),
+            },
             StaticValue::Enum {
                 type_id,
                 variant_name,
@@ -341,7 +359,10 @@ impl From<&DataType> for StaticValue {
             DataType::Int => StaticValue::Int(0),
             DataType::Bool => StaticValue::Bool(false),
             DataType::String => StaticValue::String(String::new()),
-            DataType::FsPath(_) => StaticValue::FsPath(String::new()),
+            DataType::FsPath(config) => StaticValue::FsPath {
+                config: config.clone(),
+                path: String::new(),
+            },
             DataType::Null => StaticValue::Null,
             DataType::Enum(enum_def) => StaticValue::Enum {
                 type_id: enum_def.type_id,
@@ -473,7 +494,7 @@ impl Display for DynamicValue {
             DynamicValue::Int(v) => write!(f, "{v}"),
             DynamicValue::Bool(v) => write!(f, "{v}"),
             DynamicValue::String(s) => write!(f, "\"{s}\""),
-            DynamicValue::FsPath(s) => write!(f, "\"{s}\""),
+            DynamicValue::FsPath { path, .. } => write!(f, "\"{path}\""),
             DynamicValue::Custom {
                 data, display_fn, ..
             } => {
@@ -514,7 +535,7 @@ impl FromStr for DataType {
             "int" => Ok(DataType::Int),
             "bool" => Ok(DataType::Bool),
             "string" => Ok(DataType::String),
-            "path" => Ok(DataType::FsPath(FsPathConfig::default())),
+            "path" => Ok(DataType::FsPath(Arc::new(FsPathConfig::default()))),
             _ => Err(()),
         }
     }

@@ -95,10 +95,7 @@ impl<'a> StaticValueEditor<'a> {
                 render_enum_dropdown(gui, id, enum_def, variant_name, self.pos, &style)
             }
 
-            StaticValue::FsPath(path) => {
-                let DataType::FsPath(config) = self.data_type else {
-                    panic!("Expected FsPath data type for StaticValue::FsPath");
-                };
+            StaticValue::FsPath { config, path } => {
                 FilePicker::new(id, path, &config.extensions, picker_mode(config.mode))
                     .pos(self.pos)
                     .anchor(self.anchor)

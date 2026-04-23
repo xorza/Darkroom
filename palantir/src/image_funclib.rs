@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::sync::Arc;
 
 use crate::blend_mode::BLENDMODE_DATATYPE;
 use crate::conversion_format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat};
@@ -112,10 +113,10 @@ impl Default for ImageFuncLib {
             inputs: vec![FuncInput {
                 name: "path".to_string(),
                 required: true,
-                data_type: DataType::FsPath(FsPathConfig::with_extensions(
+                data_type: DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
                     FsPathMode::ExistingFile,
                     SUPPORTED_EXTENSIONS.iter().map(|s| s.to_string()).collect(),
-                )),
+                ))),
                 default_value: None,
                 value_options: vec![],
             }],
@@ -159,10 +160,10 @@ impl Default for ImageFuncLib {
                 FuncInput {
                     name: "path".to_string(),
                     required: true,
-                    data_type: DataType::FsPath(FsPathConfig::with_extensions(
+                    data_type: DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
                         FsPathMode::NewFile,
                         SUPPORTED_EXTENSIONS.iter().map(|s| s.to_string()).collect(),
-                    )),
+                    ))),
                     default_value: None,
                     value_options: vec![],
                 },
