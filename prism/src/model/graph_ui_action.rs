@@ -2,8 +2,24 @@ use egui::{Pos2, Vec2};
 use scenarium::graph::{Binding, Node, NodeBehavior, NodeId};
 use serde::{Deserialize, Serialize};
 
-use crate::model::view_graph::IncomingEvent;
-use crate::model::{IncomingConnection, ViewGraph, ViewNode};
+use crate::model::{ViewGraph, ViewNode};
+
+/// Payload for `GraphUiAction::NodeRemoved`: a connection that pointed
+/// *into* the node being removed and must be re-established on undo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IncomingConnection {
+    pub node_id: NodeId,
+    pub input_idx: usize,
+    pub binding: Binding,
+}
+
+/// Payload for `GraphUiAction::NodeRemoved`: an event subscription that
+/// targeted the node being removed and must be re-subscribed on undo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IncomingEvent {
+    pub node_id: NodeId,
+    pub event_idx: usize,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventSubscriberChange {
@@ -65,6 +81,54 @@ pub enum GraphUiAction {
 }
 
 impl GraphUiAction {
+    /// Build a `NodeRemoved` action for `node_id`. Walks the graph once
+    /// to collect the connections and event subscriptions that referenced
+    /// the node so undo can re-establish them.
+    pub fn node_removal(view_graph: &ViewGraph, node_id: &NodeId) -> Self {
+        let view_node = view_graph
+            .view_nodes
+            .by_key(node_id)
+            .expect("node_removal expects a view node")
+            .clone();
+        let node = view_graph
+            .graph
+            .by_id(node_id)
+            .expect("node_removal expects a graph node")
+            .clone();
+        let mut incoming_connections = Vec::new();
+        let mut incoming_events = Vec::new();
+        for other in view_graph.graph.nodes.iter() {
+            for (input_idx, input) in other.inputs.iter().enumerate() {
+                let Binding::Bind(binding) = &input.binding else {
+                    continue;
+                };
+                if binding.target_id == *node_id {
+                    incoming_connections.push(IncomingConnection {
+                        node_id: other.id,
+                        input_idx,
+                        binding: input.binding.clone(),
+                    });
+                }
+            }
+            for (event_idx, event) in other.events.iter().enumerate() {
+                if event.subscribers.contains(node_id) {
+                    incoming_events.push(IncomingEvent {
+                        node_id: other.id,
+                        event_idx,
+                    });
+                }
+            }
+        }
+        let was_selected = view_graph.selected_node_id == Some(*node_id);
+        GraphUiAction::NodeRemoved {
+            view_node,
+            node,
+            incoming_connections,
+            incoming_events,
+            was_selected,
+        }
+    }
+
     pub fn apply(&self, view_graph: &mut ViewGraph) {
         match self {
             GraphUiAction::CacheToggled { node_id, after, .. } => {

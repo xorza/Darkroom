@@ -121,7 +121,7 @@ impl GraphUi {
                     disconnect_connection(key, ctx, &mut self.output);
                 }
                 BrokeItem::Node(node_id) => {
-                    let action = ctx.view_graph.removal_action(&node_id);
+                    let action = GraphUiAction::node_removal(ctx.view_graph, &node_id);
                     self.output.add_action(action);
                 }
             }

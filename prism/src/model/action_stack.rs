@@ -568,7 +568,7 @@ mod tests {
             .copied()
             .find(|node_id| !bound_targets.contains(node_id))
             .unwrap_or(secondary_id);
-        let action = view_graph.removal_action(&removed_node_id);
+        let action = GraphUiAction::node_removal(&view_graph, &removed_node_id);
         action.apply(&mut view_graph);
         stack.push_current(std::slice::from_ref(&action));
         snapshots.push(view_graph.serialize(SerdeFormat::Json));

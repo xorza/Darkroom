@@ -1,28 +1,18 @@
 use anyhow::{Result, bail};
 use common::{SerdeFormat, is_debug, key_index_vec::KeyIndexVec};
-use scenarium::graph::Binding;
 use scenarium::prelude::{FuncLib, Graph as CoreGraph, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::common::UiEquals;
-use crate::model::graph_ui_action::GraphUiAction;
 
 use super::ViewNode;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IncomingConnection {
-    pub node_id: NodeId,
-    pub input_idx: usize,
-    pub binding: Binding,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IncomingEvent {
-    pub node_id: NodeId,
-    pub event_idx: usize,
-}
-
+// `pan`, `scale`, `selected_node_id` ride along in the serialized form.
+// Open UX question: should they? A second viewer inherits the first's
+// camera and selection on disk. Keeping as-is until "reopen exactly
+// where I left off" vs "graph file is portable view-independent data"
+// is decided. Cheap fix if we flip to the latter: add `#[serde(skip)]`.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ViewGraph {
     pub graph: CoreGraph,
@@ -130,51 +120,6 @@ impl ViewGraph {
             .is_some_and(|selected| selected == *node_id)
         {
             self.selected_node_id = None;
-        }
-    }
-
-    pub fn removal_action(&self, node_id: &NodeId) -> GraphUiAction {
-        let view_node = self
-            .view_nodes
-            .by_key(node_id)
-            .expect("remove node expects a view node")
-            .clone();
-        let node = self
-            .graph
-            .by_id(node_id)
-            .expect("remove node expects a graph node")
-            .clone();
-        let mut incoming_connections = Vec::new();
-        let mut incoming_events = Vec::new();
-        for node in self.graph.nodes.iter() {
-            for (input_idx, input) in node.inputs.iter().enumerate() {
-                let Binding::Bind(binding) = &input.binding else {
-                    continue;
-                };
-                if binding.target_id == *node_id {
-                    incoming_connections.push(IncomingConnection {
-                        node_id: node.id,
-                        input_idx,
-                        binding: input.binding.clone(),
-                    });
-                }
-            }
-            for (event_idx, event) in node.events.iter().enumerate() {
-                if event.subscribers.contains(node_id) {
-                    incoming_events.push(IncomingEvent {
-                        node_id: node.id,
-                        event_idx,
-                    });
-                }
-            }
-        }
-        let was_selected = self.selected_node_id == Some(*node_id);
-        GraphUiAction::NodeRemoved {
-            view_node,
-            node,
-            incoming_connections,
-            incoming_events,
-            was_selected,
         }
     }
 }

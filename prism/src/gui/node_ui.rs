@@ -218,7 +218,7 @@ impl NodeUi {
             }
 
             if render_remove_btn(gui, &layout, node_id) {
-                output.add_action(ctx.view_graph.removal_action(&node_id));
+                output.add_action(GraphUiAction::node_removal(ctx.view_graph, &node_id));
             }
 
             render_status_hints(gui, &layout, node_id, node.behavior, func);
