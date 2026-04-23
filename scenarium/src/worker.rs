@@ -1341,4 +1341,231 @@ mod tests {
 
         new_handle.stop().await;
     }
+
+    #[tokio::test]
+    async fn send_many_empty_is_noop() {
+        // Empty batch must not panic, hang, or desynchronize the worker.
+        let mut worker = Worker::new(|_| {});
+
+        worker.send_many(std::iter::empty::<WorkerMessage>());
+
+        // Subsequent ProcessingCallback still fires → worker is alive.
+        let notify = Arc::new(Notify::new());
+        let notify_clone = Arc::clone(&notify);
+        worker.send(WorkerMessage::ProcessingCallback {
+            callback: ProcessingCallback::new(move || {
+                notify_clone.notify_one();
+            }),
+        });
+
+        timeout(Duration::from_millis(500), notify.notified())
+            .await
+            .expect("ProcessingCallback should fire after empty send_many");
+
+        worker.exit();
+    }
+
+    #[tokio::test]
+    async fn stop_event_loop_when_not_running_is_noop() {
+        let mut worker = Worker::new(|_| {});
+
+        worker.send(WorkerMessage::StopEventLoop);
+        assert!(!worker.is_event_loop_started());
+
+        // Worker still responsive after a no-op stop.
+        let notify = Arc::new(Notify::new());
+        let notify_clone = Arc::clone(&notify);
+        worker.send(WorkerMessage::ProcessingCallback {
+            callback: ProcessingCallback::new(move || {
+                notify_clone.notify_one();
+            }),
+        });
+
+        timeout(Duration::from_millis(500), notify.notified())
+            .await
+            .expect("StopEventLoop with no running loop should be a no-op");
+
+        worker.exit();
+    }
+
+    #[tokio::test]
+    async fn request_argument_values_for_unknown_node_returns_none() {
+        let timers_invoker = WorkerEventsFuncLib::default();
+        let basic_invoker = BasicFuncLib::default();
+        let mut func_lib = basic_invoker.into_func_lib();
+        func_lib.merge(timers_invoker.into_func_lib());
+
+        let graph = log_frame_no_graph(&func_lib);
+
+        let (compute_finish_tx, _compute_finish_rx) = tokio::sync::mpsc::channel(8);
+        let mut worker = Worker::new(move |result| {
+            compute_finish_tx.try_send(result).ok();
+        });
+
+        worker.send(WorkerMessage::Update {
+            graph,
+            func_lib: Arc::new(func_lib),
+        });
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        worker.send(WorkerMessage::RequestArgumentValues {
+            node_id: NodeId::unique(),
+            callback: super::ArgumentValuesCallback::new(move |values| {
+                tx.try_send(values).ok();
+            }),
+        });
+
+        let values = timeout(Duration::from_millis(500), rx.recv())
+            .await
+            .expect("Callback timeout")
+            .expect("Channel closed");
+
+        assert!(values.is_none(), "unknown node should yield None");
+
+        worker.exit();
+    }
+
+    #[tokio::test]
+    async fn multiple_processing_callbacks_in_batch_only_last_runs() {
+        // Pins current contract: ProcessingCallback is stored in an Option
+        // so a later entry in the same batch overwrites earlier ones. If
+        // this policy changes to "run all", update this test.
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let mut worker = Worker::new(|_| {});
+
+        let first_count = Arc::new(AtomicUsize::new(0));
+        let second_count = Arc::new(AtomicUsize::new(0));
+        let first_clone = Arc::clone(&first_count);
+        let second_clone = Arc::clone(&second_count);
+
+        let notify = Arc::new(Notify::new());
+        let notify_clone = Arc::clone(&notify);
+
+        worker.send_many([
+            WorkerMessage::ProcessingCallback {
+                callback: ProcessingCallback::new(move || {
+                    first_clone.fetch_add(1, Ordering::SeqCst);
+                }),
+            },
+            WorkerMessage::ProcessingCallback {
+                callback: ProcessingCallback::new(move || {
+                    second_clone.fetch_add(1, Ordering::SeqCst);
+                    notify_clone.notify_one();
+                }),
+            },
+        ]);
+
+        timeout(Duration::from_millis(500), notify.notified())
+            .await
+            .expect("Second ProcessingCallback should fire");
+
+        assert_eq!(
+            first_count.load(Ordering::SeqCst),
+            0,
+            "earlier ProcessingCallback in the same batch is currently dropped"
+        );
+        assert_eq!(second_count.load(Ordering::SeqCst), 1);
+
+        worker.exit();
+    }
+
+    #[tokio::test]
+    async fn clear_then_update_in_same_batch_applies_update() {
+        // Scan-then-commit ordering: Clear zeroes execution_graph, Update
+        // queues a replacement, commit phase applies Update and flips
+        // execution_graph_clear back to false. The event must execute.
+        let output_stream = OutputStream::new();
+        let timers_invoker = WorkerEventsFuncLib::default();
+        let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
+        let mut func_lib = basic_invoker.into_func_lib();
+        func_lib.merge(timers_invoker.into_func_lib());
+
+        let graph = log_frame_no_graph(&func_lib);
+        let frame_event_node_id = graph.by_name("frame event").unwrap().id;
+
+        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
+        let mut worker = Worker::new(move |result| {
+            compute_finish_tx.try_send(result).ok();
+        });
+
+        worker.send_many([
+            WorkerMessage::Clear,
+            WorkerMessage::Update {
+                graph,
+                func_lib: Arc::new(func_lib),
+            },
+            WorkerMessage::Event {
+                event: EventRef {
+                    node_id: frame_event_node_id,
+                    event_idx: 0,
+                },
+            },
+        ]);
+
+        let executed = compute_finish_rx
+            .recv()
+            .await
+            .expect("Missing compute completion")
+            .expect("Unsuccessful compute");
+
+        assert_eq!(executed.executed_nodes.len(), 3);
+        assert_eq!(output_stream.take().await, ["1"]);
+
+        worker.exit();
+    }
+
+    #[tokio::test]
+    async fn update_increments_loop_id_so_events_from_old_loop_are_dropped() {
+        // Invariant: when Update arrives while an event loop is running,
+        // reset_event_loop() bumps current_loop_id. Any stale
+        // EventFromLoop/EventsFromLoop still sitting in the queue with
+        // the old id is then filtered at line 204/213 and never drives
+        // execution. We probe that by stuffing a crafted EventFromLoop
+        // with loop_id=0 into the queue after an Update (which has
+        // already incremented current_loop_id to 1).
+        let output_stream = OutputStream::new();
+        let timers_invoker = WorkerEventsFuncLib::default();
+        let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
+        let mut func_lib = basic_invoker.into_func_lib();
+        func_lib.merge(timers_invoker.into_func_lib());
+
+        let graph = log_frame_no_graph(&func_lib);
+        let frame_event_node_id = graph.by_name("frame event").unwrap().id;
+
+        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
+        let mut worker = Worker::new(move |result| {
+            compute_finish_tx.try_send(result).ok();
+        });
+
+        worker.send(WorkerMessage::Update {
+            graph,
+            func_lib: Arc::new(func_lib),
+        });
+
+        // Stale event from a loop that never existed (id 0 vs
+        // current_loop_id=1 after the Update reset). Must be filtered.
+        worker.send(WorkerMessage::EventFromLoop {
+            loop_id: 0,
+            event: EventRef {
+                node_id: frame_event_node_id,
+                event_idx: 0,
+            },
+        });
+
+        // Flush: a ProcessingCallback batched after the stale event
+        // fires at end-of-iteration only if no execute happened
+        // spuriously — we don't care about that here; what we care
+        // about is that no compute completion fires for the stale
+        // event. Use a short timeout.
+        assert!(
+            timeout(Duration::from_millis(150), compute_finish_rx.recv())
+                .await
+                .is_err(),
+            "stale EventFromLoop must not trigger execution"
+        );
+        assert!(output_stream.take().await.is_empty());
+
+        worker.exit();
+    }
 }
