@@ -1,6 +1,6 @@
 //! TCP transport. Binds `127.0.0.1:<port>`, accepts connections, reads
-//! one script per connection (length-prefixed, see `FRAMING`), ships
-//! it as a [`ScriptRequest`], writes the reply back.
+//! one script per connection (`[u32-be len][utf8 source]`), ships it
+//! as a [`ScriptRequest`], writes the reply back with the same framing.
 //!
 //! Cancellation is cooperative via [`CancellationToken`]: the accept
 //! loop `select!`s between the next accept and the cancel future.
@@ -11,10 +11,6 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use super::{ScriptRequest, ScriptTransport, TransportHandle};
-
-/// `[u32-be len][utf8 source]` on each connection, same shape for the
-/// reply. Version byte + max-length check belong here in a real impl.
-pub const FRAMING: &str = "u32-be-len-prefixed";
 
 /// Hard cap on a single frame so a malicious `u32::MAX` doesn't OOM
 /// the server. 1 MiB is plenty for user scripts.
@@ -41,7 +37,7 @@ impl ScriptTransport for TcpTransport {
             }
         });
 
-        TransportHandle::new("tcp", cancel, task)
+        TransportHandle::new(cancel, task)
     }
 }
 

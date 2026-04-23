@@ -1,5 +1,3 @@
-#![allow(dead_code)] // unused items on the transport API surface while the client CLI is still internal.
-
 //! Scripting boundary for prism.
 //!
 //! The executor is transport-agnostic: every transport produces
@@ -100,30 +98,18 @@ pub enum ScriptAction {
 /// Owns a transport's background task. Dropping it cancels the token
 /// (cooperative stop) and aborts the task (hard stop) so sockets and
 /// discovery files get cleaned up without blocking shutdown of the
-/// whole app. For graceful shutdown before drop, call
-/// [`TransportHandle::shutdown`] from async context.
+/// whole app.
 #[derive(Debug)]
 pub struct TransportHandle {
-    pub name: &'static str,
     cancel: CancellationToken,
     task: Option<JoinHandle<()>>,
 }
 
 impl TransportHandle {
-    pub fn new(name: &'static str, cancel: CancellationToken, task: JoinHandle<()>) -> Self {
+    pub fn new(cancel: CancellationToken, task: JoinHandle<()>) -> Self {
         Self {
-            name,
             cancel,
             task: Some(task),
-        }
-    }
-
-    /// Cancel the transport and await its task — graceful shutdown.
-    /// Prefer this over plain drop when you're in async context.
-    pub async fn shutdown(mut self) {
-        self.cancel.cancel();
-        if let Some(task) = self.task.take() {
-            let _ = task.await;
         }
     }
 }
@@ -147,10 +133,6 @@ pub trait ScriptTransport: Send {
         cancel: CancellationToken,
     ) -> TransportHandle;
 }
-
-// ---------------------------------------------------------------------------
-// Executor
-// ---------------------------------------------------------------------------
 
 /// Owns the background executor task plus every transport it feeds.
 /// Dropping it cancels everything and aborts the tasks.
@@ -187,14 +169,6 @@ impl ScriptExecutor {
             cancel,
             task: Some(task),
             _transports: handles,
-        }
-    }
-
-    /// Cancel and await the executor task — graceful shutdown.
-    pub async fn shutdown(mut self) {
-        self.cancel.cancel();
-        if let Some(task) = self.task.take() {
-            let _ = task.await;
         }
     }
 }

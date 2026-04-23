@@ -62,7 +62,7 @@ pub struct Session {
     script_action_rx: UnboundedReceiver<ScriptAction>,
 
     ui_context: UiContext,
-    _script_executor: Option<ScriptExecutor>,
+    script_executor: Option<ScriptExecutor>,
 }
 
 impl Session {
@@ -108,7 +108,7 @@ impl Session {
             worker_rx,
             script_action_rx,
             ui_context,
-            _script_executor: Some(script_executor),
+            script_executor: Some(script_executor),
         };
 
         if let Some(path) = result.config.current_path.clone() {
@@ -348,6 +348,10 @@ impl Session {
         if let Some(worker) = &mut self.worker {
             worker.exit();
         }
+        // Drop the executor: cancels its CancellationToken and aborts
+        // the executor + transport tasks so sockets/discovery files
+        // are released before `run_native` returns.
+        self.script_executor = None;
     }
 
     fn replace_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
@@ -429,7 +433,7 @@ mod tests {
             worker_rx,
             script_action_rx,
             ui_context: UiContext::new(&eframe::egui::Context::default()),
-            _script_executor: None,
+            script_executor: None,
         }
     }
 
