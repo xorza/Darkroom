@@ -20,7 +20,7 @@ use crate::gui::frame_output::{FrameOutput, RunCommand};
 use crate::gui::graph_ctx::GraphContext;
 use crate::model::{ActionStack, ArgumentValuesCache, ViewGraph, graph_ui_action::GraphUiAction};
 use crate::script::{ScriptAction, ScriptExecutor, ScriptTransport, tcp::TcpTransport};
-use crate::ui_host::UiContext;
+use crate::ui_host::UiHost;
 
 const UNDO_MAX_STEPS: usize = 256;
 
@@ -61,18 +61,20 @@ pub struct Session {
     worker: Option<Worker>,
     worker_tx: UnboundedSender<WorkerEvent>,
     worker_rx: UnboundedReceiver<WorkerEvent>,
+
+    script_executor: Option<ScriptExecutor>,
     script_action_rx: UnboundedReceiver<ScriptAction>,
 
-    ui_context: UiContext,
-    script_executor: Option<ScriptExecutor>,
+    ui_host: Arc<dyn UiHost>,
 }
 
 impl Session {
-    pub fn new(ui_context: UiContext) -> Self {
+    pub fn new<H: UiHost + 'static>(ui_host: H) -> Self {
+        let ui_host: Arc<dyn UiHost> = Arc::new(ui_host);
         let (worker_tx, worker_rx) = unbounded_channel::<WorkerEvent>();
 
         let worker = Worker::new({
-            let ui = ui_context.clone();
+            let ui = ui_host.clone();
             let tx = worker_tx.clone();
             move |result| {
                 let _ = tx.send(WorkerEvent::ExecutionFinished(result));
@@ -109,7 +111,7 @@ impl Session {
             worker_tx,
             worker_rx,
             script_action_rx,
-            ui_context,
+            ui_host,
             script_executor: Some(script_executor),
         };
 
@@ -327,7 +329,7 @@ impl Session {
         {
             let (reply, rx) = oneshot::channel();
             msgs.push(WorkerMessage::RequestArgumentValues { node_id, reply });
-            let ui = self.ui_context.clone();
+            let ui = self.ui_host.clone();
             let tx = self.worker_tx.clone();
             tokio::spawn(async move {
                 if let Ok(values) = rx.await {
@@ -442,7 +444,7 @@ mod tests {
             worker_tx,
             worker_rx,
             script_action_rx,
-            ui_context: Arc::new(NoopUiHost),
+            ui_host: Arc::new(NoopUiHost),
             script_executor: None,
         }
     }

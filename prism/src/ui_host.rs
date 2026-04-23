@@ -9,8 +9,6 @@
 //!
 //! [`Session`]: crate::session::Session
 
-use std::sync::Arc;
-
 use eframe::egui;
 use egui::ViewportCommand;
 
@@ -18,8 +16,6 @@ pub trait UiHost: Send + Sync + std::fmt::Debug {
     fn request_redraw(&self);
     fn close_app(&self);
 }
-
-pub type UiContext = Arc<dyn UiHost>;
 
 #[derive(Debug)]
 pub struct EguiUiHost {

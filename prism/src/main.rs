@@ -75,7 +75,7 @@ struct PrismApp {
 impl PrismApp {
     fn new(ctx: &egui::Context) -> Self {
         Self {
-            session: Session::new(Arc::new(EguiUiHost::new(ctx))),
+            session: Session::new(EguiUiHost::new(ctx)),
             main_gui: MainGui::new(EguiUiHost::new(ctx)),
         }
     }

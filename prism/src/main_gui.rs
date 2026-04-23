@@ -11,6 +11,7 @@ use crate::gui::widgets::{Button, ListItem, Panel, PopupMenu};
 use crate::input::InputSnapshot;
 use crate::session::Session;
 use crate::ui_host::{EguiUiHost, UiHost};
+
 use eframe::egui;
 use egui::vec2;
 
