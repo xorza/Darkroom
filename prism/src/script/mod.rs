@@ -51,6 +51,24 @@ const MAX_STRING_SIZE: usize = 1 << 20; // 1 MiB
 const MAX_ARRAY_LEN: usize = 100_000;
 const MAX_MAP_LEN: usize = 100_000;
 
+/// Concurrent live variables in a script's scope. Rhai has no
+/// byte-level memory cap, so this is the closest proxy: bounds how
+/// many values can coexist. 256 is ample for any legitimate script.
+const MAX_VARIABLES: usize = 256;
+
+/// Cap on Rhai's interned-string pool. Protects against
+/// distinct-string-flood DoS.
+const MAX_STRINGS_INTERNED: usize = 1024;
+
+/// Deepest function recursion a script may perform.
+const MAX_CALL_LEVELS: usize = 64;
+
+/// Expression / function nesting depth caps passed to
+/// `set_max_expr_depths(expr, fn_expr)`. Guards the parser and
+/// evaluator against deeply-nested-AST DoS.
+const MAX_EXPR_DEPTH: usize = 64;
+const MAX_FN_EXPR_DEPTH: usize = 32;
+
 /// Work item sent from a transport to the executor. `reply` is a
 /// single-shot channel; the executor runs `source`, then sends one
 /// [`ScriptResult`]. If the client has gone away the receiver is
@@ -211,17 +229,16 @@ async fn run_executor(
     }
 }
 
-/// Build the Rhai engine with resource caps and the `print`
-/// callback wired to Session. Rhai is already sandboxed by default
-/// (no stdlib filesystem, process, or network access), so this
-/// function's job is just to layer runtime limits on top and route
-/// `print(...)` / `debug(...)` to the status log.
 fn build_engine(action_tx: &mpsc::UnboundedSender<ScriptAction>) -> Engine {
     let mut engine = Engine::new();
     engine.set_max_operations(MAX_OPERATIONS);
     engine.set_max_string_size(MAX_STRING_SIZE);
     engine.set_max_array_size(MAX_ARRAY_LEN);
     engine.set_max_map_size(MAX_MAP_LEN);
+    engine.set_max_variables(MAX_VARIABLES);
+    engine.set_max_strings_interned(MAX_STRINGS_INTERNED);
+    engine.set_max_call_levels(MAX_CALL_LEVELS);
+    engine.set_max_expr_depths(MAX_EXPR_DEPTH, MAX_FN_EXPR_DEPTH);
 
     let print_tx = action_tx.clone();
     engine.on_print(move |msg| {
@@ -241,9 +258,6 @@ fn build_engine(action_tx: &mpsc::UnboundedSender<ScriptAction>) -> Engine {
     engine
 }
 
-/// Run one chunk of source inside the persistent scope. Rhai's
-/// `run_with_scope` discards the expression value; swap to
-/// `eval_with_scope::<Dynamic>` later if we want to return values.
 fn run_script(engine: &Engine, scope: &mut Scope, source: &str) -> ScriptResult {
     match engine.run_with_scope(scope, source) {
         Ok(()) => ScriptResult {
