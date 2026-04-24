@@ -86,10 +86,10 @@ fn announce_tcp(report: &tcp::TcpStartReport) {
         Some(token) => println!("script-tcp: token {token}"),
         None => println!("script-tcp: auth disabled"),
     }
-    if let Some(err) = &report.token_file_error {
-        tracing::warn!(error = %err, "failed to write script token file");
-    } else if let Some(path) = &report.token_file_written {
-        tracing::info!(path = %path.display(), "wrote script token file");
+    match &report.token_file {
+        Some(Ok(path)) => tracing::info!(path = %path.display(), "wrote script token file"),
+        Some(Err(err)) => tracing::warn!(error = %err, "failed to write script token file"),
+        None => {}
     }
 }
 
@@ -283,7 +283,7 @@ async fn run_executor(
                     s.origin = req.origin.clone();
                     s.stdout.clear();
                 }
-                let error = run_error(&engine, &mut scope, &req.source);
+                let error = run_script(&engine, &mut scope, &req.source).err();
                 let stdout = std::mem::take(&mut state.lock().unwrap().stdout);
                 let _ = req.reply.send(ScriptResult { stdout, error });
             }
@@ -336,11 +336,10 @@ fn build_engine(
     engine
 }
 
-fn run_error(engine: &Engine, scope: &mut Scope, source: &str) -> Option<String> {
+fn run_script(engine: &Engine, scope: &mut Scope, source: &str) -> Result<(), String> {
     engine
         .run_with_scope(scope, source)
-        .err()
-        .map(|e| e.to_string())
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

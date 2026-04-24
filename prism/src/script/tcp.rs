@@ -56,12 +56,10 @@ impl TcpTransport {
 pub struct TcpStartReport {
     pub addr: SocketAddr,
     pub token: Option<Uuid>,
-    /// `Some(path)` if the discovery file was requested and written;
-    /// `None` if not requested or write failed.
-    pub token_file_written: Option<PathBuf>,
-    /// `Some(msg)` if the discovery file was requested but the write
-    /// failed. Independent of `token_file_written` — never both `Some`.
-    pub token_file_error: Option<String>,
+    /// `None` = no discovery file requested.
+    /// `Some(Ok(path))` = file written to `path`.
+    /// `Some(Err(msg))` = requested but the write failed.
+    pub token_file: Option<Result<PathBuf, String>>,
 }
 
 /// Boot a TCP transport from config: binds the socket and (if requested)
@@ -78,21 +76,18 @@ pub fn start(cfg: &TcpScriptConfig) -> std::io::Result<(TcpTransport, TcpStartRe
         );
     }
 
-    let (token_file_written, token_file_error) = match &cfg.token_file {
-        Some(path) => match write_token_file(path, addr.port(), cfg.token) {
-            Ok(()) => (Some(path.clone()), None),
-            Err(e) => (None, Some(e.to_string())),
-        },
-        None => (None, None),
-    };
+    let token_file = cfg.token_file.as_ref().map(|path| {
+        write_token_file(path, addr.port(), cfg.token)
+            .map(|()| path.clone())
+            .map_err(|e| e.to_string())
+    });
 
     Ok((
         transport,
         TcpStartReport {
             addr,
             token: cfg.token,
-            token_file_written,
-            token_file_error,
+            token_file,
         },
     ))
 }
@@ -386,8 +381,7 @@ mod tests {
         assert_eq!(report.addr, transport.local_addr().unwrap());
         assert_eq!(report.addr.port(), transport.local_addr().unwrap().port());
         assert_eq!(report.token, Some(token));
-        assert!(report.token_file_written.is_none());
-        assert!(report.token_file_error.is_none());
+        assert!(report.token_file.is_none());
     }
 
     #[tokio::test]
@@ -408,8 +402,10 @@ mod tests {
         };
         let (_transport, report) = start(&cfg).unwrap();
 
-        assert_eq!(report.token_file_written.as_deref(), Some(path.as_path()));
-        assert!(report.token_file_error.is_none());
+        assert_eq!(
+            report.token_file.as_ref().unwrap().as_deref(),
+            Ok(path.as_path())
+        );
 
         let body = fs::read_to_string(&path).unwrap();
         assert!(body.contains(&format!("\"port\": {}", report.addr.port())));

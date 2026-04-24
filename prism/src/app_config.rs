@@ -41,7 +41,7 @@ pub struct ScriptCliArgs {
         long,
         value_name = "BIND",
         value_parser = parse_bind_spec,
-        default_value = "127.0.0.1:33433",
+        default_value_t = default_bind(),
         global = true,
         requires = "script_tcp",
     )]
