@@ -1,22 +1,25 @@
 //! TCP transport. Binds `127.0.0.1:<port>`, accepts connections, reads
-//! one script per connection and writes one reply back.
+//! scripts from persistent streams and writes one reply per script.
 //!
-//! Request framing — without auth:
-//!     `[u32-be len][utf8 source]`
-//! With auth (`token = Some`):
-//!     `[16 bytes: UUID as u128-be][u32-be src_len][src_bytes]`
-//! The token is compared constant-time; mismatches close the connection
-//! without touching the executor.
+//! Connection lifecycle:
+//!   1. (auth only) client sends 16 bytes of UUID auth token.
+//!   2. loop: client sends one request frame, server returns one reply
+//!      frame. Connection stays open until the client closes it.
 //!
-//! Reply framing:
+//! Request frame (per script):
+//!     `[16 bytes: session-id as u128-be][u32-be src_len][src_bytes]`
+//! A zero session id (`Uuid::nil()`) asks the executor to create a new
+//! session. Any other id resumes the matching session's Rhai scope (or
+//! errors if the id isn't known).
+//!
+//! Reply frame (per script):
 //!     `[u32-be len][JSON body]`
-//! JSON body shape:
-//!     `{"print": <string>, "result": <string|null>, "error": <string|null>}`
-//! `print` holds the script's captured `print(...)` output (may be empty).
-//! `result` holds the Rhai-source serialization of the final expression
-//! on success; `null` on error. `error` holds the error message on
-//! failure; `null` on success. Exactly one of `result`/`error` is
-//! non-null per successful reply.
+//! JSON body is the serialized [`super::ScriptResult`] — fields:
+//! `session`, `print`, `result`, `error`. See `ScriptResult`'s doc
+//! comment for semantics.
+//!
+//! Auth failure is handled before the loop: on a bad token we drop the
+//! stream without sending anything.
 //!
 //! Cancellation is cooperative via [`CancellationToken`]: the accept
 //! loop `select!`s between the next accept and the cancel future.
@@ -196,50 +199,62 @@ async fn handle_conn(
     tx: mpsc::Sender<ScriptRequest>,
     cancel: CancellationToken,
 ) -> std::io::Result<()> {
+    // Auth once per connection.
     if let Some(expected) = expected_token {
         let got = stream.read_u128().await?;
-        // XOR-then-zero-check compiles branchless on x86_64/aarch64,
-        // so comparison time doesn't leak which byte mismatched.
         if got ^ expected.as_u128() != 0 {
             tracing::warn!(peer = %peer, "tcp script: token rejected, closing connection");
-            // Dropping the stream closes the socket and sends FIN; no
-            // pending writes to flush on the reject path.
+            // Drop sends FIN; no pending writes to flush on the reject path.
             drop(stream);
             return Ok(());
         }
     }
 
-    let source = read_string_frame(&mut stream).await?;
-    let (reply_tx, reply_rx) = oneshot::channel();
+    // Persistent connection: read [16B session-id][u32 src-len][src] per
+    // request, dispatch, reply, loop. Exits cleanly on client close (EOF).
+    loop {
+        let session_id = match stream.read_u128().await {
+            Ok(id) => {
+                if id == 0 {
+                    None
+                } else {
+                    Some(Uuid::from_u128(id))
+                }
+            }
+            // UnexpectedEof = client closed its side between frames.
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        let source = read_string_frame(&mut stream).await?;
 
-    // Bounded send — if the executor is saturated, this awaits and
-    // backpressure propagates all the way to the TCP client.
-    if tx
-        .send(ScriptRequest {
-            origin: peer.to_string(),
-            source,
-            reply: reply_tx,
-        })
-        .await
-        .is_err()
-    {
-        return Ok(()); // executor dropped, app is shutting down
+        let (reply_tx, reply_rx) = oneshot::channel();
+        // Bounded send — backpressure propagates to the TCP client.
+        if tx
+            .send(ScriptRequest {
+                origin: peer.to_string(),
+                session_id,
+                source,
+                reply: reply_tx,
+            })
+            .await
+            .is_err()
+        {
+            return Ok(()); // executor dropped; app shutting down
+        }
+
+        let reply = tokio::select! {
+            _ = cancel.cancelled() => return Ok(()),
+            r = reply_rx => match r {
+                Ok(r) => r,
+                Err(_) => return Ok(()), // executor dropped the sender
+            },
+        };
+
+        // `ScriptResult` derives Serialize so its field names define the
+        // wire shape. See its doc comment for the JSON layout.
+        let body = serde_json::to_string(&reply).expect("script reply is serializable");
+        write_frame(&mut stream, body.as_bytes()).await?;
     }
-
-    let reply = tokio::select! {
-        _ = cancel.cancelled() => return Ok(()),
-        r = reply_rx => match r {
-            Ok(r) => r,
-            Err(_) => return Ok(()), // executor dropped the sender
-        },
-    };
-
-    // `ScriptResult` derives Serialize so its field names define the wire
-    // shape. See its doc comment for the JSON layout.
-    let body = serde_json::to_string(&reply).expect("script reply is serializable");
-    write_frame(&mut stream, body.as_bytes()).await?;
-    stream.shutdown().await?;
-    Ok(())
 }
 
 async fn read_string_frame(stream: &mut TcpStream) -> std::io::Result<String> {
@@ -289,7 +304,20 @@ mod tests {
         (addr, executor, action_rx)
     }
 
-    async fn send_frame(stream: &mut TcpStream, bytes: &[u8]) {
+    /// Send one script request frame: 16B session-id (nil = new) + u32
+    /// length + source bytes. Use this instead of raw writes so tests
+    /// stay in sync with the wire format.
+    async fn send_request(stream: &mut TcpStream, session_id: Option<Uuid>, source: &[u8]) {
+        let id = session_id.map(|u| u.as_u128()).unwrap_or(0);
+        stream.write_u128(id).await.unwrap();
+        let len = u32::try_from(source.len()).unwrap();
+        stream.write_u32(len).await.unwrap();
+        stream.write_all(source).await.unwrap();
+    }
+
+    /// Legacy frame-writer, kept for the auth-only tests where the
+    /// connection is expected to close before we reach a script frame.
+    async fn send_raw_len_bytes(stream: &mut TcpStream, bytes: &[u8]) {
         let len = u32::try_from(bytes.len()).unwrap();
         stream.write_u32(len).await.unwrap();
         stream.write_all(bytes).await.unwrap();
@@ -313,7 +341,7 @@ mod tests {
 
         let mut s = TcpStream::connect(addr).await.unwrap();
         let local = s.local_addr().unwrap();
-        send_frame(&mut s, b"print(\"hi\")").await;
+        send_request(&mut s, None, b"print(\"hi\")").await;
 
         let reply = parse_reply(&read_reply(&mut s).await);
         assert_eq!(reply.print, "hi\n");
@@ -340,11 +368,12 @@ mod tests {
         let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
 
         let mut s = TcpStream::connect(addr).await.unwrap();
-        send_frame(&mut s, b"40 + 2").await;
+        send_request(&mut s, None, b"40 + 2").await;
         let reply = parse_reply(&read_reply(&mut s).await);
         assert_eq!(reply.print, "");
         assert_eq!(reply.result.as_deref(), Some("42\n"));
         assert_eq!(reply.error, None);
+        assert!(reply.session.is_some());
     }
 
     #[tokio::test]
@@ -353,7 +382,7 @@ mod tests {
         let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
 
         let mut s = TcpStream::connect(addr).await.unwrap();
-        send_frame(&mut s, b"#{ a: 1, b: 2 }").await;
+        send_request(&mut s, None, b"#{ a: 1, b: 2 }").await;
         let reply = parse_reply(&read_reply(&mut s).await);
         let r = reply.result.expect("result present");
         // serde_rhai orders map keys alphabetically via BTreeMap iteration.
@@ -363,13 +392,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_resume_preserves_scope_across_frames() {
+        let t = TcpTransport::bind(loopback_ephemeral(), None).unwrap();
+        let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
+        let mut s = TcpStream::connect(addr).await.unwrap();
+
+        // Frame 1: create session, bind x=42.
+        send_request(&mut s, None, b"let x = 42;").await;
+        let reply1 = parse_reply(&read_reply(&mut s).await);
+        let session = reply1.session.expect("session id returned");
+
+        // Frame 2 on the same connection: resume, read x.
+        send_request(&mut s, Some(session), b"x").await;
+        let reply2 = parse_reply(&read_reply(&mut s).await);
+        assert_eq!(reply2.session, Some(session));
+        assert_eq!(reply2.result.as_deref(), Some("42\n"));
+    }
+
+    #[tokio::test]
+    async fn unknown_session_id_returns_error_and_echoes_id() {
+        let t = TcpTransport::bind(loopback_ephemeral(), None).unwrap();
+        let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
+        let mut s = TcpStream::connect(addr).await.unwrap();
+
+        let ghost = Uuid::new_v4();
+        send_request(&mut s, Some(ghost), b"1").await;
+        let reply = parse_reply(&read_reply(&mut s).await);
+        assert_eq!(reply.session, Some(ghost));
+        assert!(reply.result.is_none());
+        let err = reply.error.expect("error set");
+        assert!(err.contains("unknown session"), "got: {err}");
+    }
+
+    #[tokio::test]
     async fn script_error_populates_error_field() {
         let t = TcpTransport::bind(loopback_ephemeral(), None).unwrap();
         let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
 
         let mut s = TcpStream::connect(addr).await.unwrap();
         // Parse error — Rhai rejects bare `let` without an identifier.
-        send_frame(&mut s, b"let = 1").await;
+        send_request(&mut s, None, b"let = 1").await;
         let reply = parse_reply(&read_reply(&mut s).await);
         assert_eq!(reply.print, "");
         assert!(reply.result.is_none(), "result should be null on error");
@@ -384,9 +446,9 @@ mod tests {
 
         let mut s = TcpStream::connect(addr).await.unwrap();
         s.write_u128(token.as_u128()).await.unwrap();
-        send_frame(&mut s, b"let x = 1;").await;
-        let reply = read_reply(&mut s).await;
-        assert!(!reply.starts_with("ERROR:"), "got: {reply}");
+        send_request(&mut s, None, b"let x = 1;").await;
+        let reply = parse_reply(&read_reply(&mut s).await);
+        assert!(reply.error.is_none(), "got error: {:?}", reply.error);
     }
 
     #[tokio::test]
@@ -398,7 +460,10 @@ mod tests {
 
         let mut s = TcpStream::connect(addr).await.unwrap();
         s.write_u128(wrong.as_u128()).await.unwrap();
-        send_frame(&mut s, b"let x = 1;").await;
+        // After the bad token, the server has already closed its side —
+        // we send a legitimate-shaped request payload anyway to confirm
+        // it doesn't get processed, and then observe the EOF on read.
+        let _ = send_raw_len_bytes(&mut s, b"let x = 1;").await;
 
         // Server closes without replying. The exact ErrorKind varies
         // (UnexpectedEof vs ConnectionReset depending on timing/OS), so

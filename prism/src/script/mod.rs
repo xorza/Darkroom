@@ -26,14 +26,18 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
-use rhai::{Dynamic, Engine, Scope};
+use rhai::{Dynamic, Engine};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::{JoinHandle, yield_now};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+mod session;
 pub mod tcp;
+
+pub use session::{SessionError, SessionRef, SessionStore};
 
 /// Runtime configuration for the scripting surface. Built from CLI flags in
 /// `main.rs`. `tcp.is_none()` means the TCP listener is off (no transport
@@ -133,6 +137,8 @@ const MAX_FN_EXPR_DEPTH: usize = 32;
 /// Work item sent from a transport to the executor. `origin` labels
 /// where the request came from (e.g. a TCP peer `"127.0.0.1:54321"`)
 /// so Session can attribute script output back to its sender.
+/// `session_id = None` asks the executor to create a fresh session;
+/// `Some(id)` resumes an existing one (errors if unknown).
 /// `reply` is a single-shot channel; the executor runs `source`, then
 /// sends one [`ScriptResult`]. If the client has gone away the
 /// receiver is dropped and `reply.send` returns `Err` — scripts still
@@ -140,6 +146,7 @@ const MAX_FN_EXPR_DEPTH: usize = 32;
 #[derive(Debug)]
 pub struct ScriptRequest {
     pub origin: String,
+    pub session_id: Option<Uuid>,
     pub source: String,
     pub reply: oneshot::Sender<ScriptResult>,
 }
@@ -150,6 +157,10 @@ pub struct ScriptRequest {
 /// (and any future in-process consumer) to parse the reply symmetrically.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScriptResult {
+    /// Session the script ran in. Echoed on success (whether resumed or
+    /// freshly created). `None` only when the request failed before a
+    /// session was resolvable (unknown id, store full).
+    pub session: Option<Uuid>,
     /// Everything the script sent through Rhai's `print` during its run,
     /// with a `\n` after each call. Empty when no prints occurred.
     pub print: String,
@@ -277,14 +288,14 @@ async fn run_executor(
 ) {
     let state: Arc<Mutex<RequestState>> = Arc::new(Mutex::new(RequestState::default()));
     let engine = build_engine(state.clone(), action_tx);
-    let mut scope = Scope::new();
+    let mut sessions = SessionStore::default();
 
     loop {
         tokio::select! {
             _ = cancel.cancelled() => break,
             r = rx.recv() => {
                 let Some(req) = r else { break };
-                let reply = run_script(&engine, &mut scope, &state, &req);
+                let reply = run_script(&engine, &mut sessions, &state, &req);
                 let _ = req.reply.send(reply);
             }
         }
@@ -336,15 +347,42 @@ fn build_engine(
     engine
 }
 
-/// Run a single request end-to-end: publish the origin into shared
-/// state so the `on_print` hook can tag it, evaluate the script, drain
-/// the accumulated stdout, and return the fully-populated reply.
+/// Run a single request end-to-end: resolve its session, publish the
+/// origin into shared state so the `on_print` hook can tag it, evaluate
+/// the script, drain the accumulated stdout, and return the reply.
 fn run_script(
     engine: &Engine,
-    scope: &mut Scope,
+    sessions: &mut SessionStore,
     state: &Arc<Mutex<RequestState>>,
     req: &ScriptRequest,
 ) -> ScriptResult {
+    // Opportunistic sweep: every incoming request is a chance to drop
+    // sessions that have been idle past the timeout.
+    let now = Instant::now();
+    sessions.reap(now);
+
+    let session_ref = match sessions.get_or_create(req.session_id, &req.origin, now) {
+        Ok(r) => r,
+        Err(e) => {
+            // Echo the requested id on Unknown so clients can detect
+            // "my session was reaped" and request a fresh one.
+            let echoed = match &e {
+                SessionError::Unknown(id) => Some(*id),
+                SessionError::Full { .. } => None,
+            };
+            return ScriptResult {
+                session: echoed,
+                print: String::new(),
+                result: None,
+                error: Some(e.to_string()),
+            };
+        }
+    };
+    let SessionRef {
+        id: session_id,
+        scope,
+    } = session_ref;
+
     state.lock().unwrap().origin = req.origin.clone();
 
     let (result, error) = match engine.eval_with_scope::<Dynamic>(scope, &req.source) {
@@ -363,6 +401,7 @@ fn run_script(
     let print = std::mem::take(&mut state.lock().unwrap().stdout);
 
     ScriptResult {
+        session: Some(session_id),
         print,
         result,
         error,
