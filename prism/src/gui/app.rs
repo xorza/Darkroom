@@ -1,5 +1,6 @@
 use eframe::egui;
 
+use crate::app_config::AppConfig;
 use crate::gui::Gui;
 use crate::gui::main_window::MainWindow;
 use crate::gui::ui_host::EguiUiHost;
@@ -12,9 +13,9 @@ pub struct GuiApp {
 }
 
 impl GuiApp {
-    pub fn new(ctx: &egui::Context) -> Self {
+    pub fn new(ctx: &egui::Context, app_config: AppConfig) -> Self {
         Self {
-            session: Session::new(EguiUiHost::new(ctx)),
+            session: Session::new(EguiUiHost::new(ctx), app_config.script),
             main_window: MainWindow::new(EguiUiHost::new(ctx)),
         }
     }

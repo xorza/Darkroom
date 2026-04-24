@@ -23,12 +23,71 @@
 //! runtime. The executor loop `await`s the next request (zero CPU
 //! when idle), runs it, then yields back to the scheduler.
 
+use std::path::PathBuf;
+
 use rhai::{Engine, Scope};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::{JoinHandle, yield_now};
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 pub mod tcp;
+
+/// Runtime configuration for the scripting surface. Built from CLI flags in
+/// `main.rs`. `tcp.is_none()` means the TCP listener is off (no transport
+/// registered at all).
+#[derive(Debug, Clone, Default)]
+pub struct ScriptConfig {
+    pub tcp: Option<TcpScriptConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TcpScriptConfig {
+    /// Bind port. `0` lets the OS pick a free port.
+    pub port: u16,
+    /// Required token clients must present. `None` means `--script-no-auth`
+    /// was passed; the listener accepts any loopback client without a
+    /// handshake. On the wire the token is 16 raw bytes (the UUID's u128
+    /// big-endian repr). Treat as a secret.
+    pub token: Option<Uuid>,
+    /// Optional JSON discovery file (`{"port": N, "token": "..."}`) written
+    /// atomically at startup.
+    pub token_file: Option<PathBuf>,
+}
+
+/// Materialize every transport described by `ScriptConfig`. Each enabled
+/// transport binds eagerly so the caller learns OS-assigned ports before
+/// any accept loop starts, and can print discovery info synchronously.
+/// A per-transport bind failure is logged and treated as "transport
+/// disabled"; the app still starts.
+pub fn build_transports(cfg: &ScriptConfig) -> Vec<Box<dyn ScriptTransport>> {
+    let mut out: Vec<Box<dyn ScriptTransport>> = Vec::new();
+    if let Some(tcp_cfg) = &cfg.tcp {
+        match tcp::start(tcp_cfg) {
+            Ok((transport, report)) => {
+                announce_tcp(&report);
+                out.push(Box::new(transport));
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "tcp script transport disabled (bind failed)");
+            }
+        }
+    }
+    out
+}
+
+fn announce_tcp(report: &tcp::TcpStartReport) {
+    println!("script-tcp: listening on {}", report.addr);
+    match report.token {
+        Some(token) => println!("script-tcp: token {token}"),
+        None => println!("script-tcp: auth disabled"),
+    }
+    if let Some(err) = &report.token_file_error {
+        tracing::warn!(error = %err, "failed to write script token file");
+    } else if let Some(path) = &report.token_file_written {
+        tracing::info!(path = %path.display(), "wrote script token file");
+    }
+}
 
 /// Capacity of the transport → executor queue. Small on purpose so
 /// flooding clients feel backpressure on their own sending tasks
@@ -242,5 +301,19 @@ fn run_script(engine: &Engine, scope: &mut Scope, source: &str) -> ScriptResult 
             stdout: String::new(),
             error: Some(err.to_string()),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_transports_empty_when_no_tcp_config() {
+        // Guards against accidentally re-enabling an always-on listener.
+        let cfg = ScriptConfig::default();
+        assert!(cfg.tcp.is_none());
+        let transports = build_transports(&cfg);
+        assert!(transports.is_empty());
     }
 }

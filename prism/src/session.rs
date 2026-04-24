@@ -19,15 +19,10 @@ use crate::config::Config;
 use crate::gui::frame_output::{FrameOutput, RunCommand};
 use crate::gui::graph_ctx::GraphContext;
 use crate::model::{ActionStack, ArgumentValuesCache, ViewGraph, graph_ui_action::GraphUiAction};
-use crate::script::{ScriptAction, ScriptExecutor, ScriptTransport, tcp::TcpTransport};
+use crate::script::{self, ScriptAction, ScriptConfig, ScriptExecutor};
 use crate::ui_host::UiHost;
 
 const UNDO_MAX_STEPS: usize = 256;
-
-/// TCP port the scripting transport listens on. Fixed for now so the
-/// CLI client has a known target; swap for `0` + a discovery file
-/// once more than one prism instance needs to coexist.
-const SCRIPT_TCP_PORT: u16 = 32853;
 
 /// Status buffer size cap (UI-visible log).
 const STATUS_CAP: usize = 2000;
@@ -69,7 +64,7 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new<H: UiHost + 'static>(ui_host: H) -> Self {
+    pub fn new<H: UiHost + 'static>(ui_host: H, script_config: ScriptConfig) -> Self {
         let ui_host: Arc<dyn UiHost> = Arc::new(ui_host);
         let (worker_tx, worker_rx) = unbounded_channel::<WorkerEvent>();
 
@@ -90,12 +85,8 @@ impl Session {
         let func_lib = Arc::new(func_lib);
 
         let (script_action_tx, script_action_rx) = unbounded_channel::<ScriptAction>();
-        let script_executor = ScriptExecutor::new(
-            [Box::new(TcpTransport {
-                port: SCRIPT_TCP_PORT,
-            }) as Box<dyn ScriptTransport>],
-            script_action_tx,
-        );
+        let transports = script::build_transports(&script_config);
+        let script_executor = ScriptExecutor::new(transports, script_action_tx);
 
         let mut result = Self {
             func_lib,

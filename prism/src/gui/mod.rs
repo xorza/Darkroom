@@ -37,7 +37,7 @@ pub mod widgets;
 /// Entry point for the egui frontend. Spins up eframe with the prism
 /// window icon and bundled font, then hands control to [`PrismApp`]
 /// in its GUI variant.
-pub fn run() -> Result<()> {
+pub fn run(app_config: crate::app_config::AppConfig) -> Result<()> {
     let options = NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
@@ -50,9 +50,9 @@ pub fn run() -> Result<()> {
     eframe::run_native(
         "Prism",
         options,
-        Box::new(|cc| {
+        Box::new(move |cc| {
             configure_fonts(&cc.egui_ctx);
-            Ok(Box::new(GuiApp::new(&cc.egui_ctx)))
+            Ok(Box::new(GuiApp::new(&cc.egui_ctx, app_config)))
         }),
     )?;
 

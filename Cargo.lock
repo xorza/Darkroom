@@ -3599,6 +3599,7 @@ dependencies = [
  "rhai",
  "scenarium",
  "serde",
+ "serde_json",
  "tokio",
  "tokio-util",
  "toml",
@@ -3606,6 +3607,7 @@ dependencies = [
  "tracing-appender",
  "tracing-rolling-file",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
