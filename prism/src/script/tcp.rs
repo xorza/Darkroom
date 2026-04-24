@@ -26,10 +26,13 @@
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{Semaphore, mpsc, oneshot};
+use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -39,6 +42,46 @@ use super::{ScriptRequest, ScriptTransport, TcpScriptConfig, TransportHandle};
 /// the server. 1 MiB is plenty for user scripts.
 const MAX_FRAME_BYTES: u32 = 1 << 20;
 
+/// Upper bound on concurrent TCP client connections. Extras are refused
+/// at accept time (socket closed immediately, no auth exchange). Picked
+/// low because each connection is a long-lived channel that can resume
+/// a session; bursty short connections shouldn't need more.
+const MAX_CONNECTIONS: usize = 4;
+
+/// Read/write deadlines that guard against misbehaving or hung clients.
+/// Every read point and the reply write get wrapped in a `timeout`; an
+/// elapsed timer surfaces as `io::ErrorKind::TimedOut`. Production
+/// callers pass [`TcpTimeouts::default`] to [`TcpTransport::bind`];
+/// tests may pass short values to drive timeout paths in real time.
+#[derive(Debug, Clone, Copy)]
+pub struct TcpTimeouts {
+    /// Window for the initial auth token frame (16 bytes). Keep short —
+    /// a legitimate client has the token ready on connect.
+    pub auth: Duration,
+    /// Window between the end of one reply and the start (first byte)
+    /// of the next request frame. Matches `SESSION_IDLE_TIMEOUT` range
+    /// because a client who hasn't sent anything for this long is
+    /// probably better off reconnecting on a new socket.
+    pub idle: Duration,
+    /// Window for the remaining bytes of an in-flight request once its
+    /// first byte has been received. Short — the client has committed.
+    pub frame: Duration,
+    /// Window for writing the JSON reply. Caps the damage a slow/dead
+    /// reader can do by filling the kernel TX buffer.
+    pub write: Duration,
+}
+
+impl Default for TcpTimeouts {
+    fn default() -> Self {
+        Self {
+            auth: Duration::from_secs(10),
+            idle: Duration::from_secs(600),
+            frame: Duration::from_secs(30),
+            write: Duration::from_secs(30),
+        }
+    }
+}
+
 /// TCP script transport. Constructed via [`TcpTransport::bind`] so the
 /// caller can inspect [`local_addr`] (useful when `port = 0`) before the
 /// accept loop starts.
@@ -46,16 +89,27 @@ const MAX_FRAME_BYTES: u32 = 1 << 20;
 pub struct TcpTransport {
     listener: std::net::TcpListener,
     token: Option<Uuid>,
+    timeouts: TcpTimeouts,
 }
 
 impl TcpTransport {
-    /// Bind the listener to `addr`. Port `0` asks the OS for a free port —
-    /// read it back with [`local_addr`].
-    pub fn bind(addr: SocketAddr, token: Option<Uuid>) -> std::io::Result<Self> {
+    /// Bind the listener to `addr`. Port `0` asks the OS for a free
+    /// port — read it back with [`Self::local_addr`]. Production
+    /// callers pass `TcpTimeouts::default()`; tests may pass short
+    /// values to exercise timeout paths in real time.
+    pub fn bind(
+        addr: SocketAddr,
+        token: Option<Uuid>,
+        timeouts: TcpTimeouts,
+    ) -> std::io::Result<Self> {
         let listener = std::net::TcpListener::bind(addr)?;
         // Required to convert into a `tokio::net::TcpListener` inside the task.
         listener.set_nonblocking(true)?;
-        Ok(Self { listener, token })
+        Ok(Self {
+            listener,
+            token,
+            timeouts,
+        })
     }
 
     pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
@@ -80,7 +134,7 @@ pub struct TcpStartReport {
 /// writes the discovery file. Returns the transport together with a
 /// pure report — no stdout I/O happens inside, so this is unit-testable.
 pub fn start(cfg: &TcpScriptConfig) -> std::io::Result<(TcpTransport, TcpStartReport)> {
-    let transport = TcpTransport::bind(cfg.bind, cfg.token)?;
+    let transport = TcpTransport::bind(cfg.bind, cfg.token, TcpTimeouts::default())?;
     let addr = transport.local_addr()?;
 
     if !addr.ip().is_loopback() {
@@ -143,10 +197,14 @@ impl ScriptTransport for TcpTransport {
         tx: mpsc::Sender<ScriptRequest>,
         cancel: CancellationToken,
     ) -> TransportHandle {
-        let Self { listener, token } = *self;
+        let Self {
+            listener,
+            token,
+            timeouts,
+        } = *self;
         let cancel_task = cancel.clone();
         let task = tokio::spawn(async move {
-            if let Err(e) = run_listener(listener, token, tx, cancel_task).await {
+            if let Err(e) = run_listener(listener, token, timeouts, tx, cancel_task).await {
                 tracing::error!(error = %e, "tcp script transport listener exited");
             }
         });
@@ -158,12 +216,18 @@ impl ScriptTransport for TcpTransport {
 async fn run_listener(
     listener: std::net::TcpListener,
     token: Option<Uuid>,
+    timeouts: TcpTimeouts,
     tx: mpsc::Sender<ScriptRequest>,
     cancel: CancellationToken,
 ) -> std::io::Result<()> {
     let listener = TcpListener::from_std(listener)?;
     let bound = listener.local_addr()?;
     tracing::info!(addr = %bound, auth = token.is_some(), "tcp script transport listening");
+
+    // One permit per concurrent connection. Cap keeps FD/memory use
+    // bounded if a client spams connects; extras are closed at accept
+    // time without going through auth or the executor.
+    let conn_limit = Arc::new(Semaphore::new(MAX_CONNECTIONS));
 
     loop {
         tokio::select! {
@@ -179,10 +243,29 @@ async fn run_listener(
                     }
                 };
 
+                // Try to take a connection slot without blocking the accept
+                // loop. If we can't, close the new socket immediately —
+                // client sees EOF on its first read.
+                let permit = match Arc::clone(&conn_limit).try_acquire_owned() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        tracing::warn!(
+                            peer = %peer,
+                            max = MAX_CONNECTIONS,
+                            "tcp script: connection limit reached, dropping new connection"
+                        );
+                        drop(stream);
+                        continue;
+                    }
+                };
+
                 let tx = tx.clone();
                 let cancel = cancel.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_conn(stream, peer, token, tx, cancel).await {
+                    // Permit held for the lifetime of the task; released
+                    // when `handle_conn` returns and `_permit` drops.
+                    let _permit = permit;
+                    if let Err(e) = handle_conn(stream, peer, token, timeouts, tx, cancel).await {
                         tracing::debug!(error = %e, peer = %peer, "tcp script conn closed with error");
                     }
                 });
@@ -196,12 +279,18 @@ async fn handle_conn(
     mut stream: TcpStream,
     peer: SocketAddr,
     expected_token: Option<Uuid>,
+    timeouts: TcpTimeouts,
     tx: mpsc::Sender<ScriptRequest>,
     cancel: CancellationToken,
 ) -> std::io::Result<()> {
-    // Auth once per connection.
+    // Auth once per connection with a tight read deadline — a legitimate
+    // client has the token in hand on connect.
     if let Some(expected) = expected_token {
-        let got = stream.read_u128().await?;
+        let got = timeout(timeouts.auth, stream.read_u128())
+            .await
+            .map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::TimedOut, "auth read timed out")
+            })??;
         if got ^ expected.as_u128() != 0 {
             tracing::warn!(peer = %peer, "tcp script: token rejected, closing connection");
             // Drop sends FIN; no pending writes to flush on the reject path.
@@ -213,19 +302,26 @@ async fn handle_conn(
     // Persistent connection: read [16B session-id][u32 src-len][src] per
     // request, dispatch, reply, loop. Exits cleanly on client close (EOF).
     loop {
-        let session_id = match stream.read_u128().await {
-            Ok(id) => {
-                if id == 0 {
-                    None
-                } else {
-                    Some(Uuid::from_u128(id))
-                }
+        // Session-id is the first byte of a new request frame. Long
+        // timeout — the client may legitimately idle between frames.
+        let session_id = match timeout(timeouts.idle, stream.read_u128()).await {
+            Err(_) => {
+                tracing::debug!(peer = %peer, "tcp script: idle between-frame timeout");
+                return Ok(());
             }
-            // UnexpectedEof = client closed its side between frames.
-            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(()),
-            Err(e) => return Err(e),
+            Ok(Err(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(()),
+            Ok(Err(e)) => return Err(e),
+            Ok(Ok(0)) => None,
+            Ok(Ok(id)) => Some(Uuid::from_u128(id)),
         };
-        let source = read_string_frame(&mut stream).await?;
+
+        // Once the first byte has landed, the rest of the frame should
+        // arrive promptly. Short timeout.
+        let source = timeout(timeouts.frame, read_string_frame(&mut stream))
+            .await
+            .map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::TimedOut, "frame body read timed out")
+            })??;
 
         let (reply_tx, reply_rx) = oneshot::channel();
         // Bounded send — backpressure propagates to the TCP client.
@@ -242,6 +338,9 @@ async fn handle_conn(
             return Ok(()); // executor dropped; app shutting down
         }
 
+        // No timeout on the executor reply: Rhai's MAX_OPERATIONS /
+        // MAX_EXPR_DEPTH caps bound worst-case script runtime, and a
+        // dropped sender returns Err immediately.
         let reply = tokio::select! {
             _ = cancel.cancelled() => return Ok(()),
             r = reply_rx => match r {
@@ -253,7 +352,11 @@ async fn handle_conn(
         // `ScriptResult` derives Serialize so its field names define the
         // wire shape. See its doc comment for the JSON layout.
         let body = serde_json::to_string(&reply).expect("script reply is serializable");
-        write_frame(&mut stream, body.as_bytes()).await?;
+        timeout(timeouts.write, write_frame(&mut stream, body.as_bytes()))
+            .await
+            .map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::TimedOut, "reply write timed out")
+            })??;
     }
 }
 
@@ -336,7 +439,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_auth_accepts_script_and_dual_sinks_print() {
-        let t = TcpTransport::bind(loopback_ephemeral(), None).unwrap();
+        let t = TcpTransport::bind(loopback_ephemeral(), None, TcpTimeouts::default()).unwrap();
         let (addr, _executor, mut action_rx) = spawn_executor_with_transport(t).await;
 
         let mut s = TcpStream::connect(addr).await.unwrap();
@@ -364,7 +467,7 @@ mod tests {
 
     #[tokio::test]
     async fn script_result_is_last_expression() {
-        let t = TcpTransport::bind(loopback_ephemeral(), None).unwrap();
+        let t = TcpTransport::bind(loopback_ephemeral(), None, TcpTimeouts::default()).unwrap();
         let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
 
         let mut s = TcpStream::connect(addr).await.unwrap();
@@ -378,7 +481,7 @@ mod tests {
 
     #[tokio::test]
     async fn script_result_object_map() {
-        let t = TcpTransport::bind(loopback_ephemeral(), None).unwrap();
+        let t = TcpTransport::bind(loopback_ephemeral(), None, TcpTimeouts::default()).unwrap();
         let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
 
         let mut s = TcpStream::connect(addr).await.unwrap();
@@ -393,7 +496,7 @@ mod tests {
 
     #[tokio::test]
     async fn session_resume_preserves_scope_across_frames() {
-        let t = TcpTransport::bind(loopback_ephemeral(), None).unwrap();
+        let t = TcpTransport::bind(loopback_ephemeral(), None, TcpTimeouts::default()).unwrap();
         let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
         let mut s = TcpStream::connect(addr).await.unwrap();
 
@@ -411,7 +514,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_session_id_returns_error_and_echoes_id() {
-        let t = TcpTransport::bind(loopback_ephemeral(), None).unwrap();
+        let t = TcpTransport::bind(loopback_ephemeral(), None, TcpTimeouts::default()).unwrap();
         let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
         let mut s = TcpStream::connect(addr).await.unwrap();
 
@@ -426,7 +529,7 @@ mod tests {
 
     #[tokio::test]
     async fn script_error_populates_error_field() {
-        let t = TcpTransport::bind(loopback_ephemeral(), None).unwrap();
+        let t = TcpTransport::bind(loopback_ephemeral(), None, TcpTimeouts::default()).unwrap();
         let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
 
         let mut s = TcpStream::connect(addr).await.unwrap();
@@ -441,7 +544,8 @@ mod tests {
     #[tokio::test]
     async fn auth_accepts_correct_token() {
         let token = Uuid::new_v4();
-        let t = TcpTransport::bind(loopback_ephemeral(), Some(token)).unwrap();
+        let t =
+            TcpTransport::bind(loopback_ephemeral(), Some(token), TcpTimeouts::default()).unwrap();
         let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
 
         let mut s = TcpStream::connect(addr).await.unwrap();
@@ -455,7 +559,8 @@ mod tests {
     async fn auth_rejects_wrong_token() {
         let correct = Uuid::new_v4();
         let wrong = Uuid::new_v4();
-        let t = TcpTransport::bind(loopback_ephemeral(), Some(correct)).unwrap();
+        let t = TcpTransport::bind(loopback_ephemeral(), Some(correct), TcpTimeouts::default())
+            .unwrap();
         let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
 
         let mut s = TcpStream::connect(addr).await.unwrap();
@@ -537,5 +642,122 @@ mod tests {
         assert!(!tmp.exists(), "tmp file should have been renamed");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ----- Timeout tests -----
+    //
+    // Use short real-time values so the tests themselves finish in
+    // hundreds of milliseconds without mocking the clock.
+
+    fn short_timeouts() -> TcpTimeouts {
+        TcpTimeouts {
+            auth: Duration::from_millis(150),
+            idle: Duration::from_millis(150),
+            frame: Duration::from_millis(150),
+            write: Duration::from_millis(150),
+        }
+    }
+
+    /// Quiet client that never sends a frame is closed by the idle-between-
+    /// frames timeout.
+    #[tokio::test]
+    async fn idle_connection_closes_after_timeout() {
+        let t = TcpTransport::bind(loopback_ephemeral(), None, short_timeouts()).unwrap();
+        let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
+
+        let mut s = TcpStream::connect(addr).await.unwrap();
+        // Send nothing. Within ~150ms the server should give up and close.
+        let start = std::time::Instant::now();
+        let mut buf = [0u8; 4];
+        let n = s.read(&mut buf).await.unwrap_or(0);
+        assert_eq!(n, 0, "expected EOF, got {n} bytes");
+        assert!(
+            start.elapsed() >= Duration::from_millis(100),
+            "closed too fast: {:?}",
+            start.elapsed()
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "closed too slow: {:?}",
+            start.elapsed()
+        );
+    }
+
+    /// With auth on, a client that connects but never sends the token is
+    /// closed by the auth-read timeout.
+    #[tokio::test]
+    async fn auth_timeout_closes_silent_client() {
+        let token = Uuid::new_v4();
+        let t = TcpTransport::bind(loopback_ephemeral(), Some(token), short_timeouts()).unwrap();
+        let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
+
+        let mut s = TcpStream::connect(addr).await.unwrap();
+        // No token sent. Server must close without replying.
+        let mut buf = [0u8; 4];
+        let n = s.read(&mut buf).await.unwrap_or(0);
+        assert_eq!(n, 0);
+    }
+
+    /// A client that sends just the session-id prefix and then stalls is
+    /// closed by the mid-frame timeout (shorter than the idle window).
+    #[tokio::test]
+    async fn partial_frame_closes_after_frame_timeout() {
+        let t = TcpTransport::bind(loopback_ephemeral(), None, short_timeouts()).unwrap();
+        let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
+
+        let mut s = TcpStream::connect(addr).await.unwrap();
+        // Send 16B nil session id, then stall (no length-prefix, no src).
+        s.write_u128(0).await.unwrap();
+        let mut buf = [0u8; 4];
+        let n = s.read(&mut buf).await.unwrap_or(0);
+        assert_eq!(n, 0);
+    }
+
+    /// Beyond MAX_CONNECTIONS concurrent clients, extras are closed at
+    /// accept time without going through auth or the executor.
+    #[tokio::test]
+    async fn excess_connections_are_refused() {
+        // Default timeouts so the holders don't get reaped mid-test.
+        let t = TcpTransport::bind(loopback_ephemeral(), None, TcpTimeouts::default()).unwrap();
+        let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
+
+        // Hold MAX_CONNECTIONS sockets open. For each, send+receive a
+        // no-op script: the reply proves the server has already
+        // accepted, authed, and taken the permit. No wall-clock sleep.
+        let mut holders = Vec::new();
+        for _ in 0..MAX_CONNECTIONS {
+            let mut s = TcpStream::connect(addr).await.unwrap();
+            send_request(&mut s, None, b"1").await;
+            let reply = parse_reply(&read_reply(&mut s).await);
+            assert_eq!(reply.error, None);
+            holders.push(s);
+        }
+
+        // Over-the-limit connect: accept() succeeds (OS-level 3-way
+        // handshake), but the server drops the stream immediately, so
+        // our read sees EOF.
+        let mut extra = TcpStream::connect(addr).await.unwrap();
+        let mut buf = [0u8; 4];
+        let n = extra.read(&mut buf).await.unwrap_or(0);
+        assert_eq!(n, 0, "over-limit connection should be closed immediately");
+
+        // Drop one holder → its permit frees. We need the server's spawned
+        // task to observe the close and release the permit, so probe with
+        // a retry loop instead of a fixed sleep.
+        drop(holders.pop());
+        let mut admitted = None;
+        for _ in 0..50 {
+            let mut s = TcpStream::connect(addr).await.unwrap();
+            send_request(&mut s, None, b"1").await;
+            let mut hdr = [0u8; 4];
+            if s.peek(&mut hdr).await.unwrap_or(0) == 4 {
+                admitted = Some(s);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let mut admitted = admitted.expect("permit should free after holder closes");
+        let reply = parse_reply(&read_reply(&mut admitted).await);
+        assert_eq!(reply.error, None);
     }
 }

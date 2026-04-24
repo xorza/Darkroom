@@ -25,7 +25,7 @@ pub const SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 /// Hard cap on live sessions. On overflow the store reaps expired
 /// entries first; if full after reaping, new session creation errors
 /// out (clients retry later).
-pub const MAX_SESSIONS: usize = 4;
+pub const MAX_SESSIONS: usize = 32;
 
 /// Reasons [`SessionStore::get_or_create`] can fail.
 #[derive(Debug, Clone, PartialEq, Eq)]
