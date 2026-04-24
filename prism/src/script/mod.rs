@@ -23,6 +23,7 @@
 //! runtime. The executor loop `await`s the next request (zero CPU
 //! when idle), runs it, then yields back to the scheduler.
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use rhai::{Engine, Scope};
@@ -43,12 +44,14 @@ pub struct ScriptConfig {
 
 #[derive(Debug, Clone)]
 pub struct TcpScriptConfig {
-    /// Bind port. `0` lets the OS pick a free port.
-    pub port: u16,
+    /// Socket address to bind. Port `0` lets the OS pick a free port;
+    /// a non-loopback IP widens exposure beyond the local machine and
+    /// will emit a warning at startup.
+    pub bind: SocketAddr,
     /// Required token clients must present. `None` means `--script-no-auth`
-    /// was passed; the listener accepts any loopback client without a
-    /// handshake. On the wire the token is 16 raw bytes (the UUID's u128
-    /// big-endian repr). Treat as a secret.
+    /// was passed; the listener accepts any client without a handshake.
+    /// On the wire the token is 16 raw bytes (the UUID's u128 big-endian
+    /// repr). Treat as a secret.
     pub token: Option<Uuid>,
     /// Optional JSON discovery file (`{"port": N, "token": "..."}`) written
     /// atomically at startup.

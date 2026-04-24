@@ -35,10 +35,10 @@ pub struct TcpTransport {
 }
 
 impl TcpTransport {
-    /// Bind a loopback listener. `port = 0` asks the OS for a free port —
+    /// Bind the listener to `addr`. Port `0` asks the OS for a free port —
     /// read it back with [`local_addr`].
-    pub fn bind(port: u16, token: Option<Uuid>) -> std::io::Result<Self> {
-        let listener = std::net::TcpListener::bind(("127.0.0.1", port))?;
+    pub fn bind(addr: SocketAddr, token: Option<Uuid>) -> std::io::Result<Self> {
+        let listener = std::net::TcpListener::bind(addr)?;
         // Required to convert into a `tokio::net::TcpListener` inside the task.
         listener.set_nonblocking(true)?;
         Ok(Self { listener, token })
@@ -68,8 +68,15 @@ pub struct TcpStartReport {
 /// writes the discovery file. Returns the transport together with a
 /// pure report — no stdout I/O happens inside, so this is unit-testable.
 pub fn start(cfg: &TcpScriptConfig) -> std::io::Result<(TcpTransport, TcpStartReport)> {
-    let transport = TcpTransport::bind(cfg.port, cfg.token)?;
+    let transport = TcpTransport::bind(cfg.bind, cfg.token)?;
     let addr = transport.local_addr()?;
+
+    if !addr.ip().is_loopback() {
+        tracing::warn!(
+            addr = %addr,
+            "tcp script: non-loopback bind — listener reachable beyond this machine"
+        );
+    }
 
     let (token_file_written, token_file_error) = match &cfg.token_file {
         Some(path) => match write_token_file(path, addr.port(), cfg.token) {
@@ -255,6 +262,12 @@ async fn write_frame(stream: &mut TcpStream, bytes: &[u8]) -> std::io::Result<()
 mod tests {
     use super::*;
     use crate::script::{ScriptAction, ScriptExecutor};
+    use std::net::Ipv4Addr;
+
+    /// Port 0 on the loopback interface — the OS picks a free port.
+    fn loopback_ephemeral() -> SocketAddr {
+        SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0)
+    }
 
     async fn spawn_executor_with_transport(
         transport: TcpTransport,
@@ -285,7 +298,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_auth_accepts_script_and_routes_print_action() {
-        let t = TcpTransport::bind(0, None).unwrap();
+        let t = TcpTransport::bind(loopback_ephemeral(), None).unwrap();
         let (addr, _executor, mut action_rx) = spawn_executor_with_transport(t).await;
 
         let mut s = TcpStream::connect(addr).await.unwrap();
@@ -307,7 +320,7 @@ mod tests {
     #[tokio::test]
     async fn auth_accepts_correct_token() {
         let token = Uuid::new_v4();
-        let t = TcpTransport::bind(0, Some(token)).unwrap();
+        let t = TcpTransport::bind(loopback_ephemeral(), Some(token)).unwrap();
         let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
 
         let mut s = TcpStream::connect(addr).await.unwrap();
@@ -321,7 +334,7 @@ mod tests {
     async fn auth_rejects_wrong_token() {
         let correct = Uuid::new_v4();
         let wrong = Uuid::new_v4();
-        let t = TcpTransport::bind(0, Some(correct)).unwrap();
+        let t = TcpTransport::bind(loopback_ephemeral(), Some(correct)).unwrap();
         let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
 
         let mut s = TcpStream::connect(addr).await.unwrap();
@@ -356,7 +369,7 @@ mod tests {
     async fn start_reports_bound_addr_and_token() {
         let token = Uuid::new_v4();
         let cfg = TcpScriptConfig {
-            port: 0,
+            bind: loopback_ephemeral(),
             token: Some(token),
             token_file: None,
         };
@@ -381,7 +394,7 @@ mod tests {
 
         let token = Uuid::from_u128(42);
         let cfg = TcpScriptConfig {
-            port: 0,
+            bind: loopback_ephemeral(),
             token: Some(token),
             token_file: Some(path.clone()),
         };
