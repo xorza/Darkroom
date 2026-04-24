@@ -48,7 +48,6 @@ pub struct Session {
     argument_values_cache: ArgumentValuesCache,
     status: String,
     config: Config,
-    autorun: bool,
 
     graph_dirty: bool,
     action_stack: ActionStack,
@@ -95,7 +94,6 @@ impl Session {
             argument_values_cache: ArgumentValuesCache::default(),
             status: String::new(),
             config: Config::load_or_default(),
-            autorun: false,
             graph_dirty: true,
             action_stack: ActionStack::new(UNDO_MAX_STEPS),
             worker: Some(worker),
@@ -117,8 +115,13 @@ impl Session {
         &self.status
     }
 
+    /// Derived from the worker's event-loop state, which is the
+    /// canonical owner. No cached field — avoids start/stop races
+    /// between `handle_output` toggling and the worker actually acking.
     pub fn autorun(&self) -> bool {
-        self.autorun
+        self.worker
+            .as_ref()
+            .is_some_and(Worker::is_event_loop_started)
     }
 
     pub fn current_path(&self) -> Option<&Path> {
@@ -136,7 +139,7 @@ impl Session {
             view_graph: &self.view_graph,
             execution_stats,
             exec_info_index: crate::model::NodeExecutionIndex::new(execution_stats),
-            autorun: self.autorun,
+            autorun: self.autorun(),
             argument_values_cache: &mut self.argument_values_cache,
         }
     }
@@ -209,11 +212,6 @@ impl Session {
     }
 
     pub fn update_shared_status(&mut self) {
-        self.autorun = self
-            .worker
-            .as_ref()
-            .is_some_and(Worker::is_event_loop_started);
-
         while let Ok(event) = self.worker_rx.try_recv() {
             match event {
                 WorkerEvent::Print(line) => self.add_status(line),
@@ -286,21 +284,17 @@ impl Session {
 
         self.graph_dirty |= self.commit_actions(output);
 
-        let mut update_if_dirty = self.autorun;
+        let mut update_if_dirty = self.autorun();
         let mut msgs: Vec<WorkerMessage> = Vec::new();
 
         if let Some(run_cmd) = output.run_cmd() {
             match run_cmd {
                 RunCommand::StartAutorun => {
-                    assert!(!self.autorun);
                     msgs.push(WorkerMessage::StartEventLoop);
                     update_if_dirty = true;
-                    self.autorun = true;
                 }
                 RunCommand::StopAutorun => {
-                    assert!(self.autorun);
                     msgs.push(WorkerMessage::StopEventLoop);
-                    self.autorun = false;
                 }
                 RunCommand::RunOnce => {
                     msgs.push(WorkerMessage::ExecuteTerminals);
@@ -430,7 +424,6 @@ mod tests {
             argument_values_cache: ArgumentValuesCache::default(),
             status: String::new(),
             config: Config::default(),
-            autorun: false,
             graph_dirty: false,
             action_stack: ActionStack::new(UNDO_MAX_STEPS),
             worker: None,
