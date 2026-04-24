@@ -27,7 +27,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use rhai::{Engine, Scope};
+use rhai::{Dynamic, Engine, Scope};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::{JoinHandle, yield_now};
 use tokio_util::sync::CancellationToken;
@@ -144,11 +144,19 @@ pub struct ScriptRequest {
     pub reply: oneshot::Sender<ScriptResult>,
 }
 
-#[derive(Debug, Clone)]
+/// One-to-one with the JSON body the TCP transport writes back. Derive-
+/// serialized so the wire shape lives here, not split between the struct
+/// def and a hand-built JSON payload. `Deserialize` is for test clients
+/// (and any future in-process consumer) to parse the reply symmetrically.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScriptResult {
     /// Everything the script sent through Rhai's `print` during its run,
     /// with a `\n` after each call. Empty when no prints occurred.
-    pub stdout: String,
+    pub print: String,
+    /// Rhai-source serialization of the script's final expression value.
+    /// Always populated on success (a statement-terminated script yields
+    /// `"()\n"`). `None` only when `error` is `Some`.
+    pub result: Option<String>,
     pub error: Option<String>,
 }
 
@@ -283,9 +291,16 @@ async fn run_executor(
                     s.origin = req.origin.clone();
                     s.stdout.clear();
                 }
-                let error = run_script(&engine, &mut scope, &req.source).err();
-                let stdout = std::mem::take(&mut state.lock().unwrap().stdout);
-                let _ = req.reply.send(ScriptResult { stdout, error });
+                let (result, error) = match run_script(&engine, &mut scope, &req.source) {
+                    Ok(r) => (Some(r), None),
+                    Err(e) => (None, Some(e)),
+                };
+                let print = std::mem::take(&mut state.lock().unwrap().stdout);
+                let _ = req.reply.send(ScriptResult {
+                    print,
+                    result,
+                    error,
+                });
             }
         }
         yield_now().await;
@@ -336,10 +351,12 @@ fn build_engine(
     engine
 }
 
-fn run_script(engine: &Engine, scope: &mut Scope, source: &str) -> Result<(), String> {
-    engine
-        .run_with_scope(scope, source)
-        .map_err(|e| e.to_string())
+fn run_script(engine: &Engine, scope: &mut Scope, source: &str) -> Result<String, String> {
+    let dynamic: Dynamic = engine
+        .eval_with_scope(scope, source)
+        .map_err(|e| e.to_string())?;
+    common::serde_rhai::to_string(&dynamic)
+        .map_err(|e| format!("failed to serialize script result: {e}"))
 }
 
 #[cfg(test)]

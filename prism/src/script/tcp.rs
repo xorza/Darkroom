@@ -1,11 +1,22 @@
 //! TCP transport. Binds `127.0.0.1:<port>`, accepts connections, reads
 //! one script per connection and writes one reply back.
 //!
-//! Without auth, the wire format is `[u32-be len][utf8 source]`.
-//! With auth (token = `Some`), each connection is
-//! `[16 raw bytes: UUID as u128-be][u32-be src_len][src_bytes]` — the
-//! token is compared constant-time; mismatches close the connection
+//! Request framing — without auth:
+//!     `[u32-be len][utf8 source]`
+//! With auth (`token = Some`):
+//!     `[16 bytes: UUID as u128-be][u32-be src_len][src_bytes]`
+//! The token is compared constant-time; mismatches close the connection
 //! without touching the executor.
+//!
+//! Reply framing:
+//!     `[u32-be len][JSON body]`
+//! JSON body shape:
+//!     `{"print": <string>, "result": <string|null>, "error": <string|null>}`
+//! `print` holds the script's captured `print(...)` output (may be empty).
+//! `result` holds the Rhai-source serialization of the final expression
+//! on success; `null` on error. `error` holds the error message on
+//! failure; `null` on success. Exactly one of `result`/`error` is
+//! non-null per successful reply.
 //!
 //! Cancellation is cooperative via [`CancellationToken`]: the accept
 //! loop `select!`s between the next accept and the cancel future.
@@ -223,11 +234,10 @@ async fn handle_conn(
         },
     };
 
-    let payload = match reply.error {
-        None => reply.stdout,
-        Some(err) => format!("ERROR: {err}\n{}", reply.stdout),
-    };
-    write_frame(&mut stream, payload.as_bytes()).await?;
+    // `ScriptResult` derives Serialize so its field names define the wire
+    // shape. See its doc comment for the JSON layout.
+    let body = serde_json::to_string(&reply).expect("script reply is serializable");
+    write_frame(&mut stream, body.as_bytes()).await?;
     stream.shutdown().await?;
     Ok(())
 }
@@ -257,7 +267,7 @@ async fn write_frame(stream: &mut TcpStream, bytes: &[u8]) -> std::io::Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::script::{ScriptAction, ScriptExecutor};
+    use crate::script::{ScriptAction, ScriptExecutor, ScriptResult};
     use std::net::Ipv4Addr;
 
     /// Port 0 on the loopback interface — the OS picks a free port.
@@ -292,6 +302,10 @@ mod tests {
         String::from_utf8(buf).unwrap()
     }
 
+    fn parse_reply(raw: &str) -> ScriptResult {
+        serde_json::from_str(raw).expect("reply is a ScriptResult JSON body")
+    }
+
     #[tokio::test]
     async fn no_auth_accepts_script_and_dual_sinks_print() {
         let t = TcpTransport::bind(loopback_ephemeral(), None).unwrap();
@@ -301,13 +315,13 @@ mod tests {
         let local = s.local_addr().unwrap();
         send_frame(&mut s, b"print(\"hi\")").await;
 
-        // Caller sink: the reply frame carries the script's stdout.
-        let reply = read_reply(&mut s).await;
-        assert_eq!(reply, "hi\n");
+        let reply = parse_reply(&read_reply(&mut s).await);
+        assert_eq!(reply.print, "hi\n");
+        // `print(...)` is a statement, so the final expression is Unit.
+        assert_eq!(reply.result.as_deref(), Some("()\n"));
+        assert_eq!(reply.error, None);
 
-        // Status sink: Session gets a tagged Print action. Origin is the
-        // client's peer addr from the server's point of view — which is
-        // the client's local_addr.
+        // Status sink: Session gets a tagged Print action.
         let action = tokio::time::timeout(std::time::Duration::from_secs(2), action_rx.recv())
             .await
             .expect("timed out waiting for ScriptAction::Print")
@@ -318,6 +332,48 @@ mod tests {
                 assert_eq!(origin, local.to_string());
             }
         }
+    }
+
+    #[tokio::test]
+    async fn script_result_is_last_expression() {
+        let t = TcpTransport::bind(loopback_ephemeral(), None).unwrap();
+        let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
+
+        let mut s = TcpStream::connect(addr).await.unwrap();
+        send_frame(&mut s, b"40 + 2").await;
+        let reply = parse_reply(&read_reply(&mut s).await);
+        assert_eq!(reply.print, "");
+        assert_eq!(reply.result.as_deref(), Some("42\n"));
+        assert_eq!(reply.error, None);
+    }
+
+    #[tokio::test]
+    async fn script_result_object_map() {
+        let t = TcpTransport::bind(loopback_ephemeral(), None).unwrap();
+        let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
+
+        let mut s = TcpStream::connect(addr).await.unwrap();
+        send_frame(&mut s, b"#{ a: 1, b: 2 }").await;
+        let reply = parse_reply(&read_reply(&mut s).await);
+        let r = reply.result.expect("result present");
+        // serde_rhai orders map keys alphabetically via BTreeMap iteration.
+        assert!(r.starts_with("#{\n"), "got: {r}");
+        assert!(r.contains("a: 1,"));
+        assert!(r.contains("b: 2,"));
+    }
+
+    #[tokio::test]
+    async fn script_error_populates_error_field() {
+        let t = TcpTransport::bind(loopback_ephemeral(), None).unwrap();
+        let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
+
+        let mut s = TcpStream::connect(addr).await.unwrap();
+        // Parse error — Rhai rejects bare `let` without an identifier.
+        send_frame(&mut s, b"let = 1").await;
+        let reply = parse_reply(&read_reply(&mut s).await);
+        assert_eq!(reply.print, "");
+        assert!(reply.result.is_none(), "result should be null on error");
+        assert!(reply.error.is_some(), "error should be populated");
     }
 
     #[tokio::test]
