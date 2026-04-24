@@ -59,6 +59,18 @@ pub struct ScriptCliArgs {
     )]
     pub script_token_file: Option<PathBuf>,
 
+    /// Use this UUID as the auth token instead of generating a random
+    /// one. Convenient for shared-launch scripts where both client and
+    /// server already know the token. Still a secret — don't commit it.
+    #[arg(
+        long,
+        value_name = "UUID",
+        global = true,
+        requires = "script_tcp",
+        conflicts_with = "script_no_auth"
+    )]
+    pub script_token: Option<Uuid>,
+
     /// Skip token authentication on the TCP script listener. Loopback
     /// only — any local process can connect. Not recommended.
     #[arg(long, global = true, requires = "script_tcp")]
@@ -71,6 +83,7 @@ impl Default for ScriptCliArgs {
             script_tcp: false,
             script_bind: default_bind(),
             script_token_file: None,
+            script_token: None,
             script_no_auth: false,
         }
     }
@@ -103,9 +116,9 @@ fn parse_bind_spec(s: &str) -> Result<SocketAddr, String> {
         .map_err(|e| format!("invalid bind spec {s:?}: {e}"))
 }
 
-/// Build a [`ScriptConfig`] from parsed CLI flags. `fresh_token` is the
-/// token to embed when auth is enabled; the caller passes a fresh
-/// `Uuid::new_v4()` from `main` (or a fixed Uuid in tests).
+/// Build a [`ScriptConfig`] from parsed CLI flags. `fresh_token` is used
+/// only when auth is on and `--script-token` wasn't supplied; callers in
+/// `main` pass `Uuid::new_v4()`, tests pass a fixed value.
 pub fn build_script_config(args: &ScriptCliArgs, fresh_token: Uuid) -> ScriptConfig {
     if !args.script_tcp {
         return ScriptConfig::default();
@@ -114,7 +127,7 @@ pub fn build_script_config(args: &ScriptCliArgs, fresh_token: Uuid) -> ScriptCon
     let token = if args.script_no_auth {
         None
     } else {
-        Some(fresh_token)
+        Some(args.script_token.unwrap_or(fresh_token))
     };
 
     ScriptConfig {
@@ -152,6 +165,35 @@ mod tests {
         assert_eq!(tcp.bind, default_bind());
         assert_eq!(tcp.token, Some(fixed_token()));
         assert!(tcp.token_file.is_none());
+    }
+
+    #[test]
+    fn script_token_overrides_fresh_token() {
+        let explicit = Uuid::from_u128(0xdead_beef_dead_beef_dead_beef_dead_beef);
+        let args = ScriptCliArgs {
+            script_tcp: true,
+            script_token: Some(explicit),
+            ..Default::default()
+        };
+        let cfg = build_script_config(&args, fixed_token());
+        assert_eq!(cfg.tcp.unwrap().token, Some(explicit));
+    }
+
+    #[test]
+    fn script_no_auth_beats_explicit_token() {
+        // clap's conflicts_with enforces this at parse time, but the
+        // builder's fallback logic should also produce `None`
+        // regardless of script_token when no_auth is set.
+        let args = ScriptCliArgs {
+            script_tcp: true,
+            script_no_auth: true,
+            script_token: Some(Uuid::new_v4()),
+            ..Default::default()
+        };
+        assert_eq!(
+            build_script_config(&args, fixed_token()).tcp.unwrap().token,
+            None
+        );
     }
 
     #[test]
@@ -200,6 +242,7 @@ mod tests {
             script_tcp: false,
             script_bind: "0.0.0.0:999".parse().unwrap(),
             script_no_auth: true,
+            script_token: None,
             script_token_file: Some(PathBuf::from("/x")),
         };
         assert!(build_script_config(&args, fixed_token()).tcp.is_none());
