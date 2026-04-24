@@ -284,23 +284,8 @@ async fn run_executor(
             _ = cancel.cancelled() => break,
             r = rx.recv() => {
                 let Some(req) = r else { break };
-                // Set origin for the `on_print` hook, run, then drain
-                // accumulated stdout back into the reply.
-                {
-                    let mut s = state.lock().unwrap();
-                    s.origin = req.origin.clone();
-                    s.stdout.clear();
-                }
-                let (result, error) = match run_script(&engine, &mut scope, &req.source) {
-                    Ok(r) => (Some(r), None),
-                    Err(e) => (None, Some(e)),
-                };
-                let print = std::mem::take(&mut state.lock().unwrap().stdout);
-                let _ = req.reply.send(ScriptResult {
-                    print,
-                    result,
-                    error,
-                });
+                let reply = run_script(&engine, &mut scope, &state, &req);
+                let _ = req.reply.send(reply);
             }
         }
         yield_now().await;
@@ -351,12 +336,37 @@ fn build_engine(
     engine
 }
 
-fn run_script(engine: &Engine, scope: &mut Scope, source: &str) -> Result<String, String> {
-    let dynamic: Dynamic = engine
-        .eval_with_scope(scope, source)
-        .map_err(|e| e.to_string())?;
-    common::serde_rhai::to_string(&dynamic)
-        .map_err(|e| format!("failed to serialize script result: {e}"))
+/// Run a single request end-to-end: publish the origin into shared
+/// state so the `on_print` hook can tag it, evaluate the script, drain
+/// the accumulated stdout, and return the fully-populated reply.
+fn run_script(
+    engine: &Engine,
+    scope: &mut Scope,
+    state: &Arc<Mutex<RequestState>>,
+    req: &ScriptRequest,
+) -> ScriptResult {
+    state.lock().unwrap().origin = req.origin.clone();
+
+    let (result, error) = match engine.eval_with_scope::<Dynamic>(scope, &req.source) {
+        Ok(dynamic) => match common::serde_rhai::to_string(&dynamic) {
+            Ok(s) => (Some(s), None),
+            Err(e) => (
+                None,
+                Some(format!("failed to serialize script result: {e}")),
+            ),
+        },
+        Err(e) => (None, Some(e.to_string())),
+    };
+
+    // Drain the hook's accumulator. `mem::take` leaves the buffer empty
+    // for the next request, so no explicit clear is needed.
+    let print = std::mem::take(&mut state.lock().unwrap().stdout);
+
+    ScriptResult {
+        print,
+        result,
+        error,
+    }
 }
 
 #[cfg(test)]
