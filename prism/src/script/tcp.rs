@@ -275,6 +275,19 @@ async fn run_listener(
     Ok(())
 }
 
+/// Wrap an I/O future in a `tokio::time::timeout` and map timer elapse
+/// to `ErrorKind::TimedOut` with the given message. Flattens the
+/// `Result<Result<_, _>, Elapsed>` onion to a single `io::Result<T>`
+/// so call sites are one `?` each.
+async fn with_timeout<T, F>(dur: Duration, msg: &'static str, fut: F) -> std::io::Result<T>
+where
+    F: std::future::Future<Output = std::io::Result<T>>,
+{
+    timeout(dur, fut)
+        .await
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, msg))?
+}
+
 async fn handle_conn(
     mut stream: TcpStream,
     peer: SocketAddr,
@@ -286,11 +299,7 @@ async fn handle_conn(
     // Auth once per connection with a tight read deadline — a legitimate
     // client has the token in hand on connect.
     if let Some(expected) = expected_token {
-        let got = timeout(timeouts.auth, stream.read_u128())
-            .await
-            .map_err(|_| {
-                std::io::Error::new(std::io::ErrorKind::TimedOut, "auth read timed out")
-            })??;
+        let got = with_timeout(timeouts.auth, "auth read timed out", stream.read_u128()).await?;
         if got ^ expected.as_u128() != 0 {
             tracing::warn!(peer = %peer, "tcp script: token rejected, closing connection");
             // Drop sends FIN; no pending writes to flush on the reject path.
@@ -319,11 +328,12 @@ async fn handle_conn(
 
         // Once the first byte has landed, the rest of the frame should
         // arrive promptly. Short timeout.
-        let source = timeout(timeouts.frame, read_string_frame(&mut stream))
-            .await
-            .map_err(|_| {
-                std::io::Error::new(std::io::ErrorKind::TimedOut, "frame body read timed out")
-            })??;
+        let source = with_timeout(
+            timeouts.frame,
+            "frame body read timed out",
+            read_string_frame(&mut stream),
+        )
+        .await?;
 
         let (reply_tx, reply_rx) = oneshot::channel();
         // Bounded send — backpressure propagates to the TCP client.
@@ -354,11 +364,12 @@ async fn handle_conn(
         // `ScriptResult` derives Serialize so its field names define the
         // wire shape. See its doc comment for the JSON layout.
         let body = serde_json::to_string(&reply).expect("script reply is serializable");
-        timeout(timeouts.write, write_frame(&mut stream, body.as_bytes()))
-            .await
-            .map_err(|_| {
-                std::io::Error::new(std::io::ErrorKind::TimedOut, "reply write timed out")
-            })??;
+        with_timeout(
+            timeouts.write,
+            "reply write timed out",
+            write_frame(&mut stream, body.as_bytes()),
+        )
+        .await?;
     }
 }
 
