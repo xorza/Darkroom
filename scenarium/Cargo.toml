@@ -16,7 +16,6 @@ rand = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 hashbrown = { workspace = true }
-mlua = { workspace = true }
 async-trait = { workspace = true }
 
 [dev-dependencies]

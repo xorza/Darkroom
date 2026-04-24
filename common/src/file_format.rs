@@ -19,7 +19,6 @@ pub fn get_file_extension(filename: &str) -> Option<&str> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SerdeFormat {
     Json,
-    Lua,
     Bitcode,
     Toml,
     Lz4,
@@ -27,14 +26,8 @@ pub enum SerdeFormat {
 }
 
 impl SerdeFormat {
-    pub fn all_formats_for_testing() -> [Self; 5] {
-        [
-            Self::Json,
-            Self::Lua,
-            Self::Bitcode,
-            Self::Lz4,
-            Self::ScnText,
-        ]
+    pub fn all_formats_for_testing() -> [Self; 3] {
+        [Self::Json, Self::Bitcode, Self::ScnText]
     }
 
     pub fn from_file_name(file_name: &str) -> FileFormatResult<Self> {
@@ -42,8 +35,6 @@ impl SerdeFormat {
 
         if ext.eq_ignore_ascii_case("json") {
             Ok(Self::Json)
-        } else if ext.eq_ignore_ascii_case("lua") {
-            Ok(Self::Lua)
         } else if ext.eq_ignore_ascii_case("bin") {
             Ok(Self::Bitcode)
         } else if ext.eq_ignore_ascii_case("lz4") {
@@ -67,7 +58,6 @@ mod tests {
     #[test]
     fn test_get_file_extension_normal() {
         assert_eq!(get_file_extension("file.json"), Some("json"));
-        assert_eq!(get_file_extension("data.lua"), Some("lua"));
         assert_eq!(get_file_extension("path/to/file.toml"), Some("toml"));
     }
 
@@ -82,10 +72,6 @@ mod tests {
         assert_eq!(
             SerdeFormat::from_file_name("a.json").unwrap(),
             SerdeFormat::Json
-        );
-        assert_eq!(
-            SerdeFormat::from_file_name("a.lua").unwrap(),
-            SerdeFormat::Lua
         );
         assert_eq!(
             SerdeFormat::from_file_name("a.bin").unwrap(),
@@ -110,10 +96,6 @@ mod tests {
         assert_eq!(
             SerdeFormat::from_file_name("a.JSON").unwrap(),
             SerdeFormat::Json
-        );
-        assert_eq!(
-            SerdeFormat::from_file_name("a.Lua").unwrap(),
-            SerdeFormat::Lua
         );
         assert_eq!(
             SerdeFormat::from_file_name("a.BIN").unwrap(),
@@ -142,7 +124,7 @@ mod tests {
 
     #[test]
     fn test_all_formats_for_testing_count() {
-        assert_eq!(SerdeFormat::all_formats_for_testing().len(), 5);
+        assert_eq!(SerdeFormat::all_formats_for_testing().len(), 3);
     }
 
     #[test]

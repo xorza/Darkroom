@@ -84,8 +84,8 @@ pub struct ScriptResult {
     pub error: Option<String>,
 }
 
-/// Side-effect requests from Lua scripts into [`crate::session::Session`].
-/// Each registered Lua function pushes a variant here; Session drains
+/// Side-effect requests from scripts into [`crate::session::Session`].
+/// Each registered script function pushes a variant here; Session drains
 /// the queue every frame and applies them. Kept separate from the
 /// request/reply channel so the executor can complete a script without
 /// round-tripping through Session for every side effect.
@@ -147,7 +147,7 @@ impl ScriptExecutor {
     /// Create the executor, spawn every transport's listener task,
     /// and spawn the executor task itself. Must be called from a
     /// tokio runtime context. `action_tx` is the Session-side
-    /// receiver for side-effect requests emitted by Lua functions.
+    /// receiver for side-effect requests emitted by script functions.
     pub fn new<I>(transports: I, action_tx: mpsc::UnboundedSender<ScriptAction>) -> Self
     where
         I: IntoIterator<Item = Box<dyn ScriptTransport>>,
