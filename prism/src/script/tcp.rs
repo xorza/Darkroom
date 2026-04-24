@@ -304,16 +304,18 @@ async fn handle_conn(
     loop {
         // Session-id is the first byte of a new request frame. Long
         // timeout — the client may legitimately idle between frames.
-        let session_id = match timeout(timeouts.idle, stream.read_u128()).await {
+        let raw_id = match timeout(timeouts.idle, stream.read_u128()).await {
             Err(_) => {
                 tracing::debug!(peer = %peer, "tcp script: idle between-frame timeout");
                 return Ok(());
             }
             Ok(Err(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(()),
             Ok(Err(e)) => return Err(e),
-            Ok(Ok(0)) => None,
-            Ok(Ok(id)) => Some(Uuid::from_u128(id)),
+            Ok(Ok(v)) => v,
         };
+        // All-zero u128 is the wire convention for "create a new session"
+        // (see `Uuid::nil`). Any other value is a resume request.
+        let session_id = (raw_id != 0).then(|| Uuid::from_u128(raw_id));
 
         // Once the first byte has landed, the rest of the frame should
         // arrive promptly. Short timeout.
@@ -416,14 +418,6 @@ mod tests {
         let len = u32::try_from(source.len()).unwrap();
         stream.write_u32(len).await.unwrap();
         stream.write_all(source).await.unwrap();
-    }
-
-    /// Legacy frame-writer, kept for the auth-only tests where the
-    /// connection is expected to close before we reach a script frame.
-    async fn send_raw_len_bytes(stream: &mut TcpStream, bytes: &[u8]) {
-        let len = u32::try_from(bytes.len()).unwrap();
-        stream.write_u32(len).await.unwrap();
-        stream.write_all(bytes).await.unwrap();
     }
 
     async fn read_reply(stream: &mut TcpStream) -> String {
@@ -565,14 +559,8 @@ mod tests {
 
         let mut s = TcpStream::connect(addr).await.unwrap();
         s.write_u128(wrong.as_u128()).await.unwrap();
-        // After the bad token, the server has already closed its side —
-        // we send a legitimate-shaped request payload anyway to confirm
-        // it doesn't get processed, and then observe the EOF on read.
-        let _ = send_raw_len_bytes(&mut s, b"let x = 1;").await;
-
-        // Server closes without replying. The exact ErrorKind varies
-        // (UnexpectedEof vs ConnectionReset depending on timing/OS), so
-        // assert only that the read fails.
+        // Server sees the bad token and drops the stream. Our read sees
+        // EOF (UnexpectedEof or ConnectionReset depending on timing).
         assert!(s.read_u32().await.is_err());
     }
 
@@ -646,31 +634,41 @@ mod tests {
 
     // ----- Timeout tests -----
     //
-    // Use short real-time values so the tests themselves finish in
-    // hundreds of milliseconds without mocking the clock.
+    // Every timeout test sets *only* the field it probes to a short
+    // value; the other three stay long (10s) so the test pins down
+    // which timeout actually fired. If `handle_conn` accidentally
+    // wired the wrong field to a read point, the intended test fails
+    // instead of passing for the wrong reason.
 
-    fn short_timeouts() -> TcpTimeouts {
+    const TEST_LONG: Duration = Duration::from_secs(10);
+    const TEST_SHORT: Duration = Duration::from_millis(150);
+
+    fn long_timeouts() -> TcpTimeouts {
         TcpTimeouts {
-            auth: Duration::from_millis(150),
-            idle: Duration::from_millis(150),
-            frame: Duration::from_millis(150),
-            write: Duration::from_millis(150),
+            auth: TEST_LONG,
+            idle: TEST_LONG,
+            frame: TEST_LONG,
+            write: TEST_LONG,
         }
     }
 
-    /// Quiet client that never sends a frame is closed by the idle-between-
-    /// frames timeout.
+    /// Quiet client that never sends a frame is closed by the
+    /// between-frames idle timeout specifically.
     #[tokio::test]
     async fn idle_connection_closes_after_timeout() {
-        let t = TcpTransport::bind(loopback_ephemeral(), None, short_timeouts()).unwrap();
+        let timeouts = TcpTimeouts {
+            idle: TEST_SHORT,
+            ..long_timeouts()
+        };
+        let t = TcpTransport::bind(loopback_ephemeral(), None, timeouts).unwrap();
         let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
 
         let mut s = TcpStream::connect(addr).await.unwrap();
-        // Send nothing. Within ~150ms the server should give up and close.
         let start = std::time::Instant::now();
         let mut buf = [0u8; 4];
         let n = s.read(&mut buf).await.unwrap_or(0);
         assert_eq!(n, 0, "expected EOF, got {n} bytes");
+        // Close must come from `idle` (150ms), not the other 10s fields.
         assert!(
             start.elapsed() >= Duration::from_millis(100),
             "closed too fast: {:?}",
@@ -678,39 +676,58 @@ mod tests {
         );
         assert!(
             start.elapsed() < Duration::from_secs(2),
-            "closed too slow: {:?}",
+            "closed too slow — probably tripped a different timeout: {:?}",
             start.elapsed()
         );
     }
 
-    /// With auth on, a client that connects but never sends the token is
-    /// closed by the auth-read timeout.
+    /// With auth on, a client that connects but never sends the token
+    /// is closed by the auth timeout specifically.
     #[tokio::test]
     async fn auth_timeout_closes_silent_client() {
+        let timeouts = TcpTimeouts {
+            auth: TEST_SHORT,
+            ..long_timeouts()
+        };
         let token = Uuid::new_v4();
-        let t = TcpTransport::bind(loopback_ephemeral(), Some(token), short_timeouts()).unwrap();
+        let t = TcpTransport::bind(loopback_ephemeral(), Some(token), timeouts).unwrap();
         let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
 
         let mut s = TcpStream::connect(addr).await.unwrap();
-        // No token sent. Server must close without replying.
+        let start = std::time::Instant::now();
         let mut buf = [0u8; 4];
         let n = s.read(&mut buf).await.unwrap_or(0);
         assert_eq!(n, 0);
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "closed too slow — probably tripped a different timeout: {:?}",
+            start.elapsed()
+        );
     }
 
-    /// A client that sends just the session-id prefix and then stalls is
-    /// closed by the mid-frame timeout (shorter than the idle window).
+    /// A client that sends the session-id prefix and stalls is closed
+    /// by the mid-frame timeout specifically.
     #[tokio::test]
     async fn partial_frame_closes_after_frame_timeout() {
-        let t = TcpTransport::bind(loopback_ephemeral(), None, short_timeouts()).unwrap();
+        let timeouts = TcpTimeouts {
+            frame: TEST_SHORT,
+            ..long_timeouts()
+        };
+        let t = TcpTransport::bind(loopback_ephemeral(), None, timeouts).unwrap();
         let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
 
         let mut s = TcpStream::connect(addr).await.unwrap();
         // Send 16B nil session id, then stall (no length-prefix, no src).
         s.write_u128(0).await.unwrap();
+        let start = std::time::Instant::now();
         let mut buf = [0u8; 4];
         let n = s.read(&mut buf).await.unwrap_or(0);
         assert_eq!(n, 0);
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "closed too slow — probably tripped a different timeout: {:?}",
+            start.elapsed()
+        );
     }
 
     /// Beyond MAX_CONNECTIONS concurrent clients, extras are closed at
