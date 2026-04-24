@@ -19,6 +19,7 @@ pub fn get_file_extension(filename: &str) -> Option<&str> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SerdeFormat {
     Json,
+    Rhai,
     Bitcode,
     Toml,
     Lz4,
@@ -26,8 +27,14 @@ pub enum SerdeFormat {
 }
 
 impl SerdeFormat {
-    pub fn all_formats_for_testing() -> [Self; 3] {
-        [Self::Json, Self::Bitcode, Self::ScnText]
+    pub fn all_formats_for_testing() -> [Self; 5] {
+        [
+            Self::Json,
+            Self::Rhai,
+            Self::Bitcode,
+            Self::Lz4,
+            Self::ScnText,
+        ]
     }
 
     pub fn from_file_name(file_name: &str) -> FileFormatResult<Self> {
@@ -35,6 +42,8 @@ impl SerdeFormat {
 
         if ext.eq_ignore_ascii_case("json") {
             Ok(Self::Json)
+        } else if ext.eq_ignore_ascii_case("rhai") {
+            Ok(Self::Rhai)
         } else if ext.eq_ignore_ascii_case("bin") {
             Ok(Self::Bitcode)
         } else if ext.eq_ignore_ascii_case("lz4") {
@@ -74,6 +83,10 @@ mod tests {
             SerdeFormat::Json
         );
         assert_eq!(
+            SerdeFormat::from_file_name("a.rhai").unwrap(),
+            SerdeFormat::Rhai
+        );
+        assert_eq!(
             SerdeFormat::from_file_name("a.bin").unwrap(),
             SerdeFormat::Bitcode
         );
@@ -96,6 +109,10 @@ mod tests {
         assert_eq!(
             SerdeFormat::from_file_name("a.JSON").unwrap(),
             SerdeFormat::Json
+        );
+        assert_eq!(
+            SerdeFormat::from_file_name("a.Rhai").unwrap(),
+            SerdeFormat::Rhai
         );
         assert_eq!(
             SerdeFormat::from_file_name("a.BIN").unwrap(),
@@ -124,7 +141,7 @@ mod tests {
 
     #[test]
     fn test_all_formats_for_testing_count() {
-        assert_eq!(SerdeFormat::all_formats_for_testing().len(), 3);
+        assert_eq!(SerdeFormat::all_formats_for_testing().len(), 5);
     }
 
     #[test]

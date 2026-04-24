@@ -5,6 +5,7 @@ use serde::de::DeserializeOwned;
 
 use crate::file_format::SerdeFormat;
 use crate::normalize_string::NormalizeString;
+use crate::serde_rhai;
 use crate::serde_scn;
 
 pub fn is_false(value: &bool) -> bool {
@@ -32,6 +33,9 @@ pub fn serialize_into<T: Serialize, W: Write>(
         SerdeFormat::Json => {
             serde_json::to_writer_pretty(writer, &value).unwrap();
         }
+        SerdeFormat::Rhai => {
+            serde_rhai::to_writer(writer, &value).unwrap();
+        }
         SerdeFormat::Bitcode => {
             let encoded = bitcode::serialize(&value).unwrap();
             writer.write_all(&encoded).unwrap();
@@ -41,8 +45,19 @@ pub fn serialize_into<T: Serialize, W: Write>(
             writer.write_all(s.as_bytes()).unwrap();
         }
         SerdeFormat::Lz4 => {
-            let _ = (writer, value, temp_buffer);
-            unimplemented!("Lz4 serialization pending a non-Lua inner format");
+            serde_rhai::to_writer(temp_buffer, &value).unwrap();
+
+            let uncompressed_size = temp_buffer.len();
+            writer
+                .write_all(&(uncompressed_size as u32).to_le_bytes())
+                .unwrap();
+
+            let max_compressed_size = lz4_flex::block::get_maximum_output_size(uncompressed_size);
+            temp_buffer.resize(uncompressed_size + max_compressed_size, 0);
+
+            let (input, output) = temp_buffer.split_at_mut(uncompressed_size);
+            let compressed_len = lz4_flex::compress_into(input, output).unwrap();
+            writer.write_all(&output[..compressed_len]).unwrap();
         }
         SerdeFormat::ScnText => {
             serde_scn::to_writer(writer, &value).unwrap();
@@ -68,6 +83,7 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
 
     match format {
         SerdeFormat::Json => Ok(serde_json::from_reader(reader)?),
+        SerdeFormat::Rhai => Ok(serde_rhai::from_reader(reader)?),
         SerdeFormat::Toml => {
             reader.read_to_end(temp_buffer)?;
             Ok(toml::from_slice(temp_buffer.as_slice())?)
@@ -77,8 +93,26 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
             Ok(bitcode::deserialize(temp_buffer.as_slice())?)
         }
         SerdeFormat::Lz4 => {
-            let _ = (reader, temp_buffer);
-            unimplemented!("Lz4 deserialization pending a non-Lua inner format");
+            reader.read_to_end(temp_buffer)?;
+
+            let uncompressed_size =
+                u32::from_le_bytes(temp_buffer[0..4].try_into().unwrap()) as usize;
+            let compressed_start = 4;
+            let compressed_len = temp_buffer.len() - compressed_start;
+
+            temp_buffer.resize(compressed_start + compressed_len + uncompressed_size, 0);
+
+            let (compressed_part, decompressed_part) =
+                temp_buffer.split_at_mut(compressed_start + compressed_len);
+            let compressed = &compressed_part[compressed_start..];
+
+            let decompressed_len = lz4_flex::decompress_into(compressed, decompressed_part)?;
+            assert_eq!(
+                decompressed_len, uncompressed_size,
+                "decompressed size mismatch"
+            );
+
+            Ok(serde_rhai::from_slice(decompressed_part)?)
         }
         SerdeFormat::ScnText => Ok(serde_scn::from_reader(reader)?),
     }

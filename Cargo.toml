@@ -58,7 +58,7 @@ dotenv = { version = "*" }
 rayon = { version = "*" }
 toml = { version = "*" }
 hashbrown = { version = "*", features = ["serde"] }
-rhai = { version = "*", features = ["sync"] }
+rhai = { version = "*", features = ["sync", "serde"] }
 syn = { version = "*", features = ["full"] }
 quote = { version = "*" }
 memmap2 = { version = "*" }
