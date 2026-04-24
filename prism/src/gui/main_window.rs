@@ -7,10 +7,11 @@ use crate::gui::frame_output::RunCommand;
 use crate::gui::graph_ui::GraphUi;
 use crate::gui::log_ui::LogUi;
 use crate::gui::style::Style;
+use crate::gui::ui_host::EguiUiHost;
 use crate::gui::widgets::{Button, ListItem, Panel, PopupMenu};
 use crate::input::InputSnapshot;
 use crate::session::Session;
-use crate::ui_host::{EguiUiHost, UiHost};
+use crate::ui_host::UiHost;
 
 use eframe::egui;
 use egui::vec2;
