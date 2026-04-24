@@ -25,6 +25,7 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use rhai::{Engine, Scope};
 use tokio::sync::{mpsc, oneshot};
@@ -129,19 +130,24 @@ const MAX_CALL_LEVELS: usize = 64;
 const MAX_EXPR_DEPTH: usize = 64;
 const MAX_FN_EXPR_DEPTH: usize = 32;
 
-/// Work item sent from a transport to the executor. `reply` is a
-/// single-shot channel; the executor runs `source`, then sends one
-/// [`ScriptResult`]. If the client has gone away the receiver is
-/// dropped and `reply.send` returns `Err` — scripts still run to
-/// completion, the reply is just discarded.
+/// Work item sent from a transport to the executor. `origin` labels
+/// where the request came from (e.g. a TCP peer `"127.0.0.1:54321"`)
+/// so Session can attribute script output back to its sender.
+/// `reply` is a single-shot channel; the executor runs `source`, then
+/// sends one [`ScriptResult`]. If the client has gone away the
+/// receiver is dropped and `reply.send` returns `Err` — scripts still
+/// run to completion, the reply is just discarded.
 #[derive(Debug)]
 pub struct ScriptRequest {
+    pub origin: String,
     pub source: String,
     pub reply: oneshot::Sender<ScriptResult>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ScriptResult {
+    /// Everything the script sent through Rhai's `print` during its run,
+    /// with a `\n` after each call. Empty when no prints occurred.
     pub stdout: String,
     pub error: Option<String>,
 }
@@ -153,8 +159,20 @@ pub struct ScriptResult {
 /// round-tripping through Session for every side effect.
 #[derive(Debug)]
 pub enum ScriptAction {
-    /// `prism.print(msg)` — append `msg` as a status-log line.
-    Print(String),
+    /// A `print(msg)` call from a script. `origin` identifies the sender
+    /// (e.g. a remote peer addr) so Session can label the status line.
+    Print { origin: String, msg: String },
+}
+
+/// Shared state touched by the `on_print` hook and the executor loop.
+/// Holds the current in-flight request's origin plus its accumulating
+/// stdout buffer. Because the executor runs one script at a time on a
+/// single tokio task, a plain `Mutex` suffices — the hook locks it
+/// briefly inside each `print(...)` call.
+#[derive(Debug, Default)]
+struct RequestState {
+    origin: String,
+    stdout: String,
 }
 
 /// Owns a transport's background task. Dropping it cancels the token
@@ -249,7 +267,8 @@ async fn run_executor(
     cancel: CancellationToken,
     action_tx: mpsc::UnboundedSender<ScriptAction>,
 ) {
-    let engine = build_engine(&action_tx);
+    let state: Arc<Mutex<RequestState>> = Arc::new(Mutex::new(RequestState::default()));
+    let engine = build_engine(state.clone(), action_tx);
     let mut scope = Scope::new();
 
     loop {
@@ -257,15 +276,26 @@ async fn run_executor(
             _ = cancel.cancelled() => break,
             r = rx.recv() => {
                 let Some(req) = r else { break };
-                let result = run_script(&engine, &mut scope, &req.source);
-                let _ = req.reply.send(result);
+                // Set origin for the `on_print` hook, run, then drain
+                // accumulated stdout back into the reply.
+                {
+                    let mut s = state.lock().unwrap();
+                    s.origin = req.origin.clone();
+                    s.stdout.clear();
+                }
+                let error = run_error(&engine, &mut scope, &req.source);
+                let stdout = std::mem::take(&mut state.lock().unwrap().stdout);
+                let _ = req.reply.send(ScriptResult { stdout, error });
             }
         }
         yield_now().await;
     }
 }
 
-fn build_engine(action_tx: &mpsc::UnboundedSender<ScriptAction>) -> Engine {
+fn build_engine(
+    state: Arc<Mutex<RequestState>>,
+    action_tx: mpsc::UnboundedSender<ScriptAction>,
+) -> Engine {
     let mut engine = Engine::new();
     engine.set_max_operations(MAX_OPERATIONS);
     engine.set_max_string_size(MAX_STRING_SIZE);
@@ -276,9 +306,21 @@ fn build_engine(action_tx: &mpsc::UnboundedSender<ScriptAction>) -> Engine {
     engine.set_max_call_levels(MAX_CALL_LEVELS);
     engine.set_max_expr_depths(MAX_EXPR_DEPTH, MAX_FN_EXPR_DEPTH);
 
-    let print_tx = action_tx.clone();
+    // Dual-sink `print`: append to the caller's reply buffer AND notify
+    // Session for the local status bar. Hook fires synchronously during
+    // the script run, so the per-request state is guaranteed to still
+    // describe the active request.
     engine.on_print(move |msg| {
-        let _ = print_tx.send(ScriptAction::Print(msg.to_string()));
+        let origin = {
+            let mut s = state.lock().unwrap();
+            s.stdout.push_str(msg);
+            s.stdout.push('\n');
+            s.origin.clone()
+        };
+        let _ = action_tx.send(ScriptAction::Print {
+            origin,
+            msg: msg.to_string(),
+        });
     });
 
     engine.on_debug(|msg, src, pos| {
@@ -294,17 +336,11 @@ fn build_engine(action_tx: &mpsc::UnboundedSender<ScriptAction>) -> Engine {
     engine
 }
 
-fn run_script(engine: &Engine, scope: &mut Scope, source: &str) -> ScriptResult {
-    match engine.run_with_scope(scope, source) {
-        Ok(()) => ScriptResult {
-            stdout: String::new(),
-            error: None,
-        },
-        Err(err) => ScriptResult {
-            stdout: String::new(),
-            error: Some(err.to_string()),
-        },
-    }
+fn run_error(engine: &Engine, scope: &mut Scope, source: &str) -> Option<String> {
+    engine
+        .run_with_scope(scope, source)
+        .err()
+        .map(|e| e.to_string())
 }
 
 #[cfg(test)]

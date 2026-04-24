@@ -246,7 +246,9 @@ impl Session {
 
         while let Ok(action) = self.script_action_rx.try_recv() {
             match action {
-                ScriptAction::Print(msg) => self.add_status(msg),
+                ScriptAction::Print { origin, msg } => {
+                    self.add_status(format!("remote {origin}: {msg}"));
+                }
             }
         }
     }

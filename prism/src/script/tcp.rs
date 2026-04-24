@@ -210,6 +210,7 @@ async fn handle_conn(
     // backpressure propagates all the way to the TCP client.
     if tx
         .send(ScriptRequest {
+            origin: peer.to_string(),
             source,
             reply: reply_tx,
         })
@@ -297,23 +298,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_auth_accepts_script_and_routes_print_action() {
+    async fn no_auth_accepts_script_and_dual_sinks_print() {
         let t = TcpTransport::bind(loopback_ephemeral(), None).unwrap();
         let (addr, _executor, mut action_rx) = spawn_executor_with_transport(t).await;
 
         let mut s = TcpStream::connect(addr).await.unwrap();
+        let local = s.local_addr().unwrap();
         send_frame(&mut s, b"print(\"hi\")").await;
-        let reply = read_reply(&mut s).await;
-        assert!(!reply.starts_with("ERROR:"), "reply was: {reply}");
 
-        // Rhai `print("hi")` must route through the executor's on_print
-        // hook and push ScriptAction::Print("hi") to the action channel.
+        // Caller sink: the reply frame carries the script's stdout.
+        let reply = read_reply(&mut s).await;
+        assert_eq!(reply, "hi\n");
+
+        // Status sink: Session gets a tagged Print action. Origin is the
+        // client's peer addr from the server's point of view — which is
+        // the client's local_addr.
         let action = tokio::time::timeout(std::time::Duration::from_secs(2), action_rx.recv())
             .await
             .expect("timed out waiting for ScriptAction::Print")
             .expect("action channel closed");
         match action {
-            ScriptAction::Print(msg) => assert_eq!(msg, "hi"),
+            ScriptAction::Print { origin, msg } => {
+                assert_eq!(msg, "hi");
+                assert_eq!(origin, local.to_string());
+            }
         }
     }
 
