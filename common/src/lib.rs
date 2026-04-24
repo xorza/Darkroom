@@ -19,7 +19,6 @@ pub mod pause_gate;
 pub mod ready_state;
 pub mod serde;
 pub mod serde_rhai;
-pub mod serde_scn;
 pub mod shared;
 pub mod shared_fn;
 pub mod slot;

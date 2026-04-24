@@ -23,18 +23,11 @@ pub enum SerdeFormat {
     Bitcode,
     Toml,
     Lz4,
-    ScnText,
 }
 
 impl SerdeFormat {
-    pub fn all_formats_for_testing() -> [Self; 5] {
-        [
-            Self::Json,
-            Self::Rhai,
-            Self::Bitcode,
-            Self::Lz4,
-            Self::ScnText,
-        ]
+    pub fn all_formats_for_testing() -> [Self; 4] {
+        [Self::Json, Self::Rhai, Self::Bitcode, Self::Lz4]
     }
 
     pub fn from_file_name(file_name: &str) -> FileFormatResult<Self> {
@@ -50,8 +43,6 @@ impl SerdeFormat {
             Ok(Self::Lz4)
         } else if ext.eq_ignore_ascii_case("toml") {
             Ok(Self::Toml)
-        } else if ext.eq_ignore_ascii_case("scn") {
-            Ok(Self::ScnText)
         } else {
             Err(FileExtensionError::UnsupportedFileExtension(
                 file_name.to_string(),
@@ -98,10 +89,6 @@ mod tests {
             SerdeFormat::from_file_name("a.toml").unwrap(),
             SerdeFormat::Toml
         );
-        assert_eq!(
-            SerdeFormat::from_file_name("a.scn").unwrap(),
-            SerdeFormat::ScnText
-        );
     }
 
     #[test]
@@ -117,10 +104,6 @@ mod tests {
         assert_eq!(
             SerdeFormat::from_file_name("a.BIN").unwrap(),
             SerdeFormat::Bitcode
-        );
-        assert_eq!(
-            SerdeFormat::from_file_name("a.SCN").unwrap(),
-            SerdeFormat::ScnText
         );
     }
 
@@ -141,7 +124,7 @@ mod tests {
 
     #[test]
     fn test_all_formats_for_testing_count() {
-        assert_eq!(SerdeFormat::all_formats_for_testing().len(), 5);
+        assert_eq!(SerdeFormat::all_formats_for_testing().len(), 4);
     }
 
     #[test]

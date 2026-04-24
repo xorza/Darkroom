@@ -57,7 +57,6 @@ impl MainWindow {
     fn save_as(&mut self, session: &mut Session) {
         let file = rfd::FileDialog::new()
             .add_filter("Rhai", &["rhai"])
-            .add_filter("Scn", &["scn"])
             .add_filter("JSON", &["json"])
             .add_filter("Lz4 compressed Rhai", &["lz4"])
             .save_file();
@@ -69,9 +68,8 @@ impl MainWindow {
 
     pub fn load(&mut self, session: &mut Session) {
         let file = rfd::FileDialog::new()
-            .add_filter("All supported", &["rhai", "json", "scn", "lz4"])
+            .add_filter("All supported", &["rhai", "json", "lz4"])
             .add_filter("Rhai", &["rhai"])
-            .add_filter("Scn", &["scn"])
             .add_filter("JSON", &["json"])
             .add_filter("Lz4 compressed Rhai", &["lz4"])
             .pick_file();

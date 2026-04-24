@@ -1,6 +1,6 @@
 //! Save `DetectionResult` as sidecar files.
 //!
-//! Sidecar path: `{image_path}.detection` using SCN text format.
+//! Sidecar path: `{image_path}.detection` in JSON.
 
 use std::path::{Path, PathBuf};
 
@@ -9,7 +9,7 @@ use super::detector::DetectionResult;
 /// Save detection result as a `.detection` sidecar file next to the image.
 pub fn save_detection_result(image_path: &Path, result: &DetectionResult) -> std::io::Result<()> {
     let text =
-        common::serde_scn::to_string(result).map_err(|e| std::io::Error::other(e.to_string()))?;
+        serde_json::to_string_pretty(result).map_err(|e| std::io::Error::other(e.to_string()))?;
     std::fs::write(sidecar_path(image_path), text)
 }
 

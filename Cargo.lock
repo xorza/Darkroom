@@ -2502,6 +2502,7 @@ dependencies = [
  "rand_chacha 0.10.0",
  "rayon",
  "serde",
+ "serde_json",
  "smallvec",
  "strum 0.28.0",
  "strum_macros 0.28.0",
