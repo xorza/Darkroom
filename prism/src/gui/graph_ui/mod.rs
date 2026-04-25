@@ -23,6 +23,7 @@ use crate::gui::node_details_ui::NodeDetailsUi;
 use crate::gui::node_ui::NodeUi;
 use crate::gui::widgets::HitRegion;
 use crate::input::InputSnapshot;
+use crate::model::ArgumentValuesCache;
 use crate::session::Session;
 
 mod connections;
@@ -62,6 +63,10 @@ pub struct GraphUi {
     dots_background: GraphBackgroundRenderer,
     new_node_ui: NewNodeUi,
     node_details_ui: NodeDetailsUi,
+    /// UI-owned per-node texture/value cache. Worker→cache fan-out
+    /// arrives via `Session::take_cache_events`, drained at the top
+    /// of `render`.
+    argument_values_cache: ArgumentValuesCache,
     output: FrameOutput,
 }
 
@@ -79,6 +84,10 @@ impl GraphUi {
     ///   2. overlays — buttons, details panel, new-node popup
     ///   3. zoom/pan — only when no overlay is hovered
     pub fn render(&mut self, gui: &mut Gui<'_>, session: &mut Session, input: &InputSnapshot) {
+        for event in session.take_cache_events() {
+            self.argument_values_cache.apply(event);
+        }
+
         if input.cancel_requested() {
             self.cancel_gesture();
         }
@@ -89,7 +98,7 @@ impl GraphUi {
             .max_rect(rect)
             .clip_rect(rect)
             .show(|gui| {
-                let mut ctx = session.graph_context();
+                let ctx = session.graph_context();
 
                 let (background_response, pointer_pos) =
                     self.setup_background_interaction(gui, input, rect);
@@ -107,7 +116,7 @@ impl GraphUi {
                 }
 
                 let overlay_hovered =
-                    self.render_overlays(gui, &mut ctx, input, pointer_pos, &background_response);
+                    self.render_overlays(gui, &ctx, input, pointer_pos, &background_response);
 
                 if !overlay_hovered && (self.gesture.is_idle() || self.gesture.is_panning()) {
                     self.update_zoom_and_pan(gui, input, &ctx, &background_response, pointer_pos);
@@ -180,7 +189,7 @@ impl GraphUi {
     fn render_overlays(
         &mut self,
         gui: &mut Gui<'_>,
-        ctx: &mut GraphContext<'_>,
+        ctx: &GraphContext<'_>,
         input: &InputSnapshot,
         pointer_pos: Option<Pos2>,
         background_response: &Response,
@@ -207,7 +216,7 @@ impl GraphUi {
         let mut hovered = buttons.response.hovered();
         hovered |= self
             .node_details_ui
-            .show(gui, ctx, &mut self.output)
+            .show(gui, ctx, &mut self.argument_values_cache, &mut self.output)
             .hovered();
         hovered |= self.handle_new_node_popup(gui, input, ctx, pointer_pos, background_response);
         hovered

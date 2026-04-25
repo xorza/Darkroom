@@ -18,7 +18,8 @@ use tokio::sync::oneshot;
 use crate::config::Config;
 use crate::gui::frame_output::{EditorCommand, FrameOutput, RunCommand};
 use crate::gui::graph_ctx::GraphContext;
-use crate::model::{ActionStack, ArgumentValuesCache, ViewGraph, graph_ui_action::GraphUiAction};
+use crate::model::argument_values_cache::{CacheEvent, NodeCache, invalidated_nodes};
+use crate::model::{ActionStack, ViewGraph, graph_ui_action::GraphUiAction};
 use crate::script::{self, ScriptAction, ScriptConfig, ScriptExecutor};
 use crate::ui_host::UiHost;
 
@@ -54,7 +55,11 @@ pub struct Session {
     func_lib: Arc<FuncLib>,
     view_graph: ViewGraph,
     execution_stats: Option<ExecutionStats>,
-    argument_values_cache: ArgumentValuesCache,
+    /// Cache mutations queued for the renderer to apply. The cache
+    /// itself lives on `GraphUi` (it's UI-owned texture state); this
+    /// queue is the worker→renderer fan-out for entries that move when
+    /// execution finishes or the graph is replaced.
+    cache_events: Vec<CacheEvent>,
     status: String,
     config: Config,
 
@@ -132,7 +137,7 @@ impl Session {
             func_lib,
             view_graph: ViewGraph::default(),
             execution_stats: None,
-            argument_values_cache: ArgumentValuesCache::default(),
+            cache_events: Vec::new(),
             status: String::new(),
             config,
             graph_dirty: true,
@@ -159,11 +164,12 @@ impl Session {
             .is_some_and(Worker::is_event_loop_started)
     }
 
-    /// Frame-level dependency bundle for the view layer. `view_graph`
-    /// is shared-borrowed (mutations go through `GraphUiAction::apply`
-    /// in `commit_actions`); `argument_values_cache` is `&mut` because
-    /// rendering lazily fills it with texture handles.
-    pub fn graph_context(&mut self) -> GraphContext<'_> {
+    /// Frame-level dependency bundle for the view layer. Fully
+    /// shared-borrowed: every mutation goes through
+    /// `GraphUiAction::apply` in `commit_actions`. The
+    /// `ArgumentValuesCache` lives on the renderer; cache updates
+    /// flow through [`Session::take_cache_events`].
+    pub fn graph_context(&self) -> GraphContext<'_> {
         let execution_stats = self.execution_stats.as_ref();
         GraphContext {
             func_lib: &self.func_lib,
@@ -171,8 +177,14 @@ impl Session {
             execution_stats,
             exec_info_index: crate::model::NodeExecutionIndex::new(execution_stats),
             autorun: self.autorun(),
-            argument_values_cache: &mut self.argument_values_cache,
         }
+    }
+
+    /// Drain pending cache mutations queued by the worker layer.
+    /// The renderer applies them to its own `ArgumentValuesCache`
+    /// at frame start.
+    pub fn take_cache_events(&mut self) -> Vec<CacheEvent> {
+        std::mem::take(&mut self.cache_events)
     }
 
     /// Appends a status line. Keeps the buffer below [`STATUS_CAP`]
@@ -309,7 +321,8 @@ impl Session {
                         stats.executed_nodes.len(),
                         stats.elapsed_secs
                     ));
-                    self.argument_values_cache.invalidate_changed(&stats);
+                    self.cache_events
+                        .push(CacheEvent::InvalidateNodes(invalidated_nodes(&stats)));
                     self.execution_stats = Some(stats);
                 }
                 WorkerEvent::ExecutionFinished(Err(err)) => {
@@ -319,13 +332,14 @@ impl Session {
                     node_id,
                     values: Some(values),
                 } => {
-                    self.argument_values_cache.insert(node_id, values.into());
+                    self.cache_events
+                        .push(CacheEvent::Insert(node_id, NodeCache::from(values)));
                 }
                 WorkerEvent::ArgumentValues {
                     node_id,
                     values: None,
                 } => {
-                    self.argument_values_cache.clear_pending(node_id);
+                    self.cache_events.push(CacheEvent::ClearPending(node_id));
                 }
                 WorkerEvent::SavePicked(Some(path)) => self.save_graph(&path),
                 WorkerEvent::SavePicked(None) => {}
@@ -409,9 +423,11 @@ impl Session {
             self.graph_dirty = false;
         }
 
-        if let Some(node_id) = output.request_argument_values()
-            && self.argument_values_cache.mark_pending(node_id)
-        {
+        // The renderer gates duplicate requests via
+        // `ArgumentValuesCache::mark_pending` *before* setting this
+        // field — by the time we see it here, the request is already
+        // deduped. Session just relays it to the worker.
+        if let Some(node_id) = output.request_argument_values() {
             let (reply, rx) = oneshot::channel();
             msgs.push(WorkerMessage::RequestArgumentValues { node_id, reply });
             let ui = self.ui_host.clone();
@@ -463,7 +479,7 @@ impl Session {
         self.view_graph.validate_with(&self.func_lib);
         self.graph_dirty = true;
         self.execution_stats = None;
-        self.argument_values_cache.clear();
+        self.cache_events.push(CacheEvent::Clear);
     }
 
     fn commit_actions(&mut self, output: &mut FrameOutput) -> bool {

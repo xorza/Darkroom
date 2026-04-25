@@ -13,7 +13,7 @@ use crate::gui::widgets::{
     Frame, HitRegion, Image as ImageWidget, Label, PositionedUi, ScrollArea, Separator, Space,
     TextEdit, Texture,
 };
-use crate::model::argument_values_cache::{CachedTexture, NodeCache};
+use crate::model::argument_values_cache::{ArgumentValuesCache, CachedTexture, NodeCache};
 use crate::model::graph_ui_action::GraphUiAction;
 use crate::model::node_execution::NodeExecutionInfo;
 
@@ -27,7 +27,8 @@ impl NodeDetailsUi {
     pub fn show(
         &self,
         gui: &mut Gui<'_>,
-        ctx: &mut GraphContext<'_>,
+        ctx: &GraphContext<'_>,
+        cache: &mut ArgumentValuesCache,
         output: &mut FrameOutput,
     ) -> Response {
         let panel_rect = compute_panel_rect(gui);
@@ -48,7 +49,7 @@ impl NodeDetailsUi {
                     .sense(Sense::all())
                     .show(gui, |gui| {
                         ScrollArea::vertical(scroll_id).show(gui, |gui| {
-                            show_content(gui, ctx, node_id, output);
+                            show_content(gui, ctx, cache, node_id, output);
                         });
                     })
             })
@@ -68,7 +69,8 @@ fn compute_panel_rect(gui: &Gui<'_>) -> Rect {
 
 fn show_content(
     gui: &mut Gui<'_>,
-    ctx: &mut GraphContext<'_>,
+    ctx: &GraphContext<'_>,
+    cache: &mut ArgumentValuesCache,
     node_id: NodeId,
     output: &mut FrameOutput,
 ) {
@@ -90,8 +92,14 @@ fn show_content(
         return;
     };
 
-    let Some(node_cache) = ctx.argument_values_cache.get_mut(&node_id) else {
-        output.set_request_argument_values(node_id);
+    let Some(node_cache) = cache.get_mut(&node_id) else {
+        // Gate duplicate requests at the source: only emit when this
+        // node isn't already pending or ready. Session::handle_output
+        // relays the request unconditionally — dedupe is the cache's
+        // job, and the cache lives here.
+        if cache.mark_pending(node_id) {
+            output.set_request_argument_values(node_id);
+        }
         return;
     };
 

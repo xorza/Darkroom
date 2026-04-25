@@ -571,7 +571,7 @@ fn finish_drag(drag: &ConnectionDrag) -> ConnectionDragUpdate {
 mod tests {
     use super::*;
     use crate::gui::graph_layout::PortInfo;
-    use crate::model::{ArgumentValuesCache, ViewGraph, ViewNode};
+    use crate::model::{ViewGraph, ViewNode};
     use scenarium::function::FuncId;
     use scenarium::graph::{Event, Input, Node, NodeBehavior};
     use scenarium::prelude::FuncLib;
@@ -691,14 +691,12 @@ mod tests {
 
     fn with_ctx<R>(vg: &ViewGraph, f: impl FnOnce(&GraphContext<'_>) -> R) -> R {
         let func_lib = FuncLib::default();
-        let mut cache = ArgumentValuesCache::default();
         let ctx = GraphContext {
             func_lib: &func_lib,
             view_graph: vg,
             execution_stats: None,
             exec_info_index: crate::model::NodeExecutionIndex::new(None),
             autorun: false,
-            argument_values_cache: &mut cache,
         };
         f(&ctx)
     }

@@ -29,6 +29,34 @@ pub struct ArgumentValuesCache {
     entries: HashMap<NodeId, CacheState>,
 }
 
+/// Cache mutations the worker layer signals to the renderer.
+/// `Session` queues these in `drain_inbound` / `refresh_graph`; the
+/// renderer drains them at frame start. Keeps the cache UI-owned
+/// without making `Session` a transport for non-UI state.
+pub enum CacheEvent {
+    /// Drop entries whose stats moved (executed, errored, missing inputs).
+    InvalidateNodes(Vec<NodeId>),
+    /// Worker returned values for a previously-pending request.
+    Insert(NodeId, NodeCache),
+    /// Worker reported "no values available" for a pending request.
+    ClearPending(NodeId),
+    /// Graph was replaced or refreshed — drop everything.
+    Clear,
+}
+
+impl std::fmt::Debug for CacheEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidateNodes(ids) => {
+                f.debug_tuple("InvalidateNodes").field(&ids.len()).finish()
+            }
+            Self::Insert(id, _) => f.debug_tuple("Insert").field(id).finish(),
+            Self::ClearPending(id) => f.debug_tuple("ClearPending").field(id).finish(),
+            Self::Clear => f.debug_tuple("Clear").finish(),
+        }
+    }
+}
+
 impl std::fmt::Debug for ArgumentValuesCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let ready = self
@@ -77,17 +105,33 @@ impl ArgumentValuesCache {
         self.entries.clear();
     }
 
-    pub fn invalidate_changed(&mut self, execution_stats: &ExecutionStats) {
-        for executed in &execution_stats.executed_nodes {
-            self.entries.remove(&executed.node_id);
-        }
-        for error in &execution_stats.node_errors {
-            self.entries.remove(&error.node_id);
-        }
-        for port_address in &execution_stats.missing_inputs {
-            self.entries.remove(&port_address.target_id);
+    pub fn apply(&mut self, event: CacheEvent) {
+        match event {
+            CacheEvent::InvalidateNodes(ids) => {
+                for id in ids {
+                    self.entries.remove(&id);
+                }
+            }
+            CacheEvent::Insert(id, cache) => self.insert(id, cache),
+            CacheEvent::ClearPending(id) => self.clear_pending(id),
+            CacheEvent::Clear => self.clear(),
         }
     }
+}
+
+/// Collect every node id whose state moved in this execution — used to
+/// build [`CacheEvent::InvalidateNodes`] without dragging
+/// `ExecutionStats` through the event queue.
+pub fn invalidated_nodes(execution_stats: &ExecutionStats) -> Vec<NodeId> {
+    let mut ids = Vec::with_capacity(
+        execution_stats.executed_nodes.len()
+            + execution_stats.node_errors.len()
+            + execution_stats.missing_inputs.len(),
+    );
+    ids.extend(execution_stats.executed_nodes.iter().map(|n| n.node_id));
+    ids.extend(execution_stats.node_errors.iter().map(|n| n.node_id));
+    ids.extend(execution_stats.missing_inputs.iter().map(|p| p.target_id));
+    ids
 }
 
 impl From<ArgumentValues> for NodeCache {
