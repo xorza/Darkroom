@@ -24,7 +24,7 @@ use crate::gui::graph_ui::nodes::new_node::NewNodeUi;
 use crate::gui::widgets::HitRegion;
 use crate::input::InputSnapshot;
 use crate::model::ArgumentValuesCache;
-use crate::model::argument_values_cache::CacheEvent;
+use crate::model::argument_values_cache::RenderEvent;
 
 pub mod background;
 pub mod connections;
@@ -82,6 +82,19 @@ impl GraphUi {
         self.gesture.cancel();
     }
 
+    /// Drain Session→renderer signals. `Reset` replaces `self` with
+    /// `Default` so a graph swap discards every per-graph field
+    /// (gesture, popups, layout galleys, cache) atomically — later
+    /// cache events in the same batch then apply to the fresh state.
+    pub(crate) fn apply_render_events(&mut self, events: Vec<RenderEvent>) {
+        for event in events {
+            match event {
+                RenderEvent::Reset => *self = Self::default(),
+                RenderEvent::Cache(c) => self.argument_values_cache.apply(c),
+            }
+        }
+    }
+
     /// Per-frame entry point. The body splits into three ordered phases:
     ///   1. content — layout, background, connections, nodes
     ///   2. overlays — buttons, details panel, new-node popup
@@ -90,13 +103,11 @@ impl GraphUi {
         &mut self,
         gui: &mut Gui<'_>,
         ctx: &GraphContext<'_>,
-        cache_events: Vec<CacheEvent>,
+        render_events: Vec<RenderEvent>,
         input: &InputSnapshot,
         output: &mut FrameOutput,
     ) {
-        for event in cache_events {
-            self.argument_values_cache.apply(event);
-        }
+        self.apply_render_events(render_events);
 
         if input.cancel_requested() {
             self.cancel_gesture();
@@ -287,3 +298,6 @@ impl GraphUi {
         (response, pointer_pos)
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -44,6 +44,32 @@ pub enum CacheEvent {
     Clear,
 }
 
+/// Session→renderer signals drained by `GraphUi::render` at frame start.
+/// `Cache` carries cache-only mutations; `Reset` is pushed when the
+/// underlying graph is swapped (`Session::replace_graph`) and tells the
+/// renderer to discard *all* per-graph state — gesture, popups, layout
+/// galleys, cache. Without this, an Open/Load that replaces the graph
+/// asynchronously would leave renderer state pointing at dead `NodeId`s.
+pub enum RenderEvent {
+    Cache(CacheEvent),
+    Reset,
+}
+
+impl std::fmt::Debug for RenderEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Cache(c) => f.debug_tuple("Cache").field(c).finish(),
+            Self::Reset => f.debug_tuple("Reset").finish(),
+        }
+    }
+}
+
+impl From<CacheEvent> for RenderEvent {
+    fn from(c: CacheEvent) -> Self {
+        Self::Cache(c)
+    }
+}
+
 impl std::fmt::Debug for CacheEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

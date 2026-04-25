@@ -60,10 +60,10 @@ impl MainWindow {
                 });
 
             Panel::central().no_frame().show(gui, |gui| {
-                let cache_events = session.take_cache_events();
+                let render_events = session.take_render_events();
                 let ctx = session.graph_context();
                 self.graph_ui
-                    .render(gui, &ctx, cache_events, &input, output);
+                    .render(gui, &ctx, render_events, &input, output);
             });
 
             self.handle_shortcuts(&input, session, output);
@@ -78,10 +78,7 @@ impl MainWindow {
 
     fn handle_app_command(&mut self, session: &mut Session, cmd: AppCommand) {
         match cmd {
-            AppCommand::New => {
-                self.graph_ui = GraphUi::default();
-                session.empty_graph();
-            }
+            AppCommand::New => session.empty_graph(),
             AppCommand::Save => session.save_graph_dialog(),
             AppCommand::SaveAs => session.save_graph_as_dialog(),
             AppCommand::Open => session.load_graph_dialog(),

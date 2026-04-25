@@ -18,7 +18,7 @@ use tokio::sync::oneshot;
 use crate::config::Config;
 use crate::gui::graph_ui::ctx::GraphContext;
 use crate::gui::graph_ui::frame_output::{EditorCommand, FrameOutput, RunCommand};
-use crate::model::argument_values_cache::{CacheEvent, NodeCache, invalidated_nodes};
+use crate::model::argument_values_cache::{CacheEvent, NodeCache, RenderEvent, invalidated_nodes};
 use crate::model::{ActionStack, ViewGraph, graph_ui_action::GraphUiAction};
 use crate::script::{self, ScriptAction, ScriptConfig, ScriptExecutor};
 use crate::ui_host::UiHost;
@@ -55,11 +55,11 @@ pub struct Session {
     func_lib: Arc<FuncLib>,
     view_graph: ViewGraph,
     execution_stats: Option<ExecutionStats>,
-    /// Cache mutations queued for the renderer to apply. The cache
-    /// itself lives on `GraphUi` (it's UI-owned texture state); this
-    /// queue is the worker→renderer fan-out for entries that move when
-    /// execution finishes or the graph is replaced.
-    cache_events: Vec<CacheEvent>,
+    /// Session→renderer signals queued for `GraphUi::render` to drain.
+    /// Carries cache mutations (texture state lives on `GraphUi`) and
+    /// the `Reset` signal pushed on graph swap so the renderer drops
+    /// per-graph state (gesture, popups, layout galleys) atomically.
+    render_events: Vec<RenderEvent>,
     status: String,
     config: Config,
 
@@ -137,7 +137,7 @@ impl Session {
             func_lib,
             view_graph: ViewGraph::default(),
             execution_stats: None,
-            cache_events: Vec::new(),
+            render_events: Vec::new(),
             status: String::new(),
             config,
             graph_dirty: true,
@@ -168,7 +168,7 @@ impl Session {
     /// shared-borrowed: every mutation goes through
     /// `GraphUiAction::apply` in `commit_actions`. The
     /// `ArgumentValuesCache` lives on the renderer; cache updates
-    /// flow through [`Session::take_cache_events`].
+    /// flow through [`Session::take_render_events`].
     pub fn graph_context(&self) -> GraphContext<'_> {
         let execution_stats = self.execution_stats.as_ref();
         GraphContext {
@@ -180,11 +180,10 @@ impl Session {
         }
     }
 
-    /// Drain pending cache mutations queued by the worker layer.
-    /// The renderer applies them to its own `ArgumentValuesCache`
-    /// at frame start.
-    pub fn take_cache_events(&mut self) -> Vec<CacheEvent> {
-        std::mem::take(&mut self.cache_events)
+    /// Drain pending Session→renderer signals (cache mutations and
+    /// graph-swap resets). `GraphUi::render` applies them at frame start.
+    pub fn take_render_events(&mut self) -> Vec<RenderEvent> {
+        std::mem::take(&mut self.render_events)
     }
 
     /// Wrap a single frame's worth of rendering with the required
@@ -338,8 +337,8 @@ impl Session {
                         stats.executed_nodes.len(),
                         stats.elapsed_secs
                     ));
-                    self.cache_events
-                        .push(CacheEvent::InvalidateNodes(invalidated_nodes(&stats)));
+                    self.render_events
+                        .push(CacheEvent::InvalidateNodes(invalidated_nodes(&stats)).into());
                     self.execution_stats = Some(stats);
                 }
                 WorkerEvent::ExecutionFinished(Err(err)) => {
@@ -349,14 +348,15 @@ impl Session {
                     node_id,
                     values: Some(values),
                 } => {
-                    self.cache_events
-                        .push(CacheEvent::Insert(node_id, NodeCache::from(values)));
+                    self.render_events
+                        .push(CacheEvent::Insert(node_id, NodeCache::from(values)).into());
                 }
                 WorkerEvent::ArgumentValues {
                     node_id,
                     values: None,
                 } => {
-                    self.cache_events.push(CacheEvent::ClearPending(node_id));
+                    self.render_events
+                        .push(CacheEvent::ClearPending(node_id).into());
                 }
                 WorkerEvent::SavePicked(Some(path)) => self.save_graph(&path),
                 WorkerEvent::SavePicked(None) => {}
@@ -489,6 +489,10 @@ impl Session {
         if let Some(worker) = &self.worker {
             let _ = worker.send(WorkerMessage::Clear);
         }
+        // Reset must precede any subsequent cache events queued in the
+        // same frame so the renderer's `GraphUi::default()` lands first
+        // and later cache events apply to the fresh state.
+        self.render_events.push(RenderEvent::Reset);
         self.refresh_graph();
     }
 
@@ -496,7 +500,7 @@ impl Session {
         self.view_graph.validate_with(&self.func_lib);
         self.graph_dirty = true;
         self.execution_stats = None;
-        self.cache_events.push(CacheEvent::Clear);
+        self.render_events.push(CacheEvent::Clear.into());
     }
 
     fn commit_actions(&mut self, output: &mut FrameOutput) -> bool {
