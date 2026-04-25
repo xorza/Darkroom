@@ -1,9 +1,8 @@
-use std::path::Path;
 use std::rc::Rc;
 
 use crate::common::StableId;
 use crate::gui::Gui;
-use crate::gui::frame_output::RunCommand;
+use crate::gui::frame_output::{EditorCommand, RunCommand};
 use crate::gui::graph_ui::GraphUi;
 use crate::gui::log_ui::LogUi;
 use crate::gui::style::Style;
@@ -18,15 +17,10 @@ use egui::vec2;
 
 #[derive(Debug)]
 pub struct MainWindow {
-    pub graph_ui: GraphUi,
-    pub log_ui: LogUi,
-    pub ui_host: EguiUiHost,
-    /// Reference `Style` at scale=1.0, loaded from `style.toml` on
-    /// startup. Serves as the canonical source for [`Gui::new`] every
-    /// frame.
-    pub style: Rc<Style>,
-
-    pub arena: bumpalo::Bump,
+    graph_ui: GraphUi,
+    log_ui: LogUi,
+    ui_host: EguiUiHost,
+    pub(crate) style: Rc<Style>,
 }
 
 impl MainWindow {
@@ -37,7 +31,6 @@ impl MainWindow {
             log_ui: LogUi,
             ui_host,
             style: Rc::new(style),
-            arena: bumpalo::Bump::new(),
         }
     }
 
@@ -46,45 +39,9 @@ impl MainWindow {
         session.empty_graph();
     }
 
-    fn save(&mut self, session: &mut Session) {
-        if let Some(path) = session.current_path().map(Path::to_path_buf) {
-            session.save_graph(&path);
-        } else {
-            self.save_as(session);
-        }
-    }
-
-    fn save_as(&mut self, session: &mut Session) {
-        let file = rfd::FileDialog::new()
-            .add_filter("Rhai", &["rhai"])
-            .add_filter("JSON", &["json"])
-            .add_filter("Lz4 compressed Rhai", &["lz4"])
-            .save_file();
-
-        if let Some(path) = file {
-            session.save_graph(&path);
-        }
-    }
-
-    pub fn load(&mut self, session: &mut Session) {
-        let file = rfd::FileDialog::new()
-            .add_filter("All supported", &["rhai", "json", "lz4"])
-            .add_filter("Rhai", &["rhai"])
-            .add_filter("JSON", &["json"])
-            .add_filter("Lz4 compressed Rhai", &["lz4"])
-            .pick_file();
-
-        if let Some(path) = file {
-            self.graph_ui = GraphUi::default();
-            session.load_graph(&path);
-        }
-    }
-
-    pub fn pre_frame(&mut self, session: &mut Session) {
-        session.drain_inbound();
-    }
-
     pub fn render(&mut self, session: &mut Session, gui: &mut Gui<'_>) {
+        session.drain_inbound();
+
         let input = gui.input_snapshot();
 
         self.handle_shortcuts(&input, session);
@@ -104,12 +61,11 @@ impl MainWindow {
                 self.log_ui.render(gui, session.status());
             });
 
-        Panel::central().no_frame().show(gui, |gui| {
-            self.graph_ui.render(gui, session, &input, &self.arena)
-        });
+        Panel::central()
+            .no_frame()
+            .show(gui, |gui| self.graph_ui.render(gui, session, &input));
 
         session.handle_output(self.graph_ui.output());
-        self.arena.reset();
     }
 
     /// Top-level "File" menu: button that anchors a popup with the
@@ -151,13 +107,13 @@ impl MainWindow {
                     self.empty(session);
                 }
                 if entry(gui, "menu_file_save", "Save") {
-                    self.save(session);
+                    session.save_graph_dialog();
                 }
                 if entry(gui, "menu_file_save_as", "Save as") {
-                    self.save_as(session);
+                    session.save_graph_as_dialog();
                 }
                 if entry(gui, "menu_file_open", "Open") {
-                    self.load(session);
+                    session.load_graph_dialog();
                 }
                 if entry(gui, "menu_file_exit", "Exit") {
                     self.ui_host.close_app();
@@ -167,19 +123,17 @@ impl MainWindow {
 
     fn handle_shortcuts(&mut self, input: &InputSnapshot, session: &mut Session) {
         if input.cmd_only(egui::Key::Z) {
-            self.graph_ui.cancel_gesture();
-            session.undo(self.graph_ui.output());
+            self.graph_ui.output().set_editor_cmd(EditorCommand::Undo);
         } else if input.cmd_shift(egui::Key::Z) {
-            self.graph_ui.cancel_gesture();
-            session.redo();
+            self.graph_ui.output().set_editor_cmd(EditorCommand::Redo);
         }
 
         if input.cmd_shift(egui::Key::S) {
-            self.save_as(session);
+            session.save_graph_as_dialog();
         } else if input.cmd_only(egui::Key::S) {
-            self.save(session);
+            session.save_graph_dialog();
         } else if input.cmd(egui::Key::O) {
-            self.load(session);
+            session.load_graph_dialog();
         }
 
         if input.cmd_shift(egui::Key::Space) {

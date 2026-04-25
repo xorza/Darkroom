@@ -736,7 +736,7 @@ mod tests {
             );
         });
 
-        let actions: Vec<_> = buf.action_stacks().flatten().cloned().collect();
+        let actions = buf.actions();
         assert_eq!(actions.len(), 1, "expected exactly one emitted action");
         match &actions[0] {
             GraphUiAction::InputChanged { after, node_id, .. } => {
@@ -769,7 +769,7 @@ mod tests {
                 &mut buf,
             );
         });
-        assert_eq!(buf.action_stacks().count(), 0);
+        assert!(buf.actions().is_empty());
     }
 
     #[test]
@@ -803,7 +803,7 @@ mod tests {
             );
         });
 
-        let actions: Vec<_> = buf.action_stacks().flatten().cloned().collect();
+        let actions = buf.actions();
         assert_eq!(actions.len(), 1);
         match &actions[0] {
             GraphUiAction::EventConnectionChanged {
@@ -849,6 +849,6 @@ mod tests {
                 &mut buf,
             );
         });
-        assert_eq!(buf.action_stacks().count(), 0);
+        assert!(buf.actions().is_empty());
     }
 }

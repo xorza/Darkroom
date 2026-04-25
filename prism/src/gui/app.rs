@@ -22,10 +22,6 @@ impl GuiApp {
 }
 
 impl eframe::App for GuiApp {
-    fn logic(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.main_window.pre_frame(&mut self.session);
-    }
-
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let mut gui = Gui::new(ui, &self.main_window.style);
         self.main_window.render(&mut self.session, &mut gui);

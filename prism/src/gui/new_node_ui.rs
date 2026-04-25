@@ -1,8 +1,5 @@
 use std::sync::Arc;
 
-use bumpalo::Bump;
-use bumpalo::collections::CollectIn;
-use bumpalo::collections::Vec as BumpVec;
 use egui::{Galley, Order, Pos2, Sense, vec2};
 use scenarium::function::Func;
 use scenarium::prelude::FuncLib;
@@ -71,7 +68,6 @@ impl NewNodeUi {
         gui: &mut Gui<'_>,
         input: &InputSnapshot,
         func_lib: &'a FuncLib,
-        arena: &Bump,
     ) -> Option<NewNodeSelection<'a>> {
         let NewNodeUiState::Open {
             position,
@@ -90,14 +86,7 @@ impl NewNodeUi {
 
         let mut selection: Option<NewNodeSelection<'a>> = None;
 
-        let popup_response = show_popup(
-            gui,
-            position,
-            from_connection,
-            func_lib,
-            arena,
-            &mut selection,
-        );
+        let popup_response = show_popup(gui, position, from_connection, func_lib, &mut selection);
 
         if should_close_popup(input, &popup_response.response.rect) || selection.is_some() {
             self.close();
@@ -112,7 +101,6 @@ fn show_popup<'a>(
     position: Pos2,
     from_connection: bool,
     func_lib: &'a FuncLib,
-    arena: &Bump,
     selection: &mut Option<NewNodeSelection<'a>>,
 ) -> egui::InnerResponse<()> {
     Area::new(StableId::new("new_node_popup"))
@@ -132,7 +120,7 @@ fn show_popup<'a>(
                         if from_connection {
                             show_const_bind_option(gui, selection);
                         }
-                        show_function_categories(gui, position, func_lib, arena, selection);
+                        show_function_categories(gui, position, func_lib, selection);
                     });
                 });
         })
@@ -180,25 +168,23 @@ fn show_function_categories<'a>(
     gui: &mut Gui<'_>,
     position: Pos2,
     func_lib: &'a FuncLib,
-    arena: &Bump,
     selection: &mut Option<NewNodeSelection<'a>>,
 ) {
-    let categories = collect_sorted_categories(func_lib, arena);
+    let categories = collect_sorted_categories(func_lib);
 
     for category in categories {
         gui.vertical(|gui| {
             Expander::new(StableId::new(("func_category", category)), category)
                 .default_open(true)
                 .show(gui, |gui| {
-                    show_category_functions(gui, position, func_lib, category, arena, selection);
+                    show_category_functions(gui, position, func_lib, category, selection);
                 });
         });
     }
 }
 
-fn collect_sorted_categories<'a>(func_lib: &'a FuncLib, arena: &'a Bump) -> BumpVec<'a, &'a str> {
-    let mut categories: BumpVec<&str> = BumpVec::new_in(arena);
-    categories.extend(func_lib.funcs.iter().map(|f| f.category.as_str()));
+fn collect_sorted_categories(func_lib: &FuncLib) -> Vec<&str> {
+    let mut categories: Vec<&str> = func_lib.funcs.iter().map(|f| f.category.as_str()).collect();
     categories.sort();
     categories.dedup();
     categories
@@ -209,21 +195,22 @@ fn show_category_functions<'a>(
     position: Pos2,
     func_lib: &'a FuncLib,
     category: &str,
-    arena: &Bump,
     selection: &mut Option<NewNodeSelection<'a>>,
 ) {
-    let funcs: BumpVec<&Func> = func_lib
+    let funcs: Vec<&Func> = func_lib
         .funcs
         .iter()
         .filter(|f| f.category == category)
-        .collect_in(arena);
+        .collect();
 
     let btn_font = gui.style.sub_font.clone();
-    let mut galleys: BumpVec<Arc<Galley>> = BumpVec::new_in(arena);
-    galleys.extend(funcs.iter().map(|func| {
-        gui.painter()
-            .layout_no_wrap(func.name.clone(), btn_font.clone(), gui.style.text_color)
-    }));
+    let galleys: Vec<Arc<Galley>> = funcs
+        .iter()
+        .map(|func| {
+            gui.painter()
+                .layout_no_wrap(func.name.clone(), btn_font.clone(), gui.style.text_color)
+        })
+        .collect();
 
     let max_width = galleys
         .iter()

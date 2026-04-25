@@ -6,7 +6,6 @@
 //! - `overlays`    — button bars, new-node popup, const-bind routing
 //! - `pan_zoom`    — viewport transforms and fit/reset targets
 
-use bumpalo::Bump;
 use common::BoolExt;
 use eframe::egui;
 use egui::{Pos2, Rect, Response, Sense, StrokeKind, Vec2};
@@ -79,13 +78,7 @@ impl GraphUi {
     ///   1. content — layout, background, connections, nodes
     ///   2. overlays — buttons, details panel, new-node popup
     ///   3. zoom/pan — only when no overlay is hovered
-    pub fn render(
-        &mut self,
-        gui: &mut Gui<'_>,
-        session: &mut Session,
-        input: &InputSnapshot,
-        arena: &Bump,
-    ) {
+    pub fn render(&mut self, gui: &mut Gui<'_>, session: &mut Session, input: &InputSnapshot) {
         self.output.clear();
 
         if input.cancel_requested() {
@@ -115,14 +108,8 @@ impl GraphUi {
                     self.handle_background_click(&ctx);
                 }
 
-                let overlay_hovered = self.render_overlays(
-                    gui,
-                    &mut ctx,
-                    input,
-                    pointer_pos,
-                    &background_response,
-                    arena,
-                );
+                let overlay_hovered =
+                    self.render_overlays(gui, &mut ctx, input, pointer_pos, &background_response);
 
                 if !overlay_hovered && (self.gesture.is_idle() || self.gesture.is_panning()) {
                     self.update_zoom_and_pan(gui, input, &ctx, &background_response, pointer_pos);
@@ -199,7 +186,6 @@ impl GraphUi {
         input: &InputSnapshot,
         pointer_pos: Option<Pos2>,
         background_response: &Response,
-        arena: &Bump,
     ) -> bool {
         let buttons = self.render_buttons(gui, ctx.autorun);
 
@@ -225,8 +211,7 @@ impl GraphUi {
             .node_details_ui
             .show(gui, ctx, &mut self.output)
             .hovered();
-        hovered |=
-            self.handle_new_node_popup(gui, input, ctx, pointer_pos, background_response, arena);
+        hovered |= self.handle_new_node_popup(gui, input, ctx, pointer_pos, background_response);
         hovered
     }
 

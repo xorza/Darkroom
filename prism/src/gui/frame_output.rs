@@ -9,6 +9,12 @@ pub enum RunCommand {
     RunOnce,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorCommand {
+    Undo,
+    Redo,
+}
+
 /// Buffer of what render emitted this frame: actions that will apply
 /// to `ViewGraph` at end-of-frame (via `Session::commit_actions`),
 /// plus side-channel signals (errors, run command, argument-values
@@ -26,6 +32,7 @@ pub(crate) struct FrameOutput {
     actions: Vec<GraphUiAction>,
     errors: Vec<ConnectionError>,
     run_cmd: Option<RunCommand>,
+    editor_cmd: Option<EditorCommand>,
     request_argument_values: Option<NodeId>,
 }
 
@@ -34,16 +41,12 @@ impl FrameOutput {
         self.actions.clear();
         self.errors.clear();
         self.run_cmd = None;
+        self.editor_cmd = None;
         self.request_argument_values = None;
     }
 
-    /// Iterates the emitted actions. Returned as an iterator of slices
-    /// to stay compatible with the old two-stack API while simplifying
-    /// the internals — callers just flatten.
-    pub fn action_stacks(&self) -> impl Iterator<Item = &'_ [GraphUiAction]> {
-        (!self.actions.is_empty())
-            .then_some(self.actions.as_slice())
-            .into_iter()
+    pub fn actions(&self) -> &[GraphUiAction] {
+        &self.actions
     }
 
     pub fn add_action(&mut self, action: GraphUiAction) {
@@ -66,6 +69,14 @@ impl FrameOutput {
         self.run_cmd = Some(cmd);
     }
 
+    pub fn editor_cmd(&self) -> Option<EditorCommand> {
+        self.editor_cmd
+    }
+
+    pub fn set_editor_cmd(&mut self, cmd: EditorCommand) {
+        self.editor_cmd = Some(cmd);
+    }
+
     pub fn request_argument_values(&self) -> Option<NodeId> {
         self.request_argument_values
     }
@@ -81,16 +92,14 @@ mod tests {
     use egui::Pos2;
 
     #[test]
-    fn actions_land_immediately_in_action_stacks() {
+    fn actions_land_immediately() {
         let mut output = FrameOutput::default();
         output.add_action(GraphUiAction::NodeMoved {
             node_id: NodeId::unique(),
             before: Pos2::ZERO,
             after: Pos2::new(10.0, 20.0),
         });
-
-        let actions: Vec<_> = output.action_stacks().flatten().collect();
-        assert_eq!(actions.len(), 1);
+        assert_eq!(output.actions().len(), 1);
     }
 
     #[test]
@@ -104,6 +113,6 @@ mod tests {
         });
 
         output.clear();
-        assert_eq!(output.action_stacks().count(), 0);
+        assert!(output.actions().is_empty());
     }
 }

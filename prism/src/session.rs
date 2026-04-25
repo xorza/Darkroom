@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -16,7 +16,7 @@ use scenarium::worker::{Worker, WorkerMessage};
 use tokio::sync::oneshot;
 
 use crate::config::Config;
-use crate::gui::frame_output::{FrameOutput, RunCommand};
+use crate::gui::frame_output::{EditorCommand, FrameOutput, RunCommand};
 use crate::gui::graph_ctx::GraphContext;
 use crate::model::{ActionStack, ArgumentValuesCache, ViewGraph, graph_ui_action::GraphUiAction};
 use crate::script::{self, ScriptAction, ScriptConfig, ScriptExecutor};
@@ -38,6 +38,10 @@ enum WorkerEvent {
         values: Option<ArgumentValues>,
     },
     Print(String),
+    /// User picked a path in the native save dialog (None = cancelled).
+    SavePicked(Option<PathBuf>),
+    /// User picked a path in the native open dialog (None = cancelled).
+    LoadPicked(Option<PathBuf>),
 }
 
 /// Frontend-agnostic editor core. Each frame, frontends must call
@@ -155,10 +159,6 @@ impl Session {
             .is_some_and(Worker::is_event_loop_started)
     }
 
-    pub fn current_path(&self) -> Option<&Path> {
-        self.config.current_path.as_deref()
-    }
-
     /// Frame-level dependency bundle for the view layer. `view_graph`
     /// is shared-borrowed (mutations go through `GraphUiAction::apply`
     /// in `commit_actions`); `argument_values_cache` is `&mut` because
@@ -204,6 +204,60 @@ impl Session {
     pub fn empty_graph(&mut self) {
         self.replace_graph(ViewGraph::default());
         self.add_status("Created new graph");
+    }
+
+    /// Save to the current path if one is set, otherwise open the
+    /// async save dialog. Result lands via `WorkerEvent::SavePicked`.
+    pub fn save_graph_dialog(&self) {
+        if let Some(path) = self.config.current_path.clone() {
+            // Synchronous save via a posted-back event keeps a single
+            // code path for "graph just got saved".
+            let tx = self.worker_tx.clone();
+            let ui = self.ui_host.clone();
+            tokio::spawn(async move {
+                let _ = tx.send(WorkerEvent::SavePicked(Some(path)));
+                ui.request_redraw();
+            });
+        } else {
+            self.save_graph_as_dialog();
+        }
+    }
+
+    /// Always open the async save dialog. Result lands via
+    /// `WorkerEvent::SavePicked`.
+    pub fn save_graph_as_dialog(&self) {
+        let tx = self.worker_tx.clone();
+        let ui = self.ui_host.clone();
+        tokio::spawn(async move {
+            let handle = rfd::AsyncFileDialog::new()
+                .add_filter("Rhai", &["rhai"])
+                .add_filter("JSON", &["json"])
+                .add_filter("Lz4 compressed Rhai", &["lz4"])
+                .save_file()
+                .await;
+            let path = handle.map(|h| h.path().to_path_buf());
+            let _ = tx.send(WorkerEvent::SavePicked(path));
+            ui.request_redraw();
+        });
+    }
+
+    /// Open the async load dialog. Result lands via
+    /// `WorkerEvent::LoadPicked`.
+    pub fn load_graph_dialog(&self) {
+        let tx = self.worker_tx.clone();
+        let ui = self.ui_host.clone();
+        tokio::spawn(async move {
+            let handle = rfd::AsyncFileDialog::new()
+                .add_filter("All supported", &["rhai", "json", "lz4"])
+                .add_filter("Rhai", &["rhai"])
+                .add_filter("JSON", &["json"])
+                .add_filter("Lz4 compressed Rhai", &["lz4"])
+                .pick_file()
+                .await;
+            let path = handle.map(|h| h.path().to_path_buf());
+            let _ = tx.send(WorkerEvent::LoadPicked(path));
+            ui.request_redraw();
+        });
     }
 
     pub fn save_graph(&mut self, path: &Path) {
@@ -273,6 +327,10 @@ impl Session {
                 } => {
                     self.argument_values_cache.clear_pending(node_id);
                 }
+                WorkerEvent::SavePicked(Some(path)) => self.save_graph(&path),
+                WorkerEvent::SavePicked(None) => {}
+                WorkerEvent::LoadPicked(Some(path)) => self.load_graph(&path),
+                WorkerEvent::LoadPicked(None) => {}
             }
         }
 
@@ -285,11 +343,7 @@ impl Session {
         }
     }
 
-    pub fn undo(&mut self, output: &mut FrameOutput) {
-        // Commit anything queued this frame before stepping back so
-        // the undo target is the pre-current-frame state.
-        self.commit_actions(output);
-
+    fn undo(&mut self) {
         let mut affects_computation = false;
         let undid = self.action_stack.undo(&mut self.view_graph, &mut |action| {
             affects_computation |= action.affects_computation();
@@ -300,7 +354,7 @@ impl Session {
         }
     }
 
-    pub fn redo(&mut self) {
+    fn redo(&mut self) {
         let mut affects_computation = false;
         let redid = self.action_stack.redo(&mut self.view_graph, &mut |action| {
             affects_computation |= action.affects_computation();
@@ -317,6 +371,16 @@ impl Session {
         }
 
         self.graph_dirty |= self.commit_actions(output);
+
+        // Process undo/redo *after* commit so any actions queued this
+        // frame land in the stack first — undo's target is the
+        // post-commit state, not the pre-frame state.
+        if let Some(cmd) = output.editor_cmd() {
+            match cmd {
+                EditorCommand::Undo => self.undo(),
+                EditorCommand::Redo => self.redo(),
+            }
+        }
 
         let mut update_if_dirty = self.autorun();
         let mut msgs: Vec<WorkerMessage> = Vec::new();
@@ -396,21 +460,21 @@ impl Session {
     }
 
     fn commit_actions(&mut self, output: &mut FrameOutput) -> bool {
-        let mut graph_updated = false;
-
-        for actions in output.action_stacks() {
-            // Apply + record. Renderer never mutates ViewGraph (GraphContext
-            // holds &ViewGraph), so this is the one site that writes each
-            // action exactly once. Cross-frame coalescing for continuous
-            // gestures (zoom/pan) happens at the undo-stack level via
-            // `GraphUiAction::gesture_key`, not here, so this loop doesn't
-            // need any pending-action state — which is what makes it safe
-            // under egui's multi-pass rendering.
-            let any_affecting = self.apply(actions);
-            self.action_stack.clear_redo();
-            self.action_stack.push_current(actions);
-            graph_updated |= any_affecting;
+        let actions = output.actions();
+        if actions.is_empty() {
+            return false;
         }
+
+        // Apply + record. Renderer never mutates ViewGraph (GraphContext
+        // holds &ViewGraph), so this is the one site that writes each
+        // action exactly once. Cross-frame coalescing for continuous
+        // gestures (zoom/pan) happens at the undo-stack level via
+        // `GraphUiAction::gesture_key` — this routine has no pending
+        // state, which is what makes it safe under egui's multi-pass
+        // rendering.
+        let graph_updated = self.apply(actions);
+        self.action_stack.clear_redo();
+        self.action_stack.push_current(actions);
 
         if graph_updated {
             self.refresh_graph();

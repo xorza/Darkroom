@@ -2,7 +2,6 @@
 //! bars, the new-node popup, and the const-binding creation path that
 //! the popup can route into.
 
-use bumpalo::Bump;
 use egui::{Align2, PointerButton, Pos2, Response, Sense, pos2, vec2};
 use scenarium::data::StaticValue;
 use scenarium::graph::Binding;
@@ -126,7 +125,6 @@ impl GraphUi {
         ctx: &GraphContext<'_>,
         pointer_pos: Option<Pos2>,
         background_response: &Response,
-        arena: &Bump,
     ) -> bool {
         if background_response.double_clicked_by(PointerButton::Primary)
             && let Some(pos) = pointer_pos
@@ -136,7 +134,7 @@ impl GraphUi {
 
         let was_open = self.new_node_ui.is_open();
 
-        if let Some(selection) = self.new_node_ui.show(gui, input, ctx.func_lib, arena) {
+        if let Some(selection) = self.new_node_ui.show(gui, input, ctx.func_lib) {
             self.handle_new_node_selection(gui, ctx, selection);
         } else if was_open && !self.new_node_ui.is_open() {
             self.cancel_gesture();
