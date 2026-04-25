@@ -67,14 +67,9 @@ pub struct GraphUi {
     /// arrives via `Session::take_cache_events`, drained at the top
     /// of `render`.
     argument_values_cache: ArgumentValuesCache,
-    output: FrameOutput,
 }
 
 impl GraphUi {
-    pub fn output(&mut self) -> &mut FrameOutput {
-        &mut self.output
-    }
-
     pub fn cancel_gesture(&mut self) {
         self.gesture.cancel();
     }
@@ -83,7 +78,13 @@ impl GraphUi {
     ///   1. content — layout, background, connections, nodes
     ///   2. overlays — buttons, details panel, new-node popup
     ///   3. zoom/pan — only when no overlay is hovered
-    pub fn render(&mut self, gui: &mut Gui<'_>, session: &mut Session, input: &InputSnapshot) {
+    pub fn render(
+        &mut self,
+        gui: &mut Gui<'_>,
+        session: &mut Session,
+        input: &InputSnapshot,
+        output: &mut FrameOutput,
+    ) {
         for event in session.take_cache_events() {
             self.argument_values_cache.apply(event);
         }
@@ -109,17 +110,30 @@ impl GraphUi {
                 // the only widget in scope at this point — would claim
                 // clicks that should have gone to nodes, triggering a
                 // spurious deselect + cancel_gesture.
-                self.render_content(gui, &ctx, input, &background_response, pointer_pos);
+                self.render_content(gui, &ctx, input, &background_response, pointer_pos, output);
 
                 if background_response.clicked() {
-                    self.handle_background_click(&ctx);
+                    self.handle_background_click(&ctx, output);
                 }
 
-                let overlay_hovered =
-                    self.render_overlays(gui, &ctx, input, pointer_pos, &background_response);
+                let overlay_hovered = self.render_overlays(
+                    gui,
+                    &ctx,
+                    input,
+                    pointer_pos,
+                    &background_response,
+                    output,
+                );
 
                 if !overlay_hovered && (self.gesture.is_idle() || self.gesture.is_panning()) {
-                    self.update_zoom_and_pan(gui, input, &ctx, &background_response, pointer_pos);
+                    self.update_zoom_and_pan(
+                        gui,
+                        input,
+                        &ctx,
+                        &background_response,
+                        pointer_pos,
+                        output,
+                    );
                 }
             });
     }
@@ -136,6 +150,7 @@ impl GraphUi {
         input: &InputSnapshot,
         background_response: &Response,
         pointer_pos: Option<Pos2>,
+        output: &mut FrameOutput,
     ) {
         gui.with_scale(ctx.view_graph.scale, |gui| {
             // Refresh galleys first so every subsequent call site
@@ -150,12 +165,12 @@ impl GraphUi {
                 gui,
                 ctx,
                 &self.graph_layout,
-                &mut self.output,
+                output,
                 &mut self.gesture,
             );
 
             self.dots_background.render(gui, ctx);
-            self.render_connections(gui, ctx);
+            self.render_connections(gui, ctx, output);
 
             // Overlay that swallows background click-through for active
             // gestures. Registered HERE — before ports — so later-registered
@@ -163,13 +178,9 @@ impl GraphUi {
             // responses still fire through. See `maybe_capture_overlay`.
             Self::maybe_capture_overlay(gui, &self.gesture);
 
-            let nodes_result = self.node_ui.render_nodes(
-                gui,
-                ctx,
-                &self.graph_layout,
-                &mut self.output,
-                &self.gesture,
-            );
+            let nodes_result =
+                self.node_ui
+                    .render_nodes(gui, ctx, &self.graph_layout, output, &self.gesture);
 
             if let Some(pointer_pos) = pointer_pos {
                 self.process_connections(
@@ -179,6 +190,7 @@ impl GraphUi {
                     pointer_pos,
                     nodes_result.port_cmd,
                     &nodes_result.broken_nodes,
+                    output,
                 );
             }
         });
@@ -193,22 +205,23 @@ impl GraphUi {
         input: &InputSnapshot,
         pointer_pos: Option<Pos2>,
         background_response: &Response,
+        output: &mut FrameOutput,
     ) -> bool {
-        let buttons = self.render_buttons(gui, ctx.autorun);
+        let buttons = self.render_buttons(gui, ctx.autorun, output);
 
         match buttons.action {
             Some(ViewButtonAction::ResetView) => {
-                self.emit_zoom_pan(ctx.view_graph, Vec2::ZERO, 1.0);
+                self.emit_zoom_pan(ctx.view_graph, Vec2::ZERO, 1.0, output);
             }
             Some(ViewButtonAction::ViewSelected) => {
                 if let Some((scale, pan)) = view_selected_node_target(gui, ctx, &self.graph_layout)
                 {
-                    self.emit_zoom_pan(ctx.view_graph, pan, scale);
+                    self.emit_zoom_pan(ctx.view_graph, pan, scale, output);
                 }
             }
             Some(ViewButtonAction::FitAll) => {
                 let (scale, pan) = fit_all_nodes_target(gui, ctx, &self.graph_layout);
-                self.emit_zoom_pan(ctx.view_graph, pan, scale);
+                self.emit_zoom_pan(ctx.view_graph, pan, scale, output);
             }
             None => {}
         }
@@ -216,9 +229,10 @@ impl GraphUi {
         let mut hovered = buttons.response.hovered();
         hovered |= self
             .node_details_ui
-            .show(gui, ctx, &mut self.argument_values_cache, &mut self.output)
+            .show(gui, ctx, &mut self.argument_values_cache, output)
             .hovered();
-        hovered |= self.handle_new_node_popup(gui, input, ctx, pointer_pos, background_response);
+        hovered |=
+            self.handle_new_node_popup(gui, input, ctx, pointer_pos, background_response, output);
         hovered
     }
 

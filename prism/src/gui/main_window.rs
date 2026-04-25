@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::common::StableId;
 use crate::gui::Gui;
-use crate::gui::frame_output::{AppCommand, EditorCommand, RunCommand};
+use crate::gui::frame_output::{AppCommand, EditorCommand, FrameOutput, RunCommand};
 use crate::gui::graph_ui::GraphUi;
 use crate::gui::log_ui::LogUi;
 use crate::gui::style::Style;
@@ -34,39 +34,40 @@ impl MainWindow {
         let mut gui = Gui::new(ui, &self.style);
         let gui = &mut gui;
 
-        // One frame = one FrameOutput lifetime. Clearing here (rather
-        // than inside `GraphUi::render`) means menu items and shortcut
-        // handlers can write to the buffer at any point in the frame
-        // without being clobbered by a later renderer's own clear.
-        self.graph_ui.output().clear();
+        let mut output = FrameOutput::default();
 
-        session.drain_inbound();
+        // Session::frame wraps drain_inbound → body → handle_output so
+        // the ordering invariant can't be skipped. The closure body is
+        // the full per-frame render: panels, graph view, shortcuts.
+        // It returns the AppCommand we then process *after*
+        // handle_output (so any pending actions land first).
+        let app_cmd = session.frame(&mut output, |session, output| {
+            let input = gui.input_snapshot();
 
-        let input = gui.input_snapshot();
-
-        Panel::top(StableId::new("top_panel"))
-            .show_separator_line(false)
-            .show(gui, |gui| {
-                gui.horizontal(|gui| {
-                    self.file_menu(gui);
+            Panel::top(StableId::new("top_panel"))
+                .show_separator_line(false)
+                .show(gui, |gui| {
+                    gui.horizontal(|gui| {
+                        self.file_menu(gui, output);
+                    });
                 });
+
+            Panel::bottom(StableId::new("status_panel"))
+                .show_separator_line(false)
+                .no_frame()
+                .show(gui, |gui| {
+                    self.log_ui.render(gui, session.status());
+                });
+
+            Panel::central().no_frame().show(gui, |gui| {
+                self.graph_ui.render(gui, session, &input, output);
             });
 
-        Panel::bottom(StableId::new("status_panel"))
-            .show_separator_line(false)
-            .no_frame()
-            .show(gui, |gui| {
-                self.log_ui.render(gui, session.status());
-            });
+            self.handle_shortcuts(&input, session, output);
 
-        Panel::central()
-            .no_frame()
-            .show(gui, |gui| self.graph_ui.render(gui, session, &input));
+            output.app_cmd()
+        });
 
-        self.handle_shortcuts(&input, session);
-
-        let app_cmd = self.graph_ui.output().app_cmd();
-        session.handle_output(self.graph_ui.output());
         if let Some(cmd) = app_cmd {
             self.handle_app_command(session, cmd);
         }
@@ -95,7 +96,7 @@ impl MainWindow {
     /// lives on [`MenuStyle`] (`gui.style.menu`). Entries are all
     /// forced to `menu.popup_min_width` so hover highlights the
     /// whole row, not just the text.
-    fn file_menu(&mut self, gui: &mut Gui<'_>) {
+    fn file_menu(&mut self, gui: &mut Gui<'_>, output: &mut FrameOutput) {
         let menu = gui.style.menu.clone();
         let file_btn = Button::new(StableId::new("menu_file"))
             .text("File")
@@ -120,7 +121,6 @@ impl MainWindow {
         PopupMenu::new(&file_btn, "menu_file_popup")
             .min_width(menu.popup_min_width)
             .show(gui, |gui| {
-                let output = self.graph_ui.output();
                 if entry(gui, "menu_file_new", "New") {
                     output.set_app_cmd(AppCommand::New);
                 }
@@ -139,9 +139,13 @@ impl MainWindow {
             });
     }
 
-    fn handle_shortcuts(&mut self, input: &InputSnapshot, session: &Session) {
+    fn handle_shortcuts(
+        &mut self,
+        input: &InputSnapshot,
+        session: &Session,
+        output: &mut FrameOutput,
+    ) {
         let autorun = session.autorun();
-        let output = self.graph_ui.output();
 
         if input.cmd_only(egui::Key::Z) {
             output.set_editor_cmd(EditorCommand::Undo);

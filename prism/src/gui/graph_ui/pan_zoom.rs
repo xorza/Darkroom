@@ -10,6 +10,7 @@ use egui::{PointerButton, Pos2, Response, Vec2};
 
 use crate::common::UiEquals;
 use crate::gui::Gui;
+use crate::gui::frame_output::FrameOutput;
 use crate::gui::gesture::Gesture;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{self, GraphLayout};
@@ -18,6 +19,7 @@ use crate::input::InputSnapshot;
 use crate::model::graph_ui_action::GraphUiAction;
 
 impl GraphUi {
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn update_zoom_and_pan(
         &mut self,
         gui: &mut Gui<'_>,
@@ -25,6 +27,7 @@ impl GraphUi {
         ctx: &GraphContext<'_>,
         background_response: &Response,
         pointer_pos: Option<Pos2>,
+        output: &mut FrameOutput,
     ) {
         self.drive_pan_interaction_state(background_response);
 
@@ -41,7 +44,7 @@ impl GraphUi {
             new_pan += background_response.drag_delta();
         }
 
-        self.emit_zoom_pan(ctx.view_graph, new_pan, new_scale);
+        self.emit_zoom_pan(ctx.view_graph, new_pan, new_scale, output);
     }
 
     fn drive_pan_interaction_state(&mut self, background_response: &Response) {
@@ -64,11 +67,12 @@ impl GraphUi {
         view_graph: &crate::model::ViewGraph,
         new_pan: Vec2,
         new_scale: f32,
+        output: &mut FrameOutput,
     ) {
         if view_graph.scale.ui_equals(new_scale) && view_graph.pan.ui_equals(new_pan) {
             return;
         }
-        self.output.add_action(GraphUiAction::ZoomPanChanged {
+        output.add_action(GraphUiAction::ZoomPanChanged {
             before_pan: view_graph.pan,
             before_scale: view_graph.scale,
             after_pan: new_pan,

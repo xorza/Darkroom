@@ -14,6 +14,7 @@ use crate::gui::Gui;
 use crate::gui::connection_ui::{
     BrokeItem, ConnectionDragUpdate, PortKind, advance_drag, disconnect_connection,
 };
+use crate::gui::frame_output::FrameOutput;
 use crate::gui::gesture::Gesture;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::PortRef;
@@ -25,14 +26,18 @@ use crate::model::EventSubscriberChange;
 use crate::model::graph_ui_action::GraphUiAction;
 
 impl GraphUi {
-    pub(super) fn handle_background_click(&mut self, ctx: &GraphContext<'_>) {
+    pub(super) fn handle_background_click(
+        &mut self,
+        ctx: &GraphContext<'_>,
+        output: &mut FrameOutput,
+    ) {
         self.cancel_gesture();
 
         if ctx.view_graph.selected_node_id.is_some() {
             let before = ctx.view_graph.selected_node_id;
             // Emit-action-only: selected_node_id is mutated by
             // `NodeSelected::apply` in commit_actions, not here.
-            self.output.add_action(GraphUiAction::NodeSelected {
+            output.add_action(GraphUiAction::NodeSelected {
                 before,
                 after: None,
             });
@@ -48,6 +53,7 @@ impl GraphUi {
         pointer_pos: Pos2,
         port_interact_cmd: PortInteractCommand,
         broken_nodes: &[NodeId],
+        output: &mut FrameOutput,
     ) {
         let primary_down = input.primary_pressed || input.primary_down;
 
@@ -72,13 +78,13 @@ impl GraphUi {
                     breaker.add_point(pointer_pos);
                 } else {
                     // Breaker released — collect results, then cancel.
-                    self.apply_breaker_results(ctx, broken_nodes);
+                    self.apply_breaker_results(ctx, broken_nodes, output);
                     self.gesture.cancel();
                 }
             }
             Gesture::DraggingConnection(drag) => {
                 let result = advance_drag(drag, pointer_pos, port_interact_cmd);
-                self.handle_drag_result(ctx, pointer_pos, result);
+                self.handle_drag_result(ctx, pointer_pos, result, output);
             }
         }
     }
@@ -106,7 +112,12 @@ impl GraphUi {
 
     /// Collects all items hit by the breaker (connections, const bindings, nodes)
     /// and applies the corresponding removals in one pass.
-    fn apply_breaker_results(&mut self, ctx: &GraphContext<'_>, broken_nodes: &[NodeId]) {
+    fn apply_breaker_results(
+        &mut self,
+        ctx: &GraphContext<'_>,
+        broken_nodes: &[NodeId],
+        output: &mut FrameOutput,
+    ) {
         let items: Vec<BrokeItem> = self
             .connections
             .broke_iter()
@@ -118,11 +129,11 @@ impl GraphUi {
         for item in items {
             match item {
                 BrokeItem::Connection(key) => {
-                    disconnect_connection(key, ctx, &mut self.output);
+                    disconnect_connection(key, ctx, output);
                 }
                 BrokeItem::Node(node_id) => {
                     let action = GraphUiAction::node_removal(ctx.view_graph, &node_id);
-                    self.output.add_action(action);
+                    output.add_action(action);
                 }
             }
         }
@@ -133,6 +144,7 @@ impl GraphUi {
         ctx: &GraphContext<'_>,
         pointer_pos: Pos2,
         result: ConnectionDragUpdate,
+        output: &mut FrameOutput,
     ) {
         match result {
             ConnectionDragUpdate::InProgress => {}
@@ -154,7 +166,7 @@ impl GraphUi {
                 input_port,
                 output_port,
             } => {
-                self.apply_connection(ctx, input_port, output_port);
+                self.apply_connection(ctx, input_port, output_port, output);
                 self.gesture.cancel();
             }
         }
@@ -165,34 +177,40 @@ impl GraphUi {
         ctx: &GraphContext<'_>,
         input_port: PortRef,
         output_port: PortRef,
+        output: &mut FrameOutput,
     ) {
         assert_eq!(input_port.kind, output_port.kind.opposite());
 
         match output_port.kind {
             PortKind::Output => {
                 match build_data_connection_action(ctx.view_graph, input_port, output_port) {
-                    Ok(action) => self.output.add_action(action),
-                    Err(err) => self.output.add_error(err),
+                    Ok(action) => output.add_action(action),
+                    Err(err) => output.add_error(err),
                 }
             }
             PortKind::Event => {
                 match build_event_connection_action(ctx.view_graph, input_port, output_port) {
-                    Ok(Some(action)) => self.output.add_action(action),
+                    Ok(Some(action)) => output.add_action(action),
                     Ok(None) => {}
-                    Err(err) => self.output.add_error(err),
+                    Err(err) => output.add_error(err),
                 }
             }
             _ => unreachable!(),
         }
     }
 
-    pub(super) fn render_connections(&mut self, gui: &mut Gui<'_>, ctx: &GraphContext<'_>) {
+    pub(super) fn render_connections(
+        &mut self,
+        gui: &mut Gui<'_>,
+        ctx: &GraphContext<'_>,
+        output: &mut FrameOutput,
+    ) {
         self.connections.render(
             gui,
             ctx,
             &self.graph_layout,
             &self.gesture,
-            &mut self.output,
+            output,
             self.gesture.breaker(),
         );
 

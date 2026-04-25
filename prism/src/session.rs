@@ -187,6 +187,23 @@ impl Session {
         std::mem::take(&mut self.cache_events)
     }
 
+    /// Wrap a single frame's worth of rendering with the required
+    /// drain → render → handle_output ordering. Frontends call this
+    /// once per frame; the closure body is the renderer's full work
+    /// (panels, graph view, shortcuts) and may freely read or queue
+    /// commands via the supplied `&mut FrameOutput`.
+    pub fn frame<R>(
+        &mut self,
+        output: &mut FrameOutput,
+        f: impl FnOnce(&mut Session, &mut FrameOutput) -> R,
+    ) -> R {
+        self.drain_inbound();
+        output.clear();
+        let result = f(self, output);
+        self.handle_output(output);
+        result
+    }
+
     /// Appends a status line. Keeps the buffer below [`STATUS_CAP`]
     /// by draining oldest content.
     pub fn add_status(&mut self, message: impl AsRef<str>) {

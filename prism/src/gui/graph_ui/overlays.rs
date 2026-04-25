@@ -9,7 +9,7 @@ use scenarium::graph::Binding;
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::connection_ui::PortKind;
-use crate::gui::frame_output::RunCommand;
+use crate::gui::frame_output::{FrameOutput, RunCommand};
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_ui::{ButtonResult, GraphUi, ViewButtonAction};
 use crate::gui::new_node_ui::NewNodeSelection;
@@ -19,7 +19,12 @@ use crate::model;
 use crate::model::graph_ui_action::GraphUiAction;
 
 impl GraphUi {
-    pub(super) fn render_buttons(&mut self, gui: &mut Gui<'_>, autorun: bool) -> ButtonResult {
+    pub(super) fn render_buttons(
+        &mut self,
+        gui: &mut Gui<'_>,
+        autorun: bool,
+        output: &mut FrameOutput,
+    ) -> ButtonResult {
         let mut autorun = autorun;
         let rect = gui.rect;
         let mut action: Option<ViewButtonAction> = None;
@@ -90,7 +95,7 @@ impl GraphUi {
                     gui.horizontal(|gui| {
                         let response = Button::new(StableId::new("run_btn")).text("run").show(gui);
                         if response.clicked() {
-                            self.output.set_run_cmd(RunCommand::RunOnce);
+                            output.set_run_cmd(RunCommand::RunOnce);
                         }
 
                         let response = Button::new(StableId::new("autorun_btn"))
@@ -99,7 +104,7 @@ impl GraphUi {
                             .show(gui);
 
                         if response.clicked() {
-                            self.output.set_run_cmd(if autorun {
+                            output.set_run_cmd(if autorun {
                                 RunCommand::StartAutorun
                             } else {
                                 RunCommand::StopAutorun
@@ -125,6 +130,7 @@ impl GraphUi {
         ctx: &GraphContext<'_>,
         pointer_pos: Option<Pos2>,
         background_response: &Response,
+        output: &mut FrameOutput,
     ) -> bool {
         if background_response.double_clicked_by(PointerButton::Primary)
             && let Some(pos) = pointer_pos
@@ -135,7 +141,7 @@ impl GraphUi {
         let was_open = self.new_node_ui.is_open();
 
         if let Some(selection) = self.new_node_ui.show(gui, input, ctx.func_lib) {
-            self.handle_new_node_selection(gui, ctx, selection);
+            self.handle_new_node_selection(gui, ctx, selection, output);
         } else if was_open && !self.new_node_ui.is_open() {
             self.cancel_gesture();
         }
@@ -148,6 +154,7 @@ impl GraphUi {
         gui: &Gui<'_>,
         ctx: &GraphContext<'_>,
         selection: NewNodeSelection,
+        output: &mut FrameOutput,
     ) {
         match selection {
             NewNodeSelection::Func { func, position } => {
@@ -161,17 +168,16 @@ impl GraphUi {
                     pos: graph_pos.to_pos2(),
                 };
 
-                self.output
-                    .add_action(GraphUiAction::NodeAdded { view_node, node });
+                output.add_action(GraphUiAction::NodeAdded { view_node, node });
             }
             NewNodeSelection::ConstBind => {
-                self.create_const_binding(ctx);
+                self.create_const_binding(ctx, output);
                 self.cancel_gesture();
             }
         }
     }
 
-    fn create_const_binding(&mut self, ctx: &GraphContext<'_>) {
+    fn create_const_binding(&mut self, ctx: &GraphContext<'_>, output: &mut FrameOutput) {
         let Some(connection_drag) = self.gesture.drag() else {
             return;
         };
@@ -195,7 +201,7 @@ impl GraphUi {
             .unwrap_or_else(|| StaticValue::from(&func_input.data_type))
             .into();
 
-        self.output.add_action(GraphUiAction::InputChanged {
+        output.add_action(GraphUiAction::InputChanged {
             node_id: input_port.node_id,
             input_idx: input_port.port_idx,
             before,
