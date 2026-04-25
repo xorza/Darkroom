@@ -16,9 +16,9 @@ pub enum EditorCommand {
 }
 
 /// Application-level intents emitted by menu items or keyboard
-/// shortcuts. Routed through `FrameOutput` so menu and shortcut paths
-/// produce identical timing — `MainWindow::handle_app_command` is the
-/// single application site.
+/// shortcuts. Routed as a MainWindow-local `Option<AppCommand>` (not
+/// through `FrameOutput`) so the renderer can't reach
+/// `AppCommand::Exit` from inside a graph widget.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppCommand {
     New,
@@ -30,8 +30,8 @@ pub enum AppCommand {
 
 /// Buffer of what render emitted this frame: actions that will apply
 /// to `ViewGraph` at end-of-frame (via `Session::commit_actions`),
-/// plus side-channel signals (errors, run command, argument-values
-/// request).
+/// plus side-channel signals consumed by `Session::handle_output`
+/// (errors, run command, editor undo/redo, argument-values request).
 ///
 /// Every action is *immediate* — it lands in `actions` on emission
 /// and is applied + recorded at end of frame. Cross-frame coalescing
@@ -40,13 +40,14 @@ pub enum AppCommand {
 /// keeping the action buffer stateless across frames makes it
 /// compatible with egui's multi-pass rendering, where the same UI
 /// callback can run more than once per logical frame.
+///
+/// `AppCommand` is intentionally *not* a field here — see [`AppCommand`].
 #[derive(Debug, Default)]
 pub(crate) struct FrameOutput {
     actions: Vec<GraphUiAction>,
     errors: Vec<ConnectionError>,
     run_cmd: Option<RunCommand>,
     editor_cmd: Option<EditorCommand>,
-    app_cmd: Option<AppCommand>,
     request_argument_values: Option<NodeId>,
 }
 
@@ -56,7 +57,6 @@ impl FrameOutput {
         self.errors.clear();
         self.run_cmd = None;
         self.editor_cmd = None;
-        self.app_cmd = None;
         self.request_argument_values = None;
     }
 
@@ -90,14 +90,6 @@ impl FrameOutput {
 
     pub fn set_editor_cmd(&mut self, cmd: EditorCommand) {
         self.editor_cmd = Some(cmd);
-    }
-
-    pub fn app_cmd(&self) -> Option<AppCommand> {
-        self.app_cmd
-    }
-
-    pub fn set_app_cmd(&mut self, cmd: AppCommand) {
-        self.app_cmd = Some(cmd);
     }
 
     pub fn request_argument_values(&self) -> Option<NodeId> {

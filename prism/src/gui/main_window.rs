@@ -37,18 +37,20 @@ impl MainWindow {
         let mut output = FrameOutput::default();
 
         // Session::frame wraps drain_inbound → body → handle_output so
-        // the ordering invariant can't be skipped. The closure body is
-        // the full per-frame render: panels, graph view, shortcuts.
-        // It returns the AppCommand we then process *after*
-        // handle_output (so any pending actions land first).
+        // the ordering invariant can't be skipped. The closure returns
+        // any pending AppCommand (from file menu or shortcut), which
+        // we route *after* handle_output so queued actions land first.
+        // `AppCommand` is intentionally not on `FrameOutput` — the
+        // renderer has no type-level path to emit one.
         let app_cmd = session.frame(&mut output, |session, output| {
             let input = gui.input_snapshot();
 
+            let mut menu_cmd = None;
             Panel::top(StableId::new("top_panel"))
                 .show_separator_line(false)
                 .show(gui, |gui| {
                     gui.horizontal(|gui| {
-                        self.file_menu(gui, output);
+                        menu_cmd = self.file_menu(gui);
                     });
                 });
 
@@ -66,9 +68,11 @@ impl MainWindow {
                     .render(gui, &ctx, render_events, &input, output);
             });
 
-            shortcut_commands(&input, session.autorun()).apply(output);
-
-            output.app_cmd()
+            // Shortcut wins over menu when both fire in the same frame —
+            // a Cmd+Q held while the File menu is open should still exit.
+            shortcut_commands(&input, session.autorun())
+                .apply(output)
+                .or(menu_cmd)
         });
 
         if let Some(cmd) = app_cmd {
@@ -96,7 +100,7 @@ impl MainWindow {
     /// lives on [`MenuStyle`] (`gui.style.menu`). Entries are all
     /// forced to `menu.popup_min_width` so hover highlights the
     /// whole row, not just the text.
-    fn file_menu(&mut self, gui: &mut Gui<'_>, output: &mut FrameOutput) {
+    fn file_menu(&mut self, gui: &mut Gui<'_>) -> Option<AppCommand> {
         let menu = gui.style.menu.clone();
         let file_btn = Button::new(StableId::new("menu_file"))
             .text("File")
@@ -121,21 +125,24 @@ impl MainWindow {
         PopupMenu::new(&file_btn, "menu_file_popup")
             .min_width(menu.popup_min_width)
             .show(gui, |gui| {
+                let mut cmd = None;
                 if entry(gui, "menu_file_new", "New") {
-                    output.set_app_cmd(AppCommand::New);
+                    cmd = Some(AppCommand::New);
                 }
                 if entry(gui, "menu_file_save", "Save") {
-                    output.set_app_cmd(AppCommand::Save);
+                    cmd = Some(AppCommand::Save);
                 }
                 if entry(gui, "menu_file_save_as", "Save as") {
-                    output.set_app_cmd(AppCommand::SaveAs);
+                    cmd = Some(AppCommand::SaveAs);
                 }
                 if entry(gui, "menu_file_open", "Open") {
-                    output.set_app_cmd(AppCommand::Open);
+                    cmd = Some(AppCommand::Open);
                 }
                 if entry(gui, "menu_file_exit", "Exit") {
-                    output.set_app_cmd(AppCommand::Exit);
+                    cmd = Some(AppCommand::Exit);
                 }
-            });
+                cmd
+            })
+            .flatten()
     }
 }

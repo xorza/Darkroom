@@ -18,16 +18,19 @@ pub(super) struct ShortcutCommands {
 }
 
 impl ShortcutCommands {
-    pub(super) fn apply(self, output: &mut FrameOutput) {
+    /// Route this frame's shortcut commands: `run_cmd`/`editor_cmd`
+    /// flow through `FrameOutput` (consumed by `Session::handle_output`
+    /// at end of frame), `app_cmd` is returned for MainWindow to route
+    /// locally — *not* through `FrameOutput`, so the renderer has no
+    /// type-level way to emit `AppCommand`.
+    pub(super) fn apply(self, output: &mut FrameOutput) -> Option<AppCommand> {
         if let Some(cmd) = self.run_cmd {
             output.set_run_cmd(cmd);
-        }
-        if let Some(cmd) = self.app_cmd {
-            output.set_app_cmd(cmd);
         }
         if let Some(cmd) = self.editor_cmd {
             output.set_editor_cmd(cmd);
         }
+        self.app_cmd
     }
 }
 
@@ -95,6 +98,36 @@ mod tests {
         assert_eq!(cmds.editor_cmd, Some(EditorCommand::Undo));
         assert_eq!(cmds.app_cmd, None);
         assert_eq!(cmds.run_cmd, None);
+    }
+
+    /// `apply` returns `app_cmd` rather than routing it through
+    /// FrameOutput — the renderer's view of FrameOutput must stay
+    /// AppCommand-free.
+    #[test]
+    fn apply_returns_app_cmd_not_via_frame_output() {
+        let cmds = shortcut_commands(&input_with(Modifiers::COMMAND, &[Key::Q]), false);
+        let mut output = FrameOutput::default();
+        assert_eq!(cmds.apply(&mut output), Some(AppCommand::Exit));
+        // FrameOutput has no setter for app_cmd; editor/run remain unset.
+        assert!(output.editor_cmd().is_none());
+        assert!(output.run_cmd().is_none());
+    }
+
+    /// `apply` keeps editor/run commands flowing through FrameOutput
+    /// (Session::handle_output reads them at end of frame).
+    #[test]
+    fn apply_routes_editor_and_run_through_frame_output() {
+        let mut output = FrameOutput::default();
+
+        let app_cmd =
+            shortcut_commands(&input_with(Modifiers::COMMAND, &[Key::Z]), false).apply(&mut output);
+        assert_eq!(output.editor_cmd(), Some(EditorCommand::Undo));
+        assert_eq!(app_cmd, None);
+
+        let app_cmd = shortcut_commands(&input_with(Modifiers::COMMAND, &[Key::Space]), false)
+            .apply(&mut output);
+        assert_eq!(output.run_cmd(), Some(RunCommand::RunOnce));
+        assert_eq!(app_cmd, None);
     }
 
     #[test]
