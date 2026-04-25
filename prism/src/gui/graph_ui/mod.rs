@@ -12,25 +12,32 @@ use egui::{Pos2, Rect, Response, Sense, StrokeKind, Vec2};
 
 use crate::common::StableId;
 use crate::gui::Gui;
-use crate::gui::connection_ui::ConnectionUi;
-use crate::gui::frame_output::FrameOutput;
-use crate::gui::gesture::Gesture;
-use crate::gui::graph_background::GraphBackgroundRenderer;
-use crate::gui::graph_ctx::GraphContext;
-use crate::gui::graph_layout::GraphLayout;
-use crate::gui::new_node_ui::NewNodeUi;
-use crate::gui::node_details_ui::NodeDetailsUi;
-use crate::gui::node_ui::NodeUi;
+use crate::gui::graph_ui::background::GraphBackgroundRenderer;
+use crate::gui::graph_ui::connections::ConnectionUi;
+use crate::gui::graph_ui::ctx::GraphContext;
+use crate::gui::graph_ui::frame_output::FrameOutput;
+use crate::gui::graph_ui::gesture::Gesture;
+use crate::gui::graph_ui::layout::GraphLayout;
+use crate::gui::graph_ui::nodes::NodeUi;
+use crate::gui::graph_ui::nodes::details::NodeDetailsUi;
+use crate::gui::graph_ui::nodes::new_node::NewNodeUi;
 use crate::gui::widgets::HitRegion;
 use crate::input::InputSnapshot;
 use crate::model::ArgumentValuesCache;
 use crate::session::Session;
 
-mod connections;
+pub mod background;
+pub mod connections;
+pub mod ctx;
+pub mod frame_output;
+pub mod gesture;
+pub mod layout;
+pub mod nodes;
 mod overlays;
 mod pan_zoom;
+pub mod port;
 
-pub(crate) use connections::ConnectionError;
+pub(crate) use connections::handlers::ConnectionError;
 use pan_zoom::{fit_all_nodes_target, view_selected_node_target};
 
 pub(crate) const MIN_ZOOM: f32 = 0.2;
@@ -287,13 +294,13 @@ impl GraphUi {
 
 #[cfg(test)]
 mod tests {
-    use super::connections::{
+    use super::connections::handlers::{
         build_data_connection_action, build_event_connection_action, handle_idle,
     };
     use super::*;
-    use crate::gui::connection_ui::PortKind;
-    use crate::gui::graph_layout::{PortInfo, PortRef};
-    use crate::gui::node_ui::PortInteractCommand;
+    use crate::gui::graph_ui::nodes::PortInteractCommand;
+    use crate::gui::graph_ui::port::PortKind;
+    use crate::gui::graph_ui::port::{PortInfo, PortRef};
     use crate::model;
     use crate::model::EventSubscriberChange;
     use crate::model::graph_ui_action::GraphUiAction;

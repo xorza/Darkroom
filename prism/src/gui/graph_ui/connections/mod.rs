@@ -1,3 +1,7 @@
+pub mod bezier;
+pub mod breaker;
+pub mod handlers;
+
 use common::key_index_vec::{CompactInsert, KeyIndexKey, KeyIndexVec};
 use egui::{PointerButton, Pos2, Sense};
 use scenarium::graph::{NodeId, PortAddress};
@@ -5,13 +9,14 @@ use scenarium::prelude::Binding;
 use scenarium::worker::EventRef;
 
 use crate::gui::Gui;
-use crate::gui::connection_bezier::{ConnectionBezier, ConnectionBezierStyle};
-use crate::gui::connection_breaker::ConnectionBreaker;
-use crate::gui::frame_output::FrameOutput;
-use crate::gui::gesture::Gesture;
-use crate::gui::graph_ctx::GraphContext;
-use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
-use crate::gui::node_ui::PortInteractCommand;
+use crate::gui::graph_ui::connections::bezier::{ConnectionBezier, ConnectionBezierStyle};
+use crate::gui::graph_ui::connections::breaker::ConnectionBreaker;
+use crate::gui::graph_ui::ctx::GraphContext;
+use crate::gui::graph_ui::frame_output::FrameOutput;
+use crate::gui::graph_ui::gesture::Gesture;
+use crate::gui::graph_ui::layout::GraphLayout;
+use crate::gui::graph_ui::nodes::PortInteractCommand;
+use crate::gui::graph_ui::port::{PortInfo, PortKind, PortRef};
 use crate::model::EventSubscriberChange;
 use crate::model::graph_ui_action::GraphUiAction;
 
@@ -35,29 +40,6 @@ pub(crate) enum ConnectionKey {
 pub(crate) enum BrokeItem {
     Connection(ConnectionKey),
     Node(NodeId),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum PortKind {
-    Input,
-    Output,
-    Trigger,
-    Event,
-}
-
-impl PortKind {
-    pub fn opposite(&self) -> Self {
-        match self {
-            PortKind::Input => PortKind::Output,
-            PortKind::Output => PortKind::Input,
-            PortKind::Trigger => PortKind::Event,
-            PortKind::Event => PortKind::Trigger,
-        }
-    }
-
-    fn is_source(&self) -> bool {
-        matches!(self, PortKind::Output | PortKind::Event)
-    }
 }
 
 // === ConnectionDrag ===
@@ -153,7 +135,7 @@ pub(crate) struct ConnectionUi {
 
     /// Cached mesh buffer for the in-flight drag preview — reused across
     /// frames while a drag is active. The drag data itself lives in
-    /// [`crate::gui::gesture::Gesture::DraggingConnection`].
+    /// [`crate::gui::graph_ui::gesture::Gesture::DraggingConnection`].
     temp_connection_bezier: ConnectionBezier,
 }
 
@@ -274,7 +256,7 @@ impl ConnectionUi {
     }
 
     /// Draws the in-flight connection preview for a drag owned by
-    /// [`crate::gui::gesture::Gesture`].
+    /// [`crate::gui::graph_ui::gesture::Gesture`].
     pub(crate) fn render_temp_connection(
         &mut self,
         gui: &mut Gui<'_>,
@@ -346,7 +328,7 @@ impl ConnectionUi {
 
 /// Advances an in-flight connection drag based on the pointer and the latest
 /// port interaction command. The drag lives inside
-/// [`crate::gui::gesture::Gesture::DraggingConnection`] — this
+/// [`crate::gui::graph_ui::gesture::Gesture::DraggingConnection`] — this
 /// is a free function so the caller owns both the drag and any transition
 /// decision (e.g. cancelling the interaction on `Finished`).
 pub(crate) fn advance_drag(
@@ -570,7 +552,7 @@ fn finish_drag(drag: &ConnectionDrag) -> ConnectionDragUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gui::graph_layout::PortInfo;
+    use crate::gui::graph_ui::port::PortInfo;
     use crate::model::{ViewGraph, ViewNode};
     use scenarium::function::FuncId;
     use scenarium::graph::{Event, Input, Node, NodeBehavior};

@@ -12,23 +12,10 @@ use crate::{
 };
 
 pub mod app;
-pub mod connection_bezier;
-pub mod connection_breaker;
-pub mod connection_ui;
-pub mod const_bind_ui;
-pub mod frame_output;
-pub mod gesture;
-pub mod graph_background;
-pub mod graph_ctx;
-pub mod graph_layout;
 pub mod graph_ui;
 pub mod image_utils;
 pub mod log_ui;
 pub mod main_window;
-pub mod new_node_ui;
-pub mod node_details_ui;
-pub mod node_layout;
-pub mod node_ui;
 pub mod style;
 pub mod ui_host;
 pub mod value_editor;

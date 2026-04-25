@@ -6,8 +6,8 @@ use scenarium::prelude::Func;
 
 use crate::common::StableId;
 use crate::gui::Gui;
-use crate::gui::frame_output::FrameOutput;
-use crate::gui::graph_ctx::GraphContext;
+use crate::gui::graph_ui::ctx::GraphContext;
+use crate::gui::graph_ui::frame_output::FrameOutput;
 use crate::gui::image_utils::to_color_image;
 use crate::gui::widgets::{
     Frame, HitRegion, Image as ImageWidget, Label, PositionedUi, ScrollArea, Separator, Space,

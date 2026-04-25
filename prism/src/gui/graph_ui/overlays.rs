@@ -8,11 +8,11 @@ use scenarium::graph::Binding;
 
 use crate::common::StableId;
 use crate::gui::Gui;
-use crate::gui::connection_ui::PortKind;
-use crate::gui::frame_output::{FrameOutput, RunCommand};
-use crate::gui::graph_ctx::GraphContext;
+use crate::gui::graph_ui::ctx::GraphContext;
+use crate::gui::graph_ui::frame_output::{FrameOutput, RunCommand};
+use crate::gui::graph_ui::nodes::new_node::NewNodeSelection;
+use crate::gui::graph_ui::port::PortKind;
 use crate::gui::graph_ui::{ButtonResult, GraphUi, ViewButtonAction};
-use crate::gui::new_node_ui::NewNodeSelection;
 use crate::gui::widgets::{Button, Frame, Layout, PositionedUi};
 use crate::input::InputSnapshot;
 use crate::model;

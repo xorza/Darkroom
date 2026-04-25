@@ -3,8 +3,8 @@ use egui::{Color32, Pos2, Rect, Response, Sense};
 use crate::common::polyline_mesh::PolylineMesh;
 use crate::common::{StableId, UiEquals, bezier_helper};
 use crate::gui::Gui;
-use crate::gui::connection_breaker::ConnectionBreaker;
-use crate::gui::connection_ui::PortKind;
+use crate::gui::graph_ui::connections::breaker::ConnectionBreaker;
+use crate::gui::graph_ui::port::PortKind;
 use crate::gui::style::Style;
 use crate::gui::widgets::HitRegion;
 

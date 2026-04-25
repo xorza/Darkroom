@@ -24,7 +24,7 @@ use egui::{Color32, FontFamily, FontId, Margin, Shadow, Stroke, Vec2};
 use serde::{Deserialize, Serialize};
 
 use crate::common::UiEquals;
-use crate::gui::connection_ui::PortKind;
+use crate::gui::graph_ui::port::PortKind;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]

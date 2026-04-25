@@ -10,9 +10,9 @@
 use egui::{Pos2, Vec2};
 use scenarium::graph::NodeId;
 
-use crate::gui::connection_breaker::ConnectionBreaker;
-use crate::gui::connection_ui::ConnectionDrag;
-use crate::gui::graph_layout::PortInfo;
+use crate::gui::graph_ui::connections::ConnectionDrag;
+use crate::gui::graph_ui::connections::breaker::ConnectionBreaker;
+use crate::gui::graph_ui::port::PortInfo;
 
 /// In-flight node drag. `start_pos` is the node's position at drag start
 /// (used as the `before` of the emitted `NodeMoved` action); `offset`
@@ -133,8 +133,8 @@ impl Gesture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gui::connection_ui::PortKind;
-    use crate::gui::graph_layout::PortRef;
+    use crate::gui::graph_ui::port::PortKind;
+    use crate::gui::graph_ui::port::PortRef;
     use scenarium::graph::NodeId;
 
     fn dummy_port() -> PortInfo {

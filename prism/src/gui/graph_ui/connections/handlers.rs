@@ -11,22 +11,22 @@ use scenarium::prelude::{Binding, PortAddress};
 
 use crate::common::StableId;
 use crate::gui::Gui;
-use crate::gui::connection_ui::{
+use crate::gui::graph_ui::GraphUi;
+use crate::gui::graph_ui::connections::{
     BrokeItem, ConnectionDragUpdate, PortKind, advance_drag, disconnect_connection,
 };
-use crate::gui::frame_output::FrameOutput;
-use crate::gui::gesture::Gesture;
-use crate::gui::graph_ctx::GraphContext;
-use crate::gui::graph_layout::PortRef;
-use crate::gui::graph_ui::GraphUi;
-use crate::gui::node_ui::PortInteractCommand;
+use crate::gui::graph_ui::ctx::GraphContext;
+use crate::gui::graph_ui::frame_output::FrameOutput;
+use crate::gui::graph_ui::gesture::Gesture;
+use crate::gui::graph_ui::nodes::PortInteractCommand;
+use crate::gui::graph_ui::port::PortRef;
 use crate::gui::widgets::HitRegion;
 use crate::input::InputSnapshot;
 use crate::model::EventSubscriberChange;
 use crate::model::graph_ui_action::GraphUiAction;
 
 impl GraphUi {
-    pub(super) fn handle_background_click(
+    pub(in crate::gui::graph_ui) fn handle_background_click(
         &mut self,
         ctx: &GraphContext<'_>,
         output: &mut FrameOutput,
@@ -45,7 +45,7 @@ impl GraphUi {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn process_connections(
+    pub(in crate::gui::graph_ui) fn process_connections(
         &mut self,
         input: &InputSnapshot,
         ctx: &GraphContext<'_>,
@@ -97,7 +97,7 @@ impl GraphUi {
     /// a higher egui z-order than this overlay and still receive their
     /// click/drag events. That subtlety is why this lives here and not
     /// inside `process_connections`.
-    pub(super) fn maybe_capture_overlay(gui: &mut Gui<'_>, gesture: &Gesture) {
+    pub(in crate::gui::graph_ui) fn maybe_capture_overlay(gui: &mut Gui<'_>, gesture: &Gesture) {
         if matches!(
             gesture,
             Gesture::BreakingConnections(_) | Gesture::DraggingConnection(_)
@@ -199,7 +199,7 @@ impl GraphUi {
         }
     }
 
-    pub(super) fn render_connections(
+    pub(in crate::gui::graph_ui) fn render_connections(
         &mut self,
         gui: &mut Gui<'_>,
         ctx: &GraphContext<'_>,
@@ -261,7 +261,7 @@ impl std::fmt::Display for ConnectionError {
 /// gesture command. Kept as a free function so it can borrow
 /// `gesture` mutably without the enclosing `process_connections`
 /// match needing to drop its discriminant borrow.
-pub(super) fn handle_idle(
+pub(in crate::gui::graph_ui) fn handle_idle(
     gesture: &mut Gesture,
     pointer_pos: Pos2,
     primary_down: bool,
@@ -282,7 +282,7 @@ pub(super) fn handle_idle(
 /// Builds the `InputChanged` action that would bind `input_port` to
 /// `output_port`. No mutation — `apply` handles it. Always produces
 /// an action; re-binding to the same source is a harmless overwrite.
-pub(super) fn build_data_connection_action(
+pub(in crate::gui::graph_ui) fn build_data_connection_action(
     view_graph: &crate::model::ViewGraph,
     input_port: PortRef,
     output_port: PortRef,
@@ -322,7 +322,7 @@ pub(super) fn build_data_connection_action(
 /// Returns `Ok(None)` when the subscriber is already present —
 /// event subscriptions are list membership, unlike data bindings
 /// which are overwrites.
-pub(super) fn build_event_connection_action(
+pub(in crate::gui::graph_ui) fn build_event_connection_action(
     view_graph: &crate::model::ViewGraph,
     input_port: PortRef,
     output_port: PortRef,

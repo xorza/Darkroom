@@ -1,14 +1,17 @@
+pub mod const_bind;
+pub mod details;
+pub mod new_node;
+
 use crate::common::StableId;
 use crate::common::primitives::draw_circle_with_gradient_shadow;
 use crate::gui::Gui;
-use crate::gui::connection_breaker::ConnectionBreaker;
-use crate::gui::connection_ui::PortKind;
-use crate::gui::const_bind_ui::ConstBindUi;
-use crate::gui::frame_output::FrameOutput;
-use crate::gui::gesture::Gesture;
-use crate::gui::graph_ctx::GraphContext;
-use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
-use crate::gui::node_layout::{NodeGalleys, NodeLayout};
+use crate::gui::graph_ui::connections::breaker::ConnectionBreaker;
+use crate::gui::graph_ui::ctx::GraphContext;
+use crate::gui::graph_ui::frame_output::FrameOutput;
+use crate::gui::graph_ui::gesture::Gesture;
+use crate::gui::graph_ui::layout::{GraphLayout, NodeGalleys, NodeLayout};
+use crate::gui::graph_ui::nodes::const_bind::ConstBindUi;
+use crate::gui::graph_ui::port::{PortInfo, PortKind, PortRef};
 use crate::gui::widgets::{Button, HitRegion};
 use crate::model::graph_ui_action::GraphUiAction;
 use crate::model::node_execution::NodeExecutionInfo;

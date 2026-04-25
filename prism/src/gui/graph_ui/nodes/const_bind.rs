@@ -5,11 +5,12 @@ use scenarium::prelude::Func;
 
 use crate::common::StableId;
 use crate::gui::Gui;
-use crate::gui::connection_bezier::ConnectionBezierStyle;
-use crate::gui::connection_breaker::ConnectionBreaker;
-use crate::gui::connection_ui::{ConnectionCurve, ConnectionKey, PortKind};
-use crate::gui::frame_output::FrameOutput;
-use crate::gui::node_layout::NodeLayout;
+use crate::gui::graph_ui::connections::bezier::ConnectionBezierStyle;
+use crate::gui::graph_ui::connections::breaker::ConnectionBreaker;
+use crate::gui::graph_ui::connections::{ConnectionCurve, ConnectionKey};
+use crate::gui::graph_ui::frame_output::FrameOutput;
+use crate::gui::graph_ui::layout::NodeLayout;
+use crate::gui::graph_ui::port::PortKind;
 use crate::gui::style::DragValueStyle;
 use crate::gui::value_editor::StaticValueEditor;
 use crate::model::graph_ui_action::GraphUiAction;

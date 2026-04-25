@@ -10,10 +10,10 @@ use egui::{PointerButton, Pos2, Response, Vec2};
 
 use crate::common::UiEquals;
 use crate::gui::Gui;
-use crate::gui::frame_output::FrameOutput;
-use crate::gui::gesture::Gesture;
-use crate::gui::graph_ctx::GraphContext;
-use crate::gui::graph_layout::{self, GraphLayout};
+use crate::gui::graph_ui::ctx::GraphContext;
+use crate::gui::graph_ui::frame_output::FrameOutput;
+use crate::gui::graph_ui::gesture::Gesture;
+use crate::gui::graph_ui::layout::{self, GraphLayout};
 use crate::gui::graph_ui::{GraphUi, MAX_ZOOM, MIN_ZOOM, WHEEL_ZOOM_SPEED};
 use crate::input::InputSnapshot;
 use crate::model::graph_ui_action::GraphUiAction;
@@ -158,7 +158,7 @@ pub(super) fn fit_all_nodes_target(
         return (1.0, Vec2::ZERO);
     }
 
-    let origin = graph_layout::origin(gui, ctx);
+    let origin = layout::origin(gui, ctx);
     let scale = ctx.view_graph.scale;
     let to_graph_rect = |rect: egui::Rect| {
         let min = (rect.min - origin) / scale;

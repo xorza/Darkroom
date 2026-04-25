@@ -5,7 +5,7 @@ use egui::epaint::{ColorImage, Mesh, Vertex};
 use egui::{Color32, Pos2, Shape, TextureFilter, TextureHandle, TextureOptions};
 
 use crate::gui::Gui;
-use crate::gui::graph_ctx::GraphContext;
+use crate::gui::graph_ui::ctx::GraphContext;
 use crate::gui::widgets::Texture;
 
 /// Target on-screen spacing range (in tile-widths) the dot pattern is

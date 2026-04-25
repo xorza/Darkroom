@@ -16,8 +16,8 @@ use scenarium::worker::{Worker, WorkerMessage};
 use tokio::sync::oneshot;
 
 use crate::config::Config;
-use crate::gui::frame_output::{EditorCommand, FrameOutput, RunCommand};
-use crate::gui::graph_ctx::GraphContext;
+use crate::gui::graph_ui::ctx::GraphContext;
+use crate::gui::graph_ui::frame_output::{EditorCommand, FrameOutput, RunCommand};
 use crate::model::argument_values_cache::{CacheEvent, NodeCache, invalidated_nodes};
 use crate::model::{ActionStack, ViewGraph, graph_ui_action::GraphUiAction};
 use crate::script::{self, ScriptAction, ScriptConfig, ScriptExecutor};
