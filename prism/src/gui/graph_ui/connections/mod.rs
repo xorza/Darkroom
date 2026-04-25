@@ -72,8 +72,9 @@ impl ConnectionUi {
         for node_view in &ctx.view_graph.view_nodes {
             let node_id = node_view.id;
             let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
+            let vp = gui.view_params();
             let node_layout = graph_layout.node_layout(
-                gui,
+                &vp,
                 ctx,
                 &node_id,
                 gesture.node_drag_offset_for(&node_id),
@@ -90,7 +91,7 @@ impl ConnectionUi {
                     input_idx,
                 };
                 let output_layout = graph_layout.node_layout(
-                    gui,
+                    &vp,
                     ctx,
                     &binding.target_id,
                     gesture.node_drag_offset_for(&binding.target_id),
@@ -127,7 +128,7 @@ impl ConnectionUi {
 
                 for &trigger_node_id in &event.subscribers {
                     let trigger_layout = graph_layout.node_layout(
-                        gui,
+                        &vp,
                         ctx,
                         &trigger_node_id,
                         gesture.node_drag_offset_for(&trigger_node_id),
@@ -181,8 +182,9 @@ impl ConnectionUi {
     ) {
         // Port centers come from fresh layout — a connection drag doesn't
         // coexist with a node drag, so drag_offset is always zero here.
+        let vp = gui.view_params();
         let port_center = |port: &PortRef| {
-            let layout = graph_layout.node_layout(gui, ctx, &port.node_id, egui::Vec2::ZERO);
+            let layout = graph_layout.node_layout(&vp, ctx, &port.node_id, egui::Vec2::ZERO);
             layout.port_center(port)
         };
         let start_center = port_center(&drag.start_port);

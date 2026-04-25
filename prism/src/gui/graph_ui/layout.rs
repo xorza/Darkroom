@@ -12,10 +12,10 @@ use scenarium::prelude::{Func, FuncBehavior};
 use std::sync::Arc;
 
 use crate::common::UiEquals;
-use crate::gui::Gui;
 use crate::gui::graph_ui::ctx::GraphContext;
 use crate::gui::graph_ui::port::{PortKind, PortRef};
 use crate::gui::style::Style;
+use crate::gui::{Gui, ViewParams};
 
 // ============================================================================
 // NodeGalleys — cached font layouts
@@ -132,11 +132,12 @@ impl NodeLayout {
     pub fn compute(
         galleys: &NodeGalleys,
         func: &Func,
-        style: &Style,
-        scale: f32,
+        vp: &ViewParams,
         origin: Pos2,
         node_pos: Pos2,
     ) -> Self {
+        let style: &Style = &vp.style;
+        let scale = vp.scale;
         let padding = style.padding;
         let small_padding = style.small_padding;
         let remove_btn_size = style.node.remove_btn_size;
@@ -291,8 +292,8 @@ pub struct GraphLayout {
 /// World-space origin (where graph coord (0, 0) lands on screen) for
 /// the current frame. Derived; kept out of `GraphLayout` so there's
 /// no cached-then-stale foot-gun.
-pub fn origin(gui: &Gui<'_>, ctx: &GraphContext<'_>) -> Pos2 {
-    gui.rect.min + ctx.view_graph.pan
+pub fn origin(vp: &ViewParams, ctx: &GraphContext<'_>) -> Pos2 {
+    vp.rect.min + ctx.view_graph.pan
 }
 
 impl GraphLayout {
@@ -317,7 +318,7 @@ impl GraphLayout {
     /// this frame — it populates galleys for every view-node.
     pub fn node_layout(
         &self,
-        gui: &Gui<'_>,
+        vp: &ViewParams,
         ctx: &GraphContext<'_>,
         node_id: &NodeId,
         drag_offset: Vec2,
@@ -329,9 +330,8 @@ impl GraphLayout {
         NodeLayout::compute(
             galleys,
             func,
-            &gui.style,
-            gui.scale(),
-            origin(gui, ctx),
+            vp,
+            origin(vp, ctx),
             view_node.pos + drag_offset,
         )
     }

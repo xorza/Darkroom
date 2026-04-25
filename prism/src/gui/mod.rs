@@ -68,6 +68,20 @@ fn configure_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
+/// Read-only bundle of frame-constant view parameters: style, scale,
+/// rect. Built from a `Gui<'_>` via [`Gui::view_params`]. Pure-geometry
+/// helpers (layout maths, zoom-target computation) take `&ViewParams`
+/// instead of `&Gui<'_>` so they can be unit-tested without an
+/// `egui::Ui`. The `Rc<Style>` is cheap-cloned at construction so the
+/// caller is free to re-borrow `gui` mutably while a `ViewParams` is
+/// live.
+#[derive(Debug, Clone)]
+pub struct ViewParams {
+    pub style: Rc<Style>,
+    pub scale: f32,
+    pub rect: Rect,
+}
+
 pub struct Gui<'a> {
     ui: &'a mut Ui,
     pub style: Rc<Style>,
@@ -179,6 +193,18 @@ impl<'a> Gui<'a> {
 
     pub fn scale(&self) -> f32 {
         self.scale
+    }
+
+    /// Read-only frame-constant view parameters: style, scale, rect.
+    /// Pure-geometry helpers take `&ViewParams` instead of `&Gui<'_>`
+    /// so they can be unit-tested without an `egui::Ui`. Cheap: one
+    /// `Rc::clone` plus two field copies.
+    pub fn view_params(&self) -> ViewParams {
+        ViewParams {
+            style: Rc::clone(&self.style),
+            scale: self.scale,
+            rect: self.rect,
+        }
     }
 
     /// Internal — the only legitimate scale transition is

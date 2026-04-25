@@ -140,7 +140,8 @@ impl NodeUi {
         for view_node in ctx.view_graph.view_nodes.iter() {
             let node_id = view_node.id;
             let drag_offset = gesture.node_drag_offset_for(&node_id);
-            let layout = graph_layout.node_layout(gui, ctx, &node_id, drag_offset);
+            let vp = gui.view_params();
+            let layout = graph_layout.node_layout(&vp, ctx, &node_id, drag_offset);
 
             let body_id = StableId::new(("node_body", node_id));
             let response = HitRegion::new(body_id)
@@ -201,7 +202,8 @@ impl NodeUi {
         for view_node in ctx.view_graph.view_nodes.iter() {
             let node_id = view_node.id;
             let drag_offset = gesture.node_drag_offset_for(&node_id);
-            let layout = graph_layout.node_layout(gui, ctx, &node_id, drag_offset);
+            let vp = gui.view_params();
+            let layout = graph_layout.node_layout(&vp, ctx, &node_id, drag_offset);
             let galleys = graph_layout.node_galleys(&node_id);
 
             let node = ctx.view_graph.graph.by_id(&node_id).unwrap();

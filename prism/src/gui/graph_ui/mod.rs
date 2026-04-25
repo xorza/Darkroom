@@ -220,13 +220,15 @@ impl GraphUi {
                 self.emit_zoom_pan(ctx.view_graph, Vec2::ZERO, 1.0, output);
             }
             Some(ViewButtonAction::ViewSelected) => {
-                if let Some((scale, pan)) = view_selected_node_target(gui, ctx, &self.graph_layout)
+                let vp = gui.view_params();
+                if let Some((scale, pan)) = view_selected_node_target(&vp, ctx, &self.graph_layout)
                 {
                     self.emit_zoom_pan(ctx.view_graph, pan, scale, output);
                 }
             }
             Some(ViewButtonAction::FitAll) => {
-                let (scale, pan) = fit_all_nodes_target(gui, ctx, &self.graph_layout);
+                let vp = gui.view_params();
+                let (scale, pan) = fit_all_nodes_target(&vp, ctx, &self.graph_layout);
                 self.emit_zoom_pan(ctx.view_graph, pan, scale, output);
             }
             None => {}

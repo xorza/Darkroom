@@ -9,12 +9,12 @@ use common::BoolExt;
 use egui::{PointerButton, Pos2, Response, Vec2};
 
 use crate::common::UiEquals;
-use crate::gui::Gui;
 use crate::gui::graph_ui::ctx::GraphContext;
 use crate::gui::graph_ui::frame_output::FrameOutput;
 use crate::gui::graph_ui::gesture::Gesture;
 use crate::gui::graph_ui::layout::{self, GraphLayout};
 use crate::gui::graph_ui::{GraphUi, MAX_ZOOM, MIN_ZOOM, WHEEL_ZOOM_SPEED};
+use crate::gui::{Gui, ViewParams};
 use crate::input::InputSnapshot;
 use crate::model::graph_ui_action::GraphUiAction;
 
@@ -35,7 +35,8 @@ impl GraphUi {
         let mut new_pan = ctx.view_graph.pan;
 
         if let Some(pointer_pos) = pointer_pos {
-            (new_scale, new_pan) = compute_scroll_zoom(gui, input, pointer_pos, new_scale, new_pan);
+            let vp = gui.view_params();
+            (new_scale, new_pan) = compute_scroll_zoom(&vp, input, pointer_pos, new_scale, new_pan);
         }
 
         if matches!(self.gesture, Gesture::Panning)
@@ -89,7 +90,7 @@ impl GraphUi {
 /// return the target `(scale, pan)`. No mutation — the orchestrator emits
 /// a `ZoomPanChanged` action if the result differs from the current view.
 fn compute_scroll_zoom(
-    gui: &Gui<'_>,
+    vp: &ViewParams,
     input: &InputSnapshot,
     pointer_pos: Pos2,
     current_scale: f32,
@@ -110,7 +111,7 @@ fn compute_scroll_zoom(
         // can produce both a zoom signal and a scroll signal;
         // applying both would push the graph under the cursor.
         let clamped_scale = (current_scale * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
-        let origin = gui.rect.min;
+        let origin = vp.rect.min;
         let graph_pos = (pointer_pos - origin - current_pan) / current_scale;
         new_scale = clamped_scale;
         new_pan = pointer_pos - origin - graph_pos * clamped_scale;
@@ -124,7 +125,7 @@ fn compute_scroll_zoom(
 /// Computes target `(scale, pan)` that centres on the selected node, or
 /// `None` if nothing is selected / the layout isn't known.
 pub(super) fn view_selected_node_target(
-    gui: &Gui<'_>,
+    vp: &ViewParams,
     ctx: &GraphContext<'_>,
     graph_layout: &GraphLayout,
 ) -> Option<(f32, Vec2)> {
@@ -133,7 +134,7 @@ pub(super) fn view_selected_node_target(
 
     let scale = ctx.view_graph.scale;
     let rect = graph_layout
-        .node_layout(gui, ctx, &node_view.id, Vec2::ZERO)
+        .node_layout(vp, ctx, &node_view.id, Vec2::ZERO)
         .body_rect;
     let size = rect.size() / scale;
     let center = egui::pos2(
@@ -142,7 +143,7 @@ pub(super) fn view_selected_node_target(
     );
 
     let target_scale = 1.0;
-    let available = gui.rect;
+    let available = vp.rect;
     let target_pan = available.center() - available.min - center.to_vec2();
     Some((target_scale, target_pan))
 }
@@ -150,7 +151,7 @@ pub(super) fn view_selected_node_target(
 /// Computes target `(scale, pan)` that fits all nodes on screen. Returns
 /// `(1.0, Vec2::ZERO)` when the graph is empty.
 pub(super) fn fit_all_nodes_target(
-    gui: &Gui<'_>,
+    vp: &ViewParams,
     ctx: &GraphContext<'_>,
     graph_layout: &GraphLayout,
 ) -> (f32, Vec2) {
@@ -158,7 +159,7 @@ pub(super) fn fit_all_nodes_target(
         return (1.0, Vec2::ZERO);
     }
 
-    let origin = layout::origin(gui, ctx);
+    let origin = layout::origin(vp, ctx);
     let scale = ctx.view_graph.scale;
     let to_graph_rect = |rect: egui::Rect| {
         let min = (rect.min - origin) / scale;
@@ -170,7 +171,7 @@ pub(super) fn fit_all_nodes_target(
         .view_graph
         .view_nodes
         .iter()
-        .map(|vn| graph_layout.node_layout(gui, ctx, &vn.id, Vec2::ZERO));
+        .map(|vn| graph_layout.node_layout(vp, ctx, &vn.id, Vec2::ZERO));
     let first = layouts
         .next()
         .expect("view_nodes non-empty — checked above");
@@ -182,7 +183,7 @@ pub(super) fn fit_all_nodes_target(
 
     let bounds_size = bounds.size();
     let padding = 24.0;
-    let gui_rect = gui.rect;
+    let gui_rect = vp.rect;
     let available = gui_rect.size() - egui::vec2(padding * 2.0, padding * 2.0);
     let zoom_x = (bounds_size.x > 0.0).then_else(available.x / bounds_size.x, 1.0);
     let zoom_y = (bounds_size.y > 0.0).then_else(available.y / bounds_size.y, 1.0);
@@ -191,4 +192,117 @@ pub(super) fn fit_all_nodes_target(
     let bounds_center = bounds.center().to_vec2();
     let target_pan = gui_rect.center() - gui_rect.min - bounds_center * target_scale;
     (target_scale, target_pan)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gui::style::Style;
+    use egui::{Pos2, Rect, vec2};
+    use std::rc::Rc;
+
+    fn vp_at(rect: Rect, scale: f32) -> ViewParams {
+        ViewParams {
+            style: Rc::new(Style::default()),
+            scale,
+            rect,
+        }
+    }
+
+    /// `egui::InputState::zoom_delta()` returns 1.0 when there's no zoom
+    /// gesture this frame, so 1.0 — not 0.0 — is the identity for tests.
+    fn idle_input() -> InputSnapshot {
+        InputSnapshot {
+            zoom_delta: 1.0,
+            ..Default::default()
+        }
+    }
+
+    fn input_with_zoom(zoom: f32) -> InputSnapshot {
+        let mut input = idle_input();
+        input.zoom_delta = zoom;
+        input
+    }
+
+    fn input_with_scroll(delta: Vec2) -> InputSnapshot {
+        let mut input = idle_input();
+        input.scroll_delta = delta;
+        input
+    }
+
+    /// Scroll-pan with no zoom: pan accumulates the scroll_delta verbatim.
+    #[test]
+    fn compute_scroll_zoom_pans_when_no_zoom() {
+        let vp = vp_at(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)), 1.0);
+        let input = input_with_scroll(vec2(10.0, -5.0));
+        let pointer = Pos2::new(400.0, 300.0);
+
+        let (scale, pan) = compute_scroll_zoom(&vp, &input, pointer, 1.0, Vec2::ZERO);
+
+        assert_eq!(scale, 1.0);
+        assert_eq!(pan, vec2(10.0, -5.0));
+    }
+
+    /// Zoom is pinned to the cursor: the graph point under the pointer
+    /// stays under the pointer after the zoom. With pointer at (400,300),
+    /// rect at origin, current_pan=ZERO, current_scale=1.0:
+    ///   graph_pos = (pointer - origin - pan) / scale = (400, 300)
+    /// After zoom_delta=2.0 (so new_scale=2.0):
+    ///   new_pan = pointer - origin - graph_pos * new_scale
+    ///           = (400, 300) - (0,0) - (400,300)*2 = (-400, -300)
+    /// Verifying: pointer = origin + new_pan + graph_pos * new_scale
+    ///                    = (0,0) + (-400,-300) + (400,300)*2 = (400,300). ✓
+    #[test]
+    fn compute_scroll_zoom_pins_to_cursor() {
+        let vp = vp_at(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)), 1.0);
+        let input = input_with_zoom(2.0);
+        let pointer = Pos2::new(400.0, 300.0);
+
+        let (scale, pan) = compute_scroll_zoom(&vp, &input, pointer, 1.0, Vec2::ZERO);
+
+        assert!((scale - 2.0).abs() < 1e-5, "scale was {scale}");
+        assert!((pan.x - -400.0).abs() < 1e-3, "pan.x was {}", pan.x);
+        assert!((pan.y - -300.0).abs() < 1e-3, "pan.y was {}", pan.y);
+        // Sanity: the point under the cursor in graph-space is unchanged.
+        let origin = vp.rect.min;
+        let graph_pos_before = (pointer - origin - Vec2::ZERO) / 1.0;
+        let graph_pos_after = (pointer - origin - pan) / scale;
+        assert!((graph_pos_before - graph_pos_after).length() < 1e-3);
+    }
+
+    /// Zoom is clamped to MAX_ZOOM (4.0).
+    #[test]
+    fn compute_scroll_zoom_clamps_to_max() {
+        let vp = vp_at(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)), 1.0);
+        let input = input_with_zoom(1000.0);
+        let (scale, _) = compute_scroll_zoom(&vp, &input, Pos2::new(0.0, 0.0), 1.0, Vec2::ZERO);
+        assert_eq!(scale, MAX_ZOOM);
+    }
+
+    /// Zoom is clamped to MIN_ZOOM (0.2).
+    #[test]
+    fn compute_scroll_zoom_clamps_to_min() {
+        let vp = vp_at(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)), 1.0);
+        let input = input_with_zoom(0.001);
+        let (scale, _) = compute_scroll_zoom(&vp, &input, Pos2::new(0.0, 0.0), 1.0, Vec2::ZERO);
+        assert_eq!(scale, MIN_ZOOM);
+    }
+
+    /// Wheel-line input takes priority over zoom_delta and produces zoom,
+    /// not pan. wheel_lines = 1.0 → zoom_delta = exp(WHEEL_ZOOM_SPEED).
+    #[test]
+    fn compute_scroll_zoom_wheel_line_zooms() {
+        let vp = vp_at(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)), 1.0);
+        let mut input = idle_input();
+        input.wheel_lines = 1.0;
+        input.scroll_delta = vec2(50.0, 50.0); // ignored — wheel takes precedence
+        let (scale, pan) = compute_scroll_zoom(&vp, &input, Pos2::new(0.0, 0.0), 1.0, Vec2::ZERO);
+        let expected_scale = (WHEEL_ZOOM_SPEED).exp();
+        assert!((scale - expected_scale).abs() < 1e-5, "scale was {scale}");
+        // Pointer at origin, current_pan=ZERO → graph_pos=ZERO → new_pan=ZERO.
+        assert!(
+            pan.length() < 1e-5,
+            "wheel-zoom pan should be zero, got {pan:?}"
+        );
+    }
 }
