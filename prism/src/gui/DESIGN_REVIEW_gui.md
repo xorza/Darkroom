@@ -126,3 +126,142 @@ The data-flow architecture (read-only context in, action buffer out, gesture as 
 - **Replacing `Gesture::DraggingNode { released: bool }` with two variants.** The "released this frame" flag looks like a smell (a flag inside a state-machine variant), but the workaround comment (`gesture.rs:27-32`) explains a real ordering constraint that the alternative — a `JustReleasedNode` transient variant — would just rename rather than fix. Out of scope for a structural review anyway.
 - **Moving `argument_values_cache` from `GraphUi` to `GraphContext`.** Looked at this because `node_details_ui` takes it as an extra `&mut` parameter. Rejected: the cache is *UI-owned* (it survives across `Session` resets, lives where the renderer can drain `Session::take_cache_events`); putting it in the read-only `GraphContext` would invert that ownership for cosmetic reasons.
 - **Promoting `widgets/` out of `gui/`.** Some widgets (`PopupMenu`, `Frame`) are reused outside the graph editor (status bar, file menu) but never outside `gui/`. No callers outside the GUI crate depend on them. Leave it.
+
+---
+
+# Design review: prism/src/gui/  (2026-04-25, follow-up)
+
+Scope (per user): data flow, dependencies, isolation of responsibility, testability. Structural placement (file moves, type relocations) is out of scope — see the prior section (F1–F6).
+
+## Current design
+
+After the F1–F5 restructure, the data contract is clean on paper: `Session::frame(output, |s, o| ...)` enforces `drain_inbound → render → handle_output`; the render closure reads through `GraphContext<'_>` (immutable bundle) and writes through `FrameOutput` (action queue + side-channel signals: errors, run/editor/app commands, an argument-values request `NodeId`). `MainWindow::render` and `GraphUi::render` are the two render entry points; everything below them is supposed to be "context in, output out."
+
+In practice the renderer breaks that boundary in two places. First, `GraphUi::render` takes `&mut Session` and calls `session.take_cache_events()` on entry (`graph_ui/mod.rs:95`) — a render-time mutation of session state that exists only because `ArgumentValuesCache` lives on `GraphUi`, not on `Session`. Second, `&mut self.argument_values_cache` is threaded as a fourth parameter into `node_details_ui.show()` (`graph_ui/mod.rs:239`), parallel to `FrameOutput`. So there are effectively two action channels: `FrameOutput` for graph mutations, `ArgumentValuesCache` for the per-node texture/value cache. Render-time emission is also scattered: `render_remove_btn`, `render_cache_btn`, and `handle_node_interactions` all push `GraphUiAction`s mid-paint (`nodes/mod.rs:155, 224, 355`), so "what actions does this interaction produce?" cannot be answered without running paint.
+
+The shared infrastructure type `Gui<'_>` is a god-handle: it bundles `&mut Ui`, `Rc<Style>`, `scale`, and `rect`. Most pure-geometry code (`NodeLayout::compute`, `pan_zoom::compute_scroll_zoom`, `view_selected_node_target`, `fit_all_nodes_target`) only needs `(style, scale, rect)` but is forced to take `&Gui<'_>` because `GraphLayout::node_layout` does. That coupling is the single biggest reason `graph_ui` tests are sparse outside `connections::handlers`.
+
+## Overall take
+
+The action-buffer architecture is right; the leaks above are localized. The biggest payoff is closing the cache-event side channel (F1 below) — that's what unlocks "render is a pure function of `(GraphContext, mut FrameOutput)`" and, consequently, headless tests of every render submodule. The `Gui<'_>` split (F2) is a smaller win but it's what makes layout/zoom maths actually unit-testable. F3–F5 are smaller cleanups; F4 is just finishing F4 from the prior review.
+
+## Findings
+
+### [F1] `ArgumentValuesCache` is a second action channel parallel to `FrameOutput`
+
+- **Category**: Contract / Responsibility
+- **Impact**: 4/5 — collapses a hidden side-channel and removes the only `&mut Session` reason from render
+- **Effort**: 3/5 — moves one field, redirects two call sites, changes `Session::take_cache_events` into an `apply` method
+- **Current**:
+  - `GraphUi` owns `argument_values_cache: ArgumentValuesCache` (`graph_ui/mod.rs:76`).
+  - `GraphUi::render` takes `session: &mut Session` purely so it can call `for event in session.take_cache_events()` at the top of the frame (`graph_ui/mod.rs:91, 95`).
+  - The cache is then threaded as `&mut self.argument_values_cache` into `node_details_ui.show()` (`graph_ui/mod.rs:239`) — a fourth `&mut` parameter alongside `gui`, `ctx`, `output`. `NodeDetailsUi::show` re-passes it to `show_content` (`nodes/details.rs:31, 52`).
+  - `request_argument_values` flows the *opposite* way through `FrameOutput::set_request_argument_values` (`frame_output.rs:107`), which `Session::handle_output` translates into a worker request — so the cache has *one* exit lane via `FrameOutput` and *one entirely separate* entry lane via `take_cache_events`.
+  - The previous review explicitly considered and rejected moving the cache to `GraphContext`. That reasoning still holds — the cache is UI-owned and survives `Session` graph resets — but it doesn't justify the current shape, where session and renderer share mutable cache state across a render-time mutation.
+- **Problem**:
+  - `GraphUi::render` cannot be called with a borrowed-only graph context. The whole point of `GraphContext` ("read-only bundle of frame-level dependencies") is undermined: the actual render API is `(read-only ctx, AND a mut Session, AND a mut FrameOutput)`.
+  - The cache is written by *render* (via `node_details_ui` setting `request_argument_values` then `Session` reposting an `ArgumentValues` event that lands in `cache_events`) but also *drained* by render. That's a feedback loop the renderer can't close on its own.
+  - Tests of `GraphUi::render` (none exist) would need a real `Session`, which itself needs `EguiUiHost`, a worker, a tokio runtime — none of it stubbed.
+- **Alternative**:
+  Treat the cache like the action buffer: it's render-owned, but inputs land via a frame-input bundle and outputs land via `FrameOutput`.
+  ```rust
+  pub struct GraphFrameInputs<'a> {
+      pub ctx: GraphContext<'a>,
+      pub cache_events: Vec<CacheEvent>,   // moved out of Session this frame
+  }
+  ```
+  Or, simpler: extend `GraphContext` with a `cache_events: &'a mut Vec<CacheEvent>` (drained by GraphUi during render — borrow ends with the context). `Session::frame`'s closure builds the bundle:
+  ```rust
+  session.frame(output, |s, output| {
+      let mut cache_events = s.take_cache_events();
+      let ctx = s.graph_context_with_events(&mut cache_events);
+      graph_ui.render(gui, &ctx, input, output);  // no &mut Session
+      ...
+  });
+  ```
+  Either way `GraphUi::render` loses `&mut Session`, and "what does render mutate?" answers exactly: `&mut self` (renderer state), `&mut FrameOutput` (egress).
+- **Recommendation**: Do it. The `&mut Session` parameter is the single biggest reason graph_ui can't be tested headlessly today.
+
+### [F2] `Gui<'_>` is the unit of dependency for code that only needs read-only style/scale/rect
+
+- **Category**: Abstraction / Testability
+- **Impact**: 4/5 — unblocks unit tests for layout maths and zoom-target maths, both of which are pure today but trapped behind `&Gui`
+- **Effort**: 3/5 — touches every signature in `layout.rs`, `pan_zoom.rs`, parts of `nodes/mod.rs`; mechanical
+- **Current**:
+  - `NodeLayout::compute` is pure (`layout.rs:132`) — takes `&NodeGalleys`, `&Func`, `&Style`, scale, origin, pos. No `Gui`. Good.
+  - But `GraphLayout::node_layout` (`layout.rs:318`) takes `&Gui<'_>` and uses it only for `gui.scale()`, `&gui.style`, and the `origin(gui, ctx)` helper which itself only needs `gui.rect.min` (`layout.rs:294`).
+  - `pan_zoom::compute_scroll_zoom`, `view_selected_node_target`, `fit_all_nodes_target` (`pan_zoom.rs:91, 126, 152`) are documented as "pure target-computing functions" but each takes `&Gui<'_>` — for `gui.rect` only (and indirectly `gui.scale()` via `node_layout`).
+  - Result: not one of these can be tested without an `egui::Ui`, despite being pure maths. The existing tests for `build_data_connection_action` / `handle_idle` (`connections/handlers.rs:365–644`) only succeed because those helpers were carefully kept `Gui`-free.
+- **Problem**: `Gui<'_>` couples the `&mut Ui` (paint sink, mutable) to `Style`/`scale`/`rect` (frame-constant, read-only) and to `painter()`/`fonts()` queries. Code that only consumes the read-only half is forced to also accept the mutable half, foreclosing tests.
+- **Alternative**: Introduce `ViewParams<'a> { style: &'a Style, scale: f32, rect: Rect }` — produced by `Gui::view_params(&self) -> ViewParams<'_>` — and rewrite the signatures of pure functions to take `&ViewParams`:
+  ```rust
+  fn node_layout(&self, vp: &ViewParams<'_>, ctx: &GraphContext<'_>, id: &NodeId, drag: Vec2) -> NodeLayout
+  fn compute_scroll_zoom(vp: &ViewParams<'_>, input: &InputSnapshot, ...) -> (f32, Vec2)
+  fn fit_all_nodes_target(vp: &ViewParams<'_>, ctx: &GraphContext<'_>, gl: &GraphLayout) -> (f32, Vec2)
+  ```
+  `Gui::scale`/`Gui::style`/`Gui::rect` already exist — `view_params()` is a one-line constructor. Painting code keeps taking `&mut Gui<'_>`.
+- **Recommendation**: Do it, and write the unit tests that fall out (zoom-pinning maths, fit-all bounds, `NodeLayout` boundary cases). These are exactly the kinds of computations regressions slip into.
+
+### [F3] Render functions emit `GraphUiAction`s mid-paint
+
+- **Category**: Responsibility / Control flow
+- **Impact**: 3/5 — separates "what did the user do?" from "what got drawn"; enables interaction-only tests
+- **Effort**: 4/5 — touches `render_nodes`, `render_remove_btn`, `render_cache_btn`, `render_buttons`
+- **Current**:
+  - The interaction/render split was already done for *node-body drag*: `handle_node_interactions` runs first and fills the gesture, `render_nodes` then paints with the up-to-date offset (`graph_ui/mod.rs:171, 188`).
+  - But `render_nodes` still emits `NodeRemoved` (via `render_remove_btn` returning a bool that the caller pushes — `nodes/mod.rs:223`), `CacheToggled` (`nodes/mod.rs:355`), and `PortInteractCommand` is bubbled out of `render_ports` (`nodes/mod.rs:447`) so connection-drag start lives downstream of paint.
+  - `render_buttons` emits `RunCommand` and a `ViewButtonAction` enum mid-paint (`overlays.rs:97, 106`). Same for `handle_new_node_popup`.
+  - Net effect: an integration test like "double-clicking a remove button emits one `NodeRemoved`" requires `egui::Ui` plumbing because the remove button is a render widget.
+- **Problem**: Action emission is functionally a side-effect of widget interaction events, but those events are also load-bearing for paint (hover state, pressed state). Coupling them means there's no way to drive the action layer in isolation. This also makes the "actions are immediate" invariant (`frame_output.rs:38`) harder to reason about — multiple sites push during render in an order that depends on iteration order over `view_nodes`.
+- **Alternative**: Two passes per node, mirroring what already exists for body drag:
+  1. **Interact pass** — emits actions and `PortInteractCommand`, returns a `NodeRenderState` (selected, breaker_hit, port_layouts) that's all the render needs.
+  2. **Render pass** — pure function of `NodeRenderState + NodeLayout + NodeGalleys`.
+
+  Two-stage approach for buttons mirrors what `pan_zoom`'s pure helpers already do for view targets — `render_buttons` returns `ButtonResult { action }`, then the caller emits the action. Apply the same shape uniformly: render returns intent, caller emits.
+- **Recommendation**: Bundle with F2. The pure render half becomes testable as a snapshot ("given this state, what shapes were drawn?") even via `egui::Painter` capture.
+
+### [F4] `NodeUi` and `NodeDetailsUi` are vestigial namespaces
+
+- **Category**: State that shouldn't exist
+- **Impact**: 2/5 — removes two indirections, no behavioral change
+- **Effort**: 1/5
+- **Current**:
+  - `NodeUi { const_bind_ui: ConstBindUi }` (`nodes/mod.rs:113`) — single field, two methods that take `&mut self` only to reach `self.const_bind_ui.start()`.
+  - `NodeDetailsUi;` is a unit struct (`nodes/details.rs:23`); `show()` is `&self` and uses no fields. It's a namespace.
+  - The previous review's F4 already named `NodeUi` and was not yet executed.
+- **Problem**: Both types add a layer to function signatures and field names without modeling any state. Readers searching for "node interaction state" find an empty struct.
+- **Alternative**: Hoist `const_bind_ui` to a direct field on `GraphUi`. Demote both types' methods to free functions in `nodes/mod.rs` and `nodes/details.rs`. Drop the structs.
+- **Recommendation**: Do it. Pure cleanup; precondition for future work that wants the const-bind cache visible to other render submodules without going through a wrapper.
+
+### [F5] `process_connections` and `update_zoom_and_pan` are free functions wearing `&mut self` costumes
+
+- **Category**: Abstraction / Responsibility
+- **Impact**: 2/5 — minor — clarifies which fields actually couple to which call site
+- **Effort**: 2/5 — re-thread fields into params; signatures already use `#[allow(clippy::too_many_arguments)]`
+- **Current**:
+  - `process_connections` takes 7 args and uses `self.gesture`, `self.connections`, `self.node_ui.const_bind_ui`, `self.new_node_ui` (`connections/handlers.rs:47`).
+  - `update_zoom_and_pan` takes 6 args and uses only `self.gesture` (`pan_zoom.rs:23`).
+  - `render_buttons` uses no fields beyond `self`'s implicit access — same for `handle_new_node_popup` which uses `self.new_node_ui`, `self.gesture`.
+  - The pattern: methods on `GraphUi` because they need 1–2 fields, but the signature already lists every other dependency explicitly. The `impl GraphUi` block isn't carrying its weight.
+- **Problem**: Signatures already document the dependencies; the `&mut self` is doing nothing the explicit params don't. Reviewers can't tell which subsystem owns which state.
+- **Alternative**: Convert to free functions whose first parameter is the specific state slice they touch:
+  ```rust
+  fn process_connections(
+      gesture: &mut Gesture,
+      connections: &ConnectionUi,
+      const_bind: &ConstBindUi,
+      new_node_ui: &mut NewNodeUi,
+      input: &InputSnapshot,
+      ctx: &GraphContext<'_>,
+      ...
+  )
+  ```
+  `update_zoom_and_pan` then just takes `&mut Gesture`. Each function's signature becomes a contract that lists what it touches.
+- **Recommendation**: Depends on F3. If F3 lands, this falls out as the natural shape; in isolation it's noise.
+
+## Considered and rejected
+
+- **Splitting `Gesture` mutation into one owner per gesture variant.** Pan-zoom touches `Gesture::Idle ↔ Panning`, connections touch `Idle ↔ Dragging/Breaking`, node body touches `Idle ↔ DraggingNode`. Tempting to give each subsystem its own mutator, but the variants are *exclusive* — exactly one transition is legal per frame — and `Gesture::cancel()` is a load-bearing escape hatch from any state. A shared `&mut Gesture` is correct; the smell is the call-site count, not the type.
+- **Replacing `Session::frame` with an explicit context object.** Considered making `Session::frame` return a `FrameGuard<'_>` that exposes only what render is allowed to do (read graph, mutate output) and Drop-applies on scope exit. Rejected: `MainWindow` legitimately needs `&mut Session` *outside* the closure (`handle_app_command`, `session.empty_graph()` in `main_window.rs:80`). The closure-based `frame` is the correct shape; the leak is F1, not the API itself.
+- **Moving `request_argument_values` from `FrameOutput` to a callback.** It's currently `Option<NodeId>` on `FrameOutput`, and `Session::handle_output` spawns an async request. Looked clean as a callback (`request_argument_values: &dyn Fn(NodeId)`), but the deferred-via-output shape is consistent with everything else in `FrameOutput` — and `NodeDetailsUi` already gates duplicate requests via `cache.mark_pending(...)` before setting the field. Leave it.
+

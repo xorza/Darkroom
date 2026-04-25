@@ -24,7 +24,7 @@ use crate::gui::graph_ui::nodes::new_node::NewNodeUi;
 use crate::gui::widgets::HitRegion;
 use crate::input::InputSnapshot;
 use crate::model::ArgumentValuesCache;
-use crate::session::Session;
+use crate::model::argument_values_cache::CacheEvent;
 
 pub mod background;
 pub mod connections;
@@ -71,8 +71,8 @@ pub struct GraphUi {
     new_node_ui: NewNodeUi,
     node_details_ui: NodeDetailsUi,
     /// UI-owned per-node texture/value cache. Worker→cache fan-out
-    /// arrives via `Session::take_cache_events`, drained at the top
-    /// of `render`.
+    /// arrives as `cache_events` passed into `render` by the host;
+    /// the renderer applies them at the top of the frame.
     argument_values_cache: ArgumentValuesCache,
 }
 
@@ -88,11 +88,12 @@ impl GraphUi {
     pub fn render(
         &mut self,
         gui: &mut Gui<'_>,
-        session: &mut Session,
+        ctx: &GraphContext<'_>,
+        cache_events: Vec<CacheEvent>,
         input: &InputSnapshot,
         output: &mut FrameOutput,
     ) {
-        for event in session.take_cache_events() {
+        for event in cache_events {
             self.argument_values_cache.apply(event);
         }
 
@@ -106,8 +107,6 @@ impl GraphUi {
             .max_rect(rect)
             .clip_rect(rect)
             .show(|gui| {
-                let ctx = session.graph_context();
-
                 let (background_response, pointer_pos) =
                     self.setup_background_interaction(gui, input, rect);
 
@@ -117,15 +116,15 @@ impl GraphUi {
                 // the only widget in scope at this point — would claim
                 // clicks that should have gone to nodes, triggering a
                 // spurious deselect + cancel_gesture.
-                self.render_content(gui, &ctx, input, &background_response, pointer_pos, output);
+                self.render_content(gui, ctx, input, &background_response, pointer_pos, output);
 
                 if background_response.clicked() {
-                    self.handle_background_click(&ctx, output);
+                    self.handle_background_click(ctx, output);
                 }
 
                 let overlay_hovered = self.render_overlays(
                     gui,
-                    &ctx,
+                    ctx,
                     input,
                     pointer_pos,
                     &background_response,
@@ -136,7 +135,7 @@ impl GraphUi {
                     self.update_zoom_and_pan(
                         gui,
                         input,
-                        &ctx,
+                        ctx,
                         &background_response,
                         pointer_pos,
                         output,

@@ -60,7 +60,10 @@ impl MainWindow {
                 });
 
             Panel::central().no_frame().show(gui, |gui| {
-                self.graph_ui.render(gui, session, &input, output);
+                let cache_events = session.take_cache_events();
+                let ctx = session.graph_context();
+                self.graph_ui
+                    .render(gui, &ctx, cache_events, &input, output);
             });
 
             self.handle_shortcuts(&input, session, output);
