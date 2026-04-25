@@ -79,8 +79,6 @@ impl GraphUi {
     ///   2. overlays — buttons, details panel, new-node popup
     ///   3. zoom/pan — only when no overlay is hovered
     pub fn render(&mut self, gui: &mut Gui<'_>, session: &mut Session, input: &InputSnapshot) {
-        self.output.clear();
-
         if input.cancel_requested() {
             self.cancel_gesture();
         }

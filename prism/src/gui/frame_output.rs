@@ -15,6 +15,19 @@ pub enum EditorCommand {
     Redo,
 }
 
+/// Application-level intents emitted by menu items or keyboard
+/// shortcuts. Routed through `FrameOutput` so menu and shortcut paths
+/// produce identical timing — `MainWindow::handle_app_command` is the
+/// single application site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppCommand {
+    New,
+    Save,
+    SaveAs,
+    Open,
+    Exit,
+}
+
 /// Buffer of what render emitted this frame: actions that will apply
 /// to `ViewGraph` at end-of-frame (via `Session::commit_actions`),
 /// plus side-channel signals (errors, run command, argument-values
@@ -33,6 +46,7 @@ pub(crate) struct FrameOutput {
     errors: Vec<ConnectionError>,
     run_cmd: Option<RunCommand>,
     editor_cmd: Option<EditorCommand>,
+    app_cmd: Option<AppCommand>,
     request_argument_values: Option<NodeId>,
 }
 
@@ -42,6 +56,7 @@ impl FrameOutput {
         self.errors.clear();
         self.run_cmd = None;
         self.editor_cmd = None;
+        self.app_cmd = None;
         self.request_argument_values = None;
     }
 
@@ -75,6 +90,14 @@ impl FrameOutput {
 
     pub fn set_editor_cmd(&mut self, cmd: EditorCommand) {
         self.editor_cmd = Some(cmd);
+    }
+
+    pub fn app_cmd(&self) -> Option<AppCommand> {
+        self.app_cmd
+    }
+
+    pub fn set_app_cmd(&mut self, cmd: AppCommand) {
+        self.app_cmd = Some(cmd);
     }
 
     pub fn request_argument_values(&self) -> Option<NodeId> {

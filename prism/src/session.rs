@@ -432,6 +432,13 @@ impl Session {
         }
     }
 
+    /// Signal the windowing layer to close. Frontend cleanup
+    /// (config save, worker exit) still runs through [`Session::exit`]
+    /// when the host actually shuts down.
+    pub fn close_app(&self) {
+        self.ui_host.close_app();
+    }
+
     pub fn exit(&mut self) {
         self.config.save();
         if let Some(worker) = &mut self.worker {
