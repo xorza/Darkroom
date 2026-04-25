@@ -36,7 +36,9 @@ enum Mode {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    init::init()?;
+    // Hold the log guard for the lifetime of `main` so the non-blocking
+    // tracing writer flushes on normal exit.
+    let _log_guard = init::init();
     let cli = Cli::parse();
 
     let app_config = AppConfig {

@@ -28,8 +28,8 @@ const UNDO_MAX_STEPS: usize = 256;
 const STATUS_CAP: usize = 2000;
 
 /// Everything the worker-side plumbing pushes back into the session.
-/// One enum, one channel — `update_shared_status` drains it in a
-/// single loop. New worker→session signals add a variant, not a field.
+/// One enum, one channel — `drain_inbound` drains it in a single loop.
+/// New worker→session signals add a variant, not a field.
 #[derive(Debug)]
 enum WorkerEvent {
     ExecutionFinished(Result<ExecutionStats, execution_graph::Error>),
@@ -40,6 +40,11 @@ enum WorkerEvent {
     Print(String),
 }
 
+/// Frontend-agnostic editor core. Each frame, frontends must call
+/// `drain_inbound()` *before* reading [`Session::graph_context`] (so
+/// the view sees freshly-arrived worker results) and `handle_output()`
+/// *after* rendering (so queued actions and run commands are applied).
+/// `exit()` runs once on shutdown.
 #[derive(Debug)]
 pub struct Session {
     func_lib: Arc<FuncLib>,
@@ -197,7 +202,7 @@ impl Session {
     }
 
     pub fn empty_graph(&mut self) {
-        self.replace_graph(ViewGraph::default(), true);
+        self.replace_graph(ViewGraph::default());
         self.add_status("Created new graph");
     }
 
@@ -233,11 +238,14 @@ impl Session {
     fn read_graph_from(&mut self, path: &Path) -> Result<()> {
         let format = SerdeFormat::from_file_name(path.to_string_lossy().as_ref())?;
         let payload = std::fs::read(path)?;
-        self.replace_graph(ViewGraph::deserialize(format, &payload)?, true);
+        self.replace_graph(ViewGraph::deserialize(format, &payload)?);
         Ok(())
     }
 
-    pub fn update_shared_status(&mut self) {
+    /// Drains worker→session and script→session channels into Session
+    /// state (status log, execution stats, argument-value cache).
+    /// Frontends must call this once per frame before rendering.
+    pub fn drain_inbound(&mut self) {
         while let Ok(event) = self.worker_rx.try_recv() {
             match event {
                 WorkerEvent::Print(line) => self.add_status(line),
@@ -371,11 +379,9 @@ impl Session {
         self.script_executor = None;
     }
 
-    fn replace_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
+    fn replace_graph(&mut self, view_graph: ViewGraph) {
         self.view_graph = view_graph;
-        if reset_undo {
-            self.action_stack.clear();
-        }
+        self.action_stack.clear();
         if let Some(worker) = &self.worker {
             let _ = worker.send(WorkerMessage::Clear);
         }

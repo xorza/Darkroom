@@ -1,23 +1,24 @@
 use anyhow::Result;
-use std::sync::OnceLock;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_rolling_file::RollingFileAppenderBase;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 
-static LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
-
-pub fn init() -> Result<()> {
+/// Returns the non-blocking writer's `WorkerGuard`. Hold it in `main`
+/// so it drops on normal exit and flushes any buffered log lines.
+/// `None` means logging setup failed (already reported to stderr) —
+/// the app continues without file logging.
+pub fn init() -> Option<WorkerGuard> {
     dotenv::dotenv().ok();
-    if let Err(e) = init_trace() {
-        eprintln!("log init failed: {e}");
+    match init_trace() {
+        Ok(guard) => Some(guard),
+        Err(e) => {
+            eprintln!("log init failed: {e}");
+            None
+        }
     }
-    Ok(())
 }
 
-/// Best-effort tracing setup. Any failure is reported to stderr by
-/// the caller and the app continues without file logging — logging
-/// is a quality-of-life feature, not required for the editor to run.
-fn init_trace() -> Result<()> {
+fn init_trace() -> Result<WorkerGuard> {
     std::fs::create_dir_all("log")?;
     let appender = RollingFileAppenderBase::builder()
         .filename("log/editor.log".to_string())
@@ -26,13 +27,10 @@ fn init_trace() -> Result<()> {
         .build()
         .map_err(|e| anyhow::anyhow!("build log appender: {e}"))?;
     let (non_blocking, log_guard) = appender.get_non_blocking_appender();
-    LOG_GUARD
-        .set(log_guard)
-        .map_err(|_| anyhow::anyhow!("log guard already set"))?;
     tracing_subscriber::fmt()
         .with_env_filter("info")
         .with_writer(non_blocking.and(std::io::stdout))
         .init();
 
-    Ok(())
+    Ok(log_guard)
 }

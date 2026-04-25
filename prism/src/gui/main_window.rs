@@ -81,7 +81,7 @@ impl MainWindow {
     }
 
     pub fn pre_frame(&mut self, session: &mut Session) {
-        session.update_shared_status();
+        session.drain_inbound();
     }
 
     pub fn render(&mut self, session: &mut Session, gui: &mut Gui<'_>) {
