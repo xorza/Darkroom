@@ -87,28 +87,54 @@ impl Session {
         let transports = script::build_transports(&script_config);
         let script_executor = ScriptExecutor::new(transports, script_action_tx);
 
-        let mut result = Self {
+        let mut result = Self::from_parts(
             func_lib,
-            view_graph: ViewGraph::default(),
-            execution_stats: None,
-            argument_values_cache: ArgumentValuesCache::default(),
-            status: String::new(),
-            config: Config::load_or_default(),
-            graph_dirty: true,
-            action_stack: ActionStack::new(UNDO_MAX_STEPS),
-            worker: Some(worker),
+            Config::load_or_default(),
+            Some(worker),
             worker_tx,
             worker_rx,
+            Some(script_executor),
             script_action_rx,
             ui_host,
-            script_executor: Some(script_executor),
-        };
+        );
 
         if let Some(path) = result.config.current_path.clone() {
             result.load_graph(&path);
         }
 
         result
+    }
+
+    /// Single struct-literal site shared by `new` and the test stub.
+    /// Adding a `Session` field touches one spot — the test stub can't
+    /// silently desync.
+    #[allow(clippy::too_many_arguments)]
+    fn from_parts(
+        func_lib: Arc<FuncLib>,
+        config: Config,
+        worker: Option<Worker>,
+        worker_tx: UnboundedSender<WorkerEvent>,
+        worker_rx: UnboundedReceiver<WorkerEvent>,
+        script_executor: Option<ScriptExecutor>,
+        script_action_rx: UnboundedReceiver<ScriptAction>,
+        ui_host: Arc<dyn UiHost>,
+    ) -> Self {
+        Self {
+            func_lib,
+            view_graph: ViewGraph::default(),
+            execution_stats: None,
+            argument_values_cache: ArgumentValuesCache::default(),
+            status: String::new(),
+            config,
+            graph_dirty: true,
+            action_stack: ActionStack::new(UNDO_MAX_STEPS),
+            worker,
+            worker_tx,
+            worker_rx,
+            script_action_rx,
+            ui_host,
+            script_executor,
+        }
     }
 
     pub fn status(&self) -> &str {
@@ -417,22 +443,16 @@ mod tests {
     fn test_session() -> Session {
         let (worker_tx, worker_rx) = unbounded_channel::<WorkerEvent>();
         let (_script_tx, script_action_rx) = unbounded_channel::<ScriptAction>();
-        Session {
-            func_lib: Arc::new(FuncLib::default()),
-            view_graph: ViewGraph::default(),
-            execution_stats: None,
-            argument_values_cache: ArgumentValuesCache::default(),
-            status: String::new(),
-            config: Config::default(),
-            graph_dirty: false,
-            action_stack: ActionStack::new(UNDO_MAX_STEPS),
-            worker: None,
+        Session::from_parts(
+            Arc::new(FuncLib::default()),
+            Config::default(),
+            None,
             worker_tx,
             worker_rx,
+            None,
             script_action_rx,
-            ui_host: Arc::new(NoopUiHost),
-            script_executor: None,
-        }
+            Arc::new(NoopUiHost),
+        )
     }
 
     #[test]
