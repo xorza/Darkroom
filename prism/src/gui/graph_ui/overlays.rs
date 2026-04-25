@@ -12,22 +12,22 @@ use crate::gui::graph_ui::ctx::GraphContext;
 use crate::gui::graph_ui::frame_output::{FrameOutput, RunCommand};
 use crate::gui::graph_ui::nodes::new_node::NewNodeSelection;
 use crate::gui::graph_ui::port::PortKind;
-use crate::gui::graph_ui::{ButtonResult, GraphUi, ViewButtonAction};
+use crate::gui::graph_ui::{GraphUi, ViewButtonAction};
 use crate::gui::widgets::{Button, Frame, Layout, PositionedUi};
 use crate::input::InputSnapshot;
 use crate::model;
 use crate::model::graph_ui_action::GraphUiAction;
 
 impl GraphUi {
-    pub(super) fn render_buttons(&mut self, gui: &mut Gui<'_>, autorun: bool) -> ButtonResult {
-        let mut autorun = autorun;
-        let rect = gui.rect;
+    /// Top-left bar: fit-all / view-selected / reset-view.
+    pub(super) fn render_view_buttons(
+        &mut self,
+        gui: &mut Gui<'_>,
+    ) -> (Response, Option<ViewButtonAction>) {
         let mut action: Option<ViewButtonAction> = None;
-        let mut run_cmd: Option<RunCommand> = None;
 
-        // Top buttons (view controls)
-        let mut response =
-            PositionedUi::new(StableId::new("graph_ui_top_buttons"), rect.left_top())
+        let response =
+            PositionedUi::new(StableId::new("graph_ui_top_buttons"), gui.rect.left_top())
                 .pivot(Align2::LEFT_TOP)
                 .interactable(false)
                 .show(gui, |gui| {
@@ -74,10 +74,21 @@ impl GraphUi {
                 })
                 .inner;
 
-        // Bottom buttons (execution controls)
-        response |= PositionedUi::new(
+        (response, action)
+    }
+
+    /// Bottom-left bar: run-once / autorun toggle.
+    pub(super) fn render_exec_buttons(
+        &mut self,
+        gui: &mut Gui<'_>,
+        autorun: bool,
+    ) -> (Response, Option<RunCommand>) {
+        let mut autorun = autorun;
+        let mut run_cmd: Option<RunCommand> = None;
+
+        let response = PositionedUi::new(
             StableId::new("graph_ui_bottom_buttons"),
-            pos2(rect.left(), rect.bottom()),
+            pos2(gui.rect.left(), gui.rect.bottom()),
         )
         .pivot(Align2::LEFT_BOTTOM)
         .interactable(false)
@@ -112,11 +123,7 @@ impl GraphUi {
         })
         .inner;
 
-        ButtonResult {
-            response,
-            action,
-            run_cmd,
-        }
+        (response, run_cmd)
     }
 
     // ------------------------------------------------------------------------

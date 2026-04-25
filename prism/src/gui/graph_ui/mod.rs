@@ -54,13 +54,6 @@ pub(super) enum ViewButtonAction {
     ResetView,
 }
 
-#[derive(Debug)]
-pub(super) struct ButtonResult {
-    pub(super) response: Response,
-    pub(super) action: Option<ViewButtonAction>,
-    pub(super) run_cmd: Option<frame_output::RunCommand>,
-}
-
 #[derive(Debug, Default)]
 pub struct GraphUi {
     /// Centralized interaction state machine.
@@ -221,13 +214,14 @@ impl GraphUi {
         background_response: &Response,
         output: &mut FrameOutput,
     ) -> bool {
-        let buttons = self.render_buttons(gui, ctx.autorun);
+        let (view_response, view_action) = self.render_view_buttons(gui);
+        let (exec_response, run_cmd) = self.render_exec_buttons(gui, ctx.autorun);
 
-        if let Some(cmd) = buttons.run_cmd {
+        if let Some(cmd) = run_cmd {
             output.set_run_cmd(cmd);
         }
 
-        match buttons.action {
+        match view_action {
             Some(ViewButtonAction::ResetView) => {
                 self.emit_zoom_pan(ctx.view_graph, Vec2::ZERO, 1.0, output);
             }
@@ -246,7 +240,7 @@ impl GraphUi {
             None => {}
         }
 
-        let mut hovered = buttons.response.hovered();
+        let mut hovered = view_response.hovered() || exec_response.hovered();
         hovered |= self
             .node_details_ui
             .show(gui, ctx, &mut self.argument_values_cache, output)
