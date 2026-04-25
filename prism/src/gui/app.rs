@@ -1,7 +1,6 @@
 use eframe::egui;
 
 use crate::app_config::AppConfig;
-use crate::gui::Gui;
 use crate::gui::main_window::MainWindow;
 use crate::gui::ui_host::EguiUiHost;
 use crate::session::Session;
@@ -23,8 +22,7 @@ impl GuiApp {
 
 impl eframe::App for GuiApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let mut gui = Gui::new(ui, &self.main_window.style);
-        self.main_window.render(&mut self.session, &mut gui);
+        self.main_window.render(&mut self.session, ui);
     }
 
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {

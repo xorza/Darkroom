@@ -17,7 +17,7 @@ use egui::vec2;
 pub struct MainWindow {
     graph_ui: GraphUi,
     log_ui: LogUi,
-    pub(crate) style: Rc<Style>,
+    style: Rc<Style>,
 }
 
 impl MainWindow {
@@ -30,7 +30,10 @@ impl MainWindow {
         }
     }
 
-    pub fn render(&mut self, session: &mut Session, gui: &mut Gui<'_>) {
+    pub fn render(&mut self, session: &mut Session, ui: &mut egui::Ui) {
+        let mut gui = Gui::new(ui, &self.style);
+        let gui = &mut gui;
+
         // One frame = one FrameOutput lifetime. Clearing here (rather
         // than inside `GraphUi::render`) means menu items and shortcut
         // handlers can write to the buffer at any point in the frame
