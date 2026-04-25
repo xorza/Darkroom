@@ -3,11 +3,11 @@ use std::rc::Rc;
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::graph_ui::GraphUi;
-use crate::gui::graph_ui::frame_output::{AppCommand, EditorCommand, FrameOutput, RunCommand};
+use crate::gui::graph_ui::frame_output::{AppCommand, FrameOutput};
 use crate::gui::log_ui::LogUi;
+use crate::gui::shortcuts::shortcut_commands;
 use crate::gui::style::Style;
 use crate::gui::widgets::{Button, ListItem, Panel, PopupMenu};
-use crate::input::InputSnapshot;
 use crate::session::Session;
 
 use eframe::egui;
@@ -66,7 +66,7 @@ impl MainWindow {
                     .render(gui, &ctx, render_events, &input, output);
             });
 
-            self.handle_shortcuts(&input, session, output);
+            shortcut_commands(&input, session.autorun()).apply(output);
 
             output.app_cmd()
         });
@@ -137,42 +137,5 @@ impl MainWindow {
                     output.set_app_cmd(AppCommand::Exit);
                 }
             });
-    }
-
-    fn handle_shortcuts(
-        &mut self,
-        input: &InputSnapshot,
-        session: &Session,
-        output: &mut FrameOutput,
-    ) {
-        let autorun = session.autorun();
-
-        if input.cmd_only(egui::Key::Z) {
-            output.set_editor_cmd(EditorCommand::Undo);
-        } else if input.cmd_shift(egui::Key::Z) {
-            output.set_editor_cmd(EditorCommand::Redo);
-        }
-
-        if input.cmd_shift(egui::Key::S) {
-            output.set_app_cmd(AppCommand::SaveAs);
-        } else if input.cmd_only(egui::Key::S) {
-            output.set_app_cmd(AppCommand::Save);
-        } else if input.cmd(egui::Key::O) {
-            output.set_app_cmd(AppCommand::Open);
-        }
-
-        if input.cmd_shift(egui::Key::Space) {
-            output.set_run_cmd(if autorun {
-                RunCommand::StopAutorun
-            } else {
-                RunCommand::StartAutorun
-            });
-        } else if input.cmd_only(egui::Key::Space) {
-            output.set_run_cmd(RunCommand::RunOnce);
-        }
-
-        if input.cmd(egui::Key::Q) {
-            output.set_app_cmd(AppCommand::Exit);
-        }
     }
 }

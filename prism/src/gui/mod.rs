@@ -16,6 +16,7 @@ pub mod graph_ui;
 pub mod image_utils;
 pub mod log_ui;
 pub mod main_window;
+pub(super) mod shortcuts;
 pub mod style;
 pub mod ui_host;
 pub mod value_editor;
