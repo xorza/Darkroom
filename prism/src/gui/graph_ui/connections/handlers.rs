@@ -88,27 +88,6 @@ impl GraphUi {
         }
     }
 
-    /// Registers a full-area interact widget during connection-dragging
-    /// or breaker modes so stray clicks can't fall through to the
-    /// background (which would trigger background-click handlers).
-    /// Called from `render` in phase 1, between `render_connections`
-    /// and `render_nodes`, so that ports — registered afterwards — keep
-    /// a higher egui z-order than this overlay and still receive their
-    /// click/drag events. That subtlety is why this lives here and not
-    /// inside `process_connections`.
-    pub(in crate::gui::graph_ui) fn maybe_capture_overlay(gui: &mut Gui<'_>, gesture: &Gesture) {
-        if matches!(
-            gesture,
-            Gesture::BreakingConnections(_) | Gesture::DraggingConnection(_)
-        ) {
-            let rect = gui.rect;
-            HitRegion::new(StableId::new("temp_overlay_background"))
-                .rect(rect)
-                .sense(Sense::all())
-                .show(gui);
-        }
-    }
-
     /// Collects all items hit by the breaker (connections, const bindings, nodes)
     /// and applies the corresponding removals in one pass.
     fn apply_breaker_results(
@@ -198,6 +177,11 @@ impl GraphUi {
         }
     }
 
+    /// Renders existing connections plus, during a connection-related
+    /// gesture, a full-area hit region that swallows stray background
+    /// clicks. The hit region is registered *here* — before nodes —
+    /// so port widgets registered later keep higher egui z-order and
+    /// still receive their click/drag events.
     pub(in crate::gui::graph_ui) fn render_connections(
         &mut self,
         gui: &mut Gui<'_>,
@@ -222,6 +206,17 @@ impl GraphUi {
                     .render_temp_connection(gui, ctx, &self.graph_layout, drag);
             }
             _ => {}
+        }
+
+        if matches!(
+            self.gesture,
+            Gesture::BreakingConnections(_) | Gesture::DraggingConnection(_)
+        ) {
+            let rect = gui.rect;
+            HitRegion::new(StableId::new("temp_overlay_background"))
+                .rect(rect)
+                .sense(Sense::all())
+                .show(gui);
         }
     }
 }

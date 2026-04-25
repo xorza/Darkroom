@@ -122,17 +122,7 @@ impl GraphUi {
                 let (background_response, pointer_pos) =
                     self.setup_background_interaction(gui, input, rect);
 
-                // Render nodes first so their widgets (body, cache button,
-                // remove button, ports) register before we read the
-                // background's click state. Otherwise the background —
-                // the only widget in scope at this point — would claim
-                // clicks that should have gone to nodes, triggering a
-                // spurious deselect + cancel_gesture.
                 self.render_content(gui, ctx, input, &background_response, pointer_pos, output);
-
-                if background_response.clicked() {
-                    self.handle_background_click(ctx, output);
-                }
 
                 let overlay_hovered = self.render_overlays(
                     gui,
@@ -188,13 +178,10 @@ impl GraphUi {
             );
 
             self.dots_background.render(gui, ctx);
+            // `render_connections` ends by registering a transient overlay
+            // hit-region during connection-related gestures; nodes register
+            // afterwards so their ports keep higher egui z-order.
             self.render_connections(gui, ctx, output);
-
-            // Overlay that swallows background click-through for active
-            // gestures. Registered HERE — before ports — so later-registered
-            // port widgets keep higher egui z-order and their click/drag
-            // responses still fire through. See `maybe_capture_overlay`.
-            Self::maybe_capture_overlay(gui, &self.gesture);
 
             let nodes_result =
                 self.node_ui
@@ -210,6 +197,15 @@ impl GraphUi {
                     &nodes_result.broken_nodes,
                     output,
                 );
+            }
+
+            // Resolve the background click after every node widget has
+            // registered (otherwise the background would claim clicks
+            // meant for nodes) and after `process_connections` (so a
+            // gesture release on the same frame — e.g. a breaker with
+            // sub-drag-threshold motion — finalizes before we cancel).
+            if background_response.clicked() {
+                self.handle_background_click(ctx, output);
             }
         });
     }
