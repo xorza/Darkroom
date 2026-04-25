@@ -227,7 +227,9 @@ impl NodeUi {
             }
 
             render_status_hints(gui, &layout, node_id, node.behavior, func);
-            render_cache_btn(gui, output, &layout, node);
+            if let Some(action) = render_cache_btn(gui, &layout, node) {
+                output.add_action(action);
+            }
 
             let missing_inputs = get_missing_input_ports(ctx.execution_stats, node_id);
             result
@@ -338,9 +340,12 @@ fn render_body(
 // UI controls
 // ============================================================================
 
-fn render_cache_btn(gui: &mut Gui<'_>, output: &mut FrameOutput, layout: &NodeLayout, node: &Node) {
+/// Returns the `CacheToggled` action when the cache button was clicked
+/// this frame. The caller (`render_nodes`) is the single emit site; this
+/// keeps render-pass code from poking `FrameOutput` mid-paint.
+fn render_cache_btn(gui: &mut Gui<'_>, layout: &NodeLayout, node: &Node) -> Option<GraphUiAction> {
     if !layout.has_cache_btn {
-        return;
+        return None;
     }
 
     let mut checked = node.behavior == NodeBehavior::Once;
@@ -354,11 +359,13 @@ fn render_cache_btn(gui: &mut Gui<'_>, output: &mut FrameOutput, layout: &NodeLa
         let before = node.behavior;
         let mut after = before;
         after.toggle();
-        output.add_action(GraphUiAction::CacheToggled {
+        Some(GraphUiAction::CacheToggled {
             node_id: node.id,
             before,
             after,
-        });
+        })
+    } else {
+        None
     }
 }
 

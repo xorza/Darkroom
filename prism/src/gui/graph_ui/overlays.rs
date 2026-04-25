@@ -19,15 +19,11 @@ use crate::model;
 use crate::model::graph_ui_action::GraphUiAction;
 
 impl GraphUi {
-    pub(super) fn render_buttons(
-        &mut self,
-        gui: &mut Gui<'_>,
-        autorun: bool,
-        output: &mut FrameOutput,
-    ) -> ButtonResult {
+    pub(super) fn render_buttons(&mut self, gui: &mut Gui<'_>, autorun: bool) -> ButtonResult {
         let mut autorun = autorun;
         let rect = gui.rect;
         let mut action: Option<ViewButtonAction> = None;
+        let mut run_cmd: Option<RunCommand> = None;
 
         // Top buttons (view controls)
         let mut response =
@@ -95,7 +91,7 @@ impl GraphUi {
                     gui.horizontal(|gui| {
                         let response = Button::new(StableId::new("run_btn")).text("run").show(gui);
                         if response.clicked() {
-                            output.set_run_cmd(RunCommand::RunOnce);
+                            run_cmd = Some(RunCommand::RunOnce);
                         }
 
                         let response = Button::new(StableId::new("autorun_btn"))
@@ -104,7 +100,7 @@ impl GraphUi {
                             .show(gui);
 
                         if response.clicked() {
-                            output.set_run_cmd(if autorun {
+                            run_cmd = Some(if autorun {
                                 RunCommand::StartAutorun
                             } else {
                                 RunCommand::StopAutorun
@@ -116,7 +112,11 @@ impl GraphUi {
         })
         .inner;
 
-        ButtonResult { response, action }
+        ButtonResult {
+            response,
+            action,
+            run_cmd,
+        }
     }
 
     // ------------------------------------------------------------------------

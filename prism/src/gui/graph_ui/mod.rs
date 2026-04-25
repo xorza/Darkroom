@@ -58,6 +58,7 @@ pub(super) enum ViewButtonAction {
 pub(super) struct ButtonResult {
     pub(super) response: Response,
     pub(super) action: Option<ViewButtonAction>,
+    pub(super) run_cmd: Option<frame_output::RunCommand>,
 }
 
 #[derive(Debug, Default)]
@@ -213,7 +214,11 @@ impl GraphUi {
         background_response: &Response,
         output: &mut FrameOutput,
     ) -> bool {
-        let buttons = self.render_buttons(gui, ctx.autorun, output);
+        let buttons = self.render_buttons(gui, ctx.autorun);
+
+        if let Some(cmd) = buttons.run_cmd {
+            output.set_run_cmd(cmd);
+        }
 
         match buttons.action {
             Some(ViewButtonAction::ResetView) => {
