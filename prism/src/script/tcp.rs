@@ -570,9 +570,32 @@ mod tests {
 
         let mut s = TcpStream::connect(addr).await.unwrap();
         s.write_u128(wrong.as_u128()).await.unwrap();
-        // Server sees the bad token and drops the stream. Our read sees
-        // EOF (UnexpectedEof or ConnectionReset depending on timing).
-        assert!(s.read_u32().await.is_err());
+        // Server sees the bad token and drops the stream cleanly (FIN
+        // with no bytes written), so the client's first read returns
+        // EOF — `read` returns Ok(0), `read_u32` maps that to
+        // UnexpectedEof. Pin both so a future change that accidentally
+        // sends a partial reply on reject would fail this test.
+        let mut buf = [0u8; 1];
+        assert_eq!(s.read(&mut buf).await.unwrap(), 0, "expected clean EOF");
+        let err = s.read_u32().await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+    }
+
+    /// A `u32` length above `MAX_FRAME_BYTES` is rejected before any
+    /// allocation. Server drops the connection without a reply.
+    #[tokio::test]
+    async fn oversized_frame_is_rejected() {
+        let t = TcpTransport::bind(loopback_ephemeral(), None, TcpTimeouts::default()).unwrap();
+        let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
+
+        let mut s = TcpStream::connect(addr).await.unwrap();
+        // Nil session id, then an oversized length declaration.
+        s.write_u128(0).await.unwrap();
+        s.write_u32(MAX_FRAME_BYTES + 1).await.unwrap();
+        // Server bails from `read_string_frame` with InvalidData and
+        // drops the stream; we should see EOF, not a JSON reply.
+        let mut buf = [0u8; 1];
+        assert_eq!(s.read(&mut buf).await.unwrap(), 0, "expected EOF on reject");
     }
 
     #[test]
