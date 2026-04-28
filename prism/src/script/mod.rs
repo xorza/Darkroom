@@ -390,13 +390,19 @@ fn build_engine(
         });
     });
 
-    // `list_funcs()` → array of strings: every name in the live FuncLib.
-    // Insertion order; matches the order funcs were merged at startup.
+    // `list_funcs()` → array of object-maps: one entry per Func in the
+    // live FuncLib (insertion order). Each map mirrors the `Func` struct
+    // via its `Serialize` impl: name, id, category, terminal, behavior,
+    // node_default_behavior, description, inputs, outputs, events.
+    // `lambda` and `required_contexts` are `#[serde(skip)]` so they
+    // don't appear.
     engine.register_fn("list_funcs", move || -> Array {
         func_lib
             .funcs
             .iter()
-            .map(|f| Dynamic::from(f.name.clone()))
+            .map(|f| {
+                rhai::serde::to_dynamic(f).expect("Func is Serialize-clean (no skipped errors)")
+            })
             .collect()
     });
 
@@ -480,18 +486,20 @@ mod tests {
     use std::net::Ipv4Addr;
 
     #[test]
-    fn list_funcs_returns_loaded_func_names_in_insertion_order() {
+    fn list_funcs_returns_full_func_objects_in_insertion_order() {
         use scenarium::function::{Func, FuncId};
 
         let mut lib = FuncLib::default();
         lib.add(Func {
             id: FuncId::unique(),
             name: "alpha".to_string(),
+            category: "math".to_string(),
             ..Default::default()
         });
         lib.add(Func {
             id: FuncId::unique(),
             name: "beta".to_string(),
+            category: "io".to_string(),
             ..Default::default()
         });
 
@@ -499,12 +507,25 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel::<ScriptAction>();
         let engine = build_engine(state, tx, Arc::new(lib));
 
-        let result: Array = engine.eval("list_funcs()").unwrap();
-        let names: Vec<String> = result
+        // Each entry is a Rhai Map with fields mirroring `Func`. Verify
+        // both insertion order and that the per-func subfields round-trip.
+        let names: Array = engine.eval("list_funcs().map(|f| f.name)").unwrap();
+        let names: Vec<String> = names
             .into_iter()
             .map(|d| d.into_string().unwrap())
             .collect();
         assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
+
+        let categories: Array = engine.eval("list_funcs().map(|f| f.category)").unwrap();
+        let categories: Vec<String> = categories
+            .into_iter()
+            .map(|d| d.into_string().unwrap())
+            .collect();
+        assert_eq!(categories, vec!["math".to_string(), "io".to_string()]);
+
+        // `inputs` / `outputs` round-trip as arrays even when empty.
+        let inputs_len: i64 = engine.eval("list_funcs()[0].inputs.len").unwrap();
+        assert_eq!(inputs_len, 0);
     }
 
     #[test]
