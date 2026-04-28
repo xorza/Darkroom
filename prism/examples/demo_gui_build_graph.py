@@ -10,13 +10,22 @@ Layout:
 
 The script also batches a few finishing actions (selecting + renaming the
 sum node) into a single `apply_all([...])` call to demonstrate atomic
-multi-action undo: one Ctrl-Z reverts the whole batch.
+multi-action undo: one Ctrl-Z reverts the whole batch. Then it animates
+the sum node along a sine wave by streaming `move_node()` calls one
+frame at a time — the GUI redraws between each because each `apply()`
+fires the Notify wakeup the script crate handed Session.
+
+Caveat: each animation frame is its own undo entry because `MoveNode`
+doesn't currently coalesce by `gesture_key`. Undoing the animation
+walks frame-by-frame, which is harmless but noisy. See
+`Intent::gesture_key` if you want to wire continuous-drag merging.
 
 Run from the repo root:
     python3 prism/examples/demo_gui_build_graph.py
 """
 
 import json
+import math
 import signal
 import socket
 import struct
@@ -140,6 +149,25 @@ def main():
             b'])',
             session_id,
         )
+
+        # Animation: stream `move_node` calls so each frame paints between
+        # network round-trips. Two cycles of a horizontal sine wave around
+        # the sum node's home position, ending exactly back there.
+        print("animating sum node…")
+        cx, cy = 320.0, 160.0
+        amplitude = 80.0
+        cycles = 2
+        frames = 60
+        duration = 2.5  # seconds
+        frame_dt = duration / frames
+        for i in range(frames):
+            t = i / (frames - 1)  # 0.0 → 1.0
+            x = cx + amplitude * math.sin(t * cycles * 2 * math.pi)
+            src = f"move_node(s_id, {x:.2f}, {cy})".encode()
+            send(sock, src, session_id)
+            time.sleep(frame_dt)
+        # Snap to the canonical home in case rounding drifted us off.
+        send(sock, f"move_node(s_id, {cx}, {cy})".encode(), session_id)
 
         print("done — try Ctrl-Z in the GUI; the rename+select should undo together")
         print("Ctrl-C here (or close the window) to exit")
