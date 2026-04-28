@@ -114,7 +114,7 @@ impl Session {
                 }
             }
         }
-        let script_executor = ScriptExecutor::new(transports, script_action_tx);
+        let script_executor = ScriptExecutor::new(transports, script_action_tx, func_lib.clone());
 
         let mut result = Self::from_parts(
             func_lib,

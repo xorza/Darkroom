@@ -415,8 +415,11 @@ mod tests {
     ) {
         let addr = transport.local_addr().unwrap();
         let (action_tx, action_rx) = mpsc::unbounded_channel::<ScriptAction>();
-        let executor =
-            ScriptExecutor::new([Box::new(transport) as Box<dyn ScriptTransport>], action_tx);
+        let executor = ScriptExecutor::new(
+            [Box::new(transport) as Box<dyn ScriptTransport>],
+            action_tx,
+            Arc::new(scenarium::prelude::FuncLib::default()),
+        );
         (addr, executor, action_rx)
     }
 

@@ -28,7 +28,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use rhai::{Dynamic, Engine};
+use rhai::{Array, Dynamic, Engine};
+use scenarium::prelude::FuncLib;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::{JoinHandle, yield_now};
 use tokio_util::sync::CancellationToken;
@@ -295,7 +296,11 @@ impl ScriptExecutor {
     /// and spawn the executor task itself. Must be called from a
     /// tokio runtime context. `action_tx` is the Session-side
     /// receiver for side-effect requests emitted by script functions.
-    pub fn new<I>(transports: I, action_tx: mpsc::UnboundedSender<ScriptAction>) -> Self
+    pub fn new<I>(
+        transports: I,
+        action_tx: mpsc::UnboundedSender<ScriptAction>,
+        func_lib: Arc<FuncLib>,
+    ) -> Self
     where
         I: IntoIterator<Item = Box<dyn ScriptTransport>>,
     {
@@ -310,7 +315,8 @@ impl ScriptExecutor {
 
         let cancel = CancellationToken::new();
         let cancel_task = cancel.clone();
-        let task = tokio::spawn(async move { run_executor(rx, cancel_task, action_tx).await });
+        let task =
+            tokio::spawn(async move { run_executor(rx, cancel_task, action_tx, func_lib).await });
 
         Self {
             cancel,
@@ -333,9 +339,10 @@ async fn run_executor(
     mut rx: mpsc::Receiver<ScriptRequest>,
     cancel: CancellationToken,
     action_tx: mpsc::UnboundedSender<ScriptAction>,
+    func_lib: Arc<FuncLib>,
 ) {
     let state: Arc<Mutex<RequestState>> = Arc::new(Mutex::new(RequestState::default()));
-    let engine = build_engine(state.clone(), action_tx);
+    let engine = build_engine(state.clone(), action_tx, func_lib);
     let mut sessions = SessionStore::default();
 
     loop {
@@ -354,6 +361,7 @@ async fn run_executor(
 fn build_engine(
     state: Arc<Mutex<RequestState>>,
     action_tx: mpsc::UnboundedSender<ScriptAction>,
+    func_lib: Arc<FuncLib>,
 ) -> Engine {
     let mut engine = Engine::new();
     engine.set_max_operations(MAX_OPERATIONS);
@@ -380,6 +388,16 @@ fn build_engine(
             origin,
             msg: msg.to_string(),
         });
+    });
+
+    // `list_funcs()` → array of strings: every name in the live FuncLib.
+    // Insertion order; matches the order funcs were merged at startup.
+    engine.register_fn("list_funcs", move || -> Array {
+        func_lib
+            .funcs
+            .iter()
+            .map(|f| Dynamic::from(f.name.clone()))
+            .collect()
     });
 
     engine.on_debug(|msg, src, pos| {
@@ -460,6 +478,44 @@ fn run_script(
 mod tests {
     use super::*;
     use std::net::Ipv4Addr;
+
+    #[test]
+    fn list_funcs_returns_loaded_func_names_in_insertion_order() {
+        use scenarium::function::{Func, FuncId};
+
+        let mut lib = FuncLib::default();
+        lib.add(Func {
+            id: FuncId::unique(),
+            name: "alpha".to_string(),
+            ..Default::default()
+        });
+        lib.add(Func {
+            id: FuncId::unique(),
+            name: "beta".to_string(),
+            ..Default::default()
+        });
+
+        let state = Arc::new(Mutex::new(RequestState::default()));
+        let (tx, _rx) = mpsc::unbounded_channel::<ScriptAction>();
+        let engine = build_engine(state, tx, Arc::new(lib));
+
+        let result: Array = engine.eval("list_funcs()").unwrap();
+        let names: Vec<String> = result
+            .into_iter()
+            .map(|d| d.into_string().unwrap())
+            .collect();
+        assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
+    }
+
+    #[test]
+    fn list_funcs_is_empty_when_func_lib_is_empty() {
+        let state = Arc::new(Mutex::new(RequestState::default()));
+        let (tx, _rx) = mpsc::unbounded_channel::<ScriptAction>();
+        let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
+
+        let result: Array = engine.eval("list_funcs()").unwrap();
+        assert!(result.is_empty());
+    }
 
     #[test]
     fn build_transports_empty_when_no_tcp_config() {

@@ -5,12 +5,13 @@ connection, demonstrate session resume.
 Run from the repo root:
     python3 prism/examples/demo_client.py
 
-Demonstrates three things:
+Demonstrates four things:
   1. First frame: session_id = nil ("new session"). Server returns a fresh id.
   2. Second frame on the same connection: resume that session, read back a
      variable bound in frame 1.
   3. Close the socket, open a new one, resume the *same* session id to show
      the scope survived a reconnect.
+  4. Call the `list_funcs()` intrinsic to query the live FuncLib registry.
 """
 
 import json
@@ -109,6 +110,12 @@ def main() -> None:
         reply3 = read_reply(second)
         print(f"after reconnect  session={reply3['session']}")
         print(f"                 result ={reply3['result']!r}")
+
+        # Query the live FuncLib via the `list_funcs()` intrinsic — every
+        # function name registered in prism's runtime, in insertion order.
+        send_request(second, session_id, b"list_funcs()")
+        reply4 = read_reply(second)
+        print(f"list_funcs()     result ={reply4['result']!r}")
         second.close()
 
     finally:
