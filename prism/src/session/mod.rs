@@ -20,7 +20,7 @@ use crate::config::Config;
 use crate::gui::graph_ui::ctx::GraphContext;
 use crate::gui::graph_ui::frame_output::{EditorCommand, FrameOutput, RunCommand};
 use crate::model::argument_values_cache::{CacheEvent, NodeCache, RenderEvent, invalidated_nodes};
-use crate::model::intent::{self, UndoStep};
+use crate::model::intent;
 use crate::model::{ActionStack, Intent, ViewGraph};
 use crate::script::{self, ScriptExecutor, SessionInbound};
 use crate::ui_host::UiHost;
@@ -246,17 +246,18 @@ impl Session {
         }
     }
 
-    /// Apply intents to `view_graph` in order. Returns `true` if any
-    /// intent affects computation. Does *not* record undo history —
-    /// that's the job of [`Session::commit_actions`]. Currently used
-    /// only by tests; production code commits through
+    /// Apply intents to `view_graph` in order, returning `true` if any
+    /// affects computation. Does *not* record undo history — that's
+    /// the job of [`Session::commit_actions`]. Currently used only by
+    /// tests; production code commits through
     /// [`Session::commit_intents`].
     #[cfg(test)]
     pub fn apply(&mut self, intents: &[Intent]) -> bool {
         let mut graph_updated = false;
         for intent in intents {
-            crate::model::intent::apply(intent, &mut self.view_graph);
-            graph_updated |= intent::affects_computation(intent);
+            let step = crate::model::intent::build_step(intent.clone(), &self.view_graph);
+            crate::model::intent::apply_step(&step, &mut self.view_graph);
+            graph_updated |= intent::affects_computation(&step);
         }
         graph_updated
     }
@@ -563,10 +564,10 @@ impl Session {
         let mut graph_updated = false;
         let mut steps = Vec::with_capacity(intents.len());
         for intent in intents {
-            let snapshot = intent::capture(&intent, &self.view_graph);
-            intent::apply(&intent, &mut self.view_graph);
-            graph_updated |= intent::affects_computation(&intent);
-            steps.push(UndoStep { intent, snapshot });
+            let step = intent::build_step(intent, &self.view_graph);
+            intent::apply_step(&step, &mut self.view_graph);
+            graph_updated |= intent::affects_computation(&step);
+            steps.push(step);
         }
         self.action_stack.clear_redo();
         self.action_stack.push_current(&steps);

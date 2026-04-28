@@ -4,7 +4,7 @@ use std::ops::Range;
 use common::SerdeFormat;
 
 use crate::model::ViewGraph;
-use crate::model::intent::{self, GestureKey, Intent, UndoStep};
+use crate::model::intent::{self, GestureKey, UndoStep};
 
 #[cfg(test)]
 mod tests;
@@ -76,10 +76,10 @@ impl ActionStack {
 
         // Gesture coalescing: if this push is a single step matching the
         // previous entry's cached gesture_key, merge in place — keep the
-        // existing snapshot, replace the intent. Cross-frame zoom/pan
-        // collapses to one undo step without cross-frame state.
+        // existing "from" half, replace the "to" half. Cross-frame
+        // zoom/pan collapses to one undo step without cross-frame state.
         if steps.len() == 1
-            && let Some(key) = intent::gesture_key(&steps[0].intent)
+            && let Some(key) = intent::gesture_key(&steps[0])
             && self.try_merge_with_last(&steps[0], key)
         {
             return;
@@ -87,7 +87,7 @@ impl ActionStack {
 
         let range = Self::append_steps(&mut self.undo_actions, steps, &mut self.temp_buffer);
         let gesture_key = if steps.len() == 1 {
-            intent::gesture_key(&steps[0].intent)
+            intent::gesture_key(&steps[0])
         } else {
             None
         };
@@ -100,15 +100,15 @@ impl ActionStack {
         self.redo_stack.clear();
     }
 
-    pub fn undo(&mut self, view_graph: &mut ViewGraph, on_step: &mut dyn FnMut(&Intent)) -> bool {
+    pub fn undo(&mut self, view_graph: &mut ViewGraph, on_step: &mut dyn FnMut(&UndoStep)) -> bool {
         let Some(entry) = self.undo_stack.pop() else {
             return false;
         };
         let bytes = Self::slice_bytes(&self.undo_actions, &entry.range);
         let steps = Self::deserialize_steps(bytes, &mut self.temp_buffer);
         for step in steps.iter().rev() {
-            intent::revert(&step.snapshot, &step.intent, view_graph);
-            on_step(&step.intent);
+            intent::revert_step(step, view_graph);
+            on_step(step);
         }
         let redo_range = Self::append_bytes(&mut self.redo_actions, bytes);
         self.redo_stack.push(redo_range);
@@ -117,20 +117,20 @@ impl ActionStack {
         true
     }
 
-    pub fn redo(&mut self, view_graph: &mut ViewGraph, on_step: &mut dyn FnMut(&Intent)) -> bool {
+    pub fn redo(&mut self, view_graph: &mut ViewGraph, on_step: &mut dyn FnMut(&UndoStep)) -> bool {
         let Some(range) = self.redo_stack.pop() else {
             return false;
         };
         let bytes = Self::slice_bytes(&self.redo_actions, &range);
         let steps = Self::deserialize_steps(bytes, &mut self.temp_buffer);
         let gesture_key = if steps.len() == 1 {
-            intent::gesture_key(&steps[0].intent)
+            intent::gesture_key(&steps[0])
         } else {
             None
         };
         for step in steps.iter() {
-            intent::apply(&step.intent, view_graph);
-            on_step(&step.intent);
+            intent::apply_step(step, view_graph);
+            on_step(step);
         }
         let undo_range = Self::append_bytes(&mut self.undo_actions, bytes);
         self.undo_stack.push(UndoEntry {
@@ -178,9 +178,27 @@ impl ActionStack {
             "gesture-keyed entry must hold a single step"
         );
 
-        let merged = UndoStep {
-            intent: new_step.intent.clone(),
-            snapshot: last_steps[0].snapshot.clone(),
+        // Combine the "from" half of the existing entry with the "to"
+        // half of the incoming step. Per-variant because each variant's
+        // forward/backward field shape differs. Add a match arm here
+        // when introducing a new gesture variant in `gesture_key`.
+        let merged = match (&last_steps[0], new_step) {
+            (
+                UndoStep::SetViewport {
+                    from_pan,
+                    from_scale,
+                    ..
+                },
+                UndoStep::SetViewport {
+                    to_pan, to_scale, ..
+                },
+            ) => UndoStep::SetViewport {
+                from_pan: *from_pan,
+                from_scale: *from_scale,
+                to_pan: *to_pan,
+                to_scale: *to_scale,
+            },
+            _ => return false,
         };
 
         Self::pop_tail_actions(&mut self.undo_actions, &last_range);

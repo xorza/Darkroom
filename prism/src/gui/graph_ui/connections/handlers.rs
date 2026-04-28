@@ -482,7 +482,8 @@ mod tests {
         )
         .unwrap();
 
-        crate::model::intent::apply(&action, &mut vg);
+        let step = crate::model::intent::build_step(action, &vg);
+        crate::model::intent::apply_step(&step, &mut vg);
 
         let a_input = &vg.graph.by_id(&a_id).unwrap().inputs[0];
         match &a_input.binding {

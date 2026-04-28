@@ -33,13 +33,13 @@ fn assert_ranges_match_actions(stack: &ActionStack) {
     assert_eq!(redo_actions_len, stack.redo_actions.len());
 }
 
-/// Apply an intent to `view_graph` and return the matching `UndoStep`
-/// (capture-then-apply). Mirrors what `Session::commit_action_slice`
-/// does in production code.
+/// Build an `UndoStep` from an `Intent` (capture pre-state from
+/// `view_graph`) and apply it forward. Mirrors what
+/// `Session::commit_intents` does in production code.
 fn step(view_graph: &mut ViewGraph, intent: Intent) -> UndoStep {
-    let snapshot = intent::capture(&intent, view_graph);
-    intent::apply(&intent, view_graph);
-    UndoStep { intent, snapshot }
+    let step = intent::build_step(intent, view_graph);
+    intent::apply_step(&step, view_graph);
+    step
 }
 
 #[test]

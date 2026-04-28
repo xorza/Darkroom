@@ -1,10 +1,24 @@
-//! Forward-only descriptions of graph mutations.
+//! Forward-only descriptions of graph mutations + the self-contained
+//! undo entries built from them.
 //!
 //! An [`Intent`] is "what the caller wants the graph to look like
-//! after"; it carries no history. Reversing an intent for undo
-//! requires a [`Snapshot`] of the slot the intent will overwrite,
-//! captured automatically at apply time. The stored undo entry is
-//! [`UndoStep`] = `intent` + `snapshot`.
+//! after"; it carries no history. To make the change reversible, we
+//! pair the intent with a snapshot of the slot it overwrites. Rather
+//! than carrying that snapshot in a sibling enum, [`UndoStep`] folds
+//! both halves into one variant per kind: every variant has both the
+//! "from" payload (for revert) and the "to" payload (for forward
+//! apply). Type-level enforcement means an `UndoStep` can never be
+//! constructed inconsistently — there's no `(Intent::A, Snapshot::B)`
+//! mismatch to worry about at runtime.
+//!
+//! Three free fns own the per-variant logic:
+//!   - [`build_step`] — read snapshot from `&ViewGraph`, fold with the
+//!     incoming intent, return a fully-populated [`UndoStep`]. Pure.
+//!   - [`apply_step`] — write the "to" half of an `UndoStep` to
+//!     `&mut ViewGraph`. Used both during initial commit and during
+//!     undo-stack redo.
+//!   - [`revert_step`] — write the "from" half of an `UndoStep` to
+//!     `&mut ViewGraph`. Used during undo.
 //!
 //! Why split: when emit-sites had to carry `before` fields, scripts
 //! using `apply()` were forced to look up old values themselves. Stale
@@ -34,20 +48,23 @@ pub struct IncomingEvent {
     pub event_idx: usize,
 }
 
-/// What the caller wants to change. Forward-only — no `before` fields.
+/// What the caller wants to change. Forward-only — no `from` fields.
 /// Each variant says "set X to Y"; Session captures the previous Y at
 /// commit time.
 ///
-/// **Adding a variant** — touch all five dispatch sites in this file:
+/// **Adding a variant** — touch four spots:
 ///   1. add the variant here on `Intent`,
-///   2. add the matching variant on [`Snapshot`] (carrying the
-///      "previous Y" payload, or empty for pure-creation intents),
-///   3. add an arm to [`capture`] reading the soon-to-be-overwritten
-///      state from `&ViewGraph`,
-///   4. add an arm to [`apply`] writing the new state to `&mut ViewGraph`,
-///   5. add an arm to [`revert`] (matching `(Snapshot, Intent)` pair),
-///   6. update [`affects_computation`] if the intent re-triggers compute,
-///   7. update [`gesture_key`] if the intent coalesces in undo history.
+///   2. add the matching variant on [`UndoStep`] (carrying both the
+///      forward "to" payload and the backward "from" payload, or just
+///      forward fields for pure-creation intents),
+///   3. add an arm to [`build_step`] (read `from` from `&ViewGraph`
+///      and combine with the intent's `to` into a complete `UndoStep`),
+///   4. add arms to [`apply_step`] and [`revert_step`] reading the
+///      forward and backward halves respectively,
+///   5. update [`affects_computation`] if the variant re-triggers
+///      compute,
+///   6. update [`gesture_key`] if the variant coalesces in undo
+///      history.
 ///
 /// The round-trip test in `action_stack/tests.rs` exercises every
 /// variant — adding the variant there too is the safety net for the
@@ -95,15 +112,20 @@ pub enum Intent {
     },
 }
 
-/// State captured at apply time so undo can restore the slot the
-/// intent overwrote. Variants line up 1:1 with `Intent`. Owned by the
-/// undo stack, opaque to emitters.
+/// Self-contained undo-stack entry. Each variant carries both halves:
+/// the forward "to" payload (read by [`apply_step`]) and the backward
+/// "from" payload (read by [`revert_step`]). Built from an [`Intent`]
+/// via [`build_step`], which captures the pre-mutation state from
+/// `&ViewGraph` at commit time. The stored entry is therefore
+/// independent of any external state — replaying it requires only the
+/// `ViewGraph` itself.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Snapshot {
-    /// Pure creation: undo is "remove the node we just added".
-    AddNode,
-    /// Pre-removal state: every reference into the doomed node, so
-    /// undo can fully restore it.
+pub enum UndoStep {
+    /// Pure creation: the "from" state is "node absent", which is
+    /// implicit — undo just removes the node by id.
+    AddNode { view_node: ViewNode, node: Node },
+    /// Pre-removal state lives entirely on the step: every reference
+    /// into the doomed node, so undo can fully restore it.
     RemoveNode {
         view_node: ViewNode,
         node: Node,
@@ -112,54 +134,60 @@ pub enum Snapshot {
         was_selected: bool,
     },
     MoveNode {
+        node_id: NodeId,
         from: Pos2,
+        to: Pos2,
     },
     RenameNode {
+        node_id: NodeId,
         from: String,
+        to: String,
     },
     SetInput {
+        node_id: NodeId,
+        input_idx: usize,
         from: Binding,
+        to: Binding,
     },
     SelectNode {
         from: Option<NodeId>,
+        to: Option<NodeId>,
     },
     SetCacheBehavior {
+        node_id: NodeId,
         from: NodeBehavior,
+        to: NodeBehavior,
     },
     SetEventConnection {
+        event_node_id: NodeId,
+        event_idx: usize,
+        subscriber: NodeId,
         was_present: bool,
+        present: bool,
     },
     SetViewport {
-        pan: Vec2,
-        scale: f32,
+        from_pan: Vec2,
+        from_scale: f32,
+        to_pan: Vec2,
+        to_scale: f32,
     },
 }
 
-/// One undo-stack entry. `intent` is what the user did; `snapshot` is
-/// what was there before. Apply walks intent forward, undo walks
-/// snapshot back.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UndoStep {
-    pub intent: Intent,
-    pub snapshot: Snapshot,
-}
-
-/// Capture the current state the intent will overwrite. Read-only on
-/// `view_graph`; runs *before* `apply` so the snapshot reflects
-/// pre-mutation state. Pure dispatch: variant of intent → variant of
-/// snapshot.
-pub fn capture(intent: &Intent, view_graph: &ViewGraph) -> Snapshot {
+/// Read pre-mutation state from `view_graph` and fold it with `intent`
+/// into a complete [`UndoStep`]. Pure — does not write to the graph.
+/// The intent is moved into the result.
+pub fn build_step(intent: Intent, view_graph: &ViewGraph) -> UndoStep {
     match intent {
-        Intent::AddNode { .. } => Snapshot::AddNode,
+        Intent::AddNode { view_node, node } => UndoStep::AddNode { view_node, node },
         Intent::RemoveNode { node_id } => {
             let view_node = view_graph
                 .view_nodes
-                .by_key(node_id)
+                .by_key(&node_id)
                 .expect("RemoveNode capture expects a view node")
                 .clone();
             let node = view_graph
                 .graph
-                .by_id(node_id)
+                .by_id(&node_id)
                 .expect("RemoveNode capture expects a graph node")
                 .clone();
             let mut incoming_connections = Vec::new();
@@ -169,7 +197,7 @@ pub fn capture(intent: &Intent, view_graph: &ViewGraph) -> Snapshot {
                     let Binding::Bind(binding) = &input.binding else {
                         continue;
                     };
-                    if binding.target_id == *node_id {
+                    if binding.target_id == node_id {
                         incoming_connections.push(IncomingConnection {
                             node_id: other.id,
                             input_idx,
@@ -178,7 +206,7 @@ pub fn capture(intent: &Intent, view_graph: &ViewGraph) -> Snapshot {
                     }
                 }
                 for (event_idx, event) in other.events.iter().enumerate() {
-                    if event.subscribers.contains(node_id) {
+                    if event.subscribers.contains(&node_id) {
                         incoming_events.push(IncomingEvent {
                             node_id: other.id,
                             event_idx,
@@ -186,8 +214,8 @@ pub fn capture(intent: &Intent, view_graph: &ViewGraph) -> Snapshot {
                     }
                 }
             }
-            let was_selected = view_graph.selected_node_id == Some(*node_id);
-            Snapshot::RemoveNode {
+            let was_selected = view_graph.selected_node_id == Some(node_id);
+            UndoStep::RemoveNode {
                 view_node,
                 node,
                 incoming_connections,
@@ -195,58 +223,76 @@ pub fn capture(intent: &Intent, view_graph: &ViewGraph) -> Snapshot {
                 was_selected,
             }
         }
-        Intent::MoveNode { node_id, .. } => Snapshot::MoveNode {
-            from: view_graph.view_nodes.by_key(node_id).unwrap().pos,
+        Intent::MoveNode { node_id, to } => UndoStep::MoveNode {
+            node_id,
+            from: view_graph.view_nodes.by_key(&node_id).unwrap().pos,
+            to,
         },
-        Intent::RenameNode { node_id, .. } => Snapshot::RenameNode {
-            from: view_graph.graph.by_id(node_id).unwrap().name.clone(),
+        Intent::RenameNode { node_id, to } => UndoStep::RenameNode {
+            from: view_graph.graph.by_id(&node_id).unwrap().name.clone(),
+            node_id,
+            to,
         },
         Intent::SetInput {
-            node_id, input_idx, ..
+            node_id,
+            input_idx,
+            to,
         } => {
-            let node = view_graph.graph.by_id(node_id).unwrap();
+            let node = view_graph.graph.by_id(&node_id).unwrap();
             assert!(
-                *input_idx < node.inputs.len(),
+                input_idx < node.inputs.len(),
                 "SetInput capture: input index out of range"
             );
-            Snapshot::SetInput {
-                from: node.inputs[*input_idx].binding.clone(),
+            UndoStep::SetInput {
+                from: node.inputs[input_idx].binding.clone(),
+                node_id,
+                input_idx,
+                to,
             }
         }
-        Intent::SelectNode { .. } => Snapshot::SelectNode {
+        Intent::SelectNode { to } => UndoStep::SelectNode {
             from: view_graph.selected_node_id,
+            to,
         },
-        Intent::SetCacheBehavior { node_id, .. } => Snapshot::SetCacheBehavior {
-            from: view_graph.graph.by_id(node_id).unwrap().behavior,
+        Intent::SetCacheBehavior { node_id, to } => UndoStep::SetCacheBehavior {
+            from: view_graph.graph.by_id(&node_id).unwrap().behavior,
+            node_id,
+            to,
         },
         Intent::SetEventConnection {
             event_node_id,
             event_idx,
             subscriber,
-            ..
+            present,
         } => {
-            let node = view_graph.graph.by_id(event_node_id).unwrap();
+            let node = view_graph.graph.by_id(&event_node_id).unwrap();
             assert!(
-                *event_idx < node.events.len(),
+                event_idx < node.events.len(),
                 "SetEventConnection capture: event index out of range"
             );
-            Snapshot::SetEventConnection {
-                was_present: node.events[*event_idx].subscribers.contains(subscriber),
+            UndoStep::SetEventConnection {
+                was_present: node.events[event_idx].subscribers.contains(&subscriber),
+                event_node_id,
+                event_idx,
+                subscriber,
+                present,
             }
         }
-        Intent::SetViewport { .. } => Snapshot::SetViewport {
-            pan: view_graph.pan,
-            scale: view_graph.scale,
+        Intent::SetViewport { pan, scale } => UndoStep::SetViewport {
+            from_pan: view_graph.pan,
+            from_scale: view_graph.scale,
+            to_pan: pan,
+            to_scale: scale,
         },
     }
 }
 
-/// Apply the intent forward. The view graph must be in a state
-/// consistent with what `capture` returned (no concurrent mutation
-/// between capture and apply).
-pub fn apply(intent: &Intent, view_graph: &mut ViewGraph) {
-    match intent {
-        Intent::AddNode { view_node, node } => {
+/// Forward apply: write the step's "to" half to `view_graph`. Used by
+/// the initial commit (right after `build_step`) and by undo-stack
+/// redo (replaying a popped step).
+pub fn apply_step(step: &UndoStep, view_graph: &mut ViewGraph) {
+    match step {
+        UndoStep::AddNode { view_node, node } => {
             assert!(
                 view_graph.graph.by_id(&node.id).is_none(),
                 "apply AddNode expects node to be absent"
@@ -254,23 +300,24 @@ pub fn apply(intent: &Intent, view_graph: &mut ViewGraph) {
             view_graph.graph.add(node.clone());
             view_graph.view_nodes.add(view_node.clone());
         }
-        Intent::RemoveNode { node_id } => {
+        UndoStep::RemoveNode { node, .. } => {
             assert!(
-                view_graph.graph.by_id(node_id).is_some(),
+                view_graph.graph.by_id(&node.id).is_some(),
                 "apply RemoveNode expects node to be present"
             );
-            view_graph.remove_node(node_id);
+            view_graph.remove_node(&node.id);
         }
-        Intent::MoveNode { node_id, to } => {
+        UndoStep::MoveNode { node_id, to, .. } => {
             view_graph.view_nodes.by_key_mut(node_id).unwrap().pos = *to;
         }
-        Intent::RenameNode { node_id, to } => {
+        UndoStep::RenameNode { node_id, to, .. } => {
             view_graph.graph.by_id_mut(node_id).unwrap().name = to.clone();
         }
-        Intent::SetInput {
+        UndoStep::SetInput {
             node_id,
             input_idx,
             to,
+            ..
         } => {
             let node = view_graph.graph.by_id_mut(node_id).unwrap();
             assert!(
@@ -279,17 +326,18 @@ pub fn apply(intent: &Intent, view_graph: &mut ViewGraph) {
             );
             node.inputs[*input_idx].binding = to.clone();
         }
-        Intent::SelectNode { to } => {
+        UndoStep::SelectNode { to, .. } => {
             view_graph.selected_node_id = *to;
         }
-        Intent::SetCacheBehavior { node_id, to } => {
+        UndoStep::SetCacheBehavior { node_id, to, .. } => {
             view_graph.graph.by_id_mut(node_id).unwrap().behavior = *to;
         }
-        Intent::SetEventConnection {
+        UndoStep::SetEventConnection {
             event_node_id,
             event_idx,
             subscriber,
             present,
+            ..
         } => {
             let node = view_graph.graph.by_id_mut(event_node_id).unwrap();
             assert!(
@@ -311,35 +359,34 @@ pub fn apply(intent: &Intent, view_graph: &mut ViewGraph) {
                 }
             }
         }
-        Intent::SetViewport { pan, scale } => {
-            view_graph.pan = *pan;
-            view_graph.scale = *scale;
+        UndoStep::SetViewport {
+            to_pan, to_scale, ..
+        } => {
+            view_graph.pan = *to_pan;
+            view_graph.scale = *to_scale;
         }
     }
 }
 
-/// Undo: walk the snapshot back. `intent` is consulted only when the
-/// snapshot needs an id from it (e.g. AddNode, where the snapshot has
-/// no payload but we need the node id to remove).
-pub fn revert(snapshot: &Snapshot, intent: &Intent, view_graph: &mut ViewGraph) {
-    match (snapshot, intent) {
-        (Snapshot::AddNode, Intent::AddNode { node, .. }) => {
+/// Backward apply: write the step's "from" half to `view_graph`. Pairs
+/// with [`apply_step`]; calling one after the other restores the
+/// graph to its pre-commit state.
+pub fn revert_step(step: &UndoStep, view_graph: &mut ViewGraph) {
+    match step {
+        UndoStep::AddNode { node, .. } => {
             view_graph.remove_node(&node.id);
         }
-        (
-            Snapshot::RemoveNode {
-                view_node,
-                node,
-                incoming_connections,
-                incoming_events,
-                was_selected,
-            },
-            Intent::RemoveNode { .. },
-        ) => {
+        UndoStep::RemoveNode {
+            view_node,
+            node,
+            incoming_connections,
+            incoming_events,
+            was_selected,
+        } => {
             let removed_node_id = node.id;
             assert!(
                 view_graph.graph.by_id(&node.id).is_none(),
-                "undo RemoveNode expects removed node to be absent"
+                "revert RemoveNode expects removed node to be absent"
             );
             view_graph.graph.add(node.clone());
             view_graph.view_nodes.add(view_node.clone());
@@ -357,35 +404,33 @@ pub fn revert(snapshot: &Snapshot, intent: &Intent, view_graph: &mut ViewGraph) 
                 view_graph.selected_node_id = Some(removed_node_id);
             }
         }
-        (Snapshot::MoveNode { from }, Intent::MoveNode { node_id, .. }) => {
+        UndoStep::MoveNode { node_id, from, .. } => {
             view_graph.view_nodes.by_key_mut(node_id).unwrap().pos = *from;
         }
-        (Snapshot::RenameNode { from }, Intent::RenameNode { node_id, .. }) => {
+        UndoStep::RenameNode { node_id, from, .. } => {
             view_graph.graph.by_id_mut(node_id).unwrap().name = from.clone();
         }
-        (
-            Snapshot::SetInput { from },
-            Intent::SetInput {
-                node_id, input_idx, ..
-            },
-        ) => {
+        UndoStep::SetInput {
+            node_id,
+            input_idx,
+            from,
+            ..
+        } => {
             view_graph.graph.by_id_mut(node_id).unwrap().inputs[*input_idx].binding = from.clone();
         }
-        (Snapshot::SelectNode { from }, Intent::SelectNode { .. }) => {
+        UndoStep::SelectNode { from, .. } => {
             view_graph.selected_node_id = *from;
         }
-        (Snapshot::SetCacheBehavior { from }, Intent::SetCacheBehavior { node_id, .. }) => {
+        UndoStep::SetCacheBehavior { node_id, from, .. } => {
             view_graph.graph.by_id_mut(node_id).unwrap().behavior = *from;
         }
-        (
-            Snapshot::SetEventConnection { was_present },
-            Intent::SetEventConnection {
-                event_node_id,
-                event_idx,
-                subscriber,
-                ..
-            },
-        ) => {
+        UndoStep::SetEventConnection {
+            event_node_id,
+            event_idx,
+            subscriber,
+            was_present,
+            ..
+        } => {
             let node = view_graph.graph.by_id_mut(event_node_id).unwrap();
             let subscribers = &mut node.events[*event_idx].subscribers;
             let position = subscribers.iter().position(|id| id == subscriber);
@@ -397,35 +442,38 @@ pub fn revert(snapshot: &Snapshot, intent: &Intent, view_graph: &mut ViewGraph) 
                 }
             }
         }
-        (Snapshot::SetViewport { pan, scale }, Intent::SetViewport { .. }) => {
-            view_graph.pan = *pan;
-            view_graph.scale = *scale;
+        UndoStep::SetViewport {
+            from_pan,
+            from_scale,
+            ..
+        } => {
+            view_graph.pan = *from_pan;
+            view_graph.scale = *from_scale;
         }
-        _ => panic!("revert: snapshot/intent variant mismatch"),
     }
 }
 
-/// Whether applying this intent should re-trigger graph computation
+/// Whether replaying this step should re-trigger graph computation
 /// (autorun / dirty-tracking). UI-only changes (selection, position,
 /// name, viewport) return false.
-pub fn affects_computation(intent: &Intent) -> bool {
+pub fn affects_computation(step: &UndoStep) -> bool {
     matches!(
-        intent,
-        Intent::AddNode { .. }
-            | Intent::RemoveNode { .. }
-            | Intent::SetInput { .. }
-            | Intent::SetCacheBehavior { .. }
-            | Intent::SetEventConnection { .. }
+        step,
+        UndoStep::AddNode { .. }
+            | UndoStep::RemoveNode { .. }
+            | UndoStep::SetInput { .. }
+            | UndoStep::SetCacheBehavior { .. }
+            | UndoStep::SetEventConnection { .. }
     )
 }
 
 /// Identifies "same continuous gesture" for undo coalescing. The undo
-/// stack collapses consecutive intents with the same key into one
-/// step (keeping the *first* snapshot). Currently only viewport
-/// changes coalesce.
-pub fn gesture_key(intent: &Intent) -> Option<GestureKey> {
-    match intent {
-        Intent::SetViewport { .. } => Some(GestureKey::Viewport),
+/// stack collapses consecutive steps with the same key into one
+/// entry (keeping the *first* "from" payload). Currently only
+/// viewport changes coalesce.
+pub fn gesture_key(step: &UndoStep) -> Option<GestureKey> {
+    match step {
+        UndoStep::SetViewport { .. } => Some(GestureKey::Viewport),
         _ => None,
     }
 }
@@ -465,9 +513,9 @@ mod tests {
     fn add_node_apply_panics_on_duplicate() {
         let mut vg = empty_graph();
         let (node, view_node) = make_node("foo");
-        let intent = Intent::AddNode { node, view_node };
-        apply(&intent, &mut vg);
-        apply(&intent, &mut vg);
+        let step = UndoStep::AddNode { node, view_node };
+        apply_step(&step, &mut vg);
+        apply_step(&step, &mut vg);
     }
 
     #[test]
@@ -479,9 +527,9 @@ mod tests {
         vg.graph.add(node);
         vg.view_nodes.add(view_node);
 
-        let intent = Intent::RemoveNode { node_id };
-        apply(&intent, &mut vg);
-        apply(&intent, &mut vg);
+        let step = build_step(Intent::RemoveNode { node_id }, &vg);
+        apply_step(&step, &mut vg);
+        apply_step(&step, &mut vg);
     }
 
     #[test]
@@ -502,14 +550,17 @@ mod tests {
         vg.graph.add(subscriber_node);
         vg.view_nodes.add(subscriber_view);
 
-        let intent = Intent::SetEventConnection {
-            event_node_id,
-            event_idx: 0,
-            subscriber,
-            present: true,
-        };
-        apply(&intent, &mut vg);
-        apply(&intent, &mut vg);
+        let step = build_step(
+            Intent::SetEventConnection {
+                event_node_id,
+                event_idx: 0,
+                subscriber,
+                present: true,
+            },
+            &vg,
+        );
+        apply_step(&step, &mut vg);
+        apply_step(&step, &mut vg);
     }
 
     #[test]
@@ -530,12 +581,15 @@ mod tests {
         vg.graph.add(subscriber_node);
         vg.view_nodes.add(subscriber_view);
 
-        let intent = Intent::SetEventConnection {
-            event_node_id,
-            event_idx: 0,
-            subscriber,
-            present: false,
-        };
-        apply(&intent, &mut vg);
+        let step = build_step(
+            Intent::SetEventConnection {
+                event_node_id,
+                event_idx: 0,
+                subscriber,
+                present: false,
+            },
+            &vg,
+        );
+        apply_step(&step, &mut vg);
     }
 }
