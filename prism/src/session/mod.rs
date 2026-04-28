@@ -15,12 +15,13 @@ use scenarium::testing::{TestFuncHooks, test_func_lib};
 use scenarium::worker::{Worker, WorkerMessage};
 use tokio::sync::oneshot;
 
+use crate::app_config::AppConfig;
 use crate::config::Config;
 use crate::gui::graph_ui::ctx::GraphContext;
 use crate::gui::graph_ui::frame_output::{EditorCommand, FrameOutput, RunCommand};
 use crate::model::argument_values_cache::{CacheEvent, NodeCache, RenderEvent, invalidated_nodes};
 use crate::model::{ActionStack, ViewGraph, graph_ui_action::GraphUiAction};
-use crate::script::{self, ScriptConfig, ScriptExecutor, SessionInbound};
+use crate::script::{self, ScriptExecutor, SessionInbound};
 use crate::ui_host::UiHost;
 
 #[cfg(test)]
@@ -80,7 +81,7 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new<H: UiHost + 'static>(ui_host: H, script_config: ScriptConfig) -> Self {
+    pub fn new<H: UiHost + 'static>(ui_host: H, app_config: AppConfig) -> Self {
         let ui_host: Arc<dyn UiHost> = Arc::new(ui_host);
         let (worker_tx, worker_rx) = unbounded_channel::<WorkerEvent>();
 
@@ -102,7 +103,7 @@ impl Session {
 
         let (script_inbound_tx, script_inbound_rx) = unbounded_channel::<SessionInbound>();
         let mut transports = Vec::new();
-        for result in script::build_transports(&script_config) {
+        for result in script::build_transports(&app_config.script) {
             match result {
                 Ok(started) => {
                     script::announce(&started.report);
@@ -130,7 +131,9 @@ impl Session {
             ui_host,
         );
 
-        if let Some(path) = result.config.current_path.clone() {
+        if app_config.load_last
+            && let Some(path) = result.config.current_path.clone()
+        {
             result.load_graph(&path);
         }
 

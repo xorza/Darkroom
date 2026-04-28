@@ -20,6 +20,11 @@ pub const DEFAULT_SCRIPT_PORT: u16 = 33433;
 #[derive(Debug, Clone, Default)]
 pub struct AppConfig {
     pub script: ScriptConfig,
+    /// Reopen the graph that was open at the last clean shutdown
+    /// (path stored in `Config::current_path`). Off by default — a
+    /// fresh launch starts with an empty graph so file-state surprises
+    /// don't follow the user across sessions.
+    pub load_last: bool,
 }
 
 // Raw CLI flags for the scripting surface. Flattened into the top-level

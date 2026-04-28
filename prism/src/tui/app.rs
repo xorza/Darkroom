@@ -14,7 +14,7 @@ pub struct TuiApp {
 impl TuiApp {
     pub fn new(app_config: AppConfig) -> Self {
         Self {
-            session: Session::new(TuiUiHost::new(), app_config.script),
+            session: Session::new(TuiUiHost::new(), app_config),
             main_tui: MainTui::new(),
         }
     }

@@ -14,7 +14,7 @@ pub struct GuiApp {
 impl GuiApp {
     pub fn new(ctx: &egui::Context, app_config: AppConfig) -> Self {
         Self {
-            session: Session::new(EguiUiHost::new(ctx), app_config.script),
+            session: Session::new(EguiUiHost::new(ctx), app_config),
             main_window: MainWindow::new(),
         }
     }

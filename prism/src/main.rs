@@ -22,6 +22,11 @@ struct Cli {
     #[command(flatten)]
     script: ScriptCliArgs,
 
+    /// Reopen the graph from the last clean shutdown. Without this
+    /// flag the app starts with an empty graph.
+    #[arg(long, global = true)]
+    load_last: bool,
+
     #[command(subcommand)]
     mode: Option<Mode>,
 }
@@ -43,6 +48,7 @@ async fn main() -> Result<()> {
 
     let app_config = AppConfig {
         script: build_script_config(&cli.script, Uuid::new_v4()),
+        load_last: cli.load_last,
     };
 
     match cli.mode.unwrap_or(Mode::Gui) {
