@@ -285,15 +285,12 @@ impl InboundSender {
     }
 }
 
-/// Shared state touched by the `on_print` hook and the executor loop.
-/// Holds the in-flight script's accumulating stdout buffer. Because the
-/// executor runs one script at a time on a single tokio task, a plain
-/// `Mutex` suffices — the hook locks it briefly inside each `print(...)`
-/// call.
-#[derive(Debug, Default)]
-struct RequestState {
-    stdout: String,
-}
+/// Buffer accumulating the in-flight script's `print(...)` output. The
+/// executor runs one script at a time on a single tokio task, so there's
+/// no real contention — the `Mutex` exists because Rhai's `on_print` hook
+/// requires a `'static + Sync` callback (sync-mode Rhai). Drained by
+/// `run_script` after each request and shipped as `ScriptResult.print`.
+type StdoutBuffer = Arc<Mutex<String>>;
 
 /// Owns a transport's background task. Dropping it cancels the token
 /// (cooperative stop) and aborts the task (hard stop) so sockets and
@@ -398,7 +395,7 @@ async fn run_executor(
     inbound: InboundSender,
     func_lib: Arc<FuncLib>,
 ) {
-    let state: Arc<Mutex<RequestState>> = Arc::new(Mutex::new(RequestState::default()));
+    let state: StdoutBuffer = Arc::new(Mutex::new(String::new()));
     let engine = build_engine(state.clone(), inbound, func_lib);
     let mut sessions = SessionStore::default();
 
@@ -415,12 +412,22 @@ async fn run_executor(
     }
 }
 
-fn build_engine(
-    state: Arc<Mutex<RequestState>>,
-    inbound: InboundSender,
-    func_lib: Arc<FuncLib>,
-) -> Engine {
+fn build_engine(stdout: StdoutBuffer, inbound: InboundSender, func_lib: Arc<FuncLib>) -> Engine {
     let mut engine = Engine::new();
+    configure_caps(&mut engine);
+    wire_print_hook(&mut engine, stdout, inbound.clone());
+    register_mutations(&mut engine, inbound);
+    register_introspection(&mut engine, func_lib.clone());
+    register_host_helpers(&mut engine, func_lib);
+    wire_debug_hook(&mut engine);
+    install_prelude(&mut engine);
+    engine
+}
+
+/// Resource caps. None of these are individually load-bearing for
+/// correctness — they bound a runaway script's blast radius (CPU,
+/// memory, recursion) to something the host can absorb.
+fn configure_caps(engine: &mut Engine) {
     engine.set_max_operations(MAX_OPERATIONS);
     engine.set_max_string_size(MAX_STRING_SIZE);
     engine.set_max_array_size(MAX_ARRAY_LEN);
@@ -429,100 +436,97 @@ fn build_engine(
     engine.set_max_strings_interned(MAX_STRINGS_INTERNED);
     engine.set_max_call_levels(MAX_CALL_LEVELS);
     engine.set_max_expr_depths(MAX_EXPR_DEPTH, MAX_FN_EXPR_DEPTH);
+}
 
-    // Dual-sink `print`: append to the caller's reply buffer AND notify
-    // Session for the local status bar. Hook fires synchronously during
-    // the script run, so the per-request state is guaranteed to still
-    // describe the active request.
-    {
-        let state = state.clone();
-        let inbound = inbound.clone();
-        engine.on_print(move |msg| {
-            {
-                let mut s = state.lock().unwrap();
-                s.stdout.push_str(msg);
-                s.stdout.push('\n');
-            }
-            inbound.send(SessionInbound::Print {
-                msg: msg.to_string(),
-            });
+/// Dual-sink `print`: append to the caller's reply buffer AND notify
+/// Session for the local status bar. Hook fires synchronously during
+/// the script run, so the buffer is guaranteed to still describe the
+/// active request when `run_script` drains it.
+fn wire_print_hook(engine: &mut Engine, stdout: StdoutBuffer, inbound: InboundSender) {
+    engine.on_print(move |msg| {
+        {
+            let mut buf = stdout.lock().unwrap();
+            buf.push_str(msg);
+            buf.push('\n');
+        }
+        inbound.send(SessionInbound::Print {
+            msg: msg.to_string(),
         });
-    }
+    });
+}
 
-    // `apply(action)` → ship one `GraphUiAction` deserialized from a
-    // Rhai map. Wires every variant at once via the existing
-    // `serde::Deserialize` derive: scripts that follow the externally-
-    // tagged enum shape (`#{ MoveNode: #{ node_id: …, before: …,
-    // after: … } }`) can construct any action without per-variant glue
-    // here. New `GraphUiAction` variants light up automatically. Errors
-    // surface as Rhai errors before the action is queued.
-    //
-    // `apply_all(actions)` → same idea for an array; all of them land
-    // in a single `SessionInbound::Apply` batch (one undo step).
+/// Decode a `GraphUiAction` from a Rhai `Dynamic` with numeric
+/// coercion. Routes through `serde_json::Value` as the intermediate
+/// because its `Deserializer` impl is lenient about widths — `f64 →
+/// f32`, `i64 → i32`, etc. all narrow silently. Rhai's own
+/// `from_dynamic` is strict (`expecting f32, got f64`), which is the
+/// safer default but inconvenient when the host type is f32 (e.g.
+/// `egui::Pos2`). One small bridge here keeps the rest of the model
+/// free of `#[serde(with = …)]` annotations.
+fn decode_action(d: &Dynamic) -> Result<GraphUiAction, String> {
+    let json = serde_json::to_value(d).map_err(|e| format!("encode to JSON: {e}"))?;
+    serde_json::from_value(json).map_err(|e| format!("decode GraphUiAction: {e}"))
+}
+
+/// `apply(action)` / `apply_all(actions)` — the generic mutation
+/// surface. Every `GraphUiAction` variant is reachable through these
+/// via `serde::Deserialize`; new variants light up automatically with
+/// no per-variant glue. `apply_all` ships everything in a single
+/// `SessionInbound::Apply` so the batch is one undo step.
+fn register_mutations(engine: &mut Engine, inbound: InboundSender) {
     {
         let inbound = inbound.clone();
         engine.register_fn(
             "apply",
             move |action: Dynamic| -> Result<(), Box<rhai::EvalAltResult>> {
-                let action: GraphUiAction = rhai::serde::from_dynamic(&action)
-                    .map_err(|e| format!("apply: cannot decode GraphUiAction: {e}"))?;
+                let action = decode_action(&action).map_err(|e| format!("apply: {e}"))?;
                 inbound.send(SessionInbound::Apply(vec![action]));
                 Ok(())
             },
         );
     }
-    {
-        let inbound = inbound.clone();
-        engine.register_fn(
-            "apply_all",
-            move |actions: Array| -> Result<(), Box<rhai::EvalAltResult>> {
-                let actions: Vec<GraphUiAction> = actions
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, d)| {
-                        rhai::serde::from_dynamic(&d).map_err(|e| {
-                            format!("apply_all[{i}]: cannot decode GraphUiAction: {e}")
-                        })
-                    })
-                    .collect::<Result<_, _>>()?;
-                inbound.send(SessionInbound::Apply(actions));
-                Ok(())
-            },
-        );
-    }
-
-    // `list_funcs()` → array of object-maps: one entry per Func in the
-    // live FuncLib (insertion order). Each map mirrors the `Func` struct
-    // via its `Serialize` impl: name, id, category, terminal, behavior,
-    // node_default_behavior, description, inputs, outputs, events.
-    // `lambda` and `required_contexts` are `#[serde(skip)]` so they
-    // don't appear.
-    {
-        let func_lib = func_lib.clone();
-        engine.register_fn("list_funcs", move || -> Array {
-            func_lib
-                .funcs
-                .iter()
-                .map(|f| {
-                    rhai::serde::to_dynamic(f).expect("Func is Serialize-clean (no skipped errors)")
-                })
-                .collect()
-        });
-    }
-
-    // `create_node(id, x, y)` → build a `GraphUiAction::AddNode` on
-    // the executor side (we have `Arc<FuncLib>` here, so the lookup is
-    // local) and ship it as `SessionInbound::Apply`. Session feeds it
-    // through the same commit path GUI actions take — no script-aware
-    // glue on the Session side. `id` is the UUID string exposed on
-    // `list_funcs()[i].id`; an unknown or malformed id surfaces
-    // synchronously as a Rhai error before any action is queued.
     engine.register_fn(
-        "create_node",
+        "apply_all",
+        move |actions: Array| -> Result<(), Box<rhai::EvalAltResult>> {
+            let actions: Vec<GraphUiAction> = actions
+                .into_iter()
+                .enumerate()
+                .map(|(i, d)| decode_action(&d).map_err(|e| format!("apply_all[{i}]: {e}")))
+                .collect::<Result<_, _>>()?;
+            inbound.send(SessionInbound::Apply(actions));
+            Ok(())
+        },
+    );
+}
+
+/// `list_funcs()` → array of object-maps mirroring `Func`'s Serialize
+/// derive (id, name, category, inputs, outputs, …; `lambda` is
+/// `#[serde(skip)]`). Lets scripts query the live FuncLib without a
+/// separate registry on this side.
+fn register_introspection(engine: &mut Engine, func_lib: Arc<FuncLib>) {
+    engine.register_fn("list_funcs", move || -> Array {
+        func_lib
+            .funcs
+            .iter()
+            .map(|f| {
+                rhai::serde::to_dynamic(f).expect("Func is Serialize-clean (no skipped errors)")
+            })
+            .collect()
+    });
+}
+
+/// Narrow native helpers for actions whose payload only the host can
+/// build (e.g. `From<&Func> for Node` lives in scenarium and depends on
+/// `FuncLib`). Keep this surface small: prefer adding script-side
+/// helpers in [`prelude.rhai`] when an action can be expressed via
+/// `apply` and primitive args.
+fn register_host_helpers(engine: &mut Engine, func_lib: Arc<FuncLib>) {
+    engine.register_fn(
+        "make_add_node",
         move |id: &str,
               x: rhai::FLOAT,
               y: rhai::FLOAT|
-              -> Result<String, Box<rhai::EvalAltResult>> {
+              -> Result<Dynamic, Box<rhai::EvalAltResult>> {
             let func_id: FuncId = id
                 .parse()
                 .map_err(|e| format!("invalid func id {id:?}: {e}"))?;
@@ -530,22 +534,18 @@ fn build_engine(
                 .by_id(&func_id)
                 .ok_or_else(|| format!("unknown func id: {id}"))?;
             let node: scenarium::graph::Node = func.into();
-            // The new node's id is fixed at construction; expose it so
-            // the script can chain follow-up actions (connections,
-            // selection, …) without round-tripping through Session.
-            let node_id = node.id.to_string();
             let view_node = ViewNode {
                 id: node.id,
                 pos: Pos2::new(x as f32, y as f32),
             };
-            inbound.send(SessionInbound::Apply(vec![GraphUiAction::AddNode {
-                view_node,
-                node,
-            }]));
-            Ok(node_id)
+            let action = GraphUiAction::AddNode { view_node, node };
+            rhai::serde::to_dynamic(&action)
+                .map_err(|e| format!("make_add_node: encode failed: {e}").into())
         },
     );
+}
 
+fn wire_debug_hook(engine: &mut Engine) {
     engine.on_debug(|msg, src, pos| {
         tracing::debug!(
             target: "prism::script",
@@ -555,8 +555,21 @@ fn build_engine(
             "{msg}"
         );
     });
+}
 
-    engine
+/// Compile [`prelude.rhai`] once and register the resulting functions
+/// as a global module. Every helper defined there (`create_node`,
+/// `connect`, `move_node`, …) becomes callable from any user script.
+/// Adding a new ergonomic helper is a one-function edit to that file —
+/// no Rust changes — provided the action can be built from `apply` and
+/// existing host helpers.
+fn install_prelude(engine: &mut Engine) {
+    let ast = engine
+        .compile(include_str!("prelude.rhai"))
+        .expect("prelude.rhai must parse");
+    let module = rhai::Module::eval_ast_as_new(rhai::Scope::new(), &ast, engine)
+        .expect("prelude.rhai must evaluate without side effects");
+    engine.register_global_module(rhai::Shared::new(module));
 }
 
 /// Run a single request end-to-end: resolve its session, publish the
@@ -565,7 +578,7 @@ fn build_engine(
 fn run_script(
     engine: &Engine,
     sessions: &mut SessionStore,
-    state: &Arc<Mutex<RequestState>>,
+    state: &StdoutBuffer,
     req: &ScriptRequest,
 ) -> ScriptResult {
     // Opportunistic sweep: every incoming request is a chance to drop
@@ -608,7 +621,7 @@ fn run_script(
 
     // Drain the hook's accumulator. `mem::take` leaves the buffer empty
     // for the next request, so no explicit clear is needed.
-    let print = std::mem::take(&mut state.lock().unwrap().stdout);
+    let print = std::mem::take(&mut *state.lock().unwrap());
 
     ScriptResult {
         session: Some(session_id),

@@ -32,7 +32,7 @@ fn list_funcs_returns_full_func_objects_in_insertion_order() {
         ..Default::default()
     });
 
-    let state = Arc::new(Mutex::new(RequestState::default()));
+    let state = Arc::new(Mutex::new(String::new()));
     let (tx, _rx) = test_inbound();
     let engine = build_engine(state, tx, Arc::new(lib));
 
@@ -59,7 +59,10 @@ fn list_funcs_returns_full_func_objects_in_insertion_order() {
 
 #[test]
 fn create_node_malformed_id_returns_rhai_error_and_no_action() {
-    let state = Arc::new(Mutex::new(RequestState::default()));
+    // `create_node` lives in prelude.rhai; it calls `make_add_node`,
+    // which surfaces this error. Confirms the prelude → native helper
+    // call chain propagates errors cleanly.
+    let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
     let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
@@ -72,13 +75,13 @@ fn create_node_malformed_id_returns_rhai_error_and_no_action() {
 
 #[test]
 fn create_node_unknown_id_returns_rhai_error_and_no_action() {
-    let state = Arc::new(Mutex::new(RequestState::default()));
+    let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
     // Empty FuncLib → any well-formed UUID is "unknown".
     let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
     let err = engine
-        .eval::<()>(r#"create_node("00000000-0000-0000-0000-000000000001", 0.0, 0.0)"#)
+        .eval::<String>(r#"create_node("00000000-0000-0000-0000-000000000001", 0.0, 0.0)"#)
         .expect_err("unknown id should error");
     assert!(err.to_string().contains("unknown func id"), "got: {err}");
     assert!(rx.try_recv().is_err());
@@ -96,7 +99,7 @@ fn create_node_known_id_enqueues_node_added_action() {
         ..Default::default()
     });
 
-    let state = Arc::new(Mutex::new(RequestState::default()));
+    let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
     let engine = build_engine(state, tx, Arc::new(lib));
 
@@ -132,7 +135,7 @@ fn apply_decodes_arbitrary_graph_ui_action_via_serde() {
     // every other variant for free. If this works, a script can drive
     // any current or future GraphUiAction through `apply` without
     // touching the executor.
-    let state = Arc::new(Mutex::new(RequestState::default()));
+    let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
     let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
@@ -157,7 +160,7 @@ fn apply_decodes_arbitrary_graph_ui_action_via_serde() {
 
 #[test]
 fn apply_returns_rhai_error_on_unknown_variant() {
-    let state = Arc::new(Mutex::new(RequestState::default()));
+    let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
     let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
@@ -165,7 +168,7 @@ fn apply_returns_rhai_error_on_unknown_variant() {
         .eval::<()>(r#"apply(#{ NotARealVariant: #{} })"#)
         .expect_err("unknown variant should error");
     assert!(
-        err.to_string().contains("apply: cannot decode"),
+        err.to_string().contains("decode GraphUiAction"),
         "got: {err}"
     );
     assert!(rx.try_recv().is_err());
@@ -173,7 +176,7 @@ fn apply_returns_rhai_error_on_unknown_variant() {
 
 #[test]
 fn apply_all_batches_actions_into_one_inbound() {
-    let state = Arc::new(Mutex::new(RequestState::default()));
+    let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
     let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
@@ -201,7 +204,7 @@ fn apply_all_batches_actions_into_one_inbound() {
 
 #[test]
 fn list_funcs_is_empty_when_func_lib_is_empty() {
-    let state = Arc::new(Mutex::new(RequestState::default()));
+    let state = Arc::new(Mutex::new(String::new()));
     let (tx, _rx) = test_inbound();
     let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
