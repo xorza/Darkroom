@@ -118,7 +118,16 @@ impl Session {
                 }
             }
         }
-        let script_executor = ScriptExecutor::new(transports, script_inbound_tx, func_lib.clone());
+        // Wake the frontend whenever the script layer queues an inbound,
+        // so `Session::frame` runs promptly and drains the queue. The
+        // script crate sees this as an opaque `Fn()` — it has no
+        // dependency on `UiHost`.
+        let redraw: script::Notify = {
+            let ui_host = ui_host.clone();
+            Arc::new(move || ui_host.request_redraw())
+        };
+        let script_executor =
+            ScriptExecutor::new(transports, script_inbound_tx, func_lib.clone(), redraw);
 
         let mut result = Self::from_parts(
             func_lib,

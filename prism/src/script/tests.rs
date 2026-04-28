@@ -1,6 +1,19 @@
 use super::*;
 use std::net::Ipv4Addr;
 
+/// Build an `InboundSender` paired with the receiver tests assert on.
+/// `notify` is a no-op — tests don't drive a real GUI loop.
+fn test_inbound() -> (InboundSender, mpsc::UnboundedReceiver<SessionInbound>) {
+    let (tx, rx) = mpsc::unbounded_channel::<SessionInbound>();
+    (
+        InboundSender {
+            tx,
+            notify: Arc::new(|| {}),
+        },
+        rx,
+    )
+}
+
 #[test]
 fn list_funcs_returns_full_func_objects_in_insertion_order() {
     use scenarium::function::{Func, FuncId};
@@ -20,7 +33,7 @@ fn list_funcs_returns_full_func_objects_in_insertion_order() {
     });
 
     let state = Arc::new(Mutex::new(RequestState::default()));
-    let (tx, _rx) = mpsc::unbounded_channel::<SessionInbound>();
+    let (tx, _rx) = test_inbound();
     let engine = build_engine(state, tx, Arc::new(lib));
 
     // Each entry is a Rhai Map with fields mirroring `Func`. Verify
@@ -47,11 +60,11 @@ fn list_funcs_returns_full_func_objects_in_insertion_order() {
 #[test]
 fn create_node_malformed_id_returns_rhai_error_and_no_action() {
     let state = Arc::new(Mutex::new(RequestState::default()));
-    let (tx, mut rx) = mpsc::unbounded_channel::<SessionInbound>();
+    let (tx, mut rx) = test_inbound();
     let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
     let err = engine
-        .eval::<()>(r#"create_node("not-a-uuid", 0.0, 0.0)"#)
+        .eval::<String>(r#"create_node("not-a-uuid", 0.0, 0.0)"#)
         .expect_err("malformed id should error");
     assert!(err.to_string().contains("invalid func id"), "got: {err}");
     assert!(rx.try_recv().is_err());
@@ -60,7 +73,7 @@ fn create_node_malformed_id_returns_rhai_error_and_no_action() {
 #[test]
 fn create_node_unknown_id_returns_rhai_error_and_no_action() {
     let state = Arc::new(Mutex::new(RequestState::default()));
-    let (tx, mut rx) = mpsc::unbounded_channel::<SessionInbound>();
+    let (tx, mut rx) = test_inbound();
     // Empty FuncLib → any well-formed UUID is "unknown".
     let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
@@ -84,11 +97,11 @@ fn create_node_known_id_enqueues_node_added_action() {
     });
 
     let state = Arc::new(Mutex::new(RequestState::default()));
-    let (tx, mut rx) = mpsc::unbounded_channel::<SessionInbound>();
+    let (tx, mut rx) = test_inbound();
     let engine = build_engine(state, tx, Arc::new(lib));
 
     let script = format!(r#"create_node("{alpha_id}", 12.5, -3.0)"#);
-    engine.eval::<()>(&script).unwrap();
+    let returned_id: String = engine.eval(&script).unwrap();
 
     // The executor builds a fully-formed GraphUiAction::AddNode —
     // identical to what the GUI emits — and ships it via Apply. Session
@@ -105,6 +118,8 @@ fn create_node_known_id_enqueues_node_added_action() {
             assert_eq!(node.name, "alpha");
             assert_eq!(view_node.id, node.id);
             assert_eq!(view_node.pos, egui::Pos2::new(12.5, -3.0));
+            // The id `create_node` returned to Rhai matches the action's node id.
+            assert_eq!(returned_id, node.id.to_string());
         }
         other => panic!("expected AddNode, got {other:?}"),
     }
@@ -118,7 +133,7 @@ fn apply_decodes_arbitrary_graph_ui_action_via_serde() {
     // any current or future GraphUiAction through `apply` without
     // touching the executor.
     let state = Arc::new(Mutex::new(RequestState::default()));
-    let (tx, mut rx) = mpsc::unbounded_channel::<SessionInbound>();
+    let (tx, mut rx) = test_inbound();
     let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
     engine
@@ -143,7 +158,7 @@ fn apply_decodes_arbitrary_graph_ui_action_via_serde() {
 #[test]
 fn apply_returns_rhai_error_on_unknown_variant() {
     let state = Arc::new(Mutex::new(RequestState::default()));
-    let (tx, mut rx) = mpsc::unbounded_channel::<SessionInbound>();
+    let (tx, mut rx) = test_inbound();
     let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
     let err = engine
@@ -159,7 +174,7 @@ fn apply_returns_rhai_error_on_unknown_variant() {
 #[test]
 fn apply_all_batches_actions_into_one_inbound() {
     let state = Arc::new(Mutex::new(RequestState::default()));
-    let (tx, mut rx) = mpsc::unbounded_channel::<SessionInbound>();
+    let (tx, mut rx) = test_inbound();
     let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
     // Two no-op selections. Verifies that a Rhai array round-trips into
@@ -187,7 +202,7 @@ fn apply_all_batches_actions_into_one_inbound() {
 #[test]
 fn list_funcs_is_empty_when_func_lib_is_empty() {
     let state = Arc::new(Mutex::new(RequestState::default()));
-    let (tx, _rx) = mpsc::unbounded_channel::<SessionInbound>();
+    let (tx, _rx) = test_inbound();
     let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
     let result: Array = engine.eval("list_funcs()").unwrap();

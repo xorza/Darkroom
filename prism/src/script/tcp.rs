@@ -419,6 +419,7 @@ mod tests {
             [Box::new(transport) as Box<dyn ScriptTransport>],
             action_tx,
             Arc::new(scenarium::prelude::FuncLib::default()),
+            Arc::new(|| {}),
         );
         (addr, executor, action_rx)
     }

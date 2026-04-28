@@ -248,6 +248,43 @@ pub enum SessionInbound {
     Apply(Vec<GraphUiAction>),
 }
 
+/// Opaque "wake the consumer" callback fired after every successful
+/// send on the inbound channel. The host wires it to whatever its
+/// event loop needs (the egui frontend uses `ui_host.request_redraw`),
+/// but the scripting crate doesn't care: from here it's just `Fn()`.
+/// Keeps script/ free of any frontend type.
+pub type Notify = Arc<dyn Fn() + Send + Sync>;
+
+/// `mpsc::UnboundedSender<SessionInbound>` + a [`Notify`] ping. Every
+/// script side-effect needs to wake the consumer's event loop so
+/// `Session::frame` runs and drains the inbound queue — without this,
+/// a script that fires actions on a quiet GUI canvas (no mouse, no
+/// keyboard) sees them pile up unnoticed until the next user input.
+/// Mirrors the worker path, which pings the same callback after every
+/// result.
+#[derive(Clone)]
+struct InboundSender {
+    tx: mpsc::UnboundedSender<SessionInbound>,
+    notify: Notify,
+}
+
+impl std::fmt::Debug for InboundSender {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InboundSender").finish_non_exhaustive()
+    }
+}
+
+impl InboundSender {
+    fn send(&self, inbound: SessionInbound) {
+        // Channel send only fails if the receiver is dropped, which
+        // happens during shutdown — Session is going away, no need to
+        // ping it for a redraw it'll never serve.
+        if self.tx.send(inbound).is_ok() {
+            (self.notify)();
+        }
+    }
+}
+
 /// Shared state touched by the `on_print` hook and the executor loop.
 /// Holds the in-flight script's accumulating stdout buffer. Because the
 /// executor runs one script at a time on a single tokio task, a plain
@@ -315,10 +352,15 @@ impl ScriptExecutor {
         transports: I,
         action_tx: mpsc::UnboundedSender<SessionInbound>,
         func_lib: Arc<FuncLib>,
+        notify: Notify,
     ) -> Self
     where
         I: IntoIterator<Item = Box<dyn ScriptTransport>>,
     {
+        let inbound = InboundSender {
+            tx: action_tx,
+            notify,
+        };
         let (tx, rx) = mpsc::channel(REQUEST_QUEUE_DEPTH);
         let handles = transports
             .into_iter()
@@ -331,7 +373,7 @@ impl ScriptExecutor {
         let cancel = CancellationToken::new();
         let cancel_task = cancel.clone();
         let task =
-            tokio::spawn(async move { run_executor(rx, cancel_task, action_tx, func_lib).await });
+            tokio::spawn(async move { run_executor(rx, cancel_task, inbound, func_lib).await });
 
         Self {
             cancel,
@@ -353,11 +395,11 @@ impl Drop for ScriptExecutor {
 async fn run_executor(
     mut rx: mpsc::Receiver<ScriptRequest>,
     cancel: CancellationToken,
-    action_tx: mpsc::UnboundedSender<SessionInbound>,
+    inbound: InboundSender,
     func_lib: Arc<FuncLib>,
 ) {
     let state: Arc<Mutex<RequestState>> = Arc::new(Mutex::new(RequestState::default()));
-    let engine = build_engine(state.clone(), action_tx, func_lib);
+    let engine = build_engine(state.clone(), inbound, func_lib);
     let mut sessions = SessionStore::default();
 
     loop {
@@ -375,7 +417,7 @@ async fn run_executor(
 
 fn build_engine(
     state: Arc<Mutex<RequestState>>,
-    action_tx: mpsc::UnboundedSender<SessionInbound>,
+    inbound: InboundSender,
     func_lib: Arc<FuncLib>,
 ) -> Engine {
     let mut engine = Engine::new();
@@ -394,14 +436,14 @@ fn build_engine(
     // describe the active request.
     {
         let state = state.clone();
-        let action_tx = action_tx.clone();
+        let inbound = inbound.clone();
         engine.on_print(move |msg| {
             {
                 let mut s = state.lock().unwrap();
                 s.stdout.push_str(msg);
                 s.stdout.push('\n');
             }
-            let _ = action_tx.send(SessionInbound::Print {
+            inbound.send(SessionInbound::Print {
                 msg: msg.to_string(),
             });
         });
@@ -418,19 +460,19 @@ fn build_engine(
     // `apply_all(actions)` → same idea for an array; all of them land
     // in a single `SessionInbound::Apply` batch (one undo step).
     {
-        let action_tx = action_tx.clone();
+        let inbound = inbound.clone();
         engine.register_fn(
             "apply",
             move |action: Dynamic| -> Result<(), Box<rhai::EvalAltResult>> {
                 let action: GraphUiAction = rhai::serde::from_dynamic(&action)
                     .map_err(|e| format!("apply: cannot decode GraphUiAction: {e}"))?;
-                let _ = action_tx.send(SessionInbound::Apply(vec![action]));
+                inbound.send(SessionInbound::Apply(vec![action]));
                 Ok(())
             },
         );
     }
     {
-        let action_tx = action_tx.clone();
+        let inbound = inbound.clone();
         engine.register_fn(
             "apply_all",
             move |actions: Array| -> Result<(), Box<rhai::EvalAltResult>> {
@@ -443,7 +485,7 @@ fn build_engine(
                         })
                     })
                     .collect::<Result<_, _>>()?;
-                let _ = action_tx.send(SessionInbound::Apply(actions));
+                inbound.send(SessionInbound::Apply(actions));
                 Ok(())
             },
         );
@@ -477,7 +519,10 @@ fn build_engine(
     // synchronously as a Rhai error before any action is queued.
     engine.register_fn(
         "create_node",
-        move |id: &str, x: rhai::FLOAT, y: rhai::FLOAT| -> Result<(), Box<rhai::EvalAltResult>> {
+        move |id: &str,
+              x: rhai::FLOAT,
+              y: rhai::FLOAT|
+              -> Result<String, Box<rhai::EvalAltResult>> {
             let func_id: FuncId = id
                 .parse()
                 .map_err(|e| format!("invalid func id {id:?}: {e}"))?;
@@ -485,15 +530,19 @@ fn build_engine(
                 .by_id(&func_id)
                 .ok_or_else(|| format!("unknown func id: {id}"))?;
             let node: scenarium::graph::Node = func.into();
+            // The new node's id is fixed at construction; expose it so
+            // the script can chain follow-up actions (connections,
+            // selection, …) without round-tripping through Session.
+            let node_id = node.id.to_string();
             let view_node = ViewNode {
                 id: node.id,
                 pos: Pos2::new(x as f32, y as f32),
             };
-            let _ = action_tx.send(SessionInbound::Apply(vec![GraphUiAction::AddNode {
+            inbound.send(SessionInbound::Apply(vec![GraphUiAction::AddNode {
                 view_node,
                 node,
             }]));
-            Ok(())
+            Ok(node_id)
         },
     );
 
