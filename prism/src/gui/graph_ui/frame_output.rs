@@ -60,12 +60,24 @@ impl FrameOutput {
         self.request_argument_values = None;
     }
 
+    /// Borrow the per-frame intent buffer for inspection. Tests use
+    /// this to assert what got emitted; production reads via
+    /// [`Self::take_intents`].
+    #[cfg(test)]
     pub fn intents(&self) -> &[Intent] {
         &self.intents
     }
 
     pub fn add_intent(&mut self, intent: Intent) {
         self.intents.push(intent);
+    }
+
+    /// Drain the per-frame intent buffer, transferring ownership.
+    /// `Session::commit_actions` calls this so it can move each intent
+    /// into its `UndoStep` without cloning — `AddNode` carries a full
+    /// `Node`, so the saved clone matters for batched spawns.
+    pub fn take_intents(&mut self) -> Vec<Intent> {
+        std::mem::take(&mut self.intents)
     }
 
     pub fn add_error(&mut self, error: ConnectionError) {

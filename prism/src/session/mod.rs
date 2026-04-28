@@ -250,7 +250,7 @@ impl Session {
     /// intent affects computation. Does *not* record undo history —
     /// that's the job of [`Session::commit_actions`]. Currently used
     /// only by tests; production code commits through
-    /// [`Session::commit_action_slice`].
+    /// [`Session::commit_intents`].
     #[cfg(test)]
     pub fn apply(&mut self, intents: &[Intent]) -> bool {
         let mut graph_updated = false;
@@ -402,8 +402,8 @@ impl Session {
                 SessionInbound::Print { msg } => {
                     self.add_status(format!("script: {msg}"));
                 }
-                SessionInbound::Apply(actions) => {
-                    self.graph_dirty |= self.commit_action_slice(&actions);
+                SessionInbound::Apply(intents) => {
+                    self.graph_dirty |= self.commit_intents(intents);
                 }
             }
         }
@@ -539,7 +539,7 @@ impl Session {
     }
 
     fn commit_actions(&mut self, output: &mut FrameOutput) -> bool {
-        self.commit_action_slice(output.intents())
+        self.commit_intents(output.take_intents())
     }
 
     /// Apply + record a batch of intents, regardless of source (GUI
@@ -548,26 +548,25 @@ impl Session {
     /// `&ViewGraph`), so this is the one site that writes each intent
     /// exactly once.
     ///
-    /// For each intent we capture-then-apply, building an `UndoStep`.
-    /// The whole batch lands as one undo entry. Cross-frame coalescing
-    /// for continuous gestures (viewport) happens inside the undo
-    /// stack via `Intent::gesture_key` — this routine has no pending
-    /// state, which is what makes it safe under egui's multi-pass
-    /// rendering and equally safe when called from `drain_inbound`.
-    fn commit_action_slice(&mut self, intents: &[Intent]) -> bool {
+    /// For each intent we capture-then-apply, *moving* the intent into
+    /// the resulting `UndoStep` — `AddNode` carries a full `Node` and
+    /// avoiding the clone matters for batched spawns. The whole batch
+    /// lands as one undo entry. Cross-frame coalescing for continuous
+    /// gestures (viewport) happens inside the undo stack via
+    /// `intent::gesture_key` — this routine has no pending state,
+    /// which is what makes it safe under egui's multi-pass rendering
+    /// and equally safe when called from `drain_inbound`.
+    fn commit_intents(&mut self, intents: Vec<Intent>) -> bool {
         if intents.is_empty() {
             return false;
         }
         let mut graph_updated = false;
         let mut steps = Vec::with_capacity(intents.len());
         for intent in intents {
-            let snapshot = intent::capture(intent, &self.view_graph);
-            intent::apply(intent, &mut self.view_graph);
-            graph_updated |= intent::affects_computation(intent);
-            steps.push(UndoStep {
-                intent: intent.clone(),
-                snapshot,
-            });
+            let snapshot = intent::capture(&intent, &self.view_graph);
+            intent::apply(&intent, &mut self.view_graph);
+            graph_updated |= intent::affects_computation(&intent);
+            steps.push(UndoStep { intent, snapshot });
         }
         self.action_stack.clear_redo();
         self.action_stack.push_current(&steps);
