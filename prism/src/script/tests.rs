@@ -111,6 +111,80 @@ fn create_node_known_id_enqueues_node_added_action() {
 }
 
 #[test]
+fn apply_decodes_arbitrary_graph_ui_action_via_serde() {
+    // NodeSelected has the simplest shape (two `Option<NodeId>`s) and
+    // exercises the generic `serde::Deserialize` path that lights up
+    // every other variant for free. If this works, a script can drive
+    // any current or future GraphUiAction through `apply` without
+    // touching the executor.
+    let state = Arc::new(Mutex::new(RequestState::default()));
+    let (tx, mut rx) = mpsc::unbounded_channel::<SessionInbound>();
+    let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
+
+    engine
+        .eval::<()>(r#"apply(#{ NodeSelected: #{ before: (), after: () } })"#)
+        .unwrap();
+
+    let inbound = rx.try_recv().expect("Apply queued");
+    let actions = match inbound {
+        SessionInbound::Apply(actions) => actions,
+        other => panic!("expected Apply, got {other:?}"),
+    };
+    assert_eq!(actions.len(), 1);
+    match &actions[0] {
+        GraphUiAction::NodeSelected { before, after } => {
+            assert!(before.is_none());
+            assert!(after.is_none());
+        }
+        other => panic!("expected NodeSelected, got {other:?}"),
+    }
+}
+
+#[test]
+fn apply_returns_rhai_error_on_unknown_variant() {
+    let state = Arc::new(Mutex::new(RequestState::default()));
+    let (tx, mut rx) = mpsc::unbounded_channel::<SessionInbound>();
+    let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
+
+    let err = engine
+        .eval::<()>(r#"apply(#{ NotARealVariant: #{} })"#)
+        .expect_err("unknown variant should error");
+    assert!(
+        err.to_string().contains("apply: cannot decode"),
+        "got: {err}"
+    );
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn apply_all_batches_actions_into_one_inbound() {
+    let state = Arc::new(Mutex::new(RequestState::default()));
+    let (tx, mut rx) = mpsc::unbounded_channel::<SessionInbound>();
+    let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
+
+    // Two no-op selections. Verifies that a Rhai array round-trips into
+    // a single `Apply(Vec<...>)` — the path that gives scripts atomic
+    // multi-action undo.
+    engine
+        .eval::<()>(
+            r#"apply_all([
+                #{ NodeSelected: #{ before: (), after: () } },
+                #{ NodeSelected: #{ before: (), after: () } },
+            ])"#,
+        )
+        .unwrap();
+
+    let inbound = rx.try_recv().expect("Apply queued");
+    let actions = match inbound {
+        SessionInbound::Apply(actions) => actions,
+        other => panic!("expected Apply, got {other:?}"),
+    };
+    assert_eq!(actions.len(), 2);
+    // No second message — the batch was a single Inbound.
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
 fn list_funcs_is_empty_when_func_lib_is_empty() {
     let state = Arc::new(Mutex::new(RequestState::default()));
     let (tx, _rx) = mpsc::unbounded_channel::<SessionInbound>();

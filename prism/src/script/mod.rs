@@ -407,6 +407,48 @@ fn build_engine(
         });
     }
 
+    // `apply(action)` → ship one `GraphUiAction` deserialized from a
+    // Rhai map. Wires every variant at once via the existing
+    // `serde::Deserialize` derive: scripts that follow the externally-
+    // tagged enum shape (`#{ NodeMoved: #{ node_id: …, before: …,
+    // after: … } }`) can construct any action without per-variant glue
+    // here. New `GraphUiAction` variants light up automatically. Errors
+    // surface as Rhai errors before the action is queued.
+    //
+    // `apply_all(actions)` → same idea for an array; all of them land
+    // in a single `SessionInbound::Apply` batch (one undo step).
+    {
+        let action_tx = action_tx.clone();
+        engine.register_fn(
+            "apply",
+            move |action: Dynamic| -> Result<(), Box<rhai::EvalAltResult>> {
+                let action: GraphUiAction = rhai::serde::from_dynamic(&action)
+                    .map_err(|e| format!("apply: cannot decode GraphUiAction: {e}"))?;
+                let _ = action_tx.send(SessionInbound::Apply(vec![action]));
+                Ok(())
+            },
+        );
+    }
+    {
+        let action_tx = action_tx.clone();
+        engine.register_fn(
+            "apply_all",
+            move |actions: Array| -> Result<(), Box<rhai::EvalAltResult>> {
+                let actions: Vec<GraphUiAction> = actions
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, d)| {
+                        rhai::serde::from_dynamic(&d).map_err(|e| {
+                            format!("apply_all[{i}]: cannot decode GraphUiAction: {e}")
+                        })
+                    })
+                    .collect::<Result<_, _>>()?;
+                let _ = action_tx.send(SessionInbound::Apply(actions));
+                Ok(())
+            },
+        );
+    }
+
     // `list_funcs()` → array of object-maps: one entry per Func in the
     // live FuncLib (insertion order). Each map mirrors the `Func` struct
     // via its `Serialize` impl: name, id, category, terminal, behavior,
