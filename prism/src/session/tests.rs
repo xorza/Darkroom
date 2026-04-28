@@ -60,6 +60,24 @@ fn add_status_caps_buffer_to_2000_chars() {
 }
 
 #[test]
+fn drain_inbound_run_commands_park_on_pending() {
+    let (script_tx, script_rx) = unbounded_channel::<SessionInbound>();
+    let mut session = test_session_with(FuncLib::default(), script_rx);
+
+    // RunOnce → pending_run_cmd is set; not consumed by drain_inbound.
+    script_tx.send(SessionInbound::RunOnce).unwrap();
+    session.drain_inbound();
+    assert_eq!(session.pending_run_cmd, Some(RunCommand::RunOnce));
+
+    // StartAutorun overwrites RunOnce in the same drain — last-script-
+    // wins for the frame, since they're processed in order.
+    script_tx.send(SessionInbound::StartAutorun).unwrap();
+    script_tx.send(SessionInbound::StopAutorun).unwrap();
+    session.drain_inbound();
+    assert_eq!(session.pending_run_cmd, Some(RunCommand::StopAutorun));
+}
+
+#[test]
 fn drain_inbound_apply_node_added_inserts_node_and_marks_dirty() {
     use scenarium::function::{Func, FuncId};
     use scenarium::graph::Node;

@@ -64,3 +64,10 @@ fn select_node(node_id) {
 fn rename_node(node_id, name) {
     apply(#{ RenameNode: #{ node_id: node_id, to: name } });
 }
+
+// Friendlier names for `host::set_autorun(bool)` — same effect as
+// clicking the GUI's run buttons. Run commands flow through Session's
+// worker pipeline and don't enter the undo stack, so calling them many
+// times in a row is cheap.
+fn start_autorun() { host::set_autorun(true); }
+fn stop_autorun()  { host::set_autorun(false); }

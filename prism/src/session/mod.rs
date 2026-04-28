@@ -77,6 +77,14 @@ pub struct Session {
 
     script_executor: Option<ScriptExecutor>,
     script_inbound_rx: UnboundedReceiver<SessionInbound>,
+    /// Run-state command queued by a `SessionInbound::Run*` (i.e. a
+    /// script). Consumed by `handle_output`, which already owns the
+    /// "dirty → Update → ExecuteTerminals" sequencing — having scripts
+    /// route through it ensures the worker sees the latest graph
+    /// before evaluating. GUI's `output.run_cmd()` still wins on
+    /// conflict so direct user input takes precedence over background
+    /// scripting.
+    pending_run_cmd: Option<RunCommand>,
 
     ui_host: Arc<dyn UiHost>,
 }
@@ -177,6 +185,7 @@ impl Session {
             worker_tx,
             worker_rx,
             script_inbound_rx,
+            pending_run_cmd: None,
             ui_host,
             script_executor,
         }
@@ -406,6 +415,20 @@ impl Session {
                 SessionInbound::Apply(intents) => {
                     self.graph_dirty |= self.commit_intents(intents);
                 }
+                // Run-state changes parked here; `handle_output`
+                // consumes them after rendering, so its existing
+                // dirty→Update→ExecuteTerminals sequencing applies.
+                // Last-script-wins for the same frame; GUI input still
+                // takes precedence (see `handle_output`).
+                SessionInbound::RunOnce => {
+                    self.pending_run_cmd = Some(RunCommand::RunOnce);
+                }
+                SessionInbound::StartAutorun => {
+                    self.pending_run_cmd = Some(RunCommand::StartAutorun);
+                }
+                SessionInbound::StopAutorun => {
+                    self.pending_run_cmd = Some(RunCommand::StopAutorun);
+                }
             }
         }
     }
@@ -452,7 +475,13 @@ impl Session {
         let mut update_if_dirty = self.autorun();
         let mut msgs: Vec<WorkerMessage> = Vec::new();
 
-        if let Some(run_cmd) = output.run_cmd() {
+        // GUI direct input wins over a script-queued command on
+        // conflict — clicking a run button in the same frame as
+        // `script: run()` arrives should land the click. Script's
+        // pending command is consumed either way.
+        let queued_run_cmd = self.pending_run_cmd.take();
+        let run_cmd = output.run_cmd().or(queued_run_cmd);
+        if let Some(run_cmd) = run_cmd {
             match run_cmd {
                 RunCommand::StartAutorun => {
                     msgs.push(WorkerMessage::StartEventLoop);

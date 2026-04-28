@@ -246,6 +246,15 @@ pub enum SessionInbound {
     /// boundary symmetric with the GUI→graph boundary, with no
     /// Session-side per-variant glue. Empty vecs are no-ops.
     Apply(Vec<Intent>),
+    /// Trigger a single graph evaluation: the worker runs every
+    /// terminal node once. Routed through Session's `pending_run_cmd`
+    /// so handle_output's existing dirty-then-run sequencing applies.
+    RunOnce,
+    /// Start the worker's event loop (autorun). Subsequent graph
+    /// mutations re-trigger evaluation automatically until stopped.
+    StartAutorun,
+    /// Stop the worker's event loop.
+    StopAutorun,
 }
 
 /// Opaque "wake the consumer" callback fired after every successful
@@ -416,9 +425,10 @@ fn build_engine(stdout: StdoutBuffer, inbound: InboundSender, func_lib: Arc<Func
     let mut engine = Engine::new();
     configure_caps(&mut engine);
     wire_print_hook(&mut engine, stdout, inbound.clone());
-    register_mutations(&mut engine, inbound);
+    register_run(&mut engine, inbound.clone());
+    register_mutations(&mut engine, inbound.clone());
     register_introspection(&mut engine, func_lib.clone());
-    register_host_helpers(&mut engine, func_lib);
+    register_host_helpers(&mut engine, inbound, func_lib);
     wire_debug_hook(&mut engine);
     install_prelude(&mut engine);
     engine
@@ -468,6 +478,20 @@ fn decode_action(d: &Dynamic) -> Result<Intent, String> {
     serde_json::from_value(json).map_err(|e| format!("decode Intent: {e}"))
 }
 
+/// `run()` — worker run-state primitive: trigger one evaluation.
+/// Bypasses the undo stack; Session routes it to
+/// `WorkerMessage::ExecuteTerminals` after applying any pending
+/// intents (so the worker sees the latest graph before evaluating).
+/// The autorun on/off pair lives in the `host` module instead, since
+/// `start_autorun()` / `stop_autorun()` (prelude) are the names users
+/// should reach for; `host::set_autorun(bool)` is the underlying
+/// primitive.
+fn register_run(engine: &mut Engine, inbound: InboundSender) {
+    engine.register_fn("run", move || {
+        inbound.send(SessionInbound::RunOnce);
+    });
+}
+
 /// `apply(action)` / `apply_all(actions)` — the generic mutation
 /// surface. Every `Intent` variant is reachable through these
 /// via `serde::Deserialize`; new variants light up automatically with
@@ -515,16 +539,21 @@ fn register_introspection(engine: &mut Engine, func_lib: Arc<FuncLib>) {
     });
 }
 
-/// Narrow native helpers for actions whose payload only the host can
-/// build (e.g. `From<&Func> for Node` lives in scenarium and depends on
-/// `FuncLib`). Registered inside a static `host` module so callers
-/// have to use `host::name(...)` — visually marked as internal and
-/// kept off the bare-name surface autocomplete sees first. The
-/// ergonomic wrapper that users *should* reach for lives in
-/// [`prelude.rhai`]. Keep this module small: prefer adding script-side
-/// helpers in `prelude.rhai` when an action can be expressed via
-/// `apply` and primitive args.
-fn register_host_helpers(engine: &mut Engine, func_lib: Arc<FuncLib>) {
+/// Narrow native primitives that the prelude wraps in friendlier
+/// names. Two flavors today:
+///
+/// - `make_add_node` — builds a `GraphUiAction::AddNode` map (lookup
+///   into FuncLib + `From<&Func> for Node`). Wrapped by `create_node`
+///   in `prelude.rhai`.
+/// - `set_autorun(bool)` — flips the worker event loop on or off.
+///   Wrapped by `start_autorun` / `stop_autorun` in `prelude.rhai`.
+///
+/// Both are registered inside a static `host` module so callers have
+/// to use `host::name(...)` — visually marked as internal and kept
+/// off the bare-name surface autocomplete sees first. Keep this module
+/// small: prefer adding script-side helpers in `prelude.rhai` when a
+/// thing can be expressed via `apply`, `run`, and primitive args.
+fn register_host_helpers(engine: &mut Engine, inbound: InboundSender, func_lib: Arc<FuncLib>) {
     let mut module = rhai::Module::new();
     module.set_native_fn(
         "make_add_node",
@@ -546,6 +575,17 @@ fn register_host_helpers(engine: &mut Engine, func_lib: Arc<FuncLib>) {
             let action = Intent::AddNode { view_node, node };
             rhai::serde::to_dynamic(&action)
                 .map_err(|e| format!("make_add_node: encode failed: {e}").into())
+        },
+    );
+    module.set_native_fn(
+        "set_autorun",
+        move |on: bool| -> Result<(), Box<rhai::EvalAltResult>> {
+            inbound.send(if on {
+                SessionInbound::StartAutorun
+            } else {
+                SessionInbound::StopAutorun
+            });
+            Ok(())
         },
     );
     engine.register_static_module("host", rhai::Shared::new(module));
