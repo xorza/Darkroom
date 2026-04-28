@@ -478,9 +478,11 @@ pub fn affects_computation(step: &UndoStep) -> bool {
 }
 
 /// Identifies "same continuous gesture" for undo coalescing. The undo
-/// stack collapses consecutive steps with the same key into one
-/// entry (keeping the *first* "from" payload). Currently only
-/// viewport changes coalesce.
+/// stack collapses consecutive steps with the same key into one entry
+/// (keeping the *first* "from" payload). Two viewport changes coalesce;
+/// two `MoveNode`s of the *same* node coalesce (a continuous drag
+/// becomes one undo step), while moves of different nodes don't —
+/// `GestureKey::NodeDrag(NodeId)` segregates them.
 ///
 /// Exhaustive on purpose: a new variant must explicitly opt out (via
 /// the `None`-returning arm) instead of silently defaulting to "no
@@ -489,9 +491,9 @@ pub fn affects_computation(step: &UndoStep) -> bool {
 pub fn gesture_key(step: &UndoStep) -> Option<GestureKey> {
     match step {
         UndoStep::SetViewport { .. } => Some(GestureKey::Viewport),
+        UndoStep::MoveNode { node_id, .. } => Some(GestureKey::NodeDrag(*node_id)),
         UndoStep::AddNode { .. }
         | UndoStep::RemoveNode { .. }
-        | UndoStep::MoveNode { .. }
         | UndoStep::RenameNode { .. }
         | UndoStep::SetInput { .. }
         | UndoStep::SelectNode { .. }
@@ -503,4 +505,5 @@ pub fn gesture_key(step: &UndoStep) -> Option<GestureKey> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GestureKey {
     Viewport,
+    NodeDrag(NodeId),
 }

@@ -96,15 +96,18 @@ fn max_steps_limits_history() {
     let graph = test_graph();
     let mut view_graph: ViewGraph = graph.into();
     let node_id = view_graph.graph.iter().next().unwrap().id;
-    let before_pos = view_graph.view_nodes.by_key(&node_id).unwrap().pos;
+    let original_name = view_graph.graph.by_id(&node_id).unwrap().name.clone();
 
     let mut stack = ActionStack::new(1);
 
+    // Use RenameNode rather than MoveNode here: same-node moves now
+    // coalesce via `GestureKey::NodeDrag`, which would defeat the
+    // "max_steps evicts old entries" check.
     let s1 = step(
         &mut view_graph,
-        Intent::MoveNode {
+        Intent::RenameNode {
             node_id,
-            to: before_pos + vec2(1.0, 0.0),
+            to: format!("{original_name}-1"),
         },
     );
     stack.push_current(&[s1]);
@@ -112,19 +115,22 @@ fn max_steps_limits_history() {
 
     let s2 = step(
         &mut view_graph,
-        Intent::MoveNode {
+        Intent::RenameNode {
             node_id,
-            to: before_pos + vec2(2.0, 0.0),
+            to: format!("{original_name}-2"),
         },
     );
     stack.push_current(&[s2]);
     assert_ranges_match_actions(&stack);
 
+    // The first rename was evicted by the max_steps=1 cap. The single
+    // remaining entry undoes only the most recent rename, leaving the
+    // graph at the post-first-rename state.
     assert!(stack.undo(&mut view_graph, &mut |_| {}));
     assert_ranges_match_actions(&stack);
     assert_eq!(
-        view_graph.view_nodes.by_key(&node_id).unwrap().pos,
-        before_pos + vec2(1.0, 0.0)
+        view_graph.graph.by_id(&node_id).unwrap().name,
+        format!("{original_name}-1")
     );
     assert!(!stack.undo(&mut view_graph, &mut |_| {}));
     assert_ranges_match_actions(&stack);
@@ -456,5 +462,108 @@ fn viewport_merge_does_not_span_other_actions() {
         stack.undo_stack.len(),
         3,
         "AddNode between viewport changes must prevent merge"
+    );
+}
+
+/// Continuous MoveNode emissions on the *same* node merge into a
+/// single undo entry — one drag, one undo step. Mirrors the SetViewport
+/// case but keyed on `GestureKey::NodeDrag(node_id)`.
+#[test]
+fn move_node_merges_into_single_undo_entry_for_same_node() {
+    use egui::Pos2;
+
+    let node = scenarium::graph::Node {
+        id: scenarium::graph::NodeId::unique(),
+        func_id: scenarium::function::FuncId::unique(),
+        name: String::new(),
+        behavior: NodeBehavior::AsFunction,
+        inputs: Vec::new(),
+        events: Vec::new(),
+    };
+    let node_id = node.id;
+    let mut vg = ViewGraph::default();
+    vg.view_nodes.add(ViewNode {
+        id: node_id,
+        pos: Pos2::ZERO,
+    });
+    vg.graph.add(node);
+
+    let mut stack = ActionStack::new(32);
+    stack.clear();
+
+    for i in 1..=5 {
+        let s = step(
+            &mut vg,
+            Intent::MoveNode {
+                node_id,
+                to: Pos2::new(i as f32 * 10.0, 0.0),
+            },
+        );
+        stack.push_current(&[s]);
+    }
+
+    assert_eq!(
+        stack.undo_stack.len(),
+        1,
+        "consecutive MoveNode of the same node must merge"
+    );
+    // Undo restores the original (pre-drag) position.
+    assert!(stack.undo(&mut vg, &mut |_| {}));
+    assert_eq!(vg.view_nodes.by_key(&node_id).unwrap().pos, Pos2::ZERO);
+}
+
+/// Moves of *different* nodes don't merge — `GestureKey::NodeDrag(id)`
+/// segregates by node id.
+#[test]
+fn move_node_does_not_merge_across_different_nodes() {
+    use egui::Pos2;
+
+    let make_node = |name: &str| scenarium::graph::Node {
+        id: scenarium::graph::NodeId::unique(),
+        func_id: scenarium::function::FuncId::unique(),
+        name: name.into(),
+        behavior: NodeBehavior::AsFunction,
+        inputs: Vec::new(),
+        events: Vec::new(),
+    };
+
+    let a = make_node("a");
+    let b = make_node("b");
+    let a_id = a.id;
+    let b_id = b.id;
+    let mut vg = ViewGraph::default();
+    for n in [&a, &b] {
+        vg.view_nodes.add(ViewNode {
+            id: n.id,
+            pos: Pos2::ZERO,
+        });
+    }
+    vg.graph.add(a);
+    vg.graph.add(b);
+
+    let mut stack = ActionStack::new(32);
+    stack.clear();
+
+    let s = step(
+        &mut vg,
+        Intent::MoveNode {
+            node_id: a_id,
+            to: Pos2::new(10.0, 0.0),
+        },
+    );
+    stack.push_current(&[s]);
+    let s = step(
+        &mut vg,
+        Intent::MoveNode {
+            node_id: b_id,
+            to: Pos2::new(20.0, 0.0),
+        },
+    );
+    stack.push_current(&[s]);
+
+    assert_eq!(
+        stack.undo_stack.len(),
+        2,
+        "moves of different nodes must remain separate undo entries"
     );
 }

@@ -182,6 +182,11 @@ impl ActionStack {
         // half of the incoming step. Per-variant because each variant's
         // forward/backward field shape differs. Add a match arm here
         // when introducing a new gesture variant in `gesture_key`.
+        //
+        // The `gesture_key == Some(key)` check above guarantees the
+        // pair is the same variant *and*, for `NodeDrag`, the same
+        // node id — so MoveNode→MoveNode here is always a same-node
+        // continuous drag.
         let merged = match (&last_steps[0], new_step) {
             (
                 UndoStep::SetViewport {
@@ -198,6 +203,13 @@ impl ActionStack {
                 to_pan: *to_pan,
                 to_scale: *to_scale,
             },
+            (UndoStep::MoveNode { node_id, from, .. }, UndoStep::MoveNode { to, .. }) => {
+                UndoStep::MoveNode {
+                    node_id: *node_id,
+                    from: *from,
+                    to: *to,
+                }
+            }
             _ => return false,
         };
 

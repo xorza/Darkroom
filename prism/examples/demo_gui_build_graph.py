@@ -15,10 +15,9 @@ the sum node along a sine wave by streaming `move_node()` calls one
 frame at a time — the GUI redraws between each because each `apply()`
 fires the Notify wakeup the script crate handed Session.
 
-Caveat: each animation frame is its own undo entry because `MoveNode`
-doesn't currently coalesce by `gesture_key`. Undoing the animation
-walks frame-by-frame, which is harmless but noisy. See
-`Intent::gesture_key` if you want to wire continuous-drag merging.
+All animation frames coalesce into one undo entry: `MoveNode`'s
+gesture key is `NodeDrag(node_id)`, so consecutive moves of the same
+node merge in the undo stack. One Ctrl-Z undoes the entire wave.
 
 Run from the repo root:
     python3 prism/examples/demo_gui_build_graph.py

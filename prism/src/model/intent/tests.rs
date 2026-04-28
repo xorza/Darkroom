@@ -130,7 +130,7 @@ fn variants_with_expected_behavior() -> Vec<(UndoStep, bool, Option<GestureKey>)
                 to: Pos2::new(1.0, 2.0),
             },
             false,
-            None,
+            Some(GestureKey::NodeDrag(node_id)),
         ),
         (
             UndoStep::RenameNode {
