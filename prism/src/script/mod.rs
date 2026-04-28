@@ -28,8 +28,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use egui::Pos2;
 use rhai::{Array, Dynamic, Engine};
+use scenarium::function::FuncId;
 use scenarium::prelude::FuncLib;
+
+use crate::model::ViewNode;
+use crate::model::graph_ui_action::GraphUiAction;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::{JoinHandle, yield_now};
 use tokio_util::sync::CancellationToken;
@@ -37,6 +42,8 @@ use uuid::Uuid;
 
 mod session;
 pub mod tcp;
+#[cfg(test)]
+mod tests;
 
 pub use session::{SessionError, SessionRef, SessionStore};
 
@@ -230,6 +237,13 @@ pub enum ScriptAction {
     /// A `print(msg)` call from a script. `origin` identifies the sender
     /// (e.g. a remote peer addr) so Session can label the status line.
     Print { origin: String, msg: String },
+    /// A graph mutation issued by a script. Built on the executor side
+    /// (which has `Arc<FuncLib>` and any other inputs the action needs)
+    /// and applied verbatim by Session through the same commit path the
+    /// GUI uses — same undo stack, same dirty-tracking, same autorun
+    /// re-execution. Keeps the script→graph boundary symmetric with the
+    /// GUI→graph boundary, with no Session-side per-variant glue.
+    Apply(GraphUiAction),
 }
 
 /// Shared state touched by the `on_print` hook and the executor loop.
@@ -377,18 +391,22 @@ fn build_engine(
     // Session for the local status bar. Hook fires synchronously during
     // the script run, so the per-request state is guaranteed to still
     // describe the active request.
-    engine.on_print(move |msg| {
-        let origin = {
-            let mut s = state.lock().unwrap();
-            s.stdout.push_str(msg);
-            s.stdout.push('\n');
-            s.origin.clone()
-        };
-        let _ = action_tx.send(ScriptAction::Print {
-            origin,
-            msg: msg.to_string(),
+    {
+        let state = state.clone();
+        let action_tx = action_tx.clone();
+        engine.on_print(move |msg| {
+            let origin = {
+                let mut s = state.lock().unwrap();
+                s.stdout.push_str(msg);
+                s.stdout.push('\n');
+                s.origin.clone()
+            };
+            let _ = action_tx.send(ScriptAction::Print {
+                origin,
+                msg: msg.to_string(),
+            });
         });
-    });
+    }
 
     // `list_funcs()` → array of object-maps: one entry per Func in the
     // live FuncLib (insertion order). Each map mirrors the `Func` struct
@@ -396,15 +414,47 @@ fn build_engine(
     // node_default_behavior, description, inputs, outputs, events.
     // `lambda` and `required_contexts` are `#[serde(skip)]` so they
     // don't appear.
-    engine.register_fn("list_funcs", move || -> Array {
-        func_lib
-            .funcs
-            .iter()
-            .map(|f| {
-                rhai::serde::to_dynamic(f).expect("Func is Serialize-clean (no skipped errors)")
-            })
-            .collect()
-    });
+    {
+        let func_lib = func_lib.clone();
+        engine.register_fn("list_funcs", move || -> Array {
+            func_lib
+                .funcs
+                .iter()
+                .map(|f| {
+                    rhai::serde::to_dynamic(f).expect("Func is Serialize-clean (no skipped errors)")
+                })
+                .collect()
+        });
+    }
+
+    // `create_node(id, x, y)` → build a `GraphUiAction::NodeAdded` on
+    // the executor side (we have `Arc<FuncLib>` here, so the lookup is
+    // local) and ship it as `ScriptAction::Apply`. Session feeds it
+    // through the same commit path GUI actions take — no script-aware
+    // glue on the Session side. `id` is the UUID string exposed on
+    // `list_funcs()[i].id`; an unknown or malformed id surfaces
+    // synchronously as a Rhai error before any action is queued.
+    engine.register_fn(
+        "create_node",
+        move |id: &str, x: rhai::FLOAT, y: rhai::FLOAT| -> Result<(), Box<rhai::EvalAltResult>> {
+            let func_id: FuncId = id
+                .parse()
+                .map_err(|e| format!("invalid func id {id:?}: {e}"))?;
+            let func = func_lib
+                .by_id(&func_id)
+                .ok_or_else(|| format!("unknown func id: {id}"))?;
+            let node: scenarium::graph::Node = func.into();
+            let view_node = ViewNode {
+                id: node.id,
+                pos: Pos2::new(x as f32, y as f32),
+            };
+            let _ = action_tx.send(ScriptAction::Apply(GraphUiAction::NodeAdded {
+                view_node,
+                node,
+            }));
+            Ok(())
+        },
+    );
 
     engine.on_debug(|msg, src, pos| {
         tracing::debug!(
@@ -477,121 +527,5 @@ fn run_script(
         print,
         result,
         error,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::net::Ipv4Addr;
-
-    #[test]
-    fn list_funcs_returns_full_func_objects_in_insertion_order() {
-        use scenarium::function::{Func, FuncId};
-
-        let mut lib = FuncLib::default();
-        lib.add(Func {
-            id: FuncId::unique(),
-            name: "alpha".to_string(),
-            category: "math".to_string(),
-            ..Default::default()
-        });
-        lib.add(Func {
-            id: FuncId::unique(),
-            name: "beta".to_string(),
-            category: "io".to_string(),
-            ..Default::default()
-        });
-
-        let state = Arc::new(Mutex::new(RequestState::default()));
-        let (tx, _rx) = mpsc::unbounded_channel::<ScriptAction>();
-        let engine = build_engine(state, tx, Arc::new(lib));
-
-        // Each entry is a Rhai Map with fields mirroring `Func`. Verify
-        // both insertion order and that the per-func subfields round-trip.
-        let names: Array = engine.eval("list_funcs().map(|f| f.name)").unwrap();
-        let names: Vec<String> = names
-            .into_iter()
-            .map(|d| d.into_string().unwrap())
-            .collect();
-        assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
-
-        let categories: Array = engine.eval("list_funcs().map(|f| f.category)").unwrap();
-        let categories: Vec<String> = categories
-            .into_iter()
-            .map(|d| d.into_string().unwrap())
-            .collect();
-        assert_eq!(categories, vec!["math".to_string(), "io".to_string()]);
-
-        // `inputs` / `outputs` round-trip as arrays even when empty.
-        let inputs_len: i64 = engine.eval("list_funcs()[0].inputs.len").unwrap();
-        assert_eq!(inputs_len, 0);
-    }
-
-    #[test]
-    fn list_funcs_is_empty_when_func_lib_is_empty() {
-        let state = Arc::new(Mutex::new(RequestState::default()));
-        let (tx, _rx) = mpsc::unbounded_channel::<ScriptAction>();
-        let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
-
-        let result: Array = engine.eval("list_funcs()").unwrap();
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn build_transports_empty_when_no_tcp_config() {
-        // Guards against accidentally re-enabling an always-on listener.
-        let cfg = ScriptConfig::default();
-        assert!(cfg.tcp.is_none());
-        let results = build_transports(&cfg);
-        assert!(results.is_empty());
-    }
-
-    #[test]
-    fn build_transports_returns_started_tcp_with_report() {
-        let token = Uuid::new_v4();
-        let cfg = ScriptConfig {
-            tcp: Some(TcpScriptConfig {
-                bind: SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
-                token: Some(token),
-                token_file: None,
-            }),
-        };
-        let mut results = build_transports(&cfg);
-        assert_eq!(results.len(), 1);
-        let started = results
-            .remove(0)
-            .expect("bind should succeed on loopback :0");
-        let TransportReport::Tcp(report) = &started.report;
-        assert_eq!(report.token, Some(token));
-        assert!(report.addr.ip().is_loopback());
-        assert_ne!(report.addr.port(), 0, "OS should have assigned a real port");
-        assert!(report.token_file.is_none());
-    }
-
-    #[test]
-    fn build_transports_surfaces_bind_failure() {
-        // Bind once to pin the port, then ask for the same port again so
-        // the second bind fails. Loopback :0 lets the OS pick; we read
-        // the port off the first listener and reuse it.
-        let first = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let taken = first.local_addr().unwrap();
-
-        let cfg = ScriptConfig {
-            tcp: Some(TcpScriptConfig {
-                bind: taken,
-                token: None,
-                token_file: None,
-            }),
-        };
-        let mut results = build_transports(&cfg);
-        assert_eq!(results.len(), 1);
-        let err = results
-            .remove(0)
-            .expect_err("port already taken should fail");
-        assert_eq!(err.kind, TransportKind::Tcp);
-        // AddrInUse on Linux/mac; pin the kind so a regression that
-        // silently swallows the error (e.g. None on bind failure) trips.
-        assert_eq!(err.error.kind(), std::io::ErrorKind::AddrInUse);
     }
 }

@@ -5,13 +5,14 @@ connection, demonstrate session resume.
 Run from the repo root:
     python3 prism/examples/demo_client.py
 
-Demonstrates four things:
+Demonstrates five things:
   1. First frame: session_id = nil ("new session"). Server returns a fresh id.
   2. Second frame on the same connection: resume that session, read back a
      variable bound in frame 1.
   3. Close the socket, open a new one, resume the *same* session id to show
      the scope survived a reconnect.
   4. Call the `list_funcs()` intrinsic to query the live FuncLib registry.
+  5. Call `create_node("sum")` to drive a graph mutation from the script.
 """
 
 import json
@@ -116,6 +117,20 @@ def main() -> None:
         send_request(second, session_id, b"list_funcs()")
         reply4 = read_reply(second)
         print(f"list_funcs()     result ={reply4['result']!r}")
+
+        # Drive a graph mutation from the script side: spawn a `sum` node
+        # at view-space (50, 50) in the live ViewGraph. We pull the func
+        # id straight off `list_funcs()` rather than hard-coding a UUID,
+        # so the script keeps working as the FuncLib evolves.
+        send_request(
+            second,
+            session_id,
+            b'let f = list_funcs().filter(|f| f.name == "sum")[0];'
+            b' create_node(f.id, 50.0, 50.0)',
+        )
+        reply5 = read_reply(second)
+        print(f"create_node(sum) result ={reply5['result']!r}")
+        print(f"                 error ={reply5['error']!r}")
         second.close()
 
     finally:

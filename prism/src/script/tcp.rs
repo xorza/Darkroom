@@ -470,6 +470,7 @@ mod tests {
                 assert_eq!(msg, "hi");
                 assert_eq!(origin, local.to_string());
             }
+            other => panic!("expected Print, got {other:?}"),
         }
     }
 

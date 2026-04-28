@@ -23,6 +23,9 @@ use crate::model::{ActionStack, ViewGraph, graph_ui_action::GraphUiAction};
 use crate::script::{self, ScriptAction, ScriptConfig, ScriptExecutor};
 use crate::ui_host::UiHost;
 
+#[cfg(test)]
+mod tests;
+
 const UNDO_MAX_STEPS: usize = 256;
 
 /// Status buffer size cap (UI-visible log).
@@ -385,6 +388,9 @@ impl Session {
                 ScriptAction::Print { origin, msg } => {
                     self.add_status(format!("remote {origin}: {msg}"));
                 }
+                ScriptAction::Apply(action) => {
+                    self.graph_dirty |= self.commit_action_slice(std::slice::from_ref(&action));
+                }
             }
         }
     }
@@ -519,26 +525,28 @@ impl Session {
     }
 
     fn commit_actions(&mut self, output: &mut FrameOutput) -> bool {
-        let actions = output.actions();
+        self.commit_action_slice(output.actions())
+    }
+
+    /// Apply + record a batch of actions, regardless of source (GUI
+    /// frame output, script side-effect, future RPC). The renderer
+    /// never mutates `ViewGraph` directly (`GraphContext` holds an
+    /// `&ViewGraph`), so this is the one site that writes each action
+    /// exactly once. Cross-frame coalescing for continuous gestures
+    /// (zoom/pan) happens at the undo-stack level via
+    /// `GraphUiAction::gesture_key` — this routine has no pending
+    /// state, which is what makes it safe under egui's multi-pass
+    /// rendering and equally safe when called from `drain_inbound`.
+    fn commit_action_slice(&mut self, actions: &[GraphUiAction]) -> bool {
         if actions.is_empty() {
             return false;
         }
-
-        // Apply + record. Renderer never mutates ViewGraph (GraphContext
-        // holds &ViewGraph), so this is the one site that writes each
-        // action exactly once. Cross-frame coalescing for continuous
-        // gestures (zoom/pan) happens at the undo-stack level via
-        // `GraphUiAction::gesture_key` — this routine has no pending
-        // state, which is what makes it safe under egui's multi-pass
-        // rendering.
         let graph_updated = self.apply(actions);
         self.action_stack.clear_redo();
         self.action_stack.push_current(actions);
-
         if graph_updated {
             self.refresh_graph();
         }
-
         graph_updated
     }
 }
@@ -550,90 +558,5 @@ fn sample_test_hooks(tx: UnboundedSender<WorkerEvent>) -> TestFuncHooks {
         print: Arc::new(move |value| {
             let _ = tx.send(WorkerEvent::Print(value.to_string()));
         }),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::ViewNode;
-    use crate::ui_host::UiHost;
-    use egui::Pos2;
-
-    #[derive(Debug)]
-    struct NoopUiHost;
-    impl UiHost for NoopUiHost {
-        fn request_redraw(&self) {}
-        fn close_app(&self) {}
-    }
-
-    /// Stub-backed Session for unit tests: no tokio runtime, no
-    /// network listener, no config autoload.
-    fn test_session() -> Session {
-        let (worker_tx, worker_rx) = unbounded_channel::<WorkerEvent>();
-        let (_script_tx, script_action_rx) = unbounded_channel::<ScriptAction>();
-        Session::from_parts(
-            Arc::new(FuncLib::default()),
-            Config::default(),
-            None,
-            worker_tx,
-            worker_rx,
-            None,
-            script_action_rx,
-            Arc::new(NoopUiHost),
-        )
-    }
-
-    #[test]
-    fn add_status_first_line_has_no_leading_newline() {
-        let mut session = test_session();
-        session.add_status("hello");
-        assert_eq!(session.status(), "hello");
-    }
-
-    #[test]
-    fn add_status_appends_with_newline_separator() {
-        let mut session = test_session();
-        session.add_status("one");
-        session.add_status("two");
-        assert_eq!(session.status(), "one\ntwo");
-    }
-
-    #[test]
-    fn add_status_caps_buffer_to_2000_chars() {
-        let mut session = test_session();
-        for _ in 0..300 {
-            session.add_status("0123456789");
-        }
-        assert!(session.status().len() <= STATUS_CAP);
-    }
-
-    #[test]
-    fn apply_reports_when_action_affects_computation() {
-        let mut session = test_session();
-
-        // NodeSelected is a UI-only action — should NOT affect computation.
-        let affects = session.apply(&[GraphUiAction::NodeSelected {
-            before: None,
-            after: None,
-        }]);
-        assert!(!affects);
-
-        // NodeMoved is also UI-only.
-        let node_id = NodeId::unique();
-        session.view_graph.view_nodes.add(ViewNode {
-            id: node_id,
-            pos: Pos2::ZERO,
-        });
-        let affects = session.apply(&[GraphUiAction::NodeMoved {
-            node_id,
-            before: Pos2::ZERO,
-            after: Pos2::new(1.0, 2.0),
-        }]);
-        assert!(!affects);
-        assert_eq!(
-            session.view_graph.view_nodes.by_key(&node_id).unwrap().pos,
-            Pos2::new(1.0, 2.0)
-        );
     }
 }
