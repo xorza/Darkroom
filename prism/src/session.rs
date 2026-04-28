@@ -98,7 +98,22 @@ impl Session {
         let func_lib = Arc::new(func_lib);
 
         let (script_action_tx, script_action_rx) = unbounded_channel::<ScriptAction>();
-        let transports = script::build_transports(&script_config);
+        let mut transports = Vec::new();
+        for result in script::build_transports(&script_config) {
+            match result {
+                Ok(started) => {
+                    script::announce(&started.report);
+                    transports.push(started.transport);
+                }
+                Err(e) => {
+                    tracing::error!(
+                        kind = ?e.kind,
+                        error = %e.error,
+                        "script transport disabled (bind failed)",
+                    );
+                }
+            }
+        }
         let script_executor = ScriptExecutor::new(transports, script_action_tx);
 
         let mut result = Self::from_parts(

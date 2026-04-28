@@ -63,25 +63,73 @@ pub struct TcpScriptConfig {
     pub token_file: Option<PathBuf>,
 }
 
+/// Successfully bound transport plus its caller-renderable report.
+/// Returned from [`build_transports`] so the caller can decide how to
+/// surface discovery info (stdout banner for CLI, status bar for GUI,
+/// silent in tests) before handing the transport to [`ScriptExecutor`].
+#[derive(Debug)]
+pub struct StartedTransport {
+    pub transport: Box<dyn ScriptTransport>,
+    pub report: TransportReport,
+}
+
+/// Identifies a transport in startup outcomes. Carried on both the
+/// success side (via [`TransportReport`]) and the failure side (via
+/// [`TransportBindError`]) so an empty config and a failed bind are
+/// always distinguishable by *which* transport.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransportKind {
+    Tcp,
+}
+
+/// Per-transport startup report. One variant per supported transport.
+#[derive(Debug, Clone)]
+pub enum TransportReport {
+    Tcp(tcp::TcpStartReport),
+}
+
+/// Bind failure tagged with the transport that failed, so callers can
+/// log meaningfully without inferring kind from position in the result
+/// vec.
+#[derive(Debug)]
+pub struct TransportBindError {
+    pub kind: TransportKind,
+    pub error: std::io::Error,
+}
+
 /// Materialize every transport described by `ScriptConfig`. Each enabled
 /// transport binds eagerly so the caller learns OS-assigned ports before
-/// any accept loop starts, and can print discovery info synchronously.
-/// A per-transport bind failure is logged and treated as "transport
-/// disabled"; the app still starts.
-pub fn build_transports(cfg: &ScriptConfig) -> Vec<Box<dyn ScriptTransport>> {
-    let mut out: Vec<Box<dyn ScriptTransport>> = Vec::new();
+/// any accept loop starts. Returns one entry per enabled transport: `Ok`
+/// with the bound transport + report, or `Err` with the failing
+/// transport's kind and bind error. Empty result means the config
+/// enabled no transports — that's the normal case for tests and the
+/// GUI without `--script-tcp`, not a degraded state. Pure with respect
+/// to stdout — surfacing is the caller's job (see [`announce`]).
+pub fn build_transports(cfg: &ScriptConfig) -> Vec<Result<StartedTransport, TransportBindError>> {
+    let mut out = Vec::new();
     if let Some(tcp_cfg) = &cfg.tcp {
-        match tcp::start(tcp_cfg) {
-            Ok((transport, report)) => {
-                announce_tcp(&report);
-                out.push(Box::new(transport));
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "tcp script transport disabled (bind failed)");
-            }
-        }
+        out.push(
+            tcp::start(tcp_cfg)
+                .map(|(transport, report)| StartedTransport {
+                    transport: Box::new(transport),
+                    report: TransportReport::Tcp(report),
+                })
+                .map_err(|error| TransportBindError {
+                    kind: TransportKind::Tcp,
+                    error,
+                }),
+        );
     }
     out
+}
+
+/// Print a transport's discovery banner to stdout (and log token-file
+/// writes via tracing). Split out from [`build_transports`] so binding
+/// stays pure and unit-testable.
+pub fn announce(report: &TransportReport) {
+    match report {
+        TransportReport::Tcp(r) => announce_tcp(r),
+    }
 }
 
 fn announce_tcp(report: &tcp::TcpStartReport) {
@@ -225,7 +273,7 @@ impl Drop for TransportHandle {
 /// How a transport plugs into the executor: it gets a bounded `Sender`
 /// for pushing requests and a [`CancellationToken`] for cooperative
 /// shutdown, and returns a handle that owns its background task.
-pub trait ScriptTransport: Send {
+pub trait ScriptTransport: Send + std::fmt::Debug {
     fn start(
         self: Box<Self>,
         tx: mpsc::Sender<ScriptRequest>,
@@ -411,13 +459,62 @@ fn run_script(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::Ipv4Addr;
 
     #[test]
     fn build_transports_empty_when_no_tcp_config() {
         // Guards against accidentally re-enabling an always-on listener.
         let cfg = ScriptConfig::default();
         assert!(cfg.tcp.is_none());
-        let transports = build_transports(&cfg);
-        assert!(transports.is_empty());
+        let results = build_transports(&cfg);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn build_transports_returns_started_tcp_with_report() {
+        let token = Uuid::new_v4();
+        let cfg = ScriptConfig {
+            tcp: Some(TcpScriptConfig {
+                bind: SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
+                token: Some(token),
+                token_file: None,
+            }),
+        };
+        let mut results = build_transports(&cfg);
+        assert_eq!(results.len(), 1);
+        let started = results
+            .remove(0)
+            .expect("bind should succeed on loopback :0");
+        let TransportReport::Tcp(report) = &started.report;
+        assert_eq!(report.token, Some(token));
+        assert!(report.addr.ip().is_loopback());
+        assert_ne!(report.addr.port(), 0, "OS should have assigned a real port");
+        assert!(report.token_file.is_none());
+    }
+
+    #[test]
+    fn build_transports_surfaces_bind_failure() {
+        // Bind once to pin the port, then ask for the same port again so
+        // the second bind fails. Loopback :0 lets the OS pick; we read
+        // the port off the first listener and reuse it.
+        let first = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let taken = first.local_addr().unwrap();
+
+        let cfg = ScriptConfig {
+            tcp: Some(TcpScriptConfig {
+                bind: taken,
+                token: None,
+                token_file: None,
+            }),
+        };
+        let mut results = build_transports(&cfg);
+        assert_eq!(results.len(), 1);
+        let err = results
+            .remove(0)
+            .expect_err("port already taken should fail");
+        assert_eq!(err.kind, TransportKind::Tcp);
+        // AddrInUse on Linux/mac; pin the kind so a regression that
+        // silently swallows the error (e.g. None on bind failure) trips.
+        assert_eq!(err.error.kind(), std::io::ErrorKind::AddrInUse);
     }
 }
