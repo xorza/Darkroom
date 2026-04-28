@@ -77,10 +77,17 @@ def step(sock, label, source, session_id, *, sleep=STEP_DELAY):
 def main():
     prism = subprocess.Popen(
         [
-            "cargo", "run", "--quiet", "--bin", "prism", "--",
+            "cargo",
+            "run",
+            "--quiet",
+            "--bin",
+            "prism",
+            "--",
             "--script-tcp",
-            "--script-bind", f":{PORT}",
-            "--script-token", str(TOKEN),
+            "--script-bind",
+            f":{PORT}",
+            "--script-token",
+            str(TOKEN),
             "gui",
         ],
         start_new_session=True,
@@ -105,7 +112,7 @@ def main():
         bootstrap = send(
             sock,
             (
-                b'let funcs = list_funcs();'
+                b"let funcs = list_funcs();"
                 b' let get_a   = funcs.filter(|f| f.name == "get_a")[0].id;'
                 b' let get_b   = funcs.filter(|f| f.name == "get_b")[0].id;'
                 b' let sum_fn  = funcs.filter(|f| f.name == "sum")[0].id;'
@@ -122,10 +129,30 @@ def main():
         # node id as a string — we save each into the Rhai scope so the
         # connection step can reference it.
         print("creating nodes:")
-        step(sock, "get_a", b'let a_id = create_node(get_a, 100.0, 100.0); a_id', session_id)
-        step(sock, "get_b", b'let b_id = create_node(get_b, 100.0, 220.0); b_id', session_id)
-        step(sock, "sum",   b'let s_id = create_node(sum_fn, 320.0, 160.0); s_id', session_id)
-        step(sock, "print", b'let p_id = create_node(print_fn, 540.0, 160.0); p_id', session_id)
+        step(
+            sock,
+            "get_a",
+            b"let a_id = create_node(get_a, 100.0, 100.0); a_id",
+            session_id,
+        )
+        step(
+            sock,
+            "get_b",
+            b"let b_id = create_node(get_b, 100.0, 220.0); b_id",
+            session_id,
+        )
+        step(
+            sock,
+            "sum",
+            b"let s_id = create_node(sum_fn, 320.0, 160.0); s_id",
+            session_id,
+        )
+        step(
+            sock,
+            "print",
+            b"let p_id = create_node(print_fn, 540.0, 160.0); p_id",
+            session_id,
+        )
 
         # Connections via the prelude `connect()` helper. No need to
         # specify a "before" value — Session captures the previous
@@ -142,10 +169,10 @@ def main():
         step(
             sock,
             "apply_all",
-            b'apply_all(['
-            b'   #{ SelectNode: #{ to: s_id } },'
+            b"apply_all(["
+            b"   #{ SelectNode: #{ to: s_id } },"
             b'   #{ RenameNode: #{ node_id: s_id, to: "a + b" } },'
-            b'])',
+            b"])",
             session_id,
         )
 
