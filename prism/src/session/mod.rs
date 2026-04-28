@@ -256,7 +256,7 @@ impl Session {
         let mut graph_updated = false;
         for intent in intents {
             crate::model::intent::apply(intent, &mut self.view_graph);
-            graph_updated |= intent.affects_computation();
+            graph_updated |= intent::affects_computation(intent);
         }
         graph_updated
     }
@@ -412,7 +412,7 @@ impl Session {
     fn undo(&mut self) {
         let mut affects_computation = false;
         let undid = self.action_stack.undo(&mut self.view_graph, &mut |action| {
-            affects_computation |= action.affects_computation();
+            affects_computation |= intent::affects_computation(action);
         });
         self.view_graph.validate();
         if undid && affects_computation {
@@ -423,7 +423,7 @@ impl Session {
     fn redo(&mut self) {
         let mut affects_computation = false;
         let redid = self.action_stack.redo(&mut self.view_graph, &mut |action| {
-            affects_computation |= action.affects_computation();
+            affects_computation |= intent::affects_computation(action);
         });
         self.view_graph.validate();
         if redid && affects_computation {
@@ -563,7 +563,7 @@ impl Session {
         for intent in intents {
             let snapshot = intent::capture(intent, &self.view_graph);
             intent::apply(intent, &mut self.view_graph);
-            graph_updated |= intent.affects_computation();
+            graph_updated |= intent::affects_computation(intent);
             steps.push(UndoStep {
                 intent: intent.clone(),
                 snapshot,

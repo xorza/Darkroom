@@ -79,7 +79,7 @@ impl ActionStack {
         // existing snapshot, replace the intent. Cross-frame zoom/pan
         // collapses to one undo step without cross-frame state.
         if steps.len() == 1
-            && let Some(key) = steps[0].intent.gesture_key()
+            && let Some(key) = intent::gesture_key(&steps[0].intent)
             && self.try_merge_with_last(&steps[0], key)
         {
             return;
@@ -87,7 +87,7 @@ impl ActionStack {
 
         let range = Self::append_steps(&mut self.undo_actions, steps, &mut self.temp_buffer);
         let gesture_key = if steps.len() == 1 {
-            steps[0].intent.gesture_key()
+            intent::gesture_key(&steps[0].intent)
         } else {
             None
         };
@@ -124,7 +124,7 @@ impl ActionStack {
         let bytes = Self::slice_bytes(&self.redo_actions, &range);
         let steps = Self::deserialize_steps(bytes, &mut self.temp_buffer);
         let gesture_key = if steps.len() == 1 {
-            steps[0].intent.gesture_key()
+            intent::gesture_key(&steps[0].intent)
         } else {
             None
         };

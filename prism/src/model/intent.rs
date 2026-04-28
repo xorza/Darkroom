@@ -37,6 +37,21 @@ pub struct IncomingEvent {
 /// What the caller wants to change. Forward-only — no `before` fields.
 /// Each variant says "set X to Y"; Session captures the previous Y at
 /// commit time.
+///
+/// **Adding a variant** — touch all five dispatch sites in this file:
+///   1. add the variant here on `Intent`,
+///   2. add the matching variant on [`Snapshot`] (carrying the
+///      "previous Y" payload, or empty for pure-creation intents),
+///   3. add an arm to [`capture`] reading the soon-to-be-overwritten
+///      state from `&ViewGraph`,
+///   4. add an arm to [`apply`] writing the new state to `&mut ViewGraph`,
+///   5. add an arm to [`revert`] (matching `(Snapshot, Intent)` pair),
+///   6. update [`affects_computation`] if the intent re-triggers compute,
+///   7. update [`gesture_key`] if the intent coalesces in undo history.
+///
+/// The round-trip test in `action_stack/tests.rs` exercises every
+/// variant — adding the variant there too is the safety net for the
+/// per-variant arms above.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Intent {
     AddNode {
@@ -390,30 +405,28 @@ pub fn revert(snapshot: &Snapshot, intent: &Intent, view_graph: &mut ViewGraph) 
     }
 }
 
-impl Intent {
-    /// Whether applying this intent should re-trigger graph
-    /// computation (autorun / dirty-tracking). UI-only changes
-    /// (selection, position, name, viewport) return false.
-    pub fn affects_computation(&self) -> bool {
-        matches!(
-            self,
-            Intent::AddNode { .. }
-                | Intent::RemoveNode { .. }
-                | Intent::SetInput { .. }
-                | Intent::SetCacheBehavior { .. }
-                | Intent::SetEventConnection { .. }
-        )
-    }
+/// Whether applying this intent should re-trigger graph computation
+/// (autorun / dirty-tracking). UI-only changes (selection, position,
+/// name, viewport) return false.
+pub fn affects_computation(intent: &Intent) -> bool {
+    matches!(
+        intent,
+        Intent::AddNode { .. }
+            | Intent::RemoveNode { .. }
+            | Intent::SetInput { .. }
+            | Intent::SetCacheBehavior { .. }
+            | Intent::SetEventConnection { .. }
+    )
+}
 
-    /// Identifies "same continuous gesture" for undo coalescing. The
-    /// stack collapses consecutive intents with the same key into one
-    /// undo step (keeping the *first* snapshot). Currently only
-    /// viewport changes coalesce.
-    pub fn gesture_key(&self) -> Option<GestureKey> {
-        match self {
-            Intent::SetViewport { .. } => Some(GestureKey::Viewport),
-            _ => None,
-        }
+/// Identifies "same continuous gesture" for undo coalescing. The undo
+/// stack collapses consecutive intents with the same key into one
+/// step (keeping the *first* snapshot). Currently only viewport
+/// changes coalesce.
+pub fn gesture_key(intent: &Intent) -> Option<GestureKey> {
+    match intent {
+        Intent::SetViewport { .. } => Some(GestureKey::Viewport),
+        _ => None,
     }
 }
 
