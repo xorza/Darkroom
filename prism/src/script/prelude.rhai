@@ -30,21 +30,22 @@ fn delete_node(node_id) {
     apply(#{ RemoveNode: #{ node_id: node_id } });
 }
 
-// Wire `from_node`'s output port `from_port` into `to_node`'s input
-// port `to_port`.
-fn connect(from_node, from_port, to_node, to_port) {
+// Wire `output_node`'s output port `output_port` into `input_node`'s
+// input port `input_port`. Names match the port kinds so the `to:`
+// field reads unambiguously as "the new binding value".
+fn connect(output_node, output_port, input_node, input_port) {
     apply(#{ SetInput: #{
-        node_id: to_node,
-        input_idx: to_port,
-        to: #{ Bind: #{ target_id: from_node, port_idx: from_port } },
+        node_id: input_node,
+        input_idx: input_port,
+        to: #{ Bind: #{ target_id: output_node, port_idx: output_port } },
     }});
 }
 
-// Drop the binding on `to_node`'s input port `to_port`.
-fn disconnect(to_node, to_port) {
+// Drop the binding on `input_node`'s input port `input_port`.
+fn disconnect(input_node, input_port) {
     apply(#{ SetInput: #{
-        node_id: to_node,
-        input_idx: to_port,
+        node_id: input_node,
+        input_idx: input_port,
         to: "None",
     }});
 }
