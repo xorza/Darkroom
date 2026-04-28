@@ -88,7 +88,7 @@ fn drain_inbound_apply_node_added_inserts_node_and_marks_dirty() {
     let node_id = node.id;
     let view_node = ViewNode { id: node_id, pos };
     script_tx
-        .send(SessionInbound::Apply(vec![GraphUiAction::NodeAdded {
+        .send(SessionInbound::Apply(vec![GraphUiAction::AddNode {
             view_node,
             node,
         }]))
@@ -104,7 +104,7 @@ fn drain_inbound_apply_node_added_inserts_node_and_marks_dirty() {
         session.view_graph.view_nodes.by_key(&node_id).unwrap().pos,
         pos
     );
-    // NodeAdded affects computation, so the dirty flag must trip.
+    // AddNode affects computation, so the dirty flag must trip.
     assert!(session.graph_dirty);
 }
 
@@ -112,20 +112,20 @@ fn drain_inbound_apply_node_added_inserts_node_and_marks_dirty() {
 fn apply_reports_when_action_affects_computation() {
     let mut session = test_session();
 
-    // NodeSelected is a UI-only action — should NOT affect computation.
-    let affects = session.apply(&[GraphUiAction::NodeSelected {
+    // SelectNode is a UI-only action — should NOT affect computation.
+    let affects = session.apply(&[GraphUiAction::SelectNode {
         before: None,
         after: None,
     }]);
     assert!(!affects);
 
-    // NodeMoved is also UI-only.
+    // MoveNode is also UI-only.
     let node_id = NodeId::unique();
     session.view_graph.view_nodes.add(ViewNode {
         id: node_id,
         pos: Pos2::ZERO,
     });
-    let affects = session.apply(&[GraphUiAction::NodeMoved {
+    let affects = session.apply(&[GraphUiAction::MoveNode {
         node_id,
         before: Pos2::ZERO,
         after: Pos2::new(1.0, 2.0),

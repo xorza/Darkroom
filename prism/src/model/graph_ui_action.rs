@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{ViewGraph, ViewNode};
 
-/// Payload for `GraphUiAction::NodeRemoved`: a connection that pointed
+/// Payload for `GraphUiAction::RemoveNode`: a connection that pointed
 /// *into* the node being removed and must be re-established on undo.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IncomingConnection {
@@ -13,7 +13,7 @@ pub struct IncomingConnection {
     pub binding: Binding,
 }
 
-/// Payload for `GraphUiAction::NodeRemoved`: an event subscription that
+/// Payload for `GraphUiAction::RemoveNode`: an event subscription that
 /// targeted the node being removed and must be re-subscribed on undo.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IncomingEvent {
@@ -29,51 +29,51 @@ pub enum EventSubscriberChange {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GraphUiAction {
-    CacheToggled {
+    ToggleCache {
         node_id: NodeId,
         before: NodeBehavior,
         after: NodeBehavior,
     },
-    EventConnectionChanged {
+    ChangeEventConnection {
         event_node_id: NodeId,
         event_idx: usize,
 
         subscriber: NodeId,
         change: EventSubscriberChange,
     },
-    InputChanged {
+    ChangeInput {
         node_id: NodeId,
         input_idx: usize,
         before: Binding,
         after: Binding,
     },
-    NodeAdded {
+    AddNode {
         view_node: ViewNode,
         node: Node,
     },
-    NodeRemoved {
+    RemoveNode {
         view_node: ViewNode,
         node: Node,
         incoming_connections: Vec<IncomingConnection>,
         incoming_events: Vec<IncomingEvent>,
         was_selected: bool,
     },
-    NodeMoved {
+    MoveNode {
         node_id: NodeId,
         before: Pos2,
         after: Pos2,
     },
-    NodeSelected {
+    SelectNode {
         before: Option<NodeId>,
         after: Option<NodeId>,
     },
-    ZoomPanChanged {
+    ChangeZoomPan {
         before_pan: Vec2,
         before_scale: f32,
         after_pan: Vec2,
         after_scale: f32,
     },
-    NodeNameChanged {
+    RenameNode {
         node_id: NodeId,
         before: String,
         after: String,
@@ -81,21 +81,21 @@ pub enum GraphUiAction {
 }
 
 impl GraphUiAction {
-    /// Build a `NodeRemoved` action for `node_id`. Walks the graph once
+    /// Build a `RemoveNode` action for `node_id`. Walks the graph once
     /// to collect the connections and event subscriptions that referenced
     /// the node so undo can re-establish them. Sole constructor method
     /// on this enum — every other variant is built via struct-literal
     /// syntax at the call site.
-    pub fn node_removal(view_graph: &ViewGraph, node_id: &NodeId) -> Self {
+    pub fn remove_node(view_graph: &ViewGraph, node_id: &NodeId) -> Self {
         let view_node = view_graph
             .view_nodes
             .by_key(node_id)
-            .expect("node_removal expects a view node")
+            .expect("remove_node expects a view node")
             .clone();
         let node = view_graph
             .graph
             .by_id(node_id)
-            .expect("node_removal expects a graph node")
+            .expect("remove_node expects a graph node")
             .clone();
         let mut incoming_connections = Vec::new();
         let mut incoming_events = Vec::new();
@@ -122,7 +122,7 @@ impl GraphUiAction {
             }
         }
         let was_selected = view_graph.selected_node_id == Some(*node_id);
-        GraphUiAction::NodeRemoved {
+        GraphUiAction::RemoveNode {
             view_node,
             node,
             incoming_connections,
@@ -133,11 +133,11 @@ impl GraphUiAction {
 
     pub fn apply(&self, view_graph: &mut ViewGraph) {
         match self {
-            GraphUiAction::CacheToggled { node_id, after, .. } => {
+            GraphUiAction::ToggleCache { node_id, after, .. } => {
                 let node = view_graph.graph.by_id_mut(node_id).unwrap();
                 node.behavior = *after;
             }
-            GraphUiAction::EventConnectionChanged {
+            GraphUiAction::ChangeEventConnection {
                 event_node_id,
                 event_idx,
                 subscriber,
@@ -147,7 +147,7 @@ impl GraphUiAction {
                 let node = view_graph.graph.by_id_mut(event_node_id).unwrap();
                 assert!(
                     *event_idx < node.events.len(),
-                    "event index out of range for EventConnectionChanged apply"
+                    "event index out of range for ChangeEventConnection apply"
                 );
                 let subscribers = &mut node.events[*event_idx].subscribers;
                 match change {
@@ -167,7 +167,7 @@ impl GraphUiAction {
                     }
                 }
             }
-            GraphUiAction::InputChanged {
+            GraphUiAction::ChangeInput {
                 node_id,
                 input_idx,
                 after,
@@ -176,33 +176,33 @@ impl GraphUiAction {
                 let node = view_graph.graph.by_id_mut(node_id).unwrap();
                 assert!(
                     *input_idx < node.inputs.len(),
-                    "input index out of range for InputChanged apply"
+                    "input index out of range for ChangeInput apply"
                 );
                 node.inputs[*input_idx].binding = after.clone();
             }
-            GraphUiAction::NodeAdded { view_node, node } => {
+            GraphUiAction::AddNode { view_node, node } => {
                 assert!(
                     view_graph.graph.by_id(&node.id).is_none(),
-                    "apply NodeAdded expects node to be absent"
+                    "apply AddNode expects node to be absent"
                 );
                 view_graph.graph.add(node.clone());
                 view_graph.view_nodes.add(view_node.clone());
             }
-            GraphUiAction::NodeRemoved { node, .. } => {
+            GraphUiAction::RemoveNode { node, .. } => {
                 assert!(
                     view_graph.graph.by_id(&node.id).is_some(),
-                    "apply NodeRemoved expects node to be present"
+                    "apply RemoveNode expects node to be present"
                 );
                 view_graph.remove_node(&node.id);
             }
-            GraphUiAction::NodeMoved { node_id, after, .. } => {
+            GraphUiAction::MoveNode { node_id, after, .. } => {
                 let view_node = view_graph.view_nodes.by_key_mut(node_id).unwrap();
                 view_node.pos = *after;
             }
-            GraphUiAction::NodeSelected { after, .. } => {
+            GraphUiAction::SelectNode { after, .. } => {
                 view_graph.selected_node_id = *after;
             }
-            GraphUiAction::ZoomPanChanged {
+            GraphUiAction::ChangeZoomPan {
                 after_pan,
                 after_scale,
                 ..
@@ -210,7 +210,7 @@ impl GraphUiAction {
                 view_graph.pan = *after_pan;
                 view_graph.scale = *after_scale;
             }
-            GraphUiAction::NodeNameChanged { node_id, after, .. } => {
+            GraphUiAction::RenameNode { node_id, after, .. } => {
                 let node = view_graph.graph.by_id_mut(node_id).unwrap();
                 node.name = after.clone();
             }
@@ -219,13 +219,13 @@ impl GraphUiAction {
 
     pub fn undo(&self, view_graph: &mut ViewGraph) {
         match self {
-            GraphUiAction::CacheToggled {
+            GraphUiAction::ToggleCache {
                 node_id, before, ..
             } => {
                 let node = view_graph.graph.by_id_mut(node_id).unwrap();
                 node.behavior = *before;
             }
-            GraphUiAction::EventConnectionChanged {
+            GraphUiAction::ChangeEventConnection {
                 event_node_id,
                 event_idx,
                 subscriber,
@@ -235,7 +235,7 @@ impl GraphUiAction {
                 let node = view_graph.graph.by_id_mut(event_node_id).unwrap();
                 assert!(
                     *event_idx < node.events.len(),
-                    "event index out of range for EventConnectionChanged undo"
+                    "event index out of range for ChangeEventConnection undo"
                 );
                 let subscribers = &mut node.events[*event_idx].subscribers;
                 match change {
@@ -255,7 +255,7 @@ impl GraphUiAction {
                     }
                 }
             }
-            GraphUiAction::InputChanged {
+            GraphUiAction::ChangeInput {
                 node_id,
                 input_idx,
                 before,
@@ -264,14 +264,14 @@ impl GraphUiAction {
                 let node = view_graph.graph.by_id_mut(node_id).unwrap();
                 assert!(
                     *input_idx < node.inputs.len(),
-                    "input index out of range for InputChanged undo"
+                    "input index out of range for ChangeInput undo"
                 );
                 node.inputs[*input_idx].binding = before.clone();
             }
-            GraphUiAction::NodeAdded { node, .. } => {
+            GraphUiAction::AddNode { node, .. } => {
                 view_graph.remove_node(&node.id);
             }
-            GraphUiAction::NodeRemoved {
+            GraphUiAction::RemoveNode {
                 view_node,
                 node,
                 incoming_connections,
@@ -300,16 +300,16 @@ impl GraphUiAction {
                     view_graph.selected_node_id = Some(removed_node_id);
                 }
             }
-            GraphUiAction::NodeMoved {
+            GraphUiAction::MoveNode {
                 node_id, before, ..
             } => {
                 let view_node = view_graph.view_nodes.by_key_mut(node_id).unwrap();
                 view_node.pos = *before;
             }
-            GraphUiAction::NodeSelected { before, .. } => {
+            GraphUiAction::SelectNode { before, .. } => {
                 view_graph.selected_node_id = *before;
             }
-            GraphUiAction::ZoomPanChanged {
+            GraphUiAction::ChangeZoomPan {
                 before_pan,
                 before_scale,
                 ..
@@ -317,7 +317,7 @@ impl GraphUiAction {
                 view_graph.pan = *before_pan;
                 view_graph.scale = *before_scale;
             }
-            GraphUiAction::NodeNameChanged {
+            GraphUiAction::RenameNode {
                 node_id, before, ..
             } => {
                 let node = view_graph.graph.by_id_mut(node_id).unwrap();
@@ -328,16 +328,16 @@ impl GraphUiAction {
 
     pub fn affects_computation(&self) -> bool {
         match self {
-            GraphUiAction::NodeAdded { .. }
-            | GraphUiAction::NodeRemoved { .. }
-            | GraphUiAction::InputChanged { .. }
-            | GraphUiAction::CacheToggled { .. }
-            | GraphUiAction::EventConnectionChanged { .. } => true,
+            GraphUiAction::AddNode { .. }
+            | GraphUiAction::RemoveNode { .. }
+            | GraphUiAction::ChangeInput { .. }
+            | GraphUiAction::ToggleCache { .. }
+            | GraphUiAction::ChangeEventConnection { .. } => true,
 
-            GraphUiAction::NodeMoved { .. }
-            | GraphUiAction::NodeSelected { .. }
-            | GraphUiAction::ZoomPanChanged { .. }
-            | GraphUiAction::NodeNameChanged { .. } => false,
+            GraphUiAction::MoveNode { .. }
+            | GraphUiAction::SelectNode { .. }
+            | GraphUiAction::ChangeZoomPan { .. }
+            | GraphUiAction::RenameNode { .. } => false,
         }
     }
 
@@ -348,7 +348,7 @@ impl GraphUiAction {
     /// in [`GraphUiAction::merge`].
     pub fn gesture_key(&self) -> Option<GestureKey> {
         match self {
-            GraphUiAction::ZoomPanChanged { .. } => Some(GestureKey::ZoomPan),
+            GraphUiAction::ChangeZoomPan { .. } => Some(GestureKey::ZoomPan),
             _ => None,
         }
     }
@@ -362,17 +362,17 @@ impl GraphUiAction {
     pub fn merge(&self, next: &Self) -> Option<Self> {
         match (self, next) {
             (
-                GraphUiAction::ZoomPanChanged {
+                GraphUiAction::ChangeZoomPan {
                     before_pan,
                     before_scale,
                     ..
                 },
-                GraphUiAction::ZoomPanChanged {
+                GraphUiAction::ChangeZoomPan {
                     after_pan,
                     after_scale,
                     ..
                 },
-            ) => Some(GraphUiAction::ZoomPanChanged {
+            ) => Some(GraphUiAction::ChangeZoomPan {
                 before_pan: *before_pan,
                 before_scale: *before_scale,
                 after_pan: *after_pan,
@@ -420,25 +420,25 @@ mod tests {
     /// action already reached must panic, surfacing a duplicate-emit UI
     /// bug instead of silently absorbing it.
     #[test]
-    #[should_panic(expected = "apply NodeAdded expects node to be absent")]
+    #[should_panic(expected = "apply AddNode expects node to be absent")]
     fn node_added_apply_panics_on_duplicate() {
         let mut vg = empty_graph();
         let (node, view_node) = make_node("foo");
-        let action = GraphUiAction::NodeAdded { node, view_node };
+        let action = GraphUiAction::AddNode { node, view_node };
 
         action.apply(&mut vg);
         action.apply(&mut vg);
     }
 
     #[test]
-    #[should_panic(expected = "apply NodeRemoved expects node to be present")]
+    #[should_panic(expected = "apply RemoveNode expects node to be present")]
     fn node_removed_apply_panics_on_missing() {
         let mut vg = empty_graph();
         let (node, view_node) = make_node("foo");
         vg.graph.add(node.clone());
         vg.view_nodes.add(view_node.clone());
 
-        let action = GraphUiAction::NodeRemoved {
+        let action = GraphUiAction::RemoveNode {
             node,
             view_node,
             incoming_connections: Vec::new(),
@@ -468,7 +468,7 @@ mod tests {
         vg.graph.add(subscriber_node);
         vg.view_nodes.add(subscriber_view);
 
-        let add = GraphUiAction::EventConnectionChanged {
+        let add = GraphUiAction::ChangeEventConnection {
             event_node_id,
             event_idx: 0,
             subscriber: subscriber_id,
@@ -497,7 +497,7 @@ mod tests {
         vg.graph.add(subscriber_node);
         vg.view_nodes.add(subscriber_view);
 
-        let remove = GraphUiAction::EventConnectionChanged {
+        let remove = GraphUiAction::ChangeEventConnection {
             event_node_id,
             event_idx: 0,
             subscriber: subscriber_id,

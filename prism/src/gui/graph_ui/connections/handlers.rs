@@ -35,8 +35,8 @@ impl GraphUi {
         if ctx.view_graph.selected_node_id.is_some() {
             let before = ctx.view_graph.selected_node_id;
             // Emit-action-only: selected_node_id is mutated by
-            // `NodeSelected::apply` in commit_actions, not here.
-            output.add_action(GraphUiAction::NodeSelected {
+            // `SelectNode::apply` in commit_actions, not here.
+            output.add_action(GraphUiAction::SelectNode {
                 before,
                 after: None,
             });
@@ -110,7 +110,7 @@ impl GraphUi {
                     disconnect_connection(key, ctx, output);
                 }
                 BrokeItem::Node(node_id) => {
-                    let action = GraphUiAction::node_removal(ctx.view_graph, &node_id);
+                    let action = GraphUiAction::remove_node(ctx.view_graph, &node_id);
                     output.add_action(action);
                 }
             }
@@ -273,7 +273,7 @@ pub(in crate::gui::graph_ui) fn handle_idle(
     }
 }
 
-/// Builds the `InputChanged` action that would bind `input_port` to
+/// Builds the `ChangeInput` action that would bind `input_port` to
 /// `output_port`. No mutation — `apply` handles it. Always produces
 /// an action; re-binding to the same source is a harmless overwrite.
 pub(in crate::gui::graph_ui) fn build_data_connection_action(
@@ -303,7 +303,7 @@ pub(in crate::gui::graph_ui) fn build_data_connection_action(
         port_idx: output_port.port_idx,
     });
 
-    Ok(GraphUiAction::InputChanged {
+    Ok(GraphUiAction::ChangeInput {
         node_id: input_port.node_id,
         input_idx: input_port.port_idx,
         before,
@@ -311,7 +311,7 @@ pub(in crate::gui::graph_ui) fn build_data_connection_action(
     })
 }
 
-/// Builds the `EventConnectionChanged` action that would subscribe
+/// Builds the `ChangeEventConnection` action that would subscribe
 /// `input_port`'s node to `output_port`'s event. No mutation.
 /// Returns `Ok(None)` when the subscriber is already present —
 /// event subscriptions are list membership, unlike data bindings
@@ -349,7 +349,7 @@ pub(in crate::gui::graph_ui) fn build_event_connection_action(
         return Ok(None);
     }
 
-    Ok(Some(GraphUiAction::EventConnectionChanged {
+    Ok(Some(GraphUiAction::ChangeEventConnection {
         event_node_id: output_port.node_id,
         event_idx: output_port.port_idx,
         subscriber: input_port.node_id,
@@ -459,7 +459,7 @@ mod tests {
         .unwrap();
 
         match action {
-            GraphUiAction::InputChanged {
+            GraphUiAction::ChangeInput {
                 node_id,
                 input_idx,
                 before,
@@ -476,7 +476,7 @@ mod tests {
                     _ => panic!("expected Binding::Bind"),
                 }
             }
-            other => panic!("expected InputChanged, got {other:?}"),
+            other => panic!("expected ChangeInput, got {other:?}"),
         }
     }
 
@@ -559,7 +559,7 @@ mod tests {
         .unwrap();
 
         match action {
-            GraphUiAction::EventConnectionChanged {
+            GraphUiAction::ChangeEventConnection {
                 event_node_id,
                 event_idx,
                 subscriber,
@@ -570,7 +570,7 @@ mod tests {
                 assert_eq!(subscriber, b_id);
                 assert_eq!(change, EventSubscriberChange::Added);
             }
-            other => panic!("expected EventConnectionChanged, got {other:?}"),
+            other => panic!("expected ChangeEventConnection, got {other:?}"),
         }
     }
 

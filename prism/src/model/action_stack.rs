@@ -17,7 +17,7 @@ struct UndoEntry {
 /// Undo history kept as two flat byte buffers with per-entry ranges,
 /// rather than `VecDeque<Vec<GraphUiAction>>`.
 ///
-/// Why: `GraphUiAction::NodeRemoved` carries a full `Node` + per-edge
+/// Why: `GraphUiAction::RemoveNode` carries a full `Node` + per-edge
 /// `Vec<IncomingConnection>` / `Vec<IncomingEvent>`; a naive enum-storage
 /// history hits the allocator once per field per pushed action and leaves
 /// the heap fragmented as the ring trims old entries. Bitcode-packing
@@ -292,16 +292,16 @@ mod tests {
         let after_pos = before_pos + vec2(10.0, 5.0);
 
         let actions = vec![
-            GraphUiAction::NodeMoved {
+            GraphUiAction::MoveNode {
                 node_id,
                 before: before_pos,
                 after: after_pos,
             },
-            GraphUiAction::NodeSelected {
+            GraphUiAction::SelectNode {
                 before: None,
                 after: Some(node_id),
             },
-            GraphUiAction::ZoomPanChanged {
+            GraphUiAction::ChangeZoomPan {
                 before_pan: Vec2::ZERO,
                 before_scale: 1.0,
                 after_pan: vec2(20.0, -10.0),
@@ -338,7 +338,7 @@ mod tests {
 
         let mut stack = ActionStack::new(1);
 
-        let first_actions = vec![GraphUiAction::NodeMoved {
+        let first_actions = vec![GraphUiAction::MoveNode {
             node_id,
             before: before_pos,
             after: before_pos + vec2(1.0, 0.0),
@@ -349,7 +349,7 @@ mod tests {
         stack.push_current(&first_actions);
         assert_ranges_match_actions(&stack);
 
-        let second_actions = vec![GraphUiAction::NodeMoved {
+        let second_actions = vec![GraphUiAction::MoveNode {
             node_id,
             before: before_pos + vec2(1.0, 0.0),
             after: before_pos + vec2(2.0, 0.0),
@@ -383,7 +383,7 @@ mod tests {
         stack.clear();
 
         for i in 0..20 {
-            let action = GraphUiAction::NodeMoved {
+            let action = GraphUiAction::MoveNode {
                 node_id,
                 before: start_pos + vec2(i as f32, 0.0),
                 after: start_pos + vec2((i + 1) as f32, 0.0),
@@ -459,7 +459,7 @@ mod tests {
             NodeBehavior::AsFunction => NodeBehavior::Once,
             NodeBehavior::Once => NodeBehavior::AsFunction,
         };
-        let action = GraphUiAction::CacheToggled {
+        let action = GraphUiAction::ToggleCache {
             node_id: primary_id,
             before: cache_before,
             after: cache_after,
@@ -485,7 +485,7 @@ mod tests {
                 .unwrap_or(event_node.id);
             (subscriber, EventSubscriberChange::Added)
         };
-        let action = GraphUiAction::EventConnectionChanged {
+        let action = GraphUiAction::ChangeEventConnection {
             event_node_id: event_node.id,
             event_idx,
             subscriber,
@@ -497,7 +497,7 @@ mod tests {
 
         let before_binding = Binding::None;
         let after_binding = Binding::Const(StaticValue::Int(123));
-        let action = GraphUiAction::InputChanged {
+        let action = GraphUiAction::ChangeInput {
             node_id: input_node_id,
             input_idx,
             before: before_binding,
@@ -509,7 +509,7 @@ mod tests {
 
         let moved_before = view_graph.view_nodes.by_key(&primary_id).unwrap().pos;
         let moved_after = moved_before + vec2(5.0, -3.0);
-        let action = GraphUiAction::NodeMoved {
+        let action = GraphUiAction::MoveNode {
             node_id: primary_id,
             before: moved_before,
             after: moved_after,
@@ -523,7 +523,7 @@ mod tests {
             Some(id) if id == primary_id => None,
             _ => Some(primary_id),
         };
-        let action = GraphUiAction::NodeSelected {
+        let action = GraphUiAction::SelectNode {
             before: selected_before,
             after: selected_after,
         };
@@ -533,7 +533,7 @@ mod tests {
 
         let zoom_before_pan = view_graph.pan;
         let zoom_before_scale = view_graph.scale;
-        let action = GraphUiAction::ZoomPanChanged {
+        let action = GraphUiAction::ChangeZoomPan {
             before_pan: zoom_before_pan,
             before_scale: zoom_before_scale,
             after_pan: zoom_before_pan + vec2(12.0, -6.0),
@@ -556,7 +556,7 @@ mod tests {
             .copied()
             .find(|node_id| !bound_targets.contains(node_id))
             .unwrap_or(secondary_id);
-        let action = GraphUiAction::node_removal(&view_graph, &removed_node_id);
+        let action = GraphUiAction::remove_node(&view_graph, &removed_node_id);
         action.apply(&mut view_graph);
         stack.push_current(std::slice::from_ref(&action));
         snapshots.push(view_graph.serialize(SerdeFormat::Json));
@@ -584,7 +584,7 @@ mod tests {
         assert!(!stack.undo(&mut view_graph, &mut |_| {}));
     }
 
-    /// Continuous ZoomPanChanged emissions merge into a single undo
+    /// Continuous ChangeZoomPan emissions merge into a single undo
     /// entry — one gesture, one undo step. Cached gesture_key makes
     /// the merge check O(1) (no deserialize).
     #[test]
@@ -601,7 +601,7 @@ mod tests {
             (Vec2::new(25.0, -5.0), 1.25, Vec2::new(40.0, -10.0), 1.4),
         ];
         for (before_pan, before_scale, after_pan, after_scale) in frame_deltas {
-            let action = GraphUiAction::ZoomPanChanged {
+            let action = GraphUiAction::ChangeZoomPan {
                 before_pan,
                 before_scale,
                 after_pan,
@@ -614,7 +614,7 @@ mod tests {
         assert_eq!(
             stack.undo_stack.len(),
             1,
-            "three consecutive ZoomPanChanged emissions must merge into one undo entry"
+            "three consecutive ChangeZoomPan emissions must merge into one undo entry"
         );
 
         assert!(stack.undo(&mut vg, &mut |_| {}));
@@ -622,7 +622,7 @@ mod tests {
         assert!(vg.scale.ui_equals(1.0));
     }
 
-    /// Merging only happens between ZoomPanChanged on ZoomPanChanged —
+    /// Merging only happens between ChangeZoomPan on ChangeZoomPan —
     /// any other action in between creates a new undo entry.
     #[test]
     fn zoom_pan_merge_does_not_span_other_actions() {
@@ -645,7 +645,7 @@ mod tests {
         let mut stack = ActionStack::new(32);
         stack.clear();
 
-        let zoom = GraphUiAction::ZoomPanChanged {
+        let zoom = GraphUiAction::ChangeZoomPan {
             before_pan: Vec2::ZERO,
             before_scale: 1.0,
             after_pan: Vec2::new(10.0, 0.0),
@@ -654,14 +654,14 @@ mod tests {
         zoom.apply(&mut vg);
         stack.push_current(std::slice::from_ref(&zoom));
 
-        let add = GraphUiAction::NodeAdded {
+        let add = GraphUiAction::AddNode {
             view_node: view_node.clone(),
             node: node.clone(),
         };
         add.apply(&mut vg);
         stack.push_current(std::slice::from_ref(&add));
 
-        let zoom2 = GraphUiAction::ZoomPanChanged {
+        let zoom2 = GraphUiAction::ChangeZoomPan {
             before_pan: Vec2::new(10.0, 0.0),
             before_scale: 1.1,
             after_pan: Vec2::new(20.0, 0.0),
@@ -673,7 +673,7 @@ mod tests {
         assert_eq!(
             stack.undo_stack.len(),
             3,
-            "NodeAdded between zooms must prevent merge"
+            "AddNode between zooms must prevent merge"
         );
     }
 }

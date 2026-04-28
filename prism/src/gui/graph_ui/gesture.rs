@@ -15,7 +15,7 @@ use crate::gui::graph_ui::connections::breaker::ConnectionBreaker;
 use crate::gui::graph_ui::port::PortInfo;
 
 /// In-flight node drag. `start_pos` is the node's position at drag start
-/// (used as the `before` of the emitted `NodeMoved` action); `offset`
+/// (used as the `before` of the emitted `MoveNode` action); `offset`
 /// accumulates per-frame drag deltas. Render composes
 /// `view_node.pos + offset` to show the dragged position; `ViewGraph`
 /// itself is untouched until the drag commits on release.
@@ -24,7 +24,7 @@ pub struct NodeDrag {
     pub node_id: NodeId,
     pub start_pos: Pos2,
     pub offset: Vec2,
-    /// Set on the frame the user releases the mouse: the `NodeMoved`
+    /// Set on the frame the user releases the mouse: the `MoveNode`
     /// action has been emitted, but we must keep the offset alive
     /// through this frame's render so the node doesn't flash back to
     /// `view_node.pos` (old) before `apply()` updates it at end of

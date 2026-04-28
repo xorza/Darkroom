@@ -131,7 +131,7 @@ impl NodeUi {
     ) {
         // A drag released on the previous frame kept its offset alive
         // through that frame's render (see `NodeDrag::released`). By
-        // now `NodeMoved::apply` has run, so the offset is stale —
+        // now `MoveNode::apply` has run, so the offset is stale —
         // cancel before we read any drag state.
         if gesture.node_drag().is_some_and(|d| d.released) {
             gesture.cancel();
@@ -153,7 +153,7 @@ impl NodeUi {
             if (events.started || response.clicked())
                 && ctx.view_graph.selected_node_id != Some(node_id)
             {
-                output.add_action(GraphUiAction::NodeSelected {
+                output.add_action(GraphUiAction::SelectNode {
                     before: ctx.view_graph.selected_node_id,
                     after: Some(node_id),
                 });
@@ -170,7 +170,7 @@ impl NodeUi {
                     drag.offset += response.drag_delta() / gui.scale();
                 }
                 if events.stopped {
-                    output.add_action(GraphUiAction::NodeMoved {
+                    output.add_action(GraphUiAction::MoveNode {
                         node_id,
                         before: drag.start_pos,
                         after: drag.committed_pos(),
@@ -184,7 +184,7 @@ impl NodeUi {
     }
 
     /// Per-frame render pass for node bodies + ports + labels. Emits
-    /// `NodeRemoved` actions directly for clicked remove-buttons; port
+    /// `RemoveNode` actions directly for clicked remove-buttons; port
     /// interaction commands and breaker hits flow back through the
     /// returned `RenderNodesResult`.
     pub(crate) fn render_nodes(
@@ -223,7 +223,7 @@ impl NodeUi {
             }
 
             if render_remove_btn(gui, &layout, node_id) {
-                output.add_action(GraphUiAction::node_removal(ctx.view_graph, &node_id));
+                output.add_action(GraphUiAction::remove_node(ctx.view_graph, &node_id));
             }
 
             render_status_hints(gui, &layout, node_id, node.behavior, func);
@@ -340,7 +340,7 @@ fn render_body(
 // UI controls
 // ============================================================================
 
-/// Returns the `CacheToggled` action when the cache button was clicked
+/// Returns the `ToggleCache` action when the cache button was clicked
 /// this frame. The caller (`render_nodes`) is the single emit site; this
 /// keeps render-pass code from poking `FrameOutput` mid-paint.
 fn render_cache_btn(gui: &mut Gui<'_>, layout: &NodeLayout, node: &Node) -> Option<GraphUiAction> {
@@ -359,7 +359,7 @@ fn render_cache_btn(gui: &mut Gui<'_>, layout: &NodeLayout, node: &Node) -> Opti
         let before = node.behavior;
         let mut after = before;
         after.toggle();
-        Some(GraphUiAction::CacheToggled {
+        Some(GraphUiAction::ToggleCache {
             node_id: node.id,
             before,
             after,

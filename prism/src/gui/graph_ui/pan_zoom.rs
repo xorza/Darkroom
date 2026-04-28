@@ -3,7 +3,7 @@
 //! Everything in here is a pure projection of `(state, input)` → new
 //! target `(scale, pan)`, plus the state-machine transitions for the
 //! middle-button pan mode. Mutation of `view_graph.pan` / `scale` happens
-//! exclusively through `ZoomPanChanged::apply` in `Session::commit_actions`.
+//! exclusively through `ChangeZoomPan::apply` in `Session::commit_actions`.
 
 use common::BoolExt;
 use egui::{PointerButton, Pos2, Response, Vec2};
@@ -60,7 +60,7 @@ impl GraphUi {
         }
     }
 
-    /// Emit `ZoomPanChanged` iff the target differs from the current view.
+    /// Emit `ChangeZoomPan` iff the target differs from the current view.
     /// `apply()` in `commit_actions` is the single site that writes
     /// `pan` / `scale` onto `ViewGraph`.
     pub(super) fn emit_zoom_pan(
@@ -73,7 +73,7 @@ impl GraphUi {
         if view_graph.scale.ui_equals(new_scale) && view_graph.pan.ui_equals(new_pan) {
             return;
         }
-        output.add_action(GraphUiAction::ZoomPanChanged {
+        output.add_action(GraphUiAction::ChangeZoomPan {
             before_pan: view_graph.pan,
             before_scale: view_graph.scale,
             after_pan: new_pan,
@@ -88,7 +88,7 @@ impl GraphUi {
 
 /// Given the current `(scale, pan)` and this frame's scroll / zoom input,
 /// return the target `(scale, pan)`. No mutation — the orchestrator emits
-/// a `ZoomPanChanged` action if the result differs from the current view.
+/// a `ChangeZoomPan` action if the result differs from the current view.
 fn compute_scroll_zoom(
     vp: &ViewParams,
     input: &InputSnapshot,

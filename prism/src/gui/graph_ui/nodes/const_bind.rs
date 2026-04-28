@@ -80,7 +80,7 @@ impl<'a> ConstBindFrame<'a> {
 
             // The editor operates on a per-frame local draft of the
             // value; `ViewGraph` is never mutated from here. Any edit
-            // produces an `InputChanged` action; double-click-to-clear
+            // produces an `ChangeInput` action; double-click-to-clear
             // produces one too and short-circuits the loop.
             if self.render_const_input(gui, output, node_layout, &ctx, value) {
                 return;
@@ -129,7 +129,7 @@ impl<'a> ConstBindFrame<'a> {
 
         // Double-click to clear binding
         if bezier_response.double_clicked_by(PointerButton::Primary) {
-            output.add_action(GraphUiAction::InputChanged {
+            output.add_action(GraphUiAction::ChangeInput {
                 node_id: ctx.node_id,
                 input_idx: ctx.input_idx,
                 before: Binding::Const(current_value.clone()),
@@ -148,7 +148,7 @@ impl<'a> ConstBindFrame<'a> {
         // keep their own edit state (cursor / partial input) keyed by
         // `Id` in egui memory, so a fresh local copy each frame works
         // cleanly without touching `ViewGraph`. On change, we emit
-        // `InputChanged` and let `apply` update the binding.
+        // `ChangeInput` and let `apply` update the binding.
         let mut draft = current_value.clone();
         let data_type = &ctx.func.inputs[ctx.input_idx].data_type;
         let editor_response = StaticValueEditor::new(&mut draft, data_type)
@@ -166,7 +166,7 @@ impl<'a> ConstBindFrame<'a> {
 
         if draft != *current_value {
             currently_hovered = true;
-            output.add_action(GraphUiAction::InputChanged {
+            output.add_action(GraphUiAction::ChangeInput {
                 node_id: ctx.node_id,
                 input_idx: ctx.input_idx,
                 before: Binding::Const(current_value.clone()),

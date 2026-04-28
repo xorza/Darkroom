@@ -90,7 +90,7 @@ fn create_node_known_id_enqueues_node_added_action() {
     let script = format!(r#"create_node("{alpha_id}", 12.5, -3.0)"#);
     engine.eval::<()>(&script).unwrap();
 
-    // The executor builds a fully-formed GraphUiAction::NodeAdded —
+    // The executor builds a fully-formed GraphUiAction::AddNode —
     // identical to what the GUI emits — and ships it via Apply. Session
     // applies it through the same commit path with no script-aware glue.
     let action = rx.try_recv().expect("Apply action queued");
@@ -100,19 +100,19 @@ fn create_node_known_id_enqueues_node_added_action() {
     };
     assert_eq!(actions.len(), 1);
     match &actions[0] {
-        GraphUiAction::NodeAdded { view_node, node } => {
+        GraphUiAction::AddNode { view_node, node } => {
             assert_eq!(node.func_id, alpha_id);
             assert_eq!(node.name, "alpha");
             assert_eq!(view_node.id, node.id);
             assert_eq!(view_node.pos, egui::Pos2::new(12.5, -3.0));
         }
-        other => panic!("expected NodeAdded, got {other:?}"),
+        other => panic!("expected AddNode, got {other:?}"),
     }
 }
 
 #[test]
 fn apply_decodes_arbitrary_graph_ui_action_via_serde() {
-    // NodeSelected has the simplest shape (two `Option<NodeId>`s) and
+    // SelectNode has the simplest shape (two `Option<NodeId>`s) and
     // exercises the generic `serde::Deserialize` path that lights up
     // every other variant for free. If this works, a script can drive
     // any current or future GraphUiAction through `apply` without
@@ -122,7 +122,7 @@ fn apply_decodes_arbitrary_graph_ui_action_via_serde() {
     let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
     engine
-        .eval::<()>(r#"apply(#{ NodeSelected: #{ before: (), after: () } })"#)
+        .eval::<()>(r#"apply(#{ SelectNode: #{ before: (), after: () } })"#)
         .unwrap();
 
     let inbound = rx.try_recv().expect("Apply queued");
@@ -132,11 +132,11 @@ fn apply_decodes_arbitrary_graph_ui_action_via_serde() {
     };
     assert_eq!(actions.len(), 1);
     match &actions[0] {
-        GraphUiAction::NodeSelected { before, after } => {
+        GraphUiAction::SelectNode { before, after } => {
             assert!(before.is_none());
             assert!(after.is_none());
         }
-        other => panic!("expected NodeSelected, got {other:?}"),
+        other => panic!("expected SelectNode, got {other:?}"),
     }
 }
 
@@ -168,8 +168,8 @@ fn apply_all_batches_actions_into_one_inbound() {
     engine
         .eval::<()>(
             r#"apply_all([
-                #{ NodeSelected: #{ before: (), after: () } },
-                #{ NodeSelected: #{ before: (), after: () } },
+                #{ SelectNode: #{ before: (), after: () } },
+                #{ SelectNode: #{ before: (), after: () } },
             ])"#,
         )
         .unwrap();

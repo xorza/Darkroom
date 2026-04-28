@@ -71,7 +71,7 @@ pub(crate) fn disconnect_connection(
             if matches!(before, Binding::None) {
                 return;
             }
-            output.add_action(GraphUiAction::InputChanged {
+            output.add_action(GraphUiAction::ChangeInput {
                 node_id: input_node_id,
                 input_idx,
                 before,
@@ -90,7 +90,7 @@ pub(crate) fn disconnect_connection(
             {
                 return;
             }
-            output.add_action(GraphUiAction::EventConnectionChanged {
+            output.add_action(GraphUiAction::ChangeEventConnection {
                 event_node_id,
                 event_idx,
                 subscriber: trigger_node_id,
@@ -330,11 +330,11 @@ mod tests {
         let actions = buf.actions();
         assert_eq!(actions.len(), 1, "expected exactly one emitted action");
         match &actions[0] {
-            GraphUiAction::InputChanged { after, node_id, .. } => {
+            GraphUiAction::ChangeInput { after, node_id, .. } => {
                 assert_eq!(*node_id, target_id);
                 assert!(matches!(after, Binding::None));
             }
-            other => panic!("expected InputChanged, got {other:?}"),
+            other => panic!("expected ChangeInput, got {other:?}"),
         }
     }
 
@@ -397,7 +397,7 @@ mod tests {
         let actions = buf.actions();
         assert_eq!(actions.len(), 1);
         match &actions[0] {
-            GraphUiAction::EventConnectionChanged {
+            GraphUiAction::ChangeEventConnection {
                 event_node_id,
                 subscriber,
                 change,
@@ -407,7 +407,7 @@ mod tests {
                 assert_eq!(*subscriber, subscriber_id);
                 assert_eq!(*change, EventSubscriberChange::Removed);
             }
-            other => panic!("expected EventConnectionChanged, got {other:?}"),
+            other => panic!("expected ChangeEventConnection, got {other:?}"),
         }
     }
 

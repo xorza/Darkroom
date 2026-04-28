@@ -175,7 +175,7 @@ impl GraphUi {
                     pos: graph_pos.to_pos2(),
                 };
 
-                output.add_action(GraphUiAction::NodeAdded { view_node, node });
+                output.add_action(GraphUiAction::AddNode { view_node, node });
             }
             NewNodeSelection::ConstBind => {
                 self.create_const_binding(ctx, output);
@@ -208,7 +208,7 @@ impl GraphUi {
             .unwrap_or_else(|| StaticValue::from(&func_input.data_type))
             .into();
 
-        output.add_action(GraphUiAction::InputChanged {
+        output.add_action(GraphUiAction::ChangeInput {
             node_id: input_port.node_id,
             input_idx: input_port.port_idx,
             before,

@@ -109,7 +109,7 @@ mod tests {
     #[test]
     fn actions_land_immediately() {
         let mut output = FrameOutput::default();
-        output.add_action(GraphUiAction::NodeMoved {
+        output.add_action(GraphUiAction::MoveNode {
             node_id: NodeId::unique(),
             before: Pos2::ZERO,
             after: Pos2::new(10.0, 20.0),
@@ -120,7 +120,7 @@ mod tests {
     #[test]
     fn clear_empties_action_buffer() {
         let mut output = FrameOutput::default();
-        output.add_action(GraphUiAction::ZoomPanChanged {
+        output.add_action(GraphUiAction::ChangeZoomPan {
             before_pan: egui::Vec2::ZERO,
             before_scale: 1.0,
             after_pan: egui::Vec2::new(5.0, 5.0),

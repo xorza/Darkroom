@@ -410,7 +410,7 @@ fn build_engine(
     // `apply(action)` → ship one `GraphUiAction` deserialized from a
     // Rhai map. Wires every variant at once via the existing
     // `serde::Deserialize` derive: scripts that follow the externally-
-    // tagged enum shape (`#{ NodeMoved: #{ node_id: …, before: …,
+    // tagged enum shape (`#{ MoveNode: #{ node_id: …, before: …,
     // after: … } }`) can construct any action without per-variant glue
     // here. New `GraphUiAction` variants light up automatically. Errors
     // surface as Rhai errors before the action is queued.
@@ -468,7 +468,7 @@ fn build_engine(
         });
     }
 
-    // `create_node(id, x, y)` → build a `GraphUiAction::NodeAdded` on
+    // `create_node(id, x, y)` → build a `GraphUiAction::AddNode` on
     // the executor side (we have `Arc<FuncLib>` here, so the lookup is
     // local) and ship it as `SessionInbound::Apply`. Session feeds it
     // through the same commit path GUI actions take — no script-aware
@@ -489,7 +489,7 @@ fn build_engine(
                 id: node.id,
                 pos: Pos2::new(x as f32, y as f32),
             };
-            let _ = action_tx.send(SessionInbound::Apply(vec![GraphUiAction::NodeAdded {
+            let _ = action_tx.send(SessionInbound::Apply(vec![GraphUiAction::AddNode {
                 view_node,
                 node,
             }]));
