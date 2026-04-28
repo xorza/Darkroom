@@ -268,6 +268,42 @@ fn undo_roundtrip_all_intent_variants_with_json_snapshots() {
     stack.push_current(std::slice::from_ref(&s));
     snapshots.push(view_graph.serialize(SerdeFormat::Json));
 
+    let original_name = view_graph.graph.by_id(&primary_id).unwrap().name.clone();
+    let s = step(
+        &mut view_graph,
+        Intent::RenameNode {
+            node_id: primary_id,
+            to: format!("{original_name}-renamed"),
+        },
+    );
+    stack.push_current(std::slice::from_ref(&s));
+    snapshots.push(view_graph.serialize(SerdeFormat::Json));
+
+    // Spawn a fresh node so AddNode's forward path is exercised
+    // explicitly (RemoveNode's revert covers it transitively, but the
+    // direct apply_step→revert_step roundtrip also matters).
+    let added_node = scenarium::graph::Node {
+        id: scenarium::graph::NodeId::unique(),
+        func_id: scenarium::function::FuncId::unique(),
+        name: "added".into(),
+        behavior: NodeBehavior::AsFunction,
+        inputs: Vec::new(),
+        events: Vec::new(),
+    };
+    let added_view = ViewNode {
+        id: added_node.id,
+        pos: egui::Pos2::new(7.5, -2.5),
+    };
+    let s = step(
+        &mut view_graph,
+        Intent::AddNode {
+            view_node: added_view,
+            node: added_node,
+        },
+    );
+    stack.push_current(std::slice::from_ref(&s));
+    snapshots.push(view_graph.serialize(SerdeFormat::Json));
+
     let moved_before = view_graph.view_nodes.by_key(&primary_id).unwrap().pos;
     let s = step(
         &mut view_graph,

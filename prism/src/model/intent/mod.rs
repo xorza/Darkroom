@@ -459,25 +459,44 @@ pub fn revert_step(step: &UndoStep, view_graph: &mut ViewGraph) {
 /// Whether replaying this step should re-trigger graph computation
 /// (autorun / dirty-tracking). UI-only changes (selection, position,
 /// name, viewport) return false.
+///
+/// Exhaustive on purpose: a new variant *must* declare its computation
+/// effect, instead of silently defaulting to "no effect" via a
+/// wildcard arm.
 pub fn affects_computation(step: &UndoStep) -> bool {
-    matches!(
-        step,
+    match step {
         UndoStep::AddNode { .. }
-            | UndoStep::RemoveNode { .. }
-            | UndoStep::SetInput { .. }
-            | UndoStep::SetCacheBehavior { .. }
-            | UndoStep::SetEventConnection { .. }
-    )
+        | UndoStep::RemoveNode { .. }
+        | UndoStep::SetInput { .. }
+        | UndoStep::SetCacheBehavior { .. }
+        | UndoStep::SetEventConnection { .. } => true,
+        UndoStep::MoveNode { .. }
+        | UndoStep::RenameNode { .. }
+        | UndoStep::SelectNode { .. }
+        | UndoStep::SetViewport { .. } => false,
+    }
 }
 
 /// Identifies "same continuous gesture" for undo coalescing. The undo
 /// stack collapses consecutive steps with the same key into one
 /// entry (keeping the *first* "from" payload). Currently only
 /// viewport changes coalesce.
+///
+/// Exhaustive on purpose: a new variant must explicitly opt out (via
+/// the `None`-returning arm) instead of silently defaulting to "no
+/// coalescing" via a wildcard. Forces the variant author to think
+/// about whether continuous emission of that intent should collapse.
 pub fn gesture_key(step: &UndoStep) -> Option<GestureKey> {
     match step {
         UndoStep::SetViewport { .. } => Some(GestureKey::Viewport),
-        _ => None,
+        UndoStep::AddNode { .. }
+        | UndoStep::RemoveNode { .. }
+        | UndoStep::MoveNode { .. }
+        | UndoStep::RenameNode { .. }
+        | UndoStep::SetInput { .. }
+        | UndoStep::SelectNode { .. }
+        | UndoStep::SetCacheBehavior { .. }
+        | UndoStep::SetEventConnection { .. } => None,
     }
 }
 
