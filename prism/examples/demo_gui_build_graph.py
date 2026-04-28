@@ -119,41 +119,13 @@ def main():
         step(sock, "sum",   b'let s_id = create_node(sum_fn, 320.0, 160.0); s_id', session_id)
         step(sock, "print", b'let p_id = create_node(print_fn, 540.0, 160.0); p_id', session_id)
 
-        # Connections via `apply(#{ ChangeInput: ... })`. The externally-
-        # tagged enum form mirrors `GraphUiAction`'s serde derive: the
-        # variant name is the map key, its payload is the value. Same
-        # works for any other GraphUiAction variant.
+        # Connections via the prelude `connect()` helper. No need to
+        # specify a "before" value — Session captures the previous
+        # binding automatically when the action lands.
         print("wiring connections:")
-        step(
-            sock,
-            "get_a → sum.input[0]",
-            b'apply(#{ ChangeInput: #{'
-            b'   node_id: s_id, input_idx: 0,'
-            b'   before: "None",'
-            b'   after: #{ Bind: #{ target_id: a_id, port_idx: 0 } },'
-            b' }})',
-            session_id,
-        )
-        step(
-            sock,
-            "get_b → sum.input[1]",
-            b'apply(#{ ChangeInput: #{'
-            b'   node_id: s_id, input_idx: 1,'
-            b'   before: "None",'
-            b'   after: #{ Bind: #{ target_id: b_id, port_idx: 0 } },'
-            b' }})',
-            session_id,
-        )
-        step(
-            sock,
-            "sum → print.input[0]",
-            b'apply(#{ ChangeInput: #{'
-            b'   node_id: p_id, input_idx: 0,'
-            b'   before: "None",'
-            b'   after: #{ Bind: #{ target_id: s_id, port_idx: 0 } },'
-            b' }})',
-            session_id,
-        )
+        step(sock, "get_a → sum.input[0]", b"connect(a_id, 0, s_id, 0)", session_id)
+        step(sock, "get_b → sum.input[1]", b"connect(b_id, 0, s_id, 1)", session_id)
+        step(sock, "sum → print.input[0]", b"connect(s_id, 0, p_id, 0)", session_id)
 
         # Bulk action demo: select the sum node and rename it, atomically.
         # `apply_all([...])` ships the whole batch as a single
@@ -163,9 +135,8 @@ def main():
             sock,
             "apply_all",
             b'apply_all(['
-            b'   #{ SelectNode: #{ before: (), after: s_id } },'
-            b'   #{ RenameNode: #{ node_id: s_id,'
-            b'        before: "sum", after: "a + b" } },'
+            b'   #{ SelectNode: #{ to: s_id } },'
+            b'   #{ RenameNode: #{ node_id: s_id, to: "a + b" } },'
             b'])',
             session_id,
         )

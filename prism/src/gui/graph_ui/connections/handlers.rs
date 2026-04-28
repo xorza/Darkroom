@@ -2,7 +2,7 @@
 //! data (input-binding) and event (trigger) connections, plus the
 //! breaker tool's deletion pass.
 //!
-//! Every function here emits `GraphUiAction`s into the gesture
+//! Every function here emits `Intent`s into the gesture
 //! buffer; `ViewGraph` is never mutated directly.
 
 use egui::{Pos2, Response, Sense};
@@ -21,8 +21,8 @@ use crate::gui::graph_ui::nodes::PortInteractCommand;
 use crate::gui::graph_ui::port::{PortKind, PortRef};
 use crate::gui::widgets::HitRegion;
 use crate::input::InputSnapshot;
-use crate::model::EventSubscriberChange;
-use crate::model::graph_ui_action::GraphUiAction;
+
+use crate::model::Intent;
 
 impl GraphUi {
     pub(in crate::gui::graph_ui) fn handle_background_click(
@@ -33,13 +33,8 @@ impl GraphUi {
         self.cancel_gesture();
 
         if ctx.view_graph.selected_node_id.is_some() {
-            let before = ctx.view_graph.selected_node_id;
-            // Emit-action-only: selected_node_id is mutated by
-            // `SelectNode::apply` in commit_actions, not here.
-            output.add_action(GraphUiAction::SelectNode {
-                before,
-                after: None,
-            });
+            // Session captures the previous selection at apply time.
+            output.add_intent(Intent::SelectNode { to: None });
         }
     }
 
@@ -110,8 +105,7 @@ impl GraphUi {
                     disconnect_connection(key, ctx, output);
                 }
                 BrokeItem::Node(node_id) => {
-                    let action = GraphUiAction::remove_node(ctx.view_graph, &node_id);
-                    output.add_action(action);
+                    output.add_intent(Intent::RemoveNode { node_id });
                 }
             }
         }
@@ -162,13 +156,13 @@ impl GraphUi {
         match output_port.kind {
             PortKind::Output => {
                 match build_data_connection_action(ctx.view_graph, input_port, output_port) {
-                    Ok(action) => output.add_action(action),
+                    Ok(action) => output.add_intent(action),
                     Err(err) => output.add_error(err),
                 }
             }
             PortKind::Event => {
                 match build_event_connection_action(ctx.view_graph, input_port, output_port) {
-                    Ok(Some(action)) => output.add_action(action),
+                    Ok(Some(action)) => output.add_intent(action),
                     Ok(None) => {}
                     Err(err) => output.add_error(err),
                 }
@@ -280,7 +274,7 @@ pub(in crate::gui::graph_ui) fn build_data_connection_action(
     view_graph: &crate::model::ViewGraph,
     input_port: PortRef,
     output_port: PortRef,
-) -> Result<GraphUiAction, ConnectionError> {
+) -> Result<Intent, ConnectionError> {
     if input_port.node_id == output_port.node_id {
         return Err(ConnectionError::CycleDetected {
             input_node_id: input_port.node_id,
@@ -296,18 +290,13 @@ pub(in crate::gui::graph_ui) fn build_data_connection_action(
         });
     }
 
-    let input_node = view_graph.graph.by_id(&input_port.node_id).unwrap();
-    let before = input_node.inputs[input_port.port_idx].binding.clone();
-    let after = Binding::Bind(PortAddress {
-        target_id: output_port.node_id,
-        port_idx: output_port.port_idx,
-    });
-
-    Ok(GraphUiAction::ChangeInput {
+    Ok(Intent::SetInput {
         node_id: input_port.node_id,
         input_idx: input_port.port_idx,
-        before,
-        after,
+        to: Binding::Bind(PortAddress {
+            target_id: output_port.node_id,
+            port_idx: output_port.port_idx,
+        }),
     })
 }
 
@@ -320,7 +309,7 @@ pub(in crate::gui::graph_ui) fn build_event_connection_action(
     view_graph: &crate::model::ViewGraph,
     input_port: PortRef,
     output_port: PortRef,
-) -> Result<Option<GraphUiAction>, ConnectionError> {
+) -> Result<Option<Intent>, ConnectionError> {
     assert_eq!(input_port.kind, PortKind::Trigger);
     assert_eq!(output_port.kind, PortKind::Event);
 
@@ -349,11 +338,11 @@ pub(in crate::gui::graph_ui) fn build_event_connection_action(
         return Ok(None);
     }
 
-    Ok(Some(GraphUiAction::ChangeEventConnection {
+    Ok(Some(Intent::SetEventConnection {
         event_node_id: output_port.node_id,
         event_idx: output_port.port_idx,
         subscriber: input_port.node_id,
-        change: EventSubscriberChange::Added,
+        present: true,
     }))
 }
 
@@ -459,16 +448,14 @@ mod tests {
         .unwrap();
 
         match action {
-            GraphUiAction::ChangeInput {
+            Intent::SetInput {
                 node_id,
                 input_idx,
-                before,
-                after,
+                to,
             } => {
                 assert_eq!(node_id, a_id);
                 assert_eq!(input_idx, 0);
-                assert!(matches!(before, Binding::None));
-                match after {
+                match to {
                     Binding::Bind(addr) => {
                         assert_eq!(addr.target_id, b_id);
                         assert_eq!(addr.port_idx, 0);
@@ -476,7 +463,7 @@ mod tests {
                     _ => panic!("expected Binding::Bind"),
                 }
             }
-            other => panic!("expected ChangeInput, got {other:?}"),
+            other => panic!("expected SetInput, got {other:?}"),
         }
     }
 
@@ -495,7 +482,7 @@ mod tests {
         )
         .unwrap();
 
-        action.apply(&mut vg);
+        crate::model::intent::apply(&action, &mut vg);
 
         let a_input = &vg.graph.by_id(&a_id).unwrap().inputs[0];
         match &a_input.binding {
@@ -559,18 +546,18 @@ mod tests {
         .unwrap();
 
         match action {
-            GraphUiAction::ChangeEventConnection {
+            Intent::SetEventConnection {
                 event_node_id,
                 event_idx,
                 subscriber,
-                change,
+                present,
             } => {
                 assert_eq!(event_node_id, a_id);
                 assert_eq!(event_idx, 0);
                 assert_eq!(subscriber, b_id);
-                assert_eq!(change, EventSubscriberChange::Added);
+                assert!(present);
             }
-            other => panic!("expected ChangeEventConnection, got {other:?}"),
+            other => panic!("expected SetEventConnection, got {other:?}"),
         }
     }
 

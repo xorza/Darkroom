@@ -16,7 +16,7 @@ use crate::gui::graph_ui::{GraphUi, ViewButtonAction};
 use crate::gui::widgets::{Button, Frame, Layout, PositionedUi};
 use crate::input::InputSnapshot;
 use crate::model;
-use crate::model::graph_ui_action::GraphUiAction;
+use crate::model::Intent;
 
 impl GraphUi {
     /// Top-left bar: fit-all / view-selected / reset-view.
@@ -175,7 +175,7 @@ impl GraphUi {
                     pos: graph_pos.to_pos2(),
                 };
 
-                output.add_action(GraphUiAction::AddNode { view_node, node });
+                output.add_intent(Intent::AddNode { view_node, node });
             }
             NewNodeSelection::ConstBind => {
                 self.create_const_binding(ctx, output);
@@ -201,18 +201,16 @@ impl GraphUi {
         };
         let func_input =
             &ctx.func_lib.by_id(&input_node.func_id).unwrap().inputs[input_port.port_idx];
-        let before = input_node.inputs[input_port.port_idx].binding.clone();
-        let after: Binding = func_input
+        let to: Binding = func_input
             .default_value
             .clone()
             .unwrap_or_else(|| StaticValue::from(&func_input.data_type))
             .into();
 
-        output.add_action(GraphUiAction::ChangeInput {
+        output.add_intent(Intent::SetInput {
             node_id: input_port.node_id,
             input_idx: input_port.port_idx,
-            before,
-            after,
+            to,
         });
     }
 }

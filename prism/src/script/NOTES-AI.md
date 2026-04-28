@@ -74,11 +74,14 @@ CLI flags ──► ScriptConfig
   capped at `MAX_SESSIONS`. Lets clients hold variables across requests
   without us tracking sockets.
 
-- **Apply(Vec<GraphUiAction>) as the unification primitive.** Scripts
-  and the GUI both push the same enum onto Session. `commit_action_slice`
-  is the only mutation site; it doesn't know or care who emitted the
-  action. New `GraphUiAction` variants are scriptable for free
-  (deserialize via `apply()`).
+- **Apply(Vec<Intent>) as the unification primitive.** Scripts and the
+  GUI both push the same enum onto Session. `commit_action_slice` is the
+  only mutation site; it doesn't know or care who emitted the intent.
+  New `Intent` variants are scriptable for free (deserialize via
+  `apply()`). Each intent specifies *what to change*; Session captures
+  the previous state at apply time and stores it as a `Snapshot` on the
+  undo stack — callers never have to look up "before" values
+  themselves.
 
 - **Notify as `Arc<dyn Fn()>`.** The script crate doesn't import
   `UiHost` or any frontend type. Session passes
@@ -86,12 +89,13 @@ CLI flags ──► ScriptConfig
   it. Tests pass `Arc::new(|| {})`.
 
 - **Generic `apply` + thin host helpers.** The `apply` / `apply_all`
-  Rhai functions deserialize any `GraphUiAction` via its Serialize
-  derive. Helpers for actions whose payload only the host can build
-  (currently just `make_add_node`, since `From<&Func> for Node` lives
-  in scenarium and depends on FuncLib) live in Rust; everything else
-  lives in `prelude.rhai` as pure script. The split is "Rust helpers
-  return action *data*; Rhai helpers compose action *flows*."
+  Rhai functions deserialize any `Intent` via its Serialize derive.
+  Helpers for actions whose payload only the host can build (currently
+  just `host::make_add_node`, since `From<&Func> for Node` lives in
+  scenarium and depends on FuncLib) live in Rust under a `host`
+  namespace module; everything else lives in `prelude.rhai` as pure
+  script. The split is "Rust helpers return action *data*; Rhai helpers
+  compose action *flows*."
 
 - **Sandbox-by-default Rhai + resource caps.** No filesystem / process
   / network access. Caps on operations, string/array/map size, scope
@@ -137,10 +141,10 @@ channel, watch the `CancellationToken`), construct it in
 - `SessionInbound::Print` and `SessionInbound::Apply` are unrelated
   side-effect kinds sharing one channel. A second channel for status
   logs would clarify, but adds plumbing for no concrete benefit yet.
-- `apply()` exposes every `GraphUiAction` variant — including UI-only
-  ones (`SelectNode`, `MoveNode`, `ChangeZoomPan`). Soft fence is
-  what helpers we expose; if stricter is wanted, split the enum into
-  `GraphMutation` (script-allowed) and `UiState` (GUI-only).
+- `apply()` exposes every `Intent` variant — including UI-only ones
+  (`SelectNode`, `MoveNode`, `SetViewport`). Soft fence is what helpers
+  we expose; if stricter is wanted, split the enum into `GraphMutation`
+  (script-allowed) and `UiState` (GUI-only).
 - The crate could be extracted: only `model::ViewNode` and
-  `model::graph_ui_action::GraphUiAction` are pulled from prism. YAGNI
-  until there's a second consumer.
+  `model::Intent` are pulled from prism. YAGNI until there's a second
+  consumer.

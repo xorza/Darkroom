@@ -88,7 +88,7 @@ fn drain_inbound_apply_node_added_inserts_node_and_marks_dirty() {
     let node_id = node.id;
     let view_node = ViewNode { id: node_id, pos };
     script_tx
-        .send(SessionInbound::Apply(vec![GraphUiAction::AddNode {
+        .send(SessionInbound::Apply(vec![Intent::AddNode {
             view_node,
             node,
         }]))
@@ -113,10 +113,7 @@ fn apply_reports_when_action_affects_computation() {
     let mut session = test_session();
 
     // SelectNode is a UI-only action — should NOT affect computation.
-    let affects = session.apply(&[GraphUiAction::SelectNode {
-        before: None,
-        after: None,
-    }]);
+    let affects = session.apply(&[Intent::SelectNode { to: None }]);
     assert!(!affects);
 
     // MoveNode is also UI-only.
@@ -125,10 +122,9 @@ fn apply_reports_when_action_affects_computation() {
         id: node_id,
         pos: Pos2::ZERO,
     });
-    let affects = session.apply(&[GraphUiAction::MoveNode {
+    let affects = session.apply(&[Intent::MoveNode {
         node_id,
-        before: Pos2::ZERO,
-        after: Pos2::new(1.0, 2.0),
+        to: Pos2::new(1.0, 2.0),
     }]);
     assert!(!affects);
     assert_eq!(

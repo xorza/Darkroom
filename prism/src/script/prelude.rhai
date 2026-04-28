@@ -1,10 +1,12 @@
 // Built-in Rhai helpers loaded into every prism scripting engine.
 //
 // These wrap the generic `apply` / `apply_all` mutation primitives
-// (and a few narrowly-scoped Rust helpers like `make_add_node`) into
-// ergonomic constructors. Adding a new helper here is one Rhai
-// function — no Rust changes needed unless the action requires data
-// only the host has (FuncLib lookups, graph walks).
+// (and a few narrowly-scoped Rust helpers like `host::make_add_node`)
+// into ergonomic constructors. Every helper specifies *intent only* —
+// the previous state is captured by Session at apply time, so callers
+// never have to pass a "before" value. Adding a new helper here is
+// one Rhai function unless the action requires data only the host has
+// (FuncLib lookups, graph walks).
 //
 // Loaded as a global module by `script::build_engine`, so every
 // function defined here is callable from any user script.
@@ -21,47 +23,43 @@ fn create_node(func_id, x, y) {
     action.AddNode.view_node.id
 }
 
+// Remove `node_id` from the graph. Session walks the graph at apply
+// time to capture every reference into the doomed node so undo can
+// fully restore it.
+fn delete_node(node_id) {
+    apply(#{ RemoveNode: #{ node_id: node_id } });
+}
+
 // Wire `from_node`'s output port `from_port` into `to_node`'s input
-// port `to_port`. Pure-script helper: no Rust counterpart needed.
+// port `to_port`.
 fn connect(from_node, from_port, to_node, to_port) {
-    apply(#{ ChangeInput: #{
+    apply(#{ SetInput: #{
         node_id: to_node,
         input_idx: to_port,
-        before: "None",
-        after: #{ Bind: #{ target_id: from_node, port_idx: from_port } },
+        to: #{ Bind: #{ target_id: from_node, port_idx: from_port } },
     }});
 }
 
 // Drop the binding on `to_node`'s input port `to_port`.
-fn disconnect(to_node, to_port, prev_from_node, prev_from_port) {
-    apply(#{ ChangeInput: #{
+fn disconnect(to_node, to_port) {
+    apply(#{ SetInput: #{
         node_id: to_node,
         input_idx: to_port,
-        before: #{ Bind: #{ target_id: prev_from_node, port_idx: prev_from_port } },
-        after: "None",
+        to: "None",
     }});
 }
 
-// Move `node_id` from `(bx, by)` to `(ax, ay)`. Caller supplies the
-// previous position so undo round-trips cleanly.
-fn move_node(node_id, bx, by, ax, ay) {
-    apply(#{ MoveNode: #{
-        node_id: node_id,
-        before: #{ x: bx, y: by },
-        after:  #{ x: ax, y: ay },
-    }});
+// Move `node_id` to view-space `(x, y)`.
+fn move_node(node_id, x, y) {
+    apply(#{ MoveNode: #{ node_id: node_id, to: #{ x: x, y: y } } });
 }
 
 // Highlight `node_id` (or `()` to clear).
 fn select_node(node_id) {
-    apply(#{ SelectNode: #{ before: (), after: node_id } });
+    apply(#{ SelectNode: #{ to: node_id } });
 }
 
-// Rename `node_id` from `before_name` to `after_name`.
-fn rename_node(node_id, before_name, after_name) {
-    apply(#{ RenameNode: #{
-        node_id: node_id,
-        before: before_name,
-        after: after_name,
-    }});
+// Rename `node_id`.
+fn rename_node(node_id, name) {
+    apply(#{ RenameNode: #{ node_id: node_id, to: name } });
 }

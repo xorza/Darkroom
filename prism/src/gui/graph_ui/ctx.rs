@@ -4,7 +4,7 @@ use scenarium::prelude::{ExecutionStats, FuncLib};
 /// Read-only bundle of frame-level dependencies for the view layer.
 ///
 /// Every field is borrowed immutably: graph mutations go through
-/// `GraphUiAction::apply` in `Session::commit_actions`, and the
+/// `Intent::apply` in `Session::commit_actions`, and the
 /// `ArgumentValuesCache` lives on the renderer (`GraphUi`) — not in
 /// this context. `exec_info_index` is built once per frame from
 /// `execution_stats` so per-node renderers don't re-scan the lists.

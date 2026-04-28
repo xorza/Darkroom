@@ -106,7 +106,7 @@ fn create_node_known_id_enqueues_node_added_action() {
     let script = format!(r#"create_node("{alpha_id}", 12.5, -3.0)"#);
     let returned_id: String = engine.eval(&script).unwrap();
 
-    // The executor builds a fully-formed GraphUiAction::AddNode —
+    // The executor builds a fully-formed Intent::AddNode —
     // identical to what the GUI emits — and ships it via Apply. Session
     // applies it through the same commit path with no script-aware glue.
     let action = rx.try_recv().expect("Apply action queued");
@@ -116,7 +116,7 @@ fn create_node_known_id_enqueues_node_added_action() {
     };
     assert_eq!(actions.len(), 1);
     match &actions[0] {
-        GraphUiAction::AddNode { view_node, node } => {
+        Intent::AddNode { view_node, node } => {
             assert_eq!(node.func_id, alpha_id);
             assert_eq!(node.name, "alpha");
             assert_eq!(view_node.id, node.id);
@@ -133,14 +133,14 @@ fn apply_decodes_arbitrary_graph_ui_action_via_serde() {
     // SelectNode has the simplest shape (two `Option<NodeId>`s) and
     // exercises the generic `serde::Deserialize` path that lights up
     // every other variant for free. If this works, a script can drive
-    // any current or future GraphUiAction through `apply` without
+    // any current or future Intent through `apply` without
     // touching the executor.
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
     let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
     engine
-        .eval::<()>(r#"apply(#{ SelectNode: #{ before: (), after: () } })"#)
+        .eval::<()>(r#"apply(#{ SelectNode: #{ to: () } })"#)
         .unwrap();
 
     let inbound = rx.try_recv().expect("Apply queued");
@@ -150,9 +150,8 @@ fn apply_decodes_arbitrary_graph_ui_action_via_serde() {
     };
     assert_eq!(actions.len(), 1);
     match &actions[0] {
-        GraphUiAction::SelectNode { before, after } => {
-            assert!(before.is_none());
-            assert!(after.is_none());
+        Intent::SelectNode { to } => {
+            assert!(to.is_none());
         }
         other => panic!("expected SelectNode, got {other:?}"),
     }
@@ -167,10 +166,7 @@ fn apply_returns_rhai_error_on_unknown_variant() {
     let err = engine
         .eval::<()>(r#"apply(#{ NotARealVariant: #{} })"#)
         .expect_err("unknown variant should error");
-    assert!(
-        err.to_string().contains("decode GraphUiAction"),
-        "got: {err}"
-    );
+    assert!(err.to_string().contains("decode Intent"), "got: {err}");
     assert!(rx.try_recv().is_err());
 }
 
@@ -186,8 +182,8 @@ fn apply_all_batches_actions_into_one_inbound() {
     engine
         .eval::<()>(
             r#"apply_all([
-                #{ SelectNode: #{ before: (), after: () } },
-                #{ SelectNode: #{ before: (), after: () } },
+                #{ SelectNode: #{ to: () } },
+                #{ SelectNode: #{ to: () } },
             ])"#,
         )
         .unwrap();

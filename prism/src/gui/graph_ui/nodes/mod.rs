@@ -13,7 +13,7 @@ use crate::gui::graph_ui::layout::{GraphLayout, NodeGalleys, NodeLayout};
 use crate::gui::graph_ui::nodes::const_bind::ConstBindUi;
 use crate::gui::graph_ui::port::{PortInfo, PortKind, PortRef};
 use crate::gui::widgets::{Button, HitRegion};
-use crate::model::graph_ui_action::GraphUiAction;
+use crate::model::Intent;
 use crate::model::node_execution::NodeExecutionInfo;
 use common::BoolExt;
 use egui::epaint::CornerRadiusF32;
@@ -153,10 +153,7 @@ impl NodeUi {
             if (events.started || response.clicked())
                 && ctx.view_graph.selected_node_id != Some(node_id)
             {
-                output.add_action(GraphUiAction::SelectNode {
-                    before: ctx.view_graph.selected_node_id,
-                    after: Some(node_id),
-                });
+                output.add_intent(Intent::SelectNode { to: Some(node_id) });
             }
 
             if events.started {
@@ -170,10 +167,9 @@ impl NodeUi {
                     drag.offset += response.drag_delta() / gui.scale();
                 }
                 if events.stopped {
-                    output.add_action(GraphUiAction::MoveNode {
+                    output.add_intent(Intent::MoveNode {
                         node_id,
-                        before: drag.start_pos,
-                        after: drag.committed_pos(),
+                        to: drag.committed_pos(),
                     });
                     // Keep offset alive for this frame's render; the
                     // cancel happens at the top of next frame's call.
@@ -223,12 +219,12 @@ impl NodeUi {
             }
 
             if render_remove_btn(gui, &layout, node_id) {
-                output.add_action(GraphUiAction::remove_node(ctx.view_graph, &node_id));
+                output.add_intent(Intent::RemoveNode { node_id });
             }
 
             render_status_hints(gui, &layout, node_id, node.behavior, func);
             if let Some(action) = render_cache_btn(gui, &layout, node) {
-                output.add_action(action);
+                output.add_intent(action);
             }
 
             let missing_inputs = get_missing_input_ports(ctx.execution_stats, node_id);
@@ -343,7 +339,7 @@ fn render_body(
 /// Returns the `ToggleCache` action when the cache button was clicked
 /// this frame. The caller (`render_nodes`) is the single emit site; this
 /// keeps render-pass code from poking `FrameOutput` mid-paint.
-fn render_cache_btn(gui: &mut Gui<'_>, layout: &NodeLayout, node: &Node) -> Option<GraphUiAction> {
+fn render_cache_btn(gui: &mut Gui<'_>, layout: &NodeLayout, node: &Node) -> Option<Intent> {
     if !layout.has_cache_btn {
         return None;
     }
@@ -356,13 +352,11 @@ fn render_cache_btn(gui: &mut Gui<'_>, layout: &NodeLayout, node: &Node) -> Opti
         .show(gui);
 
     if response.clicked() {
-        let before = node.behavior;
-        let mut after = before;
-        after.toggle();
-        Some(GraphUiAction::ToggleCache {
+        let mut to = node.behavior;
+        to.toggle();
+        Some(Intent::SetCacheBehavior {
             node_id: node.id,
-            before,
-            after,
+            to,
         })
     } else {
         None

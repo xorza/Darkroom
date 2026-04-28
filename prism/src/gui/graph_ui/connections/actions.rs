@@ -11,8 +11,8 @@ use crate::gui::graph_ui::ctx::GraphContext;
 use crate::gui::graph_ui::frame_output::FrameOutput;
 use crate::gui::graph_ui::nodes::PortInteractCommand;
 use crate::gui::graph_ui::port::{PortInfo, PortKind, PortRef};
-use crate::model::EventSubscriberChange;
-use crate::model::graph_ui_action::GraphUiAction;
+
+use crate::model::Intent;
 
 use super::types::{ConnectionDrag, ConnectionDragUpdate, ConnectionKey};
 
@@ -67,15 +67,13 @@ pub(crate) fn disconnect_connection(
             input_idx,
         } => {
             let node = ctx.view_graph.graph.by_id(&input_node_id).unwrap();
-            let before = node.inputs[input_idx].binding.clone();
-            if matches!(before, Binding::None) {
+            if matches!(node.inputs[input_idx].binding, Binding::None) {
                 return;
             }
-            output.add_action(GraphUiAction::ChangeInput {
+            output.add_intent(Intent::SetInput {
                 node_id: input_node_id,
                 input_idx,
-                before,
-                after: Binding::None,
+                to: Binding::None,
             });
         }
         ConnectionKey::Event {
@@ -90,11 +88,11 @@ pub(crate) fn disconnect_connection(
             {
                 return;
             }
-            output.add_action(GraphUiAction::ChangeEventConnection {
+            output.add_intent(Intent::SetEventConnection {
                 event_node_id,
                 event_idx,
                 subscriber: trigger_node_id,
-                change: EventSubscriberChange::Removed,
+                present: false,
             });
         }
     }
@@ -327,14 +325,14 @@ mod tests {
             );
         });
 
-        let actions = buf.actions();
+        let actions = buf.intents();
         assert_eq!(actions.len(), 1, "expected exactly one emitted action");
         match &actions[0] {
-            GraphUiAction::ChangeInput { after, node_id, .. } => {
+            Intent::SetInput { to, node_id, .. } => {
                 assert_eq!(*node_id, target_id);
-                assert!(matches!(after, Binding::None));
+                assert!(matches!(to, Binding::None));
             }
-            other => panic!("expected ChangeInput, got {other:?}"),
+            other => panic!("expected SetInput, got {other:?}"),
         }
     }
 
@@ -360,7 +358,7 @@ mod tests {
                 &mut buf,
             );
         });
-        assert!(buf.actions().is_empty());
+        assert!(buf.intents().is_empty());
     }
 
     #[test]
@@ -394,20 +392,20 @@ mod tests {
             );
         });
 
-        let actions = buf.actions();
+        let actions = buf.intents();
         assert_eq!(actions.len(), 1);
         match &actions[0] {
-            GraphUiAction::ChangeEventConnection {
+            Intent::SetEventConnection {
                 event_node_id,
                 subscriber,
-                change,
+                present,
                 ..
             } => {
                 assert_eq!(*event_node_id, emitter_id);
                 assert_eq!(*subscriber, subscriber_id);
-                assert_eq!(*change, EventSubscriberChange::Removed);
+                assert!(!*present);
             }
-            other => panic!("expected ChangeEventConnection, got {other:?}"),
+            other => panic!("expected SetEventConnection, got {other:?}"),
         }
     }
 
@@ -440,6 +438,6 @@ mod tests {
                 &mut buf,
             );
         });
-        assert!(buf.actions().is_empty());
+        assert!(buf.intents().is_empty());
     }
 }

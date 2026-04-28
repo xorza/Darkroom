@@ -13,8 +13,8 @@ use crate::gui::widgets::{
     Frame, HitRegion, Image as ImageWidget, Label, PositionedUi, ScrollArea, Separator, Space,
     TextEdit, Texture,
 };
+use crate::model::Intent;
 use crate::model::argument_values_cache::{ArgumentValuesCache, CachedTexture, NodeCache};
-use crate::model::graph_ui_action::GraphUiAction;
 use crate::model::node_execution::NodeExecutionInfo;
 
 const PANEL_WIDTH: f32 = 250.0;
@@ -134,12 +134,7 @@ fn show_name_editor(
     });
 
     if name != original_name {
-        // Mutation applied via RenameNode::apply in commit_actions.
-        output.add_action(GraphUiAction::RenameNode {
-            node_id,
-            before: original_name.to_string(),
-            after: name,
-        });
+        output.add_intent(Intent::RenameNode { node_id, to: name });
     }
 }
 

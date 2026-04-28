@@ -13,7 +13,7 @@ use crate::gui::graph_ui::layout::NodeLayout;
 use crate::gui::graph_ui::port::PortKind;
 use crate::gui::style::DragValueStyle;
 use crate::gui::value_editor::StaticValueEditor;
-use crate::model::graph_ui_action::GraphUiAction;
+use crate::model::Intent;
 use common::key_index_vec::{CompactInsert, KeyIndexVec};
 
 // === ConstBindUi ===
@@ -129,11 +129,10 @@ impl<'a> ConstBindFrame<'a> {
 
         // Double-click to clear binding
         if bezier_response.double_clicked_by(PointerButton::Primary) {
-            output.add_action(GraphUiAction::ChangeInput {
+            output.add_intent(Intent::SetInput {
                 node_id: ctx.node_id,
                 input_idx: ctx.input_idx,
-                before: Binding::Const(current_value.clone()),
-                after: Binding::None,
+                to: Binding::None,
             });
             return true;
         }
@@ -166,11 +165,10 @@ impl<'a> ConstBindFrame<'a> {
 
         if draft != *current_value {
             currently_hovered = true;
-            output.add_action(GraphUiAction::ChangeInput {
+            output.add_intent(Intent::SetInput {
                 node_id: ctx.node_id,
                 input_idx: ctx.input_idx,
-                before: Binding::Const(current_value.clone()),
-                after: Binding::Const(draft),
+                to: Binding::Const(draft),
             });
         }
 

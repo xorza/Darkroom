@@ -20,7 +20,8 @@ use crate::config::Config;
 use crate::gui::graph_ui::ctx::GraphContext;
 use crate::gui::graph_ui::frame_output::{EditorCommand, FrameOutput, RunCommand};
 use crate::model::argument_values_cache::{CacheEvent, NodeCache, RenderEvent, invalidated_nodes};
-use crate::model::{ActionStack, ViewGraph, graph_ui_action::GraphUiAction};
+use crate::model::intent::{self, UndoStep};
+use crate::model::{ActionStack, Intent, ViewGraph};
 use crate::script::{self, ScriptExecutor, SessionInbound};
 use crate::ui_host::UiHost;
 
@@ -196,7 +197,7 @@ impl Session {
 
     /// Frame-level dependency bundle for the view layer. Fully
     /// shared-borrowed: every mutation goes through
-    /// `GraphUiAction::apply` in `commit_actions`. The
+    /// `Intent::apply` in `commit_actions`. The
     /// `ArgumentValuesCache` lives on the renderer; cache updates
     /// flow through [`Session::take_render_events`].
     pub fn graph_context(&self) -> GraphContext<'_> {
@@ -245,16 +246,17 @@ impl Session {
         }
     }
 
-    /// Applies the emitted actions to `view_graph` in order.
-    /// Returns `true` if any applied action affects computation.
-    ///
-    /// Does *not* record undo history — that's the job of
-    /// [`Session::commit_actions`].
-    pub fn apply(&mut self, actions: &[GraphUiAction]) -> bool {
+    /// Apply intents to `view_graph` in order. Returns `true` if any
+    /// intent affects computation. Does *not* record undo history —
+    /// that's the job of [`Session::commit_actions`]. Currently used
+    /// only by tests; production code commits through
+    /// [`Session::commit_action_slice`].
+    #[cfg(test)]
+    pub fn apply(&mut self, intents: &[Intent]) -> bool {
         let mut graph_updated = false;
-        for action in actions {
-            action.apply(&mut self.view_graph);
-            graph_updated |= action.affects_computation();
+        for intent in intents {
+            crate::model::intent::apply(intent, &mut self.view_graph);
+            graph_updated |= intent.affects_computation();
         }
         graph_updated
     }
@@ -537,25 +539,38 @@ impl Session {
     }
 
     fn commit_actions(&mut self, output: &mut FrameOutput) -> bool {
-        self.commit_action_slice(output.actions())
+        self.commit_action_slice(output.intents())
     }
 
-    /// Apply + record a batch of actions, regardless of source (GUI
+    /// Apply + record a batch of intents, regardless of source (GUI
     /// frame output, script side-effect, future RPC). The renderer
     /// never mutates `ViewGraph` directly (`GraphContext` holds an
-    /// `&ViewGraph`), so this is the one site that writes each action
-    /// exactly once. Cross-frame coalescing for continuous gestures
-    /// (zoom/pan) happens at the undo-stack level via
-    /// `GraphUiAction::gesture_key` — this routine has no pending
+    /// `&ViewGraph`), so this is the one site that writes each intent
+    /// exactly once.
+    ///
+    /// For each intent we capture-then-apply, building an `UndoStep`.
+    /// The whole batch lands as one undo entry. Cross-frame coalescing
+    /// for continuous gestures (viewport) happens inside the undo
+    /// stack via `Intent::gesture_key` — this routine has no pending
     /// state, which is what makes it safe under egui's multi-pass
     /// rendering and equally safe when called from `drain_inbound`.
-    fn commit_action_slice(&mut self, actions: &[GraphUiAction]) -> bool {
-        if actions.is_empty() {
+    fn commit_action_slice(&mut self, intents: &[Intent]) -> bool {
+        if intents.is_empty() {
             return false;
         }
-        let graph_updated = self.apply(actions);
+        let mut graph_updated = false;
+        let mut steps = Vec::with_capacity(intents.len());
+        for intent in intents {
+            let snapshot = intent::capture(intent, &self.view_graph);
+            intent::apply(intent, &mut self.view_graph);
+            graph_updated |= intent.affects_computation();
+            steps.push(UndoStep {
+                intent: intent.clone(),
+                snapshot,
+            });
+        }
         self.action_stack.clear_redo();
-        self.action_stack.push_current(actions);
+        self.action_stack.push_current(&steps);
         if graph_updated {
             self.refresh_graph();
         }

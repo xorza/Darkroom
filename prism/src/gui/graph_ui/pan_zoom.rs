@@ -16,7 +16,7 @@ use crate::gui::graph_ui::layout::{self, GraphLayout};
 use crate::gui::graph_ui::{GraphUi, MAX_ZOOM, MIN_ZOOM, WHEEL_ZOOM_SPEED};
 use crate::gui::{Gui, ViewParams};
 use crate::input::InputSnapshot;
-use crate::model::graph_ui_action::GraphUiAction;
+use crate::model::Intent;
 
 impl GraphUi {
     #[allow(clippy::too_many_arguments)]
@@ -73,11 +73,9 @@ impl GraphUi {
         if view_graph.scale.ui_equals(new_scale) && view_graph.pan.ui_equals(new_pan) {
             return;
         }
-        output.add_action(GraphUiAction::ChangeZoomPan {
-            before_pan: view_graph.pan,
-            before_scale: view_graph.scale,
-            after_pan: new_pan,
-            after_scale: new_scale,
+        output.add_intent(Intent::SetViewport {
+            pan: new_pan,
+            scale: new_scale,
         });
     }
 }

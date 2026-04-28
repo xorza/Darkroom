@@ -1,6 +1,6 @@
 use scenarium::graph::NodeId;
 
-use crate::{gui::graph_ui::ConnectionError, model::graph_ui_action::GraphUiAction};
+use crate::{gui::graph_ui::ConnectionError, model::Intent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunCommand {
@@ -33,18 +33,18 @@ pub enum AppCommand {
 /// plus side-channel signals consumed by `Session::handle_output`
 /// (errors, run command, editor undo/redo, argument-values request).
 ///
-/// Every action is *immediate* — it lands in `actions` on emission
+/// Every intent is *immediate* — it lands in `intents` on emission
 /// and is applied + recorded at end of frame. Cross-frame coalescing
 /// for continuous gestures (zoom, pan) happens at the undo-stack
-/// level via [`GraphUiAction::gesture_key`]. That split is deliberate:
-/// keeping the action buffer stateless across frames makes it
+/// level via [`Intent::gesture_key`]. That split is deliberate:
+/// keeping the intent buffer stateless across frames makes it
 /// compatible with egui's multi-pass rendering, where the same UI
 /// callback can run more than once per logical frame.
 ///
 /// `AppCommand` is intentionally *not* a field here — see [`AppCommand`].
 #[derive(Debug, Default)]
 pub(crate) struct FrameOutput {
-    actions: Vec<GraphUiAction>,
+    intents: Vec<Intent>,
     errors: Vec<ConnectionError>,
     run_cmd: Option<RunCommand>,
     editor_cmd: Option<EditorCommand>,
@@ -53,19 +53,19 @@ pub(crate) struct FrameOutput {
 
 impl FrameOutput {
     pub fn clear(&mut self) {
-        self.actions.clear();
+        self.intents.clear();
         self.errors.clear();
         self.run_cmd = None;
         self.editor_cmd = None;
         self.request_argument_values = None;
     }
 
-    pub fn actions(&self) -> &[GraphUiAction] {
-        &self.actions
+    pub fn intents(&self) -> &[Intent] {
+        &self.intents
     }
 
-    pub fn add_action(&mut self, action: GraphUiAction) {
-        self.actions.push(action);
+    pub fn add_intent(&mut self, intent: Intent) {
+        self.intents.push(intent);
     }
 
     pub fn add_error(&mut self, error: ConnectionError) {
@@ -107,27 +107,24 @@ mod tests {
     use egui::Pos2;
 
     #[test]
-    fn actions_land_immediately() {
+    fn intents_land_immediately() {
         let mut output = FrameOutput::default();
-        output.add_action(GraphUiAction::MoveNode {
+        output.add_intent(Intent::MoveNode {
             node_id: NodeId::unique(),
-            before: Pos2::ZERO,
-            after: Pos2::new(10.0, 20.0),
+            to: Pos2::new(10.0, 20.0),
         });
-        assert_eq!(output.actions().len(), 1);
+        assert_eq!(output.intents().len(), 1);
     }
 
     #[test]
-    fn clear_empties_action_buffer() {
+    fn clear_empties_intent_buffer() {
         let mut output = FrameOutput::default();
-        output.add_action(GraphUiAction::ChangeZoomPan {
-            before_pan: egui::Vec2::ZERO,
-            before_scale: 1.0,
-            after_pan: egui::Vec2::new(5.0, 5.0),
-            after_scale: 1.2,
+        output.add_intent(Intent::SetViewport {
+            pan: egui::Vec2::new(5.0, 5.0),
+            scale: 1.2,
         });
 
         output.clear();
-        assert!(output.actions().is_empty());
+        assert!(output.intents().is_empty());
     }
 }

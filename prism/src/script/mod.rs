@@ -33,8 +33,8 @@ use rhai::{Array, Dynamic, Engine};
 use scenarium::function::FuncId;
 use scenarium::prelude::FuncLib;
 
+use crate::model::Intent;
 use crate::model::ViewNode;
-use crate::model::graph_ui_action::GraphUiAction;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::{JoinHandle, yield_now};
 use tokio_util::sync::CancellationToken;
@@ -245,7 +245,7 @@ pub enum SessionInbound {
     /// dirty-tracking, same autorun re-execution. Keeps the script→graph
     /// boundary symmetric with the GUI→graph boundary, with no
     /// Session-side per-variant glue. Empty vecs are no-ops.
-    Apply(Vec<GraphUiAction>),
+    Apply(Vec<Intent>),
 }
 
 /// Opaque "wake the consumer" callback fired after every successful
@@ -455,7 +455,7 @@ fn wire_print_hook(engine: &mut Engine, stdout: StdoutBuffer, inbound: InboundSe
     });
 }
 
-/// Decode a `GraphUiAction` from a Rhai `Dynamic` with numeric
+/// Decode a `Intent` from a Rhai `Dynamic` with numeric
 /// coercion. Routes through `serde_json::Value` as the intermediate
 /// because its `Deserializer` impl is lenient about widths — `f64 →
 /// f32`, `i64 → i32`, etc. all narrow silently. Rhai's own
@@ -463,13 +463,13 @@ fn wire_print_hook(engine: &mut Engine, stdout: StdoutBuffer, inbound: InboundSe
 /// safer default but inconvenient when the host type is f32 (e.g.
 /// `egui::Pos2`). One small bridge here keeps the rest of the model
 /// free of `#[serde(with = …)]` annotations.
-fn decode_action(d: &Dynamic) -> Result<GraphUiAction, String> {
+fn decode_action(d: &Dynamic) -> Result<Intent, String> {
     let json = serde_json::to_value(d).map_err(|e| format!("encode to JSON: {e}"))?;
-    serde_json::from_value(json).map_err(|e| format!("decode GraphUiAction: {e}"))
+    serde_json::from_value(json).map_err(|e| format!("decode Intent: {e}"))
 }
 
 /// `apply(action)` / `apply_all(actions)` — the generic mutation
-/// surface. Every `GraphUiAction` variant is reachable through these
+/// surface. Every `Intent` variant is reachable through these
 /// via `serde::Deserialize`; new variants light up automatically with
 /// no per-variant glue. `apply_all` ships everything in a single
 /// `SessionInbound::Apply` so the batch is one undo step.
@@ -488,7 +488,7 @@ fn register_mutations(engine: &mut Engine, inbound: InboundSender) {
     engine.register_fn(
         "apply_all",
         move |actions: Array| -> Result<(), Box<rhai::EvalAltResult>> {
-            let actions: Vec<GraphUiAction> = actions
+            let actions: Vec<Intent> = actions
                 .into_iter()
                 .enumerate()
                 .map(|(i, d)| decode_action(&d).map_err(|e| format!("apply_all[{i}]: {e}")))
@@ -543,7 +543,7 @@ fn register_host_helpers(engine: &mut Engine, func_lib: Arc<FuncLib>) {
                 id: node.id,
                 pos: Pos2::new(x as f32, y as f32),
             };
-            let action = GraphUiAction::AddNode { view_node, node };
+            let action = Intent::AddNode { view_node, node };
             rhai::serde::to_dynamic(&action)
                 .map_err(|e| format!("make_add_node: encode failed: {e}").into())
         },
