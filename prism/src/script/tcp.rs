@@ -398,7 +398,7 @@ async fn write_frame(stream: &mut TcpStream, bytes: &[u8]) -> std::io::Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::script::{ScriptAction, ScriptExecutor, ScriptResult};
+    use crate::script::{ScriptExecutor, ScriptResult, SessionInbound};
     use std::net::Ipv4Addr;
 
     /// Port 0 on the loopback interface — the OS picks a free port.
@@ -411,10 +411,10 @@ mod tests {
     ) -> (
         SocketAddr,
         ScriptExecutor,
-        mpsc::UnboundedReceiver<ScriptAction>,
+        mpsc::UnboundedReceiver<SessionInbound>,
     ) {
         let addr = transport.local_addr().unwrap();
-        let (action_tx, action_rx) = mpsc::unbounded_channel::<ScriptAction>();
+        let (action_tx, action_rx) = mpsc::unbounded_channel::<SessionInbound>();
         let executor = ScriptExecutor::new(
             [Box::new(transport) as Box<dyn ScriptTransport>],
             action_tx,
@@ -451,7 +451,6 @@ mod tests {
         let (addr, _executor, mut action_rx) = spawn_executor_with_transport(t).await;
 
         let mut s = TcpStream::connect(addr).await.unwrap();
-        let local = s.local_addr().unwrap();
         send_request(&mut s, None, b"print(\"hi\")").await;
 
         let reply = parse_reply(&read_reply(&mut s).await);
@@ -463,12 +462,11 @@ mod tests {
         // Status sink: Session gets a tagged Print action.
         let action = tokio::time::timeout(std::time::Duration::from_secs(2), action_rx.recv())
             .await
-            .expect("timed out waiting for ScriptAction::Print")
+            .expect("timed out waiting for SessionInbound::Print")
             .expect("action channel closed");
         match action {
-            ScriptAction::Print { origin, msg } => {
+            SessionInbound::Print { msg } => {
                 assert_eq!(msg, "hi");
-                assert_eq!(origin, local.to_string());
             }
             other => panic!("expected Print, got {other:?}"),
         }

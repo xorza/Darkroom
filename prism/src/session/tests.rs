@@ -13,14 +13,14 @@ impl UiHost for NoopUiHost {
 /// Stub-backed Session for unit tests: no tokio runtime, no
 /// network listener, no config autoload.
 fn test_session() -> Session {
-    test_session_with(FuncLib::default(), unbounded_channel::<ScriptAction>().1)
+    test_session_with(FuncLib::default(), unbounded_channel::<SessionInbound>().1)
 }
 
 /// Like `test_session` but lets the test inject a populated FuncLib
 /// and a script-action receiver so it can drain script side-effects.
 fn test_session_with(
     func_lib: FuncLib,
-    script_action_rx: UnboundedReceiver<ScriptAction>,
+    script_inbound_rx: UnboundedReceiver<SessionInbound>,
 ) -> Session {
     let (worker_tx, worker_rx) = unbounded_channel::<WorkerEvent>();
     Session::from_parts(
@@ -30,7 +30,7 @@ fn test_session_with(
         worker_tx,
         worker_rx,
         None,
-        script_action_rx,
+        script_inbound_rx,
         Arc::new(NoopUiHost),
     )
 }
@@ -72,7 +72,7 @@ fn drain_inbound_apply_node_added_inserts_node_and_marks_dirty() {
     };
     let mut lib = FuncLib::default();
     lib.add(func.clone());
-    let (script_tx, script_rx) = unbounded_channel::<ScriptAction>();
+    let (script_tx, script_rx) = unbounded_channel::<SessionInbound>();
     let mut session = test_session_with(lib, script_rx);
     // Clear the dirty flag set by Session::from_parts so we can
     // observe drain_inbound flipping it back on.
@@ -88,10 +88,10 @@ fn drain_inbound_apply_node_added_inserts_node_and_marks_dirty() {
     let node_id = node.id;
     let view_node = ViewNode { id: node_id, pos };
     script_tx
-        .send(ScriptAction::Apply(GraphUiAction::NodeAdded {
+        .send(SessionInbound::Apply(vec![GraphUiAction::NodeAdded {
             view_node,
             node,
-        }))
+        }]))
         .unwrap();
     session.drain_inbound();
 

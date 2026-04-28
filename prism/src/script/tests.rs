@@ -20,7 +20,7 @@ fn list_funcs_returns_full_func_objects_in_insertion_order() {
     });
 
     let state = Arc::new(Mutex::new(RequestState::default()));
-    let (tx, _rx) = mpsc::unbounded_channel::<ScriptAction>();
+    let (tx, _rx) = mpsc::unbounded_channel::<SessionInbound>();
     let engine = build_engine(state, tx, Arc::new(lib));
 
     // Each entry is a Rhai Map with fields mirroring `Func`. Verify
@@ -47,7 +47,7 @@ fn list_funcs_returns_full_func_objects_in_insertion_order() {
 #[test]
 fn create_node_malformed_id_returns_rhai_error_and_no_action() {
     let state = Arc::new(Mutex::new(RequestState::default()));
-    let (tx, mut rx) = mpsc::unbounded_channel::<ScriptAction>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<SessionInbound>();
     let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
     let err = engine
@@ -60,7 +60,7 @@ fn create_node_malformed_id_returns_rhai_error_and_no_action() {
 #[test]
 fn create_node_unknown_id_returns_rhai_error_and_no_action() {
     let state = Arc::new(Mutex::new(RequestState::default()));
-    let (tx, mut rx) = mpsc::unbounded_channel::<ScriptAction>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<SessionInbound>();
     // Empty FuncLib → any well-formed UUID is "unknown".
     let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
@@ -84,7 +84,7 @@ fn create_node_known_id_enqueues_node_added_action() {
     });
 
     let state = Arc::new(Mutex::new(RequestState::default()));
-    let (tx, mut rx) = mpsc::unbounded_channel::<ScriptAction>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<SessionInbound>();
     let engine = build_engine(state, tx, Arc::new(lib));
 
     let script = format!(r#"create_node("{alpha_id}", 12.5, -3.0)"#);
@@ -94,21 +94,26 @@ fn create_node_known_id_enqueues_node_added_action() {
     // identical to what the GUI emits — and ships it via Apply. Session
     // applies it through the same commit path with no script-aware glue.
     let action = rx.try_recv().expect("Apply action queued");
-    match action {
-        ScriptAction::Apply(GraphUiAction::NodeAdded { view_node, node }) => {
+    let actions = match action {
+        SessionInbound::Apply(actions) => actions,
+        other => panic!("expected Apply, got {other:?}"),
+    };
+    assert_eq!(actions.len(), 1);
+    match &actions[0] {
+        GraphUiAction::NodeAdded { view_node, node } => {
             assert_eq!(node.func_id, alpha_id);
             assert_eq!(node.name, "alpha");
             assert_eq!(view_node.id, node.id);
             assert_eq!(view_node.pos, egui::Pos2::new(12.5, -3.0));
         }
-        other => panic!("expected Apply(NodeAdded), got {other:?}"),
+        other => panic!("expected NodeAdded, got {other:?}"),
     }
 }
 
 #[test]
 fn list_funcs_is_empty_when_func_lib_is_empty() {
     let state = Arc::new(Mutex::new(RequestState::default()));
-    let (tx, _rx) = mpsc::unbounded_channel::<ScriptAction>();
+    let (tx, _rx) = mpsc::unbounded_channel::<SessionInbound>();
     let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
     let result: Array = engine.eval("list_funcs()").unwrap();

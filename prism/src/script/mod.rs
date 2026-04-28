@@ -8,7 +8,7 @@
 //! reply channel.
 //!
 //! Scripts talk back to [`crate::session::Session`] via a separate
-//! `ScriptAction` channel: functions registered on the engine (like
+//! `SessionInbound` channel: functions registered on the engine (like
 //! `prism::print`) push actions; `Session` drains them each frame
 //! and applies them. This mirrors the Worker→Session shape and
 //! keeps the executor task off the main thread.
@@ -227,33 +227,34 @@ pub struct ScriptResult {
     pub error: Option<String>,
 }
 
-/// Side-effect requests from scripts into [`crate::session::Session`].
+/// Inbound signals from the script executor to [`crate::session::Session`].
 /// Each registered script function pushes a variant here; Session drains
-/// the queue every frame and applies them. Kept separate from the
-/// request/reply channel so the executor can complete a script without
-/// round-tripping through Session for every side effect.
+/// the queue every frame. Kept separate from the request/reply channel so
+/// the executor can complete a script without round-tripping through
+/// Session for every side effect.
 #[derive(Debug)]
-pub enum ScriptAction {
-    /// A `print(msg)` call from a script. `origin` identifies the sender
-    /// (e.g. a remote peer addr) so Session can label the status line.
-    Print { origin: String, msg: String },
-    /// A graph mutation issued by a script. Built on the executor side
-    /// (which has `Arc<FuncLib>` and any other inputs the action needs)
-    /// and applied verbatim by Session through the same commit path the
-    /// GUI uses — same undo stack, same dirty-tracking, same autorun
-    /// re-execution. Keeps the script→graph boundary symmetric with the
-    /// GUI→graph boundary, with no Session-side per-variant glue.
-    Apply(GraphUiAction),
+pub enum SessionInbound {
+    /// A `print(msg)` call from a script. Lands on Session's status log.
+    /// Per-peer attribution is the transport's job (TCP traces peer addr
+    /// at the tracing layer); the status bar just sees the message.
+    Print { msg: String },
+    /// A batch of graph mutations issued by a script. Built on the
+    /// executor side (which has `Arc<FuncLib>` and any other inputs the
+    /// actions need) and applied verbatim by Session through the same
+    /// commit path the GUI uses — same undo stack as a single step, same
+    /// dirty-tracking, same autorun re-execution. Keeps the script→graph
+    /// boundary symmetric with the GUI→graph boundary, with no
+    /// Session-side per-variant glue. Empty vecs are no-ops.
+    Apply(Vec<GraphUiAction>),
 }
 
 /// Shared state touched by the `on_print` hook and the executor loop.
-/// Holds the current in-flight request's origin plus its accumulating
-/// stdout buffer. Because the executor runs one script at a time on a
-/// single tokio task, a plain `Mutex` suffices — the hook locks it
-/// briefly inside each `print(...)` call.
+/// Holds the in-flight script's accumulating stdout buffer. Because the
+/// executor runs one script at a time on a single tokio task, a plain
+/// `Mutex` suffices — the hook locks it briefly inside each `print(...)`
+/// call.
 #[derive(Debug, Default)]
 struct RequestState {
-    origin: String,
     stdout: String,
 }
 
@@ -312,7 +313,7 @@ impl ScriptExecutor {
     /// receiver for side-effect requests emitted by script functions.
     pub fn new<I>(
         transports: I,
-        action_tx: mpsc::UnboundedSender<ScriptAction>,
+        action_tx: mpsc::UnboundedSender<SessionInbound>,
         func_lib: Arc<FuncLib>,
     ) -> Self
     where
@@ -352,7 +353,7 @@ impl Drop for ScriptExecutor {
 async fn run_executor(
     mut rx: mpsc::Receiver<ScriptRequest>,
     cancel: CancellationToken,
-    action_tx: mpsc::UnboundedSender<ScriptAction>,
+    action_tx: mpsc::UnboundedSender<SessionInbound>,
     func_lib: Arc<FuncLib>,
 ) {
     let state: Arc<Mutex<RequestState>> = Arc::new(Mutex::new(RequestState::default()));
@@ -374,7 +375,7 @@ async fn run_executor(
 
 fn build_engine(
     state: Arc<Mutex<RequestState>>,
-    action_tx: mpsc::UnboundedSender<ScriptAction>,
+    action_tx: mpsc::UnboundedSender<SessionInbound>,
     func_lib: Arc<FuncLib>,
 ) -> Engine {
     let mut engine = Engine::new();
@@ -395,14 +396,12 @@ fn build_engine(
         let state = state.clone();
         let action_tx = action_tx.clone();
         engine.on_print(move |msg| {
-            let origin = {
+            {
                 let mut s = state.lock().unwrap();
                 s.stdout.push_str(msg);
                 s.stdout.push('\n');
-                s.origin.clone()
-            };
-            let _ = action_tx.send(ScriptAction::Print {
-                origin,
+            }
+            let _ = action_tx.send(SessionInbound::Print {
                 msg: msg.to_string(),
             });
         });
@@ -429,7 +428,7 @@ fn build_engine(
 
     // `create_node(id, x, y)` → build a `GraphUiAction::NodeAdded` on
     // the executor side (we have `Arc<FuncLib>` here, so the lookup is
-    // local) and ship it as `ScriptAction::Apply`. Session feeds it
+    // local) and ship it as `SessionInbound::Apply`. Session feeds it
     // through the same commit path GUI actions take — no script-aware
     // glue on the Session side. `id` is the UUID string exposed on
     // `list_funcs()[i].id`; an unknown or malformed id surfaces
@@ -448,10 +447,10 @@ fn build_engine(
                 id: node.id,
                 pos: Pos2::new(x as f32, y as f32),
             };
-            let _ = action_tx.send(ScriptAction::Apply(GraphUiAction::NodeAdded {
+            let _ = action_tx.send(SessionInbound::Apply(vec![GraphUiAction::NodeAdded {
                 view_node,
                 node,
-            }));
+            }]));
             Ok(())
         },
     );
@@ -504,8 +503,6 @@ fn run_script(
         id: session_id,
         scope,
     } = session_ref;
-
-    state.lock().unwrap().origin = req.origin.clone();
 
     let (result, error) = match engine.eval_with_scope::<Dynamic>(scope, &req.source) {
         Ok(dynamic) => match common::serde_rhai::to_string(&dynamic) {

@@ -20,7 +20,7 @@ use crate::gui::graph_ui::ctx::GraphContext;
 use crate::gui::graph_ui::frame_output::{EditorCommand, FrameOutput, RunCommand};
 use crate::model::argument_values_cache::{CacheEvent, NodeCache, RenderEvent, invalidated_nodes};
 use crate::model::{ActionStack, ViewGraph, graph_ui_action::GraphUiAction};
-use crate::script::{self, ScriptAction, ScriptConfig, ScriptExecutor};
+use crate::script::{self, ScriptConfig, ScriptExecutor, SessionInbound};
 use crate::ui_host::UiHost;
 
 #[cfg(test)]
@@ -74,7 +74,7 @@ pub struct Session {
     worker_rx: UnboundedReceiver<WorkerEvent>,
 
     script_executor: Option<ScriptExecutor>,
-    script_action_rx: UnboundedReceiver<ScriptAction>,
+    script_inbound_rx: UnboundedReceiver<SessionInbound>,
 
     ui_host: Arc<dyn UiHost>,
 }
@@ -100,7 +100,7 @@ impl Session {
         func_lib.merge(ImageFuncLib::default());
         let func_lib = Arc::new(func_lib);
 
-        let (script_action_tx, script_action_rx) = unbounded_channel::<ScriptAction>();
+        let (script_inbound_tx, script_inbound_rx) = unbounded_channel::<SessionInbound>();
         let mut transports = Vec::new();
         for result in script::build_transports(&script_config) {
             match result {
@@ -117,7 +117,7 @@ impl Session {
                 }
             }
         }
-        let script_executor = ScriptExecutor::new(transports, script_action_tx, func_lib.clone());
+        let script_executor = ScriptExecutor::new(transports, script_inbound_tx, func_lib.clone());
 
         let mut result = Self::from_parts(
             func_lib,
@@ -126,7 +126,7 @@ impl Session {
             worker_tx,
             worker_rx,
             Some(script_executor),
-            script_action_rx,
+            script_inbound_rx,
             ui_host,
         );
 
@@ -148,7 +148,7 @@ impl Session {
         worker_tx: UnboundedSender<WorkerEvent>,
         worker_rx: UnboundedReceiver<WorkerEvent>,
         script_executor: Option<ScriptExecutor>,
-        script_action_rx: UnboundedReceiver<ScriptAction>,
+        script_inbound_rx: UnboundedReceiver<SessionInbound>,
         ui_host: Arc<dyn UiHost>,
     ) -> Self {
         Self {
@@ -163,7 +163,7 @@ impl Session {
             worker,
             worker_tx,
             worker_rx,
-            script_action_rx,
+            script_inbound_rx,
             ui_host,
             script_executor,
         }
@@ -383,13 +383,13 @@ impl Session {
             }
         }
 
-        while let Ok(action) = self.script_action_rx.try_recv() {
-            match action {
-                ScriptAction::Print { origin, msg } => {
-                    self.add_status(format!("remote {origin}: {msg}"));
+        while let Ok(inbound) = self.script_inbound_rx.try_recv() {
+            match inbound {
+                SessionInbound::Print { msg } => {
+                    self.add_status(format!("script: {msg}"));
                 }
-                ScriptAction::Apply(action) => {
-                    self.graph_dirty |= self.commit_action_slice(std::slice::from_ref(&action));
+                SessionInbound::Apply(actions) => {
+                    self.graph_dirty |= self.commit_action_slice(&actions);
                 }
             }
         }
