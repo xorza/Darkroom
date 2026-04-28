@@ -517,11 +517,16 @@ fn register_introspection(engine: &mut Engine, func_lib: Arc<FuncLib>) {
 
 /// Narrow native helpers for actions whose payload only the host can
 /// build (e.g. `From<&Func> for Node` lives in scenarium and depends on
-/// `FuncLib`). Keep this surface small: prefer adding script-side
-/// helpers in [`prelude.rhai`] when an action can be expressed via
+/// `FuncLib`). Registered inside a static `host` module so callers
+/// have to use `host::name(...)` — visually marked as internal and
+/// kept off the bare-name surface autocomplete sees first. The
+/// ergonomic wrapper that users *should* reach for lives in
+/// [`prelude.rhai`]. Keep this module small: prefer adding script-side
+/// helpers in `prelude.rhai` when an action can be expressed via
 /// `apply` and primitive args.
 fn register_host_helpers(engine: &mut Engine, func_lib: Arc<FuncLib>) {
-    engine.register_fn(
+    let mut module = rhai::Module::new();
+    module.set_native_fn(
         "make_add_node",
         move |id: &str,
               x: rhai::FLOAT,
@@ -543,6 +548,7 @@ fn register_host_helpers(engine: &mut Engine, func_lib: Arc<FuncLib>) {
                 .map_err(|e| format!("make_add_node: encode failed: {e}").into())
         },
     );
+    engine.register_static_module("host", rhai::Shared::new(module));
 }
 
 fn wire_debug_hook(engine: &mut Engine) {

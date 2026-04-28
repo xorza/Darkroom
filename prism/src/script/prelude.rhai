@@ -11,9 +11,12 @@
 
 // Spawn a new node bound to `func_id` at view-space position `(x, y)`.
 // Returns the new node's id (UUID string) so the caller can chain
-// follow-up actions (connections, selection, …).
+// follow-up actions (connections, selection, …). `host::make_add_node`
+// is a host-internal helper (Func lookup + `From<&Func> for Node`
+// conversion); power users can call it directly to inspect or modify
+// the action map before applying.
 fn create_node(func_id, x, y) {
-    let action = make_add_node(func_id, x, y);
+    let action = host::make_add_node(func_id, x, y);
     apply(action);
     action.AddNode.view_node.id
 }
