@@ -5,7 +5,7 @@
 //!   `Separator`, `ComboBox`, `DragValue`, `FilePicker`, `TextEdit`, `ListItem`)
 //!   return [`egui::Response`].
 //! - **Container** widgets that take a body closure and have a meaningful outer
-//!   response (`Area`, `Frame`, `Panel`, `Expander`, `PositionedUi`) return
+//!   response (`Area`, `Frame`, `Panel`, `Expander`) return
 //!   [`egui::InnerResponse<R>`] (`Expander` uses `Option<R>` for its body since
 //!   it skips it when collapsed).
 //! - **`PopupMenu`** returns `Option<R>` — `None` means the popup wasn't open
@@ -34,7 +34,6 @@ pub mod layout;
 pub mod modal;
 pub mod panel;
 pub mod popup_menu;
-pub mod positioned_ui;
 pub mod scroll_area;
 pub mod separator;
 pub mod space;
@@ -58,7 +57,6 @@ pub use layout::Layout;
 pub use modal::Modal;
 pub use panel::Panel;
 pub use popup_menu::{ListItem, PopupMenu};
-pub use positioned_ui::PositionedUi;
 pub use scroll_area::ScrollArea;
 pub use separator::Separator;
 pub use space::Space;

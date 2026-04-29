@@ -9,8 +9,7 @@ use crate::gui::Gui;
 use crate::gui::graph_ui::ctx::GraphContext;
 use crate::gui::image_utils::to_color_image;
 use crate::gui::widgets::{
-    Frame, HitRegion, Image as ImageWidget, Label, PositionedUi, ScrollArea, Separator, Space,
-    TextEdit, Texture,
+    Frame, HitRegion, Image as ImageWidget, Label, ScrollArea, Separator, Space, TextEdit, Texture,
 };
 use crate::model::Intent;
 use crate::model::argument_values_cache::{ArgumentValuesCache, CachedTexture, NodeCache};
@@ -40,21 +39,17 @@ impl NodeDetailsUi {
 
         let scroll_id = StableId::new("node_details_scroll");
 
-        PositionedUi::new(popup_id, panel_rect.min)
-            .rect(panel_rect)
-            .max_size(panel_rect.size())
-            .show(gui, |gui| {
-                Frame::popup(StableId::new("node_details_frame"), &gui.style.popup)
-                    .inner_margin(gui.style.padding)
-                    .sense(Sense::all())
-                    .show(gui, |gui| {
-                        ScrollArea::vertical(scroll_id).show(gui, |gui| {
-                            show_content(gui, ctx, cache, node_id, output);
-                        });
-                    })
-            })
-            .inner
-            .response
+        gui.scope(popup_id).max_rect(panel_rect).show(|gui| {
+            Frame::popup(StableId::new("node_details_frame"), &gui.style.popup)
+                .inner_margin(gui.style.padding)
+                .sense(Sense::all())
+                .show(gui, |gui| {
+                    ScrollArea::vertical(scroll_id).show(gui, |gui| {
+                        show_content(gui, ctx, cache, node_id, output);
+                    });
+                })
+                .response
+        })
     }
 }
 

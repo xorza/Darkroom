@@ -1,4 +1,4 @@
-use egui::{InnerResponse, Pos2};
+use egui::{Align2, InnerResponse, Pos2};
 
 use crate::common::StableId;
 use crate::gui::Gui;
@@ -22,6 +22,19 @@ impl Area {
 
     pub fn order(mut self, order: egui::Order) -> Self {
         self.inner = self.inner.order(order);
+        self
+    }
+
+    /// Place the area so this `pivot` of its rect lands on the
+    /// `fixed_pos` (or `anchor`). egui handles the multi-pass
+    /// measure-then-shift internally — no caller-side cache needed.
+    pub fn pivot(mut self, pivot: Align2) -> Self {
+        self.inner = self.inner.pivot(pivot);
+        self
+    }
+
+    pub fn movable(mut self, movable: bool) -> Self {
+        self.inner = self.inner.movable(movable);
         self
     }
 

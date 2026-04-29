@@ -2,7 +2,7 @@
 //! bars, the new-node popup, and the const-binding creation path that
 //! the popup can route into.
 
-use egui::{Align2, PointerButton, Pos2, Response, Sense, vec2};
+use egui::{Align2, PointerButton, Pos2, Rect, Response, Sense, vec2};
 use scenarium::data::StaticValue;
 use scenarium::graph::Binding;
 
@@ -12,7 +12,7 @@ use crate::gui::graph_ui::ctx::GraphContext;
 use crate::gui::graph_ui::nodes::new_node::NewNodeSelection;
 use crate::gui::graph_ui::port::PortKind;
 use crate::gui::graph_ui::{GraphUi, ViewButtonAction};
-use crate::gui::widgets::{Button, Frame, Layout, PositionedUi};
+use crate::gui::widgets::{Area, Button, Frame, Layout};
 use crate::input::InputSnapshot;
 use crate::model;
 use crate::model::Intent;
@@ -26,55 +26,52 @@ impl GraphUi {
     ) -> (Response, Option<ViewButtonAction>) {
         let mut action: Option<ViewButtonAction> = None;
 
-        let response = PositionedUi::new(
-            StableId::new("graph_ui_top_buttons"),
-            gui.container_rect().left_top(),
-        )
-        .pivot(Align2::LEFT_TOP)
-        .interactable(false)
-        .show(gui, |gui| {
-            Layout::new().fill_width().apply(gui);
-            let padding = gui.style.padding;
+        let container = gui.container_rect();
+        let rect = Rect::from_min_max(container.left_top(), container.right_bottom());
+        let response = gui
+            .scope(StableId::new("graph_ui_top_buttons"))
+            .max_rect(rect)
+            .show(|gui| {
+                Layout::new().fill_width().apply(gui);
+                let padding = gui.style.padding;
+                Frame::none(StableId::new("top_buttons_frame"))
+                    .sense(Sense::all())
+                    .inner_margin(padding)
+                    .show(gui, |gui| {
+                        gui.horizontal(|gui| {
+                            let btn_size = vec2(20.0, 20.0);
+                            let mono_font = gui.style.mono_font.clone();
 
-            Frame::none(StableId::new("top_buttons_frame"))
-                .sense(Sense::all())
-                .inner_margin(padding)
-                .show(gui, |gui| {
-                    gui.horizontal(|gui| {
-                        let btn_size = vec2(20.0, 20.0);
-                        let mono_font = gui.style.mono_font.clone();
+                            let response = Button::new(StableId::new("fit_all_btn"))
+                                .text("a")
+                                .font(mono_font.clone())
+                                .size(btn_size)
+                                .show(gui);
+                            if response.clicked() {
+                                action = Some(ViewButtonAction::FitAll);
+                            }
 
-                        let response = Button::new(StableId::new("fit_all_btn"))
-                            .text("a")
-                            .font(mono_font.clone())
-                            .size(btn_size)
-                            .show(gui);
-                        if response.clicked() {
-                            action = Some(ViewButtonAction::FitAll);
-                        }
+                            let response = Button::new(StableId::new("view_selected_btn"))
+                                .text("s")
+                                .font(mono_font.clone())
+                                .size(btn_size)
+                                .show(gui);
+                            if response.clicked() {
+                                action = Some(ViewButtonAction::ViewSelected);
+                            }
 
-                        let response = Button::new(StableId::new("view_selected_btn"))
-                            .text("s")
-                            .font(mono_font.clone())
-                            .size(btn_size)
-                            .show(gui);
-                        if response.clicked() {
-                            action = Some(ViewButtonAction::ViewSelected);
-                        }
-
-                        let response = Button::new(StableId::new("reset_view_btn"))
-                            .text("r")
-                            .font(mono_font)
-                            .size(btn_size)
-                            .show(gui);
-                        if response.clicked() {
-                            action = Some(ViewButtonAction::ResetView);
-                        }
-                    });
-                })
-                .response
-        })
-        .inner;
+                            let response = Button::new(StableId::new("reset_view_btn"))
+                                .text("r")
+                                .font(mono_font)
+                                .size(btn_size)
+                                .show(gui);
+                            if response.clicked() {
+                                action = Some(ViewButtonAction::ResetView);
+                            }
+                        });
+                    })
+                    .response
+            });
 
         (response, action)
     }
@@ -88,42 +85,40 @@ impl GraphUi {
         let mut autorun = autorun;
         let mut run_cmd: Option<RunCommand> = None;
 
-        let response = PositionedUi::new(
-            StableId::new("graph_ui_bottom_buttons"),
-            gui.container_rect().left_bottom(),
-        )
-        .pivot(Align2::LEFT_BOTTOM)
-        .interactable(false)
-        .show(gui, |gui| {
-            let padding = gui.style.padding;
+        let response = Area::new(StableId::new("graph_ui_bottom_buttons"))
+            .fixed_pos(gui.container_rect().left_bottom())
+            .pivot(Align2::LEFT_BOTTOM)
+            .movable(false)
+            .show(gui, |gui| {
+                let padding = gui.style.padding;
+                Frame::none(StableId::new("bottom_buttons_frame"))
+                    .sense(Sense::all())
+                    .inner_margin(padding)
+                    .show(gui, |gui| {
+                        gui.horizontal(|gui| {
+                            let response =
+                                Button::new(StableId::new("run_btn")).text("run").show(gui);
+                            if response.clicked() {
+                                run_cmd = Some(RunCommand::RunOnce);
+                            }
 
-            Frame::none(StableId::new("bottom_buttons_frame"))
-                .sense(Sense::all())
-                .inner_margin(padding)
-                .show(gui, |gui| {
-                    gui.horizontal(|gui| {
-                        let response = Button::new(StableId::new("run_btn")).text("run").show(gui);
-                        if response.clicked() {
-                            run_cmd = Some(RunCommand::RunOnce);
-                        }
+                            let response = Button::new(StableId::new("autorun_btn"))
+                                .toggle(&mut autorun)
+                                .text("autorun")
+                                .show(gui);
 
-                        let response = Button::new(StableId::new("autorun_btn"))
-                            .toggle(&mut autorun)
-                            .text("autorun")
-                            .show(gui);
-
-                        if response.clicked() {
-                            run_cmd = Some(if autorun {
-                                RunCommand::StartAutorun
-                            } else {
-                                RunCommand::StopAutorun
-                            });
-                        }
-                    });
-                })
-                .response
-        })
-        .inner;
+                            if response.clicked() {
+                                run_cmd = Some(if autorun {
+                                    RunCommand::StartAutorun
+                                } else {
+                                    RunCommand::StopAutorun
+                                });
+                            }
+                        });
+                    })
+                    .response
+            })
+            .inner;
 
         (response, run_cmd)
     }
