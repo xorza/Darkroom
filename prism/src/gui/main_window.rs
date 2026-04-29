@@ -127,7 +127,7 @@ impl MainWindow {
                 .clicked()
         };
 
-        PopupMenu::new(&file_btn, "menu_file_popup")
+        PopupMenu::new(&file_btn, StableId::new("menu_file_popup"))
             .min_width(menu.popup_min_width)
             .show(gui, |gui| {
                 let mut cmd = None;

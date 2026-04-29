@@ -1,4 +1,3 @@
-use std::hash::Hash;
 use std::sync::Arc;
 
 use egui::{Align, FontId, Galley, Response, Vec2, vec2};
@@ -22,10 +21,10 @@ pub struct PopupMenu<'a> {
 }
 
 impl<'a> PopupMenu<'a> {
-    pub fn new(anchor: &'a Response, id_salt: impl Hash) -> Self {
+    pub fn new(anchor: &'a Response, id: StableId) -> Self {
         Self {
             anchor,
-            id: anchor.id.with(id_salt),
+            id: id.id(),
             style: None,
             min_width: None,
         }

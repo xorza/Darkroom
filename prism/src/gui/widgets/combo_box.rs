@@ -116,7 +116,7 @@ impl<'a> ComboBox<'a> {
         let selected = self.selected.clone();
         let options = self.options;
 
-        PopupMenu::new(&response, id.id().with("combo_popup")).show(gui, |gui| {
+        PopupMenu::new(&response, id.with("combo_popup")).show(gui, |gui| {
             // Pre-compute galleys for all items (reuse like new_node_ui)
             let item_font = gui.style.sub_font.clone();
             let padding = gui.style.padding;
