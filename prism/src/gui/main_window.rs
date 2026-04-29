@@ -30,57 +30,54 @@ impl MainWindow {
         }
     }
 
-    pub fn render(&mut self, session: &mut Session, ui: &mut egui::Ui) {
+    /// Render one frame, filling `output` with intents/commands the
+    /// renderer wants applied. Returns the `AppCommand` (file menu
+    /// item, Cmd+Q) if one fired this frame; the caller (`GuiApp`)
+    /// applies it on the next `logic` tick. `drain_inbound` /
+    /// `handle_output` are *not* called here — `GuiApp::logic` owns
+    /// that lifecycle so script side effects flow even when the
+    /// window is hidden.
+    pub fn render(
+        &mut self,
+        session: &mut Session,
+        output: &mut FrameOutput,
+        ui: &mut egui::Ui,
+    ) -> Option<AppCommand> {
         let mut gui = Gui::new(ui, &self.style);
         let gui = &mut gui;
+        let input = gui.input_snapshot();
 
-        let mut output = FrameOutput::default();
-
-        // Session::frame wraps drain_inbound → body → handle_output so
-        // the ordering invariant can't be skipped. The closure returns
-        // any pending AppCommand (from file menu or shortcut), which
-        // we route *after* handle_output so queued actions land first.
-        // `AppCommand` is intentionally not on `FrameOutput` — the
-        // renderer has no type-level path to emit one.
-        let app_cmd = session.frame(&mut output, |session, output| {
-            let input = gui.input_snapshot();
-
-            let mut menu_cmd = None;
-            Panel::top(StableId::new("top_panel"))
-                .show_separator_line(false)
-                .show(gui, |gui| {
-                    gui.horizontal(|gui| {
-                        menu_cmd = self.file_menu(gui);
-                    });
+        let mut menu_cmd = None;
+        Panel::top(StableId::new("top_panel"))
+            .show_separator_line(false)
+            .show(gui, |gui| {
+                gui.horizontal(|gui| {
+                    menu_cmd = self.file_menu(gui);
                 });
-
-            Panel::bottom(StableId::new("status_panel"))
-                .show_separator_line(false)
-                .no_frame()
-                .show(gui, |gui| {
-                    self.log_ui.render(gui, session.status());
-                });
-
-            Panel::central().no_frame().show(gui, |gui| {
-                let render_events = session.take_render_events();
-                let ctx = session.graph_context();
-                self.graph_ui
-                    .render(gui, &ctx, render_events, &input, output);
             });
 
-            // Shortcut wins over menu when both fire in the same frame —
-            // a Cmd+Q held while the File menu is open should still exit.
-            shortcut_commands(&input, session.autorun())
-                .apply(output)
-                .or(menu_cmd)
+        Panel::bottom(StableId::new("status_panel"))
+            .show_separator_line(false)
+            .no_frame()
+            .show(gui, |gui| {
+                self.log_ui.render(gui, session.status());
+            });
+
+        Panel::central().no_frame().show(gui, |gui| {
+            let render_events = session.take_render_events();
+            let ctx = session.graph_context();
+            self.graph_ui
+                .render(gui, &ctx, render_events, &input, output);
         });
 
-        if let Some(cmd) = app_cmd {
-            self.handle_app_command(session, cmd);
-        }
+        // Shortcut wins over menu when both fire in the same frame —
+        // a Cmd+Q held while the File menu is open should still exit.
+        shortcut_commands(&input, session.autorun())
+            .apply(output)
+            .or(menu_cmd)
     }
 
-    fn handle_app_command(&mut self, session: &mut Session, cmd: AppCommand) {
+    pub(crate) fn handle_app_command(&mut self, session: &mut Session, cmd: AppCommand) {
         match cmd {
             AppCommand::New => session.empty_graph(),
             AppCommand::Save => session.save_graph_dialog(),

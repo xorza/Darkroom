@@ -1,16 +1,37 @@
 use eframe::egui;
 
 use crate::gui::debug::GuiDebug;
+use crate::gui::graph_ui::frame_output::{AppCommand, FrameOutput};
 use crate::gui::main_window::MainWindow;
 use crate::gui::ui_host::EguiUiHost;
 use crate::launch_config::LaunchConfig;
 use crate::session::Session;
 
+/// eframe app split across `logic` and `ui`:
+///
+/// - `logic` drains script + worker inbounds and forwards the
+///   previous frame's [`FrameOutput`] to the worker. Eframe calls it
+///   before every paint AND whenever `request_repaint` fires while
+///   the window is hidden — so script-driven side effects (autorun,
+///   intents) reach the worker even if no painting happens.
+/// - `ui` renders, filling a fresh `FrameOutput`. The buffer lives on
+///   the app so the next `logic` tick can consume it.
+///
+/// Net effect: handling user input is delayed by one frame (~16 ms)
+/// in exchange for not blocking script side effects on a paint.
 #[derive(Debug)]
 pub struct GuiApp {
     session: Session,
     main_window: MainWindow,
     debug: GuiDebug,
+    /// Filled by `ui`, consumed by the next `logic`. `clear()` runs
+    /// at the end of `logic` so a sequence of hidden-only `logic`
+    /// ticks doesn't reprocess stale intents.
+    output: FrameOutput,
+    /// `AppCommand` (file menu, Cmd+Q) is captured from `ui` and
+    /// applied in the following `logic` tick — same one-frame delay
+    /// as the rest of `output`.
+    pending_app_cmd: Option<AppCommand>,
 }
 
 impl GuiApp {
@@ -19,14 +40,27 @@ impl GuiApp {
             session: Session::new(EguiUiHost::new(ctx), launch_config),
             main_window: MainWindow::new(),
             debug: GuiDebug::new(),
+            output: FrameOutput::default(),
+            pending_app_cmd: None,
         }
     }
 }
 
 impl eframe::App for GuiApp {
+    fn logic(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.session.drain_inbound();
+        self.session.handle_output(&mut self.output);
+        if let Some(cmd) = self.pending_app_cmd.take() {
+            self.main_window.handle_app_command(&mut self.session, cmd);
+        }
+        self.output.clear();
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.debug.frame(ui.ctx());
-        self.main_window.render(&mut self.session, ui);
+        self.pending_app_cmd = self
+            .main_window
+            .render(&mut self.session, &mut self.output, ui);
     }
 
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
