@@ -20,9 +20,8 @@ use crate::gui::graph_ui::connections::bezier::{ConnectionBezier, ConnectionBezi
 use crate::gui::graph_ui::connections::breaker::ConnectionBreaker;
 use crate::gui::graph_ui::ctx::GraphContext;
 use crate::gui::graph_ui::frame_output::FrameOutput;
-use crate::gui::graph_ui::gesture::Gesture;
 use crate::gui::graph_ui::layout::GraphLayout;
-use crate::gui::graph_ui::port::{PortKind, PortRef};
+use crate::gui::graph_ui::port::PortKind;
 
 pub(crate) use types::{
     BrokeItem, ConnectionCurve, ConnectionDrag, ConnectionDragUpdate, ConnectionKey,
@@ -60,7 +59,6 @@ impl ConnectionUi {
         gui: &mut Gui<'_>,
         ctx: &GraphContext,
         graph_layout: &GraphLayout,
-        gesture: &Gesture,
         output: &mut FrameOutput,
         breaker: Option<&ConnectionBreaker>,
     ) {
@@ -72,13 +70,7 @@ impl ConnectionUi {
         for node_view in &ctx.view_graph.view_nodes {
             let node_id = node_view.id;
             let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
-            let vp = gui.view_params();
-            let node_layout = graph_layout.node_layout(
-                &vp,
-                ctx,
-                &node_id,
-                gesture.node_drag_offset_for(&node_id),
-            );
+            let node_layout = graph_layout.cached_layout(&node_id);
 
             // Render data connections
             for (input_idx, input) in node.inputs.iter().enumerate() {
@@ -90,12 +82,7 @@ impl ConnectionUi {
                     input_node_id: node_id,
                     input_idx,
                 };
-                let output_layout = graph_layout.node_layout(
-                    &vp,
-                    ctx,
-                    &binding.target_id,
-                    gesture.node_drag_offset_for(&binding.target_id),
-                );
+                let output_layout = graph_layout.cached_layout(&binding.target_id);
                 let input_pos = node_layout.input_center(input_idx);
                 let output_pos = output_layout.output_center(binding.port_idx);
 
@@ -127,12 +114,7 @@ impl ConnectionUi {
                 let event_pos = node_layout.event_center(event_idx);
 
                 for &trigger_node_id in &event.subscribers {
-                    let trigger_layout = graph_layout.node_layout(
-                        &vp,
-                        ctx,
-                        &trigger_node_id,
-                        gesture.node_drag_offset_for(&trigger_node_id),
-                    );
+                    let trigger_layout = graph_layout.cached_layout(&trigger_node_id);
                     let trigger_pos = trigger_layout.trigger_center();
 
                     let key = ConnectionKey::Event {
@@ -176,18 +158,15 @@ impl ConnectionUi {
     pub(crate) fn render_temp_connection(
         &mut self,
         gui: &mut Gui<'_>,
-        ctx: &GraphContext<'_>,
         graph_layout: &GraphLayout,
         drag: &ConnectionDrag,
     ) {
-        // Port centers come from fresh layout — a connection drag doesn't
-        // coexist with a node drag, so drag_offset is always zero here.
-        let vp = gui.view_params();
-        let port_center = |port: &PortRef| {
-            let layout = graph_layout.node_layout(&vp, ctx, &port.node_id, egui::Vec2::ZERO);
-            layout.port_center(port)
-        };
-        let start_center = port_center(&drag.start_port);
+        // Port centers come from this frame's layout cache — a
+        // connection drag doesn't coexist with a node drag, so the
+        // cached layout's drag offset is zero everywhere.
+        let start_center = graph_layout
+            .cached_layout(&drag.start_port.node_id)
+            .port_center(&drag.start_port);
 
         // Determine bezier direction based on port kind
         let (start, end) = if drag.start_port.kind.is_source() {

@@ -154,14 +154,14 @@ impl GraphUi {
         output: &mut FrameOutput,
     ) {
         gui.with_scale(ctx.view_graph.scale, |gui| {
-            // Refresh galleys first so every subsequent call site
-            // can assume galleys exist for every view-node.
-            self.graph_layout.refresh_galleys(gui, ctx);
+            // Per-frame layout pipeline: one pass populates galleys
+            // (rebuilt on name/scale change) AND layouts (recomputed
+            // every frame) for every view-node, so every per-node
+            // pass below pays one shared `NodeLayout::compute` per
+            // node instead of one per pass.
+            self.graph_layout.refresh(gui, ctx, &self.gesture);
+            let vp = gui.view_params();
 
-            // Interact with fresh body rects — layouts are computed on
-            // demand from the current gesture offset, so this frame's
-            // drag delta accumulates into the gesture before rendering
-            // reads it again. No stale-rect flash, no dual pass.
             self.node_ui.handle_node_interactions(
                 gui,
                 ctx,
@@ -169,6 +169,12 @@ impl GraphUi {
                 output,
                 &mut self.gesture,
             );
+
+            // Interactions just accumulated this frame's drag delta
+            // — refresh the dragged node's cached layout so the
+            // connection and body-render passes see the new position.
+            self.graph_layout
+                .refresh_dragged_layout(&vp, ctx, &self.gesture);
 
             self.dots_background.render(gui, ctx);
             // `render_connections` ends by registering a transient overlay

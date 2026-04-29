@@ -182,14 +182,8 @@ impl GraphUi {
         ctx: &GraphContext<'_>,
         output: &mut FrameOutput,
     ) {
-        self.connections.render(
-            gui,
-            ctx,
-            &self.graph_layout,
-            &self.gesture,
-            output,
-            self.gesture.breaker(),
-        );
+        self.connections
+            .render(gui, ctx, &self.graph_layout, output, self.gesture.breaker());
 
         match &mut self.gesture {
             Gesture::BreakingConnections(breaker) => {
@@ -197,7 +191,7 @@ impl GraphUi {
             }
             Gesture::DraggingConnection(drag) => {
                 self.connections
-                    .render_temp_connection(gui, ctx, &self.graph_layout, drag);
+                    .render_temp_connection(gui, &self.graph_layout, drag);
             }
             _ => {}
         }

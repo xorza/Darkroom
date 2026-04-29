@@ -139,9 +139,7 @@ impl NodeUi {
 
         for view_node in ctx.view_graph.view_nodes.iter() {
             let node_id = view_node.id;
-            let drag_offset = gesture.node_drag_offset_for(&node_id);
-            let vp = gui.view_params();
-            let layout = graph_layout.node_layout(&vp, ctx, &node_id, drag_offset);
+            let layout = graph_layout.cached_layout(&node_id);
 
             let body_id = StableId::new(("node_body", node_id));
             let response = HitRegion::new(body_id)
@@ -189,15 +187,13 @@ impl NodeUi {
 
         for view_node in ctx.view_graph.view_nodes.iter() {
             let node_id = view_node.id;
-            let drag_offset = gesture.node_drag_offset_for(&node_id);
-            let vp = gui.view_params();
-            let layout = graph_layout.node_layout(&vp, ctx, &node_id, drag_offset);
+            let layout = graph_layout.cached_layout(&node_id);
             let galleys = graph_layout.node_galleys(&node_id);
 
             let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
-            const_bind_frame.render(gui, output, &layout, node, func, breaker);
+            const_bind_frame.render(gui, output, layout, node, func, breaker);
 
             if !gui.is_rect_visible(layout.body_rect) {
                 continue;
@@ -206,25 +202,25 @@ impl NodeUi {
             let is_selected = ctx.view_graph.selected_node_id == Some(node_id);
             let exec_info = ctx.exec_info_index.get(node_id);
 
-            if render_body(gui, &layout, galleys, is_selected, &exec_info, breaker) {
+            if render_body(gui, layout, galleys, is_selected, &exec_info, breaker) {
                 result.broken_nodes.push(node_id);
             }
 
-            if render_remove_btn(gui, &layout, node_id) {
+            if render_remove_btn(gui, layout, node_id) {
                 output.add_intent(Intent::RemoveNode { node_id });
             }
 
-            render_status_hints(gui, &layout, node_id, node.behavior, func);
-            if let Some(action) = render_cache_btn(gui, &layout, node) {
+            render_status_hints(gui, layout, node_id, node.behavior, func);
+            if let Some(action) = render_cache_btn(gui, layout, node) {
                 output.add_intent(action);
             }
 
             let missing_inputs = get_missing_input_ports(ctx.execution_stats, node_id);
             result
                 .port_cmd
-                .prefer(render_ports(gui, &layout, node, func, &missing_inputs));
+                .prefer(render_ports(gui, layout, node, func, &missing_inputs));
 
-            render_port_labels(gui, &layout, galleys);
+            render_port_labels(gui, layout, galleys);
         }
 
         const_bind_frame.finish();

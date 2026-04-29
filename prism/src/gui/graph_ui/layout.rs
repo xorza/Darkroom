@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use crate::common::UiEquals;
 use crate::gui::graph_ui::ctx::GraphContext;
+use crate::gui::graph_ui::gesture::Gesture;
 use crate::gui::graph_ui::port::{PortKind, PortRef};
 use crate::gui::style::Style;
 use crate::gui::{Gui, ViewParams};
@@ -29,7 +30,6 @@ use crate::gui::{Gui, ViewParams};
 
 #[derive(Debug)]
 pub struct NodeGalleys {
-    node_id: NodeId,
     scale: f32,
     pub title: Arc<Galley>,
     pub inputs: Vec<Arc<Galley>>,
@@ -41,9 +41,8 @@ pub struct NodeGalleys {
 }
 
 impl NodeGalleys {
-    pub fn new(gui: &mut Gui<'_>, node_id: NodeId, func: &Func, node_name: &str) -> Self {
+    pub fn new(gui: &mut Gui<'_>, func: &Func, node_name: &str) -> Self {
         let mut this = Self {
-            node_id,
             scale: gui.scale(),
             title: Self::make_title(gui, node_name),
             inputs: Vec::new(),
@@ -96,12 +95,6 @@ impl NodeGalleys {
 
 fn sub_row_height(gui: &mut Gui<'_>) -> f32 {
     gui.font_height(&gui.style.sub_font.clone())
-}
-
-impl KeyIndexKey<NodeId> for NodeGalleys {
-    fn key(&self) -> &NodeId {
-        &self.node_id
-    }
 }
 
 // ============================================================================
@@ -278,15 +271,30 @@ impl NodeLayout {
 }
 
 // ============================================================================
-// GraphLayout — galley cache + per-node layout queries
+// GraphLayout — per-node frame state
 // ============================================================================
 
-/// Per-frame layout state. Caches only `NodeGalleys` (shaped text).
-/// `NodeLayout` is cheap arithmetic on top of galleys + positions +
-/// style and is computed on demand at each call site.
+/// Galleys + computed layout for one node. Galleys are cross-frame
+/// state (rebuilt only on name/scale change); layout is per-frame
+/// (recomputed every frame — pure arithmetic). Co-located so a
+/// single `by_key` lookup yields both, and `view_nodes` is iterated
+/// once per frame to refresh both.
+#[derive(Debug)]
+pub struct NodeFrame {
+    node_id: NodeId,
+    pub galleys: NodeGalleys,
+    pub layout: NodeLayout,
+}
+
+impl KeyIndexKey<NodeId> for NodeFrame {
+    fn key(&self) -> &NodeId {
+        &self.node_id
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct GraphLayout {
-    node_galleys: KeyIndexVec<NodeId, NodeGalleys>,
+    nodes: KeyIndexVec<NodeId, NodeFrame>,
 }
 
 /// World-space origin (where graph coord (0, 0) lands on screen) for
@@ -297,25 +305,81 @@ pub fn origin(vp: &ViewParams, ctx: &GraphContext<'_>) -> Pos2 {
 }
 
 impl GraphLayout {
-    /// Refresh galley cache: rebuild any stale entry (name or GUI
-    /// scale changed) and insert entries for newly added nodes.
-    /// Must be called once per frame before any `node_layout` read.
-    pub fn refresh_galleys(&mut self, gui: &mut Gui<'_>, ctx: &GraphContext) {
-        let mut compact = self.node_galleys.compact_insert_start();
+    /// Per-frame refresh: rebuild stale galleys (name/scale change),
+    /// insert new entries for newly-added nodes, and recompute every
+    /// node's layout from the gesture's current drag offset (zero
+    /// except for the node being dragged). Run once per frame at the
+    /// top of the content phase.
+    pub fn refresh(&mut self, gui: &mut Gui<'_>, ctx: &GraphContext<'_>, gesture: &Gesture) {
+        let vp = gui.view_params();
+        let origin = origin(&vp, ctx);
+        let mut compact = self.nodes.compact_insert_start();
         for view_node in ctx.view_graph.view_nodes.iter() {
-            let node = ctx.view_graph.graph.by_id(&view_node.id).unwrap();
+            let node_id = view_node.id;
+            let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
+            let drag_offset = gesture.node_drag_offset_for(&node_id);
+            let pos = view_node.pos + drag_offset;
 
-            let (_, galleys) = compact.insert_with(&view_node.id, || {
-                NodeGalleys::new(gui, view_node.id, func, &node.name)
+            let (_, frame) = compact.insert_with(&node_id, || {
+                let galleys = NodeGalleys::new(gui, func, &node.name);
+                let layout = NodeLayout::compute(&galleys, func, &vp, origin, pos);
+                NodeFrame {
+                    node_id,
+                    galleys,
+                    layout,
+                }
             });
-            galleys.update(gui, func, &node.name);
+            frame.galleys.update(gui, func, &node.name);
+            frame.layout = NodeLayout::compute(&frame.galleys, func, &vp, origin, pos);
         }
     }
 
-    /// Compute geometry for a single node from cached galleys + the
-    /// caller-supplied drag offset. `refresh_galleys()` must have run
-    /// this frame — it populates galleys for every view-node.
+    /// After `handle_node_interactions` accumulates this frame's
+    /// drag delta, recompute the dragged node's layout so the
+    /// connection and body-render passes see the up-to-date position.
+    /// No-op when no node drag is in flight.
+    pub fn refresh_dragged_layout(
+        &mut self,
+        vp: &ViewParams,
+        ctx: &GraphContext<'_>,
+        gesture: &Gesture,
+    ) {
+        let Some(drag) = gesture.node_drag() else {
+            return;
+        };
+        let view_node = ctx.view_graph.view_nodes.by_key(&drag.node_id).unwrap();
+        let node = ctx.view_graph.graph.by_id(&drag.node_id).unwrap();
+        let func = ctx.func_lib.by_id(&node.func_id).unwrap();
+        let frame = self.nodes.by_key_mut(&drag.node_id).unwrap();
+        frame.layout = NodeLayout::compute(
+            &frame.galleys,
+            func,
+            vp,
+            origin(vp, ctx),
+            view_node.pos + drag.offset,
+        );
+    }
+
+    pub fn frame(&self, node_id: &NodeId) -> &NodeFrame {
+        self.nodes.by_key(node_id).unwrap()
+    }
+
+    /// Convenience: read this frame's layout for a node. Equivalent
+    /// to `frame(node_id).layout`.
+    pub fn cached_layout(&self, node_id: &NodeId) -> &NodeLayout {
+        &self.frame(node_id).layout
+    }
+
+    /// Convenience: read this frame's galleys for a node. Equivalent
+    /// to `&frame(node_id).galleys`.
+    pub fn node_galleys(&self, node_id: &NodeId) -> &NodeGalleys {
+        &self.frame(node_id).galleys
+    }
+
+    /// Compute geometry for a single node fresh, outside the
+    /// per-frame cache lifecycle. Used by the overlay buttons
+    /// (fit-all, view-selected) which compute targets at click time.
     pub fn node_layout(
         &self,
         vp: &ViewParams,
@@ -323,20 +387,16 @@ impl GraphLayout {
         node_id: &NodeId,
         drag_offset: Vec2,
     ) -> NodeLayout {
-        let galleys = self.node_galleys.by_key(node_id).unwrap();
+        let frame = self.frame(node_id);
         let node = ctx.view_graph.graph.by_id(node_id).unwrap();
         let func = ctx.func_lib.by_id(&node.func_id).unwrap();
         let view_node = ctx.view_graph.view_nodes.by_key(node_id).unwrap();
         NodeLayout::compute(
-            galleys,
+            &frame.galleys,
             func,
             vp,
             origin(vp, ctx),
             view_node.pos + drag_offset,
         )
-    }
-
-    pub fn node_galleys(&self, node_id: &NodeId) -> &NodeGalleys {
-        self.node_galleys.by_key(node_id).unwrap()
     }
 }
