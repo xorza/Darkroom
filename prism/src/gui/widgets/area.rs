@@ -43,7 +43,7 @@ impl Area {
         gui: &mut Gui,
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<R> {
-        let args = gui.child_args();
+        let args = gui.view_params();
         self.inner
             .show(gui.ui_raw().ctx(), |ui| args.enter(ui, add_contents))
     }

@@ -74,7 +74,7 @@ impl Frame {
         // widgets toggled. `Gui::scope` sets `global_scope=true`
         // internally, pinning the outer scope's id verbatim.
         gui.scope(self.id).sense(sense).show(|gui| {
-            let args = gui.child_args();
+            let args = gui.view_params();
             let result = inner_frame.show(gui.ui_raw(), |ui| args.enter(ui, add_contents));
             InnerResponse::new(result.inner, result.response)
         })

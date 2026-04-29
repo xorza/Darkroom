@@ -35,7 +35,7 @@ impl ScrollArea {
     }
 
     pub fn show<R>(self, gui: &mut Gui<'_>, add_contents: impl FnOnce(&mut Gui<'_>) -> R) -> R {
-        let args = gui.child_args();
+        let args = gui.view_params();
 
         egui::ScrollArea::vertical()
             .id_salt(self.id)

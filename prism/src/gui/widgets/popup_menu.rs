@@ -46,7 +46,7 @@ impl<'a> PopupMenu<'a> {
             popup = popup.width(w);
         }
 
-        let args = gui.child_args();
+        let args = gui.view_params();
         popup
             .show(|ui| args.enter(ui, content))
             .map(|inner| inner.inner)

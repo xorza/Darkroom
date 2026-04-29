@@ -62,7 +62,7 @@ impl Panel {
         gui: &mut Gui<'_>,
         body: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> egui::InnerResponse<R> {
-        let args = gui.child_args();
+        let args = gui.view_params();
         let run = |ui: &mut egui::Ui| args.enter(ui, body);
 
         match self.kind {

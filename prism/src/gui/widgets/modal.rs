@@ -58,7 +58,7 @@ impl<'a> Modal<'a> {
     /// the dialog is closed (or fully faded out).
     pub fn show<R>(self, gui: &mut Gui<'_>, body: impl FnOnce(&mut Gui<'_>) -> R) -> Option<R> {
         let ctx = gui.ui_raw().ctx().clone();
-        let args = gui.child_args();
+        let args = gui.view_params();
         let id = self.id;
 
         let visible = self.open.as_deref().copied().unwrap_or(true);
