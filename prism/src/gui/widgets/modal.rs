@@ -2,12 +2,14 @@
 //! only drag handle (body input is absorbed); edges and corners
 //! resize. Title bar gains a close `✕` when [`Modal::open`] is bound.
 //!
-//! Modal input blocking is achieved the same way [`egui::Modal`] does
-//! it: mark the window's layer as the modal layer (blocks focus
-//! traversal to lower layers) and lay a transparent click+drag
-//! absorber across the screen below the window (blocks pointer hits).
-//! No dim is painted — add an [`egui::Area`] at the call site if you
-//! want a visual backdrop.
+//! Modal input blocking uses egui's modal-layer system together with a
+//! transparent screen-sized click+drag absorber — same recipe as
+//! [`egui::Modal`]. No visual dim is painted; layer an [`egui::Area`]
+//! at the call site if you want one. Note: during egui::Window's
+//! built-in fade-out (after `*open` flips to false) the chrome is
+//! gone but the window paints at reducing opacity for a few frames —
+//! input briefly leaks through. egui::Window doesn't expose a way to
+//! query in-progress opacity, so we accept it.
 
 use egui::{Align2, LayerId, Order, Sense, Vec2};
 
@@ -33,8 +35,8 @@ impl<'a> Modal<'a> {
         }
     }
 
-    /// Bind visibility to a caller-owned bool. Adds a close button to
-    /// the title bar; clicking it (or pressing Escape on the focused
+    /// Bind visibility to a caller-owned bool. Adds a close `✕` to the
+    /// title bar; clicking it (or pressing Escape on the focused
     /// window) flips the flag to false.
     pub fn open(mut self, open: &'a mut bool) -> Self {
         self.open = Some(open);
@@ -52,36 +54,14 @@ impl<'a> Modal<'a> {
     pub fn show<R>(self, gui: &mut Gui<'_>, body: impl FnOnce(&mut Gui<'_>) -> R) -> Option<R> {
         let ctx = gui.ui_raw().ctx().clone();
         let args = gui.child_args();
+        let id = self.id;
 
-        // Skip backdrop + modal-layer when bound `open` is false: the
-        // window won't render and shouldn't block input either.
-        let should_render = match &self.open {
-            Some(o) => **o,
-            None => true,
-        };
-        if should_render {
-            // Backdrop: an empty Area at the window's order, registered
-            // *before* the window so it draws underneath, with a
-            // screen-sized click+drag interactor that absorbs pointer
-            // hits to widgets behind. Same recipe as egui::Modal.
-            let backdrop_id = self.id.with("backdrop").id();
-            egui::Area::new(backdrop_id)
-                .order(Order::Middle)
-                .anchor(Align2::LEFT_TOP, Vec2::ZERO)
-                .interactable(true)
-                .show(&ctx, |ui| {
-                    let screen = ui.ctx().content_rect();
-                    let _ = ui.interact(screen, backdrop_id.with("hit"), Sense::click_and_drag());
-                });
-            // And block focus traversal to lower layers.
-            ctx.memory_mut(|mem| {
-                mem.set_modal_layer(LayerId::new(Order::Middle, self.id.id()));
-            });
+        let visible = self.open.as_deref().copied().unwrap_or(true);
+        if visible {
+            install_modal_chrome(&ctx, id);
         }
 
-        let mut window = egui::Window::new(self.title)
-            .id(self.id.id())
-            .collapsible(false);
+        let mut window = egui::Window::new(self.title).id(id.id()).collapsible(false);
         if let Some(open) = self.open {
             window = window.open(open);
         }
@@ -89,23 +69,22 @@ impl<'a> Modal<'a> {
             window = window.default_size(min_size).min_size(min_size);
         }
 
-        let blocker_id = self.id.with("body_drag_block").id();
         window
             .show(&ctx, |ui| {
                 args.enter(ui, |gui| {
-                    // `egui::Window` forces `resizable: false` on its
-                    // inner `Resize`, so the window's reported size is
-                    // `last_content_size`. Claim the full available
-                    // rect (= `Resize`'s `desired_size` each frame) so
-                    // resize-by-edge sticks across frames.
                     let ui = gui.ui_raw();
+                    // egui::Window forces `resizable: false` on its
+                    // inner Resize, reporting `last_content_size` (not
+                    // `desired_size`). Claim the full available rect
+                    // (= desired_size each frame) so resize-by-edge
+                    // sticks across frames.
                     ui.set_min_size(ui.available_size());
-                    // Absorb body clicks/drags so the underlying Area's
+                    // Absorb body input so the underlying Area's
                     // move-drag (registered earlier) only fires from
                     // the title bar.
                     let _ = ui.interact(
                         ui.available_rect_before_wrap(),
-                        blocker_id,
+                        id.with("body_drag_block").id(),
                         Sense::click_and_drag(),
                     );
                     body(gui)
@@ -113,4 +92,26 @@ impl<'a> Modal<'a> {
             })
             .and_then(|r| r.inner)
     }
+}
+
+/// Block input to widgets behind the modal: a transparent screen-sized
+/// click+drag absorber registered before the window (so it draws
+/// underneath), plus the modal-layer flag for focus traversal. Both
+/// keyed off the modal's id so multiple modals coexist.
+fn install_modal_chrome(ctx: &egui::Context, id: StableId) {
+    let backdrop_id = id.with("backdrop").id();
+    egui::Area::new(backdrop_id)
+        .order(Order::Middle)
+        .anchor(Align2::LEFT_TOP, Vec2::ZERO)
+        .interactable(true)
+        .show(ctx, |ui| {
+            let _ = ui.interact(
+                ui.ctx().content_rect(),
+                backdrop_id.with("hit"),
+                Sense::click_and_drag(),
+            );
+        });
+    ctx.memory_mut(|mem| {
+        mem.set_modal_layer(LayerId::new(Order::Middle, id.id()));
+    });
 }
