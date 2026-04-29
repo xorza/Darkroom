@@ -120,8 +120,11 @@ impl Session {
             let ui_host = ui_host.clone();
             Arc::new(move || ui_host.request_redraw())
         };
+        let script_cfg = script::ScriptConfig {
+            tcp: launch_config.actual.script_tcp.clone(),
+        };
         let script_executor = ScriptExecutor::new(
-            script::start_transports(&launch_config.script),
+            script::start_transports(&script_cfg),
             script_inbound_tx,
             func_lib.clone(),
             notify,
@@ -129,7 +132,7 @@ impl Session {
 
         let mut result = Self::from_parts(
             func_lib,
-            Config::load_or_default(),
+            launch_config.saved,
             Some(worker),
             worker_tx,
             worker_rx,
@@ -138,7 +141,7 @@ impl Session {
             ui_host,
         );
 
-        if launch_config.load_last
+        if launch_config.actual.load_last
             && let Some(path) = result.config.current_path.clone()
         {
             result.load_graph(&path);

@@ -1,7 +1,8 @@
-//! Runtime configuration assembled from CLI flags and handed to the
-//! chosen frontend. A single aggregate keeps frontend constructors
-//! future-proof: new runtime knobs land as fields here rather than as
-//! additional arguments.
+//! Runtime configuration assembled from CLI flags + persisted prefs and
+//! handed to the chosen frontend. Two-copy split: `saved` is the
+//! `config.toml` snapshot Session writes back; `actual` is `saved` with
+//! CLI overrides applied for the running app. CLI flags always win for
+//! this run but never round-trip to disk.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
@@ -9,48 +10,75 @@ use std::path::PathBuf;
 use clap::Args;
 use uuid::Uuid;
 
-use crate::script::{ScriptConfig, TcpScriptConfig};
+use crate::config::Config;
+use crate::script::TcpScriptConfig;
 
-/// Default bind port for the TCP script listener when `--script-bind` is
-/// absent or specifies only an address. Fixed so a client (e.g. a CLI
-/// wrapper) can connect without reading a discovery file. Pick a fresh
-/// port if two prism instances need to coexist.
-pub const DEFAULT_SCRIPT_PORT: u16 = 33433;
+/// Default bind for the TCP script listener when neither CLI nor
+/// persisted config specify one. Loopback at a fixed port so a client
+/// can connect without a discovery file.
+const DEFAULT_SCRIPT_PORT: u16 = 33433;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug)]
 pub struct LaunchConfig {
-    pub script: ScriptConfig,
-    /// Reopen the graph that was open at the last clean shutdown
-    /// (path stored in `Config::current_path`). Off by default — a
-    /// fresh launch starts with an empty graph so file-state surprises
-    /// don't follow the user across sessions.
+    /// On-disk preferences as loaded. Session takes ownership and is
+    /// the only writer back to the file. Per-launch CLI flags never
+    /// touch this.
+    pub(crate) saved: Config,
+    /// Effective config for this run: `saved` with CLI overrides
+    /// applied per-field. Drives transport startup and one-shot
+    /// launch decisions like `load_last`. Discarded on exit.
+    pub(crate) actual: Config,
+}
+
+impl LaunchConfig {
+    /// Load `config.toml` and apply CLI overrides to produce the
+    /// per-run effective config. Generates a fresh token only as a
+    /// fallback when auth is on but neither CLI nor persisted config
+    /// supplied one.
+    pub fn new(cli: &LaunchCliArgs) -> Self {
+        let saved = Config::load_or_default();
+        let actual = apply_cli_overrides(&saved, cli, Uuid::new_v4());
+        Self { saved, actual }
+    }
+}
+
+/// All CLI flags that override persisted `Config` for a single run.
+/// Flattened into the top-level `Cli` in `main`. `apply_cli_overrides`
+/// reads this directly, so `main` doesn't have to unpack the fields.
+#[derive(Debug, Default, Args)]
+pub struct LaunchCliArgs {
+    #[command(flatten)]
+    pub script: ScriptCliArgs,
+
+    /// Reopen the graph from the last clean shutdown for this run.
+    /// ORed with the persisted `load_last` preference; never written
+    /// back to disk.
+    #[arg(long, global = true)]
     pub load_last: bool,
 }
 
-// Raw CLI flags for the scripting surface. Flattened into the top-level
-// `Cli` via `#[command(flatten)]`. Kept as its own struct so
-// `build_script_config` can be unit-tested without going through clap.
-#[derive(Debug, Args)]
+// Raw CLI flags for the scripting surface. Each Option-typed field
+// encodes "user did/didn't pass it" — `None` means leave the persisted
+// value alone.
+#[derive(Debug, Default, Args)]
 pub struct ScriptCliArgs {
-    /// Enable the loopback TCP script listener (off by default).
+    /// Enable the loopback TCP script listener for this run. Without
+    /// this flag the persisted `script_tcp` (if any) is used as-is.
     #[arg(long, global = true)]
     pub script_tcp: bool,
 
     /// Bind spec for the TCP script listener. Accepts a bare port
     /// (`8080`, `:8080`), a full `addr:port` (`127.0.0.1:8080`,
     /// `0.0.0.0:0`), or bracketed IPv6 (`[::1]:8080`). Port `0` lets
-    /// the OS pick a free port. A non-loopback address emits a warning
-    /// at startup — binding beyond 127.0.0.1 exposes the listener to
-    /// other hosts on the network.
+    /// the OS pick a free port.
     #[arg(
         long,
         value_name = "BIND",
         value_parser = parse_bind_spec,
-        default_value_t = default_bind(),
         global = true,
         requires = "script_tcp",
     )]
-    pub script_bind: SocketAddr,
+    pub script_bind: Option<SocketAddr>,
 
     /// Write a JSON `{ "port": N, "token": "..." }` discovery file at
     /// startup so a separately-launched client can find the listener.
@@ -82,66 +110,72 @@ pub struct ScriptCliArgs {
     pub script_no_auth: bool,
 }
 
-impl Default for ScriptCliArgs {
-    fn default() -> Self {
-        Self {
-            script_tcp: false,
-            script_bind: default_bind(),
-            script_token_file: None,
-            script_token: None,
-            script_no_auth: false,
-        }
-    }
-}
-
 fn default_bind() -> SocketAddr {
     SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), DEFAULT_SCRIPT_PORT)
 }
 
 /// Parse `--script-bind` values. Both address and port are optional, with
-/// defaults 127.0.0.1 and 0 (OS-assigned) respectively. Accepts:
+/// defaults 127.0.0.1 and `DEFAULT_SCRIPT_PORT` respectively. Accepts:
 /// - bare port: `"8080"` or `":8080"` → `127.0.0.1:8080`
-/// - bare address: `"0.0.0.0"`, `"::1"` → `<addr>:0`
+/// - bare address: `"0.0.0.0"`, `"::1"` → `<addr>:DEFAULT_SCRIPT_PORT`
 /// - full socket addr: `"127.0.0.1:8080"`, `"[::1]:8080"`
 fn parse_bind_spec(s: &str) -> Result<SocketAddr, String> {
     const DEFAULT_IP: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
-    // Bare port: "8080" or ":8080". Use `strip_prefix` (not
+    // Bare port: "8080" or ":8080". `strip_prefix` (not
     // `trim_start_matches`) so "::1" isn't collapsed to "1".
     let port_candidate = s.strip_prefix(':').unwrap_or(s);
     if let Ok(port) = port_candidate.parse::<u16>() {
         return Ok(SocketAddr::new(DEFAULT_IP, port));
     }
-    // Bare address (no port) falls back to the default port.
     if let Ok(ip) = s.parse::<IpAddr>() {
         return Ok(SocketAddr::new(ip, DEFAULT_SCRIPT_PORT));
     }
-    // Full addr:port, including bracketed IPv6.
     s.parse::<SocketAddr>()
         .map_err(|e| format!("invalid bind spec {s:?}: {e}"))
 }
 
-/// Build a [`ScriptConfig`] from parsed CLI flags. `fresh_token` is used
-/// only when auth is on and `--script-token` wasn't supplied; callers in
-/// `main` pass `Uuid::new_v4()`, tests pass a fixed value.
-pub fn build_script_config(args: &ScriptCliArgs, fresh_token: Uuid) -> ScriptConfig {
-    if !args.script_tcp {
-        return ScriptConfig::default();
+/// Apply CLI overrides on top of `saved` to produce the effective
+/// config for this run. CLI fields always win where set; unset fields
+/// inherit from `saved`. `--script-tcp` enables the listener for the
+/// run even when persisted config has it off, seeding a token from
+/// `fresh_token` when none is otherwise available. `cli_load_last` is
+/// ORed into `actual.load_last` — the CLI flag can enable for a single
+/// run but cannot turn off a persisted preference.
+fn apply_cli_overrides(saved: &Config, cli: &LaunchCliArgs, fresh_token: Uuid) -> Config {
+    let mut actual = saved.clone();
+    actual.load_last = saved.load_last || cli.load_last;
+
+    let script = &cli.script;
+    let want_tcp = script.script_tcp || saved.script_tcp.is_some();
+    if !want_tcp {
+        return actual;
     }
 
-    let token = if args.script_no_auth {
-        None
-    } else {
-        Some(args.script_token.unwrap_or(fresh_token))
-    };
+    // Baseline: persisted config (if any) → CLI implicit defaults.
+    // For a brand-new listener with auth on, `fresh_token` seeds the
+    // baseline so an unset `--script-token` still produces auth.
+    let mut tcp = saved.script_tcp.clone().unwrap_or_else(|| TcpScriptConfig {
+        bind: default_bind(),
+        token: Some(fresh_token),
+        token_file: None,
+    });
 
-    ScriptConfig {
-        tcp: Some(TcpScriptConfig {
-            bind: args.script_bind,
-            token,
-            token_file: args.script_token_file.clone(),
-        }),
+    if let Some(bind) = script.script_bind {
+        tcp.bind = bind;
     }
+    if let Some(file) = script.script_token_file.clone() {
+        tcp.token_file = Some(file);
+    }
+    if script.script_no_auth {
+        // `conflicts_with` already prevents `--script-token` here.
+        tcp.token = None;
+    } else if let Some(token) = script.script_token {
+        tcp.token = Some(token);
+    }
+
+    actual.script_tcp = Some(tcp);
+    actual
 }
 
 #[cfg(test)]
@@ -149,108 +183,162 @@ mod tests {
     use super::*;
 
     fn fixed_token() -> Uuid {
-        // Arbitrary fixed UUID — tests assert it propagates verbatim.
         Uuid::from_u128(0x1234_5678_9abc_def0_1122_3344_5566_7788)
     }
 
-    #[test]
-    fn disabled_by_default() {
-        let cfg = build_script_config(&ScriptCliArgs::default(), fixed_token());
-        assert!(cfg.tcp.is_none());
+    fn saved_with_tcp(tcp: TcpScriptConfig) -> Config {
+        Config {
+            script_tcp: Some(tcp),
+            ..Config::default()
+        }
+    }
+
+    fn cli(script: ScriptCliArgs, load_last: bool) -> LaunchCliArgs {
+        LaunchCliArgs { script, load_last }
     }
 
     #[test]
-    fn script_tcp_enables_with_token() {
+    fn no_cli_no_saved_yields_no_listener() {
+        let actual = apply_cli_overrides(
+            &Config::default(),
+            &cli(ScriptCliArgs::default(), false),
+            fixed_token(),
+        );
+        assert!(actual.script_tcp.is_none());
+    }
+
+    #[test]
+    fn cli_script_tcp_alone_enables_with_default_bind_and_fresh_token() {
         let args = ScriptCliArgs {
             script_tcp: true,
             ..Default::default()
         };
-        let cfg = build_script_config(&args, fixed_token());
-        let tcp = cfg.tcp.expect("tcp should be Some");
+        let actual = apply_cli_overrides(&Config::default(), &cli(args, false), fixed_token());
+        let tcp = actual.script_tcp.expect("listener should be enabled");
         assert_eq!(tcp.bind, default_bind());
         assert_eq!(tcp.token, Some(fixed_token()));
         assert!(tcp.token_file.is_none());
     }
 
     #[test]
-    fn script_token_overrides_fresh_token() {
-        let explicit = Uuid::from_u128(0xdead_beef_dead_beef_dead_beef_dead_beef);
+    fn saved_alone_drives_listener_when_cli_silent() {
+        let persisted = TcpScriptConfig {
+            bind: "0.0.0.0:54321".parse().unwrap(),
+            token: Some(Uuid::from_u128(0xabc)),
+            token_file: Some(PathBuf::from("/tmp/discovery.json")),
+        };
+        let actual = apply_cli_overrides(
+            &saved_with_tcp(persisted.clone()),
+            &cli(ScriptCliArgs::default(), false),
+            fixed_token(),
+        );
+        let tcp = actual.script_tcp.expect("listener should be enabled");
+        assert_eq!(tcp.bind, persisted.bind);
+        assert_eq!(tcp.token, persisted.token);
+        assert_eq!(tcp.token_file, persisted.token_file);
+    }
+
+    #[test]
+    fn cli_bind_overrides_saved_bind() {
+        let saved = saved_with_tcp(TcpScriptConfig {
+            bind: "127.0.0.1:8080".parse().unwrap(),
+            token: Some(Uuid::from_u128(0xabc)),
+            token_file: None,
+        });
+        let args = ScriptCliArgs {
+            script_tcp: true,
+            script_bind: Some("0.0.0.0:9090".parse().unwrap()),
+            ..Default::default()
+        };
+        let actual = apply_cli_overrides(&saved, &cli(args, false), fixed_token());
+        let tcp = actual.script_tcp.unwrap();
+        assert_eq!(tcp.bind, "0.0.0.0:9090".parse::<SocketAddr>().unwrap());
+        // Token preserved from saved, not regenerated.
+        assert_eq!(tcp.token, Some(Uuid::from_u128(0xabc)));
+    }
+
+    #[test]
+    fn cli_token_overrides_saved_token() {
+        let saved = saved_with_tcp(TcpScriptConfig {
+            bind: default_bind(),
+            token: Some(Uuid::from_u128(0xabc)),
+            token_file: None,
+        });
+        let explicit = Uuid::from_u128(0xdead);
         let args = ScriptCliArgs {
             script_tcp: true,
             script_token: Some(explicit),
             ..Default::default()
         };
-        let cfg = build_script_config(&args, fixed_token());
-        assert_eq!(cfg.tcp.unwrap().token, Some(explicit));
+        let actual = apply_cli_overrides(&saved, &cli(args, false), fixed_token());
+        assert_eq!(actual.script_tcp.unwrap().token, Some(explicit));
     }
 
     #[test]
-    fn script_no_auth_beats_explicit_token() {
-        // clap's conflicts_with enforces this at parse time, but the
-        // builder's fallback logic should also produce `None`
-        // regardless of script_token when no_auth is set.
-        let args = ScriptCliArgs {
-            script_tcp: true,
-            script_no_auth: true,
-            script_token: Some(Uuid::new_v4()),
-            ..Default::default()
-        };
-        assert_eq!(
-            build_script_config(&args, fixed_token()).tcp.unwrap().token,
-            None
-        );
-    }
-
-    #[test]
-    fn script_no_auth_suppresses_token() {
+    fn cli_no_auth_clears_saved_token() {
+        let saved = saved_with_tcp(TcpScriptConfig {
+            bind: default_bind(),
+            token: Some(Uuid::from_u128(0xabc)),
+            token_file: None,
+        });
         let args = ScriptCliArgs {
             script_tcp: true,
             script_no_auth: true,
             ..Default::default()
         };
-        let cfg = build_script_config(&args, fixed_token());
-        assert_eq!(cfg.tcp.unwrap().token, None);
+        let actual = apply_cli_overrides(&saved, &cli(args, false), fixed_token());
+        assert_eq!(actual.script_tcp.unwrap().token, None);
     }
 
     #[test]
-    fn bind_propagates() {
+    fn cli_token_file_overrides_saved() {
+        let saved = saved_with_tcp(TcpScriptConfig {
+            bind: default_bind(),
+            token: Some(Uuid::from_u128(0xabc)),
+            token_file: Some(PathBuf::from("/tmp/old.json")),
+        });
         let args = ScriptCliArgs {
             script_tcp: true,
-            script_bind: "0.0.0.0:45678".parse().unwrap(),
+            script_token_file: Some(PathBuf::from("/tmp/new.json")),
             ..Default::default()
         };
+        let actual = apply_cli_overrides(&saved, &cli(args, false), fixed_token());
         assert_eq!(
-            build_script_config(&args, fixed_token()).tcp.unwrap().bind,
-            "0.0.0.0:45678".parse::<SocketAddr>().unwrap()
+            actual.script_tcp.unwrap().token_file,
+            Some(PathBuf::from("/tmp/new.json"))
         );
     }
 
     #[test]
-    fn token_file_propagates() {
-        let args = ScriptCliArgs {
-            script_tcp: true,
-            script_token_file: Some(PathBuf::from("/tmp/x.json")),
-            ..Default::default()
+    fn current_path_passes_through() {
+        let saved = Config {
+            current_path: Some(PathBuf::from("/tmp/graph.toml")),
+            ..Config::default()
         };
-        assert_eq!(
-            build_script_config(&args, fixed_token())
-                .tcp
-                .unwrap()
-                .token_file,
-            Some(PathBuf::from("/tmp/x.json"))
-        );
+        let actual =
+            apply_cli_overrides(&saved, &cli(ScriptCliArgs::default(), false), fixed_token());
+        assert_eq!(actual.current_path, saved.current_path);
     }
 
     #[test]
-    fn flags_requiring_script_tcp_are_ignored_without_it() {
-        let args = ScriptCliArgs {
-            script_tcp: false,
-            script_bind: "0.0.0.0:999".parse().unwrap(),
-            script_no_auth: true,
-            script_token: None,
-            script_token_file: Some(PathBuf::from("/x")),
+    fn cli_load_last_enables_for_run_only() {
+        let saved = Config::default();
+        let actual =
+            apply_cli_overrides(&saved, &cli(ScriptCliArgs::default(), true), fixed_token());
+        assert!(actual.load_last);
+        // saved untouched — not persisted by `apply_cli_overrides`.
+        assert!(!saved.load_last);
+    }
+
+    #[test]
+    fn cli_load_last_does_not_disable_persisted() {
+        let saved = Config {
+            load_last: true,
+            ..Config::default()
         };
-        assert!(build_script_config(&args, fixed_token()).tcp.is_none());
+        let actual =
+            apply_cli_overrides(&saved, &cli(ScriptCliArgs::default(), false), fixed_token());
+        assert!(actual.load_last);
     }
 
     #[test]
@@ -304,6 +392,6 @@ mod tests {
     #[test]
     fn parse_bind_spec_rejects_garbage() {
         assert!(parse_bind_spec("not-an-addr").is_err());
-        assert!(parse_bind_spec("127.0.0.1:").is_err()); // trailing colon, no port
+        assert!(parse_bind_spec("127.0.0.1:").is_err());
     }
 }

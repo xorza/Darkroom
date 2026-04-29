@@ -6,11 +6,21 @@ use anyhow::Result;
 use common::SerdeFormat;
 use serde::{Deserialize, Serialize};
 
+use crate::script::TcpScriptConfig;
+
 const CONFIG_FILE: &str = "config.toml";
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct Config {
     pub current_path: Option<std::path::PathBuf>,
+    /// Reopen `current_path` at launch. CLI `--load-last` ORs into
+    /// this for the run without persisting back.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub load_last: bool,
+    /// Auto-start the TCP script listener at launch. `None` leaves it
+    /// off; mirrors the CLI's `--script-tcp` family for GUI runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script_tcp: Option<TcpScriptConfig>,
 }
 
 impl Config {

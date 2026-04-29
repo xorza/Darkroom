@@ -32,6 +32,7 @@ use egui::Pos2;
 use rhai::{Array, Dynamic, Engine};
 use scenarium::function::FuncId;
 use scenarium::prelude::FuncLib;
+use serde::{Deserialize, Serialize};
 
 use crate::model::Intent;
 use crate::model::ViewNode;
@@ -56,7 +57,7 @@ pub struct ScriptConfig {
     pub tcp: Option<TcpScriptConfig>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TcpScriptConfig {
     /// Socket address to bind. Port `0` lets the OS pick a free port;
     /// a non-loopback IP widens exposure beyond the local machine and

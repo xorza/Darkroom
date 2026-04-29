@@ -13,20 +13,14 @@ mod ui_host;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use uuid::Uuid;
 
-use crate::launch_config::{LaunchConfig, ScriptCliArgs, build_script_config};
+use crate::launch_config::{LaunchCliArgs, LaunchConfig};
 
 #[derive(Debug, Parser)]
 #[command(version, about)]
 struct Cli {
     #[command(flatten)]
-    script: ScriptCliArgs,
-
-    /// Reopen the graph from the last clean shutdown. Without this
-    /// flag the app starts with an empty graph.
-    #[arg(long, global = true)]
-    load_last: bool,
+    overrides: LaunchCliArgs,
 
     #[command(subcommand)]
     mode: Option<Mode>,
@@ -50,10 +44,7 @@ async fn main() -> Result<()> {
     let _log_guard = init::init();
     let cli = Cli::parse();
 
-    let launch_config = LaunchConfig {
-        script: build_script_config(&cli.script, Uuid::new_v4()),
-        load_last: cli.load_last,
-    };
+    let launch_config = LaunchConfig::new(&cli.overrides);
 
     match cli.mode.unwrap_or(Mode::Gui) {
         Mode::Gui => gui::run(launch_config),
