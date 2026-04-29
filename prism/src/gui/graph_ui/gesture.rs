@@ -85,27 +85,40 @@ impl Gesture {
         });
     }
 
-    /// Transition `DraggingNode` → `ReleasedNodeDrag`. No-op from any
-    /// other state. Called the frame the user lifts the mouse, after
-    /// the `MoveNode` intent has been emitted.
-    pub fn release_node_drag(&mut self) {
-        if let Self::DraggingNode(d) = *self {
-            *self = Self::ReleasedNodeDrag(d);
+    /// Accumulate this frame's drag delta onto the active node drag.
+    /// No-op from any state other than `DraggingNode` for `node_id` —
+    /// in particular, `ReleasedNodeDrag` is frozen.
+    pub fn accumulate_node_drag_offset(&mut self, node_id: NodeId, delta: Vec2) {
+        if let Self::DraggingNode(d) = self
+            && d.node_id == node_id
+        {
+            d.offset += delta;
         }
+    }
+
+    /// Atomically commit the active drag for `node_id`: read the
+    /// final position and transition to `ReleasedNodeDrag` so the
+    /// offset stays alive through this frame's render. No-op (returns
+    /// `None`) from any state other than `DraggingNode` for `node_id`.
+    pub fn commit_node_drag(&mut self, node_id: NodeId) -> Option<Pos2> {
+        let Self::DraggingNode(d) = *self else {
+            return None;
+        };
+        if d.node_id != node_id {
+            return None;
+        }
+        *self = Self::ReleasedNodeDrag(d);
+        Some(d.committed_pos())
     }
 
     pub fn is_released_node_drag(&self) -> bool {
         matches!(self, Self::ReleasedNodeDrag(_))
     }
 
+    /// Read the active node drag (if any). Returns `Some` for both
+    /// `DraggingNode` and `ReleasedNodeDrag` so render can keep
+    /// drawing at the offset position through the release frame.
     pub fn node_drag(&self) -> Option<&NodeDrag> {
-        match self {
-            Self::DraggingNode(d) | Self::ReleasedNodeDrag(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn node_drag_mut(&mut self) -> Option<&mut NodeDrag> {
         match self {
             Self::DraggingNode(d) | Self::ReleasedNodeDrag(d) => Some(d),
             _ => None,

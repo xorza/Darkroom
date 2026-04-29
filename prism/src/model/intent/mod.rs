@@ -29,6 +29,7 @@ use egui::{Pos2, Vec2};
 use scenarium::graph::{Binding, Node, NodeBehavior, NodeId};
 use serde::{Deserialize, Serialize};
 
+use crate::common::UiEquals;
 use crate::model::{ViewGraph, ViewNode};
 
 #[cfg(test)]
@@ -113,6 +114,22 @@ pub enum Intent {
         pan: Vec2,
         scale: f32,
     },
+}
+
+impl Intent {
+    /// True when this intent would be a no-op against the current
+    /// view graph (sub-`ui_equals` viewport delta, etc.). Checked at
+    /// the model boundary so external sources — scripts, future RPC —
+    /// can't bypass the renderer's emit-time gate by pushing
+    /// micro-deltas every frame.
+    pub fn is_noop_against(&self, vg: &ViewGraph) -> bool {
+        match self {
+            Self::SetViewport { pan, scale } => {
+                vg.pan.ui_equals(*pan) && vg.scale.ui_equals(*scale)
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Self-contained undo-stack entry. Each variant carries both halves:

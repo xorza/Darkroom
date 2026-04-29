@@ -160,23 +160,13 @@ impl NodeUi {
                 let start_pos = ctx.view_graph.view_nodes.by_key(&node_id).unwrap().pos;
                 gesture.start_node_drag(node_id, start_pos);
             }
-            let mut commit_pos = None;
-            if let Some(drag) = gesture.node_drag_mut()
-                && drag.node_id == node_id
-            {
-                if events.dragging {
-                    drag.offset += response.drag_delta() / gui.scale();
-                }
-                if events.stopped {
-                    commit_pos = Some(drag.committed_pos());
-                }
+            if events.dragging {
+                gesture.accumulate_node_drag_offset(node_id, response.drag_delta() / gui.scale());
             }
-            if let Some(to) = commit_pos {
+            if events.stopped
+                && let Some(to) = gesture.commit_node_drag(node_id)
+            {
                 output.add_intent(Intent::MoveNode { node_id, to });
-                // Keep offset alive for this frame's render via the
-                // `ReleasedNodeDrag` variant; the cancel happens at
-                // the top of next frame's call.
-                gesture.release_node_drag();
             }
         }
     }

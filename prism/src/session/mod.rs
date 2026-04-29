@@ -16,7 +16,6 @@ use scenarium::worker::{Worker, WorkerMessage};
 use tokio::sync::oneshot;
 
 use crate::app_config::AppConfig;
-use crate::common::UiEquals;
 use crate::config::Config;
 use crate::gui::graph_ui::ctx::GraphContext;
 use crate::gui::graph_ui::frame_output::{EditorCommand, FrameOutput, RunCommand};
@@ -594,14 +593,7 @@ impl Session {
         let mut graph_updated = false;
         let mut steps = Vec::with_capacity(intents.len());
         for intent in intents {
-            // Drop sub-`ui_equals` viewport intents at the model
-            // boundary so external sources (scripts, future RPC)
-            // can't bypass the renderer's `emit_zoom_pan` gate by
-            // pushing micro-deltas every frame.
-            if let Intent::SetViewport { pan, scale } = &intent
-                && self.view_graph.pan.ui_equals(*pan)
-                && self.view_graph.scale.ui_equals(*scale)
-            {
+            if intent.is_noop_against(&self.view_graph) {
                 continue;
             }
             let step = intent::build_step(intent, &self.view_graph);
