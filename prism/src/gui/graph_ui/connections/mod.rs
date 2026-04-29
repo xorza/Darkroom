@@ -101,10 +101,12 @@ impl ConnectionUi {
                     gui,
                     &mut curves,
                     &mut deletions,
-                    key,
-                    output_pos,
-                    input_pos,
-                    PortKind::Input,
+                    CurveDescriptor {
+                        key,
+                        start_pos: output_pos,
+                        end_pos: input_pos,
+                        port_kind: PortKind::Input,
+                    },
                     breaker,
                 );
             }
@@ -137,10 +139,12 @@ impl ConnectionUi {
                         gui,
                         &mut curves,
                         &mut deletions,
-                        key,
-                        event_pos,
-                        trigger_pos,
-                        PortKind::Trigger,
+                        CurveDescriptor {
+                            key,
+                            start_pos: event_pos,
+                            end_pos: trigger_pos,
+                            port_kind: PortKind::Trigger,
+                        },
                         breaker,
                     );
                 }
@@ -217,27 +221,37 @@ fn get_or_create_curve<'a>(
     compact.insert_with(&key, || ConnectionCurve::new(key)).1
 }
 
+/// Identity, geometry, and styling kind for one connection curve.
+/// Bundled so [`update_curve_interaction`] takes a single per-curve
+/// argument instead of four positional parameters.
+#[derive(Debug, Clone, Copy)]
+struct CurveDescriptor {
+    key: ConnectionKey,
+    start_pos: Pos2,
+    end_pos: Pos2,
+    port_kind: PortKind,
+}
+
 /// Shared update-and-interact pass for one connection curve.
 ///
 /// Used by both data (input-binding) and event (trigger) connections — they
 /// differ only in which endpoints feed `start_pos` / `end_pos` and which
 /// `port_kind` is used for styling.
-#[allow(clippy::too_many_arguments)]
 fn update_curve_interaction(
     gui: &mut Gui<'_>,
     curves: &mut CompactInsert<'_, ConnectionKey, ConnectionCurve>,
     deletions: &mut Vec<ConnectionKey>,
-    key: ConnectionKey,
-    start_pos: Pos2,
-    end_pos: Pos2,
-    port_kind: PortKind,
+    desc: CurveDescriptor,
     breaker: Option<&ConnectionBreaker>,
 ) {
-    let curve = get_or_create_curve(curves, key);
-    curve.bezier.update_points(start_pos, end_pos, gui.scale());
+    let curve = get_or_create_curve(curves, desc.key);
+    curve
+        .bezier
+        .update_points(desc.start_pos, desc.end_pos, gui.scale());
     curve.broke = curve.bezier.intersects_breaker(breaker);
 
-    let response = show_curve(gui, curve, port_kind);
+    let key = desc.key;
+    let response = show_curve(gui, curve, desc.port_kind);
 
     if breaker.is_some() {
         curve.hovered = false;

@@ -14,6 +14,7 @@ use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::graph_ui::background::GraphBackgroundRenderer;
 use crate::gui::graph_ui::connections::ConnectionUi;
+use crate::gui::graph_ui::connections::handlers::ProcessConnectionsInputs;
 use crate::gui::graph_ui::ctx::GraphContext;
 use crate::gui::graph_ui::frame_output::FrameOutput;
 use crate::gui::graph_ui::gesture::Gesture;
@@ -199,10 +200,12 @@ impl GraphUi {
                 self.process_connections(
                     input,
                     ctx,
-                    background_response,
-                    pointer_pos,
-                    nodes_result.port_cmd,
-                    &nodes_result.broken_nodes,
+                    ProcessConnectionsInputs {
+                        background_response,
+                        pointer_pos,
+                        port_interact_cmd: nodes_result.port_cmd,
+                        broken_nodes: &nodes_result.broken_nodes,
+                    },
                     output,
                 );
             }

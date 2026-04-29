@@ -24,6 +24,17 @@ use crate::input::InputSnapshot;
 
 use crate::model::Intent;
 
+/// Per-frame transients that drive [`GraphUi::process_connections`].
+/// Bundled to keep the call signature flat — these all originate from
+/// the same render-phase scope and travel together.
+#[derive(Debug)]
+pub(in crate::gui::graph_ui) struct ProcessConnectionsInputs<'a> {
+    pub background_response: &'a Response,
+    pub pointer_pos: Pos2,
+    pub port_interact_cmd: PortInteractCommand,
+    pub broken_nodes: &'a [NodeId],
+}
+
 impl GraphUi {
     pub(in crate::gui::graph_ui) fn handle_background_click(
         &mut self,
@@ -38,18 +49,20 @@ impl GraphUi {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(in crate::gui::graph_ui) fn process_connections(
         &mut self,
         input: &InputSnapshot,
         ctx: &GraphContext<'_>,
-        background_response: &Response,
-        pointer_pos: Pos2,
-        port_interact_cmd: PortInteractCommand,
-        broken_nodes: &[NodeId],
+        frame: ProcessConnectionsInputs<'_>,
         output: &mut FrameOutput,
     ) {
         let primary_down = input.primary_pressed || input.primary_down;
+        let ProcessConnectionsInputs {
+            background_response,
+            pointer_pos,
+            port_interact_cmd,
+            broken_nodes,
+        } = frame;
 
         match &mut self.gesture {
             // Node drag and view pan advance through egui response events

@@ -86,7 +86,15 @@ impl NewNodeUi {
 
         let mut selection: Option<NewNodeSelection<'a>> = None;
 
-        let popup_response = show_popup(gui, position, from_connection, func_lib, &mut selection);
+        let popup_response = show_popup(
+            gui,
+            PopupContext {
+                position,
+                from_connection,
+                func_lib,
+            },
+            &mut selection,
+        );
 
         if should_close_popup(input, &popup_response.response.rect) || selection.is_some() {
             self.close();
@@ -96,15 +104,23 @@ impl NewNodeUi {
     }
 }
 
-fn show_popup<'a>(
-    gui: &mut Gui<'_>,
+/// Read-only context for the new-node popup — anchor position, whether
+/// the popup was triggered by a dangling connection (to show the
+/// "Const" entry), and the function catalog to populate from.
+#[derive(Debug, Clone, Copy)]
+struct PopupContext<'a> {
     position: Pos2,
     from_connection: bool,
     func_lib: &'a FuncLib,
+}
+
+fn show_popup<'a>(
+    gui: &mut Gui<'_>,
+    ctx: PopupContext<'a>,
     selection: &mut Option<NewNodeSelection<'a>>,
 ) -> egui::InnerResponse<()> {
     Area::new(StableId::new("new_node_popup"))
-        .fixed_pos(position)
+        .fixed_pos(ctx.position)
         .order(Order::Foreground)
         .show(gui, |gui| {
             Frame::popup(StableId::new("new_node_popup_frame"), &gui.style.popup)
@@ -117,10 +133,10 @@ fn show_popup<'a>(
                         .apply(gui);
 
                     gui.horizontal_justified(|gui| {
-                        if from_connection {
+                        if ctx.from_connection {
                             show_const_bind_option(gui, selection);
                         }
-                        show_function_categories(gui, position, func_lib, selection);
+                        show_function_categories(gui, ctx.position, ctx.func_lib, selection);
                     });
                 });
         })
