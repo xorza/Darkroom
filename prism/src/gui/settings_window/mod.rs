@@ -17,7 +17,9 @@ use egui::{Align, Layout, vec2};
 use crate::common::StableId;
 use crate::config::Config;
 use crate::gui::Gui;
-use crate::gui::widgets::{Button, Label, Modal, Separator, Space, TextEdit};
+use crate::gui::widgets::{
+    Button, Checkbox, Label, Modal, RadioButton, Separator, Space, TextEdit,
+};
 use crate::session::Session;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,30 +75,19 @@ impl SettingsWindow {
 fn render_body(gui: &mut Gui<'_>, draft: &mut SettingsDraft) -> Option<SettingsAction> {
     let mut action = None;
 
-    fn check_glyph(checked: bool) -> &'static str {
-        if checked { "[x]" } else { "[ ]" }
-    }
-
     gui.vertical(|gui| {
-        // -- load_last --
-        gui.horizontal(|gui| {
-            Button::new(StableId::new("settings_load_last"))
-                .text(check_glyph(draft.load_last))
-                .toggle(&mut draft.load_last)
-                .show(gui);
-            Label::new("Reopen last graph on launch").show(gui);
-        });
+        Checkbox::new(StableId::new("settings_load_last"), &mut draft.load_last)
+            .text("Reopen last graph on launch")
+            .show(gui);
 
         Space::new(gui.style.padding).show(gui);
 
-        // -- tcp on/off --
-        gui.horizontal(|gui| {
-            Button::new(StableId::new("settings_tcp_enabled"))
-                .text(check_glyph(draft.tcp_enabled))
-                .toggle(&mut draft.tcp_enabled)
-                .show(gui);
-            Label::new("Auto-start TCP script listener").show(gui);
-        });
+        Checkbox::new(
+            StableId::new("settings_tcp_enabled"),
+            &mut draft.tcp_enabled,
+        )
+        .text("Auto-start TCP script listener")
+        .show(gui);
 
         if draft.tcp_enabled {
             Space::new(gui.style.small_padding).show(gui);
@@ -156,24 +147,20 @@ fn render_tcp_section(gui: &mut Gui<'_>, draft: &mut SettingsDraft) {
             gui.horizontal(|gui| {
                 Label::new("Auth").show(gui);
                 Space::new(gui.style.padding).show(gui);
-
-                let mut token_selected = !draft.tcp.no_auth;
-                let token_btn = Button::new(StableId::new("settings_tcp_auth_token"))
-                    .text("Token")
-                    .toggle(&mut token_selected)
-                    .show(gui);
-                if token_btn.clicked() {
-                    draft.tcp.no_auth = false;
-                }
-
-                let mut no_auth_selected = draft.tcp.no_auth;
-                let no_auth_btn = Button::new(StableId::new("settings_tcp_auth_none"))
-                    .text("No auth")
-                    .toggle(&mut no_auth_selected)
-                    .show(gui);
-                if no_auth_btn.clicked() {
-                    draft.tcp.no_auth = true;
-                }
+                RadioButton::new(
+                    StableId::new("settings_tcp_auth_token"),
+                    &mut draft.tcp.no_auth,
+                    false,
+                )
+                .text("Token")
+                .show(gui);
+                RadioButton::new(
+                    StableId::new("settings_tcp_auth_none"),
+                    &mut draft.tcp.no_auth,
+                    true,
+                )
+                .text("No auth")
+                .show(gui);
             });
 
             // Token row — hidden when no_auth is on
