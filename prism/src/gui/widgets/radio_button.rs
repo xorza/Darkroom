@@ -55,7 +55,7 @@ impl<'a, T: PartialEq + Clone> RadioButton<'a, T> {
         let galley = self.text.map(|t| gui.layout_no_wrap(t, &font, text_color));
 
         let box_size = gui.font_height(&font);
-        let gap = gui.style.small_padding;
+        let gap = gui.style.padding;
         let total_size = match galley.as_ref() {
             Some(g) => vec2(box_size + gap + g.size().x, box_size.max(g.size().y)),
             None => Vec2::splat(box_size),

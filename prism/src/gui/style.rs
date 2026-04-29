@@ -70,6 +70,11 @@ pub struct Style {
     /// Bigger than [`big_padding`] because dialog content needs
     /// breathing room a panel doesn't.
     pub modal_padding: f32,
+    /// Canonical height of a form row (label + input). Sized to fit
+    /// a single-line `TextEdit` (font height + its `padding` margin
+    /// top/bottom) so labels, text edits, buttons, and checkboxes
+    /// drawn in the same row sit on a shared baseline.
+    pub row_height: f32,
 
     pub graph_background: GraphBackgroundStyle,
     pub connections: ConnectionStyle,
@@ -305,6 +310,7 @@ impl Style {
             small_corner_radius: r.small_corner_radius * scale,
             button_padding: r.button_padding * scale,
             modal_padding: r.modal_padding * scale,
+            row_height: r.row_height * scale,
 
             graph_background: GraphBackgroundStyle {
                 bg_color: r.graph_background.bg_color,
@@ -498,6 +504,7 @@ impl Default for Style {
             small_corner_radius: SMALL_CORNER_RADIUS,
             button_padding: Vec2::new(12.0, 3.0),
             modal_padding: 12.0,
+            row_height: 24.0,
 
             graph_background: GraphBackgroundStyle::default(),
             connections: ConnectionStyle::default(),

@@ -129,7 +129,7 @@ fn render_tcp_section(gui: &mut Gui<'_>, draft: &mut SettingsDraft) {
         Space::new(indent).show(gui);
         gui.vertical(|gui| {
             // Bind
-            gui.horizontal(|gui| {
+            gui.form_row(|gui| {
                 Label::new("Bind address").show(gui);
                 Space::new(gui.style.padding).show(gui);
                 TextEdit::singleline(&mut draft.tcp.bind_text)
@@ -146,7 +146,7 @@ fn render_tcp_section(gui: &mut Gui<'_>, draft: &mut SettingsDraft) {
             Space::new(gui.style.small_padding).show(gui);
 
             // Auth radio (Token / No auth)
-            gui.horizontal(|gui| {
+            gui.form_row(|gui| {
                 Label::new("Auth").show(gui);
                 Space::new(gui.style.padding).show(gui);
                 RadioButton::new(
@@ -168,7 +168,7 @@ fn render_tcp_section(gui: &mut Gui<'_>, draft: &mut SettingsDraft) {
             // Token row — hidden when no_auth is on
             if !draft.tcp.no_auth {
                 Space::new(gui.style.small_padding).show(gui);
-                gui.horizontal(|gui| {
+                gui.form_row(|gui| {
                     Label::new("Token").show(gui);
                     Space::new(gui.style.padding).show(gui);
                     Label::new(draft.tcp.token.to_string())
@@ -188,7 +188,7 @@ fn render_tcp_section(gui: &mut Gui<'_>, draft: &mut SettingsDraft) {
             Space::new(gui.style.small_padding).show(gui);
 
             // Token file
-            gui.horizontal(|gui| {
+            gui.form_row(|gui| {
                 Label::new("Token file").show(gui);
                 Space::new(gui.style.padding).show(gui);
                 TextEdit::singleline(&mut draft.tcp.token_file_text)

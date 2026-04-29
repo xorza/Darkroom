@@ -192,6 +192,15 @@ impl<'a> Gui<'a> {
         self.ui.fonts_mut(|f| f.row_height(font_id))
     }
 
+    /// Pin the current layout's minimum height — siblings allocate
+    /// at least `height` on the cross axis. Form rows use this to
+    /// guarantee labels/text-edits/buttons share a baseline. Sanctioned
+    /// thin wrapper over `Ui::set_min_height` so app code doesn't
+    /// reach for `ui_raw()`.
+    pub fn set_min_height(&mut self, height: f32) {
+        self.ui.set_min_height(height);
+    }
+
     pub fn horizontal<R>(
         &mut self,
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
@@ -220,6 +229,19 @@ impl<'a> Gui<'a> {
     ) -> InnerResponse<R> {
         let args = self.view_params();
         self.ui.vertical(|ui| args.enter(ui, add_contents))
+    }
+
+    /// Single form line: pinned to `style.row_height` with cross-axis
+    /// `Align::Center`, so labels, text edits, and buttons drawn in
+    /// the same row share a vertical centerline regardless of their
+    /// natural heights. Use for any "label + input" row.
+    pub fn form_row<R>(&mut self, add_contents: impl FnOnce(&mut Gui<'_>) -> R) -> R {
+        let row_height = self.style.row_height;
+        self.with_layout(Layout::left_to_right(egui::Align::Center), |gui| {
+            gui.set_min_height(row_height);
+            add_contents(gui)
+        })
+        .inner
     }
 
     /// Begin a stable-id child scope. Returns a builder that applies
