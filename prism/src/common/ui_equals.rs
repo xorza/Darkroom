@@ -5,11 +5,14 @@ pub trait UiEquals {
 }
 
 impl UiEquals for f32 {
+    /// Relative tolerance: 1%. Loose enough that trackpad-pinch
+    /// micro-deltas don't churn the viewport-emit / galley-rebuild
+    /// gates, well below the user-visible JND for text size (~5%).
     fn ui_equals(&self, other: Self) -> bool {
         let diff = (self - other).abs();
         let scale = self.abs().max(other.abs()).max(1.0);
 
-        diff / scale <= 0.001
+        diff / scale <= 0.005
     }
 }
 
