@@ -72,9 +72,23 @@ impl<'a> Modal<'a> {
         // rect (which `Resize` sets to `desired_size` each frame) so
         // `last_content_size == desired_size` and resize sticks across
         // frames.
+        //
+        // We also register a click+drag interactor over the body rect.
+        // egui::Window's underlying Area registers its move-drag over
+        // the whole area; later-registered child widgets win hit-tests,
+        // so this absorbs body drags and leaves only the title bar as
+        // the move handle.
+        let id = self.id;
         let body_fill = move |gui: &mut Gui<'_>| {
-            let avail = gui.ui_raw().available_size();
-            gui.ui_raw().set_min_size(avail);
+            let ui = gui.ui_raw();
+            let avail = ui.available_size();
+            ui.set_min_size(avail);
+            let body_rect = ui.available_rect_before_wrap();
+            let _ = ui.interact(
+                body_rect,
+                id.with("body_drag_block").id(),
+                egui::Sense::CLICK | egui::Sense::DRAG,
+            );
             body(gui)
         };
 
