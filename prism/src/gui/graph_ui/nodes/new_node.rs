@@ -6,7 +6,7 @@ use scenarium::prelude::FuncLib;
 
 use crate::common::StableId;
 use crate::gui::Gui;
-use crate::gui::widgets::{Area, ColumnFlow, Expander, Frame, HitRegion, Layout, ListItem};
+use crate::gui::widgets::{Area, ColumnFlow, Constraints, Expander, Frame, HitRegion, ListItem};
 use crate::input::InputSnapshot;
 
 const POPUP_MIN_WIDTH: f32 = 150.0;
@@ -131,7 +131,7 @@ fn show_popup<'a>(
             Frame::popup(StableId::new("new_node_popup_frame"), &gui.style.popup)
                 .sense(Sense::all())
                 .show(gui, |gui| {
-                    Layout::new()
+                    Constraints::new()
                         .min_width(POPUP_MIN_WIDTH)
                         .min_height(POPUP_MIN_HEIGHT)
                         .max_height(POPUP_MAX_HEIGHT)
@@ -173,7 +173,7 @@ fn show_const_bind_option<'a>(gui: &mut Gui<'_>, selection: &mut Option<NewNodeS
         let button_width = BUTTON_MIN_WIDTH + padding * 2.0;
         let button_height = gui.font_height(&btn_font) + small_padding * 2.0;
 
-        Layout::new().min_width(button_width).apply(gui);
+        Constraints::new().min_width(button_width).apply(gui);
 
         if ListItem::from_str(StableId::new("const_bind_option"), "Const")
             .size(vec2(button_width, button_height))

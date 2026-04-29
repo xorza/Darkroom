@@ -2,18 +2,21 @@
 //! Lets app-layer code say "this block must be at least N wide / at most
 //! M tall / should eat all remaining horizontal space" without touching
 //! raw egui.
+//!
+//! Named `Constraints` to avoid colliding with `egui::Layout`, which is
+//! a different abstraction (direction + alignment for a layout pass).
 
 use crate::gui::Gui;
 
 #[derive(Debug, Default)]
-pub struct Layout {
+pub struct Constraints {
     min_width: Option<f32>,
     min_height: Option<f32>,
     max_height: Option<f32>,
     fill_width: bool,
 }
 
-impl Layout {
+impl Constraints {
     pub fn new() -> Self {
         Self::default()
     }

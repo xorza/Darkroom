@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use eframe::egui;
-use egui::{Align, FontId, Galley, Rect, Response, Sense, Shape, StrokeKind, Vec2, vec2};
+use egui::{Align, FontId, Galley, Rect, Response, Sense, StrokeKind, Vec2, vec2};
 
 use crate::common::StableId;
 use crate::gui::Gui;
@@ -27,7 +27,6 @@ pub struct Button<'a> {
 
     text: Option<&'a str>,
     custom_galley: Option<Arc<Galley>>,
-    shapes: Vec<Shape>,
 }
 
 impl<'a> Button<'a> {
@@ -45,7 +44,6 @@ impl<'a> Button<'a> {
             rect: None,
             size: None,
             padding: None,
-            shapes: Vec::new(),
             toggle_value: None,
             content_align: Align::Center,
             custom_galley: None,
@@ -97,11 +95,6 @@ impl<'a> Button<'a> {
 
     pub fn rect(mut self, rect: Rect) -> Self {
         self.rect = Some(rect);
-        self
-    }
-
-    pub fn shapes(mut self, shapes: impl IntoIterator<Item = impl Into<Shape>>) -> Self {
-        self.shapes = shapes.into_iter().map(Into::into).collect();
         self
     }
 
@@ -219,9 +212,6 @@ impl<'a> Button<'a> {
         gui.painter()
             .rect(rect, background.radius, fill, stroke, StrokeKind::Inside);
 
-        if !self.shapes.is_empty() {
-            gui.painter().extend(self.shapes);
-        }
         if let Some(galley) = galley {
             let text_x = match self.content_align {
                 Align::Min => rect.min.x + gui.style.padding,

@@ -12,7 +12,7 @@ use crate::gui::graph_ui::ctx::GraphContext;
 use crate::gui::graph_ui::nodes::new_node::NewNodeSelection;
 use crate::gui::graph_ui::port::PortKind;
 use crate::gui::graph_ui::{GraphUi, ViewButtonAction};
-use crate::gui::widgets::{Area, Button, Frame, Layout};
+use crate::gui::widgets::{Area, Button, Constraints, Frame};
 use crate::input::InputSnapshot;
 use crate::model;
 use crate::model::Intent;
@@ -32,7 +32,7 @@ impl GraphUi {
             .scope(StableId::new("graph_ui_top_buttons"))
             .max_rect(rect)
             .show(|gui| {
-                Layout::new().fill_width().apply(gui);
+                Constraints::new().fill_width().apply(gui);
                 let padding = gui.style.padding;
                 Frame::none(StableId::new("top_buttons_frame"))
                     .sense(Sense::all())
