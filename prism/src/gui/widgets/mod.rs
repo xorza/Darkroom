@@ -1,11 +1,3 @@
-// Widgets are small builder structs with public API surfaces (font,
-// style, size, tooltip, etc.). Many builder methods aren't called
-// internally today but exist as part of the widget's contract for
-// future callers. `text_edit.rs` is additionally a vendored fork of
-// egui's `TextEdit` and keeps methods for parity. Silencing
-// dead_code at the module level rather than per-item.
-#![allow(dead_code)]
-
 pub mod area;
 pub mod button;
 pub mod column_flow;

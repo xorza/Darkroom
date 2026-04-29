@@ -1,4 +1,4 @@
-use egui::{Align2, InnerResponse, Pos2};
+use egui::{InnerResponse, Pos2};
 
 use crate::common::StableId;
 use crate::gui::Gui;
@@ -15,33 +15,8 @@ impl Area {
         }
     }
 
-    pub fn sizing_pass(mut self, sizing_pass: bool) -> Self {
-        self.inner = self.inner.sizing_pass(sizing_pass);
-        self
-    }
-
-    pub fn default_width(mut self, width: f32) -> Self {
-        self.inner = self.inner.default_width(width);
-        self
-    }
-
-    pub fn movable(mut self, movable: bool) -> Self {
-        self.inner = self.inner.movable(movable);
-        self
-    }
-
-    pub fn interactable(mut self, interactable: bool) -> Self {
-        self.inner = self.inner.interactable(interactable);
-        self
-    }
-
     pub fn fixed_pos(mut self, pos: Pos2) -> Self {
         self.inner = self.inner.fixed_pos(pos);
-        self
-    }
-
-    pub fn pivot(mut self, pivot: Align2) -> Self {
-        self.inner = self.inner.pivot(pivot);
         self
     }
 

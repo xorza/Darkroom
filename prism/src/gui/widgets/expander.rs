@@ -11,7 +11,6 @@ pub struct Expander {
     id: StableId,
     text: String,
     default_open: bool,
-    min_width: Option<f32>,
 }
 
 impl Expander {
@@ -20,17 +19,11 @@ impl Expander {
             id,
             text: text.into(),
             default_open: false,
-            min_width: None,
         }
     }
 
     pub fn default_open(mut self, default_open: bool) -> Self {
         self.default_open = default_open;
-        self
-    }
-
-    pub fn min_width(mut self, min_width: f32) -> Self {
-        self.min_width = Some(min_width);
         self
     }
 
@@ -50,11 +43,6 @@ impl Expander {
 
         let header_height = galley.size().y.max(icon_size);
         let header_width = icon_size + icon_spacing + galley.size().x;
-        let header_width = if let Some(min_width) = self.min_width {
-            header_width.max(min_width)
-        } else {
-            header_width
-        };
         let header_size = vec2(header_width, header_height);
 
         let (_auto_id, header_rect) = gui.ui_raw().allocate_space(header_size);
@@ -80,9 +68,6 @@ impl Expander {
         }
 
         if open {
-            if let Some(min_width) = self.min_width {
-                gui.ui_raw().set_min_width(min_width);
-            }
             add_contents(gui);
         }
     }

@@ -51,6 +51,11 @@ impl<'a> Button<'a> {
         }
     }
 
+    /// No live caller, but the disabled-state rendering paths in `show`
+    /// (greyed fill, no-click sense, muted text color) all still react
+    /// to this flag — keeping the setter avoids re-deriving them when
+    /// the next menu/button needs a disabled state.
+    #[allow(dead_code)]
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
         self

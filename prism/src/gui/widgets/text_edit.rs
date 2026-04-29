@@ -24,16 +24,8 @@ pub struct TextEdit<'t> {
 
 impl<'t> TextEdit<'t> {
     pub fn singleline(text: &'t mut dyn TextBuffer) -> Self {
-        Self::wrap(egui::TextEdit::singleline(text))
-    }
-
-    pub fn multiline(text: &'t mut dyn TextBuffer) -> Self {
-        Self::wrap(egui::TextEdit::multiline(text))
-    }
-
-    fn wrap(inner: egui::TextEdit<'t>) -> Self {
         Self {
-            inner,
+            inner: egui::TextEdit::singleline(text),
             margin_override: None,
             text_color_override: None,
         }

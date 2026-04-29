@@ -31,11 +31,6 @@ impl<'a> PopupMenu<'a> {
         }
     }
 
-    pub fn style(mut self, style: PopupStyle) -> Self {
-        self.style = Some(style);
-        self
-    }
-
     pub fn min_width(mut self, width: f32) -> Self {
         self.min_width = Some(width);
         self
@@ -72,11 +67,9 @@ pub struct ListItem<'a> {
     text: Option<&'a str>,
     galley: Option<Arc<Galley>>,
     selected: bool,
-    enabled: bool,
     font: Option<FontId>,
     style: Option<ButtonStyle>,
     size: Option<Vec2>,
-    text_align: Align,
     tooltip: Option<&'a str>,
 }
 
@@ -87,11 +80,9 @@ impl<'a> ListItem<'a> {
             text: Some(text),
             galley: None,
             selected: false,
-            enabled: true,
             font: None,
             style: None,
             size: None,
-            text_align: Align::Min,
             tooltip: None,
         }
     }
@@ -103,22 +94,15 @@ impl<'a> ListItem<'a> {
             text: None,
             galley: Some(galley),
             selected: false,
-            enabled: true,
             font: None,
             style: None,
             size: None,
-            text_align: Align::Min,
             tooltip: None,
         }
     }
 
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
-        self
-    }
-
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
         self
     }
 
@@ -134,11 +118,6 @@ impl<'a> ListItem<'a> {
 
     pub fn size(mut self, size: Vec2) -> Self {
         self.size = Some(size);
-        self
-    }
-
-    pub fn text_align(mut self, align: Align) -> Self {
-        self.text_align = align;
         self
     }
 
@@ -181,8 +160,7 @@ impl<'a> ListItem<'a> {
 
         let mut btn = Button::new(id)
             .background(style)
-            .enabled(self.enabled)
-            .text_align(self.text_align)
+            .text_align(Align::Min)
             .size(size)
             .toggle(&mut selected);
 

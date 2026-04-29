@@ -15,39 +15,25 @@ use crate::gui::widgets::label::Label;
 use crate::gui::widgets::scroll_area::ScrollArea;
 use crate::gui::widgets::space::Space;
 
+/// Number of lines visible when expanded.
+const EXPANDED_LINE_COUNT: usize = 6;
+
 #[derive(Debug)]
 pub struct StatusPanel<'a> {
     id: StableId,
     status: &'a str,
-    line_count: usize,
-    default_open: bool,
 }
 
 impl<'a> StatusPanel<'a> {
     pub fn new(id: StableId, status: &'a str) -> Self {
-        Self {
-            id,
-            status,
-            line_count: 6,
-            default_open: false,
-        }
-    }
-
-    pub fn line_count(mut self, line_count: usize) -> Self {
-        self.line_count = line_count;
-        self
-    }
-
-    pub fn default_open(mut self, default_open: bool) -> Self {
-        self.default_open = default_open;
-        self
+        Self { id, status }
     }
 
     pub fn show(self, gui: &mut Gui<'_>) {
         let style = gui.style.clone();
         let line_height = gui.font_height(&style.body_font);
         let toggle_id = self.id.id().with("open");
-        let mut open = gui.load_persistent(toggle_id, self.default_open);
+        let mut open = gui.load_persistent(toggle_id, false);
 
         let frame = Frame::none(self.id)
             .fill(style.graph_background.bg_color)
@@ -80,7 +66,7 @@ impl<'a> StatusPanel<'a> {
                 gui.ui_raw().expand_to_include_rect(icon_rect);
 
                 if open {
-                    let max_height = line_height * self.line_count as f32;
+                    let max_height = line_height * EXPANDED_LINE_COUNT as f32;
                     gui.ui_raw().set_height(max_height);
 
                     ScrollArea::vertical(scroll_id)
