@@ -154,6 +154,15 @@ impl GraphUi {
         output: &mut FrameOutput,
     ) {
         gui.with_scale(ctx.view_graph.scale, |gui| {
+            // Cancel any drag released on the previous frame *before*
+            // refresh reads the gesture: by now `MoveNode::apply` has
+            // run, so `view_node.pos` already reflects the drop and
+            // adding the released drag's offset on top would render
+            // the node at twice the displacement for one frame.
+            if self.gesture.is_released_node_drag() {
+                self.gesture.cancel();
+            }
+
             // Per-frame layout pipeline: one pass populates galleys
             // (rebuilt on name/scale change) AND layouts (recomputed
             // every frame) for every view-node, so every per-node

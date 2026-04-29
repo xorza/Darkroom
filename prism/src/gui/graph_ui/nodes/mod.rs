@@ -129,14 +129,6 @@ impl NodeUi {
         output: &mut FrameOutput,
         gesture: &mut Gesture,
     ) {
-        // A drag released on the previous frame kept its offset alive
-        // through that frame's render (gesture was in `ReleasedNodeDrag`).
-        // By now `MoveNode::apply` has run, so the offset is stale —
-        // cancel before we read any drag state.
-        if gesture.is_released_node_drag() {
-            gesture.cancel();
-        }
-
         for view_node in ctx.view_graph.view_nodes.iter() {
             let node_id = view_node.id;
             let layout = graph_layout.cached_layout(&node_id);
