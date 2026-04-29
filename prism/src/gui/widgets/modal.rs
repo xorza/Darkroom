@@ -1,26 +1,23 @@
-//! Floating modal window backed by [`egui::Window`]. Title bar is the
-//! only drag handle (body input is absorbed); the window auto-sizes
-//! to its content (no user resize). Title bar gains a close `✕` when
-//! [`Modal::open`] is bound.
+//! Floating modal backed directly by [`egui::Area`] — no
+//! [`egui::Window`], no [`egui::containers::resize::Resize`]. The Area
+//! stores `state.size = content_ui.min_size()` each frame
+//! (`area.rs:670`), so the modal tracks its content size both up and
+//! down with no monotonic high-water mark. Title bar (with close `✕`)
+//! is the only drag handle: `Area::movable(true)` registers a
+//! whole-area drag, then a body-wide click+drag absorber consumes
+//! input below the title bar so only title-bar clicks reach Area's
+//! drag.
 //!
-//! Why `egui::Window` and not `egui::Modal`: we want drag-to-move and
-//! edge-resize, which `egui::Modal` does not provide. The trade-off is
-//! that we have to recreate the modal-layer + backdrop pieces by hand
-//! (see `install_modal_chrome`) and live with one rough edge: during
-//! egui::Window's built-in fade-out (after `*open` flips to false) the
-//! chrome is gone but the window paints at reducing opacity for a few
-//! frames — input briefly leaks through. egui::Window doesn't expose a
-//! way to query in-progress opacity, so we accept it.
-//!
-//! Modal input blocking uses egui's modal-layer system together with a
-//! transparent screen-sized click+drag absorber — same recipe as
-//! [`egui::Modal`]. No visual dim is painted; layer an [`egui::Area`]
-//! at the call site if you want one.
+//! Modal-layer (focus traversal blocked) + a transparent screen-sized
+//! click+drag absorber backdrop come from [`install_modal_chrome`] —
+//! same recipe as `egui::Modal`. No visual dim is painted; layer an
+//! `egui::Area` at the call site if you want one.
 
-use egui::{Align2, Order, Sense, Vec2};
+use egui::{Align, Align2, Key, Layout, Modifiers, Order, Sense, Vec2};
 
 use crate::common::StableId;
 use crate::gui::Gui;
+use crate::gui::widgets::{Button, Label, Separator};
 
 #[derive(Debug)]
 #[must_use = "Modal does nothing until .show() is called"]
@@ -40,75 +37,99 @@ impl<'a> Modal<'a> {
     }
 
     /// Bind visibility to a caller-owned bool. Adds a close `✕` to the
-    /// title bar; clicking it (or pressing Escape on the focused
-    /// window) flips the flag to false.
+    /// title bar; clicking it (or pressing Escape) flips the flag to
+    /// false.
     pub fn open(mut self, open: &'a mut bool) -> Self {
         self.open = Some(open);
         self
     }
 
     /// Returns `Some(inner)` when the body ran this frame, `None` when
-    /// the dialog is closed (or fully faded out).
+    /// the dialog is closed.
     pub fn show<R>(self, gui: &mut Gui<'_>, body: impl FnOnce(&mut Gui<'_>) -> R) -> Option<R> {
-        let ctx = gui.ui_raw().ctx().clone();
-        let args = gui.view_params();
-        let id = self.id;
-
         let visible = self.open.as_deref().copied().unwrap_or(true);
-        if visible {
-            gui.set_modal_layer(id);
-            install_modal_chrome(&ctx, id);
+        if !visible {
+            return None;
         }
 
-        // Stock `egui::Window` builds its frame from the global
-        // `window_margin` (= `style.padding`, ~4 px), which leaves
-        // dialog content visibly cramped against the chrome. Override
-        // with `modal_padding` so modal bodies get the same breathing
-        // room a real settings/about dialog expects.
+        let ctx = gui.ui_raw().ctx().clone();
+        let constrain_rect = gui.container_rect();
+        let id = self.id;
+        let title = self.title;
+
+        gui.set_modal_layer(id);
+        install_modal_chrome(&ctx, id);
+
+        // Stock window margin (~4 px) leaves dialog content cramped;
+        // bump to `modal_padding`.
         let frame = egui::Frame::window(&ctx.global_style())
             .inner_margin(egui::Margin::same(gui.style.modal_padding as i8));
-        // Auto-size to content. `auto_sized()` = `min_size(0)` +
-        // `default_size(INFINITY)` + `resizable(false)`. The first
-        // frame state is unknown so `Area` runs an invisible sizing
-        // pass (`area.rs:444-467`) where `ui.is_sizing_pass()` is
-        // true; `Gui::row_with_layout` honours that and allocates
-        // width 0, letting children grow `min_rect` to their natural
-        // width. Subsequent frames render at the measured size.
-        // `constrain_to` clamps position+size to the central panel.
-        // No `vscroll` — its `min_scrolled_size` floor and outer
-        // bookkeeping add height even when content fits.
-        let constrain_rect = gui.container_rect();
-        let mut window = egui::Window::new(self.title)
-            .id(id.id())
-            .collapsible(false)
-            .auto_sized()
+
+        let args = gui.view_params();
+
+        let mut close_clicked = false;
+
+        let inner = egui::Area::new(id.id())
+            .order(Order::Foreground)
+            .movable(true)
+            .pivot(Align2::CENTER_CENTER)
+            .default_pos(constrain_rect.center())
             .constrain_to(constrain_rect)
-            .frame(frame);
-        if let Some(open) = self.open {
-            window = window.open(open);
+            .show(&ctx, |ui| {
+                frame
+                    .show(ui, |ui| {
+                        args.enter(ui, |gui| {
+                            // Title bar: title on left, close × on
+                            // right. `row_with_layout` is sizing-pass
+                            // aware (claims width 0 during measure,
+                            // available_width on the visible pass) so
+                            // the modal's measured width is content-
+                            // driven, not slack-driven.
+                            gui.row_with_layout(Layout::right_to_left(Align::Center), |gui| {
+                                // RTL → first child placed
+                                // rightmost.
+                                let close = Button::new(id.with("close")).text("✕").show(gui);
+                                if close.clicked() {
+                                    close_clicked = true;
+                                }
+                                Label::new(title).show(gui);
+                            });
+
+                            Separator::new().show(gui);
+
+                            // Body input absorber — keeps Area's
+                            // whole-rect drag from firing inside the
+                            // body. Registered before body so body
+                            // widgets, registered later, win for
+                            // their own click points; the absorber
+                            // only catches background clicks/drags.
+                            let body_region = gui.ui_raw().available_rect_before_wrap();
+                            let _ = gui.ui_raw().interact(
+                                body_region,
+                                id.with("body_drag_block").id(),
+                                Sense::click_and_drag(),
+                            );
+
+                            body(gui)
+                        })
+                    })
+                    .inner
+            })
+            .inner;
+
+        let escape_pressed = ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape));
+        if (close_clicked || escape_pressed)
+            && let Some(open) = self.open
+        {
+            *open = false;
         }
 
-        window
-            .show(&ctx, |ui| {
-                args.enter(ui, |gui| {
-                    let ui = gui.ui_raw();
-                    // Absorb body input so the underlying Area's
-                    // move-drag (registered earlier) only fires from
-                    // the title bar.
-                    let _ = ui.interact(
-                        ui.available_rect_before_wrap(),
-                        id.with("body_drag_block").id(),
-                        Sense::click_and_drag(),
-                    );
-                    body(gui)
-                })
-            })
-            .and_then(|r| r.inner)
+        Some(inner)
     }
 }
 
 /// Transparent screen-sized click+drag absorber registered before the
-/// window (so it draws underneath). Keyed off the modal's id so
+/// modal (so it draws underneath). Keyed off the modal's id so
 /// multiple modals coexist. Caller must also flip the modal-layer flag
 /// via [`Gui::set_modal_layer`] for focus traversal to be blocked.
 fn install_modal_chrome(ctx: &egui::Context, id: StableId) {
