@@ -34,7 +34,7 @@ impl MainTui {
             // any pending worker messages — script-driven graph mutations
             // would otherwise leak into the unbounded inbound channel
             // until shutdown.
-            session.frame(&mut output, |_, _| {});
+            session.tick(&mut output);
 
             if shutdown.load(Ordering::SeqCst) {
                 break;

@@ -213,21 +213,21 @@ impl Session {
         std::mem::take(&mut self.render_events)
     }
 
-    /// Wrap a single frame's worth of rendering with the required
-    /// drain → render → handle_output ordering. Frontends call this
-    /// once per frame; the closure body is the renderer's full work
-    /// (panels, graph view, shortcuts) and may freely read or queue
-    /// commands via the supplied `&mut FrameOutput`.
-    pub fn frame<R>(
-        &mut self,
-        output: &mut FrameOutput,
-        f: impl FnOnce(&mut Session, &mut FrameOutput) -> R,
-    ) -> R {
+    /// Drive Session for one tick: drain script + worker inbounds,
+    /// then dispatch the supplied `output` (worker commands, queued
+    /// runs, edited intents, etc.) Used by non-GUI frontends
+    /// (headless, TUI) which have no render pass to interleave with
+    /// drain/dispatch. The GUI doesn't call this — it splits the two
+    /// halves across `App::logic` and `App::ui` so script side-effects
+    /// flow even when the window is hidden.
+    ///
+    /// Caller owns `output`. For non-render frontends just pass a
+    /// `FrameOutput::default()` field; it stays empty, but
+    /// `handle_output` still needs to see it to consume
+    /// `pending_run_cmd` queued by `drain_inbound`.
+    pub fn tick(&mut self, output: &mut FrameOutput) {
         self.drain_inbound();
-        output.clear();
-        let result = f(self, output);
         self.handle_output(output);
-        result
     }
 
     /// Appends a status line. Keeps the buffer below [`STATUS_CAP`]

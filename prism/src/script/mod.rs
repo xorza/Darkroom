@@ -36,7 +36,7 @@ use scenarium::prelude::FuncLib;
 use crate::model::Intent;
 use crate::model::ViewNode;
 use tokio::sync::{mpsc, oneshot};
-use tokio::task::{JoinHandle, yield_now};
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -159,8 +159,10 @@ pub fn start_transports(cfg: &ScriptConfig) -> Vec<Box<dyn ScriptTransport>> {
 
 /// Print a transport's discovery banner to stdout (and log token-file
 /// writes via tracing). Split out from [`build_transports`] so binding
-/// stays pure and unit-testable.
-pub fn announce(report: &TransportReport) {
+/// stays pure and unit-testable. Only used internally by
+/// [`start_transports`]; tests that want raw outcomes call
+/// [`build_transports`] directly.
+pub(crate) fn announce(report: &TransportReport) {
     match report {
         TransportReport::Tcp(r) => announce_tcp(r),
     }
@@ -255,9 +257,11 @@ pub struct ScriptResult {
 
 /// Inbound signals from the script executor to [`crate::session::Session`].
 /// Each registered script function pushes a variant here; Session drains
-/// the queue every frame. Kept separate from the request/reply channel so
-/// the executor can complete a script without round-tripping through
-/// Session for every side effect.
+/// the queue on every tick (GUI: in `App::logic`, headless/TUI: in their
+/// async loops, all woken by the host's `Notify` after each successful
+/// send). Kept separate from the request/reply channel so the executor
+/// can complete a script without round-tripping through Session for
+/// every side effect.
 #[derive(Debug)]
 pub enum SessionInbound {
     /// A `print(msg)` call from a script. Lands on Session's status log.
@@ -449,7 +453,6 @@ async fn run_executor(
                 let _ = req.reply.send(reply);
             }
         }
-        yield_now().await;
     }
 }
 

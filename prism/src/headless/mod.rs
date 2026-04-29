@@ -3,7 +3,7 @@
 //! or Ctrl-C. Useful for driving prism from a remote script client
 //! (`examples/script_client`) without a desktop window.
 //!
-//! Loop shape: wake → `session.frame(...)` (drains worker and script
+//! Loop shape: wake → `session.tick(...)` (drains worker and script
 //! inbounds, forwards intents to the worker) → sleep until the next
 //! `request_redraw` or `close_app` from the host or until Ctrl-C.
 
@@ -32,8 +32,8 @@ pub async fn run(launch_config: LaunchConfig) -> Result<()> {
     loop {
         // Drain inbound queues and dispatch any pending worker messages
         // (queued runs, autorun toggles, intents committed by scripts).
-        // No render closure — there's no UI to paint.
-        session.frame(&mut output, |_, _| {});
+        // No render — there's no UI to paint.
+        session.tick(&mut output);
 
         if shutdown.load(Ordering::SeqCst) {
             break;
