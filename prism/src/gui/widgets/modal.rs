@@ -27,7 +27,6 @@ pub struct Modal<'a> {
     id: StableId,
     title: &'a str,
     open: Option<&'a mut bool>,
-    min_size: Option<Vec2>,
 }
 
 impl<'a> Modal<'a> {
@@ -36,7 +35,6 @@ impl<'a> Modal<'a> {
             id,
             title,
             open: None,
-            min_size: None,
         }
     }
 
@@ -45,12 +43,6 @@ impl<'a> Modal<'a> {
     /// window) flips the flag to false.
     pub fn open(mut self, open: &'a mut bool) -> Self {
         self.open = Some(open);
-        self
-    }
-
-    /// Minimum body size. Doubles as the default size on first open.
-    pub fn min_size(mut self, min_size: Vec2) -> Self {
-        self.min_size = Some(min_size);
         self
     }
 
@@ -67,12 +59,19 @@ impl<'a> Modal<'a> {
             install_modal_chrome(&ctx, id);
         }
 
-        let mut window = egui::Window::new(self.title).id(id.id()).collapsible(false);
+        // Stock `egui::Window` builds its frame from the global
+        // `window_margin` (= `style.padding`, ~4 px), which leaves
+        // dialog content visibly cramped against the chrome. Override
+        // with `modal_padding` so modal bodies get the same breathing
+        // room a real settings/about dialog expects.
+        let frame = egui::Frame::window(&ctx.global_style())
+            .inner_margin(egui::Margin::same(gui.style.modal_padding as i8));
+        let mut window = egui::Window::new(self.title)
+            .id(id.id())
+            .collapsible(false)
+            .frame(frame);
         if let Some(open) = self.open {
             window = window.open(open);
-        }
-        if let Some(min_size) = self.min_size {
-            window = window.default_size(min_size).min_size(min_size);
         }
 
         window

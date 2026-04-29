@@ -61,6 +61,16 @@ pub struct Style {
     pub corner_radius: f32,
     pub small_corner_radius: f32,
 
+    /// Inner padding for stand-alone action buttons (dialog footers,
+    /// menu bar). Wider than the autosize default so a "Cancel" /
+    /// "Apply" reads as a button, not a label. `MenuStyle::padding`
+    /// pulls from this by default.
+    pub button_padding: Vec2,
+    /// Inner margin between a [`Modal`]'s chrome and its body.
+    /// Bigger than [`big_padding`] because dialog content needs
+    /// breathing room a panel doesn't.
+    pub modal_padding: f32,
+
     pub graph_background: GraphBackgroundStyle,
     pub connections: ConnectionStyle,
     pub node: NodeStyle,
@@ -144,14 +154,13 @@ pub struct NodeStyle {
 }
 
 /// Styling for the top-level menu bar + its dropdown entries: font,
-/// per-entry padding, popup width, and the button preset shared
-/// between the trigger button and each entry.
+/// popup width, and the button preset shared between the trigger
+/// button and each entry. Per-entry padding is the canonical
+/// [`Style::button_padding`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MenuStyle {
     pub font: FontId,
-    #[serde(with = "vec2_array")]
-    pub padding: Vec2,
     pub popup_min_width: f32,
     pub button: ButtonStyle,
 }
@@ -294,6 +303,8 @@ impl Style {
             small_padding: r.small_padding * scale,
             corner_radius: r.corner_radius * scale,
             small_corner_radius: r.small_corner_radius * scale,
+            button_padding: r.button_padding * scale,
+            modal_padding: r.modal_padding * scale,
 
             graph_background: GraphBackgroundStyle {
                 bg_color: r.graph_background.bg_color,
@@ -339,7 +350,6 @@ impl Style {
             },
             menu: MenuStyle {
                 font: scale_font(&r.menu.font, scale),
-                padding: r.menu.padding * scale,
                 popup_min_width: r.menu.popup_min_width * scale,
                 button: scale_button_style(&r.menu.button, scale),
             },
@@ -486,6 +496,8 @@ impl Default for Style {
             small_padding: 2.0,
             corner_radius: 4.0,
             small_corner_radius: SMALL_CORNER_RADIUS,
+            button_padding: Vec2::new(12.0, 3.0),
+            modal_padding: 12.0,
 
             graph_background: GraphBackgroundStyle::default(),
             connections: ConnectionStyle::default(),
@@ -530,7 +542,6 @@ impl Default for MenuStyle {
                 size: 15.0,
                 family: FontFamily::Proportional,
             },
-            padding: Vec2::new(12.0, 3.0),
             popup_min_width: 100.0,
             button: ButtonStyle::default(),
         }

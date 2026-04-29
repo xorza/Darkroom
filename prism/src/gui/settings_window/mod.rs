@@ -12,7 +12,7 @@ pub mod draft;
 
 pub use draft::SettingsDraft;
 
-use egui::{Align, Layout, vec2};
+use egui::{Align, Layout};
 
 use crate::common::StableId;
 use crate::config::Config;
@@ -54,7 +54,6 @@ impl SettingsWindow {
         let mut action: Option<SettingsAction> = None;
         Modal::new(StableId::new("settings_window"), "Settings")
             .open(&mut self.keep_open)
-            .min_size(vec2(440.0, 360.0))
             .show(gui, |gui| {
                 action = render_body(gui, &mut self.draft);
             });
@@ -100,9 +99,11 @@ fn render_body(gui: &mut Gui<'_>, draft: &mut SettingsDraft) -> Option<SettingsA
 
         // -- footer: Cancel / Apply --
         gui.with_layout(Layout::right_to_left(Align::Center), |gui| {
+            let button_padding = gui.style.button_padding;
             let apply_enabled = draft.is_valid();
             let apply = Button::new(StableId::new("settings_apply"))
                 .text("Apply")
+                .padding(button_padding)
                 .enabled(apply_enabled)
                 .show(gui);
             if apply.clicked() && apply_enabled {
@@ -111,6 +112,7 @@ fn render_body(gui: &mut Gui<'_>, draft: &mut SettingsDraft) -> Option<SettingsA
             Space::new(gui.style.small_padding).show(gui);
             let cancel = Button::new(StableId::new("settings_cancel"))
                 .text("Cancel")
+                .padding(button_padding)
                 .show(gui);
             if cancel.clicked() {
                 action = Some(SettingsAction::Cancel);
@@ -170,6 +172,7 @@ fn render_tcp_section(gui: &mut Gui<'_>, draft: &mut SettingsDraft) {
                     Label::new("Token").show(gui);
                     Space::new(gui.style.padding).show(gui);
                     Label::new(draft.tcp.token.to_string())
+                        .font(gui.style.mono_font.clone())
                         .truncate(true)
                         .show(gui);
                     Space::new(gui.style.small_padding).show(gui);

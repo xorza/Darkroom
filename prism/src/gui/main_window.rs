@@ -123,16 +123,17 @@ impl MainWindow {
         ];
 
         let menu = gui.style.menu.clone();
+        let button_padding = gui.style.button_padding;
         let file_btn = Button::new(StableId::new("menu_file"))
             .text("File")
             .font(menu.font.clone())
             .background(menu.button)
-            .padding(menu.padding)
+            .padding(button_padding)
             .show(gui);
 
         let item_size = vec2(
             menu.popup_min_width,
-            gui.font_height(&menu.font) + menu.padding.y * 2.0,
+            gui.font_height(&menu.font) + button_padding.y * 2.0,
         );
 
         PopupMenu::new(&file_btn, StableId::new("menu_file_popup"))
