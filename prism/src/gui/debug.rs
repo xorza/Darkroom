@@ -59,6 +59,7 @@ impl GuiDebug {
             }
         }
 
+        #[cfg(debug_assertions)]
         ctx.global_style_mut(|style| {
             style.debug.debug_on_hover = self.overlays;
             style.debug.show_widget_hits = self.overlays;
