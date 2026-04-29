@@ -32,10 +32,25 @@ pub struct TcpDraft {
     pub token_file_text: String,
 }
 
+/// Picks a default port in [16000, 35000). Port `0` is a valid value
+/// (OS picks a free port) but reads as a typo in a settings form, so
+/// we steer first-time users toward a fixed, predictable port the
+/// listener will actually advertise. If it's busy on next launch the
+/// bind error surfaces in the same place a hand-typed port's would.
+fn default_port() -> u16 {
+    const LOW: u16 = 1 << 14; // 16384
+    const HIGH: u16 = 1 << 15; // 32768
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    LOW + (nanos % (HIGH - LOW) as u32) as u16
+}
+
 impl Default for TcpDraft {
     fn default() -> Self {
         Self {
-            bind_text: "127.0.0.1:0".to_string(),
+            bind_text: format!("127.0.0.1:{}", default_port()),
             no_auth: false,
             token: Uuid::new_v4(),
             token_file_text: String::new(),
