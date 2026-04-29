@@ -3,6 +3,7 @@ AI coding rules for Rust projects:
 ## Workflow
 
 - **Never commit or push without explicit user confirmation.** This rule is non-negotiable and overrides auto mode, "just do it" instructions, or any implied approval from earlier in the conversation. The trigger must be a fresh, unambiguous command like "commit", "commit push", "ship it". "Do the refactor" / "apply F3" / "go" authorize the code change, not the commit. Finish the change, run tests/clippy/fmt, then stop and wait for the user to inspect the diff and explicitly say to commit.
+- **Use `.tmp/` for source investigation of external dependencies.** Cloning a dep into `.tmp/<crate>` (gitignored) lets Read/Grep work without per-file approval prompts on cargo registry paths. Match the version to the one resolved in `Cargo.lock` (e.g. `git clone --depth 1 --branch 0.34.1 https://github.com/emilk/egui .tmp/egui`). Leave clones in place across sessions — `.tmp/` is gitignored and persists.
 
 ## Available CLI tools
 

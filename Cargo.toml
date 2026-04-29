@@ -8,6 +8,7 @@ members = [
     "palantir",
     "lumos"
 ]
+exclude = [".tmp"]
 
 resolver = "2"
 
