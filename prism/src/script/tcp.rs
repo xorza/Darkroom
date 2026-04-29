@@ -440,15 +440,6 @@ mod tests {
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0)
     }
 
-    /// `UiHost` stub for tests: no GUI loop, no app to close.
-    #[derive(Debug)]
-    struct NoopUiHost;
-
-    impl crate::ui_host::UiHost for NoopUiHost {
-        fn request_redraw(&self) {}
-        fn close_app(&self) {}
-    }
-
     async fn spawn_executor_with_transport(
         transport: TcpTransport,
     ) -> (
@@ -462,7 +453,7 @@ mod tests {
             [Box::new(transport) as Box<dyn ScriptTransport>],
             action_tx,
             Arc::new(scenarium::prelude::FuncLib::default()),
-            Arc::new(NoopUiHost) as Arc<dyn crate::ui_host::UiHost>,
+            Arc::new(|| {}),
         );
         (addr, executor, action_rx)
     }

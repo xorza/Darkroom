@@ -34,7 +34,7 @@ CLI flags ──► ScriptConfig
      • Notify = Arc<Fn()>             (wakeup; wraps ui_host.request_redraw)
      • build_transports(cfg)          (binds eagerly, reports errors)
      • script::start_transports(cfg)        (binds + announces + logs)
-     • ScriptExecutor::new(transports, tx, func_lib, ui_host)
+     • ScriptExecutor::new(transports, tx, func_lib, notify)
                  │
                  ▼
    Per transport: accept loop pushes ScriptRequest into a bounded mpsc
@@ -84,13 +84,15 @@ CLI flags ──► ScriptConfig
   undo stack — callers never have to look up "before" values
   themselves.
 
-- **Host wakeup via `Arc<dyn UiHost>`.** Both the inbound-channel
-  ping (so `Session::frame` runs and drains pending side-effects) and
-  the script-side `shutdown()` builtin go through the host directly.
-  `UiHost` lives next door (`crate::ui_host`) and has exactly the two
-  methods we use; the closure-indirection era ended once it was clear
-  the script crate isn't going to be extracted soon. Tests provide a
-  `NoopUiHost` stub.
+- **Host wakeup via opaque `Notify` callback.** The script crate
+  doesn't import `UiHost` or any frontend type — it takes an
+  `Arc<dyn Fn() + Send + Sync>` and pings it after every successful
+  inbound send. Session wires it to `move || ui_host.request_redraw()`
+  for production; tests pass `Arc::new(|| {})`. `shutdown()` from a
+  script is a regular `SessionInbound::Shutdown` variant — Session
+  translates it into `close_app()` during `drain_inbound`. This works
+  because all three modes (GUI / TUI / headless) drain Session every
+  tick.
 
 - **Generic `apply` + thin host helpers.** The `apply` / `apply_all`
   Rhai functions deserialize any `Intent` via its Serialize derive.

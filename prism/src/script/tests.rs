@@ -1,26 +1,14 @@
 use super::*;
 use std::net::Ipv4Addr;
 
-/// `UiHost` stub for tests: no GUI loop to redraw, no app to close.
-#[derive(Debug)]
-struct NoopUiHost;
-
-impl UiHost for NoopUiHost {
-    fn request_redraw(&self) {}
-    fn close_app(&self) {}
-}
-
-fn test_host() -> Arc<dyn UiHost> {
-    Arc::new(NoopUiHost)
-}
-
 /// Build an `InboundSender` paired with the receiver tests assert on.
+/// `notify` is a no-op — tests don't drive a real host loop.
 fn test_inbound() -> (InboundSender, mpsc::UnboundedReceiver<SessionInbound>) {
     let (tx, rx) = mpsc::unbounded_channel::<SessionInbound>();
     (
         InboundSender {
             tx,
-            ui_host: test_host(),
+            notify: Arc::new(|| {}),
         },
         rx,
     )
@@ -46,7 +34,7 @@ fn list_funcs_returns_full_func_objects_in_insertion_order() {
 
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, _rx) = test_inbound();
-    let engine = build_engine(state, tx, Arc::new(lib), test_host());
+    let engine = build_engine(state, tx, Arc::new(lib));
 
     // Each entry is a Rhai Map with fields mirroring `Func`. Verify
     // both insertion order and that the per-func subfields round-trip.
@@ -76,7 +64,7 @@ fn create_node_malformed_id_returns_rhai_error_and_no_action() {
     // call chain propagates errors cleanly.
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
-    let engine = build_engine(state, tx, Arc::new(FuncLib::default()), test_host());
+    let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
     let err = engine
         .eval::<String>(r#"create_node("not-a-uuid", 0.0, 0.0)"#)
@@ -90,7 +78,7 @@ fn create_node_unknown_id_returns_rhai_error_and_no_action() {
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
     // Empty FuncLib → any well-formed UUID is "unknown".
-    let engine = build_engine(state, tx, Arc::new(FuncLib::default()), test_host());
+    let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
     let err = engine
         .eval::<String>(r#"create_node("00000000-0000-0000-0000-000000000001", 0.0, 0.0)"#)
@@ -113,7 +101,7 @@ fn create_node_known_id_enqueues_node_added_action() {
 
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
-    let engine = build_engine(state, tx, Arc::new(lib), test_host());
+    let engine = build_engine(state, tx, Arc::new(lib));
 
     let script = format!(r#"create_node("{alpha_id}", 12.5, -3.0)"#);
     let returned_id: String = engine.eval(&script).unwrap();
@@ -149,7 +137,7 @@ fn apply_decodes_arbitrary_graph_ui_action_via_serde() {
     // touching the executor.
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
-    let engine = build_engine(state, tx, Arc::new(FuncLib::default()), test_host());
+    let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
     engine
         .eval::<()>(r#"apply(#{ SelectNode: #{ to: () } })"#)
@@ -173,7 +161,7 @@ fn apply_decodes_arbitrary_graph_ui_action_via_serde() {
 fn apply_returns_rhai_error_on_unknown_variant() {
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
-    let engine = build_engine(state, tx, Arc::new(FuncLib::default()), test_host());
+    let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
     let err = engine
         .eval::<()>(r#"apply(#{ NotARealVariant: #{} })"#)
@@ -186,7 +174,7 @@ fn apply_returns_rhai_error_on_unknown_variant() {
 fn apply_all_batches_actions_into_one_inbound() {
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
-    let engine = build_engine(state, tx, Arc::new(FuncLib::default()), test_host());
+    let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
     // Two no-op selections. Verifies that a Rhai array round-trips into
     // a single `Apply(Vec<...>)` — the path that gives scripts atomic
@@ -214,7 +202,7 @@ fn apply_all_batches_actions_into_one_inbound() {
 fn list_funcs_is_empty_when_func_lib_is_empty() {
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, _rx) = test_inbound();
-    let engine = build_engine(state, tx, Arc::new(FuncLib::default()), test_host());
+    let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
     let result: Array = engine.eval("list_funcs()").unwrap();
     assert!(result.is_empty());

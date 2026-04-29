@@ -111,11 +111,18 @@ impl Session {
         let func_lib = Arc::new(func_lib);
 
         let (script_inbound_tx, script_inbound_rx) = unbounded_channel::<SessionInbound>();
+        // Wake the host loop after every script side-effect so the
+        // next `drain_inbound` runs promptly. Opaque `Fn()` keeps the
+        // script crate frontend-agnostic.
+        let notify: script::Notify = {
+            let ui_host = ui_host.clone();
+            Arc::new(move || ui_host.request_redraw())
+        };
         let script_executor = ScriptExecutor::new(
             script::start_transports(&launch_config.script),
             script_inbound_tx,
             func_lib.clone(),
-            ui_host.clone(),
+            notify,
         );
 
         let mut result = Self::from_parts(
@@ -408,6 +415,9 @@ impl Session {
                 }
                 SessionInbound::StopAutorun => {
                     self.pending_run_cmd = Some(RunCommand::StopAutorun);
+                }
+                SessionInbound::Shutdown => {
+                    self.close_app();
                 }
             }
         }

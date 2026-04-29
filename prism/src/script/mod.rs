@@ -35,7 +35,6 @@ use scenarium::prelude::FuncLib;
 
 use crate::model::Intent;
 use crate::model::ViewNode;
-use crate::ui_host::UiHost;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::{JoinHandle, yield_now};
 use tokio_util::sync::CancellationToken;
@@ -282,7 +281,19 @@ pub enum SessionInbound {
     StartAutorun,
     /// Stop the worker's event loop.
     StopAutorun,
+    /// Ask the host to close (script-side `shutdown()` builtin).
+    /// Session calls `close_app()` on receipt, which routes to the
+    /// frontend's natural close path (GUI: viewport-close;
+    /// TUI/headless: shutdown flag + wake).
+    Shutdown,
 }
+
+/// Opaque "wake the consumer" callback fired after every successful
+/// send on the inbound channel. The host wires it to whatever its
+/// event loop needs (egui's `request_repaint`, headless's `Notify`,
+/// the TUI's `Notify`); the script crate doesn't care — from here
+/// it's just `Fn()`. Keeps `script/` free of frontend types.
+pub type Notify = Arc<dyn Fn() + Send + Sync>;
 
 /// `mpsc::UnboundedSender<SessionInbound>` + a host-side ping. Every
 /// script side-effect needs to wake the consumer's event loop so
@@ -294,7 +305,7 @@ pub enum SessionInbound {
 #[derive(Clone)]
 struct InboundSender {
     tx: mpsc::UnboundedSender<SessionInbound>,
-    ui_host: Arc<dyn UiHost>,
+    notify: Notify,
 }
 
 impl std::fmt::Debug for InboundSender {
@@ -309,7 +320,7 @@ impl InboundSender {
         // happens during shutdown — Session is going away, no need to
         // ping it for a redraw it'll never serve.
         if self.tx.send(inbound).is_ok() {
-            self.ui_host.request_redraw();
+            (self.notify)();
         }
     }
 }
@@ -378,14 +389,14 @@ impl ScriptExecutor {
         transports: I,
         action_tx: mpsc::UnboundedSender<SessionInbound>,
         func_lib: Arc<FuncLib>,
-        ui_host: Arc<dyn UiHost>,
+        notify: Notify,
     ) -> Self
     where
         I: IntoIterator<Item = Box<dyn ScriptTransport>>,
     {
         let inbound = InboundSender {
             tx: action_tx,
-            ui_host: ui_host.clone(),
+            notify,
         };
         let (tx, rx) = mpsc::channel(REQUEST_QUEUE_DEPTH);
         let handles = transports
@@ -398,10 +409,9 @@ impl ScriptExecutor {
 
         let cancel = CancellationToken::new();
         let cancel_task = cancel.clone();
-        let task =
-            tokio::spawn(
-                async move { run_executor(rx, cancel_task, inbound, func_lib, ui_host).await },
-            );
+        let task = tokio::spawn(async move {
+            run_executor(rx, cancel_task, inbound, func_lib).await;
+        });
 
         Self {
             cancel,
@@ -425,10 +435,9 @@ async fn run_executor(
     cancel: CancellationToken,
     inbound: InboundSender,
     func_lib: Arc<FuncLib>,
-    ui_host: Arc<dyn UiHost>,
 ) {
     let state: StdoutBuffer = Arc::new(Mutex::new(String::new()));
-    let engine = build_engine(state.clone(), inbound, func_lib, ui_host);
+    let engine = build_engine(state.clone(), inbound, func_lib);
     let mut sessions = SessionStore::default();
 
     loop {
@@ -444,17 +453,12 @@ async fn run_executor(
     }
 }
 
-fn build_engine(
-    stdout: StdoutBuffer,
-    inbound: InboundSender,
-    func_lib: Arc<FuncLib>,
-    ui_host: Arc<dyn UiHost>,
-) -> Engine {
+fn build_engine(stdout: StdoutBuffer, inbound: InboundSender, func_lib: Arc<FuncLib>) -> Engine {
     let mut engine = Engine::new();
     configure_caps(&mut engine);
     wire_print_hook(&mut engine, stdout, inbound.clone());
     register_run(&mut engine, inbound.clone());
-    register_shutdown(&mut engine, ui_host);
+    register_shutdown(&mut engine, inbound.clone());
     register_mutations(&mut engine, inbound.clone());
     register_introspection(&mut engine, func_lib.clone());
     register_host_helpers(&mut engine, inbound, func_lib);
@@ -521,16 +525,14 @@ fn register_run(engine: &mut Engine, inbound: InboundSender) {
     });
 }
 
-/// `shutdown()` — ask the host to close. Hooked directly into the
-/// frontend's close path (egui's `ViewportCommand::Close`, headless's
-/// exit flag) rather than routing through `SessionInbound`, so it
-/// works even in modes whose loop doesn't drain the inbound queue.
-/// The script that called it still completes and replies normally;
-/// the actual teardown happens after the executor task is cancelled
-/// during host shutdown.
-fn register_shutdown(engine: &mut Engine, ui_host: Arc<dyn UiHost>) {
+/// `shutdown()` — ask the host to close. Pushed through the inbound
+/// channel like every other side effect; Session's `drain_inbound`
+/// translates it into `Session::close_app()`, which routes to the
+/// frontend's natural close path. Safe to send from any mode now
+/// that GUI / TUI / headless all drain Session every tick.
+fn register_shutdown(engine: &mut Engine, inbound: InboundSender) {
     engine.register_fn("shutdown", move || {
-        ui_host.close_app();
+        inbound.send(SessionInbound::Shutdown);
     });
 }
 
