@@ -57,9 +57,9 @@ impl eframe::App for GuiApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.debug.frame(ui.ctx());
-        let cmd = self
-            .main_window
-            .render(&mut self.session, &mut self.pending_output, &self.style, ui);
+        let cmd =
+            self.main_window
+                .render(&mut self.session, &mut self.pending_output, &self.style, ui);
         if let Some(cmd) = cmd {
             self.main_window.handle_app_command(&mut self.session, cmd);
         }

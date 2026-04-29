@@ -436,6 +436,10 @@ fn render_ports(
             .sense(Sense::click() | Sense::hover() | Sense::drag())
             .interact(gui);
         let hovered = response.hovered();
+        // Geometry-only check: `response.hovered()` is suppressed while a
+        // drag started on another widget owns the pointer, which broke
+        // port-snap during connection drags.
+        let pointer_over = gui.rect_contains_pointer(port_rect);
 
         if port.kind == PortKind::Input && missing_inputs.contains(&port.port_idx) {
             draw_circle_with_gradient_shadow(
@@ -457,7 +461,7 @@ fn render_ports(
             PortInteractCommand::DragStop
         } else if !response.dragged() && response.clicked_by(PointerButton::Primary) {
             PortInteractCommand::Click(info)
-        } else if hovered {
+        } else if pointer_over {
             PortInteractCommand::Hover(info)
         } else {
             PortInteractCommand::None

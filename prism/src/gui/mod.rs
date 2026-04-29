@@ -142,6 +142,10 @@ impl<'a> Gui<'a> {
         self.ui.input(|i| i.pointer.hover_pos())
     }
 
+    pub fn rect_contains_pointer(&self, rect: Rect) -> bool {
+        self.ui.rect_contains_pointer(rect)
+    }
+
     pub fn scale(&self) -> f32 {
         self.scale
     }
