@@ -142,7 +142,7 @@ impl<'a> Button<'a> {
         //   so visibility culling and the single-interact registration
         //   share a code path with the rest of the positioned-widget
         //   family.
-        // - Autosize: route through Gui::autosize_in_scope so the
+        // - Autosize: route through ScopedGui::autosize so the
         //   `allocate_*` plumbing stays behind one whitelisted helper.
         let (rect, response) = if let Some(rect) = self.rect {
             let out = HitRegion::new(id)
@@ -161,7 +161,7 @@ impl<'a> Button<'a> {
                 .padding
                 .unwrap_or_else(|| vec2(gui.style.padding, gui.style.small_padding));
             let autosize = self.size.unwrap_or(text_size + padding * 2.0);
-            let (rect, response) = gui.autosize_in_scope(id, autosize, sense);
+            let (rect, response) = gui.scope(id).autosize(autosize, sense);
             if !gui.ui_raw().is_rect_visible(rect) {
                 return response;
             }

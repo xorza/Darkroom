@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use egui::{Galley, Order, Pos2, Sense, vec2};
+use egui::{Align, Galley, Layout, Order, Pos2, Sense, vec2};
 use scenarium::function::Func;
 use scenarium::prelude::FuncLib;
 
@@ -137,7 +137,8 @@ fn show_popup<'a>(
                         .max_height(POPUP_MAX_HEIGHT)
                         .apply(gui);
 
-                    gui.horizontal_justified(|gui| {
+                    let layout = Layout::left_to_right(Align::Min).with_cross_justify(true);
+                    gui.with_layout(layout, |gui| {
                         if ctx.from_connection {
                             show_const_bind_option(gui, selection);
                         }

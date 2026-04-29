@@ -2,8 +2,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use egui::{
-    Align, Color32, FontId, Galley, InnerResponse, Layout, Painter, Rect, Response, Sense, Ui,
-    UiBuilder, Vec2,
+    Color32, FontId, Galley, InnerResponse, Layout, Painter, Rect, Response, Sense, Ui, UiBuilder,
+    Vec2,
 };
 
 use crate::common::{StableId, UiEquals};
@@ -197,17 +197,18 @@ impl<'a> Gui<'a> {
         self.ui.horizontal(|ui| args.enter(ui, add_contents))
     }
 
-    /// Horizontal layout where children are stretched to fill the cross-axis (vertical) space.
-    /// This allows ScrollAreas inside to expand to the full available height.
-    pub fn horizontal_justified<R>(
+    /// Run `add_contents` under an arbitrary [`egui::Layout`]. Generic
+    /// escape hatch for layouts not covered by `horizontal` / `vertical`
+    /// — e.g. cross-axis-justified rows, right-to-left, top-down with
+    /// custom alignment.
+    pub fn with_layout<R>(
         &mut self,
+        layout: Layout,
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<R> {
         let args = self.view_params();
-        self.ui.with_layout(
-            Layout::left_to_right(Align::Min).with_cross_justify(true),
-            |ui| args.enter(ui, add_contents),
-        )
+        self.ui
+            .with_layout(layout, |ui| args.enter(ui, add_contents))
     }
 
     pub fn vertical<R>(
@@ -226,26 +227,6 @@ impl<'a> Gui<'a> {
     /// `UiBuilder::id_salt` produces. That distinction shields our
     /// chrome from "widget rect changed id between passes" warnings
     /// when adjacent conditional siblings come and go.
-    /// Allocate `size` in the current layout under a stable-id scope
-    /// and return `(rect, response)`. This is the autosize counterpart
-    /// to [`HitRegion::interact_and_cull`] for caller-supplied rects: any
-    /// widget that does its own layout based on content size (Button,
-    /// future autosize widgets) should go through this so the
-    /// `allocate_*` calls live behind a single banned-pattern whitelist
-    /// and not at every call site.
-    pub fn autosize_in_scope(
-        &mut self,
-        id: StableId,
-        size: Vec2,
-        sense: Sense,
-    ) -> (Rect, Response) {
-        self.scope(id).sense(sense).show(|gui| {
-            let (_id, rect) = gui.ui_raw().allocate_space(size);
-            let response = gui.ui_raw().allocate_rect(rect, sense);
-            (rect, response)
-        })
-    }
-
     pub fn scope(&mut self, id: StableId) -> ScopedGui<'_, 'a> {
         ScopedGui {
             gui: self,
@@ -296,6 +277,22 @@ impl<'b, 'a> ScopedGui<'b, 'a> {
     pub fn clip_rect(mut self, rect: Rect) -> Self {
         self.clip_rect = Some(rect);
         self
+    }
+
+    /// Allocate `size` in the current layout under this scope and
+    /// return `(rect, response)`. Counterpart to
+    /// [`HitRegion::interact_and_cull`] for caller-supplied rects: any
+    /// widget that does its own layout based on content size (Button,
+    /// future autosize widgets) should go through this so the
+    /// `allocate_*` calls live behind a single banned-pattern whitelist
+    /// and not at every call site. Sets the scope's interaction sense
+    /// to `sense` automatically.
+    pub fn autosize(self, size: Vec2, sense: Sense) -> (Rect, Response) {
+        self.sense(sense).show(|gui| {
+            let (_id, rect) = gui.ui_raw().allocate_space(size);
+            let response = gui.ui_raw().allocate_rect(rect, sense);
+            (rect, response)
+        })
     }
 
     pub fn show<R>(self, add_contents: impl FnOnce(&mut Gui<'_>) -> R) -> R {
