@@ -6,7 +6,7 @@ use scenarium::data::{DataType, EnumDef, FsPathMode, StaticValue};
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::style::DragValueStyle;
-use crate::gui::widgets::{ComboBox, DragValue, FilePicker, FilePickerMode, HitRegion};
+use crate::gui::widgets::{ComboBox, DragValue, FilePicker, FilePickerMode};
 
 fn picker_mode(mode: FsPathMode) -> FilePickerMode {
     match mode {
@@ -103,11 +103,9 @@ impl<'a> StaticValueEditor<'a> {
                     .show(gui)
             }
 
-            _ => {
-                // For unsupported types, return a dummy response
-                // This allows gradual addition of new value types
-                HitRegion::new(StableId::new("value_editor_unsupported")).show(gui)
-            }
+            StaticValue::Null => todo!("StaticValueEditor: Null variant not implemented"),
+            StaticValue::Bool(_) => todo!("StaticValueEditor: Bool variant not implemented"),
+            StaticValue::String(_) => todo!("StaticValueEditor: String variant not implemented"),
         }
     }
 }
