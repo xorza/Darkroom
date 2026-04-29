@@ -32,7 +32,7 @@ impl<'a> StatusPanel<'a> {
     pub fn show(self, gui: &mut Gui<'_>) {
         let style = gui.style.clone();
         let line_height = gui.font_height(&style.body_font);
-        let toggle_id = self.id.id().with("open");
+        let toggle_id = self.id.with("open");
         let mut open = gui.load_persistent(toggle_id, false);
 
         let frame = Frame::none(self.id)

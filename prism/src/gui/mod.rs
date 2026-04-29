@@ -151,37 +151,39 @@ impl<'a> Gui<'a> {
     /// Load a persisted value (survives app restarts) from
     /// `egui::Memory::data` keyed by `id`. Returns `default` when the
     /// slot is empty.
-    pub fn load_persistent<T>(&self, id: egui::Id, default: T) -> T
+    pub fn load_persistent<T>(&self, id: StableId, default: T) -> T
     where
         T: 'static + Clone + Send + Sync + serde::Serialize + for<'de> serde::Deserialize<'de>,
     {
         self.ui
             .ctx()
-            .data_mut(|d| d.get_persisted::<T>(id).unwrap_or(default))
+            .data_mut(|d| d.get_persisted::<T>(id.id()).unwrap_or(default))
     }
 
     /// Write a persisted value to `egui::Memory::data` keyed by `id`.
-    pub fn store_persistent<T>(&self, id: egui::Id, value: T)
+    pub fn store_persistent<T>(&self, id: StableId, value: T)
     where
         T: 'static + Clone + Send + Sync + serde::Serialize + for<'de> serde::Deserialize<'de>,
     {
-        self.ui.ctx().data_mut(|d| d.insert_persisted(id, value));
+        self.ui
+            .ctx()
+            .data_mut(|d| d.insert_persisted(id.id(), value));
     }
 
     /// Load a temporary value (cleared on app restart) from
     /// `egui::Memory::data` keyed by `id`.
-    pub fn load_temp<T: 'static + Clone + Send + Sync>(&self, id: egui::Id) -> Option<T> {
-        self.ui.ctx().data_mut(|d| d.get_temp::<T>(id))
+    pub fn load_temp<T: 'static + Clone + Send + Sync>(&self, id: StableId) -> Option<T> {
+        self.ui.ctx().data_mut(|d| d.get_temp::<T>(id.id()))
     }
 
     /// Write a temporary value to `egui::Memory::data` keyed by `id`.
-    pub fn store_temp<T: 'static + Clone + Send + Sync>(&self, id: egui::Id, value: T) {
-        self.ui.ctx().data_mut(|d| d.insert_temp(id, value));
+    pub fn store_temp<T: 'static + Clone + Send + Sync>(&self, id: StableId, value: T) {
+        self.ui.ctx().data_mut(|d| d.insert_temp(id.id(), value));
     }
 
     /// Delete a temporary value of type `T` keyed by `id`.
-    pub fn remove_temp<T: 'static + Send + Sync>(&self, id: egui::Id) {
-        self.ui.ctx().data_mut(|d| d.remove::<T>(id));
+    pub fn remove_temp<T: 'static + Send + Sync>(&self, id: StableId) {
+        self.ui.ctx().data_mut(|d| d.remove::<T>(id.id()));
     }
 
     /// Capture the current frame's input into an [`InputSnapshot`].

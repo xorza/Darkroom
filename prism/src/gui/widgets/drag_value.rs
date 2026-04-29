@@ -131,7 +131,7 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
         let state_id = id.with("state");
         let edit_id = id.with("edit");
         let state = gui
-            .load_temp::<DragValueState<T>>(state_id)
+            .load_temp::<DragValueState<T>>(StableId::from_egui_id(state_id))
             .unwrap_or(DragValueState::Idle);
 
         let display_value = match &state {
@@ -307,6 +307,7 @@ fn write_state<T: DragValueNumeric>(
     state_id: egui::Id,
     state: DragValueState<T>,
 ) {
+    let state_id = StableId::from_egui_id(state_id);
     match state {
         DragValueState::Idle => gui.remove_temp::<DragValueState<T>>(state_id),
         other => gui.store_temp(state_id, other),
