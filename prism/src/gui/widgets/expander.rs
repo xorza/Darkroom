@@ -35,7 +35,7 @@ impl Expander {
         gui: &mut Gui<'_>,
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<Option<R>> {
-        let mut open = gui.load_persistent(self.id, self.default_open);
+        let mut open = gui.memory().load_persistent(self.id, self.default_open);
 
         let icon_size = gui.style.body_font.size;
         let icon_spacing = gui.style.padding;
@@ -70,7 +70,7 @@ impl Expander {
 
         if header_response.clicked() {
             open = !open;
-            gui.store_persistent(self.id, open);
+            gui.memory().store_persistent(self.id, open);
         }
 
         let inner = open.then(|| add_contents(gui));

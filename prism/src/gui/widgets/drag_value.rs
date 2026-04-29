@@ -131,6 +131,7 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
         let state_id = id.with("state");
         let edit_id = id.with("edit");
         let state = gui
+            .memory()
             .load_temp::<DragValueState<T>>(state_id)
             .unwrap_or(DragValueState::Idle);
 
@@ -310,8 +311,9 @@ fn write_state<T: DragValueNumeric>(
     state_id: StableId,
     state: DragValueState<T>,
 ) {
+    let memory = gui.memory();
     match state {
-        DragValueState::Idle => gui.remove_temp::<DragValueState<T>>(state_id),
-        other => gui.store_temp(state_id, other),
+        DragValueState::Idle => memory.remove_temp::<DragValueState<T>>(state_id),
+        other => memory.store_temp(state_id, other),
     }
 }

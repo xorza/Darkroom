@@ -33,7 +33,7 @@ impl<'a> StatusPanel<'a> {
         let style = gui.style.clone();
         let line_height = gui.font_height(&style.body_font);
         let toggle_id = self.id.with("open");
-        let mut open = gui.load_persistent(toggle_id, false);
+        let mut open = gui.memory().load_persistent(toggle_id, false);
 
         let frame = Frame::none(self.id)
             .fill(style.graph_background.bg_color)
@@ -87,7 +87,7 @@ impl<'a> StatusPanel<'a> {
             });
         });
 
-        gui.store_persistent(toggle_id, open);
+        gui.memory().store_persistent(toggle_id, open);
     }
 }
 

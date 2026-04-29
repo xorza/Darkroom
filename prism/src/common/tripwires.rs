@@ -229,6 +229,8 @@ fn no_egui_chrome_outside_widgets() {
         // Defines the `Gui` wrapper over `egui::Ui`; necessarily
         // imports `Ui` and `UiBuilder`.
         Path::new("gui/mod.rs"),
+        // eframe bootstrap — calls `egui::ViewportBuilder` and friends.
+        Path::new("gui/bootstrap.rs"),
         // Scanner defines the banned names as string literals.
         Path::new("common/tripwires.rs"),
     ];

@@ -1,77 +1,30 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use anyhow::Result;
-use eframe::NativeOptions;
 use egui::{
     Align, Color32, FontId, Galley, InnerResponse, Layout, Painter, Rect, Response, Sense, Ui,
     UiBuilder, Vec2,
 };
 
-use crate::gui::app::GuiApp;
-use crate::{
-    common::{StableId, UiEquals},
-    gui::style::Style,
-};
+use crate::common::{StableId, UiEquals};
+use crate::gui::memory::Memory;
+use crate::gui::style::Style;
 
 pub mod app;
+pub mod bootstrap;
 pub mod debug;
 pub mod graph_ui;
 pub mod image_utils;
 pub mod log_ui;
 pub mod main_window;
+pub mod memory;
 pub(super) mod shortcuts;
 pub mod style;
 pub mod ui_host;
 pub mod value_editor;
 pub mod widgets;
 
-/// Entry point for the egui frontend. Spins up eframe with the prism
-/// window icon and bundled font, then hands control to [`PrismApp`]
-/// in its GUI variant.
-pub fn run(launch_config: crate::launch_config::LaunchConfig) -> Result<()> {
-    let options = NativeOptions {
-        renderer: eframe::Renderer::Wgpu,
-        viewport: egui::ViewportBuilder::default()
-            .with_icon(load_window_icon())
-            .with_app_id("prism"),
-        persist_window: true,
-        ..Default::default()
-    };
-
-    eframe::run_native(
-        "Prism",
-        options,
-        Box::new(move |cc| {
-            configure_fonts(&cc.egui_ctx);
-            Ok(Box::new(GuiApp::new(&cc.egui_ctx, launch_config)))
-        }),
-    )?;
-
-    Ok(())
-}
-
-fn load_window_icon() -> Arc<egui::IconData> {
-    let icon = eframe::icon_data::from_png_bytes(include_bytes!("../../assets/prism.png"))
-        .expect("window icon PNG should be a valid RGBA image");
-    Arc::new(icon)
-}
-
-fn configure_fonts(ctx: &egui::Context) {
-    let mut fonts = egui::FontDefinitions::default();
-    let font_data = egui::FontData::from_static(include_bytes!("../../assets/Raleway-Medium.ttf"));
-    fonts
-        .font_data
-        .insert("Raleway".to_owned(), Arc::new(font_data));
-
-    let proportional = fonts
-        .families
-        .get_mut(&egui::FontFamily::Proportional)
-        .expect("proportional font family should exist in default font definitions");
-    proportional.insert(0, "Raleway".to_owned());
-
-    ctx.set_fonts(fonts);
-}
+pub use bootstrap::run;
 
 /// Read-only bundle of frame-constant view parameters: style, scale,
 /// rect. Built from a `Gui<'_>` via [`Gui::view_params`]. Pure-geometry
@@ -148,6 +101,11 @@ impl<'a> Gui<'a> {
         self.ui.painter()
     }
 
+    /// Persistence view over `egui::Memory::data` keyed by [`StableId`].
+    pub fn memory(&self) -> Memory<'_> {
+        Memory::new(self.ui.ctx())
+    }
+
     /// Layout text into an `Arc<Galley>` (no wrapping). Thin wrapper over
     /// [`egui::Painter::layout_no_wrap`] that takes references — egui's
     /// API consumes `String` and `FontId`, so callers were repeating
@@ -158,44 +116,6 @@ impl<'a> Gui<'a> {
         self.ui
             .painter()
             .layout_no_wrap(text.to_owned(), font.clone(), color)
-    }
-
-    /// Load a persisted value (survives app restarts) from
-    /// `egui::Memory::data` keyed by `id`. Returns `default` when the
-    /// slot is empty.
-    pub fn load_persistent<T>(&self, id: StableId, default: T) -> T
-    where
-        T: 'static + Clone + Send + Sync + serde::Serialize + for<'de> serde::Deserialize<'de>,
-    {
-        self.ui
-            .ctx()
-            .data_mut(|d| d.get_persisted::<T>(id.id()).unwrap_or(default))
-    }
-
-    /// Write a persisted value to `egui::Memory::data` keyed by `id`.
-    pub fn store_persistent<T>(&self, id: StableId, value: T)
-    where
-        T: 'static + Clone + Send + Sync + serde::Serialize + for<'de> serde::Deserialize<'de>,
-    {
-        self.ui
-            .ctx()
-            .data_mut(|d| d.insert_persisted(id.id(), value));
-    }
-
-    /// Load a temporary value (cleared on app restart) from
-    /// `egui::Memory::data` keyed by `id`.
-    pub fn load_temp<T: 'static + Clone + Send + Sync>(&self, id: StableId) -> Option<T> {
-        self.ui.ctx().data_mut(|d| d.get_temp::<T>(id.id()))
-    }
-
-    /// Write a temporary value to `egui::Memory::data` keyed by `id`.
-    pub fn store_temp<T: 'static + Clone + Send + Sync>(&self, id: StableId, value: T) {
-        self.ui.ctx().data_mut(|d| d.insert_temp(id.id(), value));
-    }
-
-    /// Delete a temporary value of type `T` keyed by `id`.
-    pub fn remove_temp<T: 'static + Send + Sync>(&self, id: StableId) {
-        self.ui.ctx().data_mut(|d| d.remove::<T>(id.id()));
     }
 
     /// Mark `id`'s `Order::Middle` layer as the modal-input layer for
