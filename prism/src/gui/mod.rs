@@ -91,12 +91,9 @@ pub struct Gui<'a> {
     /// invariant is maintained by `new_root` / `child` / `with_scale`
     /// — no other construction path exists.
     scale: f32,
-    /// Rect the wrapper was given at construction. Stable within
-    /// this `Gui`'s lifetime — callers expect "the rect of this
-    /// Gui", not "what's left in the parent Ui after other widgets
-    /// rendered." For live queries of the wrapped Ui's remaining
-    /// space, use [`Gui::ui_raw`] directly inside widgets.
-    pub rect: Rect,
+    /// Available rect snapshotted at construction. Read via
+    /// [`Gui::container_rect`]; see that doc for semantics.
+    pub(crate) rect: Rect,
 }
 
 impl<'a> Gui<'a> {
@@ -208,6 +205,16 @@ impl<'a> Gui<'a> {
 
     pub fn scale(&self) -> f32 {
         self.scale
+    }
+
+    /// Rect this `Gui` was constructed with — `available_rect_before_wrap`
+    /// of the parent `Ui` at the moment of construction, frozen for the
+    /// lifetime of this wrapper. **Not** the parent's live remaining
+    /// rect: it does not shrink as siblings render. Container widgets
+    /// inside `gui/widgets/` that need the live cursor should reach for
+    /// `ui_raw()` instead.
+    pub fn container_rect(&self) -> Rect {
+        self.rect
     }
 
     /// Read-only frame-constant view parameters: style, scale, rect.

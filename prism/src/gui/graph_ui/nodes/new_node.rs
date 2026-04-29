@@ -78,7 +78,7 @@ impl NewNodeUi {
         };
 
         // Capture interaction for the background
-        let rect = gui.rect;
+        let rect = gui.container_rect();
         HitRegion::new(StableId::new("new_node_ui_bg"))
             .rect(rect)
             .sense(Sense::all())

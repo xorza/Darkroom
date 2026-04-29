@@ -200,7 +200,7 @@ impl GraphUi {
             self.gesture,
             Gesture::BreakingConnections(_) | Gesture::DraggingConnection(_)
         ) {
-            let rect = gui.rect;
+            let rect = gui.container_rect();
             HitRegion::new(StableId::new("temp_overlay_background"))
                 .rect(rect)
                 .sense(Sense::all())

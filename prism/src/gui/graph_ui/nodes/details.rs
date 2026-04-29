@@ -59,7 +59,7 @@ impl NodeDetailsUi {
 }
 
 fn compute_panel_rect(gui: &Gui<'_>) -> Rect {
-    let graph_rect = gui.rect;
+    let graph_rect = gui.container_rect();
     let padding = gui.style.padding;
     Rect::from_min_size(
         Pos2::new(graph_rect.right() - PANEL_WIDTH, graph_rect.top() + padding),

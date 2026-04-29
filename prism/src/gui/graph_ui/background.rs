@@ -98,14 +98,14 @@ impl GraphBackgroundRenderer {
         assert!(base_spacing > common::EPSILON);
         let world_spacing = base_spacing * scale_multiplier;
 
-        let origin = gui.rect.min + ctx.view_graph.pan;
+        let origin = gui.container_rect().min + ctx.view_graph.pan;
 
         let uv = |p: Pos2| {
             let graph_pos = (p - origin) / view_scale;
             Pos2::new(graph_pos.x / world_spacing, graph_pos.y / world_spacing)
         };
 
-        let rect = gui.rect;
+        let rect = gui.container_rect();
         let vertex = |pos: Pos2| Vertex {
             pos,
             uv: uv(pos),

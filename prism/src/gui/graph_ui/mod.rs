@@ -270,7 +270,7 @@ impl GraphUi {
     // ------------------------------------------------------------------------
 
     fn draw_background_frame(&self, gui: &mut Gui<'_>) -> Rect {
-        let rect = gui.rect.shrink(gui.style.big_padding);
+        let rect = gui.container_rect().shrink(gui.style.big_padding);
 
         gui.painter().rect(
             rect,

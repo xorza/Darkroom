@@ -2,7 +2,7 @@
 //! bars, the new-node popup, and the const-binding creation path that
 //! the popup can route into.
 
-use egui::{Align2, PointerButton, Pos2, Response, Sense, pos2, vec2};
+use egui::{Align2, PointerButton, Pos2, Response, Sense, vec2};
 use scenarium::data::StaticValue;
 use scenarium::graph::Binding;
 
@@ -26,53 +26,55 @@ impl GraphUi {
     ) -> (Response, Option<ViewButtonAction>) {
         let mut action: Option<ViewButtonAction> = None;
 
-        let response =
-            PositionedUi::new(StableId::new("graph_ui_top_buttons"), gui.rect.left_top())
-                .pivot(Align2::LEFT_TOP)
-                .interactable(false)
+        let response = PositionedUi::new(
+            StableId::new("graph_ui_top_buttons"),
+            gui.container_rect().left_top(),
+        )
+        .pivot(Align2::LEFT_TOP)
+        .interactable(false)
+        .show(gui, |gui| {
+            Layout::new().fill_width().apply(gui);
+            let padding = gui.style.padding;
+
+            Frame::none(StableId::new("top_buttons_frame"))
+                .sense(Sense::all())
+                .inner_margin(padding)
                 .show(gui, |gui| {
-                    Layout::new().fill_width().apply(gui);
-                    let padding = gui.style.padding;
+                    gui.horizontal(|gui| {
+                        let btn_size = vec2(20.0, 20.0);
+                        let mono_font = gui.style.mono_font.clone();
 
-                    Frame::none(StableId::new("top_buttons_frame"))
-                        .sense(Sense::all())
-                        .inner_margin(padding)
-                        .show(gui, |gui| {
-                            gui.horizontal(|gui| {
-                                let btn_size = vec2(20.0, 20.0);
-                                let mono_font = gui.style.mono_font.clone();
+                        let response = Button::new(StableId::new("fit_all_btn"))
+                            .text("a")
+                            .font(mono_font.clone())
+                            .size(btn_size)
+                            .show(gui);
+                        if response.clicked() {
+                            action = Some(ViewButtonAction::FitAll);
+                        }
 
-                                let response = Button::new(StableId::new("fit_all_btn"))
-                                    .text("a")
-                                    .font(mono_font.clone())
-                                    .size(btn_size)
-                                    .show(gui);
-                                if response.clicked() {
-                                    action = Some(ViewButtonAction::FitAll);
-                                }
+                        let response = Button::new(StableId::new("view_selected_btn"))
+                            .text("s")
+                            .font(mono_font.clone())
+                            .size(btn_size)
+                            .show(gui);
+                        if response.clicked() {
+                            action = Some(ViewButtonAction::ViewSelected);
+                        }
 
-                                let response = Button::new(StableId::new("view_selected_btn"))
-                                    .text("s")
-                                    .font(mono_font.clone())
-                                    .size(btn_size)
-                                    .show(gui);
-                                if response.clicked() {
-                                    action = Some(ViewButtonAction::ViewSelected);
-                                }
-
-                                let response = Button::new(StableId::new("reset_view_btn"))
-                                    .text("r")
-                                    .font(mono_font)
-                                    .size(btn_size)
-                                    .show(gui);
-                                if response.clicked() {
-                                    action = Some(ViewButtonAction::ResetView);
-                                }
-                            });
-                        })
-                        .response
+                        let response = Button::new(StableId::new("reset_view_btn"))
+                            .text("r")
+                            .font(mono_font)
+                            .size(btn_size)
+                            .show(gui);
+                        if response.clicked() {
+                            action = Some(ViewButtonAction::ResetView);
+                        }
+                    });
                 })
-                .inner;
+                .response
+        })
+        .inner;
 
         (response, action)
     }
@@ -88,7 +90,7 @@ impl GraphUi {
 
         let response = PositionedUi::new(
             StableId::new("graph_ui_bottom_buttons"),
-            pos2(gui.rect.left(), gui.rect.bottom()),
+            gui.container_rect().left_bottom(),
         )
         .pivot(Align2::LEFT_BOTTOM)
         .interactable(false)
@@ -165,7 +167,7 @@ impl GraphUi {
     ) {
         match selection {
             NewNodeSelection::Func { func, position } => {
-                let origin = gui.rect.min;
+                let origin = gui.container_rect().min;
                 let graph_pos = (position - origin - ctx.view_graph.pan) / ctx.view_graph.scale;
 
                 // Build the new node + view-node locally; apply() inserts them.
