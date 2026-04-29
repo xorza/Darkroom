@@ -222,6 +222,34 @@ impl<'a> Gui<'a> {
         self.ui.vertical(|ui| args.enter(ui, add_contents))
     }
 
+    /// Indented vertical sub-section with a left vline. Mirrors
+    /// `egui::Ui::indent` but uses our own indent width
+    /// ([`style.indent`](Style::indent)) and stroke
+    /// (`style.inactive_bg_stroke`). Caller must already be in a
+    /// vertical layout — that's the only place a left-indent makes
+    /// sense.
+    pub fn indent<R>(&mut self, id: StableId, body: impl FnOnce(&mut Gui<'_>) -> R) -> R {
+        let indent = self.style.indent;
+        let stroke = self.style.inactive_bg_stroke;
+
+        let mut child_rect = self.ui.available_rect_before_wrap();
+        child_rect.min.x += indent;
+
+        let line_x = child_rect.min.x - indent * 0.5;
+        let line_top_y = child_rect.min.y;
+
+        let result = self.scope(id).max_rect(child_rect).show(body);
+
+        // After the scope ends, the parent cursor has advanced past
+        // the indented content. Trim a hair so the line doesn't bleed
+        // into the next sibling row.
+        let line_bottom_y = self.ui.cursor().min.y - self.style.small_padding;
+        self.painter()
+            .vline(line_x, line_top_y..=line_bottom_y, stroke);
+
+        result
+    }
+
     /// Single form line: explicit `(available_width, row_height)`
     /// allocation with cross-axis `Align::Center`, so labels, text
     /// edits, and buttons drawn in the same row share a vertical

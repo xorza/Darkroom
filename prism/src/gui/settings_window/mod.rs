@@ -91,7 +91,9 @@ fn render_body(gui: &mut Gui<'_>, draft: &mut SettingsDraft) -> Option<SettingsA
         });
 
         if draft.tcp_enabled {
-            render_tcp_section(gui, draft);
+            gui.indent(StableId::new("settings_tcp_indent"), |gui| {
+                render_tcp_section(gui, draft);
+            });
         }
 
         Space::new(gui.style.padding).show(gui);
@@ -125,56 +127,50 @@ fn render_body(gui: &mut Gui<'_>, draft: &mut SettingsDraft) -> Option<SettingsA
 }
 
 fn render_tcp_section(gui: &mut Gui<'_>, draft: &mut SettingsDraft) {
-    let indent = gui.style.big_padding;
-    gui.horizontal(|gui| {
-        Space::new(indent).show(gui);
-        gui.vertical(|gui| {
-            // Bind
-            gui.form_row(|gui| {
-                Label::new("Bind address").show(gui);
-                Space::new(gui.style.padding).show(gui);
-                TextEdit::singleline(&mut draft.tcp.bind_text)
-                    .id(StableId::new("settings_tcp_bind").id())
-                    .desired_width(200.0)
-                    .show(gui);
-            });
-            if let Some(err) = draft.bind_error() {
-                gui.form_row(|gui| {
-                    Label::new(err)
-                        .color(gui.style.noninteractive_text_color)
-                        .show(gui);
-                });
-            }
-
-            // Auth radios — stacked under an "Auth" header, "No auth"
-            // first.
-            gui.form_row(|gui| {
-                Label::new("Auth").show(gui);
-            });
-            let auth_indent = gui.style.big_padding;
-            gui.form_row(|gui| {
-                Space::new(auth_indent).show(gui);
-                RadioButton::new(
-                    StableId::new("settings_tcp_auth_none"),
-                    &mut draft.tcp.no_auth,
-                    true,
-                )
-                .text("No auth")
+    // Bind
+    gui.form_row(|gui| {
+        Label::new("Bind address").show(gui);
+        Space::new(gui.style.padding).show(gui);
+        TextEdit::singleline(&mut draft.tcp.bind_text)
+            .id(StableId::new("settings_tcp_bind").id())
+            .desired_width(200.0)
+            .show(gui);
+    });
+    if let Some(err) = draft.bind_error() {
+        gui.form_row(|gui| {
+            Label::new(err)
+                .color(gui.style.noninteractive_text_color)
                 .show(gui);
-            });
-            gui.form_row(|gui| {
-                Space::new(auth_indent).show(gui);
-                RadioButton::new(
-                    StableId::new("settings_tcp_auth_token"),
-                    &mut draft.tcp.no_auth,
-                    false,
-                )
-                .text("Token")
-                .show(gui);
-            });
+        });
+    }
 
-            // Token row — hidden when no_auth is on
-            if !draft.tcp.no_auth {
+    // Auth radios — header row, then radios indented under it.
+    gui.form_row(|gui| {
+        Label::new("Auth").show(gui);
+    });
+    gui.indent(StableId::new("settings_auth_indent"), |gui| {
+        gui.form_row(|gui| {
+            RadioButton::new(
+                StableId::new("settings_tcp_auth_none"),
+                &mut draft.tcp.no_auth,
+                true,
+            )
+            .text("No auth")
+            .show(gui);
+        });
+        gui.form_row(|gui| {
+            RadioButton::new(
+                StableId::new("settings_tcp_auth_token"),
+                &mut draft.tcp.no_auth,
+                false,
+            )
+            .text("Token")
+            .show(gui);
+        });
+
+        // Token-related rows are only meaningful when auth is on.
+        if !draft.tcp.no_auth {
+            gui.indent(StableId::new("settings_token_indent"), |gui| {
                 gui.form_row(|gui| {
                     Label::new("Token").show(gui);
                     Space::new(gui.style.padding).show(gui);
@@ -190,32 +186,30 @@ fn render_tcp_section(gui: &mut Gui<'_>, draft: &mut SettingsDraft) {
                         draft.regenerate_token();
                     }
                 });
-            }
-
-            // Token file
-            gui.form_row(|gui| {
-                Label::new("Token file").show(gui);
-                Space::new(gui.style.padding).show(gui);
-                TextEdit::singleline(&mut draft.tcp.token_file_text)
-                    .id(StableId::new("settings_tcp_token_file").id())
-                    .desired_width(220.0)
-                    .show(gui);
-                Space::new(gui.style.small_padding).show(gui);
-                let browse = Button::new(StableId::new("settings_tcp_token_file_browse"))
-                    .text("Browse")
-                    .show(gui);
-                if browse.clicked()
-                    && let Some(path) = rfd::FileDialog::new().save_file()
-                {
-                    draft.tcp.token_file_text = path.to_string_lossy().to_string();
-                }
+                gui.form_row(|gui| {
+                    Label::new("Token file").show(gui);
+                    Space::new(gui.style.padding).show(gui);
+                    TextEdit::singleline(&mut draft.tcp.token_file_text)
+                        .id(StableId::new("settings_tcp_token_file").id())
+                        .desired_width(220.0)
+                        .show(gui);
+                    Space::new(gui.style.small_padding).show(gui);
+                    let browse = Button::new(StableId::new("settings_tcp_token_file_browse"))
+                        .text("Browse")
+                        .show(gui);
+                    if browse.clicked()
+                        && let Some(path) = rfd::FileDialog::new().save_file()
+                    {
+                        draft.tcp.token_file_text = path.to_string_lossy().to_string();
+                    }
+                });
             });
+        }
+    });
 
-            gui.form_row(|gui| {
-                Label::new("Takes effect on next launch.")
-                    .color(gui.style.noninteractive_text_color)
-                    .show(gui);
-            });
-        });
+    gui.form_row(|gui| {
+        Label::new("Takes effect on next launch.")
+            .color(gui.style.noninteractive_text_color)
+            .show(gui);
     });
 }

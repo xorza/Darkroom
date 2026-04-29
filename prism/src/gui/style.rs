@@ -75,6 +75,11 @@ pub struct Style {
     /// top/bottom) so labels, text edits, buttons, and checkboxes
     /// drawn in the same row sit on a shared baseline.
     pub row_height: f32,
+    /// Left inset applied by [`Gui::indent`] (and the width of the
+    /// region between the parent edge and the indent vline). Big
+    /// enough that the indent reads as a hierarchy step, not a
+    /// margin.
+    pub indent: f32,
 
     pub graph_background: GraphBackgroundStyle,
     pub connections: ConnectionStyle,
@@ -311,6 +316,7 @@ impl Style {
             button_padding: r.button_padding * scale,
             modal_padding: r.modal_padding * scale,
             row_height: r.row_height * scale,
+            indent: r.indent * scale,
 
             graph_background: GraphBackgroundStyle {
                 bg_color: r.graph_background.bg_color,
@@ -505,6 +511,7 @@ impl Default for Style {
             button_padding: Vec2::new(12.0, 3.0),
             modal_padding: 12.0,
             row_height: 24.0,
+            indent: 20.0,
 
             graph_background: GraphBackgroundStyle::default(),
             connections: ConnectionStyle::default(),
