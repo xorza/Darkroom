@@ -3,7 +3,7 @@ use std::sync::atomic::AtomicBool;
 
 use anyhow::Result;
 
-use crate::app_config::AppConfig;
+use crate::launch_config::LaunchConfig;
 use crate::session::Session;
 use crate::tui::main_tui::MainTui;
 use crate::tui::ui_host::TuiUiHost;
@@ -16,10 +16,10 @@ pub struct TuiApp {
 }
 
 impl TuiApp {
-    pub fn new(app_config: AppConfig) -> Self {
+    pub fn new(launch_config: LaunchConfig) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
         Self {
-            session: Session::new(TuiUiHost::new(shutdown.clone()), app_config),
+            session: Session::new(TuiUiHost::new(shutdown.clone()), launch_config),
             main_tui: MainTui::new(),
             shutdown,
         }

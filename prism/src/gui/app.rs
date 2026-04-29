@@ -1,9 +1,9 @@
 use eframe::egui;
 
-use crate::app_config::AppConfig;
 use crate::gui::debug::GuiDebug;
 use crate::gui::main_window::MainWindow;
 use crate::gui::ui_host::EguiUiHost;
+use crate::launch_config::LaunchConfig;
 use crate::session::Session;
 
 #[derive(Debug)]
@@ -14,9 +14,9 @@ pub struct GuiApp {
 }
 
 impl GuiApp {
-    pub fn new(ctx: &egui::Context, app_config: AppConfig) -> Self {
+    pub fn new(ctx: &egui::Context, launch_config: LaunchConfig) -> Self {
         Self {
-            session: Session::new(EguiUiHost::new(ctx), app_config),
+            session: Session::new(EguiUiHost::new(ctx), launch_config),
             main_window: MainWindow::new(),
             debug: GuiDebug::new(),
         }

@@ -18,7 +18,7 @@ use crate::script::{ScriptConfig, TcpScriptConfig};
 pub const DEFAULT_SCRIPT_PORT: u16 = 33433;
 
 #[derive(Debug, Clone, Default)]
-pub struct AppConfig {
+pub struct LaunchConfig {
     pub script: ScriptConfig,
     /// Reopen the graph that was open at the last clean shutdown
     /// (path stored in `Config::current_path`). Off by default — a

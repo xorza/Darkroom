@@ -13,18 +13,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::Result;
 use tokio::sync::Notify;
 
-use crate::app_config::AppConfig;
 use crate::gui::graph_ui::frame_output::FrameOutput;
 use crate::headless::ui_host::HeadlessUiHost;
+use crate::launch_config::LaunchConfig;
 use crate::session::Session;
 
 mod ui_host;
 
-pub async fn run(app_config: AppConfig) -> Result<()> {
+pub async fn run(launch_config: LaunchConfig) -> Result<()> {
     let wake = Arc::new(Notify::new());
     let shutdown = Arc::new(AtomicBool::new(false));
     let host = HeadlessUiHost::new(wake.clone(), shutdown.clone());
-    let mut session = Session::new(host, app_config);
+    let mut session = Session::new(host, launch_config);
 
     println!("prism headless: running. Send `shutdown()` over the script TCP, or Ctrl-C.");
 

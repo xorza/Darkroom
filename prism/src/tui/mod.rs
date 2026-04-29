@@ -6,14 +6,14 @@
 
 use anyhow::Result;
 
-use crate::app_config::AppConfig;
+use crate::launch_config::LaunchConfig;
 use crate::tui::app::TuiApp;
 
 pub mod app;
 pub mod main_tui;
 pub mod ui_host;
 
-pub fn run(app_config: AppConfig) -> Result<()> {
-    let mut app = TuiApp::new(app_config);
+pub fn run(launch_config: LaunchConfig) -> Result<()> {
+    let mut app = TuiApp::new(launch_config);
     app.run()
 }

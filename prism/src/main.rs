@@ -1,10 +1,10 @@
-mod app_config;
 mod common;
 mod config;
 mod gui;
 mod headless;
 mod init;
 mod input;
+mod launch_config;
 mod model;
 mod script;
 mod session;
@@ -15,7 +15,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use uuid::Uuid;
 
-use crate::app_config::{AppConfig, ScriptCliArgs, build_script_config};
+use crate::launch_config::{LaunchConfig, ScriptCliArgs, build_script_config};
 
 #[derive(Debug, Parser)]
 #[command(version, about)]
@@ -50,14 +50,14 @@ async fn main() -> Result<()> {
     let _log_guard = init::init();
     let cli = Cli::parse();
 
-    let app_config = AppConfig {
+    let launch_config = LaunchConfig {
         script: build_script_config(&cli.script, Uuid::new_v4()),
         load_last: cli.load_last,
     };
 
     match cli.mode.unwrap_or(Mode::Gui) {
-        Mode::Gui => gui::run(app_config),
-        Mode::Tui => tui::run(app_config),
-        Mode::Headless => headless::run(app_config).await,
+        Mode::Gui => gui::run(launch_config),
+        Mode::Tui => tui::run(launch_config),
+        Mode::Headless => headless::run(launch_config).await,
     }
 }
