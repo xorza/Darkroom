@@ -17,17 +17,14 @@ use egui::vec2;
 pub struct MainWindow {
     graph_ui: GraphUi,
     log_ui: LogUi,
-    style: Rc<Style>,
     settings_open: bool,
 }
 
 impl MainWindow {
     pub fn new() -> Self {
-        let style = Style::from_file("style.toml").unwrap_or_default();
         Self {
             graph_ui: GraphUi::default(),
             log_ui: LogUi,
-            style: Rc::new(style),
             settings_open: false,
         }
     }
@@ -43,9 +40,10 @@ impl MainWindow {
         &mut self,
         session: &mut Session,
         output: &mut FrameOutput,
+        style: &Rc<Style>,
         ui: &mut egui::Ui,
     ) -> Option<AppCommand> {
-        let mut gui = Gui::new(ui, &self.style);
+        let mut gui = Gui::new(ui, style);
         let gui = &mut gui;
         let input = gui.input_snapshot();
 
@@ -106,6 +104,19 @@ impl MainWindow {
     /// forced to `menu.popup_min_width` so hover highlights the
     /// whole row, not just the text.
     fn file_menu(&mut self, gui: &mut Gui<'_>) -> Option<AppCommand> {
+        const ENTRIES: &[(&str, &str, AppCommand)] = &[
+            ("menu_file_new", "New", AppCommand::New),
+            ("menu_file_save", "Save", AppCommand::Save),
+            ("menu_file_save_as", "Save as", AppCommand::SaveAs),
+            ("menu_file_open", "Open", AppCommand::Open),
+            (
+                "menu_file_settings",
+                "Settings...",
+                AppCommand::OpenSettings,
+            ),
+            ("menu_file_exit", "Exit", AppCommand::Exit),
+        ];
+
         let menu = gui.style.menu.clone();
         let file_btn = Button::new(StableId::new("menu_file"))
             .text("File")
@@ -118,36 +129,21 @@ impl MainWindow {
             menu.popup_min_width,
             gui.font_height(&menu.font) + menu.padding.y * 2.0,
         );
-        let entry = |gui: &mut Gui<'_>, id: &'static str, label: &str| -> bool {
-            ListItem::from_str(StableId::new(id), label)
-                .font(menu.font.clone())
-                .style(menu.button)
-                .size(item_size)
-                .show(gui)
-                .clicked()
-        };
 
         PopupMenu::new(&file_btn, StableId::new("menu_file_popup"))
             .min_width(menu.popup_min_width)
             .show(gui, |gui| {
                 let mut cmd = None;
-                if entry(gui, "menu_file_new", "New") {
-                    cmd = Some(AppCommand::New);
-                }
-                if entry(gui, "menu_file_save", "Save") {
-                    cmd = Some(AppCommand::Save);
-                }
-                if entry(gui, "menu_file_save_as", "Save as") {
-                    cmd = Some(AppCommand::SaveAs);
-                }
-                if entry(gui, "menu_file_open", "Open") {
-                    cmd = Some(AppCommand::Open);
-                }
-                if entry(gui, "menu_file_settings", "Settings...") {
-                    cmd = Some(AppCommand::OpenSettings);
-                }
-                if entry(gui, "menu_file_exit", "Exit") {
-                    cmd = Some(AppCommand::Exit);
+                for (id, label, command) in ENTRIES {
+                    let clicked = ListItem::from_str(StableId::new(id), label)
+                        .font(menu.font.clone())
+                        .style(menu.button)
+                        .size(item_size)
+                        .show(gui)
+                        .clicked();
+                    if clicked {
+                        cmd = Some(*command);
+                    }
                 }
                 cmd
             })

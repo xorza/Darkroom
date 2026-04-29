@@ -1,7 +1,10 @@
+use std::rc::Rc;
+
 use eframe::egui;
 
 use crate::gui::debug::GuiDebug;
 use crate::gui::main_window::MainWindow;
+use crate::gui::style::Style;
 use crate::gui::ui_host::EguiUiHost;
 use crate::launch_config::LaunchConfig;
 use crate::session::Session;
@@ -24,6 +27,7 @@ pub struct GuiApp {
     session: Session,
     main_window: MainWindow,
     debug: GuiDebug,
+    style: Rc<Style>,
     /// Filled by `ui`, consumed by the next `logic`. `clear()` runs
     /// at the end of `logic` so a sequence of hidden-only `logic`
     /// ticks doesn't reprocess stale intents.
@@ -32,10 +36,12 @@ pub struct GuiApp {
 
 impl GuiApp {
     pub fn new(ctx: &egui::Context, launch_config: LaunchConfig) -> Self {
+        let style = Rc::new(Style::from_file("style.toml").unwrap_or_default());
         Self {
             session: Session::new(EguiUiHost::new(ctx), launch_config),
             main_window: MainWindow::new(),
             debug: GuiDebug::new(),
+            style,
             output: FrameOutput::default(),
         }
     }
@@ -52,7 +58,7 @@ impl eframe::App for GuiApp {
         self.debug.frame(ui.ctx());
         let cmd = self
             .main_window
-            .render(&mut self.session, &mut self.output, ui);
+            .render(&mut self.session, &mut self.output, &self.style, ui);
         if let Some(cmd) = cmd {
             self.main_window.handle_app_command(&mut self.session, cmd);
         }
