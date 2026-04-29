@@ -75,11 +75,13 @@ impl MainWindow {
         if self.settings_open {
             // egui-direct-ok
             let ctx = gui.ui_raw().ctx().clone();
-            egui::Window::new("Settings")
-                .collapsible(false)
-                .resizable(true)
-                .open(&mut self.settings_open)
-                .show(&ctx, |_ui| {});
+            let resp = egui::Modal::new(StableId::new("settings_modal").id()).show(&ctx, |ui| {
+                ui.set_min_size(vec2(300.0, 400.0));
+                ui.heading("Settings");
+            });
+            if resp.should_close() {
+                self.settings_open = false;
+            }
         }
 
         // Shortcut wins over menu when both fire in the same frame —
