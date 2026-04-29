@@ -156,7 +156,7 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
         let out = HitRegion::new(id.with("drag_interact"))
             .rect(rect)
             .sense(outer_sense)
-            .show_positioned(gui);
+            .interact_and_cull(gui);
 
         if !out.visible {
             return out.response;

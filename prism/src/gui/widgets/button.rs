@@ -145,8 +145,8 @@ impl<'a> Button<'a> {
         };
 
         // Two layout modes:
-        // - Explicit rect: route through HitRegion::show_positioned so
-        //   visibility culling and the single-interact registration
+        // - Explicit rect: route through HitRegion::interact_and_cull
+        //   so visibility culling and the single-interact registration
         //   share a code path with the rest of the positioned-widget
         //   family.
         // - Autosize: route through Gui::autosize_in_scope so the
@@ -155,7 +155,7 @@ impl<'a> Button<'a> {
             let out = HitRegion::new(id)
                 .rect(rect)
                 .sense(sense)
-                .show_positioned(gui);
+                .interact_and_cull(gui);
             if !out.visible {
                 return out.response;
             }

@@ -137,7 +137,7 @@ impl NodeUi {
             let response = HitRegion::new(body_id)
                 .rect(layout.body_rect)
                 .sense(Sense::click() | Sense::hover() | Sense::drag())
-                .show(gui);
+                .interact(gui);
             let events = NodeDragEvents::from_response(&response);
 
             if (events.started || response.clicked())
@@ -388,7 +388,7 @@ fn render_status_hints(
     let dot_id = StableId::new(("node_status_impure", node_id));
     HitRegion::new(dot_id)
         .rect(dot_rect)
-        .show(gui)
+        .interact(gui)
         .on_hover_text("impure");
 }
 
@@ -438,7 +438,7 @@ fn render_ports(
         let response = HitRegion::new(port_id)
             .rect(port_rect)
             .sense(Sense::click() | Sense::hover() | Sense::drag())
-            .show(gui);
+            .interact(gui);
         let hovered = response.hovered();
 
         if port.kind == PortKind::Input && missing_inputs.contains(&port.port_idx) {

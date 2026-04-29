@@ -210,7 +210,7 @@ impl GraphUi {
             HitRegion::new(StableId::new("temp_overlay_background"))
                 .rect(rect)
                 .sense(Sense::all())
-                .show(gui);
+                .interact(gui);
         }
     }
 }

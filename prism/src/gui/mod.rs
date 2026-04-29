@@ -305,7 +305,7 @@ impl<'a> Gui<'a> {
     /// when adjacent conditional siblings come and go.
     /// Allocate `size` in the current layout under a stable-id scope
     /// and return `(rect, response)`. This is the autosize counterpart
-    /// to [`HitRegion::show_positioned`] for caller-supplied rects: any
+    /// to [`HitRegion::interact_and_cull`] for caller-supplied rects: any
     /// widget that does its own layout based on content size (Button,
     /// future autosize widgets) should go through this so the
     /// `allocate_*` calls live behind a single banned-pattern whitelist

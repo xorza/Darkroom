@@ -10,13 +10,19 @@ use crate::gui::Gui;
 /// `Response`), sense = `Sense::hover()`.
 ///
 /// Two terminal forms:
-/// - [`HitRegion::show`] returns the bare [`Response`]. Use for
-///   passive hit-tests, full-container input absorbers, etc.
-/// - [`HitRegion::show_positioned`] is the input layer for a
+/// - [`HitRegion::interact`] returns the bare [`Response`]. Use for
+///   passive hit-tests, full-container input absorbers, placeholder
+///   `Response` returns, anything where you don't paint at this rect.
+/// - [`HitRegion::interact_and_cull`] is the input layer for a
 ///   positioned widget that paints at the rect: checks
 ///   `is_rect_visible`, downgrades sense to `hover()` when off-screen,
 ///   and returns the rect + a `visible` flag so the caller can skip
 ///   painting.
+///
+/// Decision rule: if your code immediately after the call would
+/// otherwise be `if !gui.is_rect_visible(rect) { return; }` followed
+/// by `painter.…(rect, …)`, use `interact_and_cull`. Otherwise
+/// `interact`.
 #[derive(Debug)]
 pub struct HitRegion {
     id: StableId,
@@ -55,17 +61,17 @@ impl HitRegion {
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>) -> Response {
+    pub fn interact(self, gui: &mut Gui<'_>) -> Response {
         gui.ui_raw().interact(self.rect, self.id.id(), self.sense)
     }
 
     /// Input layer for a positioned widget that paints at the rect.
-    /// Same as [`Self::show`] but additionally:
+    /// Same as [`Self::interact`] but additionally:
     /// - asserts the rect has finite coordinates,
     /// - checks `is_rect_visible`; if not visible, downgrades sense to
     ///   `hover()` so the rect doesn't soak input from things below it,
     /// - returns the rect alongside the response with a `visible` flag.
-    pub fn show_positioned(self, gui: &mut Gui<'_>) -> HitOutput {
+    pub fn interact_and_cull(self, gui: &mut Gui<'_>) -> HitOutput {
         assert!(self.rect.min.x.is_finite() && self.rect.min.y.is_finite());
         assert!(self.rect.max.x.is_finite() && self.rect.max.y.is_finite());
         let visible = gui.ui_raw().is_rect_visible(self.rect);

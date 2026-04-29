@@ -89,7 +89,7 @@ impl<'a> ComboBox<'a> {
         let out = HitRegion::new(id)
             .rect(rect)
             .sense(Sense::click() | Sense::hover())
-            .show_positioned(gui);
+            .interact_and_cull(gui);
 
         if !out.visible {
             return out.response;

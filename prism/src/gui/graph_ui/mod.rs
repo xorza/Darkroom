@@ -300,7 +300,7 @@ impl GraphUi {
         let response = HitRegion::new(graph_bg_id)
             .rect(rect)
             .sense(Sense::hover() | Sense::drag() | Sense::click())
-            .show(gui);
+            .interact(gui);
 
         (response, pointer_pos)
     }

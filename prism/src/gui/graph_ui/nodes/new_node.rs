@@ -87,7 +87,7 @@ impl NewNodeUi {
         HitRegion::new(StableId::new("new_node_ui_bg"))
             .rect(rect)
             .sense(Sense::all())
-            .show(gui);
+            .interact(gui);
 
         let mut selection: Option<NewNodeSelection<'a>> = None;
 

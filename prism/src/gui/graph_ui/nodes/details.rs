@@ -34,7 +34,7 @@ impl NodeDetailsUi {
         let popup_id = StableId::new("node_details_panel");
 
         let Some(node_id) = ctx.view_graph.selected_node_id else {
-            return HitRegion::new(popup_id).sense(Sense::empty()).show(gui);
+            return HitRegion::new(popup_id).sense(Sense::empty()).interact(gui);
         };
 
         let scroll_id = StableId::new("node_details_scroll");

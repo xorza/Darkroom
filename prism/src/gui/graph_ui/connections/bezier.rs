@@ -89,7 +89,7 @@ impl ConnectionBezier {
         // curves without sampling.
         let expanded_rect = self.cheap_bounds(style.stroke_width);
         if !gui.is_rect_visible(expanded_rect) {
-            return HitRegion::new(id).show(gui);
+            return HitRegion::new(id).interact(gui);
         }
 
         self.ensure_sampled();
@@ -107,9 +107,9 @@ impl ConnectionBezier {
             HitRegion::new(id)
                 .rect(expanded_rect)
                 .sense(sense)
-                .show(gui)
+                .interact(gui)
         } else {
-            HitRegion::new(id).show(gui)
+            HitRegion::new(id).interact(gui)
         };
         self.polyline.render(gui.painter());
         response
