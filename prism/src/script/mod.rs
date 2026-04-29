@@ -35,6 +35,7 @@ use scenarium::prelude::FuncLib;
 
 use crate::model::Intent;
 use crate::model::ViewNode;
+use crate::session::output::RunCommand;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -276,15 +277,13 @@ pub enum SessionInbound {
     /// boundary symmetric with the GUI→graph boundary, with no
     /// Session-side per-variant glue. Empty vecs are no-ops.
     Apply(Vec<Intent>),
-    /// Trigger a single graph evaluation: the worker runs every
-    /// terminal node once. Routed through Session's `pending_run_cmd`
-    /// so handle_output's existing dirty-then-run sequencing applies.
-    RunOnce,
-    /// Start the worker's event loop (autorun). Subsequent graph
-    /// mutations re-trigger evaluation automatically until stopped.
-    StartAutorun,
-    /// Stop the worker's event loop.
-    StopAutorun,
+    /// Worker run-state command: trigger one evaluation
+    /// ([`RunCommand::RunOnce`]) or toggle the worker's event loop
+    /// ([`RunCommand::StartAutorun`] / [`RunCommand::StopAutorun`]).
+    /// Routed through Session's `pending_run_cmd` so `handle_output`'s
+    /// existing dirty-then-run sequencing applies before the worker
+    /// runs.
+    Run(RunCommand),
     /// Ask the host to close (script-side `shutdown()` builtin).
     /// Session calls `close_app()` on receipt, which routes to the
     /// frontend's natural close path (GUI: viewport-close;
@@ -524,7 +523,7 @@ fn decode_action(d: &Dynamic) -> Result<Intent, String> {
 /// primitive.
 fn register_run(engine: &mut Engine, inbound: InboundSender) {
     engine.register_fn("run", move || {
-        inbound.send(SessionInbound::RunOnce);
+        inbound.send(SessionInbound::Run(RunCommand::RunOnce));
     });
 }
 
@@ -627,11 +626,11 @@ fn register_host_helpers(engine: &mut Engine, inbound: InboundSender, func_lib: 
     module.set_native_fn(
         "set_autorun",
         move |on: bool| -> Result<(), Box<rhai::EvalAltResult>> {
-            inbound.send(if on {
-                SessionInbound::StartAutorun
+            inbound.send(SessionInbound::Run(if on {
+                RunCommand::StartAutorun
             } else {
-                SessionInbound::StopAutorun
-            });
+                RunCommand::StopAutorun
+            }));
             Ok(())
         },
     );

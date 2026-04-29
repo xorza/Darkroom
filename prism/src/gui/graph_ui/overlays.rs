@@ -9,7 +9,6 @@ use scenarium::graph::Binding;
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::graph_ui::ctx::GraphContext;
-use crate::gui::graph_ui::frame_output::{FrameOutput, RunCommand};
 use crate::gui::graph_ui::nodes::new_node::NewNodeSelection;
 use crate::gui::graph_ui::port::PortKind;
 use crate::gui::graph_ui::{GraphUi, ViewButtonAction};
@@ -17,6 +16,7 @@ use crate::gui::widgets::{Button, Frame, Layout, PositionedUi};
 use crate::input::InputSnapshot;
 use crate::model;
 use crate::model::Intent;
+use crate::session::output::{FrameOutput, RunCommand};
 
 impl GraphUi {
     /// Top-left bar: fit-all / view-selected / reset-view.

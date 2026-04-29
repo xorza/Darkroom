@@ -6,8 +6,8 @@ use anyhow::Result;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Notify;
 
-use crate::gui::graph_ui::frame_output::FrameOutput;
 use crate::session::Session;
+use crate::session::output::FrameOutput;
 
 #[derive(Debug)]
 pub struct MainTui;

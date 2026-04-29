@@ -65,14 +65,20 @@ fn drain_inbound_run_commands_park_on_pending() {
     let mut session = test_session_with(FuncLib::default(), script_rx);
 
     // RunOnce → pending_run_cmd is set; not consumed by drain_inbound.
-    script_tx.send(SessionInbound::RunOnce).unwrap();
+    script_tx
+        .send(SessionInbound::Run(RunCommand::RunOnce))
+        .unwrap();
     session.drain_inbound();
     assert_eq!(session.pending_run_cmd, Some(RunCommand::RunOnce));
 
     // StartAutorun overwrites RunOnce in the same drain — last-script-
     // wins for the frame, since they're processed in order.
-    script_tx.send(SessionInbound::StartAutorun).unwrap();
-    script_tx.send(SessionInbound::StopAutorun).unwrap();
+    script_tx
+        .send(SessionInbound::Run(RunCommand::StartAutorun))
+        .unwrap();
+    script_tx
+        .send(SessionInbound::Run(RunCommand::StopAutorun))
+        .unwrap();
     session.drain_inbound();
     assert_eq!(session.pending_run_cmd, Some(RunCommand::StopAutorun));
 }

@@ -19,9 +19,9 @@ use crate::gui::graph_ui::connections::actions::{apply_connection_deletions, pai
 use crate::gui::graph_ui::connections::bezier::{ConnectionBezier, ConnectionBezierStyle};
 use crate::gui::graph_ui::connections::breaker::ConnectionBreaker;
 use crate::gui::graph_ui::ctx::GraphContext;
-use crate::gui::graph_ui::frame_output::FrameOutput;
 use crate::gui::graph_ui::layout::GraphLayout;
 use crate::gui::graph_ui::port::PortKind;
+use crate::session::output::FrameOutput;
 
 pub(crate) use types::{
     BrokeItem, ConnectionCurve, ConnectionDrag, ConnectionDragUpdate, ConnectionKey, ConnectionPair,

@@ -7,7 +7,6 @@ use scenarium::prelude::Func;
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::graph_ui::ctx::GraphContext;
-use crate::gui::graph_ui::frame_output::FrameOutput;
 use crate::gui::image_utils::to_color_image;
 use crate::gui::widgets::{
     Frame, HitRegion, Image as ImageWidget, Label, PositionedUi, ScrollArea, Separator, Space,
@@ -16,6 +15,7 @@ use crate::gui::widgets::{
 use crate::model::Intent;
 use crate::model::argument_values_cache::{ArgumentValuesCache, CachedTexture, NodeCache};
 use crate::model::node_execution::NodeExecutionInfo;
+use crate::session::output::FrameOutput;
 
 const PANEL_WIDTH: f32 = 250.0;
 const PREVIEW_MAX_WIDTH: f32 = PANEL_WIDTH - 32.0;

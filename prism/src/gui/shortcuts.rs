@@ -4,8 +4,8 @@
 
 use eframe::egui;
 
-use crate::gui::graph_ui::frame_output::{AppCommand, EditorCommand, FrameOutput, RunCommand};
 use crate::input::InputSnapshot;
+use crate::session::output::{AppCommand, EditorCommand, FrameOutput, RunCommand};
 
 /// Commands a single frame's shortcuts can emit. Each field is at most
 /// one — same precedence semantics the original sequential `if/else`

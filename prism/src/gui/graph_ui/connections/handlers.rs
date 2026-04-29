@@ -15,12 +15,12 @@ use crate::gui::graph_ui::GraphUi;
 use crate::gui::graph_ui::connections::actions::{advance_drag, disconnect_connection};
 use crate::gui::graph_ui::connections::{BrokeItem, ConnectionDragUpdate, ConnectionPair};
 use crate::gui::graph_ui::ctx::GraphContext;
-use crate::gui::graph_ui::frame_output::FrameOutput;
 use crate::gui::graph_ui::gesture::Gesture;
 use crate::gui::graph_ui::nodes::PortInteractCommand;
 use crate::gui::graph_ui::port::{PortKind, PortRef};
 use crate::gui::widgets::HitRegion;
 use crate::input::InputSnapshot;
+use crate::session::output::FrameOutput;
 
 use crate::model::Intent;
 

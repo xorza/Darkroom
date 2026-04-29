@@ -13,10 +13,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::Result;
 use tokio::sync::Notify;
 
-use crate::gui::graph_ui::frame_output::FrameOutput;
 use crate::headless::ui_host::HeadlessUiHost;
 use crate::launch_config::LaunchConfig;
 use crate::session::Session;
+use crate::session::output::FrameOutput;
 
 mod ui_host;
 

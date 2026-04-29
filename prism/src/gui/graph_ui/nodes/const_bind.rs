@@ -8,12 +8,12 @@ use crate::gui::Gui;
 use crate::gui::graph_ui::connections::bezier::ConnectionBezierStyle;
 use crate::gui::graph_ui::connections::breaker::ConnectionBreaker;
 use crate::gui::graph_ui::connections::{ConnectionCurve, ConnectionKey};
-use crate::gui::graph_ui::frame_output::FrameOutput;
 use crate::gui::graph_ui::layout::NodeLayout;
 use crate::gui::graph_ui::port::PortKind;
 use crate::gui::style::DragValueStyle;
 use crate::gui::value_editor::StaticValueEditor;
 use crate::model::Intent;
+use crate::session::output::FrameOutput;
 use common::key_index_vec::{CompactInsert, KeyIndexVec};
 
 // === ConstBindUi ===

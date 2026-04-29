@@ -17,13 +17,15 @@ use tokio::sync::oneshot;
 
 use crate::config::Config;
 use crate::gui::graph_ui::ctx::GraphContext;
-use crate::gui::graph_ui::frame_output::{EditorCommand, FrameOutput, RunCommand};
 use crate::launch_config::LaunchConfig;
 use crate::model::argument_values_cache::{CacheEvent, NodeCache, RenderEvent, invalidated_nodes};
 use crate::model::intent;
 use crate::model::{ActionStack, Intent, ViewGraph};
 use crate::script::{self, ScriptExecutor, SessionInbound};
+use crate::session::output::{EditorCommand, FrameOutput, RunCommand};
 use crate::ui_host::UiHost;
+
+pub mod output;
 
 #[cfg(test)]
 mod tests;
@@ -409,14 +411,8 @@ impl Session {
                 // dirty→Update→ExecuteTerminals sequencing applies.
                 // Last-script-wins for the same frame; GUI input still
                 // takes precedence (see `handle_output`).
-                SessionInbound::RunOnce => {
-                    self.pending_run_cmd = Some(RunCommand::RunOnce);
-                }
-                SessionInbound::StartAutorun => {
-                    self.pending_run_cmd = Some(RunCommand::StartAutorun);
-                }
-                SessionInbound::StopAutorun => {
-                    self.pending_run_cmd = Some(RunCommand::StopAutorun);
+                SessionInbound::Run(cmd) => {
+                    self.pending_run_cmd = Some(cmd);
                 }
                 SessionInbound::Shutdown => {
                     self.close_app();

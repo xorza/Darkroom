@@ -3,12 +3,12 @@ use std::rc::Rc;
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::graph_ui::GraphUi;
-use crate::gui::graph_ui::frame_output::{AppCommand, FrameOutput};
 use crate::gui::log_ui::LogUi;
 use crate::gui::shortcuts::shortcut_commands;
 use crate::gui::style::Style;
 use crate::gui::widgets::{Button, ListItem, Panel, PopupMenu};
 use crate::session::Session;
+use crate::session::output::{AppCommand, FrameOutput};
 
 use eframe::egui;
 use egui::vec2;

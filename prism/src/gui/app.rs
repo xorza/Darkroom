@@ -1,11 +1,11 @@
 use eframe::egui;
 
 use crate::gui::debug::GuiDebug;
-use crate::gui::graph_ui::frame_output::{AppCommand, FrameOutput};
 use crate::gui::main_window::MainWindow;
 use crate::gui::ui_host::EguiUiHost;
 use crate::launch_config::LaunchConfig;
 use crate::session::Session;
+use crate::session::output::{AppCommand, FrameOutput};
 
 /// eframe app split across `logic` and `ui`:
 ///

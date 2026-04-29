@@ -8,9 +8,9 @@ use egui::Pos2;
 use scenarium::prelude::Binding;
 
 use crate::gui::graph_ui::ctx::GraphContext;
-use crate::gui::graph_ui::frame_output::FrameOutput;
 use crate::gui::graph_ui::nodes::PortInteractCommand;
 use crate::gui::graph_ui::port::{PortInfo, PortKind, PortRef};
+use crate::session::output::FrameOutput;
 
 use crate::model::Intent;
 

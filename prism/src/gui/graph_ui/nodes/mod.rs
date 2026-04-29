@@ -7,7 +7,6 @@ use crate::common::primitives::draw_circle_with_gradient_shadow;
 use crate::gui::Gui;
 use crate::gui::graph_ui::connections::breaker::ConnectionBreaker;
 use crate::gui::graph_ui::ctx::GraphContext;
-use crate::gui::graph_ui::frame_output::FrameOutput;
 use crate::gui::graph_ui::gesture::Gesture;
 use crate::gui::graph_ui::layout::{GraphLayout, NodeGalleys, NodeLayout};
 use crate::gui::graph_ui::nodes::const_bind::ConstBindUi;
@@ -15,6 +14,7 @@ use crate::gui::graph_ui::port::{PortInfo, PortKind, PortRef};
 use crate::gui::widgets::{Button, HitRegion};
 use crate::model::Intent;
 use crate::model::node_execution::NodeExecutionInfo;
+use crate::session::output::FrameOutput;
 use common::BoolExt;
 use egui::epaint::CornerRadiusF32;
 use egui::{

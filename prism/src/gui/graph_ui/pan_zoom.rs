@@ -10,13 +10,13 @@ use egui::{PointerButton, Pos2, Response, Vec2};
 
 use crate::common::UiEquals;
 use crate::gui::graph_ui::ctx::GraphContext;
-use crate::gui::graph_ui::frame_output::FrameOutput;
 use crate::gui::graph_ui::gesture::Gesture;
 use crate::gui::graph_ui::layout::{self, GraphLayout};
 use crate::gui::graph_ui::{GraphUi, MAX_ZOOM, MIN_ZOOM, WHEEL_ZOOM_SPEED};
 use crate::gui::{Gui, ViewParams};
 use crate::input::InputSnapshot;
 use crate::model::Intent;
+use crate::session::output::FrameOutput;
 
 impl GraphUi {
     #[allow(clippy::too_many_arguments)]
