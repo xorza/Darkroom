@@ -14,16 +14,27 @@ pub fn to_color_image(image: Image) -> ColorImage {
     let desc = *image.desc();
     let size = [desc.width, desc.height];
 
-    let pixels: Vec<Color32> = {
-        let mut bytes = image.into_bytes();
-        let ptr = bytes.as_mut_ptr() as *mut Color32;
-        let len = bytes.len() / 4;
-        let cap = bytes.capacity() / 4;
-        std::mem::forget(bytes);
-        // SAFETY: Color32 is #[repr(C)] with exactly 4 bytes (RGBA),
-        // and bytes are already RGBA_U8 format with proper alignment.
-        unsafe { Vec::from_raw_parts(ptr, len, cap) }
-    };
+    // Copy rather than reinterpret: `Vec<u8>` is align-1, `Color32` is
+    // align-4 (`#[repr(align(4))]`), so `Vec::from_raw_parts` across the
+    // two would mismatch `alloc`/`dealloc` layouts. We allocate a
+    // properly-aligned destination and `memcpy` the bytes in — `Color32`'s
+    // `[r,g,b,a]` byte layout matches RGBA_U8 verbatim.
+    let bytes = image.into_bytes();
+    assert_eq!(
+        bytes.len() % 4,
+        0,
+        "RGBA_U8 buffer length must be 4-aligned"
+    );
+    let pixel_count = bytes.len() / 4;
+    let mut pixels: Vec<Color32> = Vec::with_capacity(pixel_count);
+    // SAFETY: dst is align-4 (from `Vec::with_capacity::<Color32>`),
+    // capacity is `pixel_count` Color32s = `bytes.len()` bytes, src is
+    // a distinct allocation, and Color32's layout (`#[repr(C, align(4))]`
+    // wrapping `[u8; 4]`) is byte-identical to RGBA_U8.
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), pixels.as_mut_ptr() as *mut u8, bytes.len());
+        pixels.set_len(pixel_count);
+    }
 
     ColorImage::new(size, pixels)
 }
