@@ -77,7 +77,12 @@ impl NewNodeUi {
             return None;
         };
 
-        // Capture interaction for the background
+        // Screen-wide input blocker. This is deliberate — and the reason
+        // we don't use `egui::Popup` here. While the popup is open the
+        // graph below must not pan, zoom, or select; egui::Popup only
+        // catches its own area. Soaking all input on the container rect
+        // makes the popup truly modal-like over the graph. Pair with
+        // `should_close_popup` below for outside-click + Escape close.
         let rect = gui.container_rect();
         HitRegion::new(StableId::new("new_node_ui_bg"))
             .rect(rect)

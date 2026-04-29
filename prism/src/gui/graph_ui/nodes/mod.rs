@@ -384,14 +384,12 @@ fn render_status_hints(
     gui.painter()
         .circle_filled(center, dot_radius, gui.style.node.status_impure_color);
 
-    // Tooltip on hover
     let dot_rect = Rect::from_center_size(center, vec2(dot_radius * 2.0, dot_radius * 2.0));
     let dot_id = StableId::new(("node_status_impure", node_id));
-    let response = HitRegion::new(dot_id).rect(dot_rect).show(gui);
-
-    if response.hovered() {
-        response.show_tooltip_text("impure");
-    }
+    HitRegion::new(dot_id)
+        .rect(dot_rect)
+        .show(gui)
+        .on_hover_text("impure");
 }
 
 /// True iff a node should display the impure-function status dot:

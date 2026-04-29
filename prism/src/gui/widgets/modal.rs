@@ -2,14 +2,19 @@
 //! only drag handle (body input is absorbed); edges and corners
 //! resize. Title bar gains a close `✕` when [`Modal::open`] is bound.
 //!
+//! Why `egui::Window` and not `egui::Modal`: we want drag-to-move and
+//! edge-resize, which `egui::Modal` does not provide. The trade-off is
+//! that we have to recreate the modal-layer + backdrop pieces by hand
+//! (see `install_modal_chrome`) and live with one rough edge: during
+//! egui::Window's built-in fade-out (after `*open` flips to false) the
+//! chrome is gone but the window paints at reducing opacity for a few
+//! frames — input briefly leaks through. egui::Window doesn't expose a
+//! way to query in-progress opacity, so we accept it.
+//!
 //! Modal input blocking uses egui's modal-layer system together with a
 //! transparent screen-sized click+drag absorber — same recipe as
 //! [`egui::Modal`]. No visual dim is painted; layer an [`egui::Area`]
-//! at the call site if you want one. Note: during egui::Window's
-//! built-in fade-out (after `*open` flips to false) the chrome is
-//! gone but the window paints at reducing opacity for a few frames —
-//! input briefly leaks through. egui::Window doesn't expose a way to
-//! query in-progress opacity, so we accept it.
+//! at the call site if you want one.
 
 use egui::{Align2, Order, Sense, Vec2};
 

@@ -186,12 +186,10 @@ impl<'a> Button<'a> {
             *toggle_value = !*toggle_value;
         }
 
-        if response.hovered()
-            && let Some(tooltip) = self.tooltip
-            && !tooltip.is_empty()
-        {
-            response.show_tooltip_text(tooltip);
-        }
+        let response = match self.tooltip {
+            Some(tooltip) if !tooltip.is_empty() => response.on_hover_text(tooltip),
+            _ => response,
+        };
 
         let background = self.background.unwrap_or(ButtonStyle {
             disabled_fill: gui.style.noninteractive_bg_fill,
