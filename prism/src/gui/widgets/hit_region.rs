@@ -12,9 +12,11 @@ use crate::gui::Gui;
 /// Two terminal forms:
 /// - [`HitRegion::show`] returns the bare [`Response`]. Use for
 ///   passive hit-tests, full-container input absorbers, etc.
-/// - [`HitRegion::show_culled`] additionally checks `is_rect_visible`,
-///   downgrades sense to `hover()` when off-screen, and returns the
-///   rect + a `visible` flag so positioned widgets can skip painting.
+/// - [`HitRegion::show_positioned`] is the input layer for a
+///   positioned widget that paints at the rect: checks
+///   `is_rect_visible`, downgrades sense to `hover()` when off-screen,
+///   and returns the rect + a `visible` flag so the caller can skip
+///   painting.
 #[derive(Debug)]
 pub struct HitRegion {
     id: StableId,
@@ -57,12 +59,13 @@ impl HitRegion {
         gui.ui_raw().interact(self.rect, self.id.id(), self.sense)
     }
 
+    /// Input layer for a positioned widget that paints at the rect.
     /// Same as [`Self::show`] but additionally:
     /// - asserts the rect has finite coordinates,
     /// - checks `is_rect_visible`; if not visible, downgrades sense to
     ///   `hover()` so the rect doesn't soak input from things below it,
     /// - returns the rect alongside the response with a `visible` flag.
-    pub fn show_culled(self, gui: &mut Gui<'_>) -> HitOutput {
+    pub fn show_positioned(self, gui: &mut Gui<'_>) -> HitOutput {
         assert!(self.rect.min.x.is_finite() && self.rect.min.y.is_finite());
         assert!(self.rect.max.x.is_finite() && self.rect.max.y.is_finite());
         let visible = gui.ui_raw().is_rect_visible(self.rect);

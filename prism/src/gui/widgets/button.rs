@@ -148,7 +148,7 @@ impl<'a> Button<'a> {
         };
 
         // Two layout modes:
-        // - Explicit rect: route through HitRegion::show_culled so
+        // - Explicit rect: route through HitRegion::show_positioned so
         //   visibility culling and the single-interact registration
         //   share a code path with the rest of the positioned-widget
         //   family.
@@ -156,7 +156,10 @@ impl<'a> Button<'a> {
         //   a stable-id seed; otherwise the resulting widget's id drifts
         //   with the parent's counter.
         let (rect, response) = if let Some(rect) = self.rect {
-            let out = HitRegion::new(id).rect(rect).sense(sense).show_culled(gui);
+            let out = HitRegion::new(id)
+                .rect(rect)
+                .sense(sense)
+                .show_positioned(gui);
             if !out.visible {
                 return out.response;
             }

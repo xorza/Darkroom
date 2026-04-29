@@ -105,7 +105,7 @@ impl<'a> FilePicker<'a> {
         let out = HitRegion::new(id)
             .rect(rect)
             .sense(Sense::hover())
-            .show_culled(gui);
+            .show_positioned(gui);
 
         if !out.visible {
             return out.response;

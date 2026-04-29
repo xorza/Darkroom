@@ -2,7 +2,7 @@
 //!
 //! Return-type contract:
 //! - **`HitRegion`** has two terminals: `.show()` returns
-//!   [`egui::Response`]; `.show_culled()` returns
+//!   [`egui::Response`]; `.show_positioned()` returns
 //!   [`hit_region::HitOutput`] with rect + visibility for positioned widgets.
 //! - **Atomic interactive** widgets (`Button`, `Label`, `Image`,
 //!   `Separator`, `ComboBox`, `DragValue`, `FilePicker`, `TextEdit`, `ListItem`)
