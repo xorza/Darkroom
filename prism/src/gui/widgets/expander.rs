@@ -41,11 +41,7 @@ impl Expander {
         let icon_spacing = gui.style.padding;
         let text_color = gui.style.text_color;
 
-        let galley = gui.painter().layout_no_wrap(
-            self.text.clone(),
-            gui.style.body_font.clone(),
-            text_color,
-        );
+        let galley = gui.layout_no_wrap(&self.text, &gui.style.body_font, text_color);
 
         let header_height = galley.size().y.max(icon_size);
         let header_width = icon_size + icon_spacing + galley.size().x;

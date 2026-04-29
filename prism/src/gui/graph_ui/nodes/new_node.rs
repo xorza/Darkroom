@@ -227,10 +227,7 @@ fn show_category_functions<'a>(
     let btn_font = gui.style.sub_font.clone();
     let galleys: Vec<Arc<Galley>> = funcs
         .iter()
-        .map(|func| {
-            gui.painter()
-                .layout_no_wrap(func.name.clone(), btn_font.clone(), gui.style.text_color)
-        })
+        .map(|func| gui.layout_no_wrap(&func.name, &btn_font, gui.style.text_color))
         .collect();
 
     let max_width = galleys

@@ -82,10 +82,7 @@ impl<'a> ComboBox<'a> {
             .style
             .unwrap_or_else(|| gui.style.node.const_bind_style.clone());
 
-        let galley =
-            gui.ui_raw()
-                .painter()
-                .layout_no_wrap(self.selected.clone(), font.clone(), color);
+        let galley = gui.layout_no_wrap(self.selected, &font, color);
         let size = galley.size() + padding * 2.0;
 
         let rect = self.anchor.anchor_size(self.pos, size);
@@ -125,13 +122,7 @@ impl<'a> ComboBox<'a> {
 
             let galleys: Vec<_> = options
                 .iter()
-                .map(|option| {
-                    gui.painter().layout_no_wrap(
-                        option.clone(),
-                        item_font.clone(),
-                        gui.style.text_color,
-                    )
-                })
+                .map(|option| gui.layout_no_wrap(option, &item_font, gui.style.text_color))
                 .collect();
 
             let max_text_width = galleys

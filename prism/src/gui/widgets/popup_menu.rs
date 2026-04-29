@@ -138,12 +138,9 @@ impl<'a> ListItem<'a> {
             let text_width = if let Some(galley) = &self.galley {
                 galley.size().x
             } else {
-                let galley = gui.painter().layout_no_wrap(
-                    self.text.unwrap_or("").to_string(),
-                    font.clone(),
-                    gui.style.text_color,
-                );
-                galley.size().x
+                gui.layout_no_wrap(self.text.unwrap_or(""), &font, gui.style.text_color)
+                    .size()
+                    .x
             };
 
             let width = text_width + padding * 2.0;

@@ -140,10 +140,7 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
         };
 
         let value_text = display_value.display();
-        let galley = gui
-            .ui_raw()
-            .painter()
-            .layout_no_wrap(value_text.clone(), font.clone(), color);
+        let galley = gui.layout_no_wrap(&value_text, &font, color);
         let mut size = galley.size() + padding * 2.0;
         size.x = size.x.max(30.0 * gui.scale());
         assert!(size.x.is_finite() && size.y.is_finite());

@@ -76,17 +76,10 @@ impl<'a> FilePicker<'a> {
             .unwrap_or_else(|| gui.style.node.const_bind_style.clone());
 
         let browse_text = "browse";
-        let browse_galley = gui.ui_raw().painter().layout_no_wrap(
-            browse_text.to_string(),
-            font.clone(),
-            text_color,
-        );
+        let browse_galley = gui.layout_no_wrap(browse_text, &font, text_color);
         let browse_text_size = browse_galley.size();
 
-        let filename_galley =
-            gui.ui_raw()
-                .painter()
-                .layout_no_wrap(display_name.clone(), font.clone(), text_color);
+        let filename_galley = gui.layout_no_wrap(&display_name, &font, text_color);
         let filename_text_size = filename_galley.size();
 
         let inner_height = filename_text_size.y.max(browse_text_size.y);

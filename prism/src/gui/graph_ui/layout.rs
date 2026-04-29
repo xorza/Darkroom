@@ -22,11 +22,18 @@ use crate::gui::{Gui, ViewParams};
 // NodeGalleys — cached font layouts
 // ============================================================================
 //
-// Galleys are the only expensive part of per-node layout: each one is a
-// shaped + laid-out text allocation owned by `Arc<Galley>`. They change
-// only when the node name or the GUI scale changes, so they're cached
-// here and rebuilt lazily. Everything else (rects, port centers) is
-// cheap enough to compute from scratch each frame — see `NodeLayout`.
+// Galleys live behind egui's internal `GalleyCache`, so the actual text
+// shaping/layout is already amortized across frames. What this cache
+// saves is the per-call dispatch overhead — `String` alloc, LayoutJob
+// construction, hash, IntMap lookup, `Arc::clone` — for graph nodes
+// whose name and scale rarely change. At ~3-5 µs per dispatched call
+// times N nodes times ports/node, this matters at graph scale (hundreds
+// of nodes); for tens of nodes it's noise.
+//
+// Storing the `Arc<Galley>` here also keeps `NodeLayout::compute` pure:
+// it reads `.size()` off cached galleys and the cached `sub_row_height`
+// without touching `Gui` itself. Everything else (rects, port centers)
+// is cheap enough to compute from scratch each frame — see `NodeLayout`.
 
 #[derive(Debug)]
 pub struct NodeGalleys {
@@ -80,16 +87,11 @@ impl NodeGalleys {
     }
 
     fn make_title(gui: &Gui<'_>, text: &str) -> Arc<Galley> {
-        gui.painter().layout_no_wrap(
-            text.to_string(),
-            gui.style.body_font.clone(),
-            gui.style.text_color,
-        )
+        gui.layout_no_wrap(text, &gui.style.body_font, gui.style.text_color)
     }
 
     fn make_sub(gui: &Gui<'_>, text: &str, font: &FontId) -> Arc<Galley> {
-        gui.painter()
-            .layout_no_wrap(text.to_string(), font.clone(), gui.style.text_color)
+        gui.layout_no_wrap(text, font, gui.style.text_color)
     }
 }
 

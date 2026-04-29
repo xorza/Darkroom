@@ -133,10 +133,7 @@ impl<'a> Button<'a> {
         };
         let galley = if let Some(text) = self.text {
             let font = self.font.unwrap_or_else(|| gui.style.sub_font.clone());
-            let galley = gui
-                .painter()
-                .layout_no_wrap(text.to_string(), font, text_color);
-            Some(galley)
+            Some(gui.layout_no_wrap(text, &font, text_color))
         } else {
             self.custom_galley.as_ref().map(|g| g.clone())
         };

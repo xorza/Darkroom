@@ -4,7 +4,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use eframe::NativeOptions;
 use egui::{
-    Align, FontId, InnerResponse, Layout, Painter, Rect, Response, Sense, Ui, UiBuilder, Vec2,
+    Align, Color32, FontId, Galley, InnerResponse, Layout, Painter, Rect, Response, Sense, Ui,
+    UiBuilder, Vec2,
 };
 
 use crate::gui::app::GuiApp;
@@ -145,6 +146,18 @@ impl<'a> Gui<'a> {
 
     pub fn painter(&self) -> &Painter {
         self.ui.painter()
+    }
+
+    /// Layout text into an `Arc<Galley>` (no wrapping). Thin wrapper over
+    /// [`egui::Painter::layout_no_wrap`] that takes references — egui's
+    /// API consumes `String` and `FontId`, so callers were repeating
+    /// `text.to_string()` / `font.clone()` boilerplate. Lookup goes
+    /// through egui's internal `GalleyCache`; the actual layout work is
+    /// amortized across frames for unchanged inputs.
+    pub fn layout_no_wrap(&self, text: &str, font: &FontId, color: Color32) -> Arc<Galley> {
+        self.ui
+            .painter()
+            .layout_no_wrap(text.to_owned(), font.clone(), color)
     }
 
     /// Load a persisted value (survives app restarts) from
