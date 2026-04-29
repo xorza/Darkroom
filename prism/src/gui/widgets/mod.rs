@@ -24,6 +24,7 @@
 pub mod area;
 pub mod button;
 pub mod checkbox;
+pub mod close_button;
 pub mod column_flow;
 pub mod combo_box;
 pub mod constraints;
@@ -48,6 +49,7 @@ pub mod texture;
 pub use area::Area;
 pub use button::Button;
 pub use checkbox::Checkbox;
+pub use close_button::CloseButton;
 pub use column_flow::ColumnFlow;
 pub use combo_box::ComboBox;
 pub use constraints::Constraints;

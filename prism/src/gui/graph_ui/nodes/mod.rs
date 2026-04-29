@@ -11,7 +11,7 @@ use crate::gui::graph_ui::gesture::Gesture;
 use crate::gui::graph_ui::layout::{GraphLayout, NodeGalleys, NodeLayout};
 use crate::gui::graph_ui::nodes::const_bind::ConstBindUi;
 use crate::gui::graph_ui::port::{PortInfo, PortKind, PortRef};
-use crate::gui::widgets::{Button, HitRegion};
+use crate::gui::widgets::{Button, CloseButton, HitRegion};
 use crate::model::Intent;
 use crate::model::node_execution::NodeExecutionInfo;
 use crate::session::output::FrameOutput;
@@ -344,23 +344,11 @@ fn render_cache_btn(gui: &mut Gui<'_>, layout: &NodeLayout, node: &Node) -> Opti
 }
 
 fn render_remove_btn(gui: &mut Gui<'_>, layout: &NodeLayout, node_id: NodeId) -> bool {
-    let rect = layout.remove_btn_rect;
-
-    let response = Button::new(StableId::new(("remove_btn", node_id)))
+    CloseButton::new(StableId::new(("remove_btn", node_id)))
+        .rect(layout.remove_btn_rect)
         .tooltip("Remove node")
-        .rect(rect)
-        .show(gui);
-
-    let margin = rect.width() * 0.3;
-    let tl = pos2(rect.min.x + margin, rect.min.y + margin);
-    let br = pos2(rect.max.x - margin, rect.max.y - margin);
-    let bl = pos2(rect.min.x + margin, rect.max.y - margin);
-    let tr = pos2(rect.max.x - margin, rect.min.y + margin);
-    let stroke = Stroke::new(1.4 * gui.scale(), gui.style.text_color);
-    gui.painter().line_segment([tl, br], stroke);
-    gui.painter().line_segment([bl, tr], stroke);
-
-    response.clicked()
+        .show(gui)
+        .clicked()
 }
 
 fn render_status_hints(
