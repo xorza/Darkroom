@@ -124,9 +124,6 @@ fn no_drifting_widget_ids_in_crate() {
         Path::new("gui/mod.rs"),
         // This file defines the banned patterns as string literals.
         Path::new("common/tripwires.rs"),
-        // Allocates inside an already-scoped child Ui — the
-        // canonical pattern this whole test exists to enforce.
-        Path::new("gui/widgets/button.rs"),
         // Fork of egui's TextEdit; its allocations live inside
         // egui's own widget-id discipline, configured per-call
         // via `.id_salt(StableId)` on the public API.

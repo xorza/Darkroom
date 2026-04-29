@@ -3,7 +3,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use eframe::NativeOptions;
-use egui::{Align, FontId, InnerResponse, Layout, Painter, Rect, Sense, Ui, UiBuilder};
+use egui::{
+    Align, FontId, InnerResponse, Layout, Painter, Rect, Response, Sense, Ui, UiBuilder, Vec2,
+};
 
 use crate::gui::app::GuiApp;
 use crate::{
@@ -288,6 +290,26 @@ impl<'a> Gui<'a> {
     /// `UiBuilder::id_salt` produces. That distinction shields our
     /// chrome from "widget rect changed id between passes" warnings
     /// when adjacent conditional siblings come and go.
+    /// Allocate `size` in the current layout under a stable-id scope
+    /// and return `(rect, response)`. This is the autosize counterpart
+    /// to [`HitRegion::show_positioned`] for caller-supplied rects: any
+    /// widget that does its own layout based on content size (Button,
+    /// future autosize widgets) should go through this so the
+    /// `allocate_*` calls live behind a single banned-pattern whitelist
+    /// and not at every call site.
+    pub fn autosize_in_scope(
+        &mut self,
+        id: StableId,
+        size: Vec2,
+        sense: Sense,
+    ) -> (Rect, Response) {
+        self.scope(id).sense(sense).show(|gui| {
+            let (_id, rect) = gui.ui_raw().allocate_space(size);
+            let response = gui.ui_raw().allocate_rect(rect, sense);
+            (rect, response)
+        })
+    }
+
     pub fn scope(&mut self, id: StableId) -> ScopedGui<'_, 'a> {
         ScopedGui {
             gui: self,
