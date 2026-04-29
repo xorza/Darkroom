@@ -6,6 +6,7 @@ use egui::{Align, FontId, Galley, Rect, Response, Sense, Shape, StrokeKind, Vec2
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::style::ButtonStyle;
+use crate::gui::widgets::InteractiveRect;
 
 #[must_use = "Button does nothing until .show() is called"]
 pub struct Button<'a> {
@@ -146,25 +147,19 @@ impl<'a> Button<'a> {
             Sense::hover()
         };
 
-        // Two widget-id paths depending on layout mode:
-        //
-        // - Explicit rect (`.rect(..)`): the caller dictates the rect, so
-        //   we register *one* widget directly with the caller-supplied
-        //   `StableId`. No scope needed — no auto-id counter to worry
-        //   about, no second widget at the same rect. That matters: an
-        //   earlier scope-wrapping version emitted two click-sensitive
-        //   widgets at the same rect (the scope's own widget plus an
-        //   inner `allocate_rect`), which — once other nodes' bodies
-        //   register later in the frame — made per-node cache/remove
-        //   buttons unreliable.
-        //
-        // - Autosize (no explicit rect): the layout decides the rect
-        //   from the button's content size. We still need a scope so
-        //   `allocate_space` runs against a stable-id seed, otherwise
-        //   the resulting widget's id drifts with the parent's counter.
+        // Two layout modes:
+        // - Explicit rect: route through InteractiveRect so visibility
+        //   culling and the single-interact registration share a code
+        //   path with the rest of the positioned-widget family.
+        // - Autosize: scope is required so `allocate_space` runs against
+        //   a stable-id seed; otherwise the resulting widget's id drifts
+        //   with the parent's counter.
         let (rect, response) = if let Some(rect) = self.rect {
-            let response = gui.ui_raw().interact(rect, id.id(), sense);
-            (rect, response)
+            let out = InteractiveRect::new(id, rect).sense(sense).show(gui);
+            if !out.visible {
+                return out.response;
+            }
+            (out.rect, out.response)
         } else {
             // todo also include provided shapes size
             let text_size = galley.as_ref().map(|g| g.size()).unwrap_or_default();
@@ -173,16 +168,16 @@ impl<'a> Button<'a> {
                 .padding
                 .unwrap_or_else(|| vec2(gui.style.padding, gui.style.small_padding));
             let autosize = self.size.unwrap_or(text_size + padding * 2.0);
-            gui.scope(id).sense(sense).show(|gui| {
+            let (rect, response) = gui.scope(id).sense(sense).show(|gui| {
                 let (_id, rect) = gui.ui_raw().allocate_space(autosize);
                 let response = gui.ui_raw().allocate_rect(rect, sense);
                 (rect, response)
-            })
+            });
+            if !gui.ui_raw().is_rect_visible(rect) {
+                return response;
+            }
+            (rect, response)
         };
-
-        if !gui.ui_raw().is_rect_visible(rect) {
-            return response;
-        }
 
         if response.clicked()
             && self.enabled
