@@ -1,12 +1,11 @@
-//! Floating dialog backed by `egui::Window`. Title bar with close
-//! button (when `.open(&mut bool)` is bound), resize handle, and
-//! collapsible panel come from egui — this widget just bridges to
-//! `Gui<'_>`.
+//! Floating window backed by [`egui::Window`]. Title bar is the only
+//! drag handle (body input is absorbed); bottom-right + edges resize.
+//! Title bar gains a close `✕` when [`Modal::open`] is bound.
 //!
-//! Not strictly modal: input still flows to widgets behind it. Add a
-//! backdrop layer at the call site if you need that.
+//! Not strictly modal — there's no backdrop or input blocking against
+//! widgets behind. Layer one at the call site if you need it.
 
-use egui::Vec2;
+use egui::{Sense, Vec2};
 
 use crate::common::StableId;
 use crate::gui::Gui;
@@ -32,8 +31,7 @@ impl<'a> Modal<'a> {
 
     /// Bind visibility to a caller-owned bool. Adds a close button to
     /// the title bar; clicking it (or pressing Escape on the focused
-    /// window) flips the flag back to false. The body is skipped when
-    /// the flag is already false.
+    /// window) flips the flag to false.
     pub fn open(mut self, open: &'a mut bool) -> Self {
         self.open = Some(open);
         self
@@ -45,59 +43,44 @@ impl<'a> Modal<'a> {
         self
     }
 
-    /// Returns `Some(inner)` when the dialog is open this frame, `None`
-    /// when closed.
+    /// Returns `Some(inner)` when the body ran this frame, `None` when
+    /// the dialog is closed (or fully faded out).
     pub fn show<R>(self, gui: &mut Gui<'_>, body: impl FnOnce(&mut Gui<'_>) -> R) -> Option<R> {
-        if let Some(open) = &self.open
-            && !**open
-        {
-            return None;
-        }
-
         let ctx = gui.ui_raw().ctx().clone();
         let args = gui.child_args();
 
         let mut window = egui::Window::new(self.title)
             .id(self.id.id())
-            .resizable(true)
             .collapsible(false);
+        if let Some(open) = self.open {
+            window = window.open(open);
+        }
         if let Some(min_size) = self.min_size {
             window = window.default_size(min_size).min_size(min_size);
         }
 
-        // egui::Window forces `resizable: false` on its inner `Resize`,
-        // so the window's reported size is `last_content_size`, not
-        // `desired_size`. For an empty/sparse body that's whatever the
-        // body claimed, ignoring drag-resize. Claim the full available
-        // rect (which `Resize` sets to `desired_size` each frame) so
-        // `last_content_size == desired_size` and resize sticks across
-        // frames.
-        //
-        // We also register a click+drag interactor over the body rect.
-        // egui::Window's underlying Area registers its move-drag over
-        // the whole area; later-registered child widgets win hit-tests,
-        // so this absorbs body drags and leaves only the title bar as
-        // the move handle.
-        let id = self.id;
-        let body_fill = move |gui: &mut Gui<'_>| {
-            let ui = gui.ui_raw();
-            let avail = ui.available_size();
-            ui.set_min_size(avail);
-            let body_rect = ui.available_rect_before_wrap();
-            let _ = ui.interact(
-                body_rect,
-                id.with("body_drag_block").id(),
-                egui::Sense::CLICK | egui::Sense::DRAG,
-            );
-            body(gui)
-        };
-
-        let inner_resp = if let Some(open) = self.open {
-            window.open(open).show(&ctx, |ui| args.enter(ui, body_fill))
-        } else {
-            window.show(&ctx, |ui| args.enter(ui, body_fill))
-        };
-
-        inner_resp.and_then(|r| r.inner)
+        let blocker_id = self.id.with("body_drag_block").id();
+        window
+            .show(&ctx, |ui| {
+                args.enter(ui, |gui| {
+                    // `egui::Window` forces `resizable: false` on its
+                    // inner `Resize`, so the window's reported size is
+                    // `last_content_size`. Claim the full available
+                    // rect (= `Resize`'s `desired_size` each frame) so
+                    // resize-by-edge sticks across frames.
+                    let ui = gui.ui_raw();
+                    ui.set_min_size(ui.available_size());
+                    // Absorb body clicks/drags so the underlying Area's
+                    // move-drag (registered earlier) only fires from
+                    // the title bar.
+                    let _ = ui.interact(
+                        ui.available_rect_before_wrap(),
+                        blocker_id,
+                        Sense::click_and_drag(),
+                    );
+                    body(gui)
+                })
+            })
+            .and_then(|r| r.inner)
     }
 }
