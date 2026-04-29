@@ -264,7 +264,7 @@ fn show_editing<T: DragValueNumeric>(
     let mut text_edit_response = gui
         .scope(StableId::from_egui_id(id.with("drag_value_text")))
         .max_rect(inner_rect)
-        .show(|gui| text_edit.show(gui).response);
+        .show(|gui| text_edit.show(gui));
 
     let should_confirm = text_edit_response.lost_focus()
         && gui
