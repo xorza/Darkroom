@@ -18,7 +18,7 @@ use crate::model::node_execution::NodeExecutionInfo;
 use common::BoolExt;
 use egui::epaint::CornerRadiusF32;
 use egui::{
-    Align2, PointerButton, Pos2, Rect, Response, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
+    Align2, PointerButton, Rect, Response, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
 use scenarium::graph::{Node, NodeId};
 use scenarium::prelude::{ExecutionStats, Func, FuncBehavior, NodeBehavior};
@@ -433,16 +433,17 @@ fn render_ports(
 
     let mut result = PortInteractCommand::None;
 
-    let mut draw_port = |gui: &mut Gui<'_>, kind: PortKind, idx: usize, center: Pos2| {
+    let mut draw_port = |gui: &mut Gui<'_>, port: PortRef| {
+        let center = layout.port_center(&port);
         let port_rect = Rect::from_center_size(center, port_rect_size);
-        let port_id = StableId::new(("node_port", kind, node.id, idx));
+        let port_id = StableId::new(("node_port", port.kind, port.node_id, port.port_idx));
         let response = HitRegion::new(port_id)
             .rect(port_rect)
             .sense(Sense::click() | Sense::hover() | Sense::drag())
             .show(gui);
-        let hovered = gui.rect_contains_pointer(port_rect);
+        let hovered = response.hovered();
 
-        if kind == PortKind::Input && missing_inputs.contains(&idx) {
+        if port.kind == PortKind::Input && missing_inputs.contains(&port.port_idx) {
             draw_circle_with_gradient_shadow(
                 gui.painter(),
                 center,
@@ -452,17 +453,10 @@ fn render_ports(
             );
         }
 
-        let color = gui.style.node.port_colors(kind).select(hovered);
+        let color = gui.style.node.port_colors(port.kind).select(hovered);
         gui.painter().circle_filled(center, port_radius, color);
 
-        let info = PortInfo {
-            port: PortRef {
-                node_id: node.id,
-                port_idx: idx,
-                kind,
-            },
-            center,
-        };
+        let info = PortInfo { port, center };
         let cmd = if response.drag_started_by(PointerButton::Primary) {
             PortInteractCommand::DragStart(info)
         } else if response.drag_stopped_by(PointerButton::Primary) {
@@ -477,17 +471,24 @@ fn render_ports(
         result.prefer(cmd);
     };
 
-    if func.terminal {
-        draw_port(gui, PortKind::Trigger, 0, layout.trigger_center());
-    }
-    for idx in 0..func.inputs.len() {
-        draw_port(gui, PortKind::Input, idx, layout.input_center(idx));
-    }
-    for idx in 0..func.outputs.len() {
-        draw_port(gui, PortKind::Output, idx, layout.output_center(idx));
-    }
-    for idx in 0..func.events.len() {
-        draw_port(gui, PortKind::Event, idx, layout.event_center(idx));
+    let trigger_count = if func.terminal { 1 } else { 0 };
+    let groups: [(PortKind, usize); 4] = [
+        (PortKind::Trigger, trigger_count),
+        (PortKind::Input, func.inputs.len()),
+        (PortKind::Output, func.outputs.len()),
+        (PortKind::Event, func.events.len()),
+    ];
+    for (kind, count) in groups {
+        for port_idx in 0..count {
+            draw_port(
+                gui,
+                PortRef {
+                    node_id: node.id,
+                    port_idx,
+                    kind,
+                },
+            );
+        }
     }
 
     result

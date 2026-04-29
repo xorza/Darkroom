@@ -195,10 +195,6 @@ impl<'a> Gui<'a> {
         self.ui.is_rect_visible(rect)
     }
 
-    pub fn rect_contains_pointer(&self, rect: Rect) -> bool {
-        self.ui.rect_contains_pointer(rect)
-    }
-
     pub fn pointer_hover_pos(&self) -> Option<egui::Pos2> {
         self.ui.input(|i| i.pointer.hover_pos())
     }
