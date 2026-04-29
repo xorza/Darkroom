@@ -14,7 +14,7 @@ use crate::gui::graph_ui::port::{PortInfo, PortKind, PortRef};
 
 use crate::model::Intent;
 
-use super::types::{ConnectionDrag, ConnectionDragUpdate, ConnectionKey};
+use super::types::{ConnectionDrag, ConnectionDragUpdate, ConnectionKey, ConnectionPair};
 
 /// Advances an in-flight connection drag based on the pointer and the latest
 /// port interaction command. The drag lives inside
@@ -108,13 +108,30 @@ pub(super) fn apply_connection_deletions(
     }
 }
 
-pub(super) fn order_ports(port_a: PortRef, port_b: PortRef) -> (PortRef, PortRef) {
+/// Pair two opposite-kind ports into a typed [`ConnectionPair`]. Returns
+/// `None` for any same-kind or cross-kind (data ↔ event) combination.
+/// All four valid orderings are enumerated explicitly so adding a new
+/// `PortKind` is a compile error here, not a runtime panic.
+pub(super) fn pair_ports(port_a: PortRef, port_b: PortRef) -> Option<ConnectionPair> {
+    use PortKind::*;
     match (port_a.kind, port_b.kind) {
-        (PortKind::Output, PortKind::Input) => (port_b, port_a),
-        (PortKind::Input, PortKind::Output) => (port_a, port_b),
-        (PortKind::Event, PortKind::Trigger) => (port_b, port_a),
-        (PortKind::Trigger, PortKind::Event) => (port_a, port_b),
-        _ => unreachable!("ports must be of opposite types"),
+        (Output, Input) => Some(ConnectionPair::Data {
+            input: port_b,
+            output: port_a,
+        }),
+        (Input, Output) => Some(ConnectionPair::Data {
+            input: port_a,
+            output: port_b,
+        }),
+        (Event, Trigger) => Some(ConnectionPair::Event {
+            trigger: port_b,
+            event: port_a,
+        }),
+        (Trigger, Event) => Some(ConnectionPair::Event {
+            trigger: port_a,
+            event: port_b,
+        }),
+        _ => None,
     }
 }
 
@@ -131,11 +148,11 @@ fn try_snap_to_port(drag: &mut ConnectionDrag, port_info: PortInfo) -> bool {
 
 fn finish_drag(drag: &ConnectionDrag) -> ConnectionDragUpdate {
     if let Some(end_port) = drag.end_port {
-        let (input_port, output_port) = order_ports(drag.start_port, end_port);
-        ConnectionDragUpdate::FinishedWith {
-            input_port,
-            output_port,
-        }
+        // try_snap_to_port already verified the kinds are opposite, so
+        // pair_ports cannot return None here.
+        let pair = pair_ports(drag.start_port, end_port)
+            .expect("snapped end port has been validated as opposite-kind");
+        ConnectionDragUpdate::FinishedWith(pair)
     } else {
         match drag.start_port.kind {
             PortKind::Input => ConnectionDragUpdate::FinishedWithEmptyOutput {
@@ -144,7 +161,8 @@ fn finish_drag(drag: &ConnectionDrag) -> ConnectionDragUpdate {
             PortKind::Output => ConnectionDragUpdate::FinishedWithEmptyInput {
                 output_port: drag.start_port,
             },
-            _ => ConnectionDragUpdate::Finished,
+            // Trigger / Event drags don't open the new-node popup.
+            PortKind::Trigger | PortKind::Event => ConnectionDragUpdate::Finished,
         }
     }
 }
@@ -224,12 +242,42 @@ mod tests {
 
     #[test]
     fn advance_drag_stop_with_snap_returns_finished_with() {
-        let start = port_info(NodeId::unique(), PortKind::Output, 0);
+        let start_node = NodeId::unique();
+        let end_node = NodeId::unique();
+        let start = port_info(start_node, PortKind::Output, 0);
         let mut drag = ConnectionDrag::new(start);
-        drag.end_port = Some(port_info(NodeId::unique(), PortKind::Input, 0).port);
+        let end = port_info(end_node, PortKind::Input, 1).port;
+        drag.end_port = Some(end);
 
         let update = advance_drag(&mut drag, Pos2::ZERO, PortInteractCommand::DragStop);
-        assert!(matches!(update, ConnectionDragUpdate::FinishedWith { .. }));
+        match update {
+            ConnectionDragUpdate::FinishedWith(ConnectionPair::Data { input, output }) => {
+                assert_eq!(input.node_id, end_node);
+                assert_eq!(input.port_idx, 1);
+                assert_eq!(output.node_id, start_node);
+                assert_eq!(output.port_idx, 0);
+            }
+            other => panic!("expected FinishedWith(Data), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn advance_drag_event_pair_classifies_as_event() {
+        let event_node = NodeId::unique();
+        let trigger_node = NodeId::unique();
+        let start = port_info(event_node, PortKind::Event, 2);
+        let mut drag = ConnectionDrag::new(start);
+        drag.end_port = Some(port_info(trigger_node, PortKind::Trigger, 0).port);
+
+        let update = advance_drag(&mut drag, Pos2::ZERO, PortInteractCommand::DragStop);
+        match update {
+            ConnectionDragUpdate::FinishedWith(ConnectionPair::Event { trigger, event }) => {
+                assert_eq!(trigger.node_id, trigger_node);
+                assert_eq!(event.node_id, event_node);
+                assert_eq!(event.port_idx, 2);
+            }
+            other => panic!("expected FinishedWith(Event), got {other:?}"),
+        }
     }
 
     #[test]

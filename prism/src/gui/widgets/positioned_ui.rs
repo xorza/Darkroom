@@ -62,7 +62,7 @@ impl PositionedUi {
                 .memory(|mem| mem.data.get_temp::<Vec2>(self.id.id()));
 
             let top_left = if let Some(size) = content_size {
-                self.compute_top_left(size)
+                compute_pivot_offset(self.position, size, self.pivot)
             } else {
                 self.position
             };
@@ -104,18 +104,67 @@ impl PositionedUi {
                 InnerResponse::new(result, ui.response())
             })
     }
+}
 
-    fn compute_top_left(&self, size: Vec2) -> Pos2 {
-        let x = match self.pivot.x() {
-            egui::Align::Min => self.position.x,
-            egui::Align::Center => self.position.x - size.x / 2.0,
-            egui::Align::Max => self.position.x - size.x,
-        };
-        let y = match self.pivot.y() {
-            egui::Align::Min => self.position.y,
-            egui::Align::Center => self.position.y - size.y / 2.0,
-            egui::Align::Max => self.position.y - size.y,
-        };
-        Pos2::new(x, y)
+/// Top-left of a `size`-bounded rect anchored at `position` with the given
+/// `pivot`. Pure helper — extracted from `PositionedUi::show` so the pivot
+/// math can be unit-tested without an `egui::Ui`.
+pub(crate) fn compute_pivot_offset(position: Pos2, size: Vec2, pivot: Align2) -> Pos2 {
+    let x = match pivot.x() {
+        egui::Align::Min => position.x,
+        egui::Align::Center => position.x - size.x / 2.0,
+        egui::Align::Max => position.x - size.x,
+    };
+    let y = match pivot.y() {
+        egui::Align::Min => position.y,
+        egui::Align::Center => position.y - size.y / 2.0,
+        egui::Align::Max => position.y - size.y,
+    };
+    Pos2::new(x, y)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compute_pivot_offset;
+    use egui::{Align2, Pos2, Vec2};
+
+    #[test]
+    fn left_top_pivot_is_identity() {
+        let p = compute_pivot_offset(
+            Pos2::new(10.0, 20.0),
+            Vec2::new(40.0, 30.0),
+            Align2::LEFT_TOP,
+        );
+        assert_eq!(p, Pos2::new(10.0, 20.0));
+    }
+
+    #[test]
+    fn right_bottom_pivot_subtracts_full_size() {
+        let p = compute_pivot_offset(
+            Pos2::new(100.0, 200.0),
+            Vec2::new(40.0, 30.0),
+            Align2::RIGHT_BOTTOM,
+        );
+        assert_eq!(p, Pos2::new(60.0, 170.0));
+    }
+
+    #[test]
+    fn center_center_pivot_subtracts_half_size() {
+        let p = compute_pivot_offset(
+            Pos2::new(100.0, 200.0),
+            Vec2::new(40.0, 30.0),
+            Align2::CENTER_CENTER,
+        );
+        assert_eq!(p, Pos2::new(80.0, 185.0));
+    }
+
+    #[test]
+    fn mixed_pivot_left_bottom() {
+        let p = compute_pivot_offset(
+            Pos2::new(50.0, 50.0),
+            Vec2::new(20.0, 10.0),
+            Align2::LEFT_BOTTOM,
+        );
+        assert_eq!(p, Pos2::new(50.0, 40.0));
     }
 }

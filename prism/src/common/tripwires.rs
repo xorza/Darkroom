@@ -131,10 +131,6 @@ fn no_drifting_widget_ids_in_crate() {
         // egui's own widget-id discipline, configured per-call
         // via `.id_salt(StableId)` on the public API.
         Path::new("gui/widgets/text_edit.rs"),
-        // Expander uses a stable `Id::new(text)` and `interact`
-        // with that id directly. The auto-id from allocate_space
-        // is discarded; left as-is for now.
-        Path::new("gui/widgets/expander.rs"),
     ];
 
     let offenders = scan_crate(whitelist, &[], "// id-drift-ok", |line| {

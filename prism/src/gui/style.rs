@@ -723,6 +723,7 @@ mod vec2_array {
 #[cfg(test)]
 mod tests {
     use super::Style;
+    use std::rc::Rc;
 
     #[test]
     fn style_toml_roundtrip() {
@@ -737,5 +738,100 @@ mod tests {
             style.node.const_badge_offset,
             deserialized.node.const_badge_offset
         );
+    }
+
+    #[test]
+    fn at_scale_one_is_reference_clone() {
+        let reference = Rc::new(Style::default());
+        let scaled = reference.at_scale(1.0);
+        // Fast path returns the reference itself (Rc::clone), so the
+        // pointer should be identical.
+        assert!(Rc::ptr_eq(&reference, &scaled));
+        assert_eq!(reference.padding, scaled.padding);
+    }
+
+    #[test]
+    fn at_scale_multiplies_scale_dependent_fields() {
+        let reference = Rc::new(Style::default());
+        let scaled = reference.at_scale(2.0);
+
+        assert_eq!(scaled.padding, reference.padding * 2.0);
+        assert_eq!(scaled.big_padding, reference.big_padding * 2.0);
+        assert_eq!(scaled.corner_radius, reference.corner_radius * 2.0);
+        assert_eq!(scaled.body_font.size, reference.body_font.size * 2.0);
+        assert_eq!(scaled.node.port_radius, reference.node.port_radius * 2.0);
+    }
+
+    #[test]
+    fn at_scale_leaves_color_fields_untouched() {
+        let reference = Rc::new(Style::default());
+        let scaled = reference.at_scale(2.0);
+        assert_eq!(scaled.text_color, reference.text_color);
+        assert_eq!(
+            scaled.node.input_port_color,
+            reference.node.input_port_color
+        );
+        assert_eq!(
+            scaled.graph_background.bg_color,
+            reference.graph_background.bg_color
+        );
+    }
+
+    #[test]
+    fn chained_rescaling_multiplies_from_reference_no_drift() {
+        // Scaling a runtime instance must always re-multiply from the
+        // canonical scale=1.0 values via the back-link, not compound
+        // off the previous runtime instance. So `at_scale(2.0).at_scale(0.5)`
+        // is bit-exact equal to `at_scale(1.0)` (i.e. the reference).
+        let reference = Rc::new(Style::default());
+        let detoured = reference.at_scale(2.0).at_scale(0.5);
+        let direct = reference.at_scale(0.5);
+        assert_eq!(detoured.padding, direct.padding);
+        assert_eq!(detoured.body_font.size, direct.body_font.size);
+        assert_eq!(detoured.node.port_radius, direct.node.port_radius);
+    }
+
+    #[test]
+    fn at_scale_back_link_points_to_canonical_reference() {
+        let reference = Rc::new(Style::default());
+        let scaled = reference.at_scale(2.0);
+        let back = scaled
+            .reference
+            .as_ref()
+            .expect("scaled instance must carry a back-link");
+        assert!(Rc::ptr_eq(back, &reference));
+        // Re-scaling from `scaled` follows the back-link, so the
+        // produced instance points to the same canonical reference.
+        let rescaled = scaled.at_scale(3.0);
+        let back2 = rescaled
+            .reference
+            .as_ref()
+            .expect("rescaled instance must carry a back-link");
+        assert!(Rc::ptr_eq(back2, &reference));
+    }
+
+    #[test]
+    fn at_scale_is_monotonic_in_dimensions() {
+        let reference = Rc::new(Style::default());
+        let small = reference.at_scale(0.5);
+        let big = reference.at_scale(2.0);
+        assert!(big.padding > small.padding);
+        assert!(big.body_font.size > small.body_font.size);
+        assert!(big.node.port_radius > small.node.port_radius);
+        assert!(big.corner_radius > small.corner_radius);
+    }
+
+    #[test]
+    #[should_panic(expected = "style scale must be greater than 0")]
+    fn at_scale_rejects_zero() {
+        let reference = Rc::new(Style::default());
+        let _ = reference.at_scale(0.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "style scale must be finite")]
+    fn at_scale_rejects_nan() {
+        let reference = Rc::new(Style::default());
+        let _ = reference.at_scale(f32::NAN);
     }
 }

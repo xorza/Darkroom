@@ -15,7 +15,7 @@ use scenarium::prelude::Binding;
 use scenarium::worker::EventRef;
 
 use crate::gui::Gui;
-use crate::gui::graph_ui::connections::actions::{apply_connection_deletions, order_ports};
+use crate::gui::graph_ui::connections::actions::{apply_connection_deletions, pair_ports};
 use crate::gui::graph_ui::connections::bezier::{ConnectionBezier, ConnectionBezierStyle};
 use crate::gui::graph_ui::connections::breaker::ConnectionBreaker;
 use crate::gui::graph_ui::ctx::GraphContext;
@@ -24,7 +24,7 @@ use crate::gui::graph_ui::layout::GraphLayout;
 use crate::gui::graph_ui::port::PortKind;
 
 pub(crate) use types::{
-    BrokeItem, ConnectionCurve, ConnectionDrag, ConnectionDragUpdate, ConnectionKey,
+    BrokeItem, ConnectionCurve, ConnectionDrag, ConnectionDragUpdate, ConnectionKey, ConnectionPair,
 };
 
 /// Decoration-only bezier keyed by the connection it overlays.
@@ -185,19 +185,9 @@ impl ConnectionUi {
         // temp-connection, tripping egui's "Widget rect changed id
         // between passes" warning (red-rect flash).
         let snapped_key = drag.end_port.map(|end| {
-            let (input_port, output_port) = order_ports(drag.start_port, end);
-            match output_port.kind {
-                PortKind::Output => ConnectionKey::Input {
-                    input_node_id: input_port.node_id,
-                    input_idx: input_port.port_idx,
-                },
-                PortKind::Event => ConnectionKey::Event {
-                    event_node_id: output_port.node_id,
-                    event_idx: output_port.port_idx,
-                    trigger_node_id: input_port.node_id,
-                },
-                _ => unreachable!("end port kinds are validated by try_snap_to_port"),
-            }
+            pair_ports(drag.start_port, end)
+                .expect("snapped end port has been validated as opposite-kind")
+                .key()
         });
         let style = ConnectionBezierStyle::build(&gui.style, drag.start_port.kind, false, false);
         if let Some(key) = snapped_key {

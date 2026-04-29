@@ -374,12 +374,7 @@ fn render_status_hints(
     behavior: NodeBehavior,
     func: &Func,
 ) {
-    // Show impure indicator for non-cached impure functions with outputs
-    let show_impure = behavior == NodeBehavior::AsFunction
-        && func.behavior == FuncBehavior::Impure
-        && !func.outputs.is_empty();
-
-    if !show_impure {
+    if !should_show_impure_indicator(behavior, func) {
         return;
     }
 
@@ -397,6 +392,15 @@ fn render_status_hints(
     if response.hovered() {
         response.show_tooltip_text("impure");
     }
+}
+
+/// True iff a node should display the impure-function status dot:
+/// only impure `AsFunction` nodes with at least one output. Pure
+/// helper — extracted from `render_status_hints` for unit testing.
+pub(crate) fn should_show_impure_indicator(behavior: NodeBehavior, func: &Func) -> bool {
+    behavior == NodeBehavior::AsFunction
+        && func.behavior == FuncBehavior::Impure
+        && !func.outputs.is_empty()
 }
 
 // ============================================================================
@@ -530,4 +534,51 @@ fn render_port_labels(gui: &Gui<'_>, layout: &NodeLayout, galleys: &NodeGalleys)
         &|idx| layout.event_center(idx),
         LabelSide::LeftOfPort,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_show_impure_indicator;
+    use scenarium::function::FuncOutput;
+    use scenarium::prelude::{Func, FuncBehavior, NodeBehavior};
+
+    fn func(behavior: FuncBehavior, output_count: usize) -> Func {
+        Func {
+            behavior,
+            outputs: (0..output_count)
+                .map(|_| FuncOutput {
+                    name: String::new(),
+                    data_type: Default::default(),
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn impure_function_with_outputs_shows_indicator() {
+        let f = func(FuncBehavior::Impure, 1);
+        assert!(should_show_impure_indicator(NodeBehavior::AsFunction, &f));
+    }
+
+    #[test]
+    fn pure_function_never_shows_indicator() {
+        let f = func(FuncBehavior::Pure, 1);
+        assert!(!should_show_impure_indicator(NodeBehavior::AsFunction, &f));
+    }
+
+    #[test]
+    fn impure_function_with_no_outputs_skips_indicator() {
+        // Outputs are what get cached; an impure func that produces
+        // none has no caching distinction worth flagging.
+        let f = func(FuncBehavior::Impure, 0);
+        assert!(!should_show_impure_indicator(NodeBehavior::AsFunction, &f));
+    }
+
+    #[test]
+    fn once_behavior_skips_indicator_even_when_func_impure() {
+        // Only AsFunction nodes flag impure status; Once is excluded.
+        let f = func(FuncBehavior::Impure, 2);
+        assert!(!should_show_impure_indicator(NodeBehavior::Once, &f));
+    }
 }

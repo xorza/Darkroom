@@ -57,16 +57,38 @@ impl ConnectionDrag {
 pub(crate) enum ConnectionDragUpdate {
     InProgress,
     Finished,
-    FinishedWithEmptyOutput {
-        input_port: PortRef,
-    },
-    FinishedWithEmptyInput {
-        output_port: PortRef,
-    },
-    FinishedWith {
-        input_port: PortRef,
-        output_port: PortRef,
-    },
+    FinishedWithEmptyOutput { input_port: PortRef },
+    FinishedWithEmptyInput { output_port: PortRef },
+    FinishedWith(ConnectionPair),
+}
+
+/// A snapped pair of compatible ports, classified by connection kind.
+/// Constructed only via [`super::actions::pair_ports`]; downstream code
+/// matches on the variant without re-checking [`crate::gui::graph_ui::port::PortKind`],
+/// so impossible cross-kind pairs cannot be expressed at the type level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConnectionPair {
+    Data { input: PortRef, output: PortRef },
+    Event { trigger: PortRef, event: PortRef },
+}
+
+impl ConnectionPair {
+    /// The `ConnectionKey` that addresses the (potential) committed
+    /// connection — the same id used by the permanent curve so the
+    /// in-flight temp curve and the committed curve share an egui id.
+    pub(crate) fn key(&self) -> ConnectionKey {
+        match *self {
+            ConnectionPair::Data { input, .. } => ConnectionKey::Input {
+                input_node_id: input.node_id,
+                input_idx: input.port_idx,
+            },
+            ConnectionPair::Event { trigger, event } => ConnectionKey::Event {
+                event_node_id: event.node_id,
+                event_idx: event.port_idx,
+                trigger_node_id: trigger.node_id,
+            },
+        }
+    }
 }
 
 #[derive(Debug)]

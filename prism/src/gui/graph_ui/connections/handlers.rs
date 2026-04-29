@@ -13,7 +13,7 @@ use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::graph_ui::GraphUi;
 use crate::gui::graph_ui::connections::actions::{advance_drag, disconnect_connection};
-use crate::gui::graph_ui::connections::{BrokeItem, ConnectionDragUpdate};
+use crate::gui::graph_ui::connections::{BrokeItem, ConnectionDragUpdate, ConnectionPair};
 use crate::gui::graph_ui::ctx::GraphContext;
 use crate::gui::graph_ui::frame_output::FrameOutput;
 use crate::gui::graph_ui::gesture::Gesture;
@@ -134,11 +134,8 @@ impl GraphUi {
                 assert_eq!(output_port.kind, PortKind::Output);
                 self.new_node_ui.open(pointer_pos);
             }
-            ConnectionDragUpdate::FinishedWith {
-                input_port,
-                output_port,
-            } => {
-                self.apply_connection(ctx, input_port, output_port, output);
+            ConnectionDragUpdate::FinishedWith(pair) => {
+                self.apply_connection(ctx, pair, output);
                 self.gesture.cancel();
             }
         }
@@ -147,27 +144,23 @@ impl GraphUi {
     fn apply_connection(
         &mut self,
         ctx: &GraphContext<'_>,
-        input_port: PortRef,
-        output_port: PortRef,
+        pair: ConnectionPair,
         output: &mut FrameOutput,
     ) {
-        assert_eq!(input_port.kind, output_port.kind.opposite());
-
-        match output_port.kind {
-            PortKind::Output => {
-                match build_data_connection_action(ctx.view_graph, input_port, output_port) {
+        match pair {
+            ConnectionPair::Data { input, output: out } => {
+                match build_data_connection_action(ctx.view_graph, input, out) {
                     Ok(action) => output.add_intent(action),
                     Err(err) => output.add_error(err),
                 }
             }
-            PortKind::Event => {
-                match build_event_connection_action(ctx.view_graph, input_port, output_port) {
+            ConnectionPair::Event { trigger, event } => {
+                match build_event_connection_action(ctx.view_graph, trigger, event) {
                     Ok(Some(action)) => output.add_intent(action),
                     Ok(None) => {}
                     Err(err) => output.add_error(err),
                 }
             }
-            _ => unreachable!(),
         }
     }
 
@@ -294,48 +287,40 @@ pub(in crate::gui::graph_ui) fn build_data_connection_action(
     })
 }
 
-/// Builds the `ChangeEventConnection` action that would subscribe
-/// `input_port`'s node to `output_port`'s event. No mutation.
-/// Returns `Ok(None)` when the subscriber is already present —
-/// event subscriptions are list membership, unlike data bindings
-/// which are overwrites.
+/// Builds the `SetEventConnection` action that would subscribe
+/// `trigger`'s node to `event`. No mutation. Returns `Ok(None)` when
+/// the subscriber is already present — event subscriptions are list
+/// membership, unlike data bindings which are overwrites.
+///
+/// Port-kind correctness is enforced at the call site by the
+/// [`ConnectionPair::Event`] constructor — this function trusts its
+/// inputs to be a trigger / event pair.
 pub(in crate::gui::graph_ui) fn build_event_connection_action(
     view_graph: &crate::model::ViewGraph,
-    input_port: PortRef,
-    output_port: PortRef,
+    trigger: PortRef,
+    event: PortRef,
 ) -> Result<Option<Intent>, ConnectionError> {
-    assert_eq!(input_port.kind, PortKind::Trigger);
-    assert_eq!(output_port.kind, PortKind::Event);
-
-    if input_port.node_id == output_port.node_id {
+    if trigger.node_id == event.node_id {
         return Err(ConnectionError::CycleDetected {
-            input_node_id: input_port.node_id,
-            output_node_id: output_port.node_id,
+            input_node_id: trigger.node_id,
+            output_node_id: event.node_id,
         });
     }
 
-    let output_node = view_graph
+    let event_node = view_graph
         .graph
-        .by_id(&output_port.node_id)
+        .by_id(&event.node_id)
         .expect("event connection output node must exist");
-    assert!(
-        view_graph.graph.by_id(&input_port.node_id).is_some(),
-        "event connection input node must exist"
-    );
-    assert!(
-        output_port.port_idx < output_node.events.len(),
-        "event index out of range for build_event_connection_action"
-    );
-    let event = &output_node.events[output_port.port_idx];
+    let event_def = &event_node.events[event.port_idx];
 
-    if event.subscribers.contains(&input_port.node_id) {
+    if event_def.subscribers.contains(&trigger.node_id) {
         return Ok(None);
     }
 
     Ok(Some(Intent::SetEventConnection {
-        event_node_id: output_port.node_id,
-        event_idx: output_port.port_idx,
-        subscriber: input_port.node_id,
+        event_node_id: event.node_id,
+        event_idx: event.port_idx,
+        subscriber: trigger.node_id,
         present: true,
     }))
 }
