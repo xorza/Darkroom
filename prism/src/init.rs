@@ -1,6 +1,7 @@
 use anyhow::Result;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_rolling_file::RollingFileAppenderBase;
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 
 /// Returns the non-blocking writer's `WorkerGuard`. Hold it in `main`
@@ -27,8 +28,11 @@ fn init_trace() -> Result<WorkerGuard> {
         .build()
         .map_err(|e| anyhow::anyhow!("build log appender: {e}"))?;
     let (non_blocking, log_guard) = appender.get_non_blocking_appender();
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        EnvFilter::new("info,wgpu=warn,wgpu_core=warn,wgpu_hal=warn,egui_wgpu=warn,naga=warn")
+    });
     tracing_subscriber::fmt()
-        .with_env_filter("info")
+        .with_env_filter(filter)
         .with_writer(non_blocking.and(std::io::stdout))
         .init();
 
