@@ -259,24 +259,32 @@ impl<'a> Gui<'a> {
         self.row_with_layout(Layout::left_to_right(egui::Align::Center), add_contents)
     }
 
-    /// Row pinned to `style.row_height` under `layout`, with
-    /// `(available_width, row_height)` allocated explicitly. Use when
-    /// you need a non-default direction (e.g.
+    /// Row pinned to `style.row_height` under `layout`, with width
+    /// either filling the parent (normal pass) or driven by children
+    /// (sizing pass). Use when you need a non-default direction (e.g.
     /// `Layout::right_to_left(Center)` for a footer with Apply/Cancel
     /// on the right).
     ///
-    /// Why allocate explicitly instead of `with_layout` +
-    /// `set_min_height`: egui's horizontal layouts with
-    /// `cross_align == Center` trip a "fill cross axis to
-    /// `available_rect.height()`" branch in `Layout::next_frame`.
-    /// When the parent's `max_rect.height` is bigger than the row
-    /// content — which happens whenever `egui::Window`'s `Resize`
-    /// keeps `desired_size` pinned at its high-water mark — every
-    /// widget in the row would claim that full height and the cursor
-    /// would advance by it, so the row swallows all remaining vertical
-    /// space and pushes later siblings off the visible area. A
-    /// fixed-size allocation gives the row a finite `max_rect.height`,
-    /// so the fill becomes `row_height`.
+    /// Height pin: egui's horizontal layouts with `cross_align ==
+    /// Center` trip a "fill cross axis to `available_rect.height()`"
+    /// branch in `Layout::next_frame`. When the parent's
+    /// `max_rect.height` is bigger than the row content — which
+    /// happens whenever `egui::Window`'s `Resize` keeps `desired_size`
+    /// pinned at its high-water mark — every widget in the row would
+    /// claim that full height and the cursor would advance by it, so
+    /// the row swallows all remaining vertical space and pushes later
+    /// siblings off the visible area. A fixed-size allocation gives
+    /// the row a finite `max_rect.height`, so the fill becomes
+    /// `row_height`.
+    ///
+    /// Width: in the normal pass we claim `available_width` so
+    /// right-to-left / center layouts have slack to align into. In a
+    /// sizing pass (`ui.is_sizing_pass()`, triggered by `Area` /
+    /// `Window::auto_sized()` on the first frame state is unknown) we
+    /// allocate width 0 and let egui's allocator grow `min_rect` to
+    /// fit children — so the parent measures *content* width, not
+    /// INFINITY. Same trick `egui::Sides` (sides.rs:163) and `Grid`
+    /// use to play nicely with auto-sized parents.
     pub fn row_with_layout<R>(
         &mut self,
         layout: Layout,
@@ -284,17 +292,12 @@ impl<'a> Gui<'a> {
     ) -> R {
         let row_height = self.style.row_height;
         let args = self.view_params();
-        // desired_size.y = row_height — pins the row's `max_rect.height`
-        // so egui's "fill cross axis" path in `next_frame_ignore_wrap`
-        // (triggered by horizontal layouts with `cross_align == Center`)
-        // fills to `row_height`, not the parent's full extent.
-        // desired_size.x = available_width — gives the row a finite
-        // width to allocate against. Caller (`Modal`) must hand us a
-        // finite parent `max_rect.width`; we don't try to handle
-        // INFINITY here (`auto_sized()` is incompatible with this
-        // helper for that reason).
-        let available_width = self.ui.available_size_before_wrap().x;
-        let desired_size = egui::vec2(available_width, row_height);
+        let width = if self.ui.is_sizing_pass() {
+            0.0
+        } else {
+            self.ui.available_size_before_wrap().x
+        };
+        let desired_size = egui::vec2(width, row_height);
         self.ui
             .allocate_ui_with_layout(desired_size, layout, |ui| args.enter(ui, add_contents))
             .inner

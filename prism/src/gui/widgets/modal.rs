@@ -17,7 +17,7 @@
 //! [`egui::Modal`]. No visual dim is painted; layer an [`egui::Area`]
 //! at the call site if you want one.
 
-use egui::{Align2, Order, Sense, Vec2, vec2};
+use egui::{Align2, Order, Sense, Vec2};
 
 use crate::common::StableId;
 use crate::gui::Gui;
@@ -67,35 +67,21 @@ impl<'a> Modal<'a> {
         // room a real settings/about dialog expects.
         let frame = egui::Frame::window(&ctx.global_style())
             .inner_margin(egui::Margin::same(gui.style.modal_padding as i8));
-        // Size to content with a finite, capped width.
-        //
-        // - `resizable(false)` makes the window's rendered size track
-        //   `last_content_size` each frame (egui `Resize::show`,
-        //   lines 327–329) — height auto-fits.
-        // - `default_size = (420, 200)` gives `Gui::form_row` a finite
-        //   `available_width` to allocate against (`auto_sized()`'s
-        //   INFINITY width would inflate `min_rect.x` via
-        //   `expand_to_include_rect` in egui's allocator).
-        // - `max_width = default_size.x` caps the width so it can't
-        //   keep growing toward the parent rect width: egui's
-        //   `Resize::desired_size` only expands (never shrinks), and
-        //   `form_row` reads `available_width = desired_size.x`, so
-        //   without a cap each frame would feed back wider until it
-        //   filled the panel.
-        // - `min_size = 0` lets height shrink when rows disappear.
-        // - `constrain_to(panel_rect)` clamps position+size to the
-        //   central panel.
-        // - No `vscroll` — its `min_scrolled_size` floor and outer
-        //   bookkeeping add height even when content fits.
+        // Auto-size to content. `auto_sized()` = `min_size(0)` +
+        // `default_size(INFINITY)` + `resizable(false)`. The first
+        // frame state is unknown so `Area` runs an invisible sizing
+        // pass (`area.rs:444-467`) where `ui.is_sizing_pass()` is
+        // true; `Gui::row_with_layout` honours that and allocates
+        // width 0, letting children grow `min_rect` to their natural
+        // width. Subsequent frames render at the measured size.
+        // `constrain_to` clamps position+size to the central panel.
+        // No `vscroll` — its `min_scrolled_size` floor and outer
+        // bookkeeping add height even when content fits.
         let constrain_rect = gui.container_rect();
-        let modal_width = 420.0;
         let mut window = egui::Window::new(self.title)
             .id(id.id())
             .collapsible(false)
-            .resizable(false)
-            .min_size(Vec2::ZERO)
-            .max_width(modal_width)
-            .default_size(vec2(modal_width, 200.0))
+            .auto_sized()
             .constrain_to(constrain_rect)
             .frame(frame);
         if let Some(open) = self.open {
