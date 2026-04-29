@@ -31,7 +31,7 @@ pub struct GuiApp {
     /// Filled by `ui`, consumed by the next `logic`. `clear()` runs
     /// at the end of `logic` so a sequence of hidden-only `logic`
     /// ticks doesn't reprocess stale intents.
-    output: FrameOutput,
+    pending_output: FrameOutput,
 }
 
 impl GuiApp {
@@ -43,7 +43,7 @@ impl GuiApp {
             main_window: MainWindow::new(),
             debug: GuiDebug::new(),
             style,
-            output: FrameOutput::default(),
+            pending_output: FrameOutput::default(),
         }
     }
 }
@@ -51,15 +51,15 @@ impl GuiApp {
 impl eframe::App for GuiApp {
     fn logic(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.session.drain_inbound();
-        self.session.handle_output(&mut self.output);
-        self.output.clear();
+        self.session.handle_output(&mut self.pending_output);
+        self.pending_output.clear();
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.debug.frame(ui.ctx());
         let cmd = self
             .main_window
-            .render(&mut self.session, &mut self.output, &self.style, ui);
+            .render(&mut self.session, &mut self.pending_output, &self.style, ui);
         if let Some(cmd) = cmd {
             self.main_window.handle_app_command(&mut self.session, cmd);
         }
