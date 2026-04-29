@@ -57,7 +57,11 @@ impl Panel {
         self
     }
 
-    pub fn show<R>(self, gui: &mut Gui<'_>, body: impl FnOnce(&mut Gui<'_>) -> R) -> R {
+    pub fn show<R>(
+        self,
+        gui: &mut Gui<'_>,
+        body: impl FnOnce(&mut Gui<'_>) -> R,
+    ) -> egui::InnerResponse<R> {
         let args = gui.child_args();
         let run = |ui: &mut egui::Ui| args.enter(ui, body);
 
@@ -70,7 +74,7 @@ impl Panel {
                 } else {
                     egui::CentralPanel::default()
                 };
-                panel.show_inside(gui.ui_raw(), run).inner
+                panel.show_inside(gui.ui_raw(), run)
             }
         }
     }
@@ -81,10 +85,10 @@ fn build_side<R>(
     cfg: Panel,
     run: impl FnOnce(&mut egui::Ui) -> R,
     gui: &mut Gui<'_>,
-) -> R {
+) -> egui::InnerResponse<R> {
     let mut panel = panel.show_separator_line(cfg.show_separator_line);
     if cfg.no_frame {
         panel = panel.frame(egui::Frame::NONE);
     }
-    panel.show_inside(gui.ui_raw(), run).inner
+    panel.show_inside(gui.ui_raw(), run)
 }

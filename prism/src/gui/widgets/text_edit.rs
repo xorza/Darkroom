@@ -11,7 +11,7 @@
 
 use std::hash::Hash;
 
-use egui::{Align, Color32, FontSelection, Id, Margin, TextBuffer};
+use egui::{Align, Color32, FontSelection, Id, Margin, Response, TextBuffer};
 
 use crate::gui::Gui;
 
@@ -90,7 +90,7 @@ impl<'t> TextEdit<'t> {
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>) -> egui::Response {
+    pub fn show(self, gui: &mut Gui<'_>) -> Response {
         let margin = self
             .margin_override
             .unwrap_or_else(|| gui.style.padding.into());

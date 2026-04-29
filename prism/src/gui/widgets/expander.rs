@@ -1,6 +1,6 @@
 use std::f32::consts::TAU;
 
-use egui::{Color32, Painter, Pos2, Rect, Sense, Shape, Stroke, Vec2, vec2};
+use egui::{Color32, InnerResponse, Painter, Pos2, Rect, Sense, Shape, Stroke, Vec2, vec2};
 
 use crate::common::StableId;
 use crate::gui::Gui;
@@ -27,7 +27,14 @@ impl Expander {
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>, add_contents: impl FnOnce(&mut Gui<'_>)) {
+    /// Returns the header [`Response`] (so callers can attach a tooltip
+    /// or detect a click) and the body closure's return value. When the
+    /// expander is collapsed, the body is not invoked and `inner` is `None`.
+    pub fn show<R>(
+        self,
+        gui: &mut Gui<'_>,
+        add_contents: impl FnOnce(&mut Gui<'_>) -> R,
+    ) -> InnerResponse<Option<R>> {
         let mut open = gui.load_persistent(self.id, self.default_open);
 
         let icon_size = gui.style.body_font.size;
@@ -47,8 +54,9 @@ impl Expander {
         let header_response = gui.scope(self.id).show(|gui| {
             // Allocation runs inside the `Gui::scope` above, so its auto-id
             // seeds from the scope's stable id rather than the parent counter.
-            let (header_rect, response) =
-                gui.ui_raw().allocate_exact_size(header_size, Sense::click()); // id-drift-ok
+            let (header_rect, response) = gui
+                .ui_raw()
+                .allocate_exact_size(header_size, Sense::click()); // id-drift-ok
 
             if gui.ui_raw().is_rect_visible(header_rect) {
                 let icon_rect = Rect::from_min_size(header_rect.min, Vec2::splat(icon_size));
@@ -69,9 +77,8 @@ impl Expander {
             gui.store_persistent(self.id, open);
         }
 
-        if open {
-            add_contents(gui);
-        }
+        let inner = open.then(|| add_contents(gui));
+        InnerResponse::new(inner, header_response)
     }
 }
 

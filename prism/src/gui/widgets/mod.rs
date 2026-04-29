@@ -1,3 +1,23 @@
+//! Project widget toolkit. Every widget builder finishes with `.show(gui, ..)`.
+//!
+//! Return-type contract:
+//! - **Atomic interactive** widgets (`Button`, `Label`, `HitRegion`, `Image`,
+//!   `Separator`, `ComboBox`, `DragValue`, `FilePicker`, `TextEdit`, `ListItem`)
+//!   return [`egui::Response`].
+//! - **Container** widgets that take a body closure and have a meaningful outer
+//!   response (`Area`, `Frame`, `Panel`, `Expander`, `PositionedUi`) return
+//!   [`egui::InnerResponse<R>`] (`Expander` uses `Option<R>` for its body since
+//!   it skips it when collapsed).
+//! - **`PopupMenu`** returns `Option<R>` — `None` means the popup wasn't open
+//!   this frame, so the body never ran.
+//! - **`ScrollArea`** returns `R` — egui's `ScrollAreaOutput` carries no
+//!   `Response`, so there's nothing meaningful to wrap.
+//! - **Self-contained renderers** with no external interaction value
+//!   (`Space`, `StatusPanel`, `ColumnFlow`) return `()`.
+//!
+//! No widget should return raw `egui::Response`/`egui::InnerResponse` types
+//! through the unprefixed alias only — always import via `use egui::{Response, …}`.
+
 pub mod area;
 pub mod button;
 pub mod column_flow;
