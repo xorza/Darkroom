@@ -68,13 +68,11 @@ pub struct Gui<'a> {
 
 impl<'a> Gui<'a> {
     /// Root `Gui` constructor — use at the eframe boundary. `style`
-    /// is the reference (at scale=1.0) loaded from TOML; it is
-    /// `Rc::clone`d into the wrapper at scale 1.0 and pushed into
-    /// egui's global style (one call per frame, not per child `Gui`).
+    /// is the reference (at scale=1.0); it is `Rc::clone`d into the
+    /// wrapper at scale 1.0. `Style::apply_to_egui` is *not* called
+    /// here — `GuiApp::new` pushes it into egui's global style once at
+    /// app init.
     pub fn new(ui: &'a mut Ui, style: &Rc<Style>) -> Self {
-        ui.ctx().global_style_mut(|egui_style| {
-            style.apply_to_egui(egui_style);
-        });
         Self::child(ui, Rc::clone(style), 1.0)
     }
 

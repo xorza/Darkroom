@@ -37,6 +37,7 @@ pub struct GuiApp {
 impl GuiApp {
     pub fn new(ctx: &egui::Context, launch_config: LaunchConfig) -> Self {
         let style = Rc::new(Style::from_file("style.toml").unwrap_or_default());
+        ctx.global_style_mut(|egui_style| style.apply_to_egui(egui_style));
         Self {
             session: Session::new(EguiUiHost::new(ctx), launch_config),
             main_window: MainWindow::new(),
