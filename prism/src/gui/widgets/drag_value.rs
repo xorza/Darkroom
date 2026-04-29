@@ -127,11 +127,12 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
             .unwrap_or(gui.style.node.const_bind_style.clone());
         assert!(background.radius.is_finite());
 
-        let id = self.id.id();
+        let id = self.id;
         let state_id = id.with("state");
         let edit_id = id.with("edit");
+        let interact_id = id.with("drag_interact").id();
         let state = gui
-            .load_temp::<DragValueState<T>>(StableId::from_egui_id(state_id))
+            .load_temp::<DragValueState<T>>(state_id)
             .unwrap_or(DragValueState::Idle);
 
         let display_value = match &state {
@@ -152,9 +153,7 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
         let inner_rect = rect.shrink2(padding);
 
         if !gui.ui_raw().is_rect_visible(rect) {
-            return gui
-                .ui_raw()
-                .interact(rect, id.with("drag_interact"), Sense::hover());
+            return gui.ui_raw().interact(rect, interact_id, Sense::hover());
         }
 
         gui.painter().rect(
@@ -181,7 +180,7 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
 
         let mut response = gui.ui_raw().interact(
             inner_rect,
-            id.with("drag_interact"),
+            interact_id,
             Sense::click_and_drag() | Sense::hover(),
         );
 
@@ -195,7 +194,7 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
                 original: *self.value,
             };
             gui.ui_raw()
-                .memory_mut(|memory| memory.request_focus(edit_id));
+                .memory_mut(|memory| memory.request_focus(edit_id.id()));
         }
 
         if response.drag_started() {
@@ -241,8 +240,8 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
 #[expect(clippy::too_many_arguments)]
 fn show_editing<T: DragValueNumeric>(
     gui: &mut Gui<'_>,
-    id: egui::Id,
-    edit_id: egui::Id,
+    id: StableId,
+    edit_id: StableId,
     inner_rect: egui::Rect,
     font: FontId,
     anchor: Align2,
@@ -252,7 +251,7 @@ fn show_editing<T: DragValueNumeric>(
 ) -> Response {
     let state_id = id.with("state");
     let text_edit = TextEdit::singleline(&mut text)
-        .id(edit_id)
+        .id(edit_id.id())
         .font(font)
         .desired_width(inner_rect.width())
         .horizontal_align(anchor.x())
@@ -262,7 +261,7 @@ fn show_editing<T: DragValueNumeric>(
         .frame(false);
 
     let mut text_edit_response = gui
-        .scope(StableId::from_egui_id(id.with("drag_value_text")))
+        .scope(id.with("drag_value_text"))
         .max_rect(inner_rect)
         .show(|gui| text_edit.show(gui));
 
@@ -304,10 +303,9 @@ fn show_editing<T: DragValueNumeric>(
 
 fn write_state<T: DragValueNumeric>(
     gui: &mut Gui<'_>,
-    state_id: egui::Id,
+    state_id: StableId,
     state: DragValueState<T>,
 ) {
-    let state_id = StableId::from_egui_id(state_id);
     match state {
         DragValueState::Idle => gui.remove_temp::<DragValueState<T>>(state_id),
         other => gui.store_temp(state_id, other),

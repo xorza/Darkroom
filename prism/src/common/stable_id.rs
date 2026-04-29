@@ -4,9 +4,8 @@
 //! [`StableId`]. Our own scope primitives (`Gui::scope`, `Button::show`,
 //! `Frame::show`, etc.) accept *only* `StableId`, which makes id
 //! provenance greppable: any `StableId` in the tree came from either a
-//! [`StableId::new`] call (call-site-salted), a [`StableId::with`]
-//! derivation off a parent `StableId`, or a narrow
-//! [`StableId::from_egui_id`] egui-interop escape hatch.
+//! [`StableId::new`] call (call-site-salted) or a [`StableId::with`]
+//! derivation off a parent `StableId`.
 //!
 //! For list items or per-instance widgets, pass a tuple that includes
 //! the runtime key:
@@ -49,14 +48,6 @@ impl StableId {
     /// wrapper instead of round-tripping through a raw `egui::Id`.
     pub fn with(self, salt: impl Hash) -> Self {
         Self(self.0.with(salt))
-    }
-
-    /// Wrap an [`Id`] handed to us by egui (e.g. `Response::id` for a
-    /// popup anchor, or a `TextEdit` persistent id). Not for general
-    /// construction — prefer [`StableId::new`] or [`StableId::with`],
-    /// which preserve the call-site-salting invariant.
-    pub fn from_egui_id(id: Id) -> Self {
-        Self(id)
     }
 
     /// Access the underlying [`Id`]. Needed for interop with egui APIs
