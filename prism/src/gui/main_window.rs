@@ -72,7 +72,7 @@ impl MainWindow {
                 .render(gui, &ctx, render_events, &input, output);
         });
 
-        Modal::new(StableId::new("settings_modal"))
+        Modal::new(StableId::new("settings_window"), "Settings")
             .open(&mut self.settings_open)
             .min_size(vec2(300.0, 400.0))
             .show(gui, |_gui| {});
