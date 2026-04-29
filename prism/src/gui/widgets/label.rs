@@ -8,6 +8,7 @@ pub struct Label {
     color: Option<Color32>,
     font: Option<FontId>,
     truncate: bool,
+    selectable: Option<bool>,
 }
 
 impl Label {
@@ -17,6 +18,7 @@ impl Label {
             color: None,
             font: None,
             truncate: false,
+            selectable: None,
         }
     }
 
@@ -35,6 +37,17 @@ impl Label {
         self
     }
 
+    /// Override `style.interaction.selectable_labels`. Defaults to
+    /// the style value (egui's default is `true`). When selectable,
+    /// the label registers `Sense::click_and_drag` over its galley
+    /// rect — pass `false` for chrome labels (titles, headers,
+    /// captions) so they don't intercept pointer events meant for an
+    /// enclosing draggable container.
+    pub fn selectable(mut self, selectable: bool) -> Self {
+        self.selectable = Some(selectable);
+        self
+    }
+
     pub fn show(self, gui: &mut Gui<'_>) -> Response {
         let mut rich = egui::RichText::new(self.text);
         if let Some(color) = self.color {
@@ -46,6 +59,9 @@ impl Label {
         let mut label = egui::Label::new(rich);
         if self.truncate {
             label = label.truncate();
+        }
+        if let Some(selectable) = self.selectable {
+            label = label.selectable(selectable);
         }
         gui.ui_raw().add(label)
     }

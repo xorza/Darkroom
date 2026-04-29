@@ -79,20 +79,24 @@ impl<'a> Modal<'a> {
                 frame
                     .show(ui, |ui| {
                         args.enter(ui, |gui| {
-                            // Title bar: title centered + close × at
-                            // the right edge. Implemented as two
-                            // overlaid child UIs on the same row
-                            // rect, each with its own layout — egui's
-                            // idiom for combining a centered child
-                            // with an edge-anchored sibling.
+                            // Title bar: row pinned to the modal
+                            // width, with two overlaid scopes — one
+                            // centering the title, one right-
+                            // anchoring the close ×. Both use
+                            // `Sense::empty()` so the only
+                            // interactive widget on the row is the
+                            // close button itself; the rest falls
+                            // through to Area's drag handle. The
+                            // title `Label` is `.selectable(false)`
+                            // because egui labels otherwise register
+                            // `Sense::click_and_drag` for text
+                            // selection, which would intercept drags
+                            // on the title.
                             let row_height = gui.style.row_height;
                             let row_width = if gui.ui_raw().is_sizing_pass() {
-                                // Sizing pass: report enough width
-                                // for the title plus a close-sized
-                                // gutter on each side so the modal
-                                // measures wide enough for the
-                                // visible-pass title to land at the
-                                // row center.
+                                // Mirror close-sized gutters on each
+                                // side so the visible-pass title lands
+                                // at the row center.
                                 let title_w = gui
                                     .layout_no_wrap(
                                         title,
@@ -109,21 +113,24 @@ impl<'a> Modal<'a> {
                             } else {
                                 gui.ui_raw().available_width()
                             };
-                            let (row_rect, _) = gui
+                            let row_rect = gui
                                 .scope(id.with("title_row"))
-                                .autosize(vec2(row_width, row_height), Sense::hover());
+                                .allocate(vec2(row_width, row_height));
 
                             gui.scope(id.with("title"))
                                 .max_rect(row_rect)
+                                .sense(Sense::empty())
                                 .layout(Layout::centered_and_justified(Direction::LeftToRight))
                                 .show(|gui| {
                                     Label::new(title)
                                         .font(gui.style.heading_font.clone())
+                                        .selectable(false)
                                         .show(gui);
                                 });
 
                             gui.scope(id.with("close_zone"))
                                 .max_rect(row_rect)
+                                .sense(Sense::empty())
                                 .layout(Layout::right_to_left(Align::Center))
                                 .show(|gui| {
                                     let close = CloseButton::new(id.with("close")).show(gui);

@@ -390,6 +390,20 @@ impl<'b, 'a> ScopedGui<'b, 'a> {
         })
     }
 
+    /// Like [`Self::autosize`] but skips the interaction registration:
+    /// the rect is reserved in the parent's layout and returned for
+    /// caller use (painting, sub-scopes via `.max_rect(..)`), but no
+    /// hover/click/drag widget is created. Use this when the rect is
+    /// pure layout scaffolding — e.g. a title bar shell that lets
+    /// the parent `Area`'s drag handle reach pointer events on its
+    /// empty space.
+    pub fn allocate(self, size: Vec2) -> Rect {
+        self.sense(Sense::empty()).show(|gui| {
+            let (_id, rect) = gui.ui_raw().allocate_space(size);
+            rect
+        })
+    }
+
     pub fn show<R>(self, add_contents: impl FnOnce(&mut Gui<'_>) -> R) -> R {
         let args = self.gui.view_params();
         let clip_rect = self.clip_rect;
