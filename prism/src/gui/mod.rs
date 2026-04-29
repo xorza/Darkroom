@@ -18,6 +18,7 @@ pub mod image_utils;
 pub mod log_ui;
 pub mod main_window;
 pub mod memory;
+pub mod settings_window;
 pub(super) mod shortcuts;
 pub mod style;
 pub mod ui_host;

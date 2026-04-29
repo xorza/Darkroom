@@ -4,9 +4,10 @@ use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::graph_ui::GraphUi;
 use crate::gui::log_ui::LogUi;
+use crate::gui::settings_window::SettingsWindow;
 use crate::gui::shortcuts::shortcut_commands;
 use crate::gui::style::Style;
-use crate::gui::widgets::{Button, ListItem, Modal, Panel, PopupMenu};
+use crate::gui::widgets::{Button, ListItem, Panel, PopupMenu};
 use crate::session::Session;
 use crate::session::output::{AppCommand, FrameOutput};
 
@@ -17,7 +18,8 @@ use egui::vec2;
 pub struct MainWindow {
     graph_ui: GraphUi,
     log_ui: LogUi,
-    settings_open: bool,
+    /// `Some` while the settings modal is open; `None` when closed.
+    settings_window: Option<SettingsWindow>,
 }
 
 impl MainWindow {
@@ -25,7 +27,7 @@ impl MainWindow {
         Self {
             graph_ui: GraphUi::default(),
             log_ui: LogUi,
-            settings_open: false,
+            settings_window: None,
         }
     }
 
@@ -70,10 +72,11 @@ impl MainWindow {
                 .render(gui, &ctx, render_events, &input, output);
         });
 
-        Modal::new(StableId::new("settings_window"), "Settings")
-            .open(&mut self.settings_open)
-            .min_size(vec2(300.0, 400.0))
-            .show(gui, |_gui| {});
+        if let Some(window) = self.settings_window.as_mut()
+            && !window.render(gui, session)
+        {
+            self.settings_window = None;
+        }
 
         // Shortcut wins over menu when both fire in the same frame —
         // a Cmd+Q held while the File menu is open should still exit.
@@ -88,7 +91,9 @@ impl MainWindow {
             AppCommand::Save => session.save_graph_dialog(),
             AppCommand::SaveAs => session.save_graph_as_dialog(),
             AppCommand::Open => session.load_graph_dialog(),
-            AppCommand::OpenSettings => self.settings_open = true,
+            AppCommand::OpenSettings => {
+                self.settings_window = Some(SettingsWindow::new(session.config()));
+            }
             AppCommand::Exit => session.close_app(),
         }
     }

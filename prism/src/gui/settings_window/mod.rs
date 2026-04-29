@@ -1,0 +1,225 @@
+//! Settings window: editable mirror of the persisted [`Config`] plus
+//! the modal that hosts it. Apply writes back to `Session`'s config
+//! in memory; `Session::exit` then persists on shutdown. TCP listener
+//! changes take effect on next launch — no live restart.
+//!
+//! Lifecycle: an instance only exists while the modal is visible.
+//! Callers hold `Option<SettingsWindow>` — `Some` means open, `None`
+//! means closed. [`SettingsWindow::render`] returns `false` when the
+//! user dismissed the window this frame; the caller drops the option.
+
+pub mod draft;
+
+pub use draft::SettingsDraft;
+
+use egui::{Align, Layout, vec2};
+
+use crate::common::StableId;
+use crate::config::Config;
+use crate::gui::Gui;
+use crate::gui::widgets::{Button, Label, Modal, Separator, Space, TextEdit};
+use crate::session::Session;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SettingsAction {
+    Apply,
+    Cancel,
+}
+
+#[derive(Debug)]
+pub struct SettingsWindow {
+    draft: SettingsDraft,
+    /// Bound to [`Modal::open`] so the close `✕` / Escape can flip
+    /// it. Mirrored out as the [`SettingsWindow::render`] return so
+    /// the caller can drop the option in the same frame.
+    keep_open: bool,
+}
+
+impl SettingsWindow {
+    /// Snapshot `config` into a fresh editable draft.
+    pub fn new(config: &Config) -> Self {
+        Self {
+            draft: SettingsDraft::from_config(config),
+            keep_open: true,
+        }
+    }
+
+    /// Render one frame. On Apply, calls [`Session::update_config`]
+    /// with the validated draft. Returns `false` when the modal was
+    /// dismissed this frame (Apply / Cancel / ✕ / Escape) — caller
+    /// should drop its `Option<SettingsWindow>`.
+    pub fn render(&mut self, gui: &mut Gui<'_>, session: &mut Session) -> bool {
+        let mut action: Option<SettingsAction> = None;
+        Modal::new(StableId::new("settings_window"), "Settings")
+            .open(&mut self.keep_open)
+            .min_size(vec2(440.0, 360.0))
+            .show(gui, |gui| {
+                action = render_body(gui, &mut self.draft);
+            });
+
+        match action {
+            Some(SettingsAction::Apply) => {
+                if let Ok(new_cfg) = self.draft.to_config() {
+                    session.update_config(new_cfg);
+                }
+                false
+            }
+            Some(SettingsAction::Cancel) => false,
+            None => self.keep_open,
+        }
+    }
+}
+
+fn render_body(gui: &mut Gui<'_>, draft: &mut SettingsDraft) -> Option<SettingsAction> {
+    let mut action = None;
+
+    fn check_glyph(checked: bool) -> &'static str {
+        if checked { "[x]" } else { "[ ]" }
+    }
+
+    gui.vertical(|gui| {
+        // -- load_last --
+        gui.horizontal(|gui| {
+            Button::new(StableId::new("settings_load_last"))
+                .text(check_glyph(draft.load_last))
+                .toggle(&mut draft.load_last)
+                .show(gui);
+            Label::new("Reopen last graph on launch").show(gui);
+        });
+
+        Space::new(gui.style.padding).show(gui);
+
+        // -- tcp on/off --
+        gui.horizontal(|gui| {
+            Button::new(StableId::new("settings_tcp_enabled"))
+                .text(check_glyph(draft.tcp_enabled))
+                .toggle(&mut draft.tcp_enabled)
+                .show(gui);
+            Label::new("Auto-start TCP script listener").show(gui);
+        });
+
+        if draft.tcp_enabled {
+            Space::new(gui.style.small_padding).show(gui);
+            render_tcp_section(gui, draft);
+        }
+
+        Space::new(gui.style.padding).show(gui);
+        Separator::new().show(gui);
+        Space::new(gui.style.small_padding).show(gui);
+
+        // -- footer: Cancel / Apply --
+        gui.with_layout(Layout::right_to_left(Align::Center), |gui| {
+            let apply_enabled = draft.is_valid();
+            let apply = Button::new(StableId::new("settings_apply"))
+                .text("Apply")
+                .enabled(apply_enabled)
+                .show(gui);
+            if apply.clicked() && apply_enabled {
+                action = Some(SettingsAction::Apply);
+            }
+            Space::new(gui.style.small_padding).show(gui);
+            let cancel = Button::new(StableId::new("settings_cancel"))
+                .text("Cancel")
+                .show(gui);
+            if cancel.clicked() {
+                action = Some(SettingsAction::Cancel);
+            }
+        });
+    });
+
+    action
+}
+
+fn render_tcp_section(gui: &mut Gui<'_>, draft: &mut SettingsDraft) {
+    let indent = gui.style.big_padding;
+    gui.horizontal(|gui| {
+        Space::new(indent).show(gui);
+        gui.vertical(|gui| {
+            // Bind
+            gui.horizontal(|gui| {
+                Label::new("Bind address").show(gui);
+                Space::new(gui.style.padding).show(gui);
+                TextEdit::singleline(&mut draft.tcp.bind_text)
+                    .id(StableId::new("settings_tcp_bind").id())
+                    .desired_width(200.0)
+                    .show(gui);
+            });
+            if let Some(err) = draft.bind_error() {
+                Label::new(err)
+                    .color(gui.style.noninteractive_text_color)
+                    .show(gui);
+            }
+
+            Space::new(gui.style.small_padding).show(gui);
+
+            // Auth radio (Token / No auth)
+            gui.horizontal(|gui| {
+                Label::new("Auth").show(gui);
+                Space::new(gui.style.padding).show(gui);
+
+                let mut token_selected = !draft.tcp.no_auth;
+                let token_btn = Button::new(StableId::new("settings_tcp_auth_token"))
+                    .text("Token")
+                    .toggle(&mut token_selected)
+                    .show(gui);
+                if token_btn.clicked() {
+                    draft.tcp.no_auth = false;
+                }
+
+                let mut no_auth_selected = draft.tcp.no_auth;
+                let no_auth_btn = Button::new(StableId::new("settings_tcp_auth_none"))
+                    .text("No auth")
+                    .toggle(&mut no_auth_selected)
+                    .show(gui);
+                if no_auth_btn.clicked() {
+                    draft.tcp.no_auth = true;
+                }
+            });
+
+            // Token row — hidden when no_auth is on
+            if !draft.tcp.no_auth {
+                Space::new(gui.style.small_padding).show(gui);
+                gui.horizontal(|gui| {
+                    Label::new("Token").show(gui);
+                    Space::new(gui.style.padding).show(gui);
+                    Label::new(draft.tcp.token.to_string())
+                        .truncate(true)
+                        .show(gui);
+                    Space::new(gui.style.small_padding).show(gui);
+                    let regen = Button::new(StableId::new("settings_tcp_token_regen"))
+                        .text("Regenerate")
+                        .show(gui);
+                    if regen.clicked() {
+                        draft.regenerate_token();
+                    }
+                });
+            }
+
+            Space::new(gui.style.small_padding).show(gui);
+
+            // Token file
+            gui.horizontal(|gui| {
+                Label::new("Token file").show(gui);
+                Space::new(gui.style.padding).show(gui);
+                TextEdit::singleline(&mut draft.tcp.token_file_text)
+                    .id(StableId::new("settings_tcp_token_file").id())
+                    .desired_width(220.0)
+                    .show(gui);
+                Space::new(gui.style.small_padding).show(gui);
+                let browse = Button::new(StableId::new("settings_tcp_token_file_browse"))
+                    .text("Browse")
+                    .show(gui);
+                if browse.clicked()
+                    && let Some(path) = rfd::FileDialog::new().save_file()
+                {
+                    draft.tcp.token_file_text = path.to_string_lossy().to_string();
+                }
+            });
+
+            Space::new(gui.style.small_padding).show(gui);
+            Label::new("Takes effect on next launch.")
+                .color(gui.style.noninteractive_text_color)
+                .show(gui);
+        });
+    });
+}
