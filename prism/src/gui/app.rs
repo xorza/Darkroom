@@ -64,8 +64,11 @@ impl eframe::App for GuiApp {
         }
     }
 
-    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
-        let color = visuals.panel_fill;
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        // Same color `Style::apply_to_egui` writes into `Visuals::panel_fill`,
+        // sourced directly from our canonical `Style` instead of round-tripping
+        // through egui's visuals.
+        let color = self.style.noninteractive_bg_fill;
         [
             color.r() as f32 / 255.0,
             color.g() as f32 / 255.0,
