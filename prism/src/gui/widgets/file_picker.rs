@@ -5,7 +5,7 @@ use egui::{Align2, Pos2, Response, Sense, StrokeKind, pos2, vec2};
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::style::DragValueStyle;
-use crate::gui::widgets::InteractiveRect;
+use crate::gui::widgets::HitRegion;
 use crate::gui::widgets::button::Button;
 
 /// What kind of filesystem entry the picker accepts.
@@ -102,9 +102,10 @@ impl<'a> FilePicker<'a> {
         );
 
         let rect = self.anchor.anchor_size(self.pos, total_size);
-        let out = InteractiveRect::new(id, rect)
+        let out = HitRegion::new(id)
+            .rect(rect)
             .sense(Sense::hover())
-            .show(gui);
+            .show_culled(gui);
 
         if !out.visible {
             return out.response;

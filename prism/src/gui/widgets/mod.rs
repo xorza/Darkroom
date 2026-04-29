@@ -1,7 +1,10 @@
 //! Project widget toolkit. Every widget builder finishes with `.show(gui, ..)`.
 //!
 //! Return-type contract:
-//! - **Atomic interactive** widgets (`Button`, `Label`, `HitRegion`, `Image`,
+//! - **`HitRegion`** has two terminals: `.show()` returns
+//!   [`egui::Response`]; `.show_culled()` returns
+//!   [`hit_region::HitOutput`] with rect + visibility for positioned widgets.
+//! - **Atomic interactive** widgets (`Button`, `Label`, `Image`,
 //!   `Separator`, `ComboBox`, `DragValue`, `FilePicker`, `TextEdit`, `ListItem`)
 //!   return [`egui::Response`].
 //! - **Container** widgets that take a body closure and have a meaningful outer
@@ -28,7 +31,6 @@ pub mod file_picker;
 pub mod frame;
 pub mod hit_region;
 pub mod image;
-pub mod interactive_rect;
 pub mod label;
 pub mod layout;
 pub mod modal;
@@ -51,7 +53,6 @@ pub use file_picker::{FilePicker, FilePickerMode};
 pub use frame::Frame;
 pub use hit_region::HitRegion;
 pub use image::Image;
-pub use interactive_rect::InteractiveRect;
 pub use label::Label;
 pub use layout::Layout;
 pub use modal::Modal;

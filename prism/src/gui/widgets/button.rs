@@ -6,7 +6,7 @@ use egui::{Align, FontId, Galley, Rect, Response, Sense, Shape, StrokeKind, Vec2
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::style::ButtonStyle;
-use crate::gui::widgets::InteractiveRect;
+use crate::gui::widgets::HitRegion;
 
 #[must_use = "Button does nothing until .show() is called"]
 pub struct Button<'a> {
@@ -148,14 +148,15 @@ impl<'a> Button<'a> {
         };
 
         // Two layout modes:
-        // - Explicit rect: route through InteractiveRect so visibility
-        //   culling and the single-interact registration share a code
-        //   path with the rest of the positioned-widget family.
+        // - Explicit rect: route through HitRegion::show_culled so
+        //   visibility culling and the single-interact registration
+        //   share a code path with the rest of the positioned-widget
+        //   family.
         // - Autosize: scope is required so `allocate_space` runs against
         //   a stable-id seed; otherwise the resulting widget's id drifts
         //   with the parent's counter.
         let (rect, response) = if let Some(rect) = self.rect {
-            let out = InteractiveRect::new(id, rect).sense(sense).show(gui);
+            let out = HitRegion::new(id).rect(rect).sense(sense).show_culled(gui);
             if !out.visible {
                 return out.response;
             }

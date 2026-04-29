@@ -7,7 +7,7 @@ use egui::{Align2, Color32, FontId, Key, Pos2, Response, Sense, StrokeKind, Vec2
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::style::DragValueStyle;
-use crate::gui::widgets::{InteractiveRect, TextEdit};
+use crate::gui::widgets::{HitRegion, TextEdit};
 
 /// Trait for numeric types that can be used with DragValue.
 pub trait DragValueNumeric: Copy + PartialEq + Display + FromStr + Send + Sync + 'static {
@@ -156,9 +156,10 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
             Sense::click_and_drag() | Sense::hover()
         };
         let rect = self.anchor.anchor_size(self.pos, size);
-        let out = InteractiveRect::new(id.with("drag_interact"), rect)
+        let out = HitRegion::new(id.with("drag_interact"))
+            .rect(rect)
             .sense(outer_sense)
-            .show(gui);
+            .show_culled(gui);
 
         if !out.visible {
             return out.response;

@@ -5,7 +5,7 @@ use egui::{Align2, Color32, FontId, Pos2, Response, Sense, StrokeKind, Vec2, vec
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::style::DragValueStyle;
-use crate::gui::widgets::InteractiveRect;
+use crate::gui::widgets::HitRegion;
 use crate::gui::widgets::popup_menu::{ListItem, PopupMenu};
 
 #[derive(Debug)]
@@ -89,9 +89,10 @@ impl<'a> ComboBox<'a> {
         let size = galley.size() + padding * 2.0;
 
         let rect = self.anchor.anchor_size(self.pos, size);
-        let out = InteractiveRect::new(id, rect)
+        let out = HitRegion::new(id)
+            .rect(rect)
             .sense(Sense::click() | Sense::hover())
-            .show(gui);
+            .show_culled(gui);
 
         if !out.visible {
             return out.response;
