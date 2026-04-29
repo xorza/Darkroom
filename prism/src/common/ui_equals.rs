@@ -12,7 +12,7 @@ impl UiEquals for f32 {
         let diff = (self - other).abs();
         let scale = self.abs().max(other.abs()).max(1.0);
 
-        diff / scale <= 0.005
+        diff / scale <= 0.01
     }
 }
 
