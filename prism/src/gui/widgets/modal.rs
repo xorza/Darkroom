@@ -13,11 +13,11 @@
 //! same recipe as `egui::Modal`. No visual dim is painted; layer an
 //! `egui::Area` at the call site if you want one.
 
-use egui::{Align, Align2, Key, Layout, Modifiers, Order, Sense, Vec2};
+use egui::{Align, Align2, Direction, Key, Layout, Modifiers, Order, Sense, Vec2, vec2};
 
 use crate::common::StableId;
 use crate::gui::Gui;
-use crate::gui::widgets::{Button, Label, Separator};
+use crate::gui::widgets::{CloseButton, Label, Separator};
 
 #[derive(Debug)]
 #[must_use = "Modal does nothing until .show() is called"]
@@ -79,21 +79,58 @@ impl<'a> Modal<'a> {
                 frame
                     .show(ui, |ui| {
                         args.enter(ui, |gui| {
-                            // Title bar: title on left, close × on
-                            // right. `row_with_layout` is sizing-pass
-                            // aware (claims width 0 during measure,
-                            // available_width on the visible pass) so
-                            // the modal's measured width is content-
-                            // driven, not slack-driven.
-                            gui.row_with_layout(Layout::right_to_left(Align::Center), |gui| {
-                                // RTL → first child placed
-                                // rightmost.
-                                let close = Button::new(id.with("close")).text("✕").show(gui);
-                                if close.clicked() {
-                                    close_clicked = true;
-                                }
-                                Label::new(title).show(gui);
-                            });
+                            // Title bar: title centered + close × at
+                            // the right edge. Implemented as two
+                            // overlaid child UIs on the same row
+                            // rect, each with its own layout — egui's
+                            // idiom for combining a centered child
+                            // with an edge-anchored sibling.
+                            let row_height = gui.style.row_height;
+                            let row_width = if gui.ui_raw().is_sizing_pass() {
+                                // Sizing pass: report enough width
+                                // for the title plus a close-sized
+                                // gutter on each side so the modal
+                                // measures wide enough for the
+                                // visible-pass title to land at the
+                                // row center.
+                                let title_w = gui
+                                    .layout_no_wrap(
+                                        title,
+                                        &gui.style.heading_font.clone(),
+                                        gui.style.text_color,
+                                    )
+                                    .size()
+                                    .x;
+                                row_height
+                                    + gui.style.padding
+                                    + title_w
+                                    + gui.style.padding
+                                    + row_height
+                            } else {
+                                gui.ui_raw().available_width()
+                            };
+                            let (row_rect, _) = gui
+                                .scope(id.with("title_row"))
+                                .autosize(vec2(row_width, row_height), Sense::hover());
+
+                            gui.scope(id.with("title"))
+                                .max_rect(row_rect)
+                                .layout(Layout::centered_and_justified(Direction::LeftToRight))
+                                .show(|gui| {
+                                    Label::new(title)
+                                        .font(gui.style.heading_font.clone())
+                                        .show(gui);
+                                });
+
+                            gui.scope(id.with("close_zone"))
+                                .max_rect(row_rect)
+                                .layout(Layout::right_to_left(Align::Center))
+                                .show(|gui| {
+                                    let close = CloseButton::new(id.with("close")).show(gui);
+                                    if close.clicked() {
+                                        close_clicked = true;
+                                    }
+                                });
 
                             Separator::new().show(gui);
 

@@ -356,6 +356,17 @@ impl<'b, 'a> ScopedGui<'b, 'a> {
         self
     }
 
+    /// Override the scope's layout. Used to overlay multiple layouts
+    /// on the same rect — e.g. a title bar that needs one child
+    /// centered and another anchored to the right edge: allocate the
+    /// row, then `scope(...).max_rect(row).layout(centered_and_justified)`
+    /// for the title and `scope(...).max_rect(row).layout(right_to_left)`
+    /// for the close button. The two scopes don't interact.
+    pub fn layout(mut self, layout: Layout) -> Self {
+        self.builder = self.builder.layout(layout);
+        self
+    }
+
     /// Narrows the child scope's clip rect. Anything the body paints
     /// outside this rect is culled.
     pub fn clip_rect(mut self, rect: Rect) -> Self {
