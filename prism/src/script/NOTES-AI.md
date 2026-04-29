@@ -33,7 +33,8 @@ CLI flags ──► ScriptConfig
      • mpsc<SessionInbound>           (executor → Session)
      • Notify = Arc<Fn()>             (wakeup; wraps ui_host.request_redraw)
      • build_transports(cfg)          (binds eagerly, reports errors)
-     • ScriptExecutor::new(transports, tx, func_lib, notify)
+     • script::start_transports(cfg)        (binds + announces + logs)
+     • ScriptExecutor::new(transports, tx, func_lib, ui_host)
                  │
                  ▼
    Per transport: accept loop pushes ScriptRequest into a bounded mpsc
@@ -83,10 +84,13 @@ CLI flags ──► ScriptConfig
   undo stack — callers never have to look up "before" values
   themselves.
 
-- **Notify as `Arc<dyn Fn()>`.** The script crate doesn't import
-  `UiHost` or any frontend type. Session passes
-  `move || ui_host.request_redraw()` and the script crate just calls
-  it. Tests pass `Arc::new(|| {})`.
+- **Host wakeup via `Arc<dyn UiHost>`.** Both the inbound-channel
+  ping (so `Session::frame` runs and drains pending side-effects) and
+  the script-side `shutdown()` builtin go through the host directly.
+  `UiHost` lives next door (`crate::ui_host`) and has exactly the two
+  methods we use; the closure-indirection era ended once it was clear
+  the script crate isn't going to be extracted soon. Tests provide a
+  `NoopUiHost` stub.
 
 - **Generic `apply` + thin host helpers.** The `apply` / `apply_all`
   Rhai functions deserialize any `Intent` via its Serialize derive.

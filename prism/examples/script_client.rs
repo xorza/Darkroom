@@ -194,7 +194,11 @@ fn run() -> Result<(), String> {
         had_error = reply.error.is_some();
     }
 
-    if had_error { Err("script error".into()) } else { Ok(()) }
+    if had_error {
+        Err("script error".into())
+    } else {
+        Ok(())
+    }
 }
 
 fn main() -> ExitCode {

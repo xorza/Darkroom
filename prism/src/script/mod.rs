@@ -35,6 +35,7 @@ use scenarium::prelude::FuncLib;
 
 use crate::model::Intent;
 use crate::model::ViewNode;
+use crate::ui_host::UiHost;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::{JoinHandle, yield_now};
 use tokio_util::sync::CancellationToken;
@@ -129,6 +130,32 @@ pub fn build_transports(cfg: &ScriptConfig) -> Vec<Result<StartedTransport, Tran
         );
     }
     out
+}
+
+/// Convenience wrapper around [`build_transports`] for production
+/// callers: bind every enabled transport, announce each success on
+/// stdout, log each failure via tracing, and return the bound
+/// transports ready to hand to [`ScriptExecutor::new`]. Use
+/// [`build_transports`] directly when you need raw outcomes (tests,
+/// custom surfacing).
+pub fn start_transports(cfg: &ScriptConfig) -> Vec<Box<dyn ScriptTransport>> {
+    build_transports(cfg)
+        .into_iter()
+        .filter_map(|result| match result {
+            Ok(started) => {
+                announce(&started.report);
+                Some(started.transport)
+            }
+            Err(e) => {
+                tracing::error!(
+                    kind = ?e.kind,
+                    error = %e.error,
+                    "script transport disabled (bind failed)",
+                );
+                None
+            }
+        })
+        .collect()
 }
 
 /// Print a transport's discovery banner to stdout (and log token-file
@@ -257,24 +284,17 @@ pub enum SessionInbound {
     StopAutorun,
 }
 
-/// Opaque "wake the consumer" callback fired after every successful
-/// send on the inbound channel. The host wires it to whatever its
-/// event loop needs (the egui frontend uses `ui_host.request_redraw`),
-/// but the scripting crate doesn't care: from here it's just `Fn()`.
-/// Keeps script/ free of any frontend type.
-pub type Notify = Arc<dyn Fn() + Send + Sync>;
-
-/// `mpsc::UnboundedSender<SessionInbound>` + a [`Notify`] ping. Every
+/// `mpsc::UnboundedSender<SessionInbound>` + a host-side ping. Every
 /// script side-effect needs to wake the consumer's event loop so
 /// `Session::frame` runs and drains the inbound queue — without this,
 /// a script that fires actions on a quiet GUI canvas (no mouse, no
 /// keyboard) sees them pile up unnoticed until the next user input.
-/// Mirrors the worker path, which pings the same callback after every
+/// Mirrors the worker path, which pings the same host after every
 /// result.
 #[derive(Clone)]
 struct InboundSender {
     tx: mpsc::UnboundedSender<SessionInbound>,
-    notify: Notify,
+    ui_host: Arc<dyn UiHost>,
 }
 
 impl std::fmt::Debug for InboundSender {
@@ -289,7 +309,7 @@ impl InboundSender {
         // happens during shutdown — Session is going away, no need to
         // ping it for a redraw it'll never serve.
         if self.tx.send(inbound).is_ok() {
-            (self.notify)();
+            self.ui_host.request_redraw();
         }
     }
 }
@@ -358,14 +378,14 @@ impl ScriptExecutor {
         transports: I,
         action_tx: mpsc::UnboundedSender<SessionInbound>,
         func_lib: Arc<FuncLib>,
-        notify: Notify,
+        ui_host: Arc<dyn UiHost>,
     ) -> Self
     where
         I: IntoIterator<Item = Box<dyn ScriptTransport>>,
     {
         let inbound = InboundSender {
             tx: action_tx,
-            notify,
+            ui_host: ui_host.clone(),
         };
         let (tx, rx) = mpsc::channel(REQUEST_QUEUE_DEPTH);
         let handles = transports
@@ -379,7 +399,9 @@ impl ScriptExecutor {
         let cancel = CancellationToken::new();
         let cancel_task = cancel.clone();
         let task =
-            tokio::spawn(async move { run_executor(rx, cancel_task, inbound, func_lib).await });
+            tokio::spawn(
+                async move { run_executor(rx, cancel_task, inbound, func_lib, ui_host).await },
+            );
 
         Self {
             cancel,
@@ -403,9 +425,10 @@ async fn run_executor(
     cancel: CancellationToken,
     inbound: InboundSender,
     func_lib: Arc<FuncLib>,
+    ui_host: Arc<dyn UiHost>,
 ) {
     let state: StdoutBuffer = Arc::new(Mutex::new(String::new()));
-    let engine = build_engine(state.clone(), inbound, func_lib);
+    let engine = build_engine(state.clone(), inbound, func_lib, ui_host);
     let mut sessions = SessionStore::default();
 
     loop {
@@ -421,11 +444,17 @@ async fn run_executor(
     }
 }
 
-fn build_engine(stdout: StdoutBuffer, inbound: InboundSender, func_lib: Arc<FuncLib>) -> Engine {
+fn build_engine(
+    stdout: StdoutBuffer,
+    inbound: InboundSender,
+    func_lib: Arc<FuncLib>,
+    ui_host: Arc<dyn UiHost>,
+) -> Engine {
     let mut engine = Engine::new();
     configure_caps(&mut engine);
     wire_print_hook(&mut engine, stdout, inbound.clone());
     register_run(&mut engine, inbound.clone());
+    register_shutdown(&mut engine, ui_host);
     register_mutations(&mut engine, inbound.clone());
     register_introspection(&mut engine, func_lib.clone());
     register_host_helpers(&mut engine, inbound, func_lib);
@@ -489,6 +518,19 @@ fn decode_action(d: &Dynamic) -> Result<Intent, String> {
 fn register_run(engine: &mut Engine, inbound: InboundSender) {
     engine.register_fn("run", move || {
         inbound.send(SessionInbound::RunOnce);
+    });
+}
+
+/// `shutdown()` — ask the host to close. Hooked directly into the
+/// frontend's close path (egui's `ViewportCommand::Close`, headless's
+/// exit flag) rather than routing through `SessionInbound`, so it
+/// works even in modes whose loop doesn't drain the inbound queue.
+/// The script that called it still completes and replies normally;
+/// the actual teardown happens after the executor task is cancelled
+/// during host shutdown.
+fn register_shutdown(engine: &mut Engine, ui_host: Arc<dyn UiHost>) {
+    engine.register_fn("shutdown", move || {
+        ui_host.close_app();
     });
 }
 

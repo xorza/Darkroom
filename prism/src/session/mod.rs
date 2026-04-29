@@ -111,32 +111,12 @@ impl Session {
         let func_lib = Arc::new(func_lib);
 
         let (script_inbound_tx, script_inbound_rx) = unbounded_channel::<SessionInbound>();
-        let mut transports = Vec::new();
-        for result in script::build_transports(&app_config.script) {
-            match result {
-                Ok(started) => {
-                    script::announce(&started.report);
-                    transports.push(started.transport);
-                }
-                Err(e) => {
-                    tracing::error!(
-                        kind = ?e.kind,
-                        error = %e.error,
-                        "script transport disabled (bind failed)",
-                    );
-                }
-            }
-        }
-        // Wake the frontend whenever the script layer queues an inbound,
-        // so `Session::frame` runs promptly and drains the queue. The
-        // script crate sees this as an opaque `Fn()` — it has no
-        // dependency on `UiHost`.
-        let redraw: script::Notify = {
-            let ui_host = ui_host.clone();
-            Arc::new(move || ui_host.request_redraw())
-        };
-        let script_executor =
-            ScriptExecutor::new(transports, script_inbound_tx, func_lib.clone(), redraw);
+        let script_executor = ScriptExecutor::new(
+            script::start_transports(&app_config.script),
+            script_inbound_tx,
+            func_lib.clone(),
+            ui_host.clone(),
+        );
 
         let mut result = Self::from_parts(
             func_lib,
