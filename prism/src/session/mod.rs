@@ -355,7 +355,9 @@ impl Session {
 
     /// Drains worker→session and script→session channels into Session
     /// state (status log, execution stats, argument-value cache).
-    /// Frontends must call this once per frame before rendering.
+    /// Frontends call this on every host tick before reading graph
+    /// state (GUI: `App::logic`; headless / TUI: via [`Session::tick`])
+    /// so subsequent reads see freshly-arrived results.
     pub fn drain_inbound(&mut self) {
         while let Ok(event) = self.worker_rx.try_recv() {
             match event {
