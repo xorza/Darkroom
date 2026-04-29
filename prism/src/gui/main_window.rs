@@ -18,6 +18,7 @@ pub struct MainWindow {
     graph_ui: GraphUi,
     log_ui: LogUi,
     style: Rc<Style>,
+    settings_open: bool,
 }
 
 impl MainWindow {
@@ -27,6 +28,7 @@ impl MainWindow {
             graph_ui: GraphUi::default(),
             log_ui: LogUi,
             style: Rc::new(style),
+            settings_open: false,
         }
     }
 
@@ -70,6 +72,16 @@ impl MainWindow {
                 .render(gui, &ctx, render_events, &input, output);
         });
 
+        if self.settings_open {
+            // egui-direct-ok
+            let ctx = gui.ui_raw().ctx().clone();
+            egui::Window::new("Settings")
+                .collapsible(false)
+                .resizable(true)
+                .open(&mut self.settings_open)
+                .show(&ctx, |_ui| {});
+        }
+
         // Shortcut wins over menu when both fire in the same frame —
         // a Cmd+Q held while the File menu is open should still exit.
         shortcut_commands(&input, session.autorun())
@@ -83,6 +95,7 @@ impl MainWindow {
             AppCommand::Save => session.save_graph_dialog(),
             AppCommand::SaveAs => session.save_graph_as_dialog(),
             AppCommand::Open => session.load_graph_dialog(),
+            AppCommand::OpenSettings => self.settings_open = true,
             AppCommand::Exit => session.close_app(),
         }
     }
@@ -134,6 +147,9 @@ impl MainWindow {
                 }
                 if entry(gui, "menu_file_open", "Open") {
                     cmd = Some(AppCommand::Open);
+                }
+                if entry(gui, "menu_file_settings", "Settings...") {
+                    cmd = Some(AppCommand::OpenSettings);
                 }
                 if entry(gui, "menu_file_exit", "Exit") {
                     cmd = Some(AppCommand::Exit);

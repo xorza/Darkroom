@@ -25,6 +25,7 @@ pub enum AppCommand {
     Save,
     SaveAs,
     Open,
+    OpenSettings,
     Exit,
 }
 
