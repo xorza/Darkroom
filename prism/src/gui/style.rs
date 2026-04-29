@@ -166,6 +166,18 @@ pub struct PopupStyle {
     pub padding: f32,
 }
 
+impl PopupStyle {
+    /// Build the [`egui::Frame`] used by `widgets::Frame::popup` and
+    /// `widgets::PopupMenu` so both stay visually identical.
+    pub fn to_frame(&self) -> egui::Frame {
+        egui::Frame::NONE
+            .fill(self.fill)
+            .stroke(self.stroke)
+            .corner_radius(self.corner_radius)
+            .inner_margin(self.padding)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ButtonStyle {

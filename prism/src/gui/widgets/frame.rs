@@ -23,11 +23,7 @@ impl Frame {
     pub fn popup(id: StableId, style: &PopupStyle) -> Self {
         Self {
             id,
-            inner: egui::Frame::NONE
-                .fill(style.fill)
-                .stroke(style.stroke)
-                .corner_radius(style.corner_radius)
-                .inner_margin(style.padding),
+            inner: style.to_frame(),
             sense: None,
         }
     }

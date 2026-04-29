@@ -39,13 +39,9 @@ impl<'a> PopupMenu<'a> {
     /// when closed.
     pub fn show<R>(self, gui: &mut Gui<'_>, content: impl FnOnce(&mut Gui<'_>) -> R) -> Option<R> {
         let style = self.style.unwrap_or_else(|| gui.style.popup.clone());
-        let frame = egui::Frame::NONE
-            .fill(style.fill)
-            .stroke(style.stroke)
-            .corner_radius(style.corner_radius)
-            .inner_margin(style.padding);
-
-        let mut popup = egui::Popup::menu(self.anchor).id(self.id).frame(frame);
+        let mut popup = egui::Popup::menu(self.anchor)
+            .id(self.id)
+            .frame(style.to_frame());
         if let Some(w) = self.min_width {
             popup = popup.width(w);
         }
