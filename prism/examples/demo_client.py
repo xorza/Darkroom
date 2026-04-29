@@ -25,23 +25,26 @@ import subprocess
 import time
 import uuid
 
+import lz4.block  # pip install lz4 — wire-compatible with lz4_flex block format
+
 PORT = 34567
 TOKEN = uuid.UUID("550e8400-e29b-41d4-a716-446655440000")
 
 
 def send_request(sock: socket.socket, session_id: uuid.UUID | None, source: bytes) -> None:
-    """Wire format: [16B session-id][u32 BE src_len][src_bytes]."""
+    """Wire format: [16B session-id][u32 BE body_len][lz4-with-prepended-size body]."""
     sid_bytes = session_id.bytes if session_id is not None else b"\x00" * 16
+    body = lz4.block.compress(source)  # store_size=True by default
     sock.sendall(sid_bytes)
-    sock.sendall(struct.pack(">I", len(source)) + source)
+    sock.sendall(struct.pack(">I", len(body)) + body)
 
 
 def read_reply(sock: socket.socket) -> dict:
-    """Read one [u32 BE body_len][JSON] reply frame."""
+    """Read one [u32 BE body_len][lz4-with-prepended-size JSON] reply frame."""
     raw_len = recv_exact(sock, 4)
     (body_len,) = struct.unpack(">I", raw_len)
     body = recv_exact(sock, body_len)
-    return json.loads(body)
+    return json.loads(lz4.block.decompress(body))
 
 
 def recv_exact(sock: socket.socket, n: int) -> bytes:

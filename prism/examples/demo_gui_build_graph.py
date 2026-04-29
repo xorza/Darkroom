@@ -32,6 +32,8 @@ import subprocess
 import time
 import uuid
 
+import lz4.block  # pip install lz4 — wire-compatible with lz4_flex block format
+
 PORT = 34567
 TOKEN = uuid.UUID("550e8400-e29b-41d4-a716-446655440000")
 STEP_DELAY = 1.5  # seconds between actions, so the canvas reads as a "build"
@@ -40,10 +42,11 @@ INITIAL_PAUSE = 1.5  # let the GUI show the empty canvas first
 
 def send(sock, source, session_id=None):
     sid = session_id.bytes if session_id is not None else b"\x00" * 16
-    sock.sendall(sid + struct.pack(">I", len(source)) + source)
+    body = lz4.block.compress(source)  # store_size=True by default
+    sock.sendall(sid + struct.pack(">I", len(body)) + body)
     raw_len = recv_exact(sock, 4)
     (body_len,) = struct.unpack(">I", raw_len)
-    return json.loads(recv_exact(sock, body_len))
+    return json.loads(lz4.block.decompress(recv_exact(sock, body_len)))
 
 
 def recv_exact(sock, n):
