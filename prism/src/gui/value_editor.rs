@@ -6,6 +6,7 @@ use scenarium::data::{DataType, EnumDef, FsPathMode, StaticValue};
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::style::DragValueStyle;
+use crate::gui::widgets::drag_value::DragValueNumeric;
 use crate::gui::widgets::{ComboBox, DragValue, FilePicker, FilePickerMode};
 
 fn picker_mode(mode: FsPathMode) -> FilePickerMode {
@@ -55,33 +56,18 @@ impl<'a> StaticValueEditor<'a> {
     }
 
     pub fn show(self, gui: &mut Gui<'_>, id: StableId) -> Response {
-        let small_padding = gui.style.small_padding;
-        let mono_font = gui.style.mono_font.clone();
-        let text_color = gui.style.text_color;
         let style = self
             .style
             .unwrap_or_else(|| gui.style.node.const_bind_style.clone());
 
         match self.value {
-            StaticValue::Int(int_value) => DragValue::new(id, int_value)
-                .font(mono_font)
-                .color(text_color)
-                .speed(1.0)
-                .padding(vec2(small_padding, 0.0))
-                .pos(self.pos)
-                .anchor(self.anchor)
-                .style(style)
-                .show(gui),
+            StaticValue::Int(int_value) => {
+                render_numeric_drag(gui, id, int_value, 1.0, self.pos, self.anchor, style)
+            }
 
-            StaticValue::Float(float_value) => DragValue::new(id, float_value)
-                .font(mono_font)
-                .color(text_color)
-                .speed(0.01)
-                .padding(vec2(small_padding, 0.0))
-                .pos(self.pos)
-                .anchor(self.anchor)
-                .style(style)
-                .show(gui),
+            StaticValue::Float(float_value) => {
+                render_numeric_drag(gui, id, float_value, 0.01, self.pos, self.anchor, style)
+            }
 
             StaticValue::Enum {
                 type_id,
@@ -108,6 +94,30 @@ impl<'a> StaticValueEditor<'a> {
             StaticValue::String(_) => todo!("StaticValueEditor: String variant not implemented"),
         }
     }
+}
+
+/// Shared numeric (Int / Float) editor — both `StaticValue::Int` and
+/// `StaticValue::Float` produce the same widget, differing only in the
+/// drag `speed` and the underlying value type.
+#[allow(clippy::too_many_arguments)]
+fn render_numeric_drag<T: DragValueNumeric>(
+    gui: &mut Gui<'_>,
+    id: StableId,
+    value: &mut T,
+    speed: f32,
+    pos: Pos2,
+    anchor: Align2,
+    style: DragValueStyle,
+) -> Response {
+    DragValue::new(id, value)
+        .font(gui.style.mono_font.clone())
+        .color(gui.style.text_color)
+        .speed(speed)
+        .padding(vec2(gui.style.small_padding, 0.0))
+        .pos(pos)
+        .anchor(anchor)
+        .style(style)
+        .show(gui)
 }
 
 fn render_enum_dropdown(
