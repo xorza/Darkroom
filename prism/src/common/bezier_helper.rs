@@ -55,7 +55,7 @@ pub fn segments_intersect(a1: Pos2, a2: Pos2, b1: Pos2, b2: Pos2) -> bool {
     (o1 > 0.0) != (o2 > 0.0) && (o3 > 0.0) != (o4 > 0.0)
 }
 
-fn control_offset(start: Pos2, end: Pos2, scale: f32) -> f32 {
+pub fn control_offset(start: Pos2, end: Pos2, scale: f32) -> f32 {
     let dx = (end.x - start.x).abs();
     (dx * 0.5).max(35.0 * scale).min(90.0 * scale)
 }

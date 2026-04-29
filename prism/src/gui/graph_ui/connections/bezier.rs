@@ -1,4 +1,4 @@
-use egui::{Color32, Pos2, Rect, Response, Sense};
+use egui::{Color32, Pos2, Rect, Response, Sense, pos2};
 
 use crate::common::polyline_mesh::PolylineMesh;
 use crate::common::{StableId, UiEquals, bezier_helper};
@@ -21,13 +21,18 @@ pub struct ConnectionBezier {
     polyline: PolylineMesh,
 
     inited: bool,
-    points_dirty: bool,
+    /// Endpoints (or scale, or target point count) changed since the
+    /// last `ensure_sampled` — the polyline needs re-sampling.
+    needs_sample: bool,
+    /// Polyline points or built style changed since the last
+    /// `rebuild_mesh_if_needed` — the mesh needs rebuilding.
+    mesh_dirty: bool,
+    target_point_count: usize,
 
     start: Pos2,
     end: Pos2,
     scale: f32,
     built_style: Option<ConnectionBezierStyle>,
-    bounding_rect: Rect,
 }
 
 impl ConnectionBezier {
@@ -37,6 +42,10 @@ impl ConnectionBezier {
         self.update_points_with_count(start, end, scale, Self::DEFAULT_POINTS);
     }
 
+    /// Record new endpoints + scale + target point count. Sampling is
+    /// deferred to [`Self::ensure_sampled`] — typically the curve is
+    /// off-screen and `show` early-returns via the cheap-bbox
+    /// visibility check before sampling ever happens.
     pub fn update_points_with_count(
         &mut self,
         start: Pos2,
@@ -46,29 +55,23 @@ impl ConnectionBezier {
     ) {
         assert!(point_count >= 2, "point count must be at least 2");
 
-        let needs_rebuild = !self.inited
+        let changed = !self.inited
             || !self.start.ui_equals(start)
             || !self.end.ui_equals(end)
             || !self.scale.ui_equals(scale)
-            || self.polyline.points().len() != point_count;
-        if !needs_rebuild {
+            || self.target_point_count != point_count;
+        if !changed {
             return;
         }
 
         self.inited = true;
-        self.points_dirty = true;
-
         self.start = start;
         self.end = end;
         self.scale = scale;
-
-        let points = self.polyline.points_mut();
-        if points.len() != point_count {
-            points.resize(point_count, Pos2::ZERO);
-        }
-        bezier_helper::sample(points.as_mut_slice(), start, end, scale);
-
-        self.bounding_rect = points_bounds(points).unwrap_or(Rect::NOTHING);
+        self.target_point_count = point_count;
+        self.needs_sample = true;
+        // After re-sample, the mesh will need rebuilding too.
+        self.mesh_dirty = true;
     }
 
     pub fn show(
@@ -80,11 +83,16 @@ impl ConnectionBezier {
     ) -> Response {
         let id = StableId::new(("connection_bezier", id_salt));
 
-        let expanded_rect = self.bounding_rect.expand(style.stroke_width * 0.5);
+        // Cheap bbox from endpoints + control-point offsets — the
+        // convex hull of the four cubic-Bezier control points is a
+        // conservative superset of the curve. Lets us cull off-screen
+        // curves without sampling.
+        let expanded_rect = self.cheap_bounds(style.stroke_width);
         if !gui.is_rect_visible(expanded_rect) {
             return HitRegion::new(id).show(gui);
         }
 
+        self.ensure_sampled();
         self.rebuild_mesh_if_needed(style);
 
         let pointer_pos = gui.pointer_hover_pos();
@@ -107,10 +115,11 @@ impl ConnectionBezier {
         response
     }
 
-    pub fn intersects_breaker(&self, breaker: Option<&ConnectionBreaker>) -> bool {
+    pub fn intersects_breaker(&mut self, breaker: Option<&ConnectionBreaker>) -> bool {
         let Some(breaker) = breaker else {
             return false;
         };
+        self.ensure_sampled();
         let points = self.polyline.points();
         for (b1, b2) in breaker.segments() {
             let curve_segments = points.windows(2).map(|pair| (pair[0], pair[1]));
@@ -139,16 +148,44 @@ impl ConnectionBezier {
             .any(|segment| distance_sq_point_segment(pos, segment[0], segment[1]) <= threshold_sq)
     }
 
+    /// Convex-hull bbox of the cubic-Bezier control points, expanded
+    /// by half stroke width. Conservative: the curve never extends
+    /// outside this box. Cheap: no sampling.
+    fn cheap_bounds(&self, stroke_width: f32) -> Rect {
+        let offset = bezier_helper::control_offset(self.start, self.end, self.scale);
+        let p1x = self.start.x + offset;
+        let p2x = self.end.x - offset;
+        let min_x = self.start.x.min(self.end.x).min(p1x).min(p2x);
+        let max_x = self.start.x.max(self.end.x).max(p1x).max(p2x);
+        let min_y = self.start.y.min(self.end.y);
+        let max_y = self.start.y.max(self.end.y);
+        Rect::from_min_max(pos2(min_x, min_y), pos2(max_x, max_y)).expand(stroke_width * 0.5)
+    }
+
+    fn ensure_sampled(&mut self) {
+        if !self.needs_sample {
+            return;
+        }
+        self.needs_sample = false;
+
+        let count = self.target_point_count;
+        let points = self.polyline.points_mut();
+        if points.len() != count {
+            points.resize(count, Pos2::ZERO);
+        }
+        bezier_helper::sample(points.as_mut_slice(), self.start, self.end, self.scale);
+    }
+
     fn rebuild_mesh_if_needed(&mut self, style: ConnectionBezierStyle) {
         assert!(style.stroke_width.is_finite() && style.stroke_width >= 0.0);
         assert!(style.feather.is_finite() && style.feather >= 0.0);
 
-        if !self.points_dirty && self.built_style == Some(style) {
+        if !self.mesh_dirty && self.built_style == Some(style) {
             return;
         }
 
         self.built_style = Some(style);
-        self.points_dirty = false;
+        self.mesh_dirty = false;
 
         self.polyline.rebuild(
             style.start_color,
@@ -157,21 +194,6 @@ impl ConnectionBezier {
             style.feather,
         );
     }
-}
-
-fn points_bounds(points: &[Pos2]) -> Option<Rect> {
-    if points.is_empty() {
-        return None;
-    }
-    let mut min = points[0];
-    let mut max = points[0];
-    for point in points.iter().skip(1) {
-        min.x = min.x.min(point.x);
-        min.y = min.y.min(point.y);
-        max.x = max.x.max(point.x);
-        max.y = max.y.max(point.y);
-    }
-    Some(Rect::from_min_max(min, max))
 }
 
 fn distance_sq_point_segment(point: Pos2, a: Pos2, b: Pos2) -> f32 {
@@ -196,10 +218,11 @@ impl Default for ConnectionBezier {
             start: Pos2::ZERO,
             end: Pos2::ZERO,
             scale: 1.0,
+            target_point_count: ConnectionBezier::DEFAULT_POINTS,
 
             inited: false,
-            points_dirty: false,
-            bounding_rect: Rect::NOTHING,
+            needs_sample: false,
+            mesh_dirty: false,
         }
     }
 }
