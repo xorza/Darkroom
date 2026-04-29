@@ -1,6 +1,7 @@
 use eframe::egui;
 
 use crate::app_config::AppConfig;
+use crate::gui::debug::GuiDebug;
 use crate::gui::main_window::MainWindow;
 use crate::gui::ui_host::EguiUiHost;
 use crate::session::Session;
@@ -9,6 +10,7 @@ use crate::session::Session;
 pub struct GuiApp {
     session: Session,
     main_window: MainWindow,
+    debug: GuiDebug,
 }
 
 impl GuiApp {
@@ -16,12 +18,14 @@ impl GuiApp {
         Self {
             session: Session::new(EguiUiHost::new(ctx), app_config),
             main_window: MainWindow::new(),
+            debug: GuiDebug::new(),
         }
     }
 }
 
 impl eframe::App for GuiApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.debug.frame(ui.ctx());
         self.main_window.render(&mut self.session, ui);
     }
 

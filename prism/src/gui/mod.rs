@@ -12,6 +12,7 @@ use crate::{
 };
 
 pub mod app;
+pub mod debug;
 pub mod graph_ui;
 pub mod image_utils;
 pub mod log_ui;
