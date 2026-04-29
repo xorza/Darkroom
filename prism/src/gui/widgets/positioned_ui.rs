@@ -52,9 +52,6 @@ impl PositionedUi {
         gui: &mut Gui,
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<R> {
-        let style = gui.style.clone();
-        let scale = gui.scale();
-
         let initial_rect = if let Some(rect) = self.rect {
             rect
         } else {
@@ -83,8 +80,8 @@ impl PositionedUi {
             .max_rect(initial_rect)
             .sense(sense)
             .show(|gui| {
-                let mut child_gui = Gui::child(gui.ui_raw(), style, scale);
-                let result = add_contents(&mut child_gui);
+                let args = gui.child_args();
+                let result = args.enter(gui.ui_raw(), add_contents);
 
                 // Store measured size for next frame — but ONLY on the
                 // final pass. egui runs the UI callback multiple times

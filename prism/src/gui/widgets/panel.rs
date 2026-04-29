@@ -58,12 +58,8 @@ impl Panel {
     }
 
     pub fn show<R>(self, gui: &mut Gui<'_>, body: impl FnOnce(&mut Gui<'_>) -> R) -> R {
-        let style = gui.style.clone();
-        let scale = gui.scale();
-        let run = |ui: &mut egui::Ui| {
-            let mut child = Gui::child(ui, style, scale);
-            body(&mut child)
-        };
+        let args = gui.child_args();
+        let run = |ui: &mut egui::Ui| args.enter(ui, body);
 
         match self.kind {
             PanelKind::Top(id) => build_side(egui::Panel::top(id.id()), self, run, gui),

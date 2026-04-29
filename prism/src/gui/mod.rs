@@ -124,6 +124,17 @@ impl<'a> Gui<'a> {
         }
     }
 
+    /// Snapshot of inheritance state (`style`, `scale`) for use inside an
+    /// egui container's body closure. Container widgets capture this
+    /// before re-borrowing `gui.ui_raw()` for the egui call, then funnel
+    /// the inner closure through [`ChildArgs::enter`].
+    pub(crate) fn child_args(&self) -> ChildArgs {
+        ChildArgs {
+            style: Rc::clone(&self.style),
+            scale: self.scale,
+        }
+    }
+
     /// Raw access to the underlying `egui::Ui`. Restricted to
     /// `gui/widgets/` — every other caller must build a widget rather
     /// than poke `Ui` directly. The `no_raw_ui_outside_widgets` tripwire
@@ -231,12 +242,8 @@ impl<'a> Gui<'a> {
         &mut self,
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<R> {
-        let style = Rc::clone(&self.style);
-        let scale = self.scale;
-        self.ui.horizontal(|ui| {
-            let mut gui = Gui::child(ui, style, scale);
-            add_contents(&mut gui)
-        })
+        let args = self.child_args();
+        self.ui.horizontal(|ui| args.enter(ui, add_contents))
     }
 
     /// Horizontal layout where children are stretched to fill the cross-axis (vertical) space.
@@ -245,14 +252,10 @@ impl<'a> Gui<'a> {
         &mut self,
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<R> {
-        let style = Rc::clone(&self.style);
-        let scale = self.scale;
+        let args = self.child_args();
         self.ui.with_layout(
             Layout::left_to_right(Align::Min).with_cross_justify(true),
-            |ui| {
-                let mut gui = Gui::child(ui, style, scale);
-                add_contents(&mut gui)
-            },
+            |ui| args.enter(ui, add_contents),
         )
     }
 
@@ -260,12 +263,8 @@ impl<'a> Gui<'a> {
         &mut self,
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<R> {
-        let style = Rc::clone(&self.style);
-        let scale = self.scale;
-        self.ui.vertical(|ui| {
-            let mut gui = Gui::child(ui, style, scale);
-            add_contents(&mut gui)
-        })
+        let args = self.child_args();
+        self.ui.vertical(|ui| args.enter(ui, add_contents))
     }
 
     /// Begin a stable-id child scope. Returns a builder that applies
@@ -329,8 +328,7 @@ impl<'b, 'a> ScopedGui<'b, 'a> {
     }
 
     pub fn show<R>(self, add_contents: impl FnOnce(&mut Gui<'_>) -> R) -> R {
-        let style = Rc::clone(&self.gui.style);
-        let scale = self.gui.scale;
+        let args = self.gui.child_args();
         let clip_rect = self.clip_rect;
         // Delegate to `scope_builder`, NOT `Ui::new_child` directly: only
         // `scope_builder` calls `remember_min_rect` + `advance_cursor_after_rect`
@@ -343,9 +341,27 @@ impl<'b, 'a> ScopedGui<'b, 'a> {
                 if let Some(clip) = clip_rect {
                     ui.set_clip_rect(clip);
                 }
-                let mut gui = Gui::child(ui, style, scale);
-                add_contents(&mut gui)
+                args.enter(ui, add_contents)
             })
             .inner
+    }
+}
+
+/// Snapshot of a parent `Gui`'s inheritance state (`style`, `scale`),
+/// captured by [`Gui::child_args`] before an egui container closure
+/// re-borrows `gui.ui_raw()`. Funnel the inner closure through
+/// [`ChildArgs::enter`] to wrap the fresh `&mut Ui` egui hands back as
+/// a child `Gui` — the single place where `Gui::child` is called from
+/// container widgets.
+#[derive(Clone)]
+pub(crate) struct ChildArgs {
+    style: Rc<Style>,
+    scale: f32,
+}
+
+impl ChildArgs {
+    pub fn enter<R>(self, ui: &mut Ui, body: impl FnOnce(&mut Gui<'_>) -> R) -> R {
+        let mut child = Gui::child(ui, self.style, self.scale);
+        body(&mut child)
     }
 }

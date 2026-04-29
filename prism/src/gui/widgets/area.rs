@@ -55,11 +55,8 @@ impl Area {
         gui: &mut Gui,
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<R> {
-        let style = gui.style.clone();
-        let scale = gui.scale();
-        self.inner.show(gui.ui_raw().ctx(), |ui| {
-            let mut gui = Gui::child(ui, style, scale);
-            add_contents(&mut gui)
-        })
+        let args = gui.child_args();
+        self.inner
+            .show(gui.ui_raw().ctx(), |ui| args.enter(ui, add_contents))
     }
 }
