@@ -6,7 +6,7 @@ use crate::gui::graph_ui::GraphUi;
 use crate::gui::log_ui::LogUi;
 use crate::gui::shortcuts::shortcut_commands;
 use crate::gui::style::Style;
-use crate::gui::widgets::{Button, ListItem, Panel, PopupMenu};
+use crate::gui::widgets::{Button, ListItem, Modal, Panel, PopupMenu};
 use crate::session::Session;
 use crate::session::output::{AppCommand, FrameOutput};
 
@@ -72,17 +72,10 @@ impl MainWindow {
                 .render(gui, &ctx, render_events, &input, output);
         });
 
-        if self.settings_open {
-            // egui-direct-ok
-            let ctx = gui.ui_raw().ctx().clone();
-            let resp = egui::Modal::new(StableId::new("settings_modal").id()).show(&ctx, |ui| {
-                ui.set_min_size(vec2(300.0, 400.0));
-                ui.heading("Settings");
-            });
-            if resp.should_close() {
-                self.settings_open = false;
-            }
-        }
+        Modal::new(StableId::new("settings_modal"))
+            .open(&mut self.settings_open)
+            .min_size(vec2(300.0, 400.0))
+            .show(gui, |_gui| {});
 
         // Shortcut wins over menu when both fire in the same frame —
         // a Cmd+Q held while the File menu is open should still exit.
