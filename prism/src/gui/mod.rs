@@ -183,6 +183,13 @@ impl<'a> Gui<'a> {
         self.ui.ctx().data_mut(|d| d.remove::<T>(id.id()));
     }
 
+    /// Mark `id`'s `Order::Middle` layer as the modal-input layer for
+    /// this frame. egui blocks focus traversal into anything below it.
+    pub fn set_modal_layer(&self, id: StableId) {
+        let layer = egui::LayerId::new(egui::Order::Middle, id.id());
+        self.ui.ctx().memory_mut(|mem| mem.set_modal_layer(layer));
+    }
+
     /// Capture the current frame's input into an [`InputSnapshot`].
     /// Wraps `InputSnapshot::capture(ctx())`.
     pub fn input_snapshot(&self) -> crate::input::InputSnapshot {

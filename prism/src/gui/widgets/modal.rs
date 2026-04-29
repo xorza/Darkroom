@@ -11,7 +11,7 @@
 //! input briefly leaks through. egui::Window doesn't expose a way to
 //! query in-progress opacity, so we accept it.
 
-use egui::{Align2, LayerId, Order, Sense, Vec2};
+use egui::{Align2, Order, Sense, Vec2};
 
 use crate::common::StableId;
 use crate::gui::Gui;
@@ -58,6 +58,7 @@ impl<'a> Modal<'a> {
 
         let visible = self.open.as_deref().copied().unwrap_or(true);
         if visible {
+            gui.set_modal_layer(id);
             install_modal_chrome(&ctx, id);
         }
 
@@ -94,10 +95,10 @@ impl<'a> Modal<'a> {
     }
 }
 
-/// Block input to widgets behind the modal: a transparent screen-sized
-/// click+drag absorber registered before the window (so it draws
-/// underneath), plus the modal-layer flag for focus traversal. Both
-/// keyed off the modal's id so multiple modals coexist.
+/// Transparent screen-sized click+drag absorber registered before the
+/// window (so it draws underneath). Keyed off the modal's id so
+/// multiple modals coexist. Caller must also flip the modal-layer flag
+/// via [`Gui::set_modal_layer`] for focus traversal to be blocked.
 fn install_modal_chrome(ctx: &egui::Context, id: StableId) {
     let backdrop_id = id.with("backdrop").id();
     egui::Area::new(backdrop_id)
@@ -111,7 +112,4 @@ fn install_modal_chrome(ctx: &egui::Context, id: StableId) {
                 Sense::click_and_drag(),
             );
         });
-    ctx.memory_mut(|mem| {
-        mem.set_modal_layer(LayerId::new(Order::Middle, id.id()));
-    });
 }
