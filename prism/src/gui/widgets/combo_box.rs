@@ -5,6 +5,7 @@ use egui::{Align2, Color32, FontId, Pos2, Response, Sense, StrokeKind, Vec2, vec
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::style::DragValueStyle;
+use crate::gui::widgets::InteractiveRect;
 use crate::gui::widgets::popup_menu::{ListItem, PopupMenu};
 
 #[derive(Debug)]
@@ -71,7 +72,7 @@ impl<'a> ComboBox<'a> {
     }
 
     pub fn show(self, gui: &mut Gui<'_>) -> Response {
-        let id = self.id.id();
+        let id = self.id;
         let font = self.font.unwrap_or_else(|| gui.style.sub_font.clone());
         let color = self.color.unwrap_or(gui.style.text_color);
         let padding = self
@@ -88,35 +89,34 @@ impl<'a> ComboBox<'a> {
         let size = galley.size() + padding * 2.0;
 
         let rect = self.anchor.anchor_size(self.pos, size);
-        let inner_rect = rect.shrink2(padding);
+        let out = InteractiveRect::new(id, rect)
+            .sense(Sense::click() | Sense::hover())
+            .show(gui);
 
-        if !gui.ui_raw().is_rect_visible(rect) {
-            return gui
-                .ui_raw()
-                .interact(rect, id.with("combo_interact"), Sense::hover());
+        if !out.visible {
+            return out.response;
         }
 
         gui.painter().rect(
-            rect,
+            out.rect,
             style.radius,
             style.fill,
             style.stroke,
             StrokeKind::Outside,
         );
 
+        let inner_rect = out.rect.shrink2(padding);
         let text_anchor = self.anchor.pos_in_rect(&inner_rect);
         let text_rect = self.anchor.anchor_size(text_anchor, galley.size());
         gui.painter().galley(text_rect.min, galley, color);
 
-        let mut response = gui
-            .ui_raw()
-            .interact(rect, id.with("combo_interact"), Sense::click());
+        let mut response = out.response;
 
         let mut selected_option: Option<String> = None;
         let selected = self.selected.clone();
         let options = self.options;
 
-        PopupMenu::new(&response, id.with("combo_popup")).show(gui, |gui| {
+        PopupMenu::new(&response, id.id().with("combo_popup")).show(gui, |gui| {
             // Pre-compute galleys for all items (reuse like new_node_ui)
             let item_font = gui.style.sub_font.clone();
             let padding = gui.style.padding;

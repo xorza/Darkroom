@@ -5,6 +5,7 @@ use egui::{Align2, Pos2, Response, Sense, StrokeKind, pos2, vec2};
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::style::DragValueStyle;
+use crate::gui::widgets::InteractiveRect;
 use crate::gui::widgets::button::Button;
 
 /// What kind of filesystem entry the picker accepts.
@@ -101,15 +102,19 @@ impl<'a> FilePicker<'a> {
         );
 
         let rect = self.anchor.anchor_size(self.pos, total_size);
+        let out = InteractiveRect::new(id, rect)
+            .sense(Sense::hover())
+            .show(gui);
 
-        // Calculate separator position
+        if !out.visible {
+            return out.response;
+        }
+
+        let rect = out.rect;
         let separator_x = rect.min.x + padding + filename_text_size.x + padding;
-
-        // Browse button rect (right side, inside the main rect)
         let browse_rect =
             egui::Rect::from_min_max(pos2(separator_x, rect.min.y), rect.max).shrink(padding);
 
-        // Draw outer background for entire widget
         gui.painter().rect(
             rect,
             style.radius,
@@ -118,7 +123,6 @@ impl<'a> FilePicker<'a> {
             StrokeKind::Outside,
         );
 
-        // Draw filename text
         let filename_pos = pos2(
             rect.min.x + padding,
             rect.center().y - filename_text_size.y * 0.5,
@@ -131,8 +135,6 @@ impl<'a> FilePicker<'a> {
             .font(font)
             .rect(browse_rect)
             .show(gui);
-
-        let outer_id = id.id().with("outer");
 
         if browse_response.clicked() {
             let mut dialog = rfd::FileDialog::new();
@@ -150,11 +152,8 @@ impl<'a> FilePicker<'a> {
             }
         }
 
-        // Return response for the entire widget rect (hover tooltips,
-        // outer hit-testing), not just the browse button. The outer id
-        // is allocated from our own `id`, not reused from the inner
-        // Button — whose id scheme is its own internal detail.
-        let widget_response = gui.ui_raw().interact(rect, outer_id, Sense::hover());
-        widget_response | browse_response
+        // Outer response (hover for tooltips on the whole widget) is
+        // OR'd with the browse button's click response.
+        out.response | browse_response
     }
 }

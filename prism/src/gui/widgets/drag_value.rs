@@ -7,7 +7,7 @@ use egui::{Align2, Color32, FontId, Key, Pos2, Response, Sense, StrokeKind, Vec2
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::style::DragValueStyle;
-use crate::gui::widgets::TextEdit;
+use crate::gui::widgets::{InteractiveRect, TextEdit};
 
 /// Trait for numeric types that can be used with DragValue.
 pub trait DragValueNumeric: Copy + PartialEq + Display + FromStr + Send + Sync + 'static {
@@ -130,7 +130,6 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
         let id = self.id;
         let state_id = id.with("state");
         let edit_id = id.with("edit");
-        let interact_id = id.with("drag_interact").id();
         let state = gui
             .load_temp::<DragValueState<T>>(state_id)
             .unwrap_or(DragValueState::Idle);
@@ -149,15 +148,26 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
         size.x = size.x.max(30.0 * gui.scale());
         assert!(size.x.is_finite() && size.y.is_finite());
 
+        // While editing, the inner TextEdit owns interaction; the
+        // outer rect only needs to claim space and hover for tooltips.
+        let outer_sense = if matches!(&state, DragValueState::Editing { .. }) {
+            Sense::hover()
+        } else {
+            Sense::click_and_drag() | Sense::hover()
+        };
         let rect = self.anchor.anchor_size(self.pos, size);
-        let inner_rect = rect.shrink2(padding);
+        let out = InteractiveRect::new(id.with("drag_interact"), rect)
+            .sense(outer_sense)
+            .show(gui);
 
-        if !gui.ui_raw().is_rect_visible(rect) {
-            return gui.ui_raw().interact(rect, interact_id, Sense::hover());
+        if !out.visible {
+            return out.response;
         }
 
+        let inner_rect = out.rect.shrink2(padding);
+
         gui.painter().rect(
-            rect,
+            out.rect,
             background.radius,
             background.fill,
             background.stroke,
@@ -178,11 +188,7 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
             );
         }
 
-        let mut response = gui.ui_raw().interact(
-            inner_rect,
-            interact_id,
-            Sense::click_and_drag() | Sense::hover(),
-        );
+        let mut response = out.response;
 
         // Drive the state machine. Each response check computes the
         // next state; we write it at the bottom of the function.
