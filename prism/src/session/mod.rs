@@ -532,16 +532,16 @@ impl Session {
         &self.config
     }
 
-    /// Replace the in-memory config (e.g. from the Settings window).
-    /// Persists on shutdown via [`Session::exit`]; transports already
-    /// running aren't reconfigured — TCP listener changes apply on
-    /// next launch.
+    /// Replace the in-memory config (e.g. from the Settings window)
+    /// and persist it to disk immediately. Transports already running
+    /// aren't reconfigured — TCP listener changes apply on next launch.
     pub fn update_config(&mut self, cfg: Config) {
         // Preserve the live `current_path` — it tracks New/Save/Open
         // independently of the settings window, which doesn't edit it.
         let current_path = self.config.current_path.clone();
         self.config = cfg;
         self.config.current_path = current_path;
+        self.config.save();
     }
 
     pub fn exit(&mut self) {
