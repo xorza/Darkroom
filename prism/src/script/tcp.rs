@@ -7,16 +7,24 @@
 //!      frame. Connection stays open until the client closes it.
 //!
 //! Request frame (per script):
-//!     `[16 bytes: session-id as u128-be][u32-be src_len][src_bytes]`
+//!     `[16 bytes: session-id as u128-be][u32-be body_len][body]`
 //! A zero session id (`Uuid::nil()`) asks the executor to create a new
 //! session. Any other id resumes the matching session's Rhai scope (or
 //! errors if the id isn't known).
 //!
 //! Reply frame (per script):
-//!     `[u32-be len][JSON body]`
+//!     `[u32-be body_len][body]`
 //! JSON body is the serialized [`super::ScriptResult`] — fields:
 //! `session`, `print`, `result`, `error`. See `ScriptResult`'s doc
 //! comment for semantics.
+//!
+//! `body` (both directions) is LZ4-block-compressed with the original
+//! length prepended as a u32-LE — i.e. exactly the layout produced by
+//! [`lz4_flex::block::compress_prepend_size`] /
+//! [`lz4_flex::block::decompress_size_prepended`]. Compression is
+//! mandatory; there is no flag bit. `body_len` bounds the compressed
+//! bytes; the embedded original size is validated against
+//! `MAX_FRAME_BYTES` before allocation to bound decompression.
 //!
 //! Auth failure is handled before the loop: on a bad token we drop the
 //! stream without sending anything.
@@ -39,7 +47,8 @@ use uuid::Uuid;
 use super::{ScriptRequest, ScriptTransport, TcpScriptConfig, TransportHandle};
 
 /// Hard cap on a single frame so a malicious `u32::MAX` doesn't OOM
-/// the server. 1 MiB is plenty for user scripts.
+/// the server. 1 MiB is plenty for user scripts. Applied to both the
+/// on-wire (compressed) length and the lz4-embedded original size.
 const MAX_FRAME_BYTES: u32 = 1 << 20;
 
 /// Upper bound on concurrent TCP client connections. Extras are refused
@@ -374,6 +383,15 @@ async fn handle_conn(
 }
 
 async fn read_string_frame(stream: &mut TcpStream) -> std::io::Result<String> {
+    let buf = read_compressed_frame(stream).await?;
+    String::from_utf8(buf)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
+}
+
+/// Read `[u32 compressed_len][lz4-with-prepended-size payload]` and
+/// return the decompressed bytes. Bounds both the compressed frame
+/// length and the embedded original length against `MAX_FRAME_BYTES`.
+async fn read_compressed_frame(stream: &mut TcpStream) -> std::io::Result<Vec<u8>> {
     let len = stream.read_u32().await?;
     if len > MAX_FRAME_BYTES {
         return Err(std::io::Error::new(
@@ -381,17 +399,33 @@ async fn read_string_frame(stream: &mut TcpStream) -> std::io::Result<String> {
             format!("frame too large: {len} > {MAX_FRAME_BYTES}"),
         ));
     }
+    if len < 4 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "compressed frame missing size prefix",
+        ));
+    }
     let mut buf = vec![0u8; len as usize];
     stream.read_exact(&mut buf).await?;
-    String::from_utf8(buf)
+    // lz4_flex::compress_prepend_size emits original size as u32-LE in
+    // the first 4 bytes. Cap the decompressed allocation up front.
+    let original = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+    if original > MAX_FRAME_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("decompressed size too large: {original} > {MAX_FRAME_BYTES}"),
+        ));
+    }
+    lz4_flex::block::decompress_size_prepended(&buf)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
 }
 
 async fn write_frame(stream: &mut TcpStream, bytes: &[u8]) -> std::io::Result<()> {
-    let len =
-        u32::try_from(bytes.len()).map_err(|_| std::io::Error::other("reply frame exceeds u32"))?;
+    let compressed = lz4_flex::block::compress_prepend_size(bytes);
+    let len = u32::try_from(compressed.len())
+        .map_err(|_| std::io::Error::other("reply frame exceeds u32"))?;
     stream.write_u32(len).await?;
-    stream.write_all(bytes).await?;
+    stream.write_all(&compressed).await?;
     Ok(())
 }
 
@@ -430,16 +464,18 @@ mod tests {
     async fn send_request(stream: &mut TcpStream, session_id: Option<Uuid>, source: &[u8]) {
         let id = session_id.map(|u| u.as_u128()).unwrap_or(0);
         stream.write_u128(id).await.unwrap();
-        let len = u32::try_from(source.len()).unwrap();
+        let compressed = lz4_flex::block::compress_prepend_size(source);
+        let len = u32::try_from(compressed.len()).unwrap();
         stream.write_u32(len).await.unwrap();
-        stream.write_all(source).await.unwrap();
+        stream.write_all(&compressed).await.unwrap();
     }
 
     async fn read_reply(stream: &mut TcpStream) -> String {
         let len = stream.read_u32().await.unwrap() as usize;
         let mut buf = vec![0u8; len];
         stream.read_exact(&mut buf).await.unwrap();
-        String::from_utf8(buf).unwrap()
+        let raw = lz4_flex::block::decompress_size_prepended(&buf).unwrap();
+        String::from_utf8(raw).unwrap()
     }
 
     fn parse_reply(raw: &str) -> ScriptResult {
