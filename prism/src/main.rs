@@ -2,6 +2,7 @@ mod app_config;
 mod common;
 mod config;
 mod gui;
+mod headless;
 mod init;
 mod input;
 mod model;
@@ -37,6 +38,9 @@ enum Mode {
     Gui,
     /// Run the terminal frontend.
     Tui,
+    /// No UI — run script transports + worker only. Exits on
+    /// `shutdown()` from a script or on Ctrl-C.
+    Headless,
 }
 
 #[tokio::main]
@@ -54,5 +58,6 @@ async fn main() -> Result<()> {
     match cli.mode.unwrap_or(Mode::Gui) {
         Mode::Gui => gui::run(app_config),
         Mode::Tui => tui::run(app_config),
+        Mode::Headless => headless::run(app_config).await,
     }
 }
