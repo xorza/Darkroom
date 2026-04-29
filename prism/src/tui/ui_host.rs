@@ -1,29 +1,34 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use tokio::sync::Notify;
+
 use crate::ui_host::UiHost;
 
-/// `UiHost` for the stub TUI. `request_redraw` is a no-op (the loop is
-/// blocked on stdin between commands, nothing to repaint). `close_app`
-/// flips a shared flag the loop checks after each line; because the
-/// read is blocking, a `shutdown()` from a remote script lands once
-/// the user presses Enter (we print a notice so they know).
+/// `UiHost` for the TUI. Both hooks fire the shared `wake` so the
+/// `tokio::select!` in `MainTui::run` drops out of its current await
+/// (whether that's stdin or `wake.notified()`) and re-enters the
+/// drain → render → handle_output loop. `close_app` additionally
+/// flips the shutdown flag, so the loop sees it and breaks.
 #[derive(Debug)]
 pub struct TuiUiHost {
+    wake: Arc<Notify>,
     shutdown: Arc<AtomicBool>,
 }
 
 impl TuiUiHost {
-    pub fn new(shutdown: Arc<AtomicBool>) -> Self {
-        Self { shutdown }
+    pub fn new(wake: Arc<Notify>, shutdown: Arc<AtomicBool>) -> Self {
+        Self { wake, shutdown }
     }
 }
 
 impl UiHost for TuiUiHost {
-    fn request_redraw(&self) {}
+    fn request_redraw(&self) {
+        self.wake.notify_one();
+    }
 
     fn close_app(&self) {
         self.shutdown.store(true, Ordering::SeqCst);
-        eprintln!("\n[shutdown requested by script — press Enter to exit]");
+        self.wake.notify_one();
     }
 }

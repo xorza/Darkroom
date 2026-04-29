@@ -57,7 +57,7 @@ async fn main() -> Result<()> {
 
     match cli.mode.unwrap_or(Mode::Gui) {
         Mode::Gui => gui::run(launch_config),
-        Mode::Tui => tui::run(launch_config),
+        Mode::Tui => tui::run(launch_config).await,
         Mode::Headless => headless::run(launch_config).await,
     }
 }

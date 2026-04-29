@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use anyhow::Result;
+use tokio::sync::Notify;
 
 use crate::launch_config::LaunchConfig;
 use crate::session::Session;
@@ -12,21 +13,28 @@ use crate::tui::ui_host::TuiUiHost;
 pub struct TuiApp {
     session: Session,
     main_tui: MainTui,
+    wake: Arc<Notify>,
     shutdown: Arc<AtomicBool>,
 }
 
 impl TuiApp {
     pub fn new(launch_config: LaunchConfig) -> Self {
+        let wake = Arc::new(Notify::new());
         let shutdown = Arc::new(AtomicBool::new(false));
+        let host = TuiUiHost::new(wake.clone(), shutdown.clone());
         Self {
-            session: Session::new(TuiUiHost::new(shutdown.clone()), launch_config),
+            session: Session::new(host, launch_config),
             main_tui: MainTui::new(),
+            wake,
             shutdown,
         }
     }
 
-    pub fn run(&mut self) -> Result<()> {
-        let result = self.main_tui.run(&mut self.session, &self.shutdown);
+    pub async fn run(&mut self) -> Result<()> {
+        let result = self
+            .main_tui
+            .run(&mut self.session, &self.wake, &self.shutdown)
+            .await;
         self.session.exit();
         result
     }
