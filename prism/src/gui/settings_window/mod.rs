@@ -75,21 +75,22 @@ fn render_body(gui: &mut Gui<'_>, draft: &mut SettingsDraft) -> Option<SettingsA
     let mut action = None;
 
     gui.vertical(|gui| {
-        Checkbox::new(StableId::new("settings_load_last"), &mut draft.load_last)
-            .text("Reopen last graph on launch")
+        gui.form_row(|gui| {
+            Checkbox::new(StableId::new("settings_load_last"), &mut draft.load_last)
+                .text("Reopen last graph on launch")
+                .show(gui);
+        });
+
+        gui.form_row(|gui| {
+            Checkbox::new(
+                StableId::new("settings_tcp_enabled"),
+                &mut draft.tcp_enabled,
+            )
+            .text("Auto-start TCP script listener")
             .show(gui);
-
-        Space::new(gui.style.padding).show(gui);
-
-        Checkbox::new(
-            StableId::new("settings_tcp_enabled"),
-            &mut draft.tcp_enabled,
-        )
-        .text("Auto-start TCP script listener")
-        .show(gui);
+        });
 
         if draft.tcp_enabled {
-            Space::new(gui.style.small_padding).show(gui);
             render_tcp_section(gui, draft);
         }
 
@@ -98,7 +99,7 @@ fn render_body(gui: &mut Gui<'_>, draft: &mut SettingsDraft) -> Option<SettingsA
         Space::new(gui.style.small_padding).show(gui);
 
         // -- footer: Cancel / Apply --
-        gui.with_layout(Layout::right_to_left(Align::Center), |gui| {
+        gui.row_with_layout(Layout::right_to_left(Align::Center), |gui| {
             let button_padding = gui.style.button_padding;
             let apply_enabled = draft.is_valid();
             let apply = Button::new(StableId::new("settings_apply"))
@@ -138,24 +139,21 @@ fn render_tcp_section(gui: &mut Gui<'_>, draft: &mut SettingsDraft) {
                     .show(gui);
             });
             if let Some(err) = draft.bind_error() {
-                Label::new(err)
-                    .color(gui.style.noninteractive_text_color)
-                    .show(gui);
+                gui.form_row(|gui| {
+                    Label::new(err)
+                        .color(gui.style.noninteractive_text_color)
+                        .show(gui);
+                });
             }
 
-            Space::new(gui.style.small_padding).show(gui);
-
-            // Auth radio (Token / No auth)
+            // Auth radios — stacked under an "Auth" header, "No auth"
+            // first.
             gui.form_row(|gui| {
                 Label::new("Auth").show(gui);
-                Space::new(gui.style.padding).show(gui);
-                RadioButton::new(
-                    StableId::new("settings_tcp_auth_token"),
-                    &mut draft.tcp.no_auth,
-                    false,
-                )
-                .text("Token")
-                .show(gui);
+            });
+            let auth_indent = gui.style.big_padding;
+            gui.form_row(|gui| {
+                Space::new(auth_indent).show(gui);
                 RadioButton::new(
                     StableId::new("settings_tcp_auth_none"),
                     &mut draft.tcp.no_auth,
@@ -164,10 +162,19 @@ fn render_tcp_section(gui: &mut Gui<'_>, draft: &mut SettingsDraft) {
                 .text("No auth")
                 .show(gui);
             });
+            gui.form_row(|gui| {
+                Space::new(auth_indent).show(gui);
+                RadioButton::new(
+                    StableId::new("settings_tcp_auth_token"),
+                    &mut draft.tcp.no_auth,
+                    false,
+                )
+                .text("Token")
+                .show(gui);
+            });
 
             // Token row — hidden when no_auth is on
             if !draft.tcp.no_auth {
-                Space::new(gui.style.small_padding).show(gui);
                 gui.form_row(|gui| {
                     Label::new("Token").show(gui);
                     Space::new(gui.style.padding).show(gui);
@@ -184,8 +191,6 @@ fn render_tcp_section(gui: &mut Gui<'_>, draft: &mut SettingsDraft) {
                     }
                 });
             }
-
-            Space::new(gui.style.small_padding).show(gui);
 
             // Token file
             gui.form_row(|gui| {
@@ -206,10 +211,11 @@ fn render_tcp_section(gui: &mut Gui<'_>, draft: &mut SettingsDraft) {
                 }
             });
 
-            Space::new(gui.style.small_padding).show(gui);
-            Label::new("Takes effect on next launch.")
-                .color(gui.style.noninteractive_text_color)
-                .show(gui);
+            gui.form_row(|gui| {
+                Label::new("Takes effect on next launch.")
+                    .color(gui.style.noninteractive_text_color)
+                    .show(gui);
+            });
         });
     });
 }

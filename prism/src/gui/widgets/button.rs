@@ -156,11 +156,16 @@ impl<'a> Button<'a> {
         } else {
             // todo also include provided shapes size
             let text_size = galley.as_ref().map(|g| g.size()).unwrap_or_default();
-            // Per-side padding; doubled to get the outer rect.
+            // Per-side padding; doubled to get the outer rect width.
+            // Height locks to `style.row_height` so buttons line up
+            // with text edits and other row-height widgets in form
+            // layouts; the padding.y component is not used in autosize.
             let padding = self
                 .padding
                 .unwrap_or_else(|| vec2(gui.style.padding, gui.style.small_padding));
-            let autosize = self.size.unwrap_or(text_size + padding * 2.0);
+            let autosize = self
+                .size
+                .unwrap_or_else(|| vec2(text_size.x + padding.x * 2.0, gui.style.row_height));
             let (rect, response) = gui.scope(id).autosize(autosize, sense);
             if !gui.ui_raw().is_rect_visible(rect) {
                 return response;

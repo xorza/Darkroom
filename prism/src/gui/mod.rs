@@ -192,15 +192,6 @@ impl<'a> Gui<'a> {
         self.ui.fonts_mut(|f| f.row_height(font_id))
     }
 
-    /// Pin the current layout's minimum height — siblings allocate
-    /// at least `height` on the cross axis. Form rows use this to
-    /// guarantee labels/text-edits/buttons share a baseline. Sanctioned
-    /// thin wrapper over `Ui::set_min_height` so app code doesn't
-    /// reach for `ui_raw()`.
-    pub fn set_min_height(&mut self, height: f32) {
-        self.ui.set_min_height(height);
-    }
-
     pub fn horizontal<R>(
         &mut self,
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
@@ -231,17 +222,54 @@ impl<'a> Gui<'a> {
         self.ui.vertical(|ui| args.enter(ui, add_contents))
     }
 
-    /// Single form line: pinned to `style.row_height` with cross-axis
-    /// `Align::Center`, so labels, text edits, and buttons drawn in
-    /// the same row share a vertical centerline regardless of their
-    /// natural heights. Use for any "label + input" row.
+    /// Single form line: explicit `(available_width, row_height)`
+    /// allocation with cross-axis `Align::Center`, so labels, text
+    /// edits, and buttons drawn in the same row share a vertical
+    /// centerline regardless of their natural heights. Equivalent to
+    /// [`Gui::row_with_layout`] with `Layout::left_to_right(Align::Center)`.
     pub fn form_row<R>(&mut self, add_contents: impl FnOnce(&mut Gui<'_>) -> R) -> R {
+        self.row_with_layout(Layout::left_to_right(egui::Align::Center), add_contents)
+    }
+
+    /// Row pinned to `style.row_height` under `layout`, with
+    /// `(available_width, row_height)` allocated explicitly. Use when
+    /// you need a non-default direction (e.g.
+    /// `Layout::right_to_left(Center)` for a footer with Apply/Cancel
+    /// on the right).
+    ///
+    /// Why allocate explicitly instead of `with_layout` +
+    /// `set_min_height`: egui's horizontal layouts with
+    /// `cross_align == Center` trip a "fill cross axis to
+    /// `available_rect.height()`" branch in `Layout::next_frame`.
+    /// When the parent's `max_rect.height` is bigger than the row
+    /// content — which happens whenever `egui::Window`'s `Resize`
+    /// keeps `desired_size` pinned at its high-water mark — every
+    /// widget in the row would claim that full height and the cursor
+    /// would advance by it, so the row swallows all remaining vertical
+    /// space and pushes later siblings off the visible area. A
+    /// fixed-size allocation gives the row a finite `max_rect.height`,
+    /// so the fill becomes `row_height`.
+    pub fn row_with_layout<R>(
+        &mut self,
+        layout: Layout,
+        add_contents: impl FnOnce(&mut Gui<'_>) -> R,
+    ) -> R {
         let row_height = self.style.row_height;
-        self.with_layout(Layout::left_to_right(egui::Align::Center), |gui| {
-            gui.set_min_height(row_height);
-            add_contents(gui)
-        })
-        .inner
+        let args = self.view_params();
+        // desired_size.y = row_height — pins the row's `max_rect.height`
+        // so egui's "fill cross axis" path in `next_frame_ignore_wrap`
+        // (triggered by horizontal layouts with `cross_align == Center`)
+        // fills to `row_height`, not the parent's full extent.
+        // desired_size.x = available_width — gives the row a finite
+        // width to allocate against. Caller (`Modal`) must hand us a
+        // finite parent `max_rect.width`; we don't try to handle
+        // INFINITY here (`auto_sized()` is incompatible with this
+        // helper for that reason).
+        let available_width = self.ui.available_size_before_wrap().x;
+        let desired_size = egui::vec2(available_width, row_height);
+        self.ui
+            .allocate_ui_with_layout(desired_size, layout, |ui| args.enter(ui, add_contents))
+            .inner
     }
 
     /// Begin a stable-id child scope. Returns a builder that applies

@@ -1,6 +1,7 @@
 //! Floating modal window backed by [`egui::Window`]. Title bar is the
-//! only drag handle (body input is absorbed); edges and corners
-//! resize. Title bar gains a close `✕` when [`Modal::open`] is bound.
+//! only drag handle (body input is absorbed); the window auto-sizes
+//! to its content (no user resize). Title bar gains a close `✕` when
+//! [`Modal::open`] is bound.
 //!
 //! Why `egui::Window` and not `egui::Modal`: we want drag-to-move and
 //! edge-resize, which `egui::Modal` does not provide. The trade-off is
@@ -16,7 +17,7 @@
 //! [`egui::Modal`]. No visual dim is painted; layer an [`egui::Area`]
 //! at the call site if you want one.
 
-use egui::{Align2, Order, Sense, Vec2};
+use egui::{Align2, Order, Sense, Vec2, vec2};
 
 use crate::common::StableId;
 use crate::gui::Gui;
@@ -66,9 +67,36 @@ impl<'a> Modal<'a> {
         // room a real settings/about dialog expects.
         let frame = egui::Frame::window(&ctx.global_style())
             .inner_margin(egui::Margin::same(gui.style.modal_padding as i8));
+        // Size to content with a finite, capped width.
+        //
+        // - `resizable(false)` makes the window's rendered size track
+        //   `last_content_size` each frame (egui `Resize::show`,
+        //   lines 327–329) — height auto-fits.
+        // - `default_size = (420, 200)` gives `Gui::form_row` a finite
+        //   `available_width` to allocate against (`auto_sized()`'s
+        //   INFINITY width would inflate `min_rect.x` via
+        //   `expand_to_include_rect` in egui's allocator).
+        // - `max_width = default_size.x` caps the width so it can't
+        //   keep growing toward the parent rect width: egui's
+        //   `Resize::desired_size` only expands (never shrinks), and
+        //   `form_row` reads `available_width = desired_size.x`, so
+        //   without a cap each frame would feed back wider until it
+        //   filled the panel.
+        // - `min_size = 0` lets height shrink when rows disappear.
+        // - `constrain_to(panel_rect)` clamps position+size to the
+        //   central panel.
+        // - No `vscroll` — its `min_scrolled_size` floor and outer
+        //   bookkeeping add height even when content fits.
+        let constrain_rect = gui.container_rect();
+        let modal_width = 420.0;
         let mut window = egui::Window::new(self.title)
             .id(id.id())
             .collapsible(false)
+            .resizable(false)
+            .min_size(Vec2::ZERO)
+            .max_width(modal_width)
+            .default_size(vec2(modal_width, 200.0))
+            .constrain_to(constrain_rect)
             .frame(frame);
         if let Some(open) = self.open {
             window = window.open(open);
@@ -78,12 +106,6 @@ impl<'a> Modal<'a> {
             .show(&ctx, |ui| {
                 args.enter(ui, |gui| {
                     let ui = gui.ui_raw();
-                    // egui::Window forces `resizable: false` on its
-                    // inner Resize, reporting `last_content_size` (not
-                    // `desired_size`). Claim the full available rect
-                    // (= desired_size each frame) so resize-by-edge
-                    // sticks across frames.
-                    ui.set_min_size(ui.available_size());
                     // Absorb body input so the underlying Area's
                     // move-drag (registered earlier) only fires from
                     // the title bar.
