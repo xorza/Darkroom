@@ -230,8 +230,6 @@ async fn run_listener(
     cancel: CancellationToken,
 ) -> std::io::Result<()> {
     let listener = TcpListener::from_std(listener)?;
-    let bound = listener.local_addr()?;
-    tracing::info!(addr = %bound, auth = token.is_some(), "tcp script transport listening");
 
     // One permit per concurrent connection. Cap keeps FD/memory use
     // bounded if a client spams connects; extras are closed at accept

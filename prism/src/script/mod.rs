@@ -134,11 +134,10 @@ pub fn build_transports(cfg: &ScriptConfig) -> Vec<Result<StartedTransport, Tran
 }
 
 /// Convenience wrapper around [`build_transports`] for production
-/// callers: bind every enabled transport, announce each success on
-/// stdout, log each failure via tracing, and return the bound
-/// transports ready to hand to [`ScriptExecutor::new`]. Use
-/// [`build_transports`] directly when you need raw outcomes (tests,
-/// custom surfacing).
+/// callers: bind every enabled transport, surface each outcome via
+/// tracing, and return the bound transports ready to hand to
+/// [`ScriptExecutor::new`]. Use [`build_transports`] directly when you
+/// need raw outcomes (tests, custom surfacing).
 pub fn start_transports(cfg: &ScriptConfig) -> Vec<Box<dyn ScriptTransport>> {
     build_transports(cfg)
         .into_iter()
@@ -159,11 +158,11 @@ pub fn start_transports(cfg: &ScriptConfig) -> Vec<Box<dyn ScriptTransport>> {
         .collect()
 }
 
-/// Print a transport's discovery banner to stdout (and log token-file
-/// writes via tracing). Split out from [`build_transports`] so binding
-/// stays pure and unit-testable. Only used internally by
-/// [`start_transports`]; tests that want raw outcomes call
-/// [`build_transports`] directly.
+/// Log post-bind outcomes that the transport itself doesn't cover:
+/// auth-disabled warning (louder than the `auth=false` kv on tcp.rs's
+/// "listening" line) and token-file write success/failure. The bind
+/// event is logged inside the transport. Split out from
+/// [`build_transports`] so binding stays pure and unit-testable.
 pub(crate) fn announce(report: &TransportReport) {
     match report {
         TransportReport::Tcp(r) => announce_tcp(r),
@@ -171,10 +170,13 @@ pub(crate) fn announce(report: &TransportReport) {
 }
 
 fn announce_tcp(report: &tcp::TcpStartReport) {
-    println!("script-tcp: listening on {}", report.addr);
-    match report.token {
-        Some(token) => println!("script-tcp: token {token}"),
-        None => println!("script-tcp: auth disabled"),
+    tracing::info!(
+        addr = %report.addr,
+        auth = report.token.is_some(),
+        "script-tcp: listening",
+    );
+    if report.token.is_none() {
+        tracing::warn!("script-tcp: auth disabled");
     }
     match &report.token_file {
         Some(Ok(path)) => tracing::info!(path = %path.display(), "wrote script token file"),

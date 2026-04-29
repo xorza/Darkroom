@@ -26,7 +26,7 @@ pub async fn run(launch_config: LaunchConfig) -> Result<()> {
     let host = HeadlessUiHost::new(wake.clone(), shutdown.clone());
     let mut session = Session::new(host, launch_config);
 
-    println!("prism headless: running. Send `shutdown()` over the script TCP, or Ctrl-C.");
+    tracing::info!("prism headless: running. Send `shutdown()` over the script TCP, or Ctrl-C.");
 
     let mut output = FrameOutput::default();
     loop {
@@ -46,6 +46,6 @@ pub async fn run(launch_config: LaunchConfig) -> Result<()> {
     }
 
     session.exit();
-    println!("prism headless: shut down");
+    tracing::info!("prism headless: shut down");
     Ok(())
 }
