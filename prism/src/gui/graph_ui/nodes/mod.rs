@@ -130,10 +130,10 @@ impl NodeUi {
         gesture: &mut Gesture,
     ) {
         // A drag released on the previous frame kept its offset alive
-        // through that frame's render (see `NodeDrag::released`). By
-        // now `MoveNode::apply` has run, so the offset is stale —
+        // through that frame's render (gesture was in `ReleasedNodeDrag`).
+        // By now `MoveNode::apply` has run, so the offset is stale —
         // cancel before we read any drag state.
-        if gesture.node_drag().is_some_and(|d| d.released) {
+        if gesture.is_released_node_drag() {
             gesture.cancel();
         }
 
@@ -160,6 +160,7 @@ impl NodeUi {
                 let start_pos = ctx.view_graph.view_nodes.by_key(&node_id).unwrap().pos;
                 gesture.start_node_drag(node_id, start_pos);
             }
+            let mut commit_pos = None;
             if let Some(drag) = gesture.node_drag_mut()
                 && drag.node_id == node_id
             {
@@ -167,14 +168,15 @@ impl NodeUi {
                     drag.offset += response.drag_delta() / gui.scale();
                 }
                 if events.stopped {
-                    output.add_intent(Intent::MoveNode {
-                        node_id,
-                        to: drag.committed_pos(),
-                    });
-                    // Keep offset alive for this frame's render; the
-                    // cancel happens at the top of next frame's call.
-                    drag.released = true;
+                    commit_pos = Some(drag.committed_pos());
                 }
+            }
+            if let Some(to) = commit_pos {
+                output.add_intent(Intent::MoveNode { node_id, to });
+                // Keep offset alive for this frame's render via the
+                // `ReleasedNodeDrag` variant; the cancel happens at
+                // the top of next frame's call.
+                gesture.release_node_drag();
             }
         }
     }

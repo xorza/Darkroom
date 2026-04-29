@@ -24,13 +24,6 @@ pub struct NodeDrag {
     pub node_id: NodeId,
     pub start_pos: Pos2,
     pub offset: Vec2,
-    /// Set on the frame the user releases the mouse: the `MoveNode`
-    /// action has been emitted, but we must keep the offset alive
-    /// through this frame's render so the node doesn't flash back to
-    /// `view_node.pos` (old) before `apply()` updates it at end of
-    /// frame. Cleared + gesture cancelled at the start of the next
-    /// frame's interaction pass.
-    pub released: bool,
 }
 
 impl NodeDrag {
@@ -47,6 +40,12 @@ pub enum Gesture {
     DraggingConnection(ConnectionDrag),
     BreakingConnections(ConnectionBreaker),
     DraggingNode(NodeDrag),
+    /// Drag finished last frame: the `MoveNode` intent has been
+    /// emitted but the offset must stay alive for this frame's
+    /// render so the node doesn't flash back to `view_node.pos`
+    /// before `apply()` updates it at end of frame. Cancelled at the
+    /// start of the next frame's interaction pass.
+    ReleasedNodeDrag(NodeDrag),
 }
 
 impl Gesture {
@@ -83,23 +82,33 @@ impl Gesture {
             node_id,
             start_pos,
             offset: Vec2::ZERO,
-            released: false,
         });
     }
 
+    /// Transition `DraggingNode` → `ReleasedNodeDrag`. No-op from any
+    /// other state. Called the frame the user lifts the mouse, after
+    /// the `MoveNode` intent has been emitted.
+    pub fn release_node_drag(&mut self) {
+        if let Self::DraggingNode(d) = *self {
+            *self = Self::ReleasedNodeDrag(d);
+        }
+    }
+
+    pub fn is_released_node_drag(&self) -> bool {
+        matches!(self, Self::ReleasedNodeDrag(_))
+    }
+
     pub fn node_drag(&self) -> Option<&NodeDrag> {
-        if let Self::DraggingNode(d) = self {
-            Some(d)
-        } else {
-            None
+        match self {
+            Self::DraggingNode(d) | Self::ReleasedNodeDrag(d) => Some(d),
+            _ => None,
         }
     }
 
     pub fn node_drag_mut(&mut self) -> Option<&mut NodeDrag> {
-        if let Self::DraggingNode(d) = self {
-            Some(d)
-        } else {
-            None
+        match self {
+            Self::DraggingNode(d) | Self::ReleasedNodeDrag(d) => Some(d),
+            _ => None,
         }
     }
 

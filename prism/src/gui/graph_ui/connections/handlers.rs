@@ -55,7 +55,7 @@ impl GraphUi {
             // Node drag and view pan advance through egui response events
             // elsewhere in the frame; process_connections has nothing to
             // add for them.
-            Gesture::Panning | Gesture::DraggingNode(_) => {}
+            Gesture::Panning | Gesture::DraggingNode(_) | Gesture::ReleasedNodeDrag(_) => {}
             Gesture::Idle => {
                 let pointer_on_background =
                     background_response.hovered() && !self.connections.any_hovered();
