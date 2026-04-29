@@ -1,37 +1,32 @@
+use std::hash::Hash;
 use std::sync::Arc;
 
-use egui::{Align, FontId, Galley, Id, Key, Order, Response, Vec2, vec2};
+use egui::{Align, FontId, Galley, Response, Vec2, vec2};
 
 use crate::common::StableId;
 use crate::gui::Gui;
 use crate::gui::style::{ButtonStyle, PopupStyle};
-use crate::gui::widgets::area::Area;
 use crate::gui::widgets::button::Button;
-use crate::gui::widgets::frame::Frame;
 
-/// A custom popup menu that works with the Gui struct.
-/// Opens on click of the anchor response and closes on click outside or item selection.
-/// Styled like new_node_ui popup.
+/// Click-anchored popup menu styled with our [`PopupStyle`]. Thin
+/// wrapper around [`egui::Popup::menu`] — open/close lifecycle, click
+/// outside, escape, and the "just-opened" race are all handled by
+/// stock egui.
 #[derive(Debug)]
 #[must_use = "PopupMenu does nothing until .show() is called"]
-pub struct PopupMenu {
-    id: Id,
-    anchor_response: Response,
+pub struct PopupMenu<'a> {
+    anchor: &'a Response,
+    id: egui::Id,
     style: Option<PopupStyle>,
-    close_on_click: bool,
     min_width: Option<f32>,
 }
 
-impl PopupMenu {
-    /// Create a new popup menu anchored to the given response. Pure
-    /// construction — the open/closed toggle runs inside `.show()`, so
-    /// an abandoned builder leaves no stored state behind.
-    pub fn new(anchor_response: &Response, id_salt: impl std::hash::Hash) -> Self {
+impl<'a> PopupMenu<'a> {
+    pub fn new(anchor: &'a Response, id_salt: impl Hash) -> Self {
         Self {
-            id: anchor_response.id.with(id_salt),
-            anchor_response: anchor_response.clone(),
+            anchor,
+            id: anchor.id.with(id_salt),
             style: None,
-            close_on_click: true,
             min_width: None,
         }
     }
@@ -41,95 +36,36 @@ impl PopupMenu {
         self
     }
 
-    pub fn close_on_click(mut self, close: bool) -> Self {
-        self.close_on_click = close;
-        self
-    }
-
     pub fn min_width(mut self, width: f32) -> Self {
         self.min_width = Some(width);
         self
     }
 
-    /// Show the popup menu if it's open.
-    /// Returns Some(inner) if the popup was shown, None otherwise.
+    /// Returns `Some(inner)` when the popup is open this frame, `None`
+    /// when closed.
     pub fn show<R>(self, gui: &mut Gui<'_>, content: impl FnOnce(&mut Gui<'_>) -> R) -> Option<R> {
-        // Toggle the stored open/closed bool on anchor click. Deferred
-        // from `new` so that abandoning the builder before `.show()` is
-        // called doesn't commit the toggle.
-        if self.anchor_response.clicked() {
-            let is_open = gui.load_temp::<bool>(self.id).unwrap_or(false);
-            gui.store_temp(self.id, !is_open);
+        let style = self.style.unwrap_or_else(|| gui.style.popup.clone());
+        let frame = egui::Frame::NONE
+            .fill(style.fill)
+            .stroke(style.stroke)
+            .corner_radius(style.corner_radius)
+            .inner_margin(style.padding);
+
+        let mut popup = egui::Popup::menu(self.anchor).id(self.id).frame(frame);
+        if let Some(w) = self.min_width {
+            popup = popup.width(w);
         }
 
-        let is_open = gui.load_temp::<bool>(self.id).unwrap_or(false);
-        if !is_open {
-            return None;
-        }
-
-        let popup_style = self.style.unwrap_or_else(|| gui.style.popup.clone());
-        let close_on_click = self.close_on_click;
-        let anchor_rect = self.anchor_response.rect;
-        let min_width = self.min_width;
-        let popup_id = self.id;
-        // Check if the popup was just opened on this frame (anchor was clicked)
-        let just_opened = self.anchor_response.clicked();
-
-        let popup_response = Area::new(StableId::from_egui_id(self.id))
-            .fixed_pos(anchor_rect.left_bottom())
-            .order(Order::Foreground)
-            .show(gui, |gui| {
-                Frame::popup(
-                    StableId::from_egui_id(popup_id.with("popup_menu_frame")),
-                    &popup_style,
-                )
-                .show(gui, |gui| {
-                    if let Some(width) = min_width {
-                        gui.ui_raw().set_min_width(width);
-                    }
-                    content(gui)
-                })
-            });
-
-        let inner = popup_response.inner.inner;
-        let popup_rect = popup_response.response.rect;
-
-        // Don't process close events on the frame the popup was just opened
-        if just_opened {
-            return Some(inner);
-        }
-
-        // Close on click outside
-        if gui.ui_raw().input(|i| i.pointer.any_pressed())
-            && let Some(pointer_pos) = gui.ui_raw().input(|i| i.pointer.interact_pos())
-            && !popup_rect.contains(pointer_pos)
-            && !anchor_rect.contains(pointer_pos)
-        {
-            gui.store_temp(popup_id, false);
-        }
-
-        // Close on click inside if close_on_click is true
-        // But not if clicking on the anchor (which toggles the popup)
-        if close_on_click
-            && gui.ui_raw().input(|i| i.pointer.any_click())
-            && let Some(pointer_pos) = gui.ui_raw().input(|i| i.pointer.interact_pos())
-            && popup_rect.contains(pointer_pos)
-            && !anchor_rect.contains(pointer_pos)
-        {
-            gui.store_temp(popup_id, false);
-        }
-
-        // Close on Escape
-        if gui.ui_raw().input(|i| i.key_pressed(Key::Escape)) {
-            gui.store_temp(popup_id, false);
-        }
-
-        Some(inner)
+        let args = gui.child_args();
+        popup
+            .show(|ui| args.enter(ui, content))
+            .map(|inner| inner.inner)
     }
 }
 
-/// A list item widget for use inside PopupMenu or other list contexts.
-/// Uses Button internally to ensure consistent styling with new_node_ui.
+/// A list item widget for use inside [`PopupMenu`] or other list
+/// contexts. Wraps [`Button`] with default sizing tied to the active
+/// font and `style.list_button` styling.
 #[must_use = "ListItem does nothing until .show() is called"]
 pub struct ListItem<'a> {
     id: StableId,
@@ -215,7 +151,6 @@ impl<'a> ListItem<'a> {
         let style = self.style.unwrap_or(gui.style.list_button);
         let id = self.id;
 
-        // Calculate size like new_node_ui does
         let size = if let Some(size) = self.size {
             size
         } else {
@@ -251,7 +186,6 @@ impl<'a> ListItem<'a> {
             .size(size)
             .toggle(&mut selected);
 
-        // Set text or galley
         if let Some(galley) = self.galley {
             btn = btn.galley(galley);
         } else if let Some(text) = self.text {
