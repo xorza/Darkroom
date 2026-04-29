@@ -1,11 +1,15 @@
-//! Floating window backed by [`egui::Window`]. Title bar is the only
-//! drag handle (body input is absorbed); bottom-right + edges resize.
-//! Title bar gains a close `✕` when [`Modal::open`] is bound.
+//! Floating modal window backed by [`egui::Window`]. Title bar is the
+//! only drag handle (body input is absorbed); edges and corners
+//! resize. Title bar gains a close `✕` when [`Modal::open`] is bound.
 //!
-//! Not strictly modal — there's no backdrop or input blocking against
-//! widgets behind. Layer one at the call site if you need it.
+//! Modal input blocking is achieved the same way [`egui::Modal`] does
+//! it: mark the window's layer as the modal layer (blocks focus
+//! traversal to lower layers) and lay a transparent click+drag
+//! absorber across the screen below the window (blocks pointer hits).
+//! No dim is painted — add an [`egui::Area`] at the call site if you
+//! want a visual backdrop.
 
-use egui::{Sense, Vec2};
+use egui::{Align2, LayerId, Order, Sense, Vec2};
 
 use crate::common::StableId;
 use crate::gui::Gui;
@@ -48,6 +52,32 @@ impl<'a> Modal<'a> {
     pub fn show<R>(self, gui: &mut Gui<'_>, body: impl FnOnce(&mut Gui<'_>) -> R) -> Option<R> {
         let ctx = gui.ui_raw().ctx().clone();
         let args = gui.child_args();
+
+        // Skip backdrop + modal-layer when bound `open` is false: the
+        // window won't render and shouldn't block input either.
+        let should_render = match &self.open {
+            Some(o) => **o,
+            None => true,
+        };
+        if should_render {
+            // Backdrop: an empty Area at the window's order, registered
+            // *before* the window so it draws underneath, with a
+            // screen-sized click+drag interactor that absorbs pointer
+            // hits to widgets behind. Same recipe as egui::Modal.
+            let backdrop_id = self.id.with("backdrop").id();
+            egui::Area::new(backdrop_id)
+                .order(Order::Middle)
+                .anchor(Align2::LEFT_TOP, Vec2::ZERO)
+                .interactable(true)
+                .show(&ctx, |ui| {
+                    let screen = ui.ctx().content_rect();
+                    let _ = ui.interact(screen, backdrop_id.with("hit"), Sense::click_and_drag());
+                });
+            // And block focus traversal to lower layers.
+            ctx.memory_mut(|mem| {
+                mem.set_modal_layer(LayerId::new(Order::Middle, self.id.id()));
+            });
+        }
 
         let mut window = egui::Window::new(self.title)
             .id(self.id.id())
