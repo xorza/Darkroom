@@ -13,7 +13,7 @@
 //! same recipe as `egui::Modal`. No visual dim is painted; layer an
 //! `egui::Area` at the call site if you want one.
 
-use egui::{Align, Align2, Direction, Key, Layout, Modifiers, Order, Sense, Vec2, vec2};
+use egui::{Align2, Key, Modifiers, Order, Sense, Vec2};
 
 use crate::common::StableId;
 use crate::gui::Gui;
@@ -79,65 +79,26 @@ impl<'a> Modal<'a> {
                 frame
                     .show(ui, |ui| {
                         args.enter(ui, |gui| {
-                            // Title bar: row pinned to the modal
-                            // width, with two overlaid scopes — one
-                            // centering the title, one right-
-                            // anchoring the close ×. Both use
-                            // `Sense::empty()` so the only
-                            // interactive widget on the row is the
-                            // close button itself; the rest falls
-                            // through to Area's drag handle. The
-                            // title `Label` is `.selectable(false)`
-                            // because egui labels otherwise register
-                            // `Sense::click_and_drag` for text
-                            // selection, which would intercept drags
-                            // on the title.
-                            let row_height = gui.style.row_height;
-                            let row_width = if gui.ui_raw().is_sizing_pass() {
-                                // Mirror close-sized gutters on each
-                                // side so the visible-pass title lands
-                                // at the row center.
-                                let title_w = gui
-                                    .layout_no_wrap(
-                                        title,
-                                        &gui.style.heading_font.clone(),
-                                        gui.style.text_color,
-                                    )
-                                    .size()
-                                    .x;
-                                row_height
-                                    + gui.style.padding
-                                    + title_w
-                                    + gui.style.padding
-                                    + row_height
-                            } else {
-                                gui.ui_raw().available_width()
-                            };
-                            let row_rect = gui
-                                .scope(id.with("title_row"))
-                                .allocate(vec2(row_width, row_height));
-
-                            gui.scope(id.with("title"))
-                                .max_rect(row_rect)
-                                .sense(Sense::empty())
-                                .layout(Layout::centered_and_justified(Direction::LeftToRight))
-                                .show(|gui| {
+                            // Title bar: centered title + close ×
+                            // anchored right. `row_slots` handles
+                            // the sizing-pass-vs-visible-pass dance
+                            // and the multi-anchor overlay; we just
+                            // describe what goes where.
+                            let heading_font = gui.style.heading_font.clone();
+                            gui.row_slots(id.with("title_bar"), |slots| {
+                                slots.center(|gui| {
                                     Label::new(title)
-                                        .font(gui.style.heading_font.clone())
+                                        .font(heading_font.clone())
                                         .selectable(false)
                                         .show(gui);
                                 });
-
-                            gui.scope(id.with("close_zone"))
-                                .max_rect(row_rect)
-                                .sense(Sense::empty())
-                                .layout(Layout::right_to_left(Align::Center))
-                                .show(|gui| {
+                                slots.right(|gui| {
                                     let close = CloseButton::new(id.with("close")).show(gui);
                                     if close.clicked() {
                                         close_clicked = true;
                                     }
                                 });
+                            });
 
                             Separator::new().show(gui);
 

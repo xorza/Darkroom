@@ -2,8 +2,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use egui::{
-    Color32, FontId, Galley, InnerResponse, Layout, Painter, Rect, Response, Sense, Ui, UiBuilder,
-    Vec2,
+    Align, Color32, Direction, FontId, Galley, InnerResponse, Layout, Painter, Rect, Response,
+    Sense, Ui, UiBuilder, Vec2, vec2,
 };
 
 use crate::common::{StableId, UiEquals};
@@ -319,6 +319,54 @@ impl<'a> Gui<'a> {
         }
     }
 
+    /// Row with up to three anchored slots — `left`, `center`,
+    /// `right` — that lays out correctly inside an autosizing
+    /// container (modal, popup, autosizing frame). Row height is
+    /// `style.row_height`; widgets taller than that pin the row to
+    /// their own height via the usual `min_rect` growth, so passing
+    /// the height explicitly is rarely useful.
+    ///
+    /// Each slot's body runs exactly once. During a sizing pass all
+    /// bodies stack left-to-right at their natural sizes inside one
+    /// scope, so the row's reported `min_rect` is the sum of natural
+    /// widths — that's what the parent `Area` measures and stores as
+    /// its size. During the visible pass the row is pinned to
+    /// `(available_width, row_height)` and each slot opens its own
+    /// scope over the shared `row_rect` with the appropriate layout
+    /// (LTR / `centered_and_justified` / RTL), giving a centered
+    /// child and edge-anchored siblings without inflating the parent.
+    ///
+    /// The slot scopes use `Sense::empty()` so only the slot bodies'
+    /// own widgets register pointer interactions — empty title-bar
+    /// space falls through to the enclosing `Area`'s drag handle.
+    /// Pass `Label::selectable(false)` for chrome labels inside slot
+    /// bodies; a selectable label registers `click_and_drag` over
+    /// its galley and would intercept drags.
+    pub fn row_slots(&mut self, id: StableId, build: impl FnOnce(&mut RowSlots<'_, '_>)) {
+        if self.ui.is_sizing_pass() {
+            self.scope(id.with("sizing"))
+                .layout(Layout::left_to_right(Align::Center))
+                .show(|gui| {
+                    let mut slots = RowSlots {
+                        gui,
+                        id,
+                        visible_rect: None,
+                    };
+                    build(&mut slots);
+                });
+        } else {
+            let height = self.style.row_height;
+            let width = self.ui.available_width();
+            let row_rect = self.scope(id.with("row")).allocate(vec2(width, height));
+            let mut slots = RowSlots {
+                gui: self,
+                id,
+                visible_rect: Some(row_rect),
+            };
+            build(&mut slots);
+        }
+    }
+
     /// Runs a closure with a temporarily changed scale. Saves the
     /// current `Rc<Style>` + scale and restores them by assignment
     /// after the closure returns — no second rebuild on the restore
@@ -422,4 +470,66 @@ impl<'b, 'a> ScopedGui<'b, 'a> {
             })
             .inner
     }
+}
+
+/// Builder passed to [`Gui::row_slots`]'s body closure. Each method
+/// runs its slot's body once: in the sizing pass all slots run
+/// sequentially (LTR, natural sizes); in the visible pass each runs
+/// inside its own overlaid scope on the shared row rect.
+pub struct RowSlots<'b, 'a> {
+    gui: &'b mut Gui<'a>,
+    id: StableId,
+    visible_rect: Option<Rect>,
+}
+
+impl<'b, 'a> RowSlots<'b, 'a> {
+    /// Anchored at the row's left edge (LTR layout). No live caller
+    /// yet — kept for API symmetry with [`Self::center`] /
+    /// [`Self::right`]; remove if a year passes without one appearing.
+    #[allow(dead_code)]
+    pub fn left(&mut self, body: impl FnOnce(&mut Gui<'_>)) {
+        self.run(SlotKind::Left, body);
+    }
+
+    pub fn center(&mut self, body: impl FnOnce(&mut Gui<'_>)) {
+        self.run(SlotKind::Center, body);
+    }
+
+    pub fn right(&mut self, body: impl FnOnce(&mut Gui<'_>)) {
+        self.run(SlotKind::Right, body);
+    }
+
+    fn run(&mut self, kind: SlotKind, body: impl FnOnce(&mut Gui<'_>)) {
+        match self.visible_rect {
+            None => {
+                // Sizing pass: stack LTR at natural sizes so the
+                // parent measures the row's full width.
+                body(self.gui);
+            }
+            Some(rect) => {
+                let (layout, salt) = match kind {
+                    SlotKind::Left => (Layout::left_to_right(Align::Center), "left"),
+                    SlotKind::Center => (
+                        Layout::centered_and_justified(Direction::LeftToRight),
+                        "center",
+                    ),
+                    SlotKind::Right => (Layout::right_to_left(Align::Center), "right"),
+                };
+                self.gui
+                    .scope(self.id.with(salt))
+                    .max_rect(rect)
+                    .sense(Sense::empty())
+                    .layout(layout)
+                    .show(body);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SlotKind {
+    #[allow(dead_code)]
+    Left,
+    Center,
+    Right,
 }
