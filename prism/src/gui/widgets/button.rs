@@ -196,23 +196,7 @@ impl<'a> Button<'a> {
             radius: gui.style.small_corner_radius,
         });
 
-        let fill = if !self.enabled {
-            background.disabled_fill
-        } else if is_checked {
-            background.checked_fill
-        } else if response.is_pointer_button_down_on() {
-            background.active_fill
-        } else if response.hovered() {
-            background.hover_fill
-        } else {
-            background.idle_fill
-        };
-
-        let stroke = if response.hovered() && self.enabled {
-            background.hovered_stroke
-        } else {
-            background.inactive_stroke
-        };
+        let (fill, stroke) = background.for_response(&response, self.enabled, is_checked);
 
         gui.painter()
             .rect(rect, background.radius, fill, stroke, StrokeKind::Inside);

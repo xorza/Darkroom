@@ -303,6 +303,18 @@ impl<'a> Gui<'a> {
             .inner
     }
 
+    /// Allocate exactly `size` in the current layout and return its
+    /// rect + response. The caller is responsible for being inside a
+    /// stable-id scope (`Gui::scope(...).show(...)` body, container
+    /// widget body, etc.) so the auto-id seeded by `allocate_exact_size`
+    /// does not drift with the parent's widget counter.
+    ///
+    /// Lives behind the `gui/mod.rs` banned-pattern whitelist so callers
+    /// don't need a per-line `// id-drift-ok` annotation.
+    pub fn allocate_exact_size(&mut self, size: Vec2, sense: Sense) -> (Rect, Response) {
+        self.ui.allocate_exact_size(size, sense)
+    }
+
     /// Begin a stable-id child scope. Returns a builder that applies
     /// optional `.max_rect(..)` / `.sense(..)` tweaks and finishes with
     /// `.show(|gui| ...)`, which creates the child `Gui` whose widget

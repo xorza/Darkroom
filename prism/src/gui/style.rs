@@ -215,6 +215,36 @@ pub struct ButtonStyle {
     pub radius: f32,
 }
 
+impl ButtonStyle {
+    /// Pick `(fill, stroke)` from this style based on the egui interaction
+    /// state. Encodes the disabled / checked / pressed / hover / idle
+    /// precedence in one place so widget bodies don't repeat the table.
+    pub fn for_response(
+        &self,
+        response: &egui::Response,
+        enabled: bool,
+        checked: bool,
+    ) -> (Color32, Stroke) {
+        let fill = if !enabled {
+            self.disabled_fill
+        } else if checked {
+            self.checked_fill
+        } else if response.is_pointer_button_down_on() {
+            self.active_fill
+        } else if response.hovered() {
+            self.hover_fill
+        } else {
+            self.idle_fill
+        };
+        let stroke = if enabled && response.hovered() {
+            self.hovered_stroke
+        } else {
+            self.inactive_stroke
+        };
+        (fill, stroke)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct DragValueStyle {

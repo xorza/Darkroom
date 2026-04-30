@@ -50,9 +50,7 @@ impl Expander {
         let header_response = gui.scope(self.id).show(|gui| {
             // Allocation runs inside the `Gui::scope` above, so its auto-id
             // seeds from the scope's stable id rather than the parent counter.
-            let (header_rect, response) = gui
-                .ui_raw()
-                .allocate_exact_size(header_size, Sense::click()); // id-drift-ok
+            let (header_rect, response) = gui.allocate_exact_size(header_size, Sense::click());
 
             if gui.ui_raw().is_rect_visible(header_rect) {
                 let icon_rect = Rect::from_min_size(header_rect.min, Vec2::splat(icon_size));

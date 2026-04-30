@@ -18,6 +18,20 @@ use crate::model;
 use crate::model::Intent;
 use crate::session::output::{FrameOutput, RunCommand};
 
+/// Framed horizontal button row used for both overlay bars. Wraps
+/// `Frame::none(id).sense(Sense::all).inner_margin(padding)` over a
+/// `gui.horizontal(body)`, returning the frame's Response.
+fn button_bar(gui: &mut Gui<'_>, frame_id: StableId, body: impl FnOnce(&mut Gui<'_>)) -> Response {
+    let padding = gui.style.padding;
+    Frame::none(frame_id)
+        .sense(Sense::all())
+        .inner_margin(padding)
+        .show(gui, |gui| {
+            gui.horizontal(body);
+        })
+        .response
+}
+
 impl GraphUi {
     /// Top-left bar: fit-all / view-selected / reset-view.
     pub(super) fn render_view_buttons(
@@ -33,44 +47,37 @@ impl GraphUi {
             .max_rect(rect)
             .show(|gui| {
                 Constraints::new().fill_width().apply(gui);
-                let padding = gui.style.padding;
-                Frame::none(StableId::new("top_buttons_frame"))
-                    .sense(Sense::all())
-                    .inner_margin(padding)
-                    .show(gui, |gui| {
-                        gui.horizontal(|gui| {
-                            let btn_size = vec2(20.0, 20.0);
-                            let mono_font = gui.style.mono_font.clone();
+                button_bar(gui, StableId::new("top_buttons_frame"), |gui| {
+                    let btn_size = vec2(20.0, 20.0);
+                    let mono_font = gui.style.mono_font.clone();
 
-                            let response = Button::new(StableId::new("fit_all_btn"))
-                                .text("a")
-                                .font(mono_font.clone())
-                                .size(btn_size)
-                                .show(gui);
-                            if response.clicked() {
-                                action = Some(ViewButtonAction::FitAll);
-                            }
+                    let response = Button::new(StableId::new("fit_all_btn"))
+                        .text("a")
+                        .font(mono_font.clone())
+                        .size(btn_size)
+                        .show(gui);
+                    if response.clicked() {
+                        action = Some(ViewButtonAction::FitAll);
+                    }
 
-                            let response = Button::new(StableId::new("view_selected_btn"))
-                                .text("s")
-                                .font(mono_font.clone())
-                                .size(btn_size)
-                                .show(gui);
-                            if response.clicked() {
-                                action = Some(ViewButtonAction::ViewSelected);
-                            }
+                    let response = Button::new(StableId::new("view_selected_btn"))
+                        .text("s")
+                        .font(mono_font.clone())
+                        .size(btn_size)
+                        .show(gui);
+                    if response.clicked() {
+                        action = Some(ViewButtonAction::ViewSelected);
+                    }
 
-                            let response = Button::new(StableId::new("reset_view_btn"))
-                                .text("r")
-                                .font(mono_font)
-                                .size(btn_size)
-                                .show(gui);
-                            if response.clicked() {
-                                action = Some(ViewButtonAction::ResetView);
-                            }
-                        });
-                    })
-                    .response
+                    let response = Button::new(StableId::new("reset_view_btn"))
+                        .text("r")
+                        .font(mono_font)
+                        .size(btn_size)
+                        .show(gui);
+                    if response.clicked() {
+                        action = Some(ViewButtonAction::ResetView);
+                    }
+                })
             });
 
         (response, action)
@@ -90,33 +97,25 @@ impl GraphUi {
             .pivot(Align2::LEFT_BOTTOM)
             .movable(false)
             .show(gui, |gui| {
-                let padding = gui.style.padding;
-                Frame::none(StableId::new("bottom_buttons_frame"))
-                    .sense(Sense::all())
-                    .inner_margin(padding)
-                    .show(gui, |gui| {
-                        gui.horizontal(|gui| {
-                            let response =
-                                Button::new(StableId::new("run_btn")).text("run").show(gui);
-                            if response.clicked() {
-                                run_cmd = Some(RunCommand::RunOnce);
-                            }
+                button_bar(gui, StableId::new("bottom_buttons_frame"), |gui| {
+                    let response = Button::new(StableId::new("run_btn")).text("run").show(gui);
+                    if response.clicked() {
+                        run_cmd = Some(RunCommand::RunOnce);
+                    }
 
-                            let response = Button::new(StableId::new("autorun_btn"))
-                                .toggle(&mut autorun)
-                                .text("autorun")
-                                .show(gui);
+                    let response = Button::new(StableId::new("autorun_btn"))
+                        .toggle(&mut autorun)
+                        .text("autorun")
+                        .show(gui);
 
-                            if response.clicked() {
-                                run_cmd = Some(if autorun {
-                                    RunCommand::StartAutorun
-                                } else {
-                                    RunCommand::StopAutorun
-                                });
-                            }
+                    if response.clicked() {
+                        run_cmd = Some(if autorun {
+                            RunCommand::StartAutorun
+                        } else {
+                            RunCommand::StopAutorun
                         });
-                    })
-                    .response
+                    }
+                })
             })
             .inner;
 

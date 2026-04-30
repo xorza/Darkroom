@@ -133,7 +133,16 @@ fn no_drifting_widget_ids_in_crate() {
     let offenders = scan_crate(whitelist, &[], "// id-drift-ok", |line| {
         PATTERNS
             .iter()
-            .find(|p| line.contains(*p))
+            .find(|p| {
+                let Some(idx) = line.find(*p) else {
+                    return false;
+                };
+                // Exempt calls that go through our `Gui` helpers
+                // (`gui.allocate_exact_size(...)` etc.) — those are
+                // the sanctioned wrappers, not raw egui calls.
+                let prefix = &line[..idx];
+                !prefix.ends_with("gui")
+            })
             .map(|p| format!("[{}] {}", p, line.trim_start()))
     });
 

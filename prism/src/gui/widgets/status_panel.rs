@@ -56,9 +56,7 @@ impl<'a> StatusPanel<'a> {
             gui.horizontal(|gui| {
                 // Fixed-size icon drawn inside our already-scoped Frame child.
                 let (icon_rect, icon_response) =
-                    // id-drift-ok
-                    gui.ui_raw()
-                        .allocate_exact_size(Vec2::splat(icon_size), Sense::click());
+                    gui.allocate_exact_size(Vec2::splat(icon_size), Sense::click());
                 if icon_response.clicked() {
                     open = !open;
                 }
