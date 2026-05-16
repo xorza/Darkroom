@@ -1,9 +1,25 @@
-use palantir::{Background, Color, Configure, Panel, Sizing, Ui, WinitHost, WinitHostConfig};
+mod model;
 
-struct AppState;
+use palantir::{Background, Color, Configure, Panel, Sizing, Ui, WinitHost, WinitHostConfig};
+use scenarium::testing::test_graph;
+
+use crate::model::ViewGraph;
+
+struct AppState {
+    #[allow(dead_code)]
+    view_graph: ViewGraph,
+}
+
+impl AppState {
+    fn new() -> Self {
+        Self {
+            view_graph: test_graph().into(),
+        }
+    }
+}
 
 fn main() {
-    WinitHost::new(WinitHostConfig::new("darkroom"), AppState, build_ui).run();
+    WinitHost::new(WinitHostConfig::new("darkroom"), AppState::new(), build_ui).run();
 }
 
 fn build_ui(ui: &mut Ui<AppState>) {

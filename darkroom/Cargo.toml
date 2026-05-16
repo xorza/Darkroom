@@ -5,3 +5,9 @@ edition.workspace = true
 
 [dependencies]
 palantir = { workspace = true }
+scenarium = { workspace = true }
+common = { workspace = true }
+
+glam = { workspace = true }
+serde = { workspace = true }
+anyhow = { workspace = true }

@@ -1026,7 +1026,12 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 name = "darkroom"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "common",
+ "glam 0.14.0",
  "palantir",
+ "scenarium",
+ "serde",
 ]
 
 [[package]]
@@ -1809,6 +1814,9 @@ name = "glam"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "333928d5eb103c5d4050533cec0384302db6be8ef7d3cebd30ec6a35350353da"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "glam"
