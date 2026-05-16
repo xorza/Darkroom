@@ -3,7 +3,7 @@ members = [
     "common",
     "scenarium",
     "prism",
-    "palantir",
+    "lens",
     "lumos"
 ]
 exclude = [".tmp"]
@@ -24,7 +24,7 @@ quickbench = "0.1"
 scenarium = { path = "scenarium" }
 prism = { path = "prism" }
 imaginarium = { git = "https://github.com/xorza/Imaginarium", features = ["wgpu"] }
-palantir = { path = "palantir" }
+lens = { path = "lens" }
 
 # wgpu version should be in sync with egui
 wgpu = { version = "29.0", features = ["metal", "vulkan", "dx12"] }

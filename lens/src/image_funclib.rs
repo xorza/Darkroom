@@ -399,8 +399,7 @@ impl Default for ImageFuncLib {
 
                     let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 
-                    let mut output_buffer =
-                        imaginarium::ImageBuffer::new_empty(input_image.desc);
+                    let mut output_buffer = imaginarium::ImageBuffer::new_empty(input_image.desc);
 
                     let center = Vec2::new(
                         input_image.desc.width as f32 / 2.0,

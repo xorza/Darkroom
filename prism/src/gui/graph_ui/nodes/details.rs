@@ -1,5 +1,5 @@
 use egui::{Pos2, Rect, Response, Sense, Vec2};
-use palantir::Image;
+use lens::Image;
 use scenarium::data::DynamicValue;
 use scenarium::graph::NodeId;
 use scenarium::prelude::Func;

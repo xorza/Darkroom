@@ -2329,6 +2329,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
 
 [[package]]
+name = "lens"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "common",
+ "imaginarium",
+ "scenarium",
+ "strum 0.27.2",
+ "strum_macros 0.27.2",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3272,21 +3287,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "palantir"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "common",
- "imaginarium",
- "scenarium",
- "strum 0.28.0",
- "strum_macros 0.28.0",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3583,8 +3583,8 @@ dependencies = [
  "egui",
  "hashbrown 0.17.1",
  "imaginarium",
+ "lens",
  "lz4_flex",
- "palantir",
  "ratatui",
  "rfd",
  "rhai",

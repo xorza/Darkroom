@@ -18,7 +18,7 @@ scenarium/
 ├── imaginarium/     # GPU/CPU image processing library
 ├── lumos/           # Astrophotography image processing library
 ├── prism/           # Visual egui-based graph editor
-├── palantir/        # Image processing funclib (imaginarium adapter)
+├── lens/        # Image processing funclib (imaginarium adapter)
 ├── test_resources/  # Sample graphs and media for tests
 ├── test_output/     # Output folder created by unit tests
 └── deprecated_code/ # Older .NET/QML editors (historical)
@@ -32,7 +32,7 @@ scenarium/
 | `scenarium` | Core graph library: nodes, functions, execution engine, Lua scripting |
 | `prism` | Visual egui-based editor for graph creation and execution |
 | `imaginarium` | GPU/CPU image processing with automatic backend selection |
-| `palantir` | Image processing function library adapting imaginarium to node workflow |
+| `lens` | Image processing function library adapting imaginarium to node workflow |
 | `lumos` | Astrophotography library: FITS/RAW loading, stacking, star detection, registration |
 
 ## Key Architecture Patterns

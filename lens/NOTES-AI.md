@@ -1,4 +1,4 @@
-# palantir - Implementation Notes (AI)
+# lens - Implementation Notes (AI)
 
 Image processing function library adapting imaginarium operations to the node-based workflow.
 

@@ -5,7 +5,7 @@ use anyhow::Result;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use common::SerdeFormat;
-use palantir::ImageFuncLib;
+use lens::ImageFuncLib;
 use scenarium::elements::basic_funclib::BasicFuncLib;
 use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
 use scenarium::execution_graph::{self, ArgumentValues};

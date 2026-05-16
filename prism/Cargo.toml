@@ -7,7 +7,7 @@ edition.workspace = true
 common = { workspace = true }
 scenarium = { workspace = true }
 imaginarium = { workspace = true }
-palantir = { workspace = true }
+lens = { workspace = true }
 
 egui = { workspace = true }
 eframe = { workspace = true }
