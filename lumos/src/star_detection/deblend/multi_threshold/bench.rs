@@ -2,7 +2,7 @@
 //!
 //! Run with: `cargo test -p lumos --release bench_multi_threshold -- --ignored --nocapture`
 
-use ::bench::quick_bench;
+use ::quickbench::quick_bench;
 use std::hint::black_box;
 
 use super::{DeblendBuffers, deblend_multi_threshold};
@@ -61,7 +61,7 @@ fn create_components_from_pixels(
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_deblend_multi_threshold_6k_dense(b: ::bench::Bencher) {
+fn bench_deblend_multi_threshold_6k_dense(b: ::quickbench::Bencher) {
     let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
 
@@ -91,7 +91,7 @@ fn bench_deblend_multi_threshold_6k_dense(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_deblend_multi_threshold_6k_dense_fewer_levels(b: ::bench::Bencher) {
+fn bench_deblend_multi_threshold_6k_dense_fewer_levels(b: ::quickbench::Bencher) {
     let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
 
@@ -124,7 +124,7 @@ fn bench_deblend_multi_threshold_6k_dense_fewer_levels(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_multi_threshold_4k_dense(b: ::bench::Bencher) {
+fn bench_multi_threshold_4k_dense(b: ::quickbench::Bencher) {
     let pixels = generate_globular_cluster(4096, 4096, 20000, 42);
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
 

@@ -8,13 +8,13 @@ use super::{
 use crate::common::Buffer2;
 use crate::star_detection::convolution::simd::convolve_row_scalar;
 use crate::testing::synthetic::stamps::benchmark_star_field;
-use ::bench::quick_bench;
+use ::quickbench::quick_bench;
 use std::hint::black_box;
 
 // ============ Row convolution: SIMD vs Scalar ============
 
 #[quick_bench(warmup_iters = 3, iters = 10)]
-fn bench_convolve_row_4k(b: ::bench::Bencher) {
+fn bench_convolve_row_4k(b: ::quickbench::Bencher) {
     let width = 4096 * 10;
     let input: Vec<f32> = (0..width).map(|i| (i as f32 * 0.1).sin() * 100.0).collect();
     let kernel = gaussian_kernel_1d(2.0); // FWHM ~4.7 pixels
@@ -41,7 +41,7 @@ fn bench_convolve_row_4k(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 3, iters = 10)]
-fn bench_convolve_row_large_kernel(b: ::bench::Bencher) {
+fn bench_convolve_row_large_kernel(b: ::quickbench::Bencher) {
     let width = 4096;
     let input: Vec<f32> = (0..width).map(|i| (i as f32 * 0.1).sin() * 100.0).collect();
     let kernel = gaussian_kernel_1d(5.0); // Larger kernel, FWHM ~11.8 pixels
@@ -70,7 +70,7 @@ fn bench_convolve_row_large_kernel(b: ::bench::Bencher) {
 // ============ Column convolution ============
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
-fn bench_convolve_cols_1k(b: ::bench::Bencher) {
+fn bench_convolve_cols_1k(b: ::quickbench::Bencher) {
     let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
     let kernel = gaussian_kernel_1d(2.0);
     let mut output = Buffer2::new_default(1024, 1024);
@@ -85,7 +85,7 @@ fn bench_convolve_cols_1k(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_convolve_cols_4k(b: ::bench::Bencher) {
+fn bench_convolve_cols_4k(b: ::quickbench::Bencher) {
     let pixels = benchmark_star_field(4096, 4096, 500, 0.1, 0.01, 42);
     let kernel = gaussian_kernel_1d(2.0);
     let mut output = Buffer2::new_default(4096, 4096);
@@ -102,7 +102,7 @@ fn bench_convolve_cols_4k(b: ::bench::Bencher) {
 // ============ Row vs Column convolution comparison ============
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
-fn bench_row_vs_col_1k(b: ::bench::Bencher) {
+fn bench_row_vs_col_1k(b: ::quickbench::Bencher) {
     let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
     let kernel = gaussian_kernel_1d(2.0);
     let mut output = Buffer2::new_default(1024, 1024);
@@ -127,7 +127,7 @@ fn bench_row_vs_col_1k(b: ::bench::Bencher) {
 // ============ Full image convolution ============
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
-fn bench_gaussian_convolve_1k(b: ::bench::Bencher) {
+fn bench_gaussian_convolve_1k(b: ::quickbench::Bencher) {
     let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
     let mut output = Buffer2::new_default(1024, 1024);
     let mut temp = Buffer2::new_default(1024, 1024);
@@ -144,7 +144,7 @@ fn bench_gaussian_convolve_1k(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_gaussian_convolve_4k(b: ::bench::Bencher) {
+fn bench_gaussian_convolve_4k(b: ::quickbench::Bencher) {
     let pixels = benchmark_star_field(4096, 4096, 500, 0.1, 0.01, 42);
     let mut output = Buffer2::new_default(4096, 4096);
     let mut temp = Buffer2::new_default(4096, 4096);
@@ -163,7 +163,7 @@ fn bench_gaussian_convolve_4k(b: ::bench::Bencher) {
 // ============ Elliptical convolution ============
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
-fn bench_elliptical_convolve_1k(b: ::bench::Bencher) {
+fn bench_elliptical_convolve_1k(b: ::quickbench::Bencher) {
     let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
     let mut output = Buffer2::new_default(1024, 1024);
     let mut temp = Buffer2::new_default(1024, 1024);
@@ -184,7 +184,7 @@ fn bench_elliptical_convolve_1k(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
-fn bench_elliptical_vs_circular_1k(b: ::bench::Bencher) {
+fn bench_elliptical_vs_circular_1k(b: ::quickbench::Bencher) {
     let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
     let mut output = Buffer2::new_default(1024, 1024);
     let mut temp = Buffer2::new_default(1024, 1024);
@@ -214,7 +214,7 @@ fn bench_elliptical_vs_circular_1k(b: ::bench::Bencher) {
 // ============ Matched filter (full pipeline) ============
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
-fn bench_matched_filter_1k(b: ::bench::Bencher) {
+fn bench_matched_filter_1k(b: ::quickbench::Bencher) {
     let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
     let background = Buffer2::new_filled(1024, 1024, 0.1);
     let mut output = Buffer2::new_default(1024, 1024);
@@ -254,7 +254,7 @@ fn bench_matched_filter_1k(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_matched_filter_4k(b: ::bench::Bencher) {
+fn bench_matched_filter_4k(b: ::quickbench::Bencher) {
     let pixels = benchmark_star_field(4096, 4096, 500, 0.1, 0.01, 42);
     let background = Buffer2::new_filled(4096, 4096, 0.1);
     let mut output = Buffer2::new_default(4096, 4096);

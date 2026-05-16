@@ -1,11 +1,11 @@
 use std::time::Instant;
 
-use bench::quick_bench;
+use quickbench::quick_bench;
 
 use super::*;
 
 #[quick_bench(warmup_iters = 1, iters = 5)]
-fn raw_load(b: bench::Bencher) {
+fn raw_load(b: quickbench::Bencher) {
     use crate::testing::calibration_image_paths;
 
     crate::testing::init_tracing();

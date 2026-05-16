@@ -1,6 +1,6 @@
 //! Benchmarks for statistical functions.
 
-use ::bench::quick_bench;
+use ::quickbench::quick_bench;
 use std::hint::black_box;
 
 use super::*;
@@ -33,7 +33,7 @@ fn make_tile_data_with_outliers() -> Vec<f32> {
 }
 
 #[quick_bench(warmup_iters = 3, iters = 100)]
-fn bench_median_f32(b: ::bench::Bencher) {
+fn bench_median_f32(b: ::quickbench::Bencher) {
     let data = make_test_data();
 
     b.bench(|| {
@@ -43,7 +43,7 @@ fn bench_median_f32(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 3, iters = 100)]
-fn bench_sigma_clipped_median_mad(b: ::bench::Bencher) {
+fn bench_sigma_clipped_median_mad(b: ::quickbench::Bencher) {
     let data = make_test_data_with_outliers();
     let mut deviations = Vec::with_capacity(BENCH_SIZE);
 
@@ -60,7 +60,7 @@ fn bench_sigma_clipped_median_mad(b: ::bench::Bencher) {
 
 /// Benchmark sigma clipping on realistic 64x64 tile (4096 pixels, 5 iterations)
 #[quick_bench(warmup_iters = 3, iters = 100)]
-fn bench_sigma_clipped_tile_4096(b: ::bench::Bencher) {
+fn bench_sigma_clipped_tile_4096(b: ::quickbench::Bencher) {
     let data = make_tile_data_with_outliers();
     let mut deviations = Vec::with_capacity(TILE_SIZE);
 

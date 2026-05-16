@@ -1,7 +1,7 @@
 //! Benchmark module for background estimation.
 //! Run with: cargo test -p lumos --release bench_background -- --ignored --nocapture
 
-use bench::quick_bench;
+use quickbench::quick_bench;
 use std::hint::black_box;
 
 use super::tile_grid::TileGrid;
@@ -22,7 +22,7 @@ fn estimate_background_test(pixels: &Buffer2<f32>, config: &Config) -> Backgroun
 }
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
-fn bench_background_estimate_6k(b: ::bench::Bencher) {
+fn bench_background_estimate_6k(b: ::quickbench::Bencher) {
     let width = 6144;
     let height = 6144;
     let num_stars = (width * height) / 1000;
@@ -42,7 +42,7 @@ fn bench_background_estimate_6k(b: ::bench::Bencher) {
 const BENCH_SIGMA_CLIP_ITERATIONS: usize = 2;
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
-fn bench_tile_grid_6k_globular(b: ::bench::Bencher) {
+fn bench_tile_grid_6k_globular(b: ::quickbench::Bencher) {
     let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
     let mut grid = TileGrid::new_uninit(pixels.width(), pixels.height(), 64);
 
@@ -53,7 +53,7 @@ fn bench_tile_grid_6k_globular(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 2, iters = 50)]
-fn bench_tile_grid_6k_with_mask(b: ::bench::Bencher) {
+fn bench_tile_grid_6k_with_mask(b: ::quickbench::Bencher) {
     let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
 
     // Create mask from actual bright pixels (threshold at 0.1)

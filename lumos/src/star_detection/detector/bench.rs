@@ -2,7 +2,7 @@
 //!
 //! Run with: `cargo test -p lumos --release bench_star_detection -- --ignored --nocapture`
 
-use ::bench::quick_bench;
+use ::quickbench::quick_bench;
 use std::hint::black_box;
 
 use crate::astro_image::ImageDimensions;
@@ -14,7 +14,7 @@ use crate::testing::synthetic::generate_globular_cluster;
 use crate::{AstroImage, StarDetector};
 
 #[quick_bench(warmup_iters = 3, iters = 10)]
-fn bench_detect_6k_globular_cluster(b: ::bench::Bencher) {
+fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {
     init_tracing();
 
     // 6K globular cluster with 50000 stars - extreme crowding
@@ -71,7 +71,7 @@ fn bench_detect_6k_globular_cluster(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_detect_4k_dense(b: ::bench::Bencher) {
+fn bench_detect_4k_dense(b: ::quickbench::Bencher) {
     use crate::testing::synthetic::stamps::benchmark_star_field;
 
     // 4K image with 2000 stars
@@ -86,7 +86,7 @@ fn bench_detect_4k_dense(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
-fn bench_detect_1k_sparse(b: ::bench::Bencher) {
+fn bench_detect_1k_sparse(b: ::quickbench::Bencher) {
     use crate::testing::synthetic::stamps::benchmark_star_field;
 
     // 1K image with 100 stars (sparse field)
@@ -107,7 +107,7 @@ fn bench_detect_1k_sparse(b: ::bench::Bencher) {
 /// Benchmark remove_duplicate_stars with varying star counts.
 /// Simulates dense star field scenario similar to rho-opiuchi detection.
 #[quick_bench(warmup_iters = 5, iters = 20)]
-fn bench_remove_duplicate_stars_5000(b: ::bench::Bencher) {
+fn bench_remove_duplicate_stars_5000(b: ::quickbench::Bencher) {
     use super::stages::filter::remove_duplicate_stars;
     use crate::star_detection::Star;
     use rand::prelude::*;
@@ -137,7 +137,7 @@ fn bench_remove_duplicate_stars_5000(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 5, iters = 20)]
-fn bench_remove_duplicate_stars_10000(b: ::bench::Bencher) {
+fn bench_remove_duplicate_stars_10000(b: ::quickbench::Bencher) {
     use super::stages::filter::remove_duplicate_stars;
     use crate::star_detection::Star;
     use rand::prelude::*;

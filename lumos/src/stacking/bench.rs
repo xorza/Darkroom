@@ -2,7 +2,7 @@
 //!
 //! Run with: `cargo test -p lumos --release bench_stack -- --ignored --nocapture`
 
-use bench::quick_bench;
+use quickbench::quick_bench;
 use std::hint::black_box;
 
 use crate::astro_image::{AstroImage, ImageDimensions};
@@ -172,7 +172,7 @@ fn make_light_frames(count: usize) -> Vec<AstroImage> {
 // ========== Bias Stacking Benchmarks ==========
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_stack_bias_10(b: ::bench::Bencher) {
+fn bench_stack_bias_10(b: ::quickbench::Bencher) {
     let frames = make_bias_frames(10);
     let cache = make_test_cache(frames);
     let config = StackConfig::bias();
@@ -181,7 +181,7 @@ fn bench_stack_bias_10(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_stack_bias_30(b: ::bench::Bencher) {
+fn bench_stack_bias_30(b: ::quickbench::Bencher) {
     let frames = make_bias_frames(30);
     let cache = make_test_cache(frames);
     let config = StackConfig::bias();
@@ -190,7 +190,7 @@ fn bench_stack_bias_30(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_stack_bias_100(b: ::bench::Bencher) {
+fn bench_stack_bias_100(b: ::quickbench::Bencher) {
     let frames = make_bias_frames(100);
     let cache = make_test_cache(frames);
     let config = StackConfig::bias();
@@ -201,7 +201,7 @@ fn bench_stack_bias_100(b: ::bench::Bencher) {
 // ========== Dark Stacking Benchmarks ==========
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_stack_dark_10(b: ::bench::Bencher) {
+fn bench_stack_dark_10(b: ::quickbench::Bencher) {
     let frames = make_dark_frames(10);
     let cache = make_test_cache(frames);
     let config = StackConfig::dark();
@@ -210,7 +210,7 @@ fn bench_stack_dark_10(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_stack_dark_30(b: ::bench::Bencher) {
+fn bench_stack_dark_30(b: ::quickbench::Bencher) {
     let frames = make_dark_frames(30);
     let cache = make_test_cache(frames);
     let config = StackConfig::dark();
@@ -219,7 +219,7 @@ fn bench_stack_dark_30(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_stack_dark_100(b: ::bench::Bencher) {
+fn bench_stack_dark_100(b: ::quickbench::Bencher) {
     let frames = make_dark_frames(100);
     let cache = make_test_cache(frames);
     let config = StackConfig::dark();
@@ -230,7 +230,7 @@ fn bench_stack_dark_100(b: ::bench::Bencher) {
 // ========== Flat Stacking Benchmarks ==========
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_stack_flat_10(b: ::bench::Bencher) {
+fn bench_stack_flat_10(b: ::quickbench::Bencher) {
     let frames = make_flat_frames(10);
     let cache = make_test_cache(frames);
     let config = StackConfig::flat();
@@ -239,7 +239,7 @@ fn bench_stack_flat_10(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_stack_flat_30(b: ::bench::Bencher) {
+fn bench_stack_flat_30(b: ::quickbench::Bencher) {
     let frames = make_flat_frames(30);
     let cache = make_test_cache(frames);
     let config = StackConfig::flat();
@@ -248,7 +248,7 @@ fn bench_stack_flat_30(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_stack_flat_100(b: ::bench::Bencher) {
+fn bench_stack_flat_100(b: ::quickbench::Bencher) {
     let frames = make_flat_frames(100);
     let cache = make_test_cache(frames);
     let config = StackConfig::flat();
@@ -259,7 +259,7 @@ fn bench_stack_flat_100(b: ::bench::Bencher) {
 // ========== Light Stacking Benchmarks ==========
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_stack_light_10(b: ::bench::Bencher) {
+fn bench_stack_light_10(b: ::quickbench::Bencher) {
     let frames = make_light_frames(10);
     let cache = make_test_cache(frames);
     let config = StackConfig::light();
@@ -268,7 +268,7 @@ fn bench_stack_light_10(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_stack_light_30(b: ::bench::Bencher) {
+fn bench_stack_light_30(b: ::quickbench::Bencher) {
     let frames = make_light_frames(30);
     let cache = make_test_cache(frames);
     let config = StackConfig::light();
@@ -277,7 +277,7 @@ fn bench_stack_light_30(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_stack_light_100(b: ::bench::Bencher) {
+fn bench_stack_light_100(b: ::quickbench::Bencher) {
     let frames = make_light_frames(100);
     let cache = make_test_cache(frames);
     let config = StackConfig::light();

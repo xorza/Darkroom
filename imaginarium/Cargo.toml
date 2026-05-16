@@ -22,4 +22,4 @@ atomic_refcell.workspace = true
 tokio.workspace = true
 aligned-vec.workspace = true
 [dev-dependencies]
-bench.workspace = true
+quickbench.workspace = true

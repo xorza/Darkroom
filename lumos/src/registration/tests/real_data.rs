@@ -7,7 +7,7 @@
 use std::hint::black_box;
 use std::path::PathBuf;
 
-use ::bench::quick_bench;
+use ::quickbench::quick_bench;
 
 use crate::AstroImage;
 use crate::registration::config::Config as RegistrationConfig;
@@ -275,7 +275,7 @@ fn load_all_calibrated_lights() -> Option<(Vec<AstroImage>, Vec<PathBuf>)> {
 }
 
 #[quick_bench(warmup_iters = 0, iters = 1)]
-fn bench_register_and_warp_all(b: ::bench::Bencher) {
+fn bench_register_and_warp_all(b: ::quickbench::Bencher) {
     let Some((images, paths)) = load_all_calibrated_lights() else {
         eprintln!("No calibration data available, skipping benchmark");
         return;
@@ -354,7 +354,7 @@ fn bench_register_and_warp_all(b: ::bench::Bencher) {
 // ============================================================================
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_star_detection_calibrated_light(b: ::bench::Bencher) {
+fn bench_star_detection_calibrated_light(b: ::quickbench::Bencher) {
     let Some(image) = load_first_calibrated_light() else {
         eprintln!("No calibration data available, skipping benchmark");
         return;
@@ -367,7 +367,7 @@ fn bench_star_detection_calibrated_light(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 3, iters = 30)]
-fn bench_register_stars(b: ::bench::Bencher) {
+fn bench_register_stars(b: ::quickbench::Bencher) {
     let Some((img1, img2)) = load_two_calibrated_lights() else {
         eprintln!("No calibration data available, skipping benchmark");
         return;
@@ -391,7 +391,7 @@ fn bench_register_stars(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 1, iters = 5)]
-fn bench_warp(b: ::bench::Bencher) {
+fn bench_warp(b: ::quickbench::Bencher) {
     let Some((img1, img2)) = load_two_calibrated_lights() else {
         eprintln!("No calibration data available, skipping benchmark");
         return;

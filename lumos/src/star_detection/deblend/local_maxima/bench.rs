@@ -2,7 +2,7 @@
 //!
 //! Run with: `cargo test -p lumos --release bench_local_maxima -- --ignored --nocapture`
 
-use ::bench::quick_bench;
+use ::quickbench::quick_bench;
 use std::hint::black_box;
 
 use super::{deblend_local_maxima, find_local_maxima};
@@ -61,7 +61,7 @@ fn create_components_from_pixels(
 }
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
-fn bench_find_local_maxima_6k_dense(b: ::bench::Bencher) {
+fn bench_find_local_maxima_6k_dense(b: ::quickbench::Bencher) {
     let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
 
@@ -84,7 +84,7 @@ fn bench_find_local_maxima_6k_dense(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
-fn bench_deblend_local_maxima_6k_dense(b: ::bench::Bencher) {
+fn bench_deblend_local_maxima_6k_dense(b: ::quickbench::Bencher) {
     let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
 
@@ -102,7 +102,7 @@ fn bench_deblend_local_maxima_6k_dense(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
-fn bench_local_maxima_4k_dense(b: ::bench::Bencher) {
+fn bench_local_maxima_4k_dense(b: ::quickbench::Bencher) {
     let pixels = generate_globular_cluster(4096, 4096, 20000, 42);
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
 

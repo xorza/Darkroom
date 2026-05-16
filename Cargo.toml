@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "bench",
     "common",
     "scenarium",
     "prism",
@@ -22,7 +21,7 @@ unused_imports = "allow"
 
 [workspace.dependencies]
 common = { path = "common" }
-bench = { path = "bench" }
+quickbench = "0.1"
 scenarium = { path = "scenarium" }
 prism = { path = "prism" }
 imaginarium = { path = "imaginarium" }

@@ -2,7 +2,7 @@
 //!
 //! Run with: `cargo test -p lumos --release bench_centroid -- --ignored --nocapture`
 
-use ::bench::quick_bench;
+use ::quickbench::quick_bench;
 use glam::Vec2;
 use std::hint::black_box;
 
@@ -23,7 +23,7 @@ use crate::testing::synthetic::stamps::benchmark_star_field;
 // =============================================================================
 
 #[quick_bench(warmup_iters = 100, iters = 10000)]
-fn bench_measure_star_single(b: ::bench::Bencher) {
+fn bench_measure_star_single(b: ::quickbench::Bencher) {
     // Single star centroid computation with WeightedMoments
     let width = 64;
     let height = 64;
@@ -47,7 +47,7 @@ fn bench_measure_star_single(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 100, iters = 10000)]
-fn bench_measure_star_gaussian_fit(b: ::bench::Bencher) {
+fn bench_measure_star_gaussian_fit(b: ::quickbench::Bencher) {
     // Single star centroid with Gaussian fitting
     let width = 64;
     let height = 64;
@@ -71,7 +71,7 @@ fn bench_measure_star_gaussian_fit(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 100, iters = 10000)]
-fn bench_measure_star_moffat_fit(b: ::bench::Bencher) {
+fn bench_measure_star_moffat_fit(b: ::quickbench::Bencher) {
     // Single star centroid with Moffat fitting
     let width = 64;
     let height = 64;
@@ -95,7 +95,7 @@ fn bench_measure_star_moffat_fit(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 100, iters = 10000)]
-fn bench_measure_star_local_annulus(b: ::bench::Bencher) {
+fn bench_measure_star_local_annulus(b: ::quickbench::Bencher) {
     // Single star centroid with LocalAnnulus background
     let width = 128;
     let height = 128;
@@ -124,7 +124,7 @@ fn bench_measure_star_local_annulus(b: ::bench::Bencher) {
 // =============================================================================
 
 #[quick_bench(warmup_iters = 5, iters = 200)]
-fn bench_measure_star_batch_100(b: ::bench::Bencher) {
+fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
     // 100 stars batch processing with WeightedMoments
     let pixels = benchmark_star_field(512, 512, 100, 0.1, 0.01, 42);
     let bg = crate::testing::estimate_background(&pixels, &Config::default());
@@ -145,7 +145,7 @@ fn bench_measure_star_batch_100(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
-fn bench_measure_star_batch_6k_10000(b: ::bench::Bencher) {
+fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     // 2000 stars on 4K image - compare all centroid methods
     let pixels = benchmark_star_field(6144, 6144, 10000, 0.1, 0.01, 42);
     let bg = crate::testing::estimate_background(&pixels, &Config::default());
@@ -195,7 +195,7 @@ fn bench_measure_star_batch_6k_10000(b: ::bench::Bencher) {
 // =============================================================================
 
 #[quick_bench(warmup_iters = 10, iters = 10000)]
-fn bench_refine_centroid_single(b: ::bench::Bencher) {
+fn bench_refine_centroid_single(b: ::quickbench::Bencher) {
     // Single refine_centroid call - isolates the exp() hot path
     let width = 64;
     let height = 64;
@@ -218,7 +218,7 @@ fn bench_refine_centroid_single(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 10, iters = 1000)]
-fn bench_refine_centroid_batch_1000(b: ::bench::Bencher) {
+fn bench_refine_centroid_batch_1000(b: ::quickbench::Bencher) {
     // 1000 refine_centroid calls to amplify exp() cost
     let width = 64;
     let height = 64;
@@ -247,7 +247,7 @@ fn bench_refine_centroid_batch_1000(b: ::bench::Bencher) {
 // =============================================================================
 
 #[quick_bench(warmup_iters = 100, iters = 10000)]
-fn bench_gaussian_fit_single(b: ::bench::Bencher) {
+fn bench_gaussian_fit_single(b: ::quickbench::Bencher) {
     // Single Gaussian fit (L-M optimization only)
     let width = 21;
     let height = 21;
@@ -280,7 +280,7 @@ fn bench_gaussian_fit_single(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 100, iters = 10000)]
-fn bench_moffat_fit_single(b: ::bench::Bencher) {
+fn bench_moffat_fit_single(b: ::quickbench::Bencher) {
     // Single Moffat fit (L-M optimization only)
     let width = 21;
     let height = 21;
@@ -316,7 +316,7 @@ fn bench_moffat_fit_single(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 100, iters = 10000)]
-fn bench_moffat_fit_variable_beta(b: ::bench::Bencher) {
+fn bench_moffat_fit_variable_beta(b: ::quickbench::Bencher) {
     // Single Moffat fit with variable beta (6-parameter fit)
     let width = 21;
     let height = 21;

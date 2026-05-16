@@ -4,7 +4,7 @@ use super::{
     process_words, process_words_filtered, process_words_filtered_scalar, process_words_scalar,
 };
 use crate::common::{BitBuffer2, Buffer2};
-use ::bench::quick_bench;
+use ::quickbench::quick_bench;
 use std::hint::black_box;
 
 fn create_bench_data(size: usize) -> (Buffer2<f32>, Buffer2<f32>, Buffer2<f32>) {
@@ -30,7 +30,7 @@ fn create_bench_data(size: usize) -> (Buffer2<f32>, Buffer2<f32>, Buffer2<f32>) 
 }
 
 #[quick_bench(warmup_iters = 3, iters = 200)]
-fn bench_threshold_mask_4k(b: ::bench::Bencher) {
+fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
     let (pixels, bg, noise) = create_bench_data(4096 * 4096);
     let mut mask = BitBuffer2::new_filled(4096, 4096, false);
     let pixel_end = pixels.len();

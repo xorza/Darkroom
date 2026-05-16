@@ -37,5 +37,5 @@ smallvec = { workspace = true }
 parking_lot = { workspace = true }
 
 [dev-dependencies]
-bench = { workspace = true }
+quickbench = { workspace = true }
 image = { workspace = true }

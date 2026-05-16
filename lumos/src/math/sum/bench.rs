@@ -1,6 +1,6 @@
 //! Benchmarks comparing scalar vs SIMD sum operations.
 
-use ::bench::quick_bench;
+use ::quickbench::quick_bench;
 use std::hint::black_box;
 
 use super::scalar;
@@ -18,7 +18,7 @@ fn make_weights() -> Vec<f32> {
 }
 
 #[quick_bench(warmup_iters = 3, iters = 100)]
-fn bench_sum_f32(b: ::bench::Bencher) {
+fn bench_sum_f32(b: ::quickbench::Bencher) {
     let data = make_test_data();
 
     b.bench_labeled("scalar", || black_box(scalar::sum_f32(black_box(&data))));
@@ -26,7 +26,7 @@ fn bench_sum_f32(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 3, iters = 100)]
-fn bench_weighted_mean_f32(b: ::bench::Bencher) {
+fn bench_weighted_mean_f32(b: ::quickbench::Bencher) {
     let data = make_test_data();
     let weights = make_weights();
 

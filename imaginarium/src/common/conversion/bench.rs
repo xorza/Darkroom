@@ -3,7 +3,7 @@
 use super::conversion_scalar::{ConversionInfo, dispatch_convert_row_scalar};
 use super::conversion_simd::get_simd_row_converter;
 use crate::common::color_format::ColorFormat;
-use bench::quick_bench;
+use quickbench::quick_bench;
 use std::hint::black_box;
 
 const WIDTH_4K: usize = 4096;
@@ -74,7 +74,7 @@ const CONVERSION_PAIRS: &[(ColorFormat, ColorFormat)] = &[
 ];
 
 #[quick_bench(warmup_iters = 3, iters = 20)]
-fn bench_row_conversions(b: bench::Bencher) {
+fn bench_row_conversions(b: quickbench::Bencher) {
     for &(from_fmt, to_fmt) in CONVERSION_PAIRS {
         let src = create_row_for_format(WIDTH_4K, from_fmt);
         let dst_size = WIDTH_4K * to_fmt.byte_count() as usize;

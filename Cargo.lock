@@ -336,22 +336,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
-name = "bench"
-version = "0.1.0"
-dependencies = [
- "bench-macros",
- "named-lock",
-]
-
-[[package]]
-name = "bench-macros"
-version = "0.1.0"
-dependencies = [
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "bit-set"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2110,7 +2094,6 @@ version = "0.1.0"
 dependencies = [
  "aligned-vec",
  "atomic_refcell",
- "bench",
  "bytemuck",
  "common",
  "glam 0.32.1",
@@ -2118,6 +2101,7 @@ dependencies = [
  "image",
  "paste",
  "pollster",
+ "quickbench",
  "rayon",
  "strum 0.28.0",
  "strum_macros 0.28.0",
@@ -2473,7 +2457,6 @@ name = "lumos"
 version = "0.1.0"
 dependencies = [
  "arrayvec",
- "bench",
  "bytemuck",
  "common",
  "fitsio",
@@ -2484,6 +2467,7 @@ dependencies = [
  "memmap2",
  "nalgebra",
  "parking_lot",
+ "quickbench",
  "rand 0.10.1",
  "rand_chacha 0.10.0",
  "rayon",
@@ -3660,6 +3644,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "958f21e8e7ceb5a1aa7fa87fab28e7c75976e0bfe7e23ff069e0a260f894067d"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "quickbench"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09adf1a52843e61108d4f548b374183edac593cecd8aac831b06d6d7e87abe0c"
+dependencies = [
+ "named-lock",
+ "quickbench-macros",
+]
+
+[[package]]
+name = "quickbench-macros"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0fae68b2825d32f89164602867388b2b67b0ac1f4d43a1308f1d704c858e591"
+dependencies = [
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]

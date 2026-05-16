@@ -2,7 +2,7 @@
 
 use std::hint::black_box;
 
-use ::bench::quick_bench;
+use ::quickbench::quick_bench;
 
 use super::*;
 use crate::common::Buffer2;
@@ -40,7 +40,7 @@ fn create_test_transform() -> Transform {
 // ============================================================================
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
-fn bench_warp_lanczos3_1k(b: bench::Bencher) {
+fn bench_warp_lanczos3_1k(b: quickbench::Bencher) {
     let input = create_test_image(1024, 1024);
     let mut output = Buffer2::new_default(1024, 1024);
     let transform = create_test_transform();
@@ -56,7 +56,7 @@ fn bench_warp_lanczos3_1k(b: bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 1, iters = 5)]
-fn bench_warp_lanczos3_2k(b: bench::Bencher) {
+fn bench_warp_lanczos3_2k(b: quickbench::Bencher) {
     let input = create_test_image(2048, 2048);
     let mut output = Buffer2::new_default(2048, 2048);
     let transform = create_test_transform();
@@ -72,7 +72,7 @@ fn bench_warp_lanczos3_2k(b: bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_warp_lanczos3_4k(b: bench::Bencher) {
+fn bench_warp_lanczos3_4k(b: quickbench::Bencher) {
     let input = create_test_image(4096, 4096);
     let mut output = Buffer2::new_default(4096, 4096);
     let transform = create_test_transform();
@@ -92,7 +92,7 @@ fn bench_warp_lanczos3_4k(b: bench::Bencher) {
 // ============================================================================
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
-fn bench_warp_bilinear_2k(b: bench::Bencher) {
+fn bench_warp_bilinear_2k(b: quickbench::Bencher) {
     let input = create_test_image(2048, 2048);
     let mut output = Buffer2::new_default(2048, 2048);
     let transform = create_test_transform();
@@ -113,7 +113,7 @@ fn bench_warp_bilinear_2k(b: bench::Bencher) {
 
 /// Single-threaded 1k warp to measure per-thread throughput without rayon overhead.
 #[quick_bench(warmup_iters = 3, iters = 10)]
-fn bench_warp_lanczos3_1k_single_thread(b: bench::Bencher) {
+fn bench_warp_lanczos3_1k_single_thread(b: quickbench::Bencher) {
     let input = create_test_image(1024, 1024);
     let mut output = Buffer2::new_default(1024, 1024);
     let transform = create_test_transform();
@@ -134,7 +134,7 @@ fn bench_warp_lanczos3_1k_single_thread(b: bench::Bencher) {
 
 /// Single-threaded 1k warp WITHOUT deringing, to measure soft-clamp overhead.
 #[quick_bench(warmup_iters = 3, iters = 10)]
-fn bench_warp_lanczos3_1k_no_dering(b: bench::Bencher) {
+fn bench_warp_lanczos3_1k_no_dering(b: quickbench::Bencher) {
     let input = create_test_image(1024, 1024);
     let mut output = Buffer2::new_default(1024, 1024);
     let transform = create_test_transform();
@@ -158,7 +158,7 @@ fn bench_warp_lanczos3_1k_no_dering(b: bench::Bencher) {
 // ============================================================================
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
-fn bench_warp_bicubic_2k(b: bench::Bencher) {
+fn bench_warp_bicubic_2k(b: quickbench::Bencher) {
     let input = create_test_image(2048, 2048);
     let mut output = Buffer2::new_default(2048, 2048);
     let transform = create_test_transform();
@@ -174,7 +174,7 @@ fn bench_warp_bicubic_2k(b: bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
-fn bench_warp_lanczos4_2k(b: bench::Bencher) {
+fn bench_warp_lanczos4_2k(b: quickbench::Bencher) {
     let input = create_test_image(2048, 2048);
     let mut output = Buffer2::new_default(2048, 2048);
     let transform = create_test_transform();
@@ -190,7 +190,7 @@ fn bench_warp_lanczos4_2k(b: bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
-fn bench_warp_lanczos2_2k(b: bench::Bencher) {
+fn bench_warp_lanczos2_2k(b: quickbench::Bencher) {
     let input = create_test_image(2048, 2048);
     let mut output = Buffer2::new_default(2048, 2048);
     let transform = create_test_transform();
@@ -210,7 +210,7 @@ fn bench_warp_lanczos2_2k(b: bench::Bencher) {
 // ============================================================================
 
 #[quick_bench(warmup_iters = 3, iters = 20)]
-fn bench_lut_lookup(b: bench::Bencher) {
+fn bench_lut_lookup(b: quickbench::Bencher) {
     let lut = get_lanczos_lut(3);
     let test_values: Vec<f32> = (0..1000).map(|i| (i as f32 / 1000.0) * 3.0 - 1.5).collect();
 
@@ -224,7 +224,7 @@ fn bench_lut_lookup(b: bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 3, iters = 20)]
-fn bench_interpolate_lanczos3_single(b: bench::Bencher) {
+fn bench_interpolate_lanczos3_single(b: quickbench::Bencher) {
     let input = create_test_image(256, 256);
     // Test positions near center
     let positions: Vec<(f32, f32)> = (0..1000)

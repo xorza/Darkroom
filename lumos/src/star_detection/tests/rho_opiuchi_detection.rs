@@ -289,8 +289,8 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     println!("\nAll intermediate images saved to test_output/rho-opiuchi-inspect/");
 }
 
-#[bench::quick_bench(warmup_iters = 1, iters = 10)]
-fn quick_bench_detect_rho_opiuchi(b: bench::Bencher) {
+#[quickbench::quick_bench(warmup_iters = 1, iters = 10)]
+fn quick_bench_detect_rho_opiuchi(b: quickbench::Bencher) {
     let Some(cal_dir) = calibration_dir() else {
         eprintln!("LUMOS_CALIBRATION_DIR not set, skipping bench");
         return;

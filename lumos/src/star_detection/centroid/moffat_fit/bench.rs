@@ -2,7 +2,7 @@
 //!
 //! Run with: `cargo test -p lumos --release bench_moffat -- --ignored --nocapture`
 
-use bench::quick_bench;
+use quickbench::quick_bench;
 use std::hint::black_box;
 
 use super::{MoffatFitConfig, fit_moffat_2d};
@@ -10,7 +10,7 @@ use crate::star_detection::centroid::test_utils::make_moffat_star;
 use glam::Vec2;
 
 #[quick_bench(warmup_iters = 100, iters = 10000)]
-fn bench_moffat_fit_fixed_beta_small(b: bench::Bencher) {
+fn bench_moffat_fit_fixed_beta_small(b: quickbench::Bencher) {
     // 17x17 stamp
     let pixels = make_moffat_star(17, 17, Vec2::new(8.3, 8.7), 2.5, 2.5, 1.0, 0.1);
     let config = MoffatFitConfig {
@@ -31,7 +31,7 @@ fn bench_moffat_fit_fixed_beta_small(b: bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 100, iters = 10000)]
-fn bench_moffat_fit_fixed_beta_medium(b: bench::Bencher) {
+fn bench_moffat_fit_fixed_beta_medium(b: quickbench::Bencher) {
     // 25x25 stamp
     let pixels = make_moffat_star(25, 25, Vec2::new(12.3, 12.7), 2.5, 2.5, 1.0, 0.1);
     let config = MoffatFitConfig {
@@ -52,7 +52,7 @@ fn bench_moffat_fit_fixed_beta_medium(b: bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 100, iters = 10000)]
-fn bench_moffat_fit_variable_beta(b: bench::Bencher) {
+fn bench_moffat_fit_variable_beta(b: quickbench::Bencher) {
     // 21x21 stamp with variable beta
     let pixels = make_moffat_star(21, 21, Vec2::new(10.3, 10.7), 2.5, 2.5, 1.0, 0.1);
     let config = MoffatFitConfig {
