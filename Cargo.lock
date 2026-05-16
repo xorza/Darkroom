@@ -985,6 +985,7 @@ dependencies = [
  "tracing-rolling-file",
  "tracing-subscriber",
  "uuid",
+ "wgpu",
 ]
 
 [[package]]
