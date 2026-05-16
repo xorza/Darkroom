@@ -12,7 +12,7 @@ const NODE_W: f32 = 160.0;
 const NODE_H: f32 = 70.0;
 const CONN_WIDTH: f32 = 2.0;
 
-pub fn build(ui: &mut Ui<()>, view_graph: &ViewGraph) {
+pub fn build(ui: &mut Ui, view_graph: &ViewGraph) {
     Panel::canvas()
         .id_salt("graph.canvas")
         .size((Sizing::FILL, Sizing::FILL))
@@ -31,7 +31,7 @@ pub fn build(ui: &mut Ui<()>, view_graph: &ViewGraph) {
         });
 }
 
-fn draw_connections(ui: &mut Ui<()>, view_graph: &ViewGraph, positions: &HashMap<NodeId, Vec2>) {
+fn draw_connections(ui: &mut Ui, view_graph: &ViewGraph, positions: &HashMap<NodeId, Vec2>) {
     let color = Color::hex(0x9ec1ff);
     for node in view_graph.graph.iter() {
         let Some(&tgt_pos) = positions.get(&node.id) else {
@@ -62,7 +62,7 @@ fn draw_connections(ui: &mut Ui<()>, view_graph: &ViewGraph, positions: &HashMap
     }
 }
 
-fn draw_nodes(ui: &mut Ui<()>, view_graph: &ViewGraph) {
+fn draw_nodes(ui: &mut Ui, view_graph: &ViewGraph) {
     let bg = Background {
         fill: Color::hex(0x2d2d33).into(),
         stroke: Stroke::solid(Color::hex(0x5a5a66), 1.0),
