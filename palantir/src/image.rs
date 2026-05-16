@@ -87,7 +87,7 @@ impl CustomValue for Image {
     }
 
     fn gen_preview(&self, ctx_manager: &mut ContextManager) -> Option<Box<dyn PendingPreview>> {
-        let desc = self.buffer.desc();
+        let desc = self.buffer.desc;
         let max_dim = desc.width.max(desc.height);
 
         let scale = if max_dim <= PREVIEW_SIZE {
@@ -162,7 +162,7 @@ impl CustomValue for Image {
 
 impl std::fmt::Display for Image {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.buffer.desc())
+        write!(f, "{}", self.buffer.desc)
     }
 }
 

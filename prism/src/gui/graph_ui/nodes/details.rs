@@ -266,7 +266,7 @@ fn cache_previews<'a>(
             continue;
         };
 
-        let desc = *preview.desc();
+        let desc = preview.desc;
         let texture_handle = Texture::new(
             format!("node_preview_{node_id}_{prefix}_{idx}"),
             to_color_image(preview),

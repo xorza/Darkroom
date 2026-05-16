@@ -3,7 +3,6 @@ members = [
     "common",
     "scenarium",
     "prism",
-    "imaginarium",
     "palantir",
     "lumos"
 ]
@@ -24,7 +23,7 @@ common = { path = "common" }
 quickbench = "0.1"
 scenarium = { path = "scenarium" }
 prism = { path = "prism" }
-imaginarium = { path = "imaginarium" }
+imaginarium = { git = "https://github.com/xorza/Imaginarium", features = ["wgpu"] }
 palantir = { path = "palantir" }
 
 # wgpu version should be in sync with egui

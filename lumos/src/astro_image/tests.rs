@@ -20,7 +20,7 @@ fn test_convert_to_imaginarium_image_grayscale() {
     );
 
     let image: Image = astro.into();
-    let desc = image.desc();
+    let desc = image.desc;
 
     assert_eq!(desc.width, 3);
     assert_eq!(desc.height, 2);
@@ -46,7 +46,7 @@ fn test_convert_to_imaginarium_image_rgb() {
     );
 
     let image: Image = astro.into();
-    let desc = image.desc();
+    let desc = image.desc;
 
     assert_eq!(desc.width, 2);
     assert_eq!(desc.height, 2);
@@ -71,7 +71,7 @@ fn test_convert_fits_to_imaginarium_image() {
     let astro = AstroImage::from_file(path).unwrap();
     let image: Image = astro.into();
 
-    let desc = image.desc();
+    let desc = image.desc;
     assert_eq!(desc.width, 100);
     assert_eq!(desc.height, 100);
     assert_eq!(desc.color_format, ColorFormat::L_F32);

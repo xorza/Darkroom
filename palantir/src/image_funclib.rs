@@ -87,7 +87,7 @@ impl Default for ImageFuncLib {
                     let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 
                     let mut output_buffer =
-                        imaginarium::ImageBuffer::new_empty(*input_image.desc());
+                        imaginarium::ImageBuffer::new_empty(input_image.desc);
 
                     ContrastBrightness::new(contrast, brightness)
                         .execute(&mut vision_ctx.processing_ctx, input_image, &mut output_buffer)
@@ -308,7 +308,7 @@ impl Default for ImageFuncLib {
 
                     let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 
-                    let mut output_buffer = imaginarium::ImageBuffer::new_empty(*src_image.desc());
+                    let mut output_buffer = imaginarium::ImageBuffer::new_empty(src_image.desc);
 
                     Blend::new(blend_mode, alpha)
                         .execute(
@@ -400,11 +400,11 @@ impl Default for ImageFuncLib {
                     let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 
                     let mut output_buffer =
-                        imaginarium::ImageBuffer::new_empty(*input_image.desc());
+                        imaginarium::ImageBuffer::new_empty(input_image.desc);
 
                     let center = Vec2::new(
-                        input_image.desc().width as f32 / 2.0,
-                        input_image.desc().height as f32 / 2.0,
+                        input_image.desc.width as f32 / 2.0,
+                        input_image.desc.height as f32 / 2.0,
                     );
 
                     Transform::new()

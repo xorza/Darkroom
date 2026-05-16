@@ -33,7 +33,7 @@ pub fn gray_to_rgb_image_stretched(pixels: &[f32], width: usize, height: usize) 
 /// Converts to RGB_U8 if needed since some formats don't support float data.
 pub fn save_image(image: Image, path: &Path) {
     let out = output_path(path);
-    let image_u8 = if image.desc().color_format.channel_type == imaginarium::ChannelType::Float {
+    let image_u8 = if image.desc.color_format.channel_type == imaginarium::ChannelType::Float {
         image.convert(ColorFormat::RGB_U8).unwrap()
     } else {
         image

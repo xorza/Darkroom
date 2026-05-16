@@ -640,7 +640,7 @@ impl From<AstroImage> for Image {
 
 impl From<Image> for AstroImage {
     fn from(image: Image) -> Self {
-        let desc = image.desc();
+        let desc = image.desc;
 
         let target_format = match desc.color_format.channel_count {
             ChannelCount::L | ChannelCount::LA => ColorFormat::L_F32,
@@ -651,7 +651,7 @@ impl From<Image> for AstroImage {
             .convert(target_format)
             .expect("Failed to convert image to f32");
 
-        let desc = image.desc();
+        let desc = image.desc;
         let width = desc.width;
         let height = desc.height;
         let stride_f32 = desc.stride / std::mem::size_of::<f32>();

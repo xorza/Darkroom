@@ -27,15 +27,6 @@ retries = 0
 fail-fast = false
 slow-timeout = { period = "30s", terminate-after = 2 }
 
-# GPU tests need single-threaded execution to share GPU context
-[[profile.default.overrides]]
-filter = "package(imaginarium) & test(/gpu/)"
-threads-required = 1
-
-[[profile.ci.overrides]]
-filter = "package(imaginarium) & test(/gpu/)"
-threads-required = 1
-
 # Real-data stacking tests process large RAW files and need more time
 [[profile.default.overrides]]
 filter = "package(lumos) & test(/stacking::tests::real_data/)"

@@ -2091,20 +2091,21 @@ dependencies = [
 [[package]]
 name = "imaginarium"
 version = "0.1.0"
+source = "git+https://github.com/xorza/Imaginarium#df0e637b443dd24bf416f9258a278a6408e56d9d"
 dependencies = [
  "aligned-vec",
+ "arc-swap",
  "atomic_refcell",
  "bytemuck",
- "common",
  "glam 0.32.1",
  "hashbrown 0.17.1",
  "image",
  "paste",
  "pollster",
- "quickbench",
  "rayon",
  "strum 0.28.0",
  "strum_macros 0.28.0",
+ "thiserror 2.0.18",
  "tiff",
  "tokio",
  "tracing",

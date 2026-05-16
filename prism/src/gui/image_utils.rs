@@ -6,12 +6,12 @@ use imaginarium::{ColorFormat, Image};
 /// The image must be in RGBA_U8 format.
 pub fn to_color_image(image: Image) -> ColorImage {
     assert_eq!(
-        image.desc().color_format,
+        image.desc.color_format,
         ColorFormat::RGBA_U8,
         "Image must be RGBA_U8 format"
     );
 
-    let desc = *image.desc();
+    let desc = image.desc;
     let size = [desc.width, desc.height];
 
     // Copy rather than reinterpret: `Vec<u8>` is align-1, `Color32` is
