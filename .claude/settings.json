@@ -5,8 +5,7 @@
       "Bash(cargo check *)",
       "Bash(rustc --version)",
       "Read(//tmp/**)",
-      "Bash(scc imaginarium/src/)",
-
+      "Bash(scc *)",
       "Bash(xargs sd *)",
       "Bash(cargo fmt *)",
       "Bash(cargo nextest *)",
