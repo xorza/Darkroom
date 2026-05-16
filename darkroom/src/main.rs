@@ -1,35 +1,23 @@
 mod model;
+mod view;
 
-use palantir::{Background, Color, Configure, Panel, Sizing, Ui, WinitHost, WinitHostConfig};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use glam::Vec2;
+use palantir::{WinitHost, WinitHostConfig};
 use scenarium::testing::test_graph;
 
 use crate::model::ViewGraph;
 
-struct AppState {
-    #[allow(dead_code)]
-    view_graph: ViewGraph,
-}
-
-impl AppState {
-    fn new() -> Self {
-        Self {
-            view_graph: test_graph().into(),
-        }
-    }
-}
-
 fn main() {
-    WinitHost::new(WinitHostConfig::new("darkroom"), AppState::new(), build_ui).run();
-}
+    let mut view_graph: ViewGraph = test_graph().into();
+    view_graph.auto_layout(220.0, 110.0, Vec2::new(40.0, 40.0));
+    let view_graph = Rc::new(RefCell::new(view_graph));
 
-fn build_ui(ui: &mut Ui<AppState>) {
-    Panel::vstack()
-        .auto_id()
-        .padding(16.0)
-        .size((Sizing::FILL, Sizing::FILL))
-        .background(Background {
-            fill: Color::hex(0x1e1e1e).into(),
-            ..Default::default()
-        })
-        .show(ui, |_ui| {});
+    let vg = view_graph.clone();
+    WinitHost::new(WinitHostConfig::new("darkroom"), (), move |ui| {
+        view::build(ui, &vg.borrow());
+    })
+    .run();
 }

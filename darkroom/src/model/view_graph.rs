@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use common::{SerdeFormat, is_debug, key_index_vec::KeyIndexVec};
 use glam::Vec2;
-use scenarium::prelude::{FuncLib, Graph as CoreGraph, NodeId};
+use scenarium::prelude::{Binding, FuncLib, Graph as CoreGraph, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -104,6 +104,34 @@ impl ViewGraph {
         view_graph.validate();
 
         Ok(view_graph)
+    }
+
+    /// Assign positions to `view_nodes` using topological-depth columns:
+    /// nodes with no bound inputs go in column 0, downstream nodes shift
+    /// right by one column per max-upstream-depth. Within a column, stack
+    /// vertically in graph insertion order.
+    pub fn auto_layout(&mut self, col_spacing: f32, row_spacing: f32, origin: Vec2) {
+        let mut depth: HashMap<NodeId, u32> = HashMap::new();
+        for node in self.graph.iter() {
+            let d = node
+                .inputs
+                .iter()
+                .filter_map(|inp| match &inp.binding {
+                    Binding::Bind(addr) => depth.get(&addr.target_id).copied().map(|d| d + 1),
+                    _ => None,
+                })
+                .max()
+                .unwrap_or(0);
+            depth.insert(node.id, d);
+        }
+
+        let mut row_in_col: HashMap<u32, u32> = HashMap::new();
+        for view_node in self.view_nodes.iter_mut() {
+            let d = depth.get(&view_node.id).copied().unwrap_or(0);
+            let row = row_in_col.entry(d).or_insert(0);
+            view_node.pos = origin + Vec2::new(d as f32 * col_spacing, *row as f32 * row_spacing);
+            *row += 1;
+        }
     }
 
     pub fn remove_node(&mut self, node_id: &NodeId) {
