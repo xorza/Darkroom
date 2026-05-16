@@ -1,0 +1,9 @@
+[submodule "quickbench"]
+	path = quickbench
+	url = https://github.com/xorza/quickbench.git
+[submodule "imaginarium"]
+	path = imaginarium
+	url = https://github.com/xorza/Imaginarium.git
+[submodule "palantir"]
+	path = palantir
+	url = https://github.com/xorza/palantir.git

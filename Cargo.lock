@@ -2126,7 +2126,6 @@ dependencies = [
 [[package]]
 name = "imaginarium"
 version = "0.1.0"
-source = "git+https://github.com/xorza/Imaginarium#df0e637b443dd24bf416f9258a278a6408e56d9d"
 dependencies = [
  "aligned-vec",
  "arc-swap",
@@ -2137,6 +2136,7 @@ dependencies = [
  "image",
  "paste",
  "pollster",
+ "quickbench 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "rayon",
  "strum 0.28.0",
  "strum_macros 0.28.0",
@@ -2519,7 +2519,7 @@ dependencies = [
  "memmap2",
  "nalgebra",
  "parking_lot",
- "quickbench",
+ "quickbench 0.1.1",
  "rand 0.10.1",
  "rand_chacha 0.10.0",
  "rayon",
@@ -3675,11 +3675,27 @@ dependencies = [
 [[package]]
 name = "quickbench"
 version = "0.1.1"
+dependencies = [
+ "named-lock",
+ "quickbench-macros 0.1.1",
+]
+
+[[package]]
+name = "quickbench"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8dc98b4e118db20675b101a4215f8727253ee30a999ea367ead3670483eec3b8"
 dependencies = [
  "named-lock",
- "quickbench-macros",
+ "quickbench-macros 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "quickbench-macros"
+version = "0.1.1"
+dependencies = [
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
