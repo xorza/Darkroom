@@ -4,7 +4,13 @@ Generic Rust coding conventions for this project. Palantir-specific rules (paint
 
 ## Code style
 
-- **Comments:** none except non-obvious _why_. Code is short and self-explanatory; keep it that way. **Be terse.** One short line is the target — never multi-paragraph essays, never narration of what the code does, never "this used to…/we changed it because…" history. If a comment can't fit in one line and still earn its place, delete it.
+- **Comments:** none except non-obvious _why_. Code is short and self-explanatory; keep it that way. **Be terse.** One short line is the target — never multi-paragraph essays, never narration of what the code does, never restate what the function/type name already says ("Run a script" on `fn run_script`), never "this used to…/we changed it because…" history, never "future work" / "could swap to X later" (that belongs in PR descriptions or issue trackers). If a comment can't fit in one line and still earn its place, delete it.
+- **No decorative section-divider comments.** Do not add `// =====…`, `// -----…`, or standalone `// Title` lines that exist only to group items inside a file. If a file has grown big enough to feel like it needs sections, split it into submodules instead. Module docs and `///` doc comments are the sanctioned ways to say what something is.
+- **Always `#[derive(Debug)]` on structs.**
+- **No backward compatibility.** Remove old/deprecated code, rename freely, change APIs. Rewrite callers to use new APIs. No compatibility shims, re-exports, or wrappers.
+- **Remove unused code.** If kept intentionally, add a comment explaining why and silence linter warnings.
+- **Keep public API clean and consistent.**
+- **Never `#[cfg(test)]` on functions in production code.** If tests need convenience helpers, put them in the test module (or the gated `test_support` mod described below) — never sprinkle `#[cfg(test)]` on individual production-file functions.
 - **Asserts:** default to release `assert!` for invariants, not `debug_assert!` — `debug_assert!` is stripped in release and hides logic bugs in the build users actually run. Reserve it for checks too expensive for release (e.g. O(n) inside a hot loop), and call out the tradeoff.
 - **Edition 2024.** Dependencies pinned to `*` for now (lockfile pins actual versions) — fine for prototype, pin before publishing.
 - **Visibility:** default to narrowest; demote `pub` → `pub(crate)` → private whenever nothing outside uses the item. `pub(crate)` on fields is fine — invariants live in the mutating methods, not in encapsulation theater. No `pub(in path)` / `pub(super)` — exotic noise; use `pub(crate)` for any cross-module access.

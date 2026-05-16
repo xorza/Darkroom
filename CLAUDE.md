@@ -30,15 +30,7 @@ Plus the standard set: `rg`, `fd`, `jq`, `gh`, `cargo`, `cargo-nextest`, `rustfm
 - Crash on logic errors. Do not silently swallow them.
 - Add asserts for function inputs and outputs to catch logic errors. Do not assert on user input or network failures.
 
-## Code Style
-
-- Always add `#[derive(Debug)]` to structs.
-- No backward compatibility. Remove old/deprecated code, rename freely, change APIs. Rewrite callers to use new APIs. No compatibility shims, re-exports, or wrappers.
-- Remove unused code. If kept intentionally, add a comment explaining why and silence linter warnings.
-- Keep public API clean and consistent.
-- Never use `#[cfg(test)]` on functions in production code. If tests need convenience helpers, define them in the test module itself.
-- **No decorative section-divider comments.** Do not add `// =====…`, `// -----…`, or standalone `// Title` lines that exist only to group items inside a file. If a file has grown big enough to feel like it needs sections, split it into submodules instead. Module docs and `///` doc comments are the sanctioned ways to say what something is.
-- **Keep doc comments terse.** Default to no comment. If you do add one: a single line describing the non-obvious *why*. Never restate what the function/type name already says ("Run a script" on `fn run_script`). Never include "future work" or "could swap to X later" — those belong in PR descriptions or issue trackers, not in code that rots. If the content would be "reading this tells me nothing the signature doesn't," delete it.
+See `CODING_STYLE.md` for Rust code-style rules (comments, visibility, accessors, tests layout, mechanical refactoring).
 
 ## Verification
 
