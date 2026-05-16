@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git check-ignore *)",
+      "Bash(cargo check *)",
+      "Bash(rustc --version)",
+      "Read(//tmp/**)",
+      "Bash(scc imaginarium/src/)",
+
+      "Bash(xargs sd *)",
+      "Bash(cargo fmt *)",
+      "Bash(cargo nextest *)",
+      "Bash(cargo clippy *)",
+      "Bash(cargo build *)",
+      "Bash(cargo machete *)"
+    ]
+  }
+}

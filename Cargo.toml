@@ -1,0 +1,88 @@
+[package]
+name = "imaginarium"
+version = "0.1.0"
+edition = "2024"
+
+
+[features]
+default = []
+wgpu = ["dep:wgpu", "dep:pollster", "dep:tokio"]
+
+[dependencies]
+wgpu = { version = "29.0", features = ["metal", "vulkan", "dx12"], optional = true }
+thiserror = { version = "2" }
+bytemuck = { version = "1", features = ["derive", "extern_crate_alloc"] }
+pollster = { version = "0.4", optional = true }
+glam = { version = "0.32", features = ["serde"] }
+strum = { version = "0.28" }
+strum_macros = { version = "0.28" }
+tokio = { version = "1", features = ["sync", "rt", "macros"], optional = true }
+tracing = { version = "0.1" }
+rayon = { version = "1" }
+hashbrown = { version = "0.17", features = ["serde"] }
+tiff = { version = "0.11" }
+image = { version = "0.25" }
+paste = { version = "1" }
+atomic_refcell = { version = "0.1" }
+arc-swap = { version = "1" }
+aligned-vec = { version = "0.6" }
+
+[dev-dependencies]
+quickbench = "*"
+
+[[example]]
+name = "transform"
+required-features = ["wgpu"]
+
+[[example]]
+name = "pipeline"
+required-features = ["wgpu"]
+
+[[example]]
+name = "pipeline_explicit"
+required-features = ["wgpu"]
+
+[package.metadata.cargo-machete]
+ignored = ["strum"]
+
+[profile.bench]
+debug = true
+opt-level = 3
+strip = "none"
+split-debuginfo = "off"
+
+[profile.release]
+debug = true
+strip = "none"
+opt-level = 3
+split-debuginfo = "off"
+
+# Optimize heavy dependencies even in dev/test builds
+[profile.dev.package.wgpu]
+opt-level = 3
+[profile.dev.package.wgpu-core]
+opt-level = 3
+[profile.dev.package.wgpu-hal]
+opt-level = 3
+[profile.dev.package.wgpu-types]
+opt-level = 3
+[profile.dev.package.naga]
+opt-level = 3
+[profile.dev.package.gpu-descriptor]
+opt-level = 3
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.tiff]
+opt-level = 3
+[profile.dev.package.spirv]
+opt-level = 3
+[profile.dev.package.ash]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+[profile.dev.package.ravif]
+opt-level = 3
+[profile.dev.package.rav1e]
+opt-level = 3
