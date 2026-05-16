@@ -1,4 +1,4 @@
-# prism scripting subsystem
+# darkroom-egui scripting subsystem
 
 Rhai-based scripting layer that lets external clients drive the
 ViewGraph as if they were the GUI. Same actions, same undo stack, same
@@ -152,5 +152,5 @@ channel, watch the `CancellationToken`), construct it in
   we expose; if stricter is wanted, split the enum into `GraphMutation`
   (script-allowed) and `UiState` (GUI-only).
 - The crate could be extracted: only `model::ViewNode` and
-  `model::Intent` are pulled from prism. YAGNI until there's a second
+  `model::Intent` are pulled from darkroom-egui. YAGNI until there's a second
   consumer.

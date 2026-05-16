@@ -17,7 +17,7 @@ scenarium/
 ├── scenarium/       # Core graph library with execution engine
 ├── imaginarium/     # GPU/CPU image processing library
 ├── lumos/           # Astrophotography image processing library
-├── prism/           # Visual egui-based graph editor
+├── darkroom-egui/           # Visual egui-based graph editor
 ├── lens/        # Image processing funclib (imaginarium adapter)
 ├── test_resources/  # Sample graphs and media for tests
 ├── test_output/     # Output folder created by unit tests
@@ -30,7 +30,7 @@ scenarium/
 |-------|-------------|
 | `common` | Shared utilities: thread-safe wrappers, async patterns, serialization, ID macros |
 | `scenarium` | Core graph library: nodes, functions, execution engine, Lua scripting |
-| `prism` | Visual egui-based editor for graph creation and execution |
+| `darkroom-egui` | Visual egui-based editor for graph creation and execution |
 | `imaginarium` | GPU/CPU image processing with automatic backend selection |
 | `lens` | Image processing function library adapting imaginarium to node workflow |
 | `lumos` | Astrophotography library: FITS/RAW loading, stacking, star detection, registration |

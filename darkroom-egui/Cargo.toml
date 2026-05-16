@@ -1,5 +1,5 @@
 [package]
-name = "prism"
+name = "darkroom-egui"
 version.workspace = true
 edition.workspace = true
 

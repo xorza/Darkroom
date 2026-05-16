@@ -195,7 +195,7 @@ fn no_raw_ui_outside_widgets() {
 
 /// Egui chrome types app code must not import. POD types (`Rect`,
 /// `Vec2`, `Color32`, `Sense`, `Key`, `Response`, ...) stay allowed —
-/// see `prism/EGUI_ENCAPSULATION_PLAN.md` non-goals.
+/// see `darkroom-egui/EGUI_ENCAPSULATION_PLAN.md` non-goals.
 const EGUI_CHROME_TYPES: &[&str] = &[
     "UiBuilder",
     "Ui",

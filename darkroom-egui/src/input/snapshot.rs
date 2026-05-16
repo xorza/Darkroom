@@ -1,6 +1,6 @@
 use egui::{Context, Event, Key, Modifiers, MouseWheelUnit, Pos2, Vec2};
 
-/// Snapshot of everything the prism view/interaction layer needs to know
+/// Snapshot of everything the darkroom-egui view/interaction layer needs to know
 /// about input for one frame, captured once at frame start.
 #[derive(Debug, Clone, Default)]
 pub struct InputSnapshot {

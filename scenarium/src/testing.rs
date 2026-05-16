@@ -1,7 +1,7 @@
 //! Shared test fixtures: a 5-func sample library and a small graph that
 //! wires it together. Kept out of production modules so `function.rs` /
 //! `graph.rs` don't cross-import from the prelude for fixture code.
-//! Prism's `session.rs` also uses `test_func_lib` as a demo/sample func
+//! Darkroom's `session.rs` also uses `test_func_lib` as a demo/sample func
 //! set on startup — keep that in mind before renaming.
 
 use std::sync::Arc;

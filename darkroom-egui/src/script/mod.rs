@@ -1,4 +1,4 @@
-//! Scripting boundary for prism.
+//! Scripting boundary for darkroom-egui.
 //!
 //! The executor is transport-agnostic: every transport produces
 //! [`ScriptRequest`] values into a shared bounded `tokio::mpsc`
@@ -9,7 +9,7 @@
 //!
 //! Scripts talk back to [`crate::session::Session`] via a separate
 //! `SessionInbound` channel: functions registered on the engine (like
-//! `prism::print`) push actions; `Session` drains them each frame
+//! `darkroom-egui::print`) push actions; `Session` drains them each frame
 //! and applies them. This mirrors the Worker→Session shape and
 //! keeps the executor task off the main thread.
 //!
@@ -643,7 +643,7 @@ fn register_host_helpers(engine: &mut Engine, inbound: InboundSender, func_lib: 
 fn wire_debug_hook(engine: &mut Engine) {
     engine.on_debug(|msg, src, pos| {
         tracing::debug!(
-            target: "prism::script",
+            target: "darkroom-egui::script",
             src = src.unwrap_or("<script>"),
             line = pos.line().unwrap_or(0),
             col = pos.position().unwrap_or(0),

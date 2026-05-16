@@ -1,6 +1,6 @@
 //! Headless frontend: no GUI, no terminal UI. Boots Session, worker,
 //! and script transports, then waits for either a script `shutdown()`
-//! or Ctrl-C. Useful for driving prism from a remote script client
+//! or Ctrl-C. Useful for driving darkroom-egui from a remote script client
 //! (`examples/script_client`) without a desktop window.
 //!
 //! Loop shape: wake → `session.tick(...)` (drains worker and script
@@ -26,7 +26,9 @@ pub async fn run(launch_config: LaunchConfig) -> Result<()> {
     let host = HeadlessUiHost::new(wake.clone(), shutdown.clone());
     let mut session = Session::new(host, launch_config);
 
-    tracing::info!("prism headless: running. Send `shutdown()` over the script TCP, or Ctrl-C.");
+    tracing::info!(
+        "darkroom-egui headless: running. Send `shutdown()` over the script TCP, or Ctrl-C."
+    );
 
     let mut output = FrameOutput::default();
     loop {
@@ -46,6 +48,6 @@ pub async fn run(launch_config: LaunchConfig) -> Result<()> {
     }
 
     session.exit();
-    tracing::info!("prism headless: shut down");
+    tracing::info!("darkroom-egui headless: shut down");
     Ok(())
 }

@@ -953,6 +953,37 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
+name = "darkroom-egui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "common",
+ "crossterm",
+ "dotenv",
+ "eframe",
+ "egui",
+ "hashbrown 0.17.1",
+ "imaginarium",
+ "lens",
+ "lz4_flex",
+ "ratatui",
+ "rfd",
+ "rhai",
+ "scenarium",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "toml",
+ "tracing",
+ "tracing-appender",
+ "tracing-rolling-file",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "darling"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3568,37 +3599,6 @@ checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
 dependencies = [
  "proc-macro2",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "prism"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "common",
- "crossterm",
- "dotenv",
- "eframe",
- "egui",
- "hashbrown 0.17.1",
- "imaginarium",
- "lens",
- "lz4_flex",
- "ratatui",
- "rfd",
- "rhai",
- "scenarium",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
- "toml",
- "tracing",
- "tracing-appender",
- "tracing-rolling-file",
- "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]

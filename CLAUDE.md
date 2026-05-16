@@ -12,7 +12,7 @@ These are installed and available — prefer them over slower/regex-based equiva
 - **`ast-grep`** — AST-aware structural code search. Use for "find all call sites of X", "find all `Arc::get_mut().unwrap()` patterns", or any search where regex is fragile. Beats `rg` for code-pattern matching.
   - `ast-grep run --pattern 'Arc::get_mut($X).unwrap()' --lang rust`
 - **`scc`** — fast LOC counter with language stats. Use for design-review scope decisions (faster + smarter than `wc -l`).
-  - `scc prism/src/gui/`
+  - `scc darkroom-egui/src/gui/`
 - **`hyperfine`** — statistical benchmarking. Use when validating performance claims rather than guessing.
   - `hyperfine 'cargo test --release my_test'`
 - **`cargo-machete`** — finds unused crate dependencies.
@@ -64,9 +64,9 @@ Plus the standard set: `rg`, `fd`, `jq`, `gh`, `cargo`, `cargo-nextest`, `rustfm
 - For numerical code: validate against known-good reference values or analytical solutions.
 - Do NOT write tests that only check `result < 10` or `remaining > 0`. These catch nothing.
 
-## UI conventions (egui, prism crate)
+## UI conventions (egui, darkroom-egui crate)
 
-- **Every widget id must come from `StableId`** (`prism/src/common/id_salt.rs`).
+- **Every widget id must come from `StableId`** (`darkroom-egui/src/common/id_salt.rs`).
   Sanctioned constructors:
   - `StableId::new(name)` — `#[track_caller]` mixes `file!()`/`line!()` into
     the hash. Use a tuple for per-instance widgets:

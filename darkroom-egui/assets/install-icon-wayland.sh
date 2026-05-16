@@ -6,19 +6,19 @@ ICON_DIR="$HOME/.local/share/icons/hicolor"
 APP_DIR="$HOME/.local/share/applications"
 SOURCE_ICON="$SCRIPT_DIR/icon big.png"
 
-echo "Installing Prism icon and desktop entry..."
+echo "Installing Darkroom icon and desktop entry..."
 
 # Generate and install icons at standard sizes
 for size in 16 32 48 64 128; do
     mkdir -p "$ICON_DIR/${size}x${size}/apps"
-    magick "$SOURCE_ICON" -resize "${size}x${size}" "$ICON_DIR/${size}x${size}/apps/prism.png"
+    magick "$SOURCE_ICON" -resize "${size}x${size}" "$ICON_DIR/${size}x${size}/apps/darkroom-egui.png"
     echo "Installed ${size}x${size} icon"
 done
 
 # Install desktop file
 mkdir -p "$APP_DIR"
-cp "$SCRIPT_DIR/prism.desktop" "$APP_DIR/prism.desktop"
-echo "Installed desktop entry to $APP_DIR/prism.desktop"
+cp "$SCRIPT_DIR/darkroom-egui.desktop" "$APP_DIR/darkroom-egui.desktop"
+echo "Installed desktop entry to $APP_DIR/darkroom-egui.desktop"
 
 # Update icon cache
 if command -v gtk-update-icon-cache &> /dev/null; then

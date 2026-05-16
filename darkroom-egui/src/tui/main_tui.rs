@@ -23,7 +23,7 @@ impl MainTui {
         wake: &Arc<Notify>,
         shutdown: &Arc<AtomicBool>,
     ) -> Result<()> {
-        println!("Prism TUI (stub). Type 'help' for commands.");
+        println!("Darkroom TUI (stub). Type 'help' for commands.");
         prompt()?;
 
         let mut output = FrameOutput::default();

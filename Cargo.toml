@@ -2,7 +2,7 @@
 members = [
     "common",
     "scenarium",
-    "prism",
+    "darkroom-egui",
     "lens",
     "lumos"
 ]
@@ -22,7 +22,7 @@ unused_imports = "allow"
 common = { path = "common" }
 quickbench = "0.1"
 scenarium = { path = "scenarium" }
-prism = { path = "prism" }
+darkroom-egui = { path = "darkroom-egui" }
 imaginarium = { git = "https://github.com/xorza/Imaginarium", features = ["wgpu"] }
 lens = { path = "lens" }
 

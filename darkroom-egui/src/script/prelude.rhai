@@ -1,4 +1,4 @@
-// Built-in Rhai helpers loaded into every prism scripting engine.
+// Built-in Rhai helpers loaded into every darkroom-egui scripting engine.
 //
 // These wrap the generic `apply` / `apply_all` mutation primitives
 // (and a few narrowly-scoped Rust helpers like `host::make_add_node`)

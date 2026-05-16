@@ -675,7 +675,7 @@ mod tests {
 
         // Per-test directory under the system temp root; Uuid keeps
         // parallel test runs from colliding. Clean up at the end.
-        let dir = std::env::temp_dir().join(format!("prism-test-{}", Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("darkroom-egui-test-{}", Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("discovery.json");
 

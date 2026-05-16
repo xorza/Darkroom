@@ -1,6 +1,6 @@
-//! Tiny CLI for the prism script TCP transport. Wire-format counterpart
+//! Tiny CLI for the darkroom-egui script TCP transport. Wire-format counterpart
 //! to `examples/demo_client.py`, useful when you'd rather not pull in
-//! Python (`pip install lz4`) just to poke a running prism instance.
+//! Python (`pip install lz4`) just to poke a running darkroom-egui instance.
 //!
 //! Usage:
 //!
@@ -13,11 +13,11 @@
 //!     # interactive session: each line is one request frame, reply printed
 //!     cargo run --example script_client -- --repl
 //!
-//!     # discover addr+token from the file prism wrote with --script-token-file
-//!     cargo run --example script_client -- --token-file /tmp/prism.json --repl
+//!     # discover addr+token from the file darkroom-egui wrote with --script-token-file
+//!     cargo run --example script_client -- --token-file /tmp/darkroom-egui.json --repl
 //!
-//! Bring your own running prism, e.g.:
-//!     cargo run --bin prism -- --script-tcp --script-bind :34567 --script-token <uuid> tui
+//! Bring your own running darkroom-egui, e.g.:
+//!     cargo run --bin darkroom-egui -- --script-tcp --script-bind :34567 --script-token <uuid> tui
 
 use std::io::{BufRead, Read, Write};
 use std::net::TcpStream;
@@ -30,9 +30,9 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 #[derive(Parser, Debug)]
-#[command(about = "Tiny TCP client for the prism script transport")]
+#[command(about = "Tiny TCP client for the darkroom-egui script transport")]
 struct Args {
-    /// `host:port` of the prism listener. Ignored if `--token-file` is set.
+    /// `host:port` of the darkroom-egui listener. Ignored if `--token-file` is set.
     #[arg(long, default_value = "127.0.0.1:34567")]
     addr: String,
 
@@ -40,7 +40,7 @@ struct Args {
     #[arg(long)]
     token: Option<Uuid>,
 
-    /// Path to the JSON discovery file written by `prism --script-token-file`.
+    /// Path to the JSON discovery file written by `darkroom-egui --script-token-file`.
     /// Overrides `--addr` and `--token`.
     #[arg(long)]
     token_file: Option<PathBuf>,
