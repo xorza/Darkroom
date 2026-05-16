@@ -2,6 +2,7 @@
 members = [
     "common",
     "scenarium",
+    "darkroom",
     "darkroom-egui",
     "lens",
     "lumos"
@@ -22,9 +23,11 @@ unused_imports = "allow"
 common = { path = "common" }
 quickbench = "0.1"
 scenarium = { path = "scenarium" }
+darkroom = { path = "darkroom" }
 darkroom-egui = { path = "darkroom-egui" }
 imaginarium = { git = "https://github.com/xorza/Imaginarium", features = ["wgpu"] }
 lens = { path = "lens" }
+palantir = { git = "https://github.com/xorza/palantir", branch = "main" }
 
 # wgpu version should be in sync with egui
 wgpu = { version = "29.0", features = ["metal", "vulkan", "dx12"] }
