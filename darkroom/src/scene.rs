@@ -53,18 +53,16 @@ impl Scene {
             };
             let inputs = push_port_names(
                 &mut self.port_names,
-                ui,
                 node.inputs.iter().map(|i| i.name.as_str()),
             );
             let outputs = push_port_names(
                 &mut self.port_names,
-                ui,
                 func.outputs.iter().map(|o| o.name.as_str()),
             );
             self.nodes.push(SceneNode {
                 id: vn.id,
                 pos: vn.pos,
-                name: ui.intern(&node.name),
+                name: node.name.clone().into(),
                 inputs,
                 outputs,
             });
@@ -93,13 +91,12 @@ impl Scene {
 
 fn push_port_names<'a>(
     pool: &mut Vec<InternedStr>,
-    ui: &mut Ui,
     names: impl Iterator<Item = &'a str>,
 ) -> PortSpan {
     let start = pool.len() as u32;
     let mut len = 0u32;
     for n in names {
-        pool.push(ui.intern(n));
+        pool.push(n.to_owned().into());
         len += 1;
     }
     PortSpan { start, len }
