@@ -58,8 +58,8 @@ impl GraphUI {
         let Self { ports, node_ui } = self;
         // Outer Scroll provides pan / wheel-zoom / pinch — the inner
         // Canvas hosts absolutely-positioned nodes and the connection
-        // beziers, sized large enough that all nodes fit inside its
-        // bounds (Scroll's content-extent is the canvas's outer rect).
+        // beziers. Canvas hugs the bounding box of its children, so
+        // Scroll picks up the node spread as its scrollable extent.
         Scroll::both()
             .id_salt("graph.scroll")
             .with_zoom()
@@ -70,11 +70,22 @@ impl GraphUI {
                 ..Default::default()
             })
             .show(ui, |ui| {
+                // Canvas-local origin in screen coords. Resolved against
+                // a verbatim `WidgetId` so the prior frame's cascade
+                // entry is reachable here — saves carrying a captured
+                // id across frames. `Vec2::ZERO` on the first frame
+                // (no cascade entry yet); `PortCache` is also empty
+                // then, so no connections draw.
+                let canvas_origin = ui
+                    .response_for(canvas_widget_id())
+                    .rect
+                    .map(|r| r.min)
+                    .unwrap_or(Vec2::ZERO);
                 Panel::canvas()
-                    .id_salt("graph.canvas")
+                    .id(canvas_widget_id())
                     .size((Sizing::Hug, Sizing::Hug))
                     .show(ui, |ui| {
-                        draw_connections(ui, scene, ports);
+                        draw_connections(ui, scene, ports, canvas_origin);
                         ports.clear();
                         node_ui.draw_all(ui, scene, ports, out);
                     });
@@ -82,7 +93,15 @@ impl GraphUI {
     }
 }
 
-fn draw_connections(ui: &mut Ui, scene: &Scene, ports: &PortCache) {
+/// Verbatim `WidgetId` for the graph canvas. Hashed once from a
+/// static string so the id is stable across frames and reachable
+/// from `Ui::response_for` without round-tripping through palantir's
+/// parent-mixed `make_persistent_id` chain.
+const fn canvas_widget_id() -> WidgetId {
+    WidgetId::auto_stable()
+}
+
+fn draw_connections(ui: &mut Ui, scene: &Scene, ports: &PortCache, canvas_origin: Vec2) {
     let color = Color::hex(CONN_COLOR);
     for c in &scene.connections {
         let (Some(src), Some(tgt)) = (ports.nodes.get(&c.src_node), ports.nodes.get(&c.tgt_node))
@@ -95,7 +114,10 @@ fn draw_connections(ui: &mut Ui, scene: &Scene, ports: &PortCache) {
         ) else {
             continue;
         };
-        let (Some(p0), Some(p3)) = (port_center(ui, src_wid), port_center(ui, tgt_wid)) else {
+        let (Some(p0), Some(p3)) = (
+            port_center(ui, src_wid, canvas_origin),
+            port_center(ui, tgt_wid, canvas_origin),
+        ) else {
             continue;
         };
         let dx = ((p3.x - p0.x).abs() * 0.5).max(40.0);
@@ -113,6 +135,8 @@ fn draw_connections(ui: &mut Ui, scene: &Scene, ports: &PortCache) {
     }
 }
 
-fn port_center(ui: &Ui, wid: WidgetId) -> Option<Vec2> {
-    ui.response_for(wid).rect.map(|r| r.center())
+fn port_center(ui: &Ui, wid: WidgetId, canvas_origin: Vec2) -> Option<Vec2> {
+    ui.response_for(wid)
+        .rect
+        .map(|r| r.center() - canvas_origin)
 }
