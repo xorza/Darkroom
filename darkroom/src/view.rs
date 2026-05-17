@@ -4,21 +4,11 @@ use scenarium::prelude::{Binding, NodeId};
 use std::collections::HashMap;
 
 use crate::AppState;
-use crate::gui::node_widget;
-use crate::gui::{HEADER_H, NODE_W, PORT_COL_PAD_TOP, PORT_GAP, PORT_RADIUS, PORT_SIZE, Side};
+use crate::gui::node_widget::{self, NodePorts};
 
 const CONN_WIDTH: f32 = 2.0;
 const CANVAS_BG: u32 = 0x1e1e1e;
 const CONN_COLOR: u32 = 0x9ec1ff;
-
-/// Per-node world-space port centers. Indexed positionally — matches
-/// `Node.inputs[i]` / `Func.outputs[i]`. Computed from the same
-/// constants the widget tree uses, so the rendered port circles line
-/// up with these endpoints.
-struct NodePorts {
-    inputs: Vec<Vec2>,
-    outputs: Vec<Vec2>,
-}
 
 pub fn build(ui: &mut Ui, app: &AppState) {
     Panel::canvas()
@@ -29,43 +19,29 @@ pub fn build(ui: &mut Ui, app: &AppState) {
             ..Default::default()
         })
         .show(ui, |ui| {
-            let ports = compute_ports(app);
-            draw_connections(ui, app, &ports);
-            draw_nodes(ui, app);
+            // Nodes first so their port `Frame`s emit responses whose
+            // `rect()` (prior-frame layout snapshot) gives us exact
+            // endpoint positions. Connections drawn second land
+            // visually on top of the node bodies — acceptable for now;
+            // moving them to a layer behind nodes is a later cleanup.
+            let port_rects = draw_nodes(ui, app);
+            draw_connections(ui, app, &port_rects);
         });
 }
 
-fn compute_ports(app: &AppState) -> HashMap<NodeId, NodePorts> {
-    app.view_graph
-        .view_nodes
-        .iter()
-        .filter_map(|vn| {
-            let node = app.view_graph.graph.by_id(&vn.id)?;
-            let func = app.func_lib.by_id(&node.func_id)?;
-            let inputs = port_centers(vn.pos, Side::Left, node.inputs.len());
-            let outputs = port_centers(vn.pos, Side::Right, func.outputs.len());
-            Some((vn.id, NodePorts { inputs, outputs }))
-        })
-        .collect()
-}
-
-/// Stacks `n` port centers along a node edge. Mirrors the widget-tree
-/// math so the connection endpoints land on the rendered circles.
-fn port_centers(node_pos: Vec2, side: Side, n: usize) -> Vec<Vec2> {
-    let edge_x = match side {
-        Side::Left => node_pos.x,
-        Side::Right => node_pos.x + NODE_W,
-    };
-    (0..n)
-        .map(|i| {
-            let y = node_pos.y
-                + HEADER_H
-                + PORT_COL_PAD_TOP
-                + (i as f32) * (PORT_SIZE + PORT_GAP)
-                + PORT_RADIUS;
-            Vec2::new(edge_x, y)
-        })
-        .collect()
+fn draw_nodes(ui: &mut Ui, app: &AppState) -> HashMap<NodeId, NodePorts> {
+    let mut map = HashMap::with_capacity(app.view_graph.view_nodes.len());
+    for vn in app.view_graph.view_nodes.iter() {
+        let Some(node) = app.view_graph.graph.by_id(&vn.id) else {
+            continue;
+        };
+        let Some(func) = app.func_lib.by_id(&node.func_id) else {
+            continue;
+        };
+        let ports = node_widget::draw(ui, vn, node, func);
+        map.insert(vn.id, ports);
+    }
+    map
 }
 
 fn draw_connections(ui: &mut Ui, app: &AppState, ports: &HashMap<NodeId, NodePorts>) {
@@ -81,9 +57,10 @@ fn draw_connections(ui: &mut Ui, app: &AppState, ports: &HashMap<NodeId, NodePor
             let Some(src_ports) = ports.get(&addr.target_id) else {
                 continue;
             };
-            let (Some(&p0), Some(&p3)) =
-                (src_ports.outputs.get(addr.port_idx), tgt_ports.inputs.get(i))
-            else {
+            let (Some(p0), Some(p3)) = (
+                src_ports.outputs.get(addr.port_idx).copied().flatten(),
+                tgt_ports.inputs.get(i).copied().flatten(),
+            ) else {
                 continue;
             };
             let dx = ((p3.x - p0.x).abs() * 0.5).max(40.0);
@@ -99,17 +76,5 @@ fn draw_connections(ui: &mut Ui, app: &AppState, ports: &HashMap<NodeId, NodePor
                 tolerance: 0.5,
             });
         }
-    }
-}
-
-fn draw_nodes(ui: &mut Ui, app: &AppState) {
-    for vn in app.view_graph.view_nodes.iter() {
-        let Some(node) = app.view_graph.graph.by_id(&vn.id) else {
-            continue;
-        };
-        let Some(func) = app.func_lib.by_id(&node.func_id) else {
-            continue;
-        };
-        node_widget::draw(ui, vn, node, func);
     }
 }
