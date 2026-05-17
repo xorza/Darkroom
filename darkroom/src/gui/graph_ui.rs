@@ -1,6 +1,7 @@
 use glam::Vec2;
 use palantir::{
-    Background, Color, Configure, LineCap, LineJoin, Panel, Scroll, Shape, Sizing, Ui, WidgetId,
+    Background, Color, Configure, LineCap, LineJoin, Panel, Scroll, Shape, Sizing, Spacing, Ui,
+    WidgetId,
 };
 use scenarium::prelude::NodeId;
 use std::collections::HashMap;
@@ -12,6 +13,11 @@ use crate::scene::Scene;
 const CONN_WIDTH: f32 = 2.0;
 const CANVAS_BG: u32 = 0x1e1e1e;
 const CONN_COLOR: u32 = 0x9ec1ff;
+/// Extra pan slack on every side of the node bbox, so the user always
+/// has room to drag a node past the current leading/trailing edge
+/// without immediately hitting the offset clamp. Reapplied every
+/// frame on top of the bbox-driven margin so the slack stays
+/// consistent as nodes move.
 const CANVAS_SLACK: f32 = 400.0;
 
 /// Interframe handles for every port that was recorded last pass. We
@@ -59,13 +65,33 @@ impl GraphUI {
         let Self { ports, node_ui } = self;
         // Outer Scroll provides pan / wheel-zoom / pinch — the inner
         // Canvas hosts absolutely-positioned nodes and the connection
-        // beziers. Canvas hugs the bounding box of its children, so
-        // Scroll picks up the node spread as its scrollable extent.
+        // beziers. Canvas hugs the bounding box of its **positive**
+        // children only (palantir's `Sizing::Hug` rule); negatively-
+        // placed nodes render outside the hugged rect and are
+        // reachable through the dynamic `content_margin` below.
+        //
+        // The margin tracks the live scene bbox each frame: the
+        // leading side grows by `|min(0, min node.pos)|` so dragging
+        // a node past origin always leaves enough pan slack to scroll
+        // back to it. Per-frame recompute is fine — there are at most
+        // a few dozen nodes and `Spacing` is 8 bytes. No palantir
+        // internals are involved; this is plain user-side wiring on
+        // top of `Scroll::content_margin`.
+        let mut bb_min = Vec2::ZERO;
+        for n in &scene.nodes {
+            bb_min = bb_min.min(n.pos);
+        }
+        let margin = Spacing::new(
+            -bb_min.x.min(0.0) + CANVAS_SLACK,
+            -bb_min.y.min(0.0) + CANVAS_SLACK,
+            CANVAS_SLACK,
+            CANVAS_SLACK,
+        );
         Scroll::both()
             .id_salt("graph.scroll")
             .with_zoom()
             .hide_bars()
-            .content_margin(CANVAS_SLACK)
+            .content_margin(margin)
             .size((Sizing::FILL, Sizing::FILL))
             .background(Background {
                 fill: Color::hex(CANVAS_BG).into(),
