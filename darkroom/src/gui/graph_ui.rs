@@ -70,15 +70,16 @@ impl GraphUI {
                 ..Default::default()
             })
             .show(ui, |ui| {
-                // Canvas-local origin in screen coords. Resolved against
-                // a verbatim `WidgetId` so the prior frame's cascade
-                // entry is reachable here — saves carrying a captured
-                // id across frames. `Vec2::ZERO` on the first frame
-                // (no cascade entry yet); `PortCache` is also empty
-                // then, so no connections draw.
+                // Canvas top-left in *pre-transform* world coords.
+                // `response_for(...).rect` is the post-cascade visible
+                // rect (clipped by the Scroll viewport), so its `min`
+                // jumps when the canvas pans partly off-screen. The
+                // pre-transform layout rect is unclipped and not
+                // affected by Scroll's transform — exactly what shape
+                // owner-local geometry expects.
                 let canvas_origin = ui
                     .response_for(canvas_widget_id())
-                    .rect
+                    .layout_rect
                     .map(|r| r.min)
                     .unwrap_or(Vec2::ZERO);
                 Panel::canvas()
@@ -136,7 +137,10 @@ fn draw_connections(ui: &mut Ui, scene: &Scene, ports: &PortCache, canvas_origin
 }
 
 fn port_center(ui: &Ui, wid: WidgetId, canvas_origin: Vec2) -> Option<Vec2> {
+    // Same as `canvas_origin`: use the unclipped, pre-transform layout
+    // rect so the result is owner-local in the canvas's pre-transform
+    // frame, which is what `Shape::CubicBezier` polyline coords expect.
     ui.response_for(wid)
-        .rect
+        .layout_rect
         .map(|r| r.center() - canvas_origin)
 }
