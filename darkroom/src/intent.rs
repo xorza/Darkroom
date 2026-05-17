@@ -25,7 +25,8 @@ use glam::Vec2;
 use scenarium::graph::{Binding, Node, NodeBehavior, NodeId};
 use serde::{Deserialize, Serialize};
 
-use crate::model::{ViewGraph, ViewNode};
+use crate::document::Document;
+use crate::model::ViewNode;
 
 /// A connection that pointed *into* a node we're about to remove and
 /// must be re-established on undo.
@@ -114,7 +115,8 @@ impl Intent {
     /// view graph (sub-`VIEWPORT_EPS` viewport delta, etc.). Checked at
     /// the model boundary so external sources can't bypass the
     /// renderer's emit-time gate by pushing micro-deltas every frame.
-    pub fn is_noop_against(&self, vg: &ViewGraph) -> bool {
+    pub fn is_noop_against(&self, doc: &Document) -> bool {
+        let vg = &doc.view_graph;
         match self {
             Self::SetViewport { pan, scale } => {
                 (vg.pan - *pan).length_squared() < VIEWPORT_EPS * VIEWPORT_EPS
@@ -186,7 +188,8 @@ pub enum UndoStep {
 
 /// Read pre-mutation state from `view_graph` and fold it with `intent`
 /// into a complete [`UndoStep`]. Pure — does not write to the graph.
-pub fn build_step(intent: Intent, view_graph: &ViewGraph) -> UndoStep {
+pub fn build_step(intent: Intent, doc: &Document) -> UndoStep {
+    let view_graph = &doc.view_graph;
     match intent {
         Intent::AddNode { view_node, node } => UndoStep::AddNode { view_node, node },
         Intent::RemoveNode { node_id } => {
@@ -300,7 +303,8 @@ pub fn build_step(intent: Intent, view_graph: &ViewGraph) -> UndoStep {
 /// Forward apply: write the step's "to" half to `view_graph`. Used by
 /// the initial commit (right after `build_step`) and by undo-stack
 /// redo (replaying a popped step).
-pub fn apply_step(step: &UndoStep, view_graph: &mut ViewGraph) {
+pub fn apply_step(step: &UndoStep, doc: &mut Document) {
+    let view_graph = &mut doc.view_graph;
     match step {
         UndoStep::AddNode { view_node, node } => {
             assert!(
@@ -381,7 +385,8 @@ pub fn apply_step(step: &UndoStep, view_graph: &mut ViewGraph) {
 /// Backward apply: write the step's "from" half to `view_graph`. Pairs
 /// with [`apply_step`]; calling one after the other restores the
 /// graph to its pre-commit state.
-pub fn revert_step(step: &UndoStep, view_graph: &mut ViewGraph) {
+pub fn revert_step(step: &UndoStep, doc: &mut Document) {
+    let view_graph = &mut doc.view_graph;
     match step {
         UndoStep::AddNode { node, .. } => {
             view_graph.remove_node(&node.id);

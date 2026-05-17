@@ -1,6 +1,7 @@
 #[allow(dead_code)]
 mod action_stack;
 mod app;
+mod document;
 #[allow(dead_code)]
 mod frame_result;
 mod gui;

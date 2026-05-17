@@ -13,8 +13,8 @@ use std::ops::Range;
 
 use common::SerdeFormat;
 
+use crate::document::Document;
 use crate::intent::{self, GestureKey, UndoStep};
-use crate::model::ViewGraph;
 
 #[derive(Debug)]
 struct UndoEntry {
@@ -90,14 +90,14 @@ impl ActionStack {
         self.redo_stack.clear();
     }
 
-    pub fn undo(&mut self, view_graph: &mut ViewGraph, on_step: &mut dyn FnMut(&UndoStep)) -> bool {
+    pub fn undo(&mut self, doc: &mut Document, on_step: &mut dyn FnMut(&UndoStep)) -> bool {
         let Some(entry) = self.undo_stack.pop() else {
             return false;
         };
         let bytes = Self::slice_bytes(&self.undo_actions, &entry.range);
         let steps = Self::deserialize_steps(bytes, &mut self.temp_buffer);
         for step in steps.iter().rev() {
-            intent::revert_step(step, view_graph);
+            intent::revert_step(step, doc);
             on_step(step);
         }
         let redo_range = Self::append_bytes(&mut self.redo_actions, bytes);
@@ -107,7 +107,7 @@ impl ActionStack {
         true
     }
 
-    pub fn redo(&mut self, view_graph: &mut ViewGraph, on_step: &mut dyn FnMut(&UndoStep)) -> bool {
+    pub fn redo(&mut self, doc: &mut Document, on_step: &mut dyn FnMut(&UndoStep)) -> bool {
         let Some(range) = self.redo_stack.pop() else {
             return false;
         };
@@ -119,7 +119,7 @@ impl ActionStack {
             None
         };
         for step in steps.iter() {
-            intent::apply_step(step, view_graph);
+            intent::apply_step(step, doc);
             on_step(step);
         }
         let undo_range = Self::append_bytes(&mut self.undo_actions, bytes);
