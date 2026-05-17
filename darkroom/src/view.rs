@@ -3,14 +3,14 @@ use palantir::{Background, Color, Configure, LineCap, LineJoin, Panel, Shape, Si
 use scenarium::prelude::{Binding, NodeId};
 use std::collections::HashMap;
 
-use crate::AppState;
+use crate::app::App;
 use crate::gui::node_widget::{self, NodePorts};
 
 const CONN_WIDTH: f32 = 2.0;
 const CANVAS_BG: u32 = 0x1e1e1e;
 const CONN_COLOR: u32 = 0x9ec1ff;
 
-pub fn build(ui: &mut Ui, app: &AppState) {
+pub fn build(ui: &mut Ui, app: &App) {
     Panel::canvas()
         .id_salt("graph.canvas")
         .size((Sizing::FILL, Sizing::FILL))
@@ -29,7 +29,7 @@ pub fn build(ui: &mut Ui, app: &AppState) {
         });
 }
 
-fn draw_nodes(ui: &mut Ui, app: &AppState) -> HashMap<NodeId, NodePorts> {
+fn draw_nodes(ui: &mut Ui, app: &App) -> HashMap<NodeId, NodePorts> {
     let mut map = HashMap::with_capacity(app.view_graph.view_nodes.len());
     for vn in app.view_graph.view_nodes.iter() {
         let Some(node) = app.view_graph.graph.by_id(&vn.id) else {
@@ -44,7 +44,7 @@ fn draw_nodes(ui: &mut Ui, app: &AppState) -> HashMap<NodeId, NodePorts> {
     map
 }
 
-fn draw_connections(ui: &mut Ui, app: &AppState, ports: &HashMap<NodeId, NodePorts>) {
+fn draw_connections(ui: &mut Ui, app: &App, ports: &HashMap<NodeId, NodePorts>) {
     let color = Color::hex(CONN_COLOR);
     for node in app.view_graph.graph.iter() {
         let Some(tgt_ports) = ports.get(&node.id) else {

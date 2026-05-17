@@ -1,0 +1,30 @@
+use glam::Vec2;
+use palantir::Ui;
+use scenarium::prelude::FuncLib;
+use scenarium::testing::{TestFuncHooks, test_func_lib, test_graph};
+
+use crate::model::ViewGraph;
+use crate::view;
+
+pub struct App {
+    pub view_graph: ViewGraph,
+    pub func_lib: FuncLib,
+}
+
+impl App {
+    pub fn new() -> Self {
+        let mut view_graph: ViewGraph = test_graph().into();
+        view_graph.auto_layout(220.0, 110.0, Vec2::new(40.0, 40.0));
+        let func_lib = test_func_lib(TestFuncHooks::default());
+        Self {
+            view_graph,
+            func_lib,
+        }
+    }
+}
+
+impl palantir::App for App {
+    fn frame(&mut self, ui: &mut Ui) {
+        view::build(ui, self);
+    }
+}
