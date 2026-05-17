@@ -1,6 +1,6 @@
 use palantir::{
     Align, Background, Color, Configure, Corners, Frame, HAlign, Panel, Sizing, Spacing, Stroke,
-    Text, Ui,
+    Text, Ui, VAlign,
 };
 use scenarium::prelude::{Func, Node};
 
@@ -31,7 +31,9 @@ pub fn draw(ui: &mut Ui, view_node: &ViewNode, node: &Node, func: &Func) {
         })
         .show(ui, |ui| {
             header(ui, &node.name);
-            ports_row(ui, node.inputs.len(), func.outputs.len());
+            let input_names: Vec<&str> = node.inputs.iter().map(|i| i.name.as_str()).collect();
+            let output_names: Vec<&str> = func.outputs.iter().map(|o| o.name.as_str()).collect();
+            ports_row(ui, &input_names, &output_names);
         });
 }
 
@@ -50,17 +52,17 @@ fn header(ui: &mut Ui, name: &str) {
         });
 }
 
-fn ports_row(ui: &mut Ui, n_in: usize, n_out: usize) {
+fn ports_row(ui: &mut Ui, inputs: &[&str], outputs: &[&str]) {
     Panel::hstack()
         .id_salt("ports")
         .size((Sizing::FILL, Sizing::Hug))
         .show(ui, |ui| {
-            port_column(ui, "in", n_in, Side::Left);
-            port_column(ui, "out", n_out, Side::Right);
+            port_column(ui, "in", inputs, Side::Left);
+            port_column(ui, "out", outputs, Side::Right);
         });
 }
 
-fn port_column(ui: &mut Ui, salt: &'static str, n: usize, side: Side) {
+fn port_column(ui: &mut Ui, salt: &'static str, names: &[&str], side: Side) {
     Panel::vstack()
         .id_salt(salt)
         .size((Sizing::Fill(1.0), Sizing::Hug))
@@ -71,17 +73,33 @@ fn port_column(ui: &mut Ui, salt: &'static str, n: usize, side: Side) {
             Side::Right => Align::h(HAlign::Right),
         })
         .show(ui, |ui| {
-            let (fill, margin) = match side {
-                Side::Left => (
-                    Color::hex(INPUT_COLOR),
-                    Spacing::new(-PORT_RADIUS, 0.0, 0.0, 0.0),
-                ),
-                Side::Right => (
-                    Color::hex(OUTPUT_COLOR),
-                    Spacing::new(0.0, 0.0, -PORT_RADIUS, 0.0),
-                ),
-            };
-            for _ in 0..n {
+            for (i, name) in names.iter().enumerate() {
+                port_row(ui, i, name, side);
+            }
+        });
+}
+
+/// One port = circle + label, vertically centered. Circle on the outer
+/// edge (with negative margin so it overhangs the column), label on
+/// the inner side.
+fn port_row(ui: &mut Ui, i: usize, name: &str, side: Side) {
+    let (fill, margin) = match side {
+        Side::Left => (
+            Color::hex(INPUT_COLOR),
+            Spacing::new(-PORT_RADIUS, 0.0, 0.0, 0.0),
+        ),
+        Side::Right => (
+            Color::hex(OUTPUT_COLOR),
+            Spacing::new(0.0, 0.0, -PORT_RADIUS, 0.0),
+        ),
+    };
+    Panel::hstack()
+        .id_salt(("port", i))
+        .size((Sizing::Hug, Sizing::Hug))
+        .gap(4.0)
+        .child_align(Align::v(VAlign::Center))
+        .show(ui, |ui| {
+            let circle = |ui: &mut Ui| {
                 Frame::new()
                     .auto_id()
                     .size((Sizing::Fixed(PORT_SIZE), Sizing::Fixed(PORT_SIZE)))
@@ -92,6 +110,19 @@ fn port_column(ui: &mut Ui, salt: &'static str, n: usize, side: Side) {
                         ..Default::default()
                     })
                     .show(ui);
+            };
+            let label = |ui: &mut Ui| {
+                Text::new(name.to_string()).show(ui);
+            };
+            match side {
+                Side::Left => {
+                    circle(ui);
+                    label(ui);
+                }
+                Side::Right => {
+                    label(ui);
+                    circle(ui);
+                }
             }
         });
 }
