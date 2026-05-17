@@ -1,10 +1,14 @@
+use crate::frame_result::FrameResult;
+use crate::gui::graph_ui::PortCache;
 use crate::gui::{NODE_W, PORT_COL_PAD_TOP, PORT_GAP, PORT_RADIUS, PORT_SIZE, Side};
+use crate::intent::Intent;
 use crate::scene::{Scene, SceneNode};
 use glam::Vec2;
 use palantir::{
     Align, Background, Color, Configure, Corners, Frame, HAlign, InternedStr, Panel, Rect,
     Response, Sense, Sizing, Spacing, Stroke, Text, Ui, VAlign,
 };
+use scenarium::prelude::NodeId;
 
 const NODE_FILL: u32 = 0x2d2d33;
 const NODE_BORDER: u32 = 0x5a5a66;
@@ -39,42 +43,98 @@ impl PortSpan {
     }
 }
 
-/// One graph node, composed: header band + two-column port grid.
-/// Pushes per-port world-space circle centers into `centers` and
-/// returns the spans plus the outer-panel `Response` (drag-sensed —
-/// port circles capture their own clicks so dragging only latches on
-/// the node body). `spans` is `None` until every port resolved a
-/// layout rect.
-pub struct NodeDrawResult {
-    pub spans: Option<NodePortSpans>,
-    pub response: Response,
+/// Owns rendering of every graph node plus the single active drag
+/// anchor — the press-frame `pos` is snapshotted here so each
+/// `MoveNode` target is `anchor.pos + drag_delta`, not a running
+/// integration over the moving source. Only one node can hold the
+/// pointer at a time, so one anchor slot is enough.
+///
+/// `draw_all` is the single entry point; `GraphUI` calls it once per
+/// frame with the scene and the port-center pool to fill.
+#[derive(Default)]
+pub struct NodeUI {
+    drag_anchor: Option<DragAnchor>,
 }
 
-pub fn draw(
-    ui: &mut Ui,
-    scene: &Scene,
-    node: &SceneNode,
-    centers: &mut Vec<Vec2>,
-) -> NodeDrawResult {
-    let inputs = scene.ports(node.inputs);
-    let outputs = scene.ports(node.outputs);
-    let mut spans = None;
-    let response = Panel::vstack()
-        .id_salt(("graph.node", node.id))
-        .position(node.pos)
-        .size((Sizing::Fixed(NODE_W), Sizing::Hug))
-        .sense(Sense::DRAG)
-        .background(Background {
-            fill: Color::hex(NODE_FILL).into(),
-            stroke: Stroke::solid(Color::hex(NODE_BORDER), 1.0),
-            radius: Corners::all(6.0),
-            ..Default::default()
-        })
-        .show(ui, |ui| {
-            header(ui, node.name.clone());
-            spans = ports_row(ui, inputs, outputs, centers);
-        });
-    NodeDrawResult { spans, response }
+#[derive(Clone, Copy)]
+struct DragAnchor {
+    node_id: NodeId,
+    pos: Vec2,
+}
+
+impl NodeUI {
+    /// Iterate every scene node, recording its widget tree and
+    /// pushing port circle centers into `centers`. Inserts into
+    /// `port_nodes` only when every port resolved a layout rect.
+    /// Emits an `Intent::MoveNode` for any node holding an active
+    /// LMB drag on its body (port circles capture their own clicks
+    /// via `Sense::CLICK` so drags don't latch off the port grabs).
+    pub fn draw_all(
+        &mut self,
+        ui: &mut Ui,
+        scene: &Scene,
+        ports: &mut PortCache,
+        out: &mut FrameResult,
+    ) {
+        for n in &scene.nodes {
+            if let Some(spans) = self.draw_one(ui, scene, n, &mut ports.centers, out) {
+                ports.nodes.insert(n.id, spans);
+            }
+        }
+        // Drop the anchor if its target node vanished from the graph
+        // (mid-drag delete). Without this, the slot would linger and
+        // could fire when a fresh node reused the id.
+        if let Some(a) = self.drag_anchor
+            && !scene.nodes.iter().any(|n| n.id == a.node_id)
+        {
+            self.drag_anchor = None;
+        }
+    }
+
+    fn draw_one(
+        &mut self,
+        ui: &mut Ui,
+        scene: &Scene,
+        node: &SceneNode,
+        centers: &mut Vec<Vec2>,
+        out: &mut FrameResult,
+    ) -> Option<NodePortSpans> {
+        let inputs = scene.ports(node.inputs);
+        let outputs = scene.ports(node.outputs);
+        let mut spans = None;
+        let response = Panel::vstack()
+            .id_salt(("graph.node", node.id))
+            .position(node.pos)
+            .size((Sizing::Fixed(NODE_W), Sizing::Hug))
+            .sense(Sense::DRAG)
+            .background(Background {
+                fill: Color::hex(NODE_FILL).into(),
+                stroke: Stroke::solid(Color::hex(NODE_BORDER), 1.0),
+                radius: Corners::all(6.0),
+                ..Default::default()
+            })
+            .show(ui, |ui| {
+                header(ui, node.name.clone());
+                spans = ports_row(ui, inputs, outputs, centers);
+            });
+
+        if response.drag_started() {
+            self.drag_anchor = Some(DragAnchor {
+                node_id: node.id,
+                pos: node.pos,
+            });
+        }
+        if let (Some(delta), Some(anchor)) = (response.drag_delta(), self.drag_anchor)
+            && anchor.node_id == node.id
+        {
+            out.push(Intent::MoveNode {
+                node_id: node.id,
+                to: anchor.pos + delta,
+            });
+        }
+
+        spans
+    }
 }
 
 fn header(ui: &mut Ui, name: InternedStr) {
@@ -214,6 +274,7 @@ fn circle_frame(ui: &mut Ui, fill: Color, margin: Spacing) -> Response {
     // pre-disambiguation id and gets `None` back. The parent port
     // row already has a unique `id_salt(("port", i))`, so
     // `parent.with("circle")` is unique per port.
+    //
     // Port circles sense CLICK so a press lands on the port and does
     // not fall through to the parent node panel — that's what keeps
     // node-drag from latching when the user grabs a port.

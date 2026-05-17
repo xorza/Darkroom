@@ -1,4 +1,6 @@
-pub mod node_widget;
+pub mod graph_ui;
+pub mod main_window;
+pub mod node_ui;
 
 /// Layout constants shared by the node widget (visual placement)
 /// and the connection-endpoint computer in `view.rs`. Single source

@@ -1,7 +1,6 @@
 #[allow(dead_code)]
 mod action_stack;
 mod app;
-mod frame_cache;
 #[allow(dead_code)]
 mod frame_result;
 mod gui;
@@ -9,7 +8,6 @@ mod gui;
 mod intent;
 mod model;
 mod scene;
-mod view;
 
 use palantir::{WinitHost, WinitHostConfig};
 
