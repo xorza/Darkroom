@@ -1,4 +1,5 @@
 use glam::Vec2;
+use palantir::{InternedStr, Ui};
 use scenarium::prelude::{Binding, FuncLib, NodeId};
 
 use crate::model::ViewGraph;
@@ -7,14 +8,18 @@ use crate::model::ViewGraph;
 pub struct Scene {
     pub nodes: Vec<SceneNode>,
     pub connections: Vec<SceneConnection>,
+    /// Flat pool of port-name handles. Each `SceneNode` slices into it
+    /// via `inputs` / `outputs` spans — keeps per-node allocations to
+    /// zero in steady state.
+    pub port_names: Vec<InternedStr>,
 }
 
 pub struct SceneNode {
     pub id: NodeId,
-    pub name: String,
     pub pos: Vec2,
-    pub inputs: Vec<String>,
-    pub outputs: Vec<String>,
+    pub name: InternedStr,
+    pub inputs: PortSpan,
+    pub outputs: PortSpan,
 }
 
 pub struct SceneConnection {
@@ -24,10 +29,20 @@ pub struct SceneConnection {
     pub tgt_port: usize,
 }
 
+#[derive(Clone, Copy, Default)]
+pub struct PortSpan {
+    pub start: u32,
+    pub len: u32,
+}
+
 impl Scene {
-    pub fn rebuild(&mut self, view_graph: &ViewGraph, func_lib: &FuncLib) {
+    /// Names live in palantir's per-frame text arena, which clears at
+    /// the next `Ui::frame` — so `Scene` must be rebuilt every frame
+    /// before any widget consumes it. `App::frame` enforces this.
+    pub fn rebuild(&mut self, view_graph: &ViewGraph, func_lib: &FuncLib, ui: &mut Ui) {
         self.nodes.clear();
         self.connections.clear();
+        self.port_names.clear();
 
         for vn in view_graph.view_nodes.iter() {
             let Some(node) = view_graph.graph.by_id(&vn.id) else {
@@ -36,12 +51,22 @@ impl Scene {
             let Some(func) = func_lib.by_id(&node.func_id) else {
                 continue;
             };
+            let inputs = push_port_names(
+                &mut self.port_names,
+                ui,
+                node.inputs.iter().map(|i| i.name.as_str()),
+            );
+            let outputs = push_port_names(
+                &mut self.port_names,
+                ui,
+                func.outputs.iter().map(|o| o.name.as_str()),
+            );
             self.nodes.push(SceneNode {
                 id: vn.id,
-                name: node.name.clone(),
                 pos: vn.pos,
-                inputs: node.inputs.iter().map(|i| i.name.clone()).collect(),
-                outputs: func.outputs.iter().map(|o| o.name.clone()).collect(),
+                name: ui.intern(&node.name),
+                inputs,
+                outputs,
             });
         }
 
@@ -59,4 +84,23 @@ impl Scene {
             }
         }
     }
+
+    pub fn ports(&self, span: PortSpan) -> &[InternedStr] {
+        let start = span.start as usize;
+        &self.port_names[start..start + span.len as usize]
+    }
+}
+
+fn push_port_names<'a>(
+    pool: &mut Vec<InternedStr>,
+    ui: &mut Ui,
+    names: impl Iterator<Item = &'a str>,
+) -> PortSpan {
+    let start = pool.len() as u32;
+    let mut len = 0u32;
+    for n in names {
+        pool.push(ui.intern(n));
+        len += 1;
+    }
+    PortSpan { start, len }
 }

@@ -28,7 +28,7 @@ impl App {
 
 impl palantir::App for App {
     fn frame(&mut self, ui: &mut Ui) {
-        self.scene.rebuild(&self.view_graph, &self.func_lib);
+        self.scene.rebuild(&self.view_graph, &self.func_lib, ui);
         view::build(ui, &self.scene);
     }
 }

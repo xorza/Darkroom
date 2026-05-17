@@ -3537,6 +3537,7 @@ dependencies = [
  "rayon",
  "rustc-hash 2.1.2",
  "serde",
+ "smol_str 0.2.2",
  "soa-rs",
  "strum 0.28.0",
  "thiserror 2.0.18",

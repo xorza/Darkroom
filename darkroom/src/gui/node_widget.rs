@@ -1,9 +1,9 @@
 use crate::gui::{NODE_W, PORT_COL_PAD_TOP, PORT_GAP, PORT_RADIUS, PORT_SIZE, Side};
-use crate::scene::SceneNode;
+use crate::scene::{Scene, SceneNode};
 use glam::Vec2;
 use palantir::{
-    Align, Background, Color, Configure, Corners, Frame, HAlign, Panel, Rect, Response, Sizing,
-    Spacing, Stroke, Text, Ui, VAlign,
+    Align, Background, Color, Configure, Corners, Frame, HAlign, InternedStr, Panel, Rect,
+    Response, Sizing, Spacing, Stroke, Text, Ui, VAlign,
 };
 
 const NODE_FILL: u32 = 0x2d2d33;
@@ -26,11 +26,13 @@ pub struct NodePorts {
 /// Returns the laid-out port centers (read from the prior-frame
 /// cascade snapshot via `Response::rect`) so the caller can wire
 /// connection beziers exactly to the rendered circles.
-pub fn draw(ui: &mut Ui, node: &SceneNode) -> NodePorts {
+pub fn draw(ui: &mut Ui, scene: &Scene, node: &SceneNode) -> NodePorts {
     let mut ports = NodePorts {
         inputs: Vec::new(),
         outputs: Vec::new(),
     };
+    let inputs = scene.ports(node.inputs);
+    let outputs = scene.ports(node.outputs);
     Panel::vstack()
         .id_salt(("graph.node", node.id))
         .position(node.pos)
@@ -42,13 +44,13 @@ pub fn draw(ui: &mut Ui, node: &SceneNode) -> NodePorts {
             ..Default::default()
         })
         .show(ui, |ui| {
-            header(ui, &node.name);
-            ports = ports_row(ui, &node.inputs, &node.outputs);
+            header(ui, node.name.clone());
+            ports = ports_row(ui, inputs, outputs);
         });
     ports
 }
 
-fn header(ui: &mut Ui, name: &str) {
+fn header(ui: &mut Ui, name: InternedStr) {
     Panel::vstack()
         .id_salt("header")
         .size((Sizing::FILL, Sizing::Hug))
@@ -59,12 +61,11 @@ fn header(ui: &mut Ui, name: &str) {
             ..Default::default()
         })
         .show(ui, |ui| {
-            let label = ui.intern(name);
-            Text::new(label).show(ui);
+            Text::new(name).show(ui);
         });
 }
 
-fn ports_row(ui: &mut Ui, inputs: &[String], outputs: &[String]) -> NodePorts {
+fn ports_row(ui: &mut Ui, inputs: &[InternedStr], outputs: &[InternedStr]) -> NodePorts {
     let mut np = NodePorts {
         inputs: Vec::new(),
         outputs: Vec::new(),
@@ -79,7 +80,12 @@ fn ports_row(ui: &mut Ui, inputs: &[String], outputs: &[String]) -> NodePorts {
     np
 }
 
-fn port_column(ui: &mut Ui, salt: &'static str, names: &[String], side: Side) -> Vec<Option<Vec2>> {
+fn port_column(
+    ui: &mut Ui,
+    salt: &'static str,
+    names: &[InternedStr],
+    side: Side,
+) -> Vec<Option<Vec2>> {
     let mut centers = Vec::with_capacity(names.len());
     Panel::vstack()
         .id_salt(salt)
@@ -92,7 +98,7 @@ fn port_column(ui: &mut Ui, salt: &'static str, names: &[String], side: Side) ->
         })
         .show(ui, |ui| {
             for (i, name) in names.iter().enumerate() {
-                centers.push(port_row(ui, i, name, side));
+                centers.push(port_row(ui, i, name.clone(), side));
             }
         });
     centers
@@ -102,7 +108,7 @@ fn port_column(ui: &mut Ui, salt: &'static str, names: &[String], side: Side) ->
 /// edge (with negative margin so it overhangs the column), label on
 /// the inner side. Returns the circle's center in world coords from
 /// the prior-frame layout.
-fn port_row(ui: &mut Ui, i: usize, name: &str, side: Side) -> Option<Vec2> {
+fn port_row(ui: &mut Ui, i: usize, name: InternedStr, side: Side) -> Option<Vec2> {
     let (fill, margin) = match side {
         Side::Left => (
             Color::hex(INPUT_COLOR),
@@ -122,8 +128,7 @@ fn port_row(ui: &mut Ui, i: usize, name: &str, side: Side) -> Option<Vec2> {
         .show(ui, |ui| {
             let circle = |ui: &mut Ui| circle_frame(ui, fill, margin);
             let label = |ui: &mut Ui| {
-                let label = ui.intern(name);
-                Text::new(label).show(ui);
+                Text::new(name.clone()).show(ui);
             };
             let circle_resp = match side {
                 Side::Left => {

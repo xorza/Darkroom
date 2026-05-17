@@ -32,7 +32,7 @@ pub fn build(ui: &mut Ui, scene: &Scene) {
 fn draw_nodes(ui: &mut Ui, scene: &Scene) -> HashMap<NodeId, NodePorts> {
     let mut map = HashMap::with_capacity(scene.nodes.len());
     for n in &scene.nodes {
-        let ports = node_widget::draw(ui, n);
+        let ports = node_widget::draw(ui, scene, n);
         map.insert(n.id, ports);
     }
     map
