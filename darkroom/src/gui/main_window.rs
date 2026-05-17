@@ -16,6 +16,14 @@ pub struct MainWindow {
 }
 
 impl MainWindow {
+    /// Pre-record pass: each UI subtree fills `out` with the intents
+    /// it derives from palantir's current-frame input state (drag
+    /// deltas, etc.). `App::frame` drains and applies these before
+    /// `Scene::rebuild`, so the record phase sees the latest doc.
+    pub fn prepass(&self, ui: &Ui, out: &mut FrameResult) {
+        self.graph_ui.prepass(ui, out);
+    }
+
     pub fn frame(&mut self, ui: &mut Ui, scene: &Scene, out: &mut FrameResult) {
         self.graph_ui.frame(ui, scene, out);
 

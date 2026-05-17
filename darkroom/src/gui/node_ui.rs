@@ -103,31 +103,15 @@ impl NodeUI {
         scene: &Scene,
         node: &SceneNode,
         centers: &mut Vec<Vec2>,
-        out: &mut FrameResult,
+        _out: &mut FrameResult,
     ) -> Option<NodePortSpans> {
         let inputs = scene.ports(node.inputs);
         let outputs = scene.ports(node.outputs);
 
-        // Bake any active drag delta into the position *before* the
-        // panel records, so Pass A's arrange already places the node
-        // at the cursor. `anchor.pos` is the press-frame snapshot, so
-        // `anchor.pos + delta` is absolute (doesn't double-count even
-        // if `node.pos` has already been mutated by a previously
-        // applied intent in this same gesture).
-        let effective_pos = match self.drag_anchor {
-            Some(anchor) if anchor.node_id == node.id => {
-                match ui.response_for(anchor.widget_id).drag_delta {
-                    Some(delta) => anchor.pos + delta,
-                    None => node.pos,
-                }
-            }
-            _ => node.pos,
-        };
-
         let mut spans = None;
         let response = Panel::vstack()
             .id_salt(("graph.node", node.id))
-            .position(effective_pos)
+            .position(node.pos)
             .size((Sizing::Fixed(NODE_W), Sizing::Hug))
             .sense(Sense::DRAG)
             .background(Background {
@@ -141,23 +125,36 @@ impl NodeUI {
                 spans = ports_row(ui, inputs, outputs, centers);
             });
 
+        // Latch the anchor on the press-frame edge; subsequent frames'
+        // `pending_drag_intent` peeks `response_for(widget_id)` before
+        // record runs and converts `drag_delta` into a `MoveNode`
+        // applied to `Document` upstream of `Scene::rebuild`.
         if response.drag_started() {
             self.drag_anchor = Some(DragAnchor {
                 node_id: node.id,
-                pos: effective_pos,
+                pos: node.pos,
                 widget_id: response.widget_id(),
-            });
-        }
-        if let Some(anchor) = self.drag_anchor
-            && anchor.node_id == node.id
-        {
-            out.push(Intent::MoveNode {
-                node_id: node.id,
-                to: effective_pos,
             });
         }
 
         spans
+    }
+
+    /// Pre-record pass: peek palantir's input state for any widgets
+    /// this `NodeUI` owns and push the corresponding `Intent`s into
+    /// `out`. Runs before `Scene::rebuild` in `App::frame`, so any
+    /// state mutation applied from these intents (notably drag-driven
+    /// `MoveNode`) lands in `Document` before recording — Pass A's
+    /// arrange already reflects the cursor; no Pass B relayout retry.
+    pub fn prepass(&self, ui: &Ui, out: &mut FrameResult) {
+        if let Some(anchor) = self.drag_anchor
+            && let Some(delta) = ui.response_for(anchor.widget_id).drag_delta
+        {
+            out.push(Intent::MoveNode {
+                node_id: anchor.node_id,
+                to: anchor.pos + delta,
+            });
+        }
     }
 }
 

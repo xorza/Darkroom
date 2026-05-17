@@ -48,6 +48,12 @@ pub struct GraphUI {
 }
 
 impl GraphUI {
+    /// Pre-record pass — see
+    /// [`crate::gui::node_ui::NodeUI::prepass`].
+    pub fn prepass(&self, ui: &Ui, out: &mut FrameResult) {
+        self.node_ui.prepass(ui, out);
+    }
+
     pub fn frame(&mut self, ui: &mut Ui, scene: &Scene, out: &mut FrameResult) {
         let Self { ports, node_ui } = self;
         Panel::canvas()
