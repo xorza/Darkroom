@@ -6,7 +6,7 @@ use crate::scene::{Scene, SceneNode};
 use glam::Vec2;
 use palantir::{
     Align, Background, Color, Configure, Corners, Frame, HAlign, InternedStr, Panel, Rect,
-    Response, Sense, Sizing, Spacing, Stroke, Text, Ui, VAlign,
+    Response, Sense, Sizing, Spacing, Stroke, Text, Ui, VAlign, WidgetId,
 };
 use scenarium::prelude::NodeId;
 
@@ -60,6 +60,12 @@ pub struct NodeUI {
 struct DragAnchor {
     node_id: NodeId,
     pos: Vec2,
+    /// Captured from the `drag_started` frame's `Response::widget_id()`
+    /// so subsequent frames can `ui.response_for(widget_id)` *before*
+    /// recording and bake the current `drag_delta` into `.position(...)`.
+    /// Lets the node paint at the cursor's location in Pass A directly
+    /// — no need to wait for Pass B's relayout to catch up.
+    widget_id: WidgetId,
 }
 
 impl NodeUI {
@@ -101,10 +107,27 @@ impl NodeUI {
     ) -> Option<NodePortSpans> {
         let inputs = scene.ports(node.inputs);
         let outputs = scene.ports(node.outputs);
+
+        // Bake any active drag delta into the position *before* the
+        // panel records, so Pass A's arrange already places the node
+        // at the cursor. `anchor.pos` is the press-frame snapshot, so
+        // `anchor.pos + delta` is absolute (doesn't double-count even
+        // if `node.pos` has already been mutated by a previously
+        // applied intent in this same gesture).
+        let effective_pos = match self.drag_anchor {
+            Some(anchor) if anchor.node_id == node.id => {
+                match ui.response_for(anchor.widget_id).drag_delta {
+                    Some(delta) => anchor.pos + delta,
+                    None => node.pos,
+                }
+            }
+            _ => node.pos,
+        };
+
         let mut spans = None;
         let response = Panel::vstack()
             .id_salt(("graph.node", node.id))
-            .position(node.pos)
+            .position(effective_pos)
             .size((Sizing::Fixed(NODE_W), Sizing::Hug))
             .sense(Sense::DRAG)
             .background(Background {
@@ -121,15 +144,16 @@ impl NodeUI {
         if response.drag_started() {
             self.drag_anchor = Some(DragAnchor {
                 node_id: node.id,
-                pos: node.pos,
+                pos: effective_pos,
+                widget_id: response.widget_id(),
             });
         }
-        if let (Some(delta), Some(anchor)) = (response.drag_delta(), self.drag_anchor)
+        if let Some(anchor) = self.drag_anchor
             && anchor.node_id == node.id
         {
             out.push(Intent::MoveNode {
                 node_id: node.id,
-                to: anchor.pos + delta,
+                to: effective_pos,
             });
         }
 
