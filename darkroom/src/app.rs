@@ -38,6 +38,8 @@ impl App {
 
 impl palantir::App for App {
     fn frame(&mut self, ui: &mut Ui) {
+        ui.debug_overlay.damage_rect = true;
+
         // Prepass: each UI subtree pushes input-derived intents
         // (drag-driven `MoveNode`, etc.) into `frame_result`. Drained
         // and applied *before* `Scene::rebuild`, so Pass A's record

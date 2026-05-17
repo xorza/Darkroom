@@ -91,8 +91,7 @@ impl NodeUI {
         let inputs = scene.ports(node.inputs);
         let outputs = scene.ports(node.outputs);
 
-        let mut spans = NodePortSpans::default();
-        let response = Panel::vstack()
+        let panel = Panel::vstack()
             .id_salt(("graph.node", node.id))
             .position(node.pos)
             .size((Sizing::Fixed(NODE_W), Sizing::Hug))
@@ -105,8 +104,10 @@ impl NodeUI {
             })
             .show(ui, |ui| {
                 header(ui, node.name.clone());
-                spans = ports_row(ui, inputs, outputs, widget_ids);
+                ports_row(ui, inputs, outputs, widget_ids)
             });
+        let spans = panel.inner;
+        let response = panel.response;
 
         // Latch the anchor on the press-frame edge; subsequent frames'
         // `prepass` peeks `response_for(widget_id)` before record runs
@@ -162,7 +163,6 @@ fn ports_row(
     outputs: &[InternedStr],
     widget_ids: &mut Vec<WidgetId>,
 ) -> NodePortSpans {
-    let mut spans = NodePortSpans::default();
     Panel::hstack()
         .id_salt("ports")
         .size((Sizing::FILL, Sizing::Hug))
@@ -173,12 +173,12 @@ fn ports_row(
             let start_out = widget_ids.len() as u32;
             port_column(ui, "out", outputs, Side::Right, widget_ids);
             let len_out = widget_ids.len() as u32 - start_out;
-            spans = NodePortSpans {
+            NodePortSpans {
                 inputs: Span::new(start_in, len_in),
                 outputs: Span::new(start_out, len_out),
-            };
-        });
-    spans
+            }
+        })
+        .inner
 }
 
 fn port_column(
@@ -220,7 +220,6 @@ fn port_row(ui: &mut Ui, i: usize, name: InternedStr, side: Side) -> WidgetId {
             Spacing::new(0.0, 0.0, -PORT_RADIUS, 0.0),
         ),
     };
-    let mut wid = WidgetId::default();
     Panel::hstack()
         .id_salt(("port", i))
         .size((Sizing::Hug, Sizing::Hug))
@@ -242,9 +241,9 @@ fn port_row(ui: &mut Ui, i: usize, name: InternedStr, side: Side) -> WidgetId {
                     circle(ui)
                 }
             };
-            wid = circle_resp.widget_id();
-        });
-    wid
+            circle_resp.widget_id()
+        })
+        .inner
 }
 
 fn circle_frame(ui: &mut Ui, fill: Color, margin: Spacing) -> Response {
