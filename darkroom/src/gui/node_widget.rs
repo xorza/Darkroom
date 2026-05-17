@@ -59,7 +59,8 @@ fn header(ui: &mut Ui, name: &str) {
             ..Default::default()
         })
         .show(ui, |ui| {
-            Text::new(name.to_string()).show(ui);
+            let label = ui.intern(name);
+            Text::new(label).show(ui);
         });
 }
 
@@ -121,7 +122,8 @@ fn port_row(ui: &mut Ui, i: usize, name: &str, side: Side) -> Option<Vec2> {
         .show(ui, |ui| {
             let circle = |ui: &mut Ui| circle_frame(ui, fill, margin);
             let label = |ui: &mut Ui| {
-                Text::new(name.to_string()).show(ui);
+                let label = ui.intern(name);
+                Text::new(label).show(ui);
             };
             let circle_resp = match side {
                 Side::Left => {
