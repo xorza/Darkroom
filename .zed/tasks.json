@@ -20,6 +20,18 @@
     "args": ["run", "-p", "darkroom"],
   },
   {
+    "label": "run darkroom release with tracy",
+    "command": "cargo",
+    "args": [
+      "run",
+      "--release",
+      "-p",
+      "darkroom",
+      "--features",
+      "profile-with-tracy",
+    ],
+  },
+  {
     "label": "run palantir showcase",
     "command": "cargo",
     "args": ["run", "--manifest-path", "palantir/Cargo.toml"],
