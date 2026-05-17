@@ -10,7 +10,6 @@
 //! - `avx_tests`: x86_64 AVX2 specific tests
 //! - `neon_tests`: aarch64 NEON specific tests
 
-
 mod common_tests;
 
 cfg_x86_64! {
