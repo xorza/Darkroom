@@ -1,4 +1,5 @@
 mod app;
+mod frame_cache;
 mod gui;
 mod model;
 mod scene;

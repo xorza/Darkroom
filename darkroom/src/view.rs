@@ -1,16 +1,15 @@
 use glam::Vec2;
 use palantir::{Background, Color, Configure, LineCap, LineJoin, Panel, Shape, Sizing, Ui};
-use scenarium::prelude::NodeId;
-use std::collections::HashMap;
 
-use crate::gui::node_widget::{self, NodePorts};
+use crate::frame_cache::{FrameCache, PortCache};
+use crate::gui::node_widget;
 use crate::scene::Scene;
 
 const CONN_WIDTH: f32 = 2.0;
 const CANVAS_BG: u32 = 0x1e1e1e;
 const CONN_COLOR: u32 = 0x9ec1ff;
 
-pub fn build(ui: &mut Ui, scene: &Scene) {
+pub fn build(ui: &mut Ui, scene: &Scene, cache: &mut FrameCache) {
     Panel::canvas()
         .id_salt("graph.canvas")
         .size((Sizing::FILL, Sizing::FILL))
@@ -19,35 +18,26 @@ pub fn build(ui: &mut Ui, scene: &Scene) {
             ..Default::default()
         })
         .show(ui, |ui| {
-            // Nodes first so their port `Frame`s emit responses whose
-            // `rect()` (prior-frame layout snapshot) gives us exact
-            // endpoint positions. Connections drawn second land
-            // visually on top of the node bodies — acceptable for now;
-            // moving them to a layer behind nodes is a later cleanup.
-            let port_rects = draw_nodes(ui, scene);
-            draw_connections(ui, scene, &port_rects);
+            draw_connections(ui, scene, &cache.ports);
+            cache.clear();
+            for n in &scene.nodes {
+                if let Some(spans) = node_widget::draw(ui, scene, n, &mut cache.ports.centers) {
+                    cache.ports.nodes.insert(n.id, spans);
+                }
+            }
         });
 }
 
-fn draw_nodes(ui: &mut Ui, scene: &Scene) -> HashMap<NodeId, NodePorts> {
-    let mut map = HashMap::with_capacity(scene.nodes.len());
-    for n in &scene.nodes {
-        let ports = node_widget::draw(ui, scene, n);
-        map.insert(n.id, ports);
-    }
-    map
-}
-
-fn draw_connections(ui: &mut Ui, scene: &Scene, ports: &HashMap<NodeId, NodePorts>) {
+fn draw_connections(ui: &mut Ui, scene: &Scene, ports: &PortCache) {
     let color = Color::hex(CONN_COLOR);
     for c in &scene.connections {
-        let (Some(src_ports), Some(tgt_ports)) = (ports.get(&c.src_node), ports.get(&c.tgt_node))
+        let (Some(src), Some(tgt)) = (ports.nodes.get(&c.src_node), ports.nodes.get(&c.tgt_node))
         else {
             continue;
         };
         let (Some(p0), Some(p3)) = (
-            src_ports.outputs.get(c.src_port).copied().flatten(),
-            tgt_ports.inputs.get(c.tgt_port).copied().flatten(),
+            src.outputs.get(&ports.centers, c.src_port),
+            tgt.inputs.get(&ports.centers, c.tgt_port),
         ) else {
             continue;
         };

@@ -14,4 +14,14 @@
     ],
     "tags": ["rust-test"],
   },
+  {
+    "label": "run darkroom",
+    "command": "cargo",
+    "args": ["run", "-p", "darkroom"],
+  },
+  {
+    "label": "run palantir showcase",
+    "command": "cargo",
+    "args": ["run", "--manifest-path", "palantir/Cargo.toml"],
+  },
 ]

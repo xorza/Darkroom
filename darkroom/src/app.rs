@@ -3,6 +3,7 @@ use palantir::Ui;
 use scenarium::prelude::FuncLib;
 use scenarium::testing::{TestFuncHooks, test_func_lib, test_graph};
 
+use crate::frame_cache::FrameCache;
 use crate::model::ViewGraph;
 use crate::scene::Scene;
 use crate::view;
@@ -11,6 +12,7 @@ pub struct App {
     pub view_graph: ViewGraph,
     pub func_lib: FuncLib,
     pub scene: Scene,
+    pub frame_cache: FrameCache,
 }
 
 impl App {
@@ -22,6 +24,7 @@ impl App {
             view_graph,
             func_lib,
             scene: Scene::default(),
+            frame_cache: FrameCache::default(),
         }
     }
 }
@@ -29,6 +32,6 @@ impl App {
 impl palantir::App for App {
     fn frame(&mut self, ui: &mut Ui) {
         self.scene.rebuild(&self.view_graph, &self.func_lib, ui);
-        view::build(ui, &self.scene);
+        view::build(ui, &self.scene, &mut self.frame_cache);
     }
 }

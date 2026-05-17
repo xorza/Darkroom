@@ -12,27 +12,48 @@ const HEADER_FILL: u32 = 0x3a3a44;
 const INPUT_COLOR: u32 = 0x77c97a;
 const OUTPUT_COLOR: u32 = 0xe39a4a;
 
-/// World-space centers of each port circle, indexed positionally
-/// (matches `Node.inputs[i]` / `Func.outputs[i]`). `None` on the
-/// first frame a port is visible (no prior-frame layout yet) and
-/// during the frame a node's `view_node.pos` changes (the rect read
-/// here lags layout by one frame).
-pub struct NodePorts {
-    pub inputs: Vec<Option<Vec2>>,
-    pub outputs: Vec<Option<Vec2>>,
+/// Per-node slices into the flat `PortCache.centers` pool — one for
+/// inputs, one for outputs. Indexing matches positional `Node.inputs[i]`
+/// / `Func.outputs[i]`. A node only earns an entry in `PortCache.nodes`
+/// after every port resolved a layout rect (frame 2+); first-frame
+/// nodes simply don't appear in the cache, and `draw_connections`
+/// skips them via `nodes.get(&id)` returning `None`.
+#[derive(Clone, Copy, Default)]
+pub struct NodePortSpans {
+    pub inputs: PortSpan,
+    pub outputs: PortSpan,
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct PortSpan {
+    pub start: u32,
+    pub len: u32,
+}
+
+impl PortSpan {
+    pub fn get(self, pool: &[Vec2], idx: usize) -> Option<Vec2> {
+        if idx >= self.len as usize {
+            return None;
+        }
+        Some(pool[self.start as usize + idx])
+    }
 }
 
 /// One graph node, composed: header band + two-column port grid.
-/// Returns the laid-out port centers (read from the prior-frame
-/// cascade snapshot via `Response::rect`) so the caller can wire
-/// connection beziers exactly to the rendered circles.
-pub fn draw(ui: &mut Ui, scene: &Scene, node: &SceneNode) -> NodePorts {
-    let mut ports = NodePorts {
-        inputs: Vec::new(),
-        outputs: Vec::new(),
-    };
+/// Pushes per-port world-space circle centers into `centers` and
+/// returns the spans covering this node's input and output rows.
+/// Returns `None` if any port failed to resolve a layout rect — the
+/// caller should `centers.truncate(start)` to drop the partial push so
+/// the pool indexes stay tight.
+pub fn draw(
+    ui: &mut Ui,
+    scene: &Scene,
+    node: &SceneNode,
+    centers: &mut Vec<Vec2>,
+) -> Option<NodePortSpans> {
     let inputs = scene.ports(node.inputs);
     let outputs = scene.ports(node.outputs);
+    let mut spans = None;
     Panel::vstack()
         .id_salt(("graph.node", node.id))
         .position(node.pos)
@@ -45,9 +66,9 @@ pub fn draw(ui: &mut Ui, scene: &Scene, node: &SceneNode) -> NodePorts {
         })
         .show(ui, |ui| {
             header(ui, node.name.clone());
-            ports = ports_row(ui, inputs, outputs);
+            spans = ports_row(ui, inputs, outputs, centers);
         });
-    ports
+    spans
 }
 
 fn header(ui: &mut Ui, name: InternedStr) {
@@ -65,19 +86,41 @@ fn header(ui: &mut Ui, name: InternedStr) {
         });
 }
 
-fn ports_row(ui: &mut Ui, inputs: &[InternedStr], outputs: &[InternedStr]) -> NodePorts {
-    let mut np = NodePorts {
-        inputs: Vec::new(),
-        outputs: Vec::new(),
-    };
+fn ports_row(
+    ui: &mut Ui,
+    inputs: &[InternedStr],
+    outputs: &[InternedStr],
+    centers: &mut Vec<Vec2>,
+) -> Option<NodePortSpans> {
+    let node_start = centers.len();
+    let mut spans = None;
     Panel::hstack()
         .id_salt("ports")
         .size((Sizing::FILL, Sizing::Hug))
         .show(ui, |ui| {
-            np.inputs = port_column(ui, "in", inputs, Side::Left);
-            np.outputs = port_column(ui, "out", outputs, Side::Right);
+            let start_in = centers.len() as u32;
+            let in_ok = port_column(ui, "in", inputs, Side::Left, centers);
+            let len_in = centers.len() as u32 - start_in;
+            let start_out = centers.len() as u32;
+            let out_ok = port_column(ui, "out", outputs, Side::Right, centers);
+            let len_out = centers.len() as u32 - start_out;
+            if in_ok && out_ok {
+                spans = Some(NodePortSpans {
+                    inputs: PortSpan {
+                        start: start_in,
+                        len: len_in,
+                    },
+                    outputs: PortSpan {
+                        start: start_out,
+                        len: len_out,
+                    },
+                });
+            }
         });
-    np
+    if spans.is_none() {
+        centers.truncate(node_start);
+    }
+    spans
 }
 
 fn port_column(
@@ -85,8 +128,9 @@ fn port_column(
     salt: &'static str,
     names: &[InternedStr],
     side: Side,
-) -> Vec<Option<Vec2>> {
-    let mut centers = Vec::with_capacity(names.len());
+    centers: &mut Vec<Vec2>,
+) -> bool {
+    let mut all_ok = true;
     Panel::vstack()
         .id_salt(salt)
         .size((Sizing::Fill(1.0), Sizing::Hug))
@@ -98,10 +142,20 @@ fn port_column(
         })
         .show(ui, |ui| {
             for (i, name) in names.iter().enumerate() {
-                centers.push(port_row(ui, i, name.clone(), side));
+                match port_row(ui, i, name.clone(), side) {
+                    Some(c) => centers.push(c),
+                    None => {
+                        all_ok = false;
+                        // Placeholder so positional indexing within this
+                        // column stays aligned for any siblings that
+                        // *did* resolve; caller truncates centers back
+                        // to the node's start position when bailing.
+                        centers.push(Vec2::ZERO);
+                    }
+                }
             }
         });
-    centers
+    all_ok
 }
 
 /// One port = circle + label, vertically centered. Circle on the outer
