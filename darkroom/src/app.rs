@@ -12,6 +12,7 @@ use crate::scene::Scene;
 
 const UNDO_HISTORY: usize = 100;
 
+#[derive(Debug)]
 pub struct App {
     pub view_graph: ViewGraph,
     pub func_lib: FuncLib,

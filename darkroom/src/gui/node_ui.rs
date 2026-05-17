@@ -22,13 +22,13 @@ const OUTPUT_COLOR: u32 = 0xe39a4a;
 /// after every port resolved a layout rect (frame 2+); first-frame
 /// nodes simply don't appear in the cache, and `draw_connections`
 /// skips them via `nodes.get(&id)` returning `None`.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct NodePortSpans {
     pub inputs: PortSpan,
     pub outputs: PortSpan,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct PortSpan {
     pub start: u32,
     pub len: u32,
@@ -51,12 +51,12 @@ impl PortSpan {
 ///
 /// `draw_all` is the single entry point; `GraphUI` calls it once per
 /// frame with the scene and the port-center pool to fill.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct NodeUI {
     drag_anchor: Option<DragAnchor>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct DragAnchor {
     node_id: NodeId,
     pos: Vec2,

@@ -9,7 +9,7 @@ use crate::intent::Intent;
 /// Renderer-side code emits `Intent`s; this struct lets the App
 /// orchestrate apply + undo-stack push from one place, instead of
 /// scattering `ViewGraph` mutations across widget bodies.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct FrameResult {
     pub intents: Vec<Intent>,
 }

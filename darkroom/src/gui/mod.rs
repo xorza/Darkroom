@@ -14,7 +14,7 @@ pub const PORT_COL_PAD_TOP: f32 = 6.0;
 /// Vertical gap between adjacent ports in a column.
 pub const PORT_GAP: f32 = 6.0;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Side {
     Left,
     Right,

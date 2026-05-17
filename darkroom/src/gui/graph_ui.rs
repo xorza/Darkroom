@@ -23,7 +23,7 @@ const CONN_COLOR: u32 = 0x9ec1ff;
 /// ports resolved a layout rect (frame 2+); first-frame nodes are
 /// absent from `nodes`, so `draw_connections` skips them via
 /// `nodes.get(&id)`.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct PortCache {
     pub centers: Vec<Vec2>,
     pub nodes: HashMap<NodeId, NodePortSpans>,
@@ -41,7 +41,7 @@ impl PortCache {
 /// renders every graph node. `frame` draws connections from the
 /// previous frame's snapshot, then delegates node rendering to
 /// `NodeUI::draw_all` which refills the cache.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct GraphUI {
     pub ports: PortCache,
     pub node_ui: NodeUI,

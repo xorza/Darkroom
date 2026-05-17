@@ -4,7 +4,7 @@ use scenarium::prelude::{Binding, FuncLib, NodeId};
 
 use crate::model::ViewGraph;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Scene {
     pub nodes: Vec<SceneNode>,
     pub connections: Vec<SceneConnection>,
@@ -14,6 +14,7 @@ pub struct Scene {
     pub port_names: Vec<InternedStr>,
 }
 
+#[derive(Debug)]
 pub struct SceneNode {
     pub id: NodeId,
     pub pos: Vec2,
@@ -22,6 +23,7 @@ pub struct SceneNode {
     pub outputs: PortSpan,
 }
 
+#[derive(Debug)]
 pub struct SceneConnection {
     pub src_node: NodeId,
     pub src_port: usize,
@@ -29,7 +31,7 @@ pub struct SceneConnection {
     pub tgt_port: usize,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct PortSpan {
     pub start: u32,
     pub len: u32,
