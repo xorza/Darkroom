@@ -66,7 +66,7 @@ fn port_column(ui: &mut Ui, salt: &'static str, n: usize, side: Side) {
         .size((Sizing::Fill(1.0), Sizing::Hug))
         .padding(Spacing::new(0.0, PORT_COL_PAD_TOP, 0.0, PORT_COL_PAD_TOP))
         .gap(PORT_GAP)
-        .align(match side {
+        .child_align(match side {
             Side::Left => Align::h(HAlign::Left),
             Side::Right => Align::h(HAlign::Right),
         })
