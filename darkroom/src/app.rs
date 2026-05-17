@@ -3,16 +3,23 @@ use palantir::Ui;
 use scenarium::prelude::FuncLib;
 use scenarium::testing::{TestFuncHooks, test_func_lib, test_graph};
 
+use crate::action_stack::ActionStack;
 use crate::frame_cache::FrameCache;
+use crate::frame_result::FrameResult;
+use crate::intent::{apply_step, build_step};
 use crate::model::ViewGraph;
 use crate::scene::Scene;
 use crate::view;
+
+const UNDO_HISTORY: usize = 100;
 
 pub struct App {
     pub view_graph: ViewGraph,
     pub func_lib: FuncLib,
     pub scene: Scene,
     pub frame_cache: FrameCache,
+    pub frame_result: FrameResult,
+    pub action_stack: ActionStack,
 }
 
 impl App {
@@ -25,13 +32,29 @@ impl App {
             func_lib,
             scene: Scene::default(),
             frame_cache: FrameCache::default(),
+            frame_result: FrameResult::default(),
+            action_stack: ActionStack::new(UNDO_HISTORY),
         }
     }
 }
 
 impl palantir::App for App {
     fn frame(&mut self, ui: &mut Ui) {
+        self.frame_result.clear();
         self.scene.rebuild(&self.view_graph, &self.func_lib, ui);
-        view::build(ui, &self.scene, &mut self.frame_cache);
+        view::build(
+            ui,
+            &self.scene,
+            &mut self.frame_cache,
+            &mut self.frame_result,
+        );
+        for intent in self.frame_result.drain() {
+            if intent.is_noop_against(&self.view_graph) {
+                continue;
+            }
+            let step = build_step(intent, &self.view_graph);
+            apply_step(&step, &mut self.view_graph);
+            self.action_stack.push_current(std::slice::from_ref(&step));
+        }
     }
 }

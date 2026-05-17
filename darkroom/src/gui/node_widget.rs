@@ -115,6 +115,8 @@ fn ports_row(
                         len: len_out,
                     },
                 });
+            } else {
+                ui.request_relayout();
             }
         });
     if spans.is_none() {

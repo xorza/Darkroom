@@ -2,6 +2,7 @@ use glam::Vec2;
 use palantir::{Background, Color, Configure, LineCap, LineJoin, Panel, Shape, Sizing, Ui};
 
 use crate::frame_cache::{FrameCache, PortCache};
+use crate::frame_result::FrameResult;
 use crate::gui::node_widget;
 use crate::scene::Scene;
 
@@ -9,7 +10,7 @@ const CONN_WIDTH: f32 = 2.0;
 const CANVAS_BG: u32 = 0x1e1e1e;
 const CONN_COLOR: u32 = 0x9ec1ff;
 
-pub fn build(ui: &mut Ui, scene: &Scene, cache: &mut FrameCache) {
+pub fn build(ui: &mut Ui, scene: &Scene, cache: &mut FrameCache, _out: &mut FrameResult) {
     Panel::canvas()
         .id_salt("graph.canvas")
         .size((Sizing::FILL, Sizing::FILL))
