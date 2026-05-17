@@ -4,11 +4,13 @@ use scenarium::prelude::FuncLib;
 use scenarium::testing::{TestFuncHooks, test_func_lib, test_graph};
 
 use crate::model::ViewGraph;
+use crate::scene::Scene;
 use crate::view;
 
 pub struct App {
     pub view_graph: ViewGraph,
     pub func_lib: FuncLib,
+    pub scene: Scene,
 }
 
 impl App {
@@ -19,12 +21,14 @@ impl App {
         Self {
             view_graph,
             func_lib,
+            scene: Scene::default(),
         }
     }
 }
 
 impl palantir::App for App {
     fn frame(&mut self, ui: &mut Ui) {
-        view::build(ui, self);
+        self.scene.rebuild(&self.view_graph, &self.func_lib);
+        view::build(ui, &self.scene);
     }
 }

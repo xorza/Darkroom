@@ -1,6 +1,7 @@
 mod app;
 mod gui;
 mod model;
+mod scene;
 mod view;
 
 use palantir::{WinitHost, WinitHostConfig};

@@ -1,12 +1,10 @@
+use crate::gui::{NODE_W, PORT_COL_PAD_TOP, PORT_GAP, PORT_RADIUS, PORT_SIZE, Side};
+use crate::scene::SceneNode;
 use glam::Vec2;
 use palantir::{
     Align, Background, Color, Configure, Corners, Frame, HAlign, Panel, Rect, Response, Sizing,
     Spacing, Stroke, Text, Ui, VAlign,
 };
-use scenarium::prelude::{Func, Node};
-
-use crate::gui::{NODE_W, PORT_COL_PAD_TOP, PORT_GAP, PORT_RADIUS, PORT_SIZE, Side};
-use crate::model::ViewNode;
 
 const NODE_FILL: u32 = 0x2d2d33;
 const NODE_BORDER: u32 = 0x5a5a66;
@@ -28,14 +26,14 @@ pub struct NodePorts {
 /// Returns the laid-out port centers (read from the prior-frame
 /// cascade snapshot via `Response::rect`) so the caller can wire
 /// connection beziers exactly to the rendered circles.
-pub fn draw(ui: &mut Ui, view_node: &ViewNode, node: &Node, func: &Func) -> NodePorts {
+pub fn draw(ui: &mut Ui, node: &SceneNode) -> NodePorts {
     let mut ports = NodePorts {
         inputs: Vec::new(),
         outputs: Vec::new(),
     };
     Panel::vstack()
-        .id_salt(("graph.node", view_node.id))
-        .position(view_node.pos)
+        .id_salt(("graph.node", node.id))
+        .position(node.pos)
         .size((Sizing::Fixed(NODE_W), Sizing::Hug))
         .background(Background {
             fill: Color::hex(NODE_FILL).into(),
@@ -45,9 +43,7 @@ pub fn draw(ui: &mut Ui, view_node: &ViewNode, node: &Node, func: &Func) -> Node
         })
         .show(ui, |ui| {
             header(ui, &node.name);
-            let input_names: Vec<&str> = node.inputs.iter().map(|i| i.name.as_str()).collect();
-            let output_names: Vec<&str> = func.outputs.iter().map(|o| o.name.as_str()).collect();
-            ports = ports_row(ui, &input_names, &output_names);
+            ports = ports_row(ui, &node.inputs, &node.outputs);
         });
     ports
 }
@@ -67,7 +63,7 @@ fn header(ui: &mut Ui, name: &str) {
         });
 }
 
-fn ports_row(ui: &mut Ui, inputs: &[&str], outputs: &[&str]) -> NodePorts {
+fn ports_row(ui: &mut Ui, inputs: &[String], outputs: &[String]) -> NodePorts {
     let mut np = NodePorts {
         inputs: Vec::new(),
         outputs: Vec::new(),
@@ -82,7 +78,7 @@ fn ports_row(ui: &mut Ui, inputs: &[&str], outputs: &[&str]) -> NodePorts {
     np
 }
 
-fn port_column(ui: &mut Ui, salt: &'static str, names: &[&str], side: Side) -> Vec<Option<Vec2>> {
+fn port_column(ui: &mut Ui, salt: &'static str, names: &[String], side: Side) -> Vec<Option<Vec2>> {
     let mut centers = Vec::with_capacity(names.len());
     Panel::vstack()
         .id_salt(salt)
