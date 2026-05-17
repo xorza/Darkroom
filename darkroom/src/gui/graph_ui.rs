@@ -50,7 +50,7 @@ pub struct GraphUI {
 impl GraphUI {
     /// Pre-record pass — see
     /// [`crate::gui::node_ui::NodeUI::prepass`].
-    pub fn prepass(&self, ui: &Ui, out: &mut FrameResult) {
+    pub fn prepass(&mut self, ui: &Ui, out: &mut FrameResult) {
         self.node_ui.prepass(ui, out);
     }
 

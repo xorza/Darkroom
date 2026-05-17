@@ -130,15 +130,30 @@ impl NodeUI {
     /// state mutation applied from these intents (notably drag-driven
     /// `MoveNode`) lands in `Document` before recording — Pass A's
     /// arrange already reflects the cursor; no Pass B relayout retry.
-    pub fn prepass(&self, ui: &Ui, out: &mut FrameResult) {
-        if let Some(anchor) = self.drag_anchor
-            && let Some(delta) = ui.response_for(anchor.widget_id).drag_delta
-        {
-            out.push(Intent::MoveNode {
-                node_id: anchor.node_id,
-                to: anchor.pos + delta,
-            });
+    pub fn prepass(&mut self, ui: &Ui, out: &mut FrameResult) {
+        let Some(anchor) = self.drag_anchor else {
+            return;
+        };
+        let resp = ui.response_for(anchor.widget_id);
+        // `drag_started` on a still-active anchor means a *new* gesture
+        // just latched on the same widget — `record` will replace the
+        // anchor this frame; emitting now with the stale `anchor.pos`
+        // makes the node snap to the previous gesture's start point.
+        if resp.drag_started {
+            self.drag_anchor = None;
+            return;
         }
+        // No `drag_delta` means the drag isn't latched anymore (release
+        // or pointer-left-surface). Drop the anchor so the next gesture
+        // starts fresh.
+        let Some(delta) = resp.drag_delta else {
+            self.drag_anchor = None;
+            return;
+        };
+        out.push(Intent::MoveNode {
+            node_id: anchor.node_id,
+            to: anchor.pos + delta,
+        });
     }
 }
 
