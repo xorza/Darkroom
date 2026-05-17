@@ -1,6 +1,6 @@
 use glam::Vec2;
 use palantir::{
-    Background, Color, Configure, LineCap, LineJoin, Panel, Shape, Sizing, Ui, WidgetId,
+    Background, Color, Configure, LineCap, LineJoin, Panel, Scroll, Shape, Sizing, Ui, WidgetId,
 };
 use scenarium::prelude::NodeId;
 use std::collections::HashMap;
@@ -56,17 +56,28 @@ impl GraphUI {
 
     pub fn frame(&mut self, ui: &mut Ui, scene: &Scene, out: &mut FrameResult) {
         let Self { ports, node_ui } = self;
-        Panel::canvas()
-            .id_salt("graph.canvas")
+        // Outer Scroll provides pan / wheel-zoom / pinch — the inner
+        // Canvas hosts absolutely-positioned nodes and the connection
+        // beziers, sized large enough that all nodes fit inside its
+        // bounds (Scroll's content-extent is the canvas's outer rect).
+        Scroll::both()
+            .id_salt("graph.scroll")
+            .with_zoom()
+            .hide_bars()
             .size((Sizing::FILL, Sizing::FILL))
             .background(Background {
                 fill: Color::hex(CANVAS_BG).into(),
                 ..Default::default()
             })
             .show(ui, |ui| {
-                draw_connections(ui, scene, ports);
-                ports.clear();
-                node_ui.draw_all(ui, scene, ports, out);
+                Panel::canvas()
+                    .id_salt("graph.canvas")
+                    .size((Sizing::Hug, Sizing::Hug))
+                    .show(ui, |ui| {
+                        draw_connections(ui, scene, ports);
+                        ports.clear();
+                        node_ui.draw_all(ui, scene, ports, out);
+                    });
             });
     }
 }
