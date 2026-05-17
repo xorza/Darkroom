@@ -6,7 +6,7 @@ use scenarium::testing::{TestFuncHooks, test_func_lib, test_graph};
 use crate::action_stack::ActionStack;
 use crate::frame_result::FrameResult;
 use crate::gui::main_window::MainWindow;
-use crate::intent::{apply_step, build_step};
+use crate::intent::{apply_step, build_step, requires_relayout};
 use crate::model::ViewGraph;
 use crate::scene::Scene;
 
@@ -44,13 +44,18 @@ impl palantir::App for App {
         self.scene.rebuild(&self.view_graph, &self.func_lib);
         self.main_window
             .frame(ui, &self.scene, &mut self.frame_result);
+        let mut relayout = false;
         for intent in self.frame_result.drain() {
             if intent.is_noop_against(&self.view_graph) {
                 continue;
             }
             let step = build_step(intent, &self.view_graph);
             apply_step(&step, &mut self.view_graph);
+            relayout |= requires_relayout(&step);
             self.action_stack.push_current(std::slice::from_ref(&step));
+        }
+        if relayout {
+            ui.request_relayout();
         }
     }
 }

@@ -481,6 +481,27 @@ pub fn affects_computation(step: &UndoStep) -> bool {
     }
 }
 
+/// Whether replaying this step changes anything the layout engine
+/// reads (node positions, sizes, label text length, viewport
+/// transform). When true, `App::frame` calls `ui.request_relayout()`
+/// after applying the batch so the next pass picks up the change.
+/// UI-only state with no measure/arrange input (selection, cache
+/// behavior, model-only bindings) returns false. Exhaustive on
+/// purpose — a new variant must declare its layout effect.
+pub fn requires_relayout(step: &UndoStep) -> bool {
+    match step {
+        UndoStep::AddNode { .. }
+        | UndoStep::RemoveNode { .. }
+        | UndoStep::MoveNode { .. }
+        | UndoStep::RenameNode { .. }
+        | UndoStep::SetViewport { .. } => true,
+        UndoStep::SetInput { .. }
+        | UndoStep::SelectNode { .. }
+        | UndoStep::SetCacheBehavior { .. }
+        | UndoStep::SetEventConnection { .. } => false,
+    }
+}
+
 /// Identifies "same continuous gesture" for undo coalescing. The undo
 /// stack collapses consecutive steps with the same key into one entry
 /// (keeping the *first* "from" payload). Two viewport changes coalesce;
