@@ -12,6 +12,7 @@ use crate::scene::Scene;
 const CONN_WIDTH: f32 = 2.0;
 const CANVAS_BG: u32 = 0x1e1e1e;
 const CONN_COLOR: u32 = 0x9ec1ff;
+const CANVAS_SLACK: f32 = 400.0;
 
 /// Interframe handles for every port that was recorded last pass. We
 /// stash the `WidgetId`s (not the resolved rects) and resolve them
@@ -64,6 +65,7 @@ impl GraphUI {
             .id_salt("graph.scroll")
             .with_zoom()
             .hide_bars()
+            .content_margin(CANVAS_SLACK)
             .size((Sizing::FILL, Sizing::FILL))
             .background(Background {
                 fill: Color::hex(CANVAS_BG).into(),
