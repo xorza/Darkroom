@@ -11,6 +11,18 @@ use crate::gui::node_widget::NodePortSpans;
 #[derive(Default)]
 pub struct FrameCache {
     pub ports: PortCache,
+    /// Anchor snapshotted on `drag_started` so subsequent frames can
+    /// compute `target = anchor.pos + drag_delta` instead of integrating
+    /// over a moving source. Set per-drag, sticks until the next drag
+    /// starts; the `node_id` identity gate keeps a stale anchor from
+    /// firing for an unrelated node.
+    pub drag_anchor: Option<DragAnchor>,
+}
+
+#[derive(Clone, Copy)]
+pub struct DragAnchor {
+    pub node_id: NodeId,
+    pub pos: Vec2,
 }
 
 impl FrameCache {

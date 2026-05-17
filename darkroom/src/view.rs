@@ -1,16 +1,17 @@
 use glam::Vec2;
 use palantir::{Background, Color, Configure, LineCap, LineJoin, Panel, Shape, Sizing, Ui};
 
-use crate::frame_cache::{FrameCache, PortCache};
+use crate::frame_cache::{DragAnchor, FrameCache, PortCache};
 use crate::frame_result::FrameResult;
 use crate::gui::node_widget;
+use crate::intent::Intent;
 use crate::scene::Scene;
 
 const CONN_WIDTH: f32 = 2.0;
 const CANVAS_BG: u32 = 0x1e1e1e;
 const CONN_COLOR: u32 = 0x9ec1ff;
 
-pub fn build(ui: &mut Ui, scene: &Scene, cache: &mut FrameCache, _out: &mut FrameResult) {
+pub fn build(ui: &mut Ui, scene: &Scene, cache: &mut FrameCache, out: &mut FrameResult) {
     Panel::canvas()
         .id_salt("graph.canvas")
         .size((Sizing::FILL, Sizing::FILL))
@@ -22,11 +23,42 @@ pub fn build(ui: &mut Ui, scene: &Scene, cache: &mut FrameCache, _out: &mut Fram
             draw_connections(ui, scene, &cache.ports);
             cache.clear();
             for n in &scene.nodes {
-                if let Some(spans) = node_widget::draw(ui, scene, n, &mut cache.ports.centers) {
+                let result = node_widget::draw(ui, scene, n, &mut cache.ports.centers);
+                if let Some(spans) = result.spans {
                     cache.ports.nodes.insert(n.id, spans);
                 }
+                handle_node_drag(n.id, n.pos, &result.response, cache, out);
             }
         });
+}
+
+/// Latch a drag anchor on the press frame, then convert each frame's
+/// cumulative `drag_delta` into an absolute `MoveNode` target. The
+/// anchor's `pos` stays at the press-frame position even as `n.pos`
+/// updates over the gesture, so integration error doesn't accumulate.
+fn handle_node_drag(
+    node_id: scenarium::prelude::NodeId,
+    pos: Vec2,
+    response: &palantir::Response,
+    cache: &mut FrameCache,
+    out: &mut FrameResult,
+) {
+    if response.drag_started() {
+        cache.drag_anchor = Some(DragAnchor { node_id, pos });
+    }
+    let Some(delta) = response.drag_delta() else {
+        return;
+    };
+    let Some(anchor) = cache.drag_anchor else {
+        return;
+    };
+    if anchor.node_id != node_id {
+        return;
+    }
+    out.push(Intent::MoveNode {
+        node_id,
+        to: anchor.pos + delta,
+    });
 }
 
 fn draw_connections(ui: &mut Ui, scene: &Scene, ports: &PortCache) {

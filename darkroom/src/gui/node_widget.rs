@@ -3,7 +3,7 @@ use crate::scene::{Scene, SceneNode};
 use glam::Vec2;
 use palantir::{
     Align, Background, Color, Configure, Corners, Frame, HAlign, InternedStr, Panel, Rect,
-    Response, Sizing, Spacing, Stroke, Text, Ui, VAlign,
+    Response, Sense, Sizing, Spacing, Stroke, Text, Ui, VAlign,
 };
 
 const NODE_FILL: u32 = 0x2d2d33;
@@ -41,23 +41,29 @@ impl PortSpan {
 
 /// One graph node, composed: header band + two-column port grid.
 /// Pushes per-port world-space circle centers into `centers` and
-/// returns the spans covering this node's input and output rows.
-/// Returns `None` if any port failed to resolve a layout rect — the
-/// caller should `centers.truncate(start)` to drop the partial push so
-/// the pool indexes stay tight.
+/// returns the spans plus the outer-panel `Response` (drag-sensed —
+/// port circles capture their own clicks so dragging only latches on
+/// the node body). `spans` is `None` until every port resolved a
+/// layout rect.
+pub struct NodeDrawResult {
+    pub spans: Option<NodePortSpans>,
+    pub response: Response,
+}
+
 pub fn draw(
     ui: &mut Ui,
     scene: &Scene,
     node: &SceneNode,
     centers: &mut Vec<Vec2>,
-) -> Option<NodePortSpans> {
+) -> NodeDrawResult {
     let inputs = scene.ports(node.inputs);
     let outputs = scene.ports(node.outputs);
     let mut spans = None;
-    Panel::vstack()
+    let response = Panel::vstack()
         .id_salt(("graph.node", node.id))
         .position(node.pos)
         .size((Sizing::Fixed(NODE_W), Sizing::Hug))
+        .sense(Sense::DRAG)
         .background(Background {
             fill: Color::hex(NODE_FILL).into(),
             stroke: Stroke::solid(Color::hex(NODE_BORDER), 1.0),
@@ -68,7 +74,7 @@ pub fn draw(
             header(ui, node.name.clone());
             spans = ports_row(ui, inputs, outputs, centers);
         });
-    spans
+    NodeDrawResult { spans, response }
 }
 
 fn header(ui: &mut Ui, name: InternedStr) {
@@ -208,10 +214,14 @@ fn circle_frame(ui: &mut Ui, fill: Color, margin: Spacing) -> Response {
     // pre-disambiguation id and gets `None` back. The parent port
     // row already has a unique `id_salt(("port", i))`, so
     // `parent.with("circle")` is unique per port.
+    // Port circles sense CLICK so a press lands on the port and does
+    // not fall through to the parent node panel — that's what keeps
+    // node-drag from latching when the user grabs a port.
     Frame::new()
         .id_salt("circle")
         .size((Sizing::Fixed(PORT_SIZE), Sizing::Fixed(PORT_SIZE)))
         .margin(margin)
+        .sense(Sense::CLICK)
         .background(Background {
             fill: fill.into(),
             radius: Corners::all(PORT_RADIUS),

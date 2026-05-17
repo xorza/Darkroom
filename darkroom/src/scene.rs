@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{InternedStr, Ui};
+use palantir::InternedStr;
 use scenarium::prelude::{Binding, FuncLib, NodeId};
 
 use crate::model::ViewGraph;
@@ -39,7 +39,7 @@ impl Scene {
     /// Names live in palantir's per-frame text arena, which clears at
     /// the next `Ui::frame` — so `Scene` must be rebuilt every frame
     /// before any widget consumes it. `App::frame` enforces this.
-    pub fn rebuild(&mut self, view_graph: &ViewGraph, func_lib: &FuncLib, ui: &mut Ui) {
+    pub fn rebuild(&mut self, view_graph: &ViewGraph, func_lib: &FuncLib) {
         self.nodes.clear();
         self.connections.clear();
         self.port_names.clear();
