@@ -44,7 +44,7 @@ impl palantir::App for App {
         // sees the freshly-mutated doc — no Pass B retry for drag.
         self.frame_result.clear();
         self.main_window.prepass(ui, &mut self.frame_result);
-        let _ = self.drain_intents();
+        let relayout = self.drain_intents();
 
         // Record. Widgets push intents derived from record-time state
         // (button clicks, edit commits) into `frame_result`.
@@ -55,7 +55,7 @@ impl palantir::App for App {
         // Post-record drain — these intents reflect mutations that
         // only the now-just-completed record could surface, so they
         // *do* warrant a relayout retry when applicable.
-        if self.drain_intents() {
+        if self.drain_intents() | relayout {
             ui.request_relayout();
         }
     }
