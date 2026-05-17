@@ -1,5 +1,7 @@
 use glam::Vec2;
-use palantir::{Background, Color, Configure, LineCap, LineJoin, Panel, Shape, Sizing, Ui};
+use palantir::{
+    Background, Color, Configure, LineCap, LineJoin, Panel, Shape, Sizing, Ui, WidgetId,
+};
 use scenarium::prelude::NodeId;
 use std::collections::HashMap;
 
@@ -11,36 +13,34 @@ const CONN_WIDTH: f32 = 2.0;
 const CANVAS_BG: u32 = 0x1e1e1e;
 const CONN_COLOR: u32 = 0x9ec1ff;
 
-/// Port centers captured at the end of frame N and consumed at the
-/// start of frame N+1. Lets connections draw *before* nodes (so
-/// beziers land behind node bodies) while still threading the real
-/// laid-out port centers. Same one-frame lag the prior `Response::rect`
-/// snapshot had, just hoisted into an explicit interframe carrier.
+/// Interframe handles for every port that was recorded last pass. We
+/// stash the `WidgetId`s (not the resolved rects) and resolve them
+/// fresh via [`Ui::response_for`] each time we draw connections —
+/// that way the rect we read reflects whichever pass last completed
+/// `post_record` (Pass A's arrange when Pass B is running for a
+/// drag-triggered relayout, etc.).
 ///
-/// Flat layout: `centers` pools all `Vec2`s in node-then-input-then-output
-/// order; `nodes` maps a `NodeId` to the pair of `PortSpan`s slicing
-/// into the pool. A node only earns an entry once every one of its
-/// ports resolved a layout rect (frame 2+); first-frame nodes are
-/// absent from `nodes`, so `draw_connections` skips them via
-/// `nodes.get(&id)`.
+/// Flat layout: `widget_ids` pools all port `WidgetId`s in
+/// node-then-input-then-output order; `nodes` maps each `NodeId` to
+/// the pair of `PortSpan`s slicing into the pool.
 #[derive(Default, Debug)]
 pub struct PortCache {
-    pub centers: Vec<Vec2>,
+    pub widget_ids: Vec<WidgetId>,
     pub nodes: HashMap<NodeId, NodePortSpans>,
 }
 
 impl PortCache {
     pub fn clear(&mut self) {
-        self.centers.clear();
+        self.widget_ids.clear();
         self.nodes.clear();
     }
 }
 
-/// Canvas-level UI scope: owns the port cache (interframe port-center
-/// snapshot used to anchor connection beziers) and the `NodeUI` that
-/// renders every graph node. `frame` draws connections from the
-/// previous frame's snapshot, then delegates node rendering to
-/// `NodeUI::draw_all` which refills the cache.
+/// Canvas-level UI scope: owns the port-widget-id cache and the
+/// `NodeUI` that renders every graph node. `frame` draws connections
+/// (resolving port rects through `Ui::response_for`), then delegates
+/// node rendering to `NodeUI::draw_all` which refills the cache for
+/// the next pass / frame.
 #[derive(Default, Debug)]
 pub struct GraphUI {
     pub ports: PortCache,
@@ -78,10 +78,13 @@ fn draw_connections(ui: &mut Ui, scene: &Scene, ports: &PortCache) {
         else {
             continue;
         };
-        let (Some(p0), Some(p3)) = (
-            src.outputs.get(&ports.centers, c.src_port),
-            tgt.inputs.get(&ports.centers, c.tgt_port),
+        let (Some(&src_wid), Some(&tgt_wid)) = (
+            ports.widget_ids[src.outputs.range()].get(c.src_port),
+            ports.widget_ids[tgt.inputs.range()].get(c.tgt_port),
         ) else {
+            continue;
+        };
+        let (Some(p0), Some(p3)) = (port_center(ui, src_wid), port_center(ui, tgt_wid)) else {
             continue;
         };
         let dx = ((p3.x - p0.x).abs() * 0.5).max(40.0);
@@ -97,4 +100,8 @@ fn draw_connections(ui: &mut Ui, scene: &Scene, ports: &PortCache) {
             tolerance: 0.5,
         });
     }
+}
+
+fn port_center(ui: &Ui, wid: WidgetId) -> Option<Vec2> {
+    ui.response_for(wid).rect.map(|r| r.center())
 }

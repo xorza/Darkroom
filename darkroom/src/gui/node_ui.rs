@@ -3,10 +3,11 @@ use crate::gui::graph_ui::PortCache;
 use crate::gui::{NODE_W, PORT_COL_PAD_TOP, PORT_GAP, PORT_RADIUS, PORT_SIZE, Side};
 use crate::intent::Intent;
 use crate::scene::{Scene, SceneNode};
+use common::Span;
 use glam::Vec2;
 use palantir::{
-    Align, Background, Color, Configure, Corners, Frame, HAlign, InternedStr, Panel, Rect,
-    Response, Sense, Sizing, Spacing, Stroke, Text, Ui, VAlign, WidgetId,
+    Align, Background, Color, Configure, Corners, Frame, HAlign, InternedStr, Panel, Response,
+    Sense, Sizing, Spacing, Stroke, Text, Ui, VAlign, WidgetId,
 };
 use scenarium::prelude::NodeId;
 
@@ -16,31 +17,14 @@ const HEADER_FILL: u32 = 0x3a3a44;
 const INPUT_COLOR: u32 = 0x77c97a;
 const OUTPUT_COLOR: u32 = 0xe39a4a;
 
-/// Per-node slices into the flat `PortCache.centers` pool — one for
-/// inputs, one for outputs. Indexing matches positional `Node.inputs[i]`
-/// / `Func.outputs[i]`. A node only earns an entry in `PortCache.nodes`
-/// after every port resolved a layout rect (frame 2+); first-frame
-/// nodes simply don't appear in the cache, and `draw_connections`
-/// skips them via `nodes.get(&id)` returning `None`.
+/// Per-node slices into the flat `PortCache.widget_ids` pool — one
+/// `Span` for inputs, one for outputs. Indexing matches positional
+/// `Node.inputs[i]` / `Func.outputs[i]`. Read a port through
+/// `pool[span.range()].get(i)`.
 #[derive(Clone, Copy, Default, Debug)]
 pub struct NodePortSpans {
-    pub inputs: PortSpan,
-    pub outputs: PortSpan,
-}
-
-#[derive(Clone, Copy, Default, Debug)]
-pub struct PortSpan {
-    pub start: u32,
-    pub len: u32,
-}
-
-impl PortSpan {
-    pub fn get(self, pool: &[Vec2], idx: usize) -> Option<Vec2> {
-        if idx >= self.len as usize {
-            return None;
-        }
-        Some(pool[self.start as usize + idx])
-    }
+    pub inputs: Span,
+    pub outputs: Span,
 }
 
 /// Owns rendering of every graph node plus the single active drag
@@ -83,9 +67,8 @@ impl NodeUI {
         out: &mut FrameResult,
     ) {
         for n in &scene.nodes {
-            if let Some(spans) = self.draw_one(ui, scene, n, &mut ports.centers, out) {
-                ports.nodes.insert(n.id, spans);
-            }
+            let spans = self.draw_one(ui, scene, n, &mut ports.widget_ids, out);
+            ports.nodes.insert(n.id, spans);
         }
         // Drop the anchor if its target node vanished from the graph
         // (mid-drag delete). Without this, the slot would linger and
@@ -102,13 +85,13 @@ impl NodeUI {
         ui: &mut Ui,
         scene: &Scene,
         node: &SceneNode,
-        centers: &mut Vec<Vec2>,
+        widget_ids: &mut Vec<WidgetId>,
         _out: &mut FrameResult,
-    ) -> Option<NodePortSpans> {
+    ) -> NodePortSpans {
         let inputs = scene.ports(node.inputs);
         let outputs = scene.ports(node.outputs);
 
-        let mut spans = None;
+        let mut spans = NodePortSpans::default();
         let response = Panel::vstack()
             .id_salt(("graph.node", node.id))
             .position(node.pos)
@@ -122,13 +105,13 @@ impl NodeUI {
             })
             .show(ui, |ui| {
                 header(ui, node.name.clone());
-                spans = ports_row(ui, inputs, outputs, centers);
+                spans = ports_row(ui, inputs, outputs, widget_ids);
             });
 
         // Latch the anchor on the press-frame edge; subsequent frames'
-        // `pending_drag_intent` peeks `response_for(widget_id)` before
-        // record runs and converts `drag_delta` into a `MoveNode`
-        // applied to `Document` upstream of `Scene::rebuild`.
+        // `prepass` peeks `response_for(widget_id)` before record runs
+        // and converts `drag_delta` into a `MoveNode` applied to
+        // `Document` upstream of `Scene::rebuild`.
         if response.drag_started() {
             self.drag_anchor = Some(DragAnchor {
                 node_id: node.id,
@@ -177,36 +160,24 @@ fn ports_row(
     ui: &mut Ui,
     inputs: &[InternedStr],
     outputs: &[InternedStr],
-    centers: &mut Vec<Vec2>,
-) -> Option<NodePortSpans> {
-    let node_start = centers.len();
-    let mut spans = None;
+    widget_ids: &mut Vec<WidgetId>,
+) -> NodePortSpans {
+    let mut spans = NodePortSpans::default();
     Panel::hstack()
         .id_salt("ports")
         .size((Sizing::FILL, Sizing::Hug))
         .show(ui, |ui| {
-            let start_in = centers.len() as u32;
-            let in_ok = port_column(ui, "in", inputs, Side::Left, centers);
-            let len_in = centers.len() as u32 - start_in;
-            let start_out = centers.len() as u32;
-            let out_ok = port_column(ui, "out", outputs, Side::Right, centers);
-            let len_out = centers.len() as u32 - start_out;
-            if in_ok && out_ok {
-                spans = Some(NodePortSpans {
-                    inputs: PortSpan {
-                        start: start_in,
-                        len: len_in,
-                    },
-                    outputs: PortSpan {
-                        start: start_out,
-                        len: len_out,
-                    },
-                });
-            }
+            let start_in = widget_ids.len() as u32;
+            port_column(ui, "in", inputs, Side::Left, widget_ids);
+            let len_in = widget_ids.len() as u32 - start_in;
+            let start_out = widget_ids.len() as u32;
+            port_column(ui, "out", outputs, Side::Right, widget_ids);
+            let len_out = widget_ids.len() as u32 - start_out;
+            spans = NodePortSpans {
+                inputs: Span::new(start_in, len_in),
+                outputs: Span::new(start_out, len_out),
+            };
         });
-    if spans.is_none() {
-        centers.truncate(node_start);
-    }
     spans
 }
 
@@ -215,9 +186,8 @@ fn port_column(
     salt: &'static str,
     names: &[InternedStr],
     side: Side,
-    centers: &mut Vec<Vec2>,
-) -> bool {
-    let mut all_ok = true;
+    widget_ids: &mut Vec<WidgetId>,
+) {
     Panel::vstack()
         .id_salt(salt)
         .size((Sizing::Fill(1.0), Sizing::Hug))
@@ -229,27 +199,17 @@ fn port_column(
         })
         .show(ui, |ui| {
             for (i, name) in names.iter().enumerate() {
-                match port_row(ui, i, name.clone(), side) {
-                    Some(c) => centers.push(c),
-                    None => {
-                        all_ok = false;
-                        // Placeholder so positional indexing within this
-                        // column stays aligned for any siblings that
-                        // *did* resolve; caller truncates centers back
-                        // to the node's start position when bailing.
-                        centers.push(Vec2::ZERO);
-                    }
-                }
+                widget_ids.push(port_row(ui, i, name.clone(), side));
             }
         });
-    all_ok
 }
 
 /// One port = circle + label, vertically centered. Circle on the outer
 /// edge (with negative margin so it overhangs the column), label on
-/// the inner side. Returns the circle's center in world coords from
-/// the prior-frame layout.
-fn port_row(ui: &mut Ui, i: usize, name: InternedStr, side: Side) -> Option<Vec2> {
+/// the inner side. Returns the circle's stable `WidgetId` so the
+/// canvas-level `draw_connections` can resolve its world rect on
+/// demand via `Ui::response_for`.
+fn port_row(ui: &mut Ui, i: usize, name: InternedStr, side: Side) -> WidgetId {
     let (fill, margin) = match side {
         Side::Left => (
             Color::hex(INPUT_COLOR),
@@ -260,7 +220,7 @@ fn port_row(ui: &mut Ui, i: usize, name: InternedStr, side: Side) -> Option<Vec2
             Spacing::new(0.0, 0.0, -PORT_RADIUS, 0.0),
         ),
     };
-    let mut center = None;
+    let mut wid = WidgetId::default();
     Panel::hstack()
         .id_salt(("port", i))
         .size((Sizing::Hug, Sizing::Hug))
@@ -282,9 +242,9 @@ fn port_row(ui: &mut Ui, i: usize, name: InternedStr, side: Side) -> Option<Vec2
                     circle(ui)
                 }
             };
-            center = rect_center(circle_resp.rect());
+            wid = circle_resp.widget_id();
         });
-    center
+    wid
 }
 
 fn circle_frame(ui: &mut Ui, fill: Color, margin: Spacing) -> Response {
@@ -310,8 +270,4 @@ fn circle_frame(ui: &mut Ui, fill: Color, margin: Spacing) -> Response {
             ..Default::default()
         })
         .show(ui)
-}
-
-fn rect_center(r: Option<Rect>) -> Option<Vec2> {
-    r.map(|r| r.min + Vec2::new(r.size.w * 0.5, r.size.h * 0.5))
 }
