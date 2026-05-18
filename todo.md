@@ -1,0 +1,1 @@
+batch render curves
