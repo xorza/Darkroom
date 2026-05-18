@@ -45,14 +45,15 @@ impl palantir::App for App {
         // and applied *before* `Scene::rebuild`, so Pass A's record
         // sees the freshly-mutated doc — no Pass B retry for drag.
         self.frame_result.clear();
-        self.main_window.prepass(ui, &mut self.frame_result);
+        self.main_window
+            .prepass(ui, &self.scene, &mut self.frame_result);
         let relayout = self.drain_intents();
 
         // Record. Widgets push intents derived from record-time state
         // (button clicks, edit commits) into `frame_result`.
         self.scene.rebuild(&self.document);
         self.main_window
-            .frame(ui, &self.scene, &mut self.frame_result);
+            .frame(ui, &mut self.scene, &mut self.frame_result);
 
         // Post-record drain — these intents reflect mutations that
         // only the now-just-completed record could surface, so they

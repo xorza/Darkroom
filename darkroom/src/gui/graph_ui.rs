@@ -1,6 +1,7 @@
 use glam::Vec2;
 use palantir::{
-    Background, Configure, LineCap, LineJoin, Panel, Scroll, Shape, Sizing, Spacing, Ui, WidgetId,
+    Background, Configure, LineCap, LineJoin, Panel, PointerEvent, PointerSense, Sense, Shape,
+    Sizing, TranslateScale, Ui, WidgetId,
 };
 use scenarium::prelude::NodeId;
 use std::collections::HashMap;
@@ -10,12 +11,18 @@ use crate::gui::node_ui::{NodePortSpans, NodeUI};
 use crate::scene::Scene;
 use crate::theme::AppContext;
 
-/// Extra pan slack on every side of the node bbox, so the user always
-/// has room to drag a node past the current leading/trailing edge
-/// without immediately hitting the offset clamp. Reapplied every
-/// frame on top of the bbox-driven margin so the slack stays
-/// consistent as nodes move.
-const CANVAS_SLACK: f32 = 400.0;
+/// Bounds on the canvas zoom factor. Wheel/pinch deltas multiply in;
+/// clamped each frame so pathological gestures can't drive it to 0
+/// (which would make the inverse transform explode) or to a value so
+/// large that the world coordinates underflow.
+const MIN_ZOOM: f32 = 0.1;
+const MAX_ZOOM: f32 = 10.0;
+/// Notches → multiplicative factor. `1.1` per wheel notch matches the
+/// feel of most node editors (Blender, Houdini's network view).
+const ZOOM_PER_NOTCH: f32 = 1.1;
+/// Touchpad-pixel scroll → zoom. Smaller exponent than `ZOOM_PER_NOTCH`
+/// because pixel deltas arrive in much larger counts per gesture.
+const ZOOM_PER_PIXEL: f32 = 1.0015;
 
 /// Interframe handles for every port that was recorded last pass. We
 /// stash the `WidgetId`s (not the resolved rects) and resolve them
@@ -40,96 +47,167 @@ impl PortCache {
     }
 }
 
-/// Canvas-level UI scope: owns the port-widget-id cache and the
-/// `NodeUI` that renders every graph node. `frame` draws connections
-/// (resolving port rects through `Ui::response_for`), then delegates
-/// node rendering to `NodeUI::draw_all` which refills the cache for
-/// the next pass / frame.
+/// Canvas-level UI scope: owns the port-widget-id cache, the
+/// `NodeUI` that renders every graph node, and the manual pan/zoom
+/// transform applied to the inner canvas. `frame` reads palantir's
+/// pointer-event stream (drag on the outer canvas → pan, wheel/pinch
+/// → zoom-about-cursor) and writes the result into [`Scene::pan`] /
+/// [`Scene::zoom`], which then drive the inner canvas's
+/// `TranslateScale`.
 #[derive(Default, Debug)]
 pub struct GraphUI {
     pub ports: PortCache,
     pub node_ui: NodeUI,
+    /// `Scene::pan` snapshot captured at the frame the active pan-drag
+    /// latched. While the drag is active, `scene.pan = anchor +
+    /// drag_delta`. Lives on `GraphUI` because it's input bookkeeping
+    /// (lifetime = one gesture), not viewport state.
+    pan_anchor: Option<Vec2>,
 }
 
 impl GraphUI {
     /// Pre-record pass — see
     /// [`crate::gui::node_ui::NodeUI::prepass`].
-    pub fn prepass(&mut self, ui: &Ui, ctx: &AppContext<'_>, out: &mut FrameResult) {
-        self.node_ui.prepass(ui, ctx, out);
+    pub fn prepass(&mut self, ui: &Ui, ctx: &AppContext<'_>, scene: &Scene, out: &mut FrameResult) {
+        self.node_ui.prepass(ui, ctx, scene, out);
     }
 
     pub fn frame(
         &mut self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
-        scene: &Scene,
+        scene: &mut Scene,
         out: &mut FrameResult,
     ) {
-        let Self { ports, node_ui } = self;
-        // Outer Scroll provides pan / wheel-zoom / pinch — the inner
-        // Canvas hosts absolutely-positioned nodes and the connection
-        // beziers. Canvas hugs the bounding box of its **positive**
-        // children only (palantir's `Sizing::Hug` rule); negatively-
-        // placed nodes render outside the hugged rect and are
-        // reachable through the dynamic `content_margin` below.
-        //
-        // The margin tracks the live scene bbox each frame: the
-        // leading side grows by `|min(0, min node.pos)|` so dragging
-        // a node past origin always leaves enough pan slack to scroll
-        // back to it. Per-frame recompute is fine — there are at most
-        // a few dozen nodes and `Spacing` is 8 bytes. No palantir
-        // internals are involved; this is plain user-side wiring on
-        // top of `Scroll::content_margin`.
-        let mut bb_min = Vec2::ZERO;
-        for n in &scene.nodes {
-            bb_min = bb_min.min(n.pos);
-        }
-        let margin = Spacing::new(
-            -bb_min.x.min(0.0) + CANVAS_SLACK,
-            -bb_min.y.min(0.0) + CANVAS_SLACK,
-            CANVAS_SLACK,
-            CANVAS_SLACK,
-        );
-        Scroll::both()
-            .id_salt("graph.scroll")
-            .with_zoom()
-            .hide_bars()
-            .content_margin(margin)
+        // Wake the host on scroll / pinch even when the cursor isn't
+        // over an interactive widget — the outer canvas itself only
+        // senses DRAG, so without this subscription the frame would
+        // sleep through wheel ticks.
+        ui.subscribe_pointer(PointerSense::SCROLL);
+
+        // Apply pan + zoom input *before* recording, so this frame's
+        // transform reflects the latest gesture. `response_for` reads
+        // current-frame input state (per its doc), so the drag deltas
+        // here are this frame's, not last frame's — same pattern node
+        // drag uses via `NodeUI::prepass`. Without this, the transform
+        // would always lag by one frame and dragging would feel sticky.
+        self.apply_pan_drag(ui, scene);
+        apply_scroll_zoom(ui, scene);
+
+        let Self {
+            ports,
+            node_ui,
+            pan_anchor: _,
+        } = self;
+        let pan_val = scene.pan;
+        let zoom_val = scene.zoom;
+
+        // Outer canvas: covers the whole pane, paints the canvas
+        // background, captures drag gestures on empty space for pan.
+        // Node panels are descendants of the *inner* canvas (which
+        // carries the pan/zoom transform), so the cursor hit-tests to
+        // the node first; landing on bare canvas falls through to this
+        // outer `Sense::DRAG` and latches a pan.
+        Panel::canvas()
+            .id(outer_canvas_widget_id())
             .size((Sizing::FILL, Sizing::FILL))
+            .sense(Sense::DRAG)
             .background(Background {
                 fill: ctx.theme.canvas_bg.into(),
                 ..Default::default()
             })
             .show(ui, |ui| {
-                // Canvas top-left in *pre-transform* world coords.
-                // `response_for(...).rect` is the post-cascade visible
-                // rect (clipped by the Scroll viewport), so its `min`
-                // jumps when the canvas pans partly off-screen. The
-                // pre-transform layout rect is unclipped and not
-                // affected by Scroll's transform — exactly what shape
-                // owner-local geometry expects.
-                let canvas_origin = ui
-                    .response_for(canvas_widget_id())
-                    .layout_rect
-                    .map(|r| r.min)
-                    .unwrap_or(Vec2::ZERO);
                 Panel::canvas()
-                    .id(canvas_widget_id())
-                    .size((Sizing::Hug, Sizing::Hug))
+                    .id(inner_canvas_widget_id())
+                    .size((Sizing::FILL, Sizing::FILL))
+                    .transform(TranslateScale::new(pan_val, zoom_val))
                     .show(ui, |ui| {
+                        // Inner canvas's pre-transform origin. Shapes
+                        // and child node panels recorded inside this
+                        // closure share the inner canvas's transform
+                        // (palantir's `Panel::transform` applies to
+                        // the body: child subtrees AND direct
+                        // shapes), so port `layout_rect`s and bezier
+                        // endpoints stay aligned at every zoom.
+                        let canvas_origin = ui
+                            .response_for(inner_canvas_widget_id())
+                            .layout_rect
+                            .map(|r| r.min)
+                            .unwrap_or(Vec2::ZERO);
                         draw_connections(ui, ctx, scene, ports, canvas_origin);
                         ports.clear();
                         node_ui.draw_all(ui, ctx, scene, ports, out);
                     });
             });
     }
+
+    /// Read the outer canvas's drag state from the previous frame's
+    /// cascade (via `response_for`) and bake it into `scene.pan` so
+    /// the transform recorded *this* frame already reflects the
+    /// in-flight gesture. Mirrors how `NodeUI::prepass` handles node
+    /// drags — pre-record application avoids the visible 1-frame lag
+    /// that "apply after `Panel::show`" would introduce.
+    fn apply_pan_drag(&mut self, ui: &Ui, scene: &mut Scene) {
+        let resp = ui.response_for(outer_canvas_widget_id());
+        if resp.drag_started {
+            self.pan_anchor = Some(scene.pan);
+        }
+        match (self.pan_anchor, resp.drag_delta) {
+            (Some(anchor), Some(d)) => scene.pan = anchor + d,
+            (Some(_), None) => self.pan_anchor = None,
+            _ => {}
+        }
+    }
 }
 
-/// Verbatim `WidgetId` for the graph canvas. Hashed once from a
-/// static string so the id is stable across frames and reachable
-/// from `Ui::response_for` without round-tripping through palantir's
-/// parent-mixed `make_persistent_id` chain.
-const fn canvas_widget_id() -> WidgetId {
+fn apply_scroll_zoom(ui: &Ui, scene: &mut Scene) {
+    let Some(cursor) = ui.pointer_pos() else {
+        return;
+    };
+    let outer_origin = ui
+        .response_for(outer_canvas_widget_id())
+        .layout_rect
+        .map(|r| r.min)
+        .unwrap_or(Vec2::ZERO);
+    let cursor_local = cursor - outer_origin;
+    for ev in ui.pointer_events() {
+        let factor = match *ev {
+            PointerEvent::Scroll { pixels, lines, .. } => {
+                ZOOM_PER_NOTCH.powf(lines.y) * ZOOM_PER_PIXEL.powf(pixels.y)
+            }
+            PointerEvent::Zoom { factor, .. } => factor,
+            _ => continue,
+        };
+        zoom_about(scene, cursor_local, factor);
+    }
+}
+
+/// Multiply `scene.zoom` by `factor` while holding the pre-transform
+/// point under `pivot_local` fixed in the outer canvas. Standard
+/// zoom-about-cursor algebra: world point under cursor =
+/// (pivot - pan) / zoom; choose new pan so the same world point stays
+/// under the same screen pixel after scaling.
+fn zoom_about(scene: &mut Scene, pivot_local: Vec2, factor: f32) {
+    if !factor.is_finite() || factor <= 0.0 {
+        return;
+    }
+    let new_zoom = (scene.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
+    let effective = new_zoom / scene.zoom;
+    scene.pan = pivot_local - (pivot_local - scene.pan) * effective;
+    scene.zoom = new_zoom;
+}
+
+/// Stable id for the outer (pan-capture) canvas. `auto_stable` mixes
+/// `file!()`/`line!()` so calls from different source lines stay
+/// distinct; here we only need the id to survive between frames.
+const fn outer_canvas_widget_id() -> WidgetId {
+    WidgetId::auto_stable()
+}
+
+/// Stable id for the inner (transformed) canvas. Used both as the
+/// widget seed and for resolving the canvas's pre-transform origin
+/// in `port_center`.
+const fn inner_canvas_widget_id() -> WidgetId {
     WidgetId::auto_stable()
 }
 

@@ -22,12 +22,12 @@ impl MainWindow {
     /// it derives from palantir's current-frame input state (drag
     /// deltas, etc.). `App::frame` drains and applies these before
     /// `Scene::rebuild`, so the record phase sees the latest doc.
-    pub fn prepass(&mut self, ui: &Ui, out: &mut FrameResult) {
+    pub fn prepass(&mut self, ui: &Ui, scene: &Scene, out: &mut FrameResult) {
         let ctx = AppContext::new(&self.theme);
-        self.graph_ui.prepass(ui, &ctx, out);
+        self.graph_ui.prepass(ui, &ctx, scene, out);
     }
 
-    pub fn frame(&mut self, ui: &mut Ui, scene: &Scene, out: &mut FrameResult) {
+    pub fn frame(&mut self, ui: &mut Ui, scene: &mut Scene, out: &mut FrameResult) {
         let ctx = AppContext::new(&self.theme);
         self.graph_ui.frame(ui, &ctx, scene, out);
 

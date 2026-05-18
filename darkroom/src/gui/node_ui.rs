@@ -128,7 +128,13 @@ impl NodeUI {
     /// state mutation applied from these intents (notably drag-driven
     /// `MoveNode`) lands in `Document` before recording — Pass A's
     /// arrange already reflects the cursor; no Pass B relayout retry.
-    pub fn prepass(&mut self, ui: &Ui, _ctx: &AppContext<'_>, out: &mut FrameResult) {
+    pub fn prepass(
+        &mut self,
+        ui: &Ui,
+        _ctx: &AppContext<'_>,
+        scene: &Scene,
+        out: &mut FrameResult,
+    ) {
         let Some(anchor) = self.drag_anchor else {
             return;
         };
@@ -148,9 +154,13 @@ impl NodeUI {
             self.drag_anchor = None;
             return;
         };
+        // `drag_delta` is in screen pixels; node positions live in the
+        // canvas's pre-transform frame. Divide by zoom so cursor travel
+        // matches node travel at every zoom level.
+        let zoom = if scene.zoom > 0.0 { scene.zoom } else { 1.0 };
         out.push(Intent::MoveNode {
             node_id: anchor.node_id,
-            to: anchor.pos + delta,
+            to: anchor.pos + delta / zoom,
         });
     }
 }

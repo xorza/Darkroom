@@ -4,7 +4,7 @@ use scenarium::prelude::{Binding, NodeId};
 
 use crate::document::Document;
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct Scene {
     pub nodes: Vec<SceneNode>,
     pub connections: Vec<SceneConnection>,
@@ -12,6 +12,25 @@ pub struct Scene {
     /// via `inputs` / `outputs` spans — keeps per-node allocations to
     /// zero in steady state.
     pub port_names: Vec<InternedStr>,
+    /// Viewport translation (screen pixels) applied to the graph
+    /// canvas. Preserved across `rebuild` because it's view state, not
+    /// derived from `Document`.
+    pub pan: Vec2,
+    /// Viewport zoom factor (1.0 = identity). Same preservation rule
+    /// as `pan`.
+    pub zoom: f32,
+}
+
+impl Default for Scene {
+    fn default() -> Self {
+        Self {
+            nodes: Vec::new(),
+            connections: Vec::new(),
+            port_names: Vec::new(),
+            pan: Vec2::ZERO,
+            zoom: 1.0,
+        }
+    }
 }
 
 #[derive(Debug)]
