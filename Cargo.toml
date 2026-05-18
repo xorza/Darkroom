@@ -3,7 +3,6 @@ members = [
     "common",
     "scenarium",
     "darkroom",
-    "darkroom-egui",
     "lens",
     "lumos"
 ]
@@ -25,7 +24,6 @@ common = { path = "common" }
 quickbench = { path = "quickbench" }
 scenarium = { path = "scenarium" }
 darkroom = { path = "darkroom" }
-darkroom-egui = { path = "darkroom-egui" }
 imaginarium = { path = "imaginarium", features = ["wgpu"] }
 lens = { path = "lens" }
 palantir = { path = "palantir" }

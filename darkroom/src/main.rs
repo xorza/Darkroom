@@ -9,6 +9,7 @@ mod gui;
 mod intent;
 mod model;
 mod scene;
+mod theme;
 
 use palantir::{WinitHost, WinitHostConfig};
 

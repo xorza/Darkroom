@@ -3,6 +3,7 @@ use crate::gui::graph_ui::PortCache;
 use crate::gui::{NODE_W, PORT_COL_PAD_TOP, PORT_GAP, PORT_RADIUS, PORT_SIZE, Side};
 use crate::intent::Intent;
 use crate::scene::{Scene, SceneNode};
+use crate::theme::AppContext;
 use common::Span;
 use glam::Vec2;
 use palantir::{
@@ -10,12 +11,6 @@ use palantir::{
     Sense, Sizing, Spacing, Stroke, Text, Ui, VAlign, WidgetId,
 };
 use scenarium::prelude::NodeId;
-
-const NODE_FILL: u32 = 0x2d2d33;
-const NODE_BORDER: u32 = 0x5a5a66;
-const HEADER_FILL: u32 = 0x3a3a44;
-const INPUT_COLOR: u32 = 0x77c97a;
-const OUTPUT_COLOR: u32 = 0xe39a4a;
 
 /// Per-node slices into the flat `PortCache.widget_ids` pool — one
 /// `Span` for inputs, one for outputs. Indexing matches positional
@@ -62,12 +57,13 @@ impl NodeUI {
     pub fn draw_all(
         &mut self,
         ui: &mut Ui,
+        ctx: &AppContext<'_>,
         scene: &Scene,
         ports: &mut PortCache,
         out: &mut FrameResult,
     ) {
         for n in &scene.nodes {
-            let spans = self.draw_one(ui, scene, n, &mut ports.widget_ids, out);
+            let spans = self.draw_one(ui, ctx, scene, n, &mut ports.widget_ids, out);
             ports.nodes.insert(n.id, spans);
         }
         // Drop the anchor if its target node vanished from the graph
@@ -83,6 +79,7 @@ impl NodeUI {
     fn draw_one(
         &mut self,
         ui: &mut Ui,
+        ctx: &AppContext<'_>,
         scene: &Scene,
         node: &SceneNode,
         widget_ids: &mut Vec<WidgetId>,
@@ -90,6 +87,7 @@ impl NodeUI {
     ) -> NodePortSpans {
         let inputs = scene.ports(node.inputs);
         let outputs = scene.ports(node.outputs);
+        let theme = ctx.theme;
 
         let panel = Panel::vstack()
             .id_salt(("graph.node", node.id))
@@ -97,14 +95,14 @@ impl NodeUI {
             .size((Sizing::Fixed(NODE_W), Sizing::Hug))
             .sense(Sense::DRAG)
             .background(Background {
-                fill: Color::hex(NODE_FILL).into(),
-                stroke: Stroke::solid(Color::hex(NODE_BORDER), 1.0),
-                radius: Corners::all(6.0),
+                fill: theme.node_fill.into(),
+                stroke: Stroke::solid(theme.node_border, theme.node_border_width),
+                radius: Corners::all(theme.node_corner_radius),
                 ..Default::default()
             })
             .show(ui, |ui| {
-                header(ui, node.name.clone());
-                ports_row(ui, inputs, outputs, widget_ids)
+                header(ui, ctx, node.name.clone());
+                ports_row(ui, ctx, inputs, outputs, widget_ids)
             });
         let spans = panel.inner;
         let response = panel.response;
@@ -130,7 +128,7 @@ impl NodeUI {
     /// state mutation applied from these intents (notably drag-driven
     /// `MoveNode`) lands in `Document` before recording — Pass A's
     /// arrange already reflects the cursor; no Pass B relayout retry.
-    pub fn prepass(&mut self, ui: &Ui, out: &mut FrameResult) {
+    pub fn prepass(&mut self, ui: &Ui, _ctx: &AppContext<'_>, out: &mut FrameResult) {
         let Some(anchor) = self.drag_anchor else {
             return;
         };
@@ -157,14 +155,16 @@ impl NodeUI {
     }
 }
 
-fn header(ui: &mut Ui, name: InternedStr) {
+fn header(ui: &mut Ui, ctx: &AppContext<'_>, name: InternedStr) {
+    let theme = ctx.theme;
+    let r = theme.header_corner_radius;
     Panel::vstack()
         .id_salt("header")
         .size((Sizing::FILL, Sizing::Hug))
         .padding(Spacing::xy(8.0, 4.0))
         .background(Background {
-            fill: Color::hex(HEADER_FILL).into(),
-            radius: Corners::new(6.0, 6.0, 0.0, 0.0),
+            fill: theme.header_fill.into(),
+            radius: Corners::new(r, r, 0.0, 0.0),
             ..Default::default()
         })
         .show(ui, |ui| {
@@ -174,6 +174,7 @@ fn header(ui: &mut Ui, name: InternedStr) {
 
 fn ports_row(
     ui: &mut Ui,
+    ctx: &AppContext<'_>,
     inputs: &[InternedStr],
     outputs: &[InternedStr],
     widget_ids: &mut Vec<WidgetId>,
@@ -183,10 +184,10 @@ fn ports_row(
         .size((Sizing::FILL, Sizing::Hug))
         .show(ui, |ui| {
             let start_in = widget_ids.len() as u32;
-            port_column(ui, "in", inputs, Side::Left, widget_ids);
+            port_column(ui, ctx, "in", inputs, Side::Left, widget_ids);
             let len_in = widget_ids.len() as u32 - start_in;
             let start_out = widget_ids.len() as u32;
-            port_column(ui, "out", outputs, Side::Right, widget_ids);
+            port_column(ui, ctx, "out", outputs, Side::Right, widget_ids);
             let len_out = widget_ids.len() as u32 - start_out;
             NodePortSpans {
                 inputs: Span::new(start_in, len_in),
@@ -198,11 +199,16 @@ fn ports_row(
 
 fn port_column(
     ui: &mut Ui,
+    ctx: &AppContext<'_>,
     salt: &'static str,
     names: &[InternedStr],
     side: Side,
     widget_ids: &mut Vec<WidgetId>,
 ) {
+    let fill = match side {
+        Side::Left => ctx.theme.input_port,
+        Side::Right => ctx.theme.output_port,
+    };
     Panel::vstack()
         .id_salt(salt)
         .size((Sizing::Fill(1.0), Sizing::Hug))
@@ -214,7 +220,7 @@ fn port_column(
         })
         .show(ui, |ui| {
             for (i, name) in names.iter().enumerate() {
-                widget_ids.push(port_row(ui, i, name.clone(), side));
+                widget_ids.push(port_row(ui, i, name.clone(), side, fill));
             }
         });
 }
@@ -224,16 +230,10 @@ fn port_column(
 /// the inner side. Returns the circle's stable `WidgetId` so the
 /// canvas-level `draw_connections` can resolve its world rect on
 /// demand via `Ui::response_for`.
-fn port_row(ui: &mut Ui, i: usize, name: InternedStr, side: Side) -> WidgetId {
-    let (fill, margin) = match side {
-        Side::Left => (
-            Color::hex(INPUT_COLOR),
-            Spacing::new(-PORT_RADIUS, 0.0, 0.0, 0.0),
-        ),
-        Side::Right => (
-            Color::hex(OUTPUT_COLOR),
-            Spacing::new(0.0, 0.0, -PORT_RADIUS, 0.0),
-        ),
+fn port_row(ui: &mut Ui, i: usize, name: InternedStr, side: Side, fill: Color) -> WidgetId {
+    let margin = match side {
+        Side::Left => Spacing::new(-PORT_RADIUS, 0.0, 0.0, 0.0),
+        Side::Right => Spacing::new(0.0, 0.0, -PORT_RADIUS, 0.0),
     };
     Panel::hstack()
         .id_salt(("port", i))

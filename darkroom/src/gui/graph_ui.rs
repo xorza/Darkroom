@@ -1,7 +1,6 @@
 use glam::Vec2;
 use palantir::{
-    Background, Color, Configure, LineCap, LineJoin, Panel, Scroll, Shape, Sizing, Spacing, Ui,
-    WidgetId,
+    Background, Configure, LineCap, LineJoin, Panel, Scroll, Shape, Sizing, Spacing, Ui, WidgetId,
 };
 use scenarium::prelude::NodeId;
 use std::collections::HashMap;
@@ -9,10 +8,8 @@ use std::collections::HashMap;
 use crate::frame_result::FrameResult;
 use crate::gui::node_ui::{NodePortSpans, NodeUI};
 use crate::scene::Scene;
+use crate::theme::AppContext;
 
-const CONN_WIDTH: f32 = 2.0;
-const CANVAS_BG: u32 = 0x1e1e1e;
-const CONN_COLOR: u32 = 0x9ec1ff;
 /// Extra pan slack on every side of the node bbox, so the user always
 /// has room to drag a node past the current leading/trailing edge
 /// without immediately hitting the offset clamp. Reapplied every
@@ -57,11 +54,17 @@ pub struct GraphUI {
 impl GraphUI {
     /// Pre-record pass — see
     /// [`crate::gui::node_ui::NodeUI::prepass`].
-    pub fn prepass(&mut self, ui: &Ui, out: &mut FrameResult) {
-        self.node_ui.prepass(ui, out);
+    pub fn prepass(&mut self, ui: &Ui, ctx: &AppContext<'_>, out: &mut FrameResult) {
+        self.node_ui.prepass(ui, ctx, out);
     }
 
-    pub fn frame(&mut self, ui: &mut Ui, scene: &Scene, out: &mut FrameResult) {
+    pub fn frame(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &AppContext<'_>,
+        scene: &Scene,
+        out: &mut FrameResult,
+    ) {
         let Self { ports, node_ui } = self;
         // Outer Scroll provides pan / wheel-zoom / pinch — the inner
         // Canvas hosts absolutely-positioned nodes and the connection
@@ -94,7 +97,7 @@ impl GraphUI {
             .content_margin(margin)
             .size((Sizing::FILL, Sizing::FILL))
             .background(Background {
-                fill: Color::hex(CANVAS_BG).into(),
+                fill: ctx.theme.canvas_bg.into(),
                 ..Default::default()
             })
             .show(ui, |ui| {
@@ -114,9 +117,9 @@ impl GraphUI {
                     .id(canvas_widget_id())
                     .size((Sizing::Hug, Sizing::Hug))
                     .show(ui, |ui| {
-                        draw_connections(ui, scene, ports, canvas_origin);
+                        draw_connections(ui, ctx, scene, ports, canvas_origin);
                         ports.clear();
-                        node_ui.draw_all(ui, scene, ports, out);
+                        node_ui.draw_all(ui, ctx, scene, ports, out);
                     });
             });
     }
@@ -130,8 +133,15 @@ const fn canvas_widget_id() -> WidgetId {
     WidgetId::auto_stable()
 }
 
-fn draw_connections(ui: &mut Ui, scene: &Scene, ports: &PortCache, canvas_origin: Vec2) {
-    let color = Color::hex(CONN_COLOR);
+fn draw_connections(
+    ui: &mut Ui,
+    ctx: &AppContext<'_>,
+    scene: &Scene,
+    ports: &PortCache,
+    canvas_origin: Vec2,
+) {
+    let color = ctx.theme.connection;
+    let width = ctx.theme.connection_width;
     for c in &scene.connections {
         let (Some(src), Some(tgt)) = (ports.nodes.get(&c.src_node), ports.nodes.get(&c.tgt_node))
         else {
@@ -155,7 +165,7 @@ fn draw_connections(ui: &mut Ui, scene: &Scene, ports: &PortCache, canvas_origin
             p1: p0 + Vec2::new(dx, 0.0),
             p2: p3 - Vec2::new(dx, 0.0),
             p3,
-            width: CONN_WIDTH,
+            width,
             brush: color.into(),
             cap: LineCap::Round,
             join: LineJoin::Miter,
