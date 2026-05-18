@@ -234,8 +234,6 @@ fn draw_connections(
             width,
             brush: color.into(),
             cap: LineCap::Round,
-            join: LineJoin::Miter,
-            tolerance: 0.5,
         });
     }
 }
