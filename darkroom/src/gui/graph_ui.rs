@@ -97,10 +97,18 @@ impl GraphUI {
         // Node panels (descendants of the *inner* canvas, which
         // carries the pan/zoom transform) hit-test first; only bare
         // canvas falls through to the outer's senses.
+        //
+        // `.clip_rect()` pins the inner-canvas subtree's `paint_rect`s
+        // to the outer rect even when the inner transform zooms them
+        // way past the viewport. Without it, at high zoom a single
+        // off-screen node panel's screen rect can dwarf the surface,
+        // damage threshold sees ratio ≫ 1 and trips `Damage::Full`
+        // every pan/zoom tick.
         Panel::canvas()
             .id(outer_canvas_widget_id())
             .size((Sizing::FILL, Sizing::FILL))
             .sense(Sense::DRAG | Sense::SCROLL | Sense::PINCH)
+            .clip_rect()
             .background(Background {
                 fill: ctx.theme.canvas_bg.into(),
                 ..Default::default()
