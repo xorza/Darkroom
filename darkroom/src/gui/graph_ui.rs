@@ -1,6 +1,6 @@
 use glam::Vec2;
 use palantir::{
-    Background, Configure, LineCap, LineJoin, Panel, Sense, Shape, Sizing, TranslateScale, Ui,
+    Background, Configure, LineCap, Panel, Sense, Shape, Sizing, TranslateScale, Ui,
     WidgetId,
 };
 use scenarium::prelude::NodeId;
