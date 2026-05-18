@@ -1,7 +1,7 @@
 use glam::Vec2;
 use palantir::{
-    Background, Configure, LineCap, LineJoin, Panel, PointerEvent, PointerSense, Sense, Shape,
-    Sizing, TranslateScale, Ui, WidgetId,
+    Background, Configure, LineCap, LineJoin, Panel, Sense, Shape, Sizing, TranslateScale, Ui,
+    WidgetId,
 };
 use scenarium::prelude::NodeId;
 use std::collections::HashMap;
@@ -11,18 +11,12 @@ use crate::gui::node_ui::{NodePortSpans, NodeUI};
 use crate::scene::Scene;
 use crate::theme::AppContext;
 
-/// Bounds on the canvas zoom factor. Wheel/pinch deltas multiply in;
+/// Bounds on the canvas zoom factor. Pinch deltas multiply in;
 /// clamped each frame so pathological gestures can't drive it to 0
 /// (which would make the inverse transform explode) or to a value so
 /// large that the world coordinates underflow.
 const MIN_ZOOM: f32 = 0.1;
 const MAX_ZOOM: f32 = 10.0;
-/// Notches → multiplicative factor. `1.1` per wheel notch matches the
-/// feel of most node editors (Blender, Houdini's network view).
-const ZOOM_PER_NOTCH: f32 = 1.1;
-/// Touchpad-pixel scroll → zoom. Smaller exponent than `ZOOM_PER_NOTCH`
-/// because pixel deltas arrive in much larger counts per gesture.
-const ZOOM_PER_PIXEL: f32 = 1.0015;
 
 /// Interframe handles for every port that was recorded last pass. We
 /// stash the `WidgetId`s (not the resolved rects) and resolve them
@@ -79,20 +73,12 @@ impl GraphUI {
         scene: &mut Scene,
         out: &mut FrameResult,
     ) {
-        // Wake the host on scroll / pinch even when the cursor isn't
-        // over an interactive widget — the outer canvas itself only
-        // senses DRAG, so without this subscription the frame would
-        // sleep through wheel ticks.
-        ui.subscribe_pointer(PointerSense::SCROLL);
-
-        // Apply pan + zoom input *before* recording, so this frame's
-        // transform reflects the latest gesture. `response_for` reads
-        // current-frame input state (per its doc), so the drag deltas
-        // here are this frame's, not last frame's — same pattern node
-        // drag uses via `NodeUI::prepass`. Without this, the transform
-        // would always lag by one frame and dragging would feel sticky.
-        self.apply_pan_drag(ui, scene);
-        apply_scroll_zoom(ui, scene);
+        // Read outer's response before recording so this frame's
+        // transform reflects the latest gesture — `response_for`
+        // returns current-frame drag/scroll/pinch (palantir doc); no
+        // 1-frame lag in the pan visual. Same pattern node drag uses
+        // via `NodeUI::prepass`.
+        self.apply_pan_zoom(ui, scene);
 
         let Self {
             ports,
@@ -103,15 +89,18 @@ impl GraphUI {
         let zoom_val = scene.zoom;
 
         // Outer canvas: covers the whole pane, paints the canvas
-        // background, captures drag gestures on empty space for pan.
-        // Node panels are descendants of the *inner* canvas (which
-        // carries the pan/zoom transform), so the cursor hit-tests to
-        // the node first; landing on bare canvas falls through to this
-        // outer `Sense::DRAG` and latches a pan.
+        // background, owns the input routing for empty-canvas
+        // gestures. Senses:
+        // - `DRAG`: middle-button-style canvas pan (left-button drag).
+        // - `SCROLL`: two-finger touchpad swipe / wheel = pan.
+        // - `PINCH`: touchpad pinch = zoom-about-cursor.
+        // Node panels (descendants of the *inner* canvas, which
+        // carries the pan/zoom transform) hit-test first; only bare
+        // canvas falls through to the outer's senses.
         Panel::canvas()
             .id(outer_canvas_widget_id())
             .size((Sizing::FILL, Sizing::FILL))
-            .sense(Sense::DRAG)
+            .sense(Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .background(Background {
                 fill: ctx.theme.canvas_bg.into(),
                 ..Default::default()
@@ -141,13 +130,20 @@ impl GraphUI {
             });
     }
 
-    /// Read the outer canvas's drag state from the previous frame's
-    /// cascade (via `response_for`) and bake it into `scene.pan` so
-    /// the transform recorded *this* frame already reflects the
-    /// in-flight gesture. Mirrors how `NodeUI::prepass` handles node
-    /// drags — pre-record application avoids the visible 1-frame lag
-    /// that "apply after `Panel::show`" would introduce.
-    fn apply_pan_drag(&mut self, ui: &Ui, scene: &mut Scene) {
+    /// Read the outer canvas's current-frame response and bake every
+    /// pan/zoom gesture into `scene` so this frame's `TranslateScale`
+    /// already reflects the gesture — no visible 1-frame lag. Mirrors
+    /// `NodeUI::prepass`. Three independent sources:
+    ///
+    /// - **Drag** (`Sense::DRAG`): canvas-pan-on-empty. Anchor on
+    ///   `drag_started`, then `pan = anchor + drag_delta` until release.
+    /// - **Scroll** (`Sense::SCROLL`): two-finger touchpad swipe or
+    ///   wheel. Palantir ingests the delta already-negated to "advance
+    ///   offset forward" (input/mod.rs:167-178), so `pan -= delta`
+    ///   matches Scroll's `transform.translation = -offset` convention.
+    /// - **Pinch** (`Sense::PINCH`): zoom-about-cursor using the
+    ///   `Response::pointer_local` pivot.
+    fn apply_pan_zoom(&mut self, ui: &Ui, scene: &mut Scene) {
         let resp = ui.response_for(outer_canvas_widget_id());
         if resp.drag_started {
             self.pan_anchor = Some(scene.pan);
@@ -157,28 +153,12 @@ impl GraphUI {
             (Some(_), None) => self.pan_anchor = None,
             _ => {}
         }
-    }
-}
-
-fn apply_scroll_zoom(ui: &Ui, scene: &mut Scene) {
-    let Some(cursor) = ui.pointer_pos() else {
-        return;
-    };
-    let outer_origin = ui
-        .response_for(outer_canvas_widget_id())
-        .layout_rect
-        .map(|r| r.min)
-        .unwrap_or(Vec2::ZERO);
-    let cursor_local = cursor - outer_origin;
-    for ev in ui.pointer_events() {
-        let factor = match *ev {
-            PointerEvent::Scroll { pixels, lines, .. } => {
-                ZOOM_PER_NOTCH.powf(lines.y) * ZOOM_PER_PIXEL.powf(pixels.y)
-            }
-            PointerEvent::Zoom { factor, .. } => factor,
-            _ => continue,
-        };
-        zoom_about(scene, cursor_local, factor);
+        scene.pan -= resp.scroll_delta;
+        if (resp.zoom_factor - 1.0).abs() > f32::EPSILON
+            && let Some(pivot) = resp.pointer_local
+        {
+            zoom_about(scene, pivot, resp.zoom_factor);
+        }
     }
 }
 
