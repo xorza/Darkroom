@@ -33,7 +33,7 @@
   },
   {
     "label": "run palantir showcase",
-    "command": "cargo",
+    "command": "RUST_BACKTRACE=1 cargo",
     "args": ["run", "--manifest-path", "palantir/Cargo.toml"],
   },
 ]
