@@ -250,28 +250,21 @@ fn port_row(ui: &mut Ui, i: usize, name: InternedStr, side: Side, fill: Color) -
         .size((Sizing::Hug, Sizing::Hug))
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
-        .show(ui, |ui| {
-            let circle = |ui: &mut Ui| circle_frame(ui, fill, margin);
-            let label = |ui: &mut Ui| {
+        .show(ui, |ui| match side {
+            Side::Left => {
+                let id = circle_frame(ui, fill, margin).widget_id();
                 Text::new(name.clone()).show(ui);
-            };
-            let circle_resp = match side {
-                Side::Left => {
-                    let r = circle(ui);
-                    label(ui);
-                    r
-                }
-                Side::Right => {
-                    label(ui);
-                    circle(ui)
-                }
-            };
-            circle_resp.widget_id()
+                id
+            }
+            Side::Right => {
+                Text::new(name.clone()).show(ui);
+                circle_frame(ui, fill, margin).widget_id()
+            }
         })
         .inner
 }
 
-fn circle_frame(ui: &mut Ui, fill: Color, margin: Spacing) -> Response {
+fn circle_frame(ui: &mut Ui, fill: Color, margin: Spacing) -> Response<'_> {
     // Explicit `id_salt` instead of `auto_id`: every port circle
     // shares the same `#[track_caller]` site (this function), so
     // `auto_id` collides across siblings → `SeenIds::record`
