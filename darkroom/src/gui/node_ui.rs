@@ -97,7 +97,7 @@ impl NodeUI {
             .background(Background {
                 fill: theme.node_fill.into(),
                 stroke: Stroke::solid(theme.node_border, theme.node_border_width),
-                radius: Corners::all(theme.node_corner_radius),
+                corners: Corners::all(theme.node_corner_radius),
                 ..Default::default()
             })
             .show(ui, |ui| {
@@ -174,7 +174,7 @@ fn header(ui: &mut Ui, ctx: &AppContext<'_>, name: InternedStr) {
         .padding(Spacing::xy(8.0, 4.0))
         .background(Background {
             fill: theme.header_fill.into(),
-            radius: Corners::new(r, r, 0.0, 0.0),
+            corners: Corners::new(r, r, 0.0, 0.0),
             ..Default::default()
         })
         .show(ui, |ui| {
@@ -290,7 +290,7 @@ fn circle_frame(ui: &mut Ui, fill: Color, margin: Spacing) -> Response {
         .sense(Sense::CLICK)
         .background(Background {
             fill: fill.into(),
-            radius: Corners::all(PORT_RADIUS),
+            corners: Corners::all(PORT_RADIUS),
             ..Default::default()
         })
         .show(ui)
