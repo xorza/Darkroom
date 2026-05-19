@@ -143,14 +143,14 @@ impl NodeUI {
         // just latched on the same widget — `record` will replace the
         // anchor this frame; emitting now with the stale `anchor.pos`
         // makes the node snap to the previous gesture's start point.
-        if resp.drag_started {
+        if resp.drag_started() {
             self.drag_anchor = None;
             return;
         }
         // No `drag_delta` means the drag isn't latched anymore (release
         // or pointer-left-surface). Drop the anchor so the next gesture
         // starts fresh.
-        let Some(delta) = resp.drag_delta else {
+        let Some(delta) = resp.drag_delta() else {
             self.drag_anchor = None;
             return;
         };

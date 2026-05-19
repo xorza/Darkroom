@@ -1,6 +1,7 @@
 use glam::Vec2;
 use palantir::{
-    Background, Configure, LineCap, Panel, Sense, Shape, Sizing, TranslateScale, Ui, WidgetId,
+    Background, Configure, LineCap, Panel, PointerButton, Sense, Shape, Sizing, TranslateScale, Ui,
+    WidgetId,
 };
 use scenarium::prelude::NodeId;
 use std::collections::HashMap;
@@ -98,7 +99,11 @@ impl GraphUI {
         // Outer canvas: covers the whole pane, paints the canvas
         // background, owns the input routing for empty-canvas
         // gestures. Senses:
-        // - `DRAG`: left-button canvas pan.
+        // - `DRAG`: middle-button canvas pan (graph-editor
+        //   convention; left-drag is reserved for rubber-band
+        //   selection once that lands). Pulled via
+        //   `Ui::drag_delta_by(.., PointerButton::Middle)`, since the
+        //   left-only `ResponseState::drag_delta` doesn't carry middle.
         // - `SCROLL`: mouse wheel / touchpad swipe = zoom-about-cursor.
         // - `PINCH`: touchpad pinch = zoom-about-cursor.
         // Node panels (descendants of the *inner* canvas, which
@@ -150,8 +155,11 @@ impl GraphUI {
     /// already reflects the gesture — no visible 1-frame lag. Mirrors
     /// `NodeUI::prepass`. Three independent sources:
     ///
-    /// - **Drag** (`Sense::DRAG`): canvas-pan-on-empty. Anchor on
-    ///   `drag_started`, then `pan = anchor + drag_delta` until release.
+    /// - **Middle-button drag** (`Sense::DRAG` +
+    ///   `Ui::drag_delta_by`): canvas pan. Anchor on `drag_started_by`,
+    ///   then `pan = anchor + delta` until release. Left-drag is
+    ///   intentionally NOT routed to pan so it stays free for future
+    ///   rubber-band selection.
     /// - **Scroll** (`Sense::SCROLL`): mouse wheel / touchpad swipe →
     ///   zoom-about-cursor (graph-editor convention: Figma / Blender
     ///   node editor / ComfyUI). Vertical delta only; horizontal is
@@ -162,10 +170,10 @@ impl GraphUI {
     ///   `Response::pointer_local` pivot.
     fn apply_pan_zoom(&mut self, ui: &Ui, scene: &mut Scene) {
         let resp = ui.response_for(outer_canvas_widget_id());
-        if resp.drag_started {
+        if resp.drag_started_by(PointerButton::Middle) {
             self.pan_anchor = Some(scene.pan);
         }
-        match (self.pan_anchor, resp.drag_delta) {
+        match (self.pan_anchor, resp.drag_delta_by(PointerButton::Middle)) {
             (Some(anchor), Some(d)) => scene.pan = anchor + d,
             (Some(_), None) => self.pan_anchor = None,
             _ => {}
