@@ -178,10 +178,11 @@ impl GraphUI {
             (Some(_), None) => self.pan_anchor = None,
             _ => {}
         }
-        if resp.scroll_delta.y.abs() > f32::EPSILON
+        let scroll_y = resp.scroll_pixels.y + resp.scroll_lines.y;
+        if scroll_y.abs() > f32::EPSILON
             && let Some(pivot) = resp.pointer_local
         {
-            zoom_about(scene, pivot, scroll_to_zoom_factor(resp.scroll_delta.y));
+            zoom_about(scene, pivot, scroll_to_zoom_factor(scroll_y));
         }
         if (resp.zoom_factor - 1.0).abs() > f32::EPSILON
             && let Some(pivot) = resp.pointer_local
