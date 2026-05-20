@@ -2486,6 +2486,7 @@ dependencies = [
  "arboard",
  "bitflags 2.11.1",
  "bytemuck",
+ "cosmic-text",
  "encase",
  "fixedbitset",
  "glam 0.32.1",
