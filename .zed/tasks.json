@@ -36,4 +36,16 @@
     "command": "RUST_BACKTRACE=1 cargo",
     "args": ["run", "--release", "--manifest-path", "palantir/Cargo.toml"],
   },
+  {
+    "label": "run palantir showcase with tracy",
+    "command": "RUST_BACKTRACE=1 cargo",
+    "args": [
+      "run",
+      "--release",
+      "--manifest-path",
+      "palantir/Cargo.toml",
+      "--features",
+      "profile-with-tracy",
+    ],
+  },
 ]
