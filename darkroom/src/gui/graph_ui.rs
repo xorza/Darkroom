@@ -202,7 +202,8 @@ impl GraphUI {
         if resp.scroll_lines.y.abs() > f32::EPSILON
             && let Some(pivot) = resp.pointer_local
         {
-            zoom_about(scene, pivot, scroll_to_zoom_factor(resp.scroll_lines.y));
+            let line_px = ui.theme.text.line_height_for(ui.theme.text.font_size_px);
+            zoom_about(scene, pivot, scroll_to_zoom_factor(resp.scroll_lines.y * line_px));
         }
         if (resp.zoom_factor - 1.0).abs() > f32::EPSILON
             && let Some(pivot) = resp.pointer_local
