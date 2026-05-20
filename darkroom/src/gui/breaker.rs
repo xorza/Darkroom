@@ -21,7 +21,7 @@ const MIN_POINT_DISTANCE: f32 = 4.0;
 /// Hard cap on the total polyline length. Once hit, further points
 /// stop appending; the last segment is clamped to land exactly on
 /// the limit. Matches the deprecated breaker.
-const MAX_BREAKER_LENGTH: f32 = 900.0;
+const MAX_BREAKER_LENGTH: f32 = 2000.0;
 /// Bezier sampling resolution for hit-testing. 16 segments matches
 /// the deprecated implementation's `ensure_sampled` density and is
 /// cheap enough to redo every frame for every visible connection.
