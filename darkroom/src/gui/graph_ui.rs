@@ -1,14 +1,17 @@
 use glam::Vec2;
 use palantir::{
-    Background, Configure, LineCap, Panel, PointerButton, Sense, Shape, Sizing, TranslateScale, Ui,
-    WidgetId,
+    Background, Configure, LineCap, Panel, PointerButton, PolylineColors, Sense, Shape, Sizing,
+    TranslateScale, Ui, WidgetId,
 };
+use scenarium::graph::Binding;
 use scenarium::prelude::NodeId;
 use std::collections::HashMap;
 
 use crate::app::AppContext;
 use crate::frame_result::FrameResult;
+use crate::gui::breaker::BreakerState;
 use crate::gui::node_ui::{NodePortSpans, NodeUI};
+use crate::intent::Intent;
 use crate::scene::Scene;
 
 /// Bounds on the canvas zoom factor. Pinch / scroll-zoom deltas
@@ -65,6 +68,12 @@ pub struct GraphUI {
     /// drag_delta`. Lives on `GraphUI` because it's input bookkeeping
     /// (lifetime = one gesture), not viewport state.
     pan_anchor: Option<Vec2>,
+    /// Active right-mouse-drag "connection breaker" gesture, if any.
+    /// Lives here for the same reason as `pan_anchor`: input
+    /// bookkeeping with a one-gesture lifetime. Polyline is in inner-
+    /// canvas world coords so render and intersection share the same
+    /// frame as the bezier endpoints.
+    breaker: Option<BreakerState>,
 }
 
 impl GraphUI {
@@ -87,11 +96,13 @@ impl GraphUI {
         // 1-frame lag in the pan visual. Same pattern node drag uses
         // via `NodeUI::prepass`.
         self.apply_pan_zoom(ui, scene);
+        self.apply_breaker(ui, scene, out);
 
         let Self {
             ports,
             node_ui,
             pan_anchor: _,
+            breaker,
         } = self;
         let pan_val = scene.pan;
         let zoom_val = scene.zoom;
@@ -143,9 +154,12 @@ impl GraphUI {
                             .layout_rect
                             .map(|r| r.min)
                             .unwrap_or(Vec2::ZERO);
-                        draw_connections(ui, ctx, scene, ports, canvas_origin);
+                        draw_connections(ui, ctx, scene, ports, canvas_origin, breaker.as_mut());
                         ports.clear();
                         node_ui.draw_all(ui, ctx, scene, ports, out);
+                        if let Some(b) = breaker.as_ref() {
+                            draw_breaker(ui, ctx, b);
+                        }
                     });
             });
     }
@@ -192,6 +206,88 @@ impl GraphUI {
             zoom_about(scene, pivot, resp.zoom_factor);
         }
     }
+
+    /// Right-mouse drag (or Cmd+LMB on a trackpad) on the outer
+    /// canvas drives the connection breaker. Three transitions, all
+    /// keyed off the outer canvas's response:
+    ///
+    /// - **`drag_started_by(Right)`**, *or* `drag_started_by(Left)`
+    ///   with Cmd held — convert this frame's pointer to inner-canvas
+    ///   world coords and seed a fresh [`BreakerState`] for that
+    ///   button. The button is remembered so the rest of the gesture
+    ///   keeps polling the same one — releasing Cmd mid-drag doesn't
+    ///   end an active breaker.
+    /// - **Still dragging** (`drag_delta_by(button)` is `Some`) —
+    ///   append the current pointer (`BreakerState::add_point`
+    ///   handles the 4px sample floor and 900-unit length cap).
+    /// - **Just released** (was active, `drag_delta_by(button)` now
+    ///   `None`) — drain the broken-target set into
+    ///   `Intent::SetInput { to: Binding::None }` and drop the state.
+    ///
+    /// RMB / LMB on a node panel is captured by the node (it senses
+    /// `DRAG`), so `outer.drag_started_by(..)` only fires on
+    /// background — exactly the "background-only" gate the deprecated
+    /// breaker had.
+    fn apply_breaker(&mut self, ui: &Ui, scene: &Scene, out: &mut FrameResult) {
+        let resp = ui.response_for(outer_canvas_widget_id());
+        let mods = ui.modifiers();
+        let cmd_lmb = resp.drag_started_by(PointerButton::Left) && mods.meta;
+        let rmb = resp.drag_started_by(PointerButton::Right);
+        if (rmb || cmd_lmb)
+            && self.breaker.is_none()
+            && let Some(p) = resp.pointer_local
+        {
+            let button = if rmb {
+                PointerButton::Right
+            } else {
+                PointerButton::Left
+            };
+            self.breaker = Some(BreakerState::start(to_world(p, scene), button));
+        }
+        let button = self.breaker.as_ref().map(|b| b.button);
+        match (
+            self.breaker.as_mut(),
+            button.and_then(|b| resp.drag_delta_by(b)),
+        ) {
+            (Some(b), Some(_)) => {
+                if let Some(p) = resp.pointer_local {
+                    b.add_point(to_world(p, scene));
+                }
+            }
+            (Some(b), None) => {
+                for (node_id, input_idx) in b.broken.drain() {
+                    out.push(Intent::SetInput {
+                        node_id,
+                        input_idx,
+                        to: Binding::None,
+                    });
+                }
+                self.breaker = None;
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Outer-canvas-local coords → inner-canvas pre-transform world
+/// coords. Inner canvas applies `TranslateScale::new(pan, zoom)`,
+/// so `outer = pan + zoom * world`.
+fn to_world(outer_local: Vec2, scene: &Scene) -> Vec2 {
+    let zoom = if scene.zoom > 0.0 { scene.zoom } else { 1.0 };
+    (outer_local - scene.pan) / zoom
+}
+
+fn draw_breaker(ui: &mut Ui, ctx: &AppContext<'_>, b: &BreakerState) {
+    if b.points().len() < 2 {
+        return;
+    }
+    ui.add_shape(Shape::Polyline {
+        points: b.points(),
+        colors: PolylineColors::Single(ctx.theme.breaker_stroke),
+        width: ctx.theme.breaker_stroke_width,
+        cap: LineCap::Round,
+        join: palantir::LineJoin::Round,
+    });
 }
 
 /// Map a one-frame vertical scroll delta (in logical px, palantir's
@@ -239,9 +335,12 @@ fn draw_connections(
     scene: &Scene,
     ports: &PortCache,
     canvas_origin: Vec2,
+    mut breaker: Option<&mut BreakerState>,
 ) {
-    let color = ctx.theme.connection;
     let width = ctx.theme.connection_width;
+    if let Some(b) = breaker.as_mut() {
+        b.broken.clear();
+    }
     for c in &scene.connections {
         let (Some(src), Some(tgt)) = (ports.nodes.get(&c.src_node), ports.nodes.get(&c.tgt_node))
         else {
@@ -260,10 +359,31 @@ fn draw_connections(
             continue;
         };
         let dx = ((p3.x - p0.x).abs() * 0.5).max(40.0);
+        let p1 = p0 + Vec2::new(dx, 0.0);
+        let p2 = p3 - Vec2::new(dx, 0.0);
+        // While the breaker is active, every connection re-tests
+        // against the polyline; hits are recoloured and queued for
+        // unbinding on release.
+        let broken = breaker
+            .as_mut()
+            .is_some_and(|b| b.intersects_cubic(p0, p1, p2, p3));
+        if broken {
+            // unwrap: `broken == true` implies `breaker` is `Some`.
+            breaker
+                .as_mut()
+                .unwrap()
+                .broken
+                .insert((c.tgt_node, c.tgt_port));
+        }
+        let color = if broken {
+            ctx.theme.connection_broken
+        } else {
+            ctx.theme.connection
+        };
         ui.add_shape(Shape::CubicBezier {
             p0,
-            p1: p0 + Vec2::new(dx, 0.0),
-            p2: p3 - Vec2::new(dx, 0.0),
+            p1,
+            p2,
             p3,
             width,
             brush: color.into(),

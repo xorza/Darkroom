@@ -1,3 +1,4 @@
+pub mod breaker;
 pub mod graph_ui;
 pub mod main_window;
 pub mod node_ui;
