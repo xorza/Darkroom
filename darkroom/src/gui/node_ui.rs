@@ -1,5 +1,6 @@
 use crate::app::AppContext;
 use crate::frame_result::FrameResult;
+use crate::gui::breaker::BreakerProbe;
 use crate::gui::graph_ui::PortCache;
 use crate::gui::{NODE_W, PORT_COL_PAD_TOP, PORT_GAP, PORT_RADIUS, PORT_SIZE, Side};
 use crate::intent::Intent;
@@ -7,8 +8,8 @@ use crate::scene::{Scene, SceneNode};
 use common::Span;
 use glam::Vec2;
 use palantir::{
-    Align, Background, Color, Configure, Corners, Frame, HAlign, InternedStr, Panel, Response,
-    Sense, Sizing, Spacing, Stroke, Text, Ui, VAlign, WidgetId,
+    Align, Background, Color, Configure, Corners, Frame, HAlign, InternedStr, Panel, Rect,
+    Response, Sense, Sizing, Spacing, Stroke, Text, Ui, VAlign, WidgetId,
 };
 use scenarium::prelude::NodeId;
 
@@ -60,10 +61,13 @@ impl NodeUI {
         ctx: &AppContext<'_>,
         scene: &Scene,
         ports: &mut PortCache,
-        out: &mut FrameResult,
+        probe: &mut BreakerProbe<'_>,
     ) {
+        if let Some(b) = probe.state.as_deref_mut() {
+            b.broken_nodes.clear();
+        }
         for n in &scene.nodes {
-            let spans = self.draw_one(ui, ctx, scene, n, &mut ports.widget_ids, out);
+            let spans = self.draw_one(ui, ctx, scene, n, &mut ports.widget_ids, probe);
             ports.nodes.insert(n.id, spans);
         }
         // Drop the anchor if its target node vanished from the graph
@@ -83,20 +87,52 @@ impl NodeUI {
         scene: &Scene,
         node: &SceneNode,
         widget_ids: &mut Vec<WidgetId>,
-        _out: &mut FrameResult,
+        probe: &mut BreakerProbe<'_>,
     ) -> NodePortSpans {
         let inputs = scene.ports(node.inputs);
         let outputs = scene.ports(node.outputs);
         let theme = ctx.theme;
 
+        // Probe last-frame's body rect (in canvas world coords) against
+        // the breaker polyline. Hit → recolor border red and flag the
+        // node for deletion on release. First-frame nodes have no rect
+        // yet, so the breaker simply can't catch them until next frame
+        // — acceptable: the user can't aim at something that hasn't
+        // been painted.
+        let body_rect = ui
+            .response_for(node_widget_id(node.id))
+            .layout_rect
+            .map(|r| Rect {
+                min: r.min - probe.origin,
+                size: r.size,
+            });
+        let broken = match (probe.state.as_deref(), body_rect) {
+            (Some(b), Some(r)) => b.intersects_rect(r),
+            _ => false,
+        };
+        if broken {
+            // unwrap: `broken == true` implies `state` is `Some`.
+            probe
+                .state
+                .as_deref_mut()
+                .unwrap()
+                .broken_nodes
+                .push(node.id);
+        }
+        let border = if broken {
+            theme.connection_broken
+        } else {
+            theme.node_border
+        };
+
         let panel = Panel::vstack()
-            .id_salt(("graph.node", node.id))
+            .id(node_widget_id(node.id))
             .position(node.pos)
             .size((Sizing::Fixed(NODE_W), Sizing::Hug))
             .sense(Sense::DRAG)
             .background(Background {
                 fill: theme.node_fill.into(),
-                stroke: Stroke::solid(theme.node_border, theme.node_border_width),
+                stroke: Stroke::solid(border, theme.node_border_width),
                 corners: Corners::all(theme.node_corner_radius),
                 ..Default::default()
             })
@@ -157,6 +193,14 @@ impl NodeUI {
             to: anchor.pos + delta / zoom,
         });
     }
+}
+
+/// Stable widget id for the node's outer body panel. Derived from
+/// the domain `NodeId` so `response_for` can probe last-frame's
+/// arranged rect (used by the connection breaker's body-hit test)
+/// without needing the panel's response to round-trip first.
+fn node_widget_id(node_id: NodeId) -> WidgetId {
+    WidgetId::from_hash(("graph.node.body", node_id))
 }
 
 fn header(ui: &mut Ui, ctx: &AppContext<'_>, name: InternedStr) {

@@ -3,13 +3,13 @@ use palantir::{
     Background, Configure, LineCap, Panel, PointerButton, PolylineColors, Sense, Shape, Sizing,
     TranslateScale, Ui, WidgetId,
 };
-use scenarium::graph::Binding;
+use scenarium::graph::{Binding, PortAddress};
 use scenarium::prelude::NodeId;
 use std::collections::HashMap;
 
 use crate::app::AppContext;
 use crate::frame_result::FrameResult;
-use crate::gui::breaker::BreakerState;
+use crate::gui::breaker::{BreakerProbe, BreakerState};
 use crate::gui::node_ui::{NodePortSpans, NodeUI};
 use crate::intent::Intent;
 use crate::scene::Scene;
@@ -154,9 +154,13 @@ impl GraphUI {
                             .layout_rect
                             .map(|r| r.min)
                             .unwrap_or(Vec2::ZERO);
-                        draw_connections(ui, ctx, scene, ports, canvas_origin, breaker.as_mut());
+                        let mut probe = BreakerProbe {
+                            origin: canvas_origin,
+                            state: breaker.as_mut(),
+                        };
+                        draw_connections(ui, ctx, scene, ports, &mut probe);
                         ports.clear();
-                        node_ui.draw_all(ui, ctx, scene, ports, out);
+                        node_ui.draw_all(ui, ctx, scene, ports, &mut probe);
                         if let Some(b) = breaker.as_ref() {
                             draw_breaker(ui, ctx, b);
                         }
@@ -255,10 +259,23 @@ impl GraphUI {
                 }
             }
             (Some(b), None) => {
-                for (node_id, input_idx) in b.broken.drain() {
+                // Node removals first: an `Intent::RemoveNode` is the
+                // strict superset (it also detaches incoming bindings
+                // via `UndoStep::RemoveNode`'s captured incoming
+                // edges), so emitting any per-input unbind for an
+                // already-doomed target would be a redundant
+                // historical entry. Skip those.
+                let doomed_nodes = std::mem::take(&mut b.broken_nodes);
+                for &node_id in &doomed_nodes {
+                    out.push(Intent::RemoveNode { node_id });
+                }
+                for addr in b.broken.drain(..) {
+                    if doomed_nodes.contains(&addr.target_id) {
+                        continue;
+                    }
                     out.push(Intent::SetInput {
-                        node_id,
-                        input_idx,
+                        node_id: addr.target_id,
+                        input_idx: addr.port_idx,
                         to: Binding::None,
                     });
                 }
@@ -334,11 +351,10 @@ fn draw_connections(
     ctx: &AppContext<'_>,
     scene: &Scene,
     ports: &PortCache,
-    canvas_origin: Vec2,
-    mut breaker: Option<&mut BreakerState>,
+    probe: &mut BreakerProbe<'_>,
 ) {
     let width = ctx.theme.connection_width;
-    if let Some(b) = breaker.as_mut() {
+    if let Some(b) = probe.state.as_deref_mut() {
         b.broken.clear();
     }
     for c in &scene.connections {
@@ -353,8 +369,8 @@ fn draw_connections(
             continue;
         };
         let (Some(p0), Some(p3)) = (
-            port_center(ui, src_wid, canvas_origin),
-            port_center(ui, tgt_wid, canvas_origin),
+            port_center(ui, src_wid, probe.origin),
+            port_center(ui, tgt_wid, probe.origin),
         ) else {
             continue;
         };
@@ -364,16 +380,21 @@ fn draw_connections(
         // While the breaker is active, every connection re-tests
         // against the polyline; hits are recoloured and queued for
         // unbinding on release.
-        let broken = breaker
-            .as_mut()
+        let broken = probe
+            .state
+            .as_deref()
             .is_some_and(|b| b.intersects_cubic(p0, p1, p2, p3));
         if broken {
-            // unwrap: `broken == true` implies `breaker` is `Some`.
-            breaker
-                .as_mut()
+            // unwrap: `broken == true` implies `state` is `Some`.
+            probe
+                .state
+                .as_deref_mut()
                 .unwrap()
                 .broken
-                .insert((c.tgt_node, c.tgt_port));
+                .push(PortAddress {
+                    target_id: c.tgt_node,
+                    port_idx: c.tgt_port,
+                });
         }
         let color = if broken {
             ctx.theme.connection_broken

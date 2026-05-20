@@ -1,7 +1,18 @@
 use glam::Vec2;
-use palantir::PointerButton;
+use palantir::{PointerButton, Rect};
+use scenarium::graph::PortAddress;
 use scenarium::prelude::NodeId;
-use std::collections::HashSet;
+
+/// Per-frame bundle threaded through node and connection rendering.
+/// Carries `canvas_origin` (subtracted from `layout_rect` to convert
+/// surface-space rects into the inner canvas's pre-transform frame,
+/// matching the breaker's polyline) and the optional active gesture.
+/// Passed as `&mut BreakerProbe<'_>` so Rust auto-reborrows at each
+/// nested call.
+pub(crate) struct BreakerProbe<'a> {
+    pub origin: Vec2,
+    pub state: Option<&'a mut BreakerState>,
+}
 
 /// Polyline samples closer than this (in inner-canvas world units)
 /// are dropped — keeps the breaker from accumulating sub-pixel
@@ -21,32 +32,37 @@ const BEZIER_SAMPLES: usize = 16;
 /// the points verbatim and intersection tests share the same frame
 /// as the cubic bezier endpoints.
 #[derive(Debug)]
-pub struct BreakerState {
+pub(crate) struct BreakerState {
     points: Vec<Vec2>,
     length: f32,
     /// Mouse button that latched this gesture. The release-detection
     /// check polls `drag_delta_by(button)`, so a Cmd+LMB-launched
     /// breaker must keep reading the Left button, not Right.
-    pub button: PointerButton,
-    /// Targets `(tgt_node, tgt_port)` whose data binding the breaker
-    /// intersects this frame. Filled by `draw_connections`, drained
-    /// on release into `Intent::SetInput { to: Binding::None }`.
-    /// Stored as a set so a snake-shaped drag crossing the same
-    /// wire twice doesn't push duplicate intents.
-    pub broken: HashSet<(NodeId, usize)>,
+    pub(crate) button: PointerButton,
+    /// Target input ports whose data binding the breaker intersects
+    /// this frame. Filled by `draw_connections`, drained on release
+    /// into `Intent::SetInput { to: Binding::None }`. A `Vec` is
+    /// enough — each connection is visited exactly once per frame,
+    /// so within-frame duplicates aren't possible.
+    pub(crate) broken: Vec<PortAddress>,
+    /// Nodes whose body rect the breaker crosses this frame. Filled
+    /// by `NodeUI::draw_all`, drained on release into
+    /// `Intent::RemoveNode`. Same one-visit-per-node guarantee.
+    pub(crate) broken_nodes: Vec<NodeId>,
 }
 
 impl BreakerState {
-    pub fn start(p: Vec2, button: PointerButton) -> Self {
+    pub(crate) fn start(p: Vec2, button: PointerButton) -> Self {
         Self {
             points: vec![p],
             length: 0.0,
             button,
-            broken: HashSet::new(),
+            broken: Vec::new(),
+            broken_nodes: Vec::new(),
         }
     }
 
-    pub fn add_point(&mut self, p: Vec2) {
+    pub(crate) fn add_point(&mut self, p: Vec2) {
         let last = *self.points.last().unwrap();
         let seg = last.distance(p);
         if seg <= MIN_POINT_DISTANCE {
@@ -66,19 +82,49 @@ impl BreakerState {
         self.length += added;
     }
 
-    pub fn points(&self) -> &[Vec2] {
+    pub(crate) fn points(&self) -> &[Vec2] {
         &self.points
     }
 
-    pub fn segments(&self) -> impl Iterator<Item = (Vec2, Vec2)> + '_ {
+    fn segments(&self) -> impl Iterator<Item = (Vec2, Vec2)> + '_ {
         self.points.windows(2).map(|w| (w[0], w[1]))
+    }
+
+    /// True if the breaker polyline crosses `rect`: either any sample
+    /// falls inside, or any breaker segment crosses one of the four
+    /// edges. `rect` is in the same frame as the polyline (inner-
+    /// canvas pre-transform world coords).
+    pub(crate) fn intersects_rect(&self, rect: Rect) -> bool {
+        if self.points.is_empty() {
+            return false;
+        }
+        let min = rect.min;
+        let max = rect.max();
+        let inside = |p: Vec2| p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y;
+        if self.points.iter().any(|&p| inside(p)) {
+            return true;
+        }
+        let edges = [
+            (Vec2::new(min.x, min.y), Vec2::new(max.x, min.y)),
+            (Vec2::new(max.x, min.y), Vec2::new(max.x, max.y)),
+            (Vec2::new(max.x, max.y), Vec2::new(min.x, max.y)),
+            (Vec2::new(min.x, max.y), Vec2::new(min.x, min.y)),
+        ];
+        for (a, b) in self.segments() {
+            for &(e0, e1) in &edges {
+                if segments_intersect(a, b, e0, e1) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// True if any cubic-bezier sample-segment crosses any breaker
     /// segment. Samples the bezier into `BEZIER_SAMPLES` chords; this
     /// runs once per connection per frame while the gesture is
     /// active, so we don't cache.
-    pub fn intersects_cubic(&self, p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2) -> bool {
+    pub(crate) fn intersects_cubic(&self, p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2) -> bool {
         if self.points.len() < 2 {
             return false;
         }
