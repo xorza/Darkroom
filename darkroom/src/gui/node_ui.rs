@@ -1,9 +1,9 @@
+use crate::app::AppContext;
 use crate::frame_result::FrameResult;
 use crate::gui::graph_ui::PortCache;
 use crate::gui::{NODE_W, PORT_COL_PAD_TOP, PORT_GAP, PORT_RADIUS, PORT_SIZE, Side};
 use crate::intent::Intent;
 use crate::scene::{Scene, SceneNode};
-use crate::theme::AppContext;
 use common::Span;
 use glam::Vec2;
 use palantir::{
@@ -128,13 +128,7 @@ impl NodeUI {
     /// state mutation applied from these intents (notably drag-driven
     /// `MoveNode`) lands in `Document` before recording — Pass A's
     /// arrange already reflects the cursor; no Pass B relayout retry.
-    pub fn prepass(
-        &mut self,
-        ui: &Ui,
-        _ctx: &AppContext<'_>,
-        scene: &Scene,
-        out: &mut FrameResult,
-    ) {
+    pub fn prepass(&mut self, ui: &Ui, scene: &Scene, out: &mut FrameResult) {
         let Some(anchor) = self.drag_anchor else {
             return;
         };

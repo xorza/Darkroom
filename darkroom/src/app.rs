@@ -9,8 +9,25 @@ use crate::gui::main_window::MainWindow;
 use crate::intent::{apply_step, build_step, requires_relayout};
 use crate::model::ViewGraph;
 use crate::scene::Scene;
+use crate::theme::Theme;
 
 const UNDO_HISTORY: usize = 100;
+
+/// Shared per-frame context threaded down the UI tree. Holds borrows
+/// of state owned higher up so child subtrees don't take a growing
+/// fan-out of `&` parameters. Currently just the active [`Theme`];
+/// future per-frame shared state (selection, debug toggles, etc.)
+/// lives here too.
+#[derive(Copy, Clone, Debug)]
+pub struct AppContext<'a> {
+    pub theme: &'a Theme,
+}
+
+impl<'a> AppContext<'a> {
+    pub fn new(theme: &'a Theme) -> Self {
+        Self { theme }
+    }
+}
 
 #[derive(Debug)]
 pub struct App {
@@ -19,6 +36,7 @@ pub struct App {
     pub main_window: MainWindow,
     pub frame_result: FrameResult,
     pub action_stack: ActionStack,
+    pub theme: Theme,
 }
 
 impl App {
@@ -32,6 +50,7 @@ impl App {
             main_window: MainWindow::default(),
             frame_result: FrameResult::default(),
             action_stack: ActionStack::new(UNDO_HISTORY),
+            theme: Theme::default(),
         }
     }
 }
@@ -52,8 +71,9 @@ impl palantir::App for App {
         // Record. Widgets push intents derived from record-time state
         // (button clicks, edit commits) into `frame_result`.
         self.scene.rebuild(&self.document);
+        let ctx = AppContext::new(&self.theme);
         self.main_window
-            .frame(ui, &mut self.scene, &mut self.frame_result);
+            .frame(ui, &ctx, &mut self.scene, &mut self.frame_result);
 
         // Post-record drain — these intents reflect mutations that
         // only the now-just-completed record could surface, so they

@@ -6,10 +6,10 @@ use palantir::{
 use scenarium::prelude::NodeId;
 use std::collections::HashMap;
 
+use crate::app::AppContext;
 use crate::frame_result::FrameResult;
 use crate::gui::node_ui::{NodePortSpans, NodeUI};
 use crate::scene::Scene;
-use crate::theme::AppContext;
 
 /// Bounds on the canvas zoom factor. Pinch / scroll-zoom deltas
 /// multiply in; clamped each frame so pathological gestures can't
@@ -70,8 +70,8 @@ pub struct GraphUI {
 impl GraphUI {
     /// Pre-record pass — see
     /// [`crate::gui::node_ui::NodeUI::prepass`].
-    pub fn prepass(&mut self, ui: &Ui, ctx: &AppContext<'_>, scene: &Scene, out: &mut FrameResult) {
-        self.node_ui.prepass(ui, ctx, scene, out);
+    pub fn prepass(&mut self, ui: &Ui, scene: &Scene, out: &mut FrameResult) {
+        self.node_ui.prepass(ui, scene, out);
     }
 
     pub fn frame(

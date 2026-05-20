@@ -1,7 +1,7 @@
 use palantir::Color;
 
 /// Visual palette for darkroom's UI. Owned by `MainWindow`, handed to
-/// every UI subtree through [`AppContext`] so call sites read colors
+/// every UI subtree through [`crate::app::AppContext`] so call sites read colors
 /// off a single source instead of hard-coded constants.
 #[derive(Clone, Debug)]
 pub struct Theme {
@@ -39,21 +39,5 @@ impl Default for Theme {
             input_port: Color::hex(0x77c97a),
             output_port: Color::hex(0xe39a4a),
         }
-    }
-}
-
-/// Shared per-frame context threaded down the UI tree. Holds borrows
-/// of state owned higher up so child subtrees don't take a growing
-/// fan-out of `&` parameters. Currently just the active [`Theme`];
-/// future per-frame shared state (selection, debug toggles, etc.)
-/// lives here too.
-#[derive(Copy, Clone, Debug)]
-pub struct AppContext<'a> {
-    pub theme: &'a Theme,
-}
-
-impl<'a> AppContext<'a> {
-    pub fn new(theme: &'a Theme) -> Self {
-        Self { theme }
     }
 }
