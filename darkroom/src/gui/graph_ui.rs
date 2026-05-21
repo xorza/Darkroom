@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use crate::app::AppContext;
 use crate::gui::breaker::BreakerUI;
 use crate::gui::connection_ui::ConnectionUI;
+use crate::gui::new_node_ui::NewNodeUi;
 use crate::gui::node_ui::{NodeUI, node_widget_id, port_circle_wid};
 use crate::gui::{PortKind, PortRef};
 use crate::intent::Intent;
@@ -174,6 +175,7 @@ pub struct GraphUI {
     pub node_ui: NodeUI,
     pub breaker_ui: BreakerUI,
     pub connection_ui: ConnectionUI,
+    pub new_node_ui: NewNodeUi,
     /// `Scene::pan` snapshot captured at the frame the active pan-drag
     /// latched. While the drag is active, `scene.pan = anchor +
     /// drag_delta`. Lives on `GraphUI` because it's input bookkeeping
@@ -207,6 +209,7 @@ impl GraphUI {
         self.port_frame.rebuild(ui, scene);
         self.breaker_ui.apply(ui, scene, out);
         self.connection_ui.apply(ui, scene, &self.port_frame, out);
+        self.new_node_ui.apply(ui, ctx, scene, out);
         // Bake the snap target into `PortFrame.hovered` so node_ui's
         // port_row picks up the hover color via the same lookup it
         // uses for ordinary mouse-over. `response.hovered` is
@@ -222,6 +225,7 @@ impl GraphUI {
             node_ui,
             breaker_ui,
             connection_ui,
+            new_node_ui: _,
             pan_anchor: _,
         } = self;
         let pan_val = scene.pan;

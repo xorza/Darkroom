@@ -2,6 +2,7 @@ pub mod breaker;
 pub mod connection_ui;
 pub mod graph_ui;
 pub mod main_window;
+pub mod new_node_ui;
 pub mod node_ui;
 
 /// Layout constants shared by the node widget (visual placement)

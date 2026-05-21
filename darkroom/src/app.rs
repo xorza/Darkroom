@@ -1,5 +1,9 @@
 use glam::Vec2;
 use palantir::{Shortcut, Ui};
+use lens::ImageFuncLib;
+use scenarium::elements::basic_funclib::BasicFuncLib;
+use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
+use scenarium::prelude::FuncLib;
 use scenarium::testing::{TestFuncHooks, test_func_lib, test_graph};
 
 use crate::action_stack::ActionStack;
@@ -23,11 +27,12 @@ const UNDO_HISTORY: usize = 100;
 #[derive(Copy, Clone, Debug)]
 pub struct AppContext<'a> {
     pub theme: &'a Theme,
+    pub func_lib: &'a FuncLib,
 }
 
 impl<'a> AppContext<'a> {
-    pub fn new(theme: &'a Theme) -> Self {
-        Self { theme }
+    pub fn new(theme: &'a Theme, func_lib: &'a FuncLib) -> Self {
+        Self { theme, func_lib }
     }
 }
 
@@ -45,7 +50,11 @@ impl App {
     pub fn new() -> Self {
         let mut view_graph: ViewGraph = test_graph().into();
         view_graph.auto_layout(220.0, 110.0, Vec2::new(40.0, 40.0));
-        let func_lib = test_func_lib(TestFuncHooks::default());
+        let mut func_lib = FuncLib::default();
+        func_lib.merge(test_func_lib(TestFuncHooks::default()));
+        func_lib.merge(BasicFuncLib::default());
+        func_lib.merge(WorkerEventsFuncLib::default());
+        func_lib.merge(ImageFuncLib::default());
         Self {
             document: Document::new(view_graph, func_lib),
             scene: Scene::default(),
@@ -73,7 +82,7 @@ impl palantir::App for App {
         // Record. Widgets push intents derived from record-time state
         // (button clicks, edit commits) into `intents`.
         self.scene.rebuild(&self.document);
-        let ctx = AppContext::new(&self.theme);
+        let ctx = AppContext::new(&self.theme, &self.document.func_lib);
         self.main_window
             .frame(ui, &ctx, &mut self.scene, &mut self.intents);
 
