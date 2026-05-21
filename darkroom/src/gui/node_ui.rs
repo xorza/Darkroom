@@ -374,9 +374,20 @@ fn input_port_row(
                 }
             }
         });
-    let trigger = row.response.snapshot();
+    // Open on right-click anywhere on the row — circle, label, or
+    // editor. The circle has its own `Sense::CLICK` and consumes hits
+    // over its rect, so the row's snapshot alone misses clicks landing
+    // on the circle (no event bubbling in palantir's hit-test).
+    let menu_id = row.response.widget_id();
+    let row_secondary = row.response.secondary_clicked();
+    let circle_secondary = ui.response_for(wid).secondary_clicked;
+    if (row_secondary || circle_secondary)
+        && let Some(p) = ui.pointer_pos()
+    {
+        ContextMenu::open(ui, menu_id, p);
+    }
     let default_static = func_input.map(default_static_value);
-    ContextMenu::attach(ui, &trigger)
+    ContextMenu::for_id(menu_id)
         .size((Sizing::Hug, Sizing::Hug))
         .show(ui, |ui, popup| {
             let can_set =
