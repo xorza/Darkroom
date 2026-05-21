@@ -73,6 +73,14 @@ impl ConnectionUI {
         self.drag = None;
     }
 
+    /// Compatible-kind port currently snapped under the pointer
+    /// during an active drag, or `None`. Read by `GraphUI` to force
+    /// the hover state in `PortFrame` (otherwise palantir's
+    /// drag-capture suppression would hide it).
+    pub fn snap_port(&self) -> Option<PortRef> {
+        self.drag.and_then(|d| d.snap_end)
+    }
+
     /// Paint every permanent connection on the current scene, marking
     /// those the active breaker (`probe.state`) crosses as broken.
     /// Hits get pushed onto `probe.state.broken` for the breaker's

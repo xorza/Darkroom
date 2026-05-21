@@ -53,6 +53,12 @@ struct PortInfo {
     /// Bypasses palantir's drag-capture hover suppression by reading
     /// geometry directly.
     screen_rect: Option<Rect>,
+    /// `true` when the port should paint with its hover color. Filled
+    /// from `response.hovered` in `rebuild`; an active connection
+    /// drag's snap target gets it forced on via `set_hovered` after
+    /// `ConnectionUI::apply` (palantir's drag-capture suppression
+    /// otherwise hides the snap target from `response.hovered`).
+    hovered: bool,
     /// One-frame edge: pointer-down → drag latched on this port this
     /// frame. Drives connection-drag start detection.
     drag_started: bool,
@@ -84,6 +90,7 @@ impl PortFrame {
                         PortInfo {
                             layout_center: r.layout_rect.map(|r| r.center()),
                             screen_rect: r.rect,
+                            hovered: r.hovered,
                             drag_started: r.drag_started(),
                             dragging: r.drag_started() || r.drag_delta().is_some(),
                         },
@@ -116,6 +123,22 @@ impl PortFrame {
     /// `true` while a drag started on this port is still live.
     pub(super) fn dragging(&self, p: PortRef) -> bool {
         self.map.get(&p).is_some_and(|i| i.dragging)
+    }
+
+    /// `true` when the port should paint with its hover color —
+    /// `response.hovered` plus any forced-on override.
+    pub(super) fn is_hovered(&self, p: PortRef) -> bool {
+        self.map.get(&p).is_some_and(|i| i.hovered)
+    }
+
+    /// Force the hover flag on (idempotent). Called after
+    /// `ConnectionUI::apply` for the active snap target so it lights
+    /// up even though palantir's drag-capture suppression hides it
+    /// from `response.hovered`.
+    pub(super) fn set_hovered(&mut self, p: PortRef) {
+        if let Some(info) = self.map.get_mut(&p) {
+            info.hovered = true;
+        }
     }
 }
 
@@ -165,6 +188,15 @@ impl GraphUI {
         self.port_frame.rebuild(ui, scene);
         self.breaker_ui.apply(ui, scene, out);
         self.connection_ui.apply(ui, scene, &self.port_frame, out);
+        // Bake the snap target into `PortFrame.hovered` so node_ui's
+        // port_row picks up the hover color via the same lookup it
+        // uses for ordinary mouse-over. `response.hovered` is
+        // suppressed on every widget except the drag-capture owner
+        // while a drag is live, so without this override the
+        // snapped-but-not-captured target stays at its idle color.
+        if let Some(snap) = self.connection_ui.snap_port() {
+            self.port_frame.set_hovered(snap);
+        }
 
         let Self {
             port_frame,
@@ -233,7 +265,7 @@ impl GraphUI {
                                 canvas_origin,
                                 &mut probe,
                             );
-                            node_ui.draw_all(ui, ctx, scene, &mut probe);
+                            node_ui.draw_all(ui, ctx, scene, port_frame, &mut probe);
                         }
                         breaker_ui.draw(ui, ctx);
                         connection_ui.draw_in_flight(ui, ctx, scene, port_frame, canvas_origin);

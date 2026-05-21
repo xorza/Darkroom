@@ -1,6 +1,7 @@
 use crate::app::AppContext;
 use crate::frame_result::FrameResult;
 use crate::gui::breaker::BreakerProbe;
+use crate::gui::graph_ui::PortFrame;
 use crate::gui::{NODE_W, PORT_COL_PAD_TOP, PORT_GAP, PORT_RADIUS, PORT_SIZE, PortKind, PortRef};
 use crate::intent::Intent;
 use crate::scene::{Scene, SceneNode};
@@ -49,13 +50,14 @@ impl NodeUI {
         ui: &mut Ui,
         ctx: &AppContext<'_>,
         scene: &Scene,
+        port_frame: &PortFrame,
         probe: &mut BreakerProbe<'_>,
     ) {
         if let Some(b) = probe.state.as_deref_mut() {
             b.broken_nodes.clear();
         }
         for n in &scene.nodes {
-            self.draw_one(ui, ctx, scene, n, probe);
+            self.draw_one(ui, ctx, scene, n, port_frame, probe);
         }
         // Drop the anchor if its target node vanished from the graph
         // (mid-drag delete). Without this, the slot would linger and
@@ -73,6 +75,7 @@ impl NodeUI {
         ctx: &AppContext<'_>,
         scene: &Scene,
         node: &SceneNode,
+        port_frame: &PortFrame,
         probe: &mut BreakerProbe<'_>,
     ) {
         let inputs = scene.ports(node.inputs);
@@ -124,7 +127,7 @@ impl NodeUI {
             })
             .show(ui, |ui| {
                 header(ui, ctx, node.name.clone());
-                ports_row(ui, ctx, node.id, inputs, outputs);
+                ports_row(ui, ctx, node.id, inputs, outputs, port_frame);
             });
         let response = panel.response;
 
@@ -209,13 +212,22 @@ fn ports_row(
     node_id: NodeId,
     inputs: &[InternedStr],
     outputs: &[InternedStr],
+    port_frame: &PortFrame,
 ) {
     Panel::hstack()
         .id_salt("ports")
         .size((Sizing::FILL, Sizing::Hug))
         .show(ui, |ui| {
-            port_column(ui, ctx, node_id, "in", inputs, PortKind::Input);
-            port_column(ui, ctx, node_id, "out", outputs, PortKind::Output);
+            port_column(ui, ctx, node_id, "in", inputs, PortKind::Input, port_frame);
+            port_column(
+                ui,
+                ctx,
+                node_id,
+                "out",
+                outputs,
+                PortKind::Output,
+                port_frame,
+            );
         });
 }
 
@@ -226,6 +238,7 @@ fn port_column(
     salt: &'static str,
     names: &[InternedStr],
     kind: PortKind,
+    port_frame: &PortFrame,
 ) {
     let (idle, hover) = match kind {
         PortKind::Input => (ctx.theme.input_port, ctx.theme.input_port_hover),
@@ -242,7 +255,17 @@ fn port_column(
         })
         .show(ui, |ui| {
             for (i, name) in names.iter().enumerate() {
-                port_row(ui, node_id, i, name.clone(), kind, idle, hover);
+                let port = PortRef {
+                    node_id,
+                    kind,
+                    port_idx: i,
+                };
+                let fill = if port_frame.is_hovered(port) {
+                    hover
+                } else {
+                    idle
+                };
+                port_row(ui, port, name.clone(), fill);
             }
         });
 }
@@ -266,39 +289,25 @@ pub fn port_circle_wid(port: PortRef) -> WidgetId {
 /// `port_circle_wid(node_id, kind, port_idx)`, so downstream
 /// consumers (`PortFrame::rebuild`, snap, draw) reconstruct it from
 /// domain coords without threading any cache.
-fn port_row(
-    ui: &mut Ui,
-    node_id: NodeId,
-    i: usize,
-    name: InternedStr,
-    kind: PortKind,
-    fill: Color,
-    fill_hover: Color,
-) {
-    let margin = match kind {
+fn port_row(ui: &mut Ui, port: PortRef, name: InternedStr, fill: Color) {
+    let margin = match port.kind {
         PortKind::Input => Spacing::new(-PORT_RADIUS, 0.0, 0.0, 0.0),
         PortKind::Output => Spacing::new(0.0, 0.0, -PORT_RADIUS, 0.0),
     };
-    let wid = port_circle_wid(PortRef {
-        node_id,
-        kind,
-        port_idx: i,
-    });
-    let hovered = ui.response_for(wid).hovered;
-    let color = if hovered { fill_hover } else { fill };
+    let wid = port_circle_wid(port);
     Panel::hstack()
-        .id_salt(("port", i))
+        .id_salt(("port", port.port_idx))
         .size((Sizing::Hug, Sizing::Hug))
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
-        .show(ui, |ui| match kind {
+        .show(ui, |ui| match port.kind {
             PortKind::Input => {
-                circle_frame(ui, wid, color, margin);
+                circle_frame(ui, wid, fill, margin);
                 Text::new(name.clone()).show(ui);
             }
             PortKind::Output => {
                 Text::new(name.clone()).show(ui);
-                circle_frame(ui, wid, color, margin);
+                circle_frame(ui, wid, fill, margin);
             }
         });
 }
