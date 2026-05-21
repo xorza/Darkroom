@@ -1,7 +1,12 @@
 use glam::Vec2;
-use palantir::{PointerButton, Rect};
-use scenarium::graph::PortAddress;
+use palantir::{LineCap, LineJoin, PointerButton, PolylineColors, Rect, Shape, Ui};
+use scenarium::graph::{Binding, PortAddress};
 use scenarium::prelude::NodeId;
+
+use crate::app::AppContext;
+use crate::gui::graph_ui::{outer_canvas_widget_id, to_world};
+use crate::intent::Intent;
+use crate::scene::Scene;
 
 /// Per-frame bundle threaded through node and connection rendering.
 /// Carries `canvas_origin` (subtracted from `layout_rect` to convert
@@ -165,6 +170,104 @@ fn orient(p: Vec2, q: Vec2, r: Vec2) -> f32 {
     (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)
 }
 
+/// Owns the active connection-breaker gesture (RMB / Cmd+LMB drag on
+/// the outer canvas). The state is `Option<BreakerState>` rather than
+/// flat fields so the absence of a gesture is one variant and the
+/// gesture can be cancelled by a single assignment. Hands out a
+/// `BreakerProbe` to the canvas record so node and connection draws
+/// can flag intersections inline.
+#[derive(Default, Debug)]
+pub struct BreakerUI {
+    state: Option<BreakerState>,
+}
+
+impl BreakerUI {
+    /// Drive the gesture from the outer canvas response: start, extend,
+    /// release. On release, drain `broken` / `broken_nodes` into
+    /// `RemoveNode` + `SetInput { to: None }` intents. `RemoveNode`
+    /// supersedes any per-input unbind on the same target — the undo
+    /// step already detaches incoming edges, so emitting both would
+    /// log a redundant history entry. Esc cancels without emitting.
+    pub fn apply(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
+        let resp = ui.response_for(outer_canvas_widget_id());
+        let mods = ui.modifiers();
+        let cmd_lmb = resp.drag_started_by(PointerButton::Left) && mods.meta;
+        let rmb = resp.drag_started_by(PointerButton::Right);
+        if (rmb || cmd_lmb)
+            && self.state.is_none()
+            && let Some(p) = resp.pointer_local
+        {
+            let button = if rmb {
+                PointerButton::Right
+            } else {
+                PointerButton::Left
+            };
+            self.state = Some(BreakerState::start(to_world(p, scene), button));
+        }
+        if self.state.is_some() && ui.escape_pressed() {
+            self.state = None;
+            return;
+        }
+        let button = self.state.as_ref().map(|b| b.button);
+        match (
+            self.state.as_mut(),
+            button.and_then(|b| resp.drag_delta_by(b)),
+        ) {
+            (Some(b), Some(_)) => {
+                if let Some(p) = resp.pointer_local {
+                    b.add_point(to_world(p, scene));
+                }
+            }
+            (Some(b), None) => {
+                let doomed_nodes = std::mem::take(&mut b.broken_nodes);
+                for &node_id in &doomed_nodes {
+                    out.push(Intent::RemoveNode { node_id });
+                }
+                for addr in b.broken.drain(..) {
+                    if doomed_nodes.contains(&addr.target_id) {
+                        continue;
+                    }
+                    out.push(Intent::SetInput {
+                        node_id: addr.target_id,
+                        input_idx: addr.port_idx,
+                        to: Binding::None,
+                    });
+                }
+                self.state = None;
+            }
+            _ => {}
+        }
+    }
+
+    /// Hand the active state to inline intersection consumers (node
+    /// body hit-test + connection draw). Borrow lives until the
+    /// returned `BreakerProbe` is dropped.
+    pub fn probe(&mut self, origin: Vec2) -> BreakerProbe<'_> {
+        BreakerProbe {
+            origin,
+            state: self.state.as_mut(),
+        }
+    }
+
+    /// Paint the polyline. No-op when no gesture is active or the
+    /// polyline has < 2 samples (a `start` with no `add_point`).
+    pub fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>) {
+        let Some(b) = self.state.as_ref() else {
+            return;
+        };
+        if b.points().len() < 2 {
+            return;
+        }
+        ui.add_shape(Shape::Polyline {
+            points: b.points(),
+            colors: PolylineColors::Single(ctx.theme.breaker_stroke),
+            width: ctx.theme.breaker_stroke_width,
+            cap: LineCap::Round,
+            join: LineJoin::Round,
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,15 +288,16 @@ mod tests {
     #[test]
     fn add_point_caps_total_length() {
         // Past MAX_BREAKER_LENGTH the last segment is clamped and
-        // further pushes are no-ops. Hand-computed: starting at 0
-        // and pushing (1000, 0) lands the second point at exactly
-        // (900, 0) — the cap.
+        // further pushes are no-ops. Hand-computed: starting at 0 and
+        // pushing (3000, 0) has seg = 3000 > remaining = 2000, so t =
+        // 2000/3000 and the appended point lands at exactly
+        // (2000, 0) — the cap.
         let mut b = BreakerState::start(Vec2::ZERO, PointerButton::Right);
-        b.add_point(Vec2::new(1000.0, 0.0));
+        b.add_point(Vec2::new(3000.0, 0.0));
         assert_eq!(b.points().len(), 2);
         assert!((b.points()[1].x - MAX_BREAKER_LENGTH).abs() < 1e-4);
         let before = b.points().len();
-        b.add_point(Vec2::new(2000.0, 0.0));
+        b.add_point(Vec2::new(4000.0, 0.0));
         assert_eq!(b.points().len(), before, "no append past cap");
     }
 

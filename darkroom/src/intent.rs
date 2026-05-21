@@ -105,28 +105,6 @@ pub enum Intent {
     },
 }
 
-/// 1e-4 is the threshold below which two pan/scale samples are
-/// considered the same gesture continuation — keeps idle pan/zoom
-/// from polluting the undo stack with sub-pixel deltas.
-const VIEWPORT_EPS: f32 = 1e-4;
-
-impl Intent {
-    /// True when this intent would be a no-op against the current
-    /// view graph (sub-`VIEWPORT_EPS` viewport delta, etc.). Checked at
-    /// the model boundary so external sources can't bypass the
-    /// renderer's emit-time gate by pushing micro-deltas every frame.
-    pub fn is_noop_against(&self, doc: &Document) -> bool {
-        let vg = &doc.view_graph;
-        match self {
-            Self::SetViewport { pan, scale } => {
-                (vg.pan - *pan).length_squared() < VIEWPORT_EPS * VIEWPORT_EPS
-                    && (vg.scale - *scale).abs() < VIEWPORT_EPS
-            }
-            _ => false,
-        }
-    }
-}
-
 /// Self-contained undo-stack entry. Each variant carries both halves:
 /// the forward "to" payload (read by [`apply_step`]) and the backward
 /// "from" payload (read by [`revert_step`]). Built from an [`Intent`]
@@ -186,23 +164,58 @@ pub enum UndoStep {
     },
 }
 
+/// 1e-4 is the threshold below which two pan/scale samples are
+/// considered the same gesture — keeps idle pan/zoom from polluting
+/// the undo stack with sub-pixel deltas.
+const VIEWPORT_EPS: f32 = 1e-4;
+
+impl UndoStep {
+    /// True when applying this step would leave the graph unchanged.
+    /// Generic from/to equality across every variant that captures
+    /// both halves; viewport uses an epsilon to absorb idle jitter.
+    /// `AddNode` / `RemoveNode` are never no-ops (the existence flip
+    /// is the change). Filtered out post-`build_step` so phantom
+    /// entries (re-selecting the same node, dragging zero pixels)
+    /// don't pollute the undo stack.
+    pub fn is_noop(&self) -> bool {
+        match self {
+            UndoStep::AddNode { .. } | UndoStep::RemoveNode { .. } => false,
+            UndoStep::MoveNode { from, to, .. } => from == to,
+            UndoStep::RenameNode { from, to, .. } => from == to,
+            UndoStep::SetInput { from, to, .. } => from == to,
+            UndoStep::SelectNode { from, to } => from == to,
+            UndoStep::SetCacheBehavior { from, to, .. } => from == to,
+            UndoStep::SetEventConnection {
+                was_present,
+                present,
+                ..
+            } => was_present == present,
+            UndoStep::SetViewport {
+                from_pan,
+                from_scale,
+                to_pan,
+                to_scale,
+            } => {
+                (*from_pan - *to_pan).length_squared() < VIEWPORT_EPS * VIEWPORT_EPS
+                    && (*from_scale - *to_scale).abs() < VIEWPORT_EPS
+            }
+        }
+    }
+}
+
 /// Read pre-mutation state from `view_graph` and fold it with `intent`
 /// into a complete [`UndoStep`]. Pure — does not write to the graph.
-pub fn build_step(intent: Intent, doc: &Document) -> UndoStep {
+/// Returns `None` when the intent targets a node that no longer exists
+/// (e.g. a `MoveNode` whose anchor lingered one frame past a `RemoveNode`
+/// applied earlier in the same frame). Callers should treat a `None`
+/// result as "stale intent, drop it".
+pub fn build_step(intent: Intent, doc: &Document) -> Option<UndoStep> {
     let view_graph = &doc.view_graph;
-    match intent {
+    Some(match intent {
         Intent::AddNode { view_node, node } => UndoStep::AddNode { view_node, node },
         Intent::RemoveNode { node_id } => {
-            let view_node = view_graph
-                .view_nodes
-                .by_key(&node_id)
-                .expect("RemoveNode capture expects a view node")
-                .clone();
-            let node = view_graph
-                .graph
-                .by_id(&node_id)
-                .expect("RemoveNode capture expects a graph node")
-                .clone();
+            let view_node = view_graph.view_nodes.by_key(&node_id)?.clone();
+            let node = view_graph.graph.by_id(&node_id)?.clone();
             let mut incoming_connections = Vec::new();
             let mut incoming_events = Vec::new();
             for other in view_graph.graph.iter() {
@@ -238,11 +251,11 @@ pub fn build_step(intent: Intent, doc: &Document) -> UndoStep {
         }
         Intent::MoveNode { node_id, to } => UndoStep::MoveNode {
             node_id,
-            from: view_graph.view_nodes.by_key(&node_id).unwrap().pos,
+            from: view_graph.view_nodes.by_key(&node_id)?.pos,
             to,
         },
         Intent::RenameNode { node_id, to } => UndoStep::RenameNode {
-            from: view_graph.graph.by_id(&node_id).unwrap().name.clone(),
+            from: view_graph.graph.by_id(&node_id)?.name.clone(),
             node_id,
             to,
         },
@@ -251,7 +264,7 @@ pub fn build_step(intent: Intent, doc: &Document) -> UndoStep {
             input_idx,
             to,
         } => {
-            let node = view_graph.graph.by_id(&node_id).unwrap();
+            let node = view_graph.graph.by_id(&node_id)?;
             assert!(
                 input_idx < node.inputs.len(),
                 "SetInput capture: input index out of range"
@@ -268,7 +281,7 @@ pub fn build_step(intent: Intent, doc: &Document) -> UndoStep {
             to,
         },
         Intent::SetCacheBehavior { node_id, to } => UndoStep::SetCacheBehavior {
-            from: view_graph.graph.by_id(&node_id).unwrap().behavior,
+            from: view_graph.graph.by_id(&node_id)?.behavior,
             node_id,
             to,
         },
@@ -278,7 +291,7 @@ pub fn build_step(intent: Intent, doc: &Document) -> UndoStep {
             subscriber,
             present,
         } => {
-            let node = view_graph.graph.by_id(&event_node_id).unwrap();
+            let node = view_graph.graph.by_id(&event_node_id)?;
             assert!(
                 event_idx < node.events.len(),
                 "SetEventConnection capture: event index out of range"
@@ -297,7 +310,7 @@ pub fn build_step(intent: Intent, doc: &Document) -> UndoStep {
             to_pan: pan,
             to_scale: scale,
         },
-    }
+    })
 }
 
 /// Forward apply: write the step's "to" half to `view_graph`. Used by
@@ -360,17 +373,17 @@ pub fn apply_step(step: &UndoStep, doc: &mut Document) {
             );
             let subscribers = &mut node.events[*event_idx].subscribers;
             let position = subscribers.iter().position(|id| id == subscriber);
+            // Idempotent: match `revert_step` so apply/redo and undo
+            // behave the same when the target state already holds.
+            // A genuine logic error (was_present mismatch with reality)
+            // surfaces as a no-op here but would have been filtered by
+            // `UndoStep::is_noop` upstream when emitted naturally.
             match (present, position) {
-                (true, Some(_)) => {
-                    panic!("apply SetEventConnection(present=true): subscriber already present")
-                }
                 (true, None) => subscribers.push(*subscriber),
                 (false, Some(idx)) => {
                     subscribers.remove(idx);
                 }
-                (false, None) => {
-                    panic!("apply SetEventConnection(present=false): subscriber not present")
-                }
+                _ => {}
             }
         }
         UndoStep::SetViewport {
@@ -465,24 +478,6 @@ pub fn revert_step(step: &UndoStep, doc: &mut Document) {
             view_graph.pan = *from_pan;
             view_graph.scale = *from_scale;
         }
-    }
-}
-
-/// Whether replaying this step should re-trigger graph computation
-/// (autorun / dirty-tracking). UI-only changes (selection, position,
-/// name, viewport) return false. Exhaustive on purpose so a new
-/// variant must declare its computation effect.
-pub fn affects_computation(step: &UndoStep) -> bool {
-    match step {
-        UndoStep::AddNode { .. }
-        | UndoStep::RemoveNode { .. }
-        | UndoStep::SetInput { .. }
-        | UndoStep::SetCacheBehavior { .. }
-        | UndoStep::SetEventConnection { .. } => true,
-        UndoStep::MoveNode { .. }
-        | UndoStep::RenameNode { .. }
-        | UndoStep::SelectNode { .. }
-        | UndoStep::SetViewport { .. } => false,
     }
 }
 

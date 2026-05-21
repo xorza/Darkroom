@@ -151,3 +151,7 @@ TL;DR — pick-up order
 
 The libc 0.04-IPC memcpy line stays as-is — it's bandwidth-bound, not code-bound; only way to shrink it is to copy less (lower volume from
 the FrameArena lowering callers).
+---
+
+consume shortcust in textedit
+scene to have 'str names

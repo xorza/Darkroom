@@ -19,12 +19,4 @@ impl Document {
             func_lib,
         }
     }
-
-    /// Shortcut into the core graph — equivalent to
-    /// `self.view_graph.graph`, kept here so callers don't have to
-    /// know the layering.
-    #[allow(dead_code)]
-    pub fn graph(&self) -> &scenarium::prelude::Graph {
-        &self.view_graph.graph
-    }
 }

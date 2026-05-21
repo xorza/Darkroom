@@ -22,6 +22,8 @@ pub struct Theme {
 
     pub input_port: Color,
     pub output_port: Color,
+    pub input_port_hover: Color,
+    pub output_port_hover: Color,
 }
 
 impl Default for Theme {
@@ -44,6 +46,8 @@ impl Default for Theme {
 
             input_port: Color::hex(0x77c97a),
             output_port: Color::hex(0xe39a4a),
+            input_port_hover: Color::hex(0xb3e8b6),
+            output_port_hover: Color::hex(0xffc878),
         }
     }
 }
