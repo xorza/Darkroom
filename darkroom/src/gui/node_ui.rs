@@ -121,16 +121,7 @@ impl NodeUI {
         let panel = Panel::vstack()
             .id(node_widget_id(node.id))
             .position(node.pos)
-            // Hug width with `NODE_W` as the minimum: nodes stay
-            // uniform at the default size, but expand when an input
-            // row needs more space (long port name + inline const
-            // editor). Fixed width would push the output column
-            // off-screen past the node's right edge when the input
-            // row's intrinsic exceeds half the node — see
-            // `frame_event(frequency=1.0)` as the canonical
-            // regression case.
-            .size((Sizing::Hug, Sizing::Hug))
-            .min_size((NODE_W, 0.0))
+            .size((Sizing::Fixed(NODE_W), Sizing::Hug))
             .sense(Sense::DRAG)
             .background(Background {
                 fill: theme.node_fill.into(),
