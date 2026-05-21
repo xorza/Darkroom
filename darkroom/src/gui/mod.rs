@@ -38,7 +38,7 @@ impl PortKind {
 /// One port's identity in the graph. Domain-keyed so prepass / record
 /// can derive its `WidgetId` via [`crate::gui::node_ui::port_circle_wid`]
 /// without threading any cache.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PortRef {
     pub node_id: scenarium::prelude::NodeId,
     pub kind: PortKind,

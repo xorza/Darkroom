@@ -1,27 +1,15 @@
 use crate::app::AppContext;
 use crate::frame_result::FrameResult;
 use crate::gui::breaker::BreakerProbe;
-use crate::gui::graph_ui::PortCache;
-use crate::gui::{NODE_W, PORT_COL_PAD_TOP, PORT_GAP, PORT_RADIUS, PORT_SIZE, PortKind};
+use crate::gui::{NODE_W, PORT_COL_PAD_TOP, PORT_GAP, PORT_RADIUS, PORT_SIZE, PortKind, PortRef};
 use crate::intent::Intent;
 use crate::scene::{Scene, SceneNode};
-use common::Span;
 use glam::Vec2;
 use palantir::{
-    Align, Background, Color, Configure, Corners, Frame, HAlign, InternedStr, Panel, Rect,
-    Response, Sense, Sizing, Spacing, Stroke, Text, Ui, VAlign, WidgetId,
+    Align, Background, Color, Configure, Corners, Frame, HAlign, InternedStr, Panel, Rect, Sense,
+    Sizing, Spacing, Stroke, Text, Ui, VAlign, WidgetId,
 };
 use scenarium::prelude::NodeId;
-
-/// Per-node slices into the flat `PortCache.widget_ids` pool — one
-/// `Span` for inputs, one for outputs. Indexing matches positional
-/// `Node.inputs[i]` / `Func.outputs[i]`. Read a port through
-/// `pool[span.range()].get(i)`.
-#[derive(Clone, Copy, Default, Debug)]
-pub struct NodePortSpans {
-    pub inputs: Span,
-    pub outputs: Span,
-}
 
 /// Owns rendering of every graph node plus the single active drag
 /// anchor — the press-frame `pos` is snapshotted here so each
@@ -30,7 +18,8 @@ pub struct NodePortSpans {
 /// pointer at a time, so one anchor slot is enough.
 ///
 /// `draw_all` is the single entry point; `GraphUI` calls it once per
-/// frame with the scene and the port-center pool to fill.
+/// frame after [`crate::gui::graph_ui::PortFrame`] has been rebuilt
+/// from last-frame's responses.
 #[derive(Default, Debug)]
 pub struct NodeUI {
     drag_anchor: Option<DragAnchor>,
@@ -60,15 +49,13 @@ impl NodeUI {
         ui: &mut Ui,
         ctx: &AppContext<'_>,
         scene: &Scene,
-        ports: &mut PortCache,
         probe: &mut BreakerProbe<'_>,
     ) {
         if let Some(b) = probe.state.as_deref_mut() {
             b.broken_nodes.clear();
         }
         for n in &scene.nodes {
-            let spans = self.draw_one(ui, ctx, scene, n, &mut ports.widget_ids, probe);
-            ports.nodes.insert(n.id, spans);
+            self.draw_one(ui, ctx, scene, n, probe);
         }
         // Drop the anchor if its target node vanished from the graph
         // (mid-drag delete). Without this, the slot would linger and
@@ -86,9 +73,8 @@ impl NodeUI {
         ctx: &AppContext<'_>,
         scene: &Scene,
         node: &SceneNode,
-        widget_ids: &mut Vec<WidgetId>,
         probe: &mut BreakerProbe<'_>,
-    ) -> NodePortSpans {
+    ) {
         let inputs = scene.ports(node.inputs);
         let outputs = scene.ports(node.outputs);
         let theme = ctx.theme;
@@ -138,9 +124,8 @@ impl NodeUI {
             })
             .show(ui, |ui| {
                 header(ui, ctx, node.name.clone());
-                ports_row(ui, ctx, node.id, inputs, outputs, widget_ids)
+                ports_row(ui, ctx, node.id, inputs, outputs);
             });
-        let spans = panel.inner;
         let response = panel.response;
 
         // Latch the anchor on the press-frame edge; subsequent frames'
@@ -154,8 +139,6 @@ impl NodeUI {
                 widget_id: response.widget_id(),
             });
         }
-
-        spans
     }
 
     /// Pre-record pass: peek palantir's input state for any widgets
@@ -226,32 +209,14 @@ fn ports_row(
     node_id: NodeId,
     inputs: &[InternedStr],
     outputs: &[InternedStr],
-    widget_ids: &mut Vec<WidgetId>,
-) -> NodePortSpans {
+) {
     Panel::hstack()
         .id_salt("ports")
         .size((Sizing::FILL, Sizing::Hug))
         .show(ui, |ui| {
-            let start_in = widget_ids.len() as u32;
-            port_column(ui, ctx, node_id, "in", inputs, PortKind::Input, widget_ids);
-            let len_in = widget_ids.len() as u32 - start_in;
-            let start_out = widget_ids.len() as u32;
-            port_column(
-                ui,
-                ctx,
-                node_id,
-                "out",
-                outputs,
-                PortKind::Output,
-                widget_ids,
-            );
-            let len_out = widget_ids.len() as u32 - start_out;
-            NodePortSpans {
-                inputs: Span::new(start_in, len_in),
-                outputs: Span::new(start_out, len_out),
-            }
-        })
-        .inner
+            port_column(ui, ctx, node_id, "in", inputs, PortKind::Input);
+            port_column(ui, ctx, node_id, "out", outputs, PortKind::Output);
+        });
 }
 
 fn port_column(
@@ -261,7 +226,6 @@ fn port_column(
     salt: &'static str,
     names: &[InternedStr],
     kind: PortKind,
-    widget_ids: &mut Vec<WidgetId>,
 ) {
     let (idle, hover) = match kind {
         PortKind::Input => (ctx.theme.input_port, ctx.theme.input_port_hover),
@@ -278,7 +242,7 @@ fn port_column(
         })
         .show(ui, |ui| {
             for (i, name) in names.iter().enumerate() {
-                widget_ids.push(port_row(ui, node_id, i, name.clone(), kind, idle, hover));
+                port_row(ui, node_id, i, name.clone(), kind, idle, hover);
             }
         });
 }
@@ -287,15 +251,21 @@ fn port_column(
 /// `(node_id, kind, port_idx)` so prepass can look up
 /// `response_for(port_circle_wid(..))` without threading the cache —
 /// every port's id is reconstructible from its domain coordinates.
-pub fn port_circle_wid(node_id: NodeId, kind: PortKind, port_idx: usize) -> WidgetId {
-    WidgetId::from_hash(("graph.node.port_circle", node_id, kind as u8, port_idx))
+pub fn port_circle_wid(port: PortRef) -> WidgetId {
+    WidgetId::from_hash((
+        "graph.node.port_circle",
+        port.node_id,
+        port.kind as u8,
+        port.port_idx,
+    ))
 }
 
 /// One port = circle + label, vertically centered. Circle on the outer
 /// edge (with negative margin so it overhangs the column), label on
-/// the inner kind. Returns the circle's stable `WidgetId` so the
-/// canvas-level `draw_connections` can resolve its world rect on
-/// demand via `Ui::response_for`.
+/// the inner side. The circle's `WidgetId` is the deterministic
+/// `port_circle_wid(node_id, kind, port_idx)`, so downstream
+/// consumers (`PortFrame::rebuild`, snap, draw) reconstruct it from
+/// domain coords without threading any cache.
 fn port_row(
     ui: &mut Ui,
     node_id: NodeId,
@@ -304,12 +274,16 @@ fn port_row(
     kind: PortKind,
     fill: Color,
     fill_hover: Color,
-) -> WidgetId {
+) {
     let margin = match kind {
         PortKind::Input => Spacing::new(-PORT_RADIUS, 0.0, 0.0, 0.0),
         PortKind::Output => Spacing::new(0.0, 0.0, -PORT_RADIUS, 0.0),
     };
-    let wid = port_circle_wid(node_id, kind, i);
+    let wid = port_circle_wid(PortRef {
+        node_id,
+        kind,
+        port_idx: i,
+    });
     let hovered = ui.response_for(wid).hovered;
     let color = if hovered { fill_hover } else { fill };
     Panel::hstack()
@@ -327,10 +301,9 @@ fn port_row(
                 circle_frame(ui, wid, color, margin);
             }
         });
-    wid
 }
 
-fn circle_frame(ui: &mut Ui, wid: WidgetId, fill: Color, margin: Spacing) -> Response<'_> {
+fn circle_frame(ui: &mut Ui, wid: WidgetId, fill: Color, margin: Spacing) {
     // Explicit `id(wid)` so the cross-frame id stays stable: prepass
     // computes the same `port_circle_wid` and reads its response,
     // record paints with the same id — no drift even if the parent
@@ -347,5 +320,5 @@ fn circle_frame(ui: &mut Ui, wid: WidgetId, fill: Color, margin: Spacing) -> Res
             corners: Corners::all(PORT_RADIUS),
             ..Default::default()
         })
-        .show(ui)
+        .show(ui);
 }

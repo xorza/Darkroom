@@ -1,16 +1,15 @@
 use glam::Vec2;
 use palantir::{
-    Background, Configure, LineCap, Panel, PointerButton, PolylineColors, Sense, Shape, Sizing,
-    TranslateScale, Ui, WidgetId,
+    Background, Configure, LineCap, Panel, PointerButton, PolylineColors, ResponseState, Sense,
+    Shape, Sizing, TranslateScale, Ui, WidgetId,
 };
 use scenarium::graph::{Binding, PortAddress};
-use scenarium::prelude::NodeId;
 use std::collections::HashMap;
 
 use crate::app::AppContext;
 use crate::frame_result::FrameResult;
 use crate::gui::breaker::{BreakerProbe, BreakerState};
-use crate::gui::node_ui::{NodePortSpans, NodeUI, port_circle_wid};
+use crate::gui::node_ui::{NodeUI, port_circle_wid};
 use crate::gui::{PortKind, PortRef};
 use crate::intent::Intent;
 use crate::scene::Scene;
@@ -30,26 +29,67 @@ const MAX_ZOOM: f32 = 5.0;
 /// zoom, higher → snappier but jumps badly on touchpad.
 const SCROLL_ZOOM_BASE: f32 = 1.0025;
 
-/// Interframe handles for every port that was recorded last pass. We
-/// stash the `WidgetId`s (not the resolved rects) and resolve them
-/// fresh via [`Ui::response_for`] each time we draw connections —
-/// that way the rect we read reflects whichever pass last completed
-/// `post_record` (Pass A's arrange when Pass B is running for a
-/// drag-triggered relayout, etc.).
+/// Per-frame snapshot of every port's `ResponseState`. Built once at
+/// the top of [`GraphUI::frame`] by calling [`Ui::response_for`] on
+/// each port's deterministic [`port_circle_wid`]. Downstream readers
+/// — `draw_connections`, `scan_snap_target`, `scan_drag_start`, and
+/// the start-port drag-state read — consult this map instead of
+/// re-issuing `response_for` per use-site.
 ///
-/// Flat layout: `widget_ids` pools all port `WidgetId`s in
-/// node-then-input-then-output order; `nodes` maps each `NodeId` to
-/// the pair of `PortSpan`s slicing into the pool.
+/// First-frame nodes have no rect yet (their widget hasn't recorded);
+/// the entry is still present (with `rect`/`layout_rect` = `None`) so
+/// downstream lookups can distinguish "port doesn't exist" from
+/// "port not yet measured." Polling `response_for` for an unknown id
+/// is cheap (one cascade-index lookup), so we don't pre-filter.
 #[derive(Default, Debug)]
-pub struct PortCache {
-    pub widget_ids: Vec<WidgetId>,
-    pub nodes: HashMap<NodeId, NodePortSpans>,
+pub struct PortFrame {
+    map: HashMap<PortRef, ResponseState>,
 }
 
-impl PortCache {
-    pub fn clear(&mut self) {
-        self.widget_ids.clear();
-        self.nodes.clear();
+impl PortFrame {
+    fn rebuild(&mut self, ui: &Ui, scene: &Scene) {
+        self.map.clear();
+        for n in &scene.nodes {
+            let input_count = scene.ports(n.inputs).len();
+            let output_count = scene.ports(n.outputs).len();
+            for (kind, count) in [
+                (PortKind::Input, input_count),
+                (PortKind::Output, output_count),
+            ] {
+                for port_idx in 0..count {
+                    let port = PortRef {
+                        node_id: n.id,
+                        kind,
+                        port_idx,
+                    };
+                    self.map
+                        .insert(port, ui.response_for(port_circle_wid(port)));
+                }
+            }
+        }
+    }
+
+    fn get(&self, p: PortRef) -> Option<&ResponseState> {
+        self.map.get(&p)
+    }
+
+    /// Canvas-local pre-transform port center (subtracts `canvas_origin`).
+    /// `None` when the port hasn't been measured yet — its widget
+    /// recorded but no `layout_rect` is available.
+    fn center_canvas_local(&self, p: PortRef, canvas_origin: Vec2) -> Option<Vec2> {
+        self.get(p)
+            .and_then(|r| r.layout_rect)
+            .map(|r| r.center() - canvas_origin)
+    }
+
+    /// `true` when `pointer` (screen coords) falls inside this port's
+    /// post-transform/clip rect. Used for snap-target hit-testing
+    /// during a connection drag — bypasses palantir's drag-capture
+    /// hover suppression by reading geometry directly.
+    fn contains_pointer(&self, p: PortRef, pointer: Vec2) -> bool {
+        self.get(p)
+            .and_then(|r| r.rect)
+            .is_some_and(|r| r.contains(pointer))
     }
 }
 
@@ -62,7 +102,7 @@ impl PortCache {
 /// `TranslateScale`.
 #[derive(Default, Debug)]
 pub struct GraphUI {
-    pub ports: PortCache,
+    pub port_frame: PortFrame,
     pub node_ui: NodeUI,
     /// `Scene::pan` snapshot captured at the frame the active pan-drag
     /// latched. While the drag is active, `scene.pan = anchor +
@@ -115,11 +155,15 @@ impl GraphUI {
         // 1-frame lag in the pan visual. Same pattern node drag uses
         // via `NodeUI::prepass`.
         self.apply_pan_zoom(ui, scene);
+        // Snapshot every port's response once for this frame — drag
+        // detection, snap test, and bezier endpoints all read from the
+        // same map instead of re-issuing `response_for` per use-site.
+        self.port_frame.rebuild(ui, scene);
         self.apply_breaker(ui, scene, out);
         self.apply_connection_drag(ui, scene, out);
 
         let Self {
-            ports,
+            port_frame,
             node_ui,
             pan_anchor: _,
             breaker,
@@ -179,14 +223,13 @@ impl GraphUI {
                             origin: canvas_origin,
                             state: breaker.as_mut(),
                         };
-                        draw_connections(ui, ctx, scene, ports, &mut probe);
-                        ports.clear();
-                        node_ui.draw_all(ui, ctx, scene, ports, &mut probe);
+                        draw_connections(ui, ctx, scene, port_frame, canvas_origin, &mut probe);
+                        node_ui.draw_all(ui, ctx, scene, &mut probe);
                         if let Some(b) = breaker.as_ref() {
                             draw_breaker(ui, ctx, b);
                         }
                         if let Some(d) = connection_drag.as_ref() {
-                            draw_connection_drag(ui, ctx, scene, *d, canvas_origin);
+                            draw_connection_drag(ui, ctx, scene, port_frame, *d, canvas_origin);
                         }
                     });
             });
@@ -335,7 +378,7 @@ impl GraphUI {
     /// Otherwise drop silently. Esc cancels without emitting anything.
     fn apply_connection_drag(&mut self, ui: &mut Ui, scene: &Scene, out: &mut FrameResult) {
         if self.connection_drag.is_none() {
-            self.connection_drag = scan_drag_start(ui, scene);
+            self.connection_drag = scan_drag_start(&self.port_frame, scene);
         }
         if ui.escape_pressed() {
             self.connection_drag = None;
@@ -344,14 +387,18 @@ impl GraphUI {
         let Some(mut drag) = self.connection_drag else {
             return;
         };
-        let start_resp = ui.response_for(drag.start_wid);
+        let start_resp = self
+            .port_frame
+            .get(drag.start)
+            .copied()
+            .unwrap_or_else(|| ui.response_for(drag.start_wid));
         // `drag_delta()` returning Some means palantir still considers
         // the gesture live; None means released or pointer left the
         // surface. The first frame of the drag also reports Some
         // (zero delta), so a freshly-latched drag isn't mistaken for
         // a release.
         let still_dragging = start_resp.drag_delta().is_some() || start_resp.drag_started();
-        drag.snap_end = scan_snap_target(ui, scene, drag.start);
+        drag.snap_end = scan_snap_target(&self.port_frame, ui, scene, drag.start);
         if still_dragging {
             self.connection_drag = Some(drag);
             return;
@@ -375,7 +422,7 @@ fn to_world(outer_local: Vec2, scene: &Scene) -> Vec2 {
 /// `None`. Iterates inputs first then outputs per node so the topmost
 /// recorded port wins ties (matches paint order). Returns a fully-
 /// initialized [`ConnectionDrag`] with no snap target yet.
-fn scan_drag_start(ui: &Ui, scene: &Scene) -> Option<ConnectionDrag> {
+fn scan_drag_start(frame: &PortFrame, scene: &Scene) -> Option<ConnectionDrag> {
     for n in &scene.nodes {
         for kind in [PortKind::Input, PortKind::Output] {
             let count = match kind {
@@ -383,15 +430,15 @@ fn scan_drag_start(ui: &Ui, scene: &Scene) -> Option<ConnectionDrag> {
                 PortKind::Output => scene.ports(n.outputs).len(),
             };
             for port_idx in 0..count {
-                let wid = port_circle_wid(n.id, kind, port_idx);
-                if ui.response_for(wid).drag_started() {
+                let port = PortRef {
+                    node_id: n.id,
+                    kind,
+                    port_idx,
+                };
+                if frame.get(port).is_some_and(|r| r.drag_started()) {
                     return Some(ConnectionDrag {
-                        start: PortRef {
-                            node_id: n.id,
-                            kind,
-                            port_idx,
-                        },
-                        start_wid: wid,
+                        start: port,
+                        start_wid: port_circle_wid(port),
                         snap_end: None,
                     });
                 }
@@ -408,7 +455,7 @@ fn scan_drag_start(ui: &Ui, scene: &Scene) -> Option<ConnectionDrag> {
 /// during a drag, so while the start port owns the capture no other
 /// port can ever read `hovered = true`. The cascaded `rect` is set
 /// regardless of capture, so point-in-rect picks up the snap target.
-fn scan_snap_target(ui: &Ui, scene: &Scene, start: PortRef) -> Option<PortRef> {
+fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -> Option<PortRef> {
     let want_kind = start.kind.opposite();
     let pointer = ui.pointer_pos()?;
     for n in &scene.nodes {
@@ -420,17 +467,13 @@ fn scan_snap_target(ui: &Ui, scene: &Scene, start: PortRef) -> Option<PortRef> {
             PortKind::Output => scene.ports(n.outputs).len(),
         };
         for port_idx in 0..count {
-            let wid = port_circle_wid(n.id, want_kind, port_idx);
-            if ui
-                .response_for(wid)
-                .rect
-                .is_some_and(|r| r.contains(pointer))
-            {
-                return Some(PortRef {
-                    node_id: n.id,
-                    kind: want_kind,
-                    port_idx,
-                });
+            let port = PortRef {
+                node_id: n.id,
+                kind: want_kind,
+                port_idx,
+            };
+            if frame.contains_pointer(port, pointer) {
+                return Some(port);
             }
         }
     }
@@ -466,17 +509,15 @@ fn draw_connection_drag(
     ui: &mut Ui,
     ctx: &AppContext<'_>,
     scene: &Scene,
+    port_frame: &PortFrame,
     drag: ConnectionDrag,
     canvas_origin: Vec2,
 ) {
-    let Some(start) = port_center(ui, drag.start_wid, canvas_origin) else {
+    let Some(start) = port_frame.center_canvas_local(drag.start, canvas_origin) else {
         return;
     };
     let end = match drag.snap_end {
-        Some(snap) => {
-            let wid = port_circle_wid(snap.node_id, snap.kind, snap.port_idx);
-            port_center(ui, wid, canvas_origin)
-        }
+        Some(snap) => port_frame.center_canvas_local(snap, canvas_origin),
         None => ui.pointer_pos().map(|p| to_world(p - canvas_origin, scene)),
     };
     let Some(end) = end else { return };
@@ -555,7 +596,8 @@ fn draw_connections(
     ui: &mut Ui,
     ctx: &AppContext<'_>,
     scene: &Scene,
-    ports: &PortCache,
+    port_frame: &PortFrame,
+    canvas_origin: Vec2,
     probe: &mut BreakerProbe<'_>,
 ) {
     let width = ctx.theme.connection_width;
@@ -563,19 +605,19 @@ fn draw_connections(
         b.broken.clear();
     }
     for c in &scene.connections {
-        let (Some(src), Some(tgt)) = (ports.nodes.get(&c.src_node), ports.nodes.get(&c.tgt_node))
-        else {
-            continue;
+        let src_port = PortRef {
+            node_id: c.src_node,
+            kind: PortKind::Output,
+            port_idx: c.src_port,
         };
-        let (Some(&src_wid), Some(&tgt_wid)) = (
-            ports.widget_ids[src.outputs.range()].get(c.src_port),
-            ports.widget_ids[tgt.inputs.range()].get(c.tgt_port),
-        ) else {
-            continue;
+        let tgt_port = PortRef {
+            node_id: c.tgt_node,
+            kind: PortKind::Input,
+            port_idx: c.tgt_port,
         };
         let (Some(p0), Some(p3)) = (
-            port_center(ui, src_wid, probe.origin),
-            port_center(ui, tgt_wid, probe.origin),
+            port_frame.center_canvas_local(src_port, canvas_origin),
+            port_frame.center_canvas_local(tgt_port, canvas_origin),
         ) else {
             continue;
         };
@@ -616,15 +658,6 @@ fn draw_connections(
             cap: LineCap::Round,
         });
     }
-}
-
-fn port_center(ui: &Ui, wid: WidgetId, canvas_origin: Vec2) -> Option<Vec2> {
-    // Same as `canvas_origin`: use the unclipped, pre-transform layout
-    // rect so the result is owner-local in the canvas's pre-transform
-    // frame, which is what `Shape::CubicBezier` polyline coords expect.
-    ui.response_for(wid)
-        .layout_rect
-        .map(|r| r.center() - canvas_origin)
 }
 
 #[cfg(test)]
