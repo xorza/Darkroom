@@ -2,7 +2,7 @@ use crate::app::AppContext;
 use crate::frame_result::FrameResult;
 use crate::gui::breaker::BreakerProbe;
 use crate::gui::graph_ui::PortCache;
-use crate::gui::{NODE_W, PORT_COL_PAD_TOP, PORT_GAP, PORT_RADIUS, PORT_SIZE, Side};
+use crate::gui::{NODE_W, PORT_COL_PAD_TOP, PORT_GAP, PORT_RADIUS, PORT_SIZE, PortKind};
 use crate::intent::Intent;
 use crate::scene::{Scene, SceneNode};
 use common::Span;
@@ -138,7 +138,7 @@ impl NodeUI {
             })
             .show(ui, |ui| {
                 header(ui, ctx, node.name.clone());
-                ports_row(ui, ctx, inputs, outputs, widget_ids)
+                ports_row(ui, ctx, node.id, inputs, outputs, widget_ids)
             });
         let spans = panel.inner;
         let response = panel.response;
@@ -223,6 +223,7 @@ fn header(ui: &mut Ui, ctx: &AppContext<'_>, name: InternedStr) {
 fn ports_row(
     ui: &mut Ui,
     ctx: &AppContext<'_>,
+    node_id: NodeId,
     inputs: &[InternedStr],
     outputs: &[InternedStr],
     widget_ids: &mut Vec<WidgetId>,
@@ -232,10 +233,18 @@ fn ports_row(
         .size((Sizing::FILL, Sizing::Hug))
         .show(ui, |ui| {
             let start_in = widget_ids.len() as u32;
-            port_column(ui, ctx, "in", inputs, Side::Left, widget_ids);
+            port_column(ui, ctx, node_id, "in", inputs, PortKind::Input, widget_ids);
             let len_in = widget_ids.len() as u32 - start_in;
             let start_out = widget_ids.len() as u32;
-            port_column(ui, ctx, "out", outputs, Side::Right, widget_ids);
+            port_column(
+                ui,
+                ctx,
+                node_id,
+                "out",
+                outputs,
+                PortKind::Output,
+                widget_ids,
+            );
             let len_out = widget_ids.len() as u32 - start_out;
             NodePortSpans {
                 inputs: Span::new(start_in, len_in),
@@ -248,77 +257,91 @@ fn ports_row(
 fn port_column(
     ui: &mut Ui,
     ctx: &AppContext<'_>,
+    node_id: NodeId,
     salt: &'static str,
     names: &[InternedStr],
-    side: Side,
+    kind: PortKind,
     widget_ids: &mut Vec<WidgetId>,
 ) {
-    let fill = match side {
-        Side::Left => ctx.theme.input_port,
-        Side::Right => ctx.theme.output_port,
+    let (idle, hover) = match kind {
+        PortKind::Input => (ctx.theme.input_port, ctx.theme.input_port_hover),
+        PortKind::Output => (ctx.theme.output_port, ctx.theme.output_port_hover),
     };
     Panel::vstack()
         .id_salt(salt)
         .size((Sizing::Fill(1.0), Sizing::Hug))
         .padding(Spacing::new(0.0, PORT_COL_PAD_TOP, 0.0, PORT_COL_PAD_TOP))
         .gap(PORT_GAP)
-        .child_align(match side {
-            Side::Left => Align::h(HAlign::Left),
-            Side::Right => Align::h(HAlign::Right),
+        .child_align(match kind {
+            PortKind::Input => Align::h(HAlign::Left),
+            PortKind::Output => Align::h(HAlign::Right),
         })
         .show(ui, |ui| {
             for (i, name) in names.iter().enumerate() {
-                widget_ids.push(port_row(ui, i, name.clone(), side, fill));
+                widget_ids.push(port_row(ui, node_id, i, name.clone(), kind, idle, hover));
             }
         });
 }
 
+/// Stable widget id for one port circle. Derived from
+/// `(node_id, kind, port_idx)` so prepass can look up
+/// `response_for(port_circle_wid(..))` without threading the cache —
+/// every port's id is reconstructible from its domain coordinates.
+pub fn port_circle_wid(node_id: NodeId, kind: PortKind, port_idx: usize) -> WidgetId {
+    WidgetId::from_hash(("graph.node.port_circle", node_id, kind as u8, port_idx))
+}
+
 /// One port = circle + label, vertically centered. Circle on the outer
 /// edge (with negative margin so it overhangs the column), label on
-/// the inner side. Returns the circle's stable `WidgetId` so the
+/// the inner kind. Returns the circle's stable `WidgetId` so the
 /// canvas-level `draw_connections` can resolve its world rect on
 /// demand via `Ui::response_for`.
-fn port_row(ui: &mut Ui, i: usize, name: InternedStr, side: Side, fill: Color) -> WidgetId {
-    let margin = match side {
-        Side::Left => Spacing::new(-PORT_RADIUS, 0.0, 0.0, 0.0),
-        Side::Right => Spacing::new(0.0, 0.0, -PORT_RADIUS, 0.0),
+fn port_row(
+    ui: &mut Ui,
+    node_id: NodeId,
+    i: usize,
+    name: InternedStr,
+    kind: PortKind,
+    fill: Color,
+    fill_hover: Color,
+) -> WidgetId {
+    let margin = match kind {
+        PortKind::Input => Spacing::new(-PORT_RADIUS, 0.0, 0.0, 0.0),
+        PortKind::Output => Spacing::new(0.0, 0.0, -PORT_RADIUS, 0.0),
     };
+    let wid = port_circle_wid(node_id, kind, i);
+    let hovered = ui.response_for(wid).hovered;
+    let color = if hovered { fill_hover } else { fill };
     Panel::hstack()
         .id_salt(("port", i))
         .size((Sizing::Hug, Sizing::Hug))
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
-        .show(ui, |ui| match side {
-            Side::Left => {
-                let id = circle_frame(ui, fill, margin).widget_id();
+        .show(ui, |ui| match kind {
+            PortKind::Input => {
+                circle_frame(ui, wid, color, margin);
                 Text::new(name.clone()).show(ui);
-                id
             }
-            Side::Right => {
+            PortKind::Output => {
                 Text::new(name.clone()).show(ui);
-                circle_frame(ui, fill, margin).widget_id()
+                circle_frame(ui, wid, color, margin);
             }
-        })
-        .inner
+        });
+    wid
 }
 
-fn circle_frame(ui: &mut Ui, fill: Color, margin: Spacing) -> Response<'_> {
-    // Explicit `id_salt` instead of `auto_id`: every port circle
-    // shares the same `#[track_caller]` site (this function), so
-    // `auto_id` collides across siblings → `SeenIds::record`
-    // disambiguates, but `Frame::show` reads `response_for` with the
-    // pre-disambiguation id and gets `None` back. The parent port
-    // row already has a unique `id_salt(("port", i))`, so
-    // `parent.with("circle")` is unique per port.
-    //
-    // Port circles sense CLICK so a press lands on the port and does
-    // not fall through to the parent node panel — that's what keeps
-    // node-drag from latching when the user grabs a port.
+fn circle_frame(ui: &mut Ui, wid: WidgetId, fill: Color, margin: Spacing) -> Response<'_> {
+    // Explicit `id(wid)` so the cross-frame id stays stable: prepass
+    // computes the same `port_circle_wid` and reads its response,
+    // record paints with the same id — no drift even if the parent
+    // structure shifts. CLICK | DRAG so the port (a) intercepts the
+    // press before it falls through to the node body's `Sense::DRAG`,
+    // and (b) can latch a connection drag.
     Frame::new()
-        .id_salt("circle")
+        .id(wid)
         .size((Sizing::Fixed(PORT_SIZE), Sizing::Fixed(PORT_SIZE)))
         .margin(margin)
-        .sense(Sense::CLICK)
+        .sense(Sense::CLICK | Sense::DRAG)
         .background(Background {
             fill: fill.into(),
             corners: Corners::all(PORT_RADIUS),

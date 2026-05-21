@@ -10,7 +10,8 @@ use std::collections::HashMap;
 use crate::app::AppContext;
 use crate::frame_result::FrameResult;
 use crate::gui::breaker::{BreakerProbe, BreakerState};
-use crate::gui::node_ui::{NodePortSpans, NodeUI};
+use crate::gui::node_ui::{NodePortSpans, NodeUI, port_circle_wid};
+use crate::gui::{PortKind, PortRef};
 use crate::intent::Intent;
 use crate::scene::Scene;
 
@@ -74,6 +75,24 @@ pub struct GraphUI {
     /// canvas world coords so render and intersection share the same
     /// frame as the bezier endpoints.
     breaker: Option<BreakerState>,
+    /// In-flight new-connection drag. Latched on a port's
+    /// `drag_started` and dropped on release; while active the canvas
+    /// record paints a preview bezier from the start port to the
+    /// pointer (or snapped compatible port).
+    connection_drag: Option<ConnectionDrag>,
+}
+
+/// In-flight connection drag. Identity-only — port centers are
+/// resolved every frame from the canvas's current widget layout via
+/// [`Ui::response_for`], so the drag survives layout changes without
+/// stale coordinates.
+#[derive(Clone, Copy, Debug)]
+struct ConnectionDrag {
+    start: PortRef,
+    start_wid: WidgetId,
+    /// Compatible-kind port currently under the pointer, if any. Set
+    /// during the per-frame update and read at release time.
+    snap_end: Option<PortRef>,
 }
 
 impl GraphUI {
@@ -97,12 +116,14 @@ impl GraphUI {
         // via `NodeUI::prepass`.
         self.apply_pan_zoom(ui, scene);
         self.apply_breaker(ui, scene, out);
+        self.apply_connection_drag(ui, scene, out);
 
         let Self {
             ports,
             node_ui,
             pan_anchor: _,
             breaker,
+            connection_drag,
         } = self;
         let pan_val = scene.pan;
         let zoom_val = scene.zoom;
@@ -163,6 +184,9 @@ impl GraphUI {
                         node_ui.draw_all(ui, ctx, scene, ports, &mut probe);
                         if let Some(b) = breaker.as_ref() {
                             draw_breaker(ui, ctx, b);
+                        }
+                        if let Some(d) = connection_drag.as_ref() {
+                            draw_connection_drag(ui, ctx, scene, *d, canvas_origin);
                         }
                     });
             });
@@ -296,6 +320,47 @@ impl GraphUI {
             _ => {}
         }
     }
+
+    /// Drive the in-flight new-connection drag: latch start, track
+    /// snap target, commit on release. Mirrors the deprecated
+    /// `Gesture::DraggingConnection` flow but lives on `GraphUI`
+    /// directly — single-port-at-a-time means one `Option` is enough.
+    ///
+    /// Latch: on the first port whose `response_for(...).drag_started()`
+    /// fires, store a [`ConnectionDrag`] pinned to that port.
+    /// While active: rescan every port each frame for the topmost
+    /// opposite-kind port under the pointer; that becomes `snap_end`.
+    /// Release: if a compatible `snap_end` is set, push an
+    /// [`Intent::SetInput`] binding the input port to the output port.
+    /// Otherwise drop silently. Esc cancels without emitting anything.
+    fn apply_connection_drag(&mut self, ui: &mut Ui, scene: &Scene, out: &mut FrameResult) {
+        if self.connection_drag.is_none() {
+            self.connection_drag = scan_drag_start(ui, scene);
+        }
+        if ui.escape_pressed() {
+            self.connection_drag = None;
+            return;
+        }
+        let Some(mut drag) = self.connection_drag else {
+            return;
+        };
+        let start_resp = ui.response_for(drag.start_wid);
+        // `drag_delta()` returning Some means palantir still considers
+        // the gesture live; None means released or pointer left the
+        // surface. The first frame of the drag also reports Some
+        // (zero delta), so a freshly-latched drag isn't mistaken for
+        // a release.
+        let still_dragging = start_resp.drag_delta().is_some() || start_resp.drag_started();
+        drag.snap_end = scan_snap_target(ui, scene, drag.start);
+        if still_dragging {
+            self.connection_drag = Some(drag);
+            return;
+        }
+        if let Some(end) = drag.snap_end {
+            commit_connection(drag.start, end, out);
+        }
+        self.connection_drag = None;
+    }
 }
 
 /// Outer-canvas-local coords → inner-canvas pre-transform world
@@ -304,6 +369,125 @@ impl GraphUI {
 fn to_world(outer_local: Vec2, scene: &Scene) -> Vec2 {
     let zoom = if scene.zoom > 0.0 { scene.zoom } else { 1.0 };
     (outer_local - scene.pan) / zoom
+}
+
+/// First port whose response shows `drag_started()` this frame, or
+/// `None`. Iterates inputs first then outputs per node so the topmost
+/// recorded port wins ties (matches paint order). Returns a fully-
+/// initialized [`ConnectionDrag`] with no snap target yet.
+fn scan_drag_start(ui: &Ui, scene: &Scene) -> Option<ConnectionDrag> {
+    for n in &scene.nodes {
+        for kind in [PortKind::Input, PortKind::Output] {
+            let count = match kind {
+                PortKind::Input => scene.ports(n.inputs).len(),
+                PortKind::Output => scene.ports(n.outputs).len(),
+            };
+            for port_idx in 0..count {
+                let wid = port_circle_wid(n.id, kind, port_idx);
+                if ui.response_for(wid).drag_started() {
+                    return Some(ConnectionDrag {
+                        start: PortRef {
+                            node_id: n.id,
+                            kind,
+                            port_idx,
+                        },
+                        start_wid: wid,
+                        snap_end: None,
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Port currently under the pointer that is a compatible target for
+/// `start` — opposite kind and a different node. Returns `None` if
+/// nothing is hovered or only an incompatible port is.
+fn scan_snap_target(ui: &Ui, scene: &Scene, start: PortRef) -> Option<PortRef> {
+    let want_side = start.kind.opposite();
+    for n in &scene.nodes {
+        if n.id == start.node_id {
+            continue;
+        }
+        let count = match want_side {
+            PortKind::Input => scene.ports(n.inputs).len(),
+            PortKind::Output => scene.ports(n.outputs).len(),
+        };
+        for port_idx in 0..count {
+            let wid = port_circle_wid(n.id, want_side, port_idx);
+            if ui.response_for(wid).hovered {
+                return Some(PortRef {
+                    node_id: n.id,
+                    kind: want_side,
+                    port_idx,
+                });
+            }
+        }
+    }
+    None
+}
+
+/// Convert a snapped `(start, end)` PortRef pair (one `Left`/input, one
+/// `Right`/output — caller-guaranteed by [`scan_snap_target`]) into an
+/// `Intent::SetInput` binding. Cycle prevention is left to the intent
+/// apply layer; an invalid binding will surface there rather than
+/// silently failing here.
+fn commit_connection(start: PortRef, end: PortRef, out: &mut FrameResult) {
+    let (input, output) = match (start.kind, end.kind) {
+        (PortKind::Input, PortKind::Output) => (start, end),
+        (PortKind::Output, PortKind::Input) => (end, start),
+        _ => return, // unreachable — scan_snap_target enforces opposite sides
+    };
+    out.push(Intent::SetInput {
+        node_id: input.node_id,
+        input_idx: input.port_idx,
+        to: Binding::Bind(PortAddress {
+            target_id: output.node_id,
+            port_idx: output.port_idx,
+        }),
+    });
+}
+
+/// Paint the in-flight drag preview: cubic bezier from the start
+/// port's center to either the snapped target's center (when set) or
+/// the pointer position. Drawn inside the inner canvas so coordinates
+/// share the pan/zoom transform with permanent connections.
+fn draw_connection_drag(
+    ui: &mut Ui,
+    ctx: &AppContext<'_>,
+    scene: &Scene,
+    drag: ConnectionDrag,
+    canvas_origin: Vec2,
+) {
+    let Some(start) = port_center(ui, drag.start_wid, canvas_origin) else {
+        return;
+    };
+    let end = match drag.snap_end {
+        Some(snap) => {
+            let wid = port_circle_wid(snap.node_id, snap.kind, snap.port_idx);
+            port_center(ui, wid, canvas_origin)
+        }
+        None => ui.pointer_pos().map(|p| to_world(p - canvas_origin, scene)),
+    };
+    let Some(end) = end else { return };
+    // Orient handles by kind: outputs grow rightward, inputs grow
+    // leftward. Same dx algebra as `draw_connections` so the preview
+    // matches the eventual permanent curve exactly when snapped.
+    let (p0, p3) = match drag.start.kind {
+        PortKind::Output => (start, end),
+        PortKind::Input => (end, start),
+    };
+    let dx = ((p3.x - p0.x).abs() * 0.5).max(40.0);
+    ui.add_shape(Shape::CubicBezier {
+        p0,
+        p1: p0 + Vec2::new(dx, 0.0),
+        p2: p3 - Vec2::new(dx, 0.0),
+        p3,
+        width: ctx.theme.connection_width,
+        brush: ctx.theme.connection.into(),
+        cap: LineCap::Round,
+    });
 }
 
 fn draw_breaker(ui: &mut Ui, ctx: &AppContext<'_>, b: &BreakerState) {
