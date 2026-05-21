@@ -3,7 +3,9 @@ use lens::ImageFuncLib;
 use palantir::{Shortcut, Ui};
 use scenarium::elements::basic_funclib::BasicFuncLib;
 use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
-use scenarium::prelude::FuncLib;
+use scenarium::data::StaticValue;
+use scenarium::graph::Binding;
+use scenarium::prelude::{FuncLib, NodeId};
 use scenarium::testing::{TestFuncHooks, test_func_lib, test_graph};
 
 use crate::action_stack::ActionStack;
@@ -49,6 +51,7 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         let mut view_graph: ViewGraph = test_graph().into();
+        seed_const_bindings(&mut view_graph);
         view_graph.auto_layout(220.0, 110.0, Vec2::new(40.0, 40.0));
         let mut func_lib = FuncLib::default();
         func_lib.merge(test_func_lib(TestFuncHooks::default()));
@@ -92,6 +95,21 @@ impl palantir::App for App {
         if self.drain_intents() | relayout {
             ui.request_relayout();
         }
+    }
+}
+
+/// Replace a few of `test_graph`'s `Binding::Bind` inputs with
+/// `Binding::Const(..)` so the inline static-value editor has
+/// something to render on first launch. Targets the `mult` and `sum`
+/// nodes by their well-known ids from `scenarium::testing::test_graph`.
+fn seed_const_bindings(view_graph: &mut ViewGraph) {
+    let mult_id: NodeId = "579ae1d6-10a3-4906-8948-135cb7d7508b".into();
+    let sum_id: NodeId = "999c4d37-e0eb-4856-be3f-ad2090c84d8c".into();
+    if let Some(node) = view_graph.graph.by_id_mut(&mult_id) {
+        node.inputs[1].binding = Binding::Const(StaticValue::Int(7));
+    }
+    if let Some(node) = view_graph.graph.by_id_mut(&sum_id) {
+        node.inputs[1].binding = Binding::Const(StaticValue::Float(2.5));
     }
 }
 
