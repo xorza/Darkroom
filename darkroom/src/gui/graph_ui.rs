@@ -1,17 +1,15 @@
 use glam::Vec2;
 use palantir::{
-    Background, Configure, LineCap, Panel, PointerButton, PolylineColors, Rect, Sense, Shape,
-    Sizing, TranslateScale, Ui, WidgetId,
+    Background, Configure, Panel, PointerButton, Rect, Sense, Sizing, TranslateScale, Ui, WidgetId,
 };
-use scenarium::graph::{Binding, PortAddress};
 use std::collections::HashMap;
 
 use crate::app::AppContext;
 use crate::frame_result::FrameResult;
-use crate::gui::breaker::{BreakerProbe, BreakerState};
+use crate::gui::breaker::BreakerUI;
+use crate::gui::connection_ui::ConnectionUI;
 use crate::gui::node_ui::{NodeUI, port_circle_wid};
 use crate::gui::{PortKind, PortRef};
-use crate::intent::Intent;
 use crate::scene::Scene;
 
 /// Bounds on the canvas zoom factor. Pinch / scroll-zoom deltas
@@ -97,13 +95,13 @@ impl PortFrame {
 
     /// Canvas-local pre-transform port center (subtracts `canvas_origin`).
     /// `None` when the port hasn't been measured yet.
-    fn center_canvas_local(&self, p: PortRef, canvas_origin: Vec2) -> Option<Vec2> {
+    pub(super) fn center_canvas_local(&self, p: PortRef, canvas_origin: Vec2) -> Option<Vec2> {
         self.map.get(&p)?.layout_center.map(|c| c - canvas_origin)
     }
 
     /// `true` when `pointer` (screen coords) falls inside this port's
     /// post-transform/clip rect.
-    fn contains_pointer(&self, p: PortRef, pointer: Vec2) -> bool {
+    pub(super) fn contains_pointer(&self, p: PortRef, pointer: Vec2) -> bool {
         self.map
             .get(&p)
             .and_then(|i| i.screen_rect)
@@ -111,12 +109,12 @@ impl PortFrame {
     }
 
     /// `true` on the one-frame edge of a drag-start on this port.
-    fn drag_started(&self, p: PortRef) -> bool {
+    pub(super) fn drag_started(&self, p: PortRef) -> bool {
         self.map.get(&p).is_some_and(|i| i.drag_started)
     }
 
     /// `true` while a drag started on this port is still live.
-    fn dragging(&self, p: PortRef) -> bool {
+    pub(super) fn dragging(&self, p: PortRef) -> bool {
         self.map.get(&p).is_some_and(|i| i.dragging)
     }
 }
@@ -132,33 +130,13 @@ impl PortFrame {
 pub struct GraphUI {
     pub port_frame: PortFrame,
     pub node_ui: NodeUI,
+    pub breaker_ui: BreakerUI,
+    pub connection_ui: ConnectionUI,
     /// `Scene::pan` snapshot captured at the frame the active pan-drag
     /// latched. While the drag is active, `scene.pan = anchor +
     /// drag_delta`. Lives on `GraphUI` because it's input bookkeeping
     /// (lifetime = one gesture), not viewport state.
     pan_anchor: Option<Vec2>,
-    /// Active right-mouse-drag "connection breaker" gesture, if any.
-    /// Lives here for the same reason as `pan_anchor`: input
-    /// bookkeeping with a one-gesture lifetime. Polyline is in inner-
-    /// canvas world coords so render and intersection share the same
-    /// frame as the bezier endpoints.
-    breaker: Option<BreakerState>,
-    /// In-flight new-connection drag. Latched on a port's
-    /// `drag_started` and dropped on release; while active the canvas
-    /// record paints a preview bezier from the start port to the
-    /// pointer (or snapped compatible port).
-    connection_drag: Option<ConnectionDrag>,
-}
-
-/// In-flight connection drag. Identity-only — port centers are
-/// resolved every frame from `PortFrame`, so the drag survives layout
-/// changes without stale coordinates.
-#[derive(Clone, Copy, Debug)]
-struct ConnectionDrag {
-    start: PortRef,
-    /// Compatible-kind port currently under the pointer, if any. Set
-    /// during the per-frame update and read at release time.
-    snap_end: Option<PortRef>,
 }
 
 impl GraphUI {
@@ -185,15 +163,15 @@ impl GraphUI {
         // detection, snap test, and bezier endpoints all read from the
         // same map instead of re-issuing `response_for` per use-site.
         self.port_frame.rebuild(ui, scene);
-        self.apply_breaker(ui, scene, out);
-        self.apply_connection_drag(ui, scene, out);
+        self.breaker_ui.apply(ui, scene, out);
+        self.connection_ui.apply(ui, scene, &self.port_frame, out);
 
         let Self {
             port_frame,
             node_ui,
+            breaker_ui,
+            connection_ui,
             pan_anchor: _,
-            breaker,
-            connection_drag,
         } = self;
         let pan_val = scene.pan;
         let zoom_val = scene.zoom;
@@ -245,18 +223,20 @@ impl GraphUI {
                             .layout_rect
                             .map(|r| r.min)
                             .unwrap_or(Vec2::ZERO);
-                        let mut probe = BreakerProbe {
-                            origin: canvas_origin,
-                            state: breaker.as_mut(),
-                        };
-                        draw_connections(ui, ctx, scene, port_frame, canvas_origin, &mut probe);
-                        node_ui.draw_all(ui, ctx, scene, &mut probe);
-                        if let Some(b) = breaker.as_ref() {
-                            draw_breaker(ui, ctx, b);
+                        {
+                            let mut probe = breaker_ui.probe(canvas_origin);
+                            connection_ui.draw(
+                                ui,
+                                ctx,
+                                scene,
+                                port_frame,
+                                canvas_origin,
+                                &mut probe,
+                            );
+                            node_ui.draw_all(ui, ctx, scene, &mut probe);
                         }
-                        if let Some(d) = connection_drag.as_ref() {
-                            draw_connection_drag(ui, ctx, scene, port_frame, *d, canvas_origin);
-                        }
+                        breaker_ui.draw(ui, ctx);
+                        connection_ui.draw_in_flight(ui, ctx, scene, port_frame, canvas_origin);
                     });
             });
     }
@@ -308,266 +288,14 @@ impl GraphUI {
             zoom_about(scene, pivot, resp.zoom_factor);
         }
     }
-
-    /// Right-mouse drag (or Cmd+LMB on a trackpad) on the outer
-    /// canvas drives the connection breaker. Three transitions, all
-    /// keyed off the outer canvas's response:
-    ///
-    /// - **`drag_started_by(Right)`**, *or* `drag_started_by(Left)`
-    ///   with Cmd held — convert this frame's pointer to inner-canvas
-    ///   world coords and seed a fresh [`BreakerState`] for that
-    ///   button. The button is remembered so the rest of the gesture
-    ///   keeps polling the same one — releasing Cmd mid-drag doesn't
-    ///   end an active breaker.
-    /// - **Still dragging** (`drag_delta_by(button)` is `Some`) —
-    ///   append the current pointer (`BreakerState::add_point`
-    ///   handles the 4px sample floor and 900-unit length cap).
-    /// - **Just released** (was active, `drag_delta_by(button)` now
-    ///   `None`) — drain the broken-target set into
-    ///   `Intent::SetInput { to: Binding::None }` and drop the state.
-    ///
-    /// RMB / LMB on a node panel is captured by the node (it senses
-    /// `DRAG`), so `outer.drag_started_by(..)` only fires on
-    /// background — exactly the "background-only" gate the deprecated
-    /// breaker had.
-    fn apply_breaker(&mut self, ui: &mut Ui, scene: &Scene, out: &mut FrameResult) {
-        let resp = ui.response_for(outer_canvas_widget_id());
-        let mods = ui.modifiers();
-        let cmd_lmb = resp.drag_started_by(PointerButton::Left) && mods.meta;
-        let rmb = resp.drag_started_by(PointerButton::Right);
-        if (rmb || cmd_lmb)
-            && self.breaker.is_none()
-            && let Some(p) = resp.pointer_local
-        {
-            let button = if rmb {
-                PointerButton::Right
-            } else {
-                PointerButton::Left
-            };
-            self.breaker = Some(BreakerState::start(to_world(p, scene), button));
-        }
-        // Esc cancels an active breaker: drop the gesture without
-        // emitting any unbind / remove intents. Buffered hits this
-        // frame are discarded with the state.
-        if self.breaker.is_some() && ui.escape_pressed() {
-            self.breaker = None;
-            return;
-        }
-        let button = self.breaker.as_ref().map(|b| b.button);
-        match (
-            self.breaker.as_mut(),
-            button.and_then(|b| resp.drag_delta_by(b)),
-        ) {
-            (Some(b), Some(_)) => {
-                if let Some(p) = resp.pointer_local {
-                    b.add_point(to_world(p, scene));
-                }
-            }
-            (Some(b), None) => {
-                // Node removals first: an `Intent::RemoveNode` is the
-                // strict superset (it also detaches incoming bindings
-                // via `UndoStep::RemoveNode`'s captured incoming
-                // edges), so emitting any per-input unbind for an
-                // already-doomed target would be a redundant
-                // historical entry. Skip those.
-                let doomed_nodes = std::mem::take(&mut b.broken_nodes);
-                for &node_id in &doomed_nodes {
-                    out.push(Intent::RemoveNode { node_id });
-                }
-                for addr in b.broken.drain(..) {
-                    if doomed_nodes.contains(&addr.target_id) {
-                        continue;
-                    }
-                    out.push(Intent::SetInput {
-                        node_id: addr.target_id,
-                        input_idx: addr.port_idx,
-                        to: Binding::None,
-                    });
-                }
-                self.breaker = None;
-            }
-            _ => {}
-        }
-    }
-
-    /// Drive the in-flight new-connection drag: latch start, track
-    /// snap target, commit on release. Mirrors the deprecated
-    /// `Gesture::DraggingConnection` flow but lives on `GraphUI`
-    /// directly — single-port-at-a-time means one `Option` is enough.
-    ///
-    /// Latch: on the first port whose `response_for(...).drag_started()`
-    /// fires, store a [`ConnectionDrag`] pinned to that port.
-    /// While active: rescan every port each frame for the topmost
-    /// opposite-kind port under the pointer; that becomes `snap_end`.
-    /// Release: if a compatible `snap_end` is set, push an
-    /// [`Intent::SetInput`] binding the input port to the output port.
-    /// Otherwise drop silently. Esc cancels without emitting anything.
-    fn apply_connection_drag(&mut self, ui: &mut Ui, scene: &Scene, out: &mut FrameResult) {
-        if self.connection_drag.is_none() {
-            self.connection_drag = scan_drag_start(&self.port_frame, scene);
-        }
-        if ui.escape_pressed() {
-            self.connection_drag = None;
-            return;
-        }
-        let Some(mut drag) = self.connection_drag else {
-            return;
-        };
-        // `PortFrame::dragging` rolls up `drag_delta().is_some() || drag_started()`
-        // — `Some` (incl. zero-delta first-frame) means live, transition
-        // to `false` is the release edge.
-        drag.snap_end = scan_snap_target(&self.port_frame, ui, scene, drag.start);
-        if self.port_frame.dragging(drag.start) {
-            self.connection_drag = Some(drag);
-            return;
-        }
-        if let Some(end) = drag.snap_end {
-            commit_connection(drag.start, end, out);
-        }
-        self.connection_drag = None;
-    }
 }
 
 /// Outer-canvas-local coords → inner-canvas pre-transform world
 /// coords. Inner canvas applies `TranslateScale::new(pan, zoom)`,
 /// so `outer = pan + zoom * world`.
-fn to_world(outer_local: Vec2, scene: &Scene) -> Vec2 {
+pub(super) fn to_world(outer_local: Vec2, scene: &Scene) -> Vec2 {
     let zoom = if scene.zoom > 0.0 { scene.zoom } else { 1.0 };
     (outer_local - scene.pan) / zoom
-}
-
-/// First port whose response shows `drag_started()` this frame, or
-/// `None`. Iterates inputs first then outputs per node so the topmost
-/// recorded port wins ties (matches paint order). Returns a fully-
-/// initialized [`ConnectionDrag`] with no snap target yet.
-fn scan_drag_start(frame: &PortFrame, scene: &Scene) -> Option<ConnectionDrag> {
-    for n in &scene.nodes {
-        for kind in [PortKind::Input, PortKind::Output] {
-            let count = match kind {
-                PortKind::Input => scene.ports(n.inputs).len(),
-                PortKind::Output => scene.ports(n.outputs).len(),
-            };
-            for port_idx in 0..count {
-                let port = PortRef {
-                    node_id: n.id,
-                    kind,
-                    port_idx,
-                };
-                if frame.drag_started(port) {
-                    return Some(ConnectionDrag {
-                        start: port,
-                        snap_end: None,
-                    });
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Port currently under the pointer that is a compatible target for
-/// `start` — opposite kind and a different node. Uses a geometry test
-/// against `response.rect` rather than `response.hovered`: palantir
-/// suppresses `hovered` on every widget except the LMB-capture owner
-/// during a drag, so while the start port owns the capture no other
-/// port can ever read `hovered = true`. The cascaded `rect` is set
-/// regardless of capture, so point-in-rect picks up the snap target.
-fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -> Option<PortRef> {
-    let want_kind = start.kind.opposite();
-    let pointer = ui.pointer_pos()?;
-    for n in &scene.nodes {
-        if n.id == start.node_id {
-            continue;
-        }
-        let count = match want_kind {
-            PortKind::Input => scene.ports(n.inputs).len(),
-            PortKind::Output => scene.ports(n.outputs).len(),
-        };
-        for port_idx in 0..count {
-            let port = PortRef {
-                node_id: n.id,
-                kind: want_kind,
-                port_idx,
-            };
-            if frame.contains_pointer(port, pointer) {
-                return Some(port);
-            }
-        }
-    }
-    None
-}
-
-/// Convert a snapped `(start, end)` PortRef pair (one `Left`/input, one
-/// `Right`/output — caller-guaranteed by [`scan_snap_target`]) into an
-/// `Intent::SetInput` binding. Cycle prevention is left to the intent
-/// apply layer; an invalid binding will surface there rather than
-/// silently failing here.
-fn commit_connection(start: PortRef, end: PortRef, out: &mut FrameResult) {
-    let (input, output) = match (start.kind, end.kind) {
-        (PortKind::Input, PortKind::Output) => (start, end),
-        (PortKind::Output, PortKind::Input) => (end, start),
-        _ => return, // unreachable — scan_snap_target enforces opposite sides
-    };
-    out.push(Intent::SetInput {
-        node_id: input.node_id,
-        input_idx: input.port_idx,
-        to: Binding::Bind(PortAddress {
-            target_id: output.node_id,
-            port_idx: output.port_idx,
-        }),
-    });
-}
-
-/// Paint the in-flight drag preview: cubic bezier from the start
-/// port's center to either the snapped target's center (when set) or
-/// the pointer position. Drawn inside the inner canvas so coordinates
-/// share the pan/zoom transform with permanent connections.
-fn draw_connection_drag(
-    ui: &mut Ui,
-    ctx: &AppContext<'_>,
-    scene: &Scene,
-    port_frame: &PortFrame,
-    drag: ConnectionDrag,
-    canvas_origin: Vec2,
-) {
-    let Some(start) = port_frame.center_canvas_local(drag.start, canvas_origin) else {
-        return;
-    };
-    let end = match drag.snap_end {
-        Some(snap) => port_frame.center_canvas_local(snap, canvas_origin),
-        None => ui.pointer_pos().map(|p| to_world(p - canvas_origin, scene)),
-    };
-    let Some(end) = end else { return };
-    // Orient handles by kind: outputs grow rightward, inputs grow
-    // leftward. Same dx algebra as `draw_connections` so the preview
-    // matches the eventual permanent curve exactly when snapped.
-    let (p0, p3) = match drag.start.kind {
-        PortKind::Output => (start, end),
-        PortKind::Input => (end, start),
-    };
-    let dx = ((p3.x - p0.x).abs() * 0.5).max(40.0);
-    ui.add_shape(Shape::CubicBezier {
-        p0,
-        p1: p0 + Vec2::new(dx, 0.0),
-        p2: p3 - Vec2::new(dx, 0.0),
-        p3,
-        width: ctx.theme.connection_width,
-        brush: ctx.theme.connection.into(),
-        cap: LineCap::Round,
-    });
-}
-
-fn draw_breaker(ui: &mut Ui, ctx: &AppContext<'_>, b: &BreakerState) {
-    if b.points().len() < 2 {
-        return;
-    }
-    ui.add_shape(Shape::Polyline {
-        points: b.points(),
-        colors: PolylineColors::Single(ctx.theme.breaker_stroke),
-        width: ctx.theme.breaker_stroke_width,
-        cap: LineCap::Round,
-        join: palantir::LineJoin::Round,
-    });
 }
 
 /// Map a one-frame vertical scroll delta (in logical px, palantir's
@@ -598,83 +326,15 @@ fn zoom_about(scene: &mut Scene, pivot_local: Vec2, factor: f32) {
 /// Stable id for the outer (pan-capture) canvas. `auto_stable` mixes
 /// `file!()`/`line!()` so calls from different source lines stay
 /// distinct; here we only need the id to survive between frames.
-const fn outer_canvas_widget_id() -> WidgetId {
+pub(super) const fn outer_canvas_widget_id() -> WidgetId {
     WidgetId::auto_stable()
 }
 
-/// Stable id for the inner (transformed) canvas. Used both as the
-/// widget seed and for resolving the canvas's pre-transform origin
-/// in `port_center`.
+/// Stable id for the inner (transformed) canvas. Used as the widget
+/// seed and for resolving the canvas's pre-transform origin in
+/// connection draws.
 const fn inner_canvas_widget_id() -> WidgetId {
     WidgetId::auto_stable()
-}
-
-fn draw_connections(
-    ui: &mut Ui,
-    ctx: &AppContext<'_>,
-    scene: &Scene,
-    port_frame: &PortFrame,
-    canvas_origin: Vec2,
-    probe: &mut BreakerProbe<'_>,
-) {
-    let width = ctx.theme.connection_width;
-    if let Some(b) = probe.state.as_deref_mut() {
-        b.broken.clear();
-    }
-    for c in &scene.connections {
-        let src_port = PortRef {
-            node_id: c.src_node,
-            kind: PortKind::Output,
-            port_idx: c.src_port,
-        };
-        let tgt_port = PortRef {
-            node_id: c.tgt_node,
-            kind: PortKind::Input,
-            port_idx: c.tgt_port,
-        };
-        let (Some(p0), Some(p3)) = (
-            port_frame.center_canvas_local(src_port, canvas_origin),
-            port_frame.center_canvas_local(tgt_port, canvas_origin),
-        ) else {
-            continue;
-        };
-        let dx = ((p3.x - p0.x).abs() * 0.5).max(40.0);
-        let p1 = p0 + Vec2::new(dx, 0.0);
-        let p2 = p3 - Vec2::new(dx, 0.0);
-        // While the breaker is active, every connection re-tests
-        // against the polyline; hits are recoloured and queued for
-        // unbinding on release.
-        let broken = probe
-            .state
-            .as_deref()
-            .is_some_and(|b| b.intersects_cubic(p0, p1, p2, p3));
-        if broken {
-            // unwrap: `broken == true` implies `state` is `Some`.
-            probe
-                .state
-                .as_deref_mut()
-                .unwrap()
-                .broken
-                .push(PortAddress {
-                    target_id: c.tgt_node,
-                    port_idx: c.tgt_port,
-                });
-        }
-        let color = if broken {
-            ctx.theme.connection_broken
-        } else {
-            ctx.theme.connection
-        };
-        ui.add_shape(Shape::CubicBezier {
-            p0,
-            p1,
-            p2,
-            p3,
-            width,
-            brush: color.into(),
-            cap: LineCap::Round,
-        });
-    }
 }
 
 #[cfg(test)]
