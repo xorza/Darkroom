@@ -288,15 +288,16 @@ mod tests {
     #[test]
     fn add_point_caps_total_length() {
         // Past MAX_BREAKER_LENGTH the last segment is clamped and
-        // further pushes are no-ops. Hand-computed: starting at 0
-        // and pushing (1000, 0) lands the second point at exactly
-        // (900, 0) — the cap.
+        // further pushes are no-ops. Hand-computed: starting at 0 and
+        // pushing (3000, 0) has seg = 3000 > remaining = 2000, so t =
+        // 2000/3000 and the appended point lands at exactly
+        // (2000, 0) — the cap.
         let mut b = BreakerState::start(Vec2::ZERO, PointerButton::Right);
-        b.add_point(Vec2::new(1000.0, 0.0));
+        b.add_point(Vec2::new(3000.0, 0.0));
         assert_eq!(b.points().len(), 2);
         assert!((b.points()[1].x - MAX_BREAKER_LENGTH).abs() < 1e-4);
         let before = b.points().len();
-        b.add_point(Vec2::new(2000.0, 0.0));
+        b.add_point(Vec2::new(4000.0, 0.0));
         assert_eq!(b.points().len(), before, "no append past cap");
     }
 
