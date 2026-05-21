@@ -19,7 +19,7 @@ use crate::scene::Scene;
 /// drive it to 0 (which would make the inverse transform explode) or
 /// to a value so large that the world coordinates underflow.
 const MIN_ZOOM: f32 = 0.1;
-const MAX_ZOOM: f32 = 10.0;
+const MAX_ZOOM: f32 = 5.0;
 
 /// Per-pixel base for converting wheel / touchpad scroll into a
 /// multiplicative zoom factor. Tuned so a single classic wheel notch
@@ -203,7 +203,11 @@ impl GraphUI {
             && let Some(pivot) = resp.pointer_local
         {
             let line_px = ui.theme.text.line_height_for(ui.theme.text.font_size_px);
-            zoom_about(scene, pivot, scroll_to_zoom_factor(resp.scroll_lines.y * line_px));
+            zoom_about(
+                scene,
+                pivot,
+                scroll_to_zoom_factor(resp.scroll_lines.y * line_px),
+            );
         }
         if (resp.zoom_factor - 1.0).abs() > f32::EPSILON
             && let Some(pivot) = resp.pointer_local
@@ -248,6 +252,13 @@ impl GraphUI {
                 PointerButton::Left
             };
             self.breaker = Some(BreakerState::start(to_world(p, scene), button));
+        }
+        // Esc cancels an active breaker: drop the gesture without
+        // emitting any unbind / remove intents. Buffered hits this
+        // frame are discarded with the state.
+        if self.breaker.is_some() && ui.escape_pressed() {
+            self.breaker = None;
+            return;
         }
         let button = self.breaker.as_ref().map(|b| b.button);
         match (
