@@ -402,24 +402,33 @@ fn scan_drag_start(ui: &Ui, scene: &Scene) -> Option<ConnectionDrag> {
 }
 
 /// Port currently under the pointer that is a compatible target for
-/// `start` — opposite kind and a different node. Returns `None` if
-/// nothing is hovered or only an incompatible port is.
+/// `start` — opposite kind and a different node. Uses a geometry test
+/// against `response.rect` rather than `response.hovered`: palantir
+/// suppresses `hovered` on every widget except the LMB-capture owner
+/// during a drag, so while the start port owns the capture no other
+/// port can ever read `hovered = true`. The cascaded `rect` is set
+/// regardless of capture, so point-in-rect picks up the snap target.
 fn scan_snap_target(ui: &Ui, scene: &Scene, start: PortRef) -> Option<PortRef> {
-    let want_side = start.kind.opposite();
+    let want_kind = start.kind.opposite();
+    let pointer = ui.pointer_pos()?;
     for n in &scene.nodes {
         if n.id == start.node_id {
             continue;
         }
-        let count = match want_side {
+        let count = match want_kind {
             PortKind::Input => scene.ports(n.inputs).len(),
             PortKind::Output => scene.ports(n.outputs).len(),
         };
         for port_idx in 0..count {
-            let wid = port_circle_wid(n.id, want_side, port_idx);
-            if ui.response_for(wid).hovered {
+            let wid = port_circle_wid(n.id, want_kind, port_idx);
+            if ui
+                .response_for(wid)
+                .rect
+                .is_some_and(|r| r.contains(pointer))
+            {
                 return Some(PortRef {
                     node_id: n.id,
-                    kind: want_side,
+                    kind: want_kind,
                     port_idx,
                 });
             }
