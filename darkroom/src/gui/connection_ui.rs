@@ -90,7 +90,6 @@ impl ConnectionUI {
         ctx: &AppContext<'_>,
         scene: &Scene,
         port_frame: &PortFrame,
-        canvas_origin: Vec2,
         probe: &mut BreakerProbe<'_>,
     ) {
         let width = ctx.theme.connection_width;
@@ -109,8 +108,8 @@ impl ConnectionUI {
                 port_idx: c.tgt_port,
             };
             let (Some(p0), Some(p3)) = (
-                port_frame.center_canvas_local(src_port, canvas_origin),
-                port_frame.center_canvas_local(tgt_port, canvas_origin),
+                port_frame.center_canvas_local(src_port),
+                port_frame.center_canvas_local(tgt_port),
             ) else {
                 continue;
             };
@@ -163,11 +162,11 @@ impl ConnectionUI {
         canvas_origin: Vec2,
     ) {
         let Some(drag) = self.drag else { return };
-        let Some(start) = port_frame.center_canvas_local(drag.start, canvas_origin) else {
+        let Some(start) = port_frame.center_canvas_local(drag.start) else {
             return;
         };
         let end = match drag.snap_end {
-            Some(snap) => port_frame.center_canvas_local(snap, canvas_origin),
+            Some(snap) => port_frame.center_canvas_local(snap),
             None => ui.pointer_pos().map(|p| to_world(p - canvas_origin, scene)),
         };
         let Some(end) = end else { return };

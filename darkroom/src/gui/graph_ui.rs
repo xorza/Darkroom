@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use crate::app::AppContext;
 use crate::gui::breaker::BreakerUI;
 use crate::gui::connection_ui::ConnectionUI;
-use crate::gui::node_ui::{NodeUI, port_circle_wid};
+use crate::gui::node_ui::{NodeUI, node_widget_id, port_circle_wid};
 use crate::gui::{PortKind, PortRef};
 use crate::intent::Intent;
 use crate::scene::Scene;
@@ -45,9 +45,11 @@ pub struct PortFrame {
 
 #[derive(Clone, Copy, Debug, Default)]
 struct PortInfo {
-    /// Pre-transform port-circle center in inner-canvas world coords.
-    /// Bezier consumers subtract `canvas_origin` for canvas-local
-    /// positions. `None` for ports whose widget hasn't measured yet.
+    /// Port-circle center in canvas-local (inner-canvas pre-transform)
+    /// coords. Computed as `node.pos + port_offset_within_node` so a
+    /// just-moved node's curves anchor on this frame's port positions
+    /// instead of last frame's stale `response.layout_rect`. `None`
+    /// when either the port or its parent node hasn't measured yet.
     layout_center: Option<Vec2>,
     /// Post-transform/clip screen rect for pointer hit-test (snap).
     /// Bypasses palantir's drag-capture hover suppression by reading
@@ -72,6 +74,17 @@ impl PortFrame {
     fn rebuild(&mut self, ui: &Ui, scene: &Scene) {
         self.map.clear();
         for n in &scene.nodes {
+            // Port offsets within a node are stable; the node's
+            // canvas-local position changes when the user drags. Take
+            // `port_offset = port_rect.center - node_rect.min` from
+            // last frame's layout (same frame for both, so any
+            // ancestor-shared canvas-origin term cancels) and combine
+            // with this frame's `n.pos` — curves anchor on the moved
+            // node's *current* port positions, not last frame's.
+            let node_min = ui
+                .response_for(node_widget_id(n.id))
+                .layout_rect
+                .map(|r| r.min);
             let input_count = scene.ports(n.inputs).len();
             let output_count = scene.ports(n.outputs).len();
             for (kind, count) in [
@@ -85,10 +98,16 @@ impl PortFrame {
                         port_idx,
                     };
                     let r = ui.response_for(port_circle_wid(port));
+                    let layout_center = match (r.layout_rect, node_min) {
+                        (Some(port_rect), Some(node_min)) => {
+                            Some(n.pos + (port_rect.center() - node_min))
+                        }
+                        _ => None,
+                    };
                     self.map.insert(
                         port,
                         PortInfo {
-                            layout_center: r.layout_rect.map(|r| r.center()),
+                            layout_center,
                             screen_rect: r.rect,
                             hovered: r.hovered,
                             drag_started: r.drag_started(),
@@ -100,10 +119,10 @@ impl PortFrame {
         }
     }
 
-    /// Canvas-local pre-transform port center (subtracts `canvas_origin`).
-    /// `None` when the port hasn't been measured yet.
-    pub(super) fn center_canvas_local(&self, p: PortRef, canvas_origin: Vec2) -> Option<Vec2> {
-        self.map.get(&p)?.layout_center.map(|c| c - canvas_origin)
+    /// Canvas-local pre-transform port center. `None` when the port
+    /// or its parent node hasn't been measured yet.
+    pub(super) fn center_canvas_local(&self, p: PortRef) -> Option<Vec2> {
+        self.map.get(&p)?.layout_center
     }
 
     /// `true` when `pointer` (screen coords) falls inside this port's
@@ -257,14 +276,7 @@ impl GraphUI {
                             .unwrap_or(Vec2::ZERO);
                         {
                             let mut probe = breaker_ui.probe(canvas_origin);
-                            connection_ui.draw(
-                                ui,
-                                ctx,
-                                scene,
-                                port_frame,
-                                canvas_origin,
-                                &mut probe,
-                            );
+                            connection_ui.draw(ui, ctx, scene, port_frame, &mut probe);
                             node_ui.draw_all(ui, ctx, scene, port_frame, &mut probe);
                         }
                         breaker_ui.draw(ui, ctx);

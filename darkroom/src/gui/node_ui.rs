@@ -193,7 +193,7 @@ impl NodeUI {
 /// the domain `NodeId` so `response_for` can probe last-frame's
 /// arranged rect (used by the connection breaker's body-hit test)
 /// without needing the panel's response to round-trip first.
-fn node_widget_id(node_id: NodeId) -> WidgetId {
+pub(super) fn node_widget_id(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.body", node_id))
 }
 
