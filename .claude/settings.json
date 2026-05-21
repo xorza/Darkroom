@@ -22,6 +22,14 @@
             "Bash(perf annotate *)",
             "Bash(perf report *)",
             "Bash(perf record *)",
+            "Bash(perf stat *)",
+            "Bash(perf script *)",
+
+            "Bash(readelf *)",
+            "Bash(objdump *)",
+            "Bash(nm *)",
+            "Bash(addr2line *)",
+            "Bash(delta *)",
 
             "Bash(rustc --version)",
             "Bash(rustup target *)",

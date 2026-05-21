@@ -7,9 +7,8 @@
 **/bench-results/
 
 /.claude/settings.local.json
-.claude/scheduled_tasks.lock
+/.claude/scheduled_tasks.lock
 
-/test_output/
 
 /patch.diff
 /style.toml
@@ -36,7 +35,9 @@
 /refs
 
 
-/log/
+test_output
+tmp/
+log/
 **/*.log
 **/__pycache__/
 .tmp/
