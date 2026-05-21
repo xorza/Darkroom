@@ -77,11 +77,8 @@ impl NewNodeUi {
                                     Text::new(category.to_owned())
                                         .id_salt(("new_node_cat", category))
                                         .show(ui);
-                                    for func in ctx
-                                        .func_lib
-                                        .funcs
-                                        .iter()
-                                        .filter(|f| f.category == category)
+                                    for func in
+                                        ctx.func_lib.funcs.iter().filter(|f| f.category == category)
                                     {
                                         if MenuItem::new(func.name.clone())
                                             .show(ui, popup)

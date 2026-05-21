@@ -281,7 +281,7 @@ impl GraphUI {
                         {
                             let mut probe = breaker_ui.probe(canvas_origin);
                             connection_ui.draw(ui, ctx, scene, port_frame, &mut probe);
-                            node_ui.draw_all(ui, ctx, scene, port_frame, &mut probe);
+                            node_ui.draw_all(ui, ctx, scene, port_frame, &mut probe, out);
                         }
                         breaker_ui.draw(ui, ctx);
                         connection_ui.draw_in_flight(ui, ctx, scene, port_frame, canvas_origin);

@@ -1,15 +1,19 @@
 use crate::app::AppContext;
 use crate::gui::breaker::BreakerProbe;
 use crate::gui::graph_ui::PortFrame;
+use crate::gui::value_editor;
 use crate::gui::{NODE_W, PORT_COL_PAD_TOP, PORT_GAP, PORT_RADIUS, PORT_SIZE, PortKind, PortRef};
 use crate::intent::Intent;
-use crate::scene::{Scene, SceneNode};
+use crate::scene::{InputBindingView, Scene, SceneNode};
 use glam::Vec2;
 use palantir::{
-    Align, Background, Color, Configure, Corners, Frame, HAlign, InternedStr, Panel, Rect, Sense,
-    Sizing, Spacing, Stroke, Text, Ui, VAlign, WidgetId,
+    Align, Background, Color, Configure, ContextMenu, Corners, Frame, HAlign, InternedStr,
+    MenuItem, Panel, Rect, Sense, Sizing, Spacing, Stroke, Text, Ui, VAlign, WidgetId,
 };
-use scenarium::prelude::NodeId;
+use scenarium::data::StaticValue;
+use scenarium::function::FuncInput;
+use scenarium::graph::Binding;
+use scenarium::prelude::{Func, NodeId};
 
 /// Owns rendering of every graph node plus the single active drag
 /// anchor — the press-frame `pos` is snapshotted here so each
@@ -51,12 +55,13 @@ impl NodeUI {
         scene: &Scene,
         port_frame: &PortFrame,
         probe: &mut BreakerProbe<'_>,
+        out: &mut Vec<Intent>,
     ) {
         if let Some(b) = probe.state.as_deref_mut() {
             b.broken_nodes.clear();
         }
         for n in &scene.nodes {
-            self.draw_one(ui, ctx, scene, n, port_frame, probe);
+            self.draw_one(ui, ctx, scene, n, port_frame, probe, out);
         }
         // Drop the anchor if its target node vanished from the graph
         // (mid-drag delete). Without this, the slot would linger and
@@ -68,6 +73,7 @@ impl NodeUI {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_one(
         &mut self,
         ui: &mut Ui,
@@ -76,9 +82,12 @@ impl NodeUI {
         node: &SceneNode,
         port_frame: &PortFrame,
         probe: &mut BreakerProbe<'_>,
+        out: &mut Vec<Intent>,
     ) {
         let inputs = scene.ports(node.inputs);
         let outputs = scene.ports(node.outputs);
+        let bindings = scene.bindings(node.input_bindings);
+        let func = ctx.func_lib.by_id(&node.func_id);
         let theme = ctx.theme;
 
         // Probe last-frame's body rect (in canvas world coords) against
@@ -126,7 +135,9 @@ impl NodeUI {
             })
             .show(ui, |ui| {
                 header(ui, ctx, node.name.clone());
-                ports_row(ui, ctx, node.id, inputs, outputs, port_frame);
+                ports_row(
+                    ui, ctx, node.id, func, inputs, outputs, bindings, port_frame, out,
+                );
             });
         let response = panel.response;
 
@@ -214,58 +225,50 @@ fn header(ui: &mut Ui, ctx: &AppContext<'_>, name: InternedStr) {
         });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn ports_row(
     ui: &mut Ui,
     ctx: &AppContext<'_>,
     node_id: NodeId,
+    func: Option<&Func>,
     inputs: &[InternedStr],
     outputs: &[InternedStr],
+    bindings: &[InputBindingView],
     port_frame: &PortFrame,
+    out: &mut Vec<Intent>,
 ) {
     Panel::hstack()
         .id_salt("ports")
         .size((Sizing::FILL, Sizing::Hug))
         .show(ui, |ui| {
-            port_column(ui, ctx, node_id, "in", inputs, PortKind::Input, port_frame);
-            port_column(
-                ui,
-                ctx,
-                node_id,
-                "out",
-                outputs,
-                PortKind::Output,
-                port_frame,
-            );
+            input_column(ui, ctx, node_id, func, inputs, bindings, port_frame, out);
+            output_column(ui, ctx, node_id, outputs, port_frame);
         });
 }
 
-fn port_column(
+#[allow(clippy::too_many_arguments)]
+fn input_column(
     ui: &mut Ui,
     ctx: &AppContext<'_>,
     node_id: NodeId,
-    salt: &'static str,
+    func: Option<&Func>,
     names: &[InternedStr],
-    kind: PortKind,
+    bindings: &[InputBindingView],
     port_frame: &PortFrame,
+    out: &mut Vec<Intent>,
 ) {
-    let (idle, hover) = match kind {
-        PortKind::Input => (ctx.theme.input_port, ctx.theme.input_port_hover),
-        PortKind::Output => (ctx.theme.output_port, ctx.theme.output_port_hover),
-    };
+    let (idle, hover) = (ctx.theme.input_port, ctx.theme.input_port_hover);
     Panel::vstack()
-        .id_salt(salt)
+        .id_salt("in")
         .size((Sizing::Fill(1.0), Sizing::Hug))
         .padding(Spacing::new(0.0, PORT_COL_PAD_TOP, 0.0, PORT_COL_PAD_TOP))
         .gap(PORT_GAP)
-        .child_align(match kind {
-            PortKind::Input => Align::h(HAlign::Left),
-            PortKind::Output => Align::h(HAlign::Right),
-        })
+        .child_align(Align::h(HAlign::Left))
         .show(ui, |ui| {
             for (i, name) in names.iter().enumerate() {
                 let port = PortRef {
                     node_id,
-                    kind,
+                    kind: PortKind::Input,
                     port_idx: i,
                 };
                 let fill = if port_frame.is_hovered(port) {
@@ -273,7 +276,40 @@ fn port_column(
                 } else {
                     idle
                 };
-                port_row(ui, port, name.clone(), fill);
+                let binding = bindings.get(i).unwrap_or(&InputBindingView::None);
+                let func_input = func.and_then(|f| f.inputs.get(i));
+                input_port_row(ui, port, name.clone(), fill, binding, func_input, out);
+            }
+        });
+}
+
+fn output_column(
+    ui: &mut Ui,
+    ctx: &AppContext<'_>,
+    node_id: NodeId,
+    names: &[InternedStr],
+    port_frame: &PortFrame,
+) {
+    let (idle, hover) = (ctx.theme.output_port, ctx.theme.output_port_hover);
+    Panel::vstack()
+        .id_salt("out")
+        .size((Sizing::Fill(1.0), Sizing::Hug))
+        .padding(Spacing::new(0.0, PORT_COL_PAD_TOP, 0.0, PORT_COL_PAD_TOP))
+        .gap(PORT_GAP)
+        .child_align(Align::h(HAlign::Right))
+        .show(ui, |ui| {
+            for (i, name) in names.iter().enumerate() {
+                let port = PortRef {
+                    node_id,
+                    kind: PortKind::Output,
+                    port_idx: i,
+                };
+                let fill = if port_frame.is_hovered(port) {
+                    hover
+                } else {
+                    idle
+                };
+                output_port_row(ui, port, name.clone(), fill);
             }
         });
 }
@@ -291,33 +327,93 @@ pub fn port_circle_wid(port: PortRef) -> WidgetId {
     ))
 }
 
-/// One port = circle + label, vertically centered. Circle on the outer
-/// edge (with negative margin so it overhangs the column), label on
-/// the inner side. The circle's `WidgetId` is the deterministic
-/// `port_circle_wid(node_id, kind, port_idx)`, so downstream
-/// consumers (`PortFrame::rebuild`, snap, draw) reconstruct it from
-/// domain coords without threading any cache.
-fn port_row(ui: &mut Ui, port: PortRef, name: InternedStr, fill: Color) {
-    let margin = match port.kind {
-        PortKind::Input => Spacing::new(-PORT_RADIUS, 0.0, 0.0, 0.0),
-        PortKind::Output => Spacing::new(0.0, 0.0, -PORT_RADIUS, 0.0),
-    };
+/// One output port = label + circle, vertically centered. Circle has a
+/// negative right margin so it overhangs the column. The circle's
+/// `WidgetId` is the deterministic `port_circle_wid(port)`, so
+/// downstream consumers (`PortFrame::rebuild`, snap, draw) reconstruct
+/// it from domain coords without threading any cache.
+fn output_port_row(ui: &mut Ui, port: PortRef, name: InternedStr, fill: Color) {
     let wid = port_circle_wid(port);
     Panel::hstack()
         .id_salt(("port", port.port_idx))
         .size((Sizing::Hug, Sizing::Hug))
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
-        .show(ui, |ui| match port.kind {
-            PortKind::Input => {
-                circle_frame(ui, wid, fill, margin);
-                Text::new(name.clone()).show(ui);
-            }
-            PortKind::Output => {
-                Text::new(name.clone()).show(ui);
-                circle_frame(ui, wid, fill, margin);
+        .show(ui, |ui| {
+            Text::new(name).show(ui);
+            circle_frame(ui, wid, fill, Spacing::new(0.0, 0.0, -PORT_RADIUS, 0.0));
+        });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn input_port_row(
+    ui: &mut Ui,
+    port: PortRef,
+    name: InternedStr,
+    fill: Color,
+    binding: &InputBindingView,
+    func_input: Option<&FuncInput>,
+    out: &mut Vec<Intent>,
+) {
+    let margin = Spacing::new(-PORT_RADIUS, 0.0, 0.0, 0.0);
+    let wid = port_circle_wid(port);
+    let row = Panel::hstack()
+        .id_salt(("port", port.port_idx))
+        .size((Sizing::Hug, Sizing::Hug))
+        .sense(Sense::CLICK)
+        .gap(4.0)
+        .child_align(Align::v(VAlign::Center))
+        .show(ui, |ui| {
+            circle_frame(ui, wid, fill, margin);
+            Text::new(name.clone()).show(ui);
+            if let InputBindingView::Const(value) = binding {
+                let editor_id =
+                    WidgetId::from_hash(("graph.node.const_editor", port.node_id, port.port_idx));
+                if let Some(new_value) = value_editor::show(ui, editor_id, value) {
+                    out.push(set_input(port, Binding::Const(new_value)));
+                }
             }
         });
+    let trigger = row.response.snapshot();
+    let default_static = func_input.map(default_static_value);
+    ContextMenu::attach(ui, &trigger)
+        .size((Sizing::Hug, Sizing::Hug))
+        .show(ui, |ui, popup| {
+            let can_set =
+                !matches!(binding, InputBindingView::Const(_)) && default_static.is_some();
+            if MenuItem::new("Set constant")
+                .enabled(can_set)
+                .show(ui, popup)
+                .clicked()
+                && let Some(value) = default_static.clone()
+            {
+                out.push(set_input(port, Binding::Const(value)));
+            }
+            if MenuItem::new("Clear binding")
+                .enabled(!matches!(binding, InputBindingView::None))
+                .show(ui, popup)
+                .clicked()
+            {
+                out.push(set_input(port, Binding::None));
+            }
+        });
+}
+
+fn set_input(port: PortRef, to: Binding) -> Intent {
+    Intent::SetInput {
+        node_id: port.node_id,
+        input_idx: port.port_idx,
+        to,
+    }
+}
+
+/// Default `StaticValue` for a function input — its declared
+/// `default_value` if any, otherwise the zero/empty of its `DataType`.
+fn default_static_value(func_input: &FuncInput) -> StaticValue {
+    func_input
+        .default_value
+        .clone()
+        .unwrap_or_else(|| StaticValue::from(&func_input.data_type))
 }
 
 fn circle_frame(ui: &mut Ui, wid: WidgetId, fill: Color, margin: Spacing) {

@@ -1,6 +1,7 @@
 use glam::Vec2;
 use palantir::InternedStr;
-use scenarium::prelude::{Binding, NodeId};
+use scenarium::data::StaticValue;
+use scenarium::prelude::{Binding, FuncId, NodeId};
 
 use crate::document::Document;
 
@@ -12,6 +13,10 @@ pub struct Scene {
     /// via `inputs` / `outputs` spans — keeps per-node allocations to
     /// zero in steady state.
     pub port_names: Vec<InternedStr>,
+    /// Flat pool of input-binding snapshots, one per input port across
+    /// every node. `SceneNode::input_bindings` slices into it (same len
+    /// as `SceneNode::inputs`).
+    pub input_bindings: Vec<InputBindingView>,
     /// Viewport translation (screen pixels) applied to the graph
     /// canvas. Preserved across `rebuild` because it's view state, not
     /// derived from `Document`.
@@ -21,12 +26,32 @@ pub struct Scene {
     pub zoom: f32,
 }
 
+/// Per-frame snapshot of an input port's [`Binding`] for the UI tree.
+/// Variant-only for `Bind`; the address details live on `Scene::connections`.
+#[derive(Debug, Clone)]
+pub enum InputBindingView {
+    None,
+    Const(StaticValue),
+    Bind,
+}
+
+impl From<&Binding> for InputBindingView {
+    fn from(b: &Binding) -> Self {
+        match b {
+            Binding::None => Self::None,
+            Binding::Const(v) => Self::Const(v.clone()),
+            Binding::Bind(_) => Self::Bind,
+        }
+    }
+}
+
 impl Default for Scene {
     fn default() -> Self {
         Self {
             nodes: Vec::new(),
             connections: Vec::new(),
             port_names: Vec::new(),
+            input_bindings: Vec::new(),
             pan: Vec2::ZERO,
             zoom: 1.0,
         }
@@ -36,10 +61,12 @@ impl Default for Scene {
 #[derive(Debug)]
 pub struct SceneNode {
     pub id: NodeId,
+    pub func_id: FuncId,
     pub pos: Vec2,
     pub name: InternedStr,
     pub inputs: PortSpan,
     pub outputs: PortSpan,
+    pub input_bindings: PortSpan,
 }
 
 #[derive(Debug)]
@@ -66,6 +93,7 @@ impl Scene {
         self.nodes.clear();
         self.connections.clear();
         self.port_names.clear();
+        self.input_bindings.clear();
 
         for vn in view_graph.view_nodes.iter() {
             let Some(node) = view_graph.graph.by_id(&vn.id) else {
@@ -74,20 +102,28 @@ impl Scene {
             let Some(func) = func_lib.by_id(&node.func_id) else {
                 continue;
             };
-            let inputs = push_port_names(
+            let inputs = extend_pool(
                 &mut self.port_names,
-                node.inputs.iter().map(|i| i.name.as_str()),
+                node.inputs.iter().map(|i| i.name.clone().into()),
             );
-            let outputs = push_port_names(
+            let outputs = extend_pool(
                 &mut self.port_names,
-                func.outputs.iter().map(|o| o.name.as_str()),
+                func.outputs.iter().map(|o| o.name.clone().into()),
+            );
+            let input_bindings = extend_pool(
+                &mut self.input_bindings,
+                node.inputs
+                    .iter()
+                    .map(|i| InputBindingView::from(&i.binding)),
             );
             self.nodes.push(SceneNode {
                 id: vn.id,
+                func_id: node.func_id,
                 pos: vn.pos,
                 name: node.name.clone().into(),
                 inputs,
                 outputs,
+                input_bindings,
             });
         }
 
@@ -110,17 +146,18 @@ impl Scene {
         let start = span.start as usize;
         &self.port_names[start..start + span.len as usize]
     }
+
+    pub fn bindings(&self, span: PortSpan) -> &[InputBindingView] {
+        let start = span.start as usize;
+        &self.input_bindings[start..start + span.len as usize]
+    }
 }
 
-fn push_port_names<'a>(
-    pool: &mut Vec<InternedStr>,
-    names: impl Iterator<Item = &'a str>,
-) -> PortSpan {
-    let start = pool.len() as u32;
-    let mut len = 0u32;
-    for n in names {
-        pool.push(n.to_owned().into());
-        len += 1;
+fn extend_pool<T>(pool: &mut Vec<T>, items: impl IntoIterator<Item = T>) -> PortSpan {
+    let start = pool.len();
+    pool.extend(items);
+    PortSpan {
+        start: start as u32,
+        len: (pool.len() - start) as u32,
     }
-    PortSpan { start, len }
 }
