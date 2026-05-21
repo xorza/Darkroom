@@ -380,11 +380,17 @@ fn input_port_row(
     // on the circle (no event bubbling in palantir's hit-test).
     let menu_id = row.response.widget_id();
     let row_secondary = row.response.secondary_clicked();
-    let circle_secondary = ui.response_for(wid).secondary_clicked;
-    if (row_secondary || circle_secondary)
+    let circle_state = ui.response_for(wid);
+    if (row_secondary || circle_state.secondary_clicked)
         && let Some(p) = ui.pointer_pos()
     {
         ContextMenu::open(ui, menu_id, p);
+    }
+    // Double-click on the port circle clears the binding (mirrors the
+    // deprecated-darkroom gesture). Palantir tracks the two-click edge
+    // per-button via `ResponseState::double_clicked()`.
+    if circle_state.double_clicked() {
+        out.push(set_input(port, Binding::None));
     }
     let default_static = func_input.map(default_static_value);
     ContextMenu::for_id(menu_id)
