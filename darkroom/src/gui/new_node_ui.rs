@@ -79,17 +79,6 @@ impl NewNodeUi {
                 Scroll::vertical()
                     .id_salt("new_node_scroll")
                     .size((Sizing::Hug, Sizing::Fill(1.0)))
-                    // `always_reserve` keeps the bar gutter on the
-                    // pan axis whether or not content currently
-                    // overflows. The popup hugs the scroll's outer
-                    // size — without this, the gutter appears only
-                    // once `Scroll.seen == true` (frame N pass B),
-                    // the body grows by a bar width, and the popup
-                    // re-places on frame N+1 → a visible shift of
-                    // `bar_width` between the opening frame and the
-                    // next input. Reserving unconditionally keeps the
-                    // hugged width constant across passes.
-                    .always_reserve()
                     .show(ui, |ui| {
                         Panel::hstack()
                             .id_salt("new_node_columns")
