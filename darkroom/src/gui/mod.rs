@@ -15,8 +15,14 @@ pub const PORT_RADIUS: f32 = PORT_SIZE * 0.5;
 /// Vertical inset at the top of each port column (gap below the
 /// header band before the first port).
 pub const PORT_COL_PAD_TOP: f32 = 6.0;
+/// Horizontal inset on each side of the ports row. Port circles
+/// extend left/right by `-(PORT_RADIUS + PORT_COL_PAD_X)` so they
+/// straddle the node body edge regardless of this inset.
+pub const PORT_COL_PAD_X: f32 = 8.0;
 /// Vertical gap between adjacent ports in a column.
 pub const PORT_GAP: f32 = 6.0;
+/// Horizontal gap between the input and output port columns.
+pub const PORT_COLS_GAP: f32 = 12.0;
 
 /// Whether a port consumes a binding (`Input`) or produces a value
 /// (`Output`). Mirrors deprecated darkroom's `PortKind` — same domain

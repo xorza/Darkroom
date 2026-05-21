@@ -2,7 +2,10 @@ use crate::app::AppContext;
 use crate::gui::breaker::BreakerProbe;
 use crate::gui::graph_ui::PortFrame;
 use crate::gui::value_editor;
-use crate::gui::{NODE_W, PORT_COL_PAD_TOP, PORT_GAP, PORT_RADIUS, PORT_SIZE, PortKind, PortRef};
+use crate::gui::{
+    PORT_COL_PAD_TOP, PORT_COL_PAD_X, PORT_COLS_GAP, PORT_GAP, PORT_RADIUS, PORT_SIZE, PortKind,
+    PortRef,
+};
 use crate::intent::Intent;
 use crate::scene::{InputBindingView, Scene, SceneNode};
 use glam::Vec2;
@@ -121,7 +124,8 @@ impl NodeUI {
         let panel = Panel::vstack()
             .id(node_widget_id(node.id))
             .position(node.pos)
-            .size((Sizing::Fixed(NODE_W), Sizing::Hug))
+            .min_size((40, 10))
+            .size((Sizing::Hug, Sizing::Hug))
             .sense(Sense::DRAG)
             .background(Background {
                 fill: theme.node_fill.into(),
@@ -230,6 +234,8 @@ fn ports_row(
     Panel::hstack()
         .id_salt("ports")
         .size((Sizing::FILL, Sizing::Hug))
+        .padding(Spacing::xy(PORT_COL_PAD_X, 0.0))
+        .gap(PORT_COLS_GAP)
         .show(ui, |ui| {
             input_column(ui, ctx, scene, node, port_frame, out);
             output_column(ui, ctx, scene, node, port_frame, out);
@@ -340,7 +346,12 @@ fn output_port_row(
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             Text::new(name).show(ui);
-            circle_frame(ui, wid, fill, Spacing::new(0.0, 0.0, -PORT_RADIUS, 0.0));
+            circle_frame(
+                ui,
+                wid,
+                fill,
+                Spacing::new(0.0, 0.0, -(PORT_RADIUS + PORT_COL_PAD_X), 0.0),
+            );
         });
     // Double-click on the output circle = disconnect every input
     // bound to this output. Mirrors the input-side gesture; a single
@@ -372,7 +383,7 @@ fn input_port_row(
     func_input: Option<&FuncInput>,
     out: &mut Vec<Intent>,
 ) {
-    let margin = Spacing::new(-PORT_RADIUS, 0.0, 0.0, 0.0);
+    let margin = Spacing::new(-(PORT_RADIUS + PORT_COL_PAD_X), 0.0, 0.0, 0.0);
     let wid = port_circle_wid(port);
     let row = Panel::hstack()
         .id_salt(("port", port.port_idx))
