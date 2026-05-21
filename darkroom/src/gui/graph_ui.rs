@@ -1,7 +1,7 @@
 use glam::Vec2;
 use palantir::{
-    Background, Configure, LineCap, Panel, PointerButton, PolylineColors, ResponseState, Sense,
-    Shape, Sizing, TranslateScale, Ui, WidgetId,
+    Background, Configure, LineCap, Panel, PointerButton, PolylineColors, Rect, Sense, Shape,
+    Sizing, TranslateScale, Ui, WidgetId,
 };
 use scenarium::graph::{Binding, PortAddress};
 use std::collections::HashMap;
@@ -29,21 +29,39 @@ const MAX_ZOOM: f32 = 5.0;
 /// zoom, higher → snappier but jumps badly on touchpad.
 const SCROLL_ZOOM_BASE: f32 = 1.0025;
 
-/// Per-frame snapshot of every port's `ResponseState`. Built once at
-/// the top of [`GraphUI::frame`] by calling [`Ui::response_for`] on
-/// each port's deterministic [`port_circle_wid`]. Downstream readers
-/// — `draw_connections`, `scan_snap_target`, `scan_drag_start`, and
-/// the start-port drag-state read — consult this map instead of
-/// re-issuing `response_for` per use-site.
+/// Per-frame snapshot of the four `ResponseState` fields downstream
+/// consumers actually read. Built once at the top of
+/// [`GraphUI::frame`] by polling [`Ui::response_for`] on each port's
+/// deterministic [`port_circle_wid`]. Sized to the four bytes-and-
+/// bits we use (`layout_rect.center()`, `rect`, two edge bools)
+/// instead of the full `ResponseState`.
 ///
-/// First-frame nodes have no rect yet (their widget hasn't recorded);
-/// the entry is still present (with `rect`/`layout_rect` = `None`) so
-/// downstream lookups can distinguish "port doesn't exist" from
-/// "port not yet measured." Polling `response_for` for an unknown id
-/// is cheap (one cascade-index lookup), so we don't pre-filter.
+/// Ports that haven't recorded yet (first frame after a node spawns)
+/// have an entry with `layout_center` / `screen_rect` = `None`. The
+/// edge bools default to `false` for them, so `drag_started` / `dragging`
+/// queries are correct without a presence check.
 #[derive(Default, Debug)]
 pub struct PortFrame {
-    map: HashMap<PortRef, ResponseState>,
+    map: HashMap<PortRef, PortInfo>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct PortInfo {
+    /// Pre-transform port-circle center in inner-canvas world coords.
+    /// Bezier consumers subtract `canvas_origin` for canvas-local
+    /// positions. `None` for ports whose widget hasn't measured yet.
+    layout_center: Option<Vec2>,
+    /// Post-transform/clip screen rect for pointer hit-test (snap).
+    /// Bypasses palantir's drag-capture hover suppression by reading
+    /// geometry directly.
+    screen_rect: Option<Rect>,
+    /// One-frame edge: pointer-down → drag latched on this port this
+    /// frame. Drives connection-drag start detection.
+    drag_started: bool,
+    /// Continuous: a drag is currently live on this port
+    /// (`drag_delta` is `Some` OR `drag_started` fired this frame).
+    /// Read on the start port to detect release.
+    dragging: bool,
 }
 
 impl PortFrame {
@@ -62,34 +80,44 @@ impl PortFrame {
                         kind,
                         port_idx,
                     };
-                    self.map
-                        .insert(port, ui.response_for(port_circle_wid(port)));
+                    let r = ui.response_for(port_circle_wid(port));
+                    self.map.insert(
+                        port,
+                        PortInfo {
+                            layout_center: r.layout_rect.map(|r| r.center()),
+                            screen_rect: r.rect,
+                            drag_started: r.drag_started(),
+                            dragging: r.drag_started() || r.drag_delta().is_some(),
+                        },
+                    );
                 }
             }
         }
     }
 
-    fn get(&self, p: PortRef) -> Option<&ResponseState> {
-        self.map.get(&p)
-    }
-
     /// Canvas-local pre-transform port center (subtracts `canvas_origin`).
-    /// `None` when the port hasn't been measured yet — its widget
-    /// recorded but no `layout_rect` is available.
+    /// `None` when the port hasn't been measured yet.
     fn center_canvas_local(&self, p: PortRef, canvas_origin: Vec2) -> Option<Vec2> {
-        self.get(p)
-            .and_then(|r| r.layout_rect)
-            .map(|r| r.center() - canvas_origin)
+        self.map.get(&p)?.layout_center.map(|c| c - canvas_origin)
     }
 
     /// `true` when `pointer` (screen coords) falls inside this port's
-    /// post-transform/clip rect. Used for snap-target hit-testing
-    /// during a connection drag — bypasses palantir's drag-capture
-    /// hover suppression by reading geometry directly.
+    /// post-transform/clip rect.
     fn contains_pointer(&self, p: PortRef, pointer: Vec2) -> bool {
-        self.get(p)
-            .and_then(|r| r.rect)
+        self.map
+            .get(&p)
+            .and_then(|i| i.screen_rect)
             .is_some_and(|r| r.contains(pointer))
+    }
+
+    /// `true` on the one-frame edge of a drag-start on this port.
+    fn drag_started(&self, p: PortRef) -> bool {
+        self.map.get(&p).is_some_and(|i| i.drag_started)
+    }
+
+    /// `true` while a drag started on this port is still live.
+    fn dragging(&self, p: PortRef) -> bool {
+        self.map.get(&p).is_some_and(|i| i.dragging)
     }
 }
 
@@ -123,13 +151,11 @@ pub struct GraphUI {
 }
 
 /// In-flight connection drag. Identity-only — port centers are
-/// resolved every frame from the canvas's current widget layout via
-/// [`Ui::response_for`], so the drag survives layout changes without
-/// stale coordinates.
+/// resolved every frame from `PortFrame`, so the drag survives layout
+/// changes without stale coordinates.
 #[derive(Clone, Copy, Debug)]
 struct ConnectionDrag {
     start: PortRef,
-    start_wid: WidgetId,
     /// Compatible-kind port currently under the pointer, if any. Set
     /// during the per-frame update and read at release time.
     snap_end: Option<PortRef>,
@@ -387,19 +413,11 @@ impl GraphUI {
         let Some(mut drag) = self.connection_drag else {
             return;
         };
-        let start_resp = self
-            .port_frame
-            .get(drag.start)
-            .copied()
-            .unwrap_or_else(|| ui.response_for(drag.start_wid));
-        // `drag_delta()` returning Some means palantir still considers
-        // the gesture live; None means released or pointer left the
-        // surface. The first frame of the drag also reports Some
-        // (zero delta), so a freshly-latched drag isn't mistaken for
-        // a release.
-        let still_dragging = start_resp.drag_delta().is_some() || start_resp.drag_started();
+        // `PortFrame::dragging` rolls up `drag_delta().is_some() || drag_started()`
+        // — `Some` (incl. zero-delta first-frame) means live, transition
+        // to `false` is the release edge.
         drag.snap_end = scan_snap_target(&self.port_frame, ui, scene, drag.start);
-        if still_dragging {
+        if self.port_frame.dragging(drag.start) {
             self.connection_drag = Some(drag);
             return;
         }
@@ -435,10 +453,9 @@ fn scan_drag_start(frame: &PortFrame, scene: &Scene) -> Option<ConnectionDrag> {
                     kind,
                     port_idx,
                 };
-                if frame.get(port).is_some_and(|r| r.drag_started()) {
+                if frame.drag_started(port) {
                     return Some(ConnectionDrag {
                         start: port,
-                        start_wid: port_circle_wid(port),
                         snap_end: None,
                     });
                 }
