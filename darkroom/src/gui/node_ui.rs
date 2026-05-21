@@ -13,7 +13,7 @@ use palantir::{
 use scenarium::data::StaticValue;
 use scenarium::function::FuncInput;
 use scenarium::graph::Binding;
-use scenarium::prelude::{Func, NodeId};
+use scenarium::prelude::NodeId;
 
 /// Owns rendering of every graph node plus the single active drag
 /// anchor — the press-frame `pos` is snapshotted here so each
@@ -84,10 +84,6 @@ impl NodeUI {
         probe: &mut BreakerProbe<'_>,
         out: &mut Vec<Intent>,
     ) {
-        let inputs = scene.ports(node.inputs);
-        let outputs = scene.ports(node.outputs);
-        let bindings = scene.bindings(node.input_bindings);
-        let func = ctx.func_lib.by_id(&node.func_id);
         let theme = ctx.theme;
 
         // Probe last-frame's body rect (in canvas world coords) against
@@ -135,9 +131,7 @@ impl NodeUI {
             })
             .show(ui, |ui| {
                 header(ui, ctx, node.name.clone());
-                ports_row(
-                    ui, ctx, node.id, func, inputs, outputs, bindings, port_frame, out,
-                );
+                ports_row(ui, ctx, scene, node, port_frame, out);
             });
         let response = panel.response;
 
@@ -225,15 +219,11 @@ fn header(ui: &mut Ui, ctx: &AppContext<'_>, name: InternedStr) {
         });
 }
 
-#[allow(clippy::too_many_arguments)]
 fn ports_row(
     ui: &mut Ui,
     ctx: &AppContext<'_>,
-    node_id: NodeId,
-    func: Option<&Func>,
-    inputs: &[InternedStr],
-    outputs: &[InternedStr],
-    bindings: &[InputBindingView],
+    scene: &Scene,
+    node: &SceneNode,
     port_frame: &PortFrame,
     out: &mut Vec<Intent>,
 ) {
@@ -241,22 +231,22 @@ fn ports_row(
         .id_salt("ports")
         .size((Sizing::FILL, Sizing::Hug))
         .show(ui, |ui| {
-            input_column(ui, ctx, node_id, func, inputs, bindings, port_frame, out);
-            output_column(ui, ctx, node_id, outputs, port_frame);
+            input_column(ui, ctx, scene, node, port_frame, out);
+            output_column(ui, ctx, scene, node, port_frame, out);
         });
 }
 
-#[allow(clippy::too_many_arguments)]
 fn input_column(
     ui: &mut Ui,
     ctx: &AppContext<'_>,
-    node_id: NodeId,
-    func: Option<&Func>,
-    names: &[InternedStr],
-    bindings: &[InputBindingView],
+    scene: &Scene,
+    node: &SceneNode,
     port_frame: &PortFrame,
     out: &mut Vec<Intent>,
 ) {
+    let names = scene.ports(node.inputs);
+    let bindings = scene.bindings(node.input_bindings);
+    let func = ctx.func_lib.by_id(&node.func_id);
     let (idle, hover) = (ctx.theme.input_port, ctx.theme.input_port_hover);
     Panel::vstack()
         .id_salt("in")
@@ -267,7 +257,7 @@ fn input_column(
         .show(ui, |ui| {
             for (i, name) in names.iter().enumerate() {
                 let port = PortRef {
-                    node_id,
+                    node_id: node.id,
                     kind: PortKind::Input,
                     port_idx: i,
                 };
@@ -286,10 +276,12 @@ fn input_column(
 fn output_column(
     ui: &mut Ui,
     ctx: &AppContext<'_>,
-    node_id: NodeId,
-    names: &[InternedStr],
+    scene: &Scene,
+    node: &SceneNode,
     port_frame: &PortFrame,
+    out: &mut Vec<Intent>,
 ) {
+    let names = scene.ports(node.outputs);
     let (idle, hover) = (ctx.theme.output_port, ctx.theme.output_port_hover);
     Panel::vstack()
         .id_salt("out")
@@ -300,7 +292,7 @@ fn output_column(
         .show(ui, |ui| {
             for (i, name) in names.iter().enumerate() {
                 let port = PortRef {
-                    node_id,
+                    node_id: node.id,
                     kind: PortKind::Output,
                     port_idx: i,
                 };
@@ -309,7 +301,7 @@ fn output_column(
                 } else {
                     idle
                 };
-                output_port_row(ui, port, name.clone(), fill);
+                output_port_row(ui, port, name.clone(), fill, scene, out);
             }
         });
 }
@@ -332,7 +324,14 @@ pub fn port_circle_wid(port: PortRef) -> WidgetId {
 /// `WidgetId` is the deterministic `port_circle_wid(port)`, so
 /// downstream consumers (`PortFrame::rebuild`, snap, draw) reconstruct
 /// it from domain coords without threading any cache.
-fn output_port_row(ui: &mut Ui, port: PortRef, name: InternedStr, fill: Color) {
+fn output_port_row(
+    ui: &mut Ui,
+    port: PortRef,
+    name: InternedStr,
+    fill: Color,
+    scene: &Scene,
+    out: &mut Vec<Intent>,
+) {
     let wid = port_circle_wid(port);
     Panel::hstack()
         .id_salt(("port", port.port_idx))
@@ -343,6 +342,24 @@ fn output_port_row(ui: &mut Ui, port: PortRef, name: InternedStr, fill: Color) {
             Text::new(name).show(ui);
             circle_frame(ui, wid, fill, Spacing::new(0.0, 0.0, -PORT_RADIUS, 0.0));
         });
+    // Double-click on the output circle = disconnect every input
+    // bound to this output. Mirrors the input-side gesture; a single
+    // output may feed multiple inputs, so emit one `SetInput` per
+    // consumer.
+    if ui.response_for(wid).double_clicked() {
+        for c in &scene.connections {
+            if c.src_node == port.node_id && c.src_port == port.port_idx {
+                out.push(set_input(
+                    PortRef {
+                        node_id: c.tgt_node,
+                        kind: PortKind::Input,
+                        port_idx: c.tgt_port,
+                    },
+                    Binding::None,
+                ));
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
