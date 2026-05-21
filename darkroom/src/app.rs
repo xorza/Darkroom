@@ -4,9 +4,8 @@ use scenarium::testing::{TestFuncHooks, test_func_lib, test_graph};
 
 use crate::action_stack::ActionStack;
 use crate::document::Document;
-use crate::frame_result::FrameResult;
 use crate::gui::main_window::MainWindow;
-use crate::intent::{self, apply_step, build_step, requires_relayout};
+use crate::intent::{self, Intent, apply_step, build_step, requires_relayout};
 use crate::model::ViewGraph;
 use crate::scene::Scene;
 use crate::theme::Theme;
@@ -37,7 +36,7 @@ pub struct App {
     pub document: Document,
     pub scene: Scene,
     pub main_window: MainWindow,
-    pub frame_result: FrameResult,
+    pub intents: Vec<Intent>,
     pub action_stack: ActionStack,
     pub theme: Theme,
 }
@@ -51,7 +50,7 @@ impl App {
             document: Document::new(view_graph, func_lib),
             scene: Scene::default(),
             main_window: MainWindow::default(),
-            frame_result: FrameResult::default(),
+            intents: Vec::new(),
             action_stack: ActionStack::new(UNDO_HISTORY),
             theme: Theme::default(),
         }
@@ -63,21 +62,20 @@ impl palantir::App for App {
         ui.debug_overlay.damage_rect = true;
 
         // Prepass: each UI subtree pushes input-derived intents
-        // (drag-driven `MoveNode`, etc.) into `frame_result`. Drained
-        // and applied *before* `Scene::rebuild`, so Pass A's record
-        // sees the freshly-mutated doc — no Pass B retry for drag.
-        self.frame_result.clear();
-        self.main_window
-            .prepass(ui, &self.scene, &mut self.frame_result);
+        // (drag-driven `MoveNode`, etc.) into `intents`. Drained and
+        // applied *before* `Scene::rebuild`, so Pass A's record sees
+        // the freshly-mutated doc — no Pass B retry for drag.
+        self.intents.clear();
+        self.main_window.prepass(ui, &self.scene, &mut self.intents);
         let mut relayout = self.drain_intents();
         relayout |= self.handle_shortcuts(ui);
 
         // Record. Widgets push intents derived from record-time state
-        // (button clicks, edit commits) into `frame_result`.
+        // (button clicks, edit commits) into `intents`.
         self.scene.rebuild(&self.document);
         let ctx = AppContext::new(&self.theme);
         self.main_window
-            .frame(ui, &ctx, &mut self.scene, &mut self.frame_result);
+            .frame(ui, &ctx, &mut self.scene, &mut self.intents);
 
         // Post-record drain — these intents reflect mutations that
         // only the now-just-completed record could surface, so they
@@ -107,19 +105,28 @@ impl App {
         relayout
     }
 
-    /// Drain `frame_result`, apply each non-noop intent to `document`,
-    /// and push the resulting step onto the undo stack. Returns
-    /// whether any applied step needs a relayout retry.
+    /// Drain `intents`, applying each non-no-op intent to `document`,
+    /// and push the whole frame's resulting steps onto the undo stack
+    /// as a single batch entry — so a gesture that emits N intents
+    /// (e.g. breaker swipe deleting K nodes + unbinding M ports) is
+    /// one Cmd-Z. Returns whether any applied step needs a relayout
+    /// retry.
     fn drain_intents(&mut self) -> bool {
         let mut relayout = false;
-        for intent in self.frame_result.drain() {
-            if intent.is_noop_against(&self.document) {
+        let mut batch = Vec::new();
+        for intent in self.intents.drain(..) {
+            let Some(step) = build_step(intent, &self.document) else {
+                continue;
+            };
+            if step.is_noop() {
                 continue;
             }
-            let step = build_step(intent, &self.document);
             apply_step(&step, &mut self.document);
             relayout |= requires_relayout(&step);
-            self.action_stack.push_current(std::slice::from_ref(&step));
+            batch.push(step);
+        }
+        if !batch.is_empty() {
+            self.action_stack.push_current(&batch);
         }
         relayout
     }

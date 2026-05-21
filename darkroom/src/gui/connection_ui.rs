@@ -3,7 +3,6 @@ use palantir::{LineCap, Shape, Ui};
 use scenarium::graph::{Binding, PortAddress};
 
 use crate::app::AppContext;
-use crate::frame_result::FrameResult;
 use crate::gui::breaker::BreakerProbe;
 use crate::gui::graph_ui::{PortFrame, to_world};
 use crate::gui::{PortKind, PortRef};
@@ -47,7 +46,7 @@ impl ConnectionUI {
         ui: &mut Ui,
         scene: &Scene,
         port_frame: &PortFrame,
-        out: &mut FrameResult,
+        out: &mut Vec<Intent>,
     ) {
         if self.drag.is_none() {
             self.drag = scan_drag_start(port_frame, scene);
@@ -257,7 +256,7 @@ fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -
 /// `Intent::SetInput` binding. Cycle prevention is left to the intent
 /// apply layer; an invalid binding will surface there rather than
 /// silently failing here.
-fn commit_connection(start: PortRef, end: PortRef, out: &mut FrameResult) {
+fn commit_connection(start: PortRef, end: PortRef, out: &mut Vec<Intent>) {
     let (input, output) = match (start.kind, end.kind) {
         (PortKind::Input, PortKind::Output) => (start, end),
         (PortKind::Output, PortKind::Input) => (end, start),

@@ -1,5 +1,4 @@
 use crate::app::AppContext;
-use crate::frame_result::FrameResult;
 use crate::gui::breaker::BreakerProbe;
 use crate::gui::graph_ui::PortFrame;
 use crate::gui::{NODE_W, PORT_COL_PAD_TOP, PORT_GAP, PORT_RADIUS, PORT_SIZE, PortKind, PortRef};
@@ -150,10 +149,19 @@ impl NodeUI {
     /// state mutation applied from these intents (notably drag-driven
     /// `MoveNode`) lands in `Document` before recording — Pass A's
     /// arrange already reflects the cursor; no Pass B relayout retry.
-    pub fn prepass(&mut self, ui: &Ui, scene: &Scene, out: &mut FrameResult) {
+    pub fn prepass(&mut self, ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
         let Some(anchor) = self.drag_anchor else {
             return;
         };
+        // Drop a stale anchor whose node was removed last frame (e.g.
+        // breaker swipe deleted the dragged node). Without this, the
+        // emitted `MoveNode` would target a missing node and panic in
+        // `build_step`. `draw_all` also clears stale anchors, but only
+        // after this prepass runs.
+        if !scene.nodes.iter().any(|n| n.id == anchor.node_id) {
+            self.drag_anchor = None;
+            return;
+        }
         let resp = ui.response_for(anchor.widget_id);
         // `drag_started` on a still-active anchor means a *new* gesture
         // just latched on the same widget — `record` will replace the

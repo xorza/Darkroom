@@ -4,7 +4,6 @@ use scenarium::graph::{Binding, PortAddress};
 use scenarium::prelude::NodeId;
 
 use crate::app::AppContext;
-use crate::frame_result::FrameResult;
 use crate::gui::graph_ui::{outer_canvas_widget_id, to_world};
 use crate::intent::Intent;
 use crate::scene::Scene;
@@ -189,7 +188,7 @@ impl BreakerUI {
     /// supersedes any per-input unbind on the same target — the undo
     /// step already detaches incoming edges, so emitting both would
     /// log a redundant history entry. Esc cancels without emitting.
-    pub fn apply(&mut self, ui: &mut Ui, scene: &Scene, out: &mut FrameResult) {
+    pub fn apply(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
         let resp = ui.response_for(outer_canvas_widget_id());
         let mods = ui.modifiers();
         let cmd_lmb = resp.drag_started_by(PointerButton::Left) && mods.meta;

@@ -5,11 +5,11 @@ use palantir::{
 use std::collections::HashMap;
 
 use crate::app::AppContext;
-use crate::frame_result::FrameResult;
 use crate::gui::breaker::BreakerUI;
 use crate::gui::connection_ui::ConnectionUI;
 use crate::gui::node_ui::{NodeUI, port_circle_wid};
 use crate::gui::{PortKind, PortRef};
+use crate::intent::Intent;
 use crate::scene::Scene;
 
 /// Bounds on the canvas zoom factor. Pinch / scroll-zoom deltas
@@ -165,7 +165,7 @@ pub struct GraphUI {
 impl GraphUI {
     /// Pre-record pass — see
     /// [`crate::gui::node_ui::NodeUI::prepass`].
-    pub fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut FrameResult) {
+    pub fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
         self.node_ui.prepass(ui, scene, out);
     }
 
@@ -174,7 +174,7 @@ impl GraphUI {
         ui: &mut Ui,
         ctx: &AppContext<'_>,
         scene: &mut Scene,
-        out: &mut FrameResult,
+        out: &mut Vec<Intent>,
     ) {
         // Read outer's response before recording so this frame's
         // transform reflects the latest gesture — `response_for`
