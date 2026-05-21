@@ -1,15 +1,18 @@
 use glam::Vec2;
-use palantir::Ui;
+use palantir::{Shortcut, Ui};
 use scenarium::testing::{TestFuncHooks, test_func_lib, test_graph};
 
 use crate::action_stack::ActionStack;
 use crate::document::Document;
 use crate::frame_result::FrameResult;
 use crate::gui::main_window::MainWindow;
-use crate::intent::{apply_step, build_step, requires_relayout};
+use crate::intent::{self, apply_step, build_step, requires_relayout};
 use crate::model::ViewGraph;
 use crate::scene::Scene;
 use crate::theme::Theme;
+
+const UNDO_SHORTCUT: Shortcut = Shortcut::cmd('Z');
+const REDO_SHORTCUT: Shortcut = Shortcut::cmd_shift('Z');
 
 const UNDO_HISTORY: usize = 100;
 
@@ -66,7 +69,8 @@ impl palantir::App for App {
         self.frame_result.clear();
         self.main_window
             .prepass(ui, &self.scene, &mut self.frame_result);
-        let relayout = self.drain_intents();
+        let mut relayout = self.drain_intents();
+        relayout |= self.handle_shortcuts(ui);
 
         // Record. Widgets push intents derived from record-time state
         // (button clicks, edit commits) into `frame_result`.
@@ -85,6 +89,24 @@ impl palantir::App for App {
 }
 
 impl App {
+    /// Handle Cmd+Z / Cmd+Shift+Z. Suppressed while a widget holds
+    /// keyboard focus so Cmd+Z inside a TextEdit doesn't nuke the graph.
+    fn handle_shortcuts(&mut self, ui: &mut Ui) -> bool {
+        if ui.focused_id().is_some() {
+            return false;
+        }
+        let mut relayout = false;
+        let mut on_step = |step: &intent::UndoStep| {
+            relayout |= requires_relayout(step);
+        };
+        if ui.key_pressed(UNDO_SHORTCUT) {
+            self.action_stack.undo(&mut self.document, &mut on_step);
+        } else if ui.key_pressed(REDO_SHORTCUT) {
+            self.action_stack.redo(&mut self.document, &mut on_step);
+        }
+        relayout
+    }
+
     /// Drain `frame_result`, apply each non-noop intent to `document`,
     /// and push the resulting step onto the undo stack. Returns
     /// whether any applied step needs a relayout retry.

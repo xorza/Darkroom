@@ -79,7 +79,7 @@ pub struct GraphUI {
 impl GraphUI {
     /// Pre-record pass — see
     /// [`crate::gui::node_ui::NodeUI::prepass`].
-    pub fn prepass(&mut self, ui: &Ui, scene: &Scene, out: &mut FrameResult) {
+    pub fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut FrameResult) {
         self.node_ui.prepass(ui, scene, out);
     }
 
@@ -237,7 +237,7 @@ impl GraphUI {
     /// `DRAG`), so `outer.drag_started_by(..)` only fires on
     /// background — exactly the "background-only" gate the deprecated
     /// breaker had.
-    fn apply_breaker(&mut self, ui: &Ui, scene: &Scene, out: &mut FrameResult) {
+    fn apply_breaker(&mut self, ui: &mut Ui, scene: &Scene, out: &mut FrameResult) {
         let resp = ui.response_for(outer_canvas_widget_id());
         let mods = ui.modifiers();
         let cmd_lmb = resp.drag_started_by(PointerButton::Left) && mods.meta;
