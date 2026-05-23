@@ -20,12 +20,12 @@ use crate::intent::{self, Intent, apply_step, build_step, requires_relayout};
 use crate::scene::Scene;
 use crate::theme::Theme;
 
-const UNDO_SHORTCUT: Shortcut = Shortcut::cmd('Z');
-const REDO_SHORTCUT: Shortcut = Shortcut::cmd_shift('Z');
-const NEW_SHORTCUT: Shortcut = Shortcut::cmd('N');
-const OPEN_SHORTCUT: Shortcut = Shortcut::cmd('O');
-const SAVE_SHORTCUT: Shortcut = Shortcut::cmd('S');
-const SAVE_AS_SHORTCUT: Shortcut = Shortcut::cmd_shift('S');
+const UNDO_SHORTCUT: Shortcut = Shortcut::ctrl('Z');
+const REDO_SHORTCUT: Shortcut = Shortcut::ctrl_shift('Z');
+const NEW_SHORTCUT: Shortcut = Shortcut::ctrl('N');
+const OPEN_SHORTCUT: Shortcut = Shortcut::ctrl('O');
+const SAVE_SHORTCUT: Shortcut = Shortcut::ctrl('S');
+const SAVE_AS_SHORTCUT: Shortcut = Shortcut::ctrl_shift('S');
 
 /// File-dialog extension filters. First entry is the default — Rhai
 /// is the canonical on-disk format for scenarium graphs (matches the
