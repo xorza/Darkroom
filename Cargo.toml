@@ -10,25 +10,25 @@ wgpu = ["dep:wgpu", "dep:pollster", "dep:tokio"]
 
 [dependencies]
 wgpu = { version = "29.0", features = ["metal", "vulkan", "dx12"], optional = true }
-thiserror = { version = "2" }
-bytemuck = { version = "1", features = ["derive", "extern_crate_alloc"] }
+thiserror = { version = "2.0" }
+bytemuck = { version = "1.25", features = ["derive", "extern_crate_alloc"] }
 pollster = { version = "0.4", optional = true }
-glam = { version = "0.32", features = ["serde"] }
+glam = { version = "0.33", features = ["serde"] }
 strum = { version = "0.28" }
 strum_macros = { version = "0.28" }
-tokio = { version = "1", features = ["sync", "rt", "macros"], optional = true }
+tokio = { version = "1.52", features = ["sync", "rt", "macros"], optional = true }
 tracing = { version = "0.1" }
-rayon = { version = "1" }
+rayon = { version = "1.12" }
 hashbrown = { version = "0.17", features = ["serde"] }
 tiff = { version = "0.11" }
 image = { version = "0.25" }
-paste = { version = "1" }
+paste = { version = "1.0" }
 atomic_refcell = { version = "0.1" }
-arc-swap = { version = "1" }
+arc-swap = { version = "1.9" }
 aligned-vec = { version = "0.6" }
 
 [dev-dependencies]
-quickbench = "*"
+quickbench = "0.1"
 
 [[example]]
 name = "transform"
