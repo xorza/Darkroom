@@ -145,6 +145,14 @@ impl palantir::App for App {
             .frame(ui, &ctx, &mut self.scene, host.as_ref(), &mut self.intents)
             .or(command_from_shortcut);
 
+        // Persist this frame's viewport (the pan/zoom gesture writes
+        // `Scene`) back onto the document — `Document` is the single
+        // owner, so save serializes it without any explicit sync.
+        // Runs before `handle_menu_command` so a load there can replace
+        // the doc viewport without this overwriting it.
+        self.document.pan = self.scene.pan;
+        self.document.scale = self.scene.zoom;
+
         // Post-record drain — these intents reflect mutations that
         // only the now-just-completed record could surface, so they
         // *do* warrant a relayout retry when applicable.

@@ -17,12 +17,12 @@ pub struct Scene {
     /// every node. `SceneNode::input_bindings` slices into it (same len
     /// as `SceneNode::inputs`).
     pub input_bindings: Vec<InputBindingView>,
-    /// Viewport translation (screen pixels) applied to the graph
-    /// canvas. Preserved across `rebuild` because it's view state, not
-    /// derived from `Document`.
+    /// Live viewport, mirrored from `Document::{pan, scale}` each
+    /// `rebuild`. Read by the canvas transform and the pointer↔world
+    /// mapping; the pan/zoom gesture writes it back here, and `App`
+    /// copies it onto the document so it persists (single owner =
+    /// `Document`).
     pub pan: Vec2,
-    /// Viewport zoom factor (1.0 = identity). Same preservation rule
-    /// as `pan`.
     pub zoom: f32,
     /// Currently-selected node, mirrored from `Document` each rebuild
     /// so `node_ui` can pick a different paint without taking a `&Document`.
@@ -93,6 +93,12 @@ impl Scene {
     /// before any widget consumes it. `App::frame` enforces this.
     pub fn rebuild(&mut self, doc: &Document, func_lib: &FuncLib) {
         self.selected_node_id = doc.selected_node_id;
+        // Mirror the persisted viewport. The gesture overwrites these
+        // later this frame and `App` copies them back onto the doc, so
+        // a fresh value (e.g. just-loaded document) shows up here while
+        // an active pan/zoom isn't clobbered (it re-persists each frame).
+        self.pan = doc.pan;
+        self.zoom = doc.scale;
         self.nodes.clear();
         self.connections.clear();
         self.port_names.clear();
