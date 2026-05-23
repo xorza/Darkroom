@@ -41,6 +41,7 @@ impl<'a> AppContext<'a> {
 #[derive(Debug)]
 pub struct App {
     pub document: Document,
+    pub func_lib: FuncLib,
     pub scene: Scene,
     pub main_window: MainWindow,
     pub intents: Vec<Intent>,
@@ -60,7 +61,8 @@ impl App {
         func_lib.merge(WorkerEventsFuncLib::default());
         func_lib.merge(ImageFuncLib::default());
         Self {
-            document: Document::new(view_graph, func_lib),
+            document: Document::new(view_graph),
+            func_lib,
             scene: Scene::default(),
             main_window: MainWindow::default(),
             intents: Vec::new(),
@@ -86,8 +88,8 @@ impl palantir::App for App {
 
         // Record. Widgets push intents derived from record-time state
         // (button clicks, edit commits) into `intents`.
-        self.scene.rebuild(&self.document);
-        let ctx = AppContext::new(&self.theme, &self.document.func_lib);
+        self.scene.rebuild(&self.document, &self.func_lib);
+        let ctx = AppContext::new(&self.theme, &self.func_lib);
         let host = self.host_handle.clone();
         self.main_window
             .frame(ui, &ctx, &mut self.scene, host.as_ref(), &mut self.intents);

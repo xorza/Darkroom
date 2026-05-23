@@ -1,7 +1,7 @@
 use glam::Vec2;
 use palantir::InternedStr;
 use scenarium::data::StaticValue;
-use scenarium::prelude::{Binding, FuncId, NodeId};
+use scenarium::prelude::{Binding, FuncId, FuncLib, NodeId};
 
 use crate::document::Document;
 
@@ -87,9 +87,8 @@ impl Scene {
     /// Names live in palantir's per-frame text arena, which clears at
     /// the next `Ui::frame` — so `Scene` must be rebuilt every frame
     /// before any widget consumes it. `App::frame` enforces this.
-    pub fn rebuild(&mut self, doc: &Document) {
+    pub fn rebuild(&mut self, doc: &Document, func_lib: &FuncLib) {
         let view_graph = &doc.view_graph;
-        let func_lib = &doc.func_lib;
         self.nodes.clear();
         self.connections.clear();
         self.port_names.clear();

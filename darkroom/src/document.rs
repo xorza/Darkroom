@@ -1,22 +1,16 @@
-use scenarium::prelude::FuncLib;
-
 use crate::model::ViewGraph;
 
-/// The thing being edited. Bundles the `ViewGraph` (which itself
-/// holds the core `Graph` + per-node view metadata) and the `FuncLib`
-/// it resolves against. One owner so intents/scene/undo all read from
-/// the same source without juggling parallel fields on `App`.
-#[derive(Debug)]
+/// The thing being edited. Holds the `ViewGraph` (which itself owns the
+/// core `Graph` + per-node view metadata). The `FuncLib` lives one level
+/// up on `App` because it's runtime-owned (populated from builtins at
+/// startup, shared across documents) — not document state.
+#[derive(Debug, Default)]
 pub struct Document {
     pub view_graph: ViewGraph,
-    pub func_lib: FuncLib,
 }
 
 impl Document {
-    pub fn new(view_graph: ViewGraph, func_lib: FuncLib) -> Self {
-        Self {
-            view_graph,
-            func_lib,
-        }
+    pub fn new(view_graph: ViewGraph) -> Self {
+        Self { view_graph }
     }
 }
