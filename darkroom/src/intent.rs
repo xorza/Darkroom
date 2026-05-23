@@ -492,8 +492,17 @@ pub fn requires_relayout(step: &UndoStep) -> bool {
         | UndoStep::MoveNode { .. }
         | UndoStep::RenameNode { .. }
         | UndoStep::SetViewport { .. } => true,
-        UndoStep::SetInput { .. }
-        | UndoStep::SelectNode { .. }
+        // The inline const-value editor is recorded only when the
+        // binding is `Const(_)`. Flipping Const presence (None ⇄ Const,
+        // Bind ⇄ Const) toggles the editor in the widget tree, so the
+        // node remeasures and ports shift — connection curves must
+        // re-sample their endpoints. Typing inside an existing `Const`
+        // keeps the editor present at its `Fixed` size, so the
+        // value-only edit (Const → Const) doesn't need a relayout.
+        UndoStep::SetInput { from, to, .. } => {
+            matches!(from, Binding::Const(_)) != matches!(to, Binding::Const(_))
+        }
+        UndoStep::SelectNode { .. }
         | UndoStep::SetCacheBehavior { .. }
         | UndoStep::SetEventConnection { .. } => false,
     }

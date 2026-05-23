@@ -124,7 +124,7 @@ impl NodeUI {
         let panel = Panel::vstack()
             .id(node_widget_id(node.id))
             .position(node.pos)
-            .min_size((40, 10))
+            .min_size((160, 10))
             .size((Sizing::Hug, Sizing::Hug))
             .sense(Sense::DRAG)
             .background(Background {
