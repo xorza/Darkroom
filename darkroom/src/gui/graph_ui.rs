@@ -186,14 +186,29 @@ pub struct GraphUI {
 
 impl GraphUI {
     /// Pre-record pass — see
-    /// [`crate::gui::node_ui::NodeUI::prepass`]. Pan/zoom is folded in
-    /// here (not in `frame`) so the emitted `Intent::SetViewport` is
-    /// drained *before* `Scene::rebuild`, which then mirrors the new
-    /// `Document` viewport into `Scene` — the transform reflects the
-    /// gesture the same frame, with no direct viewport write.
+    /// [`crate::gui::node_ui::NodeUI::prepass`]. Every input-derived
+    /// intent that can change layout is emitted here, *before* the
+    /// record, so its effect is applied to `Document` by the pre-record
+    /// drain and Pass A records the settled layout:
+    ///
+    /// - pan/zoom (`emit_pan_zoom` → `Intent::SetViewport`),
+    /// - node drag (`node_ui.prepass` → `Intent::MoveNode`),
+    /// - connection commit (`connection_ui.apply` → `Intent::SetInput`).
+    ///
+    /// Connection commit specifically *must* be here: binding an input
+    /// that had a const value removes its inline editor and resizes the
+    /// node. If committed during the record (post-record drain), Pass A
+    /// records the pre-resize layout and the relayout's Pass B rebuilds
+    /// `PortFrame` from that stale cascade — the new connection floats
+    /// to the old port. Committing pre-record makes `cascade_A` the
+    /// resized layout, so Pass B anchors the curve correctly with no
+    /// extra frame. `PortFrame` is rebuilt here (and reused by `frame`)
+    /// because the commit reads it.
     pub fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
         self.emit_pan_zoom(ui, scene, out);
         self.node_ui.prepass(ui, scene, out);
+        self.port_frame.rebuild(ui, scene);
+        self.connection_ui.apply(ui, scene, &self.port_frame, out);
     }
 
     pub fn frame(
@@ -214,12 +229,10 @@ impl GraphUI {
         if scene.selected_node_id.is_some() && ui.response_for(outer_canvas_widget_id()).clicked {
             out.push(Intent::SelectNode { to: None });
         }
-        // Snapshot every port's response once for this frame — drag
-        // detection, snap test, and bezier endpoints all read from the
-        // same map instead of re-issuing `response_for` per use-site.
-        self.port_frame.rebuild(ui, scene);
+        // `port_frame` was rebuilt in `prepass` (the connection commit
+        // there reads it); reuse it — the cascade hasn't changed between
+        // prepass and here, so a re-rebuild would be identical work.
         self.breaker_ui.apply(ui, scene, out);
-        self.connection_ui.apply(ui, scene, &self.port_frame, out);
         self.new_node_ui.apply(ui, ctx, scene, out);
         // Bake the snap target into `PortFrame.hovered` so node_ui's
         // port_row picks up the hover color via the same lookup it

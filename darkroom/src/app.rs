@@ -147,7 +147,10 @@ impl palantir::App for App {
 
         // Post-record drain — these intents reflect mutations that
         // only the now-just-completed record could surface, so they
-        // *do* warrant a relayout retry when applicable.
+        // *do* warrant a relayout retry when applicable. (palantir
+        // auto-schedules a follow-up frame after a relayout pass, so
+        // layout-derived state like `PortFrame`'s connection endpoints
+        // settles against the resized layout.)
         if self.drain_intents() | relayout {
             ui.request_relayout();
         }
