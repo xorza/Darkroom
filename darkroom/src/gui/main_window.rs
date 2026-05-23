@@ -1,6 +1,7 @@
 use std::mem::take;
 
 use palantir::{Configure, HostHandle, Panel, Sizing, Ui};
+use scenarium::prelude::FuncLib;
 
 use crate::app::AppContext;
 use crate::gui::graph_ui::GraphUI;
@@ -26,11 +27,11 @@ impl MainWindow {
     pub fn prepass(
         &mut self,
         ui: &mut Ui,
-        ctx: &AppContext<'_>,
+        func_lib: &FuncLib,
         scene: &Scene,
         out: &mut Vec<Intent>,
     ) {
-        self.graph_ui.prepass(ui, ctx, scene, out);
+        self.graph_ui.prepass(ui, func_lib, scene, out);
     }
 
     pub fn frame(

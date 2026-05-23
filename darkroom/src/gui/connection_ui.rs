@@ -1,6 +1,7 @@
 use glam::Vec2;
 use palantir::{Brush, Color, LineCap, LinearGradient, Shape, Stop, Ui};
 use scenarium::graph::{Binding, PortAddress};
+use scenarium::prelude::FuncLib;
 
 use crate::app::AppContext;
 use crate::gui::breaker::BreakerProbe;
@@ -51,7 +52,7 @@ impl ConnectionUI {
     pub fn apply(
         &mut self,
         ui: &mut Ui,
-        ctx: &AppContext<'_>,
+        func_lib: &FuncLib,
         scene: &Scene,
         port_frame: &PortFrame,
         out: &mut Vec<Intent>,
@@ -76,7 +77,7 @@ impl ConnectionUI {
         }
         if let Some(end) = drag.snap_end {
             commit_connection(drag.start, end, out);
-        } else if let Some(intent) = self.const_drop(ui, ctx, scene, drag.start) {
+        } else if let Some(intent) = self.const_drop(ui, func_lib, scene, drag.start) {
             out.push(intent);
         }
         self.drag = None;
@@ -92,7 +93,7 @@ impl ConnectionUI {
     fn const_drop(
         &self,
         ui: &Ui,
-        ctx: &AppContext<'_>,
+        func_lib: &FuncLib,
         scene: &Scene,
         start: PortRef,
     ) -> Option<Intent> {
@@ -112,7 +113,7 @@ impl ConnectionUI {
         ) {
             return None;
         }
-        let func = ctx.func_lib.by_id(&node.func_id)?;
+        let func = func_lib.by_id(&node.func_id)?;
         let func_input = func.inputs.get(start.port_idx)?;
         Some(set_input(
             start,

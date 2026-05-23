@@ -5,6 +5,8 @@ use palantir::{
 };
 use std::collections::HashMap;
 
+use scenarium::prelude::FuncLib;
+
 use crate::app::AppContext;
 use crate::gui::breaker::BreakerUI;
 use crate::gui::connection_ui::ConnectionUI;
@@ -207,14 +209,15 @@ impl GraphUI {
     pub fn prepass(
         &mut self,
         ui: &mut Ui,
-        ctx: &AppContext<'_>,
+        func_lib: &FuncLib,
         scene: &Scene,
         out: &mut Vec<Intent>,
     ) {
         self.emit_pan_zoom(ui, scene, out);
         self.node_ui.prepass(ui, scene, out);
         self.port_frame.rebuild(ui, scene);
-        self.connection_ui.apply(ui, ctx, scene, &self.port_frame, out);
+        self.connection_ui
+            .apply(ui, func_lib, scene, &self.port_frame, out);
     }
 
     pub fn frame(

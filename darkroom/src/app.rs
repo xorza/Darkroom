@@ -129,9 +129,12 @@ impl palantir::App for App {
         // applied *before* `Scene::rebuild`, so Pass A's record sees
         // the freshly-mutated doc — no Pass B retry for drag.
         self.intents.clear();
-        let prepass_ctx = AppContext::new(&self.theme, &self.func_lib);
+        // Prepass only derives intents (incl. the const-drop gesture,
+        // which needs `func_lib`); it never draws, so it takes just
+        // `func_lib` rather than the full `AppContext`. The record
+        // phase below builds the one `AppContext` (theme + func_lib).
         self.main_window
-            .prepass(ui, &prepass_ctx, &self.scene, &mut self.intents);
+            .prepass(ui, &self.func_lib, &self.scene, &mut self.intents);
         let mut relayout = self.drain_intents();
         relayout |= self.handle_shortcuts(ui);
 
