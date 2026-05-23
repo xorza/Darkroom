@@ -6,7 +6,6 @@ use palantir::Color;
 #[derive(Clone, Debug)]
 pub struct Theme {
     pub canvas_bg: Color,
-    pub connection: Color,
     pub connection_broken: Color,
     pub connection_width: f32,
     pub breaker_stroke: Color,
@@ -30,7 +29,6 @@ impl Default for Theme {
     fn default() -> Self {
         Self {
             canvas_bg: Color::hex(0x1e1e1e),
-            connection: Color::hex(0x9ec1ff),
             connection_broken: Color::hex(0xff5a55),
             connection_width: 2.0,
             breaker_stroke: Color::hex(0xff5a55),

@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{LineCap, Shape, Ui};
+use palantir::{Brush, Color, LineCap, LinearGradient, Shape, Stop, Ui};
 use scenarium::graph::{Binding, PortAddress};
 
 use crate::app::AppContext;
@@ -132,10 +132,16 @@ impl ConnectionUI {
                         port_idx: c.tgt_port,
                     });
             }
-            let color = if broken {
-                ctx.theme.connection_broken
+            // Gradient from output (p0) → input (p3) port color so each
+            // end of a connection visually matches the port it touches.
+            // `lower_cubic_bezier` samples `Brush::Linear` along the
+            // curve parameter `t` and ignores `angle` — we pass 0.0.
+            // Broken-state still wins as a flat color so the alarm read
+            // doesn't get diluted by the gradient.
+            let brush = if broken {
+                Brush::Solid(ctx.theme.connection_broken)
             } else {
-                ctx.theme.connection
+                port_gradient(ctx.theme.output_port, ctx.theme.input_port)
             };
             ui.add_shape(Shape::CubicBezier {
                 p0,
@@ -143,7 +149,7 @@ impl ConnectionUI {
                 p2,
                 p3,
                 width,
-                brush: color.into(),
+                brush,
                 cap: LineCap::Round,
             });
         }
@@ -184,10 +190,22 @@ impl ConnectionUI {
             p2: p3 - Vec2::new(dx, 0.0),
             p3,
             width: ctx.theme.connection_width,
-            brush: ctx.theme.connection.into(),
+            brush: port_gradient(ctx.theme.output_port, ctx.theme.input_port),
             cap: LineCap::Round,
         });
     }
+}
+
+/// Linear gradient running along the curve parameter from `start`
+/// (`t = 0`, the output-port side at `p0`) to `end` (`t = 1`, the
+/// input-port side at `p3`). `lower_cubic_bezier` samples the brush
+/// along `t` and ignores `angle`, so the geometric direction doesn't
+/// matter here.
+fn port_gradient(start: Color, end: Color) -> Brush {
+    Brush::Linear(LinearGradient::new(
+        0.0,
+        [Stop::new(0.0, start), Stop::new(1.0, end)],
+    ))
 }
 
 /// First port whose response shows `drag_started` this frame, or
