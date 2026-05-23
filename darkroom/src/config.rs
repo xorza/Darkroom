@@ -28,10 +28,11 @@ impl AppConfig {
     }
 
     /// Resolve a theme name to its on-disk path in the working dir.
+    /// Themes serialize as TOML.
     pub fn theme_path(name: &str) -> PathBuf {
         std::env::current_dir()
             .unwrap_or_default()
-            .join(format!("{name}.rhai"))
+            .join(format!("{name}.toml"))
     }
 
     /// Read the config from the working dir. Any failure (missing

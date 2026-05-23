@@ -185,11 +185,11 @@ fn pick_save_path(start: Option<&Path>) -> Option<PathBuf> {
     file_dialog(start).save_file()
 }
 
-/// Rhai-only dialog for theme files. Themes always round-trip through
-/// Rhai (the format the config references by name), so there's no
+/// TOML-only dialog for theme files. Themes always round-trip through
+/// TOML (the format the config references by name), so there's no
 /// multi-format picker like documents have.
 fn theme_dialog() -> rfd::FileDialog {
-    rfd::FileDialog::new().add_filter("Rhai theme", &["rhai"])
+    rfd::FileDialog::new().add_filter("TOML theme", &["toml"])
 }
 
 /// Replace a few of `test_graph`'s `Binding::Bind` inputs with
@@ -376,7 +376,7 @@ impl App {
                 return false;
             }
         };
-        match deserialize::<Theme>(&bytes, SerdeFormat::Rhai) {
+        match deserialize::<Theme>(&bytes, SerdeFormat::Toml) {
             Ok(theme) => {
                 self.theme = theme;
                 true
@@ -389,7 +389,7 @@ impl App {
     }
 
     fn export_theme(&self, path: &Path) {
-        let bytes = serialize(&self.theme, SerdeFormat::Rhai);
+        let bytes = serialize(&self.theme, SerdeFormat::Toml);
         if let Err(err) = std::fs::write(path, &bytes) {
             eprintln!("theme export failed: {} {err}", path.display());
         }

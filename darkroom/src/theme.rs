@@ -5,7 +5,7 @@ use palantir::Color;
 /// Theme → Export menu and checked in; `Theme::default` deserializes
 /// it so the on-disk theme format is the single source of truth for
 /// darkroom's default look (no parallel hand-coded palette to drift).
-const DEFAULT_THEME_RHAI: &str = include_str!("../assets/ayu-graphite.rhai");
+const DEFAULT_THEME_TOML: &str = include_str!("../assets/ayu-graphite.toml");
 
 /// Visual palette + layout dimensions for darkroom's UI. Owned by
 /// `MainWindow`, handed to every UI subtree through
@@ -26,13 +26,11 @@ const DEFAULT_THEME_RHAI: &str = include_str!("../assets/ayu-graphite.rhai");
 /// Export menu.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Theme {
-    /// Palantir-side widget theme. Pushed onto `Ui::theme` once at
-    /// startup so every palantir widget (Button, TextEdit, MenuItem,
-    /// Scroll, Tooltip…) reads a darkroom-tuned palette without each
-    /// call site restyling per use. Round-trips through Rhai as part
-    /// of the exported theme (palantir's tooltip "unbounded" size and
-    /// noop chrome now serialize Rhai-safely).
-    pub palantir_theme: palantir::Theme,
+    // Scalar (`Color` / `f32`) fields come first; `palantir_theme`
+    // (a nested table) is last. TOML serialization requires every
+    // scalar value to precede any table at the same level — otherwise
+    // the serializer errors with `ValueAfterTable`.
+
     // ── canvas ────────────────────────────────────────────────────
     pub canvas_bg: Color,
 
@@ -87,6 +85,13 @@ pub struct Theme {
     /// Cap on the new-node popup's height. Inner scroll handles
     /// overflow when the function list exceeds the cap.
     pub new_node_popup_max_height: f32,
+
+    /// Palantir-side widget theme. Pushed onto `Ui::theme` once at
+    /// startup so every palantir widget (Button, TextEdit, MenuItem,
+    /// Scroll, Tooltip…) reads a darkroom-tuned palette without each
+    /// call site restyling per use. Last field so its TOML table
+    /// follows all the scalar fields above (TOML `ValueAfterTable`).
+    pub palantir_theme: palantir::Theme,
 }
 
 impl Theme {
@@ -100,14 +105,14 @@ impl Theme {
 }
 
 impl Default for Theme {
-    /// Deserialize the embedded `ayu-graphite.rhai`. The asset is a
+    /// Deserialize the embedded `ayu-graphite.toml`. The asset is a
     /// checked-in build artifact we control, so a parse failure is a
     /// build/test bug, not a runtime condition — `expect` rather than
     /// a silent fallback so drift surfaces loudly (the theme tests
     /// construct `Theme::default()` and would fail).
     fn default() -> Self {
-        common::deserialize(DEFAULT_THEME_RHAI.as_bytes(), SerdeFormat::Rhai)
-            .expect("embedded ayu-graphite.rhai theme should deserialize")
+        common::deserialize(DEFAULT_THEME_TOML.as_bytes(), SerdeFormat::Toml)
+            .expect("embedded ayu-graphite.toml theme should deserialize")
     }
 }
 
@@ -116,12 +121,12 @@ mod tests {
     use super::*;
 
     /// The whole bundle — darkroom's own fields *and* the nested
-    /// palantir palette — must survive a Rhai round-trip; that's the
+    /// palantir palette — must survive a TOML round-trip; that's the
     /// on-disk format the Theme → Load / Export menu and the config
-    /// rely on. The palantir side exercises the two formerly-broken
-    /// cases: the tooltip's infinite max-size axis and a noop shadow.
+    /// rely on. Exercises the formerly-fragile case too: the tooltip's
+    /// infinite max-size axis (handled by `Size`'s custom serde).
     #[test]
-    fn theme_roundtrips_through_rhai() {
+    fn theme_roundtrips_through_toml() {
         let mut theme = Theme {
             node_min_width: 137.5,
             selection_glow: Color::hex(0x123456),
@@ -129,21 +134,21 @@ mod tests {
         };
         theme.palantir_theme.window_clear = Color::hex(0xabcdef);
 
-        let bytes = common::serialize(&theme, SerdeFormat::Rhai);
-        let back: Theme = common::deserialize(&bytes, SerdeFormat::Rhai)
-            .expect("theme should deserialize from its own Rhai output");
+        let bytes = common::serialize(&theme, SerdeFormat::Toml);
+        let back: Theme = common::deserialize(&bytes, SerdeFormat::Toml)
+            .expect("theme should deserialize from its own TOML output");
 
         assert_eq!(back.node_min_width, 137.5);
         assert_eq!(back.selection_glow, Color::hex(0x123456));
         assert_eq!(back.canvas_bg, theme.canvas_bg);
-        // Nested palantir palette now round-trips too.
+        // Nested palantir palette round-trips too.
         assert_eq!(back.palantir_theme.window_clear, Color::hex(0xabcdef));
         // The infinite tooltip-height axis survives `Size`'s serde.
         assert!(back.palantir_theme.tooltip.max_size.h.is_infinite());
         assert_eq!(back.palantir_theme.tooltip.max_size.w, 280.0);
     }
 
-    /// `Theme::default` deserializes the embedded `ayu-graphite.rhai`.
+    /// `Theme::default` deserializes the embedded `ayu-graphite.toml`.
     /// Pins a darkroom field and a nested palantir field against the
     /// asset so a malformed or drifted checked-in theme fails loudly
     /// at test time instead of panicking the running app.
