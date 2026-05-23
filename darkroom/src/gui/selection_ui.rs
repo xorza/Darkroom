@@ -11,9 +11,9 @@ use crate::intent::Intent;
 use crate::scene::Scene;
 
 /// Rubber-band multi-selection. A plain left-drag on empty canvas
-/// sweeps a rectangle; on release every node whose body intersects it
-/// becomes the new selection. Holding Shift at drag-start *extends* the
-/// current selection instead of replacing it. Cmd+LMB is the breaker
+/// sweeps a rectangle; intersecting nodes highlight live as it moves
+/// and the set is committed on release. Holding Shift at drag-start
+/// *extends* the current selection instead of replacing it. Cmd+LMB is the breaker
 /// and RMB opens the new-node menu / breaker, so this only claims
 /// unmodified left-drags that fall through to the bare canvas (node
 /// bodies hit-test first, so a drag that starts on a node never reaches
@@ -46,10 +46,17 @@ impl RubberBand {
 
 impl SelectionUI {
     /// Drive the gesture from the outer-canvas response: latch on an
-    /// unmodified left-drag-start, track the live corner, and on release
-    /// emit a `SetSelection` with every node whose world-space body rect
-    /// overlaps the swept rectangle. Esc cancels without emitting.
-    pub fn apply(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
+    /// unmodified left-drag-start, track the live corner, and recompute
+    /// the swept set every frame. The set is written straight into
+    /// `scene.selected_nodes` so nodes highlight *live* as the rectangle
+    /// moves; `Document`/undo are only touched once, by the committing
+    /// `SetSelection` emitted on release. Esc cancels without emitting.
+    ///
+    /// The pre-drag selection (the additive base) needs no stored copy:
+    /// `Scene::rebuild` reseeds `selected_nodes` from `Document` at the
+    /// top of every frame, and the document stays untouched until
+    /// release, so `scene.selected_nodes` here is always the base.
+    pub fn apply(&mut self, ui: &mut Ui, scene: &mut Scene, out: &mut Vec<Intent>) {
         let resp = ui.response_for(outer_canvas_widget_id());
         let mods = ui.modifiers();
         if self.band.is_none()
@@ -74,12 +81,6 @@ impl SelectionUI {
         if let Some(p) = resp.pointer_local {
             band.current = to_world(p, scene);
         }
-        // Still dragging → stash the updated corner and wait. `None`
-        // delta is the release edge.
-        if resp.drag_delta_by(PointerButton::Left).is_some() {
-            self.band = Some(band);
-            return;
-        }
         let rect = band.rect();
         let mut selected: BTreeSet<NodeId> = if band.additive {
             scene.selected_nodes.clone()
@@ -101,6 +102,14 @@ impl SelectionUI {
             if rect.intersects(Rect { min: n.pos, size }) {
                 selected.insert(n.id);
             }
+        }
+        // Live preview: this frame's nodes draw against the swept set.
+        scene.selected_nodes = selected.clone();
+        // Still dragging → stash the updated corner and wait. `None`
+        // delta is the release edge that commits the selection.
+        if resp.drag_delta_by(PointerButton::Left).is_some() {
+            self.band = Some(band);
+            return;
         }
         out.push(Intent::SetSelection { to: selected });
         self.band = None;
