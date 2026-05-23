@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use common::{SerdeFormat, deserialize, serialize};
 use glam::Vec2;
 use lens::ImageFuncLib;
 use palantir::{HostHandle, Shortcut, Ui};
@@ -17,6 +16,7 @@ use crate::document::Document;
 use crate::gui::main_window::MainWindow;
 use crate::gui::menu_bar::MenuCommand;
 use crate::intent::{self, Intent, apply_step, build_step, requires_relayout};
+use crate::persistence;
 use crate::scene::Scene;
 use crate::theme::Theme;
 
@@ -27,16 +27,6 @@ const OPEN_SHORTCUT: Shortcut = Shortcut::ctrl('O');
 const SAVE_SHORTCUT: Shortcut = Shortcut::ctrl('S');
 const SAVE_AS_SHORTCUT: Shortcut = Shortcut::ctrl_shift('S');
 const RESET_ZOOM_SHORTCUT: Shortcut = Shortcut::ctrl('0');
-
-/// File-dialog extension filters. First entry is the default — Rhai
-/// is the canonical on-disk format for scenarium graphs (matches the
-/// deprecated-darkroom file menu's filter list).
-const FILE_FILTERS: &[(&str, &[&str])] = &[
-    ("Rhai", &["rhai"]),
-    ("JSON", &["json"]),
-    ("Lz4 compressed Rhai", &["lz4"]),
-    ("TOML", &["toml"]),
-];
 
 const UNDO_HISTORY: usize = 100;
 
@@ -57,7 +47,12 @@ pub struct App {
     pub func_lib: FuncLib,
     pub scene: Scene,
     pub main_window: MainWindow,
-    pub intents: Vec<Intent>,
+    /// Per-frame scratch buffer of pending mutations. Cleared at the
+    /// top of every `frame`, filled by prepass/record/shortcut
+    /// handling, and fully drained before `frame` returns — it carries
+    /// no state across frames. Kept as a field only to reuse the
+    /// allocation; not part of `App`'s observable state.
+    intents: Vec<Intent>,
     pub action_stack: ActionStack,
     pub theme: Theme,
     pub host_handle: Option<HostHandle>,
@@ -169,36 +164,6 @@ impl palantir::App for App {
     }
 }
 
-/// Build an `rfd::FileDialog` preconfigured with the project's
-/// extension filters and (optionally) a starting directory taken from
-/// the last opened/saved path's parent. Shared by the open and save
-/// flows so both surfaces stay in sync.
-fn file_dialog(start: Option<&Path>) -> rfd::FileDialog {
-    let mut dialog = rfd::FileDialog::new();
-    for (name, exts) in FILE_FILTERS {
-        dialog = dialog.add_filter(*name, exts);
-    }
-    if let Some(parent) = start.and_then(Path::parent) {
-        dialog = dialog.set_directory(parent);
-    }
-    dialog
-}
-
-fn pick_open_path(start: Option<&Path>) -> Option<PathBuf> {
-    file_dialog(start).pick_file()
-}
-
-fn pick_save_path(start: Option<&Path>) -> Option<PathBuf> {
-    file_dialog(start).save_file()
-}
-
-/// TOML-only dialog for theme files. Themes always round-trip through
-/// TOML (the format the config references by name), so there's no
-/// multi-format picker like documents have.
-fn theme_dialog() -> rfd::FileDialog {
-    rfd::FileDialog::new().add_filter("TOML theme", &["toml"])
-}
-
 /// Replace a few of `test_graph`'s `Binding::Bind` inputs with
 /// `Binding::Const(..)` so the inline static-value editor has
 /// something to render on first launch. Targets the `mult` and `sum`
@@ -297,20 +262,20 @@ impl App {
         match command {
             MenuCommand::NewDocument => self.new_document(),
             MenuCommand::LoadDocument => {
-                if let Some(path) = pick_open_path(self.current_path.as_deref()) {
+                if let Some(path) = persistence::pick_open_path(self.current_path.as_deref()) {
                     self.load_document(&path);
                 }
             }
             MenuCommand::SaveDocument => self.save_current(),
             MenuCommand::SaveDocumentAs => self.save_document_as(),
             MenuCommand::LoadTheme => {
-                if let Some(path) = theme_dialog().pick_file() {
+                if let Some(path) = persistence::pick_theme_open() {
                     self.load_theme(ui, &path);
                 }
             }
             MenuCommand::ExportTheme => {
-                if let Some(path) = theme_dialog().save_file() {
-                    self.export_theme(&path);
+                if let Some(path) = persistence::pick_theme_save() {
+                    persistence::export_theme(&self.theme, &path);
                 }
             }
         }
@@ -328,29 +293,13 @@ impl App {
     }
 
     fn load_document(&mut self, path: &Path) {
-        let format = match SerdeFormat::from_file_name(&path.to_string_lossy()) {
-            Ok(f) => f,
-            Err(err) => {
-                eprintln!("load failed: unsupported file extension ({err})");
-                return;
-            }
+        let Some(doc) = persistence::load_document(path) else {
+            return;
         };
-        let bytes = match std::fs::read(path) {
-            Ok(b) => b,
-            Err(err) => {
-                eprintln!("load failed: {} {err}", path.display());
-                return;
-            }
-        };
-        match Document::deserialize(format, &bytes) {
-            Ok(doc) => {
-                self.document = doc;
-                self.action_stack.clear();
-                self.intents.clear();
-                self.set_document_path(Some(path.to_path_buf()));
-            }
-            Err(err) => eprintln!("load failed: {} {err}", path.display()),
-        }
+        self.document = doc;
+        self.action_stack.clear();
+        self.intents.clear();
+        self.set_document_path(Some(path.to_path_buf()));
     }
 
     /// Cmd+S: overwrite the current file if there is one, else fall
@@ -364,20 +313,14 @@ impl App {
 
     /// Cmd+Shift+S / "Save As…": always prompt for a destination.
     fn save_document_as(&mut self) {
-        if let Some(path) = pick_save_path(self.current_path.as_deref()) {
+        if let Some(path) = persistence::pick_save_path(self.current_path.as_deref()) {
             self.save_document(&path);
         }
     }
 
     fn save_document(&mut self, path: &Path) {
-        let format = match SerdeFormat::from_file_name(&path.to_string_lossy()) {
-            Ok(f) => f,
-            Err(_) => SerdeFormat::Rhai,
-        };
-        let bytes = self.document.serialize(format);
-        match std::fs::write(path, &bytes) {
-            Ok(()) => self.set_document_path(Some(path.to_path_buf())),
-            Err(err) => eprintln!("save failed: {} {err}", path.display()),
+        if persistence::save_document(&self.document, path) {
+            self.set_document_path(Some(path.to_path_buf()));
         }
     }
 
@@ -416,33 +359,16 @@ impl App {
         }
     }
 
-    /// Read + deserialize a theme `.toml` into `self.theme`. Returns
+    /// Apply a theme `.toml` from `path` into `self.theme`. Returns
     /// whether it succeeded; on failure leaves the current theme
-    /// untouched and logs. Shared by startup restore and menu load.
+    /// untouched. Shared by startup restore and menu load.
     fn load_theme_file(&mut self, path: &Path) -> bool {
-        let bytes = match std::fs::read(path) {
-            Ok(b) => b,
-            Err(err) => {
-                eprintln!("theme load failed: {} {err}", path.display());
-                return false;
-            }
-        };
-        match deserialize::<Theme>(&bytes, SerdeFormat::Toml) {
-            Ok(theme) => {
+        match persistence::load_theme(path) {
+            Some(theme) => {
                 self.theme = theme;
                 true
             }
-            Err(err) => {
-                eprintln!("theme load failed: {} {err}", path.display());
-                false
-            }
-        }
-    }
-
-    fn export_theme(&self, path: &Path) {
-        let bytes = serialize(&self.theme, SerdeFormat::Toml);
-        if let Err(err) = std::fs::write(path, &bytes) {
-            eprintln!("theme export failed: {} {err}", path.display());
+            None => false,
         }
     }
 

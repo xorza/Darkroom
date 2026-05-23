@@ -8,9 +8,20 @@ use std::collections::HashMap;
 use crate::model::ViewNode;
 
 /// The thing being edited: the core `Graph`, per-node view metadata,
-/// and viewport state (all persisted). The `FuncLib` it resolves
-/// against lives one level up on `App` because it's runtime-owned
-/// (populated from builtins at startup, shared across documents).
+/// and viewport state. The `FuncLib` it resolves against lives one
+/// level up on `App` because it's runtime-owned (populated from
+/// builtins at startup, shared across documents).
+///
+/// **Everything here is persisted and undoable, by design.** The
+/// viewport (`pan`/`scale`) and `selected_node_id` are deliberately
+/// part of the serialized document and the undo history, not treated
+/// as throwaway session state: reopening a file restores the exact
+/// camera and selection the user left, and Ctrl+Z walks back camera
+/// moves and selection changes alongside structural edits (navigation
+/// undo is an intentional UX choice here). Keeping selection in
+/// `Document` also makes it stay coherent across undo/redo of node
+/// removal — `RemoveNode`'s undo restores the prior selection in the
+/// same step.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
     pub graph: CoreGraph,

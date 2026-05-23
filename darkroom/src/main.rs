@@ -7,6 +7,7 @@ mod gui;
 #[allow(dead_code)]
 mod intent;
 mod model;
+mod persistence;
 mod scene;
 mod theme;
 
