@@ -19,6 +19,10 @@ pub struct Theme {
     pub header_fill: Color,
     pub header_corner_radius: f32,
 
+    /// Glow color painted behind the selected node — picked brighter
+    /// than `canvas_bg` so the halo reads as a highlight, not noise.
+    pub selection_glow: Color,
+
     pub input_port: Color,
     pub output_port: Color,
     pub input_port_hover: Color,
@@ -41,6 +45,8 @@ impl Default for Theme {
 
             header_fill: Color::hex(0x3a3a44),
             header_corner_radius: 6.0,
+
+            selection_glow: Color::hex(0x9ec1ff),
 
             input_port: Color::hex(0x77c97a),
             output_port: Color::hex(0xe39a4a),

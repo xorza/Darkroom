@@ -11,7 +11,7 @@ use crate::scene::{InputBindingView, Scene, SceneNode};
 use glam::Vec2;
 use palantir::{
     Align, Background, Color, Configure, ContextMenu, Corners, Frame, HAlign, InternedStr,
-    MenuItem, Panel, Rect, Sense, Sizing, Spacing, Stroke, Text, Ui, VAlign, WidgetId,
+    MenuItem, Panel, Rect, Sense, Shadow, Sizing, Spacing, Stroke, Text, Ui, VAlign, WidgetId,
 };
 use scenarium::data::StaticValue;
 use scenarium::function::FuncInput;
@@ -120,24 +120,52 @@ impl NodeUI {
         } else {
             theme.node_border
         };
+        let selected = scene.selected_node_id == Some(node.id);
+        // Soft halo behind the selected node. Zero-offset Gaussian
+        // shadow so the glow wraps evenly; `spread` pushes the halo
+        // out past the border so it reads at any zoom. Lives in the
+        // `Background::shadow` slot so the encoder emits it on the
+        // chrome branch — paints behind the node's fill in one
+        // chrome batch, no extra `Shape::Shadow` overdraw bookkeeping.
+        let shadow = if selected {
+            Shadow {
+                color: theme.selection_glow,
+                offset: Vec2::ZERO,
+                blur: 12.0,
+                spread: 2.0,
+                inset: false,
+            }
+        } else {
+            Shadow::NONE
+        };
 
         let panel = Panel::vstack()
             .id(node_widget_id(node.id))
             .position(node.pos)
             .min_size((160, 10))
             .size((Sizing::Hug, Sizing::Hug))
-            .sense(Sense::DRAG)
+            .sense(Sense::CLICK | Sense::DRAG)
             .background(Background {
                 fill: theme.node_fill.into(),
                 stroke: Stroke::solid(border, theme.node_border_width),
                 corners: Corners::all(theme.node_corner_radius),
-                ..Default::default()
+                shadow,
             })
             .show(ui, |ui| {
                 header(ui, ctx, node.name.clone());
                 ports_row(ui, ctx, scene, node, port_frame, out);
             });
         let response = panel.response;
+
+        // Click without drag → select. Skip when already selected so
+        // the intent stack doesn't see no-op re-selects (build_step
+        // filters them via `UndoStep::is_noop`, but skipping here
+        // saves the round-trip).
+        if response.clicked() && !selected {
+            out.push(Intent::SelectNode {
+                to: Some(node.id),
+            });
+        }
 
         // Latch the anchor on the press-frame edge; subsequent frames'
         // `prepass` peeks `response_for(widget_id)` before record runs
