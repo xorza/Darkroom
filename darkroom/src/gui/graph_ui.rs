@@ -204,11 +204,17 @@ impl GraphUI {
     /// resized layout, so Pass B anchors the curve correctly with no
     /// extra frame. `PortFrame` is rebuilt here (and reused by `frame`)
     /// because the commit reads it.
-    pub fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
+    pub fn prepass(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &AppContext<'_>,
+        scene: &Scene,
+        out: &mut Vec<Intent>,
+    ) {
         self.emit_pan_zoom(ui, scene, out);
         self.node_ui.prepass(ui, scene, out);
         self.port_frame.rebuild(ui, scene);
-        self.connection_ui.apply(ui, scene, &self.port_frame, out);
+        self.connection_ui.apply(ui, ctx, scene, &self.port_frame, out);
     }
 
     pub fn frame(

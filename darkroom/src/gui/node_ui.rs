@@ -490,7 +490,7 @@ fn input_port_row(
         });
 }
 
-fn set_input(port: PortRef, to: Binding) -> Intent {
+pub(super) fn set_input(port: PortRef, to: Binding) -> Intent {
     Intent::SetInput {
         node_id: port.node_id,
         input_idx: port.port_idx,
@@ -500,7 +500,7 @@ fn set_input(port: PortRef, to: Binding) -> Intent {
 
 /// Default `StaticValue` for a function input — its declared
 /// `default_value` if any, otherwise the zero/empty of its `DataType`.
-fn default_static_value(func_input: &FuncInput) -> StaticValue {
+pub(super) fn default_static_value(func_input: &FuncInput) -> StaticValue {
     func_input
         .default_value
         .clone()

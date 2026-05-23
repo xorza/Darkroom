@@ -129,7 +129,9 @@ impl palantir::App for App {
         // applied *before* `Scene::rebuild`, so Pass A's record sees
         // the freshly-mutated doc — no Pass B retry for drag.
         self.intents.clear();
-        self.main_window.prepass(ui, &self.scene, &mut self.intents);
+        let prepass_ctx = AppContext::new(&self.theme, &self.func_lib);
+        self.main_window
+            .prepass(ui, &prepass_ctx, &self.scene, &mut self.intents);
         let mut relayout = self.drain_intents();
         relayout |= self.handle_shortcuts(ui);
 

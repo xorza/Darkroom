@@ -5,9 +5,10 @@ use scenarium::graph::{Binding, PortAddress};
 use crate::app::AppContext;
 use crate::gui::breaker::BreakerProbe;
 use crate::gui::graph_ui::{PortFrame, to_world};
+use crate::gui::node_ui::{default_static_value, node_widget_id, set_input};
 use crate::gui::{PortKind, PortRef};
 use crate::intent::Intent;
-use crate::scene::Scene;
+use crate::scene::{InputBindingView, Scene};
 
 /// Owns the in-flight new-connection drag plus the existing-connection
 /// renderer. Single-port-at-a-time means one `Option` is enough; the
@@ -38,12 +39,19 @@ impl ConnectionUI {
     /// fires, store a [`ConnectionDrag`] pinned to that port.
     /// While active: rescan every port each frame for the topmost
     /// opposite-kind port under the pointer; that becomes `snap_end`.
-    /// Release: if a compatible `snap_end` is set, push an
-    /// [`Intent::SetInput`] binding the input port to the output port.
-    /// Otherwise drop silently. Esc cancels without emitting anything.
+    /// Release resolves to one of three outcomes:
+    /// - a compatible `snap_end` → bind the input to the output
+    ///   ([`Intent::SetInput`] with `Binding::Bind`);
+    /// - dragged from an **input** and dropped back on its **own
+    ///   node's body** (no snap) → give that input a default const
+    ///   value (quick "I want a literal here" gesture);
+    /// - anything else → drop silently.
+    ///
+    /// Esc cancels without emitting anything.
     pub fn apply(
         &mut self,
         ui: &mut Ui,
+        ctx: &AppContext<'_>,
         scene: &Scene,
         port_frame: &PortFrame,
         out: &mut Vec<Intent>,
@@ -68,8 +76,48 @@ impl ConnectionUI {
         }
         if let Some(end) = drag.snap_end {
             commit_connection(drag.start, end, out);
+        } else if let Some(intent) = self.const_drop(ui, ctx, scene, drag.start) {
+            out.push(intent);
         }
         self.drag = None;
+    }
+
+    /// "Set const" gesture: an input-port drag released over its own
+    /// node's body (and not onto a compatible port) means the user
+    /// wants a literal there. Returns the `SetInput { Const(default) }`
+    /// intent, or `None` when the gesture doesn't apply — drag started
+    /// on an output, released off the start node, the func/input is
+    /// unknown, or the input is already a const (don't clobber the
+    /// value).
+    fn const_drop(
+        &self,
+        ui: &Ui,
+        ctx: &AppContext<'_>,
+        scene: &Scene,
+        start: PortRef,
+    ) -> Option<Intent> {
+        if start.kind != PortKind::Input {
+            return None;
+        }
+        let pointer = ui.pointer_pos()?;
+        let body = ui.response_for(node_widget_id(start.node_id)).rect?;
+        if !body.contains(pointer) {
+            return None;
+        }
+        let node = scene.nodes.iter().find(|n| n.id == start.node_id)?;
+        // Don't overwrite an existing const value.
+        if matches!(
+            scene.bindings(node.input_bindings).get(start.port_idx),
+            Some(InputBindingView::Const(_))
+        ) {
+            return None;
+        }
+        let func = ctx.func_lib.by_id(&node.func_id)?;
+        let func_input = func.inputs.get(start.port_idx)?;
+        Some(set_input(
+            start,
+            Binding::Const(default_static_value(func_input)),
+        ))
     }
 
     /// Compatible-kind port currently snapped under the pointer
