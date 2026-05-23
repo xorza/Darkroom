@@ -6,8 +6,20 @@ use palantir::Color;
 /// instead of hard-coded constants. Layout fields live here too —
 /// node ports, value editors, etc. — so a theme swap can restyle
 /// geometry as well as color.
+///
+/// Also owns the palantir [`palantir::Theme`] this app wants on its
+/// `Ui`. The `WinitHost::with_setup` hook in `main` copies
+/// `palantir_theme` into `ui.theme` once before the first frame, so
+/// palantir-side widgets (buttons, text edits, menus, scrollbars)
+/// read from the same source. Tweak fields on `theme.palantir_theme`
+/// before constructing the host to override palantir's defaults.
 #[derive(Clone, Debug)]
 pub struct Theme {
+    /// Palantir-side widget theme. Pushed onto `Ui::theme` once at
+    /// startup so every palantir widget (Button, TextEdit, MenuItem,
+    /// Scroll, Tooltip…) reads a darkroom-tuned palette without each
+    /// call site restyling per use.
+    pub palantir_theme: palantir::Theme,
     // ── canvas ────────────────────────────────────────────────────
     pub canvas_bg: Color,
 
@@ -77,6 +89,8 @@ impl Theme {
 impl Default for Theme {
     fn default() -> Self {
         Self {
+            palantir_theme: palantir::Theme::default(),
+            
             canvas_bg: Color::hex(0x1e1e1e),
 
             connection_broken: Color::hex(0xff5a55),
