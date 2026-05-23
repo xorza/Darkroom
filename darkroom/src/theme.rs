@@ -155,7 +155,11 @@ mod tests {
     #[test]
     fn default_loads_embedded_theme() {
         let theme = Theme::default();
-        assert_eq!(theme.canvas_bg, Color::hex(0x1e1e1e));
+        // Ayu Mirage High Contrast: canvas = terminal_bg, ports use
+        // success-green / syn-keyword-orange.
+        assert_eq!(theme.canvas_bg, Color::hex(0x1a1a1a));
+        assert_eq!(theme.input_port, Color::hex(0xdaff58));
+        assert_eq!(theme.output_port, Color::hex(0xffa63d));
         assert_eq!(theme.node_min_width, 160.0);
         assert!(theme.palantir_theme.tooltip.max_size.h.is_infinite());
     }
