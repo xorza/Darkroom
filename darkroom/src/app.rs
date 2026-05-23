@@ -209,51 +209,68 @@ fn seed_const_bindings(doc: &mut Document) {
 }
 
 impl App {
-    /// Handle Cmd+Z / Cmd+Shift+Z and Esc-to-deselect. Suppressed
-    /// while a widget holds keyboard focus so Cmd+Z inside a TextEdit
-    /// doesn't nuke the graph and Esc inside a TextEdit blurs the
-    /// editor instead of clearing selection.
+    /// Ctrl+Z / Ctrl+Shift+Z (undo/redo) and Esc-to-deselect.
+    ///
+    /// The chords are sampled via `key_pressed` *every frame,
+    /// unconditionally* — that call both reads the press and keeps the
+    /// chord subscribed, and palantir's keyboard wake-gate only
+    /// delivers an off-focus press when its chord was subscribed last
+    /// frame (subscriptions are cleared each frame). Early-returning
+    /// before `key_pressed` would let the subscription lapse and park
+    /// presses. Focus only gates the *action*: while a widget holds
+    /// focus, Ctrl+Z must undo that widget's text and Esc must blur it,
+    /// so the graph-level handling stands down.
     fn handle_shortcuts(&mut self, ui: &mut Ui) -> bool {
+        let undo = ui.key_pressed(UNDO_SHORTCUT);
+        let redo = ui.key_pressed(REDO_SHORTCUT);
+        let escape = ui.escape_pressed();
         if ui.focused_id().is_some() {
             return false;
         }
         let mut relayout = false;
-        let mut on_step = |step: &intent::UndoStep| {
-            relayout |= requires_relayout(step);
-        };
-        if ui.key_pressed(UNDO_SHORTCUT) {
-            self.action_stack.undo(&mut self.document, &mut on_step);
-        } else if ui.key_pressed(REDO_SHORTCUT) {
-            self.action_stack.redo(&mut self.document, &mut on_step);
+        {
+            let mut on_step = |step: &intent::UndoStep| {
+                relayout |= requires_relayout(step);
+            };
+            if undo {
+                self.action_stack.undo(&mut self.document, &mut on_step);
+            } else if redo {
+                self.action_stack.redo(&mut self.document, &mut on_step);
+            }
         }
         // Esc deselects. Routed through the intent stack (not a
         // direct doc write) so it lands in the undo history and the
         // batched relayout-detection path catches it like any other
         // selection change.
-        if ui.escape_pressed() && self.document.selected_node_id.is_some() {
+        if escape && self.document.selected_node_id.is_some() {
             self.intents.push(Intent::SelectNode { to: None });
         }
         relayout
     }
 
-    /// Map Cmd+N / Cmd+O / Cmd+S to a `MenuCommand`. Gated on no
-    /// keyboard focus so Cmd+S inside a TextEdit doesn't escape into
-    /// a save dialog. Cmd+N wins over open/save if multiple fire on
-    /// the same frame (no realistic combo, but the priority is
-    /// stable). Theme actions are menu-only — no shortcut.
+    /// Map Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S to a `MenuCommand`.
+    ///
+    /// Document file ops are **global** — they fire regardless of
+    /// focus, so Ctrl+S still saves while a node's value editor is
+    /// focused (TextEdit doesn't bind S/O/N, so nothing is stolen).
+    /// Every chord is sampled with `key_pressed` each frame so all
+    /// stay subscribed for palantir's wake-gate (sampling all four up
+    /// front, not short-circuited, so one chord firing doesn't drop
+    /// the others' subscription that frame). Save-As (Ctrl+Shift+S) is
+    /// checked before Save (Ctrl+S) so the shift variant wins its
+    /// combo. Theme actions are menu-only — no shortcut.
     fn menu_shortcut(&self, ui: &mut Ui) -> Option<MenuCommand> {
-        if ui.focused_id().is_some() {
-            return None;
-        }
-        // Save-As (Cmd+Shift+S) checked before Save (Cmd+S) so the
-        // shift variant wins its own combo.
-        if ui.key_pressed(NEW_SHORTCUT) {
+        let new = ui.key_pressed(NEW_SHORTCUT);
+        let open = ui.key_pressed(OPEN_SHORTCUT);
+        let save_as = ui.key_pressed(SAVE_AS_SHORTCUT);
+        let save = ui.key_pressed(SAVE_SHORTCUT);
+        if new {
             Some(MenuCommand::NewDocument)
-        } else if ui.key_pressed(OPEN_SHORTCUT) {
+        } else if open {
             Some(MenuCommand::LoadDocument)
-        } else if ui.key_pressed(SAVE_AS_SHORTCUT) {
+        } else if save_as {
             Some(MenuCommand::SaveDocumentAs)
-        } else if ui.key_pressed(SAVE_SHORTCUT) {
+        } else if save {
             Some(MenuCommand::SaveDocument)
         } else {
             None
