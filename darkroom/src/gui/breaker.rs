@@ -191,7 +191,7 @@ impl BreakerUI {
     pub fn apply(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
         let resp = ui.response_for(outer_canvas_widget_id());
         let mods = ui.modifiers();
-        let cmd_lmb = resp.drag_started_by(PointerButton::Left) && mods.meta;
+        let cmd_lmb = resp.drag_started_by(PointerButton::Left) && mods.ctrl;
         let rmb = resp.drag_started_by(PointerButton::Right);
         if (rmb || cmd_lmb)
             && self.state.is_none()
