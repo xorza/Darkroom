@@ -118,8 +118,10 @@ fn seed_const_bindings(doc: &mut Document) {
 }
 
 impl App {
-    /// Handle Cmd+Z / Cmd+Shift+Z. Suppressed while a widget holds
-    /// keyboard focus so Cmd+Z inside a TextEdit doesn't nuke the graph.
+    /// Handle Cmd+Z / Cmd+Shift+Z and Esc-to-deselect. Suppressed
+    /// while a widget holds keyboard focus so Cmd+Z inside a TextEdit
+    /// doesn't nuke the graph and Esc inside a TextEdit blurs the
+    /// editor instead of clearing selection.
     fn handle_shortcuts(&mut self, ui: &mut Ui) -> bool {
         if ui.focused_id().is_some() {
             return false;
@@ -132,6 +134,13 @@ impl App {
             self.action_stack.undo(&mut self.document, &mut on_step);
         } else if ui.key_pressed(REDO_SHORTCUT) {
             self.action_stack.redo(&mut self.document, &mut on_step);
+        }
+        // Esc deselects. Routed through the intent stack (not a
+        // direct doc write) so it lands in the undo history and the
+        // batched relayout-detection path catches it like any other
+        // selection change.
+        if ui.escape_pressed() && self.document.selected_node_id.is_some() {
+            self.intents.push(Intent::SelectNode { to: None });
         }
         relayout
     }

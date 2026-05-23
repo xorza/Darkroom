@@ -203,6 +203,16 @@ impl GraphUI {
         // 1-frame lag in the pan visual. Same pattern node drag uses
         // via `NodeUI::prepass`.
         self.apply_pan_zoom(ui, scene);
+        // Click on bare canvas (node panels hit-test first, so this
+        // only fires when the click missed every node) deselects. Skip
+        // when nothing is selected so we don't pollute the undo stack
+        // with no-op `SelectNode { from: None, to: None }` entries
+        // every time the user clicks the empty canvas.
+        if scene.selected_node_id.is_some()
+            && ui.response_for(outer_canvas_widget_id()).clicked
+        {
+            out.push(Intent::SelectNode { to: None });
+        }
         // Snapshot every port's response once for this frame — drag
         // detection, snap test, and bezier endpoints all read from the
         // same map instead of re-issuing `response_for` per use-site.
@@ -254,7 +264,7 @@ impl GraphUI {
         Panel::canvas()
             .id(outer_canvas_widget_id())
             .size((Sizing::FILL, Sizing::FILL))
-            .sense(Sense::DRAG | Sense::SCROLL | Sense::PINCH)
+            .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
             .background(Background {
                 fill: ctx.theme.canvas_bg.into(),
