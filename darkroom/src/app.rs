@@ -1,9 +1,9 @@
 use glam::Vec2;
 use lens::ImageFuncLib;
-use palantir::{Shortcut, Ui};
+use palantir::{HostHandle, Shortcut, Ui};
+use scenarium::data::StaticValue;
 use scenarium::elements::basic_funclib::BasicFuncLib;
 use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
-use scenarium::data::StaticValue;
 use scenarium::graph::Binding;
 use scenarium::prelude::{FuncLib, NodeId};
 use scenarium::testing::{TestFuncHooks, test_func_lib, test_graph};
@@ -46,6 +46,7 @@ pub struct App {
     pub intents: Vec<Intent>,
     pub action_stack: ActionStack,
     pub theme: Theme,
+    pub host_handle: Option<HostHandle>,
 }
 
 impl App {
@@ -65,6 +66,7 @@ impl App {
             intents: Vec::new(),
             action_stack: ActionStack::new(UNDO_HISTORY),
             theme: Theme::default(),
+            host_handle: None,
         }
     }
 }
@@ -86,8 +88,9 @@ impl palantir::App for App {
         // (button clicks, edit commits) into `intents`.
         self.scene.rebuild(&self.document);
         let ctx = AppContext::new(&self.theme, &self.document.func_lib);
+        let host = self.host_handle.clone();
         self.main_window
-            .frame(ui, &ctx, &mut self.scene, &mut self.intents);
+            .frame(ui, &ctx, &mut self.scene, host.as_ref(), &mut self.intents);
 
         // Post-record drain — these intents reflect mutations that
         // only the now-just-completed record could surface, so they

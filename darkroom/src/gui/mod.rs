@@ -2,6 +2,7 @@ pub mod breaker;
 pub mod connection_ui;
 pub mod graph_ui;
 pub mod main_window;
+pub mod menu_bar;
 pub mod new_node_ui;
 pub mod node_ui;
 pub mod value_editor;

@@ -1,9 +1,10 @@
 use std::mem::take;
 
-use palantir::Ui;
+use palantir::{Configure, HostHandle, Panel, Sizing, Ui};
 
 use crate::app::AppContext;
 use crate::gui::graph_ui::GraphUI;
+use crate::gui::menu_bar;
 use crate::intent::Intent;
 use crate::scene::Scene;
 
@@ -30,9 +31,16 @@ impl MainWindow {
         ui: &mut Ui,
         ctx: &AppContext<'_>,
         scene: &mut Scene,
+        host: Option<&HostHandle>,
         out: &mut Vec<Intent>,
     ) {
-        self.graph_ui.frame(ui, ctx, scene, out);
+        Panel::vstack()
+            .auto_id()
+            .size((Sizing::FILL, Sizing::FILL))
+            .show(ui, |ui| {
+                menu_bar::show(ui, host);
+                self.graph_ui.frame(ui, ctx, scene, out);
+            });
 
         if take(&mut self.first_frame) {
             ui.request_relayout();
