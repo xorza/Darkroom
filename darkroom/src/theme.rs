@@ -22,16 +22,9 @@ pub struct Theme {
     /// Palantir-side widget theme. Pushed onto `Ui::theme` once at
     /// startup so every palantir widget (Button, TextEdit, MenuItem,
     /// Scroll, Tooltip…) reads a darkroom-tuned palette without each
-    /// call site restyling per use.
-    ///
-    /// **Not serialized.** `palantir::Theme` carries non-finite floats
-    /// (e.g. `TooltipTheme::max_size.h = INFINITY` = "unbounded"), and
-    /// Rhai has no infinity literal — the JSON intermediary collapses
-    /// it to `null` and the round-trip fails. So exported themes carry
-    /// only darkroom's own fields; the palantir palette resets to its
-    /// code default on load. Lift this `skip` once palantir models
-    /// "unbounded" with a Rhai-friendly sentinel.
-    #[serde(skip)]
+    /// call site restyling per use. Round-trips through Rhai as part
+    /// of the exported theme (palantir's tooltip "unbounded" size and
+    /// noop chrome now serialize Rhai-safely).
     pub palantir_theme: palantir::Theme,
     // ── canvas ────────────────────────────────────────────────────
     pub canvas_bg: Color,
@@ -144,11 +137,11 @@ mod tests {
     use super::*;
     use common::SerdeFormat;
 
-    /// Darkroom's own visual fields must survive a Rhai round-trip —
-    /// that's the on-disk format the Theme → Load / Export menu and
-    /// the config rely on. `palantir_theme` is `#[serde(skip)]` (Rhai
-    /// can't encode its infinite tooltip max-size), so it resets to
-    /// the code default on load rather than round-tripping.
+    /// The whole bundle — darkroom's own fields *and* the nested
+    /// palantir palette — must survive a Rhai round-trip; that's the
+    /// on-disk format the Theme → Load / Export menu and the config
+    /// rely on. The palantir side exercises the two formerly-broken
+    /// cases: the tooltip's infinite max-size axis and a noop shadow.
     #[test]
     fn theme_roundtrips_through_rhai() {
         let mut theme = Theme {
@@ -156,8 +149,6 @@ mod tests {
             selection_glow: Color::hex(0x123456),
             ..Theme::default()
         };
-        // Prove the skipped field doesn't round-trip: mutate it, then
-        // confirm the reloaded copy is back at the default.
         theme.palantir_theme.window_clear = Color::hex(0xabcdef);
 
         let bytes = common::serialize(&theme, SerdeFormat::Rhai);
@@ -167,10 +158,11 @@ mod tests {
         assert_eq!(back.node_min_width, 137.5);
         assert_eq!(back.selection_glow, Color::hex(0x123456));
         assert_eq!(back.canvas_bg, theme.canvas_bg);
-        // Skipped → default, not the mutated `0xabcdef`.
-        assert_eq!(
-            back.palantir_theme.window_clear,
-            palantir::Theme::default().window_clear
-        );
+        // Nested palantir palette now round-trips too.
+        assert_eq!(back.palantir_theme.window_clear, Color::hex(0xabcdef));
+        // The infinite tooltip-height axis survives via the
+        // `unbounded_size` adapter.
+        assert!(back.palantir_theme.tooltip.max_size.h.is_infinite());
+        assert_eq!(back.palantir_theme.tooltip.max_size.w, 280.0);
     }
 }
