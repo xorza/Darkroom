@@ -8,7 +8,7 @@ use common::{SerdeFormat, deserialize, serialize};
 const CONFIG_FILE: &str = "darkroom.config.rhai";
 
 /// Persisted session state: which theme is active (by name, resolved
-/// to `<cwd>/<name>.rhai`) and the document open when the app last
+/// to `<cwd>/<name>.toml`) and the document open when the app last
 /// closed. Reloaded on startup so darkroom reopens where the user
 /// left off. Missing / unreadable config falls back to `default()`.
 #[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]

@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use common::{SerdeFormat, is_debug, key_index_vec::KeyIndexVec};
 use glam::Vec2;
-use scenarium::prelude::{Binding, FuncLib, Graph as CoreGraph, NodeId};
+use scenarium::prelude::{Binding, Graph as CoreGraph, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -32,7 +32,6 @@ impl Default for Document {
     }
 }
 
-#[allow(dead_code)]
 impl Document {
     pub fn validate(&self) {
         if !is_debug() {
@@ -82,16 +81,6 @@ impl Document {
                 panic!("graph view missing node position");
             }
         }
-    }
-
-    pub fn validate_with(&self, func_lib: &FuncLib) {
-        if !is_debug() {
-            return;
-        }
-
-        self.validate();
-
-        self.graph.validate_with(func_lib);
     }
 
     pub fn serialize(&self, format: SerdeFormat) -> Vec<u8> {
@@ -162,7 +151,7 @@ impl From<CoreGraph> for Document {
         }
 
         Self {
-            graph: graph.clone(),
+            graph,
             view_nodes,
             pan: Vec2::ZERO,
             scale: 1.0,

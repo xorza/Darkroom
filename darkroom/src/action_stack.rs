@@ -85,11 +85,6 @@ impl ActionStack {
         self.trim_to_limit();
     }
 
-    pub fn clear_redo(&mut self) {
-        self.redo_actions.clear();
-        self.redo_stack.clear();
-    }
-
     pub fn undo(&mut self, doc: &mut Document, on_step: &mut dyn FnMut(&UndoStep)) -> bool {
         let Some(entry) = self.undo_stack.pop() else {
             return false;

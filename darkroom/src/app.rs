@@ -51,12 +51,6 @@ pub struct AppContext<'a> {
     pub func_lib: &'a FuncLib,
 }
 
-impl<'a> AppContext<'a> {
-    pub fn new(theme: &'a Theme, func_lib: &'a FuncLib) -> Self {
-        Self { theme, func_lib }
-    }
-}
-
 #[derive(Debug)]
 pub struct App {
     pub document: Document,
@@ -144,7 +138,10 @@ impl palantir::App for App {
         // Record. Widgets push intents derived from record-time state
         // (button clicks, edit commits) into `intents`.
         self.scene.rebuild(&self.document, &self.func_lib);
-        let ctx = AppContext::new(&self.theme, &self.func_lib);
+        let ctx = AppContext {
+            theme: &self.theme,
+            func_lib: &self.func_lib,
+        };
         let host = self.host_handle.clone();
         let command = self
             .main_window
@@ -419,7 +416,7 @@ impl App {
         }
     }
 
-    /// Read + deserialize a theme `.rhai` into `self.theme`. Returns
+    /// Read + deserialize a theme `.toml` into `self.theme`. Returns
     /// whether it succeeded; on failure leaves the current theme
     /// untouched and logs. Shared by startup restore and menu load.
     fn load_theme_file(&mut self, path: &Path) -> bool {
