@@ -1,6 +1,6 @@
 use std::mem::take;
 
-use palantir::{Configure, HostHandle, Panel, Sizing, Ui};
+use palantir::{Align, Configure, HostHandle, Panel, Sizing, Ui, VAlign};
 use scenarium::prelude::FuncLib;
 
 use crate::app::AppContext;
@@ -43,12 +43,20 @@ impl MainWindow {
         out: &mut Vec<Intent>,
     ) -> Option<MenuCommand> {
         let mut command = None;
-        Panel::vstack()
+        // ZStack so the menu bar floats *over* the graph rather than
+        // reserving a row above it. Record order = paint order: the
+        // graph paints first (full-pane backdrop), the menu bar on top.
+        // The bar has no background and its triggers are transparent
+        // until hovered, so nodes show through behind it. `child_align`
+        // top pins the Hug-height bar to the top edge (the FILL graph
+        // ignores it).
+        Panel::zstack()
             .auto_id()
             .size((Sizing::FILL, Sizing::FILL))
+            .child_align(Align::v(VAlign::Top))
             .show(ui, |ui| {
-                command = menu_bar::show(ui, host);
                 self.graph_ui.frame(ui, ctx, scene, out);
+                command = menu_bar::show(ui, host);
             });
 
         if take(&mut self.first_frame) {

@@ -26,6 +26,7 @@ new_node_popup_max_height = 400.0
 
 [palantir_theme]
 window_clear = "#1a1a1a"
+text_scale = 1.0
 
 [palantir_theme.button]
 padding = [12.0, 6.0]
@@ -93,7 +94,7 @@ margin = 0.0
 corners = 4.0
 
 [palantir_theme.menu_button.normal.background.fill]
-Solid = "#00000000"
+Solid = "#343434d9"
 
 [palantir_theme.menu_button.normal.text]
 font_size_px = 13.0
@@ -129,7 +130,7 @@ family = "Sans"
 corners = 4.0
 
 [palantir_theme.menu_button.disabled.background.fill]
-Solid = "#00000000"
+Solid = "#343434d9"
 
 [palantir_theme.menu_button.disabled.text]
 font_size_px = 13.0

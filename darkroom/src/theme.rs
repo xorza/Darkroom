@@ -128,18 +128,29 @@ mod tests {
     #[test]
     #[ignore = "one-shot asset generator"]
     fn generate_toml_asset() {
-        use palantir::WidgetLook;
+        use palantir::{Brush, WidgetLook};
 
         let mut theme = Theme::default();
         let base = theme.palantir_theme.text;
         let shrink = |look: &mut WidgetLook| {
             look.text = Some(look.text.unwrap_or(base).with_font_size(13.0));
         };
+        // At rest the menu bar floats over the graph, so give the
+        // triggers a semi-transparent chip — legible against busy nodes
+        // while still letting them hint through. Color derives from the
+        // theme's node surface so it tracks palette changes.
+        let chip = Brush::Solid(theme.node_fill.with_alpha(0.85));
         let mb = &mut theme.palantir_theme.menu_button;
         shrink(&mut mb.normal);
         shrink(&mut mb.hovered);
         shrink(&mut mb.pressed);
         shrink(&mut mb.disabled);
+        if let Some(bg) = mb.normal.background.as_mut() {
+            bg.fill = chip.clone();
+        }
+        if let Some(bg) = mb.disabled.background.as_mut() {
+            bg.fill = chip;
+        }
         let item = &mut theme.palantir_theme.context_menu.item;
         shrink(&mut item.normal);
         shrink(&mut item.hovered);
