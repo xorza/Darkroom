@@ -120,6 +120,35 @@ impl Default for Theme {
 mod tests {
     use super::*;
 
+    /// One-shot: regenerate `assets/ayu-graphite.toml` from the current
+    /// default, with menu-bar triggers and popup rows shrunk to 13 px
+    /// (palantir's own defaults stay 16 px — the smaller menu scale is
+    /// a darkroom theme choice, baked into the asset as data). Run with
+    /// `cargo test -p darkroom generate_toml_asset -- --ignored`.
+    #[test]
+    #[ignore = "one-shot asset generator"]
+    fn generate_toml_asset() {
+        use palantir::WidgetLook;
+
+        let mut theme = Theme::default();
+        let base = theme.palantir_theme.text;
+        let shrink = |look: &mut WidgetLook| {
+            look.text = Some(look.text.unwrap_or(base).with_font_size(13.0));
+        };
+        let mb = &mut theme.palantir_theme.menu_button;
+        shrink(&mut mb.normal);
+        shrink(&mut mb.hovered);
+        shrink(&mut mb.pressed);
+        shrink(&mut mb.disabled);
+        let item = &mut theme.palantir_theme.context_menu.item;
+        shrink(&mut item.normal);
+        shrink(&mut item.hovered);
+        shrink(&mut item.disabled);
+
+        let bytes = common::serialize(&theme, SerdeFormat::Toml);
+        std::fs::write("assets/ayu-graphite.toml", bytes).expect("write toml asset");
+    }
+
     /// The whole bundle — darkroom's own fields *and* the nested
     /// palantir palette — must survive a TOML round-trip; that's the
     /// on-disk format the Theme → Load / Export menu and the config
