@@ -162,9 +162,7 @@ impl NodeUI {
         // filters them via `UndoStep::is_noop`, but skipping here
         // saves the round-trip).
         if response.clicked() && !selected {
-            out.push(Intent::SelectNode {
-                to: Some(node.id),
-            });
+            out.push(Intent::SelectNode { to: Some(node.id) });
         }
 
         // Latch the anchor on the press-frame edge; subsequent frames'

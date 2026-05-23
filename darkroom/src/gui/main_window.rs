@@ -5,6 +5,7 @@ use palantir::{Configure, HostHandle, Panel, Sizing, Ui};
 use crate::app::AppContext;
 use crate::gui::graph_ui::GraphUI;
 use crate::gui::menu_bar;
+use crate::gui::menu_bar::FileAction;
 use crate::intent::Intent;
 use crate::scene::Scene;
 
@@ -33,18 +34,20 @@ impl MainWindow {
         scene: &mut Scene,
         host: Option<&HostHandle>,
         out: &mut Vec<Intent>,
-    ) {
+    ) -> Option<FileAction> {
+        let mut file_action = None;
         Panel::vstack()
             .auto_id()
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                menu_bar::show(ui, host);
+                file_action = menu_bar::show(ui, host);
                 self.graph_ui.frame(ui, ctx, scene, out);
             });
 
         if take(&mut self.first_frame) {
             ui.request_relayout();
         }
+        file_action
     }
 }
 

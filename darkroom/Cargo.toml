@@ -12,6 +12,7 @@ lens = { workspace = true }
 glam = { workspace = true }
 serde = { workspace = true }
 anyhow = { workspace = true }
+rfd = { workspace = true }
 
 [features]
 # Forward palantir's tracy backend so `cargo run -p darkroom --features

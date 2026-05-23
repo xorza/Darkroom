@@ -208,9 +208,7 @@ impl GraphUI {
         // when nothing is selected so we don't pollute the undo stack
         // with no-op `SelectNode { from: None, to: None }` entries
         // every time the user clicks the empty canvas.
-        if scene.selected_node_id.is_some()
-            && ui.response_for(outer_canvas_widget_id()).clicked
-        {
+        if scene.selected_node_id.is_some() && ui.response_for(outer_canvas_widget_id()).clicked {
             out.push(Intent::SelectNode { to: None });
         }
         // Snapshot every port's response once for this frame — drag
