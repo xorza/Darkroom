@@ -1,3 +1,4 @@
+pub mod background;
 pub mod breaker;
 pub mod connection_ui;
 pub mod graph_ui;

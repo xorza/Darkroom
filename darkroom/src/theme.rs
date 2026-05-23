@@ -37,6 +37,13 @@ pub struct Theme {
     /// translucent fill plus a near-opaque 1px border, both derived
     /// from this single color (palette accent).
     pub selection_rect: Color,
+    /// Dotted backdrop grid: dot color, world-space base spacing
+    /// between dots, and on-screen dot radius (px). Spacing is wrapped
+    /// by a power-of-2 multiplier as the user zooms so the field never
+    /// collapses into noise — see `gui::background`.
+    pub canvas_dot: Color,
+    pub canvas_dot_spacing: f32,
+    pub canvas_dot_radius: f32,
 
     // ── connections ──────────────────────────────────────────────
     pub connection_broken: Color,

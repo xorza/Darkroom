@@ -8,6 +8,7 @@ use std::collections::{BTreeSet, HashMap};
 use scenarium::prelude::FuncLib;
 
 use crate::app::AppContext;
+use crate::gui::background::CanvasBackground;
 use crate::gui::breaker::BreakerUI;
 use crate::gui::connection_ui::ConnectionUI;
 use crate::gui::new_node_ui::NewNodeUi;
@@ -175,6 +176,7 @@ impl PortFrame {
 /// `TranslateScale`.
 #[derive(Default, Debug)]
 pub struct GraphUI {
+    pub background: CanvasBackground,
     pub port_frame: PortFrame,
     pub node_ui: NodeUI,
     pub breaker_ui: BreakerUI,
@@ -260,6 +262,7 @@ impl GraphUI {
         }
 
         let Self {
+            background,
             port_frame,
             node_ui,
             breaker_ui,
@@ -301,6 +304,9 @@ impl GraphUI {
                 ..Default::default()
             })
             .show(ui, |ui| {
+                // Dotted backdrop in screen space, beneath the inner
+                // (transformed) canvas — so it paints under everything.
+                background.draw(ui, ctx, pan_val, zoom_val);
                 Panel::canvas()
                     .id(inner_canvas_widget_id())
                     .size((Sizing::FILL, Sizing::FILL))
