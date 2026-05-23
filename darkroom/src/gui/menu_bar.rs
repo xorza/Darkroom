@@ -1,5 +1,8 @@
 use glam::Vec2;
-use palantir::{Button, Configure, ContextMenu, HostHandle, MenuItem, Panel, Sizing, Spacing, Ui};
+use palantir::{
+    Background, Brush, Button, ButtonTheme, Color, Configure, ContextMenu, Corners, HostHandle,
+    MenuItem, Panel, Shadow, Sizing, Spacing, Stroke, Ui, WidgetLook,
+};
 
 /// Document-level action surfaced by the File menu. `App` handles the
 /// side effect (file dialog + read/write + doc swap) outside the
@@ -30,8 +33,40 @@ pub fn show(ui: &mut Ui, host: Option<&HostHandle>) -> Option<FileAction> {
     action
 }
 
+/// Flat trigger styling for menu-bar entries: transparent fill at
+/// rest, hover-only background, no border or shadow, tighter padding
+/// than the default Button. Matches the conventional menu-bar look
+/// (Figma / VS Code / macOS) — the trigger reads as text until the
+/// pointer is over it. Built once per call; cheap.
+fn menu_trigger_theme() -> ButtonTheme {
+    const HOVER_BG: Color = Color::hex(0x2a2a30);
+    const PRESSED_BG: Color = Color::hex(0x3a3a44);
+    let flat = |fill: Brush| WidgetLook {
+        background: Some(Background {
+            fill,
+            stroke: Stroke::ZERO,
+            corners: Corners::all(4.0),
+            shadow: Shadow::NONE,
+        }),
+        text: None,
+    };
+    ButtonTheme {
+        normal: flat(Brush::TRANSPARENT),
+        hovered: flat(HOVER_BG.into()),
+        pressed: flat(PRESSED_BG.into()),
+        disabled: flat(Brush::TRANSPARENT),
+        padding: Spacing::xy(8.0, 4.0),
+        margin: Spacing::ZERO,
+        anim: None,
+    }
+}
+
 fn file_menu(ui: &mut Ui, host: Option<&HostHandle>) -> Option<FileAction> {
-    let trigger = Button::new().label("File").show(ui).snapshot();
+    let trigger = Button::new()
+        .label("File")
+        .style(menu_trigger_theme())
+        .show(ui)
+        .snapshot();
     if trigger.clicked()
         && let Some(rect) = trigger.rect()
     {
