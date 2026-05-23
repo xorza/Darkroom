@@ -1,0 +1,12 @@
+{
+  "lsp": {
+    "rust-analyzer": {
+      "initialization_options": {
+        "runnables": {
+          "extraArgs": ["--release"],
+          "extraTestBinaryArgs": ["--nocapture"],
+        },
+      },
+    },
+  },
+}
