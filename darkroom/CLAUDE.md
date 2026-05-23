@@ -119,6 +119,14 @@ coupling — `App` orchestrates. Documents round-trip through any `SerdeFormat`
 (Rhai is canonical). `Theme` bundles darkroom colors/layout *and* the nested
 `palantir::Theme`, serialized as TOML; `Theme::default()` deserializes the
 embedded `assets/ayu-graphite.toml` (single source of truth for the look).
+
+**Colors come from the palette.** `assets/ayu-graphite-palette.toml` is the
+semantic Ayu Mirage High Contrast palette (backgrounds, borders, text,
+accent/status, syntax). When adding or restyling a theme field, pick an
+existing swatch from that palette rather than inventing a hex value — e.g.
+node chrome uses `backgrounds.*`, selection halo uses `elem_selected`
+(`#4b4b4b`), ports use `success`/`syn_keyword`, broken state uses `error`.
+Keeps darkroom on-palette and lets a palette re-seed propagate cleanly.
 `AppConfig` (`darkroom.config.rhai` in cwd) persists last-theme-name +
 last-document so the next launch reopens where you left off. I/O failures log
 to stderr and degrade — there is no user-facing error surface yet.
