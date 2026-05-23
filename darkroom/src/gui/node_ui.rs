@@ -129,8 +129,8 @@ impl NodeUI {
             Shadow {
                 color: theme.selection_glow,
                 offset: Vec2::ZERO,
-                blur: 12.0,
-                spread: 2.0,
+                blur: 6.0,
+                spread: 1.0,
                 inset: false,
             }
         } else {

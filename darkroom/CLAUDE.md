@@ -124,8 +124,8 @@ embedded `assets/ayu-graphite.toml` (single source of truth for the look).
 semantic Ayu Mirage High Contrast palette (backgrounds, borders, text,
 accent/status, syntax). When adding or restyling a theme field, pick an
 existing swatch from that palette rather than inventing a hex value — e.g.
-node chrome uses `backgrounds.*`, selection halo uses `elem_selected`
-(`#4b4b4b`), ports use `success`/`syn_keyword`, broken state uses `error`.
+node chrome uses `backgrounds.*`, selection halo uses `text_muted`
+(`#aaaaa8`), ports use `success`/`syn_keyword`, broken state uses `error`.
 Keeps darkroom on-palette and lets a palette re-seed propagate cleanly.
 `AppConfig` (`darkroom.config.rhai` in cwd) persists last-theme-name +
 last-document so the next launch reopens where you left off. I/O failures log
