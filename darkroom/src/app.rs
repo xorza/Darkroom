@@ -26,6 +26,7 @@ const NEW_SHORTCUT: Shortcut = Shortcut::ctrl('N');
 const OPEN_SHORTCUT: Shortcut = Shortcut::ctrl('O');
 const SAVE_SHORTCUT: Shortcut = Shortcut::ctrl('S');
 const SAVE_AS_SHORTCUT: Shortcut = Shortcut::ctrl_shift('S');
+const RESET_ZOOM_SHORTCUT: Shortcut = Shortcut::ctrl('0');
 
 /// File-dialog extension filters. First entry is the default — Rhai
 /// is the canonical on-disk format for scenarium graphs (matches the
@@ -231,6 +232,7 @@ impl App {
     fn handle_shortcuts(&mut self, ui: &mut Ui) -> bool {
         let undo = ui.key_pressed(UNDO_SHORTCUT);
         let redo = ui.key_pressed(REDO_SHORTCUT);
+        let reset_zoom = ui.key_pressed(RESET_ZOOM_SHORTCUT);
         let escape = ui.escape_pressed();
         if ui.focused_id().is_some() {
             return false;
@@ -252,6 +254,15 @@ impl App {
         // selection change.
         if escape && self.document.selected_node_id.is_some() {
             self.intents.push(Intent::SelectNode { to: None });
+        }
+        // Ctrl+0 resets zoom to 100% (keeping pan), via the same
+        // `SetViewport` intent the pan/zoom gesture uses — so it's
+        // undoable and persists. `is_noop` filters it when already 1.0.
+        if reset_zoom {
+            self.intents.push(Intent::SetViewport {
+                pan: self.document.pan,
+                scale: 1.0,
+            });
         }
         relayout
     }
