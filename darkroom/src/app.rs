@@ -25,6 +25,7 @@ const REDO_SHORTCUT: Shortcut = Shortcut::cmd_shift('Z');
 const NEW_SHORTCUT: Shortcut = Shortcut::cmd('N');
 const OPEN_SHORTCUT: Shortcut = Shortcut::cmd('O');
 const SAVE_SHORTCUT: Shortcut = Shortcut::cmd('S');
+const SAVE_AS_SHORTCUT: Shortcut = Shortcut::cmd_shift('S');
 
 /// File-dialog extension filters. First entry is the default — Rhai
 /// is the canonical on-disk format for scenarium graphs (matches the
@@ -244,10 +245,14 @@ impl App {
         if ui.focused_id().is_some() {
             return None;
         }
+        // Save-As (Cmd+Shift+S) checked before Save (Cmd+S) so the
+        // shift variant wins its own combo.
         if ui.key_pressed(NEW_SHORTCUT) {
             Some(MenuCommand::NewDocument)
         } else if ui.key_pressed(OPEN_SHORTCUT) {
             Some(MenuCommand::LoadDocument)
+        } else if ui.key_pressed(SAVE_AS_SHORTCUT) {
+            Some(MenuCommand::SaveDocumentAs)
         } else if ui.key_pressed(SAVE_SHORTCUT) {
             Some(MenuCommand::SaveDocument)
         } else {
@@ -263,11 +268,8 @@ impl App {
                     self.load_document(&path);
                 }
             }
-            MenuCommand::SaveDocument => {
-                if let Some(path) = pick_save_path(self.current_path.as_deref()) {
-                    self.save_document(&path);
-                }
-            }
+            MenuCommand::SaveDocument => self.save_current(),
+            MenuCommand::SaveDocumentAs => self.save_document_as(),
             MenuCommand::LoadTheme => {
                 if let Some(path) = theme_dialog().pick_file() {
                     self.load_theme(ui, &path);
@@ -315,6 +317,22 @@ impl App {
                 self.set_document_path(Some(path.to_path_buf()));
             }
             Err(err) => eprintln!("load failed: {} {err}", path.display()),
+        }
+    }
+
+    /// Cmd+S: overwrite the current file if there is one, else fall
+    /// back to Save As (first save of a fresh document).
+    fn save_current(&mut self) {
+        match self.current_path.clone() {
+            Some(path) => self.save_document(&path),
+            None => self.save_document_as(),
+        }
+    }
+
+    /// Cmd+Shift+S / "Save As…": always prompt for a destination.
+    fn save_document_as(&mut self) {
+        if let Some(path) = pick_save_path(self.current_path.as_deref()) {
+            self.save_document(&path);
         }
     }
 

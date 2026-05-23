@@ -12,7 +12,10 @@ use palantir::{
 pub enum MenuCommand {
     NewDocument,
     LoadDocument,
+    /// Save to the current file, or prompt (Save As) if there isn't one.
     SaveDocument,
+    /// Always prompt for a destination.
+    SaveDocumentAs,
     LoadTheme,
     ExportTheme,
 }
@@ -69,8 +72,11 @@ fn file_menu(ui: &mut Ui, host: Option<&HostHandle>) -> Option<MenuCommand> {
         if MenuItem::new("Load…").show(ui, popup).clicked() {
             command = Some(MenuCommand::LoadDocument);
         }
-        if MenuItem::new("Save…").show(ui, popup).clicked() {
+        if MenuItem::new("Save").show(ui, popup).clicked() {
             command = Some(MenuCommand::SaveDocument);
+        }
+        if MenuItem::new("Save As…").show(ui, popup).clicked() {
+            command = Some(MenuCommand::SaveDocumentAs);
         }
         MenuItem::separator(ui);
         if MenuItem::new("Quit").show(ui, popup).clicked()
