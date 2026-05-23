@@ -12,7 +12,6 @@ use crate::action_stack::ActionStack;
 use crate::document::Document;
 use crate::gui::main_window::MainWindow;
 use crate::intent::{self, Intent, apply_step, build_step, requires_relayout};
-use crate::model::ViewGraph;
 use crate::scene::Scene;
 use crate::theme::Theme;
 
@@ -52,16 +51,16 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
-        let mut view_graph: ViewGraph = test_graph().into();
-        seed_const_bindings(&mut view_graph);
-        view_graph.auto_layout(220.0, 110.0, Vec2::new(40.0, 40.0));
+        let mut document: Document = test_graph().into();
+        seed_const_bindings(&mut document);
+        document.auto_layout(220.0, 110.0, Vec2::new(40.0, 40.0));
         let mut func_lib = FuncLib::default();
         func_lib.merge(test_func_lib(TestFuncHooks::default()));
         func_lib.merge(BasicFuncLib::default());
         func_lib.merge(WorkerEventsFuncLib::default());
         func_lib.merge(ImageFuncLib::default());
         Self {
-            document: Document::new(view_graph),
+            document,
             func_lib,
             scene: Scene::default(),
             main_window: MainWindow::default(),
@@ -107,13 +106,13 @@ impl palantir::App for App {
 /// `Binding::Const(..)` so the inline static-value editor has
 /// something to render on first launch. Targets the `mult` and `sum`
 /// nodes by their well-known ids from `scenarium::testing::test_graph`.
-fn seed_const_bindings(view_graph: &mut ViewGraph) {
+fn seed_const_bindings(doc: &mut Document) {
     let mult_id: NodeId = "579ae1d6-10a3-4906-8948-135cb7d7508b".into();
     let sum_id: NodeId = "999c4d37-e0eb-4856-be3f-ad2090c84d8c".into();
-    if let Some(node) = view_graph.graph.by_id_mut(&mult_id) {
+    if let Some(node) = doc.graph.by_id_mut(&mult_id) {
         node.inputs[1].binding = Binding::Const(StaticValue::Int(7));
     }
-    if let Some(node) = view_graph.graph.by_id_mut(&sum_id) {
+    if let Some(node) = doc.graph.by_id_mut(&sum_id) {
         node.inputs[1].binding = Binding::Const(StaticValue::Float(2.5));
     }
 }

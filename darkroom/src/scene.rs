@@ -88,14 +88,13 @@ impl Scene {
     /// the next `Ui::frame` — so `Scene` must be rebuilt every frame
     /// before any widget consumes it. `App::frame` enforces this.
     pub fn rebuild(&mut self, doc: &Document, func_lib: &FuncLib) {
-        let view_graph = &doc.view_graph;
         self.nodes.clear();
         self.connections.clear();
         self.port_names.clear();
         self.input_bindings.clear();
 
-        for vn in view_graph.view_nodes.iter() {
-            let Some(node) = view_graph.graph.by_id(&vn.id) else {
+        for vn in doc.view_nodes.iter() {
+            let Some(node) = doc.graph.by_id(&vn.id) else {
                 continue;
             };
             let Some(func) = func_lib.by_id(&node.func_id) else {
@@ -126,7 +125,7 @@ impl Scene {
             });
         }
 
-        for node in view_graph.graph.iter() {
+        for node in doc.graph.iter() {
             for (tgt_port, inp) in node.inputs.iter().enumerate() {
                 let Binding::Bind(addr) = &inp.binding else {
                     continue;
