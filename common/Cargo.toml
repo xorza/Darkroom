@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 aligned-vec = { workspace = true }
 anyhow = { workspace = true }
+glam = { workspace = true }
 rayon = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }

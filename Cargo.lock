@@ -542,6 +542,7 @@ dependencies = [
  "arc-swap",
  "bitcode",
  "bumpalo",
+ "glam 0.33.0",
  "lz4_flex",
  "rayon",
  "rhai",

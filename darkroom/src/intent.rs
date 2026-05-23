@@ -490,8 +490,11 @@ pub fn requires_relayout(step: &UndoStep) -> bool {
         UndoStep::AddNode { .. }
         | UndoStep::RemoveNode { .. }
         | UndoStep::MoveNode { .. }
-        | UndoStep::RenameNode { .. }
-        | UndoStep::SetViewport { .. } => true,
+        | UndoStep::RenameNode { .. } => true,
+        // Viewport is the inner-canvas `TranslateScale`, applied at
+        // paint; children arrange in pre-transform space, so a pan/zoom
+        // changes nothing the layout engine reads — no Pass B needed.
+        UndoStep::SetViewport { .. } => false,
         // The inline const-value editor is recorded only when the
         // binding is `Const(_)`. Flipping Const presence (None ⇄ Const,
         // Bind ⇄ Const) toggles the editor in the widget tree, so the

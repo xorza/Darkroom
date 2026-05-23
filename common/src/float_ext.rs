@@ -14,6 +14,14 @@ impl FloatExt for f64 {
     }
 }
 
+/// Component-wise: both axes within `EPSILON`. NaN on either axis
+/// never compares equal (inherits the scalar semantics).
+impl FloatExt for glam::Vec2 {
+    fn approximately_eq(self, other: Self) -> bool {
+        self.x.approximately_eq(other.x) && self.y.approximately_eq(other.y)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -24,6 +32,18 @@ mod tests {
         assert!(0.0_f32.approximately_eq(0.0));
         assert!((0.1_f32 + 0.2_f32).approximately_eq(0.3));
         assert!(!1.0_f32.approximately_eq(1.001));
+    }
+
+    #[test]
+    fn vec2_approximately_eq() {
+        use glam::Vec2;
+        assert!(Vec2::new(1.0, -2.0).approximately_eq(Vec2::new(1.0, -2.0)));
+        // Within EPSILON on both axes.
+        assert!(Vec2::new(1.0, 2.0).approximately_eq(Vec2::new(1.0 + 5e-7, 2.0 - 5e-7)));
+        // One axis off by more than EPSILON → not equal.
+        assert!(!Vec2::new(1.0, 2.0).approximately_eq(Vec2::new(1.0, 2.001)));
+        // NaN on an axis never matches.
+        assert!(!Vec2::new(f32::NAN, 0.0).approximately_eq(Vec2::new(f32::NAN, 0.0)));
     }
 
     #[test]

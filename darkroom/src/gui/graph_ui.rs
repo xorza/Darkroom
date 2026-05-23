@@ -1,3 +1,4 @@
+use common::FloatExt;
 use glam::Vec2;
 use palantir::{
     Background, Configure, Panel, PointerButton, Rect, Sense, Sizing, TranslateScale, Ui, WidgetId,
@@ -185,8 +186,13 @@ pub struct GraphUI {
 
 impl GraphUI {
     /// Pre-record pass — see
-    /// [`crate::gui::node_ui::NodeUI::prepass`].
+    /// [`crate::gui::node_ui::NodeUI::prepass`]. Pan/zoom is folded in
+    /// here (not in `frame`) so the emitted `Intent::SetViewport` is
+    /// drained *before* `Scene::rebuild`, which then mirrors the new
+    /// `Document` viewport into `Scene` — the transform reflects the
+    /// gesture the same frame, with no direct viewport write.
     pub fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
+        self.emit_pan_zoom(ui, scene, out);
         self.node_ui.prepass(ui, scene, out);
     }
 
@@ -197,12 +203,9 @@ impl GraphUI {
         scene: &mut Scene,
         out: &mut Vec<Intent>,
     ) {
-        // Read outer's response before recording so this frame's
-        // transform reflects the latest gesture — `response_for`
-        // returns current-frame drag/scroll/pinch (palantir doc); no
-        // 1-frame lag in the pan visual. Same pattern node drag uses
-        // via `NodeUI::prepass`.
-        self.apply_pan_zoom(ui, scene);
+        // Pan/zoom was already folded into the document in `prepass`
+        // and mirrored into `scene` by `Scene::rebuild`, so the
+        // transform below reads the up-to-date viewport directly.
         // Click on bare canvas (node panels hit-test first, so this
         // only fires when the click missed every node) deselects. Skip
         // when nothing is selected so we don't pollute the undo stack
@@ -297,10 +300,13 @@ impl GraphUI {
             });
     }
 
-    /// Read the outer canvas's current-frame response and bake every
-    /// pan/zoom gesture into `scene` so this frame's `TranslateScale`
-    /// already reflects the gesture — no visible 1-frame lag. Mirrors
-    /// `NodeUI::prepass`. Three independent sources:
+    /// Read the outer canvas's current-frame response, compute the
+    /// target viewport, and emit an `Intent::SetViewport` when it
+    /// changed. The intent (not a direct write) is the only thing that
+    /// mutates the document's viewport — so pan/zoom rides the same
+    /// undo path as every other edit, and the undo stack coalesces a
+    /// continuous gesture into one entry via `GestureKey::Viewport`.
+    /// Three independent sources:
     ///
     /// - **Middle-button drag** (`Sense::DRAG` +
     ///   `Ui::drag_delta_by`): canvas pan. Anchor on `drag_started_by`,
@@ -315,25 +321,28 @@ impl GraphUI {
     ///   up) → zoom in.
     /// - **Pinch** (`Sense::PINCH`): zoom-about-cursor using the
     ///   `Response::pointer_local` pivot.
-    fn apply_pan_zoom(&mut self, ui: &Ui, scene: &mut Scene) {
+    fn emit_pan_zoom(&mut self, ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
         let resp = ui.response_for(outer_canvas_widget_id());
+        let mut pan = scene.pan;
+        let mut zoom = scene.zoom;
         if resp.drag_started_by(PointerButton::Middle) {
             self.pan_anchor = Some(scene.pan);
         }
         match (self.pan_anchor, resp.drag_delta_by(PointerButton::Middle)) {
-            (Some(anchor), Some(d)) => scene.pan = anchor + d,
+            (Some(anchor), Some(d)) => pan = anchor + d,
             (Some(_), None) => self.pan_anchor = None,
             _ => {}
         }
         if resp.scroll_pixels != Vec2::ZERO {
-            scene.pan -= resp.scroll_pixels;
+            pan -= resp.scroll_pixels;
         }
         if resp.scroll_lines.y.abs() > f32::EPSILON
             && let Some(pivot) = resp.pointer_local
         {
             let line_px = ui.theme.text.line_height_for(ui.theme.text.font_size_px);
             zoom_about(
-                scene,
+                &mut pan,
+                &mut zoom,
                 pivot,
                 scroll_to_zoom_factor(resp.scroll_lines.y * line_px),
             );
@@ -341,7 +350,16 @@ impl GraphUI {
         if (resp.zoom_factor - 1.0).abs() > f32::EPSILON
             && let Some(pivot) = resp.pointer_local
         {
-            zoom_about(scene, pivot, resp.zoom_factor);
+            zoom_about(&mut pan, &mut zoom, pivot, resp.zoom_factor);
+        }
+        // Only emit when the gesture actually moved the viewport
+        // (approx compare — exact float `!=` would emit on sub-epsilon
+        // jitter). The `SetViewport` undo step is also `is_noop`-
+        // filtered in `drain_intents`; this just skips the build on
+        // idle frames.
+        let unchanged = pan.approximately_eq(scene.pan) && zoom.approximately_eq(scene.zoom);
+        if !unchanged {
+            out.push(Intent::SetViewport { pan, scale: zoom });
         }
     }
 }
@@ -354,6 +372,24 @@ pub(super) fn to_world(outer_local: Vec2, scene: &Scene) -> Vec2 {
     (outer_local - scene.pan) / zoom
 }
 
+/// Multiply `zoom` by `factor` while holding the pre-transform point
+/// under `pivot_local` fixed in the outer canvas. Operates on the
+/// caller's local `(pan, zoom)` so the gesture can fold several inputs
+/// before emitting one `Intent::SetViewport`. Standard zoom-about-
+/// cursor algebra: world point under cursor = `(pivot - pan) / zoom`;
+/// choose new pan so that same world point stays under the same screen
+/// pixel after scaling. Clamps to `[MIN_ZOOM, MAX_ZOOM]`; ignores
+/// non-finite / non-positive factors.
+fn zoom_about(pan: &mut Vec2, zoom: &mut f32, pivot_local: Vec2, factor: f32) {
+    if !factor.is_finite() || factor <= 0.0 {
+        return;
+    }
+    let new_zoom = (*zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
+    let effective = new_zoom / *zoom;
+    *pan = pivot_local - (pivot_local - *pan) * effective;
+    *zoom = new_zoom;
+}
+
 /// Map a one-frame vertical scroll delta (in logical px, palantir's
 /// "advance offset forward" sign convention — `+y` = scroll content
 /// down) to a multiplicative zoom factor. Negative `delta_y` (wheel
@@ -362,21 +398,6 @@ pub(super) fn to_world(outer_local: Vec2, scene: &Scene) -> Vec2 {
 /// spinning up a UI.
 fn scroll_to_zoom_factor(delta_y: f32) -> f32 {
     SCROLL_ZOOM_BASE.powf(-delta_y)
-}
-
-/// Multiply `scene.zoom` by `factor` while holding the pre-transform
-/// point under `pivot_local` fixed in the outer canvas. Standard
-/// zoom-about-cursor algebra: world point under cursor =
-/// (pivot - pan) / zoom; choose new pan so the same world point stays
-/// under the same screen pixel after scaling.
-fn zoom_about(scene: &mut Scene, pivot_local: Vec2, factor: f32) {
-    if !factor.is_finite() || factor <= 0.0 {
-        return;
-    }
-    let new_zoom = (scene.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
-    let effective = new_zoom / scene.zoom;
-    scene.pan = pivot_local - (pivot_local - scene.pan) * effective;
-    scene.zoom = new_zoom;
 }
 
 /// Stable id for the outer (pan-capture) canvas. `auto_stable` mixes
@@ -396,15 +417,6 @@ const fn inner_canvas_widget_id() -> WidgetId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scene::Scene;
-
-    fn scene_with(pan: Vec2, zoom: f32) -> Scene {
-        Scene {
-            pan,
-            zoom,
-            ..Scene::default()
-        }
-    }
 
     #[test]
     fn scroll_to_zoom_factor_zero_delta_is_identity() {
@@ -470,11 +482,11 @@ mod tests {
         //   world_before = (pivot - pan_before) / zoom_before
         //   world_after  = (pivot - pan_after)  / zoom_after
         //   require world_before == world_after.
-        let mut scene = scene_with(Vec2::new(40.0, 20.0), 1.5);
+        let (mut pan, mut zoom) = (Vec2::new(40.0, 20.0), 1.5);
         let pivot = Vec2::new(200.0, 150.0);
-        let world_before = (pivot - scene.pan) / scene.zoom;
-        zoom_about(&mut scene, pivot, 1.3);
-        let world_after = (pivot - scene.pan) / scene.zoom;
+        let world_before = (pivot - pan) / zoom;
+        zoom_about(&mut pan, &mut zoom, pivot, 1.3);
+        let world_after = (pivot - pan) / zoom;
         let drift = (world_after - world_before).length();
         assert!(
             drift < 1e-4,
@@ -487,21 +499,17 @@ mod tests {
         // End-to-end: a wheel scroll triggers `zoom_about` with the
         // `scroll_to_zoom_factor` output. The same pivot invariant
         // must hold regardless of which factor source the caller used.
-        let mut scene = scene_with(Vec2::new(-15.0, 75.0), 0.8);
+        let (mut pan, mut zoom) = (Vec2::new(-15.0, 75.0), 0.8);
         let pivot = Vec2::new(300.0, 200.0);
-        let world_before = (pivot - scene.pan) / scene.zoom;
+        let world_before = (pivot - pan) / zoom;
         // 2 notches up.
         let factor = scroll_to_zoom_factor(-36.0);
-        zoom_about(&mut scene, pivot, factor);
-        let world_after = (pivot - scene.pan) / scene.zoom;
+        zoom_about(&mut pan, &mut zoom, pivot, factor);
+        let world_after = (pivot - pan) / zoom;
         let drift = (world_after - world_before).length();
         assert!(drift < 1e-4, "drift {drift}");
         // Sanity: zoom did move in the expected direction (in).
-        assert!(
-            scene.zoom > 0.8,
-            "scroll up should grow zoom; got {}",
-            scene.zoom
-        );
+        assert!(zoom > 0.8, "scroll up should grow zoom; got {zoom}");
     }
 
     #[test]
@@ -510,38 +518,36 @@ mod tests {
         // overshooting. Pivot invariance still holds at the clamped
         // value (effective factor = MAX_ZOOM / zoom_before, not the
         // requested factor).
-        let mut scene = scene_with(Vec2::new(10.0, 10.0), MAX_ZOOM * 0.9);
+        let (mut pan, mut zoom) = (Vec2::new(10.0, 10.0), MAX_ZOOM * 0.9);
         let pivot = Vec2::new(100.0, 100.0);
-        zoom_about(&mut scene, pivot, 5.0);
+        zoom_about(&mut pan, &mut zoom, pivot, 5.0);
         assert!(
-            (scene.zoom - MAX_ZOOM).abs() < 1e-5,
-            "expected saturation at MAX_ZOOM={MAX_ZOOM}, got {}",
-            scene.zoom,
+            (zoom - MAX_ZOOM).abs() < 1e-5,
+            "expected saturation at MAX_ZOOM={MAX_ZOOM}, got {zoom}",
         );
     }
 
     #[test]
     fn zoom_about_clamps_to_min() {
-        let mut scene = scene_with(Vec2::new(10.0, 10.0), MIN_ZOOM * 1.1);
+        let (mut pan, mut zoom) = (Vec2::new(10.0, 10.0), MIN_ZOOM * 1.1);
         let pivot = Vec2::new(100.0, 100.0);
-        zoom_about(&mut scene, pivot, 0.01);
+        zoom_about(&mut pan, &mut zoom, pivot, 0.01);
         assert!(
-            (scene.zoom - MIN_ZOOM).abs() < 1e-5,
-            "expected saturation at MIN_ZOOM={MIN_ZOOM}, got {}",
-            scene.zoom,
+            (zoom - MIN_ZOOM).abs() < 1e-5,
+            "expected saturation at MIN_ZOOM={MIN_ZOOM}, got {zoom}",
         );
     }
 
     #[test]
     fn zoom_about_ignores_non_positive_or_non_finite_factor() {
-        // Defensive: pathological factors leave scene unchanged.
-        let pan = Vec2::new(5.0, 7.0);
-        let zoom = 1.25;
+        // Defensive: pathological factors leave the viewport unchanged.
+        let pan0 = Vec2::new(5.0, 7.0);
+        let zoom0 = 1.25;
         for bad in [0.0_f32, -0.5, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            let mut s = scene_with(pan, zoom);
-            zoom_about(&mut s, Vec2::new(50.0, 50.0), bad);
-            assert_eq!(s.pan, pan, "pan moved on bad factor {bad}");
-            assert_eq!(s.zoom, zoom, "zoom moved on bad factor {bad}");
+            let (mut pan, mut zoom) = (pan0, zoom0);
+            zoom_about(&mut pan, &mut zoom, Vec2::new(50.0, 50.0), bad);
+            assert_eq!(pan, pan0, "pan moved on bad factor {bad}");
+            assert_eq!(zoom, zoom0, "zoom moved on bad factor {bad}");
         }
     }
 }
