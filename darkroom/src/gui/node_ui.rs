@@ -8,8 +8,8 @@ use crate::scene::{InputBindingView, Scene, SceneNode};
 use crate::theme::Theme;
 use glam::Vec2;
 use palantir::{
-    Align, Background, Color, Configure, ContextMenu, Corners, Frame, HAlign, InternedStr,
-    MenuItem, Panel, Rect, Sense, Shadow, Sizing, Spacing, Stroke, Text, Ui, VAlign, WidgetId,
+    Align, Background, Color, Configure, ContextMenu, Corners, HAlign, InternedStr, MenuItem,
+    Panel, Rect, Sense, Shadow, Shape, Sizing, Spacing, Stroke, Text, Ui, VAlign, WidgetId,
 };
 use scenarium::data::StaticValue;
 use scenarium::function::FuncInput;
@@ -507,25 +507,40 @@ pub(super) fn default_static_value(func_input: &FuncInput) -> StaticValue {
         .unwrap_or_else(|| StaticValue::from(&func_input.data_type))
 }
 
+/// Hover / grab box scaled past the painted dot so ports are easier to
+/// hit and snap to, while the visible circle stays `port_size`.
+const PORT_HIT_SCALE: f32 = 1.8;
+
 fn circle_frame(ui: &mut Ui, theme: &Theme, wid: WidgetId, fill: Color, margin: Spacing) {
+    let port = theme.port_size;
+    let hit = port * PORT_HIT_SCALE;
+    let inset = (hit - port) * 0.5;
+
+    // The sensing element is `hit`-sized, but the extra (`inset` on each
+    // side) is pulled back out of the layout with negative margin, so
+    // node layout and the dot's position are unchanged — only the
+    // hover/grab area grows. The dot itself paints as a centered shape.
+    let [l, t, r, b] = margin.as_array();
+    let hit_margin = Spacing::new(l - inset, t - inset, r - inset, b - inset);
+    let radius = theme.port_radius();
+
     // Explicit `id(wid)` so the cross-frame id stays stable: prepass
     // computes the same `port_circle_wid` and reads its response,
     // record paints with the same id — no drift even if the parent
     // structure shifts. CLICK | DRAG so the port (a) intercepts the
     // press before it falls through to the node body's `Sense::DRAG`,
     // and (b) can latch a connection drag.
-    Frame::new()
+    Panel::zstack()
         .id(wid)
-        .size((
-            Sizing::Fixed(theme.port_size),
-            Sizing::Fixed(theme.port_size),
-        ))
-        .margin(margin)
+        .size((Sizing::Fixed(hit), Sizing::Fixed(hit)))
+        .margin(hit_margin)
         .sense(Sense::CLICK | Sense::DRAG)
-        .background(Background {
-            fill: fill.into(),
-            corners: Corners::all(theme.port_radius()),
-            ..Default::default()
-        })
-        .show(ui);
+        .show(ui, |ui| {
+            ui.add_shape(Shape::RoundedRect {
+                local_rect: Some(Rect::new(inset, inset, port, port)),
+                corners: Corners::all(radius),
+                fill: fill.into(),
+                stroke: Stroke::ZERO,
+            });
+        });
 }
