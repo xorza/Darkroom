@@ -41,3 +41,4 @@ log/
 **/*.log
 **/__pycache__/
 .tmp/
+darkroom.config.rhai
