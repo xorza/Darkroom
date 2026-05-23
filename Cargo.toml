@@ -28,59 +28,59 @@ imaginarium = { path = "imaginarium", features = ["wgpu"] }
 lens = { path = "lens" }
 palantir = { path = "palantir" }
 
-wgpu = { version = "*", features = ["metal", "vulkan", "dx12"] }
+wgpu = { version = "29.0", features = ["metal", "vulkan", "dx12"] }
 
 # gh repo recommends using development version
 fitsio = { git = "https://github.com/simonrw/rust-fitsio", features = ["fitsio-src", "src-cmake"] }
 
-libraw-rs-sys = { version = "*" }
+libraw-rs-sys = { version = "0.0.4" }
 
-serde = { version = "*", features = ["derive", "rc"] }
-serde_json = { version = "*" }
-uuid = { version = "*", features = ["v4", "serde"] }
-anyhow = { version = "*" }
-thiserror = { version = "*" }
-bytemuck = { version = "*", features = ["derive", "extern_crate_alloc"] }
-pollster = { version = "*" }
-glam = { version = "*", features = ["serde"] }
-strum = { version = "*" }
-strum_macros = { version = "*" }
-rand = { version = "*" }
-tokio = { version = "*", features = ["full"] }
-tokio-util = { version = "*", features = ["rt"] }
-tracing = { version = "*" }
-tracing-subscriber = { version = "*", features = ["env-filter", "fmt", "time"] }
-tracing-appender = { version = "*" }
-tracing-rolling-file = { version = "*", features = ["non-blocking"] }
-dotenv = { version = "*" }
-rayon = { version = "*" }
-toml = { version = "*" }
-hashbrown = { version = "*", features = ["serde"] }
-rhai = { version = "*", features = ["sync", "serde"] }
-syn = { version = "*", features = ["full"] }
-quote = { version = "*" }
-memmap2 = { version = "*" }
-tiff = { version = "*" }
-image = { version = "*" }
-paste = { version = "*" }
-atomic_refcell = { version = "*" }
-arc-swap = { version = "*" }
-sysinfo = { version = "*" }
-bumpalo = { version = "*", features = ["collections", "allocator-api2"] }
-lz4_flex = { version = "*", features = ["std"] }
-bitcode = { version = "*", features = ["serde"] }
-rfd = { version = "*" }
-async-trait = { version = "*" }
-aligned-vec = { version = "*" }
-arrayvec = { version = "*", features = ["serde"] }
-smallvec = { version = "*" }
-parking_lot = { version = "*" }
-rand_chacha = { version = "*" }
-nalgebra = { version = "*" }
-ryu = { version = "*" }
-ratatui = { version = "*" }
-crossterm = { version = "*" }
-clap = { version = "*", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json = { version = "1.0" }
+uuid = { version = "1.23", features = ["v4", "serde"] }
+anyhow = { version = "1.0" }
+thiserror = { version = "2.0" }
+bytemuck = { version = "1.25", features = ["derive", "extern_crate_alloc"] }
+pollster = { version = "0.4" }
+glam = { version = "0.33", features = ["serde"] }
+strum = { version = "0.28" }
+strum_macros = { version = "0.28" }
+rand = { version = "0.10" }
+tokio = { version = "1.52", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tracing = { version = "0.1" }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "time"] }
+tracing-appender = { version = "0.2" }
+tracing-rolling-file = { version = "0.1", features = ["non-blocking"] }
+dotenv = { version = "0.15" }
+rayon = { version = "1.12" }
+toml = { version = "1.1" }
+hashbrown = { version = "0.17", features = ["serde"] }
+rhai = { version = "1.24", features = ["sync", "serde"] }
+syn = { version = "2.0", features = ["full"] }
+quote = { version = "1.0" }
+memmap2 = { version = "0.9" }
+tiff = { version = "0.11" }
+image = { version = "0.25" }
+paste = { version = "1.0" }
+atomic_refcell = { version = "0.1" }
+arc-swap = { version = "1.9" }
+sysinfo = { version = "0.39" }
+bumpalo = { version = "3.20", features = ["collections", "allocator-api2"] }
+lz4_flex = { version = "0.13", features = ["std"] }
+bitcode = { version = "0.6", features = ["serde"] }
+rfd = { version = "0.17" }
+async-trait = { version = "0.1" }
+aligned-vec = { version = "0.6" }
+arrayvec = { version = "0.7", features = ["serde"] }
+smallvec = { version = "1.15" }
+parking_lot = { version = "0.12" }
+rand_chacha = { version = "0.10" }
+nalgebra = { version = "0.34" }
+ryu = { version = "1.0" }
+ratatui = { version = "0.30" }
+crossterm = { version = "0.29" }
+clap = { version = "4.6", features = ["derive"] }
 
 
 [profile.bench]
