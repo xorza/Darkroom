@@ -3,7 +3,7 @@ use common::{SerdeFormat, is_debug, key_index_vec::KeyIndexVec};
 use glam::Vec2;
 use scenarium::prelude::{Binding, Graph as CoreGraph, NodeId};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::model::ViewNode;
 
@@ -13,7 +13,7 @@ use crate::model::ViewNode;
 /// builtins at startup, shared across documents).
 ///
 /// **Everything here is persisted and undoable, by design.** The
-/// viewport (`pan`/`scale`) and `selected_node_id` are deliberately
+/// viewport (`pan`/`scale`) and `selected_nodes` are deliberately
 /// part of the serialized document and the undo history, not treated
 /// as throwaway session state: reopening a file restores the exact
 /// camera and selection the user left, and Ctrl+Z walks back camera
@@ -22,13 +22,16 @@ use crate::model::ViewNode;
 /// `Document` also makes it stay coherent across undo/redo of node
 /// removal — `RemoveNode`'s undo restores the prior selection in the
 /// same step.
+///
+/// `selected_nodes` is a `BTreeSet` so equality and serialization are
+/// order-independent (no spurious undo entries from reordering).
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
     pub graph: CoreGraph,
     pub view_nodes: KeyIndexVec<NodeId, ViewNode>,
     pub pan: Vec2,
     pub scale: f32,
-    pub selected_node_id: Option<NodeId>,
+    pub selected_nodes: BTreeSet<NodeId>,
 }
 
 impl Default for Document {
@@ -38,7 +41,7 @@ impl Default for Document {
             view_nodes: KeyIndexVec::default(),
             pan: Vec2::ZERO,
             scale: 1.0,
-            selected_node_id: None,
+            selected_nodes: BTreeSet::new(),
         }
     }
 }
@@ -70,10 +73,11 @@ impl Document {
             assert!(prior.is_none(), "duplicate node id detected");
         }
 
-        if let Some(selected_node_id) = self.selected_node_id
-            && !view_nodes.contains_key(&selected_node_id)
-        {
-            panic!("selected node id must exist in graph");
+        for selected in &self.selected_nodes {
+            assert!(
+                view_nodes.contains_key(selected),
+                "selected node id must exist in graph"
+            );
         }
 
         let mut graph_nodes = HashMap::new();
@@ -141,13 +145,7 @@ impl Document {
     pub fn remove_node(&mut self, node_id: &NodeId) {
         self.view_nodes.retain(|node| node.id != *node_id);
         self.graph.remove_by_id(*node_id);
-
-        if self
-            .selected_node_id
-            .is_some_and(|selected| selected == *node_id)
-        {
-            self.selected_node_id = None;
-        }
+        self.selected_nodes.remove(node_id);
     }
 }
 
@@ -166,7 +164,7 @@ impl From<CoreGraph> for Document {
             view_nodes,
             pan: Vec2::ZERO,
             scale: 1.0,
-            selected_node_id: None,
+            selected_nodes: BTreeSet::new(),
         }
     }
 }

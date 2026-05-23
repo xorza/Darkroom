@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use glam::Vec2;
 use palantir::InternedStr;
 use scenarium::data::StaticValue;
@@ -24,9 +26,9 @@ pub struct Scene {
     /// `Document`).
     pub pan: Vec2,
     pub zoom: f32,
-    /// Currently-selected node, mirrored from `Document` each rebuild
+    /// Currently-selected nodes, mirrored from `Document` each rebuild
     /// so `node_ui` can pick a different paint without taking a `&Document`.
-    pub selected_node_id: Option<NodeId>,
+    pub selected_nodes: BTreeSet<NodeId>,
 }
 
 /// Per-frame snapshot of an input port's [`Binding`] for the UI tree.
@@ -57,7 +59,7 @@ impl Default for Scene {
             input_bindings: Vec::new(),
             pan: Vec2::ZERO,
             zoom: 1.0,
-            selected_node_id: None,
+            selected_nodes: BTreeSet::new(),
         }
     }
 }
@@ -92,7 +94,7 @@ impl Scene {
     /// the next `Ui::frame` — so `Scene` must be rebuilt every frame
     /// before any widget consumes it. `App::frame` enforces this.
     pub fn rebuild(&mut self, doc: &Document, func_lib: &FuncLib) {
-        self.selected_node_id = doc.selected_node_id;
+        self.selected_nodes = doc.selected_nodes.clone();
         // Mirror the persisted viewport. The gesture overwrites these
         // later this frame and `App` copies them back onto the doc, so
         // a fresh value (e.g. just-loaded document) shows up here while

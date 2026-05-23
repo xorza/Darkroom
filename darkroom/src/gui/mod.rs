@@ -5,6 +5,7 @@ pub mod main_window;
 pub mod menu_bar;
 pub mod new_node_ui;
 pub mod node_ui;
+pub mod selection_ui;
 pub mod value_editor;
 
 /// Whether a port consumes a binding (`Input`) or produces a value

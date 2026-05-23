@@ -21,6 +21,8 @@
 //!   - [`revert_step`] — write the "from" half of an `UndoStep` to
 //!     `&mut Document`. Used during undo.
 
+use std::collections::BTreeSet;
+
 use glam::Vec2;
 use scenarium::graph::{Binding, Node, NodeBehavior, NodeId};
 use serde::{Deserialize, Serialize};
@@ -84,8 +86,11 @@ pub enum Intent {
         input_idx: usize,
         to: Binding,
     },
-    SelectNode {
-        to: Option<NodeId>,
+    /// Replace the whole selection set. The rubber band, node clicks,
+    /// and Esc-deselect all funnel through this — the caller computes
+    /// the desired final set and the undo layer captures the prior one.
+    SetSelection {
+        to: BTreeSet<NodeId>,
     },
     SetCacheBehavior {
         node_id: NodeId,
@@ -140,9 +145,9 @@ pub enum UndoStep {
         from: Binding,
         to: Binding,
     },
-    SelectNode {
-        from: Option<NodeId>,
-        to: Option<NodeId>,
+    SetSelection {
+        from: BTreeSet<NodeId>,
+        to: BTreeSet<NodeId>,
     },
     SetCacheBehavior {
         node_id: NodeId,
@@ -183,7 +188,7 @@ impl UndoStep {
             UndoStep::MoveNode { from, to, .. } => from == to,
             UndoStep::RenameNode { from, to, .. } => from == to,
             UndoStep::SetInput { from, to, .. } => from == to,
-            UndoStep::SelectNode { from, to } => from == to,
+            UndoStep::SetSelection { from, to } => from == to,
             UndoStep::SetCacheBehavior { from, to, .. } => from == to,
             UndoStep::SetEventConnection {
                 was_present,
@@ -239,7 +244,7 @@ pub fn build_step(intent: Intent, doc: &Document) -> Option<UndoStep> {
                     }
                 }
             }
-            let was_selected = doc.selected_node_id == Some(node_id);
+            let was_selected = doc.selected_nodes.contains(&node_id);
             UndoStep::RemoveNode {
                 view_node,
                 node,
@@ -275,8 +280,8 @@ pub fn build_step(intent: Intent, doc: &Document) -> Option<UndoStep> {
                 to,
             }
         }
-        Intent::SelectNode { to } => UndoStep::SelectNode {
-            from: doc.selected_node_id,
+        Intent::SetSelection { to } => UndoStep::SetSelection {
+            from: doc.selected_nodes.clone(),
             to,
         },
         Intent::SetCacheBehavior { node_id, to } => UndoStep::SetCacheBehavior {
@@ -351,8 +356,8 @@ pub fn apply_step(step: &UndoStep, doc: &mut Document) {
             );
             node.inputs[*input_idx].binding = to.clone();
         }
-        UndoStep::SelectNode { to, .. } => {
-            doc.selected_node_id = *to;
+        UndoStep::SetSelection { to, .. } => {
+            doc.selected_nodes = to.clone();
         }
         UndoStep::SetCacheBehavior { node_id, to, .. } => {
             doc.graph.by_id_mut(node_id).unwrap().behavior = *to;
@@ -426,7 +431,7 @@ pub fn revert_step(step: &UndoStep, doc: &mut Document) {
                     .push(removed_node_id);
             }
             if *was_selected {
-                doc.selected_node_id = Some(removed_node_id);
+                doc.selected_nodes.insert(removed_node_id);
             }
         }
         UndoStep::MoveNode { node_id, from, .. } => {
@@ -443,8 +448,8 @@ pub fn revert_step(step: &UndoStep, doc: &mut Document) {
         } => {
             doc.graph.by_id_mut(node_id).unwrap().inputs[*input_idx].binding = from.clone();
         }
-        UndoStep::SelectNode { from, .. } => {
-            doc.selected_node_id = *from;
+        UndoStep::SetSelection { from, .. } => {
+            doc.selected_nodes = from.clone();
         }
         UndoStep::SetCacheBehavior { node_id, from, .. } => {
             doc.graph.by_id_mut(node_id).unwrap().behavior = *from;
@@ -505,7 +510,7 @@ pub fn requires_relayout(step: &UndoStep) -> bool {
         UndoStep::SetInput { from, to, .. } => {
             matches!(from, Binding::Const(_)) != matches!(to, Binding::Const(_))
         }
-        UndoStep::SelectNode { .. }
+        UndoStep::SetSelection { .. }
         | UndoStep::SetCacheBehavior { .. }
         | UndoStep::SetEventConnection { .. } => false,
     }
@@ -523,7 +528,7 @@ pub fn gesture_key(step: &UndoStep) -> Option<GestureKey> {
         | UndoStep::RemoveNode { .. }
         | UndoStep::RenameNode { .. }
         | UndoStep::SetInput { .. }
-        | UndoStep::SelectNode { .. }
+        | UndoStep::SetSelection { .. }
         | UndoStep::SetCacheBehavior { .. }
         | UndoStep::SetEventConnection { .. } => None,
     }

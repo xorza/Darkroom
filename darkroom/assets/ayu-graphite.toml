@@ -1,4 +1,5 @@
 canvas_bg = "#1a1a1a"
+selection_rect = "#9adbfb"
 connection_broken = "#ff5e44"
 connection_width = 2.0
 breaker_stroke = "#ff5e44"

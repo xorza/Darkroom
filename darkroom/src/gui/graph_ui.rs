@@ -3,7 +3,7 @@ use glam::Vec2;
 use palantir::{
     Background, Configure, Panel, PointerButton, Rect, Sense, Sizing, TranslateScale, Ui, WidgetId,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use scenarium::prelude::FuncLib;
 
@@ -12,6 +12,7 @@ use crate::gui::breaker::BreakerUI;
 use crate::gui::connection_ui::ConnectionUI;
 use crate::gui::new_node_ui::NewNodeUi;
 use crate::gui::node_ui::{NodeUI, node_widget_id, port_circle_wid};
+use crate::gui::selection_ui::SelectionUI;
 use crate::gui::{PortKind, PortRef};
 use crate::intent::Intent;
 use crate::scene::Scene;
@@ -179,6 +180,7 @@ pub struct GraphUI {
     pub breaker_ui: BreakerUI,
     pub connection_ui: ConnectionUI,
     pub new_node_ui: NewNodeUi,
+    pub selection_ui: SelectionUI,
     /// `Scene::pan` snapshot captured at the frame the active pan-drag
     /// latched. While the drag is active, `scene.pan = anchor +
     /// drag_delta`. Lives on `GraphUI` because it's input bookkeeping
@@ -231,13 +233,17 @@ impl GraphUI {
         // and mirrored into `scene` by `Scene::rebuild`, so the
         // transform below reads the up-to-date viewport directly.
         // Click on bare canvas (node panels hit-test first, so this
-        // only fires when the click missed every node) deselects. Skip
-        // when nothing is selected so we don't pollute the undo stack
-        // with no-op `SelectNode { from: None, to: None }` entries
-        // every time the user clicks the empty canvas.
-        if scene.selected_node_id.is_some() && ui.response_for(outer_canvas_widget_id()).clicked {
-            out.push(Intent::SelectNode { to: None });
+        // only fires when the click missed every node) clears the
+        // selection. Skip when nothing is selected so we don't pollute
+        // the undo stack with no-op `SetSelection` entries every time
+        // the user clicks the empty canvas. A *drag* on bare canvas is
+        // the rubber band (handled by `selection_ui`), not a click.
+        if !scene.selected_nodes.is_empty() && ui.response_for(outer_canvas_widget_id()).clicked {
+            out.push(Intent::SetSelection {
+                to: BTreeSet::new(),
+            });
         }
+        self.selection_ui.apply(ui, scene, out);
         // `port_frame` was rebuilt in `prepass` (the connection commit
         // there reads it); reuse it — the cascade hasn't changed between
         // prepass and here, so a re-rebuild would be identical work.
@@ -259,6 +265,7 @@ impl GraphUI {
             breaker_ui,
             connection_ui,
             new_node_ui: _,
+            selection_ui,
             pan_anchor: _,
         } = self;
         let pan_val = scene.pan;
@@ -311,6 +318,9 @@ impl GraphUI {
                             .layout_rect
                             .map(|r| r.min)
                             .unwrap_or(Vec2::ZERO);
+                        // Painted first so it sits beneath the
+                        // connections and node bodies.
+                        selection_ui.draw(ui, ctx);
                         {
                             let mut probe = breaker_ui.probe(canvas_origin);
                             connection_ui.draw(ui, ctx, scene, port_frame, &mut probe);

@@ -15,6 +15,7 @@ use scenarium::data::StaticValue;
 use scenarium::function::FuncInput;
 use scenarium::graph::Binding;
 use scenarium::prelude::NodeId;
+use std::collections::BTreeSet;
 
 /// Owns rendering of every graph node plus the single active drag
 /// anchor — the press-frame `pos` is snapshotted here so each
@@ -118,7 +119,10 @@ impl NodeUI {
         } else {
             theme.node_border
         };
-        let selected = scene.selected_node_id == Some(node.id);
+        let selected = scene.selected_nodes.contains(&node.id);
+        // Sample modifiers before the panel borrows `ui` for the rest
+        // of this scope (the click handler below can't reborrow it).
+        let shift_click = ui.modifiers().shift;
         // Soft halo behind the selected node. Zero-offset Gaussian
         // shadow so the glow wraps evenly; `spread` pushes the halo
         // out past the border so it reads at any zoom. Lives in the
@@ -155,12 +159,22 @@ impl NodeUI {
             });
         let response = panel.response;
 
-        // Click without drag → select. Skip when already selected so
-        // the intent stack doesn't see no-op re-selects (build_step
-        // filters them via `UndoStep::is_noop`, but skipping here
-        // saves the round-trip).
-        if response.clicked() && !selected {
-            out.push(Intent::SelectNode { to: Some(node.id) });
+        // Click without drag → select. Plain click selects only this
+        // node; Shift-click toggles its membership in the current
+        // selection. `UndoStep::is_noop` filters a click that doesn't
+        // change the set (e.g. clicking the sole selected node).
+        if response.clicked() {
+            let mut to = if shift_click {
+                scene.selected_nodes.clone()
+            } else {
+                BTreeSet::new()
+            };
+            if shift_click && selected {
+                to.remove(&node.id);
+            } else {
+                to.insert(node.id);
+            }
+            out.push(Intent::SetSelection { to });
         }
 
         // Latch the anchor on the press-frame edge; subsequent frames'

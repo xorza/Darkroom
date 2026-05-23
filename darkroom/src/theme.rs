@@ -33,6 +33,10 @@ pub struct Theme {
 
     // ── canvas ────────────────────────────────────────────────────
     pub canvas_bg: Color,
+    /// Tint of the rubber-band multi-selection rectangle. Drawn as a
+    /// translucent fill plus a near-opaque 1px border, both derived
+    /// from this single color (palette accent).
+    pub selection_rect: Color,
 
     // ── connections ──────────────────────────────────────────────
     pub connection_broken: Color,

@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use glam::Vec2;
@@ -210,12 +211,14 @@ impl App {
                 self.action_stack.redo(&mut self.document, &mut on_step);
             }
         }
-        // Esc deselects. Routed through the intent stack (not a
-        // direct doc write) so it lands in the undo history and the
-        // batched relayout-detection path catches it like any other
+        // Esc clears the selection. Routed through the intent stack
+        // (not a direct doc write) so it lands in the undo history and
+        // the batched relayout-detection path catches it like any other
         // selection change.
-        if escape && self.document.selected_node_id.is_some() {
-            self.intents.push(Intent::SelectNode { to: None });
+        if escape && !self.document.selected_nodes.is_empty() {
+            self.intents.push(Intent::SetSelection {
+                to: BTreeSet::new(),
+            });
         }
         // Ctrl+0 resets zoom to 100% (keeping pan), via the same
         // `SetViewport` intent the pan/zoom gesture uses — so it's
