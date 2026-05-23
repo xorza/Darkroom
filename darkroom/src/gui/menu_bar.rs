@@ -1,7 +1,5 @@
 use glam::Vec2;
-use palantir::{
-    Button, Configure, ContextMenu, HostHandle, MenuItem, Panel, Sizing, Spacing, Ui,
-};
+use palantir::{Button, Configure, ContextMenu, HostHandle, MenuItem, Panel, Sizing, Spacing, Ui};
 
 /// Document-level action surfaced by the File menu. `App` handles the
 /// side effect (file dialog + read/write + doc swap) outside the

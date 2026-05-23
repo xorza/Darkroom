@@ -11,12 +11,6 @@ use crate::intent::Intent;
 use crate::model::ViewNode;
 use crate::scene::Scene;
 
-/// Outer cap on the popup's height. Inside the popup body, a
-/// `Scroll::vertical` takes the remaining space — when the category
-/// columns add up to more than this, the user scrolls instead of the
-/// popup spilling off-surface.
-const NEW_NODE_POPUP_MAX_H: f32 = 400.0;
-
 /// Right-click-on-canvas → popup that lists every `Func` in
 /// `AppContext::func_lib` grouped by category. Clicking an entry emits
 /// an `Intent::AddNode` placed at the click's world position (inner-
@@ -73,7 +67,7 @@ impl NewNodeUi {
             .background(chrome)
             .id_salt("new_node_popup")
             .size((Sizing::Hug, Sizing::Hug))
-            .max_size((f32::INFINITY, NEW_NODE_POPUP_MAX_H))
+            .max_size((f32::INFINITY, ctx.theme.new_node_popup_max_height))
             .padding(Spacing::all(6.0))
             .show(ui, |ui, popup| {
                 Scroll::vertical()

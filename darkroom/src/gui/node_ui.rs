@@ -2,12 +2,10 @@ use crate::app::AppContext;
 use crate::gui::breaker::BreakerProbe;
 use crate::gui::graph_ui::PortFrame;
 use crate::gui::value_editor;
-use crate::gui::{
-    PORT_COL_PAD_TOP, PORT_COL_PAD_X, PORT_COLS_GAP, PORT_GAP, PORT_RADIUS, PORT_SIZE, PortKind,
-    PortRef,
-};
+use crate::gui::{PortKind, PortRef};
 use crate::intent::Intent;
 use crate::scene::{InputBindingView, Scene, SceneNode};
+use crate::theme::Theme;
 use glam::Vec2;
 use palantir::{
     Align, Background, Color, Configure, ContextMenu, Corners, Frame, HAlign, InternedStr,
@@ -142,7 +140,7 @@ impl NodeUI {
         let panel = Panel::vstack()
             .id(node_widget_id(node.id))
             .position(node.pos)
-            .min_size((160, 10))
+            .min_size((theme.node_min_width, theme.node_min_height))
             .size((Sizing::Hug, Sizing::Hug))
             .sense(Sense::CLICK | Sense::DRAG)
             .background(Background {
@@ -257,11 +255,12 @@ fn ports_row(
     port_frame: &PortFrame,
     out: &mut Vec<Intent>,
 ) {
+    let theme = ctx.theme;
     Panel::hstack()
         .id_salt("ports")
         .size((Sizing::FILL, Sizing::Hug))
-        .padding(Spacing::xy(PORT_COL_PAD_X, 0.0))
-        .gap(PORT_COLS_GAP)
+        .padding(Spacing::xy(theme.port_col_pad_x, 0.0))
+        .gap(theme.port_cols_gap)
         .show(ui, |ui| {
             input_column(ui, ctx, scene, node, port_frame, out);
             output_column(ui, ctx, scene, node, port_frame, out);
@@ -279,12 +278,18 @@ fn input_column(
     let names = scene.ports(node.inputs);
     let bindings = scene.bindings(node.input_bindings);
     let func = ctx.func_lib.by_id(&node.func_id);
-    let (idle, hover) = (ctx.theme.input_port, ctx.theme.input_port_hover);
+    let theme = ctx.theme;
+    let (idle, hover) = (theme.input_port, theme.input_port_hover);
     Panel::vstack()
         .id_salt("in")
         .size((Sizing::Fill(1.0), Sizing::Hug))
-        .padding(Spacing::new(0.0, PORT_COL_PAD_TOP, 0.0, PORT_COL_PAD_TOP))
-        .gap(PORT_GAP)
+        .padding(Spacing::new(
+            0.0,
+            theme.port_col_pad_top,
+            0.0,
+            theme.port_col_pad_top,
+        ))
+        .gap(theme.port_gap)
         .child_align(Align::h(HAlign::Left))
         .show(ui, |ui| {
             for (i, name) in names.iter().enumerate() {
@@ -300,7 +305,16 @@ fn input_column(
                 };
                 let binding = bindings.get(i).unwrap_or(&InputBindingView::None);
                 let func_input = func.and_then(|f| f.inputs.get(i));
-                input_port_row(ui, port, name.clone(), fill, binding, func_input, out);
+                input_port_row(
+                    ui,
+                    theme,
+                    port,
+                    name.clone(),
+                    fill,
+                    binding,
+                    func_input,
+                    out,
+                );
             }
         });
 }
@@ -314,12 +328,18 @@ fn output_column(
     out: &mut Vec<Intent>,
 ) {
     let names = scene.ports(node.outputs);
-    let (idle, hover) = (ctx.theme.output_port, ctx.theme.output_port_hover);
+    let theme = ctx.theme;
+    let (idle, hover) = (theme.output_port, theme.output_port_hover);
     Panel::vstack()
         .id_salt("out")
         .size((Sizing::Fill(1.0), Sizing::Hug))
-        .padding(Spacing::new(0.0, PORT_COL_PAD_TOP, 0.0, PORT_COL_PAD_TOP))
-        .gap(PORT_GAP)
+        .padding(Spacing::new(
+            0.0,
+            theme.port_col_pad_top,
+            0.0,
+            theme.port_col_pad_top,
+        ))
+        .gap(theme.port_gap)
         .child_align(Align::h(HAlign::Right))
         .show(ui, |ui| {
             for (i, name) in names.iter().enumerate() {
@@ -333,7 +353,7 @@ fn output_column(
                 } else {
                     idle
                 };
-                output_port_row(ui, port, name.clone(), fill, scene, out);
+                output_port_row(ui, theme, port, name.clone(), fill, scene, out);
             }
         });
 }
@@ -358,6 +378,7 @@ pub fn port_circle_wid(port: PortRef) -> WidgetId {
 /// it from domain coords without threading any cache.
 fn output_port_row(
     ui: &mut Ui,
+    theme: &Theme,
     port: PortRef,
     name: InternedStr,
     fill: Color,
@@ -365,6 +386,7 @@ fn output_port_row(
     out: &mut Vec<Intent>,
 ) {
     let wid = port_circle_wid(port);
+    let overhang = theme.port_radius() + theme.port_col_pad_x;
     Panel::hstack()
         .id_salt(("port", port.port_idx))
         .size((Sizing::Hug, Sizing::Hug))
@@ -372,12 +394,7 @@ fn output_port_row(
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             Text::new(name).show(ui);
-            circle_frame(
-                ui,
-                wid,
-                fill,
-                Spacing::new(0.0, 0.0, -(PORT_RADIUS + PORT_COL_PAD_X), 0.0),
-            );
+            circle_frame(ui, theme, wid, fill, Spacing::new(0.0, 0.0, -overhang, 0.0));
         });
     // Double-click on the output circle = disconnect every input
     // bound to this output. Mirrors the input-side gesture; a single
@@ -402,6 +419,7 @@ fn output_port_row(
 #[allow(clippy::too_many_arguments)]
 fn input_port_row(
     ui: &mut Ui,
+    theme: &Theme,
     port: PortRef,
     name: InternedStr,
     fill: Color,
@@ -409,8 +427,10 @@ fn input_port_row(
     func_input: Option<&FuncInput>,
     out: &mut Vec<Intent>,
 ) {
-    let margin = Spacing::new(-(PORT_RADIUS + PORT_COL_PAD_X), 0.0, 0.0, 0.0);
+    let overhang = theme.port_radius() + theme.port_col_pad_x;
+    let margin = Spacing::new(-overhang, 0.0, 0.0, 0.0);
     let wid = port_circle_wid(port);
+    let editor_w = theme.value_editor_width;
     let row = Panel::hstack()
         .id_salt(("port", port.port_idx))
         .size((Sizing::Hug, Sizing::Hug))
@@ -418,12 +438,12 @@ fn input_port_row(
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            circle_frame(ui, wid, fill, margin);
+            circle_frame(ui, theme, wid, fill, margin);
             Text::new(name.clone()).show(ui);
             if let InputBindingView::Const(value) = binding {
                 let editor_id =
                     WidgetId::from_hash(("graph.node.const_editor", port.node_id, port.port_idx));
-                if let Some(new_value) = value_editor::show(ui, editor_id, value) {
+                if let Some(new_value) = value_editor::show(ui, editor_id, value, editor_w) {
                     out.push(set_input(port, Binding::Const(new_value)));
                 }
             }
@@ -487,7 +507,7 @@ fn default_static_value(func_input: &FuncInput) -> StaticValue {
         .unwrap_or_else(|| StaticValue::from(&func_input.data_type))
 }
 
-fn circle_frame(ui: &mut Ui, wid: WidgetId, fill: Color, margin: Spacing) {
+fn circle_frame(ui: &mut Ui, theme: &Theme, wid: WidgetId, fill: Color, margin: Spacing) {
     // Explicit `id(wid)` so the cross-frame id stays stable: prepass
     // computes the same `port_circle_wid` and reads its response,
     // record paints with the same id — no drift even if the parent
@@ -496,12 +516,15 @@ fn circle_frame(ui: &mut Ui, wid: WidgetId, fill: Color, margin: Spacing) {
     // and (b) can latch a connection drag.
     Frame::new()
         .id(wid)
-        .size((Sizing::Fixed(PORT_SIZE), Sizing::Fixed(PORT_SIZE)))
+        .size((
+            Sizing::Fixed(theme.port_size),
+            Sizing::Fixed(theme.port_size),
+        ))
         .margin(margin)
         .sense(Sense::CLICK | Sense::DRAG)
         .background(Background {
             fill: fill.into(),
-            corners: Corners::all(PORT_RADIUS),
+            corners: Corners::all(theme.port_radius()),
             ..Default::default()
         })
         .show(ui);
