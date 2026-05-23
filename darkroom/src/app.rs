@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use common::SerdeFormat;
+use common::{SerdeFormat, deserialize, serialize};
 use glam::Vec2;
 use lens::ImageFuncLib;
 use palantir::{HostHandle, Shortcut, Ui};
@@ -12,9 +12,10 @@ use scenarium::prelude::{FuncLib, NodeId};
 use scenarium::testing::{TestFuncHooks, test_func_lib, test_graph};
 
 use crate::action_stack::ActionStack;
+use crate::config::AppConfig;
 use crate::document::Document;
 use crate::gui::main_window::MainWindow;
-use crate::gui::menu_bar::FileAction;
+use crate::gui::menu_bar::MenuCommand;
 use crate::intent::{self, Intent, apply_step, build_step, requires_relayout};
 use crate::scene::Scene;
 use crate::theme::Theme;
@@ -68,6 +69,10 @@ pub struct App {
     /// preopen the dialog at this directory so a session that touches
     /// many files in the same folder doesn't re-navigate each time.
     pub current_path: Option<PathBuf>,
+    /// Persisted session state (active theme name + last document).
+    /// Written on every doc/theme change so the next launch reopens
+    /// where the user left off.
+    pub config: AppConfig,
 }
 
 impl App {
@@ -90,7 +95,27 @@ impl App {
             theme: Theme::default(),
             host_handle: None,
             current_path: None,
+            config: AppConfig::default(),
         }
+    }
+
+    /// One-shot startup wiring, run from `WinitHost::with_setup`
+    /// before the first frame. Loads the persisted config, restores
+    /// the saved theme + document, and pushes the resolved palantir
+    /// theme onto `Ui`. Failures degrade silently to defaults — a
+    /// missing/corrupt config or a deleted document must not block
+    /// launch.
+    pub fn startup(&mut self, ui: &mut Ui) {
+        self.config = AppConfig::load();
+        if let Some(name) = self.config.theme_name.clone() {
+            self.load_theme_file(&AppConfig::theme_path(&name));
+        }
+        if let Some(path) = self.config.document_path.clone() {
+            self.load_document(&path);
+        }
+        // Resolved theme (default, or whatever the config restored)
+        // onto the Ui so palantir widgets paint correctly frame 1.
+        ui.theme = self.theme.palantir_theme.clone();
     }
 }
 
@@ -107,17 +132,17 @@ impl palantir::App for App {
         let mut relayout = self.drain_intents();
         relayout |= self.handle_shortcuts(ui);
 
-        let file_action_from_shortcut = self.file_shortcut(ui);
+        let command_from_shortcut = self.menu_shortcut(ui);
 
         // Record. Widgets push intents derived from record-time state
         // (button clicks, edit commits) into `intents`.
         self.scene.rebuild(&self.document, &self.func_lib);
         let ctx = AppContext::new(&self.theme, &self.func_lib);
         let host = self.host_handle.clone();
-        let file_action = self
+        let command = self
             .main_window
             .frame(ui, &ctx, &mut self.scene, host.as_ref(), &mut self.intents)
-            .or(file_action_from_shortcut);
+            .or(command_from_shortcut);
 
         // Post-record drain — these intents reflect mutations that
         // only the now-just-completed record could surface, so they
@@ -126,12 +151,12 @@ impl palantir::App for App {
             ui.request_relayout();
         }
 
-        // File-menu side effects run last so the dialog blocks after
-        // the frame's record + drain. Loading replaces the document
-        // wholesale, so `request_relayout` after the swap regardless
-        // of what `drain_intents` decided.
-        if let Some(action) = file_action {
-            self.handle_file_action(action);
+        // Menu side effects run last so the blocking file dialog opens
+        // after the frame's record + drain. Loading replaces the
+        // document/theme wholesale, so always relayout afterward
+        // regardless of what `drain_intents` decided.
+        if let Some(command) = command {
+            self.handle_menu_command(ui, command);
             ui.request_relayout();
         }
     }
@@ -158,6 +183,13 @@ fn pick_open_path(start: Option<&Path>) -> Option<PathBuf> {
 
 fn pick_save_path(start: Option<&Path>) -> Option<PathBuf> {
     file_dialog(start).save_file()
+}
+
+/// Rhai-only dialog for theme files. Themes always round-trip through
+/// Rhai (the format the config references by name), so there's no
+/// multi-format picker like documents have.
+fn theme_dialog() -> rfd::FileDialog {
+    rfd::FileDialog::new().add_filter("Rhai theme", &["rhai"])
 }
 
 /// Replace a few of `test_graph`'s `Binding::Bind` inputs with
@@ -203,37 +235,47 @@ impl App {
         relayout
     }
 
-    /// Map Cmd+N / Cmd+O / Cmd+S to a `FileAction`. Gated on no
+    /// Map Cmd+N / Cmd+O / Cmd+S to a `MenuCommand`. Gated on no
     /// keyboard focus so Cmd+S inside a TextEdit doesn't escape into
     /// a save dialog. Cmd+N wins over open/save if multiple fire on
     /// the same frame (no realistic combo, but the priority is
-    /// stable).
-    fn file_shortcut(&self, ui: &mut Ui) -> Option<FileAction> {
+    /// stable). Theme actions are menu-only — no shortcut.
+    fn menu_shortcut(&self, ui: &mut Ui) -> Option<MenuCommand> {
         if ui.focused_id().is_some() {
             return None;
         }
         if ui.key_pressed(NEW_SHORTCUT) {
-            Some(FileAction::New)
+            Some(MenuCommand::NewDocument)
         } else if ui.key_pressed(OPEN_SHORTCUT) {
-            Some(FileAction::Load)
+            Some(MenuCommand::LoadDocument)
         } else if ui.key_pressed(SAVE_SHORTCUT) {
-            Some(FileAction::Save)
+            Some(MenuCommand::SaveDocument)
         } else {
             None
         }
     }
 
-    fn handle_file_action(&mut self, action: FileAction) {
-        match action {
-            FileAction::New => self.new_document(),
-            FileAction::Load => {
+    fn handle_menu_command(&mut self, ui: &mut Ui, command: MenuCommand) {
+        match command {
+            MenuCommand::NewDocument => self.new_document(),
+            MenuCommand::LoadDocument => {
                 if let Some(path) = pick_open_path(self.current_path.as_deref()) {
                     self.load_document(&path);
                 }
             }
-            FileAction::Save => {
+            MenuCommand::SaveDocument => {
                 if let Some(path) = pick_save_path(self.current_path.as_deref()) {
                     self.save_document(&path);
+                }
+            }
+            MenuCommand::LoadTheme => {
+                if let Some(path) = theme_dialog().pick_file() {
+                    self.load_theme(ui, &path);
+                }
+            }
+            MenuCommand::ExportTheme => {
+                if let Some(path) = theme_dialog().save_file() {
+                    self.export_theme(&path);
                 }
             }
         }
@@ -247,7 +289,7 @@ impl App {
         self.document = Document::default();
         self.action_stack.clear();
         self.intents.clear();
-        self.current_path = None;
+        self.set_document_path(None);
     }
 
     fn load_document(&mut self, path: &Path) {
@@ -270,7 +312,7 @@ impl App {
                 self.document = doc;
                 self.action_stack.clear();
                 self.intents.clear();
-                self.current_path = Some(path.to_path_buf());
+                self.set_document_path(Some(path.to_path_buf()));
             }
             Err(err) => eprintln!("load failed: {} {err}", path.display()),
         }
@@ -283,8 +325,73 @@ impl App {
         };
         let bytes = self.document.serialize(format);
         match std::fs::write(path, &bytes) {
-            Ok(()) => self.current_path = Some(path.to_path_buf()),
+            Ok(()) => self.set_document_path(Some(path.to_path_buf())),
             Err(err) => eprintln!("save failed: {} {err}", path.display()),
+        }
+    }
+
+    /// Record `path` as both the dialog-anchor `current_path` and the
+    /// persisted `config.document_path`, then write the config so the
+    /// next launch reopens this document.
+    fn set_document_path(&mut self, path: Option<PathBuf>) {
+        self.current_path = path.clone();
+        self.config.document_path = path;
+        self.config.save();
+    }
+
+    /// Load a theme picked from the dialog: copy it into the working
+    /// dir under its own name (so the config can reference it by name
+    /// across sessions), apply it, and persist the name. The picked
+    /// file may live anywhere; the working-dir copy is the canonical
+    /// one the config resolves on the next launch.
+    fn load_theme(&mut self, ui: &mut Ui, picked: &Path) {
+        let Some(stem) = picked.file_stem().and_then(|s| s.to_str()) else {
+            eprintln!("theme load failed: path has no file name");
+            return;
+        };
+        let dest = AppConfig::theme_path(stem);
+        // Only copy when the picked file isn't already the working-dir
+        // copy (re-loading the active theme shouldn't self-overwrite).
+        if picked != dest
+            && let Err(err) = std::fs::copy(picked, &dest)
+        {
+            eprintln!("theme load failed: copy to {}: {err}", dest.display());
+            return;
+        }
+        if self.load_theme_file(&dest) {
+            self.config.theme_name = Some(stem.to_owned());
+            self.config.save();
+            ui.theme = self.theme.palantir_theme.clone();
+        }
+    }
+
+    /// Read + deserialize a theme `.rhai` into `self.theme`. Returns
+    /// whether it succeeded; on failure leaves the current theme
+    /// untouched and logs. Shared by startup restore and menu load.
+    fn load_theme_file(&mut self, path: &Path) -> bool {
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(err) => {
+                eprintln!("theme load failed: {} {err}", path.display());
+                return false;
+            }
+        };
+        match deserialize::<Theme>(&bytes, SerdeFormat::Rhai) {
+            Ok(theme) => {
+                self.theme = theme;
+                true
+            }
+            Err(err) => {
+                eprintln!("theme load failed: {} {err}", path.display());
+                false
+            }
+        }
+    }
+
+    fn export_theme(&self, path: &Path) {
+        let bytes = serialize(&self.theme, SerdeFormat::Rhai);
+        if let Err(err) = std::fs::write(path, &bytes) {
+            eprintln!("theme export failed: {} {err}", path.display());
         }
     }
 

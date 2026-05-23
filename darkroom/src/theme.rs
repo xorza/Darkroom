@@ -13,12 +13,25 @@ use palantir::Color;
 /// palantir-side widgets (buttons, text edits, menus, scrollbars)
 /// read from the same source. Tweak fields on `theme.palantir_theme`
 /// before constructing the host to override palantir's defaults.
-#[derive(Clone, Debug)]
+///
+/// Serializable so the whole bundle (palantir palette + darkroom
+/// layout + colors) round-trips through Rhai for the Theme → Load /
+/// Export menu.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Theme {
     /// Palantir-side widget theme. Pushed onto `Ui::theme` once at
     /// startup so every palantir widget (Button, TextEdit, MenuItem,
     /// Scroll, Tooltip…) reads a darkroom-tuned palette without each
     /// call site restyling per use.
+    ///
+    /// **Not serialized.** `palantir::Theme` carries non-finite floats
+    /// (e.g. `TooltipTheme::max_size.h = INFINITY` = "unbounded"), and
+    /// Rhai has no infinity literal — the JSON intermediary collapses
+    /// it to `null` and the round-trip fails. So exported themes carry
+    /// only darkroom's own fields; the palantir palette resets to its
+    /// code default on load. Lift this `skip` once palantir models
+    /// "unbounded" with a Rhai-friendly sentinel.
+    #[serde(skip)]
     pub palantir_theme: palantir::Theme,
     // ── canvas ────────────────────────────────────────────────────
     pub canvas_bg: Color,
@@ -90,7 +103,7 @@ impl Default for Theme {
     fn default() -> Self {
         Self {
             palantir_theme: palantir::Theme::default(),
-            
+
             canvas_bg: Color::hex(0x1e1e1e),
 
             connection_broken: Color::hex(0xff5a55),
@@ -123,5 +136,41 @@ impl Default for Theme {
             value_editor_width: 60.0,
             new_node_popup_max_height: 400.0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use common::SerdeFormat;
+
+    /// Darkroom's own visual fields must survive a Rhai round-trip —
+    /// that's the on-disk format the Theme → Load / Export menu and
+    /// the config rely on. `palantir_theme` is `#[serde(skip)]` (Rhai
+    /// can't encode its infinite tooltip max-size), so it resets to
+    /// the code default on load rather than round-tripping.
+    #[test]
+    fn theme_roundtrips_through_rhai() {
+        let mut theme = Theme {
+            node_min_width: 137.5,
+            selection_glow: Color::hex(0x123456),
+            ..Theme::default()
+        };
+        // Prove the skipped field doesn't round-trip: mutate it, then
+        // confirm the reloaded copy is back at the default.
+        theme.palantir_theme.window_clear = Color::hex(0xabcdef);
+
+        let bytes = common::serialize(&theme, SerdeFormat::Rhai);
+        let back: Theme = common::deserialize(&bytes, SerdeFormat::Rhai)
+            .expect("theme should deserialize from its own Rhai output");
+
+        assert_eq!(back.node_min_width, 137.5);
+        assert_eq!(back.selection_glow, Color::hex(0x123456));
+        assert_eq!(back.canvas_bg, theme.canvas_bg);
+        // Skipped → default, not the mutated `0xabcdef`.
+        assert_eq!(
+            back.palantir_theme.window_clear,
+            palantir::Theme::default().window_clear
+        );
     }
 }
