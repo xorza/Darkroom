@@ -11,10 +11,11 @@ use crate::event_lambda::EventLambda;
 use crate::execution_stats::{ExecutedNodeStats, ExecutionStats, NodeError};
 use crate::func_lambda::InvokeInput;
 use crate::function::{Func, FuncBehavior, FuncLib};
-use crate::graph::{Binding, Graph, InputPort, Node, NodeBehavior, NodeId};
+use crate::graph::{Graph, InputPort, NodeBehavior, NodeId};
 use crate::prelude::{AnyState, FuncId, FuncLambda};
 use crate::worker::{EventRef, EventTrigger};
 
+mod flatten;
 #[cfg(test)]
 mod tests;
 
@@ -178,33 +179,30 @@ impl ExecutionNode {
         self.output_values = None;
     }
 
-    fn refresh(&mut self, node: &Node, func: &Func) {
-        assert_eq!(self.id, node.id);
-        assert_eq!(node.func_id(), Some(func.id));
-        assert_eq!(node.inputs.len(), func.inputs.len());
-
+    /// Refresh this (flattened) node from its func + the interior node's
+    /// behavior/name. Event subscribers are cleared here and re-added by the
+    /// flatten sink (already id-remapped), so it takes no node.
+    fn refresh(&mut self, func: &Func, behavior: NodeBehavior, name: &str) {
         if !self.inited {
             self.init_from_func(func);
         } else {
+            assert_eq!(self.func_id, func.id, "func changed under a reused node id");
             self.outputs.fill(ExecutionOutput::default());
         }
 
         self.terminal = func.terminal;
-        self.behavior = Self::compute_behavior(node.behavior, func.behavior);
+        self.behavior = Self::compute_behavior(behavior, func.behavior);
 
-        for (event_idx, event) in node.events.iter().enumerate() {
-            self.events[event_idx].subscribers.clear();
-            self.events[event_idx]
-                .subscribers
-                .extend(&event.subscribers);
+        for event in &mut self.events {
+            event.subscribers.clear();
         }
 
-        assert_eq!(self.inputs.len(), node.inputs.len());
+        assert_eq!(self.inputs.len(), func.inputs.len());
         assert_eq!(self.outputs.len(), func.outputs.len());
         assert_eq!(self.events.len(), func.events.len());
 
         self.name.clear();
-        self.name.push_str(&node.name);
+        self.name.push_str(name);
     }
 
     fn init_from_func(&mut self, func: &Func) {
@@ -275,6 +273,9 @@ pub struct ExecutionGraph {
 
     #[serde(skip)]
     ctx_manager: ContextManager,
+    /// Reusable subgraph-flattening scratch (kept across updates).
+    #[serde(skip)]
+    flattener: flatten::Flattener,
 }
 
 impl ExecutionGraph {
@@ -328,82 +329,11 @@ impl ExecutionGraph {
         self.e_node_execute_order.clear();
         self.e_node_process_order.clear();
 
-        self.build_execution_nodes(graph, func_lib);
-        self.validate_with(graph, func_lib);
-    }
+        // Flatten subgraphs straight into execution nodes — no intermediate
+        // `Graph`. Everything below is boundary-agnostic (func nodes only).
+        self.flattener.build(&mut self.e_nodes, graph, func_lib);
 
-    fn build_execution_nodes(&mut self, graph: &Graph, func_lib: &FuncLib) {
-        let mut compact = self.e_nodes.compact_insert_start();
-
-        for node in graph.iter() {
-            let (e_node_idx, e_node) = compact.insert_with(&node.id, || ExecutionNode {
-                id: node.id,
-                ..Default::default()
-            });
-
-            let node = graph.by_id(&e_node.id).unwrap();
-            // Stage 1: only plain func nodes execute. Subgraph/boundary nodes
-            // are flattened away by the inliner (Stage 2), so they must not
-            // reach here yet.
-            let func_id = node
-                .func_id()
-                .expect("subgraph execution requires the inliner (Stage 2)");
-            let func = func_lib.by_id(&func_id).unwrap();
-            e_node.refresh(node, func);
-
-            for (input_idx, input) in node.inputs.iter().enumerate() {
-                Self::update_input_binding(&mut compact, e_node_idx, input_idx, &input.binding);
-            }
-        }
-    }
-
-    fn update_input_binding(
-        compact: &mut common::key_index_vec::CompactInsert<'_, NodeId, ExecutionNode>,
-        e_node_idx: usize,
-        input_idx: usize,
-        binding: &Binding,
-    ) {
-        match binding {
-            Binding::None => {
-                let e_input = &mut compact[e_node_idx].inputs[input_idx];
-                if !matches!(e_input.binding, ExecutionBinding::None) {
-                    e_input.binding = ExecutionBinding::None;
-                    e_input.binding_changed = true;
-                }
-            }
-            Binding::Const(v) => {
-                let e_input = &mut compact[e_node_idx].inputs[input_idx];
-                if !matches!(&e_input.binding, ExecutionBinding::Const(existing) if existing == v) {
-                    e_input.binding = ExecutionBinding::Const(v.clone());
-                    e_input.binding_changed = true;
-                }
-            }
-            Binding::Bind(port_address) => {
-                let (output_e_node_idx, _) =
-                    compact.insert_with(&port_address.node_id, || ExecutionNode {
-                        id: port_address.node_id,
-                        ..Default::default()
-                    });
-                let desired = ExecutionPortAddress {
-                    target_id: port_address.node_id,
-                    target_idx: output_e_node_idx,
-                    port_idx: port_address.port_idx,
-                };
-                let e_input = &mut compact[e_node_idx].inputs[input_idx];
-                match &mut e_input.binding {
-                    ExecutionBinding::Bind(existing)
-                        if existing.target_id == desired.target_id
-                            && existing.port_idx == desired.port_idx =>
-                    {
-                        existing.target_idx = desired.target_idx;
-                    }
-                    _ => {
-                        e_input.binding = ExecutionBinding::Bind(desired);
-                        e_input.binding_changed = true;
-                    }
-                }
-            }
-        }
+        self.validate_built(func_lib);
     }
 
     // === Execution ===
@@ -938,12 +868,15 @@ impl ExecutionGraph {
 
     // === Validation ===
 
-    fn validate_with(&self, graph: &Graph, func_lib: &FuncLib) {
+    /// Self-consistency check of the built (flattened) execution graph. Needs
+    /// only the `FuncLib` — the source graph is gone after flattening, so this
+    /// validates each `e_node` against its func and checks binding/edge
+    /// integrity rather than cross-checking a source graph.
+    fn validate_built(&self, func_lib: &FuncLib) {
         if !is_debug() {
             return;
         }
 
-        assert!(self.e_nodes.len() == graph.len());
         assert!(self.e_node_process_order.len() <= self.e_nodes.len());
 
         let mut seen_node_ids: HashSet<NodeId> = HashSet::with_capacity(self.e_nodes.len());
@@ -954,28 +887,17 @@ impl ExecutionGraph {
                 assert_eq!(output_values.len(), e_node.outputs.len());
             }
 
-            let node = graph.by_id(&e_node.id).unwrap();
             let func = func_lib.by_id(&e_node.func_id).unwrap();
-
-            assert_eq!(Some(e_node.func_id), node.func_id());
-            assert_eq!(node.id, e_node.id);
-            assert_eq!(node.func_id(), Some(func.id));
-            assert_eq!(e_node.inputs.len(), node.inputs.len());
-            assert_eq!(node.inputs.len(), func.inputs.len());
+            assert_eq!(e_node.inputs.len(), func.inputs.len());
             assert_eq!(e_node.outputs.len(), func.outputs.len());
+            assert_eq!(e_node.events.len(), func.events.len());
 
-            for (input, e_input) in node.inputs.iter().zip(e_node.inputs.iter()) {
-                match (&input.binding, &e_input.binding) {
-                    (Binding::None, ExecutionBinding::None) => {}
-                    (Binding::Const(v1), ExecutionBinding::Const(v2)) => assert_eq!(v1, v2),
-                    (Binding::Bind(addr), ExecutionBinding::Bind(e_addr)) => {
-                        assert!(e_addr.target_idx < self.e_nodes.len());
-                        let target = &self.e_nodes[e_addr.target_idx];
-                        assert!(e_addr.port_idx < target.outputs.len());
-                        assert_eq!(addr.port_idx, e_addr.port_idx);
-                        assert_eq!(addr.node_id, target.id);
-                    }
-                    _ => panic!("Mismatched bindings"),
+            for e_input in e_node.inputs.iter() {
+                if let ExecutionBinding::Bind(e_addr) = &e_input.binding {
+                    assert!(e_addr.target_idx < self.e_nodes.len());
+                    let target = &self.e_nodes[e_addr.target_idx];
+                    assert_eq!(e_addr.target_id, target.id);
+                    assert!(e_addr.port_idx < target.outputs.len());
                 }
             }
         }

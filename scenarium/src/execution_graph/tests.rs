@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::data::{DynamicValue, StaticValue};
-use crate::graph::NodeBehavior;
+use crate::graph::{Binding, Node, NodeBehavior};
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use common::{FloatExt, SerdeFormat};
 use tokio::sync::Mutex;
@@ -1636,5 +1636,304 @@ mod previews {
         ));
 
         Ok(())
+    }
+}
+
+// === Subgraph Flattening (Stage 2) ===
+
+mod subgraph {
+    use super::*;
+    use crate::function::FuncOutput;
+    use crate::graph::{Input, NodeKind};
+    use crate::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
+    use std::sync::Mutex as StdMutex;
+
+    fn fnode(func_lib: &FuncLib, name: &str) -> Node {
+        func_lib.by_name(name).unwrap().into()
+    }
+
+    fn int_out(name: &str) -> FuncOutput {
+        FuncOutput {
+            name: name.into(),
+            data_type: DataType::Int,
+        }
+    }
+
+    /// `in(A,B) -> sum -> out(Sum)`.
+    fn wrap_sum_def(func_lib: &FuncLib) -> SubgraphDef {
+        let in_node = Node::new(NodeKind::SubgraphInput);
+        let in_id = in_node.id;
+        let mut sum = fnode(func_lib, "sum");
+        sum.inputs = vec![
+            Input {
+                binding: (in_id, 0).into(),
+            },
+            Input {
+                binding: (in_id, 1).into(),
+            },
+        ];
+        let sum_id = sum.id;
+        let mut out = Node::new(NodeKind::SubgraphOutput);
+        out.inputs = vec![Input {
+            binding: (sum_id, 0).into(),
+        }];
+
+        let mut graph = Graph::default();
+        graph.add(in_node);
+        graph.add(sum);
+        graph.add(out);
+
+        SubgraphDef {
+            id: SubgraphId::unique(),
+            name: "WrapSum".into(),
+            category: "Test".into(),
+            graph,
+            inputs: vec![
+                crate::function::FuncInput {
+                    name: "A".into(),
+                    required: true,
+                    data_type: DataType::Int,
+                    default_value: None,
+                    value_options: vec![],
+                },
+                crate::function::FuncInput {
+                    name: "B".into(),
+                    required: false,
+                    data_type: DataType::Int,
+                    default_value: None,
+                    value_options: vec![],
+                },
+            ],
+            outputs: vec![int_out("Sum")],
+            events: vec![],
+        }
+    }
+
+    /// A composite computes through the flattened interior end to end.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn composite_computes_via_flattening() -> anyhow::Result<()> {
+        let captured = Arc::new(StdMutex::new(Vec::<i64>::new()));
+        let hooks = TestFuncHooks {
+            get_a: Arc::new(|| Ok(2)),
+            get_b: Arc::new(|| 4),
+            print: {
+                let c = captured.clone();
+                Arc::new(move |v| c.lock().unwrap().push(v))
+            },
+        };
+        let func_lib = test_func_lib(hooks);
+        let def = wrap_sum_def(&func_lib);
+
+        let get_a = fnode(&func_lib, "get_a");
+        let get_b = fnode(&func_lib, "get_b");
+        let (a_id, b_id) = (get_a.id, get_b.id);
+        let mut c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
+        c.inputs[0].binding = (a_id, 0).into();
+        c.inputs[1].binding = (b_id, 0).into();
+        let c_id = c.id;
+        let mut print = fnode(&func_lib, "print");
+        print.inputs = vec![Input {
+            binding: (c_id, 0).into(),
+        }];
+
+        let mut graph = Graph::default();
+        graph.subgraphs.add(def);
+        graph.add(get_a);
+        graph.add(get_b);
+        graph.add(c);
+        graph.add(print);
+
+        let mut eg = ExecutionGraph::default();
+        eg.update(&graph, &func_lib);
+        eg.execute_terminals().await?;
+
+        assert_eq!(*captured.lock().unwrap(), vec![6]); // 2 + 4
+        Ok(())
+    }
+
+    /// An interior branch feeding an unconsumed composite output is pruned —
+    /// its source func never runs (its hook would panic if it did).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dead_interior_branch_is_pruned() -> anyhow::Result<()> {
+        let captured = Arc::new(StdMutex::new(Vec::<i64>::new()));
+        let hooks = TestFuncHooks {
+            get_a: Arc::new(|| Ok(7)),
+            get_b: Arc::new(|| panic!("get_b feeds an unconsumed output and must be pruned")),
+            print: {
+                let c = captured.clone();
+                Arc::new(move |v| c.lock().unwrap().push(v))
+            },
+        };
+        let func_lib = test_func_lib(hooks);
+
+        // def TwoSources: get_a -> out0, get_b -> out1 (no inputs).
+        let src_a = fnode(&func_lib, "get_a");
+        let src_b = fnode(&func_lib, "get_b");
+        let (sa, sb) = (src_a.id, src_b.id);
+        let mut out = Node::new(NodeKind::SubgraphOutput);
+        out.inputs = vec![
+            Input {
+                binding: (sa, 0).into(),
+            },
+            Input {
+                binding: (sb, 0).into(),
+            },
+        ];
+        let mut def_graph = Graph::default();
+        def_graph.add(src_a);
+        def_graph.add(src_b);
+        def_graph.add(out);
+        let def = SubgraphDef {
+            id: SubgraphId::unique(),
+            name: "TwoSources".into(),
+            category: "Test".into(),
+            graph: def_graph,
+            inputs: vec![],
+            outputs: vec![int_out("O0"), int_out("O1")],
+            events: vec![],
+        };
+
+        // parent: C, print <- C.out0 (out1 unused).
+        let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
+        let c_id = c.id;
+        let mut print = fnode(&func_lib, "print");
+        print.inputs = vec![Input {
+            binding: (c_id, 0).into(),
+        }];
+
+        let mut graph = Graph::default();
+        graph.subgraphs.add(def);
+        graph.add(c);
+        graph.add(print);
+
+        let mut eg = ExecutionGraph::default();
+        eg.update(&graph, &func_lib);
+        eg.execute_terminals().await?;
+
+        assert_eq!(*captured.lock().unwrap(), vec![7]); // get_a only; get_b pruned
+        Ok(())
+    }
+
+    /// A data cycle that runs through a composite boundary is caught by the
+    /// existing cycle detector once flattened.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cross_boundary_cycle_detected() {
+        let func_lib = test_func_lib(default_hooks());
+        let def = wrap_sum_def(&func_lib);
+
+        // C.in0 <- C.out0 (self-cycle through the composite); print <- C.out0
+        // so the cyclic node is reachable from a terminal.
+        let mut c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
+        let c_id = c.id;
+        c.inputs[0].binding = (c_id, 0).into();
+        let mut print = fnode(&func_lib, "print");
+        print.inputs = vec![Input {
+            binding: (c_id, 0).into(),
+        }];
+
+        let mut graph = Graph::default();
+        graph.subgraphs.add(def);
+        graph.add(c);
+        graph.add(print);
+
+        let mut eg = ExecutionGraph::default();
+        eg.update(&graph, &func_lib);
+        let result = eg.execute_terminals().await;
+
+        assert!(
+            matches!(result, Err(Error::CycleDetected { .. })),
+            "expected CycleDetected, got {result:?}"
+        );
+    }
+
+    fn bind_target(e: &ExecutionNode, input_idx: usize) -> NodeId {
+        match &e.inputs[input_idx].binding {
+            ExecutionBinding::Bind(addr) => addr.target_id,
+            other => panic!("expected Bind, got {other:?}"),
+        }
+    }
+
+    /// A composite dissolves: only its interior func leaves remain, wired
+    /// directly to the parent's producers/consumers.
+    #[test]
+    fn composite_dissolves_into_leaf_edges() {
+        // get_a, get_b -> C(WrapSum) -> print.
+        let func_lib = test_func_lib(TestFuncHooks::default());
+        let def = wrap_sum_def(&func_lib);
+
+        let get_a = fnode(&func_lib, "get_a");
+        let get_b = fnode(&func_lib, "get_b");
+        let (a_id, b_id) = (get_a.id, get_b.id);
+        let mut c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
+        c.inputs[0].binding = (a_id, 0).into();
+        c.inputs[1].binding = (b_id, 0).into();
+        let c_id = c.id;
+        let mut print = fnode(&func_lib, "print");
+        print.inputs = vec![Input {
+            binding: (c_id, 0).into(),
+        }];
+
+        let mut graph = Graph::default();
+        graph.subgraphs.add(def);
+        graph.add(get_a);
+        graph.add(get_b);
+        graph.add(c);
+        graph.add(print);
+
+        let mut eg = ExecutionGraph::default();
+        eg.update(&graph, &func_lib);
+
+        // get_a, get_b, sum (interior), print — no composite/boundary nodes.
+        assert_eq!(eg.e_nodes.len(), 4);
+        let sum = eg.by_name("sum").unwrap();
+        assert_eq!(bind_target(sum, 0), a_id);
+        assert_eq!(bind_target(sum, 1), b_id);
+        assert_eq!(bind_target(eg.by_name("print").unwrap(), 0), sum.id);
+    }
+
+    /// A func-only graph builds with the node ids unchanged (caches survive).
+    #[test]
+    fn top_level_func_nodes_keep_identity() {
+        let func_lib = test_func_lib(default_hooks());
+        let graph = test_graph();
+        let mut eg = ExecutionGraph::default();
+        eg.update(&graph, &func_lib);
+
+        assert_eq!(eg.e_nodes.len(), graph.len());
+        for node in graph.iter() {
+            assert!(eg.by_id(&node.id).is_some(), "id preserved");
+        }
+    }
+
+    /// Two instances of one def produce two distinct interior leaves.
+    #[test]
+    fn two_instances_get_distinct_leaf_ids() {
+        let mut func_lib = test_func_lib(TestFuncHooks::default());
+        let def = wrap_sum_def(&func_lib);
+        let def_id = def.id;
+        func_lib.add_subgraph(def);
+
+        let mut graph = Graph::default();
+        let def_ref = func_lib.subgraph_by_id(&def_id).unwrap();
+        graph.add(Node::subgraph_instance(
+            def_ref,
+            SubgraphRef::Linked(def_id),
+        ));
+        graph.add(Node::subgraph_instance(
+            def_ref,
+            SubgraphRef::Linked(def_id),
+        ));
+
+        let mut eg = ExecutionGraph::default();
+        eg.update(&graph, &func_lib);
+
+        let sums: Vec<NodeId> = eg
+            .e_nodes
+            .iter()
+            .filter(|e| e.name == "sum")
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(sums.len(), 2);
+        assert_ne!(sums[0], sums[1]);
     }
 }
