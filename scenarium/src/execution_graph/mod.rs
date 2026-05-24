@@ -10,7 +10,7 @@ use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::event_lambda::EventLambda;
 use crate::execution_stats::{ExecutedNodeStats, ExecutionStats, NodeError};
 use crate::func_lambda::InvokeInput;
-use crate::function::{Func, FuncBehavior, FuncLib};
+use crate::function::{FuncBehavior, FuncLib};
 use crate::graph::{Graph, InputPort, NodeBehavior, NodeId};
 use crate::prelude::{AnyState, FuncId, FuncLambda};
 use crate::worker::{EventRef, EventTrigger};
@@ -106,6 +106,19 @@ pub enum ExecutionBehavior {
     Once,
 }
 
+/// A contiguous slice into one of `ExecutionGraph`'s SoA pools.
+#[derive(Clone, Copy, Default, Debug, Serialize, Deserialize)]
+pub struct Span {
+    start: u32,
+    len: u32,
+}
+
+impl Span {
+    fn range(self) -> std::ops::Range<usize> {
+        self.start as usize..(self.start + self.len) as usize
+    }
+}
+
 /// DFS coloring for the two backward passes. White = unvisited, Gray = on
 /// stack (Done pushed, children pending), Black = children done. Lives
 /// only within a single pass as a local `Vec<Color>`.
@@ -131,9 +144,9 @@ pub struct ExecutionNode {
     pub bindings_changed: bool,
     pub behavior: ExecutionBehavior,
 
-    pub inputs: Vec<ExecutionInput>,
-    pub outputs: Vec<ExecutionOutput>,
-    pub events: Vec<ExecutionEvent>,
+    pub inputs: Span,
+    pub outputs: Span,
+    pub events: Span,
 
     pub func_id: FuncId,
     pub run_time: f64,
@@ -159,79 +172,10 @@ impl KeyIndexKey<NodeId> for ExecutionNode {
 }
 
 impl ExecutionNode {
-    fn reset_for_execution(&mut self) {
-        self.wants_execute = false;
-        self.inputs_updated = false;
-        self.bindings_changed = false;
-        self.missing_required_inputs = false;
-        self.cached = false;
-        self.run_time = 0.0;
-        self.error = None;
-
-        for e_input in &mut self.inputs {
-            e_input.dependency_wants_execute = false;
-        }
-    }
-
     fn reset_state(&mut self) {
         self.state = AnyState::default();
         self.event_state = SharedAnyState::default();
         self.output_values = None;
-    }
-
-    /// Refresh this (flattened) node from its func + the interior node's
-    /// behavior/name. Event subscribers are cleared here and re-added by the
-    /// flatten sink (already id-remapped), so it takes no node.
-    fn refresh(&mut self, func: &Func, behavior: NodeBehavior, name: &str) {
-        if !self.inited {
-            self.init_from_func(func);
-        } else {
-            assert_eq!(self.func_id, func.id, "func changed under a reused node id");
-            self.outputs.fill(ExecutionOutput::default());
-        }
-
-        self.terminal = func.terminal;
-        self.behavior = Self::compute_behavior(behavior, func.behavior);
-
-        for event in &mut self.events {
-            event.subscribers.clear();
-        }
-
-        assert_eq!(self.inputs.len(), func.inputs.len());
-        assert_eq!(self.outputs.len(), func.outputs.len());
-        assert_eq!(self.events.len(), func.events.len());
-
-        self.name.clear();
-        self.name.push_str(name);
-    }
-
-    fn init_from_func(&mut self, func: &Func) {
-        self.inited = true;
-        self.func_id = func.id;
-        self.lambda = func.lambda.clone();
-
-        self.inputs
-            .resize(func.inputs.len(), ExecutionInput::default());
-        for (input_idx, func_input) in func.inputs.iter().enumerate() {
-            let e_input = &mut self.inputs[input_idx];
-            e_input.required = func_input.required;
-            if e_input.data_type != func_input.data_type {
-                e_input.data_type = func_input.data_type.clone();
-            }
-        }
-
-        self.events.clear();
-        self.events.reserve(func.events.len());
-        for func_event in &func.events {
-            self.events.push(ExecutionEvent {
-                lambda: func_event.event_lambda.clone(),
-                ..Default::default()
-            });
-        }
-
-        self.outputs.clear();
-        self.outputs
-            .resize(func.outputs.len(), ExecutionOutput::default());
     }
 
     fn compute_behavior(
@@ -299,6 +243,10 @@ pub struct ExecutionGraph {
     pub e_node_process_order: Vec<usize>,
     pub e_node_execute_order: Vec<usize>,
 
+    inputs: Vec<ExecutionInput>,
+    outputs: Vec<ExecutionOutput>,
+    events: Vec<ExecutionEvent>,
+
     #[serde(skip)]
     ctx_manager: ContextManager,
     /// Reusable subgraph-flattening scratch (kept across updates).
@@ -328,6 +276,18 @@ impl ExecutionGraph {
         self.e_nodes.iter_mut().find(|node| node.name == node_name)
     }
 
+    pub fn node_inputs(&self, e_node: &ExecutionNode) -> &[ExecutionInput] {
+        &self.inputs[e_node.inputs.range()]
+    }
+
+    pub fn node_outputs(&self, e_node: &ExecutionNode) -> &[ExecutionOutput] {
+        &self.outputs[e_node.outputs.range()]
+    }
+
+    pub fn node_events(&self, e_node: &ExecutionNode) -> &[ExecutionEvent] {
+        &self.events[e_node.events.range()]
+    }
+
     // === Serialization ===
 
     pub fn serialize(&self, format: SerdeFormat) -> Vec<u8> {
@@ -344,6 +304,9 @@ impl ExecutionGraph {
         self.e_nodes.clear();
         self.e_node_process_order.clear();
         self.e_node_execute_order.clear();
+        self.inputs.clear();
+        self.outputs.clear();
+        self.events.clear();
     }
 
     pub fn reset_states(&mut self) {
@@ -362,7 +325,16 @@ impl ExecutionGraph {
 
         // Flatten subgraphs straight into execution nodes — no intermediate
         // `Graph`. Everything below is boundary-agnostic (func nodes only).
-        self.flattener.build(&mut self.e_nodes, graph, func_lib);
+        self.flattener.build(
+            &mut self.e_nodes,
+            flatten::Pools {
+                inputs: &mut self.inputs,
+                outputs: &mut self.outputs,
+                events: &mut self.events,
+            },
+            graph,
+            func_lib,
+        );
 
         self.validate_built(func_lib);
     }
@@ -406,9 +378,18 @@ impl ExecutionGraph {
 
         self.collect_terminal_nodes(terminals, event_triggers, events, &mut scratch);
 
-        self.e_nodes
-            .iter_mut()
-            .for_each(|e| e.reset_for_execution());
+        for e_input in &mut self.inputs {
+            e_input.dependency_wants_execute = false;
+        }
+        for e_node in self.e_nodes.iter_mut() {
+            e_node.wants_execute = false;
+            e_node.inputs_updated = false;
+            e_node.bindings_changed = false;
+            e_node.missing_required_inputs = false;
+            e_node.cached = false;
+            e_node.run_time = 0.0;
+            e_node.error = None;
+        }
 
         let result = self.walk_backward_collect_order(
             &scratch.terminal_seeds,
@@ -443,7 +424,10 @@ impl ExecutionGraph {
         // Add event subscribers
         for event in events {
             let e_node = self.e_nodes.by_key(&event.node_id).unwrap();
-            for sub in &e_node.events[event.event_idx].subscribers {
+            let subs = self.events[e_node.events.range()][event.event_idx]
+                .subscribers
+                .clone();
+            for sub in &subs {
                 let idx = self.e_nodes.index_of_key(sub).unwrap();
                 scratch.mark_terminal(idx);
             }
@@ -461,7 +445,10 @@ impl ExecutionGraph {
         // Add nodes with event triggers
         if event_triggers {
             for (idx, e) in self.e_nodes.iter().enumerate() {
-                if e.events.iter().any(|ev| !ev.subscribers.is_empty()) {
+                if self.events[e.events.range()]
+                    .iter()
+                    .any(|ev| !ev.subscribers.is_empty())
+                {
                     scratch.mark_terminal(idx);
                 }
             }
@@ -491,7 +478,8 @@ impl ExecutionGraph {
             match visit.cause {
                 VisitCause::Terminal => {}
                 VisitCause::OutputRequest { output_idx } => {
-                    self.e_nodes[visit.e_node_idx].outputs[output_idx].usage_count += 1;
+                    let span = self.e_nodes[visit.e_node_idx].outputs;
+                    self.outputs[span.range()][output_idx].usage_count += 1;
                 }
                 VisitCause::Done => {
                     assert_eq!(color[visit.e_node_idx], Color::Gray);
@@ -518,7 +506,8 @@ impl ExecutionGraph {
                 cause: VisitCause::Done,
             });
 
-            for e_input in self.e_nodes[idx].inputs.iter() {
+            let span = self.e_nodes[idx].inputs;
+            for e_input in &self.inputs[span.range()] {
                 if let ExecutionBinding::Bind(addr) = &e_input.binding {
                     stack.push(Visit {
                         e_node_idx: addr.target_idx,
@@ -545,20 +534,20 @@ impl ExecutionGraph {
         };
 
         for e_node_idx in self.e_node_process_order.iter().copied() {
-            let e_node = &self.e_nodes[e_node_idx];
+            let inputs_span = self.e_nodes[e_node_idx].inputs;
 
             let mut inputs_updated = false;
             let mut bindings_changed = false;
             let mut missing_required = false;
 
-            for input_idx in 0..e_node.inputs.len() {
-                let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
+            for pool_idx in inputs_span.range() {
+                let e_input = &self.inputs[pool_idx];
                 let (dep_wants_execute, missing) = match &e_input.binding {
                     ExecutionBinding::None => (false, e_input.required),
                     ExecutionBinding::Const(_) => (false, false),
                     ExecutionBinding::Bind(addr) => {
                         let output_node = &self.e_nodes[addr.target_idx];
-                        assert!(addr.port_idx < output_node.outputs.len());
+                        assert!(addr.port_idx < output_node.outputs.len as usize);
                         if is_debug() {
                             assert!(
                                 processed[addr.target_idx],
@@ -572,7 +561,7 @@ impl ExecutionGraph {
                     }
                 };
 
-                let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
+                let e_input = &mut self.inputs[pool_idx];
                 e_input.dependency_wants_execute = dep_wants_execute;
                 e_input.missing = missing;
                 inputs_updated |= e_input.binding_changed || dep_wants_execute;
@@ -664,7 +653,8 @@ impl ExecutionGraph {
                 cause: VisitCause::Done,
             });
 
-            for e_input in self.e_nodes[idx].inputs.iter() {
+            let span = self.e_nodes[idx].inputs;
+            for e_input in &self.inputs[span.range()] {
                 if e_input.dependency_wants_execute
                     && let Some(addr) = e_input.binding.as_bind()
                 {
@@ -707,9 +697,10 @@ impl ExecutionGraph {
             let e_node = &mut self.e_nodes[e_node_idx];
             assert!(e_node.error.is_none());
 
+            let output_count = e_node.outputs.len as usize;
             let outputs = e_node
                 .output_values
-                .get_or_insert_with(|| vec![DynamicValue::None; e_node.outputs.len()]);
+                .get_or_insert_with(|| vec![DynamicValue::None; output_count]);
 
             let start = std::time::Instant::now();
             let result = e_node
@@ -730,13 +721,14 @@ impl ExecutionGraph {
 
             e_node.run_time = start.elapsed().as_secs_f64();
 
-            for e_input in &mut e_node.inputs {
-                e_input.binding_changed = false;
-            }
-
             if let Err(err) = result {
                 e_node.error = Some(err);
                 e_node.output_values = None;
+            }
+
+            let span = self.e_nodes[e_node_idx].inputs;
+            for e_input in &mut self.inputs[span.range()] {
+                e_input.binding_changed = false;
             }
         }
 
@@ -746,14 +738,16 @@ impl ExecutionGraph {
     }
 
     fn has_errored_dependency(&self, e_node_idx: usize) -> bool {
-        self.e_nodes[e_node_idx].inputs.iter().any(|input| {
+        let span = self.e_nodes[e_node_idx].inputs;
+        self.inputs[span.range()].iter().any(|input| {
             matches!(&input.binding, ExecutionBinding::Bind(addr) if self.e_nodes[addr.target_idx].error.is_some())
         })
     }
 
     fn collect_inputs(&self, e_node_idx: usize, inputs: &mut Vec<InvokeInput>) {
         inputs.clear();
-        for input in self.e_nodes[e_node_idx].inputs.iter() {
+        let span = self.e_nodes[e_node_idx].inputs;
+        for input in &self.inputs[span.range()] {
             let value = match &input.binding {
                 ExecutionBinding::None => DynamicValue::None,
                 ExecutionBinding::Const(v) => v.into(),
@@ -763,7 +757,7 @@ impl ExecutionGraph {
                         .output_values
                         .as_ref()
                         .expect("missing output values");
-                    assert_eq!(outputs.len(), output_node.outputs.len());
+                    assert_eq!(outputs.len(), output_node.outputs.len as usize);
                     outputs[addr.port_idx].clone()
                 }
             };
@@ -776,9 +770,9 @@ impl ExecutionGraph {
 
     fn collect_output_usage(&self, e_node_idx: usize, usage: &mut Vec<OutputUsage>) {
         usage.clear();
+        let span = self.e_nodes[e_node_idx].outputs;
         usage.extend(
-            self.e_nodes[e_node_idx]
-                .outputs
+            self.outputs[span.range()]
                 .iter()
                 .map(|o| (o.usage_count == 0).then_else(OutputUsage::Skip, OutputUsage::Needed)),
         );
@@ -801,7 +795,7 @@ impl ExecutionGraph {
         for &idx in &self.e_node_process_order {
             let e = &self.e_nodes[idx];
             if e.missing_required_inputs {
-                for (i, inp) in e.inputs.iter().enumerate() {
+                for (i, inp) in self.inputs[e.inputs.range()].iter().enumerate() {
                     if inp.missing {
                         missing_inputs.push(InputPort {
                             node_id: e.id,
@@ -836,8 +830,7 @@ impl ExecutionGraph {
     pub fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
         let e_node = self.e_nodes.by_key(node_id)?;
 
-        let inputs = e_node
-            .inputs
+        let inputs = self.inputs[e_node.inputs.range()]
             .iter()
             .map(|input| match &input.binding {
                 ExecutionBinding::None => None,
@@ -895,14 +888,14 @@ impl ExecutionGraph {
             .flat_map(|node_id| {
                 let e_node = self.by_id(&node_id).unwrap();
                 let event_state = e_node.event_state.clone();
-                e_node
-                    .events
+                let id = e_node.id;
+                self.events[e_node.events.range()]
                     .iter()
                     .enumerate()
                     .filter(|(_, event)| !event.subscribers.is_empty() && !event.lambda.is_none())
                     .map(move |(event_idx, event)| EventTrigger {
                         event: EventRef {
-                            node_id: e_node.id,
+                            node_id: id,
                             event_idx,
                         },
                         lambda: event.lambda.clone(),
@@ -930,20 +923,20 @@ impl ExecutionGraph {
             assert!(seen_node_ids.insert(e_node.id));
 
             if let Some(output_values) = e_node.output_values.as_ref() {
-                assert_eq!(output_values.len(), e_node.outputs.len());
+                assert_eq!(output_values.len(), e_node.outputs.len as usize);
             }
 
             let func = func_lib.by_id(&e_node.func_id).unwrap();
-            assert_eq!(e_node.inputs.len(), func.inputs.len());
-            assert_eq!(e_node.outputs.len(), func.outputs.len());
-            assert_eq!(e_node.events.len(), func.events.len());
+            assert_eq!(e_node.inputs.len as usize, func.inputs.len());
+            assert_eq!(e_node.outputs.len as usize, func.outputs.len());
+            assert_eq!(e_node.events.len as usize, func.events.len());
 
-            for e_input in e_node.inputs.iter() {
+            for e_input in &self.inputs[e_node.inputs.range()] {
                 if let ExecutionBinding::Bind(e_addr) = &e_input.binding {
                     assert!(e_addr.target_idx < self.e_nodes.len());
                     let target = &self.e_nodes[e_addr.target_idx];
                     assert_eq!(e_addr.target_id, target.id);
-                    assert!(e_addr.port_idx < target.outputs.len());
+                    assert!(e_addr.port_idx < target.outputs.len as usize);
                 }
             }
         }
@@ -957,7 +950,8 @@ impl ExecutionGraph {
         let mut seen_in_order = HashSet::with_capacity(self.e_nodes.len());
         for &idx in &self.e_node_process_order {
             assert!(idx < self.e_nodes.len());
-            for input in self.e_nodes[idx].inputs.iter() {
+            let span = self.e_nodes[idx].inputs;
+            for input in &self.inputs[span.range()] {
                 if let ExecutionBinding::Bind(addr) = &input.binding {
                     assert!(addr.target_idx < self.e_nodes.len());
                     assert!(seen_in_order.contains(&addr.target_idx));
@@ -977,10 +971,10 @@ impl ExecutionGraph {
                 assert!(!e_node.wants_execute);
             }
 
-            for e_input in e_node.inputs.iter() {
+            for e_input in &self.inputs[e_node.inputs.range()] {
                 if let ExecutionBinding::Bind(addr) = &e_input.binding {
                     assert!(addr.target_idx < self.e_nodes.len());
-                    assert!(addr.port_idx < self.e_nodes[addr.target_idx].outputs.len());
+                    assert!(addr.port_idx < self.e_nodes[addr.target_idx].outputs.len as usize);
                 }
             }
         }
@@ -998,7 +992,7 @@ impl ExecutionGraph {
             assert!(e_node.wants_execute);
             assert!(!e_node.missing_required_inputs);
 
-            for e_input in e_node.inputs.iter() {
+            for e_input in &self.inputs[e_node.inputs.range()] {
                 if let ExecutionBinding::Bind(addr) = &e_input.binding {
                     assert!(!pending.contains(&addr.target_idx));
                 }

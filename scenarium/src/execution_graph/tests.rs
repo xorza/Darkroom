@@ -86,10 +86,10 @@ mod graph_structure {
         let print = execution_graph.by_name("print").unwrap();
 
         // usage_count: get_a→sum[0], get_b→sum[1]+mult[1], sum→mult[0], mult→print[0]
-        assert_eq!(get_a.outputs[0].usage_count, 1);
-        assert_eq!(get_b.outputs[0].usage_count, 2);
-        assert_eq!(sum.outputs[0].usage_count, 1);
-        assert_eq!(mult.outputs[0].usage_count, 1);
+        assert_eq!(execution_graph.node_outputs(get_a)[0].usage_count, 1);
+        assert_eq!(execution_graph.node_outputs(get_b)[0].usage_count, 2);
+        assert_eq!(execution_graph.node_outputs(sum)[0].usage_count, 1);
+        assert_eq!(execution_graph.node_outputs(mult)[0].usage_count, 1);
 
         // Leaf nodes have no input dependencies so inputs_updated=false
         assert!(!get_a.inputs_updated);
@@ -125,14 +125,14 @@ mod graph_structure {
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
 
-        assert_eq!(get_a.outputs.len(), 1);
-        assert_eq!(get_b.outputs.len(), 1);
-        assert_eq!(mult.outputs.len(), 1);
-        assert!(print.outputs.is_empty());
+        assert_eq!(execution_graph.node_outputs(get_a).len(), 1);
+        assert_eq!(execution_graph.node_outputs(get_b).len(), 1);
+        assert_eq!(execution_graph.node_outputs(mult).len(), 1);
+        assert!(execution_graph.node_outputs(print).is_empty());
         // Now each source has exactly 1 consumer (sum is no longer in the path)
-        assert_eq!(get_a.outputs[0].usage_count, 1);
-        assert_eq!(get_b.outputs[0].usage_count, 1);
-        assert_eq!(mult.outputs[0].usage_count, 1);
+        assert_eq!(execution_graph.node_outputs(get_a)[0].usage_count, 1);
+        assert_eq!(execution_graph.node_outputs(get_b)[0].usage_count, 1);
+        assert_eq!(execution_graph.node_outputs(mult)[0].usage_count, 1);
 
         Ok(())
     }
@@ -159,12 +159,21 @@ mod graph_structure {
                 assert_eq!(restored.name, original.name);
                 assert_eq!(restored.func_id, original.func_id);
                 assert_eq!(restored.behavior, original.behavior);
-                assert_eq!(restored.inputs.len(), original.inputs.len());
-                assert_eq!(restored.outputs.len(), original.outputs.len());
+                assert_eq!(
+                    deserialized.node_inputs(restored).len(),
+                    execution_graph.node_inputs(original).len()
+                );
+                assert_eq!(
+                    deserialized.node_outputs(restored).len(),
+                    execution_graph.node_outputs(original).len()
+                );
             }
             // mult's Bind to sum survives with its port address intact.
             let mult = deserialized.by_name("mult").unwrap();
-            assert!(matches!(&mult.inputs[0].binding, ExecutionBinding::Bind(_)));
+            assert!(matches!(
+                &deserialized.node_inputs(mult)[0].binding,
+                ExecutionBinding::Bind(_)
+            ));
         }
 
         Ok(())
@@ -255,8 +264,8 @@ mod const_bindings {
         execution_graph.update(&graph, &func_lib);
 
         let mult = execution_graph.by_name("mult").unwrap();
-        assert!(mult.inputs[0].binding_changed);
-        assert!(mult.inputs[1].binding_changed);
+        assert!(execution_graph.node_inputs(mult)[0].binding_changed);
+        assert!(execution_graph.node_inputs(mult)[1].binding_changed);
 
         execution_graph.execute_terminals().await?;
 
@@ -269,10 +278,10 @@ mod const_bindings {
         let mult = execution_graph.by_name("mult").unwrap();
         assert!(mult.inputs_updated);
         // After execution, binding_changed is cleared
-        assert!(!mult.inputs[0].binding_changed);
-        assert!(!mult.inputs[0].dependency_wants_execute);
-        assert!(!mult.inputs[1].binding_changed);
-        assert!(!mult.inputs[1].dependency_wants_execute);
+        assert!(!execution_graph.node_inputs(mult)[0].binding_changed);
+        assert!(!execution_graph.node_inputs(mult)[0].dependency_wants_execute);
+        assert!(!execution_graph.node_inputs(mult)[1].binding_changed);
+        assert!(!execution_graph.node_inputs(mult)[1].dependency_wants_execute);
 
         // Re-run with same bindings: mult is cached, only print re-executes
         execution_graph.update(&graph, &func_lib);
@@ -282,8 +291,8 @@ mod const_bindings {
 
         let mult = execution_graph.by_name("mult").unwrap();
         assert!(!mult.inputs_updated);
-        assert!(!mult.inputs[0].binding_changed);
-        assert!(!mult.inputs[1].binding_changed);
+        assert!(!execution_graph.node_inputs(mult)[0].binding_changed);
+        assert!(!execution_graph.node_inputs(mult)[1].binding_changed);
 
         // Change one const: mult re-executes
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(4)));
@@ -298,8 +307,8 @@ mod const_bindings {
             ["mult", "print"]
         );
 
-        assert!(mult.inputs[0].binding_changed);
-        assert!(!mult.inputs[1].binding_changed);
+        assert!(execution_graph.node_inputs(mult)[0].binding_changed);
+        assert!(!execution_graph.node_inputs(mult)[1].binding_changed);
         assert!(!mult.missing_required_inputs);
         assert!(!print.missing_required_inputs);
         assert!(mult.inputs_updated);
@@ -754,6 +763,10 @@ mod invalidation {
         assert!(execution_graph.e_nodes.is_empty());
         assert!(execution_graph.e_node_process_order.is_empty());
         assert!(execution_graph.e_node_execute_order.is_empty());
+        // The SoA pools are emptied too (not just the node list).
+        assert!(execution_graph.inputs.is_empty());
+        assert!(execution_graph.outputs.is_empty());
+        assert!(execution_graph.events.is_empty());
 
         Ok(())
     }
@@ -883,6 +896,35 @@ mod execution {
         // sum should be marked as missing required inputs
         let sum = execution_graph.by_name("sum").unwrap();
         assert!(sum.missing_required_inputs);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn schedule_stable_across_repeated_runs() -> anyhow::Result<()> {
+        let func_lib = test_func_lib(default_hooks());
+        let graph = test_graph();
+        let mut eg = ExecutionGraph::default();
+        eg.update(&graph, &func_lib);
+
+        eg.execute_terminals().await?;
+        let run1 = execution_node_names_in_order(&eg);
+        eg.execute_terminals().await?;
+        let run2 = execution_node_names_in_order(&eg);
+        eg.execute_terminals().await?;
+        let run3 = execution_node_names_in_order(&eg);
+
+        // First run executes everything; once the Once/Pure upstream is cached,
+        // runs 2 and 3 must schedule identically — guards the reused `Scratch`
+        // buffers being reset cleanly each run (a missed reset would drift).
+        assert_eq!(run2, ["print"]);
+        assert_eq!(run2, run3);
+        assert_ne!(run1, run2);
+
+        // The cached product stays correct every run: sum(1+11=12) * get_b(11) = 132.
+        let mult_id = graph.by_name("mult").unwrap().id;
+        let vals = eg.get_argument_values(&mult_id).unwrap();
+        assert!(matches!(vals.outputs[0], DynamicValue::Int(132)));
 
         Ok(())
     }
@@ -1468,8 +1510,8 @@ mod output_usage {
         eg.execute_terminals().await?;
 
         let split = eg.by_name("split").unwrap();
-        assert_eq!(split.outputs[0].usage_count, 1);
-        assert_eq!(split.outputs[1].usage_count, 0);
+        assert_eq!(eg.node_outputs(split)[0].usage_count, 1);
+        assert_eq!(eg.node_outputs(split)[1].usage_count, 0);
 
         // The lambda observed Needed for the consumed output, Skip for the other.
         assert_eq!(
@@ -1579,6 +1621,126 @@ mod topology {
         let mut got = printed.lock().await.clone();
         got.sort();
         assert_eq!(got, vec![2, 5]);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cached_output_survives_compaction_reorder() -> anyhow::Result<()> {
+        // get_a is Pure → its output is cached across runs. We remove an
+        // earlier-inserted chain so compaction shifts get_a's slot, then verify
+        // its cached output (carried on the node) still resolves and it is NOT
+        // recomputed. Guards the SoA span / `output_values` carry-over across a
+        // `compact_insert` reorder.
+        let calls_a = Arc::new(Mutex::new(0));
+        let calls_a_l = calls_a.clone();
+        let func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(move || {
+                *calls_a_l.try_lock().unwrap() += 1;
+                Ok(2)
+            }),
+            get_b: Arc::new(|| 5),
+            print: Arc::new(|_| {}),
+        });
+
+        // get_a's chain is inserted AFTER get_b's, so removing get_b's chain
+        // shifts get_a to a lower exec index on the next update.
+        let get_b_id = NodeId::unique();
+        let print_b_id = NodeId::unique();
+        let get_a_id = NodeId::unique();
+        let print_a_id = NodeId::unique();
+
+        let mut graph = Graph::default();
+        graph.add(node(&func_lib, "get_b", get_b_id));
+        graph.add(node(&func_lib, "print", print_b_id));
+        graph.add(node(&func_lib, "get_a", get_a_id));
+        graph.add(node(&func_lib, "print", print_a_id));
+        graph.set_input_binding(InputPort::new(print_b_id, 0), (get_b_id, 0).into());
+        graph.set_input_binding(InputPort::new(print_a_id, 0), (get_a_id, 0).into());
+        graph.validate();
+
+        let mut eg = ExecutionGraph::default();
+        eg.update(&graph, &func_lib);
+        eg.execute_terminals().await?;
+        assert_eq!(*calls_a.lock().await, 1); // get_a ran once
+        let idx_before = eg.e_nodes.index_of_key(&get_a_id).unwrap();
+
+        // Remove get_b's chain — get_a's slot compacts toward the front.
+        graph.remove_by_id(get_b_id);
+        graph.remove_by_id(print_b_id);
+        graph.validate();
+
+        eg.update(&graph, &func_lib);
+        let idx_after = eg.e_nodes.index_of_key(&get_a_id).unwrap();
+        assert_ne!(idx_before, idx_after, "get_a should have been reordered");
+
+        let stats = eg.execute_terminals().await?;
+
+        // get_a (Pure) stays cached, not re-executed, despite the reorder…
+        assert_eq!(*calls_a.lock().await, 1, "get_a recomputed after reorder");
+        assert!(stats.cached_nodes.contains(&get_a_id));
+        // …and its cached output still resolves to the correct value.
+        let vals = eg.get_argument_values(&get_a_id).unwrap();
+        assert!(matches!(vals.outputs[0], DynamicValue::Float(v) if v.approximately_eq(2.0)));
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn repeated_structural_churn_stays_correct() -> anyhow::Result<()> {
+        // Grow→shrink the graph repeatedly on ONE ExecutionGraph, re-executing
+        // each step. Stresses the SoA pool rebuild + compaction across many
+        // updates (pools grow 2→4 then shrink 4→2 each round).
+        let printed = Arc::new(Mutex::new(Vec::<i64>::new()));
+        let p = printed.clone();
+        let func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(|| Ok(2)),
+            get_b: Arc::new(|| 5),
+            print: Arc::new(move |v| p.try_lock().unwrap().push(v)),
+        });
+
+        let get_a_id = NodeId::unique();
+        let print_a_id = NodeId::unique();
+        let mut graph = Graph::default();
+        graph.add(node(&func_lib, "get_a", get_a_id));
+        graph.add(node(&func_lib, "print", print_a_id));
+        graph.set_input_binding(InputPort::new(print_a_id, 0), (get_a_id, 0).into());
+        graph.validate();
+
+        let mut eg = ExecutionGraph::default();
+        eg.update(&graph, &func_lib);
+        eg.execute_terminals().await?;
+
+        for round in 0..3 {
+            // Add a get_b → print chain.
+            let gb = NodeId::unique();
+            let pb = NodeId::unique();
+            graph.add(node(&func_lib, "get_b", gb));
+            graph.add(node(&func_lib, "print", pb));
+            graph.set_input_binding(InputPort::new(pb, 0), (gb, 0).into());
+            graph.validate();
+            eg.update(&graph, &func_lib);
+            assert_eq!(eg.e_nodes.len(), 4, "round {round} grow");
+            printed.lock().await.clear();
+            eg.execute_terminals().await?;
+            let mut got = printed.lock().await.clone();
+            got.sort();
+            assert_eq!(got, vec![2, 5], "round {round} grow values");
+
+            // Remove it again.
+            graph.remove_by_id(gb);
+            graph.remove_by_id(pb);
+            graph.validate();
+            eg.update(&graph, &func_lib);
+            assert_eq!(eg.e_nodes.len(), 2, "round {round} shrink");
+            printed.lock().await.clear();
+            eg.execute_terminals().await?;
+            assert_eq!(
+                *printed.lock().await,
+                vec![2],
+                "round {round} shrink values"
+            );
+        }
 
         Ok(())
     }
@@ -1817,8 +1979,8 @@ mod subgraph {
         );
     }
 
-    fn bind_target(e: &ExecutionNode, input_idx: usize) -> NodeId {
-        match &e.inputs[input_idx].binding {
+    fn bind_target(eg: &ExecutionGraph, e: &ExecutionNode, input_idx: usize) -> NodeId {
+        match &eg.node_inputs(e)[input_idx].binding {
             ExecutionBinding::Bind(addr) => addr.target_id,
             other => panic!("expected Bind, got {other:?}"),
         }
@@ -1856,9 +2018,9 @@ mod subgraph {
         // get_a, get_b, sum (interior), print — no composite/boundary nodes.
         assert_eq!(eg.e_nodes.len(), 4);
         let sum = eg.by_name("sum").unwrap();
-        assert_eq!(bind_target(sum, 0), a_id);
-        assert_eq!(bind_target(sum, 1), b_id);
-        assert_eq!(bind_target(eg.by_name("print").unwrap(), 0), sum.id);
+        assert_eq!(bind_target(&eg, sum, 0), a_id);
+        assert_eq!(bind_target(&eg, sum, 1), b_id);
+        assert_eq!(bind_target(&eg, eg.by_name("print").unwrap(), 0), sum.id);
     }
 
     /// A func-only graph builds with the node ids unchanged (caches survive).
@@ -1937,8 +2099,8 @@ mod subgraph {
         func_lib
     }
 
-    fn subscriber_ids(e: &ExecutionNode, event_idx: usize) -> Vec<NodeId> {
-        e.events[event_idx].subscribers.clone()
+    fn subscriber_ids(eg: &ExecutionGraph, e: &ExecutionNode, event_idx: usize) -> Vec<NodeId> {
+        eg.node_events(e)[event_idx].subscribers.clone()
     }
 
     /// A parent subscriber of a composite's exposed event is rewired onto the
@@ -1984,7 +2146,7 @@ mod subgraph {
 
         // The flattened interior `ticker` carries the rewired subscriber.
         let ticker_node = eg.by_name("ticker").unwrap();
-        assert_eq!(subscriber_ids(ticker_node, 0), vec![listener_id]);
+        assert_eq!(subscriber_ids(&eg, ticker_node, 0), vec![listener_id]);
     }
 
     /// Triggering a composite (as a subscriber) reaches the interior nodes
@@ -2030,7 +2192,7 @@ mod subgraph {
         // The interior `print` flat id is the one wired onto `ticker`'s event.
         let reactor_flat = eg.by_name("print").unwrap().id;
         let ticker_node = eg.by_id(&emitter_id).unwrap();
-        assert_eq!(subscriber_ids(ticker_node, 0), vec![reactor_flat]);
+        assert_eq!(subscriber_ids(&eg, ticker_node, 0), vec![reactor_flat]);
     }
 
     /// Editing a shared (linked) def re-inlines every instance on the next
