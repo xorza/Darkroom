@@ -568,16 +568,19 @@ Suggested staging:
    Serialization + `validate_with` (interface↔boundary arity, recursion guard —
    a `SubgraphId` may not appear twice on a descent path). Tests: round-trip,
    recursion rejection, zero-input and zero-output subgraphs, outgoing events.
-2. **Inliner** — rewrite `build_execution_nodes` into the recursive flattener
-   with `flatten_id` + the binding resolver + `SubgraphRef` resolution + event
-   short-circuit (exposed events + composite triggering). Derive
-   terminal/behavior from the interior. Keep
-   `CompactInsert` for cache preservation. Tests: the §5.3 example asserting
-   exact flat node set + edges; dead interior branch pruned; cross-boundary cycle
-   detected; nested (2+ deep); two linked instances don't share/clobber caches;
-   editing a linked def re-inlines all instances while preserving unchanged
-   subtrees' caches; interior terminal makes the composite a terminal root;
-   exposed event outlet fires a parent subscriber.
+2. **Inliner** ✅ *(done)* — `execution_graph::flatten` walks the authoring
+   graph and writes flat func-only `ExecutionNode`s straight into `CompactInsert`
+   (no intermediate `Graph`), via `flatten_id` + the binding resolver +
+   `SubgraphRef` resolution + event short-circuit (exposed events resolve to
+   their interior emitter; triggering a composite reaches the interior nodes
+   wired to its `SubgraphInput`). Terminal/behavior fall out of the interior
+   func nodes. The `Flattener` (reusable `ids`/`subs` buffers) is owned by
+   `ExecutionGraph` so steady-state updates don't re-allocate scratch. Tests:
+   composite dissolves into exact leaf edges; dead interior branch pruned;
+   cross-boundary cycle detected; nested (2+ deep); two linked instances get
+   distinct leaf ids; end-to-end compute; exposed event rewires a parent
+   subscriber to the interior emitter; triggering a composite reaches interior
+   subscribers.
 3. **Editor** — drill-in navigation, interface editing with **by-name binding
    reconciliation**, argument-value inspection via flattened ids, **Make Local /
    user-count UI** and edit-routing to the right def table. (darkroom — separate

@@ -328,6 +328,11 @@ impl Graph {
         self.subscriptions.extend(subscriptions.iter().copied());
     }
 
+    /// Every subscription edge in this graph (deterministic order).
+    pub fn subscriptions(&self) -> impl Iterator<Item = Subscription> + '_ {
+        self.subscriptions.iter().copied()
+    }
+
     /// Subscribers of one emitter event, in `NodeId` order.
     pub fn subscribers(
         &self,
@@ -489,6 +494,17 @@ impl Graph {
         ctx_def: Option<&SubgraphDef>,
         visited: &mut HashSet<SubgraphId>,
     ) {
+        // When validating a def's interior, each exposed event must name an
+        // interior emitter that actually exposes that event.
+        if let Some(def) = ctx_def {
+            for event in &def.events {
+                let emitter = self
+                    .by_id(&event.emitter)
+                    .expect("exposed event names a missing interior emitter");
+                assert!(event.emitter_event_idx < self.event_count(emitter, func_lib, ctx_def));
+            }
+        }
+
         for node in self.nodes.iter() {
             match &node.kind {
                 NodeKind::Func(func_id) => {
@@ -564,7 +580,9 @@ impl Graph {
         }
     }
 
-    /// Number of events a node exposes — only func/subgraph nodes have any.
+    /// Number of events a node exposes. `SubgraphInput` exposes exactly one —
+    /// the trigger that interior nodes subscribe to so they fire when the
+    /// enclosing composite is triggered.
     fn event_count(
         &self,
         node: &Node,
@@ -574,7 +592,8 @@ impl Graph {
         match &node.kind {
             NodeKind::Func(func_id) => func_lib.by_id(func_id).unwrap().events.len(),
             NodeKind::Subgraph(r) => self.resolve_def(*r, func_lib).unwrap().events.len(),
-            NodeKind::SubgraphInput | NodeKind::SubgraphOutput => 0,
+            NodeKind::SubgraphInput => 1,
+            NodeKind::SubgraphOutput => 0,
         }
     }
 

@@ -1,8 +1,7 @@
 //! Subgraph (composite-node) authoring types. A `SubgraphDef` is a reusable
 //! definition that wraps an interior `Graph` and exposes a chosen set of
 //! inputs/outputs/events, so it can be instantiated as a single node in a
-//! parent graph. Execution-time flattening lives in `execution_graph`
-//! (not yet implemented — Stage 2); these types are the authoring model only.
+//! parent graph. Execution-time flattening lives in `execution_graph::flatten`.
 //!
 //! See `docs/subgraph-design.md` for the full design.
 
@@ -11,7 +10,7 @@ use common::key_index_vec::KeyIndexKey;
 use serde::{Deserialize, Serialize};
 
 use crate::function::{FuncInput, FuncOutput};
-use crate::graph::Graph;
+use crate::graph::{Graph, NodeId};
 
 id_type!(SubgraphId);
 
@@ -30,11 +29,17 @@ id_type!(SubgraphId);
 /// There is no "incoming event" interface element. Routing an event *into* a
 /// subgraph is the ordinary subscriber mechanism: the composite node, like
 /// any node, can itself be subscribed to a parent event; which interior
-/// subnodes then fire is the subgraph's internal wiring, not an exposed port.
+/// subnodes then fire is the subgraph's internal wiring (interior nodes
+/// subscribing to the def's `SubgraphInput` node), not an exposed port.
 /// See `docs/subgraph-design.md` §4.5.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SubgraphEvent {
     pub name: String,
+    /// Interior emitter this re-exports: a node in `SubgraphDef.graph` and
+    /// which of its events. At flatten time, a parent subscriber to this
+    /// exposed event is rewired onto that interior emitter's flat node.
+    pub emitter: NodeId,
+    pub emitter_event_idx: usize,
 }
 
 /// Where a composite instance resolves its definition from. The variant *is*
@@ -275,27 +280,61 @@ mod tests {
         parent.validate_with(&func_lib); // panics: recursion guard
     }
 
+    /// A func with one event and no I/O, for exposed-event tests.
+    fn ticker_func_lib() -> (FuncLib, crate::function::FuncId) {
+        use crate::event_lambda::EventLambda;
+        use crate::func_lambda::FuncLambda;
+        use crate::function::{Func, FuncBehavior, FuncEvent};
+
+        let id = crate::function::FuncId::unique();
+        let mut lib = FuncLib::default();
+        lib.add(Func {
+            id,
+            name: "ticker".into(),
+            category: "Test".into(),
+            terminal: true,
+            behavior: FuncBehavior::Impure,
+            node_default_behavior: Default::default(),
+            description: None,
+            inputs: vec![],
+            outputs: vec![],
+            events: vec![FuncEvent {
+                name: "tick".into(),
+                event_lambda: EventLambda::default(),
+            }],
+            required_contexts: vec![],
+            lambda: FuncLambda::default(),
+        });
+        (lib, id)
+    }
+
     #[test]
-    fn outgoing_events_shape_instance_node() {
-        let func_lib = test_func_lib(TestFuncHooks::default());
+    fn exposed_event_maps_to_interior_emitter() {
+        let (func_lib, ticker) = ticker_func_lib();
+
+        // def interior: a single `ticker` whose `tick` event is exposed.
+        let emitter = Node::new(NodeKind::Func(ticker));
+        let emitter_id = emitter.id;
+        let mut graph = Graph::default();
+        graph.add(emitter);
 
         let def = SubgraphDef {
             id: SubgraphId::unique(),
-            name: "TwoEvents".into(),
+            name: "Exposer".into(),
             category: "Test".into(),
-            graph: Graph::default(),
+            graph,
             inputs: vec![],
             outputs: vec![],
-            events: vec![
-                SubgraphEvent { name: "e0".into() },
-                SubgraphEvent { name: "e1".into() },
-            ],
+            events: vec![SubgraphEvent {
+                name: "tick".into(),
+                emitter: emitter_id,
+                emitter_event_idx: 0,
+            }],
         };
 
         let mut parent = Graph::default();
         let inst = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
-        // the def exposes two outgoing events parents may subscribe to
-        assert_eq!(def.events.len(), 2);
+        assert_eq!(def.events.len(), 1);
         parent.subgraphs.add(def);
         parent.add(inst);
 

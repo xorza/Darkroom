@@ -1628,9 +1628,10 @@ mod previews {
 
 mod subgraph {
     use super::*;
-    use crate::function::FuncOutput;
+    use crate::event_lambda::EventLambda;
+    use crate::function::{Func, FuncBehavior, FuncEvent, FuncId, FuncOutput};
     use crate::graph::NodeKind;
-    use crate::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
+    use crate::subgraph::{SubgraphDef, SubgraphEvent, SubgraphId, SubgraphRef};
     use std::sync::Mutex as StdMutex;
 
     fn fnode(func_lib: &FuncLib, name: &str) -> Node {
@@ -1904,5 +1905,127 @@ mod subgraph {
             .collect();
         assert_eq!(sums.len(), 2);
         assert_ne!(sums[0], sums[1]);
+    }
+
+    // === Stage 2b: events across boundaries ===
+
+    /// `test_func_lib` plus a `ticker` func (one event, no I/O) usable as an
+    /// interior or parent emitter; instantiate it by name with `fnode`.
+    fn func_lib_with_ticker() -> FuncLib {
+        let mut func_lib = test_func_lib(default_hooks());
+        func_lib.add(Func {
+            id: FuncId::unique(),
+            name: "ticker".into(),
+            category: "Test".into(),
+            terminal: true,
+            behavior: FuncBehavior::Impure,
+            node_default_behavior: Default::default(),
+            description: None,
+            inputs: vec![],
+            outputs: vec![],
+            events: vec![FuncEvent {
+                name: "tick".into(),
+                event_lambda: EventLambda::default(),
+            }],
+            required_contexts: vec![],
+            lambda: crate::prelude::FuncLambda::default(),
+        });
+        func_lib
+    }
+
+    fn subscriber_ids(e: &ExecutionNode, event_idx: usize) -> Vec<NodeId> {
+        e.events[event_idx].subscribers.clone()
+    }
+
+    /// A parent subscriber of a composite's exposed event is rewired onto the
+    /// flattened interior emitter.
+    #[test]
+    fn exposed_event_rewires_parent_subscriber_to_interior_emitter() {
+        let func_lib = func_lib_with_ticker();
+
+        // def: a single `ticker`, its `tick` event exposed as the composite's
+        // event 0.
+        let emitter = fnode(&func_lib, "ticker");
+        let emitter_id = emitter.id;
+        let mut def_graph = Graph::default();
+        def_graph.add(emitter);
+        let def = SubgraphDef {
+            id: SubgraphId::unique(),
+            name: "Exposer".into(),
+            category: "Test".into(),
+            graph: def_graph,
+            inputs: vec![],
+            outputs: vec![],
+            events: vec![SubgraphEvent {
+                name: "tick".into(),
+                emitter: emitter_id,
+                emitter_event_idx: 0,
+            }],
+        };
+
+        // parent: composite C, and `listener` subscribing to C's event 0.
+        let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
+        let c_id = c.id;
+        let listener = fnode(&func_lib, "print");
+        let listener_id = listener.id;
+
+        let mut graph = Graph::default();
+        graph.subgraphs.add(def);
+        graph.add(c);
+        graph.add(listener);
+        graph.subscribe(c_id, 0, listener_id);
+
+        let mut eg = ExecutionGraph::default();
+        eg.update(&graph, &func_lib);
+
+        // The flattened interior `ticker` carries the rewired subscriber.
+        let ticker_node = eg.by_name("ticker").unwrap();
+        assert_eq!(subscriber_ids(ticker_node, 0), vec![listener_id]);
+    }
+
+    /// Triggering a composite (as a subscriber) reaches the interior nodes
+    /// wired to its `SubgraphInput` trigger.
+    #[test]
+    fn triggering_composite_reaches_interior_subscribers() {
+        let func_lib = func_lib_with_ticker();
+
+        // def: SubgraphInput trigger → interior `print` subscribes to it.
+        let si = Node::new(NodeKind::SubgraphInput);
+        let si_id = si.id;
+        let reactor = fnode(&func_lib, "print");
+        let reactor_id = reactor.id;
+        let mut def_graph = Graph::default();
+        def_graph.add(si);
+        def_graph.add(reactor);
+        def_graph.subscribe(si_id, 0, reactor_id);
+        let def = SubgraphDef {
+            id: SubgraphId::unique(),
+            name: "Reactor".into(),
+            category: "Test".into(),
+            graph: def_graph,
+            inputs: vec![],
+            outputs: vec![],
+            events: vec![],
+        };
+
+        // parent: `ticker` emits; composite C subscribes to it.
+        let emitter = fnode(&func_lib, "ticker");
+        let emitter_id = emitter.id;
+        let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
+        let c_id = c.id;
+
+        let mut graph = Graph::default();
+        graph.subgraphs.add(def);
+        graph.add(emitter);
+        graph.add(c);
+        graph.subscribe(emitter_id, 0, c_id);
+
+        let mut eg = ExecutionGraph::default();
+        eg.update(&graph, &func_lib);
+
+        // The interior `print` flat id is the one wired onto `ticker`'s event.
+        let reactor_flat = eg.by_name("print").unwrap().id;
+        let ticker_node = eg.by_id(&emitter_id).unwrap();
+        assert_eq!(subscriber_ids(ticker_node, 0), vec![reactor_flat]);
     }
 }
