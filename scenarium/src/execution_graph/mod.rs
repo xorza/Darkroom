@@ -263,6 +263,34 @@ struct Visit {
     cause: VisitCause,
 }
 
+/// Per-run scratch buffers, kept on the `ExecutionGraph` and reused across
+/// runs so a repeated `execute_*` on an unchanged graph does no scheduling
+/// allocations. Reset (clear/resize) each run, never freed.
+#[derive(Debug, Default)]
+struct Scratch {
+    /// DFS coloring, reused across *both* backward passes (reset between).
+    color: Vec<Color>,
+    /// DFS work stack.
+    stack: Vec<Visit>,
+    /// Terminal-membership marker column (dedup without hashing).
+    is_terminal: Vec<bool>,
+    /// Deduped terminal node indices that seed the backward walks.
+    terminal_seeds: Vec<usize>,
+    /// Per-node invoke scratch, refilled per executed node.
+    inputs: Vec<InvokeInput>,
+    output_usage: Vec<OutputUsage>,
+}
+
+impl Scratch {
+    /// Mark `idx` as a terminal seed, deduping via the marker column.
+    fn mark_terminal(&mut self, idx: usize) {
+        if !self.is_terminal[idx] {
+            self.is_terminal[idx] = true;
+            self.terminal_seeds.push(idx);
+        }
+    }
+}
+
 // === Execution Graph ===
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -276,6 +304,9 @@ pub struct ExecutionGraph {
     /// Reusable subgraph-flattening scratch (kept across updates).
     #[serde(skip)]
     flattener: flatten::Flattener,
+    /// Reusable per-run scheduling scratch (kept across runs).
+    #[serde(skip)]
+    scratch: Scratch,
 }
 
 impl ExecutionGraph {
@@ -371,20 +402,31 @@ impl ExecutionGraph {
         event_triggers: bool,
         events: &[EventRef],
     ) -> Result<()> {
-        let terminal_idx = self.collect_terminal_nodes(terminals, event_triggers, events);
+        let mut scratch = std::mem::take(&mut self.scratch);
+
+        self.collect_terminal_nodes(terminals, event_triggers, events, &mut scratch);
 
         self.e_nodes
             .iter_mut()
             .for_each(|e| e.reset_for_execution());
 
-        let mut stack: Vec<Visit> = Vec::new();
-        self.walk_backward_collect_order(&terminal_idx, &mut stack)?;
-        self.propagate_input_state_forward();
-        self.walk_backward_collect_execute_order(&terminal_idx, &mut stack);
+        let result = self.walk_backward_collect_order(
+            &scratch.terminal_seeds,
+            &mut scratch.stack,
+            &mut scratch.color,
+        );
+        if result.is_ok() {
+            self.propagate_input_state_forward();
+            self.walk_backward_collect_execute_order(
+                &scratch.terminal_seeds,
+                &mut scratch.stack,
+                &mut scratch.color,
+            );
+            self.validate_for_execution();
+        }
 
-        self.validate_for_execution();
-
-        Ok(())
+        self.scratch = scratch;
+        result
     }
 
     fn collect_terminal_nodes(
@@ -392,52 +434,53 @@ impl ExecutionGraph {
         terminals: bool,
         event_triggers: bool,
         events: &[EventRef],
-    ) -> HashSet<usize> {
-        let mut terminal_idx: HashSet<usize> = HashSet::new();
+        scratch: &mut Scratch,
+    ) {
+        scratch.is_terminal.clear();
+        scratch.is_terminal.resize(self.e_nodes.len(), false);
+        scratch.terminal_seeds.clear();
 
         // Add event subscribers
-        terminal_idx.extend(events.iter().flat_map(|event| {
-            self.e_nodes.by_key(&event.node_id).unwrap().events[event.event_idx]
-                .subscribers
-                .iter()
-                .map(|id| self.e_nodes.index_of_key(id).unwrap())
-        }));
+        for event in events {
+            let e_node = self.e_nodes.by_key(&event.node_id).unwrap();
+            for sub in &e_node.events[event.event_idx].subscribers {
+                let idx = self.e_nodes.index_of_key(sub).unwrap();
+                scratch.mark_terminal(idx);
+            }
+        }
 
         // Add terminal nodes
         if terminals {
-            terminal_idx.extend(
-                self.e_nodes
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(idx, e)| e.terminal.then_some(idx)),
-            );
+            for (idx, e) in self.e_nodes.iter().enumerate() {
+                if e.terminal {
+                    scratch.mark_terminal(idx);
+                }
+            }
         }
 
         // Add nodes with event triggers
         if event_triggers {
-            terminal_idx.extend(
-                self.e_nodes
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, e)| e.events.iter().any(|ev| !ev.subscribers.is_empty()))
-                    .map(|(idx, _)| idx),
-            );
+            for (idx, e) in self.e_nodes.iter().enumerate() {
+                if e.events.iter().any(|ev| !ev.subscribers.is_empty()) {
+                    scratch.mark_terminal(idx);
+                }
+            }
         }
-
-        terminal_idx
     }
 
     fn walk_backward_collect_order(
         &mut self,
-        terminal_idx: &HashSet<usize>,
+        terminal_seeds: &[usize],
         stack: &mut Vec<Visit>,
+        color: &mut Vec<Color>,
     ) -> Result<()> {
         self.e_node_process_order.clear();
         stack.clear();
 
-        let mut color = vec![Color::White; self.e_nodes.len()];
+        color.clear();
+        color.resize(self.e_nodes.len(), Color::White);
 
-        for e_node_idx in terminal_idx.iter().copied() {
+        for e_node_idx in terminal_seeds.iter().copied() {
             stack.push(Visit {
                 e_node_idx,
                 cause: VisitCause::Terminal,
@@ -572,15 +615,17 @@ impl ExecutionGraph {
     // this pass exists to handle.
     fn walk_backward_collect_execute_order(
         &mut self,
-        terminal_idx: &HashSet<usize>,
+        terminal_seeds: &[usize],
         stack: &mut Vec<Visit>,
+        color: &mut Vec<Color>,
     ) {
         self.e_node_execute_order.clear();
         stack.clear();
 
-        let mut color = vec![Color::White; self.e_nodes.len()];
+        color.clear();
+        color.resize(self.e_nodes.len(), Color::White);
 
-        for e_node_idx in terminal_idx.iter().copied() {
+        for e_node_idx in terminal_seeds.iter().copied() {
             stack.push(Visit {
                 e_node_idx,
                 cause: VisitCause::Terminal,
@@ -637,8 +682,7 @@ impl ExecutionGraph {
     async fn run_execution(&mut self) -> ExecutionStats {
         let start = std::time::Instant::now();
 
-        let mut inputs: Vec<InvokeInput> = Vec::default();
-        let mut output_usage: Vec<OutputUsage> = Vec::default();
+        let mut scratch = std::mem::take(&mut self.scratch);
 
         for e_node_idx in self.e_node_execute_order.iter().copied() {
             let e_node = &self.e_nodes[e_node_idx];
@@ -656,8 +700,8 @@ impl ExecutionGraph {
                 continue;
             }
 
-            self.collect_inputs(e_node_idx, &mut inputs);
-            self.collect_output_usage(e_node_idx, &mut output_usage);
+            self.collect_inputs(e_node_idx, &mut scratch.inputs);
+            self.collect_output_usage(e_node_idx, &mut scratch.output_usage);
 
             let event_state = self.e_nodes[e_node_idx].event_state.clone();
             let e_node = &mut self.e_nodes[e_node_idx];
@@ -674,8 +718,8 @@ impl ExecutionGraph {
                     &mut self.ctx_manager,
                     &mut e_node.state,
                     &event_state,
-                    &inputs,
-                    &output_usage,
+                    &scratch.inputs,
+                    &scratch.output_usage,
                     outputs,
                 )
                 .await
@@ -696,7 +740,9 @@ impl ExecutionGraph {
             }
         }
 
-        self.collect_execution_stats(start)
+        let stats = self.collect_execution_stats(start);
+        self.scratch = scratch;
+        stats
     }
 
     fn has_errored_dependency(&self, e_node_idx: usize) -> bool {
