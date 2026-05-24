@@ -124,6 +124,9 @@ enum Color {
 
 // === Execution Node ===
 
+/// Topology + code for one flat node. Immutable across runs; all mutable
+/// per-run/cross-run state lives in the `ExecutionRuntime` slot of the same
+/// index (see `RuntimeSlot`).
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct ExecutionNode {
     pub id: NodeId,
@@ -137,15 +140,7 @@ pub struct ExecutionNode {
     pub events: Span,
 
     pub func_id: FuncId,
-    pub run_time: f64,
-    pub error: Option<Error>,
 
-    #[serde(skip)]
-    pub(crate) state: AnyState,
-    #[serde(skip)]
-    pub(crate) event_state: SharedAnyState,
-    #[serde(skip)]
-    pub(crate) output_values: Option<Vec<DynamicValue>>,
     #[serde(skip)]
     pub lambda: FuncLambda,
 
@@ -160,12 +155,6 @@ impl KeyIndexKey<NodeId> for ExecutionNode {
 }
 
 impl ExecutionNode {
-    fn reset_state(&mut self) {
-        self.state = AnyState::default();
-        self.event_state = SharedAnyState::default();
-        self.output_values = None;
-    }
-
     fn compute_behavior(
         node_behavior: NodeBehavior,
         func_behavior: FuncBehavior,
@@ -287,6 +276,61 @@ impl ExecutionPlan {
     }
 }
 
+// === Execution Runtime ===
+
+/// Per-node runtime state, index-aligned to `e_nodes`: the cross-run value
+/// cache (`state`, `event_state`, `output_values`) plus per-run results
+/// (`error`, `run_time`). Kept off the program node so the program stays
+/// immutable across a run; carries its own `id` so the cache can be
+/// reconciled by key on `update` (surviving node reorder/trim).
+#[derive(Default, Debug)]
+pub(crate) struct RuntimeSlot {
+    id: NodeId,
+    pub(crate) state: AnyState,
+    pub(crate) event_state: SharedAnyState,
+    pub(crate) output_values: Option<Vec<DynamicValue>>,
+    pub(crate) error: Option<Error>,
+    pub(crate) run_time: f64,
+}
+
+impl KeyIndexKey<NodeId> for RuntimeSlot {
+    fn key(&self) -> &NodeId {
+        &self.id
+    }
+}
+
+impl RuntimeSlot {
+    fn reset_state(&mut self) {
+        self.state = AnyState::default();
+        self.event_state = SharedAnyState::default();
+        self.output_values = None;
+    }
+}
+
+/// Mutable execution-time state: per-node `slots` (cache + per-run results,
+/// index-aligned to `e_nodes`) and the shared `ctx_manager`. Not serialized.
+#[derive(Default, Debug)]
+pub(crate) struct ExecutionRuntime {
+    slots: KeyIndexVec<NodeId, RuntimeSlot>,
+    ctx_manager: ContextManager,
+}
+
+impl ExecutionRuntime {
+    /// Rebuild `slots` in `e_nodes` order: preserve each surviving node's
+    /// cache by id, default new nodes, trim removed ones. Mirrors the
+    /// `CompactInsert` flatten runs over `e_nodes`, keeping `slots[i]` aligned
+    /// to `e_nodes[i]`.
+    fn reconcile(&mut self, e_nodes: &KeyIndexVec<NodeId, ExecutionNode>) {
+        let mut compact = self.slots.compact_insert_start();
+        for e_node in e_nodes.iter() {
+            compact.insert_with(&e_node.id, || RuntimeSlot {
+                id: e_node.id,
+                ..Default::default()
+            });
+        }
+    }
+}
+
 // === Execution Graph ===
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -301,8 +345,9 @@ pub struct ExecutionGraph {
     /// the per-node `outputs` span.
     n_outputs: usize,
 
+    /// Mutable execution-time state (cache + per-run results + context).
     #[serde(skip)]
-    ctx_manager: ContextManager,
+    runtime: ExecutionRuntime,
     /// Reusable subgraph-flattening scratch (kept across updates).
     #[serde(skip)]
     flattener: flatten::Flattener,
@@ -359,11 +404,12 @@ impl ExecutionGraph {
         self.inputs.clear();
         self.events.clear();
         self.n_outputs = 0;
+        self.runtime.slots.clear();
     }
 
     pub fn reset_states(&mut self) {
-        for e_node in &mut self.e_nodes {
-            e_node.reset_state();
+        for slot in self.runtime.slots.iter_mut() {
+            slot.reset_state();
         }
     }
 
@@ -386,6 +432,10 @@ impl ExecutionGraph {
             graph,
             func_lib,
         );
+
+        // Realign the runtime cache to the rebuilt node set (preserve by id,
+        // default new, trim gone).
+        self.runtime.reconcile(&self.e_nodes);
 
         self.validate_built(func_lib);
     }
@@ -434,9 +484,9 @@ impl ExecutionGraph {
 
         self.collect_terminal_nodes(terminals, event_triggers, events, &mut scratch);
 
-        for e_node in self.e_nodes.iter_mut() {
-            e_node.run_time = 0.0;
-            e_node.error = None;
+        for slot in self.runtime.slots.iter_mut() {
+            slot.run_time = 0.0;
+            slot.error = None;
         }
 
         let result = self.walk_backward_collect_order(
@@ -623,7 +673,7 @@ impl ExecutionGraph {
             }
 
             let behavior = self.e_nodes[e_node_idx].behavior;
-            let has_outputs = self.e_nodes[e_node_idx].output_values.is_some();
+            let has_outputs = self.runtime.slots[e_node_idx].output_values.is_some();
             let flags = &mut plan.node_flags[e_node_idx];
             flags.inputs_updated = inputs_updated;
             flags.missing_required_inputs = missing_required;
@@ -731,16 +781,17 @@ impl ExecutionGraph {
         let mut scratch = std::mem::take(&mut self.scratch);
 
         for e_node_idx in plan.execute_order.iter().copied() {
-            let e_node = &self.e_nodes[e_node_idx];
-            if e_node.lambda.is_none() {
+            if self.e_nodes[e_node_idx].lambda.is_none() {
                 continue;
             }
 
+            let func_id = self.e_nodes[e_node_idx].func_id;
+
             if self.has_errored_dependency(e_node_idx) {
-                let e_node = &mut self.e_nodes[e_node_idx];
-                e_node.output_values = None;
-                e_node.error = Some(Error::Invoke {
-                    func_id: e_node.func_id,
+                let slot = &mut self.runtime.slots[e_node_idx];
+                slot.output_values = None;
+                slot.error = Some(Error::Invoke {
+                    func_id,
                     message: "Skipped due to upstream error".to_string(),
                 });
                 continue;
@@ -749,37 +800,39 @@ impl ExecutionGraph {
             self.collect_inputs(e_node_idx, &plan, &mut scratch.inputs);
             self.collect_output_usage(e_node_idx, &plan, &mut scratch.output_usage);
 
-            let event_state = self.e_nodes[e_node_idx].event_state.clone();
-            let e_node = &mut self.e_nodes[e_node_idx];
-            assert!(e_node.error.is_none());
-
-            let output_count = e_node.outputs.len as usize;
-            let outputs = e_node
-                .output_values
-                .get_or_insert_with(|| vec![DynamicValue::None; output_count]);
+            let output_count = self.e_nodes[e_node_idx].outputs.len as usize;
+            let event_state = self.runtime.slots[e_node_idx].event_state.clone();
+            assert!(self.runtime.slots[e_node_idx].error.is_none());
 
             let start = std::time::Instant::now();
-            let result = e_node
-                .lambda
-                .invoke(
-                    &mut self.ctx_manager,
-                    &mut e_node.state,
-                    &event_state,
-                    &scratch.inputs,
-                    &scratch.output_usage,
-                    outputs,
-                )
-                .await
-                .map_err(|e| Error::Invoke {
-                    func_id: e_node.func_id,
-                    message: e.to_string(),
-                });
+            let result = {
+                let lambda = &self.e_nodes[e_node_idx].lambda;
+                let ExecutionRuntime { slots, ctx_manager } = &mut self.runtime;
+                let slot = &mut slots[e_node_idx];
+                let outputs = slot
+                    .output_values
+                    .get_or_insert_with(|| vec![DynamicValue::None; output_count]);
+                lambda
+                    .invoke(
+                        ctx_manager,
+                        &mut slot.state,
+                        &event_state,
+                        &scratch.inputs,
+                        &scratch.output_usage,
+                        outputs,
+                    )
+                    .await
+                    .map_err(|e| Error::Invoke {
+                        func_id,
+                        message: e.to_string(),
+                    })
+            };
 
-            e_node.run_time = start.elapsed().as_secs_f64();
-
+            let slot = &mut self.runtime.slots[e_node_idx];
+            slot.run_time = start.elapsed().as_secs_f64();
             if let Err(err) = result {
-                e_node.error = Some(err);
-                e_node.output_values = None;
+                slot.error = Some(err);
+                slot.output_values = None;
             }
 
             let span = self.e_nodes[e_node_idx].inputs;
@@ -797,7 +850,7 @@ impl ExecutionGraph {
     fn has_errored_dependency(&self, e_node_idx: usize) -> bool {
         let span = self.e_nodes[e_node_idx].inputs;
         self.inputs[span.range()].iter().any(|input| {
-            matches!(&input.binding, ExecutionBinding::Bind(addr) if self.e_nodes[addr.target_idx].error.is_some())
+            matches!(&input.binding, ExecutionBinding::Bind(addr) if self.runtime.slots[addr.target_idx].error.is_some())
         })
     }
 
@@ -814,12 +867,14 @@ impl ExecutionGraph {
                 ExecutionBinding::None => DynamicValue::None,
                 ExecutionBinding::Const(v) => v.into(),
                 ExecutionBinding::Bind(addr) => {
-                    let output_node = &self.e_nodes[addr.target_idx];
-                    let outputs = output_node
+                    let outputs = self.runtime.slots[addr.target_idx]
                         .output_values
                         .as_ref()
                         .expect("missing output values");
-                    assert_eq!(outputs.len(), output_node.outputs.len as usize);
+                    assert_eq!(
+                        outputs.len(),
+                        self.e_nodes[addr.target_idx].outputs.len as usize
+                    );
                     outputs[addr.port_idx].clone()
                 }
             };
@@ -858,10 +913,9 @@ impl ExecutionGraph {
         let mut node_errors = Vec::new();
 
         for &idx in &plan.execute_order {
-            let e = &self.e_nodes[idx];
             executed_nodes.push(ExecutedNodeStats {
-                node_id: e.id,
-                elapsed_secs: e.run_time,
+                node_id: self.e_nodes[idx].id,
+                elapsed_secs: self.runtime.slots[idx].run_time,
             });
         }
 
@@ -881,7 +935,7 @@ impl ExecutionGraph {
             if flags.cached {
                 cached_nodes.push(e.id);
             }
-            if let Some(err) = &e.error {
+            if let Some(err) = &self.runtime.slots[idx].error {
                 node_errors.push(NodeError {
                     node_id: e.id,
                     error: err.clone(),
@@ -902,14 +956,15 @@ impl ExecutionGraph {
     // === Query ===
 
     pub fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
-        let e_node = self.e_nodes.by_key(node_id)?;
+        let idx = self.e_nodes.index_of_key(node_id)?;
+        let e_node = &self.e_nodes[idx];
 
         let inputs = self.inputs[e_node.inputs.range()]
             .iter()
             .map(|input| match &input.binding {
                 ExecutionBinding::None => None,
                 ExecutionBinding::Const(v) => Some(DynamicValue::from(v)),
-                ExecutionBinding::Bind(addr) => self.e_nodes[addr.target_idx]
+                ExecutionBinding::Bind(addr) => self.runtime.slots[addr.target_idx]
                     .output_values
                     .as_ref()
                     .and_then(|o| o.get(addr.port_idx))
@@ -917,7 +972,7 @@ impl ExecutionGraph {
             })
             .collect();
 
-        let outputs = e_node
+        let outputs = self.runtime.slots[idx]
             .output_values
             .as_ref()
             .map(|o| o.to_vec())
@@ -939,12 +994,12 @@ impl ExecutionGraph {
             .flatten()
             .chain(values.outputs.iter_mut())
         {
-            if let Some(pending) = value.gen_preview(&mut self.ctx_manager) {
+            if let Some(pending) = value.gen_preview(&mut self.runtime.ctx_manager) {
                 pending_previews.push(pending);
             }
         }
         for pending in pending_previews {
-            pending.wait(&mut self.ctx_manager).await;
+            pending.wait(&mut self.runtime.ctx_manager).await;
         }
         Some(values)
     }
@@ -961,7 +1016,13 @@ impl ExecutionGraph {
             .chain(stats.executed_nodes.iter().map(|n| n.node_id))
             .flat_map(|node_id| {
                 let e_node = self.by_id(&node_id).unwrap();
-                let event_state = e_node.event_state.clone();
+                let event_state = self
+                    .runtime
+                    .slots
+                    .by_key(&node_id)
+                    .unwrap()
+                    .event_state
+                    .clone();
                 let id = e_node.id;
                 self.events[e_node.events.range()]
                     .iter()
@@ -990,11 +1051,16 @@ impl ExecutionGraph {
             return;
         }
 
+        // Runtime slots stay index-aligned to nodes after `reconcile`.
+        assert_eq!(self.runtime.slots.len(), self.e_nodes.len());
+
         let mut seen_node_ids: HashSet<NodeId> = HashSet::with_capacity(self.e_nodes.len());
-        for e_node in self.e_nodes.iter() {
+        for (idx, e_node) in self.e_nodes.iter().enumerate() {
             assert!(seen_node_ids.insert(e_node.id));
 
-            if let Some(output_values) = e_node.output_values.as_ref() {
+            let slot = &self.runtime.slots[idx];
+            assert_eq!(slot.id, e_node.id);
+            if let Some(output_values) = slot.output_values.as_ref() {
                 assert_eq!(output_values.len(), e_node.outputs.len as usize);
             }
 
@@ -1089,5 +1155,22 @@ impl ExecutionGraph {
 
     pub(crate) fn node_output_usage(&self, e_node: &ExecutionNode) -> &[u32] {
         &self.plan_buf.output_usage[e_node.outputs.range()]
+    }
+
+    // === Runtime-slot inspection ===
+
+    pub(crate) fn runtime_slot(&self, e_node: &ExecutionNode) -> &RuntimeSlot {
+        self.runtime.slots.by_key(&e_node.id).unwrap()
+    }
+
+    /// Iterator over runtime slots, index-aligned to `e_nodes`.
+    pub(crate) fn runtime_slots(&self) -> std::slice::Iter<'_, RuntimeSlot> {
+        self.runtime.slots.iter()
+    }
+
+    /// Seed a node's cached output (simulating a prior run).
+    pub(crate) fn set_output_values(&mut self, node_name: &str, values: Vec<DynamicValue>) {
+        let id = self.by_name(node_name).unwrap().id;
+        self.runtime.slots.by_key_mut(&id).unwrap().output_values = Some(values);
     }
 }

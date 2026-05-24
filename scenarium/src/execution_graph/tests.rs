@@ -481,8 +481,7 @@ mod behavior {
         assert!(execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
 
         // Simulate cached output — pure node should skip
-        execution_graph.by_name_mut("get_b").unwrap().output_values =
-            Some(vec![DynamicValue::Int(7)]);
+        execution_graph.set_output_values("get_b", vec![DynamicValue::Int(7)]);
 
         execution_graph.update(&graph, &func_lib);
         execution_graph.prepare_execution(true, false, &[])?;
@@ -532,8 +531,7 @@ mod behavior {
         execution_graph.update(&graph, &func_lib);
 
         // Even with cached output, impure node still wants to execute
-        execution_graph.by_name_mut("get_b").unwrap().output_values =
-            Some(vec![DynamicValue::Int(7)]);
+        execution_graph.set_output_values("get_b", vec![DynamicValue::Int(7)]);
         execution_graph.update(&graph, &func_lib);
         execution_graph.prepare_execution(true, false, &[])?;
 
@@ -563,8 +561,7 @@ mod behavior {
         );
 
         // With cached output, Once node is skipped even though func is Impure
-        execution_graph.by_name_mut("get_b").unwrap().output_values =
-            Some(vec![DynamicValue::Int(7)]);
+        execution_graph.set_output_values("get_b", vec![DynamicValue::Int(7)]);
         execution_graph.update(&graph, &func_lib);
         execution_graph.prepare_execution(true, false, &[])?;
 
@@ -781,30 +778,29 @@ mod invalidation {
         execution_graph.execute_terminals().await?;
 
         // Verify outputs exist before reset
-        assert!(
-            execution_graph
-                .by_name("sum")
-                .unwrap()
-                .output_values
-                .is_some()
-        );
+        let sum = execution_graph.by_name("sum").unwrap();
+        assert!(execution_graph.runtime_slot(sum).output_values.is_some());
 
         execution_graph.reset_states();
 
         // All output_values and state should be cleared
-        for e_node in execution_graph.e_nodes.iter() {
+        for (e_node, slot) in execution_graph
+            .e_nodes
+            .iter()
+            .zip(execution_graph.runtime_slots())
+        {
             assert!(
-                e_node.output_values.is_none(),
+                slot.output_values.is_none(),
                 "node {} should have no output_values",
                 e_node.name
             );
             assert!(
-                e_node.state.is_none(),
+                slot.state.is_none(),
                 "node {} should have no state",
                 e_node.name
             );
             assert!(
-                e_node.event_state.lock().await.is_none(),
+                slot.event_state.lock().await.is_none(),
                 "node {} should have no event state",
                 e_node.name
             );
@@ -1135,12 +1131,12 @@ mod error_propagation {
         let stats = execution_graph.execute_terminals().await?;
 
         // get_a fails with error, no outputs
-        let get_a = execution_graph.by_name("get_a").unwrap();
+        let get_a = execution_graph.runtime_slot(execution_graph.by_name("get_a").unwrap());
         assert!(get_a.error.is_some());
         assert!(get_a.output_values.is_none());
 
         // get_b succeeds
-        let get_b = execution_graph.by_name("get_b").unwrap();
+        let get_b = execution_graph.runtime_slot(execution_graph.by_name("get_b").unwrap());
         assert!(get_b.error.is_none());
         assert!(get_b.output_values.is_some());
         assert!(
@@ -1151,7 +1147,7 @@ mod error_propagation {
         );
 
         // sum depends on get_a, gets upstream error
-        let sum = execution_graph.by_name("sum").unwrap();
+        let sum = execution_graph.runtime_slot(execution_graph.by_name("sum").unwrap());
         assert!(sum.error.is_some());
         assert!(sum.output_values.is_none());
         assert!(
@@ -1163,7 +1159,7 @@ mod error_propagation {
         );
 
         // mult depends on sum, also gets upstream error
-        let mult = execution_graph.by_name("mult").unwrap();
+        let mult = execution_graph.runtime_slot(execution_graph.by_name("mult").unwrap());
         assert!(mult.error.is_some());
         assert!(mult.output_values.is_none());
         assert!(
@@ -1175,7 +1171,7 @@ mod error_propagation {
         );
 
         // print depends on mult, also gets upstream error
-        let print = execution_graph.by_name("print").unwrap();
+        let print = execution_graph.runtime_slot(execution_graph.by_name("print").unwrap());
         assert!(print.error.is_some());
         assert!(print.output_values.is_none());
 
