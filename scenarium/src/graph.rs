@@ -737,8 +737,13 @@ impl NodeBehavior {
 
 #[cfg(test)]
 mod tests {
-    use crate::graph::Graph;
-    use crate::testing::test_graph;
+    use crate::data::DataType;
+    use crate::function::{Func, FuncInput};
+    use crate::graph::{
+        Binding, Graph, InputPort, Node, NodeBehavior, NodeId, NodeKind, OutputPort, Subscription,
+    };
+    use crate::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
+    use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
     use common::SerdeFormat;
 
     #[test]
@@ -766,8 +771,6 @@ mod tests {
 
     #[test]
     fn check_rejects_dangling_binding() {
-        use crate::graph::{InputPort, NodeId};
-
         let mut graph = test_graph();
         let sum_id = graph.by_name("sum").unwrap().id;
         // Repoint sum's input at a node that doesn't exist.
@@ -779,8 +782,6 @@ mod tests {
 
     #[test]
     fn deserialize_rejects_corrupt_graph() {
-        use crate::graph::{InputPort, NodeId};
-
         let mut graph = test_graph();
         let sum_id = graph.by_name("sum").unwrap().id;
         graph.set_input_binding(InputPort::new(sum_id, 0), (NodeId::unique(), 0).into());
@@ -808,5 +809,327 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    // === Accessors ===
+
+    #[test]
+    fn node_kind_accessors() {
+        let func_id = "432b9bf1-f478-476c-a9c9-9a6e190124fc".into();
+        let func = NodeKind::Func(func_id);
+        assert_eq!(func.as_func(), Some(func_id));
+        assert_eq!(func.as_subgraph(), None);
+        assert!(!func.is_boundary());
+
+        let sub_id = SubgraphId::unique();
+        let sub = NodeKind::Subgraph(SubgraphRef::Local(sub_id));
+        assert_eq!(sub.as_func(), None);
+        assert_eq!(sub.as_subgraph().map(|r| r.id()), Some(sub_id));
+        assert!(!sub.is_boundary());
+
+        assert!(NodeKind::SubgraphInput.is_boundary());
+        assert!(NodeKind::SubgraphOutput.is_boundary());
+        assert_eq!(NodeKind::SubgraphInput.as_func(), None);
+        assert_eq!(NodeKind::SubgraphOutput.as_subgraph(), None);
+    }
+
+    #[test]
+    fn node_func_id_shims_kind() {
+        let func_id = "432b9bf1-f478-476c-a9c9-9a6e190124fc".into();
+        assert_eq!(Node::new(NodeKind::Func(func_id)).func_id(), Some(func_id));
+        assert_eq!(Node::new(NodeKind::SubgraphInput).func_id(), None);
+    }
+
+    #[test]
+    fn binding_accessors() {
+        let out = OutputPort {
+            node_id: NodeId::unique(),
+            port_idx: 2,
+        };
+        let bind = Binding::Bind(out);
+        assert_eq!(bind.as_output_binding(), Some(&out));
+        assert!(bind.is_some());
+        assert!(!bind.is_none());
+
+        let konst = Binding::from(5i64);
+        assert_eq!(konst.as_output_binding(), None);
+        assert!(konst.is_some()); // a Const is a real binding
+        assert!(!konst.is_none());
+
+        let none = Binding::None;
+        assert_eq!(none.as_output_binding(), None);
+        assert!(!none.is_some());
+        assert!(none.is_none());
+    }
+
+    #[test]
+    fn binding_conversions() {
+        let nid = NodeId::unique();
+        let from_port: Binding = OutputPort {
+            node_id: nid,
+            port_idx: 1,
+        }
+        .into();
+        let from_tuple: Binding = (nid, 1usize).into();
+        assert_eq!(from_port, from_tuple);
+        assert_eq!(from_port.as_output_binding().unwrap().port_idx, 1);
+
+        assert_eq!(Binding::from(7i64), Binding::Const(7i64.into()));
+    }
+
+    #[test]
+    fn node_behavior_toggle_round_trips() {
+        let mut b = NodeBehavior::AsFunction;
+        b.toggle();
+        assert_eq!(b, NodeBehavior::Once);
+        b.toggle();
+        assert_eq!(b, NodeBehavior::AsFunction);
+    }
+
+    // === Data bindings ===
+
+    #[test]
+    fn node_bindings_yields_ports_in_order_with_none_gaps() {
+        let graph = test_graph();
+        let sum_id = graph.by_name("sum").unwrap().id;
+        let get_a_id = graph.by_name("get_a").unwrap().id;
+        let get_b_id = graph.by_name("get_b").unwrap().id;
+
+        // sum has two bound inputs; ask for arity 3 to exercise the unbound gap.
+        let bindings: Vec<_> = graph.node_bindings(sum_id, 3).collect();
+        assert_eq!(
+            bindings,
+            vec![
+                (
+                    0,
+                    Binding::Bind(OutputPort {
+                        node_id: get_a_id,
+                        port_idx: 0
+                    })
+                ),
+                (
+                    1,
+                    Binding::Bind(OutputPort {
+                        node_id: get_b_id,
+                        port_idx: 0
+                    })
+                ),
+                (2, Binding::None),
+            ]
+        );
+    }
+
+    // === Event subscriptions ===
+
+    #[test]
+    fn subscribe_unsubscribe_is_subscribed() {
+        let graph = test_graph();
+        let emitter = graph.by_name("get_a").unwrap().id;
+        let sub = graph.by_name("sum").unwrap().id;
+        let mut graph = graph;
+
+        assert!(!graph.is_subscribed(emitter, 0, sub));
+        graph.subscribe(emitter, 0, sub);
+        assert!(graph.is_subscribed(emitter, 0, sub));
+
+        // Distinct event_idx is a distinct edge.
+        assert!(!graph.is_subscribed(emitter, 1, sub));
+
+        // Re-subscribing is idempotent (BTreeSet dedups).
+        graph.subscribe(emitter, 0, sub);
+        assert_eq!(graph.subscriptions().count(), 1);
+
+        graph.unsubscribe(emitter, 0, sub);
+        assert!(!graph.is_subscribed(emitter, 0, sub));
+        assert_eq!(graph.subscriptions().count(), 0);
+    }
+
+    #[test]
+    fn subscribers_ranges_one_emitter_event() {
+        let mut graph = test_graph();
+        let emitter = graph.by_name("get_a").unwrap().id;
+        let s1 = graph.by_name("sum").unwrap().id;
+        let s2 = graph.by_name("mult").unwrap().id;
+        let other = graph.by_name("print").unwrap().id;
+
+        graph.subscribe(emitter, 0, s1);
+        graph.subscribe(emitter, 0, s2);
+        graph.subscribe(emitter, 1, other); // different event: must not leak in
+
+        let mut got: Vec<NodeId> = graph.subscribers(emitter, 0).collect();
+        got.sort();
+        let mut want = vec![s1, s2];
+        want.sort();
+        assert_eq!(got, want);
+
+        assert_eq!(
+            graph.subscribers(emitter, 1).collect::<Vec<_>>(),
+            vec![other]
+        );
+        assert_eq!(graph.subscribers(emitter, 2).count(), 0);
+    }
+
+    // === Snapshot / restore (editor undo) ===
+
+    #[test]
+    fn wiring_snapshot_round_trips_through_restore() {
+        let mut graph = test_graph();
+        let sum_id = graph.by_name("sum").unwrap().id;
+        let get_a_id = graph.by_name("get_a").unwrap().id;
+
+        // Add a subscription that touches `sum` so both arms are exercised.
+        graph.subscribe(get_a_id, 0, sum_id);
+
+        let node = graph.by_id(&sum_id).unwrap().clone();
+        let bindings = graph.bindings_touching(sum_id);
+        let subs = graph.subscriptions_touching(sum_id);
+
+        // sum touches: its own inputs (sum,0),(sum,1) + the edge (mult,0)<-sum.
+        assert_eq!(bindings.len(), 3);
+        assert_eq!(
+            subs,
+            vec![Subscription {
+                emitter: get_a_id,
+                event_idx: 0,
+                subscriber: sum_id
+            }]
+        );
+
+        let edges_before = graph.edges().count();
+        graph.remove_by_id(sum_id);
+        assert_eq!(graph.edges().count(), edges_before - 3);
+        assert!(graph.subscriptions_touching(sum_id).is_empty());
+
+        // Undo: re-add the node, then re-apply its wiring.
+        graph.add(node);
+        graph.restore_wiring(&bindings, &subs);
+
+        assert_eq!(graph.edges().count(), edges_before);
+        assert!(graph.is_subscribed(get_a_id, 0, sum_id));
+        assert_eq!(graph.bindings_touching(sum_id), bindings);
+    }
+
+    // === Construction helpers seed default const bindings ===
+
+    fn func_with_default(default: i64) -> Func {
+        Func {
+            name: "withdefault".into(),
+            inputs: vec![FuncInput {
+                name: "x".into(),
+                required: false,
+                data_type: DataType::Int,
+                default_value: Some(default.into()),
+                value_options: vec![],
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn add_func_node_seeds_default_const_binding() {
+        let func = func_with_default(7);
+        let mut graph = Graph::default();
+        let id = graph.add_func_node(&func);
+
+        assert_eq!(graph.by_id(&id).unwrap().func_id(), Some(func.id));
+        assert_eq!(
+            graph.input_binding(InputPort::new(id, 0)),
+            Binding::Const(7i64.into())
+        );
+    }
+
+    #[test]
+    fn add_func_node_leaves_defaultless_inputs_unbound() {
+        let func_lib = test_func_lib(TestFuncHooks::default());
+        let sum = func_lib.by_name("sum").unwrap(); // inputs have no defaults
+        let mut graph = Graph::default();
+        let id = graph.add_func_node(sum);
+
+        assert_eq!(graph.input_binding(InputPort::new(id, 0)), Binding::None);
+        assert_eq!(graph.input_binding(InputPort::new(id, 1)), Binding::None);
+    }
+
+    #[test]
+    fn add_subgraph_node_seeds_default_const_binding() {
+        let mut input = FuncInput {
+            name: "A".into(),
+            required: false,
+            data_type: DataType::Int,
+            default_value: Some(3i64.into()),
+            value_options: vec![],
+        };
+        let def = SubgraphDef {
+            id: SubgraphId::unique(),
+            name: "Def".into(),
+            category: "Test".into(),
+            graph: Graph::default(),
+            inputs: vec![input.clone(), {
+                input.default_value = None;
+                input
+            }],
+            outputs: vec![],
+            events: vec![],
+        };
+
+        let mut graph = Graph::default();
+        let id = graph.add_subgraph_node(&def, SubgraphRef::Local(def.id));
+
+        // Port 0 had a default; port 1 did not.
+        assert_eq!(
+            graph.input_binding(InputPort::new(id, 0)),
+            Binding::Const(3i64.into())
+        );
+        assert_eq!(graph.input_binding(InputPort::new(id, 1)), Binding::None);
+    }
+
+    // === Definition resolution ===
+
+    #[test]
+    fn resolve_def_picks_local_or_linked_source() {
+        let mut func_lib = test_func_lib(TestFuncHooks::default());
+
+        let linked_id = SubgraphId::unique();
+        func_lib.add_subgraph(SubgraphDef {
+            id: linked_id,
+            name: "Linked".into(),
+            category: "Test".into(),
+            graph: Graph::default(),
+            inputs: vec![],
+            outputs: vec![],
+            events: vec![],
+        });
+
+        let mut graph = Graph::default();
+        let local_id = SubgraphId::unique();
+        graph.subgraphs.add(SubgraphDef {
+            id: local_id,
+            name: "Local".into(),
+            category: "Test".into(),
+            graph: Graph::default(),
+            inputs: vec![],
+            outputs: vec![],
+            events: vec![],
+        });
+
+        assert_eq!(
+            graph
+                .resolve_def(SubgraphRef::Local(local_id), &func_lib)
+                .unwrap()
+                .name,
+            "Local"
+        );
+        assert_eq!(
+            graph
+                .resolve_def(SubgraphRef::Linked(linked_id), &func_lib)
+                .unwrap()
+                .name,
+            "Linked"
+        );
+        // A local ref whose id only exists in the func_lib does not resolve.
+        assert!(
+            graph
+                .resolve_def(SubgraphRef::Local(linked_id), &func_lib)
+                .is_none()
+        );
     }
 }
