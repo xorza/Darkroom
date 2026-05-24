@@ -50,6 +50,9 @@ pub(crate) struct Flattener {
     /// Reusable scratch for the next `inputs` pool, built during emit and
     /// swapped into the graph (the displaced old pool returns here for reuse).
     inputs_scratch: Vec<ExecutionInput>,
+    /// Reusable scratch for the next per-input dirty column, built in lockstep
+    /// with `inputs_scratch` and swapped into the executor's `input_dirty`.
+    dirty_scratch: Vec<bool>,
 }
 
 /// The graph's SoA pools, rebuilt each `build`. `inputs` is the new pool being
@@ -60,26 +63,34 @@ pub(crate) struct Flattener {
 pub(crate) struct Pools<'a> {
     pub inputs: &'a mut Vec<ExecutionInput>,
     pub events: &'a mut Vec<ExecutionEvent>,
+    /// The executor's cross-run per-input dirty column, rebuilt in lockstep
+    /// with `inputs` (reused nodes carry their bits over, new inputs start
+    /// clean, then `set_input` marks changed bindings).
+    pub input_dirty: &'a mut Vec<bool>,
 }
 
 impl Flattener {
     /// Flatten `root` into `e_nodes` (via compact insert, preserving caches),
-    /// rebuilding the SoA pools. Inputs carry over per-node `binding`/
-    /// `binding_changed` for reused nodes; outputs/events are rebuilt fresh.
+    /// rebuilding the SoA pools. Inputs carry over per-node `binding` and dirty
+    /// bit for reused nodes; outputs/events are rebuilt fresh. Returns the total
+    /// output count assigned across all nodes.
     pub(crate) fn build(
         &mut self,
         e_nodes: &mut KeyIndexVec<NodeId, ExecutionNode>,
         pools: Pools<'_>,
         root: &Graph,
         func_lib: &FuncLib,
-    ) {
+    ) -> u32 {
         self.ids.clear();
         self.seen.clear();
         self.subs.clear();
 
         let mut new_inputs = std::mem::take(&mut self.inputs_scratch);
         new_inputs.clear();
+        let mut new_dirty = std::mem::take(&mut self.dirty_scratch);
+        new_dirty.clear();
         pools.events.clear();
+        let n_outputs;
         {
             let mut run = Run {
                 root,
@@ -91,15 +102,20 @@ impl Flattener {
                 cur_idx: 0,
                 old_inputs: pools.inputs.as_slice(),
                 new_inputs: &mut new_inputs,
+                old_dirty: pools.input_dirty.as_slice(),
+                new_dirty: &mut new_dirty,
                 n_outputs: 0,
                 events: pools.events,
             };
             run.emit();
+            n_outputs = run.n_outputs;
             // `compact` finalizes on drop, trimming nodes that disappeared.
         }
-        // Swap the freshly built inputs pool in; recycle the old one as scratch.
+        // Swap the freshly built pools in; recycle the old ones as scratch.
         std::mem::swap(pools.inputs, &mut new_inputs);
         self.inputs_scratch = new_inputs;
+        std::mem::swap(pools.input_dirty, &mut new_dirty);
+        self.dirty_scratch = new_dirty;
 
         // Apply resolved event edges now that every flat emitter exists and is
         // addressable by key. Subscribers were cleared while rebuilding events.
@@ -111,6 +127,8 @@ impl Flattener {
                     .push(s.subscriber);
             }
         }
+
+        n_outputs
     }
 }
 
@@ -177,6 +195,10 @@ struct Run<'a> {
     old_inputs: &'a [ExecutionInput],
     /// The inputs pool being built this update; `cur_idx`'s span is its tail.
     new_inputs: &'a mut Vec<ExecutionInput>,
+    /// Last build's dirty column, read to carry over reused nodes' dirty bits.
+    old_dirty: &'a [bool],
+    /// The dirty column being built this update, parallel to `new_inputs`.
+    new_dirty: &'a mut Vec<bool>,
     /// Running total of outputs emitted so far; also the next output span start.
     n_outputs: u32,
     events: &'a mut Vec<ExecutionEvent>,
@@ -236,6 +258,8 @@ impl<'a> Run<'a> {
                     if was_inited {
                         self.new_inputs
                             .extend_from_slice(&self.old_inputs[old_inputs_span.range()]);
+                        self.new_dirty
+                            .extend_from_slice(&self.old_dirty[old_inputs_span.range()]);
                     } else {
                         for func_input in &func.inputs {
                             self.new_inputs.push(ExecutionInput {
@@ -243,6 +267,7 @@ impl<'a> Run<'a> {
                                 data_type: func_input.data_type.clone(),
                                 ..Default::default()
                             });
+                            self.new_dirty.push(false);
                         }
                     }
 
@@ -387,30 +412,30 @@ impl<'a> Run<'a> {
         }
     }
 
-    /// Mutable handle to input `input_idx` of the node currently being filled,
+    /// Pool index of input `input_idx` of the node currently being filled,
     /// living in the new pool at `cur_idx`'s span.
-    fn cur_input(&mut self, input_idx: usize) -> &mut ExecutionInput {
-        let pool_idx = self.compact[self.cur_idx].inputs.start as usize + input_idx;
-        &mut self.new_inputs[pool_idx]
+    fn cur_input_idx(&self, input_idx: usize) -> usize {
+        self.compact[self.cur_idx].inputs.start as usize + input_idx
     }
 
-    /// Write the resolved source into input `cur_idx`/`input_idx`, tracking
-    /// `binding_changed` so caching stays correct across updates.
+    /// Write the resolved source into input `cur_idx`/`input_idx`, marking the
+    /// dirty bit when the binding changes so caching stays correct across updates.
     fn set_input(&mut self, input_idx: usize, source: Source) {
+        let pool_idx = self.cur_input_idx(input_idx);
         match source {
             Source::None => {
-                let e_input = self.cur_input(input_idx);
+                let e_input = &mut self.new_inputs[pool_idx];
                 if !matches!(e_input.binding, ExecutionBinding::None) {
                     e_input.binding = ExecutionBinding::None;
-                    e_input.binding_changed = true;
+                    self.new_dirty[pool_idx] = true;
                 }
             }
             Source::Const(v) => {
-                let e_input = self.cur_input(input_idx);
+                let e_input = &mut self.new_inputs[pool_idx];
                 if !matches!(&e_input.binding, ExecutionBinding::Const(existing) if *existing == v)
                 {
                     e_input.binding = ExecutionBinding::Const(v);
-                    e_input.binding_changed = true;
+                    self.new_dirty[pool_idx] = true;
                 }
             }
             Source::Producer { node_id, port_idx } => {
@@ -418,7 +443,7 @@ impl<'a> Run<'a> {
                     id: node_id,
                     ..Default::default()
                 });
-                let e_input = self.cur_input(input_idx);
+                let e_input = &mut self.new_inputs[pool_idx];
                 match &mut e_input.binding {
                     ExecutionBinding::Bind(existing)
                         if existing.target_id == node_id && existing.port_idx == port_idx =>
@@ -431,7 +456,7 @@ impl<'a> Run<'a> {
                             target_idx,
                             port_idx,
                         });
-                        e_input.binding_changed = true;
+                        self.new_dirty[pool_idx] = true;
                     }
                 }
             }

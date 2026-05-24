@@ -270,8 +270,8 @@ mod const_bindings {
         execution_graph.update(&graph, &func_lib);
 
         let mult = execution_graph.by_name("mult").unwrap();
-        assert!(execution_graph.node_inputs(mult)[0].binding_changed);
-        assert!(execution_graph.node_inputs(mult)[1].binding_changed);
+        assert!(execution_graph.node_input_dirty(mult)[0]);
+        assert!(execution_graph.node_input_dirty(mult)[1]);
 
         execution_graph.execute_terminals().await?;
 
@@ -284,9 +284,9 @@ mod const_bindings {
         let mult = execution_graph.by_name("mult").unwrap();
         assert!(execution_graph.node_flags(mult).inputs_updated);
         // After execution, binding_changed is cleared
-        assert!(!execution_graph.node_inputs(mult)[0].binding_changed);
+        assert!(!execution_graph.node_input_dirty(mult)[0]);
         assert!(!execution_graph.node_input_flags(mult)[0].dependency_wants_execute);
-        assert!(!execution_graph.node_inputs(mult)[1].binding_changed);
+        assert!(!execution_graph.node_input_dirty(mult)[1]);
         assert!(!execution_graph.node_input_flags(mult)[1].dependency_wants_execute);
 
         // Re-run with same bindings: mult is cached, only print re-executes
@@ -297,8 +297,8 @@ mod const_bindings {
 
         let mult = execution_graph.by_name("mult").unwrap();
         assert!(!execution_graph.node_flags(mult).inputs_updated);
-        assert!(!execution_graph.node_inputs(mult)[0].binding_changed);
-        assert!(!execution_graph.node_inputs(mult)[1].binding_changed);
+        assert!(!execution_graph.node_input_dirty(mult)[0]);
+        assert!(!execution_graph.node_input_dirty(mult)[1]);
 
         // Change one const: mult re-executes
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(4)));
@@ -313,8 +313,8 @@ mod const_bindings {
             ["mult", "print"]
         );
 
-        assert!(execution_graph.node_inputs(mult)[0].binding_changed);
-        assert!(!execution_graph.node_inputs(mult)[1].binding_changed);
+        assert!(execution_graph.node_input_dirty(mult)[0]);
+        assert!(!execution_graph.node_input_dirty(mult)[1]);
         assert!(!execution_graph.node_flags(mult).missing_required_inputs);
         assert!(!execution_graph.node_flags(print).missing_required_inputs);
         assert!(execution_graph.node_flags(mult).inputs_updated);
@@ -768,7 +768,7 @@ mod invalidation {
         assert!(execution_graph.plan.execute_order.is_empty());
         // The SoA pools are emptied too (not just the node list).
         assert!(execution_graph.program.inputs.is_empty());
-        assert_eq!(execution_graph.program.n_outputs(), 0);
+        assert_eq!(execution_graph.program.n_outputs, 0);
         assert!(execution_graph.program.events.is_empty());
 
         Ok(())
@@ -1519,7 +1519,7 @@ mod output_usage {
         // The lambda observed Needed for the consumed output, Skip for the other.
         assert_eq!(
             *seen_usage.lock().await,
-            vec![OutputUsage::Needed, OutputUsage::Skip]
+            vec![OutputUsage::Needed(1), OutputUsage::Skip]
         );
 
         Ok(())

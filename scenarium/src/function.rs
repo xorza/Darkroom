@@ -205,7 +205,7 @@ mod tests {
             },
         ];
         let mut outputs = vec![DynamicValue::None];
-        let outputs_meta = vec![OutputUsage::Needed; outputs.len()];
+        let outputs_meta = vec![OutputUsage::Needed(1); outputs.len()];
         let event_state = crate::common::shared_any_state::SharedAnyState::default();
         func_lib
             .by_id(&sum_id)

@@ -7,7 +7,6 @@
 
 use std::time::Instant;
 
-use common::BoolExt;
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 
 use crate::common::shared_any_state::SharedAnyState;
@@ -55,6 +54,11 @@ pub(crate) struct Executor {
     /// Per-node runtime state, index-aligned to `program.e_nodes`.
     pub(crate) slots: KeyIndexVec<NodeId, RuntimeSlot>,
     pub(crate) ctx_manager: ContextManager,
+    /// Cross-run per-input dirty bits, index-aligned to `program.inputs`. Set by
+    /// `flatten` when a binding changes at `update`, consumed/cleared here when
+    /// the owning node runs. Rebuilt positionally by each `flatten` so it tracks
+    /// the inputs pool; bridges update→run, unlike the per-run plan flags.
+    pub(crate) input_dirty: Vec<bool>,
     /// Per-node invoke scratch, refilled per executed node.
     inputs: Vec<InvokeInput>,
     output_usage: Vec<OutputUsage>,
@@ -81,12 +85,12 @@ impl Executor {
     }
 
     /// Execute every node in `plan.execute_order`, invoking its lambda with the
-    /// collected inputs. Mutates the runtime cache; clears each executed node's
-    /// `binding_changed` dirty bit on `program` (the one program mutation a run
-    /// performs). Returns per-run stats.
+    /// collected inputs. Mutates the runtime cache and clears each executed
+    /// node's per-input dirty bits in `input_dirty`. The `program` is read-only.
+    /// Returns per-run stats.
     pub(crate) async fn run(
         &mut self,
-        program: &mut ExecutionProgram,
+        program: &ExecutionProgram,
         plan: &ExecutionPlan,
     ) -> ExecutionStats {
         let start = Instant::now();
@@ -155,8 +159,8 @@ impl Executor {
             }
 
             let span = program.e_nodes[e_node_idx].inputs;
-            for e_input in &mut program.inputs[span.range()] {
-                e_input.binding_changed = false;
+            for dirty in &mut self.input_dirty[span.range()] {
+                *dirty = false;
             }
         }
 
@@ -198,10 +202,10 @@ impl Executor {
                     outputs[addr.port_idx].clone()
                 }
             };
-            let dependency_wants_execute =
-                plan.input_flags[span.start as usize + i].dependency_wants_execute;
+            let pool_idx = span.start as usize + i;
+            let dependency_wants_execute = plan.input_flags[pool_idx].dependency_wants_execute;
             inputs.push(InvokeInput {
-                changed: input.binding_changed || dependency_wants_execute,
+                changed: self.input_dirty[pool_idx] || dependency_wants_execute,
                 value,
             });
         }
@@ -216,11 +220,13 @@ impl Executor {
     ) {
         usage.clear();
         let span = program.e_nodes[e_node_idx].outputs;
-        usage.extend(
-            plan.output_usage[span.range()]
-                .iter()
-                .map(|&c| (c == 0).then_else(OutputUsage::Skip, OutputUsage::Needed)),
-        );
+        usage.extend(plan.output_usage[span.range()].iter().map(|&c| {
+            if c == 0 {
+                OutputUsage::Skip
+            } else {
+                OutputUsage::Needed(c)
+            }
+        }));
     }
 
     fn collect_execution_stats(

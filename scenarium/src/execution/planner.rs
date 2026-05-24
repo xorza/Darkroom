@@ -67,7 +67,7 @@ impl Planner {
         plan.reset(
             program.e_nodes.len(),
             program.inputs.len(),
-            program.n_outputs(),
+            program.n_outputs,
         );
 
         self.collect_terminal_nodes(program, terminals, event_triggers, events);
@@ -226,7 +226,7 @@ impl Planner {
 
             for pool_idx in inputs_span.range() {
                 let e_input = &program.inputs[pool_idx];
-                let binding_changed = e_input.binding_changed;
+                let binding_changed = executor.input_dirty[pool_idx];
                 let (dep_wants_execute, missing) = match &e_input.binding {
                     ExecutionBinding::None => (false, e_input.required),
                     ExecutionBinding::Const(_) => (false, false),

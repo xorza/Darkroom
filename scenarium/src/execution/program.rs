@@ -44,10 +44,6 @@ impl ExecutionBinding {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct ExecutionInput {
     pub required: bool,
-    /// Cross-run dirty bit: set by `flatten` when the binding changes at
-    /// `update`, consumed/cleared by the executor's run. Bridges update→run,
-    /// so unlike the per-run input flags it stays on the input, not the plan.
-    pub binding_changed: bool,
     pub binding: ExecutionBinding,
     pub data_type: DataType,
 }
@@ -133,20 +129,19 @@ pub(crate) struct ExecutionProgram {
     pub(crate) e_nodes: KeyIndexVec<NodeId, ExecutionNode>,
     pub(crate) inputs: Vec<ExecutionInput>,
     pub(crate) events: Vec<ExecutionEvent>,
+    /// Total output count across all nodes (sum of every output span length) —
+    /// the size of the plan's `output_usage` column. Outputs carry no per-node
+    /// static data, so there is no output pool; flatten accumulates this total
+    /// while assigning spans and stores it here rather than re-summing each plan.
+    #[serde(default)]
+    pub(crate) n_outputs: usize,
 }
 
 impl ExecutionProgram {
-    /// Total output count across all nodes (sum of every output span length) —
-    /// the size of the plan's `output_usage` column. Outputs carry no per-node
-    /// static data, so there is no output pool, just the per-node `outputs`
-    /// span; the total is derived from those spans rather than stored.
-    pub(crate) fn n_outputs(&self) -> usize {
-        self.e_nodes.iter().map(|n| n.outputs.len as usize).sum()
-    }
-
     pub(crate) fn clear(&mut self) {
         self.e_nodes.clear();
         self.inputs.clear();
         self.events.clear();
+        self.n_outputs = 0;
     }
 }

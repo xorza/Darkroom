@@ -58,7 +58,14 @@ pub struct ArgumentValues {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OutputUsage {
     Skip,
-    Needed,
+    /// Number of executing consumers reading this output this run (always `> 0`).
+    Needed(u32),
+}
+
+impl OutputUsage {
+    pub fn is_needed(&self) -> bool {
+        matches!(self, Self::Needed(_))
+    }
 }
 
 // === Execution Engine ===
@@ -95,6 +102,7 @@ impl ExecutionEngine {
         self.program.clear();
         self.plan.clear();
         self.executor.slots.clear();
+        self.executor.input_dirty.clear();
     }
 
     pub fn reset_states(&mut self) {
@@ -110,15 +118,16 @@ impl ExecutionEngine {
 
         // Flatten subgraphs straight into execution nodes — no intermediate
         // `Graph`. Everything below is boundary-agnostic (func nodes only).
-        self.flattener.build(
+        self.program.n_outputs = self.flattener.build(
             &mut self.program.e_nodes,
             flatten::Pools {
                 inputs: &mut self.program.inputs,
                 events: &mut self.program.events,
+                input_dirty: &mut self.executor.input_dirty,
             },
             graph,
             func_lib,
-        );
+        ) as usize;
 
         // Realign the runtime cache to the rebuilt node set (preserve by id,
         // default new, trim gone).
@@ -159,7 +168,7 @@ impl ExecutionEngine {
         )?;
 
         // Phase 3: run the schedule.
-        let mut stats = self.executor.run(&mut self.program, &self.plan).await;
+        let mut stats = self.executor.run(&self.program, &self.plan).await;
         stats.triggered_events = events;
 
         Ok(stats)
@@ -338,6 +347,11 @@ impl ExecutionEngine {
 
     pub(crate) fn node_input_flags(&self, e_node: &ExecutionNode) -> &[plan::InputFlags] {
         &self.plan.input_flags[e_node.inputs.range()]
+    }
+
+    /// Cross-run per-input dirty bits for a node, from the executor.
+    pub(crate) fn node_input_dirty(&self, e_node: &ExecutionNode) -> &[bool] {
+        &self.executor.input_dirty[e_node.inputs.range()]
     }
 
     pub(crate) fn node_output_usage(&self, e_node: &ExecutionNode) -> &[u32] {
