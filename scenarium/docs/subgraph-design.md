@@ -558,34 +558,41 @@ nodes** and a `SubgraphDef` referenced via a new `NodeKind::Subgraph(SubgraphRef
 discriminant — instances are **always references, never embedded copies** —
 resolved from `FuncLib.subgraphs` (linked) or `Graph.subgraphs` (local).
 
-Suggested staging:
+### Status
 
-1. **Authoring model** ✅ *(done)* — `SubgraphId`, `SubgraphDef` (interface
-   reuses `FuncInput`/`FuncOutput`; `SubgraphEvent` is outgoing-only), the two
-   boundary `NodeKind` variants (`SubgraphInput`/`SubgraphOutput`, one-of-each,
-   both optional), `NodeKind` + `SubgraphRef` (with the `func_id()` shim), the
-   `FuncLib.subgraphs` (linked) and `Graph.subgraphs` (local) tables.
-   Serialization + `validate_with` (interface↔boundary arity, recursion guard —
-   a `SubgraphId` may not appear twice on a descent path). Tests: round-trip,
-   recursion rejection, zero-input and zero-output subgraphs, outgoing events.
-2. **Inliner** ✅ *(done)* — `execution_graph::flatten` walks the authoring
-   graph and writes flat func-only `ExecutionNode`s straight into `CompactInsert`
-   (no intermediate `Graph`), via `flatten_id` + the binding resolver +
-   `SubgraphRef` resolution + event short-circuit (exposed events resolve to
-   their interior emitter; triggering a composite reaches the interior nodes
-   wired to its `SubgraphInput`). Terminal/behavior fall out of the interior
-   func nodes. The `Flattener` (reusable `ids`/`subs` buffers) is owned by
-   `ExecutionGraph` so steady-state updates don't re-allocate scratch. Tests:
-   composite dissolves into exact leaf edges; dead interior branch pruned;
-   cross-boundary cycle detected; nested (2+ deep); two linked instances get
-   distinct leaf ids; end-to-end compute; exposed event rewires a parent
-   subscriber to the interior emitter; triggering a composite reaches interior
-   subscribers.
-3. **Editor** — drill-in navigation, interface editing with **by-name binding
-   reconciliation**, argument-value inspection via flattened ids, **Make Local /
-   user-count UI** and edit-routing to the right def table. (darkroom — separate
-   from engine correctness.)
+**Engine — complete (`scenarium`).** The authoring model (`SubgraphDef`,
+`SubgraphRef` linked/local, boundary `NodeKind`s, `Graph.subgraphs` /
+`FuncLib.subgraphs`, serde, validation) and the inliner
+(`execution_graph::flatten`) are implemented and tested. Flattening writes flat
+func-only `ExecutionNode`s straight into `CompactInsert` (no intermediate
+`Graph`); data bindings *and* events are short-circuited across boundaries
+(exposed events → interior emitter; triggering a composite → interior
+`SubgraphInput` subscribers); terminal/behavior fall out of the interior func
+nodes. The reusable `Flattener` (descent `ids`, `seen` recursion guard, `subs`
+buffer) is owned by `ExecutionGraph`, so steady-state updates allocate no
+scratch. Recursion is rejected precisely in debug (`validate_with`) and guarded
+in release (flatten's `seen` + a `MAX_DEPTH` backstop on the resolve walk).
 
-Everything downstream of the flat `e_nodes` array — the scheduler, caching,
-change-pruning, events — is untouched, which is the whole reason this design is
-worth it.
+Everything downstream of the flat `e_nodes` array — scheduler, caching,
+change-pruning, the event loop — was untouched, which is the whole point of the
+design.
+
+### Remaining
+
+1. **Editor (`darkroom`) — not started.** Subgraph nodes are currently skipped
+   in `Scene::rebuild` (only func nodes render). Needs: rendering composite
+   nodes with their interface ports; **drill-in navigation** (breadcrumb =
+   `instance_path`) into a `SubgraphDef.graph`; **interface editing** with
+   **by-name binding reconciliation** (§6); **Make Local / user-count UI** and
+   routing edits to `FuncLib.subgraphs` (linked) vs. `Graph.subgraphs` (local);
+   argument-value inspection of interior nodes via flattened ids.
+2. **Untrusted-load recursion rejection is debug-only at the `Graph` level.**
+   `check()` (the release load-path guard) verifies local-def *existence* but
+   not linked-def cycles (it has no `FuncLib`); a recursive *linked* def is
+   rejected precisely only in debug `validate_with`, and in release is caught by
+   flatten's guards (clean panic, no hang). Local-def recursion is structurally
+   impossible (a def can't own itself). If untrusted graphs must be rejected at
+   load in release, add a `FuncLib`-aware recursion check on that path.
+3. **Authoring helpers for composites in the editor.** `Node::subgraph_instance`
+   exists; the editor will also want "wrap selection into subgraph", "expose
+   port/event", and the Make-Local clone — all `darkroom` intents.

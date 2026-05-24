@@ -16,16 +16,18 @@ use std::hash::Hasher;
 
 use common::fnv::FnvHasher;
 use common::key_index_vec::{CompactInsert, KeyIndexVec};
+use hashbrown::HashSet;
 
 use super::{ExecutionBinding, ExecutionNode, ExecutionPortAddress};
 use crate::data::StaticValue;
 use crate::function::FuncLib;
 use crate::graph::{Binding, Graph, InputPort, NodeId, NodeKind, Subscription};
+use crate::subgraph::SubgraphId;
 
-/// Hard cap on nesting depth — release safety net against an (invalid)
-/// recursive definition that slipped past validation, so the walk can't loop
-/// forever. Debug `Graph::validate_with` rejects recursion with a precise
-/// error well before this; no legitimate graph nests this deep.
+/// Hard cap on nesting depth — a release backstop for the output-resolution
+/// walk (which follows composite edges and isn't covered by the emit-descent
+/// recursion guard), so a pathological recursive definition can't loop
+/// forever. The emit descent rejects recursion precisely via `seen` first.
 const MAX_DEPTH: usize = 256;
 
 /// Reusable flattening scratch, owned by the `ExecutionGraph` so its buffer is
@@ -36,6 +38,9 @@ const MAX_DEPTH: usize = 256;
 #[derive(Debug, Default)]
 pub(super) struct Flattener {
     ids: Vec<NodeId>,
+    /// Subgraph defs currently on the emit-descent path — a def appearing
+    /// twice is recursion (it contains itself). Reused across builds.
+    seen: HashSet<SubgraphId>,
     /// Resolved flat event edges (with flattened ids), collected during the
     /// walk and applied after the node pass (when `e_nodes` is final and
     /// addressable by key). Reused across builds.
@@ -51,12 +56,14 @@ impl Flattener {
         func_lib: &FuncLib,
     ) {
         self.ids.clear();
+        self.seen.clear();
         self.subs.clear();
         {
             let mut run = Run {
                 root,
                 func_lib,
                 ids: &mut self.ids,
+                seen: &mut self.seen,
                 subs: &mut self.subs,
                 compact: e_nodes.compact_insert_start(),
                 cur_idx: 0,
@@ -127,6 +134,7 @@ struct Run<'a> {
     root: &'a Graph,
     func_lib: &'a FuncLib,
     ids: &'a mut Vec<NodeId>,
+    seen: &'a mut HashSet<SubgraphId>,
     subs: &'a mut Vec<Subscription>,
     compact: CompactInsert<'a, NodeId, ExecutionNode>,
     /// Index of the leaf currently being filled. Stable across the target
@@ -138,6 +146,17 @@ struct Run<'a> {
 impl<'a> Run<'a> {
     fn current(&self) -> &'a Graph {
         graph_at(self.root, self.func_lib, self.ids.as_slice())
+    }
+
+    /// Descend one composite level. The depth cap is a backstop for the
+    /// output-resolution walks (which the `seen` recursion guard in `emit`
+    /// doesn't cover); a legitimate graph never nests this deep.
+    fn push_level(&mut self, instance_id: NodeId) {
+        assert!(
+            self.ids.len() < MAX_DEPTH,
+            "subgraph nesting exceeds {MAX_DEPTH} levels (recursive definition?)"
+        );
+        self.ids.push(instance_id);
     }
 
     /// Emit execution nodes for the current level's graph, recursing into
@@ -167,14 +186,16 @@ impl<'a> Run<'a> {
                         self.set_input(input_idx, source);
                     }
                 }
-                NodeKind::Subgraph(_) => {
+                NodeKind::Subgraph(r) => {
                     assert!(
-                        self.ids.len() < MAX_DEPTH,
-                        "subgraph nesting exceeds {MAX_DEPTH} levels (recursive definition?)"
+                        self.seen.insert(r.id()),
+                        "recursive subgraph {:?} (it contains itself)",
+                        r.id()
                     );
-                    self.ids.push(node.id);
+                    self.push_level(node.id);
                     self.emit();
                     self.ids.pop();
+                    self.seen.remove(&r.id());
                 }
                 NodeKind::SubgraphInput | NodeKind::SubgraphOutput => {}
             }
@@ -224,7 +245,7 @@ impl<'a> Run<'a> {
                 let def = graph.resolve_def(*r, self.func_lib)?;
                 let exposed = def.events.get(event_idx)?;
                 let (interior, interior_idx) = (exposed.emitter, exposed.emitter_event_idx);
-                self.ids.push(node_id);
+                self.push_level(node_id);
                 let resolved = self.resolve_emitter(interior, interior_idx);
                 self.ids.pop();
                 resolved
@@ -262,7 +283,7 @@ impl<'a> Run<'a> {
                     .filter(|s| s.emitter == trigger)
                     .map(|s| s.subscriber)
                     .collect();
-                self.ids.push(node_id);
+                self.push_level(node_id);
                 for sub in interior {
                     self.resolve_subscriber(sub, emitter, event_idx);
                 }
@@ -347,7 +368,7 @@ impl<'a> Run<'a> {
                     node_id: so.id,
                     port_idx,
                 });
-                self.ids.push(node_id);
+                self.push_level(node_id);
                 let source = self.resolve_binding(&binding);
                 self.ids.pop();
                 source

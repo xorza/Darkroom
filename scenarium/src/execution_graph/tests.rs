@@ -1909,10 +1909,9 @@ mod subgraph {
 
     // === Stage 2b: events across boundaries ===
 
-    /// `test_func_lib` plus a `ticker` func (one event, no I/O) usable as an
-    /// interior or parent emitter; instantiate it by name with `fnode`.
-    fn func_lib_with_ticker() -> FuncLib {
-        let mut func_lib = test_func_lib(default_hooks());
+    /// Add a `ticker` func (one event, no I/O) usable as an interior or parent
+    /// emitter; instantiate it by name with `fnode`.
+    fn add_ticker(func_lib: &mut FuncLib) {
         func_lib.add(Func {
             id: FuncId::unique(),
             name: "ticker".into(),
@@ -1930,6 +1929,11 @@ mod subgraph {
             required_contexts: vec![],
             lambda: crate::prelude::FuncLambda::default(),
         });
+    }
+
+    fn func_lib_with_ticker() -> FuncLib {
+        let mut func_lib = test_func_lib(default_hooks());
+        add_ticker(&mut func_lib);
         func_lib
     }
 
@@ -2027,5 +2031,164 @@ mod subgraph {
         let reactor_flat = eg.by_name("print").unwrap().id;
         let ticker_node = eg.by_id(&emitter_id).unwrap();
         assert_eq!(subscriber_ids(ticker_node, 0), vec![reactor_flat]);
+    }
+
+    /// Editing a shared (linked) def re-inlines every instance on the next
+    /// update, and the interior leaves keep their flat ids (so caches persist).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn editing_linked_def_propagates_to_all_instances() -> anyhow::Result<()> {
+        let captured = Arc::new(StdMutex::new(Vec::<i64>::new()));
+        let hooks = TestFuncHooks {
+            get_a: Arc::new(|| Ok(0)),
+            get_b: Arc::new(|| 0),
+            print: {
+                let c = captured.clone();
+                Arc::new(move |v| c.lock().unwrap().push(v))
+            },
+        };
+        let mut func_lib = test_func_lib(hooks);
+        let def = wrap_sum_def(&func_lib);
+        let def_id = def.id;
+        func_lib.add_subgraph(def);
+
+        // Two linked instances with const inputs, each feeding a print.
+        let def_ref = func_lib.subgraph_by_id(&def_id).unwrap();
+        let c1 = Node::subgraph_instance(def_ref, SubgraphRef::Linked(def_id));
+        let c2 = Node::subgraph_instance(def_ref, SubgraphRef::Linked(def_id));
+        let (c1_id, c2_id) = (c1.id, c2.id);
+        let p1 = fnode(&func_lib, "print");
+        let p2 = fnode(&func_lib, "print");
+        let (p1_id, p2_id) = (p1.id, p2.id);
+
+        let mut graph = Graph::default();
+        graph.add(c1);
+        graph.add(c2);
+        graph.add(p1);
+        graph.add(p2);
+        graph.set_input_binding(InputPort::new(c1_id, 0), StaticValue::Int(1).into());
+        graph.set_input_binding(InputPort::new(c1_id, 1), StaticValue::Int(2).into());
+        graph.set_input_binding(InputPort::new(c2_id, 0), StaticValue::Int(10).into());
+        graph.set_input_binding(InputPort::new(c2_id, 1), StaticValue::Int(20).into());
+        graph.set_input_binding(InputPort::new(p1_id, 0), (c1_id, 0).into());
+        graph.set_input_binding(InputPort::new(p2_id, 0), (c2_id, 0).into());
+
+        let mut eg = ExecutionGraph::default();
+        eg.update(&graph, &func_lib);
+        eg.execute_terminals().await?;
+
+        let mut got = captured.lock().unwrap().clone();
+        got.sort();
+        assert_eq!(got, vec![3, 30]); // sums: 1+2, 10+20
+        captured.lock().unwrap().clear();
+
+        // Interior `sum` flat ids (sorted) — for the cache-stability check.
+        let sum_ids = |eg: &ExecutionGraph| -> Vec<NodeId> {
+            let mut ids: Vec<NodeId> = eg
+                .e_nodes
+                .iter()
+                .filter(|e| e.name == "sum")
+                .map(|e| e.id)
+                .collect();
+            ids.sort();
+            ids
+        };
+        let sum_ids_before = sum_ids(&eg);
+        assert_eq!(sum_ids_before.len(), 2);
+
+        // Edit the linked def: route the exposed output straight from input A
+        // (passthrough) instead of `sum`. Affects both instances.
+        {
+            let def = func_lib.subgraphs.by_key_mut(&def_id).unwrap();
+            let si = def
+                .graph
+                .iter()
+                .find(|n| matches!(n.kind, NodeKind::SubgraphInput))
+                .unwrap()
+                .id;
+            let so = def
+                .graph
+                .iter()
+                .find(|n| matches!(n.kind, NodeKind::SubgraphOutput))
+                .unwrap()
+                .id;
+            def.graph
+                .set_input_binding(InputPort::new(so, 0), (si, 0).into());
+        }
+
+        eg.update(&graph, &func_lib);
+        eg.execute_terminals().await?;
+
+        let mut got = captured.lock().unwrap().clone();
+        got.sort();
+        assert_eq!(got, vec![1, 10]); // now passthrough of input A
+
+        // Same interior `sum` leaves, same ids → caches were preserved, not
+        // rebuilt under fresh keys.
+        assert_eq!(sum_ids_before, sum_ids(&eg));
+        Ok(())
+    }
+
+    /// An event fired at a parent emitter reaches, through the real execution
+    /// path, the interior nodes wired to a subscribed composite's trigger.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn event_through_composite_triggers_interior_node() -> anyhow::Result<()> {
+        let ran = Arc::new(StdMutex::new(0i64));
+        let hooks = TestFuncHooks {
+            get_a: {
+                let r = ran.clone();
+                Arc::new(move || {
+                    *r.lock().unwrap() += 1;
+                    Ok(1)
+                })
+            },
+            get_b: Arc::new(|| 0),
+            print: Arc::new(|_| {}),
+        };
+        let mut func_lib = test_func_lib(hooks);
+        add_ticker(&mut func_lib);
+
+        // def Reactor: SubgraphInput trigger → interior `get_a` subscribes.
+        let si = Node::new(NodeKind::SubgraphInput);
+        let si_id = si.id;
+        let reactor = fnode(&func_lib, "get_a");
+        let reactor_id = reactor.id;
+        let mut def_graph = Graph::default();
+        def_graph.add(si);
+        def_graph.add(reactor);
+        def_graph.subscribe(si_id, 0, reactor_id);
+        let def = SubgraphDef {
+            id: SubgraphId::unique(),
+            name: "Reactor".into(),
+            category: "Test".into(),
+            graph: def_graph,
+            inputs: vec![],
+            outputs: vec![],
+            events: vec![],
+        };
+
+        // parent: `ticker` E; composite C subscribes to E's event.
+        let emitter = fnode(&func_lib, "ticker");
+        let emitter_id = emitter.id;
+        let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
+        let c_id = c.id;
+
+        let mut graph = Graph::default();
+        graph.subgraphs.add(def);
+        graph.add(emitter);
+        graph.add(c);
+        graph.subscribe(emitter_id, 0, c_id);
+
+        let mut eg = ExecutionGraph::default();
+        eg.update(&graph, &func_lib);
+
+        // Fire E's event (as the worker does) — the interior `get_a` runs.
+        eg.execute_events([EventRef {
+            node_id: emitter_id,
+            event_idx: 0,
+        }])
+        .await?;
+
+        assert_eq!(*ran.lock().unwrap(), 1);
+        Ok(())
     }
 }
