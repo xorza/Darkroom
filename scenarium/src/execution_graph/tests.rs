@@ -25,6 +25,13 @@ fn default_hooks() -> TestFuncHooks {
     }
 }
 
+/// Instantiate a `Node` for `func_name` with a fixed id; caller wires bindings.
+fn node(func_lib: &FuncLib, func_name: &str, id: NodeId) -> Node {
+    let mut node: Node = func_lib.by_name(func_name).unwrap().into();
+    node.id = id;
+    node
+}
+
 // === Graph Structure ===
 
 mod graph_structure {
@@ -1259,14 +1266,12 @@ mod events {
         let emit_calls_l = emit_calls.clone();
         let recv_values_l = recv_values.clone();
 
+        // Fields left unset (behavior, terminal, etc.) match Func::default():
+        // both funcs are Impure non-terminals.
         let mut func_lib = FuncLib::default();
         func_lib.add(Func {
             id: EMIT_FUNC,
             name: "emit".to_string(),
-            category: "Test".to_string(),
-            behavior: FuncBehavior::Impure,
-            terminal: false,
-            inputs: vec![],
             outputs: vec![FuncOutput {
                 name: "out".to_string(),
                 data_type: DataType::Int,
@@ -1288,9 +1293,6 @@ mod events {
         func_lib.add(Func {
             id: RECV_FUNC,
             name: "recv".to_string(),
-            category: "Test".to_string(),
-            behavior: FuncBehavior::Impure,
-            terminal: false,
             inputs: vec![FuncInput {
                 name: "in".to_string(),
                 required: true,
@@ -1298,8 +1300,6 @@ mod events {
                 default_value: None,
                 value_options: vec![],
             }],
-            outputs: vec![],
-            events: vec![],
             lambda: crate::async_lambda!(
                 move |_, _, _, inputs, _, _| { values = recv_values_l.clone() } => {
                     values.lock().await.push(inputs[0].value.as_i64().unwrap());
@@ -1313,13 +1313,11 @@ mod events {
         let recv_id = NodeId::unique();
 
         let mut graph = Graph::default();
-        let mut emit_node: Node = func_lib.by_id(&EMIT_FUNC).unwrap().into();
-        emit_node.id = emit_id;
+        let mut emit_node = node(&func_lib, "emit", emit_id);
         emit_node.events[0].subscribers.push(recv_id);
         graph.add(emit_node);
 
-        let mut recv_node: Node = func_lib.by_id(&RECV_FUNC).unwrap().into();
-        recv_node.id = recv_id;
+        let mut recv_node = node(&func_lib, "recv", recv_id);
         recv_node.inputs[0].binding = (emit_id, 0).into();
         graph.add(recv_node);
         graph.validate();
@@ -1433,10 +1431,6 @@ mod output_usage {
         func_lib.add(Func {
             id: SPLIT_FUNC,
             name: "split".to_string(),
-            category: "Test".to_string(),
-            behavior: FuncBehavior::Impure,
-            terminal: false,
-            inputs: vec![],
             outputs: vec![
                 FuncOutput {
                     name: "a".to_string(),
@@ -1447,7 +1441,6 @@ mod output_usage {
                     data_type: DataType::Int,
                 },
             ],
-            events: vec![],
             lambda: crate::async_lambda!(
                 move |_, _, _, _, usage, outputs| { seen = seen_usage_l.clone() } => {
                     seen.lock().await.extend_from_slice(usage);
@@ -1461,8 +1454,6 @@ mod output_usage {
         func_lib.add(Func {
             id: SINK_FUNC,
             name: "sink".to_string(),
-            category: "Test".to_string(),
-            behavior: FuncBehavior::Impure,
             terminal: true,
             inputs: vec![FuncInput {
                 name: "in".to_string(),
@@ -1471,8 +1462,6 @@ mod output_usage {
                 default_value: None,
                 value_options: vec![],
             }],
-            outputs: vec![],
-            events: vec![],
             lambda: crate::async_lambda!(|_, _, _, _, _, _| { Ok(()) }),
             ..Default::default()
         });
@@ -1480,11 +1469,8 @@ mod output_usage {
         let split_id = NodeId::unique();
         let sink_id = NodeId::unique();
         let mut graph = Graph::default();
-        let mut split: Node = func_lib.by_id(&SPLIT_FUNC).unwrap().into();
-        split.id = split_id;
-        graph.add(split);
-        let mut sink: Node = func_lib.by_id(&SINK_FUNC).unwrap().into();
-        sink.id = sink_id;
+        graph.add(node(&func_lib, "split", split_id));
+        let mut sink = node(&func_lib, "sink", sink_id);
         // Consume only output 0; output 1 has no consumer.
         sink.inputs[0].binding = (split_id, 0).into();
         graph.add(sink);
@@ -1589,18 +1575,12 @@ mod topology {
         let print2_id = NodeId::unique();
 
         let mut graph = Graph::default();
-        let mut ga: Node = func_lib.by_name("get_a").unwrap().into();
-        ga.id = get_a_id;
-        graph.add(ga);
-        let mut gb: Node = func_lib.by_name("get_b").unwrap().into();
-        gb.id = get_b_id;
-        graph.add(gb);
-        let mut p1: Node = func_lib.by_name("print").unwrap().into();
-        p1.id = print1_id;
+        graph.add(node(&func_lib, "get_a", get_a_id));
+        graph.add(node(&func_lib, "get_b", get_b_id));
+        let mut p1 = node(&func_lib, "print", print1_id);
         p1.inputs[0].binding = (get_a_id, 0).into();
         graph.add(p1);
-        let mut p2: Node = func_lib.by_name("print").unwrap().into();
-        p2.id = print2_id;
+        let mut p2 = node(&func_lib, "print", print2_id);
         p2.inputs[0].binding = (get_b_id, 0).into();
         graph.add(p2);
         graph.validate();
