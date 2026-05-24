@@ -1,5 +1,4 @@
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
-use hashbrown::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::data::StaticValue;
@@ -98,8 +97,7 @@ impl Graph {
     }
 
     /// Iterate nodes in insertion order. This order is load-bearing:
-    /// `dependent_nodes` returns matches in this order, and callers
-    /// (darkroom-egui rendering, action-stack replay) rely on it.
+    /// callers (darkroom-egui rendering, action-stack replay) rely on it.
     pub fn iter(&self) -> impl Iterator<Item = &Node> {
         self.nodes.iter()
     }
@@ -146,45 +144,6 @@ impl Graph {
     pub fn by_id_mut(&mut self, id: &NodeId) -> Option<&mut Node> {
         assert!(!id.is_nil());
         self.nodes.by_key_mut(id)
-    }
-
-    /// All nodes that transitively depend on `node_id` (excluding itself),
-    /// returned in `iter()` insertion order. Callers rely on this order —
-    /// see the `iter()` doc comment.
-    pub fn dependent_nodes(&self, node_id: &NodeId) -> Vec<NodeId> {
-        assert!(!node_id.is_nil());
-        assert!(
-            self.by_id(node_id).is_some(),
-            "node must exist to find dependents"
-        );
-
-        // Build reverse adjacency once: consumers[X] = nodes that Bind to X.
-        // O(N·d) up front vs. the previous O(N²·d) repeated linear scans.
-        let mut consumers: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
-        for node in self.nodes.iter() {
-            for input in &node.inputs {
-                if let Binding::Bind(addr) = &input.binding {
-                    consumers.entry(addr.node_id).or_default().push(node.id);
-                }
-            }
-        }
-
-        let mut seen: HashSet<NodeId> = HashSet::new();
-        let mut stack = vec![*node_id];
-        while let Some(current) = stack.pop() {
-            if let Some(next) = consumers.get(&current) {
-                for &id in next {
-                    if seen.insert(id) {
-                        stack.push(id);
-                    }
-                }
-            }
-        }
-
-        self.nodes
-            .iter()
-            .filter_map(|n| seen.contains(&n.id).then_some(n.id))
-            .collect()
     }
 
     pub fn serialize(&self, format: SerdeFormat) -> Vec<u8> {
@@ -449,29 +408,5 @@ mod tests {
         }
 
         Ok(())
-    }
-
-    #[test]
-    fn dependent_nodes() {
-        let graph = test_graph();
-
-        let get_id = |name: &str| {
-            graph
-                .by_name(name)
-                .unwrap_or_else(|| panic!("Node named \"{name}\" not found"))
-                .id
-        };
-
-        let get_a = get_id("get_a");
-        let get_b = get_id("get_b");
-        let sum = get_id("sum");
-        let mult = get_id("mult");
-        let print = get_id("print");
-
-        assert_eq!(graph.dependent_nodes(&get_a), vec![sum, mult, print]);
-        assert_eq!(graph.dependent_nodes(&get_b), vec![sum, mult, print]);
-        assert_eq!(graph.dependent_nodes(&sum), vec![mult, print]);
-        assert_eq!(graph.dependent_nodes(&mult), vec![print]);
-        assert!(graph.dependent_nodes(&print).is_empty());
     }
 }
