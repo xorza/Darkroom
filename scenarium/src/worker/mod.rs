@@ -12,7 +12,7 @@ use common::pause_gate::PauseGate;
 
 use crate::common::shared_any_state::SharedAnyState;
 use crate::event_lambda::EventLambda;
-use crate::execution_graph::{ArgumentValues, ExecutionGraph, Result};
+use crate::execution::{ArgumentValues, ExecutionEngine, Result};
 use crate::execution_stats::ExecutionStats;
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
@@ -264,7 +264,7 @@ async fn worker_loop<ExecutionCallback>(
 ) where
     ExecutionCallback: Fn(Result<ExecutionStats>) + Send + 'static,
 {
-    let mut execution_graph = ExecutionGraph::default();
+    let mut execution_engine = ExecutionEngine::default();
 
     let mut cmd_batch: Vec<WorkerMessage> = Vec::new();
     let mut ev_buf: Vec<EventRef> = Vec::with_capacity(EVENT_LOOP_BACKPRESSURE);
@@ -328,10 +328,10 @@ async fn worker_loop<ExecutionCallback>(
         }
 
         match intent.graph_state.take() {
-            Some(GraphOp::Clear) => execution_graph.clear(),
+            Some(GraphOp::Clear) => execution_engine.clear(),
             Some(GraphOp::Replace(graph, func_lib)) => {
                 tracing::info!("Graph updated");
-                execution_graph.update(&graph, &func_lib);
+                execution_engine.update(&graph, &func_lib);
             }
             None => {}
         }
@@ -350,7 +350,7 @@ async fn worker_loop<ExecutionCallback>(
         // Empty graph is a normal state, not a failure: skip execute
         // silently. Events/terminals/StartEventLoop are no-ops until
         // a graph is loaded.
-        if needs_execute && !execution_graph.is_empty() {
+        if needs_execute && !execution_engine.is_empty() {
             // Pause running lambdas only around execute(): the gate
             // stops them kicking off new iterations while execute
             // walks the graph, giving it a consistent view of
@@ -359,13 +359,13 @@ async fn worker_loop<ExecutionCallback>(
             let _pause_guard = event_loop_pause_gate.close();
 
             let in_loop = should_start_event_loop || event_loop.is_some();
-            let result = execution_graph
+            let result = execution_engine
                 .execute(intent.execute_terminals, in_loop, intent.events.drain())
                 .await;
 
             if should_start_event_loop && let Ok(stats) = &result {
                 assert!(event_loop.is_none());
-                let triggers = execution_graph.active_event_triggers(stats);
+                let triggers = execution_engine.active_event_triggers(stats);
                 if !triggers.is_empty() {
                     event_loop =
                         Some(start_event_loop(triggers, event_loop_pause_gate.clone()).await);
@@ -377,7 +377,7 @@ async fn worker_loop<ExecutionCallback>(
         }
 
         for (node_id, reply) in intent.argument_requests.drain(..) {
-            let values = execution_graph
+            let values = execution_engine
                 .get_argument_values_with_previews(&node_id)
                 .await;
             let _ = reply.send(values);

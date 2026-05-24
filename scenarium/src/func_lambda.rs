@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::{
     context::ContextManager,
     data::DynamicValue,
-    execution_graph::OutputUsage,
+    execution::OutputUsage,
     prelude::{AnyState, SharedAnyState},
 };
 

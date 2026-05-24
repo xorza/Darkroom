@@ -167,7 +167,7 @@ where
 mod tests {
     use crate::context::ContextManager;
     use crate::data::DynamicValue;
-    use crate::execution_graph::OutputUsage;
+    use crate::execution::OutputUsage;
     use crate::func_lambda::InvokeInput;
     use crate::prelude::AnyState;
     use crate::testing::{TestFuncHooks, test_func_lib};

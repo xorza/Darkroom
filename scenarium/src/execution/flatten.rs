@@ -18,7 +18,7 @@ use common::fnv::FnvHasher;
 use common::key_index_vec::{CompactInsert, KeyIndexVec};
 use hashbrown::HashSet;
 
-use super::{
+use super::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionPortAddress, Span,
 };
 use crate::data::StaticValue;
@@ -38,7 +38,7 @@ const MAX_DEPTH: usize = 256;
 /// (`graph_at`), which is cheap at realistic nesting depth and keeps the
 /// struct free of borrowed references (so it can persist).
 #[derive(Debug, Default)]
-pub(super) struct Flattener {
+pub(crate) struct Flattener {
     ids: Vec<NodeId>,
     /// Subgraph defs currently on the emit-descent path — a def appearing
     /// twice is recursion (it contains itself). Reused across builds.
@@ -55,20 +55,18 @@ pub(super) struct Flattener {
 /// The graph's SoA pools, rebuilt each `build`. `inputs` is the new pool being
 /// filled (carries over reused nodes' bindings); `old_inputs` is last build's
 /// pool, kept readable for that carry-over. Outputs carry no static per-node
-/// data, so only their grand total (`n_outputs`) is produced here — used to
-/// size the plan's `output_usage` column and to assign each node's output
-/// span.
-pub(super) struct Pools<'a> {
+/// data, so there is no output pool — each node's output span is assigned from
+/// a running counter local to the build.
+pub(crate) struct Pools<'a> {
     pub inputs: &'a mut Vec<ExecutionInput>,
     pub events: &'a mut Vec<ExecutionEvent>,
-    pub n_outputs: &'a mut usize,
 }
 
 impl Flattener {
     /// Flatten `root` into `e_nodes` (via compact insert, preserving caches),
     /// rebuilding the SoA pools. Inputs carry over per-node `binding`/
     /// `binding_changed` for reused nodes; outputs/events are rebuilt fresh.
-    pub(super) fn build(
+    pub(crate) fn build(
         &mut self,
         e_nodes: &mut KeyIndexVec<NodeId, ExecutionNode>,
         pools: Pools<'_>,
@@ -82,7 +80,6 @@ impl Flattener {
         let mut new_inputs = std::mem::take(&mut self.inputs_scratch);
         new_inputs.clear();
         pools.events.clear();
-        *pools.n_outputs = 0;
         {
             let mut run = Run {
                 root,
@@ -94,7 +91,7 @@ impl Flattener {
                 cur_idx: 0,
                 old_inputs: pools.inputs.as_slice(),
                 new_inputs: &mut new_inputs,
-                n_outputs: pools.n_outputs,
+                n_outputs: 0,
                 events: pools.events,
             };
             run.emit();
@@ -181,7 +178,7 @@ struct Run<'a> {
     /// The inputs pool being built this update; `cur_idx`'s span is its tail.
     new_inputs: &'a mut Vec<ExecutionInput>,
     /// Running total of outputs emitted so far; also the next output span start.
-    n_outputs: &'a mut usize,
+    n_outputs: u32,
     events: &'a mut Vec<ExecutionEvent>,
 }
 
@@ -225,8 +222,8 @@ impl<'a> Run<'a> {
                         );
                     }
 
-                    let outputs_start = *self.n_outputs as u32;
-                    *self.n_outputs += func.outputs.len();
+                    let outputs_start = self.n_outputs;
+                    self.n_outputs += func.outputs.len() as u32;
                     let events_start = self.events.len() as u32;
                     for func_event in &func.events {
                         self.events.push(ExecutionEvent {

@@ -3,7 +3,7 @@ pub mod context;
 pub mod data;
 pub mod elements;
 pub mod event_lambda;
-pub mod execution_graph;
+pub mod execution;
 pub mod execution_stats;
 pub mod func_lambda;
 pub mod function;
@@ -18,7 +18,7 @@ pub mod prelude {
     pub use crate::common::shared_any_state::SharedAnyState;
     pub use crate::context::ContextType;
     pub use crate::data::{CustomValue, DataType, DynamicValue, StaticValue, TypeId};
-    pub use crate::execution_graph::{ExecutionGraph, ExecutionInput, ExecutionNode};
+    pub use crate::execution::ExecutionEngine;
     pub use crate::execution_stats::{ExecutedNodeStats, ExecutionStats, NodeError};
     pub use crate::func_lambda::{FuncLambda, InvokeError, InvokeInput, InvokeResult};
     pub use crate::function::{Func, FuncBehavior, FuncId, FuncLib};

@@ -1,7 +1,7 @@
 //! Subgraph (composite-node) authoring types. A `SubgraphDef` is a reusable
 //! definition that wraps an interior `Graph` and exposes a chosen set of
 //! inputs/outputs/events, so it can be instantiated as a single node in a
-//! parent graph. Execution-time flattening lives in `execution_graph::flatten`.
+//! parent graph. Execution-time flattening lives in `execution::flatten`.
 //!
 //! See `docs/subgraph-design.md` for the full design.
 

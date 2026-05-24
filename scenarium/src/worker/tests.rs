@@ -9,7 +9,7 @@ use crate::common::shared_any_state::SharedAnyState;
 use crate::elements::basic_funclib::BasicFuncLib;
 use crate::elements::worker_events_funclib::WorkerEventsFuncLib;
 use crate::event_lambda::EventLambda;
-use crate::execution_graph::Result as ExecResult;
+use crate::execution::Result as ExecResult;
 use crate::execution_stats::ExecutionStats;
 use crate::function::FuncLib;
 use crate::graph::{Graph, InputPort, Node, NodeId};
