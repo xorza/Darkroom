@@ -1,5 +1,5 @@
 use crate::execution_graph::Error;
-use crate::graph::{NodeId, PortAddress};
+use crate::graph::{InputPort, NodeId};
 use crate::worker::EventRef;
 
 #[derive(Debug, Clone)]
@@ -19,7 +19,7 @@ pub struct ExecutionStats {
     pub elapsed_secs: f64,
 
     pub executed_nodes: Vec<ExecutedNodeStats>,
-    pub missing_inputs: Vec<PortAddress>,
+    pub missing_inputs: Vec<InputPort>,
     pub cached_nodes: Vec<NodeId>,
     pub triggered_events: Vec<EventRef>,
     pub node_errors: Vec<NodeError>,

@@ -1,6 +1,6 @@
 use glam::Vec2;
 use palantir::{LineCap, LineJoin, PointerButton, PolylineColors, Rect, Shape, Ui};
-use scenarium::graph::{Binding, PortAddress};
+use scenarium::graph::{Binding, InputPort};
 use scenarium::prelude::NodeId;
 
 use crate::app::AppContext;
@@ -49,7 +49,7 @@ pub(crate) struct BreakerState {
     /// into `Intent::SetInput { to: Binding::None }`. A `Vec` is
     /// enough — each connection is visited exactly once per frame,
     /// so within-frame duplicates aren't possible.
-    pub(crate) broken: Vec<PortAddress>,
+    pub(crate) broken: Vec<InputPort>,
     /// Nodes whose body rect the breaker crosses this frame. Filled
     /// by `NodeUI::draw_all`, drained on release into
     /// `Intent::RemoveNode`. Same one-visit-per-node guarantee.
@@ -224,11 +224,11 @@ impl BreakerUI {
                     out.push(Intent::RemoveNode { node_id });
                 }
                 for addr in b.broken.drain(..) {
-                    if doomed_nodes.contains(&addr.target_id) {
+                    if doomed_nodes.contains(&addr.node_id) {
                         continue;
                     }
                     out.push(Intent::SetInput {
-                        node_id: addr.target_id,
+                        node_id: addr.node_id,
                         input_idx: addr.port_idx,
                         to: Binding::None,
                     });

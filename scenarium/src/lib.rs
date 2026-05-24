@@ -23,5 +23,7 @@ pub mod prelude {
     pub use crate::execution_stats::{ExecutedNodeStats, ExecutionStats, NodeError};
     pub use crate::func_lambda::{FuncLambda, InvokeError, InvokeInput, InvokeResult};
     pub use crate::function::{Func, FuncBehavior, FuncId, FuncLib};
-    pub use crate::graph::{Binding, Event, Graph, Input, Node, NodeBehavior, NodeId, PortAddress};
+    pub use crate::graph::{
+        Binding, Event, Graph, Input, InputPort, Node, NodeBehavior, NodeId, OutputPort,
+    };
 }

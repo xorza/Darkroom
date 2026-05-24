@@ -1195,7 +1195,7 @@ mod stats {
             stats
                 .missing_inputs
                 .iter()
-                .any(|p| p.target_id == sum_id && p.port_idx == 0),
+                .any(|p| p.node_id == sum_id && p.port_idx == 0),
             "Expected sum input 0 in missing_inputs, got: {:?}",
             stats.missing_inputs
         );

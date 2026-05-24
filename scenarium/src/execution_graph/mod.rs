@@ -11,7 +11,7 @@ use crate::event_lambda::EventLambda;
 use crate::execution_stats::{ExecutedNodeStats, ExecutionStats, NodeError};
 use crate::func_lambda::InvokeInput;
 use crate::function::{Func, FuncBehavior, FuncLib};
-use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId, PortAddress};
+use crate::graph::{Binding, Graph, InputPort, Node, NodeBehavior, NodeId};
 use crate::prelude::{AnyState, FuncId, FuncLambda};
 use crate::worker::{EventRef, EventTrigger};
 
@@ -374,12 +374,12 @@ impl ExecutionGraph {
             }
             Binding::Bind(port_address) => {
                 let (output_e_node_idx, _) =
-                    compact.insert_with(&port_address.target_id, || ExecutionNode {
-                        id: port_address.target_id,
+                    compact.insert_with(&port_address.node_id, || ExecutionNode {
+                        id: port_address.node_id,
                         ..Default::default()
                     });
                 let desired = ExecutionPortAddress {
-                    target_id: port_address.target_id,
+                    target_id: port_address.node_id,
                     target_idx: output_e_node_idx,
                     port_idx: port_address.port_idx,
                 };
@@ -821,8 +821,8 @@ impl ExecutionGraph {
             if e.missing_required_inputs {
                 for (i, inp) in e.inputs.iter().enumerate() {
                     if inp.missing {
-                        missing_inputs.push(PortAddress {
-                            target_id: e.id,
+                        missing_inputs.push(InputPort {
+                            node_id: e.id,
                             port_idx: i,
                         });
                     }
@@ -967,7 +967,7 @@ impl ExecutionGraph {
                         let target = &self.e_nodes[e_addr.target_idx];
                         assert!(e_addr.port_idx < target.outputs.len());
                         assert_eq!(addr.port_idx, e_addr.port_idx);
-                        assert_eq!(addr.target_id, target.id);
+                        assert_eq!(addr.node_id, target.id);
                     }
                     _ => panic!("Mismatched bindings"),
                 }

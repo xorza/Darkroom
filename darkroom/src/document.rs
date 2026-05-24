@@ -125,7 +125,7 @@ impl Document {
                 .inputs
                 .iter()
                 .filter_map(|inp| match &inp.binding {
-                    Binding::Bind(addr) => depth.get(&addr.target_id).copied().map(|d| d + 1),
+                    Binding::Bind(addr) => depth.get(&addr.node_id).copied().map(|d| d + 1),
                     _ => None,
                 })
                 .max()

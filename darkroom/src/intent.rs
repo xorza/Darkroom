@@ -227,7 +227,7 @@ pub fn build_step(intent: Intent, doc: &Document) -> Option<UndoStep> {
                     let Binding::Bind(binding) = &input.binding else {
                         continue;
                     };
-                    if binding.target_id == node_id {
+                    if binding.node_id == node_id {
                         incoming_connections.push(IncomingConnection {
                             node_id: other.id,
                             input_idx,

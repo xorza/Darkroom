@@ -144,7 +144,7 @@ impl Scene {
                     continue;
                 };
                 self.connections.push(SceneConnection {
-                    src_node: addr.target_id,
+                    src_node: addr.node_id,
                     src_port: addr.port_idx,
                     tgt_node: node.id,
                     tgt_port,

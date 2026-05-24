@@ -2,7 +2,7 @@ use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use hashbrown::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
-use crate::data::{DataType, StaticValue};
+use crate::data::StaticValue;
 use crate::function::{Func, FuncId, FuncLib};
 use anyhow::ensure;
 use common::{Result, SerdeFormat, deserialize, serialize};
@@ -10,9 +10,21 @@ use common::{id_type, is_debug};
 
 id_type!(NodeId);
 
+/// Address of a producer node's output port — the source side of a data
+/// binding (`Binding::Bind`).
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PortAddress {
-    pub target_id: NodeId,
+pub struct OutputPort {
+    pub node_id: NodeId,
+    pub port_idx: usize,
+}
+
+/// Address of a consumer node's input port. Used to report unsatisfied
+/// inputs (`ExecutionStats::missing_inputs`) and the edges the editor's
+/// breaker severs. Distinct from `OutputPort` so source/sink intent can't
+/// be confused at a call site.
+#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InputPort {
+    pub node_id: NodeId,
     pub port_idx: usize,
 }
 
@@ -21,7 +33,7 @@ pub enum Binding {
     #[default]
     None,
     Const(StaticValue),
-    Bind(PortAddress),
+    Bind(OutputPort),
 }
 
 // Port/event names are not stored per-node — they're read from the func
@@ -104,7 +116,7 @@ impl Graph {
             .iter_mut()
             .flat_map(|node| node.inputs.iter_mut())
             .for_each(|input| match &input.binding {
-                Binding::Bind(output_binding) if output_binding.target_id == id => {
+                Binding::Bind(output_binding) if output_binding.node_id == id => {
                     input.binding = Binding::None;
                 }
                 _ => {}
@@ -152,7 +164,7 @@ impl Graph {
         for node in self.nodes.iter() {
             for input in &node.inputs {
                 if let Binding::Bind(addr) = &input.binding {
-                    consumers.entry(addr.target_id).or_default().push(node.id);
+                    consumers.entry(addr.node_id).or_default().push(node.id);
                 }
             }
         }
@@ -201,11 +213,11 @@ impl Graph {
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 if let Binding::Bind(addr) = &input.binding {
                     ensure!(
-                        self.nodes.by_key(&addr.target_id).is_some(),
+                        self.nodes.by_key(&addr.node_id).is_some(),
                         "node {:?} input {} binds to missing node {:?}",
                         node.id,
                         input_idx,
-                        addr.target_id
+                        addr.node_id
                     );
                 }
             }
@@ -251,7 +263,7 @@ impl Graph {
 
             for input in node.inputs.iter() {
                 if let Binding::Bind(port_address) = &input.binding {
-                    let output_node = self.by_id(&port_address.target_id).unwrap();
+                    let output_node = self.by_id(&port_address.node_id).unwrap();
                     let output_func = func_lib.by_id(&output_node.func_id).unwrap();
                     assert!(port_address.port_idx < output_func.outputs.len());
                 }
@@ -260,8 +272,14 @@ impl Graph {
     }
 }
 
-impl Default for Node {
-    fn default() -> Self {
+impl Node {
+    /// A fresh node with a unique id and no func/inputs/events. The id is
+    /// minted here (the one RNG-touching constructor); callers fill in
+    /// `func_id` and wiring, or use `From<&Func>` for a func-shaped node.
+    // No `Default`: id minting is intentionally explicit, not a silent
+    // side effect of `Node::default()`.
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
         Node {
             id: NodeId::unique(),
             func_id: FuncId::nil(),
@@ -300,7 +318,7 @@ impl From<&Func> for Node {
 }
 
 impl Binding {
-    pub fn as_output_binding(&self) -> Option<&PortAddress> {
+    pub fn as_output_binding(&self) -> Option<&OutputPort> {
         match self {
             Binding::Bind(output_binding) => Some(output_binding),
             _ => None,
@@ -322,24 +340,18 @@ impl KeyIndexKey<NodeId> for Node {
     }
 }
 
-impl From<PortAddress> for Binding {
-    fn from(value: PortAddress) -> Self {
+impl From<OutputPort> for Binding {
+    fn from(value: OutputPort) -> Self {
         Binding::Bind(value)
     }
 }
 
 impl From<(NodeId, usize)> for Binding {
     fn from((output_node_id, output_idx): (NodeId, usize)) -> Self {
-        Binding::Bind(PortAddress {
-            target_id: output_node_id,
+        Binding::Bind(OutputPort {
+            node_id: output_node_id,
             port_idx: output_idx,
         })
-    }
-}
-
-impl From<&DataType> for Binding {
-    fn from(value: &DataType) -> Self {
-        Binding::Const(value.into())
     }
 }
 
@@ -432,7 +444,7 @@ mod tests {
 
         for input in graph.iter().flat_map(|node| node.inputs.iter()) {
             if let Some(binding) = input.binding.as_output_binding() {
-                assert_ne!(binding.target_id, node_id);
+                assert_ne!(binding.node_id, node_id);
             }
         }
 
