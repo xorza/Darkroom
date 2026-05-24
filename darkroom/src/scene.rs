@@ -110,7 +110,12 @@ impl Scene {
             let Some(node) = doc.graph.by_id(&vn.id) else {
                 continue;
             };
-            let Some(func) = func_lib.by_id(&node.func_id) else {
+            // Stage 1: only func nodes are rendered; subgraph instances get
+            // their own UI in a later stage.
+            let Some(func_id) = node.func_id() else {
+                continue;
+            };
+            let Some(func) = func_lib.by_id(&func_id) else {
                 continue;
             };
             let inputs = extend_pool(
@@ -129,7 +134,7 @@ impl Scene {
             );
             self.nodes.push(SceneNode {
                 id: vn.id,
-                func_id: node.func_id,
+                func_id,
                 pos: vn.pos,
                 name: node.name.clone().into(),
                 inputs,

@@ -111,12 +111,18 @@ levels. This is the design developed below.
 ### 4.1 Boundary nodes (the Blender approach)
 
 Borrow Blender's "Group Input / Group Output" pattern: a subgraph declares its
-interface with two special built-in nodes.
+interface with two special boundary nodes.
 
 ```rust
-// Well-known FuncIds for the two interface nodes (registered in FuncLib once).
-const SUBGRAPH_INPUT_FUNC_ID:  FuncId = FuncId::from_u128(0x...);
-const SUBGRAPH_OUTPUT_FUNC_ID: FuncId = FuncId::from_u128(0x...);
+// Implemented as NodeKind variants, not built-in funcs: a boundary node's
+// port arity is dynamic (it follows the enclosing def's interface), which a
+// fixed-signature Func can't express. They carry no FuncId.
+pub enum NodeKind {
+    Func(FuncId),
+    Subgraph(SubgraphRef),
+    SubgraphInput,   // outputs = enclosing def's exposed inputs
+    SubgraphOutput,  // inputs  = enclosing def's exposed outputs
+}
 ```
 
 **Exactly one of each** (decided). A subgraph has at most one `SubgraphInput`
@@ -127,16 +133,17 @@ that single node. Both are **optional**: a subgraph with 0 exposed inputs omits
 
 - **`SubgraphInput` node** — the inbound boundary. Carries *output* data ports
   (one per exposed input; interior nodes `Bind` to them to read "whatever the
-  parent passed in") **and** *event inlets* (§4.5; interior nodes subscribe to
-  them to react to parent-side events routed in).
+  parent passed in"), and is the interior trigger interior nodes subscribe to so
+  they fire when the owner composite is triggered (§4.5).
 - **`SubgraphOutput` node** — the outbound boundary. Carries *input* data ports
-  (one per exposed output; interior nodes feed them, the parent reads them)
-  **and** *event outlets* (§4.5; interior emitters surfaced as composite-level
-  events the parent can subscribe to).
+  (one per exposed output; interior nodes feed them, the parent reads them). The
+  exposed (outgoing) events live in `SubgraphDef.events`, each mapping to an
+  interior emitter (§4.5).
 
-This is clean because it reuses the existing `Binding`/subscriber machinery
-verbatim *inside* the subgraph. No new binding variant needed for interior
-wiring. The only new thing is what those two nodes *mean* at inline time.
+Implemented as `NodeKind::SubgraphInput` / `NodeKind::SubgraphOutput` variants
+(not funcs — their arity is dynamic, following the def's interface). This reuses
+the existing `Binding`/subscriber machinery verbatim *inside* the subgraph; the
+only new thing is what those two nodes *mean* at inline time.
 
 ### 4.2 SubgraphDef — the reusable definition
 
@@ -145,31 +152,19 @@ A composite is a `Func`-like definition carrying a `Graph`:
 ```rust
 id_type!(SubgraphId);
 
+// A composite's interface IS a function signature, so its ports reuse the
+// existing `FuncInput` (name/type/required/default) and `FuncOutput`
+// (name/type) — keeping inputs and outputs the distinct shapes they already
+// are (an output has no `required`/`default_value`).
+
+/// One exposed (outgoing) event — always an interior emitter surfaced for the
+/// parent to subscribe to. No "incoming" variant; see §4.5.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SubgraphIo {
+pub struct SubgraphEvent {
     pub name: String,
-    pub data_type: DataType,
-    pub required: bool,                  // inputs only
-    pub default_value: Option<StaticValue>, // inputs only
 }
 
-/// One exposed event. An `inlet` routes a parent event inward (interior
-/// nodes subscribe); an `outlet` surfaces an interior emitter outward
-/// (parent nodes subscribe). At most one `Inlet` per def; any number of
-/// `Outlet`s. See §4.5.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub enum EventDir {
-    Inlet,   // parent event routed inward (interior nodes subscribe)
-    Outlet,  // interior emitter surfaced (parent nodes subscribe)
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SubgraphEventIo {
-    pub name: String,
-    pub direction: EventDir,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SubgraphDef {
     pub id: SubgraphId,
     pub name: String,
@@ -182,11 +177,11 @@ pub struct SubgraphDef {
     /// Interface, in port order. `inputs[i]` <-> SubgraphInput output port i.
     /// `outputs[j]` <-> SubgraphOutput input port j. The *cached* interface;
     /// must stay in sync with the boundary nodes' arity (`validate_with`).
-    pub inputs:  Vec<SubgraphIo>,
-    pub outputs: Vec<SubgraphIo>,
+    pub inputs:  Vec<FuncInput>,
+    pub outputs: Vec<FuncOutput>,
 
-    /// Exposed events (§4.5). Order matches the boundary nodes' event slots.
-    pub events:  Vec<SubgraphEventIo>,
+    /// Exposed (outgoing) events (§4.5).
+    pub events:  Vec<SubgraphEvent>,
 }
 ```
 
@@ -200,10 +195,13 @@ a *linked* (shared) instance from a *local* (detached) one (see §4.4).**
   alongside `funcs`. This is the shared, reusable, "single source of truth"
   copy — the editor's node palette already lives in `FuncLib`. Editing it
   propagates to every linked instance (§4.4).
-- **Local defs live in the `Document`.** A detached instance owns a private
-  `SubgraphDef` stored in a Document-side `subgraphs` table (serialized and
-  undoable, unlike `FuncLib` which is runtime-owned and shared across
-  documents). Editing it affects only that instance.
+- **Local defs live on the `Graph`.** `Graph` carries its own
+  `subgraphs: KeyIndexVec<SubgraphId, SubgraphDef>`; a detached instance's
+  private def lives there. Since darkroom's `Document` serializes the `Graph`,
+  these are serialized and undoable as part of it — distinct from `FuncLib`,
+  which is runtime-owned and shared across documents. Editing it affects only
+  that instance. (Each scope owns its locals: a nested def's interior graph has
+  its own `subgraphs` table.)
 
 The parent graph **never embeds the interior nodes directly** — an instance is
 always a reference to a def (library or local). Materializing the interior into
@@ -281,7 +279,7 @@ matter of *which def the reference points at*:
 | Mode | `SubgraphRef` | Def stored in | Editing the def... |
 |------|---------------|---------------|--------------------|
 | **Linked** (default) | `Linked(id)` | `FuncLib.subgraphs` (shared) | updates **all** linked instances |
-| **Local** (detached) | `Local(id)` | `Document.subgraphs` (private) | updates **only this** instance |
+| **Local** (detached) | `Local(id)` | `Graph.subgraphs` (private) | updates **only this** instance |
 
 - **Make Local** (a.k.a. "make single user"): clone the library `SubgraphDef`
   into the Document's table under a fresh `SubgraphId`, flip the node to
@@ -313,45 +311,44 @@ it does so consistently across every instance on the next `update()`.
 edits the `FuncLib` def — which affects *all* instances and *other open
 documents* sharing that library. The editor must surface the user count and
 offer Make Local before edits, and route edits to `FuncLib.subgraphs` (Linked)
-vs. `Document.subgraphs` (Local) accordingly. The engine side stays uniform: the
+vs. `Graph.subgraphs` (Local) accordingly. The engine side stays uniform: the
 inliner just resolves a `SubgraphRef` to a `&SubgraphDef` from the right table.
 
 ### 4.5 Events across the boundary
 
 Events are **internal by default** — an interior node's events fire and trigger
-interior subscribers, invisibly to the parent. But, like data ports, an event
-can be *exposed* on the composite interface, in either direction:
+interior subscribers, invisibly to the parent. The composite interface exposes
+events in **one direction only: outgoing**.
 
-- **Outlet** (surface upward, any number). An interior emitter's event becomes a
-  composite-level event the parent can subscribe to. The composite Node carries
-  this in its `events: Vec<Event>` exactly like a func node — the parent's
-  subscribers live there. The outlet maps `composite.event[j]` →
-  interior `EventRef { node_id, event_idx }`, recorded as an event slot on the
-  `SubgraphOutput` node.
-- **Inlet** (route inward, **at most one** — decided). A single shared event the
-  composite "receives" and routes to interior subscribers. Interior nodes
-  subscribe to *one* event slot on the `SubgraphInput` node ("when this composite
-  is triggered, run me"); from the parent side the composite is added as a plain
-  subscriber to whatever parent emitter feeds it.
+- **Exposed (outgoing) events** (`SubgraphDef.events`, any number). An interior
+  emitter's event is surfaced as a composite-level event the parent can
+  subscribe to. The composite Node carries one entry in its `events: Vec<Event>`
+  per exposed event, exactly like a func node — the parent's subscribers live
+  there. Each maps `composite.event[j]` → interior `EventRef { node_id, event_idx }`.
 
-  **One inlet keeps the core `Event` model unchanged.** Today a subscriber is a
-  bare `NodeId` (`Event.subscribers: Vec<NodeId>`) with no "which of my slots"
-  index, so a composite-as-subscriber is unambiguous only with a single inlet.
-  Supporting multiple inlets would force `subscribers` to carry an inlet index —
-  explicitly out of scope. (`SubgraphDef.events` therefore holds 0..N `Outlet`
-  entries and 0..1 `Inlet`.)
+There is **no "incoming event" interface element.** Routing an event *into* a
+subgraph is just the ordinary subscriber mechanism: a composite node, like any
+node, can itself be subscribed to a parent emitter (its `NodeId` in that
+emitter's `subscribers`). *Which* interior subnodes fire when the owner is
+triggered is the subgraph's **internal wiring** — interior nodes subscribe to
+the `SubgraphInput` node — not an exposed port. This needs no change to the core
+`Event` model (a subscriber stays a bare `NodeId`) and no per-instance "inlet
+index": the owner node is the subscription target, and the interior decides what
+runs.
 
-Both reduce to the **same subscriber-edge short-circuit the inliner already does
-for data edges** (§5.2): an event slot on a boundary node emits no
-`ExecutionNode` and holds no real subscribers itself — at inline time its
-subscriber set is spliced onto the real emitter on the other side, with the same
-`flatten_id` id-remap that data `Bind` edges get. So:
+At inline time both directions reduce to the **same subscriber-edge
+short-circuit the inliner does for data edges** (§5.2): a boundary event slot
+emits no `ExecutionNode` and holds no real subscribers — its subscriber set is
+spliced onto the real emitter on the other side with the same `flatten_id`
+id-remap. So:
 
-- An **outlet**: parent subscribers of `composite.event[j]` are rewritten to
-  subscribe to `flatten_id(path, interior.node_id)` event `interior.event_idx`.
-- The **inlet**: interior subscribers of the `SubgraphInput` event slot are
-  spliced onto whatever parent emitter the composite subscribes to (resolved at
-  the enclosing level, `path` minus its last element).
+- **Exposed event** (outgoing): parent subscribers of `composite.event[j]` are
+  rewritten to subscribe to `flatten_id(path, interior.node_id)` event
+  `interior.event_idx`.
+- **Triggering the composite** (incoming): the composite's interior subscribers
+  of the `SubgraphInput` trigger are spliced onto whatever parent emitter the
+  composite subscribes to (resolved at the enclosing level, `path` minus its
+  last element).
 
 After inlining there are no composite events left — only direct emitter→subscriber
 edges in the flat graph, which `active_event_triggers` and the worker's event
@@ -423,7 +420,8 @@ each node encountered at the current level:
 
 2. **Composite node** → emit *nothing for the node itself*. Resolve its
    `SubgraphRef` to a `&SubgraphDef` (`Linked` → `FuncLib.subgraphs`, `Local` →
-   `Document.subgraphs`), then recurse into `def.graph` with
+   the containing `Graph.subgraphs` — `Graph::resolve_def` does this), then
+   recurse into `def.graph` with
    `path' = path ++ [node.id]`. The boundary nodes are handled specially (they
    also emit nothing — they're pure wiring). Whether the def is linked or local
    makes no difference to the inliner past this resolution step — both are just a
@@ -492,8 +490,8 @@ interior nodes. This is the payoff of doing the work at build time.
 
 Event subscribers (`Event.subscribers: Vec<NodeId>`) need the same id remapping
 as bindings — a subscriber id crossing into/out of a composite must be flattened
-with the right `instance_path`, and exposed-event inlets/outlets short-circuit
-the boundary just like data edges. See §4.5; it's the same resolver.
+with the right `instance_path`, and exposed events / composite triggering
+short-circuit the boundary just like data edges. See §4.5; it's the same resolver.
 
 ## 6. Editor / darkroom implications
 
@@ -558,20 +556,22 @@ one.** That is Option B.
 Adopt **Option B (build-time inlining)** with the **Blender-style boundary
 nodes** and a `SubgraphDef` referenced via a new `NodeKind::Subgraph(SubgraphRef)`
 discriminant — instances are **always references, never embedded copies** —
-resolved from `FuncLib.subgraphs` (linked) or `Document.subgraphs` (local).
+resolved from `FuncLib.subgraphs` (linked) or `Graph.subgraphs` (local).
 
 Suggested staging:
 
-1. **Authoring model** — add `SubgraphId`, `SubgraphDef` (+ `SubgraphIo`,
-   `SubgraphEventIo`/`EventDir`), the two boundary built-in funcs (one-of-each,
-   both optional), `NodeKind` + `SubgraphRef` (with the `func_id` shim), the
-   `FuncLib.subgraphs` and `Document.subgraphs` tables. Serialization +
-   `validate_with` (interface↔boundary arity, ≤1 event inlet, recursion guard —
+1. **Authoring model** ✅ *(done)* — `SubgraphId`, `SubgraphDef` (interface
+   reuses `FuncInput`/`FuncOutput`; `SubgraphEvent` is outgoing-only), the two
+   boundary `NodeKind` variants (`SubgraphInput`/`SubgraphOutput`, one-of-each,
+   both optional), `NodeKind` + `SubgraphRef` (with the `func_id()` shim), the
+   `FuncLib.subgraphs` (linked) and `Graph.subgraphs` (local) tables.
+   Serialization + `validate_with` (interface↔boundary arity, recursion guard —
    a `SubgraphId` may not appear twice on a descent path). Tests: round-trip,
-   recursion rejection, zero-input and zero-output subgraphs.
+   recursion rejection, zero-input and zero-output subgraphs, outgoing events.
 2. **Inliner** — rewrite `build_execution_nodes` into the recursive flattener
    with `flatten_id` + the binding resolver + `SubgraphRef` resolution + event
-   inlet/outlet short-circuit. Derive terminal/behavior from the interior. Keep
+   short-circuit (exposed events + composite triggering). Derive
+   terminal/behavior from the interior. Keep
    `CompactInsert` for cache preservation. Tests: the §5.3 example asserting
    exact flat node set + edges; dead interior branch pruned; cross-boundary cycle
    detected; nested (2+ deep); two linked instances don't share/clobber caches;

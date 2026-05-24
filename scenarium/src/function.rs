@@ -4,6 +4,7 @@ use crate::data::*;
 use crate::event_lambda::EventLambda;
 use crate::func_lambda::FuncLambda;
 use crate::graph::NodeBehavior;
+use crate::subgraph::{SubgraphDef, SubgraphId};
 use common::id_type;
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use common::{SerdeFormat, deserialize, serialize};
@@ -18,13 +19,13 @@ pub enum FuncBehavior {
     Pure,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ValueOption {
     pub name: String,
     pub value: StaticValue,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FuncInput {
     pub name: String,
     pub required: bool,
@@ -35,7 +36,7 @@ pub struct FuncInput {
     pub value_options: Vec<ValueOption>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FuncOutput {
     pub name: String,
     pub data_type: DataType,
@@ -85,6 +86,12 @@ impl KeyIndexKey<FuncId> for Func {
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct FuncLib {
     pub funcs: KeyIndexVec<FuncId, Func>,
+
+    /// Shared (linked) subgraph definitions. A node with
+    /// `NodeKind::Subgraph(SubgraphRef::Linked(id))` resolves here; editing a
+    /// def propagates to every linked instance. See `docs/subgraph-design.md`.
+    #[serde(default)]
+    pub subgraphs: KeyIndexVec<SubgraphId, SubgraphDef>,
 }
 
 impl Func {
@@ -122,10 +129,23 @@ impl FuncLib {
         self.funcs.add(func);
     }
 
+    pub fn subgraph_by_id(&self, id: &SubgraphId) -> Option<&SubgraphDef> {
+        assert!(!id.is_nil());
+        self.subgraphs.by_key(id)
+    }
+
+    pub fn add_subgraph(&mut self, def: SubgraphDef) {
+        assert!(!def.id.is_nil());
+        self.subgraphs.add(def);
+    }
+
     pub fn merge<T: Into<FuncLib>>(&mut self, other: T) {
         let other = other.into();
         for func in other.funcs {
             self.add(func);
+        }
+        for def in other.subgraphs {
+            self.add_subgraph(def);
         }
     }
 }

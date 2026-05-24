@@ -180,7 +180,7 @@ impl ExecutionNode {
 
     fn refresh(&mut self, node: &Node, func: &Func) {
         assert_eq!(self.id, node.id);
-        assert_eq!(node.func_id, func.id);
+        assert_eq!(node.func_id(), Some(func.id));
         assert_eq!(node.inputs.len(), func.inputs.len());
 
         if !self.inited {
@@ -342,7 +342,13 @@ impl ExecutionGraph {
             });
 
             let node = graph.by_id(&e_node.id).unwrap();
-            let func = func_lib.by_id(&node.func_id).unwrap();
+            // Stage 1: only plain func nodes execute. Subgraph/boundary nodes
+            // are flattened away by the inliner (Stage 2), so they must not
+            // reach here yet.
+            let func_id = node
+                .func_id()
+                .expect("subgraph execution requires the inliner (Stage 2)");
+            let func = func_lib.by_id(&func_id).unwrap();
             e_node.refresh(node, func);
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
@@ -951,9 +957,9 @@ impl ExecutionGraph {
             let node = graph.by_id(&e_node.id).unwrap();
             let func = func_lib.by_id(&e_node.func_id).unwrap();
 
-            assert_eq!(e_node.func_id, node.func_id);
+            assert_eq!(Some(e_node.func_id), node.func_id());
             assert_eq!(node.id, e_node.id);
-            assert_eq!(node.func_id, func.id);
+            assert_eq!(node.func_id(), Some(func.id));
             assert_eq!(e_node.inputs.len(), node.inputs.len());
             assert_eq!(node.inputs.len(), func.inputs.len());
             assert_eq!(e_node.outputs.len(), func.outputs.len());
