@@ -76,19 +76,12 @@ impl ExecutionBinding {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExecutionInput {
     pub required: bool,
+    /// Cross-run dirty bit: set by `flatten` when the binding changes at
+    /// `update`, consumed/cleared by `run_execution`. Bridges update→run, so
+    /// unlike the per-run input flags it stays on the input, not the plan.
     pub binding_changed: bool,
-    pub dependency_wants_execute: bool,
-    pub missing: bool,
     pub binding: ExecutionBinding,
     pub data_type: DataType,
-}
-
-// Count (not bool) — only `> 0` is read today for Skip/Needed, but tests
-// assert exact counts and future change-pruning / refcount-based eviction
-// will want the multiplicity.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
-pub struct ExecutionOutput {
-    usage_count: usize,
 }
 
 #[derive(Default, Debug, Serialize, Deserialize)]
@@ -137,11 +130,6 @@ pub struct ExecutionNode {
     inited: bool,
 
     pub terminal: bool,
-    pub missing_required_inputs: bool,
-    pub wants_execute: bool,
-    pub cached: bool,
-    pub inputs_updated: bool,
-    pub bindings_changed: bool,
     pub behavior: ExecutionBehavior,
 
     pub inputs: Span,
@@ -237,11 +225,27 @@ impl Scratch {
 
 // === Execution Plan ===
 
+/// Per-run scheduling state for one node, indexed by `e_node_idx`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NodeFlags {
+    pub wants_execute: bool,
+    pub cached: bool,
+    pub inputs_updated: bool,
+    pub missing_required_inputs: bool,
+}
+
+/// Per-run scheduling state for one input, indexed by input-pool index.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct InputFlags {
+    pub dependency_wants_execute: bool,
+    pub missing: bool,
+}
+
 /// The per-run schedule produced by `prepare_execution` and consumed by
-/// `run_execution`. Holds the two backward-walk orders; the per-run flags it
-/// will eventually absorb still live on the nodes/pools for now (Phase 1).
-/// Regenerated every run; reused via an internal buffer on `ExecutionGraph`
-/// so a repeated run does no scheduling allocation.
+/// `run_execution`: the two backward-walk orders plus the SoA per-run flag
+/// columns (node/input/output), all keyed by the same indices as the
+/// program's pools. Regenerated every run; reused via an internal buffer on
+/// `ExecutionGraph` so a repeated run does no scheduling allocation.
 #[derive(Debug, Default)]
 pub struct ExecutionPlan {
     /// Post-order DFS over the dependency graph (deps before consumers),
@@ -249,12 +253,37 @@ pub struct ExecutionPlan {
     pub process_order: Vec<usize>,
     /// Pruned to only nodes whose output is read by an executing consumer.
     pub execute_order: Vec<usize>,
+    /// Per-node flags, indexed by `e_node_idx`.
+    node_flags: Vec<NodeFlags>,
+    /// Per-input flags, indexed by input-pool index.
+    input_flags: Vec<InputFlags>,
+    /// Per-output consumer counts, indexed by output-pool index. `> 0` ⇒
+    /// the output is Needed this run; `0` ⇒ Skip. A count (not a bool) so
+    /// future refcount-based eviction can use the multiplicity.
+    output_usage: Vec<u32>,
 }
 
 impl ExecutionPlan {
     fn clear(&mut self) {
         self.process_order.clear();
         self.execute_order.clear();
+        self.node_flags.clear();
+        self.input_flags.clear();
+        self.output_usage.clear();
+    }
+
+    /// Clear the orders and reset every flag column to default at the given
+    /// pool sizes. Called at the start of each `prepare_execution`.
+    fn reset(&mut self, n_nodes: usize, n_inputs: usize, n_outputs: usize) {
+        self.process_order.clear();
+        self.execute_order.clear();
+
+        self.node_flags.clear();
+        self.node_flags.resize(n_nodes, NodeFlags::default());
+        self.input_flags.clear();
+        self.input_flags.resize(n_inputs, InputFlags::default());
+        self.output_usage.clear();
+        self.output_usage.resize(n_outputs, 0);
     }
 }
 
@@ -265,8 +294,12 @@ pub struct ExecutionGraph {
     pub e_nodes: KeyIndexVec<NodeId, ExecutionNode>,
 
     inputs: Vec<ExecutionInput>,
-    outputs: Vec<ExecutionOutput>,
     events: Vec<ExecutionEvent>,
+    /// Total output count across all nodes (sum of every node's output span
+    /// length). Sizes the plan's `output_usage` column; outputs carry no
+    /// per-node static data, so there is no output pool — only this count and
+    /// the per-node `outputs` span.
+    n_outputs: usize,
 
     #[serde(skip)]
     ctx_manager: ContextManager,
@@ -304,10 +337,6 @@ impl ExecutionGraph {
         &self.inputs[e_node.inputs.range()]
     }
 
-    pub fn node_outputs(&self, e_node: &ExecutionNode) -> &[ExecutionOutput] {
-        &self.outputs[e_node.outputs.range()]
-    }
-
     pub fn node_events(&self, e_node: &ExecutionNode) -> &[ExecutionEvent] {
         &self.events[e_node.events.range()]
     }
@@ -328,8 +357,8 @@ impl ExecutionGraph {
         self.e_nodes.clear();
         self.plan_buf.clear();
         self.inputs.clear();
-        self.outputs.clear();
         self.events.clear();
+        self.n_outputs = 0;
     }
 
     pub fn reset_states(&mut self) {
@@ -351,8 +380,8 @@ impl ExecutionGraph {
             &mut self.e_nodes,
             flatten::Pools {
                 inputs: &mut self.inputs,
-                outputs: &mut self.outputs,
                 events: &mut self.events,
+                n_outputs: &mut self.n_outputs,
             },
             graph,
             func_lib,
@@ -400,20 +429,12 @@ impl ExecutionGraph {
         events: &[EventRef],
     ) -> Result<()> {
         let mut plan = std::mem::take(&mut self.plan_buf);
-        plan.clear();
+        plan.reset(self.e_nodes.len(), self.inputs.len(), self.n_outputs);
         let mut scratch = std::mem::take(&mut self.scratch);
 
         self.collect_terminal_nodes(terminals, event_triggers, events, &mut scratch);
 
-        for e_input in &mut self.inputs {
-            e_input.dependency_wants_execute = false;
-        }
         for e_node in self.e_nodes.iter_mut() {
-            e_node.wants_execute = false;
-            e_node.inputs_updated = false;
-            e_node.bindings_changed = false;
-            e_node.missing_required_inputs = false;
-            e_node.cached = false;
             e_node.run_time = 0.0;
             e_node.error = None;
         }
@@ -422,15 +443,15 @@ impl ExecutionGraph {
             &scratch.terminal_seeds,
             &mut scratch.stack,
             &mut scratch.color,
-            &mut plan.process_order,
+            &mut plan,
         );
         if result.is_ok() {
-            self.propagate_input_state_forward(&plan.process_order);
+            self.propagate_input_state_forward(&mut plan);
             self.walk_backward_collect_execute_order(
                 &scratch.terminal_seeds,
                 &mut scratch.stack,
                 &mut scratch.color,
-                &mut plan.execute_order,
+                &mut plan,
             );
             self.validate_for_execution(&plan);
         }
@@ -490,9 +511,9 @@ impl ExecutionGraph {
         terminal_seeds: &[usize],
         stack: &mut Vec<Visit>,
         color: &mut Vec<Color>,
-        process_order: &mut Vec<usize>,
+        plan: &mut ExecutionPlan,
     ) -> Result<()> {
-        process_order.clear();
+        plan.process_order.clear();
         stack.clear();
 
         color.clear();
@@ -510,12 +531,12 @@ impl ExecutionGraph {
                 VisitCause::Terminal => {}
                 VisitCause::OutputRequest { output_idx } => {
                     let span = self.e_nodes[visit.e_node_idx].outputs;
-                    self.outputs[span.range()][output_idx].usage_count += 1;
+                    plan.output_usage[span.start as usize + output_idx] += 1;
                 }
                 VisitCause::Done => {
                     assert_eq!(color[visit.e_node_idx], Color::Gray);
                     color[visit.e_node_idx] = Color::Black;
-                    process_order.push(visit.e_node_idx);
+                    plan.process_order.push(visit.e_node_idx);
                     continue;
                 }
             }
@@ -553,7 +574,7 @@ impl ExecutionGraph {
         Ok(())
     }
 
-    fn propagate_input_state_forward(&mut self, process_order: &[usize]) {
+    fn propagate_input_state_forward(&mut self, plan: &mut ExecutionPlan) {
         // Debug-only: verify every Bind dep was already processed in this
         // forward pass. Guaranteed by process_order being post-order DFS
         // (deps before consumers), but worth checking — if this flips, the
@@ -564,7 +585,8 @@ impl ExecutionGraph {
             Vec::new()
         };
 
-        for e_node_idx in process_order.iter().copied() {
+        for order_idx in 0..plan.process_order.len() {
+            let e_node_idx = plan.process_order[order_idx];
             let inputs_span = self.e_nodes[e_node_idx].inputs;
 
             let mut inputs_updated = false;
@@ -573,51 +595,52 @@ impl ExecutionGraph {
 
             for pool_idx in inputs_span.range() {
                 let e_input = &self.inputs[pool_idx];
+                let binding_changed = e_input.binding_changed;
                 let (dep_wants_execute, missing) = match &e_input.binding {
                     ExecutionBinding::None => (false, e_input.required),
                     ExecutionBinding::Const(_) => (false, false),
                     ExecutionBinding::Bind(addr) => {
-                        let output_node = &self.e_nodes[addr.target_idx];
-                        assert!(addr.port_idx < output_node.outputs.len as usize);
+                        let target_idx = addr.target_idx;
+                        assert!(addr.port_idx < self.e_nodes[target_idx].outputs.len as usize);
                         if is_debug() {
-                            assert!(
-                                processed[addr.target_idx],
-                                "forward pass: dep not yet processed"
-                            );
+                            assert!(processed[target_idx], "forward pass: dep not yet processed");
                         }
+                        let dep = plan.node_flags[target_idx];
                         (
-                            output_node.wants_execute,
-                            e_input.required && output_node.missing_required_inputs,
+                            dep.wants_execute,
+                            e_input.required && dep.missing_required_inputs,
                         )
                     }
                 };
 
-                let e_input = &mut self.inputs[pool_idx];
-                e_input.dependency_wants_execute = dep_wants_execute;
-                e_input.missing = missing;
-                inputs_updated |= e_input.binding_changed || dep_wants_execute;
-                bindings_changed |= e_input.binding_changed;
+                plan.input_flags[pool_idx] = InputFlags {
+                    dependency_wants_execute: dep_wants_execute,
+                    missing,
+                };
+                inputs_updated |= binding_changed || dep_wants_execute;
+                bindings_changed |= binding_changed;
                 missing_required |= missing;
             }
 
-            let e_node = &mut self.e_nodes[e_node_idx];
-            e_node.inputs_updated = inputs_updated;
-            e_node.bindings_changed = bindings_changed;
-            e_node.missing_required_inputs = missing_required;
+            let behavior = self.e_nodes[e_node_idx].behavior;
+            let has_outputs = self.e_nodes[e_node_idx].output_values.is_some();
+            let flags = &mut plan.node_flags[e_node_idx];
+            flags.inputs_updated = inputs_updated;
+            flags.missing_required_inputs = missing_required;
 
             if missing_required {
-                e_node.wants_execute = false;
-                e_node.cached = false;
+                flags.wants_execute = false;
+                flags.cached = false;
             } else if bindings_changed {
-                e_node.wants_execute = true;
-                e_node.cached = false;
+                flags.wants_execute = true;
+                flags.cached = false;
             } else {
-                e_node.cached = match e_node.behavior {
+                flags.cached = match behavior {
                     ExecutionBehavior::Impure => false,
-                    ExecutionBehavior::Pure => e_node.output_values.is_some() && !inputs_updated,
-                    ExecutionBehavior::Once => e_node.output_values.is_some(),
+                    ExecutionBehavior::Pure => has_outputs && !inputs_updated,
+                    ExecutionBehavior::Once => has_outputs,
                 };
-                e_node.wants_execute = !e_node.cached;
+                flags.wants_execute = !flags.cached;
             }
 
             if is_debug() {
@@ -626,7 +649,7 @@ impl ExecutionGraph {
         }
     }
 
-    // Prunes `e_node_process_order` to only nodes whose output is actually
+    // Prunes `process_order` to only nodes whose output is actually
     // read by an executing consumer this run. A filter over `wants_execute`
     // is not equivalent: a Pure/Impure node can have `wants_execute = true`
     // while its sole consumer is Once-cached and won't read it — the forward
@@ -638,9 +661,9 @@ impl ExecutionGraph {
         terminal_seeds: &[usize],
         stack: &mut Vec<Visit>,
         color: &mut Vec<Color>,
-        execute_order: &mut Vec<usize>,
+        plan: &mut ExecutionPlan,
     ) {
-        execute_order.clear();
+        plan.execute_order.clear();
         stack.clear();
 
         color.clear();
@@ -660,7 +683,7 @@ impl ExecutionGraph {
                 VisitCause::Terminal | VisitCause::OutputRequest { .. } => {}
                 VisitCause::Done => {
                     assert_eq!(color[idx], Color::Gray);
-                    execute_order.push(idx);
+                    plan.execute_order.push(idx);
                     color[idx] = Color::Black;
                     continue;
                 }
@@ -674,7 +697,7 @@ impl ExecutionGraph {
                 Color::Gray => unreachable!("cycle should be detected in pass 1"),
             }
 
-            if !self.e_nodes[idx].wants_execute {
+            if !plan.node_flags[idx].wants_execute {
                 color[idx] = Color::Black;
                 continue;
             }
@@ -686,8 +709,8 @@ impl ExecutionGraph {
             });
 
             let span = self.e_nodes[idx].inputs;
-            for e_input in &self.inputs[span.range()] {
-                if e_input.dependency_wants_execute
+            for (pool_idx, e_input) in self.inputs[span.range()].iter().enumerate() {
+                if plan.input_flags[span.start as usize + pool_idx].dependency_wants_execute
                     && let Some(addr) = e_input.binding.as_bind()
                 {
                     stack.push(Visit {
@@ -723,8 +746,8 @@ impl ExecutionGraph {
                 continue;
             }
 
-            self.collect_inputs(e_node_idx, &mut scratch.inputs);
-            self.collect_output_usage(e_node_idx, &mut scratch.output_usage);
+            self.collect_inputs(e_node_idx, &plan, &mut scratch.inputs);
+            self.collect_output_usage(e_node_idx, &plan, &mut scratch.output_usage);
 
             let event_state = self.e_nodes[e_node_idx].event_state.clone();
             let e_node = &mut self.e_nodes[e_node_idx];
@@ -778,10 +801,15 @@ impl ExecutionGraph {
         })
     }
 
-    fn collect_inputs(&self, e_node_idx: usize, inputs: &mut Vec<InvokeInput>) {
+    fn collect_inputs(
+        &self,
+        e_node_idx: usize,
+        plan: &ExecutionPlan,
+        inputs: &mut Vec<InvokeInput>,
+    ) {
         inputs.clear();
         let span = self.e_nodes[e_node_idx].inputs;
-        for input in &self.inputs[span.range()] {
+        for (i, input) in self.inputs[span.range()].iter().enumerate() {
             let value = match &input.binding {
                 ExecutionBinding::None => DynamicValue::None,
                 ExecutionBinding::Const(v) => v.into(),
@@ -795,20 +823,27 @@ impl ExecutionGraph {
                     outputs[addr.port_idx].clone()
                 }
             };
+            let dependency_wants_execute =
+                plan.input_flags[span.start as usize + i].dependency_wants_execute;
             inputs.push(InvokeInput {
-                changed: input.binding_changed || input.dependency_wants_execute,
+                changed: input.binding_changed || dependency_wants_execute,
                 value,
             });
         }
     }
 
-    fn collect_output_usage(&self, e_node_idx: usize, usage: &mut Vec<OutputUsage>) {
+    fn collect_output_usage(
+        &self,
+        e_node_idx: usize,
+        plan: &ExecutionPlan,
+        usage: &mut Vec<OutputUsage>,
+    ) {
         usage.clear();
         let span = self.e_nodes[e_node_idx].outputs;
         usage.extend(
-            self.outputs[span.range()]
+            plan.output_usage[span.range()]
                 .iter()
-                .map(|o| (o.usage_count == 0).then_else(OutputUsage::Skip, OutputUsage::Needed)),
+                .map(|&c| (c == 0).then_else(OutputUsage::Skip, OutputUsage::Needed)),
         );
     }
 
@@ -832,9 +867,10 @@ impl ExecutionGraph {
 
         for &idx in &plan.process_order {
             let e = &self.e_nodes[idx];
-            if e.missing_required_inputs {
-                for (i, inp) in self.inputs[e.inputs.range()].iter().enumerate() {
-                    if inp.missing {
+            let flags = plan.node_flags[idx];
+            if flags.missing_required_inputs {
+                for i in 0..e.inputs.len as usize {
+                    if plan.input_flags[e.inputs.start as usize + i].missing {
                         missing_inputs.push(InputPort {
                             node_id: e.id,
                             port_idx: i,
@@ -842,7 +878,7 @@ impl ExecutionGraph {
                     }
                 }
             }
-            if e.cached {
+            if flags.cached {
                 cached_nodes.push(e.id);
             }
             if let Some(err) = &e.error {
@@ -1000,9 +1036,10 @@ impl ExecutionGraph {
             assert!(seen_in_order.insert(idx));
         }
 
-        for e_node in self.e_nodes.iter() {
-            if e_node.missing_required_inputs {
-                assert!(!e_node.wants_execute);
+        for (idx, e_node) in self.e_nodes.iter().enumerate() {
+            let flags = plan.node_flags[idx];
+            if flags.missing_required_inputs {
+                assert!(!flags.wants_execute);
             }
 
             for e_input in &self.inputs[e_node.inputs.range()] {
@@ -1023,8 +1060,9 @@ impl ExecutionGraph {
             pending.remove(&idx);
 
             let e_node = &self.e_nodes[idx];
-            assert!(e_node.wants_execute);
-            assert!(!e_node.missing_required_inputs);
+            let flags = plan.node_flags[idx];
+            assert!(flags.wants_execute);
+            assert!(!flags.missing_required_inputs);
 
             for e_input in &self.inputs[e_node.inputs.range()] {
                 if let ExecutionBinding::Bind(addr) = &e_input.binding {
@@ -1032,5 +1070,24 @@ impl ExecutionGraph {
                 }
             }
         }
+    }
+}
+
+/// Test-only inspection of the last plan's per-run flags. Nothing in
+/// production reads per-run state off the graph — the executor reads it
+/// straight from the live `ExecutionPlan`.
+#[cfg(test)]
+impl ExecutionGraph {
+    pub(crate) fn node_flags(&self, e_node: &ExecutionNode) -> NodeFlags {
+        let idx = self.e_nodes.index_of_key(&e_node.id).unwrap();
+        self.plan_buf.node_flags[idx]
+    }
+
+    pub(crate) fn node_input_flags(&self, e_node: &ExecutionNode) -> &[InputFlags] {
+        &self.plan_buf.input_flags[e_node.inputs.range()]
+    }
+
+    pub(crate) fn node_output_usage(&self, e_node: &ExecutionNode) -> &[u32] {
+        &self.plan_buf.output_usage[e_node.outputs.range()]
     }
 }

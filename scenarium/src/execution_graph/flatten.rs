@@ -19,8 +19,7 @@ use common::key_index_vec::{CompactInsert, KeyIndexVec};
 use hashbrown::HashSet;
 
 use super::{
-    ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput,
-    ExecutionPortAddress, Span,
+    ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionPortAddress, Span,
 };
 use crate::data::StaticValue;
 use crate::function::FuncLib;
@@ -55,11 +54,14 @@ pub(super) struct Flattener {
 
 /// The graph's SoA pools, rebuilt each `build`. `inputs` is the new pool being
 /// filled (carries over reused nodes' bindings); `old_inputs` is last build's
-/// pool, kept readable for that carry-over.
+/// pool, kept readable for that carry-over. Outputs carry no static per-node
+/// data, so only their grand total (`n_outputs`) is produced here — used to
+/// size the plan's `output_usage` column and to assign each node's output
+/// span.
 pub(super) struct Pools<'a> {
     pub inputs: &'a mut Vec<ExecutionInput>,
-    pub outputs: &'a mut Vec<ExecutionOutput>,
     pub events: &'a mut Vec<ExecutionEvent>,
+    pub n_outputs: &'a mut usize,
 }
 
 impl Flattener {
@@ -79,8 +81,8 @@ impl Flattener {
 
         let mut new_inputs = std::mem::take(&mut self.inputs_scratch);
         new_inputs.clear();
-        pools.outputs.clear();
         pools.events.clear();
+        *pools.n_outputs = 0;
         {
             let mut run = Run {
                 root,
@@ -92,7 +94,7 @@ impl Flattener {
                 cur_idx: 0,
                 old_inputs: pools.inputs.as_slice(),
                 new_inputs: &mut new_inputs,
-                outputs: pools.outputs,
+                n_outputs: pools.n_outputs,
                 events: pools.events,
             };
             run.emit();
@@ -178,7 +180,8 @@ struct Run<'a> {
     old_inputs: &'a [ExecutionInput],
     /// The inputs pool being built this update; `cur_idx`'s span is its tail.
     new_inputs: &'a mut Vec<ExecutionInput>,
-    outputs: &'a mut Vec<ExecutionOutput>,
+    /// Running total of outputs emitted so far; also the next output span start.
+    n_outputs: &'a mut usize,
     events: &'a mut Vec<ExecutionEvent>,
 }
 
@@ -222,11 +225,8 @@ impl<'a> Run<'a> {
                         );
                     }
 
-                    let outputs_start = self.outputs.len() as u32;
-                    self.outputs.extend(std::iter::repeat_n(
-                        ExecutionOutput::default(),
-                        func.outputs.len(),
-                    ));
+                    let outputs_start = *self.n_outputs as u32;
+                    *self.n_outputs += func.outputs.len();
                     let events_start = self.events.len() as u32;
                     for func_event in &func.events {
                         self.events.push(ExecutionEvent {

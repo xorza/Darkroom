@@ -69,15 +69,17 @@ mod graph_structure {
         assert_eq!(execution_graph.plan_buf.execute_order.len(), 5);
         assert!(
             execution_graph
-                .e_nodes
+                .plan_buf
+                .node_flags
                 .iter()
-                .all(|e_node| !e_node.missing_required_inputs)
+                .all(|f| !f.missing_required_inputs)
         );
         assert!(
             execution_graph
-                .e_nodes
+                .plan_buf
+                .node_flags
                 .iter()
-                .all(|e_node| e_node.wants_execute)
+                .all(|f| f.wants_execute)
         );
 
         let get_a = execution_graph.by_name("get_a").unwrap();
@@ -87,17 +89,17 @@ mod graph_structure {
         let print = execution_graph.by_name("print").unwrap();
 
         // usage_count: get_a→sum[0], get_b→sum[1]+mult[1], sum→mult[0], mult→print[0]
-        assert_eq!(execution_graph.node_outputs(get_a)[0].usage_count, 1);
-        assert_eq!(execution_graph.node_outputs(get_b)[0].usage_count, 2);
-        assert_eq!(execution_graph.node_outputs(sum)[0].usage_count, 1);
-        assert_eq!(execution_graph.node_outputs(mult)[0].usage_count, 1);
+        assert_eq!(execution_graph.node_output_usage(get_a)[0], 1);
+        assert_eq!(execution_graph.node_output_usage(get_b)[0], 2);
+        assert_eq!(execution_graph.node_output_usage(sum)[0], 1);
+        assert_eq!(execution_graph.node_output_usage(mult)[0], 1);
 
         // Leaf nodes have no input dependencies so inputs_updated=false
-        assert!(!get_a.inputs_updated);
-        assert!(!get_b.inputs_updated);
-        assert!(sum.inputs_updated);
-        assert!(mult.inputs_updated);
-        assert!(print.inputs_updated);
+        assert!(!execution_graph.node_flags(get_a).inputs_updated);
+        assert!(!execution_graph.node_flags(get_b).inputs_updated);
+        assert!(execution_graph.node_flags(sum).inputs_updated);
+        assert!(execution_graph.node_flags(mult).inputs_updated);
+        assert!(execution_graph.node_flags(print).inputs_updated);
 
         assert!(print.terminal);
 
@@ -126,14 +128,14 @@ mod graph_structure {
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
 
-        assert_eq!(execution_graph.node_outputs(get_a).len(), 1);
-        assert_eq!(execution_graph.node_outputs(get_b).len(), 1);
-        assert_eq!(execution_graph.node_outputs(mult).len(), 1);
-        assert!(execution_graph.node_outputs(print).is_empty());
+        assert_eq!(execution_graph.node_output_usage(get_a).len(), 1);
+        assert_eq!(execution_graph.node_output_usage(get_b).len(), 1);
+        assert_eq!(execution_graph.node_output_usage(mult).len(), 1);
+        assert!(execution_graph.node_output_usage(print).is_empty());
         // Now each source has exactly 1 consumer (sum is no longer in the path)
-        assert_eq!(execution_graph.node_outputs(get_a)[0].usage_count, 1);
-        assert_eq!(execution_graph.node_outputs(get_b)[0].usage_count, 1);
-        assert_eq!(execution_graph.node_outputs(mult)[0].usage_count, 1);
+        assert_eq!(execution_graph.node_output_usage(get_a)[0], 1);
+        assert_eq!(execution_graph.node_output_usage(get_b)[0], 1);
+        assert_eq!(execution_graph.node_output_usage(mult)[0], 1);
 
         Ok(())
     }
@@ -164,10 +166,7 @@ mod graph_structure {
                     deserialized.node_inputs(restored).len(),
                     execution_graph.node_inputs(original).len()
                 );
-                assert_eq!(
-                    deserialized.node_outputs(restored).len(),
-                    execution_graph.node_outputs(original).len()
-                );
+                assert_eq!(restored.outputs.len, original.outputs.len);
             }
             // mult's Bind to sum survives with its port address intact.
             let mult = deserialized.by_name("mult").unwrap();
@@ -204,11 +203,11 @@ mod missing_inputs {
         let print = execution_graph.by_name("print").unwrap();
 
         // get_b has no missing inputs (no inputs at all)
-        assert!(!get_b.missing_required_inputs);
+        assert!(!execution_graph.node_flags(get_b).missing_required_inputs);
         // sum is missing input[0], propagates to downstream mult and print
-        assert!(sum.missing_required_inputs);
-        assert!(mult.missing_required_inputs);
-        assert!(print.missing_required_inputs);
+        assert!(execution_graph.node_flags(sum).missing_required_inputs);
+        assert!(execution_graph.node_flags(mult).missing_required_inputs);
+        assert!(execution_graph.node_flags(print).missing_required_inputs);
 
         // Nothing should be scheduled for execution
         assert_eq!(execution_graph.plan_buf.execute_order.len(), 0);
@@ -234,9 +233,9 @@ mod missing_inputs {
         let print = execution_graph.by_name("print").unwrap();
 
         // sum still missing, but mult/print are fine because mult[0] is optional
-        assert!(sum.missing_required_inputs);
-        assert!(!mult.missing_required_inputs);
-        assert!(!print.missing_required_inputs);
+        assert!(execution_graph.node_flags(sum).missing_required_inputs);
+        assert!(!execution_graph.node_flags(mult).missing_required_inputs);
+        assert!(!execution_graph.node_flags(print).missing_required_inputs);
 
         // Only get_b→mult→print should execute (sum excluded)
         assert_eq!(
@@ -277,12 +276,12 @@ mod const_bindings {
         );
 
         let mult = execution_graph.by_name("mult").unwrap();
-        assert!(mult.inputs_updated);
+        assert!(execution_graph.node_flags(mult).inputs_updated);
         // After execution, binding_changed is cleared
         assert!(!execution_graph.node_inputs(mult)[0].binding_changed);
-        assert!(!execution_graph.node_inputs(mult)[0].dependency_wants_execute);
+        assert!(!execution_graph.node_input_flags(mult)[0].dependency_wants_execute);
         assert!(!execution_graph.node_inputs(mult)[1].binding_changed);
-        assert!(!execution_graph.node_inputs(mult)[1].dependency_wants_execute);
+        assert!(!execution_graph.node_input_flags(mult)[1].dependency_wants_execute);
 
         // Re-run with same bindings: mult is cached, only print re-executes
         execution_graph.update(&graph, &func_lib);
@@ -291,7 +290,7 @@ mod const_bindings {
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
 
         let mult = execution_graph.by_name("mult").unwrap();
-        assert!(!mult.inputs_updated);
+        assert!(!execution_graph.node_flags(mult).inputs_updated);
         assert!(!execution_graph.node_inputs(mult)[0].binding_changed);
         assert!(!execution_graph.node_inputs(mult)[1].binding_changed);
 
@@ -310,10 +309,10 @@ mod const_bindings {
 
         assert!(execution_graph.node_inputs(mult)[0].binding_changed);
         assert!(!execution_graph.node_inputs(mult)[1].binding_changed);
-        assert!(!mult.missing_required_inputs);
-        assert!(!print.missing_required_inputs);
-        assert!(mult.inputs_updated);
-        assert!(print.inputs_updated);
+        assert!(!execution_graph.node_flags(mult).missing_required_inputs);
+        assert!(!execution_graph.node_flags(print).missing_required_inputs);
+        assert!(execution_graph.node_flags(mult).inputs_updated);
+        assert!(execution_graph.node_flags(print).inputs_updated);
 
         Ok(())
     }
@@ -694,7 +693,7 @@ mod behavior {
         execution_graph.execute_terminals().await?;
 
         let sum = execution_graph.by_name("sum").unwrap();
-        assert!(!sum.cached);
+        assert!(!execution_graph.node_flags(sum).cached);
 
         // Once node was just set, it has cached output, so only print runs
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
@@ -766,7 +765,7 @@ mod invalidation {
         assert!(execution_graph.plan_buf.execute_order.is_empty());
         // The SoA pools are emptied too (not just the node list).
         assert!(execution_graph.inputs.is_empty());
-        assert!(execution_graph.outputs.is_empty());
+        assert_eq!(execution_graph.n_outputs, 0);
         assert!(execution_graph.events.is_empty());
 
         Ok(())
@@ -896,7 +895,7 @@ mod execution {
 
         // sum should be marked as missing required inputs
         let sum = execution_graph.by_name("sum").unwrap();
-        assert!(sum.missing_required_inputs);
+        assert!(execution_graph.node_flags(sum).missing_required_inputs);
 
         Ok(())
     }
@@ -1511,8 +1510,8 @@ mod output_usage {
         eg.execute_terminals().await?;
 
         let split = eg.by_name("split").unwrap();
-        assert_eq!(eg.node_outputs(split)[0].usage_count, 1);
-        assert_eq!(eg.node_outputs(split)[1].usage_count, 0);
+        assert_eq!(eg.node_output_usage(split)[0], 1);
+        assert_eq!(eg.node_output_usage(split)[1], 0);
 
         // The lambda observed Needed for the consumed output, Skip for the other.
         assert_eq!(
