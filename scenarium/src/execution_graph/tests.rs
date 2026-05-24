@@ -14,7 +14,7 @@ fn execution_node_names_in_order(execution_graph: &ExecutionGraph) -> Vec<String
         .plan_buf
         .execute_order
         .iter()
-        .map(|&e_node_idx| execution_graph.e_nodes[e_node_idx].name.clone())
+        .map(|&e_node_idx| execution_graph.program.e_nodes[e_node_idx].name.clone())
         .collect()
 }
 
@@ -64,7 +64,7 @@ mod graph_structure {
             ["sum", "mult", "print"]
         );
 
-        assert_eq!(execution_graph.e_nodes.len(), 5);
+        assert_eq!(execution_graph.program.e_nodes.len(), 5);
         assert_eq!(execution_graph.plan_buf.process_order.len(), 5);
         assert_eq!(execution_graph.plan_buf.execute_order.len(), 5);
         assert!(
@@ -156,8 +156,11 @@ mod graph_structure {
 
             // Structural fields survive the round-trip (lambdas/state/output
             // values are #[serde(skip)], but ids/names/bindings must persist).
-            assert_eq!(deserialized.e_nodes.len(), execution_graph.e_nodes.len());
-            for original in execution_graph.e_nodes.iter() {
+            assert_eq!(
+                deserialized.program.e_nodes.len(),
+                execution_graph.program.e_nodes.len()
+            );
+            for original in execution_graph.program.e_nodes.iter() {
                 let restored = deserialized.by_id(&original.id).unwrap();
                 assert_eq!(restored.name, original.name);
                 assert_eq!(restored.func_id, original.func_id);
@@ -753,17 +756,17 @@ mod invalidation {
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
 
-        assert!(!execution_graph.e_nodes.is_empty());
+        assert!(!execution_graph.program.e_nodes.is_empty());
 
         execution_graph.clear();
 
-        assert!(execution_graph.e_nodes.is_empty());
+        assert!(execution_graph.program.e_nodes.is_empty());
         assert!(execution_graph.plan_buf.process_order.is_empty());
         assert!(execution_graph.plan_buf.execute_order.is_empty());
         // The SoA pools are emptied too (not just the node list).
-        assert!(execution_graph.inputs.is_empty());
-        assert_eq!(execution_graph.n_outputs, 0);
-        assert!(execution_graph.events.is_empty());
+        assert!(execution_graph.program.inputs.is_empty());
+        assert_eq!(execution_graph.program.n_outputs, 0);
+        assert!(execution_graph.program.events.is_empty());
 
         Ok(())
     }
@@ -785,6 +788,7 @@ mod invalidation {
 
         // All output_values and state should be cleared
         for (e_node, slot) in execution_graph
+            .program
             .e_nodes
             .iter()
             .zip(execution_graph.runtime_slots())
@@ -1538,7 +1542,7 @@ mod topology {
         let mut graph = test_graph();
         let mut eg = ExecutionGraph::default();
         eg.update(&graph, &func_lib);
-        assert_eq!(eg.e_nodes.len(), 5);
+        assert_eq!(eg.program.e_nodes.len(), 5);
 
         // Remove get_b — a middle node feeding sum[1] and mult[1] (both optional).
         // Forces compaction and target_idx remapping for the survivors.
@@ -1547,7 +1551,7 @@ mod topology {
         graph.validate();
 
         eg.update(&graph, &func_lib);
-        assert_eq!(eg.e_nodes.len(), 4);
+        assert_eq!(eg.program.e_nodes.len(), 4);
         assert!(eg.by_name("get_b").is_none());
 
         eg.execute_terminals().await?;
@@ -1659,7 +1663,7 @@ mod topology {
         eg.update(&graph, &func_lib);
         eg.execute_terminals().await?;
         assert_eq!(*calls_a.lock().await, 1); // get_a ran once
-        let idx_before = eg.e_nodes.index_of_key(&get_a_id).unwrap();
+        let idx_before = eg.program.e_nodes.index_of_key(&get_a_id).unwrap();
 
         // Remove get_b's chain — get_a's slot compacts toward the front.
         graph.remove_by_id(get_b_id);
@@ -1667,7 +1671,7 @@ mod topology {
         graph.validate();
 
         eg.update(&graph, &func_lib);
-        let idx_after = eg.e_nodes.index_of_key(&get_a_id).unwrap();
+        let idx_after = eg.program.e_nodes.index_of_key(&get_a_id).unwrap();
         assert_ne!(idx_before, idx_after, "get_a should have been reordered");
 
         let stats = eg.execute_terminals().await?;
@@ -1716,7 +1720,7 @@ mod topology {
             graph.set_input_binding(InputPort::new(pb, 0), (gb, 0).into());
             graph.validate();
             eg.update(&graph, &func_lib);
-            assert_eq!(eg.e_nodes.len(), 4, "round {round} grow");
+            assert_eq!(eg.program.e_nodes.len(), 4, "round {round} grow");
             printed.lock().await.clear();
             eg.execute_terminals().await?;
             let mut got = printed.lock().await.clone();
@@ -1728,7 +1732,7 @@ mod topology {
             graph.remove_by_id(pb);
             graph.validate();
             eg.update(&graph, &func_lib);
-            assert_eq!(eg.e_nodes.len(), 2, "round {round} shrink");
+            assert_eq!(eg.program.e_nodes.len(), 2, "round {round} shrink");
             printed.lock().await.clear();
             eg.execute_terminals().await?;
             assert_eq!(
@@ -2012,7 +2016,7 @@ mod subgraph {
         eg.update(&graph, &func_lib);
 
         // get_a, get_b, sum (interior), print — no composite/boundary nodes.
-        assert_eq!(eg.e_nodes.len(), 4);
+        assert_eq!(eg.program.e_nodes.len(), 4);
         let sum = eg.by_name("sum").unwrap();
         assert_eq!(bind_target(&eg, sum, 0), a_id);
         assert_eq!(bind_target(&eg, sum, 1), b_id);
@@ -2027,7 +2031,7 @@ mod subgraph {
         let mut eg = ExecutionGraph::default();
         eg.update(&graph, &func_lib);
 
-        assert_eq!(eg.e_nodes.len(), graph.len());
+        assert_eq!(eg.program.e_nodes.len(), graph.len());
         for node in graph.iter() {
             assert!(eg.by_id(&node.id).is_some(), "id preserved");
         }
@@ -2056,6 +2060,7 @@ mod subgraph {
         eg.update(&graph, &func_lib);
 
         let sums: Vec<NodeId> = eg
+            .program
             .e_nodes
             .iter()
             .filter(|e| e.name == "sum")
@@ -2242,6 +2247,7 @@ mod subgraph {
         // Interior `sum` flat ids (sorted) — for the cache-stability check.
         let sum_ids = |eg: &ExecutionGraph| -> Vec<NodeId> {
             let mut ids: Vec<NodeId> = eg
+                .program
                 .e_nodes
                 .iter()
                 .filter(|e| e.name == "sum")
