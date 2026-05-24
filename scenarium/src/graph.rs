@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::data::{DataType, StaticValue};
 use crate::function::{Func, FuncId, FuncLib};
+use anyhow::ensure;
 use common::{Result, SerdeFormat, deserialize, serialize};
 use common::{id_type, is_debug};
 
@@ -23,17 +24,18 @@ pub enum Binding {
     Bind(PortAddress),
 }
 
+// Port/event names are not stored per-node — they're read from the func
+// (`FuncInput`/`FuncOutput`/`FuncEvent`) via `node.func_id`, the single
+// source of truth. Inputs and events are positional, matched to the func by
+// index (`validate_with` asserts the lengths).
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Input {
-    pub name: String,
-
     #[serde(default)]
     pub binding: Binding,
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Event {
-    pub name: String,
     pub subscribers: Vec<NodeId>,
 }
 
@@ -66,6 +68,12 @@ pub struct Graph {
 
 impl Graph {
     pub fn add(&mut self, node: Node) {
+        assert!(!node.id.is_nil(), "cannot add a node with a nil id");
+        assert!(
+            self.nodes.by_key(&node.id).is_none(),
+            "node {:?} already exists; adds must use a fresh id",
+            node.id
+        );
         self.nodes.add(node);
     }
 
@@ -172,25 +180,61 @@ impl Graph {
     }
     pub fn deserialize(serialized: &[u8], format: SerdeFormat) -> Result<Graph> {
         let graph: Self = deserialize(serialized, format)?;
-        graph.validate();
+        graph.check()?;
         Ok(graph)
     }
 
+    /// Structural validation of a (possibly untrusted) graph — runs in all
+    /// builds and returns an error rather than panicking. `validate` below is
+    /// the debug-only internal-invariant check; this is the load-path guard.
+    /// Port-index ranges need a `FuncLib`, so they're checked by
+    /// `validate_with`, not here.
+    pub fn check(&self) -> Result<()> {
+        for node in self.nodes.iter() {
+            ensure!(!node.id.is_nil(), "graph contains a node with a nil id");
+            ensure!(
+                !node.func_id.is_nil(),
+                "node {:?} has a nil func_id",
+                node.id
+            );
+
+            for (input_idx, input) in node.inputs.iter().enumerate() {
+                if let Binding::Bind(addr) = &input.binding {
+                    ensure!(
+                        self.nodes.by_key(&addr.target_id).is_some(),
+                        "node {:?} input {} binds to missing node {:?}",
+                        node.id,
+                        input_idx,
+                        addr.target_id
+                    );
+                }
+            }
+
+            for (event_idx, event) in node.events.iter().enumerate() {
+                for subscriber in &event.subscribers {
+                    ensure!(
+                        self.nodes.by_key(subscriber).is_some(),
+                        "node {:?} event {} has missing subscriber {:?}",
+                        node.id,
+                        event_idx,
+                        subscriber
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Debug-only internal-invariant gate (compiled out in release, so the
+    /// per-edit / per-`update` callers pay nothing there). Shares its
+    /// structural definition with `check`; panics because a violation here is
+    /// our bug, not bad input.
     pub fn validate(&self) {
         if !is_debug() {
             return;
         }
-
-        for node in self.nodes.iter() {
-            assert_ne!(node.id, NodeId::nil());
-            assert_ne!(node.func_id, FuncId::nil());
-
-            for input in node.inputs.iter() {
-                if let Binding::Bind(output_binding) = &input.binding {
-                    assert!(self.by_id(&output_binding.target_id).is_some());
-                }
-            }
-        }
+        self.check().expect("graph structural invariant violated");
     }
 
     pub fn validate_with(&self, func_lib: &FuncLib) {
@@ -239,18 +283,10 @@ impl From<&Func> for Node {
                     Some(default) => Binding::Const(default.clone()),
                     None => Binding::None,
                 },
-                name: func_input.name.clone(),
             })
             .collect();
 
-        let events: Vec<Event> = func
-            .events
-            .iter()
-            .map(|func_event| Event {
-                name: func_event.name.clone(),
-                subscribers: Vec::default(),
-            })
-            .collect();
+        let events: Vec<Event> = func.events.iter().map(|_| Event::default()).collect();
 
         Node {
             id: NodeId::unique(),
@@ -350,6 +386,38 @@ mod tests {
         assert_eq!(graph, deserialized);
 
         Ok(())
+    }
+
+    #[test]
+    fn check_passes_for_valid_graph() {
+        assert!(test_graph().check().is_ok());
+    }
+
+    #[test]
+    fn check_rejects_dangling_binding() {
+        use crate::graph::NodeId;
+
+        let mut graph = test_graph();
+        let sum_id = graph.by_name("sum").unwrap().id;
+        // Repoint sum's input at a node that doesn't exist.
+        graph.by_id_mut(&sum_id).unwrap().inputs[0].binding = (NodeId::unique(), 0).into();
+
+        let err = graph.check().expect_err("dangling binding must fail check");
+        assert!(err.to_string().contains("binds to missing node"));
+    }
+
+    #[test]
+    fn deserialize_rejects_corrupt_graph() {
+        use crate::graph::NodeId;
+
+        let mut graph = test_graph();
+        let sum_id = graph.by_name("sum").unwrap().id;
+        graph.by_id_mut(&sum_id).unwrap().inputs[0].binding = (NodeId::unique(), 0).into();
+
+        // serialize doesn't validate; deserialize must reject the dangling bind
+        // (the release-path structural guard, not a debug-only assert).
+        let bytes = graph.serialize(SerdeFormat::Bitcode);
+        assert!(Graph::deserialize(&bytes, SerdeFormat::Bitcode).is_err());
     }
 
     #[test]

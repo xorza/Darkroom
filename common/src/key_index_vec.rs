@@ -10,10 +10,13 @@ pub trait KeyIndexKey<K> {
     fn key(&self) -> &K;
 }
 
+// Fields are private: the two maps must stay in sync (`items[idx_by_key[k]]
+// .key() == k`), an invariant only the methods here uphold. Mutate through
+// them; read via `iter`/`by_key`/`Index`; consume via `into_iter`.
 #[derive(Debug, Clone)]
 pub struct KeyIndexVec<K: Copy + Eq + Hash, V: KeyIndexKey<K>> {
-    pub items: Vec<V>,
-    pub idx_by_key: HashMap<K, usize>,
+    items: Vec<V>,
+    idx_by_key: HashMap<K, usize>,
 }
 
 impl<K, V> PartialEq for KeyIndexVec<K, V>
@@ -296,6 +299,19 @@ where
     fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
         assert!(idx < self.items.len());
         &mut self.items[idx]
+    }
+}
+
+impl<K, V> IntoIterator for KeyIndexVec<K, V>
+where
+    K: Copy + Eq + Hash,
+    V: KeyIndexKey<K>,
+{
+    type Item = V;
+    type IntoIter = std::vec::IntoIter<V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.items.into_iter()
     }
 }
 

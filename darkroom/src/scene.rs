@@ -115,7 +115,7 @@ impl Scene {
             };
             let inputs = extend_pool(
                 &mut self.port_names,
-                node.inputs.iter().map(|i| i.name.clone().into()),
+                func.inputs.iter().map(|i| i.name.clone().into()),
             );
             let outputs = extend_pool(
                 &mut self.port_names,
