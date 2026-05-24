@@ -1,48 +1,69 @@
 {
-    "env": {
-        "RUST_BACKTRACE": "1",
-        "CARGO_TERM_COLOR": "always"
-    },
-    "permissions": {
-        "defaultMode": "acceptEdits",
-        "allow": [
-            "WebSearch",
-            "WebFetch",
-            "WebFetch(*)",
+  "env": {
+    "RUST_BACKTRACE": "1",
+    "CARGO_TERM_COLOR": "always"
+  },
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "WebSearch",
+      "WebFetch",
+      "WebFetch(*)",
 
-            "Bash(cargo test:*)",
-            "Bash(cargo nextest:*)",
-            "Bash(cargo build:*)",
-            "Bash(cargo run:*)",
-            "Bash(cargo clippy:*)",
-            "Bash(cargo fmt:*)",
-            "Bash(cargo check:*)",
-            "Bash(cargo bench *)",
+      "Bash(cargo build:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo fmt:*)",
+      "Bash(cargo run:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo nextest:*)",
+      "Bash(cargo bench *)",
+      "Bash(cargo metadata *)",
+      "Bash(UPDATE_GOLDEN=1 cargo test*)",
+      "Bash(env UPDATE_GOLDEN=1 cargo test*)",
 
-            "Bash(perf annotate *)",
-            "Bash(perf report *)",
-            "Bash(perf record *)",
-            "Bash(perf stat *)",
-            "Bash(perf script *)",
+      "Bash(perf annotate *)",
+      "Bash(perf report *)",
+      "Bash(perf record *)",
+      "Bash(perf script *)",
+      "Bash(perf stat *)",
 
-            "Bash(readelf *)",
-            "Bash(objdump *)",
-            "Bash(nm *)",
-            "Bash(addr2line *)",
-            "Bash(delta *)",
+      "Bash(addr2line *)",
+      "Bash(delta *)",
+      "Bash(nm *)",
+      "Bash(objdump *)",
+      "Bash(readelf *)",
 
-            "Bash(rustc --version)",
-            "Bash(rustup target *)",
+      "Bash(rustc --version)",
+      "Bash(rustup target *)",
 
-            "Read(//proc/sys/kernel/**)",
-            "Bash(mkdir -p .tmp)",
-            "Bash(gh api *)",
-            "Bash(awk *)"
-        ],
-        "deny": ["Read(./.env)"]
-    },
-    "sandbox": {
-        "enabled": true,
-        "autoAllowBashIfSandboxed": true
-    }
+      "Bash(gh api *)",
+      "Bash(gh search *)",
+
+      "Bash(git --no-pager diff*)",
+      "Bash(git check-ignore *)",
+      "Bash(git mv *)",
+      "Bash(git rm *)",
+      "Bash(git stash *)",
+
+      "Bash(./scripts/test-all.sh)",
+      "Bash(bash scripts/test-all.sh)",
+      "Bash(FAST=1 ./scripts/test-all.sh)",
+
+      "Bash(awk *)",
+      "Bash(mkdir -p .tmp)",
+      "Bash(scc *)",
+      "Bash(sd *)",
+      "Bash(tee *)",
+
+      "Read(//proc/sys/kernel/**)",
+
+      "Skill(review-modules)"
+    ],
+    "deny": ["Read(./.env)"]
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true
+  }
 }
