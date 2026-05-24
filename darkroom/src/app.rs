@@ -8,7 +8,7 @@ use scenarium::data::StaticValue;
 use scenarium::elements::basic_funclib::BasicFuncLib;
 use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
 use scenarium::graph::Binding;
-use scenarium::prelude::{FuncLib, NodeId};
+use scenarium::prelude::{FuncLib, InputPort, NodeId};
 use scenarium::testing::{TestFuncHooks, test_func_lib, test_graph};
 
 use crate::action_stack::ActionStack;
@@ -172,11 +172,17 @@ impl palantir::App for App {
 fn seed_const_bindings(doc: &mut Document) {
     let mult_id: NodeId = "579ae1d6-10a3-4906-8948-135cb7d7508b".into();
     let sum_id: NodeId = "999c4d37-e0eb-4856-be3f-ad2090c84d8c".into();
-    if let Some(node) = doc.graph.by_id_mut(&mult_id) {
-        node.inputs[1].binding = Binding::Const(StaticValue::Int(7));
+    if doc.graph.by_id(&mult_id).is_some() {
+        doc.graph.set_input_binding(
+            InputPort::new(mult_id, 1),
+            Binding::Const(StaticValue::Int(7)),
+        );
     }
-    if let Some(node) = doc.graph.by_id_mut(&sum_id) {
-        node.inputs[1].binding = Binding::Const(StaticValue::Float(2.5));
+    if doc.graph.by_id(&sum_id).is_some() {
+        doc.graph.set_input_binding(
+            InputPort::new(sum_id, 1),
+            Binding::Const(StaticValue::Float(2.5)),
+        );
     }
 }
 

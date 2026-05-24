@@ -20,7 +20,7 @@ use common::key_index_vec::{CompactInsert, KeyIndexVec};
 use super::{ExecutionBinding, ExecutionNode, ExecutionPortAddress};
 use crate::data::StaticValue;
 use crate::function::FuncLib;
-use crate::graph::{Binding, Graph, NodeId, NodeKind};
+use crate::graph::{Binding, Graph, InputPort, NodeId, NodeKind};
 
 /// Hard cap on nesting depth — release safety net against an (invalid)
 /// recursive definition that slipped past validation, so the walk can't loop
@@ -137,13 +137,15 @@ impl<'a> Run<'a> {
                         ..Default::default()
                     });
                     let func = self.func_lib.by_id(func_id).unwrap();
+                    let input_count = func.inputs.len();
+                    let event_count = func.events.len();
                     e_node.refresh(func, node.behavior, &node.name);
                     self.cur_idx = idx;
 
-                    for (input_idx, input) in node.inputs.iter().enumerate() {
-                        let source = match &input.binding {
+                    for (input_idx, binding) in graph.node_bindings(node.id, input_count) {
+                        let source = match binding {
                             Binding::None => Source::None,
-                            Binding::Const(v) => Source::Const(v.clone()),
+                            Binding::Const(v) => Source::Const(v),
                             Binding::Bind(op) => self.resolve(op.node_id, op.port_idx),
                         };
                         self.set_input(input_idx, source);
@@ -151,11 +153,11 @@ impl<'a> Run<'a> {
 
                     // Stage 2a: only func→func subscriber edges are remapped;
                     // edges crossing a composite boundary are Stage 2b.
-                    for (event_idx, event) in node.events.iter().enumerate() {
-                        for sub in &event.subscribers {
-                            if matches!(graph.by_id(sub).map(|n| &n.kind), Some(NodeKind::Func(_)))
+                    for event_idx in 0..event_count {
+                        for sub in graph.subscribers(node.id, event_idx) {
+                            if matches!(graph.by_id(&sub).map(|n| &n.kind), Some(NodeKind::Func(_)))
                             {
-                                let flat_sub = flatten_id(self.ids.as_slice(), *sub);
+                                let flat_sub = flatten_id(self.ids.as_slice(), sub);
                                 self.compact[self.cur_idx].events[event_idx]
                                     .subscribers
                                     .push(flat_sub);
@@ -241,15 +243,17 @@ impl<'a> Run<'a> {
                 let def = graph
                     .resolve_def(*r, self.func_lib)
                     .expect("subgraph node references a missing definition");
-                let binding = def
+                let Some(so) = def
                     .graph
                     .iter()
                     .find(|n| matches!(n.kind, NodeKind::SubgraphOutput))
-                    .and_then(|so| so.inputs.get(port_idx))
-                    .map(|input| input.binding.clone());
-                let Some(binding) = binding else {
+                else {
                     return Source::None;
                 };
+                let binding = def.graph.input_binding(InputPort {
+                    node_id: so.id,
+                    port_idx,
+                });
                 self.ids.push(node_id);
                 let source = self.resolve_binding(&binding);
                 self.ids.pop();
@@ -259,15 +263,11 @@ impl<'a> Run<'a> {
             // instance's exposed input `port_idx`; resolve it one level up.
             NodeKind::SubgraphInput => {
                 let instance_id = self.ids.pop().expect("SubgraphInput at the root level");
-                let binding = self
-                    .current()
-                    .by_id(&instance_id)
-                    .and_then(|inst| inst.inputs.get(port_idx))
-                    .map(|input| input.binding.clone());
-                let source = match binding {
-                    Some(b) => self.resolve_binding(&b),
-                    None => Source::None,
-                };
+                let binding = self.current().input_binding(InputPort {
+                    node_id: instance_id,
+                    port_idx,
+                });
+                let source = self.resolve_binding(&binding);
                 self.ids.push(instance_id);
                 source
             }

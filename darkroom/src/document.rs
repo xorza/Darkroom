@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use common::{SerdeFormat, is_debug, key_index_vec::KeyIndexVec};
 use glam::Vec2;
-use scenarium::prelude::{Binding, Graph as CoreGraph, NodeId};
+use scenarium::prelude::{Graph as CoreGraph, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 
@@ -121,13 +121,11 @@ impl Document {
     pub fn auto_layout(&mut self, col_spacing: f32, row_spacing: f32, origin: Vec2) {
         let mut depth: HashMap<NodeId, u32> = HashMap::new();
         for node in self.graph.iter() {
-            let d = node
-                .inputs
-                .iter()
-                .filter_map(|inp| match &inp.binding {
-                    Binding::Bind(addr) => depth.get(&addr.node_id).copied().map(|d| d + 1),
-                    _ => None,
-                })
+            let d = self
+                .graph
+                .edges()
+                .filter(|(dst, _)| dst.node_id == node.id)
+                .filter_map(|(_, src)| depth.get(&src.node_id).copied().map(|d| d + 1))
                 .max()
                 .unwrap_or(0);
             depth.insert(node.id, d);

@@ -128,9 +128,9 @@ impl Scene {
             );
             let input_bindings = extend_pool(
                 &mut self.input_bindings,
-                node.inputs
-                    .iter()
-                    .map(|i| InputBindingView::from(&i.binding)),
+                doc.graph
+                    .node_bindings(node.id, func.inputs.len())
+                    .map(|(_, binding)| InputBindingView::from(&binding)),
             );
             self.nodes.push(SceneNode {
                 id: vn.id,
@@ -143,18 +143,13 @@ impl Scene {
             });
         }
 
-        for node in doc.graph.iter() {
-            for (tgt_port, inp) in node.inputs.iter().enumerate() {
-                let Binding::Bind(addr) = &inp.binding else {
-                    continue;
-                };
-                self.connections.push(SceneConnection {
-                    src_node: addr.node_id,
-                    src_port: addr.port_idx,
-                    tgt_node: node.id,
-                    tgt_port,
-                });
-            }
+        for (dst, src) in doc.graph.edges() {
+            self.connections.push(SceneConnection {
+                src_node: src.node_id,
+                src_port: src.port_idx,
+                tgt_node: dst.node_id,
+                tgt_port: dst.port_idx,
+            });
         }
     }
 

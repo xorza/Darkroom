@@ -92,7 +92,7 @@ mod tests {
     use super::*;
     use crate::data::DataType;
     use crate::function::FuncLib;
-    use crate::graph::{Graph, Input, Node, NodeKind};
+    use crate::graph::{Graph, InputPort, Node, NodeKind};
     use crate::testing::{TestFuncHooks, test_func_lib};
     use common::SerdeFormat;
 
@@ -120,26 +120,19 @@ mod tests {
         let in_node = Node::new(NodeKind::SubgraphInput);
         let in_id = in_node.id;
 
-        let mut sum_node = Node::new(NodeKind::Func(sum_id));
-        sum_node.inputs = vec![
-            Input {
-                binding: (in_id, 0).into(),
-            },
-            Input {
-                binding: (in_id, 1).into(),
-            },
-        ];
+        let sum_node = Node::new(NodeKind::Func(sum_id));
         let sum_node_id = sum_node.id;
 
-        let mut out_node = Node::new(NodeKind::SubgraphOutput);
-        out_node.inputs = vec![Input {
-            binding: (sum_node_id, 0).into(),
-        }];
+        let out_node = Node::new(NodeKind::SubgraphOutput);
+        let out_id = out_node.id;
 
         let mut graph = Graph::default();
         graph.add(in_node);
         graph.add(sum_node);
         graph.add(out_node);
+        graph.set_input_binding(InputPort::new(sum_node_id, 0), (in_id, 0).into());
+        graph.set_input_binding(InputPort::new(sum_node_id, 1), (in_id, 1).into());
+        graph.set_input_binding(InputPort::new(out_id, 0), (sum_node_id, 0).into());
 
         SubgraphDef {
             id: SubgraphId::unique(),
@@ -159,8 +152,8 @@ mod tests {
 
         let mut parent = Graph::default();
         let inst = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
-        assert_eq!(inst.inputs.len(), 2); // A, B from the def interface
-        assert!(inst.events.is_empty()); // no outlets
+        assert_eq!(def.inputs.len(), 2); // A, B from the def interface
+        assert!(def.events.is_empty()); // no outlets
         parent.subgraphs.add(def);
         parent.add(inst);
 
@@ -196,14 +189,13 @@ mod tests {
 
         let src = Node::new(NodeKind::Func(get_a_id));
         let src_id = src.id;
-        let mut out_node = Node::new(NodeKind::SubgraphOutput);
-        out_node.inputs = vec![Input {
-            binding: (src_id, 0).into(),
-        }];
+        let out_node = Node::new(NodeKind::SubgraphOutput);
+        let out_id = out_node.id;
 
         let mut graph = Graph::default();
         graph.add(src);
         graph.add(out_node);
+        graph.set_input_binding(InputPort::new(out_id, 0), (src_id, 0).into());
 
         let def = SubgraphDef {
             id: SubgraphId::unique(),
@@ -217,7 +209,7 @@ mod tests {
 
         let mut parent = Graph::default();
         let inst = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
-        assert!(inst.inputs.is_empty());
+        assert!(def.inputs.is_empty());
         parent.subgraphs.add(def);
         parent.add(inst);
 
@@ -232,14 +224,13 @@ mod tests {
 
         let in_node = Node::new(NodeKind::SubgraphInput);
         let in_id = in_node.id;
-        let mut print_node = Node::new(NodeKind::Func(print_id));
-        print_node.inputs = vec![Input {
-            binding: (in_id, 0).into(),
-        }];
+        let print_node = Node::new(NodeKind::Func(print_id));
+        let print_node_id = print_node.id;
 
         let mut graph = Graph::default();
         graph.add(in_node);
         graph.add(print_node);
+        graph.set_input_binding(InputPort::new(print_node_id, 0), (in_id, 0).into());
 
         let def = SubgraphDef {
             id: SubgraphId::unique(),
@@ -253,7 +244,7 @@ mod tests {
 
         let mut parent = Graph::default();
         let inst = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
-        assert_eq!(inst.inputs.len(), 1);
+        assert_eq!(def.inputs.len(), 1);
         parent.subgraphs.add(def);
         parent.add(inst);
 
@@ -303,8 +294,8 @@ mod tests {
 
         let mut parent = Graph::default();
         let inst = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
-        // one Event (parent-subscriber slot) per exposed outgoing event
-        assert_eq!(inst.events.len(), 2);
+        // the def exposes two outgoing events parents may subscribe to
+        assert_eq!(def.events.len(), 2);
         parent.subgraphs.add(def);
         parent.add(inst);
 

@@ -12,7 +12,7 @@ use crate::event_lambda::EventLambda;
 use crate::execution_graph::Result as ExecResult;
 use crate::execution_stats::ExecutionStats;
 use crate::function::FuncLib;
-use crate::graph::{Graph, Node, NodeId};
+use crate::graph::{Graph, InputPort, Node, NodeId};
 
 use crate::worker::{EventRef, EventTrigger, Worker, WorkerMessage};
 
@@ -96,19 +96,26 @@ fn log_frame_no_graph(func_lib: &FuncLib) -> Graph {
 
     let mut frame_event_node: Node = frame_event_func.into();
     frame_event_node.id = frame_event_node_id;
-    frame_event_node.inputs[0].binding = 1.into();
-    frame_event_node.events[0].subscribers.push(print_node_id);
     graph.add(frame_event_node);
 
     let mut float_to_string_node: Node = float_to_string_func.into();
     float_to_string_node.id = float_to_string_node_id;
-    float_to_string_node.inputs[0].binding = (frame_event_node_id, 1).into();
     graph.add(float_to_string_node);
 
     let mut print_node: Node = print_func.into();
     print_node.id = print_node_id;
-    print_node.inputs[0].binding = (float_to_string_node_id, 0).into();
     graph.add(print_node);
+
+    graph.set_input_binding(InputPort::new(frame_event_node_id, 0), 1.into());
+    graph.subscribe(frame_event_node_id, 0, print_node_id);
+    graph.set_input_binding(
+        InputPort::new(float_to_string_node_id, 0),
+        (frame_event_node_id, 1).into(),
+    );
+    graph.set_input_binding(
+        InputPort::new(print_node_id, 0),
+        (float_to_string_node_id, 0).into(),
+    );
 
     graph
 }
@@ -335,8 +342,12 @@ async fn execute_terminals_triggers_terminal_nodes() {
 
     let mut print_node: Node = print_func.into();
     print_node.id = NodeId::unique();
-    print_node.inputs[0].binding = StaticValue::String("hello".to_string()).into();
+    let print_node_id = print_node.id;
     graph.add(print_node);
+    graph.set_input_binding(
+        InputPort::new(print_node_id, 0),
+        StaticValue::String("hello".to_string()).into(),
+    );
 
     let (compute_finish_tx, mut compute_finish_rx) = mpsc::channel(8);
     let worker = Worker::new(move |result| {
@@ -744,8 +755,12 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
     let print_func = func_lib.by_name("print").unwrap();
     let mut print_node: Node = print_func.into();
     print_node.id = NodeId::unique();
-    print_node.inputs[0].binding = StaticValue::String("hi".to_string()).into();
+    let print_node_id = print_node.id;
     graph.add(print_node);
+    graph.set_input_binding(
+        InputPort::new(print_node_id, 0),
+        StaticValue::String("hi".to_string()).into(),
+    );
 
     let (compute_finish_tx, mut compute_finish_rx) = mpsc::channel(8);
     let worker = Worker::new(move |result| {
@@ -800,8 +815,12 @@ async fn drain_on_wake_folds_queued_batches_into_one_commit() {
     let print_func = func_lib.by_name("print").unwrap();
     let mut print_node: Node = print_func.into();
     print_node.id = NodeId::unique();
-    print_node.inputs[0].binding = StaticValue::String("once".to_string()).into();
+    let print_node_id = print_node.id;
     graph.add(print_node);
+    graph.set_input_binding(
+        InputPort::new(print_node_id, 0),
+        StaticValue::String("once".to_string()).into(),
+    );
 
     let (compute_finish_tx, mut compute_finish_rx) = mpsc::channel(8);
     let worker = Worker::new(move |result| {

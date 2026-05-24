@@ -5,8 +5,8 @@
 //! history in two allocations regardless of entry count, makes
 //! `trim_to_limit` a single `Vec::drain` of the packed prefix, and
 //! avoids per-field allocator churn that the naive enum-storage form
-//! incurred (e.g. `RemoveNode` carries a full `Node` + per-edge
-//! `Vec<IncomingConnection>` / `Vec<IncomingEvent>`).
+//! incurred (e.g. `RemoveNode` carries a full `Node` plus its captured
+//! `bindings` / `subscriptions` wiring).
 
 use std::fmt::Debug;
 use std::ops::Range;

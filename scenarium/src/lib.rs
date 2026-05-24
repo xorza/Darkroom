@@ -25,7 +25,7 @@ pub mod prelude {
     pub use crate::func_lambda::{FuncLambda, InvokeError, InvokeInput, InvokeResult};
     pub use crate::function::{Func, FuncBehavior, FuncId, FuncLib};
     pub use crate::graph::{
-        Binding, Event, Graph, Input, InputPort, Node, NodeBehavior, NodeId, NodeKind, OutputPort,
+        Binding, Graph, InputPort, Node, NodeBehavior, NodeId, NodeKind, OutputPort, Subscription,
     };
     pub use crate::subgraph::{SubgraphDef, SubgraphEvent, SubgraphId, SubgraphRef};
 }

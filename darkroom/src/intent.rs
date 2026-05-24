@@ -24,28 +24,11 @@
 use std::collections::BTreeSet;
 
 use glam::Vec2;
-use scenarium::graph::{Binding, Node, NodeBehavior, NodeId};
+use scenarium::graph::{Binding, InputPort, Node, NodeBehavior, NodeId, Subscription};
 use serde::{Deserialize, Serialize};
 
 use crate::document::Document;
 use crate::model::ViewNode;
-
-/// A connection that pointed *into* a node we're about to remove and
-/// must be re-established on undo.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IncomingConnection {
-    pub node_id: NodeId,
-    pub input_idx: usize,
-    pub binding: Binding,
-}
-
-/// An event subscription that targeted a node we're about to remove
-/// and must be re-subscribed on undo.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IncomingEvent {
-    pub node_id: NodeId,
-    pub event_idx: usize,
-}
 
 /// What the caller wants to change. Forward-only — no `from` fields.
 /// Each variant says "set X to Y"; the consumer captures the previous
@@ -125,8 +108,11 @@ pub enum UndoStep {
     RemoveNode {
         view_node: ViewNode,
         node: Node,
-        incoming_connections: Vec<IncomingConnection>,
-        incoming_events: Vec<IncomingEvent>,
+        /// All bindings `remove_by_id` drops (the node's own inputs + edges
+        /// into it), captured so undo can fully restore the wiring.
+        bindings: Vec<(InputPort, Binding)>,
+        /// All subscriptions touching the node (as emitter or subscriber).
+        subscriptions: Vec<Subscription>,
         was_selected: bool,
     },
     MoveNode {
@@ -220,36 +206,12 @@ pub fn build_step(intent: Intent, doc: &Document) -> Option<UndoStep> {
         Intent::RemoveNode { node_id } => {
             let view_node = doc.view_nodes.by_key(&node_id)?.clone();
             let node = doc.graph.by_id(&node_id)?.clone();
-            let mut incoming_connections = Vec::new();
-            let mut incoming_events = Vec::new();
-            for other in doc.graph.iter() {
-                for (input_idx, input) in other.inputs.iter().enumerate() {
-                    let Binding::Bind(binding) = &input.binding else {
-                        continue;
-                    };
-                    if binding.node_id == node_id {
-                        incoming_connections.push(IncomingConnection {
-                            node_id: other.id,
-                            input_idx,
-                            binding: input.binding.clone(),
-                        });
-                    }
-                }
-                for (event_idx, event) in other.events.iter().enumerate() {
-                    if event.subscribers.contains(&node_id) {
-                        incoming_events.push(IncomingEvent {
-                            node_id: other.id,
-                            event_idx,
-                        });
-                    }
-                }
-            }
             let was_selected = doc.selected_nodes.contains(&node_id);
             UndoStep::RemoveNode {
                 view_node,
                 node,
-                incoming_connections,
-                incoming_events,
+                bindings: doc.graph.bindings_touching(node_id),
+                subscriptions: doc.graph.subscriptions_touching(node_id),
                 was_selected,
             }
         }
@@ -268,13 +230,9 @@ pub fn build_step(intent: Intent, doc: &Document) -> Option<UndoStep> {
             input_idx,
             to,
         } => {
-            let node = doc.graph.by_id(&node_id)?;
-            assert!(
-                input_idx < node.inputs.len(),
-                "SetInput capture: input index out of range"
-            );
+            doc.graph.by_id(&node_id)?;
             UndoStep::SetInput {
-                from: node.inputs[input_idx].binding.clone(),
+                from: doc.graph.input_binding(InputPort::new(node_id, input_idx)),
                 node_id,
                 input_idx,
                 to,
@@ -295,13 +253,11 @@ pub fn build_step(intent: Intent, doc: &Document) -> Option<UndoStep> {
             subscriber,
             present,
         } => {
-            let node = doc.graph.by_id(&event_node_id)?;
-            assert!(
-                event_idx < node.events.len(),
-                "SetEventConnection capture: event index out of range"
-            );
+            doc.graph.by_id(&event_node_id)?;
             UndoStep::SetEventConnection {
-                was_present: node.events[event_idx].subscribers.contains(&subscriber),
+                was_present: doc
+                    .graph
+                    .is_subscribed(event_node_id, event_idx, subscriber),
                 event_node_id,
                 event_idx,
                 subscriber,
@@ -349,12 +305,8 @@ pub fn apply_step(step: &UndoStep, doc: &mut Document) {
             to,
             ..
         } => {
-            let node = doc.graph.by_id_mut(node_id).unwrap();
-            assert!(
-                *input_idx < node.inputs.len(),
-                "apply SetInput: input index out of range"
-            );
-            node.inputs[*input_idx].binding = to.clone();
+            doc.graph
+                .set_input_binding(InputPort::new(*node_id, *input_idx), to.clone());
         }
         UndoStep::SetSelection { to, .. } => {
             doc.selected_nodes = to.clone();
@@ -369,24 +321,13 @@ pub fn apply_step(step: &UndoStep, doc: &mut Document) {
             present,
             ..
         } => {
-            let node = doc.graph.by_id_mut(event_node_id).unwrap();
-            assert!(
-                *event_idx < node.events.len(),
-                "apply SetEventConnection: event index out of range"
-            );
-            let subscribers = &mut node.events[*event_idx].subscribers;
-            let position = subscribers.iter().position(|id| id == subscriber);
-            // Idempotent: match `revert_step` so apply/redo and undo
-            // behave the same when the target state already holds.
-            // A genuine logic error (was_present mismatch with reality)
-            // surfaces as a no-op here but would have been filtered by
-            // `UndoStep::is_noop` upstream when emitted naturally.
-            match (present, position) {
-                (true, None) => subscribers.push(*subscriber),
-                (false, Some(idx)) => {
-                    subscribers.remove(idx);
-                }
-                _ => {}
+            // subscribe/unsubscribe are idempotent (BTreeSet insert/remove),
+            // so apply/redo is a no-op when the target state already holds.
+            if *present {
+                doc.graph.subscribe(*event_node_id, *event_idx, *subscriber);
+            } else {
+                doc.graph
+                    .unsubscribe(*event_node_id, *event_idx, *subscriber);
             }
         }
         UndoStep::SetViewport {
@@ -409,8 +350,8 @@ pub fn revert_step(step: &UndoStep, doc: &mut Document) {
         UndoStep::RemoveNode {
             view_node,
             node,
-            incoming_connections,
-            incoming_events,
+            bindings,
+            subscriptions,
             was_selected,
         } => {
             let removed_node_id = node.id;
@@ -420,16 +361,7 @@ pub fn revert_step(step: &UndoStep, doc: &mut Document) {
             );
             doc.graph.add(node.clone());
             doc.view_nodes.add(view_node.clone());
-            for connection in incoming_connections {
-                let other = doc.graph.by_id_mut(&connection.node_id).unwrap();
-                other.inputs[connection.input_idx].binding = connection.binding.clone();
-            }
-            for event in incoming_events {
-                let other = doc.graph.by_id_mut(&event.node_id).unwrap();
-                other.events[event.event_idx]
-                    .subscribers
-                    .push(removed_node_id);
-            }
+            doc.graph.restore_wiring(bindings, subscriptions);
             if *was_selected {
                 doc.selected_nodes.insert(removed_node_id);
             }
@@ -446,7 +378,8 @@ pub fn revert_step(step: &UndoStep, doc: &mut Document) {
             from,
             ..
         } => {
-            doc.graph.by_id_mut(node_id).unwrap().inputs[*input_idx].binding = from.clone();
+            doc.graph
+                .set_input_binding(InputPort::new(*node_id, *input_idx), from.clone());
         }
         UndoStep::SetSelection { from, .. } => {
             doc.selected_nodes = from.clone();
@@ -461,15 +394,11 @@ pub fn revert_step(step: &UndoStep, doc: &mut Document) {
             was_present,
             ..
         } => {
-            let node = doc.graph.by_id_mut(event_node_id).unwrap();
-            let subscribers = &mut node.events[*event_idx].subscribers;
-            let position = subscribers.iter().position(|id| id == subscriber);
-            match (was_present, position) {
-                (true, Some(_)) | (false, None) => {} // already in target state
-                (true, None) => subscribers.push(*subscriber),
-                (false, Some(idx)) => {
-                    subscribers.remove(idx);
-                }
+            if *was_present {
+                doc.graph.subscribe(*event_node_id, *event_idx, *subscriber);
+            } else {
+                doc.graph
+                    .unsubscribe(*event_node_id, *event_idx, *subscriber);
             }
         }
         UndoStep::SetViewport {

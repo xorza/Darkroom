@@ -32,6 +32,18 @@ fn node(func_lib: &FuncLib, func_name: &str, id: NodeId) -> Node {
     node
 }
 
+/// Set input `idx` of the named node's binding in the source graph.
+fn bind(graph: &mut Graph, node_name: &str, idx: usize, binding: Binding) {
+    let id = graph.by_name(node_name).unwrap().id;
+    graph.set_input_binding(InputPort::new(id, idx), binding);
+}
+
+/// Read input `idx` of the named node's binding from the source graph.
+fn binding(graph: &Graph, node_name: &str, idx: usize) -> Binding {
+    let id = graph.by_name(node_name).unwrap().id;
+    graph.input_binding(InputPort::new(id, idx))
+}
+
 // === Graph Structure ===
 
 mod graph_structure {
@@ -102,9 +114,8 @@ mod graph_structure {
         // Rewire mult to get_a and get_b directly (bypassing sum)
         let binding1: Binding = (graph.by_name("get_a").unwrap().id, 0).into();
         let binding2: Binding = (graph.by_name("get_b").unwrap().id, 0).into();
-        let mult = graph.by_name_mut("mult").unwrap();
-        mult.inputs[0].binding = binding1;
-        mult.inputs[1].binding = binding2;
+        bind(&mut graph, "mult", 0, binding1);
+        bind(&mut graph, "mult", 1, binding2);
 
         execution_graph.update(&graph, &func_lib);
         execution_graph.prepare_execution(true, false, &[])?;
@@ -171,7 +182,7 @@ mod missing_inputs {
         let func_lib = test_func_lib(TestFuncHooks::default());
 
         // Remove sum's first input binding (required by default)
-        graph.by_name_mut("sum").unwrap().inputs[0].binding = Binding::None;
+        bind(&mut graph, "sum", 0, Binding::None);
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
@@ -202,7 +213,7 @@ mod missing_inputs {
         let mut execution_graph = ExecutionGraph::default();
 
         // Remove sum's first input, but make mult's first input optional
-        graph.by_name_mut("sum").unwrap().inputs[0].binding = Binding::None;
+        bind(&mut graph, "sum", 0, Binding::None);
         func_lib.by_name_mut("mult").unwrap().inputs[0].required = false;
 
         execution_graph.update(&graph, &func_lib);
@@ -238,9 +249,8 @@ mod const_bindings {
         let func_lib = test_func_lib(default_hooks());
         let mut execution_graph = ExecutionGraph::default();
 
-        let mult = graph.by_name_mut("mult").unwrap();
-        mult.inputs[0].binding = Binding::Const(StaticValue::Int(3));
-        mult.inputs[1].binding = Binding::Const(StaticValue::Int(5));
+        bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(3)));
+        bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(5)));
 
         execution_graph.update(&graph, &func_lib);
 
@@ -276,7 +286,7 @@ mod const_bindings {
         assert!(!mult.inputs[1].binding_changed);
 
         // Change one const: mult re-executes
-        graph.by_name_mut("mult").unwrap().inputs[0].binding = Binding::Const(StaticValue::Int(4));
+        bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(4)));
         execution_graph.update(&graph, &func_lib);
         execution_graph.prepare_execution(true, false, &[])?;
 
@@ -309,9 +319,8 @@ mod const_bindings {
         let mut graph = test_graph();
         let mut execution_graph = ExecutionGraph::default();
 
-        let mult = graph.by_name_mut("mult").unwrap();
-        mult.inputs[0].binding = Binding::Const(StaticValue::Int(3));
-        mult.inputs[1].binding = Binding::Const(StaticValue::Int(5));
+        bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(3)));
+        bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(5)));
 
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
@@ -322,15 +331,14 @@ mod const_bindings {
         );
 
         // Same const value: no re-execution of mult
-        graph.by_name_mut("mult").unwrap().inputs[0].binding = Binding::Const(StaticValue::Int(3));
+        bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(3)));
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
 
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
 
         // Different const value: mult re-executes
-        let mult = graph.by_name_mut("mult").unwrap();
-        mult.inputs[0].binding = Binding::Const(StaticValue::Int(4));
+        bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(4)));
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
 
@@ -356,8 +364,7 @@ mod const_bindings {
         let mut execution_graph = ExecutionGraph::default();
 
         // Replace sum[0] (get_a) with a const — get_a is no longer needed
-        let sum = graph.by_name_mut("sum").unwrap();
-        sum.inputs[0].binding = Binding::Const(33.into());
+        bind(&mut graph, "sum", 0, Binding::Const(33.into()));
 
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
@@ -368,8 +375,7 @@ mod const_bindings {
         );
 
         // Also unbind sum[1] — now sum has all const/none inputs, no upstream needed
-        let sum = graph.by_name_mut("sum").unwrap();
-        sum.inputs[1].binding = Binding::None;
+        bind(&mut graph, "sum", 1, Binding::None);
 
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
@@ -390,8 +396,7 @@ mod const_bindings {
         let mut execution_graph = ExecutionGraph::default();
 
         let get_b_id = graph.by_name_mut("get_b").unwrap().id;
-        let sum = graph.by_name_mut("sum").unwrap();
-        sum.inputs[0].binding = Binding::Const(33.into());
+        bind(&mut graph, "sum", 0, Binding::Const(33.into()));
 
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
@@ -402,8 +407,7 @@ mod const_bindings {
         );
 
         // Switch from const back to bind — sum must re-execute
-        let sum = graph.by_name_mut("sum").unwrap();
-        sum.inputs[0].binding = (get_b_id, 0).into();
+        bind(&mut graph, "sum", 0, (get_b_id, 0).into());
 
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
@@ -427,9 +431,8 @@ mod const_bindings {
         execution_graph.execute_terminals().await?;
 
         // Switch mult inputs to const/none
-        let mult = graph.by_name_mut("mult").unwrap();
-        mult.inputs[0].binding = Binding::Const(2.into());
-        mult.inputs[1].binding = Binding::None;
+        bind(&mut graph, "mult", 0, Binding::Const(2.into()));
+        bind(&mut graph, "mult", 1, Binding::None);
 
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
@@ -592,8 +595,8 @@ mod behavior {
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
 
         // Change binding: Once node must recompute
-        let mult = graph.by_name_mut("mult").unwrap();
-        mult.inputs[0].binding = mult.inputs[1].binding.clone();
+        let b1 = binding(&graph, "mult", 1);
+        bind(&mut graph, "mult", 0, b1);
 
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
@@ -632,11 +635,10 @@ mod behavior {
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
 
         // Switch to const bindings
-        let mult = graph.by_name_mut("mult").unwrap();
-        let old_binding0 = mult.inputs[0].binding.clone();
-        let old_binding1 = mult.inputs[1].binding.clone();
-        mult.inputs[0].binding = Binding::Const(2.into());
-        mult.inputs[1].binding = Binding::Const(22.into());
+        let old_binding0 = binding(&graph, "mult", 0);
+        let old_binding1 = binding(&graph, "mult", 1);
+        bind(&mut graph, "mult", 0, Binding::Const(2.into()));
+        bind(&mut graph, "mult", 1, Binding::Const(22.into()));
 
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
@@ -647,9 +649,8 @@ mod behavior {
         );
 
         // Switch back to bind (swapped) — still recomputes
-        let mult = graph.by_name_mut("mult").unwrap();
-        mult.inputs[0].binding = old_binding1;
-        mult.inputs[1].binding = old_binding0;
+        bind(&mut graph, "mult", 0, old_binding1);
+        bind(&mut graph, "mult", 1, old_binding0);
 
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
@@ -669,18 +670,15 @@ mod behavior {
         let mut graph = test_graph();
         let mut execution_graph = ExecutionGraph::default();
 
-        let sum = graph.by_name_mut("sum").unwrap();
-        sum.inputs[0].binding = Binding::Const(2.into());
-        sum.inputs[1].binding = Binding::Const(21.into());
+        bind(&mut graph, "sum", 0, Binding::Const(2.into()));
+        bind(&mut graph, "sum", 1, Binding::Const(21.into()));
 
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
 
         // Change sum's const and set mult to Once simultaneously
-        let sum = graph.by_name_mut("sum").unwrap();
-        sum.inputs[0].binding = Binding::Const(12.into());
-        let mult = graph.by_name_mut("mult").unwrap();
-        mult.behavior = NodeBehavior::Once;
+        bind(&mut graph, "sum", 0, Binding::Const(12.into()));
+        graph.by_name_mut("mult").unwrap().behavior = NodeBehavior::Once;
 
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
@@ -692,8 +690,7 @@ mod behavior {
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
 
         // Toggle mult back to AsFunction — sum now needs to re-execute
-        let mult = graph.by_name_mut("mult").unwrap();
-        mult.behavior = NodeBehavior::AsFunction;
+        graph.by_name_mut("mult").unwrap().behavior = NodeBehavior::AsFunction;
 
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
@@ -719,8 +716,7 @@ mod cycle_detection {
 
         // Create cycle: sum[0] ← mult (mult already depends on sum)
         let mult_node_id = graph.by_name("mult").unwrap().id;
-        let sum_inputs = &mut graph.by_name_mut("sum").unwrap().inputs;
-        sum_inputs[0].binding = (mult_node_id, 0).into();
+        bind(&mut graph, "sum", 0, (mult_node_id, 0).into());
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
@@ -871,8 +867,7 @@ mod execution {
         let mut execution_graph = ExecutionGraph::default();
 
         // Make sum's first input None (required) — sum and downstream shouldn't execute
-        let sum = graph.by_name_mut("sum").unwrap();
-        sum.inputs[0].binding = Binding::None;
+        bind(&mut graph, "sum", 0, Binding::None);
 
         execution_graph.update(&graph, &func_lib);
 
@@ -903,9 +898,8 @@ mod execution {
         execution_graph.execute_terminals().await?;
 
         // Switch mult to const inputs
-        let mult = graph.by_name_mut("mult").unwrap();
-        mult.inputs[0].binding = Binding::Const(2.into());
-        mult.inputs[1].binding = Binding::Const(21.into());
+        bind(&mut graph, "mult", 0, Binding::Const(2.into()));
+        bind(&mut graph, "mult", 1, Binding::Const(21.into()));
 
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
@@ -917,8 +911,7 @@ mod execution {
 
         // Switch back to bind from cached get_b — mult re-executes with cached upstream
         let get_b_id = graph.by_name_mut("get_b").unwrap().id;
-        let mult = graph.by_name_mut("mult").unwrap();
-        mult.inputs[0].binding = (get_b_id, 0).into();
+        bind(&mut graph, "mult", 0, (get_b_id, 0).into());
 
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
@@ -964,10 +957,9 @@ mod argument_values {
         let mut graph = test_graph();
         let mut execution_graph = ExecutionGraph::default();
 
-        let mult = graph.by_name_mut("mult").unwrap();
-        mult.inputs[0].binding = Binding::Const(StaticValue::Int(3));
-        mult.inputs[1].binding = Binding::Const(StaticValue::Int(5));
-        let mult_id = mult.id;
+        bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(3)));
+        bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(5)));
+        let mult_id = graph.by_name("mult").unwrap().id;
 
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
@@ -1044,9 +1036,8 @@ mod argument_values {
         let mut execution_graph = ExecutionGraph::default();
 
         func_lib.by_name_mut("mult").unwrap().inputs[1].required = false;
-        let mult = graph.by_name_mut("mult").unwrap();
-        mult.inputs[1].binding = Binding::None;
-        let mult_id = mult.id;
+        bind(&mut graph, "mult", 1, Binding::None);
+        let mult_id = graph.by_name("mult").unwrap().id;
 
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
@@ -1183,7 +1174,7 @@ mod stats {
         let func_lib = test_func_lib(default_hooks());
 
         // Remove sum's first input (required)
-        graph.by_name_mut("sum").unwrap().inputs[0].binding = Binding::None;
+        bind(&mut graph, "sum", 0, Binding::None);
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
@@ -1313,13 +1304,10 @@ mod events {
         let recv_id = NodeId::unique();
 
         let mut graph = Graph::default();
-        let mut emit_node = node(&func_lib, "emit", emit_id);
-        emit_node.events[0].subscribers.push(recv_id);
-        graph.add(emit_node);
-
-        let mut recv_node = node(&func_lib, "recv", recv_id);
-        recv_node.inputs[0].binding = (emit_id, 0).into();
-        graph.add(recv_node);
+        graph.add(node(&func_lib, "emit", emit_id));
+        graph.add(node(&func_lib, "recv", recv_id));
+        graph.subscribe(emit_id, 0, recv_id);
+        graph.set_input_binding(InputPort::new(recv_id, 0), (emit_id, 0).into());
         graph.validate();
 
         EventFixture {
@@ -1396,9 +1384,9 @@ mod events {
     async fn active_event_triggers_empty_without_subscribers() -> anyhow::Result<()> {
         let mut f = build();
         // Drop the subscriber but keep emit reachable by making it a terminal.
-        f.graph.by_name_mut("emit").unwrap().events[0]
-            .subscribers
-            .clear();
+        let emit_id = f.emit_id;
+        let recv_id = f.graph.by_name("recv").unwrap().id;
+        f.graph.unsubscribe(emit_id, 0, recv_id);
         f.func_lib.by_name_mut("emit").unwrap().terminal = true;
 
         let mut eg = ExecutionGraph::default();
@@ -1470,10 +1458,9 @@ mod output_usage {
         let sink_id = NodeId::unique();
         let mut graph = Graph::default();
         graph.add(node(&func_lib, "split", split_id));
-        let mut sink = node(&func_lib, "sink", sink_id);
+        graph.add(node(&func_lib, "sink", sink_id));
         // Consume only output 0; output 1 has no consumer.
-        sink.inputs[0].binding = (split_id, 0).into();
-        graph.add(sink);
+        graph.set_input_binding(InputPort::new(sink_id, 0), (split_id, 0).into());
         graph.validate();
 
         let mut eg = ExecutionGraph::default();
@@ -1577,12 +1564,10 @@ mod topology {
         let mut graph = Graph::default();
         graph.add(node(&func_lib, "get_a", get_a_id));
         graph.add(node(&func_lib, "get_b", get_b_id));
-        let mut p1 = node(&func_lib, "print", print1_id);
-        p1.inputs[0].binding = (get_a_id, 0).into();
-        graph.add(p1);
-        let mut p2 = node(&func_lib, "print", print2_id);
-        p2.inputs[0].binding = (get_b_id, 0).into();
-        graph.add(p2);
+        graph.add(node(&func_lib, "print", print1_id));
+        graph.add(node(&func_lib, "print", print2_id));
+        graph.set_input_binding(InputPort::new(print1_id, 0), (get_a_id, 0).into());
+        graph.set_input_binding(InputPort::new(print2_id, 0), (get_b_id, 0).into());
         graph.validate();
 
         let mut eg = ExecutionGraph::default();
@@ -1644,7 +1629,7 @@ mod previews {
 mod subgraph {
     use super::*;
     use crate::function::FuncOutput;
-    use crate::graph::{Input, NodeKind};
+    use crate::graph::NodeKind;
     use crate::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
     use std::sync::Mutex as StdMutex;
 
@@ -1663,25 +1648,18 @@ mod subgraph {
     fn wrap_sum_def(func_lib: &FuncLib) -> SubgraphDef {
         let in_node = Node::new(NodeKind::SubgraphInput);
         let in_id = in_node.id;
-        let mut sum = fnode(func_lib, "sum");
-        sum.inputs = vec![
-            Input {
-                binding: (in_id, 0).into(),
-            },
-            Input {
-                binding: (in_id, 1).into(),
-            },
-        ];
+        let sum = fnode(func_lib, "sum");
         let sum_id = sum.id;
-        let mut out = Node::new(NodeKind::SubgraphOutput);
-        out.inputs = vec![Input {
-            binding: (sum_id, 0).into(),
-        }];
+        let out = Node::new(NodeKind::SubgraphOutput);
+        let out_id = out.id;
 
         let mut graph = Graph::default();
         graph.add(in_node);
         graph.add(sum);
         graph.add(out);
+        graph.set_input_binding(InputPort::new(sum_id, 0), (in_id, 0).into());
+        graph.set_input_binding(InputPort::new(sum_id, 1), (in_id, 1).into());
+        graph.set_input_binding(InputPort::new(out_id, 0), (sum_id, 0).into());
 
         SubgraphDef {
             id: SubgraphId::unique(),
@@ -1727,14 +1705,10 @@ mod subgraph {
         let get_a = fnode(&func_lib, "get_a");
         let get_b = fnode(&func_lib, "get_b");
         let (a_id, b_id) = (get_a.id, get_b.id);
-        let mut c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
-        c.inputs[0].binding = (a_id, 0).into();
-        c.inputs[1].binding = (b_id, 0).into();
+        let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let c_id = c.id;
-        let mut print = fnode(&func_lib, "print");
-        print.inputs = vec![Input {
-            binding: (c_id, 0).into(),
-        }];
+        let print = fnode(&func_lib, "print");
+        let print_id = print.id;
 
         let mut graph = Graph::default();
         graph.subgraphs.add(def);
@@ -1742,6 +1716,9 @@ mod subgraph {
         graph.add(get_b);
         graph.add(c);
         graph.add(print);
+        graph.set_input_binding(InputPort::new(c_id, 0), (a_id, 0).into());
+        graph.set_input_binding(InputPort::new(c_id, 1), (b_id, 0).into());
+        graph.set_input_binding(InputPort::new(print_id, 0), (c_id, 0).into());
 
         let mut eg = ExecutionGraph::default();
         eg.update(&graph, &func_lib);
@@ -1770,19 +1747,14 @@ mod subgraph {
         let src_a = fnode(&func_lib, "get_a");
         let src_b = fnode(&func_lib, "get_b");
         let (sa, sb) = (src_a.id, src_b.id);
-        let mut out = Node::new(NodeKind::SubgraphOutput);
-        out.inputs = vec![
-            Input {
-                binding: (sa, 0).into(),
-            },
-            Input {
-                binding: (sb, 0).into(),
-            },
-        ];
+        let out = Node::new(NodeKind::SubgraphOutput);
+        let out_id = out.id;
         let mut def_graph = Graph::default();
         def_graph.add(src_a);
         def_graph.add(src_b);
         def_graph.add(out);
+        def_graph.set_input_binding(InputPort::new(out_id, 0), (sa, 0).into());
+        def_graph.set_input_binding(InputPort::new(out_id, 1), (sb, 0).into());
         let def = SubgraphDef {
             id: SubgraphId::unique(),
             name: "TwoSources".into(),
@@ -1796,15 +1768,14 @@ mod subgraph {
         // parent: C, print <- C.out0 (out1 unused).
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let c_id = c.id;
-        let mut print = fnode(&func_lib, "print");
-        print.inputs = vec![Input {
-            binding: (c_id, 0).into(),
-        }];
+        let print = fnode(&func_lib, "print");
+        let print_id = print.id;
 
         let mut graph = Graph::default();
         graph.subgraphs.add(def);
         graph.add(c);
         graph.add(print);
+        graph.set_input_binding(InputPort::new(print_id, 0), (c_id, 0).into());
 
         let mut eg = ExecutionGraph::default();
         eg.update(&graph, &func_lib);
@@ -1823,18 +1794,17 @@ mod subgraph {
 
         // C.in0 <- C.out0 (self-cycle through the composite); print <- C.out0
         // so the cyclic node is reachable from a terminal.
-        let mut c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
+        let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let c_id = c.id;
-        c.inputs[0].binding = (c_id, 0).into();
-        let mut print = fnode(&func_lib, "print");
-        print.inputs = vec![Input {
-            binding: (c_id, 0).into(),
-        }];
+        let print = fnode(&func_lib, "print");
+        let print_id = print.id;
 
         let mut graph = Graph::default();
         graph.subgraphs.add(def);
         graph.add(c);
         graph.add(print);
+        graph.set_input_binding(InputPort::new(c_id, 0), (c_id, 0).into());
+        graph.set_input_binding(InputPort::new(print_id, 0), (c_id, 0).into());
 
         let mut eg = ExecutionGraph::default();
         eg.update(&graph, &func_lib);
@@ -1864,14 +1834,10 @@ mod subgraph {
         let get_a = fnode(&func_lib, "get_a");
         let get_b = fnode(&func_lib, "get_b");
         let (a_id, b_id) = (get_a.id, get_b.id);
-        let mut c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
-        c.inputs[0].binding = (a_id, 0).into();
-        c.inputs[1].binding = (b_id, 0).into();
+        let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let c_id = c.id;
-        let mut print = fnode(&func_lib, "print");
-        print.inputs = vec![Input {
-            binding: (c_id, 0).into(),
-        }];
+        let print = fnode(&func_lib, "print");
+        let print_id = print.id;
 
         let mut graph = Graph::default();
         graph.subgraphs.add(def);
@@ -1879,6 +1845,9 @@ mod subgraph {
         graph.add(get_b);
         graph.add(c);
         graph.add(print);
+        graph.set_input_binding(InputPort::new(c_id, 0), (a_id, 0).into());
+        graph.set_input_binding(InputPort::new(c_id, 1), (b_id, 0).into());
+        graph.set_input_binding(InputPort::new(print_id, 0), (c_id, 0).into());
 
         let mut eg = ExecutionGraph::default();
         eg.update(&graph, &func_lib);

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::async_lambda;
 use crate::data::DataType;
 use crate::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
-use crate::graph::{Graph, Node, NodeBehavior, NodeId};
+use crate::graph::{Graph, InputPort, Node, NodeBehavior, NodeId};
 
 pub struct TestFuncHooks {
     pub get_a: Arc<dyn Fn() -> anyhow::Result<i64> + Send + Sync + 'static>,
@@ -222,20 +222,21 @@ pub fn test_graph() -> Graph {
 
     let mut sum_node: Node = sum_func.into();
     sum_node.id = sum_node_id;
-    sum_node.inputs[0].binding = (get_a_node_id, 0).into();
-    sum_node.inputs[1].binding = (get_b_node_id, 0).into();
     graph.add(sum_node);
 
     let mut mult_node: Node = mult_func.into();
     mult_node.id = mult_node_id;
-    mult_node.inputs[0].binding = (sum_node_id, 0).into();
-    mult_node.inputs[1].binding = (get_b_node_id, 0).into();
     graph.add(mult_node);
 
     let mut print_node: Node = print_func.into();
     print_node.id = print_node_id;
-    print_node.inputs[0].binding = (mult_node_id, 0).into();
     graph.add(print_node);
+
+    graph.set_input_binding(InputPort::new(sum_node_id, 0), (get_a_node_id, 0).into());
+    graph.set_input_binding(InputPort::new(sum_node_id, 1), (get_b_node_id, 0).into());
+    graph.set_input_binding(InputPort::new(mult_node_id, 0), (sum_node_id, 0).into());
+    graph.set_input_binding(InputPort::new(mult_node_id, 1), (get_b_node_id, 0).into());
+    graph.set_input_binding(InputPort::new(print_node_id, 0), (mult_node_id, 0).into());
 
     graph.validate();
 

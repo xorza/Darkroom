@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use serde::{Deserialize, Serialize};
 
@@ -13,22 +15,35 @@ id_type!(NodeId);
 
 /// Address of a producer node's output port — the source side of a data
 /// binding (`Binding::Bind`).
-#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
 pub struct OutputPort {
     pub node_id: NodeId,
     pub port_idx: usize,
 }
 
-/// Address of a consumer node's input port. Used to report unsatisfied
-/// inputs (`ExecutionStats::missing_inputs`) and the edges the editor's
-/// breaker severs. Distinct from `OutputPort` so source/sink intent can't
-/// be confused at a call site.
-#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+/// Address of a consumer node's input port. Keys a node's data binding in
+/// `Graph.bindings`, and reports unsatisfied inputs
+/// (`ExecutionStats::missing_inputs`) / edges the editor's breaker severs.
+/// Distinct from `OutputPort` so source/sink intent can't be confused.
+#[derive(
+    Clone, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
 pub struct InputPort {
     pub node_id: NodeId,
     pub port_idx: usize,
 }
 
+impl InputPort {
+    pub fn new(node_id: NodeId, port_idx: usize) -> Self {
+        Self { node_id, port_idx }
+    }
+}
+
+/// What a consumer input port is wired to. Stored sparsely: `Graph.bindings`
+/// only holds `Const`/`Bind` entries, and an absent port reads back as `None`
+/// — so unbound inputs cost nothing.
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Binding {
     #[default]
@@ -37,19 +52,50 @@ pub enum Binding {
     Bind(OutputPort),
 }
 
-// Port/event names are not stored per-node — they're read from the func
-// (`FuncInput`/`FuncOutput`/`FuncEvent`) via the node's func, the single
-// source of truth. Inputs and events are positional, matched by index
-// (`validate_with` asserts the lengths).
-#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Input {
-    #[serde(default)]
-    pub binding: Binding,
+/// One event-subscription edge: `subscriber` fires when `emitter`'s event
+/// `event_idx` triggers. Ordered (emitter, event_idx, subscriber) so a
+/// `BTreeSet` ranges over one emitter-event's subscribers contiguously.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Subscription {
+    pub emitter: NodeId,
+    pub event_idx: usize,
+    pub subscriber: NodeId,
 }
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Event {
-    pub subscribers: Vec<NodeId>,
+/// True when `binding` (at `port`) references `node_id` on either end — i.e.
+/// `port` is the node's own input, or it's a `Bind` edge feeding into it.
+/// Single source of truth for both `remove_by_id`'s drop and the undo capture.
+fn binding_touches(port: InputPort, binding: &Binding, node_id: NodeId) -> bool {
+    port.node_id == node_id || matches!(binding, Binding::Bind(src) if src.node_id == node_id)
+}
+
+/// True when `s` references `node_id` as emitter or subscriber.
+fn subscription_touches(s: &Subscription, node_id: NodeId) -> bool {
+    s.emitter == node_id || s.subscriber == node_id
+}
+
+/// Serialize `bindings` as a `(port, binding)` sequence: struct keys can't be
+/// map keys in string-keyed formats (JSON/TOML/Rhai). Order is deterministic
+/// because the source is a `BTreeMap`.
+mod binding_map_serde {
+    use super::{Binding, InputPort};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    pub fn serialize<S: Serializer>(
+        map: &BTreeMap<InputPort, Binding>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        map.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<InputPort, Binding>, D::Error> {
+        Ok(Vec::<(InputPort, Binding)>::deserialize(deserializer)?
+            .into_iter()
+            .collect())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
@@ -73,6 +119,9 @@ pub enum NodeKind {
     SubgraphOutput,
 }
 
+// A node is pure identity: its port/event *arity* comes from the func/def
+// (`NodeKind`), and its mutable wiring (input bindings, event subscriptions)
+// lives in `Graph`'s flat side-tables — never in per-node Vecs.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Node {
     pub id: NodeId,
@@ -81,11 +130,6 @@ pub struct Node {
 
     #[serde(default)]
     pub behavior: NodeBehavior,
-
-    #[serde(default)]
-    pub inputs: Vec<Input>,
-    #[serde(default)]
-    pub events: Vec<Event>,
 }
 
 impl NodeKind {
@@ -119,6 +163,20 @@ impl Node {
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Graph {
     nodes: KeyIndexVec<NodeId, Node>,
+
+    /// Data wiring, keyed by consumer input port. Sparse: only `Const`/`Bind`
+    /// ports appear; absent = `Binding::None`. A `BTreeMap` keeps
+    /// serialization deterministic and lets a node's ports range contiguously.
+    /// Serialized as a sequence of `(port, binding)` pairs — struct keys aren't
+    /// valid map keys in string-keyed formats (JSON/TOML/Rhai).
+    #[serde(default, with = "binding_map_serde")]
+    bindings: BTreeMap<InputPort, Binding>,
+
+    /// Event wiring: every (emitter event → subscriber) edge, flat. A
+    /// `BTreeSet` dedups, keeps serialization deterministic, and ranges over
+    /// one emitter-event's subscribers contiguously.
+    #[serde(default)]
+    subscriptions: BTreeSet<Subscription>,
 
     /// Local (per-instance) subgraph definitions referenced by this graph's
     /// `NodeKind::Subgraph(SubgraphRef::Local(_))` nodes. Editing one of
@@ -161,22 +219,135 @@ impl Graph {
 
         self.nodes.remove_by_key(&id);
 
-        self.nodes
-            .iter_mut()
-            .flat_map(|node| node.inputs.iter_mut())
-            .for_each(|input| match &input.binding {
-                Binding::Bind(output_binding) if output_binding.node_id == id => {
-                    input.binding = Binding::None;
-                }
-                _ => {}
-            });
+        // Drop the node's own input bindings, and any edge feeding *into* it.
+        self.bindings
+            .retain(|port, binding| !binding_touches(*port, binding, id));
 
-        self.nodes
-            .iter_mut()
-            .flat_map(|node| node.events.iter_mut())
-            .for_each(|event| {
-                event.subscribers.retain(|sub| *sub != id);
-            });
+        // Drop subscriptions where it is either the emitter or a subscriber.
+        self.subscriptions.retain(|s| !subscription_touches(s, id));
+    }
+
+    // === Data bindings ===
+
+    /// What input `port` is wired to (`None` when unbound).
+    pub fn input_binding(&self, port: InputPort) -> Binding {
+        self.bindings.get(&port).cloned().unwrap_or(Binding::None)
+    }
+
+    /// Set (or, for `None`, clear) the binding of input `port`.
+    pub fn set_input_binding(&mut self, port: InputPort, binding: Binding) {
+        if matches!(binding, Binding::None) {
+            self.bindings.remove(&port);
+        } else {
+            self.bindings.insert(port, binding);
+        }
+    }
+
+    /// A node's input bindings in port order `0..arity`, yielding `None` for
+    /// unbound ports. `arity` comes from the node's func/def.
+    pub fn node_bindings(
+        &self,
+        node_id: NodeId,
+        arity: usize,
+    ) -> impl Iterator<Item = (usize, Binding)> + '_ {
+        (0..arity).map(move |port_idx| {
+            (
+                port_idx,
+                self.input_binding(InputPort { node_id, port_idx }),
+            )
+        })
+    }
+
+    /// Every data edge as (consumer input ← producer output). Const bindings
+    /// are not edges and are skipped.
+    pub fn edges(&self) -> impl Iterator<Item = (InputPort, OutputPort)> + '_ {
+        self.bindings
+            .iter()
+            .filter_map(|(dst, binding)| match binding {
+                Binding::Bind(src) => Some((*dst, *src)),
+                _ => None,
+            })
+    }
+
+    // === Event subscriptions ===
+
+    pub fn subscribe(&mut self, emitter: NodeId, event_idx: usize, subscriber: NodeId) {
+        self.subscriptions.insert(Subscription {
+            emitter,
+            event_idx,
+            subscriber,
+        });
+    }
+
+    pub fn unsubscribe(&mut self, emitter: NodeId, event_idx: usize, subscriber: NodeId) {
+        self.subscriptions.remove(&Subscription {
+            emitter,
+            event_idx,
+            subscriber,
+        });
+    }
+
+    pub fn is_subscribed(&self, emitter: NodeId, event_idx: usize, subscriber: NodeId) -> bool {
+        self.subscriptions.contains(&Subscription {
+            emitter,
+            event_idx,
+            subscriber,
+        })
+    }
+
+    /// Every binding that references `node_id` as consumer (its own inputs)
+    /// or producer (edges feeding into it) — i.e. exactly what `remove_by_id`
+    /// would drop. For snapshot/restore (editor undo).
+    pub fn bindings_touching(&self, node_id: NodeId) -> Vec<(InputPort, Binding)> {
+        self.bindings
+            .iter()
+            .filter(|(port, binding)| binding_touches(**port, binding, node_id))
+            .map(|(port, binding)| (*port, binding.clone()))
+            .collect()
+    }
+
+    /// Every subscription with `node_id` as emitter or subscriber — what
+    /// `remove_by_id` would drop. For snapshot/restore (editor undo).
+    pub fn subscriptions_touching(&self, node_id: NodeId) -> Vec<Subscription> {
+        self.subscriptions
+            .iter()
+            .copied()
+            .filter(|s| subscription_touches(s, node_id))
+            .collect()
+    }
+
+    /// Re-insert wiring captured by `bindings_touching` / `subscriptions_touching`.
+    pub fn restore_wiring(
+        &mut self,
+        bindings: &[(InputPort, Binding)],
+        subscriptions: &[Subscription],
+    ) {
+        for (port, binding) in bindings {
+            self.set_input_binding(*port, binding.clone());
+        }
+        self.subscriptions.extend(subscriptions.iter().copied());
+    }
+
+    /// Subscribers of one emitter event, in `NodeId` order.
+    pub fn subscribers(
+        &self,
+        emitter: NodeId,
+        event_idx: usize,
+    ) -> impl Iterator<Item = NodeId> + '_ {
+        let lo = Subscription {
+            emitter,
+            event_idx,
+            subscriber: NodeId::nil(),
+        };
+        let hi = Subscription {
+            emitter,
+            event_idx: event_idx + 1,
+            subscriber: NodeId::nil(),
+        };
+        // The bounded range yields exactly this (emitter, event_idx)'s
+        // subscribers — `Subscription`'s ordering puts event_idx ahead of
+        // subscriber, so no post-filter is needed.
+        self.subscriptions.range(lo..hi).map(|s| s.subscriber)
     }
 
     pub fn by_name(&self, name: &str) -> Option<&Node> {
@@ -231,30 +402,38 @@ impl Graph {
                 }
                 NodeKind::SubgraphInput | NodeKind::SubgraphOutput => {}
             }
+        }
 
-            for (input_idx, input) in node.inputs.iter().enumerate() {
-                if let Binding::Bind(addr) = &input.binding {
-                    ensure!(
-                        self.nodes.by_key(&addr.node_id).is_some(),
-                        "node {:?} input {} binds to missing node {:?}",
-                        node.id,
-                        input_idx,
-                        addr.node_id
-                    );
-                }
+        for (dst, binding) in &self.bindings {
+            ensure!(
+                self.nodes.by_key(&dst.node_id).is_some(),
+                "binding on missing node {:?}",
+                dst.node_id
+            );
+            if let Binding::Bind(src) = binding {
+                ensure!(
+                    self.nodes.by_key(&src.node_id).is_some(),
+                    "node {:?} input {} binds to missing node {:?}",
+                    dst.node_id,
+                    dst.port_idx,
+                    src.node_id
+                );
             }
+        }
 
-            for (event_idx, event) in node.events.iter().enumerate() {
-                for subscriber in &event.subscribers {
-                    ensure!(
-                        self.nodes.by_key(subscriber).is_some(),
-                        "node {:?} event {} has missing subscriber {:?}",
-                        node.id,
-                        event_idx,
-                        subscriber
-                    );
-                }
-            }
+        for s in &self.subscriptions {
+            ensure!(
+                self.nodes.by_key(&s.emitter).is_some(),
+                "subscription from missing emitter {:?}",
+                s.emitter
+            );
+            ensure!(
+                self.nodes.by_key(&s.subscriber).is_some(),
+                "node {:?} event {} has missing subscriber {:?}",
+                s.emitter,
+                s.event_idx,
+                s.subscriber
+            );
         }
 
         for def in self.subgraphs.iter() {
@@ -313,17 +492,12 @@ impl Graph {
         for node in self.nodes.iter() {
             match &node.kind {
                 NodeKind::Func(func_id) => {
-                    let func = func_lib.by_id(func_id).unwrap();
-                    assert_eq!(node.inputs.len(), func.inputs.len());
-                    assert_eq!(node.events.len(), func.events.len());
+                    func_lib.by_id(func_id).unwrap();
                 }
                 NodeKind::Subgraph(r) => {
                     let def = self
                         .resolve_def(*r, func_lib)
                         .expect("subgraph node references a missing definition");
-                    assert_eq!(node.inputs.len(), def.inputs.len());
-                    assert_eq!(node.events.len(), def.events.len());
-
                     assert!(
                         visited.insert(def.id),
                         "subgraph {:?} is recursive (contains itself)",
@@ -337,21 +511,39 @@ impl Graph {
                         ctx_def.is_some(),
                         "SubgraphInput node is only valid inside a subgraph"
                     );
-                    assert!(node.inputs.is_empty(), "SubgraphInput has no data inputs");
                 }
                 NodeKind::SubgraphOutput => {
-                    let def = ctx_def.expect("SubgraphOutput is only valid inside a subgraph");
-                    assert_eq!(node.inputs.len(), def.outputs.len());
+                    ctx_def.expect("SubgraphOutput is only valid inside a subgraph");
                 }
             }
+        }
 
-            for input in node.inputs.iter() {
-                if let Binding::Bind(addr) = &input.binding {
-                    let producer = self.by_id(&addr.node_id).unwrap();
-                    let out_count = self.output_count(producer, func_lib, ctx_def);
-                    assert!(addr.port_idx < out_count);
-                }
+        // Every binding addresses ports that exist on both ends.
+        for (dst, binding) in self.bindings.iter() {
+            let consumer = self.by_id(&dst.node_id).unwrap();
+            assert!(dst.port_idx < self.input_count(consumer, func_lib, ctx_def));
+            if let Binding::Bind(src) = binding {
+                let producer = self.by_id(&src.node_id).unwrap();
+                assert!(src.port_idx < self.output_count(producer, func_lib, ctx_def));
             }
+        }
+
+        // Every subscription targets an event the emitter actually exposes.
+        for s in self.subscriptions.iter() {
+            let emitter = self.by_id(&s.emitter).unwrap();
+            assert!(s.event_idx < self.event_count(emitter, func_lib, ctx_def));
+        }
+    }
+
+    /// Number of input ports a node exposes — by kind. `ctx_def` is the
+    /// enclosing def, needed only for `SubgraphOutput` (whose inputs are the
+    /// def's exposed outputs).
+    fn input_count(&self, node: &Node, func_lib: &FuncLib, ctx_def: Option<&SubgraphDef>) -> usize {
+        match &node.kind {
+            NodeKind::Func(func_id) => func_lib.by_id(func_id).unwrap().inputs.len(),
+            NodeKind::Subgraph(r) => self.resolve_def(*r, func_lib).unwrap().inputs.len(),
+            NodeKind::SubgraphInput => 0,
+            NodeKind::SubgraphOutput => ctx_def.unwrap().outputs.len(),
         }
     }
 
@@ -371,6 +563,56 @@ impl Graph {
             NodeKind::SubgraphOutput => 0,
         }
     }
+
+    /// Number of events a node exposes — only func/subgraph nodes have any.
+    fn event_count(
+        &self,
+        node: &Node,
+        func_lib: &FuncLib,
+        _ctx_def: Option<&SubgraphDef>,
+    ) -> usize {
+        match &node.kind {
+            NodeKind::Func(func_id) => func_lib.by_id(func_id).unwrap().events.len(),
+            NodeKind::Subgraph(r) => self.resolve_def(*r, func_lib).unwrap().events.len(),
+            NodeKind::SubgraphInput | NodeKind::SubgraphOutput => 0,
+        }
+    }
+
+    // === Construction helpers (seed default bindings) ===
+
+    /// Add a func instance and seed its inputs' default const bindings.
+    /// Returns the new node id.
+    pub fn add_func_node(&mut self, func: &Func) -> NodeId {
+        let node = Node::from(func);
+        let node_id = node.id;
+        self.add(node);
+        for (port_idx, func_input) in func.inputs.iter().enumerate() {
+            if let Some(default) = &func_input.default_value {
+                self.set_input_binding(
+                    InputPort { node_id, port_idx },
+                    Binding::Const(default.clone()),
+                );
+            }
+        }
+        node_id
+    }
+
+    /// Add a composite instance and seed its inputs' default const bindings
+    /// from the def interface. `r` must reference `def`.
+    pub fn add_subgraph_node(&mut self, def: &SubgraphDef, r: SubgraphRef) -> NodeId {
+        let node = Node::subgraph_instance(def, r);
+        let node_id = node.id;
+        self.add(node);
+        for (port_idx, io) in def.inputs.iter().enumerate() {
+            if let Some(default) = &io.default_value {
+                self.set_input_binding(
+                    InputPort { node_id, port_idx },
+                    Binding::Const(default.clone()),
+                );
+            }
+        }
+        node_id
+    }
 }
 
 impl Node {
@@ -384,62 +626,33 @@ impl Node {
             kind,
             name: String::new(),
             behavior: NodeBehavior::AsFunction,
-            inputs: vec![],
-            events: vec![],
         }
     }
 
-    /// A composite instance node shaped from a definition: one `Input` per
-    /// exposed input (seeded with its default), one `Event` per exposed
-    /// (outgoing) event. `r` must reference `def`.
+    /// A composite instance node shaped from a definition (just identity +
+    /// name; default input bindings are seeded by `Graph::add_subgraph_node`).
+    /// `r` must reference `def`.
     pub fn subgraph_instance(def: &SubgraphDef, r: SubgraphRef) -> Self {
         assert_eq!(r.id(), def.id, "SubgraphRef must reference the given def");
-
-        let inputs = def
-            .inputs
-            .iter()
-            .map(|io| Input {
-                binding: match &io.default_value {
-                    Some(default) => Binding::Const(default.clone()),
-                    None => Binding::None,
-                },
-            })
-            .collect();
-        let events = (0..def.events.len()).map(|_| Event::default()).collect();
 
         Node {
             id: NodeId::unique(),
             kind: NodeKind::Subgraph(r),
             name: def.name.clone(),
             behavior: NodeBehavior::AsFunction,
-            inputs,
-            events,
         }
     }
 }
 
 impl From<&Func> for Node {
+    /// A bare func instance (identity + name + default behavior). Default
+    /// input bindings are seeded by `Graph::add_func_node`.
     fn from(func: &Func) -> Self {
-        let inputs: Vec<Input> = func
-            .inputs
-            .iter()
-            .map(|func_input| Input {
-                binding: match &func_input.default_value {
-                    Some(default) => Binding::Const(default.clone()),
-                    None => Binding::None,
-                },
-            })
-            .collect();
-
-        let events: Vec<Event> = func.events.iter().map(|_| Event::default()).collect();
-
         Node {
             id: NodeId::unique(),
             kind: NodeKind::Func(func.id),
             name: func.name.clone(),
             behavior: func.node_default_behavior,
-            inputs,
-            events,
         }
     }
 }
@@ -534,12 +747,12 @@ mod tests {
 
     #[test]
     fn check_rejects_dangling_binding() {
-        use crate::graph::NodeId;
+        use crate::graph::{InputPort, NodeId};
 
         let mut graph = test_graph();
         let sum_id = graph.by_name("sum").unwrap().id;
         // Repoint sum's input at a node that doesn't exist.
-        graph.by_id_mut(&sum_id).unwrap().inputs[0].binding = (NodeId::unique(), 0).into();
+        graph.set_input_binding(InputPort::new(sum_id, 0), (NodeId::unique(), 0).into());
 
         let err = graph.check().expect_err("dangling binding must fail check");
         assert!(err.to_string().contains("binds to missing node"));
@@ -547,11 +760,11 @@ mod tests {
 
     #[test]
     fn deserialize_rejects_corrupt_graph() {
-        use crate::graph::NodeId;
+        use crate::graph::{InputPort, NodeId};
 
         let mut graph = test_graph();
         let sum_id = graph.by_name("sum").unwrap().id;
-        graph.by_id_mut(&sum_id).unwrap().inputs[0].binding = (NodeId::unique(), 0).into();
+        graph.set_input_binding(InputPort::new(sum_id, 0), (NodeId::unique(), 0).into());
 
         // serialize doesn't validate; deserialize must reject the dangling bind
         // (the release-path structural guard, not a debug-only assert).
@@ -569,10 +782,10 @@ mod tests {
         assert!(graph.by_name("sum").is_none());
         assert_eq!(graph.len(), 4);
 
-        for input in graph.iter().flat_map(|node| node.inputs.iter()) {
-            if let Some(binding) = input.binding.as_output_binding() {
-                assert_ne!(binding.node_id, node_id);
-            }
+        // No surviving edge references the removed node (as consumer or producer).
+        for (dst, src) in graph.edges() {
+            assert_ne!(dst.node_id, node_id);
+            assert_ne!(src.node_id, node_id);
         }
 
         Ok(())
