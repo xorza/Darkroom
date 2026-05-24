@@ -11,7 +11,8 @@ use tokio::sync::Mutex;
 
 fn execution_node_names_in_order(execution_graph: &ExecutionGraph) -> Vec<String> {
     execution_graph
-        .e_node_execute_order
+        .plan_buf
+        .execute_order
         .iter()
         .map(|&e_node_idx| execution_graph.e_nodes[e_node_idx].name.clone())
         .collect()
@@ -64,8 +65,8 @@ mod graph_structure {
         );
 
         assert_eq!(execution_graph.e_nodes.len(), 5);
-        assert_eq!(execution_graph.e_node_process_order.len(), 5);
-        assert_eq!(execution_graph.e_node_execute_order.len(), 5);
+        assert_eq!(execution_graph.plan_buf.process_order.len(), 5);
+        assert_eq!(execution_graph.plan_buf.execute_order.len(), 5);
         assert!(
             execution_graph
                 .e_nodes
@@ -210,7 +211,7 @@ mod missing_inputs {
         assert!(print.missing_required_inputs);
 
         // Nothing should be scheduled for execution
-        assert_eq!(execution_graph.e_node_execute_order.len(), 0);
+        assert_eq!(execution_graph.plan_buf.execute_order.len(), 0);
 
         Ok(())
     }
@@ -761,8 +762,8 @@ mod invalidation {
         execution_graph.clear();
 
         assert!(execution_graph.e_nodes.is_empty());
-        assert!(execution_graph.e_node_process_order.is_empty());
-        assert!(execution_graph.e_node_execute_order.is_empty());
+        assert!(execution_graph.plan_buf.process_order.is_empty());
+        assert!(execution_graph.plan_buf.execute_order.is_empty());
         // The SoA pools are emptied too (not just the node list).
         assert!(execution_graph.inputs.is_empty());
         assert!(execution_graph.outputs.is_empty());

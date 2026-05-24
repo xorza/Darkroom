@@ -235,13 +235,34 @@ impl Scratch {
     }
 }
 
+// === Execution Plan ===
+
+/// The per-run schedule produced by `prepare_execution` and consumed by
+/// `run_execution`. Holds the two backward-walk orders; the per-run flags it
+/// will eventually absorb still live on the nodes/pools for now (Phase 1).
+/// Regenerated every run; reused via an internal buffer on `ExecutionGraph`
+/// so a repeated run does no scheduling allocation.
+#[derive(Debug, Default)]
+pub struct ExecutionPlan {
+    /// Post-order DFS over the dependency graph (deps before consumers),
+    /// seeded from the terminals. Superset of `execute_order`.
+    pub process_order: Vec<usize>,
+    /// Pruned to only nodes whose output is read by an executing consumer.
+    pub execute_order: Vec<usize>,
+}
+
+impl ExecutionPlan {
+    fn clear(&mut self) {
+        self.process_order.clear();
+        self.execute_order.clear();
+    }
+}
+
 // === Execution Graph ===
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ExecutionGraph {
     pub e_nodes: KeyIndexVec<NodeId, ExecutionNode>,
-    pub e_node_process_order: Vec<usize>,
-    pub e_node_execute_order: Vec<usize>,
 
     inputs: Vec<ExecutionInput>,
     outputs: Vec<ExecutionOutput>,
@@ -255,6 +276,9 @@ pub struct ExecutionGraph {
     /// Reusable per-run scheduling scratch (kept across runs).
     #[serde(skip)]
     scratch: Scratch,
+    /// Reusable plan buffer, recycled across runs to avoid reallocation.
+    #[serde(skip)]
+    plan_buf: ExecutionPlan,
 }
 
 impl ExecutionGraph {
@@ -302,8 +326,7 @@ impl ExecutionGraph {
 
     pub fn clear(&mut self) {
         self.e_nodes.clear();
-        self.e_node_process_order.clear();
-        self.e_node_execute_order.clear();
+        self.plan_buf.clear();
         self.inputs.clear();
         self.outputs.clear();
         self.events.clear();
@@ -320,8 +343,7 @@ impl ExecutionGraph {
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) {
         graph.validate_with(func_lib);
 
-        self.e_node_execute_order.clear();
-        self.e_node_process_order.clear();
+        self.plan_buf.clear();
 
         // Flatten subgraphs straight into execution nodes — no intermediate
         // `Graph`. Everything below is boundary-agnostic (func nodes only).
@@ -368,12 +390,17 @@ impl ExecutionGraph {
         Ok(stats)
     }
 
+    /// Build the per-run schedule into `self.plan_buf`. The only writer of
+    /// `plan_buf`; `run_execution` is the only reader. This pair is the
+    /// prepare→execute seam.
     fn prepare_execution(
         &mut self,
         terminals: bool,
         event_triggers: bool,
         events: &[EventRef],
     ) -> Result<()> {
+        let mut plan = std::mem::take(&mut self.plan_buf);
+        plan.clear();
         let mut scratch = std::mem::take(&mut self.scratch);
 
         self.collect_terminal_nodes(terminals, event_triggers, events, &mut scratch);
@@ -395,18 +422,21 @@ impl ExecutionGraph {
             &scratch.terminal_seeds,
             &mut scratch.stack,
             &mut scratch.color,
+            &mut plan.process_order,
         );
         if result.is_ok() {
-            self.propagate_input_state_forward();
+            self.propagate_input_state_forward(&plan.process_order);
             self.walk_backward_collect_execute_order(
                 &scratch.terminal_seeds,
                 &mut scratch.stack,
                 &mut scratch.color,
+                &mut plan.execute_order,
             );
-            self.validate_for_execution();
+            self.validate_for_execution(&plan);
         }
 
         self.scratch = scratch;
+        self.plan_buf = plan;
         result
     }
 
@@ -460,8 +490,9 @@ impl ExecutionGraph {
         terminal_seeds: &[usize],
         stack: &mut Vec<Visit>,
         color: &mut Vec<Color>,
+        process_order: &mut Vec<usize>,
     ) -> Result<()> {
-        self.e_node_process_order.clear();
+        process_order.clear();
         stack.clear();
 
         color.clear();
@@ -484,7 +515,7 @@ impl ExecutionGraph {
                 VisitCause::Done => {
                     assert_eq!(color[visit.e_node_idx], Color::Gray);
                     color[visit.e_node_idx] = Color::Black;
-                    self.e_node_process_order.push(visit.e_node_idx);
+                    process_order.push(visit.e_node_idx);
                     continue;
                 }
             }
@@ -522,7 +553,7 @@ impl ExecutionGraph {
         Ok(())
     }
 
-    fn propagate_input_state_forward(&mut self) {
+    fn propagate_input_state_forward(&mut self, process_order: &[usize]) {
         // Debug-only: verify every Bind dep was already processed in this
         // forward pass. Guaranteed by process_order being post-order DFS
         // (deps before consumers), but worth checking — if this flips, the
@@ -533,7 +564,7 @@ impl ExecutionGraph {
             Vec::new()
         };
 
-        for e_node_idx in self.e_node_process_order.iter().copied() {
+        for e_node_idx in process_order.iter().copied() {
             let inputs_span = self.e_nodes[e_node_idx].inputs;
 
             let mut inputs_updated = false;
@@ -607,8 +638,9 @@ impl ExecutionGraph {
         terminal_seeds: &[usize],
         stack: &mut Vec<Visit>,
         color: &mut Vec<Color>,
+        execute_order: &mut Vec<usize>,
     ) {
-        self.e_node_execute_order.clear();
+        execute_order.clear();
         stack.clear();
 
         color.clear();
@@ -628,7 +660,7 @@ impl ExecutionGraph {
                 VisitCause::Terminal | VisitCause::OutputRequest { .. } => {}
                 VisitCause::Done => {
                     assert_eq!(color[idx], Color::Gray);
-                    self.e_node_execute_order.push(idx);
+                    execute_order.push(idx);
                     color[idx] = Color::Black;
                     continue;
                 }
@@ -672,9 +704,10 @@ impl ExecutionGraph {
     async fn run_execution(&mut self) -> ExecutionStats {
         let start = std::time::Instant::now();
 
+        let plan = std::mem::take(&mut self.plan_buf);
         let mut scratch = std::mem::take(&mut self.scratch);
 
-        for e_node_idx in self.e_node_execute_order.iter().copied() {
+        for e_node_idx in plan.execute_order.iter().copied() {
             let e_node = &self.e_nodes[e_node_idx];
             if e_node.lambda.is_none() {
                 continue;
@@ -732,8 +765,9 @@ impl ExecutionGraph {
             }
         }
 
-        let stats = self.collect_execution_stats(start);
+        let stats = self.collect_execution_stats(start, &plan);
         self.scratch = scratch;
+        self.plan_buf = plan;
         stats
     }
 
@@ -778,13 +812,17 @@ impl ExecutionGraph {
         );
     }
 
-    fn collect_execution_stats(&self, start: std::time::Instant) -> ExecutionStats {
+    fn collect_execution_stats(
+        &self,
+        start: std::time::Instant,
+        plan: &ExecutionPlan,
+    ) -> ExecutionStats {
         let mut executed_nodes = Vec::new();
         let mut missing_inputs = Vec::new();
         let mut cached_nodes = Vec::new();
         let mut node_errors = Vec::new();
 
-        for &idx in &self.e_node_execute_order {
+        for &idx in &plan.execute_order {
             let e = &self.e_nodes[idx];
             executed_nodes.push(ExecutedNodeStats {
                 node_id: e.id,
@@ -792,7 +830,7 @@ impl ExecutionGraph {
             });
         }
 
-        for &idx in &self.e_node_process_order {
+        for &idx in &plan.process_order {
             let e = &self.e_nodes[idx];
             if e.missing_required_inputs {
                 for (i, inp) in self.inputs[e.inputs.range()].iter().enumerate() {
@@ -916,8 +954,6 @@ impl ExecutionGraph {
             return;
         }
 
-        assert!(self.e_node_process_order.len() <= self.e_nodes.len());
-
         let mut seen_node_ids: HashSet<NodeId> = HashSet::with_capacity(self.e_nodes.len());
         for e_node in self.e_nodes.iter() {
             assert!(seen_node_ids.insert(e_node.id));
@@ -940,15 +976,19 @@ impl ExecutionGraph {
                 }
             }
         }
+    }
 
-        let mut seen = HashSet::with_capacity(self.e_nodes.len());
-        for &idx in &self.e_node_process_order {
-            assert!(idx < self.e_nodes.len());
-            assert!(seen.insert(idx));
+    fn validate_for_execution(&self, plan: &ExecutionPlan) {
+        if !is_debug() {
+            return;
         }
 
+        assert!(plan.process_order.len() <= self.e_nodes.len());
+
+        // `process_order` is a post-order DFS: unique, and every Bind dep
+        // appears before its consumer.
         let mut seen_in_order = HashSet::with_capacity(self.e_nodes.len());
-        for &idx in &self.e_node_process_order {
+        for &idx in &plan.process_order {
             assert!(idx < self.e_nodes.len());
             let span = self.e_nodes[idx].inputs;
             for input in &self.inputs[span.range()] {
@@ -958,12 +998,6 @@ impl ExecutionGraph {
                 }
             }
             assert!(seen_in_order.insert(idx));
-        }
-    }
-
-    fn validate_for_execution(&self) {
-        if !is_debug() {
-            return;
         }
 
         for e_node in self.e_nodes.iter() {
@@ -979,12 +1013,12 @@ impl ExecutionGraph {
             }
         }
 
-        assert!(self.e_node_execute_order.len() <= self.e_node_process_order.len());
+        assert!(plan.execute_order.len() <= plan.process_order.len());
 
-        let mut pending: HashSet<usize> = self.e_node_execute_order.iter().copied().collect();
-        assert_eq!(pending.len(), self.e_node_execute_order.len());
+        let mut pending: HashSet<usize> = plan.execute_order.iter().copied().collect();
+        assert_eq!(pending.len(), plan.execute_order.len());
 
-        for &idx in &self.e_node_execute_order {
+        for &idx in &plan.execute_order {
             assert!(idx < self.e_nodes.len());
             pending.remove(&idx);
 
