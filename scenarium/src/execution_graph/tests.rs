@@ -132,6 +132,21 @@ mod graph_structure {
             let deserialized = ExecutionGraph::deserialize(&serialized, format)?;
             let serialized_again = deserialized.serialize(format);
             assert_eq!(serialized, serialized_again);
+
+            // Structural fields survive the round-trip (lambdas/state/output
+            // values are #[serde(skip)], but ids/names/bindings must persist).
+            assert_eq!(deserialized.e_nodes.len(), execution_graph.e_nodes.len());
+            for original in execution_graph.e_nodes.iter() {
+                let restored = deserialized.by_id(&original.id).unwrap();
+                assert_eq!(restored.name, original.name);
+                assert_eq!(restored.func_id, original.func_id);
+                assert_eq!(restored.behavior, original.behavior);
+                assert_eq!(restored.inputs.len(), original.inputs.len());
+                assert_eq!(restored.outputs.len(), original.outputs.len());
+            }
+            // mult's Bind to sum survives with its port address intact.
+            let mult = deserialized.by_name("mult").unwrap();
+            assert!(matches!(&mult.inputs[0].binding, ExecutionBinding::Bind(_)));
         }
 
         Ok(())
@@ -477,6 +492,12 @@ mod behavior {
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
         assert_eq!(exe_stats.cached_nodes.len(), 4);
 
+        // Cached mult must still hold the correct product, not a stale value:
+        // sum = get_a(1) + get_b(11) = 12; mult = 12 * get_b(11) = 132
+        let mult_id = graph.by_name("mult").unwrap().id;
+        let vals = execution_graph.get_argument_values(&mult_id).unwrap();
+        assert!(matches!(vals.outputs[0], DynamicValue::Int(132)));
+
         Ok(())
     }
 
@@ -702,7 +723,7 @@ mod cycle_detection {
             .expect_err("Expected cycle detection error");
         match err {
             Error::CycleDetected { node_id } => {
-                assert_eq!(node_id, "579ae1d6-10a3-4906-8948-135cb7d7508b".into());
+                assert_eq!(node_id, mult_node_id);
             }
             _ => panic!("Unexpected error: {err:?}"),
         }
@@ -764,6 +785,11 @@ mod invalidation {
             assert!(
                 e_node.state.is_none(),
                 "node {} should have no state",
+                e_node.name
+            );
+            assert!(
+                e_node.event_state.lock().await.is_none(),
+                "node {} should have no event state",
                 e_node.name
             );
         }
@@ -1200,6 +1226,434 @@ mod stats {
         // No errors on first clean run
         assert!(stats.node_errors.is_empty());
         assert!(stats.missing_inputs.is_empty());
+
+        Ok(())
+    }
+}
+
+// === Events ===
+
+mod events {
+    use super::*;
+    use crate::event_lambda::EventLambda;
+    use crate::function::{Func, FuncEvent, FuncInput, FuncOutput};
+    use crate::worker::EventRef;
+
+    const EMIT_FUNC: FuncId = FuncId::from_u128(0xE311);
+    const RECV_FUNC: FuncId = FuncId::from_u128(0xE322);
+
+    struct EventFixture {
+        func_lib: FuncLib,
+        graph: Graph,
+        emit_id: NodeId,
+        emit_calls: Arc<Mutex<i64>>,
+        recv_values: Arc<Mutex<Vec<i64>>>,
+    }
+
+    // `emit`: impure source with output 0 and one event ("tick") subscribed to
+    // by `recv`. `recv`: impure sink bound to emit's output. Neither is a
+    // terminal, so only event-driven execution reaches them.
+    fn build() -> EventFixture {
+        let emit_calls = Arc::new(Mutex::new(0));
+        let recv_values = Arc::new(Mutex::new(Vec::new()));
+        let emit_calls_l = emit_calls.clone();
+        let recv_values_l = recv_values.clone();
+
+        let mut func_lib = FuncLib::default();
+        func_lib.add(Func {
+            id: EMIT_FUNC,
+            name: "emit".to_string(),
+            category: "Test".to_string(),
+            behavior: FuncBehavior::Impure,
+            terminal: false,
+            inputs: vec![],
+            outputs: vec![FuncOutput {
+                name: "out".to_string(),
+                data_type: DataType::Int,
+            }],
+            events: vec![FuncEvent {
+                name: "tick".to_string(),
+                event_lambda: EventLambda::new(|_state| Box::pin(async move {})),
+            }],
+            lambda: crate::async_lambda!(
+                move |_, _, _, _, _, outputs| { calls = emit_calls_l.clone() } => {
+                    let mut n = calls.lock().await;
+                    *n += 1;
+                    outputs[0] = DynamicValue::Int(*n);
+                    Ok(())
+                }
+            ),
+            ..Default::default()
+        });
+        func_lib.add(Func {
+            id: RECV_FUNC,
+            name: "recv".to_string(),
+            category: "Test".to_string(),
+            behavior: FuncBehavior::Impure,
+            terminal: false,
+            inputs: vec![FuncInput {
+                name: "in".to_string(),
+                required: true,
+                data_type: DataType::Int,
+                default_value: None,
+                value_options: vec![],
+            }],
+            outputs: vec![],
+            events: vec![],
+            lambda: crate::async_lambda!(
+                move |_, _, _, inputs, _, _| { values = recv_values_l.clone() } => {
+                    values.lock().await.push(inputs[0].value.as_i64().unwrap());
+                    Ok(())
+                }
+            ),
+            ..Default::default()
+        });
+
+        let emit_id = NodeId::unique();
+        let recv_id = NodeId::unique();
+
+        let mut graph = Graph::default();
+        let mut emit_node: Node = func_lib.by_id(&EMIT_FUNC).unwrap().into();
+        emit_node.id = emit_id;
+        emit_node.events[0].subscribers.push(recv_id);
+        graph.add(emit_node);
+
+        let mut recv_node: Node = func_lib.by_id(&RECV_FUNC).unwrap().into();
+        recv_node.id = recv_id;
+        recv_node.inputs[0].binding = (emit_id, 0).into();
+        graph.add(recv_node);
+        graph.validate();
+
+        EventFixture {
+            func_lib,
+            graph,
+            emit_id,
+            emit_calls,
+            recv_values,
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn execute_events_runs_subscribers() -> anyhow::Result<()> {
+        let f = build();
+        let mut eg = ExecutionGraph::default();
+        eg.update(&f.graph, &f.func_lib);
+
+        let stats = eg
+            .execute_events([EventRef {
+                node_id: f.emit_id,
+                event_idx: 0,
+            }])
+            .await?;
+
+        // recv subscribes to emit's tick → recv is the root, emit runs as its dep
+        assert_eq!(execution_node_names_in_order(&eg), ["emit", "recv"]);
+        assert_eq!(*f.emit_calls.lock().await, 1);
+        assert_eq!(*f.recv_values.lock().await, vec![1]);
+
+        // The triggering event is echoed back in the stats
+        assert_eq!(stats.triggered_events.len(), 1);
+        assert_eq!(stats.triggered_events[0].node_id, f.emit_id);
+        assert_eq!(stats.triggered_events[0].event_idx, 0);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn event_triggers_collects_nodes_with_subscribers() -> anyhow::Result<()> {
+        let f = build();
+        let mut eg = ExecutionGraph::default();
+        eg.update(&f.graph, &f.func_lib);
+
+        // terminals=false, event_triggers=true → emit (owns a subscribed event)
+        // becomes a root; recv is downstream of emit, not a root.
+        eg.execute(false, true, Vec::<EventRef>::new()).await?;
+
+        assert_eq!(execution_node_names_in_order(&eg), ["emit"]);
+        assert_eq!(*f.emit_calls.lock().await, 1);
+        assert!(f.recv_values.lock().await.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn active_event_triggers_lists_live_events() -> anyhow::Result<()> {
+        let f = build();
+        let mut eg = ExecutionGraph::default();
+        eg.update(&f.graph, &f.func_lib);
+
+        let stats = eg.execute(false, true, Vec::<EventRef>::new()).await?;
+        let triggers = eg.active_event_triggers(&stats);
+
+        // emit executed and has a populated lambda + a subscriber → one trigger.
+        // recv has no events → contributes nothing.
+        assert_eq!(triggers.len(), 1);
+        assert_eq!(triggers[0].event.node_id, f.emit_id);
+        assert_eq!(triggers[0].event.event_idx, 0);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn active_event_triggers_empty_without_subscribers() -> anyhow::Result<()> {
+        let mut f = build();
+        // Drop the subscriber but keep emit reachable by making it a terminal.
+        f.graph.by_name_mut("emit").unwrap().events[0]
+            .subscribers
+            .clear();
+        f.func_lib.by_name_mut("emit").unwrap().terminal = true;
+
+        let mut eg = ExecutionGraph::default();
+        eg.update(&f.graph, &f.func_lib);
+        let stats = eg.execute_terminals().await?;
+
+        // emit ran, but its event has no subscribers → no live triggers.
+        assert!(stats.executed_nodes.iter().any(|n| n.node_id == f.emit_id));
+        assert!(eg.active_event_triggers(&stats).is_empty());
+
+        Ok(())
+    }
+}
+
+// === Output Usage (Skip / Needed) ===
+
+mod output_usage {
+    use super::*;
+    use crate::function::{Func, FuncInput, FuncOutput};
+
+    const SPLIT_FUNC: FuncId = FuncId::from_u128(0x5911);
+    const SINK_FUNC: FuncId = FuncId::from_u128(0x5922);
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn unused_output_marked_skip() -> anyhow::Result<()> {
+        let seen_usage: Arc<Mutex<Vec<OutputUsage>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen_usage_l = seen_usage.clone();
+
+        let mut func_lib = FuncLib::default();
+        func_lib.add(Func {
+            id: SPLIT_FUNC,
+            name: "split".to_string(),
+            category: "Test".to_string(),
+            behavior: FuncBehavior::Impure,
+            terminal: false,
+            inputs: vec![],
+            outputs: vec![
+                FuncOutput {
+                    name: "a".to_string(),
+                    data_type: DataType::Int,
+                },
+                FuncOutput {
+                    name: "b".to_string(),
+                    data_type: DataType::Int,
+                },
+            ],
+            events: vec![],
+            lambda: crate::async_lambda!(
+                move |_, _, _, _, usage, outputs| { seen = seen_usage_l.clone() } => {
+                    seen.lock().await.extend_from_slice(usage);
+                    outputs[0] = DynamicValue::Int(1);
+                    outputs[1] = DynamicValue::Int(2);
+                    Ok(())
+                }
+            ),
+            ..Default::default()
+        });
+        func_lib.add(Func {
+            id: SINK_FUNC,
+            name: "sink".to_string(),
+            category: "Test".to_string(),
+            behavior: FuncBehavior::Impure,
+            terminal: true,
+            inputs: vec![FuncInput {
+                name: "in".to_string(),
+                required: true,
+                data_type: DataType::Int,
+                default_value: None,
+                value_options: vec![],
+            }],
+            outputs: vec![],
+            events: vec![],
+            lambda: crate::async_lambda!(|_, _, _, _, _, _| { Ok(()) }),
+            ..Default::default()
+        });
+
+        let split_id = NodeId::unique();
+        let sink_id = NodeId::unique();
+        let mut graph = Graph::default();
+        let mut split: Node = func_lib.by_id(&SPLIT_FUNC).unwrap().into();
+        split.id = split_id;
+        graph.add(split);
+        let mut sink: Node = func_lib.by_id(&SINK_FUNC).unwrap().into();
+        sink.id = sink_id;
+        // Consume only output 0; output 1 has no consumer.
+        sink.inputs[0].binding = (split_id, 0).into();
+        graph.add(sink);
+        graph.validate();
+
+        let mut eg = ExecutionGraph::default();
+        eg.update(&graph, &func_lib);
+        eg.execute_terminals().await?;
+
+        let split = eg.by_name("split").unwrap();
+        assert_eq!(split.outputs[0].usage_count, 1);
+        assert_eq!(split.outputs[1].usage_count, 0);
+
+        // The lambda observed Needed for the consumed output, Skip for the other.
+        assert_eq!(
+            *seen_usage.lock().await,
+            vec![OutputUsage::Needed, OutputUsage::Skip]
+        );
+
+        Ok(())
+    }
+}
+
+// === Topology Edge Cases ===
+
+mod topology {
+    use super::*;
+    use common::FloatExt;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn removing_node_compacts_and_remaps() -> anyhow::Result<()> {
+        let printed = Arc::new(Mutex::new(0i64));
+        let printed_l = printed.clone();
+        let func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(|| Ok(2)),
+            get_b: Arc::new(|| 5),
+            print: Arc::new(move |v| *printed_l.try_lock().unwrap() = v),
+        });
+
+        let mut graph = test_graph();
+        let mut eg = ExecutionGraph::default();
+        eg.update(&graph, &func_lib);
+        assert_eq!(eg.e_nodes.len(), 5);
+
+        // Remove get_b — a middle node feeding sum[1] and mult[1] (both optional).
+        // Forces compaction and target_idx remapping for the survivors.
+        let get_b_id = graph.by_name("get_b").unwrap().id;
+        graph.remove_by_id(get_b_id);
+        graph.validate();
+
+        eg.update(&graph, &func_lib);
+        assert_eq!(eg.e_nodes.len(), 4);
+        assert!(eg.by_name("get_b").is_none());
+
+        eg.execute_terminals().await?;
+
+        // sum = get_a(2) + none(0) = 2; mult = sum(2) * none(default 1) = 2
+        assert_eq!(*printed.lock().await, 2);
+
+        // sum's Bind to get_a still resolves after the index remap.
+        let sum_id = graph.by_name("sum").unwrap().id;
+        let vals = eg.get_argument_values(&sum_id).unwrap();
+        assert!(matches!(vals.inputs[0], Some(DynamicValue::Float(v)) if v.approximately_eq(2.0)));
+        assert!(vals.inputs[1].is_none());
+        assert!(matches!(vals.outputs[0], DynamicValue::Int(2)));
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn empty_graph_executes_cleanly() -> anyhow::Result<()> {
+        let graph = Graph::default();
+        let func_lib = FuncLib::default();
+
+        let mut eg = ExecutionGraph::default();
+        eg.update(&graph, &func_lib);
+
+        assert!(eg.is_empty());
+
+        let stats = eg.execute_terminals().await?;
+        assert!(stats.executed_nodes.is_empty());
+        assert!(stats.node_errors.is_empty());
+        assert!(stats.missing_inputs.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn multiple_terminals_all_execute() -> anyhow::Result<()> {
+        let printed = Arc::new(Mutex::new(Vec::<i64>::new()));
+        let printed_l = printed.clone();
+        let func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(|| Ok(2)),
+            get_b: Arc::new(|| 5),
+            print: Arc::new(move |v| printed_l.try_lock().unwrap().push(v)),
+        });
+
+        // Two independent terminal chains: get_a→print1, get_b→print2.
+        let get_a_id = NodeId::unique();
+        let get_b_id = NodeId::unique();
+        let print1_id = NodeId::unique();
+        let print2_id = NodeId::unique();
+
+        let mut graph = Graph::default();
+        let mut ga: Node = func_lib.by_name("get_a").unwrap().into();
+        ga.id = get_a_id;
+        graph.add(ga);
+        let mut gb: Node = func_lib.by_name("get_b").unwrap().into();
+        gb.id = get_b_id;
+        graph.add(gb);
+        let mut p1: Node = func_lib.by_name("print").unwrap().into();
+        p1.id = print1_id;
+        p1.inputs[0].binding = (get_a_id, 0).into();
+        graph.add(p1);
+        let mut p2: Node = func_lib.by_name("print").unwrap().into();
+        p2.id = print2_id;
+        p2.inputs[0].binding = (get_b_id, 0).into();
+        graph.add(p2);
+        graph.validate();
+
+        let mut eg = ExecutionGraph::default();
+        eg.update(&graph, &func_lib);
+        let stats = eg.execute_terminals().await?;
+
+        // Both terminals plus both sources execute exactly once.
+        assert_eq!(stats.executed_nodes.len(), 4);
+        let mut got = printed.lock().await.clone();
+        got.sort();
+        assert_eq!(got, vec![2, 5]);
+
+        Ok(())
+    }
+}
+
+// === Previews ===
+
+mod previews {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn previews_match_plain_argument_values() -> anyhow::Result<()> {
+        let func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(|| Ok(2)),
+            get_b: Arc::new(|| 5),
+            print: Arc::new(|_| {}),
+        });
+        let graph = test_graph();
+
+        let mut eg = ExecutionGraph::default();
+        eg.update(&graph, &func_lib);
+        eg.execute_terminals().await?;
+
+        // For non-Custom values gen_preview is a no-op, so the preview variant
+        // must return exactly the same values as the plain accessor.
+        let mult_id = graph.by_name("mult").unwrap().id;
+        let plain = eg.get_argument_values(&mult_id).unwrap();
+        let with_previews = eg
+            .get_argument_values_with_previews(&mult_id)
+            .await
+            .unwrap();
+
+        // mult = sum(2+5=7) * get_b(5) = 35
+        assert!(matches!(with_previews.outputs[0], DynamicValue::Int(35)));
+        assert_eq!(plain.inputs.len(), with_previews.inputs.len());
+        assert_eq!(plain.outputs.len(), with_previews.outputs.len());
+        assert!(matches!(
+            with_previews.inputs[0],
+            Some(DynamicValue::Int(7))
+        ));
 
         Ok(())
     }
