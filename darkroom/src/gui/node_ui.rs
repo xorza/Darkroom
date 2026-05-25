@@ -214,7 +214,7 @@ impl NodeUI {
     /// state mutation applied from these intents (notably drag-driven
     /// `MoveNodes`) lands in `Document` before recording — Pass A's
     /// arrange already reflects the cursor; no Pass B relayout retry.
-    pub fn prepass(&mut self, ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
+    pub(super) fn prepass(&mut self, ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
         // `node_id`/`widget_id` are `Copy`, so pull them out and drop the
         // borrow — that lets the early returns below reassign
         // `self.drag_anchor` without cloning the `start_positions` `Vec`,
@@ -555,7 +555,7 @@ fn output_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Ve
 /// `(node_id, kind, port_idx)` so prepass can look up
 /// `response_for(port_circle_wid(..))` without threading the cache —
 /// every port's id is reconstructible from its domain coordinates.
-pub fn port_circle_wid(port: PortRef) -> WidgetId {
+pub(super) fn port_circle_wid(port: PortRef) -> WidgetId {
     WidgetId::from_hash((
         "graph.node.port_circle",
         port.node_id,
