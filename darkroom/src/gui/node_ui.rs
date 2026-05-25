@@ -1,6 +1,6 @@
 use crate::document::{BoundarySide, GraphRef};
 use crate::gui::breaker::BreakerProbe;
-use crate::gui::graph_ui::PortFrame;
+use crate::gui::graph_ui::{PortFrame, node_ports};
 use crate::gui::value_editor;
 use crate::gui::{PortKind, PortRef, UiAction};
 use crate::intent::Intent;
@@ -251,6 +251,41 @@ pub(super) fn emit_subgraph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAc
             && ui.response_for(subgraph_badge_wid(n.id)).clicked
         {
             actions.push(UiAction::OpenGraph(GraphRef::Local(id)));
+        }
+    }
+}
+
+/// Prepass scan: port-circle double-clicks read from last frame's
+/// responses. An input double-click clears that input's binding; an
+/// output double-click disconnects every consumer it feeds.
+///
+/// Emitted pre-record (like the connection commit) because clearing a
+/// `Const` input removes its inline editor and resizes the node — doing it
+/// before Pass A lets the node arrange at its settled size and the wires
+/// re-anchor the same frame, instead of floating until the relayout pass.
+pub(super) fn emit_port_disconnects(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
+    for node in &scene.nodes {
+        for port in node_ports(scene, node, PortKind::Input) {
+            if ui.response_for(port_circle_wid(port)).double_clicked() {
+                out.push(set_input(port, Binding::None));
+            }
+        }
+        for port in node_ports(scene, node, PortKind::Output) {
+            if ui.response_for(port_circle_wid(port)).double_clicked() {
+                // An output may feed many inputs — clear each consumer.
+                for c in &scene.connections {
+                    if c.src_node == port.node_id && c.src_port == port.port_idx {
+                        out.push(set_input(
+                            PortRef {
+                                node_id: c.tgt_node,
+                                kind: PortKind::Input,
+                                port_idx: c.tgt_port,
+                            },
+                            Binding::None,
+                        ));
+                    }
+                }
+            }
         }
     }
 }
@@ -525,24 +560,8 @@ fn output_port_row(
             port_label(ui, rcx, port, name, rename, out);
             circle_frame(ui, theme, wid, fill, Spacing::new(0.0, 0.0, -overhang, 0.0));
         });
-    // Double-click on the output circle = disconnect every input
-    // bound to this output. Mirrors the input-side gesture; a single
-    // output may feed multiple inputs, so emit one `SetInput` per
-    // consumer.
-    if ui.response_for(wid).double_clicked() {
-        for c in &rcx.scene.connections {
-            if c.src_node == port.node_id && c.src_port == port.port_idx {
-                out.push(set_input(
-                    PortRef {
-                        node_id: c.tgt_node,
-                        kind: PortKind::Input,
-                        port_idx: c.tgt_port,
-                    },
-                    Binding::None,
-                ));
-            }
-        }
-    }
+    // Double-click to disconnect every consumer is handled in
+    // `emit_port_disconnects` (prepass) alongside the input-side gesture.
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -596,12 +615,9 @@ fn input_port_row(
     {
         ContextMenu::open(ui, menu_id, p);
     }
-    // Double-click on the port circle clears the binding (mirrors the
-    // deprecated-darkroom gesture). Palantir tracks the two-click edge
-    // per-button via `ResponseState::double_clicked()`.
-    if circle_state.double_clicked() {
-        out.push(set_input(port, Binding::None));
-    }
+    // Double-click on the circle clears the binding — handled in
+    // `emit_port_disconnects` (prepass), since clearing a `Const` resizes
+    // the node and the wires must re-anchor before the record.
     ContextMenu::for_id(menu_id)
         .size((Sizing::Hug, Sizing::Hug))
         .show(ui, |ui, popup| {

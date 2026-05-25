@@ -10,7 +10,9 @@ use crate::gui::background::CanvasBackground;
 use crate::gui::breaker::BreakerUI;
 use crate::gui::connection_ui::ConnectionUI;
 use crate::gui::new_node_ui::NewNodeUi;
-use crate::gui::node_ui::{NodeUI, RecordCtx, node_widget_id, port_circle_wid};
+use crate::gui::node_ui::{
+    NodeUI, RecordCtx, emit_port_disconnects, node_widget_id, port_circle_wid,
+};
 use crate::gui::selection_ui::SelectionUI;
 use crate::gui::{PortKind, PortRef};
 use crate::intent::Intent;
@@ -254,6 +256,7 @@ impl GraphUI {
     pub fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
         self.emit_pan_zoom(ui, scene, out);
         self.gestures.node_ui.prepass(ui, scene, out);
+        emit_port_disconnects(ui, scene, out);
         self.port_frame.rebuild(ui, scene);
         self.gestures
             .connection_ui
