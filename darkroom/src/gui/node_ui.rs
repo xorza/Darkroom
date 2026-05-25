@@ -1,8 +1,9 @@
 use crate::app::AppContext;
+use crate::document::GraphRef;
 use crate::gui::breaker::BreakerProbe;
 use crate::gui::graph_ui::PortFrame;
 use crate::gui::value_editor;
-use crate::gui::{PortKind, PortRef};
+use crate::gui::{PortKind, PortRef, UiAction};
 use crate::intent::Intent;
 use crate::scene::{InputBindingView, Scene, SceneNode};
 use crate::theme::Theme;
@@ -14,7 +15,7 @@ use palantir::{
 };
 use scenarium::data::StaticValue;
 use scenarium::graph::Binding;
-use scenarium::prelude::{NodeBehavior, NodeId};
+use scenarium::prelude::{NodeBehavior, NodeId, SubgraphRef};
 use std::collections::BTreeSet;
 
 /// Owns rendering of every graph node plus the single active drag
@@ -50,6 +51,7 @@ impl NodeUI {
     /// Emits an `Intent::MoveNode` for any node holding an active
     /// LMB drag on its body (port circles capture their own clicks
     /// via `Sense::CLICK` so drags don't latch off the port grabs).
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_all(
         &mut self,
         ui: &mut Ui,
@@ -58,12 +60,13 @@ impl NodeUI {
         port_frame: &PortFrame,
         probe: &mut BreakerProbe<'_>,
         out: &mut Vec<Intent>,
+        actions: &mut Vec<UiAction>,
     ) {
         if let Some(b) = probe.state.as_deref_mut() {
             b.broken_nodes.clear();
         }
         for n in &scene.nodes {
-            self.draw_one(ui, ctx, scene, n, port_frame, probe, out);
+            self.draw_one(ui, ctx, scene, n, port_frame, probe, out, actions);
         }
         // Drop the anchor if its target node vanished from the graph
         // (mid-drag delete). Without this, the slot would linger and
@@ -85,6 +88,7 @@ impl NodeUI {
         port_frame: &PortFrame,
         probe: &mut BreakerProbe<'_>,
         out: &mut Vec<Intent>,
+        actions: &mut Vec<UiAction>,
     ) {
         let theme = ctx.theme;
 
@@ -154,7 +158,7 @@ impl NodeUI {
                 shadow,
             })
             .show(ui, |ui| {
-                header(ui, ctx, node, out);
+                header(ui, ctx, node, out, actions);
                 ports_row(ui, ctx, scene, node, port_frame, out);
             });
         let response = panel.response;
@@ -248,7 +252,13 @@ pub(super) fn node_widget_id(node_id: NodeId) -> WidgetId {
 const BADGE_SIZE: f32 = 15.0;
 const BADGE_FONT: f32 = 10.0;
 
-fn header(ui: &mut Ui, ctx: &AppContext<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+fn header(
+    ui: &mut Ui,
+    ctx: &AppContext<'_>,
+    node: &SceneNode,
+    out: &mut Vec<Intent>,
+    actions: &mut Vec<UiAction>,
+) {
     let theme = ctx.theme;
     let r = theme.header_corner_radius;
     Panel::hstack()
@@ -269,9 +279,21 @@ fn header(ui: &mut Ui, ctx: &AppContext<'_>, node: &SceneNode, out: &mut Vec<Int
                 .id_salt("badge_spacer")
                 .size((Sizing::FILL, Sizing::Hug))
                 .show(ui, |_| {});
-            // Static descriptors first, then the interactive cache toggle.
-            if node.is_subgraph {
-                badge(ui, theme, "badge_sg", "S", theme.badge_subgraph, true, None);
+            // Subgraph chip is the open-in-tab affordance: clicking it
+            // opens (or focuses) the local subgraph's interior tab.
+            if let Some(sref) = node.subgraph {
+                let opened = badge(
+                    ui,
+                    theme,
+                    "badge_sg",
+                    "S",
+                    theme.badge_subgraph,
+                    true,
+                    Some(subgraph_badge_wid(node.id)),
+                );
+                if opened && let SubgraphRef::Local(id) = sref {
+                    actions.push(UiAction::OpenGraph(GraphRef::Local(id)));
+                }
             }
             if node.terminal {
                 badge(ui, theme, "badge_t", "T", theme.badge_terminal, true, None);
@@ -302,6 +324,11 @@ fn header(ui: &mut Ui, ctx: &AppContext<'_>, node: &SceneNode, out: &mut Vec<Int
 /// so `response_for` works without threading state.
 fn cache_badge_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.cache_badge", node_id))
+}
+
+/// Stable id for a subgraph node's clickable open-in-tab chip.
+fn subgraph_badge_wid(node_id: NodeId) -> WidgetId {
+    WidgetId::from_hash(("graph.node.subgraph_badge", node_id))
 }
 
 /// One header indicator chip: a small rounded square with a centered

@@ -6,14 +6,16 @@ use lens::ImageFuncLib;
 use palantir::{HostHandle, Shortcut, Ui};
 use scenarium::elements::basic_funclib::BasicFuncLib;
 use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
-use scenarium::prelude::FuncLib;
+use scenarium::prelude::{FuncLib, SubgraphId};
 use scenarium::testing::{TestFuncHooks, test_func_lib};
 
 use crate::action_stack::ActionStack;
 use crate::config::AppConfig;
-use crate::document::Document;
+use crate::document::{Document, GraphRef, GraphView};
+use crate::gui::UiAction;
 use crate::gui::main_window::MainWindow;
 use crate::gui::menu_bar::MenuCommand;
+use crate::gui::tab_bar::TabLabel;
 use crate::intent::{self, Intent, apply_step, build_step, requires_relayout};
 use crate::persistence;
 use crate::sample_graph::sample_graph;
@@ -53,6 +55,10 @@ pub struct App {
     /// no state across frames. Kept as a field only to reuse the
     /// allocation; not part of `App`'s observable state.
     intents: Vec<Intent>,
+    /// Per-frame scratch buffer of view-state requests (open/activate/
+    /// close tab) raised during record. Drained each frame; carries no
+    /// cross-frame state — kept only to reuse the allocation.
+    actions: Vec<UiAction>,
     pub action_stack: ActionStack,
     pub theme: Theme,
     pub host_handle: HostHandle,
@@ -74,7 +80,9 @@ impl palantir::App for App {
     /// corrupt config, or a deleted document, must not block launch.
     fn new(ui: &mut Ui, handle: HostHandle) -> Self {
         let mut document: Document = sample_graph().into();
-        document.auto_layout(220.0, 110.0, Vec2::new(40.0, 40.0));
+        document
+            .main_view
+            .auto_layout(&document.graph, 220.0, 110.0, Vec2::new(40.0, 40.0));
         let mut func_lib = FuncLib::default();
         func_lib.merge(test_func_lib(TestFuncHooks::default()));
         func_lib.merge(BasicFuncLib::default());
@@ -86,6 +94,7 @@ impl palantir::App for App {
             scene: Scene::default(),
             main_window: MainWindow::default(),
             intents: Vec::new(),
+            actions: Vec::new(),
             action_stack: ActionStack::new(UNDO_HISTORY),
             theme: Theme::default(),
             host_handle: handle,
@@ -108,40 +117,72 @@ impl palantir::App for App {
     fn frame(&mut self, ui: &mut Ui) {
         // ui.debug_overlay.damage_rect = true;
 
+        // A closed/deleted target can't be active; fall back to Main.
+        self.ensure_valid_active();
+        let target = self.document.active_target();
+        let prev_active = self.document.active;
+
         // Prepass: each UI subtree pushes input-derived intents
         // (drag-driven `MoveNode`, etc.) into `intents`. Drained and
         // applied *before* `Scene::rebuild`, so Pass A's record sees
         // the freshly-mutated doc — no Pass B retry for drag.
         self.intents.clear();
+        self.actions.clear();
         // Prepass only derives intents from input state; it never draws
         // and reads everything it needs off `Scene`, so it takes neither
         // the func lib nor the full `AppContext`.
         self.main_window.prepass(ui, &self.scene, &mut self.intents);
-        let mut relayout = self.drain_intents();
-        relayout |= self.handle_shortcuts(ui);
+        let mut relayout = self.drain_intents(target);
+        relayout |= self.handle_shortcuts(ui, target);
 
         let command_from_shortcut = self.menu_shortcut(ui);
 
         // Record. Widgets push intents derived from record-time state
         // (button clicks, edit commits) into `intents`.
-        self.scene.rebuild(&self.document, &self.func_lib);
+        let graph = self
+            .document
+            .graph_for(target)
+            .expect("active tab graph exists");
+        let view = self.document.view(target).expect("active tab view exists");
+        self.scene.rebuild(graph, view, &self.func_lib);
         let ctx = AppContext {
             theme: &self.theme,
             func_lib: &self.func_lib,
         };
+        let tab_labels = self.tab_labels();
+        let active = self.document.active;
         let host = self.host_handle.clone();
         let command = self
             .main_window
-            .frame(ui, &ctx, &mut self.scene, Some(&host), &mut self.intents)
+            .frame(
+                ui,
+                &ctx,
+                &mut self.scene,
+                Some(&host),
+                &tab_labels,
+                active,
+                &mut self.intents,
+                &mut self.actions,
+            )
             .or(command_from_shortcut);
 
+        // View actions (open/close a tab) mutate the tab list directly;
+        // tab *switches* become an `Intent::SwitchTab` so they're
+        // undoable and coalescing — both land before the post-record
+        // drain below.
+        relayout |= self.apply_view_actions();
         // Post-record drain — these intents reflect mutations that
-        // only the now-just-completed record could surface, so they
-        // *do* warrant a relayout retry when applicable. (palantir
-        // auto-schedules a follow-up frame after a relayout pass, so
-        // layout-derived state like `PortFrame`'s connection endpoints
-        // settles against the resized layout.)
-        if self.drain_intents() | relayout {
+        // only the now-just-completed record could surface (incl. the
+        // switch intent just queued), so they warrant a relayout retry
+        // when applicable.
+        relayout |= self.drain_intents(target);
+        // A changed active tab (via switch intent or open/close) swaps
+        // the rendered graph; drop stale drag/connection bookkeeping.
+        if self.document.active != prev_active {
+            self.main_window.reset_transient();
+            relayout = true;
+        }
+        if relayout {
             ui.request_relayout();
         }
 
@@ -168,7 +209,7 @@ impl App {
     /// presses. Focus only gates the *action*: while a widget holds
     /// focus, Ctrl+Z must undo that widget's text and Esc must blur it,
     /// so the graph-level handling stands down.
-    fn handle_shortcuts(&mut self, ui: &mut Ui) -> bool {
+    fn handle_shortcuts(&mut self, ui: &mut Ui, target: GraphRef) -> bool {
         let undo = ui.key_pressed(UNDO_SHORTCUT);
         let redo = ui.key_pressed(REDO_SHORTCUT);
         let reset_zoom = ui.key_pressed(RESET_ZOOM_SHORTCUT);
@@ -191,7 +232,10 @@ impl App {
         // (not a direct doc write) so it lands in the undo history and
         // the batched relayout-detection path catches it like any other
         // selection change.
-        if escape && !self.document.selected_nodes.is_empty() {
+        let view = self.document.view(target).expect("active tab view exists");
+        let has_selection = !view.selected_nodes.is_empty();
+        let pan = view.pan;
+        if escape && has_selection {
             self.intents.push(Intent::SetSelection {
                 to: BTreeSet::new(),
             });
@@ -200,10 +244,7 @@ impl App {
         // `SetViewport` intent the pan/zoom gesture uses — so it's
         // undoable and persists. `is_noop` filters it when already 1.0.
         if reset_zoom {
-            self.intents.push(Intent::SetViewport {
-                pan: self.document.pan,
-                scale: 1.0,
-            });
+            self.intents.push(Intent::SetViewport { pan, scale: 1.0 });
         }
         relayout
     }
@@ -357,23 +398,147 @@ impl App {
     /// (e.g. breaker swipe deleting K nodes + unbinding M ports) is
     /// one Cmd-Z. Returns whether any applied step needs a relayout
     /// retry.
-    fn drain_intents(&mut self) -> bool {
+    fn drain_intents(&mut self, target: GraphRef) -> bool {
         let mut relayout = false;
         let mut batch = Vec::new();
         for intent in self.intents.drain(..) {
-            let Some(step) = build_step(intent, &self.document) else {
+            let Some(step) = build_step(intent, &self.document, target) else {
                 continue;
             };
             if step.is_noop() {
                 continue;
             }
-            apply_step(&step, &mut self.document);
+            apply_step(&step, &mut self.document, target);
             relayout |= requires_relayout(&step);
             batch.push(step);
         }
         if !batch.is_empty() {
-            self.action_stack.push_current(&batch);
+            self.action_stack.push_current(target, &batch);
         }
         relayout
+    }
+
+    /// Drop tabs whose graph vanished and clamp `active` into range, so
+    /// the frame always has a live target to render. `Main` always
+    /// survives (`graph_for(Main)` is infallible).
+    fn ensure_valid_active(&mut self) {
+        // Common case: every tab still resolves — touch nothing (no
+        // per-frame allocation). Only rebuild the list when a tab's
+        // graph actually vanished.
+        if self
+            .document
+            .tabs
+            .iter()
+            .any(|t| self.document.graph_for(*t).is_none())
+        {
+            // Split the borrow so `retain` (mut `tabs`) can read `graph`.
+            let Document { graph, tabs, .. } = &mut self.document;
+            tabs.retain(|t| match t {
+                GraphRef::Main => true,
+                GraphRef::Local(id) => graph.subgraphs.by_key(id).is_some(),
+            });
+        }
+        if self.document.active >= self.document.tabs.len() {
+            self.document.active = self.document.tabs.len() - 1;
+        }
+    }
+
+    /// Build the strip's per-tab labels from the open-tab list.
+    fn tab_labels(&self) -> Vec<TabLabel> {
+        self.document
+            .tabs
+            .iter()
+            .map(|t| match t {
+                GraphRef::Main => TabLabel {
+                    text: "main".into(),
+                    closable: false,
+                },
+                GraphRef::Local(id) => {
+                    let name = self
+                        .document
+                        .graph
+                        .subgraphs
+                        .by_key(id)
+                        .map(|d| d.name.clone())
+                        .unwrap_or_else(|| "subgraph".to_string());
+                    TabLabel {
+                        text: name.into(),
+                        closable: true,
+                    }
+                }
+            })
+            .collect()
+    }
+
+    /// Apply the record pass's view-state requests. Open/close mutate
+    /// the tab list directly (not undoable); activate is queued as an
+    /// `Intent::SwitchTab` so it joins the undo history. Returns whether
+    /// a relayout is needed.
+    fn apply_view_actions(&mut self) -> bool {
+        let mut relayout = false;
+        for action in std::mem::take(&mut self.actions) {
+            match action {
+                UiAction::OpenGraph(target) => relayout |= self.open_graph(target),
+                UiAction::ActivateTab(index) => {
+                    self.intents.push(Intent::SwitchTab { to: index });
+                }
+                UiAction::CloseTab(index) => relayout |= self.close_tab(index),
+            }
+        }
+        relayout
+    }
+
+    /// Focus `target`'s tab, opening a new one (lazily seeding its view
+    /// metadata) if not already open. Returns whether anything changed.
+    fn open_graph(&mut self, target: GraphRef) -> bool {
+        if let Some(index) = self.document.tabs.iter().position(|t| *t == target) {
+            if self.document.active != index {
+                self.document.active = index;
+                return true;
+            }
+            return false;
+        }
+        if let GraphRef::Local(id) = target
+            && !self.ensure_sub_view(id)
+        {
+            return false;
+        }
+        self.document.tabs.push(target);
+        self.document.active = self.document.tabs.len() - 1;
+        true
+    }
+
+    /// Ensure a `GraphView` exists for a local subgraph interior,
+    /// auto-laying-out its nodes on first creation. Returns `false` if
+    /// the subgraph no longer exists.
+    fn ensure_sub_view(&mut self, id: SubgraphId) -> bool {
+        if self.document.sub_views.contains_key(&id) {
+            return true;
+        }
+        let view = {
+            let Some(def) = self.document.graph.subgraphs.by_key(&id) else {
+                return false;
+            };
+            let mut view = GraphView::for_graph(&def.graph);
+            view.auto_layout(&def.graph, 220.0, 110.0, Vec2::new(40.0, 40.0));
+            view
+        };
+        self.document.sub_views.insert(id, view);
+        true
+    }
+
+    /// Close the tab at `index` (the `Main` tab at 0 is never closable).
+    /// Keeps the subgraph's view metadata so reopening restores its
+    /// layout. Returns whether anything changed.
+    fn close_tab(&mut self, index: usize) -> bool {
+        if index == 0 || index >= self.document.tabs.len() {
+            return false;
+        }
+        self.document.tabs.remove(index);
+        if self.document.active > index {
+            self.document.active -= 1;
+        }
+        self.document.active = self.document.active.min(self.document.tabs.len() - 1);
+        true
     }
 }

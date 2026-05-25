@@ -13,7 +13,7 @@ use std::ops::Range;
 
 use common::SerdeFormat;
 
-use crate::document::Document;
+use crate::document::{Document, GraphRef};
 use crate::intent::{self, GestureKey, UndoStep};
 
 #[derive(Debug)]
@@ -23,6 +23,15 @@ struct UndoEntry {
     /// entry. Only set for single-step batches that identify as a
     /// gesture.
     gesture_key: Option<GestureKey>,
+    /// Which graph this batch mutated, so undo/redo re-target the right
+    /// graph+view even when the user has since switched tabs.
+    target: GraphRef,
+}
+
+#[derive(Debug)]
+struct RedoEntry {
+    range: Range<usize>,
+    target: GraphRef,
 }
 
 #[derive(Debug)]
@@ -30,7 +39,7 @@ pub struct ActionStack {
     undo_actions: Vec<u8>,
     redo_actions: Vec<u8>,
     undo_stack: Vec<UndoEntry>,
-    redo_stack: Vec<Range<usize>>,
+    redo_stack: Vec<RedoEntry>,
     max_steps: usize,
     temp_buffer: Vec<u8>,
 }
@@ -55,9 +64,10 @@ impl ActionStack {
         self.redo_stack.clear();
     }
 
-    /// Push a batch of just-applied steps. `steps` is a single undo
-    /// entry — undoing/redoing replays the whole batch atomically.
-    pub fn push_current(&mut self, steps: &[UndoStep]) {
+    /// Push a batch of just-applied steps that mutated `target`. `steps`
+    /// is a single undo entry — undoing/redoing replays the whole batch
+    /// atomically against `target`'s graph+view.
+    pub fn push_current(&mut self, target: GraphRef, steps: &[UndoStep]) {
         if steps.is_empty() {
             return;
         }
@@ -65,12 +75,12 @@ impl ActionStack {
         self.redo_stack.clear();
 
         // Gesture coalescing: if this push is a single step matching the
-        // previous entry's cached gesture_key, merge in place — keep the
-        // existing "from" half, replace the "to" half. Cross-frame
-        // zoom/pan collapses to one undo step without cross-frame state.
+        // previous entry's cached gesture_key *on the same graph*, merge
+        // in place — keep the existing "from" half, replace the "to"
+        // half. Cross-frame zoom/pan collapses to one undo step.
         if steps.len() == 1
             && let Some(key) = intent::gesture_key(&steps[0])
-            && self.try_merge_with_last(&steps[0], key)
+            && self.try_merge_with_last(&steps[0], key, target)
         {
             return;
         }
@@ -81,7 +91,11 @@ impl ActionStack {
         } else {
             None
         };
-        self.undo_stack.push(UndoEntry { range, gesture_key });
+        self.undo_stack.push(UndoEntry {
+            range,
+            gesture_key,
+            target,
+        });
         self.trim_to_limit();
     }
 
@@ -91,22 +105,28 @@ impl ActionStack {
         };
         let bytes = Self::slice_bytes(&self.undo_actions, &entry.range);
         let steps = Self::deserialize_steps(bytes, &mut self.temp_buffer);
+        // `revert_step` resolves the right graph+view from `target` and
+        // no-ops if it's gone (subgraph deleted) — the entry still moves
+        // onto the redo stack so the two halves stay paired.
         for step in steps.iter().rev() {
-            intent::revert_step(step, doc);
+            intent::revert_step(step, doc, entry.target);
             on_step(step);
         }
         let redo_range = Self::append_bytes(&mut self.redo_actions, bytes);
-        self.redo_stack.push(redo_range);
+        self.redo_stack.push(RedoEntry {
+            range: redo_range,
+            target: entry.target,
+        });
         Self::pop_tail_actions(&mut self.undo_actions, &entry.range);
 
         true
     }
 
     pub fn redo(&mut self, doc: &mut Document, on_step: &mut dyn FnMut(&UndoStep)) -> bool {
-        let Some(range) = self.redo_stack.pop() else {
+        let Some(entry) = self.redo_stack.pop() else {
             return false;
         };
-        let bytes = Self::slice_bytes(&self.redo_actions, &range);
+        let bytes = Self::slice_bytes(&self.redo_actions, &entry.range);
         let steps = Self::deserialize_steps(bytes, &mut self.temp_buffer);
         let gesture_key = if steps.len() == 1 {
             intent::gesture_key(&steps[0])
@@ -114,15 +134,16 @@ impl ActionStack {
             None
         };
         for step in steps.iter() {
-            intent::apply_step(step, doc);
+            intent::apply_step(step, doc, entry.target);
             on_step(step);
         }
         let undo_range = Self::append_bytes(&mut self.undo_actions, bytes);
         self.undo_stack.push(UndoEntry {
             range: undo_range,
             gesture_key,
+            target: entry.target,
         });
-        Self::pop_tail_actions(&mut self.redo_actions, &range);
+        Self::pop_tail_actions(&mut self.redo_actions, &entry.range);
 
         true
     }
@@ -142,11 +163,16 @@ impl ActionStack {
         }
     }
 
-    fn try_merge_with_last(&mut self, new_step: &UndoStep, key: GestureKey) -> bool {
+    fn try_merge_with_last(
+        &mut self,
+        new_step: &UndoStep,
+        key: GestureKey,
+        target: GraphRef,
+    ) -> bool {
         let Some(last) = self.undo_stack.last() else {
             return false;
         };
-        if last.gesture_key != Some(key) {
+        if last.gesture_key != Some(key) || last.target != target {
             return false;
         }
         let last_range = last.range.clone();
@@ -186,6 +212,12 @@ impl ActionStack {
                     to: *to,
                 }
             }
+            (UndoStep::SwitchTab { from, .. }, UndoStep::SwitchTab { to, .. }) => {
+                UndoStep::SwitchTab {
+                    from: *from,
+                    to: *to,
+                }
+            }
             _ => return false,
         };
 
@@ -195,6 +227,7 @@ impl ActionStack {
         self.undo_stack.push(UndoEntry {
             range,
             gesture_key: Some(key),
+            target,
         });
         true
     }
@@ -243,5 +276,91 @@ impl ActionStack {
         if range.end == buffer.len() {
             buffer.truncate(range.start);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::Document;
+    use crate::intent::{Intent, apply_step, build_step};
+    use scenarium::testing::test_graph;
+
+    /// A document with three tab slots so `active` can move 0→1→2. The
+    /// extra slots reuse `Main` — the switch step only reads/writes
+    /// `active`, never the tab graphs, so degenerate slots are fine here.
+    fn doc_with_three_tabs() -> Document {
+        let mut doc: Document = test_graph().into();
+        doc.tabs = vec![GraphRef::Main, GraphRef::Main, GraphRef::Main];
+        doc.active = 0;
+        doc
+    }
+
+    /// Commit a tab switch through the real intent path and push it.
+    fn switch_to(stack: &mut ActionStack, doc: &mut Document, to: usize) {
+        let step = build_step(Intent::SwitchTab { to }, doc, GraphRef::Main).unwrap();
+        apply_step(&step, doc, GraphRef::Main);
+        stack.push_current(GraphRef::Main, &[step]);
+    }
+
+    #[test]
+    fn consecutive_switches_coalesce_into_one_undo() {
+        let mut doc = doc_with_three_tabs();
+        let mut stack = ActionStack::new(100);
+
+        switch_to(&mut stack, &mut doc, 1);
+        switch_to(&mut stack, &mut doc, 2);
+        assert_eq!(doc.active, 2, "active follows the latest switch");
+
+        // The two switches merged: a single undo jumps straight back to
+        // the pre-burst tab (0), not to the intermediate 1.
+        assert!(stack.undo(&mut doc, &mut |_| {}));
+        assert_eq!(doc.active, 0, "one undo reverts the whole switch burst");
+
+        // No second entry survived the merge.
+        assert!(
+            !stack.undo(&mut doc, &mut |_| {}),
+            "the burst collapsed to exactly one entry"
+        );
+    }
+
+    #[test]
+    fn redo_replays_the_merged_switch() {
+        let mut doc = doc_with_three_tabs();
+        let mut stack = ActionStack::new(100);
+
+        switch_to(&mut stack, &mut doc, 1);
+        switch_to(&mut stack, &mut doc, 2);
+        stack.undo(&mut doc, &mut |_| {});
+        assert_eq!(doc.active, 0);
+
+        assert!(stack.redo(&mut doc, &mut |_| {}));
+        assert_eq!(doc.active, 2, "redo restores the merged switch target");
+    }
+
+    #[test]
+    fn switch_does_not_merge_across_an_intervening_edit() {
+        // A non-switch entry between two switches breaks the gesture, so
+        // the second switch starts a fresh, separately-undoable entry.
+        let mut doc = doc_with_three_tabs();
+        let mut stack = ActionStack::new(100);
+
+        switch_to(&mut stack, &mut doc, 1);
+
+        // Intervening selection edit (a real change, so not a no-op).
+        let node_id = doc.graph.iter().next().unwrap().id;
+        let mut want = std::collections::BTreeSet::new();
+        want.insert(node_id);
+        let sel = build_step(Intent::SetSelection { to: want }, &doc, GraphRef::Main).unwrap();
+        apply_step(&sel, &mut doc, GraphRef::Main);
+        stack.push_current(GraphRef::Main, &[sel]);
+
+        switch_to(&mut stack, &mut doc, 2);
+        assert_eq!(doc.active, 2);
+
+        // First undo reverts only the second switch (2 → 1); it didn't
+        // merge into the first because the selection edit broke the run.
+        stack.undo(&mut doc, &mut |_| {});
+        assert_eq!(doc.active, 1, "switch after an edit is its own entry");
     }
 }

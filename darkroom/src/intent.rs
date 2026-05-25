@@ -27,7 +27,7 @@ use glam::Vec2;
 use scenarium::graph::{Binding, InputPort, Node, NodeBehavior, NodeId, Subscription};
 use serde::{Deserialize, Serialize};
 
-use crate::document::Document;
+use crate::document::{Document, EditScope, EditScopeRef, GraphRef};
 use crate::model::ViewNode;
 
 /// What the caller wants to change. Forward-only — no `from` fields.
@@ -91,6 +91,12 @@ pub enum Intent {
         pan: Vec2,
         scale: f32,
     },
+    /// Make the tab at index `to` active. Document-global (not scoped to
+    /// any one graph); undoable and coalescing so a flurry of switches
+    /// collapses into a single history entry.
+    SwitchTab {
+        to: usize,
+    },
 }
 
 /// Self-contained undo-stack entry. Each variant carries both halves:
@@ -102,7 +108,10 @@ pub enum Intent {
 pub enum UndoStep {
     /// Pure creation: the "from" state is "node absent", which is
     /// implicit — undo just removes the node by id.
-    AddNode { view_node: ViewNode, node: Node },
+    AddNode {
+        view_node: ViewNode,
+        node: Node,
+    },
     /// Pre-removal state lives entirely on the step: every reference
     /// into the doomed node, so undo can fully restore it.
     RemoveNode {
@@ -153,6 +162,10 @@ pub enum UndoStep {
         to_pan: Vec2,
         to_scale: f32,
     },
+    SwitchTab {
+        from: usize,
+        to: usize,
+    },
 }
 
 /// 1e-4 is the threshold below which two pan/scale samples are
@@ -190,6 +203,7 @@ impl UndoStep {
                 (*from_pan - *to_pan).length_squared() < VIEWPORT_EPS * VIEWPORT_EPS
                     && (*from_scale - *to_scale).abs() < VIEWPORT_EPS
             }
+            UndoStep::SwitchTab { from, to } => from == to,
         }
     }
 }
@@ -200,28 +214,37 @@ impl UndoStep {
 /// (e.g. a `MoveNode` whose anchor lingered one frame past a `RemoveNode`
 /// applied earlier in the same frame). Callers should treat a `None`
 /// result as "stale intent, drop it".
-pub fn build_step(intent: Intent, doc: &Document) -> Option<UndoStep> {
+pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<UndoStep> {
+    // Document-global intents don't resolve a graph scope.
+    if let Intent::SwitchTab { to } = intent {
+        return Some(UndoStep::SwitchTab {
+            from: doc.active,
+            to,
+        });
+    }
+    let EditScopeRef { graph, view } = doc.scope(target)?;
     Some(match intent {
+        Intent::SwitchTab { .. } => unreachable!("handled above"),
         Intent::AddNode { view_node, node } => UndoStep::AddNode { view_node, node },
         Intent::RemoveNode { node_id } => {
-            let view_node = doc.view_nodes.by_key(&node_id)?.clone();
-            let node = doc.graph.by_id(&node_id)?.clone();
-            let was_selected = doc.selected_nodes.contains(&node_id);
+            let view_node = view.view_nodes.by_key(&node_id)?.clone();
+            let node = graph.by_id(&node_id)?.clone();
+            let was_selected = view.selected_nodes.contains(&node_id);
             UndoStep::RemoveNode {
                 view_node,
                 node,
-                bindings: doc.graph.bindings_touching(node_id),
-                subscriptions: doc.graph.subscriptions_touching(node_id),
+                bindings: graph.bindings_touching(node_id),
+                subscriptions: graph.subscriptions_touching(node_id),
                 was_selected,
             }
         }
         Intent::MoveNode { node_id, to } => UndoStep::MoveNode {
             node_id,
-            from: doc.view_nodes.by_key(&node_id)?.pos,
+            from: view.view_nodes.by_key(&node_id)?.pos,
             to,
         },
         Intent::RenameNode { node_id, to } => UndoStep::RenameNode {
-            from: doc.graph.by_id(&node_id)?.name.clone(),
+            from: graph.by_id(&node_id)?.name.clone(),
             node_id,
             to,
         },
@@ -230,20 +253,20 @@ pub fn build_step(intent: Intent, doc: &Document) -> Option<UndoStep> {
             input_idx,
             to,
         } => {
-            doc.graph.by_id(&node_id)?;
+            graph.by_id(&node_id)?;
             UndoStep::SetInput {
-                from: doc.graph.input_binding(InputPort::new(node_id, input_idx)),
+                from: graph.input_binding(InputPort::new(node_id, input_idx)),
                 node_id,
                 input_idx,
                 to,
             }
         }
         Intent::SetSelection { to } => UndoStep::SetSelection {
-            from: doc.selected_nodes.clone(),
+            from: view.selected_nodes.clone(),
             to,
         },
         Intent::SetCacheBehavior { node_id, to } => UndoStep::SetCacheBehavior {
-            from: doc.graph.by_id(&node_id)?.behavior,
+            from: graph.by_id(&node_id)?.behavior,
             node_id,
             to,
         },
@@ -253,11 +276,9 @@ pub fn build_step(intent: Intent, doc: &Document) -> Option<UndoStep> {
             subscriber,
             present,
         } => {
-            doc.graph.by_id(&event_node_id)?;
+            graph.by_id(&event_node_id)?;
             UndoStep::SetEventConnection {
-                was_present: doc
-                    .graph
-                    .is_subscribed(event_node_id, event_idx, subscriber),
+                was_present: graph.is_subscribed(event_node_id, event_idx, subscriber),
                 event_node_id,
                 event_idx,
                 subscriber,
@@ -265,39 +286,53 @@ pub fn build_step(intent: Intent, doc: &Document) -> Option<UndoStep> {
             }
         }
         Intent::SetViewport { pan, scale } => UndoStep::SetViewport {
-            from_pan: doc.pan,
-            from_scale: doc.scale,
+            from_pan: view.pan,
+            from_scale: view.scale,
             to_pan: pan,
             to_scale: scale,
         },
     })
 }
 
+/// Resolve the right graph+view for a scoped step, run `body`, and
+/// no-op if the target graph has since disappeared (a subgraph deleted
+/// while its undo entries linger).
+fn with_scope(doc: &mut Document, target: GraphRef, body: impl FnOnce(&mut EditScope<'_>)) {
+    if let Some(mut scope) = doc.scope_mut(target) {
+        body(&mut scope);
+    }
+}
+
 /// Forward apply: write the step's "to" half to `doc`. Used by
 /// the initial commit (right after `build_step`) and by undo-stack
 /// redo (replaying a popped step).
-pub fn apply_step(step: &UndoStep, doc: &mut Document) {
-    match step {
+pub fn apply_step(step: &UndoStep, doc: &mut Document, target: GraphRef) {
+    if let UndoStep::SwitchTab { to, .. } = step {
+        doc.active = *to;
+        return;
+    }
+    with_scope(doc, target, |scope| match step {
+        UndoStep::SwitchTab { .. } => unreachable!("handled above"),
         UndoStep::AddNode { view_node, node } => {
             assert!(
-                doc.graph.by_id(&node.id).is_none(),
+                scope.graph.by_id(&node.id).is_none(),
                 "apply AddNode expects node to be absent"
             );
-            doc.graph.add(node.clone());
-            doc.view_nodes.add(view_node.clone());
+            scope.graph.add(node.clone());
+            scope.view.view_nodes.add(view_node.clone());
         }
         UndoStep::RemoveNode { node, .. } => {
             assert!(
-                doc.graph.by_id(&node.id).is_some(),
+                scope.graph.by_id(&node.id).is_some(),
                 "apply RemoveNode expects node to be present"
             );
-            doc.remove_node(&node.id);
+            scope.remove_node(&node.id);
         }
         UndoStep::MoveNode { node_id, to, .. } => {
-            doc.view_nodes.by_key_mut(node_id).unwrap().pos = *to;
+            scope.view.view_nodes.by_key_mut(node_id).unwrap().pos = *to;
         }
         UndoStep::RenameNode { node_id, to, .. } => {
-            doc.graph.by_id_mut(node_id).unwrap().name = to.clone();
+            scope.graph.by_id_mut(node_id).unwrap().name = to.clone();
         }
         UndoStep::SetInput {
             node_id,
@@ -305,14 +340,15 @@ pub fn apply_step(step: &UndoStep, doc: &mut Document) {
             to,
             ..
         } => {
-            doc.graph
+            scope
+                .graph
                 .set_input_binding(InputPort::new(*node_id, *input_idx), to.clone());
         }
         UndoStep::SetSelection { to, .. } => {
-            doc.selected_nodes = to.clone();
+            scope.view.selected_nodes = to.clone();
         }
         UndoStep::SetCacheBehavior { node_id, to, .. } => {
-            doc.graph.by_id_mut(node_id).unwrap().behavior = *to;
+            scope.graph.by_id_mut(node_id).unwrap().behavior = *to;
         }
         UndoStep::SetEventConnection {
             event_node_id,
@@ -324,28 +360,36 @@ pub fn apply_step(step: &UndoStep, doc: &mut Document) {
             // subscribe/unsubscribe are idempotent (BTreeSet insert/remove),
             // so apply/redo is a no-op when the target state already holds.
             if *present {
-                doc.graph.subscribe(*event_node_id, *event_idx, *subscriber);
+                scope
+                    .graph
+                    .subscribe(*event_node_id, *event_idx, *subscriber);
             } else {
-                doc.graph
+                scope
+                    .graph
                     .unsubscribe(*event_node_id, *event_idx, *subscriber);
             }
         }
         UndoStep::SetViewport {
             to_pan, to_scale, ..
         } => {
-            doc.pan = *to_pan;
-            doc.scale = *to_scale;
+            scope.view.pan = *to_pan;
+            scope.view.scale = *to_scale;
         }
-    }
+    });
 }
 
 /// Backward apply: write the step's "from" half to `doc`. Pairs
 /// with [`apply_step`]; calling one after the other restores the
 /// graph to its pre-commit state.
-pub fn revert_step(step: &UndoStep, doc: &mut Document) {
-    match step {
+pub fn revert_step(step: &UndoStep, doc: &mut Document, target: GraphRef) {
+    if let UndoStep::SwitchTab { from, .. } = step {
+        doc.active = *from;
+        return;
+    }
+    with_scope(doc, target, |scope| match step {
+        UndoStep::SwitchTab { .. } => unreachable!("handled above"),
         UndoStep::AddNode { node, .. } => {
-            doc.remove_node(&node.id);
+            scope.remove_node(&node.id);
         }
         UndoStep::RemoveNode {
             view_node,
@@ -356,21 +400,21 @@ pub fn revert_step(step: &UndoStep, doc: &mut Document) {
         } => {
             let removed_node_id = node.id;
             assert!(
-                doc.graph.by_id(&node.id).is_none(),
+                scope.graph.by_id(&node.id).is_none(),
                 "revert RemoveNode expects removed node to be absent"
             );
-            doc.graph.add(node.clone());
-            doc.view_nodes.add(view_node.clone());
-            doc.graph.restore_wiring(bindings, subscriptions);
+            scope.graph.add(node.clone());
+            scope.view.view_nodes.add(view_node.clone());
+            scope.graph.restore_wiring(bindings, subscriptions);
             if *was_selected {
-                doc.selected_nodes.insert(removed_node_id);
+                scope.view.selected_nodes.insert(removed_node_id);
             }
         }
         UndoStep::MoveNode { node_id, from, .. } => {
-            doc.view_nodes.by_key_mut(node_id).unwrap().pos = *from;
+            scope.view.view_nodes.by_key_mut(node_id).unwrap().pos = *from;
         }
         UndoStep::RenameNode { node_id, from, .. } => {
-            doc.graph.by_id_mut(node_id).unwrap().name = from.clone();
+            scope.graph.by_id_mut(node_id).unwrap().name = from.clone();
         }
         UndoStep::SetInput {
             node_id,
@@ -378,14 +422,15 @@ pub fn revert_step(step: &UndoStep, doc: &mut Document) {
             from,
             ..
         } => {
-            doc.graph
+            scope
+                .graph
                 .set_input_binding(InputPort::new(*node_id, *input_idx), from.clone());
         }
         UndoStep::SetSelection { from, .. } => {
-            doc.selected_nodes = from.clone();
+            scope.view.selected_nodes = from.clone();
         }
         UndoStep::SetCacheBehavior { node_id, from, .. } => {
-            doc.graph.by_id_mut(node_id).unwrap().behavior = *from;
+            scope.graph.by_id_mut(node_id).unwrap().behavior = *from;
         }
         UndoStep::SetEventConnection {
             event_node_id,
@@ -395,9 +440,12 @@ pub fn revert_step(step: &UndoStep, doc: &mut Document) {
             ..
         } => {
             if *was_present {
-                doc.graph.subscribe(*event_node_id, *event_idx, *subscriber);
+                scope
+                    .graph
+                    .subscribe(*event_node_id, *event_idx, *subscriber);
             } else {
-                doc.graph
+                scope
+                    .graph
                     .unsubscribe(*event_node_id, *event_idx, *subscriber);
             }
         }
@@ -406,10 +454,10 @@ pub fn revert_step(step: &UndoStep, doc: &mut Document) {
             from_scale,
             ..
         } => {
-            doc.pan = *from_pan;
-            doc.scale = *from_scale;
+            scope.view.pan = *from_pan;
+            scope.view.scale = *from_scale;
         }
-    }
+    });
 }
 
 /// Whether replaying this step changes anything the layout engine
@@ -425,6 +473,9 @@ pub fn requires_relayout(step: &UndoStep) -> bool {
         | UndoStep::RemoveNode { .. }
         | UndoStep::MoveNode { .. }
         | UndoStep::RenameNode { .. } => true,
+        // Switching tabs swaps which graph the scene renders — the whole
+        // canvas relays out.
+        UndoStep::SwitchTab { .. } => true,
         // Viewport is the inner-canvas `TranslateScale`, applied at
         // paint; children arrange in pre-transform space, so a pan/zoom
         // changes nothing the layout engine reads — no Pass B needed.
@@ -453,6 +504,10 @@ pub fn gesture_key(step: &UndoStep) -> Option<GestureKey> {
     match step {
         UndoStep::SetViewport { .. } => Some(GestureKey::Viewport),
         UndoStep::MoveNode { node_id, .. } => Some(GestureKey::NodeDrag(*node_id)),
+        // Consecutive tab switches collapse into one entry: the merged
+        // step keeps the original `from` and adopts the latest `to`, so
+        // a burst of tabbing undoes back to where it started in one step.
+        UndoStep::SwitchTab { .. } => Some(GestureKey::TabSwitch),
         UndoStep::AddNode { .. }
         | UndoStep::RemoveNode { .. }
         | UndoStep::RenameNode { .. }
@@ -467,4 +522,5 @@ pub fn gesture_key(step: &UndoStep) -> Option<GestureKey> {
 pub enum GestureKey {
     Viewport,
     NodeDrag(NodeId),
+    TabSwitch,
 }

@@ -1,11 +1,13 @@
 use std::mem::take;
 
-use palantir::{Align, Configure, HostHandle, Panel, Sizing, Ui, VAlign};
+use palantir::{Background, Configure, HostHandle, Panel, Sizing, Ui};
 
 use crate::app::AppContext;
+use crate::gui::UiAction;
 use crate::gui::graph_ui::GraphUI;
 use crate::gui::menu_bar;
 use crate::gui::menu_bar::MenuCommand;
+use crate::gui::tab_bar::{self, TabLabel};
 use crate::intent::Intent;
 use crate::scene::Scene;
 
@@ -27,35 +29,55 @@ impl MainWindow {
         self.graph_ui.prepass(ui, scene, out);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn frame(
         &mut self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
         scene: &mut Scene,
         host: Option<&HostHandle>,
+        tabs: &[TabLabel],
+        active: usize,
         out: &mut Vec<Intent>,
+        actions: &mut Vec<UiAction>,
     ) -> Option<MenuCommand> {
         let mut command = None;
-        // ZStack so the menu bar floats *over* the graph rather than
-        // reserving a row above it. Record order = paint order: the
-        // graph paints first (full-pane backdrop), the menu bar on top.
-        // The bar has no background and its triggers are transparent
-        // until hovered, so nodes show through behind it. `child_align`
-        // top pins the Hug-height bar to the top edge (the FILL graph
-        // ignores it).
-        Panel::zstack()
+        // Top-to-bottom: menu bar, then the tab strip, then the graph.
+        // Menu bar + tabs share the `node_fill` chrome color so they
+        // read as one top bar; the graph pane (canvas_bg) fills the
+        // rest, and the active tab punches through to that same color so
+        // it looks continuous with the canvas below it.
+        let chrome = ctx.theme.node_fill;
+        Panel::vstack()
             .auto_id()
             .size((Sizing::FILL, Sizing::FILL))
-            .child_align(Align::v(VAlign::Top))
             .show(ui, |ui| {
-                self.graph_ui.frame(ui, ctx, scene, out);
-                command = menu_bar::show(ui, host);
+                Panel::hstack()
+                    .id_salt("menu_chrome")
+                    .size((Sizing::FILL, Sizing::Hug))
+                    .background(Background {
+                        fill: chrome.into(),
+                        ..Default::default()
+                    })
+                    .show(ui, |ui| {
+                        command = menu_bar::show(ui, host);
+                    });
+                tab_bar::show(ui, ctx.theme, tabs, active, actions);
+                self.graph_ui.frame(ui, ctx, scene, out, actions);
             });
 
         if take(&mut self.first_frame) {
             ui.request_relayout();
         }
         command
+    }
+
+    /// Drop transient input bookkeeping (drag anchors, in-flight
+    /// connection) when the active tab changes so a gesture started on
+    /// one graph can't bleed into another. Keeps `PortFrame`'s offset
+    /// cache so the newly-shown graph's connections render immediately.
+    pub fn reset_transient(&mut self) {
+        self.graph_ui.clear_gestures();
     }
 }
 

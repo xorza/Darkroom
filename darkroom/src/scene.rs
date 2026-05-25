@@ -4,9 +4,9 @@ use glam::Vec2;
 use palantir::InternedStr;
 use scenarium::data::StaticValue;
 use scenarium::function::FuncInput;
-use scenarium::prelude::{Binding, FuncLib, NodeBehavior, NodeId, NodeKind};
+use scenarium::prelude::{Binding, FuncLib, Graph, NodeBehavior, NodeId, NodeKind, SubgraphRef};
 
-use crate::document::Document;
+use crate::document::GraphView;
 
 #[derive(Debug)]
 pub struct Scene {
@@ -80,8 +80,10 @@ pub struct SceneNode {
     pub inputs: PortSpan,
     pub outputs: PortSpan,
     pub input_bindings: PortSpan,
-    /// Composite (`NodeKind::Subgraph`) instance vs a plain func node.
-    pub is_subgraph: bool,
+    /// `Some` for a composite (`NodeKind::Subgraph`) instance — carries
+    /// the ref so the header's open-in-tab action knows which def to
+    /// target. `None` for a plain func node.
+    pub subgraph: Option<SubgraphRef>,
     /// Sink node (its func is `terminal` — no outputs feed downstream).
     pub terminal: bool,
     /// Result is cached / computed once (`NodeBehavior::Once`). The
@@ -107,22 +109,22 @@ impl Scene {
     /// Names live in palantir's per-frame text arena, which clears at
     /// the next `Ui::frame` — so `Scene` must be rebuilt every frame
     /// before any widget consumes it. `App::frame` enforces this.
-    pub fn rebuild(&mut self, doc: &Document, func_lib: &FuncLib) {
-        self.selected_nodes = doc.selected_nodes.clone();
+    pub fn rebuild(&mut self, graph: &Graph, view: &GraphView, func_lib: &FuncLib) {
+        self.selected_nodes = view.selected_nodes.clone();
         // Mirror the persisted viewport. The gesture overwrites these
         // later this frame and `App` copies them back onto the doc, so
         // a fresh value (e.g. just-loaded document) shows up here while
         // an active pan/zoom isn't clobbered (it re-persists each frame).
-        self.pan = doc.pan;
-        self.zoom = doc.scale;
+        self.pan = view.pan;
+        self.zoom = view.scale;
         self.nodes.clear();
         self.connections.clear();
         self.port_names.clear();
         self.input_bindings.clear();
         self.input_defaults.clear();
 
-        for vn in doc.view_nodes.iter() {
-            let Some(node) = doc.graph.by_id(&vn.id) else {
+        for vn in view.view_nodes.iter() {
+            let Some(node) = graph.by_id(&vn.id) else {
                 continue;
             };
             // A node's interface (port names + input defaults) comes from
@@ -133,20 +135,18 @@ impl Scene {
                 NodeKind::Func(func_id) => func_lib.by_id(func_id).map(|f| NodeInterface {
                     inputs: &f.inputs,
                     output_names: f.outputs.iter().map(|o| o.name.clone()).collect(),
-                    is_subgraph: false,
+                    subgraph: None,
                     terminal: f.terminal,
                 }),
-                NodeKind::Subgraph(r) => {
-                    doc.graph.resolve_def(*r, func_lib).map(|d| NodeInterface {
-                        inputs: &d.inputs,
-                        output_names: d.outputs.iter().map(|o| o.name.clone()).collect(),
-                        is_subgraph: true,
-                        // A composite's terminal-ness is derived at flatten
-                        // time, not stored on the def; treat "no exposed
-                        // outputs" as the visible sink signal.
-                        terminal: d.outputs.is_empty(),
-                    })
-                }
+                NodeKind::Subgraph(r) => graph.resolve_def(*r, func_lib).map(|d| NodeInterface {
+                    inputs: &d.inputs,
+                    output_names: d.outputs.iter().map(|o| o.name.clone()).collect(),
+                    subgraph: Some(*r),
+                    // A composite's terminal-ness is derived at flatten
+                    // time, not stored on the def; treat "no exposed
+                    // outputs" as the visible sink signal.
+                    terminal: d.outputs.is_empty(),
+                }),
                 NodeKind::SubgraphInput | NodeKind::SubgraphOutput => None,
             };
             let Some(interface) = interface else {
@@ -162,7 +162,7 @@ impl Scene {
             );
             let input_bindings = extend_pool(
                 &mut self.input_bindings,
-                doc.graph
+                graph
                     .node_bindings(node.id, interface.inputs.len())
                     .map(|(_, binding)| InputBindingView::from(&binding)),
             );
@@ -177,13 +177,13 @@ impl Scene {
                 inputs,
                 outputs,
                 input_bindings,
-                is_subgraph: interface.is_subgraph,
+                subgraph: interface.subgraph,
                 terminal: interface.terminal,
                 cached: node.behavior == NodeBehavior::Once,
             });
         }
 
-        for (dst, src) in doc.graph.edges() {
+        for (dst, src) in graph.edges() {
             self.connections.push(SceneConnection {
                 src_node: src.node_id,
                 src_port: src.port_idx,
@@ -218,7 +218,7 @@ impl Scene {
 struct NodeInterface<'a> {
     inputs: &'a [FuncInput],
     output_names: Vec<String>,
-    is_subgraph: bool,
+    subgraph: Option<SubgraphRef>,
     terminal: bool,
 }
 

@@ -7,7 +7,24 @@ pub mod menu_bar;
 pub mod new_node_ui;
 pub mod node_ui;
 pub mod selection_ui;
+pub mod tab_bar;
 pub mod value_editor;
+
+use crate::document::GraphRef;
+
+/// A view-state request raised during the record pass and applied by
+/// `App` after the frame. Distinct from `Intent` because none of these
+/// mutate the document — they change *what the editor shows* (which tab
+/// is active, which graphs are open), so they're not undoable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UiAction {
+    /// Open `target` in a tab (or focus its existing tab).
+    OpenGraph(GraphRef),
+    /// Make the tab at this index active.
+    ActivateTab(usize),
+    /// Close the tab at this index (the `Main` tab is never closable).
+    CloseTab(usize),
+}
 
 /// Whether a port consumes a binding (`Input`) or produces a value
 /// (`Output`). Mirrors deprecated darkroom's `PortKind` — same domain

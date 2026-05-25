@@ -12,7 +12,7 @@ use crate::gui::connection_ui::ConnectionUI;
 use crate::gui::new_node_ui::NewNodeUi;
 use crate::gui::node_ui::{NodeUI, node_widget_id, port_circle_wid};
 use crate::gui::selection_ui::SelectionUI;
-use crate::gui::{PortKind, PortRef};
+use crate::gui::{PortKind, PortRef, UiAction};
 use crate::intent::Intent;
 use crate::scene::Scene;
 
@@ -45,6 +45,16 @@ const SCROLL_ZOOM_BASE: f32 = 1.0025;
 #[derive(Default, Debug)]
 pub struct PortFrame {
     map: HashMap<PortRef, PortInfo>,
+    /// Per-port intra-node offset (`port_rect.center - node_rect.min`),
+    /// kept **across frames and tab switches**. A port's offset is
+    /// layout-stable (it only depends on the node's content, not its
+    /// position), so when a graph is shown again — e.g. the frame after
+    /// switching back to its tab, where none of its widgets recorded
+    /// last frame — we still resolve port centers from `node.pos +
+    /// cached_offset` and connections draw on that first frame instead
+    /// of popping in one frame late. Keyed by the globally-unique
+    /// `PortRef`, so it naturally spans every open graph.
+    offsets: HashMap<PortRef, Vec2>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -102,12 +112,20 @@ impl PortFrame {
                         port_idx,
                     };
                     let r = ui.response_for(port_circle_wid(port));
-                    let layout_center = match (r.layout_rect, node_min) {
-                        (Some(port_rect), Some(node_min)) => {
-                            Some(n.pos + (port_rect.center() - node_min))
-                        }
+                    // Fresh offset this frame (both rects recorded last
+                    // frame) refreshes the cache; otherwise fall back to
+                    // the cached offset so a just-shown graph still
+                    // anchors its curves.
+                    let fresh_offset = match (r.layout_rect, node_min) {
+                        (Some(port_rect), Some(node_min)) => Some(port_rect.center() - node_min),
                         _ => None,
                     };
+                    if let Some(offset) = fresh_offset {
+                        self.offsets.insert(port, offset);
+                    }
+                    let layout_center = fresh_offset
+                        .or_else(|| self.offsets.get(&port).copied())
+                        .map(|offset| n.pos + offset);
                     self.map.insert(
                         port,
                         PortInfo {
@@ -189,6 +207,20 @@ pub struct GraphUI {
 }
 
 impl GraphUI {
+    /// Drop in-flight gesture state (node drag anchor, connection drag,
+    /// breaker scribble, rubber-band, spawn popup, pan anchor) while
+    /// **keeping** cross-frame caches — notably `PortFrame`'s port-offset
+    /// table, so connections still anchor on the first frame after a tab
+    /// switch. Called when the active tab changes.
+    pub fn clear_gestures(&mut self) {
+        self.node_ui = NodeUI::default();
+        self.connection_ui = ConnectionUI::default();
+        self.breaker_ui = BreakerUI::default();
+        self.selection_ui = SelectionUI::default();
+        self.new_node_ui = NewNodeUi::default();
+        self.pan_anchor = None;
+    }
+
     /// Pre-record pass — see
     /// [`crate::gui::node_ui::NodeUI::prepass`]. Every input-derived
     /// intent that can change layout is emitted here, *before* the
@@ -221,6 +253,7 @@ impl GraphUI {
         ctx: &AppContext<'_>,
         scene: &mut Scene,
         out: &mut Vec<Intent>,
+        actions: &mut Vec<UiAction>,
     ) {
         // Pan/zoom was already folded into the document in `prepass`
         // and mirrored into `scene` by `Scene::rebuild`, so the
@@ -236,10 +269,17 @@ impl GraphUI {
                 to: BTreeSet::new(),
             });
         }
+        // Rebuild `PortFrame` against the *now-current* scene. `prepass`
+        // also rebuilt it (for the connection commit), but from the
+        // scene as it stood before `Scene::rebuild` ran this frame —
+        // which, on the first frame after a tab switch, is still the
+        // previous tab's graph. Rebuilding here picks up the active
+        // graph's nodes; the offset cache then resolves their port
+        // centers even though those widgets weren't recorded last frame,
+        // so connections draw on this first frame instead of popping in
+        // one frame late. On a normal frame the two builds are identical.
+        self.port_frame.rebuild(ui, scene);
         self.selection_ui.apply(ui, scene, out);
-        // `port_frame` was rebuilt in `prepass` (the connection commit
-        // there reads it); reuse it — the cascade hasn't changed between
-        // prepass and here, so a re-rebuild would be identical work.
         self.breaker_ui.apply(ui, scene, out);
         self.new_node_ui.apply(ui, ctx, scene, out);
         // Bake the snap target into `PortFrame.hovered` so node_ui's
@@ -321,7 +361,7 @@ impl GraphUI {
                         {
                             let mut probe = breaker_ui.probe(canvas_origin);
                             connection_ui.draw(ui, ctx, scene, port_frame, &mut probe);
-                            node_ui.draw_all(ui, ctx, scene, port_frame, &mut probe, out);
+                            node_ui.draw_all(ui, ctx, scene, port_frame, &mut probe, out, actions);
                         }
                         breaker_ui.draw(ui, ctx);
                         connection_ui.draw_in_flight(ui, ctx, scene, port_frame, canvas_origin);
