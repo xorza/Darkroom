@@ -595,4 +595,73 @@ mod tests {
             .is_none()
         );
     }
+
+    #[test]
+    fn rename_undo_survives_interface_compaction() {
+        use crate::document::BoundarySide;
+        use crate::intent::revert_step;
+        use scenarium::data::DataType;
+        use scenarium::function::FuncInput;
+        use scenarium::prelude::{Graph, SubgraphDef};
+
+        let finput = |n: &str| FuncInput {
+            name: n.into(),
+            required: false,
+            data_type: DataType::Int,
+            default_value: None,
+            value_options: Vec::new(),
+        };
+        let mut doc: Document = test_graph().into();
+        let def = SubgraphDef {
+            id: "00000000-0000-0000-0000-0000000000cc".into(),
+            name: "S".into(),
+            category: "Subgraph".into(),
+            graph: Graph::default(),
+            inputs: vec![finput("A"), finput("B")],
+            outputs: vec![],
+            events: vec![],
+        };
+        let def_id = def.id;
+        doc.graph.subgraphs.add(def);
+        let target = GraphRef::Local(def_id);
+
+        // Rename inputs[1] "B" -> "beta".
+        let step = build_step(
+            Intent::RenameBoundaryPort {
+                side: BoundarySide::Input,
+                idx: 1,
+                to: "beta".into(),
+            },
+            &doc,
+            target,
+        )
+        .unwrap();
+        apply_step(&step, &mut doc, target);
+        assert_eq!(
+            doc.graph.subgraphs.by_key(&def_id).unwrap().inputs[1].name,
+            "beta"
+        );
+
+        // Simulate `reconcile_boundaries` compacting after input 0 ("A")
+        // was disconnected: the survivor "beta" shifts from index 1 to 0.
+        doc.graph
+            .subgraphs
+            .by_key_mut(&def_id)
+            .unwrap()
+            .inputs
+            .remove(0);
+        assert_eq!(
+            doc.graph.subgraphs.by_key(&def_id).unwrap().inputs[0].name,
+            "beta"
+        );
+
+        // Undo: the step's `idx` (1) is now stale, but it resolves "beta"
+        // by name at its new index 0 and restores "B" — not a no-op, not
+        // the wrong slot.
+        revert_step(&step, &mut doc, target);
+        assert_eq!(
+            doc.graph.subgraphs.by_key(&def_id).unwrap().inputs[0].name,
+            "B"
+        );
+    }
 }

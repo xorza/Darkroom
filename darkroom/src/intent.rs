@@ -214,14 +214,14 @@ pub enum DocStep {
     /// `sub_id` is resolved at build time so apply/revert are
     /// self-contained (don't need the drain target). Carries both names.
     ///
-    /// **Known limitation:** `idx` is positional, but a subgraph's
-    /// interface is derived and `reconcile_boundaries` *compacts* it on
-    /// disconnect — so a disconnect between this rename and its undo can
-    /// renumber or drop the slot. Undo then renames the wrong slot, or
-    /// no-ops (`Document::set_boundary_port_name` guards out-of-range).
-    /// Non-corrupting, and the window is narrow (compaction only on
-    /// disconnect), so it's accepted: the interface has no stable
-    /// per-port identity to key on instead.
+    /// `idx` is only a *hint*: apply/revert resolve the slot by name
+    /// (`from`/`to`) via [`Document::rename_boundary_port`], so undo/redo
+    /// survive `reconcile_boundaries` compacting the interface — it
+    /// renumbers indices but preserves names. If the slot was
+    /// disconnected away entirely the name is gone and the step no-ops
+    /// (can't restore a name on a port that no longer exists). Residual
+    /// ambiguity only under duplicate names *and* compaction together —
+    /// rare and user-created.
     RenameBoundaryPort {
         sub_id: SubgraphId,
         side: BoundarySide,
@@ -449,9 +449,9 @@ fn apply_doc(step: &DocStep, doc: &mut Document) {
             sub_id,
             side,
             idx,
+            from,
             to,
-            ..
-        } => doc.set_boundary_port_name(*sub_id, *side, *idx, to),
+        } => doc.rename_boundary_port(*sub_id, *side, *idx, from, to),
     }
 }
 
@@ -551,8 +551,8 @@ fn revert_doc(step: &DocStep, doc: &mut Document) {
             side,
             idx,
             from,
-            ..
-        } => doc.set_boundary_port_name(*sub_id, *side, *idx, from),
+            to,
+        } => doc.rename_boundary_port(*sub_id, *side, *idx, to, from),
     }
 }
 

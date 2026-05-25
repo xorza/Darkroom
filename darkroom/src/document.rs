@@ -206,6 +206,23 @@ fn default_tabs() -> Vec<GraphRef> {
     vec![GraphRef::Main]
 }
 
+/// Index of the slot named `expected`: `idx_hint` when it still holds
+/// that name (fast path / duplicate-name disambiguation), else the first
+/// slot matching by name. `None` when nothing matches.
+fn resolve_named_slot<T>(
+    slots: &[T],
+    idx_hint: usize,
+    expected: &str,
+    name_of: impl Fn(&T) -> &str,
+) -> Option<usize> {
+    if let Some(s) = slots.get(idx_hint)
+        && name_of(s) == expected
+    {
+        return Some(idx_hint);
+    }
+    slots.iter().position(|s| name_of(s) == expected)
+}
+
 impl Default for Document {
     fn default() -> Self {
         Self {
@@ -296,25 +313,35 @@ impl Document {
         Some(name)
     }
 
-    /// Set a subgraph interface port's name. No-op if the def / side /
-    /// index is gone (e.g. the slot was compacted away between an edit's
-    /// commit and a later undo replay).
-    pub fn set_boundary_port_name(
+    /// Rename the interface port currently named `expected` on `side` to
+    /// `new`. `idx_hint` is tried first (exact when nothing moved, and it
+    /// disambiguates duplicate names); otherwise the slot is found by its
+    /// `expected` name. Resolving by name lets undo/redo survive
+    /// `reconcile_boundaries` compacting the interface — it renumbers
+    /// indices but *preserves names*, so the renamed slot is still found
+    /// at its new index. No-op if no matching slot exists (e.g. the port
+    /// was disconnected away entirely).
+    pub fn rename_boundary_port(
         &mut self,
         sub_id: SubgraphId,
         side: BoundarySide,
-        idx: usize,
-        name: &str,
+        idx_hint: usize,
+        expected: &str,
+        new: &str,
     ) {
         let Some(def) = self.graph.subgraphs.by_key_mut(&sub_id) else {
             return;
         };
         let slot = match side {
-            BoundarySide::Input => def.inputs.get_mut(idx).map(|i| &mut i.name),
-            BoundarySide::Output => def.outputs.get_mut(idx).map(|o| &mut o.name),
+            BoundarySide::Input => resolve_named_slot(&def.inputs, idx_hint, expected, |i| &i.name)
+                .map(|i| &mut def.inputs[i].name),
+            BoundarySide::Output => {
+                resolve_named_slot(&def.outputs, idx_hint, expected, |o| &o.name)
+                    .map(|i| &mut def.outputs[i].name)
+            }
         };
         if let Some(slot) = slot {
-            *slot = name.to_owned();
+            *slot = new.to_owned();
         }
     }
 
