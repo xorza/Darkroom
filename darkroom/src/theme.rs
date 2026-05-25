@@ -69,6 +69,15 @@ pub struct Theme {
     /// than `canvas_bg` so the halo reads as a highlight, not noise.
     pub selection_glow: Color,
 
+    /// Top-chrome fill behind the menu bar + tab strip. Palette `bg`
+    /// (`#252525`) — a notch darker than the node surface, sitting
+    /// between the graph (`canvas_bg`) and the nodes, so the chrome
+    /// recedes and the active tab (which uses `canvas_bg`) reads as
+    /// continuous with the graph below it. `#[serde(default)]` so older
+    /// themes keep loading without regenerating the asset.
+    #[serde(default = "default_chrome_fill")]
+    pub chrome_fill: Color,
+
     // ── header badges ────────────────────────────────────────────
     // Indicator-chip accents in the node header. `#[serde(default)]`
     // so themes predating these fields still load (the embedded asset
@@ -117,6 +126,10 @@ pub struct Theme {
     /// call site restyling per use. Last field so its TOML table
     /// follows all the scalar fields above (TOML `ValueAfterTable`).
     pub palantir_theme: palantir::Theme,
+}
+
+fn default_chrome_fill() -> Color {
+    Color::hex(0x252525)
 }
 
 fn default_badge_subgraph() -> Color {

@@ -43,11 +43,11 @@ impl MainWindow {
     ) -> Option<MenuCommand> {
         let mut command = None;
         // Top-to-bottom: menu bar, then the tab strip, then the graph.
-        // Menu bar + tabs share the `node_fill` chrome color so they
-        // read as one top bar; the graph pane (canvas_bg) fills the
-        // rest, and the active tab punches through to that same color so
-        // it looks continuous with the canvas below it.
-        let chrome = ctx.theme.node_fill;
+        // Menu bar + tabs share the `chrome_fill` color so they read as
+        // one top bar; the graph pane (canvas_bg) fills the rest, and the
+        // active tab punches through to that same color so it looks
+        // continuous with the canvas below it.
+        let chrome = ctx.theme.chrome_fill;
         Panel::vstack()
             .auto_id()
             .size((Sizing::FILL, Sizing::FILL))

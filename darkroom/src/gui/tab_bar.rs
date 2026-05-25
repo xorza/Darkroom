@@ -20,9 +20,9 @@ pub struct TabLabel {
 
 /// Draw the strip and push any activate/close actions onto `out`.
 pub fn show(ui: &mut Ui, theme: &Theme, tabs: &[TabLabel], active: usize, out: &mut Vec<UiAction>) {
-    // The strip shares the menu bar's `node_fill` chrome; the active
-    // tab below punches through to `canvas_bg` so it reads as one piece
-    // with the graph.
+    // The strip shares the menu bar's `chrome_fill`; the active tab
+    // below punches through to `canvas_bg` so it reads as one piece with
+    // the graph.
     Panel::hstack()
         .id_salt("tab_bar")
         .size((Sizing::FILL, Sizing::Hug))
@@ -30,7 +30,7 @@ pub fn show(ui: &mut Ui, theme: &Theme, tabs: &[TabLabel], active: usize, out: &
         .gap(3.0)
         .child_align(Align::v(VAlign::Bottom))
         .background(Background {
-            fill: theme.node_fill.into(),
+            fill: theme.chrome_fill.into(),
             ..Default::default()
         })
         .show(ui, |ui| {
