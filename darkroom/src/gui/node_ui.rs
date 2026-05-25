@@ -172,17 +172,7 @@ impl NodeUI {
         // selection. `UndoStep::is_noop` filters a click that doesn't
         // change the set (e.g. clicking the sole selected node).
         if response.clicked() {
-            let mut to = if shift_click {
-                rcx.scene.selected_nodes.clone()
-            } else {
-                BTreeSet::new()
-            };
-            if shift_click && selected {
-                to.remove(&node.id);
-            } else {
-                to.insert(node.id);
-            }
-            out.push(Intent::SetSelection { to });
+            out.push(select_intent(shift_click, rcx.scene, node.id));
         }
 
         // Latch the anchor on the press-frame edge; subsequent frames'
@@ -527,7 +517,7 @@ fn output_port_row(
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            port_label(ui, theme, port, name, rename, out);
+            port_label(ui, rcx, port, name, rename, out);
             circle_frame(ui, theme, wid, fill, Spacing::new(0.0, 0.0, -overhang, 0.0));
         });
     // Double-click on the output circle = disconnect every input
@@ -580,7 +570,7 @@ fn input_port_row(
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             circle_frame(ui, theme, wid, fill, margin);
-            port_label(ui, theme, port, name.clone(), rename, out);
+            port_label(ui, rcx, port, name.clone(), rename, out);
             if allow_const && let InputBindingView::Const(value) = binding {
                 let editor_id =
                     WidgetId::from_hash(("graph.node.const_editor", port.node_id, port.port_idx));
@@ -639,6 +629,24 @@ pub(super) fn set_input(port: PortRef, to: Binding) -> Intent {
     }
 }
 
+/// The `SetSelection` a click on `node_id` produces: plain click selects
+/// only it, Shift-click toggles its membership. Shared by the node body
+/// and the port labels so clicking a label selects the node like the
+/// body does. `UndoStep::is_noop` drops the entry when nothing changed.
+fn select_intent(shift: bool, scene: &Scene, node_id: NodeId) -> Intent {
+    let mut to = if shift {
+        scene.selected_nodes.clone()
+    } else {
+        BTreeSet::new()
+    };
+    if shift && scene.selected_nodes.contains(&node_id) {
+        to.remove(&node_id);
+    } else {
+        to.insert(node_id);
+    }
+    Intent::SetSelection { to }
+}
+
 /// Character cap for a boundary-port name in the inline rename editor.
 const PORT_NAME_MAX_CHARS: usize = 24;
 
@@ -674,12 +682,13 @@ fn port_rename_wid(port: PortRef) -> WidgetId {
 /// text.
 fn port_label(
     ui: &mut Ui,
-    theme: &Theme,
+    rcx: RecordCtx<'_>,
     port: PortRef,
     name: InternedStr,
     rename: Option<BoundarySide>,
     out: &mut Vec<Intent>,
 ) {
+    let theme = rcx.theme;
     let Some(side) = rename else {
         Text::new(name).show(ui);
         return;
@@ -690,6 +699,7 @@ fn port_label(
     // only the double-click seed and the commit compare need it, never
     // the idle per-frame path.
     if !ui.state_mut::<PortRename>(id).active {
+        let shift = ui.modifiers().shift;
         let resp = Panel::hstack()
             .id(id)
             .size((Sizing::Hug, Sizing::Hug))
@@ -700,6 +710,11 @@ fn port_label(
                 Text::new(name.clone()).show(ui);
             })
             .response;
+        // Single click selects the node (the label otherwise swallows
+        // the click the body would have gotten); double-click renames.
+        if resp.clicked() {
+            out.push(select_intent(shift, rcx.scene, port.node_id));
+        }
         if resp.double_clicked() {
             let st = ui.state_mut::<PortRename>(id);
             st.active = true;
