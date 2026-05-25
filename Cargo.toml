@@ -56,7 +56,7 @@ dotenv = { version = "0.15" }
 rayon = { version = "1.12" }
 toml = { version = "1.1" }
 hashbrown = { version = "0.17", features = ["serde"] }
-rhai = { version = "1.24", features = ["sync", "serde"] }
+rhai = { version = "1.25", features = ["sync", "serde"] }
 syn = { version = "2.0", features = ["full"] }
 quote = { version = "1.0" }
 memmap2 = { version = "0.9" }
@@ -76,7 +76,7 @@ arrayvec = { version = "0.7", features = ["serde"] }
 smallvec = { version = "1.15" }
 parking_lot = { version = "0.12" }
 rand_chacha = { version = "0.10" }
-nalgebra = { version = "0.34" }
+nalgebra = { version = "0.35" }
 ryu = { version = "1.0" }
 ratatui = { version = "0.30" }
 crossterm = { version = "0.29" }
