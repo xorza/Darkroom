@@ -19,11 +19,12 @@ use common::key_index_vec::{CompactInsert, KeyIndexVec};
 use hashbrown::HashSet;
 
 use super::program::{
-    ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionPortAddress, Span,
+    ExecutionBehavior, ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
+    ExecutionPortAddress, Span,
 };
 use crate::data::StaticValue;
 use crate::function::FuncLib;
-use crate::graph::{Binding, Graph, InputPort, NodeId, NodeKind, Subscription};
+use crate::graph::{Binding, Graph, InputPort, NodeBehavior, NodeId, NodeKind, Subscription};
 use crate::subgraph::SubgraphId;
 
 /// Hard cap on nesting depth — a release backstop for the output-resolution
@@ -106,6 +107,7 @@ impl Flattener {
                 new_dirty: &mut new_dirty,
                 n_outputs: 0,
                 events: pools.events,
+                once_depth: 0,
             };
             run.emit();
             n_outputs = run.n_outputs;
@@ -202,6 +204,11 @@ struct Run<'a> {
     /// Running total of outputs emitted so far; also the next output span start.
     n_outputs: u32,
     events: &'a mut Vec<ExecutionEvent>,
+    /// How many `Once` composite instances enclose the node being emitted.
+    /// While `> 0`, every interior func node is forced to
+    /// `ExecutionBehavior::Once` so the whole subgraph computes once and
+    /// then caches — the composite-level reading of `NodeBehavior::Once`.
+    once_depth: usize,
 }
 
 impl<'a> Run<'a> {
@@ -290,7 +297,14 @@ impl<'a> Run<'a> {
                         len: func.events.len() as u32,
                     };
                     e_node.terminal = func.terminal;
-                    e_node.behavior = ExecutionNode::compute_behavior(node.behavior, func.behavior);
+                    // Inside a `Once` composite the whole interior is frozen
+                    // after its first run; otherwise the node's own behavior
+                    // applies.
+                    e_node.behavior = if self.once_depth > 0 {
+                        ExecutionBehavior::Once
+                    } else {
+                        ExecutionNode::compute_behavior(node.behavior, func.behavior)
+                    };
                     e_node.name.clear();
                     e_node.name.push_str(&node.name);
 
@@ -311,9 +325,14 @@ impl<'a> Run<'a> {
                         "recursive subgraph {:?} (it contains itself)",
                         r.id()
                     );
+                    // A `Once` composite freezes its whole interior: bump the
+                    // depth so every interior func node flattens as `Once`.
+                    let once = node.behavior == NodeBehavior::Once;
+                    self.once_depth += once as usize;
                     self.push_level(node.id);
                     self.emit();
                     self.ids.pop();
+                    self.once_depth -= once as usize;
                     self.seen.remove(&r.id());
                 }
                 NodeKind::SubgraphInput | NodeKind::SubgraphOutput => {}

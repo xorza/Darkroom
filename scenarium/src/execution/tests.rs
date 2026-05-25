@@ -716,6 +716,198 @@ mod behavior {
     }
 }
 
+// === Composite (Subgraph) Caching ===
+
+mod composite_behavior {
+    use super::*;
+    use crate::function::FuncOutput;
+    use crate::graph::NodeKind;
+    use crate::subgraph::{SubgraphDef, SubgraphRef};
+
+    fn func_node(func_lib: &FuncLib, func_name: &str, node_name: &str) -> Node {
+        let id = func_lib.by_name(func_name).unwrap().id;
+        let mut n = Node::new(NodeKind::Func(id));
+        n.name = node_name.to_string();
+        n
+    }
+
+    fn int_output(name: &str) -> FuncOutput {
+        FuncOutput {
+            name: name.to_string(),
+            data_type: DataType::Int,
+        }
+    }
+
+    /// A subgraph def with no inputs and one output, whose interior is the
+    /// impure `get_b` (named `inner_name`) feeding `SubgraphOutput[0]`.
+    fn impure_output_def(
+        func_lib: &FuncLib,
+        id: &str,
+        name: &str,
+        inner_name: &str,
+    ) -> SubgraphDef {
+        let inner = func_node(func_lib, "get_b", inner_name);
+        let inner_id = inner.id;
+        let so = Node::new(NodeKind::SubgraphOutput);
+        let so_id = so.id;
+        let mut interior = Graph::default();
+        interior.add(inner);
+        interior.add(so);
+        interior.set_input_binding(InputPort::new(so_id, 0), (inner_id, 0).into());
+        SubgraphDef {
+            id: id.into(),
+            name: name.to_string(),
+            category: String::new(),
+            graph: interior,
+            inputs: vec![],
+            outputs: vec![int_output("Out")],
+            events: vec![],
+        }
+    }
+
+    /// Main graph: one instance of `def` whose output feeds a terminal
+    /// `print`. `once` toggles the instance's cache flag.
+    fn main_with(func_lib: &FuncLib, def: SubgraphDef, once: bool) -> Graph {
+        let def_id = def.id;
+        let mut graph = Graph::default();
+        graph.subgraphs.add(def.clone());
+        let inst = graph.add_subgraph_node(&def, SubgraphRef::Local(def_id));
+        if once {
+            graph.by_id_mut(&inst).unwrap().behavior = NodeBehavior::Once;
+        }
+        let p = func_node(func_lib, "print", "p");
+        let p_id = p.id;
+        graph.add(p);
+        graph.set_input_binding(InputPort::new(p_id, 0), (inst, 0).into());
+        graph
+    }
+
+    /// `(name in execute_order)` after a second prepare, with a cached
+    /// output already present for that node — i.e. "would it re-run?".
+    fn reruns_with_cache(graph: &Graph, func_lib: &FuncLib, name: &str) -> bool {
+        let mut eg = ExecutionEngine::default();
+        eg.update(graph, func_lib);
+        eg.prepare_execution(true, false, &[]).unwrap();
+        assert!(
+            execution_node_names_in_order(&eg).contains(&name.to_string()),
+            "{name} should run on the first prepare"
+        );
+        eg.set_output_values(name, vec![DynamicValue::Int(11)]);
+        eg.update(graph, func_lib);
+        eg.prepare_execution(true, false, &[]).unwrap();
+        execution_node_names_in_order(&eg).contains(&name.to_string())
+    }
+
+    #[test]
+    fn as_function_composite_reruns_impure_interior() {
+        // Control: the instance is *not* `Once`, so its impure interior
+        // recomputes like any impure node — my change must not force it.
+        let func_lib = test_func_lib(TestFuncHooks::default());
+        let def = impure_output_def(
+            &func_lib,
+            "00000000-0000-0000-0000-0000000000a1",
+            "S",
+            "inner",
+        );
+        let graph = main_with(&func_lib, def, false);
+        assert!(
+            reruns_with_cache(&graph, &func_lib, "inner"),
+            "impure interior recomputes when the composite is AsFunction"
+        );
+    }
+
+    #[test]
+    fn once_composite_caches_impure_interior() {
+        // The instance is `Once`: its interior computes once and then
+        // caches, even though `get_b` is impure.
+        let func_lib = test_func_lib(TestFuncHooks::default());
+        let def = impure_output_def(
+            &func_lib,
+            "00000000-0000-0000-0000-0000000000a1",
+            "S",
+            "inner",
+        );
+        let graph = main_with(&func_lib, def, true);
+        assert!(
+            !reruns_with_cache(&graph, &func_lib, "inner"),
+            "Once composite freezes its interior after the first run"
+        );
+    }
+
+    #[test]
+    fn once_composite_freezes_nested_interior() {
+        // `Once` propagates through nested composites: marking only the
+        // outer instance freezes a node two levels deep.
+        let func_lib = test_func_lib(TestFuncHooks::default());
+        let inner_def = impure_output_def(
+            &func_lib,
+            "00000000-0000-0000-0000-0000000000b1",
+            "Inner",
+            "deep",
+        );
+        let inner_id = inner_def.id;
+
+        // Outer's interior holds an instance of Inner feeding its output.
+        let mut outer_interior = Graph::default();
+        outer_interior.subgraphs.add(inner_def.clone());
+        let inner_inst = outer_interior.add_subgraph_node(&inner_def, SubgraphRef::Local(inner_id));
+        let so = Node::new(NodeKind::SubgraphOutput);
+        let so_id = so.id;
+        outer_interior.add(so);
+        outer_interior.set_input_binding(InputPort::new(so_id, 0), (inner_inst, 0).into());
+        let outer_def = SubgraphDef {
+            id: "00000000-0000-0000-0000-0000000000b2".into(),
+            name: "Outer".to_string(),
+            category: String::new(),
+            graph: outer_interior,
+            inputs: vec![],
+            outputs: vec![int_output("Out")],
+            events: vec![],
+        };
+
+        let graph = main_with(&func_lib, outer_def, true);
+        assert!(
+            !reruns_with_cache(&graph, &func_lib, "deep"),
+            "Once on the outer composite freezes the doubly-nested interior"
+        );
+    }
+
+    #[test]
+    fn nested_without_once_reruns() {
+        // Same nesting, outer instance left AsFunction: the deep impure
+        // node recomputes (no forced caching leaks in).
+        let func_lib = test_func_lib(TestFuncHooks::default());
+        let inner_def = impure_output_def(
+            &func_lib,
+            "00000000-0000-0000-0000-0000000000b1",
+            "Inner",
+            "deep",
+        );
+        let inner_id = inner_def.id;
+        let mut outer_interior = Graph::default();
+        outer_interior.subgraphs.add(inner_def.clone());
+        let inner_inst = outer_interior.add_subgraph_node(&inner_def, SubgraphRef::Local(inner_id));
+        let so = Node::new(NodeKind::SubgraphOutput);
+        let so_id = so.id;
+        outer_interior.add(so);
+        outer_interior.set_input_binding(InputPort::new(so_id, 0), (inner_inst, 0).into());
+        let outer_def = SubgraphDef {
+            id: "00000000-0000-0000-0000-0000000000b2".into(),
+            name: "Outer".to_string(),
+            category: String::new(),
+            graph: outer_interior,
+            inputs: vec![],
+            outputs: vec![int_output("Out")],
+            events: vec![],
+        };
+        let graph = main_with(&func_lib, outer_def, false);
+        assert!(
+            reruns_with_cache(&graph, &func_lib, "deep"),
+            "nested impure interior recomputes when nothing is Once"
+        );
+    }
+}
+
 // === Cycle Detection ===
 
 mod cycle_detection {
