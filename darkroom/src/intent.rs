@@ -195,6 +195,15 @@ pub enum UndoStep {
     },
     /// `sub_id` is resolved at build time so apply/revert are
     /// self-contained (don't need the drain target). Carries both names.
+    ///
+    /// **Known limitation:** `idx` is positional, but a subgraph's
+    /// interface is derived and `reconcile_boundaries` *compacts* it on
+    /// disconnect — so a disconnect between this rename and its undo can
+    /// renumber or drop the slot. Undo then renames the wrong slot, or
+    /// no-ops (`Document::set_boundary_port_name` guards out-of-range).
+    /// Non-corrupting, and the window is narrow (compaction only on
+    /// disconnect), so it's accepted: the interface has no stable
+    /// per-port identity to key on instead.
     RenameBoundaryPort {
         sub_id: SubgraphId,
         side: BoundarySide,
@@ -290,7 +299,7 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
         let GraphRef::Local(sub_id) = target else {
             return None;
         };
-        let from = boundary_port_name(doc, sub_id, side, idx)?;
+        let from = doc.boundary_port_name(sub_id, side, idx)?.to_owned();
         return Some(UndoStep::RenameBoundaryPort {
             sub_id,
             side,
@@ -406,7 +415,7 @@ pub fn apply_step(step: &UndoStep, doc: &mut Document, target: GraphRef) {
         ..
     } = step
     {
-        set_boundary_port_name(doc, *sub_id, *side, *idx, to);
+        doc.set_boundary_port_name(*sub_id, *side, *idx, to);
         return;
     }
     with_scope(doc, target, |scope| match step {
@@ -507,7 +516,7 @@ pub fn revert_step(step: &UndoStep, doc: &mut Document, target: GraphRef) {
         ..
     } = step
     {
-        set_boundary_port_name(doc, *sub_id, *side, *idx, from);
+        doc.set_boundary_port_name(*sub_id, *side, *idx, from);
         return;
     }
     with_scope(doc, target, |scope| match step {
@@ -650,42 +659,6 @@ pub fn gesture_key(step: &UndoStep) -> Option<GestureKey> {
         | UndoStep::SetEventConnection { .. }
         | UndoStep::CloseTab { .. }
         | UndoStep::RenameBoundaryPort { .. } => None,
-    }
-}
-
-/// Read a boundary port's current name from the def's interface, or
-/// `None` when the def/side/index doesn't resolve.
-fn boundary_port_name(
-    doc: &Document,
-    sub_id: SubgraphId,
-    side: BoundarySide,
-    idx: usize,
-) -> Option<String> {
-    let def = doc.graph.subgraphs.by_key(&sub_id)?;
-    match side {
-        BoundarySide::Input => def.inputs.get(idx).map(|i| i.name.clone()),
-        BoundarySide::Output => def.outputs.get(idx).map(|o| o.name.clone()),
-    }
-}
-
-/// Write a boundary port's name. No-op if the def/side/index is gone
-/// (e.g. the slot was compacted away between commit and replay).
-fn set_boundary_port_name(
-    doc: &mut Document,
-    sub_id: SubgraphId,
-    side: BoundarySide,
-    idx: usize,
-    name: &str,
-) {
-    let Some(def) = doc.graph.subgraphs.by_key_mut(&sub_id) else {
-        return;
-    };
-    let slot = match side {
-        BoundarySide::Input => def.inputs.get_mut(idx).map(|i| &mut i.name),
-        BoundarySide::Output => def.outputs.get_mut(idx).map(|o| &mut o.name),
-    };
-    if let Some(slot) = slot {
-        *slot = name.to_owned();
     }
 }
 

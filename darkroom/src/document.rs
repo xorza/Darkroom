@@ -279,6 +279,45 @@ impl Document {
         self.tabs[self.active]
     }
 
+    /// Current name of a subgraph interface port (`inputs[idx]` for
+    /// `Input`, `outputs[idx]` for `Output`), or `None` if the def /
+    /// side / index doesn't resolve.
+    pub fn boundary_port_name(
+        &self,
+        sub_id: SubgraphId,
+        side: BoundarySide,
+        idx: usize,
+    ) -> Option<&str> {
+        let def = self.graph.subgraphs.by_key(&sub_id)?;
+        let name = match side {
+            BoundarySide::Input => &def.inputs.get(idx)?.name,
+            BoundarySide::Output => &def.outputs.get(idx)?.name,
+        };
+        Some(name)
+    }
+
+    /// Set a subgraph interface port's name. No-op if the def / side /
+    /// index is gone (e.g. the slot was compacted away between an edit's
+    /// commit and a later undo replay).
+    pub fn set_boundary_port_name(
+        &mut self,
+        sub_id: SubgraphId,
+        side: BoundarySide,
+        idx: usize,
+        name: &str,
+    ) {
+        let Some(def) = self.graph.subgraphs.by_key_mut(&sub_id) else {
+            return;
+        };
+        let slot = match side {
+            BoundarySide::Input => def.inputs.get_mut(idx).map(|i| &mut i.name),
+            BoundarySide::Output => def.outputs.get_mut(idx).map(|o| &mut o.name),
+        };
+        if let Some(slot) = slot {
+            *slot = name.to_owned();
+        }
+    }
+
     /// Reconcile every local subgraph def's interface (`inputs`/`outputs`)
     /// against its interior wiring — derived state, recomputed like the
     /// scene rather than stored as undo steps. See `crate::reconcile` for
