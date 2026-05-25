@@ -258,14 +258,26 @@ impl App {
     /// Rebuild the `Scene` projection from the graph + view the `target`
     /// points at. Centralizes the borrow split (mut `scene`, shared
     /// `document` + `func_lib`) so the frame can rebuild at more than one
-    /// point without repeating it.
+    /// point without repeating it. For a `Local` target, also hands the
+    /// scene the enclosing `SubgraphDef` so the interior's boundary nodes
+    /// can mirror its interface as their ports.
+    ///
+    /// Reconciles every subgraph's interface against its interior wiring
+    /// first (derived state, like the scene itself) so boundary nodes
+    /// render the right ports + placeholder and the doc is consistent
+    /// before any save.
     fn rebuild_scene(&mut self, target: GraphRef) {
+        self.document.reconcile_boundaries(&self.func_lib);
         let graph = self
             .document
             .graph_for(target)
             .expect("active tab graph exists");
         let view = self.document.view(target).expect("active tab view exists");
-        self.scene.rebuild(graph, view, &self.func_lib);
+        let ctx_def = match target {
+            GraphRef::Main => None,
+            GraphRef::Local(id) => self.document.graph.subgraphs.by_key(&id),
+        };
+        self.scene.rebuild(graph, view, &self.func_lib, ctx_def);
     }
 
     /// Ctrl+Z / Ctrl+Shift+Z. Replays undo/redo against the document

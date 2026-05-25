@@ -1,11 +1,12 @@
 use anyhow::{Result, bail};
 use common::{SerdeFormat, is_debug, key_index_vec::KeyIndexVec};
 use glam::Vec2;
-use scenarium::prelude::{Graph as CoreGraph, NodeId, SubgraphId};
+use scenarium::prelude::{FuncLib, Graph as CoreGraph, NodeId, SubgraphId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 
 use crate::model::ViewNode;
+use crate::reconcile::reconcile_def;
 
 /// Which graph an editor tab is pointed at. `Main` is the document's
 /// root graph; `Local(id)` is a local subgraph def's interior graph
@@ -226,6 +227,18 @@ impl Document {
         }
     }
 
+    /// Mutable graph for a target — the root graph or a local subgraph
+    /// interior. Unlike `scope_mut` this hands back only the graph (no
+    /// view), so callers that rewire bindings across *several* graphs in
+    /// one pass (e.g. boundary reconcile remapping instance bindings) can
+    /// borrow each in turn without dragging the view along.
+    pub fn graph_mut(&mut self, target: GraphRef) -> Option<&mut CoreGraph> {
+        match target {
+            GraphRef::Main => Some(&mut self.graph),
+            GraphRef::Local(id) => self.graph.subgraphs.by_key_mut(&id).map(|d| &mut d.graph),
+        }
+    }
+
     /// Graph + view borrowed together for editing the given target.
     pub fn scope_mut(&mut self, target: GraphRef) -> Option<EditScope<'_>> {
         match target {
@@ -255,6 +268,20 @@ impl Document {
     /// The graph the active tab points at.
     pub fn active_target(&self) -> GraphRef {
         self.tabs[self.active]
+    }
+
+    /// Reconcile every local subgraph def's interface (`inputs`/`outputs`)
+    /// against its interior wiring — derived state, recomputed like the
+    /// scene rather than stored as undo steps. See `crate::reconcile` for
+    /// the per-def logic and rationale (placeholder ports, compaction).
+    pub fn reconcile_boundaries(&mut self, func_lib: &FuncLib) {
+        if self.graph.subgraphs.is_empty() {
+            return;
+        }
+        let def_ids: Vec<SubgraphId> = self.graph.subgraphs.iter().map(|d| d.id).collect();
+        for id in def_ids {
+            reconcile_def(self, id, func_lib);
+        }
     }
 
     pub fn validate(&self) {

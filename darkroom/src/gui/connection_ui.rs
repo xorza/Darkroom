@@ -109,6 +109,10 @@ impl ConnectionUI {
             return None;
         }
         let node = scene.nodes.iter().find(|n| n.id == start.node_id)?;
+        // Boundary ports route the interface, not literal values.
+        if node.boundary {
+            return None;
+        }
         // Don't overwrite an existing const value.
         if matches!(
             scene.bindings(node.input_bindings).get(start.port_idx),

@@ -415,6 +415,9 @@ fn input_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec
     let bindings = rcx.scene.bindings(node.input_bindings);
     let defaults = rcx.scene.defaults(node.input_bindings);
     let theme = rcx.theme;
+    // Boundary (`SubgraphInput`/`SubgraphOutput`) ports route the
+    // interface, not literal values — no const affordance.
+    let allow_const = !node.boundary;
     Panel::vstack()
         .id_salt("in")
         .size((Sizing::Fill(1.0), Sizing::Hug))
@@ -435,7 +438,16 @@ fn input_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec
                 };
                 let binding = bindings.get(i).unwrap_or(&InputBindingView::None);
                 let default = defaults.get(i).cloned();
-                input_port_row(ui, rcx, port, name.clone(), binding, default, out);
+                input_port_row(
+                    ui,
+                    rcx,
+                    port,
+                    name.clone(),
+                    binding,
+                    default,
+                    allow_const,
+                    out,
+                );
             }
         });
 }
@@ -528,6 +540,7 @@ fn output_port_row(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn input_port_row(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
@@ -535,6 +548,7 @@ fn input_port_row(
     name: InternedStr,
     binding: &InputBindingView,
     default_static: Option<StaticValue>,
+    allow_const: bool,
     out: &mut Vec<Intent>,
 ) {
     let theme = rcx.theme;
@@ -556,7 +570,7 @@ fn input_port_row(
         .show(ui, |ui| {
             circle_frame(ui, theme, wid, fill, margin);
             Text::new(name.clone()).show(ui);
-            if let InputBindingView::Const(value) = binding {
+            if allow_const && let InputBindingView::Const(value) = binding {
                 let editor_id =
                     WidgetId::from_hash(("graph.node.const_editor", port.node_id, port.port_idx));
                 if let Some(new_value) = value_editor::show(ui, editor_id, value, editor_w) {
@@ -585,8 +599,9 @@ fn input_port_row(
     ContextMenu::for_id(menu_id)
         .size((Sizing::Hug, Sizing::Hug))
         .show(ui, |ui, popup| {
-            let can_set =
-                !matches!(binding, InputBindingView::Const(_)) && default_static.is_some();
+            let can_set = allow_const
+                && !matches!(binding, InputBindingView::Const(_))
+                && default_static.is_some();
             if MenuItem::new("Set constant")
                 .enabled(can_set)
                 .show(ui, popup)
