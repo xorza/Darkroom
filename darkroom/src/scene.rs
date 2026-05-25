@@ -3,7 +3,8 @@ use std::collections::BTreeSet;
 use glam::Vec2;
 use palantir::InternedStr;
 use scenarium::data::StaticValue;
-use scenarium::prelude::{Binding, FuncId, FuncLib, NodeId};
+use scenarium::function::FuncInput;
+use scenarium::prelude::{Binding, FuncLib, NodeId, NodeKind};
 
 use crate::document::Document;
 
@@ -19,6 +20,12 @@ pub struct Scene {
     /// every node. `SceneNode::input_bindings` slices into it (same len
     /// as `SceneNode::inputs`).
     pub input_bindings: Vec<InputBindingView>,
+    /// Flat pool of each input port's default literal (from the func/def
+    /// interface), resolved once per rebuild. Sliced by the same span as
+    /// `input_bindings`, so the UI can offer a "set constant" value
+    /// without re-resolving against the func lib (and without needing a
+    /// func at all for subgraph instance nodes).
+    pub input_defaults: Vec<StaticValue>,
     /// Live viewport, mirrored from `Document::{pan, scale}` each
     /// `rebuild`. Read by the canvas transform and the pointer↔world
     /// mapping; the pan/zoom gesture writes it back here, and `App`
@@ -57,6 +64,7 @@ impl Default for Scene {
             connections: Vec::new(),
             port_names: Vec::new(),
             input_bindings: Vec::new(),
+            input_defaults: Vec::new(),
             pan: Vec2::ZERO,
             zoom: 1.0,
             selected_nodes: BTreeSet::new(),
@@ -67,7 +75,6 @@ impl Default for Scene {
 #[derive(Debug)]
 pub struct SceneNode {
     pub id: NodeId,
-    pub func_id: FuncId,
     pub pos: Vec2,
     pub name: InternedStr,
     pub inputs: PortSpan,
@@ -105,36 +112,52 @@ impl Scene {
         self.connections.clear();
         self.port_names.clear();
         self.input_bindings.clear();
+        self.input_defaults.clear();
 
         for vn in doc.view_nodes.iter() {
             let Some(node) = doc.graph.by_id(&vn.id) else {
                 continue;
             };
-            // Stage 1: only func nodes are rendered; subgraph instances get
-            // their own UI in a later stage.
-            let Some(func_id) = node.func_id() else {
-                continue;
+            // A node's interface (port names + input defaults) comes from
+            // its func or its subgraph def — both expose `FuncInput`s /
+            // `FuncOutput`s. Boundary nodes only exist inside a def's
+            // interior, never at the top level rendered here.
+            let interface = match &node.kind {
+                NodeKind::Func(func_id) => func_lib.by_id(func_id).map(|f| NodeInterface {
+                    inputs: &f.inputs,
+                    output_names: f.outputs.iter().map(|o| o.name.clone()).collect(),
+                }),
+                NodeKind::Subgraph(r) => {
+                    doc.graph.resolve_def(*r, func_lib).map(|d| NodeInterface {
+                        inputs: &d.inputs,
+                        output_names: d.outputs.iter().map(|o| o.name.clone()).collect(),
+                    })
+                }
+                NodeKind::SubgraphInput | NodeKind::SubgraphOutput => None,
             };
-            let Some(func) = func_lib.by_id(&func_id) else {
+            let Some(interface) = interface else {
                 continue;
             };
             let inputs = extend_pool(
                 &mut self.port_names,
-                func.inputs.iter().map(|i| i.name.clone().into()),
+                interface.inputs.iter().map(|i| i.name.clone().into()),
             );
             let outputs = extend_pool(
                 &mut self.port_names,
-                func.outputs.iter().map(|o| o.name.clone().into()),
+                interface.output_names.iter().map(|n| n.clone().into()),
             );
             let input_bindings = extend_pool(
                 &mut self.input_bindings,
                 doc.graph
-                    .node_bindings(node.id, func.inputs.len())
+                    .node_bindings(node.id, interface.inputs.len())
                     .map(|(_, binding)| InputBindingView::from(&binding)),
+            );
+            extend_pool(
+                &mut self.input_defaults,
+                interface.inputs.iter().map(default_static_value),
             );
             self.nodes.push(SceneNode {
                 id: vn.id,
-                func_id,
                 pos: vn.pos,
                 name: node.name.clone().into(),
                 inputs,
@@ -162,6 +185,31 @@ impl Scene {
         let start = span.start as usize;
         &self.input_bindings[start..start + span.len as usize]
     }
+
+    /// Per-input default literals, sliced by the node's `input_bindings`
+    /// span (defaults are pushed in lockstep with bindings, so the spans
+    /// coincide).
+    pub fn defaults(&self, span: PortSpan) -> &[StaticValue] {
+        let start = span.start as usize;
+        &self.input_defaults[start..start + span.len as usize]
+    }
+}
+
+/// Borrowed view of a node's interface during a single rebuild: the
+/// input ports (whole `FuncInput`, for names + defaults) and the output
+/// port names. Sourced from a func or a subgraph def uniformly.
+struct NodeInterface<'a> {
+    inputs: &'a [FuncInput],
+    output_names: Vec<String>,
+}
+
+/// The literal a port falls back to when given a const binding: its
+/// declared default, else the zero value for its data type.
+fn default_static_value(input: &FuncInput) -> StaticValue {
+    input
+        .default_value
+        .clone()
+        .unwrap_or_else(|| StaticValue::from(&input.data_type))
 }
 
 fn extend_pool<T>(pool: &mut Vec<T>, items: impl IntoIterator<Item = T>) -> PortSpan {

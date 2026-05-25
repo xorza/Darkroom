@@ -7,7 +7,7 @@ use palantir::{HostHandle, Shortcut, Ui};
 use scenarium::elements::basic_funclib::BasicFuncLib;
 use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
 use scenarium::prelude::FuncLib;
-use scenarium::testing::{TestFuncHooks, test_func_lib, test_graph};
+use scenarium::testing::{TestFuncHooks, test_func_lib};
 
 use crate::action_stack::ActionStack;
 use crate::config::AppConfig;
@@ -16,6 +16,7 @@ use crate::gui::main_window::MainWindow;
 use crate::gui::menu_bar::MenuCommand;
 use crate::intent::{self, Intent, apply_step, build_step, requires_relayout};
 use crate::persistence;
+use crate::sample_graph::sample_graph;
 use crate::scene::Scene;
 use crate::theme::Theme;
 
@@ -72,7 +73,7 @@ impl palantir::App for App {
     /// Restore failures degrade silently to defaults — a missing or
     /// corrupt config, or a deleted document, must not block launch.
     fn new(ui: &mut Ui, handle: HostHandle) -> Self {
-        let mut document: Document = test_graph().into();
+        let mut document: Document = sample_graph().into();
         document.auto_layout(220.0, 110.0, Vec2::new(40.0, 40.0));
         let mut func_lib = FuncLib::default();
         func_lib.merge(test_func_lib(TestFuncHooks::default()));
@@ -112,12 +113,10 @@ impl palantir::App for App {
         // applied *before* `Scene::rebuild`, so Pass A's record sees
         // the freshly-mutated doc — no Pass B retry for drag.
         self.intents.clear();
-        // Prepass only derives intents (incl. the const-drop gesture,
-        // which needs `func_lib`); it never draws, so it takes just
-        // `func_lib` rather than the full `AppContext`. The record
-        // phase below builds the one `AppContext` (theme + func_lib).
-        self.main_window
-            .prepass(ui, &self.func_lib, &self.scene, &mut self.intents);
+        // Prepass only derives intents from input state; it never draws
+        // and reads everything it needs off `Scene`, so it takes neither
+        // the func lib nor the full `AppContext`.
+        self.main_window.prepass(ui, &self.scene, &mut self.intents);
         let mut relayout = self.drain_intents();
         relayout |= self.handle_shortcuts(ui);
 

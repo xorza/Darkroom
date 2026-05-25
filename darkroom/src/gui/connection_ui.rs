@@ -1,12 +1,11 @@
 use glam::Vec2;
 use palantir::{Brush, Color, LineCap, LinearGradient, Shape, Stop, Ui};
 use scenarium::graph::{Binding, InputPort, OutputPort};
-use scenarium::prelude::FuncLib;
 
 use crate::app::AppContext;
 use crate::gui::breaker::BreakerProbe;
 use crate::gui::graph_ui::{PortFrame, to_world};
-use crate::gui::node_ui::{default_static_value, node_widget_id, set_input};
+use crate::gui::node_ui::{node_widget_id, set_input};
 use crate::gui::{PortKind, PortRef};
 use crate::intent::Intent;
 use crate::scene::{InputBindingView, Scene};
@@ -52,7 +51,6 @@ impl ConnectionUI {
     pub fn apply(
         &mut self,
         ui: &mut Ui,
-        func_lib: &FuncLib,
         scene: &Scene,
         port_frame: &PortFrame,
         out: &mut Vec<Intent>,
@@ -77,7 +75,7 @@ impl ConnectionUI {
         }
         if let Some(end) = drag.snap_end {
             commit_connection(drag.start, end, out);
-        } else if let Some(intent) = self.const_drop(ui, func_lib, scene, drag.start) {
+        } else if let Some(intent) = self.const_drop(ui, scene, drag.start) {
             out.push(intent);
         }
         self.drag = None;
@@ -87,16 +85,9 @@ impl ConnectionUI {
     /// node's body (and not onto a compatible port) means the user
     /// wants a literal there. Returns the `SetInput { Const(default) }`
     /// intent, or `None` when the gesture doesn't apply — drag started
-    /// on an output, released off the start node, the func/input is
-    /// unknown, or the input is already a const (don't clobber the
-    /// value).
-    fn const_drop(
-        &self,
-        ui: &Ui,
-        func_lib: &FuncLib,
-        scene: &Scene,
-        start: PortRef,
-    ) -> Option<Intent> {
+    /// on an output, released off the start node, the port is unknown,
+    /// or the input is already a const (don't clobber the value).
+    fn const_drop(&self, ui: &Ui, scene: &Scene, start: PortRef) -> Option<Intent> {
         if start.kind != PortKind::Input {
             return None;
         }
@@ -113,12 +104,8 @@ impl ConnectionUI {
         ) {
             return None;
         }
-        let func = func_lib.by_id(&node.func_id)?;
-        let func_input = func.inputs.get(start.port_idx)?;
-        Some(set_input(
-            start,
-            Binding::Const(default_static_value(func_input)),
-        ))
+        let default = scene.defaults(node.input_bindings).get(start.port_idx)?;
+        Some(set_input(start, Binding::Const(default.clone())))
     }
 
     /// Compatible-kind port currently snapped under the pointer

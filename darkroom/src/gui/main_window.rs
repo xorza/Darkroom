@@ -1,7 +1,6 @@
 use std::mem::take;
 
 use palantir::{Align, Configure, HostHandle, Panel, Sizing, Ui, VAlign};
-use scenarium::prelude::FuncLib;
 
 use crate::app::AppContext;
 use crate::gui::graph_ui::GraphUI;
@@ -24,14 +23,8 @@ impl MainWindow {
     /// it derives from palantir's current-frame input state (drag
     /// deltas, etc.). `App::frame` drains and applies these before
     /// `Scene::rebuild`, so the record phase sees the latest doc.
-    pub fn prepass(
-        &mut self,
-        ui: &mut Ui,
-        func_lib: &FuncLib,
-        scene: &Scene,
-        out: &mut Vec<Intent>,
-    ) {
-        self.graph_ui.prepass(ui, func_lib, scene, out);
+    pub fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
+        self.graph_ui.prepass(ui, scene, out);
     }
 
     pub fn frame(

@@ -12,7 +12,6 @@ use palantir::{
     Panel, Rect, Sense, Shadow, Shape, Sizing, Spacing, Stroke, Text, Ui, VAlign, WidgetId,
 };
 use scenarium::data::StaticValue;
-use scenarium::function::FuncInput;
 use scenarium::graph::Binding;
 use scenarium::prelude::NodeId;
 use std::collections::BTreeSet;
@@ -291,7 +290,7 @@ fn input_column(
 ) {
     let names = scene.ports(node.inputs);
     let bindings = scene.bindings(node.input_bindings);
-    let func = ctx.func_lib.by_id(&node.func_id);
+    let defaults = scene.defaults(node.input_bindings);
     let theme = ctx.theme;
     let (idle, hover) = (theme.input_port, theme.input_port_hover);
     Panel::vstack()
@@ -318,17 +317,8 @@ fn input_column(
                     idle
                 };
                 let binding = bindings.get(i).unwrap_or(&InputBindingView::None);
-                let func_input = func.and_then(|f| f.inputs.get(i));
-                input_port_row(
-                    ui,
-                    theme,
-                    port,
-                    name.clone(),
-                    fill,
-                    binding,
-                    func_input,
-                    out,
-                );
+                let default = defaults.get(i).cloned();
+                input_port_row(ui, theme, port, name.clone(), fill, binding, default, out);
             }
         });
 }
@@ -438,7 +428,7 @@ fn input_port_row(
     name: InternedStr,
     fill: Color,
     binding: &InputBindingView,
-    func_input: Option<&FuncInput>,
+    default_static: Option<StaticValue>,
     out: &mut Vec<Intent>,
 ) {
     let overhang = theme.port_radius() + theme.port_col_pad_x;
@@ -480,7 +470,6 @@ fn input_port_row(
     if circle_state.double_clicked() {
         out.push(set_input(port, Binding::None));
     }
-    let default_static = func_input.map(default_static_value);
     ContextMenu::for_id(menu_id)
         .size((Sizing::Hug, Sizing::Hug))
         .show(ui, |ui, popup| {
@@ -510,15 +499,6 @@ pub(super) fn set_input(port: PortRef, to: Binding) -> Intent {
         input_idx: port.port_idx,
         to,
     }
-}
-
-/// Default `StaticValue` for a function input — its declared
-/// `default_value` if any, otherwise the zero/empty of its `DataType`.
-pub(super) fn default_static_value(func_input: &FuncInput) -> StaticValue {
-    func_input
-        .default_value
-        .clone()
-        .unwrap_or_else(|| StaticValue::from(&func_input.data_type))
 }
 
 /// Hover / grab box scaled past the painted dot so ports are easier to
