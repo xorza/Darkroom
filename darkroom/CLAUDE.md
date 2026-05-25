@@ -51,23 +51,33 @@ click responses and must resolve before anything edits or records. One frame:
    `UiAction`s. Open mutates the tab list directly; activate/close queue
    undoable `SwitchTab` / `CloseTab` intents. After this
    `target = document.active_target()` is fixed for the rest of the frame.
-3. **sync_scene** — rebuild `Scene` (and drop transient gesture state) only if
-   the active graph changed since last frame, tracked by `App::scene_target`.
-   So a switched-to graph records in Pass A and draws its connections in Pass B
-   with no first-frame gap.
-4. **edit prepass** (`MainWindow::prepass` → `GraphUI::prepass`) — read
+3. **sync_target** (`App::sync_target`) — if the active graph changed since last
+   frame (tracked by `App::scene_target`), drop transient gesture state
+   (`reset_transient`) and flag a relayout. Does *not* rebuild — that's the next
+   step.
+4. **rebuild #1 (pre-prepass)** — `rebuild_scene(target)`, **unconditional**.
+   Runs after the whole navigation phase has settled the doc, so prepass and
+   `PortFrame` never read a stale graph (an undo/redo no longer leaves them a
+   frame behind). It's unconditional because `Scene` re-interns port names into
+   palantir's per-frame text arena, which clears each `Ui::frame` — the
+   projection must be regenerated every frame regardless. Clears `scene_dirty`.
+5. **edit prepass** (`MainWindow::prepass` → `GraphUI::prepass`) — read
    palantir's *current* input state (drag deltas, pan/zoom, connection release)
    and push `Intent`s. No drawing. Layout-changing edits (node drag, connection
    commit) are emitted here so they apply *before* the record. See the long
    comment on `GraphUI::prepass` for why connection commit must be pre-record.
-5. **drain (pre-record)** + canvas shortcuts (Esc-deselect, Ctrl+0 reset-zoom
-   → intents) + file-op chords (`menu_shortcut` → `MenuCommand`).
-6. **`rebuild_scene`** — fold the pre-record drain into the render projection.
-7. **record** (`MainWindow::frame` → `GraphUI::frame`) — draw the tree; widgets
+6. **drain (pre-record)** + canvas shortcuts (Esc-deselect, Ctrl+0 reset-zoom
+   → intents) + file-op chords (`menu_shortcut` → `MenuCommand`). The drain sets
+   `scene_dirty` if it applied anything.
+7. **rebuild #2 (pre-record)** — `rebuild_scene` again **only if `scene_dirty`**
+   (the pre-record drain changed the doc: drag, connection commit). An idle
+   frame or a bare tab switch skips it, so a tab-switch frame rebuilds once, not
+   twice.
+8. **record** (`MainWindow::frame` → `GraphUI::frame`) — draw the tree; widgets
    push more intents (clicks, edit commits) and a `MenuCommand` may surface.
-8. **drain (post-record)** + relayout request as needed.
-9. **menu side effects** — file/theme dialogs run *last*, outside the record,
-   so the blocking dialog holds no frame borrows.
+9. **drain (post-record)** + relayout request as needed.
+10. **menu side effects** — file/theme dialogs run *last*, outside the record,
+    so the blocking dialog holds no frame borrows.
 
 ### Source of truth: `Document` (`src/document.rs`)
 The serialized, undoable unit. The graph *data* is one `scenarium::Graph`

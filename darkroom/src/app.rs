@@ -48,11 +48,19 @@ pub struct App {
     pub document: Document,
     pub func_lib: FuncLib,
     pub scene: Scene,
-    /// Which graph `scene` currently reflects. `None` forces a rebuild
-    /// on the next frame. Drives the "rebuild the scene *before* prepass
-    /// when the active tab changed" path so prepass and `PortFrame` never
-    /// see a stale graph (the frame after a tab switch).
+    /// Which graph `scene` last reflected. A mismatch with the active
+    /// target means the tab changed: drop transient gesture state
+    /// (`reset_transient`) and request a relayout. `None` forces that on
+    /// the next frame (set by document replacement). It does *not* gate
+    /// the rebuild itself — the projection is rebuilt every frame
+    /// regardless (see `frame`).
     scene_target: Option<GraphRef>,
+    /// Set by `drain_intents` whenever it applies a step; consumed by the
+    /// pre-record rebuild so the record sees doc edits the pre-record
+    /// drain made (drag, connection commit). Only meaningful in the
+    /// window between the unconditional pre-prepass rebuild (which clears
+    /// it) and the pre-record rebuild.
+    scene_dirty: bool,
     pub main_window: MainWindow,
     /// Per-frame scratch buffer of pending mutations. Cleared at the
     /// top of every `frame`, filled by prepass/record/shortcut
@@ -98,6 +106,7 @@ impl palantir::App for App {
             func_lib,
             scene: Scene::default(),
             scene_target: None,
+            scene_dirty: false,
             main_window: MainWindow::default(),
             intents: Vec::new(),
             actions: Vec::new(),
@@ -128,13 +137,23 @@ impl palantir::App for App {
 
         // ── Navigation phase ─────────────────────────────────────────
         // Settle the active graph entirely from frame-top inputs
-        // (keyboard undo/redo + last-frame click responses). After this
-        // `target` is fixed for the rest of the frame, and `scene`
-        // reflects it — so a switched-to graph records in Pass A and its
-        // connections draw in Pass B (no first-frame gap).
+        // (keyboard undo/redo + last-frame click responses). `navigate`
+        // reads *last* frame's `scene` to resolve tab/chip clicks, so it
+        // must run before this frame's rebuild. After it, `target` is
+        // fixed for the rest of the frame.
         let mut relayout = self.navigate(ui);
         let target = self.document.active_target();
-        relayout |= self.sync_scene(target);
+        relayout |= self.sync_target(target);
+
+        // Rebuild the projection for this frame, after the navigation
+        // phase has fully settled the document — so prepass and
+        // `PortFrame` never read a stale graph (the old "rebuild only on
+        // tab switch" path let an undo/redo leave them a frame behind).
+        // Unconditional: `Scene` re-interns port names into palantir's
+        // per-frame text arena, which clears each `Ui::frame`, so the
+        // projection must be regenerated every frame regardless.
+        self.rebuild_scene(target);
+        self.scene_dirty = false;
 
         // ── Edit phase ───────────────────────────────────────────────
         // Prepass emits input-derived graph mutations (drag, pan/zoom,
@@ -147,9 +166,14 @@ impl palantir::App for App {
 
         let command_from_shortcut = self.menu_shortcut(ui);
 
-        // Record. Rebuild `scene` to fold in the pre-record drain (drag,
-        // etc.), then draw; widgets push more (graph-edit) intents.
-        self.rebuild_scene(target);
+        // Record. Rebuild again only if the pre-record drain actually
+        // changed the doc (drag, connection commit) — an idle frame or a
+        // bare tab switch leaves `scene_dirty` false and skips it, so the
+        // tab-switch frame rebuilds once, not twice.
+        if self.scene_dirty {
+            self.rebuild_scene(target);
+            self.scene_dirty = false;
+        }
         let ctx = AppContext {
             theme: &self.theme,
             func_lib: &self.func_lib,
@@ -216,16 +240,17 @@ impl App {
         relayout
     }
 
-    /// Make `scene` reflect `target`, rebuilding it (and dropping stale
-    /// gesture state) only when the active graph actually changed since
-    /// last frame. Keeps `PortFrame`'s offset cache, so a graph shown
-    /// again resolves its port centers immediately.
-    fn sync_scene(&mut self, target: GraphRef) -> bool {
+    /// Note a possible active-graph change: when `target` differs from
+    /// what `scene` last reflected, drop transient gesture state (so a
+    /// drag started on one graph can't bleed into another) and request a
+    /// relayout. Keeps `PortFrame`'s offset cache, so a graph shown again
+    /// resolves its port centers immediately. The rebuild itself is the
+    /// caller's unconditional one — this only reacts to the switch.
+    fn sync_target(&mut self, target: GraphRef) -> bool {
         if self.scene_target == Some(target) {
             return false;
         }
         self.main_window.reset_transient();
-        self.rebuild_scene(target);
         self.scene_target = Some(target);
         true
     }
@@ -449,8 +474,9 @@ impl App {
     /// and push the whole frame's resulting steps onto the undo stack
     /// as a single batch entry — so a gesture that emits N intents
     /// (e.g. breaker swipe deleting K nodes + unbinding M ports) is
-    /// one Cmd-Z. Returns whether any applied step needs a relayout
-    /// retry.
+    /// one Cmd-Z. Marks the scene dirty when anything applied (so the
+    /// pre-record rebuild folds the change in). Returns whether any
+    /// applied step needs a relayout retry.
     fn drain_intents(&mut self, target: GraphRef) -> bool {
         let mut relayout = false;
         let mut batch = Vec::new();
@@ -466,6 +492,7 @@ impl App {
             batch.push(step);
         }
         if !batch.is_empty() {
+            self.scene_dirty = true;
             self.action_stack.push_current(target, &batch);
         }
         relayout
