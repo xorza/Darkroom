@@ -180,6 +180,11 @@ impl NodeUI {
         // and converts `drag_delta` into a `MoveNode` applied to
         // `Document` upstream of `Scene::rebuild`.
         if response.drag_started() {
+            // Grabbing an unselected node selects it (dragging one that's
+            // already in the selection keeps the group intact).
+            if !selected {
+                out.push(select_intent(false, rcx.scene, node.id));
+            }
             self.drag_anchor = Some(DragAnchor {
                 node_id: node.id,
                 pos: node.pos,
