@@ -10,7 +10,7 @@ use crate::gui::background::CanvasBackground;
 use crate::gui::breaker::BreakerUI;
 use crate::gui::connection_ui::ConnectionUI;
 use crate::gui::new_node_ui::NewNodeUi;
-use crate::gui::node_ui::{NodeUI, node_widget_id, port_circle_wid};
+use crate::gui::node_ui::{NodeUI, RecordCtx, node_widget_id, port_circle_wid};
 use crate::gui::selection_ui::SelectionUI;
 use crate::gui::{PortKind, PortRef, UiAction};
 use crate::intent::Intent;
@@ -371,7 +371,12 @@ impl GraphUI {
                         {
                             let mut probe = breaker_ui.probe(canvas_origin);
                             connection_ui.draw(ui, ctx, scene, port_frame, &mut probe);
-                            node_ui.draw_all(ui, ctx, scene, port_frame, &mut probe, out, actions);
+                            let rcx = RecordCtx {
+                                theme: ctx.theme,
+                                scene,
+                                port_frame,
+                            };
+                            node_ui.draw_all(ui, rcx, &mut probe, out, actions);
                         }
                         breaker_ui.draw(ui, ctx);
                         connection_ui.draw_in_flight(ui, ctx, scene, port_frame, canvas_origin);

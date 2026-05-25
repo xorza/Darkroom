@@ -1,4 +1,3 @@
-use crate::app::AppContext;
 use crate::document::GraphRef;
 use crate::gui::breaker::BreakerProbe;
 use crate::gui::graph_ui::PortFrame;
@@ -17,6 +16,19 @@ use scenarium::data::StaticValue;
 use scenarium::graph::Binding;
 use scenarium::prelude::{NodeBehavior, NodeId, SubgraphRef};
 use std::collections::BTreeSet;
+
+/// Read-only context the node-draw chain threads top to bottom: the
+/// theme, the scene being rendered, and last frame's port geometry.
+/// `Copy` (all shared refs), so it's passed by value — copying it while
+/// a `&rcx.scene.nodes[..]` borrow is live is fine, which keeps
+/// `draw_all`'s node loop borrow-clean. The mutable sinks (`out`,
+/// `actions`) and the breaker `probe` stay separate params.
+#[derive(Clone, Copy)]
+pub(super) struct RecordCtx<'a> {
+    pub theme: &'a Theme,
+    pub scene: &'a Scene,
+    pub port_frame: &'a PortFrame,
+}
 
 /// Owns rendering of every graph node plus the single active drag
 /// anchor — the press-frame `pos` is snapshotted here so each
@@ -51,13 +63,10 @@ impl NodeUI {
     /// Emits an `Intent::MoveNode` for any node holding an active
     /// LMB drag on its body (port circles capture their own clicks
     /// via `Sense::CLICK` so drags don't latch off the port grabs).
-    #[allow(clippy::too_many_arguments)]
-    pub fn draw_all(
+    pub(super) fn draw_all(
         &mut self,
         ui: &mut Ui,
-        ctx: &AppContext<'_>,
-        scene: &Scene,
-        port_frame: &PortFrame,
+        rcx: RecordCtx<'_>,
         probe: &mut BreakerProbe<'_>,
         out: &mut Vec<Intent>,
         actions: &mut Vec<UiAction>,
@@ -65,32 +74,29 @@ impl NodeUI {
         if let Some(b) = probe.state.as_deref_mut() {
             b.broken_nodes.clear();
         }
-        for n in &scene.nodes {
-            self.draw_one(ui, ctx, scene, n, port_frame, probe, out, actions);
+        for n in &rcx.scene.nodes {
+            self.draw_one(ui, rcx, n, probe, out, actions);
         }
         // Drop the anchor if its target node vanished from the graph
         // (mid-drag delete). Without this, the slot would linger and
         // could fire when a fresh node reused the id.
         if let Some(a) = self.drag_anchor
-            && !scene.nodes.iter().any(|n| n.id == a.node_id)
+            && !rcx.scene.nodes.iter().any(|n| n.id == a.node_id)
         {
             self.drag_anchor = None;
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn draw_one(
         &mut self,
         ui: &mut Ui,
-        ctx: &AppContext<'_>,
-        scene: &Scene,
+        rcx: RecordCtx<'_>,
         node: &SceneNode,
-        port_frame: &PortFrame,
         probe: &mut BreakerProbe<'_>,
         out: &mut Vec<Intent>,
         actions: &mut Vec<UiAction>,
     ) {
-        let theme = ctx.theme;
+        let theme = rcx.theme;
 
         // Probe last-frame's body rect (in canvas world coords) against
         // the breaker polyline. Hit → recolor border red and flag the
@@ -123,7 +129,7 @@ impl NodeUI {
         } else {
             theme.node_border
         };
-        let selected = scene.selected_nodes.contains(&node.id);
+        let selected = rcx.scene.selected_nodes.contains(&node.id);
         // Sample modifiers before the panel borrows `ui` for the rest
         // of this scope (the click handler below can't reborrow it).
         let shift_click = ui.modifiers().shift;
@@ -158,8 +164,8 @@ impl NodeUI {
                 shadow,
             })
             .show(ui, |ui| {
-                header(ui, ctx, node, out, actions);
-                ports_row(ui, ctx, scene, node, port_frame, out);
+                header(ui, rcx, node, out, actions);
+                ports_row(ui, rcx, node, out);
             });
         let response = panel.response;
 
@@ -169,7 +175,7 @@ impl NodeUI {
         // change the set (e.g. clicking the sole selected node).
         if response.clicked() {
             let mut to = if shift_click {
-                scene.selected_nodes.clone()
+                rcx.scene.selected_nodes.clone()
             } else {
                 BTreeSet::new()
             };
@@ -254,12 +260,12 @@ const BADGE_FONT: f32 = 10.0;
 
 fn header(
     ui: &mut Ui,
-    ctx: &AppContext<'_>,
+    rcx: RecordCtx<'_>,
     node: &SceneNode,
     out: &mut Vec<Intent>,
     actions: &mut Vec<UiAction>,
 ) {
-    let theme = ctx.theme;
+    let theme = rcx.theme;
     let r = theme.header_corner_radius;
     Panel::hstack()
         .id_salt("header")
@@ -383,39 +389,24 @@ fn badge(
         .clicked()
 }
 
-fn ports_row(
-    ui: &mut Ui,
-    ctx: &AppContext<'_>,
-    scene: &Scene,
-    node: &SceneNode,
-    port_frame: &PortFrame,
-    out: &mut Vec<Intent>,
-) {
-    let theme = ctx.theme;
+fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+    let theme = rcx.theme;
     Panel::hstack()
         .id_salt("ports")
         .size((Sizing::FILL, Sizing::Hug))
         .padding(Spacing::xy(theme.port_col_pad_x, 0.0))
         .gap(theme.port_cols_gap)
         .show(ui, |ui| {
-            input_column(ui, ctx, scene, node, port_frame, out);
-            output_column(ui, ctx, scene, node, port_frame, out);
+            input_column(ui, rcx, node, out);
+            output_column(ui, rcx, node, out);
         });
 }
 
-fn input_column(
-    ui: &mut Ui,
-    ctx: &AppContext<'_>,
-    scene: &Scene,
-    node: &SceneNode,
-    port_frame: &PortFrame,
-    out: &mut Vec<Intent>,
-) {
-    let names = scene.ports(node.inputs);
-    let bindings = scene.bindings(node.input_bindings);
-    let defaults = scene.defaults(node.input_bindings);
-    let theme = ctx.theme;
-    let (idle, hover) = (theme.input_port, theme.input_port_hover);
+fn input_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+    let names = rcx.scene.ports(node.inputs);
+    let bindings = rcx.scene.bindings(node.input_bindings);
+    let defaults = rcx.scene.defaults(node.input_bindings);
+    let theme = rcx.theme;
     Panel::vstack()
         .id_salt("in")
         .size((Sizing::Fill(1.0), Sizing::Hug))
@@ -434,29 +425,16 @@ fn input_column(
                     kind: PortKind::Input,
                     port_idx: i,
                 };
-                let fill = if port_frame.is_hovered(port) {
-                    hover
-                } else {
-                    idle
-                };
                 let binding = bindings.get(i).unwrap_or(&InputBindingView::None);
                 let default = defaults.get(i).cloned();
-                input_port_row(ui, theme, port, name.clone(), fill, binding, default, out);
+                input_port_row(ui, rcx, port, name.clone(), binding, default, out);
             }
         });
 }
 
-fn output_column(
-    ui: &mut Ui,
-    ctx: &AppContext<'_>,
-    scene: &Scene,
-    node: &SceneNode,
-    port_frame: &PortFrame,
-    out: &mut Vec<Intent>,
-) {
-    let names = scene.ports(node.outputs);
-    let theme = ctx.theme;
-    let (idle, hover) = (theme.output_port, theme.output_port_hover);
+fn output_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+    let names = rcx.scene.ports(node.outputs);
+    let theme = rcx.theme;
     Panel::vstack()
         .id_salt("out")
         .size((Sizing::Fill(1.0), Sizing::Hug))
@@ -475,12 +453,7 @@ fn output_column(
                     kind: PortKind::Output,
                     port_idx: i,
                 };
-                let fill = if port_frame.is_hovered(port) {
-                    hover
-                } else {
-                    idle
-                };
-                output_port_row(ui, theme, port, name.clone(), fill, scene, out);
+                output_port_row(ui, rcx, port, name.clone(), out);
             }
         });
 }
@@ -505,13 +478,17 @@ pub fn port_circle_wid(port: PortRef) -> WidgetId {
 /// it from domain coords without threading any cache.
 fn output_port_row(
     ui: &mut Ui,
-    theme: &Theme,
+    rcx: RecordCtx<'_>,
     port: PortRef,
     name: InternedStr,
-    fill: Color,
-    scene: &Scene,
     out: &mut Vec<Intent>,
 ) {
+    let theme = rcx.theme;
+    let fill = if rcx.port_frame.is_hovered(port) {
+        theme.output_port_hover
+    } else {
+        theme.output_port
+    };
     let wid = port_circle_wid(port);
     let overhang = theme.port_radius() + theme.port_col_pad_x;
     Panel::hstack()
@@ -528,7 +505,7 @@ fn output_port_row(
     // output may feed multiple inputs, so emit one `SetInput` per
     // consumer.
     if ui.response_for(wid).double_clicked() {
-        for c in &scene.connections {
+        for c in &rcx.scene.connections {
             if c.src_node == port.node_id && c.src_port == port.port_idx {
                 out.push(set_input(
                     PortRef {
@@ -543,17 +520,21 @@ fn output_port_row(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn input_port_row(
     ui: &mut Ui,
-    theme: &Theme,
+    rcx: RecordCtx<'_>,
     port: PortRef,
     name: InternedStr,
-    fill: Color,
     binding: &InputBindingView,
     default_static: Option<StaticValue>,
     out: &mut Vec<Intent>,
 ) {
+    let theme = rcx.theme;
+    let fill = if rcx.port_frame.is_hovered(port) {
+        theme.input_port_hover
+    } else {
+        theme.input_port
+    };
     let overhang = theme.port_radius() + theme.port_col_pad_x;
     let margin = Spacing::new(-overhang, 0.0, 0.0, 0.0);
     let wid = port_circle_wid(port);
