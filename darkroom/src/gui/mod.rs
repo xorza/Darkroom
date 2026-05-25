@@ -1,15 +1,8 @@
-pub mod background;
-pub mod breaker;
-pub mod connection_ui;
-pub mod graph_ui;
+pub mod canvas;
 pub mod main_window;
 pub mod menu_bar;
-pub mod new_node_ui;
-pub mod node_ui;
-pub mod port_frame;
-pub mod selection_ui;
+pub mod node;
 pub mod tab_bar;
-pub mod value_editor;
 
 use crate::document::GraphRef;
 
@@ -53,7 +46,7 @@ impl PortKind {
 }
 
 /// One port's identity in the graph. Domain-keyed so prepass / record
-/// can derive its `WidgetId` via [`crate::gui::node_ui::port_circle_wid`]
+/// can derive its `WidgetId` via [`crate::gui::node::port_row::port_circle_wid`]
 /// without threading any cache.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PortRef {

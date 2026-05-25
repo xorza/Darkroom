@@ -2,7 +2,7 @@ use glam::Vec2;
 use palantir::{Color, ColorU8, Image, ImageFit, ImageHandle, Shape, Ui};
 
 use crate::app::AppContext;
-use crate::gui::graph_ui::outer_canvas_widget_id;
+use crate::gui::canvas::outer_canvas_widget_id;
 
 /// Target on-screen tile spacing range, as a multiple of the theme's
 /// base spacing. A power-of-2 multiplier wraps the world spacing into

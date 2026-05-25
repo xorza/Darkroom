@@ -4,7 +4,7 @@ use scenarium::graph::{Binding, InputPort};
 use scenarium::prelude::NodeId;
 
 use crate::app::AppContext;
-use crate::gui::graph_ui::{outer_canvas_widget_id, to_world};
+use crate::gui::canvas::{outer_canvas_widget_id, to_world};
 use crate::intent::Intent;
 use crate::scene::Scene;
 

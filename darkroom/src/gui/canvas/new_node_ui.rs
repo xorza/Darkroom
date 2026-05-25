@@ -6,7 +6,7 @@ use scenarium::function::Func;
 use scenarium::graph::Node;
 
 use crate::app::AppContext;
-use crate::gui::graph_ui::{outer_canvas_widget_id, to_world};
+use crate::gui::canvas::{outer_canvas_widget_id, to_world};
 use crate::intent::Intent;
 use crate::scene::Scene;
 use crate::view_node::ViewNode;

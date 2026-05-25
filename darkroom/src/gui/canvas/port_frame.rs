@@ -3,14 +3,15 @@ use std::collections::HashMap;
 use glam::Vec2;
 use palantir::{Rect, Ui};
 
-use crate::gui::graph_ui::node_ports;
-use crate::gui::node_ui::{node_widget_id, port_circle_wid};
+use crate::gui::canvas::node_ports;
+use crate::gui::node::node_widget_id;
+use crate::gui::node::port_row::port_circle_wid;
 use crate::gui::{PortKind, PortRef};
 use crate::scene::Scene;
 
 /// Per-frame snapshot of the four `ResponseState` fields downstream
 /// consumers actually read. Built once at the top of
-/// [`crate::gui::graph_ui::GraphUI::frame`] by polling [`Ui::response_for`]
+/// [`crate::gui::canvas::GraphUI::frame`] by polling [`Ui::response_for`]
 /// on each port's deterministic [`port_circle_wid`]. Sized to the four
 /// bytes-and-bits we use (`layout_rect.center()`, `rect`, two edge bools)
 /// instead of the full `ResponseState`.
@@ -135,7 +136,7 @@ impl PortFrame {
 
     /// `true` when the port should paint with its hover color —
     /// `response.hovered` plus any forced-on override.
-    pub(super) fn is_hovered(&self, p: PortRef) -> bool {
+    pub(crate) fn is_hovered(&self, p: PortRef) -> bool {
         self.map.get(&p).is_some_and(|i| i.hovered)
     }
 
