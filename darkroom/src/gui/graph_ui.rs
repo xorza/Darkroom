@@ -196,33 +196,39 @@ impl PortFrame {
 /// first, so these only fire when a gesture falls through to bare canvas.
 #[derive(Default, Debug)]
 pub struct GraphUI {
-    pub background: CanvasBackground,
-    pub port_frame: PortFrame,
-    pub node_ui: NodeUI,
-    pub breaker_ui: BreakerUI,
-    pub connection_ui: ConnectionUI,
-    pub new_node_ui: NewNodeUi,
-    pub selection_ui: SelectionUI,
+    background: CanvasBackground,
+    port_frame: PortFrame,
+    /// In-flight gesture controllers. Grouped so a tab switch can reset
+    /// *all* of them in one assignment (`clear_gestures`) without the
+    /// caller enumerating each — and so the persistent caches
+    /// (`background`, `port_frame`) sitting beside this field survive by
+    /// construction.
+    gestures: Gestures,
+}
+
+/// The resettable, one-gesture-lifetime controllers. Everything here is
+/// dropped on a tab switch; nothing here is a cross-frame cache.
+#[derive(Default, Debug)]
+struct Gestures {
+    node_ui: NodeUI,
+    breaker_ui: BreakerUI,
+    connection_ui: ConnectionUI,
+    new_node_ui: NewNodeUi,
+    selection_ui: SelectionUI,
     /// `Scene::pan` snapshot captured at the frame the active pan-drag
     /// latched. While the drag is active, `scene.pan = anchor +
-    /// drag_delta`. Lives on `GraphUI` because it's input bookkeeping
-    /// (lifetime = one gesture), not viewport state.
+    /// drag_delta`. Input bookkeeping (lifetime = one gesture), not
+    /// viewport state.
     pan_anchor: Option<Vec2>,
 }
 
 impl GraphUI {
-    /// Drop in-flight gesture state (node drag anchor, connection drag,
-    /// breaker scribble, rubber-band, spawn popup, pan anchor) while
-    /// **keeping** cross-frame caches — notably `PortFrame`'s port-offset
-    /// table, so connections still anchor on the first frame after a tab
-    /// switch. Called when the active tab changes.
+    /// Drop all in-flight gesture state while **keeping** cross-frame
+    /// caches — notably `PortFrame`'s port-offset table, so connections
+    /// still anchor on the first frame after a tab switch. Called when
+    /// the active tab changes.
     pub fn clear_gestures(&mut self) {
-        self.node_ui = NodeUI::default();
-        self.connection_ui = ConnectionUI::default();
-        self.breaker_ui = BreakerUI::default();
-        self.selection_ui = SelectionUI::default();
-        self.new_node_ui = NewNodeUi::default();
-        self.pan_anchor = None;
+        self.gestures = Gestures::default();
     }
 
     /// Pre-record pass — see
@@ -246,9 +252,11 @@ impl GraphUI {
     /// because the commit reads it.
     pub fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
         self.emit_pan_zoom(ui, scene, out);
-        self.node_ui.prepass(ui, scene, out);
+        self.gestures.node_ui.prepass(ui, scene, out);
         self.port_frame.rebuild(ui, scene);
-        self.connection_ui.apply(ui, scene, &self.port_frame, out);
+        self.gestures
+            .connection_ui
+            .apply(ui, scene, &self.port_frame, out);
     }
 
     pub fn frame(
@@ -273,38 +281,36 @@ impl GraphUI {
                 to: BTreeSet::new(),
             });
         }
-        // Rebuild `PortFrame` against the *now-current* scene. `prepass`
-        // also rebuilt it (for the connection commit), but from the
-        // scene as it stood before `Scene::rebuild` ran this frame —
-        // which, on the first frame after a tab switch, is still the
-        // previous tab's graph. Rebuilding here picks up the active
-        // graph's nodes; the offset cache then resolves their port
-        // centers even though those widgets weren't recorded last frame,
-        // so connections draw on this first frame instead of popping in
-        // one frame late. On a normal frame the two builds are identical.
-        self.port_frame.rebuild(ui, scene);
-        self.selection_ui.apply(ui, scene, out);
-        self.breaker_ui.apply(ui, scene, out);
-        self.new_node_ui.apply(ui, ctx, scene, out);
+        // `PortFrame` was already rebuilt in `prepass` against the active
+        // graph's scene — `App` rebuilds the scene *before* prepass on the
+        // frame a tab becomes active, so prepass never sees a stale graph,
+        // and the offset cache fills in port centers for nodes that hadn't
+        // recorded yet. Reuse it here; no second rebuild needed.
+        self.gestures.selection_ui.apply(ui, scene, out);
+        self.gestures.breaker_ui.apply(ui, scene, out);
+        self.gestures.new_node_ui.apply(ui, ctx, scene, out);
         // Bake the snap target into `PortFrame.hovered` so node_ui's
         // port_row picks up the hover color via the same lookup it
         // uses for ordinary mouse-over. `response.hovered` is
         // suppressed on every widget except the drag-capture owner
         // while a drag is live, so without this override the
         // snapped-but-not-captured target stays at its idle color.
-        if let Some(snap) = self.connection_ui.snap_port() {
+        if let Some(snap) = self.gestures.connection_ui.snap_port() {
             self.port_frame.set_hovered(snap);
         }
 
         let Self {
             background,
             port_frame,
-            node_ui,
-            breaker_ui,
-            connection_ui,
-            new_node_ui: _,
-            selection_ui,
-            pan_anchor: _,
+            gestures:
+                Gestures {
+                    node_ui,
+                    breaker_ui,
+                    connection_ui,
+                    new_node_ui: _,
+                    selection_ui,
+                    pan_anchor: _,
+                },
         } = self;
         let pan_val = scene.pan;
         let zoom_val = scene.zoom;
@@ -399,11 +405,14 @@ impl GraphUI {
         let mut pan = scene.pan;
         let mut zoom = scene.zoom;
         if resp.drag_started_by(PointerButton::Middle) {
-            self.pan_anchor = Some(scene.pan);
+            self.gestures.pan_anchor = Some(scene.pan);
         }
-        match (self.pan_anchor, resp.drag_delta_by(PointerButton::Middle)) {
+        match (
+            self.gestures.pan_anchor,
+            resp.drag_delta_by(PointerButton::Middle),
+        ) {
             (Some(anchor), Some(d)) => pan = anchor + d,
-            (Some(_), None) => self.pan_anchor = None,
+            (Some(_), None) => self.gestures.pan_anchor = None,
             _ => {}
         }
         if resp.scroll_pixels != Vec2::ZERO {

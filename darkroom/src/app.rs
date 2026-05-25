@@ -48,6 +48,11 @@ pub struct App {
     pub document: Document,
     pub func_lib: FuncLib,
     pub scene: Scene,
+    /// Which graph `scene` currently reflects. `None` forces a rebuild
+    /// on the next frame. Drives the "rebuild the scene *before* prepass
+    /// when the active tab changed" path so prepass and `PortFrame` never
+    /// see a stale graph (the frame after a tab switch).
+    scene_target: Option<GraphRef>,
     pub main_window: MainWindow,
     /// Per-frame scratch buffer of pending mutations. Cleared at the
     /// top of every `frame`, filled by prepass/record/shortcut
@@ -92,6 +97,7 @@ impl palantir::App for App {
             document,
             func_lib,
             scene: Scene::default(),
+            scene_target: None,
             main_window: MainWindow::default(),
             intents: Vec::new(),
             actions: Vec::new(),
@@ -117,34 +123,47 @@ impl palantir::App for App {
     fn frame(&mut self, ui: &mut Ui) {
         // ui.debug_overlay.damage_rect = true;
 
+        self.intents.clear();
+        self.actions.clear();
+
+        // 1. Navigation first, so the active target is settled for the
+        //    whole frame. Undo/redo can change `active` (it replays
+        //    `SwitchTab` steps), and the action stack resolves each
+        //    entry's own graph, so it needs no target argument.
+        let mut relayout = self.apply_undo_redo(ui);
         // A closed/deleted target can't be active; fall back to Main.
         self.ensure_valid_active();
         let target = self.document.active_target();
-        let prev_active = self.document.active;
 
-        // Prepass: each UI subtree pushes input-derived intents
-        // (drag-driven `MoveNode`, etc.) into `intents`. Drained and
-        // applied *before* `Scene::rebuild`, so Pass A's record sees
-        // the freshly-mutated doc — no Pass B retry for drag.
-        self.intents.clear();
-        self.actions.clear();
-        // Prepass only derives intents from input state; it never draws
-        // and reads everything it needs off `Scene`, so it takes neither
-        // the func lib nor the full `AppContext`.
+        // 2. If `scene` no longer reflects the active graph (tab switched
+        //    last frame, opened/closed, or an undo just moved `active`),
+        //    rebuild it and drop stale gesture state *before* prepass —
+        //    so prepass and `PortFrame` see the right graph and the
+        //    offset cache fills port centers for nodes not yet recorded.
+        if self.scene_target != Some(target) {
+            self.main_window.reset_transient();
+            self.rebuild_scene(target);
+            self.scene_target = Some(target);
+            relayout = true;
+        }
+
+        // 3. Prepass: each UI subtree pushes input-derived intents
+        //    (drag-driven `MoveNode`, etc.). Drained and applied *before*
+        //    the record's `Scene::rebuild`, so Pass A sees the mutated
+        //    doc — no Pass B retry for drag. Reads everything off `Scene`,
+        //    so it takes neither the func lib nor the full `AppContext`.
         self.main_window.prepass(ui, &self.scene, &mut self.intents);
-        let mut relayout = self.drain_intents(target);
-        relayout |= self.handle_shortcuts(ui, target);
+        relayout |= self.drain_intents(target);
+        // Canvas shortcuts that act on the active view (Esc-deselect,
+        // Ctrl+0 reset-zoom). Split from undo/redo so it can read the
+        // settled `target`.
+        relayout |= self.apply_canvas_shortcuts(ui, target);
 
         let command_from_shortcut = self.menu_shortcut(ui);
 
-        // Record. Widgets push intents derived from record-time state
-        // (button clicks, edit commits) into `intents`.
-        let graph = self
-            .document
-            .graph_for(target)
-            .expect("active tab graph exists");
-        let view = self.document.view(target).expect("active tab view exists");
-        self.scene.rebuild(graph, view, &self.func_lib);
+        // 4. Record. Rebuild `scene` to fold in this frame's pre-record
+        //    drain (drag, etc.), then draw; widgets push more intents.
+        self.rebuild_scene(target);
         let ctx = AppContext {
             theme: &self.theme,
             func_lib: &self.func_lib,
@@ -166,20 +185,15 @@ impl palantir::App for App {
             )
             .or(command_from_shortcut);
 
-        // View actions (open/close a tab) mutate the tab list directly;
-        // tab *switches* become an `Intent::SwitchTab` so they're
-        // undoable and coalescing — both land before the post-record
-        // drain below.
+        // 5. View actions (open/close mutate the tab list directly; tab
+        //    *switches* become an undoable `Intent::SwitchTab`), then the
+        //    post-record drain. Any of these can move `active`; that's
+        //    picked up at step 2 *next* frame (scene rebuild + reset), so
+        //    just mark the scene stale and request a relayout here.
         relayout |= self.apply_view_actions();
-        // Post-record drain — these intents reflect mutations that
-        // only the now-just-completed record could surface (incl. the
-        // switch intent just queued), so they warrant a relayout retry
-        // when applicable.
         relayout |= self.drain_intents(target);
-        // A changed active tab (via switch intent or open/close) swaps
-        // the rendered graph; drop stale drag/connection bookkeeping.
-        if self.document.active != prev_active {
-            self.main_window.reset_transient();
+        if self.document.active_target() != target {
+            self.scene_target = None;
             relayout = true;
         }
         if relayout {
@@ -198,40 +212,60 @@ impl palantir::App for App {
 }
 
 impl App {
-    /// Ctrl+Z / Ctrl+Shift+Z (undo/redo) and Esc-to-deselect.
+    /// Rebuild the `Scene` projection from the graph + view the `target`
+    /// points at. Centralizes the borrow split (mut `scene`, shared
+    /// `document` + `func_lib`) so the frame can rebuild at more than one
+    /// point without repeating it.
+    fn rebuild_scene(&mut self, target: GraphRef) {
+        let graph = self
+            .document
+            .graph_for(target)
+            .expect("active tab graph exists");
+        let view = self.document.view(target).expect("active tab view exists");
+        self.scene.rebuild(graph, view, &self.func_lib);
+    }
+
+    /// Ctrl+Z / Ctrl+Shift+Z. Replays undo/redo against the document
+    /// (each entry carries its own graph target). Returns whether a
+    /// relayout is needed.
     ///
     /// The chords are sampled via `key_pressed` *every frame,
     /// unconditionally* — that call both reads the press and keeps the
-    /// chord subscribed, and palantir's keyboard wake-gate only
-    /// delivers an off-focus press when its chord was subscribed last
-    /// frame (subscriptions are cleared each frame). Early-returning
-    /// before `key_pressed` would let the subscription lapse and park
-    /// presses. Focus only gates the *action*: while a widget holds
-    /// focus, Ctrl+Z must undo that widget's text and Esc must blur it,
+    /// chord subscribed, and palantir's keyboard wake-gate only delivers
+    /// an off-focus press when its chord was subscribed last frame
+    /// (subscriptions clear each frame). Focus only gates the *action*:
+    /// while a widget holds focus, Ctrl+Z must undo that widget's text,
     /// so the graph-level handling stands down.
-    fn handle_shortcuts(&mut self, ui: &mut Ui, target: GraphRef) -> bool {
+    fn apply_undo_redo(&mut self, ui: &mut Ui) -> bool {
         let undo = ui.key_pressed(UNDO_SHORTCUT);
         let redo = ui.key_pressed(REDO_SHORTCUT);
+        if ui.focused_id().is_some() {
+            return false;
+        }
+        let mut relayout = false;
+        let mut on_step = |step: &intent::UndoStep| {
+            relayout |= requires_relayout(step);
+        };
+        if undo {
+            self.action_stack.undo(&mut self.document, &mut on_step);
+        } else if redo {
+            self.action_stack.redo(&mut self.document, &mut on_step);
+        }
+        relayout
+    }
+
+    /// Esc-deselect and Ctrl+0 reset-zoom — both act on the active view,
+    /// so they take the settled `target`. Routed through the intent stack
+    /// (not a direct doc write) so they land in the undo history; the
+    /// `is_noop` filter in `drain_intents` drops them when they'd change
+    /// nothing. Chords are sampled unconditionally (see `apply_undo_redo`)
+    /// and gated by focus.
+    fn apply_canvas_shortcuts(&mut self, ui: &mut Ui, target: GraphRef) -> bool {
         let reset_zoom = ui.key_pressed(RESET_ZOOM_SHORTCUT);
         let escape = ui.escape_pressed();
         if ui.focused_id().is_some() {
             return false;
         }
-        let mut relayout = false;
-        {
-            let mut on_step = |step: &intent::UndoStep| {
-                relayout |= requires_relayout(step);
-            };
-            if undo {
-                self.action_stack.undo(&mut self.document, &mut on_step);
-            } else if redo {
-                self.action_stack.redo(&mut self.document, &mut on_step);
-            }
-        }
-        // Esc clears the selection. Routed through the intent stack
-        // (not a direct doc write) so it lands in the undo history and
-        // the batched relayout-detection path catches it like any other
-        // selection change.
         let view = self.document.view(target).expect("active tab view exists");
         let has_selection = !view.selected_nodes.is_empty();
         let pan = view.pan;
@@ -240,13 +274,10 @@ impl App {
                 to: BTreeSet::new(),
             });
         }
-        // Ctrl+0 resets zoom to 100% (keeping pan), via the same
-        // `SetViewport` intent the pan/zoom gesture uses — so it's
-        // undoable and persists. `is_noop` filters it when already 1.0.
         if reset_zoom {
             self.intents.push(Intent::SetViewport { pan, scale: 1.0 });
         }
-        relayout
+        false
     }
 
     /// Map Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S to a `MenuCommand`.
@@ -309,6 +340,9 @@ impl App {
         self.document = Document::default();
         self.action_stack.clear();
         self.intents.clear();
+        // Force a scene rebuild next frame: the active target may still
+        // be `Main`, but it now points at a different graph.
+        self.scene_target = None;
         self.set_document_path(None);
     }
 
@@ -319,6 +353,7 @@ impl App {
         self.document = doc;
         self.action_stack.clear();
         self.intents.clear();
+        self.scene_target = None;
         self.set_document_path(Some(path.to_path_buf()));
     }
 
