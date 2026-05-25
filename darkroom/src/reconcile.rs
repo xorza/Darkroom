@@ -104,10 +104,18 @@ fn plan_inputs(def: &SubgraphDef, func_lib: &FuncLib) -> Option<SidePlan<FuncInp
     let mut interface = Vec::with_capacity(used.len());
     for (new_idx, &old) in used.iter().enumerate() {
         remap.insert(old, new_idx);
-        interface.push(def.inputs.get(old).cloned().unwrap_or_else(|| {
-            let ty = infer_used_input_type(interior, func_lib, boundary, old);
-            synth_input(new_idx, ty)
-        }));
+        // Type is derived from the wired port every pass (so reconnecting
+        // to a differently-typed node updates it); the name and any
+        // authored fields are preserved. A passthrough / unwired-to-a-real
+        // port resolves to `Null` (polymorphic — see `infer_used_input_type`).
+        let data_type = infer_used_input_type(interior, func_lib, boundary, old);
+        interface.push(match def.inputs.get(old) {
+            Some(existing) => FuncInput {
+                data_type,
+                ..existing.clone()
+            },
+            None => synth_input(new_idx, data_type),
+        });
     }
     let changed = interface != def.inputs || remap.iter().any(|(o, n)| o != n);
     Some(SidePlan {
@@ -136,13 +144,14 @@ fn plan_outputs(def: &SubgraphDef, func_lib: &FuncLib) -> Option<SidePlan<FuncOu
     let mut interface = Vec::with_capacity(used.len());
     for (new_idx, &old) in used.iter().enumerate() {
         remap.insert(old, new_idx);
-        interface.push(def.outputs.get(old).cloned().unwrap_or_else(|| {
-            let ty = infer_used_output_type(interior, func_lib, boundary, old);
-            FuncOutput {
-                name: format!("output{new_idx}"),
-                data_type: ty,
-            }
-        }));
+        // Re-derive the type from the wired producer each pass; preserve
+        // the name. Passthrough / unwired-to-a-real producer → `Null`.
+        let data_type = infer_used_output_type(interior, func_lib, boundary, old);
+        let name = match def.outputs.get(old) {
+            Some(existing) => existing.name.clone(),
+            None => format!("output{new_idx}"),
+        };
+        interface.push(FuncOutput { name, data_type });
     }
     let changed = interface != def.outputs || remap.iter().any(|(o, n)| o != n);
     Some(SidePlan {
@@ -589,5 +598,86 @@ mod tests {
         let inputs = &doc.graph.subgraphs.by_key(&def_id).unwrap().inputs;
         assert_eq!(inputs.len(), 1);
         assert_eq!(inputs[0].name, "A");
+    }
+
+    #[test]
+    fn existing_port_type_is_rederived_from_wiring() {
+        // An existing slot authored with a stale type (Bool) but wired to
+        // `sum.in0` (Int): reconcile corrects the type to Int while keeping
+        // the authored name.
+        let func_lib = lib();
+        let stale = FuncInput {
+            name: "A".into(),
+            required: false,
+            data_type: DataType::Bool,
+            default_value: None,
+            value_options: Vec::new(),
+        };
+        let (mut def, sgin, sum, _sgout) = build_def(&func_lib, vec![stale], vec![]);
+        bind(&mut def.graph, sum, 0, sgin, 0); // sgin.out0 -> sum.in0
+        let def_id = def.id;
+        let mut graph = Graph::default();
+        graph.subgraphs.add(def);
+        let mut doc: Document = graph.into();
+
+        doc.reconcile_boundaries(&func_lib);
+
+        let input = &doc.graph.subgraphs.by_key(&def_id).unwrap().inputs[0];
+        assert_eq!(input.name, "A", "authored name preserved");
+        assert_eq!(
+            input.data_type,
+            DataType::Int,
+            "type re-derived from the wired func input, replacing the stale Bool"
+        );
+    }
+
+    #[test]
+    fn passthrough_ports_are_null_typed() {
+        // `SubgraphInput.out0` wired straight to `SubgraphOutput.in0` — no
+        // real func between. Both boundary ports are polymorphic, so their
+        // derived type is `Null`.
+        let func_lib = lib();
+        let sgin = Node::new(NodeKind::SubgraphInput);
+        let sgout = Node::new(NodeKind::SubgraphOutput);
+        let (sgin_id, sgout_id) = (sgin.id, sgout.id);
+        let mut interior = Graph::default();
+        interior.add(sgin);
+        interior.add(sgout);
+        // sgout.in0 <- sgin.out0
+        interior.set_input_binding(
+            InputPort {
+                node_id: sgout_id,
+                port_idx: 0,
+            },
+            Binding::Bind(OutputPort {
+                node_id: sgin_id,
+                port_idx: 0,
+            }),
+        );
+        let def = SubgraphDef {
+            id: "00000000-0000-0000-0000-0000000000dd".into(),
+            name: "Pass".into(),
+            category: "Subgraph".into(),
+            graph: interior,
+            inputs: vec![],
+            outputs: vec![],
+            events: vec![],
+        };
+        let def_id = def.id;
+        let mut graph = Graph::default();
+        graph.subgraphs.add(def);
+        let mut doc: Document = graph.into();
+
+        doc.reconcile_boundaries(&func_lib);
+
+        let def = doc.graph.subgraphs.by_key(&def_id).unwrap();
+        assert_eq!(def.inputs.len(), 1);
+        assert_eq!(def.outputs.len(), 1);
+        assert_eq!(
+            def.inputs[0].data_type,
+            DataType::Null,
+            "a passthrough subgraph input is polymorphic (Null)"
+        );
+        assert_eq!(def.outputs[0].data_type, DataType::Null);
     }
 }
