@@ -14,7 +14,7 @@ use std::ops::Range;
 use common::SerdeFormat;
 
 use crate::document::{Document, GraphRef};
-use crate::intent::{self, GestureKey, UndoStep};
+use crate::intent::{self, DocStep, GestureKey, GraphStep, UndoStep};
 
 #[derive(Debug)]
 struct UndoEntry {
@@ -191,33 +191,35 @@ impl ActionStack {
         // the same variant *and*, for `NodeDrag`, the same node id.
         let merged = match (&last_steps[0], new_step) {
             (
-                UndoStep::SetViewport {
+                UndoStep::Graph(GraphStep::SetViewport {
                     from_pan,
                     from_scale,
                     ..
-                },
-                UndoStep::SetViewport {
+                }),
+                UndoStep::Graph(GraphStep::SetViewport {
                     to_pan, to_scale, ..
-                },
-            ) => UndoStep::SetViewport {
+                }),
+            ) => UndoStep::Graph(GraphStep::SetViewport {
                 from_pan: *from_pan,
                 from_scale: *from_scale,
                 to_pan: *to_pan,
                 to_scale: *to_scale,
-            },
-            (UndoStep::MoveNode { node_id, from, .. }, UndoStep::MoveNode { to, .. }) => {
-                UndoStep::MoveNode {
-                    node_id: *node_id,
-                    from: *from,
-                    to: *to,
-                }
-            }
-            (UndoStep::SwitchTab { from, .. }, UndoStep::SwitchTab { to, .. }) => {
-                UndoStep::SwitchTab {
-                    from: *from,
-                    to: *to,
-                }
-            }
+            }),
+            (
+                UndoStep::Graph(GraphStep::MoveNode { node_id, from, .. }),
+                UndoStep::Graph(GraphStep::MoveNode { to, .. }),
+            ) => UndoStep::Graph(GraphStep::MoveNode {
+                node_id: *node_id,
+                from: *from,
+                to: *to,
+            }),
+            (
+                UndoStep::Doc(DocStep::SwitchTab { from, .. }),
+                UndoStep::Doc(DocStep::SwitchTab { to, .. }),
+            ) => UndoStep::Doc(DocStep::SwitchTab {
+                from: *from,
+                to: *to,
+            }),
             _ => return false,
         };
 
