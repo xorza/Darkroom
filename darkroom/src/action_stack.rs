@@ -8,16 +8,25 @@
 //! one deserialize — no second buffer, no copying bytes between buffers.
 //! A fresh edit discards the redoable tail (truncate from the end),
 //! appends, and trims the oldest entries off the front to honor a byte
-//! budget. One contiguous allocation regardless of entry count; no
-//! per-field churn (the naive `VecDeque<Vec<UndoStep>>` form re-allocated
-//! a `RemoveNode`'s `Node` + captured wiring on every entry).
+//! budget.
+//!
+//! Front eviction is O(1): a `head` marks the first live byte, so
+//! dropping the oldest entry just advances `head` (and pops the front of
+//! the `VecDeque` metadata) — no memmove. The dead `[0, head)` prefix is
+//! reclaimed lazily by a `drain` once it grows past the budget, so that
+//! one memmove amortizes over a whole budget of evictions. The history is
+//! still one contiguous `actions` allocation plus a single ring buffer of
+//! fixed-size metadata — no per-entry / per-field churn (the naive
+//! `VecDeque<Vec<UndoStep>>` form re-allocated a `RemoveNode`'s `Node` +
+//! captured wiring on every entry).
 
+use std::collections::VecDeque;
 use std::ops::Range;
 
 use common::SerdeFormat;
 
 use crate::document::{Document, GraphRef};
-use crate::intent::{self, DocStep, GestureKey, GraphStep, UndoStep};
+use crate::intent::{self, GestureKey, UndoStep};
 
 #[derive(Debug)]
 struct Entry {
@@ -34,20 +43,26 @@ struct Entry {
 
 #[derive(Debug)]
 pub struct ActionStack {
-    /// The single packed history buffer, oldest entry first.
+    /// The single packed history buffer. Live entries occupy
+    /// `[head, len)`; `[0, head)` is evicted-but-not-yet-reclaimed dead
+    /// prefix. Entry ranges are absolute indices into this buffer.
     actions: Vec<u8>,
+    /// First live byte of `actions`. Advanced on eviction (O(1)),
+    /// reclaimed by `trim_to_limit`'s lazy compaction.
+    head: usize,
     /// Per-entry metadata, parallel to the packed entries in `actions`.
-    entries: Vec<Entry>,
+    /// A `VecDeque` so front eviction (`pop_front`) is O(1) too.
+    entries: VecDeque<Entry>,
     /// Boundary between applied (`entries[..cursor]`) and undone
     /// (`entries[cursor..]`) entries. Undo decrements, redo increments, a
     /// new edit truncates the undone tail then appends.
     cursor: usize,
-    /// Byte budget for `actions`. When a push overflows it the oldest
-    /// entries are dropped off the front; the just-pushed entry always
-    /// survives, even when it alone exceeds the budget. Bounds history by
-    /// memory rather than entry count, since one entry (e.g. a
+    /// Live-byte budget (`len - head`). When a push overflows it the
+    /// oldest entries are dropped off the front; the just-pushed entry
+    /// always survives, even when it alone exceeds the budget. Bounds
+    /// history by memory rather than entry count, since one entry (e.g. a
     /// `RemoveNode` carrying a whole `Node` + wiring) can dwarf many small
-    /// ones.
+    /// ones. Physical `actions` peaks at ~2× this between compactions.
     max_bytes: usize,
     temp_buffer: Vec<u8>,
 }
@@ -57,7 +72,8 @@ impl ActionStack {
         assert!(max_bytes > 0, "undo history needs a positive byte budget");
         Self {
             actions: Vec::new(),
-            entries: Vec::new(),
+            head: 0,
+            entries: VecDeque::new(),
             cursor: 0,
             max_bytes,
             temp_buffer: Vec::new(),
@@ -66,6 +82,7 @@ impl ActionStack {
 
     pub fn clear(&mut self) {
         self.actions.clear();
+        self.head = 0;
         self.entries.clear();
         self.cursor = 0;
     }
@@ -98,7 +115,7 @@ impl ActionStack {
         }
 
         let range = Self::append_steps(&mut self.actions, steps, &mut self.temp_buffer);
-        self.entries.push(Entry {
+        self.entries.push_back(Entry {
             range,
             gesture_key,
             target,
@@ -115,9 +132,10 @@ impl ActionStack {
         // `revert_step` resolves the right graph+view from `target` and
         // no-ops if it's gone (subgraph deleted). The entry stays in the
         // buffer — it just moved into the redoable region.
-        let (range, target) = self.entry_at(self.cursor);
+        let entry = &self.entries[self.cursor];
+        let target = entry.target;
         let steps = Self::deserialize_steps(
-            Self::slice_bytes(&self.actions, &range),
+            Self::slice_bytes(&self.actions, &entry.range),
             &mut self.temp_buffer,
         );
         for step in steps.iter().rev() {
@@ -131,9 +149,10 @@ impl ActionStack {
         if self.cursor == self.entries.len() {
             return false;
         }
-        let (range, target) = self.entry_at(self.cursor);
+        let entry = &self.entries[self.cursor];
+        let target = entry.target;
         let steps = Self::deserialize_steps(
-            Self::slice_bytes(&self.actions, &range),
+            Self::slice_bytes(&self.actions, &entry.range),
             &mut self.temp_buffer,
         );
         for step in steps.iter() {
@@ -144,40 +163,58 @@ impl ActionStack {
         true
     }
 
-    /// `(range, target)` of entry `i`, cloned so callers can then borrow
-    /// `actions` / `temp_buffer` without holding the `entries` borrow.
-    fn entry_at(&self, i: usize) -> (Range<usize>, GraphRef) {
-        let e = &self.entries[i];
-        (e.range.clone(), e.target)
-    }
-
     /// Drop the redoable tail (`entries[cursor..]`) and its bytes — a new
     /// edit makes them unreachable. Truncations from the end, so no
-    /// memmove.
+    /// memmove. If that empties the live region (a full rewind then a
+    /// fresh edit), reclaim the dead prefix too.
     fn discard_redo(&mut self) {
         if self.cursor < self.entries.len() {
             let cut = self.entries[self.cursor].range.start;
             self.actions.truncate(cut);
             self.entries.truncate(self.cursor);
+            if self.entries.is_empty() {
+                self.actions.clear();
+                self.head = 0;
+            }
         }
     }
 
     fn trim_to_limit(&mut self) {
-        // Drop the oldest entries one at a time until the packed buffer
-        // fits the budget — minimal history loss. Always keep the last
-        // (just-pushed) entry. Runs only right after a push, where every
-        // entry is applied (`cursor == entries.len()`), so each front
-        // drop also steps the cursor down.
-        while self.entries.len() > 1 && self.actions.len() > self.max_bytes {
-            let drop_end = self.entries[0].range.end;
-            self.entries.remove(0);
-            self.actions.drain(0..drop_end);
-            for entry in &mut self.entries {
-                entry.range.start -= drop_end;
-                entry.range.end -= drop_end;
-            }
+        // Runs only right after a push, where every entry is applied — the
+        // eviction `cursor -= 1` below relies on it.
+        debug_assert_eq!(
+            self.cursor,
+            self.entries.len(),
+            "trim_to_limit expects all entries applied"
+        );
+        // Drop the oldest entries until the live region fits the budget —
+        // minimal history loss. Each drop just advances `head` past the
+        // freed bytes and pops the front metadata entry: O(1), no memmove.
+        // Always keep the last (just-pushed) entry.
+        while self.entries.len() > 1 && self.actions.len() - self.head > self.max_bytes {
+            let removed = self.entries.pop_front().unwrap();
+            self.head = removed.range.end;
             self.cursor -= 1;
         }
+        // Reclaim the dead prefix lazily, once it has grown past the
+        // budget — the one memmove amortizes over a budget of evictions,
+        // and physical `actions` stays ~2× the budget.
+        if self.head > self.max_bytes {
+            self.actions.drain(0..self.head);
+            for entry in &mut self.entries {
+                entry.range.start -= self.head;
+                entry.range.end -= self.head;
+            }
+            self.head = 0;
+        }
+        // `head` always marks the oldest live entry's start (0 when empty)
+        // — the dead prefix ends exactly where live history begins.
+        debug_assert!(
+            self.entries
+                .front()
+                .map_or(self.head == 0, |e| e.range.start == self.head),
+            "head must mark the oldest live entry's start"
+        );
     }
 
     fn try_merge_with_last(
@@ -188,7 +225,7 @@ impl ActionStack {
     ) -> bool {
         // `discard_redo` ran first, so the last entry is the last applied
         // one and its bytes are the buffer tail.
-        let Some(last) = self.entries.last() else {
+        let Some(last) = self.entries.back() else {
             return false;
         };
         if last.gesture_key != Some(key) || last.target != target {
@@ -203,51 +240,20 @@ impl ActionStack {
             "gesture-keyed entry must hold a single step"
         );
 
-        // Combine the "from" half of the existing entry with the "to"
-        // half of the incoming step. Add a match arm here when
-        // introducing a new gesture variant in `gesture_key`. The
-        // `gesture_key == Some(key)` check above guarantees the pair is
-        // the same variant *and*, for `NodeDrag`, the same node id.
-        let merged = match (&last_steps[0], new_step) {
-            (
-                UndoStep::Graph(GraphStep::SetViewport {
-                    from_pan,
-                    from_scale,
-                    ..
-                }),
-                UndoStep::Graph(GraphStep::SetViewport {
-                    to_pan, to_scale, ..
-                }),
-            ) => UndoStep::Graph(GraphStep::SetViewport {
-                from_pan: *from_pan,
-                from_scale: *from_scale,
-                to_pan: *to_pan,
-                to_scale: *to_scale,
-            }),
-            (
-                UndoStep::Graph(GraphStep::MoveNode { node_id, from, .. }),
-                UndoStep::Graph(GraphStep::MoveNode { to, .. }),
-            ) => UndoStep::Graph(GraphStep::MoveNode {
-                node_id: *node_id,
-                from: *from,
-                to: *to,
-            }),
-            (
-                UndoStep::Doc(DocStep::SwitchTab { from, .. }),
-                UndoStep::Doc(DocStep::SwitchTab { to, .. }),
-            ) => UndoStep::Doc(DocStep::SwitchTab {
-                from: *from,
-                to: *to,
-            }),
-            _ => return false,
+        // Fold the existing entry's "from" half with the incoming step's
+        // "to" half. `intent` owns the per-variant logic; the
+        // `gesture_key == Some(key)` gate above already guarantees a
+        // matching variant (and same node, for `NodeDrag`).
+        let Some(merged) = intent::coalesce(&last_steps[0], new_step) else {
+            return false;
         };
 
         // The last entry is the buffer tail — truncate it off and
         // re-append the merged step in place.
         self.actions.truncate(last_range.start);
-        self.entries.pop();
+        self.entries.pop_back();
         let range = Self::append_steps(&mut self.actions, &[merged], &mut self.temp_buffer);
-        self.entries.push(Entry {
+        self.entries.push_back(Entry {
             range,
             gesture_key: Some(key),
             target,
@@ -502,13 +508,20 @@ mod tests {
             let step = build_step(Intent::SetSelection { to }, &doc, GraphRef::Main).unwrap();
             apply_step(&step, &mut doc, GraphRef::Main);
             stack.push_current(GraphRef::Main, &[step]);
-            // The single packed buffer never exceeds the budget (entries
-            // are far smaller than 256 B, so no single-entry overflow).
+            // The *live* region stays within budget (entries are far
+            // smaller than 256 B, so no single-entry overflow)...
+            let live = stack.actions.len() - stack.head;
             assert!(
-                stack.actions.len() <= stack.max_bytes,
-                "buffer {} exceeded budget {} after push {i}",
-                stack.actions.len(),
+                live <= stack.max_bytes,
+                "live {live} exceeded budget {} after push {i}",
                 stack.max_bytes,
+            );
+            // ...and the dead-prefix reclaim keeps the physical buffer
+            // bounded (lazy compaction fires at head > budget).
+            assert!(
+                stack.actions.len() <= 2 * stack.max_bytes,
+                "physical buffer {} exceeded 2× budget after push {i}",
+                stack.actions.len(),
             );
         }
 

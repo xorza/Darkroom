@@ -703,6 +703,49 @@ pub fn gesture_key(step: &UndoStep) -> Option<GestureKey> {
     }
 }
 
+/// Fold two consecutive steps of the same gesture into one: keep `prev`'s
+/// "from" half and adopt `next`'s "to" half. `None` for any pair that
+/// doesn't coalesce. The undo stack calls this after matching
+/// [`gesture_key`] (so the pair is the same variant, and for `NodeDrag`
+/// the same node), but the match below re-checks the pairing so the fold
+/// stays self-contained — variant internals live here next to the step
+/// definitions, not in the stack. Keep this in sync with `gesture_key`.
+pub fn coalesce(prev: &UndoStep, next: &UndoStep) -> Option<UndoStep> {
+    match (prev, next) {
+        (
+            UndoStep::Graph(GraphStep::SetViewport {
+                from_pan,
+                from_scale,
+                ..
+            }),
+            UndoStep::Graph(GraphStep::SetViewport {
+                to_pan, to_scale, ..
+            }),
+        ) => Some(UndoStep::Graph(GraphStep::SetViewport {
+            from_pan: *from_pan,
+            from_scale: *from_scale,
+            to_pan: *to_pan,
+            to_scale: *to_scale,
+        })),
+        (
+            UndoStep::Graph(GraphStep::MoveNode { node_id, from, .. }),
+            UndoStep::Graph(GraphStep::MoveNode { to, .. }),
+        ) => Some(UndoStep::Graph(GraphStep::MoveNode {
+            node_id: *node_id,
+            from: *from,
+            to: *to,
+        })),
+        (
+            UndoStep::Doc(DocStep::SwitchTab { from, .. }),
+            UndoStep::Doc(DocStep::SwitchTab { to, .. }),
+        ) => Some(UndoStep::Doc(DocStep::SwitchTab {
+            from: *from,
+            to: *to,
+        })),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GestureKey {
     Viewport,
