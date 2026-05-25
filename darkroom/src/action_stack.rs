@@ -473,6 +473,94 @@ mod tests {
     }
 
     #[test]
+    fn consecutive_moves_coalesce_keeping_first_from() {
+        use glam::Vec2;
+
+        let mut doc: Document = test_graph().into();
+        let node = doc.graph.iter().next().unwrap().id;
+        let start = doc.main_view.view_nodes.by_key(&node).unwrap().pos;
+        let mut stack = ActionStack::new(1 << 20);
+
+        let drag_to = |stack: &mut ActionStack, doc: &mut Document, to: Vec2| {
+            let step =
+                build_step(Intent::MoveNode { node_id: node, to }, doc, GraphRef::Main).unwrap();
+            apply_step(&step, doc, GraphRef::Main);
+            stack.push_current(GraphRef::Main, &[step]);
+        };
+        drag_to(&mut stack, &mut doc, Vec2::new(10.0, 10.0));
+        drag_to(&mut stack, &mut doc, Vec2::new(20.0, 20.0));
+
+        // Both moves of the same node collapsed into one entry: a single
+        // undo restores the *original* position (the first `from`)...
+        assert!(stack.undo(&mut doc, &mut |_| {}));
+        assert_eq!(
+            doc.main_view.view_nodes.by_key(&node).unwrap().pos,
+            start,
+            "one undo reverts the whole drag"
+        );
+        assert!(
+            !stack.undo(&mut doc, &mut |_| {}),
+            "the drag collapsed to exactly one entry"
+        );
+        // ...and redo replays to the last `to`.
+        assert!(stack.redo(&mut doc, &mut |_| {}));
+        assert_eq!(
+            doc.main_view.view_nodes.by_key(&node).unwrap().pos,
+            Vec2::new(20.0, 20.0),
+        );
+    }
+
+    #[test]
+    fn moves_of_different_nodes_do_not_coalesce() {
+        use glam::Vec2;
+
+        let mut doc: Document = test_graph().into();
+        let a = doc.graph.iter().next().unwrap().id;
+        let b = doc.graph.iter().nth(1).unwrap().id;
+        let mut stack = ActionStack::new(1 << 20);
+
+        for (node, to) in [(a, Vec2::new(5.0, 5.0)), (b, Vec2::new(6.0, 6.0))] {
+            let step =
+                build_step(Intent::MoveNode { node_id: node, to }, &doc, GraphRef::Main).unwrap();
+            apply_step(&step, &mut doc, GraphRef::Main);
+            stack.push_current(GraphRef::Main, &[step]);
+        }
+        // Different nodes ⇒ different `NodeDrag` keys ⇒ two entries.
+        assert!(stack.undo(&mut doc, &mut |_| {}));
+        assert!(
+            stack.undo(&mut doc, &mut |_| {}),
+            "moves of distinct nodes stay separate undo entries"
+        );
+    }
+
+    #[test]
+    fn new_edit_discards_the_redo_tail() {
+        use std::collections::BTreeSet;
+
+        let mut doc: Document = test_graph().into();
+        let node = doc.graph.iter().next().unwrap().id;
+        let mut stack = ActionStack::new(1 << 20);
+
+        let select = |stack: &mut ActionStack, doc: &mut Document, set: BTreeSet<_>| {
+            let step = build_step(Intent::SetSelection { to: set }, doc, GraphRef::Main).unwrap();
+            apply_step(&step, doc, GraphRef::Main);
+            stack.push_current(GraphRef::Main, &[step]);
+        };
+        let one: BTreeSet<_> = [node].into_iter().collect();
+        select(&mut stack, &mut doc, one.clone()); // A: {} -> {node}
+        select(&mut stack, &mut doc, BTreeSet::new()); // B: {node} -> {}
+
+        // Undo B → selection back to {node}, B now redoable.
+        assert!(stack.undo(&mut doc, &mut |_| {}));
+        // A fresh edit while a redo is pending must discard it.
+        select(&mut stack, &mut doc, BTreeSet::new()); // C: {node} -> {}
+        assert!(
+            !stack.redo(&mut doc, &mut |_| {}),
+            "a new edit invalidates the redoable tail"
+        );
+    }
+
+    #[test]
     fn consecutive_closes_do_not_coalesce() {
         // Each close is its own undo entry — two closes need two undos.
         let mut doc = doc_with_distinct_tabs();
