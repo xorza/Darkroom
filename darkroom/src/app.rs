@@ -453,9 +453,17 @@ impl App {
         relayout
     }
 
-    /// Drop tabs whose graph vanished and clamp `active` into range, so
-    /// the frame always has a live target to render. `Main` always
-    /// survives (`graph_for(Main)` is infallible).
+    /// Keep the tab list renderable: drop tabs whose graph vanished,
+    /// seed any `Local` tab that's missing its view metadata, and clamp
+    /// `active` into range — so `rebuild_scene` always resolves a live
+    /// graph *and* view. `Main` always survives (`graph_for(Main)` is
+    /// infallible and `main_view` always exists).
+    ///
+    /// The view-seeding covers a desync hazard: `tabs` and `sub_views`
+    /// are independent serialized fields, so a deserialized (or
+    /// hand-edited) document can carry a `Local` tab with no matching
+    /// `sub_views` entry. Seeding it here recovers gracefully instead of
+    /// panicking on the `view(target).expect(..)` in `rebuild_scene`.
     fn ensure_valid_active(&mut self) {
         // Common case: every tab still resolves — touch nothing (no
         // per-frame allocation). Only rebuild the list when a tab's
@@ -472,6 +480,27 @@ impl App {
                 GraphRef::Main => true,
                 GraphRef::Local(id) => graph.subgraphs.by_key(id).is_some(),
             });
+        }
+        // Seed views for any `Local` tab missing one. Guarded by `any`
+        // so the common (all-seeded) case allocates nothing.
+        if self
+            .document
+            .tabs
+            .iter()
+            .any(|t| matches!(t, GraphRef::Local(id) if !self.document.sub_views.contains_key(id)))
+        {
+            let missing: Vec<SubgraphId> = self
+                .document
+                .tabs
+                .iter()
+                .filter_map(|t| match t {
+                    GraphRef::Local(id) if !self.document.sub_views.contains_key(id) => Some(*id),
+                    _ => None,
+                })
+                .collect();
+            for id in missing {
+                self.ensure_sub_view(id);
+            }
         }
         if self.document.active >= self.document.tabs.len() {
             self.document.active = self.document.tabs.len() - 1;
