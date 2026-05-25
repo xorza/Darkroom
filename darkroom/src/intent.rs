@@ -54,6 +54,16 @@ pub enum Intent {
         view_node: ViewNode,
         node: Node,
     },
+    /// Paste a set of pre-cloned nodes (fresh ids, offset positions) plus
+    /// the connections *among* them, and select the copies. The caller
+    /// (Ctrl+D duplicate) builds the clones + remapped wiring; `build_step`
+    /// only captures the prior selection. One undo entry for the whole
+    /// duplicate.
+    DuplicateNodes {
+        nodes: Vec<(ViewNode, Node)>,
+        bindings: Vec<(InputPort, Binding)>,
+        subscriptions: Vec<Subscription>,
+    },
     RemoveNode {
         node_id: NodeId,
     },
@@ -141,6 +151,18 @@ pub enum GraphStep {
     /// Pure creation: the "from" state is "node absent", which is
     /// implicit — undo just removes the node by id.
     AddNode { view_node: ViewNode, node: Node },
+    /// Add a batch of nodes + their internal wiring and swap the
+    /// selection to the copies. Undo removes every added node (which
+    /// cascade-drops the added bindings/subscriptions) and restores
+    /// `from_selection`. `nodes` carry fresh ids, so there's no prior
+    /// state to capture beyond the selection.
+    DuplicateNodes {
+        nodes: Vec<(ViewNode, Node)>,
+        bindings: Vec<(InputPort, Binding)>,
+        subscriptions: Vec<Subscription>,
+        from_selection: BTreeSet<NodeId>,
+        to_selection: BTreeSet<NodeId>,
+    },
     /// Pre-removal state lives entirely on the step: every reference
     /// into the doomed node, so undo can fully restore it.
     RemoveNode {
@@ -255,6 +277,7 @@ impl GraphStep {
     fn is_noop(&self) -> bool {
         match self {
             GraphStep::AddNode { .. } | GraphStep::RemoveNode { .. } => false,
+            GraphStep::DuplicateNodes { nodes, .. } => nodes.is_empty(),
             GraphStep::MoveNode { from, to, .. } => from == to,
             GraphStep::RenameNode { from, to, .. } => from == to,
             GraphStep::SetInput { from, to, .. } => from == to,
@@ -347,6 +370,20 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             unreachable!("document-global intents handled above")
         }
         Intent::AddNode { view_node, node } => GraphStep::AddNode { view_node, node },
+        Intent::DuplicateNodes {
+            nodes,
+            bindings,
+            subscriptions,
+        } => {
+            let to_selection = nodes.iter().map(|(_, node)| node.id).collect();
+            GraphStep::DuplicateNodes {
+                nodes,
+                bindings,
+                subscriptions,
+                from_selection: view.selected_nodes.clone(),
+                to_selection,
+            }
+        }
         Intent::RemoveNode { node_id } => {
             let view_node = view.view_nodes.by_key(&node_id)?.clone();
             let node = graph.by_id(&node_id)?.clone();
@@ -466,6 +503,25 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             scope.graph.add(node.clone());
             scope.view.view_nodes.add(view_node.clone());
         }
+        GraphStep::DuplicateNodes {
+            nodes,
+            bindings,
+            subscriptions,
+            to_selection,
+            ..
+        } => {
+            for (view_node, node) in nodes {
+                scope.graph.add(node.clone());
+                scope.view.view_nodes.add(view_node.clone());
+            }
+            for (port, binding) in bindings {
+                scope.graph.set_input_binding(*port, binding.clone());
+            }
+            for s in subscriptions {
+                scope.graph.subscribe(s.emitter, s.event_idx, s.subscriber);
+            }
+            scope.view.selected_nodes = to_selection.clone();
+        }
         GraphStep::RemoveNode { node, .. } => {
             assert!(
                 scope.graph.by_id(&node.id).is_some(),
@@ -562,6 +618,19 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::AddNode { node, .. } => {
             scope.remove_node(&node.id);
         }
+        GraphStep::DuplicateNodes {
+            nodes,
+            from_selection,
+            ..
+        } => {
+            // Removing each added node cascade-drops the bindings and
+            // subscriptions that referenced it, so the batch's wiring goes
+            // with it — only the selection needs explicit restoring.
+            for (_, node) in nodes {
+                scope.remove_node(&node.id);
+            }
+            scope.view.selected_nodes = from_selection.clone();
+        }
         GraphStep::RemoveNode {
             view_node,
             node,
@@ -650,6 +719,7 @@ pub fn requires_relayout(step: &UndoStep) -> bool {
         ) => true,
         UndoStep::Graph(g) => match g {
             GraphStep::AddNode { .. }
+            | GraphStep::DuplicateNodes { .. }
             | GraphStep::RemoveNode { .. }
             | GraphStep::MoveNode { .. }
             | GraphStep::RenameNode { .. } => true,
@@ -692,6 +762,7 @@ pub fn gesture_key(step: &UndoStep) -> Option<GestureKey> {
         // in a row shouldn't collapse into one Ctrl+Z.
         UndoStep::Graph(
             GraphStep::AddNode { .. }
+            | GraphStep::DuplicateNodes { .. }
             | GraphStep::RemoveNode { .. }
             | GraphStep::RenameNode { .. }
             | GraphStep::SetInput { .. }

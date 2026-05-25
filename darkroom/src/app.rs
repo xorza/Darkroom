@@ -30,6 +30,7 @@ const OPEN_SHORTCUT: Shortcut = Shortcut::ctrl('O');
 const SAVE_SHORTCUT: Shortcut = Shortcut::ctrl('S');
 const SAVE_AS_SHORTCUT: Shortcut = Shortcut::ctrl_shift('S');
 const RESET_ZOOM_SHORTCUT: Shortcut = Shortcut::ctrl('0');
+const DUPLICATE_SHORTCUT: Shortcut = Shortcut::ctrl('D');
 
 /// Byte budget for the undo history's packed buffer (~1 MiB). Bounds
 /// memory rather than entry count — a single large edit can't be
@@ -322,6 +323,7 @@ impl App {
     fn apply_canvas_shortcuts(&mut self, ui: &mut Ui, target: GraphRef) -> bool {
         let reset_zoom = ui.key_pressed(RESET_ZOOM_SHORTCUT);
         let escape = ui.escape_pressed();
+        let duplicate = ui.key_pressed(DUPLICATE_SHORTCUT);
         if ui.focused_id().is_some() {
             return false;
         }
@@ -335,6 +337,9 @@ impl App {
         }
         if reset_zoom {
             self.intents.push(Intent::SetViewport { pan, scale: 1.0 });
+        }
+        if duplicate && let Some(intent) = self.document.duplicate_intent(target) {
+            self.intents.push(intent);
         }
         false
     }

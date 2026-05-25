@@ -1,12 +1,18 @@
 use anyhow::{Result, bail};
 use common::{SerdeFormat, is_debug, key_index_vec::KeyIndexVec};
 use glam::Vec2;
+use scenarium::graph::{Binding, InputPort, OutputPort, Subscription};
 use scenarium::prelude::{FuncLib, Graph as CoreGraph, NodeId, SubgraphDef, SubgraphId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 
+use crate::intent::Intent;
 use crate::model::ViewNode;
 use crate::reconcile::reconcile_def;
+
+/// World-space offset applied to duplicated nodes so the copies don't
+/// land exactly on top of their originals.
+const DUPLICATE_OFFSET: Vec2 = Vec2::new(32.0, 32.0);
 
 /// Which graph an editor tab is pointed at. `Main` is the document's
 /// root graph; `Local(id)` is a local subgraph def's interior graph
@@ -311,6 +317,76 @@ impl Document {
         id
     }
 
+    /// Build a `DuplicateNodes` intent for `target`'s current selection:
+    /// clone each selected node with a fresh id and an offset position,
+    /// copy const-value bindings, and recreate the data + event
+    /// connections whose *both* endpoints are selected (wires to
+    /// unselected nodes are dropped). `None` when nothing is selected or
+    /// the target doesn't resolve.
+    pub fn duplicate_intent(&self, target: GraphRef) -> Option<Intent> {
+        let EditScopeRef { graph, view } = self.scope(target)?;
+        if view.selected_nodes.is_empty() {
+            return None;
+        }
+
+        let mut id_map: HashMap<NodeId, NodeId> = HashMap::new();
+        let mut nodes = Vec::new();
+        for old_id in &view.selected_nodes {
+            let Some(node) = graph.by_id(old_id) else {
+                continue;
+            };
+            let new_id = NodeId::unique();
+            id_map.insert(*old_id, new_id);
+            let mut clone = node.clone();
+            clone.id = new_id;
+            let pos = view.view_nodes.by_key(old_id).unwrap().pos + DUPLICATE_OFFSET;
+            nodes.push((ViewNode { id: new_id, pos }, clone));
+        }
+
+        // Each selected node's own input ports. Const/None copy verbatim;
+        // a `Bind` survives only if its source is also selected (remapped
+        // to the clone) — otherwise the wire is external and dropped.
+        let mut bindings = Vec::new();
+        for old_id in &view.selected_nodes {
+            for (port, binding) in graph.bindings_touching(*old_id) {
+                if port.node_id != *old_id {
+                    continue;
+                }
+                let new_binding = match binding {
+                    Binding::Bind(src) => match id_map.get(&src.node_id) {
+                        Some(&new_src) => Binding::Bind(OutputPort {
+                            node_id: new_src,
+                            port_idx: src.port_idx,
+                        }),
+                        None => continue,
+                    },
+                    other => other,
+                };
+                bindings.push((InputPort::new(id_map[old_id], port.port_idx), new_binding));
+            }
+        }
+
+        // Event subscriptions internal to the selection.
+        let mut subscriptions = Vec::new();
+        for s in graph.subscriptions() {
+            if let (Some(&emitter), Some(&subscriber)) =
+                (id_map.get(&s.emitter), id_map.get(&s.subscriber))
+            {
+                subscriptions.push(Subscription {
+                    emitter,
+                    event_idx: s.event_idx,
+                    subscriber,
+                });
+            }
+        }
+
+        Some(Intent::DuplicateNodes {
+            nodes,
+            bindings,
+            subscriptions,
+        })
+    }
+
     /// Current name of a subgraph interface port (`inputs[idx]` for
     /// `Input`, `outputs[idx]` for `Output`), or `None` if the def /
     /// side / index doesn't resolve.
@@ -440,6 +516,7 @@ impl From<CoreGraph> for Document {
 mod tests {
     use super::*;
     use scenarium::graph::{Node, NodeKind};
+    use scenarium::prelude::{FuncId, StaticValue};
     use scenarium::subgraph::SubgraphRef;
     use scenarium::testing::test_graph as core_test_graph;
 
@@ -498,6 +575,97 @@ mod tests {
         let b = doc.import_subgraph(leaf_def(id, "x"));
         assert_ne!(a, b, "each import gets its own id");
         assert_eq!(doc.graph.subgraphs.len(), 2, "no silent overwrite");
+    }
+
+    /// Add a bare `Func`-kind node to `doc`'s root graph + main view at
+    /// `pos`, returning its id.
+    fn add_node_at(doc: &mut Document, pos: Vec2) -> NodeId {
+        let node = Node::new(NodeKind::Func(FuncId::unique()));
+        let id = node.id;
+        doc.graph.add(node);
+        doc.main_view.view_nodes.add(ViewNode { id, pos });
+        id
+    }
+
+    #[test]
+    fn duplicate_intent_clones_internal_wiring_and_drops_external() {
+        // a -> b (internal edge, both selected); c -> b (external, c not
+        // selected). b also has a Const on input 1. Selecting {a, b} must
+        // duplicate a' and b', keep a'->b' and the Const, drop c->b.
+        let mut doc = Document::default();
+        let a = add_node_at(&mut doc, Vec2::new(0.0, 0.0));
+        let b = add_node_at(&mut doc, Vec2::new(100.0, 0.0));
+        let c = add_node_at(&mut doc, Vec2::new(0.0, 100.0));
+        doc.graph
+            .set_input_binding(InputPort::new(b, 0), (a, 0).into());
+        doc.graph.set_input_binding(
+            InputPort::new(b, 1),
+            Binding::Const(StaticValue::from(7i64)),
+        );
+        doc.graph
+            .set_input_binding(InputPort::new(b, 2), (c, 0).into());
+        doc.main_view.selected_nodes = [a, b].into_iter().collect();
+
+        let Some(Intent::DuplicateNodes {
+            nodes,
+            bindings,
+            subscriptions,
+        }) = doc.duplicate_intent(GraphRef::Main)
+        else {
+            panic!("expected a DuplicateNodes intent");
+        };
+
+        assert_eq!(nodes.len(), 2, "both selected nodes cloned");
+        assert!(subscriptions.is_empty());
+        // Fresh ids, offset positions.
+        let new_ids: BTreeSet<NodeId> = nodes.iter().map(|(_, n)| n.id).collect();
+        assert!(
+            new_ids.is_disjoint(&doc.main_view.selected_nodes),
+            "clones get fresh ids"
+        );
+        let a_clone = nodes
+            .iter()
+            .find(|(vn, _)| vn.pos == Vec2::new(0.0, 0.0) + DUPLICATE_OFFSET)
+            .map(|(_, n)| n.id)
+            .expect("a's clone offset from its origin");
+
+        // Exactly two bindings survive: the internal a'->b' edge and the
+        // Const; the external c->b edge (input 2) is gone.
+        assert_eq!(bindings.len(), 2);
+        let b_clone = nodes
+            .iter()
+            .find(|(vn, _)| vn.pos == Vec2::new(100.0, 0.0) + DUPLICATE_OFFSET)
+            .map(|(_, n)| n.id)
+            .unwrap();
+        let internal = bindings
+            .iter()
+            .find(|(port, _)| port.port_idx == 0)
+            .expect("a'->b' edge present");
+        assert_eq!(internal.0.node_id, b_clone, "edge sinks into b's clone");
+        match &internal.1 {
+            Binding::Bind(src) => {
+                assert_eq!(src.node_id, a_clone, "remapped to a's clone");
+                assert_eq!(src.port_idx, 0);
+            }
+            other => panic!("expected Bind, got {other:?}"),
+        }
+        assert!(
+            bindings
+                .iter()
+                .any(|(port, bind)| port.port_idx == 1 && matches!(bind, Binding::Const(_))),
+            "const binding copied"
+        );
+        assert!(
+            !bindings.iter().any(|(port, _)| port.port_idx == 2),
+            "external edge dropped"
+        );
+    }
+
+    #[test]
+    fn duplicate_intent_none_without_selection() {
+        let mut doc = Document::default();
+        add_node_at(&mut doc, Vec2::ZERO);
+        assert!(doc.duplicate_intent(GraphRef::Main).is_none());
     }
 
     #[test]
