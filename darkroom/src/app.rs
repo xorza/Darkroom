@@ -133,7 +133,7 @@ impl palantir::App for App {
         let mut relayout = self.apply_undo_redo(ui);
         // A closed/deleted target can't be active; fall back to Main.
         self.ensure_valid_active();
-        let target = self.document.active_target();
+        let mut target = self.document.active_target();
 
         // 2. If `scene` no longer reflects the active graph (tab switched
         //    last frame, opened/closed, or an undo just moved `active`),
@@ -148,12 +148,26 @@ impl palantir::App for App {
         }
 
         // 3. Prepass: each UI subtree pushes input-derived intents
-        //    (drag-driven `MoveNode`, etc.). Drained and applied *before*
-        //    the record's `Scene::rebuild`, so Pass A sees the mutated
-        //    doc — no Pass B retry for drag. Reads everything off `Scene`,
-        //    so it takes neither the func lib nor the full `AppContext`.
-        self.main_window.prepass(ui, &self.scene, &mut self.intents);
+        //    (drag-driven `MoveNode`, etc.) and surfaces the open-subgraph
+        //    navigation (from last frame's chip response). Reads
+        //    everything off `Scene`, so it takes neither the func lib nor
+        //    the full `AppContext`.
+        self.main_window
+            .prepass(ui, &self.scene, &mut self.intents, &mut self.actions);
         relayout |= self.drain_intents(target);
+        // Apply the open *before* the record so a first-opened subgraph
+        // records this present (Pass A) and its connections draw in the
+        // relayout pass (Pass B) — no first-frame gap. If it moved the
+        // active tab, re-settle and rebuild the scene for the record.
+        relayout |= self.apply_view_actions();
+        if self.document.active_target() != target {
+            self.ensure_valid_active();
+            target = self.document.active_target();
+            self.main_window.reset_transient();
+            self.rebuild_scene(target);
+            self.scene_target = Some(target);
+            relayout = true;
+        }
         // Canvas shortcuts that act on the active view (Esc-deselect,
         // Ctrl+0 reset-zoom). Split from undo/redo so it can read the
         // settled `target`.

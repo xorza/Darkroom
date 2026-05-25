@@ -25,8 +25,14 @@ impl MainWindow {
     /// it derives from palantir's current-frame input state (drag
     /// deltas, etc.). `App::frame` drains and applies these before
     /// `Scene::rebuild`, so the record phase sees the latest doc.
-    pub fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
-        self.graph_ui.prepass(ui, scene, out);
+    pub fn prepass(
+        &mut self,
+        ui: &mut Ui,
+        scene: &Scene,
+        out: &mut Vec<Intent>,
+        actions: &mut Vec<UiAction>,
+    ) {
+        self.graph_ui.prepass(ui, scene, out, actions);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -63,7 +69,7 @@ impl MainWindow {
                         command = menu_bar::show(ui, host);
                     });
                 tab_bar::show(ui, ctx.theme, tabs, active, actions);
-                self.graph_ui.frame(ui, ctx, scene, out, actions);
+                self.graph_ui.frame(ui, ctx, scene, out);
             });
 
         if take(&mut self.first_frame) {

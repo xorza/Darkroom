@@ -79,7 +79,13 @@ fn tab_chip(
         .child_align(Align::v(VAlign::Center))
         .background(background)
         .show(ui, |ui| {
-            Text::new(tab.text.clone()).show(ui);
+            // Match the menu bar's smaller (13px) label scale.
+            Text::new(tab.text.clone())
+                .style(TextStyle {
+                    font_size_px: 13.0,
+                    ..ui.theme.text
+                })
+                .show(ui);
             if tab.closable {
                 let close_wid = WidgetId::from_hash(("graph.tab_close", index));
                 // Hover comes from last frame's response; paint a subtle

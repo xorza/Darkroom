@@ -69,13 +69,12 @@ impl NodeUI {
         rcx: RecordCtx<'_>,
         probe: &mut BreakerProbe<'_>,
         out: &mut Vec<Intent>,
-        actions: &mut Vec<UiAction>,
     ) {
         if let Some(b) = probe.state.as_deref_mut() {
             b.broken_nodes.clear();
         }
         for n in &rcx.scene.nodes {
-            self.draw_one(ui, rcx, n, probe, out, actions);
+            self.draw_one(ui, rcx, n, probe, out);
         }
         // Drop the anchor if its target node vanished from the graph
         // (mid-drag delete). Without this, the slot would linger and
@@ -94,7 +93,6 @@ impl NodeUI {
         node: &SceneNode,
         probe: &mut BreakerProbe<'_>,
         out: &mut Vec<Intent>,
-        actions: &mut Vec<UiAction>,
     ) {
         let theme = rcx.theme;
 
@@ -164,7 +162,7 @@ impl NodeUI {
                 shadow,
             })
             .show(ui, |ui| {
-                header(ui, rcx, node, out, actions);
+                header(ui, rcx, node, out);
                 ports_row(ui, rcx, node, out);
             });
         let response = panel.response;
@@ -246,6 +244,22 @@ impl NodeUI {
     }
 }
 
+/// Prepass scan: surface an `OpenGraph` for any subgraph node whose `S`
+/// chip was clicked (read from last frame's response). Detecting the
+/// open here — *before* the record — lets `App` switch the active graph
+/// ahead of Pass A, so the subgraph records a pass earlier and its
+/// connections draw with no first-frame gap. Linked subgraphs aren't
+/// editable targets yet, so only `Local` opens.
+pub(super) fn emit_subgraph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAction>) {
+    for n in &scene.nodes {
+        if let Some(SubgraphRef::Local(id)) = n.subgraph
+            && ui.response_for(subgraph_badge_wid(n.id)).clicked
+        {
+            actions.push(UiAction::OpenGraph(GraphRef::Local(id)));
+        }
+    }
+}
+
 /// Stable widget id for the node's outer body panel. Derived from
 /// the domain `NodeId` so `response_for` can probe last-frame's
 /// arranged rect (used by the connection breaker's body-hit test)
@@ -258,13 +272,7 @@ pub(super) fn node_widget_id(node_id: NodeId) -> WidgetId {
 const BADGE_SIZE: f32 = 15.0;
 const BADGE_FONT: f32 = 10.0;
 
-fn header(
-    ui: &mut Ui,
-    rcx: RecordCtx<'_>,
-    node: &SceneNode,
-    out: &mut Vec<Intent>,
-    actions: &mut Vec<UiAction>,
-) {
+fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
     let r = theme.header_corner_radius;
     Panel::hstack()
@@ -285,10 +293,13 @@ fn header(
                 .id_salt("badge_spacer")
                 .size((Sizing::FILL, Sizing::Hug))
                 .show(ui, |_| {});
-            // Subgraph chip is the open-in-tab affordance: clicking it
-            // opens (or focuses) the local subgraph's interior tab.
-            if let Some(sref) = node.subgraph {
-                let opened = badge(
+            // Subgraph chip is the open-in-tab affordance. We only *draw*
+            // it here (with its stable id); the click is read next frame
+            // in `emit_subgraph_opens` (prepass) so the open applies
+            // before the record — letting the subgraph record a pass
+            // earlier and its connections draw with no first-frame gap.
+            if node.subgraph.is_some() {
+                badge(
                     ui,
                     theme,
                     "badge_sg",
@@ -297,9 +308,6 @@ fn header(
                     true,
                     Some(subgraph_badge_wid(node.id)),
                 );
-                if opened && let SubgraphRef::Local(id) = sref {
-                    actions.push(UiAction::OpenGraph(GraphRef::Local(id)));
-                }
             }
             if node.terminal {
                 badge(ui, theme, "badge_t", "T", theme.badge_terminal, true, None);

@@ -10,7 +10,9 @@ use crate::gui::background::CanvasBackground;
 use crate::gui::breaker::BreakerUI;
 use crate::gui::connection_ui::ConnectionUI;
 use crate::gui::new_node_ui::NewNodeUi;
-use crate::gui::node_ui::{NodeUI, RecordCtx, node_widget_id, port_circle_wid};
+use crate::gui::node_ui::{
+    NodeUI, RecordCtx, emit_subgraph_opens, node_widget_id, port_circle_wid,
+};
 use crate::gui::selection_ui::SelectionUI;
 use crate::gui::{PortKind, PortRef, UiAction};
 use crate::intent::Intent;
@@ -250,13 +252,23 @@ impl GraphUI {
     /// resized layout, so Pass B anchors the curve correctly with no
     /// extra frame. `PortFrame` is rebuilt here (and reused by `frame`)
     /// because the commit reads it.
-    pub fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
+    pub fn prepass(
+        &mut self,
+        ui: &mut Ui,
+        scene: &Scene,
+        out: &mut Vec<Intent>,
+        actions: &mut Vec<UiAction>,
+    ) {
         self.emit_pan_zoom(ui, scene, out);
         self.gestures.node_ui.prepass(ui, scene, out);
         self.port_frame.rebuild(ui, scene);
         self.gestures
             .connection_ui
             .apply(ui, scene, &self.port_frame, out);
+        // Open-in-tab is a layout-affecting navigation: surface it here
+        // (from last frame's chip response) so `App` applies it before
+        // the record.
+        emit_subgraph_opens(ui, scene, actions);
     }
 
     pub fn frame(
@@ -265,7 +277,6 @@ impl GraphUI {
         ctx: &AppContext<'_>,
         scene: &mut Scene,
         out: &mut Vec<Intent>,
-        actions: &mut Vec<UiAction>,
     ) {
         // Pan/zoom was already folded into the document in `prepass`
         // and mirrored into `scene` by `Scene::rebuild`, so the
@@ -376,7 +387,7 @@ impl GraphUI {
                                 scene,
                                 port_frame,
                             };
-                            node_ui.draw_all(ui, rcx, &mut probe, out, actions);
+                            node_ui.draw_all(ui, rcx, &mut probe, out);
                         }
                         breaker_ui.draw(ui, ctx);
                         connection_ui.draw_in_flight(ui, ctx, scene, port_frame, canvas_origin);
