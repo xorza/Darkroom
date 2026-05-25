@@ -4,11 +4,9 @@ use std::path::{Path, PathBuf};
 use glam::Vec2;
 use lens::ImageFuncLib;
 use palantir::{HostHandle, Shortcut, Ui};
-use scenarium::data::StaticValue;
 use scenarium::elements::basic_funclib::BasicFuncLib;
 use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
-use scenarium::graph::Binding;
-use scenarium::prelude::{FuncLib, InputPort, NodeId};
+use scenarium::prelude::FuncLib;
 use scenarium::testing::{TestFuncHooks, test_func_lib, test_graph};
 
 use crate::action_stack::ActionStack;
@@ -56,7 +54,7 @@ pub struct App {
     intents: Vec<Intent>,
     pub action_stack: ActionStack,
     pub theme: Theme,
-    pub host_handle: Option<HostHandle>,
+    pub host_handle: HostHandle,
     /// Last successfully loaded/saved file path. `Save…` and `Load…`
     /// preopen the dialog at this directory so a session that touches
     /// many files in the same folder doesn't re-navigate each time.
@@ -67,17 +65,21 @@ pub struct App {
     pub config: AppConfig,
 }
 
-impl App {
-    pub fn new() -> Self {
+impl palantir::App for App {
+    /// Build the app before the first frame: assemble the func lib +
+    /// seed document, then restore persisted config (saved theme +
+    /// last document) and push the resolved palantir theme onto `Ui`.
+    /// Restore failures degrade silently to defaults — a missing or
+    /// corrupt config, or a deleted document, must not block launch.
+    fn new(ui: &mut Ui, handle: HostHandle) -> Self {
         let mut document: Document = test_graph().into();
-        seed_const_bindings(&mut document);
         document.auto_layout(220.0, 110.0, Vec2::new(40.0, 40.0));
         let mut func_lib = FuncLib::default();
         func_lib.merge(test_func_lib(TestFuncHooks::default()));
         func_lib.merge(BasicFuncLib::default());
         func_lib.merge(WorkerEventsFuncLib::default());
         func_lib.merge(ImageFuncLib::default());
-        Self {
+        let mut app = Self {
             document,
             func_lib,
             scene: Scene::default(),
@@ -85,33 +87,23 @@ impl App {
             intents: Vec::new(),
             action_stack: ActionStack::new(UNDO_HISTORY),
             theme: Theme::default(),
-            host_handle: None,
+            host_handle: handle,
             current_path: None,
             config: AppConfig::default(),
+        };
+        app.config = AppConfig::load();
+        if let Some(name) = app.config.theme_name.clone() {
+            app.load_theme_file(&AppConfig::theme_path(&name));
         }
-    }
-
-    /// One-shot startup wiring, run from `WinitHost::with_setup`
-    /// before the first frame. Loads the persisted config, restores
-    /// the saved theme + document, and pushes the resolved palantir
-    /// theme onto `Ui`. Failures degrade silently to defaults — a
-    /// missing/corrupt config or a deleted document must not block
-    /// launch.
-    pub fn startup(&mut self, ui: &mut Ui) {
-        self.config = AppConfig::load();
-        if let Some(name) = self.config.theme_name.clone() {
-            self.load_theme_file(&AppConfig::theme_path(&name));
-        }
-        if let Some(path) = self.config.document_path.clone() {
-            self.load_document(&path);
+        if let Some(path) = app.config.document_path.clone() {
+            app.load_document(&path);
         }
         // Resolved theme (default, or whatever the config restored)
         // onto the Ui so palantir widgets paint correctly frame 1.
-        ui.theme = self.theme.palantir_theme.clone();
+        ui.theme = app.theme.palantir_theme.clone();
+        app
     }
-}
 
-impl palantir::App for App {
     fn frame(&mut self, ui: &mut Ui) {
         // ui.debug_overlay.damage_rect = true;
 
@@ -141,7 +133,7 @@ impl palantir::App for App {
         let host = self.host_handle.clone();
         let command = self
             .main_window
-            .frame(ui, &ctx, &mut self.scene, host.as_ref(), &mut self.intents)
+            .frame(ui, &ctx, &mut self.scene, Some(&host), &mut self.intents)
             .or(command_from_shortcut);
 
         // Post-record drain — these intents reflect mutations that
@@ -162,27 +154,6 @@ impl palantir::App for App {
             self.handle_menu_command(ui, command);
             ui.request_relayout();
         }
-    }
-}
-
-/// Replace a few of `test_graph`'s `Binding::Bind` inputs with
-/// `Binding::Const(..)` so the inline static-value editor has
-/// something to render on first launch. Targets the `mult` and `sum`
-/// nodes by their well-known ids from `scenarium::testing::test_graph`.
-fn seed_const_bindings(doc: &mut Document) {
-    let mult_id: NodeId = "579ae1d6-10a3-4906-8948-135cb7d7508b".into();
-    let sum_id: NodeId = "999c4d37-e0eb-4856-be3f-ad2090c84d8c".into();
-    if doc.graph.by_id(&mult_id).is_some() {
-        doc.graph.set_input_binding(
-            InputPort::new(mult_id, 1),
-            Binding::Const(StaticValue::Int(7)),
-        );
-    }
-    if doc.graph.by_id(&sum_id).is_some() {
-        doc.graph.set_input_binding(
-            InputPort::new(sum_id, 1),
-            Binding::Const(StaticValue::Float(2.5)),
-        );
     }
 }
 

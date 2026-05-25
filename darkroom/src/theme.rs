@@ -15,11 +15,11 @@ const DEFAULT_THEME_TOML: &str = include_str!("../assets/ayu-graphite.toml");
 /// geometry as well as color.
 ///
 /// Also owns the palantir [`palantir::Theme`] this app wants on its
-/// `Ui`. The `WinitHost::with_setup` hook in `main` copies
-/// `palantir_theme` into `ui.theme` once before the first frame, so
-/// palantir-side widgets (buttons, text edits, menus, scrollbars)
-/// read from the same source. Tweak fields on `theme.palantir_theme`
-/// before constructing the host to override palantir's defaults.
+/// `Ui`. [`crate::app::App::new`] copies `palantir_theme` into
+/// `ui.theme` once before the first frame, so palantir-side widgets
+/// (buttons, text edits, menus, scrollbars) read from the same source.
+/// Tweak fields on `theme.palantir_theme` during construction to
+/// override palantir's defaults.
 ///
 /// Serializable so the whole bundle (palantir palette + darkroom
 /// layout + colors) round-trips through Rhai for the Theme → Load /

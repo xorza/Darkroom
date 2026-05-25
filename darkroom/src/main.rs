@@ -16,13 +16,5 @@ use palantir::{WinitHost, WinitHostConfig};
 use crate::app::App;
 
 fn main() {
-    WinitHost::new(WinitHostConfig::new("darkroom"), App::new())
-        .with_setup(|ui, app, handle| {
-            app.host_handle = Some(handle.clone());
-            // Restore persisted config (theme + last document) and
-            // push the resolved palantir theme onto `Ui` before the
-            // first frame.
-            app.startup(ui);
-        })
-        .run();
+    WinitHost::<App>::new(WinitHostConfig::new("darkroom")).run();
 }
