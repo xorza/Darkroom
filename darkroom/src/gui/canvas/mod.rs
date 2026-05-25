@@ -11,6 +11,7 @@ use palantir::{Background, Configure, Panel, Sense, Sizing, TranslateScale, Ui, 
 use std::collections::BTreeSet;
 
 use crate::app::AppContext;
+use crate::edit::intent::Intent;
 use crate::gui::canvas::background::CanvasBackground;
 use crate::gui::canvas::breaker::BreakerUI;
 use crate::gui::canvas::connection_ui::ConnectionUI;
@@ -19,7 +20,6 @@ use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::node::{NodeUI, RecordCtx, emit_port_disconnects};
 use crate::gui::{PortKind, PortRef};
-use crate::intent::Intent;
 use crate::scene::{Scene, SceneNode};
 
 /// Canvas-level UI scope: owns the port-widget-id cache, the

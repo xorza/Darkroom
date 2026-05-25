@@ -34,9 +34,31 @@ Run the ignored one-shot asset generator after changing the default look:
 - **`common`** — `SerdeFormat`, `serialize`/`deserialize`, `KeyIndexVec`.
 - **`lens`** — `ImageFuncLib` (image-processing node library).
 
+## Module layout (`src/`)
+
+Root holds the entry point plus the two most-referenced central types;
+everything else is grouped by responsibility:
+
+- **`main.rs`** — module decls + `WinitHost` bootstrap.
+- **`scene.rs`** — the render projection (see below).
+- **`theme.rs`** — the visual/layout `Theme` bundle (see below).
+- **`app/`** — `mod.rs` (the `App`, per-frame pipeline, and `AppContext`),
+  `shortcuts.rs` (keyboard chords → intents/commands), `commands.rs` (menu
+  side effects: file/theme/subgraph load-save, run *outside* the record).
+- **`document/`** — `mod.rs` (the `Document` model + `GraphRef` / `GraphView` /
+  `EditScope`), `view_node.rs`, `sample_graph.rs` (startup demo graph).
+- **`edit/`** — the mutation machinery: `intent.rs` (intents + undo steps),
+  `action_stack/` (packed undo history), `reconcile/` (derived subgraph-
+  interface reconciliation).
+- **`io/`** — `persistence.rs` (file-dialog + serde I/O), `config.rs`
+  (`AppConfig` session state).
+- **`gui/`** — the UI tree: `canvas/` (the graph canvas + its gestures/
+  overlays), `node/` (the node-body widget cluster), plus `main_window`,
+  `menu_bar`, `tab_bar` chrome.
+
 ## Architecture: the per-frame pipeline
 
-Everything hangs off `App::frame` (`src/app.rs`). darkroom is immediate-mode
+Everything hangs off `App::frame` (`src/app/mod.rs`). darkroom is immediate-mode
 but routes **all** graph mutations through an intent/undo layer rather than
 mutating the document inline. The frame splits into a **navigation phase**
 (settle *which* graph is active) and an **edit phase** (mutate that graph),
@@ -79,7 +101,7 @@ click responses and must resolve before anything edits or records. One frame:
 10. **menu side effects** — file/theme dialogs run *last*, outside the record,
     so the blocking dialog holds no frame borrows.
 
-### Source of truth: `Document` (`src/document.rs`)
+### Source of truth: `Document` (`src/document/mod.rs`)
 The serialized, undoable unit. The graph *data* is one `scenarium::Graph`
 (`graph`), which already nests local subgraph defs and their interior graphs.
 Everything else is editor view-state, split per graph:
@@ -104,7 +126,7 @@ Everything else is editor view-state, split per graph:
 `FuncLib` is *not* here — it's runtime-owned on `App` (built from builtins at
 startup, shared across documents).
 
-### Intent / undo layer (`src/intent.rs`, `src/action_stack.rs`)
+### Intent / undo layer (`src/edit/intent.rs`, `src/edit/action_stack/`)
 - Every mutation is scoped to a `GraphRef` target. `Intent` = forward-only
   "set X to Y". `build_step(intent, &doc, target)` reads the pre-mutation
   snapshot (via `scope`) and folds both halves into one self-contained
@@ -135,21 +157,32 @@ active `GraphView` each rebuild; the gesture writes back via intents, never
 directly.
 
 ### GUI tree (`src/gui/`)
-`MainWindow` (zstack: graph behind a floating menu bar + tab strip) → `GraphUI`
-(the canvas) owns the sub-controllers: `NodeUI` (node bodies + ports + drag;
-also emits subgraph-open requests via `emit_subgraph_opens`), `ConnectionUI`
-(wires + in-flight drag + snap), `BreakerUI` (RMB/Cmd+LMB scribble that severs
-wires / deletes nodes), `NewNodeUi` (right-click spawn popup), `value_editor`
-(inline `Const` editing). `tab_bar` renders the open-tab strip and emits
-`UiAction`s; `menu_bar` returns `MenuCommand`s; `App` performs the side effects.
-`AppContext` (in `app.rs`) threads the active `Theme` + `FuncLib` down the tree.
+Top level is the chrome: `MainWindow` (zstack: graph behind a floating menu
+bar + tab strip), `menu_bar` (returns `MenuCommand`s), and `tab_bar` (renders
+the open-tab strip and emits `UiAction`s). The rest splits into two subsystems:
+
+- **`gui/canvas/`** — `mod.rs` is `GraphUI`, the canvas scope. It owns the
+  resettable gesture sub-controllers — `ConnectionUI` (wires + in-flight drag +
+  snap), `BreakerUI` (RMB/Cmd+LMB scribble that severs wires / deletes nodes),
+  `NewNodeUi` (right-click spawn popup), `SelectionUI` (rubber-band) — plus the
+  cross-frame caches `background` (dotted backdrop) and `port_frame`.
+  `pan_zoom` holds the viewport gesture + zoom math (unit-tested).
+- **`gui/node/`** — the node-body widget: `mod.rs` is `NodeUI` (node bodies +
+  drag; also emits subgraph-open requests via `emit_subgraph_opens` and
+  port-disconnect double-clicks via `emit_port_disconnects`), with sub-widgets
+  `header` (title + `S`/`T`/`C` badges), `port_row` (the two port columns +
+  circles + binding menu), `port_rename` (inline boundary-port rename editor),
+  and `value_editor` (inline `Const` editing).
+
+`App` performs the menu / `UiAction` side effects. `AppContext` (in
+`app/mod.rs`) threads the active `Theme` + `FuncLib` down the tree.
 
 Key cross-cutting mechanisms:
 - **Deterministic widget ids.** Node/port widgets derive their `WidgetId` from
   domain coords (`node_widget_id(id)`, `port_circle_wid(PortRef)`) so any pass
   can `ui.response_for(id)` without threading a cache. The two canvases use
   `WidgetId::auto_stable()`.
-- **`PortFrame`** (`graph_ui.rs`) — per-frame snapshot of each port's
+- **`PortFrame`** (`gui/canvas/port_frame.rs`) — per-frame snapshot of each port's
   geometry/hover/drag state, polled from last frame's responses. **Rebuilt in
   `prepass` and reused in `frame`** (the connection commit reads it); the order
   is an invariant enforced by call sequence, not types. Port centers are
@@ -158,7 +191,7 @@ Key cross-cutting mechanisms:
 - **`BreakerProbe`** threads the active breaker state into node/connection
   draws so intersection tests run inline; hits drain into intents on release.
 
-### Persistence (`src/persistence.rs`, `src/config.rs`, `src/theme.rs`)
+### Persistence (`src/io/persistence.rs`, `src/io/config.rs`, `src/theme.rs`)
 `persistence` is pure path⇄type I/O (dialogs + serde), no `App`/undo/config
 coupling — `App` orchestrates. Documents round-trip through any `SerdeFormat`
 (Rhai is canonical). `Theme` bundles darkroom colors/layout *and* the nested

@@ -12,11 +12,11 @@ use scenarium::data::StaticValue;
 use scenarium::graph::Binding;
 
 use crate::document::BoundarySide;
+use crate::edit::intent::Intent;
 use crate::gui::node::port_rename::port_label;
 use crate::gui::node::value_editor;
 use crate::gui::node::{RecordCtx, set_input};
 use crate::gui::{PortKind, PortRef};
-use crate::intent::Intent;
 use crate::scene::{InputBindingView, SceneNode};
 use crate::theme::Theme;
 

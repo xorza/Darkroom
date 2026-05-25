@@ -1,6 +1,6 @@
 use super::*;
 use crate::document::Document;
-use crate::intent::{Intent, apply_step, build_step};
+use crate::edit::intent::{Intent, apply_step, build_step};
 use scenarium::prelude::SubgraphId;
 use scenarium::testing::test_graph;
 
@@ -451,7 +451,7 @@ fn doc_with_def() -> (Document, GraphRef) {
 #[test]
 fn rename_boundary_port_applies_and_reverts() {
     use crate::document::BoundarySide;
-    use crate::intent::revert_step;
+    use crate::edit::intent::revert_step;
 
     let (mut doc, target) = doc_with_def();
     let GraphRef::Local(def_id) = target else {
@@ -543,7 +543,7 @@ fn rename_boundary_port_dropped_off_local_target_or_oob() {
 #[test]
 fn rename_undo_survives_interface_compaction() {
     use crate::document::BoundarySide;
-    use crate::intent::revert_step;
+    use crate::edit::intent::revert_step;
     use scenarium::data::DataType;
     use scenarium::function::FuncInput;
     use scenarium::prelude::{Graph, SubgraphDef};

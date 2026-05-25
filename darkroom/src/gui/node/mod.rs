@@ -4,13 +4,13 @@ pub mod port_row;
 pub mod value_editor;
 
 use crate::document::GraphRef;
+use crate::edit::intent::Intent;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::node_ports;
 use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::node::header::{header, subgraph_badge_wid};
 use crate::gui::node::port_row::{port_circle_wid, ports_row};
 use crate::gui::{PortKind, PortRef, UiAction};
-use crate::intent::Intent;
 use crate::scene::{Scene, SceneNode};
 use crate::theme::Theme;
 use glam::Vec2;

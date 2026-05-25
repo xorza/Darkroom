@@ -5,9 +5,9 @@ use palantir::{Corners, PointerButton, Rect, Shape, Stroke, Ui};
 use scenarium::prelude::NodeId;
 
 use crate::app::AppContext;
+use crate::edit::intent::Intent;
 use crate::gui::canvas::{outer_canvas_widget_id, to_world};
 use crate::gui::node::node_widget_id;
-use crate::intent::Intent;
 use crate::scene::Scene;
 
 /// Rubber-band multi-selection. A plain left-drag on empty canvas

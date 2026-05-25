@@ -8,8 +8,8 @@ use common::FloatExt;
 use glam::Vec2;
 use palantir::{PointerButton, Ui};
 
+use crate::edit::intent::Intent;
 use crate::gui::canvas::outer_canvas_widget_id;
-use crate::intent::Intent;
 use crate::scene::Scene;
 
 /// Bounds on the canvas zoom factor. Pinch / scroll-zoom deltas

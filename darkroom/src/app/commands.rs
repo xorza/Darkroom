@@ -10,10 +10,10 @@ use std::path::{Path, PathBuf};
 use palantir::Ui;
 
 use crate::app::App;
-use crate::config::AppConfig;
 use crate::document::Document;
 use crate::gui::menu_bar::MenuCommand;
-use crate::persistence;
+use crate::io::config::AppConfig;
+use crate::io::persistence;
 
 impl App {
     pub(crate) fn handle_menu_command(&mut self, ui: &mut Ui, command: MenuCommand) {

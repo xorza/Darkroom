@@ -8,8 +8,8 @@ use palantir::{
 };
 use scenarium::prelude::{NodeBehavior, NodeId};
 
+use crate::edit::intent::Intent;
 use crate::gui::node::RecordCtx;
-use crate::intent::Intent;
 use crate::scene::SceneNode;
 use crate::theme::Theme;
 

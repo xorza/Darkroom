@@ -11,9 +11,9 @@ use palantir::{
 };
 
 use crate::document::BoundarySide;
+use crate::edit::intent::Intent;
 use crate::gui::PortRef;
 use crate::gui::node::{RecordCtx, select_intent};
-use crate::intent::Intent;
 
 /// Character cap for a boundary-port name in the inline rename editor.
 const PORT_NAME_MAX_CHARS: usize = 24;

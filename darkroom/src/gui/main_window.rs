@@ -3,13 +3,13 @@ use std::mem::take;
 use palantir::{Background, Configure, HostHandle, Panel, Sizing, Ui};
 
 use crate::app::AppContext;
+use crate::edit::intent::Intent;
 use crate::gui::UiAction;
 use crate::gui::canvas::GraphUI;
 use crate::gui::menu_bar;
 use crate::gui::menu_bar::MenuCommand;
 use crate::gui::node::emit_subgraph_opens;
 use crate::gui::tab_bar::{self, TabLabel};
-use crate::intent::Intent;
 use crate::scene::Scene;
 
 /// Top of darkroom's UI tree. Owns every persistent UI scope (right

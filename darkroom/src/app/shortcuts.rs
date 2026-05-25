@@ -9,8 +9,8 @@ use palantir::{Key, Shortcut, Ui};
 
 use crate::app::App;
 use crate::document::GraphRef;
+use crate::edit::intent::{self, Intent, requires_relayout};
 use crate::gui::menu_bar::MenuCommand;
-use crate::intent::{self, Intent, requires_relayout};
 
 const UNDO_SHORTCUT: Shortcut = Shortcut::ctrl('Z');
 const REDO_SHORTCUT: Shortcut = Shortcut::ctrl_shift('Z');

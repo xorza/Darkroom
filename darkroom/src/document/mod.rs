@@ -1,3 +1,6 @@
+pub mod sample_graph;
+pub mod view_node;
+
 use anyhow::{Result, bail};
 use common::{SerdeFormat, is_debug, key_index_vec::KeyIndexVec};
 use glam::Vec2;
@@ -7,9 +10,9 @@ use scenarium::subgraph::SubgraphRef;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 
-use crate::intent::Intent;
-use crate::reconcile::reconcile_def;
-use crate::view_node::ViewNode;
+use crate::document::view_node::ViewNode;
+use crate::edit::intent::Intent;
+use crate::edit::reconcile::reconcile_def;
 
 /// World-space offset applied to duplicated nodes so the copies don't
 /// land exactly on top of their originals.
@@ -606,7 +609,7 @@ impl Document {
 
     /// Reconcile every local subgraph def's interface (`inputs`/`outputs`)
     /// against its interior wiring — derived state, recomputed like the
-    /// scene rather than stored as undo steps. See `crate::reconcile` for
+    /// scene rather than stored as undo steps. See `crate::edit::reconcile` for
     /// the per-def logic and rationale (placeholder ports, compaction).
     pub fn reconcile_boundaries(&mut self, func_lib: &FuncLib) {
         if self.graph.subgraphs.is_empty() {

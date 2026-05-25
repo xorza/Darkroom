@@ -6,10 +6,10 @@ use scenarium::function::Func;
 use scenarium::graph::Node;
 
 use crate::app::AppContext;
+use crate::document::view_node::ViewNode;
+use crate::edit::intent::Intent;
 use crate::gui::canvas::{outer_canvas_widget_id, to_world};
-use crate::intent::Intent;
 use crate::scene::Scene;
-use crate::view_node::ViewNode;
 
 /// Right-click-on-canvas → popup that lists every `Func` in
 /// `AppContext::func_lib` grouped by category. Clicking an entry emits

@@ -4,8 +4,8 @@ use scenarium::graph::{Binding, InputPort};
 use scenarium::prelude::NodeId;
 
 use crate::app::AppContext;
+use crate::edit::intent::Intent;
 use crate::gui::canvas::{outer_canvas_widget_id, to_world};
-use crate::intent::Intent;
 use crate::scene::Scene;
 
 /// Per-frame bundle threaded through node and connection rendering.

@@ -28,8 +28,8 @@ use scenarium::graph::{Binding, InputPort, Node, NodeBehavior, NodeId, Subscript
 use scenarium::prelude::SubgraphId;
 use serde::{Deserialize, Serialize};
 
+use crate::document::view_node::ViewNode;
 use crate::document::{BoundarySide, Document, EditScope, EditScopeRef, GraphRef};
-use crate::view_node::ViewNode;
 
 /// What the caller wants to change. Forward-only — no `from` fields.
 /// Each variant says "set X to Y"; the consumer captures the previous

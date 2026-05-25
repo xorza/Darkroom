@@ -1,15 +1,10 @@
-mod action_stack;
 mod app;
-mod config;
 mod document;
+mod edit;
 mod gui;
-mod intent;
-mod persistence;
-mod reconcile;
-mod sample_graph;
+mod io;
 mod scene;
 mod theme;
-mod view_node;
 
 use palantir::{WinitHost, WinitHostConfig};
 

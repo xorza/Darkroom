@@ -7,14 +7,14 @@ use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
 use scenarium::prelude::FuncLib;
 use scenarium::testing::{TestFuncHooks, test_func_lib};
 
-use crate::action_stack::ActionStack;
-use crate::config::AppConfig;
+use crate::document::sample_graph::sample_graph;
 use crate::document::{Document, GraphRef};
+use crate::edit::action_stack::ActionStack;
+use crate::edit::intent::{Intent, apply_step, build_step, requires_relayout};
 use crate::gui::UiAction;
 use crate::gui::main_window::MainWindow;
 use crate::gui::tab_bar::TabLabel;
-use crate::intent::{Intent, apply_step, build_step, requires_relayout};
-use crate::sample_graph::sample_graph;
+use crate::io::config::AppConfig;
 use crate::scene::Scene;
 use crate::theme::Theme;
 
