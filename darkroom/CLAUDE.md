@@ -48,9 +48,9 @@ click responses and must resolve before anything edits or records. One frame:
 2. **navigate** (`App::navigate`) — apply keyboard undo/redo (which can replay
    a `SwitchTab`), then `MainWindow::scan_navigation` surfaces tab
    activate/close + subgraph-open clicks off last frame's responses as
-   `UiAction`s. Open/close mutate the tab list directly; activate queues an
-   undoable `SwitchTab` intent. After this `target = document.active_target()`
-   is fixed for the rest of the frame.
+   `UiAction`s. Open mutates the tab list directly; activate/close queue
+   undoable `SwitchTab` / `CloseTab` intents. After this
+   `target = document.active_target()` is fixed for the rest of the frame.
 3. **sync_scene** — rebuild `Scene` (and drop transient gesture state) only if
    the active graph changed since last frame, tracked by `App::scene_target`.
    So a switched-to graph records in Pass A and draws its connections in Pass B
@@ -105,8 +105,10 @@ startup, shared across documents).
   `Vec<Vec<UndoStep>>`. Each batch records its `target` so undo/redo re-resolve
   the right graph+view. Consecutive same-`GestureKey` *and* same-target steps
   coalesce in place (a node drag = many `MoveNode` intents → one undo entry).
-- **`UiAction`** (`gui/mod.rs`) is the non-undoable sibling of `Intent`: it
-  changes *what the editor shows* (open/activate/close tab), not the document.
+- **`UiAction`** (`gui/mod.rs`) is the navigation-request transport from the
+  UI layer to `App`: `App` turns `ActivateTab`/`CloseTab` into undoable
+  `SwitchTab`/`CloseTab` intents, while `OpenGraph` mutates the tab list
+  directly (opening isn't undoable; switching and closing are).
 - Note: `RenameNode` and `SetEventConnection` variants exist with full handling
   but are **not yet emitted by any UI** — staged ports from the deprecated
   editor. They don't trip dead-code lints because the serde derives reference

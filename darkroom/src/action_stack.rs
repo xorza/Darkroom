@@ -284,6 +284,7 @@ mod tests {
     use super::*;
     use crate::document::Document;
     use crate::intent::{Intent, apply_step, build_step};
+    use scenarium::prelude::SubgraphId;
     use scenarium::testing::test_graph;
 
     /// A document with three tab slots so `active` can move 0→1→2. The
@@ -362,5 +363,111 @@ mod tests {
         // merge into the first because the selection edit broke the run.
         stack.undo(&mut doc, &mut |_| {});
         assert_eq!(doc.active, 1, "switch after an edit is its own entry");
+    }
+
+    /// Three tabs with distinct `Local` targets so a close at a given
+    /// index is observable in the surviving tab list. `CloseTab` is
+    /// document-global (it only touches `tabs`/`active`, never resolves a
+    /// graph), so the fabricated subgraph ids need no backing graph.
+    fn doc_with_distinct_tabs() -> Document {
+        let a: SubgraphId = "11111111-1111-1111-1111-111111111111".into();
+        let b: SubgraphId = "22222222-2222-2222-2222-222222222222".into();
+        let mut doc: Document = test_graph().into();
+        doc.tabs = vec![GraphRef::Main, GraphRef::Local(a), GraphRef::Local(b)];
+        doc.active = 0;
+        doc
+    }
+
+    /// Commit a tab close through the real intent path and push it.
+    /// Returns `false` when `build_step` dropped the intent (Main /
+    /// out-of-range), so callers can assert the guard.
+    fn close_at(stack: &mut ActionStack, doc: &mut Document, index: usize) -> bool {
+        let Some(step) = build_step(Intent::CloseTab { index }, doc, GraphRef::Main) else {
+            return false;
+        };
+        apply_step(&step, doc, GraphRef::Main);
+        stack.push_current(GraphRef::Main, &[step]);
+        true
+    }
+
+    #[test]
+    fn close_is_dropped_for_main_or_out_of_range() {
+        let mut doc = doc_with_distinct_tabs();
+        let mut stack = ActionStack::new(100);
+        // Main (index 0) is never closable; index 3 is past the end.
+        assert!(!close_at(&mut stack, &mut doc, 0), "Main must not close");
+        assert!(!close_at(&mut stack, &mut doc, 3), "OOB index must drop");
+        assert_eq!(doc.tabs.len(), 3, "no tab removed");
+    }
+
+    #[test]
+    fn close_then_undo_restores_tab_and_active() {
+        let mut doc = doc_with_distinct_tabs();
+        let b = doc.tabs[2];
+        let mut stack = ActionStack::new(100);
+        doc.active = 2; // viewing the tab we're about to close
+
+        assert!(close_at(&mut stack, &mut doc, 2));
+        // Tab gone; active clamped from 2 into the new range [0, 1].
+        assert_eq!(doc.tabs.len(), 2);
+        assert_eq!(doc.active, 1, "active clamped after closing the last tab");
+
+        // Undo reinserts the closed tab at its index and restores active.
+        assert!(stack.undo(&mut doc, &mut |_| {}));
+        assert_eq!(doc.tabs.len(), 3);
+        assert_eq!(doc.tabs[2], b, "closed tab restored at its original index");
+        assert_eq!(doc.active, 2, "active restored to the pre-close value");
+    }
+
+    #[test]
+    fn close_left_of_cursor_shifts_active_down() {
+        // Closing a tab to the left of the active one shifts the cursor
+        // left by one so it keeps pointing at the same graph.
+        let mut doc = doc_with_distinct_tabs();
+        let b = doc.tabs[2];
+        let mut stack = ActionStack::new(100);
+        doc.active = 2;
+
+        assert!(close_at(&mut stack, &mut doc, 1));
+        assert_eq!(doc.tabs.len(), 2);
+        // Old index 2 (`b`) is now at index 1, and active followed it.
+        assert_eq!(doc.active, 1);
+        assert_eq!(doc.tabs[1], b);
+
+        stack.undo(&mut doc, &mut |_| {});
+        assert_eq!(doc.active, 2, "active restored across the reinsert");
+        assert_eq!(doc.tabs.len(), 3);
+    }
+
+    #[test]
+    fn close_redo_replays() {
+        let mut doc = doc_with_distinct_tabs();
+        let mut stack = ActionStack::new(100);
+        doc.active = 1;
+
+        close_at(&mut stack, &mut doc, 1);
+        assert_eq!(doc.tabs.len(), 2);
+        stack.undo(&mut doc, &mut |_| {});
+        assert_eq!(doc.tabs.len(), 3);
+
+        assert!(stack.redo(&mut doc, &mut |_| {}));
+        assert_eq!(doc.tabs.len(), 2, "redo re-closes the tab");
+        assert_eq!(doc.active, 1);
+    }
+
+    #[test]
+    fn consecutive_closes_do_not_coalesce() {
+        // Each close is its own undo entry — two closes need two undos.
+        let mut doc = doc_with_distinct_tabs();
+        let mut stack = ActionStack::new(100);
+
+        close_at(&mut stack, &mut doc, 2);
+        close_at(&mut stack, &mut doc, 1);
+        assert_eq!(doc.tabs.len(), 1, "both subgraph tabs closed");
+
+        stack.undo(&mut doc, &mut |_| {});
+        assert_eq!(doc.tabs.len(), 2, "first undo restores one tab");
+        stack.undo(&mut doc, &mut |_| {});
+        assert_eq!(doc.tabs.len(), 3, "second undo restores the other");
     }
 }

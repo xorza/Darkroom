@@ -12,10 +12,12 @@ pub mod value_editor;
 
 use crate::document::GraphRef;
 
-/// A view-state request raised during the record pass and applied by
-/// `App` after the frame. Distinct from `Intent` because none of these
-/// mutate the document — they change *what the editor shows* (which tab
-/// is active, which graphs are open), so they're not undoable.
+/// A navigation request surfaced from last frame's responses (tab/chip
+/// clicks) and applied by `App` in the navigation phase. Decoupled from
+/// `Intent` so the UI layer doesn't need to know which requests are
+/// undoable: `App` translates `ActivateTab`/`CloseTab` into the undoable
+/// `Intent::SwitchTab`/`CloseTab`, while `OpenGraph` mutates the tab list
+/// directly (opening a tab isn't undoable — only switching/closing is).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UiAction {
     /// Open `target` in a tab (or focus its existing tab).

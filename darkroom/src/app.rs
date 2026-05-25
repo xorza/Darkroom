@@ -205,9 +205,10 @@ impl App {
         let tab_count = self.document.tabs.len();
         self.main_window
             .scan_navigation(ui, &self.scene, tab_count, &mut self.actions);
-        // Open/close mutate the tab list directly; activate queues an
-        // undoable `SwitchTab` intent — drain it (the step is
-        // graph-agnostic, so the target passed here doesn't matter).
+        // Open mutates the tab list directly; activate/close queue
+        // undoable `SwitchTab` / `CloseTab` intents — drain them (both
+        // steps are graph-agnostic, so the target passed here doesn't
+        // matter).
         relayout |= self.apply_view_actions();
         relayout |= self.drain_intents(self.document.active_target());
         // A closed/deleted target can't be active; fall back to Main.
@@ -551,10 +552,11 @@ impl App {
             .collect()
     }
 
-    /// Apply the record pass's view-state requests. Open/close mutate
-    /// the tab list directly (not undoable); activate is queued as an
-    /// `Intent::SwitchTab` so it joins the undo history. Returns whether
-    /// a relayout is needed.
+    /// Apply the record pass's view-state requests. Open mutates the tab
+    /// list directly (not undoable); activate and close are queued as
+    /// `Intent::SwitchTab` / `Intent::CloseTab` so they join the undo
+    /// history. Returns whether a relayout is needed (the queued intents'
+    /// relayout is decided later, when they drain).
     fn apply_view_actions(&mut self) -> bool {
         let mut relayout = false;
         for action in std::mem::take(&mut self.actions) {
@@ -563,7 +565,9 @@ impl App {
                 UiAction::ActivateTab(index) => {
                     self.intents.push(Intent::SwitchTab { to: index });
                 }
-                UiAction::CloseTab(index) => relayout |= self.close_tab(index),
+                UiAction::CloseTab(index) => {
+                    self.intents.push(Intent::CloseTab { index });
+                }
             }
         }
         relayout
@@ -605,21 +609,6 @@ impl App {
             view
         };
         self.document.sub_views.insert(id, view);
-        true
-    }
-
-    /// Close the tab at `index` (the `Main` tab at 0 is never closable).
-    /// Keeps the subgraph's view metadata so reopening restores its
-    /// layout. Returns whether anything changed.
-    fn close_tab(&mut self, index: usize) -> bool {
-        if index == 0 || index >= self.document.tabs.len() {
-            return false;
-        }
-        self.document.tabs.remove(index);
-        if self.document.active > index {
-            self.document.active -= 1;
-        }
-        self.document.active = self.document.active.min(self.document.tabs.len() - 1);
         true
     }
 }

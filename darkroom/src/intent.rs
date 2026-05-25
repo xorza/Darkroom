@@ -97,6 +97,13 @@ pub enum Intent {
     SwitchTab {
         to: usize,
     },
+    /// Close the tab at `index`. Document-global; undoable so a closed
+    /// subgraph tab can be reopened with Ctrl+Z. The `Main` tab (index 0)
+    /// is never closable — `build_step` drops the intent if it targets it
+    /// or an out-of-range index.
+    CloseTab {
+        index: usize,
+    },
 }
 
 /// Self-contained undo-stack entry. Each variant carries both halves:
@@ -166,6 +173,15 @@ pub enum UndoStep {
         from: usize,
         to: usize,
     },
+    /// Captures everything needed to reopen the closed tab: the removed
+    /// `target` and `index` (re-inserted on revert) plus the active index
+    /// before/after the close.
+    CloseTab {
+        index: usize,
+        target: GraphRef,
+        from_active: usize,
+        to_active: usize,
+    },
 }
 
 /// 1e-4 is the threshold below which two pan/scale samples are
@@ -204,6 +220,9 @@ impl UndoStep {
                     && (*from_scale - *to_scale).abs() < VIEWPORT_EPS
             }
             UndoStep::SwitchTab { from, to } => from == to,
+            // A close always removes a tab (build_step drops invalid
+            // targets up front), so it's never a no-op.
+            UndoStep::CloseTab { .. } => false,
         }
     }
 }
@@ -222,9 +241,31 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             to,
         });
     }
+    if let Intent::CloseTab { index } = intent {
+        // `Main` (index 0) is never closable, and a stale index is dropped.
+        if index == 0 || index >= doc.tabs.len() {
+            return None;
+        }
+        let from_active = doc.active;
+        // Mirror `apply`'s active recompute so the forward step is
+        // self-contained: shift left if we closed left of the cursor,
+        // then clamp into the post-removal range (len shrinks by one).
+        let mut to_active = if from_active > index {
+            from_active - 1
+        } else {
+            from_active
+        };
+        to_active = to_active.min(doc.tabs.len() - 2);
+        return Some(UndoStep::CloseTab {
+            index,
+            target: doc.tabs[index],
+            from_active,
+            to_active,
+        });
+    }
     let EditScopeRef { graph, view } = doc.scope(target)?;
     Some(match intent {
-        Intent::SwitchTab { .. } => unreachable!("handled above"),
+        Intent::SwitchTab { .. } | Intent::CloseTab { .. } => unreachable!("handled above"),
         Intent::AddNode { view_node, node } => UndoStep::AddNode { view_node, node },
         Intent::RemoveNode { node_id } => {
             let view_node = view.view_nodes.by_key(&node_id)?.clone();
@@ -311,8 +352,16 @@ pub fn apply_step(step: &UndoStep, doc: &mut Document, target: GraphRef) {
         doc.active = *to;
         return;
     }
+    if let UndoStep::CloseTab {
+        index, to_active, ..
+    } = step
+    {
+        doc.tabs.remove(*index);
+        doc.active = *to_active;
+        return;
+    }
     with_scope(doc, target, |scope| match step {
-        UndoStep::SwitchTab { .. } => unreachable!("handled above"),
+        UndoStep::SwitchTab { .. } | UndoStep::CloseTab { .. } => unreachable!("handled above"),
         UndoStep::AddNode { view_node, node } => {
             assert!(
                 scope.graph.by_id(&node.id).is_none(),
@@ -386,8 +435,19 @@ pub fn revert_step(step: &UndoStep, doc: &mut Document, target: GraphRef) {
         doc.active = *from;
         return;
     }
+    if let UndoStep::CloseTab {
+        index,
+        target,
+        from_active,
+        ..
+    } = step
+    {
+        doc.tabs.insert(*index, *target);
+        doc.active = *from_active;
+        return;
+    }
     with_scope(doc, target, |scope| match step {
-        UndoStep::SwitchTab { .. } => unreachable!("handled above"),
+        UndoStep::SwitchTab { .. } | UndoStep::CloseTab { .. } => unreachable!("handled above"),
         UndoStep::AddNode { node, .. } => {
             scope.remove_node(&node.id);
         }
@@ -473,9 +533,9 @@ pub fn requires_relayout(step: &UndoStep) -> bool {
         | UndoStep::RemoveNode { .. }
         | UndoStep::MoveNode { .. }
         | UndoStep::RenameNode { .. } => true,
-        // Switching tabs swaps which graph the scene renders — the whole
-        // canvas relays out.
-        UndoStep::SwitchTab { .. } => true,
+        // Switching or closing a tab swaps which graph the scene renders
+        // (and reshapes the tab strip) — the whole canvas relays out.
+        UndoStep::SwitchTab { .. } | UndoStep::CloseTab { .. } => true,
         // Viewport is the inner-canvas `TranslateScale`, applied at
         // paint; children arrange in pre-transform space, so a pan/zoom
         // changes nothing the layout engine reads — no Pass B needed.
@@ -508,13 +568,16 @@ pub fn gesture_key(step: &UndoStep) -> Option<GestureKey> {
         // step keeps the original `from` and adopts the latest `to`, so
         // a burst of tabbing undoes back to where it started in one step.
         UndoStep::SwitchTab { .. } => Some(GestureKey::TabSwitch),
+        // Each close is its own undo entry — closing two tabs in a row
+        // shouldn't collapse into one Ctrl+Z.
         UndoStep::AddNode { .. }
         | UndoStep::RemoveNode { .. }
         | UndoStep::RenameNode { .. }
         | UndoStep::SetInput { .. }
         | UndoStep::SetSelection { .. }
         | UndoStep::SetCacheBehavior { .. }
-        | UndoStep::SetEventConnection { .. } => None,
+        | UndoStep::SetEventConnection { .. }
+        | UndoStep::CloseTab { .. } => None,
     }
 }
 
