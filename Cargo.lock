@@ -3337,18 +3337,18 @@ dependencies = [
 
 [[package]]
 name = "soa-rs"
-version = "1.0.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2db6129491886267d03760559b431de98bc92d64f0c09cf567fb137949085a1f"
+checksum = "bf20e367c4676b712916633bc735e97d18cf4d7c2a88b0e29a43446790d029d6"
 dependencies = [
  "soa-rs-derive",
 ]
 
 [[package]]
 name = "soa-rs-derive"
-version = "1.0.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f685a127d0edd3b04f4f7e22c1be60ecc00a3b7300920d7e510cb1b062e178e"
+checksum = "3de734b144ae71c89c91cdc45de3bd22e99e4efb1098e2635797fc0ee0566172"
 dependencies = [
  "proc-macro2",
  "quote",
