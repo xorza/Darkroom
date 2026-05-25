@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use glam::Vec2;
 use lens::ImageFuncLib;
-use palantir::{HostHandle, Shortcut, Ui};
+use palantir::{HostHandle, Key, Shortcut, Ui};
 use scenarium::elements::basic_funclib::BasicFuncLib;
 use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
 use scenarium::graph::NodeKind;
@@ -324,6 +324,10 @@ impl App {
         let reset_zoom = ui.key_pressed(RESET_ZOOM_SHORTCUT);
         let escape = ui.escape_pressed();
         let duplicate = ui.key_pressed(DUPLICATE_SHORTCUT);
+        // Sampled before the focus gate so the chords stay subscribed for
+        // palantir's wake-gate even on a focused frame.
+        let delete = ui.key_pressed(Shortcut::key(Key::Delete))
+            || ui.key_pressed(Shortcut::key(Key::Backspace));
         if ui.focused_id().is_some() {
             return false;
         }
@@ -340,6 +344,22 @@ impl App {
         }
         if duplicate && let Some(intent) = self.document.duplicate_intent(target) {
             self.intents.push(intent);
+        }
+        // Delete/Backspace removes the whole selection. One `RemoveNode`
+        // per node; `drain_intents` batches a frame's intents into a single
+        // undo entry, so it's one Cmd-Z (mirrors the breaker's multi-delete).
+        if delete {
+            let ids: Vec<_> = self
+                .document
+                .view(target)
+                .expect("active tab view exists")
+                .selected_nodes
+                .iter()
+                .copied()
+                .collect();
+            for node_id in ids {
+                self.intents.push(Intent::RemoveNode { node_id });
+            }
         }
         false
     }

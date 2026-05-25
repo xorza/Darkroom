@@ -540,6 +540,47 @@ mod tests {
     }
 
     #[test]
+    fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
+        use scenarium::graph::{Binding, InputPort};
+
+        let mut doc: Document = test_graph().into();
+        let a = doc.graph.iter().next().unwrap().id;
+        let b = doc.graph.iter().nth(1).unwrap().id;
+        // Edge a -> b, then select both for deletion.
+        doc.graph
+            .set_input_binding(InputPort::new(b, 0), (a, 0).into());
+        doc.main_view.selected_nodes = [a, b].into_iter().collect();
+
+        // Mirror `drain_intents`: build each `RemoveNode` against the live
+        // doc, apply immediately, collect into one batch entry. The a->b
+        // edge is captured by a's step (before a is removed), so a single
+        // undo can restore it once both nodes are back.
+        let mut stack = ActionStack::new(1 << 20);
+        let mut batch = Vec::new();
+        for node_id in [a, b] {
+            let step = build_step(Intent::RemoveNode { node_id }, &doc, GraphRef::Main).unwrap();
+            apply_step(&step, &mut doc, GraphRef::Main);
+            batch.push(step);
+        }
+        stack.push_current(GraphRef::Main, &batch);
+
+        assert!(doc.graph.by_id(&a).is_none());
+        assert!(doc.graph.by_id(&b).is_none());
+
+        assert!(stack.undo(&mut doc, &mut |_| {}));
+        assert!(doc.graph.by_id(&a).is_some());
+        assert!(doc.graph.by_id(&b).is_some());
+        match doc.graph.input_binding(InputPort::new(b, 0)) {
+            Binding::Bind(src) => assert_eq!((src.node_id, src.port_idx), (a, 0)),
+            other => panic!("expected restored a->b edge, got {other:?}"),
+        }
+        assert!(
+            !stack.undo(&mut doc, &mut |_| {}),
+            "the whole delete collapsed to one undo entry"
+        );
+    }
+
+    #[test]
     fn group_drag_moves_all_and_undoes_as_one() {
         use glam::Vec2;
 
