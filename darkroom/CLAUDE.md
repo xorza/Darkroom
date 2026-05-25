@@ -38,66 +38,98 @@ Run the ignored one-shot asset generator after changing the default look:
 
 Everything hangs off `App::frame` (`src/app.rs`). darkroom is immediate-mode
 but routes **all** graph mutations through an intent/undo layer rather than
-mutating the document inline. One frame, in order:
+mutating the document inline. The frame splits into a **navigation phase**
+(settle *which* graph is active) and an **edit phase** (mutate that graph),
+because input that switches tabs/opens subgraphs comes from *last* frame's
+click responses and must resolve before anything edits or records. One frame:
 
-1. **clear `intents`** — `App::intents` is a per-frame scratch buffer (private,
-   reused only for its allocation; carries no cross-frame state).
-2. **prepass** (`MainWindow::prepass` → `GraphUI::prepass`) — read palantir's
-   *current* input state (drag deltas, pan/zoom, connection release) and push
-   `Intent`s. No drawing. Crucially, layout-changing edits (node drag,
-   connection commit) are emitted here so they apply *before* the record —
-   Pass A then arranges the settled layout and no extra relayout frame is
-   needed. See the long comment on `GraphUI::prepass` for why connection
-   commit specifically must be pre-record.
-3. **drain (pre-record)** — `App::drain_intents`: build an `UndoStep` per
-   intent, drop no-ops, apply to `Document`, push the whole batch as **one**
-   undo entry.
-4. **shortcuts** — undo/redo (applied directly via `ActionStack`), Esc-deselect
-   and Ctrl+0 reset-zoom (pushed as intents), plus file-op chords → `MenuCommand`.
-5. **`Scene::rebuild`** — rebuild the derived render projection from `Document`.
-6. **record** (`MainWindow::frame` → `GraphUI::frame`) — draw the tree; widgets
+1. **clear scratch** — `intents` (pending mutations) and `actions` (view-state
+   requests). Both are reused-allocation buffers; no cross-frame state.
+2. **navigate** (`App::navigate`) — apply keyboard undo/redo (which can replay
+   a `SwitchTab`), then `MainWindow::scan_navigation` surfaces tab
+   activate/close + subgraph-open clicks off last frame's responses as
+   `UiAction`s. Open/close mutate the tab list directly; activate queues an
+   undoable `SwitchTab` intent. After this `target = document.active_target()`
+   is fixed for the rest of the frame.
+3. **sync_scene** — rebuild `Scene` (and drop transient gesture state) only if
+   the active graph changed since last frame, tracked by `App::scene_target`.
+   So a switched-to graph records in Pass A and draws its connections in Pass B
+   with no first-frame gap.
+4. **edit prepass** (`MainWindow::prepass` → `GraphUI::prepass`) — read
+   palantir's *current* input state (drag deltas, pan/zoom, connection release)
+   and push `Intent`s. No drawing. Layout-changing edits (node drag, connection
+   commit) are emitted here so they apply *before* the record. See the long
+   comment on `GraphUI::prepass` for why connection commit must be pre-record.
+5. **drain (pre-record)** + canvas shortcuts (Esc-deselect, Ctrl+0 reset-zoom
+   → intents) + file-op chords (`menu_shortcut` → `MenuCommand`).
+6. **`rebuild_scene`** — fold the pre-record drain into the render projection.
+7. **record** (`MainWindow::frame` → `GraphUI::frame`) — draw the tree; widgets
    push more intents (clicks, edit commits) and a `MenuCommand` may surface.
-7. **drain (post-record)** + relayout request as needed.
-8. **menu side effects** — file/theme dialogs run *last*, outside the record,
+8. **drain (post-record)** + relayout request as needed.
+9. **menu side effects** — file/theme dialogs run *last*, outside the record,
    so the blocking dialog holds no frame borrows.
 
 ### Source of truth: `Document` (`src/document.rs`)
-The serialized, undoable unit: `graph` (scenarium), `view_nodes` (per-node
-positions, a `KeyIndexVec<NodeId, ViewNode>` side-table kept in sync with
-`graph` — `validate()` asserts the node sets match), plus `pan`/`scale` and
-`selected_node_id`. **Viewport and selection are deliberately persisted and
-undoable** (reopen restores camera + selection; navigation undo is intentional;
-selection-in-Document keeps it coherent across undo/redo of node removal).
+The serialized, undoable unit. The graph *data* is one `scenarium::Graph`
+(`graph`), which already nests local subgraph defs and their interior graphs.
+Everything else is editor view-state, split per graph:
+
+- **`GraphRef`** — `Main` (root graph) or `Local(SubgraphId)` (a subgraph
+  interior). The active-graph handle threaded through the whole edit pipeline.
+- **`GraphView`** — per-graph view metadata: `view_nodes`
+  (`KeyIndexVec<NodeId, ViewNode>` of positions, kept in sync with the graph,
+  `validate()` asserts node sets match), `pan`, `scale`, and `selected_nodes`
+  (a `BTreeSet` so equality/serde are order-independent). Root lives in
+  `main_view`; each opened subgraph in `sub_views` (lazily seeded +
+  auto-laid-out on first open). **All of this is persisted and undoable by
+  design** — reopening restores camera + selection, and Ctrl+Z walks them
+  alongside structural edits.
+- **`tabs` / `active`** — open editor tabs (`tabs[0]` is always `Main`) and the
+  visible index. Also persisted; switching tabs is an undoable `SwitchTab`.
+- **`EditScope` / `EditScopeRef`** — graph+view borrowed *together* for a
+  target, so an edit touches both atomically (the borrow checker can't prove
+  `graph` and a `sub_views` entry are disjoint across separate accessors).
+  Get them via `Document::scope_mut(target)` / `scope(target)`.
+
 `FuncLib` is *not* here — it's runtime-owned on `App` (built from builtins at
 startup, shared across documents).
 
 ### Intent / undo layer (`src/intent.rs`, `src/action_stack.rs`)
-- `Intent` = forward-only "set X to Y". `build_step(intent, &doc)` reads the
-  pre-mutation snapshot and folds both halves into one self-contained
-  `UndoStep`. `apply_step`/`revert_step` write the "to"/"from" halves. Adding
-  a variant touches ~6 spots — the doc comment on `Intent` lists them.
+- Every mutation is scoped to a `GraphRef` target. `Intent` = forward-only
+  "set X to Y". `build_step(intent, &doc, target)` reads the pre-mutation
+  snapshot (via `scope`) and folds both halves into one self-contained
+  `UndoStep`; `apply_step`/`revert_step` write the "to"/"from" halves against
+  `target`. `SwitchTab` is graph-agnostic and special-cased ahead of the
+  scope lookup. Adding a variant touches ~6 spots — the doc comment lists them.
 - `ActionStack` packs history into two flat byte buffers (bitcode), not a
-  `Vec<Vec<UndoStep>>`. Consecutive same-`GestureKey` steps coalesce in place
-  (a node drag = many `MoveNode` intents → one undo entry; same for viewport).
+  `Vec<Vec<UndoStep>>`. Each batch records its `target` so undo/redo re-resolve
+  the right graph+view. Consecutive same-`GestureKey` *and* same-target steps
+  coalesce in place (a node drag = many `MoveNode` intents → one undo entry).
+- **`UiAction`** (`gui/mod.rs`) is the non-undoable sibling of `Intent`: it
+  changes *what the editor shows* (open/activate/close tab), not the document.
 - Note: `RenameNode`, `SetCacheBehavior`, `SetEventConnection` variants exist
   with full handling but are **not yet emitted by any UI** — staged ports from
   the deprecated editor. That's why `mod intent` carries `#[allow(dead_code)]`.
 
 ### Render projection: `Scene` (`src/scene.rs`)
-A flat, per-frame snapshot rebuilt from `Document` every frame (the names live
-in palantir's per-frame text arena, so it *must* be rebuilt before any widget
-reads it). Port names and input-binding snapshots are flattened into pooled
-`Vec`s sliced by `PortSpan` (zero per-node allocation in steady state). Scene
-is read-only mirror state — viewport/selection are copied *from* Document each
-rebuild; the gesture writes back via intents, never directly.
+A flat, per-frame snapshot rebuilt from the *active* graph+view every frame
+(`Scene::rebuild(graph, view, func_lib)` — see `App::rebuild_scene`). The names
+live in palantir's per-frame text arena, so it *must* be rebuilt before any
+widget reads it. Port names and input-binding snapshots are flattened into
+pooled `Vec`s sliced by `PortSpan` (zero per-node allocation in steady state).
+Scene is read-only mirror state — viewport/selection are copied *from* the
+active `GraphView` each rebuild; the gesture writes back via intents, never
+directly.
 
 ### GUI tree (`src/gui/`)
-`MainWindow` (zstack: graph behind a floating menu bar) → `GraphUI` (the
-canvas) owns the sub-controllers: `NodeUI` (node bodies + ports + drag),
-`ConnectionUI` (wires + in-flight drag + snap), `BreakerUI` (RMB/Cmd+LMB
-scribble that severs wires / deletes nodes), `NewNodeUi` (right-click spawn
-popup), `value_editor` (inline `Const` editing). `menu_bar` returns
-`MenuCommand`s; `App` performs the side effects.
+`MainWindow` (zstack: graph behind a floating menu bar + tab strip) → `GraphUI`
+(the canvas) owns the sub-controllers: `NodeUI` (node bodies + ports + drag;
+also emits subgraph-open requests via `emit_subgraph_opens`), `ConnectionUI`
+(wires + in-flight drag + snap), `BreakerUI` (RMB/Cmd+LMB scribble that severs
+wires / deletes nodes), `NewNodeUi` (right-click spawn popup), `value_editor`
+(inline `Const` editing). `tab_bar` renders the open-tab strip and emits
+`UiAction`s; `menu_bar` returns `MenuCommand`s; `App` performs the side effects.
+`AppContext` (in `app.rs`) threads the active `Theme` + `FuncLib` down the tree.
 
 Key cross-cutting mechanisms:
 - **Deterministic widget ids.** Node/port widgets derive their `WidgetId` from
