@@ -10,11 +10,9 @@ use crate::gui::background::CanvasBackground;
 use crate::gui::breaker::BreakerUI;
 use crate::gui::connection_ui::ConnectionUI;
 use crate::gui::new_node_ui::NewNodeUi;
-use crate::gui::node_ui::{
-    NodeUI, RecordCtx, emit_subgraph_opens, node_widget_id, port_circle_wid,
-};
+use crate::gui::node_ui::{NodeUI, RecordCtx, node_widget_id, port_circle_wid};
 use crate::gui::selection_ui::SelectionUI;
-use crate::gui::{PortKind, PortRef, UiAction};
+use crate::gui::{PortKind, PortRef};
 use crate::intent::Intent;
 use crate::scene::{Scene, SceneNode};
 
@@ -252,23 +250,17 @@ impl GraphUI {
     /// resized layout, so Pass B anchors the curve correctly with no
     /// extra frame. `PortFrame` is rebuilt here (and reused by `frame`)
     /// because the commit reads it.
-    pub fn prepass(
-        &mut self,
-        ui: &mut Ui,
-        scene: &Scene,
-        out: &mut Vec<Intent>,
-        actions: &mut Vec<UiAction>,
-    ) {
+    /// Edit-phase prepass: emit input-derived graph mutations (drag,
+    /// pan/zoom, connection commit) for the active graph. Navigation
+    /// (tab/open) is handled separately, before this, so the target is
+    /// already fixed here.
+    pub fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
         self.emit_pan_zoom(ui, scene, out);
         self.gestures.node_ui.prepass(ui, scene, out);
         self.port_frame.rebuild(ui, scene);
         self.gestures
             .connection_ui
             .apply(ui, scene, &self.port_frame, out);
-        // Open-in-tab is a layout-affecting navigation: surface it here
-        // (from last frame's chip response) so `App` applies it before
-        // the record.
-        emit_subgraph_opens(ui, scene, actions);
     }
 
     pub fn frame(

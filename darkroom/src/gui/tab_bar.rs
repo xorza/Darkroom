@@ -1,7 +1,10 @@
 //! The graph-pane tab strip. Renders one chip per open graph (the
-//! root + any opened subgraph interiors), highlights the active one,
-//! and raises [`UiAction`]s for activate / close. Pure view state — it
-//! never touches the document.
+//! root + any opened subgraph interiors) and highlights the active one.
+//! Draw-only: clicks are read back in `emit_tab_actions` during prepass
+//! (from last frame's chip responses) so a tab switch applies *before*
+//! the record — letting the target graph record a pass earlier and its
+//! connections draw with no first-frame gap. Pure view state; never
+//! touches the document.
 
 use palantir::{
     Align, Background, Configure, Corners, InternedStr, Panel, Sense, Sizing, Spacing, Text,
@@ -18,8 +21,34 @@ pub struct TabLabel {
     pub closable: bool,
 }
 
-/// Draw the strip and push any activate/close actions onto `out`.
-pub fn show(ui: &mut Ui, theme: &Theme, tabs: &[TabLabel], active: usize, out: &mut Vec<UiAction>) {
+/// Stable id for the tab chip at `index` — deterministic so prepass can
+/// read its click without the live response.
+fn tab_chip_wid(index: usize) -> WidgetId {
+    WidgetId::from_hash(("graph.tab", index))
+}
+
+/// Stable id for the close button of the tab at `index`.
+fn tab_close_wid(index: usize) -> WidgetId {
+    WidgetId::from_hash(("graph.tab_close", index))
+}
+
+/// Prepass scan: surface tab activate/close from last frame's chip
+/// responses. `count` is the current tab count; widgets for indices that
+/// didn't exist last frame simply report no click. Close wins over
+/// activate on the same chip.
+pub(super) fn emit_tab_actions(ui: &Ui, count: usize, actions: &mut Vec<UiAction>) {
+    for index in 0..count {
+        // Only non-`Main` tabs (index > 0) carry a close button.
+        if index > 0 && ui.response_for(tab_close_wid(index)).clicked {
+            actions.push(UiAction::CloseTab(index));
+        } else if ui.response_for(tab_chip_wid(index)).clicked {
+            actions.push(UiAction::ActivateTab(index));
+        }
+    }
+}
+
+/// Draw the strip. Clicks are handled in [`emit_tab_actions`] (prepass).
+pub fn show(ui: &mut Ui, theme: &Theme, tabs: &[TabLabel], active: usize) {
     // The strip shares the menu bar's `chrome_fill`; the active tab
     // below punches through to `canvas_bg` so it reads as one piece with
     // the graph.
@@ -35,19 +64,12 @@ pub fn show(ui: &mut Ui, theme: &Theme, tabs: &[TabLabel], active: usize, out: &
         })
         .show(ui, |ui| {
             for (i, tab) in tabs.iter().enumerate() {
-                tab_chip(ui, theme, tab, i, i == active, out);
+                tab_chip(ui, theme, tab, i, i == active);
             }
         });
 }
 
-fn tab_chip(
-    ui: &mut Ui,
-    theme: &Theme,
-    tab: &TabLabel,
-    index: usize,
-    active: bool,
-    out: &mut Vec<UiAction>,
-) {
+fn tab_chip(ui: &mut Ui, theme: &Theme, tab: &TabLabel, index: usize, active: bool) {
     let r = theme.header_corner_radius;
     // Active tab takes the graph's color so its bottom edge dissolves
     // into the canvas; inactive tabs stay flat on the chrome strip
@@ -69,9 +91,8 @@ fn tab_chip(
     } else {
         Spacing::xy(10.0, 4.0)
     };
-    let mut close_clicked = false;
-    let chip = Panel::hstack()
-        .id_salt(("tab", index))
+    Panel::hstack()
+        .id(tab_chip_wid(index))
         .size((Sizing::Hug, Sizing::Hug))
         .sense(Sense::CLICK)
         .padding(padding)
@@ -87,7 +108,7 @@ fn tab_chip(
                 })
                 .show(ui);
             if tab.closable {
-                let close_wid = WidgetId::from_hash(("graph.tab_close", index));
+                let close_wid = tab_close_wid(index);
                 // Hover comes from last frame's response; paint a subtle
                 // highlight chip behind the `×` when pointed at.
                 let hover_bg = if ui.response_for(close_wid).hovered {
@@ -99,7 +120,7 @@ fn tab_chip(
                 } else {
                     Background::default()
                 };
-                let close = Panel::zstack()
+                Panel::zstack()
                     .id(close_wid)
                     .size((Sizing::Fixed(16.0), Sizing::Fixed(16.0)))
                     .sense(Sense::CLICK)
@@ -127,15 +148,6 @@ fn tab_chip(
                             .text_align(Align::CENTER)
                             .show(ui);
                     });
-                close_clicked = close.response.clicked();
             }
         });
-    // Close wins over activate when both could read the same press —
-    // the close glyph consumes its own hit, so this is just belt-and-
-    // braces against the chip also reporting the click.
-    if close_clicked {
-        out.push(UiAction::CloseTab(index));
-    } else if chip.response.clicked() {
-        out.push(UiAction::ActivateTab(index));
-    }
 }

@@ -7,6 +7,7 @@ use crate::gui::UiAction;
 use crate::gui::graph_ui::GraphUI;
 use crate::gui::menu_bar;
 use crate::gui::menu_bar::MenuCommand;
+use crate::gui::node_ui::emit_subgraph_opens;
 use crate::gui::tab_bar::{self, TabLabel};
 use crate::intent::Intent;
 use crate::scene::Scene;
@@ -25,14 +26,27 @@ impl MainWindow {
     /// it derives from palantir's current-frame input state (drag
     /// deltas, etc.). `App::frame` drains and applies these before
     /// `Scene::rebuild`, so the record phase sees the latest doc.
-    pub fn prepass(
-        &mut self,
-        ui: &mut Ui,
+    /// Navigation scan: surface tab activate/close and subgraph-open
+    /// requests from *last* frame's responses (`scene` is the
+    /// last-rendered graph, which is what carried the clicked chips).
+    /// `App` runs this at the top of the frame so a switch applies before
+    /// the record — the switched-to graph records in Pass A and its
+    /// connections draw in Pass B, no first-frame gap.
+    pub fn scan_navigation(
+        &self,
+        ui: &Ui,
         scene: &Scene,
-        out: &mut Vec<Intent>,
+        tab_count: usize,
         actions: &mut Vec<UiAction>,
     ) {
-        self.graph_ui.prepass(ui, scene, out, actions);
+        tab_bar::emit_tab_actions(ui, tab_count, actions);
+        emit_subgraph_opens(ui, scene, actions);
+    }
+
+    /// Edit-phase prepass: input-derived graph mutations for the
+    /// already-settled active graph.
+    pub fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
+        self.graph_ui.prepass(ui, scene, out);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -45,7 +59,6 @@ impl MainWindow {
         tabs: &[TabLabel],
         active: usize,
         out: &mut Vec<Intent>,
-        actions: &mut Vec<UiAction>,
     ) -> Option<MenuCommand> {
         let mut command = None;
         // Top-to-bottom: menu bar, then the tab strip, then the graph.
@@ -68,7 +81,7 @@ impl MainWindow {
                     .show(ui, |ui| {
                         command = menu_bar::show(ui, host);
                     });
-                tab_bar::show(ui, ctx.theme, tabs, active, actions);
+                tab_bar::show(ui, ctx.theme, tabs, active);
                 self.graph_ui.frame(ui, ctx, scene, out);
             });
 
