@@ -4,11 +4,23 @@ use scenarium::graph::{Binding, InputPort, OutputPort};
 
 use crate::app::AppContext;
 use crate::gui::breaker::BreakerProbe;
-use crate::gui::graph_ui::{PortFrame, to_world};
+use crate::gui::graph_ui::{PortFrame, node_ports, to_world};
 use crate::gui::node_ui::{node_widget_id, set_input};
 use crate::gui::{PortKind, PortRef};
 use crate::intent::Intent;
 use crate::scene::{InputBindingView, Scene};
+
+/// Minimum horizontal length of a connection's bezier control handles,
+/// so short/backward links still bow out into a readable S-curve.
+const MIN_CUBIC_HANDLE: f32 = 40.0;
+
+/// Control points for a left-to-right cubic between port centers `p0`
+/// (output side) and `p3` (input side). Shared by the permanent and
+/// in-flight draws so the preview matches the committed curve exactly.
+fn cubic_handles(p0: Vec2, p3: Vec2) -> (Vec2, Vec2) {
+    let dx = ((p3.x - p0.x).abs() * 0.5).max(MIN_CUBIC_HANDLE);
+    (p0 + Vec2::new(dx, 0.0), p3 - Vec2::new(dx, 0.0))
+}
 
 /// Owns the in-flight new-connection drag plus the existing-connection
 /// renderer. Single-port-at-a-time means one `Option` is enough; the
@@ -149,9 +161,7 @@ impl ConnectionUI {
             ) else {
                 continue;
             };
-            let dx = ((p3.x - p0.x).abs() * 0.5).max(40.0);
-            let p1 = p0 + Vec2::new(dx, 0.0);
-            let p2 = p3 - Vec2::new(dx, 0.0);
+            let (p1, p2) = cubic_handles(p0, p3);
             let broken = probe
                 .state
                 .as_deref()
@@ -214,11 +224,11 @@ impl ConnectionUI {
             PortKind::Output => (start, end),
             PortKind::Input => (end, start),
         };
-        let dx = ((p3.x - p0.x).abs() * 0.5).max(40.0);
+        let (p1, p2) = cubic_handles(p0, p3);
         ui.add_shape(Shape::CubicBezier {
             p0,
-            p1: p0 + Vec2::new(dx, 0.0),
-            p2: p3 - Vec2::new(dx, 0.0),
+            p1,
+            p2,
             p3,
             width: ctx.theme.connection_width,
             brush: port_gradient(ctx.theme.output_port, ctx.theme.input_port),
@@ -246,16 +256,7 @@ fn port_gradient(start: Color, end: Color) -> Brush {
 fn scan_drag_start(frame: &PortFrame, scene: &Scene) -> Option<ConnectionDrag> {
     for n in &scene.nodes {
         for kind in [PortKind::Input, PortKind::Output] {
-            let count = match kind {
-                PortKind::Input => scene.ports(n.inputs).len(),
-                PortKind::Output => scene.ports(n.outputs).len(),
-            };
-            for port_idx in 0..count {
-                let port = PortRef {
-                    node_id: n.id,
-                    kind,
-                    port_idx,
-                };
+            for port in node_ports(scene, n, kind) {
                 if frame.drag_started(port) {
                     return Some(ConnectionDrag {
                         start: port,
@@ -281,16 +282,7 @@ fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -
         if n.id == start.node_id {
             continue;
         }
-        let count = match want_kind {
-            PortKind::Input => scene.ports(n.inputs).len(),
-            PortKind::Output => scene.ports(n.outputs).len(),
-        };
-        for port_idx in 0..count {
-            let port = PortRef {
-                node_id: n.id,
-                kind: want_kind,
-                port_idx,
-            };
+        for port in node_ports(scene, n, want_kind) {
             if frame.contains_pointer(port, pointer) {
                 return Some(port);
             }

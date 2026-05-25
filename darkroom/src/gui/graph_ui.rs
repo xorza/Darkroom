@@ -14,7 +14,7 @@ use crate::gui::node_ui::{NodeUI, node_widget_id, port_circle_wid};
 use crate::gui::selection_ui::SelectionUI;
 use crate::gui::{PortKind, PortRef, UiAction};
 use crate::intent::Intent;
-use crate::scene::Scene;
+use crate::scene::{Scene, SceneNode};
 
 /// Bounds on the canvas zoom factor. Pinch / scroll-zoom deltas
 /// multiply in; clamped each frame so pathological gestures can't
@@ -57,7 +57,7 @@ pub struct PortFrame {
     offsets: HashMap<PortRef, Vec2>,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 struct PortInfo {
     /// Port-circle center in canvas-local (inner-canvas pre-transform)
     /// coords. Computed as `node.pos + port_offset_within_node` so a
@@ -99,18 +99,8 @@ impl PortFrame {
                 .response_for(node_widget_id(n.id))
                 .layout_rect
                 .map(|r| r.min);
-            let input_count = scene.ports(n.inputs).len();
-            let output_count = scene.ports(n.outputs).len();
-            for (kind, count) in [
-                (PortKind::Input, input_count),
-                (PortKind::Output, output_count),
-            ] {
-                for port_idx in 0..count {
-                    let port = PortRef {
-                        node_id: n.id,
-                        kind,
-                        port_idx,
-                    };
+            for kind in [PortKind::Input, PortKind::Output] {
+                for port in node_ports(scene, n, kind) {
                     let r = ui.response_for(port_circle_wid(port));
                     // Fresh offset this frame (both rects recorded last
                     // frame) refreshes the cache; otherwise fall back to
@@ -190,6 +180,20 @@ impl PortFrame {
 /// → zoom-about-cursor) and writes the result into [`Scene::pan`] /
 /// [`Scene::zoom`], which then drive the inner canvas's
 /// `TranslateScale`.
+///
+/// **Bare-canvas gesture arbitration.** Several sub-controllers each
+/// poll the *same* outer-canvas response ([`outer_canvas_widget_id`])
+/// and self-select on a button/modifier guard. The guards are kept
+/// mutually exclusive by convention — there's no central dispatcher, so
+/// keep them disjoint when editing:
+/// - **Middle-drag** → pan ([`GraphUI::emit_pan_zoom`]).
+/// - **Wheel / pinch** → zoom-about-cursor (same).
+/// - **Plain LMB-drag** (no modifier) → rubber-band select (`SelectionUI`).
+/// - **Ctrl+LMB-drag** or **RMB-drag** → connection breaker (`BreakerUI`).
+/// - **RMB-click** (not drag) → new-node popup (`NewNodeUi`).
+///
+/// Node panels and port circles live in the *inner* canvas and hit-test
+/// first, so these only fire when a gesture falls through to bare canvas.
 #[derive(Default, Debug)]
 pub struct GraphUI {
     pub background: CanvasBackground,
@@ -431,6 +435,27 @@ impl GraphUI {
             out.push(Intent::SetViewport { pan, scale: zoom });
         }
     }
+}
+
+/// Every `PortRef` of `node` on the given side, in port order. Single
+/// source for the "iterate a node's ports by kind" loop that
+/// `PortFrame::rebuild` and the connection scans all need, so scan order
+/// and paint order can't drift apart.
+pub(super) fn node_ports<'a>(
+    scene: &'a Scene,
+    node: &'a SceneNode,
+    kind: PortKind,
+) -> impl Iterator<Item = PortRef> + 'a {
+    let span = match kind {
+        PortKind::Input => node.inputs,
+        PortKind::Output => node.outputs,
+    };
+    let count = scene.ports(span).len();
+    (0..count).map(move |port_idx| PortRef {
+        node_id: node.id,
+        kind,
+        port_idx,
+    })
 }
 
 /// Outer-canvas-local coords → inner-canvas pre-transform world
