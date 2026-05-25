@@ -32,10 +32,15 @@ fn tab_close_wid(index: usize) -> WidgetId {
     WidgetId::from_hash(("graph.tab_close", index))
 }
 
-/// Prepass scan: surface tab activate/close from last frame's chip
-/// responses. `count` is the current tab count; widgets for indices that
-/// didn't exist last frame simply report no click. Close wins over
-/// activate on the same chip.
+/// Stable id for the trailing "+" new-subgraph chip.
+fn tab_new_wid() -> WidgetId {
+    WidgetId::from_hash("graph.tab_new")
+}
+
+/// Prepass scan: surface tab activate/close + the "+" new-subgraph
+/// request from last frame's chip responses. `count` is the current tab
+/// count; widgets for indices that didn't exist last frame simply report
+/// no click. Close wins over activate on the same chip.
 pub(super) fn emit_tab_actions(ui: &Ui, count: usize, actions: &mut Vec<UiAction>) {
     for index in 0..count {
         // Only non-`Main` tabs (index > 0) carry a close button.
@@ -44,6 +49,9 @@ pub(super) fn emit_tab_actions(ui: &Ui, count: usize, actions: &mut Vec<UiAction
         } else if ui.response_for(tab_chip_wid(index)).clicked {
             actions.push(UiAction::ActivateTab(index));
         }
+    }
+    if ui.response_for(tab_new_wid()).clicked {
+        actions.push(UiAction::NewSubgraph);
     }
 }
 
@@ -66,6 +74,40 @@ pub fn show(ui: &mut Ui, theme: &Theme, tabs: &[TabLabel], active: usize) {
             for (i, tab) in tabs.iter().enumerate() {
                 tab_chip(ui, theme, tab, i, i == active);
             }
+            new_tab_chip(ui, theme);
+        });
+}
+
+/// The trailing "+" chip that creates and opens a fresh subgraph. Reads
+/// as an inactive tab (flat on the chrome strip); the click is consumed
+/// in [`emit_tab_actions`].
+fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
+    let hover_bg = if ui.response_for(tab_new_wid()).hovered {
+        Background {
+            fill: theme.header_fill.into(),
+            corners: Corners::all(3.0),
+            ..Default::default()
+        }
+    } else {
+        Background::default()
+    };
+    Panel::zstack()
+        .id(tab_new_wid())
+        .size((Sizing::Fixed(20.0), Sizing::Hug))
+        .sense(Sense::CLICK)
+        .padding(Spacing::xy(0.0, 4.0))
+        .child_align(Align::CENTER)
+        .background(hover_bg)
+        .show(ui, |ui| {
+            Text::new("+")
+                .style(TextStyle {
+                    color: theme.selection_glow,
+                    font_size_px: 15.0,
+                    line_height_mult: 1.0,
+                    ..ui.theme.text
+                })
+                .text_align(Align::CENTER)
+                .show(ui);
         });
 }
 

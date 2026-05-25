@@ -688,6 +688,13 @@ impl App {
                 UiAction::CloseTab(index) => {
                     self.intents.push(Intent::CloseTab { index });
                 }
+                UiAction::NewSubgraph => {
+                    // Create the def then open it; like `OpenGraph`, this
+                    // isn't undoable (the new def is referenced by no undo
+                    // history, so the stack stays valid).
+                    let id = self.document.create_subgraph();
+                    relayout |= self.open_graph(GraphRef::Local(id));
+                }
             }
         }
         relayout

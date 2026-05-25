@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use common::{SerdeFormat, is_debug, key_index_vec::KeyIndexVec};
 use glam::Vec2;
-use scenarium::graph::{Binding, InputPort, OutputPort, Subscription};
+use scenarium::graph::{Binding, InputPort, Node, NodeKind, OutputPort, Subscription};
 use scenarium::prelude::{FuncLib, Graph as CoreGraph, NodeId, SubgraphDef, SubgraphId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
@@ -13,6 +13,13 @@ use crate::reconcile::reconcile_def;
 /// World-space offset applied to duplicated nodes so the copies don't
 /// land exactly on top of their originals.
 const DUPLICATE_OFFSET: Vec2 = Vec2::new(32.0, 32.0);
+
+/// Initial placement of a fresh subgraph's boundary nodes: the input
+/// boundary at the origin, the output boundary one gap to the right and
+/// level with it (instead of the generic auto-layout stacking the two
+/// unconnected nodes in one column).
+const BOUNDARY_LAYOUT_ORIGIN: Vec2 = Vec2::new(40.0, 40.0);
+const BOUNDARY_LAYOUT_GAP: f32 = 520.0;
 
 /// Which graph an editor tab is pointed at. `Main` is the document's
 /// root graph; `Local(id)` is a local subgraph def's interior graph
@@ -317,6 +324,46 @@ impl Document {
         id
     }
 
+    /// Create a fresh, empty local subgraph — just the two boundary nodes
+    /// (`SubgraphInput`/`SubgraphOutput`), no interface yet (it's derived
+    /// from interior wiring, so an unwired pair exposes nothing). Returns
+    /// the new id for the caller to open in a tab.
+    pub fn create_subgraph(&mut self) -> SubgraphId {
+        let mut graph = CoreGraph::default();
+        let input = Node::new(NodeKind::SubgraphInput);
+        let output = Node::new(NodeKind::SubgraphOutput);
+        let (input_id, output_id) = (input.id, output.id);
+        graph.add(input);
+        graph.add(output);
+        let def = SubgraphDef {
+            id: SubgraphId::unique(),
+            name: format!("subgraph {}", self.graph.subgraphs.len() + 1),
+            category: String::new(),
+            graph,
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            events: Vec::new(),
+        };
+        let id = def.id;
+        self.graph.subgraphs.add(def);
+
+        // Seed the view explicitly so the pair opens input-left /
+        // output-right; `ensure_sub_view` then finds it and skips the
+        // generic auto-layout that would stack them.
+        let mut view = GraphView::default();
+        view.view_nodes.add(ViewNode {
+            id: input_id,
+            pos: BOUNDARY_LAYOUT_ORIGIN,
+        });
+        view.view_nodes.add(ViewNode {
+            id: output_id,
+            pos: BOUNDARY_LAYOUT_ORIGIN + Vec2::new(BOUNDARY_LAYOUT_GAP, 0.0),
+        });
+        self.sub_views.insert(id, view);
+
+        id
+    }
+
     /// Build a `DuplicateNodes` intent for `target`'s current selection:
     /// clone each selected node with a fresh id and an offset position,
     /// copy const-value bindings, and recreate the data + event
@@ -515,7 +562,6 @@ impl From<CoreGraph> for Document {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scenarium::graph::{Node, NodeKind};
     use scenarium::prelude::{FuncId, StaticValue};
     use scenarium::subgraph::SubgraphRef;
     use scenarium::testing::test_graph as core_test_graph;
@@ -659,6 +705,55 @@ mod tests {
             !bindings.iter().any(|(port, _)| port.port_idx == 2),
             "external edge dropped"
         );
+    }
+
+    #[test]
+    fn create_subgraph_has_only_boundary_nodes() {
+        let mut doc = Document::default();
+        let id = doc.create_subgraph();
+        let def = doc.graph.subgraphs.by_key(&id).expect("def added");
+
+        // Exactly the two boundary nodes, nothing else, empty interface.
+        assert_eq!(def.graph.len(), 2);
+        assert_eq!(
+            def.graph
+                .iter()
+                .filter(|n| matches!(n.kind, NodeKind::SubgraphInput))
+                .count(),
+            1
+        );
+        assert_eq!(
+            def.graph
+                .iter()
+                .filter(|n| matches!(n.kind, NodeKind::SubgraphOutput))
+                .count(),
+            1
+        );
+        assert!(def.inputs.is_empty() && def.outputs.is_empty());
+
+        // Boundary nodes are placed input-left / output-right, level.
+        let input_id = def
+            .graph
+            .iter()
+            .find(|n| matches!(n.kind, NodeKind::SubgraphInput))
+            .unwrap()
+            .id;
+        let output_id = def
+            .graph
+            .iter()
+            .find(|n| matches!(n.kind, NodeKind::SubgraphOutput))
+            .unwrap()
+            .id;
+        let view = doc.sub_views.get(&id).expect("view seeded on create");
+        let ip = view.view_nodes.by_key(&input_id).unwrap().pos;
+        let op = view.view_nodes.by_key(&output_id).unwrap().pos;
+        assert!(op.x > ip.x, "output boundary sits right of input");
+        assert_eq!(ip.y, op.y, "boundaries are level");
+
+        // Each create mints a distinct id (no overwrite).
+        let id2 = doc.create_subgraph();
+        assert_ne!(id, id2);
+        assert_eq!(doc.graph.subgraphs.len(), 2);
     }
 
     #[test]

@@ -26,6 +26,9 @@ pub enum UiAction {
     ActivateTab(usize),
     /// Close the tab at this index (the `Main` tab is never closable).
     CloseTab(usize),
+    /// Create a fresh empty subgraph and open it in a new tab (the "+"
+    /// chip at the end of the strip).
+    NewSubgraph,
 }
 
 /// Whether a port consumes a binding (`Input`) or produces a value
