@@ -69,6 +69,20 @@ pub struct Theme {
     /// than `canvas_bg` so the halo reads as a highlight, not noise.
     pub selection_glow: Color,
 
+    // ── header badges ────────────────────────────────────────────
+    // Indicator-chip accents in the node header. `#[serde(default)]`
+    // so themes predating these fields still load (the embedded asset
+    // doesn't need regenerating to pick up new chips).
+    /// Subgraph (composite instance) chip — accent cyan.
+    #[serde(default = "default_badge_subgraph")]
+    pub badge_subgraph: Color,
+    /// Terminal (sink) chip — error red.
+    #[serde(default = "default_badge_terminal")]
+    pub badge_terminal: Color,
+    /// Cache (compute-once) chip — warning yellow.
+    #[serde(default = "default_badge_cache")]
+    pub badge_cache: Color,
+
     // ── ports ────────────────────────────────────────────────────
     pub input_port: Color,
     pub output_port: Color,
@@ -103,6 +117,18 @@ pub struct Theme {
     /// call site restyling per use. Last field so its TOML table
     /// follows all the scalar fields above (TOML `ValueAfterTable`).
     pub palantir_theme: palantir::Theme,
+}
+
+fn default_badge_subgraph() -> Color {
+    Color::hex(0x9adbfb)
+}
+
+fn default_badge_terminal() -> Color {
+    Color::hex(0xff5e44)
+}
+
+fn default_badge_cache() -> Color {
+    Color::hex(0xffd44a)
 }
 
 impl Theme {

@@ -4,7 +4,7 @@ use glam::Vec2;
 use palantir::InternedStr;
 use scenarium::data::StaticValue;
 use scenarium::function::FuncInput;
-use scenarium::prelude::{Binding, FuncLib, NodeId, NodeKind};
+use scenarium::prelude::{Binding, FuncLib, NodeBehavior, NodeId, NodeKind};
 
 use crate::document::Document;
 
@@ -80,6 +80,13 @@ pub struct SceneNode {
     pub inputs: PortSpan,
     pub outputs: PortSpan,
     pub input_bindings: PortSpan,
+    /// Composite (`NodeKind::Subgraph`) instance vs a plain func node.
+    pub is_subgraph: bool,
+    /// Sink node (its func is `terminal` — no outputs feed downstream).
+    pub terminal: bool,
+    /// Result is cached / computed once (`NodeBehavior::Once`). The
+    /// header badge toggles this via `Intent::SetCacheBehavior`.
+    pub cached: bool,
 }
 
 #[derive(Debug)]
@@ -126,11 +133,18 @@ impl Scene {
                 NodeKind::Func(func_id) => func_lib.by_id(func_id).map(|f| NodeInterface {
                     inputs: &f.inputs,
                     output_names: f.outputs.iter().map(|o| o.name.clone()).collect(),
+                    is_subgraph: false,
+                    terminal: f.terminal,
                 }),
                 NodeKind::Subgraph(r) => {
                     doc.graph.resolve_def(*r, func_lib).map(|d| NodeInterface {
                         inputs: &d.inputs,
                         output_names: d.outputs.iter().map(|o| o.name.clone()).collect(),
+                        is_subgraph: true,
+                        // A composite's terminal-ness is derived at flatten
+                        // time, not stored on the def; treat "no exposed
+                        // outputs" as the visible sink signal.
+                        terminal: d.outputs.is_empty(),
                     })
                 }
                 NodeKind::SubgraphInput | NodeKind::SubgraphOutput => None,
@@ -163,6 +177,9 @@ impl Scene {
                 inputs,
                 outputs,
                 input_bindings,
+                is_subgraph: interface.is_subgraph,
+                terminal: interface.terminal,
+                cached: node.behavior == NodeBehavior::Once,
             });
         }
 
@@ -201,6 +218,8 @@ impl Scene {
 struct NodeInterface<'a> {
     inputs: &'a [FuncInput],
     output_names: Vec<String>,
+    is_subgraph: bool,
+    terminal: bool,
 }
 
 /// The literal a port falls back to when given a const binding: its
