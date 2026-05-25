@@ -18,6 +18,11 @@ pub enum MenuCommand {
     SaveDocumentAs,
     LoadTheme,
     ExportTheme,
+    /// Export the active subgraph (plus its local-def dependencies) to a
+    /// file. No-op when the active tab isn't a subgraph.
+    ExportSubgraph,
+    /// Import a subgraph bundle from a file into the current document.
+    ImportSubgraph,
 }
 
 /// Top-of-window menu bar. Horizontal strip of "menu trigger" buttons;
@@ -32,7 +37,9 @@ pub fn show(ui: &mut Ui, host: Option<&HostHandle>) -> Option<MenuCommand> {
         .padding(Spacing::xy(4.0, 4.0))
         .gap(2.0)
         .show(ui, |ui| {
-            command = file_menu(ui, host).or_else(|| theme_menu(ui));
+            command = file_menu(ui, host)
+                .or_else(|| subgraph_menu(ui))
+                .or_else(|| theme_menu(ui));
         });
     command
 }
@@ -83,6 +90,19 @@ fn file_menu(ui: &mut Ui, host: Option<&HostHandle>) -> Option<MenuCommand> {
             && let Some(h) = host
         {
             h.quit();
+        }
+        command
+    })
+}
+
+fn subgraph_menu(ui: &mut Ui) -> Option<MenuCommand> {
+    dropdown(ui, "Subgraph", |ui, popup| {
+        let mut command = None;
+        if MenuItem::new("Export…").show(ui, popup).clicked() {
+            command = Some(MenuCommand::ExportSubgraph);
+        }
+        if MenuItem::new("Import…").show(ui, popup).clicked() {
+            command = Some(MenuCommand::ImportSubgraph);
         }
         command
     })

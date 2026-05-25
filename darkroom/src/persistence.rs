@@ -9,6 +9,7 @@
 use std::path::{Path, PathBuf};
 
 use common::{SerdeFormat, deserialize, serialize};
+use scenarium::prelude::SubgraphDef;
 
 use crate::document::Document;
 use crate::theme::Theme;
@@ -43,6 +44,14 @@ pub fn pick_open_path(start: Option<&Path>) -> Option<PathBuf> {
 }
 
 pub fn pick_save_path(start: Option<&Path>) -> Option<PathBuf> {
+    file_dialog(start).save_file()
+}
+
+pub fn pick_subgraph_open(start: Option<&Path>) -> Option<PathBuf> {
+    file_dialog(start).pick_file()
+}
+
+pub fn pick_subgraph_save(start: Option<&Path>) -> Option<PathBuf> {
     file_dialog(start).save_file()
 }
 
@@ -117,6 +126,49 @@ pub fn load_theme(path: &Path) -> Option<Theme> {
         Ok(theme) => Some(theme),
         Err(err) => {
             eprintln!("theme load failed: {} {err}", path.display());
+            None
+        }
+    }
+}
+
+/// Serialize a subgraph `def` and write it to `path`, picking the format
+/// from its extension (defaulting to Rhai). The def's interior `Graph`
+/// carries its own nested subgraph table, so nested defs travel along
+/// automatically. Returns whether the write succeeded.
+pub fn export_subgraph(def: &SubgraphDef, path: &Path) -> bool {
+    let format = SerdeFormat::from_file_name(&path.to_string_lossy()).unwrap_or(SerdeFormat::Rhai);
+    let bytes = serialize(def, format);
+    match std::fs::write(path, &bytes) {
+        Ok(()) => true,
+        Err(err) => {
+            eprintln!("subgraph export failed: {} {err}", path.display());
+            false
+        }
+    }
+}
+
+/// Read + deserialize a subgraph def from `path`. Returns `None` (and
+/// logs) on an unsupported extension, an unreadable file, or a parse
+/// failure.
+pub fn import_subgraph(path: &Path) -> Option<SubgraphDef> {
+    let format = match SerdeFormat::from_file_name(&path.to_string_lossy()) {
+        Ok(f) => f,
+        Err(err) => {
+            eprintln!("subgraph import failed: unsupported file extension ({err})");
+            return None;
+        }
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(err) => {
+            eprintln!("subgraph import failed: {} {err}", path.display());
+            return None;
+        }
+    };
+    match deserialize::<SubgraphDef>(&bytes, format) {
+        Ok(def) => Some(def),
+        Err(err) => {
+            eprintln!("subgraph import failed: {} {err}", path.display());
             None
         }
     }

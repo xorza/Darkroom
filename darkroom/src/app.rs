@@ -387,6 +387,37 @@ impl App {
                     persistence::export_theme(&self.theme, &path);
                 }
             }
+            MenuCommand::ExportSubgraph => self.export_active_subgraph(),
+            MenuCommand::ImportSubgraph => self.import_subgraph(),
+        }
+    }
+
+    /// Export the active subgraph tab's def to a file (its interior
+    /// `Graph` carries any nested subgraph defs along). No-op when the
+    /// active tab is the root graph.
+    fn export_active_subgraph(&mut self) {
+        let GraphRef::Local(id) = self.document.active_target() else {
+            eprintln!("subgraph export: active tab is not a subgraph");
+            return;
+        };
+        let Some(def) = self.document.graph.subgraphs.by_key(&id) else {
+            return;
+        };
+        if let Some(path) = persistence::pick_subgraph_save(self.current_path.as_deref()) {
+            persistence::export_subgraph(def, &path);
+        }
+    }
+
+    /// Import a subgraph def from a file as a local def in the current
+    /// document. The import is a copy with a fresh id; nothing is
+    /// instantiated and the undo stack is untouched (existing history
+    /// references no imported def, so it stays valid).
+    fn import_subgraph(&mut self) {
+        let Some(path) = persistence::pick_subgraph_open(self.current_path.as_deref()) else {
+            return;
+        };
+        if let Some(def) = persistence::import_subgraph(&path) {
+            self.document.import_subgraph(def);
         }
     }
 

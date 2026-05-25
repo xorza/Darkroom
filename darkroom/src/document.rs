@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use common::{SerdeFormat, is_debug, key_index_vec::KeyIndexVec};
 use glam::Vec2;
-use scenarium::prelude::{FuncLib, Graph as CoreGraph, NodeId, SubgraphId};
+use scenarium::prelude::{FuncLib, Graph as CoreGraph, NodeId, SubgraphDef, SubgraphId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 
@@ -296,6 +296,21 @@ impl Document {
         self.tabs[self.active]
     }
 
+    /// Add an imported subgraph `def` to this document's local defs,
+    /// returning its assigned id. The top-level id is regenerated so an
+    /// import never overwrites an existing def. Nested child defs ride
+    /// along inside `def.graph.subgraphs` (a `Graph` carries its own
+    /// subgraph table) and resolve only within this def's interior, so
+    /// their ids can't collide with the document's table — they're left
+    /// untouched. The undo stack is unaffected: no existing history
+    /// references the freshly added def.
+    pub fn import_subgraph(&mut self, mut def: SubgraphDef) -> SubgraphId {
+        def.id = SubgraphId::unique();
+        let id = def.id;
+        self.graph.subgraphs.add(def);
+        id
+    }
+
     /// Current name of a subgraph interface port (`inputs[idx]` for
     /// `Input`, `outputs[idx]` for `Output`), or `None` if the def /
     /// side / index doesn't resolve.
@@ -424,7 +439,66 @@ impl From<CoreGraph> for Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use scenarium::graph::{Node, NodeKind};
+    use scenarium::subgraph::SubgraphRef;
     use scenarium::testing::test_graph as core_test_graph;
+
+    /// A childless local def with the given id/name.
+    fn leaf_def(id: SubgraphId, name: &str) -> SubgraphDef {
+        SubgraphDef {
+            id,
+            name: name.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn import_regenerates_top_id_and_keeps_nested_defs() {
+        // Real storage shape: a child def lives in its *parent's* interior
+        // `graph.subgraphs`, instanced by an interior node — not in a flat
+        // root table. Importing the parent carries the child with it.
+        let child_id = SubgraphId::unique();
+        let parent_id = SubgraphId::unique();
+        let mut interior = CoreGraph::default();
+        interior.subgraphs.add(leaf_def(child_id, "child"));
+        interior.add(Node::new(NodeKind::Subgraph(SubgraphRef::Local(child_id))));
+        let parent = SubgraphDef {
+            id: parent_id,
+            name: "parent".into(),
+            graph: interior,
+            ..Default::default()
+        };
+
+        let mut doc = Document::default();
+        let new_id = doc.import_subgraph(parent);
+
+        assert_ne!(new_id, parent_id, "top-level id is regenerated");
+        assert!(
+            doc.graph.subgraphs.by_key(&parent_id).is_none(),
+            "original top id is not reused"
+        );
+        let imported = doc
+            .graph
+            .subgraphs
+            .by_key(&new_id)
+            .expect("def resolves under its new id");
+        // The nested child rides along untouched inside the interior table.
+        assert_eq!(imported.graph.subgraphs.len(), 1);
+        assert!(
+            imported.graph.subgraphs.by_key(&child_id).is_some(),
+            "nested child def is preserved with its original id"
+        );
+    }
+
+    #[test]
+    fn importing_same_def_twice_makes_two_copies() {
+        let id = SubgraphId::unique();
+        let mut doc = Document::default();
+        let a = doc.import_subgraph(leaf_def(id, "x"));
+        let b = doc.import_subgraph(leaf_def(id, "x"));
+        assert_ne!(a, b, "each import gets its own id");
+        assert_eq!(doc.graph.subgraphs.len(), 2, "no silent overwrite");
+    }
 
     #[test]
     fn document_validates() {
