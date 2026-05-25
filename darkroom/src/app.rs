@@ -30,7 +30,10 @@ const SAVE_SHORTCUT: Shortcut = Shortcut::ctrl('S');
 const SAVE_AS_SHORTCUT: Shortcut = Shortcut::ctrl_shift('S');
 const RESET_ZOOM_SHORTCUT: Shortcut = Shortcut::ctrl('0');
 
-const UNDO_HISTORY: usize = 100;
+/// Byte budget for the undo history's packed buffer (~1 MiB). Bounds
+/// memory rather than entry count — a single large edit can't be
+/// undone away, but the oldest entries drop once the buffer overflows.
+const UNDO_HISTORY_BYTES: usize = 1 << 20;
 
 /// Shared per-frame context threaded down the UI tree. Holds borrows
 /// of state owned higher up so child subtrees don't take a growing
@@ -110,7 +113,7 @@ impl palantir::App for App {
             main_window: MainWindow::default(),
             intents: Vec::new(),
             actions: Vec::new(),
-            action_stack: ActionStack::new(UNDO_HISTORY),
+            action_stack: ActionStack::new(UNDO_HISTORY_BYTES),
             theme: Theme::default(),
             host_handle: handle,
             current_path: None,

@@ -40,19 +40,24 @@ pub struct ActionStack {
     redo_actions: Vec<u8>,
     undo_stack: Vec<UndoEntry>,
     redo_stack: Vec<RedoEntry>,
-    max_steps: usize,
+    /// Byte budget for the packed `undo_actions` buffer. Oldest entries
+    /// are dropped until it fits (the just-pushed entry always survives,
+    /// even when it alone exceeds the budget). Bounds history by memory
+    /// rather than entry count, since one entry (e.g. a `RemoveNode`
+    /// carrying a whole `Node` + wiring) can dwarf many small ones.
+    max_bytes: usize,
     temp_buffer: Vec<u8>,
 }
 
 impl ActionStack {
-    pub fn new(max_steps: usize) -> Self {
-        assert!(max_steps > 0, "undo stack must allow at least one step");
+    pub fn new(max_bytes: usize) -> Self {
+        assert!(max_bytes > 0, "undo history needs a positive byte budget");
         Self {
             undo_actions: Vec::new(),
             redo_actions: Vec::new(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
-            max_steps,
+            max_bytes,
             temp_buffer: Vec::new(),
         }
     }
@@ -74,23 +79,24 @@ impl ActionStack {
         self.redo_actions.clear();
         self.redo_stack.clear();
 
-        // Gesture coalescing: if this push is a single step matching the
-        // previous entry's cached gesture_key *on the same graph*, merge
-        // in place — keep the existing "from" half, replace the "to"
-        // half. Cross-frame zoom/pan collapses to one undo step.
-        if steps.len() == 1
-            && let Some(key) = intent::gesture_key(&steps[0])
+        // A gesture key only exists for single-step batches; a multi-step
+        // batch (e.g. a breaker swipe) is never coalesced.
+        let gesture_key = match steps {
+            [step] => intent::gesture_key(step),
+            _ => None,
+        };
+
+        // Gesture coalescing: if this push matches the previous entry's
+        // cached key *on the same graph*, merge in place — keep the
+        // existing "from" half, replace the "to" half. Cross-frame
+        // zoom/pan collapses to one undo step.
+        if let Some(key) = gesture_key
             && self.try_merge_with_last(&steps[0], key, target)
         {
             return;
         }
 
         let range = Self::append_steps(&mut self.undo_actions, steps, &mut self.temp_buffer);
-        let gesture_key = if steps.len() == 1 {
-            intent::gesture_key(&steps[0])
-        } else {
-            None
-        };
         self.undo_stack.push(UndoEntry {
             range,
             gesture_key,
@@ -149,11 +155,15 @@ impl ActionStack {
     }
 
     fn trim_to_limit(&mut self) {
-        while self.undo_stack.len() > self.max_steps {
+        // Drop oldest entries until the packed buffer fits the byte
+        // budget, but always keep the last (just-pushed) entry so an edit
+        // stays undoable even if it alone exceeds the budget.
+        while self.undo_stack.len() > 1 && self.undo_actions.len() > self.max_bytes {
             let removed = self.undo_stack.remove(0);
             // Drain the dropped prefix immediately and renormalize the
-            // remaining ranges. max_steps is small (~100), so this is
-            // cheap and saves carrying a base_offset field.
+            // remaining ranges (no base-offset field to carry). Entries
+            // are small relative to the budget, so few are dropped per
+            // push and the memmove stays bounded.
             let drop_end = removed.range.end;
             self.undo_actions.drain(0..drop_end);
             for entry in &mut self.undo_stack {
@@ -274,10 +284,16 @@ impl ActionStack {
         &buffer[range.clone()]
     }
 
+    /// Drop `range`'s bytes off the end of `buffer`. Every caller pops or
+    /// merges the *last* entry, whose bytes are always the buffer tail —
+    /// assert that invariant rather than silently leaking on misuse.
     fn pop_tail_actions(buffer: &mut Vec<u8>, range: &Range<usize>) {
-        if range.end == buffer.len() {
-            buffer.truncate(range.start);
-        }
+        assert_eq!(
+            range.end,
+            buffer.len(),
+            "pop_tail_actions expects the trailing entry"
+        );
+        buffer.truncate(range.start);
     }
 }
 
@@ -309,7 +325,7 @@ mod tests {
     #[test]
     fn consecutive_switches_coalesce_into_one_undo() {
         let mut doc = doc_with_three_tabs();
-        let mut stack = ActionStack::new(100);
+        let mut stack = ActionStack::new(1 << 20);
 
         switch_to(&mut stack, &mut doc, 1);
         switch_to(&mut stack, &mut doc, 2);
@@ -330,7 +346,7 @@ mod tests {
     #[test]
     fn redo_replays_the_merged_switch() {
         let mut doc = doc_with_three_tabs();
-        let mut stack = ActionStack::new(100);
+        let mut stack = ActionStack::new(1 << 20);
 
         switch_to(&mut stack, &mut doc, 1);
         switch_to(&mut stack, &mut doc, 2);
@@ -346,7 +362,7 @@ mod tests {
         // A non-switch entry between two switches breaks the gesture, so
         // the second switch starts a fresh, separately-undoable entry.
         let mut doc = doc_with_three_tabs();
-        let mut stack = ActionStack::new(100);
+        let mut stack = ActionStack::new(1 << 20);
 
         switch_to(&mut stack, &mut doc, 1);
 
@@ -395,7 +411,7 @@ mod tests {
     #[test]
     fn close_is_dropped_for_main_or_out_of_range() {
         let mut doc = doc_with_distinct_tabs();
-        let mut stack = ActionStack::new(100);
+        let mut stack = ActionStack::new(1 << 20);
         // Main (index 0) is never closable; index 3 is past the end.
         assert!(!close_at(&mut stack, &mut doc, 0), "Main must not close");
         assert!(!close_at(&mut stack, &mut doc, 3), "OOB index must drop");
@@ -406,7 +422,7 @@ mod tests {
     fn close_then_undo_restores_tab_and_active() {
         let mut doc = doc_with_distinct_tabs();
         let b = doc.tabs[2];
-        let mut stack = ActionStack::new(100);
+        let mut stack = ActionStack::new(1 << 20);
         doc.active = 2; // viewing the tab we're about to close
 
         assert!(close_at(&mut stack, &mut doc, 2));
@@ -427,7 +443,7 @@ mod tests {
         // left by one so it keeps pointing at the same graph.
         let mut doc = doc_with_distinct_tabs();
         let b = doc.tabs[2];
-        let mut stack = ActionStack::new(100);
+        let mut stack = ActionStack::new(1 << 20);
         doc.active = 2;
 
         assert!(close_at(&mut stack, &mut doc, 1));
@@ -444,7 +460,7 @@ mod tests {
     #[test]
     fn close_redo_replays() {
         let mut doc = doc_with_distinct_tabs();
-        let mut stack = ActionStack::new(100);
+        let mut stack = ActionStack::new(1 << 20);
         doc.active = 1;
 
         close_at(&mut stack, &mut doc, 1);
@@ -461,7 +477,7 @@ mod tests {
     fn consecutive_closes_do_not_coalesce() {
         // Each close is its own undo entry — two closes need two undos.
         let mut doc = doc_with_distinct_tabs();
-        let mut stack = ActionStack::new(100);
+        let mut stack = ActionStack::new(1 << 20);
 
         close_at(&mut stack, &mut doc, 2);
         close_at(&mut stack, &mut doc, 1);
