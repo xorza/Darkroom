@@ -25,9 +25,10 @@ use std::collections::BTreeSet;
 
 use glam::Vec2;
 use scenarium::graph::{Binding, InputPort, Node, NodeBehavior, NodeId, Subscription};
+use scenarium::prelude::SubgraphId;
 use serde::{Deserialize, Serialize};
 
-use crate::document::{Document, EditScope, EditScopeRef, GraphRef};
+use crate::document::{BoundarySide, Document, EditScope, EditScopeRef, GraphRef};
 use crate::model::ViewNode;
 
 /// What the caller wants to change. Forward-only — no `from` fields.
@@ -103,6 +104,16 @@ pub enum Intent {
     /// or an out-of-range index.
     CloseTab {
         index: usize,
+    },
+    /// Rename a subgraph interface port (`def.inputs[idx]` for
+    /// `side = Input`, `def.outputs[idx]` for `Output`). Scoped to the
+    /// active `Local` target — `build_step` reads the `SubgraphId` from
+    /// the drain `target`, so the intent only carries the side + index +
+    /// new name. Dropped when the target isn't a subgraph interior.
+    RenameBoundaryPort {
+        side: BoundarySide,
+        idx: usize,
+        to: String,
     },
 }
 
@@ -182,6 +193,15 @@ pub enum UndoStep {
         from_active: usize,
         to_active: usize,
     },
+    /// `sub_id` is resolved at build time so apply/revert are
+    /// self-contained (don't need the drain target). Carries both names.
+    RenameBoundaryPort {
+        sub_id: SubgraphId,
+        side: BoundarySide,
+        idx: usize,
+        from: String,
+        to: String,
+    },
 }
 
 /// 1e-4 is the threshold below which two pan/scale samples are
@@ -223,6 +243,7 @@ impl UndoStep {
             // A close always removes a tab (build_step drops invalid
             // targets up front), so it's never a no-op.
             UndoStep::CloseTab { .. } => false,
+            UndoStep::RenameBoundaryPort { from, to, .. } => from == to,
         }
     }
 }
@@ -263,9 +284,26 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             to_active,
         });
     }
+    if let Intent::RenameBoundaryPort { side, idx, to } = intent {
+        // Boundary ports only exist in a subgraph interior; the def is
+        // the active `Local` target's. Drop the rename otherwise.
+        let GraphRef::Local(sub_id) = target else {
+            return None;
+        };
+        let from = boundary_port_name(doc, sub_id, side, idx)?;
+        return Some(UndoStep::RenameBoundaryPort {
+            sub_id,
+            side,
+            idx,
+            from,
+            to,
+        });
+    }
     let EditScopeRef { graph, view } = doc.scope(target)?;
     Some(match intent {
-        Intent::SwitchTab { .. } | Intent::CloseTab { .. } => unreachable!("handled above"),
+        Intent::SwitchTab { .. } | Intent::CloseTab { .. } | Intent::RenameBoundaryPort { .. } => {
+            unreachable!("handled above")
+        }
         Intent::AddNode { view_node, node } => UndoStep::AddNode { view_node, node },
         Intent::RemoveNode { node_id } => {
             let view_node = view.view_nodes.by_key(&node_id)?.clone();
@@ -360,8 +398,23 @@ pub fn apply_step(step: &UndoStep, doc: &mut Document, target: GraphRef) {
         doc.active = *to_active;
         return;
     }
+    if let UndoStep::RenameBoundaryPort {
+        sub_id,
+        side,
+        idx,
+        to,
+        ..
+    } = step
+    {
+        set_boundary_port_name(doc, *sub_id, *side, *idx, to);
+        return;
+    }
     with_scope(doc, target, |scope| match step {
-        UndoStep::SwitchTab { .. } | UndoStep::CloseTab { .. } => unreachable!("handled above"),
+        UndoStep::SwitchTab { .. }
+        | UndoStep::CloseTab { .. }
+        | UndoStep::RenameBoundaryPort { .. } => {
+            unreachable!("handled above")
+        }
         UndoStep::AddNode { view_node, node } => {
             assert!(
                 scope.graph.by_id(&node.id).is_none(),
@@ -446,8 +499,23 @@ pub fn revert_step(step: &UndoStep, doc: &mut Document, target: GraphRef) {
         doc.active = *from_active;
         return;
     }
+    if let UndoStep::RenameBoundaryPort {
+        sub_id,
+        side,
+        idx,
+        from,
+        ..
+    } = step
+    {
+        set_boundary_port_name(doc, *sub_id, *side, *idx, from);
+        return;
+    }
     with_scope(doc, target, |scope| match step {
-        UndoStep::SwitchTab { .. } | UndoStep::CloseTab { .. } => unreachable!("handled above"),
+        UndoStep::SwitchTab { .. }
+        | UndoStep::CloseTab { .. }
+        | UndoStep::RenameBoundaryPort { .. } => {
+            unreachable!("handled above")
+        }
         UndoStep::AddNode { node, .. } => {
             scope.remove_node(&node.id);
         }
@@ -536,6 +604,9 @@ pub fn requires_relayout(step: &UndoStep) -> bool {
         // Switching or closing a tab swaps which graph the scene renders
         // (and reshapes the tab strip) — the whole canvas relays out.
         UndoStep::SwitchTab { .. } | UndoStep::CloseTab { .. } => true,
+        // A port label's text changes width → the node remeasures and
+        // its ports shift, so wires must re-anchor.
+        UndoStep::RenameBoundaryPort { .. } => true,
         // Viewport is the inner-canvas `TranslateScale`, applied at
         // paint; children arrange in pre-transform space, so a pan/zoom
         // changes nothing the layout engine reads — no Pass B needed.
@@ -577,7 +648,44 @@ pub fn gesture_key(step: &UndoStep) -> Option<GestureKey> {
         | UndoStep::SetSelection { .. }
         | UndoStep::SetCacheBehavior { .. }
         | UndoStep::SetEventConnection { .. }
-        | UndoStep::CloseTab { .. } => None,
+        | UndoStep::CloseTab { .. }
+        | UndoStep::RenameBoundaryPort { .. } => None,
+    }
+}
+
+/// Read a boundary port's current name from the def's interface, or
+/// `None` when the def/side/index doesn't resolve.
+fn boundary_port_name(
+    doc: &Document,
+    sub_id: SubgraphId,
+    side: BoundarySide,
+    idx: usize,
+) -> Option<String> {
+    let def = doc.graph.subgraphs.by_key(&sub_id)?;
+    match side {
+        BoundarySide::Input => def.inputs.get(idx).map(|i| i.name.clone()),
+        BoundarySide::Output => def.outputs.get(idx).map(|o| o.name.clone()),
+    }
+}
+
+/// Write a boundary port's name. No-op if the def/side/index is gone
+/// (e.g. the slot was compacted away between commit and replay).
+fn set_boundary_port_name(
+    doc: &mut Document,
+    sub_id: SubgraphId,
+    side: BoundarySide,
+    idx: usize,
+    name: &str,
+) {
+    let Some(def) = doc.graph.subgraphs.by_key_mut(&sub_id) else {
+        return;
+    };
+    let slot = match side {
+        BoundarySide::Input => def.inputs.get_mut(idx).map(|i| &mut i.name),
+        BoundarySide::Output => def.outputs.get_mut(idx).map(|o| &mut o.name),
+    };
+    if let Some(slot) = slot {
+        *slot = name.to_owned();
     }
 }
 

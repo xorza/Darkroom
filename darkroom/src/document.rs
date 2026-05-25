@@ -19,6 +19,15 @@ pub enum GraphRef {
     Local(SubgraphId),
 }
 
+/// Which side of a subgraph def's interface a boundary-port edit targets:
+/// `Input` → `def.inputs` (the `SubgraphInput` node's output ports),
+/// `Output` → `def.outputs` (the `SubgraphOutput` node's input ports).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BoundarySide {
+    Input,
+    Output,
+}
+
 /// Editor-side view metadata for one graph: per-node positions, the
 /// viewport, and the selection. One of these exists per open/edited
 /// graph (the root in `Document::main_view`, each subgraph interior in

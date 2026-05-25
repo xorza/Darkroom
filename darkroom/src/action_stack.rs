@@ -470,4 +470,127 @@ mod tests {
         stack.undo(&mut doc, &mut |_| {});
         assert_eq!(doc.tabs.len(), 3, "second undo restores the other");
     }
+
+    /// A document carrying a subgraph def "S" with interface inputs
+    /// `[A]` and outputs `[R]`, plus that `Local` target.
+    fn doc_with_def() -> (Document, GraphRef) {
+        use scenarium::data::DataType;
+        use scenarium::function::{FuncInput, FuncOutput};
+        use scenarium::prelude::{Graph, SubgraphDef};
+
+        let mut doc: Document = test_graph().into();
+        let def = SubgraphDef {
+            id: "00000000-0000-0000-0000-0000000000bb".into(),
+            name: "S".into(),
+            category: "Subgraph".into(),
+            graph: Graph::default(),
+            inputs: vec![FuncInput {
+                name: "A".into(),
+                required: false,
+                data_type: DataType::Int,
+                default_value: None,
+                value_options: Vec::new(),
+            }],
+            outputs: vec![FuncOutput {
+                name: "R".into(),
+                data_type: DataType::Int,
+            }],
+            events: vec![],
+        };
+        let id = def.id;
+        doc.graph.subgraphs.add(def);
+        (doc, GraphRef::Local(id))
+    }
+
+    #[test]
+    fn rename_boundary_port_applies_and_reverts() {
+        use crate::document::BoundarySide;
+        use crate::intent::revert_step;
+
+        let (mut doc, target) = doc_with_def();
+        let GraphRef::Local(def_id) = target else {
+            unreachable!()
+        };
+        let step = build_step(
+            Intent::RenameBoundaryPort {
+                side: BoundarySide::Input,
+                idx: 0,
+                to: "alpha".into(),
+            },
+            &doc,
+            target,
+        )
+        .expect("rename builds against a Local target");
+
+        apply_step(&step, &mut doc, target);
+        assert_eq!(
+            doc.graph.subgraphs.by_key(&def_id).unwrap().inputs[0].name,
+            "alpha"
+        );
+
+        revert_step(&step, &mut doc, target);
+        assert_eq!(
+            doc.graph.subgraphs.by_key(&def_id).unwrap().inputs[0].name,
+            "A",
+            "revert restores the captured `from` name"
+        );
+    }
+
+    #[test]
+    fn rename_boundary_port_renames_outputs_side() {
+        use crate::document::BoundarySide;
+
+        let (mut doc, target) = doc_with_def();
+        let GraphRef::Local(def_id) = target else {
+            unreachable!()
+        };
+        let step = build_step(
+            Intent::RenameBoundaryPort {
+                side: BoundarySide::Output,
+                idx: 0,
+                to: "result".into(),
+            },
+            &doc,
+            target,
+        )
+        .unwrap();
+        apply_step(&step, &mut doc, target);
+        assert_eq!(
+            doc.graph.subgraphs.by_key(&def_id).unwrap().outputs[0].name,
+            "result"
+        );
+    }
+
+    #[test]
+    fn rename_boundary_port_dropped_off_local_target_or_oob() {
+        use crate::document::BoundarySide;
+
+        let (doc, target) = doc_with_def();
+        // Main target has no def interface to rename.
+        assert!(
+            build_step(
+                Intent::RenameBoundaryPort {
+                    side: BoundarySide::Input,
+                    idx: 0,
+                    to: "x".into(),
+                },
+                &doc,
+                GraphRef::Main,
+            )
+            .is_none()
+        );
+        // Out-of-range index on the right target also drops.
+        assert!(
+            build_step(
+                Intent::RenameBoundaryPort {
+                    side: BoundarySide::Input,
+                    idx: 9,
+                    to: "x".into(),
+                },
+                &doc,
+                target,
+            )
+            .is_none()
+        );
+    }
 }

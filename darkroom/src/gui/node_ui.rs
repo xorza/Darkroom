@@ -1,4 +1,4 @@
-use crate::document::GraphRef;
+use crate::document::{BoundarySide, GraphRef};
 use crate::gui::breaker::BreakerProbe;
 use crate::gui::graph_ui::PortFrame;
 use crate::gui::value_editor;
@@ -8,9 +8,9 @@ use crate::scene::{InputBindingView, Scene, SceneNode};
 use crate::theme::Theme;
 use glam::Vec2;
 use palantir::{
-    Align, Background, Color, Configure, ContextMenu, Corners, HAlign, InternedStr, MenuItem,
-    Panel, Rect, Sense, Shadow, Shape, Sizing, Spacing, Stroke, Text, TextStyle, Ui, VAlign,
-    WidgetId,
+    Align, Background, Color, Configure, ContextMenu, Corners, HAlign, InternedStr, Key, MenuItem,
+    Panel, Rect, Sense, Shadow, Shape, Shortcut, Sizing, Spacing, Stroke, Text, TextEdit,
+    TextStyle, Ui, VAlign, WidgetId,
 };
 use scenarium::data::StaticValue;
 use scenarium::graph::Binding;
@@ -438,6 +438,10 @@ fn input_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec
                 };
                 let binding = bindings.get(i).unwrap_or(&InputBindingView::None);
                 let default = defaults.get(i).cloned();
+                // A `SubgraphOutput` boundary node's input ports are the
+                // subgraph's *outputs* — renameable, except the trailing
+                // "+" placeholder.
+                let rename = (node.boundary && i + 1 < names.len()).then_some(BoundarySide::Output);
                 input_port_row(
                     ui,
                     rcx,
@@ -446,6 +450,7 @@ fn input_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec
                     binding,
                     default,
                     allow_const,
+                    rename,
                     out,
                 );
             }
@@ -473,7 +478,11 @@ fn output_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Ve
                     kind: PortKind::Output,
                     port_idx: i,
                 };
-                output_port_row(ui, rcx, port, name.clone(), out);
+                // A `SubgraphInput` boundary node's output ports are the
+                // subgraph's *inputs* — renameable, except the trailing
+                // "+" placeholder.
+                let rename = (node.boundary && i + 1 < names.len()).then_some(BoundarySide::Input);
+                output_port_row(ui, rcx, port, name.clone(), rename, out);
             }
         });
 }
@@ -501,6 +510,7 @@ fn output_port_row(
     rcx: RecordCtx<'_>,
     port: PortRef,
     name: InternedStr,
+    rename: Option<BoundarySide>,
     out: &mut Vec<Intent>,
 ) {
     let theme = rcx.theme;
@@ -517,7 +527,7 @@ fn output_port_row(
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            Text::new(name).show(ui);
+            port_label(ui, theme, port, name, rename, out);
             circle_frame(ui, theme, wid, fill, Spacing::new(0.0, 0.0, -overhang, 0.0));
         });
     // Double-click on the output circle = disconnect every input
@@ -549,6 +559,7 @@ fn input_port_row(
     binding: &InputBindingView,
     default_static: Option<StaticValue>,
     allow_const: bool,
+    rename: Option<BoundarySide>,
     out: &mut Vec<Intent>,
 ) {
     let theme = rcx.theme;
@@ -569,7 +580,7 @@ fn input_port_row(
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             circle_frame(ui, theme, wid, fill, margin);
-            Text::new(name.clone()).show(ui);
+            port_label(ui, theme, port, name.clone(), rename, out);
             if allow_const && let InputBindingView::Const(value) = binding {
                 let editor_id =
                     WidgetId::from_hash(("graph.node.const_editor", port.node_id, port.port_idx));
@@ -625,6 +636,109 @@ pub(super) fn set_input(port: PortRef, to: Binding) -> Intent {
         node_id: port.node_id,
         input_idx: port.port_idx,
         to,
+    }
+}
+
+/// Character cap for a boundary-port name in the inline rename editor.
+const PORT_NAME_MAX_CHARS: usize = 24;
+
+/// Cross-frame state for a boundary port's inline rename editor, held in
+/// palantir's `StateMap` under the editor's `WidgetId`.
+#[derive(Default, Clone)]
+struct PortRename {
+    active: bool,
+    /// Latches once the editor actually holds focus, so the frames
+    /// between `request_focus` and focus landing don't read as a blur
+    /// and commit early.
+    focused_once: bool,
+    draft: String,
+}
+
+/// Stable id for a port's rename editor — and for the sensing label
+/// panel shown when idle, so the same `WidgetId` is recorded every frame
+/// across the label⇄editor swap (palantir drops state rows for ids it
+/// doesn't see).
+fn port_rename_wid(port: PortRef) -> WidgetId {
+    WidgetId::from_hash((
+        "graph.node.port_rename",
+        port.node_id,
+        port.kind as u8,
+        port.port_idx,
+    ))
+}
+
+/// A port label. When `rename` is `Some`, double-clicking swaps the
+/// label for a fixed-width, length-capped `TextEdit`; Enter or focus
+/// loss commits a [`Intent::RenameBoundaryPort`], Esc cancels. `None`
+/// (regular node ports and the trailing "+" placeholder) renders plain
+/// text.
+fn port_label(
+    ui: &mut Ui,
+    theme: &Theme,
+    port: PortRef,
+    name: InternedStr,
+    rename: Option<BoundarySide>,
+    out: &mut Vec<Intent>,
+) {
+    let Some(side) = rename else {
+        Text::new(name).show(ui);
+        return;
+    };
+    let id = port_rename_wid(port);
+    // darkroom port names are always `Owned` (built via `String::into`),
+    // so `as_str` resolves without a live text arena. Resolve lazily —
+    // only the double-click seed and the commit compare need it, never
+    // the idle per-frame path.
+    if !ui.state_mut::<PortRename>(id).active {
+        let resp = Panel::hstack()
+            .id(id)
+            .size((Sizing::Hug, Sizing::Hug))
+            .sense(Sense::CLICK)
+            .show(ui, |ui| {
+                // `InternedStr::clone` is allocation-free for the `Owned`
+                // names darkroom builds, so this is cheap per frame.
+                Text::new(name.clone()).show(ui);
+            })
+            .response;
+        if resp.double_clicked() {
+            let st = ui.state_mut::<PortRename>(id);
+            st.active = true;
+            st.focused_once = false;
+            st.draft = name.as_str("").to_owned();
+            ui.request_focus(Some(id));
+        }
+        return;
+    }
+
+    let mut draft = std::mem::take(&mut ui.state_mut::<PortRename>(id).draft);
+    TextEdit::new(&mut draft)
+        .id(id)
+        .max_chars(PORT_NAME_MAX_CHARS)
+        .size((Sizing::Fixed(theme.value_editor_width), Sizing::Hug))
+        .show(ui);
+    let focused = ui.focused_id() == Some(id);
+    let escape = ui.escape_pressed();
+    let enter = ui.key_pressed(Shortcut::key(Key::Enter));
+    let commit = {
+        let st = ui.state_mut::<PortRename>(id);
+        st.draft = draft.clone();
+        st.focused_once |= focused;
+        // Commit on Enter or on blur (once focus had landed); Esc wins
+        // as a cancel.
+        !escape && (enter || (st.focused_once && !focused))
+    };
+    if commit || escape {
+        if commit && draft != name.as_str("") {
+            out.push(Intent::RenameBoundaryPort {
+                side,
+                idx: port.port_idx,
+                to: draft,
+            });
+        }
+        let st = ui.state_mut::<PortRename>(id);
+        st.active = false;
+        st.focused_once = false;
+        ui.request_focus(None);
     }
 }
 
