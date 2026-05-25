@@ -1,14 +1,17 @@
-//! Bitcode-packed undo/redo stack ported from `darkroom-egui`.
+//! Bitcode-packed undo/redo history in one byte buffer.
 //!
-//! Two flat byte buffers (`undo_actions` / `redo_actions`) with per-entry
-//! ranges, instead of `VecDeque<Vec<UndoStep>>`. Keeps the entire
-//! history in two allocations regardless of entry count, makes
-//! `trim_to_limit` a single `Vec::drain` of the packed prefix, and
-//! avoids per-field allocator churn that the naive enum-storage form
-//! incurred (e.g. `RemoveNode` carries a full `Node` plus its captured
-//! `bindings` / `subscriptions` wiring).
+//! Every entry — undoable *and* redoable — lives packed back-to-back in a
+//! single `actions: Vec<u8>`, with a parallel `entries` table of
+//! `(range, gesture_key, target)`. A `cursor` splits the applied entries
+//! (`entries[..cursor]`, undoable) from the undone ones
+//! (`entries[cursor..]`, redoable). Undo/redo are just a cursor step plus
+//! one deserialize — no second buffer, no copying bytes between buffers.
+//! A fresh edit discards the redoable tail (truncate from the end),
+//! appends, and trims the oldest entries off the front to honor a byte
+//! budget. One contiguous allocation regardless of entry count; no
+//! per-field churn (the naive `VecDeque<Vec<UndoStep>>` form re-allocated
+//! a `RemoveNode`'s `Node` + captured wiring on every entry).
 
-use std::fmt::Debug;
 use std::ops::Range;
 
 use common::SerdeFormat;
@@ -17,7 +20,8 @@ use crate::document::{Document, GraphRef};
 use crate::intent::{self, DocStep, GestureKey, GraphStep, UndoStep};
 
 #[derive(Debug)]
-struct UndoEntry {
+struct Entry {
+    /// Byte range of this entry's serialized steps in `actions`.
     range: Range<usize>,
     /// Cached so gesture-merge can reject without deserializing the
     /// entry. Only set for single-step batches that identify as a
@@ -29,22 +33,21 @@ struct UndoEntry {
 }
 
 #[derive(Debug)]
-struct RedoEntry {
-    range: Range<usize>,
-    target: GraphRef,
-}
-
-#[derive(Debug)]
 pub struct ActionStack {
-    undo_actions: Vec<u8>,
-    redo_actions: Vec<u8>,
-    undo_stack: Vec<UndoEntry>,
-    redo_stack: Vec<RedoEntry>,
-    /// Byte budget for the packed `undo_actions` buffer. Oldest entries
-    /// are dropped until it fits (the just-pushed entry always survives,
-    /// even when it alone exceeds the budget). Bounds history by memory
-    /// rather than entry count, since one entry (e.g. a `RemoveNode`
-    /// carrying a whole `Node` + wiring) can dwarf many small ones.
+    /// The single packed history buffer, oldest entry first.
+    actions: Vec<u8>,
+    /// Per-entry metadata, parallel to the packed entries in `actions`.
+    entries: Vec<Entry>,
+    /// Boundary between applied (`entries[..cursor]`) and undone
+    /// (`entries[cursor..]`) entries. Undo decrements, redo increments, a
+    /// new edit truncates the undone tail then appends.
+    cursor: usize,
+    /// Byte budget for `actions`. When a push overflows it the oldest
+    /// entries are dropped off the front; the just-pushed entry always
+    /// survives, even when it alone exceeds the budget. Bounds history by
+    /// memory rather than entry count, since one entry (e.g. a
+    /// `RemoveNode` carrying a whole `Node` + wiring) can dwarf many small
+    /// ones.
     max_bytes: usize,
     temp_buffer: Vec<u8>,
 }
@@ -53,20 +56,18 @@ impl ActionStack {
     pub fn new(max_bytes: usize) -> Self {
         assert!(max_bytes > 0, "undo history needs a positive byte budget");
         Self {
-            undo_actions: Vec::new(),
-            redo_actions: Vec::new(),
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
+            actions: Vec::new(),
+            entries: Vec::new(),
+            cursor: 0,
             max_bytes,
             temp_buffer: Vec::new(),
         }
     }
 
     pub fn clear(&mut self) {
-        self.undo_actions.clear();
-        self.redo_actions.clear();
-        self.undo_stack.clear();
-        self.redo_stack.clear();
+        self.actions.clear();
+        self.entries.clear();
+        self.cursor = 0;
     }
 
     /// Push a batch of just-applied steps that mutated `target`. `steps`
@@ -76,8 +77,8 @@ impl ActionStack {
         if steps.is_empty() {
             return;
         }
-        self.redo_actions.clear();
-        self.redo_stack.clear();
+        // A fresh edit makes the undone tail unreachable; drop it.
+        self.discard_redo();
 
         // A gesture key only exists for single-step batches; a multi-step
         // batch (e.g. a breaker swipe) is never coalesced.
@@ -96,80 +97,86 @@ impl ActionStack {
             return;
         }
 
-        let range = Self::append_steps(&mut self.undo_actions, steps, &mut self.temp_buffer);
-        self.undo_stack.push(UndoEntry {
+        let range = Self::append_steps(&mut self.actions, steps, &mut self.temp_buffer);
+        self.entries.push(Entry {
             range,
             gesture_key,
             target,
         });
+        self.cursor = self.entries.len();
         self.trim_to_limit();
     }
 
     pub fn undo(&mut self, doc: &mut Document, on_step: &mut dyn FnMut(&UndoStep)) -> bool {
-        let Some(entry) = self.undo_stack.pop() else {
+        if self.cursor == 0 {
             return false;
-        };
-        let bytes = Self::slice_bytes(&self.undo_actions, &entry.range);
-        let steps = Self::deserialize_steps(bytes, &mut self.temp_buffer);
+        }
+        self.cursor -= 1;
         // `revert_step` resolves the right graph+view from `target` and
-        // no-ops if it's gone (subgraph deleted) — the entry still moves
-        // onto the redo stack so the two halves stay paired.
+        // no-ops if it's gone (subgraph deleted). The entry stays in the
+        // buffer — it just moved into the redoable region.
+        let (range, target) = self.entry_at(self.cursor);
+        let steps = Self::deserialize_steps(
+            Self::slice_bytes(&self.actions, &range),
+            &mut self.temp_buffer,
+        );
         for step in steps.iter().rev() {
-            intent::revert_step(step, doc, entry.target);
+            intent::revert_step(step, doc, target);
             on_step(step);
         }
-        let redo_range = Self::append_bytes(&mut self.redo_actions, bytes);
-        self.redo_stack.push(RedoEntry {
-            range: redo_range,
-            target: entry.target,
-        });
-        Self::pop_tail_actions(&mut self.undo_actions, &entry.range);
-
         true
     }
 
     pub fn redo(&mut self, doc: &mut Document, on_step: &mut dyn FnMut(&UndoStep)) -> bool {
-        let Some(entry) = self.redo_stack.pop() else {
+        if self.cursor == self.entries.len() {
             return false;
-        };
-        let bytes = Self::slice_bytes(&self.redo_actions, &entry.range);
-        let steps = Self::deserialize_steps(bytes, &mut self.temp_buffer);
-        let gesture_key = if steps.len() == 1 {
-            intent::gesture_key(&steps[0])
-        } else {
-            None
-        };
+        }
+        let (range, target) = self.entry_at(self.cursor);
+        let steps = Self::deserialize_steps(
+            Self::slice_bytes(&self.actions, &range),
+            &mut self.temp_buffer,
+        );
         for step in steps.iter() {
-            intent::apply_step(step, doc, entry.target);
+            intent::apply_step(step, doc, target);
             on_step(step);
         }
-        let undo_range = Self::append_bytes(&mut self.undo_actions, bytes);
-        self.undo_stack.push(UndoEntry {
-            range: undo_range,
-            gesture_key,
-            target: entry.target,
-        });
-        Self::pop_tail_actions(&mut self.redo_actions, &entry.range);
-
+        self.cursor += 1;
         true
     }
 
+    /// `(range, target)` of entry `i`, cloned so callers can then borrow
+    /// `actions` / `temp_buffer` without holding the `entries` borrow.
+    fn entry_at(&self, i: usize) -> (Range<usize>, GraphRef) {
+        let e = &self.entries[i];
+        (e.range.clone(), e.target)
+    }
+
+    /// Drop the redoable tail (`entries[cursor..]`) and its bytes — a new
+    /// edit makes them unreachable. Truncations from the end, so no
+    /// memmove.
+    fn discard_redo(&mut self) {
+        if self.cursor < self.entries.len() {
+            let cut = self.entries[self.cursor].range.start;
+            self.actions.truncate(cut);
+            self.entries.truncate(self.cursor);
+        }
+    }
+
     fn trim_to_limit(&mut self) {
-        // Drop oldest entries until the packed buffer fits the byte
-        // budget, but always keep the last (just-pushed) entry so an edit
-        // stays undoable even if it alone exceeds the budget.
-        while self.undo_stack.len() > 1 && self.undo_actions.len() > self.max_bytes {
-            let removed = self.undo_stack.remove(0);
-            // Drain the dropped prefix immediately and renormalize the
-            // remaining ranges (no base-offset field to carry). Entries
-            // are small relative to the budget, so few are dropped per
-            // push and the memmove stays bounded.
-            let drop_end = removed.range.end;
-            self.undo_actions.drain(0..drop_end);
-            for entry in &mut self.undo_stack {
+        // Drop the oldest entries one at a time until the packed buffer
+        // fits the budget — minimal history loss. Always keep the last
+        // (just-pushed) entry. Runs only right after a push, where every
+        // entry is applied (`cursor == entries.len()`), so each front
+        // drop also steps the cursor down.
+        while self.entries.len() > 1 && self.actions.len() > self.max_bytes {
+            let drop_end = self.entries[0].range.end;
+            self.entries.remove(0);
+            self.actions.drain(0..drop_end);
+            for entry in &mut self.entries {
                 entry.range.start -= drop_end;
                 entry.range.end -= drop_end;
             }
+            self.cursor -= 1;
         }
     }
 
@@ -179,14 +186,16 @@ impl ActionStack {
         key: GestureKey,
         target: GraphRef,
     ) -> bool {
-        let Some(last) = self.undo_stack.last() else {
+        // `discard_redo` ran first, so the last entry is the last applied
+        // one and its bytes are the buffer tail.
+        let Some(last) = self.entries.last() else {
             return false;
         };
         if last.gesture_key != Some(key) || last.target != target {
             return false;
         }
         let last_range = last.range.clone();
-        let last_bytes = Self::slice_bytes(&self.undo_actions, &last_range);
+        let last_bytes = Self::slice_bytes(&self.actions, &last_range);
         let last_steps = Self::deserialize_steps(last_bytes, &mut self.temp_buffer);
         assert_eq!(
             last_steps.len(),
@@ -233,14 +242,17 @@ impl ActionStack {
             _ => return false,
         };
 
-        Self::pop_tail_actions(&mut self.undo_actions, &last_range);
-        self.undo_stack.pop();
-        let range = Self::append_steps(&mut self.undo_actions, &[merged], &mut self.temp_buffer);
-        self.undo_stack.push(UndoEntry {
+        // The last entry is the buffer tail — truncate it off and
+        // re-append the merged step in place.
+        self.actions.truncate(last_range.start);
+        self.entries.pop();
+        let range = Self::append_steps(&mut self.actions, &[merged], &mut self.temp_buffer);
+        self.entries.push(Entry {
             range,
             gesture_key: Some(key),
             target,
         });
+        self.cursor = self.entries.len();
         true
     }
 
@@ -268,13 +280,6 @@ impl ActionStack {
         .unwrap()
     }
 
-    fn append_bytes(target: &mut Vec<u8>, bytes: &[u8]) -> Range<usize> {
-        let start = target.len();
-        target.extend_from_slice(bytes);
-        let end = target.len();
-        start..end
-    }
-
     fn slice_bytes<'a>(buffer: &'a [u8], range: &Range<usize>) -> &'a [u8] {
         assert!(range.start <= range.end, "undo stack range start > end");
         assert!(
@@ -282,18 +287,6 @@ impl ActionStack {
             "undo stack range exceeds buffer length"
         );
         &buffer[range.clone()]
-    }
-
-    /// Drop `range`'s bytes off the end of `buffer`. Every caller pops or
-    /// merges the *last* entry, whose bytes are always the buffer tail —
-    /// assert that invariant rather than silently leaking on misuse.
-    fn pop_tail_actions(buffer: &mut Vec<u8>, range: &Range<usize>) {
-        assert_eq!(
-            range.end,
-            buffer.len(),
-            "pop_tail_actions expects the trailing entry"
-        );
-        buffer.truncate(range.start);
     }
 }
 
@@ -487,6 +480,48 @@ mod tests {
         assert_eq!(doc.tabs.len(), 2, "first undo restores one tab");
         stack.undo(&mut doc, &mut |_| {});
         assert_eq!(doc.tabs.len(), 3, "second undo restores the other");
+    }
+
+    #[test]
+    fn history_bounded_by_byte_budget() {
+        use std::collections::BTreeSet;
+
+        let mut doc: Document = test_graph().into();
+        let node = doc.graph.iter().next().unwrap().id;
+        // Tiny budget so a handful of small entries overflow it.
+        let mut stack = ActionStack::new(256);
+
+        // Many distinct, non-coalescing selection edits (toggle one node
+        // in/out — `from != to` each time, gesture key `None`).
+        for i in 0..200 {
+            let to: BTreeSet<_> = if i % 2 == 0 {
+                [node].into_iter().collect()
+            } else {
+                BTreeSet::new()
+            };
+            let step = build_step(Intent::SetSelection { to }, &doc, GraphRef::Main).unwrap();
+            apply_step(&step, &mut doc, GraphRef::Main);
+            stack.push_current(GraphRef::Main, &[step]);
+            // The single packed buffer never exceeds the budget (entries
+            // are far smaller than 256 B, so no single-entry overflow).
+            assert!(
+                stack.actions.len() <= stack.max_bytes,
+                "buffer {} exceeded budget {} after push {i}",
+                stack.actions.len(),
+                stack.max_bytes,
+            );
+        }
+
+        // Old entries were dropped (not all 200 kept) and the newest is
+        // still undoable.
+        assert!(
+            stack.entries.len() < 200,
+            "oldest entries should have been trimmed"
+        );
+        assert!(
+            stack.undo(&mut doc, &mut |_| {}),
+            "the most recent edit stays undoable"
+        );
     }
 
     /// A document carrying a subgraph def "S" with interface inputs
