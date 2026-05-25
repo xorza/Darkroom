@@ -3,6 +3,7 @@ use common::{SerdeFormat, is_debug, key_index_vec::KeyIndexVec};
 use glam::Vec2;
 use scenarium::graph::{Binding, InputPort, Node, NodeKind, OutputPort, Subscription};
 use scenarium::prelude::{FuncLib, Graph as CoreGraph, NodeId, SubgraphDef, SubgraphId};
+use scenarium::subgraph::SubgraphRef;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 
@@ -345,9 +346,22 @@ impl Document {
             events: Vec::new(),
         };
         let id = def.id;
+        // Drop an instance of the new subgraph into the root graph,
+        // staggered so repeated creates don't perfectly overlap. Built
+        // before the def moves into the table (needs `&def`); the empty
+        // interface means no input ports to seed.
+        let inst = Node::subgraph_instance(&def, SubgraphRef::Local(id));
+        let inst_id = inst.id;
+        let inst_pos =
+            Vec2::new(60.0, 60.0) + Vec2::splat(36.0) * self.graph.subgraphs.len() as f32;
         self.graph.subgraphs.add(def);
+        self.graph.add(inst);
+        self.main_view.view_nodes.add(ViewNode {
+            id: inst_id,
+            pos: inst_pos,
+        });
 
-        // Seed the view explicitly so the pair opens input-left /
+        // Seed the interior view explicitly so the pair opens input-left /
         // output-right; `ensure_sub_view` then finds it and skips the
         // generic auto-layout that would stack them.
         let mut view = GraphView::default();
@@ -563,7 +577,6 @@ impl From<CoreGraph> for Document {
 mod tests {
     use super::*;
     use scenarium::prelude::{FuncId, StaticValue};
-    use scenarium::subgraph::SubgraphRef;
     use scenarium::testing::test_graph as core_test_graph;
 
     /// A childless local def with the given id/name.
@@ -749,6 +762,17 @@ mod tests {
         let op = view.view_nodes.by_key(&output_id).unwrap().pos;
         assert!(op.x > ip.x, "output boundary sits right of input");
         assert_eq!(ip.y, op.y, "boundaries are level");
+
+        // Creating also drops an instance of the new subgraph into root.
+        let inst = doc
+            .graph
+            .iter()
+            .find(|n| matches!(n.kind, NodeKind::Subgraph(SubgraphRef::Local(sid)) if sid == id))
+            .expect("instance added to main graph");
+        assert!(
+            doc.main_view.view_nodes.by_key(&inst.id).is_some(),
+            "instance has a main view node"
+        );
 
         // Each create mints a distinct id (no overwrite).
         let id2 = doc.create_subgraph();
