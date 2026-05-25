@@ -1,27 +1,26 @@
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use glam::Vec2;
 use lens::ImageFuncLib;
 use palantir::{HostHandle, Key, Shortcut, Ui};
 use scenarium::elements::basic_funclib::BasicFuncLib;
 use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
-use scenarium::graph::NodeKind;
-use scenarium::prelude::{FuncLib, SubgraphDef, SubgraphId};
+use scenarium::prelude::FuncLib;
 use scenarium::testing::{TestFuncHooks, test_func_lib};
 
 use crate::action_stack::ActionStack;
 use crate::config::AppConfig;
-use crate::document::{Document, GraphRef, GraphView};
+use crate::document::{Document, GraphRef};
 use crate::gui::UiAction;
 use crate::gui::main_window::MainWindow;
 use crate::gui::menu_bar::MenuCommand;
 use crate::gui::tab_bar::TabLabel;
 use crate::intent::{self, Intent, apply_step, build_step, requires_relayout};
-use crate::persistence;
 use crate::sample_graph::sample_graph;
 use crate::scene::Scene;
 use crate::theme::Theme;
+
+mod commands;
 
 const UNDO_SHORTCUT: Shortcut = Shortcut::ctrl('Z');
 const REDO_SHORTCUT: Shortcut = Shortcut::ctrl_shift('Z');
@@ -98,9 +97,7 @@ impl palantir::App for App {
     /// corrupt config, or a deleted document, must not block launch.
     fn new(ui: &mut Ui, handle: HostHandle) -> Self {
         let mut document: Document = sample_graph().into();
-        document
-            .main_view
-            .auto_layout(&document.graph, 220.0, 110.0, Vec2::new(40.0, 40.0));
+        document.main_view.auto_layout_default(&document.graph);
         let mut func_lib = FuncLib::default();
         func_lib.merge(test_func_lib(TestFuncHooks::default()));
         func_lib.merge(BasicFuncLib::default());
@@ -241,7 +238,7 @@ impl App {
         relayout |= self.apply_view_actions();
         relayout |= self.drain_intents(self.document.active_target());
         // A closed/deleted target can't be active; fall back to Main.
-        self.ensure_valid_active();
+        self.document.ensure_valid_active();
         relayout
     }
 
@@ -393,176 +390,6 @@ impl App {
         }
     }
 
-    fn handle_menu_command(&mut self, ui: &mut Ui, command: MenuCommand) {
-        match command {
-            MenuCommand::NewDocument => self.new_document(),
-            MenuCommand::LoadDocument => {
-                if let Some(path) = persistence::pick_open_path(self.current_path.as_deref()) {
-                    self.load_document(&path);
-                }
-            }
-            MenuCommand::SaveDocument => self.save_current(),
-            MenuCommand::SaveDocumentAs => self.save_document_as(),
-            MenuCommand::LoadTheme => {
-                if let Some(path) = persistence::pick_theme_open() {
-                    self.load_theme(ui, &path);
-                }
-            }
-            MenuCommand::ExportTheme => {
-                if let Some(path) = persistence::pick_theme_save() {
-                    persistence::export_theme(&self.theme, &path);
-                }
-            }
-            MenuCommand::ExportSubgraph => self.export_active_subgraph(),
-            MenuCommand::ImportSubgraph => self.import_subgraph(),
-        }
-    }
-
-    /// Export a subgraph def to a file (its interior `Graph` carries any
-    /// nested subgraph defs along). A selected subgraph-instance node
-    /// wins; otherwise, when the active tab is itself a subgraph, that
-    /// open subgraph is exported. No-op when neither resolves.
-    fn export_active_subgraph(&mut self) {
-        let Some(def) = self.subgraph_to_export() else {
-            eprintln!("subgraph export: no subgraph selected or open");
-            return;
-        };
-        if let Some(path) = persistence::pick_subgraph_save(self.current_path.as_deref()) {
-            persistence::export_subgraph(def, &path);
-        }
-    }
-
-    /// Resolve which subgraph def an export targets: the first selected
-    /// subgraph-instance node in the active graph (resolved against that
-    /// graph's own `Local` table or the shared `FuncLib` for `Linked`),
-    /// else the currently open subgraph when inside one.
-    fn subgraph_to_export(&self) -> Option<&SubgraphDef> {
-        let target = self.document.active_target();
-        let graph = self.document.graph_for(target)?;
-        if let Some(view) = self.document.view(target) {
-            for nid in &view.selected_nodes {
-                if let Some(node) = graph.by_id(nid)
-                    && let NodeKind::Subgraph(r) = node.kind
-                    && let Some(def) = graph.resolve_def(r, &self.func_lib)
-                {
-                    return Some(def);
-                }
-            }
-        }
-        match target {
-            GraphRef::Local(id) => self.document.graph.subgraphs.by_key(&id),
-            GraphRef::Main => None,
-        }
-    }
-
-    /// Import a subgraph def from a file as a local def in the current
-    /// document. The import is a copy with a fresh id; nothing is
-    /// instantiated and the undo stack is untouched (existing history
-    /// references no imported def, so it stays valid).
-    fn import_subgraph(&mut self) {
-        let Some(path) = persistence::pick_subgraph_open(self.current_path.as_deref()) else {
-            return;
-        };
-        if let Some(def) = persistence::import_subgraph(&path) {
-            self.document.import_subgraph(def);
-        }
-    }
-
-    /// Replace the document with an empty one and reset all derived
-    /// state. Clears the undo stack — restoring the previous doc via
-    /// Cmd-Z would re-introduce all of its nodes one-step-at-a-time
-    /// from intent history that no longer matches the live tree.
-    fn new_document(&mut self) {
-        self.document = Document::default();
-        self.action_stack.clear();
-        self.intents.clear();
-        // Force a scene rebuild next frame: the active target may still
-        // be `Main`, but it now points at a different graph.
-        self.scene_target = None;
-        self.set_document_path(None);
-    }
-
-    fn load_document(&mut self, path: &Path) {
-        let Some(doc) = persistence::load_document(path) else {
-            return;
-        };
-        self.document = doc;
-        self.action_stack.clear();
-        self.intents.clear();
-        self.scene_target = None;
-        self.set_document_path(Some(path.to_path_buf()));
-    }
-
-    /// Cmd+S: overwrite the current file if there is one, else fall
-    /// back to Save As (first save of a fresh document).
-    fn save_current(&mut self) {
-        match self.current_path.clone() {
-            Some(path) => self.save_document(&path),
-            None => self.save_document_as(),
-        }
-    }
-
-    /// Cmd+Shift+S / "Save As…": always prompt for a destination.
-    fn save_document_as(&mut self) {
-        if let Some(path) = persistence::pick_save_path(self.current_path.as_deref()) {
-            self.save_document(&path);
-        }
-    }
-
-    fn save_document(&mut self, path: &Path) {
-        if persistence::save_document(&self.document, path) {
-            self.set_document_path(Some(path.to_path_buf()));
-        }
-    }
-
-    /// Record `path` as both the dialog-anchor `current_path` and the
-    /// persisted `config.document_path`, then write the config so the
-    /// next launch reopens this document.
-    fn set_document_path(&mut self, path: Option<PathBuf>) {
-        self.current_path = path.clone();
-        self.config.document_path = path;
-        self.config.save();
-    }
-
-    /// Load a theme picked from the dialog: copy it into the working
-    /// dir under its own name (so the config can reference it by name
-    /// across sessions), apply it, and persist the name. The picked
-    /// file may live anywhere; the working-dir copy is the canonical
-    /// one the config resolves on the next launch.
-    fn load_theme(&mut self, ui: &mut Ui, picked: &Path) {
-        let Some(stem) = picked.file_stem().and_then(|s| s.to_str()) else {
-            eprintln!("theme load failed: path has no file name");
-            return;
-        };
-        let dest = AppConfig::theme_path(stem);
-        // Only copy when the picked file isn't already the working-dir
-        // copy (re-loading the active theme shouldn't self-overwrite).
-        if picked != dest
-            && let Err(err) = std::fs::copy(picked, &dest)
-        {
-            eprintln!("theme load failed: copy to {}: {err}", dest.display());
-            return;
-        }
-        if self.load_theme_file(&dest) {
-            self.config.theme_name = Some(stem.to_owned());
-            self.config.save();
-            ui.theme = self.theme.palantir_theme.clone();
-        }
-    }
-
-    /// Apply a theme `.toml` from `path` into `self.theme`. Returns
-    /// whether it succeeded; on failure leaves the current theme
-    /// untouched. Shared by startup restore and menu load.
-    fn load_theme_file(&mut self, path: &Path) -> bool {
-        match persistence::load_theme(path) {
-            Some(theme) => {
-                self.theme = theme;
-                true
-            }
-            None => false,
-        }
-    }
-
     /// Drain `intents`, applying each non-no-op intent to `document`,
     /// and push the whole frame's resulting steps onto the undo stack
     /// as a single batch entry — so a gesture that emits N intents
@@ -589,60 +416,6 @@ impl App {
             self.action_stack.push_current(target, &batch);
         }
         relayout
-    }
-
-    /// Keep the tab list renderable: drop tabs whose graph vanished,
-    /// seed any `Local` tab that's missing its view metadata, and clamp
-    /// `active` into range — so `rebuild_scene` always resolves a live
-    /// graph *and* view. `Main` always survives (`graph_for(Main)` is
-    /// infallible and `main_view` always exists).
-    ///
-    /// The view-seeding covers a desync hazard: `tabs` and `sub_views`
-    /// are independent serialized fields, so a deserialized (or
-    /// hand-edited) document can carry a `Local` tab with no matching
-    /// `sub_views` entry. Seeding it here recovers gracefully instead of
-    /// panicking on the `view(target).expect(..)` in `rebuild_scene`.
-    fn ensure_valid_active(&mut self) {
-        // Common case: every tab still resolves — touch nothing (no
-        // per-frame allocation). Only rebuild the list when a tab's
-        // graph actually vanished.
-        if self
-            .document
-            .tabs
-            .iter()
-            .any(|t| self.document.graph_for(*t).is_none())
-        {
-            // Split the borrow so `retain` (mut `tabs`) can read `graph`.
-            let Document { graph, tabs, .. } = &mut self.document;
-            tabs.retain(|t| match t {
-                GraphRef::Main => true,
-                GraphRef::Local(id) => graph.subgraphs.by_key(id).is_some(),
-            });
-        }
-        // Seed views for any `Local` tab missing one. Guarded by `any`
-        // so the common (all-seeded) case allocates nothing.
-        if self
-            .document
-            .tabs
-            .iter()
-            .any(|t| matches!(t, GraphRef::Local(id) if !self.document.sub_views.contains_key(id)))
-        {
-            let missing: Vec<SubgraphId> = self
-                .document
-                .tabs
-                .iter()
-                .filter_map(|t| match t {
-                    GraphRef::Local(id) if !self.document.sub_views.contains_key(id) => Some(*id),
-                    _ => None,
-                })
-                .collect();
-            for id in missing {
-                self.ensure_sub_view(id);
-            }
-        }
-        if self.document.active >= self.document.tabs.len() {
-            self.document.active = self.document.tabs.len() - 1;
-        }
     }
 
     /// Build the strip's per-tab labels from the open-tab list.
@@ -711,31 +484,12 @@ impl App {
             return false;
         }
         if let GraphRef::Local(id) = target
-            && !self.ensure_sub_view(id)
+            && !self.document.ensure_sub_view(id)
         {
             return false;
         }
         self.document.tabs.push(target);
         self.document.active = self.document.tabs.len() - 1;
-        true
-    }
-
-    /// Ensure a `GraphView` exists for a local subgraph interior,
-    /// auto-laying-out its nodes on first creation. Returns `false` if
-    /// the subgraph no longer exists.
-    fn ensure_sub_view(&mut self, id: SubgraphId) -> bool {
-        if self.document.sub_views.contains_key(&id) {
-            return true;
-        }
-        let view = {
-            let Some(def) = self.document.graph.subgraphs.by_key(&id) else {
-                return false;
-            };
-            let mut view = GraphView::for_graph(&def.graph);
-            view.auto_layout(&def.graph, 220.0, 110.0, Vec2::new(40.0, 40.0));
-            view
-        };
-        self.document.sub_views.insert(id, view);
         true
     }
 }

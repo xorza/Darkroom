@@ -47,14 +47,6 @@ pub fn pick_save_path(start: Option<&Path>) -> Option<PathBuf> {
     file_dialog(start).save_file()
 }
 
-pub fn pick_subgraph_open(start: Option<&Path>) -> Option<PathBuf> {
-    file_dialog(start).pick_file()
-}
-
-pub fn pick_subgraph_save(start: Option<&Path>) -> Option<PathBuf> {
-    file_dialog(start).save_file()
-}
-
 /// TOML-only dialog for theme files. Themes always round-trip through
 /// TOML (the format the config references by name), so there's no
 /// multi-format picker like documents have.

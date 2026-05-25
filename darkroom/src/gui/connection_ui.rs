@@ -4,8 +4,9 @@ use scenarium::graph::{Binding, InputPort, OutputPort};
 
 use crate::app::AppContext;
 use crate::gui::breaker::BreakerProbe;
-use crate::gui::graph_ui::{PortFrame, node_ports, to_world};
+use crate::gui::graph_ui::{node_ports, to_world};
 use crate::gui::node_ui::{node_widget_id, set_input};
+use crate::gui::port_frame::PortFrame;
 use crate::gui::{PortKind, PortRef};
 use crate::intent::Intent;
 use crate::scene::{InputBindingView, Scene};

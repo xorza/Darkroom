@@ -6,6 +6,7 @@ pub mod main_window;
 pub mod menu_bar;
 pub mod new_node_ui;
 pub mod node_ui;
+pub mod port_frame;
 pub mod selection_ui;
 pub mod tab_bar;
 pub mod value_editor;

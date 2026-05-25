@@ -4,12 +4,12 @@ mod config;
 mod document;
 mod gui;
 mod intent;
-mod model;
 mod persistence;
 mod reconcile;
 mod sample_graph;
 mod scene;
 mod theme;
+mod view_node;
 
 use palantir::{WinitHost, WinitHostConfig};
 

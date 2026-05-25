@@ -1,6 +1,7 @@
 use crate::document::{BoundarySide, GraphRef};
 use crate::gui::breaker::BreakerProbe;
-use crate::gui::graph_ui::{PortFrame, node_ports};
+use crate::gui::graph_ui::node_ports;
+use crate::gui::port_frame::PortFrame;
 use crate::gui::value_editor;
 use crate::gui::{PortKind, PortRef, UiAction};
 use crate::intent::Intent;
@@ -37,7 +38,7 @@ pub(super) struct RecordCtx<'a> {
 /// pointer at a time, so one anchor slot is enough.
 ///
 /// `draw_all` is the single entry point; `GraphUI` calls it once per
-/// frame after [`crate::gui::graph_ui::PortFrame`] has been rebuilt
+/// frame after [`crate::gui::port_frame::PortFrame`] has been rebuilt
 /// from last-frame's responses.
 #[derive(Default, Debug)]
 pub struct NodeUI {

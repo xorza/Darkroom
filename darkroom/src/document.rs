@@ -8,18 +8,25 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 
 use crate::intent::Intent;
-use crate::model::ViewNode;
 use crate::reconcile::reconcile_def;
+use crate::view_node::ViewNode;
 
 /// World-space offset applied to duplicated nodes so the copies don't
 /// land exactly on top of their originals.
 const DUPLICATE_OFFSET: Vec2 = Vec2::new(32.0, 32.0);
 
+/// Default topological-column auto-layout parameters, shared by every
+/// place that seeds a fresh view (the root on load, each subgraph
+/// interior on first open). Kept in one spot so the seeding paths can't
+/// drift. The boundary placement below reuses `AUTO_LAYOUT_ORIGIN`.
+const AUTO_LAYOUT_COL_SPACING: f32 = 220.0;
+const AUTO_LAYOUT_ROW_SPACING: f32 = 110.0;
+const AUTO_LAYOUT_ORIGIN: Vec2 = Vec2::new(40.0, 40.0);
+
 /// Initial placement of a fresh subgraph's boundary nodes: the input
 /// boundary at the origin, the output boundary one gap to the right and
 /// level with it (instead of the generic auto-layout stacking the two
 /// unconnected nodes in one column).
-const BOUNDARY_LAYOUT_ORIGIN: Vec2 = Vec2::new(40.0, 40.0);
 const BOUNDARY_LAYOUT_GAP: f32 = 520.0;
 
 /// Which graph an editor tab is pointed at. `Main` is the document's
@@ -118,6 +125,16 @@ impl GraphView {
             view_node.pos = origin + Vec2::new(d as f32 * col_spacing, *row as f32 * row_spacing);
             *row += 1;
         }
+    }
+
+    /// `auto_layout` with the shared default column/row spacing + origin.
+    pub fn auto_layout_default(&mut self, graph: &CoreGraph) {
+        self.auto_layout(
+            graph,
+            AUTO_LAYOUT_COL_SPACING,
+            AUTO_LAYOUT_ROW_SPACING,
+            AUTO_LAYOUT_ORIGIN,
+        );
     }
 
     fn validate(&self, graph: &CoreGraph) {
@@ -310,6 +327,96 @@ impl Document {
         self.tabs[self.active]
     }
 
+    /// Resolve which subgraph def an export targets: the first selected
+    /// subgraph-instance node in the active graph (resolved against that
+    /// graph's own `Local` table or the shared `FuncLib` for `Linked`),
+    /// else the currently open subgraph when inside one. `None` when
+    /// neither resolves.
+    pub fn subgraph_to_export<'a>(&'a self, func_lib: &'a FuncLib) -> Option<&'a SubgraphDef> {
+        let target = self.active_target();
+        let graph = self.graph_for(target)?;
+        if let Some(view) = self.view(target) {
+            for nid in &view.selected_nodes {
+                if let Some(node) = graph.by_id(nid)
+                    && let NodeKind::Subgraph(r) = node.kind
+                    && let Some(def) = graph.resolve_def(r, func_lib)
+                {
+                    return Some(def);
+                }
+            }
+        }
+        match target {
+            GraphRef::Local(id) => self.graph.subgraphs.by_key(&id),
+            GraphRef::Main => None,
+        }
+    }
+
+    /// Ensure a `GraphView` exists for a local subgraph interior,
+    /// auto-laying-out its nodes on first creation. Returns `false` if
+    /// the subgraph no longer exists.
+    pub fn ensure_sub_view(&mut self, id: SubgraphId) -> bool {
+        if self.sub_views.contains_key(&id) {
+            return true;
+        }
+        let view = {
+            let Some(def) = self.graph.subgraphs.by_key(&id) else {
+                return false;
+            };
+            let mut view = GraphView::for_graph(&def.graph);
+            view.auto_layout_default(&def.graph);
+            view
+        };
+        self.sub_views.insert(id, view);
+        true
+    }
+
+    /// Keep the tab list renderable: drop tabs whose graph vanished,
+    /// seed any `Local` tab that's missing its view metadata, and clamp
+    /// `active` into range — so the scene rebuild always resolves a live
+    /// graph *and* view. `Main` always survives (`graph_for(Main)` is
+    /// infallible and `main_view` always exists).
+    ///
+    /// The view-seeding covers a desync hazard: `tabs` and `sub_views`
+    /// are independent serialized fields, so a deserialized (or
+    /// hand-edited) document can carry a `Local` tab with no matching
+    /// `sub_views` entry. Seeding it here recovers gracefully instead of
+    /// panicking on a later `view(target).expect(..)`.
+    pub fn ensure_valid_active(&mut self) {
+        // Common case: every tab still resolves — touch nothing (no
+        // per-frame allocation). Only rebuild the list when a tab's
+        // graph actually vanished.
+        if self.tabs.iter().any(|t| self.graph_for(*t).is_none()) {
+            // Split the borrow so `retain` (mut `tabs`) can read `graph`.
+            let Document { graph, tabs, .. } = self;
+            tabs.retain(|t| match t {
+                GraphRef::Main => true,
+                GraphRef::Local(id) => graph.subgraphs.by_key(id).is_some(),
+            });
+        }
+        // Seed views for any `Local` tab missing one. Guarded by `any`
+        // so the common (all-seeded) case allocates nothing.
+        if self
+            .tabs
+            .iter()
+            .any(|t| matches!(t, GraphRef::Local(id) if !self.sub_views.contains_key(id)))
+        {
+            let missing: Vec<SubgraphId> = self
+                .tabs
+                .iter()
+                .filter_map(|t| match t {
+                    GraphRef::Local(id) if !self.sub_views.contains_key(id) => Some(*id),
+                    _ => None,
+                })
+                .collect();
+            for id in missing {
+                self.ensure_sub_view(id);
+            }
+        }
+        if self.active >= self.tabs.len() {
+            self.active = self.tabs.len() - 1;
+        }
+    }
+
     /// Add an imported subgraph `def` to this document's local defs,
     /// returning its assigned id. The top-level id is regenerated so an
     /// import never overwrites an existing def. Nested child defs ride
@@ -367,11 +474,11 @@ impl Document {
         let mut view = GraphView::default();
         view.view_nodes.add(ViewNode {
             id: input_id,
-            pos: BOUNDARY_LAYOUT_ORIGIN,
+            pos: AUTO_LAYOUT_ORIGIN,
         });
         view.view_nodes.add(ViewNode {
             id: output_id,
-            pos: BOUNDARY_LAYOUT_ORIGIN + Vec2::new(BOUNDARY_LAYOUT_GAP, 0.0),
+            pos: AUTO_LAYOUT_ORIGIN + Vec2::new(BOUNDARY_LAYOUT_GAP, 0.0),
         });
         self.sub_views.insert(id, view);
 
