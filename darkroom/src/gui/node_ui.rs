@@ -10,7 +10,7 @@ use glam::Vec2;
 use palantir::{
     Align, Background, Color, Configure, ContextMenu, Corners, HAlign, InternedStr, Key, MenuItem,
     Panel, Rect, Sense, Shadow, Shape, Shortcut, Sizing, Spacing, Stroke, Text, TextEdit,
-    TextStyle, Ui, VAlign, WidgetId,
+    TextEditTheme, TextStyle, Ui, VAlign, WidgetId,
 };
 use scenarium::data::StaticValue;
 use scenarium::graph::Binding;
@@ -713,6 +713,7 @@ fn port_label(
     let mut draft = std::mem::take(&mut ui.state_mut::<PortRename>(id).draft);
     TextEdit::new(&mut draft)
         .id(id)
+        .style(flat_edit_style(ui))
         .max_chars(PORT_NAME_MAX_CHARS)
         .size((Sizing::Fixed(theme.value_editor_width), Sizing::Hug))
         .show(ui);
@@ -740,6 +741,23 @@ fn port_label(
         st.focused_once = false;
         ui.request_focus(None);
     }
+}
+
+/// The ambient text-edit theme flattened for an inline port-rename
+/// field: zero padding/margin and no border, so the editor's `Hug`
+/// height equals the plain `Text` label's line height — the node body
+/// doesn't grow when a label enters/exits edit mode. The fill stays, so
+/// the fixed-width field still reads as editable.
+fn flat_edit_style(ui: &Ui) -> TextEditTheme {
+    let mut style = ui.theme.text_edit.clone();
+    style.padding = Spacing::ZERO;
+    style.margin = Spacing::ZERO;
+    for look in [&mut style.normal, &mut style.focused, &mut style.disabled] {
+        if let Some(bg) = look.background.as_mut() {
+            bg.stroke = Stroke::ZERO;
+        }
+    }
+    style
 }
 
 /// Hover / grab box scaled past the painted dot so ports are easier to
