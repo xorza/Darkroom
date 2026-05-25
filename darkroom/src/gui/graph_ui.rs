@@ -240,7 +240,7 @@ impl GraphUI {
     /// drain and Pass A records the settled layout:
     ///
     /// - pan/zoom (`emit_pan_zoom` → `Intent::SetViewport`),
-    /// - node drag (`node_ui.prepass` → `Intent::MoveNode`),
+    /// - node drag (`node_ui.prepass` → `Intent::MoveNodes`),
     /// - connection commit (`connection_ui.apply` → `Intent::SetInput`).
     ///
     /// Connection commit specifically *must* be here: binding an input

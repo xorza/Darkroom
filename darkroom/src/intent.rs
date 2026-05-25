@@ -67,9 +67,14 @@ pub enum Intent {
     RemoveNode {
         node_id: NodeId,
     },
-    MoveNode {
-        node_id: NodeId,
-        to: Vec2,
+    /// Move one or more nodes. A multi-select drag moves the whole group
+    /// as a single undo entry; a plain drag carries just the one node.
+    /// `grabbed` is the node the pointer latched — it keys the drag
+    /// gesture so consecutive frames coalesce. Each `to` entry is
+    /// `(node_id, new_pos)`.
+    MoveNodes {
+        grabbed: NodeId,
+        to: Vec<(NodeId, Vec2)>,
     },
     RenameNode {
         node_id: NodeId,
@@ -175,10 +180,11 @@ pub enum GraphStep {
         subscriptions: Vec<Subscription>,
         was_selected: bool,
     },
-    MoveNode {
-        node_id: NodeId,
-        from: Vec2,
-        to: Vec2,
+    MoveNodes {
+        grabbed: NodeId,
+        /// `(node_id, from, to)` per moved node. Nodes missing at build
+        /// time are dropped, so this can be shorter than the intent's `to`.
+        moves: Vec<(NodeId, Vec2, Vec2)>,
     },
     RenameNode {
         node_id: NodeId,
@@ -278,7 +284,7 @@ impl GraphStep {
         match self {
             GraphStep::AddNode { .. } | GraphStep::RemoveNode { .. } => false,
             GraphStep::DuplicateNodes { nodes, .. } => nodes.is_empty(),
-            GraphStep::MoveNode { from, to, .. } => from == to,
+            GraphStep::MoveNodes { moves, .. } => moves.iter().all(|(_, from, to)| from == to),
             GraphStep::RenameNode { from, to, .. } => from == to,
             GraphStep::SetInput { from, to, .. } => from == to,
             GraphStep::SetSelection { from, to } => from == to,
@@ -316,9 +322,10 @@ impl DocStep {
 /// Read pre-mutation state from `doc` and fold it with `intent`
 /// into a complete [`UndoStep`]. Pure — does not write to the graph.
 /// Returns `None` when the intent targets a node that no longer exists
-/// (e.g. a `MoveNode` whose anchor lingered one frame past a `RemoveNode`
-/// applied earlier in the same frame). Callers should treat a `None`
-/// result as "stale intent, drop it".
+/// (e.g. a `RemoveNode`/`SetInput` whose anchor lingered one frame past a
+/// `RemoveNode` applied earlier in the same frame). Callers should treat a
+/// `None` result as "stale intent, drop it". (`MoveNodes` instead skips
+/// vanished nodes individually rather than dropping the whole batch.)
 pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<UndoStep> {
     // Document-global intents don't resolve a graph scope.
     if let Intent::SwitchTab { to } = intent {
@@ -396,11 +403,15 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
                 was_selected,
             }
         }
-        Intent::MoveNode { node_id, to } => GraphStep::MoveNode {
-            node_id,
-            from: view.view_nodes.by_key(&node_id)?.pos,
-            to,
-        },
+        Intent::MoveNodes { grabbed, to } => {
+            let mut moves = Vec::with_capacity(to.len());
+            for (id, t) in to {
+                if let Some(vn) = view.view_nodes.by_key(&id) {
+                    moves.push((id, vn.pos, t));
+                }
+            }
+            GraphStep::MoveNodes { grabbed, moves }
+        }
         Intent::RenameNode { node_id, to } => GraphStep::RenameNode {
             from: graph.by_id(&node_id)?.name.clone(),
             node_id,
@@ -529,8 +540,12 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             );
             scope.remove_node(&node.id);
         }
-        GraphStep::MoveNode { node_id, to, .. } => {
-            scope.view.view_nodes.by_key_mut(node_id).unwrap().pos = *to;
+        GraphStep::MoveNodes { moves, .. } => {
+            for (id, _, to) in moves {
+                if let Some(vn) = scope.view.view_nodes.by_key_mut(id) {
+                    vn.pos = *to;
+                }
+            }
         }
         GraphStep::RenameNode { node_id, to, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().name = to.clone();
@@ -650,8 +665,12 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
                 scope.view.selected_nodes.insert(removed_node_id);
             }
         }
-        GraphStep::MoveNode { node_id, from, .. } => {
-            scope.view.view_nodes.by_key_mut(node_id).unwrap().pos = *from;
+        GraphStep::MoveNodes { moves, .. } => {
+            for (id, from, _) in moves {
+                if let Some(vn) = scope.view.view_nodes.by_key_mut(id) {
+                    vn.pos = *from;
+                }
+            }
         }
         GraphStep::RenameNode { node_id, from, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().name = from.clone();
@@ -721,7 +740,7 @@ pub fn requires_relayout(step: &UndoStep) -> bool {
             GraphStep::AddNode { .. }
             | GraphStep::DuplicateNodes { .. }
             | GraphStep::RemoveNode { .. }
-            | GraphStep::MoveNode { .. }
+            | GraphStep::MoveNodes { .. }
             | GraphStep::RenameNode { .. } => true,
             // Viewport is the inner-canvas `TranslateScale`, applied at
             // paint; children arrange in pre-transform space, so a pan/zoom
@@ -747,12 +766,12 @@ pub fn requires_relayout(step: &UndoStep) -> bool {
 /// Identifies "same continuous gesture" for undo coalescing. The undo
 /// stack collapses consecutive steps with the same key into one entry
 /// (keeping the *first* "from" payload). Two viewport changes coalesce;
-/// two `MoveNode`s of the *same* node coalesce.
+/// two `MoveNodes` of the *same* grabbed node coalesce.
 pub fn gesture_key(step: &UndoStep) -> Option<GestureKey> {
     match step {
         UndoStep::Graph(GraphStep::SetViewport { .. }) => Some(GestureKey::Viewport),
-        UndoStep::Graph(GraphStep::MoveNode { node_id, .. }) => {
-            Some(GestureKey::NodeDrag(*node_id))
+        UndoStep::Graph(GraphStep::MoveNodes { grabbed, .. }) => {
+            Some(GestureKey::NodeDrag(*grabbed))
         }
         // Consecutive tab switches collapse into one entry: the merged
         // step keeps the original `from` and adopts the latest `to`, so
@@ -799,13 +818,30 @@ pub fn coalesce(prev: &UndoStep, next: &UndoStep) -> Option<UndoStep> {
             to_scale: *to_scale,
         })),
         (
-            UndoStep::Graph(GraphStep::MoveNode { node_id, from, .. }),
-            UndoStep::Graph(GraphStep::MoveNode { to, .. }),
-        ) => Some(UndoStep::Graph(GraphStep::MoveNode {
-            node_id: *node_id,
-            from: *from,
-            to: *to,
-        })),
+            UndoStep::Graph(GraphStep::MoveNodes {
+                grabbed,
+                moves: prev,
+            }),
+            UndoStep::Graph(GraphStep::MoveNodes { moves: next, .. }),
+        ) => {
+            // Same gesture (matched `NodeDrag` key) ⇒ same node set; keep
+            // each node's original `from`, adopt its latest `to`.
+            let merged = prev
+                .iter()
+                .map(|(id, from, prev_to)| {
+                    let to = next
+                        .iter()
+                        .find(|(nid, _, _)| nid == id)
+                        .map(|(_, _, t)| *t)
+                        .unwrap_or(*prev_to);
+                    (*id, *from, to)
+                })
+                .collect();
+            Some(UndoStep::Graph(GraphStep::MoveNodes {
+                grabbed: *grabbed,
+                moves: merged,
+            }))
+        }
         (
             UndoStep::Doc(DocStep::SwitchTab { from, .. }),
             UndoStep::Doc(DocStep::SwitchTab { to, .. }),

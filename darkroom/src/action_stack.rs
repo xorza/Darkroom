@@ -482,8 +482,11 @@ mod tests {
         let mut stack = ActionStack::new(1 << 20);
 
         let drag_to = |stack: &mut ActionStack, doc: &mut Document, to: Vec2| {
-            let step =
-                build_step(Intent::MoveNode { node_id: node, to }, doc, GraphRef::Main).unwrap();
+            let intent = Intent::MoveNodes {
+                grabbed: node,
+                to: vec![(node, to)],
+            };
+            let step = build_step(intent, doc, GraphRef::Main).unwrap();
             apply_step(&step, doc, GraphRef::Main);
             stack.push_current(GraphRef::Main, &[step]);
         };
@@ -520,16 +523,64 @@ mod tests {
         let mut stack = ActionStack::new(1 << 20);
 
         for (node, to) in [(a, Vec2::new(5.0, 5.0)), (b, Vec2::new(6.0, 6.0))] {
-            let step =
-                build_step(Intent::MoveNode { node_id: node, to }, &doc, GraphRef::Main).unwrap();
+            let intent = Intent::MoveNodes {
+                grabbed: node,
+                to: vec![(node, to)],
+            };
+            let step = build_step(intent, &doc, GraphRef::Main).unwrap();
             apply_step(&step, &mut doc, GraphRef::Main);
             stack.push_current(GraphRef::Main, &[step]);
         }
-        // Different nodes ⇒ different `NodeDrag` keys ⇒ two entries.
+        // Different grabbed nodes ⇒ different `NodeDrag` keys ⇒ two entries.
         assert!(stack.undo(&mut doc, &mut |_| {}));
         assert!(
             stack.undo(&mut doc, &mut |_| {}),
             "moves of distinct nodes stay separate undo entries"
+        );
+    }
+
+    #[test]
+    fn group_drag_moves_all_and_undoes_as_one() {
+        use glam::Vec2;
+
+        let mut doc: Document = test_graph().into();
+        let a = doc.graph.iter().next().unwrap().id;
+        let b = doc.graph.iter().nth(1).unwrap().id;
+        let a0 = doc.main_view.view_nodes.by_key(&a).unwrap().pos;
+        let b0 = doc.main_view.view_nodes.by_key(&b).unwrap().pos;
+        let mut stack = ActionStack::new(1 << 20);
+
+        // Two frames of a group drag (grabbed = a), each frame moving both
+        // a and b by the running offset. Same grabbed ⇒ one coalesced entry.
+        let drag = |stack: &mut ActionStack, doc: &mut Document, off: Vec2| {
+            let intent = Intent::MoveNodes {
+                grabbed: a,
+                to: vec![(a, a0 + off), (b, b0 + off)],
+            };
+            let step = build_step(intent, doc, GraphRef::Main).unwrap();
+            apply_step(&step, doc, GraphRef::Main);
+            stack.push_current(GraphRef::Main, &[step]);
+        };
+        drag(&mut stack, &mut doc, Vec2::new(10.0, 0.0));
+        drag(&mut stack, &mut doc, Vec2::new(25.0, 5.0));
+
+        // Both ended at origin + last offset.
+        assert_eq!(
+            doc.main_view.view_nodes.by_key(&a).unwrap().pos,
+            a0 + Vec2::new(25.0, 5.0)
+        );
+        assert_eq!(
+            doc.main_view.view_nodes.by_key(&b).unwrap().pos,
+            b0 + Vec2::new(25.0, 5.0)
+        );
+
+        // One undo restores BOTH to their pre-drag positions (first `from`).
+        assert!(stack.undo(&mut doc, &mut |_| {}));
+        assert_eq!(doc.main_view.view_nodes.by_key(&a).unwrap().pos, a0);
+        assert_eq!(doc.main_view.view_nodes.by_key(&b).unwrap().pos, b0);
+        assert!(
+            !stack.undo(&mut doc, &mut |_| {}),
+            "the group drag collapsed to exactly one entry"
         );
     }
 

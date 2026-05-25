@@ -31,8 +31,8 @@ pub(super) struct RecordCtx<'a> {
 }
 
 /// Owns rendering of every graph node plus the single active drag
-/// anchor — the press-frame `pos` is snapshotted here so each
-/// `MoveNode` target is `anchor.pos + drag_delta`, not a running
+/// anchor — the press-frame positions are snapshotted here so each
+/// `MoveNodes` target is `start_pos + drag_delta`, not a running
 /// integration over the moving source. Only one node can hold the
 /// pointer at a time, so one anchor slot is enough.
 ///
@@ -44,10 +44,15 @@ pub struct NodeUI {
     drag_anchor: Option<DragAnchor>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct DragAnchor {
+    /// The node the pointer latched. Keys the `response_for` lookup and
+    /// the drag gesture; always present in `start_positions`.
     node_id: NodeId,
-    pos: Vec2,
+    /// Every node moving with this drag and its position at drag start:
+    /// the whole selection when the grabbed node was already selected,
+    /// else just the grabbed node. Each emits `start + delta`.
+    start_positions: Vec<(NodeId, Vec2)>,
     /// Captured from the `drag_started` frame's `Response::widget_id()`
     /// so subsequent frames can `ui.response_for(widget_id)` *before*
     /// recording and bake the current `drag_delta` into `.position(...)`.
@@ -60,7 +65,7 @@ impl NodeUI {
     /// Iterate every scene node, recording its widget tree and
     /// pushing port circle centers into `centers`. Inserts into
     /// `port_nodes` only when every port resolved a layout rect.
-    /// Emits an `Intent::MoveNode` for any node holding an active
+    /// Emits an `Intent::MoveNodes` for any node holding an active
     /// LMB drag on its body (port circles capture their own clicks
     /// via `Sense::CLICK` so drags don't latch off the port grabs).
     pub(super) fn draw_all(
@@ -79,7 +84,7 @@ impl NodeUI {
         // Drop the anchor if its target node vanished from the graph
         // (mid-drag delete). Without this, the slot would linger and
         // could fire when a fresh node reused the id.
-        if let Some(a) = self.drag_anchor
+        if let Some(a) = &self.drag_anchor
             && !rcx.scene.nodes.iter().any(|n| n.id == a.node_id)
         {
             self.drag_anchor = None;
@@ -177,17 +182,26 @@ impl NodeUI {
 
         // Latch the anchor on the press-frame edge; subsequent frames'
         // `prepass` peeks `response_for(widget_id)` before record runs
-        // and converts `drag_delta` into a `MoveNode` applied to
+        // and converts `drag_delta` into a `MoveNodes` applied to
         // `Document` upstream of `Scene::rebuild`.
         if response.drag_started() {
-            // Grabbing an unselected node selects it (dragging one that's
-            // already in the selection keeps the group intact).
-            if !selected {
+            // Grabbing a node already in the selection drags the whole
+            // group together; grabbing an unselected node selects only it
+            // and drags it alone.
+            let start_positions = if selected {
+                rcx.scene
+                    .nodes
+                    .iter()
+                    .filter(|n| rcx.scene.selected_nodes.contains(&n.id))
+                    .map(|n| (n.id, n.pos))
+                    .collect()
+            } else {
                 out.push(select_intent(false, rcx.scene, node.id));
-            }
+                vec![(node.id, node.pos)]
+            };
             self.drag_anchor = Some(DragAnchor {
                 node_id: node.id,
-                pos: node.pos,
+                start_positions,
                 widget_id: response.widget_id(),
             });
         }
@@ -197,26 +211,34 @@ impl NodeUI {
     /// this `NodeUI` owns and push the corresponding `Intent`s into
     /// `out`. Runs before `Scene::rebuild` in `App::frame`, so any
     /// state mutation applied from these intents (notably drag-driven
-    /// `MoveNode`) lands in `Document` before recording — Pass A's
+    /// `MoveNodes`) lands in `Document` before recording — Pass A's
     /// arrange already reflects the cursor; no Pass B relayout retry.
     pub fn prepass(&mut self, ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
-        let Some(anchor) = self.drag_anchor else {
+        // `node_id`/`widget_id` are `Copy`, so pull them out and drop the
+        // borrow — that lets the early returns below reassign
+        // `self.drag_anchor` without cloning the `start_positions` `Vec`,
+        // which is only read in the success path (where the anchor isn't
+        // cleared and can be re-borrowed).
+        let Some(&DragAnchor {
+            node_id, widget_id, ..
+        }) = self.drag_anchor.as_ref()
+        else {
             return;
         };
         // Drop a stale anchor whose node was removed last frame (e.g.
         // breaker swipe deleted the dragged node). Without this, the
-        // emitted `MoveNode` would target a missing node and panic in
+        // emitted `MoveNodes` would target a missing node and panic in
         // `build_step`. `draw_all` also clears stale anchors, but only
         // after this prepass runs.
-        if !scene.nodes.iter().any(|n| n.id == anchor.node_id) {
+        if !scene.nodes.iter().any(|n| n.id == node_id) {
             self.drag_anchor = None;
             return;
         }
-        let resp = ui.response_for(anchor.widget_id);
+        let resp = ui.response_for(widget_id);
         // `drag_started` on a still-active anchor means a *new* gesture
         // just latched on the same widget — `record` will replace the
-        // anchor this frame; emitting now with the stale `anchor.pos`
-        // makes the node snap to the previous gesture's start point.
+        // anchor this frame; emitting now with the stale start positions
+        // makes the nodes snap to the previous gesture's start point.
         if resp.drag_started() {
             self.drag_anchor = None;
             return;
@@ -232,9 +254,20 @@ impl NodeUI {
         // canvas's pre-transform frame. Divide by zoom so cursor travel
         // matches node travel at every zoom level.
         let zoom = if scene.zoom > 0.0 { scene.zoom } else { 1.0 };
-        out.push(Intent::MoveNode {
-            node_id: anchor.node_id,
-            to: anchor.pos + delta / zoom,
+        let offset = delta / zoom;
+        // Anchor still present (success path never cleared it); re-borrow
+        // to read the start positions without cloning.
+        let to = self
+            .drag_anchor
+            .as_ref()
+            .unwrap()
+            .start_positions
+            .iter()
+            .map(|(id, start)| (*id, *start + offset))
+            .collect();
+        out.push(Intent::MoveNodes {
+            grabbed: node_id,
+            to,
         });
     }
 }
