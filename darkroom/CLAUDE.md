@@ -107,9 +107,10 @@ startup, shared across documents).
   coalesce in place (a node drag = many `MoveNode` intents → one undo entry).
 - **`UiAction`** (`gui/mod.rs`) is the non-undoable sibling of `Intent`: it
   changes *what the editor shows* (open/activate/close tab), not the document.
-- Note: `RenameNode`, `SetCacheBehavior`, `SetEventConnection` variants exist
-  with full handling but are **not yet emitted by any UI** — staged ports from
-  the deprecated editor. That's why `mod intent` carries `#[allow(dead_code)]`.
+- Note: `RenameNode` and `SetEventConnection` variants exist with full handling
+  but are **not yet emitted by any UI** — staged ports from the deprecated
+  editor. They don't trip dead-code lints because the serde derives reference
+  every variant. (`SetCacheBehavior` *is* live — the node header's `C` chip.)
 
 ### Render projection: `Scene` (`src/scene.rs`)
 A flat, per-frame snapshot rebuilt from the *active* graph+view every frame

@@ -22,10 +22,6 @@ pub struct MainWindow {
 }
 
 impl MainWindow {
-    /// Pre-record pass: each UI subtree fills `out` with the intents
-    /// it derives from palantir's current-frame input state (drag
-    /// deltas, etc.). `App::frame` drains and applies these before
-    /// `Scene::rebuild`, so the record phase sees the latest doc.
     /// Navigation scan: surface tab activate/close and subgraph-open
     /// requests from *last* frame's responses (`scene` is the
     /// last-rendered graph, which is what carried the clicked chips).

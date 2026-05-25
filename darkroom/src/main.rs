@@ -1,10 +1,8 @@
-#[allow(dead_code)]
 mod action_stack;
 mod app;
 mod config;
 mod document;
 mod gui;
-#[allow(dead_code)]
 mod intent;
 mod model;
 mod persistence;

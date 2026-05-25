@@ -34,7 +34,7 @@ use crate::model::ViewNode;
 /// Each variant says "set X to Y"; the consumer captures the previous
 /// Y at commit time via [`build_step`].
 ///
-/// **Adding a variant** — touch four spots:
+/// **Adding a variant** — touch these spots:
 ///   1. add the variant here on `Intent`,
 ///   2. add the matching variant on [`UndoStep`] (carrying both the
 ///      forward "to" payload and the backward "from" payload, or just
@@ -43,8 +43,8 @@ use crate::model::ViewNode;
 ///      and combine with the intent's `to` into a complete `UndoStep`),
 ///   4. add arms to [`apply_step`] and [`revert_step`] reading the
 ///      forward and backward halves respectively,
-///   5. update [`affects_computation`] if the variant re-triggers
-///      compute,
+///   5. add arms to [`UndoStep::is_noop`] and [`requires_relayout`]
+///      (both exhaustive — they won't compile until you do),
 ///   6. update [`gesture_key`] if the variant coalesces in undo
 ///      history.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -249,11 +249,8 @@ impl GraphUI {
     /// to the old port. Committing pre-record makes `cascade_A` the
     /// resized layout, so Pass B anchors the curve correctly with no
     /// extra frame. `PortFrame` is rebuilt here (and reused by `frame`)
-    /// because the commit reads it.
-    /// Edit-phase prepass: emit input-derived graph mutations (drag,
-    /// pan/zoom, connection commit) for the active graph. Navigation
-    /// (tab/open) is handled separately, before this, so the target is
-    /// already fixed here.
+    /// because the commit reads it. Navigation (tab/open) is handled
+    /// separately, before this, so the target is already fixed here.
     pub fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
         self.emit_pan_zoom(ui, scene, out);
         self.gestures.node_ui.prepass(ui, scene, out);
