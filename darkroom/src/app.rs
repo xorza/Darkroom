@@ -6,7 +6,8 @@ use lens::ImageFuncLib;
 use palantir::{HostHandle, Shortcut, Ui};
 use scenarium::elements::basic_funclib::BasicFuncLib;
 use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
-use scenarium::prelude::{FuncLib, SubgraphId};
+use scenarium::graph::NodeKind;
+use scenarium::prelude::{FuncLib, SubgraphDef, SubgraphId};
 use scenarium::testing::{TestFuncHooks, test_func_lib};
 
 use crate::action_stack::ActionStack;
@@ -392,19 +393,40 @@ impl App {
         }
     }
 
-    /// Export the active subgraph tab's def to a file (its interior
-    /// `Graph` carries any nested subgraph defs along). No-op when the
-    /// active tab is the root graph.
+    /// Export a subgraph def to a file (its interior `Graph` carries any
+    /// nested subgraph defs along). A selected subgraph-instance node
+    /// wins; otherwise, when the active tab is itself a subgraph, that
+    /// open subgraph is exported. No-op when neither resolves.
     fn export_active_subgraph(&mut self) {
-        let GraphRef::Local(id) = self.document.active_target() else {
-            eprintln!("subgraph export: active tab is not a subgraph");
-            return;
-        };
-        let Some(def) = self.document.graph.subgraphs.by_key(&id) else {
+        let Some(def) = self.subgraph_to_export() else {
+            eprintln!("subgraph export: no subgraph selected or open");
             return;
         };
         if let Some(path) = persistence::pick_subgraph_save(self.current_path.as_deref()) {
             persistence::export_subgraph(def, &path);
+        }
+    }
+
+    /// Resolve which subgraph def an export targets: the first selected
+    /// subgraph-instance node in the active graph (resolved against that
+    /// graph's own `Local` table or the shared `FuncLib` for `Linked`),
+    /// else the currently open subgraph when inside one.
+    fn subgraph_to_export(&self) -> Option<&SubgraphDef> {
+        let target = self.document.active_target();
+        let graph = self.document.graph_for(target)?;
+        if let Some(view) = self.document.view(target) {
+            for nid in &view.selected_nodes {
+                if let Some(node) = graph.by_id(nid)
+                    && let NodeKind::Subgraph(r) = node.kind
+                    && let Some(def) = graph.resolve_def(r, &self.func_lib)
+                {
+                    return Some(def);
+                }
+            }
+        }
+        match target {
+            GraphRef::Local(id) => self.document.graph.subgraphs.by_key(&id),
+            GraphRef::Main => None,
         }
     }
 
