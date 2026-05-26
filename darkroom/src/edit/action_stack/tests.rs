@@ -442,6 +442,7 @@ fn doc_with_def() -> (Document, GraphRef) {
             data_type: DataType::Int,
         }],
         events: vec![],
+        origin: None,
     };
     let id = def.id;
     doc.graph.subgraphs.add(def);
@@ -564,6 +565,7 @@ fn rename_undo_survives_interface_compaction() {
         inputs: vec![finput("A"), finput("B")],
         outputs: vec![],
         events: vec![],
+        origin: None,
     };
     let def_id = def.id;
     doc.graph.subgraphs.add(def);

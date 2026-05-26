@@ -6,9 +6,7 @@ use lens::ImageFuncLib;
 use palantir::{HostHandle, Ui};
 use scenarium::elements::basic_funclib::BasicFuncLib;
 use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
-use scenarium::graph::NodeKind;
 use scenarium::prelude::{FuncLib, Graph as CoreGraph, NodeId};
-use scenarium::subgraph::SubgraphRef;
 
 use crate::document::{Document, GraphRef};
 use crate::edit::action_stack::ActionStack;
@@ -395,41 +393,9 @@ impl App {
                     let id = self.document.create_subgraph();
                     relayout |= self.open_graph(GraphRef::Local(id));
                 }
-                UiAction::LocalizeSubgraph(node_id) => {
-                    relayout |= self.localize_subgraph(node_id);
-                }
             }
         }
         relayout
-    }
-
-    /// Localize a `Linked` instance into the active graph: clone its
-    /// library def (fresh ids), record an undoable `Localize`, then open
-    /// the editable `Local` copy. No-op if the node isn't a `Linked`
-    /// instance or its def is missing from the library.
-    fn localize_subgraph(&mut self, node_id: NodeId) -> bool {
-        let target = self.document.active_target();
-        let kind = self
-            .document
-            .graph_for(target)
-            .and_then(|g| g.by_id(&node_id))
-            .map(|n| &n.kind);
-        let lib_id = match kind {
-            Some(NodeKind::Subgraph(SubgraphRef::Linked(id))) => *id,
-            _ => return false,
-        };
-        let Some(def) = self.func_lib.subgraph_by_id(&lib_id) else {
-            return false;
-        };
-        let local = def.fresh_copy();
-        let new_id = local.id;
-        self.intents.push(Intent::Localize {
-            node_id,
-            def: Box::new(local),
-        });
-        // Apply now so the `Local` def exists before we open its tab.
-        self.drain_intents(target);
-        self.open_graph(GraphRef::Local(new_id))
     }
 
     /// Focus `target`'s tab, opening a new one (lazily seeding its view

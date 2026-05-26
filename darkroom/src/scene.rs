@@ -381,6 +381,7 @@ mod tests {
                 data_type: DataType::Int,
             }],
             events: vec![],
+            origin: None,
         };
         (def, in_id, out_id)
     }

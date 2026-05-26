@@ -84,6 +84,12 @@ pub struct SubgraphDef {
     /// entry here — the same count as `events.len()`.
     #[serde(default)]
     pub events: Vec<SubgraphEvent>,
+
+    /// The shared-library def this one was copied from, if any. Lineage
+    /// metadata for editors that localize a library subgraph on instance
+    /// (the runtime ignores it). `None` for hand-authored / library defs.
+    #[serde(default)]
+    pub origin: Option<SubgraphId>,
 }
 
 impl SubgraphDef {
@@ -109,6 +115,9 @@ impl SubgraphDef {
             inputs: self.inputs.clone(),
             outputs: self.outputs.clone(),
             events,
+            // A fresh copy is its own def; the caller (library instancing)
+            // sets `origin` to the source library id if it wants lineage.
+            origin: None,
         }
     }
 }
@@ -174,6 +183,7 @@ mod tests {
             inputs: vec![fin("A"), fin("B")],
             outputs: vec![fout("Sum")],
             events: vec![],
+            origin: None,
         }
     }
 
@@ -265,6 +275,7 @@ mod tests {
             inputs: vec![],
             outputs: vec![fout("Val")],
             events: vec![],
+            origin: None,
         };
 
         let mut parent = Graph::default();
@@ -300,6 +311,7 @@ mod tests {
             inputs: vec![fin("msg")],
             outputs: vec![],
             events: vec![],
+            origin: None,
         };
 
         let mut parent = Graph::default();
@@ -328,6 +340,7 @@ mod tests {
             inputs: vec![],
             outputs: vec![],
             events: vec![],
+            origin: None,
         });
 
         let mut parent = Graph::default();
@@ -385,6 +398,7 @@ mod tests {
                 emitter: emitter_id,
                 emitter_event_idx: 0,
             }],
+            origin: None,
         };
 
         let mut parent = Graph::default();

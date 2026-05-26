@@ -6,7 +6,6 @@ pub mod tab_bar;
 pub mod widgets;
 
 use crate::document::GraphRef;
-use scenarium::prelude::NodeId;
 
 /// A navigation request surfaced from last frame's responses (tab/chip
 /// clicks) and applied by `App` in the navigation phase. Decoupled from
@@ -25,10 +24,6 @@ pub enum UiAction {
     /// Create a fresh empty subgraph and open it in a new tab (the "+"
     /// chip at the end of the strip).
     NewSubgraph,
-    /// Localize the `Linked` subgraph instance `node_id` (copy the library
-    /// def into the doc as `Local`) and open the editable copy. The "S"
-    /// chip on a `Linked` instance — linked defs are read-only in place.
-    LocalizeSubgraph(NodeId),
 }
 
 /// Whether a port consumes a binding (`Input`) or produces a value

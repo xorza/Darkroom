@@ -295,15 +295,12 @@ impl NodeUI {
 /// editable targets yet, so only `Local` opens.
 pub(super) fn emit_subgraph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAction>) {
     for n in &scene.nodes {
-        let Some(r) = n.subgraph else { continue };
-        if !ui.response_for(subgraph_badge_wid(n.id)).clicked {
-            continue;
-        }
-        match r {
-            // Local interiors open directly; `Linked` library defs are
-            // read-only in place, so opening one localizes it first.
-            SubgraphRef::Local(id) => actions.push(UiAction::OpenGraph(GraphRef::Local(id))),
-            SubgraphRef::Linked(_) => actions.push(UiAction::LocalizeSubgraph(n.id)),
+        // Instances are always `Local` (library subgraphs are localized on
+        // instance), so the "S" chip opens the interior directly.
+        if let Some(SubgraphRef::Local(id)) = n.subgraph
+            && ui.response_for(subgraph_badge_wid(n.id)).clicked
+        {
+            actions.push(UiAction::OpenGraph(GraphRef::Local(id)));
         }
     }
 }

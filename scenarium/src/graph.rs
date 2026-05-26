@@ -1130,6 +1130,7 @@ mod tests {
             }],
             outputs: vec![],
             events: vec![],
+            origin: None,
         };
 
         let mut graph = Graph::default();
@@ -1158,6 +1159,7 @@ mod tests {
             inputs: vec![],
             outputs: vec![],
             events: vec![],
+            origin: None,
         });
 
         let mut graph = Graph::default();
@@ -1170,6 +1172,7 @@ mod tests {
             inputs: vec![],
             outputs: vec![],
             events: vec![],
+            origin: None,
         });
 
         assert_eq!(

@@ -453,6 +453,7 @@ impl Document {
             inputs: Vec::new(),
             outputs: Vec::new(),
             events: Vec::new(),
+            origin: None,
         };
         let id = def.id;
         // Drop an instance of the new subgraph into the root graph,
@@ -746,56 +747,55 @@ mod tests {
     }
 
     #[test]
-    fn localize_round_trips_linked_to_local() {
+    fn add_node_with_def_round_trips() {
         use crate::edit::intent::{Intent, apply_step, build_step, revert_step};
 
-        // A `Linked` instance of a library def in the root graph.
+        // Instancing a library subgraph localizes it: a `Local` def copy
+        // (recording its `origin`) is added alongside the instance node, as
+        // one undoable `AddNode`.
         let lib_id = SubgraphId::unique();
-        let lib_def = leaf_def(lib_id, "Lib");
-        let inst = Node::subgraph_instance(&lib_def, SubgraphRef::Linked(lib_id));
-        let inst_id = inst.id;
-        let mut doc = Document::default();
-        doc.graph.add(inst);
-        doc.main_view.view_nodes.add(ViewNode {
-            id: inst_id,
-            pos: Vec2::ZERO,
-        });
-
-        // The prepared `Local` copy (fresh id), as `App` builds it.
-        let local = lib_def.fresh_copy();
+        let mut local = leaf_def(lib_id, "Lib").fresh_copy();
+        local.origin = Some(lib_id);
         let local_id = local.id;
-        assert_ne!(local_id, lib_id);
+        let node = Node::subgraph_instance(&local, SubgraphRef::Local(local_id));
+        let node_id = node.id;
+        let view_node = ViewNode {
+            id: node_id,
+            pos: Vec2::ZERO,
+        };
 
+        let mut doc = Document::default();
         let step = build_step(
-            Intent::Localize {
-                node_id: inst_id,
-                def: Box::new(local),
+            Intent::AddNode {
+                view_node,
+                node,
+                def: Some(Box::new(local)),
             },
             &doc,
             GraphRef::Main,
         )
-        .expect("localize builds");
+        .expect("add builds");
 
         apply_step(&step, &mut doc, GraphRef::Main);
         assert!(
             doc.graph.subgraphs.by_key(&local_id).is_some(),
-            "local def added to the containing graph"
+            "local def added alongside the instance"
         );
-        assert!(
-            matches!(doc.graph.by_id(&inst_id).unwrap().kind,
-                NodeKind::Subgraph(SubgraphRef::Local(id)) if id == local_id),
-            "instance repointed to Local"
+        assert_eq!(
+            doc.graph.subgraphs.by_key(&local_id).unwrap().origin,
+            Some(lib_id),
+            "copy records its library origin"
         );
+        assert!(doc.graph.by_id(&node_id).is_some(), "instance node added");
 
         revert_step(&step, &mut doc, GraphRef::Main);
         assert!(
             doc.graph.subgraphs.by_key(&local_id).is_none(),
-            "undo removes the local def"
+            "undo removes the def"
         );
         assert!(
-            matches!(doc.graph.by_id(&inst_id).unwrap().kind,
-                NodeKind::Subgraph(SubgraphRef::Linked(id)) if id == lib_id),
-            "undo restores the Linked ref"
+            doc.graph.by_id(&node_id).is_none(),
+            "undo removes the instance node"
         );
     }
 

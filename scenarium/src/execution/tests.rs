@@ -762,6 +762,7 @@ mod composite_behavior {
             inputs: vec![],
             outputs: vec![int_output("Out")],
             events: vec![],
+            origin: None,
         }
     }
 
@@ -863,6 +864,7 @@ mod composite_behavior {
             inputs: vec![],
             outputs: vec![int_output("Out")],
             events: vec![],
+            origin: None,
         };
 
         let graph = main_with(&func_lib, outer_def, true);
@@ -899,6 +901,7 @@ mod composite_behavior {
             inputs: vec![],
             outputs: vec![int_output("Out")],
             events: vec![],
+            origin: None,
         };
         let graph = main_with(&func_lib, outer_def, false);
         assert!(
@@ -2042,6 +2045,7 @@ mod subgraph {
             ],
             outputs: vec![int_out("Sum")],
             events: vec![],
+            origin: None,
         }
     }
 
@@ -2121,6 +2125,7 @@ mod subgraph {
             inputs: vec![],
             outputs: vec![int_out("O0"), int_out("O1")],
             events: vec![],
+            origin: None,
         };
 
         // parent: C, print <- C.out0 (out1 unused).
@@ -2361,6 +2366,7 @@ mod subgraph {
                 emitter: emitter_id,
                 emitter_event_idx: 0,
             }],
+            origin: None,
         };
 
         // parent: composite C, and `listener` subscribing to C's event 0.
@@ -2406,6 +2412,7 @@ mod subgraph {
             inputs: vec![],
             outputs: vec![],
             events: vec![],
+            origin: None,
         };
 
         // parent: `ticker` emits; composite C subscribes to it.
@@ -2561,6 +2568,7 @@ mod subgraph {
             inputs: vec![],
             outputs: vec![],
             events: vec![],
+            origin: None,
         };
 
         // parent: `ticker` E; composite C subscribes to E's event.

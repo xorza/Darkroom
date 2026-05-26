@@ -1,7 +1,7 @@
 use glam::Vec2;
 use palantir::{ClickOutside, Configure, MenuItem, Panel, Popup, Sizing, Spacing, Text, Ui};
 use scenarium::graph::Node;
-use scenarium::subgraph::SubgraphRef;
+use scenarium::subgraph::{SubgraphDef, SubgraphRef};
 
 use crate::app::AppContext;
 use crate::document::view_node::ViewNode;
@@ -54,10 +54,11 @@ impl NewNodeUi {
             return;
         }
 
-        // Click result: the node to spawn (a func node or a `Linked`
-        // subgraph instance). Owned, so it holds no borrow of `func_lib`
-        // past the popup body.
-        let mut chosen: Option<Node> = None;
+        // Click result: the node to spawn, plus a `Local` subgraph def to
+        // add alongside it (library subgraphs are localized on instance,
+        // so they drop an editable copy that records its `origin`). Owned,
+        // so it holds no borrow of `func_lib` past the popup body.
+        let mut chosen: Option<(Node, Option<Box<SubgraphDef>>)> = None;
         let chrome = ui.theme.context_menu.panel.clone();
         // One column per category (an `hstack` laid left-to-right). Within
         // a column the function list is a `wrap_vstack`, so a category with
@@ -105,7 +106,7 @@ impl NewNodeUi {
                                                     .show(ui, popup)
                                                     .clicked()
                                                 {
-                                                    chosen = Some(func.into());
+                                                    chosen = Some((func.into(), None));
                                                 }
                                             }
                                             // Shared (`Linked`) subgraph
@@ -121,10 +122,16 @@ impl NewNodeUi {
                                                     .show(ui, popup)
                                                     .clicked()
                                                 {
-                                                    chosen = Some(Node::subgraph_instance(
-                                                        def,
-                                                        SubgraphRef::Linked(def.id),
-                                                    ));
+                                                    // Localize on instance: drop an
+                                                    // editable `Local` copy that
+                                                    // records its library `origin`.
+                                                    let mut local = def.fresh_copy();
+                                                    local.origin = Some(def.id);
+                                                    let node = Node::subgraph_instance(
+                                                        &local,
+                                                        SubgraphRef::Local(local.id),
+                                                    );
+                                                    chosen = Some((node, Some(Box::new(local))));
                                                 }
                                             }
                                         });
@@ -133,12 +140,16 @@ impl NewNodeUi {
                     });
             });
 
-        if let Some(node) = chosen {
+        if let Some((node, def)) = chosen {
             let view_node = ViewNode {
                 id: node.id,
                 pos: open.world_pos,
             };
-            out.push(Intent::AddNode { view_node, node });
+            out.push(Intent::AddNode {
+                view_node,
+                node,
+                def,
+            });
             self.state = None;
         } else if popup_resp.dismissed || popup_resp.close_requested {
             self.state = None;

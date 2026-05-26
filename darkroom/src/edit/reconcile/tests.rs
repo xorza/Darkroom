@@ -44,6 +44,7 @@ fn build_def(
         inputs: authored_inputs,
         outputs: authored_outputs,
         events: vec![],
+        origin: None,
     };
     (def, sgin_id, sum_id_n, sgout_id)
 }
@@ -326,6 +327,7 @@ fn passthrough_ports_are_null_typed() {
         inputs: vec![],
         outputs: vec![],
         events: vec![],
+        origin: None,
     };
     let def_id = def.id;
     let mut graph = Graph::default();
