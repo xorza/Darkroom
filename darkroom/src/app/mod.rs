@@ -15,6 +15,7 @@ use crate::exec_status::{ExecStatus, project_stats};
 use crate::gui::UiAction;
 use crate::gui::main_window::MainWindow;
 use crate::io::config::AppConfig;
+use crate::io::library;
 use crate::scene::Scene;
 use crate::theme::Theme;
 
@@ -118,10 +119,17 @@ impl App {
     pub(crate) fn new(ui: &mut Ui, handle: HostHandle) -> Self {
         let mut document: Document = CoreGraph::default().into();
         document.main_view.auto_layout_default(&document.graph);
+        // The runtime lib is builtins + the shared subgraph library
+        // (where `SubgraphRef::Linked` resolves); builtins carry no
+        // subgraphs, so `func_lib.subgraphs` *is* the library.
+        let mut func_lib = builtin_func_lib();
+        for def in library::load_library() {
+            func_lib.add_subgraph(def);
+        }
         let worker = WorkerBridge::new(handle.clone());
         let mut app = Self {
             document,
-            func_lib: Arc::new(builtin_func_lib()),
+            func_lib: Arc::new(func_lib),
             scene: Scene::default(),
             scene_target: None,
             scene_dirty: false,

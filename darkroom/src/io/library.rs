@@ -1,0 +1,42 @@
+//! The shared subgraph library: `Linked` subgraph defs that live in the
+//! runtime `FuncLib` (where `SubgraphRef::Linked` resolves) rather than in
+//! any one document, so they're reusable across documents. Persisted in
+//! the working dir as Rhai, like the config — loaded into
+//! `func_lib.subgraphs` at startup, saved when "promote" grows it.
+
+use std::path::PathBuf;
+
+use common::{SerdeFormat, deserialize};
+use scenarium::prelude::SubgraphDef;
+
+/// Library file name, resolved relative to the process working directory.
+/// Rhai so it's hand-editable and matches the doc / theme / config format.
+const LIBRARY_FILE: &str = "darkroom.library.rhai";
+
+/// On-disk wrapper so the file is a named table rather than a bare
+/// collection (more robust to hand-edit and future fields). A plain
+/// `Vec` — each def carries its own `id`, and we only ever iterate to
+/// feed `FuncLib::add_subgraph`.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct Library {
+    #[serde(default)]
+    subgraphs: Vec<SubgraphDef>,
+}
+
+fn path() -> PathBuf {
+    std::env::current_dir()
+        .unwrap_or_default()
+        .join(LIBRARY_FILE)
+}
+
+/// Load the shared subgraph defs from the working dir. Any failure
+/// (missing file, parse error) degrades to an empty library rather than
+/// blocking startup.
+pub(crate) fn load_library() -> Vec<SubgraphDef> {
+    let Ok(bytes) = std::fs::read(path()) else {
+        return Vec::new();
+    };
+    deserialize::<Library>(&bytes, SerdeFormat::Rhai)
+        .map(|lib| lib.subgraphs)
+        .unwrap_or_default()
+}

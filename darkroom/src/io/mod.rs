@@ -3,4 +3,5 @@
 //! last theme + document across launches.
 
 pub mod config;
+pub mod library;
 pub mod persistence;
