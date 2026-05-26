@@ -1,4 +1,3 @@
-pub mod sample_graph;
 pub mod view_node;
 
 use anyhow::{Result, bail};

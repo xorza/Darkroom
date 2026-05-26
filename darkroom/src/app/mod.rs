@@ -5,10 +5,8 @@ use lens::ImageFuncLib;
 use palantir::{HostHandle, Ui};
 use scenarium::elements::basic_funclib::BasicFuncLib;
 use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
-use scenarium::prelude::FuncLib;
-use scenarium::testing::{TestFuncHooks, test_func_lib};
+use scenarium::prelude::{FuncLib, Graph as CoreGraph};
 
-use crate::document::sample_graph::sample_graph;
 use crate::document::{Document, GraphRef};
 use crate::edit::action_stack::ActionStack;
 use crate::edit::intent::{Intent, apply_step, build_step, requires_relayout};
@@ -28,19 +26,6 @@ use worker::{WorkerBridge, WorkerEvent};
 /// memory rather than entry count — a single large edit can't be
 /// undone away, but the oldest entries drop once the buffer overflows.
 const UNDO_HISTORY_BYTES: usize = 1 << 20;
-
-/// Concrete hooks for the demo `test_func_lib` (the sample graph wires
-/// `get_a`/`get_b`/`print` nodes). The library's `Default` hooks panic
-/// on call, which is right for unit tests but blows up the worker the
-/// first time it actually evaluates the graph — so the editor supplies
-/// real ones. `print` goes to stderr until there's a status surface.
-fn sample_test_hooks() -> TestFuncHooks {
-    TestFuncHooks {
-        get_a: Arc::new(|| Ok(21)),
-        get_b: Arc::new(|| 2),
-        print: Arc::new(|value| eprintln!("print: {value}")),
-    }
-}
 
 /// Shared per-frame context threaded down the UI tree. Holds borrows
 /// of state owned higher up so child subtrees don't take a growing
@@ -111,10 +96,9 @@ impl App {
     /// Handed to [`palantir::WinitHost::run`], which calls it once the
     /// `Ui` + [`HostHandle`] exist (before the first frame).
     pub(crate) fn new(ui: &mut Ui, handle: HostHandle) -> Self {
-        let mut document: Document = sample_graph().into();
+        let mut document: Document = CoreGraph::default().into();
         document.main_view.auto_layout_default(&document.graph);
         let mut func_lib = FuncLib::default();
-        func_lib.merge(test_func_lib(sample_test_hooks()));
         func_lib.merge(BasicFuncLib::default());
         func_lib.merge(WorkerEventsFuncLib::default());
         func_lib.merge(ImageFuncLib::default());
