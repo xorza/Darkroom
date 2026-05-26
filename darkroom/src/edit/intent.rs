@@ -24,8 +24,9 @@
 use std::collections::BTreeSet;
 
 use glam::Vec2;
-use scenarium::graph::{Binding, InputPort, Node, NodeBehavior, NodeId, Subscription};
-use scenarium::prelude::SubgraphId;
+use scenarium::graph::{Binding, InputPort, Node, NodeBehavior, NodeId, NodeKind, Subscription};
+use scenarium::prelude::{SubgraphDef, SubgraphId};
+use scenarium::subgraph::SubgraphRef;
 use serde::{Deserialize, Serialize};
 
 use crate::document::view_node::ViewNode;
@@ -130,6 +131,17 @@ pub enum Intent {
         idx: usize,
         to: String,
     },
+    /// Localize a `Linked` subgraph instance: add `def` (a fresh-copy
+    /// `Local` def, prepared by `App` from the library since `build_step`
+    /// has no `FuncLib`) to the containing graph and repoint the instance
+    /// `node_id` from `Linked` to `Local(def.id)`. Dropped when `node_id`
+    /// isn't a subgraph instance.
+    Localize {
+        node_id: NodeId,
+        /// Boxed — a `SubgraphDef` carries a whole interior `Graph`, far
+        /// larger than any other variant.
+        def: Box<SubgraphDef>,
+    },
 }
 
 /// Self-contained undo-stack entry. Each leaf variant carries both
@@ -219,6 +231,14 @@ pub enum GraphStep {
         to_pan: Vec2,
         to_scale: f32,
     },
+    /// Localize: add the `Local` `def` to the containing graph and repoint
+    /// `node_id` to `Local(def.id)`. Undo removes the def and restores
+    /// `from_ref`; `def` stays on the step so redo can re-add it.
+    Localize {
+        node_id: NodeId,
+        def: Box<SubgraphDef>,
+        from_ref: SubgraphRef,
+    },
 }
 
 /// Document-global steps — they mutate fields that aren't scoped to a
@@ -282,7 +302,9 @@ impl GraphStep {
     /// flip is the change).
     fn is_noop(&self) -> bool {
         match self {
-            GraphStep::AddNode { .. } | GraphStep::RemoveNode { .. } => false,
+            GraphStep::AddNode { .. }
+            | GraphStep::RemoveNode { .. }
+            | GraphStep::Localize { .. } => false,
             GraphStep::DuplicateNodes { nodes, .. } => nodes.is_empty(),
             GraphStep::MoveNodes { moves, .. } => moves.iter().all(|(_, from, to)| from == to),
             GraphStep::RenameNode { from, to, .. } => from == to,
@@ -439,6 +461,16 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             node_id,
             to,
         },
+        Intent::Localize { node_id, def } => {
+            let NodeKind::Subgraph(from_ref) = graph.by_id(&node_id)?.kind else {
+                return None;
+            };
+            GraphStep::Localize {
+                node_id,
+                def,
+                from_ref,
+            }
+        }
         Intent::SetEventConnection {
             event_node_id,
             event_idx,
@@ -566,6 +598,11 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetCacheBehavior { node_id, to, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().behavior = *to;
         }
+        GraphStep::Localize { node_id, def, .. } => {
+            scope.graph.subgraphs.add((**def).clone());
+            scope.graph.by_id_mut(node_id).unwrap().kind =
+                NodeKind::Subgraph(SubgraphRef::Local(def.id));
+        }
         GraphStep::SetEventConnection {
             event_node_id,
             event_idx,
@@ -691,6 +728,14 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetCacheBehavior { node_id, from, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().behavior = *from;
         }
+        GraphStep::Localize {
+            node_id,
+            def,
+            from_ref,
+        } => {
+            scope.graph.subgraphs.remove_by_key(&def.id);
+            scope.graph.by_id_mut(node_id).unwrap().kind = NodeKind::Subgraph(*from_ref);
+        }
         GraphStep::SetEventConnection {
             event_node_id,
             event_idx,
@@ -741,7 +786,10 @@ pub fn requires_relayout(step: &UndoStep) -> bool {
             | GraphStep::DuplicateNodes { .. }
             | GraphStep::RemoveNode { .. }
             | GraphStep::MoveNodes { .. }
-            | GraphStep::RenameNode { .. } => true,
+            | GraphStep::RenameNode { .. }
+            // Localize repoints to a fresh `Local` def + adds it; the node's
+            // interface is unchanged but the tab/def set shifts — relayout.
+            | GraphStep::Localize { .. } => true,
             // Viewport is the inner-canvas `TranslateScale`, applied at
             // paint; children arrange in pre-transform space, so a pan/zoom
             // changes nothing the layout engine reads — no Pass B needed.
@@ -787,7 +835,8 @@ pub fn gesture_key(step: &UndoStep) -> Option<GestureKey> {
             | GraphStep::SetInput { .. }
             | GraphStep::SetSelection { .. }
             | GraphStep::SetCacheBehavior { .. }
-            | GraphStep::SetEventConnection { .. },
+            | GraphStep::SetEventConnection { .. }
+            | GraphStep::Localize { .. },
         )
         | UndoStep::Doc(DocStep::CloseTab { .. } | DocStep::RenameBoundaryPort { .. }) => None,
     }

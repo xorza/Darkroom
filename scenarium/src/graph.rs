@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use serde::{Deserialize, Serialize};
@@ -186,6 +186,14 @@ pub struct Graph {
     pub subgraphs: KeyIndexVec<SubgraphId, SubgraphDef>,
 }
 
+/// A graph cloned with fresh node ids, plus the old→new id map (so
+/// callers can remap ids the graph doesn't own, e.g. a subgraph def's
+/// exposed-event emitters). Result of [`Graph::with_fresh_node_ids`].
+pub struct FreshGraph {
+    pub graph: Graph,
+    pub id_map: HashMap<NodeId, NodeId>,
+}
+
 impl Graph {
     pub fn add(&mut self, node: Node) {
         assert!(!node.id.is_nil(), "cannot add a node with a nil id");
@@ -256,6 +264,59 @@ impl Graph {
                 self.input_binding(InputPort { node_id, port_idx }),
             )
         })
+    }
+
+    /// Deep-clone with a freshly generated id for every node, remapping
+    /// all bindings + subscriptions onto the new ids. Nested per-graph
+    /// subgraph defs are copied verbatim — their ids are private to this
+    /// graph's table. Returns the clone plus the old→new id map (callers
+    /// like subgraph localization need it to remap exposed-event
+    /// emitters). Used to make an independent copy of a subgraph interior.
+    pub fn with_fresh_node_ids(&self) -> FreshGraph {
+        let mut id_map = HashMap::with_capacity(self.nodes.len());
+        let mut nodes = KeyIndexVec::with_capacity(self.nodes.len());
+        for node in self.nodes.iter() {
+            let new_id = NodeId::unique();
+            id_map.insert(node.id, new_id);
+            let mut clone = node.clone();
+            clone.id = new_id;
+            nodes.add(clone);
+        }
+        let remap = |id: NodeId| id_map.get(&id).copied().unwrap_or(id);
+        let bindings = self
+            .bindings
+            .iter()
+            .map(|(port, binding)| {
+                let port = InputPort {
+                    node_id: remap(port.node_id),
+                    port_idx: port.port_idx,
+                };
+                let binding = match binding {
+                    Binding::Bind(op) => Binding::Bind(OutputPort {
+                        node_id: remap(op.node_id),
+                        port_idx: op.port_idx,
+                    }),
+                    other => other.clone(),
+                };
+                (port, binding)
+            })
+            .collect();
+        let subscriptions = self
+            .subscriptions
+            .iter()
+            .map(|s| Subscription {
+                emitter: remap(s.emitter),
+                event_idx: s.event_idx,
+                subscriber: remap(s.subscriber),
+            })
+            .collect();
+        let graph = Graph {
+            nodes,
+            bindings,
+            subscriptions,
+            subgraphs: self.subgraphs.clone(),
+        };
+        FreshGraph { graph, id_map }
     }
 
     /// Every data edge as (consumer input ← producer output). Const bindings

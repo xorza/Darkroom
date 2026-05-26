@@ -86,6 +86,33 @@ pub struct SubgraphDef {
     pub events: Vec<SubgraphEvent>,
 }
 
+impl SubgraphDef {
+    /// An independent copy with a fresh def id and fresh interior node
+    /// ids (exposed-event emitters remapped to match), preserving the
+    /// interface. Used to localize a `Linked` instance or make an
+    /// instance unique without sharing identity with the original.
+    pub fn fresh_copy(&self) -> SubgraphDef {
+        let fresh = self.graph.with_fresh_node_ids();
+        let events = self
+            .events
+            .iter()
+            .map(|e| SubgraphEvent {
+                emitter: fresh.id_map.get(&e.emitter).copied().unwrap_or(e.emitter),
+                ..e.clone()
+            })
+            .collect();
+        SubgraphDef {
+            id: SubgraphId::unique(),
+            name: self.name.clone(),
+            category: self.category.clone(),
+            graph: fresh.graph,
+            inputs: self.inputs.clone(),
+            outputs: self.outputs.clone(),
+            events,
+        }
+    }
+}
+
 impl KeyIndexKey<SubgraphId> for SubgraphDef {
     fn key(&self) -> &SubgraphId {
         &self.id
@@ -147,6 +174,34 @@ mod tests {
             inputs: vec![fin("A"), fin("B")],
             outputs: vec![fout("Sum")],
             events: vec![],
+        }
+    }
+
+    #[test]
+    fn fresh_copy_remaps_interior_ids_and_preserves_wiring() {
+        let func_lib = test_func_lib(TestFuncHooks::default());
+        let def = wrap_sum(&func_lib);
+        let copy = def.fresh_copy();
+
+        // Fresh def id; same interface.
+        assert_ne!(copy.id, def.id);
+        assert_eq!(copy.inputs.len(), def.inputs.len());
+        assert_eq!(copy.outputs.len(), def.outputs.len());
+
+        // Every interior node id is fresh (disjoint from the original).
+        let orig_ids: Vec<_> = def.graph.iter().map(|n| n.id).collect();
+        let copy_ids: Vec<_> = copy.graph.iter().map(|n| n.id).collect();
+        assert_eq!(copy_ids.len(), orig_ids.len());
+        for id in &copy_ids {
+            assert!(!orig_ids.contains(id), "interior id must be remapped");
+        }
+
+        // Wiring preserved (same edge count), and every edge references
+        // only the copy's own node ids — bindings were remapped.
+        assert_eq!(copy.graph.edges().count(), def.graph.edges().count());
+        for (dst, src) in copy.graph.edges() {
+            assert!(copy_ids.contains(&dst.node_id));
+            assert!(copy_ids.contains(&src.node_id));
         }
     }
 

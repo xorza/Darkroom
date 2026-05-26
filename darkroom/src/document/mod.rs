@@ -745,6 +745,60 @@ mod tests {
         assert_eq!(doc.graph.subgraphs.len(), 2, "no silent overwrite");
     }
 
+    #[test]
+    fn localize_round_trips_linked_to_local() {
+        use crate::edit::intent::{Intent, apply_step, build_step, revert_step};
+
+        // A `Linked` instance of a library def in the root graph.
+        let lib_id = SubgraphId::unique();
+        let lib_def = leaf_def(lib_id, "Lib");
+        let inst = Node::subgraph_instance(&lib_def, SubgraphRef::Linked(lib_id));
+        let inst_id = inst.id;
+        let mut doc = Document::default();
+        doc.graph.add(inst);
+        doc.main_view.view_nodes.add(ViewNode {
+            id: inst_id,
+            pos: Vec2::ZERO,
+        });
+
+        // The prepared `Local` copy (fresh id), as `App` builds it.
+        let local = lib_def.fresh_copy();
+        let local_id = local.id;
+        assert_ne!(local_id, lib_id);
+
+        let step = build_step(
+            Intent::Localize {
+                node_id: inst_id,
+                def: Box::new(local),
+            },
+            &doc,
+            GraphRef::Main,
+        )
+        .expect("localize builds");
+
+        apply_step(&step, &mut doc, GraphRef::Main);
+        assert!(
+            doc.graph.subgraphs.by_key(&local_id).is_some(),
+            "local def added to the containing graph"
+        );
+        assert!(
+            matches!(doc.graph.by_id(&inst_id).unwrap().kind,
+                NodeKind::Subgraph(SubgraphRef::Local(id)) if id == local_id),
+            "instance repointed to Local"
+        );
+
+        revert_step(&step, &mut doc, GraphRef::Main);
+        assert!(
+            doc.graph.subgraphs.by_key(&local_id).is_none(),
+            "undo removes the local def"
+        );
+        assert!(
+            matches!(doc.graph.by_id(&inst_id).unwrap().kind,
+                NodeKind::Subgraph(SubgraphRef::Linked(id)) if id == lib_id),
+            "undo restores the Linked ref"
+        );
+    }
+
     /// Add a bare `Func`-kind node to `doc`'s root graph + main view at
     /// `pos`, returning its id.
     fn add_node_at(doc: &mut Document, pos: Vec2) -> NodeId {
