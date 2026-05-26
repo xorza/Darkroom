@@ -79,13 +79,16 @@ pub struct App {
     pub config: AppConfig,
 }
 
-impl palantir::App for App {
+impl App {
     /// Build the app before the first frame: assemble the func lib +
     /// seed document, then restore persisted config (saved theme +
     /// last document) and push the resolved palantir theme onto `Ui`.
     /// Restore failures degrade silently to defaults — a missing or
     /// corrupt config, or a deleted document, must not block launch.
-    fn new(ui: &mut Ui, handle: HostHandle) -> Self {
+    ///
+    /// Handed to [`palantir::WinitHost::run`], which calls it once the
+    /// `Ui` + [`HostHandle`] exist (before the first frame).
+    pub(crate) fn new(ui: &mut Ui, handle: HostHandle) -> Self {
         let mut document: Document = sample_graph().into();
         document.main_view.auto_layout_default(&document.graph);
         let mut func_lib = FuncLib::default();
@@ -120,7 +123,9 @@ impl palantir::App for App {
         ui.theme = app.theme.palantir_theme.clone();
         app
     }
+}
 
+impl palantir::App for App {
     fn frame(&mut self, ui: &mut Ui) {
         // ui.debug_overlay.damage_rect = true;
 

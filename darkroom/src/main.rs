@@ -11,5 +11,5 @@ use palantir::{WinitHost, WinitHostConfig};
 use crate::app::App;
 
 fn main() {
-    WinitHost::<App>::new(WinitHostConfig::new("darkroom")).run();
+    WinitHost::new(WinitHostConfig::new("darkroom"), App::new).run();
 }
