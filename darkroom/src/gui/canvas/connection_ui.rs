@@ -283,8 +283,21 @@ fn scan_drag_start(frame: &PortFrame, scene: &Scene) -> Option<ConnectionDrag> {
 fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -> Option<PortRef> {
     let want_kind = start.kind.opposite();
     let pointer = ui.pointer_pos()?;
+    // A passthrough (subgraph input boundary wired straight to the output
+    // boundary) leaves the relayed value untyped at execution and panics
+    // the worker — disallow it by never snapping one boundary node onto
+    // the other. The only boundary→boundary link possible is exactly that
+    // passthrough, so a blanket reject is precise.
+    let start_boundary = scene
+        .nodes
+        .iter()
+        .find(|n| n.id == start.node_id)
+        .is_some_and(|n| n.boundary);
     for n in &scene.nodes {
         if n.id == start.node_id {
+            continue;
+        }
+        if start_boundary && n.boundary {
             continue;
         }
         for port in node_ports(scene, n, want_kind) {
