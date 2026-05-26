@@ -50,11 +50,15 @@ pub(crate) fn inline_rename(
     name: InternedStr,
     max_chars: usize,
 ) -> RenameEvent {
+    // Floor the height at one text line so an empty label still has a
+    // clickable box (a `Hug` panel with no text would collapse to zero
+    // height). Derived from the ambient text style, not hardcoded.
+    let line_h = ui.theme.text.line_height_for(ui.theme.text.font_size_px);
     if !ui.state_mut::<RenameState>(id).active {
         let resp = Panel::hstack()
             .id(id)
             .size((Sizing::Hug, Sizing::Hug))
-            .min_size((MIN_EDIT_WIDTH, 0.0))
+            .min_size((MIN_EDIT_WIDTH, line_h))
             .sense(Sense::CLICK)
             .show(ui, |ui| {
                 // `InternedStr::clone` is allocation-free for the `Owned`
@@ -85,7 +89,7 @@ pub(crate) fn inline_rename(
         .style(flat_edit_style(ui))
         .max_chars(max_chars)
         .size((Sizing::Hug, Sizing::Hug))
-        .min_size((MIN_EDIT_WIDTH, 0.0))
+        .min_size((MIN_EDIT_WIDTH, line_h))
         .show(ui);
     let focused = ui.focused_id() == Some(id);
     let escape = ui.escape_pressed();
