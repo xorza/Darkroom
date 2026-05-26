@@ -1,7 +1,5 @@
 use glam::Vec2;
-use palantir::{
-    ClickOutside, Configure, MenuItem, Panel, Popup, Scroll, Sizing, Spacing, Text, Ui,
-};
+use palantir::{ClickOutside, Configure, MenuItem, Panel, Popup, Sizing, Spacing, Text, Ui};
 use scenarium::function::Func;
 use scenarium::graph::Node;
 
@@ -58,37 +56,42 @@ impl NewNodeUi {
 
         let mut chosen: Option<&Func> = None;
         let chrome = ui.theme.context_menu.panel.clone();
-        // The popup hugs the function list up to a cap, then scrolls. A
-        // `Hug` scroll sizes its viewport to content (capped by
-        // `max_size`), so the `Hug` popup grows with the list and the
-        // scroll takes over past the cap. Width hugs the widest column,
-        // so the popup is no wider than it needs.
+        // One column per category (an `hstack` laid left-to-right). Within
+        // a column the function list is a `wrap_vstack`, so a category with
+        // many functions wraps into sub-columns once it would exceed the
+        // popup's height cap. The cap lives once on the popup: a bounded
+        // stack constrains its children's main axis, so the popup's
+        // `max_size` height flows down through the column `hstack`/`vstack`
+        // into each func wrap. Everything hugs, so the popup is only as
+        // wide/tall as its columns need.
         let popup_resp = Popup::anchored_to(open.anchor)
             .click_outside(ClickOutside::Dismiss)
             .background(chrome)
             .id_salt("new_node_popup")
             .size((Sizing::Hug, Sizing::Hug))
+            .max_size((f32::INFINITY, ctx.theme.new_node_popup_max_height))
             .padding(Spacing::all(6.0))
             .show(ui, |ui, popup| {
-                Scroll::vertical()
-                    .id_salt("new_node_scroll")
+                Panel::hstack()
+                    .id_salt("new_node_columns")
                     .size((Sizing::Hug, Sizing::Hug))
-                    .max_size((f32::INFINITY, ctx.theme.new_node_popup_max_height))
+                    .gap(12.0)
                     .show(ui, |ui| {
-                        Panel::hstack()
-                            .id_salt("new_node_columns")
-                            .size((Sizing::Hug, Sizing::Hug))
-                            .gap(12.0)
-                            .show(ui, |ui| {
-                                for category in sorted_categories(ctx) {
-                                    Panel::vstack()
-                                        .id_salt(("new_node_col", category))
+                        for category in sorted_categories(ctx) {
+                            Panel::vstack()
+                                .id_salt(("new_node_col", category))
+                                .size((Sizing::Hug, Sizing::Hug))
+                                .gap(4.0)
+                                .show(ui, |ui| {
+                                    Text::new(category.to_owned())
+                                        .id_salt(("new_node_cat", category))
+                                        .show(ui);
+                                    Panel::wrap_vstack()
+                                        .id_salt(("new_node_funcs", category))
                                         .size((Sizing::Hug, Sizing::Hug))
                                         .gap(2.0)
+                                        .line_gap(12.0)
                                         .show(ui, |ui| {
-                                            Text::new(category.to_owned())
-                                                .id_salt(("new_node_cat", category))
-                                                .show(ui);
                                             for func in ctx
                                                 .func_lib
                                                 .funcs
@@ -103,8 +106,8 @@ impl NewNodeUi {
                                                 }
                                             }
                                         });
-                                }
-                            });
+                                });
+                        }
                     });
             });
 
