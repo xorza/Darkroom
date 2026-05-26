@@ -58,21 +58,22 @@ impl NewNodeUi {
 
         let mut chosen: Option<&Func> = None;
         let chrome = ui.theme.context_menu.panel.clone();
-        // Cap the popup's height so it stays usable on small surfaces;
-        // the inner `Scroll::vertical` handles overflow when the
-        // function list exceeds the cap. Width hugs the content so the
-        // popup is as wide as the widest column row, but no wider.
+        // The popup hugs the function list up to a cap, then scrolls. A
+        // `Hug` scroll sizes its viewport to content (capped by
+        // `max_size`), so the `Hug` popup grows with the list and the
+        // scroll takes over past the cap. Width hugs the widest column,
+        // so the popup is no wider than it needs.
         let popup_resp = Popup::anchored_to(open.anchor)
             .click_outside(ClickOutside::Dismiss)
             .background(chrome)
             .id_salt("new_node_popup")
             .size((Sizing::Hug, Sizing::Hug))
-            .max_size((f32::INFINITY, ctx.theme.new_node_popup_max_height))
             .padding(Spacing::all(6.0))
             .show(ui, |ui, popup| {
                 Scroll::vertical()
                     .id_salt("new_node_scroll")
-                    .size((Sizing::Hug, Sizing::Fill(1.0)))
+                    .size((Sizing::Hug, Sizing::Hug))
+                    .max_size((f32::INFINITY, ctx.theme.new_node_popup_max_height))
                     .show(ui, |ui| {
                         Panel::hstack()
                             .id_salt("new_node_columns")
