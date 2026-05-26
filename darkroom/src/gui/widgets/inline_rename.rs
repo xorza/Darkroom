@@ -55,11 +55,18 @@ pub(crate) fn inline_rename(
     // height). Derived from the ambient text style, not hardcoded.
     let line_h = ui.theme.text.line_height_for(ui.theme.text.font_size_px);
     if !ui.state_mut::<RenameState>(id).active {
+        // `DRAG` as well as `CLICK`: the label captures the press (so it
+        // can register clicks / double-click-to-edit), but a press that
+        // turns into a drag must still be available to an ancestor that
+        // uses the label as a move handle — e.g. the node header dragging
+        // its node. Without `DRAG` the press latches as a click-only
+        // capture and the drag is swallowed. The active editor is a
+        // `TextEdit` (no `DRAG`), so this only applies while idle.
         let resp = Panel::hstack()
             .id(id)
             .size((Sizing::Hug, Sizing::Hug))
             .min_size((MIN_EDIT_WIDTH, line_h))
-            .sense(Sense::CLICK)
+            .sense(Sense::CLICK | Sense::DRAG)
             .show(ui, |ui| {
                 // `InternedStr::clone` is allocation-free for the `Owned`
                 // names darkroom builds, so this is cheap per frame.

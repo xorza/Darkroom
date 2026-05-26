@@ -174,21 +174,35 @@ impl NodeUI {
                 header(ui, rcx, node, out);
                 ports_row(ui, rcx, node, out);
             });
+        // Pull the body response's flags into locals so its `&mut ui`
+        // borrow ends before the `response_for(title)` peek below.
         let response = panel.response;
+        let body_clicked = response.clicked();
+        let body_drag_started = response.drag_started();
+        let body_wid = response.widget_id();
 
         // Click without drag → select. Plain click selects only this
         // node; Shift-click toggles its membership in the current
         // selection. `UndoStep::is_noop` filters a click that doesn't
         // change the set (e.g. clicking the sole selected node).
-        if response.clicked() {
+        if body_clicked {
             out.push(select_intent(shift_click, rcx.scene, node.id));
         }
+
+        // The header title doubles as a drag handle: its idle label
+        // senses `DRAG`, so a drag latched there moves the node like a
+        // body drag (the title swallows the press, so the body never sees
+        // it). `response_for` is last-frame, matching how `prepass` reads
+        // the delta. While renaming the title is a `TextEdit` (no `DRAG`),
+        // so this can't fire mid-edit.
+        let title_wid = node_rename_wid(node.id);
+        let title_drag = ui.response_for(title_wid).drag_started();
 
         // Latch the anchor on the press-frame edge; subsequent frames'
         // `prepass` peeks `response_for(widget_id)` before record runs
         // and converts `drag_delta` into a `MoveNodes` applied to
         // `Document` upstream of `Scene::rebuild`.
-        if response.drag_started() {
+        if title_drag || body_drag_started {
             // Grabbing a node already in the selection drags the whole
             // group together; grabbing an unselected node selects only it
             // and drags it alone.
@@ -206,7 +220,7 @@ impl NodeUI {
             self.drag_anchor = Some(DragAnchor {
                 node_id: node.id,
                 start_positions,
-                widget_id: response.widget_id(),
+                widget_id: if title_drag { title_wid } else { body_wid },
             });
         }
     }
@@ -333,6 +347,14 @@ pub(super) fn emit_port_disconnects(ui: &Ui, scene: &Scene, out: &mut Vec<Intent
 /// without needing the panel's response to round-trip first.
 pub(super) fn node_widget_id(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.body", node_id))
+}
+
+/// Stable id for a node's inline title-rename editor (and its idle
+/// label), so the same id is recorded across the label⇄editor swap.
+/// Polled here to drag the node by its title (the idle label senses
+/// `DRAG`) and by [`header::title`] to render the field.
+pub(super) fn node_rename_wid(node_id: NodeId) -> WidgetId {
+    WidgetId::from_hash(("graph.node.title_rename", node_id))
 }
 
 pub(super) fn set_input(port: PortRef, to: Binding) -> Intent {

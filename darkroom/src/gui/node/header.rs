@@ -9,7 +9,7 @@ use palantir::{
 use scenarium::prelude::{NodeBehavior, NodeId};
 
 use crate::edit::intent::Intent;
-use crate::gui::node::{RecordCtx, select_intent};
+use crate::gui::node::{RecordCtx, node_rename_wid, select_intent};
 use crate::gui::widgets::inline_rename::inline_rename;
 use crate::scene::SceneNode;
 use crate::theme::Theme;
@@ -101,12 +101,6 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent
             to,
         });
     }
-}
-
-/// Stable id for a node's inline title-rename editor (and its idle
-/// label), so the same id is recorded across the label⇄editor swap.
-fn node_rename_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.title_rename", node_id))
 }
 
 /// Stable id for a node's clickable cache-toggle chip. Domain-derived
