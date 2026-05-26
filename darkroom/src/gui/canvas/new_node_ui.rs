@@ -1,7 +1,7 @@
 use glam::Vec2;
 use palantir::{ClickOutside, Configure, MenuItem, Panel, Popup, Sizing, Spacing, Text, Ui};
-use scenarium::function::Func;
 use scenarium::graph::Node;
+use scenarium::subgraph::SubgraphRef;
 
 use crate::app::AppContext;
 use crate::document::view_node::ViewNode;
@@ -54,7 +54,10 @@ impl NewNodeUi {
             return;
         }
 
-        let mut chosen: Option<&Func> = None;
+        // Click result: the node to spawn (a func node or a `Linked`
+        // subgraph instance). Owned, so it holds no borrow of `func_lib`
+        // past the popup body.
+        let mut chosen: Option<Node> = None;
         let chrome = ui.theme.context_menu.panel.clone();
         // One column per category (an `hstack` laid left-to-right). Within
         // a column the function list is a `wrap_vstack`, so a category with
@@ -102,7 +105,26 @@ impl NewNodeUi {
                                                     .show(ui, popup)
                                                     .clicked()
                                                 {
-                                                    chosen = Some(func);
+                                                    chosen = Some(func.into());
+                                                }
+                                            }
+                                            // Shared (`Linked`) subgraph
+                                            // defs of this category, after
+                                            // the funcs.
+                                            for def in ctx
+                                                .func_lib
+                                                .subgraphs
+                                                .iter()
+                                                .filter(|d| d.category == category)
+                                            {
+                                                if MenuItem::new(def.name.clone())
+                                                    .show(ui, popup)
+                                                    .clicked()
+                                                {
+                                                    chosen = Some(Node::subgraph_instance(
+                                                        def,
+                                                        SubgraphRef::Linked(def.id),
+                                                    ));
                                                 }
                                             }
                                         });
@@ -111,8 +133,12 @@ impl NewNodeUi {
                     });
             });
 
-        if let Some(func) = chosen {
-            out.push(add_node_intent(func, open.world_pos));
+        if let Some(node) = chosen {
+            let view_node = ViewNode {
+                id: node.id,
+                pos: open.world_pos,
+            };
+            out.push(Intent::AddNode { view_node, node });
             self.state = None;
         } else if popup_resp.dismissed || popup_resp.close_requested {
             self.state = None;
@@ -120,23 +146,17 @@ impl NewNodeUi {
     }
 }
 
+/// Every category that has a func *or* a shared subgraph def, sorted +
+/// deduped — one popup column each.
 fn sorted_categories<'a>(ctx: &'a AppContext<'_>) -> Vec<&'a str> {
     let mut cats: Vec<&str> = ctx
         .func_lib
         .funcs
         .iter()
         .map(|f| f.category.as_str())
+        .chain(ctx.func_lib.subgraphs.iter().map(|d| d.category.as_str()))
         .collect();
     cats.sort();
     cats.dedup();
     cats
-}
-
-fn add_node_intent(func: &Func, world_pos: Vec2) -> Intent {
-    let node: Node = func.into();
-    let view_node = ViewNode {
-        id: node.id,
-        pos: world_pos,
-    };
-    Intent::AddNode { view_node, node }
 }
