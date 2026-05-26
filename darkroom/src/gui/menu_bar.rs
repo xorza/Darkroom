@@ -23,6 +23,10 @@ pub enum MenuCommand {
     ExportSubgraph,
     /// Import a subgraph bundle from a file into the current document.
     ImportSubgraph,
+    /// Publish a copy of the active subgraph into the shared library
+    /// (`FuncLib`), so it can be instanced as `Linked` anywhere. No-op
+    /// when the active tab / selection isn't a subgraph.
+    PromoteSubgraph,
     /// Evaluate the graph once on the worker.
     Run,
 }
@@ -106,6 +110,12 @@ fn subgraph_menu(ui: &mut Ui) -> Option<MenuCommand> {
         }
         if MenuItem::new("Import…").show(ui, popup).clicked() {
             command = Some(MenuCommand::ImportSubgraph);
+        }
+        if MenuItem::new("Promote to Library…")
+            .show(ui, popup)
+            .clicked()
+        {
+            command = Some(MenuCommand::PromoteSubgraph);
         }
         command
     })

@@ -6,6 +6,7 @@
 //! scene state.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use palantir::Ui;
 
@@ -13,6 +14,7 @@ use crate::app::App;
 use crate::document::Document;
 use crate::gui::menu_bar::MenuCommand;
 use crate::io::config::AppConfig;
+use crate::io::library;
 use crate::io::persistence;
 
 impl App {
@@ -38,6 +40,7 @@ impl App {
             }
             MenuCommand::ExportSubgraph => self.export_active_subgraph(),
             MenuCommand::ImportSubgraph => self.import_subgraph(),
+            MenuCommand::PromoteSubgraph => self.promote_active_subgraph(),
             MenuCommand::Run => self.run_graph(),
         }
     }
@@ -54,6 +57,23 @@ impl App {
         if let Some(path) = persistence::pick_save_path(self.current_path.as_deref()) {
             persistence::export_subgraph(def, &path);
         }
+    }
+
+    /// Publish a copy of the active/selected subgraph into the shared
+    /// library (the runtime `FuncLib`) and persist it, so it can be
+    /// instanced as `Linked` anywhere. Non-destructive: a fresh-id copy
+    /// (fresh interior ids too) joins the library; the source instance
+    /// and document are untouched, so there's nothing for the undo stack
+    /// to track. No-op when neither a subgraph instance nor an open
+    /// subgraph resolves.
+    fn promote_active_subgraph(&mut self) {
+        let Some(def) = self.document.subgraph_to_export(&self.func_lib) else {
+            eprintln!("subgraph promote: no subgraph selected or open");
+            return;
+        };
+        let published = def.fresh_copy();
+        Arc::make_mut(&mut self.func_lib).add_subgraph(published);
+        library::save_library(self.func_lib.subgraphs.iter());
     }
 
     /// Import a subgraph def from a file as a local def in the current

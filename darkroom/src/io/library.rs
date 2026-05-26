@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use common::{SerdeFormat, deserialize};
+use common::{SerdeFormat, deserialize, serialize};
 use scenarium::prelude::SubgraphDef;
 
 /// Library file name, resolved relative to the process working directory.
@@ -39,4 +39,16 @@ pub(crate) fn load_library() -> Vec<SubgraphDef> {
     deserialize::<Library>(&bytes, SerdeFormat::Rhai)
         .map(|lib| lib.subgraphs)
         .unwrap_or_default()
+}
+
+/// Write the shared subgraph defs to the working dir. Errors print to
+/// stderr — a failed persist shouldn't interrupt the session.
+pub(crate) fn save_library<'a>(subgraphs: impl Iterator<Item = &'a SubgraphDef>) {
+    let lib = Library {
+        subgraphs: subgraphs.cloned().collect(),
+    };
+    let bytes = serialize(&lib, SerdeFormat::Rhai);
+    if let Err(err) = std::fs::write(path(), &bytes) {
+        eprintln!("library save failed: {err}");
+    }
 }
