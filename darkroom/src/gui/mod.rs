@@ -3,6 +3,7 @@ pub mod main_window;
 pub mod menu_bar;
 pub mod node;
 pub mod tab_bar;
+pub mod widgets;
 
 use crate::document::GraphRef;
 

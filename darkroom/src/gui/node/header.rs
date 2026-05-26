@@ -9,9 +9,13 @@ use palantir::{
 use scenarium::prelude::{NodeBehavior, NodeId};
 
 use crate::edit::intent::Intent;
-use crate::gui::node::RecordCtx;
+use crate::gui::node::{RecordCtx, select_intent};
+use crate::gui::widgets::inline_rename::inline_rename;
 use crate::scene::SceneNode;
 use crate::theme::Theme;
+
+/// Character cap for a node title in the inline rename editor.
+const NODE_NAME_MAX_CHARS: usize = 32;
 
 /// Side of a header indicator chip (px), and its glyph font size.
 const BADGE_SIZE: f32 = 15.0;
@@ -32,7 +36,7 @@ pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
             ..Default::default()
         })
         .show(ui, |ui| {
-            Text::new(node.name.clone()).show(ui);
+            title(ui, rcx, node, out);
             // FILL spacer pushes the badge cluster to the right edge.
             Panel::hstack()
                 .id_salt("badge_spacer")
@@ -77,6 +81,32 @@ pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
                 });
             }
         });
+}
+
+/// The node title: an inline-renamable label. Double-click swaps it for
+/// a `TextEdit`; commit emits [`Intent::RenameNode`], single-click
+/// selects (the label would otherwise swallow the body's click). Same
+/// widget + style as the boundary-port rename in
+/// [`crate::gui::node::port_rename`].
+fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+    let shift = ui.modifiers().shift;
+    let id = node_rename_wid(node.id);
+    let ev = inline_rename(ui, id, node.name.clone(), NODE_NAME_MAX_CHARS);
+    if ev.clicked {
+        out.push(select_intent(shift, rcx.scene, node.id));
+    }
+    if let Some(to) = ev.committed {
+        out.push(Intent::RenameNode {
+            node_id: node.id,
+            to,
+        });
+    }
+}
+
+/// Stable id for a node's inline title-rename editor (and its idle
+/// label), so the same id is recorded across the label⇄editor swap.
+fn node_rename_wid(node_id: NodeId) -> WidgetId {
+    WidgetId::from_hash(("graph.node.title_rename", node_id))
 }
 
 /// Stable id for a node's clickable cache-toggle chip. Domain-derived
