@@ -75,7 +75,6 @@ impl App {
     /// from intent history that no longer matches the live tree.
     fn new_document(&mut self) {
         self.document = Document::default();
-        self.rebuild_func_lib();
         self.action_stack.clear();
         self.intents.clear();
         // Force a scene rebuild next frame: the active target may still
@@ -89,7 +88,6 @@ impl App {
             return;
         };
         self.document = doc;
-        self.rebuild_func_lib();
         self.action_stack.clear();
         self.intents.clear();
         self.scene_target = None;

@@ -29,8 +29,9 @@ use worker::{WorkerBridge, WorkerEvent};
 /// undone away, but the oldest entries drop once the buffer overflows.
 const UNDO_HISTORY_BYTES: usize = 1 << 20;
 
-/// The built-in runtime function library (no document-shared subgraphs).
-/// Reassembled with the document's shared defs by [`App::rebuild_func_lib`].
+/// The built-in runtime function library. Builtins carry no subgraph
+/// defs, so `func_lib.subgraphs` *is* the shared subgraph library —
+/// loaded from the library file at startup, grown by "promote".
 fn builtin_func_lib() -> FuncLib {
     let mut func_lib = FuncLib::default();
     func_lib.merge(BasicFuncLib::default());
@@ -300,7 +301,6 @@ impl App {
         let ctx_def = match target {
             GraphRef::Main => None,
             GraphRef::Local(id) => self.document.graph.subgraphs.by_key(&id),
-            GraphRef::Shared(id) => self.document.shared_subgraphs.by_key(&id),
         };
         self.scene
             .rebuild(graph, view, &self.func_lib, ctx_def, &self.exec_status);
@@ -338,19 +338,6 @@ impl App {
     /// terminals once. The worker evaluates the full nested graph, so
     /// this is independent of the active tab. Cloning the graph + an
     /// `Arc` bump of the lib is the per-run cost.
-    /// Reassemble the runtime `func_lib` as builtins + the document's
-    /// shared subgraph defs (where `SubgraphRef::Linked` instances
-    /// resolve). Call after anything that changes `shared_subgraphs`
-    /// (load, promote/localize). A fresh `Arc` so the worker's in-flight
-    /// clone isn't disturbed.
-    pub(crate) fn rebuild_func_lib(&mut self) {
-        let mut func_lib = builtin_func_lib();
-        for def in self.document.shared_subgraphs.iter() {
-            func_lib.add_subgraph(def.clone());
-        }
-        self.func_lib = Arc::new(func_lib);
-    }
-
     pub(crate) fn run_graph(&self) {
         eprintln!("run_graph called");
         self.worker

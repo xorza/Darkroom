@@ -108,12 +108,11 @@ fn tab_labels(doc: &Document) -> Vec<TabLabel> {
                 text: "main".into(),
                 closable: false,
             },
-            GraphRef::Local(id) | GraphRef::Shared(id) => {
+            GraphRef::Local(id) => {
                 let name = doc
                     .graph
                     .subgraphs
                     .by_key(id)
-                    .or_else(|| doc.shared_subgraphs.by_key(id))
                     .map(|d| d.name.clone())
                     .unwrap_or_else(|| "subgraph".to_string());
                 TabLabel {
