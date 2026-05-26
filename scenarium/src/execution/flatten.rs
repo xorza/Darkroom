@@ -23,6 +23,7 @@ use super::program::{
     ExecutionPortAddress, Span,
 };
 use crate::data::StaticValue;
+use crate::execution_stats::FlattenMap;
 use crate::function::FuncLib;
 use crate::graph::{Binding, Graph, InputPort, NodeBehavior, NodeId, NodeKind, Subscription};
 use crate::subgraph::SubgraphId;
@@ -41,6 +42,9 @@ const MAX_DEPTH: usize = 256;
 #[derive(Debug, Default)]
 pub(crate) struct Flattener {
     ids: Vec<NodeId>,
+    /// `FlattenMap` scope indices parallel to the emit-descent in `ids` —
+    /// the scope each level's nodes live in. Reused across builds.
+    scope_stack: Vec<u32>,
     /// Subgraph defs currently on the emit-descent path — a def appearing
     /// twice is recursion (it contains itself). Reused across builds.
     seen: HashSet<SubgraphId>,
@@ -81,10 +85,16 @@ impl Flattener {
         pools: Pools<'_>,
         root: &Graph,
         func_lib: &FuncLib,
+        flatten: &mut FlattenMap,
     ) -> u32 {
         self.ids.clear();
         self.seen.clear();
         self.subs.clear();
+        // Reset to a lone root scope; emit pushes child scopes as it
+        // descends composites (scope 0 is the root the stack starts on).
+        flatten.reset();
+        self.scope_stack.clear();
+        self.scope_stack.push(0);
 
         let mut new_inputs = std::mem::take(&mut self.inputs_scratch);
         new_inputs.clear();
@@ -97,6 +107,8 @@ impl Flattener {
                 root,
                 func_lib,
                 ids: &mut self.ids,
+                scope_stack: &mut self.scope_stack,
+                flatten,
                 seen: &mut self.seen,
                 subs: &mut self.subs,
                 compact: e_nodes.compact_insert_start(),
@@ -186,6 +198,12 @@ struct Run<'a> {
     root: &'a Graph,
     func_lib: &'a FuncLib,
     ids: &'a mut Vec<NodeId>,
+    /// Scope indices parallel to `ids` (the emit descent). `last()` is the
+    /// scope the current level's nodes live in.
+    scope_stack: &'a mut Vec<u32>,
+    /// The flatten map being built — leaves recorded per func node, scopes
+    /// pushed per composite descent.
+    flatten: &'a mut FlattenMap,
     seen: &'a mut HashSet<SubgraphId>,
     subs: &'a mut Vec<Subscription>,
     compact: CompactInsert<'a, NodeId, ExecutionNode>,
@@ -308,6 +326,11 @@ impl<'a> Run<'a> {
                     e_node.name.clear();
                     e_node.name.push_str(&node.name);
 
+                    // Record where this flat node came from (current scope
+                    // + authoring id) so stats map back to editor nodes.
+                    let scope = *self.scope_stack.last().unwrap();
+                    self.flatten.set_leaf(flat_id, scope, node.id);
+
                     self.cur_idx = idx;
 
                     for (input_idx, binding) in graph.node_bindings(node.id, input_count) {
@@ -330,7 +353,13 @@ impl<'a> Run<'a> {
                     let once = node.behavior == NodeBehavior::Once;
                     self.once_depth += once as usize;
                     self.push_level(node.id);
+                    // Open this instance's scope under the current one; its
+                    // interior nodes record their leaves against it.
+                    let parent = *self.scope_stack.last().unwrap();
+                    let scope = self.flatten.push_scope(node.id, parent);
+                    self.scope_stack.push(scope);
                     self.emit();
+                    self.scope_stack.pop();
                     self.ids.pop();
                     self.once_depth -= once as usize;
                     self.seen.remove(&r.id());

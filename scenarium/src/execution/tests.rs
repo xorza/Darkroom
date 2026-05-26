@@ -2265,6 +2265,44 @@ mod subgraph {
         assert_ne!(sums[0], sums[1]);
     }
 
+    /// The `FlattenMap` maps a flattened interior node back to the
+    /// editor's authoring ids: `attribution` yields the node's own id
+    /// inside the def's graph, then each enclosing composite instance.
+    /// This is what lets the editor show per-node stats inside a subgraph
+    /// and accumulate them onto the instance node.
+    #[test]
+    fn flatten_map_attributes_interior_to_authoring_ids() {
+        let func_lib = test_func_lib(TestFuncHooks::default());
+        let def = wrap_sum_def(&func_lib);
+        // The id the editor knows the interior node by (in the def graph).
+        let interior_sum_id = def.graph.iter().find(|n| n.name == "sum").unwrap().id;
+
+        let get_a = fnode(&func_lib, "get_a");
+        let a_id = get_a.id;
+        let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
+        let c_id = c.id;
+
+        let mut graph = Graph::default();
+        graph.subgraphs.add(def);
+        graph.add(get_a);
+        graph.add(c);
+        graph.set_input_binding(InputPort::new(c_id, 0), (a_id, 0).into());
+
+        let mut eg = ExecutionEngine::default();
+        eg.update(&graph, &func_lib);
+
+        // Interior node: flattened id is remapped, but attribution points
+        // back to the authoring interior id then the enclosing instance.
+        let sum_flat = eg.by_name("sum").unwrap().id;
+        assert_ne!(sum_flat, interior_sum_id, "flattened id is remapped");
+        let attr: Vec<_> = eg.flatten.attribution(sum_flat).collect();
+        assert_eq!(attr, vec![interior_sum_id, c_id]);
+
+        // Top-level node: id unchanged, attribution is just itself.
+        let a_attr: Vec<_> = eg.flatten.attribution(a_id).collect();
+        assert_eq!(a_attr, vec![a_id]);
+    }
+
     // === Stage 2b: events across boundaries ===
 
     /// Add a `ticker` func (one event, no I/O) usable as an interior or parent

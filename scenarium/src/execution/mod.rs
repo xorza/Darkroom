@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::data::DynamicValue;
-use crate::execution_stats::ExecutionStats;
+use crate::execution_stats::{ExecutionStats, FlattenMap};
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
 use crate::prelude::FuncId;
@@ -79,6 +79,11 @@ pub struct ExecutionEngine {
     pub(crate) program: ExecutionProgram,
     /// Reusable subgraph-flattening scratch (kept across compiles).
     flattener: flatten::Flattener,
+    /// How the last `update` flattened the graph (authoring↔execution id
+    /// map). Rebuilt each compile, cloned into each run's `ExecutionStats`
+    /// so the editor can project stats onto its nodes. Compile scratch,
+    /// not part of the serialized program.
+    flatten: FlattenMap,
     executor: Executor,
     planner: Planner,
     /// Reusable plan buffer, recycled across runs to avoid reallocation.
@@ -127,6 +132,7 @@ impl ExecutionEngine {
             },
             graph,
             func_lib,
+            &mut self.flatten,
         ) as usize;
 
         // Realign the runtime cache to the rebuilt node set (preserve by id,
@@ -170,6 +176,10 @@ impl ExecutionEngine {
         // Phase 3: run the schedule.
         let mut stats = self.executor.run(&self.program, &self.plan).await;
         stats.triggered_events = events;
+        // Annotate with how the graph was flattened so the stats' flat ids
+        // can be projected back onto authoring nodes (the executor itself
+        // stays oblivious to the authoring graph).
+        stats.flatten = self.flatten.clone();
 
         Ok(stats)
     }

@@ -12,7 +12,7 @@ use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use crate::common::shared_any_state::SharedAnyState;
 use crate::context::ContextManager;
 use crate::data::DynamicValue;
-use crate::execution_stats::{ExecutedNodeStats, ExecutionStats, NodeError};
+use crate::execution_stats::{ExecutedNodeStats, ExecutionStats, FlattenMap, NodeError};
 use crate::func_lambda::InvokeInput;
 use crate::graph::{InputPort, NodeId};
 use crate::prelude::AnyState;
@@ -241,8 +241,9 @@ impl Executor {
         let mut node_errors = Vec::new();
 
         for &idx in &plan.execute_order {
+            let e = &program.e_nodes[idx];
             executed_nodes.push(ExecutedNodeStats {
-                node_id: program.e_nodes[idx].id,
+                node_id: e.id,
                 elapsed_secs: self.slots[idx].run_time,
             });
         }
@@ -278,6 +279,9 @@ impl Executor {
             cached_nodes,
             triggered_events: Vec::default(),
             node_errors,
+            // Filled by `ExecutionEngine::execute` from the flatten pass;
+            // the executor doesn't know the authoring graph.
+            flatten: FlattenMap::default(),
         }
     }
 }

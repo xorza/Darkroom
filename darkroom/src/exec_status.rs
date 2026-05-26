@@ -57,17 +57,14 @@ impl ExecStatus {
 
 /// Project a run's stats onto an editor-`NodeId`-keyed status map. Each
 /// flattened stat folds (via [`ExecStatus::merged`]) onto the node itself
-/// (`addr.interior`) and onto every ancestor composite instance
-/// (`addr.path`). `out` is cleared first; keys absent from the map paint
-/// no glow.
+/// (its `interior` id) and onto every enclosing composite instance (via
+/// the flatten map's `attribution`). `out` is cleared first; keys absent
+/// from the map paint no glow.
 pub(crate) fn project_stats(out: &mut HashMap<NodeId, ExecStatus>, stats: &ExecutionStats) {
     out.clear();
     let mut rec = |flat_id: NodeId, status: ExecStatus| {
-        let Some(addr) = stats.addrs.get(&flat_id) else {
-            return;
-        };
-        for key in std::iter::once(&addr.interior).chain(addr.path.iter()) {
-            let slot = out.entry(*key).or_default();
+        for node_id in stats.flatten.attribution(flat_id) {
+            let slot = out.entry(node_id).or_default();
             *slot = slot.merged(status);
         }
     };
@@ -88,59 +85,60 @@ pub(crate) fn project_stats(out: &mut HashMap<NodeId, ExecStatus>, stats: &Execu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scenarium::prelude::{ExecutedNodeStats, NodeAddr};
+    use scenarium::prelude::{ExecutedNodeStats, FlattenMap, NodeError};
 
     fn nid(n: u128) -> NodeId {
         NodeId::from_u128(n)
     }
 
-    /// Two instances of one def → the interior node's flattened ids both
-    /// fold onto its authoring `interior` id, summing time; the instance
-    /// nodes each get only their own subtree.
-    #[test]
-    fn aggregates_interior_across_instances_and_per_instance_subtree() {
-        let interior = nid(1);
-        let inst_a = nid(10);
-        let inst_b = nid(20);
-        // Two flattened runs of the same interior node, one per instance.
-        let flat_a = nid(101);
-        let flat_b = nid(102);
-        let mut addrs = HashMap::new();
-        addrs.insert(
-            flat_a,
-            NodeAddr {
-                path: vec![inst_a],
-                interior,
-            },
-        );
-        addrs.insert(
-            flat_b,
-            NodeAddr {
-                path: vec![inst_b],
-                interior,
-            },
-        );
-        let stats = ExecutionStats {
+    /// Build an `ExecutionStats` carrying `flatten`, with the given
+    /// executed `(flat_id, secs)` and errored `flat_id`s.
+    fn stats(
+        flatten: FlattenMap,
+        executed: &[(NodeId, f64)],
+        errored: &[NodeId],
+    ) -> ExecutionStats {
+        ExecutionStats {
             elapsed_secs: 0.0,
-            executed_nodes: vec![
-                ExecutedNodeStats {
-                    node_id: flat_a,
-                    elapsed_secs: 2.0,
-                },
-                ExecutedNodeStats {
-                    node_id: flat_b,
-                    elapsed_secs: 3.0,
-                },
-            ],
+            executed_nodes: executed
+                .iter()
+                .map(|&(node_id, elapsed_secs)| ExecutedNodeStats {
+                    node_id,
+                    elapsed_secs,
+                })
+                .collect(),
             missing_inputs: vec![],
             cached_nodes: vec![],
             triggered_events: vec![],
-            node_errors: vec![],
-            addrs,
-        };
+            node_errors: errored
+                .iter()
+                .map(|&node_id| NodeError {
+                    node_id,
+                    error: scenarium::execution::Error::CycleDetected { node_id },
+                })
+                .collect(),
+            flatten,
+        }
+    }
+
+    /// Two instances of one def → the interior node's flattened ids both
+    /// fold onto its authoring `interior` id, summing time; the instance
+    /// nodes each get only their own run.
+    #[test]
+    fn aggregates_interior_across_instances_and_per_instance_subtree() {
+        let interior = nid(1);
+        let (inst_a, inst_b) = (nid(10), nid(20));
+        let (flat_a, flat_b) = (nid(101), nid(102));
+
+        let mut map = FlattenMap::default();
+        map.reset();
+        let scope_a = map.push_scope(inst_a, 0);
+        let scope_b = map.push_scope(inst_b, 0);
+        map.set_leaf(flat_a, scope_a, interior);
+        map.set_leaf(flat_b, scope_b, interior);
 
         let mut out = HashMap::new();
-        project_stats(&mut out, &stats);
+        project_stats(&mut out, &stats(map, &[(flat_a, 2.0), (flat_b, 3.0)], &[]));
 
         // Shared interior view: both instances' times sum (2 + 3).
         assert_eq!(out.get(&interior), Some(&ExecStatus::Executed(5.0)));
@@ -149,38 +147,39 @@ mod tests {
         assert_eq!(out.get(&inst_b), Some(&ExecStatus::Executed(3.0)));
     }
 
+    /// A node nested two levels deep accumulates onto *both* enclosing
+    /// instances — the outer instance's total includes nested cost.
+    #[test]
+    fn outer_instance_total_includes_nested() {
+        let interior = nid(1);
+        let (outer, inner) = (nid(10), nid(20));
+        let flat = nid(100);
+
+        let mut map = FlattenMap::default();
+        map.reset();
+        let scope_outer = map.push_scope(outer, 0);
+        let scope_inner = map.push_scope(inner, scope_outer);
+        map.set_leaf(flat, scope_inner, interior);
+
+        let mut out = HashMap::new();
+        project_stats(&mut out, &stats(map, &[(flat, 4.0)], &[]));
+
+        assert_eq!(out.get(&interior), Some(&ExecStatus::Executed(4.0)));
+        assert_eq!(out.get(&inner), Some(&ExecStatus::Executed(4.0)));
+        assert_eq!(out.get(&outer), Some(&ExecStatus::Executed(4.0)));
+    }
+
     /// Worst status wins when a node both executed and errored (the
     /// errored node is in both lists); time is dropped with the upgrade.
     #[test]
     fn errored_beats_executed_on_same_node() {
-        let interior = nid(1);
-        let flat = nid(1); // top-level: flattened id == interior
-        let mut addrs = HashMap::new();
-        addrs.insert(
-            flat,
-            NodeAddr {
-                path: vec![],
-                interior,
-            },
-        );
-        let stats = ExecutionStats {
-            elapsed_secs: 0.0,
-            executed_nodes: vec![ExecutedNodeStats {
-                node_id: flat,
-                elapsed_secs: 1.0,
-            }],
-            missing_inputs: vec![],
-            cached_nodes: vec![],
-            triggered_events: vec![],
-            node_errors: vec![scenarium::prelude::NodeError {
-                node_id: flat,
-                error: scenarium::execution::Error::CycleDetected { node_id: flat },
-            }],
-            addrs,
-        };
+        let interior = nid(1); // top-level: flattened id == interior
+        let mut map = FlattenMap::default();
+        map.reset();
+        map.set_leaf(interior, 0, interior);
 
         let mut out = HashMap::new();
-        project_stats(&mut out, &stats);
+        project_stats(&mut out, &stats(map, &[(interior, 1.0)], &[interior]));
         assert_eq!(out.get(&interior), Some(&ExecStatus::Errored));
     }
 }
