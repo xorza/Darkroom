@@ -33,13 +33,15 @@ const BOUNDARY_LAYOUT_GAP: f32 = 520.0;
 
 /// Which graph an editor tab is pointed at. `Main` is the document's
 /// root graph; `Local(id)` is a local subgraph def's interior graph
-/// (`Document::graph.subgraphs[id].graph`). Linked subgraphs live in the
-/// shared `FuncLib`, not the document, so they aren't editable targets
-/// here yet.
+/// (`Document::graph.subgraphs[id].graph`, private to the root graph);
+/// `Shared(id)` is a document-shared (`Linked`) subgraph def's interior
+/// (`Document::shared_subgraphs[id].graph`) — instanced from anywhere in
+/// the doc, edits propagate to every instance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum GraphRef {
     Main,
     Local(SubgraphId),
+    Shared(SubgraphId),
 }
 
 /// Which side of a subgraph def's interface a boundary-port edit targets:
@@ -220,6 +222,13 @@ impl EditScope<'_> {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
     pub graph: CoreGraph,
+    /// Document-shared subgraph defs — the source of truth for `Linked`
+    /// instances anywhere in the document. Assembled into the runtime
+    /// `FuncLib` (which is where `SubgraphRef::Linked` resolves from) by
+    /// `App`. Editing one propagates to every instance. Persisted with
+    /// the document; `Local` defs (per-graph) live in `graph.subgraphs`.
+    #[serde(default)]
+    pub shared_subgraphs: KeyIndexVec<SubgraphId, SubgraphDef>,
     pub main_view: GraphView,
     /// View metadata for local subgraph interiors, created lazily when a
     /// subgraph is first opened in a tab. Keyed by `SubgraphId`.
@@ -260,6 +269,7 @@ impl Default for Document {
     fn default() -> Self {
         Self {
             graph: CoreGraph::default(),
+            shared_subgraphs: KeyIndexVec::default(),
             main_view: GraphView::default(),
             sub_views: HashMap::new(),
             tabs: default_tabs(),
@@ -275,6 +285,7 @@ impl Document {
         match target {
             GraphRef::Main => Some(&self.graph),
             GraphRef::Local(id) => self.graph.subgraphs.by_key(&id).map(|d| &d.graph),
+            GraphRef::Shared(id) => self.shared_subgraphs.by_key(&id).map(|d| &d.graph),
         }
     }
 
@@ -282,7 +293,7 @@ impl Document {
     pub fn view(&self, target: GraphRef) -> Option<&GraphView> {
         match target {
             GraphRef::Main => Some(&self.main_view),
-            GraphRef::Local(id) => self.sub_views.get(&id),
+            GraphRef::Local(id) | GraphRef::Shared(id) => self.sub_views.get(&id),
         }
     }
 
@@ -295,6 +306,7 @@ impl Document {
         match target {
             GraphRef::Main => Some(&mut self.graph),
             GraphRef::Local(id) => self.graph.subgraphs.by_key_mut(&id).map(|d| &mut d.graph),
+            GraphRef::Shared(id) => self.shared_subgraphs.by_key_mut(&id).map(|d| &mut d.graph),
         }
     }
 
@@ -307,6 +319,14 @@ impl Document {
             }),
             GraphRef::Local(id) => {
                 let def = self.graph.subgraphs.by_key_mut(&id)?;
+                let view = self.sub_views.get_mut(&id)?;
+                Some(EditScope {
+                    graph: &mut def.graph,
+                    view,
+                })
+            }
+            GraphRef::Shared(id) => {
+                let def = self.shared_subgraphs.by_key_mut(&id)?;
                 let view = self.sub_views.get_mut(&id)?;
                 Some(EditScope {
                     graph: &mut def.graph,
@@ -349,6 +369,7 @@ impl Document {
         }
         match target {
             GraphRef::Local(id) => self.graph.subgraphs.by_key(&id),
+            GraphRef::Shared(id) => self.shared_subgraphs.by_key(&id),
             GraphRef::Main => None,
         }
     }
@@ -361,7 +382,14 @@ impl Document {
             return true;
         }
         let view = {
-            let Some(def) = self.graph.subgraphs.by_key(&id) else {
+            // A subgraph id resolves against either the per-graph local
+            // table or the document-shared table (ids are unique).
+            let Some(def) = self
+                .graph
+                .subgraphs
+                .by_key(&id)
+                .or_else(|| self.shared_subgraphs.by_key(&id))
+            else {
                 return false;
             };
             let mut view = GraphView::for_graph(&def.graph);
@@ -389,24 +417,32 @@ impl Document {
         // graph actually vanished.
         if self.tabs.iter().any(|t| self.graph_for(*t).is_none()) {
             // Split the borrow so `retain` (mut `tabs`) can read `graph`.
-            let Document { graph, tabs, .. } = self;
+            let Document {
+                graph,
+                shared_subgraphs,
+                tabs,
+                ..
+            } = self;
             tabs.retain(|t| match t {
                 GraphRef::Main => true,
                 GraphRef::Local(id) => graph.subgraphs.by_key(id).is_some(),
+                GraphRef::Shared(id) => shared_subgraphs.by_key(id).is_some(),
             });
         }
-        // Seed views for any `Local` tab missing one. Guarded by `any`
-        // so the common (all-seeded) case allocates nothing.
-        if self
-            .tabs
-            .iter()
-            .any(|t| matches!(t, GraphRef::Local(id) if !self.sub_views.contains_key(id)))
-        {
+        // Seed views for any `Local`/`Shared` tab missing one. Guarded by
+        // `any` so the common (all-seeded) case allocates nothing.
+        if self.tabs.iter().any(
+            |t| matches!(t, GraphRef::Local(id) | GraphRef::Shared(id) if !self.sub_views.contains_key(id)),
+        ) {
             let missing: Vec<SubgraphId> = self
                 .tabs
                 .iter()
                 .filter_map(|t| match t {
-                    GraphRef::Local(id) if !self.sub_views.contains_key(id) => Some(*id),
+                    GraphRef::Local(id) | GraphRef::Shared(id)
+                        if !self.sub_views.contains_key(id) =>
+                    {
+                        Some(*id)
+                    }
                     _ => None,
                 })
                 .collect();
@@ -674,6 +710,7 @@ impl From<CoreGraph> for Document {
         let main_view = GraphView::for_graph(&graph);
         Self {
             graph,
+            shared_subgraphs: KeyIndexVec::default(),
             main_view,
             sub_views: HashMap::new(),
             tabs: default_tabs(),
