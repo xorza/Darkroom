@@ -131,32 +131,23 @@ impl NodeUI {
                 .broken_nodes
                 .push(node.id);
         }
+        let selected = rcx.scene.selected_nodes.contains(&node.id);
+        // The border width is *always* the selection width so selecting a
+        // node never resizes it (stroke folds into padding). Only the
+        // color changes: bright glow when selected, the node fill when
+        // not (the reserved stroke blends into the body so no border
+        // shows). Broken still wins as the alarm color.
+        let border_width = theme.node_border_width * 2.0;
         let border = if broken {
             theme.connection_broken
+        } else if selected {
+            theme.selection_glow
         } else {
-            theme.node_border
+            theme.node_fill
         };
-        let selected = rcx.scene.selected_nodes.contains(&node.id);
         // Sample modifiers before the panel borrows `ui` for the rest
         // of this scope (the click handler below can't reborrow it).
         let shift_click = ui.modifiers().shift;
-        // Soft halo behind the selected node. Zero-offset Gaussian
-        // shadow so the glow wraps evenly; `spread` pushes the halo
-        // out past the border so it reads at any zoom. Lives in the
-        // `Background::shadow` slot so the encoder emits it on the
-        // chrome branch — paints behind the node's fill in one
-        // chrome batch, no extra `Shape::Shadow` overdraw bookkeeping.
-        let shadow = if selected {
-            Shadow {
-                color: theme.selection_glow,
-                offset: Vec2::ZERO,
-                blur: 6.0,
-                spread: 1.0,
-                inset: false,
-            }
-        } else {
-            Shadow::NONE
-        };
 
         let panel = Panel::vstack()
             .id(node_widget_id(node.id))
@@ -166,9 +157,9 @@ impl NodeUI {
             .sense(Sense::CLICK | Sense::DRAG)
             .background(Background {
                 fill: theme.node_fill.into(),
-                stroke: Stroke::solid(border, theme.node_border_width),
+                stroke: Stroke::solid(border, border_width),
                 corners: Corners::all(theme.node_corner_radius),
-                shadow,
+                shadow: Shadow::NONE,
             })
             .show(ui, |ui| {
                 header(ui, rcx, node, out);
