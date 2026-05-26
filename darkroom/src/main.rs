@@ -1,6 +1,7 @@
 mod app;
 mod document;
 mod edit;
+mod exec_status;
 mod gui;
 mod io;
 mod scene;

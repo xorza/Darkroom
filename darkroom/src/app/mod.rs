@@ -11,10 +11,11 @@ use scenarium::prelude::{FuncLib, Graph as CoreGraph, NodeId};
 use crate::document::{Document, GraphRef};
 use crate::edit::action_stack::ActionStack;
 use crate::edit::intent::{Intent, apply_step, build_step, requires_relayout};
+use crate::exec_status::{ExecStatus, project_stats};
 use crate::gui::UiAction;
 use crate::gui::main_window::MainWindow;
 use crate::io::config::AppConfig;
-use crate::scene::{ExecStatus, Scene};
+use crate::scene::Scene;
 use crate::theme::Theme;
 
 mod commands;
@@ -344,25 +345,7 @@ impl App {
         for event in self.worker.drain() {
             match event {
                 WorkerEvent::ExecutionFinished(Ok(stats)) => {
-                    // Insert low→high severity so a higher status wins on
-                    // a node in several lists (a node both executed and
-                    // errored shows `Errored`, losing its time — that's
-                    // the tradeoff for carrying the time on `Executed`).
-                    self.exec_status.clear();
-                    for id in &stats.cached_nodes {
-                        self.exec_status.insert(*id, ExecStatus::Cached);
-                    }
-                    for e in &stats.executed_nodes {
-                        self.exec_status
-                            .insert(e.node_id, ExecStatus::Executed(e.elapsed_secs));
-                    }
-                    for port in &stats.missing_inputs {
-                        self.exec_status
-                            .insert(port.node_id, ExecStatus::MissingInputs);
-                    }
-                    for e in &stats.node_errors {
-                        self.exec_status.insert(e.node_id, ExecStatus::Errored);
-                    }
+                    project_stats(&mut self.exec_status, &stats);
                 }
                 WorkerEvent::ExecutionFinished(Err(err)) => {
                     eprintln!("compute failed: {err}");

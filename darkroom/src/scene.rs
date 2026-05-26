@@ -10,6 +10,7 @@ use scenarium::prelude::{
 };
 
 use crate::document::GraphView;
+use crate::exec_status::ExecStatus;
 
 #[derive(Debug)]
 pub struct Scene {
@@ -102,22 +103,6 @@ pub struct SceneNode {
     /// `Executed`) the header time label; `None` (the default) paints
     /// no glow.
     pub exec_status: ExecStatus,
-}
-
-/// Per-node outcome of the last graph run, projected from the worker's
-/// `ExecutionStats`. Ordered low→high so the index build can let a
-/// higher-severity status overwrite a lower one on the same node
-/// (`Errored` wins over `MissingInputs` wins over `Executed` wins over
-/// `Cached`) — mirrors the deprecated editor's precedence. `Executed`
-/// carries the node's wall-clock run time (seconds).
-#[derive(Clone, Copy, PartialEq, Default, Debug)]
-pub enum ExecStatus {
-    #[default]
-    None,
-    Cached,
-    Executed(f64),
-    MissingInputs,
-    Errored,
 }
 
 #[derive(Debug)]

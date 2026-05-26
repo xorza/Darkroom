@@ -9,9 +9,10 @@ use palantir::{
 use scenarium::prelude::{NodeBehavior, NodeId};
 
 use crate::edit::intent::Intent;
+use crate::exec_status::ExecStatus;
 use crate::gui::node::{RecordCtx, exec_color, node_rename_wid, select_intent};
 use crate::gui::widgets::inline_rename::inline_rename;
-use crate::scene::{ExecStatus, SceneNode};
+use crate::scene::SceneNode;
 use crate::theme::Theme;
 
 /// Character cap for a node title in the inline rename editor.
