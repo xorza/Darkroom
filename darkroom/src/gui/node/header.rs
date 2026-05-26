@@ -38,7 +38,13 @@ fn fmt_elapsed(secs: f64) -> String {
 /// label never reflows the title.
 pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
-    let r = theme.header_corner_radius;
+    // The header sits inside the body's border stroke (the layout folds
+    // the stroke width into the body's padding). Its top corners must
+    // follow the stroke's *inner* radius — `node_corner_radius` minus the
+    // stroke width (the node draws a `2 × node_border_width` stroke) —
+    // otherwise the header's rounder corner leaves a wedge of body
+    // `node_fill` showing between it and the (selection-lit) stroke.
+    let r = (theme.node_corner_radius - theme.node_border_width * 2.0).max(0.0);
     Panel::hstack()
         .id_salt("header")
         .size((Sizing::FILL, Sizing::Hug))
