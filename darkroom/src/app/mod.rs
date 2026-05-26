@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use lens::ImageFuncLib;
 use palantir::{HostHandle, Ui};
@@ -19,11 +20,27 @@ use crate::theme::Theme;
 
 mod commands;
 mod shortcuts;
+mod worker;
+
+use worker::{WorkerBridge, WorkerEvent};
 
 /// Byte budget for the undo history's packed buffer (~1 MiB). Bounds
 /// memory rather than entry count — a single large edit can't be
 /// undone away, but the oldest entries drop once the buffer overflows.
 const UNDO_HISTORY_BYTES: usize = 1 << 20;
+
+/// Concrete hooks for the demo `test_func_lib` (the sample graph wires
+/// `get_a`/`get_b`/`print` nodes). The library's `Default` hooks panic
+/// on call, which is right for unit tests but blows up the worker the
+/// first time it actually evaluates the graph — so the editor supplies
+/// real ones. `print` goes to stderr until there's a status surface.
+fn sample_test_hooks() -> TestFuncHooks {
+    TestFuncHooks {
+        get_a: Arc::new(|| Ok(21)),
+        get_b: Arc::new(|| 2),
+        print: Arc::new(|value| eprintln!("print: {value}")),
+    }
+}
 
 /// Shared per-frame context threaded down the UI tree. Holds borrows
 /// of state owned higher up so child subtrees don't take a growing
@@ -39,7 +56,10 @@ pub struct AppContext<'a> {
 #[derive(Debug)]
 pub struct App {
     pub document: Document,
-    pub func_lib: FuncLib,
+    /// Shared with the worker on every run (`Arc` so a run clones a
+    /// pointer, not the whole lib). Runtime-owned, not part of the
+    /// serialized `Document`.
+    pub func_lib: Arc<FuncLib>,
     pub scene: Scene,
     /// Which graph `scene` last reflected. A mismatch with the active
     /// target means the tab changed: drop transient gesture state
@@ -76,6 +96,9 @@ pub struct App {
     /// Written on every doc/theme change so the next launch reopens
     /// where the user left off.
     pub config: AppConfig,
+    /// Drives the headless graph-evaluation worker (run on demand,
+    /// results drained each frame). Off the serialized state.
+    worker: WorkerBridge,
 }
 
 impl App {
@@ -91,13 +114,14 @@ impl App {
         let mut document: Document = sample_graph().into();
         document.main_view.auto_layout_default(&document.graph);
         let mut func_lib = FuncLib::default();
-        func_lib.merge(test_func_lib(TestFuncHooks::default()));
+        func_lib.merge(test_func_lib(sample_test_hooks()));
         func_lib.merge(BasicFuncLib::default());
         func_lib.merge(WorkerEventsFuncLib::default());
         func_lib.merge(ImageFuncLib::default());
+        let worker = WorkerBridge::new(handle.clone());
         let mut app = Self {
             document,
-            func_lib,
+            func_lib: Arc::new(func_lib),
             scene: Scene::default(),
             scene_target: None,
             scene_dirty: false,
@@ -109,6 +133,7 @@ impl App {
             host_handle: handle,
             current_path: None,
             config: AppConfig::default(),
+            worker,
         };
         app.config = AppConfig::load();
         if let Some(name) = app.config.theme_name.clone() {
@@ -131,6 +156,11 @@ impl palantir::App for App {
 
         self.intents.clear();
         self.actions.clear();
+
+        // Drain anything the worker posted since last frame, before the
+        // scene rebuild so any derived state it updates is visible this
+        // frame. For now this only logs execution stats.
+        self.drain_worker_events();
 
         // ── Navigation phase ─────────────────────────────────────────
         // Settle the active graph entirely from frame-top inputs
@@ -300,6 +330,37 @@ impl App {
             self.action_stack.push_current(target, &batch);
         }
         relayout
+    }
+
+    /// Send the whole document graph to the worker and execute its
+    /// terminals once. The worker evaluates the full nested graph, so
+    /// this is independent of the active tab. Cloning the graph + an
+    /// `Arc` bump of the lib is the per-run cost.
+    pub(crate) fn run_graph(&self) {
+        eprintln!("run_graph called");
+        self.worker
+            .run_once(self.document.graph.clone(), self.func_lib.clone());
+    }
+
+    /// Consume worker results posted since the last frame. For now just
+    /// reports execution stats to stderr; the value/status surface will
+    /// fold them into derived state here.
+    fn drain_worker_events(&mut self) {
+        for event in self.worker.drain() {
+            match event {
+                WorkerEvent::ExecutionFinished(Ok(stats)) => {
+                    eprintln!(
+                        "compute finished: {} nodes, {} errors, {:.3}s",
+                        stats.executed_nodes.len(),
+                        stats.node_errors.len(),
+                        stats.elapsed_secs,
+                    );
+                }
+                WorkerEvent::ExecutionFinished(Err(err)) => {
+                    eprintln!("compute failed: {err}");
+                }
+            }
+        }
     }
 
     /// Apply the record pass's view-state requests. Open mutates the tab

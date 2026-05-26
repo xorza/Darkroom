@@ -23,6 +23,8 @@ pub enum MenuCommand {
     ExportSubgraph,
     /// Import a subgraph bundle from a file into the current document.
     ImportSubgraph,
+    /// Evaluate the graph once on the worker.
+    Run,
 }
 
 /// Top-of-window menu bar. Horizontal strip of "menu trigger" buttons;
@@ -39,7 +41,8 @@ pub fn show(ui: &mut Ui, host: Option<&HostHandle>) -> Option<MenuCommand> {
         .show(ui, |ui| {
             command = file_menu(ui, host)
                 .or_else(|| subgraph_menu(ui))
-                .or_else(|| theme_menu(ui));
+                .or_else(|| theme_menu(ui))
+                .or_else(|| run_menu(ui));
         });
     command
 }
@@ -103,6 +106,16 @@ fn subgraph_menu(ui: &mut Ui) -> Option<MenuCommand> {
         }
         if MenuItem::new("Import…").show(ui, popup).clicked() {
             command = Some(MenuCommand::ImportSubgraph);
+        }
+        command
+    })
+}
+
+fn run_menu(ui: &mut Ui) -> Option<MenuCommand> {
+    dropdown(ui, "Run", |ui, popup| {
+        let mut command = None;
+        if MenuItem::new("Run Once").show(ui, popup).clicked() {
+            command = Some(MenuCommand::Run);
         }
         command
     })

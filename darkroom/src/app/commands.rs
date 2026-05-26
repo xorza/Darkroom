@@ -38,6 +38,7 @@ impl App {
             }
             MenuCommand::ExportSubgraph => self.export_active_subgraph(),
             MenuCommand::ImportSubgraph => self.import_subgraph(),
+            MenuCommand::Run => self.run_graph(),
         }
     }
 

@@ -20,6 +20,7 @@ const SAVE_SHORTCUT: Shortcut = Shortcut::ctrl('S');
 const SAVE_AS_SHORTCUT: Shortcut = Shortcut::ctrl_shift('S');
 const RESET_ZOOM_SHORTCUT: Shortcut = Shortcut::ctrl('0');
 const DUPLICATE_SHORTCUT: Shortcut = Shortcut::ctrl('D');
+const RUN_SHORTCUT: Shortcut = Shortcut::ctrl('R');
 
 impl App {
     /// Ctrl+Z / Ctrl+Shift+Z. Replays undo/redo against the document
@@ -101,7 +102,7 @@ impl App {
         false
     }
 
-    /// Map Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S to a `MenuCommand`.
+    /// Map Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S / Ctrl+R to a `MenuCommand`.
     ///
     /// Document file ops are **global** — they fire regardless of
     /// focus, so Ctrl+S still saves while a node's value editor is
@@ -117,6 +118,7 @@ impl App {
         let open = ui.key_pressed(OPEN_SHORTCUT);
         let save_as = ui.key_pressed(SAVE_AS_SHORTCUT);
         let save = ui.key_pressed(SAVE_SHORTCUT);
+        let run = ui.key_pressed(RUN_SHORTCUT);
         if new {
             Some(MenuCommand::NewDocument)
         } else if open {
@@ -125,6 +127,8 @@ impl App {
             Some(MenuCommand::SaveDocumentAs)
         } else if save {
             Some(MenuCommand::SaveDocument)
+        } else if run {
+            Some(MenuCommand::Run)
         } else {
             None
         }

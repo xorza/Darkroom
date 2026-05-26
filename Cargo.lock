@@ -732,6 +732,7 @@ dependencies = [
  "rfd",
  "scenarium",
  "serde",
+ "tokio",
 ]
 
 [[package]]
