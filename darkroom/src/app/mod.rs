@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -5,7 +6,7 @@ use lens::ImageFuncLib;
 use palantir::{HostHandle, Ui};
 use scenarium::elements::basic_funclib::BasicFuncLib;
 use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
-use scenarium::prelude::{FuncLib, Graph as CoreGraph};
+use scenarium::prelude::{FuncLib, Graph as CoreGraph, NodeId};
 
 use crate::document::{Document, GraphRef};
 use crate::edit::action_stack::ActionStack;
@@ -13,7 +14,7 @@ use crate::edit::intent::{Intent, apply_step, build_step, requires_relayout};
 use crate::gui::UiAction;
 use crate::gui::main_window::MainWindow;
 use crate::io::config::AppConfig;
-use crate::scene::Scene;
+use crate::scene::{ExecStatus, Scene};
 use crate::theme::Theme;
 
 mod commands;
@@ -84,6 +85,12 @@ pub struct App {
     /// Drives the headless graph-evaluation worker (run on demand,
     /// results drained each frame). Off the serialized state.
     worker: WorkerBridge,
+    /// Per-node outcome of the last completed run, projected into each
+    /// `SceneNode::exec_status` at rebuild to drive the status glow.
+    /// Keyed by the document's `NodeId`s so it resolves against any tab
+    /// (root or subgraph interior). Rebuilt when a run finishes, cleared
+    /// on run failure. Off the serialized state.
+    exec_status: HashMap<NodeId, ExecStatus>,
 }
 
 impl App {
@@ -118,6 +125,7 @@ impl App {
             current_path: None,
             config: AppConfig::default(),
             worker,
+            exec_status: HashMap::new(),
         };
         app.config = AppConfig::load();
         if let Some(name) = app.config.theme_name.clone() {
@@ -285,7 +293,8 @@ impl App {
             GraphRef::Main => None,
             GraphRef::Local(id) => self.document.graph.subgraphs.by_key(&id),
         };
-        self.scene.rebuild(graph, view, &self.func_lib, ctx_def);
+        self.scene
+            .rebuild(graph, view, &self.func_lib, ctx_def, &self.exec_status);
     }
 
     /// Drain `intents`, applying each non-no-op intent to `document`,
@@ -326,22 +335,35 @@ impl App {
             .run_once(self.document.graph.clone(), self.func_lib.clone());
     }
 
-    /// Consume worker results posted since the last frame. For now just
-    /// reports execution stats to stderr; the value/status surface will
-    /// fold them into derived state here.
+    /// Consume worker results posted since the last frame. A finished run
+    /// reprojects per-node `ExecStatus` (consumed by the next rebuild as
+    /// the status glow); a failed run clears it. Drained before the scene
+    /// rebuild so the glow reflects the latest run this frame.
     fn drain_worker_events(&mut self) {
         for event in self.worker.drain() {
             match event {
                 WorkerEvent::ExecutionFinished(Ok(stats)) => {
-                    eprintln!(
-                        "compute finished: {} nodes, {} errors, {:.3}s",
-                        stats.executed_nodes.len(),
-                        stats.node_errors.len(),
-                        stats.elapsed_secs,
-                    );
+                    // Insert low→high severity so a higher status wins on
+                    // a node that appears in several lists (a node both
+                    // executed and errored shows `Errored`).
+                    self.exec_status.clear();
+                    for id in &stats.cached_nodes {
+                        self.exec_status.insert(*id, ExecStatus::Cached);
+                    }
+                    for e in &stats.executed_nodes {
+                        self.exec_status.insert(e.node_id, ExecStatus::Executed);
+                    }
+                    for port in &stats.missing_inputs {
+                        self.exec_status
+                            .insert(port.node_id, ExecStatus::MissingInputs);
+                    }
+                    for e in &stats.node_errors {
+                        self.exec_status.insert(e.node_id, ExecStatus::Errored);
+                    }
                 }
                 WorkerEvent::ExecutionFinished(Err(err)) => {
                     eprintln!("compute failed: {err}");
+                    self.exec_status.clear();
                 }
             }
         }

@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use glam::Vec2;
 use palantir::InternedStr;
@@ -97,6 +97,25 @@ pub struct SceneNode {
     /// values, so the const-value affordances (inline editor, "Set
     /// constant" menu, drag-to-own-body) are suppressed on them.
     pub boundary: bool,
+    /// Outcome of the last graph run, mirrored from the worker's
+    /// `ExecutionStats`. Drives the node's status-glow shadow; `None`
+    /// (the default) paints no glow.
+    pub exec_status: ExecStatus,
+}
+
+/// Per-node outcome of the last graph run, projected from the worker's
+/// `ExecutionStats`. Ordered low→high so the index build can let a
+/// higher-severity status overwrite a lower one on the same node
+/// (`Errored` wins over `MissingInputs` wins over `Executed` wins over
+/// `Cached`) — mirrors the deprecated editor's precedence.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub enum ExecStatus {
+    #[default]
+    None,
+    Cached,
+    Executed,
+    MissingInputs,
+    Errored,
 }
 
 #[derive(Debug)]
@@ -128,6 +147,7 @@ impl Scene {
         view: &GraphView,
         func_lib: &FuncLib,
         ctx_def: Option<&SubgraphDef>,
+        exec_status: &HashMap<NodeId, ExecStatus>,
     ) {
         self.selected_nodes = view.selected_nodes.clone();
         // Mirror the persisted viewport. The gesture overwrites these
@@ -240,6 +260,7 @@ impl Scene {
                     node.kind,
                     NodeKind::SubgraphInput | NodeKind::SubgraphOutput
                 ),
+                exec_status: exec_status.get(&vn.id).copied().unwrap_or_default(),
             });
         }
 
@@ -382,7 +403,13 @@ mod tests {
         let (def, in_id, out_id) = adder_def();
         let view = GraphView::for_graph(&def.graph);
         let mut scene = Scene::default();
-        scene.rebuild(&def.graph, &view, &FuncLib::default(), Some(&def));
+        scene.rebuild(
+            &def.graph,
+            &view,
+            &FuncLib::default(),
+            Some(&def),
+            &HashMap::new(),
+        );
 
         assert_eq!(scene.nodes.len(), 2, "both boundary nodes render");
         let input_node = scene.nodes.iter().find(|n| n.id == in_id).unwrap();
@@ -428,7 +455,13 @@ mod tests {
         let (def, _in, _out) = adder_def();
         let view = GraphView::for_graph(&def.graph);
         let mut scene = Scene::default();
-        scene.rebuild(&def.graph, &view, &FuncLib::default(), None);
+        scene.rebuild(
+            &def.graph,
+            &view,
+            &FuncLib::default(),
+            None,
+            &HashMap::new(),
+        );
 
         assert_eq!(scene.nodes.len(), 0, "no ctx_def → no boundary nodes");
         // The wire's endpoints aren't rendered, but `edges()` still yields

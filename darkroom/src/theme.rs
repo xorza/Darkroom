@@ -92,6 +92,24 @@ pub struct Theme {
     #[serde(default = "default_badge_cache")]
     pub badge_cache: Color,
 
+    // ── execution-status glow ────────────────────────────────────
+    // Color of the soft glow shadow behind a node, by the last run's
+    // outcome (mirrors the deprecated editor's per-status shadows).
+    // Palette swatches: `success`/`accent`/`syn_keyword`/`error`.
+    // `#[serde(default)]` so themes predating these fields still load.
+    /// Node computed this run — palette `success` (green).
+    #[serde(default = "default_exec_executed")]
+    pub exec_executed_glow: Color,
+    /// Node reused its cached result — palette `accent` (cyan).
+    #[serde(default = "default_exec_cached")]
+    pub exec_cached_glow: Color,
+    /// Node has unfilled required inputs — palette `syn_keyword` (orange).
+    #[serde(default = "default_exec_missing")]
+    pub exec_missing_glow: Color,
+    /// Node errored — palette `error` (red).
+    #[serde(default = "default_exec_errored")]
+    pub exec_errored_glow: Color,
+
     // ── ports ────────────────────────────────────────────────────
     pub input_port: Color,
     pub output_port: Color,
@@ -142,6 +160,22 @@ fn default_badge_terminal() -> Color {
 
 fn default_badge_cache() -> Color {
     Color::hex(0xffd44a)
+}
+
+fn default_exec_executed() -> Color {
+    Color::hex(0xdaff58)
+}
+
+fn default_exec_cached() -> Color {
+    Color::hex(0x9adbfb)
+}
+
+fn default_exec_missing() -> Color {
+    Color::hex(0xffa63d)
+}
+
+fn default_exec_errored() -> Color {
+    Color::hex(0xff5e44)
 }
 
 impl Theme {

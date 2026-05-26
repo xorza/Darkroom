@@ -11,11 +11,11 @@ use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::node::header::{header, subgraph_badge_wid};
 use crate::gui::node::port_row::{port_circle_wid, ports_row};
 use crate::gui::{PortKind, PortRef, UiAction};
-use crate::scene::{Scene, SceneNode};
+use crate::scene::{ExecStatus, Scene, SceneNode};
 use crate::theme::Theme;
 use glam::Vec2;
 use palantir::{
-    Background, Configure, Corners, Panel, Rect, Sense, Shadow, Sizing, Stroke, Ui, WidgetId,
+    Background, Color, Configure, Corners, Panel, Rect, Sense, Shadow, Sizing, Stroke, Ui, WidgetId,
 };
 use scenarium::graph::Binding;
 use scenarium::prelude::{NodeId, SubgraphRef};
@@ -148,6 +148,10 @@ impl NodeUI {
         // Sample modifiers before the panel borrows `ui` for the rest
         // of this scope (the click handler below can't reborrow it).
         let shift_click = ui.modifiers().shift;
+        // Soft glow behind the node colored by its last run outcome
+        // (zero-offset so it wraps evenly, like the deprecated editor's
+        // status shadow). `None` paints nothing.
+        let shadow = exec_shadow(theme, node.exec_status);
 
         let panel = Panel::vstack()
             .id(node_widget_id(node.id))
@@ -159,7 +163,7 @@ impl NodeUI {
                 fill: theme.node_fill.into(),
                 stroke: Stroke::solid(border, border_width),
                 corners: Corners::all(theme.node_corner_radius),
-                shadow: Shadow::NONE,
+                shadow,
             })
             .show(ui, |ui| {
                 header(ui, rcx, node, out);
@@ -329,6 +333,26 @@ pub(super) fn emit_port_disconnects(ui: &Ui, scene: &Scene, out: &mut Vec<Intent
                 }
             }
         }
+    }
+}
+
+/// The status glow for a node's last-run outcome, or `Shadow::NONE`
+/// when it didn't run. Zero offset so the halo wraps evenly; a small
+/// spread pushes it past the border so it reads at any zoom.
+fn exec_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
+    let glow = |color: Color| Shadow {
+        color,
+        offset: Vec2::ZERO,
+        blur: 8.0,
+        spread: 2.0,
+        inset: false,
+    };
+    match status {
+        ExecStatus::None => Shadow::NONE,
+        ExecStatus::Cached => glow(theme.exec_cached_glow),
+        ExecStatus::Executed => glow(theme.exec_executed_glow),
+        ExecStatus::MissingInputs => glow(theme.exec_missing_glow),
+        ExecStatus::Errored => glow(theme.exec_errored_glow),
     }
 }
 
