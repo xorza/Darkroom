@@ -13,7 +13,6 @@ use crate::edit::action_stack::ActionStack;
 use crate::edit::intent::{Intent, apply_step, build_step, requires_relayout};
 use crate::gui::UiAction;
 use crate::gui::main_window::MainWindow;
-use crate::gui::tab_bar::TabLabel;
 use crate::io::config::AppConfig;
 use crate::scene::Scene;
 use crate::theme::Theme;
@@ -176,8 +175,6 @@ impl palantir::App for App {
             theme: &self.theme,
             func_lib: &self.func_lib,
         };
-        let tab_labels = self.tab_labels();
-        let active = self.document.active;
         let host = self.host_handle.clone();
         let command = self
             .main_window
@@ -186,8 +183,7 @@ impl palantir::App for App {
                 &ctx,
                 &mut self.scene,
                 Some(&host),
-                &tab_labels,
-                active,
+                &self.document,
                 &mut self.intents,
             )
             .or(command_from_shortcut);
@@ -304,33 +300,6 @@ impl App {
             self.action_stack.push_current(target, &batch);
         }
         relayout
-    }
-
-    /// Build the strip's per-tab labels from the open-tab list.
-    fn tab_labels(&self) -> Vec<TabLabel> {
-        self.document
-            .tabs
-            .iter()
-            .map(|t| match t {
-                GraphRef::Main => TabLabel {
-                    text: "main".into(),
-                    closable: false,
-                },
-                GraphRef::Local(id) => {
-                    let name = self
-                        .document
-                        .graph
-                        .subgraphs
-                        .by_key(id)
-                        .map(|d| d.name.clone())
-                        .unwrap_or_else(|| "subgraph".to_string());
-                    TabLabel {
-                        text: name.into(),
-                        closable: true,
-                    }
-                }
-            })
-            .collect()
     }
 
     /// Apply the record pass's view-state requests. Open mutates the tab

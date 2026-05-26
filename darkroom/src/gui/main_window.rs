@@ -3,6 +3,7 @@ use std::mem::take;
 use palantir::{Background, Configure, HostHandle, Panel, Sizing, Ui};
 
 use crate::app::AppContext;
+use crate::document::{Document, GraphRef};
 use crate::edit::intent::Intent;
 use crate::gui::UiAction;
 use crate::gui::canvas::GraphUI;
@@ -52,11 +53,11 @@ impl MainWindow {
         ctx: &AppContext<'_>,
         scene: &mut Scene,
         host: Option<&HostHandle>,
-        tabs: &[TabLabel],
-        active: usize,
+        doc: &Document,
         out: &mut Vec<Intent>,
     ) -> Option<MenuCommand> {
         let mut command = None;
+        let tabs = tab_labels(doc);
         // Top-to-bottom: menu bar, then the tab strip, then the graph.
         // Menu bar + tabs share the `chrome_fill` color so they read as
         // one top bar; the graph pane (canvas_bg) fills the rest, and the
@@ -77,7 +78,7 @@ impl MainWindow {
                     .show(ui, |ui| {
                         command = menu_bar::show(ui, host);
                     });
-                tab_bar::show(ui, ctx.theme, tabs, active);
+                tab_bar::show(ui, ctx.theme, &tabs, doc.active);
                 self.graph_ui.frame(ui, ctx, scene, out);
             });
 
@@ -94,6 +95,33 @@ impl MainWindow {
     pub fn reset_transient(&mut self) {
         self.graph_ui.clear_gestures();
     }
+}
+
+/// Project the document's open-tab list into the strip's per-tab
+/// labels. Lives here (not in `tab_bar`) so the strip stays
+/// document-agnostic — same split as `Scene` for the canvas.
+fn tab_labels(doc: &Document) -> Vec<TabLabel> {
+    doc.tabs
+        .iter()
+        .map(|t| match t {
+            GraphRef::Main => TabLabel {
+                text: "main".into(),
+                closable: false,
+            },
+            GraphRef::Local(id) => {
+                let name = doc
+                    .graph
+                    .subgraphs
+                    .by_key(id)
+                    .map(|d| d.name.clone())
+                    .unwrap_or_else(|| "subgraph".to_string());
+                TabLabel {
+                    text: name.into(),
+                    closable: true,
+                }
+            }
+        })
+        .collect()
 }
 
 impl Default for MainWindow {

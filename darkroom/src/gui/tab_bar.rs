@@ -14,7 +14,7 @@ use palantir::{
 use crate::gui::UiAction;
 use crate::theme::Theme;
 
-/// One tab's display state, built by `App` from its open-tab list.
+/// One tab's display state, built by `main_window` from the open-tab list.
 pub struct TabLabel {
     pub text: InternedStr,
     /// `false` for the always-present `Main` tab.
