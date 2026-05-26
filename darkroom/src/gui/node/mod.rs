@@ -8,7 +8,7 @@ use crate::edit::intent::Intent;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::node_ports;
 use crate::gui::canvas::port_frame::PortFrame;
-use crate::gui::node::header::{header, subgraph_badge_wid};
+use crate::gui::node::header::{header, status_row, subgraph_badge_wid};
 use crate::gui::node::port_row::{port_circle_wid, ports_row};
 use crate::gui::{PortKind, PortRef, UiAction};
 use crate::scene::{ExecStatus, Scene, SceneNode};
@@ -167,6 +167,7 @@ impl NodeUI {
             })
             .show(ui, |ui| {
                 header(ui, rcx, node, out);
+                status_row(ui, rcx, node, out);
                 ports_row(ui, rcx, node, out);
             });
         // Pull the body response's flags into locals so its `&mut ui`
@@ -336,23 +337,32 @@ pub(super) fn emit_port_disconnects(ui: &Ui, scene: &Scene, out: &mut Vec<Intent
     }
 }
 
+/// The accent color for a node's last-run status, or `None` when it
+/// didn't run. Shared by the body glow and the header time label so they
+/// read as one cue.
+pub(super) fn exec_color(theme: &Theme, status: ExecStatus) -> Option<Color> {
+    match status {
+        ExecStatus::None => None,
+        ExecStatus::Cached => Some(theme.exec_cached_glow),
+        ExecStatus::Executed(_) => Some(theme.exec_executed_glow),
+        ExecStatus::MissingInputs => Some(theme.exec_missing_glow),
+        ExecStatus::Errored => Some(theme.exec_errored_glow),
+    }
+}
+
 /// The status glow for a node's last-run outcome, or `Shadow::NONE`
 /// when it didn't run. Zero offset so the halo wraps evenly; a small
 /// spread pushes it past the border so it reads at any zoom.
 fn exec_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
-    let glow = |color: Color| Shadow {
-        color,
-        offset: Vec2::ZERO,
-        blur: 8.0,
-        spread: 2.0,
-        inset: false,
-    };
-    match status {
-        ExecStatus::None => Shadow::NONE,
-        ExecStatus::Cached => glow(theme.exec_cached_glow),
-        ExecStatus::Executed => glow(theme.exec_executed_glow),
-        ExecStatus::MissingInputs => glow(theme.exec_missing_glow),
-        ExecStatus::Errored => glow(theme.exec_errored_glow),
+    match exec_color(theme, status) {
+        Some(color) => Shadow {
+            color,
+            offset: Vec2::ZERO,
+            blur: 8.0,
+            spread: 2.0,
+            inset: false,
+        },
+        None => Shadow::NONE,
     }
 }
 

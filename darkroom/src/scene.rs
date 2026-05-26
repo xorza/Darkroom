@@ -98,8 +98,9 @@ pub struct SceneNode {
     /// constant" menu, drag-to-own-body) are suppressed on them.
     pub boundary: bool,
     /// Outcome of the last graph run, mirrored from the worker's
-    /// `ExecutionStats`. Drives the node's status-glow shadow; `None`
-    /// (the default) paints no glow.
+    /// `ExecutionStats`. Drives the node's status-glow shadow and (for
+    /// `Executed`) the header time label; `None` (the default) paints
+    /// no glow.
     pub exec_status: ExecStatus,
 }
 
@@ -107,13 +108,14 @@ pub struct SceneNode {
 /// `ExecutionStats`. Ordered low→high so the index build can let a
 /// higher-severity status overwrite a lower one on the same node
 /// (`Errored` wins over `MissingInputs` wins over `Executed` wins over
-/// `Cached`) — mirrors the deprecated editor's precedence.
-#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+/// `Cached`) — mirrors the deprecated editor's precedence. `Executed`
+/// carries the node's wall-clock run time (seconds).
+#[derive(Clone, Copy, PartialEq, Default, Debug)]
 pub enum ExecStatus {
     #[default]
     None,
     Cached,
-    Executed,
+    Executed(f64),
     MissingInputs,
     Errored,
 }

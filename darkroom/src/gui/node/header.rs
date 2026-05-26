@@ -9,9 +9,9 @@ use palantir::{
 use scenarium::prelude::{NodeBehavior, NodeId};
 
 use crate::edit::intent::Intent;
-use crate::gui::node::{RecordCtx, node_rename_wid, select_intent};
+use crate::gui::node::{RecordCtx, exec_color, node_rename_wid, select_intent};
 use crate::gui::widgets::inline_rename::inline_rename;
-use crate::scene::SceneNode;
+use crate::scene::{ExecStatus, SceneNode};
 use crate::theme::Theme;
 
 /// Character cap for a node title in the inline rename editor.
@@ -21,6 +21,21 @@ const NODE_NAME_MAX_CHARS: usize = 32;
 const BADGE_SIZE: f32 = 15.0;
 const BADGE_FONT: f32 = 10.0;
 
+/// Compact run-time label: seconds → `s` / `ms` / `µs` at the scale
+/// that keeps 2–3 significant digits.
+fn fmt_elapsed(secs: f64) -> String {
+    if secs >= 1.0 {
+        format!("{secs:.2}s")
+    } else if secs >= 1e-3 {
+        format!("{:.1}ms", secs * 1e3)
+    } else {
+        format!("{:.0}µs", secs * 1e6)
+    }
+}
+
+/// The header bar: just the node title. Indicator chips + the run-time
+/// label live in [`status_row`] below it so adding/removing the time
+/// label never reflows the title.
 pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
     let r = theme.header_corner_radius;
@@ -37,6 +52,35 @@ pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
         })
         .show(ui, |ui| {
             title(ui, rcx, node, out);
+        });
+}
+
+/// The status strip under the header: the last-run time label (left) and
+/// the indicator chips (`S` subgraph-open, `T` terminal, `C` cache),
+/// right-aligned. Its own row so the time appearing/disappearing doesn't
+/// resize the header; the cache chip always shows, so the row's height is
+/// reserved regardless.
+pub(super) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+    let theme = rcx.theme;
+    Panel::hstack()
+        .id_salt("status_row")
+        .size((Sizing::FILL, Sizing::Hug))
+        .padding(Spacing::xy(8.0, 2.0))
+        .gap(4.0)
+        .child_align(Align::v(VAlign::Center))
+        .show(ui, |ui| {
+            // Last-run time, in the node's status color so it ties to the
+            // glow. Only executed nodes carry a time.
+            if let ExecStatus::Executed(secs) = node.exec_status {
+                let color = exec_color(theme, node.exec_status).unwrap_or(ui.theme.text.color);
+                Text::new(fmt_elapsed(secs))
+                    .style(TextStyle {
+                        color,
+                        font_size_px: BADGE_FONT,
+                        ..ui.theme.text
+                    })
+                    .show(ui);
+            }
             // FILL spacer pushes the badge cluster to the right edge.
             Panel::hstack()
                 .id_salt("badge_spacer")

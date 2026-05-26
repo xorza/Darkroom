@@ -85,11 +85,12 @@ pub struct App {
     /// Drives the headless graph-evaluation worker (run on demand,
     /// results drained each frame). Off the serialized state.
     worker: WorkerBridge,
-    /// Per-node outcome of the last completed run, projected into each
-    /// `SceneNode::exec_status` at rebuild to drive the status glow.
-    /// Keyed by the document's `NodeId`s so it resolves against any tab
-    /// (root or subgraph interior). Rebuilt when a run finishes, cleared
-    /// on run failure. Off the serialized state.
+    /// Per-node outcome of the last completed run (with `Executed`'s
+    /// run time), projected into each `SceneNode::exec_status` at rebuild
+    /// to drive the status glow and the header time label. Keyed by the
+    /// document's `NodeId`s so it resolves against any tab (root or
+    /// subgraph interior). Rebuilt when a run finishes, cleared on run
+    /// failure. Off the serialized state.
     exec_status: HashMap<NodeId, ExecStatus>,
 }
 
@@ -344,14 +345,16 @@ impl App {
             match event {
                 WorkerEvent::ExecutionFinished(Ok(stats)) => {
                     // Insert low→high severity so a higher status wins on
-                    // a node that appears in several lists (a node both
-                    // executed and errored shows `Errored`).
+                    // a node in several lists (a node both executed and
+                    // errored shows `Errored`, losing its time — that's
+                    // the tradeoff for carrying the time on `Executed`).
                     self.exec_status.clear();
                     for id in &stats.cached_nodes {
                         self.exec_status.insert(*id, ExecStatus::Cached);
                     }
                     for e in &stats.executed_nodes {
-                        self.exec_status.insert(e.node_id, ExecStatus::Executed);
+                        self.exec_status
+                            .insert(e.node_id, ExecStatus::Executed(e.elapsed_secs));
                     }
                     for port in &stats.missing_inputs {
                         self.exec_status
