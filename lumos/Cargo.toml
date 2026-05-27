@@ -7,9 +7,6 @@ description = ""
 [features]
 real-data = []
 
-[lints]
-workspace = true
-
 [dependencies]
 common = { workspace = true }
 imaginarium = { workspace = true }

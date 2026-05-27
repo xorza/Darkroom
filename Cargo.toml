@@ -17,9 +17,6 @@ resolver = "2"
 version = "0.1.0"
 edition = "2024"
 
-[workspace.lints.rust]
-unused_imports = "allow"
-
 
 [workspace.dependencies]
 common = { path = "common" }
@@ -86,12 +83,14 @@ clap = { version = "4.6", features = ["derive"] }
 
 
 [profile.bench]
-debug = true
+debug = false
+opt-level = 3
 strip = "none"
 split-debuginfo = "off"
 
 [profile.release]
 debug = true
+opt-level = 3
 strip = "none"
 split-debuginfo = "off"
 
@@ -126,4 +125,24 @@ opt-level = 3
 [profile.dev.package.rav1e]
 opt-level = 3
 [profile.dev.package.nalgebra]
+opt-level = 3
+[profile.dev.package.half]
+opt-level = 3
+[profile.dev.package.exr]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+[profile.dev.package.flate2]
+opt-level = 3
+[profile.dev.package.gif]
+opt-level = 3
+[profile.dev.package.qoi]
+opt-level = 3
+[profile.dev.package.lz4_flex]
+opt-level = 3
+[profile.dev.package.fitsio]
+opt-level = 3
+[profile.dev.package.fitsio-sys]
+opt-level = 3
+[profile.dev.package.libraw-rs-sys]
 opt-level = 3
