@@ -799,6 +799,75 @@ mod tests {
         );
     }
 
+    /// Localize one library instance into `doc`'s root graph and return
+    /// `(node_id, local_def_id)`. `origin` tags the copy's library
+    /// lineage so a later instance can dedup against it.
+    fn add_library_instance(doc: &mut Document, lib_id: SubgraphId) -> (NodeId, SubgraphId) {
+        use crate::edit::intent::{Intent, apply_step, build_step};
+
+        let mut local = leaf_def(lib_id, "Lib").fresh_copy();
+        local.origin = Some(lib_id);
+        let local_id = local.id;
+        let node = Node::subgraph_instance(&local, SubgraphRef::Local(local_id));
+        let node_id = node.id;
+        let step = build_step(
+            Intent::AddNode {
+                view_node: ViewNode {
+                    id: node_id,
+                    pos: Vec2::ZERO,
+                },
+                node,
+                def: Some(Box::new(local)),
+            },
+            doc,
+            GraphRef::Main,
+        )
+        .expect("add builds");
+        apply_step(&step, doc, GraphRef::Main);
+        (node_id, local_id)
+    }
+
+    #[test]
+    fn second_instance_reuses_existing_local_def() {
+        // Two instances of the same library subgraph dropped into one
+        // graph must share a single local def: the first materializes the
+        // localized copy, the second re-points at it (no duplicate def).
+        let lib_id = SubgraphId::unique();
+        let mut doc = Document::default();
+
+        let (_node_a, def_a_id) = add_library_instance(&mut doc, lib_id);
+        assert_eq!(doc.graph.subgraphs.len(), 1, "first instance adds the def");
+
+        let (node_b, def_b_id) = add_library_instance(&mut doc, lib_id);
+        assert_eq!(
+            doc.graph.subgraphs.len(),
+            1,
+            "second instance reuses the def — no duplicate"
+        );
+        assert!(
+            doc.graph.subgraphs.by_key(&def_b_id).is_none(),
+            "the second fresh copy was dropped"
+        );
+        assert_eq!(
+            doc.graph.by_id(&node_b).unwrap().kind,
+            NodeKind::Subgraph(SubgraphRef::Local(def_a_id)),
+            "second instance points at the first instance's local def"
+        );
+    }
+
+    #[test]
+    fn instances_of_different_library_defs_stay_separate() {
+        // Different library sources must NOT collapse into one local def.
+        let mut doc = Document::default();
+        add_library_instance(&mut doc, SubgraphId::unique());
+        add_library_instance(&mut doc, SubgraphId::unique());
+        assert_eq!(
+            doc.graph.subgraphs.len(),
+            2,
+            "distinct library origins keep distinct local defs"
+        );
+    }
+
     /// Add a bare `Func`-kind node to `doc`'s root graph + main view at
     /// `pos`, returning its id.
     fn add_node_at(doc: &mut Document, pos: Vec2) -> NodeId {

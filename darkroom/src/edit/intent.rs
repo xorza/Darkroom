@@ -24,8 +24,11 @@
 use std::collections::BTreeSet;
 
 use glam::Vec2;
-use scenarium::graph::{Binding, InputPort, Node, NodeBehavior, NodeId, Subscription};
+use scenarium::graph::{
+    Binding, Graph, InputPort, Node, NodeBehavior, NodeId, NodeKind, Subscription,
+};
 use scenarium::prelude::{SubgraphDef, SubgraphId};
+use scenarium::subgraph::SubgraphRef;
 use serde::{Deserialize, Serialize};
 
 use crate::document::view_node::ViewNode;
@@ -389,13 +392,16 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
         }
         Intent::AddNode {
             view_node,
-            node,
+            mut node,
             def,
-        } => GraphStep::AddNode {
-            view_node,
-            node,
-            def,
-        },
+        } => {
+            let def = reuse_local_subgraph(graph, &mut node, def);
+            GraphStep::AddNode {
+                view_node,
+                node,
+                def,
+            }
+        }
         Intent::DuplicateNodes {
             nodes,
             bindings,
@@ -481,6 +487,32 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
         },
     };
     Some(UndoStep::Graph(step))
+}
+
+/// Library subgraphs are localized on instance: the new-node menu drops
+/// a fresh `Local` copy tagged with the library def it came from
+/// (`origin`). If `graph` already holds a local def from the same
+/// library source, re-point `node` at that existing def and drop the
+/// duplicate copy — one editable local def, many instances. Otherwise
+/// return `def` untouched (the first instance materializes the copy).
+fn reuse_local_subgraph(
+    graph: &Graph,
+    node: &mut Node,
+    def: Option<Box<SubgraphDef>>,
+) -> Option<Box<SubgraphDef>> {
+    let def = def?;
+    // No library lineage (hand-authored local def, e.g. collapse-to-
+    // subgraph) → always its own copy; nothing to dedup against.
+    let Some(origin) = def.origin else {
+        return Some(def);
+    };
+    match graph.subgraphs.iter().find(|d| d.origin == Some(origin)) {
+        Some(existing) => {
+            node.kind = NodeKind::Subgraph(SubgraphRef::Local(existing.id));
+            None
+        }
+        None => Some(def),
+    }
 }
 
 /// Resolve the right graph+view for a scoped step, run `body`, and
