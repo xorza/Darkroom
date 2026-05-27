@@ -1,4 +1,4 @@
-use palantir::Color;
+use palantir::{Background, Brush, Color, WidgetLook};
 
 // ── default palette + dimensions ─────────────────────────────────────
 // The single source of truth for darkroom's built-in look. `Theme::default`
@@ -241,8 +241,6 @@ fn default_exec_errored() -> Color {
 /// it tracks palette changes; baked into the generated asset by the
 /// in-sync test.
 fn default_palantir_theme() -> palantir::Theme {
-    use palantir::{Brush, WidgetLook};
-
     let mut theme = palantir::Theme::default();
     let base = theme.text;
     let shrink = |look: &mut WidgetLook| {
@@ -276,14 +274,10 @@ impl Theme {
         self.port_size * 0.5
     }
 
-    /// Invert every color in place — a quick light-theme stub. Uses
-    /// [`Color::inverted`] (linear `1 − c`), which is *exactly* reversible,
-    /// so the Theme → "Invert Colors" toggle restores the original on a
-    /// second call without drift.
-    ///
-    /// **Stub:** on the nested palantir palette only `window_clear` is
-    /// inverted; its widget chrome (buttons, menus, text edits) isn't
-    /// deep-inverted, so a polished light theme still wants hand-tuning.
+    /// Invert every color in place — a quick light-theme stub behind the
+    /// Theme → "Invert Colors" toggle. Uses [`Color::inverted`] (linear
+    /// `1 − c`), reversible to within f32 rounding (far below display
+    /// precision), so a second call restores the look.
     pub fn invert(&mut self) {
         for c in [
             &mut self.canvas_bg,
@@ -310,7 +304,110 @@ impl Theme {
         ] {
             *c = c.inverted();
         }
-        self.palantir_theme.window_clear = self.palantir_theme.window_clear.inverted();
+        invert_palantir_theme(&mut self.palantir_theme);
+    }
+}
+
+/// **Hack** — invert the colors of the nested palantir widget palette
+/// in place so the menus / buttons / text edits flip with the rest of
+/// the theme. Reaches into palantir's public theme fields directly
+/// rather than a general `palantir::Theme::invert` (this is darkroom's
+/// throwaway light-theme toggle, not a palantir feature). Gradient-stop
+/// fills are skipped — the default palette is solid-fill only.
+fn invert_palantir_theme(p: &mut palantir::Theme) {
+    // Every per-state `WidgetLook` across the widget themes. Disjoint
+    // field paths, so one array of `&mut` borrows is fine.
+    for look in [
+        &mut p.button.normal,
+        &mut p.button.hovered,
+        &mut p.button.pressed,
+        &mut p.button.disabled,
+        &mut p.menu_button.normal,
+        &mut p.menu_button.hovered,
+        &mut p.menu_button.pressed,
+        &mut p.menu_button.disabled,
+        &mut p.checkbox.unchecked.normal,
+        &mut p.checkbox.unchecked.hovered,
+        &mut p.checkbox.unchecked.pressed,
+        &mut p.checkbox.unchecked.disabled,
+        &mut p.checkbox.checked.normal,
+        &mut p.checkbox.checked.hovered,
+        &mut p.checkbox.checked.pressed,
+        &mut p.checkbox.checked.disabled,
+        &mut p.radio.unchecked.normal,
+        &mut p.radio.unchecked.hovered,
+        &mut p.radio.unchecked.pressed,
+        &mut p.radio.unchecked.disabled,
+        &mut p.radio.checked.normal,
+        &mut p.radio.checked.hovered,
+        &mut p.radio.checked.pressed,
+        &mut p.radio.checked.disabled,
+        &mut p.text_edit.normal,
+        &mut p.text_edit.focused,
+        &mut p.text_edit.disabled,
+        &mut p.context_menu.item.normal,
+        &mut p.context_menu.item.hovered,
+        &mut p.context_menu.item.disabled,
+    ] {
+        invert_look(look);
+    }
+
+    // Standalone backgrounds and loose color fields.
+    invert_background(&mut p.context_menu.panel);
+    invert_background(&mut p.tooltip.panel);
+    if let Some(bg) = &mut p.panel_background {
+        invert_background(bg);
+    }
+    for c in [
+        &mut p.text.color,
+        &mut p.tooltip.text.color,
+        &mut p.window_clear,
+        &mut p.checkbox.indicator,
+        &mut p.radio.indicator,
+        &mut p.scrollbar.track,
+        &mut p.scrollbar.thumb,
+        &mut p.scrollbar.thumb_hover,
+        &mut p.scrollbar.thumb_active,
+        &mut p.text_edit.placeholder,
+        &mut p.text_edit.caret,
+        &mut p.text_edit.selection,
+        &mut p.context_menu.item.shortcut,
+        &mut p.context_menu.separator,
+    ] {
+        *c = c.inverted();
+    }
+}
+
+fn invert_look(look: &mut WidgetLook) {
+    if let Some(bg) = &mut look.background {
+        invert_background(bg);
+    }
+    if let Some(t) = &mut look.text {
+        t.color = t.color.inverted();
+    }
+}
+
+fn invert_background(bg: &mut Background) {
+    invert_brush(&mut bg.fill);
+    invert_brush(&mut bg.stroke.brush);
+    bg.shadow.color = bg.shadow.color.inverted();
+}
+
+fn invert_brush(brush: &mut Brush) {
+    match brush {
+        Brush::Solid(c) => *c = c.inverted(),
+        Brush::Linear(g) => g
+            .stops
+            .iter_mut()
+            .for_each(|s| s.color = s.color.inverted()),
+        Brush::Radial(g) => g
+            .stops
+            .iter_mut()
+            .for_each(|s| s.color = s.color.inverted()),
+        Brush::Conic(g) => g
+            .stops
+            .iter_mut()
+            .for_each(|s| s.color = s.color.inverted()),
     }
 }
 
@@ -432,25 +529,37 @@ mod tests {
         assert_eq!(menu_text.font_size_px, MENU_FONT_SIZE);
     }
 
-    /// `invert` flips colors (a dark bg goes light) and is *exactly*
-    /// reversible — two inversions restore the original, which the
-    /// Theme → Invert Colors toggle depends on.
+    /// `invert` flips colors (a dark bg goes light) and reaches the
+    /// nested palantir palette (text color), and a double invert restores
+    /// the original to within f32 rounding — which the Theme → Invert
+    /// Colors toggle depends on. (Linear `1 − c` is reversible up to ~1
+    /// ULP, not byte-exact, so the round-trip is checked with a tolerance.)
     #[test]
-    fn invert_is_an_exact_involution() {
+    fn invert_round_trips_within_epsilon() {
+        let original = Theme::default();
         let mut theme = Theme::default();
-        // Canvas starts dark; one invert lifts it toward white.
+
+        // Canvas starts dark; one invert lifts it toward white, and the
+        // palantir text color (a light grey) drops toward black.
         assert!(theme.canvas_bg.r < 0.5);
+        let text_before = theme.palantir_theme.text.color.r;
         theme.invert();
         assert!(theme.canvas_bg.r > 0.5, "dark canvas inverts to light");
-        assert_eq!(
-            theme.palantir_theme.window_clear,
-            CANVAS_BG.inverted(),
-            "nested palantir surface is inverted too"
+        assert!(
+            theme.palantir_theme.text.color.r < text_before,
+            "nested palantir text color is inverted too"
         );
-        // Invert again → byte-identical to the original default.
+
+        // Invert again → back to the original within float rounding.
         theme.invert();
-        assert_eq!(theme.canvas_bg, CANVAS_BG);
-        assert_eq!(theme.output_port_hover, OUTPUT_PORT_HOVER);
-        assert_eq!(theme.palantir_theme.window_clear, CANVAS_BG);
+        let approx = |a: Color, b: Color| {
+            (a.r - b.r).abs() < 1e-4 && (a.g - b.g).abs() < 1e-4 && (a.b - b.b).abs() < 1e-4
+        };
+        assert!(approx(theme.canvas_bg, original.canvas_bg));
+        assert!(approx(theme.output_port_hover, original.output_port_hover));
+        assert!(approx(
+            theme.palantir_theme.window_clear,
+            original.palantir_theme.window_clear
+        ));
     }
 }
