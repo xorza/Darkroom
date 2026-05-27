@@ -9,7 +9,7 @@ use palantir::{Key, Shortcut, Ui};
 
 use crate::app::App;
 use crate::document::GraphRef;
-use crate::edit::intent::{self, Intent, requires_relayout};
+use crate::edit::intent::{self, Intent, requires_reconcile, requires_relayout};
 use crate::gui::menu_bar::MenuCommand;
 
 const UNDO_SHORTCUT: Shortcut = Shortcut::ctrl('Z');
@@ -41,14 +41,17 @@ impl App {
             return false;
         }
         let mut relayout = false;
+        let mut reconcile = false;
         let mut on_step = |step: &intent::UndoStep| {
             relayout |= requires_relayout(step);
+            reconcile |= requires_reconcile(step);
         };
         if undo {
             self.action_stack.undo(&mut self.document, &mut on_step);
         } else if redo {
             self.action_stack.redo(&mut self.document, &mut on_step);
         }
+        self.needs_reconcile |= reconcile;
         relayout
     }
 

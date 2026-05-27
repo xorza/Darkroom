@@ -10,7 +10,7 @@ use scenarium::prelude::{FuncLib, Graph as CoreGraph, NodeId};
 
 use crate::document::{Document, GraphRef};
 use crate::edit::action_stack::ActionStack;
-use crate::edit::intent::{Intent, apply_step, build_step, requires_relayout};
+use crate::edit::intent::{Intent, apply_step, build_step, requires_reconcile, requires_relayout};
 use crate::exec_status::{ExecStatus, NodeLogs, project_logs, project_stats};
 use crate::gui::UiAction;
 use crate::gui::main_window::MainWindow;
@@ -76,6 +76,14 @@ pub(crate) struct App {
     /// window between the unconditional pre-prepass rebuild (which clears
     /// it) and the pre-record rebuild.
     scene_dirty: bool,
+    /// Set when an applied/undone step can change a subgraph's derived
+    /// interface (see `requires_reconcile`); consumed by `rebuild_scene`,
+    /// which reruns `reconcile_boundaries` only then. Derived state is
+    /// recomputed on structural edits, not on every frame's projection
+    /// rebuild — idle/selection/viewport frames skip the per-def edge
+    /// scan. Starts `true` so the first rebuild canonicalizes a freshly
+    /// loaded (or hand-edited) document.
+    needs_reconcile: bool,
     pub(crate) main_window: MainWindow,
     /// Per-frame scratch buffer of pending mutations. Cleared at the
     /// top of every `frame`, filled by prepass/record/shortcut
@@ -140,6 +148,7 @@ impl App {
             scene: Scene::default(),
             scene_target: None,
             scene_dirty: false,
+            needs_reconcile: true,
             main_window: MainWindow::default(),
             intents: Vec::new(),
             actions: Vec::new(),
@@ -307,9 +316,15 @@ impl App {
     /// Reconciles every subgraph's interface against its interior wiring
     /// first (derived state, like the scene itself) so boundary nodes
     /// render the right ports + placeholder and the doc is consistent
-    /// before any save.
+    /// before any save — but only when `needs_reconcile` is set (a
+    /// structural edit, undo/redo, or document replacement since the last
+    /// reconcile). Idle/selection/viewport frames skip it: the interface
+    /// can't have changed, and reconcile is idempotent there anyway.
     fn rebuild_scene(&mut self, target: GraphRef) {
-        self.document.reconcile_boundaries(&self.func_lib);
+        if self.needs_reconcile {
+            self.document.reconcile_boundaries(&self.func_lib);
+            self.needs_reconcile = false;
+        }
         let graph = self
             .document
             .graph_for(target)
@@ -342,6 +357,7 @@ impl App {
             }
             apply_step(&step, &mut self.document, target);
             relayout |= requires_relayout(&step);
+            self.needs_reconcile |= requires_reconcile(&step);
             batch.push(step);
         }
         if !batch.is_empty() {

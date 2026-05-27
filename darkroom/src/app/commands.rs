@@ -107,6 +107,9 @@ impl App {
         };
         if let Some(def) = persistence::import_subgraph(&path) {
             self.document.import_subgraph(def);
+            // An imported def's stored interface may not match its interior
+            // wiring (hand-edited / older file) — re-derive it next rebuild.
+            self.needs_reconcile = true;
         }
     }
 
@@ -119,8 +122,10 @@ impl App {
         self.action_stack.clear();
         self.intents.clear();
         // Force a scene rebuild next frame: the active target may still
-        // be `Main`, but it now points at a different graph.
+        // be `Main`, but it now points at a different graph. Re-derive the
+        // subgraph interfaces too — the document was replaced wholesale.
         self.scene_target = None;
+        self.needs_reconcile = true;
         self.set_document_path(None);
     }
 
@@ -132,6 +137,7 @@ impl App {
         self.action_stack.clear();
         self.intents.clear();
         self.scene_target = None;
+        self.needs_reconcile = true;
         self.set_document_path(Some(path.to_path_buf()));
     }
 

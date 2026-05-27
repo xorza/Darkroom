@@ -874,6 +874,36 @@ pub fn requires_relayout(step: &UndoStep) -> bool {
     }
 }
 
+/// Whether applying this step can change a subgraph's *derived interface*
+/// (`def.inputs`/`def.outputs`), so `reconcile_boundaries` must rerun
+/// before the next scene rebuild. Only interior boundary wiring and
+/// instance bindings feed that derivation, so any edit that touches a
+/// binding or the node set qualifies; pure view/selection/cache/tab edits
+/// (and boundary-port *renames*, which reconcile preserves) never do.
+/// Conservative on `SetInput` — a const-value edit on a plain func port
+/// can't change an interface, but filtering that needs a doc lookup, and
+/// reconcile is an idempotent no-op there anyway. Exhaustive on purpose.
+pub fn requires_reconcile(step: &UndoStep) -> bool {
+    match step {
+        UndoStep::Graph(
+            GraphStep::AddNode { .. }
+            | GraphStep::RemoveNode { .. }
+            | GraphStep::DuplicateNodes { .. }
+            | GraphStep::SetInput { .. }
+            | GraphStep::DetachSubgraph { .. },
+        ) => true,
+        UndoStep::Graph(
+            GraphStep::MoveNodes { .. }
+            | GraphStep::RenameNode { .. }
+            | GraphStep::SetSelection { .. }
+            | GraphStep::SetCacheBehavior { .. }
+            | GraphStep::SetEventConnection { .. }
+            | GraphStep::SetViewport { .. },
+        )
+        | UndoStep::Doc(_) => false,
+    }
+}
+
 /// Identifies "same continuous gesture" for undo coalescing. The undo
 /// stack collapses consecutive steps with the same key into one entry
 /// (keeping the *first* "from" payload). Two viewport changes coalesce;
