@@ -72,6 +72,7 @@ pub(crate) fn show(
             Button::new()
                 .id(id)
                 .label(path_preview(path))
+                .elide()
                 .size((Sizing::Fixed(width), Sizing::Hug))
                 .show(ui);
             None

@@ -18,10 +18,7 @@ mod tests;
 mod magsac;
 mod transforms;
 
-pub(crate) use transforms::{
-    adaptive_iterations,
-    estimate_transform,
-};
+pub(crate) use transforms::{adaptive_iterations, estimate_transform};
 
 use magsac::MagsacScorer;
 
