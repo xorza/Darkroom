@@ -14,7 +14,7 @@ use crate::scene::Scene;
 /// an `Intent::AddNode` placed at the click's world position (inner-
 /// canvas pre-transform). Outside-click and Esc dismiss.
 #[derive(Default, Debug)]
-pub struct NewNodeUi {
+pub(crate) struct NewNodeUi {
     state: Option<OpenState>,
 }
 
@@ -28,7 +28,7 @@ struct OpenState {
 }
 
 impl NewNodeUi {
-    pub fn apply(
+    pub(crate) fn apply(
         &mut self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,

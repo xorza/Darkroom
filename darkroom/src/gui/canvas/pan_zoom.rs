@@ -49,7 +49,7 @@ const SCROLL_ZOOM_BASE: f32 = 1.0025;
 ///   up) → zoom in.
 /// - **Pinch** (`Sense::PINCH`): zoom-about-cursor using the
 ///   `Response::pointer_local` pivot.
-pub(super) fn emit_pan_zoom(
+pub(crate) fn emit_pan_zoom(
     pan_anchor: &mut Option<Vec2>,
     ui: &Ui,
     scene: &Scene,

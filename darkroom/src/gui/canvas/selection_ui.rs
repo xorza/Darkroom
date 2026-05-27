@@ -19,7 +19,7 @@ use crate::scene::Scene;
 /// bodies hit-test first, so a drag that starts on a node never reaches
 /// here).
 #[derive(Default, Debug)]
-pub struct SelectionUI {
+pub(crate) struct SelectionUI {
     band: Option<RubberBand>,
 }
 
@@ -56,7 +56,7 @@ impl SelectionUI {
     /// `Scene::rebuild` reseeds `selected_nodes` from `Document` at the
     /// top of every frame, and the document stays untouched until
     /// release, so `scene.selected_nodes` here is always the base.
-    pub fn apply(&mut self, ui: &mut Ui, scene: &mut Scene, out: &mut Vec<Intent>) {
+    pub(crate) fn apply(&mut self, ui: &mut Ui, scene: &mut Scene, out: &mut Vec<Intent>) {
         let resp = ui.response_for(outer_canvas_widget_id());
         let mods = ui.modifiers();
         if self.band.is_none()
@@ -118,7 +118,7 @@ impl SelectionUI {
     /// Paint the in-progress rectangle. Drawn inside the inner canvas so
     /// its world coords ride the same pan/zoom transform as the nodes.
     /// No-op when no gesture is active or the rect has no area yet.
-    pub fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>) {
+    pub(crate) fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>) {
         let Some(band) = self.band else {
             return;
         };

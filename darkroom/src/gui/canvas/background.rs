@@ -24,7 +24,7 @@ const TILE_PX: u32 = 64;
 /// transform carries the pan/zoom — so the grid pans and zooms for the
 /// cost of one draw call.
 #[derive(Default, Debug)]
-pub struct CanvasBackground {
+pub(crate) struct CanvasBackground {
     /// `(params, handle)` of the registered dot tile. Reused while the
     /// params are unchanged so we don't synthesize a 64×64 image every
     /// frame (the registry's `register` takes the `Image` by value, so
@@ -59,7 +59,7 @@ impl CanvasBackground {
     /// it sits beneath every connection and node. `pan`/`zoom` are the
     /// live viewport; a screen point `s` maps to grid coord
     /// `(s - pan) / tile_px`, which is exactly the tile UV.
-    pub fn draw(&mut self, ui: &mut Ui, ctx: &AppContext<'_>, pan: Vec2, zoom: f32) {
+    pub(crate) fn draw(&mut self, ui: &mut Ui, ctx: &AppContext<'_>, pan: Vec2, zoom: f32) {
         let spacing = ctx.theme.canvas_dot_spacing;
         if zoom <= f32::EPSILON || spacing <= f32::EPSILON {
             return;

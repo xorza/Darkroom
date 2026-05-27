@@ -15,7 +15,7 @@ use crate::scene::Scene;
 /// the open is latched off *last* frame's badge response, then the
 /// popup is shown and its clicks handled this frame.
 #[derive(Default, Debug)]
-pub struct SubgraphMenuUi {
+pub(crate) struct SubgraphMenuUi {
     open: Option<OpenState>,
 }
 
@@ -27,7 +27,7 @@ struct OpenState {
 }
 
 impl SubgraphMenuUi {
-    pub fn apply(
+    pub(crate) fn apply(
         &mut self,
         ui: &mut Ui,
         scene: &Scene,

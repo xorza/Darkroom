@@ -21,7 +21,7 @@ use crate::scene::Scene;
 /// edge bools default to `false` for them, so `drag_started` / `dragging`
 /// queries are correct without a presence check.
 #[derive(Default, Debug)]
-pub struct PortFrame {
+pub(crate) struct PortFrame {
     map: HashMap<PortRef, PortInfo>,
     /// Per-port intra-node offset (`port_rect.center - node_rect.min`),
     /// kept **across frames and tab switches**. A port's offset is
@@ -63,7 +63,7 @@ struct PortInfo {
 }
 
 impl PortFrame {
-    pub(super) fn rebuild(&mut self, ui: &Ui, scene: &Scene) {
+    pub(crate) fn rebuild(&mut self, ui: &Ui, scene: &Scene) {
         self.map.clear();
         for n in &scene.nodes {
             // Port offsets within a node are stable; the node's
@@ -111,13 +111,13 @@ impl PortFrame {
 
     /// Canvas-local pre-transform port center. `None` when the port
     /// or its parent node hasn't been measured yet.
-    pub(super) fn center_canvas_local(&self, p: PortRef) -> Option<Vec2> {
+    pub(crate) fn center_canvas_local(&self, p: PortRef) -> Option<Vec2> {
         self.map.get(&p)?.layout_center
     }
 
     /// `true` when `pointer` (screen coords) falls inside this port's
     /// post-transform/clip rect.
-    pub(super) fn contains_pointer(&self, p: PortRef, pointer: Vec2) -> bool {
+    pub(crate) fn contains_pointer(&self, p: PortRef, pointer: Vec2) -> bool {
         self.map
             .get(&p)
             .and_then(|i| i.screen_rect)
@@ -125,12 +125,12 @@ impl PortFrame {
     }
 
     /// `true` on the one-frame edge of a drag-start on this port.
-    pub(super) fn drag_started(&self, p: PortRef) -> bool {
+    pub(crate) fn drag_started(&self, p: PortRef) -> bool {
         self.map.get(&p).is_some_and(|i| i.drag_started)
     }
 
     /// `true` while a drag started on this port is still live.
-    pub(super) fn dragging(&self, p: PortRef) -> bool {
+    pub(crate) fn dragging(&self, p: PortRef) -> bool {
         self.map.get(&p).is_some_and(|i| i.dragging)
     }
 
@@ -144,7 +144,7 @@ impl PortFrame {
     /// `ConnectionUI::apply` for the active snap target so it lights
     /// up even though palantir's drag-capture suppression hides it
     /// from `response.hovered`.
-    pub(super) fn set_hovered(&mut self, p: PortRef) {
+    pub(crate) fn set_hovered(&mut self, p: PortRef) {
         if let Some(info) = self.map.get_mut(&p) {
             info.hovered = true;
         }

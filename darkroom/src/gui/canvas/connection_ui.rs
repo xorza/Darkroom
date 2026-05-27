@@ -15,12 +15,21 @@ use crate::scene::{InputBindingView, Scene};
 /// so short/backward links still bow out into a readable S-curve.
 const MIN_CUBIC_HANDLE: f32 = 40.0;
 
+/// The two interior control points of a connection cubic.
+struct CubicHandles {
+    p1: Vec2,
+    p2: Vec2,
+}
+
 /// Control points for a left-to-right cubic between port centers `p0`
 /// (output side) and `p3` (input side). Shared by the permanent and
 /// in-flight draws so the preview matches the committed curve exactly.
-fn cubic_handles(p0: Vec2, p3: Vec2) -> (Vec2, Vec2) {
+fn cubic_handles(p0: Vec2, p3: Vec2) -> CubicHandles {
     let dx = ((p3.x - p0.x).abs() * 0.5).max(MIN_CUBIC_HANDLE);
-    (p0 + Vec2::new(dx, 0.0), p3 - Vec2::new(dx, 0.0))
+    CubicHandles {
+        p1: p0 + Vec2::new(dx, 0.0),
+        p2: p3 - Vec2::new(dx, 0.0),
+    }
 }
 
 /// Owns the in-flight new-connection drag plus the existing-connection
@@ -29,7 +38,7 @@ fn cubic_handles(p0: Vec2, p3: Vec2) -> (Vec2, Vec2) {
 /// frame by [`Self::draw`]. Mirrors the deprecated
 /// `Gesture::DraggingConnection` but as a dedicated UI module.
 #[derive(Default, Debug)]
-pub struct ConnectionUI {
+pub(crate) struct ConnectionUI {
     drag: Option<ConnectionDrag>,
 }
 
@@ -61,7 +70,7 @@ impl ConnectionUI {
     /// - anything else → drop silently.
     ///
     /// Esc cancels without emitting anything.
-    pub fn apply(
+    pub(crate) fn apply(
         &mut self,
         ui: &mut Ui,
         scene: &Scene,
@@ -129,7 +138,7 @@ impl ConnectionUI {
     /// during an active drag, or `None`. Read by `GraphUI` to force
     /// the hover state in `PortFrame` (otherwise palantir's
     /// drag-capture suppression would hide it).
-    pub fn snap_port(&self) -> Option<PortRef> {
+    pub(crate) fn snap_port(&self) -> Option<PortRef> {
         self.drag.and_then(|d| d.snap_end)
     }
 
@@ -137,7 +146,7 @@ impl ConnectionUI {
     /// those the active breaker (`probe.state`) crosses as broken.
     /// Hits get pushed onto `probe.state.broken` for the breaker's
     /// release-frame drain.
-    pub fn draw(
+    pub(crate) fn draw(
         &self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
@@ -166,7 +175,7 @@ impl ConnectionUI {
             ) else {
                 continue;
             };
-            let (p1, p2) = cubic_handles(p0, p3);
+            let CubicHandles { p1, p2 } = cubic_handles(p0, p3);
             let broken = probe
                 .state
                 .as_deref()
@@ -205,7 +214,7 @@ impl ConnectionUI {
     /// center to either the snapped target's center (when set) or the
     /// pointer position. Drawn inside the inner canvas so coordinates
     /// share the pan/zoom transform with permanent connections.
-    pub fn draw_in_flight(
+    pub(crate) fn draw_in_flight(
         &self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
@@ -229,7 +238,7 @@ impl ConnectionUI {
             PortKind::Output => (start, end),
             PortKind::Input => (end, start),
         };
-        let (p1, p2) = cubic_handles(p0, p3);
+        let CubicHandles { p1, p2 } = cubic_handles(p0, p3);
         ui.add_shape(Shape::CubicBezier {
             p0,
             p1,

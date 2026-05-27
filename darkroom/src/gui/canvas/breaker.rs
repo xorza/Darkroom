@@ -15,8 +15,8 @@ use crate::scene::Scene;
 /// Passed as `&mut BreakerProbe<'_>` so Rust auto-reborrows at each
 /// nested call.
 pub(crate) struct BreakerProbe<'a> {
-    pub origin: Vec2,
-    pub state: Option<&'a mut BreakerState>,
+    pub(crate) origin: Vec2,
+    pub(crate) state: Option<&'a mut BreakerState>,
 }
 
 /// Polyline samples closer than this (in inner-canvas world units)
@@ -38,7 +38,7 @@ const BEZIER_SAMPLES: usize = 16;
 /// as the cubic bezier endpoints.
 #[derive(Debug)]
 pub(crate) struct BreakerState {
-    points: Vec<Vec2>,
+    pub(crate) points: Vec<Vec2>,
     length: f32,
     /// Mouse button that latched this gesture. The release-detection
     /// check polls `drag_delta_by(button)`, so a Cmd+LMB-launched
@@ -85,10 +85,6 @@ impl BreakerState {
         };
         self.points.push(clamped);
         self.length += added;
-    }
-
-    pub(crate) fn points(&self) -> &[Vec2] {
-        &self.points
     }
 
     fn segments(&self) -> impl Iterator<Item = (Vec2, Vec2)> + '_ {
@@ -177,7 +173,7 @@ fn orient(p: Vec2, q: Vec2, r: Vec2) -> f32 {
 /// `BreakerProbe` to the canvas record so node and connection draws
 /// can flag intersections inline.
 #[derive(Default, Debug)]
-pub struct BreakerUI {
+pub(crate) struct BreakerUI {
     state: Option<BreakerState>,
 }
 
@@ -188,7 +184,7 @@ impl BreakerUI {
     /// supersedes any per-input unbind on the same target — the undo
     /// step already detaches incoming edges, so emitting both would
     /// log a redundant history entry. Esc cancels without emitting.
-    pub fn apply(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
+    pub(crate) fn apply(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
         let resp = ui.response_for(outer_canvas_widget_id());
         let mods = ui.modifiers();
         let cmd_lmb = resp.drag_started_by(PointerButton::Left) && mods.ctrl;
@@ -242,7 +238,7 @@ impl BreakerUI {
     /// Hand the active state to inline intersection consumers (node
     /// body hit-test + connection draw). Borrow lives until the
     /// returned `BreakerProbe` is dropped.
-    pub fn probe(&mut self, origin: Vec2) -> BreakerProbe<'_> {
+    pub(crate) fn probe(&mut self, origin: Vec2) -> BreakerProbe<'_> {
         BreakerProbe {
             origin,
             state: self.state.as_mut(),
@@ -251,15 +247,15 @@ impl BreakerUI {
 
     /// Paint the polyline. No-op when no gesture is active or the
     /// polyline has < 2 samples (a `start` with no `add_point`).
-    pub fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>) {
+    pub(crate) fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>) {
         let Some(b) = self.state.as_ref() else {
             return;
         };
-        if b.points().len() < 2 {
+        if b.points.len() < 2 {
             return;
         }
         ui.add_shape(Shape::Polyline {
-            points: b.points(),
+            points: &b.points,
             colors: PolylineColors::Single(ctx.theme.breaker_stroke),
             width: ctx.theme.breaker_stroke_width,
             cap: LineCap::Round,
@@ -280,9 +276,9 @@ mod tests {
         b.add_point(Vec2::new(1.0, 0.0));
         b.add_point(Vec2::new(2.0, 0.0));
         b.add_point(Vec2::new(3.0, 0.0));
-        assert_eq!(b.points().len(), 1, "sub-4px samples must be dropped");
+        assert_eq!(b.points.len(), 1, "sub-4px samples must be dropped");
         b.add_point(Vec2::new(10.0, 0.0));
-        assert_eq!(b.points().len(), 2);
+        assert_eq!(b.points.len(), 2);
     }
 
     #[test]
@@ -294,11 +290,11 @@ mod tests {
         // (2000, 0) — the cap.
         let mut b = BreakerState::start(Vec2::ZERO, PointerButton::Right);
         b.add_point(Vec2::new(3000.0, 0.0));
-        assert_eq!(b.points().len(), 2);
-        assert!((b.points()[1].x - MAX_BREAKER_LENGTH).abs() < 1e-4);
-        let before = b.points().len();
+        assert_eq!(b.points.len(), 2);
+        assert!((b.points[1].x - MAX_BREAKER_LENGTH).abs() < 1e-4);
+        let before = b.points.len();
         b.add_point(Vec2::new(4000.0, 0.0));
-        assert_eq!(b.points().len(), before, "no append past cap");
+        assert_eq!(b.points.len(), before, "no append past cap");
     }
 
     #[test]

@@ -1,11 +1,11 @@
-pub mod background;
-pub mod breaker;
-pub mod connection_ui;
-pub mod new_node_ui;
-pub mod pan_zoom;
-pub mod port_frame;
-pub mod selection_ui;
-pub mod subgraph_menu;
+pub(crate) mod background;
+pub(crate) mod breaker;
+pub(crate) mod connection_ui;
+pub(crate) mod new_node_ui;
+pub(crate) mod pan_zoom;
+pub(crate) mod port_frame;
+pub(crate) mod selection_ui;
+pub(crate) mod subgraph_menu;
 
 use glam::Vec2;
 use palantir::{Background, Configure, Panel, Sense, Sizing, TranslateScale, Ui, WidgetId};
@@ -47,7 +47,7 @@ use crate::scene::{Scene, SceneNode};
 /// Node panels and port circles live in the *inner* canvas and hit-test
 /// first, so these only fire when a gesture falls through to bare canvas.
 #[derive(Default, Debug)]
-pub struct GraphUI {
+pub(crate) struct GraphUI {
     background: CanvasBackground,
     port_frame: PortFrame,
     /// In-flight gesture controllers. Grouped so a tab switch can reset
@@ -80,7 +80,7 @@ impl GraphUI {
     /// caches — notably `PortFrame`'s port-offset table, so connections
     /// still anchor on the first frame after a tab switch. Called when
     /// the active tab changes.
-    pub fn clear_gestures(&mut self) {
+    pub(crate) fn clear_gestures(&mut self) {
         self.gestures = Gestures::default();
     }
 
@@ -104,7 +104,7 @@ impl GraphUI {
     /// extra frame. `PortFrame` is rebuilt here (and reused by `frame`)
     /// because the commit reads it. Navigation (tab/open) is handled
     /// separately, before this, so the target is already fixed here.
-    pub fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
+    pub(crate) fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
         pan_zoom::emit_pan_zoom(&mut self.gestures.pan_anchor, ui, scene, out);
         self.gestures.node_ui.prepass(ui, scene, out);
         emit_port_disconnects(ui, scene, out);
@@ -114,7 +114,7 @@ impl GraphUI {
             .apply(ui, scene, &self.port_frame, out);
     }
 
-    pub fn frame(
+    pub(crate) fn frame(
         &mut self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
@@ -246,7 +246,7 @@ impl GraphUI {
 /// source for the "iterate a node's ports by kind" loop that
 /// `PortFrame::rebuild` and the connection scans all need, so scan order
 /// and paint order can't drift apart.
-pub(super) fn node_ports<'a>(
+pub(crate) fn node_ports<'a>(
     scene: &'a Scene,
     node: &'a SceneNode,
     kind: PortKind,
@@ -266,7 +266,7 @@ pub(super) fn node_ports<'a>(
 /// Outer-canvas-local coords → inner-canvas pre-transform world
 /// coords. Inner canvas applies `TranslateScale::new(pan, zoom)`,
 /// so `outer = pan + zoom * world`.
-pub(super) fn to_world(outer_local: Vec2, scene: &Scene) -> Vec2 {
+pub(crate) fn to_world(outer_local: Vec2, scene: &Scene) -> Vec2 {
     let zoom = if scene.zoom > 0.0 { scene.zoom } else { 1.0 };
     (outer_local - scene.pan) / zoom
 }
@@ -274,7 +274,7 @@ pub(super) fn to_world(outer_local: Vec2, scene: &Scene) -> Vec2 {
 /// Stable id for the outer (pan-capture) canvas. `auto_stable` mixes
 /// `file!()`/`line!()` so calls from different source lines stay
 /// distinct; here we only need the id to survive between frames.
-pub(super) const fn outer_canvas_widget_id() -> WidgetId {
+pub(crate) const fn outer_canvas_widget_id() -> WidgetId {
     WidgetId::auto_stable()
 }
 
