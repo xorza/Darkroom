@@ -34,9 +34,9 @@ pub(crate) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: 
 }
 
 fn input_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
-    let names = rcx.scene.ports(node.inputs);
-    let bindings = rcx.scene.bindings(node.input_bindings);
-    let defaults = rcx.scene.defaults(node.input_bindings);
+    let names = rcx.scene.input_names(node.inputs);
+    let bindings = rcx.scene.bindings(node.inputs);
+    let defaults = rcx.scene.defaults(node.inputs);
     let theme = rcx.theme;
     // Boundary (`SubgraphInput`/`SubgraphOutput`) ports route the
     // interface, not literal values — no const affordance.
@@ -81,7 +81,7 @@ fn input_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec
 }
 
 fn output_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
-    let names = rcx.scene.ports(node.outputs);
+    let names = rcx.scene.output_names(node.outputs);
     let theme = rcx.theme;
     Panel::vstack()
         .id_salt("out")

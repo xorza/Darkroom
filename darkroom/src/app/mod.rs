@@ -356,7 +356,6 @@ impl App {
     /// this is independent of the active tab. Cloning the graph + an
     /// `Arc` bump of the lib is the per-run cost.
     pub(crate) fn run_graph(&self) {
-        eprintln!("run_graph called");
         self.worker
             .run_once(self.document.graph.clone(), self.func_lib.clone());
     }

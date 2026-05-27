@@ -125,12 +125,12 @@ impl ConnectionUI {
         }
         // Don't overwrite an existing const value.
         if matches!(
-            scene.bindings(node.input_bindings).get(start.port_idx),
+            scene.bindings(node.inputs).get(start.port_idx),
             Some(InputBindingView::Const(_))
         ) {
             return None;
         }
-        let default = scene.defaults(node.input_bindings).get(start.port_idx)?;
+        let default = scene.defaults(node.inputs).get(start.port_idx)?;
         Some(set_input(start, Binding::Const(default.clone())))
     }
 
@@ -270,7 +270,7 @@ fn port_gradient(start: Color, end: Color) -> Brush {
 fn scan_drag_start(frame: &PortFrame, scene: &Scene) -> Option<ConnectionDrag> {
     for n in &scene.nodes {
         for kind in [PortKind::Input, PortKind::Output] {
-            for port in node_ports(scene, n, kind) {
+            for port in node_ports(n, kind) {
                 if frame.drag_started(port) {
                     return Some(ConnectionDrag {
                         start: port,
@@ -309,7 +309,7 @@ fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -
         if start_boundary && n.boundary {
             continue;
         }
-        for port in node_ports(scene, n, want_kind) {
+        for port in node_ports(n, want_kind) {
             if frame.contains_pointer(port, pointer) {
                 return Some(port);
             }

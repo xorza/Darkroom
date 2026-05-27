@@ -319,12 +319,12 @@ pub(crate) fn emit_subgraph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAc
 /// re-anchor the same frame, instead of floating until the relayout pass.
 pub(crate) fn emit_port_disconnects(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
     for node in &scene.nodes {
-        for port in node_ports(scene, node, PortKind::Input) {
+        for port in node_ports(node, PortKind::Input) {
             if ui.response_for(port_circle_wid(port)).double_clicked() {
                 out.push(set_input(port, Binding::None));
             }
         }
-        for port in node_ports(scene, node, PortKind::Output) {
+        for port in node_ports(node, PortKind::Output) {
             if ui.response_for(port_circle_wid(port)).double_clicked() {
                 // An output may feed many inputs — clear each consumer.
                 for c in &scene.connections {

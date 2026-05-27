@@ -78,7 +78,7 @@ impl PortFrame {
                 .layout_rect
                 .map(|r| r.min);
             for kind in [PortKind::Input, PortKind::Output] {
-                for port in node_ports(scene, n, kind) {
+                for port in node_ports(n, kind) {
                     let r = ui.response_for(port_circle_wid(port));
                     // Fresh offset this frame (both rects recorded last
                     // frame) refreshes the cache; otherwise fall back to
@@ -107,6 +107,12 @@ impl PortFrame {
                 }
             }
         }
+        // Drop offset entries for ports no longer present this frame
+        // (deleted nodes, closed subgraphs, shrunk port counts) so the
+        // cross-frame cache stays bounded by the *live* port set rather
+        // than every port ever seen this session. `map` was rebuilt to
+        // exactly the live ports above, so it's the live key set.
+        self.offsets.retain(|p, _| self.map.contains_key(p));
     }
 
     /// Canvas-local pre-transform port center. `None` when the port

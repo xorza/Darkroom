@@ -171,9 +171,9 @@ impl Inspectors {
                 line(ui, node.name.as_str("(unnamed)"), title_style(ui));
                 line(ui, node.kind_label.as_str(""), muted_style(ui));
 
-                let in_names = scene.ports(node.inputs);
+                let in_names = scene.input_names(node.inputs);
                 let in_types = scene.input_types(node.inputs);
-                let in_binds = scene.bindings(node.input_bindings);
+                let in_binds = scene.bindings(node.inputs);
                 if !in_names.is_empty() {
                     line(ui, "Inputs", section_style(ui));
                     for (i, name) in in_names.iter().enumerate() {
@@ -184,7 +184,7 @@ impl Inspectors {
                     }
                 }
 
-                let out_names = scene.ports(node.outputs);
+                let out_names = scene.output_names(node.outputs);
                 let out_types = scene.output_types(node.outputs);
                 if !out_names.is_empty() {
                     line(ui, "Outputs", section_style(ui));

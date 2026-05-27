@@ -266,16 +266,12 @@ impl GraphUI {
 /// source for the "iterate a node's ports by kind" loop that
 /// `PortFrame::rebuild` and the connection scans all need, so scan order
 /// and paint order can't drift apart.
-pub(crate) fn node_ports<'a>(
-    scene: &'a Scene,
-    node: &'a SceneNode,
-    kind: PortKind,
-) -> impl Iterator<Item = PortRef> + 'a {
+pub(crate) fn node_ports(node: &SceneNode, kind: PortKind) -> impl Iterator<Item = PortRef> + '_ {
     let span = match kind {
         PortKind::Input => node.inputs,
         PortKind::Output => node.outputs,
     };
-    let count = scene.ports(span).len();
+    let count = span.len as usize;
     (0..count).map(move |port_idx| PortRef {
         node_id: node.id,
         kind,
