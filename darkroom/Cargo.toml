@@ -8,6 +8,7 @@ palantir = { workspace = true }
 scenarium = { workspace = true }
 common = { workspace = true }
 lens = { workspace = true }
+imaginarium = { workspace = true }
 
 glam = { workspace = true }
 serde = { workspace = true }
