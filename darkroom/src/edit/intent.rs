@@ -230,12 +230,11 @@ pub enum GraphStep {
         to: NodeBehavior,
     },
     /// Fork + re-point: `def` (a fresh standalone copy) joins the
-    /// graph's local defs and the node swaps from `from_id` to `to_id`
-    /// (`= def.id`). Undo restores the `from_id` ref and drops `def`.
+    /// graph's local defs and the node swaps from `from_id` to `def.id`.
+    /// Undo restores the `from_id` ref and drops `def`.
     DetachSubgraph {
         node_id: NodeId,
         from_id: SubgraphId,
-        to_id: SubgraphId,
         def: Box<SubgraphDef>,
     },
     SetEventConnection {
@@ -494,7 +493,6 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             GraphStep::DetachSubgraph {
                 node_id,
                 from_id,
-                to_id: copy.id,
                 def: Box::new(copy),
             }
         }
@@ -658,15 +656,10 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetCacheBehavior { node_id, to, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().behavior = *to;
         }
-        GraphStep::DetachSubgraph {
-            node_id,
-            to_id,
-            def,
-            ..
-        } => {
+        GraphStep::DetachSubgraph { node_id, def, .. } => {
             scope.graph.subgraphs.add((**def).clone());
             scope.graph.by_id_mut(node_id).unwrap().kind =
-                NodeKind::Subgraph(SubgraphRef::Local(*to_id));
+                NodeKind::Subgraph(SubgraphRef::Local(def.id));
         }
         GraphStep::SetEventConnection {
             event_node_id,
@@ -799,12 +792,11 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::DetachSubgraph {
             node_id,
             from_id,
-            to_id,
-            ..
+            def,
         } => {
             scope.graph.by_id_mut(node_id).unwrap().kind =
                 NodeKind::Subgraph(SubgraphRef::Local(*from_id));
-            scope.graph.subgraphs.remove_by_key(to_id);
+            scope.graph.subgraphs.remove_by_key(&def.id);
         }
         GraphStep::SetEventConnection {
             event_node_id,
