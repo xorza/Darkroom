@@ -101,7 +101,7 @@ fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
         .show(ui, |ui| {
             Text::new("+")
                 .style(TextStyle {
-                    color: theme.selection_glow,
+                    color: theme.text_muted,
                     font_size_px: 15.0,
                     line_height_mult: 1.0,
                     ..ui.theme.text
@@ -112,7 +112,7 @@ fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
 }
 
 fn tab_chip(ui: &mut Ui, theme: &Theme, tab: &TabLabel, index: usize, active: bool) {
-    let r = theme.header_corner_radius;
+    let r = theme.tab_corner_radius;
     // Active tab takes the graph's color so its bottom edge dissolves
     // into the canvas; inactive tabs stay flat on the chrome strip
     // (transparent fill = just a label) so the active one reads clearly.
@@ -179,7 +179,7 @@ fn tab_chip(ui: &mut Ui, theme: &Theme, tab: &TabLabel, index: usize, active: bo
                         // border color it was before.
                         Text::new("\u{00d7}")
                             .style(TextStyle {
-                                color: theme.selection_glow,
+                                color: theme.text_muted,
                                 font_size_px: 13.0,
                                 // Hug the glyph (no 1.2× leading) so the
                                 // line box ≈ the glyph and it centers in

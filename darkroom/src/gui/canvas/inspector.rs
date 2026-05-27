@@ -144,7 +144,7 @@ impl Inspectors {
         logs: &[LogEntry],
     ) {
         let border = match mode {
-            InspectMode::Pinned => theme.selection_glow,
+            InspectMode::Pinned => theme.text_muted,
             InspectMode::Open => theme.node_border,
         };
         let chrome = Background {

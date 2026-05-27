@@ -67,16 +67,16 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
                 .size((Sizing::FILL, Sizing::Hug))
                 .show(ui, |_| {});
             // Inspect toggle: filled (checked) when pinned, accent outline
-            // when open, muted-grey outline when closed (`selection_glow` is
-            // the palette's `text_muted` — visible on the header without
-            // competing with the accent S/T/C badges). The click is consumed
-            // in `Inspectors::apply` via this chip's deterministic id, so the
-            // returned flag is ignored here.
+            // when open, muted-grey outline (`text_muted`) when closed —
+            // visible on the header without competing with the accent
+            // S/T/C badges. The click is consumed in `Inspectors::apply`
+            // via this chip's deterministic id, so the returned flag is
+            // ignored here.
             let mode = rcx.inspectors.mode(node.id);
             let color = if mode.is_some() {
                 theme.badge_subgraph
             } else {
-                theme.selection_glow
+                theme.text_muted
             };
             badge(
                 ui,
@@ -166,7 +166,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                 theme,
                 "badge_d",
                 "D",
-                theme.selection_glow,
+                theme.text_muted,
                 node.disabled,
                 Some(disable_badge_wid(node.id)),
             );

@@ -139,16 +139,16 @@ impl NodeUI {
         let selected = rcx.scene.selected_nodes.contains(&node.id);
         // The border width is *always* the selection width so selecting a
         // node never resizes it (stroke folds into padding). Only the
-        // color changes: bright glow when selected, the node fill when
-        // not (the reserved stroke blends into the body so no border
-        // shows). Broken still wins as the alarm color.
+        // color changes: the breaker alarm wins, then the bright selection
+        // halo, else the resting `node_border` (a faint outline just above
+        // the fill).
         let border_width = theme.node_border_width * 2.0;
         let border = if broken {
             theme.connection_broken
         } else if selected {
-            theme.selection_glow
+            theme.text_muted
         } else {
-            theme.node_fill
+            theme.node_border
         };
         // Sample modifiers before the panel borrows `ui` for the rest
         // of this scope (the click handler below can't reborrow it).

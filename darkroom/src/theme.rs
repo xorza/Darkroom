@@ -63,11 +63,16 @@ pub struct Theme {
     pub node_min_height: f32,
 
     pub header_fill: Color,
-    pub header_corner_radius: f32,
+    /// Corner radius of the tab-strip tabs (the header derives its own
+    /// radius from `node_corner_radius`, so it doesn't read this).
+    pub tab_corner_radius: f32,
 
-    /// Glow color painted behind the selected node — picked brighter
-    /// than `canvas_bg` so the halo reads as a highlight, not noise.
-    pub selection_glow: Color,
+    /// Muted secondary foreground (palette `text_muted`, `#aaaaa8`). The
+    /// de-emphasized accent shared across chrome: the selected-node halo,
+    /// inactive/disabled header chips, the pinned-inspector outline, and
+    /// active-tab text — visible without competing with the bright accent
+    /// (`badge_subgraph`) or full-strength text.
+    pub text_muted: Color,
 
     /// Top-chrome fill behind the menu bar + tab strip. Palette `bg`
     /// (`#252525`) — a notch darker than the node surface, sitting
@@ -253,7 +258,7 @@ mod tests {
     fn theme_roundtrips_through_toml() {
         let mut theme = Theme {
             node_min_width: 137.5,
-            selection_glow: Color::hex(0x123456),
+            text_muted: Color::hex(0x123456),
             ..Theme::default()
         };
         theme.palantir_theme.window_clear = Color::hex(0xabcdef);
@@ -263,7 +268,7 @@ mod tests {
             .expect("theme should deserialize from its own TOML output");
 
         assert_eq!(back.node_min_width, 137.5);
-        assert_eq!(back.selection_glow, Color::hex(0x123456));
+        assert_eq!(back.text_muted, Color::hex(0x123456));
         assert_eq!(back.canvas_bg, theme.canvas_bg);
         // Nested palantir palette round-trips too.
         assert_eq!(back.palantir_theme.window_clear, Color::hex(0xabcdef));
