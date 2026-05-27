@@ -10,7 +10,7 @@ use scenarium::prelude::NodeId;
 /// `Document` / `Theme` / `ActionStack` and lets the blocking dialog
 /// run without holding borrows from the active frame.
 #[derive(Clone, Copy, Debug)]
-pub enum MenuCommand {
+pub(crate) enum MenuCommand {
     NewDocument,
     LoadDocument,
     /// Save to the current file, or prompt (Save As) if there isn't one.
@@ -43,7 +43,7 @@ pub enum MenuCommand {
 /// each opens a [`ContextMenu`] anchored at the trigger's bottom-left.
 /// `Quit` calls into [`HostHandle::quit`]; everything else returns a
 /// [`MenuCommand`] for `App` to consume.
-pub fn show(ui: &mut Ui, host: Option<&HostHandle>) -> Option<MenuCommand> {
+pub(crate) fn show(ui: &mut Ui, host: Option<&HostHandle>) -> Option<MenuCommand> {
     let mut command = None;
     Panel::hstack()
         .auto_id()

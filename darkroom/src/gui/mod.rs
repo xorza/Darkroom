@@ -1,9 +1,9 @@
-pub mod canvas;
-pub mod main_window;
-pub mod menu_bar;
-pub mod node;
-pub mod tab_bar;
-pub mod widgets;
+pub(crate) mod canvas;
+pub(crate) mod main_window;
+pub(crate) mod menu_bar;
+pub(crate) mod node;
+pub(crate) mod tab_bar;
+pub(crate) mod widgets;
 
 use crate::document::GraphRef;
 
@@ -14,7 +14,7 @@ use crate::document::GraphRef;
 /// `Intent::SwitchTab`/`CloseTab`, while `OpenGraph` mutates the tab list
 /// directly (opening a tab isn't undoable — only switching/closing is).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UiAction {
+pub(crate) enum UiAction {
     /// Open `target` in a tab (or focus its existing tab).
     OpenGraph(GraphRef),
     /// Make the tab at this index active.
@@ -32,13 +32,13 @@ pub enum UiAction {
 /// reintroduced. `Input` ports live in the left column, `Output` in
 /// the right; `opposite` flips between them for snap-target tests.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum PortKind {
+pub(crate) enum PortKind {
     Input,
     Output,
 }
 
 impl PortKind {
-    pub fn opposite(self) -> Self {
+    pub(crate) fn opposite(self) -> Self {
         match self {
             PortKind::Input => PortKind::Output,
             PortKind::Output => PortKind::Input,
@@ -50,8 +50,8 @@ impl PortKind {
 /// can derive its `WidgetId` via [`crate::gui::node::port_row::port_circle_wid`]
 /// without threading any cache.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct PortRef {
-    pub node_id: scenarium::prelude::NodeId,
-    pub kind: PortKind,
-    pub port_idx: usize,
+pub(crate) struct PortRef {
+    pub(crate) node_id: scenarium::prelude::NodeId,
+    pub(crate) kind: PortKind,
+    pub(crate) port_idx: usize,
 }

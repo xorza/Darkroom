@@ -33,7 +33,7 @@ fn port_rename_wid(port: PortRef) -> WidgetId {
 /// label for a length-capped `TextEdit`; Enter or focus loss commits a
 /// [`Intent::RenameBoundaryPort`], Esc cancels. `None` (regular node
 /// ports and the trailing "+" placeholder) renders plain text.
-pub(super) fn port_label(
+pub(crate) fn port_label(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
     port: PortRef,

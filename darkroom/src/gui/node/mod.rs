@@ -1,7 +1,7 @@
-pub mod header;
-pub mod port_rename;
-pub mod port_row;
-pub mod value_editor;
+pub(crate) mod header;
+pub(crate) mod port_rename;
+pub(crate) mod port_row;
+pub(crate) mod value_editor;
 
 use crate::document::GraphRef;
 use crate::edit::intent::Intent;
@@ -29,10 +29,10 @@ use std::collections::BTreeSet;
 /// `draw_all`'s node loop borrow-clean. The mutable sinks (`out`,
 /// `actions`) and the breaker `probe` stay separate params.
 #[derive(Clone, Copy)]
-pub(super) struct RecordCtx<'a> {
-    pub theme: &'a Theme,
-    pub scene: &'a Scene,
-    pub port_frame: &'a PortFrame,
+pub(crate) struct RecordCtx<'a> {
+    pub(crate) theme: &'a Theme,
+    pub(crate) scene: &'a Scene,
+    pub(crate) port_frame: &'a PortFrame,
 }
 
 /// Owns rendering of every graph node plus the single active drag
@@ -45,7 +45,7 @@ pub(super) struct RecordCtx<'a> {
 /// frame after [`crate::gui::canvas::port_frame::PortFrame`] has been rebuilt
 /// from last-frame's responses.
 #[derive(Default, Debug)]
-pub struct NodeUI {
+pub(crate) struct NodeUI {
     drag_anchor: Option<DragAnchor>,
 }
 
@@ -73,7 +73,7 @@ impl NodeUI {
     /// Emits an `Intent::MoveNodes` for any node holding an active
     /// LMB drag on its body (port circles capture their own clicks
     /// via `Sense::CLICK` so drags don't latch off the port grabs).
-    pub(super) fn draw_all(
+    pub(crate) fn draw_all(
         &mut self,
         ui: &mut Ui,
         rcx: RecordCtx<'_>,
@@ -228,7 +228,7 @@ impl NodeUI {
     /// state mutation applied from these intents (notably drag-driven
     /// `MoveNodes`) lands in `Document` before recording — Pass A's
     /// arrange already reflects the cursor; no Pass B relayout retry.
-    pub(super) fn prepass(&mut self, ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
+    pub(crate) fn prepass(&mut self, ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
         // `node_id`/`widget_id` are `Copy`, so pull them out and drop the
         // borrow — that lets the early returns below reassign
         // `self.drag_anchor` without cloning the `start_positions` `Vec`,
@@ -293,7 +293,7 @@ impl NodeUI {
 /// ahead of Pass A, so the subgraph records a pass earlier and its
 /// connections draw with no first-frame gap. Linked subgraphs aren't
 /// editable targets yet, so only `Local` opens.
-pub(super) fn emit_subgraph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAction>) {
+pub(crate) fn emit_subgraph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAction>) {
     for n in &scene.nodes {
         // Instances are always `Local` (library subgraphs are localized on
         // instance), so the "S" chip opens the interior directly.
@@ -313,7 +313,7 @@ pub(super) fn emit_subgraph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAc
 /// `Const` input removes its inline editor and resizes the node — doing it
 /// before Pass A lets the node arrange at its settled size and the wires
 /// re-anchor the same frame, instead of floating until the relayout pass.
-pub(super) fn emit_port_disconnects(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
+pub(crate) fn emit_port_disconnects(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
     for node in &scene.nodes {
         for port in node_ports(scene, node, PortKind::Input) {
             if ui.response_for(port_circle_wid(port)).double_clicked() {
@@ -343,7 +343,7 @@ pub(super) fn emit_port_disconnects(ui: &Ui, scene: &Scene, out: &mut Vec<Intent
 /// The accent color for a node's last-run status, or `None` when it
 /// didn't run. Shared by the body glow and the header time label so they
 /// read as one cue.
-pub(super) fn exec_color(theme: &Theme, status: ExecStatus) -> Option<Color> {
+pub(crate) fn exec_color(theme: &Theme, status: ExecStatus) -> Option<Color> {
     match status {
         ExecStatus::None => None,
         ExecStatus::Cached => Some(theme.exec_cached_glow),
@@ -373,7 +373,7 @@ fn exec_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
 /// the domain `NodeId` so `response_for` can probe last-frame's
 /// arranged rect (used by the connection breaker's body-hit test)
 /// without needing the panel's response to round-trip first.
-pub(super) fn node_widget_id(node_id: NodeId) -> WidgetId {
+pub(crate) fn node_widget_id(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.body", node_id))
 }
 
@@ -381,11 +381,11 @@ pub(super) fn node_widget_id(node_id: NodeId) -> WidgetId {
 /// label), so the same id is recorded across the label⇄editor swap.
 /// Polled here to drag the node by its title (the idle label senses
 /// `DRAG`) and by [`header::title`] to render the field.
-pub(super) fn node_rename_wid(node_id: NodeId) -> WidgetId {
+pub(crate) fn node_rename_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.title_rename", node_id))
 }
 
-pub(super) fn set_input(port: PortRef, to: Binding) -> Intent {
+pub(crate) fn set_input(port: PortRef, to: Binding) -> Intent {
     Intent::SetInput {
         node_id: port.node_id,
         input_idx: port.port_idx,
@@ -397,7 +397,7 @@ pub(super) fn set_input(port: PortRef, to: Binding) -> Intent {
 /// only it, Shift-click toggles its membership. Shared by the node body
 /// and the port labels so clicking a label selects the node like the
 /// body does. `UndoStep::is_noop` drops the entry when nothing changed.
-pub(super) fn select_intent(shift: bool, scene: &Scene, node_id: NodeId) -> Intent {
+pub(crate) fn select_intent(shift: bool, scene: &Scene, node_id: NodeId) -> Intent {
     let mut to = if shift {
         scene.selected_nodes.clone()
     } else {

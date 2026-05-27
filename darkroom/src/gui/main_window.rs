@@ -17,8 +17,8 @@ use crate::scene::Scene;
 /// now just `GraphUI`); adding a new top-level pane is a new field
 /// + a new dispatch in `frame`.
 #[derive(Debug)]
-pub struct MainWindow {
-    pub graph_ui: GraphUI,
+pub(crate) struct MainWindow {
+    pub(crate) graph_ui: GraphUI,
     first_frame: bool,
 }
 
@@ -29,7 +29,7 @@ impl MainWindow {
     /// `App` runs this at the top of the frame so a switch applies before
     /// the record — the switched-to graph records in Pass A and its
     /// connections draw in Pass B, no first-frame gap.
-    pub fn scan_navigation(
+    pub(crate) fn scan_navigation(
         &self,
         ui: &Ui,
         scene: &Scene,
@@ -42,12 +42,12 @@ impl MainWindow {
 
     /// Edit-phase prepass: input-derived graph mutations for the
     /// already-settled active graph.
-    pub fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
+    pub(crate) fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
         self.graph_ui.prepass(ui, scene, out);
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn frame(
+    pub(crate) fn frame(
         &mut self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
@@ -92,7 +92,7 @@ impl MainWindow {
     /// connection) when the active tab changes so a gesture started on
     /// one graph can't bleed into another. Keeps `PortFrame`'s offset
     /// cache so the newly-shown graph's connections render immediately.
-    pub fn reset_transient(&mut self) {
+    pub(crate) fn reset_transient(&mut self) {
         self.graph_ui.clear_gestures();
     }
 }

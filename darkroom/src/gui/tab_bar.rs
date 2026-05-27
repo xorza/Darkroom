@@ -15,10 +15,10 @@ use crate::gui::UiAction;
 use crate::theme::Theme;
 
 /// One tab's display state, built by `main_window` from the open-tab list.
-pub struct TabLabel {
-    pub text: InternedStr,
+pub(crate) struct TabLabel {
+    pub(crate) text: InternedStr,
     /// `false` for the always-present `Main` tab.
-    pub closable: bool,
+    pub(crate) closable: bool,
 }
 
 /// Stable id for the tab chip at `index` — deterministic so prepass can
@@ -41,7 +41,7 @@ fn tab_new_wid() -> WidgetId {
 /// request from last frame's chip responses. `count` is the current tab
 /// count; widgets for indices that didn't exist last frame simply report
 /// no click. Close wins over activate on the same chip.
-pub(super) fn emit_tab_actions(ui: &Ui, count: usize, actions: &mut Vec<UiAction>) {
+pub(crate) fn emit_tab_actions(ui: &Ui, count: usize, actions: &mut Vec<UiAction>) {
     for index in 0..count {
         // Only non-`Main` tabs (index > 0) carry a close button.
         if index > 0 && ui.response_for(tab_close_wid(index)).clicked {
@@ -56,7 +56,7 @@ pub(super) fn emit_tab_actions(ui: &Ui, count: usize, actions: &mut Vec<UiAction
 }
 
 /// Draw the strip. Clicks are handled in [`emit_tab_actions`] (prepass).
-pub fn show(ui: &mut Ui, theme: &Theme, tabs: &[TabLabel], active: usize) {
+pub(crate) fn show(ui: &mut Ui, theme: &Theme, tabs: &[TabLabel], active: usize) {
     // The strip shares the menu bar's `chrome_fill`; the active tab
     // below punches through to `canvas_bg` so it reads as one piece with
     // the graph.

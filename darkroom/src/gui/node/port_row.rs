@@ -20,7 +20,7 @@ use crate::gui::{PortKind, PortRef};
 use crate::scene::{InputBindingView, SceneNode};
 use crate::theme::Theme;
 
-pub(super) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+pub(crate) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
     Panel::hstack()
         .id_salt("ports")

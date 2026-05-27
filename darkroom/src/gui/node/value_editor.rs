@@ -27,7 +27,12 @@ struct EditBuffer {
 /// frames so the TextEdit / buffer state survives. `width` is the
 /// fixed logical-px width for the embedded TextEdit, threaded in
 /// from the darkroom theme by the caller.
-pub fn show(ui: &mut Ui, id: WidgetId, value: &StaticValue, width: f32) -> Option<StaticValue> {
+pub(crate) fn show(
+    ui: &mut Ui,
+    id: WidgetId,
+    value: &StaticValue,
+    width: f32,
+) -> Option<StaticValue> {
     match value {
         StaticValue::Int(current) => {
             let buf = buffered_text_edit(ui, id, *current, i64::to_string, width);

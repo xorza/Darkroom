@@ -29,8 +29,8 @@ struct RenameState {
 /// the second only while editing — but a single struct keeps the caller's
 /// match flat.
 pub(crate) struct RenameEvent {
-    pub clicked: bool,
-    pub committed: Option<String>,
+    pub(crate) clicked: bool,
+    pub(crate) committed: Option<String>,
 }
 
 /// Minimum width of both the idle label and the editor, so a short name

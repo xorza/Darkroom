@@ -37,7 +37,7 @@ fn fmt_elapsed(secs: f64) -> String {
 /// The header bar: just the node title. Indicator chips + the run-time
 /// label live in [`status_row`] below it so adding/removing the time
 /// label never reflows the title.
-pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
     // The header sits inside the body's border stroke (the layout folds
     // the stroke width into the body's padding). Its top corners must
@@ -67,7 +67,7 @@ pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
 /// right-aligned. Its own row so the time appearing/disappearing doesn't
 /// resize the header; the cache chip always shows, so the row's height is
 /// reserved regardless.
-pub(super) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
     Panel::hstack()
         .id_salt("status_row")
