@@ -10,6 +10,7 @@ use palantir::{
 };
 use scenarium::data::StaticValue;
 use scenarium::graph::Binding;
+use scenarium::prelude::NodeId;
 
 use crate::document::BoundarySide;
 use crate::edit::intent::Intent;
@@ -123,6 +124,13 @@ pub(crate) fn port_circle_wid(port: PortRef) -> WidgetId {
     ))
 }
 
+/// Stable widget id for an input port's inline const editor (text field,
+/// checkbox, or file-pick button). Reconstructible from domain coords so
+/// the path-pick scan can poll the button's click without threading state.
+pub(crate) fn const_editor_wid(node_id: NodeId, port_idx: usize) -> WidgetId {
+    WidgetId::from_hash(("graph.node.const_editor", node_id, port_idx))
+}
+
 /// One output port = label + circle, vertically centered. Circle has a
 /// negative right margin so it overhangs the column. The circle's
 /// `WidgetId` is the deterministic `port_circle_wid(port)`, so
@@ -189,8 +197,7 @@ fn input_port_row(
             circle_frame(ui, theme, wid, fill, margin);
             port_label(ui, rcx, port, name.clone(), rename, out);
             if allow_const && let InputBindingView::Const(value) = binding {
-                let editor_id =
-                    WidgetId::from_hash(("graph.node.const_editor", port.node_id, port.port_idx));
+                let editor_id = const_editor_wid(port.node_id, port.port_idx);
                 if let Some(new_value) = value_editor::show(ui, editor_id, value, editor_w) {
                     out.push(set_input(port, Binding::Const(new_value)));
                 }

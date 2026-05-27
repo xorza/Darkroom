@@ -9,16 +9,18 @@ use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::node_ports;
 use crate::gui::canvas::port_frame::PortFrame;
+use crate::gui::menu_bar::MenuCommand;
 use crate::gui::node::header::{header, status_row, subgraph_badge_wid};
-use crate::gui::node::port_row::{port_circle_wid, ports_row};
+use crate::gui::node::port_row::{const_editor_wid, port_circle_wid, ports_row};
 use crate::gui::{PortKind, PortRef, UiAction};
 use crate::run_state::ExecStatus;
-use crate::scene::{Scene, SceneNode};
+use crate::scene::{InputBindingView, Scene, SceneNode};
 use crate::theme::Theme;
 use glam::Vec2;
 use palantir::{
     Background, Color, Configure, Corners, Panel, Rect, Sense, Shadow, Sizing, Stroke, Ui, WidgetId,
 };
+use scenarium::data::StaticValue;
 use scenarium::graph::Binding;
 use scenarium::prelude::{NodeId, SubgraphRef};
 use std::collections::BTreeSet;
@@ -305,6 +307,32 @@ pub(crate) fn emit_subgraph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAc
             && ui.response_for(subgraph_badge_wid(n.id)).clicked
         {
             actions.push(UiAction::OpenGraph(GraphRef::Local(id)));
+        }
+    }
+}
+
+/// Scan: a click on an `FsPath` input's inline pick button (polled by its
+/// const-editor id, from last frame's responses) surfaces a
+/// `PickInputPath`. `App` opens the blocking file dialog outside the
+/// record and applies the chosen path. First click wins — one command per
+/// frame — and a command already set this frame (e.g. a menu action) is
+/// left untouched.
+pub(crate) fn emit_path_picks(ui: &Ui, scene: &Scene, cmd: &mut Option<MenuCommand>) {
+    if cmd.is_some() {
+        return;
+    }
+    for node in &scene.nodes {
+        for (port_idx, binding) in scene.bindings(node.inputs).iter().enumerate() {
+            if let InputBindingView::Const(StaticValue::FsPath { config, .. }) = binding
+                && ui.response_for(const_editor_wid(node.id, port_idx)).clicked
+            {
+                *cmd = Some(MenuCommand::PickInputPath {
+                    node_id: node.id,
+                    port_idx,
+                    config: config.clone(),
+                });
+                return;
+            }
         }
     }
 }

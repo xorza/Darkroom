@@ -9,14 +9,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use palantir::Ui;
+use scenarium::data::{FsPathConfig, StaticValue};
 use scenarium::function::FuncLib;
-use scenarium::graph::NodeKind;
+use scenarium::graph::{Binding, NodeKind};
 use scenarium::prelude::{NodeId, SubgraphId};
 use scenarium::subgraph::SubgraphRef;
 
 use crate::app::App;
 use crate::app::editor::Editor;
 use crate::document::{Document, GraphRef};
+use crate::edit::intent::Intent;
 use crate::gui::menu_bar::MenuCommand;
 use crate::io::config::AppConfig;
 use crate::io::library;
@@ -54,8 +56,32 @@ impl App {
             MenuCommand::ImportSubgraph => self.import_subgraph(),
             MenuCommand::PromoteSubgraph => self.promote_active_subgraph(),
             MenuCommand::PublishNodeSubgraph { node_id } => self.publish_node_subgraph(node_id),
+            MenuCommand::PickInputPath {
+                node_id,
+                port_idx,
+                config,
+            } => self.pick_input_path(node_id, port_idx, config),
             MenuCommand::Run => self.run_graph(),
         }
+    }
+
+    /// Open a file dialog for a node's `FsPath` const input and, if the
+    /// user picks one, apply the chosen path as a `SetInput` edit. Runs
+    /// outside the record (blocking dialog), so it goes through
+    /// `Editor::apply_edit` rather than the frame's intent drain.
+    fn pick_input_path(&mut self, node_id: NodeId, port_idx: usize, config: Arc<FsPathConfig>) {
+        let Some(path) = persistence::pick_path(&config) else {
+            return;
+        };
+        let value = StaticValue::FsPath {
+            config,
+            path: path.to_string_lossy().into_owned(),
+        };
+        self.editor.apply_edit(Intent::SetInput {
+            node_id,
+            input_idx: port_idx,
+            to: Binding::Const(value),
+        });
     }
 
     /// Export a subgraph def to a file (its interior `Graph` carries any

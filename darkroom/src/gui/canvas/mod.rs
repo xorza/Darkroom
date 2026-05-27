@@ -26,7 +26,7 @@ use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subgraph_menu::SubgraphMenuUi;
 use crate::gui::menu_bar::MenuCommand;
-use crate::gui::node::{NodeUI, RecordCtx, emit_port_disconnects};
+use crate::gui::node::{NodeUI, RecordCtx, emit_path_picks, emit_port_disconnects};
 use crate::gui::{PortKind, PortRef};
 use crate::scene::{Scene, SceneNode};
 
@@ -166,6 +166,9 @@ impl GraphUI {
             .new_node_ui
             .apply(ui, ctx, scene, gesture, out);
         self.gestures.subgraph_menu.apply(ui, scene, out, cmd);
+        // A click on an FsPath input's pick button surfaces a deferred
+        // PickInputPath command (App opens the dialog outside the record).
+        emit_path_picks(ui, scene, cmd);
         // Bake the snap target into `PortFrame.hovered` so node_ui's
         // port_row picks up the hover color via the same lookup it
         // uses for ordinary mouse-over. `response.hovered` is

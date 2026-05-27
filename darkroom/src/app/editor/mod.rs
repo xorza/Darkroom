@@ -120,6 +120,25 @@ impl Editor {
             .take_requests(self.main_window.graph_ui.open_inspector_nodes())
     }
 
+    /// Apply a single `intent` against the active target and record it as
+    /// its own undo entry. For edits raised *outside* the frame's intent
+    /// drain — e.g. a file-picker result `App` handles after the record.
+    /// No-ops (and self-cancelling steps) are dropped, like the in-frame
+    /// drain.
+    pub(crate) fn apply_edit(&mut self, intent: Intent) {
+        let target = self.document.active_target();
+        let Some(step) = build_step(intent, &self.document, target) else {
+            return;
+        };
+        if step.is_noop() {
+            return;
+        }
+        apply_step(&step, &mut self.document, target);
+        self.needs_relayout |= requires_relayout(&step);
+        self.needs_reconcile |= requires_reconcile(&step);
+        self.action_stack.push_current(target, &[step]);
+    }
+
     /// Add an imported subgraph def to the document, flagging the reconcile
     /// the import needs: an imported def's stored interface may not match
     /// its interior wiring (hand-edited / older file), so it's re-derived

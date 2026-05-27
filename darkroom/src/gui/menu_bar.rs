@@ -1,7 +1,10 @@
+use std::sync::Arc;
+
 use glam::Vec2;
 use palantir::{
     Button, Configure, ContextMenu, HostHandle, MenuItem, Panel, PopupHandle, Sizing, Spacing, Ui,
 };
+use scenarium::data::FsPathConfig;
 use scenarium::prelude::NodeId;
 
 /// A command surfaced by the menu bar. `App` performs the side effect
@@ -9,7 +12,7 @@ use scenarium::prelude::NodeId;
 /// outside the record pass — keeps `menu_bar` decoupled from
 /// `Document` / `Theme` / `ActionStack` and lets the blocking dialog
 /// run without holding borrows from the active frame.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum MenuCommand {
     NewDocument,
     LoadDocument,
@@ -36,6 +39,15 @@ pub(crate) enum MenuCommand {
     /// links the local def to it.
     PublishNodeSubgraph {
         node_id: NodeId,
+    },
+    /// Open a file dialog (filtered by `config`) for a node's `FsPath`
+    /// const input, applying the chosen path as a `SetInput` edit. Raised
+    /// by the inline pick button (see `gui::node::emit_path_picks`); the
+    /// blocking dialog runs outside the record like the other file ops.
+    PickInputPath {
+        node_id: NodeId,
+        port_idx: usize,
+        config: Arc<FsPathConfig>,
     },
     /// Evaluate the graph once on the worker.
     Run,

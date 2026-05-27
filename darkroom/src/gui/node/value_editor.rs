@@ -4,8 +4,11 @@
 //! `StaticValue` when the user changes it. The host (`node_ui`)
 //! converts that into an `Intent::SetInput { to: Binding::Const(..) }`.
 //!
-//! v1 supports `Int`, `Float`, `Bool`, `String`. `Null`, `Enum`, and
-//! `FsPath` render as a read-only label.
+//! Supports `Int`, `Float`, `Bool`, `String`, and `FsPath` (a pick
+//! button showing the chosen file's name — the actual path change comes
+//! back deferred via the OS file dialog, opened by `App` outside the
+//! record and polled here by `emit_path_picks`). `Null` and `Enum`
+//! render as a read-only label.
 //!
 //! Textual edit state: a `TextEdit` round-trip through `i64`/`f64`
 //! formatting would clobber partial input (typing "3." would reformat
@@ -14,7 +17,7 @@
 //! unfocused and parse on every frame, emitting a change only when the
 //! parsed value differs from the canonical one.
 
-use palantir::{Checkbox, Configure, Sizing, TextEdit, Ui, WidgetId};
+use palantir::{Button, Checkbox, Configure, Sizing, TextEdit, Ui, WidgetId};
 use scenarium::data::StaticValue;
 
 #[derive(Default, Clone, Debug)]
@@ -60,8 +63,21 @@ pub(crate) fn show(
             Checkbox::new(&mut draft).id(id).show(ui);
             (draft != *current).then_some(StaticValue::Bool(draft))
         }
-        StaticValue::Null | StaticValue::Enum { .. } | StaticValue::FsPath { .. } => {
-            // v1: not editable. Show the textual form so the value is
+        StaticValue::FsPath { path, .. } => {
+            // A pick button showing the chosen file's name. The click is
+            // polled by `emit_path_picks` (by `id`), which surfaces a
+            // `MenuCommand::PickInputPath`; `App` opens the dialog outside
+            // the record and applies the resulting path. So no synchronous
+            // value here.
+            Button::new()
+                .id(id)
+                .label(path_preview(path))
+                .size((Sizing::Fixed(width), Sizing::Hug))
+                .show(ui);
+            None
+        }
+        StaticValue::Null | StaticValue::Enum { .. } => {
+            // Not editable. Show the textual form so the value is
             // visible; clicks fall through to the surrounding row.
             let mut buf = placeholder(value);
             TextEdit::new(&mut buf)
@@ -71,6 +87,18 @@ pub(crate) fn show(
             None
         }
     }
+}
+
+/// The pick button's label: the chosen file's name (last path
+/// component), or a prompt when no path is set yet.
+fn path_preview(path: &str) -> String {
+    if path.is_empty() {
+        return "Choose file…".to_owned();
+    }
+    std::path::Path::new(path)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_owned())
 }
 
 /// Render a TextEdit whose buffer survives across frames via palantir's
@@ -109,7 +137,6 @@ fn placeholder(value: &StaticValue) -> String {
     match value {
         StaticValue::Null => "null".to_owned(),
         StaticValue::Enum { variant_name, .. } => variant_name.clone(),
-        StaticValue::FsPath { path, .. } => path.clone(),
         _ => String::new(),
     }
 }

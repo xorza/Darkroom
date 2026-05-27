@@ -9,6 +9,7 @@
 use std::path::{Path, PathBuf};
 
 use common::{SerdeFormat, deserialize, serialize};
+use scenarium::data::{FsPathConfig, FsPathMode};
 use scenarium::prelude::SubgraphDef;
 
 use crate::document::Document;
@@ -45,6 +46,22 @@ pub fn pick_open_path(start: Option<&Path>) -> Option<PathBuf> {
 
 pub fn pick_save_path(start: Option<&Path>) -> Option<PathBuf> {
     file_dialog(start).save_file()
+}
+
+/// Open a file/folder dialog for an `FsPath` input, honoring its config:
+/// the mode picks open-file / save-file / pick-folder, and any extensions
+/// become a filter. Returns the chosen path, or `None` if cancelled.
+pub fn pick_path(config: &FsPathConfig) -> Option<PathBuf> {
+    let mut dialog = rfd::FileDialog::new();
+    if !config.extensions.is_empty() {
+        let exts: Vec<&str> = config.extensions.iter().map(String::as_str).collect();
+        dialog = dialog.add_filter("Files", &exts);
+    }
+    match config.mode {
+        FsPathMode::ExistingFile => dialog.pick_file(),
+        FsPathMode::NewFile => dialog.save_file(),
+        FsPathMode::Directory => dialog.pick_folder(),
+    }
 }
 
 /// TOML-only dialog for theme files. Themes always round-trip through
