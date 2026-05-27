@@ -17,7 +17,7 @@
 //! unfocused and parse on every frame, emitting a change only when the
 //! parsed value differs from the canonical one.
 
-use palantir::{Button, Checkbox, Configure, Sizing, TextEdit, Ui, WidgetId};
+use palantir::{Button, Checkbox, Configure, Sizing, TextEdit, TextWrap, Ui, WidgetId};
 use scenarium::data::StaticValue;
 
 #[derive(Default, Clone, Debug)]
@@ -72,7 +72,7 @@ pub(crate) fn show(
             Button::new()
                 .id(id)
                 .label(path_preview(path))
-                .elide()
+                .text_wrap(TextWrap::Ellipsis)
                 .size((Sizing::Fixed(width), Sizing::Hug))
                 .show(ui);
             None
