@@ -1,6 +1,7 @@
 pub(crate) mod background;
 pub(crate) mod breaker;
 pub(crate) mod connection_ui;
+pub(crate) mod inspector;
 pub(crate) mod new_node_ui;
 pub(crate) mod pan_zoom;
 pub(crate) mod port_frame;
@@ -16,6 +17,7 @@ use crate::edit::intent::Intent;
 use crate::gui::canvas::background::CanvasBackground;
 use crate::gui::canvas::breaker::BreakerUI;
 use crate::gui::canvas::connection_ui::ConnectionUI;
+use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::new_node_ui::NewNodeUi;
 use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::canvas::selection_ui::SelectionUI;
@@ -50,6 +52,10 @@ use crate::scene::{Scene, SceneNode};
 pub(crate) struct GraphUI {
     background: CanvasBackground,
     port_frame: PortFrame,
+    /// Open inspection panels, keyed by node. Outside the gesture group
+    /// so pinned panels survive a tab switch; panels only paint for nodes
+    /// in the active scene, so off-tab ones hide and reappear.
+    inspectors: Inspectors,
     /// In-flight gesture controllers. Grouped so a tab switch can reset
     /// *all* of them in one assignment (`clear_gestures`) without the
     /// caller enumerating each — and so the persistent caches
@@ -82,6 +88,9 @@ impl GraphUI {
     /// the active tab changes.
     pub(crate) fn clear_gestures(&mut self) {
         self.gestures = Gestures::default();
+        // Transient inspection panels are tab-local; drop them on a
+        // switch. Pinned ones persist and reappear with their nodes.
+        self.inspectors.close_unpinned();
     }
 
     /// Pre-record pass — see
@@ -154,10 +163,15 @@ impl GraphUI {
         if let Some(snap) = self.gestures.connection_ui.snap_port() {
             self.port_frame.set_hovered(snap);
         }
+        // Cycle inspector toggles + close transient panels on outside
+        // actions, all from last-frame responses (same timing as every
+        // other gesture here).
+        self.inspectors.apply(ui, scene);
 
         let Self {
             background,
             port_frame,
+            inspectors,
             gestures:
                 Gestures {
                     node_ui,
@@ -232,9 +246,15 @@ impl GraphUI {
                                 theme: ctx.theme,
                                 scene,
                                 port_frame,
+                                inspectors,
                             };
                             node_ui.draw_all(ui, rcx, &mut probe, out);
                         }
+                        // Inspection panels paint after the node bodies so
+                        // they sit on top and win clicks over the nodes
+                        // beneath; positioned in world coords, so they ride
+                        // the inner-canvas transform.
+                        inspectors.draw_panels(ui, ctx.theme, scene);
                         breaker_ui.draw(ui, ctx);
                         connection_ui.draw_in_flight(ui, ctx, scene, port_frame, canvas_origin);
                     });

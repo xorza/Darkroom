@@ -1,0 +1,344 @@
+//! Per-node inspection panels: a floating, read-only summary of a node
+//! (identity, inputs + values, outputs, run status) toggled by the `i`
+//! chip in the node header.
+//!
+//! Panels are **not** palantir `Popup`s — those record into the
+//! screen-space `Layer::Popup` and wouldn't track the canvas. Instead
+//! [`Inspectors::draw_panels`] records ordinary `Panel`s as direct
+//! children of the inner (transformed) canvas in
+//! [`crate::gui::canvas::GraphUI::frame`], positioned at the node's world
+//! coords — so they pan and scale with the node for free.
+//!
+//! Each node cycles independently `Closed → Open → Pinned → Closed` on
+//! each header-chip click. `Open` (unpinned) panels close on any outside
+//! action (clicking a node / bare canvas, panning, zooming); `Pinned`
+//! ones persist. State lives on `GraphUI` (not the resettable gesture
+//! group) so pinned panels survive tab switches — panels only render for
+//! nodes present in the current `Scene`, so off-tab ones disappear.
+
+use std::collections::HashMap;
+
+use glam::Vec2;
+use palantir::{
+    Background, Color, Configure, Corners, Panel, Sense, Shadow, Sizing, Spacing, Stroke, Text,
+    TextStyle, Ui, WidgetId,
+};
+use scenarium::data::{DataType, StaticValue};
+use scenarium::prelude::NodeId;
+
+use crate::exec_status::ExecStatus;
+use crate::gui::canvas::outer_canvas_widget_id;
+use crate::gui::node::header::fmt_elapsed;
+use crate::gui::node::{exec_color, node_widget_id};
+use crate::scene::{InputBindingView, Scene, SceneNode};
+use crate::theme::Theme;
+
+/// Open state of a single node's inspector. Absence from
+/// [`Inspectors::modes`] is the third, `Closed`, state.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub(crate) enum InspectMode {
+    /// Transient: closes on the next outside action.
+    Open,
+    /// Sticky: stays open through outside actions; chip renders checked.
+    Pinned,
+}
+
+/// Open inspection panels, keyed by node. Survives tab switches; panels
+/// only paint for nodes in the current scene.
+#[derive(Default, Debug)]
+pub(crate) struct Inspectors {
+    modes: HashMap<NodeId, InspectMode>,
+}
+
+/// Fixed panel width in canvas (pre-transform) units.
+const PANEL_WIDTH: f32 = 210.0;
+/// Gap between the node's right edge and the panel's left edge.
+const PANEL_GAP: f32 = 16.0;
+
+/// Next state in the `Closed → Open → Pinned → Closed` cycle. `None`
+/// is the `Closed` state.
+fn cycle(mode: Option<InspectMode>) -> Option<InspectMode> {
+    match mode {
+        None => Some(InspectMode::Open),
+        Some(InspectMode::Open) => Some(InspectMode::Pinned),
+        Some(InspectMode::Pinned) => None,
+    }
+}
+
+impl Inspectors {
+    /// The mode for a node, for the header chip to style itself.
+    pub(crate) fn mode(&self, id: NodeId) -> Option<InspectMode> {
+        self.modes.get(&id).copied()
+    }
+
+    /// Drop transient (`Open`) panels, keeping pinned ones. Called when
+    /// an outside action fires and on a tab switch.
+    pub(crate) fn close_unpinned(&mut self) {
+        self.modes.retain(|_, m| *m == InspectMode::Pinned);
+    }
+
+    /// Read last-frame chip clicks to cycle node states, close unpinned
+    /// panels on an outside action, and drop entries for deleted nodes.
+    /// Reads everything off last-frame responses (same timing as the
+    /// chip toggle), so a chip click never reads as its own outside
+    /// action — the click lands on the chip, not the canvas or a body.
+    pub(crate) fn apply(&mut self, ui: &Ui, scene: &Scene) {
+        for n in &scene.nodes {
+            if ui.response_for(inspect_badge_wid(n.id)).clicked {
+                match cycle(self.modes.get(&n.id).copied()) {
+                    Some(m) => {
+                        self.modes.insert(n.id, m);
+                    }
+                    None => {
+                        self.modes.remove(&n.id);
+                    }
+                }
+            }
+        }
+        if outside_action(ui, scene) {
+            self.close_unpinned();
+        }
+        self.modes
+            .retain(|id, _| scene.nodes.iter().any(|n| n.id == *id));
+    }
+
+    /// Record a panel for every open inspector, positioned just right of
+    /// its node in canvas-world coords. Call inside the inner-canvas
+    /// closure, after the node bodies, so panels paint on top and win
+    /// hit-tests over the nodes beneath.
+    pub(crate) fn draw_panels(&self, ui: &mut Ui, theme: &Theme, scene: &Scene) {
+        for (&id, &mode) in &self.modes {
+            let Some(node) = scene.nodes.iter().find(|n| n.id == id) else {
+                continue;
+            };
+            // Last frame's body width places the panel just past the
+            // node's right edge; absent on the node's first frame.
+            let node_w = ui
+                .response_for(node_widget_id(id))
+                .layout_rect
+                .map(|r| r.size.w)
+                .unwrap_or(theme.node_min_width);
+            let pos = node.pos + Vec2::new(node_w + PANEL_GAP, 0.0);
+            self.draw_one(ui, theme, scene, node, mode, pos);
+        }
+    }
+
+    fn draw_one(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        scene: &Scene,
+        node: &SceneNode,
+        mode: InspectMode,
+        pos: Vec2,
+    ) {
+        let border = match mode {
+            InspectMode::Pinned => theme.selection_glow,
+            InspectMode::Open => theme.node_border,
+        };
+        let chrome = Background {
+            fill: theme.node_fill.into(),
+            stroke: Stroke::solid(border, 1.0),
+            corners: Corners::all(theme.node_corner_radius),
+            shadow: Shadow {
+                color: Color::linear_rgb(0.0, 0.0, 0.0).with_alpha(0.45),
+                offset: Vec2::new(0.0, 3.0),
+                blur: 12.0,
+                spread: 0.0,
+                inset: false,
+            },
+        };
+        Panel::vstack()
+            .id(inspect_panel_wid(node.id))
+            .position(pos)
+            .size((Sizing::Fixed(PANEL_WIDTH), Sizing::Hug))
+            .sense(Sense::CLICK)
+            .padding(Spacing::all(8.0))
+            .gap(3.0)
+            .background(chrome)
+            .show(ui, |ui| {
+                line(ui, node.name.as_str("(unnamed)"), title_style(ui));
+                line(ui, node.kind_label.as_str(""), muted_style(ui));
+
+                let in_names = scene.ports(node.inputs);
+                let in_types = scene.input_types(node.inputs);
+                let in_binds = scene.bindings(node.input_bindings);
+                if !in_names.is_empty() {
+                    line(ui, "Inputs", section_style(ui));
+                    for (i, name) in in_names.iter().enumerate() {
+                        let name = name.as_str("");
+                        let ty = in_types.get(i).map(type_str).unwrap_or_default();
+                        let val = in_binds.get(i).map(value_str).unwrap_or_default();
+                        line(ui, &format!("{name}: {ty} = {val}"), body_style(ui));
+                    }
+                }
+
+                let out_names = scene.ports(node.outputs);
+                let out_types = scene.output_types(node.outputs);
+                if !out_names.is_empty() {
+                    line(ui, "Outputs", section_style(ui));
+                    for (i, name) in out_names.iter().enumerate() {
+                        let name = name.as_str("");
+                        let ty = out_types.get(i).map(type_str).unwrap_or_default();
+                        line(ui, &format!("{name}: {ty}"), body_style(ui));
+                    }
+                }
+
+                line(ui, "Status", section_style(ui));
+                let status_color =
+                    exec_color(theme, node.exec_status).unwrap_or(ui.theme.text.color);
+                line(
+                    ui,
+                    &status_text(node.exec_status),
+                    TextStyle {
+                        color: status_color,
+                        ..body_style(ui)
+                    },
+                );
+                if let Some(flags) = flag_text(node) {
+                    line(ui, &flags, muted_style(ui));
+                }
+            });
+    }
+}
+
+/// Did the user act outside any inspection panel this frame? Clicking a
+/// node body, clicking bare canvas, or panning/zooming the canvas all
+/// count; clicks inside a panel or on a chip don't (those widgets
+/// capture the press, so neither the canvas nor a body sees it).
+fn outside_action(ui: &Ui, scene: &Scene) -> bool {
+    let oc = ui.response_for(outer_canvas_widget_id());
+    let canvas_acted = oc.clicked
+        || oc.drag_delta().is_some()
+        || oc.scroll_lines != Vec2::ZERO
+        || oc.scroll_pixels != Vec2::ZERO
+        || (oc.zoom_factor - 1.0).abs() > f32::EPSILON;
+    let node_acted = scene.nodes.iter().any(|n| {
+        let r = ui.response_for(node_widget_id(n.id));
+        r.clicked || r.drag_started()
+    });
+    canvas_acted || node_acted
+}
+
+fn line(ui: &mut Ui, text: &str, style: TextStyle) {
+    Text::new(text.to_owned()).style(style).show(ui);
+}
+
+fn title_style(ui: &Ui) -> TextStyle {
+    TextStyle {
+        font_size_px: 14.0,
+        ..ui.theme.text
+    }
+}
+
+fn section_style(ui: &Ui) -> TextStyle {
+    TextStyle {
+        color: ui.theme.text.color.with_alpha(0.7),
+        font_size_px: 11.0,
+        ..ui.theme.text
+    }
+}
+
+fn muted_style(ui: &Ui) -> TextStyle {
+    TextStyle {
+        color: ui.theme.text.color.with_alpha(0.6),
+        font_size_px: 11.0,
+        ..ui.theme.text
+    }
+}
+
+fn body_style(ui: &Ui) -> TextStyle {
+    TextStyle {
+        font_size_px: 12.0,
+        ..ui.theme.text
+    }
+}
+
+fn type_str(ty: &DataType) -> String {
+    format!("{ty}")
+}
+
+fn value_str(b: &InputBindingView) -> String {
+    match b {
+        InputBindingView::None => "—".to_owned(),
+        InputBindingView::Bind => "linked".to_owned(),
+        InputBindingView::Const(v) => static_value_str(v),
+    }
+}
+
+fn static_value_str(v: &StaticValue) -> String {
+    match v {
+        StaticValue::Null => "null".to_owned(),
+        StaticValue::Float(f) => format!("{f}"),
+        StaticValue::Int(i) => format!("{i}"),
+        StaticValue::Bool(b) => format!("{b}"),
+        StaticValue::String(s) => format!("\"{s}\""),
+        StaticValue::FsPath { path, .. } => path.clone(),
+        StaticValue::Enum { variant_name, .. } => variant_name.clone(),
+    }
+}
+
+fn status_text(status: ExecStatus) -> String {
+    match status {
+        ExecStatus::None => "not run".to_owned(),
+        ExecStatus::Cached => "cached".to_owned(),
+        ExecStatus::Executed(secs) => format!("ran in {}", fmt_elapsed(secs)),
+        ExecStatus::MissingInputs => "missing inputs".to_owned(),
+        ExecStatus::Errored => "errored".to_owned(),
+    }
+}
+
+/// `cached` / `terminal` flags joined for the footer, or `None` when the
+/// node carries neither.
+fn flag_text(node: &SceneNode) -> Option<String> {
+    let mut flags = Vec::new();
+    if node.cached {
+        flags.push("cached");
+    }
+    if node.terminal {
+        flags.push("terminal");
+    }
+    (!flags.is_empty()).then(|| flags.join(" · "))
+}
+
+/// Stable id for a node's inspector toggle chip in the header.
+pub(crate) fn inspect_badge_wid(node_id: NodeId) -> WidgetId {
+    WidgetId::from_hash(("graph.node.inspect_badge", node_id))
+}
+
+/// Stable id for a node's floating inspection panel.
+fn inspect_panel_wid(node_id: NodeId) -> WidgetId {
+    WidgetId::from_hash(("graph.node.inspect_panel", node_id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cycle_walks_closed_open_pinned_closed() {
+        // Closed (None) → Open → Pinned → Closed, matching the chip's
+        // three-click loop.
+        assert_eq!(cycle(None), Some(InspectMode::Open));
+        assert_eq!(cycle(Some(InspectMode::Open)), Some(InspectMode::Pinned));
+        assert_eq!(cycle(Some(InspectMode::Pinned)), None);
+    }
+
+    #[test]
+    fn close_unpinned_drops_open_keeps_pinned() {
+        let open = NodeId::unique();
+        let pinned = NodeId::unique();
+        let mut ins = Inspectors::default();
+        ins.modes.insert(open, InspectMode::Open);
+        ins.modes.insert(pinned, InspectMode::Pinned);
+
+        ins.close_unpinned();
+
+        assert_eq!(ins.mode(open), None, "transient panel closed");
+        assert_eq!(
+            ins.mode(pinned),
+            Some(InspectMode::Pinned),
+            "pinned panel survives the outside action"
+        );
+    }
+}

@@ -7,6 +7,7 @@ use crate::document::GraphRef;
 use crate::edit::intent::Intent;
 use crate::exec_status::ExecStatus;
 use crate::gui::canvas::breaker::BreakerProbe;
+use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::node_ports;
 use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::node::header::{header, status_row, subgraph_badge_wid};
@@ -33,6 +34,9 @@ pub(crate) struct RecordCtx<'a> {
     pub(crate) theme: &'a Theme,
     pub(crate) scene: &'a Scene,
     pub(crate) port_frame: &'a PortFrame,
+    /// Open inspection panels, so the header chip can render its
+    /// open/pinned state.
+    pub(crate) inspectors: &'a Inspectors,
 }
 
 /// Owns rendering of every graph node plus the single active drag

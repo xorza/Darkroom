@@ -30,6 +30,10 @@ pub struct Scene {
     /// without re-resolving against the func lib (and without needing a
     /// func at all for subgraph instance nodes).
     pub input_defaults: Vec<StaticValue>,
+    /// Flat pool of every port's data type, built in lockstep with
+    /// `port_names` so the same `inputs` / `outputs` spans slice it. Read
+    /// by the inspection panel to label ports.
+    pub port_types: Vec<DataType>,
     /// Live viewport, mirrored from `Document::{pan, scale}` each
     /// `rebuild`. Read by the canvas transform and the pointer↔world
     /// mapping; the pan/zoom gesture writes it back here, and `App`
@@ -69,6 +73,7 @@ impl Default for Scene {
             port_names: Vec::new(),
             input_bindings: Vec::new(),
             input_defaults: Vec::new(),
+            port_types: Vec::new(),
             pan: Vec2::ZERO,
             zoom: 1.0,
             selected_nodes: BTreeSet::new(),
@@ -81,6 +86,10 @@ pub struct SceneNode {
     pub id: NodeId,
     pub pos: Vec2,
     pub name: InternedStr,
+    /// Human-readable type identity: the func name, the subgraph def
+    /// name, or the boundary role (`Input`/`Output`). Shown by the
+    /// inspection panel.
+    pub kind_label: InternedStr,
     pub inputs: PortSpan,
     pub outputs: PortSpan,
     pub input_bindings: PortSpan,
@@ -148,6 +157,7 @@ impl Scene {
         self.port_names.clear();
         self.input_bindings.clear();
         self.input_defaults.clear();
+        self.port_types.clear();
 
         for vn in view.view_nodes.iter() {
             let Some(node) = graph.by_id(&vn.id) else {
@@ -160,14 +170,18 @@ impl Scene {
             // mirrored from the enclosing `ctx_def`'s interface.
             let interface = match &node.kind {
                 NodeKind::Func(func_id) => func_lib.by_id(func_id).map(|f| NodeInterface {
+                    kind_label: f.name.clone().into(),
                     inputs: Cow::Borrowed(&f.inputs),
                     output_names: f.outputs.iter().map(|o| o.name.clone()).collect(),
+                    output_types: f.outputs.iter().map(|o| o.data_type.clone()).collect(),
                     subgraph: None,
                     terminal: f.terminal,
                 }),
                 NodeKind::Subgraph(r) => graph.resolve_def(*r, func_lib).map(|d| NodeInterface {
+                    kind_label: d.name.clone().into(),
                     inputs: Cow::Borrowed(&d.inputs),
                     output_names: d.outputs.iter().map(|o| o.name.clone()).collect(),
+                    output_types: d.outputs.iter().map(|o| o.data_type.clone()).collect(),
                     subgraph: Some(*r),
                     // A composite's terminal-ness is derived at flatten
                     // time, not stored on the def; treat "no exposed
@@ -182,10 +196,15 @@ impl Scene {
                 NodeKind::SubgraphInput => ctx_def.map(|d| {
                     let mut output_names: Vec<String> =
                         d.inputs.iter().map(|i| i.name.clone()).collect();
+                    let mut output_types: Vec<DataType> =
+                        d.inputs.iter().map(|i| i.data_type.clone()).collect();
                     output_names.push(PLACEHOLDER_PORT.to_string());
+                    output_types.push(DataType::default());
                     NodeInterface {
+                        kind_label: "Input".into(),
                         inputs: Cow::Borrowed(&[]),
                         output_names,
+                        output_types,
                         subgraph: None,
                         terminal: false,
                     }
@@ -198,8 +217,10 @@ impl Scene {
                     let mut inputs: Vec<FuncInput> = d.outputs.iter().map(boundary_input).collect();
                     inputs.push(placeholder_input());
                     NodeInterface {
+                        kind_label: "Output".into(),
                         inputs: Cow::Owned(inputs),
                         output_names: Vec::new(),
+                        output_types: Vec::new(),
                         subgraph: None,
                         terminal: false,
                     }
@@ -208,14 +229,22 @@ impl Scene {
             let Some(interface) = interface else {
                 continue;
             };
+            // `port_types` grows in lockstep with `port_names` (inputs
+            // then outputs) so the `inputs` / `outputs` spans — which index
+            // `port_names` — slice it identically.
             let inputs = extend_pool(
                 &mut self.port_names,
                 interface.inputs.iter().map(|i| i.name.clone().into()),
+            );
+            extend_pool(
+                &mut self.port_types,
+                interface.inputs.iter().map(|i| i.data_type.clone()),
             );
             let outputs = extend_pool(
                 &mut self.port_names,
                 interface.output_names.iter().map(|n| n.clone().into()),
             );
+            extend_pool(&mut self.port_types, interface.output_types.iter().cloned());
             let input_bindings = extend_pool(
                 &mut self.input_bindings,
                 graph
@@ -237,6 +266,7 @@ impl Scene {
                 id: vn.id,
                 pos: vn.pos,
                 name,
+                kind_label: interface.kind_label,
                 inputs,
                 outputs,
                 input_bindings,
@@ -278,6 +308,18 @@ impl Scene {
         let start = span.start as usize;
         &self.input_defaults[start..start + span.len as usize]
     }
+
+    /// Per-input data types, sliced by the node's `inputs` span.
+    pub fn input_types(&self, span: PortSpan) -> &[DataType] {
+        let start = span.start as usize;
+        &self.port_types[start..start + span.len as usize]
+    }
+
+    /// Per-output data types, sliced by the node's `outputs` span.
+    pub fn output_types(&self, span: PortSpan) -> &[DataType] {
+        let start = span.start as usize;
+        &self.port_types[start..start + span.len as usize]
+    }
 }
 
 /// View of a node's interface during a single rebuild: the input ports
@@ -286,8 +328,10 @@ impl Scene {
 /// boundary node synthesizes them from the def's `FuncOutput`s, hence
 /// `Cow`.
 struct NodeInterface<'a> {
+    kind_label: InternedStr,
     inputs: Cow<'a, [FuncInput]>,
     output_names: Vec<String>,
+    output_types: Vec<DataType>,
     subgraph: Option<SubgraphRef>,
     terminal: bool,
 }
@@ -402,6 +446,27 @@ mod tests {
         assert_eq!(scene.nodes.len(), 2, "both boundary nodes render");
         let input_node = scene.nodes.iter().find(|n| n.id == in_id).unwrap();
         let output_node = scene.nodes.iter().find(|n| n.id == out_id).unwrap();
+
+        // Boundary nodes are labeled by role.
+        assert_eq!(input_node.kind_label.as_str(""), "Input");
+        assert_eq!(output_node.kind_label.as_str(""), "Output");
+
+        // SubgraphInput's outputs mirror the def inputs (A:Int, B:Float)
+        // plus the untyped "+" placeholder — types align with names.
+        let in_out_types = scene.output_types(input_node.outputs);
+        assert_eq!(in_out_types.len(), 3, "two def inputs + placeholder");
+        assert!(matches!(in_out_types[0], DataType::Int));
+        assert!(matches!(in_out_types[1], DataType::Float));
+        assert!(
+            matches!(in_out_types[2], DataType::Null),
+            "placeholder untyped"
+        );
+
+        // SubgraphOutput's inputs mirror the def output (Sum:Int) plus a
+        // placeholder.
+        let out_in_types = scene.input_types(output_node.inputs);
+        assert_eq!(out_in_types.len(), 2, "one def output + placeholder");
+        assert!(matches!(out_in_types[0], DataType::Int));
 
         // SubgraphInput: 0 inputs; one output per def *input*, named to
         // match, plus the trailing "+" placeholder.

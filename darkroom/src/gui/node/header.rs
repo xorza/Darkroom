@@ -10,6 +10,7 @@ use scenarium::prelude::{NodeBehavior, NodeId};
 
 use crate::edit::intent::Intent;
 use crate::exec_status::ExecStatus;
+use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
 use crate::gui::node::{RecordCtx, exec_color, node_rename_wid, select_intent};
 use crate::gui::widgets::inline_rename::inline_rename;
 use crate::scene::SceneNode;
@@ -24,7 +25,7 @@ const BADGE_FONT: f32 = 10.0;
 
 /// Compact run-time label: seconds → `s` / `ms` / `µs` at the scale
 /// that keeps 2–3 significant digits.
-fn fmt_elapsed(secs: f64) -> String {
+pub(crate) fn fmt_elapsed(secs: f64) -> String {
     if secs >= 1.0 {
         format!("{secs:.2}s")
     } else if secs >= 1e-3 {
@@ -59,6 +60,31 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
         })
         .show(ui, |ui| {
             title(ui, rcx, node, out);
+            // FILL spacer pushes the inspect chip to the header's right
+            // edge, opposite the title.
+            Panel::hstack()
+                .id_salt("header_spacer")
+                .size((Sizing::FILL, Sizing::Hug))
+                .show(ui, |_| {});
+            // Inspect toggle: filled (checked) when the node's panel is
+            // pinned, accent outline when open, faint outline when closed.
+            // The click is consumed in `Inspectors::apply` via this chip's
+            // deterministic id, so the returned flag is ignored here.
+            let mode = rcx.inspectors.mode(node.id);
+            let color = if mode.is_some() {
+                theme.badge_subgraph
+            } else {
+                theme.node_border
+            };
+            badge(
+                ui,
+                theme,
+                "badge_inspect",
+                "i",
+                color,
+                mode == Some(InspectMode::Pinned),
+                Some(inspect_badge_wid(node.id)),
+            );
         });
 }
 
