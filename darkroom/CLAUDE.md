@@ -20,86 +20,125 @@ cargo run -p darkroom --features profile-with-tracy   # tracy zones across darkr
 ```
 
 Run the ignored one-shot asset generator after changing the default look:
-`cargo test -p darkroom generate_toml_asset -- --ignored` (regenerates
-`assets/ayu-graphite.toml`, the checked-in default theme).
+`cargo test -p darkroom ayu_graphite_asset_in_sync -- --ignored` (regenerates
+`assets/ayu-graphite.toml` from the code-defined theme consts; see `theme.rs`).
 
 ## Dependencies / boundaries
 
 - **`scenarium`** — headless core. Owns `Graph`, `Node`, `Binding`, `FuncLib`,
-  `StaticValue`, serde formats. darkroom never reimplements graph semantics;
-  it edits a `scenarium::Graph` and resolves nodes against a `FuncLib`.
+  `SubgraphDef`, `StaticValue`, the headless `Worker` evaluator, serde formats.
+  darkroom never reimplements graph semantics; it edits a `scenarium::Graph`,
+  resolves nodes against a `FuncLib`, and runs the graph through `Worker`.
 - **`palantir`** — the GUI runtime. `App` implements `palantir::App::frame`;
-  `WinitHost` (in `main.rs`) drives it. All widgets, input, layout, theming
-  come from here. Pre-1.0, breaks freely — coordinate changes with palantir.
+  `WinitHost` (in `main.rs`) drives it. All widgets, input, layout, theming,
+  texture upload come from here. Pre-1.0, breaks freely — coordinate changes
+  with palantir.
 - **`common`** — `SerdeFormat`, `serialize`/`deserialize`, `KeyIndexVec`.
 - **`lens`** — `ImageFuncLib` (image-processing node library).
+- **`tokio`** — multi-thread runtime backing the execution worker (graph runs
+  off the UI thread; results drain back on-frame).
 
 ## Module layout (`src/`)
 
-Root holds the entry point plus the two most-referenced central types;
+Root holds the entry point plus the central projection/theme/run-state types;
 everything else is grouped by responsibility:
 
 - **`main.rs`** — module decls + `WinitHost` bootstrap.
 - **`scene.rs`** — the render projection (see below).
-- **`theme.rs`** — the visual/layout `Theme` bundle (see below).
-- **`app/`** — `mod.rs` (the `App`, per-frame pipeline, and `AppContext`),
-  `shortcuts.rs` (keyboard chords → intents/commands), `commands.rs` (menu
-  side effects: file/theme/subgraph load-save, run *outside* the record).
+- **`theme.rs`** — the visual/layout `Theme` bundle, code-defined (see below).
+- **`run_state.rs`** — per-node execution status + logs + on-demand runtime
+  values (`RunState`, `NodeRunState`, `ExecStatus`, `RunId`).
+- **`node_values.rs`** — render-side value views: formats worker-returned
+  values to text and uploads image previews as palantir textures
+  (`NodeValueView`, `PortValueView`).
+- **`app/`** — `mod.rs` (the `App`: runtime owner + per-frame entry +
+  `AppContext`), `editor/` (the `Editor`: document + undo + scene + UI tree +
+  the edit pipeline; `shortcuts.rs` maps chords → intents/commands),
+  `worker.rs` (`WorkerBridge`: tokio worker + result channel), `commands.rs`
+  (`MenuCommand` side effects: file/theme/subgraph/library I/O + run, *outside*
+  the record).
 - **`document/`** — `mod.rs` (the `Document` model + `GraphRef` / `GraphView` /
-  `EditScope`), `view_node.rs`, `sample_graph.rs` (startup demo graph).
+  `EditScope`), `view_node.rs` (per-node position record).
 - **`edit/`** — the mutation machinery: `intent.rs` (intents + undo steps),
   `action_stack/` (packed undo history), `reconcile/` (derived subgraph-
   interface reconciliation).
 - **`io/`** — `persistence.rs` (file-dialog + serde I/O), `config.rs`
-  (`AppConfig` session state).
+  (`AppConfig` session state), `library.rs` (shared subgraph library file).
 - **`gui/`** — the UI tree: `canvas/` (the graph canvas + its gestures/
-  overlays), `node/` (the node-body widget cluster), plus `main_window`,
-  `menu_bar`, `tab_bar` chrome.
+  overlays/inspectors), `node/` (the node-body widget cluster), `widgets/`
+  (reusable widgets like inline-rename), plus `main_window`, `menu_bar`,
+  `tab_bar` chrome.
 
-## Architecture: the per-frame pipeline
+## Architecture: App vs Editor split
 
-Everything hangs off `App::frame` (`src/app/mod.rs`). darkroom is immediate-mode
-but routes **all** graph mutations through an intent/undo layer rather than
-mutating the document inline. The frame splits into a **navigation phase**
-(settle *which* graph is active) and an **edit phase** (mutate that graph),
-because input that switches tabs/opens subgraphs comes from *last* frame's
-click responses and must resolve before anything edits or records. One frame:
+`App` (`src/app/mod.rs`) is the **runtime owner**; `Editor`
+(`src/app/editor/mod.rs`) is the **document + editing pipeline**. `App` holds:
 
-1. **clear scratch** — `intents` (pending mutations) and `actions` (view-state
-   requests). Both are reused-allocation buffers; no cross-frame state.
-2. **navigate** (`App::navigate`) — apply keyboard undo/redo (which can replay
-   a `SwitchTab`), then `MainWindow::scan_navigation` surfaces tab
-   activate/close + subgraph-open clicks off last frame's responses as
-   `UiAction`s. Open mutates the tab list directly; activate/close queue
-   undoable `SwitchTab` / `CloseTab` intents. After this
-   `target = document.active_target()` is fixed for the rest of the frame.
-3. **sync_target** (`App::sync_target`) — if the active graph changed since last
-   frame (tracked by `App::scene_target`), drop transient gesture state
-   (`reset_transient`) and flag a relayout. Does *not* rebuild — that's the next
-   step.
-4. **rebuild #1 (pre-prepass)** — `rebuild_scene(target)`, **unconditional**.
-   Runs after the whole navigation phase has settled the doc, so prepass and
-   `PortFrame` never read a stale graph (an undo/redo no longer leaves them a
-   frame behind). It's unconditional because `Scene` re-interns port names into
-   palantir's per-frame text arena, which clears each `Ui::frame` — the
-   projection must be regenerated every frame regardless. Clears `scene_dirty`.
-5. **edit prepass** (`MainWindow::prepass` → `GraphUI::prepass`) — read
-   palantir's *current* input state (drag deltas, pan/zoom, connection release)
-   and push `Intent`s. No drawing. Layout-changing edits (node drag, connection
-   commit) are emitted here so they apply *before* the record. See the long
-   comment on `GraphUI::prepass` for why connection commit must be pre-record.
-6. **drain (pre-record)** + canvas shortcuts (Esc-deselect, Ctrl+0 reset-zoom
-   → intents) + file-op chords (`menu_shortcut` → `MenuCommand`). The drain sets
-   `scene_dirty` if it applied anything.
-7. **rebuild #2 (pre-record)** — `rebuild_scene` again **only if `scene_dirty`**
-   (the pre-record drain changed the doc: drag, connection commit). An idle
-   frame or a bare tab switch skips it, so a tab-switch frame rebuilds once, not
-   twice.
-8. **record** (`MainWindow::frame` → `GraphUI::frame`) — draw the tree; widgets
-   push more intents (clicks, edit commits) and a `MenuCommand` may surface.
+- `editor: Editor` — everything document-related and the per-frame pipeline.
+- `func_lib: Arc<FuncLib>` — shared runtime library (builtins + loaded library
+  subgraph defs), built at startup.
+- `theme: Theme`, `config: AppConfig`, `current_path: Option<PathBuf>`.
+- `host_handle: HostHandle` — winit integration for file dialogs + repaints.
+- `worker: WorkerBridge` — drives the headless graph-execution worker.
+
+`App::frame` is thin — it wires the runtime to the editor each frame:
+
+1. **drain worker events** (`drain_worker_events`) — pull `ExecutionStats` and
+   `ArgumentValues` off the worker channel into `editor.run_state`.
+2. **editor frame** (`editor.frame`) — the full edit pipeline; returns an
+   optional `MenuCommand`.
+3. **request open-panel values** (`request_open_panel_values`) — for each open
+   inspector node, ask the worker for fresh input/output values (deduped per
+   run epoch).
+4. **handle menu command** (`handle_menu_command`) — file/theme dialogs +
+   `Run` execute *last*, outside the record, so the blocking dialog holds no
+   frame borrows. `Run` calls `App::run_graph`.
+
+`AppContext<'a>` (`app/mod.rs`) threads `&Theme`, `&FuncLib`, and `&RunState`
+down the UI tree so child widgets don't grow a parameter fan-out.
+
+## Architecture: the per-frame edit pipeline (`Editor::frame`)
+
+darkroom is immediate-mode but routes **all** graph mutations through an
+intent/undo layer rather than mutating the document inline. The frame splits
+into a **navigation phase** (settle *which* graph is active) and an **edit
+phase** (mutate that graph), because input that switches tabs/opens subgraphs
+comes from *last* frame's click responses and must resolve before anything
+edits or records. `Editor` owns the pipeline state:
+
+- `document: Document`, `action_stack: ActionStack`, `scene: Scene`,
+  `main_window: MainWindow`, `run_state: RunState`.
+- `scene_target: Option<GraphRef>` (detects tab change), `scene_dirty`,
+  `needs_reconcile`, `needs_relayout` flags.
+- `intents: Vec<Intent>` and `actions: Vec<UiAction>` — reused scratch buffers,
+  cleared each frame (no cross-frame state).
+
+One frame:
+
+1. **clear scratch** — `intents` + `actions`.
+2. **navigate** — apply keyboard undo/redo (which can replay a `SwitchTab`),
+   then surface tab activate/close + subgraph-open/new clicks off last frame's
+   responses as `UiAction`s. Open mutates the tab list directly; activate/close
+   queue undoable `SwitchTab` / `CloseTab` intents. After this the active
+   target is fixed for the rest of the frame.
+3. **sync_target** — if the active graph changed since last frame, drop
+   transient gesture state and flag a relayout. Does not rebuild.
+4. **rebuild #1 (pre-prepass)** — `rebuild_scene(target)`, **unconditional**,
+   because `Scene` re-interns port names into palantir's per-frame text arena
+   (cleared each `Ui::frame`), so the projection must be regenerated every
+   frame regardless. Clears `scene_dirty`.
+5. **edit prepass** — read palantir's *current* input state (drag deltas,
+   pan/zoom, connection release) and push `Intent`s. No drawing.
+   Layout-changing edits (node drag, connection commit) are emitted here so
+   they apply *before* the record.
+6. **drain (pre-record)** + canvas shortcuts + file-op chords. The drain runs
+   reconcile when `needs_reconcile`, and sets `scene_dirty` if it applied
+   anything.
+7. **rebuild #2 (pre-record)** — `rebuild_scene` again **only if `scene_dirty`**.
+   An idle frame or bare tab switch skips it.
+8. **record** — draw the tree; widgets push more intents (clicks, edit commits,
+   inspector chip toggles) and a `MenuCommand` may surface.
 9. **drain (post-record)** + relayout request as needed.
-10. **menu side effects** — file/theme dialogs run *last*, outside the record,
-    so the blocking dialog holds no frame borrows.
 
 ### Source of truth: `Document` (`src/document/mod.rs`)
 The serialized, undoable unit. The graph *data* is one `scenarium::Graph`
@@ -119,93 +158,150 @@ Everything else is editor view-state, split per graph:
 - **`tabs` / `active`** — open editor tabs (`tabs[0]` is always `Main`) and the
   visible index. Also persisted; switching tabs is an undoable `SwitchTab`.
 - **`EditScope` / `EditScopeRef`** — graph+view borrowed *together* for a
-  target, so an edit touches both atomically (the borrow checker can't prove
-  `graph` and a `sub_views` entry are disjoint across separate accessors).
-  Get them via `Document::scope_mut(target)` / `scope(target)`.
+  target, so an edit touches both atomically. Get them via
+  `Document::scope_mut(target)` / `scope(target)`.
 
-`FuncLib` is *not* here — it's runtime-owned on `App` (built from builtins at
-startup, shared across documents).
+`FuncLib` is *not* here — it's runtime-owned on `App` (built from builtins +
+the library file at startup, shared across documents). Startup seeds an empty
+graph (`auto_layout_default`); there is no checked-in sample graph.
 
 ### Intent / undo layer (`src/edit/intent.rs`, `src/edit/action_stack/`)
 - Every mutation is scoped to a `GraphRef` target. `Intent` = forward-only
   "set X to Y". `build_step(intent, &doc, target)` reads the pre-mutation
-  snapshot (via `scope`) and folds both halves into one self-contained
-  `UndoStep`; `apply_step`/`revert_step` write the "to"/"from" halves against
-  `target`. `SwitchTab` is graph-agnostic and special-cased ahead of the
+  snapshot and folds both halves into one self-contained `UndoStep`;
+  `apply_step`/`revert_step` write the "to"/"from" halves against `target`.
+  `SwitchTab`/`CloseTab` are graph-agnostic and special-cased ahead of the
   scope lookup. Adding a variant touches ~6 spots — the doc comment lists them.
+- Variants: `AddNode`, `DuplicateNodes`, `RemoveNode`, `MoveNodes`,
+  `RenameNode`, `SetInput`, `SetSelection`, `SetCacheBehavior`, `SetDisabled`,
+  `DetachSubgraph`, `SetEventConnection`, `SetViewport`, `RenameBoundaryPort`,
+  plus document-global `SwitchTab` / `CloseTab`.
 - `ActionStack` packs history into two flat byte buffers (bitcode), not a
   `Vec<Vec<UndoStep>>`. Each batch records its `target` so undo/redo re-resolve
   the right graph+view. Consecutive same-`GestureKey` *and* same-target steps
-  coalesce in place (a node drag = many `MoveNode` intents → one undo entry).
+  coalesce in place (a node drag = many `MoveNodes` intents → one undo entry).
 - **`UiAction`** (`gui/mod.rs`) is the navigation-request transport from the
-  UI layer to `App`: `App` turns `ActivateTab`/`CloseTab` into undoable
-  `SwitchTab`/`CloseTab` intents, while `OpenGraph` mutates the tab list
-  directly (opening isn't undoable; switching and closing are).
-- Note: `RenameNode` and `SetEventConnection` variants exist with full handling
-  but are **not yet emitted by any UI** — staged ports from the deprecated
-  editor. They don't trip dead-code lints because the serde derives reference
-  every variant. (`SetCacheBehavior` *is* live — the node header's `C` chip.)
+  UI layer to `Editor`: `ActivateTab`/`CloseTab` become undoable
+  `SwitchTab`/`CloseTab`; `OpenGraph` and `NewSubgraph` mutate the tab list
+  directly (opening/creating isn't undoable; switching and closing are).
+- Note: `RenameNode` and `SetEventConnection` have full handling but are **not
+  yet emitted by any UI** (staged from the deprecated editor). They don't trip
+  dead-code lints because the serde derives reference every variant.
+  `RenameBoundaryPort` and `SetCacheBehavior` *are* live.
+
+### Reconciliation (`src/edit/reconcile/`)
+Derived state, like `Scene`. Runs in the pre-record drain when
+`needs_reconcile` is set (any structural edit). Synchronizes each local
+subgraph's interface against its interior wiring: compacts unused boundary
+slots, remaps indices in the interior graph and across all instance bindings.
+Idempotent — a no-op on an already-canonical document.
 
 ### Render projection: `Scene` (`src/scene.rs`)
 A flat, per-frame snapshot rebuilt from the *active* graph+view every frame
-(`Scene::rebuild(graph, view, func_lib)` — see `App::rebuild_scene`). The names
-live in palantir's per-frame text arena, so it *must* be rebuilt before any
-widget reads it. Port names and input-binding snapshots are flattened into
-pooled `Vec`s sliced by `PortSpan` (zero per-node allocation in steady state).
-Scene is read-only mirror state — viewport/selection are copied *from* the
-active `GraphView` each rebuild; the gesture writes back via intents, never
-directly.
+(`Scene::rebuild(graph, view, func_lib, ctx_def, run_state)` — see
+`Editor::rebuild_scene`). Port names live in palantir's per-frame text arena,
+so it *must* be rebuilt before any widget reads it. Port names, types, and
+input-binding snapshots are flattened into pooled `Vec`s sliced per node (zero
+per-node allocation in steady state). Each `SceneNode` carries its
+`exec_status` (copied from `run_state`) to drive the status glow + header time
+label. Scene is read-only mirror state — viewport/selection are copied *from*
+the active `GraphView` each rebuild; the gesture writes back via intents.
+
+### Graph execution: worker + run state (`app/worker.rs`, `run_state.rs`)
+Execution is **decoupled from the UI thread**. `WorkerBridge` owns a tokio
+multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
+
+- `App::run_graph` clones the active graph + func_lib and sends an
+  `[Update, ExecuteTerminals]` batch to the worker. The worker evaluates on its
+  runtime and replies via callback, which forwards `ExecutionStats` over the
+  channel and pokes `host.request_repaint()`.
+- On-thread, `App::frame` drains the channel (`worker.drain()`, non-blocking).
+  `RunState::ingest` folds `ExecutionStats` (including nested-subgraph
+  attribution) onto authoring nodes: per-node `ExecStatus`
+  (`None`/`Cached`/`Executed(secs)`/`MissingInputs`/`Errored`) + logs.
+- **Status + logs persist across re-runs** (the glow doesn't blank during
+  compute); runtime *values* invalidate immediately on `begin_run` and are
+  fetched on demand.
+- **On-demand values**: open inspector panels drive `App::request_open_panel_values`,
+  which sends a `ValueRequest { node_id, run_id }` (the `run_id` epoch drops
+  stale replies). The worker spawns a forwarder task; its `ArgumentValues`
+  reply (`inputs`/`outputs`) lands on a later frame, where
+  `node_values::build_view` formats text + uploads image previews as palantir
+  textures into `RunState`.
 
 ### GUI tree (`src/gui/`)
 Top level is the chrome: `MainWindow` (zstack: graph behind a floating menu
 bar + tab strip), `menu_bar` (returns `MenuCommand`s), and `tab_bar` (renders
-the open-tab strip and emits `UiAction`s). The rest splits into two subsystems:
+the open-tab strip + "+" new-subgraph chip, emits `UiAction`s). The rest:
 
-- **`gui/canvas/`** — `mod.rs` is `GraphUI`, the canvas scope. It owns the
-  resettable gesture sub-controllers — `ConnectionUI` (wires + in-flight drag +
-  snap), `BreakerUI` (RMB/Cmd+LMB scribble that severs wires / deletes nodes),
-  `NewNodeUi` (right-click spawn popup), `SelectionUI` (rubber-band) — plus the
-  cross-frame caches `background` (dotted backdrop) and `port_frame`.
-  `pan_zoom` holds the viewport gesture + zoom math (unit-tested).
+- **`gui/canvas/`** — `mod.rs` is `GraphUI`, the canvas scope. It separates
+  **persistent** state (`background` dotted backdrop, `port_frame` geometry
+  cache, `inspectors` open-panel set — survive tab switches) from a resettable
+  `Gestures` bundle: `NodeUI` (node bodies + drag), `ConnectionUI` (wires +
+  in-flight drag + snap), `BreakerUI` (RMB/Cmd+LMB scribble that severs wires /
+  deletes nodes), `NewNodeUi` (right-click spawn popup), `SubgraphMenuUi`
+  (RMB context menu on subgraph-instance nodes), `SelectionUI` (rubber-band),
+  and the pan anchor. `pan_zoom` holds the viewport gesture + zoom math
+  (unit-tested).
+- **`gui/canvas/inspector.rs`** — floating per-node inspection panels.
+  `Inspectors` keeps a `NodeId → InspectMode` map (`Open` = transient, closes
+  on any outside action; `Pinned` = sticky). The header `i` chip cycles
+  `Closed → Open → Pinned → Closed`. Panels render as children of the inner
+  (transformed) canvas so they pan/zoom with the graph, only for nodes present
+  in the current scene. Sections: identity, status (outcome + elapsed),
+  inputs (live values when fetched, else static bindings), outputs, log tail.
 - **`gui/node/`** — the node-body widget: `mod.rs` is `NodeUI` (node bodies +
-  drag; also emits subgraph-open requests via `emit_subgraph_opens` and
-  port-disconnect double-clicks via `emit_port_disconnects`), with sub-widgets
-  `header` (title + `S`/`T`/`C` badges), `port_row` (the two port columns +
-  circles + binding menu), `port_rename` (inline boundary-port rename editor),
-  and `value_editor` (inline `Const` editing).
-
-`App` performs the menu / `UiAction` side effects. `AppContext` (in
-`app/mod.rs`) threads the active `Theme` + `FuncLib` down the tree.
+  drag; emits `MoveNodes`, subgraph-open requests, port-disconnect
+  double-clicks), with sub-widgets `header` (title + `S`/`T`/`C`/`i` badges:
+  subgraph / terminal / cache-behavior / inspect), `port_row` (the two port
+  columns + circles + binding menu), `port_rename` (inline boundary-port rename
+  in subgraph interiors), and `value_editor` (inline `Const` editing).
+- **`gui/widgets/`** — reusable widgets. `inline_rename.rs` is a label that
+  swaps to a `TextEdit` on double-click (used by the node title and
+  boundary-port names).
 
 Key cross-cutting mechanisms:
 - **Deterministic widget ids.** Node/port widgets derive their `WidgetId` from
   domain coords (`node_widget_id(id)`, `port_circle_wid(PortRef)`) so any pass
-  can `ui.response_for(id)` without threading a cache. The two canvases use
+  can `ui.response_for(id)` without threading a cache. The canvas uses
   `WidgetId::auto_stable()`.
-- **`PortFrame`** (`gui/canvas/port_frame.rs`) — per-frame snapshot of each port's
-  geometry/hover/drag state, polled from last frame's responses. **Rebuilt in
-  `prepass` and reused in `frame`** (the connection commit reads it); the order
-  is an invariant enforced by call sequence, not types. Port centers are
+- **`PortFrame`** (`gui/canvas/port_frame.rs`) — per-frame snapshot of each
+  port's geometry/hover/drag state, polled from last frame's responses.
+  **Rebuilt in `prepass` and reused in `frame`** (the connection commit reads
+  it); the order is an invariant enforced by call sequence. Port centers are
   recomputed from this frame's `node.pos` + cached intra-node offset so a
   just-dragged node's wires anchor correctly without a stale frame.
 - **`BreakerProbe`** threads the active breaker state into node/connection
   draws so intersection tests run inline; hits drain into intents on release.
 
-### Persistence (`src/io/persistence.rs`, `src/io/config.rs`, `src/theme.rs`)
-`persistence` is pure path⇄type I/O (dialogs + serde), no `App`/undo/config
-coupling — `App` orchestrates. Documents round-trip through any `SerdeFormat`
-(Rhai is canonical). `Theme` bundles darkroom colors/layout *and* the nested
-`palantir::Theme`, serialized as TOML; `Theme::default()` deserializes the
-embedded `assets/ayu-graphite.toml` (single source of truth for the look).
+### Persistence + library (`src/io/`, `src/theme.rs`)
+`persistence.rs` is pure path⇄type I/O (dialogs + serde), no `App`/undo/config
+coupling — `commands.rs` orchestrates. Documents round-trip through any
+`SerdeFormat` (Rhai is canonical). `library.rs` reads/writes the shared
+subgraph library (`darkroom.library.rhai`): a set of `SubgraphDef`s loaded into
+`FuncLib` at startup and grown by the **promote/publish** menu commands. Local
+subgraph defs track lineage via an `origin` field — "Publish" updates the
+linked library entry in place, else creates a new one.
 
-**Colors come from the palette.** `assets/ayu-graphite-palette.toml` is the
-semantic Ayu Mirage High Contrast palette (backgrounds, borders, text,
-accent/status, syntax). When adding or restyling a theme field, pick an
-existing swatch from that palette rather than inventing a hex value — e.g.
-node chrome uses `backgrounds.*`, selection halo uses `text_muted`
-(`#aaaaa8`), ports use `success`/`syn_keyword`, broken state uses `error`.
-Keeps darkroom on-palette and lets a palette re-seed propagate cleanly.
 `AppConfig` (`darkroom.config.toml` in cwd) persists last-theme-name +
 last-document so the next launch reopens where you left off. I/O failures log
 to stderr and degrade — there is no user-facing error surface yet.
+
+### Theme (`src/theme.rs`)
+The look is **code-defined**, not embedded TOML. Module consts hold every
+color (`CANVAS_BG`, `NODE_FILL`, `BADGE_SUBGRAPH`, `EXEC_EXECUTED_GLOW`,
+`INPUT_PORT`, …) and layout dimension (`NODE_MIN_WIDTH`, `PORT_SIZE`,
+`CANVAS_DOT_SPACING`, …). `Theme::default()` assembles them. `Theme` bundles
+darkroom's own fields *and* the nested `palantir::Theme` (scalar fields first,
+the palantir table last — a TOML serialization ordering requirement), so it's a
+complete bundle serialized as TOML. The checked-in `assets/ayu-graphite.toml`
+is a reference/round-trip fixture kept in sync by an ignored test, **not** a
+parallel source of truth.
+
+**Colors come from the palette.** Values trace back to the semantic Ayu Mirage
+High Contrast palette (backgrounds, borders, text, accent/status, syntax). When
+adding or restyling a field, reuse an existing palette swatch rather than
+inventing a hex value, so a palette re-seed propagates cleanly. The
+`MenuCommand::InvertColors` command is a reversible light-theme stub that flips
+every color in place.
 </content>
