@@ -871,6 +871,7 @@ dependencies = [
  "anyhow",
  "common",
  "glam 0.33.0",
+ "imaginarium",
  "lens",
  "palantir",
  "rfd",
