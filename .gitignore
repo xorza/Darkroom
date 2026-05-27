@@ -43,3 +43,4 @@ log/
 .tmp/
 darkroom.config.rhai
 darkroom.library.rhai
+darkroom.config.toml

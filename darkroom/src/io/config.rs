@@ -3,15 +3,18 @@ use std::path::PathBuf;
 use common::{SerdeFormat, deserialize, serialize};
 
 /// Config file name, resolved relative to the process working
-/// directory. Rhai so it's hand-editable and matches the document /
-/// theme on-disk format.
-const CONFIG_FILE: &str = "darkroom.config.rhai";
+/// directory. TOML so it's hand-editable and matches the theme
+/// on-disk format.
+const CONFIG_FILE: &str = "darkroom.config.toml";
 
 /// Persisted session state: which theme is active (by name, resolved
 /// to `<cwd>/<name>.toml`) and the document open when the app last
 /// closed. Reloaded on startup so darkroom reopens where the user
 /// left off. Missing / unreadable config falls back to `default()`.
+/// `#[serde(default)]` so an all-`None` config (TOML omits `None`
+/// keys, yielding an empty doc) still deserializes.
 #[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct AppConfig {
     /// Stem of the active theme file in the working dir. `None` uses
     /// the built-in default theme.
@@ -42,15 +45,46 @@ impl AppConfig {
         let Ok(bytes) = std::fs::read(Self::path()) else {
             return Self::default();
         };
-        deserialize(&bytes, SerdeFormat::Rhai).unwrap_or_default()
+        deserialize(&bytes, SerdeFormat::Toml).unwrap_or_default()
     }
 
     /// Write the config to the working dir. Errors print to stderr —
     /// a failed persist shouldn't interrupt the user's session.
     pub fn save(&self) {
-        let bytes = serialize(self, SerdeFormat::Rhai);
+        let bytes = serialize(self, SerdeFormat::Toml);
         if let Err(err) = std::fs::write(Self::path(), &bytes) {
             eprintln!("config save failed: {err}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn roundtrip(cfg: &AppConfig) -> AppConfig {
+        let bytes = serialize(cfg, SerdeFormat::Toml);
+        deserialize(&bytes, SerdeFormat::Toml).expect("config TOML round-trips")
+    }
+
+    #[test]
+    fn populated_config_roundtrips() {
+        let cfg = AppConfig {
+            theme_name: Some("ayu-graphite".into()),
+            document_path: Some(PathBuf::from("/tmp/graph.rhai")),
+        };
+        let back = roundtrip(&cfg);
+        assert_eq!(back.theme_name.as_deref(), Some("ayu-graphite"));
+        assert_eq!(back.document_path, Some(PathBuf::from("/tmp/graph.rhai")));
+    }
+
+    #[test]
+    fn all_none_config_roundtrips() {
+        // TOML omits `None` keys, so the default config serializes to an
+        // (effectively) empty document; `#[serde(default)]` must restore
+        // both fields as `None` rather than erroring on the missing keys.
+        let back = roundtrip(&AppConfig::default());
+        assert_eq!(back.theme_name, None);
+        assert_eq!(back.document_path, None);
     }
 }

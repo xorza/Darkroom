@@ -66,15 +66,17 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
                 .id_salt("header_spacer")
                 .size((Sizing::FILL, Sizing::Hug))
                 .show(ui, |_| {});
-            // Inspect toggle: filled (checked) when the node's panel is
-            // pinned, accent outline when open, faint outline when closed.
-            // The click is consumed in `Inspectors::apply` via this chip's
-            // deterministic id, so the returned flag is ignored here.
+            // Inspect toggle: filled (checked) when pinned, accent outline
+            // when open, muted-grey outline when closed (`selection_glow` is
+            // the palette's `text_muted` — visible on the header without
+            // competing with the accent S/T/C badges). The click is consumed
+            // in `Inspectors::apply` via this chip's deterministic id, so the
+            // returned flag is ignored here.
             let mode = rcx.inspectors.mode(node.id);
             let color = if mode.is_some() {
                 theme.badge_subgraph
             } else {
-                theme.node_border
+                theme.selection_glow
             };
             badge(
                 ui,
