@@ -7,9 +7,10 @@ members = [
     "lumos",
     "imaginarium",
     "quickbench",
+    "palantir"
 ]
 default-members = ["darkroom"]
-exclude = [".tmp", "palantir"]
+exclude = [".tmp"]
 
 resolver = "2"
 
@@ -93,6 +94,19 @@ debug = true
 opt-level = 3
 strip = "none"
 split-debuginfo = "off"
+# Thin LTO lets cross-crate generics like `soa_rs::Soa::push` inline at
+# their call sites (carried over from palantir's release profile).
+lto = "thin"
+
+[profile.release-max]
+inherits = "release"
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+debug = false
+incremental = false
 
 
 # Optimize heavy dependencies even in dev/test builds
