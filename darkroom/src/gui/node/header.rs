@@ -161,7 +161,7 @@ fn cache_badge_wid(node_id: NodeId) -> WidgetId {
 }
 
 /// Stable id for a subgraph node's clickable open-in-tab chip.
-pub(super) fn subgraph_badge_wid(node_id: NodeId) -> WidgetId {
+pub(crate) fn subgraph_badge_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.subgraph_badge", node_id))
 }
 

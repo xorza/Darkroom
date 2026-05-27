@@ -42,6 +42,32 @@ pub enum GraphRef {
     Local(SubgraphId),
 }
 
+/// A subgraph resolved for promotion into the library: the def to
+/// publish (owned copy) plus where to re-link its `origin` afterward.
+pub struct PromoteSource {
+    pub def: SubgraphDef,
+    /// Where the source local def lives, so the caller can point its
+    /// `origin` at the freshly-created library entry. `None` when the
+    /// source is a library (`Linked`) def — nothing in the document to
+    /// re-link.
+    pub relink: Option<RelinkLocal>,
+}
+
+/// Locates a local subgraph def for an `origin` re-link: the graph
+/// whose local table holds it, plus the def's id.
+pub struct RelinkLocal {
+    pub holder: GraphRef,
+    pub def_id: SubgraphId,
+}
+
+/// Internal resolution result shared by export + promote.
+enum Promotable {
+    /// First selected subgraph-instance node in the active graph.
+    Node { graph: GraphRef, sref: SubgraphRef },
+    /// The open subgraph interior (its def lives in the root table).
+    OpenTab { id: SubgraphId },
+}
+
 /// Which side of a subgraph def's interface a boundary-port edit targets:
 /// `Input` → `def.inputs` (the `SubgraphInput` node's output ports),
 /// `Output` → `def.outputs` (the `SubgraphOutput` node's input ports).
@@ -335,21 +361,67 @@ impl Document {
     /// else the currently open subgraph when inside one. `None` when
     /// neither resolves.
     pub fn subgraph_to_export<'a>(&'a self, func_lib: &'a FuncLib) -> Option<&'a SubgraphDef> {
+        match self.resolve_promotable(func_lib)? {
+            Promotable::Node { graph, sref } => self.graph_for(graph)?.resolve_def(sref, func_lib),
+            Promotable::OpenTab { id } => self.graph.subgraphs.by_key(&id),
+        }
+    }
+
+    /// Like [`Self::subgraph_to_export`], but for promoting into the
+    /// library: returns an owned copy of the resolved def plus, when the
+    /// source is a `Local` def in this document, where to re-link its
+    /// `origin` after the library entry is created. `None` (no relink)
+    /// for a `Linked` source — there's no in-document def to own it.
+    pub fn promote_source(&self, func_lib: &FuncLib) -> Option<PromoteSource> {
+        let (def, relink) = match self.resolve_promotable(func_lib)? {
+            Promotable::Node { graph, sref } => {
+                let def = self.graph_for(graph)?.resolve_def(sref, func_lib)?.clone();
+                let relink = match sref {
+                    SubgraphRef::Local(id) => Some(RelinkLocal {
+                        holder: graph,
+                        def_id: id,
+                    }),
+                    SubgraphRef::Linked(_) => None,
+                };
+                (def, relink)
+            }
+            // An open subgraph tab is always a `Local` def living in the
+            // root table, regardless of which interior is shown.
+            Promotable::OpenTab { id } => (
+                self.graph.subgraphs.by_key(&id)?.clone(),
+                Some(RelinkLocal {
+                    holder: GraphRef::Main,
+                    def_id: id,
+                }),
+            ),
+        };
+        Some(PromoteSource { def, relink })
+    }
+
+    /// Shared resolution for export / promote: the first selected
+    /// subgraph-instance node in the active graph (whose def resolves),
+    /// else the open subgraph interior. `None` when neither applies.
+    fn resolve_promotable(&self, func_lib: &FuncLib) -> Option<Promotable> {
         let target = self.active_target();
         let graph = self.graph_for(target)?;
         if let Some(view) = self.view(target) {
             for nid in &view.selected_nodes {
                 if let Some(node) = graph.by_id(nid)
-                    && let NodeKind::Subgraph(r) = node.kind
-                    && let Some(def) = graph.resolve_def(r, func_lib)
+                    && let NodeKind::Subgraph(sref) = node.kind
+                    && graph.resolve_def(sref, func_lib).is_some()
                 {
-                    return Some(def);
+                    return Some(Promotable::Node {
+                        graph: target,
+                        sref,
+                    });
                 }
             }
         }
         match target {
-            GraphRef::Local(id) => self.graph.subgraphs.by_key(&id),
-            GraphRef::Main => None,
+            GraphRef::Local(id) if self.graph.subgraphs.by_key(&id).is_some() => {
+                Some(Promotable::OpenTab { id })
+            }
+            _ => None,
         }
     }
 
@@ -853,6 +925,56 @@ mod tests {
             NodeKind::Subgraph(SubgraphRef::Local(def_a_id)),
             "second instance points at the first instance's local def"
         );
+    }
+
+    #[test]
+    fn detach_forks_standalone_copy_and_repoints_node() {
+        use crate::edit::intent::{Intent, apply_step, build_step, revert_step};
+
+        // A node on a library-linked local def. Detach must fork a fresh
+        // standalone copy (origin cleared), add it, and repoint the node.
+        let lib_id = SubgraphId::unique();
+        let mut doc = Document::default();
+        let mut local = leaf_def(SubgraphId::unique(), "Lib");
+        local.origin = Some(lib_id);
+        let local_id = local.id;
+        doc.graph.subgraphs.add(local);
+        let node = Node::subgraph_instance(
+            doc.graph.subgraphs.by_key(&local_id).unwrap(),
+            SubgraphRef::Local(local_id),
+        );
+        let node_id = node.id;
+        doc.graph.add(node);
+        doc.main_view.view_nodes.add(ViewNode {
+            id: node_id,
+            pos: Vec2::ZERO,
+        });
+
+        let step = build_step(Intent::DetachSubgraph { node_id }, &doc, GraphRef::Main)
+            .expect("detach builds");
+        apply_step(&step, &mut doc, GraphRef::Main);
+
+        assert_eq!(doc.graph.subgraphs.len(), 2, "fork adds a second local def");
+        let NodeKind::Subgraph(SubgraphRef::Local(new_id)) =
+            doc.graph.by_id(&node_id).unwrap().kind
+        else {
+            panic!("node should still be a local subgraph");
+        };
+        assert_ne!(new_id, local_id, "node now points at the fork");
+        assert_eq!(
+            doc.graph.subgraphs.by_key(&new_id).unwrap().origin,
+            None,
+            "detach clears the library lineage"
+        );
+
+        revert_step(&step, &mut doc, GraphRef::Main);
+        assert_eq!(doc.graph.subgraphs.len(), 1, "undo drops the fork");
+        let NodeKind::Subgraph(SubgraphRef::Local(restored)) =
+            doc.graph.by_id(&node_id).unwrap().kind
+        else {
+            panic!("node should still be a local subgraph");
+        };
+        assert_eq!(restored, local_id, "undo restores the original ref");
     }
 
     #[test]

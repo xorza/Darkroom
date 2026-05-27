@@ -79,7 +79,7 @@ impl MainWindow {
                         command = menu_bar::show(ui, host);
                     });
                 tab_bar::show(ui, ctx.theme, &tabs, doc.active);
-                self.graph_ui.frame(ui, ctx, scene, out);
+                self.graph_ui.frame(ui, ctx, scene, out, &mut command);
             });
 
         if take(&mut self.first_frame) {

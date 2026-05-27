@@ -103,6 +103,15 @@ pub enum Intent {
         node_id: NodeId,
         to: NodeBehavior,
     },
+    /// Fork a private standalone copy of a `Subgraph(Local(_))` node's
+    /// def and re-point the node at it (the S-badge "Detach" action).
+    /// The copy gets fresh ids and a cleared `origin`, so it diverges
+    /// from any sibling instances *and* from the library it came from.
+    /// `build_step` reads the source def from the active graph; dropped
+    /// when the node isn't a local subgraph instance.
+    DetachSubgraph {
+        node_id: NodeId,
+    },
     /// Add (`present = true`) or remove (`present = false`)
     /// `subscriber` from the event at `(event_node_id, event_idx)`.
     SetEventConnection {
@@ -220,6 +229,15 @@ pub enum GraphStep {
         from: NodeBehavior,
         to: NodeBehavior,
     },
+    /// Fork + re-point: `def` (a fresh standalone copy) joins the
+    /// graph's local defs and the node swaps from `from_id` to `to_id`
+    /// (`= def.id`). Undo restores the `from_id` ref and drops `def`.
+    DetachSubgraph {
+        node_id: NodeId,
+        from_id: SubgraphId,
+        to_id: SubgraphId,
+        def: Box<SubgraphDef>,
+    },
     SetEventConnection {
         event_node_id: NodeId,
         event_idx: usize,
@@ -296,7 +314,9 @@ impl GraphStep {
     /// flip is the change).
     fn is_noop(&self) -> bool {
         match self {
-            GraphStep::AddNode { .. } | GraphStep::RemoveNode { .. } => false,
+            GraphStep::AddNode { .. }
+            | GraphStep::RemoveNode { .. }
+            | GraphStep::DetachSubgraph { .. } => false,
             GraphStep::DuplicateNodes { nodes, .. } => nodes.is_empty(),
             GraphStep::MoveNodes { moves, .. } => moves.iter().all(|(_, from, to)| from == to),
             GraphStep::RenameNode { from, to, .. } => from == to,
@@ -464,6 +484,20 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             node_id,
             to,
         },
+        Intent::DetachSubgraph { node_id } => {
+            let NodeKind::Subgraph(SubgraphRef::Local(from_id)) = graph.by_id(&node_id)?.kind
+            else {
+                return None; // not a local subgraph instance — nothing to fork
+            };
+            let mut copy = graph.subgraphs.by_key(&from_id)?.fresh_copy();
+            copy.origin = None; // detach severs the library lineage
+            GraphStep::DetachSubgraph {
+                node_id,
+                from_id,
+                to_id: copy.id,
+                def: Box::new(copy),
+            }
+        }
         Intent::SetEventConnection {
             event_node_id,
             event_idx,
@@ -624,6 +658,16 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetCacheBehavior { node_id, to, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().behavior = *to;
         }
+        GraphStep::DetachSubgraph {
+            node_id,
+            to_id,
+            def,
+            ..
+        } => {
+            scope.graph.subgraphs.add((**def).clone());
+            scope.graph.by_id_mut(node_id).unwrap().kind =
+                NodeKind::Subgraph(SubgraphRef::Local(*to_id));
+        }
         GraphStep::SetEventConnection {
             event_node_id,
             event_idx,
@@ -752,6 +796,16 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetCacheBehavior { node_id, from, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().behavior = *from;
         }
+        GraphStep::DetachSubgraph {
+            node_id,
+            from_id,
+            to_id,
+            ..
+        } => {
+            scope.graph.by_id_mut(node_id).unwrap().kind =
+                NodeKind::Subgraph(SubgraphRef::Local(*from_id));
+            scope.graph.subgraphs.remove_by_key(to_id);
+        }
         GraphStep::SetEventConnection {
             event_node_id,
             event_idx,
@@ -802,7 +856,11 @@ pub fn requires_relayout(step: &UndoStep) -> bool {
             | GraphStep::DuplicateNodes { .. }
             | GraphStep::RemoveNode { .. }
             | GraphStep::MoveNodes { .. }
-            | GraphStep::RenameNode { .. } => true,
+            | GraphStep::RenameNode { .. }
+            // Forks an identical-interface def, so the node doesn't
+            // resize — but it's a structural edit and rare, so eat one
+            // relayout rather than reason about it staying in lockstep.
+            | GraphStep::DetachSubgraph { .. } => true,
             // Viewport is the inner-canvas `TranslateScale`, applied at
             // paint; children arrange in pre-transform space, so a pan/zoom
             // changes nothing the layout engine reads — no Pass B needed.
@@ -848,6 +906,7 @@ pub fn gesture_key(step: &UndoStep) -> Option<GestureKey> {
             | GraphStep::SetInput { .. }
             | GraphStep::SetSelection { .. }
             | GraphStep::SetCacheBehavior { .. }
+            | GraphStep::DetachSubgraph { .. }
             | GraphStep::SetEventConnection { .. },
         )
         | UndoStep::Doc(DocStep::CloseTab { .. } | DocStep::RenameBoundaryPort { .. }) => None,

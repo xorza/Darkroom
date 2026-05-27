@@ -5,6 +5,7 @@ pub mod new_node_ui;
 pub mod pan_zoom;
 pub mod port_frame;
 pub mod selection_ui;
+pub mod subgraph_menu;
 
 use glam::Vec2;
 use palantir::{Background, Configure, Panel, Sense, Sizing, TranslateScale, Ui, WidgetId};
@@ -18,6 +19,8 @@ use crate::gui::canvas::connection_ui::ConnectionUI;
 use crate::gui::canvas::new_node_ui::NewNodeUi;
 use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::canvas::selection_ui::SelectionUI;
+use crate::gui::canvas::subgraph_menu::SubgraphMenuUi;
+use crate::gui::menu_bar::MenuCommand;
 use crate::gui::node::{NodeUI, RecordCtx, emit_port_disconnects};
 use crate::gui::{PortKind, PortRef};
 use crate::scene::{Scene, SceneNode};
@@ -63,6 +66,7 @@ struct Gestures {
     breaker_ui: BreakerUI,
     connection_ui: ConnectionUI,
     new_node_ui: NewNodeUi,
+    subgraph_menu: SubgraphMenuUi,
     selection_ui: SelectionUI,
     /// `Scene::pan` snapshot captured at the frame the active pan-drag
     /// latched. While the drag is active, `scene.pan = anchor +
@@ -116,6 +120,7 @@ impl GraphUI {
         ctx: &AppContext<'_>,
         scene: &mut Scene,
         out: &mut Vec<Intent>,
+        cmd: &mut Option<MenuCommand>,
     ) {
         // Pan/zoom was already folded into the document in `prepass`
         // and mirrored into `scene` by `Scene::rebuild`, so the
@@ -139,6 +144,7 @@ impl GraphUI {
         self.gestures.selection_ui.apply(ui, scene, out);
         self.gestures.breaker_ui.apply(ui, scene, out);
         self.gestures.new_node_ui.apply(ui, ctx, scene, out);
+        self.gestures.subgraph_menu.apply(ui, scene, out, cmd);
         // Bake the snap target into `PortFrame.hovered` so node_ui's
         // port_row picks up the hover color via the same lookup it
         // uses for ordinary mouse-over. `response.hovered` is
@@ -158,6 +164,7 @@ impl GraphUI {
                     breaker_ui,
                     connection_ui,
                     new_node_ui: _,
+                    subgraph_menu: _,
                     selection_ui,
                     pan_anchor: _,
                 },

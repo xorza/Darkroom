@@ -2,6 +2,7 @@ use glam::Vec2;
 use palantir::{
     Button, Configure, ContextMenu, HostHandle, MenuItem, Panel, PopupHandle, Sizing, Spacing, Ui,
 };
+use scenarium::prelude::NodeId;
 
 /// A command surfaced by the menu bar. `App` performs the side effect
 /// (file dialog + read/write + doc/theme swap + config persist)
@@ -27,6 +28,13 @@ pub enum MenuCommand {
     /// (`FuncLib`), so it can be instanced as `Linked` anywhere. No-op
     /// when the active tab / selection isn't a subgraph.
     PromoteSubgraph,
+    /// Publish a specific node's local subgraph def to the library (the
+    /// S-badge "Publish" action). Updates the library def it came from
+    /// in place when linked (`origin`), else creates a new entry and
+    /// links the local def to it.
+    PublishNodeSubgraph {
+        node_id: NodeId,
+    },
     /// Evaluate the graph once on the worker.
     Run,
 }
