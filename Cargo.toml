@@ -4,7 +4,9 @@ members = [
     "scenarium",
     "darkroom",
     "lens",
-    "lumos"
+    "lumos",
+    "imaginarium",
+    "quickbench",
 ]
 default-members = ["darkroom"]
 exclude = [".tmp", "palantir"]
