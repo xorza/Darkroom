@@ -1,13 +1,14 @@
-//! Keyboard input → intent/command mapping. Kept apart from the
-//! per-frame pipeline in `app.rs`: these read palantir's key state and
-//! translate chords into queued `Intent`s (canvas edits) or a
-//! `MenuCommand` (file ops), never touching the frame orchestration.
+//! Keyboard input → intent/command mapping. A child module of `editor`:
+//! these read palantir's key state and translate chords into queued
+//! `Intent`s (canvas edits) or a `MenuCommand` (file ops). Being a child
+//! lets them drive the pipeline through `Editor`'s private fields without
+//! widening visibility; they never touch the frame orchestration.
 
 use std::collections::BTreeSet;
 
 use palantir::{Key, Shortcut, Ui};
 
-use crate::app::App;
+use super::Editor;
 use crate::document::GraphRef;
 use crate::edit::intent::{self, Intent, requires_reconcile, requires_relayout};
 use crate::gui::menu_bar::MenuCommand;
@@ -22,7 +23,7 @@ const RESET_ZOOM_SHORTCUT: Shortcut = Shortcut::ctrl('0');
 const DUPLICATE_SHORTCUT: Shortcut = Shortcut::ctrl('D');
 const RUN_SHORTCUT: Shortcut = Shortcut::ctrl('R');
 
-impl App {
+impl Editor {
     /// Ctrl+Z / Ctrl+Shift+Z. Replays undo/redo against the document
     /// (each entry carries its own graph target). Returns whether a
     /// relayout is needed.

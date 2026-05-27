@@ -15,6 +15,7 @@ use scenarium::prelude::{NodeId, SubgraphId};
 use scenarium::subgraph::SubgraphRef;
 
 use crate::app::App;
+use crate::app::editor::Editor;
 use crate::document::{Document, GraphRef};
 use crate::gui::menu_bar::MenuCommand;
 use crate::io::config::AppConfig;
@@ -55,7 +56,7 @@ impl App {
     /// wins; otherwise, when the active tab is itself a subgraph, that
     /// open subgraph is exported. No-op when neither resolves.
     fn export_active_subgraph(&mut self) {
-        let Some(def) = self.document.subgraph_to_export(&self.func_lib) else {
+        let Some(def) = self.editor.document.subgraph_to_export(&self.func_lib) else {
             eprintln!("subgraph export: no subgraph selected or open");
             return;
         };
@@ -73,7 +74,7 @@ impl App {
     /// not routed through undo. No-op when neither a subgraph instance
     /// nor an open subgraph resolves.
     fn promote_active_subgraph(&mut self) {
-        if promote_to_library(&mut self.document, &mut self.func_lib) {
+        if promote_to_library(&mut self.editor.document, &mut self.func_lib) {
             library::save_library(self.func_lib.subgraphs.iter());
         } else {
             eprintln!("subgraph promote: no subgraph selected or open");
@@ -89,8 +90,13 @@ impl App {
     /// rather than re-adds. Non-undoable (library + disk only); the node
     /// resolves against the active graph.
     fn publish_node_subgraph(&mut self, node_id: NodeId) {
-        let target = self.document.active_target();
-        if publish_local_def(&mut self.document, &mut self.func_lib, target, node_id) {
+        let target = self.editor.document.active_target();
+        if publish_local_def(
+            &mut self.editor.document,
+            &mut self.func_lib,
+            target,
+            node_id,
+        ) {
             library::save_library(self.func_lib.subgraphs.iter());
         } else {
             eprintln!("subgraph publish: node is not a local subgraph");
@@ -106,26 +112,17 @@ impl App {
             return;
         };
         if let Some(def) = persistence::import_subgraph(&path) {
-            self.document.import_subgraph(def);
-            // An imported def's stored interface may not match its interior
-            // wiring (hand-edited / older file) — re-derive it next rebuild.
-            self.needs_reconcile = true;
+            self.editor.import_subgraph(def);
         }
     }
 
-    /// Replace the document with an empty one and reset all derived
-    /// state. Clears the undo stack — restoring the previous doc via
-    /// Cmd-Z would re-introduce all of its nodes one-step-at-a-time
-    /// from intent history that no longer matches the live tree.
+    /// Replace the document with an empty one. A fresh [`Editor`] resets
+    /// all derived/transient state in one move: empty undo history
+    /// (restoring the old doc via Cmd-Z would replay nodes from intent
+    /// history that no longer matches the live tree), forced reconcile +
+    /// scene rebuild, dropped gesture state, and cleared run results.
     fn new_document(&mut self) {
-        self.document = Document::default();
-        self.action_stack.clear();
-        self.intents.clear();
-        // Force a scene rebuild next frame: the active target may still
-        // be `Main`, but it now points at a different graph. Re-derive the
-        // subgraph interfaces too — the document was replaced wholesale.
-        self.scene_target = None;
-        self.needs_reconcile = true;
+        self.editor = Editor::new(Document::default());
         self.set_document_path(None);
     }
 
@@ -133,11 +130,9 @@ impl App {
         let Some(doc) = persistence::load_document(path) else {
             return;
         };
-        self.document = doc;
-        self.action_stack.clear();
-        self.intents.clear();
-        self.scene_target = None;
-        self.needs_reconcile = true;
+        // Fresh editor around the loaded doc — see `new_document` for why
+        // a wholesale reset (rather than poking individual fields) is right.
+        self.editor = Editor::new(doc);
         self.set_document_path(Some(path.to_path_buf()));
     }
 
@@ -158,7 +153,7 @@ impl App {
     }
 
     fn save_document(&mut self, path: &Path) {
-        if persistence::save_document(&self.document, path) {
+        if persistence::save_document(&self.editor.document, path) {
             self.set_document_path(Some(path.to_path_buf()));
         }
     }

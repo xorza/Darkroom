@@ -80,13 +80,6 @@ impl ActionStack {
         }
     }
 
-    pub fn clear(&mut self) {
-        self.actions.clear();
-        self.head = 0;
-        self.entries.clear();
-        self.cursor = 0;
-    }
-
     /// Push a batch of just-applied steps that mutated `target`. `steps`
     /// is a single undo entry — undoing/redoing replays the whole batch
     /// atomically against `target`'s graph+view.

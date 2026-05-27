@@ -1,0 +1,375 @@
+//! The per-frame edit pipeline over a [`Document`].
+//!
+//! `Editor` owns the document being edited, its undo history, the derived
+//! [`Scene`] projection (plus the per-run status/log projections), the GUI
+//! tree state, and the transient frame-coordination scratch. [`App`] is a
+//! thin shell around it: it owns the runtime/IO (func lib, theme, config,
+//! file path, worker, host handle), drains the worker into the editor's
+//! projections, runs one `Editor::frame`, and handles the [`MenuCommand`]
+//! that frame surfaces. Everything the GUI tree reads or mutates lives
+//! here; nothing in `Editor` knows about file dialogs or the worker.
+//!
+//! [`App`]: super::App
+
+use std::collections::HashMap;
+
+use palantir::{HostHandle, Ui};
+use scenarium::prelude::{ExecutionStats, FuncLib, NodeId, SubgraphDef};
+
+use crate::document::{Document, GraphRef};
+use crate::edit::action_stack::ActionStack;
+use crate::edit::intent::{Intent, apply_step, build_step, requires_reconcile, requires_relayout};
+use crate::exec_status::{ExecStatus, NodeLogs, project_logs, project_stats};
+use crate::gui::UiAction;
+use crate::gui::main_window::MainWindow;
+use crate::gui::menu_bar::MenuCommand;
+use crate::scene::Scene;
+use crate::theme::Theme;
+
+use super::AppContext;
+
+/// Keyboard chords → intents/commands. A child module so it can drive the
+/// pipeline through `Editor`'s private fields (undo stack, intent buffer,
+/// dirty flags) without widening their visibility.
+mod shortcuts;
+
+/// Byte budget for the undo history's packed buffer (~1 MiB). Bounds
+/// memory rather than entry count — a single large edit can't be
+/// undone away, but the oldest entries drop once the buffer overflows.
+const UNDO_HISTORY_BYTES: usize = 1 << 20;
+
+#[derive(Debug)]
+pub(crate) struct Editor {
+    pub(crate) document: Document,
+    action_stack: ActionStack,
+    scene: Scene,
+    main_window: MainWindow,
+    /// Which graph `scene` last reflected. A mismatch with the active
+    /// target means the tab changed: drop transient gesture state
+    /// (`reset_transient`) and request a relayout. `None` forces that on
+    /// the next frame (a fresh `Editor`). It does *not* gate the rebuild
+    /// itself — the projection is rebuilt every frame regardless.
+    scene_target: Option<GraphRef>,
+    /// Set by `drain_intents` whenever it applies a step; consumed by the
+    /// pre-record rebuild so the record sees doc edits the pre-record
+    /// drain made (drag, connection commit). Only meaningful in the
+    /// window between the unconditional pre-prepass rebuild (which clears
+    /// it) and the pre-record rebuild.
+    scene_dirty: bool,
+    /// Set when an applied/undone step can change a subgraph's derived
+    /// interface (see `requires_reconcile`); consumed by `rebuild_scene`,
+    /// which reruns `reconcile_boundaries` only then. Derived state is
+    /// recomputed on structural edits, not on every frame's projection
+    /// rebuild — idle/selection/viewport frames skip the per-def edge
+    /// scan. Starts `true` so the first rebuild canonicalizes a freshly
+    /// loaded (or hand-edited) document.
+    needs_reconcile: bool,
+    /// Per-frame accumulator: set by any step/transition that changes
+    /// something the layout engine reads (see `requires_relayout`), and
+    /// consumed once at the end of `frame` as a single
+    /// `ui.request_relayout()`. Reset at the top of every frame. A plain
+    /// side-effect field like `scene_dirty` / `needs_reconcile`, rather
+    /// than a `bool` threaded back through every helper's return.
+    needs_relayout: bool,
+    /// Per-frame scratch buffer of pending mutations. Cleared at the
+    /// top of every `frame`, filled by prepass/record/shortcut
+    /// handling, and fully drained before `frame` returns — it carries
+    /// no state across frames. Kept as a field only to reuse the
+    /// allocation; not part of the observable state.
+    intents: Vec<Intent>,
+    /// Per-frame scratch buffer of view-state requests (open/activate/
+    /// close tab) raised during record. Drained each frame; carries no
+    /// cross-frame state — kept only to reuse the allocation.
+    actions: Vec<UiAction>,
+    /// Per-node outcome of the last completed run (with `Executed`'s
+    /// run time), projected into each `SceneNode::exec_status` at rebuild
+    /// to drive the status glow and the header time label. Keyed by the
+    /// document's `NodeId`s so it resolves against any tab (root or
+    /// subgraph interior). Rebuilt when a run finishes, cleared on run
+    /// failure (both via `set_run_results` / `clear_run_results`, called by
+    /// `App` as it drains the worker). Off the serialized state.
+    exec_status: HashMap<NodeId, ExecStatus>,
+    /// Last run's per-node log lines (from node `print` / `ctx.log`),
+    /// keyed like `exec_status`. Shown in the node inspection panel's Log
+    /// section; replaced each run. Off the serialized state.
+    node_logs: NodeLogs,
+}
+
+impl Editor {
+    /// Build the editor around a starting `document`. Derived state
+    /// (scene, status/log projections) starts empty and `needs_reconcile`
+    /// starts `true` so the first frame canonicalizes the document.
+    pub(crate) fn new(document: Document) -> Self {
+        Self {
+            document,
+            action_stack: ActionStack::new(UNDO_HISTORY_BYTES),
+            scene: Scene::default(),
+            main_window: MainWindow::default(),
+            scene_target: None,
+            scene_dirty: false,
+            needs_reconcile: true,
+            needs_relayout: false,
+            intents: Vec::new(),
+            actions: Vec::new(),
+            exec_status: HashMap::new(),
+            node_logs: NodeLogs::new(),
+        }
+    }
+
+    /// Reproject a finished run's per-node status + logs onto the editor's
+    /// projections (read by `rebuild_scene`'s status glow and the
+    /// inspector's Log section). Called by `App` as it drains the worker.
+    pub(crate) fn set_run_results(&mut self, stats: &ExecutionStats) {
+        project_stats(&mut self.exec_status, stats);
+        project_logs(&mut self.node_logs, stats);
+    }
+
+    /// Drop the last run's projected status + logs (a failed run paints no
+    /// glow and shows no log lines).
+    pub(crate) fn clear_run_results(&mut self) {
+        self.exec_status.clear();
+        self.node_logs.clear();
+    }
+
+    /// Add an imported subgraph def to the document, flagging the reconcile
+    /// the import needs: an imported def's stored interface may not match
+    /// its interior wiring (hand-edited / older file), so it's re-derived
+    /// on the next rebuild. Keeps the "import ⇒ reconcile" invariant here
+    /// rather than on the caller.
+    pub(crate) fn import_subgraph(&mut self, def: SubgraphDef) {
+        self.document.import_subgraph(def);
+        self.needs_reconcile = true;
+    }
+
+    /// Run one frame of the edit pipeline against the borrowed runtime
+    /// context (`func_lib`, `theme`, `host`), returning the [`MenuCommand`]
+    /// the frame surfaced (if any) for `App` to action outside the record.
+    ///
+    /// The frame splits into a **navigation phase** (settle *which* graph
+    /// is active, from frame-top inputs) and an **edit phase** (mutate that
+    /// graph), because input that switches tabs/opens subgraphs comes from
+    /// *last* frame's click responses and must resolve before anything
+    /// edits or records.
+    pub(crate) fn frame(
+        &mut self,
+        ui: &mut Ui,
+        func_lib: &FuncLib,
+        theme: &Theme,
+        host: &HostHandle,
+    ) -> Option<MenuCommand> {
+        self.intents.clear();
+        self.actions.clear();
+        self.needs_relayout = false;
+
+        // ── Navigation phase ─────────────────────────────────────────
+        // Settle the active graph entirely from frame-top inputs
+        // (keyboard undo/redo + last-frame click responses). `navigate`
+        // reads *last* frame's `scene` to resolve tab/chip clicks, so it
+        // must run before this frame's rebuild. After it, `target` is
+        // fixed for the rest of the frame.
+        self.navigate(ui);
+        let target = self.document.active_target();
+        self.sync_target(target);
+
+        // Rebuild the projection for this frame, after the navigation
+        // phase has fully settled the document — so prepass and
+        // `PortFrame` never read a stale graph (the old "rebuild only on
+        // tab switch" path let an undo/redo leave them a frame behind).
+        // Unconditional: `Scene` re-interns port names into palantir's
+        // per-frame text arena, which clears each `Ui::frame`, so the
+        // projection must be regenerated every frame regardless.
+        self.rebuild_scene(target, func_lib);
+        self.scene_dirty = false;
+
+        // ── Edit phase ───────────────────────────────────────────────
+        // Prepass emits input-derived graph mutations (drag, pan/zoom,
+        // connection commit) drained *before* the record so Pass A sees
+        // the settled doc. It reads everything off `Scene`, so it takes
+        // neither the func lib nor the full `AppContext`.
+        self.main_window.prepass(ui, &self.scene, &mut self.intents);
+        self.drain_intents(target);
+        self.apply_canvas_shortcuts(ui, target);
+
+        let command_from_shortcut = self.menu_shortcut(ui);
+
+        // Record. Rebuild again only if the pre-record drain actually
+        // changed the doc (drag, connection commit) — an idle frame or a
+        // bare tab switch leaves `scene_dirty` false and skips it, so the
+        // tab-switch frame rebuilds once, not twice.
+        if self.scene_dirty {
+            self.rebuild_scene(target, func_lib);
+            self.scene_dirty = false;
+        }
+        let ctx = AppContext {
+            theme,
+            func_lib,
+            node_logs: &self.node_logs,
+        };
+        let command = self
+            .main_window
+            .frame(
+                ui,
+                &ctx,
+                &mut self.scene,
+                Some(host),
+                &self.document,
+                &mut self.intents,
+            )
+            .or(command_from_shortcut);
+
+        // Post-record drain — graph edits the record surfaced (node
+        // select, cache toggle, const edit). Navigation is fully settled
+        // in the navigation phase, so nothing here moves the active tab.
+        self.drain_intents(target);
+
+        // Single consumption point for the frame's accumulated relayout
+        // signal (edits, tab switch, undo/redo). A menu side effect adds
+        // its own relayout in `App`, since it runs after this returns.
+        if self.needs_relayout {
+            ui.request_relayout();
+        }
+        command
+    }
+
+    /// Settle which graph is active for this frame, from inputs all
+    /// available before the record: keyboard undo/redo (which can replay
+    /// a `SwitchTab`) and tab/subgraph-open clicks read from *last*
+    /// frame's responses.
+    ///
+    /// Done up front so the edit pipeline runs against a fixed target and
+    /// a switched-to graph records in the same present's Pass A.
+    fn navigate(&mut self, ui: &mut Ui) {
+        self.apply_undo_redo(ui);
+        // Surface tab/open clicks from last frame's responses. `scene`
+        // still holds the last-rendered graph here — exactly the one
+        // whose chips were clicked.
+        let tab_count = self.document.tabs.len();
+        self.main_window
+            .scan_navigation(ui, &self.scene, tab_count, &mut self.actions);
+        // Open mutates the tab list directly; activate/close queue
+        // undoable `SwitchTab` / `CloseTab` intents — drain them (both
+        // steps are graph-agnostic, so the target passed here doesn't
+        // matter).
+        self.apply_view_actions();
+        self.drain_intents(self.document.active_target());
+        // A closed/deleted target can't be active; fall back to Main.
+        self.document.ensure_valid_active();
+    }
+
+    /// Note a possible active-graph change: when `target` differs from
+    /// what `scene` last reflected, drop transient gesture state (so a
+    /// drag started on one graph can't bleed into another) and request a
+    /// relayout. Keeps `PortFrame`'s offset cache, so a graph shown again
+    /// resolves its port centers immediately. The rebuild itself is the
+    /// caller's unconditional one — this only reacts to the switch.
+    fn sync_target(&mut self, target: GraphRef) {
+        if self.scene_target == Some(target) {
+            return;
+        }
+        self.main_window.reset_transient();
+        self.scene_target = Some(target);
+        self.needs_relayout = true;
+    }
+
+    /// Rebuild the `Scene` projection from the graph + view the `target`
+    /// points at. For a `Local` target, also hands the scene the enclosing
+    /// `SubgraphDef` so the interior's boundary nodes can mirror its
+    /// interface as their ports.
+    ///
+    /// Reconciles every subgraph's interface against its interior wiring
+    /// first (derived state, like the scene itself) so boundary nodes
+    /// render the right ports + placeholder and the doc is consistent
+    /// before any save — but only when `needs_reconcile` is set (a
+    /// structural edit, undo/redo, or document replacement since the last
+    /// reconcile). Idle/selection/viewport frames skip it: the interface
+    /// can't have changed, and reconcile is idempotent there anyway.
+    pub(crate) fn rebuild_scene(&mut self, target: GraphRef, func_lib: &FuncLib) {
+        if self.needs_reconcile {
+            self.document.reconcile_boundaries(func_lib);
+            self.needs_reconcile = false;
+        }
+        let graph = self
+            .document
+            .graph_for(target)
+            .expect("active tab graph exists");
+        let view = self.document.view(target).expect("active tab view exists");
+        let ctx_def = match target {
+            GraphRef::Main => None,
+            GraphRef::Local(id) => self.document.graph.subgraphs.by_key(&id),
+        };
+        self.scene
+            .rebuild(graph, view, func_lib, ctx_def, &self.exec_status);
+    }
+
+    /// Drain `intents`, applying each non-no-op intent to `document`,
+    /// and push the whole frame's resulting steps onto the undo stack
+    /// as a single batch entry — so a gesture that emits N intents
+    /// (e.g. breaker swipe deleting K nodes + unbinding M ports) is
+    /// one Cmd-Z. Marks the scene dirty when anything applied (so the
+    /// pre-record rebuild folds the change in) and accumulates the
+    /// relayout / reconcile signals onto the frame's fields.
+    fn drain_intents(&mut self, target: GraphRef) {
+        let mut batch = Vec::new();
+        for intent in self.intents.drain(..) {
+            let Some(step) = build_step(intent, &self.document, target) else {
+                continue;
+            };
+            if step.is_noop() {
+                continue;
+            }
+            apply_step(&step, &mut self.document, target);
+            self.needs_relayout |= requires_relayout(&step);
+            self.needs_reconcile |= requires_reconcile(&step);
+            batch.push(step);
+        }
+        if !batch.is_empty() {
+            self.scene_dirty = true;
+            self.action_stack.push_current(target, &batch);
+        }
+    }
+
+    /// Apply the record pass's view-state requests. Open mutates the tab
+    /// list directly (not undoable); activate and close are queued as
+    /// `Intent::SwitchTab` / `Intent::CloseTab` so they join the undo
+    /// history (their relayout is decided later, when they drain).
+    fn apply_view_actions(&mut self) {
+        for action in std::mem::take(&mut self.actions) {
+            match action {
+                UiAction::OpenGraph(target) => self.open_graph(target),
+                UiAction::ActivateTab(index) => {
+                    self.intents.push(Intent::SwitchTab { to: index });
+                }
+                UiAction::CloseTab(index) => {
+                    self.intents.push(Intent::CloseTab { index });
+                }
+                UiAction::NewSubgraph => {
+                    // Create the def then open it; like `OpenGraph`, this
+                    // isn't undoable (the new def is referenced by no undo
+                    // history, so the stack stays valid).
+                    let id = self.document.create_subgraph();
+                    self.open_graph(GraphRef::Local(id));
+                }
+            }
+        }
+    }
+
+    /// Focus `target`'s tab, opening a new one (lazily seeding its view
+    /// metadata) if not already open. Flags a relayout when anything moved.
+    fn open_graph(&mut self, target: GraphRef) {
+        if let Some(index) = self.document.tabs.iter().position(|t| *t == target) {
+            if self.document.active != index {
+                self.document.active = index;
+                self.needs_relayout = true;
+            }
+            return;
+        }
+        if let GraphRef::Local(id) = target
+            && !self.document.ensure_sub_view(id)
+        {
+            return;
+        }
+        self.document.tabs.push(target);
+        self.document.active = self.document.tabs.len() - 1;
+        self.needs_relayout = true;
+    }
+}
