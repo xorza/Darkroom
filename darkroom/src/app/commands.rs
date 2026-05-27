@@ -43,6 +43,13 @@ impl App {
                     persistence::export_theme(&self.theme, &path);
                 }
             }
+            MenuCommand::InvertColors => {
+                // Reversible light-theme stub: flip every color, then push
+                // the inverted palantir palette onto the Ui. A second
+                // invocation restores the original (linear inversion is exact).
+                self.theme.invert();
+                ui.theme = self.theme.palantir_theme.clone();
+            }
             MenuCommand::ExportSubgraph => self.export_active_subgraph(),
             MenuCommand::ImportSubgraph => self.import_subgraph(),
             MenuCommand::PromoteSubgraph => self.promote_active_subgraph(),

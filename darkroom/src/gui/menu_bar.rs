@@ -19,6 +19,8 @@ pub(crate) enum MenuCommand {
     SaveDocumentAs,
     LoadTheme,
     ExportTheme,
+    /// Invert every theme color in place — a reversible light-theme stub.
+    InvertColors,
     /// Export the active subgraph (plus its local-def dependencies) to a
     /// file. No-op when the active tab isn't a subgraph.
     ExportSubgraph,
@@ -147,6 +149,10 @@ fn theme_menu(ui: &mut Ui) -> Option<MenuCommand> {
         }
         if MenuItem::new("Export…").show(ui, popup).clicked() {
             command = Some(MenuCommand::ExportTheme);
+        }
+        MenuItem::separator(ui);
+        if MenuItem::new("Invert Colors").show(ui, popup).clicked() {
+            command = Some(MenuCommand::InvertColors);
         }
         command
     })

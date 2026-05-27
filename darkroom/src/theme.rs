@@ -275,6 +275,43 @@ impl Theme {
     pub fn port_radius(&self) -> f32 {
         self.port_size * 0.5
     }
+
+    /// Invert every color in place — a quick light-theme stub. Uses
+    /// [`Color::inverted`] (linear `1 − c`), which is *exactly* reversible,
+    /// so the Theme → "Invert Colors" toggle restores the original on a
+    /// second call without drift.
+    ///
+    /// **Stub:** on the nested palantir palette only `window_clear` is
+    /// inverted; its widget chrome (buttons, menus, text edits) isn't
+    /// deep-inverted, so a polished light theme still wants hand-tuning.
+    pub fn invert(&mut self) {
+        for c in [
+            &mut self.canvas_bg,
+            &mut self.selection_rect,
+            &mut self.canvas_dot,
+            &mut self.connection_broken,
+            &mut self.breaker_stroke,
+            &mut self.node_fill,
+            &mut self.node_border,
+            &mut self.header_fill,
+            &mut self.text_muted,
+            &mut self.chrome_fill,
+            &mut self.badge_subgraph,
+            &mut self.badge_terminal,
+            &mut self.badge_cache,
+            &mut self.exec_executed_glow,
+            &mut self.exec_cached_glow,
+            &mut self.exec_missing_glow,
+            &mut self.exec_errored_glow,
+            &mut self.input_port,
+            &mut self.output_port,
+            &mut self.input_port_hover,
+            &mut self.output_port_hover,
+        ] {
+            *c = c.inverted();
+        }
+        self.palantir_theme.window_clear = self.palantir_theme.window_clear.inverted();
+    }
 }
 
 impl Default for Theme {
@@ -393,5 +430,27 @@ mod tests {
             .text
             .expect("menu button carries an explicit text style");
         assert_eq!(menu_text.font_size_px, MENU_FONT_SIZE);
+    }
+
+    /// `invert` flips colors (a dark bg goes light) and is *exactly*
+    /// reversible — two inversions restore the original, which the
+    /// Theme → Invert Colors toggle depends on.
+    #[test]
+    fn invert_is_an_exact_involution() {
+        let mut theme = Theme::default();
+        // Canvas starts dark; one invert lifts it toward white.
+        assert!(theme.canvas_bg.r < 0.5);
+        theme.invert();
+        assert!(theme.canvas_bg.r > 0.5, "dark canvas inverts to light");
+        assert_eq!(
+            theme.palantir_theme.window_clear,
+            CANVAS_BG.inverted(),
+            "nested palantir surface is inverted too"
+        );
+        // Invert again → byte-identical to the original default.
+        theme.invert();
+        assert_eq!(theme.canvas_bg, CANVAS_BG);
+        assert_eq!(theme.output_port_hover, OUTPUT_PORT_HOVER);
+        assert_eq!(theme.palantir_theme.window_clear, CANVAS_BG);
     }
 }
