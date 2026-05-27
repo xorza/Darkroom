@@ -6,7 +6,7 @@ use scenarium::prelude::NodeId;
 
 use crate::app::AppContext;
 use crate::edit::intent::Intent;
-use crate::gui::canvas::{outer_canvas_widget_id, to_world};
+use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::node::node_widget_id;
 use crate::scene::Scene;
 
@@ -56,19 +56,25 @@ impl SelectionUI {
     /// `Scene::rebuild` reseeds `selected_nodes` from `Document` at the
     /// top of every frame, and the document stays untouched until
     /// release, so `scene.selected_nodes` here is always the base.
-    pub(crate) fn apply(&mut self, ui: &mut Ui, scene: &mut Scene, out: &mut Vec<Intent>) {
+    pub(crate) fn apply(
+        &mut self,
+        ui: &mut Ui,
+        scene: &mut Scene,
+        gesture: Option<CanvasGesture>,
+        out: &mut Vec<Intent>,
+    ) {
         let resp = ui.response_for(outer_canvas_widget_id());
-        let mods = ui.modifiers();
         if self.band.is_none()
-            && resp.drag_started_by(PointerButton::Left)
-            && !mods.ctrl
+            && gesture == Some(CanvasGesture::Select)
             && let Some(p) = resp.pointer_local
         {
             let w = to_world(p, scene);
             self.band = Some(RubberBand {
                 start: w,
                 current: w,
-                additive: mods.shift,
+                // Shift is a gesture *parameter* (extend vs replace), not
+                // arbitration — read it here, not in the classifier.
+                additive: ui.modifiers().shift,
             });
         }
         let Some(mut band) = self.band else {

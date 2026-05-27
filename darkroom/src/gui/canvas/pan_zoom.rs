@@ -9,7 +9,7 @@ use glam::Vec2;
 use palantir::{PointerButton, Ui};
 
 use crate::edit::intent::Intent;
-use crate::gui::canvas::outer_canvas_widget_id;
+use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id};
 use crate::scene::Scene;
 
 /// Bounds on the canvas zoom factor. Pinch / scroll-zoom deltas
@@ -53,12 +53,15 @@ pub(crate) fn emit_pan_zoom(
     pan_anchor: &mut Option<Vec2>,
     ui: &Ui,
     scene: &Scene,
+    gesture: Option<CanvasGesture>,
     out: &mut Vec<Intent>,
 ) {
     let resp = ui.response_for(outer_canvas_widget_id());
     let mut pan = scene.pan;
     let mut zoom = scene.zoom;
-    if resp.drag_started_by(PointerButton::Middle) {
+    // Pan latch comes from the central classification; continuation and
+    // wheel/pinch zoom below read the response directly (not arbitration).
+    if gesture == Some(CanvasGesture::Pan) {
         *pan_anchor = Some(scene.pan);
     }
     match (*pan_anchor, resp.drag_delta_by(PointerButton::Middle)) {

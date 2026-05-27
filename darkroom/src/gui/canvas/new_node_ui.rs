@@ -6,7 +6,7 @@ use scenarium::subgraph::{SubgraphDef, SubgraphRef};
 use crate::app::AppContext;
 use crate::document::view_node::ViewNode;
 use crate::edit::intent::Intent;
-use crate::gui::canvas::{outer_canvas_widget_id, to_world};
+use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::scene::Scene;
 
 /// Right-click-on-canvas → popup that lists every `Func` in
@@ -33,10 +33,11 @@ impl NewNodeUi {
         ui: &mut Ui,
         ctx: &AppContext<'_>,
         scene: &Scene,
+        gesture: Option<CanvasGesture>,
         out: &mut Vec<Intent>,
     ) {
         let resp = ui.response_for(outer_canvas_widget_id());
-        if resp.secondary_clicked
+        if gesture == Some(CanvasGesture::NewNode)
             && let (Some(local), Some(rect)) = (resp.pointer_local, resp.rect)
         {
             self.state = Some(OpenState {

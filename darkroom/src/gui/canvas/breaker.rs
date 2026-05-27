@@ -5,7 +5,7 @@ use scenarium::prelude::NodeId;
 
 use crate::app::AppContext;
 use crate::edit::intent::Intent;
-use crate::gui::canvas::{outer_canvas_widget_id, to_world};
+use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::scene::Scene;
 
 /// Per-frame bundle threaded through node and connection rendering.
@@ -184,20 +184,20 @@ impl BreakerUI {
     /// supersedes any per-input unbind on the same target — the undo
     /// step already detaches incoming edges, so emitting both would
     /// log a redundant history entry. Esc cancels without emitting.
-    pub(crate) fn apply(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
+    pub(crate) fn apply(
+        &mut self,
+        ui: &mut Ui,
+        scene: &Scene,
+        gesture: Option<CanvasGesture>,
+        out: &mut Vec<Intent>,
+    ) {
         let resp = ui.response_for(outer_canvas_widget_id());
-        let mods = ui.modifiers();
-        let cmd_lmb = resp.drag_started_by(PointerButton::Left) && mods.ctrl;
-        let rmb = resp.drag_started_by(PointerButton::Right);
-        if (rmb || cmd_lmb)
+        // The classifier resolves RMB-drag vs Ctrl+LMB-drag and hands back
+        // the latching button, which the gesture polls for continuation.
+        if let Some(CanvasGesture::Breaker(button)) = gesture
             && self.state.is_none()
             && let Some(p) = resp.pointer_local
         {
-            let button = if rmb {
-                PointerButton::Right
-            } else {
-                PointerButton::Left
-            };
             self.state = Some(BreakerState::start(to_world(p, scene), button));
         }
         if self.state.is_some() && ui.escape_pressed() {

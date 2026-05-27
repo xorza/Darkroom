@@ -9,7 +9,9 @@ pub(crate) mod selection_ui;
 pub(crate) mod subgraph_menu;
 
 use glam::Vec2;
-use palantir::{Background, Configure, Panel, Sense, Sizing, TranslateScale, Ui, WidgetId};
+use palantir::{
+    Background, Configure, Panel, PointerButton, Sense, Sizing, TranslateScale, Ui, WidgetId,
+};
 use std::collections::BTreeSet;
 
 use crate::app::AppContext;
@@ -35,19 +37,18 @@ use crate::scene::{Scene, SceneNode};
 /// [`Scene::zoom`], which then drive the inner canvas's
 /// `TranslateScale`.
 ///
-/// **Bare-canvas gesture arbitration.** Several sub-controllers each
-/// poll the *same* outer-canvas response ([`outer_canvas_widget_id`])
-/// and self-select on a button/modifier guard. The guards are kept
-/// mutually exclusive by convention — there's no central dispatcher, so
-/// keep them disjoint when editing:
-/// - **Middle-drag** → pan ([`crate::gui::canvas::pan_zoom::emit_pan_zoom`]).
-/// - **Wheel / pinch** → zoom-about-cursor (same).
-/// - **Plain LMB-drag** (no modifier) → rubber-band select (`SelectionUI`).
-/// - **Ctrl+LMB-drag** or **RMB-drag** → connection breaker (`BreakerUI`).
-/// - **RMB-click** (not drag) → new-node popup (`NewNodeUi`).
+/// **Bare-canvas gesture arbitration.** [`classify_canvas_gesture`] reads
+/// the outer-canvas response ([`outer_canvas_widget_id`]) + modifiers
+/// *once* per phase and resolves which gesture latches this frame into a
+/// single [`CanvasGesture`]; each sub-controller is handed that
+/// classification and consumes only its own variant, so there's no
+/// hand-kept disjointness across files — the precedence lives in one
+/// match. Wheel/pinch zoom isn't a latch gesture (it coexists), so it
+/// stays inside `emit_pan_zoom` regardless of the classification.
 ///
 /// Node panels and port circles live in the *inner* canvas and hit-test
-/// first, so these only fire when a gesture falls through to bare canvas.
+/// first, so a gesture only reaches the bare canvas (and this
+/// classification) when it missed every node/port.
 #[derive(Default, Debug)]
 pub(crate) struct GraphUI {
     background: CanvasBackground,
@@ -114,7 +115,8 @@ impl GraphUI {
     /// because the commit reads it. Navigation (tab/open) is handled
     /// separately, before this, so the target is already fixed here.
     pub(crate) fn prepass(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
-        pan_zoom::emit_pan_zoom(&mut self.gestures.pan_anchor, ui, scene, out);
+        let gesture = classify_canvas_gesture(ui);
+        pan_zoom::emit_pan_zoom(&mut self.gestures.pan_anchor, ui, scene, gesture, out);
         self.gestures.node_ui.prepass(ui, scene, out);
         emit_port_disconnects(ui, scene, out);
         self.port_frame.rebuild(ui, scene);
@@ -134,13 +136,14 @@ impl GraphUI {
         // Pan/zoom was already folded into the document in `prepass`
         // and mirrored into `scene` by `Scene::rebuild`, so the
         // transform below reads the up-to-date viewport directly.
+        let gesture = classify_canvas_gesture(ui);
         // Click on bare canvas (node panels hit-test first, so this
         // only fires when the click missed every node) clears the
         // selection. Skip when nothing is selected so we don't pollute
         // the undo stack with no-op `SetSelection` entries every time
         // the user clicks the empty canvas. A *drag* on bare canvas is
-        // the rubber band (handled by `selection_ui`), not a click.
-        if !scene.selected_nodes.is_empty() && ui.response_for(outer_canvas_widget_id()).clicked {
+        // the rubber band (classified as `Select`), not a `Deselect`.
+        if gesture == Some(CanvasGesture::Deselect) && !scene.selected_nodes.is_empty() {
             out.push(Intent::SetSelection {
                 to: BTreeSet::new(),
             });
@@ -150,9 +153,11 @@ impl GraphUI {
         // frame a tab becomes active, so prepass never sees a stale graph,
         // and the offset cache fills in port centers for nodes that hadn't
         // recorded yet. Reuse it here; no second rebuild needed.
-        self.gestures.selection_ui.apply(ui, scene, out);
-        self.gestures.breaker_ui.apply(ui, scene, out);
-        self.gestures.new_node_ui.apply(ui, ctx, scene, out);
+        self.gestures.selection_ui.apply(ui, scene, gesture, out);
+        self.gestures.breaker_ui.apply(ui, scene, gesture, out);
+        self.gestures
+            .new_node_ui
+            .apply(ui, ctx, scene, gesture, out);
         self.gestures.subgraph_menu.apply(ui, scene, out, cmd);
         // Bake the snap target into `PortFrame.hovered` so node_ui's
         // port_row picks up the hover color via the same lookup it
@@ -260,6 +265,59 @@ impl GraphUI {
                     });
             });
     }
+}
+
+/// Which bare-canvas gesture a fresh press/click latches this frame.
+/// Resolved once by [`classify_canvas_gesture`] so the precedence among
+/// the competing controllers lives in a single place rather than being
+/// re-derived (and kept disjoint by hand) in each one.
+///
+/// Covers the *latch* frame only: continuation of an in-flight gesture is
+/// tracked by each controller's own `Option<state>`, and wheel/pinch zoom
+/// coexists with everything (handled in `emit_pan_zoom`, not here).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum CanvasGesture {
+    /// Middle-button drag → viewport pan.
+    Pan,
+    /// Plain LMB-drag (no modifier) → rubber-band selection.
+    Select,
+    /// Ctrl+LMB-drag or RMB-drag → connection breaker. Carries the button
+    /// that latched it, since the breaker polls that same button for
+    /// continuation/release (a Cmd+LMB breaker must keep reading Left).
+    Breaker(PointerButton),
+    /// RMB-click (no drag) → new-node popup.
+    NewNode,
+    /// LMB-click (no drag) → clear selection.
+    Deselect,
+}
+
+/// Resolve the bare-canvas gesture for this frame from the outer-canvas
+/// response + modifiers. Drag-starts are checked before clicks (palantir
+/// reports `clicked`/`secondary_clicked` only on a release that *didn't*
+/// drag, but the explicit ordering keeps the precedence obvious). `None`
+/// when nothing latched — an idle canvas, or a press a node/port captured.
+pub(crate) fn classify_canvas_gesture(ui: &Ui) -> Option<CanvasGesture> {
+    let resp = ui.response_for(outer_canvas_widget_id());
+    if resp.drag_started_by(PointerButton::Middle) {
+        return Some(CanvasGesture::Pan);
+    }
+    if resp.drag_started_by(PointerButton::Right) {
+        return Some(CanvasGesture::Breaker(PointerButton::Right));
+    }
+    if resp.drag_started_by(PointerButton::Left) {
+        return Some(if ui.modifiers().ctrl {
+            CanvasGesture::Breaker(PointerButton::Left)
+        } else {
+            CanvasGesture::Select
+        });
+    }
+    if resp.secondary_clicked {
+        return Some(CanvasGesture::NewNode);
+    }
+    if resp.clicked {
+        return Some(CanvasGesture::Deselect);
+    }
+    None
 }
 
 /// Every `PortRef` of `node` on the given side, in port order. Single
