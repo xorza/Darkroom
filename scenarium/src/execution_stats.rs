@@ -123,6 +123,25 @@ pub struct NodeError {
     pub error: Error,
 }
 
+/// Severity of a [`LogEntry`] emitted by a node during execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogLevel {
+    Info,
+    Warn,
+    Error,
+}
+
+/// One log line emitted by a node lambda (via `ContextManager::log`).
+/// `node_id` is the flattened execution id; a UI projects it back onto
+/// the authoring node(s) via [`FlattenMap::attribution`], like the other
+/// stat lists.
+#[derive(Debug, Clone)]
+pub struct LogEntry {
+    pub node_id: NodeId,
+    pub level: LogLevel,
+    pub message: String,
+}
+
 #[derive(Debug)]
 pub struct ExecutionStats {
     pub elapsed_secs: f64,
@@ -132,6 +151,9 @@ pub struct ExecutionStats {
     pub cached_nodes: Vec<NodeId>,
     pub triggered_events: Vec<EventRef>,
     pub node_errors: Vec<NodeError>,
+    /// Log lines emitted by node lambdas this run, in emission order.
+    /// Keyed by flattened node id; project via [`FlattenMap::attribution`].
+    pub logs: Vec<LogEntry>,
     /// How the run's graph was flattened, so a UI can project the
     /// flattened-id stats above back onto the authoring nodes the user
     /// sees (including subgraph interiors + instances).

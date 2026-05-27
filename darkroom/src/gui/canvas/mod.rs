@@ -254,7 +254,7 @@ impl GraphUI {
                         // they sit on top and win clicks over the nodes
                         // beneath; positioned in world coords, so they ride
                         // the inner-canvas transform.
-                        inspectors.draw_panels(ui, ctx.theme, scene);
+                        inspectors.draw_panels(ui, ctx.theme, scene, ctx.node_logs);
                         breaker_ui.draw(ui, ctx);
                         connection_ui.draw_in_flight(ui, ctx, scene, port_frame, canvas_origin);
                     });

@@ -1,10 +1,6 @@
-use common::Shared;
 use rand::{RngExt, SeedableRng};
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter};
-use tracing::info;
-
-use common::output_stream::OutputStream;
 
 use crate::async_lambda;
 use crate::data::{DataType, DynamicValue, StaticValue};
@@ -14,7 +10,6 @@ use crate::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput, ValueO
 #[derive(Debug)]
 pub struct BasicFuncLib {
     func_lib: FuncLib,
-    output_stream: Shared<Option<OutputStream>>,
 }
 
 #[repr(u32)]
@@ -74,18 +69,6 @@ impl From<i64> for Math2ArgOp {
 }
 
 impl BasicFuncLib {
-    pub async fn with_output_stream(output_stream: &OutputStream) -> Self {
-        let invoker = Self::default();
-        invoker
-            .output_stream
-            .lock()
-            .await
-            .replace(output_stream.clone());
-        invoker
-    }
-}
-
-impl BasicFuncLib {
     pub fn func_lib(&self) -> &FuncLib {
         &self.func_lib
     }
@@ -104,14 +87,13 @@ impl From<BasicFuncLib> for FuncLib {
 impl Default for BasicFuncLib {
     fn default() -> Self {
         let mut func_lib = FuncLib::default();
-        let output_stream = Shared::new(None::<OutputStream>);
-        let output_stream_clone = output_stream.clone();
 
-        //print, outputs to output_stream
+        // print: log the input string to the node log (info level), read
+        // back by the editor. Sugar over `ContextManager::log`.
         func_lib.add(Func {
             id: "01896910-0790-AD1B-AA12-3F1437196789".into(),
             name: "print".to_string(),
-            description: Some("Outputs a string value to the output stream".to_string()),
+            description: Some("Logs a string value to the node log".to_string()),
             behavior: FuncBehavior::Impure,
             terminal: true,
             category: "math".to_string(),
@@ -125,20 +107,12 @@ impl Default for BasicFuncLib {
             outputs: vec![],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(
-                move |_, _, _, inputs, _, _| { output_stream = output_stream_clone.clone() } => {
-                    assert_eq!(inputs.len(), 1);
-                    let value: &str = inputs[0].value.as_string().unwrap();
-                    let mut guard = output_stream
-                        .try_lock()
-                        .expect("Output stream mutex is already locked");
-                    if let Some(stream) = guard.as_mut() {
-                        stream.write(value);
-                    }
-                    info!("{:?}", value);
-                    Ok(())
-                }
-            ),
+            lambda: async_lambda!(move |ctx, _, _, inputs, _, _| {
+                assert_eq!(inputs.len(), 1);
+                let value: &str = inputs[0].value.as_string().unwrap();
+                ctx.info(value);
+                Ok(())
+            }),
             ..Default::default()
         });
         // math two argument operation
@@ -784,9 +758,6 @@ impl Default for BasicFuncLib {
             ..Default::default()
         });
 
-        Self {
-            func_lib,
-            output_stream,
-        }
+        Self { func_lib }
     }
 }

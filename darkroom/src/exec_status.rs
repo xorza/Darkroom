@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use scenarium::prelude::{ExecutionStats, NodeId};
+use scenarium::prelude::{ExecutionStats, LogEntry, NodeId};
 
 /// Per-node outcome of the last graph run. Ordered low→high so a
 /// higher-severity status wins when several fold onto one node
@@ -82,10 +82,34 @@ pub(crate) fn project_stats(out: &mut HashMap<NodeId, ExecStatus>, stats: &Execu
     }
 }
 
+/// Per-editor-node log lines from the last run, keyed by authoring
+/// `NodeId` (interior nodes and composite instances both).
+pub(crate) type NodeLogs = HashMap<NodeId, Vec<LogEntry>>;
+
+/// Project a run's log lines onto an editor-`NodeId`-keyed map. Each
+/// flattened entry attaches to the node itself (its `interior` id) and to
+/// every enclosing composite instance (via the flatten map's
+/// `attribution`), so a `print` inside a subgraph shows on both the
+/// interior node and the instance — same projection as [`project_stats`].
+/// `out` is cleared first (last run wins; history belongs to a future
+/// global console).
+pub(crate) fn project_logs(out: &mut NodeLogs, stats: &ExecutionStats) {
+    out.clear();
+    for entry in &stats.logs {
+        for node_id in stats.flatten.attribution(entry.node_id) {
+            out.entry(node_id).or_default().push(LogEntry {
+                node_id,
+                level: entry.level,
+                message: entry.message.clone(),
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scenarium::prelude::{ExecutedNodeStats, FlattenMap, NodeError};
+    use scenarium::prelude::{ExecutedNodeStats, FlattenMap, LogLevel, NodeError};
 
     fn nid(n: u128) -> NodeId {
         NodeId::from_u128(n)
@@ -117,6 +141,7 @@ mod tests {
                     error: scenarium::execution::Error::CycleDetected { node_id },
                 })
                 .collect(),
+            logs: vec![],
             flatten,
         }
     }
@@ -181,5 +206,38 @@ mod tests {
         let mut out = HashMap::new();
         project_stats(&mut out, &stats(map, &[(interior, 1.0)], &[interior]));
         assert_eq!(out.get(&interior), Some(&ExecStatus::Errored));
+    }
+
+    /// A log line emitted inside a subgraph instance attributes to both
+    /// the interior node and the enclosing instance, preserving level +
+    /// message, re-keyed to each editor node.
+    #[test]
+    fn project_logs_attributes_to_interior_and_instance() {
+        let interior = nid(1);
+        let inst = nid(10);
+        let flat = nid(100);
+        let mut map = FlattenMap::default();
+        map.reset();
+        let scope = map.push_scope(inst, 0);
+        map.set_leaf(flat, scope, interior);
+
+        let mut s = stats(map, &[], &[]);
+        s.logs.push(LogEntry {
+            node_id: flat,
+            level: LogLevel::Warn,
+            message: "hi".into(),
+        });
+
+        let mut out = HashMap::new();
+        project_logs(&mut out, &s);
+
+        assert_eq!(out.len(), 2, "interior + instance, nothing else");
+        let i = out.get(&interior).expect("interior carries the line");
+        assert_eq!(i.len(), 1);
+        assert_eq!(i[0].message, "hi");
+        assert_eq!(i[0].level, LogLevel::Warn);
+        assert_eq!(i[0].node_id, interior);
+        let n = out.get(&inst).expect("instance carries the line");
+        assert_eq!(n[0].node_id, inst, "re-keyed to the instance");
     }
 }

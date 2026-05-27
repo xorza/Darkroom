@@ -13,7 +13,6 @@ pub mod fnv;
 pub mod key_index_vec;
 pub mod lambda;
 pub mod normalize_string;
-pub mod output_stream;
 pub mod parallel;
 pub mod pause_gate;
 pub mod ready_state;

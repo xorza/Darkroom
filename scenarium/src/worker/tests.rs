@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use common::output_stream::OutputStream;
 use common::pause_gate::PauseGate;
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
@@ -16,6 +15,12 @@ use crate::graph::{Graph, InputPort, Node, NodeId};
 
 use crate::worker::{EventRef, EventTrigger, Worker, WorkerMessage};
 
+/// Print messages a run logged, in order — `print` now logs via
+/// `ContextManager::info`, surfaced in `ExecutionStats.logs`.
+fn messages(stats: &ExecutionStats) -> Vec<String> {
+    stats.logs.iter().map(|e| e.message.clone()).collect()
+}
+
 /// End-to-end fixture for Worker tests that run a graph with a
 /// `frame event` source and a terminal `print`. Builds the func lib,
 /// the standard 3-node graph, and a worker whose callback forwards
@@ -27,7 +32,6 @@ struct FrameHarness {
     func_lib: Arc<FuncLib>,
     graph: Graph,
     frame_event_node_id: NodeId,
-    output_stream: OutputStream,
     compute_rx: mpsc::Receiver<ExecResult<ExecutionStats>>,
 }
 
@@ -37,10 +41,8 @@ impl FrameHarness {
     }
 
     async fn with_callback_capacity(cap: usize) -> Self {
-        let output_stream = OutputStream::new();
-        let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
         let timers_invoker = WorkerEventsFuncLib::default();
-        let mut func_lib = basic_invoker.into_func_lib();
+        let mut func_lib = BasicFuncLib::default().into_func_lib();
         func_lib.merge(timers_invoker.into_func_lib());
 
         let graph = log_frame_no_graph(&func_lib);
@@ -57,7 +59,6 @@ impl FrameHarness {
             func_lib,
             graph,
             frame_event_node_id,
-            output_stream,
             compute_rx,
         }
     }
@@ -139,7 +140,7 @@ async fn test_worker() -> anyhow::Result<()> {
             .expect("Missing compute completion")
             .expect("Unsuccessful compute");
         assert_eq!(executed.executed_nodes.len(), 3);
-        assert_eq!(h.output_stream.take().await, [expected]);
+        assert_eq!(messages(&executed), [expected]);
     }
 
     Ok(())
@@ -300,14 +301,22 @@ async fn clear_resets_execution_graph() {
     h.worker
         .send_many([h.update_msg(), h.inject_frame_event()])
         .unwrap();
-    let _ = h.compute_rx.recv().await;
-    assert_eq!(h.output_stream.take().await, ["1"]);
+    let stats = h.compute_rx.recv().await.unwrap().unwrap();
+    assert_eq!(messages(&stats), ["1"]);
 
     h.worker.send(WorkerMessage::Clear).unwrap();
     h.worker.send(h.inject_frame_event()).unwrap();
 
     tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(h.output_stream.take().await.is_empty());
+    // After Clear the frame event has no subscribers, so nothing runs /
+    // logs — drain any callbacks and assert no print output.
+    let mut printed = Vec::new();
+    while let Ok(result) = h.compute_rx.try_recv() {
+        if let Ok(stats) = result {
+            printed.extend(messages(&stats));
+        }
+    }
+    assert!(printed.is_empty());
 }
 
 #[tokio::test]
@@ -323,18 +332,15 @@ async fn events_are_deduplicated() {
         })
         .unwrap();
 
-    let _ = h.compute_rx.recv().await;
-    assert_eq!(h.output_stream.take().await, ["1"]);
+    let stats = h.compute_rx.recv().await.unwrap().unwrap();
+    assert_eq!(messages(&stats), ["1"]);
 }
 
 #[tokio::test]
 async fn execute_terminals_triggers_terminal_nodes() {
     use crate::data::StaticValue;
 
-    let output_stream = OutputStream::new();
-
-    let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
-    let func_lib = basic_invoker.into_func_lib();
+    let func_lib = BasicFuncLib::default().into_func_lib();
 
     // Simple single-terminal graph — doesn't use FrameHarness' frame-event setup.
     let mut graph = Graph::default();
@@ -371,7 +377,7 @@ async fn execute_terminals_triggers_terminal_nodes() {
         .expect("Unsuccessful compute");
 
     assert_eq!(executed.executed_nodes.len(), 1);
-    assert_eq!(output_stream.take().await, ["hello"]);
+    assert_eq!(messages(&executed), ["hello"]);
 }
 
 #[tokio::test]
@@ -593,7 +599,7 @@ async fn clear_then_update_in_same_batch_applies_update() {
         .expect("Unsuccessful compute");
 
     assert_eq!(executed.executed_nodes.len(), 3);
-    assert_eq!(h.output_stream.take().await, ["1"]);
+    assert_eq!(messages(&executed), ["1"]);
 }
 
 // F3: RequestArgumentValues batched with Update must observe the
@@ -747,9 +753,7 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
     // the loop never actually spawns. This removes lambda-driven
     // callbacks as a confounding factor while still exercising the
     // should_start_event_loop branch.
-    let output_stream = OutputStream::new();
-    let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
-    let func_lib = basic_invoker.into_func_lib();
+    let func_lib = BasicFuncLib::default().into_func_lib();
 
     let mut graph = Graph::default();
     let print_func = func_lib.by_name("print").unwrap();
@@ -793,7 +797,7 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
         !worker.is_event_loop_started(),
         "terminal-only graph yields no triggers; loop should not have started"
     );
-    assert_eq!(output_stream.take().await, ["hi"]);
+    assert_eq!(messages(first.as_ref().unwrap()), ["hi"]);
 }
 
 // F2: when two separate send_many calls queue messages before the
@@ -806,9 +810,7 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
 async fn drain_on_wake_folds_queued_batches_into_one_commit() {
     use crate::data::StaticValue;
 
-    let output_stream = OutputStream::new();
-    let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
-    let func_lib = basic_invoker.into_func_lib();
+    let func_lib = BasicFuncLib::default().into_func_lib();
 
     // Terminal-only graph — one execute produces one line of output.
     let mut graph = Graph::default();
@@ -860,7 +862,7 @@ async fn drain_on_wake_folds_queued_batches_into_one_commit() {
         compute_finish_rx.try_recv().is_err(),
         "two ExecuteTerminals across batches must reduce to one callback"
     );
-    assert_eq!(output_stream.take().await, ["once"]);
+    assert_eq!(messages(first.as_ref().unwrap()), ["once"]);
 }
 
 #[tokio::test]

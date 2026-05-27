@@ -11,7 +11,7 @@ use scenarium::prelude::{FuncLib, Graph as CoreGraph, NodeId};
 use crate::document::{Document, GraphRef};
 use crate::edit::action_stack::ActionStack;
 use crate::edit::intent::{Intent, apply_step, build_step, requires_relayout};
-use crate::exec_status::{ExecStatus, project_stats};
+use crate::exec_status::{ExecStatus, NodeLogs, project_logs, project_stats};
 use crate::gui::UiAction;
 use crate::gui::main_window::MainWindow;
 use crate::io::config::AppConfig;
@@ -50,6 +50,9 @@ fn builtin_func_lib() -> FuncLib {
 pub(crate) struct AppContext<'a> {
     pub(crate) theme: &'a Theme,
     pub(crate) func_lib: &'a FuncLib,
+    /// Last run's per-node log lines, keyed by authoring `NodeId`. Read
+    /// by the node inspection panel's Log section.
+    pub(crate) node_logs: &'a NodeLogs,
 }
 
 #[derive(Debug)]
@@ -105,6 +108,10 @@ pub(crate) struct App {
     /// subgraph interior). Rebuilt when a run finishes, cleared on run
     /// failure. Off the serialized state.
     exec_status: HashMap<NodeId, ExecStatus>,
+    /// Last run's per-node log lines (from node `print` / `ctx.log`),
+    /// keyed like `exec_status`. Shown in the node inspection panel's Log
+    /// section; replaced each run. Off the serialized state.
+    node_logs: NodeLogs,
 }
 
 impl App {
@@ -143,6 +150,7 @@ impl App {
             config: AppConfig::default(),
             worker,
             exec_status: HashMap::new(),
+            node_logs: NodeLogs::new(),
         };
         app.config = AppConfig::load();
         if let Some(name) = app.config.theme_name.clone() {
@@ -213,6 +221,7 @@ impl palantir::App for App {
         let ctx = AppContext {
             theme: &self.theme,
             func_lib: &self.func_lib,
+            node_logs: &self.node_logs,
         };
         let host = self.host_handle.clone();
         let command = self
@@ -353,18 +362,20 @@ impl App {
     }
 
     /// Consume worker results posted since the last frame. A finished run
-    /// reprojects per-node `ExecStatus` (consumed by the next rebuild as
-    /// the status glow); a failed run clears it. Drained before the scene
-    /// rebuild so the glow reflects the latest run this frame.
+    /// reprojects per-node `ExecStatus` (the status glow) and per-node
+    /// logs (the inspector's Log section); a failed run clears both.
+    /// Drained before the scene rebuild so they reflect the latest run.
     fn drain_worker_events(&mut self) {
         for event in self.worker.drain() {
             match event {
                 WorkerEvent::ExecutionFinished(Ok(stats)) => {
                     project_stats(&mut self.exec_status, &stats);
+                    project_logs(&mut self.node_logs, &stats);
                 }
                 WorkerEvent::ExecutionFinished(Err(err)) => {
                     eprintln!("compute failed: {err}");
                     self.exec_status.clear();
+                    self.node_logs.clear();
                 }
             }
         }

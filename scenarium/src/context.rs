@@ -6,6 +6,9 @@ use std::sync::Arc;
 use common::id_type;
 use hashbrown::HashMap;
 
+use crate::execution_stats::{LogEntry, LogLevel};
+use crate::graph::NodeId;
+
 type ContextCtor = dyn Fn() -> Box<dyn Any + Send> + Send + Sync;
 id_type!(CtxId);
 
@@ -19,6 +22,46 @@ pub struct ContextType {
 #[derive(Debug, Default)]
 pub struct ContextManager {
     pub store: HashMap<ContextType, Box<dyn Any + Send>>,
+    /// Node currently being invoked, set by the executor before each
+    /// lambda call so `log` can attribute lines. `None` outside a run.
+    pub(crate) current_node: Option<NodeId>,
+    /// Log lines emitted this run, drained into `ExecutionStats` when the
+    /// run finishes.
+    pub(crate) logs: Vec<LogEntry>,
+}
+
+impl ContextManager {
+    /// Emit a log line attributed to the node currently executing, and
+    /// mirror it to `tracing` at the matching level so headless runs
+    /// still surface output. No-op when called outside a node invoke
+    /// (`current_node` unset).
+    pub fn log(&mut self, level: LogLevel, msg: impl Into<String>) {
+        let Some(node_id) = self.current_node else {
+            return;
+        };
+        let message = msg.into();
+        match level {
+            LogLevel::Info => tracing::info!(?node_id, "{message}"),
+            LogLevel::Warn => tracing::warn!(?node_id, "{message}"),
+            LogLevel::Error => tracing::error!(?node_id, "{message}"),
+        }
+        self.logs.push(LogEntry {
+            node_id,
+            level,
+            message,
+        });
+    }
+
+    /// Sugar for [`Self::log`] at the matching level.
+    pub fn info(&mut self, msg: impl Into<String>) {
+        self.log(LogLevel::Info, msg);
+    }
+    pub fn warn(&mut self, msg: impl Into<String>) {
+        self.log(LogLevel::Warn, msg);
+    }
+    pub fn error(&mut self, msg: impl Into<String>) {
+        self.log(LogLevel::Error, msg);
+    }
 }
 
 impl Debug for ContextType {

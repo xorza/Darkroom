@@ -24,9 +24,9 @@ use palantir::{
     TextStyle, Ui, WidgetId,
 };
 use scenarium::data::{DataType, StaticValue};
-use scenarium::prelude::NodeId;
+use scenarium::prelude::{LogEntry, LogLevel, NodeId};
 
-use crate::exec_status::ExecStatus;
+use crate::exec_status::{ExecStatus, NodeLogs};
 use crate::gui::canvas::outer_canvas_widget_id;
 use crate::gui::node::header::fmt_elapsed;
 use crate::gui::node::{exec_color, node_widget_id};
@@ -54,6 +54,8 @@ pub(crate) struct Inspectors {
 const PANEL_WIDTH: f32 = 210.0;
 /// Gap between the node's right edge and the panel's left edge.
 const PANEL_GAP: f32 = 16.0;
+/// Most recent log lines shown per node, so the panel stays bounded.
+const LOG_LINE_CAP: usize = 20;
 
 /// Next state in the `Closed → Open → Pinned → Closed` cycle. `None`
 /// is the `Closed` state.
@@ -106,7 +108,13 @@ impl Inspectors {
     /// its node in canvas-world coords. Call inside the inner-canvas
     /// closure, after the node bodies, so panels paint on top and win
     /// hit-tests over the nodes beneath.
-    pub(crate) fn draw_panels(&self, ui: &mut Ui, theme: &Theme, scene: &Scene) {
+    pub(crate) fn draw_panels(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        scene: &Scene,
+        node_logs: &NodeLogs,
+    ) {
         for (&id, &mode) in &self.modes {
             let Some(node) = scene.nodes.iter().find(|n| n.id == id) else {
                 continue;
@@ -119,10 +127,12 @@ impl Inspectors {
                 .map(|r| r.size.w)
                 .unwrap_or(theme.node_min_width);
             let pos = node.pos + Vec2::new(node_w + PANEL_GAP, 0.0);
-            self.draw_one(ui, theme, scene, node, mode, pos);
+            let logs = node_logs.get(&id).map(Vec::as_slice).unwrap_or(&[]);
+            self.draw_one(ui, theme, scene, node, mode, pos, logs);
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_one(
         &self,
         ui: &mut Ui,
@@ -131,6 +141,7 @@ impl Inspectors {
         node: &SceneNode,
         mode: InspectMode,
         pos: Vec2,
+        logs: &[LogEntry],
     ) {
         let border = match mode {
             InspectMode::Pinned => theme.selection_glow,
@@ -198,7 +209,35 @@ impl Inspectors {
                 if let Some(flags) = flag_text(node) {
                     line(ui, &flags, muted_style(ui));
                 }
+
+                // Log: this node's lines from the last run, level-colored.
+                // Capped to the most recent few so the panel can't grow
+                // unbounded.
+                if !logs.is_empty() {
+                    line(ui, "Log", section_style(ui));
+                    let start = logs.len().saturating_sub(LOG_LINE_CAP);
+                    for entry in &logs[start..] {
+                        line(
+                            ui,
+                            &entry.message,
+                            TextStyle {
+                                color: log_color(theme, ui, entry.level),
+                                ..body_style(ui)
+                            },
+                        );
+                    }
+                }
             });
+    }
+}
+
+/// Color for a log line by level: info reads as muted body text, warn
+/// reuses the missing-inputs glow (orange), error the errored glow (red).
+fn log_color(theme: &Theme, ui: &Ui, level: LogLevel) -> Color {
+    match level {
+        LogLevel::Info => ui.theme.text.color.with_alpha(0.85),
+        LogLevel::Warn => theme.exec_missing_glow,
+        LogLevel::Error => theme.exec_errored_glow,
     }
 }
 

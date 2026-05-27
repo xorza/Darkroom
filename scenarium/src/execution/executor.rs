@@ -100,6 +100,7 @@ impl Executor {
             slot.run_time = 0.0;
             slot.error = None;
         }
+        self.ctx_manager.logs.clear();
 
         let mut inputs = std::mem::take(&mut self.inputs);
         let mut output_usage = std::mem::take(&mut self.output_usage);
@@ -128,6 +129,9 @@ impl Executor {
             let event_state = self.slots[e_node_idx].event_state.clone();
             assert!(self.slots[e_node_idx].error.is_none());
 
+            // Attribute any logs this node emits to it (read by
+            // `ContextManager::log`).
+            self.ctx_manager.current_node = Some(program.e_nodes[e_node_idx].id);
             let invoke_start = Instant::now();
             let result = {
                 let lambda = &program.e_nodes[e_node_idx].lambda;
@@ -164,7 +168,9 @@ impl Executor {
             }
         }
 
-        let stats = self.collect_execution_stats(program, plan, start);
+        self.ctx_manager.current_node = None;
+        let mut stats = self.collect_execution_stats(program, plan, start);
+        stats.logs = std::mem::take(&mut self.ctx_manager.logs);
         self.inputs = inputs;
         self.output_usage = output_usage;
         stats
@@ -279,6 +285,8 @@ impl Executor {
             cached_nodes,
             triggered_events: Vec::default(),
             node_errors,
+            // Filled by `run` from the context manager's per-run buffer.
+            logs: Vec::new(),
             // Filled by `ExecutionEngine::execute` from the flatten pass;
             // the executor doesn't know the authoring graph.
             flatten: FlattenMap::default(),
