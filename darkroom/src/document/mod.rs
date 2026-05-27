@@ -1001,6 +1001,33 @@ mod tests {
     }
 
     #[test]
+    fn set_disabled_round_trips_through_undo() {
+        use crate::edit::intent::{Intent, apply_step, build_step, revert_step};
+
+        let mut doc = Document::default();
+        let id = add_node_at(&mut doc, Vec2::ZERO);
+        assert!(!doc.graph.by_id(&id).unwrap().disabled, "starts enabled");
+
+        let step = build_step(
+            Intent::SetDisabled {
+                node_id: id,
+                to: true,
+            },
+            &doc,
+            GraphRef::Main,
+        )
+        .expect("builds");
+        apply_step(&step, &mut doc, GraphRef::Main);
+        assert!(doc.graph.by_id(&id).unwrap().disabled, "apply disables");
+
+        revert_step(&step, &mut doc, GraphRef::Main);
+        assert!(
+            !doc.graph.by_id(&id).unwrap().disabled,
+            "revert re-enables (restores the captured `from`)"
+        );
+    }
+
+    #[test]
     fn duplicate_intent_clones_internal_wiring_and_drops_external() {
         // a -> b (internal edge, both selected); c -> b (external, c not
         // selected). b also has a Const on input 1. Selecting {a, b} must

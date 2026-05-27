@@ -103,6 +103,12 @@ pub enum Intent {
         node_id: NodeId,
         to: NodeBehavior,
     },
+    /// Enable/disable a node for execution (`Node::disabled`). The header
+    /// badge toggles it; a disabled node is skipped at flatten time.
+    SetDisabled {
+        node_id: NodeId,
+        to: bool,
+    },
     /// Fork a private standalone copy of a `Subgraph(Local(_))` node's
     /// def and re-point the node at it (the S-badge "Detach" action).
     /// The copy gets fresh ids and a cleared `origin`, so it diverges
@@ -229,6 +235,11 @@ pub enum GraphStep {
         from: NodeBehavior,
         to: NodeBehavior,
     },
+    SetDisabled {
+        node_id: NodeId,
+        from: bool,
+        to: bool,
+    },
     /// Fork + re-point: `def` (a fresh standalone copy) joins the
     /// graph's local defs and the node swaps from `from_id` to `def.id`.
     /// Undo restores the `from_id` ref and drops `def`.
@@ -322,6 +333,7 @@ impl GraphStep {
             GraphStep::SetInput { from, to, .. } => from == to,
             GraphStep::SetSelection { from, to } => from == to,
             GraphStep::SetCacheBehavior { from, to, .. } => from == to,
+            GraphStep::SetDisabled { from, to, .. } => from == to,
             GraphStep::SetEventConnection {
                 was_present,
                 present,
@@ -480,6 +492,11 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
         },
         Intent::SetCacheBehavior { node_id, to } => GraphStep::SetCacheBehavior {
             from: graph.by_id(&node_id)?.behavior,
+            node_id,
+            to,
+        },
+        Intent::SetDisabled { node_id, to } => GraphStep::SetDisabled {
+            from: graph.by_id(&node_id)?.disabled,
             node_id,
             to,
         },
@@ -656,6 +673,9 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetCacheBehavior { node_id, to, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().behavior = *to;
         }
+        GraphStep::SetDisabled { node_id, to, .. } => {
+            scope.graph.by_id_mut(node_id).unwrap().disabled = *to;
+        }
         GraphStep::DetachSubgraph { node_id, def, .. } => {
             scope.graph.subgraphs.add((**def).clone());
             scope.graph.by_id_mut(node_id).unwrap().kind =
@@ -789,6 +809,9 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetCacheBehavior { node_id, from, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().behavior = *from;
         }
+        GraphStep::SetDisabled { node_id, from, .. } => {
+            scope.graph.by_id_mut(node_id).unwrap().disabled = *from;
+        }
         GraphStep::DetachSubgraph {
             node_id,
             from_id,
@@ -869,6 +892,8 @@ pub fn requires_relayout(step: &UndoStep) -> bool {
             }
             GraphStep::SetSelection { .. }
             | GraphStep::SetCacheBehavior { .. }
+            // Disabling only dims the body paint — same rect, no remeasure.
+            | GraphStep::SetDisabled { .. }
             | GraphStep::SetEventConnection { .. } => false,
         },
     }
@@ -897,6 +922,7 @@ pub fn requires_reconcile(step: &UndoStep) -> bool {
             | GraphStep::RenameNode { .. }
             | GraphStep::SetSelection { .. }
             | GraphStep::SetCacheBehavior { .. }
+            | GraphStep::SetDisabled { .. }
             | GraphStep::SetEventConnection { .. }
             | GraphStep::SetViewport { .. },
         )
@@ -928,6 +954,7 @@ pub fn gesture_key(step: &UndoStep) -> Option<GestureKey> {
             | GraphStep::SetInput { .. }
             | GraphStep::SetSelection { .. }
             | GraphStep::SetCacheBehavior { .. }
+            | GraphStep::SetDisabled { .. }
             | GraphStep::DetachSubgraph { .. }
             | GraphStep::SetEventConnection { .. },
         )

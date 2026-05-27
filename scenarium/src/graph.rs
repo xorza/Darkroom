@@ -130,6 +130,15 @@ pub struct Node {
 
     #[serde(default)]
     pub behavior: NodeBehavior,
+
+    /// Disabled nodes are skipped at flatten time: they emit no execution
+    /// node, and any binding resolving to one yields no producer, so a
+    /// downstream consumer sees the wire as unbound (→ `MissingInputs` if
+    /// the input is required). Orthogonal to `behavior` (which only
+    /// matters for nodes that run). `#[serde(default)]` → `false` keeps
+    /// pre-field documents enabled.
+    #[serde(default)]
+    pub disabled: bool,
 }
 
 impl NodeKind {
@@ -706,6 +715,7 @@ impl Node {
             kind,
             name: String::new(),
             behavior: NodeBehavior::AsFunction,
+            disabled: false,
         }
     }
 
@@ -720,6 +730,7 @@ impl Node {
             kind: NodeKind::Subgraph(r),
             name: def.name.clone(),
             behavior: NodeBehavior::AsFunction,
+            disabled: false,
         }
     }
 }
@@ -733,6 +744,7 @@ impl From<&Func> for Node {
             kind: NodeKind::Func(func.id),
             name: func.name.clone(),
             behavior: func.node_default_behavior,
+            disabled: false,
         }
     }
 }

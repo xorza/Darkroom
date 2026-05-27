@@ -251,6 +251,13 @@ impl<'a> Run<'a> {
         let graph = self.current();
 
         for node in graph.iter() {
+            // Disabled nodes are skipped entirely: no execution node, no
+            // recursion into a disabled composite. A consumer bound to a
+            // skipped node's output resolves to `Source::None` (see
+            // `resolve`), so the wire reads as unbound downstream.
+            if node.disabled {
+                continue;
+            }
             match &node.kind {
                 NodeKind::Func(func_id) => {
                     let flat_id = flatten_id(self.ids.as_slice(), node.id);
@@ -406,7 +413,11 @@ impl<'a> Run<'a> {
     /// it ultimately fires, following composite exposed-event mappings inward.
     fn resolve_emitter(&mut self, node_id: NodeId, event_idx: usize) -> Option<(NodeId, usize)> {
         let graph = self.current();
-        match &graph.by_id(&node_id)?.kind {
+        let node = graph.by_id(&node_id)?;
+        if node.disabled {
+            return None; // a disabled node fires no events
+        }
+        match &node.kind {
             NodeKind::Func(_) => Some((flatten_id(self.ids.as_slice(), node_id), event_idx)),
             NodeKind::Subgraph(r) => {
                 let def = graph.resolve_def(*r, self.func_lib)?;
@@ -427,6 +438,10 @@ impl<'a> Run<'a> {
     /// trigger.
     fn resolve_subscriber(&mut self, node_id: NodeId, emitter: NodeId, event_idx: usize) {
         let graph = self.current();
+        // A disabled node runs nothing, so it receives no events.
+        if graph.by_id(&node_id).is_some_and(|n| n.disabled) {
+            return;
+        }
         match graph.by_id(&node_id).map(|n| &n.kind) {
             Some(NodeKind::Func(_)) => {
                 let flat = flatten_id(self.ids.as_slice(), node_id);
@@ -516,11 +531,13 @@ impl<'a> Run<'a> {
     /// nodes. Leaves the descent stack as it found it.
     fn resolve(&mut self, node_id: NodeId, port_idx: usize) -> Source {
         let graph = self.current();
-        match &graph
-            .by_id(&node_id)
-            .expect("binding to a missing node")
-            .kind
-        {
+        let node = graph.by_id(&node_id).expect("binding to a missing node");
+        // A disabled producer emits nothing, so its outputs have no source:
+        // treat the wire as unbound (matches `emit` skipping the node).
+        if node.disabled {
+            return Source::None;
+        }
+        match &node.kind {
             NodeKind::Func(_) => Source::Producer {
                 node_id: flatten_id(self.ids.as_slice(), node_id),
                 port_idx,

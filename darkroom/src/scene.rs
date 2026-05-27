@@ -119,6 +119,9 @@ pub struct SceneNode {
     /// Result is cached / computed once (`NodeBehavior::Once`). The
     /// header badge toggles this via `Intent::SetCacheBehavior`.
     pub cached: bool,
+    /// Excluded from execution (`Node::disabled`). The header badge
+    /// toggles this via `Intent::SetDisabled`; the body paints dimmed.
+    pub disabled: bool,
     /// A `SubgraphInput`/`SubgraphOutput` interface boundary node. Its
     /// ports route the subgraph interface rather than carry literal
     /// values, so the const-value affordances (inline editor, "Set
@@ -288,6 +291,7 @@ impl Scene {
                 subgraph: interface.subgraph,
                 terminal: interface.terminal,
                 cached: node.behavior == NodeBehavior::Once,
+                disabled: node.disabled,
                 boundary: matches!(
                     node.kind,
                     NodeKind::SubgraphInput | NodeKind::SubgraphOutput

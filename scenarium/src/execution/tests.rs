@@ -253,6 +253,72 @@ mod missing_inputs {
     }
 }
 
+// === Disabled Nodes ===
+
+mod disabled_nodes {
+    use super::*;
+
+    /// Disabling `sum` drops it from the program entirely, and its
+    /// consumer `mult` (whose input[0] was bound to sum) sees that wire as
+    /// unbound — so the missing-required-input flag propagates downstream
+    /// exactly as if the binding had been cleared.
+    #[test]
+    fn disabled_node_skipped_and_breaks_downstream() -> anyhow::Result<()> {
+        let mut graph = test_graph();
+        let func_lib = test_func_lib(TestFuncHooks::default());
+
+        let sum_id = graph.by_name("sum").unwrap().id;
+        graph.by_id_mut(&sum_id).unwrap().disabled = true;
+
+        let mut execution_graph = ExecutionEngine::default();
+        execution_graph.update(&graph, &func_lib);
+        execution_graph.prepare_execution(true, false, &[])?;
+
+        // The disabled node emits no execution node at all.
+        assert!(
+            execution_graph.by_name("sum").is_none(),
+            "disabled node must be absent from the program"
+        );
+
+        // get_b has no inputs, so it's unaffected; mult/print lost their
+        // (transitive) producer and are flagged missing-required-input.
+        let get_b = execution_graph.by_name("get_b").unwrap();
+        let mult = execution_graph.by_name("mult").unwrap();
+        let print = execution_graph.by_name("print").unwrap();
+        assert!(!execution_graph.node_flags(get_b).missing_required_inputs);
+        assert!(execution_graph.node_flags(mult).missing_required_inputs);
+        assert!(execution_graph.node_flags(print).missing_required_inputs);
+
+        Ok(())
+    }
+
+    /// With `mult`'s sum-fed input made optional, disabling `sum` no longer
+    /// breaks the chain: `sum` is skipped but `get_b → mult → print` still
+    /// runs (mirrors `non_required_missing_does_not_propagate`, but via the
+    /// disable flag rather than a cleared binding).
+    #[test]
+    fn disabled_upstream_with_optional_consumer_still_runs() -> anyhow::Result<()> {
+        let mut graph = test_graph();
+        let mut func_lib = test_func_lib(TestFuncHooks::default());
+
+        let sum_id = graph.by_name("sum").unwrap().id;
+        graph.by_id_mut(&sum_id).unwrap().disabled = true;
+        func_lib.by_name_mut("mult").unwrap().inputs[0].required = false;
+
+        let mut execution_graph = ExecutionEngine::default();
+        execution_graph.update(&graph, &func_lib);
+        execution_graph.prepare_execution(true, false, &[])?;
+
+        assert!(execution_graph.by_name("sum").is_none());
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph),
+            ["get_b", "mult", "print"]
+        );
+
+        Ok(())
+    }
+}
+
 // === Const Bindings ===
 
 mod const_bindings {

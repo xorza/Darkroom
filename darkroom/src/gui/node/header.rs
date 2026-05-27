@@ -159,6 +159,23 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                     },
                 });
             }
+            // Disable toggle: filled when the node is excluded from
+            // execution. Muted swatch (it's "off", not an alarm).
+            let disable_toggled = badge(
+                ui,
+                theme,
+                "badge_d",
+                "D",
+                theme.selection_glow,
+                node.disabled,
+                Some(disable_badge_wid(node.id)),
+            );
+            if disable_toggled {
+                out.push(Intent::SetDisabled {
+                    node_id: node.id,
+                    to: !node.disabled,
+                });
+            }
         });
 }
 
@@ -186,6 +203,11 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent
 /// so `response_for` works without threading state.
 fn cache_badge_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.cache_badge", node_id))
+}
+
+/// Stable id for a node's clickable enable/disable chip.
+fn disable_badge_wid(node_id: NodeId) -> WidgetId {
+    WidgetId::from_hash(("graph.node.disable_badge", node_id))
 }
 
 /// Stable id for a subgraph node's clickable open-in-tab chip.
