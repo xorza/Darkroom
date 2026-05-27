@@ -74,7 +74,6 @@ pub mod tests;
 // =============================================================================
 
 // Main detector types
-pub(crate) use buffer_pool::BufferPool;
 pub use detector::{ChannelStats, DetectionResult, Diagnostics, StarDetector};
 
 // Configuration
@@ -88,4 +87,3 @@ pub use star::Star;
 
 // Pipeline data structures
 pub use background::BackgroundEstimate;
-pub(crate) use deblend::Region;

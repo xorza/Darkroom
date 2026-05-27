@@ -19,8 +19,8 @@ mod magsac;
 mod transforms;
 
 pub(crate) use transforms::{
-    adaptive_iterations, centroid, estimate_affine, estimate_homography, estimate_similarity,
-    estimate_transform, normalize_points,
+    adaptive_iterations,
+    estimate_transform,
 };
 
 use magsac::MagsacScorer;

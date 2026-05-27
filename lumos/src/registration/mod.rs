@@ -66,7 +66,6 @@ pub use distortion::SipPolynomial;
 use std::time::Instant;
 
 use glam::DVec2;
-use rayon::prelude::*;
 
 use crate::AstroImage;
 use crate::star_detection::Star;
@@ -466,8 +465,6 @@ pub(crate) fn recover_matches(
 }
 
 // === Internal Re-exports (for submodules) ===
-
-pub(crate) use ransac::RansacResult;
 
 #[cfg(test)]
 mod fwhm_tests {

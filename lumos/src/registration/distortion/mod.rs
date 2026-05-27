@@ -33,5 +33,3 @@ mod tps;
 pub(crate) const SINGULAR_THRESHOLD: f64 = 1e-12;
 
 pub use sip::{SipConfig, SipFitResult, SipPolynomial};
-pub(crate) use tps::tps_kernel;
-pub use tps::{DistortionMap, ThinPlateSpline, TpsConfig};

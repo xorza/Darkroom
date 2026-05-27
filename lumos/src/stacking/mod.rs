@@ -9,7 +9,7 @@ pub(crate) mod stack;
 use strum_macros::Display;
 
 // ========== Public API ==========
-pub use config::{CombineMethod, Normalization, StackConfig, Weighting};
+pub use config::{CombineMethod, Normalization, StackConfig};
 pub use rejection::Rejection;
 pub use stack::{stack, stack_with_progress};
 
@@ -18,9 +18,6 @@ pub use error::Error;
 pub use progress::{ProgressCallback, StackingProgress, StackingStage};
 
 // Re-export rejection types for advanced users
-pub use rejection::{
-    GesdConfig, LinearFitClipConfig, PercentileClipConfig, SigmaClipConfig, WinsorizedClipConfig,
-};
 
 /// Type of calibration frame being stacked.
 ///

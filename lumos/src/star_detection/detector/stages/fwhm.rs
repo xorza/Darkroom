@@ -30,7 +30,6 @@ use super::measure;
 use crate::star_detection::background::BackgroundEstimate;
 use crate::star_detection::buffer_pool::BufferPool;
 use crate::star_detection::config::Config;
-use crate::star_detection::deblend::Region;
 use crate::star_detection::star::Star;
 
 /// Result of FWHM estimation stage.

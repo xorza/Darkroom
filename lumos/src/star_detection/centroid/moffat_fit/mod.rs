@@ -21,7 +21,7 @@ mod simd_avx2;
 #[cfg(target_arch = "aarch64")]
 mod simd_neon;
 
-use super::lm_optimizer::{LMConfig, LMModel, LMResult, optimize};
+use super::lm_optimizer::{LMConfig, LMModel, optimize};
 use super::{estimate_sigma_from_moments, extract_stamp};
 use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;
