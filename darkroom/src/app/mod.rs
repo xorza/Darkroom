@@ -84,6 +84,13 @@ pub(crate) struct App {
     /// scan. Starts `true` so the first rebuild canonicalizes a freshly
     /// loaded (or hand-edited) document.
     needs_reconcile: bool,
+    /// Per-frame accumulator: set by any step/transition that changes
+    /// something the layout engine reads (see `requires_relayout`), and
+    /// consumed once at the end of `frame` as a single
+    /// `ui.request_relayout()`. Reset at the top of every frame. A plain
+    /// side-effect field like `scene_dirty` / `needs_reconcile`, rather
+    /// than a `bool` threaded back through every helper's return.
+    needs_relayout: bool,
     pub(crate) main_window: MainWindow,
     /// Per-frame scratch buffer of pending mutations. Cleared at the
     /// top of every `frame`, filled by prepass/record/shortcut
@@ -149,6 +156,7 @@ impl App {
             scene_target: None,
             scene_dirty: false,
             needs_reconcile: true,
+            needs_relayout: false,
             main_window: MainWindow::default(),
             intents: Vec::new(),
             actions: Vec::new(),
@@ -182,6 +190,7 @@ impl palantir::App for App {
 
         self.intents.clear();
         self.actions.clear();
+        self.needs_relayout = false;
 
         // Drain anything the worker posted since last frame, before the
         // scene rebuild so any derived state it updates is visible this
@@ -194,9 +203,9 @@ impl palantir::App for App {
         // reads *last* frame's `scene` to resolve tab/chip clicks, so it
         // must run before this frame's rebuild. After it, `target` is
         // fixed for the rest of the frame.
-        let mut relayout = self.navigate(ui);
+        self.navigate(ui);
         let target = self.document.active_target();
-        relayout |= self.sync_target(target);
+        self.sync_target(target);
 
         // Rebuild the projection for this frame, after the navigation
         // phase has fully settled the document — so prepass and
@@ -214,8 +223,8 @@ impl palantir::App for App {
         // the settled doc. It reads everything off `Scene`, so it takes
         // neither the func lib nor the full `AppContext`.
         self.main_window.prepass(ui, &self.scene, &mut self.intents);
-        relayout |= self.drain_intents(target);
-        relayout |= self.apply_canvas_shortcuts(ui, target);
+        self.drain_intents(target);
+        self.apply_canvas_shortcuts(ui, target);
 
         let command_from_shortcut = self.menu_shortcut(ui);
 
@@ -248,17 +257,19 @@ impl palantir::App for App {
         // Post-record drain — graph edits the record surfaced (node
         // select, cache toggle, const edit). Navigation is fully settled
         // in the navigation phase, so nothing here moves the active tab.
-        relayout |= self.drain_intents(target);
-        if relayout {
-            ui.request_relayout();
-        }
+        self.drain_intents(target);
 
         // Menu side effects run last so the blocking file dialog opens
         // after the frame's record + drain. Loading replaces the
-        // document/theme wholesale, so always relayout afterward
-        // regardless of what `drain_intents` decided.
+        // document/theme wholesale, so always relayout afterward.
         if let Some(command) = command {
             self.handle_menu_command(ui, command);
+            self.needs_relayout = true;
+        }
+
+        // Single consumption point for the frame's accumulated relayout
+        // signal (edits, tab switch, undo/redo, menu side effects).
+        if self.needs_relayout {
             ui.request_relayout();
         }
     }
@@ -272,8 +283,8 @@ impl App {
     ///
     /// Done up front so the edit pipeline runs against a fixed target and
     /// a switched-to graph records in the same present's Pass A.
-    fn navigate(&mut self, ui: &mut Ui) -> bool {
-        let mut relayout = self.apply_undo_redo(ui);
+    fn navigate(&mut self, ui: &mut Ui) {
+        self.apply_undo_redo(ui);
         // Surface tab/open clicks from last frame's responses. `scene`
         // still holds the last-rendered graph here — exactly the one
         // whose chips were clicked.
@@ -284,11 +295,10 @@ impl App {
         // undoable `SwitchTab` / `CloseTab` intents — drain them (both
         // steps are graph-agnostic, so the target passed here doesn't
         // matter).
-        relayout |= self.apply_view_actions();
-        relayout |= self.drain_intents(self.document.active_target());
+        self.apply_view_actions();
+        self.drain_intents(self.document.active_target());
         // A closed/deleted target can't be active; fall back to Main.
         self.document.ensure_valid_active();
-        relayout
     }
 
     /// Note a possible active-graph change: when `target` differs from
@@ -297,13 +307,13 @@ impl App {
     /// relayout. Keeps `PortFrame`'s offset cache, so a graph shown again
     /// resolves its port centers immediately. The rebuild itself is the
     /// caller's unconditional one — this only reacts to the switch.
-    fn sync_target(&mut self, target: GraphRef) -> bool {
+    fn sync_target(&mut self, target: GraphRef) {
         if self.scene_target == Some(target) {
-            return false;
+            return;
         }
         self.main_window.reset_transient();
         self.scene_target = Some(target);
-        true
+        self.needs_relayout = true;
     }
 
     /// Rebuild the `Scene` projection from the graph + view the `target`
@@ -343,10 +353,9 @@ impl App {
     /// as a single batch entry — so a gesture that emits N intents
     /// (e.g. breaker swipe deleting K nodes + unbinding M ports) is
     /// one Cmd-Z. Marks the scene dirty when anything applied (so the
-    /// pre-record rebuild folds the change in). Returns whether any
-    /// applied step needs a relayout retry.
-    fn drain_intents(&mut self, target: GraphRef) -> bool {
-        let mut relayout = false;
+    /// pre-record rebuild folds the change in) and accumulates the
+    /// relayout / reconcile signals onto the frame's fields.
+    fn drain_intents(&mut self, target: GraphRef) {
         let mut batch = Vec::new();
         for intent in self.intents.drain(..) {
             let Some(step) = build_step(intent, &self.document, target) else {
@@ -356,7 +365,7 @@ impl App {
                 continue;
             }
             apply_step(&step, &mut self.document, target);
-            relayout |= requires_relayout(&step);
+            self.needs_relayout |= requires_relayout(&step);
             self.needs_reconcile |= requires_reconcile(&step);
             batch.push(step);
         }
@@ -364,7 +373,6 @@ impl App {
             self.scene_dirty = true;
             self.action_stack.push_current(target, &batch);
         }
-        relayout
     }
 
     /// Send the whole document graph to the worker and execute its
@@ -399,13 +407,11 @@ impl App {
     /// Apply the record pass's view-state requests. Open mutates the tab
     /// list directly (not undoable); activate and close are queued as
     /// `Intent::SwitchTab` / `Intent::CloseTab` so they join the undo
-    /// history. Returns whether a relayout is needed (the queued intents'
-    /// relayout is decided later, when they drain).
-    fn apply_view_actions(&mut self) -> bool {
-        let mut relayout = false;
+    /// history (their relayout is decided later, when they drain).
+    fn apply_view_actions(&mut self) {
         for action in std::mem::take(&mut self.actions) {
             match action {
-                UiAction::OpenGraph(target) => relayout |= self.open_graph(target),
+                UiAction::OpenGraph(target) => self.open_graph(target),
                 UiAction::ActivateTab(index) => {
                     self.intents.push(Intent::SwitchTab { to: index });
                 }
@@ -417,30 +423,29 @@ impl App {
                     // isn't undoable (the new def is referenced by no undo
                     // history, so the stack stays valid).
                     let id = self.document.create_subgraph();
-                    relayout |= self.open_graph(GraphRef::Local(id));
+                    self.open_graph(GraphRef::Local(id));
                 }
             }
         }
-        relayout
     }
 
     /// Focus `target`'s tab, opening a new one (lazily seeding its view
-    /// metadata) if not already open. Returns whether anything changed.
-    fn open_graph(&mut self, target: GraphRef) -> bool {
+    /// metadata) if not already open. Flags a relayout when anything moved.
+    fn open_graph(&mut self, target: GraphRef) {
         if let Some(index) = self.document.tabs.iter().position(|t| *t == target) {
             if self.document.active != index {
                 self.document.active = index;
-                return true;
+                self.needs_relayout = true;
             }
-            return false;
+            return;
         }
         if let GraphRef::Local(id) = target
             && !self.document.ensure_sub_view(id)
         {
-            return false;
+            return;
         }
         self.document.tabs.push(target);
         self.document.active = self.document.tabs.len() - 1;
-        true
+        self.needs_relayout = true;
     }
 }

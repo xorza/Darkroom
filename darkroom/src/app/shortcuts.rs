@@ -34,11 +34,11 @@ impl App {
     /// (subscriptions clear each frame). Focus only gates the *action*:
     /// while a widget holds focus, Ctrl+Z must undo that widget's text,
     /// so the graph-level handling stands down.
-    pub(crate) fn apply_undo_redo(&mut self, ui: &mut Ui) -> bool {
+    pub(crate) fn apply_undo_redo(&mut self, ui: &mut Ui) {
         let undo = ui.key_pressed(UNDO_SHORTCUT);
         let redo = ui.key_pressed(REDO_SHORTCUT);
         if ui.focused_id().is_some() {
-            return false;
+            return;
         }
         let mut relayout = false;
         let mut reconcile = false;
@@ -51,8 +51,8 @@ impl App {
         } else if redo {
             self.action_stack.redo(&mut self.document, &mut on_step);
         }
+        self.needs_relayout |= relayout;
         self.needs_reconcile |= reconcile;
-        relayout
     }
 
     /// Esc-deselect and Ctrl+0 reset-zoom — both act on the active view,
@@ -60,8 +60,9 @@ impl App {
     /// (not a direct doc write) so they land in the undo history; the
     /// `is_noop` filter in `drain_intents` drops them when they'd change
     /// nothing. Chords are sampled unconditionally (see `apply_undo_redo`)
-    /// and gated by focus.
-    pub(crate) fn apply_canvas_shortcuts(&mut self, ui: &mut Ui, target: GraphRef) -> bool {
+    /// and gated by focus. Pushes intents only — their relayout is decided
+    /// by the post-record drain, so this returns nothing.
+    pub(crate) fn apply_canvas_shortcuts(&mut self, ui: &mut Ui, target: GraphRef) {
         let reset_zoom = ui.key_pressed(RESET_ZOOM_SHORTCUT);
         let escape = ui.escape_pressed();
         let duplicate = ui.key_pressed(DUPLICATE_SHORTCUT);
@@ -70,7 +71,7 @@ impl App {
         let delete = ui.key_pressed(Shortcut::key(Key::Delete))
             || ui.key_pressed(Shortcut::key(Key::Backspace));
         if ui.focused_id().is_some() {
-            return false;
+            return;
         }
         let view = self.document.view(target).expect("active tab view exists");
         let has_selection = !view.selected_nodes.is_empty();
@@ -102,7 +103,6 @@ impl App {
                 self.intents.push(Intent::RemoveNode { node_id });
             }
         }
-        false
     }
 
     /// Map Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S / Ctrl+R to a `MenuCommand`.
