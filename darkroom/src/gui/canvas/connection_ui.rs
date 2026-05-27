@@ -130,8 +130,8 @@ impl ConnectionUI {
         ) {
             return None;
         }
-        let default = scene.defaults(node.inputs).get(start.port_idx)?;
-        Some(set_input(start, Binding::Const(default.clone())))
+        let default = scene.defaults(node.inputs).get(start.port_idx)?.clone()?;
+        Some(set_input(start, Binding::Const(default)))
     }
 
     /// Compatible-kind port currently snapped under the pointer

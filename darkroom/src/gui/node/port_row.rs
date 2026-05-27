@@ -60,7 +60,7 @@ fn input_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec
                     port_idx: i,
                 };
                 let binding = bindings.get(i).unwrap_or(&InputBindingView::None);
-                let default = defaults.get(i).cloned();
+                let default = defaults.get(i).cloned().flatten();
                 // A `SubgraphOutput` boundary node's input ports are the
                 // subgraph's *outputs* — renameable, except the trailing
                 // "+" placeholder.

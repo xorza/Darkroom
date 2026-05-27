@@ -29,8 +29,10 @@ pub struct Scene {
     /// Each input's default literal (from the func/def interface),
     /// resolved once per rebuild, so the UI can offer a "set constant"
     /// value without re-resolving against the func lib (and without a
-    /// func at all for subgraph instance nodes).
-    pub input_defaults: Vec<StaticValue>,
+    /// func at all for subgraph instance nodes). `None` for inputs with no
+    /// representable static default (a `Custom` type like an image — there
+    /// is no `StaticValue` for it, so its port offers no inline const).
+    pub input_defaults: Vec<Option<StaticValue>>,
     /// Flat pools for **output** ports, grown in lockstep and sliced by
     /// the single `SceneNode::outputs` span.
     pub output_names: Vec<InternedStr>,
@@ -326,7 +328,8 @@ impl Scene {
     }
 
     /// Per-input default literals, sliced by the node's `inputs` span.
-    pub fn defaults(&self, span: PortSpan) -> &[StaticValue] {
+    /// `None` where the input type has no static default (e.g. `Custom`).
+    pub fn defaults(&self, span: PortSpan) -> &[Option<StaticValue>] {
         slice_pool(&self.input_defaults, span)
     }
 
@@ -360,12 +363,17 @@ struct NodeInterface<'a> {
 }
 
 /// The literal a port falls back to when given a const binding: its
-/// declared default, else the zero value for its data type.
-fn default_static_value(input: &FuncInput) -> StaticValue {
-    input
-        .default_value
-        .clone()
-        .unwrap_or_else(|| StaticValue::from(&input.data_type))
+/// declared default, else the zero value for its data type. `None` for a
+/// `Custom` type — there is no `StaticValue` for it, so the port can't be
+/// given an inline const (and `StaticValue::from` would panic).
+fn default_static_value(input: &FuncInput) -> Option<StaticValue> {
+    if let Some(default) = &input.default_value {
+        return Some(default.clone());
+    }
+    match &input.data_type {
+        DataType::Custom(_) => None,
+        data_type => Some(StaticValue::from(data_type)),
+    }
 }
 
 /// Synthesize a `FuncInput` for a `SubgraphOutput`'s input port from the
