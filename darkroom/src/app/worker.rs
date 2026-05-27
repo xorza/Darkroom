@@ -15,12 +15,12 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use palantir::HostHandle;
 use scenarium::execution::{ArgumentValues, Error as ExecError};
 use scenarium::execution_stats::ExecutionStats;
-use scenarium::prelude::{FuncLib, Graph, NodeId};
+use scenarium::prelude::{FuncLib, Graph};
 use scenarium::worker::{Worker, WorkerMessage};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
 
-use crate::run_state::RunId;
+use crate::run_state::ValueRequest;
 
 /// A result delivered from the worker thread back to the frame loop.
 /// Mirrors the worker's callback surface; richer variants (per-node
@@ -28,13 +28,13 @@ use crate::run_state::RunId;
 #[derive(Debug)]
 pub(crate) enum WorkerEvent {
     ExecutionFinished(Result<ExecutionStats, ExecError>),
-    /// Reply to a [`WorkerBridge::request_argument_values`] call. `run_id`
-    /// echoes the run epoch the request was tagged with so a reply from a
-    /// superseded run can be dropped. `values` is `None` when the worker
-    /// couldn't resolve the node (e.g. it isn't in the executed program).
+    /// Reply to a [`WorkerBridge::request_argument_values`] call. The
+    /// `request` echoes back the node + run epoch it was tagged with so a
+    /// reply from a superseded run can be dropped. `values` is `None` when
+    /// the worker couldn't resolve the node (e.g. it isn't in the executed
+    /// program).
     ArgumentValues {
-        node_id: NodeId,
-        run_id: RunId,
+        request: ValueRequest,
         values: Option<ArgumentValues>,
     },
 }
@@ -108,16 +108,16 @@ impl WorkerBridge {
     /// Ask the worker for one node's computed input/output values. The
     /// worker answers on a oneshot against its live executor slots; a
     /// forwarder task on our runtime turns that into a
-    /// [`WorkerEvent::ArgumentValues`] on the frame channel (tagged with
-    /// `run_id`) and pokes a repaint. A dropped send (worker exited) just
-    /// drops the forwarder — no reply ever arrives, which is the right
-    /// shutdown behavior.
-    pub(crate) fn request_argument_values(&self, node_id: NodeId, run_id: RunId) {
+    /// [`WorkerEvent::ArgumentValues`] on the frame channel (echoing the
+    /// `request` so a stale-epoch reply can be dropped) and pokes a
+    /// repaint. A dropped send (worker exited) just drops the forwarder —
+    /// no reply ever arrives, which is the right shutdown behavior.
+    pub(crate) fn request_argument_values(&self, request: ValueRequest) {
         let (reply_tx, reply_rx) = oneshot::channel();
         if self
             .worker
             .send(WorkerMessage::RequestArgumentValues {
-                node_id,
+                node_id: request.node_id,
                 reply: reply_tx,
             })
             .is_err()
@@ -130,11 +130,7 @@ impl WorkerBridge {
             // `Err` means the worker dropped the reply end (shutdown /
             // graph cleared mid-flight); nothing to forward.
             if let Ok(values) = reply_rx.await {
-                let _ = tx.send(WorkerEvent::ArgumentValues {
-                    node_id,
-                    run_id,
-                    values,
-                });
+                let _ = tx.send(WorkerEvent::ArgumentValues { request, values });
                 host.request_repaint();
             }
         });

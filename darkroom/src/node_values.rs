@@ -14,7 +14,7 @@ use scenarium::data::DynamicValue;
 use scenarium::execution::ArgumentValues;
 use scenarium::prelude::NodeId;
 
-use crate::run_state::RunId;
+use crate::run_state::{RunId, ValueRequest};
 
 /// One port's runtime value, ready to render: a formatted text cell plus
 /// an optional preview thumbnail (already uploaded as a texture).
@@ -35,12 +35,8 @@ pub(crate) struct NodeValueView {
 /// Convert a worker reply into a render-ready view: format every value to
 /// text and upload any image previews as textures (keyed by `run_id` so a
 /// re-run replaces rather than collides with the prior thumbnail).
-pub(crate) fn build_view(
-    ui: &Ui,
-    node_id: NodeId,
-    run_id: RunId,
-    values: ArgumentValues,
-) -> NodeValueView {
+pub(crate) fn build_view(ui: &Ui, request: ValueRequest, values: ArgumentValues) -> NodeValueView {
+    let ValueRequest { node_id, run_id } = request;
     let inputs = values
         .inputs
         .iter()

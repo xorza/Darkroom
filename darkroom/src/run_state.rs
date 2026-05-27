@@ -96,8 +96,10 @@ pub(crate) struct RunState {
     nodes: HashMap<NodeId, NodeRunState>,
     /// Current run epoch (tags value requests/replies).
     run_id: RunId,
-    /// Nodes with a value request in flight for `run_id`, so the frame
-    /// loop doesn't re-request every frame while one is pending.
+    /// Nodes already asked about this epoch (insert-only; cleared only on
+    /// a new epoch / `clear`). Dedups so the frame loop sends one request
+    /// per node per run — a reply, including a `None` one, doesn't reopen
+    /// the node for re-request.
     requested: HashSet<NodeId>,
 }
 
@@ -184,44 +186,36 @@ impl RunState {
 
     /// Deposit a worker value reply (uploading any preview textures via
     /// `ui`). A reply tagged with a stale epoch, or for a node the worker
-    /// couldn't resolve (`None`), is dropped.
+    /// couldn't resolve (`None`), stores nothing — the node stays "asked"
+    /// either way, so it isn't re-requested until the next epoch.
     pub(crate) fn ingest_values(
         &mut self,
         ui: &Ui,
-        node_id: NodeId,
-        run_id: RunId,
+        request: ValueRequest,
         values: Option<ArgumentValues>,
     ) {
-        if run_id != self.run_id {
+        if request.run_id != self.run_id {
             return;
         }
-        self.requested.remove(&node_id);
         let Some(values) = values else {
             return;
         };
-        self.nodes.entry(node_id).or_default().values =
-            Some(build_view(ui, node_id, run_id, values));
+        self.nodes.entry(request.node_id).or_default().values =
+            Some(build_view(ui, request, values));
     }
 
-    /// Pending value requests for the `open` panels: each open node with no
-    /// value yet and no request in flight, marked in-flight here and
-    /// returned (with the current epoch) for `App` to forward to the
-    /// worker. Keeps all request bookkeeping on the projection.
+    /// Pending value requests for the `open` panels: each open node not yet
+    /// asked about this epoch, marked asked here and returned (tagged with
+    /// the current epoch) for `App` to forward to the worker. Keeps all
+    /// request bookkeeping on the projection.
     pub(crate) fn take_requests(
         &mut self,
         open: impl Iterator<Item = NodeId>,
     ) -> Vec<ValueRequest> {
-        let mut requests = Vec::new();
-        for node_id in open {
-            let have_values = self.nodes.get(&node_id).is_some_and(|n| n.values.is_some());
-            if !have_values && self.requested.insert(node_id) {
-                requests.push(ValueRequest {
-                    node_id,
-                    run_id: self.run_id,
-                });
-            }
-        }
-        requests
+        let run_id = self.run_id;
+        open.filter(|&node_id| self.requested.insert(node_id))
+            .map(|node_id| ValueRequest { node_id, run_id })
+            .collect()
     }
 }
 
@@ -382,25 +376,31 @@ mod tests {
         assert!(rs.requested.is_empty(), "pending markers reset");
     }
 
-    /// `take_requests` returns each open node once, skips ones with a
-    /// request in flight, and skips ones whose values already landed.
+    /// `take_requests` asks for each open node once per epoch, then nothing
+    /// more — a node already asked is not re-requested even if no value
+    /// landed (a `None` reply must not reopen it). A new epoch re-asks.
     #[test]
-    fn take_requests_dedups_and_skips_fetched() {
+    fn take_requests_asks_once_per_epoch() {
         let (a, b) = (nid(1), nid(2));
-        let req = |node_id| ValueRequest { node_id, run_id: 0 };
+        let req = |node_id, run_id| ValueRequest { node_id, run_id };
         let mut rs = RunState::default();
 
-        // First pass: both need fetching.
-        assert_eq!(rs.take_requests([a, b].into_iter()), vec![req(a), req(b)]);
-        // Both now in flight → none re-requested.
+        // First pass: both asked.
+        assert_eq!(
+            rs.take_requests([a, b].into_iter()),
+            vec![req(a, 0), req(b, 0)]
+        );
+        // Already asked this epoch → nothing, regardless of whether values
+        // arrived. `a` got a value, `b` got nothing (a `None` reply); both
+        // stay asked, so neither is re-requested.
+        rs.nodes.entry(a).or_default().values = Some(NodeValueView::default());
         assert!(rs.take_requests([a, b].into_iter()).is_empty());
 
-        // `a`'s reply lands; clear its in-flight marker like ingest would.
-        rs.requested.remove(&a);
-        rs.nodes.entry(a).or_default().values = Some(NodeValueView::default());
-        // `b`'s marker cleared too (e.g. a dropped reply) — only `b`, which
-        // has no values, is requested again; `a` is skipped (fetched).
-        rs.requested.remove(&b);
-        assert_eq!(rs.take_requests([a, b].into_iter()), vec![req(b)]);
+        // A new epoch resets the asked set → both re-asked under run 1.
+        rs.begin_run();
+        assert_eq!(
+            rs.take_requests([a, b].into_iter()),
+            vec![req(a, 1), req(b, 1)]
+        );
     }
 }

@@ -142,11 +142,9 @@ impl App {
                     eprintln!("compute failed: {err}");
                     run_state.clear();
                 }
-                WorkerEvent::ArgumentValues {
-                    node_id,
-                    run_id,
-                    values,
-                } => run_state.ingest_values(ui, node_id, run_id, values),
+                WorkerEvent::ArgumentValues { request, values } => {
+                    run_state.ingest_values(ui, request, values)
+                }
             }
         }
     }
@@ -156,7 +154,7 @@ impl App {
     /// panel set is settled; the reply arrives on a later frame's drain.
     fn request_open_panel_values(&mut self) {
         for req in self.editor.take_value_requests() {
-            self.worker.request_argument_values(req.node_id, req.run_id);
+            self.worker.request_argument_values(req);
         }
     }
 }
