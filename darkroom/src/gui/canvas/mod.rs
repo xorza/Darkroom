@@ -12,6 +12,7 @@ use glam::Vec2;
 use palantir::{
     Background, Configure, Panel, PointerButton, Sense, Sizing, TranslateScale, Ui, WidgetId,
 };
+use scenarium::prelude::NodeId;
 use std::collections::BTreeSet;
 
 use crate::app::AppContext;
@@ -92,6 +93,12 @@ impl GraphUI {
         // Transient inspection panels are tab-local; drop them on a
         // switch. Pinned ones persist and reappear with their nodes.
         self.inspectors.close_unpinned();
+    }
+
+    /// The nodes with an open inspection panel, for the frame loop to
+    /// request runtime values for.
+    pub(crate) fn open_inspector_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.inspectors.open_nodes()
     }
 
     /// Pre-record pass — see
@@ -259,7 +266,7 @@ impl GraphUI {
                         // they sit on top and win clicks over the nodes
                         // beneath; positioned in world coords, so they ride
                         // the inner-canvas transform.
-                        inspectors.draw_panels(ui, ctx.theme, scene, ctx.node_logs);
+                        inspectors.draw_panels(ui, ctx.theme, scene, ctx.run_state);
                         breaker_ui.draw(ui, ctx);
                         connection_ui.draw_in_flight(ui, ctx, scene, port_frame, canvas_origin);
                     });

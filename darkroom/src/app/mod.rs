@@ -8,9 +8,9 @@ use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
 use scenarium::prelude::{FuncLib, Graph as CoreGraph};
 
 use crate::document::Document;
-use crate::exec_status::NodeLogs;
 use crate::io::config::AppConfig;
 use crate::io::library;
+use crate::run_state::RunState;
 use crate::theme::Theme;
 
 mod commands;
@@ -38,9 +38,10 @@ fn builtin_func_lib() -> FuncLib {
 pub(crate) struct AppContext<'a> {
     pub(crate) theme: &'a Theme,
     pub(crate) func_lib: &'a FuncLib,
-    /// Last run's per-node log lines, keyed by authoring `NodeId`. Read
-    /// by the node inspection panel's Log section.
-    pub(crate) node_logs: &'a NodeLogs,
+    /// Last run's per-node state (status, logs, fetched runtime values),
+    /// keyed by authoring `NodeId`. Read by the inspection panel's Log and
+    /// Inputs/Outputs sections.
+    pub(crate) run_state: &'a RunState,
 }
 
 /// Thin shell around the [`Editor`] (which owns the document + its edit
@@ -118,25 +119,44 @@ impl App {
     /// terminals once. The worker evaluates the full nested graph, so
     /// this is independent of the active tab. Cloning the graph + an
     /// `Arc` bump of the lib is the per-run cost.
-    pub(crate) fn run_graph(&self) {
+    pub(crate) fn run_graph(&mut self) {
+        // Open a fresh value-cache epoch: a re-run invalidates last run's
+        // per-node values, and tags the replies the open panels request.
+        self.editor.run_state.begin_run();
         self.worker
             .run_once(self.editor.document.graph.clone(), self.func_lib.clone());
     }
 
     /// Consume worker results posted since the last frame. A finished run
     /// reprojects per-node `ExecStatus` (the status glow) and per-node
-    /// logs (the inspector's Log section); a failed run clears both.
-    /// Drained before the editor's scene rebuild so they reflect the
-    /// latest run.
-    fn drain_worker_events(&mut self) {
+    /// logs (the inspector's Log section); a failed run clears both. An
+    /// argument-value reply lands in the run state (uploading any preview
+    /// textures via `ui`). Drained before the editor's scene rebuild so
+    /// they reflect the latest run.
+    fn drain_worker_events(&mut self, ui: &Ui) {
+        let run_state = &mut self.editor.run_state;
         for event in self.worker.drain() {
             match event {
-                WorkerEvent::ExecutionFinished(Ok(stats)) => self.editor.set_run_results(&stats),
+                WorkerEvent::ExecutionFinished(Ok(stats)) => run_state.set_results(&stats),
                 WorkerEvent::ExecutionFinished(Err(err)) => {
                     eprintln!("compute failed: {err}");
-                    self.editor.clear_run_results();
+                    run_state.clear();
                 }
+                WorkerEvent::ArgumentValues {
+                    node_id,
+                    run_id,
+                    values,
+                } => run_state.ingest_values(ui, node_id, run_id, values),
             }
+        }
+    }
+
+    /// Forward the editor's pending value requests (open panels with no
+    /// value yet) to the worker. Run after the frame's record, when the
+    /// panel set is settled; the reply arrives on a later frame's drain.
+    fn request_open_panel_values(&mut self) {
+        for req in self.editor.take_value_requests() {
+            self.worker.request_argument_values(req.node_id, req.run_id);
         }
     }
 }
@@ -146,11 +166,15 @@ impl palantir::App for App {
         // Drain anything the worker posted since last frame, before the
         // editor rebuilds its scene so the status/log projections it
         // reads reflect the latest run.
-        self.drain_worker_events();
+        self.drain_worker_events(ui);
 
         let command = self
             .editor
             .frame(ui, &self.func_lib, &self.theme, &self.host_handle);
+
+        // The frame settled which inspector panels are open; request the
+        // runtime values for any that still need them.
+        self.request_open_panel_values();
 
         // Menu side effects run last so the blocking file dialog opens
         // after the frame's record + drain. Loading replaces the

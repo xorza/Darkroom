@@ -13,11 +13,14 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use palantir::HostHandle;
-use scenarium::execution::Error as ExecError;
+use scenarium::execution::{ArgumentValues, Error as ExecError};
 use scenarium::execution_stats::ExecutionStats;
-use scenarium::prelude::{FuncLib, Graph};
+use scenarium::prelude::{FuncLib, Graph, NodeId};
 use scenarium::worker::{Worker, WorkerMessage};
 use tokio::runtime::Runtime;
+use tokio::sync::oneshot;
+
+use crate::run_state::RunId;
 
 /// A result delivered from the worker thread back to the frame loop.
 /// Mirrors the worker's callback surface; richer variants (per-node
@@ -25,14 +28,29 @@ use tokio::runtime::Runtime;
 #[derive(Debug)]
 pub(crate) enum WorkerEvent {
     ExecutionFinished(Result<ExecutionStats, ExecError>),
+    /// Reply to a [`WorkerBridge::request_argument_values`] call. `run_id`
+    /// echoes the run epoch the request was tagged with so a reply from a
+    /// superseded run can be dropped. `values` is `None` when the worker
+    /// couldn't resolve the node (e.g. it isn't in the executed program).
+    ArgumentValues {
+        node_id: NodeId,
+        run_id: RunId,
+        values: Option<ArgumentValues>,
+    },
 }
 
 pub(crate) struct WorkerBridge {
-    /// Kept alive so the worker's spawned tasks keep running; dropping
-    /// it shuts the runtime down. Never touched after construction.
-    _runtime: Runtime,
+    /// Kept alive so the worker's spawned tasks keep running; dropping it
+    /// shuts the runtime down. Also used to spawn the forwarder that turns
+    /// an argument-value oneshot reply into a [`WorkerEvent`].
+    runtime: Runtime,
     worker: Worker,
     rx: Receiver<WorkerEvent>,
+    /// Cloned into each forwarder task (and the execution callback) so
+    /// replies reach the frame loop on the same channel.
+    tx: Sender<WorkerEvent>,
+    /// Cloned into forwarders to poke a repaint when a reply lands.
+    host: HostHandle,
 }
 
 impl std::fmt::Debug for WorkerBridge {
@@ -54,12 +72,16 @@ impl WorkerBridge {
         // `Worker::new`'s `tokio::spawn` needs an ambient runtime.
         let worker = {
             let _guard = runtime.enter();
+            let tx = tx.clone();
+            let host = host.clone();
             Worker::new(move |result| Self::deliver(&tx, &host, result))
         };
         Self {
-            _runtime: runtime,
+            runtime,
             worker,
             rx,
+            tx,
+            host,
         }
     }
 
@@ -81,6 +103,41 @@ impl WorkerBridge {
             WorkerMessage::Update { graph, func_lib },
             WorkerMessage::ExecuteTerminals,
         ]);
+    }
+
+    /// Ask the worker for one node's computed input/output values. The
+    /// worker answers on a oneshot against its live executor slots; a
+    /// forwarder task on our runtime turns that into a
+    /// [`WorkerEvent::ArgumentValues`] on the frame channel (tagged with
+    /// `run_id`) and pokes a repaint. A dropped send (worker exited) just
+    /// drops the forwarder — no reply ever arrives, which is the right
+    /// shutdown behavior.
+    pub(crate) fn request_argument_values(&self, node_id: NodeId, run_id: RunId) {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        if self
+            .worker
+            .send(WorkerMessage::RequestArgumentValues {
+                node_id,
+                reply: reply_tx,
+            })
+            .is_err()
+        {
+            return;
+        }
+        let tx = self.tx.clone();
+        let host = self.host.clone();
+        self.runtime.spawn(async move {
+            // `Err` means the worker dropped the reply end (shutdown /
+            // graph cleared mid-flight); nothing to forward.
+            if let Ok(values) = reply_rx.await {
+                let _ = tx.send(WorkerEvent::ArgumentValues {
+                    node_id,
+                    run_id,
+                    values,
+                });
+                host.request_repaint();
+            }
+        });
     }
 
     /// Non-blocking drain of everything the worker has posted since the

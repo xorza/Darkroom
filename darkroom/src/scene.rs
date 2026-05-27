@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
 use glam::Vec2;
 use palantir::InternedStr;
@@ -10,7 +10,7 @@ use scenarium::prelude::{
 };
 
 use crate::document::GraphView;
-use crate::exec_status::ExecStatus;
+use crate::run_state::{ExecStatus, RunState};
 
 #[derive(Debug)]
 pub struct Scene {
@@ -163,7 +163,7 @@ impl Scene {
         view: &GraphView,
         func_lib: &FuncLib,
         ctx_def: Option<&SubgraphDef>,
-        exec_status: &HashMap<NodeId, ExecStatus>,
+        run_state: &RunState,
     ) {
         self.selected_nodes = view.selected_nodes.clone();
         // Mirror the persisted viewport. The gesture overwrites these
@@ -296,7 +296,7 @@ impl Scene {
                     node.kind,
                     NodeKind::SubgraphInput | NodeKind::SubgraphOutput
                 ),
-                exec_status: exec_status.get(&vn.id).copied().unwrap_or_default(),
+                exec_status: run_state.status(vn.id),
             });
         }
 
@@ -481,7 +481,7 @@ mod tests {
             &view,
             &FuncLib::default(),
             Some(&def),
-            &HashMap::new(),
+            &RunState::default(),
         );
 
         assert_eq!(scene.nodes.len(), 2, "both boundary nodes render");
@@ -554,7 +554,7 @@ mod tests {
             &view,
             &FuncLib::default(),
             None,
-            &HashMap::new(),
+            &RunState::default(),
         );
 
         assert_eq!(scene.nodes.len(), 0, "no ctx_def → no boundary nodes");

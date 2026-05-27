@@ -9,10 +9,10 @@ use palantir::{
 use scenarium::prelude::{NodeBehavior, NodeId};
 
 use crate::edit::intent::Intent;
-use crate::exec_status::ExecStatus;
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
 use crate::gui::node::{RecordCtx, exec_color, node_rename_wid, select_intent};
 use crate::gui::widgets::inline_rename::inline_rename;
+use crate::run_state::ExecStatus;
 use crate::scene::SceneNode;
 use crate::theme::Theme;
 

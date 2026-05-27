@@ -11,18 +11,16 @@
 //!
 //! [`App`]: super::App
 
-use std::collections::HashMap;
-
 use palantir::{HostHandle, Ui};
-use scenarium::prelude::{ExecutionStats, FuncLib, NodeId, SubgraphDef};
+use scenarium::prelude::{FuncLib, SubgraphDef};
 
 use crate::document::{Document, GraphRef};
 use crate::edit::action_stack::ActionStack;
 use crate::edit::intent::{Intent, apply_step, build_step, requires_reconcile, requires_relayout};
-use crate::exec_status::{ExecStatus, NodeLogs, project_logs, project_stats};
 use crate::gui::UiAction;
 use crate::gui::main_window::MainWindow;
 use crate::gui::menu_bar::MenuCommand;
+use crate::run_state::{RunState, ValueRequest};
 use crate::scene::Scene;
 use crate::theme::Theme;
 
@@ -81,18 +79,15 @@ pub(crate) struct Editor {
     /// close tab) raised during record. Drained each frame; carries no
     /// cross-frame state — kept only to reuse the allocation.
     actions: Vec<UiAction>,
-    /// Per-node outcome of the last completed run (with `Executed`'s
-    /// run time), projected into each `SceneNode::exec_status` at rebuild
-    /// to drive the status glow and the header time label. Keyed by the
-    /// document's `NodeId`s so it resolves against any tab (root or
-    /// subgraph interior). Rebuilt when a run finishes, cleared on run
-    /// failure (both via `set_run_results` / `clear_run_results`, called by
-    /// `App` as it drains the worker). Off the serialized state.
-    exec_status: HashMap<NodeId, ExecStatus>,
-    /// Last run's per-node log lines (from node `print` / `ctx.log`),
-    /// keyed like `exec_status`. Shown in the node inspection panel's Log
-    /// section; replaced each run. Off the serialized state.
-    node_logs: NodeLogs,
+    /// The last completed run's per-node state, keyed by the document's
+    /// `NodeId`s so it resolves against any tab (root or subgraph
+    /// interior): execution status (the glow + header time, projected into
+    /// each `SceneNode::exec_status` at rebuild), log lines, and the
+    /// runtime values fetched on demand for open inspection panels. `App`
+    /// drives it as it drains the worker (`RunState::set_results` /
+    /// `ingest_values` / `clear`); requests go through `take_value_requests`
+    /// here, which also reads the open-panel set. Off the serialized state.
+    pub(crate) run_state: RunState,
 }
 
 impl Editor {
@@ -111,24 +106,18 @@ impl Editor {
             needs_relayout: false,
             intents: Vec::new(),
             actions: Vec::new(),
-            exec_status: HashMap::new(),
-            node_logs: NodeLogs::new(),
+            run_state: RunState::default(),
         }
     }
 
-    /// Reproject a finished run's per-node status + logs onto the editor's
-    /// projections (read by `rebuild_scene`'s status glow and the
-    /// inspector's Log section). Called by `App` as it drains the worker.
-    pub(crate) fn set_run_results(&mut self, stats: &ExecutionStats) {
-        project_stats(&mut self.exec_status, stats);
-        project_logs(&mut self.node_logs, stats);
-    }
-
-    /// Drop the last run's projected status + logs (a failed run paints no
-    /// glow and shows no log lines).
-    pub(crate) fn clear_run_results(&mut self) {
-        self.exec_status.clear();
-        self.node_logs.clear();
+    /// Pending value requests for the open inspection panels: each open
+    /// node that has no value yet and no request in flight, marked
+    /// in-flight here and returned (with the current run epoch) for `App`
+    /// to forward to the worker. Keeps all request bookkeeping on the
+    /// projection; `App` only performs the IO.
+    pub(crate) fn take_value_requests(&mut self) -> Vec<ValueRequest> {
+        self.run_state
+            .take_requests(self.main_window.graph_ui.open_inspector_nodes())
     }
 
     /// Add an imported subgraph def to the document, flagging the reconcile
@@ -203,7 +192,7 @@ impl Editor {
         let ctx = AppContext {
             theme,
             func_lib,
-            node_logs: &self.node_logs,
+            run_state: &self.run_state,
         };
         let command = self
             .main_window
@@ -298,7 +287,7 @@ impl Editor {
             GraphRef::Local(id) => self.document.graph.subgraphs.by_key(&id),
         };
         self.scene
-            .rebuild(graph, view, func_lib, ctx_def, &self.exec_status);
+            .rebuild(graph, view, func_lib, ctx_def, &self.run_state);
     }
 
     /// Drain `intents`, applying each non-no-op intent to `document`,

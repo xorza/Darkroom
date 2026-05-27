@@ -1,6 +1,11 @@
 //! Per-node inspection panels: a floating, read-only summary of a node
-//! (identity, inputs + values, outputs, run status) toggled by the `i`
-//! chip in the node header.
+//! (identity, inputs, outputs, run status, log) toggled by the `i` chip
+//! in the node header.
+//!
+//! Input/output lines show the last run's computed runtime value when one
+//! is available (pulled on demand into [`crate::run_state::RunState`] for
+//! open panels), falling back to the static binding otherwise; image
+//! ports also render a preview thumbnail beneath their line.
 //!
 //! Panels are **not** palantir `Popup`s — those record into the
 //! screen-space `Layer::Popup` and wouldn't track the canvas. Instead
@@ -20,16 +25,17 @@ use std::collections::HashMap;
 
 use glam::Vec2;
 use palantir::{
-    Background, Color, Configure, Corners, Panel, Sense, Shadow, Sizing, Spacing, Stroke, Text,
-    TextStyle, Ui, WidgetId,
+    Background, Color, Configure, Corners, ImageFit, Panel, Sense, Shadow, Shape, Sizing, Spacing,
+    Stroke, Text, TextStyle, Ui, WidgetId,
 };
 use scenarium::data::{DataType, StaticValue};
 use scenarium::prelude::{LogEntry, LogLevel, NodeId};
 
-use crate::exec_status::{ExecStatus, NodeLogs};
 use crate::gui::canvas::outer_canvas_widget_id;
 use crate::gui::node::header::fmt_elapsed;
 use crate::gui::node::{exec_color, node_widget_id};
+use crate::node_values::{NodeValueView, PortValueView};
+use crate::run_state::{ExecStatus, RunState};
 use crate::scene::{InputBindingView, Scene, SceneNode};
 use crate::theme::Theme;
 
@@ -52,6 +58,9 @@ pub(crate) struct Inspectors {
 
 /// Fixed panel width in canvas (pre-transform) units.
 const PANEL_WIDTH: f32 = 210.0;
+/// Max width of an inline preview thumbnail (panel width minus the
+/// panel's 8 px padding on each side).
+const PREVIEW_MAX_WIDTH: f32 = PANEL_WIDTH - 16.0;
 /// Gap between the node's right edge and the panel's left edge.
 const PANEL_GAP: f32 = 16.0;
 /// Most recent log lines shown per node, so the panel stays bounded.
@@ -71,6 +80,12 @@ impl Inspectors {
     /// The mode for a node, for the header chip to style itself.
     pub(crate) fn mode(&self, id: NodeId) -> Option<InspectMode> {
         self.modes.get(&id).copied()
+    }
+
+    /// Nodes with an open panel (either mode), for the frame loop to fetch
+    /// runtime values for.
+    pub(crate) fn open_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.modes.keys().copied()
     }
 
     /// Drop transient (`Open`) panels, keeping pinned ones. Called when
@@ -113,7 +128,7 @@ impl Inspectors {
         ui: &mut Ui,
         theme: &Theme,
         scene: &Scene,
-        node_logs: &NodeLogs,
+        run_state: &RunState,
     ) {
         for (&id, &mode) in &self.modes {
             let Some(node) = scene.nodes.iter().find(|n| n.id == id) else {
@@ -127,8 +142,16 @@ impl Inspectors {
                 .map(|r| r.size.w)
                 .unwrap_or(theme.node_min_width);
             let pos = node.pos + Vec2::new(node_w + PANEL_GAP, 0.0);
-            let logs = node_logs.get(&id).map(Vec::as_slice).unwrap_or(&[]);
-            self.draw_one(ui, theme, scene, node, mode, pos, logs);
+            self.draw_one(
+                ui,
+                theme,
+                scene,
+                node,
+                mode,
+                pos,
+                run_state.logs(id),
+                run_state.values(id),
+            );
         }
     }
 
@@ -142,6 +165,7 @@ impl Inspectors {
         mode: InspectMode,
         pos: Vec2,
         logs: &[LogEntry],
+        values: Option<&NodeValueView>,
     ) {
         let border = match mode {
             InspectMode::Pinned => theme.text_muted,
@@ -179,8 +203,18 @@ impl Inspectors {
                     for (i, name) in in_names.iter().enumerate() {
                         let name = name.as_str("");
                         let ty = in_types.get(i).map(type_str).unwrap_or_default();
-                        let val = in_binds.get(i).map(value_str).unwrap_or_default();
-                        line(ui, &format!("{name}: {ty} = {val}"), body_style(ui));
+                        // Runtime value when this run computed one; else
+                        // fall back to the static binding.
+                        match values.and_then(|v| v.inputs.get(i)) {
+                            Some(pv) => {
+                                line(ui, &format!("{name}: {ty} = {}", pv.text), body_style(ui));
+                                draw_preview(ui, node.id, "in", i, pv);
+                            }
+                            None => {
+                                let val = in_binds.get(i).map(value_str).unwrap_or_default();
+                                line(ui, &format!("{name}: {ty} = {val}"), body_style(ui));
+                            }
+                        }
                     }
                 }
 
@@ -191,7 +225,13 @@ impl Inspectors {
                     for (i, name) in out_names.iter().enumerate() {
                         let name = name.as_str("");
                         let ty = out_types.get(i).map(type_str).unwrap_or_default();
-                        line(ui, &format!("{name}: {ty}"), body_style(ui));
+                        match values.and_then(|v| v.outputs.get(i)) {
+                            Some(pv) => {
+                                line(ui, &format!("{name}: {ty} = {}", pv.text), body_style(ui));
+                                draw_preview(ui, node.id, "out", i, pv);
+                            }
+                            None => line(ui, &format!("{name}: {ty}"), body_style(ui)),
+                        }
                     }
                 }
 
@@ -261,6 +301,38 @@ fn outside_action(ui: &Ui, scene: &Scene) -> bool {
 
 fn line(ui: &mut Ui, text: &str, style: TextStyle) {
     Text::new(text.to_owned()).style(style).show(ui);
+}
+
+/// Draw a port's preview thumbnail beneath its value line: a fixed-size
+/// panel (aspect-preserving, capped at [`PREVIEW_MAX_WIDTH`]) painting the
+/// registered texture. No-op when the port has no preview.
+fn draw_preview(ui: &mut Ui, node_id: NodeId, side: &str, idx: usize, pv: &PortValueView) {
+    let Some(handle) = pv.preview else {
+        return;
+    };
+    let size = handle.size();
+    if size.x == 0 || size.y == 0 {
+        return;
+    }
+    let aspect = size.x as f32 / size.y as f32;
+    let w = PREVIEW_MAX_WIDTH.min(size.x as f32);
+    let h = w / aspect;
+    Panel::vstack()
+        .id(WidgetId::from_hash((
+            "inspector.preview",
+            node_id,
+            side,
+            idx,
+        )))
+        .size((Sizing::Fixed(w), Sizing::Fixed(h)))
+        .show(ui, |ui| {
+            ui.add_shape(Shape::Image {
+                handle,
+                local_rect: None,
+                fit: ImageFit::Contain,
+                tint: Color::WHITE,
+            });
+        });
 }
 
 fn title_style(ui: &Ui) -> TextStyle {

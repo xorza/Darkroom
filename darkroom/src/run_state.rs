@@ -1,0 +1,406 @@
+//! Last graph run's per-node state, keyed by authoring `NodeId`: the
+//! execution outcome (status glow + header time), the run's log lines, and
+//! — fetched on demand for open inspection panels — the computed runtime
+//! input/output values. One [`RunState`] per [`Editor`], rebuilt each run.
+//!
+//! Execution dissolves subgraphs and remaps interior node ids, so a run's
+//! raw `ExecutionStats` are keyed by *flattened* ids. [`RunState::set_results`]
+//! uses each stat's `NodeAddr` to fold the outcome back onto the authoring
+//! nodes: onto the node itself (`interior`, unique per editor node — a
+//! def's interior aggregates across its instances) and onto every ancestor
+//! composite instance (`path`), so an instance node reflects its whole
+//! subtree. Logs attribute the same way.
+//!
+//! Values arrive separately and asynchronously: `App` requests them for
+//! open panels (see [`RunState::take_requests`]) and feeds replies in via
+//! [`RunState::ingest_values`]. A [`RunId`] epoch tags each request/reply
+//! so a value computed against a superseded run is dropped; status/logs
+//! linger across a re-run (so the glow doesn't blank during compute) while
+//! values invalidate immediately.
+//!
+//! [`Editor`]: crate::app::editor::Editor
+
+use std::collections::{HashMap, HashSet};
+
+use palantir::Ui;
+use scenarium::execution::ArgumentValues;
+use scenarium::prelude::{ExecutionStats, LogEntry, NodeId};
+
+use crate::node_values::{NodeValueView, build_view};
+
+/// Run epoch. Bumped each time the editor kicks a fresh run so values from
+/// a superseded run can be dropped on arrival.
+pub(crate) type RunId = u64;
+
+/// One node's pending value fetch: which node, tagged with the run epoch
+/// it was requested under (echoed back on the reply to drop stale ones).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct ValueRequest {
+    pub(crate) node_id: NodeId,
+    pub(crate) run_id: RunId,
+}
+
+/// Per-node execution outcome of the last run. Ordered low→high so a
+/// higher-severity status wins when several fold onto one node
+/// (`Errored` > `MissingInputs` > `Executed` > `Cached`). `Executed`
+/// carries the node's wall-clock run time (seconds).
+#[derive(Clone, Copy, PartialEq, Default, Debug)]
+pub(crate) enum ExecStatus {
+    #[default]
+    None,
+    Cached,
+    Executed(f64),
+    MissingInputs,
+    Errored,
+}
+
+impl ExecStatus {
+    /// Severity rank, for folding several outcomes onto one editor node
+    /// (a subgraph def's interior node runs once per instance; an
+    /// instance node aggregates its whole subtree). Higher wins.
+    fn severity(self) -> u8 {
+        match self {
+            ExecStatus::None => 0,
+            ExecStatus::Cached => 1,
+            ExecStatus::Executed(_) => 2,
+            ExecStatus::MissingInputs => 3,
+            ExecStatus::Errored => 4,
+        }
+    }
+
+    /// Fold two outcomes for the same editor node: two `Executed` times
+    /// sum (total compute across instances / subtree); otherwise the
+    /// worse status wins.
+    fn merged(self, other: ExecStatus) -> ExecStatus {
+        match (self, other) {
+            (ExecStatus::Executed(a), ExecStatus::Executed(b)) => ExecStatus::Executed(a + b),
+            _ if other.severity() >= self.severity() => other,
+            _ => self,
+        }
+    }
+}
+
+/// Everything the editor knows about one node from the last run. `values`
+/// is `None` until fetched (and only for nodes whose panel is open).
+#[derive(Default, Debug)]
+pub(crate) struct NodeRunState {
+    pub(crate) status: ExecStatus,
+    pub(crate) logs: Vec<LogEntry>,
+    pub(crate) values: Option<NodeValueView>,
+}
+
+/// The last run's per-node state plus value-fetch coordination. Off the
+/// serialized state; rebuilt each run.
+#[derive(Default, Debug)]
+pub(crate) struct RunState {
+    nodes: HashMap<NodeId, NodeRunState>,
+    /// Current run epoch (tags value requests/replies).
+    run_id: RunId,
+    /// Nodes with a value request in flight for `run_id`, so the frame
+    /// loop doesn't re-request every frame while one is pending.
+    requested: HashSet<NodeId>,
+}
+
+impl RunState {
+    pub(crate) fn status(&self, id: NodeId) -> ExecStatus {
+        self.nodes.get(&id).map(|n| n.status).unwrap_or_default()
+    }
+
+    pub(crate) fn logs(&self, id: NodeId) -> &[LogEntry] {
+        self.nodes
+            .get(&id)
+            .map(|n| n.logs.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub(crate) fn values(&self, id: NodeId) -> Option<&NodeValueView> {
+        self.nodes.get(&id).and_then(|n| n.values.as_ref())
+    }
+
+    /// Reproject a finished run's status + logs onto the per-node map.
+    /// Status/logs are reset and rebuilt; already-fetched values are kept
+    /// (they belong to this epoch — a value reply can land before its
+    /// stats). Entries left carrying nothing are dropped.
+    pub(crate) fn set_results(&mut self, stats: &ExecutionStats) {
+        for node in self.nodes.values_mut() {
+            node.status = ExecStatus::None;
+            node.logs.clear();
+        }
+        for e in &stats.executed_nodes {
+            self.record_status(stats, e.node_id, ExecStatus::Executed(e.elapsed_secs));
+        }
+        for id in &stats.cached_nodes {
+            self.record_status(stats, *id, ExecStatus::Cached);
+        }
+        for port in &stats.missing_inputs {
+            self.record_status(stats, port.node_id, ExecStatus::MissingInputs);
+        }
+        for e in &stats.node_errors {
+            self.record_status(stats, e.node_id, ExecStatus::Errored);
+        }
+        for entry in &stats.logs {
+            for node_id in stats.flatten.attribution(entry.node_id) {
+                self.nodes.entry(node_id).or_default().logs.push(LogEntry {
+                    node_id,
+                    level: entry.level,
+                    message: entry.message.clone(),
+                });
+            }
+        }
+        self.nodes.retain(|_, n| {
+            n.status != ExecStatus::None || !n.logs.is_empty() || n.values.is_some()
+        });
+    }
+
+    /// Fold one flattened stat's `status` onto the node itself and every
+    /// enclosing composite instance (via the flatten map's attribution).
+    fn record_status(&mut self, stats: &ExecutionStats, flat_id: NodeId, status: ExecStatus) {
+        for node_id in stats.flatten.attribution(flat_id) {
+            let slot = self.nodes.entry(node_id).or_default();
+            slot.status = slot.status.merged(status);
+        }
+    }
+
+    /// Drop everything (a failed run paints no glow and shows no logs /
+    /// values).
+    pub(crate) fn clear(&mut self) {
+        self.nodes.clear();
+        self.requested.clear();
+    }
+
+    /// Open a new value-fetch epoch: a re-run invalidates last run's
+    /// values immediately, but keeps status/logs so the glow doesn't blank
+    /// during compute (the new run's stats replace them). Pending request
+    /// markers reset so open panels re-request under the new epoch.
+    pub(crate) fn begin_run(&mut self) {
+        self.run_id = self.run_id.wrapping_add(1);
+        self.requested.clear();
+        for node in self.nodes.values_mut() {
+            node.values = None;
+        }
+        self.nodes
+            .retain(|_, n| n.status != ExecStatus::None || !n.logs.is_empty());
+    }
+
+    /// Deposit a worker value reply (uploading any preview textures via
+    /// `ui`). A reply tagged with a stale epoch, or for a node the worker
+    /// couldn't resolve (`None`), is dropped.
+    pub(crate) fn ingest_values(
+        &mut self,
+        ui: &Ui,
+        node_id: NodeId,
+        run_id: RunId,
+        values: Option<ArgumentValues>,
+    ) {
+        if run_id != self.run_id {
+            return;
+        }
+        self.requested.remove(&node_id);
+        let Some(values) = values else {
+            return;
+        };
+        self.nodes.entry(node_id).or_default().values =
+            Some(build_view(ui, node_id, run_id, values));
+    }
+
+    /// Pending value requests for the `open` panels: each open node with no
+    /// value yet and no request in flight, marked in-flight here and
+    /// returned (with the current epoch) for `App` to forward to the
+    /// worker. Keeps all request bookkeeping on the projection.
+    pub(crate) fn take_requests(
+        &mut self,
+        open: impl Iterator<Item = NodeId>,
+    ) -> Vec<ValueRequest> {
+        let mut requests = Vec::new();
+        for node_id in open {
+            let have_values = self.nodes.get(&node_id).is_some_and(|n| n.values.is_some());
+            if !have_values && self.requested.insert(node_id) {
+                requests.push(ValueRequest {
+                    node_id,
+                    run_id: self.run_id,
+                });
+            }
+        }
+        requests
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scenarium::prelude::{ExecutedNodeStats, FlattenMap, LogLevel, NodeError};
+
+    fn nid(n: u128) -> NodeId {
+        NodeId::from_u128(n)
+    }
+
+    /// Build an `ExecutionStats` carrying `flatten`, with the given
+    /// executed `(flat_id, secs)` and errored `flat_id`s.
+    fn stats(
+        flatten: FlattenMap,
+        executed: &[(NodeId, f64)],
+        errored: &[NodeId],
+    ) -> ExecutionStats {
+        ExecutionStats {
+            elapsed_secs: 0.0,
+            executed_nodes: executed
+                .iter()
+                .map(|&(node_id, elapsed_secs)| ExecutedNodeStats {
+                    node_id,
+                    elapsed_secs,
+                })
+                .collect(),
+            missing_inputs: vec![],
+            cached_nodes: vec![],
+            triggered_events: vec![],
+            node_errors: errored
+                .iter()
+                .map(|&node_id| NodeError {
+                    node_id,
+                    error: scenarium::execution::Error::CycleDetected { node_id },
+                })
+                .collect(),
+            logs: vec![],
+            flatten,
+        }
+    }
+
+    /// Two instances of one def → the interior node's flattened ids both
+    /// fold onto its authoring `interior` id, summing time; the instance
+    /// nodes each get only their own run.
+    #[test]
+    fn aggregates_interior_across_instances_and_per_instance_subtree() {
+        let interior = nid(1);
+        let (inst_a, inst_b) = (nid(10), nid(20));
+        let (flat_a, flat_b) = (nid(101), nid(102));
+
+        let mut map = FlattenMap::default();
+        map.reset();
+        let scope_a = map.push_scope(inst_a, 0);
+        let scope_b = map.push_scope(inst_b, 0);
+        map.set_leaf(flat_a, scope_a, interior);
+        map.set_leaf(flat_b, scope_b, interior);
+
+        let mut rs = RunState::default();
+        rs.set_results(&stats(map, &[(flat_a, 2.0), (flat_b, 3.0)], &[]));
+
+        // Shared interior view: both instances' times sum (2 + 3).
+        assert_eq!(rs.status(interior), ExecStatus::Executed(5.0));
+        // Each instance node carries only its own run.
+        assert_eq!(rs.status(inst_a), ExecStatus::Executed(2.0));
+        assert_eq!(rs.status(inst_b), ExecStatus::Executed(3.0));
+    }
+
+    /// A node nested two levels deep accumulates onto *both* enclosing
+    /// instances — the outer instance's total includes nested cost.
+    #[test]
+    fn outer_instance_total_includes_nested() {
+        let interior = nid(1);
+        let (outer, inner) = (nid(10), nid(20));
+        let flat = nid(100);
+
+        let mut map = FlattenMap::default();
+        map.reset();
+        let scope_outer = map.push_scope(outer, 0);
+        let scope_inner = map.push_scope(inner, scope_outer);
+        map.set_leaf(flat, scope_inner, interior);
+
+        let mut rs = RunState::default();
+        rs.set_results(&stats(map, &[(flat, 4.0)], &[]));
+
+        assert_eq!(rs.status(interior), ExecStatus::Executed(4.0));
+        assert_eq!(rs.status(inner), ExecStatus::Executed(4.0));
+        assert_eq!(rs.status(outer), ExecStatus::Executed(4.0));
+    }
+
+    /// Worst status wins when a node both executed and errored (the
+    /// errored node is in both lists); time is dropped with the upgrade.
+    #[test]
+    fn errored_beats_executed_on_same_node() {
+        let interior = nid(1); // top-level: flattened id == interior
+        let mut map = FlattenMap::default();
+        map.reset();
+        map.set_leaf(interior, 0, interior);
+
+        let mut rs = RunState::default();
+        rs.set_results(&stats(map, &[(interior, 1.0)], &[interior]));
+        assert_eq!(rs.status(interior), ExecStatus::Errored);
+    }
+
+    /// A log line emitted inside a subgraph instance attributes to both
+    /// the interior node and the enclosing instance, preserving level +
+    /// message, re-keyed to each editor node.
+    #[test]
+    fn set_results_attributes_logs_to_interior_and_instance() {
+        let interior = nid(1);
+        let inst = nid(10);
+        let flat = nid(100);
+        let mut map = FlattenMap::default();
+        map.reset();
+        let scope = map.push_scope(inst, 0);
+        map.set_leaf(flat, scope, interior);
+
+        let mut s = stats(map, &[], &[]);
+        s.logs.push(LogEntry {
+            node_id: flat,
+            level: LogLevel::Warn,
+            message: "hi".into(),
+        });
+
+        let mut rs = RunState::default();
+        rs.set_results(&s);
+
+        let i = rs.logs(interior);
+        assert_eq!(i.len(), 1, "interior carries the line");
+        assert_eq!(i[0].message, "hi");
+        assert_eq!(i[0].level, LogLevel::Warn);
+        assert_eq!(i[0].node_id, interior);
+        let n = rs.logs(inst);
+        assert_eq!(n.len(), 1);
+        assert_eq!(n[0].node_id, inst, "re-keyed to the instance");
+    }
+
+    /// A new epoch bumps the id and drops values, but keeps status/logs so
+    /// the glow survives a recompute; pending markers reset.
+    #[test]
+    fn begin_run_bumps_id_drops_values_keeps_status() {
+        let node = nid(1);
+        let mut map = FlattenMap::default();
+        map.reset();
+        map.set_leaf(node, 0, node);
+
+        let mut rs = RunState::default();
+        rs.set_results(&stats(map, &[(node, 1.0)], &[]));
+        rs.nodes.get_mut(&node).unwrap().values = Some(NodeValueView::default());
+        rs.requested.insert(node);
+
+        rs.begin_run();
+
+        assert_eq!(rs.run_id, 1);
+        assert_eq!(rs.status(node), ExecStatus::Executed(1.0), "status lingers");
+        assert!(rs.values(node).is_none(), "values invalidated");
+        assert!(rs.requested.is_empty(), "pending markers reset");
+    }
+
+    /// `take_requests` returns each open node once, skips ones with a
+    /// request in flight, and skips ones whose values already landed.
+    #[test]
+    fn take_requests_dedups_and_skips_fetched() {
+        let (a, b) = (nid(1), nid(2));
+        let req = |node_id| ValueRequest { node_id, run_id: 0 };
+        let mut rs = RunState::default();
+
+        // First pass: both need fetching.
+        assert_eq!(rs.take_requests([a, b].into_iter()), vec![req(a), req(b)]);
+        // Both now in flight → none re-requested.
+        assert!(rs.take_requests([a, b].into_iter()).is_empty());
+
+        // `a`'s reply lands; clear its in-flight marker like ingest would.
+        rs.requested.remove(&a);
+        rs.nodes.entry(a).or_default().values = Some(NodeValueView::default());
+        // `b`'s marker cleared too (e.g. a dropped reply) — only `b`, which
+        // has no values, is requested again; `a` is skipped (fetched).
+        rs.requested.remove(&b);
+        assert_eq!(rs.take_requests([a, b].into_iter()), vec![req(b)]);
+    }
+}
