@@ -47,19 +47,19 @@ fn builtin_func_lib() -> FuncLib {
 /// future per-frame shared state (selection, debug toggles, etc.)
 /// lives here too.
 #[derive(Copy, Clone, Debug)]
-pub struct AppContext<'a> {
-    pub theme: &'a Theme,
-    pub func_lib: &'a FuncLib,
+pub(crate) struct AppContext<'a> {
+    pub(crate) theme: &'a Theme,
+    pub(crate) func_lib: &'a FuncLib,
 }
 
 #[derive(Debug)]
-pub struct App {
-    pub document: Document,
+pub(crate) struct App {
+    pub(crate) document: Document,
     /// Shared with the worker on every run (`Arc` so a run clones a
     /// pointer, not the whole lib). Runtime-owned, not part of the
     /// serialized `Document`.
-    pub func_lib: Arc<FuncLib>,
-    pub scene: Scene,
+    pub(crate) func_lib: Arc<FuncLib>,
+    pub(crate) scene: Scene,
     /// Which graph `scene` last reflected. A mismatch with the active
     /// target means the tab changed: drop transient gesture state
     /// (`reset_transient`) and request a relayout. `None` forces that on
@@ -73,7 +73,7 @@ pub struct App {
     /// window between the unconditional pre-prepass rebuild (which clears
     /// it) and the pre-record rebuild.
     scene_dirty: bool,
-    pub main_window: MainWindow,
+    pub(crate) main_window: MainWindow,
     /// Per-frame scratch buffer of pending mutations. Cleared at the
     /// top of every `frame`, filled by prepass/record/shortcut
     /// handling, and fully drained before `frame` returns — it carries
@@ -84,17 +84,17 @@ pub struct App {
     /// close tab) raised during record. Drained each frame; carries no
     /// cross-frame state — kept only to reuse the allocation.
     actions: Vec<UiAction>,
-    pub action_stack: ActionStack,
-    pub theme: Theme,
-    pub host_handle: HostHandle,
+    pub(crate) action_stack: ActionStack,
+    pub(crate) theme: Theme,
+    pub(crate) host_handle: HostHandle,
     /// Last successfully loaded/saved file path. `Save…` and `Load…`
     /// preopen the dialog at this directory so a session that touches
     /// many files in the same folder doesn't re-navigate each time.
-    pub current_path: Option<PathBuf>,
+    pub(crate) current_path: Option<PathBuf>,
     /// Persisted session state (active theme name + last document).
     /// Written on every doc/theme change so the next launch reopens
     /// where the user left off.
-    pub config: AppConfig,
+    pub(crate) config: AppConfig,
     /// Drives the headless graph-evaluation worker (run on demand,
     /// results drained each frame). Off the serialized state.
     worker: WorkerBridge,
