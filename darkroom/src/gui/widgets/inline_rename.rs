@@ -7,8 +7,8 @@
 //! [`crate::gui::node::value_editor`].
 
 use palantir::{
-    Align, Configure, HAlign, InternedStr, Justify, Key, Panel, Sense, Shortcut, Sizing, Text,
-    TextEdit, TextEditTheme, TextStyle, Ui, WidgetId,
+    Align, Configure, HAlign, InternedStr, Justify, Key, Panel, Sense, Shortcut, Sizing, Spacing,
+    Text, TextEdit, TextEditTheme, TextStyle, Ui, VAlign, WidgetId,
 };
 
 use crate::theme::InlineRenameTheme;
@@ -120,7 +120,11 @@ impl<'a> InlineRename<'a> {
             HAlign::Center => Justify::Center,
             _ => Justify::Start,
         };
-        let text_align = Align::h(halign);
+        // Pin both axes explicitly — TextEdit's single-line default
+        // (`Align::LEFT` = HAlign::Left + VAlign::Center) is sticky in
+        // edit mode, but we also need vertical centering in idle so
+        // the swap doesn't snap glyphs vertically.
+        let text_align = Align::new(halign, VAlign::Center);
         // Floor the height at one text line so an empty label still has
         // a clickable box (a `Hug` panel with no text would collapse to
         // zero height). Derived from the (possibly overridden) text
@@ -128,6 +132,40 @@ impl<'a> InlineRename<'a> {
         // target.
         let style_for_metrics = style.unwrap_or(ui.theme.text);
         let line_h = style_for_metrics.line_height_for(style_for_metrics.font_size_px);
+        // Resolve the editor theme up front so the idle path can
+        // mirror the active TextEdit's trailing caret-room — without
+        // this, the panel grows by `caret_width` (and right-aligned
+        // glyphs shift left by the same amount) on the swap to edit
+        // mode, twitching the label one or two pixels.
+        let owned_default;
+        let theme_ref: &InlineRenameTheme = match theme {
+            Some(t) => t,
+            None => {
+                owned_default = InlineRenameTheme::default();
+                &owned_default
+            }
+        };
+        let caret_room = theme_ref.text_edit.caret_width.max(0.0);
+        // TextEdit's Hug single-line floor sets `min_size.w = text +
+        // padding_horiz + 2 * caret_room` (see palantir
+        // `text_edit/mod.rs::show`), reserving caret slack on *both*
+        // sides so the end-of-line caret never clips on horizontal
+        // scroll. We mirror the same total width on the idle Panel,
+        // but the side that holds the slack has to match where
+        // TextEdit's `align_offset` actually places the glyphs — i.e.
+        // *opposite* the text's leading edge:
+        //   - Left  halign: TE puts text flush at `TE.left + 0`, with
+        //     2·caret_room slack on the right → idle: padding on right.
+        //   - Right halign: TE puts text flush at `TE.right - caret_room`,
+        //     so slack is split caret_room/caret_room → idle: symmetric.
+        // Same total width either way, so the surrounding row doesn't
+        // reshape; the glyph baseline stays put across the swap.
+        let two = 2.0 * caret_room;
+        let idle_padding = match halign {
+            HAlign::Right => Spacing::new(caret_room, 0.0, caret_room, 0.0),
+            HAlign::Center => Spacing::new(caret_room, 0.0, caret_room, 0.0),
+            _ => Spacing::new(0.0, 0.0, two, 0.0),
+        };
         if !ui.state_mut::<RenameState>(id).active {
             // `DRAG` as well as `CLICK`: the label captures the press
             // (so it can register clicks / double-click-to-edit), but
@@ -141,7 +179,11 @@ impl<'a> InlineRename<'a> {
                 .id(id)
                 .size((Sizing::Hug, Sizing::Hug))
                 .min_size((MIN_EDIT_WIDTH, line_h))
+                .padding(idle_padding)
                 .justify(justify)
+                // Match TextEdit's single-line vertical centering so
+                // the swap to edit mode doesn't shift the glyph row.
+                .child_align(Align::v(VAlign::Center))
                 .sense(Sense::CLICK | Sense::DRAG)
                 .show(ui, |ui| {
                     // `InternedStr::clone` is allocation-free for the
@@ -154,6 +196,17 @@ impl<'a> InlineRename<'a> {
                     t.show(ui);
                 })
                 .response;
+            if let Some(r) = resp.layout_rect() {
+                eprintln!(
+                    "[inline_rename id={id:?}] IDLE rect=({:.2},{:.2} {}x{}) pad_r={:.2} name={:?}",
+                    r.min.x,
+                    r.min.y,
+                    r.size.w,
+                    r.size.h,
+                    caret_room,
+                    name.as_str("")
+                );
+            }
             let clicked = resp.clicked();
             let double_clicked = resp.double_clicked();
             if double_clicked {
@@ -170,18 +223,7 @@ impl<'a> InlineRename<'a> {
         }
 
         let mut draft = std::mem::take(&mut ui.state_mut::<RenameState>(id).draft);
-        // Fall back to the built-in flat theme when the caller didn't
-        // hand one in. Owned binding lives until the end of `show` so
-        // `theme_ref` stays valid for the duration of the editor draw.
-        let owned_default;
-        let theme_ref: &InlineRenameTheme = match theme {
-            Some(t) => t,
-            None => {
-                owned_default = InlineRenameTheme::default();
-                &owned_default
-            }
-        };
-        TextEdit::new(&mut draft)
+        let ed_resp = TextEdit::new(&mut draft)
             .id(id)
             .style(edit_style(theme_ref, style))
             .max_chars(max_chars)
@@ -189,6 +231,17 @@ impl<'a> InlineRename<'a> {
             .min_size((MIN_EDIT_WIDTH, line_h))
             .text_align(text_align)
             .show(ui);
+        if let Some(r) = ed_resp.layout_rect() {
+            eprintln!(
+                "[inline_rename id={id:?}] EDIT rect=({:.2},{:.2} {}x{}) caret_room={:.2} draft={:?}",
+                r.min.x,
+                r.min.y,
+                r.size.w,
+                r.size.h,
+                caret_room,
+                draft
+            );
+        }
         let focused = ui.focused_id() == Some(id);
         let escape = ui.escape_pressed();
         let enter = ui.key_pressed(Shortcut::key(Key::Enter));
