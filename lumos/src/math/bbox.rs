@@ -14,13 +14,6 @@ pub struct Aabb {
 }
 
 impl Aabb {
-    /// Create a new bounding box with the given bounds.
-    #[inline]
-    #[allow(dead_code)] // Used in tests
-    pub const fn new(min: Vec2us, max: Vec2us) -> Self {
-        Self { min, max }
-    }
-
     /// Create an empty bounding box (for accumulation).
     ///
     /// The empty box has inverted bounds so that any point
@@ -33,13 +26,6 @@ impl Aabb {
         }
     }
 
-    /// Check if this bounding box is empty (no points included).
-    #[inline]
-    #[allow(dead_code)] // Used in tests
-    pub const fn is_empty(&self) -> bool {
-        self.min.x > self.max.x || self.min.y > self.max.y
-    }
-
     /// Expand this bounding box to include the given point.
     #[inline]
     pub fn include(&mut self, pos: Vec2us) {
@@ -49,10 +35,31 @@ impl Aabb {
         self.max.y = self.max.y.max(pos.y);
     }
 
+    /// Merge two bounding boxes, returning a box that contains both.
+    #[inline]
+    pub fn merge(&self, other: &Self) -> Self {
+        Self {
+            min: Vec2us::new(self.min.x.min(other.min.x), self.min.y.min(other.min.y)),
+            max: Vec2us::new(self.max.x.max(other.max.x), self.max.y.max(other.max.y)),
+        }
+    }
+}
+
+#[cfg(test)]
+impl Aabb {
+    #[inline]
+    pub(crate) const fn new(min: Vec2us, max: Vec2us) -> Self {
+        Self { min, max }
+    }
+
+    #[inline]
+    pub(crate) const fn is_empty(&self) -> bool {
+        self.min.x > self.max.x || self.min.y > self.max.y
+    }
+
     /// Width of the bounding box (number of columns). Returns 0 for empty boxes.
     #[inline]
-    #[allow(dead_code)] // Used in tests
-    pub const fn width(&self) -> usize {
+    pub(crate) const fn width(&self) -> usize {
         if self.is_empty() {
             return 0;
         }
@@ -61,35 +68,22 @@ impl Aabb {
 
     /// Height of the bounding box (number of rows). Returns 0 for empty boxes.
     #[inline]
-    #[allow(dead_code)] // Used in tests
-    pub const fn height(&self) -> usize {
+    pub(crate) const fn height(&self) -> usize {
         if self.is_empty() {
             return 0;
         }
         self.max.y - self.min.y + 1
     }
 
-    /// Check if a point is inside the bounding box.
     #[inline]
-    #[allow(dead_code)] // Used in tests
-    pub const fn contains(&self, pos: Vec2us) -> bool {
+    pub(crate) const fn contains(&self, pos: Vec2us) -> bool {
         pos.x >= self.min.x && pos.x <= self.max.x && pos.y >= self.min.y && pos.y <= self.max.y
     }
 
     /// Area of the bounding box (width * height).
     #[inline]
-    #[allow(dead_code)] // Used in tests
-    pub const fn area(&self) -> usize {
+    pub(crate) const fn area(&self) -> usize {
         self.width() * self.height()
-    }
-
-    /// Merge two bounding boxes, returning a box that contains both.
-    #[inline]
-    pub fn merge(&self, other: &Self) -> Self {
-        Self {
-            min: Vec2us::new(self.min.x.min(other.min.x), self.min.y.min(other.min.y)),
-            max: Vec2us::new(self.max.x.max(other.max.x), self.max.y.max(other.max.y)),
-        }
     }
 }
 

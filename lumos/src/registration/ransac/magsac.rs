@@ -79,13 +79,6 @@ impl MagsacScorer {
     pub fn is_inlier(&self, residual_sq: f64) -> bool {
         residual_sq <= self.threshold_sq
     }
-
-    /// Get the effective threshold squared for inlier classification.
-    #[inline]
-    #[cfg(test)]
-    pub fn threshold_sq(&self) -> f64 {
-        self.threshold_sq
-    }
 }
 
 #[cfg(test)]
@@ -127,7 +120,7 @@ mod tests {
         let scorer = MagsacScorer::new(2.0);
         // σ_max = 2.0 → σ²_max = 4.0
         // threshold_sq = 9.21 * 4.0 = 36.84
-        assert!((scorer.threshold_sq() - 36.84).abs() < TOL);
+        assert!((scorer.threshold_sq - 36.84).abs() < TOL);
         // outlier_loss = 4.0 / 2.0 = 2.0
         assert!((scorer.outlier_loss - 2.0).abs() < TOL);
 
@@ -136,7 +129,7 @@ mod tests {
         // threshold_sq = 9.21 * 0.25 = 2.3025
         #[allow(clippy::approx_constant)]
         let expected_threshold = 2.3025;
-        assert!((scorer.threshold_sq() - expected_threshold).abs() < TOL);
+        assert!((scorer.threshold_sq - expected_threshold).abs() < TOL);
         // outlier_loss = 0.25 / 2.0 = 0.125
         assert!((scorer.outlier_loss - 0.125).abs() < TOL);
     }
@@ -192,7 +185,7 @@ mod tests {
         // Verify loss is continuous at the threshold boundary.
         // Just below threshold should be close to outlier_loss.
         let scorer = MagsacScorer::new(1.0);
-        let threshold_sq = scorer.threshold_sq(); // 9.21
+        let threshold_sq = scorer.threshold_sq; // 9.21
 
         // Loss just below threshold:
         // x = 9.20 / 2 = 4.60, γ(1, 4.60) = 1 - exp(-4.60) ≈ 0.98994...
@@ -261,17 +254,17 @@ mod tests {
 
         let scorer_1 = MagsacScorer::new(1.0);
         assert!(
-            (scorer_1.threshold_sq().sqrt() - sqrt_chi * 1.0).abs() < 1e-6,
+            (scorer_1.threshold_sq.sqrt() - sqrt_chi * 1.0).abs() < 1e-6,
             "σ=1: threshold={}",
-            scorer_1.threshold_sq().sqrt()
+            scorer_1.threshold_sq.sqrt()
         );
 
         let scorer_3 = MagsacScorer::new(3.0);
         // threshold = sqrt(9.21 * 9) = sqrt(82.89) = 9.104...
         assert!(
-            (scorer_3.threshold_sq().sqrt() - sqrt_chi * 3.0).abs() < 1e-6,
+            (scorer_3.threshold_sq.sqrt() - sqrt_chi * 3.0).abs() < 1e-6,
             "σ=3: threshold={}",
-            scorer_3.threshold_sq().sqrt()
+            scorer_3.threshold_sq.sqrt()
         );
     }
 }

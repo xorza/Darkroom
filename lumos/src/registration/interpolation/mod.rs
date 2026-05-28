@@ -29,16 +29,6 @@ impl Default for WarpParams {
     }
 }
 
-impl WarpParams {
-    #[allow(dead_code)] // Used in tests
-    pub fn new(method: InterpolationMethod) -> Self {
-        Self {
-            method,
-            ..Default::default()
-        }
-    }
-}
-
 #[cfg(test)]
 mod bench;
 #[cfg(test)]
@@ -342,4 +332,14 @@ pub(crate) fn warp_image(
                 }
             }
         });
+}
+
+#[cfg(test)]
+impl WarpParams {
+    pub(crate) fn new(method: InterpolationMethod) -> Self {
+        Self {
+            method,
+            ..Default::default()
+        }
+    }
 }
