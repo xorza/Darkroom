@@ -48,7 +48,6 @@ distortion/
   tps/
     mod.rs        ThinPlateSpline, TpsConfig, DistortionMap, tps_kernel
     tests.rs      TPS tests (23 tests)
-  NOTES-AI.md     This file
 ```
 
 ## Test Coverage

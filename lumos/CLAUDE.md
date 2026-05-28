@@ -20,7 +20,7 @@ Public surface is defined in `src/lib.rs` (the only place that `pub use`s — no
 | `prelude` | `pub` | Convenience re-exports of the main API. |
 | `testing` | `#[cfg(test)]` | Synthetic + real-data fixtures for tests/benches. |
 
-Subdirectories carry their own `NOTES-AI.md`/`README.md` for deeper detail (e.g. `registration/ransac/`, `star_detection/background/`, `drizzle/`, `math/`). This file is the crate-level map; consult those for algorithm specifics.
+This file is the crate-level map; consult the code in each domain module for algorithm specifics.
 
 ## Modules
 
