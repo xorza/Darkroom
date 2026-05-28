@@ -1,9 +1,11 @@
 //! Standard pipeline tests - tests full star detection on typical scenarios.
 
 use crate::star_detection::config::Config;
-use crate::star_detection::tests::common::output::{check_pass, standard_criteria};
+use crate::star_detection::tests::common::output::metrics::{check_pass, standard_criteria};
 use crate::testing::init_tracing;
-use crate::testing::synthetic::{StarFieldConfig, dense_field_config, sparse_field_config};
+use crate::testing::synthetic::star_field::{
+    StarFieldConfig, dense_field_config, sparse_field_config,
+};
 
 /// Test: Sparse field with well-separated stars.
 #[test]
@@ -46,7 +48,7 @@ fn test_pipeline_dense_field() {
     let metrics = super::run_test("dense_field", "pipeline", &field_config, &detection_config);
 
     // Relaxed criteria for dense field
-    let criteria = crate::star_detection::tests::common::output::crowded_criteria();
+    let criteria = crate::star_detection::tests::common::output::metrics::crowded_criteria();
     if let Err(failures) = check_pass(&metrics, &criteria) {
         for f in &failures {
             println!("FAIL: {}", f);
@@ -90,7 +92,7 @@ fn test_pipeline_moffat_profile() {
     );
 
     // Moffat profile has extended wings that can affect FWHM estimation
-    let criteria = crate::star_detection::tests::common::output::PassCriteria {
+    let criteria = crate::star_detection::tests::common::output::metrics::PassCriteria {
         min_detection_rate: 0.85, // 25 stars on 256x256 — one missed star is -4%
         max_false_positive_rate: 0.05,
         max_mean_centroid_error: 0.30, // Moffat wings can affect centroid matching
@@ -132,7 +134,7 @@ fn test_pipeline_fwhm_range() {
     let metrics = super::run_test("fwhm_range", "pipeline", &field_config, &detection_config);
 
     // Relaxed for FWHM variation - centroid matching can have outliers with varying PSF
-    let criteria = crate::star_detection::tests::common::output::PassCriteria {
+    let criteria = crate::star_detection::tests::common::output::metrics::PassCriteria {
         min_detection_rate: 0.90, // Relaxed for smaller images
         max_false_positive_rate: 0.05,
         max_mean_centroid_error: 0.30, // Relaxed due to FWHM variation
@@ -182,7 +184,7 @@ fn test_pipeline_dynamic_range() {
     );
 
     // Faint stars are hard to detect, so relaxed criteria
-    let criteria = crate::star_detection::tests::common::output::faint_star_criteria();
+    let criteria = crate::star_detection::tests::common::output::metrics::faint_star_criteria();
 
     if let Err(failures) = check_pass(&metrics, &criteria) {
         for f in &failures {
@@ -219,7 +221,7 @@ fn test_pipeline_low_noise() {
     let metrics = super::run_test("low_noise", "pipeline", &field_config, &detection_config);
 
     // Good criteria for low noise - some outlier matches can skew mean centroid error
-    let criteria = crate::star_detection::tests::common::output::PassCriteria {
+    let criteria = crate::star_detection::tests::common::output::metrics::PassCriteria {
         min_detection_rate: 0.92,
         max_false_positive_rate: 0.02,
         max_mean_centroid_error: 0.25, // Outliers in matching can skew mean

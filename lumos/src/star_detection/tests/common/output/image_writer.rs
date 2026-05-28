@@ -73,7 +73,7 @@ pub fn mask_to_gray(mask: &[bool], width: usize, height: usize) -> GrayImage {
 /// Convert labeled image to colored visualization.
 ///
 /// Each label gets a unique color for easy visualization.
-pub fn labels_to_rgb(labels: &crate::common::Buffer2<u32>) -> RgbImage {
+pub fn labels_to_rgb(labels: &common::buffer2::Buffer2<u32>) -> RgbImage {
     // Generate distinct colors for labels using golden ratio
     let label_to_color = |label: u32| -> Rgb<u8> {
         if label == 0 {
@@ -142,8 +142,8 @@ pub fn save_comparison(
     pixels: &[f32],
     width: usize,
     height: usize,
-    ground_truth: &[crate::testing::synthetic::GroundTruthStar],
-    detected: &[crate::star_detection::Star],
+    ground_truth: &[crate::testing::synthetic::star_field::GroundTruthStar],
+    detected: &[crate::star_detection::star::Star],
     match_radius: f32,
     path: &Path,
 ) {

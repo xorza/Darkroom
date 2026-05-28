@@ -1,9 +1,9 @@
 use crate::astro_image::cfa::{CfaImage, CfaType};
 use crate::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
-use crate::calibration_masters::DefectMap;
-use crate::common::Buffer2;
+use crate::calibration_masters::defect_map::DefectMap;
 use crate::testing::constant_cfa;
 use crate::{AstroImageMetadata, CalibrationMasters};
+use common::buffer2::Buffer2;
 
 #[test]
 fn test_new_constructor() {
@@ -263,7 +263,7 @@ fn test_defect_detection_zero_median_no_false_positives() {
 #[test]
 fn test_calibrate_hot_pixel_correction() {
     // 6x6 Bayer dark with one hot pixel at (2,2)
-    use crate::raw::demosaic::CfaPattern;
+    use crate::raw::demosaic::bayer::CfaPattern;
 
     let w = 6;
     let h = 6;

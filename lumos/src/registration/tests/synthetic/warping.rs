@@ -7,14 +7,14 @@
 //! - All TransformType variants (Translation, Euclidean, Similarity, Affine, Homography)
 //! - All InterpolationMethod variants (Nearest, Bilinear, Bicubic, Lanczos2/3/4)
 
-use crate::common::Buffer2;
 use crate::registration::config::InterpolationMethod;
 use crate::registration::interpolation::{WarpParams, warp_image};
 use crate::registration::transform::{Transform, TransformType, WarpTransform};
 use crate::registration::warp;
-use crate::star_detection::StarDetector;
-use crate::testing::synthetic::{self, StarFieldConfig, stamps};
+use crate::star_detection::detector::StarDetector;
+use crate::testing::synthetic::{self, stamps, star_field::StarFieldConfig};
 use crate::{AstroImage, ImageDimensions};
+use common::buffer2::Buffer2;
 use glam::DVec2;
 
 /// Helper to warp and return a new buffer (for test convenience).
@@ -292,19 +292,19 @@ fn test_warp_with_detected_transform() {
     use crate::AstroImage;
 
     use crate::registration::{Config as RegConfig, register};
-    use crate::star_detection::Config as StarConfig;
+    use crate::star_detection::config::Config as StarConfig;
 
     let config = StarFieldConfig {
         width: 256,
         height: 256,
         num_stars: 40,
         seed: 66666,
-        ..synthetic::sparse_field_config()
+        ..synthetic::star_field::sparse_field_config()
     };
     let width = config.width;
     let height = config.height;
 
-    let (ref_pixels, _) = synthetic::generate_star_field(&config);
+    let (ref_pixels, _) = synthetic::star_field::generate_star_field(&config);
 
     // Apply a known transform
     let dx = 12.0;
@@ -459,7 +459,7 @@ fn test_interpolation_quality_ordering() {
 
 #[test]
 fn test_warp_grayscale_translation() {
-    use crate::registration::Config as RegConfig;
+    use crate::registration::config::Config as RegConfig;
 
     let (ref_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 88888);
     let width = ref_buf.width();
@@ -515,7 +515,7 @@ fn test_warp_grayscale_translation() {
 
 #[test]
 fn test_warp_rgb() {
-    use crate::registration::Config as RegConfig;
+    use crate::registration::config::Config as RegConfig;
 
     let (gray_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 99999);
     let width = gray_buf.width();
@@ -584,7 +584,7 @@ fn test_warp_rgb() {
 #[test]
 fn test_warp_preserves_output_metadata() {
     use crate::astro_image::AstroImageMetadata;
-    use crate::registration::Config as RegConfig;
+    use crate::registration::config::Config as RegConfig;
 
     let (pixels, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 11111);
     let width = pixels.width();
@@ -653,7 +653,7 @@ fn extract_central_region(
 /// compared to warp without SIP.
 #[test]
 fn test_warp_with_sip_correction() {
-    use crate::registration::distortion::{SipConfig, SipPolynomial};
+    use crate::registration::distortion::sip::{SipConfig, SipPolynomial};
 
     let width = 256;
     let height = 256;
@@ -758,8 +758,8 @@ fn test_warp_with_sip_correction() {
 /// Test that warp with SIP correction through the public `warp()` API works.
 #[test]
 fn test_warp_api_with_sip() {
-    use crate::registration::Config as RegConfig;
-    use crate::registration::distortion::{SipConfig, SipPolynomial};
+    use crate::registration::config::Config as RegConfig;
+    use crate::registration::distortion::sip::{SipConfig, SipPolynomial};
 
     let width = 128;
     let height = 128;

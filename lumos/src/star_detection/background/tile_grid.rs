@@ -1,8 +1,9 @@
 //! Tile grid for background estimation interpolation.
 
-use crate::common::{BitBuffer2, Buffer2};
-use crate::math::median_f32_mut;
-use crate::math::sigma_clipped_median_mad;
+use crate::math::statistics::median_f32_mut;
+use crate::math::statistics::sigma_clipped_median_mad;
+use common::bit_buffer2::BitBuffer2;
+use common::buffer2::Buffer2;
 use rayon::prelude::*;
 
 // ============================================================================

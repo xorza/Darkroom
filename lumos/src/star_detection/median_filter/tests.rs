@@ -1,7 +1,7 @@
 //! Tests for 3x3 median filter.
 
 use super::*;
-use crate::common::Buffer2;
+use common::buffer2::Buffer2;
 
 #[test]
 fn test_uniform_image() {

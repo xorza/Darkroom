@@ -350,7 +350,7 @@ fn bench_bayer_rcd_quality_vs_libraw() {
 #[test]
 #[ignore]
 fn bench_rcd_demosaic_core() {
-    use demosaic::bayer::CfaPattern;
+    use demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
 
     println!("Benchmarking RCD demosaic core (synthetic data)\n");
 
@@ -419,8 +419,8 @@ struct ChannelCompareStats {
 
 /// Compare two channels using linear regression to remove scale/offset differences.
 fn compare_channels(
-    a: &crate::common::Buffer2<f32>,
-    b: &crate::common::Buffer2<f32>,
+    a: &common::buffer2::Buffer2<f32>,
+    b: &common::buffer2::Buffer2<f32>,
     width: usize,
     height: usize,
     border: usize,

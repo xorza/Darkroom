@@ -7,13 +7,14 @@
 use crate::{AstroImage, ImageDimensions};
 use glam::DVec2;
 
-use crate::common::Buffer2;
 use crate::registration::config::InterpolationMethod;
 use crate::registration::interpolation::{WarpParams, warp_image};
 use crate::registration::transform::{Transform, WarpTransform};
 use crate::registration::{Config, TransformType, register};
-use crate::star_detection::{StarDetector, config::Config as DetConfig};
-use crate::testing::synthetic::{self, StarFieldConfig};
+use crate::star_detection::config::Config as DetConfig;
+use crate::star_detection::detector::StarDetector;
+use crate::testing::synthetic::{self, star_field::StarFieldConfig};
+use common::buffer2::Buffer2;
 
 /// Default star detector for synthetic images.
 fn detector() -> StarDetector {
@@ -73,12 +74,12 @@ fn test_image_registration_translation() {
     let config = StarFieldConfig {
         num_stars: 50,
         seed: 42,
-        ..synthetic::sparse_field_config()
+        ..synthetic::star_field::sparse_field_config()
     };
     let width = config.width;
     let height = config.height;
 
-    let (ref_pixels, _ground_truth) = synthetic::generate_star_field(&config);
+    let (ref_pixels, _ground_truth) = synthetic::star_field::generate_star_field(&config);
     let ref_pixels_vec = ref_pixels.into_vec();
 
     // Apply a known translation to create target image
@@ -154,12 +155,12 @@ fn test_image_registration_rotation() {
     let config = StarFieldConfig {
         num_stars: 60,
         seed: 123,
-        ..synthetic::sparse_field_config()
+        ..synthetic::star_field::sparse_field_config()
     };
     let width = config.width;
     let height = config.height;
 
-    let (ref_pixels, _) = synthetic::generate_star_field(&config);
+    let (ref_pixels, _) = synthetic::star_field::generate_star_field(&config);
     let ref_pixels_vec = ref_pixels.into_vec();
 
     // Apply rotation + small translation
@@ -213,12 +214,12 @@ fn test_image_registration_similarity() {
     let config = StarFieldConfig {
         num_stars: 70,
         seed: 456,
-        ..synthetic::sparse_field_config()
+        ..synthetic::star_field::sparse_field_config()
     };
     let width = config.width;
     let height = config.height;
 
-    let (ref_pixels, _) = synthetic::generate_star_field(&config);
+    let (ref_pixels, _) = synthetic::star_field::generate_star_field(&config);
     let ref_pixels_vec = ref_pixels.into_vec();
 
     // Apply similarity transform (translation + rotation + scale)
@@ -285,12 +286,12 @@ fn test_image_registration_with_noise() {
         num_stars: 80,
         noise_sigma: 0.04, // Higher noise
         seed: 789,
-        ..synthetic::sparse_field_config()
+        ..synthetic::star_field::sparse_field_config()
     };
     let width = config.width;
     let height = config.height;
 
-    let (ref_pixels, _) = synthetic::generate_star_field(&config);
+    let (ref_pixels, _) = synthetic::star_field::generate_star_field(&config);
     let ref_pixels_vec = ref_pixels.into_vec();
 
     // Apply translation
@@ -351,12 +352,12 @@ fn test_image_registration_dense_field() {
     let config = StarFieldConfig {
         num_stars: 200,
         seed: 999,
-        ..synthetic::dense_field_config()
+        ..synthetic::star_field::dense_field_config()
     };
     let width = config.width;
     let height = config.height;
 
-    let (ref_pixels, _) = synthetic::generate_star_field(&config);
+    let (ref_pixels, _) = synthetic::star_field::generate_star_field(&config);
     let ref_pixels_vec = ref_pixels.into_vec();
 
     let dx = 10.0;
@@ -411,12 +412,12 @@ fn test_image_registration_large_image() {
         height: 1024,
         num_stars: 100,
         seed: 111,
-        ..synthetic::sparse_field_config()
+        ..synthetic::star_field::sparse_field_config()
     };
     let width = config.width;
     let height = config.height;
 
-    let (ref_pixels, _) = synthetic::generate_star_field(&config);
+    let (ref_pixels, _) = synthetic::star_field::generate_star_field(&config);
     let ref_pixels_vec = ref_pixels.into_vec();
 
     // Larger translation for larger image

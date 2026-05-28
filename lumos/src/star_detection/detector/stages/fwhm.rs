@@ -3,8 +3,8 @@
 //! Determines the effective FWHM for matched filtering by either using
 //! a manual value, auto-estimating from bright stars, or disabling.
 
-use crate::common::Buffer2;
-use crate::math::{mad_f32_with_scratch, median_f32_mut};
+use crate::math::statistics::{mad_f32_with_scratch, median_f32_mut};
+use common::buffer2::Buffer2;
 
 /// Minimum plausible FWHM in pixels. Stars narrower than this are likely
 /// cosmic rays or hot pixels.
@@ -27,7 +27,7 @@ const FWHM_MAD_FLOOR_FRACTION: f32 = 0.1;
 
 use super::detect::detect;
 use super::measure;
-use crate::star_detection::background::BackgroundEstimate;
+use crate::star_detection::background::estimate::BackgroundEstimate;
 use crate::star_detection::buffer_pool::BufferPool;
 use crate::star_detection::config::Config;
 use crate::star_detection::star::Star;

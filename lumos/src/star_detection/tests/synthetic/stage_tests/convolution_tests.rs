@@ -2,13 +2,13 @@
 //!
 //! Tests the Gaussian filtering for star enhancement.
 
-use crate::common::Buffer2;
 use crate::math::fwhm_to_sigma;
 use crate::star_detection::config::Config;
 use crate::star_detection::convolution::gaussian_convolve;
-use crate::star_detection::tests::common::output::save_grayscale;
+use crate::star_detection::tests::common::output::image_writer::save_grayscale;
 use crate::testing::init_tracing;
-use crate::testing::synthetic::{StarFieldConfig, generate_star_field};
+use crate::testing::synthetic::star_field::{StarFieldConfig, generate_star_field};
+use common::buffer2::Buffer2;
 use common::test_utils::test_output_path;
 
 use super::TILE_SIZE;

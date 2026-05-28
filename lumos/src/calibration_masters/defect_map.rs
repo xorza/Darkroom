@@ -27,7 +27,7 @@
 //!    (by the central limit theorem for order statistics).
 
 use crate::astro_image::cfa::{CfaImage, CfaType};
-use crate::common::Buffer2;
+use common::buffer2::Buffer2;
 
 use arrayvec::ArrayVec;
 
@@ -145,7 +145,7 @@ impl DefectMap {
 /// Maximum number of samples per color channel for median estimation.
 const MAX_MEDIAN_SAMPLES: usize = 100_000;
 
-use crate::math::MAD_TO_SIGMA;
+use crate::math::statistics::MAD_TO_SIGMA;
 
 /// Get CFA color index at (x, y). Returns 0 for Mono (None CFA type).
 fn cfa_color_at(cfa_type: Option<&CfaType>, x: usize, y: usize) -> u8 {
@@ -176,12 +176,12 @@ fn compute_per_color_thresholds(
             continue;
         }
 
-        let median = crate::math::median_f32_mut(&mut samples);
+        let median = crate::math::statistics::median_f32_mut(&mut samples);
 
         for v in samples.iter_mut() {
             *v = (*v - median).abs();
         }
-        let mad = crate::math::median_f32_mut(&mut samples);
+        let mad = crate::math::statistics::median_f32_mut(&mut samples);
 
         let computed_sigma = mad * MAD_TO_SIGMA;
         // Floor prevents over-detection on uniform/clean darks (MAD≈0).
@@ -281,7 +281,7 @@ fn median_of_neighbors_raw(pixels: &Buffer2<f32>, x: usize, y: usize) -> f32 {
         return *pixels.get(x, y);
     }
 
-    crate::math::median_f32_mut(&mut neighbors[..count])
+    crate::math::statistics::median_f32_mut(&mut neighbors[..count])
 }
 
 /// Find same-color CFA neighbors and return their median.
@@ -330,7 +330,7 @@ fn bayer_same_color_median(pixels: &Buffer2<f32>, x: usize, y: usize) -> f32 {
     if count == 0 {
         return *pixels.get(x, y);
     }
-    crate::math::median_f32_mut(&mut buf[..count])
+    crate::math::statistics::median_f32_mut(&mut buf[..count])
 }
 
 /// X-Trans same-color neighbor median.
@@ -379,7 +379,7 @@ fn xtrans_same_color_median(pixels: &Buffer2<f32>, x: usize, y: usize, pattern: 
     for (i, &(_, val)) in candidates[..n].iter().enumerate() {
         neighbors[i] = val;
     }
-    crate::math::median_f32_mut(&mut neighbors[..n])
+    crate::math::statistics::median_f32_mut(&mut neighbors[..n])
 }
 
 #[cfg(test)]
@@ -407,7 +407,7 @@ mod tests {
             6,
             6,
             pixels,
-            CfaType::Bayer(crate::raw::demosaic::CfaPattern::Rggb),
+            CfaType::Bayer(crate::raw::demosaic::bayer::CfaPattern::Rggb),
         );
         let defect_map = DefectMap::from_master_dark(&dark, 5.0);
 
@@ -430,7 +430,7 @@ mod tests {
             6,
             6,
             pixels,
-            CfaType::Bayer(crate::raw::demosaic::CfaPattern::Rggb),
+            CfaType::Bayer(crate::raw::demosaic::bayer::CfaPattern::Rggb),
         );
 
         let defect_map = DefectMap {
@@ -483,7 +483,7 @@ mod tests {
         pixels[2] = 70.0; // (2,0)
         pixels[4 * 6 + 2] = 80.0; // (2,4)
 
-        let pixels = crate::common::Buffer2::new(6, 6, pixels);
+        let pixels = common::buffer2::Buffer2::new(6, 6, pixels);
         let result = bayer_same_color_median(&pixels, 2, 2);
 
         // Neighbors: 50, 60, 70, 80, 100 (0,2=100), 100 (4,2=100), 100 (0,4=100), 100 (4,4=100)
@@ -503,7 +503,7 @@ mod tests {
             999.0, 10.0, 50.0, 10.0, 10.0, 10.0, 10.0, 10.0, 60.0, 10.0, 70.0, 10.0, 10.0, 10.0,
             10.0, 10.0,
         ];
-        let pixels = crate::common::Buffer2::new(4, 4, pixels);
+        let pixels = common::buffer2::Buffer2::new(4, 4, pixels);
         let result = bayer_same_color_median(&pixels, 0, 0);
 
         // Same-color neighbors: (2,0)=50, (0,2)=60, (2,2)=70
@@ -531,7 +531,7 @@ mod tests {
             size,
             size,
             pixels,
-            CfaType::Bayer(crate::raw::demosaic::CfaPattern::Rggb),
+            CfaType::Bayer(crate::raw::demosaic::bayer::CfaPattern::Rggb),
         );
         let defect_map = DefectMap::from_master_dark(&dark, 5.0);
 
@@ -557,7 +557,7 @@ mod tests {
             6,
             6,
             pixels,
-            CfaType::Bayer(crate::raw::demosaic::CfaPattern::Rggb),
+            CfaType::Bayer(crate::raw::demosaic::bayer::CfaPattern::Rggb),
         );
         let defect_map = DefectMap::from_master_dark(&dark, 5.0);
 
@@ -581,7 +581,7 @@ mod tests {
             6,
             6,
             pixels,
-            CfaType::Bayer(crate::raw::demosaic::CfaPattern::Rggb),
+            CfaType::Bayer(crate::raw::demosaic::bayer::CfaPattern::Rggb),
         );
         let defect_map = DefectMap::from_master_dark(&dark, 5.0);
 
@@ -625,7 +625,7 @@ mod tests {
         // Blue pixels (at odd x, odd y) have value 50.0
         // One red pixel is hot at 500.0 — should be detected by per-channel stats
         // even though 500 might not exceed a global threshold dominated by green=200.
-        let pattern = CfaType::Bayer(crate::raw::demosaic::CfaPattern::Rggb);
+        let pattern = CfaType::Bayer(crate::raw::demosaic::bayer::CfaPattern::Rggb);
         let mut pixels = vec![0.0f32; 64];
         for y in 0..8 {
             for x in 0..8 {
@@ -659,7 +659,7 @@ mod tests {
     fn test_per_channel_detection_cold_in_blue() {
         // 8x8 Bayer RGGB: R=100, G=200, B=150
         // One blue pixel is dead at 0.0
-        let pattern = CfaType::Bayer(crate::raw::demosaic::CfaPattern::Rggb);
+        let pattern = CfaType::Bayer(crate::raw::demosaic::bayer::CfaPattern::Rggb);
         let mut pixels = vec![0.0f32; 64];
         for y in 0..8 {
             for x in 0..8 {

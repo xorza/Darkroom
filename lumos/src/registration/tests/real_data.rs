@@ -11,7 +11,8 @@ use ::quickbench::quick_bench;
 
 use crate::AstroImage;
 use crate::registration::config::Config as RegistrationConfig;
-use crate::star_detection::{StarDetector, config::Config};
+use crate::star_detection::config::Config;
+use crate::star_detection::detector::StarDetector;
 use crate::testing::calibration_dir;
 
 const IMAGE_EXTENSIONS: &[&str] = &["tiff", "tif", "fit", "fits", "png"];
@@ -178,13 +179,13 @@ fn test_register_two_calibrated_lights() {
         .map(|&(_, ti)| target_positions[ti])
         .collect();
 
-    let sip_config = crate::registration::distortion::SipConfig {
+    let sip_config = crate::registration::distortion::sip::SipConfig {
         order: 4,
         reference_point: None,
         ..Default::default()
     };
 
-    let sip = crate::registration::distortion::SipPolynomial::fit_from_transform(
+    let sip = crate::registration::distortion::sip::SipPolynomial::fit_from_transform(
         &inlier_ref,
         &inlier_target,
         &result.transform,

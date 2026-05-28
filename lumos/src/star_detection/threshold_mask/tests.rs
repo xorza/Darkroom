@@ -8,7 +8,8 @@
 //! - Multi-row tests: 2D image patterns and row boundary handling
 
 use super::{create_threshold_mask, create_threshold_mask_filtered};
-use crate::common::{BitBuffer2, Buffer2};
+use common::bit_buffer2::BitBuffer2;
+use common::buffer2::Buffer2;
 
 // ============================================================================
 // Test helpers

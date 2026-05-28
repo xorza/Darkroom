@@ -14,13 +14,10 @@
 //! 6. Extract high-confidence matches from vote matrix
 
 mod geometry;
-mod matching;
+pub(crate) mod matching;
 #[cfg(test)]
 mod tests;
-mod voting;
-
-pub use matching::match_triangles;
-pub use voting::PointMatch;
+pub(crate) mod voting;
 
 /// Triangle matching parameters extracted from Config.
 #[derive(Debug, Clone)]

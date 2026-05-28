@@ -2,8 +2,8 @@
 //!
 //! Run with: `cargo test -p lumos --features real-data rho_opiuchi -- --ignored --nocapture`
 
-use crate::star_detection::StarDetector;
 use crate::star_detection::config::Config;
+use crate::star_detection::detector::StarDetector;
 use crate::testing::{calibration_dir, init_tracing};
 use crate::{AstroImage, CentroidMethod};
 use common::test_utils::test_output_path;
@@ -116,7 +116,6 @@ fn test_detect_rho_opiuchi() {
 #[ignore] // Requires LUMOS_CALIBRATION_DIR
 fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     use super::common::output::image_writer;
-    use crate::common::Buffer2;
     use crate::star_detection::background::estimate_background;
     use crate::star_detection::buffer_pool::BufferPool;
     use crate::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
@@ -125,6 +124,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     use crate::star_detection::labeling::LabelMap;
     use crate::star_detection::mask_dilation::dilate_mask;
     use crate::star_detection::threshold_mask::create_threshold_mask_filtered;
+    use common::buffer2::Buffer2;
 
     init_tracing();
 

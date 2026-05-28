@@ -1,10 +1,10 @@
 //! Test utilities for the detect stage.
 
-use crate::common::Buffer2;
-use crate::star_detection::background::BackgroundEstimate;
+use crate::star_detection::background::estimate::BackgroundEstimate;
 use crate::star_detection::buffer_pool::BufferPool;
 use crate::star_detection::config::Config;
-use crate::star_detection::deblend::Region;
+use crate::star_detection::deblend::region::Region;
+use common::buffer2::Buffer2;
 
 use super::detect::detect;
 

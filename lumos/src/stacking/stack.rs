@@ -15,7 +15,7 @@ use super::config::{CombineMethod, Normalization, StackConfig, Weighting};
 use super::error::Error;
 use super::progress::ProgressCallback;
 use crate::math;
-use crate::star_detection::ChannelStats;
+use crate::star_detection::detector::ChannelStats;
 
 /// Per-frame, per-channel affine normalization parameters.
 ///
@@ -286,8 +286,11 @@ fn resolve_weights(weighting: &Weighting, stats: &[FrameStats]) -> Option<Vec<f3
             let weights: Vec<f32> = stats
                 .iter()
                 .map(|fs| {
-                    let sigma_sum: f32 =
-                        fs.channels.iter().map(|c| math::mad_to_sigma(c.mad)).sum();
+                    let sigma_sum: f32 = fs
+                        .channels
+                        .iter()
+                        .map(|c| math::statistics::mad_to_sigma(c.mad))
+                        .sum();
                     let avg_sigma = sigma_sum / fs.channels.len() as f32;
                     if avg_sigma > f32::EPSILON {
                         1.0 / (avg_sigma * avg_sigma)
@@ -336,7 +339,7 @@ fn dispatch_stacking(
 ) -> crate::astro_image::PixelData {
     match config.method {
         CombineMethod::Median => cache.process_chunked(None, frame_norms, |values, _, _| {
-            math::median_f32_mut(values)
+            math::statistics::median_f32_mut(values)
         }),
 
         CombineMethod::Mean(rejection) => {
@@ -519,7 +522,7 @@ mod tests {
         let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
 
         let result = cache.process_chunked(None, Some(&norm_params), |values, _, _| {
-            math::mean_f32(values)
+            math::sum::mean_f32(values)
         });
         assert_channel_near(&result, 0, 100.0, 1.0);
     }
@@ -573,7 +576,7 @@ mod tests {
         let norm_params = norm_params_for(&cache, Normalization::Multiplicative).unwrap();
 
         let result = cache.process_chunked(None, Some(&norm_params), |values, _, _| {
-            math::mean_f32(values)
+            math::sum::mean_f32(values)
         });
         assert_channel_near(&result, 0, 100.0, 1.0);
     }
@@ -595,7 +598,7 @@ mod tests {
             let norm_params = norm_params_for(&cache, mode).unwrap();
 
             let result = cache.process_chunked(None, Some(&norm_params), |values, _, _| {
-                math::mean_f32(values)
+                math::sum::mean_f32(values)
             });
 
             for (ch, &expected) in ref_rgb.iter().enumerate() {
@@ -774,7 +777,7 @@ mod tests {
 
         // Frame 1 is reference (lower noise), so stacked result should be ~200
         let result = cache.process_chunked(None, Some(&norm_params), |values, _, _| {
-            math::mean_f32(values)
+            math::sum::mean_f32(values)
         });
         assert_channel_near(&result, 0, 200.0, 2.0);
     }
@@ -797,8 +800,8 @@ mod tests {
 
         let stats = cache.channel_stats().to_vec();
         // sigma0 ≈ MAD*1.4826 (small), sigma1 ≈ MAD*1.4826 (large)
-        let sigma0 = math::mad_to_sigma(stats[0].channels[0].mad);
-        let sigma1 = math::mad_to_sigma(stats[1].channels[0].mad);
+        let sigma0 = math::statistics::mad_to_sigma(stats[0].channels[0].mad);
+        let sigma1 = math::statistics::mad_to_sigma(stats[1].channels[0].mad);
         assert!(
             sigma1 > sigma0 * 5.0,
             "Frame 1 should be much noisier: sigma0={sigma0}, sigma1={sigma1}"

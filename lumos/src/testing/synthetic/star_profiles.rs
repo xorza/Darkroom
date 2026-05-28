@@ -6,9 +6,6 @@
 //! - Elliptical Gaussian (tracking errors)
 //! - Saturated stars (flat-topped profiles)
 
-// Re-export from math module
-pub use crate::math::{fwhm_to_sigma, sigma_to_fwhm};
-
 /// Render a circular Gaussian star profile.
 ///
 /// # Arguments
@@ -252,6 +249,7 @@ pub fn render_cosmic_ray_extended(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::{fwhm_to_sigma, sigma_to_fwhm};
 
     #[test]
     fn test_gaussian_peak_at_center() {

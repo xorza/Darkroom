@@ -39,7 +39,7 @@ pub(crate) mod config;
 pub(crate) mod distortion;
 pub(crate) mod interpolation;
 pub(crate) mod ransac;
-mod result;
+pub(crate) mod result;
 pub(crate) mod spatial;
 pub(crate) mod transform;
 pub(crate) mod triangle;
@@ -47,19 +47,10 @@ pub(crate) mod triangle;
 #[cfg(test)]
 mod tests;
 
-// === Primary Public API ===
-
-// Configuration
-pub use config::{Config, InterpolationMethod};
-
-// Core types
-pub use transform::{Transform, TransformType, WarpTransform};
-
-// Results and errors
-pub use result::{RansacFailureReason, RegistrationError, RegistrationResult};
-
-// Distortion (for users who need manual SIP access)
-pub use distortion::SipPolynomial;
+use config::Config;
+use distortion::sip::SipPolynomial;
+use result::{RansacFailureReason, RegistrationError, RegistrationResult};
+use transform::{Transform, TransformType, WarpTransform};
 
 // === Top-Level Functions ===
 
@@ -68,12 +59,15 @@ use std::time::Instant;
 use glam::DVec2;
 
 use crate::AstroImage;
-use crate::star_detection::Star;
-use distortion::SipConfig;
+use crate::star_detection::star::Star;
+use distortion::sip::SipConfig;
 use interpolation::warp_image;
-use ransac::{RansacEstimator, RansacParams, estimate_transform};
+use ransac::transforms::estimate_transform;
+use ransac::{RansacEstimator, RansacParams};
 use spatial::KdTree;
-use triangle::{PointMatch, TriangleParams, match_triangles};
+use triangle::TriangleParams;
+use triangle::matching::match_triangles;
+use triangle::voting::PointMatch;
 
 /// Register two sets of star positions.
 ///
@@ -536,7 +530,7 @@ mod fwhm_tests {
 #[cfg(test)]
 mod recovery_tests {
     use super::*;
-    use crate::testing::synthetic::generate_random_positions;
+    use crate::testing::synthetic::transforms::generate_random_positions;
 
     /// Apply a similarity transform (rotation + translation) around a center.
     fn apply_similarity(pos: DVec2, dx: f64, dy: f64, angle: f64, center: DVec2) -> DVec2 {

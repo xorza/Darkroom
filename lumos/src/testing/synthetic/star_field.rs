@@ -9,10 +9,11 @@ use super::backgrounds::{
     add_vignette_background,
 };
 use super::star_profiles::{
-    fwhm_to_moffat_alpha, fwhm_to_sigma, render_elliptical_star, render_gaussian_star,
-    render_moffat_star, render_saturated_star,
+    fwhm_to_moffat_alpha, render_elliptical_star, render_gaussian_star, render_moffat_star,
+    render_saturated_star,
 };
-use crate::common::Buffer2;
+use crate::math::fwhm_to_sigma;
+use common::buffer2::Buffer2;
 use glam::DVec2;
 use std::f32::consts::PI;
 

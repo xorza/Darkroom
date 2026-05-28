@@ -11,7 +11,7 @@ use imaginarium::{ChannelCount, ColorFormat, Image, ImageDesc};
 use std::ops::SubAssign;
 use std::path::Path;
 
-use crate::common::Buffer2;
+use common::buffer2::Buffer2;
 
 // ============================================================================
 // BitPix - FITS pixel data types
@@ -477,7 +477,7 @@ impl AstroImage {
     /// Calculate mean pixel value across all channels.
     pub fn mean(&self) -> f32 {
         fn parallel_sum(values: &[f32]) -> f32 {
-            values.par_chunks(8192).map(crate::math::sum_f32).sum()
+            values.par_chunks(8192).map(crate::math::sum::sum_f32).sum()
         }
 
         match &self.pixels {
@@ -572,8 +572,8 @@ impl crate::stacking::cache::StackableImage for AstroImage {
         &self.metadata
     }
 
-    fn load(path: &Path) -> Result<Self, crate::stacking::Error> {
-        AstroImage::from_file(path).map_err(|e| crate::stacking::Error::ImageLoad {
+    fn load(path: &Path) -> Result<Self, crate::stacking::error::Error> {
+        AstroImage::from_file(path).map_err(|e| crate::stacking::error::Error::ImageLoad {
             path: path.to_path_buf(),
             source: std::io::Error::other(e),
         })

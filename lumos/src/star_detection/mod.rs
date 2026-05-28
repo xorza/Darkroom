@@ -54,36 +54,17 @@
 
 pub(crate) mod background;
 pub(crate) mod buffer_pool;
-mod centroid;
+pub(crate) mod centroid;
 pub mod config;
 mod convolution;
-mod deblend;
+pub(crate) mod deblend;
 pub mod detection_file;
 pub(crate) mod detector;
 pub(crate) mod labeling;
 mod mask_dilation;
 mod median_filter;
-mod star;
+pub(crate) mod star;
 pub(crate) mod threshold_mask;
 
 #[cfg(test)]
 pub mod tests;
-
-// =============================================================================
-// Public API Exports
-// =============================================================================
-
-// Main detector types
-pub use detector::{ChannelStats, DetectionResult, Diagnostics, StarDetector};
-
-// Configuration
-pub use config::BackgroundRefinement;
-pub use config::CentroidMethod;
-pub use config::Config;
-pub use config::Connectivity;
-pub use config::LocalBackgroundMethod;
-pub use config::NoiseModel;
-pub use star::Star;
-
-// Pipeline data structures
-pub use background::BackgroundEstimate;

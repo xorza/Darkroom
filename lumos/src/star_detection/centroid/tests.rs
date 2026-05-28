@@ -3,13 +3,14 @@
 use glam::Vec2;
 
 use super::*;
-use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;
-use crate::math::{Aabb, Vec2us};
-use crate::star_detection::BackgroundEstimate;
+use crate::math::bbox::Aabb;
+use crate::math::vec2us::Vec2us;
+use crate::star_detection::background::estimate::BackgroundEstimate;
 use crate::star_detection::config::Config;
-use crate::star_detection::deblend::Region;
+use crate::star_detection::deblend::region::Region;
 use crate::star_detection::detector::stages::detect_test_utils::detect_stars_test;
+use common::buffer2::Buffer2;
 
 /// Default stamp radius for tests (matching expected FWHM of ~4 pixels).
 const TEST_STAMP_RADIUS: usize = 7;
@@ -1372,7 +1373,7 @@ fn test_asymmetric_star_roundness2() {
 
 #[test]
 fn test_star_is_round() {
-    use crate::star_detection::Star;
+    use crate::star_detection::star::Star;
 
     let round_star = Star {
         pos: glam::DVec2::new(10.0, 10.0),
@@ -2327,7 +2328,7 @@ fn test_extract_stamp_fractional_position() {
 
 #[test]
 fn test_local_annulus_background_uniform() {
-    use crate::star_detection::LocalBackgroundMethod;
+    use crate::star_detection::config::LocalBackgroundMethod;
 
     let width = 128;
     let height = 128;
@@ -2375,7 +2376,7 @@ fn test_local_annulus_background_uniform() {
 
 #[test]
 fn test_local_annulus_vs_global_map() {
-    use crate::star_detection::LocalBackgroundMethod;
+    use crate::star_detection::config::LocalBackgroundMethod;
 
     let width = 128;
     let height = 128;
@@ -2424,7 +2425,7 @@ fn test_local_annulus_vs_global_map() {
 
 #[test]
 fn test_local_annulus_near_edge_fallback() {
-    use crate::star_detection::LocalBackgroundMethod;
+    use crate::star_detection::config::LocalBackgroundMethod;
 
     let width = 64;
     let height = 64;

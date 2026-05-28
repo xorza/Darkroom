@@ -7,8 +7,8 @@
 use rayon::prelude::*;
 
 use super::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
-use crate::common::Buffer2;
-use crate::raw::demosaic::CfaPattern;
+use crate::raw::demosaic::bayer::CfaPattern;
+use common::buffer2::Buffer2;
 
 /// CFA pattern for raw sensor data.
 #[derive(Debug, Clone)]
@@ -66,8 +66,8 @@ impl crate::stacking::cache::StackableImage for CfaImage {
         &self.metadata
     }
 
-    fn load(path: &std::path::Path) -> Result<Self, crate::stacking::Error> {
-        crate::raw::load_raw_cfa(path).map_err(|e| crate::stacking::Error::ImageLoad {
+    fn load(path: &std::path::Path) -> Result<Self, crate::stacking::error::Error> {
+        crate::raw::load_raw_cfa(path).map_err(|e| crate::stacking::error::Error::ImageLoad {
             path: path.to_path_buf(),
             source: std::io::Error::other(e),
         })

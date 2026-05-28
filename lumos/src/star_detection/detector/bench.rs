@@ -10,7 +10,7 @@ use crate::star_detection::config::{
     BackgroundRefinement, CentroidMethod, Config, Connectivity, LocalBackgroundMethod,
 };
 use crate::testing::init_tracing;
-use crate::testing::synthetic::generate_globular_cluster;
+use crate::testing::synthetic::star_field::generate_globular_cluster;
 use crate::{AstroImage, StarDetector};
 
 #[quick_bench(warmup_iters = 3, iters = 10)]
@@ -109,7 +109,7 @@ fn bench_detect_1k_sparse(b: ::quickbench::Bencher) {
 #[quick_bench(warmup_iters = 5, iters = 20)]
 fn bench_remove_duplicate_stars_5000(b: ::quickbench::Bencher) {
     use super::stages::filter::remove_duplicate_stars;
-    use crate::star_detection::Star;
+    use crate::star_detection::star::Star;
     use rand::prelude::*;
 
     // Generate 5000 stars in a 4K image area (similar to dense field)
@@ -139,7 +139,7 @@ fn bench_remove_duplicate_stars_5000(b: ::quickbench::Bencher) {
 #[quick_bench(warmup_iters = 5, iters = 20)]
 fn bench_remove_duplicate_stars_10000(b: ::quickbench::Bencher) {
     use super::stages::filter::remove_duplicate_stars;
-    use crate::star_detection::Star;
+    use crate::star_detection::star::Star;
     use rand::prelude::*;
 
     // Generate 10000 stars - extreme case

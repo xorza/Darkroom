@@ -6,10 +6,12 @@ use std::hint::black_box;
 
 use super::tile_grid::TileGrid;
 use super::{BufferPool, estimate_background, refine_background};
-use crate::common::{BitBuffer2, Buffer2};
-use crate::star_detection::background::BackgroundEstimate;
+use crate::star_detection::background::estimate::BackgroundEstimate;
 use crate::star_detection::config::Config;
-use crate::testing::synthetic::{generate_globular_cluster, stamps};
+use crate::testing::synthetic::stamps;
+use crate::testing::synthetic::star_field::generate_globular_cluster;
+use common::bit_buffer2::BitBuffer2;
+use common::buffer2::Buffer2;
 
 /// Estimate background with automatic buffer pool management (bench helper).
 fn estimate_background_test(pixels: &Buffer2<f32>, config: &Config) -> BackgroundEstimate {

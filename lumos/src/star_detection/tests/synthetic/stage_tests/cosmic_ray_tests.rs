@@ -4,12 +4,14 @@
 
 use crate::{AstroImage, ImageDimensions};
 
-use crate::star_detection::tests::common::output::{
+use crate::star_detection::config::Config;
+use crate::star_detection::detector::StarDetector;
+use crate::star_detection::tests::common::output::image_writer::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
-use crate::star_detection::{StarDetector, config::Config};
 use crate::testing::init_tracing;
-use crate::testing::synthetic::{StarFieldConfig, add_cosmic_rays, generate_star_field};
+use crate::testing::synthetic::artifacts::add_cosmic_rays;
+use crate::testing::synthetic::star_field::{StarFieldConfig, generate_star_field};
 use common::test_utils::test_output_path;
 use glam::Vec2;
 use imaginarium::Color;

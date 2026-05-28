@@ -1,13 +1,17 @@
 //! Debug test that outputs intermediate steps of star detection.
 
-use super::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
-use crate::common::{BitBuffer2, Buffer2};
-use crate::star_detection::tests::common::output::{mask_to_gray, to_gray_stretched};
-use crate::star_detection::tests::common::{gray_to_rgb_image_stretched, save_image};
+use super::star_field::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
+use crate::star_detection::tests::common::output::image_writer::{
+    gray_to_rgb_image_stretched, save_image,
+};
+use crate::star_detection::tests::common::output::image_writer::{mask_to_gray, to_gray_stretched};
 use crate::{AstroImage, ImageDimensions};
+use common::bit_buffer2::BitBuffer2;
+use common::buffer2::Buffer2;
 
+use crate::star_detection::config::Config;
+use crate::star_detection::detector::StarDetector;
 use crate::star_detection::mask_dilation::dilate_mask;
-use crate::star_detection::{StarDetector, config::Config};
 use crate::testing::init_tracing;
 use glam::Vec2;
 use imaginarium::Color;

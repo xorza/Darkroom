@@ -2,11 +2,13 @@
 
 use crate::{AstroImage, ImageDimensions};
 
-use crate::star_detection::tests::common::output::{
-    DetectionMetrics, compute_detection_metrics, save_comparison, save_grayscale, save_metrics,
+use crate::star_detection::config::Config;
+use crate::star_detection::detector::StarDetector;
+use crate::star_detection::tests::common::output::image_writer::{save_comparison, save_grayscale};
+use crate::star_detection::tests::common::output::metrics::{
+    DetectionMetrics, compute_detection_metrics, save_metrics,
 };
-use crate::star_detection::{StarDetector, config::Config};
-use crate::testing::synthetic::{StarFieldConfig, generate_star_field};
+use crate::testing::synthetic::star_field::{StarFieldConfig, generate_star_field};
 use common::test_utils::test_output_path;
 
 mod challenging_tests;

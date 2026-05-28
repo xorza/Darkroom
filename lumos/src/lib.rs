@@ -44,8 +44,8 @@ pub mod prelude;
 pub use astro_image::cfa::{CfaImage, CfaType};
 pub use astro_image::error::ImageError;
 pub use astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
-pub use calibration_masters::DefectMap;
-pub use raw::demosaic::CfaPattern;
+pub use calibration_masters::defect_map::DefectMap;
+pub use raw::demosaic::bayer::CfaPattern;
 
 // ============================================================================
 // Calibration
@@ -57,66 +57,37 @@ pub use calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
 // Star detection
 // ============================================================================
 
-pub use star_detection::{
-    // Pipeline data structures
-    BackgroundEstimate,
-    BackgroundRefinement,
-    // Configuration
-    CentroidMethod,
-    ChannelStats,
-    Config as StarDetectionConfig,
-    Connectivity,
-    // Main API
-    DetectionResult as StarDetectionResult,
-    Diagnostics as StarDetectionDiagnostics,
-    LocalBackgroundMethod,
-    NoiseModel,
-    Star,
+pub use star_detection::background::estimate::BackgroundEstimate;
+pub use star_detection::config::{
+    BackgroundRefinement, CentroidMethod, Config as StarDetectionConfig, Connectivity,
+    LocalBackgroundMethod, NoiseModel,
+};
+pub use star_detection::detector::{
+    ChannelStats, DetectionResult as StarDetectionResult, Diagnostics as StarDetectionDiagnostics,
     StarDetector,
 };
+pub use star_detection::star::Star;
 
 // ============================================================================
 // Registration
 // ============================================================================
 
-pub use registration::{
-    // Configuration
-    Config as RegistrationConfig,
-    InterpolationMethod,
-    // Results and errors
-    RansacFailureReason,
-    RegistrationError,
-    RegistrationResult,
-    // Core types
-    SipPolynomial,
-    Transform,
-    TransformType,
-    WarpTransform,
-    // Top-level functions
-    register,
-    warp,
-};
+pub use registration::config::{Config as RegistrationConfig, InterpolationMethod};
+pub use registration::distortion::sip::SipPolynomial;
+pub use registration::result::{RansacFailureReason, RegistrationError, RegistrationResult};
+pub use registration::transform::{Transform, TransformType, WarpTransform};
+pub use registration::{register, warp};
 
 // ============================================================================
 // Stacking
 // ============================================================================
 
-pub use stacking::{
-    // Configuration
-    CacheConfig,
-    CombineMethod,
-    FrameType,
-    Normalization,
-    // Progress reporting
-    ProgressCallback,
-    Rejection,
-    StackConfig,
-    StackingProgress,
-    StackingStage,
-    // Main API
-    stack,
-    stack_with_progress,
-};
+pub use stacking::FrameType;
+pub use stacking::cache_config::CacheConfig;
+pub use stacking::config::{CombineMethod, Normalization, StackConfig};
+pub use stacking::progress::{ProgressCallback, StackingProgress, StackingStage};
+pub use stacking::rejection::Rejection;
+pub use stacking::stack::{stack, stack_with_progress};
 
 // ============================================================================
 // Drizzle

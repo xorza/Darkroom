@@ -1,11 +1,14 @@
 //! Integration tests for deblending algorithms.
 //! These tests compare behavior between local_maxima and multi_threshold.
 
+use super::local_maxima::deblend_local_maxima;
+use super::multi_threshold::{DeblendBuffers, deblend_multi_threshold};
+use super::region::Region;
 use super::*;
-use crate::common::Buffer2;
-use crate::math::Vec2us;
+use crate::math::vec2us::Vec2us;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::test_utils::label_map_from_raw;
+use common::buffer2::Buffer2;
 
 /// Convenience wrapper for tests — creates fresh buffers per call.
 fn deblend_multi_threshold_test(

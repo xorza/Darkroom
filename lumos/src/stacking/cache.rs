@@ -31,7 +31,7 @@ use crate::stacking::cache_config::{
 use crate::stacking::error::Error;
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
 use crate::stacking::stack::FrameNorm;
-use crate::star_detection::ChannelStats;
+use crate::star_detection::detector::ChannelStats;
 
 /// Per-frame statistics: one `ChannelStats` per channel.
 #[derive(Debug, Clone)]
@@ -49,8 +49,8 @@ fn compute_frame_stats(image: &impl StackableImage) -> FrameStats {
         let data = image.channel(0);
         let mut buf = Vec::with_capacity(dims.width * dims.height);
         buf.extend_from_slice(data);
-        let median = crate::math::median_f32_mut(&mut buf);
-        let mad = crate::math::mad_f32_with_scratch(data, median, &mut buf);
+        let median = crate::math::statistics::median_f32_mut(&mut buf);
+        let mad = crate::math::statistics::mad_f32_with_scratch(data, median, &mut buf);
         let mut channels = ArrayVec::new();
         channels.push(ChannelStats { median, mad });
         return FrameStats { channels };
@@ -63,8 +63,8 @@ fn compute_frame_stats(image: &impl StackableImage) -> FrameStats {
             let data = image.channel(c);
             let mut buf = Vec::with_capacity(dims.width * dims.height);
             buf.extend_from_slice(data);
-            let median = crate::math::median_f32_mut(&mut buf);
-            let mad = crate::math::mad_f32_with_scratch(data, median, &mut buf);
+            let median = crate::math::statistics::median_f32_mut(&mut buf);
+            let mad = crate::math::statistics::mad_f32_with_scratch(data, median, &mut buf);
             ChannelStats { median, mad }
         })
         .collect();

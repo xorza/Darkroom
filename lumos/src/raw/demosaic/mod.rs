@@ -8,6 +8,3 @@
 
 pub(crate) mod bayer;
 pub(crate) mod xtrans;
-
-pub use bayer::CfaPattern;
-pub(crate) use bayer::{BayerImage, demosaic_bayer};

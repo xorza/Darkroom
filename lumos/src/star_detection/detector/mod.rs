@@ -142,12 +142,15 @@ impl StarDetector {
         let grayscale_image = stages::prepare::prepare(image, pool);
 
         // Step 2: Estimate background and noise
-        let mut background =
-            stages::background::estimate_background(&grayscale_image, &self.config, pool);
+        let mut background = crate::star_detection::background::estimate_background(
+            &grayscale_image,
+            &self.config,
+            pool,
+        );
 
         // Step 2b: Refine background if iterative refinement is enabled
         if self.config.refinement.iterations() > 0 {
-            stages::background::refine_background(
+            crate::star_detection::background::refine_background(
                 &grayscale_image,
                 &mut background,
                 &self.config,
@@ -215,11 +218,11 @@ impl StarDetector {
         diagnostics.final_star_count = stars.len();
         if !stars.is_empty() {
             let mut buf: Vec<f32> = stars.iter().map(|s| s.fwhm).collect();
-            diagnostics.median_fwhm = crate::math::median_f32_mut(&mut buf);
+            diagnostics.median_fwhm = crate::math::statistics::median_f32_mut(&mut buf);
 
             buf.clear();
             buf.extend(stars.iter().map(|s| s.snr));
-            diagnostics.median_snr = crate::math::median_f32_mut(&mut buf);
+            diagnostics.median_snr = crate::math::statistics::median_f32_mut(&mut buf);
         }
 
         DetectionResult { stars, diagnostics }

@@ -3,13 +3,14 @@
 use glam::Vec2;
 
 use crate::star_detection::config::Config;
-use crate::star_detection::tests::common::output::{
+use crate::star_detection::tests::common::output::metrics::{
     PassCriteria, check_pass, crowded_criteria, faint_star_criteria,
 };
 use crate::testing::init_tracing;
-use crate::testing::synthetic::{
-    CrowdingType, ElongationType, NebulaConfig, StarFieldConfig, crowded_cluster_config,
-    elliptical_stars_config, faint_stars_config,
+use crate::testing::synthetic::backgrounds::NebulaConfig;
+use crate::testing::synthetic::star_field::{
+    CrowdingType, ElongationType, StarFieldConfig, crowded_cluster_config, elliptical_stars_config,
+    faint_stars_config,
 };
 
 /// Run full pipeline and evaluate metrics for challenging cases.

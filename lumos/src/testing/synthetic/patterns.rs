@@ -3,7 +3,7 @@
 //! Provides basic image patterns like gradients, uniform fills, and checkerboards
 //! that are commonly needed in benchmarks and tests.
 
-use crate::common::Buffer2;
+use common::buffer2::Buffer2;
 
 /// Create a uniform image filled with a single value.
 pub fn uniform(width: usize, height: usize, value: f32) -> Buffer2<f32> {

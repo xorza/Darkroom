@@ -29,10 +29,12 @@ use rayon::prelude::*;
 
 use crate::ImageDimensions;
 use crate::astro_image::AstroImage;
-use crate::common::Buffer2;
 use crate::registration::transform::Transform;
+use crate::stacking::FrameType;
+use crate::stacking::error::Error;
 use crate::stacking::progress::report_progress;
-use crate::stacking::{Error, FrameType, ProgressCallback, StackingStage};
+use crate::stacking::progress::{ProgressCallback, StackingStage};
+use common::buffer2::Buffer2;
 
 /// Maximum number of channels (RGB = 3).
 const MAX_CHANNELS: usize = 3;

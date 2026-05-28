@@ -26,10 +26,8 @@
 //!
 //! where U(r) = r² log(r). Use when distortion is non-radial or non-uniform.
 
-mod sip;
-mod tps;
+pub(crate) mod sip;
+pub(crate) mod tps;
 
 /// Pivot magnitude below which a matrix is considered singular in LU/Cholesky solvers.
 pub(crate) const SINGULAR_THRESHOLD: f64 = 1e-12;
-
-pub use sip::{SipConfig, SipFitResult, SipPolynomial};

@@ -20,7 +20,8 @@ mod bench;
 #[cfg(test)]
 mod tests;
 
-use crate::common::{BitBuffer2, Buffer2};
+use common::bit_buffer2::BitBuffer2;
+use common::buffer2::Buffer2;
 
 #[cfg(target_arch = "x86_64")]
 use common::cpu_features;

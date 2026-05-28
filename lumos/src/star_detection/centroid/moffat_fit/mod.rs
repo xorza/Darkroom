@@ -23,8 +23,8 @@ mod simd_neon;
 
 use super::lm_optimizer::{LMConfig, LMModel, optimize};
 use super::{estimate_sigma_from_moments, extract_stamp};
-use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;
+use common::buffer2::Buffer2;
 use glam::Vec2;
 
 /// Configuration for Moffat profile fitting.

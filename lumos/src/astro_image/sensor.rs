@@ -1,4 +1,4 @@
-use crate::raw::demosaic::CfaPattern;
+use crate::raw::demosaic::bayer::CfaPattern;
 
 /// Sensor type detected from libraw metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,6 +1,6 @@
 //! Per-pixel background and noise estimates.
 
-use crate::common::Buffer2;
+use common::buffer2::Buffer2;
 
 use super::super::buffer_pool::BufferPool;
 

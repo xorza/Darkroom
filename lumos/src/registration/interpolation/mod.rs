@@ -9,9 +9,9 @@ use std::sync::OnceLock;
 
 use rayon::prelude::*;
 
-use crate::common::Buffer2;
 use crate::registration::config::InterpolationMethod;
 use crate::registration::transform::WarpTransform;
+use common::buffer2::Buffer2;
 
 /// Bundled warp parameters passed through the interpolation pipeline.
 #[derive(Debug, Clone, Copy)]

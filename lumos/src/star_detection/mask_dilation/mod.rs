@@ -8,7 +8,8 @@ mod bench;
 #[cfg(test)]
 mod tests;
 
-use crate::common::{BitBuffer2, UnsafeSendPtr};
+use crate::common::UnsafeSendPtr;
+use common::bit_buffer2::BitBuffer2;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 /// Dilate a binary mask by the given radius (morphological dilation).

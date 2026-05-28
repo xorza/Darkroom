@@ -8,8 +8,8 @@
 //! - Combined disturbances (stress tests)
 
 use crate::registration::{Config, TransformType, register};
-use crate::star_detection::Star;
-use crate::testing::synthetic::{
+use crate::star_detection::star::Star;
+use crate::testing::synthetic::transforms::{
     add_spurious_star_list, add_star_noise, filter_stars_to_bounds, generate_random_stars,
     remove_random_star_list, transform_star_list, translate_star_list,
     translate_stars_with_overlap,

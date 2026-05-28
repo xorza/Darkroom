@@ -3,7 +3,7 @@
 //! Provides functions to generate small image stamps containing single stars
 //! with various PSF profiles (Gaussian, Moffat, elliptical).
 
-use crate::common::Buffer2;
+use common::buffer2::Buffer2;
 
 /// Generate a Gaussian star stamp.
 ///

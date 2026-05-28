@@ -11,8 +11,10 @@
 //! - Homography (8 DOF: handles perspective)
 
 use crate::registration::{Config, TransformType, register};
-use crate::star_detection::Star;
-use crate::testing::synthetic::{generate_random_stars, transform_star_list, translate_star_list};
+use crate::star_detection::star::Star;
+use crate::testing::synthetic::transforms::{
+    generate_random_stars, transform_star_list, translate_star_list,
+};
 use glam::DVec2;
 
 use super::helpers::{FWHM_NORMAL, FWHM_TIGHT, apply_affine, apply_homography};

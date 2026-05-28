@@ -6,7 +6,7 @@
 //! Most functions are generic over the `Positioned` trait, supporting both
 //! `DVec2` (bare positions) and `Star` (full star structs) transparently.
 
-use crate::star_detection::Star;
+use crate::star_detection::star::Star;
 use glam::DVec2;
 
 // ============================================================================

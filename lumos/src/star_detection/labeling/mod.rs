@@ -16,8 +16,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use rayon::prelude::*;
 
-use crate::common::{BitBuffer2, Buffer2, UnsafeSendPtr};
+use crate::common::UnsafeSendPtr;
 use crate::star_detection::buffer_pool::BufferPool;
+use common::bit_buffer2::BitBuffer2;
+use common::buffer2::Buffer2;
 
 use crate::star_detection::config::Connectivity;
 

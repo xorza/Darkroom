@@ -13,9 +13,9 @@ use arrayvec::ArrayVec;
 
 use super::region::Region;
 use super::{ComponentData, MAX_PEAKS, Pixel};
-use crate::common::Buffer2;
-use crate::math::Aabb;
+use crate::math::bbox::Aabb;
 use crate::star_detection::labeling::LabelMap;
+use common::buffer2::Buffer2;
 
 #[cfg(test)]
 mod tests;

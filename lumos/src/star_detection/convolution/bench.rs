@@ -5,10 +5,10 @@ use super::{
     MatchedFilterBuffers, convolve_cols, convolve_rows_parallel, elliptical_gaussian_convolve,
     gaussian_convolve, gaussian_kernel_1d, matched_filter,
 };
-use crate::common::Buffer2;
 use crate::star_detection::convolution::simd::convolve_row_scalar;
 use crate::testing::synthetic::stamps::benchmark_star_field;
 use ::quickbench::quick_bench;
+use common::buffer2::Buffer2;
 use std::hint::black_box;
 
 // ============ Row convolution: SIMD vs Scalar ============

@@ -17,7 +17,7 @@ mod tests;
 
 use rayon::prelude::*;
 
-use crate::common::Buffer2;
+use common::buffer2::Buffer2;
 
 /// Maximum deviation of axis_ratio from 1.0 to use the faster separable
 /// (circular) kernel path instead of full 2D elliptical convolution.

@@ -9,16 +9,18 @@ mod stage_tests;
 mod star_field;
 mod subpixel_accuracy;
 
-pub use star_field::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
-
-use crate::star_detection::tests::common::output::to_gray_image;
-use crate::star_detection::tests::common::{gray_to_rgb_image_stretched, save_image};
-use crate::star_detection::{Config, StarDetector};
+use crate::star_detection::config::Config;
+use crate::star_detection::detector::StarDetector;
+use crate::star_detection::tests::common::output::image_writer::to_gray_image;
+use crate::star_detection::tests::common::output::image_writer::{
+    gray_to_rgb_image_stretched, save_image,
+};
 use crate::testing::init_tracing;
 use crate::{AstroImage, ImageDimensions};
 use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
+use star_field::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 
 #[test]
 fn test_synthetic_star_detection() {

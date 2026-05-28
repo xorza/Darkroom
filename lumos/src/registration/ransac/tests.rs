@@ -2,7 +2,7 @@
 
 use super::transforms::{centroid, normalize_points};
 use super::*;
-use crate::registration::triangle::PointMatch;
+use crate::registration::triangle::voting::PointMatch;
 use glam::DVec2;
 use std::f64::consts::PI;
 

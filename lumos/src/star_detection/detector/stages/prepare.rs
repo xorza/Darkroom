@@ -1,9 +1,9 @@
 //! Image preparation stage: grayscale conversion and CFA filter.
 
 use crate::AstroImage;
-use crate::common::Buffer2;
 use crate::star_detection::buffer_pool::BufferPool;
 use crate::star_detection::median_filter::median_filter_3x3;
+use common::buffer2::Buffer2;
 
 /// Convert an input image to a grayscale f32 buffer, applying CFA median
 /// filtering if needed.

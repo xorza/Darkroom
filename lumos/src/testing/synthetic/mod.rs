@@ -45,25 +45,11 @@ pub mod star_field;
 pub mod star_profiles;
 pub mod transforms;
 
-// Re-export main types and functions for convenience
-use crate::common::Buffer2;
-pub use artifacts::add_cosmic_rays;
-pub use backgrounds::{
-    NebulaConfig, add_gradient_background, add_nebula_background, add_uniform_background,
-    add_vignette_background,
-};
-pub use star_field::{
+use common::buffer2::Buffer2;
+use star_field::{
     CrowdingType, ElongationType, GroundTruthStar, StarFieldConfig, crowded_cluster_config,
-    dense_field_config, elliptical_stars_config, faint_stars_config, generate_globular_cluster,
-    generate_star_field, sparse_field_config,
-};
-pub use star_profiles::{fwhm_to_sigma, render_gaussian_star};
-pub use transforms::{
-    add_position_noise, add_spurious_star_list, add_spurious_stars, add_star_noise,
-    filter_stars_to_bounds, filter_to_bounds, generate_random_positions, generate_random_stars,
-    positions_to_stars, remove_random_star_list, remove_random_stars, transform_star_list,
-    transform_stars, translate_star_list, translate_stars, translate_stars_with_overlap,
-    translate_with_overlap,
+    dense_field_config, elliptical_stars_config, faint_stars_config, generate_star_field,
+    sparse_field_config,
 };
 
 // ============================================================================

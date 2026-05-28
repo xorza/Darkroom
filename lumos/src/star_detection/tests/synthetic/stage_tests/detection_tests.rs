@@ -4,11 +4,13 @@
 
 use crate::star_detection::config::Config;
 use crate::star_detection::detector::stages::detect_test_utils::detect_stars_test;
-use crate::star_detection::tests::common::output::{
+use crate::star_detection::tests::common::output::image_writer::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
 use crate::testing::init_tracing;
-use crate::testing::synthetic::{StarFieldConfig, generate_star_field, sparse_field_config};
+use crate::testing::synthetic::star_field::{
+    StarFieldConfig, generate_star_field, sparse_field_config,
+};
 use common::test_utils::test_output_path;
 use glam::Vec2;
 use imaginarium::Color;

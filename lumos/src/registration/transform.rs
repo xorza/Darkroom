@@ -2,8 +2,8 @@
 
 use glam::DVec2;
 
-use crate::math::DMat3;
-use crate::registration::distortion::SipPolynomial;
+use crate::math::dmat3::DMat3;
+use crate::registration::distortion::sip::SipPolynomial;
 
 /// Supported transformation models with increasing degrees of freedom.
 ///
@@ -514,7 +514,7 @@ mod tests {
 
     #[test]
     fn test_warp_transform_with_sip() {
-        use crate::registration::distortion::{SipConfig, SipPolynomial};
+        use crate::registration::distortion::sip::{SipConfig, SipPolynomial};
 
         let transform = Transform::identity();
 

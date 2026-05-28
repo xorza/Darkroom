@@ -10,20 +10,17 @@
 //!    tree-based algorithm that uses multiple threshold levels to separate
 //!    blended sources. More accurate for crowded fields but slower.
 
-use crate::common::Buffer2;
-use crate::math::{Aabb, Vec2us};
+use crate::math::bbox::Aabb;
+use crate::math::vec2us::Vec2us;
 use crate::star_detection::labeling::LabelMap;
+use common::buffer2::Buffer2;
 
 pub mod local_maxima;
 pub mod multi_threshold;
-mod region;
+pub(crate) mod region;
 
 #[cfg(test)]
 mod tests;
-
-pub use local_maxima::deblend_local_maxima;
-pub(crate) use multi_threshold::{DeblendBuffers, deblend_multi_threshold};
-pub use region::Region;
 
 // ============================================================================
 // Constants

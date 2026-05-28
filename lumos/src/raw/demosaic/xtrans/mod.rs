@@ -15,7 +15,7 @@ mod markesteijn_steps;
 
 use std::time::Instant;
 
-pub use markesteijn::demosaic_xtrans_markesteijn;
+use markesteijn::demosaic_xtrans_markesteijn;
 
 /// Process X-Trans sensor data and demosaic to RGB.
 ///

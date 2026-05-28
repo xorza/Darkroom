@@ -20,19 +20,17 @@ pub(crate) mod test_utils;
 #[cfg(test)]
 mod tests;
 
-// Re-export fitting functions and types for convenience
-pub use gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
-pub use moffat_fit::{MoffatFitConfig, fit_moffat_2d};
-
 use arrayvec::ArrayVec;
 use glam::Vec2;
 
-use super::background::BackgroundEstimate;
-use super::config::Config;
-use super::deblend::Region;
-use super::{CentroidMethod, LocalBackgroundMethod, Star};
-use crate::common::Buffer2;
+use super::background::estimate::BackgroundEstimate;
+use super::config::{CentroidMethod, Config, LocalBackgroundMethod};
+use super::deblend::region::Region;
+use super::star::Star;
 use crate::math::FWHM_TO_SIGMA;
+use common::buffer2::Buffer2;
+use gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
+use moffat_fit::{MoffatFitConfig, fit_moffat_2d};
 
 // =============================================================================
 // Stamp and Centroid Constants
@@ -261,7 +259,12 @@ fn sigma_clipped_median_mad(values: &mut [f32], kappa: f32, iterations: usize) -
     let mut deviations: ArrayVec<f32, MAX_ANNULUS_PIXELS> = ArrayVec::new();
     // Resize to match values length
     deviations.extend(std::iter::repeat_n(0.0, values.len()));
-    crate::math::sigma_clipped_median_mad_arrayvec(values, &mut deviations, kappa, iterations)
+    crate::math::statistics::sigma_clipped_median_mad_arrayvec(
+        values,
+        &mut deviations,
+        kappa,
+        iterations,
+    )
 }
 
 /// Measure a star candidate: compute sub-pixel position and quality metrics.

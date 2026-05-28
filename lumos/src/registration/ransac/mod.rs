@@ -16,17 +16,16 @@
 mod tests;
 
 mod magsac;
-mod transforms;
-
-pub(crate) use transforms::{adaptive_iterations, estimate_transform};
+pub(crate) mod transforms;
 
 use magsac::MagsacScorer;
+use transforms::{adaptive_iterations, estimate_transform};
 
 use glam::DVec2;
 use rand::prelude::*;
 
 use crate::registration::transform::{Transform, TransformType};
-use crate::registration::triangle::PointMatch;
+use crate::registration::triangle::voting::PointMatch;
 
 /// Progressive sampling: 3 phases from high-confidence pool to full pool.
 /// This front-loads good candidates, improving early convergence.

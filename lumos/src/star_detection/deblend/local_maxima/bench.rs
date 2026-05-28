@@ -6,13 +6,15 @@ use ::quickbench::quick_bench;
 use std::hint::black_box;
 
 use super::{deblend_local_maxima, find_local_maxima};
-use crate::common::{BitBuffer2, Buffer2};
-use crate::math::{Aabb, Vec2us};
+use crate::math::bbox::Aabb;
+use crate::math::vec2us::Vec2us;
 use crate::star_detection::config::Connectivity;
 use crate::star_detection::deblend::ComponentData;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::test_utils::label_map_from_mask_with_connectivity;
-use crate::testing::synthetic::generate_globular_cluster;
+use crate::testing::synthetic::star_field::generate_globular_cluster;
+use common::bit_buffer2::BitBuffer2;
+use common::buffer2::Buffer2;
 
 /// Create components from a pixel buffer for benchmarking.
 fn create_components_from_pixels(

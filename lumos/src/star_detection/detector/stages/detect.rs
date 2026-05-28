@@ -5,17 +5,18 @@
 
 use rayon::prelude::*;
 
-use crate::common::Buffer2;
-use crate::math::{Aabb, Vec2us};
+use crate::math::bbox::Aabb;
+use crate::math::vec2us::Vec2us;
+use common::buffer2::Buffer2;
 
-use crate::star_detection::background::BackgroundEstimate;
+use crate::star_detection::background::estimate::BackgroundEstimate;
 use crate::star_detection::buffer_pool::BufferPool;
 use crate::star_detection::config::Config;
 use crate::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
-use crate::star_detection::deblend::Region;
-use crate::star_detection::deblend::{
-    ComponentData, DeblendBuffers, deblend_local_maxima, deblend_multi_threshold,
-};
+use crate::star_detection::deblend::ComponentData;
+use crate::star_detection::deblend::local_maxima::deblend_local_maxima;
+use crate::star_detection::deblend::multi_threshold::{DeblendBuffers, deblend_multi_threshold};
+use crate::star_detection::deblend::region::Region;
 use crate::star_detection::labeling::LabelMap;
 
 use crate::star_detection::threshold_mask::{

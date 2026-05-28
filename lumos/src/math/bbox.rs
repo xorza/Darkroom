@@ -1,6 +1,6 @@
 //! Axis-aligned bounding box for pixel regions.
 
-use super::Vec2us;
+use super::vec2us::Vec2us;
 
 /// Axis-aligned bounding box with `usize` coordinates.
 ///

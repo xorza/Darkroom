@@ -1,8 +1,8 @@
 //! Detection metrics computation for visual tests.
 
 use super::comparison::match_stars;
-use crate::star_detection::Star;
-use crate::testing::synthetic::GroundTruthStar;
+use crate::star_detection::star::Star;
+use crate::testing::synthetic::star_field::GroundTruthStar;
 use std::fmt;
 use std::fs::File;
 use std::io::Write;

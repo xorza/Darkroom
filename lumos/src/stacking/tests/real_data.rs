@@ -1,6 +1,7 @@
-use crate::stacking::{
-    FrameType, Normalization, ProgressCallback, StackConfig, stack_with_progress,
-};
+use crate::stacking::FrameType;
+use crate::stacking::config::{Normalization, StackConfig};
+use crate::stacking::progress::ProgressCallback;
+use crate::stacking::stack::stack_with_progress;
 use crate::testing::{calibration_dir, init_tracing};
 
 #[test]

@@ -1,5 +1,5 @@
 pub(crate) mod cache;
-mod cache_config;
+pub(crate) mod cache_config;
 pub(crate) mod config;
 pub(crate) mod error;
 pub mod progress;
@@ -7,17 +7,6 @@ pub mod rejection;
 pub(crate) mod stack;
 
 use strum_macros::Display;
-
-// ========== Public API ==========
-pub use config::{CombineMethod, Normalization, StackConfig};
-pub use rejection::Rejection;
-pub use stack::{stack, stack_with_progress};
-
-pub use cache_config::CacheConfig;
-pub use error::Error;
-pub use progress::{ProgressCallback, StackingProgress, StackingStage};
-
-// Re-export rejection types for advanced users
 
 /// Type of calibration frame being stacked.
 ///

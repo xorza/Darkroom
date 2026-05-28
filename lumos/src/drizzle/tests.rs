@@ -1379,8 +1379,8 @@ fn test_square_kernel_rotation() {
     // Rotation matrix (row-major): translate to origin, rotate, translate back
     // x' = cos*(x-cx) - sin*(y-cy) + cx
     // y' = sin*(x-cx) + cos*(y-cy) + cy
-    use crate::math::DMat3;
-    use crate::registration::TransformType;
+    use crate::math::dmat3::DMat3;
+    use crate::registration::transform::TransformType;
     let matrix = DMat3::from_rows(
         [cos_a, -sin_a, cx * (1.0 - cos_a) + cy * sin_a],
         [sin_a, cos_a, -cx * sin_a + cy * (1.0 - cos_a)],
@@ -1770,8 +1770,8 @@ fn test_square_differs_from_turbo_under_rotation() {
     let sin_a = angle.sin();
     let cx = 5.0;
     let cy = 5.0;
-    use crate::math::DMat3;
-    use crate::registration::TransformType;
+    use crate::math::dmat3::DMat3;
+    use crate::registration::transform::TransformType;
     let matrix = DMat3::from_rows(
         [cos_a, -sin_a, cx * (1.0 - cos_a) + cy * sin_a],
         [sin_a, cos_a, -cx * sin_a + cy * (1.0 - cos_a)],
@@ -1867,8 +1867,8 @@ fn test_square_kernel_flux_conservation() {
     let sin_a = angle.sin();
     let cx = 10.0;
     let cy = 10.0;
-    use crate::math::DMat3;
-    use crate::registration::TransformType;
+    use crate::math::dmat3::DMat3;
+    use crate::registration::transform::TransformType;
     let matrix = DMat3::from_rows(
         [cos_a, -sin_a, cx * (1.0 - cos_a) + cy * sin_a],
         [sin_a, cos_a, -cx * sin_a + cy * (1.0 - cos_a)],
@@ -1995,8 +1995,8 @@ fn test_local_jacobian_identity_scale2() {
 fn test_local_jacobian_rotation_preserves_area() {
     // Pure rotation around origin: area is preserved, Jacobian = scale².
     // Rotation by 30° around (0, 0), scale=1.
-    use crate::math::DMat3;
-    use crate::registration::TransformType;
+    use crate::math::dmat3::DMat3;
+    use crate::registration::transform::TransformType;
     let angle = 30.0_f64.to_radians();
     let (sin_a, cos_a) = angle.sin_cos();
     let matrix = DMat3::from_rows([cos_a, -sin_a, 0.0], [sin_a, cos_a, 0.0], [0.0, 0.0, 1.0]);
@@ -2013,8 +2013,8 @@ fn test_local_jacobian_rotation_preserves_area() {
 #[test]
 fn test_local_jacobian_anisotropic_scale() {
     // Scale by 2x in x, 3x in y: area magnification = 6.
-    use crate::math::DMat3;
-    use crate::registration::TransformType;
+    use crate::math::dmat3::DMat3;
+    use crate::registration::transform::TransformType;
     let matrix = DMat3::from_rows([2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 1.0]);
     let transform = Transform::from_matrix(matrix, TransformType::Affine);
     let center = transform.apply(DVec2::new(5.5, 5.5));
@@ -2030,8 +2030,8 @@ fn test_local_jacobian_anisotropic_scale() {
 fn test_local_jacobian_perspective_varies_spatially() {
     // Perspective transform: Jacobian should differ at different image locations.
     // Homography with small perspective terms.
-    use crate::math::DMat3;
-    use crate::registration::TransformType;
+    use crate::math::dmat3::DMat3;
+    use crate::registration::transform::TransformType;
     let matrix = DMat3::from_rows(
         [1.0, 0.0, 0.0],
         [0.0, 1.0, 0.0],
@@ -2077,8 +2077,8 @@ fn test_local_jacobian_perspective_varies_spatially() {
 
 /// Build a scale-2x transform: maps (x,y) → (2x, 2y).
 fn make_scale2x_transform() -> Transform {
-    use crate::math::DMat3;
-    use crate::registration::TransformType;
+    use crate::math::dmat3::DMat3;
+    use crate::registration::transform::TransformType;
     let matrix = DMat3::from_rows([2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 1.0]);
     Transform::from_matrix(matrix, TransformType::Affine)
 }
@@ -2203,8 +2203,8 @@ fn test_turbo_matches_square_affine_with_jacobian() {
     // For affine transforms (constant Jacobian), Turbo with Jacobian and Square
     // should produce identical output on a gradient image (non-trivial content).
     // Using a translation of (0.3, 0.7) — axis-aligned, so Turbo drop = true quad.
-    use crate::math::DMat3;
-    use crate::registration::TransformType;
+    use crate::math::dmat3::DMat3;
+    use crate::registration::transform::TransformType;
 
     let w = 16;
     let h = 16;
@@ -2359,8 +2359,8 @@ fn test_all_kernels_jacobian_matches_square_affine() {
     // For a pure translation (affine, constant Jacobian=1), all kernels with
     // pixfrac=1, scale=1 should produce similar output to Square on a gradient
     // image. This tests that Jacobian correction doesn't break normal operation.
-    use crate::math::DMat3;
-    use crate::registration::TransformType;
+    use crate::math::dmat3::DMat3;
+    use crate::registration::transform::TransformType;
 
     let w = 20;
     let h = 20;

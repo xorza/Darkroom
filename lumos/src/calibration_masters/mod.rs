@@ -13,8 +13,7 @@ use crate::stacking::cache::ImageCache;
 use crate::stacking::config::StackConfig;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::stack::run_stacking;
-
-pub use defect_map::DefectMap;
+use defect_map::DefectMap;
 
 /// Default sigma threshold for defect detection.
 ///
@@ -51,7 +50,7 @@ fn stack_cfa_frames(
     paths: &[impl AsRef<Path> + Sync],
     frame_type: FrameType,
     config: StackConfig,
-) -> Result<Option<CfaImage>, crate::stacking::Error> {
+) -> Result<Option<CfaImage>, crate::stacking::error::Error> {
     if paths.is_empty() {
         return Ok(None);
     }
@@ -122,7 +121,7 @@ impl CalibrationMasters {
         biases: &[impl AsRef<Path> + Sync],
         flat_darks: &[impl AsRef<Path> + Sync],
         sigma_threshold: f32,
-    ) -> Result<Self, crate::stacking::Error> {
+    ) -> Result<Self, crate::stacking::error::Error> {
         let dark = stack_cfa_frames(darks, FrameType::Dark, StackConfig::dark())?;
         let flat = stack_cfa_frames(flats, FrameType::Flat, StackConfig::flat())?;
         let bias = stack_cfa_frames(biases, FrameType::Bias, StackConfig::bias())?;

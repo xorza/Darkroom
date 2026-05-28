@@ -1,6 +1,6 @@
 //! Registration result and error types.
 
-use crate::registration::distortion::SipFitResult;
+use crate::registration::distortion::sip::SipFitResult;
 use crate::registration::transform::{Transform, WarpTransform};
 
 /// Minimum inlier count for a meaningful quality score (below this the fit is unreliable).

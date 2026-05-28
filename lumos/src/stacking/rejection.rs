@@ -7,7 +7,7 @@
 //! - Percentile clipping
 //! - Generalized Extreme Studentized Deviate (GESD)
 
-use crate::math::{self, mad_f32_fast, mad_to_sigma, median_f32_fast};
+use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_fast};
 use crate::stacking::cache::ScratchBuffers;
 
 /// Configuration for sigma clipping.
@@ -908,8 +908,8 @@ impl Rejection {
         // None doesn't reorder values, so weights align directly
         if let Rejection::None = self {
             return match weights {
-                Some(w) => math::weighted_mean_f32(values, w),
-                None => math::mean_f32(values),
+                Some(w) => crate::math::sum::weighted_mean_f32(values, w),
+                None => crate::math::sum::mean_f32(values),
             };
         }
 
@@ -920,7 +920,7 @@ impl Rejection {
             Some(w) if remaining > 0 => {
                 weighted_mean_indexed(&values[..remaining], w, &scratch.indices[..remaining])
             }
-            _ => math::mean_f32(&values[..remaining]),
+            _ => crate::math::sum::mean_f32(&values[..remaining]),
         }
     }
 }
@@ -1050,7 +1050,7 @@ mod tests {
     fn test_sigma_clip_removes_outlier() {
         let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
         let remaining = SigmaClipConfig::new(2.0, 3).reject(&mut values, &mut scratch());
-        let mean = math::mean_f32(&values[..remaining]);
+        let mean = crate::math::sum::mean_f32(&values[..remaining]);
         assert!(mean < 10.0, "Expected outlier to be clipped, got {}", mean);
         assert!(remaining < 8);
     }
@@ -1067,7 +1067,7 @@ mod tests {
         let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
         let remaining =
             SigmaClipConfig::new_asymmetric(4.0, 2.0, 3).reject(&mut values, &mut scratch());
-        let mean = math::mean_f32(&values[..remaining]);
+        let mean = crate::math::sum::mean_f32(&values[..remaining]);
         assert!(mean < 10.0, "High outlier should be clipped, got {}", mean);
         assert!(remaining < 8);
     }
@@ -1085,7 +1085,7 @@ mod tests {
             "Low outlier should be kept, remaining={}",
             remaining
         );
-        let mean = math::mean_f32(&values[..remaining]);
+        let mean = crate::math::sum::mean_f32(&values[..remaining]);
         assert!(
             mean < 2.5,
             "Mean should be < 2.5 due to kept low outlier, got {}",
@@ -1105,7 +1105,10 @@ mod tests {
         let r2 = SigmaClipConfig::new_asymmetric(sigma, sigma, 3).reject(&mut v2, &mut scratch());
 
         assert_eq!(r1, r2);
-        assert!((math::mean_f32(&v1[..r1]) - math::mean_f32(&v2[..r2])).abs() < 1e-6,);
+        assert!(
+            (crate::math::sum::mean_f32(&v1[..r1]) - crate::math::sum::mean_f32(&v2[..r2])).abs()
+                < 1e-6,
+        );
     }
 
     #[test]
@@ -1132,7 +1135,7 @@ mod tests {
             remaining < 8,
             "Outlier should be rejected, got {remaining} survivors"
         );
-        let mean = math::mean_f32(&values[..remaining]);
+        let mean = crate::math::sum::mean_f32(&values[..remaining]);
         assert!(mean < 10.0, "Mean of survivors should be low, got {mean}");
     }
 
@@ -1141,7 +1144,7 @@ mod tests {
         let mut values = vec![5.0, 5.0, 5.0, 5.0, 5.0];
         let remaining = LinearFitClipConfig::default().reject(&mut values, &mut scratch());
         assert_eq!(remaining, 5);
-        assert!((math::mean_f32(&values[..remaining]) - 5.0).abs() < 0.01);
+        assert!((crate::math::sum::mean_f32(&values[..remaining]) - 5.0).abs() < 0.01);
     }
 
     #[test]
@@ -1149,7 +1152,7 @@ mod tests {
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 100.0, 6.0];
         let remaining = LinearFitClipConfig::new(2.0, 2.0, 3).reject(&mut values, &mut scratch());
         assert!(remaining < 6);
-        assert!(math::mean_f32(&values[..remaining]) < 20.0);
+        assert!(crate::math::sum::mean_f32(&values[..remaining]) < 20.0);
     }
 
     #[test]
@@ -1158,7 +1161,7 @@ mod tests {
         let remaining = PercentileClipConfig::new(20.0, 20.0).reject(&mut values, &mut scratch());
         assert_eq!(remaining, 6);
         // Mean of [3, 4, 5, 6, 7, 8] = 5.5
-        assert!((math::mean_f32(&values[..remaining]) - 5.5).abs() < 0.01);
+        assert!((crate::math::sum::mean_f32(&values[..remaining]) - 5.5).abs() < 0.01);
     }
 
     #[test]
@@ -1659,7 +1662,7 @@ mod tests {
         let remaining =
             WinsorizedClipConfig::new_asymmetric(3.0, 2.0).reject(&mut values, &mut scratch());
         assert!(remaining < 6, "High outlier should be rejected");
-        let mean = math::mean_f32(&values[..remaining]);
+        let mean = crate::math::sum::mean_f32(&values[..remaining]);
         assert!(mean < 5.0, "Mean without outlier should be low, got {mean}");
     }
 

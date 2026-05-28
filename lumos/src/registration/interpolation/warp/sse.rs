@@ -2,7 +2,7 @@
 
 #![allow(clippy::needless_range_loop)]
 
-use crate::common::Buffer2;
+use common::buffer2::Buffer2;
 use glam::DVec2;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
@@ -419,8 +419,8 @@ unsafe fn hsum_ps(v: __m128) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::Buffer2;
     use crate::testing::synthetic::patterns;
+    use common::buffer2::Buffer2;
     #[cfg(target_arch = "x86_64")]
     use common::cpu_features;
 
@@ -444,7 +444,7 @@ mod tests {
         unsafe {
             warp_row_bilinear_avx2(input, &mut output_avx2, y, &inverse);
         }
-        let inverse_wt = super::super::WarpTransform::new(inverse);
+        let inverse_wt = crate::registration::transform::WarpTransform::new(inverse);
         super::super::warp_row_bilinear_scalar(input, &mut output_scalar, y, &inverse_wt, 0.0);
 
         for x in 0..width {
@@ -476,7 +476,7 @@ mod tests {
         unsafe {
             warp_row_bilinear_sse(input, &mut output_sse, y, &inverse);
         }
-        let inverse_wt = super::super::WarpTransform::new(inverse);
+        let inverse_wt = crate::registration::transform::WarpTransform::new(inverse);
         super::super::warp_row_bilinear_scalar(input, &mut output_scalar, y, &inverse_wt, 0.0);
 
         for x in 0..width {

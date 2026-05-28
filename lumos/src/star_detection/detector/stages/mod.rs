@@ -3,7 +3,6 @@
 //! Each stage is a pure function that transforms data, with all buffer
 //! management contained within.
 
-pub(crate) mod background;
 pub(crate) mod detect;
 #[cfg(test)]
 pub(crate) mod detect_test_utils;

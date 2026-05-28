@@ -168,7 +168,7 @@ fn normalize_fits_pixels(mut pixels: Vec<f32>, bitpix: BitPix) -> Vec<f32> {
 /// ROWORDER: "TOP-DOWN" (default) or "BOTTOM-UP" (flips pattern vertically).
 /// XBAYROFF/YBAYROFF: integer offsets into the Bayer matrix (shifts pattern).
 fn read_cfa_from_headers(hdu: &fitsio::hdu::FitsHdu, fptr: &mut FitsFile) -> Option<CfaType> {
-    use crate::raw::demosaic::CfaPattern;
+    use crate::raw::demosaic::bayer::CfaPattern;
 
     let bayerpat: String = read_key_optional(hdu, fptr, "BAYERPAT")?;
     let mut pattern = CfaPattern::from_bayerpat(&bayerpat)?;

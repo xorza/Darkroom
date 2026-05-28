@@ -8,19 +8,19 @@
 
 #[cfg(test)]
 mod bench;
-mod estimate;
+pub(crate) mod estimate;
 mod simd;
 #[cfg(test)]
 mod tests;
 mod tile_grid;
 
-pub use estimate::BackgroundEstimate;
-
-use crate::common::{BitBuffer2, Buffer2};
+use common::bit_buffer2::BitBuffer2;
+use common::buffer2::Buffer2;
 use rayon::prelude::*;
 
 use super::buffer_pool::BufferPool;
 use super::config::Config;
+use estimate::BackgroundEstimate;
 use tile_grid::TileGrid;
 
 /// Estimate background and noise for the image.

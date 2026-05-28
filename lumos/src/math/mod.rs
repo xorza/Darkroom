@@ -9,28 +9,12 @@
 // Submodules
 // =============================================================================
 
-mod bbox;
-mod dmat3;
+pub(crate) mod bbox;
+pub(crate) mod dmat3;
 
 pub mod statistics;
 pub mod sum;
-mod vec2us;
-
-// =============================================================================
-// Re-exports
-// =============================================================================
-
-pub use bbox::Aabb;
-pub use dmat3::DMat3;
-pub use vec2us::Vec2us;
-
-// Re-export commonly used functions at top level for convenience
-pub use statistics::{
-    MAD_TO_SIGMA, mad_f32_with_scratch, mad_to_sigma, median_and_mad_f32_mut, median_f32_mut,
-    sigma_clipped_median_mad, sigma_clipped_median_mad_arrayvec,
-};
-pub(crate) use statistics::{mad_f32_fast, median_f32_fast};
-pub use sum::{mean_f32, sum_f32, weighted_mean_f32};
+pub(crate) mod vec2us;
 
 // =============================================================================
 // Constants

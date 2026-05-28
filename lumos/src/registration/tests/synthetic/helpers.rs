@@ -1,6 +1,6 @@
 //! Shared test helpers for synthetic registration tests.
 
-use crate::star_detection::Star;
+use crate::star_detection::star::Star;
 use glam::DVec2;
 
 /// FWHM for tight/compact stars (~max_sigma 0.67).
