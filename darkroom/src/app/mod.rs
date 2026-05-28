@@ -8,10 +8,10 @@ use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
 use scenarium::prelude::{FuncLib, Graph as CoreGraph};
 
 use crate::document::Document;
-use crate::io::config::{AppConfig, ThemePreset};
+use crate::io::config::AppConfig;
 use crate::io::library;
 use crate::run_state::RunState;
-use crate::theme::Theme;
+use crate::theme::{Theme, ThemeChoice};
 
 mod commands;
 pub(crate) mod editor;
@@ -37,6 +37,10 @@ fn builtin_func_lib() -> FuncLib {
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct AppContext<'a> {
     pub(crate) theme: &'a Theme,
+    /// The user's persisted theme preference (`system`/`dark`/`light`),
+    /// so the Theme menu can mark the active choice. Distinct from
+    /// `theme`, the concrete palette `System` resolved to.
+    pub(crate) theme_choice: ThemeChoice,
     pub(crate) func_lib: &'a FuncLib,
     /// Last run's per-node state (status, logs, fetched runtime values),
     /// keyed by authoring `NodeId`. Read by the inspection panel's Log and
@@ -103,12 +107,9 @@ impl App {
             worker,
         };
         app.config = AppConfig::load();
-        if let Some(preset) = app.config.theme_preset {
-            app.theme = match preset {
-                ThemePreset::Dark => Theme::dark(),
-                ThemePreset::Light => Theme::light(),
-            };
-        }
+        // Resolve the saved preference: `System` (the default) follows
+        // the OS light/dark setting, re-queried each launch.
+        app.theme = Theme::from_preset(app.config.theme.resolve());
         if let Some(path) = app.config.document_path.clone() {
             app.load_document(&path);
         }
@@ -170,9 +171,13 @@ impl palantir::App for App {
         // reads reflect the latest run.
         self.drain_worker_events(ui);
 
-        let command = self
-            .editor
-            .frame(ui, &self.func_lib, &self.theme, &self.host_handle);
+        let command = self.editor.frame(
+            ui,
+            &self.func_lib,
+            &self.theme,
+            self.config.theme,
+            &self.host_handle,
+        );
 
         // The frame settled which inspector panels are open; request the
         // runtime values for any that still need them.

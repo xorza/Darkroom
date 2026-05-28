@@ -2,26 +2,25 @@ use std::path::PathBuf;
 
 use common::{SerdeFormat, deserialize, serialize};
 
-pub use crate::theme::ThemePreset;
+use crate::theme::ThemeChoice;
 
 /// Config file name, resolved relative to the process working
 /// directory. TOML so it's hand-editable and matches the theme
 /// on-disk format.
 const CONFIG_FILE: &str = "darkroom.config.toml";
 
-/// Persisted session state: the built-in theme preset to restore and
-/// the document open when the app last closed. Reloaded on startup
-/// so darkroom reopens where the user left off. Missing / unreadable
-/// config falls back to `default()`. `#[serde(default)]` so an
-/// all-`None` config (TOML omits `None` keys, yielding an empty doc)
-/// still deserializes.
+/// Persisted session state: the theme preference to restore and the
+/// document open when the app last closed. Reloaded on startup so
+/// darkroom reopens where the user left off. Missing / unreadable
+/// config falls back to `default()`. `#[serde(default)]` so a partial
+/// config (TOML omits absent keys) still deserializes.
 #[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
-    /// Built-in preset to restore (`dark` / `light`). Written by the
-    /// Theme → Toggle Light/Dark command; `None` (the default) uses
-    /// the built-in default theme.
-    pub theme_preset: Option<ThemePreset>,
+    /// Theme preference to restore (`system` / `dark` / `light`).
+    /// Written by the Theme menu; the default (`system`) follows the
+    /// OS light/dark setting.
+    pub theme: ThemeChoice,
     /// Document to reopen on launch. `None` starts with an empty doc.
     pub document_path: Option<PathBuf>,
 }
@@ -65,21 +64,22 @@ mod tests {
     #[test]
     fn populated_config_roundtrips() {
         let cfg = AppConfig {
-            theme_preset: Some(ThemePreset::Light),
+            theme: ThemeChoice::Light,
             document_path: Some(PathBuf::from("/tmp/graph.rhai")),
         };
         let back = roundtrip(&cfg);
-        assert_eq!(back.theme_preset, Some(ThemePreset::Light));
+        assert_eq!(back.theme, ThemeChoice::Light);
         assert_eq!(back.document_path, Some(PathBuf::from("/tmp/graph.rhai")));
     }
 
     #[test]
-    fn all_none_config_roundtrips() {
-        // TOML omits `None` keys, so the default config serializes to an
-        // (effectively) empty document; `#[serde(default)]` must restore
-        // both fields as `None` rather than erroring on the missing keys.
+    fn default_config_roundtrips() {
+        // TOML omits the `None` document path, so the default config
+        // serializes to a minimal document; `#[serde(default)]` must
+        // restore `theme` as `System` and the path as `None` rather than
+        // erroring on the missing keys.
         let back = roundtrip(&AppConfig::default());
-        assert_eq!(back.theme_preset, None);
+        assert_eq!(back.theme, ThemeChoice::System);
         assert_eq!(back.document_path, None);
     }
 }

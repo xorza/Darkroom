@@ -20,7 +20,6 @@ use crate::app::editor::Editor;
 use crate::document::{Document, GraphRef};
 use crate::edit::intent::Intent;
 use crate::gui::menu_bar::MenuCommand;
-use crate::io::config::ThemePreset;
 use crate::io::library;
 use crate::io::persistence;
 use crate::theme::Theme;
@@ -46,21 +45,14 @@ impl App {
                     persistence::export_theme(&self.theme, &path);
                 }
             }
-            MenuCommand::ToggleLightDark => {
-                // Swap to the opposite preset's full palette + sub-theme,
-                // push the matching palantir palette onto the Ui, and
-                // persist the choice so the next launch restores it.
-                let next = if self.theme.is_light() {
-                    ThemePreset::Dark
-                } else {
-                    ThemePreset::Light
-                };
-                self.theme = match next {
-                    ThemePreset::Dark => Theme::dark(),
-                    ThemePreset::Light => Theme::light(),
-                };
+            MenuCommand::SetTheme(choice) => {
+                // Resolve the choice to a concrete palette (`System`
+                // queries the OS), push the matching palantir palette onto
+                // the Ui, and persist the preference so the next launch
+                // restores it.
+                self.theme = Theme::from_preset(choice.resolve());
                 ui.theme = self.theme.palantir_theme.clone();
-                self.config.theme_preset = Some(next);
+                self.config.theme = choice;
                 self.config.save();
             }
             MenuCommand::ExportSubgraph => self.export_active_subgraph(),
@@ -213,9 +205,8 @@ impl App {
 
     /// Load a theme picked from the dialog and apply it to the live
     /// session. Not persisted: the next launch always restores the
-    /// preset recorded in [`AppConfig::theme_preset`] (toggled via
-    /// Theme → Toggle Light/Dark), regardless of any file loaded in
-    /// this session.
+    /// preference recorded in [`AppConfig::theme`] (set via the Theme
+    /// menu), regardless of any file loaded in this session.
     fn load_theme(&mut self, ui: &mut Ui, picked: &Path) {
         if self.load_theme_file(picked) {
             ui.theme = self.theme.palantir_theme.clone();

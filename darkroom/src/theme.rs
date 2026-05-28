@@ -139,19 +139,59 @@ pub(crate) mod light {
     pub(crate) const PAL_BORDER_FOCUSED: Color = Color::hex(0xc4daf6);
 }
 
-/// Which built-in palette built this [`Theme`]. Carried on the theme
-/// itself so the Toggle Light/Dark command knows where to swap to
-/// without inspecting colour values, and reused by
-/// [`crate::io::config::AppConfig`] to persist the selected preset
-/// across launches. `Default = Dark` so a hand-rolled `Theme` (e.g.
-/// the deserialised round-trip used by tests) has a deterministic
-/// tag without callers having to spell it out.
+/// Which built-in palette built this [`Theme`] — the concrete palette
+/// a [`ThemeChoice`] resolves to. Carried on the theme itself and
+/// round-tripped through TOML so a loaded theme file restores its
+/// origin palette. `Default = Dark` so a hand-rolled `Theme` (e.g. the
+/// deserialised round-trip used by tests) has a deterministic tag
+/// without callers having to spell it out.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ThemePreset {
     #[default]
     Dark,
     Light,
+}
+
+impl ThemePreset {
+    /// The OS's current light/dark preference, falling back to
+    /// [`Dark`](Self::Dark) when the platform reports no preference or
+    /// detection fails. Backs [`ThemeChoice::System`].
+    pub fn from_system() -> Self {
+        match dark_light::detect() {
+            Ok(dark_light::Mode::Light) => Self::Light,
+            Ok(dark_light::Mode::Dark | dark_light::Mode::Unspecified) | Err(_) => Self::Dark,
+        }
+    }
+}
+
+/// The user's persisted theme *preference*, as offered in the Theme
+/// menu. Distinct from [`ThemePreset`] (a concrete built-in palette):
+/// `System` has no fixed palette — it [`resolve`](Self::resolve)s to a
+/// preset by querying the OS each launch, so the editor follows the
+/// desktop's light/dark setting without the user re-picking. `Dark` /
+/// `Light` pin a palette regardless of the OS.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemeChoice {
+    /// Follow the OS light/dark preference, re-resolved on each launch.
+    #[default]
+    System,
+    Dark,
+    Light,
+}
+
+impl ThemeChoice {
+    /// Resolve to the concrete built-in preset to load. `System` queries
+    /// the OS (falling back to dark); `Dark` / `Light` map straight
+    /// through.
+    pub fn resolve(self) -> ThemePreset {
+        match self {
+            Self::System => ThemePreset::from_system(),
+            Self::Dark => ThemePreset::Dark,
+            Self::Light => ThemePreset::Light,
+        }
+    }
 }
 
 /// Visual palette + layout dimensions for darkroom's UI. Owned by
@@ -692,12 +732,13 @@ impl Theme {
         self.port_size * 0.5
     }
 
-    /// Whether this theme reads as light, by the explicit [`preset`]
-    /// tag the builders stamp on every theme.
-    ///
-    /// [`preset`]: Self::preset
-    pub fn is_light(&self) -> bool {
-        matches!(self.preset, ThemePreset::Light)
+    /// Assemble the full theme for a built-in preset. One place so
+    /// startup and the Theme menu share the preset → palette mapping.
+    pub fn from_preset(preset: ThemePreset) -> Self {
+        match preset {
+            ThemePreset::Dark => Self::dark(),
+            ThemePreset::Light => Self::light(),
+        }
     }
 
     /// Ayu Mirage High Contrast palette — the built-in dark look.
@@ -860,12 +901,40 @@ mod tests {
         assert_eq!(menu_text.font_size_px, MENU_FONT_SIZE);
     }
 
-    /// `is_light` classifies the two built-in presets correctly so the
-    /// menu's "Toggle Light/Dark" command always flips to the other
-    /// palette regardless of which one the user is currently on.
+    /// `from_preset` round-trips the tag both ways — the assembled theme
+    /// carries the preset it was asked for and swaps the full palette,
+    /// not just the tag. The builders stamp the matching preset too.
     #[test]
-    fn is_light_classifies_built_in_presets() {
-        assert!(!Theme::dark().is_light(), "dark canvas reads as not-light");
-        assert!(Theme::light().is_light(), "light canvas reads as light");
+    fn from_preset_maps_both_presets() {
+        let dark = Theme::from_preset(ThemePreset::Dark);
+        let light = Theme::from_preset(ThemePreset::Light);
+        assert_eq!(dark.preset, ThemePreset::Dark);
+        assert_eq!(light.preset, ThemePreset::Light);
+        assert_eq!(Theme::dark().preset, ThemePreset::Dark);
+        assert_eq!(Theme::light().preset, ThemePreset::Light);
+        // Full palette swapped, not just the tag.
+        assert_eq!(dark.canvas_bg, Color::hex(0x1a1a1a));
+        assert_eq!(light.canvas_bg, Color::hex(0xfcfcfc));
+    }
+
+    /// System detection must always resolve to one of the two built-in
+    /// presets (its `Unspecified`/error arms fold to `Dark`), so the
+    /// startup fallback can hand the result straight to `from_preset`.
+    #[test]
+    fn from_system_resolves_to_built_in_preset() {
+        let preset = ThemePreset::from_system();
+        assert!(matches!(preset, ThemePreset::Dark | ThemePreset::Light));
+    }
+
+    /// `ThemeChoice` resolution: the explicit choices map straight to
+    /// their preset, and `System` defers to OS detection — which itself
+    /// always lands on a concrete preset.
+    #[test]
+    fn theme_choice_resolves_to_preset() {
+        assert_eq!(ThemeChoice::Dark.resolve(), ThemePreset::Dark);
+        assert_eq!(ThemeChoice::Light.resolve(), ThemePreset::Light);
+        assert_eq!(ThemeChoice::System.resolve(), ThemePreset::from_system());
+        // System is the default preference — fresh launches follow the OS.
+        assert_eq!(ThemeChoice::default(), ThemeChoice::System);
     }
 }

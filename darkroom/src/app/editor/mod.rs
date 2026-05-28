@@ -22,7 +22,7 @@ use crate::gui::main_window::MainWindow;
 use crate::gui::menu_bar::MenuCommand;
 use crate::run_state::{RunState, ValueRequest};
 use crate::scene::Scene;
-use crate::theme::Theme;
+use crate::theme::{Theme, ThemeChoice};
 
 use super::AppContext;
 
@@ -163,6 +163,7 @@ impl Editor {
         ui: &mut Ui,
         func_lib: &FuncLib,
         theme: &Theme,
+        theme_choice: ThemeChoice,
         host: &HostHandle,
     ) -> Option<MenuCommand> {
         self.intents.clear();
@@ -210,6 +211,7 @@ impl Editor {
         }
         let ctx = AppContext {
             theme,
+            theme_choice,
             func_lib,
             run_state: &self.run_state,
         };

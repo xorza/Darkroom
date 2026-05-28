@@ -7,6 +7,8 @@ use palantir::{
 use scenarium::data::FsPathConfig;
 use scenarium::prelude::NodeId;
 
+use crate::theme::ThemeChoice;
+
 /// A command surfaced by the menu bar. `App` performs the side effect
 /// (file dialog + read/write + doc/theme swap + config persist)
 /// outside the record pass — keeps `menu_bar` decoupled from
@@ -22,8 +24,9 @@ pub(crate) enum MenuCommand {
     SaveDocumentAs,
     LoadTheme,
     ExportTheme,
-    /// Swap the live theme to the opposite preset (dark ⇄ light).
-    ToggleLightDark,
+    /// Set the theme preference: `System` follows the OS light/dark
+    /// setting, `Dark`/`Light` pin a palette. Persisted to config.
+    SetTheme(ThemeChoice),
     /// Export the active subgraph (plus its local-def dependencies) to a
     /// file. No-op when the active tab isn't a subgraph.
     ExportSubgraph,
@@ -57,7 +60,11 @@ pub(crate) enum MenuCommand {
 /// each opens a [`ContextMenu`] anchored at the trigger's bottom-left.
 /// `Quit` calls into [`HostHandle::quit`]; everything else returns a
 /// [`MenuCommand`] for `App` to consume.
-pub(crate) fn show(ui: &mut Ui, host: Option<&HostHandle>) -> Option<MenuCommand> {
+pub(crate) fn show(
+    ui: &mut Ui,
+    host: Option<&HostHandle>,
+    theme_choice: ThemeChoice,
+) -> Option<MenuCommand> {
     let mut command = None;
     Panel::hstack()
         .auto_id()
@@ -67,7 +74,7 @@ pub(crate) fn show(ui: &mut Ui, host: Option<&HostHandle>) -> Option<MenuCommand
         .show(ui, |ui| {
             command = file_menu(ui, host)
                 .or_else(|| subgraph_menu(ui))
-                .or_else(|| theme_menu(ui))
+                .or_else(|| theme_menu(ui, theme_choice))
                 .or_else(|| run_menu(ui));
         });
     command
@@ -153,7 +160,7 @@ fn run_menu(ui: &mut Ui) -> Option<MenuCommand> {
     })
 }
 
-fn theme_menu(ui: &mut Ui) -> Option<MenuCommand> {
+fn theme_menu(ui: &mut Ui, current: ThemeChoice) -> Option<MenuCommand> {
     dropdown(ui, "Theme", |ui, popup| {
         let mut command = None;
         if MenuItem::new("Load…").show(ui, popup).clicked() {
@@ -163,8 +170,20 @@ fn theme_menu(ui: &mut Ui) -> Option<MenuCommand> {
             command = Some(MenuCommand::ExportTheme);
         }
         MenuItem::separator(ui);
-        if MenuItem::new("Toggle Light/Dark").show(ui, popup).clicked() {
-            command = Some(MenuCommand::ToggleLightDark);
+        // Active choice gets a leading check; the rest are blank-padded so
+        // the labels stay aligned.
+        for (choice, label) in [
+            (ThemeChoice::System, "System"),
+            (ThemeChoice::Dark, "Dark"),
+            (ThemeChoice::Light, "Light"),
+        ] {
+            let mark = if choice == current { "✓ " } else { "    " };
+            if MenuItem::new(format!("{mark}{label}"))
+                .show(ui, popup)
+                .clicked()
+            {
+                command = Some(MenuCommand::SetTheme(choice));
+            }
         }
         command
     })
