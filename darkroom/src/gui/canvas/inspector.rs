@@ -134,6 +134,12 @@ impl Inspectors {
             let Some(node) = scene.nodes.iter().find(|n| n.id == id) else {
                 continue;
             };
+            // Boundary nodes (SubgraphInput/SubgraphOutput) are pure
+            // routing — no runtime values or status — and the chip is
+            // suppressed on the header; skip any stale pinned entry too.
+            if node.boundary {
+                continue;
+            }
             // Last frame's body width places the panel just past the
             // node's right edge; absent on the node's first frame.
             let node_w = ui
