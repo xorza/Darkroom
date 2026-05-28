@@ -7,8 +7,8 @@
 //! [`crate::gui::node::value_editor`].
 
 use palantir::{
-    Brush, Configure, InternedStr, Key, Panel, Sense, Shortcut, Sizing, Spacing, Stroke, Text,
-    TextEdit, TextEditTheme, TextStyle, Ui, WidgetId,
+    Align, Brush, Configure, HAlign, InternedStr, Justify, Key, Panel, Sense, Shortcut, Sizing,
+    Spacing, Stroke, Text, TextEdit, TextEditTheme, TextStyle, Ui, WidgetId,
 };
 
 /// Cross-frame state for one inline-rename editor, held in palantir's
@@ -50,7 +50,17 @@ pub(crate) fn inline_rename(
     name: InternedStr,
     max_chars: usize,
     style: Option<TextStyle>,
+    halign: HAlign,
 ) -> RenameEvent {
+    // The label sits inside a `MIN_EDIT_WIDTH` panel so short names
+    // still present a clickable target; the parent's main-axis
+    // distribution (`justify`) decides which side the text hugs.
+    let justify = match halign {
+        HAlign::Right => Justify::End,
+        HAlign::Center => Justify::Center,
+        _ => Justify::Start,
+    };
+    let text_align = Align::h(halign);
     // Floor the height at one text line so an empty label still has a
     // clickable box (a `Hug` panel with no text would collapse to zero
     // height). Derived from the (possibly overridden) text style so
@@ -69,6 +79,11 @@ pub(crate) fn inline_rename(
             .id(id)
             .size((Sizing::Hug, Sizing::Hug))
             .min_size((MIN_EDIT_WIDTH, line_h))
+            // Push the label to the requested side of the min-width
+            // box so a short name doesn't drift away from the side it
+            // should hug (e.g. boundary input ports in the right
+            // column want it flush to the right).
+            .justify(justify)
             .sense(Sense::CLICK | Sense::DRAG)
             .show(ui, |ui| {
                 // `InternedStr::clone` is allocation-free for the `Owned`
@@ -104,6 +119,9 @@ pub(crate) fn inline_rename(
         .max_chars(max_chars)
         .size((Sizing::Hug, Sizing::Hug))
         .min_size((MIN_EDIT_WIDTH, line_h))
+        // Mirror the idle label's alignment so the text/caret hugs the
+        // same side of the min-width box during editing.
+        .text_align(text_align)
         .show(ui);
     let focused = ui.focused_id() == Some(id);
     let escape = ui.escape_pressed();

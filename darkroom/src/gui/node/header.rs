@@ -187,7 +187,14 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
 fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let shift = ui.modifiers().shift;
     let id = node_rename_wid(node.id);
-    let ev = inline_rename(ui, id, node.name.clone(), NODE_NAME_MAX_CHARS, None);
+    let ev = inline_rename(
+        ui,
+        id,
+        node.name.clone(),
+        NODE_NAME_MAX_CHARS,
+        None,
+        palantir::HAlign::Left,
+    );
     if ev.clicked {
         out.push(select_intent(shift, rcx.scene, node.id));
     }

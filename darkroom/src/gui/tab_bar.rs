@@ -7,8 +7,8 @@
 //! touches the document.
 
 use palantir::{
-    Align, Background, Configure, Corners, InternedStr, Panel, Sense, Sizing, Spacing, Text,
-    TextStyle, Ui, VAlign, WidgetId,
+    Align, Background, Configure, Corners, HAlign, InternedStr, Panel, Sense, Sizing, Spacing,
+    Text, TextStyle, Ui, VAlign, WidgetId,
 };
 use scenarium::prelude::SubgraphId;
 
@@ -188,6 +188,7 @@ fn tab_chip(
                     tab.text.clone(),
                     SUBGRAPH_NAME_MAX_CHARS,
                     Some(label_style),
+                    HAlign::Left,
                 );
                 if ev.clicked {
                     out.push(Intent::SwitchTab { to: index });

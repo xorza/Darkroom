@@ -5,7 +5,7 @@
 //! (`SubgraphInput`/`SubgraphOutput`) port rows in
 //! [`crate::gui::node::port_row`]; ordinary node ports render plain text.
 
-use palantir::{InternedStr, Text, Ui, WidgetId};
+use palantir::{HAlign, InternedStr, Text, Ui, WidgetId};
 
 use crate::document::BoundarySide;
 use crate::edit::intent::Intent;
@@ -47,7 +47,14 @@ pub(crate) fn port_label(
     };
     let shift = ui.modifiers().shift;
     let id = port_rename_wid(port);
-    let ev = inline_rename(ui, id, name, PORT_NAME_MAX_CHARS, None);
+    // Boundary inputs render in the right (output) column — text hugs
+    // the right edge so it stays flush with the port circle. Boundary
+    // outputs render in the left column and hug the left edge.
+    let halign = match side {
+        BoundarySide::Input => HAlign::Right,
+        BoundarySide::Output => HAlign::Left,
+    };
+    let ev = inline_rename(ui, id, name, PORT_NAME_MAX_CHARS, None, halign);
     // Single click selects the node (the label otherwise swallows the
     // click the body would have gotten); a committed value renames.
     if ev.clicked {
