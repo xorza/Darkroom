@@ -47,7 +47,7 @@ pub(crate) fn port_label(
     };
     let shift = ui.modifiers().shift;
     let id = port_rename_wid(port);
-    let ev = inline_rename(ui, id, name, PORT_NAME_MAX_CHARS);
+    let ev = inline_rename(ui, id, name, PORT_NAME_MAX_CHARS, None);
     // Single click selects the node (the label otherwise swallows the
     // click the body would have gotten); a committed value renames.
     if ev.clicked {

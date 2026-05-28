@@ -7,8 +7,8 @@
 //! [`crate::gui::node::value_editor`].
 
 use palantir::{
-    Configure, InternedStr, Key, Panel, Sense, Shortcut, Sizing, Spacing, Stroke, Text, TextEdit,
-    TextEditTheme, Ui, WidgetId,
+    Brush, Configure, InternedStr, Key, Panel, Sense, Shortcut, Sizing, Spacing, Stroke, Text,
+    TextEdit, TextEditTheme, TextStyle, Ui, WidgetId,
 };
 
 /// Cross-frame state for one inline-rename editor, held in palantir's
@@ -49,11 +49,14 @@ pub(crate) fn inline_rename(
     id: WidgetId,
     name: InternedStr,
     max_chars: usize,
+    style: Option<TextStyle>,
 ) -> RenameEvent {
     // Floor the height at one text line so an empty label still has a
     // clickable box (a `Hug` panel with no text would collapse to zero
-    // height). Derived from the ambient text style, not hardcoded.
-    let line_h = ui.theme.text.line_height_for(ui.theme.text.font_size_px);
+    // height). Derived from the (possibly overridden) text style so
+    // overriding the font size also tightens the click target.
+    let style_for_metrics = style.unwrap_or(ui.theme.text);
+    let line_h = style_for_metrics.line_height_for(style_for_metrics.font_size_px);
     if !ui.state_mut::<RenameState>(id).active {
         // `DRAG` as well as `CLICK`: the label captures the press (so it
         // can register clicks / double-click-to-edit), but a press that
@@ -70,7 +73,11 @@ pub(crate) fn inline_rename(
             .show(ui, |ui| {
                 // `InternedStr::clone` is allocation-free for the `Owned`
                 // names darkroom builds, so this is cheap per frame.
-                Text::new(name.clone()).show(ui);
+                let mut t = Text::new(name.clone());
+                if let Some(s) = style {
+                    t = t.style(s);
+                }
+                t.show(ui);
             })
             .response;
         // Read flags off the response before any `ui.state_mut` — the
@@ -93,7 +100,7 @@ pub(crate) fn inline_rename(
     let mut draft = std::mem::take(&mut ui.state_mut::<RenameState>(id).draft);
     TextEdit::new(&mut draft)
         .id(id)
-        .style(flat_edit_style(ui))
+        .style(flat_edit_style(ui, style))
         .max_chars(max_chars)
         .size((Sizing::Hug, Sizing::Hug))
         .min_size((MIN_EDIT_WIDTH, line_h))
@@ -129,14 +136,20 @@ pub(crate) fn inline_rename(
 /// zero padding/margin and no border, so the editor's `Hug` height
 /// equals the plain `Text` label's line height — the node body doesn't
 /// grow when a label enters/exits edit mode. The fill stays, so the
-/// fixed-width field still reads as editable.
-fn flat_edit_style(ui: &Ui) -> TextEditTheme {
+/// fixed-width field still reads as editable. When `text` is `Some`,
+/// the same style is applied to every WidgetLook so the edit field
+/// renders at the same size/colour as the idle label.
+fn flat_edit_style(ui: &Ui, text: Option<TextStyle>) -> TextEditTheme {
     let mut style = ui.theme.text_edit.clone();
     style.padding = Spacing::ZERO;
     style.margin = Spacing::ZERO;
     for look in [&mut style.normal, &mut style.focused, &mut style.disabled] {
         if let Some(bg) = look.background.as_mut() {
             bg.stroke = Stroke::ZERO;
+            bg.fill = Brush::TRANSPARENT;
+        }
+        if text.is_some() {
+            look.text = text;
         }
     }
     style

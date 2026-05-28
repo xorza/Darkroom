@@ -10,15 +10,22 @@ use palantir::{
     Align, Background, Configure, Corners, InternedStr, Panel, Sense, Sizing, Spacing, Text,
     TextStyle, Ui, VAlign, WidgetId,
 };
+use scenarium::prelude::SubgraphId;
 
+use crate::edit::intent::Intent;
 use crate::gui::UiAction;
+use crate::gui::widgets::inline_rename::inline_rename;
 use crate::theme::Theme;
 
+/// Character cap for a subgraph name in the inline rename editor.
+const SUBGRAPH_NAME_MAX_CHARS: usize = 32;
+
 /// One tab's display state, built by `main_window` from the open-tab list.
+/// `subgraph_id.is_some()` is the renamable + closable test (subgraph
+/// tabs only; the Main tab is `None`).
 pub(crate) struct TabLabel {
     pub(crate) text: InternedStr,
-    /// `false` for the always-present `Main` tab.
-    pub(crate) closable: bool,
+    pub(crate) subgraph_id: Option<SubgraphId>,
 }
 
 /// Stable id for the tab chip at `index` — deterministic so prepass can
@@ -35,6 +42,13 @@ fn tab_close_wid(index: usize) -> WidgetId {
 /// Stable id for the trailing "+" new-subgraph chip.
 fn tab_new_wid() -> WidgetId {
     WidgetId::from_hash("graph.tab_new")
+}
+
+/// Stable id for the rename editor on a subgraph tab. Keyed on the
+/// subgraph id (not tab index) so the editing state survives a tab
+/// reorder.
+fn tab_rename_wid(sub_id: SubgraphId) -> WidgetId {
+    WidgetId::from_hash(("graph.tab_rename", sub_id))
 }
 
 /// Prepass scan: surface tab activate/close + the "+" new-subgraph
@@ -55,8 +69,16 @@ pub(crate) fn emit_tab_actions(ui: &Ui, count: usize, actions: &mut Vec<UiAction
     }
 }
 
-/// Draw the strip. Clicks are handled in [`emit_tab_actions`] (prepass).
-pub(crate) fn show(ui: &mut Ui, theme: &Theme, tabs: &[TabLabel], active: usize) {
+/// Draw the strip. Tab activate / close clicks are handled in
+/// [`emit_tab_actions`] (prepass); subgraph-rename commits push directly
+/// into `out` from the label's inline-rename editor.
+pub(crate) fn show(
+    ui: &mut Ui,
+    theme: &Theme,
+    tabs: &[TabLabel],
+    active: usize,
+    out: &mut Vec<Intent>,
+) {
     // The strip shares the menu bar's `chrome_fill`; the active tab
     // below punches through to `canvas_bg` so it reads as one piece with
     // the graph.
@@ -72,7 +94,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, tabs: &[TabLabel], active: usize)
         })
         .show(ui, |ui| {
             for (i, tab) in tabs.iter().enumerate() {
-                tab_chip(ui, theme, tab, i, i == active);
+                tab_chip(ui, theme, tab, i, i == active, out);
             }
             new_tab_chip(ui, theme);
         });
@@ -111,7 +133,14 @@ fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
         });
 }
 
-fn tab_chip(ui: &mut Ui, theme: &Theme, tab: &TabLabel, index: usize, active: bool) {
+fn tab_chip(
+    ui: &mut Ui,
+    theme: &Theme,
+    tab: &TabLabel,
+    index: usize,
+    active: bool,
+    out: &mut Vec<Intent>,
+) {
     let r = theme.tab_corner_radius;
     // Active tab takes the graph's color so its bottom edge dissolves
     // into the canvas; inactive tabs stay flat on the chrome strip
@@ -125,13 +154,18 @@ fn tab_chip(ui: &mut Ui, theme: &Theme, tab: &TabLabel, index: usize, active: bo
     } else {
         Background::default()
     };
-    // A closable tab trades right inset for the top-right close button
-    // (equal 4px top/right gaps); a tab without one (Main) stays
-    // symmetric so its label is centered.
-    let padding = if tab.closable {
+    // A subgraph tab trades right inset for the top-right close button
+    // (equal 4px top/right gaps); Main stays symmetric so its label is
+    // centered.
+    let padding = if tab.subgraph_id.is_some() {
         Spacing::new(10.0, 4.0, 4.0, 4.0)
     } else {
         Spacing::xy(10.0, 4.0)
+    };
+    // Match the menu bar's smaller (13px) label scale on every tab.
+    let label_style = TextStyle {
+        font_size_px: 13.0,
+        ..ui.theme.text
     };
     Panel::hstack()
         .id(tab_chip_wid(index))
@@ -142,14 +176,31 @@ fn tab_chip(ui: &mut Ui, theme: &Theme, tab: &TabLabel, index: usize, active: bo
         .child_align(Align::v(VAlign::Center))
         .background(background)
         .show(ui, |ui| {
-            // Match the menu bar's smaller (13px) label scale.
-            Text::new(tab.text.clone())
-                .style(TextStyle {
-                    font_size_px: 13.0,
-                    ..ui.theme.text
-                })
-                .show(ui);
-            if tab.closable {
+            // Subgraph tab: inline-renamable label. Double-click swaps to
+            // a `TextEdit`; Enter / blur commits. A single click on the
+            // label also switches tab (the label's own panel captures it,
+            // so the outer chip's click handler in `emit_tab_actions`
+            // wouldn't see it).
+            if let Some(sub_id) = tab.subgraph_id {
+                let ev = inline_rename(
+                    ui,
+                    tab_rename_wid(sub_id),
+                    tab.text.clone(),
+                    SUBGRAPH_NAME_MAX_CHARS,
+                    Some(label_style),
+                );
+                if ev.clicked {
+                    out.push(Intent::SwitchTab { to: index });
+                }
+                if let Some(to) = ev.committed {
+                    out.push(Intent::RenameSubgraph { id: sub_id, to });
+                }
+            } else {
+                // Main tab: plain label, activation handled by the outer
+                // chip in `emit_tab_actions`.
+                Text::new(tab.text.clone()).style(label_style).show(ui);
+            }
+            if tab.subgraph_id.is_some() {
                 let close_wid = tab_close_wid(index);
                 // Hover comes from last frame's response; paint a subtle
                 // highlight chip behind the `×` when pointed at.

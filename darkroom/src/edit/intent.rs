@@ -153,6 +153,14 @@ pub enum Intent {
         idx: usize,
         to: String,
     },
+    /// Rename a local subgraph def (`graph.subgraphs[id].name`).
+    /// Document-global (not scoped to any one graph) so it works
+    /// regardless of which tab is active. Drives the tab-strip's
+    /// double-click-to-rename label.
+    RenameSubgraph {
+        id: SubgraphId,
+        to: String,
+    },
 }
 
 /// Self-contained undo-stack entry. Each leaf variant carries both
@@ -299,6 +307,13 @@ pub enum DocStep {
         from: String,
         to: String,
     },
+    /// Rename a local subgraph def. Self-contained on the step (both
+    /// names) so apply/revert don't need to re-read the doc.
+    RenameSubgraph {
+        id: SubgraphId,
+        from: String,
+        to: String,
+    },
 }
 
 /// 1e-4 is the threshold below which two pan/scale samples are
@@ -360,6 +375,7 @@ impl DocStep {
             // targets up front), so it's never a no-op.
             DocStep::CloseTab { .. } => false,
             DocStep::RenameBoundaryPort { from, to, .. } => from == to,
+            DocStep::RenameSubgraph { from, to, .. } => from == to,
         }
     }
 }
@@ -401,6 +417,10 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             to_active,
         }));
     }
+    if let Intent::RenameSubgraph { id, to } = intent {
+        let from = doc.graph.subgraphs.by_key(&id)?.name.clone();
+        return Some(UndoStep::Doc(DocStep::RenameSubgraph { id, from, to }));
+    }
     if let Intent::RenameBoundaryPort { side, idx, to } = intent {
         // Boundary ports only exist in a subgraph interior; the def is
         // the active `Local` target's. Drop the rename otherwise.
@@ -418,7 +438,10 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
     }
     let EditScopeRef { graph, view } = doc.scope(target)?;
     let step = match intent {
-        Intent::SwitchTab { .. } | Intent::CloseTab { .. } | Intent::RenameBoundaryPort { .. } => {
+        Intent::SwitchTab { .. }
+        | Intent::CloseTab { .. }
+        | Intent::RenameBoundaryPort { .. }
+        | Intent::RenameSubgraph { .. } => {
             unreachable!("document-global intents handled above")
         }
         Intent::AddNode {
@@ -600,6 +623,11 @@ fn apply_doc(step: &DocStep, doc: &mut Document) {
             from,
             to,
         } => doc.rename_boundary_port(*sub_id, *side, *idx, from, to),
+        DocStep::RenameSubgraph { id, to, .. } => {
+            if let Some(def) = doc.graph.subgraphs.by_key_mut(id) {
+                def.name = to.clone();
+            }
+        }
     }
 }
 
@@ -739,6 +767,11 @@ fn revert_doc(step: &DocStep, doc: &mut Document) {
             from,
             to,
         } => doc.rename_boundary_port(*sub_id, *side, *idx, to, from),
+        DocStep::RenameSubgraph { id, from, .. } => {
+            if let Some(def) = doc.graph.subgraphs.by_key_mut(id) {
+                def.name = from.clone();
+            }
+        }
     }
 }
 
@@ -864,7 +897,9 @@ pub fn requires_relayout(step: &UndoStep) -> bool {
         UndoStep::Doc(
             DocStep::SwitchTab { .. }
             | DocStep::CloseTab { .. }
-            | DocStep::RenameBoundaryPort { .. },
+            | DocStep::RenameBoundaryPort { .. }
+            // Subgraph rename changes the tab-strip label's width.
+            | DocStep::RenameSubgraph { .. },
         ) => true,
         UndoStep::Graph(g) => match g {
             GraphStep::AddNode { .. }
@@ -958,7 +993,11 @@ pub fn gesture_key(step: &UndoStep) -> Option<GestureKey> {
             | GraphStep::DetachSubgraph { .. }
             | GraphStep::SetEventConnection { .. },
         )
-        | UndoStep::Doc(DocStep::CloseTab { .. } | DocStep::RenameBoundaryPort { .. }) => None,
+        | UndoStep::Doc(
+            DocStep::CloseTab { .. }
+            | DocStep::RenameBoundaryPort { .. }
+            | DocStep::RenameSubgraph { .. },
+        ) => None,
     }
 }
 

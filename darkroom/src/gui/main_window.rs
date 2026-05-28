@@ -78,7 +78,7 @@ impl MainWindow {
                     .show(ui, |ui| {
                         command = menu_bar::show(ui, host);
                     });
-                tab_bar::show(ui, ctx.theme, &tabs, doc.active);
+                tab_bar::show(ui, ctx.theme, &tabs, doc.active, out);
                 self.graph_ui.frame(ui, ctx, scene, out, &mut command);
             });
 
@@ -106,7 +106,7 @@ fn tab_labels(doc: &Document) -> Vec<TabLabel> {
         .map(|t| match t {
             GraphRef::Main => TabLabel {
                 text: "main".into(),
-                closable: false,
+                subgraph_id: None,
             },
             GraphRef::Local(id) => {
                 let name = doc
@@ -117,7 +117,7 @@ fn tab_labels(doc: &Document) -> Vec<TabLabel> {
                     .unwrap_or_else(|| "subgraph".to_string());
                 TabLabel {
                     text: name.into(),
-                    closable: true,
+                    subgraph_id: Some(*id),
                 }
             }
         })
