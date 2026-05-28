@@ -28,15 +28,22 @@ const MENU_FONT_SIZE: f32 = 13.0;
 const MENU_CHIP_ALPHA: f32 = 0.85;
 
 // ── colour palettes ──────────────────────────────────────────────────
-// One mod per built-in look. `Theme::dark` / `Theme::light` consume their
-// matching mod; `Theme::default` aliases `dark`. The names line up 1:1
-// across the two so the construct sites are pure substitution.
+// One named-const mod per built-in preset, so any builder (`Theme::dark`,
+// `StaticValueEditorTheme::dark`, future per-widget theme helpers) can
+// reach a swatch by name instead of inlining a hex literal. The two
+// mods line up 1:1 — every name in `dark::*` has a `light::*` peer with
+// the matching role.
 //
 // Sourced from the semantic palette TOMLs in `assets/`:
-//   - `dark` — `ayu-graphite-palette.toml` (Ayu Mirage High Contrast).
-//   - `light` — `ayu-light-palette.toml` (Zed's Ayu Light).
-// The toml files are the hand-edited reference; these consts are the
+//   - `dark`  — `ayu-graphite-palette.toml` (Ayu Mirage High Contrast)
+//   - `light` — `ayu-light-palette.toml`    (Zed's "Ayu Light")
+// The toml files are the hand-edited reference; the consts here are the
 // compile-time copy. Keep in sync when the palette changes.
+//
+// TODO: see `theme-review.md` §2/§4 — most of `recolour_palantir` should
+// move into palantir as a `Theme::from_palette` ctor; once that lands,
+// the `PAL_*` block in each mod (and `PalantirPalette`) collapses to
+// "pick `palantir::Palette::dark()` or `::light()`".
 
 pub(crate) mod dark {
     use palantir::Color;
@@ -68,7 +75,7 @@ pub(crate) mod dark {
     pub(crate) const EXEC_MISSING_GLOW: Color = Color::hex(0xffa63d);
     pub(crate) const EXEC_ERRORED_GLOW: Color = Color::hex(0xff5e44);
 
-    // ports
+    // ports — hover variants brighten for emphasis on a dark canvas.
     pub(crate) const INPUT_PORT: Color = Color::hex(0xdaff58);
     pub(crate) const OUTPUT_PORT: Color = Color::hex(0xffa63d);
     pub(crate) const INPUT_PORT_HOVER: Color = Color::hex(0xe9ff8e);
@@ -76,47 +83,40 @@ pub(crate) mod dark {
 
     // palantir sub-theme palette — values palantir's widgets normally
     // read from its own `palette::*` consts. Pushed through
-    // `palantir_palette` so the live `ui.theme` recolours alongside
-    // darkroom-specific chrome.
-    // Every value here comes from `assets/ayu-graphite-palette.toml`
-    // (the hand-edited Ayu Mirage High Contrast reference).
+    // `PalantirPalette` so the live `ui.theme` recolours alongside
+    // darkroom chrome; reused by `StaticValueEditorTheme::dark` for
+    // the per-palette path-pick chip.
     pub(crate) const PAL_TEXT: Color = Color::hex(0xe2dfd3);
-    pub(crate) const PAL_TEXT_MUTED: Color = TEXT_MUTED;
     pub(crate) const PAL_TEXT_DISABLED: Color = Color::hex(0x878a8d);
-    pub(crate) const PAL_TERMINAL_BG: Color = Color::hex(0x1a1a1a);
-    pub(crate) const PAL_ELEM: Color = NODE_FILL;
     pub(crate) const PAL_ELEM_HOVER: Color = Color::hex(0x3e3e3e);
     pub(crate) const PAL_ELEM_ACTIVE: Color = Color::hex(0x4b4b4b);
     pub(crate) const PAL_BORDER_FOCUSED: Color = Color::hex(0x105577);
-    pub(crate) const PAL_ACCENT: Color = SELECTION_RECT;
 }
 
 pub(crate) mod light {
     use palantir::Color;
 
-    // canvas — editor surface (`terminal_bg` in the palette), accent for
-    // rubber-band, the muted `border` swatch for the dot grid.
+    // canvas
     pub(crate) const CANVAS_BG: Color = Color::hex(0xfcfcfc);
     pub(crate) const SELECTION_RECT: Color = Color::hex(0x3b9ee5);
     pub(crate) const CANVAS_DOT: Color = Color::hex(0xcfd1d2);
 
-    // connections + breaker — palette `error`.
+    // connections + breaker
     pub(crate) const CONNECTION_BROKEN: Color = Color::hex(0xef7271);
     pub(crate) const BREAKER_STROKE: Color = Color::hex(0xef7271);
 
-    // node chrome — `elem` for the body, `border` for the outline,
-    // `title_bar` for the header band, `text_muted`/`bg` for muted text
-    // and the top-chrome strip.
+    // node chrome
     pub(crate) const NODE_FILL: Color = Color::hex(0xececed);
     pub(crate) const NODE_BORDER: Color = Color::hex(0xcfd1d2);
     pub(crate) const HEADER_FILL: Color = Color::hex(0xdcddde);
     pub(crate) const TEXT_MUTED: Color = Color::hex(0x8b8e92);
     pub(crate) const CHROME_FILL: Color = Color::hex(0xdcddde);
 
-    // header badges — accent / error / modified (warning yellow).
+    // header badges — accent / error / a deeper amber than the palette's
+    // warning yellow (#f1ad49 was barely visible on a light surface).
     pub(crate) const BADGE_SUBGRAPH: Color = Color::hex(0x3b9ee5);
     pub(crate) const BADGE_TERMINAL: Color = Color::hex(0xef7271);
-    pub(crate) const BADGE_CACHE: Color = Color::hex(0xf1ad49);
+    pub(crate) const BADGE_CACHE: Color = Color::hex(0xb87503);
 
     // execution-status glow — success / accent / syn_keyword / error.
     pub(crate) const EXEC_EXECUTED_GLOW: Color = Color::hex(0x85b304);
@@ -124,26 +124,19 @@ pub(crate) mod light {
     pub(crate) const EXEC_MISSING_GLOW: Color = Color::hex(0xfa8d3e);
     pub(crate) const EXEC_ERRORED_GLOW: Color = Color::hex(0xef7271);
 
-    // ports — input = `success`, output = `syn_keyword`; on a light
-    // canvas "hover" needs *darker* (not lighter) variants for emphasis,
-    // opposite to the dark theme.
+    // ports — input = success, output = syn_keyword. Hover variants on
+    // the light canvas *darken* for emphasis (opposite to the dark theme).
     pub(crate) const INPUT_PORT: Color = Color::hex(0x85b304);
     pub(crate) const OUTPUT_PORT: Color = Color::hex(0xfa8d3e);
     pub(crate) const INPUT_PORT_HOVER: Color = Color::hex(0x6f9603);
     pub(crate) const OUTPUT_PORT_HOVER: Color = Color::hex(0xd97527);
 
-    // palantir sub-theme palette — Ayu Light counterparts to the dark
-    // mod's PAL_* set; see the doc comment there. Sourced from
-    // `assets/ayu-light-palette.toml` (Zed's "Ayu Light" theme).
+    // palantir sub-theme palette — see `dark::PAL_*` for the contract.
     pub(crate) const PAL_TEXT: Color = Color::hex(0x5c6166);
-    pub(crate) const PAL_TEXT_MUTED: Color = TEXT_MUTED;
     pub(crate) const PAL_TEXT_DISABLED: Color = Color::hex(0xa9acae);
-    pub(crate) const PAL_TERMINAL_BG: Color = Color::hex(0xfcfcfc);
-    pub(crate) const PAL_ELEM: Color = NODE_FILL;
     pub(crate) const PAL_ELEM_HOVER: Color = Color::hex(0xdfe0e1);
     pub(crate) const PAL_ELEM_ACTIVE: Color = Color::hex(0xcfd0d2);
     pub(crate) const PAL_BORDER_FOCUSED: Color = Color::hex(0xc4daf6);
-    pub(crate) const PAL_ACCENT: Color = SELECTION_RECT;
 }
 
 /// Visual palette + layout dimensions for darkroom's UI. Owned by
@@ -293,12 +286,34 @@ pub struct StaticValueEditorTheme {
     pub width: f32,
 }
 
-impl Default for StaticValueEditorTheme {
-    fn default() -> Self {
-        // Palantir's `menu_button` preset already matches: transparent
-        // at rest, hover-only background, no border.
+impl StaticValueEditorTheme {
+    /// Path-pick chip in the dark theme — transparent at rest, dark
+    /// `elem_hover`/`elem_active` fills on hover and press.
+    fn dark() -> Self {
+        Self::with_button_fills(dark::PAL_ELEM_HOVER, dark::PAL_ELEM_ACTIVE)
+    }
+
+    /// Path-pick chip in the light theme — same structure as `dark`,
+    /// with the light palette's `elem_hover`/`elem_active` fills.
+    fn light() -> Self {
+        Self::with_button_fills(light::PAL_ELEM_HOVER, light::PAL_ELEM_ACTIVE)
+    }
+
+    /// Shared shape: palantir's `menu_button` preset (transparent at
+    /// rest + disabled, no border) with the two hover/press fills
+    /// substituted to match the live palette. `ButtonTheme` isn't
+    /// `const`-constructible, so this lives behind a `fn` instead of
+    /// `const DARK / LIGHT` peers next to the palette mods.
+    fn with_button_fills(hover: Color, pressed: Color) -> Self {
+        let mut button = ButtonTheme::menu_button();
+        if let Some(bg) = button.hovered.background.as_mut() {
+            bg.fill = hover.into();
+        }
+        if let Some(bg) = button.pressed.background.as_mut() {
+            bg.fill = pressed.into();
+        }
         Self {
-            button: ButtonTheme::menu_button(),
+            button,
             width: VALUE_EDITOR_WIDTH,
         }
     }
@@ -351,26 +366,31 @@ struct PalantirPalette {
 impl PalantirPalette {
     const DARK: Self = Self {
         text: dark::PAL_TEXT,
-        text_muted: dark::PAL_TEXT_MUTED,
+        text_muted: dark::TEXT_MUTED,
         text_disabled: dark::PAL_TEXT_DISABLED,
-        terminal_bg: dark::PAL_TERMINAL_BG,
-        elem: dark::PAL_ELEM,
+        // Palantir's `window_clear` slot wants the editor / terminal
+        // surface — same swatch as the graph canvas in both themes.
+        terminal_bg: dark::CANVAS_BG,
+        // Palantir's `palette::ELEM` and our `NODE_FILL` are the same
+        // swatch by design: nodes and palantir surfaces sit on the
+        // same surface tier.
+        elem: dark::NODE_FILL,
         elem_hover: dark::PAL_ELEM_HOVER,
         elem_active: dark::PAL_ELEM_ACTIVE,
         border_focused: dark::PAL_BORDER_FOCUSED,
-        accent: dark::PAL_ACCENT,
+        accent: dark::SELECTION_RECT,
     };
 
     const LIGHT: Self = Self {
         text: light::PAL_TEXT,
-        text_muted: light::PAL_TEXT_MUTED,
+        text_muted: light::TEXT_MUTED,
         text_disabled: light::PAL_TEXT_DISABLED,
-        terminal_bg: light::PAL_TERMINAL_BG,
-        elem: light::PAL_ELEM,
+        terminal_bg: light::CANVAS_BG,
+        elem: light::NODE_FILL,
         elem_hover: light::PAL_ELEM_HOVER,
         elem_active: light::PAL_ELEM_ACTIVE,
         border_focused: light::PAL_BORDER_FOCUSED,
-        accent: light::PAL_ACCENT,
+        accent: light::SELECTION_RECT,
     };
 }
 
@@ -544,27 +564,6 @@ fn recolour_palantir(t: &mut palantir::Theme, p: &PalantirPalette) {
     t.tooltip.text.color = p.text;
 }
 
-impl Theme {
-    /// Derived radius for port circles — half the port side. Lives as
-    /// a method instead of a stored field so the two can't drift if
-    /// someone bumps `port_size` and forgets the radius.
-    #[inline]
-    pub fn port_radius(&self) -> f32 {
-        self.port_size * 0.5
-    }
-
-    /// Best-effort guess at whether this theme reads as the light or the
-    /// dark preset. Used by [`crate::app::commands`] to flip to the
-    /// opposite palette on the "Toggle Light/Dark" menu — driven off
-    /// `canvas_bg` luminance so hand-edited / loaded themes still pick a
-    /// sensible "other side" to swap to.
-    pub fn is_light(&self) -> bool {
-        let c = self.canvas_bg;
-        // Rec. 709 luma against a 50 % midpoint.
-        0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b > 0.5
-    }
-}
-
 /// Colour swatches a [`Theme`] needs from a palette mod. Borrowed by
 /// [`Theme::build`] so the two presets share one assembly path — only
 /// the colour values diverge, every dimension and sub-theme comes from
@@ -644,21 +643,50 @@ impl PaletteColors {
 }
 
 impl Theme {
+    /// Derived radius for port circles — half the port side. Lives as
+    /// a method instead of a stored field so the two can't drift if
+    /// someone bumps `port_size` and forgets the radius.
+    #[inline]
+    pub fn port_radius(&self) -> f32 {
+        self.port_size * 0.5
+    }
+
+    /// Best-effort guess at whether this theme reads as the light or
+    /// the dark preset. Used by [`crate::app::commands`] to flip to
+    /// the opposite palette on the "Toggle Light/Dark" menu — driven
+    /// off `canvas_bg` luminance so hand-edited / loaded themes still
+    /// pick a sensible "other side" to swap to.
+    pub fn is_light(&self) -> bool {
+        let c = self.canvas_bg;
+        // Rec. 709 luma against a 50 % midpoint.
+        0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b > 0.5
+    }
+
     /// Ayu Mirage High Contrast palette — the built-in dark look.
     pub fn dark() -> Self {
-        Self::build(&PaletteColors::DARK, &PalantirPalette::DARK)
+        Self::build(
+            &PaletteColors::DARK,
+            &PalantirPalette::DARK,
+            StaticValueEditorTheme::dark(),
+        )
     }
 
     /// Ayu Light palette — the built-in light look (Zed's "Ayu Light"
     /// variant ported into darkroom's structure).
     pub fn light() -> Self {
-        Self::build(&PaletteColors::LIGHT, &PalantirPalette::LIGHT)
+        Self::build(
+            &PaletteColors::LIGHT,
+            &PalantirPalette::LIGHT,
+            StaticValueEditorTheme::light(),
+        )
     }
 
-    /// Shared assembly path: dimensions + sub-themes are palette-
-    /// independent; the colour table `c` drives darkroom chrome and
-    /// `p` recolours every palantir widget.
-    fn build(c: &PaletteColors, p: &PalantirPalette) -> Self {
+    /// Shared assembly path: dimensions are palette-independent; `c`
+    /// drives darkroom chrome, `p` drives the palantir widget
+    /// recolouring, and `sve` is the per-palette static-value-editor
+    /// bundle (handed in rather than rebuilt here so its hex values
+    /// stay alongside the rest of the palette).
+    fn build(c: &PaletteColors, p: &PalantirPalette, sve: StaticValueEditorTheme) -> Self {
         Self {
             canvas_bg: c.canvas_bg,
             selection_rect: c.selection_rect,
@@ -696,7 +724,7 @@ impl Theme {
             port_gap: PORT_GAP,
             port_cols_gap: PORT_COLS_GAP,
             new_node_popup_max_height: NEW_NODE_POPUP_MAX_HEIGHT,
-            static_value_editor: StaticValueEditorTheme::default(),
+            static_value_editor: sve,
             inline_rename: InlineRenameTheme::default(),
             palantir_theme: palantir_theme_for(p),
         }
