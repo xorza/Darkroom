@@ -8,9 +8,9 @@ use crate::stacking::cache::ImageCache;
 use crate::stacking::stack::run_stacking;
 use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
 use crate::{
-    AstroImage, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, Normalization, ProgressCallback,
-    RegistrationConfig, StackConfig, Star, StarDetectionConfig, StarDetector, register,
-    stack_with_progress, warp,
+    AstroImage, CalibrationFrames, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, Normalization,
+    ProgressCallback, RegistrationConfig, StackConfig, Star, StarDetectionConfig, StarDetector,
+    register, stack_with_progress, warp,
 };
 
 #[test]
@@ -21,12 +21,14 @@ fn diag_dark_pixel_distribution() {
     let dark_paths = calibration_image_paths("Darks").unwrap();
     let bias_paths = calibration_image_paths("Bias").unwrap();
 
-    let empty: Vec<String> = Vec::new();
+    let empty: Vec<std::path::PathBuf> = Vec::new();
     let masters = CalibrationMasters::from_files(
-        &dark_paths,
-        &empty,
-        &bias_paths,
-        &empty,
+        CalibrationFrames {
+            darks: &dark_paths,
+            flats: &empty,
+            bias: &bias_paths,
+            flat_darks: &empty,
+        },
         DEFAULT_SIGMA_THRESHOLD,
     )
     .expect("Failed to create masters");

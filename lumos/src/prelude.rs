@@ -1,6 +1,9 @@
-//! Prelude module for convenient imports.
+//! Prelude: the full public surface in one glob import.
 //!
-//! This module re-exports the most commonly used types and traits from the library.
+//! Re-exports every item published at the crate root, so `use lumos::prelude::*`
+//! reaches all of the loading, calibration, detection, registration, stacking,
+//! and drizzle APIs. It mirrors `lib.rs` via a wildcard, so it cannot drift out
+//! of sync as the surface grows.
 //!
 //! # Usage
 //!
@@ -8,28 +11,4 @@
 //! use lumos::prelude::*;
 //! ```
 
-// Core image types
-pub use crate::{AstroImage, AstroImageMetadata, BitPix, DefectMap, ImageDimensions};
-
-// Calibration
-pub use crate::CalibrationMasters;
-
-// Star detection - main API
-pub use crate::{
-    BackgroundEstimate, Star, StarDetectionConfig, StarDetectionDiagnostics, StarDetectionResult,
-};
-
-// Registration - main API
-pub use crate::{
-    InterpolationMethod, RegistrationConfig, RegistrationError, RegistrationResult, Transform,
-    TransformType,
-};
-
-// Registration - convenience functions
-pub use crate::{register, warp};
-
-// Stacking - main API
-pub use crate::{
-    CacheConfig, CombineMethod, Normalization, ProgressCallback, Rejection, StackConfig,
-    StackError, StackingProgress, StackingStage, stack, stack_images, stack_with_progress,
-};
+pub use crate::*;

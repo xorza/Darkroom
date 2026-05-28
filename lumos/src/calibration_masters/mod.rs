@@ -21,6 +21,25 @@ use defect_map::DefectMap;
 /// PixInsight uses 3.0; 5.0 is more conservative (fewer false positives).
 pub const DEFAULT_SIGMA_THRESHOLD: f32 = 5.0;
 
+/// Raw frame paths for [`CalibrationMasters::from_files`], grouped by role.
+///
+/// Naming each role at the call site prevents accidentally swapping, say, flats
+/// and bias (all four are path slices). An empty slice produces `None` for that
+/// master.
+#[derive(Debug)]
+pub struct CalibrationFrames<'a, P: AsRef<Path> + Sync> {
+    /// Dark frames (thermal-noise calibration).
+    pub darks: &'a [P],
+    /// Flat frames (vignetting / dust correction).
+    pub flats: &'a [P],
+    /// Bias frames (read-noise calibration).
+    pub bias: &'a [P],
+    /// Dark frames taken at the flat exposure time. When non-empty, subtracted
+    /// from the flat instead of bias during flat normalization — matters for
+    /// narrowband, where flat exposures accumulate dark current.
+    pub flat_darks: &'a [P],
+}
+
 /// Holds master calibration frames (dark, flat, bias) and defect map.
 ///
 /// Operates on raw CFA (single-channel sensor) data before demosaicing,
@@ -102,24 +121,18 @@ impl CalibrationMasters {
     ///
     /// Uses sigma-clipped mean (>= 8 frames) or median (< 8 frames)
     /// with the full stacking pipeline (rejection, normalization, chunked processing).
-    /// Empty slices produce `None` for that master.
+    /// Empty slices produce `None` for that master (see [`CalibrationFrames`]).
     ///
-    /// `flat_darks` are dark frames taken at the flat exposure time. When provided,
-    /// they are subtracted from the flat instead of bias during normalization.
-    /// Important for narrowband imaging where flat exposures accumulate dark current.
     /// `sigma_threshold` controls defect detection sensitivity (see
     /// [`DEFAULT_SIGMA_THRESHOLD`]).
-    pub fn from_files(
-        darks: &[impl AsRef<Path> + Sync],
-        flats: &[impl AsRef<Path> + Sync],
-        biases: &[impl AsRef<Path> + Sync],
-        flat_darks: &[impl AsRef<Path> + Sync],
+    pub fn from_files<P: AsRef<Path> + Sync>(
+        frames: CalibrationFrames<'_, P>,
         sigma_threshold: f32,
     ) -> Result<Self, crate::stacking::error::Error> {
-        let dark = stack_cfa_frames(darks, StackConfig::dark())?;
-        let flat = stack_cfa_frames(flats, StackConfig::flat())?;
-        let bias = stack_cfa_frames(biases, StackConfig::bias())?;
-        let flat_dark = stack_cfa_frames(flat_darks, StackConfig::dark())?;
+        let dark = stack_cfa_frames(frames.darks, StackConfig::dark())?;
+        let flat = stack_cfa_frames(frames.flats, StackConfig::flat())?;
+        let bias = stack_cfa_frames(frames.bias, StackConfig::bias())?;
+        let flat_dark = stack_cfa_frames(frames.flat_darks, StackConfig::dark())?;
         Ok(Self::from_images(
             dark,
             flat,

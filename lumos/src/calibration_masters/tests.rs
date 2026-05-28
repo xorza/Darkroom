@@ -2,8 +2,30 @@ use crate::astro_image::cfa::{CfaImage, CfaType};
 use crate::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
 use crate::calibration_masters::defect_map::DefectMap;
 use crate::testing::constant_cfa;
-use crate::{AstroImageMetadata, CalibrationMasters};
+use crate::{AstroImageMetadata, CalibrationFrames, CalibrationMasters};
 use common::buffer2::Buffer2;
+
+#[test]
+fn test_from_files_all_empty_yields_no_masters() {
+    // Empty frame sets must produce a `None` for every master (no file I/O path).
+    let empty: Vec<std::path::PathBuf> = Vec::new();
+    let masters = CalibrationMasters::from_files(
+        CalibrationFrames {
+            darks: &empty,
+            flats: &empty,
+            bias: &empty,
+            flat_darks: &empty,
+        },
+        DEFAULT_SIGMA_THRESHOLD,
+    )
+    .unwrap();
+
+    assert!(masters.master_dark.is_none());
+    assert!(masters.master_flat.is_none());
+    assert!(masters.master_bias.is_none());
+    assert!(masters.master_flat_dark.is_none());
+    assert!(masters.defect_map.is_none());
+}
 
 #[test]
 fn test_new_constructor() {
