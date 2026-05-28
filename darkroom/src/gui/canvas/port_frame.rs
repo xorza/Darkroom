@@ -107,12 +107,13 @@ impl PortFrame {
                 }
             }
         }
-        // Drop offset entries for ports no longer present this frame
-        // (deleted nodes, closed subgraphs, shrunk port counts) so the
-        // cross-frame cache stays bounded by the *live* port set rather
-        // than every port ever seen this session. `map` was rebuilt to
-        // exactly the live ports above, so it's the live key set.
-        self.offsets.retain(|p, _| self.map.contains_key(p));
+        // `offsets` deliberately accumulates across every tab the user
+        // has touched this session — a previous retain-by-current-scene
+        // pass dropped every other tab's entries on a tab switch, so
+        // the frame after the switch hit an empty cache and skipped
+        // every connection. Each entry is tiny (16 bytes), so the
+        // session-long cap is fine; on doc reload the whole `GraphUI`
+        // is dropped, taking the cache with it.
     }
 
     /// Canvas-local pre-transform port center. `None` when the port

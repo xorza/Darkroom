@@ -32,11 +32,11 @@ impl MainWindow {
     pub(crate) fn scan_navigation(
         &self,
         ui: &Ui,
+        doc: &Document,
         scene: &Scene,
-        tab_count: usize,
         actions: &mut Vec<UiAction>,
     ) {
-        tab_bar::emit_tab_actions(ui, tab_count, actions);
+        tab_bar::emit_tab_actions(ui, &doc.tabs, actions);
         emit_subgraph_opens(ui, scene, actions);
     }
 

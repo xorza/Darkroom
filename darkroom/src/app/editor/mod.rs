@@ -251,9 +251,8 @@ impl Editor {
         // Surface tab/open clicks from last frame's responses. `scene`
         // still holds the last-rendered graph here — exactly the one
         // whose chips were clicked.
-        let tab_count = self.document.tabs.len();
         self.main_window
-            .scan_navigation(ui, &self.scene, tab_count, &mut self.actions);
+            .scan_navigation(ui, &self.document, &self.scene, &mut self.actions);
         // Open mutates the tab list directly; activate/close queue
         // undoable `SwitchTab` / `CloseTab` intents — drain them (both
         // steps are graph-agnostic, so the target passed here doesn't

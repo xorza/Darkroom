@@ -12,6 +12,7 @@ use palantir::{
 };
 use scenarium::prelude::SubgraphId;
 
+use crate::document::GraphRef;
 use crate::edit::intent::Intent;
 use crate::gui::UiAction;
 use crate::gui::widgets::inline_rename::InlineRename;
@@ -52,15 +53,30 @@ fn tab_rename_wid(sub_id: SubgraphId) -> WidgetId {
 }
 
 /// Prepass scan: surface tab activate/close + the "+" new-subgraph
-/// request from last frame's chip responses. `count` is the current tab
-/// count; widgets for indices that didn't exist last frame simply report
-/// no click. Close wins over activate on the same chip.
-pub(crate) fn emit_tab_actions(ui: &Ui, count: usize, actions: &mut Vec<UiAction>) {
-    for index in 0..count {
+/// request from last frame's chip responses. Reads three click sources
+/// per subgraph tab (close button > rename-label > outer chip), since a
+/// click landing on the inner rename label is captured there and the
+/// outer chip's response stays `clicked: false` — without polling the
+/// label widget id here too, the activation would only fire once the
+/// click happened on the chip's padding. Close wins over activate.
+///
+/// Reading the rename label's click in the *prepass* (not as a record-
+/// pass `Intent` push) is load-bearing: it lets the navigation phase
+/// settle the new target *before* this frame's record, so Pass A
+/// records the new tab and Pass A's cascades feed Pass B's
+/// `PortFrame` cache — without that, the switch lands in the
+/// post-record drain, Pass A draws the old tab, and Pass B redraws
+/// the new tab with an empty port cache (no connections that frame).
+pub(crate) fn emit_tab_actions(ui: &Ui, tabs: &[GraphRef], actions: &mut Vec<UiAction>) {
+    for (index, tab) in tabs.iter().enumerate() {
         // Only non-`Main` tabs (index > 0) carry a close button.
         if index > 0 && ui.response_for(tab_close_wid(index)).clicked {
             actions.push(UiAction::CloseTab(index));
-        } else if ui.response_for(tab_chip_wid(index)).clicked {
+            continue;
+        }
+        let label_clicked =
+            matches!(tab, GraphRef::Local(id) if ui.response_for(tab_rename_wid(*id)).clicked);
+        if label_clicked || ui.response_for(tab_chip_wid(index)).clicked {
             actions.push(UiAction::ActivateTab(index));
         }
     }
@@ -182,14 +198,19 @@ fn tab_chip(
             // so the outer chip's click handler in `emit_tab_actions`
             // wouldn't see it).
             if let Some(sub_id) = tab.subgraph_id {
+                // `clicked` is *not* forwarded to a `SwitchTab` intent
+                // here — `emit_tab_actions` polls the same response in
+                // the prepass and pushes the activation as a
+                // `UiAction`, so the switch settles before this
+                // frame's record. Push-on-click during record would
+                // defer the switch to the post-record drain, landing
+                // the new tab in Pass B with no measured layouts and
+                // dropping its connections for a frame.
                 let ev = InlineRename::new(tab_rename_wid(sub_id), tab.text.clone())
                     .theme(&theme.inline_rename)
                     .max_chars(SUBGRAPH_NAME_MAX_CHARS)
                     .style(label_style)
                     .show(ui);
-                if ev.clicked {
-                    out.push(Intent::SwitchTab { to: index });
-                }
                 if let Some(to) = ev.committed {
                     out.push(Intent::RenameSubgraph { id: sub_id, to });
                 }
