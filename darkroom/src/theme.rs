@@ -1,66 +1,150 @@
-use palantir::{Background, Brush, ButtonTheme, Color, Spacing, Stroke, TextEditTheme, WidgetLook};
+use palantir::{
+    Background, Brush, ButtonTheme, Color, Corners, Shadow, Spacing, Stroke, TextEditTheme,
+    WidgetLook,
+};
 
-// ── default palette + dimensions ─────────────────────────────────────
-// The single source of truth for darkroom's built-in look. `Theme::default`
-// is assembled from these; `tests::ayu_graphite_asset_in_sync` serializes
-// that default and rewrites `assets/ayu-graphite.toml`, so the checked-in
-// theme file is a generated artifact (a reference users can copy / edit
-// via Theme → Load), never a parallel source that can drift.
+// ── shared dimensions ────────────────────────────────────────────────
+// Layout dimensions don't change between dark and light — they're factored
+// out so both palettes pull the same numbers and a tweak hits both at once.
 
-// canvas
-const CANVAS_BG: Color = Color::hex(0x1a1a1a);
-const SELECTION_RECT: Color = Color::hex(0x9adbfb);
-const CANVAS_DOT: Color = Color::hex(0x363636);
 const CANVAS_DOT_SPACING: f32 = 18.0;
 const CANVAS_DOT_RADIUS: f32 = 0.6;
-
-// connections
-const CONNECTION_BROKEN: Color = Color::hex(0xff5e44);
 const CONNECTION_WIDTH: f32 = 2.0;
-const BREAKER_STROKE: Color = Color::hex(0xff5e44);
 const BREAKER_STROKE_WIDTH: f32 = 2.0;
-
-// node chrome
-const NODE_FILL: Color = Color::hex(0x343434);
-const NODE_BORDER: Color = Color::hex(0x363636);
 const NODE_BORDER_WIDTH: f32 = 1.0;
 const NODE_CORNER_RADIUS: f32 = 6.0;
 const NODE_MIN_WIDTH: f32 = 160.0;
 const NODE_MIN_HEIGHT: f32 = 10.0;
-const HEADER_FILL: Color = Color::hex(0x414141);
 const TAB_CORNER_RADIUS: f32 = 6.0;
-const TEXT_MUTED: Color = Color::hex(0xaaaaa8);
-const CHROME_FILL: Color = Color::hex(0x252525);
-
-// header badges
-const BADGE_SUBGRAPH: Color = Color::hex(0x9adbfb);
-const BADGE_TERMINAL: Color = Color::hex(0xff5e44);
-const BADGE_CACHE: Color = Color::hex(0xffd44a);
-
-// execution-status glow
-const EXEC_EXECUTED_GLOW: Color = Color::hex(0xdaff58);
-const EXEC_CACHED_GLOW: Color = Color::hex(0x9adbfb);
-const EXEC_MISSING_GLOW: Color = Color::hex(0xffa63d);
-const EXEC_ERRORED_GLOW: Color = Color::hex(0xff5e44);
-
-// ports
-const INPUT_PORT: Color = Color::hex(0xdaff58);
-const OUTPUT_PORT: Color = Color::hex(0xffa63d);
-const INPUT_PORT_HOVER: Color = Color::hex(0xe9ff8e);
-const OUTPUT_PORT_HOVER: Color = Color::hex(0xffc878);
 const PORT_SIZE: f32 = 10.0;
 const PORT_COL_PAD_TOP: f32 = 6.0;
 const PORT_COL_PAD_X: f32 = 8.0;
 const PORT_GAP: f32 = 6.0;
 const PORT_COLS_GAP: f32 = 12.0;
-
-// inline editors / popups
 const VALUE_EDITOR_WIDTH: f32 = 100.0;
 const NEW_NODE_POPUP_MAX_HEIGHT: f32 = 400.0;
-
-// palantir sub-theme tweaks (see `default_palantir_theme`)
+// palantir sub-theme tweaks (see `palantir_theme_for`)
 const MENU_FONT_SIZE: f32 = 13.0;
 const MENU_CHIP_ALPHA: f32 = 0.85;
+
+// ── colour palettes ──────────────────────────────────────────────────
+// One mod per built-in look. `Theme::dark` / `Theme::light` consume their
+// matching mod; `Theme::default` aliases `dark`. The names line up 1:1
+// across the two so the construct sites are pure substitution.
+//
+// Sourced from the semantic palette TOMLs in `assets/`:
+//   - `dark` — `ayu-graphite-palette.toml` (Ayu Mirage High Contrast).
+//   - `light` — `ayu-light-palette.toml` (Zed's Ayu Light).
+// The toml files are the hand-edited reference; these consts are the
+// compile-time copy. Keep in sync when the palette changes.
+
+pub(crate) mod dark {
+    use palantir::Color;
+
+    // canvas
+    pub(crate) const CANVAS_BG: Color = Color::hex(0x1a1a1a);
+    pub(crate) const SELECTION_RECT: Color = Color::hex(0x9adbfb);
+    pub(crate) const CANVAS_DOT: Color = Color::hex(0x363636);
+
+    // connections + breaker
+    pub(crate) const CONNECTION_BROKEN: Color = Color::hex(0xff5e44);
+    pub(crate) const BREAKER_STROKE: Color = Color::hex(0xff5e44);
+
+    // node chrome
+    pub(crate) const NODE_FILL: Color = Color::hex(0x343434);
+    pub(crate) const NODE_BORDER: Color = Color::hex(0x363636);
+    pub(crate) const HEADER_FILL: Color = Color::hex(0x414141);
+    pub(crate) const TEXT_MUTED: Color = Color::hex(0xaaaaa8);
+    pub(crate) const CHROME_FILL: Color = Color::hex(0x252525);
+
+    // header badges
+    pub(crate) const BADGE_SUBGRAPH: Color = Color::hex(0x9adbfb);
+    pub(crate) const BADGE_TERMINAL: Color = Color::hex(0xff5e44);
+    pub(crate) const BADGE_CACHE: Color = Color::hex(0xffd44a);
+
+    // execution-status glow
+    pub(crate) const EXEC_EXECUTED_GLOW: Color = Color::hex(0xdaff58);
+    pub(crate) const EXEC_CACHED_GLOW: Color = Color::hex(0x9adbfb);
+    pub(crate) const EXEC_MISSING_GLOW: Color = Color::hex(0xffa63d);
+    pub(crate) const EXEC_ERRORED_GLOW: Color = Color::hex(0xff5e44);
+
+    // ports
+    pub(crate) const INPUT_PORT: Color = Color::hex(0xdaff58);
+    pub(crate) const OUTPUT_PORT: Color = Color::hex(0xffa63d);
+    pub(crate) const INPUT_PORT_HOVER: Color = Color::hex(0xe9ff8e);
+    pub(crate) const OUTPUT_PORT_HOVER: Color = Color::hex(0xffc878);
+
+    // palantir sub-theme palette — values palantir's widgets normally
+    // read from its own `palette::*` consts. Pushed through
+    // `palantir_palette` so the live `ui.theme` recolours alongside
+    // darkroom-specific chrome.
+    // Every value here comes from `assets/ayu-graphite-palette.toml`
+    // (the hand-edited Ayu Mirage High Contrast reference).
+    pub(crate) const PAL_TEXT: Color = Color::hex(0xe2dfd3);
+    pub(crate) const PAL_TEXT_MUTED: Color = TEXT_MUTED;
+    pub(crate) const PAL_TEXT_DISABLED: Color = Color::hex(0x878a8d);
+    pub(crate) const PAL_TERMINAL_BG: Color = Color::hex(0x1a1a1a);
+    pub(crate) const PAL_ELEM: Color = NODE_FILL;
+    pub(crate) const PAL_ELEM_HOVER: Color = Color::hex(0x3e3e3e);
+    pub(crate) const PAL_ELEM_ACTIVE: Color = Color::hex(0x4b4b4b);
+    pub(crate) const PAL_BORDER_FOCUSED: Color = Color::hex(0x105577);
+    pub(crate) const PAL_ACCENT: Color = SELECTION_RECT;
+}
+
+pub(crate) mod light {
+    use palantir::Color;
+
+    // canvas — editor surface (`terminal_bg` in the palette), accent for
+    // rubber-band, the muted `border` swatch for the dot grid.
+    pub(crate) const CANVAS_BG: Color = Color::hex(0xfcfcfc);
+    pub(crate) const SELECTION_RECT: Color = Color::hex(0x3b9ee5);
+    pub(crate) const CANVAS_DOT: Color = Color::hex(0xcfd1d2);
+
+    // connections + breaker — palette `error`.
+    pub(crate) const CONNECTION_BROKEN: Color = Color::hex(0xef7271);
+    pub(crate) const BREAKER_STROKE: Color = Color::hex(0xef7271);
+
+    // node chrome — `elem` for the body, `border` for the outline,
+    // `title_bar` for the header band, `text_muted`/`bg` for muted text
+    // and the top-chrome strip.
+    pub(crate) const NODE_FILL: Color = Color::hex(0xececed);
+    pub(crate) const NODE_BORDER: Color = Color::hex(0xcfd1d2);
+    pub(crate) const HEADER_FILL: Color = Color::hex(0xdcddde);
+    pub(crate) const TEXT_MUTED: Color = Color::hex(0x8b8e92);
+    pub(crate) const CHROME_FILL: Color = Color::hex(0xdcddde);
+
+    // header badges — accent / error / modified (warning yellow).
+    pub(crate) const BADGE_SUBGRAPH: Color = Color::hex(0x3b9ee5);
+    pub(crate) const BADGE_TERMINAL: Color = Color::hex(0xef7271);
+    pub(crate) const BADGE_CACHE: Color = Color::hex(0xf1ad49);
+
+    // execution-status glow — success / accent / syn_keyword / error.
+    pub(crate) const EXEC_EXECUTED_GLOW: Color = Color::hex(0x85b304);
+    pub(crate) const EXEC_CACHED_GLOW: Color = Color::hex(0x3b9ee5);
+    pub(crate) const EXEC_MISSING_GLOW: Color = Color::hex(0xfa8d3e);
+    pub(crate) const EXEC_ERRORED_GLOW: Color = Color::hex(0xef7271);
+
+    // ports — input = `success`, output = `syn_keyword`; on a light
+    // canvas "hover" needs *darker* (not lighter) variants for emphasis,
+    // opposite to the dark theme.
+    pub(crate) const INPUT_PORT: Color = Color::hex(0x85b304);
+    pub(crate) const OUTPUT_PORT: Color = Color::hex(0xfa8d3e);
+    pub(crate) const INPUT_PORT_HOVER: Color = Color::hex(0x6f9603);
+    pub(crate) const OUTPUT_PORT_HOVER: Color = Color::hex(0xd97527);
+
+    // palantir sub-theme palette — Ayu Light counterparts to the dark
+    // mod's PAL_* set; see the doc comment there. Sourced from
+    // `assets/ayu-light-palette.toml` (Zed's "Ayu Light" theme).
+    pub(crate) const PAL_TEXT: Color = Color::hex(0x5c6166);
+    pub(crate) const PAL_TEXT_MUTED: Color = TEXT_MUTED;
+    pub(crate) const PAL_TEXT_DISABLED: Color = Color::hex(0xa9acae);
+    pub(crate) const PAL_TERMINAL_BG: Color = Color::hex(0xfcfcfc);
+    pub(crate) const PAL_ELEM: Color = NODE_FILL;
+    pub(crate) const PAL_ELEM_HOVER: Color = Color::hex(0xdfe0e1);
+    pub(crate) const PAL_ELEM_ACTIVE: Color = Color::hex(0xcfd0d2);
+    pub(crate) const PAL_BORDER_FOCUSED: Color = Color::hex(0xc4daf6);
+    pub(crate) const PAL_ACCENT: Color = SELECTION_RECT;
+}
 
 /// Visual palette + layout dimensions for darkroom's UI. Owned by
 /// `MainWindow`, handed to every UI subtree through
@@ -129,45 +213,31 @@ pub struct Theme {
     /// (`badge_subgraph`) or full-strength text.
     pub text_muted: Color,
 
-    /// Top-chrome fill behind the menu bar + tab strip. Palette `bg`
-    /// (`#252525`) — a notch darker than the node surface, sitting
-    /// between the graph (`canvas_bg`) and the nodes, so the chrome
-    /// recedes and the active tab (which uses `canvas_bg`) reads as
-    /// continuous with the graph below it. `#[serde(default)]` so older
-    /// themes keep loading without regenerating the asset.
-    #[serde(default = "default_chrome_fill")]
+    /// Top-chrome fill behind the menu bar + tab strip. A notch darker
+    /// than the node surface, sitting between the graph (`canvas_bg`)
+    /// and the nodes, so the chrome recedes and the active tab (which
+    /// uses `canvas_bg`) reads as continuous with the graph below it.
     pub chrome_fill: Color,
 
     // ── header badges ────────────────────────────────────────────
-    // Indicator-chip accents in the node header. `#[serde(default)]`
-    // so themes predating these fields still load (the embedded asset
-    // doesn't need regenerating to pick up new chips).
     /// Subgraph (composite instance) chip — accent cyan.
-    #[serde(default = "default_badge_subgraph")]
     pub badge_subgraph: Color,
     /// Terminal (sink) chip — error red.
-    #[serde(default = "default_badge_terminal")]
     pub badge_terminal: Color,
     /// Cache (compute-once) chip — warning yellow.
-    #[serde(default = "default_badge_cache")]
     pub badge_cache: Color,
 
     // ── execution-status glow ────────────────────────────────────
     // Color of the soft glow shadow behind a node, by the last run's
     // outcome (mirrors the deprecated editor's per-status shadows).
     // Palette swatches: `success`/`accent`/`syn_keyword`/`error`.
-    // `#[serde(default)]` so themes predating these fields still load.
     /// Node computed this run — palette `success` (green).
-    #[serde(default = "default_exec_executed")]
     pub exec_executed_glow: Color,
     /// Node reused its cached result — palette `accent` (cyan).
-    #[serde(default = "default_exec_cached")]
     pub exec_cached_glow: Color,
     /// Node has unfilled required inputs — palette `syn_keyword` (orange).
-    #[serde(default = "default_exec_missing")]
     pub exec_missing_glow: Color,
     /// Node errored — palette `error` (red).
-    #[serde(default = "default_exec_errored")]
     pub exec_errored_glow: Color,
 
     // ── ports ────────────────────────────────────────────────────
@@ -196,16 +266,11 @@ pub struct Theme {
     pub new_node_popup_max_height: f32,
 
     /// Look + dimensions for the inline static-value editor that hugs a
-    /// `Binding::Const` input port (number/string field, file-pick
-    /// chip). `#[serde(default)]` so older themes load with the
-    /// built-in look.
-    #[serde(default = "default_static_value_editor")]
+    /// `Binding::Const` input port (number/string field, file-pick chip).
     pub static_value_editor: StaticValueEditorTheme,
 
     /// Look for the inline-rename widget (node title, boundary port,
-    /// subgraph tab). `#[serde(default)]` so older themes load with the
-    /// built-in look.
-    #[serde(default = "default_inline_rename")]
+    /// subgraph tab).
     pub inline_rename: InlineRenameTheme,
 
     /// Palantir-side widget theme. Pushed onto `Ui::theme` once at
@@ -214,34 +279,6 @@ pub struct Theme {
     /// call site restyling per use. Last field so its TOML table
     /// follows all the scalar fields above (TOML `ValueAfterTable`).
     pub palantir_theme: palantir::Theme,
-}
-
-// `#[serde(default)]` fallbacks for fields added after the first themes
-// shipped, so a user theme predating them still loads. They return the
-// same consts `Theme::default` uses — one source of truth.
-fn default_chrome_fill() -> Color {
-    CHROME_FILL
-}
-fn default_badge_subgraph() -> Color {
-    BADGE_SUBGRAPH
-}
-fn default_badge_terminal() -> Color {
-    BADGE_TERMINAL
-}
-fn default_badge_cache() -> Color {
-    BADGE_CACHE
-}
-fn default_exec_executed() -> Color {
-    EXEC_EXECUTED_GLOW
-}
-fn default_exec_cached() -> Color {
-    EXEC_CACHED_GLOW
-}
-fn default_exec_missing() -> Color {
-    EXEC_MISSING_GLOW
-}
-fn default_exec_errored() -> Color {
-    EXEC_ERRORED_GLOW
 }
 
 /// Per-widget theme bundle for the inline static-value editor on a
@@ -265,10 +302,6 @@ impl Default for StaticValueEditorTheme {
             width: VALUE_EDITOR_WIDTH,
         }
     }
-}
-
-fn default_static_value_editor() -> StaticValueEditorTheme {
-    StaticValueEditorTheme::default()
 }
 
 /// Per-widget theme bundle for the inline-rename label⇄field widget
@@ -298,23 +331,62 @@ impl Default for InlineRenameTheme {
     }
 }
 
-fn default_inline_rename() -> InlineRenameTheme {
-    InlineRenameTheme::default()
+/// Palette palantir's widgets need to render correctly under a darkroom
+/// theme. Mirrors palantir's own (private) `palette::*` consts; we hand
+/// it in so swapping dark ⇄ light recolours every widget palantir paints,
+/// not just darkroom-owned chrome. Built from the matching palette mod's
+/// `PAL_*` block.
+struct PalantirPalette {
+    text: Color,
+    text_muted: Color,
+    text_disabled: Color,
+    terminal_bg: Color,
+    elem: Color,
+    elem_hover: Color,
+    elem_active: Color,
+    border_focused: Color,
+    accent: Color,
 }
 
-/// Palantir sub-theme for darkroom: palantir's own defaults, with the
-/// menu bar + context-menu rows shrunk to [`MENU_FONT_SIZE`] and the
-/// floating menu-bar triggers given a semi-transparent node-surface chip
-/// (legible over busy nodes while still hinting through). Built in code so
-/// it tracks palette changes; baked into the generated asset by the
-/// in-sync test.
-fn default_palantir_theme() -> palantir::Theme {
+impl PalantirPalette {
+    const DARK: Self = Self {
+        text: dark::PAL_TEXT,
+        text_muted: dark::PAL_TEXT_MUTED,
+        text_disabled: dark::PAL_TEXT_DISABLED,
+        terminal_bg: dark::PAL_TERMINAL_BG,
+        elem: dark::PAL_ELEM,
+        elem_hover: dark::PAL_ELEM_HOVER,
+        elem_active: dark::PAL_ELEM_ACTIVE,
+        border_focused: dark::PAL_BORDER_FOCUSED,
+        accent: dark::PAL_ACCENT,
+    };
+
+    const LIGHT: Self = Self {
+        text: light::PAL_TEXT,
+        text_muted: light::PAL_TEXT_MUTED,
+        text_disabled: light::PAL_TEXT_DISABLED,
+        terminal_bg: light::PAL_TERMINAL_BG,
+        elem: light::PAL_ELEM,
+        elem_hover: light::PAL_ELEM_HOVER,
+        elem_active: light::PAL_ELEM_ACTIVE,
+        border_focused: light::PAL_BORDER_FOCUSED,
+        accent: light::PAL_ACCENT,
+    };
+}
+
+/// Palantir sub-theme for darkroom: start from palantir's defaults,
+/// recolour every widget using `p`, then apply darkroom-only tweaks
+/// (smaller menu/context-menu font, semi-transparent node-surface chip
+/// on the floating menu-bar triggers).
+fn palantir_theme_for(p: &PalantirPalette) -> palantir::Theme {
     let mut theme = palantir::Theme::default();
+    recolour_palantir(&mut theme, p);
+
     let base = theme.text;
     let shrink = |look: &mut WidgetLook| {
         look.text = Some(look.text.unwrap_or(base).with_font_size(MENU_FONT_SIZE));
     };
-    let chip = Brush::Solid(NODE_FILL.with_alpha(MENU_CHIP_ALPHA));
+    let chip = Brush::Solid(p.elem.with_alpha(MENU_CHIP_ALPHA));
     let mb = &mut theme.menu_button;
     shrink(&mut mb.normal);
     shrink(&mut mb.hovered);
@@ -333,6 +405,145 @@ fn default_palantir_theme() -> palantir::Theme {
     theme
 }
 
+/// Walk `theme` and replace every colour palantir's defaults pulled from
+/// its (private) `palette::*` consts with the matching entry in `p`. One
+/// place so a palette swap propagates through every widget palantir
+/// paints — text, buttons, text-edits, toggles, scrollbars, menus,
+/// tooltips — not just the darkroom-owned chrome.
+fn recolour_palantir(t: &mut palantir::Theme, p: &PalantirPalette) {
+    use palantir::TextStyle;
+
+    let muted_edge = p.text_muted.with_alpha(0.18);
+    let panel_edge = p.text_muted.with_alpha(0.22);
+
+    // Helpers cribbed from palantir's own theme defaults so the
+    // structural recipe (which fill / which stroke per state) stays in
+    // one shape — only the palette values diverge.
+    let solid_bg = |fill: Color, stroke: Color, stroke_w: f32| Background {
+        fill: fill.into(),
+        stroke: Stroke::solid(stroke, stroke_w),
+        corners: Corners::all(4.0),
+        shadow: Shadow::NONE,
+    };
+    let disabled_text = Some(TextStyle::default().with_color(p.text_disabled));
+
+    // Top-level surfaces + text.
+    t.text.color = p.text;
+    t.window_clear = p.terminal_bg;
+
+    // Button — same recipe as `ButtonTheme::default`, recoloured.
+    let pressed_stroke = Stroke::solid(p.border_focused, 1.0);
+    t.button.normal.background = Some(solid_bg(p.elem_hover, muted_edge, 1.0));
+    t.button.hovered.background = Some(solid_bg(p.elem_active, muted_edge, 1.0));
+    t.button.pressed.background = Some(Background {
+        fill: p.elem_active.into(),
+        stroke: pressed_stroke,
+        corners: Corners::all(4.0),
+        shadow: Shadow::NONE,
+    });
+    t.button.disabled.background = Some(solid_bg(p.elem, muted_edge, 1.0));
+    t.button.disabled.text = disabled_text;
+
+    // Menu-button — `ButtonTheme::menu_button` recipe: transparent at
+    // rest + disabled, hover = elem_hover, pressed = elem_active. The
+    // darkroom-side `palantir_theme_for` then overlays a semi-transparent
+    // node-fill chip on the normal/disabled looks for legibility over
+    // busy nodes; we only need to recolour the hover/pressed fills here.
+    let flat_round = |fill: Color| Background {
+        fill: fill.into(),
+        stroke: Stroke::ZERO,
+        corners: Corners::all(4.0),
+        shadow: Shadow::NONE,
+    };
+    t.menu_button.hovered.background = Some(flat_round(p.elem_hover));
+    t.menu_button.pressed.background = Some(flat_round(p.elem_active));
+
+    // TextEdit — stroke-width-constant recipe from `TextEditTheme::default`.
+    let te_stroke_w = 1.5;
+    t.text_edit.normal.background = Some(solid_bg(p.elem_hover, muted_edge, te_stroke_w));
+    t.text_edit.focused.background = Some(solid_bg(p.elem_hover, p.border_focused, te_stroke_w));
+    t.text_edit.disabled.background = Some(solid_bg(p.elem, muted_edge, te_stroke_w));
+    t.text_edit.disabled.text = disabled_text;
+    t.text_edit.placeholder = p.text_muted;
+    t.text_edit.caret = p.text;
+    t.text_edit.selection = p.accent.with_alpha(0.25);
+
+    // Toggle (checkbox + radio) — same recipe as palantir's
+    // `ToggleTheme::with_radius`, applied separately per toggle so the
+    // corner radius (square checkbox vs pill radio) stays correct.
+    let recolour_toggle = |toggle: &mut palantir::ToggleTheme, corner: f32| {
+        let radius = Corners::all(corner);
+        let edge = p.text_muted.with_alpha(0.35);
+        let make = |fill: Color, stroke: Stroke| -> Option<Background> {
+            Some(Background {
+                fill: fill.into(),
+                stroke,
+                corners: radius,
+                shadow: Shadow::NONE,
+            })
+        };
+        toggle.unchecked.normal.background = make(p.elem_hover, Stroke::solid(edge, 1.0));
+        toggle.unchecked.hovered.background = make(p.elem_active, Stroke::solid(edge, 1.0));
+        toggle.unchecked.pressed.background =
+            make(p.elem_active, Stroke::solid(p.border_focused, 1.0));
+        toggle.unchecked.disabled.background =
+            make(p.elem, Stroke::solid(edge.with_alpha(0.18), 1.0));
+        toggle.unchecked.disabled.text = disabled_text;
+        toggle.checked.normal.background = make(p.accent, Stroke::ZERO);
+        toggle.checked.hovered.background = make(p.accent, Stroke::ZERO);
+        toggle.checked.pressed.background = make(p.accent, Stroke::solid(p.border_focused, 1.0));
+        toggle.checked.disabled.background = make(p.accent.with_alpha(0.45), Stroke::ZERO);
+        toggle.checked.disabled.text = disabled_text;
+        toggle.indicator = p.terminal_bg;
+    };
+    recolour_toggle(&mut t.checkbox, 3.0);
+    let radio_radius = t.radio.box_size * 0.5;
+    recolour_toggle(&mut t.radio, radio_radius);
+
+    // Scrollbar — transparent track, thumb tiers via text_muted alpha
+    // (matches `ScrollbarTheme::default`).
+    t.scrollbar.track = Color::TRANSPARENT;
+    t.scrollbar.thumb = p.text_muted.with_alpha(0.45);
+    t.scrollbar.thumb_hover = p.text_muted.with_alpha(0.65);
+    t.scrollbar.thumb_active = p.text_muted.with_alpha(0.85);
+
+    // Context menu — panel + item rows + shortcut + separator.
+    // (`ContextMenuTheme::default` recipe.)
+    t.context_menu.panel = Background {
+        fill: p.elem.into(),
+        stroke: Stroke::solid(panel_edge, 1.0),
+        corners: Corners::all(6.0),
+        shadow: Shadow::NONE,
+    };
+    t.context_menu.item.normal.background = None;
+    t.context_menu.item.hovered.background = Some(Background {
+        fill: p.elem_hover.into(),
+        stroke: Stroke::ZERO,
+        corners: Corners::all(4.0),
+        shadow: Shadow::NONE,
+    });
+    t.context_menu.item.disabled.background = None;
+    t.context_menu.item.disabled.text = disabled_text;
+    t.context_menu.item.shortcut = p.text_muted;
+    t.context_menu.separator = p.text_muted.with_alpha(0.18);
+
+    // Tooltip — `TooltipTheme::default` recipe; the panel keeps its
+    // drop shadow so the bubble lifts off whatever it overlaps.
+    t.tooltip.panel = Background {
+        fill: p.elem.into(),
+        stroke: Stroke::solid(panel_edge, 1.0),
+        corners: Corners::all(4.0),
+        shadow: Shadow {
+            color: Color::linear_rgba(0.0, 0.0, 0.0, 0.6),
+            offset: glam::Vec2::new(2.0, 2.0),
+            blur: 5.0,
+            spread: 0.0,
+            inset: false,
+        },
+    };
+    t.tooltip.text.color = p.text;
+}
+
 impl Theme {
     /// Derived radius for port circles — half the port side. Lives as
     /// a method instead of a stored field so the two can't drift if
@@ -342,180 +553,143 @@ impl Theme {
         self.port_size * 0.5
     }
 
-    /// Invert every color in place — a quick light-theme stub behind the
-    /// Theme → "Invert Colors" toggle. Uses [`Color::inverted`] (linear
-    /// `1 − c`), reversible to within f32 rounding (far below display
-    /// precision), so a second call restores the look.
-    pub fn invert(&mut self) {
-        for c in [
-            &mut self.canvas_bg,
-            &mut self.selection_rect,
-            &mut self.canvas_dot,
-            &mut self.connection_broken,
-            &mut self.breaker_stroke,
-            &mut self.node_fill,
-            &mut self.node_border,
-            &mut self.header_fill,
-            &mut self.text_muted,
-            &mut self.chrome_fill,
-            &mut self.badge_subgraph,
-            &mut self.badge_terminal,
-            &mut self.badge_cache,
-            &mut self.exec_executed_glow,
-            &mut self.exec_cached_glow,
-            &mut self.exec_missing_glow,
-            &mut self.exec_errored_glow,
-            &mut self.input_port,
-            &mut self.output_port,
-            &mut self.input_port_hover,
-            &mut self.output_port_hover,
-        ] {
-            *c = c.inverted();
-        }
-        invert_palantir_theme(&mut self.palantir_theme);
+    /// Best-effort guess at whether this theme reads as the light or the
+    /// dark preset. Used by [`crate::app::commands`] to flip to the
+    /// opposite palette on the "Toggle Light/Dark" menu — driven off
+    /// `canvas_bg` luminance so hand-edited / loaded themes still pick a
+    /// sensible "other side" to swap to.
+    pub fn is_light(&self) -> bool {
+        let c = self.canvas_bg;
+        // Rec. 709 luma against a 50 % midpoint.
+        0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b > 0.5
     }
 }
 
-/// **Hack** — invert the colors of the nested palantir widget palette
-/// in place so the menus / buttons / text edits flip with the rest of
-/// the theme. Reaches into palantir's public theme fields directly
-/// rather than a general `palantir::Theme::invert` (this is darkroom's
-/// throwaway light-theme toggle, not a palantir feature). Gradient-stop
-/// fills are skipped — the default palette is solid-fill only.
-fn invert_palantir_theme(p: &mut palantir::Theme) {
-    // Every per-state `WidgetLook` across the widget themes. Disjoint
-    // field paths, so one array of `&mut` borrows is fine.
-    for look in [
-        &mut p.button.normal,
-        &mut p.button.hovered,
-        &mut p.button.pressed,
-        &mut p.button.disabled,
-        &mut p.menu_button.normal,
-        &mut p.menu_button.hovered,
-        &mut p.menu_button.pressed,
-        &mut p.menu_button.disabled,
-        &mut p.checkbox.unchecked.normal,
-        &mut p.checkbox.unchecked.hovered,
-        &mut p.checkbox.unchecked.pressed,
-        &mut p.checkbox.unchecked.disabled,
-        &mut p.checkbox.checked.normal,
-        &mut p.checkbox.checked.hovered,
-        &mut p.checkbox.checked.pressed,
-        &mut p.checkbox.checked.disabled,
-        &mut p.radio.unchecked.normal,
-        &mut p.radio.unchecked.hovered,
-        &mut p.radio.unchecked.pressed,
-        &mut p.radio.unchecked.disabled,
-        &mut p.radio.checked.normal,
-        &mut p.radio.checked.hovered,
-        &mut p.radio.checked.pressed,
-        &mut p.radio.checked.disabled,
-        &mut p.text_edit.normal,
-        &mut p.text_edit.focused,
-        &mut p.text_edit.disabled,
-        &mut p.context_menu.item.normal,
-        &mut p.context_menu.item.hovered,
-        &mut p.context_menu.item.disabled,
-    ] {
-        invert_look(look);
-    }
-
-    // Standalone backgrounds and loose color fields.
-    invert_background(&mut p.context_menu.panel);
-    invert_background(&mut p.tooltip.panel);
-    if let Some(bg) = &mut p.panel_background {
-        invert_background(bg);
-    }
-    for c in [
-        &mut p.text.color,
-        &mut p.tooltip.text.color,
-        &mut p.window_clear,
-        &mut p.checkbox.indicator,
-        &mut p.radio.indicator,
-        &mut p.scrollbar.track,
-        &mut p.scrollbar.thumb,
-        &mut p.scrollbar.thumb_hover,
-        &mut p.scrollbar.thumb_active,
-        &mut p.text_edit.placeholder,
-        &mut p.text_edit.caret,
-        &mut p.text_edit.selection,
-        &mut p.context_menu.item.shortcut,
-        &mut p.context_menu.separator,
-    ] {
-        *c = c.inverted();
-    }
+/// Colour swatches a [`Theme`] needs from a palette mod. Borrowed by
+/// [`Theme::build`] so the two presets share one assembly path — only
+/// the colour values diverge, every dimension and sub-theme comes from
+/// the shared block.
+struct PaletteColors {
+    canvas_bg: Color,
+    selection_rect: Color,
+    canvas_dot: Color,
+    connection_broken: Color,
+    breaker_stroke: Color,
+    node_fill: Color,
+    node_border: Color,
+    header_fill: Color,
+    text_muted: Color,
+    chrome_fill: Color,
+    badge_subgraph: Color,
+    badge_terminal: Color,
+    badge_cache: Color,
+    exec_executed_glow: Color,
+    exec_cached_glow: Color,
+    exec_missing_glow: Color,
+    exec_errored_glow: Color,
+    input_port: Color,
+    output_port: Color,
+    input_port_hover: Color,
+    output_port_hover: Color,
 }
 
-fn invert_look(look: &mut WidgetLook) {
-    if let Some(bg) = &mut look.background {
-        invert_background(bg);
-    }
-    if let Some(t) = &mut look.text {
-        t.color = t.color.inverted();
-    }
+impl PaletteColors {
+    const DARK: Self = Self {
+        canvas_bg: dark::CANVAS_BG,
+        selection_rect: dark::SELECTION_RECT,
+        canvas_dot: dark::CANVAS_DOT,
+        connection_broken: dark::CONNECTION_BROKEN,
+        breaker_stroke: dark::BREAKER_STROKE,
+        node_fill: dark::NODE_FILL,
+        node_border: dark::NODE_BORDER,
+        header_fill: dark::HEADER_FILL,
+        text_muted: dark::TEXT_MUTED,
+        chrome_fill: dark::CHROME_FILL,
+        badge_subgraph: dark::BADGE_SUBGRAPH,
+        badge_terminal: dark::BADGE_TERMINAL,
+        badge_cache: dark::BADGE_CACHE,
+        exec_executed_glow: dark::EXEC_EXECUTED_GLOW,
+        exec_cached_glow: dark::EXEC_CACHED_GLOW,
+        exec_missing_glow: dark::EXEC_MISSING_GLOW,
+        exec_errored_glow: dark::EXEC_ERRORED_GLOW,
+        input_port: dark::INPUT_PORT,
+        output_port: dark::OUTPUT_PORT,
+        input_port_hover: dark::INPUT_PORT_HOVER,
+        output_port_hover: dark::OUTPUT_PORT_HOVER,
+    };
+
+    const LIGHT: Self = Self {
+        canvas_bg: light::CANVAS_BG,
+        selection_rect: light::SELECTION_RECT,
+        canvas_dot: light::CANVAS_DOT,
+        connection_broken: light::CONNECTION_BROKEN,
+        breaker_stroke: light::BREAKER_STROKE,
+        node_fill: light::NODE_FILL,
+        node_border: light::NODE_BORDER,
+        header_fill: light::HEADER_FILL,
+        text_muted: light::TEXT_MUTED,
+        chrome_fill: light::CHROME_FILL,
+        badge_subgraph: light::BADGE_SUBGRAPH,
+        badge_terminal: light::BADGE_TERMINAL,
+        badge_cache: light::BADGE_CACHE,
+        exec_executed_glow: light::EXEC_EXECUTED_GLOW,
+        exec_cached_glow: light::EXEC_CACHED_GLOW,
+        exec_missing_glow: light::EXEC_MISSING_GLOW,
+        exec_errored_glow: light::EXEC_ERRORED_GLOW,
+        input_port: light::INPUT_PORT,
+        output_port: light::OUTPUT_PORT,
+        input_port_hover: light::INPUT_PORT_HOVER,
+        output_port_hover: light::OUTPUT_PORT_HOVER,
+    };
 }
 
-fn invert_background(bg: &mut Background) {
-    invert_brush(&mut bg.fill);
-    invert_brush(&mut bg.stroke.brush);
-    bg.shadow.color = bg.shadow.color.inverted();
-}
-
-fn invert_brush(brush: &mut Brush) {
-    match brush {
-        Brush::Solid(c) => *c = c.inverted(),
-        Brush::Linear(g) => g
-            .stops
-            .iter_mut()
-            .for_each(|s| s.color = s.color.inverted()),
-        Brush::Radial(g) => g
-            .stops
-            .iter_mut()
-            .for_each(|s| s.color = s.color.inverted()),
-        Brush::Conic(g) => g
-            .stops
-            .iter_mut()
-            .for_each(|s| s.color = s.color.inverted()),
+impl Theme {
+    /// Ayu Mirage High Contrast palette — the built-in dark look.
+    pub fn dark() -> Self {
+        Self::build(&PaletteColors::DARK, &PalantirPalette::DARK)
     }
-}
 
-impl Default for Theme {
-    /// Built entirely from the module consts (the single source of truth
-    /// for darkroom's look) plus [`default_palantir_theme`] — no file I/O,
-    /// no deserialize. The checked-in `assets/ayu-graphite.toml` is
-    /// regenerated *from* this by `tests::ayu_graphite_asset_in_sync`.
-    fn default() -> Self {
+    /// Ayu Light palette — the built-in light look (Zed's "Ayu Light"
+    /// variant ported into darkroom's structure).
+    pub fn light() -> Self {
+        Self::build(&PaletteColors::LIGHT, &PalantirPalette::LIGHT)
+    }
+
+    /// Shared assembly path: dimensions + sub-themes are palette-
+    /// independent; the colour table `c` drives darkroom chrome and
+    /// `p` recolours every palantir widget.
+    fn build(c: &PaletteColors, p: &PalantirPalette) -> Self {
         Self {
-            canvas_bg: CANVAS_BG,
-            selection_rect: SELECTION_RECT,
-            canvas_dot: CANVAS_DOT,
+            canvas_bg: c.canvas_bg,
+            selection_rect: c.selection_rect,
+            canvas_dot: c.canvas_dot,
             canvas_dot_spacing: CANVAS_DOT_SPACING,
             canvas_dot_radius: CANVAS_DOT_RADIUS,
-            connection_broken: CONNECTION_BROKEN,
+            connection_broken: c.connection_broken,
             connection_width: CONNECTION_WIDTH,
-            breaker_stroke: BREAKER_STROKE,
+            breaker_stroke: c.breaker_stroke,
             breaker_stroke_width: BREAKER_STROKE_WIDTH,
-            node_fill: NODE_FILL,
-            node_border: NODE_BORDER,
+            node_fill: c.node_fill,
+            node_border: c.node_border,
             node_border_width: NODE_BORDER_WIDTH,
             node_corner_radius: NODE_CORNER_RADIUS,
             node_min_width: NODE_MIN_WIDTH,
             node_min_height: NODE_MIN_HEIGHT,
-            header_fill: HEADER_FILL,
+            header_fill: c.header_fill,
             tab_corner_radius: TAB_CORNER_RADIUS,
-            text_muted: TEXT_MUTED,
-            chrome_fill: CHROME_FILL,
-            badge_subgraph: BADGE_SUBGRAPH,
-            badge_terminal: BADGE_TERMINAL,
-            badge_cache: BADGE_CACHE,
-            exec_executed_glow: EXEC_EXECUTED_GLOW,
-            exec_cached_glow: EXEC_CACHED_GLOW,
-            exec_missing_glow: EXEC_MISSING_GLOW,
-            exec_errored_glow: EXEC_ERRORED_GLOW,
-            input_port: INPUT_PORT,
-            output_port: OUTPUT_PORT,
-            input_port_hover: INPUT_PORT_HOVER,
-            output_port_hover: OUTPUT_PORT_HOVER,
+            text_muted: c.text_muted,
+            chrome_fill: c.chrome_fill,
+            badge_subgraph: c.badge_subgraph,
+            badge_terminal: c.badge_terminal,
+            badge_cache: c.badge_cache,
+            exec_executed_glow: c.exec_executed_glow,
+            exec_cached_glow: c.exec_cached_glow,
+            exec_missing_glow: c.exec_missing_glow,
+            exec_errored_glow: c.exec_errored_glow,
+            input_port: c.input_port,
+            output_port: c.output_port,
+            input_port_hover: c.input_port_hover,
+            output_port_hover: c.output_port_hover,
             port_size: PORT_SIZE,
             port_col_pad_top: PORT_COL_PAD_TOP,
             port_col_pad_x: PORT_COL_PAD_X,
@@ -524,8 +698,17 @@ impl Default for Theme {
             new_node_popup_max_height: NEW_NODE_POPUP_MAX_HEIGHT,
             static_value_editor: StaticValueEditorTheme::default(),
             inline_rename: InlineRenameTheme::default(),
-            palantir_theme: default_palantir_theme(),
+            palantir_theme: palantir_theme_for(p),
         }
+    }
+}
+
+impl Default for Theme {
+    /// Defaults to [`Theme::dark`] — the historical look. The asset
+    /// `assets/ayu-graphite.toml` is regenerated from this by
+    /// `tests::ayu_graphite_asset_in_sync`.
+    fn default() -> Self {
+        Self::dark()
     }
 }
 
@@ -598,37 +781,12 @@ mod tests {
         assert_eq!(menu_text.font_size_px, MENU_FONT_SIZE);
     }
 
-    /// `invert` flips colors (a dark bg goes light) and reaches the
-    /// nested palantir palette (text color), and a double invert restores
-    /// the original to within f32 rounding — which the Theme → Invert
-    /// Colors toggle depends on. (Linear `1 − c` is reversible up to ~1
-    /// ULP, not byte-exact, so the round-trip is checked with a tolerance.)
+    /// `is_light` classifies the two built-in presets correctly so the
+    /// menu's "Toggle Light/Dark" command always flips to the other
+    /// palette regardless of which one the user is currently on.
     #[test]
-    fn invert_round_trips_within_epsilon() {
-        let original = Theme::default();
-        let mut theme = Theme::default();
-
-        // Canvas starts dark; one invert lifts it toward white, and the
-        // palantir text color (a light grey) drops toward black.
-        assert!(theme.canvas_bg.r < 0.5);
-        let text_before = theme.palantir_theme.text.color.r;
-        theme.invert();
-        assert!(theme.canvas_bg.r > 0.5, "dark canvas inverts to light");
-        assert!(
-            theme.palantir_theme.text.color.r < text_before,
-            "nested palantir text color is inverted too"
-        );
-
-        // Invert again → back to the original within float rounding.
-        theme.invert();
-        let approx = |a: Color, b: Color| {
-            (a.r - b.r).abs() < 1e-4 && (a.g - b.g).abs() < 1e-4 && (a.b - b.b).abs() < 1e-4
-        };
-        assert!(approx(theme.canvas_bg, original.canvas_bg));
-        assert!(approx(theme.output_port_hover, original.output_port_hover));
-        assert!(approx(
-            theme.palantir_theme.window_clear,
-            original.palantir_theme.window_clear
-        ));
+    fn is_light_classifies_built_in_presets() {
+        assert!(!Theme::dark().is_light(), "dark canvas reads as not-light");
+        assert!(Theme::light().is_light(), "light canvas reads as light");
     }
 }

@@ -23,6 +23,7 @@ use crate::gui::menu_bar::MenuCommand;
 use crate::io::config::AppConfig;
 use crate::io::library;
 use crate::io::persistence;
+use crate::theme::Theme;
 
 impl App {
     pub(crate) fn handle_menu_command(&mut self, ui: &mut Ui, command: MenuCommand) {
@@ -45,11 +46,14 @@ impl App {
                     persistence::export_theme(&self.theme, &path);
                 }
             }
-            MenuCommand::InvertColors => {
-                // Reversible light-theme stub: flip every color, then push
-                // the inverted palantir palette onto the Ui. A second
-                // invocation restores the original (linear inversion is exact).
-                self.theme.invert();
+            MenuCommand::ToggleLightDark => {
+                // Swap to the opposite preset's full palette + sub-theme,
+                // then push the matching palantir palette onto the Ui.
+                self.theme = if self.theme.is_light() {
+                    Theme::dark()
+                } else {
+                    Theme::light()
+                };
                 ui.theme = self.theme.palantir_theme.clone();
             }
             MenuCommand::ExportSubgraph => self.export_active_subgraph(),

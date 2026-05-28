@@ -172,7 +172,7 @@ Solid = "#343434d9"
 
 [palantir_theme.menu_button.normal.text]
 font_size_px = 13.0
-color = "#ffffff"
+color = "#e2dfd3"
 line_height_mult = 1.2
 family = "Sans"
 
@@ -184,7 +184,7 @@ Solid = "#3e3e3e"
 
 [palantir_theme.menu_button.hovered.text]
 font_size_px = 13.0
-color = "#ffffff"
+color = "#e2dfd3"
 line_height_mult = 1.2
 family = "Sans"
 
@@ -196,7 +196,7 @@ Solid = "#4b4b4b"
 
 [palantir_theme.menu_button.pressed.text]
 font_size_px = 13.0
-color = "#ffffff"
+color = "#e2dfd3"
 line_height_mult = 1.2
 family = "Sans"
 
@@ -208,7 +208,7 @@ Solid = "#343434d9"
 
 [palantir_theme.menu_button.disabled.text]
 font_size_px = 13.0
-color = "#ffffff"
+color = "#e2dfd3"
 line_height_mult = 1.2
 family = "Sans"
 
@@ -418,7 +418,7 @@ radius = 4.0
 
 [palantir_theme.text_edit]
 placeholder = "#aaaaa8"
-caret = "#ffffff"
+caret = "#e2dfd3"
 caret_width = 1.5
 selection = "#9adbfb40"
 padding = [5.0, 3.0]
@@ -489,7 +489,7 @@ padding = [10.0, 6.0]
 
 [palantir_theme.context_menu.item.normal.text]
 font_size_px = 13.0
-color = "#ffffff"
+color = "#e2dfd3"
 line_height_mult = 1.2
 family = "Sans"
 
@@ -501,7 +501,7 @@ Solid = "#3e3e3e"
 
 [palantir_theme.context_menu.item.hovered.text]
 font_size_px = 13.0
-color = "#ffffff"
+color = "#e2dfd3"
 line_height_mult = 1.2
 family = "Sans"
 
@@ -538,7 +538,7 @@ inset = false
 
 [palantir_theme.tooltip.text]
 font_size_px = 13.0
-color = "#ffffff"
+color = "#e2dfd3"
 line_height_mult = 1.2
 family = "Sans"
 
@@ -547,6 +547,6 @@ w = 280.0
 
 [palantir_theme.text]
 font_size_px = 16.0
-color = "#ffffff"
+color = "#e2dfd3"
 line_height_mult = 1.2
 family = "Sans"

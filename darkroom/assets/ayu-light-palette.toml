@@ -1,0 +1,70 @@
+# Ayu Light — semantic palette (single source of truth)
+# Lifted from Zed's official `assets/themes/ayu/ayu.json` (the "Ayu Light"
+# variant). Mirrors the structure of `ayu-graphite-palette.toml`; hand-edit
+# me, the target builders are pure transformers.
+
+[backgrounds]
+bg = "#dcddde"
+panel = "#ececed"
+surface = "#ececed"
+elem = "#ececed"
+elem_hover = "#dfe0e1"
+elem_active = "#cfd0d2"
+elem_selected = "#cfd0d2"
+title_bar = "#dcddde"
+title_bar_inactive = "#ececed"
+# Editor / terminal surfaces sit lighter than the chrome bg for extra contrast.
+terminal_bg = "#fcfcfc"
+
+[borders]
+border = "#cfd1d2"
+border_focused = "#c4daf6"
+
+[text]
+text = "#5c6166"
+text_muted = "#8b8e92"
+text_disabled = "#a9acae"
+
+[accent_status]
+accent = "#3b9ee5"
+success = "#85b304"
+warning = "#f1ad49"
+error = "#ef7271"
+
+[status_bg]
+info_bg = "#deebfa"
+info_border = "#c4daf6"
+hint_bg = "#deebfa"
+hint_border = "#c4daf6"
+success_bg = "#e9efd2"
+success_border = "#d7e3ae"
+warning_bg = "#ffeeda"
+warning_border = "#ffe1be"
+error_bg = "#ffe3e1"
+error_border = "#ffcdca"
+
+[diff]
+created = "#85b304"
+created_bg = "#e9efd2"
+deleted = "#ef7271"
+deleted_bg = "#ffe3e1"
+
+[ansi]
+ansi_blue = "#3b9ee5"
+ansi_magenta = "#55b4d3"
+ansi_cyan = "#4dbf99"
+
+[syntax]
+syn_keyword = "#fa8d3e"
+syn_function = "#f2ad48"
+syn_string = "#86b300"
+syn_string_regex = "#4bbf98"
+syn_comment = "#abb0b6"
+syn_number = "#a37acc"
+syn_type = "#389ee6"
+syn_operator = "#ed9365"
+syn_attribute = "#3b9ee5"
+syn_punctuation = "#73777b"
+syn_doc = "#898d90"
+syn_string_special = "#e6ba7e"
+syn_predictive = "#9eb9d3"
