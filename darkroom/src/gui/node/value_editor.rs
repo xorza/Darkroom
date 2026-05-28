@@ -17,7 +17,9 @@
 //! unfocused and parse on every frame, emitting a change only when the
 //! parsed value differs from the canonical one.
 
-use palantir::{Button, Checkbox, Configure, Sizing, TextEdit, TextWrap, Ui, WidgetId};
+use palantir::{
+    Button, ButtonTheme, Checkbox, Configure, Sizing, Spacing, TextEdit, TextWrap, Ui, WidgetId,
+};
 use scenarium::data::StaticValue;
 
 #[derive(Default, Clone, Debug)]
@@ -72,8 +74,10 @@ pub(crate) fn show(
             Button::new()
                 .id(id)
                 .label(path_preview(path))
+                .style(flat_inline_button())
                 .text_wrap(TextWrap::Ellipsis)
                 .size((Sizing::Fixed(width), Sizing::Hug))
+                .padding(Spacing::xy(6.0, 0.0))
                 .show(ui);
             None
         }
@@ -125,6 +129,14 @@ fn buffered_text_edit<T>(
     let snapshot = text.clone();
     ui.state_mut::<EditBuffer>(id).text = text;
     snapshot
+}
+
+/// Flat inline-field button look: palantir's `menu_button` preset
+/// (transparent at rest, hover-only background, no border) tightened to
+/// sit on the port-row baseline. Horizontal padding goes through the
+/// builder so the theme's vertical 0 sticks.
+fn flat_inline_button() -> ButtonTheme {
+    ButtonTheme::menu_button()
 }
 
 /// `{}` on f64 prints `1` for whole numbers, which round-trips through
