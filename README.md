@@ -20,7 +20,7 @@ Requires Rust **1.88+** (uses the 2024 edition; current deps like `wgpu` 29 and 
 
 ```sh
 cargo check
-cargo nextest run
+cargo test
 ```
 
 ## Examples

@@ -95,8 +95,8 @@ Edition 2024, toolchain pinned in `rust-toolchain.toml`. CPU-only is the default
 ```sh
 cargo check
 cargo check --features wgpu
-cargo nextest run            # or: cargo test
-cargo nextest run --features wgpu
+cargo test
+cargo test --features wgpu
 ```
 
 Benchmarks are `#[ignore]`d: `cargo test --release <bench> -- --ignored --nocapture`. Examples: `cargo run --release --example pipeline` (and `blend`/`transform`/…).
