@@ -160,7 +160,7 @@ Local maximum check at image boundaries:
 - Edge cases (empty, boundaries)
 - Peak replacement logic
 
-Run with: `cargo nextest run -p lumos local_maxima`
+Run with: `cargo test -p lumos local_maxima`
 
 ## References
 

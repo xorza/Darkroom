@@ -128,6 +128,6 @@ Runtime feature detection via the `common` crate (`cpu_features::has_avx2()` / `
 
 ```bash
 cargo build -p lumos --release
-cargo nextest run -p lumos
+cargo test -p lumos
 cargo test -p lumos --release <bench_name> -- --ignored --nocapture   # benches (e.g. bench_rcd, bench_bayer)
 ```

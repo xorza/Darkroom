@@ -124,7 +124,7 @@ This optimization provides ~65% speedup in benchmarks while maintaining detectio
 - Various star configurations (horizontal, vertical, diagonal)
 - Edge cases (empty, single pixel, flat profile)
 
-Run with: `cargo nextest run -p lumos multi_threshold`
+Run with: `cargo test -p lumos multi_threshold`
 
 ## Alternative Approaches
 

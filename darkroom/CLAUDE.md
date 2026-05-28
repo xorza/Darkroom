@@ -13,8 +13,8 @@ only what's specific to darkroom.
 
 ```
 cargo run -p darkroom                      # launch the editor (opens last doc)
-cargo nextest run -p darkroom              # tests (mostly pure: zoom math, breaker geometry, serde round-trips)
-cargo nextest run -p darkroom <substr>     # single test by name substring
+cargo test -p darkroom              # tests (mostly pure: zoom math, breaker geometry, serde round-trips)
+cargo test -p darkroom <substr>     # single test by name substring
 cargo clippy -p darkroom --all-targets -- -D warnings
 cargo run -p darkroom --features profile-with-tracy   # tracy zones across darkroom + palantir
 ```

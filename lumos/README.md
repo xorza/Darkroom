@@ -104,7 +104,7 @@ cargo build -p lumos --release
 ## Running Tests
 
 ```bash
-cargo nextest run -p lumos
+cargo test -p lumos
 ```
 
 ## Benchmarks
