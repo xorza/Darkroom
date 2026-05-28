@@ -202,17 +202,17 @@ impl Inspectors {
                     line(ui, "Inputs", section_style(ui));
                     for (i, name) in in_names.iter().enumerate() {
                         let name = name.as_str("");
-                        let ty = in_types.get(i).map(type_str).unwrap_or_default();
+                        let ty = in_types.get(i);
                         // Runtime value when this run computed one; else
                         // fall back to the static binding.
                         match values.and_then(|v| v.inputs.get(i)) {
                             Some(pv) => {
-                                line(ui, &format!("{name}: {ty} = {}", pv.text), body_style(ui));
+                                line(ui, &port_line(name, ty, Some(&pv.text)), body_style(ui));
                                 draw_preview(ui, node.id, "in", i, pv);
                             }
                             None => {
-                                let val = in_binds.get(i).map(value_str).unwrap_or_default();
-                                line(ui, &format!("{name}: {ty} = {val}"), body_style(ui));
+                                let val = in_binds.get(i).map(value_str);
+                                line(ui, &port_line(name, ty, val.as_deref()), body_style(ui));
                             }
                         }
                     }
@@ -224,13 +224,13 @@ impl Inspectors {
                     line(ui, "Outputs", section_style(ui));
                     for (i, name) in out_names.iter().enumerate() {
                         let name = name.as_str("");
-                        let ty = out_types.get(i).map(type_str).unwrap_or_default();
+                        let ty = out_types.get(i);
                         match values.and_then(|v| v.outputs.get(i)) {
                             Some(pv) => {
-                                line(ui, &format!("{name}: {ty} = {}", pv.text), body_style(ui));
+                                line(ui, &port_line(name, ty, Some(&pv.text)), body_style(ui));
                                 draw_preview(ui, node.id, "out", i, pv);
                             }
-                            None => line(ui, &format!("{name}: {ty}"), body_style(ui)),
+                            None => line(ui, &port_line(name, ty, None), body_style(ui)),
                         }
                     }
                 }
@@ -368,8 +368,22 @@ fn body_style(ui: &Ui) -> TextStyle {
     }
 }
 
-fn type_str(ty: &DataType) -> String {
-    format!("{ty}")
+/// Format one port row. Path-typed ports show `name: value` (the value
+/// already conveys "path"); other ports show `name: type = value`, or
+/// `name: type` when no value is available.
+fn port_line(name: &str, ty: Option<&DataType>, val: Option<&str>) -> String {
+    if matches!(ty, Some(DataType::FsPath(_))) {
+        match val {
+            Some(v) => format!("{name}: {v}"),
+            None => format!("{name}: path"),
+        }
+    } else {
+        let ty = ty.map(|t| format!("{t}")).unwrap_or_default();
+        match val {
+            Some(v) => format!("{name}: {ty} = {v}"),
+            None => format!("{name}: {ty}"),
+        }
+    }
 }
 
 fn value_str(b: &InputBindingView) -> String {
