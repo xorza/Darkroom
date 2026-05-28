@@ -329,8 +329,27 @@ pub struct InlineRenameTheme {
     pub text_edit: TextEditTheme,
 }
 
-impl Default for InlineRenameTheme {
-    fn default() -> Self {
+impl InlineRenameTheme {
+    /// Inline-rename editor in the dark theme — flat surface (no
+    /// padding/margin/border, transparent fill) plus the dark palette's
+    /// foreground/accent for the caret + selection.
+    pub(crate) fn dark() -> Self {
+        Self::with_palette_colors(dark::PAL_TEXT, dark::TEXT_MUTED, dark::SELECTION_RECT)
+    }
+
+    /// Inline-rename editor in the light theme — same flat surface,
+    /// light-palette caret + selection so it stays visible on the
+    /// light canvas.
+    fn light() -> Self {
+        Self::with_palette_colors(light::PAL_TEXT, light::TEXT_MUTED, light::SELECTION_RECT)
+    }
+
+    /// Shared shape: start from palantir's `TextEditTheme::default`,
+    /// strip every visual that would reshape the row (padding, margin,
+    /// border, fill), then recolour the live-state foreground
+    /// (`caret`, `placeholder`, `selection`) from the supplied palette
+    /// so the field reads against whichever canvas hosts it.
+    fn with_palette_colors(text: Color, muted: Color, accent: Color) -> Self {
         let mut style = TextEditTheme {
             padding: Spacing::ZERO,
             margin: Spacing::ZERO,
@@ -342,6 +361,9 @@ impl Default for InlineRenameTheme {
                 bg.fill = Brush::TRANSPARENT;
             }
         }
+        style.caret = text;
+        style.placeholder = muted;
+        style.selection = accent.with_alpha(0.25);
         Self { text_edit: style }
     }
 }
@@ -668,6 +690,7 @@ impl Theme {
             &PaletteColors::DARK,
             &PalantirPalette::DARK,
             StaticValueEditorTheme::dark(),
+            InlineRenameTheme::dark(),
         )
     }
 
@@ -678,15 +701,21 @@ impl Theme {
             &PaletteColors::LIGHT,
             &PalantirPalette::LIGHT,
             StaticValueEditorTheme::light(),
+            InlineRenameTheme::light(),
         )
     }
 
     /// Shared assembly path: dimensions are palette-independent; `c`
     /// drives darkroom chrome, `p` drives the palantir widget
-    /// recolouring, and `sve` is the per-palette static-value-editor
-    /// bundle (handed in rather than rebuilt here so its hex values
-    /// stay alongside the rest of the palette).
-    fn build(c: &PaletteColors, p: &PalantirPalette, sve: StaticValueEditorTheme) -> Self {
+    /// recolouring, and `sve` / `inline_rename` are the per-palette
+    /// per-widget bundles (handed in rather than rebuilt here so their
+    /// hex values stay alongside the rest of the palette).
+    fn build(
+        c: &PaletteColors,
+        p: &PalantirPalette,
+        sve: StaticValueEditorTheme,
+        inline_rename: InlineRenameTheme,
+    ) -> Self {
         Self {
             canvas_bg: c.canvas_bg,
             selection_rect: c.selection_rect,
@@ -725,7 +754,7 @@ impl Theme {
             port_cols_gap: PORT_COLS_GAP,
             new_node_popup_max_height: NEW_NODE_POPUP_MAX_HEIGHT,
             static_value_editor: sve,
-            inline_rename: InlineRenameTheme::default(),
+            inline_rename,
             palantir_theme: palantir_theme_for(p),
         }
     }

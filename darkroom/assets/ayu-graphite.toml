@@ -68,7 +68,7 @@ Solid = "#00000000"
 
 [inline_rename.text_edit]
 placeholder = "#aaaaa8"
-caret = "#ffffff"
+caret = "#e2dfd3"
 caret_width = 1.5
 selection = "#9adbfb40"
 padding = 0.0

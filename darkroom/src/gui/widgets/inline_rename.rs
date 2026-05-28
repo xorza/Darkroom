@@ -141,7 +141,7 @@ impl<'a> InlineRename<'a> {
         let theme_ref: &InlineRenameTheme = match theme {
             Some(t) => t,
             None => {
-                owned_default = InlineRenameTheme::default();
+                owned_default = InlineRenameTheme::dark();
                 &owned_default
             }
         };
