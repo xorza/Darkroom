@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use glam::Vec2;
 use palantir::{
     Background, Color, Configure, Corners, ImageFit, Panel, Sense, Shadow, Shape, Sizing, Spacing,
-    Stroke, Text, TextStyle, Ui, WidgetId,
+    Stroke, Text, TextStyle, TextWrap, Ui, WidgetId,
 };
 use scenarium::data::{DataType, StaticValue};
 use scenarium::prelude::{LogEntry, LogLevel, NodeId};
@@ -300,7 +300,10 @@ fn outside_action(ui: &Ui, scene: &Scene) -> bool {
 }
 
 fn line(ui: &mut Ui, text: &str, style: TextStyle) {
-    Text::new(text.to_owned()).style(style).show(ui);
+    Text::new(text.to_owned())
+        .style(style)
+        .text_wrap(TextWrap::Wrap)
+        .show(ui);
 }
 
 /// Draw a port's preview thumbnail beneath its value line: a fixed-size
