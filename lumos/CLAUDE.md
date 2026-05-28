@@ -2,6 +2,18 @@
 
 Astronomical image-processing library: RAW/FITS decoding, master-frame calibration, star detection, star-pattern registration, frame stacking, and drizzle reconstruction. CPU-bound with hand-written SIMD (AVX2 / SSE4.1 / NEON) hot paths and rayon parallelism; no GPU backend. Pixels are stored **planar** (one `common::Buffer2<f32>` per channel) and normalized to `[0, 1]`.
 
+## Pipeline
+
+A stack of telescope exposures → one calibrated, aligned, combined deep-sky image. The modules below are stages in that flow:
+
+1. **Load / decode** (`astro_image`, `raw`) — FITS (cfitsio), camera RAW (libraw → RCD/Markesteijn demosaic), or standard formats into a planar `AstroImage`. The calibration path keeps RAW as single-channel `CfaImage` (correct before demosaic).
+2. **Calibrate** (`calibration_masters`) — stack calibration frames into master dark/flat/bias/flat-dark + defect map, then per light frame: dark-subtract → flat-divide → defect-correct.
+3. **Detect stars** (`star_detection`) — six-stage detector → flux-sorted `Star`s with sub-pixel centroids and shape/quality metrics.
+4. **Register** (`registration`) — triangle matching → RANSAC/MAGSAC++ transform fit → match recovery → optional SIP distortion → image warp into a common frame.
+5. **Combine** — `stacking` (statistical per-pixel combine with rejection/normalization/weighting, memory-tiered) **or** `drizzle` (Fruchter & Hook variable-pixel reconstruction for dithered/super-resolution sets).
+
+`math` (SIMD sums, robust statistics, transforms), `common` (CPU dispatch), and `prelude` support all stages. `lib.rs` defines the entire public surface.
+
 ## Crate layout
 
 `src/lib.rs` is the only place that `pub use`s — no intermediate re-exports. Seven domain modules plus support:
