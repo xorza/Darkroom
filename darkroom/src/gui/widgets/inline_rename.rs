@@ -196,17 +196,6 @@ impl<'a> InlineRename<'a> {
                     t.show(ui);
                 })
                 .response;
-            if let Some(r) = resp.layout_rect() {
-                eprintln!(
-                    "[inline_rename id={id:?}] IDLE rect=({:.2},{:.2} {}x{}) pad_r={:.2} name={:?}",
-                    r.min.x,
-                    r.min.y,
-                    r.size.w,
-                    r.size.h,
-                    caret_room,
-                    name.as_str("")
-                );
-            }
             let clicked = resp.clicked();
             let double_clicked = resp.double_clicked();
             if double_clicked {
@@ -223,7 +212,7 @@ impl<'a> InlineRename<'a> {
         }
 
         let mut draft = std::mem::take(&mut ui.state_mut::<RenameState>(id).draft);
-        let ed_resp = TextEdit::new(&mut draft)
+        TextEdit::new(&mut draft)
             .id(id)
             .style(edit_style(theme_ref, style))
             .max_chars(max_chars)
@@ -231,17 +220,6 @@ impl<'a> InlineRename<'a> {
             .min_size((MIN_EDIT_WIDTH, line_h))
             .text_align(text_align)
             .show(ui);
-        if let Some(r) = ed_resp.layout_rect() {
-            eprintln!(
-                "[inline_rename id={id:?}] EDIT rect=({:.2},{:.2} {}x{}) caret_room={:.2} draft={:?}",
-                r.min.x,
-                r.min.y,
-                r.size.w,
-                r.size.h,
-                caret_room,
-                draft
-            );
-        }
         let focused = ui.focused_id() == Some(id);
         let escape = ui.escape_pressed();
         let enter = ui.key_pressed(Shortcut::key(Key::Enter));
