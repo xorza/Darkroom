@@ -20,7 +20,7 @@ use crate::app::editor::Editor;
 use crate::document::{Document, GraphRef};
 use crate::edit::intent::Intent;
 use crate::gui::menu_bar::MenuCommand;
-use crate::io::config::AppConfig;
+use crate::io::config::ThemePreset;
 use crate::io::library;
 use crate::io::persistence;
 use crate::theme::Theme;
@@ -48,13 +48,20 @@ impl App {
             }
             MenuCommand::ToggleLightDark => {
                 // Swap to the opposite preset's full palette + sub-theme,
-                // then push the matching palantir palette onto the Ui.
-                self.theme = if self.theme.is_light() {
-                    Theme::dark()
+                // push the matching palantir palette onto the Ui, and
+                // persist the choice so the next launch restores it.
+                let next = if self.theme.is_light() {
+                    ThemePreset::Dark
                 } else {
-                    Theme::light()
+                    ThemePreset::Light
+                };
+                self.theme = match next {
+                    ThemePreset::Dark => Theme::dark(),
+                    ThemePreset::Light => Theme::light(),
                 };
                 ui.theme = self.theme.palantir_theme.clone();
+                self.config.theme_preset = Some(next);
+                self.config.save();
             }
             MenuCommand::ExportSubgraph => self.export_active_subgraph(),
             MenuCommand::ImportSubgraph => self.import_subgraph(),
@@ -204,28 +211,13 @@ impl App {
         self.config.save();
     }
 
-    /// Load a theme picked from the dialog: copy it into the working
-    /// dir under its own name (so the config can reference it by name
-    /// across sessions), apply it, and persist the name. The picked
-    /// file may live anywhere; the working-dir copy is the canonical
-    /// one the config resolves on the next launch.
+    /// Load a theme picked from the dialog and apply it to the live
+    /// session. Not persisted: the next launch always restores the
+    /// preset recorded in [`AppConfig::theme_preset`] (toggled via
+    /// Theme → Toggle Light/Dark), regardless of any file loaded in
+    /// this session.
     fn load_theme(&mut self, ui: &mut Ui, picked: &Path) {
-        let Some(stem) = picked.file_stem().and_then(|s| s.to_str()) else {
-            eprintln!("theme load failed: path has no file name");
-            return;
-        };
-        let dest = AppConfig::theme_path(stem);
-        // Only copy when the picked file isn't already the working-dir
-        // copy (re-loading the active theme shouldn't self-overwrite).
-        if picked != dest
-            && let Err(err) = std::fs::copy(picked, &dest)
-        {
-            eprintln!("theme load failed: copy to {}: {err}", dest.display());
-            return;
-        }
-        if self.load_theme_file(&dest) {
-            self.config.theme_name = Some(stem.to_owned());
-            self.config.save();
+        if self.load_theme_file(picked) {
             ui.theme = self.theme.palantir_theme.clone();
         }
     }

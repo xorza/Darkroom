@@ -1,3 +1,4 @@
+preset = "dark"
 canvas_bg = "#1a1a1a"
 selection_rect = "#9adbfb"
 canvas_dot = "#363636"

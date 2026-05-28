@@ -8,7 +8,7 @@ use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
 use scenarium::prelude::{FuncLib, Graph as CoreGraph};
 
 use crate::document::Document;
-use crate::io::config::AppConfig;
+use crate::io::config::{AppConfig, ThemePreset};
 use crate::io::library;
 use crate::run_state::RunState;
 use crate::theme::Theme;
@@ -103,8 +103,11 @@ impl App {
             worker,
         };
         app.config = AppConfig::load();
-        if let Some(name) = app.config.theme_name.clone() {
-            app.load_theme_file(&AppConfig::theme_path(&name));
+        if let Some(preset) = app.config.theme_preset {
+            app.theme = match preset {
+                ThemePreset::Dark => Theme::dark(),
+                ThemePreset::Light => Theme::light(),
+            };
         }
         if let Some(path) = app.config.document_path.clone() {
             app.load_document(&path);

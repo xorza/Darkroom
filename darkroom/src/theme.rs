@@ -139,6 +139,21 @@ pub(crate) mod light {
     pub(crate) const PAL_BORDER_FOCUSED: Color = Color::hex(0xc4daf6);
 }
 
+/// Which built-in palette built this [`Theme`]. Carried on the theme
+/// itself so the Toggle Light/Dark command knows where to swap to
+/// without inspecting colour values, and reused by
+/// [`crate::io::config::AppConfig`] to persist the selected preset
+/// across launches. `Default = Dark` so a hand-rolled `Theme` (e.g.
+/// the deserialised round-trip used by tests) has a deterministic
+/// tag without callers having to spell it out.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemePreset {
+    #[default]
+    Dark,
+    Light,
+}
+
 /// Visual palette + layout dimensions for darkroom's UI. Owned by
 /// `MainWindow`, handed to every UI subtree through
 /// [`crate::app::AppContext`] so call sites read off a single source
@@ -162,6 +177,10 @@ pub struct Theme {
     // (a nested table) is last. TOML serialization requires every
     // scalar value to precede any table at the same level — otherwise
     // the serializer errors with `ValueAfterTable`.
+    /// Which built-in preset assembled this theme. Round-trips
+    /// through TOML so a user-loaded file restores the same toggle
+    /// behaviour the original `Theme::dark` / `light` had.
+    pub preset: ThemePreset,
 
     // ── canvas ────────────────────────────────────────────────────
     pub canvas_bg: Color,
@@ -673,20 +692,18 @@ impl Theme {
         self.port_size * 0.5
     }
 
-    /// Best-effort guess at whether this theme reads as the light or
-    /// the dark preset. Used by [`crate::app::commands`] to flip to
-    /// the opposite palette on the "Toggle Light/Dark" menu — driven
-    /// off `canvas_bg` luminance so hand-edited / loaded themes still
-    /// pick a sensible "other side" to swap to.
+    /// Whether this theme reads as light, by the explicit [`preset`]
+    /// tag the builders stamp on every theme.
+    ///
+    /// [`preset`]: Self::preset
     pub fn is_light(&self) -> bool {
-        let c = self.canvas_bg;
-        // Rec. 709 luma against a 50 % midpoint.
-        0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b > 0.5
+        matches!(self.preset, ThemePreset::Light)
     }
 
     /// Ayu Mirage High Contrast palette — the built-in dark look.
     pub fn dark() -> Self {
         Self::build(
+            ThemePreset::Dark,
             &PaletteColors::DARK,
             &PalantirPalette::DARK,
             StaticValueEditorTheme::dark(),
@@ -698,6 +715,7 @@ impl Theme {
     /// variant ported into darkroom's structure).
     pub fn light() -> Self {
         Self::build(
+            ThemePreset::Light,
             &PaletteColors::LIGHT,
             &PalantirPalette::LIGHT,
             StaticValueEditorTheme::light(),
@@ -709,14 +727,18 @@ impl Theme {
     /// drives darkroom chrome, `p` drives the palantir widget
     /// recolouring, and `sve` / `inline_rename` are the per-palette
     /// per-widget bundles (handed in rather than rebuilt here so their
-    /// hex values stay alongside the rest of the palette).
+    /// hex values stay alongside the rest of the palette). `preset`
+    /// tags which built-in produced this theme so the toggle command
+    /// doesn't have to guess.
     fn build(
+        preset: ThemePreset,
         c: &PaletteColors,
         p: &PalantirPalette,
         sve: StaticValueEditorTheme,
         inline_rename: InlineRenameTheme,
     ) -> Self {
         Self {
+            preset,
             canvas_bg: c.canvas_bg,
             selection_rect: c.selection_rect,
             canvas_dot: c.canvas_dot,
