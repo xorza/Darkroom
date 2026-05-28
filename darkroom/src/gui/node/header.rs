@@ -188,6 +188,7 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent
     let shift = ui.modifiers().shift;
     let id = node_rename_wid(node.id);
     let ev = InlineRename::new(id, node.name.clone())
+        .theme(&rcx.theme.inline_rename)
         .max_chars(NODE_NAME_MAX_CHARS)
         .show(ui);
     if ev.clicked {

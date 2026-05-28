@@ -17,10 +17,10 @@
 //! unfocused and parse on every frame, emitting a change only when the
 //! parsed value differs from the canonical one.
 
-use palantir::{
-    Button, ButtonTheme, Checkbox, Configure, Sizing, Spacing, TextEdit, TextWrap, Ui, WidgetId,
-};
+use palantir::{Button, Checkbox, Configure, Sizing, Spacing, TextEdit, TextWrap, Ui, WidgetId};
 use scenarium::data::StaticValue;
+
+use crate::theme::StaticValueEditorTheme;
 
 #[derive(Default, Clone, Debug)]
 struct EditBuffer {
@@ -29,15 +29,15 @@ struct EditBuffer {
 
 /// Render the editor for `value`. Returns the new value when the user
 /// edited it this frame, otherwise `None`. `id` must be stable across
-/// frames so the TextEdit / buffer state survives. `width` is the
-/// fixed logical-px width for the embedded TextEdit, threaded in
-/// from the darkroom theme by the caller.
+/// frames so the TextEdit / buffer state survives. Every visual axis
+/// (button look, field width) comes off `theme`.
 pub(crate) fn show(
     ui: &mut Ui,
+    theme: &StaticValueEditorTheme,
     id: WidgetId,
     value: &StaticValue,
-    width: f32,
 ) -> Option<StaticValue> {
+    let width = theme.width;
     match value {
         StaticValue::Int(current) => {
             let buf = buffered_text_edit(ui, id, *current, i64::to_string, width);
@@ -74,9 +74,11 @@ pub(crate) fn show(
             Button::new()
                 .id(id)
                 .label(path_preview(path))
-                .style(flat_inline_button())
+                .style(theme.button.clone())
                 .text_wrap(TextWrap::Ellipsis)
                 .size((Sizing::Fixed(width), Sizing::Hug))
+                // Override the theme's vertical padding so the chip sits
+                // flush on the port-row baseline.
                 .padding(Spacing::xy(6.0, 0.0))
                 .show(ui);
             None
@@ -129,14 +131,6 @@ fn buffered_text_edit<T>(
     let snapshot = text.clone();
     ui.state_mut::<EditBuffer>(id).text = text;
     snapshot
-}
-
-/// Flat inline-field button look: palantir's `menu_button` preset
-/// (transparent at rest, hover-only background, no border) tightened to
-/// sit on the port-row baseline. Horizontal padding goes through the
-/// builder so the theme's vertical 0 sticks.
-fn flat_inline_button() -> ButtonTheme {
-    ButtonTheme::menu_button()
 }
 
 /// `{}` on f64 prints `1` for whole numbers, which round-trips through

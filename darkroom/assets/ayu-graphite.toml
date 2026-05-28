@@ -33,8 +33,70 @@ port_col_pad_top = 6.0
 port_col_pad_x = 8.0
 port_gap = 6.0
 port_cols_gap = 12.0
-value_editor_width = 100.0
 new_node_popup_max_height = 400.0
+
+[static_value_editor]
+width = 100.0
+
+[static_value_editor.button]
+padding = [8.0, 4.0]
+margin = 0.0
+
+[static_value_editor.button.normal.background]
+corners = 4.0
+
+[static_value_editor.button.normal.background.fill]
+Solid = "#00000000"
+
+[static_value_editor.button.hovered.background]
+corners = 4.0
+
+[static_value_editor.button.hovered.background.fill]
+Solid = "#3e3e3e"
+
+[static_value_editor.button.pressed.background]
+corners = 4.0
+
+[static_value_editor.button.pressed.background.fill]
+Solid = "#4b4b4b"
+
+[static_value_editor.button.disabled.background]
+corners = 4.0
+
+[static_value_editor.button.disabled.background.fill]
+Solid = "#00000000"
+
+[inline_rename.text_edit]
+placeholder = "#aaaaa8"
+caret = "#ffffff"
+caret_width = 1.5
+selection = "#9adbfb40"
+padding = 0.0
+margin = 0.0
+
+[inline_rename.text_edit.normal.background]
+corners = 4.0
+
+[inline_rename.text_edit.normal.background.fill]
+Solid = "#00000000"
+
+[inline_rename.text_edit.focused.background]
+corners = 4.0
+
+[inline_rename.text_edit.focused.background.fill]
+Solid = "#00000000"
+
+[inline_rename.text_edit.disabled.background]
+corners = 4.0
+
+[inline_rename.text_edit.disabled.background.fill]
+Solid = "#00000000"
+
+[inline_rename.text_edit.disabled.text]
+font_size_px = 16.0
+color = "#878a8d"
+line_height_mult = 1.2
+family = "Sans"
 
 [palantir_theme]
 window_clear = "#1a1a1a"

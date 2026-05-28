@@ -7,9 +7,11 @@
 //! [`crate::gui::node::value_editor`].
 
 use palantir::{
-    Align, Brush, Configure, HAlign, InternedStr, Justify, Key, Panel, Sense, Shortcut, Sizing,
-    Spacing, Stroke, Text, TextEdit, TextEditTheme, TextStyle, Ui, WidgetId,
+    Align, Configure, HAlign, InternedStr, Justify, Key, Panel, Sense, Shortcut, Sizing, Text,
+    TextEdit, TextEditTheme, TextStyle, Ui, WidgetId,
 };
+
+use crate::theme::InlineRenameTheme;
 
 /// Cross-frame state for one inline-rename editor, held in palantir's
 /// `StateMap` under the editor's `WidgetId`.
@@ -47,23 +49,36 @@ const DEFAULT_MAX_CHARS: usize = 64;
 /// The same `id` is recorded every frame across the label⇄editor swap so
 /// palantir keeps the state row alive — pick something stable per
 /// underlying domain item (node id, port id, subgraph id, …).
-pub(crate) struct InlineRename {
+///
+pub(crate) struct InlineRename<'a> {
     id: WidgetId,
     name: InternedStr,
+    /// Borrowed when the caller supplied one via [`Self::theme`];
+    /// otherwise `show()` falls back to `InlineRenameTheme::default()`
+    /// (the built-in flat editor).
+    theme: Option<&'a InlineRenameTheme>,
     max_chars: usize,
     style: Option<TextStyle>,
     halign: HAlign,
 }
 
-impl InlineRename {
+impl<'a> InlineRename<'a> {
     pub(crate) fn new(id: WidgetId, name: impl Into<InternedStr>) -> Self {
         Self {
             id,
             name: name.into(),
+            theme: None,
             max_chars: DEFAULT_MAX_CHARS,
             style: None,
             halign: HAlign::Left,
         }
+    }
+
+    /// Borrow a darkroom [`InlineRenameTheme`] for the editor look.
+    /// Optional — without it, `show()` uses the type's `Default`.
+    pub(crate) fn theme(mut self, theme: &'a InlineRenameTheme) -> Self {
+        self.theme = Some(theme);
+        self
     }
 
     /// Override the character cap applied to the active `TextEdit`.
@@ -92,6 +107,7 @@ impl InlineRename {
         let Self {
             id,
             name,
+            theme,
             max_chars,
             style,
             halign,
@@ -154,9 +170,20 @@ impl InlineRename {
         }
 
         let mut draft = std::mem::take(&mut ui.state_mut::<RenameState>(id).draft);
+        // Fall back to the built-in flat theme when the caller didn't
+        // hand one in. Owned binding lives until the end of `show` so
+        // `theme_ref` stays valid for the duration of the editor draw.
+        let owned_default;
+        let theme_ref: &InlineRenameTheme = match theme {
+            Some(t) => t,
+            None => {
+                owned_default = InlineRenameTheme::default();
+                &owned_default
+            }
+        };
         TextEdit::new(&mut draft)
             .id(id)
-            .style(flat_edit_style(ui, style))
+            .style(edit_style(theme_ref, style))
             .max_chars(max_chars)
             .size((Sizing::Hug, Sizing::Hug))
             .min_size((MIN_EDIT_WIDTH, line_h))
@@ -190,23 +217,14 @@ impl InlineRename {
     }
 }
 
-/// The ambient text-edit theme flattened for an inline rename field:
-/// zero padding/margin and no border, so the editor's `Hug` height
-/// equals the plain `Text` label's line height — the node body doesn't
-/// grow when a label enters/exits edit mode. The fill stays, so the
-/// fixed-width field still reads as editable. When `text` is `Some`,
-/// the same style is applied to every WidgetLook so the edit field
-/// renders at the same size/colour as the idle label.
-fn flat_edit_style(ui: &Ui, text: Option<TextStyle>) -> TextEditTheme {
-    let mut style = ui.theme.text_edit.clone();
-    style.padding = Spacing::ZERO;
-    style.margin = Spacing::ZERO;
-    for look in [&mut style.normal, &mut style.focused, &mut style.disabled] {
-        if let Some(bg) = look.background.as_mut() {
-            bg.stroke = Stroke::ZERO;
-            bg.fill = Brush::TRANSPARENT;
-        }
-        if text.is_some() {
+/// Build the active editor's theme: start from the bundle's flat
+/// `text_edit` (no padding/margin/border, transparent fill) and, when
+/// a label style is supplied, copy it into every WidgetLook's text
+/// slot so the field renders at the same font as the idle label.
+fn edit_style(theme: &InlineRenameTheme, text: Option<TextStyle>) -> TextEditTheme {
+    let mut style = theme.text_edit.clone();
+    if text.is_some() {
+        for look in [&mut style.normal, &mut style.focused, &mut style.disabled] {
             look.text = text;
         }
     }

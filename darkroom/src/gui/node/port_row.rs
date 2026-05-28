@@ -186,7 +186,6 @@ fn input_port_row(
     let overhang = theme.port_radius() + theme.port_col_pad_x;
     let margin = Spacing::new(-overhang, 0.0, 0.0, 0.0);
     let wid = port_circle_wid(port);
-    let editor_w = theme.value_editor_width;
     let row = Panel::hstack()
         .id_salt(("port", port.port_idx))
         .size((Sizing::Hug, Sizing::Hug))
@@ -198,7 +197,9 @@ fn input_port_row(
             port_label(ui, rcx, port, name.clone(), rename, out);
             if allow_const && let InputBindingView::Const(value) = binding {
                 let editor_id = const_editor_wid(port.node_id, port.port_idx);
-                if let Some(new_value) = value_editor::show(ui, editor_id, value, editor_w) {
+                if let Some(new_value) =
+                    value_editor::show(ui, &theme.static_value_editor, editor_id, value)
+                {
                     out.push(set_input(port, Binding::Const(new_value)));
                 }
             }

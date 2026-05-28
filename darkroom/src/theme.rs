@@ -1,4 +1,4 @@
-use palantir::{Background, Brush, Color, WidgetLook};
+use palantir::{Background, Brush, ButtonTheme, Color, Spacing, Stroke, TextEditTheme, WidgetLook};
 
 // ── default palette + dimensions ─────────────────────────────────────
 // The single source of truth for darkroom's built-in look. `Theme::default`
@@ -191,12 +191,22 @@ pub struct Theme {
     pub port_cols_gap: f32,
 
     // ── inline editors / popups ─────────────────────────────────
-    /// Fixed width of the inline static-value editor that hugs a
-    /// `Binding::Const` input port.
-    pub value_editor_width: f32,
     /// Cap on the new-node popup's height. Inner scroll handles
     /// overflow when the function list exceeds the cap.
     pub new_node_popup_max_height: f32,
+
+    /// Look + dimensions for the inline static-value editor that hugs a
+    /// `Binding::Const` input port (number/string field, file-pick
+    /// chip). `#[serde(default)]` so older themes load with the
+    /// built-in look.
+    #[serde(default = "default_static_value_editor")]
+    pub static_value_editor: StaticValueEditorTheme,
+
+    /// Look for the inline-rename widget (node title, boundary port,
+    /// subgraph tab). `#[serde(default)]` so older themes load with the
+    /// built-in look.
+    #[serde(default = "default_inline_rename")]
+    pub inline_rename: InlineRenameTheme,
 
     /// Palantir-side widget theme. Pushed onto `Ui::theme` once at
     /// startup so every palantir widget (Button, TextEdit, MenuItem,
@@ -232,6 +242,64 @@ fn default_exec_missing() -> Color {
 }
 fn default_exec_errored() -> Color {
     EXEC_ERRORED_GLOW
+}
+
+/// Per-widget theme bundle for the inline static-value editor on a
+/// `Binding::Const` input port. Owns the look of the path-pick chip
+/// (transparent at rest, hover-only background, no border) and the
+/// fixed field width so a single struct covers every visual axis the
+/// editor needs.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct StaticValueEditorTheme {
+    pub button: ButtonTheme,
+    /// Fixed logical-px width of the embedded `TextEdit` / pick button.
+    pub width: f32,
+}
+
+impl Default for StaticValueEditorTheme {
+    fn default() -> Self {
+        // Palantir's `menu_button` preset already matches: transparent
+        // at rest, hover-only background, no border.
+        Self {
+            button: ButtonTheme::menu_button(),
+            width: VALUE_EDITOR_WIDTH,
+        }
+    }
+}
+
+fn default_static_value_editor() -> StaticValueEditorTheme {
+    StaticValueEditorTheme::default()
+}
+
+/// Per-widget theme bundle for the inline-rename label⇄field widget
+/// (node title, boundary-port name, subgraph tab). The `text_edit`
+/// look is stripped to the bare editor surface (no padding/margin, no
+/// border, transparent fill) so the field's `Hug` height equals its
+/// plain `Text` twin and the row doesn't reshape on a swap.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct InlineRenameTheme {
+    pub text_edit: TextEditTheme,
+}
+
+impl Default for InlineRenameTheme {
+    fn default() -> Self {
+        let mut style = TextEditTheme {
+            padding: Spacing::ZERO,
+            margin: Spacing::ZERO,
+            ..TextEditTheme::default()
+        };
+        for look in [&mut style.normal, &mut style.focused, &mut style.disabled] {
+            if let Some(bg) = look.background.as_mut() {
+                bg.stroke = Stroke::ZERO;
+                bg.fill = Brush::TRANSPARENT;
+            }
+        }
+        Self { text_edit: style }
+    }
+}
+
+fn default_inline_rename() -> InlineRenameTheme {
+    InlineRenameTheme::default()
 }
 
 /// Palantir sub-theme for darkroom: palantir's own defaults, with the
@@ -453,8 +521,9 @@ impl Default for Theme {
             port_col_pad_x: PORT_COL_PAD_X,
             port_gap: PORT_GAP,
             port_cols_gap: PORT_COLS_GAP,
-            value_editor_width: VALUE_EDITOR_WIDTH,
             new_node_popup_max_height: NEW_NODE_POPUP_MAX_HEIGHT,
+            static_value_editor: StaticValueEditorTheme::default(),
+            inline_rename: InlineRenameTheme::default(),
             palantir_theme: default_palantir_theme(),
         }
     }

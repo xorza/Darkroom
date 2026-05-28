@@ -183,6 +183,7 @@ fn tab_chip(
             // wouldn't see it).
             if let Some(sub_id) = tab.subgraph_id {
                 let ev = InlineRename::new(tab_rename_wid(sub_id), tab.text.clone())
+                    .theme(&theme.inline_rename)
                     .max_chars(SUBGRAPH_NAME_MAX_CHARS)
                     .style(label_style)
                     .show(ui);
