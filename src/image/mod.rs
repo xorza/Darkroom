@@ -138,7 +138,7 @@ impl Image {
         match extension.as_str() {
             "png" => io::save_png(image, filename)?,
             "jpeg" | "jpg" => io::save_jpg(image, filename)?,
-            "tiff" | "tif" => io::save_tiff(image, filename)?,
+            "tiff" | "tif" => tiff::save_tiff(image, filename)?,
 
             _ => return Err(Error::InvalidExtension(extension)),
         };

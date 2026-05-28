@@ -180,5 +180,3 @@ pub(crate) fn save_png<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
 
     Ok(())
 }
-
-pub(crate) use super::tiff::save_tiff;
