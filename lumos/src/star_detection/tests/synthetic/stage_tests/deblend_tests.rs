@@ -3,7 +3,6 @@
 //! Tests the star deblending logic for overlapping/blended stars.
 
 use crate::common::Buffer2;
-use crate::star_detection::BackgroundEstimate;
 use crate::star_detection::config::Config;
 use crate::star_detection::detector::stages::detect_test_utils::detect_stars_test;
 use crate::star_detection::tests::common::output::{

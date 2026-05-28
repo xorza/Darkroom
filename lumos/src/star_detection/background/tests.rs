@@ -1,6 +1,5 @@
 //! Tests for background estimation.
 
-use super::*;
 use crate::common::Buffer2;
 use crate::star_detection::config::{BackgroundRefinement, Config};
 

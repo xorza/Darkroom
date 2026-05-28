@@ -12,9 +12,7 @@ use super::moffat_fit::{MoffatFitConfig, fit_moffat_2d};
 use super::refine_centroid;
 use super::test_utils::make_gaussian_star;
 use crate::common::Buffer2;
-use crate::star_detection::BackgroundEstimate;
 use crate::star_detection::config::{CentroidMethod, Config, LocalBackgroundMethod};
-use crate::star_detection::deblend::Region;
 use crate::star_detection::detector::stages::detect_test_utils::detect_stars_test;
 use crate::testing::synthetic::stamps::benchmark_star_field;
 

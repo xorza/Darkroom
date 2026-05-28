@@ -4,7 +4,6 @@
 
 use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
-use crate::star_detection::BackgroundEstimate;
 use crate::star_detection::centroid::measure_star;
 use crate::star_detection::config::Config;
 use crate::star_detection::deblend::Region;

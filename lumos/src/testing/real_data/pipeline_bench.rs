@@ -16,8 +16,6 @@ use crate::{
 #[test]
 #[ignore]
 fn diag_dark_pixel_distribution() {
-    use crate::calibration_masters::defect_map::DefectMap;
-
     init_tracing();
 
     let dark_paths = calibration_image_paths("Darks").unwrap();

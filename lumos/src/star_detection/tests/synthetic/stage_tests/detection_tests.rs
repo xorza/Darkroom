@@ -2,8 +2,6 @@
 //!
 //! Tests the peak detection and thresholding logic.
 
-use crate::math::Vec2us;
-use crate::star_detection::BackgroundEstimate;
 use crate::star_detection::config::Config;
 use crate::star_detection::detector::stages::detect_test_utils::detect_stars_test;
 use crate::star_detection::tests::common::output::{
@@ -12,7 +10,7 @@ use crate::star_detection::tests::common::output::{
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{StarFieldConfig, generate_star_field, sparse_field_config};
 use common::test_utils::test_output_path;
-use glam::{DVec2, Vec2};
+use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 

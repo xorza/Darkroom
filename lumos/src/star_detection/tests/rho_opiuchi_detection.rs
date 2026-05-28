@@ -117,8 +117,8 @@ fn test_detect_rho_opiuchi() {
 fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     use super::common::output::image_writer;
     use crate::common::Buffer2;
-    use crate::star_detection::BufferPool;
     use crate::star_detection::background::estimate_background;
+    use crate::star_detection::buffer_pool::BufferPool;
     use crate::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
     use crate::star_detection::detector::stages::fwhm::estimate_fwhm;
     use crate::star_detection::detector::stages::prepare;

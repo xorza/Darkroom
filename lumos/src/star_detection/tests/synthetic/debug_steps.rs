@@ -6,7 +6,6 @@ use crate::star_detection::tests::common::output::{mask_to_gray, to_gray_stretch
 use crate::star_detection::tests::common::{gray_to_rgb_image_stretched, save_image};
 use crate::{AstroImage, ImageDimensions};
 
-use crate::star_detection::BackgroundEstimate;
 use crate::star_detection::mask_dilation::dilate_mask;
 use crate::star_detection::{StarDetector, config::Config};
 use crate::testing::init_tracing;

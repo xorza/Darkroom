@@ -58,8 +58,9 @@ use crate::AstroImage;
 use crate::astro_image::AstroImageMetadata;
 use crate::astro_image::cfa::{CfaImage, CfaType};
 use crate::common::Buffer2;
+use crate::star_detection::buffer_pool::BufferPool;
 use crate::star_detection::detector::stages;
-use crate::star_detection::{BackgroundEstimate, BufferPool, Config};
+use crate::star_detection::{BackgroundEstimate, Config};
 
 /// Convenience function to estimate background for tests.
 ///

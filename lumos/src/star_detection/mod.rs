@@ -53,7 +53,7 @@
 // =============================================================================
 
 pub(crate) mod background;
-mod buffer_pool;
+pub(crate) mod buffer_pool;
 mod centroid;
 pub mod config;
 mod convolution;
