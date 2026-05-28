@@ -160,11 +160,9 @@ impl<'a> InlineRename<'a> {
         //     so slack is split caret_room/caret_room → idle: symmetric.
         // Same total width either way, so the surrounding row doesn't
         // reshape; the glyph baseline stays put across the swap.
-        let two = 2.0 * caret_room;
         let idle_padding = match halign {
-            HAlign::Right => Spacing::new(caret_room, 0.0, caret_room, 0.0),
-            HAlign::Center => Spacing::new(caret_room, 0.0, caret_room, 0.0),
-            _ => Spacing::new(0.0, 0.0, two, 0.0),
+            HAlign::Right | HAlign::Center => Spacing::xy(caret_room, 0.0),
+            _ => Spacing::new(0.0, 0.0, 2.0 * caret_room, 0.0),
         };
         if !ui.state_mut::<RenameState>(id).active {
             // `DRAG` as well as `CLICK`: the label captures the press
