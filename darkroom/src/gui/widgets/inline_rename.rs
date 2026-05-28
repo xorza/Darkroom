@@ -23,7 +23,7 @@ struct RenameState {
     draft: String,
 }
 
-/// What one frame of [`inline_rename`] surfaced. `clicked` (idle label
+/// What one frame of [`InlineRename`] surfaced. `clicked` (idle label
 /// clicked, including the double-click frame) and `committed` (a changed
 /// value was accepted) never co-occur — the first only fires while idle,
 /// the second only while editing — but a single struct keeps the caller's
@@ -38,115 +38,155 @@ pub(crate) struct RenameEvent {
 /// collapse to a caret sliver when the draft is emptied.
 const MIN_EDIT_WIDTH: f32 = 40.0;
 
-/// Draw an inline-renamable label under `id`. While idle it's a
-/// click-sensing `Text`; double-click swaps it for a `max_chars`-capped
-/// `TextEdit` that hugs its text width (grows as you type). Enter or blur
-/// commits (→ `committed` when the value changed), Esc cancels. The same
-/// `id` is recorded every frame across the label⇄editor swap so palantir
-/// keeps the state row alive.
-pub(crate) fn inline_rename(
-    ui: &mut Ui,
+/// Default character cap. Caller's `.max_chars(n)` overrides.
+const DEFAULT_MAX_CHARS: usize = 64;
+
+/// Inline-renamable label builder. Idle = click-sensing `Text`;
+/// double-click swaps in a `max_chars`-capped `TextEdit` that hugs its
+/// text width (grows as you type). Enter or blur commits, Esc cancels.
+/// The same `id` is recorded every frame across the label⇄editor swap so
+/// palantir keeps the state row alive — pick something stable per
+/// underlying domain item (node id, port id, subgraph id, …).
+pub(crate) struct InlineRename {
     id: WidgetId,
     name: InternedStr,
     max_chars: usize,
     style: Option<TextStyle>,
     halign: HAlign,
-) -> RenameEvent {
-    // The label sits inside a `MIN_EDIT_WIDTH` panel so short names
-    // still present a clickable target; the parent's main-axis
-    // distribution (`justify`) decides which side the text hugs.
-    let justify = match halign {
-        HAlign::Right => Justify::End,
-        HAlign::Center => Justify::Center,
-        _ => Justify::Start,
-    };
-    let text_align = Align::h(halign);
-    // Floor the height at one text line so an empty label still has a
-    // clickable box (a `Hug` panel with no text would collapse to zero
-    // height). Derived from the (possibly overridden) text style so
-    // overriding the font size also tightens the click target.
-    let style_for_metrics = style.unwrap_or(ui.theme.text);
-    let line_h = style_for_metrics.line_height_for(style_for_metrics.font_size_px);
-    if !ui.state_mut::<RenameState>(id).active {
-        // `DRAG` as well as `CLICK`: the label captures the press (so it
-        // can register clicks / double-click-to-edit), but a press that
-        // turns into a drag must still be available to an ancestor that
-        // uses the label as a move handle — e.g. the node header dragging
-        // its node. Without `DRAG` the press latches as a click-only
-        // capture and the drag is swallowed. The active editor is a
-        // `TextEdit` (no `DRAG`), so this only applies while idle.
-        let resp = Panel::hstack()
-            .id(id)
-            .size((Sizing::Hug, Sizing::Hug))
-            .min_size((MIN_EDIT_WIDTH, line_h))
-            // Push the label to the requested side of the min-width
-            // box so a short name doesn't drift away from the side it
-            // should hug (e.g. boundary input ports in the right
-            // column want it flush to the right).
-            .justify(justify)
-            .sense(Sense::CLICK | Sense::DRAG)
-            .show(ui, |ui| {
-                // `InternedStr::clone` is allocation-free for the `Owned`
-                // names darkroom builds, so this is cheap per frame.
-                let mut t = Text::new(name.clone());
-                if let Some(s) = style {
-                    t = t.style(s);
-                }
-                t.show(ui);
-            })
-            .response;
-        // Read flags off the response before any `ui.state_mut` — the
-        // response borrows `ui`.
-        let clicked = resp.clicked();
-        let double_clicked = resp.double_clicked();
-        if double_clicked {
-            let st = ui.state_mut::<RenameState>(id);
-            st.active = true;
-            st.focused_once = false;
-            st.draft = name.as_str("").to_owned();
-            ui.request_focus(Some(id));
+}
+
+impl InlineRename {
+    pub(crate) fn new(id: WidgetId, name: impl Into<InternedStr>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            max_chars: DEFAULT_MAX_CHARS,
+            style: None,
+            halign: HAlign::Left,
         }
-        return RenameEvent {
-            clicked,
-            committed: None,
-        };
     }
 
-    let mut draft = std::mem::take(&mut ui.state_mut::<RenameState>(id).draft);
-    TextEdit::new(&mut draft)
-        .id(id)
-        .style(flat_edit_style(ui, style))
-        .max_chars(max_chars)
-        .size((Sizing::Hug, Sizing::Hug))
-        .min_size((MIN_EDIT_WIDTH, line_h))
-        // Mirror the idle label's alignment so the text/caret hugs the
-        // same side of the min-width box during editing.
-        .text_align(text_align)
-        .show(ui);
-    let focused = ui.focused_id() == Some(id);
-    let escape = ui.escape_pressed();
-    let enter = ui.key_pressed(Shortcut::key(Key::Enter));
-    let commit = {
-        let st = ui.state_mut::<RenameState>(id);
-        st.draft = draft.clone();
-        st.focused_once |= focused;
-        // Commit on Enter or on blur (once focus had landed); Esc wins
-        // as a cancel.
-        !escape && (enter || (st.focused_once && !focused))
-    };
-    if !(commit || escape) {
-        return RenameEvent {
-            clicked: false,
-            committed: None,
-        };
+    /// Override the character cap applied to the active `TextEdit`.
+    pub(crate) fn max_chars(mut self, n: usize) -> Self {
+        self.max_chars = n;
+        self
     }
-    let st = ui.state_mut::<RenameState>(id);
-    st.active = false;
-    st.focused_once = false;
-    ui.request_focus(None);
-    RenameEvent {
-        clicked: false,
-        committed: (commit && draft != name.as_str("")).then_some(draft),
+
+    /// Override the text style of both the idle label and the active
+    /// editor (font size / colour / family). Defaults to ambient
+    /// `ui.theme.text`.
+    pub(crate) fn style(mut self, style: TextStyle) -> Self {
+        self.style = Some(style);
+        self
+    }
+
+    /// Pick which side of the min-width box the text hugs. Default
+    /// `HAlign::Left`; pass `HAlign::Right` for labels that live in a
+    /// right-aligned column (e.g. boundary input ports).
+    pub(crate) fn halign(mut self, halign: HAlign) -> Self {
+        self.halign = halign;
+        self
+    }
+
+    pub(crate) fn show(self, ui: &mut Ui) -> RenameEvent {
+        let Self {
+            id,
+            name,
+            max_chars,
+            style,
+            halign,
+        } = self;
+        // The label sits inside a `MIN_EDIT_WIDTH` panel so short names
+        // still present a clickable target; the parent's main-axis
+        // distribution (`justify`) decides which side the text hugs.
+        let justify = match halign {
+            HAlign::Right => Justify::End,
+            HAlign::Center => Justify::Center,
+            _ => Justify::Start,
+        };
+        let text_align = Align::h(halign);
+        // Floor the height at one text line so an empty label still has
+        // a clickable box (a `Hug` panel with no text would collapse to
+        // zero height). Derived from the (possibly overridden) text
+        // style so overriding the font size also tightens the click
+        // target.
+        let style_for_metrics = style.unwrap_or(ui.theme.text);
+        let line_h = style_for_metrics.line_height_for(style_for_metrics.font_size_px);
+        if !ui.state_mut::<RenameState>(id).active {
+            // `DRAG` as well as `CLICK`: the label captures the press
+            // (so it can register clicks / double-click-to-edit), but
+            // a press that turns into a drag must still be available
+            // to an ancestor that uses the label as a move handle —
+            // e.g. the node header dragging its node. Without `DRAG`
+            // the press latches as a click-only capture and the drag
+            // is swallowed. The active editor is a `TextEdit` (no
+            // `DRAG`), so this only applies while idle.
+            let resp = Panel::hstack()
+                .id(id)
+                .size((Sizing::Hug, Sizing::Hug))
+                .min_size((MIN_EDIT_WIDTH, line_h))
+                .justify(justify)
+                .sense(Sense::CLICK | Sense::DRAG)
+                .show(ui, |ui| {
+                    // `InternedStr::clone` is allocation-free for the
+                    // `Owned` names darkroom builds, so this is cheap
+                    // per frame.
+                    let mut t = Text::new(name.clone());
+                    if let Some(s) = style {
+                        t = t.style(s);
+                    }
+                    t.show(ui);
+                })
+                .response;
+            let clicked = resp.clicked();
+            let double_clicked = resp.double_clicked();
+            if double_clicked {
+                let st = ui.state_mut::<RenameState>(id);
+                st.active = true;
+                st.focused_once = false;
+                st.draft = name.as_str("").to_owned();
+                ui.request_focus(Some(id));
+            }
+            return RenameEvent {
+                clicked,
+                committed: None,
+            };
+        }
+
+        let mut draft = std::mem::take(&mut ui.state_mut::<RenameState>(id).draft);
+        TextEdit::new(&mut draft)
+            .id(id)
+            .style(flat_edit_style(ui, style))
+            .max_chars(max_chars)
+            .size((Sizing::Hug, Sizing::Hug))
+            .min_size((MIN_EDIT_WIDTH, line_h))
+            .text_align(text_align)
+            .show(ui);
+        let focused = ui.focused_id() == Some(id);
+        let escape = ui.escape_pressed();
+        let enter = ui.key_pressed(Shortcut::key(Key::Enter));
+        let commit = {
+            let st = ui.state_mut::<RenameState>(id);
+            st.draft = draft.clone();
+            st.focused_once |= focused;
+            // Commit on Enter or on blur (once focus had landed); Esc
+            // wins as a cancel.
+            !escape && (enter || (st.focused_once && !focused))
+        };
+        if !(commit || escape) {
+            return RenameEvent {
+                clicked: false,
+                committed: None,
+            };
+        }
+        let st = ui.state_mut::<RenameState>(id);
+        st.active = false;
+        st.focused_once = false;
+        ui.request_focus(None);
+        RenameEvent {
+            clicked: false,
+            committed: (commit && draft != name.as_str("")).then_some(draft),
+        }
     }
 }
 

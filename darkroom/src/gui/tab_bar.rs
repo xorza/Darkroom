@@ -7,14 +7,14 @@
 //! touches the document.
 
 use palantir::{
-    Align, Background, Configure, Corners, HAlign, InternedStr, Panel, Sense, Sizing, Spacing,
-    Text, TextStyle, Ui, VAlign, WidgetId,
+    Align, Background, Configure, Corners, InternedStr, Panel, Sense, Sizing, Spacing, Text,
+    TextStyle, Ui, VAlign, WidgetId,
 };
 use scenarium::prelude::SubgraphId;
 
 use crate::edit::intent::Intent;
 use crate::gui::UiAction;
-use crate::gui::widgets::inline_rename::inline_rename;
+use crate::gui::widgets::inline_rename::InlineRename;
 use crate::theme::Theme;
 
 /// Character cap for a subgraph name in the inline rename editor.
@@ -182,14 +182,10 @@ fn tab_chip(
             // so the outer chip's click handler in `emit_tab_actions`
             // wouldn't see it).
             if let Some(sub_id) = tab.subgraph_id {
-                let ev = inline_rename(
-                    ui,
-                    tab_rename_wid(sub_id),
-                    tab.text.clone(),
-                    SUBGRAPH_NAME_MAX_CHARS,
-                    Some(label_style),
-                    HAlign::Left,
-                );
+                let ev = InlineRename::new(tab_rename_wid(sub_id), tab.text.clone())
+                    .max_chars(SUBGRAPH_NAME_MAX_CHARS)
+                    .style(label_style)
+                    .show(ui);
                 if ev.clicked {
                     out.push(Intent::SwitchTab { to: index });
                 }

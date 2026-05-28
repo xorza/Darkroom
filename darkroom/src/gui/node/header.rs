@@ -11,7 +11,7 @@ use scenarium::prelude::{NodeBehavior, NodeId};
 use crate::edit::intent::Intent;
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
 use crate::gui::node::{RecordCtx, exec_color, node_rename_wid, select_intent};
-use crate::gui::widgets::inline_rename::inline_rename;
+use crate::gui::widgets::inline_rename::InlineRename;
 use crate::run_state::ExecStatus;
 use crate::scene::SceneNode;
 use crate::theme::Theme;
@@ -187,14 +187,9 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
 fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let shift = ui.modifiers().shift;
     let id = node_rename_wid(node.id);
-    let ev = inline_rename(
-        ui,
-        id,
-        node.name.clone(),
-        NODE_NAME_MAX_CHARS,
-        None,
-        palantir::HAlign::Left,
-    );
+    let ev = InlineRename::new(id, node.name.clone())
+        .max_chars(NODE_NAME_MAX_CHARS)
+        .show(ui);
     if ev.clicked {
         out.push(select_intent(shift, rcx.scene, node.id));
     }

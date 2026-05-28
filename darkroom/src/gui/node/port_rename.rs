@@ -11,7 +11,7 @@ use crate::document::BoundarySide;
 use crate::edit::intent::Intent;
 use crate::gui::PortRef;
 use crate::gui::node::{RecordCtx, select_intent};
-use crate::gui::widgets::inline_rename::inline_rename;
+use crate::gui::widgets::inline_rename::InlineRename;
 
 /// Character cap for a boundary-port name in the inline rename editor.
 const PORT_NAME_MAX_CHARS: usize = 24;
@@ -54,7 +54,10 @@ pub(crate) fn port_label(
         BoundarySide::Input => HAlign::Right,
         BoundarySide::Output => HAlign::Left,
     };
-    let ev = inline_rename(ui, id, name, PORT_NAME_MAX_CHARS, None, halign);
+    let ev = InlineRename::new(id, name)
+        .max_chars(PORT_NAME_MAX_CHARS)
+        .halign(halign)
+        .show(ui);
     // Single click selects the node (the label otherwise swallows the
     // click the body would have gotten); a committed value renames.
     if ev.clicked {
