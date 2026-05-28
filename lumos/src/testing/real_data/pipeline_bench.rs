@@ -8,9 +8,9 @@ use crate::stacking::cache::ImageCache;
 use crate::stacking::stack::run_stacking;
 use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
 use crate::{
-    AstroImage, CalibrationFrames, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, Normalization,
-    ProgressCallback, RegistrationConfig, StackConfig, Star, StarDetectionConfig, StarDetector,
-    register, stack_with_progress, warp,
+    AstroImage, CalibrationFrames, CalibrationImages, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD,
+    Normalization, ProgressCallback, RegistrationConfig, StackConfig, Star, StarDetectionConfig,
+    StarDetector, register, stack_with_progress, warp,
 };
 
 #[test]
@@ -201,7 +201,15 @@ fn bench_full_pipeline() {
     let bias = stack_cfa("Bias", &bias_paths, StackConfig::bias());
 
     let t_defect = Instant::now();
-    let masters = CalibrationMasters::from_images(dark, flat, bias, None, DEFAULT_SIGMA_THRESHOLD);
+    let masters = CalibrationMasters::from_images(
+        CalibrationImages {
+            dark,
+            flat,
+            bias,
+            flat_dark: None,
+        },
+        DEFAULT_SIGMA_THRESHOLD,
+    );
     println!(
         "  DefectMap: {:.0}ms",
         t_defect.elapsed().as_secs_f64() * 1000.0

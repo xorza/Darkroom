@@ -51,7 +51,9 @@ pub use raw::demosaic::bayer::CfaPattern;
 // Calibration
 // ============================================================================
 
-pub use calibration_masters::{CalibrationFrames, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
+pub use calibration_masters::{
+    CalibrationFrames, CalibrationImages, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD,
+};
 
 // ============================================================================
 // Star detection

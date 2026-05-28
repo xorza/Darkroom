@@ -2,7 +2,7 @@ use crate::astro_image::cfa::{CfaImage, CfaType};
 use crate::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
 use crate::calibration_masters::defect_map::DefectMap;
 use crate::testing::constant_cfa;
-use crate::{AstroImageMetadata, CalibrationFrames, CalibrationMasters};
+use crate::{AstroImageMetadata, CalibrationFrames, CalibrationImages, CalibrationMasters};
 use common::buffer2::Buffer2;
 
 #[test]
@@ -33,10 +33,11 @@ fn test_new_constructor() {
     let flat = constant_cfa(4, 4, 0.8, CfaType::Mono);
 
     let masters = CalibrationMasters::from_images(
-        Some(dark),
-        Some(flat),
-        None,
-        None,
+        CalibrationImages {
+            dark: Some(dark),
+            flat: Some(flat),
+            ..Default::default()
+        },
         DEFAULT_SIGMA_THRESHOLD,
     );
 
@@ -51,8 +52,13 @@ fn test_new_constructor() {
 fn test_new_no_dark_no_hot_pixels() {
     let flat = constant_cfa(4, 4, 0.8, CfaType::Mono);
 
-    let masters =
-        CalibrationMasters::from_images(None, Some(flat), None, None, DEFAULT_SIGMA_THRESHOLD);
+    let masters = CalibrationMasters::from_images(
+        CalibrationImages {
+            flat: Some(flat),
+            ..Default::default()
+        },
+        DEFAULT_SIGMA_THRESHOLD,
+    );
 
     assert!(masters.master_dark.is_none());
     assert!(masters.master_flat.is_some());
@@ -62,8 +68,13 @@ fn test_new_no_dark_no_hot_pixels() {
 #[test]
 fn test_calibrate_dark_subtraction() {
     let dark = constant_cfa(4, 4, 0.1, CfaType::Mono);
-    let masters =
-        CalibrationMasters::from_images(Some(dark), None, None, None, DEFAULT_SIGMA_THRESHOLD);
+    let masters = CalibrationMasters::from_images(
+        CalibrationImages {
+            dark: Some(dark),
+            ..Default::default()
+        },
+        DEFAULT_SIGMA_THRESHOLD,
+    );
 
     let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
     masters.calibrate(&mut light);
@@ -78,8 +89,13 @@ fn test_calibrate_dark_subtraction() {
 fn test_calibrate_bias_only() {
     // No dark → bias is subtracted instead
     let bias = constant_cfa(4, 4, 0.05, CfaType::Mono);
-    let masters =
-        CalibrationMasters::from_images(None, None, Some(bias), None, DEFAULT_SIGMA_THRESHOLD);
+    let masters = CalibrationMasters::from_images(
+        CalibrationImages {
+            bias: Some(bias),
+            ..Default::default()
+        },
+        DEFAULT_SIGMA_THRESHOLD,
+    );
 
     let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
     masters.calibrate(&mut light);
@@ -96,10 +112,11 @@ fn test_calibrate_dark_takes_priority_over_bias() {
     let dark = constant_cfa(4, 4, 0.1, CfaType::Mono);
     let bias = constant_cfa(4, 4, 0.05, CfaType::Mono);
     let masters = CalibrationMasters::from_images(
-        Some(dark),
-        None,
-        Some(bias),
-        None,
+        CalibrationImages {
+            dark: Some(dark),
+            bias: Some(bias),
+            ..Default::default()
+        },
         DEFAULT_SIGMA_THRESHOLD,
     );
 
@@ -126,8 +143,13 @@ fn test_calibrate_flat_correction() {
         },
     };
 
-    let masters =
-        CalibrationMasters::from_images(None, Some(flat), None, None, DEFAULT_SIGMA_THRESHOLD);
+    let masters = CalibrationMasters::from_images(
+        CalibrationImages {
+            flat: Some(flat),
+            ..Default::default()
+        },
+        DEFAULT_SIGMA_THRESHOLD,
+    );
 
     let mut light = constant_cfa(2, 2, 0.3, CfaType::Mono);
     masters.calibrate(&mut light);
@@ -174,10 +196,12 @@ fn test_calibrate_full_pipeline() {
     let bias = constant_cfa(2, 1, bias_val, CfaType::Mono);
 
     let masters = CalibrationMasters::from_images(
-        Some(dark),
-        Some(flat),
-        Some(bias),
-        None,
+        CalibrationImages {
+            dark: Some(dark),
+            flat: Some(flat),
+            bias: Some(bias),
+            ..Default::default()
+        },
         DEFAULT_SIGMA_THRESHOLD,
     );
 
@@ -235,8 +259,20 @@ fn test_sigma_threshold_affects_detection() {
         ..dark_loose
     };
 
-    let masters_strict = CalibrationMasters::from_images(Some(dark_strict), None, None, None, 3.0);
-    let masters_loose = CalibrationMasters::from_images(Some(dark_loose), None, None, None, 20.0);
+    let masters_strict = CalibrationMasters::from_images(
+        CalibrationImages {
+            dark: Some(dark_strict),
+            ..Default::default()
+        },
+        3.0,
+    );
+    let masters_loose = CalibrationMasters::from_images(
+        CalibrationImages {
+            dark: Some(dark_loose),
+            ..Default::default()
+        },
+        20.0,
+    );
 
     let strict_count = masters_strict.defect_map.as_ref().unwrap().hot_count();
     let loose_count = masters_loose.defect_map.as_ref().unwrap().hot_count();
@@ -302,8 +338,13 @@ fn test_calibrate_hot_pixel_correction() {
         },
     };
 
-    let masters =
-        CalibrationMasters::from_images(Some(dark), None, None, None, DEFAULT_SIGMA_THRESHOLD);
+    let masters = CalibrationMasters::from_images(
+        CalibrationImages {
+            dark: Some(dark),
+            ..Default::default()
+        },
+        DEFAULT_SIGMA_THRESHOLD,
+    );
 
     assert!(masters.defect_map.is_some());
     let defect_map = masters.defect_map.as_ref().unwrap();
@@ -366,10 +407,12 @@ fn test_calibrate_flat_dark() {
     let flat_dark = constant_cfa(2, 1, flat_dark_val, CfaType::Mono);
 
     let masters = CalibrationMasters::from_images(
-        Some(dark),
-        Some(flat),
-        None,
-        Some(flat_dark),
+        CalibrationImages {
+            dark: Some(dark),
+            flat: Some(flat),
+            flat_dark: Some(flat_dark),
+            ..Default::default()
+        },
         DEFAULT_SIGMA_THRESHOLD,
     );
 
@@ -417,10 +460,12 @@ fn test_flat_dark_takes_priority_over_bias() {
     let flat_dark = constant_cfa(2, 2, 0.10, CfaType::Mono);
 
     let masters = CalibrationMasters::from_images(
-        None,
-        Some(flat),
-        Some(bias),
-        Some(flat_dark),
+        CalibrationImages {
+            flat: Some(flat),
+            bias: Some(bias),
+            flat_dark: Some(flat_dark),
+            ..Default::default()
+        },
         DEFAULT_SIGMA_THRESHOLD,
     );
 

@@ -40,6 +40,23 @@ pub struct CalibrationFrames<'a, P: AsRef<Path> + Sync> {
     pub flat_darks: &'a [P],
 }
 
+/// Pre-stacked master frames for [`CalibrationMasters::from_images`], grouped by role.
+///
+/// Like [`CalibrationFrames`] but for already-stacked CFA images. Naming each
+/// role at the call site prevents swapping them (all four are `Option<CfaImage>`).
+/// `None` omits that master.
+#[derive(Debug, Default)]
+pub struct CalibrationImages {
+    /// Master dark frame (raw CFA).
+    pub dark: Option<CfaImage>,
+    /// Master flat frame (raw CFA).
+    pub flat: Option<CfaImage>,
+    /// Master bias frame (raw CFA).
+    pub bias: Option<CfaImage>,
+    /// Master flat-dark frame (dark taken at the flat exposure time).
+    pub flat_dark: Option<CfaImage>,
+}
+
 /// Holds master calibration frames (dark, flat, bias) and defect map.
 ///
 /// Operates on raw CFA (single-channel sensor) data before demosaicing,
@@ -93,17 +110,18 @@ impl CalibrationMasters {
     /// Create CalibrationMasters from pre-built CFA images.
     ///
     /// Generates defect map from the CFA dark if provided.
-    /// `flat_dark` is a dark frame taken at the flat's exposure time — used instead
-    /// of bias for flat normalization when provided.
+    /// `images.flat_dark` is a dark frame taken at the flat's exposure time — used
+    /// instead of bias for flat normalization when provided.
     /// `sigma_threshold` controls defect detection sensitivity (see
     /// [`DEFAULT_SIGMA_THRESHOLD`]).
-    pub fn from_images(
-        dark: Option<CfaImage>,
-        flat: Option<CfaImage>,
-        bias: Option<CfaImage>,
-        flat_dark: Option<CfaImage>,
-        sigma_threshold: f32,
-    ) -> Self {
+    pub fn from_images(images: CalibrationImages, sigma_threshold: f32) -> Self {
+        let CalibrationImages {
+            dark,
+            flat,
+            bias,
+            flat_dark,
+        } = images;
+
         let defect_map = dark
             .as_ref()
             .map(|d| DefectMap::from_master_dark(d, sigma_threshold));
@@ -134,10 +152,12 @@ impl CalibrationMasters {
         let bias = stack_cfa_frames(frames.bias, StackConfig::bias())?;
         let flat_dark = stack_cfa_frames(frames.flat_darks, StackConfig::dark())?;
         Ok(Self::from_images(
-            dark,
-            flat,
-            bias,
-            flat_dark,
+            CalibrationImages {
+                dark,
+                flat,
+                bias,
+                flat_dark,
+            },
             sigma_threshold,
         ))
     }
