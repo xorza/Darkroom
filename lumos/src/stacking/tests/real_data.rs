@@ -1,4 +1,3 @@
-use crate::stacking::FrameType;
 use crate::stacking::config::{Normalization, StackConfig};
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::stack::stack_with_progress;
@@ -30,13 +29,8 @@ fn test_stack_registered_lights() {
         ..StackConfig::sigma_clipped(2.5)
     };
 
-    let stacked = stack_with_progress(
-        &paths,
-        FrameType::Light,
-        config,
-        ProgressCallback::default(),
-    )
-    .expect("Failed to stack registered lights");
+    let stacked = stack_with_progress(&paths, config, ProgressCallback::default())
+        .expect("Failed to stack registered lights");
 
     println!(
         "Stacked result: {}x{}x{}",

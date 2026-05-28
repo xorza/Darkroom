@@ -6,7 +6,7 @@ Image stacking for astrophotography with pixel rejection, frame weighting, norma
 
 | File | Description |
 |------|-------------|
-| `mod.rs` | Public API exports, `FrameType` enum |
+| `mod.rs` | Public API exports |
 | `config.rs` | `StackConfig`, `CombineMethod`, `Rejection`, `Normalization` |
 | `stack.rs` | `stack()` / `stack_with_progress()` entry points, dispatch, normalization |
 | `rejection.rs` | Pixel rejection algorithms |
@@ -18,36 +18,35 @@ Image stacking for astrophotography with pixel rejection, frame weighting, norma
 ## Public API
 
 ```rust
-stack(paths, frame_type, config) -> Result<AstroImage, Error>
-stack_with_progress(paths, frame_type, config, progress) -> Result<AstroImage, Error>
+stack(paths, config) -> Result<AstroImage, Error>
+stack_with_progress(paths, config, progress) -> Result<AstroImage, Error>
 
 StackConfig        // { method, weights, normalization, cache }
 CombineMethod      // Mean(Rejection) | Median
 Rejection          // None | SigmaClip | SigmaClipAsymmetric | Winsorized | LinearFit | Percentile | Gesd
 Normalization      // None | Global
-FrameType          // Dark | Flat | Bias | Light
 CacheConfig        // { cache_dir, keep_cache, available_memory }
 ```
 
 ## Usage
 
 ```rust
-use lumos::stacking::{stack, StackConfig, FrameType, Rejection, Normalization};
+use lumos::stacking::{stack, StackConfig, Rejection, Normalization};
 
 // Default: sigma-clipped mean (sigma=2.5, 3 iterations)
-let result = stack(&paths, FrameType::Light, StackConfig::default())?;
+let result = stack(&paths, StackConfig::default())?;
 
 // Presets
-let result = stack(&paths, FrameType::Light, StackConfig::median())?;
-let result = stack(&paths, FrameType::Light, StackConfig::sigma_clipped(2.0))?;
-let result = stack(&paths, FrameType::Bias, StackConfig::mean())?;
-let result = stack(&paths, FrameType::Light, StackConfig::winsorized(3.0))?;
-let result = stack(&paths, FrameType::Light, StackConfig::linear_fit(2.5))?;
-let result = stack(&paths, FrameType::Light, StackConfig::percentile(15.0))?;
-let result = stack(&paths, FrameType::Light, StackConfig::gesd())?;
+let result = stack(&paths, StackConfig::median())?;
+let result = stack(&paths, StackConfig::sigma_clipped(2.0))?;
+let result = stack(&paths, StackConfig::mean())?;
+let result = stack(&paths, StackConfig::winsorized(3.0))?;
+let result = stack(&paths, StackConfig::linear_fit(2.5))?;
+let result = stack(&paths, StackConfig::percentile(15.0))?;
+let result = stack(&paths, StackConfig::gesd())?;
 
 // Weighted stacking
-let result = stack(&paths, FrameType::Light, StackConfig::weighted(vec![1.0, 0.8, 1.2]))?;
+let result = stack(&paths, StackConfig::weighted(vec![1.0, 0.8, 1.2]))?;
 
 // Global normalization + custom rejection
 let config = StackConfig {
@@ -55,7 +54,7 @@ let config = StackConfig {
     normalization: Normalization::Global,
     ..Default::default()
 };
-let result = stack(&paths, FrameType::Light, config)?;
+let result = stack(&paths, config)?;
 ```
 
 ## Rejection Algorithms

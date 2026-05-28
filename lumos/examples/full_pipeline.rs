@@ -50,9 +50,9 @@ use std::time::Instant;
 
 use lumos::raw::load_raw_cfa;
 use lumos::{
-    AstroImage, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, FrameType, ProgressCallback,
-    RegistrationConfig, StackConfig, StackingProgress, StackingStage, Star, StarDetectionConfig,
-    StarDetector, TransformType, stack_with_progress,
+    AstroImage, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, ProgressCallback, RegistrationConfig,
+    StackConfig, StackingProgress, StackingStage, Star, StarDetectionConfig, StarDetector,
+    TransformType, stack_with_progress,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -435,13 +435,7 @@ fn register_all_lights(
                 tracing::info!("Transform: {}", result.transform);
 
                 // Warp the image to align with reference
-                let mut warped = target_image.clone();
-                lumos::warp(
-                    &target_image,
-                    &mut warped,
-                    &result.warp_transform(),
-                    &reg_config,
-                );
+                let warped = lumos::warp(&target_image, &result.warp_transform(), &reg_config);
 
                 // Save registered image
                 let img: imaginarium::Image = warped.into();
@@ -500,7 +494,7 @@ fn stack_registered_lights(registered_paths: &[PathBuf], output_dir: &Path) {
 
     let progress = create_progress_callback();
 
-    match stack_with_progress(registered_paths, FrameType::Light, config, progress) {
+    match stack_with_progress(registered_paths, config, progress) {
         Ok(stacked) => {
             let output_path = output_dir.join("stacked_result.tiff");
 

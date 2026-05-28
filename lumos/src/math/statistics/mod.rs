@@ -1,5 +1,14 @@
 //! Statistical functions: median, MAD, sigma-clipped statistics.
 
+use serde::{Deserialize, Serialize};
+
+/// Per-channel robust statistics (median and MAD).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ChannelStats {
+    pub median: f32,
+    pub mad: f32,
+}
+
 /// Compute absolute deviations from median in-place.
 ///
 /// Replaces each value with |value - median|.

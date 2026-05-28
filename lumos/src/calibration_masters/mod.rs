@@ -8,7 +8,6 @@ mod tests;
 use std::path::Path;
 
 use crate::astro_image::cfa::CfaImage;
-use crate::stacking::FrameType;
 use crate::stacking::cache::ImageCache;
 use crate::stacking::config::StackConfig;
 use crate::stacking::progress::ProgressCallback;
@@ -48,7 +47,6 @@ pub struct CalibrationMasters {
 /// Returns `None` if `paths` is empty.
 fn stack_cfa_frames(
     paths: &[impl AsRef<Path> + Sync],
-    frame_type: FrameType,
     config: StackConfig,
 ) -> Result<Option<CfaImage>, crate::stacking::error::Error> {
     if paths.is_empty() {
@@ -64,12 +62,8 @@ fn stack_cfa_frames(
         config
     };
 
-    let cache = ImageCache::<CfaImage>::from_paths(
-        paths,
-        &config.cache,
-        frame_type,
-        ProgressCallback::default(),
-    )?;
+    let cache =
+        ImageCache::<CfaImage>::from_paths(paths, &config.cache, ProgressCallback::default())?;
 
     let result = run_stacking(&cache, &config);
 
@@ -122,10 +116,10 @@ impl CalibrationMasters {
         flat_darks: &[impl AsRef<Path> + Sync],
         sigma_threshold: f32,
     ) -> Result<Self, crate::stacking::error::Error> {
-        let dark = stack_cfa_frames(darks, FrameType::Dark, StackConfig::dark())?;
-        let flat = stack_cfa_frames(flats, FrameType::Flat, StackConfig::flat())?;
-        let bias = stack_cfa_frames(biases, FrameType::Bias, StackConfig::bias())?;
-        let flat_dark = stack_cfa_frames(flat_darks, FrameType::Dark, StackConfig::dark())?;
+        let dark = stack_cfa_frames(darks, StackConfig::dark())?;
+        let flat = stack_cfa_frames(flats, StackConfig::flat())?;
+        let bias = stack_cfa_frames(biases, StackConfig::bias())?;
+        let flat_dark = stack_cfa_frames(flat_darks, StackConfig::dark())?;
         Ok(Self::from_images(
             dark,
             flat,

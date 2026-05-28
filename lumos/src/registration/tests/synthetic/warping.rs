@@ -358,13 +358,7 @@ fn test_warp_with_detected_transform() {
         interpolation: InterpolationMethod::Lanczos3 { deringing: 0.3 },
         ..Default::default()
     };
-    let mut warped_astro = target_astro.clone();
-    warp(
-        &target_astro,
-        &mut warped_astro,
-        &result.warp_transform(),
-        &warp_config,
-    );
+    let warped_astro = warp(&target_astro, &result.warp_transform(), &warp_config);
 
     // Compare aligned image to reference
     let margin = 40;
@@ -475,13 +469,7 @@ fn test_warp_grayscale_translation() {
         interpolation: InterpolationMethod::Lanczos3 { deringing: 0.3 },
         ..Default::default()
     };
-    let mut warped = ref_image.clone();
-    warp(
-        &ref_image,
-        &mut warped,
-        &WarpTransform::new(transform),
-        &warp_config,
-    );
+    let warped = warp(&ref_image, &WarpTransform::new(transform), &warp_config);
 
     // Verify dimensions preserved
     assert_eq!(warped.width(), width);
@@ -543,13 +531,7 @@ fn test_warp_rgb() {
         interpolation: InterpolationMethod::Lanczos3 { deringing: 0.3 },
         ..Default::default()
     };
-    let mut warped = rgb_image.clone();
-    warp(
-        &rgb_image,
-        &mut warped,
-        &WarpTransform::new(transform),
-        &warp_config,
-    );
+    let warped = warp(&rgb_image, &WarpTransform::new(transform), &warp_config);
 
     // Verify dimensions preserved
     assert_eq!(warped.width(), width);
@@ -589,11 +571,9 @@ fn test_warp_preserves_output_metadata() {
     let (pixels, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 11111);
     let width = pixels.width();
     let height = pixels.height();
-    let image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels.into_vec());
-
-    // Create output with metadata
-    let mut warped = image.clone();
-    warped.metadata = AstroImageMetadata {
+    let mut image =
+        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels.into_vec());
+    image.metadata = AstroImageMetadata {
         object: Some("M42".to_string()),
         exposure_time: Some(120.0),
         ..Default::default()
@@ -604,14 +584,10 @@ fn test_warp_preserves_output_metadata() {
         interpolation: InterpolationMethod::Bilinear,
         ..Default::default()
     };
-    warp(
-        &image,
-        &mut warped,
-        &WarpTransform::new(transform),
-        &warp_config,
-    );
+    let warped = warp(&image, &WarpTransform::new(transform), &warp_config);
 
-    // Verify output metadata is preserved (warp only modifies pixel data)
+    // Verify the input's metadata is carried into the warped output (warp only
+    // produces new pixel data).
     assert_eq!(warped.metadata.object, Some("M42".to_string()));
     assert_eq!(warped.metadata.exposure_time, Some(120.0));
 }
@@ -809,19 +785,11 @@ fn test_warp_api_with_sip() {
     };
 
     // Warp without SIP
-    let mut warped_no_sip = image.clone();
-    warp(
-        &image,
-        &mut warped_no_sip,
-        &WarpTransform::new(transform),
-        &warp_config,
-    );
+    let warped_no_sip = warp(&image, &WarpTransform::new(transform), &warp_config);
 
     // Warp with SIP
-    let mut warped_with_sip = image.clone();
-    warp(
+    let warped_with_sip = warp(
         &image,
-        &mut warped_with_sip,
         &WarpTransform::with_sip(transform, sip),
         &warp_config,
     );

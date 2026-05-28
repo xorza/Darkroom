@@ -166,7 +166,63 @@ fn test_drizzle_stack_empty_paths() {
         &config,
         ProgressCallback::default(),
     );
-    assert!(matches!(result.unwrap_err(), Error::NoPaths));
+    assert!(matches!(result.unwrap_err(), DrizzleError::NoFrames));
+}
+
+#[test]
+fn test_drizzle_images_empty() {
+    let result = drizzle_images(
+        Vec::new(),
+        &[],
+        None,
+        None,
+        &DrizzleConfig::default(),
+        ProgressCallback::default(),
+    );
+    assert!(matches!(result.unwrap_err(), DrizzleError::NoFrames));
+}
+
+#[test]
+fn test_drizzle_images_matches_accumulator() {
+    // drizzle_images with one identity-transformed frame must reproduce the
+    // single-image accumulator path: 200x200 output, interior pixels = 0.5.
+    let image = AstroImage::from_pixels(ImageDimensions::new(100, 100, 1), vec![0.5; 100 * 100]);
+    let result = drizzle_images(
+        vec![image],
+        &[Transform::identity()],
+        None,
+        None,
+        &DrizzleConfig::x2(),
+        ProgressCallback::default(),
+    )
+    .unwrap();
+
+    assert_eq!(result.image.width(), 200);
+    assert_eq!(result.image.height(), 200);
+    let pixels = result.image.channel(0);
+    assert!(
+        (pixels[0] - 0.5).abs() < 1e-5,
+        "Pixel (0,0) should be 0.5, got {}",
+        pixels[0]
+    );
+}
+
+#[test]
+fn test_drizzle_images_dimension_mismatch() {
+    let a = AstroImage::from_pixels(ImageDimensions::new(20, 20, 1), vec![0.5; 400]);
+    let b = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), vec![0.5; 100]);
+    let result = drizzle_images(
+        vec![a, b],
+        &[Transform::identity(), Transform::identity()],
+        None,
+        None,
+        &DrizzleConfig::default(),
+        ProgressCallback::default(),
+    );
+    assert!(matches!(
+        result.unwrap_err(),
+        DrizzleError::DimensionMismatch { index: 1, .. }
+    ));
 }
 
 #[test]

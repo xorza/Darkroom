@@ -8,9 +8,9 @@ use crate::stacking::cache::ImageCache;
 use crate::stacking::stack::run_stacking;
 use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
 use crate::{
-    AstroImage, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, FrameType, Normalization,
-    ProgressCallback, RegistrationConfig, StackConfig, Star, StarDetectionConfig, StarDetector,
-    register, stack_with_progress, warp,
+    AstroImage, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, Normalization, ProgressCallback,
+    RegistrationConfig, StackConfig, Star, StarDetectionConfig, StarDetector, register,
+    stack_with_progress, warp,
 };
 
 #[test]
@@ -161,7 +161,6 @@ fn bench_full_pipeline() {
     // Time each master separately to find the bottleneck
     let stack_cfa = |name: &str,
                      paths: &[std::path::PathBuf],
-                     frame_type: FrameType,
                      config: StackConfig|
      -> Option<CfaImage> {
         if paths.is_empty() {
@@ -178,13 +177,9 @@ fn bench_full_pipeline() {
         };
 
         let t0 = Instant::now();
-        let cache = ImageCache::<CfaImage>::from_paths(
-            paths,
-            &config.cache,
-            frame_type,
-            ProgressCallback::default(),
-        )
-        .unwrap();
+        let cache =
+            ImageCache::<CfaImage>::from_paths(paths, &config.cache, ProgressCallback::default())
+                .unwrap();
         let load_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
         let t1 = Instant::now();
@@ -199,9 +194,9 @@ fn bench_full_pipeline() {
         Some(result)
     };
 
-    let dark = stack_cfa("Dark", &dark_paths, FrameType::Dark, StackConfig::dark());
-    let flat = stack_cfa("Flat", &flat_paths, FrameType::Flat, StackConfig::flat());
-    let bias = stack_cfa("Bias", &bias_paths, FrameType::Bias, StackConfig::bias());
+    let dark = stack_cfa("Dark", &dark_paths, StackConfig::dark());
+    let flat = stack_cfa("Flat", &flat_paths, StackConfig::flat());
+    let bias = stack_cfa("Bias", &bias_paths, StackConfig::bias());
 
     let t_defect = Instant::now();
     let masters = CalibrationMasters::from_images(dark, flat, bias, None, DEFAULT_SIGMA_THRESHOLD);
@@ -294,8 +289,7 @@ fn bench_full_pipeline() {
             let result = register(ref_stars, stars, &reg_config)
                 .unwrap_or_else(|e| panic!("Registration failed: {e}"));
             let warp_start = Instant::now();
-            let mut warped = (*img).clone();
-            warp(img, &mut warped, &result.warp_transform(), &reg_config);
+            let warped = warp(img, &result.warp_transform(), &reg_config);
             let warp_ms = warp_start.elapsed().as_secs_f64() * 1000.0;
             println!(
                 "  {} inliers, RMS={:.3}px, reg={:.1}ms, warp={:.1}ms",
@@ -342,13 +336,8 @@ fn bench_full_pipeline() {
         ..StackConfig::sigma_clipped(2.5)
     };
 
-    let stacked = stack_with_progress(
-        &registered_paths,
-        FrameType::Light,
-        stack_config,
-        ProgressCallback::default(),
-    )
-    .unwrap();
+    let stacked =
+        stack_with_progress(&registered_paths, stack_config, ProgressCallback::default()).unwrap();
 
     println!(
         "  Stacked result: {}x{}x{}",

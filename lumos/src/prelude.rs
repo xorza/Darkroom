@@ -30,6 +30,6 @@ pub use crate::{register, warp};
 
 // Stacking - main API
 pub use crate::{
-    CacheConfig, CombineMethod, FrameType, Normalization, ProgressCallback, Rejection, StackConfig,
-    StackingProgress, StackingStage, stack, stack_with_progress,
+    CacheConfig, CombineMethod, Normalization, ProgressCallback, Rejection, StackConfig,
+    StackError, StackingProgress, StackingStage, stack, stack_images, stack_with_progress,
 };

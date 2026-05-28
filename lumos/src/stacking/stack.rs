@@ -9,13 +9,12 @@ use arrayvec::ArrayVec;
 
 use crate::AstroImage;
 
-use super::FrameType;
 use super::cache::{FrameStats, ImageCache, StackableImage};
 use super::config::{CombineMethod, Normalization, StackConfig, Weighting};
 use super::error::Error;
 use super::progress::ProgressCallback;
 use crate::math;
-use crate::star_detection::detector::ChannelStats;
+use crate::math::statistics::ChannelStats;
 
 /// Per-frame, per-channel affine normalization parameters.
 ///
@@ -39,15 +38,14 @@ pub(crate) struct FrameNorm {
     pub channels: ArrayVec<ChannelNorm, 3>,
 }
 
-/// Stack multiple images into a single result.
+/// Stack multiple images from disk into a single result.
 ///
-/// This is the main entry point for image stacking. It combines multiple frames
-/// using the specified configuration.
+/// This is the main entry point for stacking frames stored as files. To stack
+/// frames already held in memory, use [`stack_images`].
 ///
 /// # Arguments
 ///
 /// * `paths` - Paths to input images
-/// * `frame_type` - Type of frame being stacked (Light, Dark, Flat, Bias)
 /// * `config` - Stacking configuration
 ///
 /// # Returns
@@ -70,99 +68,92 @@ pub(crate) struct FrameNorm {
 /// # Examples
 ///
 /// ```ignore
-/// use lumos::stacking::{stack, StackConfig, FrameType};
+/// use lumos::stacking::{stack, StackConfig};
 ///
 /// // Default sigma-clipped mean
-/// let result = stack(&paths, FrameType::Light, StackConfig::default())?;
+/// let result = stack(&paths, StackConfig::default())?;
 ///
 /// // Median stacking
-/// let result = stack(&paths, FrameType::Light, StackConfig::median())?;
-///
-/// // Custom configuration
-/// let config = StackConfig {
-///     method: CombineMethod::Mean(Rejection::sigma_clip_asymmetric(2.0, 3.0)),
-///     ..Default::default()
-/// };
-/// let result = stack(&paths, FrameType::Light, config)?;
+/// let result = stack(&paths, StackConfig::median())?;
 /// ```
-pub fn stack<P: AsRef<Path> + Sync>(
-    paths: &[P],
-    frame_type: FrameType,
-    config: StackConfig,
-) -> Result<AstroImage, Error> {
-    stack_with_progress(paths, frame_type, config, ProgressCallback::default())
+pub fn stack<P: AsRef<Path> + Sync>(paths: &[P], config: StackConfig) -> Result<AstroImage, Error> {
+    stack_with_progress(paths, config, ProgressCallback::default())
 }
 
-/// Stack multiple images with progress reporting.
+/// Stack multiple images from disk with progress reporting.
 ///
 /// Same as `stack()` but accepts a progress callback for monitoring.
-///
-/// # Arguments
-///
-/// * `paths` - Paths to input images
-/// * `frame_type` - Type of frame being stacked
-/// * `config` - Stacking configuration
-/// * `progress` - Progress callback
 ///
 /// # Panics
 ///
 /// - If `config` fails validation (see [`StackConfig::validate`]).
 /// - If `config.weighting` is `Manual` and the weight count doesn't match `paths.len()`.
-///
-/// # Examples
-///
-/// ```ignore
-/// use lumos::stacking::{stack_with_progress, StackConfig, FrameType, ProgressCallback};
-///
-/// let progress = ProgressCallback::from(|p: StackingProgress| {
-///     println!("{:?}: {}/{}", p.stage, p.current, p.total);
-/// });
-///
-/// let result = stack_with_progress(&paths, FrameType::Light, StackConfig::default(), progress)?;
-/// ```
 pub fn stack_with_progress<P: AsRef<Path> + Sync>(
     paths: &[P],
-    frame_type: FrameType,
     config: StackConfig,
     progress: ProgressCallback,
 ) -> Result<AstroImage, Error> {
     if paths.is_empty() {
-        return Err(Error::NoPaths);
+        return Err(Error::NoFrames);
     }
 
-    // Validate configuration
     config.validate();
+    validate_manual_weights(&config, paths.len());
 
-    // Validate manual weights count
-    if let Weighting::Manual(ref w) = config.weighting {
-        assert_eq!(
-            w.len(),
-            paths.len(),
-            "Weight count ({}) must match frame count ({})",
-            w.len(),
-            paths.len()
-        );
-    }
-
-    // Log stacking parameters
     tracing::info!(
-        frame_type = %frame_type,
         method = ?config.method,
         weighting = ?config.weighting,
         normalization = ?config.normalization,
         frame_count = paths.len(),
-        "Starting unified stack"
+        "Starting unified stack (from paths)"
     );
 
-    // Create image cache
-    let cache = ImageCache::<AstroImage>::from_paths(paths, &config.cache, frame_type, progress)?;
-
-    // Run stacking pipeline (normalization + combining + construction)
+    let cache = ImageCache::<AstroImage>::from_paths(paths, &config.cache, progress)?;
     let result = run_stacking(&cache, &config);
-
-    // Cleanup cache
     cache.cleanup();
+    Ok(result)
+}
 
+/// Stack frames already held in memory into a single result.
+///
+/// The in-memory counterpart to [`stack`]: skips the disk round-trip when the
+/// caller already owns the decoded frames (e.g. straight off calibration or
+/// warping). The frames are consumed.
+///
+/// # Panics
+///
+/// - If `config` fails validation (see [`StackConfig::validate`]).
+/// - If `config.weighting` is `Manual` and the weight count doesn't match `images.len()`.
+pub fn stack_images(images: Vec<AstroImage>, config: StackConfig) -> Result<AstroImage, Error> {
+    stack_images_with_progress(images, config, ProgressCallback::default())
+}
+
+/// Stack in-memory frames with progress reporting.
+///
+/// Same as [`stack_images`] but accepts a progress callback for the combine stage.
+pub fn stack_images_with_progress(
+    images: Vec<AstroImage>,
+    config: StackConfig,
+    progress: ProgressCallback,
+) -> Result<AstroImage, Error> {
+    if images.is_empty() {
+        return Err(Error::NoFrames);
+    }
+
+    config.validate();
+    validate_manual_weights(&config, images.len());
+
+    tracing::info!(
+        method = ?config.method,
+        weighting = ?config.weighting,
+        normalization = ?config.normalization,
+        frame_count = images.len(),
+        "Starting unified stack (in memory)"
+    );
+
+    let cache = ImageCache::<AstroImage>::from_images(images, &config.cache, progress)?;
+    let result = run_stacking(&cache, &config);
+    cache.cleanup();
     Ok(result)
 }
 
@@ -305,6 +296,19 @@ fn resolve_weights(weighting: &Weighting, stats: &[FrameStats]) -> Option<Vec<f3
     }
 }
 
+/// Panic if `Manual` weighting is configured with a count that doesn't match the frames.
+fn validate_manual_weights(config: &StackConfig, frame_count: usize) {
+    if let Weighting::Manual(ref w) = config.weighting {
+        assert_eq!(
+            w.len(),
+            frame_count,
+            "Weight count ({}) must match frame count ({})",
+            w.len(),
+            frame_count
+        );
+    }
+}
+
 /// Normalize weights to sum to 1.0. Returns `None` if total weight is zero.
 fn normalize_weights(weights: &[f32]) -> Option<Vec<f32>> {
     let sum: f32 = weights.iter().sum();
@@ -431,14 +435,20 @@ mod tests {
     #[test]
     fn test_stack_empty_paths() {
         let paths: Vec<PathBuf> = vec![];
-        let result = stack(&paths, FrameType::Light, StackConfig::default());
-        assert!(matches!(result.unwrap_err(), Error::NoPaths));
+        let result = stack(&paths, StackConfig::default());
+        assert!(matches!(result.unwrap_err(), Error::NoFrames));
+    }
+
+    #[test]
+    fn test_stack_images_empty() {
+        let result = stack_images(Vec::new(), StackConfig::default());
+        assert!(matches!(result.unwrap_err(), Error::NoFrames));
     }
 
     #[test]
     fn test_stack_nonexistent_file() {
         let paths = vec![PathBuf::from("/nonexistent/image.fits")];
-        let result = stack(&paths, FrameType::Light, StackConfig::default());
+        let result = stack(&paths, StackConfig::default());
         assert!(matches!(result.unwrap_err(), Error::ImageLoad { .. }));
     }
 
@@ -452,7 +462,38 @@ mod tests {
         ];
         let mut config = StackConfig::weighted(vec![1.0, 2.0]); // Wrong count
         config.normalization = Normalization::None; // avoid loading files for stats
-        let _ = stack(&paths, FrameType::Light, config);
+        let _ = stack(&paths, config);
+    }
+
+    #[test]
+    fn test_stack_images_in_memory_mean() {
+        // In-memory stacking must match the documented mean: (10 + 20 + 30)/3 = 20.
+        let dims = ImageDimensions::new(4, 4, 1);
+        let images = vec![
+            AstroImage::from_pixels(dims, vec![10.0; 16]),
+            AstroImage::from_pixels(dims, vec![20.0; 16]),
+            AstroImage::from_pixels(dims, vec![30.0; 16]),
+        ];
+        let config = StackConfig {
+            method: CombineMethod::Mean(Rejection::None),
+            ..Default::default()
+        };
+        let result = stack_images(images, config).unwrap();
+        assert_eq!(result.channels(), 1);
+        for &p in result.channel(0).pixels() {
+            assert!((p - 20.0).abs() < 1e-4, "expected 20.0, got {p}");
+        }
+    }
+
+    #[test]
+    fn test_stack_images_dimension_mismatch() {
+        let a = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), vec![1.0; 16]);
+        let b = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![1.0; 4]);
+        let result = stack_images(vec![a, b], StackConfig::default());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::DimensionMismatch { index: 1, .. }
+        ));
     }
 
     // ========== Normalization: Identity ==========

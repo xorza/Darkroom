@@ -59,6 +59,7 @@ use std::time::Instant;
 use glam::DVec2;
 
 use crate::AstroImage;
+use crate::astro_image::PixelData;
 use crate::star_detection::star::Star;
 use distortion::sip::SipConfig;
 use interpolation::warp_image;
@@ -217,20 +218,19 @@ fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
     fwhms[fwhms.len() / 2] as f64
 }
 
-/// Warp an image to align with the reference frame, writing the result into an output image.
+/// Warp an image to align with the reference frame, returning the aligned image.
 ///
 /// The `WarpTransform` bundles the linear transform with optional SIP distortion
 /// correction. Use `result.warp_transform()` to obtain one from a `RegistrationResult`,
 /// or `WarpTransform::new(transform)` for a plain transform.
 ///
+/// The output has the same dimensions and metadata as `image`; every output pixel
+/// is produced by inverse-mapping, so no input pixels are carried over.
+///
 /// # Arguments
 /// * `image` - The source (target) image to warp
-/// * `output` - The destination image where the warped result is written
 /// * `warp_transform` - Combined transform + optional SIP correction
 /// * `config` - Configuration for interpolation method
-///
-/// # Panics
-/// Panics if the output image dimensions or channel count don't match the input.
 ///
 /// # Example
 ///
@@ -238,31 +238,30 @@ fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
 /// use lumos::registration::{register, warp, Config};
 ///
 /// let result = register(&ref_stars, &target_stars, &Config::default())?;
-/// let mut aligned = target_image.clone();
-/// warp(&target_image, &mut aligned, &result.warp_transform(), &Config::default());
+/// let aligned = warp(&target_image, &result.warp_transform(), &Config::default());
 /// ```
-pub fn warp(
-    image: &AstroImage,
-    output: &mut AstroImage,
-    warp_transform: &WarpTransform,
-    config: &Config,
-) {
-    assert_eq!(
-        image.dimensions(),
-        output.dimensions(),
-        "Output dimensions must match input"
-    );
-
+pub fn warp(image: &AstroImage, warp_transform: &WarpTransform, config: &Config) -> AstroImage {
     let params = interpolation::WarpParams {
         method: config.interpolation,
         border_value: config.border_value,
     };
 
+    let mut output = AstroImage {
+        metadata: image.metadata.clone(),
+        dimensions: image.dimensions,
+        pixels: PixelData::new_default(image.width(), image.height(), image.channels()),
+    };
+
     for c in 0..image.channels() {
-        let input = image.channel(c);
-        let output_buf = output.channel_mut(c);
-        warp_image(input, output_buf, warp_transform, &params);
+        warp_image(
+            image.channel(c),
+            output.channel_mut(c),
+            warp_transform,
+            &params,
+        );
     }
+
+    output
 }
 
 // === Internal Functions ===

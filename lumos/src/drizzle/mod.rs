@@ -21,6 +21,8 @@
 //!   of Undersampled Images"
 //! - HST DrizzlePac Handbook (2025)
 
+pub mod error;
+
 use std::path::Path;
 
 use arrayvec::ArrayVec;
@@ -30,11 +32,10 @@ use rayon::prelude::*;
 use crate::ImageDimensions;
 use crate::astro_image::AstroImage;
 use crate::registration::transform::Transform;
-use crate::stacking::FrameType;
-use crate::stacking::error::Error;
 use crate::stacking::progress::report_progress;
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 use common::buffer2::Buffer2;
+use error::DrizzleError;
 
 /// Maximum number of channels (RGB = 3).
 const MAX_CHANNELS: usize = 3;
@@ -858,7 +859,67 @@ fn boxer(ox: f64, oy: f64, x: &[f64; 4], y: &[f64; 4]) -> f64 {
     sum.abs()
 }
 
-/// Drizzle stack images from paths with transforms.
+/// Validate that every per-frame input slice matches the frame count.
+fn validate_drizzle_inputs(
+    frame_count: usize,
+    transforms: &[Transform],
+    weights: Option<&[f32]>,
+    pixel_weight_maps: Option<&[Buffer2<f32>]>,
+) {
+    assert_eq!(
+        frame_count,
+        transforms.len(),
+        "Number of frames ({}) must match number of transforms ({})",
+        frame_count,
+        transforms.len()
+    );
+    if let Some(w) = weights {
+        assert_eq!(
+            frame_count,
+            w.len(),
+            "Number of frames ({}) must match number of weights ({})",
+            frame_count,
+            w.len()
+        );
+    }
+    if let Some(pw) = pixel_weight_maps {
+        assert_eq!(
+            frame_count,
+            pw.len(),
+            "Number of frames ({}) must match number of pixel weight maps ({})",
+            frame_count,
+            pw.len()
+        );
+    }
+}
+
+/// Add one frame to the accumulator, validating its dimensions against the first.
+fn accumulate_frame(
+    accumulator: &mut DrizzleAccumulator,
+    image: AstroImage,
+    index: usize,
+    transforms: &[Transform],
+    weights: Option<&[f32]>,
+    pixel_weight_maps: Option<&[Buffer2<f32>]>,
+    input_dims: ImageDimensions,
+) -> Result<(), DrizzleError> {
+    if image.dimensions != input_dims {
+        return Err(DrizzleError::DimensionMismatch {
+            index,
+            expected: input_dims,
+            actual: image.dimensions,
+        });
+    }
+    let weight = weights.map_or(1.0, |w| w[index]);
+    let pixel_weights = pixel_weight_maps.map(|maps| &maps[index]);
+    accumulator.add_image(image, &transforms[index], weight, pixel_weights);
+    Ok(())
+}
+
+/// Drizzle stack images from disk with per-frame transforms.
+///
+/// Streams frames one at a time (only one input image is resident at a time).
+/// To drizzle frames already held in memory, use [`drizzle_images`].
 ///
 /// # Arguments
 ///
@@ -880,45 +941,20 @@ pub fn drizzle_stack<P: AsRef<Path> + Sync>(
     pixel_weight_maps: Option<&[Buffer2<f32>]>,
     config: &DrizzleConfig,
     progress: ProgressCallback,
-) -> Result<DrizzleResult, Error> {
+) -> Result<DrizzleResult, DrizzleError> {
     if paths.is_empty() {
-        return Err(Error::NoPaths);
+        return Err(DrizzleError::NoFrames);
     }
+    validate_drizzle_inputs(paths.len(), transforms, weights, pixel_weight_maps);
 
-    assert_eq!(
-        paths.len(),
-        transforms.len(),
-        "Number of paths ({}) must match number of transforms ({})",
-        paths.len(),
-        transforms.len()
-    );
+    let load = |path: &Path| -> Result<AstroImage, DrizzleError> {
+        AstroImage::from_file(path).map_err(|e| DrizzleError::ImageLoad {
+            path: path.to_path_buf(),
+            source: std::io::Error::other(e),
+        })
+    };
 
-    if let Some(w) = weights {
-        assert_eq!(
-            paths.len(),
-            w.len(),
-            "Number of paths ({}) must match number of weights ({})",
-            paths.len(),
-            w.len()
-        );
-    }
-
-    if let Some(pw) = pixel_weight_maps {
-        assert_eq!(
-            paths.len(),
-            pw.len(),
-            "Number of paths ({}) must match number of pixel weight maps ({})",
-            paths.len(),
-            pw.len()
-        );
-    }
-
-    // Load first image to get dimensions
-    let first_image = AstroImage::from_file(paths[0].as_ref()).map_err(|e| Error::ImageLoad {
-        path: paths[0].as_ref().to_path_buf(),
-        source: std::io::Error::other(e),
-    })?;
-
+    let first_image = load(paths[0].as_ref())?;
     let input_dims = first_image.dimensions;
 
     tracing::info!(
@@ -929,49 +965,84 @@ pub fn drizzle_stack<P: AsRef<Path> + Sync>(
         pixfrac = config.pixfrac,
         kernel = ?config.kernel,
         frame_count = paths.len(),
-        "Starting drizzle stacking"
+        "Starting drizzle stacking (from paths)"
     );
 
     let mut accumulator = DrizzleAccumulator::new(input_dims, config.clone());
-    let out_dims = accumulator.dimensions();
-    tracing::info!(
-        output_width = out_dims.width,
-        output_height = out_dims.height,
-        "Output dimensions"
-    );
-
-    // Add first image
-    let first_weight = weights.map_or(1.0, |w| w[0]);
-    let first_pw = pixel_weight_maps.map(|maps| &maps[0]);
-    accumulator.add_image(first_image, &transforms[0], first_weight, first_pw);
+    accumulate_frame(
+        &mut accumulator,
+        first_image,
+        0,
+        transforms,
+        weights,
+        pixel_weight_maps,
+        input_dims,
+    )?;
     report_progress(&progress, 1, paths.len(), StackingStage::Processing);
 
-    // Process remaining images
     for (i, path) in paths.iter().enumerate().skip(1) {
-        let image = AstroImage::from_file(path.as_ref()).map_err(|e| Error::ImageLoad {
-            path: path.as_ref().to_path_buf(),
-            source: std::io::Error::other(e),
-        })?;
-
-        // Validate dimensions match
-        if image.dimensions != input_dims {
-            return Err(Error::DimensionMismatch {
-                frame_type: FrameType::Light,
-                index: i,
-                expected: input_dims,
-                actual: image.dimensions,
-            });
-        }
-
-        let weight = weights.map_or(1.0, |w| w[i]);
-        let pw = pixel_weight_maps.map(|maps| &maps[i]);
-        accumulator.add_image(image, &transforms[i], weight, pw);
+        let image = load(path.as_ref())?;
+        accumulate_frame(
+            &mut accumulator,
+            image,
+            i,
+            transforms,
+            weights,
+            pixel_weight_maps,
+            input_dims,
+        )?;
         report_progress(&progress, i + 1, paths.len(), StackingStage::Processing);
     }
 
-    let result = accumulator.finalize();
+    Ok(accumulator.finalize())
+}
 
-    Ok(result)
+/// Drizzle stack frames already held in memory.
+///
+/// In-memory counterpart to [`drizzle_stack`]: skips the per-frame disk load when
+/// the caller already owns the decoded frames. The frames are consumed.
+pub fn drizzle_images(
+    images: Vec<AstroImage>,
+    transforms: &[Transform],
+    weights: Option<&[f32]>,
+    pixel_weight_maps: Option<&[Buffer2<f32>]>,
+    config: &DrizzleConfig,
+    progress: ProgressCallback,
+) -> Result<DrizzleResult, DrizzleError> {
+    if images.is_empty() {
+        return Err(DrizzleError::NoFrames);
+    }
+    validate_drizzle_inputs(images.len(), transforms, weights, pixel_weight_maps);
+
+    let frame_count = images.len();
+    let input_dims = images[0].dimensions;
+
+    tracing::info!(
+        input_width = input_dims.width,
+        input_height = input_dims.height,
+        channels = input_dims.channels,
+        output_scale = config.scale,
+        pixfrac = config.pixfrac,
+        kernel = ?config.kernel,
+        frame_count,
+        "Starting drizzle stacking (in memory)"
+    );
+
+    let mut accumulator = DrizzleAccumulator::new(input_dims, config.clone());
+    for (i, image) in images.into_iter().enumerate() {
+        accumulate_frame(
+            &mut accumulator,
+            image,
+            i,
+            transforms,
+            weights,
+            pixel_weight_maps,
+            input_dims,
+        )?;
+        report_progress(&progress, i + 1, frame_count, StackingStage::Processing);
+    }
+
+    Ok(accumulator.finalize())
 }
 
 #[cfg(test)]

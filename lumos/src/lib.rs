@@ -57,14 +57,14 @@ pub use calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
 // Star detection
 // ============================================================================
 
+pub use math::statistics::ChannelStats;
 pub use star_detection::background::estimate::BackgroundEstimate;
 pub use star_detection::config::{
     BackgroundRefinement, CentroidMethod, Config as StarDetectionConfig, Connectivity,
     LocalBackgroundMethod, NoiseModel,
 };
 pub use star_detection::detector::{
-    ChannelStats, DetectionResult as StarDetectionResult, Diagnostics as StarDetectionDiagnostics,
-    StarDetector,
+    DetectionResult as StarDetectionResult, Diagnostics as StarDetectionDiagnostics, StarDetector,
 };
 pub use star_detection::star::Star;
 
@@ -82,15 +82,18 @@ pub use registration::{register, warp};
 // Stacking
 // ============================================================================
 
-pub use stacking::FrameType;
 pub use stacking::cache_config::CacheConfig;
 pub use stacking::config::{CombineMethod, Normalization, StackConfig};
+pub use stacking::error::Error as StackError;
 pub use stacking::progress::{ProgressCallback, StackingProgress, StackingStage};
 pub use stacking::rejection::Rejection;
-pub use stacking::stack::{stack, stack_with_progress};
+pub use stacking::stack::{stack, stack_images, stack_images_with_progress, stack_with_progress};
 
 // ============================================================================
 // Drizzle
 // ============================================================================
 
-pub use drizzle::{DrizzleAccumulator, DrizzleConfig, DrizzleKernel, DrizzleResult, drizzle_stack};
+pub use drizzle::error::DrizzleError;
+pub use drizzle::{
+    DrizzleAccumulator, DrizzleConfig, DrizzleKernel, DrizzleResult, drizzle_images, drizzle_stack,
+};

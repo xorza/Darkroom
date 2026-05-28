@@ -50,14 +50,14 @@ pub enum Normalization {
 /// # Examples
 ///
 /// ```ignore
-/// use lumos::stacking::{stack, StackConfig, FrameType};
+/// use lumos::stacking::{stack, StackConfig};
 ///
 /// // Simple sigma-clipped stacking (default)
-/// let result = stack(&paths, FrameType::Light, StackConfig::default())?;
+/// let result = stack(&paths, StackConfig::default())?;
 ///
 /// // Using presets
-/// let result = stack(&paths, FrameType::Light, StackConfig::sigma_clipped(2.0))?;
-/// let result = stack(&paths, FrameType::Light, StackConfig::median())?;
+/// let result = stack(&paths, StackConfig::sigma_clipped(2.0))?;
+/// let result = stack(&paths, StackConfig::median())?;
 ///
 /// // Custom configuration
 /// let config = StackConfig {
@@ -65,7 +65,7 @@ pub enum Normalization {
 ///     normalization: Normalization::Global,
 ///     ..Default::default()
 /// };
-/// let result = stack(&paths, FrameType::Light, config)?;
+/// let result = stack(&paths, config)?;
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct StackConfig {

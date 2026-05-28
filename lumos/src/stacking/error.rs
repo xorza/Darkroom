@@ -6,13 +6,12 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use crate::astro_image::ImageDimensions;
-use crate::stacking::FrameType;
 
 /// Errors that can occur during stacking operations.
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("No paths provided for stacking")]
-    NoPaths,
+    #[error("No frames provided for stacking")]
+    NoFrames,
 
     #[error("Failed to load image '{path}': {source}")]
     ImageLoad {
@@ -21,11 +20,8 @@ pub enum Error {
         source: io::Error,
     },
 
-    #[error(
-        "Dimension mismatch for {frame_type} frame {index}: expected {expected:?}, got {actual:?}"
-    )]
+    #[error("Dimension mismatch for frame {index}: expected {expected:?}, got {actual:?}")]
     DimensionMismatch {
-        frame_type: FrameType,
         index: usize,
         expected: ImageDimensions,
         actual: ImageDimensions,
@@ -72,9 +68,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_no_paths_error_message() {
-        let err = Error::NoPaths;
-        assert_eq!(err.to_string(), "No paths provided for stacking");
+    fn test_no_frames_error_message() {
+        let err = Error::NoFrames;
+        assert_eq!(err.to_string(), "No frames provided for stacking");
     }
 
     #[test]
@@ -90,7 +86,6 @@ mod tests {
     #[test]
     fn test_dimension_mismatch_error_message() {
         let err = Error::DimensionMismatch {
-            frame_type: FrameType::Dark,
             index: 5,
             expected: ImageDimensions {
                 width: 100,
@@ -104,7 +99,6 @@ mod tests {
             },
         };
         let msg = err.to_string();
-        assert!(msg.contains("dark"));
         assert!(msg.contains("5"));
         assert!(msg.contains("100"));
         assert!(msg.contains("200"));
@@ -160,9 +154,9 @@ mod tests {
 
     #[test]
     fn test_error_is_debug() {
-        let err = Error::NoPaths;
+        let err = Error::NoFrames;
         let debug_str = format!("{:?}", err);
-        assert!(debug_str.contains("NoPaths"));
+        assert!(debug_str.contains("NoFrames"));
     }
 
     #[test]

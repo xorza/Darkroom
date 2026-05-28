@@ -24,14 +24,13 @@ use memmap2::Mmap;
 use rayon::prelude::*;
 
 use crate::astro_image::{AstroImageMetadata, ImageDimensions, PixelData};
-use crate::stacking::FrameType;
+use crate::math::statistics::ChannelStats;
 use crate::stacking::cache_config::{
     CacheConfig, MEMORY_PERCENT, compute_optimal_chunk_rows_with_memory,
 };
 use crate::stacking::error::Error;
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
 use crate::stacking::stack::FrameNorm;
-use crate::star_detection::detector::ChannelStats;
 
 /// Per-frame statistics: one `ChannelStats` per channel.
 #[derive(Debug, Clone)]
@@ -184,11 +183,10 @@ impl<I: StackableImage> ImageCache<I> {
     pub fn from_paths<P: AsRef<Path> + Sync>(
         paths: &[P],
         config: &CacheConfig,
-        frame_type: FrameType,
         progress: ProgressCallback,
     ) -> Result<Self, Error> {
         if paths.is_empty() {
-            return Err(Error::NoPaths);
+            return Err(Error::NoFrames);
         }
 
         // Report initial progress
@@ -214,16 +212,9 @@ impl<I: StackableImage> ImageCache<I> {
         );
 
         let (storage, channel_stats) = if use_in_memory {
-            Self::load_in_memory(paths, &progress, frame_type, dimensions, first_image)?
+            Self::load_in_memory(paths, &progress, dimensions, first_image)?
         } else {
-            Self::load_to_disk(
-                paths,
-                config,
-                &progress,
-                frame_type,
-                dimensions,
-                first_image,
-            )?
+            Self::load_to_disk(paths, config, &progress, dimensions, first_image)?
         };
 
         Ok(Self {
@@ -236,11 +227,49 @@ impl<I: StackableImage> ImageCache<I> {
         })
     }
 
+    /// Create an in-memory cache from already-loaded images.
+    ///
+    /// Validates that every frame matches the first frame's dimensions and
+    /// computes per-frame channel statistics. Unlike [`from_paths`], this never
+    /// spills to disk — the images are owned directly.
+    pub fn from_images(
+        images: Vec<I>,
+        config: &CacheConfig,
+        progress: ProgressCallback,
+    ) -> Result<Self, Error> {
+        if images.is_empty() {
+            return Err(Error::NoFrames);
+        }
+        let dimensions = images[0].dimensions();
+        let metadata = images[0].metadata().clone();
+
+        for (index, image) in images.iter().enumerate().skip(1) {
+            if image.dimensions() != dimensions {
+                return Err(Error::DimensionMismatch {
+                    index,
+                    expected: dimensions,
+                    actual: image.dimensions(),
+                });
+            }
+        }
+
+        // Parallelize across frames, matching the disk/in-memory loaders.
+        let channel_stats = images.par_iter().map(compute_frame_stats).collect();
+
+        Ok(Self {
+            storage: Storage::InMemory(images),
+            dimensions,
+            metadata,
+            channel_stats,
+            config: config.clone(),
+            progress,
+        })
+    }
+
     /// Load all images into memory and compute per-frame channel statistics.
     fn load_in_memory<P: AsRef<Path> + Sync>(
         paths: &[P],
         progress: &ProgressCallback,
-        frame_type: FrameType,
         dimensions: ImageDimensions,
         first_image: I,
     ) -> Result<(Storage<I>, Vec<FrameStats>), Error> {
@@ -258,7 +287,6 @@ impl<I: StackableImage> ImageCache<I> {
             let image = I::load(path_ref)?;
             if image.dimensions() != dimensions {
                 return Err(Error::DimensionMismatch {
-                    frame_type,
                     index: idx,
                     expected: dimensions,
                     actual: image.dimensions(),
@@ -291,7 +319,6 @@ impl<I: StackableImage> ImageCache<I> {
         paths: &[P],
         config: &CacheConfig,
         progress: &ProgressCallback,
-        frame_type: FrameType,
         dimensions: ImageDimensions,
         first_image: I,
     ) -> Result<(Storage<I>, Vec<FrameStats>), Error> {
@@ -320,14 +347,7 @@ impl<I: StackableImage> ImageCache<I> {
         let remaining = try_par_map_limited(&indexed_paths, 3, |&(idx, ref path)| {
             let path_ref = path.as_ref();
             let base_filename = cache_filename_for_path(path_ref);
-            load_and_cache_frame::<I>(
-                cache_dir,
-                &base_filename,
-                path_ref,
-                dimensions,
-                frame_type,
-                idx,
-            )
+            load_and_cache_frame::<I>(cache_dir, &base_filename, path_ref, dimensions, idx)
         })?;
 
         // Build final vectors
@@ -655,7 +675,6 @@ fn load_and_cache_frame<I: StackableImage>(
     base_filename: &str,
     source_path: &Path,
     dimensions: ImageDimensions,
-    frame_type: FrameType,
     frame_index: usize,
 ) -> Result<(CachedFrame, FrameStats), Error> {
     let channels = dimensions.channels;
@@ -693,7 +712,6 @@ fn load_and_cache_frame<I: StackableImage>(
 
         if image.dimensions() != dimensions {
             return Err(Error::DimensionMismatch {
-                frame_type,
                 index: frame_index,
                 expected: dimensions,
                 actual: image.dimensions(),
@@ -785,21 +803,11 @@ pub(crate) mod tests {
     use super::*;
     use crate::astro_image::AstroImage;
 
-    /// Create an in-memory ImageCache from loaded images (test/internal helper).
+    /// Create an in-memory ImageCache from loaded images (test helper).
     #[cfg(test)]
     pub(crate) fn make_test_cache<I: StackableImage>(images: Vec<I>) -> ImageCache<I> {
-        let dimensions = images[0].dimensions();
-        let metadata = images[0].metadata().clone();
-        let channel_stats: Vec<FrameStats> =
-            images.iter().map(|img| compute_frame_stats(img)).collect();
-        ImageCache {
-            storage: Storage::InMemory(images),
-            dimensions,
-            metadata,
-            channel_stats,
-            config: CacheConfig::default(),
-            progress: ProgressCallback::default(),
-        }
+        ImageCache::from_images(images, &CacheConfig::default(), ProgressCallback::default())
+            .expect("test images must be non-empty and dimension-consistent")
     }
 
     // ========== Storage Type Selection Tests ==========
@@ -934,16 +942,14 @@ pub(crate) mod tests {
         let result = ImageCache::<AstroImage>::from_paths(
             &Vec::<PathBuf>::new(),
             &config,
-            FrameType::Dark,
             ProgressCallback::default(),
         );
-        assert!(matches!(result.unwrap_err(), Error::NoPaths));
+        assert!(matches!(result.unwrap_err(), Error::NoFrames));
 
         // Nonexistent file
         let result = ImageCache::<AstroImage>::from_paths(
             &[PathBuf::from("/nonexistent/path/image.fits")],
             &config,
-            FrameType::Dark,
             ProgressCallback::default(),
         );
         assert!(matches!(result.unwrap_err(), Error::ImageLoad { .. }));
@@ -1204,15 +1210,9 @@ pub(crate) mod tests {
         let base_filename = "cached_frame.bin";
 
         // First call should load and cache
-        let cached_frame = load_and_cache_frame::<AstroImage>(
-            &temp_dir,
-            base_filename,
-            &source_path,
-            dims,
-            FrameType::Light,
-            0,
-        )
-        .unwrap();
+        let cached_frame =
+            load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &source_path, dims, 0)
+                .unwrap();
 
         let (cached_frame, _stats) = cached_frame;
         assert_eq!(cached_frame.channels.len(), 1);
@@ -1242,26 +1242,14 @@ pub(crate) mod tests {
         let base_filename = "cached_frame.bin";
 
         // First call - creates cache
-        let first_frame = load_and_cache_frame::<AstroImage>(
-            &temp_dir,
-            base_filename,
-            &source_path,
-            dims,
-            FrameType::Light,
-            0,
-        )
-        .unwrap();
+        let first_frame =
+            load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &source_path, dims, 0)
+                .unwrap();
 
         // Second call - should reuse cache
-        let second_frame = load_and_cache_frame::<AstroImage>(
-            &temp_dir,
-            base_filename,
-            &source_path,
-            dims,
-            FrameType::Light,
-            0,
-        )
-        .unwrap();
+        let second_frame =
+            load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &source_path, dims, 0)
+                .unwrap();
 
         // Both should have same data
         let first_data: &[f32] = bytemuck::cast_slice(&first_frame.0.channels[0][..]);
@@ -1294,7 +1282,6 @@ pub(crate) mod tests {
             "cached.bin",
             &source_path,
             expected_dims,
-            FrameType::Light,
             5,
         );
 
@@ -1598,30 +1585,18 @@ pub(crate) mod tests {
         let base_filename = "stats_test.bin";
 
         // First call — loads image, computes stats, writes sidecar
-        let (_, first_stats) = load_and_cache_frame::<AstroImage>(
-            &temp_dir,
-            base_filename,
-            &source_path,
-            dims,
-            FrameType::Light,
-            0,
-        )
-        .unwrap();
+        let (_, first_stats) =
+            load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &source_path, dims, 0)
+                .unwrap();
 
         assert_eq!(first_stats.channels.len(), 1);
         assert!((first_stats.channels[0].median - 5.5).abs() < f32::EPSILON);
         assert!((first_stats.channels[0].mad - 3.0).abs() < f32::EPSILON);
 
         // Second call — reuses cache, reads stats from sidecar
-        let (_, reused_stats) = load_and_cache_frame::<AstroImage>(
-            &temp_dir,
-            base_filename,
-            &source_path,
-            dims,
-            FrameType::Light,
-            0,
-        )
-        .unwrap();
+        let (_, reused_stats) =
+            load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &source_path, dims, 0)
+                .unwrap();
 
         // Stats must be identical (exact f32 roundtrip via le_bytes)
         assert_eq!(reused_stats.channels.len(), first_stats.channels.len());
@@ -1652,15 +1627,9 @@ pub(crate) mod tests {
         let base_filename = "missing_stats.bin";
 
         // First call — creates cache + sidecars
-        let (_, first_stats) = load_and_cache_frame::<AstroImage>(
-            &temp_dir,
-            base_filename,
-            &source_path,
-            dims,
-            FrameType::Light,
-            0,
-        )
-        .unwrap();
+        let (_, first_stats) =
+            load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &source_path, dims, 0)
+                .unwrap();
 
         // Delete only the .stats sidecar
         let sp = stats_path(&temp_dir, base_filename);
@@ -1668,15 +1637,9 @@ pub(crate) mod tests {
         std::fs::remove_file(&sp).unwrap();
 
         // Second call — should reload (not panic) and recompute stats
-        let (_, reloaded_stats) = load_and_cache_frame::<AstroImage>(
-            &temp_dir,
-            base_filename,
-            &source_path,
-            dims,
-            FrameType::Light,
-            0,
-        )
-        .unwrap();
+        let (_, reloaded_stats) =
+            load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &source_path, dims, 0)
+                .unwrap();
 
         // Stats should match (same source image)
         assert_eq!(

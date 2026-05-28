@@ -23,13 +23,6 @@ use super::buffer_pool::BufferPool;
 use super::config::Config;
 use super::star::Star;
 
-/// Per-channel robust statistics (median and MAD).
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct ChannelStats {
-    pub median: f32,
-    pub mad: f32,
-}
-
 /// Result of star detection with diagnostics.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectionResult {
