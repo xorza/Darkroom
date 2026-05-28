@@ -33,9 +33,9 @@ Astronomical image-processing library: RAW/FITS decoding, master-frame calibrati
 
 ## calibration_masters — master frames & defects
 
-- `CalibrationMasters` (`mod.rs:31`): optional master dark/flat/bias/flat-dark `CfaImage`s + `DefectMap`.
-- `from_files` (`mod.rs:118`) stacks raw CFA frames through the full stacking pipeline (sigma-clipped mean at ≥8 frames, else median); `from_images` (`mod.rs:87`) builds from pre-stacked frames and derives a `DefectMap` from the dark.
-- `calibrate(&mut CfaImage)` (`mod.rs:144`): **order = dark-subtract (or bias) → flat-divide (flat-dark priority over bias) → defect-correct**, in place.
+- `CalibrationMasters` (`mod.rs:66`): optional master dark/flat/bias/flat-dark `CfaImage`s + `DefectMap`.
+- `from_files` (`mod.rs:146`) stacks raw CFA frames through the full stacking pipeline (sigma-clipped mean at ≥8 frames, else median); `from_images` (`mod.rs:117`) builds from pre-stacked frames and derives a `DefectMap` from the dark.
+- `calibrate(&mut CfaImage)` (`mod.rs:171`): **order = dark-subtract (or bias) → flat-divide (flat-dark priority over bias) → defect-correct**, in place.
 - `DefectMap` (`defect_map.rs:40`): hot/cold flat-index lists from per-color MAD thresholds (`from_master_dark`, adaptive sampling above 200K px); `correct()` replaces defects with same-color CFA-neighbor medians. `DEFAULT_SIGMA_THRESHOLD = 5.0`.
 
 ## raw — RAW decode & demosaic
@@ -48,7 +48,7 @@ Astronomical image-processing library: RAW/FITS decoding, master-frame calibrati
 
 ## star_detection — detection pipeline
 
-`StarDetector` (`detector/mod.rs:89`) holds a reusable `BufferPool` (`buffer_pool.rs:14`); `detect(&AstroImage)` (`detector/mod.rs:129`) → `DetectionResult` (`stars: Vec<Star>` flux-sorted + `Diagnostics`). `detect_file` (`mod.rs:235`) loads then detects; `detection_file::save_detection_result` writes results.
+`StarDetector` (`detector/mod.rs:82`) holds a reusable `BufferPool` (`buffer_pool.rs:14`); `detect(&AstroImage)` (`detector/mod.rs:122`) → `DetectionResult` (`stars: Vec<Star>` flux-sorted + `Diagnostics`). `detect_file` (`mod.rs:228`) loads then detects; `detection_file::save_detection_result` writes results.
 
 `Star` (`star.rs:8`): `pos: DVec2`, `flux`, `fwhm`, `eccentricity`, `snr`, `peak`, `sharpness`, `roundness1`/`roundness2` (DAOFIND GROUND/SROUND), with `is_saturated`/`is_cosmic_ray`/`is_round`.
 
@@ -64,34 +64,34 @@ Astronomical image-processing library: RAW/FITS decoding, master-frame calibrati
 
 ## registration — alignment & warp
 
-`register(ref_stars, target_stars, config)` (`registration/mod.rs:104`) → `Result<RegistrationResult, RegistrationError>`:
+`register(ref_stars, target_stars, config)` (`registration/mod.rs:105`) → `Result<RegistrationResult, RegistrationError>`:
 1. derive `max_sigma = (median_fwhm·0.5).max(0.5)` from input FWHM,
 2. select brightest ≤`max_stars`,
 3. **triangle matching** (`triangle/`: k-NN invariant triangles via `spatial::KdTree`, ratio-space voting in `voting.rs`, greedy conflict resolution) → `Vec<PointMatch>`,
 4. **RANSAC/MAGSAC++** (`ransac/`) with `Auto` upgrading Similarity→Homography when RMS > 0.5 px,
-5. iterative **match recovery** (`mod.rs:377`, kd-tree NN within `~3.03·max_sigma`, ≤5 passes),
+5. iterative **match recovery** (`mod.rs:376`, kd-tree NN within `~3.03·max_sigma`, ≤5 passes),
 6. optional **SIP** polynomial fit, then `max_rms_error` gate.
 
-- `Transform` / `TransformType` (`transform.rs:14`/`:70`): `Translation | Euclidean | Similarity | Affine | Homography | Auto` over a row-major `DMat3`; `apply`/`apply_inverse`/`inverse`/`compose`. `WarpTransform` (`transform.rs:323`) bundles a `Transform` + optional `SipPolynomial` (applies SIP first).
+- `Transform` (`transform.rs:70`) / `TransformType` (`transform.rs:15`): `Translation | Euclidean | Similarity | Affine | Homography | Auto` over a row-major `DMat3`; `apply`/`apply_inverse`/`inverse`/`compose`. `WarpTransform` (`transform.rs:323`) bundles a `Transform` + optional `SipPolynomial` (applies SIP first).
 - `RegistrationConfig` (`config.rs:109`): star-matching, RANSAC (iterations/confidence/inlier-ratio/rotation+scale bounds/LO), SIP, and warp settings; presets `default`/`fast`/`precise`/`wide_field`/`precise_wide_field`/`mosaic`.
 - `RegistrationResult` (`result.rs:104`): transform, optional `SipFitResult`, matched pairs, residuals, RMS/max error, inlier count, `quality_score`, `elapsed_ms`; `warp_transform()` builds the `WarpTransform`. `RegistrationError` (`result.rs:39`) covers insufficient stars / no patterns / RANSAC failure / accuracy.
 - `ransac/`: `transforms.rs` (Procrustes for Euclidean/Similarity, Hartley-normalized least-squares for Affine, DLT-SVD for Homography), `magsac.rs` (continuous MAGSAC++ loss, no binary threshold), LO-RANSAC + adaptive iteration count.
 - `distortion/`: `sip` (FITS WCS SIP polynomial, order 2–5, MAD sigma-clipped fit) is live; `tps` (thin-plate spline, `DistortionMap`) is **fully implemented but `#![allow(dead_code)]` and not wired into `register()`**.
-- `warp(image, output, warp_transform, config)` (`mod.rs:244`): per-channel inverse-mapping. `InterpolationMethod` (`config.rs:24`) = `Nearest | Bilinear | Bicubic | Lanczos2/3/4{deringing}`. `interpolation/warp/` has AVX2/SSE4.1 bilinear (no-SIP, border 0) and a const-generic Lanczos path (4096-sample LUT, incremental f64 stepping, interior fast path, PixInsight-style soft-clamp deringing, Lanczos3/AVX2 FMA); other methods are scalar.
+- `warp(image, output, warp_transform, config)` (`mod.rs:243`): per-channel inverse-mapping. `InterpolationMethod` (`config.rs:24`) = `Nearest | Bilinear | Bicubic | Lanczos2/3/4{deringing}`. `interpolation/warp/` has AVX2/SSE4.1 bilinear (no-SIP, border 0) and a const-generic Lanczos path (4096-sample LUT, incremental f64 stepping, interior fast path, PixInsight-style soft-clamp deringing, Lanczos3/AVX2 FMA); other methods are scalar.
 - `spatial::KdTree` (`spatial/mod.rs`): flat implicit 2D k-d tree (`k_nearest`/`nearest_one`/`radius_indices_into`) with a stack-allocated bounded max-heap for k ≤ 32.
 
 ## stacking — frame combination
 
-`stack(paths, frame_type, config)` (`stack.rs:88`) and `stack_with_progress(...)` (`stack.rs:123`) → `AstroImage`. `FrameType` = `Dark | Flat | Bias | Light`.
+`stack(paths, frame_type, config)` (`stack.rs:79`) and `stack_with_progress(...)` (`stack.rs:91`) → `AstroImage`. `FrameType` = `Dark | Flat | Bias | Light`.
 
 - `StackConfig` (`config.rs:71`): `method: CombineMethod` (`Mean(Rejection) | Median`, `config.rs:13`), `weighting: Weighting` (`Equal | Noise | Manual(Vec<f32>)`, `config.rs:22`), `normalization: Normalization` (`None | Global | Multiplicative`, `config.rs:36`), `cache: CacheConfig`. Presets `sigma_clipped`/`winsorized`/`linear_fit`/`median`/`mean`/`gesd`/`percentile`/`weighted` + frame presets `light`/`flat`/`dark`/`bias`.
 - `Rejection` (`rejection.rs:831`): `None | SigmaClip | Winsorized | LinearFit | Percentile | Gesd` (each with its own config struct).
-- `ImageCache<I>` (`cache.rs:153`): selects **in-memory** (fits in ~75% RAM) vs **disk-backed mmap** tiers; computes per-frame `FrameStats` (`cache.rs:38`, per-channel median + MAD).
+- `ImageCache<I>` (`cache.rs:152`): selects **in-memory** (fits in ~75% RAM) vs **disk-backed mmap** tiers; computes per-frame `FrameStats` (`cache.rs:37`, per-channel median + MAD).
 - Pipeline (`stack.rs`): tier-select + load → pick lowest-MAD reference → compute Global/Multiplicative norms → resolve weights → chunked per-pixel combine (adaptive row chunks bounded by memory) applying normalize → reject → accumulate.
 
 ## drizzle — variable-pixel reconstruction
 
-`drizzle_stack(paths, transforms, weights?, pixel_weight_maps?, config, progress)` (`drizzle/mod.rs:876`) → `DrizzleResult` (output `AstroImage` + normalized coverage map).
+`drizzle_stack(paths, transforms, weights?, pixel_weight_maps?, config, progress)` (`drizzle/mod.rs:937`) → `DrizzleResult` (output `AstroImage` + normalized coverage map).
 
 - `DrizzleConfig` (`mod.rs:86`): `scale`, `pixfrac`, `kernel`, `fill_value`, `min_coverage`.
 - `DrizzleKernel` (`mod.rs:61`): `Square` (exact polygon clipping via Green's theorem `boxer`/`sgarea`), `Turbo` (axis-aligned, default), `Point`, `Gaussian`, `Lanczos` (valid only at pixfrac=scale=1).
