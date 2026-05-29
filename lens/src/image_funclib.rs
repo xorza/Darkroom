@@ -210,7 +210,7 @@ impl Default for ImageFuncLib {
                     name: "format".to_string(),
                     required: true,
                     data_type: CONVERSION_FORMAT_DATATYPE.clone(),
-                    default_value: Some(CONVERSION_FORMAT_DATATYPE.default_value()),
+                    default_value: CONVERSION_FORMAT_DATATYPE.default_value(),
                     value_options: vec![],
                 },
             ],
@@ -277,7 +277,7 @@ impl Default for ImageFuncLib {
                     name: "mode".to_string(),
                     required: true,
                     data_type: BLENDMODE_DATATYPE.clone(),
-                    default_value: Some(BLENDMODE_DATATYPE.default_value()),
+                    default_value: BLENDMODE_DATATYPE.default_value(),
                     value_options: vec![],
                 },
                 FuncInput {

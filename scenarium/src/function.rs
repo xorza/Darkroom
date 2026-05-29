@@ -166,7 +166,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::context::ContextManager;
-    use crate::data::DynamicValue;
+    use crate::data::{DynamicValue, StaticValue};
     use crate::execution::OutputUsage;
     use crate::func_lambda::InvokeInput;
     use crate::prelude::AnyState;
@@ -197,14 +197,14 @@ mod tests {
         let mut inputs = vec![
             InvokeInput {
                 changed: true,
-                value: DynamicValue::Int(2),
+                value: DynamicValue::Static(StaticValue::Int(2)),
             },
             InvokeInput {
                 changed: true,
-                value: DynamicValue::Int(4),
+                value: DynamicValue::Static(StaticValue::Int(4)),
             },
         ];
-        let mut outputs = vec![DynamicValue::None];
+        let mut outputs = vec![DynamicValue::Unbound];
         let outputs_meta = vec![OutputUsage::Needed(1); outputs.len()];
         let event_state = crate::common::shared_any_state::SharedAnyState::default();
         func_lib
@@ -226,9 +226,9 @@ mod tests {
             .expect("InvokeCache should contain the sum value");
         assert_eq!(cached, 6);
 
-        inputs[0].value = DynamicValue::Int(3);
-        inputs[1].value = DynamicValue::Int(5);
-        outputs[0] = DynamicValue::None;
+        inputs[0].value = DynamicValue::Static(StaticValue::Int(3));
+        inputs[1].value = DynamicValue::Static(StaticValue::Int(5));
+        outputs[0] = DynamicValue::Unbound;
         func_lib
             .by_id(&sum_id)
             .unwrap()

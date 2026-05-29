@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use crate::data::{DataType, DynamicValue};
+use crate::data::DataType;
 use crate::event_lambda::EventLambda;
 use crate::func_lambda::FuncLambda;
 use crate::function::{Func, FuncBehavior, FuncEvent, FuncInput, FuncLib, FuncOutput};
@@ -138,8 +138,8 @@ impl Default for WorkerEventsFuncLib {
                             frame_no: prev_state.frame_no + 1,
                         });
 
-                        outputs[0] = DynamicValue::Float(delta);
-                        outputs[1] = DynamicValue::Int(prev_state.frame_no);
+                        outputs[0] = delta.into();
+                        outputs[1] = prev_state.frame_no.into();
 
                         Ok(())
                     })

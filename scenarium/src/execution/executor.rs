@@ -138,7 +138,7 @@ impl Executor {
                 let slot = &mut self.slots[e_node_idx];
                 let outputs = slot
                     .output_values
-                    .get_or_insert_with(|| vec![DynamicValue::None; output_count]);
+                    .get_or_insert_with(|| vec![DynamicValue::Unbound; output_count]);
                 lambda
                     .invoke(
                         &mut self.ctx_manager,
@@ -194,7 +194,7 @@ impl Executor {
         let span = program.e_nodes[e_node_idx].inputs;
         for (i, input) in program.inputs[span.range()].iter().enumerate() {
             let value = match &input.binding {
-                ExecutionBinding::None => DynamicValue::None,
+                ExecutionBinding::None => DynamicValue::Unbound,
                 ExecutionBinding::Const(v) => v.into(),
                 ExecutionBinding::Bind(addr) => {
                     let outputs = self.slots[addr.target_idx]

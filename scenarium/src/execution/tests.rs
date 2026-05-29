@@ -553,7 +553,7 @@ mod behavior {
         assert!(execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
 
         // Simulate cached output — pure node should skip
-        execution_graph.set_output_values("get_b", vec![DynamicValue::Int(7)]);
+        execution_graph.set_output_values("get_b", vec![DynamicValue::Static(StaticValue::Int(7))]);
 
         execution_graph.update(&graph, &func_lib);
         execution_graph.prepare_execution(true, false, &[])?;
@@ -586,7 +586,10 @@ mod behavior {
         // sum = get_a(1) + get_b(11) = 12; mult = 12 * get_b(11) = 132
         let mult_id = graph.by_name("mult").unwrap().id;
         let vals = execution_graph.get_argument_values(&mult_id).unwrap();
-        assert!(matches!(vals.outputs[0], DynamicValue::Int(132)));
+        assert!(matches!(
+            vals.outputs[0],
+            DynamicValue::Static(StaticValue::Int(132))
+        ));
 
         Ok(())
     }
@@ -603,7 +606,7 @@ mod behavior {
         execution_graph.update(&graph, &func_lib);
 
         // Even with cached output, impure node still wants to execute
-        execution_graph.set_output_values("get_b", vec![DynamicValue::Int(7)]);
+        execution_graph.set_output_values("get_b", vec![DynamicValue::Static(StaticValue::Int(7))]);
         execution_graph.update(&graph, &func_lib);
         execution_graph.prepare_execution(true, false, &[])?;
 
@@ -633,7 +636,7 @@ mod behavior {
         );
 
         // With cached output, Once node is skipped even though func is Impure
-        execution_graph.set_output_values("get_b", vec![DynamicValue::Int(7)]);
+        execution_graph.set_output_values("get_b", vec![DynamicValue::Static(StaticValue::Int(7))]);
         execution_graph.update(&graph, &func_lib);
         execution_graph.prepare_execution(true, false, &[])?;
 
@@ -859,7 +862,7 @@ mod composite_behavior {
             execution_node_names_in_order(&eg).contains(&name.to_string()),
             "{name} should run on the first prepare"
         );
-        eg.set_output_values(name, vec![DynamicValue::Int(11)]);
+        eg.set_output_values(name, vec![DynamicValue::Static(StaticValue::Int(11))]);
         eg.update(graph, func_lib);
         eg.prepare_execution(true, false, &[]).unwrap();
         execution_node_names_in_order(&eg).contains(&name.to_string())
@@ -1188,7 +1191,10 @@ mod execution {
         // The cached product stays correct every run: sum(1+11=12) * get_b(11) = 132.
         let mult_id = graph.by_name("mult").unwrap().id;
         let vals = eg.get_argument_values(&mult_id).unwrap();
-        assert!(matches!(vals.outputs[0], DynamicValue::Int(132)));
+        assert!(matches!(
+            vals.outputs[0],
+            DynamicValue::Static(StaticValue::Int(132))
+        ));
 
         Ok(())
     }
@@ -1273,12 +1279,21 @@ mod argument_values {
         let values = execution_graph.get_argument_values(&mult_id).unwrap();
 
         assert_eq!(values.inputs.len(), 2);
-        assert!(matches!(values.inputs[0], Some(DynamicValue::Int(3))));
-        assert!(matches!(values.inputs[1], Some(DynamicValue::Int(5))));
+        assert!(matches!(
+            values.inputs[0],
+            Some(DynamicValue::Static(StaticValue::Int(3)))
+        ));
+        assert!(matches!(
+            values.inputs[1],
+            Some(DynamicValue::Static(StaticValue::Int(5)))
+        ));
 
         // 3 * 5 = 15
         assert_eq!(values.outputs.len(), 1);
-        assert!(matches!(values.outputs[0], DynamicValue::Int(15)));
+        assert!(matches!(
+            values.outputs[0],
+            DynamicValue::Static(StaticValue::Int(15))
+        ));
 
         Ok(())
     }
@@ -1303,32 +1318,44 @@ mod argument_values {
 
         assert_eq!(values.inputs.len(), 2);
         assert!(
-            matches!(values.inputs[0], Some(DynamicValue::Float(v)) if v.approximately_eq(2.0))
+            matches!(values.inputs[0], Some(DynamicValue::Static(StaticValue::Float(v))) if v.approximately_eq(2.0))
         );
         assert!(
-            matches!(values.inputs[1], Some(DynamicValue::Float(v)) if v.approximately_eq(5.0))
+            matches!(values.inputs[1], Some(DynamicValue::Static(StaticValue::Float(v))) if v.approximately_eq(5.0))
         );
         assert_eq!(values.outputs.len(), 1);
-        assert!(matches!(values.outputs[0], DynamicValue::Int(7)));
+        assert!(matches!(
+            values.outputs[0],
+            DynamicValue::Static(StaticValue::Int(7))
+        ));
 
         // mult: inputs are sum(7) and get_b(5.0), output is 7*5=35
         let mult_id = graph.by_name("mult").unwrap().id;
         let values = execution_graph.get_argument_values(&mult_id).unwrap();
 
         assert_eq!(values.inputs.len(), 2);
-        assert!(matches!(values.inputs[0], Some(DynamicValue::Int(7))));
+        assert!(matches!(
+            values.inputs[0],
+            Some(DynamicValue::Static(StaticValue::Int(7)))
+        ));
         assert!(
-            matches!(values.inputs[1], Some(DynamicValue::Float(v)) if v.approximately_eq(5.0))
+            matches!(values.inputs[1], Some(DynamicValue::Static(StaticValue::Float(v))) if v.approximately_eq(5.0))
         );
         assert_eq!(values.outputs.len(), 1);
-        assert!(matches!(values.outputs[0], DynamicValue::Int(35)));
+        assert!(matches!(
+            values.outputs[0],
+            DynamicValue::Static(StaticValue::Int(35))
+        ));
 
         // print: input is mult(35), no outputs
         let print_id = graph.by_name("print").unwrap().id;
         let values = execution_graph.get_argument_values(&print_id).unwrap();
 
         assert_eq!(values.inputs.len(), 1);
-        assert!(matches!(values.inputs[0], Some(DynamicValue::Int(35))));
+        assert!(matches!(
+            values.inputs[0],
+            Some(DynamicValue::Static(StaticValue::Int(35)))
+        ));
         assert!(values.outputs.is_empty());
 
         Ok(())
@@ -1581,7 +1608,7 @@ mod events {
                 move |_, _, _, _, _, outputs| { calls = emit_calls_l.clone() } => {
                     let mut n = calls.lock().await;
                     *n += 1;
-                    outputs[0] = DynamicValue::Int(*n);
+                    outputs[0] = DynamicValue::Static(StaticValue::Int(*n));
                     Ok(())
                 }
             ),
@@ -1738,8 +1765,8 @@ mod output_usage {
             lambda: crate::async_lambda!(
                 move |_, _, _, _, usage, outputs| { seen = seen_usage_l.clone() } => {
                     seen.lock().await.extend_from_slice(usage);
-                    outputs[0] = DynamicValue::Int(1);
-                    outputs[1] = DynamicValue::Int(2);
+                    outputs[0] = DynamicValue::Static(StaticValue::Int(1));
+                    outputs[1] = DynamicValue::Static(StaticValue::Int(2));
                     Ok(())
                 }
             ),
@@ -1826,9 +1853,14 @@ mod topology {
         // sum's Bind to get_a still resolves after the index remap.
         let sum_id = graph.by_name("sum").unwrap().id;
         let vals = eg.get_argument_values(&sum_id).unwrap();
-        assert!(matches!(vals.inputs[0], Some(DynamicValue::Float(v)) if v.approximately_eq(2.0)));
+        assert!(
+            matches!(vals.inputs[0], Some(DynamicValue::Static(StaticValue::Float(v))) if v.approximately_eq(2.0))
+        );
         assert!(vals.inputs[1].is_none());
-        assert!(matches!(vals.outputs[0], DynamicValue::Int(2)));
+        assert!(matches!(
+            vals.outputs[0],
+            DynamicValue::Static(StaticValue::Int(2))
+        ));
 
         Ok(())
     }
@@ -1945,7 +1977,9 @@ mod topology {
         assert!(stats.cached_nodes.contains(&get_a_id));
         // …and its cached output still resolves to the correct value.
         let vals = eg.get_argument_values(&get_a_id).unwrap();
-        assert!(matches!(vals.outputs[0], DynamicValue::Float(v) if v.approximately_eq(2.0)));
+        assert!(
+            matches!(vals.outputs[0], DynamicValue::Static(StaticValue::Float(v)) if v.approximately_eq(2.0))
+        );
 
         Ok(())
     }
@@ -2038,12 +2072,15 @@ mod previews {
             .unwrap();
 
         // mult = sum(2+5=7) * get_b(5) = 35
-        assert!(matches!(with_previews.outputs[0], DynamicValue::Int(35)));
+        assert!(matches!(
+            with_previews.outputs[0],
+            DynamicValue::Static(StaticValue::Int(35))
+        ));
         assert_eq!(plain.inputs.len(), with_previews.inputs.len());
         assert_eq!(plain.outputs.len(), with_previews.outputs.len());
         assert!(matches!(
             with_previews.inputs[0],
-            Some(DynamicValue::Int(7))
+            Some(DynamicValue::Static(StaticValue::Int(7)))
         ));
 
         Ok(())

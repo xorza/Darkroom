@@ -68,10 +68,6 @@ impl EnumDef {
             variants: E::variant_names(),
         }
     }
-
-    pub fn index_of(&self, variant: &str) -> Option<usize> {
-        self.variants.iter().position(|v| v == variant)
-    }
 }
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -114,6 +110,10 @@ pub enum DataType {
     Enum(Arc<EnumDef>),
 }
 
+/// An authored constant: the serializable value form persisted in the graph
+/// (input-port `Const` bindings, func-input defaults). Carries every value kind
+/// *except* the runtime-only ones — there is no unbound state and no custom
+/// payload here (those live on [`DynamicValue`], which wraps this).
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub enum StaticValue {
     #[default]
@@ -169,48 +169,96 @@ impl PartialEq for StaticValue {
 
 impl Eq for StaticValue {}
 
+impl StaticValue {
+    /// Numeric coercion: `Float`/`Int`/`Bool` → `f64`, else `None`.
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            StaticValue::Float(value) => Some(*value),
+            StaticValue::Int(value) => Some(*value as f64),
+            StaticValue::Bool(value) => Some(*value as i64 as f64),
+            _ => None,
+        }
+    }
+
+    /// Numeric coercion: `Int`/`Float`/`Bool` → `i64`, else `None`.
+    pub fn as_i64(&self) -> Option<i64> {
+        match self {
+            StaticValue::Int(value) => Some(*value),
+            StaticValue::Float(value) => Some(*value as i64),
+            StaticValue::Bool(value) => Some(*value as i64),
+            _ => None,
+        }
+    }
+
+    /// Truthiness coercion: `Bool`/`Int`/`Float` → `bool`, else `None`.
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            StaticValue::Bool(value) => Some(*value),
+            StaticValue::Int(value) => Some(*value != 0),
+            StaticValue::Float(value) => Some(value.abs() > f64::EPSILON),
+            _ => None,
+        }
+    }
+
+    pub fn as_string(&self) -> Option<&str> {
+        match self {
+            StaticValue::String(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn as_enum(&self) -> Option<&str> {
+        match self {
+            StaticValue::Enum { variant_name, .. } => Some(variant_name),
+            _ => None,
+        }
+    }
+
+    pub fn as_fs_path(&self) -> Option<&str> {
+        match self {
+            StaticValue::FsPath { path, .. } => Some(path),
+            _ => None,
+        }
+    }
+}
+
+impl Display for StaticValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StaticValue::Null => write!(f, "null"),
+            StaticValue::Float(v) => write!(f, "{v:.4}"),
+            StaticValue::Int(v) => write!(f, "{v}"),
+            StaticValue::Bool(v) => write!(f, "{v}"),
+            StaticValue::String(s) => write!(f, "\"{s}\""),
+            StaticValue::FsPath { path, .. } => write!(f, "\"{path}\""),
+            StaticValue::Enum { variant_name, .. } => write!(f, "{variant_name}"),
+        }
+    }
+}
+
+/// A runtime value flowing through execution. Structurally "an optional,
+/// possibly-custom [`StaticValue`]": [`Static`](DynamicValue::Static) carries
+/// every serializable kind (defined once, on `StaticValue`), while the two
+/// runtime-only states live here — [`Unbound`](DynamicValue::Unbound) (no value
+/// produced yet) and [`Custom`](DynamicValue::Custom) (a non-serializable
+/// `Arc<dyn CustomValue>` payload). Deliberately not `Serialize`.
 #[derive(Default, Clone)]
 pub enum DynamicValue {
     #[default]
-    None,
-    Null,
-    Float(f64),
-    Int(i64),
-    Bool(bool),
-    String(String),
-    FsPath {
-        config: Arc<FsPathConfig>,
-        path: String,
-    },
+    Unbound,
+    Static(StaticValue),
     Custom(Arc<dyn CustomValue>),
-    Enum {
-        type_id: TypeId,
-        variant_name: String,
-    },
 }
 
 impl std::fmt::Debug for DynamicValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DynamicValue::None => write!(f, "None"),
-            DynamicValue::Null => write!(f, "Null"),
-            DynamicValue::Float(v) => f.debug_tuple("Float").field(v).finish(),
-            DynamicValue::Int(v) => f.debug_tuple("Int").field(v).finish(),
-            DynamicValue::Bool(v) => f.debug_tuple("Bool").field(v).finish(),
-            DynamicValue::String(v) => f.debug_tuple("String").field(v).finish(),
-            DynamicValue::FsPath { path, .. } => f.debug_tuple("FsPath").field(path).finish(),
+            DynamicValue::Unbound => write!(f, "Unbound"),
+            DynamicValue::Static(value) => write!(f, "{value:?}"),
             DynamicValue::Custom(data) => f
                 .debug_struct("Custom")
                 .field("type_def", &data.type_def())
                 .finish_non_exhaustive(),
-            DynamicValue::Enum {
-                type_id,
-                variant_name,
-            } => f
-                .debug_struct("Enum")
-                .field("type_id", type_id)
-                .field("variant_name", variant_name)
-                .finish(),
         }
     }
 }
@@ -220,57 +268,41 @@ impl DynamicValue {
         DynamicValue::Custom(Arc::new(value))
     }
 
-    pub fn as_f64(&self) -> Option<f64> {
+    /// The wrapped [`StaticValue`], or `None` when unbound/custom.
+    pub fn as_static(&self) -> Option<&StaticValue> {
         match self {
-            DynamicValue::Float(value) => Some(*value),
-            DynamicValue::Int(value) => Some(*value as f64),
-            DynamicValue::Bool(value) => Some(*value as i64 as f64),
+            DynamicValue::Static(value) => Some(value),
             _ => None,
         }
+    }
+
+    pub fn as_f64(&self) -> Option<f64> {
+        self.as_static().and_then(StaticValue::as_f64)
     }
 
     pub fn as_i64(&self) -> Option<i64> {
-        match self {
-            DynamicValue::Int(value) => Some(*value),
-            DynamicValue::Float(value) => Some(*value as i64),
-            DynamicValue::Bool(value) => Some(*value as i64),
-            _ => None,
-        }
+        self.as_static().and_then(StaticValue::as_i64)
     }
 
     pub fn as_bool(&self) -> Option<bool> {
-        match self {
-            DynamicValue::Bool(value) => Some(*value),
-            DynamicValue::Int(value) => Some(*value != 0),
-            DynamicValue::Float(value) => Some(value.abs() > f64::EPSILON),
-            _ => None,
-        }
+        self.as_static().and_then(StaticValue::as_bool)
     }
 
     pub fn as_string(&self) -> Option<&str> {
-        match self {
-            DynamicValue::String(value) => Some(value),
-            _ => None,
-        }
+        self.as_static().and_then(StaticValue::as_string)
+    }
+
+    pub fn as_enum(&self) -> Option<&str> {
+        self.as_static().and_then(StaticValue::as_enum)
+    }
+
+    pub fn as_fs_path(&self) -> Option<&str> {
+        self.as_static().and_then(StaticValue::as_fs_path)
     }
 
     pub fn as_custom<T: CustomValue>(&self) -> Option<&T> {
         match self {
             DynamicValue::Custom(data) => data.as_any().downcast_ref::<T>(),
-            _ => None,
-        }
-    }
-
-    pub fn as_enum(&self) -> Option<&str> {
-        match self {
-            DynamicValue::Enum { variant_name, .. } => Some(variant_name),
-            _ => None,
-        }
-    }
-
-    pub fn as_fs_path(&self) -> Option<&str> {
-        match self {
-            DynamicValue::FsPath { path, .. } => Some(path),
             _ => None,
         }
     }
@@ -288,51 +320,13 @@ impl DynamicValue {
 
 impl From<&StaticValue> for DynamicValue {
     fn from(value: &StaticValue) -> Self {
-        match value {
-            StaticValue::Null => DynamicValue::Null,
-            StaticValue::Float(value) => DynamicValue::Float(*value),
-            StaticValue::Int(value) => DynamicValue::Int(*value),
-            StaticValue::Bool(value) => DynamicValue::Bool(*value),
-            StaticValue::String(value) => DynamicValue::String(value.clone()),
-            StaticValue::FsPath { config, path } => DynamicValue::FsPath {
-                config: config.clone(),
-                path: path.clone(),
-            },
-            StaticValue::Enum {
-                type_id,
-                variant_name,
-            } => DynamicValue::Enum {
-                type_id: *type_id,
-                variant_name: variant_name.clone(),
-            },
-        }
+        DynamicValue::Static(value.clone())
     }
 }
 
-impl From<&DataType> for StaticValue {
-    fn from(data_type: &DataType) -> Self {
-        match data_type {
-            DataType::Float => StaticValue::Float(0.0),
-            DataType::Int => StaticValue::Int(0),
-            DataType::Bool => StaticValue::Bool(false),
-            DataType::String => StaticValue::String(String::new()),
-            DataType::FsPath(config) => StaticValue::FsPath {
-                config: config.clone(),
-                path: String::new(),
-            },
-            DataType::Null => StaticValue::Null,
-            DataType::Enum(enum_def) => StaticValue::Enum {
-                type_id: enum_def.type_id,
-                variant_name: enum_def.variants[0].clone(),
-            },
-            DataType::Custom(_) => panic!("No default StaticValue for {:?}", data_type),
-        }
-    }
-}
-
-impl From<&DataType> for DynamicValue {
-    fn from(data_type: &DataType) -> Self {
-        DynamicValue::from(&StaticValue::from(data_type))
+impl From<StaticValue> for DynamicValue {
+    fn from(value: StaticValue) -> Self {
+        DynamicValue::Static(value)
     }
 }
 
@@ -378,45 +372,47 @@ impl From<bool> for StaticValue {
     }
 }
 
+// Primitive -> DynamicValue routes through StaticValue so the shared kinds stay
+// defined in one place.
 impl From<i64> for DynamicValue {
     fn from(value: i64) -> Self {
-        DynamicValue::Int(value)
+        DynamicValue::Static(value.into())
     }
 }
 
 impl From<i32> for DynamicValue {
     fn from(value: i32) -> Self {
-        DynamicValue::Int(value as i64)
+        DynamicValue::Static(value.into())
     }
 }
 
 impl From<f32> for DynamicValue {
     fn from(value: f32) -> Self {
-        DynamicValue::Float(value as f64)
+        DynamicValue::Static(value.into())
     }
 }
 
 impl From<f64> for DynamicValue {
     fn from(value: f64) -> Self {
-        DynamicValue::Float(value)
+        DynamicValue::Static(value.into())
     }
 }
 
 impl From<&str> for DynamicValue {
     fn from(value: &str) -> Self {
-        DynamicValue::String(value.to_string())
+        DynamicValue::Static(value.into())
     }
 }
 
 impl From<String> for DynamicValue {
     fn from(value: String) -> Self {
-        DynamicValue::String(value)
+        DynamicValue::Static(value.into())
     }
 }
 
 impl From<bool> for DynamicValue {
     fn from(value: bool) -> Self {
-        DynamicValue::Bool(value)
+        DynamicValue::Static(value.into())
     }
 }
 
@@ -435,23 +431,34 @@ impl DataType {
         DataType::Enum(Arc::new(EnumDef::from_enum::<E>(type_id, display_name)))
     }
 
-    pub fn default_value(&self) -> StaticValue {
-        StaticValue::from(self)
+    /// The zero/default constant for this type, or `None` for `Custom` (custom
+    /// types have no authorable literal).
+    pub fn default_value(&self) -> Option<StaticValue> {
+        Some(match self {
+            DataType::Null => StaticValue::Null,
+            DataType::Float => StaticValue::Float(0.0),
+            DataType::Int => StaticValue::Int(0),
+            DataType::Bool => StaticValue::Bool(false),
+            DataType::String => StaticValue::String(String::new()),
+            DataType::FsPath(config) => StaticValue::FsPath {
+                config: config.clone(),
+                path: String::new(),
+            },
+            DataType::Enum(enum_def) => StaticValue::Enum {
+                type_id: enum_def.type_id,
+                variant_name: enum_def.variants[0].clone(),
+            },
+            DataType::Custom(_) => return None,
+        })
     }
 }
 
 impl Display for DynamicValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DynamicValue::None => write!(f, "-"),
-            DynamicValue::Null => write!(f, "null"),
-            DynamicValue::Float(v) => write!(f, "{v:.4}"),
-            DynamicValue::Int(v) => write!(f, "{v}"),
-            DynamicValue::Bool(v) => write!(f, "{v}"),
-            DynamicValue::String(s) => write!(f, "\"{s}\""),
-            DynamicValue::FsPath { path, .. } => write!(f, "\"{path}\""),
+            DynamicValue::Unbound => write!(f, "-"),
+            DynamicValue::Static(value) => write!(f, "{value}"),
             DynamicValue::Custom(data) => write!(f, "{data}"),
-            DynamicValue::Enum { variant_name, .. } => write!(f, "{variant_name}"),
         }
     }
 }
@@ -503,3 +510,105 @@ impl PartialEq for DataType {
 }
 
 impl Eq for DataType {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn static_value_coercions() {
+        // Numeric widening and bool→number.
+        assert_eq!(StaticValue::Int(3).as_f64(), Some(3.0));
+        assert_eq!(StaticValue::Bool(true).as_f64(), Some(1.0));
+        assert_eq!(StaticValue::Bool(false).as_f64(), Some(0.0));
+        assert_eq!(StaticValue::Float(2.7).as_i64(), Some(2)); // truncates
+        assert_eq!(StaticValue::Int(9).as_i64(), Some(9));
+        // Truthiness: 0.0 is false, anything past EPSILON is true.
+        assert_eq!(StaticValue::Float(0.0).as_bool(), Some(false));
+        assert_eq!(StaticValue::Float(0.5).as_bool(), Some(true));
+        assert_eq!(StaticValue::Int(0).as_bool(), Some(false));
+        // Non-numeric kinds don't coerce to numbers.
+        assert_eq!(StaticValue::String("x".into()).as_f64(), None);
+        assert_eq!(StaticValue::Null.as_i64(), None);
+        // String / enum / path extractors.
+        assert_eq!(StaticValue::String("hi".into()).as_string(), Some("hi"));
+        assert_eq!(StaticValue::Int(1).as_string(), None);
+        assert_eq!(
+            StaticValue::Enum {
+                type_id: TypeId::nil(),
+                variant_name: "Add".into(),
+            }
+            .as_enum(),
+            Some("Add")
+        );
+        assert_eq!(
+            StaticValue::FsPath {
+                config: Arc::new(FsPathConfig::default()),
+                path: "/tmp/x".into(),
+            }
+            .as_fs_path(),
+            Some("/tmp/x")
+        );
+    }
+
+    #[test]
+    fn dynamic_value_delegates_and_runtime_states() {
+        // Static delegates to the inner StaticValue coercion.
+        assert_eq!(
+            DynamicValue::Static(StaticValue::Int(4)).as_f64(),
+            Some(4.0)
+        );
+        assert_eq!(
+            DynamicValue::Static(StaticValue::Int(4))
+                .as_static()
+                .map(StaticValue::as_i64),
+            Some(Some(4))
+        );
+        // The two runtime-only states never coerce to a scalar.
+        assert_eq!(DynamicValue::Unbound.as_f64(), None);
+        assert!(DynamicValue::Unbound.as_static().is_none());
+        // Default is Unbound.
+        assert!(matches!(DynamicValue::default(), DynamicValue::Unbound));
+    }
+
+    #[test]
+    fn conversions_wrap_in_static() {
+        // Primitive `.into()` and `From<&StaticValue>` both land in `Static`.
+        let d: DynamicValue = 3.5f64.into();
+        assert!(matches!(d, DynamicValue::Static(StaticValue::Float(f)) if f == 3.5));
+        let s = StaticValue::Int(9);
+        assert_eq!(DynamicValue::from(&s).as_i64(), Some(9));
+        assert_eq!(DynamicValue::from(true).as_bool(), Some(true));
+    }
+
+    #[test]
+    fn datatype_default_value() {
+        assert_eq!(
+            DataType::Float.default_value(),
+            Some(StaticValue::Float(0.0))
+        );
+        assert_eq!(DataType::Int.default_value(), Some(StaticValue::Int(0)));
+        assert_eq!(
+            DataType::Bool.default_value(),
+            Some(StaticValue::Bool(false))
+        );
+        assert_eq!(
+            DataType::String.default_value(),
+            Some(StaticValue::String(String::new()))
+        );
+        // Custom has no authorable literal.
+        assert_eq!(DataType::from_custom(1u128, "Img").default_value(), None);
+    }
+
+    #[test]
+    fn display_formats() {
+        assert_eq!(format!("{}", DynamicValue::Unbound), "-");
+        assert_eq!(
+            format!("{}", DynamicValue::Static(StaticValue::Int(5))),
+            "5"
+        );
+        assert_eq!(format!("{}", StaticValue::String("hi".into())), "\"hi\"");
+        assert_eq!(format!("{}", StaticValue::Float(1.5)), "1.5000");
+        assert_eq!(format!("{}", StaticValue::Null), "null");
+    }
+}

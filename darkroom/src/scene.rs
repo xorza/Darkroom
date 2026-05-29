@@ -367,13 +367,12 @@ struct NodeInterface<'a> {
 /// `Custom` type — there is no `StaticValue` for it, so the port can't be
 /// given an inline const (and `StaticValue::from` would panic).
 fn default_static_value(input: &FuncInput) -> Option<StaticValue> {
-    if let Some(default) = &input.default_value {
-        return Some(default.clone());
-    }
-    match &input.data_type {
-        DataType::Custom(_) => None,
-        data_type => Some(StaticValue::from(data_type)),
-    }
+    // Explicit default if any, else the type's zero value (`None` for custom
+    // types, which have no authorable literal).
+    input
+        .default_value
+        .clone()
+        .or_else(|| input.data_type.default_value())
 }
 
 /// Synthesize a `FuncInput` for a `SubgraphOutput`'s input port from the

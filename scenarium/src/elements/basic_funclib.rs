@@ -39,7 +39,7 @@ impl Math2ArgOp {
         let a = inputs[0].value.as_f64().unwrap();
         let b = inputs[1].value.as_f64().unwrap();
 
-        Ok(DynamicValue::Float(self.apply(a, b)))
+        Ok(self.apply(a, b).into())
     }
     fn apply(&self, a: f64, b: f64) -> f64 {
         match self {
@@ -193,7 +193,7 @@ impl Default for BasicFuncLib {
                 let value: f64 = inputs[0].value.as_f64().unwrap();
                 let result = value.to_string();
 
-                outputs[0] = DynamicValue::String(result);
+                outputs[0] = result.into();
                 Ok(())
             }),
             ..Default::default()
@@ -241,7 +241,7 @@ impl Default for BasicFuncLib {
                 let random = rng.random::<f64>();
                 let result = min + (max - min) * random;
 
-                outputs[0] = DynamicValue::Float(result);
+                outputs[0] = result.into();
                 Ok(())
             }),
             ..Default::default()
@@ -284,7 +284,7 @@ impl Default for BasicFuncLib {
                 let b: f64 = inputs[1].value.as_f64().unwrap();
                 let result = a + b;
 
-                outputs[0] = DynamicValue::Float(result);
+                outputs[0] = result.into();
                 Ok(())
             }),
             ..Default::default()
@@ -327,7 +327,7 @@ impl Default for BasicFuncLib {
                 let b: f64 = inputs[1].value.as_f64().unwrap();
                 let result = a - b;
 
-                outputs[0] = DynamicValue::Float(result);
+                outputs[0] = result.into();
                 Ok(())
             }),
             ..Default::default()
@@ -370,7 +370,7 @@ impl Default for BasicFuncLib {
                 let b: f64 = inputs[1].value.as_f64().unwrap();
                 let result = a * b;
 
-                outputs[0] = DynamicValue::Float(result);
+                outputs[0] = result.into();
                 Ok(())
             }),
             ..Default::default()
@@ -423,8 +423,8 @@ impl Default for BasicFuncLib {
                 let divide = a / b;
                 let modulo = a % b;
 
-                outputs[0] = DynamicValue::Float(divide);
-                outputs[1] = DynamicValue::Float(modulo);
+                outputs[0] = divide.into();
+                outputs[1] = modulo.into();
                 Ok(())
             }),
             ..Default::default()
@@ -469,7 +469,7 @@ impl Default for BasicFuncLib {
                 let b: f64 = inputs[1].value.as_f64().unwrap();
                 let power = a.powf(b);
 
-                outputs[0] = DynamicValue::Float(power);
+                outputs[0] = power.into();
                 Ok(())
             }),
             ..Default::default()
@@ -502,7 +502,7 @@ impl Default for BasicFuncLib {
                 let a: f64 = inputs[0].value.as_f64().unwrap();
                 let sqrt = a.sqrt();
 
-                outputs[0] = DynamicValue::Float(sqrt);
+                outputs[0] = sqrt.into();
                 Ok(())
             }),
             ..Default::default()
@@ -535,7 +535,7 @@ impl Default for BasicFuncLib {
                 let a: f64 = inputs[0].value.as_f64().unwrap();
                 let sin = a.sin();
 
-                outputs[0] = DynamicValue::Float(sin);
+                outputs[0] = sin.into();
                 Ok(())
             }),
             ..Default::default()
@@ -568,7 +568,7 @@ impl Default for BasicFuncLib {
                 let a: f64 = inputs[0].value.as_f64().unwrap();
                 let cos = a.cos();
 
-                outputs[0] = DynamicValue::Float(cos);
+                outputs[0] = cos.into();
                 Ok(())
             }),
             ..Default::default()
@@ -601,7 +601,7 @@ impl Default for BasicFuncLib {
                 let a: f64 = inputs[0].value.as_f64().unwrap();
                 let tan = a.tan();
 
-                outputs[0] = DynamicValue::Float(tan);
+                outputs[0] = tan.into();
                 Ok(())
             }),
             ..Default::default()
@@ -636,7 +636,7 @@ impl Default for BasicFuncLib {
                 let sin: f64 = inputs[0].value.as_f64().unwrap();
                 let asin = sin.asin();
 
-                outputs[0] = DynamicValue::Float(asin);
+                outputs[0] = asin.into();
                 Ok(())
             }),
             ..Default::default()
@@ -671,7 +671,7 @@ impl Default for BasicFuncLib {
                 let cos: f64 = inputs[0].value.as_f64().unwrap();
                 let acos = cos.acos();
 
-                outputs[0] = DynamicValue::Float(acos);
+                outputs[0] = acos.into();
                 Ok(())
             }),
             ..Default::default()
@@ -707,7 +707,7 @@ impl Default for BasicFuncLib {
                 let tan: f64 = inputs[0].value.as_f64().unwrap();
                 let atan = tan.atan();
 
-                outputs[0] = DynamicValue::Float(atan);
+                outputs[0] = atan.into();
                 Ok(())
             }),
             ..Default::default()
@@ -752,7 +752,7 @@ impl Default for BasicFuncLib {
                 let base: f64 = inputs[1].value.as_f64().unwrap();
                 let log = value.log(base);
 
-                outputs[0] = DynamicValue::Float(log);
+                outputs[0] = log.into();
                 Ok(())
             }),
             ..Default::default()
