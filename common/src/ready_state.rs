@@ -23,7 +23,10 @@ impl ReadyState {
     pub fn signal(&self) {
         let new_count = self.count.fetch_add(1, Ordering::SeqCst) + 1;
         if new_count == self.total {
-            self.notify.notify_one();
+            // `notify_waiters` (not `notify_one`): every parked waiter must wake.
+            // Late arrivals are safe via the re-check-after-register loop in `wait`,
+            // since `count` is monotonic and never drops back below `total`.
+            self.notify.notify_waiters();
         }
     }
 
@@ -77,6 +80,32 @@ mod tests {
             "wait should complete after total signals"
         );
         second_wait.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn signal_wakes_every_parked_waiter() {
+        // Cross-check the `notify_waiters` (not `notify_one`) choice: more waiters
+        // than there are signals, all parked before the threshold is reached. With
+        // `notify_one` only one would wake and the rest would hang past the timeout.
+        let ready = ReadyState::new(3);
+        let mut handles = Vec::new();
+        for _ in 0..4 {
+            let ready = ready.clone();
+            handles.push(tokio::spawn(async move { ready.wait().await }));
+        }
+        // Let all four park inside `wait()` before any signal lands.
+        tokio::task::yield_now().await;
+
+        ready.signal();
+        ready.signal();
+        ready.signal();
+
+        for handle in handles {
+            timeout(Duration::from_millis(200), handle)
+                .await
+                .expect("every parked waiter must wake")
+                .expect("waiter task should not panic");
+        }
     }
 
     #[tokio::test]

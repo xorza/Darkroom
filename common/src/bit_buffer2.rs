@@ -33,7 +33,6 @@ pub struct BitBuffer2 {
     stride: usize,
 }
 
-#[allow(dead_code)] // Public API - methods will be used as Buffer2<bool> is migrated
 impl BitBuffer2 {
     /// Create a new bit buffer filled with the given value.
     #[inline]
@@ -315,7 +314,6 @@ impl From<&BitBuffer2> for Vec<bool> {
 }
 
 /// Iterator over bit values (row-major order, skipping padding).
-#[allow(dead_code)] // Public API - will be used as Buffer2<bool> is migrated
 pub struct BitIter<'a> {
     buffer: &'a BitBuffer2,
     x: usize,

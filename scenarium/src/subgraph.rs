@@ -230,7 +230,7 @@ mod tests {
         parent.validate_with(&func_lib);
 
         for format in SerdeFormat::all_formats_for_testing() {
-            let bytes = parent.serialize(format);
+            let bytes = parent.serialize(format).unwrap();
             let back = Graph::deserialize(&bytes, format).unwrap();
             assert_eq!(parent, back);
         }

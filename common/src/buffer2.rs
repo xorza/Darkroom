@@ -59,16 +59,6 @@ impl<T> Buffer2<T> {
     }
 
     #[inline]
-    pub fn len(&self) -> usize {
-        self.pixels.len()
-    }
-
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.pixels.is_empty()
-    }
-
-    #[inline]
     pub fn width(&self) -> usize {
         self.width
     }
@@ -91,24 +81,6 @@ impl<T> Buffer2<T> {
     #[inline]
     pub fn into_vec(self) -> Vec<T> {
         self.pixels
-    }
-
-    #[inline]
-    pub fn to_vec(&self) -> Vec<T>
-    where
-        T: Clone,
-    {
-        self.pixels.clone()
-    }
-
-    #[inline]
-    pub fn iter(&self) -> slice::Iter<'_, T> {
-        self.pixels.iter()
-    }
-
-    #[inline]
-    pub fn iter_mut(&mut self) -> slice::IterMut<'_, T> {
-        self.pixels.iter_mut()
     }
 
     #[inline]
@@ -140,11 +112,6 @@ impl<T: Clone> Buffer2<T> {
             height,
         }
     }
-
-    #[inline]
-    pub fn fill(&mut self, value: T) {
-        self.pixels.fill(value);
-    }
 }
 
 impl<T> Index<(usize, usize)> for Buffer2<T> {
@@ -163,6 +130,9 @@ impl<T> IndexMut<(usize, usize)> for Buffer2<T> {
     }
 }
 
+// These linear/range `Index` impls cannot be replaced by `Deref<[T]>`: once a
+// type implements `Index` for any index, the `[]` operator commits to that type
+// and never autoderefs to the slice's impls.
 impl<T> Index<usize> for Buffer2<T> {
     type Output = T;
 

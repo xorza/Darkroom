@@ -154,9 +154,9 @@ mod graph_structure {
         // engine itself is not serializable.
         let program = &execution_graph.program;
         for format in SerdeFormat::all_formats_for_testing() {
-            let serialized = common::serialize(program, format);
+            let serialized = common::serialize(program, format)?;
             let deserialized: ExecutionProgram = common::deserialize(&serialized, format)?;
-            let serialized_again = common::serialize(&deserialized, format);
+            let serialized_again = common::serialize(&deserialized, format)?;
             assert_eq!(serialized, serialized_again);
 
             // Structural fields survive the round-trip (lambdas/state/output

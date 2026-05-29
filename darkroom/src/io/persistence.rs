@@ -111,7 +111,13 @@ pub fn load_document(path: &Path) -> Option<Document> {
 /// whether the write succeeded.
 pub fn save_document(doc: &Document, path: &Path) -> bool {
     let format = SerdeFormat::from_file_name(&path.to_string_lossy()).unwrap_or(SerdeFormat::Rhai);
-    let bytes = doc.serialize(format);
+    let bytes = match doc.serialize(format) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            eprintln!("save failed: {} {err}", path.display());
+            return false;
+        }
+    };
     match std::fs::write(path, &bytes) {
         Ok(()) => true,
         Err(err) => {
@@ -146,7 +152,13 @@ pub fn load_theme(path: &Path) -> Option<Theme> {
 /// automatically. Returns whether the write succeeded.
 pub fn export_subgraph(def: &SubgraphDef, path: &Path) -> bool {
     let format = SerdeFormat::from_file_name(&path.to_string_lossy()).unwrap_or(SerdeFormat::Rhai);
-    let bytes = serialize(def, format);
+    let bytes = match serialize(def, format) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            eprintln!("subgraph export failed: {} {err}", path.display());
+            return false;
+        }
+    };
     match std::fs::write(path, &bytes) {
         Ok(()) => true,
         Err(err) => {
@@ -185,7 +197,13 @@ pub fn import_subgraph(path: &Path) -> Option<SubgraphDef> {
 
 /// Serialize `theme` to TOML and write it to `path`.
 pub fn export_theme(theme: &Theme, path: &Path) {
-    let bytes = serialize(theme, SerdeFormat::Toml);
+    let bytes = match serialize(theme, SerdeFormat::Toml) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            eprintln!("theme export failed: {} {err}", path.display());
+            return;
+        }
+    };
     if let Err(err) = std::fs::write(path, &bytes) {
         eprintln!("theme export failed: {} {err}", path.display());
     }

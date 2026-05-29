@@ -265,7 +265,8 @@ impl ActionStack {
             "undo stack should not store empty step batches"
         );
         let start = buffer.len();
-        common::serde::serialize_into(steps, SerdeFormat::Bitcode, buffer, temp_buffer);
+        common::serde::serialize_into(steps, SerdeFormat::Bitcode, buffer, temp_buffer)
+            .expect("bitcode serialize of in-memory undo steps is infallible");
         let end = buffer.len();
         start..end
     }

@@ -45,7 +45,13 @@ impl AppConfig {
     /// Write the config to the working dir. Errors print to stderr —
     /// a failed persist shouldn't interrupt the user's session.
     pub fn save(&self) {
-        let bytes = serialize(self, SerdeFormat::Toml);
+        let bytes = match serialize(self, SerdeFormat::Toml) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                eprintln!("config save failed: {err}");
+                return;
+            }
+        };
         if let Err(err) = std::fs::write(Self::path(), &bytes) {
             eprintln!("config save failed: {err}");
         }
@@ -57,7 +63,7 @@ mod tests {
     use super::*;
 
     fn roundtrip(cfg: &AppConfig) -> AppConfig {
-        let bytes = serialize(cfg, SerdeFormat::Toml);
+        let bytes = serialize(cfg, SerdeFormat::Toml).expect("config TOML serializes");
         deserialize(&bytes, SerdeFormat::Toml).expect("config TOML round-trips")
     }
 

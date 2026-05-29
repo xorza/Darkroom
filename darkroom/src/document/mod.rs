@@ -723,7 +723,7 @@ impl Document {
         }
     }
 
-    pub fn serialize(&self, format: SerdeFormat) -> Vec<u8> {
+    pub fn serialize(&self, format: SerdeFormat) -> Result<Vec<u8>> {
         self.validate();
         common::serialize(self, format)
     }
@@ -1187,7 +1187,7 @@ mod tests {
 
     fn assert_roundtrip(format: SerdeFormat) {
         let doc = build_test_doc();
-        let serialized = doc.serialize(format);
+        let serialized = doc.serialize(format).expect("serialize document");
         assert!(
             !serialized.is_empty(),
             "serialized document should not be empty"

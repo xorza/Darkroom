@@ -107,7 +107,7 @@ impl FuncLib {
     pub fn deserialize(serialized: &[u8], format: SerdeFormat) -> anyhow::Result<Self> {
         deserialize(serialized, format)
     }
-    pub fn serialize(&self, format: SerdeFormat) -> Vec<u8> {
+    pub fn serialize(&self, format: SerdeFormat) -> anyhow::Result<Vec<u8>> {
         serialize(&self, format)
     }
 
@@ -178,9 +178,9 @@ mod tests {
         let func_lib = test_func_lib(TestFuncHooks::default());
 
         for format in SerdeFormat::all_formats_for_testing() {
-            let serialized = func_lib.serialize(format);
+            let serialized = func_lib.serialize(format)?;
             let deserialized = super::FuncLib::deserialize(&serialized, format)?;
-            let serialized_again = deserialized.serialize(format);
+            let serialized_again = deserialized.serialize(format)?;
             assert_eq!(serialized, serialized_again);
         }
 

@@ -47,7 +47,13 @@ pub(crate) fn save_library<'a>(subgraphs: impl Iterator<Item = &'a SubgraphDef>)
     let lib = Library {
         subgraphs: subgraphs.cloned().collect(),
     };
-    let bytes = serialize(&lib, SerdeFormat::Rhai);
+    let bytes = match serialize(&lib, SerdeFormat::Rhai) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            eprintln!("library save failed: {err}");
+            return;
+        }
+    };
     if let Err(err) = std::fs::write(path(), &bytes) {
         eprintln!("library save failed: {err}");
     }

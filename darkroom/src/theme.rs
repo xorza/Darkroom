@@ -847,7 +847,8 @@ mod tests {
     /// clean tree.
     #[test]
     fn ayu_graphite_asset_in_sync() {
-        let bytes = common::serialize(&Theme::default(), SerdeFormat::Toml);
+        let bytes =
+            common::serialize(&Theme::default(), SerdeFormat::Toml).expect("serialize theme");
         std::fs::write("assets/ayu-graphite.toml", bytes).expect("write toml asset");
     }
 
@@ -865,7 +866,7 @@ mod tests {
         };
         theme.palantir_theme.window_clear = Color::hex(0xabcdef);
 
-        let bytes = common::serialize(&theme, SerdeFormat::Toml);
+        let bytes = common::serialize(&theme, SerdeFormat::Toml).expect("serialize theme");
         let back: Theme = common::deserialize(&bytes, SerdeFormat::Toml)
             .expect("theme should deserialize from its own TOML output");
 

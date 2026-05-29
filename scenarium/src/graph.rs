@@ -443,7 +443,7 @@ impl Graph {
         self.nodes.by_key_mut(id)
     }
 
-    pub fn serialize(&self, format: SerdeFormat) -> Vec<u8> {
+    pub fn serialize(&self, format: SerdeFormat) -> Result<Vec<u8>> {
         serialize(self, format)
     }
     pub fn deserialize(serialized: &[u8], format: SerdeFormat) -> Result<Graph> {
@@ -824,13 +824,13 @@ mod tests {
         let graph = test_graph();
 
         for format in SerdeFormat::all_formats_for_testing() {
-            let serialized = graph.serialize(format);
+            let serialized = graph.serialize(format)?;
             let deserialized = Graph::deserialize(&serialized, format)?;
-            let serialized_again = deserialized.serialize(format);
+            let serialized_again = deserialized.serialize(format)?;
             assert_eq!(serialized, serialized_again);
         }
 
-        let bin = graph.serialize(SerdeFormat::Bitcode);
+        let bin = graph.serialize(SerdeFormat::Bitcode)?;
         let deserialized = Graph::deserialize(&bin, SerdeFormat::Bitcode)?;
         assert_eq!(graph, deserialized);
 
@@ -861,7 +861,7 @@ mod tests {
 
         // serialize doesn't validate; deserialize must reject the dangling bind
         // (the release-path structural guard, not a debug-only assert).
-        let bytes = graph.serialize(SerdeFormat::Bitcode);
+        let bytes = graph.serialize(SerdeFormat::Bitcode).unwrap();
         assert!(Graph::deserialize(&bytes, SerdeFormat::Bitcode).is_err());
     }
 
