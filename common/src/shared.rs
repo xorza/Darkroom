@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
 
+/// `Arc<Mutex<T>>` newtype: clones share one mutex; `lock()` awaits exclusive
+/// access. A plain newtype (no `Deref` to the inner `Arc`/`Mutex`) so the only
+/// surface is `lock`/`get_mut` — no accidental `Arc`/`Mutex` method bleed-through.
 #[derive(Debug)]
 pub struct Shared<T> {
     inner: Arc<Mutex<T>>,
@@ -14,20 +17,14 @@ impl<T> Shared<T> {
         }
     }
 
-    pub fn arc(&self) -> Arc<Mutex<T>> {
-        Arc::clone(&self.inner)
+    pub async fn lock(&self) -> MutexGuard<'_, T> {
+        self.inner.lock().await
     }
 
+    /// `&mut T` without locking when this is the sole owner; `None` if other
+    /// clones exist.
     pub fn get_mut(&mut self) -> Option<&mut T> {
         Arc::get_mut(&mut self.inner).map(|mutex| mutex.get_mut())
-    }
-}
-
-impl<T> std::ops::Deref for Shared<T> {
-    type Target = Arc<Mutex<T>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
     }
 }
 

@@ -20,6 +20,10 @@ pub fn serialize<T: Serialize>(value: &T, format: SerdeFormat) -> Result<Vec<u8>
     Ok(buffer)
 }
 
+/// `temp_buffer` is reusable scratch the caller threads across calls to avoid
+/// per-call allocation in hot paths (e.g. undo-step coalescing). Pass a
+/// long-lived `Vec` you reuse; it's cleared on entry. (Bitcode/JSON/Rhai don't
+/// touch it on serialize; the LZ4 arm uses it.)
 pub fn serialize_into<T: Serialize, W: Write>(
     value: T,
     format: SerdeFormat,
@@ -66,6 +70,8 @@ pub fn deserialize<T: DeserializeOwned>(serialized: &[u8], format: SerdeFormat) 
     )
 }
 
+/// `temp_buffer` is reusable scratch (read buffer / LZ4 work area) the caller
+/// threads across calls to avoid per-call allocation in hot paths. Cleared on entry.
 pub fn deserialize_from<T: DeserializeOwned, R: Read>(
     reader: &mut R,
     format: SerdeFormat,
