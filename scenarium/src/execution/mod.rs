@@ -43,6 +43,8 @@ pub enum Error {
     Invoke { func_id: FuncId, message: String },
     #[error("Cycle detected while building execution graph at node {node_id:?}")]
     CycleDetected { node_id: NodeId },
+    #[error("event lambda for node {node_id:?} panicked: {message}")]
+    EventLambdaPanic { node_id: NodeId, message: String },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

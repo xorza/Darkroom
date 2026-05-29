@@ -295,6 +295,45 @@ async fn pause_gate_blocks_event_loop_iterations() {
 }
 
 #[tokio::test]
+async fn lambda_panic_is_captured_not_unwound() {
+    // A panicking event lambda must be isolated: `stop()` captures the panic
+    // (attributed to its node) and returns it, rather than unwinding into the
+    // worker loop — which would kill the worker.
+    let node_id = NodeId::unique();
+    let event_lambda = EventLambda::new(|_state| Box::pin(async { panic!("boom in lambda") }));
+
+    let (mut handle, mut event_rx) = super::start_event_loop(
+        vec![EventTrigger {
+            event: EventRef {
+                node_id,
+                event_idx: 0,
+            },
+            lambda: event_lambda,
+            state: SharedAnyState::default(),
+        }],
+        PauseGate::default(),
+    )
+    .await;
+
+    // The lambda panics on its first invoke and never sends; its sole sender
+    // drops, closing the channel. Awaiting that close ensures the panic has
+    // landed before we stop.
+    assert!(
+        event_rx.recv().await.is_none(),
+        "panicking lambda should close the event channel without sending"
+    );
+
+    let panics = handle.stop().await;
+    assert_eq!(panics.len(), 1, "the lambda panic should be captured");
+    assert_eq!(panics[0].node_id, node_id, "panic attributed to its node");
+    assert!(
+        panics[0].message.contains("boom in lambda"),
+        "panic message preserved: {}",
+        panics[0].message
+    );
+}
+
+#[tokio::test]
 async fn clear_resets_execution_graph() {
     let mut h = FrameHarness::new().await;
 

@@ -12,7 +12,7 @@ use common::ReadyState;
 
 use crate::common::shared_any_state::SharedAnyState;
 use crate::event_lambda::EventLambda;
-use crate::execution::{ArgumentValues, ExecutionEngine, Result};
+use crate::execution::{ArgumentValues, Error, ExecutionEngine, Result};
 use crate::execution_stats::ExecutionStats;
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
@@ -137,26 +137,66 @@ impl Drop for Worker {
     }
 }
 
+/// A lambda task that ended by panicking, paired with the node it ran for so
+/// the worker can attribute the report.
+#[derive(Debug)]
+struct LambdaPanic {
+    node_id: NodeId,
+    message: String,
+}
+
+/// Best-effort message extraction from a caught panic payload.
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_string()
+    }
+}
+
 #[derive(Debug)]
 struct EventLoopHandle {
-    join_handles: Vec<JoinHandle<()>>,
+    join_handles: Vec<(EventRef, JoinHandle<()>)>,
 }
 
 impl EventLoopHandle {
-    /// Cancels every spawned lambda task. Each task's in-flight
-    /// `.await` is aborted — lambda authors must write cancel-safe
-    /// code. Panics are re-raised on the caller.
-    async fn stop(&mut self) {
-        for ah in self.join_handles.drain(..) {
+    /// Cancels every spawned lambda task and joins it. A task that ended by
+    /// panicking is **isolated** — its panic is captured and returned (the
+    /// worker reports it via the execution callback) rather than unwound into
+    /// the worker loop, which would kill the worker. Cancellations (from
+    /// `abort`) are expected; any other join error is a bug. Lambda authors
+    /// must still write cancel-safe code (aborts happen at the next `.await`).
+    async fn stop(&mut self) -> Vec<LambdaPanic> {
+        let mut panics = Vec::new();
+        for (event, ah) in self.join_handles.drain(..) {
             ah.abort();
             if let Err(err) = ah.await {
                 if err.is_panic() {
-                    std::panic::resume_unwind(err.into_panic());
+                    panics.push(LambdaPanic {
+                        node_id: event.node_id,
+                        message: panic_message(err.into_panic()),
+                    });
                 } else {
                     assert!(err.is_cancelled(), "event task join error: {err}");
                 }
             }
         }
+        panics
+    }
+}
+
+/// Forwards captured lambda panics to the execution callback as `Err`s.
+fn report_lambda_panics<C>(panics: Vec<LambdaPanic>, callback: &C)
+where
+    C: Fn(Result<ExecutionStats>),
+{
+    for panic in panics {
+        callback(Err(Error::EventLambdaPanic {
+            node_id: panic.node_id,
+            message: panic.message,
+        }));
     }
 }
 
@@ -299,10 +339,11 @@ async fn worker_loop<ExecutionCallback>(
             }, if event_loop.is_some() => {
                 if n == 0 {
                     // Event channel closed with loop still nominally
-                    // running — lambdas all died. Tear down and keep
-                    // going; no stats to report.
+                    // running — lambdas all died (returned or panicked).
+                    // Tear down, report any panics, and keep going.
                     if let Some((mut handle, _)) = event_loop.take() {
-                        handle.stop().await;
+                        let panics = handle.stop().await;
+                        report_lambda_panics(panics, &execution_callback);
                     }
                     continue;
                 }
@@ -317,11 +358,13 @@ async fn worker_loop<ExecutionCallback>(
         // apply graph op → execute → start loop in stable order.
         let needs_stop =
             intent.graph_state.is_some() || intent.loop_request.is_some() || intent.exit;
-        let loop_was_running_before_stop = if needs_stop {
+        let stop_outcome = if needs_stop {
             stop_event_loop(&mut event_loop).await
         } else {
-            false
+            StopOutcome::default()
         };
+        report_lambda_panics(stop_outcome.panics, &execution_callback);
+        let loop_was_running_before_stop = stop_outcome.was_running;
 
         if intent.exit {
             return;
@@ -395,18 +438,30 @@ async fn worker_loop<ExecutionCallback>(
     }
 }
 
+/// Outcome of a teardown: whether a loop was running, and any lambda panics
+/// captured while joining (for the worker to report).
+#[derive(Debug, Default)]
+struct StopOutcome {
+    was_running: bool,
+    panics: Vec<LambdaPanic>,
+}
+
 /// Tears down any running event loop. Dropping the `Receiver` alongside
 /// the handle guarantees that any events still in flight die with the
 /// old channel — there's no way for them to re-enter the worker.
-/// Returns `true` if a loop was actually running.
-async fn stop_event_loop(event_loop: &mut Option<(EventLoopHandle, Receiver<EventRef>)>) -> bool {
+async fn stop_event_loop(
+    event_loop: &mut Option<(EventLoopHandle, Receiver<EventRef>)>,
+) -> StopOutcome {
     match event_loop.take() {
         Some((mut handle, _rx)) => {
-            handle.stop().await;
+            let panics = handle.stop().await;
             tracing::info!("Event loop stopped");
-            true
+            StopOutcome {
+                was_running: true,
+                panics,
+            }
         }
-        None => false,
+        None => StopOutcome::default(),
     }
 }
 
@@ -422,7 +477,7 @@ async fn start_event_loop(
 
     let (event_tx, event_rx) = channel::<EventRef>(EVENT_LOOP_BACKPRESSURE);
     let ready = ReadyState::new(event_triggers.len());
-    let mut join_handles: Vec<JoinHandle<()>> = Vec::default();
+    let mut join_handles: Vec<(EventRef, JoinHandle<()>)> = Vec::default();
 
     for EventTrigger {
         event,
@@ -448,7 +503,8 @@ async fn start_event_loop(
                 }
             }
         });
-        join_handles.push(join_handle);
+        // `event` is `Copy`, so the spawned task and this pairing each keep one.
+        join_handles.push((event, join_handle));
     }
 
     ready.wait().await;
