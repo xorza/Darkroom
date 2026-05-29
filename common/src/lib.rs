@@ -22,6 +22,7 @@ pub mod shared_fn;
 pub mod slot;
 pub mod span;
 pub mod string_ext;
+#[cfg(any(test, feature = "test-support"))]
 pub mod test_utils;
 pub mod toggle;
 

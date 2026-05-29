@@ -34,12 +34,6 @@ impl<T> From<T> for Shared<T> {
     }
 }
 
-impl<T> From<Arc<Mutex<T>>> for Shared<T> {
-    fn from(inner: Arc<Mutex<T>>) -> Self {
-        Self { inner }
-    }
-}
-
 impl<T> Default for Shared<T>
 where
     T: Default,

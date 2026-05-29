@@ -9,7 +9,7 @@ fn workspace_root() -> PathBuf {
 }
 
 /// Ensures the test output directory exists. Safe to call multiple times.
-pub fn ensure_test_output_dir() {
+fn ensure_test_output_dir() {
     static INIT: OnceLock<()> = OnceLock::new();
     INIT.get_or_init(|| {
         std::fs::create_dir_all(workspace_root().join("test_output"))
