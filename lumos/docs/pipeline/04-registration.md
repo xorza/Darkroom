@@ -434,8 +434,8 @@ MAGSAC++ paper (arXiv 1912.05909, §2.1–2.2) gives the closed-form loss. The n
 `ρ(r) = ∫₀ʳ x·w(x)dx`. For `0 ≤ r ≤ kσ_max` the paper's closed form is
 
 ```
-ρ(r) = C(n)·2^{(n+1)/2}·[ (σ_max/2)·γ((n+1)/2, r²/2σ²_max)
-                        + (r/4)·(Γ((n−1)/2, r²/2σ²_max) − Γ((n−1)/2, k²/2)) ]
+ρ(r) = [C(n)·2^{(n+1)/2}/σ_max]·[ (σ²_max/2)·γ((n+1)/2, r²/2σ²_max)
+                                 + (r²/4)·(Γ((n−1)/2, r²/2σ²_max) − Γ((n−1)/2, k²/2)) ]
 ```
 
 with `ρ(r)=ρ(kσ_max)` constant beyond, where `γ` is lower- and `Γ` upper-incomplete
@@ -468,7 +468,8 @@ substitutes the `a=1` incomplete gamma `1−e^{−x}` for the lower term and `e^
 the upper `(Γ_complete − Γ_k)` factor, **and drops** the global `C(n)·2^{(n+1)/2}/σ_max`
 prefactor. I verified numerically that this diverges from the paper's `ρ` at every
 `r>0` (e.g. at σ_max=1: paper-n2 ρ(1.0)=0.323, paper-n4 ρ(1.0)=0.285, lumos
-loss(1.0)=0.348; at r=3 they diverge further, paper-n4=0.861 vs lumos=0.519). So
+loss(1.0)=0.348; the gap widens with r — at r=2, paper-n4=0.746 vs lumos=0.568, and
+at r=3, paper-n4=0.908 vs lumos=0.519). So
 lumos's scorer is **MAGSAC++-*inspired*, not the MAGSAC++ loss**: a smooth,
 monotone-increasing, threshold-free robust kernel that captures the *qualitative*
 behavior (continuous inlier→outlier fade, σ-derived scale, `1/loss` quality,

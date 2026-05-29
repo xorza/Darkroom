@@ -60,8 +60,9 @@ values**. The procedure (verified in SEP `background.c`):
 2. Build a histogram with bins spanning ±`QUANTIF_NSIGMA`=5 σ
    (`background.c:382-386`).
 3. **Iteratively clip** the histogram at ±3σ around its *median* until σ
-   converges (changes <0.02%, i.e. `EPS=1e-4` on the σ ratio) or σ drops below
-   0.1, max 100 iterations (`backguess`, `background.c:490-524`).
+   converges (relative change ≤ `EPS=1e-4`, i.e. <0.01% on the σ ratio) or σ
+   drops below 0.1, max 100 iterations (`backguess`, `background.c:490-524`;
+   the loop guard is `fabs(sig/sig1 − 1.0) > EPS`).
 4. Choose the sky estimate by a **crowding criterion** (`background.c:525-531`):
 
    ```
@@ -117,8 +118,10 @@ returns `*sigma = sig·qscale`, `background.c:533`). This becomes the σ(x,y) ma
 > `bkgrms_estimator` (e.g. `MADStdBackgroundRMS` = 1.4826·MAD, or
 > `StdBackgroundRMS`). SExtractor/SEP tie them together (both from the same
 > clipped histogram). MAD-based σ (`1.4826·MAD`) is more outlier-robust than the
-> clipped standard deviation and is what lumos uses (`prepare.rs:74`,
-> `estimate.rs` tiles; `MAD_TO_SIGMA = 1.4826022`).
+> clipped standard deviation and is what lumos uses: the RGB-plane noise weights
+> in `prepare.rs:74`, and the per-tile σ in `tile_grid.rs`
+> (`compute_tile_stats` → `sigma_clipped_median_mad`, `:452`, returns the
+> sigma-clipped **median** plus `mad_to_sigma(mad)`); `MAD_TO_SIGMA = 1.4826022`.
 
 ### 1.3 Mesh filtering (remove bright-source contamination)
 
@@ -127,11 +130,25 @@ clipping. SExtractor median-filters the *tile grid itself* with a small kernel
 (`BACK_FILTERSIZE`, default 3×3) before interpolation: each node is replaced by
 the median of its neighbors **only if** the change exceeds `BACK_FILTERTHRESH`
 (`fthresh`) — SEP `filterback`, `background.c:540-659`, the test is
-`fabs(med − back[i]) >= fthresh`. Bad tiles (too few good pixels,
-`BACK_MINGOODFRAC`=0.5) are flagged `-BIG` and filled from the nearest valid
-tile (`background.c:569-596`). This step is what makes the mesh robust to a few
-contaminated tiles. lumos does **not** currently median-filter its tile grid
-(§8 gap).
+`fabs(med − back[i]) >= fthresh`. The σ map is median-filtered alongside the sky
+map (`background.c:627`). **The default `fthresh` is `0.0` in both tools**
+(SExtractor `BACK_FILTTHRESH`, `preflist.h:62`, range `[0, BIG]`; SEP
+`fthresh=0.0`, `sep.pyx:390`), so `|med − back| >= 0` is always true and the
+**default behavior is unconditional replacement** with the 3×3 neighbor median.
+The threshold only suppresses replacement once a user raises it above zero. Bad
+tiles (too few good pixels, `BACK_MINGOODFRAC`=0.5) are flagged `-BIG` and
+filled from the nearest valid tile (`background.c:569-596`). This step is what
+makes the mesh robust to a few contaminated tiles.
+
+lumos **does** median-filter its tile grid — `apply_median_filter`
+(`tile_grid.rs:208-249`) runs on every `compute()` (`:87`), replacing each tile's
+median *and* σ with the median of its 3×3 tile neighborhood (`:244-245`,
+edge tiles use the available neighbors). Because the replacement is
+**unconditional**, this matches SExtractor/SEP at their default `fthresh=0`.
+Two deviations: lumos exposes no `fthresh` knob (it cannot replicate a non-zero
+`BACK_FILTERTHRESH`), and it skips the filter entirely for grids smaller than
+3×3 tiles (`:212`), whereas SExtractor/SEP still filter small grids with a
+shrunk window.
 
 ### 1.4 Interpolation: bicubic spline, not bilinear
 
@@ -568,12 +585,20 @@ carries error `npix²·σ_sky²/n_sky` (n_sky = sky-annulus pixel count). Photom
 codes that use a small sky annulus add this term; lumos's global-mesh σ makes it
 negligible. The equation also assumes Poisson ≈ Gaussian, valid for `N ≳ 10` e⁻.
 
-lumos implements exactly this (`compute_snr`, `centroid/mod.rs:721-750`):
-with a `NoiseModel{gain, read_noise}` it uses
-`total_var = flux/g + npix·(σ_sky² + R²/g²)` (the shot + sky + read terms);
-without a noise model it falls back to the background-limited
-`SNR = flux / (σ_sky·sqrt(npix))`. The full form requires the user to supply
-gain and read noise (`config.noise_model`).
+lumos implements exactly this (`compute_snr`, `centroid/mod.rs:721-750`) with
+three branches keyed on what the `NoiseModel` supplies: (1) gain **and** read
+noise → `total_var = flux/g + npix·(σ_sky² + R²/g²)` (shot + sky + read); (2)
+gain only → `flux/g + npix·σ_sky²` (drops the read term, `:737`); (3) no noise
+model → background-limited `total_var = npix·σ_sky²`, i.e.
+`SNR = flux / (σ_sky·sqrt(npix))`. Two implementation details worth stating:
+`npix` is the **full square stamp** `(2r+1)²` (`:639`), not an
+above-threshold/aperture pixel count — flux is summed over the same full stamp,
+so signal and the `npix`-scaled noise terms are consistent but both span a
+larger region than a tight aperture would; and `σ_sky` (`avg_noise`) is the mean
+of the per-pixel noise map over the stamp's **outer ring** (`r² >
+(r−2)²`, `:598-603`), a local sky-noise estimate rather than a global scalar.
+The full CCD form requires the user to supply gain and read noise
+(`config.noise_model`).
 
 > **Pitfall — gain unknown / data normalized to [0,1].** lumos pixels are
 > normalized to [0,1] (planar f32), so "flux" and σ are in normalized units, not
@@ -593,9 +618,13 @@ From the flux-weighted second central moments
   semi-axes `a=sqrt(λ₁)`, `b=sqrt(λ₂)` (SExtractor `A_IMAGE`,`B_IMAGE`,`THETA`,
   `analyse.c:273-296`). **Eccentricity** `e = sqrt(1 − (b/a)²) = sqrt(1 − λ₂/λ₁)`
   (lumos `centroid/mod.rs:616-630`); **ellipticity** `= 1 − b/a`. Circular → 0.
-  When the source is unresolved (moment matrix near-singular, `x2·y2−xy² < 0.0694`)
-  SExtractor adds 1/12 to the diagonal (the pixel-quantization variance) and flags
-  `OBJ_SINGU` (`analyse.c:259-271`) — a subtlety lumos does not replicate.
+  When the source is unresolved (moment matrix near-singular,
+  `x2·y2−xy² < 0.00694`) SExtractor adds `1/12 = 0.0833333` to each diagonal
+  moment (the pixel-quantization variance of a uniform 1-px-wide distribution)
+  and flags `OBJ_SINGU` (SEP `analyse.c:259-263`: `if (xm2·ym2 − xym·xym <
+  0.00694) { xm2 += 0.0833333; ym2 += 0.0833333; … |= SEP_OBJ_SINGU; }`) — a
+  subtlety lumos does not replicate. (Without it, an unresolved 1–2 px blob can
+  drive `λ₂→0` and force `e→1`, spuriously failing the eccentricity gate.)
 
 Eccentricity is the single most useful non-stellar reject: galaxies, blends, and
 trailed stars have high e; round PSFs have e≈0.
@@ -759,7 +788,8 @@ A reference pipeline, in order:
    first to kill mosaic artifacts.
 2. **Background:** 64-px tiled mesh; per tile, sigma-clipped histogram → mode
    `2.5·med−1.5·mean` (median if `|mean−med|/σ ≥ 0.3`); σ from clipped std or
-   1.4826·MAD; **3×3 median-filter the tile grid** with a threshold;
+   1.4826·MAD; **3×3 median-filter the tile grid** (sky *and* σ; replacement
+   gated by `BACK_FILTERTHRESH`, default 0 = unconditional);
    natural-bicubic interpolate to per-pixel sky and σ. On crowded fields, ≥1
    object-masked refinement pass.
 3. **FWHM:** auto-estimate from a strict first-pass detection (high threshold,
@@ -825,7 +855,7 @@ A reference pipeline, in order:
 
 ## 8. How lumos currently does it — and gaps/opportunities
 
-**Pipeline (`detector/mod.rs:122-218`):** prepare → background (+optional
+**Pipeline (`detector/mod.rs:122-222`, `StarDetector::detect`):** prepare → background (+optional
 iterative refine) → FWHM estimate → detect (matched filter + threshold + CCL +
 deblend) → measure (parallel centroid + metrics) → filter. This matches the
 canonical six-stage flow and is well-structured.
@@ -834,6 +864,9 @@ canonical six-stage flow and is well-structured.
 
 - Tiled (64 px) sigma-clipped background with **natural bicubic** interpolation
   and **per-pixel σ** map (`background/mod.rs`), MAD-based σ (1.4826·MAD).
+- **3×3 tile-grid median filter** on both the sky and σ grids
+  (`tile_grid.rs:208-249`, run on every `compute()`) — matches SExtractor/SEP
+  `filterback` at its default `BACK_FILTERTHRESH=0` (unconditional replacement).
 - Optional **object-masked iterative refinement** for crowded fields
   (`refine_background`).
 - **Matched-filter** detection with correct `sqrt(ΣK²)` kernel-energy
@@ -866,31 +899,35 @@ canonical six-stage flow and is well-structured.
    compute SROUND as `2·sum2/sum4` over convolved quadrants
    (`star.rs:24-30`, `centroid/mod.rs:671-694`).
 2. **Background mode estimator is median/MAD only — no `2.5·med−1.5·mean` mode and
-   no 0.3 crowding switch.** Adding the Pearson mode (with the median fallback)
-   would reduce sky bias in uncrowded tiles, matching SExtractor/SEP exactly.
-3. **No tile-grid median filter** (`BACK_FILTERSIZE`/`BACK_FILTERTHRESH`). A tile
-   on a bright star biases sky locally; a 3×3 thresholded median filter on the
-   grid (SEP `filterback`) is the standard fix and is cheap.
-4. **Multi-threshold contrast is relative to the *parent node* flux, not the
+   no 0.3 crowding switch.** lumos's per-tile statistic is the sigma-clipped
+   *median* with `σ = 1.4826·MAD` (`tile_grid.rs:452`); SExtractor/SEP use the
+   Pearson mode `2.5·med−1.5·mean` (falling back to median when `|mean−med|/σ ≥
+   0.3`). Adding the mode (with the median fallback) would shave the residual
+   positive-tail bias in uncrowded tiles, matching SExtractor/SEP exactly. This
+   is now the single highest-value background-fidelity gap (the tile-grid median
+   filter, previously flagged here, is in fact present — see §1.3).
+3. **Multi-threshold contrast is relative to the *parent node* flux, not the
    *root/total* flux** as in SExtractor (`mod.rs:811-816` vs SEP
-   `deblend.c:116`). This changes split behavior; align with SExtractor's global
-   `MINCONT·root_flux` bar if cross-tool consistency matters.
-5. **Windowed centroid lacks the SExtractor factor-of-2 update acceleration**
-   (`centroid/mod.rs:491`). Harmless to accuracy with 10 iterations, but adding it
-   matches XWIN and converges faster.
-6. **Sharpness is `peak/core_flux` (3×3)**, an approximation of DAOFIND's
-   `(peak − mean_neighbors)/Gaussian_height`. The DAOFIND form is more
-   discriminating for CRs vs. undersampled stars; consider it, or add a
-   **Laplacian (L.A.Cosmic) CR test** for undersampled data where a sharpness cut
-   would reject real faint stars.
-7. **Flux clamps negatives to 0** (`centroid/mod.rs:574`) — fine for detection,
-   biases photometry; expose an unclamped flux for measurement use.
-8. **No singular-moment 1/12 regularization / `OBJ_SINGU` flag** for unresolved
-   sources (SExtractor `analyse.c:259-271`) — FWHM/eccentricity of 1–2 px blobs
-   can be ill-defined.
+   `deblend.c:116`, `value0 = root.fdflux · mincont`). This changes split
+   behavior; align with SExtractor's global `MINCONT·root_flux` bar if cross-tool
+   consistency matters.
+4. **Windowed centroid lacks the SExtractor factor-of-2 update acceleration**
+   (`centroid/mod.rs:491` is the plain `Σwx/Σw`). Harmless to accuracy with 10
+   iterations, but adding it matches XWIN and converges in 3–5 steps.
+5. **Sharpness is `peak/core_flux` (3×3)** (`centroid/mod.rs:644-649`), an
+   approximation of DAOFIND's `(peak − mean_neighbors)/Gaussian_height`. The
+   DAOFIND form is more discriminating for CRs vs. undersampled stars; consider
+   it, or add a **Laplacian (L.A.Cosmic) CR test** for undersampled data where a
+   sharpness cut would reject real faint stars.
+6. **Flux clamps negatives to 0** (`centroid/mod.rs:574`) — fine for detection,
+   biases photometry; expose an unclamped flux for measurement use. SNR's
+   `npix` is also the full square stamp `(2r+1)²`, not an aperture count (§5.2).
+7. **No singular-moment 1/12 regularization / `OBJ_SINGU` flag** for unresolved
+   sources (SEP `analyse.c:259-263`, threshold `x2·y2−xy² < 0.00694`) —
+   FWHM/eccentricity of 1–2 px blobs can be ill-defined and over-reject.
 
-None of these block correct detection; #1 (naming) and #2/#3 (background fidelity)
-are the highest-value alignments with the reference implementations.
+None of these block correct detection; #1 (roundness naming) and #2 (background
+mode) are the highest-value alignments with the reference implementations.
 
 ---
 
@@ -941,13 +978,60 @@ medfac/meafac), `filter.c:177-195` (`Σ|K|` normalization + `varnorm=√ΣK²`);
 `daofinder.py:534-577` (SROUND `2·sum2/sum4`), `:580-594` (sharpness), `:862-976`
 (GROUND marginal-Gaussian fit on *unconvolved* image, `2·(hx−hy)/(hx+hy)`); PSFEx
 `diagnostic.c:184-225` (Moffat as a *diagnostic*, not the PSF model); lumos
-`star.rs:24-30`, `centroid/mod.rs:671-694` (roundness), `:55-56` (no XWIN ×2),
-`convolution/mod.rs:99-117` (`√ΣK²`), `multi_threshold/mod.rs` (parent-relative
-contrast), `config.rs:265,272,273,286,287,290` (defaults).
+`star.rs:24-30`, `centroid/mod.rs:671-694` (roundness), `:491` (no XWIN ×2 —
+plain `Σwx/Σw`), `convolution/mod.rs:99-117` (`√ΣK²`), `multi_threshold/mod.rs`
+(parent-relative contrast), `config.rs:265,272,273,286,287,290` (defaults).
 
 **Still unverifiable / could not parse:** Bertin & Arnouts 1996 itself (scanned
-image — secondary sources cover all cited claims); Zackay & Ofek 2017 and van Dokkum
-2001 not re-fetched this pass (carried from pass 1 with their published claims).
+image — secondary sources cover all cited claims); Zackay & Ofek 2017 not
+re-fetched this pass (carried from pass 1 with its published claims).
+
+---
+
+## Re-verification (pass 3)
+
+Every claim above was re-checked against the cloned reference source and the
+lumos tree, plus targeted online re-fetches. Corrections applied this pass:
+
+- **lumos *does* median-filter its tile grid** (the largest fix). `tile_grid.rs`
+  `apply_median_filter` (`:208-249`) runs on every `compute()` (`:87`), replacing
+  each tile's median **and** σ with the 3×3 tile-neighborhood median (`:244-245`).
+  SEP/SExtractor default `fthresh = 0.0` (`sep.pyx:390`; `preflist.h:62`,
+  `BACK_FILTTHRESH 0.0`), so their `filterback` replacement is *also unconditional
+  by default* — lumos matches it. The prior "no tile-grid median filter" gap was
+  wrong; §1.3, the §8 "gets right" list, and the §8 gap list are corrected. Only
+  residual deviations: lumos has no `fthresh` knob and skips grids < 3×3 tiles.
+- **Singular-moment threshold is `< 0.00694`, not `0.0694`** — SEP
+  `analyse.c:259` (`if (xm2·ym2 − xym·xym < 0.00694)`), then `+= 0.0833333`
+  (= 1/12) and `SEP_OBJ_SINGU` (`:260-263`). Fixed in §5.3 and §8.
+- **Background convergence is `<0.01%`, not `<0.02%`** — `EPS=1e-4` with guard
+  `fabs(sig/sig1 − 1.0) > EPS` (SEP `background.c:467,490`). Fixed in §1.2.
+- **§5.2 expanded:** lumos's `compute_snr` has *three* branches (gain+read,
+  gain-only, neither), and `npix` is the full square stamp `(2r+1)²`, with
+  `σ_sky` taken from the stamp's outer ring — now stated explicitly.
+
+Re-confirmed unchanged (primary source re-read this pass, cite file:line):
+SEP `background.c:528-530` (mode `2.5·med−1.5·mea` + 0.3 switch), `:508-511`
+(histogram-interpolated median), `:625` (filterback `|med−back|>=fthresh`);
+`deblend.c:116,120-122,179,184` (root `value0`, `pow(fdpeak/thresh0,k/xn)`,
+branch test, `m>1`); SExtractor `filter.c:178-195` (`Σ|K|` norm + `varnorm=√ΣK²`,
+zero-sum→variance fallback); SEP `deblend_nthresh=32,cont=0.005` (`sep.pyx:610`),
+SExtractor `DEBLEND_NTHRESH 32 / DEBLEND_MINCONT 0.005` (`preflist.h:207-208`),
+photutils `n_levels=32,contrast=0.001` watershed (`deblend.py:45,582`); photutils
+`daofinder.py:533-577` (SROUND quadrants `2·sum2/sum4`, convolved), `:579-594`
+(sharpness `(peak−data_mean)/convdata_peak`), `:862-976` (GROUND
+`2·(hx−hy)/(hx+hy)`, lstsq marginal Gaussians on the **unconvolved** image),
+`background/core.py:436,478` (`2.5·med−1.5·mean`+0.3), `:388-394` (MMM
+`3·med−2·mean`), `sigma_radius=1.5` (`:211`); PSFEx `diagnostic.c:182-184`
+(`psf_diagnostic` "by fitting Moffat models" — diagnostic only). Online: CCD
+equation re-fetched (Dhillon PHY217 — `S·t·g / √(S·t·g + Ssky·t·g·npix +
+Sdark·t·npix + R²·npix)`, read noise un-rooted; lumos's rearrangement is
+algebraically equivalent); Moffat `FWHM = 2α√(2^(1/β)−1)`, Gaussian = β→∞ limit,
+β=1 = Lorentzian (photutils/MNRAS). lumos source re-read in full this pass:
+`star.rs`, `config.rs`, `centroid/mod.rs`, `convolution/mod.rs`,
+`detector/mod.rs`, `detector/stages/{prepare,detect,measure,filter,fwhm}.rs`,
+`background/{mod,estimate}.rs`, `tile_grid.rs`, `math/statistics/mod.rs` — all
+file:line citations confirmed current.
 
 ---
 

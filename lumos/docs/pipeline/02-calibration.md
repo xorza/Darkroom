@@ -108,7 +108,7 @@ divisor — hence `F − FD` (or `F − B`). If you divide lights by a flat that
 own pedestal in it, you inject the flat's bias signal into your data
 (opticalmechanics; astropy guide). This is exactly why lumos passes a `flat_sub`
 (`master_flat_dark` with priority over `master_bias`) into `divide_by_normalized`
-(`$HOME/Projects/Scenarium/lumos/src/calibration_masters/mod.rs:179`).
+(`$HOME/Projects/Scenarium/lumos/src/calibration_masters/mod.rs:181`).
 
 ### 1.3 Linearity and the pedestal problem
 
@@ -117,7 +117,8 @@ sky-free pixel is `0 ± σ`, so roughly half its noise excursions are **negative
 negative values are *real information*. Clamping them to zero biases the mean upward and
 corrupts later noise-weighted statistics. lumos handles this correctly: `CfaImage::subtract`
 deliberately keeps negatives — *"Clamping to zero would introduce a positive bias in the
-stacked result"* (`$HOME/Projects/Scenarium/lumos/src/astro_image/cfa.rs:142`).
+stacked result"* (`$HOME/Projects/Scenarium/lumos/src/astro_image/cfa.rs:144`, in
+`subtract` at line 146).
 
 The classic workaround in integer pipelines (MaxIm DL, some CCD software) is a **pedestal**:
 add a fixed constant (commonly 100 ADU) after subtraction so values stay non-negative,
@@ -236,8 +237,10 @@ weighted average, and entropy-weighted average
 (http://deepskystacker.free.fr/english/technical.htm via search).
 
 **Why average-with-rejection beats plain median for masters:** the median of N frames has
-~1.25× the variance of the mean (for Gaussian noise), so a sigma-clipped/winsorized *mean*
-keeps more SNR while still rejecting cosmic rays and the occasional satellite. Median is the
+~1.57× (π/2) the variance of the mean for Gaussian noise — equivalently ~1.25× the *standard
+deviation* (√(π/2) ≈ 1.25; this is the asymptotic median variance (π/2)·σ²/N, derived in full
+below) — so a sigma-clipped/winsorized *mean* keeps more SNR while still rejecting cosmic rays
+and the occasional satellite. Median is the
 robust fallback when N is too small for rejection statistics to be reliable. lumos encodes
 exactly this heuristic: `stack_cfa_frames` uses the frame-type preset (winsorized mean for
 darks/bias at σ=3.0, sigma-clip mean for flats at σ=2.5) when N ≥ 8, and falls back to
@@ -287,10 +290,15 @@ superbias modeling — its bias master is a straight winsorized mean (a reasonab
 result of stacking thousands of individual bias frames"* by running a **multiscale
 decomposition** (default **7 layers**) over an ordinary master bias whose dominant signal is
 *"a pattern of vertical and/or horizontal stripes."* It then reconstructs **only the
-structured (row/column) component and discards the small-scale random component**: the output
-has *"absolutely no random noise"* yet retains the fixed pattern. The layer count is a scale
-knob — more layers keep finer structure and progressively suppress large-scale banding (e.g.
-10 layers to attenuate a broad horizontal band). The precondition: SuperBias only helps when
+structured (large-scale) component and discards the small-scale detail layers** that carry the
+random noise: the output has *"absolutely no random noise"* (Blackwater Skies, verbatim) yet
+retains the fixed pattern. The layer count works in the *opposite* sense to first intuition:
+because the small-scale layers are the ones thrown away, **fewer layers preserve more (finer)
+structure** while **more layers discard progressively coarser detail**, smoothing harder and so
+attenuating large-scale banding. Default is **7**; reduce to ~6 when the master bias already
+came from ≥50 subs (so finer real structure survives), and *raise* it (Blackwater Skies found
+10 layers "reduces the effect of the large scale horizontal band pattern" along the top edge)
+when a broad band must be suppressed. The precondition: SuperBias only helps when
 the bias's fixed-pattern noise is *structured* (amplifier banding). For a featureless,
 well-randomized bias it gains little — and on CMOS where the bias itself is unreliable (next
 subsection) the concept is moot because you skip the bias entirely.
@@ -355,9 +363,13 @@ the light. Two ways to compute `k`:
 **Mandatory precondition:** dark scaling is only valid on the **bias-free** dark
 (`Dark − Offset`). The bias pedestal does *not* scale with exposure; scaling a dark that
 still contains bias multiplies the pedestal by `k` and leaves a residual offset. This is why
-ccdproc *forces* separate bias handling when `scale=True`, and why DSS works on `Dark − Offset`.
-Confirmed in source: `subtract_dark` computes `scale_factor = data_exposure/dark_exposure`
-and multiplies the master before subtracting (core.py:851, pass 2).
+the ccdproc *guide* insists bias and dark be handled separately whenever the dark is scaled,
+and why DSS works on `Dark − Offset`. Note the precondition is a *workflow* rule, not enforced
+by the code: `subtract_dark(scale=True)` simply computes `scale_factor =
+data_exposure/dark_exposure` and multiplies whatever master it is handed before subtracting
+(core.py:851, verified pass 2); keeping that master bias-free is the caller's responsibility,
+which `ccd_process` arranges by subtracting the master bias (core.py:346) *before* the scaled
+dark (core.py:355).
 
 **When dark scaling fails (anti-pattern territory):**
 - **Scaling *up* a short dark amplifies its noise** (a failure mode independent of amp glow).
@@ -492,7 +504,7 @@ which neutral point they pick.
 True CCDs have a physical **overscan** region (non-illuminated readout columns) used to track
 the bias level *per frame*, absorbing slow bias drift between exposures. ccdproc supports
 this with `subtract_overscan` (median or modeled per row/column) and `trim_image`
-(`$HOME/Projects/Scenarium/lumos/.tmp/refs/ccdproc/ccdproc/core.py:486` and
+(`$HOME/Projects/Scenarium/lumos/.tmp/refs/ccdproc/ccdproc/core.py:487` and
 `ccd_process` lines 294–315). Consumer CMOS/DSLR sensors expose no overscan; the bias-drift
 problem there is handled either by frequent bias re-takes or — better — by folding bias into
 matched darks/flat-darks (§2.3). lumos has no overscan support (irrelevant for its RAW/CMOS
@@ -576,9 +588,12 @@ wrong color:
   a false color into the demosaic. lumos `bayer_same_color_median` uses the 8 stride-2
   neighbors (`defect_map.rs:307–334`); Siril's cosmetic median uses `step = 2` for CFA data,
   same idea (`cosmetic_correction.c:46, 73–74, 131–132`).
-- **X-Trans:** lumos searches a radius-6 (one full 6×6 period) window for same-color pixels,
-  sorts by Manhattan distance, and medians the closest 24 to avoid directional bias
-  (`defect_map.rs:340–383`). (Siril explicitly refuses cosmetic correction on X-Trans —
+- **X-Trans:** lumos searches a ±6-pixel window (13×13 = 169 candidates; since the X-Trans
+  mosaic repeats every 6 px this spans roughly two full periods in each direction) for
+  same-color pixels, sorts by Manhattan distance, and medians the closest 24 to avoid
+  directional bias (`defect_map.rs:340–383`). (The in-code comments are loose about this —
+  `defect_map.rs:290` says "2*period", `:337` says "one full period"; the literal value is
+  `radius = 6`.) (Siril explicitly refuses cosmetic correction on X-Trans —
   `preprocess.c:388–390` — so lumos is *more* capable here.)
 
 Using the **median** (not mean) of neighbors is important: a defect often clusters with other
@@ -698,11 +713,13 @@ must run on **linear, calibrated** data. ccdproc also offers a simpler `cosmicra
 ### 4.3 Where CR rejection belongs in the pipeline
 
 The important, well-sourced nuance: **single-frame CR rejection (L.A.Cosmic) belongs before
-registration/warping**, because *"stacking often requires spatial interpolation of the input
-images, and any cosmic rays not previously identified can be spread over many pixels by
-spatially extended interpolation kernels"* (van Dokkum 2001 / arxiv astro-ph 0108003;
-CSST CR paper arxiv 2511.01524 — two sources). A CR smeared by a Lanczos kernel during warp
-becomes a low-amplitude blob that sigma clipping can no longer reject. So:
+registration/warping**. Van Dokkum 2001 motivates single-frame rejection precisely for this
+case — it is desirable *"if the images are shifted with respect to each other by a non-integer
+number of pixels"* (arXiv astro-ph/0108003, verified) — because a non-integer shift forces the
+warp to *interpolate*, and a CR smeared by a Lanczos kernel becomes a low-amplitude blob that
+sigma clipping can no longer reject. (The "interpolation spreads unrejected CRs" framing is the
+standard operational rationale behind this ordering; it is *not* a verbatim van Dokkum quote —
+the paper states it through the non-integer-shift argument above.) So:
 
 - **Few frames / single frame** → run L.A.Cosmic on each *calibrated, pre-registration* frame.
 - **Many frames** → dither + sigma/winsorized clip at the stack catches most CRs, but running
@@ -893,7 +910,7 @@ median for mono. (lumos already does all three.)
    under illumination are invisible. *Opportunity:* also derive cold/dead pixels from the
    master flat.
 6. **No defect-map persistence / external bad-pixel-map import** (Siril supports
-   `apply_cosme_to_image` from a file, `preprocess.c:436`). *Opportunity:* serialize the
+   `apply_cosme_to_image` from a file, `preprocess.c:437`). *Opportunity:* serialize the
    `DefectMap` so it can be reused / hand-edited.
 7. **Flat normalization uses the whole-frame mean**, not Siril's central-region mean. For
    heavily vignetted optics the edge pixels pull the mean down slightly; a central-region (or
@@ -963,7 +980,8 @@ DSS C++ source**, superseding the pass-1 search snippet).
     (flat normalization via central-region mean, `equalize_cfa`, cosmetic-from-dark); `:409`
     `prepro_image_hook` (dark-optim → calibrate → cosmetic → debayer).
   - `core/siril.c:453` `compute_grey_flat` (per-CFA-channel means, coeff1=R̄/Ḡ, coeff2=B̄/Ḡ).
-  - `filters/cosmetic_correction.c:182` `find_deviant_pixels` (mean±k·σ thresholds); `:43`
+  - `filters/cosmetic_correction.c:182` `find_deviant_pixels` (**median**±k·σ thresholds,
+    `median = stat->median` / `sigma = stat->sigma` at lines 200–213); `:43`
     CFA-aware median (`step = is_cfa ? 2 : 1`).
 - **DeepSkyStacker** (`DeepSkyStackerKernel/`):
   - `DarkFrame.cpp:127` `ComputeMinimumEntropyFactor` (dark factor k∈[0,5] minimizing entropy);
@@ -973,8 +991,8 @@ DSS C++ source**, superseding the pass-1 search snippet).
   - `src/calibration_masters/mod.rs` (`calibrate` order, flat-dark priority, presets/fallback).
   - `src/calibration_masters/defect_map.rs` (MAD per-color thresholds, sigma floor, CFA-color
     neighbor median, X-Trans handling).
-  - `src/astro_image/cfa.rs:140` `subtract` (preserves negatives); `:169`
-    `divide_by_normalized` (per-CFA-channel means).
+  - `src/astro_image/cfa.rs:146` `subtract` (preserves negatives, rationale at line 144);
+    `:169` `divide_by_normalized` (per-CFA-channel means).
   - `src/stacking/config.rs:163` frame-type combine presets.
 
 ### Online (cross-verified, ≥2 sources per major claim)
@@ -985,8 +1003,13 @@ DSS C++ source**, superseding the pass-1 search snippet).
   https://ccdproc.readthedocs.io/en/latest/api/ccdproc.cosmicray_lacosmic.html
 - van Dokkum 2001, *Cosmic-Ray Rejection by Laplacian Edge Detection* (L.A.Cosmic):
   https://iopscience.iop.org/article/10.1086/323894 ; arXiv: https://arxiv.org/pdf/astro-ph/0108003
-- CR rejection before interpolation / single vs multi-frame:
-  https://arxiv.org/html/2511.01524 ; https://www.cambridge.org/core/journals/publications-of-the-astronomical-society-of-australia/article/evaluation-of-cosmic-ray-rejection-algorithms-on-singleshot-exposures/F36D800232478BE7D3B5A29543B0D4CF
+- Single- vs multi-frame CR rejection (the "run single-frame rejection before an interpolating
+  warp" ordering is grounded in van Dokkum 2001's non-integer-shift argument above, not in
+  these two — they are corroborating context on single-frame methods and rejection evaluation):
+  *Cosmic Ray Detection and Rejection for CSST* (single-image method, since CSST's survey
+  strategy invalidates multi-frame stacking) https://arxiv.org/abs/2511.01524 ;
+  PASA *Evaluation of cosmic-ray rejection algorithms on single-shot exposures*
+  https://www.cambridge.org/core/journals/publications-of-the-astronomical-society-of-australia/article/evaluation-of-cosmic-ray-rejection-algorithms-on-singleshot-exposures/F36D800232478BE7D3B5A29543B0D4CF
 - Calibration counts / combine methods / sigma κ≈3:
   https://www.opticalmechanics.com/mastering-calibration-frames-for-deep-sky-astrophotography/ ;
   https://practicalastrophotography.com/a-brief-guide-to-calibration-frames/ ;
