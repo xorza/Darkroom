@@ -51,7 +51,7 @@ impl MainWindow {
         &mut self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
-        scene: &mut Scene,
+        scene: &Scene,
         host: Option<&HostHandle>,
         doc: &Document,
         out: &mut Vec<Intent>,

@@ -21,6 +21,12 @@ use crate::scene::Scene;
 #[derive(Default, Debug)]
 pub(crate) struct SelectionUI {
     band: Option<RubberBand>,
+    /// The swept set while a band is active, for node draw to highlight
+    /// live. Owned here rather than written into `Scene::selected_nodes`
+    /// so the projection stays a read-only mirror of `Document`. `None`
+    /// when no band is in flight (node draw falls back to the committed
+    /// selection).
+    preview: Option<BTreeSet<NodeId>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -45,12 +51,20 @@ impl RubberBand {
 }
 
 impl SelectionUI {
+    /// The live swept set while a band is in flight, for node draw to
+    /// paint against; `None` when no band is active (the caller falls back
+    /// to the committed `scene.selected_nodes`).
+    pub(crate) fn preview(&self) -> Option<&BTreeSet<NodeId>> {
+        self.preview.as_ref()
+    }
+
     /// Drive the gesture from the outer-canvas response: latch on an
     /// unmodified left-drag-start, track the live corner, and recompute
-    /// the swept set every frame. The set is written straight into
-    /// `scene.selected_nodes` so nodes highlight *live* as the rectangle
-    /// moves; `Document`/undo are only touched once, by the committing
-    /// `SetSelection` emitted on release. Esc cancels without emitting.
+    /// the swept set every frame. The set is stashed in `self.preview` so
+    /// nodes highlight *live* as the rectangle moves (read back via
+    /// [`Self::preview`]); `Document`/undo are only touched once, by the
+    /// committing `SetSelection` emitted on release. Esc cancels without
+    /// emitting.
     ///
     /// The pre-drag selection (the additive base) needs no stored copy:
     /// `Scene::rebuild` reseeds `selected_nodes` from `Document` at the
@@ -59,7 +73,7 @@ impl SelectionUI {
     pub(crate) fn apply(
         &mut self,
         ui: &mut Ui,
-        scene: &mut Scene,
+        scene: &Scene,
         gesture: Option<CanvasGesture>,
         out: &mut Vec<Intent>,
     ) {
@@ -78,10 +92,15 @@ impl SelectionUI {
             });
         }
         let Some(mut band) = self.band else {
+            // No band in flight — drop any preview left by the
+            // just-committed (or cancelled) drag so node draw falls back
+            // to the now-committed `scene.selected_nodes`.
+            self.preview = None;
             return;
         };
         if ui.escape_pressed() {
             self.band = None;
+            self.preview = None;
             return;
         }
         if let Some(p) = resp.pointer_local {
@@ -109,15 +128,22 @@ impl SelectionUI {
                 selected.insert(n.id);
             }
         }
-        // Live preview: this frame's nodes draw against the swept set.
-        scene.selected_nodes = selected.clone();
-        // Still dragging → stash the updated corner and wait. `None`
-        // delta is the release edge that commits the selection.
+        // Still dragging → stash the updated corner + the swept preview
+        // (node draw reads it via `preview()` for live highlight) and
+        // wait. A `None` delta is the release edge that commits.
         if resp.drag_delta_by(PointerButton::Left).is_some() {
             self.band = Some(band);
+            self.preview = Some(selected);
             return;
         }
-        out.push(Intent::SetSelection { to: selected });
+        // Keep the swept set as the preview for *this* (release) frame's
+        // draw so it paints the final selection; the `SetSelection` drains
+        // post-record, and next frame — band now `None` — the early return
+        // above clears the preview and draw falls back to the committed set.
+        out.push(Intent::SetSelection {
+            to: selected.clone(),
+        });
+        self.preview = Some(selected);
         self.band = None;
     }
 

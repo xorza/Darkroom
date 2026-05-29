@@ -3,19 +3,14 @@ pub mod view_node;
 use anyhow::{Result, bail};
 use common::{KeyIndexVec, SerdeFormat, is_debug};
 use glam::Vec2;
-use scenarium::graph::{Binding, InputPort, Node, NodeKind, OutputPort, Subscription};
+use scenarium::graph::{Node, NodeKind};
 use scenarium::prelude::{FuncLib, Graph as CoreGraph, NodeId, SubgraphDef, SubgraphId};
 use scenarium::subgraph::SubgraphRef;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 
 use crate::document::view_node::ViewNode;
-use crate::edit::intent::Intent;
 use crate::edit::reconcile::reconcile_def;
-
-/// World-space offset applied to duplicated nodes so the copies don't
-/// land exactly on top of their originals.
-const DUPLICATE_OFFSET: Vec2 = Vec2::new(32.0, 32.0);
 
 /// Default topological-column auto-layout parameters, shared by every
 /// place that seeds a fresh view (the root on load, each subgraph
@@ -42,35 +37,14 @@ pub enum GraphRef {
     Local(SubgraphId),
 }
 
-/// A subgraph resolved for promotion into the library: the def to
-/// publish (owned copy) plus where to re-link its `origin` afterward.
-pub struct PromoteSource {
-    pub def: SubgraphDef,
-    /// Where the source local def lives, so the caller can point its
-    /// `origin` at the freshly-created library entry. `None` when the
-    /// source is a library (`Linked`) def — nothing in the document to
-    /// re-link.
-    pub relink: Option<RelinkLocal>,
-}
-
-/// Locates a local subgraph def for an `origin` re-link: the graph
-/// whose local table holds it, plus the def's id.
-pub struct RelinkLocal {
-    pub holder: GraphRef,
-    pub def_id: SubgraphId,
-}
-
-/// Internal resolution result shared by export + promote.
-enum Promotable {
-    /// First selected subgraph-instance node in the active graph.
-    Node { graph: GraphRef, sref: SubgraphRef },
-    /// The open subgraph interior (its def lives in the root table).
-    OpenTab { id: SubgraphId },
-}
-
 /// Which side of a subgraph def's interface a boundary-port edit targets:
 /// `Input` → `def.inputs` (the `SubgraphInput` node's output ports),
 /// `Output` → `def.outputs` (the `SubgraphOutput` node's input ports).
+///
+/// The side names the *interface*, not the UI column it shows in: a
+/// boundary node mirrors the interface, so the `SubgraphOutput` node's
+/// *input column* edits the `Output` side and the `SubgraphInput` node's
+/// *output column* edits the `Input` side (see `gui::node::port_row`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BoundarySide {
     Input,
@@ -355,76 +329,6 @@ impl Document {
         self.tabs[self.active]
     }
 
-    /// Resolve which subgraph def an export targets: the first selected
-    /// subgraph-instance node in the active graph (resolved against that
-    /// graph's own `Local` table or the shared `FuncLib` for `Linked`),
-    /// else the currently open subgraph when inside one. `None` when
-    /// neither resolves.
-    pub fn subgraph_to_export<'a>(&'a self, func_lib: &'a FuncLib) -> Option<&'a SubgraphDef> {
-        match self.resolve_promotable(func_lib)? {
-            Promotable::Node { graph, sref } => self.graph_for(graph)?.resolve_def(sref, func_lib),
-            Promotable::OpenTab { id } => self.graph.subgraphs.by_key(&id),
-        }
-    }
-
-    /// Like [`Self::subgraph_to_export`], but for promoting into the
-    /// library: returns an owned copy of the resolved def plus, when the
-    /// source is a `Local` def in this document, where to re-link its
-    /// `origin` after the library entry is created. `None` (no relink)
-    /// for a `Linked` source — there's no in-document def to own it.
-    pub fn promote_source(&self, func_lib: &FuncLib) -> Option<PromoteSource> {
-        let (def, relink) = match self.resolve_promotable(func_lib)? {
-            Promotable::Node { graph, sref } => {
-                let def = self.graph_for(graph)?.resolve_def(sref, func_lib)?.clone();
-                let relink = match sref {
-                    SubgraphRef::Local(id) => Some(RelinkLocal {
-                        holder: graph,
-                        def_id: id,
-                    }),
-                    SubgraphRef::Linked(_) => None,
-                };
-                (def, relink)
-            }
-            // An open subgraph tab is always a `Local` def living in the
-            // root table, regardless of which interior is shown.
-            Promotable::OpenTab { id } => (
-                self.graph.subgraphs.by_key(&id)?.clone(),
-                Some(RelinkLocal {
-                    holder: GraphRef::Main,
-                    def_id: id,
-                }),
-            ),
-        };
-        Some(PromoteSource { def, relink })
-    }
-
-    /// Shared resolution for export / promote: the first selected
-    /// subgraph-instance node in the active graph (whose def resolves),
-    /// else the open subgraph interior. `None` when neither applies.
-    fn resolve_promotable(&self, func_lib: &FuncLib) -> Option<Promotable> {
-        let target = self.active_target();
-        let graph = self.graph_for(target)?;
-        if let Some(view) = self.view(target) {
-            for nid in &view.selected_nodes {
-                if let Some(node) = graph.by_id(nid)
-                    && let NodeKind::Subgraph(sref) = node.kind
-                    && graph.resolve_def(sref, func_lib).is_some()
-                {
-                    return Some(Promotable::Node {
-                        graph: target,
-                        sref,
-                    });
-                }
-            }
-        }
-        match target {
-            GraphRef::Local(id) if self.graph.subgraphs.by_key(&id).is_some() => {
-                Some(Promotable::OpenTab { id })
-            }
-            _ => None,
-        }
-    }
-
     /// Ensure a `GraphView` exists for a local subgraph interior,
     /// auto-laying-out its nodes on first creation. Returns `false` if
     /// the subgraph no longer exists.
@@ -560,76 +464,6 @@ impl Document {
         id
     }
 
-    /// Build a `DuplicateNodes` intent for `target`'s current selection:
-    /// clone each selected node with a fresh id and an offset position,
-    /// copy const-value bindings, and recreate the data + event
-    /// connections whose *both* endpoints are selected (wires to
-    /// unselected nodes are dropped). `None` when nothing is selected or
-    /// the target doesn't resolve.
-    pub fn duplicate_intent(&self, target: GraphRef) -> Option<Intent> {
-        let EditScopeRef { graph, view } = self.scope(target)?;
-        if view.selected_nodes.is_empty() {
-            return None;
-        }
-
-        let mut id_map: HashMap<NodeId, NodeId> = HashMap::new();
-        let mut nodes = Vec::new();
-        for old_id in &view.selected_nodes {
-            let Some(node) = graph.by_id(old_id) else {
-                continue;
-            };
-            let new_id = NodeId::unique();
-            id_map.insert(*old_id, new_id);
-            let mut clone = node.clone();
-            clone.id = new_id;
-            let pos = view.view_nodes.by_key(old_id).unwrap().pos + DUPLICATE_OFFSET;
-            nodes.push((ViewNode { id: new_id, pos }, clone));
-        }
-
-        // Each selected node's own input ports. Const/None copy verbatim;
-        // a `Bind` survives only if its source is also selected (remapped
-        // to the clone) — otherwise the wire is external and dropped.
-        let mut bindings = Vec::new();
-        for old_id in &view.selected_nodes {
-            for (port, binding) in graph.bindings_touching(*old_id) {
-                if port.node_id != *old_id {
-                    continue;
-                }
-                let new_binding = match binding {
-                    Binding::Bind(src) => match id_map.get(&src.node_id) {
-                        Some(&new_src) => Binding::Bind(OutputPort {
-                            node_id: new_src,
-                            port_idx: src.port_idx,
-                        }),
-                        None => continue,
-                    },
-                    other => other,
-                };
-                bindings.push((InputPort::new(id_map[old_id], port.port_idx), new_binding));
-            }
-        }
-
-        // Event subscriptions internal to the selection.
-        let mut subscriptions = Vec::new();
-        for s in graph.subscriptions() {
-            if let (Some(&emitter), Some(&subscriber)) =
-                (id_map.get(&s.emitter), id_map.get(&s.subscriber))
-            {
-                subscriptions.push(Subscription {
-                    emitter,
-                    event_idx: s.event_idx,
-                    subscriber,
-                });
-            }
-        }
-
-        Some(Intent::DuplicateNodes {
-            nodes,
-            bindings,
-            subscriptions,
-        })
-    }
-
     /// Current name of a subgraph interface port (`inputs[idx]` for
     /// `Input`, `outputs[idx]` for `Output`), or `None` if the def /
     /// side / index doesn't resolve.
@@ -758,7 +592,7 @@ impl From<CoreGraph> for Document {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scenarium::prelude::{FuncId, StaticValue};
+    use scenarium::prelude::FuncId;
     use scenarium::testing::test_graph as core_test_graph;
 
     /// A childless local def with the given id/name.
@@ -1028,80 +862,6 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_intent_clones_internal_wiring_and_drops_external() {
-        // a -> b (internal edge, both selected); c -> b (external, c not
-        // selected). b also has a Const on input 1. Selecting {a, b} must
-        // duplicate a' and b', keep a'->b' and the Const, drop c->b.
-        let mut doc = Document::default();
-        let a = add_node_at(&mut doc, Vec2::new(0.0, 0.0));
-        let b = add_node_at(&mut doc, Vec2::new(100.0, 0.0));
-        let c = add_node_at(&mut doc, Vec2::new(0.0, 100.0));
-        doc.graph
-            .set_input_binding(InputPort::new(b, 0), (a, 0).into());
-        doc.graph.set_input_binding(
-            InputPort::new(b, 1),
-            Binding::Const(StaticValue::from(7i64)),
-        );
-        doc.graph
-            .set_input_binding(InputPort::new(b, 2), (c, 0).into());
-        doc.main_view.selected_nodes = [a, b].into_iter().collect();
-
-        let Some(Intent::DuplicateNodes {
-            nodes,
-            bindings,
-            subscriptions,
-        }) = doc.duplicate_intent(GraphRef::Main)
-        else {
-            panic!("expected a DuplicateNodes intent");
-        };
-
-        assert_eq!(nodes.len(), 2, "both selected nodes cloned");
-        assert!(subscriptions.is_empty());
-        // Fresh ids, offset positions.
-        let new_ids: BTreeSet<NodeId> = nodes.iter().map(|(_, n)| n.id).collect();
-        assert!(
-            new_ids.is_disjoint(&doc.main_view.selected_nodes),
-            "clones get fresh ids"
-        );
-        let a_clone = nodes
-            .iter()
-            .find(|(vn, _)| vn.pos == Vec2::new(0.0, 0.0) + DUPLICATE_OFFSET)
-            .map(|(_, n)| n.id)
-            .expect("a's clone offset from its origin");
-
-        // Exactly two bindings survive: the internal a'->b' edge and the
-        // Const; the external c->b edge (input 2) is gone.
-        assert_eq!(bindings.len(), 2);
-        let b_clone = nodes
-            .iter()
-            .find(|(vn, _)| vn.pos == Vec2::new(100.0, 0.0) + DUPLICATE_OFFSET)
-            .map(|(_, n)| n.id)
-            .unwrap();
-        let internal = bindings
-            .iter()
-            .find(|(port, _)| port.port_idx == 0)
-            .expect("a'->b' edge present");
-        assert_eq!(internal.0.node_id, b_clone, "edge sinks into b's clone");
-        match &internal.1 {
-            Binding::Bind(src) => {
-                assert_eq!(src.node_id, a_clone, "remapped to a's clone");
-                assert_eq!(src.port_idx, 0);
-            }
-            other => panic!("expected Bind, got {other:?}"),
-        }
-        assert!(
-            bindings
-                .iter()
-                .any(|(port, bind)| port.port_idx == 1 && matches!(bind, Binding::Const(_))),
-            "const binding copied"
-        );
-        assert!(
-            !bindings.iter().any(|(port, _)| port.port_idx == 2),
-            "external edge dropped"
-        );
-    }
-
-    #[test]
     fn create_subgraph_has_only_boundary_nodes() {
         let mut doc = Document::default();
         let id = doc.create_subgraph();
@@ -1159,13 +919,6 @@ mod tests {
         let id2 = doc.create_subgraph();
         assert_ne!(id, id2);
         assert_eq!(doc.graph.subgraphs.len(), 2);
-    }
-
-    #[test]
-    fn duplicate_intent_none_without_selection() {
-        let mut doc = Document::default();
-        add_node_at(&mut doc, Vec2::ZERO);
-        assert!(doc.duplicate_intent(GraphRef::Main).is_none());
     }
 
     #[test]

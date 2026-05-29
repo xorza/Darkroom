@@ -10,7 +10,7 @@ use palantir::{Key, Shortcut, Ui};
 
 use super::Editor;
 use crate::document::GraphRef;
-use crate::edit::intent::{self, Intent, requires_reconcile, requires_relayout};
+use crate::edit::intent::{self, Intent, build_duplicate_intent};
 use crate::gui::menu_bar::MenuCommand;
 
 const UNDO_SHORTCUT: Shortcut = Shortcut::ctrl('Z');
@@ -44,8 +44,8 @@ impl Editor {
         let mut relayout = false;
         let mut reconcile = false;
         let mut on_step = |step: &intent::UndoStep| {
-            relayout |= requires_relayout(step);
-            reconcile |= requires_reconcile(step);
+            relayout |= step.requires_relayout();
+            reconcile |= step.requires_reconcile();
         };
         if undo {
             self.action_stack.undo(&mut self.document, &mut on_step);
@@ -85,7 +85,7 @@ impl Editor {
         if reset_zoom {
             self.intents.push(Intent::SetViewport { pan, scale: 1.0 });
         }
-        if duplicate && let Some(intent) = self.document.duplicate_intent(target) {
+        if duplicate && let Some(intent) = build_duplicate_intent(&self.document, target) {
             self.intents.push(intent);
         }
         // Delete/Backspace removes the whole selection. One `RemoveNode`

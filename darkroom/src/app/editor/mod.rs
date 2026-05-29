@@ -16,7 +16,7 @@ use scenarium::prelude::{FuncLib, SubgraphDef};
 
 use crate::document::{Document, GraphRef};
 use crate::edit::action_stack::ActionStack;
-use crate::edit::intent::{Intent, apply_step, build_step, requires_reconcile, requires_relayout};
+use crate::edit::intent::{Intent, apply_step, build_step};
 use crate::gui::UiAction;
 use crate::gui::main_window::MainWindow;
 use crate::gui::menu_bar::MenuCommand;
@@ -134,8 +134,8 @@ impl Editor {
             return;
         }
         apply_step(&step, &mut self.document, target);
-        self.needs_relayout |= requires_relayout(&step);
-        self.needs_reconcile |= requires_reconcile(&step);
+        self.needs_relayout |= step.requires_relayout();
+        self.needs_reconcile |= step.requires_reconcile();
         self.action_stack.push_current(target, &[step]);
     }
 
@@ -220,7 +220,7 @@ impl Editor {
             .frame(
                 ui,
                 &ctx,
-                &mut self.scene,
+                &self.scene,
                 Some(host),
                 &self.document,
                 &mut self.intents,
@@ -327,8 +327,8 @@ impl Editor {
                 continue;
             }
             apply_step(&step, &mut self.document, target);
-            self.needs_relayout |= requires_relayout(&step);
-            self.needs_reconcile |= requires_reconcile(&step);
+            self.needs_relayout |= step.requires_relayout();
+            self.needs_reconcile |= step.requires_reconcile();
             batch.push(step);
         }
         if !batch.is_empty() {

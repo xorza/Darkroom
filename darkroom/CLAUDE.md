@@ -174,8 +174,12 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   scope lookup. Adding a variant touches ~6 spots — the doc comment lists them.
 - Variants: `AddNode`, `DuplicateNodes`, `RemoveNode`, `MoveNodes`,
   `RenameNode`, `SetInput`, `SetSelection`, `SetCacheBehavior`, `SetDisabled`,
-  `DetachSubgraph`, `SetEventConnection`, `SetViewport`, `RenameBoundaryPort`,
+  `DetachSubgraph`, `SetViewport`, `RenameBoundaryPort`, `RenameSubgraph`,
   plus document-global `SwitchTab` / `CloseTab`.
+- `DuplicateNodes` is assembled from the current selection by
+  `intent::build_duplicate_intent` (free fn next to `build_step`, not a
+  `Document` method — `Document` is the persisted model, intent
+  construction lives in `edit/`).
 - `ActionStack` packs history into two flat byte buffers (bitcode), not a
   `Vec<Vec<UndoStep>>`. Each batch records its `target` so undo/redo re-resolve
   the right graph+view. Consecutive same-`GestureKey` *and* same-target steps
@@ -184,10 +188,13 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   UI layer to `Editor`: `ActivateTab`/`CloseTab` become undoable
   `SwitchTab`/`CloseTab`; `OpenGraph` and `NewSubgraph` mutate the tab list
   directly (opening/creating isn't undoable; switching and closing are).
-- Note: `RenameNode` and `SetEventConnection` have full handling but are **not
-  yet emitted by any UI** (staged from the deprecated editor). They don't trip
-  dead-code lints because the serde derives reference every variant.
-  `RenameBoundaryPort` and `SetCacheBehavior` *are* live.
+- Per-step properties (`is_noop`, `requires_relayout`, `requires_reconcile`,
+  `gesture_key`, `coalesce`) are methods on `UndoStep`, exhaustive over the
+  variants so a new one won't compile until it declares its behavior.
+- Every variant is emitted by some UI (node-title rename →
+  `RenameNode`, tab-strip rename → `RenameSubgraph`, etc.). Promote/export
+  resolution (`subgraph_to_export` / `promote_source`) lives in
+  `app/commands.rs` beside its only callers, not on `Document`.
 
 ### Reconciliation (`src/edit/reconcile/`)
 Derived state, like `Scene`. Runs in the pre-record drain when

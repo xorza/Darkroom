@@ -136,7 +136,7 @@ impl GraphUI {
         &mut self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
-        scene: &mut Scene,
+        scene: &Scene,
         out: &mut Vec<Intent>,
         cmd: &mut Option<MenuCommand>,
     ) {
@@ -168,7 +168,18 @@ impl GraphUI {
         self.gestures.subgraph_menu.apply(ui, scene, out, cmd);
         // A click on an FsPath input's pick button surfaces a deferred
         // PickInputPath command (App opens the dialog outside the record).
-        emit_path_picks(ui, scene, cmd);
+        // The node UI returns a domain request; the canvas — which owns the
+        // command channel — translates it, so node code never names
+        // `MenuCommand`. A command already set this frame wins.
+        if cmd.is_none()
+            && let Some(req) = emit_path_picks(ui, scene)
+        {
+            *cmd = Some(MenuCommand::PickInputPath {
+                node_id: req.node_id,
+                port_idx: req.port_idx,
+                config: req.config,
+            });
+        }
         // Bake the snap target into `PortFrame.hovered` so node_ui's
         // port_row picks up the hover color via the same lookup it
         // uses for ordinary mouse-over. `response.hovered` is
@@ -200,6 +211,10 @@ impl GraphUI {
         } = self;
         let pan_val = scene.pan;
         let zoom_val = scene.zoom;
+        // Effective selection to paint: the live rubber-band preview while
+        // a band is in flight, else the committed set. Kept off `Scene` so
+        // the projection stays a read-only mirror of `Document`.
+        let selected = selection_ui.preview().unwrap_or(&scene.selected_nodes);
 
         // Outer canvas: covers the whole pane, paints the canvas
         // background, owns the input routing for empty-canvas
@@ -260,6 +275,7 @@ impl GraphUI {
                             let rcx = RecordCtx {
                                 theme: ctx.theme,
                                 scene,
+                                selected,
                                 port_frame,
                                 inspectors,
                             };

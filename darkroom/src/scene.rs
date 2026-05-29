@@ -44,20 +44,12 @@ pub struct Scene {
     /// `Document`).
     pub pan: Vec2,
     pub zoom: f32,
-    /// Currently-selected nodes, mirrored from `Document` each rebuild
-    /// so `node_ui` can pick a different paint without taking a `&Document`.
-    ///
-    /// **Gesture-writable, by contract.** Unlike the rest of `Scene` (a
-    /// read-only projection), this field is the shared channel for *live
-    /// selection preview*: `SelectionUI::apply` overwrites it mid-frame so
-    /// every node body paints against the in-progress rubber-band set
-    /// before the committing `Intent::SetSelection` lands on release. This
-    /// is sound only because `rebuild` reseeds it from `Document` at the
-    /// top of *every* frame (see the unconditional rebuild in `App::frame`)
-    /// while the document stays untouched until release — so the value here
-    /// is always the committed base that the additive (Shift) preview
-    /// extends. That per-frame reseed is load-bearing: do not make it
-    /// conditional.
+    /// Currently-selected nodes, the committed set mirrored from
+    /// `Document` each rebuild so `node_ui` can pick a different paint
+    /// without taking a `&Document`. Read-only, like the rest of `Scene`:
+    /// the in-progress rubber-band preview lives on `SelectionUI` (read
+    /// back via `SelectionUI::preview`) and the canvas unions the two when
+    /// drawing, so the gesture never writes into this projection.
     pub selected_nodes: BTreeSet<NodeId>,
 }
 

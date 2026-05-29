@@ -93,6 +93,11 @@ fn upload_preview(
         return None;
     }
     let row = desc.width * 4;
+    // A sub-row stride would overrun on the per-row slice below — reject
+    // rather than panic on a malformed image from the worker.
+    if desc.stride < row {
+        return None;
+    }
     let bytes = image.into_bytes();
     let pixels = if desc.stride == row {
         bytes

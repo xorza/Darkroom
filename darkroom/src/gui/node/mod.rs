@@ -9,7 +9,6 @@ use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::node_ports;
 use crate::gui::canvas::port_frame::PortFrame;
-use crate::gui::menu_bar::MenuCommand;
 use crate::gui::node::header::{header, status_row, subgraph_badge_wid};
 use crate::gui::node::port_row::{const_editor_wid, port_circle_wid, ports_row};
 use crate::gui::{PortKind, PortRef, UiAction};
@@ -20,10 +19,11 @@ use glam::Vec2;
 use palantir::{
     Background, Color, Configure, Corners, Panel, Rect, Sense, Shadow, Sizing, Stroke, Ui, WidgetId,
 };
-use scenarium::data::{DataType, StaticValue};
+use scenarium::data::{DataType, FsPathConfig, StaticValue};
 use scenarium::graph::Binding;
 use scenarium::prelude::{NodeId, SubgraphRef};
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 /// Read-only context the node-draw chain threads top to bottom: the
 /// theme, the scene being rendered, and last frame's port geometry.
@@ -35,6 +35,12 @@ use std::collections::BTreeSet;
 pub(crate) struct RecordCtx<'a> {
     pub(crate) theme: &'a Theme,
     pub(crate) scene: &'a Scene,
+    /// Effective selection to paint: the committed set
+    /// (`scene.selected_nodes`) or, mid-rubber-band, the live swept
+    /// preview owned by `SelectionUI`. Kept off `Scene` so the projection
+    /// stays a read-only mirror — the gesture no longer scribbles its
+    /// preview into the committed field.
+    pub(crate) selected: &'a BTreeSet<NodeId>,
     pub(crate) port_frame: &'a PortFrame,
     /// Open inspection panels, so the header chip can render its
     /// open/pinned state.
@@ -138,7 +144,7 @@ impl NodeUI {
                 .broken_nodes
                 .push(node.id);
         }
-        let selected = rcx.scene.selected_nodes.contains(&node.id);
+        let selected = rcx.selected.contains(&node.id);
         // The border width is *always* the selection width so selecting a
         // node never resizes it (stroke folds into padding). Only the
         // color changes: the breaker alarm wins, then the bright selection
@@ -213,7 +219,7 @@ impl NodeUI {
                 rcx.scene
                     .nodes
                     .iter()
-                    .filter(|n| rcx.scene.selected_nodes.contains(&n.id))
+                    .filter(|n| rcx.selected.contains(&n.id))
                     .map(|n| (n.id, n.pos))
                     .collect()
             } else {
@@ -311,34 +317,40 @@ pub(crate) fn emit_subgraph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAc
     }
 }
 
-/// Scan: a click on an `FsPath` input's inline pick button (polled by its
-/// const-editor id, from last frame's responses) surfaces a
-/// `PickInputPath`. `App` opens the blocking file dialog outside the
-/// record and applies the chosen path. First click wins — one command per
-/// frame — and a command already set this frame (e.g. a menu action) is
-/// left untouched.
-pub(crate) fn emit_path_picks(ui: &Ui, scene: &Scene, cmd: &mut Option<MenuCommand>) {
-    if cmd.is_some() {
-        return;
-    }
+/// A click on an `FsPath` input's inline pick button, surfaced for the
+/// caller to translate into a deferred file-dialog command. The node UI
+/// produces the domain request (node + port + picker config) and stays
+/// unaware of the app-level `MenuCommand` enum — the canvas, which already
+/// owns the command channel, does the translation.
+pub(crate) struct PathPickRequest {
+    pub(crate) node_id: NodeId,
+    pub(crate) port_idx: usize,
+    /// The picker config is type-level metadata, taken from the port's
+    /// `DataType` (the value only carries the path string).
+    pub(crate) config: Arc<FsPathConfig>,
+}
+
+/// Scan for a click on an `FsPath` input's inline pick button (polled by
+/// its const-editor id, from last frame's responses). Returns the first
+/// hit — one pick per frame — for the caller to defer into a blocking file
+/// dialog outside the record.
+pub(crate) fn emit_path_picks(ui: &Ui, scene: &Scene) -> Option<PathPickRequest> {
     for node in &scene.nodes {
         let types = scene.input_types(node.inputs);
         for (port_idx, binding) in scene.bindings(node.inputs).iter().enumerate() {
-            // The picker config is type-level metadata, taken from the port's
-            // `DataType` (the value only carries the path string).
             if let InputBindingView::Const(StaticValue::FsPath(_)) = binding
                 && let DataType::FsPath(config) = &types[port_idx]
                 && ui.response_for(const_editor_wid(node.id, port_idx)).clicked
             {
-                *cmd = Some(MenuCommand::PickInputPath {
+                return Some(PathPickRequest {
                     node_id: node.id,
                     port_idx,
                     config: config.clone(),
                 });
-                return;
             }
         }
     }
+    None
 }
 
 /// Prepass scan: port-circle double-clicks read from last frame's

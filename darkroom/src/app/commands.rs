@@ -12,7 +12,7 @@ use palantir::Ui;
 use scenarium::data::{FsPathConfig, StaticValue};
 use scenarium::function::FuncLib;
 use scenarium::graph::{Binding, NodeKind};
-use scenarium::prelude::{NodeId, SubgraphId};
+use scenarium::prelude::{NodeId, SubgraphDef, SubgraphId};
 use scenarium::subgraph::SubgraphRef;
 
 use crate::app::App;
@@ -89,7 +89,7 @@ impl App {
     /// wins; otherwise, when the active tab is itself a subgraph, that
     /// open subgraph is exported. No-op when neither resolves.
     fn export_active_subgraph(&mut self) {
-        let Some(def) = self.editor.document.subgraph_to_export(&self.func_lib) else {
+        let Some(def) = subgraph_to_export(&self.editor.document, &self.func_lib) else {
             eprintln!("subgraph export: no subgraph selected or open");
             return;
         };
@@ -283,7 +283,7 @@ fn publish_local_def(
 /// re-pointed at the new library entry, so it tracks its lineage. Free
 /// fn so it's unit-testable against a bare `Document` + `FuncLib`.
 fn promote_to_library(document: &mut Document, func_lib: &mut Arc<FuncLib>) -> bool {
-    let Some(source) = document.promote_source(func_lib) else {
+    let Some(source) = promote_source(document, func_lib) else {
         return false;
     };
     let published = source.def.fresh_copy();
@@ -303,6 +303,108 @@ fn set_origin(document: &mut Document, holder: GraphRef, def_id: SubgraphId, ori
         && let Some(def) = graph.subgraphs.by_key_mut(&def_id)
     {
         def.origin = Some(origin);
+    }
+}
+
+/// A subgraph resolved for promotion into the library: the def to
+/// publish (owned copy) plus where to re-link its `origin` afterward.
+pub(crate) struct PromoteSource {
+    def: SubgraphDef,
+    /// Where the source local def lives, so we can point its `origin` at
+    /// the freshly-created library entry. `None` when the source is a
+    /// library (`Linked`) def — nothing in the document to re-link.
+    relink: Option<RelinkLocal>,
+}
+
+/// Locates a local subgraph def for an `origin` re-link: the graph
+/// whose local table holds it, plus the def's id.
+struct RelinkLocal {
+    holder: GraphRef,
+    def_id: SubgraphId,
+}
+
+/// Internal resolution result shared by export + promote.
+enum Promotable {
+    /// First selected subgraph-instance node in the active graph.
+    Node { graph: GraphRef, sref: SubgraphRef },
+    /// The open subgraph interior (its def lives in the root table).
+    OpenTab { id: SubgraphId },
+}
+
+/// Resolve which subgraph def an export targets: the first selected
+/// subgraph-instance node in the active graph (resolved against that
+/// graph's own `Local` table or the shared `FuncLib` for `Linked`), else
+/// the currently open subgraph when inside one. `None` when neither
+/// resolves. Pure resolution over the document — kept here with its only
+/// callers rather than on the `Document` model.
+fn subgraph_to_export<'a>(
+    document: &'a Document,
+    func_lib: &'a FuncLib,
+) -> Option<&'a SubgraphDef> {
+    match resolve_promotable(document, func_lib)? {
+        Promotable::Node { graph, sref } => document.graph_for(graph)?.resolve_def(sref, func_lib),
+        Promotable::OpenTab { id } => document.graph.subgraphs.by_key(&id),
+    }
+}
+
+/// Like [`subgraph_to_export`], but for promoting into the library:
+/// returns an owned copy of the resolved def plus, when the source is a
+/// `Local` def in this document, where to re-link its `origin` after the
+/// library entry is created. `None` (no relink) for a `Linked` source —
+/// there's no in-document def to own it.
+fn promote_source(document: &Document, func_lib: &FuncLib) -> Option<PromoteSource> {
+    let (def, relink) = match resolve_promotable(document, func_lib)? {
+        Promotable::Node { graph, sref } => {
+            let def = document
+                .graph_for(graph)?
+                .resolve_def(sref, func_lib)?
+                .clone();
+            let relink = match sref {
+                SubgraphRef::Local(id) => Some(RelinkLocal {
+                    holder: graph,
+                    def_id: id,
+                }),
+                SubgraphRef::Linked(_) => None,
+            };
+            (def, relink)
+        }
+        // An open subgraph tab is always a `Local` def living in the root
+        // table, regardless of which interior is shown.
+        Promotable::OpenTab { id } => (
+            document.graph.subgraphs.by_key(&id)?.clone(),
+            Some(RelinkLocal {
+                holder: GraphRef::Main,
+                def_id: id,
+            }),
+        ),
+    };
+    Some(PromoteSource { def, relink })
+}
+
+/// Shared resolution for export / promote: the first selected
+/// subgraph-instance node in the active graph (whose def resolves), else
+/// the open subgraph interior. `None` when neither applies.
+fn resolve_promotable(document: &Document, func_lib: &FuncLib) -> Option<Promotable> {
+    let target = document.active_target();
+    let graph = document.graph_for(target)?;
+    if let Some(view) = document.view(target) {
+        for nid in &view.selected_nodes {
+            if let Some(node) = graph.by_id(nid)
+                && let NodeKind::Subgraph(sref) = node.kind
+                && graph.resolve_def(sref, func_lib).is_some()
+            {
+                return Some(Promotable::Node {
+                    graph: target,
+                    sref,
+                });
+            }
+        }
+    }
+    match target {
+        GraphRef::Local(id) if document.graph.subgraphs.by_key(&id).is_some() => {
+            Some(Promotable::OpenTab { id })
+        }
+        _ => None,
     }
 }
 

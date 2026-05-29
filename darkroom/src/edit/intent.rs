@@ -21,11 +21,11 @@
 //!   - [`revert_step`] — write the "from" half of an `UndoStep` to
 //!     `&mut Document`. Used during undo.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use glam::Vec2;
 use scenarium::graph::{
-    Binding, Graph, InputPort, Node, NodeBehavior, NodeId, NodeKind, Subscription,
+    Binding, Graph, InputPort, Node, NodeBehavior, NodeId, NodeKind, OutputPort, Subscription,
 };
 use scenarium::prelude::{SubgraphDef, SubgraphId};
 use scenarium::subgraph::SubgraphRef;
@@ -47,9 +47,10 @@ use crate::document::{BoundarySide, Document, EditScope, EditScopeRef, GraphRef}
 ///   3. add an arm to [`build_step`] (read `from` from `&Document`
 ///      and combine with the intent's `to` into a complete step),
 ///   4. add an arm to the matching `apply_*` / `revert_*` fn,
-///   5. add arms to `is_noop` and [`requires_relayout`] (both
-///      exhaustive — they won't compile until you do),
-///   6. update [`gesture_key`] if the variant coalesces in undo
+///   5. add arms to [`UndoStep::is_noop`] and
+///      [`UndoStep::requires_relayout`] (both exhaustive — they won't
+///      compile until you do),
+///   6. update [`UndoStep::gesture_key`] if the variant coalesces in undo
 ///      history.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Intent {
@@ -117,14 +118,6 @@ pub enum Intent {
     /// when the node isn't a local subgraph instance.
     DetachSubgraph {
         node_id: NodeId,
-    },
-    /// Add (`present = true`) or remove (`present = false`)
-    /// `subscriber` from the event at `(event_node_id, event_idx)`.
-    SetEventConnection {
-        event_node_id: NodeId,
-        event_idx: usize,
-        subscriber: NodeId,
-        present: bool,
     },
     SetViewport {
         pan: Vec2,
@@ -256,13 +249,6 @@ pub enum GraphStep {
         from_id: SubgraphId,
         def: Box<SubgraphDef>,
     },
-    SetEventConnection {
-        event_node_id: NodeId,
-        event_idx: usize,
-        subscriber: NodeId,
-        was_present: bool,
-        present: bool,
-    },
     SetViewport {
         from_pan: Vec2,
         from_scale: f32,
@@ -321,6 +307,10 @@ pub enum DocStep {
 /// the undo stack with sub-pixel deltas.
 const VIEWPORT_EPS: f32 = 1e-4;
 
+/// World-space offset applied to duplicated nodes so the copies don't
+/// land exactly on top of their originals.
+const DUPLICATE_OFFSET: Vec2 = Vec2::new(32.0, 32.0);
+
 impl UndoStep {
     /// True when applying this step would leave the document unchanged.
     /// Filtered out post-`build_step` so phantom entries (re-selecting
@@ -349,11 +339,6 @@ impl GraphStep {
             GraphStep::SetSelection { from, to } => from == to,
             GraphStep::SetCacheBehavior { from, to, .. } => from == to,
             GraphStep::SetDisabled { from, to, .. } => from == to,
-            GraphStep::SetEventConnection {
-                was_present,
-                present,
-                ..
-            } => was_present == present,
             GraphStep::SetViewport {
                 from_pan,
                 from_scale,
@@ -536,21 +521,6 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
                 def: Box::new(copy),
             }
         }
-        Intent::SetEventConnection {
-            event_node_id,
-            event_idx,
-            subscriber,
-            present,
-        } => {
-            graph.by_id(&event_node_id)?;
-            GraphStep::SetEventConnection {
-                was_present: graph.is_subscribed(event_node_id, event_idx, subscriber),
-                event_node_id,
-                event_idx,
-                subscriber,
-                present,
-            }
-        }
         Intent::SetViewport { pan, scale } => GraphStep::SetViewport {
             from_pan: view.pan,
             from_scale: view.scale,
@@ -559,6 +529,78 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
         },
     };
     Some(UndoStep::Graph(step))
+}
+
+/// Build an [`Intent::DuplicateNodes`] for `target`'s current selection:
+/// clone each selected node with a fresh id and an offset position, copy
+/// const-value bindings, and recreate the data + event connections whose
+/// *both* endpoints are selected (wires to unselected nodes are dropped).
+/// `None` when nothing is selected or the target doesn't resolve. Reads
+/// the document to assemble the intent — editor-operation construction,
+/// kept with the rest of the intent machinery rather than on the
+/// `Document` model.
+pub fn build_duplicate_intent(doc: &Document, target: GraphRef) -> Option<Intent> {
+    let EditScopeRef { graph, view } = doc.scope(target)?;
+    if view.selected_nodes.is_empty() {
+        return None;
+    }
+
+    let mut id_map: HashMap<NodeId, NodeId> = HashMap::new();
+    let mut nodes = Vec::new();
+    for old_id in &view.selected_nodes {
+        let Some(node) = graph.by_id(old_id) else {
+            continue;
+        };
+        let new_id = NodeId::unique();
+        id_map.insert(*old_id, new_id);
+        let mut clone = node.clone();
+        clone.id = new_id;
+        let pos = view.view_nodes.by_key(old_id).unwrap().pos + DUPLICATE_OFFSET;
+        nodes.push((ViewNode { id: new_id, pos }, clone));
+    }
+
+    // Each selected node's own input ports. Const/None copy verbatim;
+    // a `Bind` survives only if its source is also selected (remapped
+    // to the clone) — otherwise the wire is external and dropped.
+    let mut bindings = Vec::new();
+    for old_id in &view.selected_nodes {
+        for (port, binding) in graph.bindings_touching(*old_id) {
+            if port.node_id != *old_id {
+                continue;
+            }
+            let new_binding = match binding {
+                Binding::Bind(src) => match id_map.get(&src.node_id) {
+                    Some(&new_src) => Binding::Bind(OutputPort {
+                        node_id: new_src,
+                        port_idx: src.port_idx,
+                    }),
+                    None => continue,
+                },
+                other => other,
+            };
+            bindings.push((InputPort::new(id_map[old_id], port.port_idx), new_binding));
+        }
+    }
+
+    // Event subscriptions internal to the selection.
+    let mut subscriptions = Vec::new();
+    for s in graph.subscriptions() {
+        if let (Some(&emitter), Some(&subscriber)) =
+            (id_map.get(&s.emitter), id_map.get(&s.subscriber))
+        {
+            subscriptions.push(Subscription {
+                emitter,
+                event_idx: s.event_idx,
+                subscriber,
+            });
+        }
+    }
+
+    Some(Intent::DuplicateNodes {
+        nodes,
+        bindings,
+        subscriptions,
+    })
 }
 
 /// Library subgraphs are localized on instance: the new-node menu drops
@@ -709,25 +751,6 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             scope.graph.by_id_mut(node_id).unwrap().kind =
                 NodeKind::Subgraph(SubgraphRef::Local(def.id));
         }
-        GraphStep::SetEventConnection {
-            event_node_id,
-            event_idx,
-            subscriber,
-            present,
-            ..
-        } => {
-            // subscribe/unsubscribe are idempotent (BTreeSet insert/remove),
-            // so apply/redo is a no-op when the target state already holds.
-            if *present {
-                scope
-                    .graph
-                    .subscribe(*event_node_id, *event_idx, *subscriber);
-            } else {
-                scope
-                    .graph
-                    .unsubscribe(*event_node_id, *event_idx, *subscriber);
-            }
-        }
         GraphStep::SetViewport {
             to_pan, to_scale, ..
         } => {
@@ -854,23 +877,6 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
                 NodeKind::Subgraph(SubgraphRef::Local(*from_id));
             scope.graph.subgraphs.remove_by_key(&def.id);
         }
-        GraphStep::SetEventConnection {
-            event_node_id,
-            event_idx,
-            subscriber,
-            was_present,
-            ..
-        } => {
-            if *was_present {
-                scope
-                    .graph
-                    .subscribe(*event_node_id, *event_idx, *subscriber);
-            } else {
-                scope
-                    .graph
-                    .unsubscribe(*event_node_id, *event_idx, *subscriber);
-            }
-        }
         GraphStep::SetViewport {
             from_pan,
             from_scale,
@@ -882,15 +888,16 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
     }
 }
 
-/// Whether replaying this step changes anything the layout engine
-/// reads (node positions, sizes, label text length, viewport
-/// transform). When true, `App::frame` calls `ui.request_relayout()`
-/// after applying the batch so the next pass picks up the change.
-/// UI-only state with no measure/arrange input (selection, cache
-/// behavior, model-only bindings) returns false. Exhaustive on
-/// purpose — a new variant must declare its layout effect.
-pub fn requires_relayout(step: &UndoStep) -> bool {
-    match step {
+impl UndoStep {
+    /// Whether replaying this step changes anything the layout engine
+    /// reads (node positions, sizes, label text length, viewport
+    /// transform). When true, `App::frame` calls `ui.request_relayout()`
+    /// after applying the batch so the next pass picks up the change.
+    /// UI-only state with no measure/arrange input (selection, cache
+    /// behavior, model-only bindings) returns false. Exhaustive on
+    /// purpose — a new variant must declare its layout effect.
+    pub fn requires_relayout(&self) -> bool {
+        match self {
         // Switching or closing a tab swaps which graph the scene renders
         // (and reshapes the tab strip); a port rename changes a label's
         // width so the node remeasures — all relayout the canvas.
@@ -928,136 +935,135 @@ pub fn requires_relayout(step: &UndoStep) -> bool {
             GraphStep::SetSelection { .. }
             | GraphStep::SetCacheBehavior { .. }
             // Disabling only dims the body paint — same rect, no remeasure.
-            | GraphStep::SetDisabled { .. }
-            | GraphStep::SetEventConnection { .. } => false,
+            | GraphStep::SetDisabled { .. } => false,
         },
     }
-}
-
-/// Whether applying this step can change a subgraph's *derived interface*
-/// (`def.inputs`/`def.outputs`), so `reconcile_boundaries` must rerun
-/// before the next scene rebuild. Only interior boundary wiring and
-/// instance bindings feed that derivation, so any edit that touches a
-/// binding or the node set qualifies; pure view/selection/cache/tab edits
-/// (and boundary-port *renames*, which reconcile preserves) never do.
-/// Conservative on `SetInput` — a const-value edit on a plain func port
-/// can't change an interface, but filtering that needs a doc lookup, and
-/// reconcile is an idempotent no-op there anyway. Exhaustive on purpose.
-pub fn requires_reconcile(step: &UndoStep) -> bool {
-    match step {
-        UndoStep::Graph(
-            GraphStep::AddNode { .. }
-            | GraphStep::RemoveNode { .. }
-            | GraphStep::DuplicateNodes { .. }
-            | GraphStep::SetInput { .. }
-            | GraphStep::DetachSubgraph { .. },
-        ) => true,
-        UndoStep::Graph(
-            GraphStep::MoveNodes { .. }
-            | GraphStep::RenameNode { .. }
-            | GraphStep::SetSelection { .. }
-            | GraphStep::SetCacheBehavior { .. }
-            | GraphStep::SetDisabled { .. }
-            | GraphStep::SetEventConnection { .. }
-            | GraphStep::SetViewport { .. },
-        )
-        | UndoStep::Doc(_) => false,
     }
-}
 
-/// Identifies "same continuous gesture" for undo coalescing. The undo
-/// stack collapses consecutive steps with the same key into one entry
-/// (keeping the *first* "from" payload). Two viewport changes coalesce;
-/// two `MoveNodes` of the *same* grabbed node coalesce.
-pub fn gesture_key(step: &UndoStep) -> Option<GestureKey> {
-    match step {
-        UndoStep::Graph(GraphStep::SetViewport { .. }) => Some(GestureKey::Viewport),
-        UndoStep::Graph(GraphStep::MoveNodes { grabbed, .. }) => {
-            Some(GestureKey::NodeDrag(*grabbed))
+    /// Whether applying this step can change a subgraph's *derived interface*
+    /// (`def.inputs`/`def.outputs`), so `reconcile_boundaries` must rerun
+    /// before the next scene rebuild. Only interior boundary wiring and
+    /// instance bindings feed that derivation, so any edit that touches a
+    /// binding or the node set qualifies; pure view/selection/cache/tab edits
+    /// (and boundary-port *renames*, which reconcile preserves) never do.
+    /// Conservative on `SetInput` — a const-value edit on a plain func port
+    /// can't change an interface, but filtering that needs a doc lookup, and
+    /// reconcile is an idempotent no-op there anyway. Exhaustive on purpose.
+    pub fn requires_reconcile(&self) -> bool {
+        match self {
+            UndoStep::Graph(
+                GraphStep::AddNode { .. }
+                | GraphStep::RemoveNode { .. }
+                | GraphStep::DuplicateNodes { .. }
+                | GraphStep::SetInput { .. }
+                | GraphStep::DetachSubgraph { .. },
+            ) => true,
+            UndoStep::Graph(
+                GraphStep::MoveNodes { .. }
+                | GraphStep::RenameNode { .. }
+                | GraphStep::SetSelection { .. }
+                | GraphStep::SetCacheBehavior { .. }
+                | GraphStep::SetDisabled { .. }
+                | GraphStep::SetViewport { .. },
+            )
+            | UndoStep::Doc(_) => false,
         }
-        // Consecutive tab switches collapse into one entry: the merged
-        // step keeps the original `from` and adopts the latest `to`, so
-        // a burst of tabbing undoes back to where it started in one step.
-        UndoStep::Doc(DocStep::SwitchTab { .. }) => Some(GestureKey::TabSwitch),
-        // Everything else is its own undo entry — e.g. closing two tabs
-        // in a row shouldn't collapse into one Ctrl+Z.
-        UndoStep::Graph(
-            GraphStep::AddNode { .. }
-            | GraphStep::DuplicateNodes { .. }
-            | GraphStep::RemoveNode { .. }
-            | GraphStep::RenameNode { .. }
-            | GraphStep::SetInput { .. }
-            | GraphStep::SetSelection { .. }
-            | GraphStep::SetCacheBehavior { .. }
-            | GraphStep::SetDisabled { .. }
-            | GraphStep::DetachSubgraph { .. }
-            | GraphStep::SetEventConnection { .. },
-        )
-        | UndoStep::Doc(
-            DocStep::CloseTab { .. }
-            | DocStep::RenameBoundaryPort { .. }
-            | DocStep::RenameSubgraph { .. },
-        ) => None,
     }
-}
 
-/// Fold two consecutive steps of the same gesture into one: keep `prev`'s
-/// "from" half and adopt `next`'s "to" half. `None` for any pair that
-/// doesn't coalesce. The undo stack calls this after matching
-/// [`gesture_key`] (so the pair is the same variant, and for `NodeDrag`
-/// the same node), but the match below re-checks the pairing so the fold
-/// stays self-contained — variant internals live here next to the step
-/// definitions, not in the stack. Keep this in sync with `gesture_key`.
-pub fn coalesce(prev: &UndoStep, next: &UndoStep) -> Option<UndoStep> {
-    match (prev, next) {
-        (
-            UndoStep::Graph(GraphStep::SetViewport {
-                from_pan,
-                from_scale,
-                ..
-            }),
-            UndoStep::Graph(GraphStep::SetViewport {
-                to_pan, to_scale, ..
-            }),
-        ) => Some(UndoStep::Graph(GraphStep::SetViewport {
-            from_pan: *from_pan,
-            from_scale: *from_scale,
-            to_pan: *to_pan,
-            to_scale: *to_scale,
-        })),
-        (
-            UndoStep::Graph(GraphStep::MoveNodes {
-                grabbed,
-                moves: prev,
-            }),
-            UndoStep::Graph(GraphStep::MoveNodes { moves: next, .. }),
-        ) => {
-            // Same gesture (matched `NodeDrag` key) ⇒ same node set; keep
-            // each node's original `from`, adopt its latest `to`.
-            let merged = prev
-                .iter()
-                .map(|(id, from, prev_to)| {
-                    let to = next
-                        .iter()
-                        .find(|(nid, _, _)| nid == id)
-                        .map(|(_, _, t)| *t)
-                        .unwrap_or(*prev_to);
-                    (*id, *from, to)
-                })
-                .collect();
-            Some(UndoStep::Graph(GraphStep::MoveNodes {
-                grabbed: *grabbed,
-                moves: merged,
-            }))
+    /// Identifies "same continuous gesture" for undo coalescing. The undo
+    /// stack collapses consecutive steps with the same key into one entry
+    /// (keeping the *first* "from" payload). Two viewport changes coalesce;
+    /// two `MoveNodes` of the *same* grabbed node coalesce.
+    pub fn gesture_key(&self) -> Option<GestureKey> {
+        match self {
+            UndoStep::Graph(GraphStep::SetViewport { .. }) => Some(GestureKey::Viewport),
+            UndoStep::Graph(GraphStep::MoveNodes { grabbed, .. }) => {
+                Some(GestureKey::NodeDrag(*grabbed))
+            }
+            // Consecutive tab switches collapse into one entry: the merged
+            // step keeps the original `from` and adopts the latest `to`, so
+            // a burst of tabbing undoes back to where it started in one step.
+            UndoStep::Doc(DocStep::SwitchTab { .. }) => Some(GestureKey::TabSwitch),
+            // Everything else is its own undo entry — e.g. closing two tabs
+            // in a row shouldn't collapse into one Ctrl+Z.
+            UndoStep::Graph(
+                GraphStep::AddNode { .. }
+                | GraphStep::DuplicateNodes { .. }
+                | GraphStep::RemoveNode { .. }
+                | GraphStep::RenameNode { .. }
+                | GraphStep::SetInput { .. }
+                | GraphStep::SetSelection { .. }
+                | GraphStep::SetCacheBehavior { .. }
+                | GraphStep::SetDisabled { .. }
+                | GraphStep::DetachSubgraph { .. },
+            )
+            | UndoStep::Doc(
+                DocStep::CloseTab { .. }
+                | DocStep::RenameBoundaryPort { .. }
+                | DocStep::RenameSubgraph { .. },
+            ) => None,
         }
-        (
-            UndoStep::Doc(DocStep::SwitchTab { from, .. }),
-            UndoStep::Doc(DocStep::SwitchTab { to, .. }),
-        ) => Some(UndoStep::Doc(DocStep::SwitchTab {
-            from: *from,
-            to: *to,
-        })),
-        _ => None,
+    }
+
+    /// Fold two consecutive steps of the same gesture into one: keep
+    /// `self`'s "from" half and adopt `next`'s "to" half. `None` for any
+    /// pair that doesn't coalesce. The undo stack calls this after matching
+    /// [`Self::gesture_key`] (so the pair is the same variant, and for
+    /// `NodeDrag` the same node), but the match below re-checks the pairing
+    /// so the fold stays self-contained — variant internals live here next
+    /// to the step definitions, not in the stack. Keep this in sync with
+    /// `gesture_key`.
+    pub fn coalesce(&self, next: &UndoStep) -> Option<UndoStep> {
+        match (self, next) {
+            (
+                UndoStep::Graph(GraphStep::SetViewport {
+                    from_pan,
+                    from_scale,
+                    ..
+                }),
+                UndoStep::Graph(GraphStep::SetViewport {
+                    to_pan, to_scale, ..
+                }),
+            ) => Some(UndoStep::Graph(GraphStep::SetViewport {
+                from_pan: *from_pan,
+                from_scale: *from_scale,
+                to_pan: *to_pan,
+                to_scale: *to_scale,
+            })),
+            (
+                UndoStep::Graph(GraphStep::MoveNodes {
+                    grabbed,
+                    moves: prev,
+                }),
+                UndoStep::Graph(GraphStep::MoveNodes { moves: next, .. }),
+            ) => {
+                // Same gesture (matched `NodeDrag` key) ⇒ same node set; keep
+                // each node's original `from`, adopt its latest `to`.
+                let merged = prev
+                    .iter()
+                    .map(|(id, from, prev_to)| {
+                        let to = next
+                            .iter()
+                            .find(|(nid, _, _)| nid == id)
+                            .map(|(_, _, t)| *t)
+                            .unwrap_or(*prev_to);
+                        (*id, *from, to)
+                    })
+                    .collect();
+                Some(UndoStep::Graph(GraphStep::MoveNodes {
+                    grabbed: *grabbed,
+                    moves: merged,
+                }))
+            }
+            (
+                UndoStep::Doc(DocStep::SwitchTab { from, .. }),
+                UndoStep::Doc(DocStep::SwitchTab { to, .. }),
+            ) => Some(UndoStep::Doc(DocStep::SwitchTab {
+                from: *from,
+                to: *to,
+            })),
+            _ => None,
+        }
     }
 }
 
@@ -1066,4 +1072,102 @@ pub enum GestureKey {
     Viewport,
     NodeDrag(NodeId),
     TabSwitch,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scenarium::data::StaticValue;
+    use scenarium::prelude::FuncId;
+
+    /// Add a bare `Func`-kind node to `doc`'s root graph + main view at
+    /// `pos`, returning its id.
+    fn add_node_at(doc: &mut Document, pos: Vec2) -> NodeId {
+        let node = Node::new(NodeKind::Func(FuncId::unique()));
+        let id = node.id;
+        doc.graph.add(node);
+        doc.main_view.view_nodes.add(ViewNode { id, pos });
+        id
+    }
+
+    #[test]
+    fn duplicate_intent_clones_internal_wiring_and_drops_external() {
+        // a -> b (internal edge, both selected); c -> b (external, c not
+        // selected). b also has a Const on input 1. Selecting {a, b} must
+        // duplicate a' and b', keep a'->b' and the Const, drop c->b.
+        let mut doc = Document::default();
+        let a = add_node_at(&mut doc, Vec2::new(0.0, 0.0));
+        let b = add_node_at(&mut doc, Vec2::new(100.0, 0.0));
+        let c = add_node_at(&mut doc, Vec2::new(0.0, 100.0));
+        doc.graph
+            .set_input_binding(InputPort::new(b, 0), (a, 0).into());
+        doc.graph.set_input_binding(
+            InputPort::new(b, 1),
+            Binding::Const(StaticValue::from(7i64)),
+        );
+        doc.graph
+            .set_input_binding(InputPort::new(b, 2), (c, 0).into());
+        doc.main_view.selected_nodes = [a, b].into_iter().collect();
+
+        let Some(Intent::DuplicateNodes {
+            nodes,
+            bindings,
+            subscriptions,
+        }) = build_duplicate_intent(&doc, GraphRef::Main)
+        else {
+            panic!("expected a DuplicateNodes intent");
+        };
+
+        assert_eq!(nodes.len(), 2, "both selected nodes cloned");
+        assert!(subscriptions.is_empty());
+        // Fresh ids, offset positions.
+        let new_ids: BTreeSet<NodeId> = nodes.iter().map(|(_, n)| n.id).collect();
+        assert!(
+            new_ids.is_disjoint(&doc.main_view.selected_nodes),
+            "clones get fresh ids"
+        );
+        let a_clone = nodes
+            .iter()
+            .find(|(vn, _)| vn.pos == Vec2::new(0.0, 0.0) + DUPLICATE_OFFSET)
+            .map(|(_, n)| n.id)
+            .expect("a's clone offset from its origin");
+
+        // Exactly two bindings survive: the internal a'->b' edge and the
+        // Const; the external c->b edge (input 2) is gone.
+        assert_eq!(bindings.len(), 2);
+        let b_clone = nodes
+            .iter()
+            .find(|(vn, _)| vn.pos == Vec2::new(100.0, 0.0) + DUPLICATE_OFFSET)
+            .map(|(_, n)| n.id)
+            .unwrap();
+        let internal = bindings
+            .iter()
+            .find(|(port, _)| port.port_idx == 0)
+            .expect("a'->b' edge present");
+        assert_eq!(internal.0.node_id, b_clone, "edge sinks into b's clone");
+        match &internal.1 {
+            Binding::Bind(src) => {
+                assert_eq!(src.node_id, a_clone, "remapped to a's clone");
+                assert_eq!(src.port_idx, 0);
+            }
+            other => panic!("expected Bind, got {other:?}"),
+        }
+        assert!(
+            bindings
+                .iter()
+                .any(|(port, bind)| port.port_idx == 1 && matches!(bind, Binding::Const(_))),
+            "const binding copied"
+        );
+        assert!(
+            !bindings.iter().any(|(port, _)| port.port_idx == 2),
+            "external edge dropped"
+        );
+    }
+
+    #[test]
+    fn duplicate_intent_none_without_selection() {
+        let mut doc = Document::default();
+        add_node_at(&mut doc, Vec2::ZERO);
+        assert!(build_duplicate_intent(&doc, GraphRef::Main).is_none());
+    }
 }

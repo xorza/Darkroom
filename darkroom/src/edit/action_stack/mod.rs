@@ -93,7 +93,7 @@ impl ActionStack {
         // A gesture key only exists for single-step batches; a multi-step
         // batch (e.g. a breaker swipe) is never coalesced.
         let gesture_key = match steps {
-            [step] => intent::gesture_key(step),
+            [step] => step.gesture_key(),
             _ => None,
         };
 
@@ -237,7 +237,7 @@ impl ActionStack {
         // "to" half. `intent` owns the per-variant logic; the
         // `gesture_key == Some(key)` gate above already guarantees a
         // matching variant (and same node, for `NodeDrag`).
-        let Some(merged) = intent::coalesce(&last_steps[0], new_step) else {
+        let Some(merged) = last_steps[0].coalesce(new_step) else {
             return false;
         };
 
