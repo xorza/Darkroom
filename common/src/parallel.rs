@@ -1,14 +1,26 @@
 //! Concurrency-limited parallel iteration utilities.
 //!
-//! Wraps rayon's `par_iter` to process items in parallel while limiting
-//! the number of items in flight at once (e.g. to cap memory or IO pressure).
+//! Processes items in consecutive parallel *batches* of `max_concurrent`,
+//! bounding peak concurrency — and thus peak memory / open files — when each
+//! item is heavy (a large image buffer, an open file). This is a **batched**
+//! cap with a barrier between batches, not a sliding window: batch N+1 starts
+//! only once batch N has fully finished.
+//!
+//! That barrier is intentional and cheap for the intended workload, where each
+//! `f` is itself CPU-saturating (it uses the global rayon pool internally) or
+//! IO-bound — so the few threads that finish a batch early aren't wasted (their
+//! cores are taken by neighbours' internal parallelism). A true sliding-window
+//! cap would need a non-rayon worker pool (so nested rayon in `f` isn't
+//! starved); it isn't worth the complexity here.
 
 use rayon::prelude::*;
 
-/// Maps `f` over `items` in parallel, with at most `max_concurrent` items in flight.
+/// Maps `f` over `items`, running at most `max_concurrent` invocations at once.
 ///
-/// Semantically equivalent to `items.par_iter().map(f).collect()`, but processes
-/// items in chunks of `max_concurrent` to limit resource usage.
+/// Items run in consecutive batches of `max_concurrent` via rayon's `par_iter`,
+/// with a barrier between batches (see the module docs). Each `f` keeps full
+/// access to the global rayon pool for its own internal parallelism. Results
+/// preserve input order.
 ///
 /// # Panics
 ///
@@ -31,8 +43,8 @@ where
 
 /// Like [`par_map_limited`], but the closure returns `Result<R, E>`.
 ///
-/// Stops at the first chunk that contains an error and returns it.
-/// Items within the failing chunk may still be processed in parallel.
+/// Stops at the first batch that contains an error and returns it. Items within
+/// the failing batch may still be processed; later batches are not started.
 pub fn try_par_map_limited<T, R, E, F>(
     items: &[T],
     max_concurrent: usize,
