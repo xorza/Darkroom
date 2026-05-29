@@ -466,20 +466,36 @@ loss(r²) = (σ²ₘₐₓ/2)·(1 − e^{−x}) + (r²/4)·e^{−x},   x = r²/(
 i.e. it keeps the reference's structural skeleton `σ²_max/2·γ_lower + r²/4·(…)` but
 substitutes the `a=1` incomplete gamma `1−e^{−x}` for the lower term and `e^{−x}` for
 the upper `(Γ_complete − Γ_k)` factor, **and drops** the global `C(n)·2^{(n+1)/2}/σ_max`
-prefactor. I verified numerically that this diverges from the paper's `ρ` at every
-`r>0` (e.g. at σ_max=1: paper-n2 ρ(1.0)=0.323, paper-n4 ρ(1.0)=0.285, lumos
-loss(1.0)=0.348; the gap widens with r — at r=2, paper-n4=0.746 vs lumos=0.568, and
-at r=3, paper-n4=0.908 vs lumos=0.519). So
-lumos's scorer is **MAGSAC++-*inspired*, not the MAGSAC++ loss**: a smooth,
-monotone-increasing, threshold-free robust kernel that captures the *qualitative*
-behavior (continuous inlier→outlier fade, σ-derived scale, `1/loss` quality,
-budget-based early exit) but not the marginalized χ-density. Two practical
-consequences: (a) dropping the constant prefactor is harmless for **model selection
-within one `register()` call** (σ_max is fixed, so a uniform scale cannot change the
-argmax), but it means the scores are not comparable across different σ_max; (b) the
-shape difference means lumos's down-weighting profile is not the statistically-optimal
-M-estimator the paper proves converges — it is a reasonable heuristic that happens to
-be monotone and bounded.
+prefactor. I verified numerically (recomputed pass 3 from the closed form via
+half-integer incomplete gammas) that this diverges from the paper's `ρ` at every `r>0`
+(σ_max=1: paper-n2 ρ(1.0)=0.323, paper-n4 ρ(1.0)=0.285, lumos loss(1.0)=0.348; at r=2
+paper-n2=0.576, paper-n4=0.746, lumos=0.568; at r=3 paper-n2=0.622, paper-n4=0.908,
+lumos=0.519). The divergence is *structural*, not a constant scale factor: lumos sits
+**above** both paper curves at small `r`, **near** the n=2 curve at `r≈2`, then **below**
+both by `r=3` — because, crucially, **lumos's loss is not monotone.** Written compactly,
+`loss = (σ²_max/2)·[1 − e^{−x}(1−x)]` with `x = r²/2σ²_max`, so the derivative
+`d(loss)/dx = (σ²_max/2)·e^{−x}(2−x)` is positive only for `x<2`: the loss **rises to a
+peak at `r = 2σ_max`** (value `(σ²_max/2)(1+e^{−2}) ≈ 0.568·σ²_max`) and then **declines**
+toward the clamp (`≈0.518·σ²_max` at `r=3.03σ_max`) before dropping to
+`outlier_loss = 0.5·σ²_max`. Because the peak (`0.568·σ²_max`) *exceeds* the outlier loss
+(`0.5·σ²_max`), a borderline point at `r≈2σ_max` is penalized **more** than a clear
+outlier beyond `3.03σ_max` — the opposite of the paper's `ρ`, which is monotone
+non-decreasing (it is the potential `∫₀ʳ x·w(x)dx` of a non-negative weight `w`). The
+in-tree boundary test already notes the tail of this effect ("the MAGSAC formula can
+overshoot slightly near the boundary", `magsac.rs:193-194`), but the overshoot is not
+confined to the boundary — it peaks well *inside* the band, at `2σ_max`. So lumos's
+scorer is **MAGSAC++-*inspired*, not the MAGSAC++ loss**: a smooth, bounded,
+threshold-free kernel that keeps the *operational* traits (σ-derived scale, `1/loss`
+quality, budget-based early exit, a soft 0→peak ramp for tight inliers) but is neither
+the marginalized χ-density nor even a monotone robust kernel. Two practical consequences:
+(a) dropping the constant prefactor is harmless for **model selection within one
+`register()` call** (σ_max is fixed, so a uniform rescale cannot change the argmax), but
+the scores are not comparable across different σ_max; (b) the non-monotonicity means
+lumos faintly *prefers* a model that drives borderline points either tight (`r<2σ`) or
+clearly out (`r>3σ`) over one that leaves them near `2σ`. The effect is small and bounded
+(the in-band excess over the outlier loss is ≤`0.07·σ²_max`, all in the 2–3σ fringe), and
+the triangle vote + LO-RANSAC + match-recovery carry the load, so accuracy is unaffected
+in practice — but the loss should not be described as the paper's ρ or as monotone.
 
 The per-point loss is clamped to `outlier_loss = σ²ₘₐₓ/2` beyond
 `threshold² = χ²₀.₉₉(2)·σ²ₘₐₓ = 9.21·σ²ₘₐₓ` (`magsac.rs:43-74`; note `9.21 = χ²₀.₉₉(2)`,
@@ -948,8 +964,9 @@ well-grounded against astroalign, MAGSAC, astrometry.net, and SCAMP.
 - **Voting with ≥3 confirming triangles** and greedy one-to-one resolution
   (`voting.rs`).
 - **MAGSAC++-*inspired* threshold-free loss**, hand-verified by unit tests
-  (`ransac/magsac.rs`) — a smooth monotone robust kernel, *not* the paper's exact
-  σ-marginalized ρ (see §3.5 Correction); preemptive scoring; **adaptive iterations**;
+  (`ransac/magsac.rs`) — a smooth, bounded (but **non-monotone**, §3.5) robust kernel,
+  *not* the paper's exact σ-marginalized ρ (see §3.5 Correction); preemptive scoring;
+  **adaptive iterations**;
   **LO-RANSAC on new-best only**; **degeneracy rejection**; **final non-minimal refit**
   (`ransac/mod.rs`).
 - **Hartley √2 normalization** for *both* homography and affine, SVD of the full
@@ -998,8 +1015,10 @@ well-grounded against astroalign, MAGSAC, astrometry.net, and SCAMP.
    correctness gap, but Lanczos2/4 and bicubic could be vectorized if they become
    hot.
 8. **MAGSAC++ loss is a heuristic, not the paper's ρ** (§3.5 Correction). lumos's
-   `MagsacScorer::loss` uses `(σ²/2)(1−e^{−x}) + (r²/4)e^{−x}`, which is monotone and
-   bounded but does not equal the σ-marginalized χ-density loss for `n=2` or `n=4`. If
+   `MagsacScorer::loss` uses `(σ²/2)(1−e^{−x}) + (r²/4)e^{−x}`, which is bounded but
+   **non-monotone** — it peaks at `r=2σ_max` (≈`0.568·σ²_max`, *above* the `0.5·σ²_max`
+   outlier loss) then declines — and does not equal the σ-marginalized χ-density loss
+   for `n=2` or `n=4`. If
    exact MAGSAC++ behavior is wanted, implement the real ρ via a small incomplete-gamma
    LUT (`n=2`: `γ(3/2,·)`, `Γ(1/2,·)`; `n=4`: `γ(5/2,·)`, `Γ(3/2,·)`). In practice the
    current loss works because the triangle vote + LO-RANSAC + match-recovery do most of
@@ -1053,7 +1072,39 @@ root). Each line: source → load-bearing takeaway → local `.txt`.
   image* PDF with no text layer (`pdftotext` yields 0 bytes); the 2-D analytic formulas
   and the general `det`-correction are cross-checked against the lumos code and the
   standard statement instead. The IRSA SIP mirror and one Spitzer copy were the only
-  working SIP PDFs.
+  working SIP PDFs. (Re-checked pass 3: `umeyama1991.txt` is still empty — 5 bytes.)
+
+## Pass 3 — independent re-verification log
+
+Every lumos `file:line` citation in this document was re-read against the current source
+and found accurate (modulo ±1-line drift where a citation points at a `#[derive(…)]`
+attribute rather than the `enum`/`struct` line it decorates — e.g. `TransformType` at
+`transform.rs:14` vs 15, `Orientation` at `geometry.rs:11` vs 12; both resolve to the
+right item). The load-bearing reference-clone citations were re-confirmed verbatim:
+`magsac.h` termination (939-940), `getModelQualityPlusPlus` loss `maximum_sigma_2_per_2 *
+γ_lower + r²/4·(Γ_complete − γ_k)` × `two_ad_dof_plus_one_per_maximum_sigma` (1028-1031)
+and early-exit (1039); `estimators.h` `getSigmaQuantile()=3.64`, `getDegreesOfFreedom()=4`,
+`getC()=0.25` (36-49); `astroalign.py` (`r=0.1` empirical comment 349-356, 3 refinement
+passes 637-642, `_invariantfeatures` 106-115, footprint 452-474); `codefile.c`
+scale/costheta/sintheta + C-rotation (49-65); `sip.c` `sip_calc_distortion` `*U=u+fuv`,
+`*V=v+guv` (364-396) and `sip_distortion` (73-78); `swarp/interpolate.c` LANCZOS2/3/4 via
+`sincos` (337-428); `scamp/fitswcs.c` `PV?_????` + `TPV` pcode (610-905); `solver.c`
+`solver_tweak2` (126). Paper claims re-confirmed in `.tmp/papers/`: Groth `R=r3/r2`,
+`C`=cosine at vertex 1, `≈48 n_t² ε²` false-match count, log-magnification pruning;
+astrometry.net prior `p(F)/p(B)=10⁻⁶`, `u(FP)=−1999`, "quad ≈ two triangles sharing an
+edge"; MAGSAC++ "`n = 4` for point correspondences" and the `0 ≤ r ≤ kσ_max` closed form.
+The §3.5 MAGSAC++ ρ values were recomputed independently (half-integer incomplete gammas,
+no scipy): n2 ρ(1)=0.3232, n4 ρ(1)=0.2849, n4 ρ(2)=0.7461, n4 ρ(3)=0.9084, lumos
+loss(1/2/3)=0.3484/0.5677/0.5194 — all matching the quoted figures. The Keys `a=−0.5`
+"agrees with the Taylor series to third order" claim and the SIP order/overfitting
+consensus were re-checked against fresh web sources.
+
+**One substantive correction (this pass):** §3.5, §9 and §9.8 had described lumos's loss
+as "monotone(-increasing)". It is **not** — written `loss = (σ²_max/2)[1 − e^{−x}(1−x)]`,
+its derivative `(σ²_max/2)e^{−x}(2−x)` changes sign at `x=2`, so the loss peaks at
+`r=2σ_max` (`≈0.568·σ²_max`, which *exceeds* the `0.5·σ²_max` outlier loss) and then
+declines to the clamp. The three passages were rewritten to state the loss is *bounded but
+non-monotone*, with the analytic peak and its practical (small, fringe-only) consequences.
 
 ## 10. References
 
