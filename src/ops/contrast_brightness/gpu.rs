@@ -5,7 +5,7 @@ use super::pipeline::GpuContrastBrightnessPipeline;
 use crate::common::error::Result;
 use crate::gpu::Gpu;
 use crate::gpu::gpu_image::GpuImage;
-use crate::ops::gpu_format::*;
+use crate::ops::gpu_format::{get_format_type, workgroup_count};
 use crate::processing_context::ProcessingContext;
 use crate::processing_context::image_buffer::ImageBuffer;
 
@@ -80,19 +80,8 @@ impl ContrastBrightness {
             compute_pass.set_pipeline(&pipeline.compute_pipeline);
             compute_pass.set_bind_group(0, &bind_group, &[]);
 
-            let work_items = match format_type {
-                FORMAT_L_U8 => {
-                    let quads_per_row = width.div_ceil(4);
-                    quads_per_row * height
-                }
-                FORMAT_LA_U8 | FORMAT_L_U16 => {
-                    let pairs_per_row = width.div_ceil(2);
-                    pairs_per_row * height
-                }
-                _ => width * height,
-            };
-            let workgroup_count = work_items.div_ceil(256) as u32;
-            compute_pass.dispatch_workgroups(workgroup_count, 1, 1);
+            let groups = workgroup_count(format_type, width, height);
+            compute_pass.dispatch_workgroups(groups, 1, 1);
         }
 
         queue.submit(std::iter::once(encoder.finish()));

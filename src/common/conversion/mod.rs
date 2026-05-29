@@ -10,6 +10,10 @@ pub(crate) const LUMA_R: u32 = 13933;
 pub(crate) const LUMA_G: u32 = 46871;
 pub(crate) const LUMA_B: u32 = 4732;
 
+// Rec. 709 weights scaled to 8-bit fixed point (sum 256, allows >>8 instead of divide).
+// Used by the SIMD integer luminance kernels; [R, G, B].
+pub(crate) const LUMA_8BIT: [u16; 3] = [54, 183, 19];
+
 #[cfg(test)]
 mod bench;
 #[cfg(test)]

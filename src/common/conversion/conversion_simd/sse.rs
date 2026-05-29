@@ -4,6 +4,7 @@
 
 #![allow(unsafe_op_in_unsafe_fn)]
 
+use super::LUMA_8BIT;
 use super::LUMA_B;
 use super::LUMA_G;
 use super::LUMA_R;
@@ -136,9 +137,9 @@ pub(super) unsafe fn convert_rgba_to_l_row_ssse3(src: &[u8], dst: &mut [u8], wid
         let g16 = _mm_unpacklo_epi8(g, zero);
         let b16 = _mm_unpacklo_epi8(b, zero);
 
-        let r_w = _mm_set1_epi16(54);
-        let g_w = _mm_set1_epi16(183);
-        let b_w = _mm_set1_epi16(19);
+        let r_w = _mm_set1_epi16(LUMA_8BIT[0] as i16);
+        let g_w = _mm_set1_epi16(LUMA_8BIT[1] as i16);
+        let b_w = _mm_set1_epi16(LUMA_8BIT[2] as i16);
 
         let sum = _mm_add_epi16(
             _mm_add_epi16(_mm_mullo_epi16(r16, r_w), _mm_mullo_epi16(g16, g_w)),
@@ -226,9 +227,9 @@ pub(super) unsafe fn convert_rgb_to_l_row_ssse3(src: &[u8], dst: &mut [u8], widt
         let b_hi = _mm_or_si128(b2_part, _mm_slli_si128(b3_part, 2));
 
         let zero = _mm_setzero_si128();
-        let r_w = _mm_set1_epi16(54);
-        let g_w = _mm_set1_epi16(183);
-        let b_w = _mm_set1_epi16(19);
+        let r_w = _mm_set1_epi16(LUMA_8BIT[0] as i16);
+        let g_w = _mm_set1_epi16(LUMA_8BIT[1] as i16);
+        let b_w = _mm_set1_epi16(LUMA_8BIT[2] as i16);
 
         let r16_lo = _mm_unpacklo_epi8(r_lo, zero);
         let g16_lo = _mm_unpacklo_epi8(g_lo, zero);
@@ -418,9 +419,9 @@ pub(super) unsafe fn convert_rgba_to_la_row_ssse3(src: &[u8], dst: &mut [u8], wi
         let g16 = _mm_unpacklo_epi8(g, zero);
         let b16 = _mm_unpacklo_epi8(b, zero);
 
-        let r_w = _mm_set1_epi16(54);
-        let g_w = _mm_set1_epi16(183);
-        let b_w = _mm_set1_epi16(19);
+        let r_w = _mm_set1_epi16(LUMA_8BIT[0] as i16);
+        let g_w = _mm_set1_epi16(LUMA_8BIT[1] as i16);
+        let b_w = _mm_set1_epi16(LUMA_8BIT[2] as i16);
 
         let sum = _mm_add_epi16(
             _mm_add_epi16(_mm_mullo_epi16(r16, r_w), _mm_mullo_epi16(g16, g_w)),
@@ -489,7 +490,7 @@ pub(super) unsafe fn convert_f32_to_u8_row_sse2(src: &[f32], dst: &mut [u8]) {
     }
 
     for i in 0..remainder {
-        let val = (src[simd_width * 16 + i] * 255.0).clamp(0.0, 255.0) as u8;
+        let val = (src[simd_width * 16 + i] * 255.0).round_ties_even().clamp(0.0, 255.0) as u8;
         dst[simd_width * 16 + i] = val;
     }
 }
@@ -659,6 +660,6 @@ pub(super) unsafe fn convert_f32_to_u16_row_sse41(src: &[f32], dst: &mut [u16]) 
     }
 
     for i in 0..remainder {
-        dst[simd_width * 8 + i] = (src[simd_width * 8 + i] * 65535.0).clamp(0.0, 65535.0) as u16;
+        dst[simd_width * 8 + i] = (src[simd_width * 8 + i] * 65535.0).round_ties_even().clamp(0.0, 65535.0) as u16;
     }
 }

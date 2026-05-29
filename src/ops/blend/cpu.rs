@@ -5,6 +5,8 @@ use rayon::prelude::*;
 
 use super::{Blend, BlendMode};
 use crate::common::color_format::{ChannelCount, ChannelSize, ChannelType};
+#[cfg(target_arch = "x86_64")]
+use crate::cpu_features;
 use crate::image::Image;
 
 /// Applies blending of two images using CPU.
@@ -35,7 +37,7 @@ pub(super) fn apply(params: &Blend, src: &Image, dst: &Image, output: &mut Image
 
     // Use SIMD-optimized paths when available
     #[cfg(target_arch = "x86_64")]
-    if is_x86_feature_detected!("sse4.1") {
+    if cpu_features::has_sse4_1() {
         match (channel_size, channel_type, channel_count) {
             (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::Rgba) => {
                 // SAFETY: SSE4.1 support verified above

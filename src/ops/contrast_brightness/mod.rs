@@ -4,42 +4,12 @@ mod gpu;
 #[cfg(feature = "wgpu")]
 pub(crate) mod pipeline;
 
-use crate::common::color_format::ColorFormat;
+use crate::common::color_format::ALL_FORMATS;
 use crate::common::error::Result;
 use crate::image::Image;
 use crate::ops::backend_selection::{Backend, select_backend};
 use crate::processing_context::ProcessingContext;
 use crate::processing_context::image_buffer::ImageBuffer;
-
-const SUPPORTED_CPU_FORMATS: &[ColorFormat] = &[
-    ColorFormat::L_U8,
-    ColorFormat::L_U16,
-    ColorFormat::L_F32,
-    ColorFormat::LA_U8,
-    ColorFormat::LA_U16,
-    ColorFormat::LA_F32,
-    ColorFormat::RGB_U8,
-    ColorFormat::RGB_U16,
-    ColorFormat::RGB_F32,
-    ColorFormat::RGBA_U8,
-    ColorFormat::RGBA_U16,
-    ColorFormat::RGBA_F32,
-];
-
-const SUPPORTED_GPU_FORMATS: &[ColorFormat] = &[
-    ColorFormat::L_U8,
-    ColorFormat::LA_U8,
-    ColorFormat::RGB_U8,
-    ColorFormat::RGBA_U8,
-    ColorFormat::L_U16,
-    ColorFormat::LA_U16,
-    ColorFormat::RGB_U16,
-    ColorFormat::RGBA_U16,
-    ColorFormat::L_F32,
-    ColorFormat::LA_F32,
-    ColorFormat::RGB_F32,
-    ColorFormat::RGBA_F32,
-];
 
 /// Parameters for contrast and brightness adjustment.
 #[derive(Debug, Clone, Copy)]
@@ -111,8 +81,8 @@ impl ContrastBrightness {
         let backend = select_backend(
             ctx,
             &[input, output],
-            SUPPORTED_CPU_FORMATS,
-            SUPPORTED_GPU_FORMATS,
+            ALL_FORMATS,
+            ALL_FORMATS,
             "ContrastBrightness",
         )?;
 

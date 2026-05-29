@@ -6,42 +6,12 @@ pub(crate) mod pipeline;
 
 use strum_macros::{EnumString, VariantNames};
 
-use crate::common::color_format::ColorFormat;
+use crate::common::color_format::ALL_FORMATS;
 use crate::common::error::Result;
 use crate::image::Image;
 use crate::ops::backend_selection::{Backend, select_backend};
 use crate::processing_context::ProcessingContext;
 use crate::processing_context::image_buffer::ImageBuffer;
-
-const SUPPORTED_CPU_FORMATS: &[ColorFormat] = &[
-    ColorFormat::L_U8,
-    ColorFormat::L_U16,
-    ColorFormat::L_F32,
-    ColorFormat::LA_U8,
-    ColorFormat::LA_U16,
-    ColorFormat::LA_F32,
-    ColorFormat::RGB_U8,
-    ColorFormat::RGB_U16,
-    ColorFormat::RGB_F32,
-    ColorFormat::RGBA_U8,
-    ColorFormat::RGBA_U16,
-    ColorFormat::RGBA_F32,
-];
-
-const SUPPORTED_GPU_FORMATS: &[ColorFormat] = &[
-    ColorFormat::L_U8,
-    ColorFormat::LA_U8,
-    ColorFormat::RGB_U8,
-    ColorFormat::RGBA_U8,
-    ColorFormat::L_U16,
-    ColorFormat::LA_U16,
-    ColorFormat::RGB_U16,
-    ColorFormat::RGBA_U16,
-    ColorFormat::L_F32,
-    ColorFormat::LA_F32,
-    ColorFormat::RGB_F32,
-    ColorFormat::RGBA_F32,
-];
 
 /// Blend modes for combining two images.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, EnumString, VariantNames)]
@@ -127,13 +97,7 @@ impl Blend {
         dst: &ImageBuffer,
         output: &mut ImageBuffer,
     ) -> Result<()> {
-        let backend = select_backend(
-            ctx,
-            &[src, dst, output],
-            SUPPORTED_CPU_FORMATS,
-            SUPPORTED_GPU_FORMATS,
-            "Blend",
-        )?;
+        let backend = select_backend(ctx, &[src, dst, output], ALL_FORMATS, ALL_FORMATS, "Blend")?;
 
         match backend {
             #[cfg(feature = "wgpu")]

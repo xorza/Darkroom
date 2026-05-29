@@ -1,11 +1,11 @@
 use wgpu::util::DeviceExt;
 
+use super::Blend;
 use super::pipeline::GpuBlendPipeline;
-use super::{Blend, BlendMode};
 use crate::common::error::Result;
 use crate::gpu::Gpu;
 use crate::gpu::gpu_image::GpuImage;
-use crate::ops::gpu_format::*;
+use crate::ops::gpu_format::{get_format_type, workgroup_count};
 use crate::processing_context::ProcessingContext;
 use crate::processing_context::image_buffer::ImageBuffer;
 
@@ -36,14 +36,8 @@ impl Blend {
         let height = src.desc.height;
         let stride = src.desc.stride;
 
-        let mode_u32 = match self.mode {
-            BlendMode::Normal => 0u32,
-            BlendMode::Add => 1u32,
-            BlendMode::Subtract => 2u32,
-            BlendMode::Multiply => 3u32,
-            BlendMode::Screen => 4u32,
-            BlendMode::Overlay => 5u32,
-        };
+        // BlendMode is #[repr(u8)]; the shader's mode contract depends on this declared order.
+        let mode_u32 = self.mode as u32;
 
         let uniform_params = Params {
             mode: mode_u32,
@@ -96,19 +90,8 @@ impl Blend {
             compute_pass.set_pipeline(&pipeline.compute_pipeline);
             compute_pass.set_bind_group(0, &bind_group, &[]);
 
-            let work_items = match format_type {
-                FORMAT_L_U8 => {
-                    let quads_per_row = width.div_ceil(4);
-                    quads_per_row * height
-                }
-                FORMAT_LA_U8 | FORMAT_L_U16 => {
-                    let pairs_per_row = width.div_ceil(2);
-                    pairs_per_row * height
-                }
-                _ => width * height,
-            };
-            let workgroup_count = work_items.div_ceil(256) as u32;
-            compute_pass.dispatch_workgroups(workgroup_count, 1, 1);
+            let groups = workgroup_count(format_type, width, height);
+            compute_pass.dispatch_workgroups(groups, 1, 1);
         }
 
         queue.submit(std::iter::once(encoder.finish()));
@@ -153,6 +136,7 @@ struct Params {
 
 #[cfg(test)]
 mod tests {
+    use super::super::BlendMode;
     use super::*;
     use crate::common::color_format::ColorFormat;
     use crate::common::test_utils::{create_test_image, create_test_image_f32, test_gpu};

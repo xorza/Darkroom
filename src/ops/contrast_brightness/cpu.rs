@@ -5,6 +5,8 @@ use rayon::prelude::*;
 
 use super::ContrastBrightness;
 use crate::common::color_format::{ChannelCount, ChannelSize, ChannelType};
+#[cfg(target_arch = "x86_64")]
+use crate::cpu_features;
 use crate::image::Image;
 
 /// Applies contrast and brightness adjustment to an image using CPU.
@@ -24,7 +26,7 @@ pub(super) fn apply(params: &ContrastBrightness, input: &Image, output: &mut Ima
 
     // Use SIMD-optimized paths when available
     #[cfg(target_arch = "x86_64")]
-    if is_x86_feature_detected!("sse4.1") {
+    if cpu_features::has_sse4_1() {
         match (channel_size, channel_type, channel_count) {
             // u8 formats
             (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::L) => {
@@ -148,7 +150,7 @@ impl ContrastBrightnessApply for u8 {
         let max = Self::MAX as f32;
         let mid = max / 2.0;
         let val = (self as f32 - mid) * contrast + mid + brightness * max;
-        val.clamp(0.0, max) as Self
+        val.round_ties_even().clamp(0.0, max) as Self
     }
 }
 
@@ -158,7 +160,7 @@ impl ContrastBrightnessApply for u16 {
         let max = Self::MAX as f32;
         let mid = max / 2.0;
         let val = (self as f32 - mid) * contrast + mid + brightness * max;
-        val.clamp(0.0, max) as Self
+        val.round_ties_even().clamp(0.0, max) as Self
     }
 }
 
@@ -296,7 +298,9 @@ unsafe fn process_row_u8_gray_sse41(
 
         // Scalar fallback
         while x < width {
-            out_row[x] = (in_row[x] as f32 * contrast + offset).clamp(0.0, 255.0) as u8;
+            out_row[x] = (in_row[x] as f32 * contrast + offset)
+                .round()
+                .clamp(0.0, 255.0) as u8;
             x += 1;
         }
     }
@@ -387,7 +391,9 @@ unsafe fn process_row_u8_gray_alpha_sse41(
 
         // Scalar fallback
         while x < width {
-            out_row[x * 2] = (in_row[x * 2] as f32 * contrast + offset).clamp(0.0, 255.0) as u8;
+            out_row[x * 2] = (in_row[x * 2] as f32 * contrast + offset)
+                .round()
+                .clamp(0.0, 255.0) as u8;
             out_row[x * 2 + 1] = in_row[x * 2 + 1]; // preserve alpha
             x += 1;
         }
@@ -484,8 +490,9 @@ unsafe fn process_row_u8_rgb_sse41(
         // Scalar fallback
         while x < width {
             for c in 0..3 {
-                out_row[x * 3 + c] =
-                    (in_row[x * 3 + c] as f32 * contrast + offset).clamp(0.0, 255.0) as u8;
+                out_row[x * 3 + c] = (in_row[x * 3 + c] as f32 * contrast + offset)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
             }
             x += 1;
         }
@@ -591,7 +598,9 @@ unsafe fn process_row_u8_rgba_sse41(
             let src = &in_row[x * 4..];
             let dst = &mut out_row[x * 4..];
             for c in 0..3 {
-                dst[c] = (src[c] as f32 * contrast + offset).clamp(0.0, 255.0) as u8;
+                dst[c] = (src[c] as f32 * contrast + offset)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
             }
             dst[3] = src[3];
             x += 1;
@@ -946,7 +955,7 @@ unsafe fn process_row_u8_gray_neon(
                 ($v:expr) => {{
                     let f = vcvtq_f32_u32($v);
                     let r = vmlaq_f32(offset_vec, f, contrast_vec);
-                    vcvtq_u32_f32(vminq_f32(vmaxq_f32(r, min_val), max_val))
+                    vcvtnq_u32_f32(vminq_f32(vmaxq_f32(r, min_val), max_val))
                 }};
             }
 
@@ -966,7 +975,9 @@ unsafe fn process_row_u8_gray_neon(
 
         // Scalar fallback
         while x < width {
-            out_row[x] = (in_row[x] as f32 * contrast + offset).clamp(0.0, 255.0) as u8;
+            out_row[x] = (in_row[x] as f32 * contrast + offset)
+                .round()
+                .clamp(0.0, 255.0) as u8;
             x += 1;
         }
     }
@@ -1028,7 +1039,7 @@ unsafe fn process_row_u8_gray_alpha_neon(
                 ($v:expr) => {{
                     let f = vcvtq_f32_u32($v);
                     let r = vmlaq_f32(offset_vec, f, contrast_vec);
-                    vcvtq_u32_f32(vminq_f32(vmaxq_f32(r, min_val), max_val))
+                    vcvtnq_u32_f32(vminq_f32(vmaxq_f32(r, min_val), max_val))
                 }};
             }
 
@@ -1046,7 +1057,9 @@ unsafe fn process_row_u8_gray_alpha_neon(
 
         // Scalar fallback
         while x < width {
-            out_row[x * 2] = (in_row[x * 2] as f32 * contrast + offset).clamp(0.0, 255.0) as u8;
+            out_row[x * 2] = (in_row[x * 2] as f32 * contrast + offset)
+                .round()
+                .clamp(0.0, 255.0) as u8;
             out_row[x * 2 + 1] = in_row[x * 2 + 1]; // preserve alpha
             x += 1;
         }
@@ -1110,8 +1123,8 @@ unsafe fn process_row_u8_rgb_neon(
                     let r0 = vmlaq_f32(offset_vec, f0, contrast_vec);
                     let r1 = vmlaq_f32(offset_vec, f1, contrast_vec);
 
-                    let r0 = vcvtq_u32_f32(vminq_f32(vmaxq_f32(r0, min_val), max_val));
-                    let r1 = vcvtq_u32_f32(vminq_f32(vmaxq_f32(r1, min_val), max_val));
+                    let r0 = vcvtnq_u32_f32(vminq_f32(vmaxq_f32(r0, min_val), max_val));
+                    let r1 = vcvtnq_u32_f32(vminq_f32(vmaxq_f32(r1, min_val), max_val));
 
                     let out_16 = vcombine_u16(vmovn_u32(r0), vmovn_u32(r1));
                     vmovn_u16(out_16)
@@ -1130,8 +1143,9 @@ unsafe fn process_row_u8_rgb_neon(
         // Scalar fallback
         while x < width {
             for c in 0..3 {
-                out_row[x * 3 + c] =
-                    (in_row[x * 3 + c] as f32 * contrast + offset).clamp(0.0, 255.0) as u8;
+                out_row[x * 3 + c] = (in_row[x * 3 + c] as f32 * contrast + offset)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
             }
             x += 1;
         }
@@ -1195,8 +1209,8 @@ unsafe fn process_row_u8_rgba_neon(
                     let r0 = vmlaq_f32(offset_vec, f0, contrast_vec);
                     let r1 = vmlaq_f32(offset_vec, f1, contrast_vec);
 
-                    let r0 = vcvtq_u32_f32(vminq_f32(vmaxq_f32(r0, min_val), max_val));
-                    let r1 = vcvtq_u32_f32(vminq_f32(vmaxq_f32(r1, min_val), max_val));
+                    let r0 = vcvtnq_u32_f32(vminq_f32(vmaxq_f32(r0, min_val), max_val));
+                    let r1 = vcvtnq_u32_f32(vminq_f32(vmaxq_f32(r1, min_val), max_val));
 
                     let out_16 = vcombine_u16(vmovn_u32(r0), vmovn_u32(r1));
                     vmovn_u16(out_16)
@@ -1219,7 +1233,9 @@ unsafe fn process_row_u8_rgba_neon(
             let src = &in_row[x * 4..];
             let dst = &mut out_row[x * 4..];
             for c in 0..3 {
-                dst[c] = (src[c] as f32 * contrast + offset).clamp(0.0, 255.0) as u8;
+                dst[c] = (src[c] as f32 * contrast + offset)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
             }
             dst[3] = src[3];
             x += 1;

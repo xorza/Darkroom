@@ -3,26 +3,11 @@ pub(crate) mod pipeline;
 
 use glam::{Affine2, Vec2};
 
-use crate::common::color_format::ColorFormat;
+use crate::common::color_format::ALL_FORMATS;
 use crate::common::error::Result;
 use crate::ops::backend_selection::{Backend, select_backend};
 use crate::processing_context::ProcessingContext;
 use crate::processing_context::image_buffer::ImageBuffer;
-
-const SUPPORTED_GPU_FORMATS: &[ColorFormat] = &[
-    ColorFormat::L_U8,
-    ColorFormat::LA_U8,
-    ColorFormat::RGB_U8,
-    ColorFormat::RGBA_U8,
-    ColorFormat::L_U16,
-    ColorFormat::LA_U16,
-    ColorFormat::RGB_U16,
-    ColorFormat::RGBA_U16,
-    ColorFormat::L_F32,
-    ColorFormat::LA_F32,
-    ColorFormat::RGB_F32,
-    ColorFormat::RGBA_F32,
-];
 
 /// Filter mode for image sampling during transformation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -103,7 +88,7 @@ impl Transform {
     /// # Errors
     /// Returns an error if:
     /// - Input and output have different color formats
-    /// - The color format is not supported (only RGBA_U8 is supported)
+    /// - The color format is not one of the 12 supported formats
     pub fn execute(
         &self,
         ctx: &mut ProcessingContext,
@@ -114,7 +99,7 @@ impl Transform {
             ctx,
             &[input, output],
             &[], // No CPU support
-            SUPPORTED_GPU_FORMATS,
+            ALL_FORMATS,
             "Transform",
         )?;
 

@@ -80,13 +80,15 @@ macro_rules! impl_convert_int_to_float {
     };
 }
 
-// Float to integer
+// Float to integer. Rounds to nearest, ties to even, to match the SSE/AVX/NEON kernels
+// (`cvtps_epi32` / `vcvtnq_*`); the `as` cast then saturates out-of-range values. A plain
+// truncating cast would diverge from the SIMD paths.
 macro_rules! impl_convert_float_to_int {
     ($float:ty, $int:ty) => {
         impl ChannelConvert<$int> for $float {
             #[inline]
             fn convert(self) -> $int {
-                (self as f64 * <$int>::MAX as f64) as $int
+                (self as f64 * <$int>::MAX as f64).round_ties_even() as $int
             }
         }
     };

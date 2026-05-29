@@ -4,6 +4,7 @@
 
 #![allow(unsafe_op_in_unsafe_fn)]
 
+use super::LUMA_8BIT;
 use super::LUMA_B;
 use super::LUMA_G;
 use super::LUMA_R;
@@ -81,9 +82,9 @@ pub(super) unsafe fn convert_rgba_to_l_row_neon(src: &[u8], dst: &mut [u8], widt
     let simd_width = width / 16;
     let remainder = width % 16;
 
-    let r_w = vdupq_n_u16(54);
-    let g_w = vdupq_n_u16(183);
-    let b_w = vdupq_n_u16(19);
+    let r_w = vdupq_n_u16(LUMA_8BIT[0]);
+    let g_w = vdupq_n_u16(LUMA_8BIT[1]);
+    let b_w = vdupq_n_u16(LUMA_8BIT[2]);
 
     for i in 0..simd_width {
         let src_offset = i * 64;
@@ -135,9 +136,9 @@ pub(super) unsafe fn convert_rgb_to_l_row_neon(src: &[u8], dst: &mut [u8], width
     let simd_width = width / 16;
     let remainder = width % 16;
 
-    let r_w = vdupq_n_u16(54);
-    let g_w = vdupq_n_u16(183);
-    let b_w = vdupq_n_u16(19);
+    let r_w = vdupq_n_u16(LUMA_8BIT[0]);
+    let g_w = vdupq_n_u16(LUMA_8BIT[1]);
+    let b_w = vdupq_n_u16(LUMA_8BIT[2]);
 
     for i in 0..simd_width {
         let src_offset = i * 48;
@@ -278,9 +279,9 @@ pub(super) unsafe fn convert_rgba_to_la_row_neon(src: &[u8], dst: &mut [u8], wid
     let simd_width = width / 16;
     let remainder = width % 16;
 
-    let r_w = vdupq_n_u16(54);
-    let g_w = vdupq_n_u16(183);
-    let b_w = vdupq_n_u16(19);
+    let r_w = vdupq_n_u16(LUMA_8BIT[0]);
+    let g_w = vdupq_n_u16(LUMA_8BIT[1]);
+    let b_w = vdupq_n_u16(LUMA_8BIT[2]);
 
     for i in 0..simd_width {
         let src_offset = i * 64;
@@ -353,10 +354,10 @@ pub(super) unsafe fn convert_f32_to_u8_row_neon(src: &[f32], dst: &mut [u8]) {
         let scaled2 = vminq_f32(vmaxq_f32(vmulq_f32(f2, scale), zero), max);
         let scaled3 = vminq_f32(vmaxq_f32(vmulq_f32(f3, scale), zero), max);
 
-        let u0 = vcvtq_u32_f32(scaled0);
-        let u1 = vcvtq_u32_f32(scaled1);
-        let u2 = vcvtq_u32_f32(scaled2);
-        let u3 = vcvtq_u32_f32(scaled3);
+        let u0 = vcvtnq_u32_f32(scaled0);
+        let u1 = vcvtnq_u32_f32(scaled1);
+        let u2 = vcvtnq_u32_f32(scaled2);
+        let u3 = vcvtnq_u32_f32(scaled3);
 
         let words_lo = vcombine_u16(vmovn_u32(u0), vmovn_u32(u1));
         let words_hi = vcombine_u16(vmovn_u32(u2), vmovn_u32(u3));
@@ -367,7 +368,7 @@ pub(super) unsafe fn convert_f32_to_u8_row_neon(src: &[f32], dst: &mut [u8]) {
     }
 
     for i in 0..remainder {
-        let val = (src[simd_width * 16 + i] * 255.0).clamp(0.0, 255.0) as u8;
+        let val = (src[simd_width * 16 + i] * 255.0).round_ties_even().clamp(0.0, 255.0) as u8;
         dst[simd_width * 16 + i] = val;
     }
 }
@@ -519,8 +520,8 @@ pub(super) unsafe fn convert_f32_to_u16_row_neon(src: &[f32], dst: &mut [u16]) {
         let scaled0 = vminq_f32(vmaxq_f32(vmulq_f32(f0, scale), zero), max);
         let scaled1 = vminq_f32(vmaxq_f32(vmulq_f32(f1, scale), zero), max);
 
-        let u0 = vcvtq_u32_f32(scaled0);
-        let u1 = vcvtq_u32_f32(scaled1);
+        let u0 = vcvtnq_u32_f32(scaled0);
+        let u1 = vcvtnq_u32_f32(scaled1);
 
         let words = vcombine_u16(vmovn_u32(u0), vmovn_u32(u1));
 
@@ -528,6 +529,6 @@ pub(super) unsafe fn convert_f32_to_u16_row_neon(src: &[f32], dst: &mut [u16]) {
     }
 
     for i in 0..remainder {
-        dst[simd_width * 8 + i] = (src[simd_width * 8 + i] * 65535.0).clamp(0.0, 65535.0) as u16;
+        dst[simd_width * 8 + i] = (src[simd_width * 8 + i] * 65535.0).round_ties_even().clamp(0.0, 65535.0) as u16;
     }
 }

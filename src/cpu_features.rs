@@ -45,21 +45,6 @@ pub fn get() -> X86Features {
 }
 
 #[inline]
-pub fn has_sse2() -> bool {
-    get().sse2
-}
-
-#[inline]
-pub fn has_sse3() -> bool {
-    get().sse3
-}
-
-#[inline]
-pub fn has_ssse3() -> bool {
-    get().ssse3
-}
-
-#[inline]
 pub fn has_sse4_1() -> bool {
     get().sse4_1
 }
@@ -67,10 +52,4 @@ pub fn has_sse4_1() -> bool {
 #[inline]
 pub fn has_avx2() -> bool {
     get().avx2
-}
-
-#[inline]
-pub fn has_avx2_fma() -> bool {
-    let f = get();
-    f.avx2 && f.fma
 }

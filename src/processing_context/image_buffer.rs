@@ -10,7 +10,7 @@ use crate::image::{Image, ImageDesc};
 
 /// Storage location for image data.
 #[derive(Debug)]
-pub enum Storage {
+pub(crate) enum Storage {
     /// Image data is on the CPU.
     Cpu(Image),
     /// Image data is on the GPU.
@@ -42,7 +42,7 @@ impl ImageBuffer {
 
     /// Creates a new ImageBuffer from a GPU image.
     #[cfg(feature = "wgpu")]
-    pub fn from_gpu(image: GpuImage) -> Self {
+    pub(crate) fn from_gpu(image: GpuImage) -> Self {
         Self {
             desc: image.desc,
             storage: AtomicRefCell::new(Some(Storage::Gpu(image))),
@@ -77,7 +77,7 @@ impl ImageBuffer {
     /// Allocates GPU storage if empty.
     /// Returns an immutable reference to the GPU image.
     #[cfg(feature = "wgpu")]
-    pub fn make_gpu(&self, ctx: &ProcessingContext) -> Result<AtomicRef<'_, GpuImage>> {
+    pub(crate) fn make_gpu(&self, ctx: &ProcessingContext) -> Result<AtomicRef<'_, GpuImage>> {
         self.ensure_gpu(ctx)?;
         let storage = self.storage.borrow();
         Ok(AtomicRef::map(storage, |s| match s {
@@ -92,7 +92,10 @@ impl ImageBuffer {
     ///
     /// Note: `&mut self` is intentional to prevent accidental writes to non-mutable buffers.
     #[cfg(feature = "wgpu")]
-    pub fn make_gpu_mut(&mut self, ctx: &ProcessingContext) -> Result<AtomicRefMut<'_, GpuImage>> {
+    pub(crate) fn make_gpu_mut(
+        &mut self,
+        ctx: &ProcessingContext,
+    ) -> Result<AtomicRefMut<'_, GpuImage>> {
         self.ensure_gpu(ctx)?;
         let storage = self.storage.borrow_mut();
         Ok(AtomicRefMut::map(storage, |s| match s {
@@ -156,6 +159,7 @@ impl ImageBuffer {
                 None => Storage::Cpu(Image::new_black(self.desc)?),
             });
         }
+        #[cfg(not(feature = "wgpu"))]
         let _ = ctx;
         Ok(())
     }
@@ -176,6 +180,7 @@ impl ImageBuffer {
     /// Note: Requires the GPU device to be polled (via `ctx.gpu().wait()` or similar)
     /// for the download to complete. The polling can happen from another thread.
     pub async fn to_cpu_async(self, ctx: &ProcessingContext) -> Result<Image> {
+        #[cfg(not(feature = "wgpu"))]
         let _ = ctx;
         match self.storage.into_inner() {
             Some(Storage::Cpu(img)) => Ok(img),

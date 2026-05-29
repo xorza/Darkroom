@@ -44,16 +44,10 @@ impl Image {
         &self.bytes
     }
 
-    /// Convert to owned bytes (zero-copy due to 16-byte alignment).
+    /// Convert to owned bytes. Copies: an `AVec`'s over-aligned allocation cannot be
+    /// freed as a plain `Vec` (the dealloc `Layout` alignment would mismatch the alloc).
     pub fn into_bytes(self) -> Vec<u8> {
-        let (ptr, _align, len, capacity) = self.bytes.into_raw_parts();
-        // Safety: AVec guarantees the pointer is valid and properly aligned.
-        unsafe { Vec::from_raw_parts(ptr, len, capacity) }
-    }
-
-    /// Convert to owned aligned bytes (internal use).
-    fn into_aligned_bytes(self) -> AVec<u8, ConstAlign<ALIGNMENT>> {
-        self.bytes
+        self.bytes.to_vec()
     }
 
     /// Returns the image bytes as a mutable slice.
@@ -153,12 +147,11 @@ impl Image {
             return Ok(self);
         }
 
-        let desc = ImageDesc::new(
-            self.desc.width,
-            self.desc.height,
-            color_format,
-            self.desc.is_aligned(),
-        );
+        let desc = if self.desc.is_aligned() {
+            ImageDesc::new_with_stride(self.desc.width, self.desc.height, color_format)
+        } else {
+            ImageDesc::new_packed(self.desc.width, self.desc.height, color_format)
+        };
 
         let mut result = Image::new_black(desc)?;
 
@@ -206,7 +199,7 @@ impl Image {
 
         let desc = self.desc;
         let bytes = add_stride_padding(
-            self.into_aligned_bytes(),
+            self.bytes,
             desc.width,
             desc.height,
             aligned_stride,
@@ -225,41 +218,16 @@ impl Image {
     }
 }
 
-/// Convert Vec<u8> to AVec<u8>, zero-copy if already aligned, otherwise copies.
+/// Convert `Vec<u8>` to a 16-byte-aligned `AVec<u8>`.
+///
+/// Always copies: a `Vec` is allocated with align 1, so reinterpreting its buffer as an
+/// `AVec<_, ConstAlign<16>>` would make the destructor free it with a mismatched `Layout`
+/// alignment (UB), even when the pointer happens to already be 16-aligned.
 fn vec_to_avec(bytes: Vec<u8>) -> AVec<u8, ConstAlign<ALIGNMENT>> {
-    let ptr = bytes.as_ptr();
-    if (ptr as usize).is_multiple_of(ALIGNMENT) {
-        // Already aligned - zero-copy conversion
-        let (ptr, len, capacity) = {
-            let mut bytes = std::mem::ManuallyDrop::new(bytes);
-            (bytes.as_mut_ptr(), bytes.len(), bytes.capacity())
-        };
-        // Safety: pointer is verified to be ALIGNMENT-aligned, and we own the memory
-        unsafe { AVec::from_raw_parts(ptr, ALIGNMENT, len, capacity) }
-    } else {
-        // Not aligned - must copy
-        AVec::from_slice(ALIGNMENT, &bytes)
-    }
+    AVec::from_slice(ALIGNMENT, &bytes)
 }
 
 impl ImageDesc {
-    /// Create a new ImageDesc with aligned stride (4-byte aligned).
-    pub fn new(width: usize, height: usize, color_format: ColorFormat, align: bool) -> Self {
-        let row_bytes = width * color_format.byte_count() as usize;
-        let stride = if align {
-            align_stride(row_bytes)
-        } else {
-            row_bytes
-        };
-
-        Self {
-            width,
-            height,
-            stride,
-            color_format,
-        }
-    }
-
     /// Create a new ImageDesc with aligned stride (4-byte aligned).
     pub fn new_with_stride(width: usize, height: usize, color_format: ColorFormat) -> Self {
         let row_bytes = width * color_format.byte_count() as usize;
@@ -287,11 +255,6 @@ impl ImageDesc {
 
     pub fn size_in_bytes(&self) -> usize {
         self.height * self.stride
-    }
-
-    /// Returns the total number of pixel values (width * height * channels).
-    pub fn pixel_count(&self) -> usize {
-        self.width * self.height * self.color_format.channel_count as usize
     }
 
     /// Returns the number of bytes per row without padding.

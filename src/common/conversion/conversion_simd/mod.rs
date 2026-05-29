@@ -30,7 +30,7 @@ cfg_aarch64! {
 #[cfg(test)]
 mod tests;
 
-use super::{LUMA_B, LUMA_G, LUMA_R};
+use super::{LUMA_8BIT, LUMA_B, LUMA_G, LUMA_R};
 
 /// Row conversion function type
 pub(crate) type RowConvertFn = fn(src: &[u8], dst: &mut [u8], width: usize);

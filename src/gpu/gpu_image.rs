@@ -210,14 +210,14 @@ impl GpuImage {
     }
 
     /// Returns a read-only buffer wrapper for binding in shaders.
-    pub fn read_buffer(&self) -> ReadBuffer<'_> {
+    pub(crate) fn read_buffer(&self) -> ReadBuffer<'_> {
         ReadBuffer(&self.buffer)
     }
 
     /// Returns a writable buffer wrapper for binding in shaders.
     ///
     /// Note: `&mut self` is intentional to prevent accidental writes to non-mutable buffers.
-    pub fn write_buffer(&mut self) -> WriteBuffer<'_> {
+    pub(crate) fn write_buffer(&mut self) -> WriteBuffer<'_> {
         WriteBuffer(&self.buffer)
     }
 }

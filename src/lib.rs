@@ -48,7 +48,7 @@ pub use crate::ops::contrast_brightness::ContrastBrightness;
 #[cfg(feature = "wgpu")]
 pub use crate::{
     gpu::Gpu,
-    gpu::gpu_image::{GpuImage, ReadBuffer, WriteBuffer},
+    gpu::gpu_image::GpuImage,
     ops::blend::pipeline::GpuBlendPipeline,
     ops::contrast_brightness::pipeline::GpuContrastBrightnessPipeline,
     ops::transform::pipeline::GpuTransformPipeline,

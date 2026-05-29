@@ -1,6 +1,7 @@
 use std::any::{Any, TypeId};
 
 use hashbrown::HashMap;
+use hashbrown::hash_map::Entry;
 
 use crate::common::error::Result;
 use crate::gpu::Gpu;
@@ -19,7 +20,7 @@ pub struct GpuContext {
 }
 
 impl GpuContext {
-    /// Creates a new PipelineCache with no pipelines initialized.
+    /// Creates a new GpuContext with no pipelines initialized.
     pub fn new(gpu: Gpu) -> Self {
         Self {
             gpu,
@@ -34,16 +35,16 @@ impl GpuContext {
         F: FnOnce(&Gpu) -> Result<T>,
     {
         let type_id = TypeId::of::<T>();
-
-        if !self.pipelines.contains_key(&type_id) {
-            let pipeline = create(&self.gpu)?;
-            self.pipelines.insert(type_id, Box::new(pipeline));
+        if let Entry::Vacant(e) = self.pipelines.entry(type_id) {
+            e.insert(Box::new(create(&self.gpu)?));
         }
 
-        Ok(self
+        let pipeline = self
             .pipelines
             .get(&type_id)
-            .and_then(|p| (p.as_ref() as &dyn Any).downcast_ref::<T>())
+            .expect("pipeline was just inserted");
+        Ok((pipeline.as_ref() as &dyn Any)
+            .downcast_ref::<T>()
             .expect("pipeline type mismatch - this is a bug"))
     }
 }

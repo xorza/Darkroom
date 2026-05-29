@@ -416,35 +416,34 @@ fn image_bytes_are_16_byte_aligned() {
 }
 
 #[test]
-fn into_bytes_is_zero_copy() {
+fn into_bytes_preserves_data() {
     let desc = ImageDesc::new_with_stride(100, 100, ColorFormat::RGBA_U8);
-    let img = Image::new_black(desc).unwrap();
-    let original_ptr = img.bytes().as_ptr();
+    let mut img = Image::new_black(desc).unwrap();
+    img.bytes_mut()[..4].copy_from_slice(&[1, 2, 3, 4]);
+    let expected = img.bytes().to_vec();
     let vec = img.into_bytes();
-    let vec_ptr = vec.as_ptr();
-    assert_eq!(original_ptr, vec_ptr, "into_bytes should be zero-copy");
+    // into_bytes copies (an AVec's over-aligned allocation can't be freed as a plain Vec),
+    // so we assert the data is preserved rather than pointer identity.
+    assert_eq!(vec, expected, "into_bytes must preserve the pixel data");
 }
 
 #[test]
-fn new_with_data_from_aligned_vec_preserves_pointer() {
-    // Create an aligned Vec by going through AVec
-    let mut aligned = aligned_vec::AVec::<u8>::with_capacity(8, 16);
-    aligned.resize(16, 42);
-    let original_ptr = aligned.as_ptr();
-
-    // Convert to Vec (this is zero-copy from AVec to Vec)
-    let (ptr, _align, len, capacity) = aligned.into_raw_parts();
-    let vec = unsafe { Vec::from_raw_parts(ptr, len, capacity) };
-
-    // Now create Image from the aligned Vec
+fn new_with_data_produces_aligned_copy() {
+    // A plain Vec<u8> is only 1-byte aligned; new_with_data must copy into
+    // 16-byte-aligned storage while preserving the bytes.
     let desc = ImageDesc::new_with_stride(2, 2, ColorFormat::RGBA_U8);
-    let img = Image::new_with_data(desc, vec).unwrap();
+    let data: Vec<u8> = (0..desc.size_in_bytes() as u8).collect();
+    let img = Image::new_with_data(desc, data.clone()).unwrap();
 
-    // Should preserve the pointer since it was already 8-byte aligned
     assert_eq!(
-        img.bytes().as_ptr(),
-        original_ptr,
-        "Should preserve pointer for aligned input"
+        img.bytes().as_ptr() as usize % 16,
+        0,
+        "stored bytes must be 16-byte aligned"
+    );
+    assert_eq!(
+        img.bytes(),
+        &data[..],
+        "new_with_data must preserve the data"
     );
 }
 

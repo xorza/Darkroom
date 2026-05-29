@@ -52,8 +52,13 @@ pub(crate) fn select_backend(
             Ok(Backend::Gpu)
         } else if cpu_supported {
             Ok(Backend::Cpu)
-        } else {
+        } else if ctx.has_gpu() {
+            // GPU-only format (e.g. Transform), data currently on CPU.
             Ok(Backend::Gpu)
+        } else {
+            Err(Error::UnsupportedFormat(format!(
+                "{op_name} requires a GPU for format {format}, but no GPU is available"
+            )))
         }
     }
 
