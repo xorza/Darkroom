@@ -407,8 +407,8 @@ fn static_value_str(v: &StaticValue) -> String {
         StaticValue::Int(i) => format!("{i}"),
         StaticValue::Bool(b) => format!("{b}"),
         StaticValue::String(s) => format!("\"{s}\""),
-        StaticValue::FsPath { path, .. } => path.clone(),
-        StaticValue::Enum { variant_name, .. } => variant_name.clone(),
+        StaticValue::FsPath(path) => path.clone(),
+        StaticValue::Enum(variant) => variant.clone(),
     }
 }
 

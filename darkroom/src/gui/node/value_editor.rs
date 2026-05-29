@@ -65,7 +65,7 @@ pub(crate) fn show(
             Checkbox::new(&mut draft).id(id).show(ui);
             (draft != *current).then_some(StaticValue::Bool(draft))
         }
-        StaticValue::FsPath { path, .. } => {
+        StaticValue::FsPath(path) => {
             // A pick button showing the chosen file's name. The click is
             // polled by `emit_path_picks` (by `id`), which surfaces a
             // `MenuCommand::PickInputPath`; `App` opens the dialog outside
@@ -83,7 +83,7 @@ pub(crate) fn show(
                 .show(ui);
             None
         }
-        StaticValue::Null | StaticValue::Enum { .. } => {
+        StaticValue::Null | StaticValue::Enum(_) => {
             // Not editable. Show the textual form so the value is
             // visible; clicks fall through to the surrounding row.
             let mut buf = placeholder(value);
@@ -143,7 +143,7 @@ fn format_float(v: &f64) -> String {
 fn placeholder(value: &StaticValue) -> String {
     match value {
         StaticValue::Null => "null".to_owned(),
-        StaticValue::Enum { variant_name, .. } => variant_name.clone(),
+        StaticValue::Enum(variant) => variant.clone(),
         _ => String::new(),
     }
 }

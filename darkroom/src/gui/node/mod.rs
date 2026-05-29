@@ -20,7 +20,7 @@ use glam::Vec2;
 use palantir::{
     Background, Color, Configure, Corners, Panel, Rect, Sense, Shadow, Sizing, Stroke, Ui, WidgetId,
 };
-use scenarium::data::StaticValue;
+use scenarium::data::{DataType, StaticValue};
 use scenarium::graph::Binding;
 use scenarium::prelude::{NodeId, SubgraphRef};
 use std::collections::BTreeSet;
@@ -322,8 +322,12 @@ pub(crate) fn emit_path_picks(ui: &Ui, scene: &Scene, cmd: &mut Option<MenuComma
         return;
     }
     for node in &scene.nodes {
+        let types = scene.input_types(node.inputs);
         for (port_idx, binding) in scene.bindings(node.inputs).iter().enumerate() {
-            if let InputBindingView::Const(StaticValue::FsPath { config, .. }) = binding
+            // The picker config is type-level metadata, taken from the port's
+            // `DataType` (the value only carries the path string).
+            if let InputBindingView::Const(StaticValue::FsPath(_)) = binding
+                && let DataType::FsPath(config) = &types[port_idx]
                 && ui.response_for(const_editor_wid(node.id, port_idx)).clicked
             {
                 *cmd = Some(MenuCommand::PickInputPath {

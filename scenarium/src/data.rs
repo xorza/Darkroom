@@ -122,14 +122,12 @@ pub enum StaticValue {
     Int(i64),
     Bool(bool),
     String(String),
-    FsPath {
-        config: Arc<FsPathConfig>,
-        path: String,
-    },
-    Enum {
-        type_id: TypeId,
-        variant_name: String,
-    },
+    /// A filesystem path. The path string only — the `FsPathConfig` (picker
+    /// mode + extensions) is type-level metadata and lives on `DataType::FsPath`.
+    FsPath(String),
+    /// An enum variant by name. The variant list and type identity are
+    /// type-level metadata and live on `DataType::Enum(EnumDef)`.
+    Enum(String),
 }
 
 impl PartialEq for StaticValue {
@@ -142,26 +140,8 @@ impl PartialEq for StaticValue {
             (StaticValue::Int(left), StaticValue::Int(right)) => left == right,
             (StaticValue::Bool(left), StaticValue::Bool(right)) => left == right,
             (StaticValue::String(left), StaticValue::String(right)) => left == right,
-            (
-                StaticValue::FsPath {
-                    config: config_left,
-                    path: path_left,
-                },
-                StaticValue::FsPath {
-                    config: config_right,
-                    path: path_right,
-                },
-            ) => config_left == config_right && path_left == path_right,
-            (
-                StaticValue::Enum {
-                    type_id: type_id_left,
-                    variant_name: name_left,
-                },
-                StaticValue::Enum {
-                    type_id: type_id_right,
-                    variant_name: name_right,
-                },
-            ) => type_id_left == type_id_right && name_left == name_right,
+            (StaticValue::FsPath(left), StaticValue::FsPath(right)) => left == right,
+            (StaticValue::Enum(left), StaticValue::Enum(right)) => left == right,
             _ => false,
         }
     }
@@ -209,14 +189,14 @@ impl StaticValue {
 
     pub fn as_enum(&self) -> Option<&str> {
         match self {
-            StaticValue::Enum { variant_name, .. } => Some(variant_name),
+            StaticValue::Enum(variant) => Some(variant),
             _ => None,
         }
     }
 
     pub fn as_fs_path(&self) -> Option<&str> {
         match self {
-            StaticValue::FsPath { path, .. } => Some(path),
+            StaticValue::FsPath(path) => Some(path),
             _ => None,
         }
     }
@@ -230,8 +210,8 @@ impl Display for StaticValue {
             StaticValue::Int(v) => write!(f, "{v}"),
             StaticValue::Bool(v) => write!(f, "{v}"),
             StaticValue::String(s) => write!(f, "\"{s}\""),
-            StaticValue::FsPath { path, .. } => write!(f, "\"{path}\""),
-            StaticValue::Enum { variant_name, .. } => write!(f, "{variant_name}"),
+            StaticValue::FsPath(path) => write!(f, "\"{path}\""),
+            StaticValue::Enum(variant) => write!(f, "{variant}"),
         }
     }
 }
@@ -440,14 +420,8 @@ impl DataType {
             DataType::Int => StaticValue::Int(0),
             DataType::Bool => StaticValue::Bool(false),
             DataType::String => StaticValue::String(String::new()),
-            DataType::FsPath(config) => StaticValue::FsPath {
-                config: config.clone(),
-                path: String::new(),
-            },
-            DataType::Enum(enum_def) => StaticValue::Enum {
-                type_id: enum_def.type_id,
-                variant_name: enum_def.variants[0].clone(),
-            },
+            DataType::FsPath(_) => StaticValue::FsPath(String::new()),
+            DataType::Enum(enum_def) => StaticValue::Enum(enum_def.variants[0].clone()),
             DataType::Custom(_) => return None,
         })
     }
@@ -533,20 +507,9 @@ mod tests {
         // String / enum / path extractors.
         assert_eq!(StaticValue::String("hi".into()).as_string(), Some("hi"));
         assert_eq!(StaticValue::Int(1).as_string(), None);
+        assert_eq!(StaticValue::Enum("Add".into()).as_enum(), Some("Add"));
         assert_eq!(
-            StaticValue::Enum {
-                type_id: TypeId::nil(),
-                variant_name: "Add".into(),
-            }
-            .as_enum(),
-            Some("Add")
-        );
-        assert_eq!(
-            StaticValue::FsPath {
-                config: Arc::new(FsPathConfig::default()),
-                path: "/tmp/x".into(),
-            }
-            .as_fs_path(),
+            StaticValue::FsPath("/tmp/x".into()).as_fs_path(),
             Some("/tmp/x")
         );
     }

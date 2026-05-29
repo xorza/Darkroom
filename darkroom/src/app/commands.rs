@@ -76,10 +76,7 @@ impl App {
         let Some(path) = persistence::pick_path(&config) else {
             return;
         };
-        let value = StaticValue::FsPath {
-            config,
-            path: path.to_string_lossy().into_owned(),
-        };
+        let value = StaticValue::FsPath(path.to_string_lossy().into_owned());
         self.editor.apply_edit(Intent::SetInput {
             node_id,
             input_idx: port_idx,
