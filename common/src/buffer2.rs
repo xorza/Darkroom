@@ -29,26 +29,26 @@ impl<T> Buffer2<T> {
 
     #[inline]
     pub fn get(&self, x: usize, y: usize) -> &T {
-        debug_assert!(x < self.width && y < self.height);
+        assert!(x < self.width && y < self.height);
         &self.pixels[y * self.width + x]
     }
 
     #[inline]
     pub fn get_mut(&mut self, x: usize, y: usize) -> &mut T {
-        debug_assert!(x < self.width && y < self.height);
+        assert!(x < self.width && y < self.height);
         &mut self.pixels[y * self.width + x]
     }
 
     #[inline]
     pub fn row(&self, y: usize) -> &[T] {
-        debug_assert!(y < self.height);
+        assert!(y < self.height);
         let start = y * self.width;
         &self.pixels[start..start + self.width]
     }
 
     #[inline]
     pub fn row_mut(&mut self, y: usize) -> &mut [T] {
-        debug_assert!(y < self.height);
+        assert!(y < self.height);
         let start = y * self.width;
         &mut self.pixels[start..start + self.width]
     }

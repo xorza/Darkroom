@@ -138,7 +138,7 @@ impl BitBuffer2 {
     /// Get a bit value at the given linear index (row-major, no padding).
     #[inline]
     pub fn get(&self, idx: usize) -> bool {
-        debug_assert!(idx < self.len());
+        assert!(idx < self.len());
         let x = idx % self.width;
         let y = idx / self.width;
         self.get_xy(x, y)
@@ -147,7 +147,7 @@ impl BitBuffer2 {
     /// Set a bit value at the given linear index (row-major, no padding).
     #[inline]
     pub fn set(&mut self, idx: usize, value: bool) {
-        debug_assert!(idx < self.len());
+        assert!(idx < self.len());
         let x = idx % self.width;
         let y = idx / self.width;
         self.set_xy(x, y, value);
@@ -156,7 +156,7 @@ impl BitBuffer2 {
     /// Get a bit value at the given (x, y) coordinates.
     #[inline]
     pub fn get_xy(&self, x: usize, y: usize) -> bool {
-        debug_assert!(x < self.width && y < self.height);
+        assert!(x < self.width && y < self.height);
         let bit_idx = y * self.stride + x;
         let word_idx = bit_idx / BITS_PER_WORD;
         let bit_in_word = bit_idx % BITS_PER_WORD;
@@ -166,7 +166,7 @@ impl BitBuffer2 {
     /// Set a bit value at the given (x, y) coordinates.
     #[inline]
     pub fn set_xy(&mut self, x: usize, y: usize, value: bool) {
-        debug_assert!(x < self.width && y < self.height);
+        assert!(x < self.width && y < self.height);
         let bit_idx = y * self.stride + x;
         let word_idx = bit_idx / BITS_PER_WORD;
         let bit_in_word = bit_idx % BITS_PER_WORD;

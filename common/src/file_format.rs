@@ -10,7 +10,7 @@ pub enum FileExtensionError {
 
 pub type FileFormatResult<T> = Result<T, FileExtensionError>;
 
-pub fn get_file_extension(filename: &str) -> Option<&str> {
+fn get_file_extension(filename: &str) -> Option<&str> {
     Path::new(filename)
         .extension()
         .and_then(|os_str| os_str.to_str())
