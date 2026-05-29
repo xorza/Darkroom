@@ -136,10 +136,18 @@ Runtime feature detection via the `common` crate (`cpu_features::has_avx2()` / `
 - Test-only constructors/APIs are gated and kept minimal (e.g. `math/bbox`, warp params). Don't widen them for production use.
 - The `real-data` feature flag (empty) gates real-data tests/benches that read a calibration directory from the environment.
 
+## Reference docs & upstream sources
+
+- **`docs/pipeline/`** — best-practices reference for each pipeline stage, grounded in upstream source + cross-checked web research (≥2 sources per load-bearing claim). One doc per stage: `01-load-decode.md`, `02-calibration.md`, `03-star-detection.md`, `04-registration.md`, `05-stacking-drizzle.md`, plus `README.md` (index + cross-cutting "stay linear, stay calibrated" principle). These are *descriptive* references (how the field does each stage well, what to avoid) — **not** a prescriptive change list. `README.md` also tracks a table of findings flagged against lumos source (claims to verify, with file pointers; none acted on yet) — consult it before working a stage, but treat each row as unverified.
+- **`scripts/clone-refs.sh`** — shallow-clones the upstream software whose functionality overlaps lumos into `.tmp/refs/<name>/` for source investigation (Read/Grep without per-file registry prompts; nothing is built or linked). `--list` prints the set, `--all` adds the large suites (RawTherapee, OpenCV, astropy, kstars, …), no arg clones the core set. Idempotent — an existing clone is skipped; delete its dir to refresh. Native deps (LibRaw, cfitsio) are pinned to `Cargo.lock` versions; everything else tracks upstream HEAD. Each entry's comment names the lumos module it informs (e.g. `sep`/`sextractor`/`photutils` → `star_detection`, `magsac`/`astroalign` → `registration`, `drizzle` → `drizzle`).
+- **`.tmp/refs/`** is gitignored and persists across sessions. Run the script before reading upstream source; the `docs/pipeline/` docs were built from these clones.
+
 ## Commands
 
 ```bash
 cargo build -p lumos --release
 cargo test -p lumos
 cargo test -p lumos --release <bench_name> -- --ignored --nocapture   # benches (e.g. bench_rcd, bench_bayer)
+
+scripts/clone-refs.sh          # clone core upstream refs into .tmp/refs/ (--all for large suites, --list to preview)
 ```
