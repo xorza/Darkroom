@@ -394,11 +394,15 @@ async fn worker_loop<ExecutionCallback>(
         // silently. Events/terminals/StartEventLoop are no-ops until
         // a graph is loaded.
         if needs_execute && !execution_engine.is_empty() {
-            // Pause running lambdas only around execute(): the gate
-            // stops them kicking off new iterations while execute
-            // walks the graph, giving it a consistent view of
-            // per-node SharedAnyState. No-op when the loop was torn
-            // down above (needs_stop path) or wasn't running.
+            // Quiesce the event loop around execute(): closing the gate
+            // stops lambdas from *starting a new iteration*. It does NOT
+            // pause a lambda already inside `invoke()`, so this is not an
+            // atomic cross-node snapshot — execute can still observe
+            // per-node `SharedAnyState` that an in-flight lambda is mid-
+            // update on another node. Per-node mutexes keep each node's
+            // state un-torn; the gate just bounds how much churn races
+            // execute. No-op when the loop was torn down above
+            // (needs_stop path) or wasn't running.
             let _pause_guard = event_loop_pause_gate.close();
 
             let in_loop = should_start_event_loop || event_loop.is_some();
