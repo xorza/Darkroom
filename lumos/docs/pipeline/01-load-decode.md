@@ -13,7 +13,13 @@ sources disagree, that is called out explicitly. **Pass 2** additionally parsed 
 primary-source PDFs (FITS Standard 4.0, the IPOL Malvar reproduction, Siril drizzle
 docs) and re-read the RCD/Markesteijn/`adjust_bl` source line-by-line to verify the
 formulas; corrected claims are flagged with "**Correction (pass 2):**" and the parsed
-PDFs are listed under References.
+PDFs are listed under References. **Pass 3** manually re-verified every formula and
+source line-reference against the cloned code and parsed papers (the FITS scaling/
+BLANK/endianness quotes, `adjust_bl`/`scale_colors`/`subtract_black`, the RCD and
+Markesteijn math and lumos's ports, and the Malvar gains/kernel/PSNR), re-checked the
+online claims against RawPedia/astropy/darktable, corrected the RawTherapee-vs-darktable
+default-demosaic attribution (flagged "**Correction (pass 3):**"), and added §2.6 on
+standard (TIFF/PNG/JPEG) inputs.
 
 ---
 
@@ -490,6 +496,39 @@ This is precisely why lumos has a separate `load_raw_cfa` path
 happens on the mosaic, and `CfaImage::demosaic` runs **last** (`cfa.rs:91-138`). This
 ordering is the single most important structural decision in OSC astro decoding.
 
+### 2.6 Standard formats (TIFF/PNG/JPEG) — the linearity trap
+
+FITS and RAW are not the only inputs. `AstroImage::from_file` (`src/astro_image/mod.rs:276-287`)
+routes a third class — `tiff`/`tif`/`png`/`jpg`/`jpeg` — to the imaginarium loader
+(`Image::read_file(path)?.into()`), with **no gamma decode and no linearization** applied.
+That is a quiet correctness hazard, because these formats arrive in two photometrically
+incompatible states and nothing in the file forces the right interpretation:
+
+- **8-bit PNG/JPEG are almost always sRGB-gamma-encoded and already demosaiced** (and JPEG
+  is lossy, 4:2:0-chroma-subsampled, and block-quantized). Loaded verbatim, the pixels are
+  a nonlinear function of photons — every premise of Stage 1 (`pixel ∝ photons`) is broken,
+  so flat division, stacking statistics, and photometry are invalid. There is no safe way
+  to "rescue" them: the gamma is recoverable in principle (apply the inverse sRGB transfer
+  function) but the 8-bit quantization and JPEG loss are not, and a file may instead be
+  *already linear* 8-bit (rare) — undetectable from the pixels alone.
+- **16-bit TIFF is ambiguous** in exactly the way headerless float FITS is (§1.4): capture
+  tools (SharpCap, some DSLR tethering) can write **linear** 16-bit TIFF that is perfectly
+  usable, while anything exported from an image editor is gamma-encoded and tone-mapped.
+  TIFF *can* carry a `TransferFunction`/`ColorSpace` tag, but most astro tools don't, so a
+  loader cannot reliably tell the two apart.
+
+**Best practice:** treat 8-bit PNG/JPEG as **display artifacts, not science data** — accept
+them only for previews/thumbnails or for already-processed "finished" images, never as
+stacking input. Accept 16-bit TIFF only when the source is *known* linear, and record that
+provenance out-of-band (same discipline as headerless float FITS). If non-linear input must
+be ingested for a non-photometric purpose, apply the explicit inverse-sRGB transfer function
+at load so at least the gamma is undone — but do not pretend the result is calibration-grade.
+
+**lumos status:** the standard-format path performs neither linearization nor a linear/
+nonlinear provenance check; it trusts the caller to feed it linear data. For a pipeline whose
+whole contract is linearity this is worth at least a documented warning at the API boundary
+(and ideally refusing 8-bit lossy formats as stacking input). See §6 gap 9.
+
 ---
 
 ## 3. Demosaicing
@@ -596,8 +635,8 @@ sources, and darktable's manual:
 | **DCB** | medium | good | best false-color suppression on AA-less sensors | strong where false color dominates |
 | **LMMSE** | slow | good on noisy data | suppresses maze on high-ISO | recommended for very noisy frames |
 | **IGV** | slow | good on noisy data | strong moiré/maze suppression | recommended for noisy frames |
-| **AMaZE** (Aliasing Minimization & Zipper Elimination) | slow | **state of the art** detail | minimal zipper; can color-overshoot on low-contrast/noisy areas | RawTherapee's historical default; best on clean low-ISO data |
-| **RCD** (Ratio-Corrected Demosaicing) | fast-medium | near-AMaZE detail | **excellent on round edges / stars**, less overshoot than AMaZE | RawTherapee's current default |
+| **AMaZE** (Aliasing Minimization & Zipper Elimination) | slow | **state of the art** detail | minimal zipper; can color-overshoot on low-contrast/noisy areas | **RawTherapee's default**; best on clean low-ISO data |
+| **RCD** (Ratio-Corrected Demosaicing) | fast-medium | near-AMaZE detail | **excellent on round edges / stars**, less overshoot than AMaZE | **darktable's default** (RawTherapee defaults to AMaZE) |
 
 **Operating principles** (what each family actually does, for context on the table):
 
@@ -635,6 +674,16 @@ detail as AMaZE." That last sentence is why RCD is the natural Bayer choice for 
 astro pipeline (point sources are round high-contrast edges, exactly where AMaZE's
 overshoot would ring as colored halos) and why lumos implements RCD as its primary
 Bayer path.
+
+**Correction (pass 3):** the prior draft labeled RCD "RawTherapee's current default" and
+AMaZE "RawTherapee's historical default." That is wrong. RawPedia states plainly that
+"**AMaZE … is the default demosaicing method**" for RawTherapee (current and historical);
+**RCD is darktable's default** (it replaced PPG — darktable's manual: "RCD now offers
+similar performance to PPG, but with better results, it is now the default algorithm").
+A standing RawTherapee feature request (Beep6581/RawTherapee #5908, "use RCD as default")
+confirms RT had *not* switched. The astro takeaway is unchanged — RCD is still the right
+Bayer choice for stars on the strength of the round-edge/overshoot behavior above,
+independent of which app ships it as the default.
 
 **How RCD works** (`.tmp/refs/librtprocess/src/demosaic/rcd.cc`, originally
 LuisSR/RCD-Demosaicing, MIT, by Luis Sanz Rodríguez). The four steps, with the exact
@@ -924,6 +973,11 @@ A concrete, opinionated Stage-1 recipe for an OSC astro pipeline.
   sky; crop to the active rectangle first.
 - **Treating float-FITS BLANK via `BLANK` keyword, or integer-FITS NaN.** `BLANK` is
   integer-only; NaN is the float blank. Test the correct one against the correct value.
+- **Feeding gamma-encoded 8-bit PNG/JPEG (or unknown-provenance TIFF) as science data.**
+  These are display artifacts: sRGB-gamma-encoded, already demosaiced, and (JPEG) lossy.
+  Loaded as-is they break `pixel ∝ photons`; the gamma is invertible but the 8-bit
+  quantization and JPEG loss are not. Use them only for previews; accept 16-bit TIFF only
+  when known linear (§2.6).
 
 ---
 
@@ -985,6 +1039,12 @@ calibrate-then-debayer ordering, with flat division using per-CFA-color means.
    not the load module — fine architecturally, but the load docs should make the
    "defects corrected on the mosaic before demosaic" ordering explicit so callers
    don't accidentally demosaic the uncalibrated `load_raw` output for OSC data.
+9. **Standard formats are loaded without a linearity check (pass 3).** `from_file`
+   (`mod.rs:276-287`) routes TIFF/PNG/JPEG to imaginarium with no gamma decode and no
+   linear/nonlinear provenance check (§2.6). An 8-bit sRGB JPEG fed as stacking input
+   silently violates `pixel ∝ photons`. Consider refusing 8-bit lossy formats as
+   stacking input, and at minimum documenting/optionally applying inverse-sRGB at the
+   API boundary.
 
 ---
 
@@ -1039,7 +1099,12 @@ calibrate-then-debayer ordering, with flat division using per-CFA-color means.
   <https://pixinsight.com/forum/index.php?threads/bayer-drizzle-instead-of-de-bayering-with-osc.12996/>
   — practical CFA-drizzle rationale and green-bias correction.
 - darktable demosaic manual — <https://docs.darktable.org/usermanual/development/en/module-reference/processing-modules/demosaic/>
-  — RCD/AMaZE/VNG/Markesteijn behavior and defaults.
+  — RCD/AMaZE/VNG/Markesteijn behavior; states **RCD is darktable's default** (replaced
+  PPG): "RCD now offers similar performance to PPG, but with better results, it is now the
+  default algorithm" — and AMaZE "is also more prone to color overshoots than RCD."
+- RawTherapee issue #5908, "Suggestion to use RCD as default demosaic method" —
+  <https://github.com/Beep6581/RawTherapee/issues/5908> — confirms RawTherapee's default is
+  **AMaZE, not RCD** (pass-3 correction; RawPedia: "AMaZE … is the default demosaicing method").
 - astropy CCD Data Reduction Guide / ccdproc — <https://www.astropy.org/ccd-reduction-and-photometry-guide/>
   and <https://ccdproc.readthedocs.io/en/latest/reduction_toolbox.html> — canonical
   calibration order: overscan → trim → bias → dark (scaled) → flat; debayer separate.
