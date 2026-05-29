@@ -77,6 +77,17 @@ fn write_value<W: Write>(
     indent: usize,
     out: &mut W,
 ) -> std::io::Result<()> {
+    // `indent` doubles as the nesting depth (one level per array/object).
+    // Cap it to mirror the read side's `set_max_expr_depths`, so a deeply
+    // nested in-memory value errors instead of overflowing the stack.
+    const MAX_DEPTH: usize = 128;
+    if indent > MAX_DEPTH {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "serde_rhai: value nesting exceeds maximum depth",
+        ));
+    }
+
     match value {
         serde_json::Value::Null => out.write_all(b"()"),
         serde_json::Value::Bool(v) => out.write_all(if *v { b"true" } else { b"false" }),

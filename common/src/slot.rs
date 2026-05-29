@@ -83,7 +83,10 @@ impl<T> Slot<T> {
         }
     }
 
-    /// Returns true if there is a value present.
+    /// Returns true if there is a value present. Note this is independent of
+    /// whether `take`/`take_or_wait` will succeed: those also fail when a `peek`
+    /// clone is still alive, so `has_value()` can be `true` while `take()` yields
+    /// `None`.
     pub fn has_value(&self) -> bool {
         self.value.load().is_some()
     }

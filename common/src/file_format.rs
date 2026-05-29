@@ -26,10 +26,6 @@ pub enum SerdeFormat {
 }
 
 impl SerdeFormat {
-    pub fn all_formats_for_testing() -> [Self; 4] {
-        [Self::Json, Self::Rhai, Self::Bitcode, Self::Lz4]
-    }
-
     pub fn from_file_name(file_name: &str) -> FileFormatResult<Self> {
         let ext = get_file_extension(file_name).ok_or(FileExtensionError::MissingFileExtension)?;
 
@@ -48,6 +44,18 @@ impl SerdeFormat {
                 file_name.to_string(),
             ))
         }
+    }
+}
+
+/// Test-only helpers, gated out of the released surface. Enabled in downstream
+/// crates' test targets via `common = { …, features = ["test-support"] }`.
+#[cfg(any(test, feature = "test-support"))]
+impl SerdeFormat {
+    /// All formats a round-trip test should sweep. Omits `Toml` deliberately:
+    /// TOML can't serialize a top-level sequence, which several round-tripped
+    /// types are.
+    pub fn all_formats_for_testing() -> [Self; 4] {
+        [Self::Json, Self::Rhai, Self::Bitcode, Self::Lz4]
     }
 }
 

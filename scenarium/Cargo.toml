@@ -19,3 +19,4 @@ hashbrown = { workspace = true }
 async-trait = { workspace = true }
 
 [dev-dependencies]
+common = { workspace = true, features = ["test-support"] }

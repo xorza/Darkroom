@@ -7,10 +7,6 @@ use crate::file_format::SerdeFormat;
 use crate::normalize_string::NormalizeString;
 use crate::serde_rhai;
 
-pub fn is_false(value: &bool) -> bool {
-    !*value
-}
-
 pub type Result<T> = anyhow::Result<T>;
 
 pub fn serialize<T: Serialize>(value: &T, format: SerdeFormat) -> Result<Vec<u8>> {

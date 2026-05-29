@@ -24,6 +24,23 @@ fn round_trip_simple() {
 }
 
 #[test]
+fn write_rejects_excessive_nesting() {
+    // `depth` levels of nested arrays: [[[ … ]]].
+    fn nest(depth: usize) -> serde_json::Value {
+        let mut v = serde_json::Value::Array(vec![]);
+        for _ in 0..depth {
+            v = serde_json::Value::Array(vec![v]);
+        }
+        v
+    }
+    // Under the 128 cap: serializes fine.
+    assert!(to_string(&nest(100)).is_ok());
+    // Past the cap: errors (as an IO error) instead of overflowing the stack.
+    let err = to_string(&nest(300)).unwrap_err();
+    assert!(matches!(err, SerdeRhaiError::Io(_)));
+}
+
+#[test]
 fn round_trip_float_integer_valued() {
     // Rhai distinguishes INT (i64) from FLOAT (f64). A float with integer
     // value must emit `.0` or it will parse as INT and from_dynamic will

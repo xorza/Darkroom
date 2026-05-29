@@ -34,7 +34,7 @@ pub use file_format::{FileExtensionError, FileFormatResult, SerdeFormat};
 pub use float_ext::FloatExt;
 pub use ready_state::ReadyState;
 pub use serde::Result;
-pub use serde::{deserialize, is_false, serialize};
+pub use serde::{deserialize, serialize};
 pub use shared::Shared;
 pub use shared_fn::SharedFn;
 pub use span::Span;
