@@ -189,15 +189,24 @@ statistical efficiency is `2/π ≈ 0.637` in *variance*, i.e. `√(2/π) ≈ 0.
 *standard deviation*. So:
 
 ```
-SNR_median ≈ 0.80 · √N · SNR_single        (asymptotically; worse at small N)
+SNR_median ≈ 0.80 · √N · SNR_single        (asymptotic floor; loss is *smaller* at small N — below)
 ```
 
 A median stack throws away ~20% of the SNR you could have had — roughly equivalent to
 discarding ~36% of your frames (`0.80² ≈ 0.637`, so you'd need `1/0.637 ≈ 1.57×` as
-many frames to match a mean's SNR). At *small* N the penalty is worse than 0.80 (the
-asymptotic value is approached from below; e.g. for N=3 the median efficiency is only
-~0.74). This is verified across multiple astrophotography references (Siril docs;
-jonrista; medium/Sreeraman) and is a standard order-statistics result.
+many frames to match a mean's SNR). **Correction (pass 3):** the prior version added
+"the penalty is *worse* at small N (approached from below; ~0.74 at N=3)" — that is
+**backwards**. Direct numerical integration of the order-statistic variance for a
+Gaussian gives a *variance* efficiency `Var(mean)/Var(median)` of `0.743` at N=3,
+`0.697` at N=5, `0.669` at N=9, *decreasing monotonically* to the asymptotic
+`2/π ≈ 0.637` — i.e. the limit is approached **from above**. In *standard-deviation*
+terms that is `0.862` (N=3) → `0.835` (N=5) → `0.798` (N→∞), so a 3-frame median actually
+keeps ~86% of the mean's SNR, *more* than the ~80% asymptotic floor. The `~0.74` quoted
+before is the *variance* efficiency at N=3 (which is **above** the `0.637` asymptotic
+variance efficiency), not a worse SD efficiency than `0.80`. The real small-N caution
+about median/clipping is about the **robustness of the σ estimate** (§4.4), not SNR
+efficiency. Corroborated by standard order-statistics theory and astrophotography
+references (Siril docs; jonrista; Akinshin, *median-vs-mean*).
 
 **When is median worth it?** Median is the right choice only when (a) you have few
 frames and an unknown/heavy outlier population that rejection can't reliably model, or
@@ -263,7 +272,7 @@ the σ estimate is itself dominated by the outliers (see §4.4 and §7).
 
 The lumos rejection family lives in `src/stacking/rejection.rs`
 (`enum Rejection { None | SigmaClip | Winsorized | LinearFit | Percentile | Gesd }`,
-`config.rs:831`).
+`rejection.rs:831`).
 
 ### 3.1 Sigma clipping / kappa-sigma
 
@@ -296,8 +305,10 @@ reject x_i  ⇔  (c − x_i > κ_low·s)  ∨  (x_i − c > κ_high·s)
   keeps `N` constant so the final average is over a fixed count (DSS's
   `SIGMEDIAN`-like behavior; siril has the same idea in its `SIGMEDIAN` case,
   `rejection_float.c:210`).
-- lumos `SigmaClip` (`rejection.rs`, `SigmaClipConfig` at `config.rs:20`) — separate
-  low/high sigma, iterative.
+- lumos `SigmaClip` (`rejection.rs`, `SigmaClipConfig` at `rejection.rs:20`) — separate
+  low/high sigma, iterative; median center + MAD spread, with a Welford mean+stddev
+  early-exit that skips the median/MAD pass when no sample can possibly clip
+  (`no_outliers_possible`, `rejection.rs:138`).
 
 **Assumptions:** Gaussian core, outliers in the tails, enough samples that the
 center/spread are well estimated. **Failure mode:** with few frames, a single bright
@@ -336,9 +347,12 @@ Winsorized sd by `1.134 ≈ 1/√0.778` restores an (asymptotically) unbiased σ
 The value is specific to `c = 1.5` — a different Winsorizing cutoff needs a different
 factor. This `c = 1.5` / `1.134` pairing is the one PixInsight, siril, and lumos all
 use; it is documented in PixInsight's Winsorized-sigma-clipping notes and Huber's robust
-statistics. (Concretely: `0.778 = Φ-truncated variance + tail mass·c²` for the
-symmetric Winsorized Gaussian at `c=1.5`; the exact closed form is
-`E[ψ_c(z)²]` with `ψ_c` Huber's clipped score.) lumos hard-codes exactly this:
+statistics. **Verified (pass 3) by direct numerical integration:** for the symmetric
+Winsorized Gaussian at `c = 1.5`, `E[ψ_{1.5}(z)²] = ∫_{−1.5}^{1.5} z²φ(z) dz +
+1.5²·2(1−Φ(1.5)) = 0.47783 + 0.30063 = 0.77846`, so the bias factor is exactly
+`1/√0.77846 = 1.13339 ≈ 1.134` — siril/lumos's constant to four digits. (`ψ_c` is
+Huber's clipped score, which is just the Winsorized variable `clamp(z, −c, c)`; its
+second moment is the deflated variance.) lumos hard-codes exactly this:
 `HUBER_C = 1.5` (`rejection.rs:201`), `WINSORIZED_CORRECTION = 1.134`
 (`rejection.rs:203`), `WINSORIZE_CONVERGENCE = 0.0005` (`rejection.rs:205`) — bit-for-bit
 the same constants as siril's `1.5f`, `1.134f`, `0.0005f` (`rejection_float.c:230-237`),
@@ -432,14 +446,30 @@ that, neither the t- nor the normal-approximation should be trusted much.
   `gsl_cdf_tdist_Pinv(1 − sig/(2·size), size−2)` (`median_and_mean.c:1481`) — this is
   *exactly* the λ formula above. The max number of outliers is
   `floor(N · sig[0])` (`:1480`), i.e. a fraction of the stack.
-- lumos `Gesd` (`GesdConfig`, `rejection.rs:616`; `reject` at `:716`) implements the
+- lumos `Gesd` (`GesdConfig`, `rejection.rs:616`; `reject` at `:668`) implements the
   same backward-scan Grubbs procedure (`floats_b` holds the `G_k`, the backward scan
-  at `:736-749` finds the largest passing `k`). **Important difference:** lumos
-  approximates the t-distribution critical value with an *inverse-normal*
-  (Abramowitz-Stegun) approximation (`inverse_normal_approx`, `rejection.rs:759`)
-  rather than the exact Student-t inverse. For small `N` (where `t` has heavy tails vs
-  the normal) this **under-estimates λ and will over-reject** — a real correctness gap
-  (see §8). `max_outliers` defaults to `N/4` (`rejection.rs:42`).
+  at `:736-749` finds the largest passing `k`), with `max_outliers` defaulting to `N/4`
+  (`max_outliers_for_size`, `rejection.rs:657`). It diverges from siril/NIST in **three**
+  ways, the first two of which are correctness gaps and all of which bias toward
+  over-rejection:
+  1. **Critical value uses the inverse-*normal*, not Student-t.** `inverse_normal_approx`
+     (Abramowitz-Stegun, `rejection.rs:759`) replaces the exact t-inverse. For small `N`
+     the t-distribution's heavier tails make the true critical value larger, so the
+     normal **under-estimates λ and over-rejects**.
+  2. **Wrong effective sample size in the λ formula (pass-3 finding).** The backward scan
+     sets `ni = len + num_candidates − i = n − i` and its own comment calls this the
+     "effective n at step i" — but it then evaluates λ with `ni − i = n − 2i` everywhere
+     (`p`, numerator, denominator at `rejection.rs:737-742`) instead of `ni = n − i`.
+     siril/NIST use the live count `m = n − i + 1` (siril's decrementing `size`,
+     `median_and_mean.c:1480-1484`). The two agree only at the first step (`i = 0`); for
+     every later step lumos plugs in too small an `m`, so λ is too small and rejection
+     too eager. (Worked example `n=20`, 5 candidates: at `i=4` lumos uses `m=12,
+     λ≈2.13`, where the correct live count is `m=16, λ≈2.32`.)
+  3. **Grubbs statistic from median + MAD, not mean + sd.** lumos forms `G = |x−median| /
+     (1.4826·MAD)` with an asymmetric `low_relaxation` factor for dark pixels
+     (`rejection.rs:695-722`) — more robust than the textbook/siril `G = max|x−mean|/sd`
+     (`grubbs_stat`, `rejection_float.c:82`), but no longer the statistic the t-critical
+     values are strictly derived for.
 
 **Assumptions:** approximately Gaussian core, outlier fraction below `r/N`. GESD needs
 `n ≥ ~3` to even compute (siril guards `nb_frames < 3` at `median_and_mean.c:1281`)
@@ -551,9 +581,11 @@ accumulation). lumos mirrors this in `src/drizzle/mod.rs`.
 
 Each input pixel is shrunk by **pixfrac** `p ∈ (0,1]` into a "drop", then its four
 corners are mapped through the geometric transform onto a finer **output grid** whose
-pixels are `s = scale` times smaller (output-to-input linear ratio). The drop is a
-quadrilateral on the output grid; its overlap area with each output pixel determines
-how much flux that output pixel receives.
+pixels are `scale`× smaller in linear size (lumos's `scale`, the super-resolution
+factor; equivalently F&H's output/input pixel-size ratio `s = 1/scale` — see §5.5 for
+this reciprocal, which is easy to get wrong). The drop is a quadrilateral on the output
+grid; its overlap area with each output pixel determines how much flux that output pixel
+receives.
 
 - **Square kernel** (`do_kernel_square`, `cdrizzlebox.c:1982`): transforms all four
   corners (`interpolate_four_points`), computes the **exact polygon-pixel overlap**
@@ -645,16 +677,30 @@ statistically optimum when inverse variance maps are used as the input weights"*
 halves: `accumulate` (`mod.rs:603`) sums `flux·pixel_weight` into the flux buffer and
 `pixel_weight` into the weight buffer, then `finalize` (`mod.rs:625`) divides
 `data/weights` once at the end (`val = data[idx]/w`, `mod.rs:667`) — algebraically the
-same weighted average as Eqs. 4–5, just deferred to one final division. The
+same weighted average as Eqs. 4–5 **except for the global `s²` factor, which lumos
+omits** (see the closing paragraph of this subsection), just deferred to one final
+division. The
 variance-aware variant `update_data_var` (`:91`) additionally co-adds variance arrays
 with **squared** weights `v = (var·vc² + dow²·d2)/vc_plus_dow²` (`:135`) — the correct
 `Var(Σwx)=Σw²Var(x)` propagation (§4.1), and exactly the `w²s⁴σ²` form that reappears in
 the F&H correlated-noise derivation (§5.6).
 
-This is a **linear** combination — the output is `Σ(area·weight·flux)/Σ(area·weight)`.
-Because it is linear and weight-conserving, total flux is preserved (a star's
-integrated counts are unchanged), which is the property that justifies photometry on
-drizzled images.
+This is a **linear** combination — lumos's output is exactly
+`Σ(a·w·flux)/Σ(a·w)`, i.e. F&H Eqs. 4–5 **without the `s²` factor**.
+**Correction (pass 3):** the prior version called this total-flux-conserving; it is not,
+quite. F&H put `s²` (`= s_F&H² = 1/scale²`) in the flux numerator (Eq. 5), and STScI
+folds it into the data via `d = data·iscale` with `iscale = scale²`
+(`cdrizzlebox.c:640`; `iscale = scale·scale` set in `cdrizzleapi.c:324`); that factor is
+what makes the output conserve surface intensity / total integrated flux across the
+pixel-size change. lumos drops it — the `scale²` in its Jacobian cancels between the flux
+buffer and the weight buffer, so a flat field of value `F` drizzles back to `F`. lumos
+therefore preserves the **input per-pixel DN scale**, not F&H's flux normalization, and
+its integrated counts grow by `scale²`. Because `s²` is a *single global constant*, this
+leaves SNR, linearity, and *relative* aperture photometry on one drizzled frame intact
+(it cancels in any ratio) and arguably makes lumos's drizzle output directly comparable
+to its ordinary mean-stack output; it only shifts the absolute level. But it is **not**
+the F&H/STScI flux convention — relevant if you mix drizzled and undrizzled frames or do
+cross-pipeline absolute photometry (§8).
 
 ### 5.4 Kernels
 
@@ -667,11 +713,19 @@ drizzled images.
 | **Lanczos2/3** | sinc-windowed sinc | precomputed LUT (`create_lanczos_lut`) | highest fidelity but **only valid at pixfrac=1, scale=1**; can ring (negative lobes) |
 
 STScI dispatches via `kernel_handler_map` (`cdrizzlebox.c:2144`). lumos mirrors all
-five (`DrizzleKernel`, `drizzle/mod.rs:63`); it explicitly forbids Lanczos when
-`pixfrac≠1 ∨ scale≠1` ("Per STScI DrizzlePac: Lanczos should never be used for
-pixfrac != 1.0", `mod.rs:274`) and applies a `val.max(0.0)` clamp on Lanczos output to
-suppress negative ringing (`mod.rs:668`). STScI similarly warns and ignores pixfrac in
-the Lanczos kernel (`cdrizzlebox.c:1702`).
+five (`DrizzleKernel`, `drizzle/mod.rs:63`). **Correction (pass 3):** lumos does *not*
+"forbid" Lanczos off `pixfrac=scale=1` — it only emits a `tracing::warn!` and then runs
+the kernel anyway (`mod.rs:271-281`: "Lanczos kernel should only be used with
+pixfrac=1.0 and scale=1.0"), applying a `val.max(0.0)` clamp on the output to suppress
+negative ringing (`mod.rs:669`). STScI behaves the same — it warns and *ignores* pixfrac
+in the Lanczos kernel rather than erroring (`cdrizzlebox.c:1702`). Three further lumos
+specifics worth noting: (a) its Lanczos is **Lanczos-3 only** (`a = 3`, separable
+`lanczos_kernel(dx)·lanczos_kernel(dy)`, `mod.rs:312-323`; STScI also offers Lanczos-2);
+(b) its Gaussian and Lanczos paths **normalise the kernel to sum 1** per input pixel
+before accumulating (two-pass `add_image_radial`, `mod.rs:520-599`), so the drop's total
+weight is conserved regardless of kernel shape; and (c) lumos's **Point** kernel *does*
+apply the Jacobian (`weight·pw/jaco`, `mod.rs:508`), so the table's "no Jacobian needed"
+note describes STScI's `do_kernel_point`, not lumos's.
 
 ### 5.5 pixfrac and output scale
 
@@ -687,19 +741,39 @@ the Lanczos kernel (`cdrizzlebox.c:1702`).
   add as the sum of squares, the effect of this replacement is often quite
   significant" — this is *why* a smaller pixfrac sharpens the image.
 - **scale `s`** is *"the ratio of the linear size of an output pixel to an input
-  pixel"* (F&H §2). `s=2` (output pixel = ½ input) doubles the linear sampling of the
-  grid. F&H note the sweet spot: when the dithers map onto output-grid centers and
-  *"pixfrac and scale are chosen so that p is only slightly greater than s, one obtains
-  the full advantages of interlacing"* — the convolutions with both `p` and the output
-  grid `G` effectively drop away while the small drop overlap still fills missing data.
-  (Note F&H phrase this as `p` slightly greater than `s` in *drop-vs-output* terms; in
-  the `r = p/s` parameterization of §5.6 that is `r` slightly above 1.) You can only
+  pixel"* (F&H §2) — so **`s < 1` means a *finer* output grid**: `s = 0.5` makes each
+  output pixel ½ the input pixel and doubles the linear sampling. F&H note the sweet
+  spot: when the dithers map onto output-grid centers and *"pixfrac and scale are chosen
+  so that p is only slightly greater than s, one obtains the full advantages of
+  interlacing"* — the convolutions with both `p` and the output grid `G` effectively
+  drop away while the small drop overlap still fills missing data. In the `r = p/s`
+  parameterization of §5.6 that sweet spot is `r` slightly above 1. You can only
   *recover* finer detail if the data are dithered and undersampled.
+
+  **Correction (pass 3) — lumos's `scale` is the *reciprocal* of F&H's `s`.** lumos's
+  `scale` is the linear *super-resolution factor* (`output_width = scale·input_width`,
+  `mod.rs:189`): the output grid is `scale`× **finer**, so each output pixel is `1/scale`
+  the size of an input pixel. Hence `s_F&H = 1/scale_lumos`, and the F&H ratio is
+  `r = p/s = pixfrac · scale_lumos` — equivalently, **`r` is just lumos's
+  `drop_size = pixfrac·scale` measured in output pixels** (`mod.rs:269`). The prior
+  version's "`s=2` (output pixel = ½ input)" was self-contradictory: under F&H's
+  definition `s=2` makes the output pixel *twice* the input (coarser); 2× finer sampling
+  is `s = 0.5`, i.e. `scale_lumos = 2`. When applying the §5.6 formula to lumos
+  parameters, use `r = pixfrac·scale`, **not** `pixfrac/scale`.
 
 Typical optimal values from STScI/HST experience: **final pixfrac 0.7–0.9** for
 well-dithered data, with the grid `scale` chosen so the output pixel is ~0.5–0.7× the
 input. lumos defaults `scale=2.0, pixfrac=0.8` (`DrizzleConfig::default`,
 `mod.rs:107`); the `x3` preset drops pixfrac to 0.7 (`mod.rs:137`).
+
+**lumos's default `r` is therefore high, not low (pass 3).** Using `r = pixfrac·scale`
+(above): the default `scale=2.0, pixfrac=0.8` gives `r = 1.6` (drop = 1.6 output pixels)
+→ `R = r/(1−1/(3r)) ≈ 2.0`; the `x3` preset (`scale=3, pixfrac=0.7`) gives `r = 2.1` →
+`R ≈ 2.5`. Both sit well **above** the F&H/Casertano sweet spot `r ≈ 1.2–1.25`
+(`R ≈ 1.6`): lumos's defaults favour uniform coverage and a smooth result at the cost of
+substantial correlated noise — the *opposite* end of the tradeoff from the "keep `r`
+modestly below 1" advice in §5.9 (which is the low-correlated-noise choice). To reach
+`r < 1` in lumos you need `pixfrac < 1/scale` (e.g. `pixfrac ≤ 0.45` at `scale=2`).
 
 **Drizzle in practice — the HDF-S numbers (Casertano et al. 2000, parsed pass 2).** The
 canonical worked example of choosing these parameters: for the final HDF-S WFPC2 combine
@@ -740,8 +814,10 @@ true large-scale noise by the factor `R`. F&H derive `σ_c²` and `σ_p²` expli
 R    = σ_c / σ_p                       (Eq. 8)
 ```
 
-For a uniform dither continuously filling the output plane (`r = p/s = pixfrac/scale`),
-the sums become integrals and F&H give the closed form (their Eqs. 9–10):
+For a uniform dither continuously filling the output plane (`r = p/s`, with `s` the F&H
+output/input pixel-size ratio; **in lumos's parameters `r = pixfrac·scale`** since
+`s = 1/scale_lumos`, §5.5), the sums become integrals and F&H give the closed form
+(their Eqs. 9–10):
 
 ```
 r ≥ 1 :   R = r / (1 − 1/(3r))         (F&H Eq. 9)
@@ -809,7 +885,7 @@ reconstruction*: it recovers only the information lost to the **pixel** convolut
 (Nyquist or oversampled) data is therefore an anti-pattern** — there is no undersampling
 to undo, so you pay the correlated-noise cost and gain nothing; a plain stacked mean is
 strictly better. lumos's drizzle takes per-frame `Transform`s (`drizzle_stack`,
-`mod.rs:876`) and does not itself verify dither diversity — that is the caller's
+`mod.rs:937`) and does not itself verify dither diversity — that is the caller's
 responsibility.
 
 ### 5.8 Rejection in the drizzle workflow (DrizzlePac CR scheme)
@@ -859,7 +935,7 @@ so undersampled structure isn't mistaken for CRs. siril's drizzle path similarly
 rejects pixels with zero drizzle weight before combining (`rejection_float.c:117-126`).
 
 lumos's drizzle has **no** built-in CR rejection or blot step — it accepts an optional
-`pixel_weight_maps` parameter (`drizzle_stack`, `mod.rs:876`) through which a caller
+`pixel_weight_maps` parameter (`drizzle_stack`, `mod.rs:937`) through which a caller
 can supply pre-computed rejection masks, but the median+blot+derivative scheme is not
 implemented (see §8).
 
@@ -867,9 +943,12 @@ implemented (see §8).
 
 - **Justified:** undersampled data (PSF FWHM ≲ 2 px), **good sub-pixel dither**
   diversity, many frames, geometric distortion to correct, and you need either
-  resolution recovery or distortion-free photometry. Keep `r = pixfrac/scale` modestly
-  *below* 1 (e.g. `pixfrac ≈ 0.8·scale`, `r ≈ 0.8 → R ≈ 1.36`): low enough to bound
-  correlated noise, high enough that coverage stays uniform (§5.6).
+  resolution recovery or distortion-free photometry. In lumos's parameters the F&H ratio
+  is `r = pixfrac·scale` (§5.5), and there are two defensible targets (§5.6): F&H and
+  Casertano themselves used `r ≈ 1.2–1.25` (`R ≈ 1.6`) to *guarantee* uniform coverage;
+  if instead you want to **minimise correlated noise** and have enough dither/frames to
+  keep coverage, push `r` modestly *below* 1 (`r ≈ 0.8 → R ≈ 1.36`, which at `scale=2`
+  means `pixfrac ≈ 0.4`). Either way `r` is `pixfrac·scale`, not `pixfrac/scale`.
 - **Harmful / pointless:** well-sampled (Nyquist or oversampled) data, no/poor dither,
   few frames, or when you only want SNR. In these cases drizzle adds correlated noise
   and resampling blur for no benefit — a robust stacked mean wins. Drizzle is *not* a
