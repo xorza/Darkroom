@@ -80,13 +80,7 @@ where
         let idx = self.idx_by_key.remove(key)?;
         let removed = self.items.remove(idx);
         assert!(*removed.key() == *key);
-
-        // Only update indices for items that shifted (those after the removed index)
-        for item in self.items.iter().skip(idx) {
-            let entry = self.idx_by_key.get_mut(item.key()).unwrap();
-            *entry -= 1;
-        }
-
+        self.shift_indices_down_after(idx);
         Some(removed)
     }
 
@@ -99,14 +93,18 @@ where
         let key = *removed.key();
         let had_key = self.idx_by_key.remove(&key).is_some();
         assert!(had_key, "remove_by_index expects the key to exist");
+        self.shift_indices_down_after(idx);
+        removed
+    }
 
-        // Only update indices for items that shifted (those after the removed index)
-        for item in self.items.iter().skip(idx) {
+    /// After an `items.remove(removed_idx)`, decrement the stored index of every
+    /// item that shifted left (those now at `removed_idx..`). The removed key's
+    /// own entry must already be gone from `idx_by_key`.
+    fn shift_indices_down_after(&mut self, removed_idx: usize) {
+        for item in self.items.iter().skip(removed_idx) {
             let entry = self.idx_by_key.get_mut(item.key()).unwrap();
             *entry -= 1;
         }
-
-        removed
     }
 
     pub fn clear(&mut self) {

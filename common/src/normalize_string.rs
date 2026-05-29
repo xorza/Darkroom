@@ -48,18 +48,6 @@ impl NormalizeString for str {
     }
 }
 
-impl NormalizeString for String {
-    fn normalize(&self) -> String {
-        self.as_str().normalize()
-    }
-}
-
-impl NormalizeString for &str {
-    fn normalize(&self) -> String {
-        (*self).normalize()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

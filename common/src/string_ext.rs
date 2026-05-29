@@ -51,26 +51,6 @@ impl StrExt for str {
     }
 }
 
-impl StrExt for String {
-    fn last_line(&self) -> &str {
-        self.as_str().last_line()
-    }
-
-    fn line_count(&self) -> usize {
-        self.as_str().line_count()
-    }
-}
-
-impl StrExt for &str {
-    fn last_line(&self) -> &str {
-        (*self).last_line()
-    }
-
-    fn line_count(&self) -> usize {
-        (*self).line_count()
-    }
-}
-
 fn is_newline(byte: u8) -> bool {
     byte == b'\n' || byte == b'\r'
 }
