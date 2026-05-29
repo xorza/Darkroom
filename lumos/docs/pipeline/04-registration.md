@@ -49,6 +49,35 @@ triangle votes for three point correspondences. The invariance properties are
 exactly what we need because a tracked-mount frame pair differs by precisely
 translation + rotation + (fixed) scale.
 
+**Groth's exact feature pair (pass 2, parsed from the PDF).** Groth does *not* use
+two side ratios; he uses **`(R, C)`** where `R = r3/r2` is the ratio of the longest to
+the shortest side (`groth1986.txt:128-139`) and `C` is the **cosine of the angle at
+vertex 1** (the vertex opposite the longest side, `groth1986.txt:149-150`,
+`C = (Δx3·Δx2 + Δy3·Δy2)/r3r2`). He also carries each invariant's *tolerance*, derived
+by propagating a per-coordinate matching error `ε` through `R` and `C` (his Eqs. 2–6).
+Crucially the cosine, unlike a pure side ratio, can encode the **sense of vertex
+traversal** if measured as a signed angle — Groth instead stores the CW/CCW
+orientation separately so the algorithm is "independent of coordinate inversion"
+(`groth1986.txt:95-102`). Two triangles match when `(R_A−R_B)² < t_RA + t_RB` and
+`(C_A−C_B)² < t_CA + t_CB` (Eqs. 7–8), found efficiently by a sort-merge sweep over
+the ratio-sorted lists. The two-side-ratio parameterization (astroalign, lumos) is an
+algebraically equivalent shape descriptor — any two independent length ratios fully
+characterize a triangle up to similarity (astroalign states this explicitly,
+`astroalign_beroiz2020.txt`: "knowing two independent ratios of the side lengths is
+also sufficient … any function of two independent length ratios will suffice") — and
+trades Groth's `(R, cosine)` for a more uniform 2-D code space.
+
+**False-match probability (pass 2).** Groth derives the expected number of *spurious*
+triangle matches analytically (`groth1986.txt:230-260`): with `n` points per list
+there are `n_t = n(n−1)(n−2)/6` triangles and `12 n_t²` potential matches (6 vertex
+permutations × 2 orientations). A false match occurs when the transformed third
+vertex lands within a `2ε`-square of its counterpart — probability `4ε²` — so the
+expected count is `≈ 48 n_t² ε²`, written `n_f = 4f² n_t² ε²` with an empirical
+`f ∈ [2,3]` absorbing edge/tolerance effects. The decisive consequence: **as `n`
+grows, `ε` must shrink as `n^{−3/2}`** to keep true matches from being swamped by
+false ones — the formal justification for both keeping the matching tolerance tight
+(§1.5) and capping the star count (brightest-N).
+
 A triangle has three side lengths `s0 ≤ s1 ≤ s2`. Two **ratios** of side lengths
 fully describe its shape up to similarity:
 
@@ -132,25 +161,72 @@ This **voting/accumulator** scheme is the key robustness amplifier: it converts 
 soft per-triangle similarity into a hard per-point consensus, so a handful of
 spurious stars cannot manufacture a correspondence.
 
+**Groth's full vote pipeline (pass 2).** The voting idea is Groth's, and his version
+adds two filters lumos folds into RANSAC instead. (1) **Log-perimeter
+(log-magnification) pruning** before voting: each matched triangle implies a
+magnification `log M = log p_A − log p_B` between the lists; *true* matches all share
+essentially the same `M` while false matches scatter, so Groth iteratively discards
+matches whose `log M` is more than `f·σ` from the mean (`f` set to 1/2/3 by the ratio
+of estimated true-to-false matches `m_t/m_f`), and discards the minority orientation
+class (`groth1986.txt:260-300`). (2) **Vote termination by factor-of-2 drop:** after
+sorting the vote array, assignments proceed until "the vote drops by a factor of 2, an
+attempt is made to assign an already-assigned point, or the vote drops to zero"
+(`groth1986.txt:300-330`). lumos's `min_votes ≥ 3` cutoff and greedy one-to-one
+resolution is a simpler stand-in for this gap-detection rule. (3) **Spurious-assignment
+guard:** Groth re-runs the *entire* matcher restricted to the points matched in the
+first pass; if fewer survive, the original matches were false and the lists are
+declared unmatchable — the conceptual ancestor of RANSAC's "does the model explain the
+rest of the data?" verification.
+
 ### 1.4 Quad hashing (astrometry.net) — the blind-solve alternative
 
 When there is *no* prior on scale or position (blind plate solving against a sky
 catalog), 4-star **quads** are preferred over triangles because a 4-point code is a
 4-D descriptor with far higher discriminating power, enabling a pre-built
-hash index. astrometry.net (Lang et al. 2010) computes a geometric hash:
-pick the two most-widely-separated stars A, B of a quad; define a local coordinate
-frame where A=(0,0), B=(1,1); express the remaining stars C, D in that frame; the
-4 numbers `(xC,yC,xD,yD)` are the **code**, invariant to translation/rotation/scale
-(`/.tmp/refs/astrometry.net/solver/codefile.c:37-69`: `codefile_compute_field_code`
-builds `costheta=(ABy+ABx)/|AB|²`, `sintheta=(ABy-ABx)/|AB|²` and rotates C, D into
-the AB frame). A symmetry convention (canonical ordering of A/B and C/D) removes the
-4-fold ambiguity so each quad maps to a single code. Matching is then a kd-tree
-range query in 4-D code space with tolerance `codetol`
-(`solver/onefield.c:540`), and every candidate is **verified** by a Bayesian
-log-odds test that scores how well the implied WCS predicts the *other* stars,
-accounting for a `distractor_ratio` and per-star positional noise `verify_pix`
-(`solver/solver.c:179-220`, `verify.c`). The verify step is essential: a single
-quad code match is just a hypothesis; only the full-field agreement confirms it.
+hash index. astrometry.net (Lang et al. 2010, parsed pass 2) computes a geometric
+hash: pick the two most-widely-separated stars A, B of a quad; define a local
+coordinate frame where A=(0,0), B=(1,1); express the remaining stars C, D in that
+frame; the 4 numbers `(xC,yC,xD,yD)` are the **code**, invariant to
+translation/rotation/scale (`astrometry_lang2010.txt:258-280`, Fig. 1;
+`.tmp/refs/astrometry.net/solver/codefile.c:49-65`: `codefile_compute_field_code`
+builds `scale=|AB|²`, `costheta=(ABy+ABx)/scale`, `sintheta=(ABy−ABx)/scale` and
+rotates C, D into the AB frame via `x = Cx·cosθ + Cy·sinθ`, `y = −Cx·sinθ + Cy·cosθ`).
+
+**Why quads, not triangles (pass 2).** The paper is explicit that the *standard*
+geometric-hashing recipe would use triangles, but "the positional noise level in
+typical astronomical images is sufficiently high that triangles are not distinctive
+enough" — a quad "can be thought of as two triangles that share a common edge," so a
+quad "nearly squares the distinctiveness" and each code occupies a much smaller
+fraction of the 4-D code space, yielding far fewer coincidental matches
+(`astrometry_lang2010.txt:300-330`). This is the opposite tradeoff from the
+frame-to-frame case: blind solving has a *huge* hypothesis space and needs maximum
+discrimination per feature; frame-to-frame matching has a near-identity prior, so the
+cheaper triangle + vote suffices.
+
+**Symmetry breaking and the circle (pass 2).** The code has two symmetries — swapping
+A↔B sends `(xC,yC,xD,yD)→(1−xC,1−yC,1−xD,1−yD)`, swapping C↔D sends it to
+`(xD,yD,xC,yC)`. astrometry.net breaks both by *requiring* `xC ≤ xD` **and**
+`xC + xD ≤ 1`, and requires C, D to lie inside the circle with AB as diameter, so each
+physical quad maps to exactly one code (`astrometry_lang2010.txt:268-275`). Matching
+is a kd-tree range query in 4-D code space, and every candidate is **verified** by a
+Bayesian decision test.
+
+**The Bayesian verification, quantified (pass 2).** The verify step chooses between a
+foreground model `F` (alignment true) and background `B` (false) via the Bayes factor
+`K = p(D|F)/p(D|B)` (`astrometry_lang2010.txt:460-475`). It accepts iff
+`K > [p(B)/p(F)]·[u(TN)−u(FP)]/[u(TP)−u(FN)]`. astrometry.net uses a deliberately
+conservative prior `p(F)/p(B) = 10⁻⁶` (because it examines many false alignments before
+the first true one) and a strongly asymmetric utility table `u(TP)=+1, u(FN)=−1,
+u(TN)=+1, u(FP)=−1999` — a false positive is treated as ~2000× worse than any other
+outcome, so the system "would much rather fail to produce a result rather than produce
+a false result." Operationally it asks "if this alignment were correct, where else
+would we expect stars?" and scores the implied WCS against the *other* field stars,
+accounting for a distractor ratio and per-star positional noise `verify_pix`
+(`solver/solver.c`, `verify.c`). The verify step is essential: a single quad code match
+is just a hypothesis; only the full-field agreement confirms it. (Interestingly the
+paper notes they found it *faster* to verify every hypothesis immediately than to
+accumulate votes across codes — the opposite of Groth's vote-then-fit, justified by
+the cheap per-hypothesis WCS and the huge candidate count.)
 
 **When to use which.** Triangles (lumos, astroalign) are ideal for the
 frame-to-frame case where the two star lists are drawn from nearly the same field
@@ -193,6 +269,29 @@ needed to solve exactly):
 lumos encodes this exact ladder in `TransformType` (`src/registration/transform.rs:14`),
 with `min_points()` returning `{1,2,2,3,4}` (line 35) and `degrees_of_freedom()`
 returning `{2,3,4,6,8}` (line 47), all matching the table.
+
+**The optics that set the DOF (pass 2 depth).** Each DOF maps to a physical cause:
+
+- **Translation** = dither/guiding drift and periodic-error residual; always present.
+- **Rotation** = *field rotation*. An alt-az mount rotates the field at the parallactic
+  rate (up to ~15″/s·sin(alt-az geometry) near the zenith); a German equatorial after a
+  *meridian flip* rotates the field 180°; even a polar-aligned mount drifts a fraction
+  of a degree over a session from polar-misalignment cone error. So Euclidean (rigid)
+  is the *minimum* honest model for anything but a single short equatorial run.
+- **Uniform scale** = plate-scale change. On one rig at fixed focus the plate scale is
+  *fixed* to ~10⁻⁴, so the Similarity scale DOF is ≈1.0 and harmless — but it becomes
+  essential across different focal lengths, focal reducers, binning modes, or a
+  refocus that shifts the effective focal length (temperature-dependent in refractors).
+- **Shear + differential scale** (affine) = sensor non-orthogonality / tilt, anamorphic
+  optics, or rectangular-pixel mismatch — a *few*×10⁻³ effect, usually below the noise.
+- **Perspective** (homography) = the field is genuinely projected from a tilted plane:
+  off-axis pointing in a mosaic, or a fast wide lens where the gnomonic (TAN) projection
+  itself is non-affine across the frame. The TAN projection (WCS Paper II,
+  `wcs2_greisen2002.txt`) maps the tangent plane to the sky non-linearly; for a narrow
+  field the linear approximation is excellent, but a several-degree field needs the
+  projective (or distortion) terms.
+- **Smooth non-linear** (SIP/TPS) = lens radial distortion (barrel/pincushion), field
+  curvature, the residual the TAN+linear model leaves at the corners.
 
 **Choosing by field.**
 
@@ -247,9 +346,16 @@ works only because the triangle vote has already cleaned the data heavily.
 
 MSAC (Torr & Zisserman) keeps the binary threshold for *inlier selection* but
 changes the *score*: instead of counting inliers, it sums a truncated quadratic
-loss `min(r², t²)`, so a model that fits its inliers *tightly* beats one that
-barely scrapes them under the threshold. This is a strictly better objective at no
-cost and is the conceptual bridge to MAGSAC.
+loss `ρ(r) = min(r², t²)` (equivalently, score `Σ min(r², t²)` to *minimize*), so a
+model that fits its inliers *tightly* beats one that barely scrapes them under the
+threshold. Plain RANSAC is the degenerate case `ρ(r) = [r² > t²]` (0/1 indicator);
+MSAC just replaces the flat inlier plateau with the quadratic `r²` so residual
+magnitude *inside* the band still discriminates. MLESAC generalizes further to a
+maximum-likelihood mixture score. This is a strictly better objective at no extra cost
+and is the conceptual bridge to MAGSAC: MAGSAC++ keeps the truncation (`outlier_loss`
+beyond `kσ_max`) but replaces the hard inner `r²` with the σ-marginalized ρ (§3.5), so
+the only remaining "threshold" is the soft upper bound `σ_max`, not a crisp inlier
+cutoff.
 
 ### 3.3 Adaptive iteration count
 
@@ -267,8 +373,8 @@ statistically guaranteed. lumos implements it verbatim in `adaptive_iterations`
 `N = ceil(log(1−p) / log(1−w^s))`, with guards for `w∈{0,1}`. The main loop
 recomputes `adaptive_max` whenever the best inlier ratio improves and breaks once
 `iterations ≥ adaptive_max` (`ransac/mod.rs:341-349`). MAGSAC's source builds the
-same termination from its marginalized inlier count
-(`/.tmp/refs/magsac/.../magsac.h:939-940`:
+same termination from its marginalized inlier count (verified pass 2,
+`.tmp/refs/magsac/src/pymagsac/include/magsac.h:939-940`:
 `last_iteration_number = log_confidence / log(1 − (inlier/N)^sample_size)`).
 
 The practical lesson: with `s=2` (Similarity) and `w=0.5`, `N ≈ log(0.005)/log(0.75)
@@ -278,21 +384,33 @@ The practical lesson: with `s=2` (Similarity) and `w=0.5`, `N ≈ log(0.005)/log
 
 ### 3.4 LO-RANSAC: local optimization
 
-LO-RANSAC (Chum, Matas & Kittler 2003;
+LO-RANSAC (Chum, Matas & Kittler 2003; parsed pass 2,
 [CMP PDF](https://cmp.felk.cvut.cz/~matas/papers/chum-dagm03.pdf)) observes that a
 minimal sample, even when all-inlier, gives a noisy model because it ignores all
 the *other* inliers. The fix: whenever a new best model is found, run a local
 optimization — re-estimate using **all** current inliers (non-minimal least
 squares), find the new inlier set, and iterate, optionally with a narrowing
-threshold. "Fixing the LO-RANSAC" (Lebeda et al. 2012) refined the inner loop. This
-typically improves inlier count by 5–15% and tightens RMS.
+threshold. The paper's decisive rule is **"if a new maximum has occurred (`I_k > I_j`
+for all `j < k`), run local optimization"** (`loransac_chum2003.txt:99`) — i.e.
+LO only on so-far-the-best samples, since the expected number of new maxima over a
+run is only `O(log N)`, making LO nearly free. The paper tests four inner methods
+(`loransac_chum2003.txt:221-230`): **(1) Standard** (no LO), **(2) Simple** (one
+least-squares refit on the inliers), **(3) Iterative** — take points within `K·θ`,
+refit, *reduce* the threshold, and iterate down (the narrowing-threshold variant), and
+**(4) Inner RANSAC** — a fresh sampling restricted to the `I_k` consistent points.
+"Fixing the LO-RANSAC" (Lebeda et al. 2012) further capped the inner-sample size and
+iteration count. LO typically improves inlier count by 5–15% and tightens RMS.
 
-lumos's `local_optimization` (`ransac/mod.rs:167-240`) does exactly this: it
-re-estimates from the current inliers, rescoring, and swaps in the result only if
-it improves — and crucially **only refines new-best hypotheses** (`mod.rs:314`),
-which is the standard cost-saving form of LO-RANSAC. A final least-squares refit on
-all inliers happens after the loop (`mod.rs:353-388`). This non-minimal final refit
-is essential: the reported transform must never be the raw minimal-sample model.
+lumos's `local_optimization` (`ransac/mod.rs:167-240`) implements method **(2)
+Simple**, *iterated*: it re-estimates from all current inliers, rescores with the same
+(non-narrowing) MAGSAC++ loss, swaps in the result only if it improves, and repeats up
+to `lo_max_iterations` times until the inlier count and score stop improving
+(`mod.rs:196-237`) — and crucially **only refines new-best hypotheses**
+(`mod.rs:315-316`: `use_local_optimization && score > best_score`), the standard
+cost-saving form. It does *not* do the method-(3) threshold narrowing — a noted gap
+(§9.6). A final least-squares refit on all inliers happens after the loop
+(`mod.rs:353-388`). This non-minimal final refit is essential: the reported transform
+must never be the raw minimal-sample model.
 
 ### 3.5 MAGSAC++ : marginalizing the noise scale
 
@@ -307,39 +425,91 @@ marginal likelihood of being an inlier (integrated over σ), and the model quali
 a continuous loss with no inlier set required. The optimized model is then a
 **weighted** least-squares fit using those marginal weights, iterated (IRLS).
 
-The MAGSAC++ point loss has a closed form per the χ² model with `ν` DOF. From the
-reference implementation `getModelQualityPlusPlus`
-(`/.tmp/refs/magsac/.../magsac.h:946-1045`): a point with residual `r > maximum_threshold`
-gets a constant `outlier_loss`; otherwise the loss combines a lower-incomplete-gamma
-term `σ²ₘₐₓ/2 · γ_lower(...)` and a `r²/4 · (γ_complete − γ_k)` term, all scaled by
-`2^{(ν+1)/2}/σₘₐₓ` — evaluated through precomputed gamma lookup tables. The model
-score is `1/total_loss`, and validation early-exits once `total_loss` exceeds the
-previous best (the `previous_best_loss` budget). The estimator constants confirm the
-correspondence model: `getDegreesOfFreedom()=4`, `getSigmaQuantile()=3.64`,
-`getC()=0.25` for homography/rigid estimators (`/.tmp/refs/magsac/.../estimators.h:36-49`).
-
-**lumos's specialization to 2-D point residuals (`k=2` DOF).** lumos does not need
-the gamma lookup table because for a 2-D residual the relevant lower-incomplete
-gamma collapses to a closed form: `γ(1, x) = 1 − e^{−x}`
-(`src/registration/ransac/magsac.rs:18`). The per-point loss is therefore
+**The exact MAGSAC++ ρ-function (pass 2, parsed from the primary PDF).** The
+MAGSAC++ paper (arXiv 1912.05909, §2.1–2.2) gives the closed-form loss. The noise
+σ is marginalized as `σ ∼ U(0, σ_max)`; inlier residuals follow a trimmed
+χ-distribution with `n` DOF (`g(r|σ) = 2C(n)σ^{−n}exp(−r²/2σ²)r^{n−1}` for
+`r < τ(σ)`, where `C(n)=(2^{n/2}Γ(n/2))^{−1}` and `τ(σ)=kσ`). The IRLS weight is the
+σ-marginalized density `w(r) = ∫ g(r|σ)f(σ)dσ`, and the loss is its potential
+`ρ(r) = ∫₀ʳ x·w(x)dx`. For `0 ≤ r ≤ kσ_max` the paper's closed form is
 
 ```
-loss(r²) = (σ²ₘₐₓ/2)·γ(1,x) + (r²/4)·(1 − γ(1,x)),   x = r² / (2σ²ₘₐₓ)
+ρ(r) = C(n)·2^{(n+1)/2}·[ (σ_max/2)·γ((n+1)/2, r²/2σ²_max)
+                        + (r/4)·(Γ((n−1)/2, r²/2σ²_max) − Γ((n−1)/2, k²/2)) ]
 ```
 
-clamped to `outlier_loss = σ²ₘₐₓ/2` beyond `threshold² = χ²₀.₉₉(2)·σ²ₘₐₓ = 9.21·σ²ₘₐₓ`
-(`magsac.rs:43-74`). The hand-computed unit tests verify this exactly — e.g.
+with `ρ(r)=ρ(kσ_max)` constant beyond, where `γ` is lower- and `Γ` upper-incomplete
+gamma. The quality is `Q = 1/Σρ`. The paper sets `k = τ(σ)/σ = 3.64` (the 0.99
+χ-quantile) and **`n = 4` for point correspondences** ("For problems using point
+correspondences, `n = 4`"), with `σ_max` "set to a fairly high value, e.g. 10 pixels."
+The reference C++ matches this exactly: `getModelQualityPlusPlus`
+(`.tmp/refs/magsac/src/pymagsac/include/magsac.h:1028-1031`) computes
+`loss = [σ²_max/2·γ_lower(x) + r²/4·(Γ_complete(x) − Γ_k)]·2^{(dof+1)/2}/σ_max`,
+table-lookup `x = r²/(2σ²_max)`, constant `outlier_loss` above `maximum_threshold`,
+score `1/total_loss`, early-exit once `total_loss > previous_best_loss`
+(`magsac.h:1039`). Estimator constants: `getDegreesOfFreedom()=4`,
+`getSigmaQuantile()=3.64`, `getC()=0.25`
+(`.tmp/refs/magsac/src/pymagsac/include/estimators.h:36-49`) — and `C=0.25 = C(n=4) =
+(2²·Γ(2))^{−1}` confirms the `n=4` choice.
+
+**Correction (pass 2): lumos does NOT implement the paper's ρ for `n=2` (or any
+standard `n`).** Pass 1 claimed lumos "specializes to 2-D point residuals (`k=2`
+DOF)" via the exact closed form, asserting the lower-incomplete gamma "collapses to
+`γ(1,x)=1−e^{−x}`." That is wrong: the paper's `n=2` form needs `γ(3/2, x)` (lower)
+and `Γ(1/2, x)` (upper), **not** `γ(1, x)`. What lumos actually computes
+(`magsac.rs:63-75`) is the bespoke loss
+
+```
+loss(r²) = (σ²ₘₐₓ/2)·(1 − e^{−x}) + (r²/4)·e^{−x},   x = r²/(2σ²ₘₐₓ)
+```
+
+i.e. it keeps the reference's structural skeleton `σ²_max/2·γ_lower + r²/4·(…)` but
+substitutes the `a=1` incomplete gamma `1−e^{−x}` for the lower term and `e^{−x}` for
+the upper `(Γ_complete − Γ_k)` factor, **and drops** the global `C(n)·2^{(n+1)/2}/σ_max`
+prefactor. I verified numerically that this diverges from the paper's `ρ` at every
+`r>0` (e.g. at σ_max=1: paper-n2 ρ(1.0)=0.323, paper-n4 ρ(1.0)=0.285, lumos
+loss(1.0)=0.348; at r=3 they diverge further, paper-n4=0.861 vs lumos=0.519). So
+lumos's scorer is **MAGSAC++-*inspired*, not the MAGSAC++ loss**: a smooth,
+monotone-increasing, threshold-free robust kernel that captures the *qualitative*
+behavior (continuous inlier→outlier fade, σ-derived scale, `1/loss` quality,
+budget-based early exit) but not the marginalized χ-density. Two practical
+consequences: (a) dropping the constant prefactor is harmless for **model selection
+within one `register()` call** (σ_max is fixed, so a uniform scale cannot change the
+argmax), but it means the scores are not comparable across different σ_max; (b) the
+shape difference means lumos's down-weighting profile is not the statistically-optimal
+M-estimator the paper proves converges — it is a reasonable heuristic that happens to
+be monotone and bounded.
+
+The per-point loss is clamped to `outlier_loss = σ²ₘₐₓ/2` beyond
+`threshold² = χ²₀.₉₉(2)·σ²ₘₐₓ = 9.21·σ²ₘₐₓ` (`magsac.rs:43-74`; note `9.21 = χ²₀.₉₉(2)`,
+distinct from the reference's `k=3.64` *χ*-quantile — lumos uses a `χ²`-quantile on
+`r²` directly). The hand-computed unit tests verify the lumos formula exactly — e.g.
 `loss(r²=1)` with σ=1 equals `0.5·(1−e^{−0.5}) + 0.25·e^{−0.5} = 0.34837`
 (`magsac.rs:138-181`). The effective hard fallback threshold is `√9.21·σ ≈ 3.03σ`
 (`magsac.rs:248`), which is why lumos derives `max_sigma` from seeing and treats
 `~3·max_sigma` as the match-recovery threshold (§4).
+
+**σ-consensus vs σ-consensus++ (pass 2).** The original MAGSAC (arXiv 1803.07469)
+computed the weights by *partitioning* `[σ₁, σ_max]` into `d` discrete bins, running a
+least-squares fit per bin to get `θ_σ`, and accumulating each point's implied inlier
+probability across bins — accurate but slow (several LS fits per model). MAGSAC++
+replaces this with the IRLS reformulation above: the weight is the analytic
+σ-marginal `w(r)` (one closed-form evaluation per point, via a gamma LUT), and
+`θ_{i+1} = argmin_θ Σ w(D(θ_i, p))·D²(θ, p)` is iterated to a local minimum — this is
+**σ-consensus++**, used both for the non-minimal fit and as a post-process polisher for
+*any* robust estimator's output (`magsacpp_barath2019.txt:166-232`). lumos's
+`local_optimization` is the structural analogue (re-fit on the consensus set, iterate)
+but uses an *unweighted* least-squares estimator on the binary inlier set rather than a
+true `w(r)`-weighted IRLS — so it is closer to plain LO-RANSAC than to σ-consensus++.
 
 Intuition for *why marginalization beats a hard threshold*: a point's contribution
 fades **smoothly** from "definitely inlier" (r≈0, loss→0) to "definitely outlier"
 (r>3σ, loss→constant) with no cliff, so a genuine inlier nudged just past a single
 threshold by seeing noise is not discarded — it is down-weighted continuously. This
 is what makes MAGSAC++ "more geometrically accurate and fail fewer times" than
-threshold RANSAC (verified: TPAMI 2021 abstract).
+threshold RANSAC (verified: TPAMI 2021 abstract; MAGSAC++ paper reports the new
+quality function plus σ-consensus++ as the source of both the accuracy gain and the
+speedup over MAGSAC).
 
 lumos's `score_hypothesis` (`ransac/mod.rs:613-640`) sums this loss over all
 correspondences, returns `−total_loss` (so higher = better), and **preemptively
@@ -378,15 +548,30 @@ For Translation/Euclidean/Similarity, the closed-form least-squares solution is
 **Procrustes analysis** (the Kabsch/Umeyama solution), not DLT. Umeyama 1991
 ([IEEE TPAMI 13:376](https://ui.adsabs.harvard.edu/abs/1991ITPAM..13..376U/abstract))
 gives the *correct* rotation even with corrupted data by enforcing both
-orthogonality and `det(R)=+1` via the SVD of the cross-covariance, fixing the
-earlier Arun/Horn methods that could return a reflection. lumos uses the 2-D
-closed forms directly: `estimate_similarity` computes the rotation angle
-`θ = atan2(Sxy−Syx, Sxx+Syy)` and scale `((Sxx+Syy)cosθ + (Sxy−Syx)sinθ)/Var_ref`
-from the cross-covariance of centered points (`transforms.rs:111-165`);
-`estimate_euclidean` (`transforms.rs:76-108`) is the same with scale fixed at 1.
-These are the analytic 2-D Umeyama formulas. (lumos does not explicitly guard the
-reflection/`det=+1` case as Umeyama's theorem does, since orientation is already
-enforced upstream in triangle voting — see §9.)
+orthogonality and `det(R)=+1` via the SVD of the cross-covariance `Σ = UDVᵀ`, setting
+`R = U·diag(1,…,1, det(UVᵀ))·Vᵀ` so that a reflection (`det(UVᵀ)=−1`) is flipped back
+to a proper rotation — fixing the earlier Arun/Horn methods that could return an
+improper reflection when the data is noisy. lumos uses the **analytic 2-D Umeyama
+formulas** directly: `estimate_similarity` computes the rotation angle
+`θ = atan2(Sxy−Syx, Sxx+Syy)` and scale `s = ((Sxx+Syy)cosθ + (Sxy−Syx)sinθ)/Var_ref`
+from the cross-covariance of centered points (`transforms.rs:147-152`);
+`estimate_euclidean` (`transforms.rs:76-108`) is the same with `s≡1`.
+
+**Correction/refinement (pass 2): the 2-D `atan2` form is *structurally* a proper
+rotation — no det guard is needed.** The general-`d` Umeyama det-correction exists
+because SVD-derived `R` can be a reflection; but in 2-D the closed form
+`θ = atan2(·, ·)` *parameterizes a rotation by construction* — every `θ` maps to a
+rotation matrix with `det = +1`, so `estimate_similarity`/`estimate_euclidean` can
+never emit a reflection regardless of the data. The pass-1 §9 worry that "a degenerate
+sample could in principle yield a reflection" is therefore **unfounded for these two
+estimators**: the only way lumos handles a mirrored frame is by *disabling*
+`check_orientation` so the triangle vote proposes mirror correspondences — at which
+point the 2-D rotation model simply cannot fit them (it has no reflection DOF), and the
+fit fails the RMS gate rather than silently mirroring. To actually register mirrored
+frames one needs an affine/homography model (which *can* represent a reflection via a
+negative-determinant linear part) or an explicit pre-flip. Only `estimate_affine` /
+`estimate_homography` can express reflection, and those are unconstrained DLT fits with
+no orthogonality assumption, so no det guard applies there either.
 
 ### 3.8 Degeneracy handling
 
@@ -581,18 +766,27 @@ interpolated from neighbors with a kernel:
   it *blurs*, enlarging stellar FWHM. Astrophotographers note bilinear "removes the
   dark-halo artifacts but the image is not as sharp (larger FWHM)" (verified).
   Good for masks/weights and quick previews.
-- **Bicubic** (4×4, Catmull-Rom a=−0.5): cubic kernel, sharper than bilinear, mild
-  overshoot. lumos's `bicubic_kernel` is the standard Catmull-Rom piecewise cubic
-  (`interpolation/mod.rs:114-120`). A reasonable default when ringing must be
-  avoided.
-- **Lanczos-a** (windowed sinc, kernel half-width `a`∈{2,3,4}; 2a×2a footprint):
-  the best frequency response — preserves the most detail / smallest FWHM growth —
-  and is the de-facto astrophotography default. lumos defaults to **Lanczos3** with
-  deringing (`InterpolationMethod::default()`, `config.rs:39-45`), with a 4096-
-  sample LUT per kernel (`interpolation/mod.rs:39-111`). The kernel is
-  `sinc(x)·sinc(x/a)` for `|x|<a` (`lanczos_kernel_compute`, `mod.rs:45-55`). swarp
-  implements the identical Lanczos2/3/4 windowed-sinc kernels
-  (`/.tmp/refs/swarp/src/interpolate.c:337-428`, computed via `sincos`).
+- **Bicubic** (4×4, Keys cubic convolution with `a=−0.5`): the Keys (1981) family is
+  the piecewise cubic `k(x) = (a+2)|x|³−(a+3)|x|²+1` for `|x|≤1` and
+  `a|x|³−5a|x|²+8a|x|−4a` for `1<|x|<2`. The free parameter `a` controls the negative
+  lobe; **`a=−0.5` is the unique value that makes the interpolant agree with the
+  Taylor series to third order** (the "Catmull-Rom"/Keys-optimal choice), so it is the
+  most accurate cubic — sharper than bilinear, mild overshoot. lumos's
+  `bicubic_kernel` hard-codes `A=−0.5` (`interpolation/mod.rs:115-125`), the standard
+  choice. A reasonable default when ringing must be avoided.
+- **Lanczos-a** (windowed sinc, kernel half-width `a`∈{2,3,4}; 2a×2a footprint): the
+  ideal reconstruction filter is `sinc(x)=sin(πx)/(πx)`, but the sinc has infinite
+  support and slow `1/x` decay; the Lanczos kernel multiplies it by a *sinc window*
+  `sinc(x/a)`, giving `L(x)=sinc(x)·sinc(x/a)` for `|x|<a` and 0 outside. This is the
+  best practical frequency response — it preserves the most detail / smallest FWHM
+  growth — and is the de-facto astrophotography default. Larger `a` → closer to the
+  ideal sinc (sharper) but larger negative lobes (more ringing). lumos defaults to
+  **Lanczos3** with deringing (`InterpolationMethod::default()`, `config.rs:39-45`),
+  with a 4096-sample LUT per kernel (`interpolation/mod.rs:39-111`, ~0.00024
+  precision). The kernel is exactly `(sin(πx)/πx)·(sin(πx/a)/(πx/a))` for `|x|<a`
+  (`lanczos_kernel_compute`, `mod.rs:45-55`). swarp implements the identical
+  Lanczos2/3/4 windowed-sinc kernels
+  (`.tmp/refs/swarp/src/interpolate.c:337-428`, computed via `sincos`).
 - **Gaussian**: not a sharp interpolator but produces clean, ring-free PSFs;
   preferred when photometric PSF fidelity beats sharpness (verified — "smooth,
   centrally peaked PSFs … better behaved for photometry").
@@ -752,9 +946,10 @@ well-grounded against astroalign, MAGSAC, astrometry.net, and SCAMP.
   (`geometry.rs:71-83`).
 - **Voting with ≥3 confirming triangles** and greedy one-to-one resolution
   (`voting.rs`).
-- **MAGSAC++** with the exact `k=2` closed-form loss, hand-verified by unit tests
-  (`ransac/magsac.rs`); preemptive scoring; **adaptive iterations**; **LO-RANSAC on
-  new-best only**; **degeneracy rejection**; **final non-minimal refit**
+- **MAGSAC++-*inspired* threshold-free loss**, hand-verified by unit tests
+  (`ransac/magsac.rs`) — a smooth monotone robust kernel, *not* the paper's exact
+  σ-marginalized ρ (see §3.5 Correction); preemptive scoring; **adaptive iterations**;
+  **LO-RANSAC on new-best only**; **degeneracy rejection**; **final non-minimal refit**
   (`ransac/mod.rs`).
 - **Hartley √2 normalization** for *both* homography and affine, SVD of the full
   design matrix (`ransac/transforms.rs`).
@@ -784,12 +979,16 @@ well-grounded against astroalign, MAGSAC, astrometry.net, and SCAMP.
    common tracked-mount case, 3 DOF, fastest) and Affine. A finer ladder (Euclidean
    → Similarity → Affine → Homography, upgrading by residual) would fit the simplest
    adequate model more often.
-5. **Reflection guard in Procrustes.** `estimate_similarity`/`euclidean` use the 2-D
-   closed form without Umeyama's explicit `det(R)=+1` enforcement; orientation is
-   handled upstream in triangle voting, so this is currently safe, but if
-   `check_orientation` is disabled (mirrored frames) a degenerate sample could in
-   principle yield a reflection. Worth an assertion or the Umeyama `det` correction
-   for defense-in-depth.
+5. **Mirrored-frame support (revised pass 2).** `estimate_similarity`/`euclidean` use
+   the 2-D `atan2` closed form, which *structurally* yields a proper rotation
+   (`det=+1`) — no reflection can leak out, so no det guard is needed (§3.7
+   Correction). The real gap is the *opposite*: lumos has **no path to register a
+   mirrored frame** (meridian flip, diagonal optical mirror). Disabling
+   `check_orientation` lets the triangle vote propose mirror correspondences, but the
+   similarity/euclidean model can't fit them (no reflection DOF), so the fit fails the
+   RMS gate. Supporting mirrors cleanly would mean detecting the orientation sign from
+   the vote and either pre-flipping the image or fitting an affine/homography (whose
+   linear part can carry the `det<0`).
 6. **Match recovery uses a fixed `3.03·σ` gate**, not the smooth MAGSAC++ loss. This
    is fine post-convergence but a narrowing-threshold recovery (à la "Fixing
    LO-RANSAC") could squeeze out a few more correct matches at the faint end.
@@ -797,12 +996,71 @@ well-grounded against astroalign, MAGSAC, astrometry.net, and SCAMP.
    bilinear and a const-generic Lanczos path; bicubic/Lanczos2/4 are scalar). Not a
    correctness gap, but Lanczos2/4 and bicubic could be vectorized if they become
    hot.
+8. **MAGSAC++ loss is a heuristic, not the paper's ρ** (§3.5 Correction). lumos's
+   `MagsacScorer::loss` uses `(σ²/2)(1−e^{−x}) + (r²/4)e^{−x}`, which is monotone and
+   bounded but does not equal the σ-marginalized χ-density loss for `n=2` or `n=4`. If
+   exact MAGSAC++ behavior is wanted, implement the real ρ via a small incomplete-gamma
+   LUT (`n=2`: `γ(3/2,·)`, `Γ(1/2,·)`; `n=4`: `γ(5/2,·)`, `Γ(3/2,·)`). In practice the
+   current loss works because the triangle vote + LO-RANSAC + match-recovery do most of
+   the heavy lifting; the divergence mainly affects borderline down-weighting at the
+   `~2–3σ` fringe, not gross inlier/outlier separation.
 
 ---
+
+## Primary sources parsed (pass 2)
+
+PDFs fetched and `pdftotext`-extracted to `.tmp/papers/` (relative to the lumos crate
+root). Each line: source → load-bearing takeaway → local `.txt`.
+
+- **Beroiz, Cabral & Sanchez 2020, *Astroalign*** (arXiv 1909.02946) → confirmed the
+  invariant tuple `M({Lᵢ}) = (L₂/L₁, L₁/L₀)` with `L₂≥L₁≥L₀` (their Eq. 3–4), the
+  brightest-50 cap, the `C(5,3)=10`-triangles-per-star kNN construction, and the
+  invariant-space geometry (equilateral→(1,1), collinear curve `y=(x−1)⁻¹`). →
+  `.tmp/papers/astroalign_beroiz2020.txt`.
+- **Lang et al. 2010, astrometry.net** (arXiv 0910.2233) → quad code construction
+  (A,B widest pair → origin/(1,1); code `(xC,yC,xD,yD)`), symmetry-breaking `xC≤xD ∧
+  xC+xD≤1`, C/D-in-circle constraint, "quad ≈ two triangles sharing an edge" rationale,
+  and the **quantified Bayesian verifier** (Bayes factor `K=p(D|F)/p(D|B)`, prior
+  `10⁻⁶`, utility `u(FP)=−1999`). → `.tmp/papers/astrometry_lang2010.txt`.
+- **Barath et al. 2018, MAGSAC** (arXiv 1803.07469) → the original partition-based
+  σ-consensus weighting (`d` bins, LS fit per bin) that MAGSAC++ supersedes. →
+  `.tmp/papers/magsac_barath2018.txt`.
+- **Barath et al. 2019/20, MAGSAC++** (arXiv 1912.05909) → the **exact closed-form ρ**
+  (quoted in §3.5), `n=4` for point correspondences, `k=3.64` (0.99 χ-quantile),
+  IRLS/σ-consensus++ reformulation, gamma-LUT. **This is what exposed the lumos
+  loss-formula correction.** → `.tmp/papers/magsacpp_barath2019.txt`.
+- **Groth 1986, AJ 91 1244** → the *actual* invariants `(R=longest/shortest, C=cosine
+  at vertex 1)` with propagated tolerances, the `R≤10` cut ("triangle count drops a few
+  %, search time halves"), the false-match count `≈48 n_t² ε²` ⇒ `ε ∝ n^{−3/2}`, the
+  log-perimeter pruning, and the vote-drops-by-2 termination. →
+  `.tmp/papers/groth1986.txt`.
+- **Shupe et al. 2005, SIP convention** (Spitzer ADASS PDF) → confirmed `[x;y] =
+  CD·[u+f(u,v); v+g(u,v)]`, `f=ΣA_pq uᵖvᵍ`, `g=ΣB_pq uᵖvᵍ` with `p+q≤ORDER`, and the
+  inverse AP/BP polynomials (their Eqs. 1–6). → `.tmp/papers/sip_shupe2005.txt`.
+- **Hartley 1997, "In defence of the 8-point algorithm"** → confirmed the isotropic
+  normalization (centroid→origin, average distance→√2) and the condition-number
+  argument (`κ` of `A` vs `κ²` when forming `AᵀA`). → `.tmp/papers/hartley1997.txt`.
+- **Chum, Matas & Kittler 2003, LO-RANSAC** → confirmed "LO only on new maxima" and the
+  four inner-method taxonomy (Standard/Simple/Iterative/Inner-RANSAC). →
+  `.tmp/papers/loransac_chum2003.txt`.
+- **Calabretta & Greisen 2002, WCS Paper II** (arXiv astro-ph/0207413) → TAN/gnomonic
+  projection + CD-matrix → intermediate-world-coordinate chain (context for why a wide
+  field needs projective/distortion terms). → `.tmp/papers/wcs2_greisen2002.txt`.
+- **Fischler & Bolles 1981, RANSAC** → original consensus-set formulation (background
+  for §3.1). → `.tmp/papers/fischler_bolles1981.txt`.
+- **Failed to parse:** Umeyama 1991 (TPAMI 13:376) — every mirror found is a *scanned
+  image* PDF with no text layer (`pdftotext` yields 0 bytes); the 2-D analytic formulas
+  and the general `det`-correction are cross-checked against the lumos code and the
+  standard statement instead. The IRSA SIP mirror and one Spitzer copy were the only
+  working SIP PDFs.
 
 ## 10. References
 
 ### Source paths (cloned upstream, read for this document)
+
+> Note: clone paths are under the lumos crate's `.tmp/refs/` (i.e.
+> `lumos/.tmp/refs/...`), not a filesystem-root `/.tmp/`. Line numbers below were
+> re-verified in pass 2 where cited.
 
 - **astroalign** — invariant-triangle asterism matching, `_invariantfeatures`,
   `_generate_invariants`, `_ransac`, `apply_transform`:

@@ -70,13 +70,35 @@ values**. The procedure (verified in SEP `background.c`):
    ```
 
 The `2.5·median − 1.5·mean` form is **Pearson's empirical mode estimator** for a
-mildly skewed unimodal distribution; the coefficients come from SExtractor's
-`BACK_PEARSON`=2.5 preference (medfac=2.5, meafac=BACK_PEARSON−1=1.5;
-SExtractor `back.c:698-699`). Photutils exposes this exactly as
+mildly skewed unimodal distribution. **Verified verbatim (pass 2)** in both primary
+sources:
+
+- SExtractor `back.c:698-699,735-737`: `medfac = prefs.back_pearson` (=2.5),
+  `meafac = prefs.back_pearson − 1.0` (=1.5), and the sky is
+  `qzero + (medfac·med − meafac·mea)·qscale` when `fabs((mea−med)/sig) < 0.3`,
+  else `qzero + med·qscale`. **`BACK_PEARSON` is a configurable parameter**
+  (`preflist.h:264`, default 2.5), so SExtractor's mode is the *family*
+  `α·med − (α−1)·mea`; 2.5/1.5 is just the default α.
+- SEP `background.c:528-530` is byte-identical:
+  `fabs((mea − med)/sig) < 0.3 ? qzero + (2.5·med − 1.5·mea)·qscale
+  : qzero + med·qscale`.
+
+**Nuance the prior pass missed: `med` and `mea` are *histogram-domain* quantities.**
+Both implementations work on the per-tile histogram (bins of width `qscale` spanning
+±5σ from `qzero`), iteratively clipping at `med ± 3σ`. `mea` is the histogram's
+intensity-weighted mean *in bin units*; `med` is **not** a sorted median but a
+**histogram-interpolated median** found by walking two pointers inward from the
+clipped ends until the cumulative counts balance, then linearly interpolating within
+the crossover bin (`background.c:508-511`). The final sky is `qzero + (…)·qscale` —
+i.e. the bin-unit estimate scaled back to ADU. This is why a naive "sorted-median +
+sample-mean" reimplementation will not bit-match SExtractor even with the right
+coefficients.
+
+Photutils exposes the formula (but on raw pixel arrays, not a histogram) as
 `SExtractorBackground`: *"(2.5 · median) − (1.5 · mean). If (mean − median)/std >
 0.3 then the median is used instead"* (photutils `background/core.py:430-478`).
 The closely related **MMM** estimator (DAOPHOT) uses `3·median − 2·mean`
-(photutils `MMMBackground`, `core.py:388-425`).
+(photutils `MMMBackground`, `core.py:388-425`) — i.e. the same family with α=3.
 
 **Why mode, not mean or median?** In an *uncrowded* tile the sky histogram is a
 near-Gaussian with a faint positive tail from undetected sources. The mean is
@@ -178,9 +200,32 @@ normalization `sqrt(Σ K²)` is essential**: it makes the filtered image's noise
 equal the per-pixel σ again, so a fixed `n·σ` threshold has the same
 false-alarm rate before and after filtering. lumos gets this right — `matched_filter`
 divides by `noise_norm = sqrt(Σ K²)` so that `filtered > sigma·noise` is a valid
-SNR cut (`convolution/mod.rs:46-117`). SEP goes further than SExtractor:
-with a per-pixel variance map it does a *full* matched filter (deweighting noisy
-pixels), where plain `conv` would fail (SEP filter docs).
+SNR cut (`convolution/mod.rs:99-117`; separable path computes
+`(Σk₁²)·(Σk₁²)` then sqrt).
+
+> **What SExtractor actually does with the kernel (pass 2, primary source).**
+> SExtractor's `getconv` (`filter.c:177-195`) computes **two** norms: `sum = Σ|K|`
+> and `varnorm = sqrt(ΣK²)`. It divides the convolution mask by **`Σ|K|`** (so the
+> *convolved sky stays unbiased* — a flat field convolves to itself), and keeps
+> `varnorm = sqrt(ΣK²)` separately for the *significance* test. The two
+> formulations — "normalize kernel by `Σ|K|`, then threshold the convolved value
+> against `(varnorm/Σ|K|)·σ`" vs. lumos's "normalize the *output noise* by
+> `sqrt(ΣK²)`, then threshold against `1·σ`" — are the **same n·σ cut up to a
+> constant**. lumos's is the cleaner SNR-image form (it makes `filtered/σ` directly
+> the per-pixel SNR). Note lumos does **not** zero-mean the kernel the way DAOFIND
+> does (the "lowered Gaussian", §5.4), so lumos's convolution does not get DAOFIND's
+> automatic sky-slope cancellation — it relies on prior background subtraction.
+
+SEP goes further than SExtractor: with a per-pixel variance map it does a *full*
+matched filter (deweighting noisy pixels), where plain `conv` would fail. The SEP
+JOSS paper (Barbary 2016, `.tmp/papers/sep_barbary2016.txt`) lists *"Optimized
+matched filter for variable noise in source extraction"* as one of the features
+**added beyond** the original SExtractor — confirming this is a SEP extension, not a
+SExtractor feature. Makovoz & Marleau 2005 (MOPEX, `.tmp/papers/makovoz2005.txt`)
+note that when many sources are present the pixel distribution is *"highly
+non-Gaussian … the linear filter becomes sub-optimal and the optimal filter is
+non-linear"*, and that *"the filtered images are used for detection only"* — the
+same convolve-to-detect / measure-on-the-raw-image discipline (§2.1 pitfall).
 
 **Kernel choice.** SExtractor ships Gaussian masks for FWHM 1.5–5 px; the
 default `default.conv` is a 3×3 Gaussian (FWHM≈2 px). Matching the kernel to the
@@ -188,13 +233,14 @@ actual FWHM maximizes faint-source SNR; over-smoothing merges close pairs and
 hurts deblending. lumos auto-estimates FWHM first (§5) then builds a
 (possibly elliptical) Gaussian kernel (`config.psf_axis_ratio`, `psf_angle`).
 
-> **Pitfall — convolution and centroids.** SExtractor and DAOFIND detect *and*
-> compute roundness/sharpness on the *convolved* image, but measure flux and
-> position on the *unconvolved* image (convolution shifts/biases moments and
-> destroys flux linearity). lumos correctly thresholds on the filtered plane but
-> measures flux/FWHM/centroid on the original plane (`detect.rs:98-110` vs
-> `measure.rs`). It does, however, compute roundness/sharpness on the *unconvolved*
-> stamp — DAOFIND uses the convolved stamp (§5.4, §8 gap).
+> **Pitfall — convolution and centroids.** SExtractor and DAOFIND detect on the
+> *convolved* image and compute the **sharpness denominator and SROUND** there, but
+> measure flux, position, and the GROUND marginals on the *unconvolved* image
+> (convolution shifts/biases moments and destroys flux linearity). lumos correctly
+> thresholds on the filtered plane but measures flux/FWHM/centroid on the original
+> plane (`detect.rs:98-110` vs `measure.rs`). It computes **both** roundness indices
+> and sharpness on the *unconvolved* stamp — diverging from DAOFIND/photutils for
+> sharpness's `H` denominator and for SROUND (§5.4, §8 gap).
 
 ### 2.2 Thresholding
 
@@ -252,20 +298,35 @@ This is the algorithm to implement. From SEP `deblend.c` and Bertin & Arnouts
 
 1. For each detected object, re-threshold its pixels at **`DEBLEND_NTHRESH`
    levels** (default **32**) spaced **exponentially** (geometrically) between the
-   detection threshold `t₀` and the object's peak. SEP:
-   `thresh = t₀ · (peak/t₀)^(k/N)` (`deblend.c:121-122`). Exponential spacing
-   puts more levels near the bright core where blends separate.
+   detection threshold `t₀` and the object's peak. SEP verbatim (`deblend.c:120-122`):
+   `thresh = thresh0 · pow(peak/thresh0, k/N)` where `peak = obj.fdpeak`,
+   `thresh0 = obj.thresh`. Exponential spacing puts more levels near the bright
+   core where blends separate.
 2. **Build a tree bottom-up.** At each rising level, re-run Lutz CCL
    (`deblend.c:130-141`) on the pixels above that level. A component that splits
    into two children at a higher threshold becomes a branch point. Each node
    records its integrated flux above its own threshold.
 3. **Prune top-down with the contrast criterion.** A branch is accepted as a
    separate object only if its integrated flux exceeds **`DEBLEND_MINCONT`**
-   (default **0.005**) **times the *total* flux of the original (root) object**:
-   SEP `value0 = objlist[0].obj[0].fdflux · deblend_mincont` and the test
-   `obj[j].fdflux − obj[j].thresh·obj[j].fdnpix > value0` (`deblend.c:116,179`).
+   (default **0.005**) **times the detection-isophotal flux of the original (root)
+   object** (`fdflux`): SEP `value0 = objlist[0].obj[0].fdflux · deblend_mincont`
+   (`deblend.c:116`) and the test
+   `obj[j].fdflux − obj[j].thresh·obj[j].fdnpix > value0` (`deblend.c:179`).
    Only when **two or more** children clear this bar is the parent actually split
    (`if (m > 1)`, `deblend.c:184`); otherwise it stays a single object.
+
+   > **Correction (pass 2): "total flux" → root *detection-isophotal* flux.** The
+   > prior pass said the bar is `MINCONT × the *total* flux of the root object`.
+   > Primary-source `fdflux` is the flux summed **above the detection threshold
+   > isophote** at deblend time (not an aperture or total/Kron flux), and the
+   > per-branch quantity tested is `fdflux − thresh·fdnpix` (flux *above that
+   > branch's own level*). Holwerda's *SExtractor for Dummies*
+   > (`.tmp/papers/holwerda_dummies.txt:1182-1186`) states the criterion in words:
+   > a branch is a separate object iff *"(1) the number of counts in the branch is
+   > above a certain fraction of the total count in the entire 'island'"* and
+   > *"(2) there is at least one other branch above the same level that is also
+   > above this fraction"* — confirming both the **root/island-relative** bar and
+   > the **≥2-children** rule.
 4. **Reassign leftover faint pixels.** Pixels below the split level are assigned
    to the most probable progenitor by a bivariate-Gaussian profile likelihood
    (`gatherup`, `analyse.c`/`deblend.c:274-391`), with a stochastic
@@ -354,13 +415,23 @@ w_i = exp(−r_i² / (2 s²)),   s = d₅₀ / sqrt(8 ln 2)   (d₅₀ = half-fl
 x^(t+1) = x^(t) + 2 · [Σ w_i I_i (x_i − x^(t))] / [Σ w_i I_i]      (likewise y)
 ```
 
-iterated until the shift < 2×10⁻⁴ px (typically 3–5 iterations). The **factor of
-2** is a convergence accelerator derived from the Gaussian-window fixed-point
-analysis. SExtractor states XWIN/YWIN accuracy is *"very close to that of
-PSF-fitting on focused and properly sampled star images"* and *"close to the
-theoretical limit set by image noise"* for isolated Gaussian-like sources. The
-Gaussian window suppresses the contribution of distant/contaminating pixels and
-removes the isophotal-threshold bias.
+iterated until the shift < 2×10⁻⁴ px. **Verified verbatim (pass 2)** from the
+SExtractor manual `PositionWin.html`: the iteration *"is initialized"* with the
+isophotal `x̄`,`ȳ`; the Gaussian window FWHM *"is the diameter of the disk that
+contains half of the object flux (d₅₀)"* (so `s = d₅₀/√(8 ln 2)`); the update
+carries the explicit **`+2·…`** prefactor; and *"the process stops when the change
+in position between two iterations is less than 2×10⁻⁴ pixel, a condition which is
+achieved in about 3 to 5 iterations in practice."* The **factor of 2** is a
+fixed-point accelerator: for a Gaussian source under a matched Gaussian window the
+naive weighted-mean update moves only ~half the way to the true centroid each step
+(the window itself pulls the estimate back), so doubling the step makes the
+iteration a near-Newton fixed point — which is why XWIN converges in 3-5 steps
+where the un-accelerated form (lumos) needs more. SExtractor states XWIN/YWIN
+accuracy is *"actually very close to that of PSF-fitting on focused and properly
+sampled star images"* and, for *"isolated objects with Gaussian-like profiles … is
+close to the theoretical limit set by image noise."* The Gaussian window suppresses
+the contribution of distant/contaminating pixels and removes the isophotal-threshold
+bias.
 
 lumos's `WeightedMoments` is this iterative Gaussian-weighted centroid
 (`centroid/mod.rs:437-503`, `refine_centroid`): weight
@@ -381,24 +452,43 @@ squares:
   wings of atmospheric seeing PSFs.
 - **2D Moffat** `I(r) = I₀ · [1 + (r/α)²]^(−β)` (Moffat 1969). The β parameter
   controls the wing heaviness; β≈2.5–4.8 fits atmospheric seeing far better than
-  a Gaussian, which is the β→∞ limit. FWHM = 2α·sqrt(2^(1/β) − 1). PSFEx
-  (`psfex/src/`) models PSFs with Moffat/Gaussian basis and tracks variation
-  across the field.
+  a Gaussian, which is the β→∞ limit. FWHM = 2α·sqrt(2^(1/β) − 1).
 
-lumos implements both via a shared Levenberg–Marquardt optimizer:
-`CentroidMethod::{WeightedMoments, GaussianFit, MoffatFit{beta}}`
-(`config.rs:44`), `centroid/gaussian_fit/` (6-param, SIMD), `centroid/moffat_fit/`
-(5–6 param, fixed or fit β), `lm_optimizer.rs` + `linear_solver.rs`. It seeds the
-fit with 2 moment iterations then lets LM refine independently
-(`measure.rs`/`centroid/mod.rs:304-401`). Documented accuracy: ~0.05 px (moments)
-vs ~0.01 px (fit).
+**PSFEx and field-varying PSFs (clarified, pass 2).** For wide fields the PSF is
+*not* constant — it broadens and elongates toward the corners (off-axis
+aberrations, defocus, tracking). **PSFEx** models this: it samples bright,
+unsaturated, isolated stars across the frame and fits a **pixel-basis** (or
+Gauss-Laguerre "polar shapelet") PSF model whose coefficients **vary polynomially
+with field position** (and optionally other "context" parameters). Reading the
+PSFEx source (`.tmp/refs/psfex/src/diagnostic.c:184-225`), the **Moffat fit is a
+*diagnostic*** — PSFEx fits a Moffat (and a "pixel-free" Moffat) to the
+*reconstructed* PSF at a grid of field positions purely to *report* FWHM /
+elongation / asymmetry (`moffat_fwhm_min/max` over the snapshot grid); it is **not**
+the underlying PSF model. The takeaway for measurement: (1) a single global Gaussian
+or Moffat is wrong across a wide field — interpolate the PSF, or at least fit each
+star's own shape; (2) **aperture flux** (sum within a fixed radius) is model-free
+but throws away SNR and needs an aperture correction, while **PSF flux** (amplitude
+× model integral) is optimal but only as good as the PSF model — the right choice
+depends on whether you trust your PSF more than your aperture-correction curve.
+
+lumos implements per-star fits (not field-varying models) via a shared
+Levenberg–Marquardt optimizer: `CentroidMethod::{WeightedMoments, GaussianFit,
+MoffatFit{beta}}` (`config.rs:44`), `centroid/gaussian_fit/` (6-param, SIMD),
+`centroid/moffat_fit/` (5–6 param, fixed or fit β), `lm_optimizer.rs` +
+`linear_solver.rs`. It seeds the fit with 2 moment iterations then lets LM refine
+independently (`measure.rs`/`centroid/mod.rs:304-401`). Documented accuracy:
+~0.05 px (moments) vs ~0.01 px (fit). Because each star is fit independently, lumos
+naturally accommodates a slowly field-varying PSF without an explicit interpolation
+model — at the cost of more parameters per source and no shared regularization.
 
 ### 4.4 Marginal 1D Gaussian (DAOFIND's centroid)
 
 DAOFIND fits separate 1D Gaussians to the **marginal** (row-summed and
-column-summed) distributions of the convolved stamp — cheaper than a full 2D fit
-and the basis of DAOFIND's GROUND roundness (§5.4). photutils
-`daofinder.py:_marginal_*` (`daofinder.py:596-709`).
+column-summed) distributions of the **unconvolved** stamp (the marginal *shape* is
+taken from the kernel; the data summed is the original image — see §5.4 correction)
+— cheaper than a full 2D fit, and the basis of both the DAOFIND sub-pixel shift
+(`x_centroid = x_max + dx`) and GROUND roundness (§5.4). photutils
+`daofind_marginal_fit` / `_marginal_*` (`daofinder.py:596-709,862-896`).
 
 ### 4.5 Accuracy limits and LM pitfalls
 
@@ -460,11 +550,23 @@ SNR = N* / sqrt( N* + npix·( N_sky + N_dark + R² ) )
 
 where `N*` = source electrons (its own **shot noise** = sqrt(N\*)), `N_sky` = sky
 e⁻ per pixel, `N_dark` = dark e⁻ per pixel, `R` = read noise e⁻/pixel, `npix` =
-pixels in the aperture. **Two regimes:**
+pixels in the aperture. Each noise term enters as a **variance** (they add in
+quadrature because the underlying processes are independent): source shot noise
+`N*`, sky shot noise `npix·N_sky`, dark shot noise `npix·N_dark`, read noise
+`npix·R²`. A fifth term, **digitization/quantization noise** `npix·(g²/12)` (the
+±½-ADU rounding of the ADC, gain `g` in e⁻/ADU), is usually folded into the
+effective read noise and omitted; it matters only at very low read noise. **Two
+regimes:**
 
 - **Shot/sky-limited** (bright source or bright sky): SNR ∝ sqrt(N\*) ∝ sqrt(t).
 - **Read-noise-limited** (faint source, short exposure): denominator ≈
   sqrt(npix)·R, so SNR ∝ N\* ∝ t (linear in exposure).
+
+A subtle bias the CCD equation hides: `npix` is the *aperture* pixel count, treated
+as exact, but the sky level subtracted under the source is itself estimated and
+carries error `npix²·σ_sky²/n_sky` (n_sky = sky-annulus pixel count). Photometry
+codes that use a small sky annulus add this term; lumos's global-mesh σ makes it
+negligible. The equation also assumes Poisson ≈ Gaussian, valid for `N ≳ 10` e⁻.
 
 lumos implements exactly this (`compute_snr`, `centroid/mod.rs:721-750`):
 with a `NoiseModel{gain, read_noise}` it uses
@@ -500,44 +602,120 @@ trailed stars have high e; round PSFs have e≈0.
 
 ### 5.4 DAOFIND sharpness & roundness (Stetson 1987)
 
-DAOFIND's three shape statistics, computed on the **convolved** image (photutils
-`daofinder.py`, verified against docs):
+**What Stetson 1987 actually defines** (parsed from the original PASP paper, §II.A,
+`.tmp/papers/stetson1987.txt`). DAOFIND first builds `H`, the array of best-fit
+Gaussian *central heights* — equivalent to convolving the data `D` with a
+**"lowered" (zero-integral) truncated Gaussian** `G' = G − ⟨G⟩` so that
+`Σ H = 0` (the constant + sloping sky cancels): `H = Σ(GD)−(ΣG)(ΣD)/n) /
+(Σ(G²)−(ΣG)²/n)` with `σ = FWHM/2.355`. Detections are local maxima of `H` above
+`Hmin` (the n·σ threshold). Stetson then gives **two** secondary indices:
 
-- **Sharpness** = (height of central pixel in *unconvolved* data − mean of the
-  surrounding pixels) / (height of the best-fit Gaussian at that point)
-  (`daofinder.py:580-594`). A point source ≈ the kernel → sharpness ≈
-  intermediate; a single hot pixel/cosmic ray is far sharper than the kernel →
-  sharpness near 1; a broad galaxy → low sharpness. Default accept range
+- **sharp** = `D_central / ⟨D_neighbors⟩`-style ratio. Verbatim:
+  `d_{i0j0} = D_{i0j0} − ⟨D⟩` (observed difference between the central pixel and
+  the *mean of the remaining pixels used in the fit*), and
+  **`sharp = d / H`** — the central intensity excess divided by the best-fit
+  Gaussian height. *"For a very narrow profile, such as that caused by a cosmic-ray
+  event, all of the intensity will be contained in the central pixel … hence sharp >
+  1. … moderately-peaked objects, such as star images … should scatter about a value
+  significantly less than unity and greater than zero."* Accept `0.2 < sharp < 1.0`.
+- **round** (Stetson defines only ONE): *"compares the peakedness of the enhancement
+  in the x-direction with that in the y-direction: the height of the best-fitting
+  one-dimensional Gaussian function of x, hx, is compared to the height … of y, hy."*
+  Charge-overflow columns give `hx ≫ 0, hy ≈ 0`; *"a roundness criterion readily
+  distinguishes stars (round ≈ 0) from bad rows and columns (round ≈ ±2)."* The
+  ±2 range fixes the normalization as **`round = 2·(hx − hy)/(hx + hy)`**. Accept
+  `−1.0 < round < 1.0`. **This is what photutils later named GROUND.** Stetson's
+  "round" has **no** symmetry/quadrant variant — the SROUND statistic was added by
+  the IRAF DAOFIND reimplementation and inherited by photutils.
+
+**What photutils computes** (verified line-by-line in `daofinder.py`):
+
+- **sharpness** (`daofinder.py:580-594`) = `(peak − data_mean) / convdata_peak`,
+  where `peak` and `data_mean` (mean over the kernel-masked footprint excluding the
+  peak) come from the **unconvolved** cutout and `convdata_peak` is the peak of the
+  **convolved** cutout = Stetson's `H`. So sharpness ≈ Stetson's `d/H`. Accept
   `(0.2, 1.0)`.
-- **roundness1 = SROUND** — *symmetry* based: ratio of the object's 2-fold to
-  4-fold symmetry computed from four quadrant sums of the **convolved** stamp
-  (peak pixel zeroed), `2·sum2/sum4` (`daofinder.py:534-577`). Circular → 0.
-- **roundness2 = GROUND** — *marginal-Gaussian* based: fit 1D Gaussians to the x
-  and y marginals; `GROUND = 2·(hx − hy)/(hx + hy)` where hx,hy are the fit
-  *heights* (`daofinder.py:964-976`). x-extended → negative, y-extended →
-  positive. Default accept range `(−1.0, 1.0)`; kernel `sigma_radius=1.5`.
+- **roundness1 = SROUND** (`daofinder.py:534-577`) — *symmetry* index. Zero the
+  central pixel of the **convolved** cutout, split into four quadrants, and compute
+  `sum2 = −q1 + q2 − q3 + q4`, `sum4 = Σ|cutout_conv|`, then
+  **`roundness1 = 2·sum2/sum4`**. Circular → 0.
+- **roundness2 = GROUND** (`daofinder.py:964-976`) — *marginal-Gaussian* index,
+  **`roundness2 = 2·(hx − hy)/(hx + hy)`**, where hx,hy are least-squares
+  amplitudes of 1D Gaussians (shaped from the *kernel's* marginal) fit to the
+  marginal x/y distributions of the **unconvolved** image (docstring of
+  `daofind_marginal_fit`: *"to the marginal x/y distributions of the original
+  (unconvolved) image"*). x-extended → negative, y-extended → positive. Accept
+  `(−1.0, 1.0)`; kernel `sigma_radius=1.5`. **This is Stetson's original `round`.**
 
-> **NAMING BUG / gap in lumos.** photutils (and DAOFIND) define **roundness1 =
-> SROUND (symmetry)** and **roundness2 = GROUND (marginal Gaussian heights)**.
-> lumos has them **swapped**: its `Star.roundness1` is documented and computed as
-> GROUND `(hx−hy)/(hx+hy)` and `Star.roundness2` as a symmetry/asymmetry RMS
-> (`star.rs:24-30`, `compute_roundness`, `centroid/mod.rs:666-694`). Functionally
-> both are still computed and both are gated by `is_round`, so detection still
-> works — but the field names are the reverse of the published convention, which
-> will mislead anyone cross-checking against photutils/DAOFIND. Additionally,
-> lumos computes them on the **unconvolved** stamp and its SROUND is an
-> ad-hoc left/right + top/bottom asymmetry RMS, not Stetson's quadrant 2-fold/
-> 4-fold ratio. These are approximations, not the canonical definitions.
+> **FINAL VERDICT (pass 2): the "swapped" claim is CONFIRMED, with two extra
+> caveats.** photutils + IRAF DAOFIND fix the convention as **roundness1 = SROUND
+> (quadrant 2-fold/4-fold symmetry, on the convolved stamp)** and **roundness2 =
+> GROUND (marginal-Gaussian height ratio, on the unconvolved stamp)** — and
+> Stetson's *single* original `round` is exactly GROUND. lumos reverses both names
+> (`star.rs:24-30`, `centroid/mod.rs:671-694`):
+>
+> - lumos `roundness1` is documented and computed as **GROUND-like**:
+>   `safe_ratio(hx − hy, hx + hy)` (`centroid/mod.rs:673-675`) → matches photutils
+>   **`roundness2`**, the *reverse* name. Two further deviations: lumos **drops the
+>   factor of 2** photutils carries, and lumos takes `hx`/`hy` as the **max of the
+>   raw marginal-sum profile** (`marginal_x.iter().fold(0, f64::max)`), *not* a
+>   least-squares 1D-Gaussian amplitude — so it is a marginal-peak ratio, not a
+>   marginal-Gaussian-fit ratio.
+> - lumos `roundness2` is computed as **SROUND-like**: `hypot(asym_x, asym_y)` of
+>   the left/right and top/bottom marginal asymmetries (`centroid/mod.rs:681-688`)
+>   → fills the role of photutils **`roundness1`**, the *reverse* name. But it is an
+>   *ad-hoc 1D-marginal asymmetry RMS*, not Stetson/IRAF's quadrant `2·sum2/sum4`
+>   ratio. It is clamped to `[0, 1]`, so it can never go negative and cannot encode
+>   the directional sign that SROUND carries.
+> - **Both are computed on the *unconvolved* stamp** — `compute_metrics` is handed
+>   the raw `pixels` plane (`centroid/mod.rs:528-535`, called from `measure.rs`),
+>   never the matched-filter output. photutils computes sharpness and SROUND on the
+>   **convolved** cutout (only GROUND uses the unconvolved image), so lumos diverges
+>   on the image *and* the formula for its SROUND analogue.
+>
+> Net effect: both indices are still computed and both are gated by `is_round`
+> (`star.rs:52-54`), so circular vs. elongated discrimination still works; but the
+> field names are the inverse of every published reference, the directional sign of
+> SROUND is lost, and neither index is bit-comparable to photutils/DAOFIND. The fix
+> is purely cosmetic for detection but important for anyone cross-checking: swap the
+> names, restore the factor of 2 on GROUND, fit (not max) the marginal Gaussians,
+> compute the symmetry index as `2·sum2/sum4` over convolved quadrants, and feed the
+> convolved stamp.
 
-### 5.5 Saturation & cosmic-ray flagging
+**Correction (pass 2) — GROUND is on the *unconvolved* image, not convolved.** The
+prior pass said all three DAOFIND stats are "computed on the convolved image." That
+is right for sharpness's denominator and for SROUND, but photutils explicitly fits
+the GROUND marginals to the **original (unconvolved)** data (`daofind_marginal_fit`
+docstring). Stetson's text agrees: `round` compares 1D-Gaussian heights `hx`,`hy`
+fit "by a formula involving sums of the image-brightness values identical in form to
+equation (1)" — i.e. of the *image* `D`, not of `H`.
+
+### 5.5 Saturation, bleed, spikes & cosmic-ray flagging
 
 - **Saturation:** flag stars whose peak exceeds a fraction of the ADC/well limit
   (SExtractor `SATUR_LEVEL` → `FLAGS` bit 2). Saturated cores have flat tops →
   biased centroids and meaningless flux. lumos: `Star::is_saturated(threshold)`,
   default 0.95 of normalized max (`star.rs:38`, applied in `filter.rs:46`).
+- **Bleed columns / charge overflow:** a grossly overexposed star spills charge
+  along the readout column (vertical bleed) or row, producing a long thin
+  detection. This is exactly the case Stetson's `round` was *designed* to catch:
+  *"false detections arise in the charge overflow columns and rows from grossly
+  overexposed objects … much more elongated in x or y than star images … hx ≫ 0
+  and hy ≈ 0 … round ≈ ±2"* (Stetson 1987, `.tmp/papers/stetson1987.txt:662-783`).
+  So a hard eccentricity cut *plus* an axis-aligned roundness (GROUND) cut rejects
+  bleed. SExtractor flags the saturated parent (`FLAGS` bit 2) and the deblend can
+  shatter a bleed trail into fake companions — see §3.3.
+- **Diffraction spikes:** four (or six) symmetric rays from a bright star
+  (secondary-mirror spider or aperture edges). They are highly elongated but
+  **inclined** to the axes, so an axis-aligned roundness misses them (Stetson notes
+  `round` *"does not select against objects which are elongated in a direction
+  inclined to the rows and columns"*); the eccentricity-from-eigenvalues cut (§5.3)
+  is the rotation-invariant discriminator that does. lumos has no dedicated
+  spike model; it relies on the eccentricity gate.
 - **Cosmic rays:** sharp, often single-/few-pixel spikes far narrower than the
   PSF. Two discriminators: (a) **sharpness** — CRs have sharpness ≫ a real star
-  (lumos `is_cosmic_ray(max_sharpness)`, default 0.7, `star.rs:45`,
+  (Stetson: a CR concentrates *"all of the intensity … in the central pixel … hence
+  sharp > 1"*; lumos `is_cosmic_ray(max_sharpness)`, default 0.7, `star.rs:45`,
   `filter.rs:55`); (b) **Laplacian edge detection** (van Dokkum 2001,
   L.A.Cosmic): a CR's edges are sharper than any PSF-convolved source, so a
   Laplacian-filtered/SNR image flags CRs while *"reliably discriminating between
@@ -546,6 +724,27 @@ DAOFIND's three shape statistics, computed on the **convolved** image (photutils
   robust CR rejection, though, is **multi-frame**: a CR appears in one sub only,
   so sigma-clipped stacking (Stage 5) removes it. For single-frame detection,
   sharpness is a cheap first pass; Laplacian is the rigorous upgrade.
+
+### 5.6 Star–galaxy separation (CLASS_STAR / neural net)
+
+For science catalogs SExtractor adds a dedicated **stellarity** index
+`CLASS_STAR ∈ [0, 1]` (0 = galaxy/non-star, 1 = star), output of a small
+pre-trained **neural network** (`default.nnw`). Per Holwerda's tutorial
+(`.tmp/papers/holwerda_dummies.txt:2674-2979`), the net is fed the object's **7
+isophotal areas** (`ISO0..ISO7`, areas above evenly-spaced levels), the **peak
+intensity**, and the **`SEEING_FWHM`** — the seeing scale is essential because
+"compact" is defined relative to the PSF. The output separates point sources
+(stars: their isophotal areas shrink fast with level, like the PSF) from extended
+sources (galaxies: shallow area-vs-level profile). CLASS_STAR degrades at faint
+magnitudes and in crowding; modern pipelines replace it with `SPREAD_MODEL` (a
+linear discriminant between the local PSF and a slightly broadened PSF) or a CNN.
+
+For lumos, whose targets are stars and whose downstream consumer is *registration*
+(which wants clean point sources), full star–galaxy classification is overkill: the
+eccentricity + FWHM-outlier + sharpness gates already reject the obvious extended /
+elongated objects. The seeing-relative idea is the transferable lesson — lumos's
+auto-FWHM (§3 fwhm stage) plays the role of `SEEING_FWHM`, and a future
+"compactness vs. measured FWHM" cut would be the cheap analogue of `SPREAD_MODEL`.
 
 ---
 
@@ -575,8 +774,9 @@ A reference pipeline, in order:
    moments (XWIN-style, with the factor-of-2 acceleration) for speed, or 2D
    Gaussian/Moffat LM fit (seeded from moments, background subtracted, ≥1.5×FWHM
    stamp) for precision. Compute flux, CCD-equation SNR, FWHM and eccentricity
-   from second moments, DAOFIND sharpness + SROUND + GROUND **on the convolved
-   stamp**.
+   from second moments, and DAOFIND shape stats: **sharpness and SROUND on the
+   convolved stamp, GROUND (marginal-Gaussian heights) on the unconvolved stamp**
+   (§5.4).
 7. **Filter:** reject saturated, low-SNR, high-eccentricity, high-sharpness
    (CR), and non-round sources; MAD-clip FWHM outliers; remove duplicates; sort
    by flux.
@@ -653,12 +853,18 @@ canonical six-stage flow and is well-structured.
 
 **Gaps / opportunities (ordered by impact):**
 
-1. **roundness1/roundness2 are swapped vs. the DAOFIND/photutils convention** and
-   computed on the *unconvolved* stamp with an ad-hoc SROUND. lumos roundness1 =
-   GROUND-like `(hx−hy)/(hx+hy)`, roundness2 = an asymmetry-RMS, the reverse of
-   photutils. Rename to match the convention, compute on the convolved stamp, and
-   use Stetson's quadrant 2-fold/4-fold ratio for SROUND
-   (`star.rs:24-30`, `centroid/mod.rs:666-694`).
+1. **roundness1/roundness2 are swapped vs. the DAOFIND/photutils convention**
+   (CONFIRMED pass 2 against Stetson 1987 + photutils source — see §5.4 verdict).
+   lumos `roundness1` = GROUND-like `(hx−hy)/(hx+hy)` (= photutils `roundness2`),
+   lumos `roundness2` = an asymmetry-RMS (≈ photutils `roundness1`), reversed names.
+   Extra deviations: GROUND drops the factor of 2 and uses the marginal-sum *max*
+   rather than a 1D-Gaussian *fit amplitude*; SROUND is a 1D-marginal asymmetry RMS
+   clamped to `[0,1]` (loses the directional sign), not Stetson/IRAF's quadrant
+   `2·sum2/sum4`; both are computed on the *unconvolved* stamp (photutils does
+   sharpness + SROUND on the *convolved* stamp, GROUND on the unconvolved). Fix:
+   swap the names, restore the ×2 on GROUND, least-squares-fit the marginals,
+   compute SROUND as `2·sum2/sum4` over convolved quadrants
+   (`star.rs:24-30`, `centroid/mod.rs:671-694`).
 2. **Background mode estimator is median/MAD only — no `2.5·med−1.5·mean` mode and
    no 0.3 crowding switch.** Adding the Pearson mode (with the median fallback)
    would reduce sky bias in uncrowded tiles, matching SExtractor/SEP exactly.
@@ -685,6 +891,63 @@ canonical six-stage flow and is well-structured.
 
 None of these block correct detection; #1 (naming) and #2/#3 (background fidelity)
 are the highest-value alignments with the reference implementations.
+
+---
+
+## Primary sources parsed (pass 2)
+
+PDF/HTML fetched and read this pass (saved under `.tmp/papers/`, parsed with
+`pdftotext`). Each line: source → takeaway → local file.
+
+- **Stetson 1987, DAOPHOT/FIND, PASP 99 191** (`.tmp/papers/stetson1987.txt`, 32 pp,
+  text layer clean). *The decisive source for the roundness verdict.* Settled:
+  Stetson defines a **single** roundness, `round = 2·(hx−hy)/(hx+hy)` from marginal
+  1D-Gaussian heights (= photutils GROUND, accept `−1<round<1`, bad rows/cols → ±2);
+  `sharp = d/H` = (central pixel − neighbor mean) / best-fit Gaussian height (accept
+  `0.2<sharp<1`); the detection image `H` is the convolution with a **lowered
+  (zero-integral) Gaussian** so sky slope cancels. SROUND is **not** Stetson's — it
+  is a later IRAF/photutils addition.
+- **Bertin & Arnouts 1996, SExtractor, A&AS 117 393** (`.tmp/papers/bertin1996.pdf`,
+  12 pp, downloaded from ADS — **scanned image, no text layer**, `pdftotext` yields
+  only the bibcode). Could not quote directly; substituted the SExtractor C source
+  (`.tmp/refs/sextractor`), the SExtractor readthedocs manual, Holwerda's tutorial,
+  and SEP source — all of which trace to this paper.
+- **Barbary 2016, SEP, JOSS 1(6) 58** (`.tmp/papers/sep_barbary2016.txt`). Confirmed
+  the *"optimized matched filter for variable noise"* is a SEP feature **added beyond**
+  SExtractor; SEP aims for SExtractor-compatible results from in-memory arrays.
+- **Makovoz & Marleau 2005, MOPEX point-source extraction** (`.tmp/papers/makovoz2005.txt`,
+  34 pp). Linear matched filter is optimal only for a single source / Gaussian noise;
+  with many sources the optimal filter is non-linear; *"filtered images are used for
+  detection only"* (corroborates the convolve-to-detect, measure-on-raw discipline);
+  multi-threshold "passive deblending" by progressively raising the segmentation
+  threshold.
+- **Holwerda, *Source Extractor for Dummies*** (`.tmp/papers/holwerda_dummies.txt`,
+  87 pp). Deblend criterion in words: branch counts > fraction (`MINCONT`) of **total
+  island count** AND ≥1 other branch passes — corroborates the root-flux bar and the
+  ≥2-children rule. CLASS_STAR neural net fed by 7 isophotal areas + peak + SEEING_FWHM.
+  *Caveat:* its prose has the mode/median switch **backwards** ("mean in non-crowded,
+  `2.5·med−1.5·mean` in crowded") — the C source is authoritative (mode when *not*
+  crowded). Bicubic-spline background interpolation + `BACK_FILTERSIZE` confirmed.
+- **SExtractor manual, PositionWin** (`.tmp/papers/positionwin.html`). XWIN/YWIN
+  verbatim: window FWHM = `d₅₀`; explicit `+2·…` update; converges in 3-5 iters at
+  `<2×10⁻⁴` px; accuracy *"very close to … PSF-fitting"* and *"close to the
+  theoretical limit set by image noise."*
+
+**Re-read cloned source this pass (cite file:line):** SEP `background.c:478-535`
+(mode + 0.3 switch + histogram-interpolated median), `deblend.c:116,120-122,179,184`
+(root-flux `value0`, exponential `pow(peak/thresh0,k/N)`, split test, ≥2-children);
+SExtractor `back.c:698-699,735-737` + `preflist.h:264` (`BACK_PEARSON`=2.5 →
+medfac/meafac), `filter.c:177-195` (`Σ|K|` normalization + `varnorm=√ΣK²`); photutils
+`daofinder.py:534-577` (SROUND `2·sum2/sum4`), `:580-594` (sharpness), `:862-976`
+(GROUND marginal-Gaussian fit on *unconvolved* image, `2·(hx−hy)/(hx+hy)`); PSFEx
+`diagnostic.c:184-225` (Moffat as a *diagnostic*, not the PSF model); lumos
+`star.rs:24-30`, `centroid/mod.rs:671-694` (roundness), `:55-56` (no XWIN ×2),
+`convolution/mod.rs:99-117` (`√ΣK²`), `multi_threshold/mod.rs` (parent-relative
+contrast), `config.rs:265,272,273,286,287,290` (defaults).
+
+**Still unverifiable / could not parse:** Bertin & Arnouts 1996 itself (scanned
+image — secondary sources cover all cited claims); Zackay & Ofek 2017 and van Dokkum
+2001 not re-fetched this pass (carried from pass 1 with their published claims).
 
 ---
 

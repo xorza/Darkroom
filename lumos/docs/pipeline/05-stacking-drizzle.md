@@ -115,7 +115,18 @@ x̂  =  ────────────────       with   Var(x̂) =
 ```
 
 so `w_i = 1/σ_i²`. This is the *only* weighting that minimizes the variance of the
-combined pixel; equal weighting is optimal only when all `σ_i` are equal.
+combined pixel; equal weighting is optimal only when all `σ_i` are equal. **Proof
+sketch:** for a weighted mean `x̂ = Σw_i x_i / Σw_i`, `Var(x̂) = Σw_i²σ_i² / (Σw_i)²`.
+Minimizing over `{w_i}` by Lagrange (∂/∂w_j = 0) gives `w_j ∝ 1/σ_j²`; substituting back
+collapses the variance to `1/Σ(1/σ_i²)` — the Cramér-Rao bound for `N` Gaussian samples,
+so no unbiased linear combiner can do better. This is the same statement F&H make about
+drizzle's weighting being *"statistically optimum when inverse variance maps are used as
+the input weights"* (§5.3). Note `w_i ∝ SNR_i²` for fixed signal (since `SNR ∝ 1/σ` at
+fixed flux), which is why "SNR² weighting" and "inverse-variance weighting" are the same
+prescription expressed in different units. **Subexposure-weighting corollary:** for
+sky-noise-limited subs of equal length, `σ_i² ∝ sky_i`, so `w_i ∝ 1/sky_i` — the cloudy
+/ light-polluted / high-airmass sub is automatically down-weighted, and a sub twice as
+noisy contributes ¼ the weight, not ½.
 
 Reference implementations expose several practical proxies for `1/σ_i²`:
 
@@ -168,18 +179,25 @@ integration time `t`, SNR ∝ √t). Doubling SNR requires 4× the frames; 10× 
 requires 100×.
 
 The **median** is robust (a single huge outlier cannot move it) but is a *less
-efficient* estimator. For Gaussian data, the standard error of the median is larger
-than that of the mean by a factor of `√(π/2) ≈ 1.2533`. Equivalently the median's
-statistical efficiency is `2/π ≈ 0.637` in *variance*, i.e. `√(2/π) ≈ 0.80` in
+efficient* estimator. **Derivation of the 0.80 factor:** for a sample of `N` draws from
+a distribution with density `f` and standard deviation `σ`, the asymptotic variance of
+the sample median is `1/(4N·f(m)²)` where `m` is the population median. For a Gaussian,
+`f(m) = 1/(σ√(2π))`, so `Var(median) = (σ²·2π)/(4N) = (π/2)·σ²/N`, versus `Var(mean) =
+σ²/N`. The ratio is exactly **`π/2 ≈ 1.5708`** in variance, so the median's standard
+error is larger than the mean's by `√(π/2) ≈ 1.2533`. Equivalently the median's
+statistical efficiency is `2/π ≈ 0.637` in *variance*, i.e. `√(2/π) ≈ 0.7979 ≈ 0.80` in
 *standard deviation*. So:
 
 ```
-SNR_median ≈ 0.80 · √N · SNR_single
+SNR_median ≈ 0.80 · √N · SNR_single        (asymptotically; worse at small N)
 ```
 
 A median stack throws away ~20% of the SNR you could have had — roughly equivalent to
-discarding ~36% of your frames (`0.80² ≈ 0.64`). This is verified across multiple
-astrophotography references (Siril docs; jonrista; medium/Sreeraman).
+discarding ~36% of your frames (`0.80² ≈ 0.637`, so you'd need `1/0.637 ≈ 1.57×` as
+many frames to match a mean's SNR). At *small* N the penalty is worse than 0.80 (the
+asymptotic value is approached from below; e.g. for N=3 the median efficiency is only
+~0.74). This is verified across multiple astrophotography references (Siril docs;
+jonrista; medium/Sreeraman) and is a standard order-statistics result.
 
 **When is median worth it?** Median is the right choice only when (a) you have few
 frames and an unknown/heavy outlier population that rejection can't reliably model, or
@@ -200,6 +218,31 @@ robustness-critical intermediate steps.
   Median-Kappa-Sigma (`MediannClip`/`MedianKappaSigmaClip`), Auto-Adaptive Weighted
   Average, and Entropy-Weighted Average (`DeepSkyStackerKernel/DSSTools.h`,
   `MultiBitmapProcess.cpp`).
+
+### 2.3 Trimmed and Winsorized means (the efficiency middle ground)
+
+Between the plain mean (best efficiency, no robustness) and the median (full
+robustness, 0.80 efficiency) sit two compromise estimators, both of which the rejection
+family reduces to:
+
+- **Trimmed mean** — sort the `N` samples, *discard* the lowest and highest `α·N`, and
+  average the rest. A 10% trimmed mean of a Gaussian has ~0.97 efficiency yet rejects
+  one-sided contamination up to 10%. **Sigma/kappa-clipping is an adaptive trimmed
+  mean**: instead of trimming a fixed *fraction*, it trims everything past `κσ`, so the
+  trim count adapts to how heavy the tail actually is. The `SIGMEDIAN` /
+  median-kappa-sigma variants (siril `rejection_float.c:210`, DSS
+  `MedianKappaSigmaClip`) are the *replacing* cousin — rejected samples become the
+  median rather than being dropped, keeping `N` constant.
+- **Winsorized mean** — instead of discarding the tails, *clamp* them to the cutoff
+  value, then average. Retains all `N` samples' worth of count but caps their leverage.
+  This is the combination-operator analogue of the **σ-estimation** trick in §3.2;
+  the rejection there Winsorizes only to compute a robust *spread*, then clips the
+  original data, but the same clamp-don't-drop idea defines the Winsorized *mean*.
+
+The practical upshot: a sigma-clipped mean is, statistically, an adaptive trimmed mean,
+and that is *why* it keeps ~99% of the mean's efficiency while shedding outliers —
+it trims only the genuine tail, not the Gaussian core. This is the formal justification
+for the "clipped mean beats median for science stacks" rule of §2.1.
 
 ---
 
@@ -285,10 +328,21 @@ until no change
 
 The magic constant **1.134** is the bias-correction factor that rescales the
 Winsorized standard deviation back to an unbiased estimate of the true Gaussian σ
-(because clamping the tails shrinks the variance). lumos hard-codes the same idea:
-`WinsorizedClipConfig` (`rejection.rs:193`) plus an explicit "Bias correction factor
-for Winsorized standard deviation" (`rejection.rs:202`) and a
-`std-from-mean-not-MAD` helper (`rejection.rs:339`).
+(because clamping the tails shrinks the variance). **Where 1.134 comes from:**
+Winsorizing a Gaussian at Huber's `c = 1.5` (i.e. clamping everything beyond ±1.5σ to
+exactly ±1.5σ) leaves a distribution whose variance is smaller than the parent σ². The
+deflation factor for `c = 1.5` works out to ≈ `1/1.134² ≈ 0.778`, so multiplying the
+Winsorized sd by `1.134 ≈ 1/√0.778` restores an (asymptotically) unbiased σ estimate.
+The value is specific to `c = 1.5` — a different Winsorizing cutoff needs a different
+factor. This `c = 1.5` / `1.134` pairing is the one PixInsight, siril, and lumos all
+use; it is documented in PixInsight's Winsorized-sigma-clipping notes and Huber's robust
+statistics. (Concretely: `0.778 = Φ-truncated variance + tail mass·c²` for the
+symmetric Winsorized Gaussian at `c=1.5`; the exact closed form is
+`E[ψ_c(z)²]` with `ψ_c` Huber's clipped score.) lumos hard-codes exactly this:
+`HUBER_C = 1.5` (`rejection.rs:201`), `WINSORIZED_CORRECTION = 1.134`
+(`rejection.rs:203`), `WINSORIZE_CONVERGENCE = 0.0005` (`rejection.rs:205`) — bit-for-bit
+the same constants as siril's `1.5f`, `1.134f`, `0.0005f` (`rejection_float.c:230-237`),
+including the same iterate-to-stable-σ inner loop.
 
 **Best practice:** Winsorized sigma clipping is the **recommended default for small-to-
 moderate frame counts** (PixInsight community: "Winsorized when fewer than ~20 subs").
@@ -351,18 +405,27 @@ remove the most extreme x_i, recompute, repeat up to r times → G_1, G_2, …, 
 ```
 
 Each `G_k` is compared against a critical value derived from the **Student-t inverse
-CDF**:
+CDF**. The exact NIST/Rosner form (parsed from the NIST e-Handbook, pass 2) indexes by
+`i = 1…r` (number already removed):
 
 ```
-              (n−1) · t                                  α
-λ_k  =  ─────────────────────────     ,   t = t_inv(1 − ───── , n−2)
-        √(n · (n − 2 + t²))                              2n
+              (n−i) · t_{p, n−i−1}                                α
+λ_i  =  ──────────────────────────────── ,   p = 1 − ─────────────────
+        √((n−i−1+t²)·(n−i+1))                          2·(n − i + 1)
 ```
 
-(where `n` is the count at step `k`.) The number of outliers is the *largest* `k`
-for which `G_k > λ_k`. Because the comparison is done backward (test for the most
-outliers that still pass), GESD is robust to **masking** (one outlier hiding another)
-in a way that single-pass sigma clipping is not.
+where `t_{p,ν}` is the 100p-th percentile of the t-distribution with `ν` d.o.f. This is
+**identical** to the per-step form `λ = (m−1)·t / √(m·(m−2+t²))` with `t = t_inv(1 −
+α/(2m), m−2)` once you set `m = n − i + 1` (the live sample count at step `i`): then
+`m−1 = n−i`, `m−2 = n−i−1`, `m = n−i+1`, and `p = 1 − α/(2m)` line up exactly. siril
+codes the `m` (decrementing `size`) convention; the doc's earlier `(n−1)t/√(n(n−2+t²))`
+is this same form at the first step (`m = n`). The number of outliers is the *largest*
+`i` for which `G_i > λ_i`. Because the comparison is done backward (test for the most
+outliers that still pass), GESD is robust to **masking** (one outlier hiding another) —
+NIST's worked example flags **3** outliers at α=0.05 where sequential Grubbs *"would
+stop at the first iteration and declare no outliers."* NIST also notes the t-critical
+approximation is *"very accurate for n ≥ 25 and reasonably accurate for n ≥ 15"* — below
+that, neither the t- nor the normal-approximation should be trusted much.
 
 - siril `GESDT` (`rejection_float.c:301`) with `grubbs_stat` (`:82`) and the critical
   values precomputed via the exact t-inverse CDF
@@ -436,17 +499,19 @@ Both paradigms benefit from carrying a per-pixel weight:
   flagging bad columns/edges) lets you down-weight rather than hard-reject, and the
   output weight map records how many good samples each pixel got.
 - In **drizzle**, the **coverage/weight map is mandatory** — it records `W_xy = Σ
-  a_xy·w_i·s²` (the accumulated overlap-area × input-weight) and is what the flux is
-  normalized by. Edge pixels and chip gaps get low coverage; `min_coverage` masks
-  them. lumos returns this as `DrizzleResult.coverage` normalized to [0,1]
+  a_xy·w_i` (the accumulated overlap-area × input-weight; **per F&H Eq. 4 there is no
+  `s²` in the weight** — the `s²` lives only in the flux numerator, Eq. 5) and is what
+  the flux is normalized by. Edge pixels and chip gaps get low coverage; `min_coverage`
+  masks them. lumos returns this as `DrizzleResult.coverage` normalized to [0,1]
   (`drizzle/mod.rs:680`); STScI returns `output_counts` (`cdrizzlebox.c`,
   `p->output_counts`).
 
 ### 4.3 Correlated noise from resampling
 
-Any resampling — interpolation during registration warp, *or* drizzle with `pixfrac <
-scale` — spreads one input pixel's value across several output pixels. Adjacent output
-pixels then share input samples and their noise becomes **correlated**. The
+Any resampling — interpolation during registration warp, *or* drizzle whenever drops
+overlap (i.e. `pixfrac > 0`, increasing with `r = pixfrac/scale`; §5.6) — spreads one
+input pixel's value across several output pixels. Adjacent output pixels then share
+input samples and their noise becomes **correlated**. The
 consequence: the **pixel-to-pixel RMS measured in the output underestimates the true
 noise on larger (aperture) scales**, because it misses the off-diagonal covariance
 terms. This biases any noise-based weighting or SNR estimate computed *after*
@@ -510,42 +575,81 @@ is divided by the local **Jacobian** (the area magnification of the transform):
 w_effective = w_input / |J|        (per input pixel)
 ```
 
-STScI computes `jaco = ½·((x₁−x₃)(y₀−y₂) − (x₀−x₂)(y₁−y₃))` — the signed area of the
-output quadrilateral via the diagonal cross product — and uses `w = weight/jaco`
-(`cdrizzlebox.c:2076-2089`). lumos computes the same Jacobian in `add_image_square`
-(`mod.rs:443`) and a `local_jacobian` for turbo (`mod.rs:356`), dividing the weight by
-it. The data value is also multiplied by `iscale = s²`-type scaling in STScI
-(`d = get_pixel(...) * p->iscale`) so surface brightness is preserved. This Jacobian
-correction is what makes drizzle photometrically correct under distortion — the
-headline F&H feature.
+STScI computes `jaco = ½·((x₁−x₃)(y₀−y₂) − (x₀−x₂)(y₁−y₃))` (`cdrizzlebox.c:1376`) —
+the signed area of the output quadrilateral via the diagonal cross product — and uses
+`w = get_pixel(weights)·weight_scale / jaco` (`:1393`; comment: *"Scale the weighting
+mask … inversely by the Jacobian to ensure conservation of weight in the output"*). The
+sign is irrelevant because, as the STScI comment notes, anticlockwise corners make both
+`jaco` and the `boxer` areas negative, so it cancels on division. lumos computes the
+same Jacobian in `add_image_square` (`mod.rs:443`) and a `local_jacobian` for turbo
+(`mod.rs:356`), dividing the weight by it. The data value is also multiplied by
+`iscale` in STScI (`d = get_pixel(...) * p->iscale`, `:640`/`:1380`) so surface
+brightness is preserved.
+
+This Jacobian correction is the **headline F&H feature**. F&H §5 (Photometry) states it
+plainly: camera distortion means *"pixels at the corner of each CCD subtend less area
+on the sky than those near the center … point sources near the corners of the chip are
+artificially brightened compared to those in the center. By scaling the weights of the
+input pixels by their areal overlap with the output pixel, and by moving input points
+to their corrected geometric positions, Drizzle largely removes this effect. In the
+case of pixfrac = 1, this correction is exact."* Their quantitative test: a 4% edge
+brightening from WF distortion is reduced to **0.004 mag RMS** after drizzling at
+`scale=0.5, pixfrac=0.6` (§5 of the paper), and ≤0.015 mag with realistic random
+dithers plus CR masks — the photometric-fidelity numbers that justify aperture
+photometry on drizzled images.
 
 ### 5.3 The flux & weight update equation
 
-For each contribution of input pixel value `d` with effective weight `dow = dover·w`
-(`dover` = overlap area, possibly kernel-weighted) to output pixel `(ii,jj)`, STScI's
-`update_data` (`cdrizzlebox.c:32`) does a **running weighted average**:
+**Correction/confirmation (pass 2):** the F&H paper is now read in full; here are the
+*verbatim* equations (their §2, Eqs. 2–5). When input pixel `(xᵢ,yᵢ)` with data
+`d_{xᵢyᵢ}` and weight `w_{xᵢyᵢ}` is added to output pixel `(xₒ,yₒ)` with running value
+`I`, running weight `W`, and fractional overlap `0 < a_{xᵢyᵢxₒyₒ} < 1`, the *iterative*
+update (Eqs. 2, 3) is
 
 ```
-if W == 0:   I_out      = d
-else:        I_out      = (I_out · W + dow · d) / (W + dow)
-in all cases: W_new     = W + dow
+W'  =  a·w  +  W                                         (F&H Eq. 2)
+
+       d · a · w · s²  +  I · W
+I'  =  ───────────────────────────                       (F&H Eq. 3)
+                W'
 ```
 
-i.e. the Fruchter & Hook accumulation
+"where a factor of `s²` is introduced to conserve surface intensity" (`s = scale`,
+output-to-input pixel-size ratio). After all inputs, the closed form (Eqs. 4, 5, with
+Einstein summation over all input pixels of all images) is
 
 ```
-        I_xy · W_xy + (a_xy · w_i · s²) · i_xy
-I_xy ←  ─────────────────────────────────────── ,   W_xy ← W_xy + a_xy · w_i · s²
-              W_xy + a_xy · w_i · s²
+W_{xₒyₒ}  =  Σ a · w                                      (F&H Eq. 4)
+
+             Σ d · a · w · s²
+I_{xₒyₒ}  =  ───────────────────                          (F&H Eq. 5)
+                W_{xₒyₒ}
 ```
 
-where `a_xy` is the fractional overlap area of the drop with output pixel `(x,y)`,
-`w_i` the input pixel weight, `s²` the scale/Jacobian area factor, and `i_xy` the input
-flux. lumos does this in two halves: `accumulate` (`mod.rs:603`) sums `d·dow` into the
-flux buffer and `dow` into the weight buffer, then `finalize` (`mod.rs:625`) divides
+The earlier (pass 1) rendering of this doc had the algebra right — the only refinement
+is that the `s²` factor multiplies the **flux numerator** (surface-intensity
+conservation), and the **weight** `W` accumulates the bare `a·w` (Eq. 4 has *no* `s²`).
+STScI's `update_data` (`cdrizzlebox.c:32`) implements Eq. 3 as a **running weighted
+average** with `dow = a·w` and the `s²` folded into `d` upstream via `d = data·iscale`
+(`cdrizzlebox.c:640`, `iscale = s²`-type factor):
+
+```
+if W == 0:   I_out  = d
+else:        I_out  = (I_out · W + dow · d) / (W + dow)
+in all cases: W_new = W + dow                            # dow = a·w
+```
+
+F&H also state the deep design property directly: *"the linear weighting scheme is
+statistically optimum when inverse variance maps are used as the input weights"* — i.e.
+`w_i = 1/σ_i²` makes Eq. 5 the minimum-variance estimator (§1.3). lumos does this in two
+halves: `accumulate` (`mod.rs:603`) sums `flux·pixel_weight` into the flux buffer and
+`pixel_weight` into the weight buffer, then `finalize` (`mod.rs:625`) divides
 `data/weights` once at the end (`val = data[idx]/w`, `mod.rs:667`) — algebraically the
-same weighted average, just deferred. The variance-aware version `update_data_var`
-(`:91`) additionally co-adds variance with squared weights (§4.1).
+same weighted average as Eqs. 4–5, just deferred to one final division. The
+variance-aware variant `update_data_var` (`:91`) additionally co-adds variance arrays
+with **squared** weights `v = (var·vc² + dow²·d2)/vc_plus_dow²` (`:135`) — the correct
+`Var(Σwx)=Σw²Var(x)` propagation (§4.1), and exactly the `w²s⁴σ²` form that reappears in
+the F&H correlated-noise derivation (§5.6).
 
 This is a **linear** combination — the output is `Σ(area·weight·flux)/Σ(area·weight)`.
 Because it is linear and weight-conserving, total flux is preserved (a star's
@@ -571,66 +675,171 @@ the Lanczos kernel (`cdrizzlebox.c:1702`).
 
 ### 5.5 pixfrac and output scale
 
-- **pixfrac `p`** shrinks each input pixel before mapping. Limits:
-  `p → 0` ≡ **interlacing** (point sampling — drops become points, requires perfect
-  sub-pixel dither coverage or you get holes); `p = 1` ≡ **shift-and-add** (full pixel
-  convolution, maximal overlap, least correlated noise but no resolution gain). STScI
-  docs and F&H both state these limits.
-- **scale `s`** sets the output pixel size = input/`s`. `s=2` doubles linear
-  resolution of the grid. You can only *recover* the finer detail if the data are
-  dithered and undersampled.
+- **pixfrac `p`** is, in F&H's exact words, *"the ratio of the linear size of the drop
+  to the input pixel"*. Limits, stated verbatim in F&H §2: *"interlacing is equivalent
+  to Drizzle in the limit of pixfrac → 0.0, while shift-and-add is equivalent to
+  pixfrac = 1.0."* So `p → 0` ≡ **interlacing** (drops become points, requires perfect
+  sub-pixel dither coverage or you get holes — "if the drop size is sufficiently small
+  not all output pixels have data added to them from each input image"); `p = 1` ≡
+  **shift-and-add** (full pixel convolution, maximal overlap). F&H's image-quality
+  argument (their Eq. 1, `I = T⊗O⊗E⊗P⊗G`): drizzle *replaces the convolution by the
+  physical pixel `P` with a convolution by the smaller kernel `p`*, and "as convolutions
+  add as the sum of squares, the effect of this replacement is often quite
+  significant" — this is *why* a smaller pixfrac sharpens the image.
+- **scale `s`** is *"the ratio of the linear size of an output pixel to an input
+  pixel"* (F&H §2). `s=2` (output pixel = ½ input) doubles the linear sampling of the
+  grid. F&H note the sweet spot: when the dithers map onto output-grid centers and
+  *"pixfrac and scale are chosen so that p is only slightly greater than s, one obtains
+  the full advantages of interlacing"* — the convolutions with both `p` and the output
+  grid `G` effectively drop away while the small drop overlap still fills missing data.
+  (Note F&H phrase this as `p` slightly greater than `s` in *drop-vs-output* terms; in
+  the `r = p/s` parameterization of §5.6 that is `r` slightly above 1.) You can only
+  *recover* finer detail if the data are dithered and undersampled.
 
 Typical optimal values from STScI/HST experience: **final pixfrac 0.7–0.9** for
 well-dithered data, with the grid `scale` chosen so the output pixel is ~0.5–0.7× the
 input. lumos defaults `scale=2.0, pixfrac=0.8` (`DrizzleConfig::default`,
 `mod.rs:107`); the `x3` preset drops pixfrac to 0.7 (`mod.rs:137`).
 
+**Drizzle in practice — the HDF-S numbers (Casertano et al. 2000, parsed pass 2).** The
+canonical worked example of choosing these parameters: for the final HDF-S WFPC2 combine
+Casertano used *"a pixel scale of 0.4 WF pixels, and a footprint of 0.5 WF pixels"* —
+i.e. output pixel = 0.4× input (`scale ≈ 2.5`), drop = 0.5× input (`pixfrac = 0.5`), so
+`r = p/s = 0.5/0.4 = 1.25`. They also ran a *coarser intermediate* combine at 0.6 WF
+pixels (`60 mas`) with footprint 1.0 specifically because *"60 mas [is] more than
+adequate for a proper cosmic ray rejection, but not as demanding in terms of number of
+input images and pointing quality as the scale of 40 mas/pixel desired for"* the final
+science image. This is the standard two-tier pattern: a forgiving large-pixel combine
+for the CR median, a fine-pixel combine for the science product. The PC chip (smaller
+pixels) got `pixfrac = 0.8` — *footprint and pixfrac are tuned per detector sampling*,
+not globally. Casertano's weighting was strictly *background-noise* inverse-variance
+(*"weighting each input exposure in inverse proportion to the square of the noise per
+pixel … weights that reflect only the noise due to the background, both sky and
+detector, without considering the local signal due to individual objects"*) — using the
+measured *signal* to set per-pixel noise *"can produce biased results"*, the same trap
+flagged in §4.3. The output weight map yields the **equivalent single-pixel noise**
+`σ̄_i = 1/√W_i` (Casertano Eq. 1), the practical handle on the correlated-noise problem:
+on large scales the true area noise is the quadrature sum of `σ̄_i`, *not* of the
+(correlation-suppressed) measured pixel RMS.
+
 ### 5.6 Correlated-noise penalty (the cost of drizzle)
 
-The price of resampling is correlated noise (§4.3). For a uniform dither filling the
-output plane, STScI gives the noise-correlation ratio `R` — the factor by which the
-*measured* pixel-to-pixel RMS underestimates the *true* noise — as a function of
-`r = p/s`:
+The price of resampling is correlated noise (§4.3). The F&H derivation (now read in
+full from the paper — see *Primary sources parsed (pass 2)*) defines the noise
+correlation ratio `R = σ_c/σ_p` (Eq. 8): the ratio of the *true* block-summed noise
+`σ_c` (the variance you'd get if drops only landed on the pixel under their center) to
+the *measured* per-output-pixel noise `σ_p`. `R > 1` always, because pixel-to-pixel RMS
+on a drizzled image **misses the off-diagonal covariance** and so underestimates the
+true large-scale noise by the factor `R`. F&H derive `σ_c²` and `σ_p²` explicitly
+(their Eqs. 6–7, weights enter as `w²·s⁴·σ²`, the same squared-weight propagation as
+`update_data_var`):
 
 ```
-r ≤ 1 :   R = r / (1 − r/3)
-r ≥ 1 :   R = r / (1 − 1/(3r))
+σ_c² = Σ_C w²s⁴σ² / (Σ_C w)²          (drops only on center pixel)
+σ_p² = Σ_P a²w²s⁴σ² / (Σ_P aw)²        (all drops overlapping the pixel)
+R    = σ_c / σ_p                       (Eq. 8)
 ```
 
-Worked example from STScI: `p=0.6, s=0.5 → r=1.2 → R = 1.662`. So with those
-parameters the apparent noise is ~40% lower than reality. **Implication:** the smaller
-the pixfrac relative to scale, the *less* overlap between drops, the fewer effectively
-independent samples per output pixel, and the *larger* `R` — i.e. small pixfrac buys
-resolution but inflates correlated noise and degrades the *real* (aperture-scale) SNR.
-This is the central drizzle tradeoff. Keeping `pixfrac` large (closer to `scale`)
-keeps drops overlapping and `R` near 1.
+For a uniform dither continuously filling the output plane (`r = p/s = pixfrac/scale`),
+the sums become integrals and F&H give the closed form (their Eqs. 9–10):
+
+```
+r ≥ 1 :   R = r / (1 − 1/(3r))         (F&H Eq. 9)
+r ≤ 1 :   R = 1 / (1 − r/3)            (F&H Eq. 10)
+```
+
+**Correction (pass 2):** the prior version of this doc wrote the `r ≤ 1` case as
+`R = r/(1 − r/3)`. That is the form printed in the **DrizzlePac Handbook §3.3** (and
+parroted by many secondary sources), but it is a **typo in the Handbook** — the
+original F&H 2002 paper (Eq. 10, read directly from the PDF) has numerator **1**, not
+`r`. The F&H form is the physically correct one: as `r → 0` (interlacing limit),
+`R → 1/(1−0) = 1` (no correlated noise, exactly as F&H state — "Consider then the
+situation when pixfrac, p, is set to zero. There is then no correlated noise in the
+output image"), whereas the Handbook's `r/(1−r/3)` wrongly gives `R → 0`, which is
+impossible since `R ≥ 1` by construction. Both forms coincide at `r = 1` (`R = 1.5`),
+which is why the error is easy to miss. Use the F&H form.
+
+Worked example from F&H (Eq. 9, `r ≥ 1` branch): `p=0.6, s=0.5 → r=1.2 →
+R = 1.2/(1 − 1/3.6) = 1.2/0.7222 = 1.662`. So with those parameters the apparent
+pixel-to-pixel noise is ~40% *lower* than the real aperture-scale noise.
+
+**Correction (pass 2): the monotonicity is the opposite of what pass 1 stated.** `R(r)`
+is *monotonically increasing* in `r = p/s`: it is **minimal** (`R → 1`, no correlated
+noise) at `r → 0` (interlacing limit), `R = 1.5` at `r = 1`, and grows without bound for
+`r > 1`. So **larger** pixfrac relative to scale (larger `r`) means *more* overlap
+between drops and *more* correlated noise, not less. The pass-1 claim that "smaller
+pixfrac inflates correlated noise" was backwards.
+
+The actual drizzle tradeoff is therefore a three-way tension, not a single axis:
+
+- **Small `r` (small pixfrac / large scale):** drops barely overlap → low correlated
+  noise (`R → 1`) and the sharpest result, *but* poor coverage — output pixels receive
+  few samples, the *uncorrelated* per-pixel variance is high, and with insufficient
+  dither you get **holes**. This is the regime where coverage, not correlation, limits
+  you.
+- **Large `r` (large pixfrac / fine scale):** heavy drop overlap → uniform coverage and
+  smooth-looking output, *but* high correlated noise (`R` large), so the pixel-to-pixel
+  RMS badly understates the true aperture-scale noise and resolution is lost to the
+  pixel re-convolution.
+- The sweet spot F&H and Casertano land on is `r` slightly above 1 (`R ≈ 1.5–1.7`):
+  enough overlap to fill coverage robustly, while keeping the correlated-noise penalty
+  bounded and most of the resolution. Note `R` never reaches 1 for a coverage-adequate
+  pixfrac — even good parameters carry `R ≈ 1.5` of correlated-noise penalty under a
+  filled uniform dither, which is *why* §4.3's rule (compute noise on un-resampled
+  frames) matters.
 
 ### 5.7 Dithering requirement
 
 Drizzle's resolution recovery **requires sub-pixel dithering**: the frames must sample
-the scene at different sub-pixel phases so the finer output grid is filled. Without
-dither, every frame samples the same phase, the finer grid has empty cells (or all
-drops land identically), and drizzle reduces to a noisier interpolation that *adds*
-correlated noise for *no* resolution gain. F&H developed the method specifically for
-"undersampled, dithered data". **Drizzling un-dithered, well-sampled (Nyquist) data is
-an anti-pattern** — you pay the correlated-noise cost and gain nothing; a plain
-stacked mean is strictly better. lumos's drizzle takes per-frame `Transform`s
-(`drizzle_stack`, `mod.rs:876`) and does not itself verify dither diversity — that is
-the caller's responsibility.
+the scene at different sub-pixel phases so the finer output grid is filled. F&H frame
+this physically (§2): a dither is *"offset samples from the same convolved image"* —
+the detector samples `Id = T⊗O⊗E` at different sub-pixel positions, and drizzle
+reassembles those offset samples on the fine grid. Without dither, every frame samples
+the same phase, the finer grid has empty cells (or all drops land identically), and
+drizzle reduces to a noisier interpolation that *adds* correlated noise for *no*
+resolution gain. F&H's title and abstract scope the method explicitly to *"undersampled,
+dithered data"*, and F&H §2 cautions the drop must be *"small enough to avoid degrading
+the image, but large enough so that after all images are drizzled the coverage is
+reasonably uniform"* — the dither-vs-pixfrac coverage tradeoff. Crucially, F&H §1 also
+warn what drizzle is **not**: it *"does not attempt to improve upon the final image
+resolution by enhancing the high frequency components"* (that is *image restoration* —
+Richardson-Lucy, max-entropy — which trades S/N for resolution). Drizzle is *image
+reconstruction*: it recovers only the information lost to the **pixel** convolution
+`P`, not information lost to the optics `O`. **Drizzling un-dithered, well-sampled
+(Nyquist or oversampled) data is therefore an anti-pattern** — there is no undersampling
+to undo, so you pay the correlated-noise cost and gain nothing; a plain stacked mean is
+strictly better. lumos's drizzle takes per-frame `Transform`s (`drizzle_stack`,
+`mod.rs:876`) and does not itself verify dither diversity — that is the caller's
+responsibility.
 
 ### 5.8 Rejection in the drizzle workflow (DrizzlePac CR scheme)
 
-Because drizzle is a *linear* coadd it cannot reject cosmic rays itself. The classic
-DrizzlePac workflow rejects them *before* the final drizzle using **median + blot +
-derivative**:
+Because drizzle is a *linear* coadd it cannot reject cosmic rays itself. The
+median+blot+derivative scheme **originates in the F&H paper itself** (§3, "Cosmic Ray
+Detection") — DrizzlePac's `drizCR` is the modern implementation. F&H's exact 7-step
+recipe (paraphrasing their numbered list, §3):
 
-1. Drizzle all frames to a common grid and take the **median** → a clean, CR-free
-   *model* of the scene.
-2. **Blot** (inverse-drizzle) the median back into each input frame's distorted
-   geometry.
-3. Compare each input to its blotted model: flag a pixel as a CR if the absolute
-   difference exceeds a noise-scaled threshold that also accounts for the local image
-   **derivative** (so sharp real features near bright stars aren't falsely flagged).
+1. Drizzle each image to a separate sub-sampled output using **pixfrac = 1.0**.
+2. Take the **median** of the aligned drizzled images → *"a first estimate of an image
+   free of cosmic-rays."*
+3. **Blot** (the F&H program literally named "Blot") — map the median back to each
+   input's distorted plane by interpolation.
+4. Take the **spatial derivative** of each blotted image — used *"to estimate the
+   degree to which errors in the computed image shift or the blurring effect of taking
+   the median could have distorted the value of the blotted estimate."*
+5. Compare each original to its blot: *"Where the difference is larger than can be
+   explained by noise statistics, the flattening effect of taking the median or an
+   error in the shift, the suspect pixel is masked."*
+6. Repeat on **pixels adjacent** to already-masked ones, *"using a more stringent
+   comparison criterion"* (neighbor growth).
+7. Finally, drizzle the inputs onto a single output using the masks, *"For this final
+   combination a smaller pixfrac than in step 1) will usually be used in order to
+   maximize the resolution."*
+
+The key insight (step 4, the derivative term) is F&H's: the threshold widens where the
+blotted model is *steep* (PSF cores, edges), because median-blurring and small shift
+errors there produce large legitimate differences that would otherwise be misflagged as
+CRs. The DrizzlePac implementation makes this concrete:
 
 The exact test from `drizzlepac/drizCR.py` (`:320-334`):
 
@@ -658,8 +867,9 @@ implemented (see §8).
 
 - **Justified:** undersampled data (PSF FWHM ≲ 2 px), **good sub-pixel dither**
   diversity, many frames, geometric distortion to correct, and you need either
-  resolution recovery or distortion-free photometry. Keep `pixfrac ≈ scale·0.8` to
-  bound correlated noise.
+  resolution recovery or distortion-free photometry. Keep `r = pixfrac/scale` modestly
+  *below* 1 (e.g. `pixfrac ≈ 0.8·scale`, `r ≈ 0.8 → R ≈ 1.36`): low enough to bound
+  correlated noise, high enough that coverage stays uniform (§5.6).
 - **Harmful / pointless:** well-sampled (Nyquist or oversampled) data, no/poor dither,
   few frames, or when you only want SNR. In these cases drizzle adds correlated noise
   and resampling blur for no benefit — a robust stacked mean wins. Drizzle is *not* a
@@ -686,8 +896,10 @@ quality varies.
 **Drizzle parameters:**
 - Use drizzle *only* for dithered + undersampled data.
 - `scale`: 1.5–2.0 typical; only as fine as the dither diversity supports.
-- `pixfrac`: 0.7–0.9; keep `pixfrac/scale` close to 1 to limit correlated noise (§5.6).
-  Reduce pixfrac only with many frames and excellent dither.
+- `pixfrac`: 0.7–0.9; aim for `r = pixfrac/scale` modestly *below* 1 — smaller `r` means
+  *less* correlated noise (`R → 1` as `r → 0`) but worse coverage, so don't push `r` so
+  low that output pixels under-sample / form holes (§5.6 corrected monotonicity). Reduce
+  pixfrac (lower `r`) only with many frames and excellent dither to keep coverage.
 - `kernel`: **Square** for accuracy under rotation; **Turbo** for speed with small
   rotation (lumos default); **Point** only with superb dithering; **Lanczos** only at
   pixfrac=1, scale=1 (and accept ringing).
@@ -712,8 +924,15 @@ quality varies.
 4. **Drizzle without dithering.** Pays the correlated-noise + resampling-blur cost for
    zero resolution gain. Use a stacked mean instead.
 5. **pixfrac too small for the coverage.** Small pixfrac with too few dither phases
-   leaves empty/under-covered output pixels (holes) and blows up correlated noise
-   (`R = r/(1−r/3)` grows as `r→0`). Increase pixfrac or add dither diversity.
+   leaves empty/under-covered output pixels (**holes**) — the dominant failure of small
+   pixfrac. **Correction (pass 2):** the prior wording claimed correlated noise "blows
+   up as `r → 0`"; that is backwards. By F&H Eq. 10, `R = 1/(1 − r/3) → 1` as `r → 0`
+   (interlacing has the *least* correlated noise). The real cost of small pixfrac is
+   *coverage*, not correlation: too few independent samples land on each output pixel, so
+   it's the *uncorrelated* per-pixel variance (and holes) that hurt, while `R` actually
+   *decreases* toward 1. Increase pixfrac (toward `r ≈ 1`, `R ≈ 1.5`) or add dither
+   diversity. (Note: `R` is **monotonically increasing in `r`** — minimal at `r → 0`
+   where `R → 1`, `R = 1.5` at `r = 1`, and growing without bound for `r > 1`.)
 6. **Ignoring correlated noise.** Measuring SNR or deriving inverse-variance weights
    from the *pixel-to-pixel RMS of a drizzled/resampled image* underestimates the true
    noise (by `R`, §5.6) and biases everything downstream. Compute noise on un-resampled
@@ -790,6 +1009,65 @@ quality varies.
 
 ---
 
+## Primary sources parsed (pass 2)
+
+PDFs/pages read directly this pass (saved under `.tmp/papers/`), with the load-bearing
+takeaway each resolved:
+
+- **Fruchter & Hook 2002, *Drizzle* (PASP 114:144)** —
+  `.tmp/papers/fruchter_hook_2002_drizzle.txt` (the previously-garbled PDF, now fully
+  legible). **Resolved:** the verbatim accumulation equations (Eqs. 2–5: `W' = a·w + W`;
+  `I' = (d·a·w·s² + I·W)/W'`; with `s²` only in the **flux** numerator, never in the
+  weight), the correlated-noise derivation (Eqs. 6–8, weights enter as `w²s⁴σ²`;
+  `R = σ_c/σ_p`), and the closed-form `R` (Eqs. 9–10). **Correction it forced:** the
+  `r ≤ 1` branch is `R = 1/(1 − r/3)` (numerator 1), *not* `r/(1 − r/3)` — see §5.6. Also
+  resolved: the interlacing↔shift-and-add limits, the photometry numbers (0.004 / ≤0.015
+  mag), and the 7-step median+blot+derivative CR recipe (which *originates here*, not in
+  DrizzlePac) — §§5.2, 5.3, 5.5, 5.7, 5.8.
+- **Casertano et al. 2000, *WFPC2 Observations of the HDF-S* (AJ 120:2747)** —
+  arXiv `astro-ph/0010245` → `.tmp/papers/casertano_2000_hdfs.txt`. **Added:** real-world
+  drizzle parameters (`scale = 0.4` WF px, `pixfrac = 0.5` WF px → `r = 1.25`; PC chip
+  `pixfrac = 0.8`; coarse 60 mas intermediate for CR, fine 40 mas for science),
+  background-only inverse-variance weighting (signal-based weighting "can produce biased
+  results"), and the equivalent single-pixel noise `σ̄ = 1/√W` from the output weight map
+  — §5.5. (The first download under the task's `astro-ph/0004178` ID was the *wrong*
+  paper — a CMB `Pseudo-Cl` paper; the correct HDF-S preprint was found via the arXiv API
+  and is the one cited here.)
+- **DrizzlePac Handbook §3.3, *Weight Maps and Correlated Noise*** (HST docs, web) →
+  `.tmp/papers/drizzlepac_handbook_3_3.html`. Confirms the `R = σ_c/σ_p` framing and the
+  `r=1.2 → R=1.662` example, **but** prints the `r ≤ 1` branch as `r/(1 − r/3)` — the
+  typo this doc previously inherited; F&H's original is authoritative (§5.6).
+- **NIST e-Handbook §1.3.5.17.3, *Generalized ESD Test*** (web) →
+  `.tmp/papers/nist_gesd.html`. **Resolved** the exact λ critical-value formula
+  `λ_i = (n−i)·t_{p,n−i−1} / √((n−i−1+t²)(n−i+1))`, `p = 1 − α/(2(n−i+1))`, and reconciled
+  it index-for-index with siril's decrementing-`size` form (§3.5). Confirms masking
+  robustness (3 outliers vs Grubbs' 0) and the `n ≥ 15`/`n ≥ 25` accuracy bounds.
+
+**Re-verified in cloned source (cite file:line):** siril `rejection_float.c`
+Winsorized `1.5f / 1.134f / 0.0005f` (`:230-237`), `median_and_mean.c` GESD t-critical
+`gsl_cdf_tdist_Pinv(1 − sig/(2·size), size−2)` then `λ = (size−1)t/√(size(size−2+t²))`
+(`:1481-1484`), noise weights `1/(pscale²·bgnoise²)` (`:1122`), wFWHM/nbstars weights
+(`:1136`/`:1183`); cdrizzle `update_data` running weighted average (`:32`),
+`update_data_var` squared-weight variance `(var·vc²+dow²·d2)/vc_plus_dow²` (`:135`),
+`boxer`/`sgarea` (`:280`/`:174`), `over()` rect-intersect (`:460`), square-kernel
+Jacobian `0.5((x₁−x₃)(y₀−y₂)−(x₀−x₂)(y₁−y₃))` with `w = weights·weight_scale/jaco`
+(`:1376`/`:1393`), Gaussian `pfo` clamp `≥1.2/pscale_ratio` (`:1576`), Lanczos pixfrac
+warning (`:1701`); DrizzlePac `drizCR.py` threshold `t2 = mult·blot_deriv + snr·ta/gain`,
+defaults `3.5 3.0` / `1.2 0.7`, `tmp2 ≥ 9` (`:320-336`). **lumos confirmed:**
+`inverse_normal_approx` Abramowitz-Stegun for the GESD critical value (`rejection.rs:759`)
+vs siril's exact Student-t — the over-rejection gap is real; Winsorized constants
+`HUBER_C=1.5 / WINSORIZED_CORRECTION=1.134` (`rejection.rs:201-203`); lowest-mean-MAD
+reference (`stack.rs:165`); noise weight `1/σ²` *without* the `pscale²` term
+(`stack.rs:271`); drizzle `accumulate`/`finalize` deferred weighted average
+(`mod.rs:603`/`:625`, `val = data/w` at `:667`).
+
+**Still unverifiable / open:** the exact analytic derivation of the **1.134** factor
+(stated as `≈1/√0.778` for Huber `c=1.5`; the closed-form `E[ψ_c(z)²]` integral is
+sketched in §3.2 but I did not locate a primary statistics reference that prints the
+literal "1.134" — it propagates through PixInsight/siril/lumos as a shared constant).
+The small-N median efficiency value (~0.74 at N=3) is a standard order-statistics result
+quoted from memory, not parsed from a cited table this pass.
+
 ## 9. References
 
 ### Source code (cloned references)
@@ -820,10 +1098,16 @@ quality varies.
 
 - Fruchter & Hook 2002, *Drizzle: A Method for the Linear Reconstruction of
   Undersampled Images*, PASP 114:144 — https://arxiv.org/abs/astro-ph/9808087 ,
-  https://iopscience.iop.org/article/10.1086/338393
+  https://iopscience.iop.org/article/10.1086/338393 . **Parsed in full this pass** →
+  `.tmp/papers/fruchter_hook_2002_drizzle.txt` (Eqs. 2–10 quoted in §§5.2–5.8).
+- Casertano et al. 2000, *WFPC2 Observations of the Hubble Deep Field-South*, AJ 120:2747
+  — https://arxiv.org/abs/astro-ph/0010245 . **Parsed this pass** →
+  `.tmp/papers/casertano_2000_hdfs.txt` (real-world drizzle parameters, background-noise
+  weighting, `σ̄ = 1/√W`; §5.5).
 - STScI, *Dithering and the Drizzle Algorithm* —
   https://www.stsci.edu/ftp/science/hdf/combination/drizzle.html
-- STScI HST docs, *Weight Maps and Correlated Noise* (the `R = r/(1−r/3)` formula) —
+- STScI HST docs, *Weight Maps and Correlated Noise* (the `R` formula — note its `r ≤ 1`
+  branch `r/(1−r/3)` is a typo; F&H's `1/(1−r/3)` is correct, §5.6) —
   https://hst-docs.stsci.edu/drizzpac/chapter-3-description-of-the-drizzle-algorithm/3-3-weight-maps-and-correlated-noise
 - The DrizzlePac Handbook —
   https://www.stsci.edu/files/live/sites/www/files/home/scientific-community/software/drizzlepac/_documents/drizzlepac-handbook-v1.pdf

@@ -1,30 +1,36 @@
 # Lumos Pipeline — Best-Practices Reference
 
 Deep reference documentation on best practices, state-of-the-art algorithms, and
-anti-patterns for each stage of the lumos astrophotography pipeline. Each document
-was built from two evidence bases:
+anti-patterns for each stage of the lumos astrophotography pipeline. Built and then
+**validated across two research passes** against two evidence bases:
 
 - **Upstream source code** cloned under `.tmp/refs/` (see `scripts/clone-refs.sh`) —
   LibRaw, librtprocess, RawTherapee, cfitsio, ccdproc, SExtractor, SEP, photutils,
   PSFEx, astroalign, MAGSAC++, astrometry.net, SCAMP, SWarp, reproject, the STScI
   drizzle/DrizzlePac C core, Siril, DeepSkyStacker, and OpenCV.
-- **Web research**, with each load-bearing claim cross-checked against ≥2 sources
-  (FITS Standard 4.0; the SExtractor, DAOFIND, MAGSAC++, SIP, and Fruchter & Hook
-  papers; vendor docs for PixInsight / Siril / DeepSkyStacker).
+- **Primary literature**, with 27 papers downloaded and text-extracted into
+  `.tmp/papers/` (via `pdftotext`) — incl. the FITS Standard 4.0, Bertin & Arnouts
+  1996 (SExtractor), Stetson 1987 (DAOFIND), Fruchter & Hook 2002 + Casertano 2000
+  (drizzle), MAGSAC/MAGSAC++, astrometry.net, Groth 1986, the SIP convention,
+  Hartley 1997, van Dokkum 2001 (L.A.Cosmic), Malvar 2004, and the NIST GESD test.
+  Every load-bearing claim is cross-checked against ≥2 sources.
 
-These are *reference* documents — they describe how the field does each stage well,
-and what to avoid — not a prescriptive change list for lumos. The per-document
-"How lumos currently does it" sections compare against lumos source for context.
+These are *reference* documents — how the field does each stage well, and what to
+avoid — not a prescriptive change list. The per-document "How lumos currently does
+it" sections compare against lumos source for context.
 
 ## Documents
 
 | # | Stage | Document | Lines |
 |---|-------|----------|-------|
-| 1 | Load & decode (FITS, RAW, demosaic) | [`01-load-decode.md`](01-load-decode.md) | 689 |
-| 2 | Calibration (bias/dark/flat, defects) | [`02-calibration.md`](02-calibration.md) | 673 |
-| 3 | Star detection (background→deblend→centroid) | [`03-star-detection.md`](03-star-detection.md) | 760 |
-| 4 | Registration (match→RANSAC→SIP→warp) | [`04-registration.md`](04-registration.md) | 870 |
-| 5 | Stacking & drizzle (rejection, weighting, F&H) | [`05-stacking-drizzle.md`](05-stacking-drizzle.md) | 842 |
+| 1 | Load & decode (FITS, RAW, demosaic) | [`01-load-decode.md`](01-load-decode.md) | 1089 |
+| 2 | Calibration (bias/dark/flat, defects) | [`02-calibration.md`](02-calibration.md) | 1034 |
+| 3 | Star detection (background→deblend→centroid) | [`03-star-detection.md`](03-star-detection.md) | 1023 |
+| 4 | Registration (match→RANSAC→SIP→warp) | [`04-registration.md`](04-registration.md) | 1128 |
+| 5 | Stacking & drizzle (rejection, weighting, F&H) | [`05-stacking-drizzle.md`](05-stacking-drizzle.md) | 1126 |
+
+Each doc ends with a `## Primary sources parsed (pass 2)` subsection mapping each
+extracted PDF to a one-line takeaway and its local `.tmp/papers/<name>.txt`.
 
 ## Cross-cutting principle: stay linear, stay calibrated
 
@@ -39,40 +45,55 @@ common anti-patterns across all five stages are violations of this:
 - a hard inlier threshold or nearest-neighbour resampling on science pixels (Stage 4);
 - pixel rejection without prior normalization, or sigma-clipping with too few frames (Stage 5).
 
-## Findings flagged against lumos source (for review — not yet verified by maintainer)
+## Corrections made in pass 2 (errors found in pass 1)
 
-While grounding the research, the agents read lumos source and flagged the
-following. Each is a *claim to verify*, with a pointer; none has been changed.
+The second validation pass — armed with the primary PDFs — overturned several
+pass-1 claims. These are now fixed in the docs (marked `**Correction (pass 2):**`):
+
+| Stage | What pass 1 got wrong | Corrected to |
+|-------|----------------------|--------------|
+| 1 | RCD green-channel formula given as `G·(1+(LPF₀−LPF₂)/(LPF₀+LPF₂))` | The real directional ratio estimates `N_Est = cfa·2·lpf₀/(eps+lpf₀+lpf_N)` with gradient-weighted V/H blending (per `librtprocess/rcd.cc`) |
+| 1 | Markesteijn "3-pass" mischaracterized | It doubles direction count (4→8) and re-derives green per pass; homogeneity selection runs once |
+| 3 | "All DAOFIND stats are computed on the convolved image" | GROUND (roundness) is computed on the **unconvolved** image; only sharpness/SROUND use convolved data |
+| 3 | Deblend contrast measured against parent-node flux | SExtractor measures it against **root/total isophotal flux** (`fdflux`) |
+| 4 | lumos implements the MAGSAC++ closed-form ρ "specialized to k=2 via γ(1,x)=1−e⁻ˣ" | **Wrong** — lumos's loss is a *bespoke MAGSAC++-inspired* kernel, not the paper's ρ for any DoF (numerically: paper-n4 ρ(3)=0.861 vs lumos 0.519) |
+| 5 | Correlated-noise `R = r/(1−r/3)` (from the DrizzlePac Handbook) | F&H Eq. 10 has numerator **1**: `R = 1/(1−r/3)` — the Handbook's printed form is a typo (fails the r→0 ⇒ R→1 sanity check) |
+| 5 | "Smaller pixfrac inflates correlated noise"; weight `W = Σa·w·s²` | R is monotonically **increasing** in `r=p/s` (small pixfrac's real cost is coverage/holes); the output-scale `s²` lives only in the flux numerator, never in the weight (F&H Eqs. 2–3) |
+
+## Findings flagged against lumos source (for review — not changed)
+
+While grounding the research, the agents read lumos source and flagged these. Each
+is a *claim to verify*, with a pointer; none has been changed (research/docs only).
 
 | Stage | Finding | Pointer |
 |-------|---------|---------|
-| 1 | Load-time clamp to `[0,1]` can positively bias dark/bias **masters** (signed residuals lost). | `src/raw/mod.rs` load path |
-| 1 | Integer-FITS `BLANK` not handled (only float NaN/Inf sanitized); float-FITS divide-by-max is per-file/lossy. | `src/astro_image/fits.rs` |
-| 1 | Have both pieces for CFA/Bayer-drizzle but it is not wired; no superpixel/split-CFA mode. | `src/raw/`, `src/drizzle/` |
-| 2 | No dark **scaling/optimization** (k=1 only); no single-frame cosmic-ray rejection (relies on stack-time clipping); no bad-column or overscan/superbias handling. | `src/calibration_masters/mod.rs` |
-| 3 | **`Star.roundness1`/`roundness2` appear swapped vs the DAOFIND/photutils convention**, and are computed on the unconvolved stamp. Highest-value item to confirm. | `src/star_detection/star.rs:24`, `centroid/mod.rs:666` |
-| 3 | Background uses median/MAD only — no Pearson `2.5·median−1.5·mean` mode estimator, no crowding switch, no tile-grid median filter. | `src/star_detection/background/` |
-| 3 | Deblend contrast is measured relative to the **parent node** flux, not SExtractor's **root/total** flux. | `src/star_detection/deblend/multi_threshold/mod.rs:811` |
-| 4 | **`warp()` emits no coverage/footprint mask** for extrapolated pixels — the biggest stacking-correctness gap (those pixels should be down-weighted in the combine). | `src/registration/` warp |
-| 4 | SIP order is fixed (not auto-selected); `Auto` upgrade skips the Euclidean/Affine rungs; TPS implemented but unwired. | `src/registration/` |
-| 5 | GESD uses an inverse-**normal** approximation rather than Student-t critical values → over-rejects at small N; no output **variance/weight map**; no blot/drizzle-CR; scalar-only normalization (no surface/background match for mosaics); noise weighting omits a `pscale²` term. | `src/stacking/rejection.rs:759`, `src/stacking/` |
+| 3 | **`Star.roundness1`/`roundness2` are swapped vs the DAOFIND/photutils convention — CONFIRMED** with quoted Stetson 1987 + photutils definitions. lumos also drops the ×2, uses a marginal-max not a Gaussian fit, computes both on the unconvolved stamp, and its SROUND is a clamped asymmetry-RMS. Highest-value item. | `src/star_detection/star.rs:24`, `centroid/mod.rs:666` |
+| 4 | **`warp()` emits no coverage/footprint mask** for extrapolated pixels — they should be down-weighted in the combine. Biggest stacking-correctness gap. | `src/registration/` warp |
+| 4 | lumos's robust loss is a bespoke kernel, **not** standard MAGSAC++ ρ — worth deciding if that's intended (works in tests, but diverges numerically from the paper). | `src/registration/ransac/magsac.rs` |
+| 5 | GESD uses an inverse-**normal** approximation instead of Student-t critical values → over-rejects at small N; no output **variance/weight map**; no blot/drizzle-CR; scalar-only normalization; noise weighting omits a `pscale²` term. | `src/stacking/rejection.rs:759`, `src/stacking/` |
+| 3 | Background uses median/MAD only — no Pearson `2.5·median−1.5·mean` mode estimator (with the `|mean−median|/σ<0.3` switch), no tile-grid median filter. | `src/star_detection/background/` |
+| 1 | Load-time clamp to `[0,1]` can positively bias dark/bias **masters**; integer-FITS `BLANK` unhandled; only `primary_hdu()` read (no multi-extension/tile-compressed FITS); CFA/Bayer-drizzle pieces exist but unwired. | `src/raw/mod.rs`, `src/astro_image/fits.rs` |
+| 2 | No dark **scaling/optimization**; no single-frame cosmic-ray rejection; no bad-column/overscan/superbias; no uncertainty plane. | `src/calibration_masters/mod.rs` |
+| 4 | SIP order fixed (not auto-selected); `Auto` upgrade skips the Euclidean/Affine rungs; TPS implemented but unwired. | `src/registration/` |
 
-## Notable unverifiable / caveated claims
+## Remaining unverifiable / caveated claims (much reduced after pass 2)
 
-The agents flagged a few claims they could not pin to a primary source (all
-corroborated indirectly, but worth knowing):
-
-- **Markesteijn X-Trans**: behaviour/tradeoffs confirmed, but no authoritative
-  step-by-step algorithmic walkthrough was found in prose — relies on the
-  RawTherapee/librtprocess source.
-- **Fruchter & Hook (2002)** and **Stetson (1987, DAOFIND)** PDFs would not parse
-  via fetch; their equations were reconstructed from the STScI C source / photutils
-  and corroborated against ≥2 secondary sources (the drizzle update equations and
-  the correlated-noise `R = r/(1−r/3)` formula agree across source + docs).
-- **DeepSkyStacker** `theory.htm` refused direct fetch; its dark-scaling and
-  hot-pixel rules were corroborated via DSS source and search snippets.
+- **Bertin & Arnouts 1996** (SExtractor): the only ADS copy is a scanned image with
+  no text layer — covered via the SExtractor source, the readthedocs manual, and
+  the "for Dummies" guide rather than the primary text.
+- **Umeyama 1991** (similarity Procrustes): all mirrors are scanned — the det(R)=+1
+  result is cross-checked via the lumos code and the standard formula.
+- **RCD**: no formal paper exists; the algorithm is defined as code in
+  `librtprocess/rcd.cc` (treated as authoritative).
+- The **Winsorization 1.134** unbiasing constant isn't stated in a primary stats
+  reference (it propagates as a shared PixInsight/Siril/lumos constant; derivation
+  sketched as ≈1/√0.778 for a Huber c=1.5 break).
+- Small-N median efficiency (~0.74 at N=3) is quoted from standard order-statistics
+  theory, not a parsed table.
 
 ## Regenerating
 
-The clone script lives at `scripts/clone-refs.sh` (`--all` for the large suites).
-Sources persist in `.tmp/refs/` (gitignored) across sessions.
+- Reference source clones: `scripts/clone-refs.sh` (`--all` for the large suites),
+  persisting in `.tmp/refs/`.
+- Parsed papers: `.tmp/papers/*.txt` (extracted with `pdftotext`; `brew install poppler`).
+- Both `.tmp/` subtrees are gitignored.

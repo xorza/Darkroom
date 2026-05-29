@@ -9,7 +9,11 @@ calibration, registration, stacking, and photometry can trust.
 Claims here are cross-checked against the FITS Standard 4.0, the cloned upstream
 sources under `.tmp/refs/` (LibRaw, librtprocess, RawTherapee, cfitsio, astropy),
 and the published astrophotography/demosaicing literature. Where authoritative
-sources disagree, that is called out explicitly.
+sources disagree, that is called out explicitly. **Pass 2** additionally parsed the
+primary-source PDFs (FITS Standard 4.0, the IPOL Malvar reproduction, Siril drizzle
+docs) and re-read the RCD/Markesteijn/`adjust_bl` source line-by-line to verify the
+formulas; corrected claims are flagged with "**Correction (pass 2):**" and the parsed
+PDFs are listed under References.
 
 ---
 
@@ -55,29 +59,36 @@ conventions*, not in the array read itself.
 
 ### 1.1 BITPIX, BZERO/BSCALE — the integer→float contract
 
-`BITPIX` declares the on-disk sample type: `8` (unsigned byte), `16` (signed
-16-bit), `32` (signed 32-bit), `64` (signed 64-bit), `-32` (IEEE float),
-`-64` (IEEE double). The physical value is reconstructed by the FITS Standard 4.0
-scaling equation:
+`BITPIX` declares the on-disk sample type. The Standard fixes the integer sizes
+(§5.2): 8-bit are **unsigned** binary integers (0–255); 16/32/64-bit are **two's
+complement signed** binary integers (§5.2.2–5.2.4, e.g. 16-bit range −32768…+32767);
+`-32`/`-64` are IEEE-754 single/double float (§5.3). The physical value is
+reconstructed by the FITS Standard 4.0 scaling equation (§4.4.2, Eq. 3, verified pass 2
+from the parsed standard `.tmp/papers/fits40.txt:2224`):
 
 ```
-physical_value = BZERO + BSCALE × array_value
+physical value = BZERO + BSCALE × array value
 ```
 
-with defaults `BZERO = 0.0`, `BSCALE = 1.0` (FITS Standard 4.0 §4.4.2; verified at
-<https://heasarc.gsfc.nasa.gov/docs/fcg/standard_dict.html> and the GSFC floating-point
-agreement <https://fits.gsfc.nasa.gov/fp89.txt>).
+with defaults `BZERO = 0.0`, `BSCALE = 1.0`. The Standard's exact wording: BSCALE is
+"the coefficient of the linear term in the scaling equation, the ratio of physical value
+to array value at zero offset"; BZERO is "the physical value corresponding to an array
+value of zero."
 
-**The unsigned-16 convention is the critical landmine.** FITS has no native
-unsigned integer type. The universal convention (astropy applies it *by default*) is
-to store `uint16` data as `BITPIX = 16` (signed) with `BZERO = 32768`, `BSCALE = 1`.
-The value `0` is stored on disk as `-32768`; the reader must add 32768 to recover it.
-For `uint32` the shift is `BZERO = 2147483648`. Any loader that ignores `BZERO`
-reads an unsigned-16 light frame as a signed-16 array centered on zero — half the
-pixels go negative and the histogram is destroyed. Sources:
-astropy docs <https://docs.astropy.org/en/stable/io/fits/usage/image.html> ("int16
-data with BZERO=32768 and BSCALE=1 would be treated as uint16 data") and the
-STScI reserved-keywords guide.
+**The unsigned convention is the critical landmine — and it is the Standard, not a
+hack.** §5.2.5 states plainly that "the FITS format does not support a native unsigned
+integer data type (except for the unsigned 8-bit byte data type) therefore unsigned
+16-bit, 32-bit, or 64-bit binary integers cannot be stored directly… the appropriate
+offset must be applied… which is then stored in the FITS file. The BZERO keyword shall
+record the amount of the offset needed to restore the original unsigned value." Table 11
+gives the offsets: `uint16` ⇒ `BITPIX=16, BZERO=32768`; `uint32` ⇒ `BZERO=2147483648`;
+`uint64` ⇒ `BZERO=9223372036854775808`; and the converse for *signed* 8-bit
+(`BITPIX=8, BZERO=−128`). In all cases `BSCALE` keeps its default 1.0. So a `uint16`
+value of 0 is stored on disk as the signed value −32768. A footnote (§4.4.2.5 n.9) notes
+the offset is most efficiently applied by simply flipping the most-significant bit. Any
+loader that ignores `BZERO` reads a `uint16` light as a signed array centered on zero —
+half the pixels go negative and the histogram is destroyed. astropy applies the
+convention by default; cross-check <https://docs.astropy.org/en/stable/io/fits/usage/image.html>.
 
 **Best practice:** never read the raw array and apply scaling yourself unless you
 are certain of the keyword semantics. Let cfitsio do it. cfitsio's `fits_read_pix`
@@ -92,23 +103,35 @@ offset — which matters for the float-normalization heuristic below.
 
 ### 1.2 BLANK and NaN — undefined pixels
 
-For **integer** images, undefined pixels are flagged by the `BLANK` keyword: any
-array value equal to `BLANK` is "undefined" and should not be treated as data
-(FITS Standard 4.0 §4.4.2.5). `BLANK` is only meaningful for integer `BITPIX` and
-**must be ignored for floating-point images** — there, an IEEE NaN *is* the blank
-indicator (verified across the GSFC standard dictionary and the floating-point
-agreement). A correct reader therefore:
+For **integer** images, undefined pixels are flagged by the `BLANK` keyword. §4.4.2.5
+(verified pass 2, `.tmp/papers/fits40.txt:2262`): "This keyword shall be used only in
+headers with positive values of BITPIX (i.e., in arrays with integer data)… an integer
+that specifies the value that is used within the integer array to represent pixels that
+have an undefined physical value." The Standard nails the raw-vs-scaled subtlety
+explicitly: **"If the BSCALE and BZERO keywords do not have the default values… then the
+value of the BLANK keyword must equal the actual value in the FITS data array that is
+used to represent an undefined pixel and not the corresponding physical value (computed
+from Eq. 3)."** Worked example given verbatim in the Standard: for `uint16`
+(`BZERO=32768, BSCALE=1`), to make the *physical* value 0 mark an undefined pixel, set
+`BLANK = −32768`, because −32768 is the actual stored array value.
 
-- integer image: map array values equal to `BLANK` to a sentinel / mask before
-  any statistic;
+For **float** images, §5.3 is equally explicit: "The BLANK keyword should not be used
+when BITPIX = −32 or −64; rather, the IEEE NaN should be used to represent an undefined
+value. Use of the BSCALE and BZERO keywords is not recommended." The full IEEE set
+(±Inf, denormals, NaN) is permitted in FITS interchange (§5.3), but only **NaN** is the
+sanctioned blank.
+
+A correct reader therefore:
+
+- integer image: compare each *raw array value* against `BLANK` (before scaling), and
+  mask matches — never compare the scaled physical value, which may not be exactly
+  representable;
 - float image: treat NaN (and, defensively, ±Inf — which the standard does not
   define as data) as undefined.
 
-A subtle trap: after `BZERO`/`BSCALE` scaling, the test for `BLANK` must be done
-against the *raw array value*, not the scaled value, because a scaled `BLANK` may
-not be exactly representable. cfitsio handles this internally when you set a null
-value via `fits_read_imgnull` / `fits_set_imgnull`. If you read scaled floats and
-then test for NaN (lumos's approach), you correctly catch float blanks but
+cfitsio handles the raw-value comparison internally when you set a null value via
+`fits_read_imgnull` / `fits_set_imgnull`. If you read scaled floats and then test for
+NaN (lumos's approach, `fits.rs:151-158`), you correctly catch float blanks but
 **silently miss integer `BLANK` pixels**, because the integer `BLANK` value scales
 to an ordinary finite float. This is a real gap for data from instruments that
 write integer `BLANK` (uncommon in amateur OSC/CMOS data, common in survey/archival
@@ -116,11 +139,19 @@ integer FITS).
 
 ### 1.3 Endianness
 
-FITS arrays are **big-endian** ("most significant byte first") by definition
-(FITS Standard 4.0 §3.3.2). Byte swapping on little-endian hosts (x86, ARM) is
+FITS arrays are **big-endian** by definition. §3.3.2 (verified pass 2,
+`.tmp/papers/fits40.txt:1075`): "The individual data values shall be stored in
+big-endian byte order such that the byte containing the most-significant bits of the
+value appears first in the FITS file, followed by the remaining bytes, if any, in
+decreasing order of significance." This applies to integers (two's-complement, MSB
+first) and to IEEE floats alike. Byte swapping on little-endian hosts (x86, ARM) is
 mandatory and is handled inside cfitsio; never read FITS bytes raw. This is a
 non-issue if you go through cfitsio/rust-fitsio and a guaranteed corruption bug if
 you don't.
+
+Array storage order (§3.3.2): Axis 1 (`NAXIS1`) varies fastest, then Axis 2, etc. —
+"the same order as in multi-dimensional arrays in the Fortran programming language."
+That is why C/row-major bindings return the shape reversed (see §1.5).
 
 ### 1.4 Float FITS has no normalization convention
 
@@ -197,6 +228,66 @@ SBFITSEXT / MaxIm-DL header conventions document these keywords; cross-checked a
 - **Trailing-space and case sloppiness** in string values (`'BOTTOM-UP '`,
   `'rggb'`) — compare case-insensitively and trimmed.
 
+### 1.8 Multi-extension and compressed FITS (the load gap lumos hasn't closed)
+
+A FITS file is one or more HDUs (Header-Data Units): a mandatory **primary HDU**
+followed by optional **extensions** (`XTENSION` = `IMAGE`, `TABLE`, `BINTABLE`,
+§3.4.1). A file with extensions is a **multi-extension FITS (MEF)**. Real instrument
+and survey data routinely put the science image in an `IMAGE` extension (the primary
+HDU may be empty, `NAXIS = 0`), and place masks / variance / WCS in further extensions.
+
+**Tiled image compression** (FITS Standard §10, verified pass 2,
+`.tmp/papers/fits40.txt:5913`) is the bigger trap, because the result *looks like a
+table*. The image is cut into a "rectangular grid of subimages or tiles" (default tiling
+= one row per tile, `ZTILE1 = NAXIS1`), each tile is compressed and stored as one row of
+a variable-length column in a **`BINTABLE`** extension, with `ZIMAGE = T` marking "this
+extension should be interpreted as an image rather than a table." The original geometry
+is carried in mandatory keywords: `ZCMPTYPE` (algorithm), `ZBITPIX` (= original
+`BITPIX`), `ZNAXIS`, `ZNAXISn`. Supported algorithms (§10.4): **`RICE_1`** (Rice — the
+common, fast astronomy default), **`GZIP_1`/`GZIP_2`**, **`PLIO_1`** (IRAF mask
+run-length), **`HCOMPRESS_1`**. fpack/funpack are the reference tools.
+
+Float images get a further subtlety (§10.2): lossless float compresses poorly, so the
+floats are often **quantized to scaled integers** per tile via `I = round((F − ZZERO) /
+ZSCALE)`, with per-tile `ZSCALE`/`ZZERO` columns. `ZSCALE` is set to a fraction `Q` of
+the background RMS noise (≈ `log2(Q) + 1.792` bits of noise preserved per pixel). To
+avoid a **systematic photometric bias** in faint regions (coarse quantization pulls the
+sky background toward the nearest level), the Standard mandates **subtractive dithering**:
+`I = round((F − ZZERO)/ZSCALE + R_i − 0.5)`, restored with the same `R_i` per pixel;
+`ZQUANTIZ` records `NO_DITHER` / `SUBTRACTIVE_DITHER_1/2` and `ZDITHER0` the RNG seed.
+This is directly astro-relevant: a naive float-FITS reader that decompresses without
+honoring `ZSCALE`/`ZZERO`/`ZQUANTIZ` reads garbage; one that ignores the dither
+restoration reintroduces the faint-end bias the dither was designed to remove.
+Undefined pixels survive compression via `ZBLANK` (recommended −2147483648) for floats,
+or the ordinary integer `BLANK` for integer data (§10.2.2).
+
+**lumos gap:** `load_fits` opens only the **primary HDU** (`fits.rs:21`,
+`fptr.primary_hdu()`) and errors if it is a table. It therefore cannot read (a) an MEF
+where the image is in an `IMAGE` extension, nor (b) any tile-compressed FITS (the image
+lives in a `BINTABLE` with `ZIMAGE=T`). cfitsio *can* transparently decompress these
+(its "compressed image" API treats a `.fz` HDU as a normal image), and rust-fitsio
+exposes HDU iteration — so the fix is to iterate HDUs, pick the first with image data
+(or the one with `ZIMAGE=T`), and let cfitsio handle decompression. This is a real-world
+hole for anyone feeding lumos `fpack`-compressed survey/archive frames or DSLR-to-FITS
+exports that wrap the image in an extension.
+
+### 1.9 WCS keyword preservation through load
+
+Plate-solved frames carry a **World Coordinate System** describing pixel→sky mapping
+(§8). The conversion pipeline is a fixed chain (§8, Fig. 2): pixel coords →
+(`CRPIXj`, linear `PCi_j` or `CDi_j`) → intermediate pixel coords → (`CDELTi`) →
+intermediate world coords → (`CTYPEi`, `CRVALi`, projection params `PVi_m`) → world
+coords. For tile-compressed images the Standard *strongly recommends* copying all
+original-image keywords verbatim into the table header, "even in cases where the keyword
+is not normally expected to occur in the header of a binary-table extension (e.g., the
+BSCALE and BZERO keywords, or the world-coordinate-system keywords such as CTYPEn,
+CRPIXn, and CRVALn)" (§10.1.2). A loader that demosaics/registers and then re-saves
+must propagate the WCS (and update `CRPIXj` if it crops/bins), or downstream astrometric
+matching is lost. lumos currently parses only the reference point (`CRVAL1/2` as an
+RA/Dec fallback, `fits.rs:209`) and does not retain the full WCS through load — fine for
+a star-pattern registration pipeline that re-derives geometry, but it means lumos cannot
+*preserve* an existing plate solution.
+
 ---
 
 ## 2. RAW decoding (the libraw model)
@@ -224,12 +315,25 @@ pixel), and on modern CMOS it is **per-CFA-color** and sometimes **spatially
 patterned**, not a single scalar.
 
 LibRaw consolidates all of this in `adjust_bl()`
-(`.tmp/refs/LibRaw/src/utils/utils_libraw.cpp:464-545`). The data structures:
+(`.tmp/refs/LibRaw/src/utils/utils_libraw.cpp:464-545`). The data structures (from
+`libraw/libraw_types.h:655-660`, verified pass 2; `cblack` is `unsigned[4104]`,
+`LIBRAW_CBLACK_SIZE = 4104`):
 
-- `C.black` — a scalar global pedestal.
-- `C.cblack[0..3]` — per-channel pedestals for the 2×2 CFA positions (R, G1, B, G2).
-- `C.cblack[4]`, `C.cblack[5]` — the dimensions of an *additional* spatial black
-  pattern (e.g. a 6×6 repeating offset), with `cblack[6+]` holding that pattern.
+- `C.black` — a scalar global pedestal (`unsigned black`).
+- `C.cblack[0..3]` — per-channel pedestals for the 2×2 CFA positions. The mapping is by
+  the `FC(row,col)` color macro: `cblack[FC(0,0)], cblack[FC(0,1)], cblack[FC(1,0)],
+  cblack[FC(1,1)]`, with the *second green* remapped to channel index 3 (so the layout is
+  effectively R, G1, B, G2).
+- `C.cblack[4]`, `C.cblack[5]` — the *dimensions* of an *additional* spatial black
+  pattern (rows × cols, e.g. a small repeating offset grid), with `cblack[6 + …]` holding
+  that pattern in row-major order.
+- `C.maximum` — the white level (saturation ADU); `C.data_maximum` — the brightest value
+  actually present; `C.dmaxall` / per-channel maxima updated during subtraction.
+
+A parallel **DNG** set exists — `dng_black`, `dng_cblack[4104]`, plus *floating-point*
+`dng_fblack` / `dng_fcblack[4104]` (`libraw_types.h:237-240`) — because the DNG spec
+carries black levels (and `BlackLevelDeltaH/V`) as rationals that need not be integers.
+LibRaw folds these into the same `black`/`cblack` model before `adjust_bl()`.
 
 `adjust_bl()` (and lumos's faithful port `consolidate_black_levels`,
 `src/raw/mod.rs:91-207`) does, in order:
@@ -342,6 +446,32 @@ from photometry (lumos's star detector flags `is_saturated`), not reconstructed.
 Clipping the top to 1.0 is acceptable *as a flag of saturation*; what matters is that
 the saturation level is known so those pixels can be masked, not silently trusted.
 
+**Saturation is per-channel and interacts with WB and demosaic.** The true saturation
+threshold is at the *raw* white level `maximum`, **per CFA color**. Two subtleties:
+
+- *WB pushes the saturation point.* Applying WB multipliers (all ≥ 1.0 under
+  min-normalization, §2.3) *scales up* every channel, so a pixel that was just below
+  `maximum` in the weakest channel can be lifted toward or past the clip after WB. This
+  is exactly why the `!highlight` min-normalization exists (no channel is scaled *down*,
+  so an already-valid pixel is never pushed *over* by a sub-unity multiplier) — but it
+  means the saturation flag should be derived from the **pre-WB raw** value, not the
+  post-WB normalized one. A star saturated in red but not green/blue produces a
+  *magenta/cyan core* after demosaic if not masked, because only two channels clip.
+- *Demosaic spreads clipping.* Once a saturated photosite is interpolated, its clipped
+  value bleeds into neighbors, so the saturated region after demosaic is larger and
+  fuzzier than the true clipped set. Hence saturation masks, like defect maps, are most
+  reliable when computed on the **mosaic** (§2.5) and carried through, rather than
+  re-derived from the demosaiced image.
+
+**Linearity below saturation.** Modern CMOS is linear to well within a percent over most
+of its range but can roll off near full well; some sensors also have a small nonlinear
+toe near black. LibRaw/DNG model this with a linearization table (`LinearizationTable`
+in DNG, applied at unpack) — if present it must be applied *before* black subtraction to
+restore proportionality. lumos assumes post-unpack linearity (no extra linearization
+table handling) and relies on the camera's native linearity, which is correct for the
+mainstream astro CMOS it targets but would mis-handle a sensor that ships a DNG
+linearization curve.
+
 ### 2.5 Bad-pixel handling **before** demosaic
 
 Hot pixels (thermally stuck-high), cold/dead pixels, and amp glow are
@@ -365,16 +495,92 @@ ordering is the single most important structural decision in OSC astro decoding.
 ## 3. Demosaicing
 
 When a sensor has a CFA, two-thirds of the color information at every pixel is
-missing and must be reconstructed. The algorithm choice trades reconstructed
-resolution against three artifact classes:
+missing and must be reconstructed. The Bayer mosaic samples green on a quincunx
+(½ the pixels) and red/blue each on ¼; green therefore has twice the sampling rate
+of chroma, and **every good demosaic algorithm exploits the fact that R/G/B
+edges are correlated** — it estimates the high-frequency luminance detail from the
+dense green channel and applies it to the sparse R/B channels (the "constant
+color-difference" or "constant color-ratio" assumption). The algorithm choice trades
+reconstructed resolution against four artifact classes:
 
-- **Zipper** — alternating light/dark along high-contrast edges, from interpolating
-  across an edge in the wrong direction.
-- **Maze / labyrinth** — a worm-like texture in fine detail, from inconsistent
-  per-pixel direction decisions.
-- **False color (chroma) fringing** — colored speckle where luminance detail
-  exceeds the chroma sampling rate; especially bad on aliasing-prone (AA-filterless)
-  sensors and on X-Trans.
+#### Artifact taxonomy
+
+- **Zipper** — alternating light/dark "teeth" running *along* a high-contrast edge,
+  from interpolating *across* the edge in the wrong direction (mixing the bright and
+  dark sides). Caused by direction-agnostic or wrongly-directed interpolation.
+- **Maze / labyrinth** — a worm-like / fingerprint texture in fine, near-Nyquist
+  detail, from *inconsistent neighbor-to-neighbor direction decisions* (one pixel votes
+  horizontal, its neighbor vertical). It is the failure mode of directional methods
+  whose direction estimate is noisy.
+- **False color (chroma) fringing** — spurious colored speckle where luminance detail
+  exceeds the chroma sampling rate: the under-sampled R/B channels alias, so a neutral
+  fine texture acquires color. Worst on aliasing-prone (AA-filterless) sensors and on
+  X-Trans; on astro data it appears as colored rims on bright stars and along sharp
+  diffraction spikes.
+- **Color moiré** — large-scale, low-frequency rainbow banding when a periodic
+  high-frequency pattern (a regular texture, or a finely-sampled diffraction pattern)
+  beats against the CFA period. The structured, large-scale cousin of false color.
+
+#### Which algorithm suppresses which
+
+| Artifact | Root cause | Suppressed by | Worsened by |
+|----------|------------|---------------|-------------|
+| Zipper | cross-edge interpolation | edge-directed methods (AHD, AMaZE, RCD, Markesteijn) | bilinear, fixed-direction |
+| Maze | noisy/inconsistent direction votes | direction *smoothing* / homogeneity voting (AHD, Markesteijn homogeneity map; RCD's `VH_Disc` neighborhood refinement) | high-ISO noise feeding the direction estimator |
+| False color | chroma aliasing | color-difference/ratio interpolation + (terrestrial) chroma median; AMaZE/RCD anti-overshoot | bilinear; any per-channel-independent method |
+| Color moiré | periodic detail beating CFA | VNG/LMMSE/IGV averaging; AA filter in hardware | sharp AA-less sensors |
+
+The cross-cutting astro caveat: the terrestrial cure for false color is **chroma
+median / defringe**, which is exactly the step that destroys point-source photometry
+(§3.3). So an astro pipeline must pick an algorithm whose *interpolation itself*
+minimizes false color (RCD's anti-overshoot ratio estimate) rather than relying on a
+post-hoc chroma filter.
+
+### 3.0 Malvar–He–Cutler — the linear gradient-corrected baseline
+
+Before the directional methods, the canonical *linear* algorithm is **Malvar, He &
+Cutler 2004** (gradient-corrected linear interpolation). It is worth stating exactly
+because it is the cheapest method that is still **strictly linear** — and a strictly
+linear demosaic is photometrically the safest (it is a fixed convolution; flux is
+conserved up to the kernel, no data-dependent decisions). Verified pass 2 from the
+peer-reviewed IPOL reproduction (Getreuer 2011, `.tmp/papers/malvar_ipol.txt`):
+
+Start from bilinear (green = mean of 4 axial neighbors; R/B = mean of 4 diagonal
+neighbors), then add a **Laplacian cross-channel correction** (following Pei & Tam):
+
+```
+Ĝ(i,j) = Ĝ_bilinear(i,j) + α·ΔR(i,j)        at a red site
+ΔR(i,j) = R(i,j) − ¼·(R(i−2,j) + R(i+2,j) + R(i,j−2) + R(i,j+2))   // 5-point Laplacian of R
+```
+
+i.e. the green estimate is nudged by the *second derivative of the known channel at the
+same site* — encoding "R and G share high-frequency detail." Symmetric corrections fill
+R at green sites (β·ΔG, a 9-point Laplacian), R at blue sites (γ·ΔB, 5-point), and the
+blue analogues. The gains are chosen to minimize MSE over the Kodak suite, then rounded
+to dyadic rationals so the filters run in integer arithmetic with bit-shifts:
+
+```
+α = 1/2,   β = 5/8,   γ = 3/4
+```
+
+"The filters approximate the optimal Wiener filters within 5%… for a 5×5 support." The
+eight 5×5 filters can be applied as a single integer convolution; e.g. red at a green
+site in a red row (coefficients ×16, IPOL Eq.):
+
+```
+R = ( F(i,j−2) + F(i,j+2)
+      − 2·(F(i−1,j−1)+F(i+1,j−1)+F(i−2,j)+F(i+2,j)+F(i−1,j+1)+F(i+1,j+1))
+      + 8·(F(i−1,j)+F(i+1,j))
+      + 10·F(i,j) ) / 16
+```
+
+Malvar beats bilinear by ~4 dB PSNR and is competitive with far more complex methods
+(IPOL: Malvar PSNR 29.66 vs bilinear 29.47 vs Hamilton-Adams 29.17 on Kodak-7), but it
+is **not directional**, so it still zippers and false-colors on the hardest edges — which
+is why directional methods (RCD/AMaZE) win on real data. For an astro pipeline Malvar is
+a reasonable *fast, exactly-linear* option that beats bilinear without the photometric
+risk of a nonlinear adaptive method; lumos does not implement it (it uses RCD), but it is
+the right mental baseline for "what does a purely linear demosaic look like."
 
 ### 3.1 Algorithm landscape (Bayer)
 
@@ -393,45 +599,161 @@ sources, and darktable's manual:
 | **AMaZE** (Aliasing Minimization & Zipper Elimination) | slow | **state of the art** detail | minimal zipper; can color-overshoot on low-contrast/noisy areas | RawTherapee's historical default; best on clean low-ISO data |
 | **RCD** (Ratio-Corrected Demosaicing) | fast-medium | near-AMaZE detail | **excellent on round edges / stars**, less overshoot than AMaZE | RawTherapee's current default |
 
+**Operating principles** (what each family actually does, for context on the table):
+
+- **VNG (Variable Number of Gradients)** computes 8 directional gradients around each
+  pixel, sets a threshold from their min/max, and averages *only* the neighbors whose
+  gradient falls below threshold — so the number of contributing directions varies per
+  pixel (hence the name). Robust and maze-free because it averages broadly, but that
+  same averaging *loses detail*. Its niche survival is fixing green-channel imbalance
+  from lens crosstalk (VNG4 treats G1/G2 separately).
+- **AHD (Adaptive Homogeneity-Directed, Hirakawa & Parks 2005)** interpolates the image
+  *twice* — once assuming horizontal edges, once vertical — converts both candidates to
+  a perceptually uniform space (CIELab), and at each pixel picks the direction whose
+  local neighborhood is **more homogeneous** (smaller color-difference variation in a
+  small ball). The homogeneity test is what kills both zipper (wrong-direction
+  candidates are inhomogeneous) and maze (the decision is spatially smoothed). It is the
+  conceptual ancestor of Markesteijn's homogeneity voting; "old, slow, inferior" today
+  (RawPedia) only relative to AMaZE/RCD.
+- **AMaZE (Aliasing Minimization & Zipper Elimination)** is a more elaborate directional
+  method that estimates per-pixel edge direction *and* explicitly models/cancels
+  aliasing in the color-difference signal, achieving the sharpest detail of the classic
+  set; the cost is occasional **color overshoot** (ringing into colored over/undershoot)
+  on low-contrast or noisy regions — precisely the regime of faint nebulosity and noisy
+  subs.
+- **LMMSE / IGV** are tuned for noisy input: LMMSE applies a linear-MMSE estimate to the
+  color-difference planes (suppressing maze on high-ISO), IGV uses an integrated
+  gradient with strong directional averaging (strong moiré/maze suppression). Both trade
+  some detail for stability — attractive for single noisy subs, less so once temporal
+  stacking is the real denoiser.
+
 The two state-of-the-art interior algorithms are **AMaZE** and **RCD**. RawPedia's
 own wording: AMaZE "yields the best results in most cases" but "is also more prone to
 color overshoots than RCD," while RCD "does an excellent job for round edges, for
 example **stars in astrophotography**, while preserving almost the same level of
 detail as AMaZE." That last sentence is why RCD is the natural Bayer choice for an
-astro pipeline and why lumos implements RCD as its primary Bayer path.
+astro pipeline (point sources are round high-contrast edges, exactly where AMaZE's
+overshoot would ring as colored halos) and why lumos implements RCD as its primary
+Bayer path.
 
 **How RCD works** (`.tmp/refs/librtprocess/src/demosaic/rcd.cc`, originally
-LuisSR/RCD-Demosaicing, MIT, by Luis Sanz Rodríguez): it (1) computes a directional
-discrimination statistic from a vertical/horizontal high-pass filter squared
-(`VH_Dir = V_stat/(V_stat+H_stat)`, `rcd.cc:128-160`) that is *invariant to chromatic
-aberration*; (2) builds a low-pass filter combining R/G/B local samples
-(`rcd.cc:162-169`); (3) reconstructs green at R/B sites using cardinal gradients and a
-**ratio correction in the low-pass domain** rather than the usual color-difference
-domain — the published green estimate is
-`G_est = G·(1 + (LPF₀−LPF₂)/(LPF₀+LPF₂))` — which is exactly what reduces the pixel
-*overshoot* that causes color speckle around stars; (4) reconstructs R/B from the now
-complete green plus local color differences in the diagonal P/Q directions. The
-ratio-in-LPF-domain step is the algorithm's defining idea. lumos's
-`src/raw/demosaic/bayer/rcd.rs` is a SIMD port of this v2.3 code.
+LuisSR/RCD-Demosaicing, MIT, by Luis Sanz Rodríguez). The four steps, with the exact
+math read out of the canonical source (verified pass 2):
+
+*Step 1 — directional discrimination (`rcd.cc:131-160`).* For each pixel form a
+**second-difference high-pass response** along the vertical axis and square it:
+
+```
+hpf_V = (cfa[−3w] − cfa[−w] − cfa[+w] + cfa[+3w]) − 3·(cfa[−2w] + cfa[+2w]) + 6·cfa[0]
+V_stat = max(epssq, hpf_V[−w]² + hpf_V[0]² + hpf_V[+w]²)        // 3-tap vertical sum
+```
+
+(`w` = one row; the horizontal `H_stat` is the same filter rotated 90°). The directional
+statistic is the **ratio**
+
+```
+VH_Dir = V_stat / (V_stat + H_stat)         ∈ [0,1]
+```
+
+This is a *normalized* discriminator: because it is a ratio of like high-pass energies,
+a uniform chroma/illumination scaling cancels, which is what makes it robust to
+chromatic aberration. `VH_Dir → 0` means "edge runs vertically, interpolate vertically";
+`→ 1` the opposite; `≈ 0.5` means no strong direction.
+
+*Step 2 — low-pass filter (`rcd.cc:162-169`).* A 3×3 binomial low-pass of the raw CFA,
+mixing whatever colors land in the window:
+
+```
+lpf[0] = cfa[0] + ½·(cfa[±w] + cfa[±1]) + ¼·(cfa[±w±1])
+```
+
+*Step 3 — green at R/B sites (`rcd.cc:171-200`) — the defining idea.* The missing green
+is estimated from each cardinal neighbor by a **ratio correction in the low-pass
+domain** (not the usual color-difference domain):
+
+```
+N_Est = cfa[−w] · 2·lpf[0] / (eps + lpf[0] + lpf[−w])      // and S/E/W analogously
+```
+
+i.e. the neighboring green sample is rescaled by the ratio of the *local low-pass level
+at the center* to the *average low-pass level center↔neighbor*. The four cardinal
+estimates are blended into a vertical and a horizontal estimate weighted by **opposite**
+gradient strength (so the smoother side dominates):
+
+```
+V_Est = (S_Grad·N_Est + N_Grad·S_Est) / (N_Grad + S_Grad)
+H_Est = (W_Grad·E_Est + E_Grad·W_Est) / (E_Grad + W_Grad)
+G = intp(VH_Disc, H_Est, V_Est)            // linear blend by the refined direction
+```
+
+where `VH_Disc` is `VH_Dir` further refined against its 4-diagonal-neighbor mean (whichever
+of center/neighborhood is *farther from 0.5*, i.e. more confidently directional, wins).
+It is this ratio-in-LPF-domain estimate — rather than an additive color difference — that
+suppresses the pixel **overshoot** which would otherwise ring as colored speckle around
+bright point sources, the property that makes RCD good on stars.
+
+*Step 4 — red/blue (`rcd.cc:202-296`).* With green now complete, R and B are filled at
+opposing CFA sites from **diagonal color differences** `rgb[c]−green` blended by a P/Q
+diagonal direction statistic (same ratio-of-HPF-energy form, `rcd.cc:206-219`), then at
+green sites from **cardinal color differences**, both gradient-weighted exactly as the
+green step.
+
+**Correction (pass 2):** the prior draft gave the green estimate as
+`G_est = G·(1 + (LPF₀−LPF₂)/(LPF₀+LPF₂))`. That formula does **not** appear in the
+reference and is wrong; the actual per-direction estimate is
+`N_Est = cfa[N]·2·lpf₀/(eps + lpf₀ + lpf_N)` (algebraically a different quantity — it is
+`G·2L₀/(L₀+L_N)`, not `G·(1+(L₀−L₂)/(L₀+L₂))`), combined with gradient-weighted V/H
+blending and the `VH_Disc` direction refinement above. lumos's
+`src/raw/demosaic/bayer/rcd.rs:227-249` is a faithful SIMD port of the corrected math
+(`n_est = cfa[idx-w1]·two_lpfi/(EPS + lpfi + lpf[idx-w2])`); it stores the LPF at full
+resolution where the reference half-packs it (`lpindx = indx/2`), so its `lpf[idx − w2]`
+equals the reference's `lpf[lpindx − w1]`. The `eps = 1e-5` / `epssq = 1e-10`
+divide-by-zero guards (`rcd.cc:72-73`) must be ported verbatim.
 
 ### 3.2 X-Trans: Markesteijn
 
 Fuji X-Trans uses a 6×6 CFA (not 2×2), engineered to suppress moiré without an AA
 filter — at the cost of making chroma reconstruction much harder. The reference
 algorithm is **Markesteijn** (Frank Markesteijn, integrated into dcraw/libraw and
-RawTherapee `xtrans_demosaic.cc`):
+RawTherapee `xtrans_demosaic.cc`). The pipeline, read out of
+`.tmp/refs/librtprocess/src/demosaic/markesteijn.cc` (verified pass 2):
 
-- **1-pass** — builds green from directional gradients over the 6×6 neighborhood,
-  then R/B; fast, "fairly good results" (RawPedia/darktable). lumos implements
-  Markesteijn **1-pass** (`src/raw/demosaic/xtrans/markesteijn.rs` +
-  `markesteijn_steps.rs` + precomputed `hex_lookup.rs`).
-- **3-pass** — iterates the direction selection three times, "leads to sharper
-  results though you can only see this on low-ISO photos" (RawPedia); slower.
+1. **Hex lookup + green bounds (`markesteijn.cc:171-360`).** Because X-Trans has no
+   regular 2×2 cell, the algorithm precomputes, per CFA phase, a *hexagonal neighbor
+   map* (`allhex`) of the nearest green sites around each pixel — lumos materializes this
+   as `hex_lookup.rs`. It also clamps each interpolated green to the local
+   `[greenmin, greenmax]` of its hex neighbors to bound overshoot.
+2. **Directional green (`markesteijn.cc:372-426`).** Green is interpolated in
+   `ndir = 4 << (passes > 1)` directions — **4 for 1-pass** (horizontal, vertical, two
+   diagonals), **8 for 3-pass** — using fixed hex weights. The exact weights (verified to
+   match lumos `markesteijn_steps.rs:286-296`):
+   `color = 0.6796875·(g_a + g_b) − 0.1796875·(g_a2 + g_b2)` for one axis and
+   `0.87109375·g3 + 0.12890625·g2 + 0.359375·(center − same_color_neighbor)` for the
+   cross term.
+3. **Iterate green + R/B (`markesteijn.cc:428-…`, the `for pass` loop).** For passes ≥ 2
+   the green is *recomputed* from the now-interpolated closer pixels (this is what
+   "3-pass" iterates — the green refinement, not merely the direction selection), then R
+   and B are filled per direction from color differences.
+4. **Homogeneity voting (`markesteijn.cc:728-870`).** Each directional candidate is taken
+   to CIELab, per-direction derivatives `drv` are formed, and a per-pixel
+   **homogeneity map** counts how many neighbors have `drv ≤ 8·min_drv` (lumos
+   `markesteijn_steps.rs:766-820` uses exactly the `threshold = 8 × min` rule). A 5×5 sum
+   of the homogeneity maps selects the most homogeneous direction(s) at each pixel.
+5. **Blend (`markesteijn.cc:867-…`).** The final RGB averages the qualifying (most
+   homogeneous) directions — directly analogous to AHD, generalized to the hex geometry.
 
-For X-Trans, false color in high-spatial-frequency luminance is the dominant artifact;
-both Markesteijn variants apply careful direction selection to limit it. On *noisy*
-astro subs the 1-pass/3-pass quality gap largely vanishes (the noise dominates), so
-1-pass is the pragmatic astro choice — which is what lumos picks.
+lumos implements Markesteijn **1-pass** (4 directions) across `markesteijn.rs` +
+`markesteijn_steps.rs` + `hex_lookup.rs`, recomputing RGB on-the-fly in the blend rather
+than materializing all `ndir` RGB candidates (memory ~10·P f32).
+
+**Correction (pass 2):** the prior draft said 3-pass "iterates the direction selection
+three times." More precisely, multi-pass doubles the direction count (`ndir` 4→8) and
+re-derives green from interpolated neighbors on each pass; the homogeneity-based
+*selection* runs once at the end. For X-Trans, false color in high-spatial-frequency
+luminance is the dominant artifact; the homogeneity voting is what limits it. On *noisy*
+astro subs the 1-pass/3-pass quality gap largely vanishes (the noise dominates the
+direction/derivative estimates), so 1-pass is the pragmatic astro choice — which is what
+lumos picks.
 
 ### 3.3 Astro-specific alternatives — and why chroma processing is dangerous
 
@@ -452,28 +774,56 @@ algorithm (RCD/AMaZE/Markesteijn), and **skip all chroma smoothing and false-col
 suppression**. Accept a little residual false color around the brightest stars
 rather than corrupt photometry everywhere.
 
-Three structural alternatives sidestep demosaic artifacts entirely:
+Three structural alternatives sidestep demosaic artifacts entirely. Quantitative
+tradeoffs (resolution kept, whether neighboring output pixels share input samples →
+**noise correlation**, and photometric validity):
+
+| Method | Output resolution | Noise correlation between output px | Photometric validity | Color fidelity / cost |
+|--------|-------------------|-------------------------------------|----------------------|------------------------|
+| **Full demosaic** (RCD/AMaZE) | full (W×H) | **high** — each output px is a weighted blend of many inputs; adjacent px share inputs | **degraded** — interpolation moves flux; only ⅓ (R/B ¼) of each channel is real, rest is inferred | best preview color; data-dependent → hardest to error-propagate |
+| **Superpixel (2×2→1)** | **¼** (½W × ½H) | **none** — each 2×2 cell is disjoint; output px share no inputs | **exact** — pure binning of real samples; a fixed linear map per channel; flux conserved | true measured color; trivial, fastest |
+| **Split-CFA** | ¼ per channel, on offset grids | none within a channel | exact (each channel is real samples) | channels misregistered by ½px (must co-register); good for independent per-channel work |
+| **CFA / Bayer drizzle** | tunable (scale 1→2) | **low** — drops are placed without interpolation; dithering decorrelates | **exact in the limit** — each drop carries one real photosite's flux | needs many dithered subs; restores resolution debayering can't |
 
 1. **Bayer / CFA drizzle** (Fruchter & Hook drizzle applied to the *mosaic*). Each
    raw photosite is dropped into the output channel its filter color dictates;
    sub-pixel dithering between many frames fills the gaps. This *never interpolates
-   color* and so "avoids the artefacts that occur with all debayering algorithms,"
-   with better noise and a corrected green bias (Siril docs
-   <https://siril.readthedocs.io/en/latest/preprocessing/drizzle.html>; PixInsight
-   forum). Requirements: **the CFA pattern must be preserved through stacking**
-   (do *not* debayer before drizzle), and frames must be **dithered**. Recommended
-   parameters for a normally-sampled OSC sensor: **scale = 1.0, pixfrac = 1.0** —
-   upsampling (scale > 1) needs exponentially more subs because R/B sites are sparse.
-   lumos already has a drizzle stage (`src/drizzle/`); feeding it CFA data is the
-   natural astro path to a demosaic-free OSC pipeline.
+   color* and so "avoids the artefacts that occur with all debayering algorithms, which
+   gives improved noise characteristics" (Siril docs, verified pass 2,
+   `.tmp/papers/siril_drizzle.txt`). Requirements: **the CFA pattern must be preserved
+   through stacking** (do *not* debayer before drizzle), and frames must be **dithered**.
+   Siril's explicit guidance on parameters (verified pass 2): "For OSC drizzle, start with
+   scale = pixel fraction = 1.0" — because each color drops only ¼ (R/B) of the input
+   pixels onto the output grid, so coverage is already sparse: "a 2x upscale drizzle of a
+   color channel from a CFA image has the same amount of reduction in droplet coverage as
+   a 2x upscale drizzle [of mono]. If you upscale on top of that, you need as much droplet
+   coverage as you would for a 4x upscale drizzle! Therefore it is generally recommended
+   to drizzle CFA images at scale = 1." With some kernels it helps to set `pixfrac ≈
+   1/scale`. lumos already has a drizzle stage (`src/drizzle/`); feeding it CFA data is
+   the natural astro path to a demosaic-free OSC pipeline.
 2. **Superpixel** (a.k.a. half-resolution / `bin 2×2`): collapse each 2×2 Bayer cell
-   to one output RGB pixel (R, average-of-2-G, B). Halves resolution but is
-   *exactly* linear, artifact-free, and trivially correct photometrically — ideal for
-   well-sampled or short-focal-length OSC data, or as a fast, trustworthy preview.
+   to one output RGB pixel (R, average-of-2-G, B). Halves linear resolution (quarters
+   pixel count) but is *exactly* linear, artifact-free, **noise-uncorrelated** (disjoint
+   cells), and trivially correct photometrically — ideal for well-sampled or
+   short-focal-length OSC data, oversampled setups, or as a fast, trustworthy preview and
+   photometric ground-truth against which to validate the RCD path.
 3. **Split-CFA / channel extraction**: treat each color's photosites as three
    independent sub-images (each at half resolution, on its own grid) and process them
-   like three mono channels. Useful when you want fully independent per-channel
-   registration/stacking.
+   like three mono channels. The R/G/B grids are spatially offset by ½ a CFA cell, so
+   they must be co-registered before recombination. Useful when you want fully
+   independent per-channel registration/stacking with zero color mixing.
+
+**Why chroma smoothing harms photometry, quantitatively.** Photometry measures flux =
+Σ(pixel − background) inside an aperture. A linear demosaic (or none) keeps that sum an
+unbiased estimate of the channel's collected electrons. A **chroma median** replaces a
+pixel's color-difference by a neighborhood order statistic — a *nonlinear, non-flux-
+conserving* operator: it neither preserves the aperture sum nor commutes with background
+subtraction, so the measured magnitude of a colored star shifts by an amount that depends
+on the surrounding pixels (their values, their count, the kernel). On a sparse star field
+the "neighborhood" of a red star is mostly dark sky, so the median pulls the star's chroma
+toward neutral — desaturating it and corrupting any color-index measurement. There is no
+calibration that undoes a spatially-varying nonlinear filter; the only safe choice is not
+to apply it.
 
 ### 3.4 Demosaic-first-vs-denoise-first
 
@@ -613,15 +963,25 @@ calibrate-then-debayer ordering, with flat division using per-CFA-color means.
    values and gives sibling frames different scales. It works because the stacking
    stage re-normalizes, but a known-range override (or carrying the source range in
    metadata) would be safer for photometry.
-4. **No native CFA-drizzle wiring.** lumos has both a drizzle stage and an
+4. **No multi-extension or compressed FITS (pass 2).** `load_fits` reads only the
+   primary HDU (`fits.rs:21`) and errors on a table. It cannot open an MEF whose image
+   is in an `IMAGE` extension, nor any `fpack`/tile-compressed FITS (image in a
+   `BINTABLE` with `ZIMAGE=T`, §1.8). Both are common in survey/archive data and some
+   capture-tool exports. cfitsio can decompress these transparently; the fix is to
+   iterate HDUs and select the image (honoring `ZIMAGE`), letting cfitsio handle
+   Rice/GZIP/HCOMPRESS and the `ZSCALE`/`ZZERO`/`ZQUANTIZ` float dequantization.
+5. **No native CFA-drizzle wiring.** lumos has both a drizzle stage and an
    un-demosaiced `CfaImage`, but they aren't connected into a CFA/Bayer-drizzle path.
    Given RawPedia/Siril guidance that CFA drizzle is the artifact-free OSC ideal, a
    `drizzle_stack` variant that consumes mosaics (scale = pixfrac = 1.0, dithered) is
    a high-value addition.
-5. **No superpixel / split-CFA mode.** A trivial, exactly-linear half-res debayer
+6. **No superpixel / split-CFA mode.** A trivial, exactly-linear half-res debayer
    would be a useful fast/trustworthy alternative and a photometric ground truth for
    testing the RCD path.
-6. **Defect correction is dark-derived (good) but lives in the calibration module**,
+7. **No DNG linearization-table handling (pass 2).** lumos assumes post-unpack
+   linearity; a sensor shipping a DNG `LinearizationTable` would be mis-handled (§2.4).
+   Mainstream astro CMOS is natively linear so this is low-priority, but worth noting.
+8. **Defect correction is dark-derived (good) but lives in the calibration module**,
    not the load module — fine architecturally, but the load docs should make the
    "defects corrected on the mosaic before demosaic" ordering explicit so callers
    don't accidentally demosaic the uncalibrated `load_raw` output for OSC data.
@@ -668,8 +1028,10 @@ calibrate-then-debayer ordering, with flat division using per-CFA-color means.
 - RawPedia "Demosaicing" — <https://rawpedia.rawtherapee.com/Demosaicing> — algorithm
   quality/artifact comparison; AMaZE default, RCD best for round edges/stars,
   Markesteijn 1-pass vs 3-pass.
-- LuisSR RCD-Demosaicing — <https://github.com/LuisSR/RCD-Demosaicing> — RCD origin,
-  ratio-in-LPF-domain green estimate, CA-invariant direction statistic.
+- LuisSR RCD-Demosaicing — <https://github.com/LuisSR/RCD-Demosaicing> — RCD origin
+  (no formal paper); green estimate = directional LPF-domain ratio
+  `cfa[N]·2·lpf₀/(eps+lpf₀+lpf_N)`, CA-invariant `V_stat/(V_stat+H_stat)` direction
+  statistic, `VH_Disc` neighborhood refinement (math read from `rcd.cc`, see §3.1).
 - Siril drizzle docs — <https://siril.readthedocs.io/en/latest/preprocessing/drizzle.html>
   — CFA/Bayer drizzle for OSC: scale = pixfrac = 1.0, preserve CFA, no debayer before
   drizzle, avoids debayering artifacts.
@@ -687,3 +1049,41 @@ calibrate-then-debayer ordering, with flat division using per-CFA-color means.
 - Clark, "Astrophotography Image Processing Using Modern Raw…" —
   <https://clarkvision.com/articles/astrophotography.image.processing/> — keeping the
   raw pipeline linear and the DN→flux ordering.
+
+### Primary sources parsed (pass 2)
+
+PDFs successfully downloaded and extracted with `pdftotext`, then quoted above:
+
+- **FITS Standard 4.0** (full 75-page standard, `fits_standard40aa-le.pdf`) →
+  `.tmp/papers/fits40.txt`. Takeaway: confirmed verbatim the scaling equation (§4.4.2
+  Eq. 3), the unsigned-integer BZERO offsets (Table 11, §5.2.5), the raw-value `BLANK`
+  rule + uint16 `BLANK=−32768` example (§4.4.2.5), `BLANK` forbidden / NaN as float
+  blank (§5.3), big-endian two's-complement storage (§3.3.2), and the entire tiled
+  image-compression machinery (ZIMAGE/ZCMPTYPE/ZTILEn/ZSCALE/ZZERO/ZQUANTIZ subtractive
+  dithering + photometric-bias warning, §10) and WCS-keyword preservation (§10.1.2).
+- **Getreuer 2011, "Malvar-He-Cutler Linear Image Demosaicking"** (peer-reviewed IPOL
+  reproduction of Malvar et al. 2004, `article.pdf`) → `.tmp/papers/malvar_ipol.txt`.
+  Takeaway: the exact gradient-corrected linear formula (bilinear + Laplacian
+  cross-channel term), gains α=½, β=⅝, γ=¾, the integer ×16 convolution kernel, and the
+  Kodak PSNR comparison vs bilinear/Hamilton-Adams. Used as the better-than-original
+  primary source for §3.0 (the Microsoft-hosted original 403'd).
+- **Siril drizzle documentation** (HTML, converted) → `.tmp/papers/siril_drizzle.txt`.
+  Takeaway: the quantitative OSC/CFA-drizzle guidance ("start with scale = pixel
+  fraction = 1.0"; why CFA upscaling needs disproportionately more subs; CFA drizzle
+  "avoids the artefacts that occur with all debayering algorithms"). Used to make §3.3
+  quantitative.
+
+Failed / unavailable (tried multiple mirrors, all 403'd or returned HTML):
+
+- Malvar et al. 2004 original ICASSP PDF (Microsoft Research) — superseded by the IPOL
+  reproduction above, which carries the same math peer-reviewed.
+- Hirakawa & Parks 2005 (AHD) original PDF — AHD principle reconstructed from the
+  RawTherapee/librtprocess `ahd.cc` source and RawPedia instead.
+- Li/Gunturk/Zhang 2008 "Image demosaicing: a systematic survey" and Menon & Calvagno
+  "Color image demosaicking: an overview" — not retrievable; artifact taxonomy and
+  algorithm principles cross-checked against RawPedia + the cloned RawTherapee sources.
+
+Still unverifiable from a primary source: there is **no formal published RCD paper**
+(RCD is defined by its reference C code + RawPedia); the §3.1 RCD math is therefore
+verified against the canonical implementation `librtprocess/.../rcd.cc` rather than a
+paper — which for an algorithm-as-code is the authoritative source.
