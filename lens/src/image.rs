@@ -3,7 +3,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::sync::LazyLock;
 
-use common::slot::Slot;
+use common::Slot;
 use imaginarium::{ColorFormat, ImageBuffer, ImageDesc, Transform, Vec2};
 use scenarium::context::ContextManager;
 use scenarium::data::{CustomValue, DataType, PendingPreview, TypeDef};

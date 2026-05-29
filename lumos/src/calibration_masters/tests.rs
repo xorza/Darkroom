@@ -3,7 +3,7 @@ use crate::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
 use crate::calibration_masters::defect_map::DefectMap;
 use crate::testing::constant_cfa;
 use crate::{AstroImageMetadata, CalibrationFrames, CalibrationImages, CalibrationMasters};
-use common::buffer2::Buffer2;
+use common::Buffer2;
 
 #[test]
 fn test_from_files_all_empty_yields_no_masters() {

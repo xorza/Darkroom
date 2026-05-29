@@ -13,7 +13,7 @@
 use crate::math::bbox::Aabb;
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::labeling::LabelMap;
-use common::buffer2::Buffer2;
+use common::Buffer2;
 
 pub mod local_maxima;
 pub mod multi_threshold;

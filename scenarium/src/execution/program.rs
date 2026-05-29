@@ -4,7 +4,7 @@
 //! [`Executor`](super::executor::Executor); all per-run scheduling state in the
 //! [`ExecutionPlan`](super::plan::ExecutionPlan).
 
-use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
+use common::{KeyIndexKey, KeyIndexVec};
 use serde::{Deserialize, Serialize};
 
 use crate::data::{DataType, StaticValue};

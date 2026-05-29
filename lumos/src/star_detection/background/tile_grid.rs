@@ -2,8 +2,8 @@
 
 use crate::math::statistics::median_f32_mut;
 use crate::math::statistics::sigma_clipped_median_mad;
-use common::bit_buffer2::BitBuffer2;
-use common::buffer2::Buffer2;
+use common::BitBuffer2;
+use common::Buffer2;
 use rayon::prelude::*;
 
 // ============================================================================

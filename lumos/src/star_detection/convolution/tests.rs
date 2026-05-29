@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::math::FWHM_TO_SIGMA;
-use common::buffer2::Buffer2;
+use common::Buffer2;
 
 // ============================================================================
 // Kernel generation tests

@@ -1,8 +1,8 @@
 //! Test utilities for the labeling module.
 
 use crate::star_detection::config::Connectivity;
-use common::bit_buffer2::BitBuffer2;
-use common::buffer2::Buffer2;
+use common::BitBuffer2;
+use common::Buffer2;
 
 use super::LabelMap;
 

@@ -6,7 +6,7 @@ use crate::func_lambda::FuncLambda;
 use crate::graph::NodeBehavior;
 use crate::subgraph::{SubgraphDef, SubgraphId};
 use common::id_type;
-use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
+use common::{KeyIndexKey, KeyIndexVec};
 use common::{SerdeFormat, deserialize, serialize};
 use serde::{Deserialize, Serialize};
 

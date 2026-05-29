@@ -12,7 +12,7 @@ use crate::testing::synthetic::backgrounds::{
     add_vignette_background,
 };
 use crate::testing::synthetic::star_field::{StarFieldConfig, generate_star_field};
-use common::buffer2::Buffer2;
+use common::Buffer2;
 use common::test_utils::test_output_path;
 
 use super::TILE_SIZE;

@@ -124,7 +124,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     use crate::star_detection::labeling::LabelMap;
     use crate::star_detection::mask_dilation::dilate_mask;
     use crate::star_detection::threshold_mask::create_threshold_mask_filtered;
-    use common::buffer2::Buffer2;
+    use common::Buffer2;
 
     init_tracing();
 

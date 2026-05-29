@@ -8,7 +8,7 @@ use super::*;
 use crate::math::dmat3::DMat3;
 use crate::registration::config::InterpolationMethod;
 use crate::registration::transform::{Transform, TransformType, WarpTransform};
-use common::buffer2::Buffer2;
+use common::Buffer2;
 
 /// Create a test image of specified size filled with gradient pattern.
 fn create_test_image(width: usize, height: usize) -> Buffer2<f32> {

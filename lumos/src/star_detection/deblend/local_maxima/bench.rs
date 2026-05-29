@@ -13,8 +13,8 @@ use crate::star_detection::deblend::ComponentData;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::test_utils::label_map_from_mask_with_connectivity;
 use crate::testing::synthetic::star_field::generate_globular_cluster;
-use common::bit_buffer2::BitBuffer2;
-use common::buffer2::Buffer2;
+use common::BitBuffer2;
+use common::Buffer2;
 
 /// Create components from a pixel buffer for benchmarking.
 fn create_components_from_pixels(

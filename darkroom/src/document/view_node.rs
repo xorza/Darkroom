@@ -1,4 +1,4 @@
-use common::key_index_vec::KeyIndexKey;
+use common::KeyIndexKey;
 use glam::Vec2;
 use scenarium::graph::{Node, NodeId};
 use serde::{Deserialize, Serialize};

@@ -11,7 +11,7 @@ use imaginarium::{ChannelCount, ColorFormat, Image, ImageDesc};
 use std::ops::SubAssign;
 use std::path::Path;
 
-use common::buffer2::Buffer2;
+use common::Buffer2;
 
 // ============================================================================
 // BitPix - FITS pixel data types

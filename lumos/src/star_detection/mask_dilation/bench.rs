@@ -2,7 +2,7 @@
 
 use super::dilate_mask;
 use ::quickbench::quick_bench;
-use common::bit_buffer2::BitBuffer2;
+use common::BitBuffer2;
 use std::hint::black_box;
 
 /// Create a sparse mask with some set bits for benchmarking.

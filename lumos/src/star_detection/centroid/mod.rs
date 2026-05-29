@@ -28,7 +28,7 @@ use super::config::{CentroidMethod, Config, LocalBackgroundMethod};
 use super::deblend::region::Region;
 use super::star::Star;
 use crate::math::FWHM_TO_SIGMA;
-use common::buffer2::Buffer2;
+use common::Buffer2;
 use gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
 use moffat_fit::{MoffatFitConfig, fit_moffat_2d};
 

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use common::pause_gate::PauseGate;
+use common::PauseGate;
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 

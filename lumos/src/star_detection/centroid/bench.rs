@@ -14,7 +14,7 @@ use super::test_utils::make_gaussian_star;
 use crate::star_detection::config::{CentroidMethod, Config, LocalBackgroundMethod};
 use crate::star_detection::detector::stages::detect_test_utils::detect_stars_test;
 use crate::testing::synthetic::stamps::benchmark_star_field;
-use common::buffer2::Buffer2;
+use common::Buffer2;
 
 // =============================================================================
 // Single Star Centroid Benchmarks

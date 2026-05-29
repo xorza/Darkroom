@@ -43,7 +43,7 @@ pub(super) const LN2_LO: f64 = 1.428_606_820_309_417_3e-6;
 
 use super::lm_optimizer::{LMConfig, LMModel, LMResult, optimize};
 use super::{estimate_sigma_from_moments, extract_stamp};
-use common::buffer2::Buffer2;
+use common::Buffer2;
 use glam::Vec2;
 
 /// Configuration for Gaussian fitting.

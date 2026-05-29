@@ -3,8 +3,8 @@
 //! This module provides a pool of reusable buffers to avoid repeated allocations
 //! when processing multiple images of the same dimensions.
 
-use common::bit_buffer2::BitBuffer2;
-use common::buffer2::Buffer2;
+use common::BitBuffer2;
+use common::Buffer2;
 
 /// Pool of reusable buffers for star detection.
 ///

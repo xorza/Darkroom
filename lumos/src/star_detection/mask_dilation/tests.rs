@@ -4,7 +4,7 @@
 #![allow(clippy::identity_op, clippy::erasing_op)]
 
 use super::dilate_mask;
-use common::bit_buffer2::BitBuffer2;
+use common::BitBuffer2;
 
 /// Verify dilation result against naive O(n²×r²) box dilation.
 fn assert_naive_dilation(mask: &BitBuffer2, dilated: &BitBuffer2, radius: usize, ctx: &str) {

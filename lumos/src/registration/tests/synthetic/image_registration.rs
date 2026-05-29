@@ -14,7 +14,7 @@ use crate::registration::{Config, TransformType, register};
 use crate::star_detection::config::Config as DetConfig;
 use crate::star_detection::detector::StarDetector;
 use crate::testing::synthetic::{self, star_field::StarFieldConfig};
-use common::buffer2::Buffer2;
+use common::Buffer2;
 
 /// Default star detector for synthetic images.
 fn detector() -> StarDetector {

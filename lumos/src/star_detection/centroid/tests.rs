@@ -10,7 +10,7 @@ use crate::star_detection::background::estimate::BackgroundEstimate;
 use crate::star_detection::config::Config;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::detector::stages::detect_test_utils::detect_stars_test;
-use common::buffer2::Buffer2;
+use common::Buffer2;
 
 /// Default stamp radius for tests (matching expected FWHM of ~4 pixels).
 const TEST_STAMP_RADIUS: usize = 7;

@@ -8,7 +8,7 @@ use super::*;
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::test_utils::label_map_from_raw;
-use common::buffer2::Buffer2;
+use common::Buffer2;
 
 /// Convenience wrapper for tests — creates fresh buffers per call.
 fn deblend_multi_threshold_test(

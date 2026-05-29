@@ -19,7 +19,7 @@ use rayon::prelude::*;
 use crate::astro_image::cfa::{CfaImage, CfaType};
 use crate::astro_image::sensor::{SensorType, detect_sensor_type};
 use crate::astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
-use common::buffer2::Buffer2;
+use common::Buffer2;
 use demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
 use demosaic::xtrans::process_xtrans;
 

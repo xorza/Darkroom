@@ -45,7 +45,7 @@ pub mod star_field;
 pub mod star_profiles;
 pub mod transforms;
 
-use common::buffer2::Buffer2;
+use common::Buffer2;
 use star_field::{
     CrowdingType, ElongationType, GroundTruthStar, StarFieldConfig, crowded_cluster_config,
     dense_field_config, elliptical_stars_config, faint_stars_config, generate_star_field,

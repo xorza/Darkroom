@@ -4,7 +4,7 @@
 //! a manual value, auto-estimating from bright stars, or disabling.
 
 use crate::math::statistics::{mad_f32_with_scratch, median_f32_mut};
-use common::buffer2::Buffer2;
+use common::Buffer2;
 
 /// Minimum plausible FWHM in pixels. Stars narrower than this are likely
 /// cosmic rays or hot pixels.

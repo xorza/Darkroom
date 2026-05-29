@@ -7,8 +7,8 @@ use tokio::sync::mpsc::{Receiver, UnboundedReceiver, UnboundedSender, channel, u
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
+use common::PauseGate;
 use common::ReadyState;
-use common::pause_gate::PauseGate;
 
 use crate::common::shared_any_state::SharedAnyState;
 use crate::event_lambda::EventLambda;

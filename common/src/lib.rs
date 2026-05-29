@@ -1,42 +1,53 @@
+// Type-holding modules are `pub(crate)`; their public surface is defined by the
+// crate-root `pub use`s below (one canonical path per item). Modules that are
+// free-function namespaces (or a macro home) stay `pub` and are used as
+// `common::<module>::fn`.
 #[macro_use]
 pub mod macros;
-pub mod bit_buffer2;
-pub mod bool_ext;
-pub mod buffer2;
-pub mod constants;
 pub mod cpu_features;
-pub mod debug;
-pub mod file_format;
 pub mod file_utils;
-pub mod float_ext;
-pub mod fnv;
-pub mod key_index_vec;
-pub mod normalize_string;
 pub mod parallel;
-pub mod pause_gate;
-pub mod ready_state;
 pub mod serde;
 pub mod serde_rhai;
-pub mod shared;
-pub mod shared_fn;
-pub mod slot;
-pub mod span;
-pub mod string_ext;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_utils;
-pub mod toggle;
 
-pub use bit_buffer2::BitBuffer2;
+pub(crate) mod bit_buffer2;
+pub(crate) mod bool_ext;
+pub(crate) mod buffer2;
+pub(crate) mod constants;
+pub(crate) mod debug;
+pub(crate) mod file_format;
+pub(crate) mod float_ext;
+pub(crate) mod fnv;
+pub(crate) mod key_index_vec;
+pub(crate) mod normalize_string;
+pub(crate) mod pause_gate;
+pub(crate) mod ready_state;
+pub(crate) mod shared;
+pub(crate) mod shared_fn;
+pub(crate) mod slot;
+pub(crate) mod span;
+pub(crate) mod string_ext;
+pub(crate) mod toggle;
+
+pub use bit_buffer2::{BitBuffer2, BitIter};
 pub use bool_ext::BoolExt;
 pub use buffer2::Buffer2;
 pub use constants::EPSILON;
 pub use debug::is_debug;
 pub use file_format::{FileExtensionError, FileFormatResult, SerdeFormat};
 pub use float_ext::FloatExt;
+pub use fnv::FnvHasher;
+pub use key_index_vec::{CompactInsert, KeyIndexKey, KeyIndexVec};
+pub use normalize_string::NormalizeString;
+pub use pause_gate::{PauseGate, PauseGateCloseGuard};
 pub use ready_state::ReadyState;
 pub use serde::Result;
 pub use serde::{deserialize, serialize};
 pub use shared::Shared;
 pub use shared_fn::SharedFn;
+pub use slot::{Slot, SlotError};
 pub use span::Span;
 pub use string_ext::StrExt;
+pub use toggle::Toggle;

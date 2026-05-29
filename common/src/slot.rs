@@ -5,7 +5,7 @@ use tokio::sync::Notify;
 
 #[derive(Debug, Error)]
 #[error("Cannot take value: other references exist")]
-pub struct Error;
+pub struct SlotError;
 
 /// A lockless single-value slot for cross-thread communication.
 ///
@@ -52,12 +52,12 @@ impl<T> Slot<T> {
 
     /// Takes the value, waiting asynchronously if none exists.
     /// Returns error if other references exist (from `peek`/`peek_or_wait`).
-    pub async fn take_or_wait(&self) -> Result<T, Error> {
+    pub async fn take_or_wait(&self) -> Result<T, SlotError> {
         loop {
             let notified = self.notify.notified();
 
             if let Some(arc) = self.value.swap(None) {
-                return Arc::into_inner(arc).ok_or(Error);
+                return Arc::into_inner(arc).ok_or(SlotError);
             }
 
             notified.await;

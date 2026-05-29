@@ -18,7 +18,7 @@ use std::mem::size_of;
 use std::path::{Path, PathBuf};
 
 use arrayvec::ArrayVec;
-use common::fnv::FnvHasher;
+use common::FnvHasher;
 use common::parallel::try_par_map_limited;
 use memmap2::Mmap;
 use rayon::prelude::*;

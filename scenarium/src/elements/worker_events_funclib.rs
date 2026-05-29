@@ -6,7 +6,7 @@ use crate::func_lambda::FuncLambda;
 use crate::function::{Func, FuncBehavior, FuncEvent, FuncInput, FuncLib, FuncOutput};
 use crate::prelude::FuncId;
 use common::FloatExt;
-use common::slot::Slot;
+use common::Slot;
 
 pub const FRAME_EVENT_FUNC_ID: FuncId = FuncId::from_u128(0x01897c92d6055f5a7a21627ed74824ff);
 

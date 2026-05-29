@@ -3,7 +3,7 @@
 //! Provides utilities to create BackgroundEstimate instances for benchmarks and tests.
 
 use crate::star_detection::background::estimate::BackgroundEstimate;
-use common::buffer2::Buffer2;
+use common::Buffer2;
 
 /// Create a uniform BackgroundEstimate with constant background and noise values.
 pub fn uniform(width: usize, height: usize, background: f32, noise: f32) -> BackgroundEstimate {

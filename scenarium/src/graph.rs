@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
+use common::{KeyIndexKey, KeyIndexVec};
 use serde::{Deserialize, Serialize};
 
 use crate::data::StaticValue;

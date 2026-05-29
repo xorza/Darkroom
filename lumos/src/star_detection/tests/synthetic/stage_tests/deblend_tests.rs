@@ -10,7 +10,7 @@ use crate::star_detection::tests::common::output::image_writer::{
 };
 use crate::testing::init_tracing;
 use crate::testing::synthetic::star_profiles::render_gaussian_star;
-use common::buffer2::Buffer2;
+use common::Buffer2;
 use common::test_utils::test_output_path;
 use glam::Vec2;
 use imaginarium::Color;

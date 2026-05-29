@@ -13,7 +13,7 @@ use super::star_profiles::{
     render_saturated_star,
 };
 use crate::math::fwhm_to_sigma;
-use common::buffer2::Buffer2;
+use common::Buffer2;
 use glam::DVec2;
 use std::f32::consts::PI;
 

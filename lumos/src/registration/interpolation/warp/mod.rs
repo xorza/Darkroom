@@ -17,7 +17,7 @@ pub mod sse;
 use crate::registration::interpolation::WarpParams;
 use crate::registration::interpolation::get_lanczos_lut;
 use crate::registration::transform::WarpTransform;
-use common::buffer2::Buffer2;
+use common::Buffer2;
 use glam::DVec2;
 
 /// Fast inline floor-to-i32, avoiding libc `floorf` function call.

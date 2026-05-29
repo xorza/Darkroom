@@ -34,7 +34,7 @@ use crate::astro_image::AstroImage;
 use crate::registration::transform::Transform;
 use crate::stacking::progress::report_progress;
 use crate::stacking::progress::{ProgressCallback, StackingStage};
-use common::buffer2::Buffer2;
+use common::Buffer2;
 use error::DrizzleError;
 
 /// Maximum number of channels (RGB = 3).

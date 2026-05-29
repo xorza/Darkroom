@@ -1,7 +1,7 @@
 pub mod view_node;
 
 use anyhow::{Result, bail};
-use common::{SerdeFormat, is_debug, key_index_vec::KeyIndexVec};
+use common::{KeyIndexVec, SerdeFormat, is_debug};
 use glam::Vec2;
 use scenarium::graph::{Binding, InputPort, Node, NodeKind, OutputPort, Subscription};
 use scenarium::prelude::{FuncLib, Graph as CoreGraph, NodeId, SubgraphDef, SubgraphId};

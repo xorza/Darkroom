@@ -14,8 +14,8 @@
 
 use std::hash::Hasher;
 
-use common::fnv::FnvHasher;
-use common::key_index_vec::{CompactInsert, KeyIndexVec};
+use common::FnvHasher;
+use common::{CompactInsert, KeyIndexVec};
 use hashbrown::HashSet;
 
 use super::program::{

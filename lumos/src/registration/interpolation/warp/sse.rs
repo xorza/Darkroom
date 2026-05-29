@@ -2,7 +2,7 @@
 
 #![allow(clippy::needless_range_loop)]
 
-use common::buffer2::Buffer2;
+use common::Buffer2;
 use glam::DVec2;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
@@ -420,7 +420,7 @@ unsafe fn hsum_ps(v: __m128) -> f32 {
 mod tests {
     use super::*;
     use crate::testing::synthetic::patterns;
-    use common::buffer2::Buffer2;
+    use common::Buffer2;
     #[cfg(target_arch = "x86_64")]
     use common::cpu_features;
 

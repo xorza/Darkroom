@@ -16,7 +16,7 @@ use super::{ComponentData, MAX_PEAKS, Pixel};
 use crate::math::bbox::Aabb;
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::labeling::LabelMap;
-use common::buffer2::Buffer2;
+use common::Buffer2;
 
 #[cfg(test)]
 mod tests;

@@ -14,7 +14,7 @@ use crate::registration::warp;
 use crate::star_detection::detector::StarDetector;
 use crate::testing::synthetic::{self, stamps, star_field::StarFieldConfig};
 use crate::{AstroImage, ImageDimensions};
-use common::buffer2::Buffer2;
+use common::Buffer2;
 use glam::DVec2;
 
 /// Helper to warp and return a new buffer (for test convenience).

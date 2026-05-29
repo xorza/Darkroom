@@ -8,7 +8,7 @@ use rayon::prelude::*;
 
 use super::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
 use crate::raw::demosaic::bayer::CfaPattern;
-use common::buffer2::Buffer2;
+use common::Buffer2;
 
 /// CFA pattern for raw sensor data.
 #[derive(Debug, Clone)]

@@ -6,8 +6,8 @@ use crate::star_detection::tests::common::output::image_writer::{
 };
 use crate::star_detection::tests::common::output::image_writer::{mask_to_gray, to_gray_stretched};
 use crate::{AstroImage, ImageDimensions};
-use common::bit_buffer2::BitBuffer2;
-use common::buffer2::Buffer2;
+use common::BitBuffer2;
+use common::Buffer2;
 
 use crate::star_detection::config::Config;
 use crate::star_detection::detector::StarDetector;

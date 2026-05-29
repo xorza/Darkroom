@@ -2,7 +2,7 @@ use std::f32::consts::PI;
 
 use super::*;
 use crate::registration::transform::{Transform, WarpTransform};
-use common::buffer2::Buffer2;
+use common::Buffer2;
 use glam::DVec2;
 
 /// Shorthand for tests: interpolate with a method and default border/clamp settings.

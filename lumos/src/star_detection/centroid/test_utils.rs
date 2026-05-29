@@ -2,7 +2,7 @@
 
 use glam::Vec2;
 
-use common::buffer2::Buffer2;
+use common::Buffer2;
 
 /// Add Gaussian noise to pixel values using a simple LCG PRNG.
 pub fn add_noise(pixels: &mut [f32], noise_sigma: f32, seed: u64) {

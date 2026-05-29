@@ -5,7 +5,7 @@
 
 use crate::star_detection::config::Connectivity;
 use crate::star_detection::labeling::test_utils::label_map_from_mask_with_connectivity;
-use common::bit_buffer2::BitBuffer2;
+use common::BitBuffer2;
 
 #[test]
 fn empty_mask() {

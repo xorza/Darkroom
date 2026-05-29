@@ -11,7 +11,7 @@ use rayon::prelude::*;
 
 use crate::registration::config::InterpolationMethod;
 use crate::registration::transform::WarpTransform;
-use common::buffer2::Buffer2;
+use common::Buffer2;
 
 /// Bundled warp parameters passed through the interpolation pipeline.
 #[derive(Debug, Clone, Copy)]

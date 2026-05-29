@@ -1,7 +1,7 @@
 //! Tests for background estimation.
 
 use crate::star_detection::config::{BackgroundRefinement, Config};
-use common::buffer2::Buffer2;
+use common::Buffer2;
 
 #[test]
 fn test_uniform_background() {

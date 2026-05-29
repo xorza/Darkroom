@@ -5,8 +5,8 @@
 //!
 //! See `docs/subgraph-design.md` for the full design.
 
+use common::KeyIndexKey;
 use common::id_type;
-use common::key_index_vec::KeyIndexKey;
 use serde::{Deserialize, Serialize};
 
 use crate::function::{FuncInput, FuncOutput};

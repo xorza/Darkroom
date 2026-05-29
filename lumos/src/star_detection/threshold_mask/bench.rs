@@ -4,8 +4,8 @@ use super::{
     process_words, process_words_filtered, process_words_filtered_scalar, process_words_scalar,
 };
 use ::quickbench::quick_bench;
-use common::bit_buffer2::BitBuffer2;
-use common::buffer2::Buffer2;
+use common::BitBuffer2;
+use common::Buffer2;
 use std::hint::black_box;
 
 fn create_bench_data(size: usize) -> (Buffer2<f32>, Buffer2<f32>, Buffer2<f32>) {
