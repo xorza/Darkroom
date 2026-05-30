@@ -32,11 +32,11 @@ pub(crate) struct CanvasBackground {
     tile: Option<(DotKey, ImageHandle)>,
 }
 
-/// The theme inputs `build_tile` reads. Doubles as the registry cache
-/// key (it's `Hash`, so `register` hashes it) and the per-frame "did the
-/// theme change?" compare (`Eq`). Floats stored as raw bits so the key
-/// is `Eq + Hash`.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+/// The theme inputs `build_tile` reads. The per-frame "did the theme
+/// change?" compare: an unchanged key reuses the cached tile handle
+/// instead of re-synthesizing and re-uploading. Floats stored as raw
+/// bits for exact `Eq`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct DotKey {
     color: ColorU8,
     radius_bits: u32,
@@ -91,15 +91,15 @@ impl CanvasBackground {
 
     fn tile_handle(&mut self, ui: &Ui, ctx: &AppContext<'_>) -> ImageHandle {
         let key = DotKey::from_theme(ctx);
-        if let Some((cached, handle)) = self.tile
-            && cached == key
+        if let Some((cached, handle)) = &self.tile
+            && *cached == key
         {
-            return handle;
+            return handle.clone();
         }
-        // `register_image` hashes the key itself; a changed `key` is a
-        // new registry entry, so a theme swap re-uploads a fresh tile.
-        let handle = ui.register_image(("darkroom.canvas_dot", key), build_tile(ctx));
-        self.tile = Some((key, handle));
+        // A changed `key` means a theme swap: register a fresh tile and
+        // drop the old handle, freeing the previous tile's GPU texture.
+        let handle = ui.register_image(build_tile(ctx));
+        self.tile = Some((key, handle.clone()));
         handle
     }
 }

@@ -316,7 +316,7 @@ fn line(ui: &mut Ui, text: &str, style: TextStyle) {
 /// panel (aspect-preserving, capped at [`PREVIEW_MAX_WIDTH`]) painting the
 /// registered texture. No-op when the port has no preview.
 fn draw_preview(ui: &mut Ui, node_id: NodeId, side: &str, idx: usize, pv: &PortValueView) {
-    let Some(handle) = pv.preview else {
+    let Some(handle) = &pv.preview else {
         return;
     };
     let size = handle.size();
@@ -336,7 +336,7 @@ fn draw_preview(ui: &mut Ui, node_id: NodeId, side: &str, idx: usize, pv: &PortV
         .size((Sizing::Fixed(w), Sizing::Fixed(h)))
         .show(ui, |ui| {
             ui.add_shape(Shape::Image {
-                handle,
+                handle: handle.clone(),
                 local_rect: None,
                 fit: ImageFit::Contain,
                 tint: Color::WHITE,

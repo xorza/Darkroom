@@ -200,8 +200,7 @@ impl RunState {
         let Some(values) = values else {
             return;
         };
-        self.nodes.entry(request.node_id).or_default().values =
-            Some(build_view(ui, request, values));
+        self.nodes.entry(request.node_id).or_default().values = Some(build_view(ui, values));
     }
 
     /// Pending value requests for the `open` panels: each open node not yet

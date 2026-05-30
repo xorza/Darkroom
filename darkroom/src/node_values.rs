@@ -12,9 +12,6 @@ use lens::Image as LensImage;
 use palantir::{Image as PalImage, ImageHandle, Ui};
 use scenarium::data::DynamicValue;
 use scenarium::execution::ArgumentValues;
-use scenarium::prelude::NodeId;
-
-use crate::run_state::{RunId, ValueRequest};
 
 /// One port's runtime value, ready to render: a formatted text cell plus
 /// an optional preview thumbnail (already uploaded as a texture).
@@ -33,16 +30,15 @@ pub(crate) struct NodeValueView {
 }
 
 /// Convert a worker reply into a render-ready view: format every value to
-/// text and upload any image previews as textures (keyed by `run_id` so a
-/// re-run replaces rather than collides with the prior thumbnail).
-pub(crate) fn build_view(ui: &Ui, request: ValueRequest, values: ArgumentValues) -> NodeValueView {
-    let ValueRequest { node_id, run_id } = request;
+/// text and upload any image previews as GPU textures. Each preview's
+/// [`ImageHandle`] is owned by the returned view, so replacing the view on
+/// a re-run drops the old handles and frees their textures.
+pub(crate) fn build_view(ui: &Ui, values: ArgumentValues) -> NodeValueView {
     let inputs = values
         .inputs
         .iter()
-        .enumerate()
-        .map(|(idx, value)| match value {
-            Some(value) => port_view(ui, node_id, run_id, "in", idx, value),
+        .map(|value| match value {
+            Some(value) => port_view(ui, value),
             None => PortValueView {
                 text: "-".to_string(),
                 preview: None,
@@ -52,24 +48,16 @@ pub(crate) fn build_view(ui: &Ui, request: ValueRequest, values: ArgumentValues)
     let outputs = values
         .outputs
         .iter()
-        .enumerate()
-        .map(|(idx, value)| port_view(ui, node_id, run_id, "out", idx, value))
+        .map(|value| port_view(ui, value))
         .collect();
     NodeValueView { inputs, outputs }
 }
 
-fn port_view(
-    ui: &Ui,
-    node_id: NodeId,
-    run_id: RunId,
-    side: &str,
-    idx: usize,
-    value: &DynamicValue,
-) -> PortValueView {
+fn port_view(ui: &Ui, value: &DynamicValue) -> PortValueView {
     let preview = value
         .as_custom::<LensImage>()
         .and_then(LensImage::take_preview)
-        .and_then(|preview| upload_preview(ui, node_id, run_id, side, idx, preview));
+        .and_then(|preview| upload_preview(ui, preview));
     PortValueView {
         text: value.to_string(),
         preview,
@@ -80,14 +68,7 @@ fn port_view(
 /// a padded stride ever shows up (the preview path produces a packed
 /// stride, so this is normally a straight move). `None` for an unexpected
 /// format or a degenerate buffer.
-fn upload_preview(
-    ui: &Ui,
-    node_id: NodeId,
-    run_id: RunId,
-    side: &str,
-    idx: usize,
-    image: RawImage,
-) -> Option<ImageHandle> {
+fn upload_preview(ui: &Ui, image: RawImage) -> Option<ImageHandle> {
     let desc = image.desc;
     if desc.color_format != ColorFormat::RGBA_U8 {
         return None;
@@ -111,10 +92,10 @@ fn upload_preview(
     if pixels.len() != row * desc.height {
         return None;
     }
-    let key = ("darkroom.inspector.preview", node_id, side, idx, run_id);
-    let handle = ui.register_image(
-        key,
-        PalImage::from_rgba8(desc.width as u32, desc.height as u32, pixels),
-    );
+    let handle = ui.register_image(PalImage::from_rgba8(
+        desc.width as u32,
+        desc.height as u32,
+        pixels,
+    ));
     Some(handle)
 }
