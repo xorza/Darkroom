@@ -2,7 +2,18 @@ AI coding rules for Rust projects.
 
 ## Project state
 
-Scenarium is a Cargo workspace for a node-based data processing pipeline framework with a visual editor. Workspace members: `common` (shared utilities, buffers, file formats), `scenarium` (the node-graph framework: graph, execution, functions), `darkroom` (the editor app, the default-member), `lens` (image-processing funclib), `lumos` (astronomical image processing), `imaginarium` (image library with wgpu GPU ops), `quickbench` (in-test benchmarking utilities), and `palantir` (our GUI library). `default-members = ["darkroom"]`; only `.tmp` is `exclude`d. `imaginarium`, `quickbench`, and `palantir` are git submodules (see `.gitmodules`). The frozen `darkroom-egui-deprecared/` crate is **not** a workspace member.
+Scenarium is a Cargo workspace for a node-based data processing pipeline framework with a visual editor. Workspace members:
+
+- **`common`** — pure leaf crate of shared utilities: 2D buffers (`Buffer2`, bit-packed `BitBuffer2`), strongly-typed UUID IDs, serialization + file-format detection, async sync primitives (`Slot`, `PauseGate`, `ReadyState`), and small extension traits. Depended on by everything, depends on nothing in-tree.
+- **`scenarium`** — the node-graph framework: an authoring graph model plus a compile→plan→execute pipeline that flattens composites and schedules async node functions on a tokio worker. Depends only on `common`.
+- **`darkroom`** — the editor app and `default-member`; the new Palantir-based UI (see GUI-rewrite note below).
+- **`lens`** — image-processing function library that adapts `imaginarium` operations into `scenarium`'s node-based workflow.
+- **`lumos`** — astronomical image-processing pipeline (RAW/FITS, starfield work).
+- **`imaginarium`** — image library with CPU and wgpu GPU operations.
+- **`quickbench`** — tiny no-frills micro-benchmark harness; benchmarks are `#[test] #[ignore]` fns run via `cargo test`.
+- **`palantir`** — our in-development immediate-mode GUI library (see GUI-rewrite note below).
+
+`default-members = ["darkroom"]`; only `.tmp` is `exclude`d. `imaginarium`, `quickbench`, and `palantir` are git submodules (see `.gitmodules`). The frozen `darkroom-egui-deprecared/` crate is **not** a workspace member.
 
 **GUI rewrite in progress.** The editor is mid-migration off egui:
 
