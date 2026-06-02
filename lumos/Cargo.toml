@@ -11,7 +11,7 @@ real-data = []
 common = { workspace = true }
 imaginarium = { workspace = true }
 
-fitsio = { workspace = true }
+fits-well = { workspace = true }
 libraw-rs-sys = { workspace = true }
 
 thiserror = { workspace = true }

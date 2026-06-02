@@ -6,7 +6,7 @@ Astronomical image-processing library: RAW/FITS decoding, master-frame calibrati
 
 A stack of telescope exposures → one calibrated, aligned, combined deep-sky image. The modules below are stages in that flow:
 
-1. **Load / decode** (`astro_image`, `raw`) — FITS (cfitsio), camera RAW (libraw → RCD/Markesteijn demosaic), or standard formats into a planar `AstroImage`. The calibration path keeps RAW as single-channel `CfaImage` (correct before demosaic).
+1. **Load / decode** (`astro_image`, `raw`) — FITS (pure-Rust `fits-well`), camera RAW (libraw → RCD/Markesteijn demosaic), or standard formats into a planar `AstroImage`. The calibration path keeps RAW as single-channel `CfaImage` (correct before demosaic).
 2. **Calibrate** (`calibration_masters`) — stack calibration frames into master dark/flat/bias/flat-dark + defect map, then per light frame: dark-subtract → flat-divide → defect-correct.
 3. **Detect stars** (`star_detection`) — six-stage detector → flux-sorted `Star`s with sub-pixel centroids and shape/quality metrics.
 4. **Register** (`registration`) — triangle matching → RANSAC/MAGSAC++ transform fit → match recovery → optional SIP distortion → image warp into a common frame.
@@ -41,7 +41,7 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 - `BitPix` (`mod.rs:27`, FITS pixel type + `normalization_max()`), `ImageDimensions` (`mod.rs:85`, width/height/channels ∈ {1,3}), `AstroImageMetadata` (`mod.rs:134`, full FITS/EXIF header set + CFA/filter/gain/exposure/coords).
 - Entry points: `from_file` (`mod.rs:268`, dispatches FITS → `fits::load_fits`, RAW exts → `raw::load_raw`, else imaginarium), `from_pixels` (`mod.rs:291`, interleaved → planar), `from_planar_channels` (`mod.rs:320`). `mean()` (parallel Kahan), `into_grayscale()` (Rec.709 luminance).
 - `cfa` (`CfaType` = `Mono | Bayer(CfaPattern) | XTrans([[u8;6];6])`; `CfaImage` un-demosaiced sensor data with in-place `subtract`/`divide_by_normalized` and `demosaic()` → `AstroImage`). Flat division uses **per-color-channel means** so non-white flats don't shift color.
-- `fits` (cfitsio I/O, header parsing, NaN/Inf sanitization, ROWORDER/XBAYROFF flips), `sensor` (`detect_sensor_type(filters, colors)` from libraw metadata), `error` (`ImageError`).
+- `fits` (`fits-well` I/O, `physical()` BSCALE/BZERO scaling, NaN/Inf sanitization, ROWORDER/XBAYROFF flips), `sensor` (`detect_sensor_type(filters, colors)` from libraw metadata), `error` (`ImageError`).
 
 ## calibration_masters — master frames & defects
 

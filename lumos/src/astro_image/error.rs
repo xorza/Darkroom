@@ -8,8 +8,11 @@ pub enum ImageError {
     #[error("Failed to load FITS file '{path}': {source}")]
     Fits {
         path: PathBuf,
-        source: fitsio::errors::Error,
+        source: fits_well::FitsError,
     },
+
+    #[error("Unsupported FITS file '{path}': {reason}")]
+    FitsUnsupported { path: PathBuf, reason: String },
 
     #[error("Failed to load image '{path}': {source}")]
     Image {

@@ -1,64 +1,64 @@
-use fitsio::FitsFile;
-use fitsio::hdu::HduInfo;
-use fitsio::images::ImageType;
+use std::fs::File;
 use std::path::Path;
+
+use fits_well::{Bitpix, FitsReader, Header, Scaling};
 
 use super::cfa::CfaType;
 use super::error::ImageError;
 use super::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 
-fn fits_err(path: &Path, source: fitsio::errors::Error) -> ImageError {
+fn fits_err(path: &Path, source: fits_well::FitsError) -> ImageError {
     ImageError::Fits {
         path: path.to_path_buf(),
         source,
     }
 }
 
+fn fits_unsupported(path: &Path, reason: impl Into<String>) -> ImageError {
+    ImageError::FitsUnsupported {
+        path: path.to_path_buf(),
+        reason: reason.into(),
+    }
+}
+
 /// Load an astronomical image from a FITS file.
 pub fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
-    let mut fptr = FitsFile::open(path).map_err(|e| fits_err(path, e))?;
+    let file = File::open(path).map_err(|source| ImageError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut reader = FitsReader::open(file).map_err(|e| fits_err(path, e))?;
 
-    let hdu = fptr.primary_hdu().map_err(|e| fits_err(path, e))?;
+    // The first image-bearing HDU: skips an empty (NAXIS=0) primary and reads a
+    // tile-compressed image transparently, which `primary_hdu` could not do.
+    let index = *reader
+        .image_indices()
+        .first()
+        .ok_or_else(|| fits_unsupported(path, "no image HDU found"))?;
 
-    let (dimensions, bitpix) = match &hdu.info {
-        HduInfo::ImageInfo { shape, image_type } => {
-            let bitpix = image_type_to_bitpix(image_type);
-            (shape.clone(), bitpix)
-        }
-        HduInfo::TableInfo { .. } => {
-            return Err(fits_err(
-                path,
-                fitsio::errors::Error::Message("Primary HDU is a table, not an image".into()),
-            ));
-        }
-        HduInfo::AnyInfo => {
-            return Err(fits_err(
-                path,
-                fitsio::errors::Error::Message("Unknown HDU type".into()),
-            ));
-        }
+    // Decode pixels and shape, then drop the data-unit borrow before reading headers.
+    let (shape, bitpix, pixels) = {
+        let raw = reader.read_image(index).map_err(|e| fits_err(path, e))?;
+        let bitpix = map_bitpix(raw.bitpix, &raw.scaling);
+        // `physical` applies BSCALE/BZERO and maps the integer BLANK to NaN, matching
+        // the effective values cfitsio's f32 read produced; widen-then-narrow to f32.
+        let pixels: Vec<f32> = raw.physical().into_iter().map(|v| v as f32).collect();
+        (raw.shape.clone(), bitpix, pixels)
     };
 
-    assert!(
-        !dimensions.is_empty(),
-        "Image must have at least one dimension"
-    );
+    assert!(!shape.is_empty(), "Image must have at least one dimension");
 
-    // FITS dimensions are in NAXIS order: NAXIS1 (width), NAXIS2 (height), NAXIS3 (channels)
-    // But shape is returned in reverse order: [channels, height, width] or [height, width]
-    let img_dims = match dimensions.len() {
-        2 => ImageDimensions::new(dimensions[1], dimensions[0], 1),
-        3 => ImageDimensions::new(dimensions[2], dimensions[1], dimensions[0]),
+    // fits-well reports shape NAXIS1-first: [width, height, (channels)].
+    let img_dims = match shape.len() {
+        2 => ImageDimensions::new(shape[0], shape[1], 1),
+        3 => ImageDimensions::new(shape[0], shape[1], shape[2]),
         n => {
-            return Err(fits_err(
+            return Err(fits_unsupported(
                 path,
-                fitsio::errors::Error::Message(format!("Unsupported number of dimensions: {}", n)),
+                format!("Unsupported number of dimensions: {n}"),
             ));
         }
     };
-
-    // Read pixel data as f32
-    let pixels: Vec<f32> = hdu.read_image(&mut fptr).map_err(|e| fits_err(path, e))?;
 
     let plane_size = img_dims.width * img_dims.height;
     assert_eq!(
@@ -70,38 +70,40 @@ pub fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
     // Normalize integer FITS data to [0,1] range (RAW files are already normalized)
     let pixels = normalize_fits_pixels(pixels, bitpix);
 
+    let header = &reader.hdus()[index].header;
+
     // Detect CFA pattern from BAYERPAT header
-    let cfa_type = read_cfa_from_headers(&hdu, &mut fptr);
+    let cfa_type = read_cfa_from_headers(header);
 
     // Read metadata
     let metadata = AstroImageMetadata {
-        object: read_key_optional(&hdu, &mut fptr, "OBJECT"),
-        instrument: read_key_optional(&hdu, &mut fptr, "INSTRUME"),
-        telescope: read_key_optional(&hdu, &mut fptr, "TELESCOP"),
-        date_obs: read_key_optional(&hdu, &mut fptr, "DATE-OBS"),
-        exposure_time: read_key_optional(&hdu, &mut fptr, "EXPTIME"),
-        iso: read_key_optional::<i32>(&hdu, &mut fptr, "ISOSPEED").map(|v| v as u32),
+        object: read_text(header, "OBJECT"),
+        instrument: read_text(header, "INSTRUME"),
+        telescope: read_text(header, "TELESCOP"),
+        date_obs: read_text(header, "DATE-OBS"),
+        exposure_time: header.get_real("EXPTIME"),
+        iso: header.get_integer("ISOSPEED").map(|v| v as u32),
         bitpix,
-        header_dimensions: dimensions,
+        header_dimensions: shape,
         cfa_type,
-        filter: read_key_optional(&hdu, &mut fptr, "FILTER"),
-        gain: read_key_optional(&hdu, &mut fptr, "GAIN"),
-        egain: read_key_optional(&hdu, &mut fptr, "EGAIN"),
-        ccd_temp: read_key_optional::<f64>(&hdu, &mut fptr, "CCD-TEMP")
-            .or_else(|| read_key_optional(&hdu, &mut fptr, "CCDTEMP")),
-        image_type: read_key_optional::<String>(&hdu, &mut fptr, "IMAGETYP")
-            .or_else(|| read_key_optional(&hdu, &mut fptr, "FRAME")),
-        xbinning: read_key_optional(&hdu, &mut fptr, "XBINNING"),
-        ybinning: read_key_optional(&hdu, &mut fptr, "YBINNING"),
-        set_temp: read_key_optional(&hdu, &mut fptr, "SET-TEMP"),
-        offset: read_key_optional(&hdu, &mut fptr, "OFFSET"),
-        focal_length: read_key_optional(&hdu, &mut fptr, "FOCALLEN"),
-        airmass: read_key_optional(&hdu, &mut fptr, "AIRMASS"),
-        ra_deg: read_ra_deg(&hdu, &mut fptr),
-        dec_deg: read_dec_deg(&hdu, &mut fptr),
-        pixel_size_x: read_key_optional(&hdu, &mut fptr, "XPIXSZ"),
-        pixel_size_y: read_key_optional(&hdu, &mut fptr, "YPIXSZ"),
-        data_max: read_key_optional(&hdu, &mut fptr, "DATAMAX"),
+        filter: read_text(header, "FILTER"),
+        gain: header.get_real("GAIN"),
+        egain: header.get_real("EGAIN"),
+        ccd_temp: header
+            .get_real("CCD-TEMP")
+            .or_else(|| header.get_real("CCDTEMP")),
+        image_type: read_text(header, "IMAGETYP").or_else(|| read_text(header, "FRAME")),
+        xbinning: header.get_integer("XBINNING").map(|v| v as i32),
+        ybinning: header.get_integer("YBINNING").map(|v| v as i32),
+        set_temp: header.get_real("SET-TEMP"),
+        offset: header.get_integer("OFFSET").map(|v| v as i32),
+        focal_length: header.get_real("FOCALLEN"),
+        airmass: header.get_real("AIRMASS"),
+        ra_deg: read_ra_deg(header),
+        dec_deg: read_dec_deg(header),
+        pixel_size_x: header.get_real("XPIXSZ"),
+        pixel_size_y: header.get_real("YPIXSZ"),
+        data_max: header.get_real("DATAMAX"),
     };
 
     // FITS stores 3D images in planar order (all R, then all G, then all B).
@@ -116,20 +118,22 @@ pub fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
     Ok(astro)
 }
 
-/// Convert ImageType to BitPix enum.
+/// Map a FITS `BITPIX` to lumos's `BitPix`, recovering unsigned integer types.
 ///
-/// cfitsio distinguishes signed from unsigned types (BZERO convention),
-/// so we preserve this for correct normalization ranges.
-fn image_type_to_bitpix(image_type: &ImageType) -> BitPix {
-    match image_type {
-        ImageType::UnsignedByte | ImageType::Byte => BitPix::UInt8,
-        ImageType::Short => BitPix::Int16,
-        ImageType::UnsignedShort => BitPix::UInt16,
-        ImageType::Long => BitPix::Int32,
-        ImageType::UnsignedLong => BitPix::UInt32,
-        ImageType::LongLong => BitPix::Int64,
-        ImageType::Float => BitPix::Float32,
-        ImageType::Double => BitPix::Float64,
+/// FITS stores only signed integers; unsigned data uses the BZERO convention
+/// (`BZERO = 2^(n-1)`, `BSCALE = 1`). fits-well reports the raw signed `BITPIX`,
+/// so we inspect `Scaling` to restore the distinction the normalization ranges need.
+fn map_bitpix(bitpix: Bitpix, scaling: &Scaling) -> BitPix {
+    let unsigned = scaling.bscale == 1.0;
+    match bitpix {
+        Bitpix::U8 => BitPix::UInt8,
+        Bitpix::I16 if unsigned && scaling.bzero == 32768.0 => BitPix::UInt16,
+        Bitpix::I16 => BitPix::Int16,
+        Bitpix::I32 if unsigned && scaling.bzero == 2_147_483_648.0 => BitPix::UInt32,
+        Bitpix::I32 => BitPix::Int32,
+        Bitpix::I64 => BitPix::Int64,
+        Bitpix::F32 => BitPix::Float32,
+        Bitpix::F64 => BitPix::Float64,
     }
 }
 
@@ -167,15 +171,15 @@ fn normalize_fits_pixels(mut pixels: Vec<f32>, bitpix: BitPix) -> Vec<f32> {
 /// BAYERPAT values: "RGGB", "BGGR", "GRBG", "GBRG", or "TRUE" (= RGGB).
 /// ROWORDER: "TOP-DOWN" (default) or "BOTTOM-UP" (flips pattern vertically).
 /// XBAYROFF/YBAYROFF: integer offsets into the Bayer matrix (shifts pattern).
-fn read_cfa_from_headers(hdu: &fitsio::hdu::FitsHdu, fptr: &mut FitsFile) -> Option<CfaType> {
+fn read_cfa_from_headers(header: &Header) -> Option<CfaType> {
     use crate::raw::demosaic::bayer::CfaPattern;
 
-    let bayerpat: String = read_key_optional(hdu, fptr, "BAYERPAT")?;
-    let mut pattern = CfaPattern::from_bayerpat(&bayerpat)?;
+    let bayerpat = header.get_text("BAYERPAT")?;
+    let mut pattern = CfaPattern::from_bayerpat(bayerpat)?;
 
     // ROWORDER: if BOTTOM-UP, the first row in memory is the bottom of the image,
     // so the Bayer pattern needs to be flipped vertically.
-    if let Some(roworder) = read_key_optional::<String>(hdu, fptr, "ROWORDER")
+    if let Some(roworder) = header.get_text("ROWORDER")
         && roworder.trim().eq_ignore_ascii_case("BOTTOM-UP")
     {
         pattern = pattern.flip_vertical();
@@ -183,8 +187,8 @@ fn read_cfa_from_headers(hdu: &fitsio::hdu::FitsHdu, fptr: &mut FitsFile) -> Opt
 
     // XBAYROFF/YBAYROFF: offset into the Bayer matrix.
     // An odd Y offset flips rows, an odd X offset flips columns.
-    let xoff: i32 = read_key_optional(hdu, fptr, "XBAYROFF").unwrap_or(0);
-    let yoff: i32 = read_key_optional(hdu, fptr, "YBAYROFF").unwrap_or(0);
+    let xoff = header.get_integer("XBAYROFF").unwrap_or(0);
+    let yoff = header.get_integer("YBAYROFF").unwrap_or(0);
     if yoff & 1 != 0 {
         pattern = pattern.flip_vertical();
     }
@@ -199,27 +203,27 @@ fn read_cfa_from_headers(hdu: &fitsio::hdu::FitsHdu, fptr: &mut FitsFile) -> Opt
 ///
 /// Tries: `RA` (degrees, NINA/SGP), `OBJCTRA` (HMS string, MaximDL/ASCOM),
 /// `CRVAL1` (WCS reference point, plate-solved images).
-fn read_ra_deg(hdu: &fitsio::hdu::FitsHdu, fptr: &mut FitsFile) -> Option<f64> {
-    if let Some(ra) = read_key_optional::<f64>(hdu, fptr, "RA") {
+fn read_ra_deg(header: &Header) -> Option<f64> {
+    if let Some(ra) = header.get_real("RA") {
         return Some(ra);
     }
-    if let Some(s) = read_key_optional::<String>(hdu, fptr, "OBJCTRA") {
-        return parse_hms_to_deg(&s);
+    if let Some(s) = header.get_text("OBJCTRA") {
+        return parse_hms_to_deg(s);
     }
-    read_key_optional::<f64>(hdu, fptr, "CRVAL1")
+    header.get_real("CRVAL1")
 }
 
 /// Read DEC in degrees from FITS headers.
 ///
 /// Tries: `DEC` (degrees), `OBJCTDEC` (DMS string), `CRVAL2` (WCS).
-fn read_dec_deg(hdu: &fitsio::hdu::FitsHdu, fptr: &mut FitsFile) -> Option<f64> {
-    if let Some(dec) = read_key_optional::<f64>(hdu, fptr, "DEC") {
+fn read_dec_deg(header: &Header) -> Option<f64> {
+    if let Some(dec) = header.get_real("DEC") {
         return Some(dec);
     }
-    if let Some(s) = read_key_optional::<String>(hdu, fptr, "OBJCTDEC") {
-        return parse_dms_to_deg(&s);
+    if let Some(s) = header.get_text("OBJCTDEC") {
+        return parse_dms_to_deg(s);
     }
-    read_key_optional::<f64>(hdu, fptr, "CRVAL2")
+    header.get_real("CRVAL2")
 }
 
 /// Parse HMS string "HH MM SS.ss" to degrees.
@@ -261,13 +265,9 @@ fn parse_dms_to_deg(s: &str) -> Option<f64> {
     Some(sign * (parts[0].abs() + parts[1] / 60.0 + parts[2] / 3600.0))
 }
 
-/// Helper to read an optional string key from FITS header.
-fn read_key_optional<T: fitsio::headers::ReadsKey>(
-    hdu: &fitsio::hdu::FitsHdu,
-    fptr: &mut FitsFile,
-    key: &str,
-) -> Option<T> {
-    hdu.read_key(fptr, key).ok()
+/// Read an optional string-valued header key as an owned `String`.
+fn read_text(header: &Header, key: &str) -> Option<String> {
+    header.get_text(key).map(str::to_owned)
 }
 
 #[cfg(test)]

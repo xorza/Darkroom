@@ -7,7 +7,8 @@ members = [
     "lumos",
     "imaginarium",
     "quickbench",
-    "palantir"
+    "palantir",
+    "fits-well"
 ]
 default-members = ["darkroom"]
 exclude = [".tmp"]
@@ -27,11 +28,9 @@ darkroom = { path = "darkroom" }
 imaginarium = { path = "imaginarium", features = ["wgpu"] }
 lens = { path = "lens" }
 palantir = { path = "palantir" }
+fits-well = { path = "fits-well" }
 
 wgpu = { version = "29.0", features = ["metal", "vulkan", "dx12"] }
-
-# gh repo recommends using development version
-fitsio = { git = "https://github.com/simonrw/rust-fitsio", features = ["fitsio-src", "src-cmake"] }
 
 libraw-rs-sys = { version = "0.0.4" }
 
@@ -155,9 +154,7 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.lz4_flex]
 opt-level = 3
-[profile.dev.package.fitsio]
-opt-level = 3
-[profile.dev.package.fitsio-sys]
+[profile.dev.package.fits-well]
 opt-level = 3
 [profile.dev.package.libraw-rs-sys]
 opt-level = 3
