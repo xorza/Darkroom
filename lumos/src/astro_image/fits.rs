@@ -1,4 +1,3 @@
-use std::fs::File;
 use std::path::Path;
 
 use fits_well::{FitsReader, Header, SampleType};
@@ -23,11 +22,14 @@ fn fits_unsupported(path: &Path, reason: impl Into<String>) -> ImageError {
 
 /// Load an astronomical image from a FITS file.
 pub fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
-    let file = File::open(path).map_err(|source| ImageError::Io {
+    // Read the whole file once, then decode straight from the bytes: `from_bytes`
+    // borrows the buffer in place, so `read_image` skips the per-data-unit staging
+    // copy that the seeking `open` path pays.
+    let bytes = std::fs::read(path).map_err(|source| ImageError::Io {
         path: path.to_path_buf(),
         source,
     })?;
-    let mut reader = FitsReader::open(file).map_err(|e| fits_err(path, e))?;
+    let mut reader = FitsReader::from_bytes(&bytes).map_err(|e| fits_err(path, e))?;
 
     // The first image-bearing HDU: skips an empty (NAXIS=0) primary and reads a
     // tile-compressed image transparently, which `primary_hdu` could not do.
@@ -51,7 +53,16 @@ pub fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
     // fits-well reports shape NAXIS1-first: [width, height, (channels)].
     let img_dims = match shape.len() {
         2 => ImageDimensions::new(shape[0], shape[1], 1),
-        3 => ImageDimensions::new(shape[0], shape[1], shape[2]),
+        // A 3D FITS is RGB only when NAXIS3 ∈ {1,3}; any other depth is a data cube
+        // we don't model — reject it cleanly instead of tripping ImageDimensions's
+        // channel assertion on untrusted file input.
+        3 if shape[2] == 1 || shape[2] == 3 => ImageDimensions::new(shape[0], shape[1], shape[2]),
+        3 => {
+            return Err(fits_unsupported(
+                path,
+                format!("Unsupported channel count (NAXIS3): {}", shape[2]),
+            ));
+        }
         n => {
             return Err(fits_unsupported(
                 path,
@@ -138,28 +149,31 @@ fn map_bitpix(sample_type: SampleType) -> BitPix {
 
 /// Normalize FITS pixel data to [0,1] range.
 ///
-/// Integer types: `physical()` already applied BZERO/BSCALE, so values are in
-/// the correct integer range. We divide by the max value for the BITPIX type.
+/// First pass always sanitizes non-finite values to 0.0: `physical_f32` maps the
+/// integer `BLANK` sentinel (and float NaN/Inf nulls) to NaN, and those must not
+/// survive into the pipeline for *either* type — an integer FITS carrying a BLANK
+/// keyword does produce NaN here, so the integer path can't assume clean input.
 ///
-/// Float types: the FITS standard does not define a normalization convention.
-/// Data may be in [0,1] (PixInsight), [0,65535] (DeepSkyStacker), [0,255],
-/// or arbitrary physical units. We detect the actual max value and normalize
-/// if it exceeds 2.0 (threshold provides headroom for HDR/overexposed pixels
-/// while catching the common integer-like ranges).
+/// Integer types: BZERO/BSCALE was already applied, so the sanitized values sit in
+/// the correct integer range — divide by the max value for the BITPIX type.
+///
+/// Float types: the FITS standard defines no normalization convention. Data may be
+/// in [0,1] (PixInsight), [0,65535] (DeepSkyStacker), [0,255], or arbitrary physical
+/// units. We take the actual max and normalize only if it exceeds 2.0 (headroom for
+/// HDR/overexposed pixels while still catching the common integer-like ranges).
 fn normalize_fits_pixels(mut pixels: Vec<f32>, bitpix: BitPix) -> Vec<f32> {
-    let inv_max = if let Some(max_val) = bitpix.normalization_max() {
-        1.0 / max_val
-    } else {
-        // Float types: sanitize NaN/Inf to 0.0 and find max in one pass
-        let mut max = f32::NEG_INFINITY;
-        for p in pixels.iter_mut() {
-            if p.is_finite() {
-                max = max.max(*p);
-            } else {
-                *p = 0.0;
-            }
+    let mut max = f32::NEG_INFINITY;
+    for p in pixels.iter_mut() {
+        if p.is_finite() {
+            max = max.max(*p);
+        } else {
+            *p = 0.0;
         }
-        if max > 2.0 { 1.0 / max } else { return pixels }
+    }
+    let inv_max = match bitpix.normalization_max() {
+        Some(max_val) => 1.0 / max_val,
+        None if max > 2.0 => 1.0 / max,
+        None => return pixels,
     };
     pixels.iter_mut().for_each(|p| *p *= inv_max);
     pixels
@@ -207,7 +221,8 @@ fn read_ra_deg(header: &Header) -> Option<f64> {
         return Some(ra);
     }
     if let Some(s) = header.get_text("OBJCTRA") {
-        return parse_hms_to_deg(s);
+        // OBJCTRA is in hours; scale the sexagesimal value to degrees.
+        return parse_sexagesimal(s).map(|h| h * 15.0);
     }
     header.get_real("CRVAL1")
 }
@@ -220,34 +235,18 @@ fn read_dec_deg(header: &Header) -> Option<f64> {
         return Some(dec);
     }
     if let Some(s) = header.get_text("OBJCTDEC") {
-        return parse_dms_to_deg(s);
+        return parse_sexagesimal(s);
     }
     header.get_real("CRVAL2")
 }
 
-/// Parse HMS string "HH MM SS.ss" to degrees.
-/// Accepts both space-delimited and colon-delimited formats.
-fn parse_hms_to_deg(s: &str) -> Option<f64> {
-    let parts: Vec<f64> = s
-        .split([' ', ':'])
-        .filter(|p| !p.is_empty())
-        .map(|p| p.trim().parse().ok())
-        .collect::<Option<Vec<_>>>()?;
-    if parts.len() != 3 {
-        return None;
-    }
-    // RA in hours: deg = (h + m/60 + s/3600) * 15
-    let sign = if parts[0].is_sign_negative() {
-        -1.0
-    } else {
-        1.0
-    };
-    Some(sign * (parts[0].abs() + parts[1] / 60.0 + parts[2] / 3600.0) * 15.0)
-}
-
-/// Parse DMS string "±DD MM SS.ss" to degrees.
-/// Accepts both space-delimited and colon-delimited formats.
-fn parse_dms_to_deg(s: &str) -> Option<f64> {
+/// Parse a sexagesimal triple "±AA BB CC.cc" to its signed decimal value
+/// `AA + BB/60 + CC/3600`. Accepts space- or colon-delimited fields.
+///
+/// DEC (degrees) uses the result directly; RA (hours) scales it by 15 at the call
+/// site. The sign is taken from the first field, so "-00 30 00" is -0.5 — a bare
+/// `-AA.abs()` would otherwise drop the sign on a zero-degree/hour field.
+fn parse_sexagesimal(s: &str) -> Option<f64> {
     let parts: Vec<f64> = s
         .split([' ', ':'])
         .filter(|p| !p.is_empty())
@@ -436,14 +435,13 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_uint16_nan_not_sanitized() {
-        // Integer types use fixed normalization_max, NaN handling is float-only.
-        // NaN * inv_max = NaN — integer FITS should never contain NaN from cfitsio,
-        // so we don't sanitize (would mask a real bug).
+    fn test_normalize_uint16_nan_sanitized() {
+        // fits-well's physical_f32 maps the integer BLANK sentinel to NaN, so the
+        // integer path must sanitize too: NaN → 0.0 before the fixed-max divide.
         let pixels = vec![0.0, f32::NAN, 65535.0];
         let result = normalize_fits_pixels(pixels, BitPix::UInt16);
         assert!((result[0] - 0.0).abs() < 1e-7);
-        assert!(result[1].is_nan()); // Not sanitized for integer types
+        assert_eq!(result[1], 0.0); // BLANK → 0.0, not propagated as NaN
         assert!((result[2] - 1.0).abs() < 1e-7);
     }
 
@@ -452,70 +450,39 @@ mod tests {
     // ====================================================================
 
     #[test]
-    fn test_parse_hms_space_delimited() {
-        // M42: RA = 05h 35m 17.3s = (5 + 35/60 + 17.3/3600) * 15 = 83.82208333... deg
-        let deg = parse_hms_to_deg("05 35 17.3").unwrap();
-        let expected = (5.0 + 35.0 / 60.0 + 17.3 / 3600.0) * 15.0; // 83.82208333
-        assert!(
-            (deg - expected).abs() < 1e-10,
-            "got {deg}, expected {expected}"
-        );
-    }
-
-    #[test]
-    fn test_parse_hms_colon_delimited() {
-        // Same value with colons
-        let deg = parse_hms_to_deg("05:35:17.3").unwrap();
+    fn test_parse_sexagesimal_hms_to_ra_deg() {
+        // RA is in hours; the call site scales the triple by 15 to get degrees.
+        // M42: 05h 35m 17.3s = (5 + 35/60 + 17.3/3600) * 15 = 83.82208333... deg
         let expected = (5.0 + 35.0 / 60.0 + 17.3 / 3600.0) * 15.0;
-        assert!((deg - expected).abs() < 1e-10);
+        // Space- and colon-delimited forms parse identically.
+        for s in ["05 35 17.3", "05:35:17.3"] {
+            let deg = parse_sexagesimal(s).unwrap() * 15.0;
+            assert!(
+                (deg - expected).abs() < 1e-10,
+                "{s}: got {deg}, expected {expected}"
+            );
+        }
+        // Zero triple → 0.
+        assert!((parse_sexagesimal("00 00 00.0").unwrap() * 15.0).abs() < 1e-10);
     }
 
     #[test]
-    fn test_parse_hms_zero() {
-        // RA = 00h 00m 00.0s = 0.0 deg
-        let deg = parse_hms_to_deg("00 00 00.0").unwrap();
-        assert!((deg - 0.0).abs() < 1e-10);
+    fn test_parse_sexagesimal_dms_to_dec_deg() {
+        // DEC uses the triple directly (degrees).
+        // M42: -05° 23' 28.0" = -(5 + 23/60 + 28/3600) = -5.39111...
+        let neg = parse_sexagesimal("-05 23 28.0").unwrap();
+        assert!((neg - -(5.0 + 23.0 / 60.0 + 28.0 / 3600.0)).abs() < 1e-10);
+        // Colon-delimited positive.
+        let pos = parse_sexagesimal("+45:30:15.5").unwrap();
+        assert!((pos - (45.0 + 30.0 / 60.0 + 15.5 / 3600.0)).abs() < 1e-10);
+        // Sign must survive a zero-degree field: -00° 30' = -0.5, not +0.5.
+        assert!((parse_sexagesimal("-00 30 00.0").unwrap() - -0.5).abs() < 1e-10);
     }
 
     #[test]
-    fn test_parse_dms_positive() {
-        // M42 DEC: -05° 23' 28.0" = -(5 + 23/60 + 28/3600) = -5.39111...
-        let deg = parse_dms_to_deg("-05 23 28.0").unwrap();
-        let expected = -(5.0 + 23.0 / 60.0 + 28.0 / 3600.0); // -5.39111
-        assert!(
-            (deg - expected).abs() < 1e-10,
-            "got {deg}, expected {expected}"
-        );
-    }
-
-    #[test]
-    fn test_parse_dms_colon_delimited() {
-        let deg = parse_dms_to_deg("+45:30:15.5").unwrap();
-        let expected = 45.0 + 30.0 / 60.0 + 15.5 / 3600.0; // 45.50430555
-        assert!((deg - expected).abs() < 1e-10);
-    }
-
-    #[test]
-    fn test_parse_dms_negative_zero_degrees() {
-        // DEC = -00° 30' 00.0" = -0.5 deg (sign on zero degrees)
-        let deg = parse_dms_to_deg("-00 30 00.0").unwrap();
-        let expected = -0.5;
-        assert!(
-            (deg - expected).abs() < 1e-10,
-            "got {deg}, expected {expected}"
-        );
-    }
-
-    #[test]
-    fn test_parse_hms_invalid_parts() {
-        assert!(parse_hms_to_deg("05 35").is_none()); // only 2 parts
-        assert!(parse_hms_to_deg("").is_none());
-        assert!(parse_hms_to_deg("abc def ghi").is_none());
-    }
-
-    #[test]
-    fn test_parse_dms_invalid_parts() {
-        assert!(parse_dms_to_deg("45 30").is_none());
-        assert!(parse_dms_to_deg("").is_none());
+    fn test_parse_sexagesimal_invalid() {
+        assert!(parse_sexagesimal("05 35").is_none()); // only 2 fields
+        assert!(parse_sexagesimal("").is_none());
+        assert!(parse_sexagesimal("abc def ghi").is_none());
     }
 }
