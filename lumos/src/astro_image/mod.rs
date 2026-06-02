@@ -21,7 +21,7 @@ use common::Buffer2;
 ///
 /// FITS natively supports only signed integers. Unsigned integers use the
 /// BZERO convention (e.g., BITPIX=16 + BZERO=32768 for unsigned 16-bit).
-/// cfitsio handles this transparently and reports the effective type.
+/// fits-well's `SampleType` resolves this and reports the effective type.
 /// The unsigned variants here preserve the distinction for correct normalization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum BitPix {
@@ -37,30 +37,6 @@ pub enum BitPix {
 }
 
 impl BitPix {
-    pub fn from_fits_value(value: i32) -> Result<Self, String> {
-        match value {
-            8 => Ok(BitPix::UInt8),
-            16 => Ok(BitPix::Int16),
-            32 => Ok(BitPix::Int32),
-            64 => Ok(BitPix::Int64),
-            -32 => Ok(BitPix::Float32),
-            -64 => Ok(BitPix::Float64),
-            _ => Err(format!("Unknown FITS BITPIX value: {value}")),
-        }
-    }
-
-    pub fn to_fits_value(self) -> i32 {
-        match self {
-            BitPix::UInt8 => 8,
-            // Both signed and unsigned 16-bit map to BITPIX=16 (BZERO distinguishes)
-            BitPix::Int16 | BitPix::UInt16 => 16,
-            BitPix::Int32 | BitPix::UInt32 => 32,
-            BitPix::Int64 => 64,
-            BitPix::Float32 => -32,
-            BitPix::Float64 => -64,
-        }
-    }
-
     /// Normalization divisor for converting integer FITS data to [0,1].
     /// Returns `None` for float types (assumed already in correct range).
     pub fn normalization_max(self) -> Option<f32> {

@@ -501,37 +501,6 @@ fn test_image_dimensions_invalid_channels() {
 }
 
 #[test]
-fn test_bitpix_roundtrip() {
-    let values = [
-        (8, BitPix::UInt8),
-        (16, BitPix::Int16),
-        (32, BitPix::Int32),
-        (64, BitPix::Int64),
-        (-32, BitPix::Float32),
-        (-64, BitPix::Float64),
-    ];
-
-    for (fits_val, expected) in values {
-        let bitpix = BitPix::from_fits_value(fits_val).unwrap();
-        assert_eq!(bitpix, expected);
-        assert_eq!(bitpix.to_fits_value(), fits_val);
-    }
-}
-
-#[test]
-fn test_bitpix_unsigned_variants() {
-    // UInt16 and UInt32 map back to the same BITPIX as signed
-    assert_eq!(BitPix::UInt16.to_fits_value(), 16);
-    assert_eq!(BitPix::UInt32.to_fits_value(), 32);
-}
-
-#[test]
-fn test_bitpix_from_fits_value_unknown() {
-    assert!(BitPix::from_fits_value(99).is_err());
-    assert!(BitPix::from_fits_value(0).is_err());
-}
-
-#[test]
 fn test_bitpix_normalization_max() {
     assert_eq!(BitPix::UInt8.normalization_max(), Some(255.0));
     assert_eq!(BitPix::UInt16.normalization_max(), Some(65535.0));

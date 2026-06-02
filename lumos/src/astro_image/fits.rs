@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::path::Path;
 
-use fits_well::{Bitpix, FitsReader, Header, Scaling};
+use fits_well::{FitsReader, Header, SampleType};
 
 use super::cfa::CfaType;
 use super::error::ImageError;
@@ -39,7 +39,7 @@ pub fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
     // Decode pixels and shape, then drop the data-unit borrow before reading headers.
     let (shape, bitpix, pixels) = {
         let raw = reader.read_image(index).map_err(|e| fits_err(path, e))?;
-        let bitpix = map_bitpix(raw.bitpix, &raw.scaling);
+        let bitpix = map_bitpix(raw.sample_type());
         // `physical` applies BSCALE/BZERO and maps the integer BLANK to NaN, matching
         // the effective values cfitsio's f32 read produced; widen-then-narrow to f32.
         let pixels: Vec<f32> = raw.physical().into_iter().map(|v| v as f32).collect();
@@ -118,22 +118,21 @@ pub fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
     Ok(astro)
 }
 
-/// Map a FITS `BITPIX` to lumos's `BitPix`, recovering unsigned integer types.
+/// Map fits-well's effective `SampleType` to lumos's `BitPix`.
 ///
-/// FITS stores only signed integers; unsigned data uses the BZERO convention
-/// (`BZERO = 2^(n-1)`, `BSCALE = 1`). fits-well reports the raw signed `BITPIX`,
-/// so we inspect `Scaling` to restore the distinction the normalization ranges need.
-fn map_bitpix(bitpix: Bitpix, scaling: &Scaling) -> BitPix {
-    let unsigned = scaling.bscale == 1.0;
-    match bitpix {
-        Bitpix::U8 => BitPix::UInt8,
-        Bitpix::I16 if unsigned && scaling.bzero == 32768.0 => BitPix::UInt16,
-        Bitpix::I16 => BitPix::Int16,
-        Bitpix::I32 if unsigned && scaling.bzero == 2_147_483_648.0 => BitPix::UInt32,
-        Bitpix::I32 => BitPix::Int32,
-        Bitpix::I64 => BitPix::Int64,
-        Bitpix::F32 => BitPix::Float32,
-        Bitpix::F64 => BitPix::Float64,
+/// `SampleType` already resolves the FITS unsigned/signed-byte BZERO conventions, so
+/// the normalization range falls straight out. lumos has no signed-byte or unsigned-64
+/// type, so `I8` folds into `UInt8` and `U64` into `Int64` (as the cfitsio path did).
+fn map_bitpix(sample_type: SampleType) -> BitPix {
+    match sample_type {
+        SampleType::I8 | SampleType::U8 => BitPix::UInt8,
+        SampleType::I16 => BitPix::Int16,
+        SampleType::U16 => BitPix::UInt16,
+        SampleType::I32 => BitPix::Int32,
+        SampleType::U32 => BitPix::UInt32,
+        SampleType::I64 | SampleType::U64 => BitPix::Int64,
+        SampleType::F32 => BitPix::Float32,
+        SampleType::F64 => BitPix::Float64,
     }
 }
 
