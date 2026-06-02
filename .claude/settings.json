@@ -4,7 +4,7 @@
     "CARGO_TERM_COLOR": "always"
   },
   "permissions": {
-    "defaultMode": "acceptEdits",
+    "defaultMode": "auto",
     "allow": [
       "WebSearch",
       "WebFetch",
