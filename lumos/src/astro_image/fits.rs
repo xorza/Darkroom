@@ -40,9 +40,9 @@ pub fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
     let (shape, bitpix, pixels) = {
         let raw = reader.read_image(index).map_err(|e| fits_err(path, e))?;
         let bitpix = map_bitpix(raw.sample_type());
-        // `physical` applies BSCALE/BZERO and maps the integer BLANK to NaN, matching
-        // the effective values cfitsio's f32 read produced; widen-then-narrow to f32.
-        let pixels: Vec<f32> = raw.physical().into_iter().map(|v| v as f32).collect();
+        // `physical_f32` applies BSCALE/BZERO and maps the integer BLANK to NaN (the
+        // effective values cfitsio's f32 read produced), narrowing in a single pass.
+        let pixels: Vec<f32> = raw.physical_f32();
         (raw.shape.clone(), bitpix, pixels)
     };
 
