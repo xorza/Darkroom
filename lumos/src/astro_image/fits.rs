@@ -139,8 +139,8 @@ fn map_bitpix(bitpix: Bitpix, scaling: &Scaling) -> BitPix {
 
 /// Normalize FITS pixel data to [0,1] range.
 ///
-/// Integer types: cfitsio already applies BZERO/BSCALE, so values are in the
-/// correct integer range. We divide by the max value for the BITPIX type.
+/// Integer types: `physical()` already applied BZERO/BSCALE, so values are in
+/// the correct integer range. We divide by the max value for the BITPIX type.
 ///
 /// Float types: the FITS standard does not define a normalization convention.
 /// Data may be in [0,1] (PixInsight), [0,65535] (DeepSkyStacker), [0,255],
