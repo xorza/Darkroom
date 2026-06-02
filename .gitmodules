@@ -7,3 +7,6 @@
 [submodule "palantir"]
 	path = palantir
 	url = git@github.com:xorza/palantir.git
+[submodule "fits-well"]
+	path = fits-well
+	url = git@github.com:xorza/fits-well.git
