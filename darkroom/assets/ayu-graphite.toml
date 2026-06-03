@@ -407,6 +407,108 @@ color = "#878a8d"
 line_height_mult = 1.2
 family = "Sans"
 
+[palantir_theme.switch]
+indicator = "#ffffff"
+box_size = 20.0
+indicator_stroke = 2.0
+indicator_inset = 3.0
+row_gap = 8.0
+
+[palantir_theme.switch.unchecked.normal.background]
+corners = 10.0
+
+[palantir_theme.switch.unchecked.normal.background.fill]
+Solid = "#3e3e3e"
+
+[palantir_theme.switch.unchecked.normal.background.stroke]
+width = 1.0
+
+[palantir_theme.switch.unchecked.normal.background.stroke.brush]
+Solid = "#aaaaa859"
+
+[palantir_theme.switch.unchecked.hovered.background]
+corners = 10.0
+
+[palantir_theme.switch.unchecked.hovered.background.fill]
+Solid = "#4b4b4b"
+
+[palantir_theme.switch.unchecked.hovered.background.stroke]
+width = 1.0
+
+[palantir_theme.switch.unchecked.hovered.background.stroke.brush]
+Solid = "#aaaaa859"
+
+[palantir_theme.switch.unchecked.pressed.background]
+corners = 10.0
+
+[palantir_theme.switch.unchecked.pressed.background.fill]
+Solid = "#4b4b4b"
+
+[palantir_theme.switch.unchecked.pressed.background.stroke]
+width = 1.0
+
+[palantir_theme.switch.unchecked.pressed.background.stroke.brush]
+Solid = "#105577"
+
+[palantir_theme.switch.unchecked.disabled.background]
+corners = 10.0
+
+[palantir_theme.switch.unchecked.disabled.background.fill]
+Solid = "#343434"
+
+[palantir_theme.switch.unchecked.disabled.background.stroke]
+width = 1.0
+
+[palantir_theme.switch.unchecked.disabled.background.stroke.brush]
+Solid = "#aaaaa82e"
+
+[palantir_theme.switch.unchecked.disabled.text]
+font_size_px = 16.0
+color = "#878a8d"
+line_height_mult = 1.2
+family = "Sans"
+
+[palantir_theme.switch.checked.normal.background]
+corners = 10.0
+
+[palantir_theme.switch.checked.normal.background.fill]
+Solid = "#9adbfb"
+
+[palantir_theme.switch.checked.hovered.background]
+corners = 10.0
+
+[palantir_theme.switch.checked.hovered.background.fill]
+Solid = "#9adbfb"
+
+[palantir_theme.switch.checked.pressed.background]
+corners = 10.0
+
+[palantir_theme.switch.checked.pressed.background.fill]
+Solid = "#9adbfb"
+
+[palantir_theme.switch.checked.pressed.background.stroke]
+width = 1.0
+
+[palantir_theme.switch.checked.pressed.background.stroke.brush]
+Solid = "#105577"
+
+[palantir_theme.switch.checked.disabled.background]
+corners = 10.0
+
+[palantir_theme.switch.checked.disabled.background.fill]
+Solid = "#9adbfb73"
+
+[palantir_theme.switch.checked.disabled.text]
+font_size_px = 16.0
+color = "#878a8d"
+line_height_mult = 1.2
+family = "Sans"
+
+[palantir_theme.switch.anim]
+kind = "spring"
+stiffness = 170.0
+damping = 26.0
+
 [palantir_theme.scrollbar]
 width = 8.0
 gap = 4.0
@@ -545,6 +647,18 @@ family = "Sans"
 
 [palantir_theme.tooltip.max_size]
 w = 280.0
+
+[palantir_theme.progress_bar]
+track = "#3e3e3e"
+fill = "#9adbfb"
+height = 6.0
+
+[palantir_theme.slider]
+rail = "#3e3e3e"
+fill = "#9adbfb"
+knob = "#ffffff"
+knob_size = 18.0
+rail_thickness = 4.0
 
 [palantir_theme.text]
 font_size_px = 16.0
