@@ -409,8 +409,8 @@ fn exec_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
         Some(color) => Shadow {
             color,
             offset: Vec2::ZERO,
-            blur: 8.0,
-            spread: 2.0,
+            blur: 3.0,
+            spread: 0.0,
             inset: false,
         },
         None => Shadow::NONE,
