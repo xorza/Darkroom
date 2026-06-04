@@ -17,14 +17,14 @@ use std::sync::Arc;
 
 use scenarium::prelude::{FuncLib, Graph as CoreGraph};
 
-use crate::app::builtin_func_lib;
-use crate::app::worker::{WorkerBridge, WorkerEvent};
 use crate::document::Document;
 use crate::edit::intent::{Intent, apply_step, build_step};
+use crate::func_lib::builtin_func_lib;
 use crate::io::config::AppConfig;
 use crate::io::{library, persistence};
 use crate::script::{ScriptConfig, ScriptHost, SessionInbound};
 use crate::wake::Wake;
+use crate::worker::{WorkerBridge, WorkerEvent};
 
 #[cfg(test)]
 mod tests;

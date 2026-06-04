@@ -1,37 +1,23 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use lens::ImageFuncLib;
 use palantir::{HostHandle, Ui};
-use scenarium::elements::basic_funclib::BasicFuncLib;
-use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
 use scenarium::prelude::{FuncLib, Graph as CoreGraph};
 
 use crate::document::Document;
+use crate::func_lib::builtin_func_lib;
 use crate::io::config::AppConfig;
 use crate::io::library;
 use crate::run_state::RunState;
 use crate::script::{ScriptConfig, ScriptHost, SessionInbound};
 use crate::theme::{Theme, ThemeChoice};
 use crate::wake::Wake;
+use crate::worker::{WorkerBridge, WorkerEvent};
 
 mod commands;
 pub(crate) mod editor;
-pub(crate) mod worker;
 
 use editor::Editor;
-use worker::{WorkerBridge, WorkerEvent};
-
-/// The built-in runtime function library. Builtins carry no subgraph
-/// defs, so `func_lib.subgraphs` *is* the shared subgraph library —
-/// loaded from the library file at startup, grown by "promote".
-pub(crate) fn builtin_func_lib() -> FuncLib {
-    let mut func_lib = FuncLib::default();
-    func_lib.merge(BasicFuncLib::default());
-    func_lib.merge(WorkerEventsFuncLib::default());
-    func_lib.merge(ImageFuncLib::default());
-    func_lib
-}
 
 /// Shared per-frame context threaded down the UI tree. Holds borrows
 /// of state owned higher up so child subtrees don't take a growing

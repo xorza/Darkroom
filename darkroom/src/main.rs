@@ -1,6 +1,7 @@
 mod app;
 mod document;
 mod edit;
+mod func_lib;
 mod gui;
 mod headless;
 mod io;
@@ -12,6 +13,7 @@ mod session;
 mod theme;
 mod tui;
 mod wake;
+mod worker;
 
 use std::sync::Arc;
 
