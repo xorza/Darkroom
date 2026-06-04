@@ -11,6 +11,7 @@ use crate::document::Document;
 use crate::io::config::AppConfig;
 use crate::io::library;
 use crate::run_state::RunState;
+use crate::script::{ScriptConfig, ScriptHost, SessionInbound};
 use crate::theme::{Theme, ThemeChoice};
 
 mod commands;
@@ -75,6 +76,10 @@ pub(crate) struct App {
     /// Drives the headless graph-evaluation worker (run on demand,
     /// results drained each frame). Off the serialized state.
     worker: WorkerBridge,
+    /// Scripting-over-TCP host: owns its own tokio runtime + the sandboxed
+    /// Rhai executor. `Some` only when `--script-tcp` bound a listener;
+    /// `App` drains its inbound queue each frame. Off the serialized state.
+    script: Option<ScriptHost>,
 }
 
 impl App {
@@ -86,7 +91,7 @@ impl App {
     ///
     /// Handed to [`palantir::WinitHost::run`], which calls it once the
     /// `Ui` + [`HostHandle`] exist (before the first frame).
-    pub(crate) fn new(ui: &mut Ui, handle: HostHandle) -> Self {
+    pub(crate) fn new(ui: &mut Ui, handle: HostHandle, script_cfg: ScriptConfig) -> Self {
         let mut document: Document = CoreGraph::default().into();
         document.main_view.auto_layout_default(&document.graph);
         // The runtime lib is builtins + the shared subgraph library
@@ -96,15 +101,21 @@ impl App {
         for def in library::load_library() {
             func_lib.add_subgraph(def);
         }
+        let func_lib = Arc::new(func_lib);
         let worker = WorkerBridge::new(handle.clone());
+        // Start the script listener — a no-op returning `None` unless
+        // `--script-tcp` was passed. Shares a startup snapshot of the func
+        // lib with the executor.
+        let script = ScriptHost::start(&script_cfg, func_lib.clone(), handle.clone());
         let mut app = Self {
             editor: Editor::new(document),
-            func_lib: Arc::new(func_lib),
+            func_lib,
             theme: Theme::default(),
             host_handle: handle,
             current_path: None,
             config: AppConfig::default(),
             worker,
+            script,
         };
         app.config = AppConfig::load();
         // Resolve the saved preference: `System` (the default) follows
@@ -162,6 +173,35 @@ impl App {
             self.worker.request_argument_values(req);
         }
     }
+
+    /// Drain the script executor's inbound queue and act on each message:
+    /// graph edits go through the editor's external-intent path (one batch
+    /// = one undo entry), `run()` kicks one evaluation, `shutdown()` quits.
+    /// Runs before the editor's frame so applied edits show the same frame.
+    fn handle_script_inbound(&mut self) {
+        let events = match &mut self.script {
+            Some(script) => script.drain(),
+            None => return,
+        };
+        let mut run = false;
+        for event in events {
+            match event {
+                SessionInbound::Print { msg } => eprintln!("script: {msg}"),
+                SessionInbound::Apply(intents) => self.editor.apply_external_intents(intents),
+                SessionInbound::RunOnce => run = true,
+                // Shutdown is terminal: quit and drop the rest of the batch
+                // (the app is closing, so any remaining edits/runs are moot).
+                SessionInbound::Shutdown => {
+                    self.host_handle.quit();
+                    return;
+                }
+            }
+        }
+        // Coalesce: many `run()`s in one drain still kick a single run.
+        if run {
+            self.run_graph();
+        }
+    }
 }
 
 impl palantir::App for App {
@@ -170,6 +210,10 @@ impl palantir::App for App {
         // editor rebuilds its scene so the status/log projections it
         // reads reflect the latest run.
         self.drain_worker_events(ui);
+
+        // Apply anything scripts pushed since the last frame (graph edits,
+        // run, quit) before the editor rebuilds, so the scene reflects them.
+        self.handle_script_inbound();
 
         let command = self.editor.frame(
             ui,

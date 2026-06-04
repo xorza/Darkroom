@@ -127,16 +127,48 @@ impl Editor {
     /// drain.
     pub(crate) fn apply_edit(&mut self, intent: Intent) {
         let target = self.document.active_target();
-        let Some(step) = build_step(intent, &self.document, target) else {
-            return;
-        };
-        if step.is_noop() {
-            return;
+        self.commit_batch(target, [intent]);
+    }
+
+    /// Apply a batch of externally-sourced `intents` (e.g. from a script)
+    /// against the active target as a single undo entry — the multi-intent
+    /// analogue of [`Self::apply_edit`]. Used by `App` when draining the
+    /// script inbound queue before the frame; the unconditional pre-prepass
+    /// rebuild folds the edits in, so `scene_dirty` needn't be set here.
+    pub(crate) fn apply_external_intents(&mut self, intents: Vec<Intent>) {
+        let target = self.document.active_target();
+        self.commit_batch(target, intents);
+    }
+
+    /// Build, apply, and record `intents` against `target` as one undo
+    /// entry, accumulating the frame's relayout/reconcile signals. Returns
+    /// whether anything applied. Shared core of [`Self::apply_edit`],
+    /// [`Self::apply_external_intents`], and [`Self::drain_intents`]: no-op
+    /// and stale intents (anchor node already gone) are dropped per-intent,
+    /// and an empty batch records nothing.
+    fn commit_batch(
+        &mut self,
+        target: GraphRef,
+        intents: impl IntoIterator<Item = Intent>,
+    ) -> bool {
+        let mut batch = Vec::new();
+        for intent in intents {
+            let Some(step) = build_step(intent, &self.document, target) else {
+                continue;
+            };
+            if step.is_noop() {
+                continue;
+            }
+            apply_step(&step, &mut self.document, target);
+            self.needs_relayout |= step.requires_relayout();
+            self.needs_reconcile |= step.requires_reconcile();
+            batch.push(step);
         }
-        apply_step(&step, &mut self.document, target);
-        self.needs_relayout |= step.requires_relayout();
-        self.needs_reconcile |= step.requires_reconcile();
-        self.action_stack.push_current(target, &[step]);
+        let applied = !batch.is_empty();
+        if applied {
+            self.action_stack.push_current(target, &batch);
+        }
+        applied
     }
 
     /// Add an imported subgraph def to the document, flagging the reconcile
@@ -318,23 +350,14 @@ impl Editor {
     /// pre-record rebuild folds the change in) and accumulates the
     /// relayout / reconcile signals onto the frame's fields.
     fn drain_intents(&mut self, target: GraphRef) {
-        let mut batch = Vec::new();
-        for intent in self.intents.drain(..) {
-            let Some(step) = build_step(intent, &self.document, target) else {
-                continue;
-            };
-            if step.is_noop() {
-                continue;
-            }
-            apply_step(&step, &mut self.document, target);
-            self.needs_relayout |= step.requires_relayout();
-            self.needs_reconcile |= step.requires_reconcile();
-            batch.push(step);
-        }
-        if !batch.is_empty() {
+        // Move the scratch buffer out so it can drive `commit_batch` (which
+        // borrows `self` mutably), then put the now-empty buffer back to
+        // reuse its allocation next frame.
+        let mut scratch = std::mem::take(&mut self.intents);
+        if self.commit_batch(target, scratch.drain(..)) {
             self.scene_dirty = true;
-            self.action_stack.push_current(target, &batch);
         }
+        self.intents = scratch;
     }
 
     /// Apply the record pass's view-state requests. Open mutates the tab

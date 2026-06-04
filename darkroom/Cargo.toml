@@ -17,6 +17,17 @@ dark-light = { workspace = true }
 rfd = { workspace = true }
 tokio = { workspace = true }
 
+# Scripting-over-TCP transport (`src/script/`): a sandboxed Rhai executor
+# fed by a length-prefixed, lz4-framed TCP protocol. Off unless `--script-tcp`.
+rhai = { workspace = true }
+lz4_flex = { workspace = true }
+tokio-util = { workspace = true }
+uuid = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
 [dev-dependencies]
 common = { workspace = true, features = ["test-support"] }
 
