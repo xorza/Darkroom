@@ -25,8 +25,8 @@ use std::ops::Range;
 
 use common::SerdeFormat;
 
-use crate::document::{Document, GraphRef};
-use crate::edit::intent::{self, GestureKey, UndoStep};
+use crate::core::document::{Document, GraphRef};
+use crate::core::edit::intent::{self, GestureKey, UndoStep};
 
 #[derive(Debug)]
 struct Entry {

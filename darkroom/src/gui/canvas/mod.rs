@@ -15,8 +15,8 @@ use palantir::{
 use scenarium::prelude::NodeId;
 use std::collections::BTreeSet;
 
-use crate::app::AppContext;
-use crate::edit::intent::Intent;
+use crate::core::edit::intent::Intent;
+use crate::gui::app::AppContext;
 use crate::gui::canvas::background::CanvasBackground;
 use crate::gui::canvas::breaker::BreakerUI;
 use crate::gui::canvas::connection_ui::ConnectionUI;
@@ -27,8 +27,8 @@ use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subgraph_menu::SubgraphMenuUi;
 use crate::gui::menu_bar::MenuCommand;
 use crate::gui::node::{NodeUI, RecordCtx, emit_path_picks, emit_port_disconnects};
+use crate::gui::scene::{Scene, SceneNode};
 use crate::gui::{PortKind, PortRef};
-use crate::scene::{Scene, SceneNode};
 
 /// Canvas-level UI scope: owns the port-widget-id cache, the
 /// `NodeUI` that renders every graph node, and the manual pan/zoom

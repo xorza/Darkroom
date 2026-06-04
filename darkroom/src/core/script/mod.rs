@@ -9,7 +9,7 @@
 //!
 //! Scripts talk back to the editor via a separate [`SessionInbound`]
 //! channel: functions registered on the engine (`print`, `apply`,
-//! `run`, …) push messages; [`crate::app::App`] drains them at the top
+//! `run`, …) push messages; [`crate::gui::app::App`] drains them at the top
 //! of every frame and applies them through the same intent/undo path
 //! the GUI uses. This keeps the executor task off the UI thread.
 //!
@@ -35,9 +35,9 @@ use scenarium::graph::{Node, NodeId};
 use scenarium::prelude::FuncLib;
 use serde::{Deserialize, Serialize};
 
-use crate::document::view_node::ViewNode;
-use crate::edit::intent::Intent;
-use crate::wake::Wake;
+use crate::core::document::view_node::ViewNode;
+use crate::core::edit::intent::Intent;
+use crate::core::wake::Wake;
 use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -261,7 +261,7 @@ pub struct ScriptResult {
     pub error: Option<String>,
 }
 
-/// Inbound signals from the script executor to [`crate::app::App`]. Each
+/// Inbound signals from the script executor to [`crate::gui::app::App`]. Each
 /// registered script function pushes a variant here; `App` drains the
 /// queue at the top of every frame (woken by the host's `Notify` after
 /// each successful send). Kept separate from the request/reply channel so
@@ -282,7 +282,7 @@ pub enum SessionInbound {
     /// with no editor-side per-variant glue. Empty vecs are no-ops.
     Apply(Vec<Intent>),
     /// `run()` — evaluate the graph once. `App` routes it to
-    /// [`crate::app::App::run_graph`]. The deprecated editor's autorun
+    /// [`crate::gui::app::App::run_graph`]. The deprecated editor's autorun
     /// on/off pair has no analogue here: the new editor runs on demand.
     RunOnce,
     /// `shutdown()` — ask the host to quit, via
@@ -732,7 +732,7 @@ fn default_bind() -> SocketAddr {
 /// Owns the scripting runtime: a dedicated tokio runtime (mirroring
 /// `WorkerBridge`), the [`ScriptExecutor`] feeding off it, and the
 /// receiving end of the executor→editor [`SessionInbound`] channel that
-/// [`crate::app::App`] drains each frame. Built only when `--script-tcp`
+/// [`crate::gui::app::App`] drains each frame. Built only when `--script-tcp`
 /// bound at least one listener; dropping it cancels every task and shuts
 /// the runtime down.
 pub struct ScriptHost {

@@ -3,10 +3,10 @@ use palantir::{ClickOutside, Configure, MenuItem, Popup, Sizing, Spacing, Ui};
 use scenarium::prelude::NodeId;
 use scenarium::subgraph::SubgraphRef;
 
-use crate::edit::intent::Intent;
+use crate::core::edit::intent::Intent;
 use crate::gui::menu_bar::MenuCommand;
 use crate::gui::node::header::subgraph_badge_wid;
-use crate::scene::Scene;
+use crate::gui::scene::Scene;
 
 /// Right-click on a subgraph node's `S` badge → a small popup with
 /// "Publish to library" and "Detach copy". Left-click still opens the

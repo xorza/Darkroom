@@ -9,8 +9,8 @@ use scenarium::prelude::{
     Binding, FuncLib, Graph, NodeBehavior, NodeId, NodeKind, SubgraphDef, SubgraphRef,
 };
 
-use crate::document::GraphView;
-use crate::run_state::{ExecStatus, RunState};
+use crate::core::document::GraphView;
+use crate::gui::run_state::{ExecStatus, RunState};
 
 #[derive(Debug)]
 pub struct Scene {

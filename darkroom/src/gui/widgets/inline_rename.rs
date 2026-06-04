@@ -11,7 +11,7 @@ use palantir::{
     Text, TextEdit, TextEditTheme, TextStyle, Ui, VAlign, WidgetId,
 };
 
-use crate::theme::InlineRenameTheme;
+use crate::gui::theme::InlineRenameTheme;
 
 /// Cross-frame state for one inline-rename editor, held in palantir's
 /// `StateMap` under the editor's `WidgetId`.

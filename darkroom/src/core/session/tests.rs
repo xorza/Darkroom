@@ -3,7 +3,7 @@ use scenarium::graph::{Node, NodeId, NodeKind};
 use scenarium::prelude::FuncId;
 
 use super::*;
-use crate::document::view_node::ViewNode;
+use crate::core::document::view_node::ViewNode;
 
 #[test]
 fn apply_intents_adds_node_and_flags_reconcile() {

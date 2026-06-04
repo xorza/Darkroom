@@ -1,9 +1,9 @@
-//! The bridge between `App` and the headless graph-evaluation `Worker`
-//! (`scenarium::worker`). The worker runs on its own tokio runtime; this
-//! type owns that runtime, the worker handle, and a sync channel the
-//! worker's callback posts results onto. `App` drains the channel each
-//! frame (`drain_worker_events`) and wakes the host loop from off-thread
-//! via the [`Wake`] callback.
+//! The bridge between a frontend's `Engine` and the headless
+//! graph-evaluation `Worker` (`scenarium::worker`). The worker runs on its
+//! own tokio runtime; this type owns that runtime, the worker handle, and a
+//! sync channel the worker's callback posts results onto. The host loop
+//! (`App::frame` / `Session::tick`) drains the channel each frame and is
+//! woken from off-thread via the [`Wake`] callback.
 //!
 //! Outbound is one batched send per request (the worker scans a batch
 //! into a single commit); inbound is a plain `std::sync::mpsc` because
@@ -14,13 +14,26 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use scenarium::execution::{ArgumentValues, Error as ExecError};
 use scenarium::execution_stats::ExecutionStats;
-use scenarium::prelude::{FuncLib, Graph};
+use scenarium::prelude::{FuncLib, Graph, NodeId};
 use scenarium::worker::{Worker, WorkerMessage};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
 
-use crate::run_state::ValueRequest;
-use crate::wake::Wake;
+use crate::core::wake::Wake;
+
+/// Run epoch. Bumped each time a frontend kicks a fresh run so values from
+/// a superseded run can be dropped on arrival.
+pub(crate) type RunId = u64;
+
+/// One node's pending value fetch: which node, tagged with the run epoch
+/// it was requested under (echoed back on the reply so a stale-run reply
+/// can be dropped). The worker's request/reply currency, so it lives here
+/// rather than in the GUI's `run_state`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct ValueRequest {
+    pub(crate) node_id: NodeId,
+    pub(crate) run_id: RunId,
+}
 
 /// A result delivered from the worker thread back to the frame loop.
 /// Mirrors the worker's callback surface; richer variants (per-node

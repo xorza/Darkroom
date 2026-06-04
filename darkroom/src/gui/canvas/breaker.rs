@@ -3,10 +3,10 @@ use palantir::{LineCap, LineJoin, PointerButton, PolylineColors, Rect, Shape, Ui
 use scenarium::graph::{Binding, InputPort};
 use scenarium::prelude::NodeId;
 
-use crate::app::AppContext;
-use crate::edit::intent::Intent;
+use crate::core::edit::intent::Intent;
+use crate::gui::app::AppContext;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
-use crate::scene::Scene;
+use crate::gui::scene::Scene;
 
 /// Per-frame bundle threaded through node and connection rendering.
 /// Carries `canvas_origin` (subtracted from `layout_rect` to convert

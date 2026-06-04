@@ -24,7 +24,7 @@ use scenarium::function::{FuncInput, FuncOutput};
 use scenarium::graph::{Binding, Graph, InputPort, NodeKind, OutputPort};
 use scenarium::prelude::{FuncLib, NodeId, SubgraphDef, SubgraphId};
 
-use crate::document::{Document, GraphRef};
+use crate::core::document::{Document, GraphRef};
 
 /// Per-side plan: the new interface vec plus the `old_idx → new_idx` map
 /// applied to every binding that addresses this boundary by index.

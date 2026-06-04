@@ -9,8 +9,8 @@ use std::collections::BTreeSet;
 use palantir::{Key, Shortcut, Ui};
 
 use super::Editor;
-use crate::document::GraphRef;
-use crate::edit::intent::{self, Intent, build_duplicate_intent};
+use crate::core::document::GraphRef;
+use crate::core::edit::intent::{self, Intent, build_duplicate_intent};
 use crate::gui::menu_bar::MenuCommand;
 
 const UNDO_SHORTCUT: Shortcut = Shortcut::ctrl('Z');

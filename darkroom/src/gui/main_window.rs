@@ -2,16 +2,16 @@ use std::mem::take;
 
 use palantir::{Background, Configure, HostHandle, Panel, Sizing, Ui};
 
-use crate::app::AppContext;
-use crate::document::{Document, GraphRef};
-use crate::edit::intent::Intent;
+use crate::core::document::{Document, GraphRef};
+use crate::core::edit::intent::Intent;
 use crate::gui::UiAction;
+use crate::gui::app::AppContext;
 use crate::gui::canvas::GraphUI;
 use crate::gui::menu_bar;
 use crate::gui::menu_bar::MenuCommand;
 use crate::gui::node::emit_subgraph_opens;
+use crate::gui::scene::Scene;
 use crate::gui::tab_bar::{self, TabLabel};
-use crate::scene::Scene;
 
 /// Top of darkroom's UI tree. Owns every persistent UI scope (right
 /// now just `GraphUI`); adding a new top-level pane is a new field

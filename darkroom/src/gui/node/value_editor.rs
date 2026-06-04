@@ -20,7 +20,7 @@
 use palantir::{Button, Checkbox, Configure, Sizing, Spacing, TextEdit, TextWrap, Ui, WidgetId};
 use scenarium::data::StaticValue;
 
-use crate::theme::StaticValueEditorTheme;
+use crate::gui::theme::StaticValueEditorTheme;
 
 #[derive(Default, Clone, Debug)]
 struct EditBuffer {

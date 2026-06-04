@@ -10,7 +10,7 @@
 use anyhow::Result;
 use tokio::sync::Notify;
 
-use crate::session::Session;
+use crate::core::session::Session;
 
 pub(crate) async fn run(session: &mut Session, notify: &Notify) -> Result<()> {
     tracing::info!("darkroom headless: running — send `shutdown()` over the script TCP, or Ctrl-C");

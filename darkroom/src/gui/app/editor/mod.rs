@@ -14,15 +14,17 @@
 use palantir::{HostHandle, Ui};
 use scenarium::prelude::{FuncLib, SubgraphDef};
 
-use crate::document::{Document, GraphRef};
-use crate::edit::action_stack::ActionStack;
-use crate::edit::intent::{Intent, apply_step, build_step};
+use crate::core::document::{Document, GraphRef};
+use crate::core::edit::action_stack::ActionStack;
+use crate::core::edit::intent::{Intent, apply_step, build_step};
+use crate::core::theme_pref::ThemeChoice;
+use crate::core::worker::ValueRequest;
 use crate::gui::UiAction;
 use crate::gui::main_window::MainWindow;
 use crate::gui::menu_bar::MenuCommand;
-use crate::run_state::{RunState, ValueRequest};
-use crate::scene::Scene;
-use crate::theme::{Theme, ThemeChoice};
+use crate::gui::run_state::RunState;
+use crate::gui::scene::Scene;
+use crate::gui::theme::Theme;
 
 use super::AppContext;
 

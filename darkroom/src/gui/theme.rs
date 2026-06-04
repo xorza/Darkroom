@@ -165,21 +165,7 @@ impl ThemePreset {
     }
 }
 
-/// The user's persisted theme *preference*, as offered in the Theme
-/// menu. Distinct from [`ThemePreset`] (a concrete built-in palette):
-/// `System` has no fixed palette — it [`resolve`](Self::resolve)s to a
-/// preset by querying the OS each launch, so the editor follows the
-/// desktop's light/dark setting without the user re-picking. `Dark` /
-/// `Light` pin a palette regardless of the OS.
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ThemeChoice {
-    /// Follow the OS light/dark preference, re-resolved on each launch.
-    #[default]
-    System,
-    Dark,
-    Light,
-}
+use crate::core::theme_pref::ThemeChoice;
 
 impl ThemeChoice {
     /// Resolve to the concrete built-in preset to load. `System` queries
@@ -196,13 +182,13 @@ impl ThemeChoice {
 
 /// Visual palette + layout dimensions for darkroom's UI. Owned by
 /// `MainWindow`, handed to every UI subtree through
-/// [`crate::app::AppContext`] so call sites read off a single source
+/// [`crate::gui::app::AppContext`] so call sites read off a single source
 /// instead of hard-coded constants. Layout fields live here too —
 /// node ports, value editors, etc. — so a theme swap can restyle
 /// geometry as well as color.
 ///
 /// Also owns the palantir [`palantir::Theme`] this app wants on its
-/// `Ui`. [`crate::app::App::new`] copies `palantir_theme` into
+/// `Ui`. [`crate::gui::app::App::new`] copies `palantir_theme` into
 /// `ui.theme` once before the first frame, so palantir-side widgets
 /// (buttons, text edits, menus, scrollbars) read from the same source.
 /// Tweak fields on `theme.palantir_theme` during construction to

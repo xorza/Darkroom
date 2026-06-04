@@ -18,7 +18,7 @@
 //! linger across a re-run (so the glow doesn't blank during compute) while
 //! values invalidate immediately.
 //!
-//! [`Editor`]: crate::app::editor::Editor
+//! [`Editor`]: crate::gui::app::editor::Editor
 
 use std::collections::{HashMap, HashSet};
 
@@ -26,19 +26,8 @@ use palantir::Ui;
 use scenarium::execution::ArgumentValues;
 use scenarium::prelude::{ExecutionStats, LogEntry, NodeId};
 
-use crate::node_values::{NodeValueView, build_view};
-
-/// Run epoch. Bumped each time the editor kicks a fresh run so values from
-/// a superseded run can be dropped on arrival.
-pub(crate) type RunId = u64;
-
-/// One node's pending value fetch: which node, tagged with the run epoch
-/// it was requested under (echoed back on the reply to drop stale ones).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct ValueRequest {
-    pub(crate) node_id: NodeId,
-    pub(crate) run_id: RunId,
-}
+use crate::core::worker::{RunId, ValueRequest};
+use crate::gui::node_values::{NodeValueView, build_view};
 
 /// Per-node execution outcome of the last run. Ordered low→high so a
 /// higher-severity status wins when several fold onto one node

@@ -2,14 +2,14 @@ use glam::Vec2;
 use palantir::{Brush, Color, LineCap, LinearGradient, Shape, Stop, Ui};
 use scenarium::graph::{Binding, InputPort, OutputPort};
 
-use crate::app::AppContext;
-use crate::edit::intent::Intent;
+use crate::core::edit::intent::Intent;
+use crate::gui::app::AppContext;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::canvas::{node_ports, to_world};
 use crate::gui::node::{node_widget_id, set_input};
+use crate::gui::scene::{InputBindingView, Scene};
 use crate::gui::{PortKind, PortRef};
-use crate::scene::{InputBindingView, Scene};
 
 /// Minimum horizontal length of a connection's bezier control handles,
 /// so short/backward links still bow out into a readable S-curve.

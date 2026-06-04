@@ -6,8 +6,8 @@ use palantir::{Rect, Ui};
 use crate::gui::canvas::node_ports;
 use crate::gui::node::node_widget_id;
 use crate::gui::node::port_row::port_circle_wid;
+use crate::gui::scene::Scene;
 use crate::gui::{PortKind, PortRef};
-use crate::scene::Scene;
 
 /// Per-frame snapshot of the four `ResponseState` fields downstream
 /// consumers actually read. Built once at the top of

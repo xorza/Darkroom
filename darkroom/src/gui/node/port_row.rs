@@ -12,14 +12,14 @@ use scenarium::data::StaticValue;
 use scenarium::graph::Binding;
 use scenarium::prelude::NodeId;
 
-use crate::document::BoundarySide;
-use crate::edit::intent::Intent;
+use crate::core::document::BoundarySide;
+use crate::core::edit::intent::Intent;
 use crate::gui::node::port_rename::port_label;
 use crate::gui::node::value_editor;
 use crate::gui::node::{RecordCtx, set_input};
+use crate::gui::scene::{InputBindingView, SceneNode};
+use crate::gui::theme::Theme;
 use crate::gui::{PortKind, PortRef};
-use crate::scene::{InputBindingView, SceneNode};
-use crate::theme::Theme;
 
 pub(crate) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;

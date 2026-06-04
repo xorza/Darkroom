@@ -8,13 +8,13 @@ use palantir::{
 };
 use scenarium::prelude::{NodeBehavior, NodeId};
 
-use crate::edit::intent::Intent;
+use crate::core::edit::intent::Intent;
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
 use crate::gui::node::{RecordCtx, exec_color, node_rename_wid, select_intent};
+use crate::gui::run_state::ExecStatus;
+use crate::gui::scene::SceneNode;
+use crate::gui::theme::Theme;
 use crate::gui::widgets::inline_rename::InlineRename;
-use crate::run_state::ExecStatus;
-use crate::scene::SceneNode;
-use crate::theme::Theme;
 
 /// Character cap for a node title in the inline rename editor.
 const NODE_NAME_MAX_CHARS: usize = 32;

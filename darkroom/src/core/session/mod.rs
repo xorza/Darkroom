@@ -1,30 +1,29 @@
 //! Frontend-agnostic editing core for the non-GUI modes (`--tui`,
-//! `--headless`). Owns the document, the func lib, the evaluation worker,
-//! and the script-over-TCP host, and drains their inbound queues on each
-//! [`Session::tick`]. No Palantir, no undo stack, no inspector — scripts
-//! mutate the graph, trigger runs, and `print`/`shutdown`; the worker's
-//! results and script `print`s land on a small status log the driver can
-//! show.
+//! `--headless`). Owns the document plus an [`Engine`] (func lib +
+//! evaluation worker + script host), and drains their inbound queues on
+//! each [`Session::tick`]. No Palantir, no undo stack, no inspector —
+//! scripts mutate the graph, trigger runs, and `print`/`shutdown`; the
+//! worker's results and script `print`s land on a small status log the
+//! driver can show.
 //!
-//! The GUI ([`crate::app::App`]) has its own per-frame orchestration; this
-//! is the lean parallel that the headless/TUI drivers share. The pieces it
-//! reuses — [`Document`], the worker, the script host, and the
+//! The GUI ([`crate::gui::app::App`]) is the parallel shell over the same
+//! [`Engine`] with its own per-frame orchestration; `tui`/`headless` share
+//! this one. The pieces it reuses — [`Document`], the engine, and the
 //! `build_step`/`apply_step` intent machinery — are all GUI-free.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use scenarium::prelude::{FuncLib, Graph as CoreGraph};
+use scenarium::prelude::Graph as CoreGraph;
 
-use crate::document::Document;
-use crate::edit::intent::{Intent, apply_step, build_step};
-use crate::func_lib::builtin_func_lib;
-use crate::io::config::AppConfig;
-use crate::io::{library, persistence};
-use crate::script::{ScriptConfig, ScriptHost, SessionInbound};
-use crate::wake::Wake;
-use crate::worker::{WorkerBridge, WorkerEvent};
+use crate::core::document::Document;
+use crate::core::edit::intent::{Intent, apply_step, build_step};
+use crate::core::engine::Engine;
+use crate::core::io::config::AppConfig;
+use crate::core::io::persistence;
+use crate::core::script::{ScriptConfig, SessionInbound};
+use crate::core::wake::Wake;
+use crate::core::worker::WorkerEvent;
 
 #[cfg(test)]
 mod tests;
@@ -36,9 +35,8 @@ const STATUS_LOG_CAP: usize = 200;
 #[derive(Debug)]
 pub(crate) struct Session {
     document: Document,
-    func_lib: Arc<FuncLib>,
-    worker: WorkerBridge,
-    script: Option<ScriptHost>,
+    /// Shared runtime services (func lib + worker + script host).
+    engine: Engine,
     /// Set when a script edit can change a subgraph's derived interface;
     /// the graph is reconciled before the next run / save.
     needs_reconcile: bool,
@@ -58,13 +56,7 @@ impl Session {
     /// the saved config (or seed an empty graph). The script host is `None`
     /// unless `script_cfg` enabled a listener.
     pub(crate) fn new(script_cfg: &ScriptConfig, wake: Wake) -> Self {
-        let mut func_lib = builtin_func_lib();
-        for def in library::load_library() {
-            func_lib.add_subgraph(def);
-        }
-        let func_lib = Arc::new(func_lib);
-        let worker = WorkerBridge::new(wake.clone());
-        let script = ScriptHost::start(script_cfg, func_lib.clone(), wake);
+        let engine = Engine::new(script_cfg, wake);
 
         let config = AppConfig::load();
         let (document, current_path) = match config.document_path.as_deref() {
@@ -77,9 +69,7 @@ impl Session {
 
         let mut session = Self {
             document,
-            func_lib,
-            worker,
-            script,
+            engine,
             needs_reconcile: true,
             status: VecDeque::new(),
             current_path,
@@ -108,12 +98,9 @@ impl Session {
     /// rendering — the driver decides how to surface [`Self::status_lines`].
     pub(crate) fn tick(&mut self) {
         self.drain_worker();
-        // Collect first so the `&mut self.script` borrow is released before
+        // Drain to a Vec so the `&mut self.engine` borrow is released before
         // the loop body touches other `self` fields.
-        let inbound = match &mut self.script {
-            Some(script) => script.drain(),
-            None => Vec::new(),
-        };
+        let inbound = self.engine.drain_script();
         let mut run = false;
         for event in inbound {
             match event {
@@ -134,8 +121,7 @@ impl Session {
     /// evaluation. Results arrive on a later [`Self::tick`] as status lines.
     pub(crate) fn run_graph(&mut self) {
         self.reconcile_if_needed();
-        self.worker
-            .run_once(self.document.graph.clone(), self.func_lib.clone());
+        self.engine.run_once(self.document.graph.clone());
     }
 
     /// Write the document back to the file it was opened from. Returns
@@ -150,14 +136,14 @@ impl Session {
 
     fn reconcile_if_needed(&mut self) {
         if self.needs_reconcile {
-            self.document.reconcile_boundaries(&self.func_lib);
+            self.document.reconcile_boundaries(&self.engine.func_lib);
             self.needs_reconcile = false;
         }
     }
 
     fn drain_worker(&mut self) {
-        // Collect to drop the `self.worker` borrow before `push_status`.
-        let events: Vec<WorkerEvent> = self.worker.drain().collect();
+        // Collect to drop the `self.engine` borrow before `push_status`.
+        let events: Vec<WorkerEvent> = self.engine.drain_worker().collect();
         for event in events {
             match event {
                 WorkerEvent::ExecutionFinished(Ok(stats)) => {

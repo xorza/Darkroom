@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use common::{SerdeFormat, deserialize, serialize};
 
-use crate::theme::ThemeChoice;
+use crate::core::theme_pref::ThemeChoice;
 
 /// Config file name, resolved relative to the process working
 /// directory. TOML so it's hand-editable and matches the theme

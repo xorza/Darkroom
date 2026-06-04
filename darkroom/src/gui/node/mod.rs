@@ -3,18 +3,18 @@ pub(crate) mod port_rename;
 pub(crate) mod port_row;
 pub(crate) mod value_editor;
 
-use crate::document::GraphRef;
-use crate::edit::intent::Intent;
+use crate::core::document::GraphRef;
+use crate::core::edit::intent::Intent;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::node_ports;
 use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::node::header::{header, status_row, subgraph_badge_wid};
 use crate::gui::node::port_row::{const_editor_wid, port_circle_wid, ports_row};
+use crate::gui::run_state::ExecStatus;
+use crate::gui::scene::{InputBindingView, Scene, SceneNode};
+use crate::gui::theme::Theme;
 use crate::gui::{PortKind, PortRef, UiAction};
-use crate::run_state::ExecStatus;
-use crate::scene::{InputBindingView, Scene, SceneNode};
-use crate::theme::Theme;
 use glam::Vec2;
 use palantir::{
     Background, Color, Configure, Corners, Panel, Rect, Sense, Shadow, Sizing, Stroke, Ui, WidgetId,

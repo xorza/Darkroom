@@ -7,7 +7,7 @@ use palantir::{
 use scenarium::data::FsPathConfig;
 use scenarium::prelude::NodeId;
 
-use crate::theme::ThemeChoice;
+use crate::core::theme_pref::ThemeChoice;
 
 /// A command surfaced by the menu bar. `App` performs the side effect
 /// (file dialog + read/write + doc/theme swap + config persist)

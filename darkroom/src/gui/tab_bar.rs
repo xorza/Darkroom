@@ -12,11 +12,11 @@ use palantir::{
 };
 use scenarium::prelude::SubgraphId;
 
-use crate::document::GraphRef;
-use crate::edit::intent::Intent;
+use crate::core::document::GraphRef;
+use crate::core::edit::intent::Intent;
 use crate::gui::UiAction;
+use crate::gui::theme::Theme;
 use crate::gui::widgets::inline_rename::InlineRename;
-use crate::theme::Theme;
 
 /// Character cap for a subgraph name in the inline rename editor.
 const SUBGRAPH_NAME_MAX_CHARS: usize = 32;

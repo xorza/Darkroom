@@ -1,11 +1,18 @@
 pub(crate) mod canvas;
+pub(crate) mod dialogs;
 pub(crate) mod main_window;
 pub(crate) mod menu_bar;
 pub(crate) mod node;
 pub(crate) mod tab_bar;
 pub(crate) mod widgets;
 
-use crate::document::GraphRef;
+pub(crate) mod app;
+pub(crate) mod node_values;
+pub(crate) mod run_state;
+pub(crate) mod scene;
+pub(crate) mod theme;
+
+use crate::core::document::GraphRef;
 
 /// A navigation request surfaced from last frame's responses (tab/chip
 /// clicks) and applied by `App` in the navigation phase. Decoupled from

@@ -15,34 +15,35 @@ use scenarium::graph::{Binding, NodeKind};
 use scenarium::prelude::{NodeId, SubgraphDef, SubgraphId};
 use scenarium::subgraph::SubgraphRef;
 
-use crate::app::App;
-use crate::app::editor::Editor;
-use crate::document::{Document, GraphRef};
-use crate::edit::intent::Intent;
+use crate::core::document::{Document, GraphRef};
+use crate::core::edit::intent::Intent;
+use crate::core::io::library;
+use crate::core::io::persistence;
+use crate::gui::app::App;
+use crate::gui::app::editor::Editor;
+use crate::gui::dialogs;
 use crate::gui::menu_bar::MenuCommand;
-use crate::io::library;
-use crate::io::persistence;
-use crate::theme::Theme;
+use crate::gui::theme::Theme;
 
 impl App {
     pub(crate) fn handle_menu_command(&mut self, ui: &mut Ui, command: MenuCommand) {
         match command {
             MenuCommand::NewDocument => self.new_document(),
             MenuCommand::LoadDocument => {
-                if let Some(path) = persistence::pick_open_path(self.current_path.as_deref()) {
+                if let Some(path) = dialogs::pick_open_path(self.current_path.as_deref()) {
                     self.load_document(&path);
                 }
             }
             MenuCommand::SaveDocument => self.save_current(),
             MenuCommand::SaveDocumentAs => self.save_document_as(),
             MenuCommand::LoadTheme => {
-                if let Some(path) = persistence::pick_theme_open() {
+                if let Some(path) = dialogs::pick_theme_open() {
                     self.load_theme(ui, &path);
                 }
             }
             MenuCommand::ExportTheme => {
-                if let Some(path) = persistence::pick_theme_save() {
-                    persistence::export_theme(&self.theme, &path);
+                if let Some(path) = dialogs::pick_theme_save() {
+                    dialogs::export_theme(&self.theme, &path);
                 }
             }
             MenuCommand::SetTheme(choice) => {
@@ -73,7 +74,7 @@ impl App {
     /// outside the record (blocking dialog), so it goes through
     /// `Editor::apply_edit` rather than the frame's intent drain.
     fn pick_input_path(&mut self, node_id: NodeId, port_idx: usize, config: Arc<FsPathConfig>) {
-        let Some(path) = persistence::pick_path(&config) else {
+        let Some(path) = dialogs::pick_path(&config) else {
             return;
         };
         let value = StaticValue::FsPath(path.to_string_lossy().into_owned());
@@ -89,11 +90,11 @@ impl App {
     /// wins; otherwise, when the active tab is itself a subgraph, that
     /// open subgraph is exported. No-op when neither resolves.
     fn export_active_subgraph(&mut self) {
-        let Some(def) = subgraph_to_export(&self.editor.document, &self.func_lib) else {
+        let Some(def) = subgraph_to_export(&self.editor.document, &self.engine.func_lib) else {
             eprintln!("subgraph export: no subgraph selected or open");
             return;
         };
-        if let Some(path) = persistence::pick_save_path(self.current_path.as_deref()) {
+        if let Some(path) = dialogs::pick_save_path(self.current_path.as_deref()) {
             persistence::export_subgraph(def, &path);
         }
     }
@@ -107,8 +108,8 @@ impl App {
     /// not routed through undo. No-op when neither a subgraph instance
     /// nor an open subgraph resolves.
     fn promote_active_subgraph(&mut self) {
-        if promote_to_library(&mut self.editor.document, &mut self.func_lib) {
-            library::save_library(self.func_lib.subgraphs.iter());
+        if promote_to_library(&mut self.editor.document, &mut self.engine.func_lib) {
+            library::save_library(self.engine.func_lib.subgraphs.iter());
         } else {
             eprintln!("subgraph promote: no subgraph selected or open");
         }
@@ -126,11 +127,11 @@ impl App {
         let target = self.editor.document.active_target();
         if publish_local_def(
             &mut self.editor.document,
-            &mut self.func_lib,
+            &mut self.engine.func_lib,
             target,
             node_id,
         ) {
-            library::save_library(self.func_lib.subgraphs.iter());
+            library::save_library(self.engine.func_lib.subgraphs.iter());
         } else {
             eprintln!("subgraph publish: node is not a local subgraph");
         }
@@ -141,7 +142,7 @@ impl App {
     /// instantiated and the undo stack is untouched (existing history
     /// references no imported def, so it stays valid).
     fn import_subgraph(&mut self) {
-        let Some(path) = persistence::pick_open_path(self.current_path.as_deref()) else {
+        let Some(path) = dialogs::pick_open_path(self.current_path.as_deref()) else {
             return;
         };
         if let Some(def) = persistence::import_subgraph(&path) {
@@ -180,7 +181,7 @@ impl App {
 
     /// Cmd+Shift+S / "Save As…": always prompt for a destination.
     fn save_document_as(&mut self) {
-        if let Some(path) = persistence::pick_save_path(self.current_path.as_deref()) {
+        if let Some(path) = dialogs::pick_save_path(self.current_path.as_deref()) {
             self.save_document(&path);
         }
     }
@@ -214,7 +215,7 @@ impl App {
     /// whether it succeeded; on failure leaves the current theme
     /// untouched. Shared by startup restore and menu load.
     pub(crate) fn load_theme_file(&mut self, path: &Path) -> bool {
-        match persistence::load_theme(path) {
+        match dialogs::load_theme(path) {
             Some(theme) => {
                 self.theme = theme;
                 true

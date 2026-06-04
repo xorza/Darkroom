@@ -9,8 +9,8 @@ use scenarium::subgraph::SubgraphRef;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 
-use crate::document::view_node::ViewNode;
-use crate::edit::reconcile::reconcile_def;
+use crate::core::document::view_node::ViewNode;
+use crate::core::edit::reconcile::reconcile_def;
 
 /// Default topological-column auto-layout parameters, shared by every
 /// place that seeds a fresh view (the root on load, each subgraph
@@ -515,7 +515,7 @@ impl Document {
 
     /// Reconcile every local subgraph def's interface (`inputs`/`outputs`)
     /// against its interior wiring — derived state, recomputed like the
-    /// scene rather than stored as undo steps. See `crate::edit::reconcile` for
+    /// scene rather than stored as undo steps. See `crate::core::edit::reconcile` for
     /// the per-def logic and rationale (placeholder ports, compaction).
     pub fn reconcile_boundaries(&mut self, func_lib: &FuncLib) {
         if self.graph.subgraphs.is_empty() {
@@ -654,7 +654,7 @@ mod tests {
 
     #[test]
     fn add_node_with_def_round_trips() {
-        use crate::edit::intent::{Intent, apply_step, build_step, revert_step};
+        use crate::core::edit::intent::{Intent, apply_step, build_step, revert_step};
 
         // Instancing a library subgraph localizes it: a `Local` def copy
         // (recording its `origin`) is added alongside the instance node, as
@@ -709,7 +709,7 @@ mod tests {
     /// `(node_id, local_def_id)`. `origin` tags the copy's library
     /// lineage so a later instance can dedup against it.
     fn add_library_instance(doc: &mut Document, lib_id: SubgraphId) -> (NodeId, SubgraphId) {
-        use crate::edit::intent::{Intent, apply_step, build_step};
+        use crate::core::edit::intent::{Intent, apply_step, build_step};
 
         let mut local = leaf_def(lib_id, "Lib").fresh_copy();
         local.origin = Some(lib_id);
@@ -763,7 +763,7 @@ mod tests {
 
     #[test]
     fn detach_forks_standalone_copy_and_repoints_node() {
-        use crate::edit::intent::{Intent, apply_step, build_step, revert_step};
+        use crate::core::edit::intent::{Intent, apply_step, build_step, revert_step};
 
         // A node on a library-linked local def. Detach must fork a fresh
         // standalone copy (origin cleared), add it, and repoint the node.
@@ -836,7 +836,7 @@ mod tests {
 
     #[test]
     fn set_disabled_round_trips_through_undo() {
-        use crate::edit::intent::{Intent, apply_step, build_step, revert_step};
+        use crate::core::edit::intent::{Intent, apply_step, build_step, revert_step};
 
         let mut doc = Document::default();
         let id = add_node_at(&mut doc, Vec2::ZERO);

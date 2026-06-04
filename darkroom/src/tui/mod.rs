@@ -14,7 +14,7 @@ use anyhow::Result;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Notify;
 
-use crate::session::Session;
+use crate::core::session::Session;
 
 pub(crate) async fn run(session: &mut Session, notify: &Notify) -> Result<()> {
     println!("darkroom TUI — type 'help' for commands.");

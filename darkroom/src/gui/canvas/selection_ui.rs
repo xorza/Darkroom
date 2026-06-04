@@ -4,11 +4,11 @@ use glam::Vec2;
 use palantir::{Corners, PointerButton, Rect, Shape, Stroke, Ui};
 use scenarium::prelude::NodeId;
 
-use crate::app::AppContext;
-use crate::edit::intent::Intent;
+use crate::core::edit::intent::Intent;
+use crate::gui::app::AppContext;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::node::node_widget_id;
-use crate::scene::Scene;
+use crate::gui::scene::Scene;
 
 /// Rubber-band multi-selection. A plain left-drag on empty canvas
 /// sweeps a rectangle; intersecting nodes highlight live as it moves

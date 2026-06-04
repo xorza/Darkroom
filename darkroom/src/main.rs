@@ -1,19 +1,7 @@
-mod app;
-mod document;
-mod edit;
-mod func_lib;
+mod core;
 mod gui;
 mod headless;
-mod io;
-mod node_values;
-mod run_state;
-mod scene;
-mod script;
-mod session;
-mod theme;
 mod tui;
-mod wake;
-mod worker;
 
 use std::sync::Arc;
 
@@ -21,9 +9,10 @@ use clap::{Parser, Subcommand};
 use palantir::{WinitHost, WinitHostConfig};
 use tokio::sync::Notify;
 
-use crate::app::App;
-use crate::script::{ScriptArgs, ScriptConfig};
-use crate::session::Session;
+use crate::core::script::{ScriptArgs, ScriptConfig};
+use crate::core::session::Session;
+use crate::core::wake;
+use crate::gui::app::App;
 
 /// darkroom — node-graph editor. The optional subcommand picks the
 /// frontend (default `gui`); the flags configure the scripting-over-TCP

@@ -3,7 +3,7 @@
 //! in the node header.
 //!
 //! Input/output lines show the last run's computed runtime value when one
-//! is available (pulled on demand into [`crate::run_state::RunState`] for
+//! is available (pulled on demand into [`crate::gui::run_state::RunState`] for
 //! open panels), falling back to the static binding otherwise; image
 //! ports also render a preview thumbnail beneath their line.
 //!
@@ -34,10 +34,10 @@ use scenarium::prelude::{LogEntry, LogLevel, NodeId};
 use crate::gui::canvas::outer_canvas_widget_id;
 use crate::gui::node::header::fmt_elapsed;
 use crate::gui::node::{exec_color, node_widget_id};
-use crate::node_values::{NodeValueView, PortValueView};
-use crate::run_state::{ExecStatus, RunState};
-use crate::scene::{InputBindingView, Scene, SceneNode};
-use crate::theme::Theme;
+use crate::gui::node_values::{NodeValueView, PortValueView};
+use crate::gui::run_state::{ExecStatus, RunState};
+use crate::gui::scene::{InputBindingView, Scene, SceneNode};
+use crate::gui::theme::Theme;
 
 /// Open state of a single node's inspector. Absence from
 /// [`Inspectors::modes`] is the third, `Closed`, state.

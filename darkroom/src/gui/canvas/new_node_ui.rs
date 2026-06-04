@@ -3,11 +3,11 @@ use palantir::{ClickOutside, Configure, MenuItem, Panel, Popup, Sizing, Spacing,
 use scenarium::graph::Node;
 use scenarium::subgraph::{SubgraphDef, SubgraphRef};
 
-use crate::app::AppContext;
-use crate::document::view_node::ViewNode;
-use crate::edit::intent::Intent;
+use crate::core::document::view_node::ViewNode;
+use crate::core::edit::intent::Intent;
+use crate::gui::app::AppContext;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
-use crate::scene::Scene;
+use crate::gui::scene::Scene;
 
 /// Right-click-on-canvas → popup that lists every `Func` in
 /// `AppContext::func_lib` grouped by category. Clicking an entry emits

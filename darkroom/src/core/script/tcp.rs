@@ -430,7 +430,7 @@ async fn write_frame(stream: &mut TcpStream, bytes: &[u8]) -> std::io::Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::script::{ScriptExecutor, ScriptResult, SessionInbound};
+    use crate::core::script::{ScriptExecutor, ScriptResult, SessionInbound};
     use std::net::Ipv4Addr;
 
     /// Port 0 on the loopback interface — the OS picks a free port.

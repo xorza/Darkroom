@@ -7,8 +7,8 @@
 
 use palantir::{HAlign, InternedStr, Text, Ui, WidgetId};
 
-use crate::document::BoundarySide;
-use crate::edit::intent::Intent;
+use crate::core::document::BoundarySide;
+use crate::core::edit::intent::Intent;
 use crate::gui::PortRef;
 use crate::gui::node::{RecordCtx, select_intent};
 use crate::gui::widgets::inline_rename::InlineRename;

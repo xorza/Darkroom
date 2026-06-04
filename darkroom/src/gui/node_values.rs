@@ -5,7 +5,7 @@
 //! image values are reduced to the preview the worker resolved before
 //! replying and uploaded here as a GUI texture, so the full buffers never
 //! cross into the editor. The owning per-node store + fetch coordination
-//! lives in [`crate::run_state::RunState`].
+//! lives in [`crate::gui::run_state::RunState`].
 
 use imaginarium::{ColorFormat, Image as RawImage};
 use lens::Image as LensImage;

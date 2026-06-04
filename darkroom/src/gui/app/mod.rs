@@ -4,15 +4,15 @@ use std::sync::Arc;
 use palantir::{HostHandle, Ui};
 use scenarium::prelude::{FuncLib, Graph as CoreGraph};
 
-use crate::document::Document;
-use crate::func_lib::builtin_func_lib;
-use crate::io::config::AppConfig;
-use crate::io::library;
-use crate::run_state::RunState;
-use crate::script::{ScriptConfig, ScriptHost, SessionInbound};
-use crate::theme::{Theme, ThemeChoice};
-use crate::wake::Wake;
-use crate::worker::{WorkerBridge, WorkerEvent};
+use crate::core::document::Document;
+use crate::core::engine::Engine;
+use crate::core::io::config::AppConfig;
+use crate::core::script::{ScriptConfig, SessionInbound};
+use crate::core::theme_pref::ThemeChoice;
+use crate::core::wake::Wake;
+use crate::core::worker::WorkerEvent;
+use crate::gui::run_state::RunState;
+use crate::gui::theme::Theme;
 
 mod commands;
 pub(crate) mod editor;
@@ -38,18 +38,18 @@ pub(crate) struct AppContext<'a> {
 
 /// Thin shell around the [`Editor`] (which owns the document + its edit
 /// pipeline + the GUI tree): `App` holds only the runtime/IO the editor
-/// borrows each frame — the shared func lib, the active theme, session
-/// config + file path, the host handle, and the evaluation worker. Its
-/// `frame` drains the worker into the editor's projections, runs one
-/// `Editor::frame`, and actions the [`MenuCommand`] it surfaces (file /
-/// theme / subgraph dialogs, run) outside the record.
+/// borrows each frame — the [`Engine`] (func lib + worker + script host),
+/// the active theme, session config + file path, and the host handle. Its
+/// `frame` drains the engine's worker + script queues into the editor's
+/// projections, runs one `Editor::frame`, and actions the [`MenuCommand`]
+/// it surfaces (file / theme / subgraph dialogs, run) outside the record.
 #[derive(Debug)]
 pub(crate) struct App {
     pub(crate) editor: Editor,
-    /// Shared with the worker on every run (`Arc` so a run clones a
-    /// pointer, not the whole lib). Runtime-owned, not part of the
-    /// serialized `Document`.
-    pub(crate) func_lib: Arc<FuncLib>,
+    /// Shared runtime services — func lib + evaluation worker + script host
+    /// — built at startup. The GUI reads `engine.func_lib` each frame and
+    /// drains the worker/script queues through it. Off the serialized state.
+    pub(crate) engine: Engine,
     pub(crate) theme: Theme,
     pub(crate) host_handle: HostHandle,
     /// Last successfully loaded/saved file path. `Save…` and `Load…`
@@ -60,13 +60,6 @@ pub(crate) struct App {
     /// Written on every doc/theme change so the next launch reopens
     /// where the user left off.
     pub(crate) config: AppConfig,
-    /// Drives the headless graph-evaluation worker (run on demand,
-    /// results drained each frame). Off the serialized state.
-    worker: WorkerBridge,
-    /// Scripting-over-TCP host: owns its own tokio runtime + the sandboxed
-    /// Rhai executor. `Some` only when `--script-tcp` bound a listener;
-    /// `App` drains its inbound queue each frame. Off the serialized state.
-    script: Option<ScriptHost>,
 }
 
 impl App {
@@ -81,35 +74,20 @@ impl App {
     pub(crate) fn new(ui: &mut Ui, handle: HostHandle, script_cfg: ScriptConfig) -> Self {
         let mut document: Document = CoreGraph::default().into();
         document.main_view.auto_layout_default(&document.graph);
-        // The runtime lib is builtins + the shared subgraph library
-        // (where `SubgraphRef::Linked` resolves); builtins carry no
-        // subgraphs, so `func_lib.subgraphs` *is* the library.
-        let mut func_lib = builtin_func_lib();
-        for def in library::load_library() {
-            func_lib.add_subgraph(def);
-        }
-        let func_lib = Arc::new(func_lib);
         // The worker + script host wake the winit loop via the host handle;
         // the headless/tui drivers swap in a tokio `Notify` (see
-        // `crate::wake`).
+        // `crate::core::wake`).
         let wake: Wake = {
             let handle = handle.clone();
             Arc::new(move || handle.request_repaint())
         };
-        let worker = WorkerBridge::new(wake.clone());
-        // Start the script listener — a no-op returning `None` unless
-        // `--script-tcp` was passed. Shares a startup snapshot of the func
-        // lib with the executor.
-        let script = ScriptHost::start(&script_cfg, func_lib.clone(), wake);
         let mut app = Self {
             editor: Editor::new(document),
-            func_lib,
+            engine: Engine::new(&script_cfg, wake),
             theme: Theme::default(),
             host_handle: handle,
             current_path: None,
             config: AppConfig::default(),
-            worker,
-            script,
         };
         app.config = AppConfig::load();
         // Resolve the saved preference: `System` (the default) follows
@@ -133,8 +111,7 @@ impl App {
         // Open a fresh value-cache epoch: a re-run invalidates last run's
         // per-node values, and tags the replies the open panels request.
         self.editor.run_state.begin_run();
-        self.worker
-            .run_once(self.editor.document.graph.clone(), self.func_lib.clone());
+        self.engine.run_once(self.editor.document.graph.clone());
     }
 
     /// Consume worker results posted since the last frame. A finished run
@@ -145,7 +122,7 @@ impl App {
     /// they reflect the latest run.
     fn drain_worker_events(&mut self, ui: &Ui) {
         let run_state = &mut self.editor.run_state;
-        for event in self.worker.drain() {
+        for event in self.engine.drain_worker() {
             match event {
                 WorkerEvent::ExecutionFinished(Ok(stats)) => run_state.set_results(&stats),
                 WorkerEvent::ExecutionFinished(Err(err)) => {
@@ -164,7 +141,7 @@ impl App {
     /// panel set is settled; the reply arrives on a later frame's drain.
     fn request_open_panel_values(&mut self) {
         for req in self.editor.take_value_requests() {
-            self.worker.request_argument_values(req);
+            self.engine.request_argument_values(req);
         }
     }
 
@@ -173,10 +150,7 @@ impl App {
     /// = one undo entry), `run()` kicks one evaluation, `shutdown()` quits.
     /// Runs before the editor's frame so applied edits show the same frame.
     fn handle_script_inbound(&mut self) {
-        let events = match &mut self.script {
-            Some(script) => script.drain(),
-            None => return,
-        };
+        let events = self.engine.drain_script();
         let mut run = false;
         for event in events {
             match event {
@@ -211,7 +185,7 @@ impl palantir::App for App {
 
         let command = self.editor.frame(
             ui,
-            &self.func_lib,
+            &self.engine.func_lib,
             &self.theme,
             self.config.theme,
             &self.host_handle,
