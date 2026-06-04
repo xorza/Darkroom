@@ -188,8 +188,8 @@ pub enum ScriptMessage {
     /// with no editor-side per-variant glue. Empty vecs are no-ops.
     Apply(Vec<Intent>),
     /// `run()` — evaluate the graph once. `App` routes it to
-    /// [`crate::gui::app::App::run_graph`]. The deprecated editor's autorun
-    /// on/off pair has no analogue here: the new editor runs on demand.
+    /// [`crate::gui::app::App::run_graph`]; the editor runs on demand,
+    /// with no autorun toggle.
     RunOnce,
     /// `shutdown()` — ask the host to quit, via
     /// [`palantir::HostHandle::quit`].

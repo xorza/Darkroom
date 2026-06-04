@@ -2,12 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-`darkroom` is the **new** node-graph editor, built on Palantir (the in-tree
-immediate-mode GUI lib at `../palantir`). The frozen egui editor lives in
-`../darkroom-egui-deprecared` and is reference-only. Root `../CLAUDE.md`
-holds the workspace-wide rules (workflow, Rust style, tooling); Palantir's
-own widget/id conventions live in `../palantir/CLAUDE.md`. This file covers
-only what's specific to darkroom.
+`darkroom` is the node-graph editor, built on Palantir (the in-tree
+immediate-mode GUI lib at `../palantir`). Root `../CLAUDE.md` holds the
+workspace-wide rules (workflow, Rust style, tooling); Palantir's own
+widget/id conventions live in `../palantir/CLAUDE.md`. This file covers only
+what's specific to darkroom.
 
 ## Commands
 

@@ -1,6 +1,5 @@
 //! Forward-only descriptions of graph mutations + the self-contained
-//! undo entries built from them. Ported from `darkroom-egui` —
-//! same design rationale; substitute `glam::Vec2` for `egui::{Pos2,Vec2}`.
+//! undo entries built from them.
 //!
 //! An [`Intent`] is "what the caller wants the graph to look like
 //! after"; it carries no history. To make the change reversible, we

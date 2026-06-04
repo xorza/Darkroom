@@ -34,8 +34,7 @@ pub(crate) enum UiAction {
 }
 
 /// Whether a port consumes a binding (`Input`) or produces a value
-/// (`Output`). Mirrors deprecated darkroom's `PortKind` — same domain
-/// vocabulary, scoped to the data-port subset until Trigger/Event are
+/// (`Output`). Scoped to the data-port subset until Trigger/Event are
 /// reintroduced. `Input` ports live in the left column, `Output` in
 /// the right; `opposite` flips between them for snap-target tests.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

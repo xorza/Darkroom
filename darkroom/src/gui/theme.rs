@@ -267,7 +267,7 @@ pub struct Theme {
 
     // ── execution-status glow ────────────────────────────────────
     // Color of the soft glow shadow behind a node, by the last run's
-    // outcome (mirrors the deprecated editor's per-status shadows).
+    // outcome.
     // Palette swatches: `success`/`accent`/`syn_keyword`/`error`.
     /// Node computed this run — palette `success` (green).
     pub exec_executed_glow: Color,

@@ -162,8 +162,7 @@ impl NodeUI {
         // of this scope (the click handler below can't reborrow it).
         let shift_click = ui.modifiers().shift;
         // Soft glow behind the node colored by its last run outcome
-        // (zero-offset so it wraps evenly, like the deprecated editor's
-        // status shadow). `None` paints nothing.
+        // (zero-offset so it wraps evenly). `None` paints nothing.
         let shadow = exec_shadow(theme, node.exec_status);
 
         let panel = Panel::vstack()

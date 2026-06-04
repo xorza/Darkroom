@@ -223,7 +223,7 @@ impl Graph {
     }
 
     /// Iterate nodes in insertion order. This order is load-bearing:
-    /// callers (darkroom-egui rendering, action-stack replay) rely on it.
+    /// callers (editor rendering, action-stack replay) rely on it.
     pub fn iter(&self) -> impl Iterator<Item = &Node> {
         self.nodes.iter()
     }
