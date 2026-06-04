@@ -32,7 +32,7 @@
     ],
   },
   {
-    "label": "run darkroom TUI (script TCP, no auth)",
+    "label": "run darkroom GUI (script TCP, no auth)",
     "command": "cargo",
     "args": [
       "run",
@@ -43,7 +43,7 @@
       "--script-no-auth",
       "--script-bind",
       "127.0.0.1:34567",
-      "tui",
+      "gui",
     ],
   },
   {
