@@ -1,11 +1,10 @@
 use super::*;
 use scenarium::graph::{Binding, NodeKind, OutputPort};
-use std::net::Ipv4Addr;
 
 /// Build an `InboundSender` paired with the receiver tests assert on.
 /// `notify` is a no-op — tests don't drive a real host loop.
-fn test_inbound() -> (InboundSender, mpsc::UnboundedReceiver<SessionInbound>) {
-    let (tx, rx) = mpsc::unbounded_channel::<SessionInbound>();
+fn test_inbound() -> (InboundSender, mpsc::UnboundedReceiver<ScriptMessage>) {
+    let (tx, rx) = mpsc::unbounded_channel::<ScriptMessage>();
     (
         InboundSender {
             tx,
@@ -17,9 +16,9 @@ fn test_inbound() -> (InboundSender, mpsc::UnboundedReceiver<SessionInbound>) {
 
 /// Drain the next inbound, asserting it's a single-batch `Apply`, and
 /// return the decoded intents.
-fn expect_apply(rx: &mut mpsc::UnboundedReceiver<SessionInbound>) -> Vec<Intent> {
+fn expect_apply(rx: &mut mpsc::UnboundedReceiver<ScriptMessage>) -> Vec<Intent> {
     match rx.try_recv().expect("Apply queued") {
-        SessionInbound::Apply(actions) => actions,
+        ScriptMessage::Apply(actions) => actions,
         other => panic!("expected Apply, got {other:?}"),
     }
 }
@@ -316,7 +315,7 @@ fn run_emits_run_once() {
     let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
     engine.eval::<()>("run()").unwrap();
-    assert!(matches!(rx.try_recv(), Ok(SessionInbound::RunOnce)));
+    assert!(matches!(rx.try_recv(), Ok(ScriptMessage::RunOnce)));
 }
 
 #[test]
@@ -326,134 +325,5 @@ fn shutdown_emits_shutdown() {
     let engine = build_engine(state, tx, Arc::new(FuncLib::default()));
 
     engine.eval::<()>("shutdown()").unwrap();
-    assert!(matches!(rx.try_recv(), Ok(SessionInbound::Shutdown)));
-}
-
-#[test]
-fn build_transports_empty_when_no_tcp_config() {
-    // Guards against accidentally re-enabling an always-on listener.
-    let cfg = ScriptConfig::default();
-    assert!(cfg.tcp.is_none());
-    let results = build_transports(&cfg);
-    assert!(results.is_empty());
-}
-
-#[test]
-fn build_transports_returns_started_tcp_with_report() {
-    let token = Uuid::new_v4();
-    let cfg = ScriptConfig {
-        tcp: Some(TcpScriptConfig {
-            bind: SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
-            token: Some(token),
-            token_file: None,
-        }),
-    };
-    let mut results = build_transports(&cfg);
-    assert_eq!(results.len(), 1);
-    let started = results
-        .remove(0)
-        .expect("bind should succeed on loopback :0");
-    let TransportReport::Tcp(report) = &started.report;
-    assert_eq!(report.token, Some(token));
-    assert!(report.addr.ip().is_loopback());
-    assert_ne!(report.addr.port(), 0, "OS should have assigned a real port");
-    assert!(report.token_file.is_none());
-}
-
-#[test]
-fn build_transports_surfaces_bind_failure() {
-    // Bind once to pin the port, then ask for the same port again so the
-    // second bind fails. Loopback :0 lets the OS pick; we read the port
-    // off the first listener and reuse it.
-    let first = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-    let taken = first.local_addr().unwrap();
-
-    let cfg = ScriptConfig {
-        tcp: Some(TcpScriptConfig {
-            bind: taken,
-            token: None,
-            token_file: None,
-        }),
-    };
-    let mut results = build_transports(&cfg);
-    assert_eq!(results.len(), 1);
-    let err = results
-        .remove(0)
-        .expect_err("port already taken should fail");
-    assert_eq!(err.kind, TransportKind::Tcp);
-    // AddrInUse on Linux/mac; pin the kind so a regression that silently
-    // swallows the error (e.g. None on bind failure) trips.
-    assert_eq!(err.error.kind(), std::io::ErrorKind::AddrInUse);
-}
-
-#[test]
-fn parse_bind_spec_variants() {
-    // Bare port (with and without the leading colon) → loopback.
-    assert_eq!(
-        parse_bind_spec("34567").unwrap(),
-        SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 34567)
-    );
-    assert_eq!(
-        parse_bind_spec(":8080").unwrap(),
-        SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8080)
-    );
-    // Bare IP → default port (and "::1" must not be mangled by the
-    // colon-strip).
-    assert_eq!(
-        parse_bind_spec("0.0.0.0").unwrap(),
-        SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), DEFAULT_SCRIPT_PORT)
-    );
-    assert_eq!(
-        parse_bind_spec("::1").unwrap(),
-        SocketAddr::new(std::net::Ipv6Addr::LOCALHOST.into(), DEFAULT_SCRIPT_PORT)
-    );
-    // Full socket addr passes through.
-    assert_eq!(
-        parse_bind_spec("127.0.0.1:9000").unwrap(),
-        SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 9000)
-    );
-    assert!(parse_bind_spec("not-an-addr").is_err());
-}
-
-#[test]
-fn script_args_default_disables_listener() {
-    assert!(ScriptArgs::default().to_config().tcp.is_none());
-}
-
-#[test]
-fn script_args_tcp_mints_token_and_uses_default_bind() {
-    let cfg = ScriptArgs {
-        script_tcp: true,
-        ..Default::default()
-    }
-    .to_config();
-    let tcp = cfg.tcp.expect("listener enabled");
-    assert!(tcp.token.is_some(), "auth on by default");
-    assert_eq!(tcp.bind, default_bind());
-}
-
-#[test]
-fn script_args_no_auth_clears_token() {
-    let cfg = ScriptArgs {
-        script_tcp: true,
-        script_no_auth: true,
-        ..Default::default()
-    }
-    .to_config();
-    assert!(cfg.tcp.unwrap().token.is_none());
-}
-
-#[test]
-fn script_args_explicit_token_and_bind() {
-    let token = Uuid::new_v4();
-    let cfg = ScriptArgs {
-        script_tcp: true,
-        script_bind: Some(":9999".into()),
-        script_token: Some(token),
-        ..Default::default()
-    }
-    .to_config();
-    let tcp = cfg.tcp.unwrap();
-    assert_eq!(tcp.token, Some(token));
-    assert_eq!(tcp.bind.port(), 9999);
+    assert!(matches!(rx.try_recv(), Ok(ScriptMessage::Shutdown)));
 }

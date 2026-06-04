@@ -7,7 +7,7 @@ use scenarium::prelude::{FuncLib, Graph as CoreGraph};
 use crate::core::document::Document;
 use crate::core::engine::Engine;
 use crate::core::io::config::AppConfig;
-use crate::core::script::{ScriptConfig, SessionInbound};
+use crate::core::script::{ScriptConfig, ScriptMessage};
 use crate::core::theme_pref::ThemeChoice;
 use crate::core::wake::Wake;
 use crate::core::worker::WorkerEvent;
@@ -154,12 +154,12 @@ impl App {
         let mut run = false;
         for event in events {
             match event {
-                SessionInbound::Print { msg } => eprintln!("script: {msg}"),
-                SessionInbound::Apply(intents) => self.editor.apply_external_intents(intents),
-                SessionInbound::RunOnce => run = true,
+                ScriptMessage::Print { msg } => eprintln!("script: {msg}"),
+                ScriptMessage::Apply(intents) => self.editor.apply_external_intents(intents),
+                ScriptMessage::RunOnce => run = true,
                 // Shutdown is terminal: quit and drop the rest of the batch
                 // (the app is closing, so any remaining edits/runs are moot).
-                SessionInbound::Shutdown => {
+                ScriptMessage::Shutdown => {
                     self.host_handle.quit();
                     return;
                 }

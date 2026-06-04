@@ -10,7 +10,7 @@ use scenarium::prelude::{FuncLib, Graph};
 
 use crate::core::func_lib::builtin_func_lib;
 use crate::core::io::library;
-use crate::core::script::{ScriptConfig, ScriptHost, SessionInbound};
+use crate::core::script::{ScriptConfig, ScriptHost, ScriptMessage};
 use crate::core::wake::Wake;
 use crate::core::worker::{ValueRequest, WorkerBridge, WorkerEvent};
 
@@ -59,7 +59,7 @@ impl Engine {
 
     /// Non-blocking drain of everything scripts have pushed since the last
     /// frame (empty when no listener is running).
-    pub(crate) fn drain_script(&mut self) -> Vec<SessionInbound> {
+    pub(crate) fn drain_script(&mut self) -> Vec<ScriptMessage> {
         match &mut self.script {
             Some(script) => script.drain(),
             None => Vec::new(),

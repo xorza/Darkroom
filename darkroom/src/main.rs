@@ -3,13 +3,16 @@ mod gui;
 mod headless;
 mod tui;
 
+use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use palantir::{WinitHost, WinitHostConfig};
 use tokio::sync::Notify;
+use uuid::Uuid;
 
-use crate::core::script::{ScriptArgs, ScriptConfig};
+use crate::core::script::{DEFAULT_BIND, ScriptConfig, TcpScriptConfig};
 use crate::core::session::Session;
 use crate::core::wake;
 use crate::gui::app::App;
@@ -37,6 +40,80 @@ enum Mode {
     /// No UI: host the script TCP server + evaluation worker only. Exits on
     /// a script `shutdown()` or Ctrl-C.
     Headless,
+}
+
+/// CLI flags configuring the script TCP listener, flattened into [`Cli`].
+/// All optional; with no `--script-tcp` the listener stays off and the
+/// editor behaves exactly as before.
+#[derive(clap::Args, Debug, Default)]
+struct ScriptArgs {
+    /// Enable the TCP script listener.
+    #[arg(long)]
+    script_tcp: bool,
+    /// Bind address: a bare port (`34567` / `:34567`), an IP (uses the
+    /// default port), or a full `host:port`. Defaults to `127.0.0.1:34567`.
+    /// A non-loopback bind widens exposure and warns at startup.
+    #[arg(long, value_name = "ADDR")]
+    script_bind: Option<String>,
+    /// Require this 16-byte UUID auth token from every client.
+    #[arg(long, value_name = "UUID", conflicts_with = "script_no_auth")]
+    script_token: Option<Uuid>,
+    /// Accept any client without a handshake (loopback bind still advised).
+    /// Mutually exclusive with `--script-token`.
+    #[arg(long)]
+    script_no_auth: bool,
+    /// Write a JSON discovery file (`{"port": N, "token": "..."}`) at
+    /// startup so a client can find the address + token.
+    #[arg(long, value_name = "PATH")]
+    script_token_file: Option<PathBuf>,
+}
+
+impl ScriptArgs {
+    /// Resolve these flags into a [`ScriptConfig`]: the listener-off default
+    /// unless `--script-tcp` is set. When on with neither `--script-token`
+    /// nor `--script-no-auth`, a fresh random token is minted so the
+    /// listener defaults to authenticated.
+    fn to_config(&self) -> ScriptConfig {
+        if !self.script_tcp {
+            return ScriptConfig::default();
+        }
+        let bind = match &self.script_bind {
+            Some(spec) => parse_bind_spec(spec).unwrap_or_else(|e| {
+                eprintln!("--script-bind: {e}; falling back to {DEFAULT_BIND}");
+                DEFAULT_BIND
+            }),
+            None => DEFAULT_BIND,
+        };
+        let token = if self.script_no_auth {
+            None
+        } else {
+            Some(self.script_token.unwrap_or_else(Uuid::new_v4))
+        };
+        ScriptConfig {
+            tcp: Some(TcpScriptConfig {
+                bind,
+                token,
+                token_file: self.script_token_file.clone(),
+            }),
+        }
+    }
+}
+
+/// Parse a `--script-bind` spec into a `SocketAddr`: a bare port
+/// (`"34567"` / `":34567"`), a bare IP (`"0.0.0.0"`, `"::1"` → default
+/// port), or a full socket addr (`"127.0.0.1:8080"`, `"[::1]:8080"`).
+fn parse_bind_spec(s: &str) -> Result<SocketAddr, String> {
+    // Bare port: "34567" or ":34567". `strip_prefix` (not
+    // `trim_start_matches`) so "::1" isn't collapsed to "1".
+    let port_candidate = s.strip_prefix(':').unwrap_or(s);
+    if let Ok(port) = port_candidate.parse::<u16>() {
+        return Ok(SocketAddr::new(DEFAULT_BIND.ip(), port));
+    }
+    if let Ok(ip) = s.parse::<IpAddr>() {
+        return Ok(SocketAddr::new(ip, DEFAULT_BIND.port()));
+    }
+    s.parse::<SocketAddr>()
+        .map_err(|e| format!("invalid bind spec {s:?}: {e}"))
 }
 
 fn main() {
@@ -137,5 +214,77 @@ mod tests {
             cli.script.to_config().tcp.is_some(),
             "the listener flag applies alongside the subcommand"
         );
+    }
+
+    #[test]
+    fn parse_bind_spec_variants() {
+        use std::net::{Ipv4Addr, Ipv6Addr};
+        // Bare port (with and without the leading colon) → loopback.
+        assert_eq!(
+            parse_bind_spec("34567").unwrap(),
+            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 34567)
+        );
+        assert_eq!(
+            parse_bind_spec(":8080").unwrap(),
+            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8080)
+        );
+        // Bare IP → default port (and "::1" must survive the colon-strip).
+        assert_eq!(
+            parse_bind_spec("0.0.0.0").unwrap(),
+            SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), DEFAULT_BIND.port())
+        );
+        assert_eq!(
+            parse_bind_spec("::1").unwrap(),
+            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), DEFAULT_BIND.port())
+        );
+        // Full socket addr passes through.
+        assert_eq!(
+            parse_bind_spec("127.0.0.1:9000").unwrap(),
+            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 9000)
+        );
+        assert!(parse_bind_spec("not-an-addr").is_err());
+    }
+
+    #[test]
+    fn script_args_default_disables_listener() {
+        assert!(ScriptArgs::default().to_config().tcp.is_none());
+    }
+
+    #[test]
+    fn script_args_tcp_mints_token_and_uses_default_bind() {
+        let cfg = ScriptArgs {
+            script_tcp: true,
+            ..Default::default()
+        }
+        .to_config();
+        let tcp = cfg.tcp.expect("listener enabled");
+        assert!(tcp.token.is_some(), "auth on by default");
+        assert_eq!(tcp.bind, DEFAULT_BIND);
+    }
+
+    #[test]
+    fn script_args_no_auth_clears_token() {
+        let cfg = ScriptArgs {
+            script_tcp: true,
+            script_no_auth: true,
+            ..Default::default()
+        }
+        .to_config();
+        assert!(cfg.tcp.unwrap().token.is_none());
+    }
+
+    #[test]
+    fn script_args_explicit_token_and_bind() {
+        let token = Uuid::new_v4();
+        let cfg = ScriptArgs {
+            script_tcp: true,
+            script_bind: Some(":9999".into()),
+            script_token: Some(token),
+            ..Default::default()
+        }
+        .to_config();
+        let tcp = cfg.tcp.unwrap();
+        assert_eq!(tcp.token, Some(token));
+        assert_eq!(tcp.bind.port(), 9999);
     }
 }

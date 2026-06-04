@@ -44,7 +44,7 @@ use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::{ScriptRequest, ScriptTransport, TcpScriptConfig, TransportHandle};
+use super::{ScriptRequest, TcpScriptConfig, TransportHandle};
 
 /// Hard cap on a single frame so a malicious `u32::MAX` doesn't OOM
 /// the server. 1 MiB is plenty for user scripts. Applied to both the
@@ -200,9 +200,12 @@ fn atomic_write(path: &Path, body: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
-impl ScriptTransport for TcpTransport {
-    fn start(
-        self: Box<Self>,
+impl TcpTransport {
+    /// Spawn the accept loop on the ambient runtime; the returned handle
+    /// owns the task (dropping it cancels + aborts the listener). Pairs
+    /// requests onto `tx` and stops cooperatively on `cancel`.
+    pub fn start(
+        self,
         tx: mpsc::Sender<ScriptRequest>,
         cancel: CancellationToken,
     ) -> TransportHandle {
@@ -210,7 +213,7 @@ impl ScriptTransport for TcpTransport {
             listener,
             token,
             timeouts,
-        } = *self;
+        } = self;
         let cancel_task = cancel.clone();
         let task = tokio::spawn(async move {
             if let Err(e) = run_listener(listener, token, timeouts, tx, cancel_task).await {
@@ -430,7 +433,7 @@ async fn write_frame(stream: &mut TcpStream, bytes: &[u8]) -> std::io::Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::script::{ScriptExecutor, ScriptResult, SessionInbound};
+    use crate::core::script::{ScriptExecutor, ScriptMessage, ScriptResult};
     use std::net::Ipv4Addr;
 
     /// Port 0 on the loopback interface — the OS picks a free port.
@@ -443,12 +446,12 @@ mod tests {
     ) -> (
         SocketAddr,
         ScriptExecutor,
-        mpsc::UnboundedReceiver<SessionInbound>,
+        mpsc::UnboundedReceiver<ScriptMessage>,
     ) {
         let addr = transport.local_addr().unwrap();
-        let (action_tx, action_rx) = mpsc::unbounded_channel::<SessionInbound>();
+        let (action_tx, action_rx) = mpsc::unbounded_channel::<ScriptMessage>();
         let executor = ScriptExecutor::new(
-            [Box::new(transport) as Box<dyn ScriptTransport>],
+            transport,
             action_tx,
             Arc::new(scenarium::prelude::FuncLib::default()),
             Arc::new(|| {}),
@@ -497,10 +500,10 @@ mod tests {
         // Status sink: Session gets a tagged Print action.
         let action = tokio::time::timeout(std::time::Duration::from_secs(2), action_rx.recv())
             .await
-            .expect("timed out waiting for SessionInbound::Print")
+            .expect("timed out waiting for ScriptMessage::Print")
             .expect("action channel closed");
         match action {
-            SessionInbound::Print { msg } => {
+            ScriptMessage::Print { msg } => {
                 assert_eq!(msg, "hi");
             }
             other => panic!("expected Print, got {other:?}"),

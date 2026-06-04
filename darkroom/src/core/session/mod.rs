@@ -21,7 +21,7 @@ use crate::core::edit::intent::{Intent, apply_step, build_step};
 use crate::core::engine::Engine;
 use crate::core::io::config::AppConfig;
 use crate::core::io::persistence;
-use crate::core::script::{ScriptConfig, SessionInbound};
+use crate::core::script::{ScriptConfig, ScriptMessage};
 use crate::core::wake::Wake;
 use crate::core::worker::WorkerEvent;
 
@@ -104,12 +104,12 @@ impl Session {
         let mut run = false;
         for event in inbound {
             match event {
-                SessionInbound::Print { msg } => self.push_status(format!("script: {msg}")),
-                SessionInbound::Apply(intents) => {
+                ScriptMessage::Print { msg } => self.push_status(format!("script: {msg}")),
+                ScriptMessage::Apply(intents) => {
                     self.needs_reconcile |= apply_intents(&mut self.document, intents);
                 }
-                SessionInbound::RunOnce => run = true,
-                SessionInbound::Shutdown => self.quit = true,
+                ScriptMessage::RunOnce => run = true,
+                ScriptMessage::Shutdown => self.quit = true,
             }
         }
         if run {

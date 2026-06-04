@@ -7,7 +7,7 @@
 //! back a single [`ScriptResult`] on its [`tokio::sync::oneshot`]
 //! reply channel.
 //!
-//! Scripts talk back to the editor via a separate [`SessionInbound`]
+//! Scripts talk back to the editor via a separate [`ScriptMessage`]
 //! channel: functions registered on the engine (`print`, `apply`,
 //! `run`, …) push messages; [`crate::gui::app::App`] drains them at the top
 //! of every frame and applies them through the same intent/undo path
@@ -75,102 +75,8 @@ pub struct TcpScriptConfig {
     pub token_file: Option<PathBuf>,
 }
 
-/// Successfully bound transport plus its caller-renderable report.
-/// Returned from [`build_transports`] so the caller can decide how to
-/// surface discovery info (stdout banner for CLI, status bar for GUI,
-/// silent in tests) before handing the transport to [`ScriptExecutor`].
-#[derive(Debug)]
-pub struct StartedTransport {
-    pub transport: Box<dyn ScriptTransport>,
-    pub report: TransportReport,
-}
-
-/// Identifies a transport in startup outcomes. Carried on both the
-/// success side (via [`TransportReport`]) and the failure side (via
-/// [`TransportBindError`]) so an empty config and a failed bind are
-/// always distinguishable by *which* transport.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TransportKind {
-    Tcp,
-}
-
-/// Per-transport startup report. One variant per supported transport.
-#[derive(Debug, Clone)]
-pub enum TransportReport {
-    Tcp(tcp::TcpStartReport),
-}
-
-/// Bind failure tagged with the transport that failed, so callers can
-/// log meaningfully without inferring kind from position in the result
-/// vec.
-#[derive(Debug)]
-pub struct TransportBindError {
-    pub kind: TransportKind,
-    pub error: std::io::Error,
-}
-
-/// Materialize every transport described by `ScriptConfig`. Each enabled
-/// transport binds eagerly so the caller learns OS-assigned ports before
-/// any accept loop starts. Returns one entry per enabled transport: `Ok`
-/// with the bound transport + report, or `Err` with the failing
-/// transport's kind and bind error. Empty result means the config
-/// enabled no transports — that's the normal case for tests and the
-/// GUI without `--script-tcp`, not a degraded state. Pure with respect
-/// to stdout — surfacing is the caller's job (see [`announce`]).
-pub fn build_transports(cfg: &ScriptConfig) -> Vec<Result<StartedTransport, TransportBindError>> {
-    let mut out = Vec::new();
-    if let Some(tcp_cfg) = &cfg.tcp {
-        out.push(
-            tcp::start(tcp_cfg)
-                .map(|(transport, report)| StartedTransport {
-                    transport: Box::new(transport),
-                    report: TransportReport::Tcp(report),
-                })
-                .map_err(|error| TransportBindError {
-                    kind: TransportKind::Tcp,
-                    error,
-                }),
-        );
-    }
-    out
-}
-
-/// Convenience wrapper around [`build_transports`] for production
-/// callers: bind every enabled transport, surface each outcome via
-/// tracing, and return the bound transports ready to hand to
-/// [`ScriptExecutor::new`]. Use [`build_transports`] directly when you
-/// need raw outcomes (tests, custom surfacing).
-pub fn start_transports(cfg: &ScriptConfig) -> Vec<Box<dyn ScriptTransport>> {
-    build_transports(cfg)
-        .into_iter()
-        .filter_map(|result| match result {
-            Ok(started) => {
-                announce(&started.report);
-                Some(started.transport)
-            }
-            Err(e) => {
-                tracing::error!(
-                    kind = ?e.kind,
-                    error = %e.error,
-                    "script transport disabled (bind failed)",
-                );
-                None
-            }
-        })
-        .collect()
-}
-
-/// Log post-bind outcomes that the transport itself doesn't cover:
-/// auth-disabled warning (louder than the `auth=false` kv on tcp.rs's
-/// "listening" line) and token-file write success/failure. The bind
-/// event is logged inside the transport. Split out from
-/// [`build_transports`] so binding stays pure and unit-testable.
-pub(crate) fn announce(report: &TransportReport) {
-    match report {
-        TransportReport::Tcp(r) => announce_tcp(r),
-    }
-}
-
+/// Log a successful bind: the listening line, the auth-disabled warning,
+/// and the discovery-file write outcome. Called by [`ScriptHost::start`].
 fn announce_tcp(report: &tcp::TcpStartReport) {
     tracing::info!(
         addr = %report.addr,
@@ -226,7 +132,7 @@ const MAX_FN_EXPR_DEPTH: usize = 32;
 
 /// Work item sent from a transport to the executor. `origin` labels
 /// where the request came from (e.g. a TCP peer `"127.0.0.1:54321"`)
-/// so Session can attribute script output back to its sender.
+/// for tracing / attribution.
 /// `session_id = None` asks the executor to create a fresh session;
 /// `Some(id)` resumes an existing one (errors if unknown).
 /// `reply` is a single-shot channel; the executor runs `source`, then
@@ -268,7 +174,7 @@ pub struct ScriptResult {
 /// the executor can complete a script without round-tripping through the
 /// editor for every side effect.
 #[derive(Debug)]
-pub enum SessionInbound {
+pub enum ScriptMessage {
     /// A `print(msg)` call from a script. The TCP client also receives
     /// this text back in `ScriptResult.print`; the local echo (stderr) is
     /// `App`'s job. Per-peer attribution is the transport's (it traces the
@@ -290,16 +196,15 @@ pub enum SessionInbound {
     Shutdown,
 }
 
-/// `mpsc::UnboundedSender<SessionInbound>` + a host-side ping. Every
-/// script side-effect needs to wake the consumer's event loop so
-/// `Session::frame` runs and drains the inbound queue — without this,
-/// a script that fires actions on a quiet GUI canvas (no mouse, no
-/// keyboard) sees them pile up unnoticed until the next user input.
-/// Mirrors the worker path, which pings the same host after every
-/// result.
+/// `mpsc::UnboundedSender<ScriptMessage>` + a host-side ping. Every
+/// script side-effect needs to wake the host loop so it drains the
+/// inbound queue — without this, a script that fires actions on a quiet
+/// GUI canvas (no mouse, no keyboard) sees them pile up unnoticed until
+/// the next user input. Mirrors the worker path, which pings the same
+/// host after every result.
 #[derive(Clone)]
 struct InboundSender {
-    tx: mpsc::UnboundedSender<SessionInbound>,
+    tx: mpsc::UnboundedSender<ScriptMessage>,
     notify: Wake,
 }
 
@@ -310,7 +215,7 @@ impl std::fmt::Debug for InboundSender {
 }
 
 impl InboundSender {
-    fn send(&self, inbound: SessionInbound) {
+    fn send(&self, inbound: ScriptMessage) {
         // Channel send only fails if the receiver is dropped, which
         // happens during shutdown — Session is going away, no need to
         // ping it for a redraw it'll never serve.
@@ -355,52 +260,31 @@ impl Drop for TransportHandle {
     }
 }
 
-/// How a transport plugs into the executor: it gets a bounded `Sender`
-/// for pushing requests and a [`CancellationToken`] for cooperative
-/// shutdown, and returns a handle that owns its background task.
-pub trait ScriptTransport: Send + std::fmt::Debug {
-    fn start(
-        self: Box<Self>,
-        tx: mpsc::Sender<ScriptRequest>,
-        cancel: CancellationToken,
-    ) -> TransportHandle;
-}
-
-/// Owns the background executor task plus every transport it feeds.
+/// Owns the background executor task plus the TCP transport feeding it.
 /// Dropping it cancels everything and aborts the tasks.
 #[derive(Debug)]
 pub struct ScriptExecutor {
     cancel: CancellationToken,
     task: Option<JoinHandle<()>>,
-    _transports: Vec<TransportHandle>,
+    _transport: TransportHandle,
 }
 
 impl ScriptExecutor {
-    /// Create the executor, spawn every transport's listener task,
-    /// and spawn the executor task itself. Must be called from a
-    /// tokio runtime context. `action_tx` is the Session-side
-    /// receiver for side-effect requests emitted by script functions.
-    pub fn new<I>(
-        transports: I,
-        action_tx: mpsc::UnboundedSender<SessionInbound>,
+    /// Spawn the TCP transport's listener task and the executor task that
+    /// drains it. Must be called from a tokio runtime context. `action_tx`
+    /// is the host-side sender for the side effects script functions emit.
+    pub fn new(
+        transport: tcp::TcpTransport,
+        action_tx: mpsc::UnboundedSender<ScriptMessage>,
         func_lib: Arc<FuncLib>,
         notify: Wake,
-    ) -> Self
-    where
-        I: IntoIterator<Item = Box<dyn ScriptTransport>>,
-    {
+    ) -> Self {
         let inbound = InboundSender {
             tx: action_tx,
             notify,
         };
         let (tx, rx) = mpsc::channel(REQUEST_QUEUE_DEPTH);
-        let handles = transports
-            .into_iter()
-            .map(|t| {
-                let cancel = CancellationToken::new();
-                t.start(tx.clone(), cancel)
-            })
-            .collect();
+        let transport = transport.start(tx, CancellationToken::new());
 
         let cancel = CancellationToken::new();
         let cancel_task = cancel.clone();
@@ -411,7 +295,7 @@ impl ScriptExecutor {
         Self {
             cancel,
             task: Some(task),
-            _transports: handles,
+            _transport: transport,
         }
     }
 }
@@ -440,7 +324,19 @@ async fn run_executor(
             _ = cancel.cancelled() => break,
             r = rx.recv() => {
                 let Some(req) = r else { break };
-                let reply = run_script(&engine, &mut sessions, &state, &req);
+                // Isolate per-request panics: a panicking script (or a
+                // poisoned buffer) must not kill the executor task, which
+                // would silently stop the whole server while the listener
+                // keeps accepting connections.
+                let reply = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    run_script(&engine, &mut sessions, &state, &req)
+                }))
+                .unwrap_or_else(|_| ScriptResult {
+                    session: req.session_id,
+                    print: String::new(),
+                    result: None,
+                    error: Some("script execution panicked".to_string()),
+                });
                 let _ = req.reply.send(reply);
             }
         }
@@ -475,10 +371,10 @@ fn configure_caps(engine: &mut Engine) {
     engine.set_max_expr_depths(MAX_EXPR_DEPTH, MAX_FN_EXPR_DEPTH);
 }
 
-/// Dual-sink `print`: append to the caller's reply buffer AND notify
-/// Session for the local status bar. Hook fires synchronously during
-/// the script run, so the buffer is guaranteed to still describe the
-/// active request when `run_script` drains it.
+/// Dual-sink `print`: append to the caller's reply buffer AND notify the
+/// host (which echoes it). Hook fires synchronously during the script
+/// run, so the buffer is guaranteed to still describe the active request
+/// when `run_script` drains it.
 fn wire_print_hook(engine: &mut Engine, stdout: StdoutBuffer, inbound: InboundSender) {
     engine.on_print(move |msg| {
         {
@@ -486,7 +382,7 @@ fn wire_print_hook(engine: &mut Engine, stdout: StdoutBuffer, inbound: InboundSe
             buf.push_str(msg);
             buf.push('\n');
         }
-        inbound.send(SessionInbound::Print {
+        inbound.send(ScriptMessage::Print {
             msg: msg.to_string(),
         });
     });
@@ -498,7 +394,7 @@ fn wire_print_hook(engine: &mut Engine, stdout: StdoutBuffer, inbound: InboundSe
 /// f32`, `i64 → i32`, etc. all narrow silently. Rhai's own
 /// `from_dynamic` is strict (`expecting f32, got f64`), which is the
 /// safer default but inconvenient when the host type is f32 (e.g.
-/// `egui::Pos2`). One small bridge here keeps the rest of the model
+/// `glam::Vec2`). One small bridge here keeps the rest of the model
 /// free of `#[serde(with = …)]` annotations.
 fn decode_action(d: &Dynamic) -> Result<Intent, String> {
     let json = serde_json::to_value(d).map_err(|e| format!("encode to JSON: {e}"))?;
@@ -510,7 +406,7 @@ fn decode_action(d: &Dynamic) -> Result<Intent, String> {
 /// (so the worker sees the latest graph before evaluating).
 fn register_run(engine: &mut Engine, inbound: InboundSender) {
     engine.register_fn("run", move || {
-        inbound.send(SessionInbound::RunOnce);
+        inbound.send(ScriptMessage::RunOnce);
     });
 }
 
@@ -519,7 +415,7 @@ fn register_run(engine: &mut Engine, inbound: InboundSender) {
 /// [`palantir::HostHandle::quit`].
 fn register_shutdown(engine: &mut Engine, inbound: InboundSender) {
     engine.register_fn("shutdown", move || {
-        inbound.send(SessionInbound::Shutdown);
+        inbound.send(ScriptMessage::Shutdown);
     });
 }
 
@@ -527,7 +423,7 @@ fn register_shutdown(engine: &mut Engine, inbound: InboundSender) {
 /// surface. Every `Intent` variant is reachable through these
 /// via `serde::Deserialize`; new variants light up automatically with
 /// no per-variant glue. `apply_all` ships everything in a single
-/// `SessionInbound::Apply` so the batch is one undo step.
+/// `ScriptMessage::Apply` so the batch is one undo step.
 fn register_mutations(engine: &mut Engine, inbound: InboundSender) {
     {
         let inbound = inbound.clone();
@@ -535,7 +431,7 @@ fn register_mutations(engine: &mut Engine, inbound: InboundSender) {
             "apply",
             move |action: Dynamic| -> Result<(), Box<rhai::EvalAltResult>> {
                 let action = decode_action(&action).map_err(|e| format!("apply: {e}"))?;
-                inbound.send(SessionInbound::Apply(vec![action]));
+                inbound.send(ScriptMessage::Apply(vec![action]));
                 Ok(())
             },
         );
@@ -548,7 +444,7 @@ fn register_mutations(engine: &mut Engine, inbound: InboundSender) {
                 .enumerate()
                 .map(|(i, d)| decode_action(&d).map_err(|e| format!("apply_all[{i}]: {e}")))
                 .collect::<Result<_, _>>()?;
-            inbound.send(SessionInbound::Apply(actions));
+            inbound.send(ScriptMessage::Apply(actions));
             Ok(())
         },
     );
@@ -560,12 +456,12 @@ fn register_mutations(engine: &mut Engine, inbound: InboundSender) {
 /// separate registry on this side.
 fn register_introspection(engine: &mut Engine, func_lib: Arc<FuncLib>) {
     engine.register_fn("list_funcs", move || -> Array {
+        // Skip (don't panic on) any func that fails to serialize, so a bad
+        // entry can't take down the executor task mid-eval.
         func_lib
             .funcs
             .iter()
-            .map(|f| {
-                rhai::serde::to_dynamic(f).expect("Func is Serialize-clean (no skipped errors)")
-            })
+            .filter_map(|f| rhai::serde::to_dynamic(f).ok())
             .collect()
     });
 }
@@ -639,7 +535,7 @@ fn register_host_helpers(engine: &mut Engine, func_lib: Arc<FuncLib>) {
 fn wire_debug_hook(engine: &mut Engine) {
     engine.on_debug(|msg, src, pos| {
         tracing::debug!(
-            target: "darkroom-egui::script",
+            target: "darkroom::script",
             src = src.unwrap_or("<script>"),
             line = pos.line().unwrap_or(0),
             col = pos.position().unwrap_or(0),
@@ -663,9 +559,8 @@ fn install_prelude(engine: &mut Engine) {
     engine.register_global_module(rhai::Shared::new(module));
 }
 
-/// Run a single request end-to-end: resolve its session, publish the
-/// origin into shared state so the `on_print` hook can tag it, evaluate
-/// the script, drain the accumulated stdout, and return the reply.
+/// Run a single request end-to-end: resolve its session, evaluate the
+/// script, drain the accumulated stdout, and return the reply.
 fn run_script(
     engine: &Engine,
     sessions: &mut SessionStore,
@@ -722,19 +617,11 @@ fn run_script(
     }
 }
 
-/// Default TCP port when `--script-bind` gives only an IP (or isn't set).
-const DEFAULT_SCRIPT_PORT: u16 = 34567;
-
-fn default_bind() -> SocketAddr {
-    SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), DEFAULT_SCRIPT_PORT)
-}
-
 /// Owns the scripting runtime: a dedicated tokio runtime (mirroring
 /// `WorkerBridge`), the [`ScriptExecutor`] feeding off it, and the
-/// receiving end of the executor→editor [`SessionInbound`] channel that
-/// [`crate::gui::app::App`] drains each frame. Built only when `--script-tcp`
-/// bound at least one listener; dropping it cancels every task and shuts
-/// the runtime down.
+/// receiving end of the executor→host [`ScriptMessage`] channel the
+/// frontend drains each frame. Built only when `--script-tcp` bound the
+/// listener; dropping it cancels every task and shuts the runtime down.
 pub struct ScriptHost {
     // `executor` and `runtime` are RAII holders, never read after
     // construction: dropping `executor` cancels + aborts the executor and
@@ -742,7 +629,7 @@ pub struct ScriptHost {
     // shuts down the threads they ran on. Held only for that drop order.
     #[allow(dead_code)]
     executor: ScriptExecutor,
-    inbound_rx: mpsc::UnboundedReceiver<SessionInbound>,
+    inbound_rx: mpsc::UnboundedReceiver<ScriptMessage>,
     #[allow(dead_code)]
     runtime: Runtime,
 }
@@ -754,17 +641,21 @@ impl std::fmt::Debug for ScriptHost {
 }
 
 impl ScriptHost {
-    /// Bind every transport `cfg` enables, spin up a runtime, and start
-    /// the executor on it. Returns `None` when `cfg` enabled nothing or no
-    /// transport bound (a failed bind is logged in `start_transports`) —
-    /// the normal "scripting off" case, not an error. `func_lib` is a
-    /// startup snapshot shared with the executor; later library growth
-    /// (promote/publish) isn't reflected in already-running scripts.
+    /// Bind the TCP listener (when `cfg.tcp` is set), spin up a runtime,
+    /// and start the executor on it. Returns `None` when scripting is off
+    /// or the bind failed (logged here) — the normal case, not an error.
+    /// `func_lib` is a startup snapshot shared with the executor; later
+    /// library growth (promote/publish) isn't reflected in running scripts.
     pub fn start(cfg: &ScriptConfig, func_lib: Arc<FuncLib>, wake: Wake) -> Option<Self> {
-        let transports = start_transports(cfg);
-        if transports.is_empty() {
-            return None;
-        }
+        let tcp_cfg = cfg.tcp.as_ref()?;
+        let (transport, report) = match tcp::start(tcp_cfg) {
+            Ok(pair) => pair,
+            Err(e) => {
+                tracing::error!(error = %e, "script-tcp: bind failed; scripting disabled");
+                return None;
+            }
+        };
+        announce_tcp(&report);
         let runtime = match tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -780,7 +671,7 @@ impl ScriptHost {
         // tasks, so it needs an ambient runtime.
         let executor = {
             let _guard = runtime.enter();
-            ScriptExecutor::new(transports, tx, func_lib, wake)
+            ScriptExecutor::new(transport, tx, func_lib, wake)
         };
         Some(Self {
             executor,
@@ -791,7 +682,7 @@ impl ScriptHost {
 
     /// Non-blocking drain of everything scripts have pushed since the last
     /// frame. `App` applies each message on the UI thread.
-    pub fn drain(&mut self) -> Vec<SessionInbound> {
+    pub fn drain(&mut self) -> Vec<ScriptMessage> {
         let mut out = Vec::new();
         while let Ok(inbound) = self.inbound_rx.try_recv() {
             out.push(inbound);
@@ -800,80 +691,5 @@ impl ScriptHost {
     }
 }
 
-/// CLI flags that configure the script TCP listener, flattened into the
-/// editor's top-level args in `main.rs`. All optional; with no
-/// `--script-tcp` the listener stays off and the editor behaves exactly
-/// as before.
-#[derive(clap::Args, Debug, Default)]
-pub struct ScriptArgs {
-    /// Enable the TCP script listener.
-    #[arg(long)]
-    pub script_tcp: bool,
-    /// Bind address: a bare port (`34567` / `:34567`), an IP (uses the
-    /// default port), or a full `host:port`. Defaults to `127.0.0.1:34567`.
-    /// A non-loopback bind widens exposure and warns at startup.
-    #[arg(long, value_name = "ADDR")]
-    pub script_bind: Option<String>,
-    /// Require this 16-byte UUID auth token from every client.
-    #[arg(long, value_name = "UUID", conflicts_with = "script_no_auth")]
-    pub script_token: Option<Uuid>,
-    /// Accept any client without a handshake (loopback bind still
-    /// advised). Mutually exclusive with `--script-token`.
-    #[arg(long)]
-    pub script_no_auth: bool,
-    /// Write a JSON discovery file (`{"port": N, "token": "..."}`) at
-    /// startup so a client can find the address + token.
-    #[arg(long, value_name = "PATH")]
-    pub script_token_file: Option<PathBuf>,
-}
-
-impl ScriptArgs {
-    /// Resolve these flags into a [`ScriptConfig`]. Returns the
-    /// listener-off default unless `--script-tcp` is set. When on with
-    /// neither `--script-token` nor `--script-no-auth`, a fresh random
-    /// token is minted so the listener defaults to authenticated (surfaced
-    /// via the discovery file / startup log).
-    pub fn to_config(&self) -> ScriptConfig {
-        if !self.script_tcp {
-            return ScriptConfig::default();
-        }
-        let bind = match &self.script_bind {
-            Some(spec) => parse_bind_spec(spec).unwrap_or_else(|e| {
-                eprintln!("--script-bind: {e}; falling back to {}", default_bind());
-                default_bind()
-            }),
-            None => default_bind(),
-        };
-        let token = if self.script_no_auth {
-            None
-        } else {
-            Some(self.script_token.unwrap_or_else(Uuid::new_v4))
-        };
-        ScriptConfig {
-            tcp: Some(TcpScriptConfig {
-                bind,
-                token,
-                token_file: self.script_token_file.clone(),
-            }),
-        }
-    }
-}
-
-/// Parse a `--script-bind` spec into a `SocketAddr`. Accepts a bare port
-/// (`"34567"` / `":34567"`), a bare IP (`"0.0.0.0"`, `"::1"` → default
-/// port), or a full socket addr (`"127.0.0.1:8080"`, `"[::1]:8080"`).
-fn parse_bind_spec(s: &str) -> Result<SocketAddr, String> {
-    const DEFAULT_IP: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
-
-    // Bare port: "34567" or ":34567". `strip_prefix` (not
-    // `trim_start_matches`) so "::1" isn't collapsed to "1".
-    let port_candidate = s.strip_prefix(':').unwrap_or(s);
-    if let Ok(port) = port_candidate.parse::<u16>() {
-        return Ok(SocketAddr::new(DEFAULT_IP, port));
-    }
-    if let Ok(ip) = s.parse::<IpAddr>() {
-        return Ok(SocketAddr::new(ip, DEFAULT_SCRIPT_PORT));
-    }
-    s.parse::<SocketAddr>()
-        .map_err(|e| format!("invalid bind spec {s:?}: {e}"))
-}
+/// The default bind when `--script-tcp` is on with no `--script-bind`.
+pub const DEFAULT_BIND: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 34567);
