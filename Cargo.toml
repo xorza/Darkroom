@@ -84,7 +84,7 @@ clap = { version = "4.6", features = ["derive"] }
 
 
 [profile.bench]
-debug = false
+debug = true
 opt-level = 3
 strip = "none"
 split-debuginfo = "off"
