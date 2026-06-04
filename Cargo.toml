@@ -88,14 +88,13 @@ debug = true
 opt-level = 3
 strip = "none"
 split-debuginfo = "off"
+lto = "thin"
 
 [profile.release]
 debug = true
 opt-level = 3
 strip = "none"
 split-debuginfo = "off"
-# Thin LTO lets cross-crate generics like `soa_rs::Soa::push` inline at
-# their call sites (carried over from palantir's release profile).
 lto = "thin"
 
 [profile.release-max]
