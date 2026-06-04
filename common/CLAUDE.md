@@ -51,4 +51,4 @@ helpers. Pure leaf crate — depended on by everything, depends on nothing in-tr
 
 ## Dependencies
 
-tokio, rayon, serde, serde_json, rhai, toml, bitcode, lz4_flex, glam, aligned-vec, arc-swap, bumpalo, ryu, anyhow, thiserror.
+tokio, rayon, serde, serde_json, rhai, toml, bitcode, lz4_flex, glam, aligned-vec, arc-swap, ryu, anyhow, thiserror.
