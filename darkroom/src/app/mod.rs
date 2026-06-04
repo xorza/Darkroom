@@ -13,10 +13,11 @@ use crate::io::library;
 use crate::run_state::RunState;
 use crate::script::{ScriptConfig, ScriptHost, SessionInbound};
 use crate::theme::{Theme, ThemeChoice};
+use crate::wake::Wake;
 
 mod commands;
 pub(crate) mod editor;
-mod worker;
+pub(crate) mod worker;
 
 use editor::Editor;
 use worker::{WorkerBridge, WorkerEvent};
@@ -24,7 +25,7 @@ use worker::{WorkerBridge, WorkerEvent};
 /// The built-in runtime function library. Builtins carry no subgraph
 /// defs, so `func_lib.subgraphs` *is* the shared subgraph library —
 /// loaded from the library file at startup, grown by "promote".
-fn builtin_func_lib() -> FuncLib {
+pub(crate) fn builtin_func_lib() -> FuncLib {
     let mut func_lib = FuncLib::default();
     func_lib.merge(BasicFuncLib::default());
     func_lib.merge(WorkerEventsFuncLib::default());
@@ -102,11 +103,18 @@ impl App {
             func_lib.add_subgraph(def);
         }
         let func_lib = Arc::new(func_lib);
-        let worker = WorkerBridge::new(handle.clone());
+        // The worker + script host wake the winit loop via the host handle;
+        // the headless/tui drivers swap in a tokio `Notify` (see
+        // `crate::wake`).
+        let wake: Wake = {
+            let handle = handle.clone();
+            Arc::new(move || handle.request_repaint())
+        };
+        let worker = WorkerBridge::new(wake.clone());
         // Start the script listener — a no-op returning `None` unless
         // `--script-tcp` was passed. Shares a startup snapshot of the func
         // lib with the executor.
-        let script = ScriptHost::start(&script_cfg, func_lib.clone(), handle.clone());
+        let script = ScriptHost::start(&script_cfg, func_lib.clone(), wake);
         let mut app = Self {
             editor: Editor::new(document),
             func_lib,

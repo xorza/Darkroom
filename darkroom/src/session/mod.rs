@@ -1,0 +1,218 @@
+//! Frontend-agnostic editing core for the non-GUI modes (`--tui`,
+//! `--headless`). Owns the document, the func lib, the evaluation worker,
+//! and the script-over-TCP host, and drains their inbound queues on each
+//! [`Session::tick`]. No Palantir, no undo stack, no inspector — scripts
+//! mutate the graph, trigger runs, and `print`/`shutdown`; the worker's
+//! results and script `print`s land on a small status log the driver can
+//! show.
+//!
+//! The GUI ([`crate::app::App`]) has its own per-frame orchestration; this
+//! is the lean parallel that the headless/TUI drivers share. The pieces it
+//! reuses — [`Document`], the worker, the script host, and the
+//! `build_step`/`apply_step` intent machinery — are all GUI-free.
+
+use std::collections::VecDeque;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use scenarium::prelude::{FuncLib, Graph as CoreGraph};
+
+use crate::app::builtin_func_lib;
+use crate::app::worker::{WorkerBridge, WorkerEvent};
+use crate::document::Document;
+use crate::edit::intent::{Intent, apply_step, build_step};
+use crate::io::config::AppConfig;
+use crate::io::{library, persistence};
+use crate::script::{ScriptConfig, ScriptHost, SessionInbound};
+use crate::wake::Wake;
+
+#[cfg(test)]
+mod tests;
+
+/// Cap on the retained status log (lines). Oldest lines drop off the front
+/// so a long-running session can't grow it without bound.
+const STATUS_LOG_CAP: usize = 200;
+
+#[derive(Debug)]
+pub(crate) struct Session {
+    document: Document,
+    func_lib: Arc<FuncLib>,
+    worker: WorkerBridge,
+    script: Option<ScriptHost>,
+    /// Set when a script edit can change a subgraph's derived interface;
+    /// the graph is reconciled before the next run / save.
+    needs_reconcile: bool,
+    /// Rolling status log (worker summaries, script `print`s, errors),
+    /// surfaced by the TUI `status` command. Bounded by [`STATUS_LOG_CAP`].
+    status: VecDeque<String>,
+    /// Where `save` writes, if a document was opened at startup.
+    current_path: Option<PathBuf>,
+    /// Flipped by a script `shutdown()`; the driver loop polls
+    /// [`Session::should_quit`] after each tick.
+    quit: bool,
+}
+
+impl Session {
+    /// Build the core: assemble the func lib, spin up the worker + script
+    /// host (both woken through `wake`), and reopen the last document from
+    /// the saved config (or seed an empty graph). The script host is `None`
+    /// unless `script_cfg` enabled a listener.
+    pub(crate) fn new(script_cfg: &ScriptConfig, wake: Wake) -> Self {
+        let mut func_lib = builtin_func_lib();
+        for def in library::load_library() {
+            func_lib.add_subgraph(def);
+        }
+        let func_lib = Arc::new(func_lib);
+        let worker = WorkerBridge::new(wake.clone());
+        let script = ScriptHost::start(script_cfg, func_lib.clone(), wake);
+
+        let config = AppConfig::load();
+        let (document, current_path) = match config.document_path.as_deref() {
+            Some(path) => match persistence::load_document(path) {
+                Some(doc) => (doc, Some(path.to_path_buf())),
+                None => (empty_document(), None),
+            },
+            None => (empty_document(), None),
+        };
+
+        let mut session = Self {
+            document,
+            func_lib,
+            worker,
+            script,
+            needs_reconcile: true,
+            status: VecDeque::new(),
+            current_path,
+            quit: false,
+        };
+        // Canonicalize the freshly loaded / empty doc before anything runs.
+        session.reconcile_if_needed();
+        session
+    }
+
+    pub(crate) fn should_quit(&self) -> bool {
+        self.quit
+    }
+
+    pub(crate) fn node_count(&self) -> usize {
+        self.document.graph.len()
+    }
+
+    pub(crate) fn status_lines(&self) -> impl Iterator<Item = &str> {
+        self.status.iter().map(String::as_str)
+    }
+
+    /// Drain the worker + script inbound queues and act on them: apply
+    /// script edits to the document, summarize worker results onto the
+    /// status log, and (if a script asked) reconcile + run the graph. No
+    /// rendering — the driver decides how to surface [`Self::status_lines`].
+    pub(crate) fn tick(&mut self) {
+        self.drain_worker();
+        // Collect first so the `&mut self.script` borrow is released before
+        // the loop body touches other `self` fields.
+        let inbound = match &mut self.script {
+            Some(script) => script.drain(),
+            None => Vec::new(),
+        };
+        let mut run = false;
+        for event in inbound {
+            match event {
+                SessionInbound::Print { msg } => self.push_status(format!("script: {msg}")),
+                SessionInbound::Apply(intents) => {
+                    self.needs_reconcile |= apply_intents(&mut self.document, intents);
+                }
+                SessionInbound::RunOnce => run = true,
+                SessionInbound::Shutdown => self.quit = true,
+            }
+        }
+        if run {
+            self.run_graph();
+        }
+    }
+
+    /// Reconcile if needed, then send the whole graph to the worker for one
+    /// evaluation. Results arrive on a later [`Self::tick`] as status lines.
+    pub(crate) fn run_graph(&mut self) {
+        self.reconcile_if_needed();
+        self.worker
+            .run_once(self.document.graph.clone(), self.func_lib.clone());
+    }
+
+    /// Write the document back to the file it was opened from. Returns
+    /// `false` when there's no path to save to (a fresh, never-loaded doc).
+    pub(crate) fn save(&mut self) -> bool {
+        let Some(path) = self.current_path.clone() else {
+            return false;
+        };
+        self.reconcile_if_needed();
+        persistence::save_document(&self.document, &path)
+    }
+
+    fn reconcile_if_needed(&mut self) {
+        if self.needs_reconcile {
+            self.document.reconcile_boundaries(&self.func_lib);
+            self.needs_reconcile = false;
+        }
+    }
+
+    fn drain_worker(&mut self) {
+        // Collect to drop the `self.worker` borrow before `push_status`.
+        let events: Vec<WorkerEvent> = self.worker.drain().collect();
+        for event in events {
+            match event {
+                WorkerEvent::ExecutionFinished(Ok(stats)) => {
+                    self.push_status(format!(
+                        "run finished: {} node(s), {:.3}s",
+                        stats.executed_nodes.len(),
+                        stats.elapsed_secs
+                    ));
+                    for log in &stats.logs {
+                        self.push_status(format!("  [{:?}] {}", log.level, log.message));
+                    }
+                }
+                WorkerEvent::ExecutionFinished(Err(err)) => {
+                    self.push_status(format!("run failed: {err}"));
+                }
+                // Headless/TUI never request per-node argument values.
+                WorkerEvent::ArgumentValues { .. } => {}
+            }
+        }
+    }
+
+    fn push_status(&mut self, line: String) {
+        tracing::info!(target: "darkroom::session", "{line}");
+        if self.status.len() >= STATUS_LOG_CAP {
+            self.status.pop_front();
+        }
+        self.status.push_back(line);
+    }
+}
+
+/// Seed an empty document (root graph, auto-laid-out) — the startup state
+/// when no last document is restored.
+fn empty_document() -> Document {
+    let mut document: Document = CoreGraph::default().into();
+    document.main_view.auto_layout_default(&document.graph);
+    document
+}
+
+/// Apply a batch of script-sourced `intents` to `document`, returning
+/// whether any of them can change a subgraph's derived interface (so the
+/// caller reconciles before the next run / save). No undo — the non-GUI
+/// frontends don't expose it. No-op and stale intents (anchor node already
+/// gone) are dropped per-intent.
+fn apply_intents(document: &mut Document, intents: Vec<Intent>) -> bool {
+    let target = document.active_target();
+    let mut needs_reconcile = false;
+    for intent in intents {
+        let Some(step) = build_step(intent, document, target) else {
+            continue;
+        };
+        if step.is_noop() {
+            continue;
+        }
+        apply_step(&step, document, target);
+        needs_reconcile |= step.requires_reconcile();
+    }
+    needs_reconcile
+}

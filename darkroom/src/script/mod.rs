@@ -29,7 +29,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use glam::Vec2;
-use palantir::HostHandle;
 use rhai::{Array, Dynamic, Engine};
 use scenarium::function::FuncId;
 use scenarium::graph::{Node, NodeId};
@@ -38,6 +37,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::document::view_node::ViewNode;
 use crate::edit::intent::Intent;
+use crate::wake::Wake;
 use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -290,13 +290,6 @@ pub enum SessionInbound {
     Shutdown,
 }
 
-/// Opaque "wake the consumer" callback fired after every successful
-/// send on the inbound channel. The host wires it to whatever its
-/// event loop needs (egui's `request_repaint`, headless's `Notify`,
-/// the TUI's `Notify`); the script crate doesn't care — from here
-/// it's just `Fn()`. Keeps `script/` free of frontend types.
-pub type Notify = Arc<dyn Fn() + Send + Sync>;
-
 /// `mpsc::UnboundedSender<SessionInbound>` + a host-side ping. Every
 /// script side-effect needs to wake the consumer's event loop so
 /// `Session::frame` runs and drains the inbound queue — without this,
@@ -307,7 +300,7 @@ pub type Notify = Arc<dyn Fn() + Send + Sync>;
 #[derive(Clone)]
 struct InboundSender {
     tx: mpsc::UnboundedSender<SessionInbound>,
-    notify: Notify,
+    notify: Wake,
 }
 
 impl std::fmt::Debug for InboundSender {
@@ -391,7 +384,7 @@ impl ScriptExecutor {
         transports: I,
         action_tx: mpsc::UnboundedSender<SessionInbound>,
         func_lib: Arc<FuncLib>,
-        notify: Notify,
+        notify: Wake,
     ) -> Self
     where
         I: IntoIterator<Item = Box<dyn ScriptTransport>>,
@@ -767,7 +760,7 @@ impl ScriptHost {
     /// the normal "scripting off" case, not an error. `func_lib` is a
     /// startup snapshot shared with the executor; later library growth
     /// (promote/publish) isn't reflected in already-running scripts.
-    pub fn start(cfg: &ScriptConfig, func_lib: Arc<FuncLib>, host: HostHandle) -> Option<Self> {
+    pub fn start(cfg: &ScriptConfig, func_lib: Arc<FuncLib>, wake: Wake) -> Option<Self> {
         let transports = start_transports(cfg);
         if transports.is_empty() {
             return None;
@@ -783,15 +776,11 @@ impl ScriptHost {
             }
         };
         let (tx, inbound_rx) = mpsc::unbounded_channel();
-        let notify: Notify = {
-            let host = host.clone();
-            Arc::new(move || host.request_repaint())
-        };
         // `ScriptExecutor::new` spawns the executor + transport listener
         // tasks, so it needs an ambient runtime.
         let executor = {
             let _guard = runtime.enter();
-            ScriptExecutor::new(transports, tx, func_lib, notify)
+            ScriptExecutor::new(transports, tx, func_lib, wake)
         };
         Some(Self {
             executor,
