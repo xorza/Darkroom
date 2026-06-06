@@ -876,13 +876,12 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
     }
 }
 
-/// Coverage is emitted for the default negative-lobe kernel (Lanczos3) too:
-/// 1.0 in the interior, 0.0 fully outside, fractional across an `a`-wide border
-/// band. Value renormalization is *not* applied to Lanczos (negative lobes), so
-/// partially-covered edge pixels stay darkened — the coverage map is what lets
-/// downstream down-weight them.
+/// The default negative-lobe kernel (Lanczos3) emits coverage — 1.0 interior, 0.0 fully
+/// outside, fractional across an `a`-wide border band — AND renormalizes the value by the
+/// in-bounds weight: a partially-covered edge pixel of a flat field reads V (recovered),
+/// not V·coverage (darkened). Coverage stays as the downstream stacking weight.
 #[test]
-fn warp_emits_coverage_for_lanczos_without_renormalizing() {
+fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
     use crate::registration::config::Config as RegConfig;
 
     const V: f32 = 0.5;
@@ -920,19 +919,22 @@ fn warp_emits_coverage_for_lanczos_without_renormalizing() {
         "expected a fractional coverage band, got {partial} columns"
     );
 
-    // Lanczos is not renormalized: interior reads V, but a partially-covered
-    // edge pixel stays darkened (≈ V·coverage < V) rather than recovered to V.
+    // Lanczos is renormalized by the in-bounds weight: a flat field reads V everywhere it
+    // has any coverage — interior AND partially-covered edge columns — instead of being
+    // darkened to V·coverage as it was before in-sampler weight tracking.
     assert!(
         (val[at(10, y)] - V).abs() < 1e-4,
-        "interior value should be V"
+        "interior value should be V, got {}",
+        val[at(10, y)]
     );
     let edge_x = (24..31)
         .find(|&x| cov[at(x, y)] > 0.05 && cov[at(x, y)] < 0.95)
         .expect("a partially-covered edge column");
     assert!(
-        val[at(edge_x, y)] < V - 1e-3,
-        "Lanczos edge value should stay darkened (renorm skipped), got {} at col {edge_x}",
-        val[at(edge_x, y)]
+        (val[at(edge_x, y)] - V).abs() < 1e-4,
+        "renormalized Lanczos edge value should recover V, got {} at col {edge_x} (cov {})",
+        val[at(edge_x, y)],
+        cov[at(edge_x, y)]
     );
 
     for &c in cov {

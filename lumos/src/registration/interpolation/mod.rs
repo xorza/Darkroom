@@ -194,15 +194,33 @@ fn interpolate_bicubic(data: &Buffer2<f32>, x: f32, y: f32, border_value: f32) -
     let wy = bicubic_weights(fy);
 
     let (pixels, w, h) = (data.pixels(), data.width(), data.height());
-    let mut sum = 0.0;
+    let (wi, hi) = (w as i32, h as i32);
+    // Drop out-of-bounds taps and divide by the in-bounds weight so edge pixels get the
+    // true in-bounds weighted average instead of being darkened by missing taps. Interior
+    // pixels are unchanged: bicubic weights sum to 1, so `w_in == 1`.
+    let mut sum = 0.0f32;
+    let mut w_in = 0.0f32;
     for (j, &wyj) in wy.iter().enumerate() {
         let py = y0 - 1 + j as i32;
+        if py < 0 || py >= hi {
+            continue;
+        }
+        let row_off = py as usize * w;
         for (i, &wxi) in wx.iter().enumerate() {
             let px = x0 - 1 + i as i32;
-            sum += sample_pixel(pixels, w, h, px, py, border_value) * wxi * wyj;
+            if px < 0 || px >= wi {
+                continue;
+            }
+            let weight = wxi * wyj;
+            sum += pixels[row_off + px as usize] * weight;
+            w_in += weight;
         }
     }
-    sum
+    if w_in.abs() < 1e-10 {
+        border_value
+    } else {
+        sum / w_in
+    }
 }
 
 #[inline]
@@ -231,40 +249,41 @@ fn interpolate_lanczos_impl<const A: usize, const SIZE: usize>(
 
     let mut wx = [0.0f32; SIZE];
     let mut wy = [0.0f32; SIZE];
-    let mut wx_sum = 0.0f32;
-    let mut wy_sum = 0.0f32;
-
     for (i, w) in wx.iter_mut().enumerate() {
         *w = lut.lookup(fx - (i as i32 - a_i32 + 1) as f32);
-        wx_sum += *w;
     }
     for (j, w) in wy.iter_mut().enumerate() {
         *w = lut.lookup(fy - (j as i32 - a_i32 + 1) as f32);
-        wy_sum += *w;
     }
-
-    let inv_wx = if wx_sum.abs() > 1e-10 {
-        1.0 / wx_sum
-    } else {
-        1.0
-    };
-    let inv_wy = if wy_sum.abs() > 1e-10 {
-        1.0 / wy_sum
-    } else {
-        1.0
-    };
 
     let (pixels, w, h) = (data.pixels(), data.width(), data.height());
+    let (wi, hi) = (w as i32, h as i32);
+    // Drop out-of-bounds taps and divide by the in-bounds weight (the in-bounds weighted
+    // average). Interior pixels are unchanged: `w_in` equals the full kernel sum that the
+    // old `inv_wx * inv_wy` normalization divided by.
     let mut sum = 0.0f32;
+    let mut w_in = 0.0f32;
     for (j, &wyj) in wy.iter().enumerate() {
         let py = y0 - a_i32 + 1 + j as i32;
-        let wyj = wyj * inv_wy;
+        if py < 0 || py >= hi {
+            continue;
+        }
+        let row_off = py as usize * w;
         for (i, &wxi) in wx.iter().enumerate() {
             let px = x0 - a_i32 + 1 + i as i32;
-            sum += sample_pixel(pixels, w, h, px, py, border_value) * wxi * inv_wx * wyj;
+            if px < 0 || px >= wi {
+                continue;
+            }
+            let weight = wxi * wyj;
+            sum += pixels[row_off + px as usize] * weight;
+            w_in += weight;
         }
     }
-    sum
+    if w_in.abs() < 1e-10 {
+        border_value
+    } else {
+        sum / w_in
+    }
 }
 
 #[inline]
@@ -289,9 +308,10 @@ fn interpolate(data: &Buffer2<f32>, x: f32, y: f32, params: &WarpParams) -> f32 
 /// on in-bounds source samples — `Σ_in(w) / Σ_all(w) ∈ [0, 1]`. Pure geometry:
 /// it mirrors each sampler's tap layout + weights but reads no pixel data, so
 /// it needs neither a scratch source buffer nor a second sampling pass. The
-/// `1.0` for fully-interior pixels and `0.0` for fully-extrapolated ones is what
-/// lets [`warp_coverage`] feed a per-pixel weight to downstream stacking, and
-/// what the value renormalization divides by.
+/// `1.0` for fully-interior pixels and `0.0` for fully-extrapolated ones is the
+/// per-pixel data-fraction weight [`warp_coverage`] feeds to downstream stacking.
+/// The warped *value* is already renormalized by the in-bounds weight inside the
+/// samplers, so it is not divided by this coverage again.
 fn coverage_at(sx: f32, sy: f32, w: usize, h: usize, method: InterpolationMethod) -> f32 {
     let in_bounds = |x: i32, y: i32| x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h;
     match method {
@@ -346,8 +366,9 @@ fn coverage_at(sx: f32, sy: f32, w: usize, h: usize, method: InterpolationMethod
 }
 
 /// Sum the in-bounds tap weights of a separable kernel and divide by the total
-/// weight. Mirrors the `Σ sample·wx·wy / (Σwx·Σwy)` normalization the samplers
-/// use, so `value / coverage` recovers the in-bounds weighted average.
+/// weight — the fraction of the kernel that landed on real samples. The samplers
+/// themselves divide their in-bounds value sum by the in-bounds weight, so this is
+/// the downstream stacking weight, not a value-renormalization factor.
 fn separable_in_bounds_fraction(
     x0: i32,
     wx: &[f32],

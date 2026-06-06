@@ -1013,3 +1013,34 @@ fn test_generic_stepping_disabled_for_homography() {
         }
     }
 }
+
+/// In-bounds renormalization: on a flat field the in-bounds weighted average is the
+/// constant V no matter how many kernel taps fall off the image, so a renormalized edge
+/// sample reads exactly V. Before in-bounds weight tracking, bicubic read `V·Σ_in(w)` and
+/// Lanczos read `V·(Σ_in/Σ_all)` — both ≠ V at a partially-covered edge.
+#[test]
+fn samplers_renormalize_partial_kernel_at_edge() {
+    const V: f32 = 0.7;
+    let img = Buffer2::new(16, 16, vec![V; 16 * 16]);
+
+    for method in [
+        InterpolationMethod::Bicubic,
+        InterpolationMethod::Lanczos2 { deringing: -1.0 },
+        InterpolationMethod::Lanczos3 { deringing: -1.0 },
+        InterpolationMethod::Lanczos4 { deringing: -1.0 },
+    ] {
+        // x = 0.5 forces the leftmost tap(s) out of bounds (the renormalized partial-kernel
+        // path); y = 8.5 is fully interior.
+        let edge = interp(&img, 0.5, 8.5, method);
+        assert!(
+            (edge - V).abs() < TOL,
+            "{method:?}: partial-kernel edge should recover V={V}, got {edge}"
+        );
+        // Fully interior: all taps in bounds, value unchanged.
+        let interior = interp(&img, 8.5, 8.5, method);
+        assert!(
+            (interior - V).abs() < TOL,
+            "{method:?}: interior should be V={V}, got {interior}"
+        );
+    }
+}

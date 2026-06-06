@@ -352,17 +352,30 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
                 sp * inv_total
             };
         } else {
-            // Slow path: bounds-checked sampling for border pixels
+            // Slow path: border pixels. Out-of-bounds taps are dropped (not substituted
+            // with border_value) and the result is normalized by the in-bounds weight, so
+            // edge pixels get the true in-bounds weighted average instead of being darkened
+            // by the missing taps. `inv_total` (the full-kernel reciprocal) is wrong here
+            // because it divides by the out-of-bounds weight too.
             let mut sp = 0.0f32;
             let mut sn = 0.0f32;
             let mut wp = 0.0f32;
             let mut wn = 0.0f32;
+            let mut w_in = 0.0f32;
             for (j, &wyj) in wy.iter().enumerate() {
                 let py = ky0 + j as i32;
+                if py < 0 || py >= ih {
+                    continue;
+                }
+                let row_off = py as usize * input_width;
                 for (i, &wxi) in wx.iter().enumerate() {
                     let px = kx0 + i as i32;
-                    let v = sample_pixel(pixels, input_width, input_height, px, py, border_value);
+                    if px < 0 || px >= iw {
+                        continue;
+                    }
+                    let v = unsafe { *pixels.get_unchecked(row_off + px as usize) };
                     let weight = wxi * wyj;
+                    w_in += weight;
                     let s = v * weight;
                     if DERINGING {
                         if s < 0.0 {
@@ -377,10 +390,12 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
                     }
                 }
             }
-            *out_pixel = if DERINGING {
+            *out_pixel = if w_in.abs() < 1e-10 {
+                border_value
+            } else if DERINGING {
                 soft_clamp(sp, sn, wp, wn, clamp_th, clamp_th_inv)
             } else {
-                sp * inv_total
+                sp / w_in
             };
         }
 
@@ -437,26 +452,26 @@ mod tests {
                 *w = lut.lookup(dy);
             }
 
-            let wx_sum: f32 = wx.iter().sum();
-            let wy_sum: f32 = wy.iter().sum();
-            if wx_sum.abs() > 1e-10 {
-                wx.iter_mut().for_each(|w| *w /= wx_sum);
-            }
-            if wy_sum.abs() > 1e-10 {
-                wy.iter_mut().for_each(|w| *w /= wy_sum);
-            }
-
+            let (iw, ih) = (input_width as i32, input_height as i32);
             let mut sum = 0.0f32;
+            let mut w_in = 0.0f32;
             for (j, &wyj) in wy.iter().enumerate() {
                 let py = y0 - 2 + j as i32;
+                if py < 0 || py >= ih {
+                    continue;
+                }
                 for (i, &wxi) in wx.iter().enumerate() {
                     let px = x0 - 2 + i as i32;
-                    let pixel = sample_pixel(pixels, input_width, input_height, px, py, 0.0);
-                    sum += pixel * wxi * wyj;
+                    if px < 0 || px >= iw {
+                        continue;
+                    }
+                    let weight = wxi * wyj;
+                    sum += pixels[py as usize * input_width + px as usize] * weight;
+                    w_in += weight;
                 }
             }
 
-            *out_pixel = sum;
+            *out_pixel = if w_in.abs() < 1e-10 { 0.0 } else { sum / w_in };
         }
     }
 
@@ -924,24 +939,22 @@ mod tests {
                 *w = lut.lookup(fy - (j as i32 - 2) as f32);
             }
 
-            let wx_sum: f32 = wx.iter().sum();
-            let wy_sum: f32 = wy.iter().sum();
-            if wx_sum.abs() > 1e-10 {
-                wx.iter_mut().for_each(|w| *w /= wx_sum);
-            }
-            if wy_sum.abs() > 1e-10 {
-                wy.iter_mut().for_each(|w| *w /= wy_sum);
-            }
-
+            let (iw, ih) = (input_width as i32, input_height as i32);
             let mut sp = 0.0f32;
             let mut sn = 0.0f32;
             let mut wp = 0.0f32;
             let mut wn = 0.0f32;
             for (j, &wyj) in wy.iter().enumerate() {
                 let py = y0 - 2 + j as i32;
+                if py < 0 || py >= ih {
+                    continue;
+                }
                 for (i, &wxi) in wx.iter().enumerate() {
                     let px = x0 - 2 + i as i32;
-                    let v = sample_pixel(pixels, input_width, input_height, px, py, 0.0);
+                    if px < 0 || px >= iw {
+                        continue;
+                    }
+                    let v = pixels[py as usize * input_width + px as usize];
                     let weight = wxi * wyj;
                     let s = v * weight;
                     if s < 0.0 {
@@ -1202,24 +1215,25 @@ mod tests {
             for (j, w) in wy.iter_mut().enumerate() {
                 *w = lut.lookup(fy - (j as i32 - a_i32 + 1) as f32);
             }
-            let wx_sum: f32 = wx.iter().sum();
-            let wy_sum: f32 = wy.iter().sum();
-            if wx_sum.abs() > 1e-10 {
-                wx.iter_mut().for_each(|w| *w /= wx_sum);
-            }
-            if wy_sum.abs() > 1e-10 {
-                wy.iter_mut().for_each(|w| *w /= wy_sum);
-            }
-
+            let (iw, ih) = (input_width as i32, input_height as i32);
             let mut sum = 0.0f32;
+            let mut w_in = 0.0f32;
             for (j, &wyj) in wy.iter().enumerate() {
                 let py = y0 - a_i32 + 1 + j as i32;
+                if py < 0 || py >= ih {
+                    continue;
+                }
                 for (i, &wxi) in wx.iter().enumerate() {
                     let px = x0 - a_i32 + 1 + i as i32;
-                    sum += sample_pixel(pixels, input_width, input_height, px, py, 0.0) * wxi * wyj;
+                    if px < 0 || px >= iw {
+                        continue;
+                    }
+                    let weight = wxi * wyj;
+                    sum += pixels[py as usize * input_width + px as usize] * weight;
+                    w_in += weight;
                 }
             }
-            *out_pixel = sum;
+            *out_pixel = if w_in.abs() < 1e-10 { 0.0 } else { sum / w_in };
         }
     }
 

@@ -9,13 +9,13 @@ Status: ☐ todo · ◐ in progress · ⊘ deferred (deliberate)
 
 ## Tier 1 — silent corruption of the default output
 
-- ◐ **T1.1 — `warp()` coverage mask + border-flux renormalization** · Critical · M
-  Coverage is emitted (`WarpResult { image, coverage }`) and border flux renormalized for the
-  non-negative kernels (nearest/bilinear). Remaining: (1) value-renormalization for the
-  negative-lobe kernels (bicubic/**Lanczos**, the default) — coverage is emitted but exact
-  value renorm under deringing needs true in-sampler weight tracking; (2) wire coverage into a
-  production warp→stack path as `pixel_weight_maps` (`warp`/`drizzle_stack` are bench/test-only
-  today — no production consumer yet).
+- ◐ **T1.1 — wire `warp()` coverage into a production warp→stack path** · Critical · M
+  Coverage is emitted (`WarpResult { image, coverage }`), border flux is renormalized for the
+  non-negative kernels (nearest/bilinear), and the negative-lobe kernels (bicubic/**Lanczos**,
+  the default) now renormalize the value by the in-bounds weight in-sampler under deringing
+  (`interpolation/mod.rs` + `warp/mod.rs` slow path). Remaining: wire coverage into a production
+  warp→stack path as `pixel_weight_maps` — `warp`/`drizzle_stack` are bench/test-only today (no
+  production consumer), so this is blocked on the end-to-end registered-stack entry point.
 
 ## Tier 2 — high (corrupts output; narrower or quantitative)
 
