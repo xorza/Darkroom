@@ -79,7 +79,11 @@ pub struct CalibrationMasters {
 /// Stack raw CFA frames using the full stacking pipeline.
 ///
 /// Uses the frame-type preset config. Falls back to median for < 8 frames
-/// (too few for rejection to work well).
+/// (too few for rejection to work well). This is a stricter, all-methods
+/// *quality* threshold for master frames, sitting above the library's
+/// per-method *correctness* floor (`stacking::MIN_FRAMES_FOR_REJECTION`, which
+/// only overrides genuinely-unsound σ-rejection at N ≤ 4); the two compose —
+/// a `< 8` master is already median here, so the library floor is a no-op.
 /// Returns `None` if `paths` is empty.
 fn stack_cfa_frames(
     paths: &[impl AsRef<Path> + Sync],

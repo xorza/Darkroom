@@ -1,8 +1,29 @@
 use rayon::prelude::*;
 
-/// Normalize u16 raw data to f32 in [0.0, 1.0] range using parallel SIMD processing.
-/// Formula: clamp(((value - black).max(0) * inv_range), 0.0, 1.0)
+/// Light-frame normalization: `clamp((value - black).max(0) * inv_range, 0, 1)`.
+/// The `[0, 1]` clamp is the display / demosaic contract for light frames.
 pub(crate) fn normalize_u16_to_f32_parallel(data: &[u16], black: f32, inv_range: f32) -> Vec<f32> {
+    normalize_generic::<true>(data, black, inv_range)
+}
+
+/// Calibration normalization: `(value - black) * inv_range`, **no** `[0, 1]`
+/// clamp. Master dark/bias frames must keep the signed noise distribution
+/// around the pedestal — flooring at 0 clips the sub-pedestal tail and biases
+/// the stacked master's mean upward, which then leaks a residual offset into
+/// every calibrated light. The downstream subtract/divide math tolerates the
+/// negatives (`CfaImage` keeps them too).
+pub(crate) fn normalize_u16_to_f32_parallel_unclamped(
+    data: &[u16],
+    black: f32,
+    inv_range: f32,
+) -> Vec<f32> {
+    normalize_generic::<false>(data, black, inv_range)
+}
+
+/// Shared parallel driver. `CLAMP` is a compile-time switch so each variant
+/// monomorphizes to branch-free SIMD — the light path keeps its `[0, 1]` clamp,
+/// the calibration path drops it, with no duplicated kernel.
+fn normalize_generic<const CLAMP: bool>(data: &[u16], black: f32, inv_range: f32) -> Vec<f32> {
     const CHUNK_SIZE: usize = 16384; // Process 64KB chunks (16K * 4 bytes)
 
     // SAFETY: Every element is written by the parallel SIMD pass below before being read.
@@ -12,31 +33,48 @@ pub(crate) fn normalize_u16_to_f32_parallel(data: &[u16], black: f32, inv_range:
         .par_chunks_mut(CHUNK_SIZE)
         .zip(data.par_chunks(CHUNK_SIZE))
         .for_each(|(out_chunk, in_chunk)| {
-            normalize_chunk_simd(in_chunk, out_chunk, black, inv_range);
+            normalize_chunk_simd::<CLAMP>(in_chunk, out_chunk, black, inv_range);
         });
 
     result
 }
 
+/// Scalar form of the per-pixel transform, shared by the fallback and the SIMD
+/// remainders. `CLAMP` gates the `[0, 1]` floor/ceil.
+#[inline(always)]
+fn normalize_one<const CLAMP: bool>(val: u16, black: f32, inv_range: f32) -> f32 {
+    let subtracted = (val as f32) - black;
+    if CLAMP {
+        (subtracted.max(0.0) * inv_range).min(1.0)
+    } else {
+        subtracted * inv_range
+    }
+}
+
 /// Normalize a chunk of u16 data to f32 using SIMD when available.
 #[inline]
-fn normalize_chunk_simd(input: &[u16], output: &mut [f32], black: f32, inv_range: f32) {
+fn normalize_chunk_simd<const CLAMP: bool>(
+    input: &[u16],
+    output: &mut [f32],
+    black: f32,
+    inv_range: f32,
+) {
     #[cfg(target_arch = "x86_64")]
     {
         // Prefer SSE4.1 for faster u16->i32 conversion (pmovzxwd)
         if common::cpu_features::has_sse4_1() {
             // SAFETY: We've verified SSE4.1 is available
             unsafe {
-                normalize_chunk_sse41(input, output, black, inv_range);
+                normalize_chunk_sse41::<CLAMP>(input, output, black, inv_range);
             }
         } else if common::cpu_features::has_sse2() {
             // SAFETY: We've verified SSE2 is available
             unsafe {
-                normalize_chunk_sse2(input, output, black, inv_range);
+                normalize_chunk_sse2::<CLAMP>(input, output, black, inv_range);
             }
         } else {
             for (out, &val) in output.iter_mut().zip(input.iter()) {
-                *out = (((val as f32) - black).max(0.0) * inv_range).min(1.0);
+                *out = normalize_one::<CLAMP>(val, black, inv_range);
             }
         }
     }
@@ -45,38 +83,34 @@ fn normalize_chunk_simd(input: &[u16], output: &mut [f32], black: f32, inv_range
     {
         // SAFETY: NEON is always available on aarch64
         unsafe {
-            normalize_chunk_neon(input, output, black, inv_range);
+            normalize_chunk_neon::<CLAMP>(input, output, black, inv_range);
         }
     }
 
     #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
     {
         // Scalar fallback for other architectures
-        normalize_chunk_scalar(input, output, black, inv_range);
-    }
-}
-
-/// Scalar normalization fallback.
-#[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-#[inline]
-fn normalize_chunk_scalar(input: &[u16], output: &mut [f32], black: f32, inv_range: f32) {
-    for (out, &val) in output.iter_mut().zip(input.iter()) {
-        *out = (((val as f32) - black).max(0.0) * inv_range).min(1.0);
+        for (out, &val) in output.iter_mut().zip(input.iter()) {
+            *out = normalize_one::<CLAMP>(val, black, inv_range);
+        }
     }
 }
 
 /// SSE4.1 SIMD normalization for x86_64 (fast path with pmovzxwd).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
-unsafe fn normalize_chunk_sse41(input: &[u16], output: &mut [f32], black: f32, inv_range: f32) {
+unsafe fn normalize_chunk_sse41<const CLAMP: bool>(
+    input: &[u16],
+    output: &mut [f32],
+    black: f32,
+    inv_range: f32,
+) {
     use std::arch::x86_64::*;
 
     // SAFETY: All operations require SSE4.1, guaranteed by target_feature
     unsafe {
         let black_vec = _mm_set1_ps(black);
         let inv_range_vec = _mm_set1_ps(inv_range);
-        let zero_vec = _mm_setzero_ps();
-        let one_vec = _mm_set1_ps(1.0);
 
         let chunks = input.len() / 4;
         let remainder = input.len() % 4;
@@ -88,21 +122,29 @@ unsafe fn normalize_chunk_sse41(input: &[u16], output: &mut [f32], black: f32, i
             let vals_i32 = _mm_cvtepu16_epi32(vals_u16);
             let vals_f32 = _mm_cvtepi32_ps(vals_i32);
 
-            // Subtract black, clamp to [0, 1], multiply by inv_range
+            // Subtract black; optionally floor at 0, scale, optionally cap at 1.
             let subtracted = _mm_sub_ps(vals_f32, black_vec);
-            let clamped = _mm_max_ps(subtracted, zero_vec);
-            let normalized = _mm_mul_ps(clamped, inv_range_vec);
-            let clamped_upper = _mm_min_ps(normalized, one_vec);
+            let floored = if CLAMP {
+                _mm_max_ps(subtracted, _mm_setzero_ps())
+            } else {
+                subtracted
+            };
+            let normalized = _mm_mul_ps(floored, inv_range_vec);
+            let result = if CLAMP {
+                _mm_min_ps(normalized, _mm_set1_ps(1.0))
+            } else {
+                normalized
+            };
 
             // Store result
-            _mm_storeu_ps(output.as_mut_ptr().add(idx), clamped_upper);
+            _mm_storeu_ps(output.as_mut_ptr().add(idx), result);
         }
 
         // Handle remainder with scalar
         let start = chunks * 4;
         for i in 0..remainder {
             let idx = start + i;
-            output[idx] = (((input[idx] as f32) - black).max(0.0) * inv_range).min(1.0);
+            output[idx] = normalize_one::<CLAMP>(input[idx], black, inv_range);
         }
     }
 }
@@ -110,15 +152,18 @@ unsafe fn normalize_chunk_sse41(input: &[u16], output: &mut [f32], black: f32, i
 /// SSE2 SIMD normalization for x86_64 (fallback without SSE4.1).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
-unsafe fn normalize_chunk_sse2(input: &[u16], output: &mut [f32], black: f32, inv_range: f32) {
+unsafe fn normalize_chunk_sse2<const CLAMP: bool>(
+    input: &[u16],
+    output: &mut [f32],
+    black: f32,
+    inv_range: f32,
+) {
     use std::arch::x86_64::*;
 
     // SAFETY: All operations require SSE2, guaranteed by target_feature
     unsafe {
         let black_vec = _mm_set1_ps(black);
         let inv_range_vec = _mm_set1_ps(inv_range);
-        let zero_vec = _mm_setzero_ps();
-        let one_vec = _mm_set1_ps(1.0);
 
         let chunks = input.len() / 4;
         let remainder = input.len() % 4;
@@ -132,28 +177,41 @@ unsafe fn normalize_chunk_sse2(input: &[u16], output: &mut [f32], black: f32, in
             let vals_i32 = _mm_unpacklo_epi16(vals_u16, _mm_setzero_si128());
             let vals_f32 = _mm_cvtepi32_ps(vals_i32);
 
-            // Subtract black, clamp to [0, 1], multiply by inv_range
+            // Subtract black; optionally floor at 0, scale, optionally cap at 1.
             let subtracted = _mm_sub_ps(vals_f32, black_vec);
-            let clamped = _mm_max_ps(subtracted, zero_vec);
-            let normalized = _mm_mul_ps(clamped, inv_range_vec);
-            let clamped_upper = _mm_min_ps(normalized, one_vec);
+            let floored = if CLAMP {
+                _mm_max_ps(subtracted, _mm_setzero_ps())
+            } else {
+                subtracted
+            };
+            let normalized = _mm_mul_ps(floored, inv_range_vec);
+            let result = if CLAMP {
+                _mm_min_ps(normalized, _mm_set1_ps(1.0))
+            } else {
+                normalized
+            };
 
             // Store result
-            _mm_storeu_ps(output.as_mut_ptr().add(idx), clamped_upper);
+            _mm_storeu_ps(output.as_mut_ptr().add(idx), result);
         }
 
         // Handle remainder with scalar
         let start = chunks * 4;
         for i in 0..remainder {
             let idx = start + i;
-            output[idx] = (((input[idx] as f32) - black).max(0.0) * inv_range).min(1.0);
+            output[idx] = normalize_one::<CLAMP>(input[idx], black, inv_range);
         }
     }
 }
 
 /// NEON SIMD normalization for aarch64.
 #[cfg(target_arch = "aarch64")]
-unsafe fn normalize_chunk_neon(input: &[u16], output: &mut [f32], black: f32, inv_range: f32) {
+unsafe fn normalize_chunk_neon<const CLAMP: bool>(
+    input: &[u16],
+    output: &mut [f32],
+    black: f32,
+    inv_range: f32,
+) {
     use std::arch::aarch64::*;
 
     // SAFETY: All NEON intrinsics in this function are safe because:
@@ -163,8 +221,6 @@ unsafe fn normalize_chunk_neon(input: &[u16], output: &mut [f32], black: f32, in
     unsafe {
         let black_vec = vdupq_n_f32(black);
         let inv_range_vec = vdupq_n_f32(inv_range);
-        let zero_vec = vdupq_n_f32(0.0);
-        let one_vec = vdupq_n_f32(1.0);
 
         let chunks = input.len() / 4;
         let remainder = input.len() % 4;
@@ -178,21 +234,29 @@ unsafe fn normalize_chunk_neon(input: &[u16], output: &mut [f32], black: f32, in
             // Convert to f32
             let vals_f32 = vcvtq_f32_u32(vals_u32);
 
-            // Subtract black, clamp to [0, 1], multiply by inv_range
+            // Subtract black; optionally floor at 0, scale, optionally cap at 1.
             let subtracted = vsubq_f32(vals_f32, black_vec);
-            let clamped = vmaxq_f32(subtracted, zero_vec);
-            let normalized = vmulq_f32(clamped, inv_range_vec);
-            let clamped_upper = vminq_f32(normalized, one_vec);
+            let floored = if CLAMP {
+                vmaxq_f32(subtracted, vdupq_n_f32(0.0))
+            } else {
+                subtracted
+            };
+            let normalized = vmulq_f32(floored, inv_range_vec);
+            let result = if CLAMP {
+                vminq_f32(normalized, vdupq_n_f32(1.0))
+            } else {
+                normalized
+            };
 
             // Store result
-            vst1q_f32(output.as_mut_ptr().add(idx), clamped_upper);
+            vst1q_f32(output.as_mut_ptr().add(idx), result);
         }
 
         // Handle remainder with scalar
         let start = chunks * 4;
         for i in 0..remainder {
             let idx = start + i;
-            output[idx] = (((input[idx] as f32) - black).max(0.0) * inv_range).min(1.0);
+            output[idx] = normalize_one::<CLAMP>(input[idx], black, inv_range);
         }
     }
 }

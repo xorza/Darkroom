@@ -290,6 +290,40 @@ fn test_normalize_below_black_clamped() {
     }
 }
 
+/// The calibration path keeps signed, un-clamped values — flooring the
+/// sub-pedestal tail at 0 (the light-frame clamp) would bias stacked master
+/// dark/bias means upward.
+#[test]
+fn test_normalize_unclamped_preserves_out_of_range() {
+    let black = 500.0;
+    let inv_range = 1.0 / 1000.0; // white level = 1500
+
+    // below black, below black, in range, above white
+    let input: Vec<u16> = vec![0, 100, 499, 700, 2000];
+    let unclamped = normalize::normalize_u16_to_f32_parallel_unclamped(&input, black, inv_range);
+    let clamped = normalize::normalize_u16_to_f32_parallel(&input, black, inv_range);
+
+    // Unclamped is the exact affine map (value - black) * inv_range; negatives
+    // and >1 are retained.
+    let unclamped_expected = [-0.5, -0.4, -0.001, 0.2, 1.5];
+    for (i, (&got, &want)) in unclamped.iter().zip(unclamped_expected.iter()).enumerate() {
+        assert!(
+            (got - want).abs() < 1e-6,
+            "unclamped[{i}] = {got}, want {want}"
+        );
+    }
+
+    // Clamped floors the sub-black tail at exactly 0 and caps the over-white
+    // value at exactly 1; the in-range value is identical to the unclamped one.
+    let clamped_expected = [0.0, 0.0, 0.0, 0.2, 1.0];
+    for (i, (&got, &want)) in clamped.iter().zip(clamped_expected.iter()).enumerate() {
+        assert!(
+            (got - want).abs() < 1e-6,
+            "clamped[{i}] = {got}, want {want}"
+        );
+    }
+}
+
 /// Test process_unknown_libraw_fallback 16-bit normalization formula.
 /// We can't call the function directly (needs libraw instance), but we can
 /// verify the normalization math it uses: (v as f32) / 65535.0

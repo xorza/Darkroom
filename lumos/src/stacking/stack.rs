@@ -323,12 +323,44 @@ fn normalize_weights(weights: &[f32]) -> Option<Vec<f32>> {
 /// and construct the output image.
 ///
 /// Generic over any `StackableImage` type.
+/// Hard correctness floor for σ-based pixel rejection. Sigma-clip, linear-fit,
+/// and GESD estimate a scale (σ) from the per-pixel samples; with fewer than
+/// this many frames that estimate is dominated by noise and the methods over-
+/// or under-reject, corrupting the combine (the "sigma-clipping with too few
+/// frames" anti-pattern). Below the floor the combine falls back to the median,
+/// which is robust at any N. This is intentionally lower than the calibration
+/// master path's quality threshold (`calibration_masters`, which prefers ≥8
+/// frames before using rejection at all): 5–7-frame sigma-clipped light stacks
+/// are legitimate, so the library only overrides the genuinely-unsound N≤4 case.
+pub(crate) const MIN_FRAMES_FOR_REJECTION: usize = 5;
+
+/// Resolve the combine method actually used, downgrading σ-based rejection to a
+/// median when there are too few frames for the rejection statistics to be
+/// trustworthy (see [`MIN_FRAMES_FOR_REJECTION`]). Non-σ methods (Winsorized,
+/// Percentile, None) and an explicit Median pass through unchanged.
+fn effective_combine_method(method: CombineMethod, frame_count: usize) -> CombineMethod {
+    if let CombineMethod::Mean(rejection) = method
+        && rejection.needs_many_frames()
+        && frame_count < MIN_FRAMES_FOR_REJECTION
+    {
+        tracing::warn!(
+            frame_count,
+            min_frames = MIN_FRAMES_FOR_REJECTION,
+            ?rejection,
+            "too few frames for reliable σ-based rejection; combining with the median instead",
+        );
+        return CombineMethod::Median;
+    }
+    method
+}
+
 pub(crate) fn run_stacking<I: StackableImage>(cache: &ImageCache<I>, config: &StackConfig) -> I {
     let stats = cache.channel_stats();
+    let method = effective_combine_method(config.method, stats.len());
     let frame_norms = compute_frame_norms(stats, config.normalization);
     let weights = resolve_weights(&config.weighting, stats);
 
-    let pixels = dispatch_stacking(cache, weights.as_deref(), config, frame_norms.as_deref());
+    let pixels = dispatch_stacking(cache, weights.as_deref(), method, frame_norms.as_deref());
     I::from_stacked(pixels, cache.metadata().clone(), cache.dimensions())
 }
 
@@ -338,10 +370,10 @@ pub(crate) fn run_stacking<I: StackableImage>(cache: &ImageCache<I>, config: &St
 fn dispatch_stacking(
     cache: &ImageCache<impl StackableImage>,
     weights: Option<&[f32]>,
-    config: &StackConfig,
+    method: CombineMethod,
     frame_norms: Option<&[FrameNorm]>,
 ) -> crate::astro_image::PixelData {
-    match config.method {
+    match method {
         CombineMethod::Median => cache.process_chunked(None, frame_norms, |values, _, _| {
             math::statistics::median_f32_mut(values)
         }),
@@ -494,6 +526,57 @@ mod tests {
             result.unwrap_err(),
             Error::DimensionMismatch { index: 1, .. }
         ));
+    }
+
+    // ========== Small-N rejection guard ==========
+
+    #[test]
+    fn needs_many_frames_only_for_statistical_methods() {
+        // σ/trend estimators need samples; Winsorized (small-stack design),
+        // Percentile (fixed fraction), and None are stable at any N.
+        assert!(Rejection::sigma_clip(2.5).needs_many_frames());
+        assert!(Rejection::linear_fit(3.0).needs_many_frames());
+        assert!(Rejection::gesd().needs_many_frames());
+        assert!(!Rejection::winsorized(3.0).needs_many_frames());
+        assert!(!Rejection::percentile(10.0).needs_many_frames());
+        assert!(!Rejection::None.needs_many_frames());
+    }
+
+    #[test]
+    fn effective_combine_method_applies_small_n_floor() {
+        use CombineMethod::{Mean, Median};
+        let sigma = Mean(Rejection::sigma_clip(2.5));
+        // (method, frame_count, expected effective method)
+        let cases = [
+            // σ-based methods below the floor (N ≤ 4) fall back to the median...
+            (sigma, 0, Median),
+            (sigma, MIN_FRAMES_FOR_REJECTION - 1, Median),
+            (Mean(Rejection::linear_fit(3.0)), 3, Median),
+            (Mean(Rejection::gesd()), 4, Median),
+            // ...and are respected at the floor and above.
+            (sigma, MIN_FRAMES_FOR_REJECTION, sigma),
+            (sigma, 50, sigma),
+            // Small-stack-stable methods + explicit Median never downgrade, even at N=2.
+            (
+                Mean(Rejection::winsorized(3.0)),
+                2,
+                Mean(Rejection::winsorized(3.0)),
+            ),
+            (
+                Mean(Rejection::percentile(10.0)),
+                2,
+                Mean(Rejection::percentile(10.0)),
+            ),
+            (Mean(Rejection::None), 2, Mean(Rejection::None)),
+            (Median, 2, Median),
+        ];
+        for (method, n, expected) in cases {
+            assert_eq!(
+                effective_combine_method(method, n),
+                expected,
+                "method={method:?} at {n} frames",
+            );
+        }
     }
 
     // ========== Normalization: Identity ==========
@@ -660,8 +743,8 @@ mod tests {
             normalization: Normalization::Global,
             ..Default::default()
         };
-        let result_norm = dispatch_stacking(&cache, None, &config, Some(&norm_params));
-        let result_unnorm = dispatch_stacking(&cache, None, &config, None);
+        let result_norm = dispatch_stacking(&cache, None, config.method, Some(&norm_params));
+        let result_unnorm = dispatch_stacking(&cache, None, config.method, None);
 
         let norm_pixel = result_norm.channel(0)[0];
         let unnorm_pixel = result_unnorm.channel(0)[0];

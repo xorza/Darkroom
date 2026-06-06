@@ -23,7 +23,7 @@ use common::Buffer2;
 use demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
 use demosaic::xtrans::process_xtrans;
 
-use normalize::normalize_u16_to_f32_parallel;
+use normalize::{normalize_u16_to_f32_parallel, normalize_u16_to_f32_parallel_unclamped};
 
 /// Allocate a Vec of given length without zeroing.
 ///
@@ -237,7 +237,35 @@ fn compute_wb_multipliers(cam_mul: [f32; 4]) -> Option<[f32; 4]> {
 ///
 /// Operates on data already normalized with the common black level.
 /// Channel is determined by the libraw `filters` bitmask using the FC macro.
+/// Apply per-channel black delta + white balance in place, clamped to `[0, 1]`
+/// (light-frame contract).
 fn apply_channel_corrections(
+    data: &mut [f32],
+    raw_width: usize,
+    filters: u32,
+    delta_norm: &[f32; 4],
+    wb_mul: &[f32; 4],
+) {
+    apply_channel_corrections_impl::<true>(data, raw_width, filters, delta_norm, wb_mul);
+}
+
+/// Like [`apply_channel_corrections`] but without the `[0, 1]` clamp, for the
+/// calibration path — flooring the channel-delta result would reintroduce the
+/// master-bias the unclamped normalize avoids (see
+/// [`normalize_u16_to_f32_parallel_unclamped`]).
+fn apply_channel_corrections_unclamped(
+    data: &mut [f32],
+    raw_width: usize,
+    filters: u32,
+    delta_norm: &[f32; 4],
+    wb_mul: &[f32; 4],
+) {
+    apply_channel_corrections_impl::<false>(data, raw_width, filters, delta_norm, wb_mul);
+}
+
+/// `CLAMP` monomorphizes the per-pixel floor/ceil away — the light path keeps
+/// the `[0, 1]` clamp, the calibration path drops it, sharing one kernel.
+fn apply_channel_corrections_impl<const CLAMP: bool>(
     data: &mut [f32],
     raw_width: usize,
     filters: u32,
@@ -256,7 +284,12 @@ fn apply_channel_corrections(
         .for_each(|(row, row_data)| {
             for (col, pixel) in row_data.iter_mut().enumerate() {
                 let ch = fc(filters, row, col);
-                *pixel = ((*pixel - delta_norm[ch]).max(0.0) * wb_mul[ch]).min(1.0);
+                let corrected = *pixel - delta_norm[ch];
+                *pixel = if CLAMP {
+                    (corrected.max(0.0) * wb_mul[ch]).min(1.0)
+                } else {
+                    corrected * wb_mul[ch]
+                };
             }
         });
 }
@@ -315,17 +348,29 @@ impl UnpackedRaw {
 
     /// Extract raw CFA pixels as normalized f32 (active area only).
     ///
-    /// Applies per-channel black correction but NO white balance (used for
-    /// calibration frames where raw data integrity is required).
-    fn extract_cfa_pixels(&self) -> Result<Vec<f32>, ImageError> {
+    /// Applies per-channel black correction but NO white balance. `CLAMP`
+    /// controls the `[0, 1]` floor/ceil (compile-time, like the kernels it
+    /// dispatches to): `true` for monochrome **light** frames (the normalized
+    /// output is the displayed image), `false` for the **calibration** path,
+    /// where flooring at 0 would bias the stacked master dark/bias upward by
+    /// clipping the sub-pedestal noise tail.
+    fn extract_cfa_pixels<const CLAMP: bool>(&self) -> Result<Vec<f32>, ImageError> {
         let raw_data = self.raw_image_slice()?;
 
         // Pass 1: SIMD normalize with common black level
-        let mut normalized = normalize_u16_to_f32_parallel(
-            raw_data,
-            self.black_level.common,
-            self.black_level.inv_range,
-        );
+        let mut normalized = if CLAMP {
+            normalize_u16_to_f32_parallel(
+                raw_data,
+                self.black_level.common,
+                self.black_level.inv_range,
+            )
+        } else {
+            normalize_u16_to_f32_parallel_unclamped(
+                raw_data,
+                self.black_level.common,
+                self.black_level.inv_range,
+            )
+        };
 
         // Pass 2: Per-channel black delta correction (no WB)
         let has_delta = self
@@ -334,13 +379,19 @@ impl UnpackedRaw {
             .iter()
             .any(|&d| d.abs() > f32::EPSILON);
         if has_delta {
-            apply_channel_corrections(
-                &mut normalized,
-                self.raw_width,
-                self.filters,
-                &self.black_level.channel_delta_norm,
-                &[1.0; 4], // No WB for calibration path
-            );
+            let delta = &self.black_level.channel_delta_norm;
+            let wb = &[1.0; 4]; // No WB for calibration path
+            if CLAMP {
+                apply_channel_corrections(&mut normalized, self.raw_width, self.filters, delta, wb);
+            } else {
+                apply_channel_corrections_unclamped(
+                    &mut normalized,
+                    self.raw_width,
+                    self.filters,
+                    delta,
+                    wb,
+                );
+            }
         }
 
         // Extract the active area
@@ -726,7 +777,8 @@ pub fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
     let (pixels, width, height, channels, cfa_type) = match sensor_type {
         SensorType::Monochrome => {
             tracing::info!("Monochrome sensor detected, skipping demosaic");
-            let pixels = raw.extract_cfa_pixels()?;
+            // Light frame: clamp to the [0, 1] display contract.
+            let pixels = raw.extract_cfa_pixels::<true>()?;
             (pixels, raw.width, raw.height, 1, None)
         }
         SensorType::Bayer(cfa_pattern) => {
@@ -801,7 +853,9 @@ pub fn load_raw_cfa(path: &Path) -> Result<CfaImage, ImageError> {
         }
     };
 
-    let pixels = raw.extract_cfa_pixels()?;
+    // Calibration path: keep signed, un-clamped values so stacked master
+    // dark/bias means aren't biased upward by clipping the sub-pedestal tail.
+    let pixels = raw.extract_cfa_pixels::<false>()?;
     let metadata = AstroImageMetadata {
         iso: raw.iso,
         bitpix: BitPix::UInt16,
