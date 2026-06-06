@@ -58,7 +58,6 @@ pub(crate) mod centroid;
 pub mod config;
 mod convolution;
 pub(crate) mod deblend;
-pub mod detection_file;
 pub(crate) mod detector;
 pub(crate) mod labeling;
 mod mask_dilation;

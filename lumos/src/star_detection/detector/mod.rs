@@ -12,16 +12,12 @@ mod bench;
 // Imports
 // =============================================================================
 
-use std::path::Path;
-
 use serde::{Deserialize, Serialize};
 
 use crate::astro_image::AstroImage;
-use crate::astro_image::error::ImageError;
 
 use super::buffer_pool::BufferPool;
 use super::config::Config;
-use super::detection_file;
 use super::star::Star;
 
 /// Result of star detection with diagnostics.
@@ -215,33 +211,5 @@ impl StarDetector {
         }
 
         DetectionResult { stars, diagnostics }
-    }
-
-    /// Load an image from `path`, run detection, and write the result to a
-    /// `{path}.detection` JSON sidecar.
-    ///
-    /// Always re-detects, overwriting any existing sidecar; use
-    /// [`detect_file_cached`](Self::detect_file_cached) to reuse a fresh sidecar.
-    pub fn detect_file(&mut self, path: impl AsRef<Path>) -> Result<DetectionResult, ImageError> {
-        let path = path.as_ref();
-        let image = AstroImage::from_file(path)?;
-        let result = self.detect(&image);
-        detection_file::save_detection_result(path, &result, &self.config)?;
-        Ok(result)
-    }
-
-    /// Like [`detect_file`](Self::detect_file), but reuses the `{path}.detection`
-    /// sidecar when it is still valid — present, no older than the image, and
-    /// written under the current config. On a cache hit the image is not loaded;
-    /// on a miss it detects and writes a fresh sidecar.
-    pub fn detect_file_cached(
-        &mut self,
-        path: impl AsRef<Path>,
-    ) -> Result<DetectionResult, ImageError> {
-        let path = path.as_ref();
-        if let Some(cached) = detection_file::load_if_fresh(path, &self.config) {
-            return Ok(cached);
-        }
-        self.detect_file(path)
     }
 }

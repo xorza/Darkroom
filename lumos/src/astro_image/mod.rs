@@ -419,32 +419,6 @@ impl AstroImage {
     }
 
     // ------------------------------------------------------------------------
-    // Grayscale conversion
-    // ------------------------------------------------------------------------
-
-    /// Convert to grayscale, consuming self (reuses R buffer for RGB).
-    pub fn into_grayscale(self) -> Self {
-        if self.is_grayscale() {
-            return self;
-        }
-
-        let width = self.dimensions.width;
-        let height = self.dimensions.height;
-
-        match self.pixels {
-            PixelData::Rgb([mut r, g, b]) => {
-                rgb_to_luminance_inplace(&mut r, &g, &b);
-                AstroImage {
-                    metadata: self.metadata,
-                    dimensions: ImageDimensions::new(width, height, 1),
-                    pixels: PixelData::L(r),
-                }
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    // ------------------------------------------------------------------------
     // Conversion / Export
     // ------------------------------------------------------------------------
 
@@ -657,26 +631,6 @@ fn interleave_rgb(r: &[f32], g: &[f32], b: &[f32], interleaved: &mut [f32]) {
             rgb[0] = r[i];
             rgb[1] = g[i];
             rgb[2] = b[i];
-        });
-}
-
-/// Convert RGB planes to luminance in-place, reusing the R buffer for output.
-fn rgb_to_luminance_inplace(r: &mut Buffer2<f32>, g: &Buffer2<f32>, b: &Buffer2<f32>) {
-    debug_assert_eq!(r.len(), g.len());
-    debug_assert_eq!(g.len(), b.len());
-
-    const R_WEIGHT: f32 = 0.2126;
-    const G_WEIGHT: f32 = 0.7152;
-    const B_WEIGHT: f32 = 0.0722;
-
-    let g_slice = g.pixels();
-    let b_slice = b.pixels();
-
-    r.pixels_mut()
-        .par_iter_mut()
-        .enumerate()
-        .for_each(|(i, val)| {
-            *val = R_WEIGHT * *val + G_WEIGHT * g_slice[i] + B_WEIGHT * b_slice[i];
         });
 }
 

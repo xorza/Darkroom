@@ -340,30 +340,6 @@ fn test_get_pixel_channel_rgb() {
 }
 
 #[test]
-fn test_to_grayscale_rgb() {
-    let rgb = AstroImage::from_pixels(
-        ImageDimensions::new(2, 1, 3),
-        vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-    );
-
-    let gray = rgb.into_grayscale();
-
-    assert!(gray.is_grayscale());
-    assert_eq!(gray.channels(), 1);
-    assert!((gray.channel(0)[0] - 0.2126).abs() < 1e-4);
-    assert!((gray.channel(0)[1] - 0.7152).abs() < 1e-4);
-}
-
-#[test]
-fn test_to_grayscale_already_gray() {
-    let gray = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![1.0, 2.0, 3.0, 4.0]);
-    let result = gray.into_grayscale();
-
-    assert!(result.is_grayscale());
-    assert_eq!(result.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0]);
-}
-
-#[test]
 fn test_from_planar_channels_grayscale() {
     let channels = vec![vec![1.0, 2.0, 3.0, 4.0]];
     let image = AstroImage::from_planar_channels(ImageDimensions::new(2, 2, 1), channels);

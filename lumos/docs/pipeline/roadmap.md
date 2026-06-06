@@ -171,14 +171,15 @@ analyst passes (perf ×2, removal, precision), de-noised + verified.
   sum backends). Duplicated `math/sum` and superseded by the median/MAD background. Kept
   the cubic-spline SIMD (the live path). Suite 1971→1950, green.
 
-## Wired this session
-- ☑ `detection_file.rs` sidecar — restored after an over-eager removal, then properly
-  wired: `save_detection_result` / `load_detection_result` round-trip, plus a config- and
-  mtime-aware cache (`load_if_fresh`) behind `StarDetector::detect_file_cached`. Sidecar
-  stores a `{format_version, config_fingerprint, result}` envelope; a stale image (mtime),
-  changed config (Debug-hash fingerprint), or version bump is a safe cache miss. Public via
-  `lumos::{sidecar_path, save_detection_result, load_detection_result}` + demoed in
-  `examples/star_detection.rs`. 6 tests (round-trip, mtime, config, corrupt/version, e2e).
+## Removed as out of scope (per Mission & scope — must serve the stacked image)
+- ☑ `detection_file.rs` sidecar — `detect_file`/`detect_file_cached`, `save`/`load`/`load_if_fresh`,
+  `sidecar_path`, `ImageError::Sidecar`, the `lib.rs` re-exports, and the example demo. A
+  detection-result cache (IO/persistence) that never fed `stack()`. Removed under the
+  precision-first scope policy — it isn't a step toward the stacked image. (Built, wired, then
+  cut once the scope rule was set; the call is consistent with the policy.)
+- ☑ `AstroImage::into_grayscale` (Rec.709) + `rgb_to_luminance_inplace` + its 2 tests. Zero
+  pipeline/example consumers; the detection plane uses an inverse-variance channel combine,
+  not luminance. A display convenience, out of scope.
 
 ## Kept (intentional — wire later, per decision)
 - ⊘ `drizzle` (2,464 LOC) — no production caller yet; keep as the F&H combine feature.
@@ -203,6 +204,12 @@ analyst passes (perf ×2, removal, precision), de-noised + verified.
   delegates to `math::sum::weighted_mean_f32` (compensated + SIMD + zero-weight guard),
   matching the unrejected branch. Test `weighted_mean_indexed_uses_compensated_sum` locks
   the precision benefit (sub-ULP increments a naive f32 sum would drop).
+- ☐ **PR4 — FITS f32 output writer; drop lossy formats from the result path** · High. The only
+  output is `AstroImage::save` → imaginarium → TIFF f32 (lossless) or PNG/JPEG (lossy 8-bit);
+  lumos reads FITS but cannot write it. FITS f32 is the canonical master-frame format. Add a
+  FITS f32 writer and restrict the result path to lossless formats (TIFF f32 + FITS) so the
+  stacked image never leaves in a precision-losing format. PNG/JPEG belong in a viewer, not the
+  pipeline output.
 
 ## Performance queue (toward "most performant"; ARM is the profiled target)
 - ☐ **PF1 — NEON Lanczos/bilinear warp** · High (ARM). Default Lanczos3 warp is scalar on

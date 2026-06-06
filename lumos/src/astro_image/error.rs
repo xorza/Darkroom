@@ -34,7 +34,4 @@ pub enum ImageError {
 
     #[error("Failed to save image: {source}")]
     Save { source: imaginarium::Error },
-
-    #[error("Invalid detection sidecar '{path}': {reason}")]
-    Sidecar { path: PathBuf, reason: String },
 }

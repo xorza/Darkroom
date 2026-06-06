@@ -45,7 +45,7 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 - `AstroImage` (`astro_image/mod.rs:251`): `metadata: AstroImageMetadata` + `dimensions: ImageDimensions` + `pixels: PixelData`.
 - `PixelData` (`mod.rs:186`): `L(Buffer2<f32>)` or `Rgb([Buffer2<f32>; 3])` — **planar**, one buffer per channel.
 - `BitPix` (`mod.rs:27`, FITS pixel type + `normalization_max()`), `ImageDimensions` (`mod.rs:85`, width/height/channels ∈ {1,3}), `AstroImageMetadata` (`mod.rs:134`, full FITS/EXIF header set + CFA/filter/gain/exposure/coords).
-- Entry points: `from_file` (`mod.rs:268`, dispatches FITS → `fits::load_fits`, RAW exts → `raw::load_raw`, else imaginarium), `from_pixels` (`mod.rs:291`, interleaved → planar), `from_planar_channels` (`mod.rs:320`). `mean()` (parallel Kahan), `into_grayscale()` (Rec.709 luminance).
+- Entry points: `from_file` (`mod.rs:268`, dispatches FITS → `fits::load_fits`, RAW exts → `raw::load_raw`, else imaginarium), `from_pixels` (`mod.rs:291`, interleaved → planar), `from_planar_channels` (`mod.rs:320`). `mean()` (parallel Kahan).
 - `cfa` (`CfaType` = `Mono | Bayer(CfaPattern) | XTrans([[u8;6];6])`; `CfaImage` un-demosaiced sensor data with in-place `subtract`/`divide_by_normalized` and `demosaic()` → `AstroImage`). Flat division uses **per-color-channel means** so non-white flats don't shift color.
 - `fits` (`fits-well` I/O, `physical()` BSCALE/BZERO scaling, NaN/Inf sanitization, ROWORDER/XBAYROFF flips), `sensor` (`detect_sensor_type(filters, colors)` from libraw metadata), `error` (`ImageError`).
 
@@ -66,7 +66,7 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 
 ## star_detection — detection pipeline
 
-`StarDetector` (`detector/mod.rs:82`) holds a reusable `BufferPool` (`buffer_pool.rs:14`); `detect(&AstroImage)` → `DetectionResult` (`stars: Vec<Star>` flux-sorted + `Diagnostics`). `detect_file` loads → detects → writes a `{path}.detection` JSON sidecar; `detect_file_cached` reuses that sidecar when still valid (present, stored image mtime equals the image's current mtime, config fingerprint matches), else detects. `detection_file` holds the format: a `{format_version, image_mtime, config_fingerprint, result}` envelope with `save_detection_result` / `load_detection_result` (round-trip) and `load_if_fresh` (the cache check — any staleness/mismatch is a safe miss). Config fingerprint hashes the `Config` `Debug` form with `common::FnvHasher` (fixed seed, stable across runs/toolchains). `sidecar_path`, `save_detection_result`, `load_detection_result` are public (`lib.rs`).
+`StarDetector` (`detector/mod.rs:82`) holds a reusable `BufferPool` (`buffer_pool.rs:14`); `detect(&AstroImage)` → `DetectionResult` (`stars: Vec<Star>` flux-sorted + `Diagnostics`).
 
 `Star` (`star.rs:8`): `pos: DVec2`, `flux`, `fwhm`, `eccentricity`, `snr`, `peak`, `sharpness`, `roundness1`/`roundness2` (DAOFIND GROUND/SROUND), with `is_saturated`/`is_cosmic_ray`/`is_round`.
 
