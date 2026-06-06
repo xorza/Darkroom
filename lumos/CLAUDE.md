@@ -60,7 +60,7 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 
 ## star_detection — detection pipeline
 
-`StarDetector` (`detector/mod.rs:82`) holds a reusable `BufferPool` (`buffer_pool.rs:14`); `detect(&AstroImage)` (`detector/mod.rs:122`) → `DetectionResult` (`stars: Vec<Star>` flux-sorted + `Diagnostics`). `detect_file` (`mod.rs:228`) loads then detects; `detection_file::save_detection_result` writes results.
+`StarDetector` (`detector/mod.rs:82`) holds a reusable `BufferPool` (`buffer_pool.rs:14`); `detect(&AstroImage)` → `DetectionResult` (`stars: Vec<Star>` flux-sorted + `Diagnostics`). `detect_file` loads → detects → writes a `{path}.detection` JSON sidecar; `detect_file_cached` reuses that sidecar when still valid (present, stored image mtime equals the image's current mtime, config fingerprint matches), else detects. `detection_file` holds the format: a `{format_version, image_mtime, config_fingerprint, result}` envelope with `save_detection_result` / `load_detection_result` (round-trip) and `load_if_fresh` (the cache check — any staleness/mismatch is a safe miss). Config fingerprint hashes the `Config` `Debug` form with `common::FnvHasher` (fixed seed, stable across runs/toolchains). `sidecar_path`, `save_detection_result`, `load_detection_result` are public (`lib.rs`).
 
 `Star` (`star.rs:8`): `pos: DVec2`, `flux`, `fwhm`, `eccentricity`, `snr`, `peak`, `sharpness`, `roundness1`/`roundness2` (DAOFIND GROUND/SROUND), with `is_saturated`/`is_cosmic_ray`/`is_round`.
 

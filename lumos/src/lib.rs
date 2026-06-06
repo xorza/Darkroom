@@ -65,6 +65,9 @@ pub use star_detection::config::{
     BackgroundRefinement, CentroidMethod, Config as StarDetectionConfig, Connectivity,
     LocalBackgroundMethod, NoiseModel,
 };
+pub use star_detection::detection_file::{
+    load_detection_result, save_detection_result, sidecar_path,
+};
 pub use star_detection::detector::{
     DetectionResult as StarDetectionResult, Diagnostics as StarDetectionDiagnostics, StarDetector,
 };

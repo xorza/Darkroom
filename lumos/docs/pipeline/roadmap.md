@@ -163,15 +163,22 @@ normalization (`convolution/mod.rs`).
 Goal: most-precise calibration/detection/stacking + most-performant. Four parallel
 analyst passes (perf ×2, removal, precision), de-noised + verified.
 
-## Removal — done this session (~850 LOC, all verified zero-reference)
-- ☑ `detect_file` + `detection_file.rs` — wrote a `.detection` JSON sidecar nothing
-  reads (no caller, no reader). Removed module + its `pub mod` + now-unused imports.
+## Removal — done this session (~800 LOC, all verified zero-reference)
 - ☑ `clear_buffer_pool` (trivial speculative), `write_grayscale_buffer` + its orphaned
   `rgb_to_luminance` helper (duplicate of `into_grayscale`).
 - ☑ `background/simd/` sum/deviation family — `sum_and_sum_sq_*` / `sum_abs_deviations_*`
   across `mod.rs` (+ ~17 tests) and the whole `sse.rs` + `neon.rs` (they held only the
   sum backends). Duplicated `math/sum` and superseded by the median/MAD background. Kept
   the cubic-spline SIMD (the live path). Suite 1971→1950, green.
+
+## Wired this session
+- ☑ `detection_file.rs` sidecar — restored after an over-eager removal, then properly
+  wired: `save_detection_result` / `load_detection_result` round-trip, plus a config- and
+  mtime-aware cache (`load_if_fresh`) behind `StarDetector::detect_file_cached`. Sidecar
+  stores a `{format_version, config_fingerprint, result}` envelope; a stale image (mtime),
+  changed config (Debug-hash fingerprint), or version bump is a safe cache miss. Public via
+  `lumos::{sidecar_path, save_detection_result, load_detection_result}` + demoed in
+  `examples/star_detection.rs`. 6 tests (round-trip, mtime, config, corrupt/version, e2e).
 
 ## Kept (intentional — wire later, per decision)
 - ⊘ `drizzle` (2,464 LOC) — no production caller yet; keep as the F&H combine feature.

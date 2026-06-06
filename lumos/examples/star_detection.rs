@@ -74,6 +74,26 @@ fn main() {
     println!("Stars detected: {}", result.stars.len());
     print_diagnostics(&result.diagnostics);
 
+    // === Persisting detections to a sidecar (with caching) ===
+    println!("\n--- Detection sidecar (cache) ---");
+    let sidecar = lumos::sidecar_path(image_path);
+    let had_cache = sidecar.exists();
+    let mut cache_detector = StarDetector::new();
+    match cache_detector.detect_file_cached(image_path) {
+        Ok(cached) if had_cache => println!(
+            "Loaded {} stars from cached sidecar: {}",
+            cached.stars.len(),
+            sidecar.display()
+        ),
+        Ok(cached) => println!(
+            "Detected {} stars and wrote sidecar: {}",
+            cached.stars.len(),
+            sidecar.display()
+        ),
+        Err(e) => eprintln!("Sidecar detection failed: {e}"),
+    }
+    println!("Re-run to load from the cache instead of re-detecting.");
+
     // Print details for top 10 brightest stars from the last detection
     println!("\n--- Top 10 brightest stars ---");
     println!(
