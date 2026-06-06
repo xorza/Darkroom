@@ -198,9 +198,11 @@ analyst passes (perf ×2, removal, precision), de-noised + verified.
 - ☐ **PR2 — second moments on unclamped signed `(px−bg)`** · Med. `centroid/mod.rs:574`
   clamps wing negatives to 0, biasing FWHM/eccentricity low (feeds matched-filter sizing
   + registration `max_sigma`). Distinct from the known flux-clamp item.
-- ☐ **PR3 — compensated weighted-mean after rejection** · Med (≈free). The default
-  light path (`Noise`+`SigmaClip`) sums in naive f32 (`rejection.rs:954`); route through
-  `math::sum::weighted_mean_f32` like the other combine branches.
+- ☑ **PR3 — compensated weighted-mean after rejection** · done. `weighted_mean_indexed`
+  now gathers the rejection-reordered weights into the reused `floats_a` scratch and
+  delegates to `math::sum::weighted_mean_f32` (compensated + SIMD + zero-weight guard),
+  matching the unrejected branch. Test `weighted_mean_indexed_uses_compensated_sum` locks
+  the precision benefit (sub-ULP increments a naive f32 sum would drop).
 
 ## Performance queue (toward "most performant"; ARM is the profiled target)
 - ☐ **PF1 — NEON Lanczos/bilinear warp** · High (ARM). Default Lanczos3 warp is scalar on

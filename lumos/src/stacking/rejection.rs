@@ -936,39 +936,37 @@ impl Rejection {
         let remaining = self.reject(values, scratch);
 
         match weights {
-            Some(w) if remaining > 0 => {
-                weighted_mean_indexed(&values[..remaining], w, &scratch.indices[..remaining])
-            }
+            Some(w) if remaining > 0 => weighted_mean_indexed(
+                &values[..remaining],
+                w,
+                &scratch.indices[..remaining],
+                &mut scratch.floats_a,
+            ),
             _ => crate::math::sum::mean_f32(&values[..remaining]),
         }
     }
 }
 
-/// Compute weighted mean using index mapping.
+/// Weighted mean of rejection-reordered `values`: gathers each survivor's weight
+/// via `indices[i] → weights[indices[i]]` into `scratch` so values and weights
+/// align, then delegates to the compensated (and SIMD) [`weighted_mean_f32`],
+/// matching the unrejected branch. Returns `0.0` when the total weight is ~0.
 ///
-/// `indices[i]` maps `values[i]` to `weights[indices[i]]`, maintaining correct
-/// alignment after rejection functions have reordered the values array.
+/// `scratch` is a reused buffer (its prior contents are overwritten) so the
+/// per-pixel combine path allocates nothing.
 ///
-/// Preconditions: `values` is non-empty, `indices.len() == values.len()`,
-/// all `indices[i] < weights.len()`, and total weight > 0.
-fn weighted_mean_indexed(values: &[f32], weights: &[f32], indices: &[usize]) -> f32 {
-    debug_assert!(!values.is_empty());
+/// Preconditions: `indices.len() == values.len()`, all `indices[i] < weights.len()`.
+fn weighted_mean_indexed(
+    values: &[f32],
+    weights: &[f32],
+    indices: &[usize],
+    scratch: &mut Vec<f32>,
+) -> f32 {
     debug_assert_eq!(values.len(), indices.len());
 
-    let mut sum = 0.0f32;
-    let mut weight_sum = 0.0f32;
-
-    for (&v, &idx) in values.iter().zip(indices.iter()) {
-        let w = weights[idx];
-        sum += v * w;
-        weight_sum += w;
-    }
-
-    if weight_sum > f32::EPSILON {
-        sum / weight_sum
-    } else {
-        0.0
-    }
+    scratch.clear();
+    scratch.extend(indices.iter().map(|&idx| weights[idx]));
+    crate::math::sum::weighted_mean_f32(values, scratch.as_slice())
 }
 
 #[cfg(test)]
@@ -1750,7 +1748,8 @@ mod tests {
         let values = [2.0, 4.0, 6.0];
         let weights = [10.0, 1.0, 1.0];
         let indices = [0, 1, 2];
-        let mean = weighted_mean_indexed(&values, &weights, &indices);
+        let mut buf = Vec::new();
+        let mean = weighted_mean_indexed(&values, &weights, &indices, &mut buf);
         assert!((mean - 2.5).abs() < 1e-6, "Expected 2.5, got {}", mean);
     }
 
@@ -1761,7 +1760,8 @@ mod tests {
         let values = [10.0, 20.0];
         let weights = [5.0, 0.5, 1.0]; // original weights for 3 frames
         let indices = [0, 2]; // frame 0 and frame 2 survived
-        let mean = weighted_mean_indexed(&values, &weights, &indices);
+        let mut buf = Vec::new();
+        let mean = weighted_mean_indexed(&values, &weights, &indices, &mut buf);
         // expected: (10*5 + 20*1) / (5+1) = 70/6 ≈ 11.667
         assert!(
             (mean - 70.0 / 6.0).abs() < 1e-5,
@@ -2256,7 +2256,8 @@ mod tests {
         let values = [5.0f32, 10.0, 15.0];
         let weights = [0.0f32, 0.0, 0.0];
         let indices = [0, 1, 2];
-        let result = weighted_mean_indexed(&values, &weights, &indices);
+        let mut buf = Vec::new();
+        let result = weighted_mean_indexed(&values, &weights, &indices, &mut buf);
         assert!(
             (result - 0.0).abs() < 1e-6,
             "Should return 0.0, got {}",
@@ -2271,7 +2272,30 @@ mod tests {
         let values = [5.0f32, 10.0, 15.0];
         let weights = [0.0f32, 2.0, 0.0];
         let indices = [0, 1, 2];
-        let result = weighted_mean_indexed(&values, &weights, &indices);
+        let mut buf = Vec::new();
+        let result = weighted_mean_indexed(&values, &weights, &indices, &mut buf);
         assert!((result - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn weighted_mean_indexed_uses_compensated_sum() {
+        // 0.5 sits below half the ULP of 2e7, so a naive f32 accumulation would
+        // drop every increment; the compensated weighted_mean_f32 recovers them.
+        // Weights are all 1.0, so the result is a plain mean.
+        let mut values = vec![0.5_f32; 17];
+        values[0] = 2.0e7;
+        let weights = vec![1.0_f32; values.len()];
+        let indices: Vec<usize> = (0..values.len()).collect();
+
+        let mut buf = Vec::new();
+        let mean = weighted_mean_indexed(&values, &weights, &indices, &mut buf);
+
+        // True mean = (2e7 + 16*0.5) / 17 = 20_000_008 / 17 ≈ 1_176_471.06.
+        // A naive f32 sum gives ~2e7/17 ≈ 1_176_470.59, off by 8/17 ≈ 0.47.
+        let expected = (2.0e7_f64 + 8.0) / 17.0;
+        assert!(
+            (mean as f64 - expected).abs() < 0.1,
+            "compensated mean {mean} must be within 0.1 of {expected} (naive loses ~0.47)"
+        );
     }
 }
