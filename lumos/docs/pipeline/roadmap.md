@@ -203,11 +203,16 @@ analyst passes (perf ×2, removal, precision), de-noised + verified.
   cut. Detection rate dropped (sparse-field 98→93%, cosmic-ray 90→<90%) → fewer matches →
   worse stack. The clamp actually approximates the SExtractor isophotal-footprint approach
   (moments over significant pixels only), so it's the better cheap choice. Superseded by PR5.
-- ☐ **PR5 — windowed/adaptive second moments** · High (the real version of PR2). SExtractor
-  XWIN/YWIN: iteratively Gaussian-weight the moments by the current size estimate, suppressing
-  wing noise — unbiased *and* low-variance. Replaces the fixed-stamp clamp for FWHM/ecc with a
-  measurement that won't drop round stars. Larger change (iterative, multi-backend); validate
-  on real data.
+- ☑ **PR5 — windowed/adaptive second moments** · done (the real version of PR2).
+  `windowed_covariance` (`centroid/mod.rs`) Gaussian-weights the second moments by a circular
+  window whose scale iterates to match the source (`σ_w² → trace(C)/2`, ≤4 iters), then
+  deconvolves the window — `C = (C_obs⁻¹ − σ_w⁻²·I)⁻¹` — using the *signed* `(px−bg)` (the
+  window kills the wings so noise cancels instead of inflating ecc). Falls back to the plain
+  moments if it can't reach a positive-definite estimate. Wired into `compute_metrics` for the
+  default `WeightedMoments` FWHM/eccentricity. Result on the sparse-field synthetic: detection
+  **93→100%** and mean FWHM error **5.3→2.0%** vs the reverted PR2. 3 unit tests (round σ
+  recovery, elliptical axis recovery, wing-noise resistance) + the existing synthetic pipeline
+  suite. Follow-up: validate on real data; consider an elliptical (non-circular) window.
 - ☑ **PR3 — compensated weighted-mean after rejection** · done. `weighted_mean_indexed`
   now gathers the rejection-reordered weights into the reused `floats_a` scratch and
   delegates to `math::sum::weighted_mean_f32` (compensated + SIMD + zero-weight guard),

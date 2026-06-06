@@ -502,6 +502,129 @@ pub(crate) fn refine_centroid(
     Some(new_pos)
 }
 
+/// Symmetric 2×2 covariance (px²) for windowed second moments.
+#[derive(Debug, Clone, Copy)]
+struct Cov2 {
+    xx: f64,
+    yy: f64,
+    xy: f64,
+}
+
+impl Cov2 {
+    fn trace(self) -> f64 {
+        self.xx + self.yy
+    }
+
+    fn det(self) -> f64 {
+        self.xx * self.yy - self.xy * self.xy
+    }
+
+    /// Inverse of the symmetric matrix, or `None` if (near-)singular.
+    fn inverse(self) -> Option<Cov2> {
+        let det = self.det();
+        if det.abs() < 1e-12 {
+            return None;
+        }
+        let inv = 1.0 / det;
+        Some(Cov2 {
+            xx: self.yy * inv,
+            yy: self.xx * inv,
+            xy: -self.xy * inv,
+        })
+    }
+}
+
+/// Window-scale bounds (px²): σ ∈ [0.5, 10] px.
+const MIN_SIGMA_SQ: f64 = 0.25;
+const MAX_SIGMA_SQ: f64 = 100.0;
+
+/// Adaptive windowed second moments (SExtractor WIN style).
+///
+/// Weights the second moments by a circular Gaussian whose scale is iterated to
+/// match the source (`σ_w² → trace(C)/2`), exponentially suppressing far-wing
+/// noise, then deconvolves the window — `C = (C_obs⁻¹ − σ_w⁻²·I)⁻¹` — so the
+/// result stays unbiased. Uses the unclamped signed `(px − bg)`: the window already
+/// kills the wings, so noise cancels instead of rectifying and inflating
+/// eccentricity (the failure mode of plain signed moments over a fixed stamp).
+///
+/// Returns the source covariance, or `None` if it never reaches a valid
+/// positive-definite estimate (caller falls back to the plain moments).
+fn windowed_covariance(
+    pixels: &Buffer2<f32>,
+    background: &BackgroundEstimate,
+    pos: Vec2,
+    stamp_radius: usize,
+    seed_sigma_sq: f64,
+) -> Option<Cov2> {
+    const MAX_ITERS: usize = 4;
+
+    let icx = pos.x.round() as isize;
+    let icy = pos.y.round() as isize;
+    let pos_x = pos.x as f64;
+    let pos_y = pos.y as f64;
+    let sr = stamp_radius as i32;
+
+    let mut sigma_w_sq = seed_sigma_sq.clamp(MIN_SIGMA_SQ, MAX_SIGMA_SQ);
+    let mut best: Option<Cov2> = None;
+
+    for _ in 0..MAX_ITERS {
+        let inv_two_sw = 1.0 / (2.0 * sigma_w_sq);
+        let mut w_sum = 0.0f64;
+        let mut mxx = 0.0f64;
+        let mut myy = 0.0f64;
+        let mut mxy = 0.0f64;
+
+        for dy in -sr..=sr {
+            let y = (icy + dy as isize) as usize;
+            let px_row = pixels.row(y);
+            let bg_row = background.background.row(y);
+            for dx in -sr..=sr {
+                let x = (icx + dx as isize) as usize;
+                let fx = x as f64 - pos_x;
+                let fy = y as f64 - pos_y;
+                let r2 = fx * fx + fy * fy;
+                let wv = (-r2 * inv_two_sw).exp() * (px_row[x] - bg_row[x]) as f64;
+                w_sum += wv;
+                mxx += wv * fx * fx;
+                myy += wv * fy * fy;
+                mxy += wv * fx * fy;
+            }
+        }
+
+        if w_sum < f64::EPSILON {
+            break;
+        }
+        let obs = Cov2 {
+            xx: mxx / w_sum,
+            yy: myy / w_sum,
+            xy: mxy / w_sum,
+        };
+
+        // Deconvolve the circular window: C = (C_obs⁻¹ − σ_w⁻²·I)⁻¹
+        let Some(obs_inv) = obs.inverse() else { break };
+        let inv_sw = 1.0 / sigma_w_sq;
+        let decon_inv = Cov2 {
+            xx: obs_inv.xx - inv_sw,
+            yy: obs_inv.yy - inv_sw,
+            xy: obs_inv.xy,
+        };
+        let Some(c) = decon_inv.inverse() else { break };
+        if c.det() <= 0.0 || c.trace() <= 0.0 {
+            break;
+        }
+
+        let new_sigma_w_sq = (c.trace() / 2.0).clamp(MIN_SIGMA_SQ, MAX_SIGMA_SQ);
+        let converged = (new_sigma_w_sq - sigma_w_sq).abs() < 1e-3 * sigma_w_sq;
+        best = Some(c);
+        sigma_w_sq = new_sigma_w_sq;
+        if converged {
+            break;
+        }
+    }
+
+    best
+}
+
 /// Quality metrics for a star.
 #[derive(Debug)]
 pub(crate) struct StarMetrics {
@@ -608,17 +731,26 @@ pub(crate) fn compute_metrics(
         return None;
     }
 
-    // FWHM from second moment (assuming Gaussian PSF)
-    let sigma_sq = sum_r2 / flux / 2.0;
+    // Adaptive windowed second moments: Gaussian-weight by an iteratively-matched
+    // window to suppress wing noise, then deconvolve the window so FWHM/eccentricity
+    // stay unbiased. Seed the window from the plain moment; fall back to the plain
+    // moments if it can't converge to a valid (positive-definite) covariance.
+    let seed_sigma_sq = (sum_r2 / flux / 2.0).max(MIN_SIGMA_SQ);
+    let cov =
+        windowed_covariance(pixels, background, pos, stamp_radius, seed_sigma_sq).unwrap_or(Cov2 {
+            xx: sum_x2 / flux,
+            yy: sum_y2 / flux,
+            xy: sum_xy / flux,
+        });
+
+    let trace = cov.trace();
+    let det = cov.det();
+
+    // FWHM from the mean second moment (assuming Gaussian PSF)
+    let sigma_sq = (trace / 2.0).max(0.0);
     let fwhm = crate::math::sigma_to_fwhm(sigma_sq.sqrt() as f32);
 
-    // Eccentricity from covariance matrix
-    let cxx = sum_x2 / flux;
-    let cyy = sum_y2 / flux;
-    let cxy = sum_xy / flux;
-
-    let trace = cxx + cyy;
-    let det = cxx * cyy - cxy * cxy;
+    // Eccentricity from covariance matrix eigenvalues
     let discriminant = (trace * trace - 4.0 * det).max(0.0);
     let lambda1 = (trace + discriminant.sqrt()) / 2.0;
     let lambda2 = (trace - discriminant.sqrt()) / 2.0;

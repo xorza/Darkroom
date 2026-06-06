@@ -10,6 +10,7 @@ use crate::star_detection::background::estimate::BackgroundEstimate;
 use crate::star_detection::config::Config;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::detector::stages::detect_test_utils::detect_stars_test;
+use crate::testing::synthetic::background_map;
 use common::Buffer2;
 
 /// Default stamp radius for tests (matching expected FWHM of ~4 pixels).
@@ -4105,5 +4106,96 @@ fn test_moffat_fit_fwhm_more_accurate_than_moments() {
         fit_star.fwhm,
         moments_star.fwhm,
         true_fwhm
+    );
+}
+
+// ── Windowed (adaptive) second moments (PR5) ─────────────────────────────────
+
+#[test]
+fn windowed_covariance_recovers_gaussian_sigma() {
+    // A clean round Gaussian of σ=2.5: the window deconvolution must recover σ²
+    // on both axes (unbiased FWHM) with a ~zero cross term (round → ecc ≈ 0).
+    let (width, height) = (64, 64);
+    let pos = Vec2::new(32.0, 32.0);
+    let sigma = 2.5f32;
+    let pixels = make_gaussian_star(width, height, pos, sigma, 1.0, 0.0);
+    let bg = background_map::uniform(width, height, 0.0, 1.0);
+
+    let cov = windowed_covariance(&pixels, &bg, pos, 12, (sigma * sigma) as f64)
+        .expect("clean Gaussian should converge");
+
+    let expected = (sigma * sigma) as f64; // σ² per axis
+    assert!(
+        (cov.xx - expected).abs() < 0.1 * expected,
+        "cxx {} vs expected {expected}",
+        cov.xx
+    );
+    assert!(
+        (cov.yy - expected).abs() < 0.1 * expected,
+        "cyy {} vs expected {expected}",
+        cov.yy
+    );
+    assert!(
+        cov.xy.abs() < 0.05 * expected,
+        "cxy {} should be ~0",
+        cov.xy
+    );
+}
+
+#[test]
+fn windowed_covariance_recovers_elliptical_axes() {
+    // An elliptical Gaussian (σx=3, σy=2): a circular window is isotropic, so its
+    // deconvolution recovers both axis variances exactly — the measurement must
+    // not circularize the source (otherwise eccentricity would be lost).
+    let (width, height) = (64, 64);
+    let pos = Vec2::new(32.0, 32.0);
+    let (sx, sy) = (3.0f32, 2.0f32);
+    let pixels = super::test_utils::make_elliptical_star(width, height, pos, sx, sy, 1.0, 0.0);
+    let bg = background_map::uniform(width, height, 0.0, 1.0);
+
+    let seed = ((sx * sx + sy * sy) / 2.0) as f64;
+    let cov = windowed_covariance(&pixels, &bg, pos, 14, seed)
+        .expect("clean elliptical Gaussian should converge");
+
+    assert!(
+        (cov.xx - (sx * sx) as f64).abs() < 0.12 * (sx * sx) as f64,
+        "cxx {} vs {}",
+        cov.xx,
+        sx * sx
+    );
+    assert!(
+        (cov.yy - (sy * sy) as f64).abs() < 0.12 * (sy * sy) as f64,
+        "cyy {} vs {}",
+        cov.yy,
+        sy * sy
+    );
+    // Recovered axis ratio tracks the input (not washed toward 1).
+    let ratio = (cov.yy / cov.xx).sqrt();
+    let expected_ratio = (sy / sx) as f64;
+    assert!(
+        (ratio - expected_ratio).abs() < 0.08,
+        "axis ratio {ratio} vs expected {expected_ratio}"
+    );
+}
+
+#[test]
+fn windowed_covariance_resists_wing_noise() {
+    // The PR2 failure mode: signed moments over a fixed stamp sum in far-wing
+    // noise, which inflates eccentricity for round stars. The window must suppress
+    // it — a round noisy star stays ~circular.
+    let (width, height) = (64, 64);
+    let pos = Vec2::new(32.0, 32.0);
+    let sigma = 2.5f32;
+    let mut pixels = make_gaussian_star(width, height, pos, sigma, 1.0, 0.1);
+    super::test_utils::add_noise(pixels.pixels_mut(), 0.03, 12345);
+    let bg = background_map::uniform(width, height, 0.1, 1.0);
+
+    let cov = windowed_covariance(&pixels, &bg, pos, 12, (sigma * sigma) as f64)
+        .expect("noisy Gaussian should still converge");
+
+    let ratio = (cov.yy / cov.xx).sqrt();
+    assert!(
+        (0.85..1.18).contains(&ratio),
+        "axis ratio {ratio} should stay ~1 under noise (no inflation)"
     );
 }
