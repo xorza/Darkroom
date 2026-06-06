@@ -349,7 +349,10 @@ impl DrizzleAccumulator {
                     continue;
                 }
 
-                let t = transform.apply(DVec2::new(ix as f64 + 0.5, iy as f64 + 0.5));
+                // Integer-center throughout: input pixel `i` is at coordinate `i` (matching
+                // star centroids / `register` / `warp`), and output pixel `o` is the cell
+                // `[o - 0.5, o + 0.5)`. The drop center needs no coordinate adjustment.
+                let t = transform.apply(DVec2::new(ix as f64, iy as f64));
                 let ox_center = t.x as f32 * scale;
                 let oy_center = t.y as f32 * scale;
 
@@ -358,10 +361,15 @@ impl DrizzleAccumulator {
                     continue;
                 }
 
-                let ox_min = (ox_center - half_drop).floor().max(0.0) as usize;
-                let oy_min = (oy_center - half_drop).floor().max(0.0) as usize;
-                let ox_max = (ox_center + half_drop).ceil().min(output_width as f32) as usize;
-                let oy_max = (oy_center + half_drop).ceil().min(output_height as f32) as usize;
+                // Output pixel `o` is the cell `[o - 0.5, o + 0.5)`, so the drop touches the
+                // pixels `round(min) ..= round(max)` (the `overlap > 0.0` test below drops any
+                // boundary cell that doesn't actually touch).
+                let ox_min = (ox_center - half_drop).round().max(0.0) as usize;
+                let oy_min = (oy_center - half_drop).round().max(0.0) as usize;
+                let ox_max =
+                    ((ox_center + half_drop).round() + 1.0).min(output_width as f32) as usize;
+                let oy_max =
+                    ((oy_center + half_drop).round() + 1.0).min(output_height as f32) as usize;
 
                 let effective_weight = weight * pw / jaco;
                 for oy in oy_min..oy_max {
@@ -371,10 +379,10 @@ impl DrizzleAccumulator {
                             oy_center - half_drop,
                             ox_center + half_drop,
                             oy_center + half_drop,
-                            ox as f32,
-                            oy as f32,
-                            (ox + 1) as f32,
-                            (oy + 1) as f32,
+                            ox as f32 - 0.5,
+                            oy as f32 - 0.5,
+                            ox as f32 + 0.5,
+                            oy as f32 + 0.5,
                         );
 
                         if overlap > 0.0 {
@@ -418,11 +426,11 @@ impl DrizzleAccumulator {
                     continue;
                 }
 
-                // Compute 4 corners of the shrunken drop in input space.
-                // Input pixel (ix, iy) has center at (ix+0.5, iy+0.5).
+                // Compute 4 corners of the shrunken drop in input space. Input pixel (ix, iy)
+                // is integer-center (center at (ix, iy), matching centroids / warp).
                 // Winding order: BL, BR, TR, TL (counterclockwise).
-                let cx = ix as f64 + 0.5;
-                let cy = iy as f64 + 0.5;
+                let cx = ix as f64;
+                let cy = iy as f64;
                 let corners_in = [
                     DVec2::new(cx - dh, cy - dh),
                     DVec2::new(cx + dh, cy - dh),
@@ -430,7 +438,8 @@ impl DrizzleAccumulator {
                     DVec2::new(cx - dh, cy + dh),
                 ];
 
-                // Transform all 4 corners to output coordinates and scale
+                // Transform the 4 corners to integer-center output coordinates (output pixel
+                // `o` is centered at `o`); `boxer` is given each cell as `[o - 0.5, o + 0.5)`.
                 let mut xout = [0.0f64; 4];
                 let mut yout = [0.0f64; 4];
                 for (k, corner) in corners_in.iter().enumerate() {
@@ -454,17 +463,19 @@ impl DrizzleAccumulator {
                 let ymin = yout.iter().copied().fold(f64::INFINITY, f64::min);
                 let ymax = yout.iter().copied().fold(f64::NEG_INFINITY, f64::max);
 
-                let ox_min = (xmin.floor().max(0.0)) as usize;
-                let oy_min = (ymin.floor().max(0.0)) as usize;
-                let ox_max = (xmax.ceil().min(output_width as f64)) as usize;
-                let oy_max = (ymax.ceil().min(output_height as f64)) as usize;
+                // Output pixel `o` is the cell `[o - 0.5, o + 0.5)`, so the quad bbox touches
+                // pixels `round(min) ..= round(max)`.
+                let ox_min = xmin.round().max(0.0) as usize;
+                let oy_min = ymin.round().max(0.0) as usize;
+                let ox_max = (xmax.round() + 1.0).min(output_width as f64) as usize;
+                let oy_max = (ymax.round() + 1.0).min(output_height as f64) as usize;
 
                 let effective_weight = weight as f64 * pw as f64;
                 let w_over_jaco = effective_weight / abs_jaco;
 
                 for oy in oy_min..oy_max {
                     for ox in ox_min..ox_max {
-                        let overlap = boxer(ox as f64, oy as f64, &xout, &yout);
+                        let overlap = boxer(ox as f64 - 0.5, oy as f64 - 0.5, &xout, &yout);
                         if overlap > 0.0 {
                             let pixel_weight = (overlap * w_over_jaco) as f32;
                             self.accumulate(image, ix, iy, ox, oy, pixel_weight);
@@ -496,9 +507,10 @@ impl DrizzleAccumulator {
                     continue;
                 }
 
-                let t = transform.apply(DVec2::new(ix as f64 + 0.5, iy as f64 + 0.5));
-                let ox = (t.x as f32 * scale).floor() as isize;
-                let oy = (t.y as f32 * scale).floor() as isize;
+                // Integer-center input; flux lands in the nearest output pixel.
+                let t = transform.apply(DVec2::new(ix as f64, iy as f64));
+                let ox = (t.x as f32 * scale).round() as isize;
+                let oy = (t.y as f32 * scale).round() as isize;
 
                 if ox >= 0 && ox < output_width as isize && oy >= 0 && oy < output_height as isize {
                     let jaco = local_jacobian(transform, t, ix, iy, scale as f64) as f32;
@@ -539,7 +551,9 @@ impl DrizzleAccumulator {
                     continue;
                 }
 
-                let t = transform.apply(DVec2::new(ix as f64 + 0.5, iy as f64 + 0.5));
+                // Integer-center: output pixel `o` is centred at `o`, so the kernel distance
+                // is `o - ox_center` with no offset.
+                let t = transform.apply(DVec2::new(ix as f64, iy as f64));
                 let ox_center = t.x as f32 * scale;
                 let oy_center = t.y as f32 * scale;
 
@@ -548,8 +562,8 @@ impl DrizzleAccumulator {
                     continue;
                 }
 
-                let ox_int = ox_center.floor() as isize;
-                let oy_int = oy_center.floor() as isize;
+                let ox_int = ox_center.round() as isize;
+                let oy_int = oy_center.round() as isize;
 
                 // First pass: compute total weight for normalization
                 // (kernel geometry only — per-pixel weight applied to the frame weight)
@@ -564,8 +578,8 @@ impl DrizzleAccumulator {
                         if ox < 0 || ox >= output_width {
                             continue;
                         }
-                        let dist_x = (ox as f32 + 0.5) - ox_center;
-                        let dist_y = (oy as f32 + 0.5) - oy_center;
+                        let dist_x = ox as f32 - ox_center;
+                        let dist_y = oy as f32 - oy_center;
                         total_weight += kernel_fn(dist_x, dist_y);
                     }
                 }
@@ -588,8 +602,8 @@ impl DrizzleAccumulator {
                         if ox < 0 || ox >= output_width {
                             continue;
                         }
-                        let dist_x = (ox as f32 + 0.5) - ox_center;
-                        let dist_y = (oy as f32 + 0.5) - oy_center;
+                        let dist_x = ox as f32 - ox_center;
+                        let dist_y = oy as f32 - oy_center;
                         let pixel_weight = kernel_fn(dist_x, dist_y) * inv_total;
                         self.accumulate(image, ix, iy, ox as usize, oy as usize, pixel_weight);
                     }
@@ -720,8 +734,9 @@ impl DrizzleResult {
 /// For homographies it varies spatially.
 #[inline]
 fn local_jacobian(transform: &Transform, center: DVec2, ix: usize, iy: usize, scale: f64) -> f64 {
-    let right = transform.apply(DVec2::new(ix as f64 + 1.5, iy as f64 + 0.5));
-    let down = transform.apply(DVec2::new(ix as f64 + 0.5, iy as f64 + 1.5));
+    // Integer-center: `center` is `T(ix, iy)`; sample the +x and +y neighbours a unit apart.
+    let right = transform.apply(DVec2::new(ix as f64 + 1.0, iy as f64));
+    let down = transform.apply(DVec2::new(ix as f64, iy as f64 + 1.0));
     let dx = right - center;
     let dy = down - center;
     (dx.x * dy.y - dx.y * dy.x).abs() * scale * scale
@@ -837,15 +852,14 @@ fn sgarea(x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {
     sgn_dx * (0.5 * (xhi - xtop) * (1.0 + yhi) + xtop - xlo)
 }
 
-/// Compute overlap area between a convex quadrilateral and an output pixel.
+/// Compute overlap area between a convex quadrilateral and a pixel cell.
 ///
-/// Shifts the quadrilateral so that output pixel (ox, oy) becomes the unit square
-/// [0,1]×[0,1], then sums signed areas from each edge via `sgarea()`.
+/// Shifts the quadrilateral so that the cell with lower-left corner `(ox, oy)` becomes the
+/// unit square [0,1]×[0,1], then sums signed areas from each edge via `sgarea()`.
 ///
-/// Port of STScI `boxer()` from cdrizzlebox.c. The STScI version uses pixel-centered
-/// coordinates (pixel `(i,j)` spans `[i-0.5, i+0.5]`), but our code uses pixel-corner
-/// coordinates (pixel `(ox, oy)` spans `[ox, ox+1]`), so we shift by `ox` / `oy`
-/// directly (no 0.5 adjustment needed).
+/// Port of STScI `boxer()` from cdrizzlebox.c. Output pixels are integer-center (pixel `o`
+/// spans `[o - 0.5, o + 0.5]`, matching STScI), so callers pass the cell's lower-left
+/// corner `o - 0.5`.
 #[inline]
 fn boxer(ox: f64, oy: f64, x: &[f64; 4], y: &[f64; 4]) -> f64 {
     let px = [x[0] - ox, x[1] - ox, x[2] - ox, x[3] - ox];

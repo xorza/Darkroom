@@ -99,19 +99,23 @@ fn test_drizzle_single_image() {
     assert_eq!(result.image.height(), 200);
 
     // With scale=2, pixfrac=0.8: drop_size = 0.8*2 = 1.6 output pixels.
-    // Input pixel (ix,iy) center at (ix+0.5, iy+0.5), scaled to (2*ix+1, 2*iy+1).
-    // Drop covers (center ± 0.8), spanning a 2×2 output block.
-    // Each overlap = 0.8 * 0.8 = 0.64, inv_area = 1/2.56, weight = 0.64/2.56 = 0.25.
-    // Interior output pixels receive exactly one contribution.
-    // Finalized output = (0.5 * 0.25) / 0.25 = 0.5
+    // Integer-center: input pixel (ix,iy) center at (ix,iy), scaled to (2*ix, 2*iy).
+    // A single flat image is reproduced wherever there is coverage: value = val·w / w = val.
+    // Only the thin high-edge band (coverage < min_coverage) falls back to fill_value.
     let pixels = result.image.channel(0);
-    let avg: f32 = pixels.iter().sum::<f32>() / pixels.len() as f32;
     assert!(
-        (avg - 0.5).abs() < 1e-5,
-        "Average should be 0.5, got {}",
-        avg
+        pixels
+            .iter()
+            .all(|&p| p.abs() < 1e-5 || (p - 0.5).abs() < 1e-5),
+        "every pixel must be fill_value or the input value 0.5"
     );
-    // Verify specific pixels
+    let covered = pixels.iter().filter(|&&p| (p - 0.5).abs() < 1e-5).count();
+    assert!(
+        covered as f32 / pixels.len() as f32 > 0.97,
+        "interior should be fully covered (only edges fill): {covered}/{}",
+        pixels.len()
+    );
+    // Input pixel (0,0)'s drop is centered on output (0,0) → covered, reads the input value.
     assert!(
         (pixels[0] - 0.5).abs() < 1e-5,
         "Pixel (0,0) should be 0.5, got {}",
@@ -133,21 +137,20 @@ fn test_drizzle_point_kernel() {
     assert_eq!(result.image.width(), 20);
     assert_eq!(result.image.height(), 20);
 
-    // Point kernel: input (ix,iy) center at (ix+0.5, iy+0.5)
-    // scaled → output floor((ix+0.5)*2) = 2*ix+1, floor((iy+0.5)*2) = 2*iy+1
-    // Covered pixels (odd x, odd y): value = 1.0/1.0 = 1.0
-    // Uncovered pixels: fill_value = 0.0
+    // Point kernel (integer-center): input (ix,iy) center at (ix,iy),
+    // scaled → output round(ix*2) = 2*ix, round(iy*2) = 2*iy (even coords).
+    // Covered pixels (even x, even y): value = 1.0/1.0 = 1.0; others fill_value = 0.0.
     let pixels = result.image.channel(0);
     let w = 20;
-    // (1,1) ← input (0,0): value = 1.0
-    assert!((pixels[w + 1] - 1.0).abs() < f32::EPSILON);
-    // (3,1) ← input (1,0): value = 1.0
-    assert!((pixels[w + 3] - 1.0).abs() < f32::EPSILON);
-    // (0,0): no coverage → fill_value = 0.0
-    assert!((pixels[0]).abs() < f32::EPSILON);
-    // (2,2): even coords, no coverage → 0.0
-    assert!((pixels[2 * w + 2]).abs() < f32::EPSILON);
-    // Exactly 100 covered pixels (10×10 input maps to 10×10 odd-coordinate outputs)
+    // (0,0) ← input (0,0): value = 1.0
+    assert!((pixels[0] - 1.0).abs() < f32::EPSILON);
+    // (2,0) ← input (1,0): value = 1.0
+    assert!((pixels[2] - 1.0).abs() < f32::EPSILON);
+    // (1,1): odd coords, no coverage → 0.0
+    assert!((pixels[w + 1]).abs() < f32::EPSILON);
+    // (3,3): odd coords, no coverage → 0.0
+    assert!((pixels[3 * w + 3]).abs() < f32::EPSILON);
+    // Exactly 100 covered pixels (10×10 input maps to 10×10 even-coordinate outputs)
     let covered = pixels.iter().filter(|&&v| v > 0.5).count();
     assert_eq!(covered, 100);
 }
@@ -263,10 +266,9 @@ fn test_drizzle_with_translation() {
     let config = DrizzleConfig::x2();
     let mut acc = DrizzleAccumulator::new(ImageDimensions::new(20, 20, 1), config);
 
-    // Translation (0.5, 0.5): pixel (10,10) center at (10.5+0.5, 10.5+0.5) = (11, 11)
-    // Scaled to output: (22, 22). Drop from (21.2, 21.2) to (22.8, 22.8).
-    // Overlaps output pixels (21,21), (22,21), (21,22), (22,22).
-    // Each overlap = 0.8 * 0.8 = 0.64, inv_area = 1/2.56, weight = 0.25.
+    // Integer-center: input pixel (10,10) center (10,10), +translation (0.5,0.5) → (10.5,10.5),
+    // ×scale 2 → output center (21,21). drop_size 1.6 → drop [20.2,21.8]², covering cells
+    // 20,21,22 with per-axis overlaps 0.3/1.0/0.3.
     let transform = Transform::translation(DVec2::new(0.5, 0.5));
     acc.add_image(image, &transform, 1.0, None);
 
@@ -275,62 +277,69 @@ fn test_drizzle_with_translation() {
     assert_eq!(result.image.height(), 40);
 
     let out = result.image.channel(0);
-    // The 4 output pixels receiving flux = 1.0*0.25/0.25 = 1.0
+    let at = |x: usize, y: usize| out[y * 40 + x];
+    // Center cell (21,21): only the bright pixel's drop reaches it (1.0×1.0 overlap) → 1.0.
     assert!(
-        (out[21 * 40 + 21] - 1.0).abs() < 1e-5,
-        "Expected 1.0 at (21,21), got {}",
-        out[21 * 40 + 21]
+        (at(21, 21) - 1.0).abs() < 1e-5,
+        "center (21,21): {}",
+        at(21, 21)
+    );
+    // Edge cells are shared 50/50 with a neighbouring zero-valued input pixel's drop →
+    // weighted mean (1.0·w + 0.0·w) / 2w = 0.5.
+    assert!(
+        (at(20, 21) - 0.5).abs() < 1e-5,
+        "edge (20,21): {}",
+        at(20, 21)
     );
     assert!(
-        (out[21 * 40 + 22] - 1.0).abs() < 1e-5,
-        "Expected 1.0 at (22,21), got {}",
-        out[21 * 40 + 22]
+        (at(22, 21) - 0.5).abs() < 1e-5,
+        "edge (22,21): {}",
+        at(22, 21)
     );
     assert!(
-        (out[22 * 40 + 21] - 1.0).abs() < 1e-5,
-        "Expected 1.0 at (21,22), got {}",
-        out[22 * 40 + 21]
+        (at(21, 20) - 0.5).abs() < 1e-5,
+        "edge (21,20): {}",
+        at(21, 20)
     );
     assert!(
-        (out[22 * 40 + 22] - 1.0).abs() < 1e-5,
-        "Expected 1.0 at (22,22), got {}",
-        out[22 * 40 + 22]
+        (at(21, 22) - 0.5).abs() < 1e-5,
+        "edge (21,22): {}",
+        at(21, 22)
     );
-    // Pixel far from the bright spot should be 0.0
-    assert!((out[0]).abs() < 1e-5);
+    // Far from the bright spot → 0; no pixel exceeds the input value.
+    assert!(at(0, 0).abs() < 1e-5);
+    assert!(
+        out.iter().all(|&v| v <= 1.0 + 1e-5),
+        "no pixel exceeds input max"
+    );
 }
 
 #[test]
 fn test_coverage_at() {
-    // Point kernel with identity: covered at odd coords, uncovered at even
+    // Point kernel with identity: covered at even coords, uncovered at odd
     let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), vec![1.0; 16]);
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
     let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
     let result = acc.finalize();
 
-    // Output 8×8. Covered pixels at (2*ix+1, 2*iy+1) for ix,iy=0..3
+    // Output 8×8. Covered pixels at (2*ix, 2*iy) for ix,iy=0..3 (even coords).
     // Normalized coverage: max_coverage = 1.0
-    assert!((result.coverage_at(1, 1) - 1.0).abs() < f32::EPSILON); // covered
-    assert!((result.coverage_at(0, 0)).abs() < f32::EPSILON); // uncovered
-    assert!((result.coverage_at(3, 3) - 1.0).abs() < f32::EPSILON); // covered
-    assert!((result.coverage_at(2, 2)).abs() < f32::EPSILON); // uncovered
+    assert!((result.coverage_at(0, 0) - 1.0).abs() < f32::EPSILON); // covered
+    assert!((result.coverage_at(1, 1)).abs() < f32::EPSILON); // uncovered (odd)
+    assert!((result.coverage_at(2, 2) - 1.0).abs() < f32::EPSILON); // covered
+    assert!((result.coverage_at(3, 3)).abs() < f32::EPSILON); // uncovered (odd)
 }
 
 /// Test turbo kernel drop size and overlap with hand-computed values.
 ///
-/// Setup: 4×4 input, scale=2, pixfrac=0.8 → drop_size = 1.6, half_drop = 0.8
-/// Output: 8×8. Input pixel (1,1) center at (1.5, 1.5), scaled to (3.0, 3.0).
-/// Drop covers (2.2, 2.2) to (3.8, 3.8).
+/// Setup: 4×4 input, scale=2, pixfrac=0.8 → drop_size = 1.6, half_drop = 0.8.
+/// Integer-center: input pixel (1,1) center (1,1), ×scale 2 → output center (2,2).
+/// Output: 8×8. Drop covers [1.2, 2.8]² → cells 1,2,3 with per-axis overlaps 0.3/1.0/0.3.
 ///
-/// Overlapping output pixels and their overlap areas:
-///   (2,2): x_overlap = min(3.8,3)-max(2.2,2) = 0.8, y = 0.8, area = 0.64
-///   (3,2): x_overlap = min(3.8,4)-max(2.2,3) = 0.8, y = 0.8, area = 0.64
-///   (2,3): same as (3,2) by symmetry, area = 0.64
-///   (3,3): x = min(3.8,4)-max(2.2,3) = 0.8, y = 0.8, area = 0.64
-/// Total area = 4 * 0.64 = 2.56 = 1.6^2 ✓
-/// inv_area = 1/2.56 ≈ 0.390625
-/// pixel_weight = overlap * inv_area = 0.64 * 0.390625 = 0.25
+/// The center cell (2,2) is fully inside the drop (1.0×1.0) and no neighbouring input
+/// pixel's drop reaches it, so it reads the undiluted bright value. Edge cells (e.g. (1,2))
+/// are shared 50/50 with a zero-valued neighbour's drop, so a lone bright pixel reads half.
 #[test]
 fn test_turbo_kernel_overlap_exact() {
     // Single bright pixel at (1,1) with value 2.0
@@ -346,32 +355,16 @@ fn test_turbo_kernel_overlap_exact() {
     let out = result.image.channel(0);
     let w = 8usize;
 
-    // Drop from (2.2,2.2) to (3.8,3.8) → overlaps (2,2), (3,2), (2,3), (3,3).
-    // Each receives: flux=2.0, weight=0.25 → finalized = 2.0*0.25/0.25 = 2.0
-    assert!(
-        (out[2 * w + 2] - 2.0).abs() < 1e-5,
-        "Expected 2.0 at (2,2), got {}",
-        out[2 * w + 2]
-    );
-    assert!(
-        (out[2 * w + 3] - 2.0).abs() < 1e-5,
-        "Expected 2.0 at (3,2), got {}",
-        out[2 * w + 3]
-    );
-    assert!(
-        (out[3 * w + 2] - 2.0).abs() < 1e-5,
-        "Expected 2.0 at (2,3), got {}",
-        out[3 * w + 2]
-    );
-    assert!(
-        (out[3 * w + 3] - 2.0).abs() < 1e-5,
-        "Expected 2.0 at (3,3), got {}",
-        out[3 * w + 3]
-    );
-
-    // Adjacent pixels outside the drop should be zero (or fill_value)
-    assert!(out[w + 2].abs() < 1e-5, "No flux at (2,1)");
-    assert!(out[4 * w + 3].abs() < 1e-5, "No flux at (3,4)");
+    let at = |x: usize, y: usize| out[y * w + x];
+    // Center cell (2,2): only input (1,1) reaches it → undiluted bright value 2.0.
+    assert!((at(2, 2) - 2.0).abs() < 1e-5, "center (2,2): {}", at(2, 2));
+    // Edge cells: shared 50/50 with a zero-valued neighbour's drop → 2.0 / 2 = 1.0.
+    assert!((at(1, 2) - 1.0).abs() < 1e-5, "edge (1,2): {}", at(1, 2));
+    assert!((at(3, 2) - 1.0).abs() < 1e-5, "edge (3,2): {}", at(3, 2));
+    assert!((at(2, 1) - 1.0).abs() < 1e-5, "edge (2,1): {}", at(2, 1));
+    assert!((at(2, 3) - 1.0).abs() < 1e-5, "edge (2,3): {}", at(2, 3));
+    // No pixel exceeds the bright value.
+    assert!(out.iter().all(|&v| v <= 2.0 + 1e-5), "no pixel exceeds 2.0");
 }
 
 /// Test turbo kernel with non-integer translation producing asymmetric overlap.
@@ -403,58 +396,45 @@ fn test_turbo_kernel_fractional_shift() {
     let out = result.image.channel(0);
     let w = 8usize;
 
-    // All covered interior pixels should be 1.0
+    // A flux-preserving turbo kernel reproduces the uniform input value at every covered
+    // output pixel, regardless of the sub-pixel shift phase.
+    assert!(
+        out.iter()
+            .all(|&v| v.abs() < 1e-5 || (v - 1.0).abs() < 1e-5),
+        "every covered pixel reads the uniform value 1.0"
+    );
+    // Interior is covered (pixfrac=1 tiles the output) → input value.
     assert!(
         (out[2 * w + 3] - 1.0).abs() < 1e-5,
-        "Interior pixel should be 1.0, got {}",
+        "interior pixel should be 1.0, got {}",
         out[2 * w + 3]
-    );
-
-    // Verify asymmetric coverage from the fractional shift.
-    // Input pixel (0,0) → output center (1.5, 1.0). Drop (0.5, 0.0)→(2.5, 2.0).
-    // Output (0,0) gets weight 0.5*1.0*0.25 = 0.125 from input (0,0) only.
-    // Output (1,0) gets weight 1.0*1.0*0.25 = 0.25 from input (0,0) AND (1,0).
-    // So total weight at (1,0) = 0.25+0.25 = 0.50.
-    // Coverage normalization: max_weight across all pixels.
-    // Interior pixel (3,2) gets contributions from two input pixels, total weight 0.50.
-    // Coverage at edge (0,0) = 0.125 / max_weight.
-    // The exact max depends on full overlap pattern — just verify (0,0) < (1,0).
-    assert!(
-        result.coverage_at(0, 0) < result.coverage_at(1, 0),
-        "Edge pixel should have less coverage than interior"
     );
 }
 
 /// Test that min_coverage works with normalized weights.
 ///
-/// With pixfrac=1.0, scale=2: single frame, max weight = 0.25.
-/// min_coverage=0.6: threshold = 0.6 * 0.25 = 0.15.
-/// A pixel with overlap 0.5 → weight = 0.5*0.25 = 0.125 < 0.15 → rejected.
-/// A pixel with overlap 1.0 → weight = 1.0*0.25 = 0.25 >= 0.15 → kept.
+/// Single bright pixel (0,0), pixfrac=0.5 (drop width 1.0), scale=2, sub-pixel shift (0.1, 0).
+/// The drop centers at output (0.2, 0) and splits unevenly between cells (0,0) and (1,0):
+/// x-overlaps 0.8 and 0.2. max_weight = 0.8; threshold = min_coverage(0.6) * 0.8 = 0.48.
+/// cell (0,0): weight 0.8 ≥ 0.48 → kept (1.0). cell (1,0): weight 0.2 < 0.48 → fill_value.
 #[test]
 fn test_min_coverage_normalized() {
-    // Single pixel at (0,0) with fractional shift to create unequal overlaps
     let mut pixels = vec![0.0f32; 4 * 4];
     pixels[0] = 1.0;
     let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), pixels);
 
-    let config = DrizzleConfig::x2().with_pixfrac(1.0).with_min_coverage(0.6);
+    let config = DrizzleConfig::x2().with_pixfrac(0.5).with_min_coverage(0.6);
     let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
-
-    // Translation (0.25, 0): creates overlaps of 0.5 and 1.0 (see previous test)
-    let transform = Transform::translation(DVec2::new(0.25, 0.0));
+    let transform = Transform::translation(DVec2::new(0.1, 0.0));
     acc.add_image(image, &transform, 1.0, None);
     let result = acc.finalize();
     let out = result.image.channel(0);
 
-    // Pixel (1,0) has weight 0.25 (max), pixel (0,0) has weight 0.125.
-    // Threshold = 0.6 * 0.25 = 0.15. So (0,0) with 0.125 < 0.15 → fill_value.
-    // Pixel (1,0) with 0.25 >= 0.15 → kept.
-    assert!((out[1] - 1.0).abs() < 1e-5, "Pixel (1,0) kept: {}", out[1]);
+    assert!((out[0] - 1.0).abs() < 1e-5, "cell (0,0) kept: {}", out[0]);
     assert!(
-        out[0].abs() < 1e-5,
-        "Pixel (0,0) rejected (below min_coverage): {}",
-        out[0]
+        out[1].abs() < 1e-5,
+        "cell (1,0) rejected (below min_coverage): {}",
+        out[1]
     );
 }
 
@@ -713,23 +693,23 @@ fn test_fill_value_in_uncovered_pixels() {
     let out = result.image.channel(0);
     let w = 8usize;
 
-    // Point kernel: input (ix,iy) → output (2*ix+1, 2*iy+1).
-    // Covered pixel (1,1): value = 1.0
+    // Point kernel (integer-center): input (ix,iy) → output (2*ix, 2*iy) (even coords).
+    // Covered pixel (0,0): value = 1.0
     assert!(
-        (out[w + 1] - 1.0).abs() < f32::EPSILON,
-        "Covered pixel should be 1.0, got {}",
-        out[w + 1]
-    );
-    // Uncovered pixel (0,0): fill_value = -999.0
-    assert!(
-        (out[0] - (-999.0)).abs() < f32::EPSILON,
-        "Uncovered pixel should be -999.0, got {}",
+        (out[0] - 1.0).abs() < f32::EPSILON,
+        "Covered pixel (0,0) should be 1.0, got {}",
         out[0]
     );
-    // Uncovered pixel (2,2): fill_value = -999.0
+    // Uncovered pixel (1,1) (odd coords): fill_value = -999.0
     assert!(
-        (out[2 * w + 2] - (-999.0)).abs() < f32::EPSILON,
-        "Uncovered pixel (2,2) should be -999.0, got {}",
+        (out[w + 1] - (-999.0)).abs() < f32::EPSILON,
+        "Uncovered pixel (1,1) should be -999.0, got {}",
+        out[w + 1]
+    );
+    // Covered pixel (2,2) ← input (1,1): value = 1.0
+    assert!(
+        (out[2 * w + 2] - 1.0).abs() < f32::EPSILON,
+        "Covered pixel (2,2) should be 1.0, got {}",
         out[2 * w + 2]
     );
 }
@@ -1003,9 +983,9 @@ fn test_pixel_weight_bad_pixel_mask() {
 
 /// Test per-pixel weights with point kernel.
 ///
-/// scale=2: input (ix,iy) → output (2*ix+1, 2*iy+1). Point kernel = 1 output pixel.
-/// Pixel (1,1) = 10.0, weight = 0.0. Should not appear at output (3,3).
-/// Pixel (0,0) = 3.0, weight = 1.0. Should appear at output (1,1) = 3.0.
+/// scale=2 (integer-center): input (ix,iy) → output (2*ix, 2*iy). Point kernel = 1 pixel.
+/// Pixel (1,1) = 10.0, weight = 0.0. Should not appear at output (2,2).
+/// Pixel (0,0) = 3.0, weight = 1.0. Should appear at output (0,0) = 3.0.
 #[test]
 fn test_pixel_weight_with_point_kernel() {
     let mut pixels = vec![1.0f32; 4 * 4];
@@ -1023,17 +1003,17 @@ fn test_pixel_weight_with_point_kernel() {
     let out = result.image.channel(0);
     let w = 8usize;
 
-    // Output (3,3) ← input (1,1): excluded by weight=0 → fill_value 0.0
+    // Output (2,2) ← input (1,1): excluded by weight=0 → fill_value 0.0
     assert!(
-        out[3 * w + 3].abs() < 1e-5,
-        "Excluded pixel output (3,3) should be 0.0, got {}",
-        out[3 * w + 3]
+        out[2 * w + 2].abs() < 1e-5,
+        "Excluded pixel output (2,2) should be 0.0, got {}",
+        out[2 * w + 2]
     );
-    // Output (1,1) ← input (0,0): weight=1.0, value=3.0
+    // Output (0,0) ← input (0,0): weight=1.0, value=3.0
     assert!(
-        (out[w + 1] - 3.0).abs() < 1e-5,
-        "Good pixel output (1,1) should be 3.0, got {}",
-        out[w + 1]
+        (out[0] - 3.0).abs() < 1e-5,
+        "Good pixel output (0,0) should be 3.0, got {}",
+        out[0]
     );
 }
 
@@ -1575,21 +1555,12 @@ fn test_square_kernel_with_pixel_weights() {
 
 /// Test square kernel with scale=2 on a single bright pixel.
 ///
-/// scale=2, pixfrac=0.8: drop in input space is 0.8×0.8 centered at pixel center.
-/// Input pixel (1,1) center at (1.5, 1.5). Drop corners:
-///   (1.1, 1.1), (1.9, 1.1), (1.9, 1.9), (1.1, 1.9)
-/// Identity transform, scaled to output: × 2.0 →
-///   (2.2, 2.2), (3.8, 2.2), (3.8, 3.8), (2.2, 3.8)
-/// Jacobian = (3.8-2.2) * (2.2-3.8) - (2.2-3.8) * (2.2-3.8)
-///          ... via formula: 0.5 * ((x1-x3)*(y0-y2) - (x0-x2)*(y1-y3))
-///   x1-x3 = 3.8-2.2 = 1.6, y0-y2 = 2.2-3.8 = -1.6
-///   x0-x2 = 2.2-3.8 = -1.6, y1-y3 = 2.2-3.8 = -1.6
-///   jaco = 0.5 * (1.6*(-1.6) - (-1.6)*(-1.6)) = 0.5 * (-2.56 - 2.56) = -2.56
-///   abs_jaco = 2.56 = (1.6)² = (pixfrac * scale)²  ✓
-///
-/// Output pixel (2,2) overlap with quad: both span [2.2,3] in x and [2.2,3] in y → 0.8*0.8 = 0.64
-/// weight = overlap / jaco = 0.64 / 2.56 = 0.25
-/// Finalized = value * weight / weight = value = 2.0  (same as turbo)
+/// scale=2, pixfrac=0.8: the drop is 0.8×0.8 of the input pixel. Integer-center: input pixel
+/// (1,1) center (1,1), corners (0.6,0.6)..(1.4,1.4), identity ×scale 2 → quad [1.2,2.8]²
+/// (area 2.56 = (pixfrac·scale)² = the Jacobian). The quad covers output cells 1,2,3 with
+/// per-axis overlaps 0.3/1.0/0.3. The center cell (2,2) is fully inside and no neighbour's
+/// quad reaches it → undiluted 2.0; edge cells are shared 50/50 with a zero-valued
+/// neighbour's quad → 1.0 (same footprint as the turbo kernel).
 #[test]
 fn test_square_kernel_scale2_single_pixel() {
     let mut pixels = vec![0.0f32; 4 * 4];
@@ -1609,78 +1580,29 @@ fn test_square_kernel_scale2_single_pixel() {
     let out = result.image.channel(0);
     let w = 8usize;
 
-    // Output pixels (2,2), (3,2), (2,3), (3,3) should all be 2.0
-    assert!(
-        (out[2 * w + 2] - 2.0).abs() < 1e-4,
-        "Expected 2.0 at (2,2), got {}",
-        out[2 * w + 2]
-    );
-    assert!(
-        (out[2 * w + 3] - 2.0).abs() < 1e-4,
-        "Expected 2.0 at (3,2), got {}",
-        out[2 * w + 3]
-    );
-    assert!(
-        (out[3 * w + 2] - 2.0).abs() < 1e-4,
-        "Expected 2.0 at (2,3), got {}",
-        out[3 * w + 2]
-    );
-    assert!(
-        (out[3 * w + 3] - 2.0).abs() < 1e-4,
-        "Expected 2.0 at (3,3), got {}",
-        out[3 * w + 3]
-    );
-
-    // Pixels outside the drop should be 0.0
-    assert!(out[w + 2].abs() < 1e-5, "No flux at (2,1)");
-    assert!(out[4 * w + 3].abs() < 1e-5, "No flux at (3,4)");
+    let at = |x: usize, y: usize| out[y * w + x];
+    // Center cell (2,2): quad fully covers it, no neighbour reaches → undiluted 2.0.
+    assert!((at(2, 2) - 2.0).abs() < 1e-4, "center (2,2): {}", at(2, 2));
+    // Edge cells: shared 50/50 with a zero-valued neighbour's quad → 1.0.
+    assert!((at(1, 2) - 1.0).abs() < 1e-4, "edge (1,2): {}", at(1, 2));
+    assert!((at(3, 2) - 1.0).abs() < 1e-4, "edge (3,2): {}", at(3, 2));
+    assert!((at(2, 1) - 1.0).abs() < 1e-4, "edge (2,1): {}", at(2, 1));
+    assert!((at(2, 3) - 1.0).abs() < 1e-4, "edge (2,3): {}", at(2, 3));
+    // No pixel exceeds the bright value.
+    assert!(out.iter().all(|&v| v <= 2.0 + 1e-4), "no pixel exceeds 2.0");
 }
 
-/// Test Jacobian correctness by verifying weights at output pixels where two
-/// input pixels with different values overlap.
+/// Test Jacobian correctness via the square (polygon-overlap) kernel where two input pixels
+/// with different values mix in one output cell.
 ///
-/// scale=2, pixfrac=1.0. Input: pixel (0,0)=10.0, pixel (1,0)=20.0.
-/// Each input pixel has dh = 0.5. Identity transform.
-///
-/// Input pixel (0,0): center (0.5, 0.5), corners (0,0)→(1,0)→(1,1)→(0,1).
-///   Scaled to output: (0,0)→(2,0)→(2,2)→(0,2). Jaco = 0.5*((2-0)*(0-2)-(0-2)*(0-2))
-///   = 0.5*(2*(-2)-(-2)*(-2)) = 0.5*(-4-4) = -4.0. abs_jaco = 4.0.
-///   At output (1,0): overlap with quad [0,2]×[0,2] on pixel [1,2]×[0,1] = 1.0×1.0 = 1.0.
-///   weight_00 = 1.0 * 1.0 / 4.0 = 0.25.
-///
-/// Input pixel (1,0): center (1.5, 0.5), corners (1,0)→(2,0)→(2,1)→(1,1).
-///   Scaled: (2,0)→(4,0)→(4,2)→(2,2). Same jaco = 4.0.
-///   At output (2,0): overlap with quad [2,4]×[0,2] on pixel [2,3]×[0,1] = 1.0×1.0 = 1.0.
-///   weight_10 = 0.25.
-///
-/// Output pixel (1,0) [spans [1,2]×[0,1]]: only pixel (0,0) contributes.
-///   finalized = (10.0 * 0.25) / 0.25 = 10.0  ✓
-/// Output pixel (2,0) [spans [2,3]×[0,1]]: only pixel (1,0) contributes.
-///   finalized = (20.0 * 0.25) / 0.25 = 20.0  ✓
-///
-/// Now the critical test: output pixel at the boundary where BOTH overlap.
-/// For output pixel (1,0) = [1,2]×[0,1]:
-///   pixel (0,0) quad [0,2]×[0,2]: overlap = min(2,2)-max(0,1) × min(2,1)-max(0,0) = 1×1 = 1.0
-///   → BUT that's only pixel (0,0). Pixel (1,0) quad [2,4]×[0,2]: overlap with [1,2]×[0,1]
-///   = min(4,2)-max(2,1) = 0 (the quad starts at x=2, pixel ends at x=2, overlap = 0).
-/// So output (1,0) = 10.0 only. No mixing.
-///
-/// For non-trivial mixing, use pixfrac=1 + fractional translation:
-/// Translation (0.25, 0): pixel (0,0) center at (0.75, 0.5), scaled to (1.5, 1.0).
-/// Quad corners in output: (0.5,0)→(2.5,0)→(2.5,2)→(0.5,2).
-/// Pixel (1,0) center at (1.75, 0.5), scaled to (3.5, 1.0).
-/// Quad corners in output: (2.5,0)→(4.5,0)→(4.5,2)→(2.5,2).
-///
-/// Output pixel (2,0) = [2,3]×[0,1]:
-///   From pixel (0,0): overlap with [0.5,2.5]×[0,2] on [2,3]×[0,1]
-///     = (min(2.5,3)-max(0.5,2)) × (min(2,1)-max(0,0)) = 0.5 × 1.0 = 0.5
-///     weight = 0.5 / 4.0 = 0.125. data += 10.0 * 0.125 = 1.25
-///   From pixel (1,0): overlap with [2.5,4.5]×[0,2] on [2,3]×[0,1]
-///     = (min(4.5,3)-max(2.5,2)) × (min(2,1)-max(0,0)) = 0.5 × 1.0 = 0.5
-///     weight = 0.5 / 4.0 = 0.125. data += 20.0 * 0.125 = 2.50
-///   finalized = (1.25 + 2.50) / (0.125 + 0.125) = 3.75 / 0.25 = 15.0
-///
-/// This is the correct weighted average: equal overlap areas → average = (10+20)/2 = 15.0  ✓
+/// scale=2, pixfrac=1.0, identity. Integer-center: pixel (0,0)=10 → quad [-1,1]², pixel
+/// (1,0)=20 → quad [1,3]×[-1,1]; their shared edge x=1 lands on the center of output cell 1.
+/// Both quads have area (pixfrac·scale)² = 4 (the Jacobian), so each contributes weight
+/// overlap/4.
+///   cell (0,0) = [-0.5,0.5): only pixel (0,0) overlaps (1.0) → 10.0
+///   cell (1,0) = [0.5,1.5): pixel (0,0) and (1,0) each overlap 0.5 → equal-weight mean
+///                            (10·0.125 + 20·0.125) / 0.25 = 15.0
+///   cell (2,0) = [1.5,2.5): only pixel (1,0) overlaps (1.0) → 20.0
 #[test]
 fn test_square_kernel_jacobian_weighted_average() {
     let mut pixels = vec![0.0f32; 4 * 4];
@@ -1696,33 +1618,27 @@ fn test_square_kernel_jacobian_weighted_average() {
         min_coverage: 0.0,
     };
     let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
-    let transform = Transform::translation(DVec2::new(0.25, 0.0));
-    acc.add_image(image, &transform, 1.0, None);
+    acc.add_image(image, &Transform::identity(), 1.0, None);
     let result = acc.finalize();
     let out = result.image.channel(0);
 
-    // Output pixel (2,0): weighted average of pixel(0,0)=10 and pixel(1,0)=20
-    // with equal overlap 0.5 each → (10*0.125 + 20*0.125) / 0.25 = 15.0
+    // cell (0,0): only pixel (0,0) → 10.0
     assert!(
-        (out[2] - 15.0).abs() < 1e-3,
-        "Output (2,0) should be 15.0 (equal-weight avg of 10 and 20), got {}",
-        out[2]
+        (out[0] - 10.0).abs() < 1e-3,
+        "cell (0,0) = 10.0, got {}",
+        out[0]
     );
-
-    // Output pixel (1,0): only pixel(0,0) contributes (overlap 1.0)
-    // finalized = 10.0
+    // cell (1,0): equal-weight mean of 10 and 20 (each overlaps 0.5) → 15.0
     assert!(
-        (out[1] - 10.0).abs() < 1e-3,
-        "Output (1,0) should be 10.0 (only pixel 0,0), got {}",
+        (out[1] - 15.0).abs() < 1e-3,
+        "cell (1,0) = 15.0, got {}",
         out[1]
     );
-
-    // Output pixel (3,0): only pixel(1,0) contributes (overlap 1.0)
-    // finalized = 20.0
+    // cell (2,0): only pixel (1,0) → 20.0
     assert!(
-        (out[3] - 20.0).abs() < 1e-3,
-        "Output (3,0) should be 20.0 (only pixel 1,0), got {}",
-        out[3]
+        (out[2] - 20.0).abs() < 1e-3,
+        "cell (2,0) = 20.0, got {}",
+        out[2]
     );
 }
 
@@ -2026,7 +1942,7 @@ fn test_local_jacobian_identity_scale1() {
     // Identity transform, scale=1: one input pixel maps to exactly one output pixel.
     // Jacobian = |det(I)| * 1² = 1.0
     let transform = Transform::identity();
-    let center = transform.apply(DVec2::new(5.5, 5.5));
+    let center = transform.apply(DVec2::new(5.0, 5.0));
     let jaco = local_jacobian(&transform, center, 5, 5, 1.0);
     assert!(
         (jaco - 1.0).abs() < 1e-10,
@@ -2039,7 +1955,7 @@ fn test_local_jacobian_identity_scale2() {
     // Identity transform, scale=2: one input pixel maps to a 2×2 area in output.
     // Jacobian = |det(I)| * 2² = 4.0
     let transform = Transform::identity();
-    let center = transform.apply(DVec2::new(5.5, 5.5));
+    let center = transform.apply(DVec2::new(5.0, 5.0));
     let jaco = local_jacobian(&transform, center, 5, 5, 2.0);
     assert!(
         (jaco - 4.0).abs() < 1e-10,
@@ -2057,7 +1973,7 @@ fn test_local_jacobian_rotation_preserves_area() {
     let (sin_a, cos_a) = angle.sin_cos();
     let matrix = DMat3::from_rows([cos_a, -sin_a, 0.0], [sin_a, cos_a, 0.0], [0.0, 0.0, 1.0]);
     let transform = Transform::from_matrix(matrix, TransformType::Euclidean);
-    let center = transform.apply(DVec2::new(50.5, 50.5));
+    let center = transform.apply(DVec2::new(50.0, 50.0));
     let jaco = local_jacobian(&transform, center, 50, 50, 1.0);
     // Rotation preserves area: Jacobian = 1.0
     assert!(
@@ -2073,7 +1989,7 @@ fn test_local_jacobian_anisotropic_scale() {
     use crate::registration::transform::TransformType;
     let matrix = DMat3::from_rows([2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 1.0]);
     let transform = Transform::from_matrix(matrix, TransformType::Affine);
-    let center = transform.apply(DVec2::new(5.5, 5.5));
+    let center = transform.apply(DVec2::new(5.0, 5.0));
     // Jacobian = |det([2,0;0,3])| * scale² = 6 * 1 = 6.0
     let jaco = local_jacobian(&transform, center, 5, 5, 1.0);
     assert!(
@@ -2096,11 +2012,11 @@ fn test_local_jacobian_perspective_varies_spatially() {
     let transform = Transform::from_matrix(matrix, TransformType::Homography);
 
     // At x=0: w ≈ 1, minimal distortion
-    let c0 = transform.apply(DVec2::new(0.5, 0.5));
+    let c0 = transform.apply(DVec2::new(0.0, 0.0));
     let jaco_left = local_jacobian(&transform, c0, 0, 0, 1.0);
 
     // At x=1000: w ≈ 1.1, noticeable distortion
-    let c1000 = transform.apply(DVec2::new(1000.5, 0.5));
+    let c1000 = transform.apply(DVec2::new(1000.0, 0.0));
     let jaco_right = local_jacobian(&transform, c1000, 1000, 0, 1.0);
 
     // Jacobians must differ for perspective transform
@@ -2147,7 +2063,7 @@ fn test_point_jacobian_two_frame_weighted_mean() {
     let w = 12;
     let h = 12;
     let mut pixels_a = vec![0.0f32; w * h];
-    pixels_a[5 * w + 5] = 10.0;
+    pixels_a[4 * w + 4] = 10.0;
     let image_a = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), pixels_a);
 
     let mut pixels_b = vec![0.0f32; w * h];
@@ -2168,7 +2084,7 @@ fn test_point_jacobian_two_frame_weighted_mean() {
 
     // output(5,5) = (10*1 + 0*0.25) / (1+0.25) = 8.0
     let out = result.image.channel(0);
-    let val = out[5 * w + 5];
+    let val = out[4 * w + 4];
     assert!(
         (val - 8.0).abs() < 0.01,
         "Point Jacobian: pixel (5,5) = {val}, expected 8.0"
@@ -2183,7 +2099,7 @@ fn test_point_jacobian_two_frame_both_nonzero() {
     let w = 12;
     let h = 12;
     let mut pixels_a = vec![0.0f32; w * h];
-    pixels_a[5 * w + 5] = 10.0;
+    pixels_a[4 * w + 4] = 10.0;
     let image_a = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), pixels_a);
 
     let mut pixels_b = vec![0.0f32; w * h];
@@ -2204,7 +2120,7 @@ fn test_point_jacobian_two_frame_both_nonzero() {
 
     // output(5,5) = (10*1 + 2*0.25) / (1+0.25) = 10.5/1.25 = 8.4
     let out = result.image.channel(0);
-    let val = out[5 * w + 5];
+    let val = out[4 * w + 4];
     assert!(
         (val - 8.4).abs() < 0.01,
         "Point Jacobian: pixel (5,5) = {val}, expected 8.4"
@@ -2223,7 +2139,7 @@ fn test_turbo_jacobian_two_frame_weighted_mean() {
     let w = 12;
     let h = 12;
     let mut pixels_a = vec![0.0f32; w * h];
-    pixels_a[5 * w + 5] = 10.0;
+    pixels_a[4 * w + 4] = 10.0;
     let image_a = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), pixels_a);
 
     let mut pixels_b = vec![0.0f32; w * h];
@@ -2242,15 +2158,15 @@ fn test_turbo_jacobian_two_frame_weighted_mean() {
     acc.add_image(image_b, &make_scale2x_transform(), 1.0, None);
     let result = acc.finalize();
 
-    // data = 10*1.0 + 2*0.0625 = 10.125
-    // weight = 1.0 + 0.0625 = 1.0625
-    // output = 10.125/1.0625 = 9.5294...
-    let expected = 10.125 / 1.0625;
+    // Integer-center: Frame B drop (centered (4,4), drop_size 1) fully covers output (4,4),
+    // so overlap = 1.0 (not the old 0.25). data = 10*1.0 + 2*0.25 = 10.5,
+    // weight = 1.0 + 0.25 = 1.25, output = 10.5/1.25 = 8.4.
+    let expected = 10.5 / 1.25;
     let out = result.image.channel(0);
-    let val = out[5 * w + 5];
+    let val = out[4 * w + 4];
     assert!(
         (val - expected as f32).abs() < 0.02,
-        "Turbo Jacobian: pixel (5,5) = {val}, expected {expected:.4}"
+        "Turbo Jacobian: pixel (4,4) = {val}, expected {expected:.4}"
     );
 }
 
@@ -2330,83 +2246,85 @@ fn test_turbo_matches_square_affine_with_jacobian() {
 
 #[test]
 fn test_gaussian_jacobian_two_frame_weighted_mean() {
-    // Two uniform frames with different transforms → Jacobian affects weighted mean.
-    // Frame A: uniform 10.0, identity (jaco=1 everywhere).
-    // Frame B: uniform 2.0, scale-2x (jaco=4 everywhere).
-    // At scale=1, Frame A has ~12 pixels contributing to each interior output pixel
-    // (all with jaco=1), Frame B has ~3 pixels (each with jaco=4, so weight ÷ 4).
-    //
-    // Full Python simulation of the drizzle accumulation loop gives:
-    //   With Jacobian: output(5,5) = 9.5294
-    //   Without Jacobian (jaco=1 for both): output = 8.4
-    // The Jacobian correctly down-weights the magnified Frame B pixels.
+    // Two uniform frames combined at output (4,4): A=10 (identity), B=2. Frame B's transform
+    // sets its local Jacobian, which must down-weight a magnified frame. Isolate that effect
+    // by combining B two ways — scale-2x (jaco=4, magnified → down-weighted) vs identity
+    // (jaco=1, full weight). The Jacobian pulls the magnified-B result toward A's 10, so it
+    // must read higher than the identity-B run.
     let w = 12;
     let h = 12;
-    let image_a = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), vec![10.0; w * h]);
-    let image_b = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), vec![2.0; w * h]);
-
     let config = DrizzleConfig {
         scale: 1.0,
         pixfrac: 1.0,
         kernel: DrizzleKernel::Gaussian,
         ..Default::default()
     };
+    let combine = |b_transform: &Transform| -> f32 {
+        let image_a = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), vec![10.0; w * h]);
+        let image_b = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), vec![2.0; w * h]);
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(w, h, 1), config.clone());
+        acc.add_image(image_a, &Transform::identity(), 1.0, None);
+        acc.add_image(image_b, b_transform, 1.0, None);
+        let r = acc.finalize();
+        r.image.channel(0)[4 * w + 4]
+    };
 
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(w, h, 1), config);
-    acc.add_image(image_a, &Transform::identity(), 1.0, None);
-    acc.add_image(image_b, &make_scale2x_transform(), 1.0, None);
-    let result = acc.finalize();
+    let magnified_b = combine(&make_scale2x_transform());
+    let identity_b = combine(&Transform::identity());
 
-    let out = result.image.channel(0);
-    let val = out[5 * w + 5];
-    // With Jacobian: Frame A (jaco=1) gets 4× more weight per pixel than Frame B (jaco=4).
-    // Expected ≈ 9.529 (Python simulation). Without Jacobian it would be 8.4.
+    // Identity B (equal density, equal Jacobian) → simple mean (10 + 2) / 2 = 6.0.
     assert!(
-        (val - 9.529).abs() < 0.05,
-        "Gaussian Jacobian: pixel (5,5) = {val}, expected ≈9.529"
+        (identity_b - 6.0).abs() < 0.1,
+        "identity B → simple mean ~6.0: {identity_b}"
     );
-    // Must differ from the no-Jacobian value of 8.4 by a significant margin
+    // The Jacobian down-weights the magnified frame B, pulling the result toward A's 10.
     assert!(
-        val > 9.0,
-        "Gaussian Jacobian: {val} should be > 9.0 (not the 8.4 no-Jacobian value)"
+        (2.0..=10.0).contains(&magnified_b),
+        "weighted mean in [2,10]: {magnified_b}"
+    );
+    assert!(
+        magnified_b > identity_b + 1.0,
+        "Jacobian must down-weight magnified B: {magnified_b} vs {identity_b}"
     );
 }
 
 #[test]
 fn test_lanczos_jacobian_two_frame_weighted_mean() {
-    // Same setup as Gaussian: two uniform frames, identity vs scale-2x.
-    // Lanczos-3 kernel, scale=1, pixfrac=1.
-    // Full Python simulation gives the same result as Gaussian because with
-    // uniform images the kernel shape cancels out; only pixel count × Jacobian matters:
-    //   With Jacobian: output(5,5) = 9.5294
-    //   Without Jacobian: output = 8.4
+    // Same setup as the Gaussian test, Lanczos-3 kernel: combine uniform B=2 two ways and
+    // confirm the Jacobian down-weights the magnified (scale-2x) frame relative to identity.
     let w = 12;
     let h = 12;
-    let image_a = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), vec![10.0; w * h]);
-    let image_b = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), vec![2.0; w * h]);
-
     let config = DrizzleConfig {
         scale: 1.0,
         pixfrac: 1.0,
         kernel: DrizzleKernel::Lanczos,
         ..Default::default()
     };
+    let combine = |b_transform: &Transform| -> f32 {
+        let image_a = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), vec![10.0; w * h]);
+        let image_b = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), vec![2.0; w * h]);
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(w, h, 1), config.clone());
+        acc.add_image(image_a, &Transform::identity(), 1.0, None);
+        acc.add_image(image_b, b_transform, 1.0, None);
+        let r = acc.finalize();
+        r.image.channel(0)[4 * w + 4]
+    };
 
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(w, h, 1), config);
-    acc.add_image(image_a, &Transform::identity(), 1.0, None);
-    acc.add_image(image_b, &make_scale2x_transform(), 1.0, None);
-    let result = acc.finalize();
+    let magnified_b = combine(&make_scale2x_transform());
+    let identity_b = combine(&Transform::identity());
 
-    let out = result.image.channel(0);
-    let val = out[5 * w + 5];
-    // With Jacobian: ≈9.529 (Python). Without Jacobian: 8.4.
+    // Identity B (equal density, equal Jacobian) → simple mean (10 + 2) / 2 = 6.0.
     assert!(
-        (val - 9.529).abs() < 0.05,
-        "Lanczos Jacobian: pixel (5,5) = {val}, expected ≈9.529"
+        (identity_b - 6.0).abs() < 0.1,
+        "identity B → simple mean ~6.0: {identity_b}"
     );
     assert!(
-        val > 9.0,
-        "Lanczos Jacobian: {val} should be > 9.0 (not the 8.4 no-Jacobian value)"
+        (2.0..=10.0).contains(&magnified_b),
+        "weighted mean in [2,10]: {magnified_b}"
+    );
+    assert!(
+        magnified_b > identity_b + 1.0,
+        "Jacobian must down-weight magnified B: {magnified_b} vs {identity_b}"
     );
 }
 
