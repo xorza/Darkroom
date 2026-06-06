@@ -201,6 +201,16 @@ impl CfaImage {
         }
     }
 
+    /// Floor for the normalized flat divisor. A flat pixel far below the channel
+    /// mean — deep vignetting, a dead/near-zero photosite, or noise pushing
+    /// `flat - flat_dark` negative — would otherwise divide by ~0 (blowing the
+    /// light pixel up or flipping its sign) or, if skipped, leave it
+    /// dark-subtracted-but-not-flat-divided, mixing two calibration states in
+    /// one frame. Clamping the divisor to a small positive fraction of the mean
+    /// keeps every pixel in one consistent state and bounds noise amplification
+    /// to `1 / MIN_NORMALIZED_FLAT`× (ccdproc / PixInsight `min_value` behavior).
+    const MIN_NORMALIZED_FLAT: f32 = 0.1;
+
     /// Single-mean flat normalization (Mono or unknown CFA).
     fn divide_by_normalized_mono(&mut self, flat: &CfaImage, bias: Option<&CfaImage>) {
         let flat_mean = if let Some(bias) = bias {
@@ -229,9 +239,7 @@ impl CfaImage {
                     .zip(flat.data.par_iter().zip(bias.data.par_iter()))
                     .for_each(|(l, (f, b))| {
                         let norm_flat = (f - b) * inv_mean;
-                        if norm_flat > f32::EPSILON {
-                            *l /= norm_flat;
-                        }
+                        *l /= norm_flat.max(Self::MIN_NORMALIZED_FLAT);
                     });
             }
             None => {
@@ -240,9 +248,7 @@ impl CfaImage {
                     .zip(flat.data.par_iter())
                     .for_each(|(l, f)| {
                         let norm_flat = f * inv_mean;
-                        if norm_flat > f32::EPSILON {
-                            *l /= norm_flat;
-                        }
+                        *l /= norm_flat.max(Self::MIN_NORMALIZED_FLAT);
                     });
             }
         }
@@ -304,9 +310,7 @@ impl CfaImage {
                         Some(br) => (flat_row[x] - br[x]) * inv_means[color],
                         None => flat_row[x] * inv_means[color],
                     };
-                    if norm_flat > f32::EPSILON {
-                        *pixel /= norm_flat;
-                    }
+                    *pixel /= norm_flat.max(Self::MIN_NORMALIZED_FLAT);
                 }
             });
     }
@@ -432,6 +436,31 @@ mod tests {
         assert!((light.data[0] - 0.375).abs() < 1e-4);
         // 0.5 / (1.0/0.75) = 0.5 / 1.3333 = 0.375
         assert!((light.data[1] - 0.375).abs() < 1e-4);
+    }
+
+    /// A dead/near-zero flat pixel must divide by the `MIN_NORMALIZED_FLAT`
+    /// floor — one consistent calibration state with bounded amplification —
+    /// rather than being skipped (left dark-subtracted-but-not-flat-divided) or
+    /// dividing by ~0.
+    #[test]
+    fn test_divide_by_normalized_floors_dead_flat_pixel() {
+        // flat = [0, 1, 1, 1], mean = 0.75 → inv_mean = 1.333:
+        //   pixel 0: norm_flat = 0 → clamped to MIN_NORMALIZED_FLAT,
+        //   pixels 1-3: norm_flat = 1.333 (normal, floor inactive).
+        let mut light = make_cfa(2, 2, vec![1.0, 1.0, 1.0, 1.0], CfaType::Mono);
+        let flat = make_cfa(2, 2, vec![0.0, 1.0, 1.0, 1.0], CfaType::Mono);
+
+        light.divide_by_normalized(&flat, None);
+
+        // Dead flat pixel divides by the floor (≠ 1.0 skip, ≠ huge ÷0 blow-up).
+        let expected = 1.0 / CfaImage::MIN_NORMALIZED_FLAT;
+        assert!(
+            (light.data[0] - expected).abs() < 1e-4,
+            "dead flat pixel should divide by the floor ({expected}), got {}",
+            light.data[0]
+        );
+        // Normal pixel is untouched by the floor: 1.0 / (1.0/0.75) = 0.75.
+        assert!((light.data[1] - 0.75).abs() < 1e-4);
     }
 
     #[test]

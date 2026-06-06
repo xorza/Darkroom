@@ -95,9 +95,14 @@ linearity edges.
 
 ## Tier 3 — medium (opt-in / cheap / deep-stack)
 
-- ☐ **T3.1 — flat division floor** · Medium · S (one-liner)
-  - `cfa.rs:233/244/308` skips division when `norm_flat ≤ EPSILON`, leaving pixels
-    un-flat-corrected. Fix: `*l /= norm_flat.max(min_value)`.
+- ☑ **T3.1 — flat division floor** · Medium · S — *done*
+  - All three flat-division paths (`cfa.rs` mono ±bias + per-CFA-color) now divide
+    by `norm_flat.max(CfaImage::MIN_NORMALIZED_FLAT)` (0.1) instead of skipping when
+    `norm_flat ≤ EPSILON`. Every pixel ends in one consistent calibration state,
+    near-zero/negative divisors can't blow up or flip sign, and noise amplification
+    in deep vignetting is bounded to 10× (ccdproc/PixInsight `min_value`). New test
+    `test_divide_by_normalized_floors_dead_flat_pixel`; vignetting test (flats ≥ 0.1)
+    unchanged.
 - ☐ **T3.2 — GESD over-rejection** · Medium (opt-in) · S+M
   - `rejection.rs:737-742`: off-by-`i` sample size (`n−2i` vs `n−i`, fix S);
     inverse-normal not Student-t (`:759`); median+MAD not mean+sd. No default uses GESD.
