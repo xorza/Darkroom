@@ -226,6 +226,47 @@ fn test_hierarchical_deblend() {
 }
 
 #[test]
+fn deblend_contrast_bar_is_root_flux_not_parent() {
+    // Hand-built tree:
+    //   0 root(100) → [1 bright(60), 2 dim_branch(40) → [3 mid(25), 4 faint(12)]]
+    // With min_contrast = 0.2 the global bar is 0.2·root = 20:
+    //   - bright(60) and dim_branch(40) clear 20 → the root splits in two;
+    //   - inside dim_branch, mid(25) clears 20 but faint(12) does not, so only
+    //     one child clears → dim_branch stays a single object.
+    // Result: {bright, dim_branch} = 2 objects.
+    //
+    // Under the old *parent*-relative bar, faint(12) would clear 0.2·40 = 8, so
+    // dim_branch would over-split into {mid, faint} → 3 objects. This pins the
+    // SExtractor-correct root/total-flux criterion (T2.4).
+    fn node(flux: f32, children: &[usize]) -> DeblendNode {
+        DeblendNode {
+            peak: Pixel {
+                pos: Vec2us::new(0, 0),
+                value: flux,
+            },
+            flux,
+            children: children.iter().copied().collect(),
+        }
+    }
+
+    let tree = vec![
+        node(100.0, &[1, 2]),
+        node(60.0, &[]),
+        node(40.0, &[3, 4]),
+        node(25.0, &[]),
+        node(12.0, &[]),
+    ];
+
+    let mut leaves: Vec<usize> = find_significant_branches(&tree, 0.2).to_vec();
+    leaves.sort_unstable();
+    assert_eq!(
+        leaves,
+        vec![1, 2],
+        "root-relative contrast must keep the dim branch whole (parent-relative would split it into 3)"
+    );
+}
+
+#[test]
 fn test_equal_brightness_stars() {
     let (pixels, labels, data) =
         make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 1.0, 2.5)]);

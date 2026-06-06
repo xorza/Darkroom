@@ -772,7 +772,9 @@ fn collect_roots_and_leaves(
 
     for (i, &child) in is_child.iter().enumerate() {
         if !child {
-            collect_significant_leaves(tree, i, min_contrast, &mut leaves);
+            // `i` is a root: its flux is the island's total isophotal flux —
+            // the global bar for every contrast test within the island.
+            collect_significant_leaves(tree, i, tree[i].flux, min_contrast, &mut leaves);
         }
     }
 
@@ -788,13 +790,18 @@ fn collect_roots_and_leaves(
     leaves
 }
 
-/// Recursively collect leaf nodes that pass contrast criterion.
+/// Recursively collect leaf nodes that pass the contrast criterion.
 ///
-/// Per SExtractor algorithm: a branch is considered a separate object if its
-/// flux is at least `min_contrast` fraction of the **parent's** flux (not root).
+/// Per the SExtractor algorithm a branch is a separate object when its flux is
+/// at least `min_contrast` of the island's **root/total isophotal flux**
+/// (`root_flux`), not of its immediate parent — so the bar is one global value
+/// per island instead of shrinking with depth. A parent-relative bar
+/// over-splits the bright wings of large/saturated stars in crowded fields,
+/// injecting spurious detections that poison registration's triangle matching.
 fn collect_significant_leaves(
     tree: &[DeblendNode],
     node_idx: usize,
+    root_flux: f32,
     min_contrast: f32,
     leaves: &mut SmallVec<[usize; MAX_PEAKS]>,
 ) {
@@ -807,9 +814,8 @@ fn collect_significant_leaves(
         return;
     }
 
-    // Check if children pass contrast criterion relative to THIS node's flux
-    let parent_flux = node.flux;
-    let min_flux = min_contrast * parent_flux;
+    // A child splits off only if it clears `min_contrast` of the island total.
+    let min_flux = min_contrast * root_flux;
 
     let mut num_pass = 0;
     for &child_idx in &node.children {
@@ -819,15 +825,15 @@ fn collect_significant_leaves(
     }
 
     if num_pass <= 1 {
-        // Not enough children pass contrast - treat this node as a leaf
+        // Fewer than two children clear the bar - treat this node as a leaf.
         if leaves.len() < MAX_PEAKS {
             leaves.push(node_idx);
         }
     } else {
-        // Multiple children pass - recurse into each
+        // Multiple children clear the bar - recurse, carrying the same root bar.
         for &child_idx in &node.children {
             if tree[child_idx].flux >= min_flux {
-                collect_significant_leaves(tree, child_idx, min_contrast, leaves);
+                collect_significant_leaves(tree, child_idx, root_flux, min_contrast, leaves);
             }
         }
     }

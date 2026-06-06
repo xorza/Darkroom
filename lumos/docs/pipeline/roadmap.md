@@ -73,10 +73,18 @@ linearity edges.
     scale=2/pixfrac=0.8, R≈2 → output RMS understates true noise ~2× with no weight map.
   - Fix: accumulate + return per-channel weight (and optional variance) map.
 
-- ☐ **T2.4 — deblend contrast vs root flux, not parent** · High (crowded) · M
-  - `deblend/multi_threshold/mod.rs:810-816` uses `min_contrast*node.flux` (parent);
-    SExtractor uses `mincont*root_flux`. Over-splits bright stars → poisons registration.
-  - Fix: thread root flux down; test `child.flux ≥ min_contrast*root_flux`.
+- ☑ **T2.4 — deblend contrast vs root flux, not parent** · High (crowded) · M — *done*
+  - `collect_significant_leaves` (`deblend/multi_threshold/mod.rs`) now tests each
+    branch against `min_contrast * root_flux` — the island's total isophotal flux
+    (`process_root_level`'s root node), threaded down from `collect_roots_and_leaves`
+    — instead of the shrinking-with-depth parent-node flux. Matches SExtractor's
+    global per-island bar; stops over-splitting bright wings in crowded fields.
+    New unit test `deblend_contrast_bar_is_root_flux_not_parent` (hand-built tree:
+    root-relative → 2 objects, parent-relative would give 3). No detection/pipeline
+    regressions (1970 tests green).
+  - *Possible follow-up (Low):* SExtractor also subtracts the `thresh·npix` pedestal
+    (`fdflux − thresh·fdnpix`) before the contrast test; lumos compares raw
+    above-threshold flux. Minor refinement, not done.
 
 ---
 
