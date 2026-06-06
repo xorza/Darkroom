@@ -71,7 +71,7 @@ All large buffers use `alloc_uninit_vec` to skip kernel page zeroing (`clear_pag
 
 ## Test Coverage
 
-**Total: 67 tests** across all submodules.
+**Total: 65 tests** across all submodules.
 
 | Area | Tests | Notes |
 |------|-------|-------|
@@ -79,7 +79,7 @@ All large buffers use `alloc_uninit_vec` to skip kernel page zeroing (`clear_pag
 | `load_raw` real data | 2 | Behind `real-data` feature flag |
 | LibrawGuard RAII | 2 | Cleanup + null safety |
 | Normalization | 5 | Small/large array, below-black clamping, monochrome crop, fallback formulas |
-| CFA pattern | 6 | All 4 patterns, `red_in_row`, `pattern_2x2` |
+| CFA pattern | 4 | All 4 patterns via `color_at` |
 | BayerImage validation | 6 | Zero dims, wrong length, margin overflow, valid construction |
 | X-Trans pattern | 3 | color_at, wrapping, invalid value panic |
 | X-Trans image | 3 | Valid, zero width, wrong data length |

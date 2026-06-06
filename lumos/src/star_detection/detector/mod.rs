@@ -12,12 +12,9 @@ mod bench;
 // Imports
 // =============================================================================
 
-use std::path::Path;
-
 use serde::{Deserialize, Serialize};
 
 use crate::astro_image::AstroImage;
-use crate::astro_image::error::ImageError;
 
 use super::buffer_pool::BufferPool;
 use super::config::Config;
@@ -111,11 +108,6 @@ impl StarDetector {
     /// Get reference to the underlying configuration.
     pub fn config(&self) -> &Config {
         &self.config
-    }
-
-    /// Clear the buffer pool, freeing all cached memory.
-    pub fn clear_buffer_pool(&mut self) {
-        self.buffer_pool = None;
     }
 
     /// Detect stars in a single image.
@@ -219,22 +211,5 @@ impl StarDetector {
         }
 
         DetectionResult { stars, diagnostics }
-    }
-
-    /// Load an image from `path`, run detection, and save the result as a sidecar file.
-    ///
-    /// The sidecar is written to `{path}.detection` in SCN format.
-    /// Returns the detection result.
-    pub fn detect_file(&mut self, path: impl AsRef<Path>) -> Result<DetectionResult, ImageError> {
-        let path = path.as_ref();
-        let image = AstroImage::from_file(path)?;
-        let result = self.detect(&image);
-        crate::star_detection::detection_file::save_detection_result(path, &result).map_err(
-            |e| ImageError::Io {
-                path: path.to_path_buf(),
-                source: e,
-            },
-        )?;
-        Ok(result)
     }
 }

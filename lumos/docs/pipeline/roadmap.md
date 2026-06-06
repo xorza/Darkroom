@@ -155,3 +155,56 @@ normalize (`cache.rs:434`); Winsorization 1.134 (`rejection.rs:201`); Hartley-no
 DLT + analytic Umeyama (`ransac/transforms.rs`); single-pass SIP-then-linear warp
 (`transform.rs:346`); F&H boxer/sgarea (`drizzle/mod.rs:768`); matched-filter
 normalization (`convolution/mod.rs`).
+
+---
+
+# Review pass 2 (2026-06-06): precision · performance · removal
+
+Goal: most-precise calibration/detection/stacking + most-performant. Four parallel
+analyst passes (perf ×2, removal, precision), de-noised + verified.
+
+## Removal — done this session (~850 LOC, all verified zero-reference)
+- ☑ `detect_file` + `detection_file.rs` — wrote a `.detection` JSON sidecar nothing
+  reads (no caller, no reader). Removed module + its `pub mod` + now-unused imports.
+- ☑ `clear_buffer_pool` (trivial speculative), `write_grayscale_buffer` + its orphaned
+  `rgb_to_luminance` helper (duplicate of `into_grayscale`).
+- ☑ `background/simd/` sum/deviation family — `sum_and_sum_sq_*` / `sum_abs_deviations_*`
+  across `mod.rs` (+ ~17 tests) and the whole `sse.rs` + `neon.rs` (they held only the
+  sum backends). Duplicated `math/sum` and superseded by the median/MAD background. Kept
+  the cubic-spline SIMD (the live path). Suite 1971→1950, green.
+
+## Kept (intentional — wire later, per decision)
+- ⊘ `drizzle` (2,464 LOC) — no production caller yet; keep as the F&H combine feature.
+- ⊘ `registration/distortion/tps` (1,037 LOC) — unwired SIP-alternative; keep to wire later.
+- ⊘ `AstroImageMetadata` fields + `data_max` — forward-looking provenance; `exposure_time`
+  is needed for the future dark-scaling item. Leave.
+- Suggested (not done): gate the test-only accessors (`get_pixel_*`, `pattern_2x2`, defect
+  counters, `RansacResult.{iterations,inlier_ratio}`, …) behind `test_support` per house
+  style — they're test scaffolding in the prod surface, not dead.
+
+## Precision queue (toward "most precise")
+- ☐ **PR1 — weighted (inverse-variance) PSF fit** · High. LM minimizes plain `Σr²`
+  (`centroid/lm_optimizer.rs:88`, gaussian/moffat + AVX2/NEON); ML for Poisson/CCD noise
+  is `w=1/σ²` (over-weights the bright core → biases the sub-px centroid/FWHM/flux that
+  feed registration). `NoiseModel` + per-pixel noise map already exist. Multi-backend;
+  shifts results → validate with real-data tests.
+- ☐ **PR2 — second moments on unclamped signed `(px−bg)`** · Med. `centroid/mod.rs:574`
+  clamps wing negatives to 0, biasing FWHM/eccentricity low (feeds matched-filter sizing
+  + registration `max_sigma`). Distinct from the known flux-clamp item.
+- ☐ **PR3 — compensated weighted-mean after rejection** · Med (≈free). The default
+  light path (`Noise`+`SigmaClip`) sums in naive f32 (`rejection.rs:954`); route through
+  `math::sum::weighted_mean_f32` like the other combine branches.
+
+## Performance queue (toward "most performant"; ARM is the profiled target)
+- ☐ **PF1 — NEON Lanczos/bilinear warp** · High (ARM). Default Lanczos3 warp is scalar on
+  aarch64; the SSE/AVX FMA kernel has no NEON twin (`interpolation/warp/`). #1 ARM win.
+- ☐ **PF2 — RAW demosaic planar output** · High. RCD/Markesteijn build planar → interleave
+  → `from_pixels` de-interleaves back (≈6·P traffic + 3·P alloc per RAW light frame). Give
+  demosaic a planar contract → `from_planar_channels` (zero-copy).
+- ☐ **PF3 — per-star ×3 f64 `Vec` alloc in LM fit** · High (when fitting). `gaussian_fit/mod.rs:242`
+  + moffat, inside the parallel `measure` loop → per-thread scratch / f64 stamp fields.
+- ☐ **PF4 (x86)** AVX2 `raw/normalize` (~2×); **PF5** parallelize the serial per-color flat-mean
+  pass (`cfa.rs:272`) + defect-map sample collection (60 MB throwaway); **PF6 (x86)**
+  threshold_mask AVX2 (bandwidth-bound, modest).
+- Doc fix: CLAUDE.md's SIMD table is stale — `background`/`convolution`/`median_filter`
+  already have AVX2; the real gaps are `raw/normalize` + `threshold_mask` (x86).

@@ -54,12 +54,6 @@ impl DMat3 {
         &self.data
     }
 
-    /// Mutable reference to the underlying row-major array.
-    #[inline]
-    pub fn as_array_mut(&mut self) -> &mut [f64; 9] {
-        &mut self.data
-    }
-
     /// Consume and return the underlying array.
     #[inline]
     pub const fn to_array(self) -> [f64; 9] {
@@ -239,6 +233,14 @@ impl Mul<DMat3> for f64 {
     #[inline]
     fn mul(self, rhs: DMat3) -> DMat3 {
         rhs * self
+    }
+}
+
+/// Mutable element access used only by tests to perturb individual entries.
+#[cfg(test)]
+impl DMat3 {
+    pub fn as_array_mut(&mut self) -> &mut [f64; 9] {
+        &mut self.data
     }
 }
 

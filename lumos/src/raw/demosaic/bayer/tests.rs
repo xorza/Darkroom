@@ -44,31 +44,6 @@ fn test_cfa_gbrg_pattern() {
     assert_eq!(cfa.color_at(1, 1), 1); // G
 }
 
-#[test]
-fn test_red_in_row() {
-    assert!(CfaPattern::Rggb.red_in_row(0));
-    assert!(!CfaPattern::Rggb.red_in_row(1));
-    assert!(CfaPattern::Rggb.red_in_row(2));
-
-    assert!(!CfaPattern::Bggr.red_in_row(0));
-    assert!(CfaPattern::Bggr.red_in_row(1));
-    assert!(!CfaPattern::Bggr.red_in_row(2));
-
-    assert!(CfaPattern::Grbg.red_in_row(0));
-    assert!(!CfaPattern::Grbg.red_in_row(1));
-
-    assert!(!CfaPattern::Gbrg.red_in_row(0));
-    assert!(CfaPattern::Gbrg.red_in_row(1));
-}
-
-#[test]
-fn test_pattern_2x2() {
-    assert_eq!(CfaPattern::Rggb.pattern_2x2(), [0, 1, 1, 2]);
-    assert_eq!(CfaPattern::Bggr.pattern_2x2(), [2, 1, 1, 0]);
-    assert_eq!(CfaPattern::Grbg.pattern_2x2(), [1, 0, 2, 1]);
-    assert_eq!(CfaPattern::Gbrg.pattern_2x2(), [1, 2, 0, 1]);
-}
-
 // ── from_bayerpat tests ──────────────────────────────────────
 
 #[test]

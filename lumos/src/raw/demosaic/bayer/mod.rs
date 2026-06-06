@@ -65,28 +65,6 @@ impl CfaPattern {
             CfaPattern::Gbrg => [1, 2, 0, 1][(row << 1) | col],
         }
     }
-
-    /// Check if red is on the same row as a green pixel at position (y, x).
-    /// Used to determine interpolation direction for green pixels.
-    #[inline(always)]
-    pub fn red_in_row(&self, y: usize) -> bool {
-        match self {
-            CfaPattern::Rggb | CfaPattern::Grbg => (y & 1) == 0,
-            CfaPattern::Bggr | CfaPattern::Gbrg => (y & 1) == 1,
-        }
-    }
-
-    /// Get the 2x2 color pattern as [row0_col0, row0_col1, row1_col0, row1_col1].
-    /// Values: 0=Red, 1=Green, 2=Blue
-    #[inline(always)]
-    pub fn pattern_2x2(&self) -> [usize; 4] {
-        match self {
-            CfaPattern::Rggb => [0, 1, 1, 2],
-            CfaPattern::Bggr => [2, 1, 1, 0],
-            CfaPattern::Grbg => [1, 0, 2, 1],
-            CfaPattern::Gbrg => [1, 2, 0, 1],
-        }
-    }
 }
 
 /// Raw Bayer image data with metadata needed for demosaicing.

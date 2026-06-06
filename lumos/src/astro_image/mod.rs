@@ -396,57 +396,6 @@ impl AstroImage {
     }
 
     // ------------------------------------------------------------------------
-    // Pixel access
-    // ------------------------------------------------------------------------
-
-    /// Get pixel value at (x, y) for grayscale images.
-    pub fn get_pixel_gray(&self, x: usize, y: usize) -> f32 {
-        debug_assert!(x < self.width() && y < self.height());
-        debug_assert!(self.is_grayscale());
-        self.channel(0)[y * self.width() + x]
-    }
-
-    /// Get mutable reference to pixel at (x, y) for grayscale images.
-    pub fn get_pixel_gray_mut(&mut self, x: usize, y: usize) -> &mut f32 {
-        debug_assert!(x < self.width() && y < self.height());
-        debug_assert!(self.is_grayscale());
-        let width = self.width();
-        &mut self.channel_mut(0)[y * width + x]
-    }
-
-    /// Get pixel value at (x, y) for a specific channel.
-    pub fn get_pixel_channel(&self, x: usize, y: usize, c: usize) -> f32 {
-        debug_assert!(x < self.width() && y < self.height() && c < self.channels());
-        self.channel(c)[y * self.width() + x]
-    }
-
-    /// Get RGB pixel values at (x, y).
-    pub fn get_pixel_rgb(&self, x: usize, y: usize) -> [f32; 3] {
-        debug_assert!(x < self.width() && y < self.height());
-        debug_assert!(self.is_rgb());
-        let idx = y * self.width() + x;
-        match &self.pixels {
-            PixelData::Rgb([r, g, b]) => [r[idx], g[idx], b[idx]],
-            _ => unreachable!(),
-        }
-    }
-
-    /// Set RGB pixel values at (x, y).
-    pub fn set_pixel_rgb(&mut self, x: usize, y: usize, rgb: [f32; 3]) {
-        debug_assert!(x < self.width() && y < self.height());
-        debug_assert!(self.is_rgb());
-        let idx = y * self.width() + x;
-        match &mut self.pixels {
-            PixelData::Rgb([r, g, b]) => {
-                r[idx] = rgb[0];
-                g[idx] = rgb[1];
-                b[idx] = rgb[2];
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    // ------------------------------------------------------------------------
     // Statistics
     // ------------------------------------------------------------------------
 
@@ -472,17 +421,6 @@ impl AstroImage {
     // ------------------------------------------------------------------------
     // Grayscale conversion
     // ------------------------------------------------------------------------
-
-    /// Write grayscale data into an existing buffer (Rec. 709 luminance).
-    pub fn write_grayscale_buffer(&self, output: &mut Buffer2<f32>) {
-        debug_assert_eq!(output.width(), self.dimensions.width);
-        debug_assert_eq!(output.height(), self.dimensions.height);
-
-        match &self.pixels {
-            PixelData::L(data) => output.pixels_mut().copy_from_slice(data),
-            PixelData::Rgb([r, g, b]) => rgb_to_luminance(r, g, b, output.pixels_mut()),
-        }
-    }
 
     /// Convert to grayscale, consuming self (reuses R buffer for RGB).
     pub fn into_grayscale(self) -> Self {
@@ -516,18 +454,6 @@ impl AstroImage {
         image
             .save_file(path)
             .map_err(|source| ImageError::Save { source })
-    }
-
-    /// Consume and return interleaved pixels (RGBRGBRGB...).
-    pub fn into_interleaved_pixels(self) -> Vec<f32> {
-        match self.pixels {
-            PixelData::L(data) => data.into_vec(),
-            PixelData::Rgb([r, g, b]) => {
-                let mut interleaved = vec![0.0f32; r.len() * 3];
-                interleave_rgb(&r, &g, &b, &mut interleaved);
-                interleaved
-            }
-        }
     }
 }
 
@@ -734,21 +660,6 @@ fn interleave_rgb(r: &[f32], g: &[f32], b: &[f32], interleaved: &mut [f32]) {
         });
 }
 
-/// Convert RGB planes to luminance using Rec. 709 weights.
-fn rgb_to_luminance(r: &[f32], g: &[f32], b: &[f32], gray: &mut [f32]) {
-    debug_assert_eq!(r.len(), g.len());
-    debug_assert_eq!(g.len(), b.len());
-    debug_assert_eq!(b.len(), gray.len());
-
-    const R_WEIGHT: f32 = 0.2126;
-    const G_WEIGHT: f32 = 0.7152;
-    const B_WEIGHT: f32 = 0.0722;
-
-    gray.par_iter_mut().enumerate().for_each(|(i, val)| {
-        *val = R_WEIGHT * r[i] + G_WEIGHT * g[i] + B_WEIGHT * b[i];
-    });
-}
-
 /// Convert RGB planes to luminance in-place, reusing the R buffer for output.
 fn rgb_to_luminance_inplace(r: &mut Buffer2<f32>, g: &Buffer2<f32>, b: &Buffer2<f32>) {
     debug_assert_eq!(r.len(), g.len());
@@ -767,6 +678,69 @@ fn rgb_to_luminance_inplace(r: &mut Buffer2<f32>, g: &Buffer2<f32>, b: &Buffer2<
         .for_each(|(i, val)| {
             *val = R_WEIGHT * *val + G_WEIGHT * g_slice[i] + B_WEIGHT * b_slice[i];
         });
+}
+
+/// Per-pixel accessors used only by tests to inspect/construct planar buffers.
+#[cfg(test)]
+impl AstroImage {
+    /// Get pixel value at (x, y) for grayscale images.
+    pub fn get_pixel_gray(&self, x: usize, y: usize) -> f32 {
+        debug_assert!(x < self.width() && y < self.height());
+        debug_assert!(self.is_grayscale());
+        self.channel(0)[y * self.width() + x]
+    }
+
+    /// Get mutable reference to pixel at (x, y) for grayscale images.
+    pub fn get_pixel_gray_mut(&mut self, x: usize, y: usize) -> &mut f32 {
+        debug_assert!(x < self.width() && y < self.height());
+        debug_assert!(self.is_grayscale());
+        let width = self.width();
+        &mut self.channel_mut(0)[y * width + x]
+    }
+
+    /// Get pixel value at (x, y) for a specific channel.
+    pub fn get_pixel_channel(&self, x: usize, y: usize, c: usize) -> f32 {
+        debug_assert!(x < self.width() && y < self.height() && c < self.channels());
+        self.channel(c)[y * self.width() + x]
+    }
+
+    /// Get RGB pixel values at (x, y).
+    pub fn get_pixel_rgb(&self, x: usize, y: usize) -> [f32; 3] {
+        debug_assert!(x < self.width() && y < self.height());
+        debug_assert!(self.is_rgb());
+        let idx = y * self.width() + x;
+        match &self.pixels {
+            PixelData::Rgb([r, g, b]) => [r[idx], g[idx], b[idx]],
+            _ => unreachable!(),
+        }
+    }
+
+    /// Set RGB pixel values at (x, y).
+    pub fn set_pixel_rgb(&mut self, x: usize, y: usize, rgb: [f32; 3]) {
+        debug_assert!(x < self.width() && y < self.height());
+        debug_assert!(self.is_rgb());
+        let idx = y * self.width() + x;
+        match &mut self.pixels {
+            PixelData::Rgb([r, g, b]) => {
+                r[idx] = rgb[0];
+                g[idx] = rgb[1];
+                b[idx] = rgb[2];
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    /// Consume and return interleaved pixels (RGBRGBRGB...).
+    pub fn into_interleaved_pixels(self) -> Vec<f32> {
+        match self.pixels {
+            PixelData::L(data) => data.into_vec(),
+            PixelData::Rgb([r, g, b]) => {
+                let mut interleaved = vec![0.0f32; r.len() * 3];
+                interleave_rgb(&r, &g, &b, &mut interleaved);
+                interleaved
+            }
+        }
+    }
 }
 
 #[cfg(test)]

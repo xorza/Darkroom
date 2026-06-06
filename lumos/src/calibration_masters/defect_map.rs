@@ -96,16 +96,6 @@ impl DefectMap {
         self.hot_indices.len() + self.cold_indices.len()
     }
 
-    /// Number of hot pixels detected.
-    pub fn hot_count(&self) -> usize {
-        self.hot_indices.len()
-    }
-
-    /// Number of cold/dead pixels detected.
-    pub fn cold_count(&self) -> usize {
-        self.cold_indices.len()
-    }
-
     /// Get the percentage of defective pixels.
     pub fn percentage(&self) -> f32 {
         let pixel_count = self.width * self.height;
@@ -380,6 +370,20 @@ fn xtrans_same_color_median(pixels: &Buffer2<f32>, x: usize, y: usize, pattern: 
         neighbors[i] = val;
     }
     crate::math::statistics::median_f32_mut(&mut neighbors[..n])
+}
+
+/// Per-class defect counts, used only by tests to assert detection behavior.
+#[cfg(test)]
+impl DefectMap {
+    /// Number of hot pixels detected.
+    pub fn hot_count(&self) -> usize {
+        self.hot_indices.len()
+    }
+
+    /// Number of cold/dead pixels detected.
+    pub fn cold_count(&self) -> usize {
+        self.cold_indices.len()
+    }
 }
 
 #[cfg(test)]

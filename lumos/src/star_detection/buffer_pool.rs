@@ -46,12 +46,6 @@ impl BufferPool {
         self.height
     }
 
-    /// Check if the pool matches the given dimensions.
-    #[inline]
-    pub fn matches_dimensions(&self, width: usize, height: usize) -> bool {
-        self.width == width && self.height == height
-    }
-
     /// Acquire an f32 buffer from the pool, or allocate a new one.
     pub fn acquire_f32(&mut self) -> Buffer2<f32> {
         self.f32_buffers
@@ -114,6 +108,14 @@ impl BufferPool {
             self.width = width;
             self.height = height;
         }
+    }
+}
+
+/// Dimension check used only by tests to assert pool sizing/reuse.
+#[cfg(test)]
+impl BufferPool {
+    pub fn matches_dimensions(&self, width: usize, height: usize) -> bool {
+        self.width == width && self.height == height
     }
 }
 
