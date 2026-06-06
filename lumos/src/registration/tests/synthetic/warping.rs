@@ -875,3 +875,67 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
         assert!(v == 0.0 || (v - V).abs() < 1e-5, "unexpected value {v}");
     }
 }
+
+/// Coverage is emitted for the default negative-lobe kernel (Lanczos3) too:
+/// 1.0 in the interior, 0.0 fully outside, fractional across an `a`-wide border
+/// band. Value renormalization is *not* applied to Lanczos (negative lobes), so
+/// partially-covered edge pixels stay darkened — the coverage map is what lets
+/// downstream down-weight them.
+#[test]
+fn warp_emits_coverage_for_lanczos_without_renormalizing() {
+    use crate::registration::config::Config as RegConfig;
+
+    const V: f32 = 0.5;
+    let (w, h) = (32usize, 8usize);
+    let image = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), vec![V; w * h]);
+
+    // src = (x + 3.5, y): a Lanczos3 (6-tap) kernel reaches off the right edge
+    // for x ≳ 26 and lands entirely outside by x = 31.
+    let transform = Transform::translation(DVec2::new(3.5, 0.0));
+    let config = RegConfig {
+        interpolation: InterpolationMethod::Lanczos3 { deringing: 0.3 },
+        ..Default::default()
+    };
+
+    let result = warp(&image, &WarpTransform::new(transform), &config);
+    let cov = result.coverage.pixels();
+    let val = result.image.channel(0).pixels();
+    let at = |x: usize, y: usize| y * w + x;
+    let y = 4;
+
+    // Interior: every kernel tap is in bounds, so Σ_in/Σ_all == 1 exactly.
+    assert!(
+        (cov[at(10, y)] - 1.0).abs() < 1e-5,
+        "interior coverage should be 1.0, got {}",
+        cov[at(10, y)]
+    );
+    // Far past the edge: every tap is outside.
+    assert_eq!(cov[at(31, y)], 0.0, "column 31 is fully extrapolated");
+    // A fractional border band exists between the two.
+    let partial = (24..32)
+        .filter(|&x| cov[at(x, y)] > 0.0 && cov[at(x, y)] < 1.0)
+        .count();
+    assert!(
+        partial >= 2,
+        "expected a fractional coverage band, got {partial} columns"
+    );
+
+    // Lanczos is not renormalized: interior reads V, but a partially-covered
+    // edge pixel stays darkened (≈ V·coverage < V) rather than recovered to V.
+    assert!(
+        (val[at(10, y)] - V).abs() < 1e-4,
+        "interior value should be V"
+    );
+    let edge_x = (24..31)
+        .find(|&x| cov[at(x, y)] > 0.05 && cov[at(x, y)] < 0.95)
+        .expect("a partially-covered edge column");
+    assert!(
+        val[at(edge_x, y)] < V - 1e-3,
+        "Lanczos edge value should stay darkened (renorm skipped), got {} at col {edge_x}",
+        val[at(edge_x, y)]
+    );
+
+    for &c in cov {
+        assert!((0.0..=1.0).contains(&c), "coverage {c} out of range");
+    }
+}

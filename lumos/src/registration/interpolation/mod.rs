@@ -124,6 +124,19 @@ pub(crate) fn bicubic_kernel(x: f32) -> f32 {
     }
 }
 
+/// The four 1-D bicubic tap weights for a fractional offset `f`, ordered for
+/// taps at `floor - 1 ..= floor + 2`. Single source of truth shared by the
+/// bicubic sampler and the coverage pass.
+#[inline]
+fn bicubic_weights(f: f32) -> [f32; 4] {
+    [
+        bicubic_kernel(f + 1.0),
+        bicubic_kernel(f),
+        bicubic_kernel(f - 1.0),
+        bicubic_kernel(f - 2.0),
+    ]
+}
+
 /// Sample a pixel with bounds checking. Returns `border_value` for out-of-bounds coordinates.
 #[inline]
 pub(super) fn sample_pixel(
@@ -177,18 +190,8 @@ fn interpolate_bicubic(data: &Buffer2<f32>, x: f32, y: f32, border_value: f32) -
     let fx = x - x0 as f32;
     let fy = y - y0 as f32;
 
-    let wx = [
-        bicubic_kernel(fx + 1.0),
-        bicubic_kernel(fx),
-        bicubic_kernel(fx - 1.0),
-        bicubic_kernel(fx - 2.0),
-    ];
-    let wy = [
-        bicubic_kernel(fy + 1.0),
-        bicubic_kernel(fy),
-        bicubic_kernel(fy - 1.0),
-        bicubic_kernel(fy - 2.0),
-    ];
+    let wx = bicubic_weights(fx);
+    let wy = bicubic_weights(fy);
 
     let (pixels, w, h) = (data.pixels(), data.width(), data.height());
     let mut sum = 0.0;
@@ -280,6 +283,137 @@ fn interpolate(data: &Buffer2<f32>, x: f32, y: f32, params: &WarpParams) -> f32 
             interpolate_lanczos(data, x, y, 4, params.border_value)
         }
     }
+}
+
+/// Fraction of the interpolation kernel's weight at one output pixel that lands
+/// on in-bounds source samples — `Σ_in(w) / Σ_all(w) ∈ [0, 1]`. Pure geometry:
+/// it mirrors each sampler's tap layout + weights but reads no pixel data, so
+/// it needs neither a scratch source buffer nor a second sampling pass. The
+/// `1.0` for fully-interior pixels and `0.0` for fully-extrapolated ones is what
+/// lets [`warp_coverage`] feed a per-pixel weight to downstream stacking, and
+/// what the value renormalization divides by.
+fn coverage_at(sx: f32, sy: f32, w: usize, h: usize, method: InterpolationMethod) -> f32 {
+    let in_bounds = |x: i32, y: i32| x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h;
+    match method {
+        InterpolationMethod::Nearest => {
+            if in_bounds(sx.round() as i32, sy.round() as i32) {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        InterpolationMethod::Bilinear => {
+            let x0 = sx.floor() as i32;
+            let y0 = sy.floor() as i32;
+            let fx = sx - x0 as f32;
+            let fy = sy - y0 as f32;
+            separable_in_bounds_fraction(x0, &[1.0 - fx, fx], y0, &[1.0 - fy, fy], w, h)
+        }
+        InterpolationMethod::Bicubic => {
+            let x0 = sx.floor() as i32;
+            let y0 = sy.floor() as i32;
+            let fx = sx - x0 as f32;
+            let fy = sy - y0 as f32;
+            let wx = bicubic_weights(fx);
+            let wy = bicubic_weights(fy);
+            separable_in_bounds_fraction(x0 - 1, &wx, y0 - 1, &wy, w, h)
+        }
+        InterpolationMethod::Lanczos2 { .. }
+        | InterpolationMethod::Lanczos3 { .. }
+        | InterpolationMethod::Lanczos4 { .. } => {
+            let a = match method {
+                InterpolationMethod::Lanczos2 { .. } => 2,
+                InterpolationMethod::Lanczos3 { .. } => 3,
+                _ => 4,
+            };
+            let lut = get_lanczos_lut(a);
+            let x0 = sx.floor() as i32;
+            let y0 = sy.floor() as i32;
+            let fx = sx - x0 as f32;
+            let fy = sy - y0 as f32;
+            let ai = a as i32;
+            let size = 2 * a;
+            // Max kernel is Lanczos4 (8 taps per axis).
+            let mut wx = [0.0f32; 8];
+            let mut wy = [0.0f32; 8];
+            for i in 0..size {
+                wx[i] = lut.lookup(fx - (i as i32 - ai + 1) as f32);
+                wy[i] = lut.lookup(fy - (i as i32 - ai + 1) as f32);
+            }
+            separable_in_bounds_fraction(x0 - ai + 1, &wx[..size], y0 - ai + 1, &wy[..size], w, h)
+        }
+    }
+}
+
+/// Sum the in-bounds tap weights of a separable kernel and divide by the total
+/// weight. Mirrors the `Σ sample·wx·wy / (Σwx·Σwy)` normalization the samplers
+/// use, so `value / coverage` recovers the in-bounds weighted average.
+fn separable_in_bounds_fraction(
+    x0: i32,
+    wx: &[f32],
+    y0: i32,
+    wy: &[f32],
+    w: usize,
+    h: usize,
+) -> f32 {
+    let wsum = wx.iter().sum::<f32>() * wy.iter().sum::<f32>();
+    if wsum.abs() < 1e-10 {
+        return 0.0;
+    }
+    let mut in_sum = 0.0f32;
+    for (j, &wyj) in wy.iter().enumerate() {
+        let py = y0 + j as i32;
+        if py < 0 || py as usize >= h {
+            continue;
+        }
+        for (i, &wxi) in wx.iter().enumerate() {
+            let px = x0 + i as i32;
+            if px >= 0 && (px as usize) < w {
+                in_sum += wxi * wyj;
+            }
+        }
+    }
+    (in_sum / wsum).clamp(0.0, 1.0)
+}
+
+/// Per-pixel coverage map for a warp — the geometric companion to
+/// [`warp_image`], computed in the same inverse-mapped row order with the same
+/// incremental coordinate stepping but reading no pixel data (see
+/// [`coverage_at`]). Channel-independent, so the caller computes it once.
+pub(crate) fn warp_coverage(
+    width: usize,
+    height: usize,
+    wt: &WarpTransform,
+    method: InterpolationMethod,
+) -> Buffer2<f32> {
+    let mut coverage = Buffer2::new_default(width, height);
+    coverage
+        .pixels_mut()
+        .par_chunks_mut(width)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let m = wt.transform.matrix.as_array();
+            let can_step = wt.is_linear();
+            let src0 = wt.apply(glam::DVec2::new(0.0, y as f64));
+            let mut src_x = src0.x;
+            let mut src_y = src0.y;
+            let dx_step = m[0];
+            let dy_step = m[3];
+
+            for (x, c) in row.iter_mut().enumerate() {
+                if !can_step {
+                    let src = wt.apply(glam::DVec2::new(x as f64, y as f64));
+                    src_x = src.x;
+                    src_y = src.y;
+                }
+                *c = coverage_at(src_x as f32, src_y as f32, width, height, method);
+                if can_step {
+                    src_x += dx_step;
+                    src_y += dy_step;
+                }
+            }
+        });
+    coverage
 }
 
 /// Warp an image using a [`WarpTransform`] (linear transform + optional SIP correction).

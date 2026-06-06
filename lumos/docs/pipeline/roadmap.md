@@ -19,21 +19,26 @@ linearity edges.
 
 ## Tier 1 — fix first (silent corruption of the default output)
 
-- ◐ **T1.1 — `warp()` coverage mask + border flux renormalization** · Critical · M — *Scope A done*
-  - `warp()` now returns `WarpResult { image, coverage }` (`registration/mod.rs`).
-    Coverage is computed by warping an all-ones source through the *same* sampler
-    with a zero border (`warp_coverage`), so `coverage = Σ_in(w)/Σ_all(w)` ∈ [0,1]
-    for every method (incl. SIMD) with no sampler changes and no drift. Border-flux
-    darkening is fixed by `value /= coverage` for the non-negative kernels
-    (nearest/bilinear) when `border_value == 0` — interior pixels stay bit-exact.
-    New test `warp_emits_coverage_and_renormalizes_bilinear_border`; all 9 callers
-    (tests/benches/examples) updated to `.image`; `WarpResult` re-exported.
-  - **Deferred (Scope B):** value-renormalization for the negative-lobe kernels
-    (bicubic/**Lanczos**, the default) — needs in-sampler in-bounds-weight tracking,
-    not the ones-warp post-pass; their coverage *is* emitted, so downstream
-    down-weighting already mitigates the darkening. And wiring coverage into a
-    production warp→stack path as `pixel_weight_maps` (no production consumer exists
-    yet — `warp`/`drizzle_stack` are bench/test-only today).
+- ◐ **T1.1 — `warp()` coverage mask + border flux renormalization** · Critical · M — *Scope A+B done*
+  - `warp()` returns `WarpResult { image, coverage }` (`registration/mod.rs`),
+    `WarpResult` re-exported; all 9 callers (tests/benches/examples) use `.image`.
+  - **Scope B (no scratch buffer):** coverage is a weight-only geometric pass
+    (`interpolation::warp_coverage` / `coverage_at`) that mirrors each kernel's
+    tap layout + weights to produce `Σ_in(w)/Σ_all(w)` ∈ [0,1] for every method —
+    reads no pixel data, allocates no `ones` buffer, and runs in the same
+    inverse-mapped row order as `warp_image` with the same incremental stepping.
+    Replaced the earlier ones-warp (which needed a full-frame scratch + second
+    sampling pass). The value SIMD kernels are untouched.
+  - Border-flux darkening fixed by `value /= coverage` for the non-negative
+    kernels (nearest/bilinear) when `border_value == 0`; interior bit-exact.
+    Tests: `warp_emits_coverage_and_renormalizes_bilinear_border` (exact),
+    `warp_emits_coverage_for_lanczos_without_renormalizing` (default kernel).
+  - **Still open:** (1) value-renormalization for the negative-lobe kernels
+    (bicubic/**Lanczos**, the default) — their coverage is emitted (so downstream
+    down-weighting mitigates the darkening), but exact value renorm under deringing
+    would need true in-sampler weight tracking; (2) wiring coverage into a
+    production warp→stack path as `pixel_weight_maps` (no production consumer yet —
+    `warp`/`drizzle_stack` are bench/test-only today).
 
 - ☑ **T1.2 — small-N rejection guard in `stack()`** · High · S — *done*
   - `run_stacking` now calls `effective_combine_method`: σ-based rejection

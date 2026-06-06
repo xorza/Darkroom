@@ -278,7 +278,7 @@ pub fn warp(image: &AstroImage, warp_transform: &WarpTransform, config: &Config)
         );
     }
 
-    let coverage = warp_coverage(
+    let coverage = interpolation::warp_coverage(
         image.width(),
         image.height(),
         warp_transform,
@@ -301,31 +301,6 @@ pub fn warp(image: &AstroImage, warp_transform: &WarpTransform, config: &Config)
         image: output,
         coverage,
     }
-}
-
-/// Per-pixel in-bounds weight fraction of the interpolation kernel, computed by
-/// warping an all-ones source with a zero border through the *same* sampler:
-/// in-bounds taps contribute their weight, out-of-bounds taps contribute 0, so
-/// the result is `Σ_in(w) / Σ_all(w)`. Reusing the real sampler (SIMD included)
-/// keeps coverage from drifting away from the value warp. Clamped to `[0, 1]`
-/// (negative-lobe kernels can ring slightly past the ends).
-fn warp_coverage(
-    width: usize,
-    height: usize,
-    warp_transform: &WarpTransform,
-    method: InterpolationMethod,
-) -> Buffer2<f32> {
-    let ones = Buffer2::new_filled(width, height, 1.0);
-    let mut coverage = Buffer2::new_default(width, height);
-    let params = interpolation::WarpParams {
-        method,
-        border_value: 0.0,
-    };
-    warp_image(&ones, &mut coverage, warp_transform, &params);
-    for v in coverage.pixels_mut() {
-        *v = v.clamp(0.0, 1.0);
-    }
-    coverage
 }
 
 /// Kernels whose weights are non-negative, where dividing a zero-border warp by
