@@ -734,12 +734,17 @@ impl GesdConfig {
         let mut num_outliers = 0;
 
         for i in (0..num_candidates).rev() {
-            let ni = (len + num_candidates - i) as f32; // effective n at step i
-            let p = 1.0 - self.alpha / (2.0 * (ni - i as f32));
+            // `ni` is already the effective sample size at this step
+            // (`len + num_candidates - i == n - i`); the Rosner/GESD critical
+            // value uses that live count directly. The earlier `ni - i` form
+            // double-subtracted `i` (an effective `n - 2i`), shrinking the count,
+            // shrinking λ, and over-rejecting.
+            let ni = (len + num_candidates - i) as f32;
+            let p = 1.0 - self.alpha / (2.0 * ni);
             let t_crit = inverse_normal_approx(p);
 
-            let numerator = (ni - i as f32 - 1.0) * t_crit;
-            let denominator = ((ni - i as f32 - 2.0 + t_crit * t_crit) * (ni - i as f32)).sqrt();
+            let numerator = (ni - 1.0) * t_crit;
+            let denominator = ((ni - 2.0 + t_crit * t_crit) * ni).sqrt();
             let lambda = numerator / denominator;
 
             if scratch.floats_b[i] > lambda {
@@ -1182,7 +1187,8 @@ mod tests {
     fn test_gesd_removes_single_bright_outlier() {
         // n=8, max_outliers=default(25%=2), relax=1.0 (symmetric).
         // Hand-computed: step 0 removes 100.0 (r=667.8), step 1 tries 1.2
-        // (r=1.35 < lambda=1.63 → keep). Phase 2 confirms 1 outlier. Result: 7.
+        // (r=1.35 < λ≈1.74 → keep; λ from the live count n−i=7). Phase 2
+        // confirms 1 outlier. Result: 7.
         let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 100.0];
         let mut s = scratch();
         let remaining = GesdConfig::new(0.05, None)
@@ -1213,8 +1219,9 @@ mod tests {
     #[test]
     fn test_gesd_keeps_tight_cluster() {
         // Tight cluster, no real outliers. max_outliers=default(25%=2).
-        // Hand-computed: step 0 tries 1.2 (r=1.35 < lambda=1.84), step 1
-        // tries 0.8 (r=0.90 < lambda=1.63). Phase 2: both keep. Result: 8.
+        // Hand-computed: step 0 tries 1.2 (r=1.35 < λ≈1.84, live count n−i=8),
+        // step 1 tries 0.8 (r=0.90 < λ≈1.74, live count n−i=7). Phase 2: both
+        // keep. Result: 8.
         let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 1.1];
         let remaining = GesdConfig::default().reject(&mut values, &mut scratch());
         assert_eq!(remaining, 8, "Tight cluster should have no rejections");

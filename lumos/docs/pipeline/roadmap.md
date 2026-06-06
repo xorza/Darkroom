@@ -103,14 +103,26 @@ linearity edges.
     in deep vignetting is bounded to 10× (ccdproc/PixInsight `min_value`). New test
     `test_divide_by_normalized_floors_dead_flat_pixel`; vignetting test (flats ≥ 0.1)
     unchanged.
-- ☐ **T3.2 — GESD over-rejection** · Medium (opt-in) · S+M
-  - `rejection.rs:737-742`: off-by-`i` sample size (`n−2i` vs `n−i`, fix S);
-    inverse-normal not Student-t (`:759`); median+MAD not mean+sd. No default uses GESD.
+- ◐ **T3.2 — GESD over-rejection** · Medium (opt-in) — *off-by-`i` fixed*
+  - Fixed the sample-size bug (`rejection.rs`): the Rosner/GESD critical value now
+    uses the live count `ni = n−i` directly instead of the double-subtracted `n−2i`,
+    which had shrunk λ and over-rejected. Verified against Rosner's formula; the two
+    stale hand-computed λ comments (`test_gesd_removes_single_bright_outlier`,
+    `test_gesd_keeps_tight_cluster`) updated to the corrected values (step-1 λ
+    1.63→≈1.74; outcomes unchanged, 13 GESD tests green).
+  - *Left (Low, opt-in):* inverse-**normal** instead of Student-t critical values
+    (`:759`) and median+MAD instead of mean+sd Grubbs statistic — both push the same
+    over-reject direction but are second-order; no default preset uses GESD.
 - ☐ **T3.3 — warp/drizzle pixel-center mismatch (~0.5px)** · Medium · S
   - drizzle uses `+0.5` center (`drizzle/mod.rs:352`), warp integer (`interpolation/mod.rs:313`).
 - ☐ **T3.4 — `Auto` ladder skips Euclidean/Affine** · Medium · S — `mod.rs:163-185`.
 - ☐ **T3.5 — drizzle uncompensated f32 accumulation** · Medium (deep stacks) · M — `drizzle/mod.rs:619`.
-- ☐ **T3.6 — NaN-safe combine on in-memory path** · Medium · M — `statistics/mod.rs:66`, couples T1.1/T3.1.
+- ◐ **T3.6 — NaN-safe combine on in-memory path** · Medium — *guard added*
+  - Added a `debug_assert!(values.iter().all(is_finite))` at the single combine
+    chokepoint (`cache.rs` `process_chunked`, before the reducer closure) — catches a
+    NaN/Inf leaking into the combine from any future upstream regression, debug-only.
+    No live source today (FITS load sanitizes, T3.1 floored flat division, warp
+    border-fills 0), so the full NaN-skipping rewrite of the reducers is unwarranted.
 
 ---
 
