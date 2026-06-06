@@ -2,6 +2,12 @@
 
 Astronomical image-processing library: RAW/FITS decoding, master-frame calibration, star detection, star-pattern registration, frame stacking, and drizzle reconstruction. CPU-bound with hand-written SIMD (AVX2 / SSE4.1 / NEON) hot paths and rayon parallelism; no GPU backend. Pixels are stored **planar** (one `common::Buffer2<f32>` per channel) and normalized to `[0, 1]`.
 
+## Mission & scope
+
+Lumos aims to be the **most precise and the fastest** astrophotography stacking pipeline there is. There is exactly one deliverable: a calibrated, registered, **stacked** deep-sky image — the highest-fidelity master a given set of exposures can yield. Every feature must move a frame toward that result (load → calibrate → detect → register → combine); functionality that doesn't serve the stacked image is **out of scope** and should be removed rather than carried.
+
+**Precision and correctness outrank speed.** Both are first-class goals — the hot paths are aggressively optimized — but when the two conflict, the numerically-correct choice wins; never trade accuracy of the stacked result for throughput.
+
 ## Pipeline
 
 A stack of telescope exposures → one calibrated, aligned, combined deep-sky image. The modules below are stages in that flow:
