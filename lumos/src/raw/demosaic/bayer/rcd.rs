@@ -61,7 +61,7 @@ impl SendPtr {
 /// Input: BayerImage with normalized [0,1] CFA data and margin info.
 /// Output: Interleaved RGB f32 pixels `[R0, G0, B0, R1, G1, B1, ...]`
 /// for the active area (width × height).
-pub(super) fn rcd_demosaic(bayer: &BayerImage) -> Vec<f32> {
+pub(super) fn rcd_demosaic(bayer: &BayerImage) -> [Vec<f32>; 3] {
     let width = bayer.width;
     let height = bayer.height;
     let rw = bayer.raw_width;
@@ -349,27 +349,28 @@ pub(super) fn rcd_demosaic(bayer: &BayerImage) -> Vec<f32> {
 
     border_interpolate(&mut rgb_r, &mut rgb_b, &mut rgb_g, cfa, &pattern, s);
 
-    // ── Extract active area to interleaved RGB output ────────────────────
+    // ── Extract active area to planar RGB channels ───────────────────────
+    // Per-row contiguous copy (margins cropped); cheaper than the interleaved
+    // scatter and lets the caller take the buffers zero-copy.
 
-    let out_size = width * height * 3;
-    let mut output = vec![0.0f32; out_size];
+    let active = width * height;
+    let mut out_r = vec![0.0f32; active];
+    let mut out_g = vec![0.0f32; active];
+    let mut out_b = vec![0.0f32; active];
 
-    output
-        .par_chunks_mut(width * 3)
+    out_r
+        .par_chunks_mut(width)
+        .zip(out_g.par_chunks_mut(width))
+        .zip(out_b.par_chunks_mut(width))
         .enumerate()
-        .for_each(|(y, out_row)| {
-            let ry = tm + y;
-            for x in 0..width {
-                let rx = lm + x;
-                let raw_idx = ry * rw + rx;
-                let ox = x * 3;
-                out_row[ox] = rgb_r[raw_idx];
-                out_row[ox + 1] = rgb_g[raw_idx];
-                out_row[ox + 2] = rgb_b[raw_idx];
-            }
+        .for_each(|(y, ((r_row, g_row), b_row))| {
+            let base = (tm + y) * rw + lm;
+            r_row.copy_from_slice(&rgb_r[base..base + width]);
+            g_row.copy_from_slice(&rgb_g[base..base + width]);
+            b_row.copy_from_slice(&rgb_b[base..base + width]);
         });
 
-    output
+    [out_r, out_g, out_b]
 }
 
 /// Step 4.2: Interpolate the missing color at R/B CFA positions.

@@ -1,6 +1,7 @@
 //! Tests for Bayer CFA types and RCD demosaicing.
 
 use super::{BayerImage, CfaPattern, demosaic_bayer};
+use crate::raw::demosaic::interleave_planes;
 
 // ── CFA pattern tests ────────────────────────────────────────
 
@@ -170,7 +171,7 @@ fn test_rcd_output_dimensions() {
     let h = 20;
     let data = vec![0.5f32; w * h];
     let bayer = make_bayer(&data, w, h, CfaPattern::Rggb);
-    let rgb = demosaic_bayer(&bayer);
+    let rgb = interleave_planes(demosaic_bayer(&bayer));
     assert_eq!(rgb.len(), w * h * 3);
 }
 
@@ -188,7 +189,7 @@ fn test_rcd_uniform_input() {
     let act_w = 20;
     let act_h = 20;
     let bayer = BayerImage::with_margins(&data, raw_w, raw_h, act_w, act_h, 6, 6, CfaPattern::Rggb);
-    let rgb = demosaic_bayer(&bayer);
+    let rgb = interleave_planes(demosaic_bayer(&bayer));
 
     // Check all output pixels. With 6 pixels of margin on each side of the raw
     // buffer, even border pixels in the active area have full neighborhoods.
@@ -230,7 +231,7 @@ fn test_rcd_preserves_cfa_channel() {
     data[ry * w + rx] = 0.7;
 
     let bayer = make_bayer(&data, w, h, CfaPattern::Rggb);
-    let rgb = demosaic_bayer(&bayer);
+    let rgb = interleave_planes(demosaic_bayer(&bayer));
 
     // The red channel at this pixel should be exactly 0.7 (it's the CFA value)
     let out_idx = (ry * w + rx) * 3;
@@ -272,7 +273,7 @@ fn test_rcd_green_at_red_position_hand_computed() {
     }
 
     let bayer = make_bayer(&data, w, h, cfa);
-    let rgb = demosaic_bayer(&bayer);
+    let rgb = interleave_planes(demosaic_bayer(&bayer));
 
     // At (8,8) which is R: green should be interpolated from surrounding green values.
     // All green neighbors are 0.6, all same-color neighbors are 0.3.
@@ -312,7 +313,7 @@ fn test_rcd_all_patterns_produce_valid_output() {
         CfaPattern::Gbrg,
     ] {
         let bayer = make_bayer(&data, w, h, pattern);
-        let rgb = demosaic_bayer(&bayer);
+        let rgb = interleave_planes(demosaic_bayer(&bayer));
         assert_eq!(rgb.len(), w * h * 3);
 
         for (i, &val) in rgb.iter().enumerate() {
@@ -341,7 +342,7 @@ fn test_rcd_with_margins() {
     let data = vec![0.4f32; raw_w * raw_h];
     let bayer =
         BayerImage::with_margins(&data, raw_w, raw_h, act_w, act_h, tm, lm, CfaPattern::Rggb);
-    let rgb = demosaic_bayer(&bayer);
+    let rgb = interleave_planes(demosaic_bayer(&bayer));
 
     // Output should be active area size
     assert_eq!(rgb.len(), act_w * act_h * 3);
@@ -378,7 +379,7 @@ fn test_rcd_gradient_image_green_smoothness() {
     }
 
     let bayer = make_bayer(&data, w, h, CfaPattern::Rggb);
-    let rgb = demosaic_bayer(&bayer);
+    let rgb = interleave_planes(demosaic_bayer(&bayer));
 
     // Check that green channel is monotonically increasing (approximately)
     // in the interior rows, allowing small local deviations
@@ -422,7 +423,7 @@ fn test_rcd_red_blue_at_green_positions() {
     }
 
     let bayer = make_bayer(&data, w, h, cfa);
-    let rgb = demosaic_bayer(&bayer);
+    let rgb = interleave_planes(demosaic_bayer(&bayer));
 
     // Check interior pixels at green positions
     let border = 5;
@@ -476,7 +477,7 @@ fn test_rcd_blue_at_red_position() {
     }
 
     let bayer = make_bayer(&data, w, h, cfa);
-    let rgb = demosaic_bayer(&bayer);
+    let rgb = interleave_planes(demosaic_bayer(&bayer));
 
     let border = 5;
     for y in border..h - border {
@@ -523,7 +524,7 @@ fn test_rcd_red_at_blue_position() {
     }
 
     let bayer = make_bayer(&data, w, h, cfa);
-    let rgb = demosaic_bayer(&bayer);
+    let rgb = interleave_planes(demosaic_bayer(&bayer));
 
     let border = 5;
     for y in border..h - border {
@@ -570,7 +571,7 @@ fn test_rcd_bggr_correctness() {
     }
 
     let bayer = make_bayer(&data, w, h, cfa);
-    let rgb = demosaic_bayer(&bayer);
+    let rgb = interleave_planes(demosaic_bayer(&bayer));
 
     let border = 5;
     for y in border..h - border {
@@ -617,7 +618,7 @@ fn test_rcd_grbg_gbrg_correctness() {
         }
 
         let bayer = make_bayer(&data, w, h, cfa);
-        let rgb = demosaic_bayer(&bayer);
+        let rgb = interleave_planes(demosaic_bayer(&bayer));
 
         let border = 5;
         for y in border..h - border {
@@ -665,7 +666,7 @@ fn test_rcd_vh_direction_sensitivity() {
         }
     }
     let h_bayer = make_bayer(&h_data, w, h, CfaPattern::Rggb);
-    let h_rgb = demosaic_bayer(&h_bayer);
+    let h_rgb = interleave_planes(demosaic_bayer(&h_bayer));
 
     // Vertical stripes: cols 0-15 = 0.8, cols 16-31 = 0.2
     let mut v_data = vec![0.0f32; w * h];
@@ -675,7 +676,7 @@ fn test_rcd_vh_direction_sensitivity() {
         }
     }
     let v_bayer = make_bayer(&v_data, w, h, CfaPattern::Rggb);
-    let v_rgb = demosaic_bayer(&v_bayer);
+    let v_rgb = interleave_planes(demosaic_bayer(&v_bayer));
 
     // For horizontal stripes: green variation along a row (far from edge) should be small
     let test_row = 6; // well inside the uniform top half
@@ -717,7 +718,7 @@ fn test_rcd_border_interpolation() {
     let data = vec![val; w * h];
     let cfa = CfaPattern::Rggb;
     let bayer = make_bayer(&data, w, h, cfa);
-    let rgb = demosaic_bayer(&bayer);
+    let rgb = interleave_planes(demosaic_bayer(&bayer));
 
     // Border = 4 pixels. Check the very edge pixels are non-zero and close to val.
     // Corner pixel (0,0) for RGGB is R. Its G and B are bilinear from neighbors.
@@ -770,7 +771,7 @@ fn test_rcd_sharp_edge_no_excessive_artifacts() {
     }
 
     let bayer = make_bayer(&data, w, h, CfaPattern::Rggb);
-    let rgb = demosaic_bayer(&bayer);
+    let rgb = interleave_planes(demosaic_bayer(&bayer));
 
     // All output values must be in [0, 1] (clamp works)
     for (i, &val) in rgb.iter().enumerate() {

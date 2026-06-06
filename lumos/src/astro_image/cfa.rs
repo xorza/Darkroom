@@ -118,9 +118,9 @@ impl CfaImage {
                     0,
                     *cfa_pattern,
                 );
-                let rgb = demosaic_bayer(&bayer);
+                let planes = demosaic_bayer(&bayer);
                 let dims = ImageDimensions::new(width, height, 3);
-                let mut astro = AstroImage::from_pixels(dims, rgb);
+                let mut astro = AstroImage::from_planar_channels(dims, planes);
                 astro.metadata = self.metadata;
                 astro
             }

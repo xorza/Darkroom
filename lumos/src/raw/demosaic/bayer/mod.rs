@@ -163,7 +163,8 @@ impl<'a> BayerImage<'a> {
 
 /// Demosaic a Bayer CFA image to RGB using the RCD algorithm.
 ///
-/// The output has 3 channels (RGB) interleaved: [R0, G0, B0, R1, G1, B1, ...].
-pub(crate) fn demosaic_bayer(bayer: &BayerImage) -> Vec<f32> {
+/// Returns planar channels `[R, G, B]`, each `width * height`, cropped to the
+/// active area.
+pub(crate) fn demosaic_bayer(bayer: &BayerImage) -> [Vec<f32>; 3] {
     rcd::rcd_demosaic(bayer)
 }

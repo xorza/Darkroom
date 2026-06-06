@@ -414,8 +414,9 @@ impl UnpackedRaw {
         Ok(pixels)
     }
 
-    /// Process Bayer sensor data using our fast SIMD demosaic.
-    fn demosaic_bayer(&self, cfa_pattern: CfaPattern) -> Result<Vec<f32>, ImageError> {
+    /// Process Bayer sensor data using our fast SIMD demosaic. Returns planar
+    /// `[R, G, B]` channels.
+    fn demosaic_bayer(&self, cfa_pattern: CfaPattern) -> Result<[Vec<f32>; 3], ImageError> {
         let raw_data = self.raw_image_slice()?;
 
         // Pass 1: SIMD normalize with common black level
@@ -770,6 +771,16 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
 /// - Monochrome sensors: no demosaic needed, returns grayscale
 /// - Known Bayer patterns (RGGB, BGGR, GRBG, GBRG): fast SIMD demosaic
 /// - Unknown patterns (X-Trans, etc.): libraw's built-in demosaic (slower but correct)
+///
+/// Our RGB demosaic kernels emit planar `[R, G, B]`, taken zero-copy into the
+/// image via [`AstroImage::from_planar_channels`]. The mono path and libraw's
+/// fallback emit a single flat buffer — grayscale or interleaved RGB — that
+/// [`AstroImage::from_pixels`] handles (grayscale zero-copy, RGB de-interleaved).
+enum DemosaicedPixels {
+    Planar([Vec<f32>; 3]),
+    Flat(Vec<f32>),
+}
+
 pub fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
     let mut raw = open_raw(path)?;
 
@@ -779,13 +790,19 @@ pub fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
             tracing::info!("Monochrome sensor detected, skipping demosaic");
             // Light frame: clamp to the [0, 1] display contract.
             let pixels = raw.extract_cfa_pixels::<true>()?;
-            (pixels, raw.width, raw.height, 1, None)
+            (
+                DemosaicedPixels::Flat(pixels),
+                raw.width,
+                raw.height,
+                1,
+                None,
+            )
         }
         SensorType::Bayer(cfa_pattern) => {
             tracing::debug!("Detected Bayer CFA pattern: {:?}", cfa_pattern);
-            let pixels = raw.demosaic_bayer(cfa_pattern)?;
+            let planes = raw.demosaic_bayer(cfa_pattern)?;
             (
-                pixels,
+                DemosaicedPixels::Planar(planes),
                 raw.width,
                 raw.height,
                 3,
@@ -797,7 +814,7 @@ pub fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
             let xtrans_pattern = raw.xtrans_pattern();
             let pixels = raw.demosaic_xtrans()?;
             (
-                pixels,
+                DemosaicedPixels::Flat(pixels),
                 raw.width,
                 raw.height,
                 3,
@@ -807,7 +824,7 @@ pub fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
         SensorType::Unknown => {
             tracing::info!("Unknown CFA pattern, using libraw demosaic fallback");
             let (pixels, w, h, c) = raw.demosaic_libraw_fallback()?;
-            (pixels, w, h, c, Some(CfaType::Mono))
+            (DemosaicedPixels::Flat(pixels), w, h, c, Some(CfaType::Mono))
         }
     };
 
@@ -821,14 +838,10 @@ pub fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
     drop(raw);
 
     let dimensions = ImageDimensions::new(width, height, channels);
-    assert!(
-        pixels.len() == dimensions.sample_count(),
-        "Sample count mismatch: expected {}, got {}",
-        dimensions.sample_count(),
-        pixels.len()
-    );
-
-    let mut astro = AstroImage::from_pixels(dimensions, pixels);
+    let mut astro = match pixels {
+        DemosaicedPixels::Planar(planes) => AstroImage::from_planar_channels(dimensions, planes),
+        DemosaicedPixels::Flat(px) => AstroImage::from_pixels(dimensions, px),
+    };
     astro.metadata = metadata;
     Ok(astro)
 }
