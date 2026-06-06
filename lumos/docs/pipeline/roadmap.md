@@ -245,5 +245,6 @@ analyst passes (perf ×2, removal, precision), de-noised + verified.
 - ☐ **PF4 (x86)** AVX2 `raw/normalize` (~2×); **PF5** parallelize the serial per-color flat-mean
   pass (`cfa.rs:272`) + defect-map sample collection (60 MB throwaway); **PF6 (x86)**
   threshold_mask AVX2 (bandwidth-bound, modest).
-- Doc fix: CLAUDE.md's SIMD table is stale — `background`/`convolution`/`median_filter`
-  already have AVX2; the real gaps are `raw/normalize` + `threshold_mask` (x86).
+- ☑ Doc fix: CLAUDE.md's SIMD table corrected — `background`/`convolution`/`median_filter`
+  marked AVX2 ✓ (verified: real `_mm256` / `target_feature(avx2)` impls). Remaining AVX2 gaps
+  are `raw/normalize` (PF4) + `threshold_mask` (PF6).

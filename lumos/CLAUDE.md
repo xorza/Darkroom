@@ -129,10 +129,10 @@ Runtime feature detection via the `common` crate (`cpu_features::has_avx2()` / `
 |------|------|--------|------|
 | `math/sum` | ✓ | ✓ | ✓ |
 | `raw/normalize` | | ✓ | ✓ |
-| `star_detection/background` | | ✓ | ✓ |
-| `star_detection/convolution` | | ✓ | ✓ |
+| `star_detection/background` | ✓ | ✓ | ✓ |
+| `star_detection/convolution` | ✓ | ✓ | ✓ |
 | `star_detection/threshold_mask` | | ✓ | ✓ |
-| `star_detection/median_filter` | | ✓ | ✓ |
+| `star_detection/median_filter` | ✓ | ✓ | ✓ |
 | `star_detection/centroid/{gaussian,moffat}_fit` | ✓ | | ✓ |
 | `registration/interpolation/warp` (bilinear; Lanczos3 FMA) | ✓ | ✓ | scalar |
 
