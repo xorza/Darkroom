@@ -61,12 +61,17 @@ linearity edges.
     `false` (signed, un-clipped, so master dark/bias means aren't biased upward).
     X-Trans light path untouched. 1 new test; all 104 raw tests still green.
 
-- ☐ **T2.2 — saturation: carry true white level + mask in fits** · High · M (Stage 1→3→4)
-  - `load_raw` never sets `metadata.data_max` (`raw/mod.rs:762`); saturation tested at
-    magic `0.95` (`detector/stages/filter.rs:46`); saturated cores enter LM fit
-    unmasked (`gaussian_fit/mod.rs:166`) → biased positions leak to registration.
-  - Fix: carry per-channel saturation from raw `maximum`/`cblack`; mask sat pixels in
-    centroid/FWHM.
+- ⊘ **T2.2 — saturation masking** · ~~High~~ → **Low (premise moot)** — *investigated, downgraded*
+  - **The B5 "biased positions" premise does not hold.** `Star.peak = region.peak_value`
+    is the **raw**-plane region max (`centroid/mod.rs:426`; regions extracted from raw
+    `pixels` at `detect.rs:119`, not the convolved plane), and normalization maps the
+    sensor white level to exactly `1.0`. So any genuinely clipped (flat-topped) star has
+    `peak == 1.0 > 0.95` → already **rejected** by `filter.rs:46` (and excluded from FWHM
+    at `fwhm.rs:131`) before its fit can bias anything. Kept stars (peak ≤ 0.95) aren't
+    clipped → centroids already unbiased. No registration-accuracy gain available.
+  - Residual (cosmetic, Low): `metadata.data_max` is set on the FITS path but never read
+    by the detector (dead); `0.95` is hardcoded in 3 spots (could be a `Config` knob).
+  - The WB-clip confound also resolves to *rejection*, not bias — same conclusion.
 
 - ☐ **T2.3 — drizzle output variance/weight map** · High (quantitative) · L
   - `DrizzleResult` has only image + coverage (`drizzle/mod.rs:699`). At default
