@@ -207,19 +207,16 @@ analyst passes (perf ×2, removal, precision), de-noised + verified.
 ## Performance queue (toward "most performant"; ARM is the profiled target)
 - ☐ **PF1 — NEON Lanczos/bilinear warp** · High (ARM). Default Lanczos3 warp is scalar on
   aarch64; the SSE/AVX FMA kernel has no NEON twin (`interpolation/warp/`). #1 ARM win.
-- ◐ **PF2 — RAW demosaic planar output** · Bayer done; X-Trans queued as PF2b. RCD now
-  returns planar `[R,G,B]` (contiguous per-row extract with margins cropped, replacing the
-  interleaved scatter) taken zero-copy via `from_planar_channels`. `load_raw` dispatches via
-  a `DemosaicedPixels` enum: `Planar([Vec<f32>;3])` (Bayer) vs `Flat(Vec<f32>)` (mono +
-  libraw fallback, handled by `from_pixels` — grayscale zero-copy). `CfaImage::demosaic`
-  Bayer arm updated too. Eliminates the interleave + `from_pixels`
-  de-interleave round trip on every Bayer light/calibration frame. Tests re-interleave via
-  `demosaic::interleave_planes` to keep exact-value assertions.
-- ☐ **PF2b — X-Trans (Markesteijn) planar output** · High. `demosaic_xtrans_markesteijn`
-  still writes interleaved into the arena then copies out; deinterleave that final copy into
-  `[R,G,B]` and flip the `load_raw`/`CfaImage` X-Trans arms (+ shared `process_xtrans_f32`
-  calibration path) to `from_planar_channels` — flips the enum's XTrans arm to `Planar`.
-  Deferred from PF2 (multi-line test calls + the shared calibration entry point).
+- ☑ **PF2 — RAW demosaic planar output (Bayer + X-Trans)** · done. RCD returns planar
+  `[R,G,B]` (contiguous per-row extract, margins cropped, replacing the interleaved scatter);
+  Markesteijn deinterleaves its arena output into `[R,G,B]` on the final copy. Both taken
+  zero-copy via `from_planar_channels`. `load_raw` dispatches through a `DemosaicedPixels`
+  enum: `Planar([Vec<f32>;3])` (Bayer + X-Trans) vs `Flat(Vec<f32>)` (mono + libraw fallback,
+  handled by `from_pixels` — grayscale zero-copy). `CfaImage::demosaic` Bayer + X-Trans arms
+  updated too. Eliminates the interleave + `from_pixels` de-interleave round trip on every
+  demosaiced light/calibration frame. Tests: Bayer + Markesteijn re-interleave via
+  `demosaic::interleave_planes` to keep exact-value assertions; `process_xtrans` tests use
+  planar assertions.
 - ☐ **PF3 — per-star ×3 f64 `Vec` alloc in LM fit** · High (when fitting). `gaussian_fit/mod.rs:242`
   + moffat, inside the parallel `measure` loop → per-thread scratch / f64 stamp fields.
 - ☐ **PF4 (x86)** AVX2 `raw/normalize` (~2×); **PF5** parallelize the serial per-color flat-mean

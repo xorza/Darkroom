@@ -69,8 +69,8 @@ impl DemosaicArena {
 
 /// Demosaic an X-Trans image using Markesteijn 1-pass algorithm.
 ///
-/// Returns RGB interleaved pixels: [R0, G0, B0, R1, G1, B1, ...] in 0.0-1.0 range.
-pub fn demosaic_xtrans_markesteijn(xtrans: &XTransImage) -> Vec<f32> {
+/// Returns planar channels `[R, G, B]`, each `width * height`, in 0.0-1.0 range.
+pub fn demosaic_xtrans_markesteijn(xtrans: &XTransImage) -> [Vec<f32>; 3] {
     use std::time::Instant;
 
     let width = xtrans.width;
@@ -169,14 +169,24 @@ pub fn demosaic_xtrans_markesteijn(xtrans: &XTransImage) -> Vec<f32> {
         t.elapsed().as_secs_f64() * 1000.0
     );
 
-    // Copy output from Region B into owned Vec
-    arena.storage[4 * pixels..4 * pixels + 3 * pixels].to_vec()
+    // Deinterleave the Region B output ([R0, G0, B0, ...]) into planar channels.
+    let output = &arena.storage[4 * pixels..4 * pixels + 3 * pixels];
+    let mut r = vec![0.0f32; pixels];
+    let mut g = vec![0.0f32; pixels];
+    let mut b = vec![0.0f32; pixels];
+    for (i, ((rv, gv), bv)) in r.iter_mut().zip(g.iter_mut()).zip(b.iter_mut()).enumerate() {
+        *rv = output[i * 3];
+        *gv = output[i * 3 + 1];
+        *bv = output[i * 3 + 2];
+    }
+    [r, g, b]
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::{XTransImage, XTransPattern};
     use super::*;
+    use crate::raw::demosaic::interleave_planes;
 
     fn test_pattern() -> XTransPattern {
         XTransPattern::new([
@@ -228,7 +238,7 @@ mod tests {
         let data = vec![to_u16(0.5); raw_w * raw_h];
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
 
-        let rgb = demosaic_xtrans_markesteijn(&xtrans);
+        let rgb = interleave_planes(demosaic_xtrans_markesteijn(&xtrans));
         assert_eq!(rgb.len(), w * h * 3);
     }
 
@@ -241,7 +251,7 @@ mod tests {
         let data = vec![to_u16(0.5); raw_w * raw_h];
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
 
-        let rgb = demosaic_xtrans_markesteijn(&xtrans);
+        let rgb = interleave_planes(demosaic_xtrans_markesteijn(&xtrans));
 
         // Uniform input should produce approximately uniform output
         for (i, &v) in rgb.iter().enumerate() {
@@ -265,7 +275,7 @@ mod tests {
             .collect();
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
 
-        let rgb = demosaic_xtrans_markesteijn(&xtrans);
+        let rgb = interleave_planes(demosaic_xtrans_markesteijn(&xtrans));
 
         for (i, &v) in rgb.iter().enumerate() {
             assert!(v.is_finite(), "NaN/Inf at pixel {}", i);
@@ -281,7 +291,7 @@ mod tests {
         let data = vec![0u16; raw_w * raw_h];
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
 
-        let rgb = demosaic_xtrans_markesteijn(&xtrans);
+        let rgb = interleave_planes(demosaic_xtrans_markesteijn(&xtrans));
         for &v in &rgb {
             assert_eq!(v, 0.0, "Expected 0.0 for all-zero input");
         }
@@ -311,7 +321,7 @@ mod tests {
             [1.0; 3],
         );
 
-        let rgb = demosaic_xtrans_markesteijn(&xtrans);
+        let rgb = interleave_planes(demosaic_xtrans_markesteijn(&xtrans));
 
         // At green pixel positions, the green channel should be approximately the raw value
         for y in 0..h {

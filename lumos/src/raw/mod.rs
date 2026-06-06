@@ -481,7 +481,7 @@ impl UnpackedRaw {
     ///
     /// Drops guard and buf before the expensive demosaicing step,
     /// reducing peak memory by ~77 MB.
-    fn demosaic_xtrans(&mut self) -> Result<Vec<f32>, ImageError> {
+    fn demosaic_xtrans(&mut self) -> Result<[Vec<f32>; 3], ImageError> {
         let raw_data = self.raw_image_slice()?;
         let xtrans_pattern = self.xtrans_pattern();
 
@@ -812,9 +812,9 @@ pub fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
         SensorType::XTrans => {
             tracing::info!("X-Trans sensor detected, using X-Trans demosaic");
             let xtrans_pattern = raw.xtrans_pattern();
-            let pixels = raw.demosaic_xtrans()?;
+            let planes = raw.demosaic_xtrans()?;
             (
-                DemosaicedPixels::Flat(pixels),
+                DemosaicedPixels::Planar(planes),
                 raw.width,
                 raw.height,
                 3,

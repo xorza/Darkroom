@@ -22,8 +22,7 @@ use markesteijn::demosaic_xtrans_markesteijn;
 /// Takes raw u16 sensor data and normalization parameters. Normalization happens
 /// on-the-fly during demosaicing, avoiding a separate P×4 byte f32 buffer.
 ///
-/// # Returns
-/// Tuple of (RGB pixels, number of channels which is always 3)
+/// Returns planar `[R, G, B]` channels, each `width * height`.
 #[allow(clippy::too_many_arguments)]
 pub fn process_xtrans(
     raw_data: &[u16],
@@ -37,7 +36,7 @@ pub fn process_xtrans(
     channel_black: [f32; 3],
     inv_range: f32,
     wb_mul: [f32; 3],
-) -> Vec<f32> {
+) -> [Vec<f32>; 3] {
     let pattern = XTransPattern::new(xtrans_pattern);
 
     let xtrans = XTransImage::with_margins(
@@ -82,7 +81,7 @@ pub fn process_xtrans_f32(
     top_margin: usize,
     left_margin: usize,
     xtrans_pattern: [[u8; 6]; 6],
-) -> Vec<f32> {
+) -> [Vec<f32>; 3] {
     let pattern = XTransPattern::new(xtrans_pattern);
 
     let xtrans = XTransImage::with_margins_f32(
@@ -461,7 +460,7 @@ mod tests {
             [1.0; 3],
         );
 
-        assert_eq!(rgb.len(), 6 * 6 * 3);
+        assert_eq!(rgb.iter().map(|c| c.len()).sum::<usize>(), 6 * 6 * 3);
     }
 
     #[test]
@@ -489,7 +488,7 @@ mod tests {
             [1.0; 3],
         );
 
-        for &val in &rgb {
+        for &val in rgb.iter().flatten() {
             assert!((val - 0.5).abs() < 0.01, "Expected ~0.5, got {}", val);
         }
     }
@@ -517,7 +516,7 @@ mod tests {
             [1.0; 3],
         );
 
-        for &val in &rgb {
+        for &val in rgb.iter().flatten() {
             assert_eq!(val, 0.0, "Expected 0.0 for values below black level");
         }
     }
@@ -543,7 +542,7 @@ mod tests {
             [1.0; 3],
         );
 
-        for &val in &rgb {
+        for &val in rgb.iter().flatten() {
             assert!((val - 1.0).abs() < 0.001, "Expected 1.0, got {}", val);
         }
     }
@@ -627,8 +626,10 @@ mod tests {
 
         // Since demosaic blends neighbors, we can't check exact pixel values,
         // but the mean should reflect the per-channel scaling
-        let mean_uniform: f32 = rgb_uniform.iter().sum::<f32>() / rgb_uniform.len() as f32;
-        let mean_wb: f32 = rgb_wb.iter().sum::<f32>() / rgb_wb.len() as f32;
+        let mean_uniform: f32 =
+            rgb_uniform.iter().flatten().sum::<f32>() / rgb_uniform.iter().flatten().count() as f32;
+        let mean_wb: f32 =
+            rgb_wb.iter().flatten().sum::<f32>() / rgb_wb.iter().flatten().count() as f32;
 
         // WB with multipliers [2.0, 1.0, 1.5] on average should produce higher values
         // than per-channel-black-only (wb=[1,1,1])
@@ -654,7 +655,7 @@ mod tests {
     fn test_process_xtrans_f32_output_size() {
         let data: Vec<f32> = vec![0.5; 12 * 12];
         let rgb = process_xtrans_f32(&data, 12, 12, 6, 6, 3, 3, test_pattern_array());
-        assert_eq!(rgb.len(), 6 * 6 * 3);
+        assert_eq!(rgb.iter().map(|c| c.len()).sum::<usize>(), 6 * 6 * 3);
     }
 
     #[test]
@@ -662,7 +663,7 @@ mod tests {
         let data: Vec<f32> = vec![0.5; 12 * 12];
         let rgb = process_xtrans_f32(&data, 12, 12, 6, 6, 3, 3, test_pattern_array());
 
-        for &val in &rgb {
+        for &val in rgb.iter().flatten() {
             assert!((val - 0.5).abs() < 0.01, "Expected ~0.5, got {}", val);
         }
     }
@@ -695,8 +696,16 @@ mod tests {
         );
         let rgb_f32 = process_xtrans_f32(&raw_f32, 12, 12, 6, 6, 3, 3, test_pattern_array());
 
-        assert_eq!(rgb_u16.len(), rgb_f32.len());
-        for (i, (&a, &b)) in rgb_u16.iter().zip(rgb_f32.iter()).enumerate() {
+        assert_eq!(
+            rgb_u16.iter().flatten().count(),
+            rgb_f32.iter().flatten().count()
+        );
+        for (i, (&a, &b)) in rgb_u16
+            .iter()
+            .flatten()
+            .zip(rgb_f32.iter().flatten())
+            .enumerate()
+        {
             assert!(
                 (a - b).abs() < 1e-5,
                 "Pixel {i}: u16 path={a}, f32 path={b}, diff={}",

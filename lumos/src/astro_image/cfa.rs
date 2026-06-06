@@ -127,10 +127,11 @@ impl CfaImage {
             CfaType::XTrans(pattern) => {
                 use crate::raw::demosaic::xtrans::process_xtrans_f32;
 
-                let rgb = process_xtrans_f32(&pixels, width, height, width, height, 0, 0, *pattern);
+                let planes =
+                    process_xtrans_f32(&pixels, width, height, width, height, 0, 0, *pattern);
 
                 let dims = ImageDimensions::new(width, height, 3);
-                let mut astro = AstroImage::from_pixels(dims, rgb);
+                let mut astro = AstroImage::from_planar_channels(dims, planes);
                 astro.metadata = self.metadata;
                 astro
             }
