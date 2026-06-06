@@ -95,7 +95,7 @@ All large buffers use `alloc_uninit_vec` to skip kernel page zeroing (`clear_pag
 
 ## Benchmarks
 
-Run with `LUMOS_CALIBRATION_DIR=<path> cargo test -p lumos --release <bench_name> -- --ignored --nocapture`:
+Run with `cargo test -p lumos --release <bench_name> -- --ignored --nocapture`:
 
 - `raw_load` - End-to-end loading time (file read + unpack + normalize + demosaic)
 - `bench_load_raw_libraw_demosaic` - libraw's built-in demosaic at different quality levels

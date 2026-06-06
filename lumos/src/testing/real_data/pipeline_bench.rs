@@ -140,13 +140,11 @@ fn diag_dark_pixel_distribution() {
 }
 
 #[test]
-#[ignore] // Requires LUMOS_CALIBRATION_DIR
+#[cfg_attr(not(feature = "real-data"), ignore)]
 fn bench_full_pipeline() {
     init_tracing();
 
-    let Some(cal_dir) = calibration_dir() else {
-        return;
-    };
+    let cal_dir = calibration_dir();
 
     let total_start = Instant::now();
 

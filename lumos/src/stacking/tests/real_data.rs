@@ -4,13 +4,11 @@ use crate::stacking::stack::stack_with_progress;
 use crate::testing::{calibration_dir, init_tracing};
 
 #[test]
-#[ignore] // Requires LUMOS_CALIBRATION_DIR with registered_lights/
+#[cfg_attr(not(feature = "real-data"), ignore)]
 fn test_stack_registered_lights() {
     init_tracing();
 
-    let Some(cal_dir) = calibration_dir() else {
-        return;
-    };
+    let cal_dir = calibration_dir();
 
     let registered_dir = cal_dir.join("registered_lights");
     assert!(

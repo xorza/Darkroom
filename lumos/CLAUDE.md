@@ -140,7 +140,7 @@ Runtime feature detection via the `common` crate (`cpu_features::has_avx2()` / `
 
 - `registration/distortion/tps` (thin-plate spline) is implemented and tested but `#![allow(dead_code)]` and **not wired** into `register()` — an alternate post-RANSAC distortion model.
 - Test-only constructors/APIs are gated and kept minimal (e.g. `math/bbox`, warp params). Don't widen them for production use.
-- The `real-data` feature flag (empty) gates real-data tests/benches that read a calibration directory from the environment.
+- The `real-data` feature flag (empty) gates real-data tests/benches that read the bundled `test_data/lumos_data` dataset (gitignored; present locally).
 
 ## Reference docs & upstream sources
 

@@ -1,6 +1,6 @@
 //! Real data registration tests.
 //!
-//! These tests load calibrated light frames from `LUMOS_CALIBRATION_DIR/calibrated_lights/`,
+//! These tests load calibrated light frames from `test_data/lumos_data/calibrated_lights/`,
 //! run star detection, and register them to verify the pipeline end-to-end.
 //! Skipped automatically when the env var is not set.
 
@@ -37,9 +37,9 @@ fn list_image_files(dir: &std::path::Path) -> Vec<PathBuf> {
 }
 
 /// Load one calibrated light frame (the first one).
-/// Returns None if `LUMOS_CALIBRATION_DIR` is not set or has no lights.
+/// Returns None if there are no lights.
 fn load_first_calibrated_light() -> Option<AstroImage> {
-    let cal_dir = calibration_dir()?;
+    let cal_dir = calibration_dir();
     let lights_dir = cal_dir.join("calibrated_lights");
     if !lights_dir.exists() {
         eprintln!("calibrated_lights directory not found, skipping");
@@ -57,9 +57,9 @@ fn load_first_calibrated_light() -> Option<AstroImage> {
 }
 
 /// Load the first and last calibrated light frames from the sample data directory.
-/// Returns None if `LUMOS_CALIBRATION_DIR` is not set or has fewer than 2 lights.
+/// Returns None if there are fewer than 2 lights.
 fn load_two_calibrated_lights() -> Option<(AstroImage, AstroImage)> {
-    let cal_dir = calibration_dir()?;
+    let cal_dir = calibration_dir();
     let lights_dir = cal_dir.join("calibrated_lights");
     if !lights_dir.exists() {
         eprintln!("calibrated_lights directory not found, skipping test");
@@ -86,7 +86,7 @@ fn load_two_calibrated_lights() -> Option<(AstroImage, AstroImage)> {
 }
 
 #[test]
-#[ignore] // Requires LUMOS_CALIBRATION_DIR with calibrated_lights/ subdirectory
+#[cfg_attr(not(feature = "real-data"), ignore)]
 fn test_register_two_calibrated_lights() {
     let Some((img1, img2)) = load_two_calibrated_lights() else {
         return;
@@ -249,9 +249,9 @@ fn test_register_two_calibrated_lights() {
 }
 
 /// Load all calibrated light frames and their file paths.
-/// Returns None if `LUMOS_CALIBRATION_DIR` is not set or has fewer than 2 lights.
+/// Returns None if there are fewer than 2 lights.
 fn load_all_calibrated_lights() -> Option<(Vec<AstroImage>, Vec<PathBuf>)> {
-    let cal_dir = calibration_dir()?;
+    let cal_dir = calibration_dir();
     let lights_dir = cal_dir.join("calibrated_lights");
     if !lights_dir.exists() {
         eprintln!("calibrated_lights directory not found, skipping");
@@ -281,7 +281,7 @@ fn bench_register_and_warp_all(b: ::quickbench::Bencher) {
         return;
     };
 
-    let cal_dir = calibration_dir().unwrap();
+    let cal_dir = calibration_dir();
     let output_dir = cal_dir.join("registered_lights");
     std::fs::create_dir_all(&output_dir).expect("Failed to create registered_lights directory");
 

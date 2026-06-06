@@ -93,25 +93,23 @@ pub fn constant_cfa(width: usize, height: usize, value: f32, cfa_type: CfaType) 
     }
 }
 
-/// Returns the calibration directory from LUMOS_CALIBRATION_DIR env var.
-/// Prints a message if not set.
-pub fn calibration_dir() -> Option<PathBuf> {
-    match std::env::var("LUMOS_CALIBRATION_DIR")
-        .ok()
-        .map(PathBuf::from)
-    {
-        Some(dir) => Some(dir),
-        None => {
-            eprintln!("LUMOS_CALIBRATION_DIR not set, skipping test");
-            None
-        }
-    }
+/// Returns the bundled real-data directory (`test_data/lumos_data`). Real-data tests are
+/// gated behind the `real-data` feature and require the dataset, so this panics if it's
+/// missing rather than making every caller handle an `Option`.
+pub fn calibration_dir() -> PathBuf {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/lumos_data");
+    assert!(
+        dir.is_dir(),
+        "real-data dataset missing at {} (required by the `real-data` feature)",
+        dir.display()
+    );
+    dir
 }
 
 /// Returns the calibration_masters subdirectory within the calibration directory.
 /// Prints a message if not found.
 pub fn calibration_masters_dir() -> Option<PathBuf> {
-    let cal_dir = calibration_dir()?;
+    let cal_dir = calibration_dir();
     let masters_dir = cal_dir.join("calibration_masters");
     if masters_dir.exists() {
         Some(masters_dir)
@@ -134,9 +132,9 @@ pub fn init_tracing() {
 }
 
 /// Loads all images from a subdirectory of the calibration directory.
-/// Returns None if LUMOS_CALIBRATION_DIR is not set or the subdirectory doesn't exist.
+/// Returns None if the subdirectory does not exist.
 pub fn load_calibration_images(subdir: &str) -> Option<Vec<AstroImage>> {
-    let cal_dir = calibration_dir()?;
+    let cal_dir = calibration_dir();
     let dir = cal_dir.join(subdir);
 
     if !dir.exists() {
@@ -151,9 +149,9 @@ pub fn load_calibration_images(subdir: &str) -> Option<Vec<AstroImage>> {
 }
 
 /// Returns the first RAW file from the Lights subdirectory.
-/// Returns None if LUMOS_CALIBRATION_DIR is not set or no RAW files found.
+/// Returns None if no RAW files are found.
 pub fn first_raw_file() -> Option<PathBuf> {
-    let cal_dir = calibration_dir()?;
+    let cal_dir = calibration_dir();
     let lights = cal_dir.join("Lights");
     if !lights.exists() {
         return None;
@@ -164,9 +162,9 @@ pub fn first_raw_file() -> Option<PathBuf> {
 }
 
 /// Returns paths to all images in a subdirectory of the calibration directory.
-/// Returns None if LUMOS_CALIBRATION_DIR is not set or the subdirectory doesn't exist.
+/// Returns None if the subdirectory does not exist.
 pub fn calibration_image_paths(subdir: &str) -> Option<Vec<PathBuf>> {
-    let cal_dir = calibration_dir()?;
+    let cal_dir = calibration_dir();
     let dir = cal_dir.join(subdir);
 
     if !dir.exists() {

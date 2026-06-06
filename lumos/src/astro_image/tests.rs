@@ -240,10 +240,7 @@ fn test_image_gray_alpha_to_astro_drops_alpha() {
 fn test_load_single_raw_from_env() {
     init_tracing();
 
-    let Some(cal_dir) = calibration_dir() else {
-        eprintln!("LUMOS_CALIBRATION_DIR not set, skipping test");
-        return;
-    };
+    let cal_dir = calibration_dir();
 
     let lights_dir = cal_dir.join("Lights");
     if !lights_dir.exists() {

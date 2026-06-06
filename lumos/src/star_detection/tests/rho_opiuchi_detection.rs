@@ -13,14 +13,11 @@ use imaginarium::ColorFormat;
 use imaginarium::drawing::draw_circle;
 
 #[test]
-#[ignore] // Requires LUMOS_CALIBRATION_DIR
+#[cfg_attr(not(feature = "real-data"), ignore)]
 fn test_detect_rho_opiuchi() {
     init_tracing();
 
-    let Some(cal_dir) = calibration_dir() else {
-        eprintln!("LUMOS_CALIBRATION_DIR not set, skipping test");
-        return;
-    };
+    let cal_dir = calibration_dir();
 
     let image_path = cal_dir.join("rho-opiuchi.jpg");
     if !image_path.exists() {
@@ -113,7 +110,7 @@ fn test_detect_rho_opiuchi() {
 }
 
 #[test]
-#[ignore] // Requires LUMOS_CALIBRATION_DIR
+#[cfg_attr(not(feature = "real-data"), ignore)]
 fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     use super::common::output::image_writer;
     use crate::star_detection::background::estimate_background;
@@ -128,10 +125,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
 
     init_tracing();
 
-    let Some(cal_dir) = calibration_dir() else {
-        eprintln!("LUMOS_CALIBRATION_DIR not set, skipping test");
-        return;
-    };
+    let cal_dir = calibration_dir();
 
     let image_path = cal_dir.join("rho-opiuchi.jpg");
     if !image_path.exists() {
@@ -291,10 +285,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
 
 #[quickbench::quick_bench(warmup_iters = 1, iters = 10)]
 fn quick_bench_detect_rho_opiuchi(b: quickbench::Bencher) {
-    let Some(cal_dir) = calibration_dir() else {
-        eprintln!("LUMOS_CALIBRATION_DIR not set, skipping bench");
-        return;
-    };
+    let cal_dir = calibration_dir();
 
     let image_path = cal_dir.join("rho-opiuchi.jpg");
     if !image_path.exists() {
