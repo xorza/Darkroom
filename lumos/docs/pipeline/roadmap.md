@@ -196,9 +196,18 @@ analyst passes (perf ×2, removal, precision), de-noised + verified.
   is `w=1/σ²` (over-weights the bright core → biases the sub-px centroid/FWHM/flux that
   feed registration). `NoiseModel` + per-pixel noise map already exist. Multi-backend;
   shifts results → validate with real-data tests.
-- ☐ **PR2 — second moments on unclamped signed `(px−bg)`** · Med. `centroid/mod.rs:574`
-  clamps wing negatives to 0, biasing FWHM/eccentricity low (feeds matched-filter sizing
-  + registration `max_sigma`). Distinct from the known flux-clamp item.
+- ✗ **PR2 — second moments on unclamped signed `(px−bg)`** · investigated, reverted.
+  Switching the second moments + their denominator to the signed value is unbiased *in the
+  mean* but higher-variance per star over a fixed stamp: far-wing noise gets summed in, and
+  it breaks x/y symmetry so eccentricity inflates from 0 → round stars fail the eccentricity
+  cut. Detection rate dropped (sparse-field 98→93%, cosmic-ray 90→<90%) → fewer matches →
+  worse stack. The clamp actually approximates the SExtractor isophotal-footprint approach
+  (moments over significant pixels only), so it's the better cheap choice. Superseded by PR5.
+- ☐ **PR5 — windowed/adaptive second moments** · High (the real version of PR2). SExtractor
+  XWIN/YWIN: iteratively Gaussian-weight the moments by the current size estimate, suppressing
+  wing noise — unbiased *and* low-variance. Replaces the fixed-stamp clamp for FWHM/ecc with a
+  measurement that won't drop round stars. Larger change (iterative, multi-backend); validate
+  on real data.
 - ☑ **PR3 — compensated weighted-mean after rejection** · done. `weighted_mean_indexed`
   now gathers the rejection-reordered weights into the reused `floats_a` scratch and
   delegates to `math::sum::weighted_mean_f32` (compensated + SIMD + zero-weight guard),
