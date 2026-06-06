@@ -877,7 +877,9 @@ fn sat_query(sat: &[u32], sat_w: usize, y0: usize, x0: usize, y1: usize, x1: usi
 /// SATs are built one direction at a time to reduce peak memory from ~4P to ~1P.
 /// Per-pixel scores are stored in a temporary `hm_buf` between passes.
 ///
-/// `output` is a preallocated slice of length `pixels * 3` where the final RGB is written.
+/// `out_r`/`out_g`/`out_b` are preallocated planar channels (each length `pixels`) that the
+/// final RGB is written into.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn blend_final(
     xtrans: &XTransImage,
     green_dir: &[f32],
@@ -885,11 +887,14 @@ pub(super) fn blend_final(
     homo: &[u8],
     width: usize,
     height: usize,
-    output: &mut [f32],
+    out_r: &mut [f32],
+    out_g: &mut [f32],
+    out_b: &mut [f32],
 ) {
     let pixels = width * height;
-    let row_stride = width * 3;
-    assert_eq!(output.len(), pixels * 3);
+    assert_eq!(out_r.len(), pixels);
+    assert_eq!(out_g.len(), pixels);
+    assert_eq!(out_b.len(), pixels);
 
     let sat_w = width + 1;
 
@@ -914,11 +919,13 @@ pub(super) fn blend_final(
         }
     }
 
-    // Pass 2: Parallel blend using stored scores + on-the-fly RGB recomputation.
-    output
-        .par_chunks_mut(row_stride)
+    // Pass 2: Parallel blend into planar channels, recomputing RGB on-the-fly.
+    out_r
+        .par_chunks_mut(width)
+        .zip(out_g.par_chunks_mut(width))
+        .zip(out_b.par_chunks_mut(width))
         .enumerate()
-        .for_each(|(y, rgb_row)| {
+        .for_each(|(y, ((r_row, g_row), b_row))| {
             let y_interior = y >= 1 && y + 1 < height;
 
             for x in 0..width {
@@ -956,13 +963,13 @@ pub(super) fn blend_final(
 
                 if count > 0 {
                     let inv = 1.0 / count as f32;
-                    rgb_row[x * 3] = (avg_r * inv).max(0.0);
-                    rgb_row[x * 3 + 1] = (avg_g * inv).max(0.0);
-                    rgb_row[x * 3 + 2] = (avg_b * inv).max(0.0);
+                    r_row[x] = (avg_r * inv).max(0.0);
+                    g_row[x] = (avg_g * inv).max(0.0);
+                    b_row[x] = (avg_b * inv).max(0.0);
                 } else {
-                    rgb_row[x * 3] = 0.0;
-                    rgb_row[x * 3 + 1] = 0.0;
-                    rgb_row[x * 3 + 2] = 0.0;
+                    r_row[x] = 0.0;
+                    g_row[x] = 0.0;
+                    b_row[x] = 0.0;
                 }
             }
         });
@@ -973,6 +980,7 @@ mod tests {
     use super::super::hex_lookup::HexLookup;
     use super::super::{XTransImage, XTransPattern};
     use super::*;
+    use crate::raw::demosaic::interleave_planes;
 
     fn test_pattern() -> XTransPattern {
         XTransPattern::new([
@@ -1606,10 +1614,23 @@ mod tests {
         let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
         let homo = vec![9u8; NDIR * pixels];
 
-        let mut output = vec![0.0f32; pixels * 3];
-        blend_final(&xtrans, &green_dir, &color_lookup, &homo, w, h, &mut output);
+        let mut r = vec![0.0f32; pixels];
+        let mut g = vec![0.0f32; pixels];
+        let mut b = vec![0.0f32; pixels];
+        blend_final(
+            &xtrans,
+            &green_dir,
+            &color_lookup,
+            &homo,
+            w,
+            h,
+            &mut r,
+            &mut g,
+            &mut b,
+        );
 
         // Uniform 0.5 input → output should be approximately 0.5 for all channels
+        let output = interleave_planes([r, g, b]);
         for (i, &v) in output.iter().enumerate() {
             assert!((v - 0.5).abs() < 0.05, "Pixel {i}: expected ~0.5, got {v}");
         }
@@ -1639,7 +1660,9 @@ mod tests {
         let mut homo = vec![0u8; NDIR * pixels];
         homo[..pixels].fill(9);
 
-        let mut output_one = vec![0.0f32; pixels * 3];
+        let mut r_one = vec![0.0f32; pixels];
+        let mut g_one = vec![0.0f32; pixels];
+        let mut b_one = vec![0.0f32; pixels];
         blend_final(
             &xtrans,
             &green_dir,
@@ -1647,12 +1670,17 @@ mod tests {
             &homo,
             w,
             h,
-            &mut output_one,
+            &mut r_one,
+            &mut g_one,
+            &mut b_one,
         );
+        let output_one = interleave_planes([r_one, g_one, b_one]);
 
         // All directions equally good
         let homo_all = vec![9u8; NDIR * pixels];
-        let mut output_all = vec![0.0f32; pixels * 3];
+        let mut r_all = vec![0.0f32; pixels];
+        let mut g_all = vec![0.0f32; pixels];
+        let mut b_all = vec![0.0f32; pixels];
         blend_final(
             &xtrans,
             &green_dir,
@@ -1660,8 +1688,11 @@ mod tests {
             &homo_all,
             w,
             h,
-            &mut output_all,
+            &mut r_all,
+            &mut g_all,
+            &mut b_all,
         );
+        let output_all = interleave_planes([r_all, g_all, b_all]);
 
         // With uniform input, both should give similar results
         for i in 0..output_one.len() {

@@ -19,17 +19,18 @@
 //! the same memory region:
 //!
 //! ```text
-//! [ Region A: green_dir (4P) | Region B: drv/output (4P) | C: gmin/homo (P) | D: gmax/threshold (P) ]
-//! Total: 10P f32 elements, where P = width × height
+//! [ Region A: green_dir (4P) | Region B: drv (4P) | C: gmin/homo (P) | D: gmax/threshold (P) ]
+//! Total: 10P f32 arena, where P = width × height (+ 3P for the planar output buffers)
 //! ```
 //!
 //! Region A holds green_dir (4 directions), written in Step 2, read through Step 4.
-//! Region B is used as `drv` in Steps 3–4, then output (3P) is written in Step 5.
+//! Region B is used as `drv` in Steps 3–4, then dead in Step 5.
 //! Region C is used as `gmin` in Steps 1–2, then reinterpreted as `homo` (u8) in Steps 4–5.
 //! Region D is used as `gmax` in Steps 1–2, then reused as `threshold` in Step 4.
 //!
-//! RGB is never materialized — it's recomputed on-the-fly in Steps 3 and 5 from green_dir,
-//! eliminating the 12P rgb_dir buffer (~1.1 GB for 6032×4028).
+//! RGB is never materialized interleaved — Steps 3 and 5 recompute it on-the-fly from
+//! green_dir (eliminating the 12P rgb_dir buffer, ~1.1 GB for 6032×4028); Step 5 writes the
+//! final result straight into planar `[R, G, B]` output buffers.
 
 use super::XTransImage;
 use super::hex_lookup::HexLookup;
@@ -143,25 +144,31 @@ pub fn demosaic_xtrans_markesteijn(xtrans: &XTransImage) -> [Vec<f32>; 3] {
     );
 
     // Step 5: Final blend (recomputing RGB on-the-fly from green_dir + homogeneity)
-    // Reads: Region A (green_dir), Region C (homo via SATs).
-    // Writes: Region B[..3P] (output RGB, overwriting first 3P of dead drv).
+    // Reads: Region A (green_dir), Region C (homo via SATs). Writes planar [R, G, B]
+    // directly into the output buffers — no interleave, no extract copy.
+    // SAFETY: blend_final writes every element of each output buffer.
+    let mut r = unsafe { crate::raw::alloc_uninit_vec::<f32>(pixels) };
+    let mut g = unsafe { crate::raw::alloc_uninit_vec::<f32>(pixels) };
+    let mut b = unsafe { crate::raw::alloc_uninit_vec::<f32>(pixels) };
     let t = Instant::now();
     {
-        let (region_a, rest) = arena.storage.split_at_mut(4 * pixels);
-        let (region_b, region_cd) = rest.split_at_mut(4 * pixels);
+        let green_dir = &arena.storage[..4 * pixels];
+        // SAFETY: Region C (f32 at [8P..9P]) holds the homogeneity map written as u8
+        // in Step 4; f32 alignment (4) satisfies u8 alignment (1). Read-only here.
         let homo = unsafe {
-            let ptr = region_cd.as_ptr() as *const u8;
+            let ptr = arena.storage[8 * pixels..].as_ptr() as *const u8;
             std::slice::from_raw_parts(ptr, pixels * 4)
         };
-        let output = &mut region_b[..3 * pixels];
         markesteijn_steps::blend_final(
             xtrans,
-            region_a,
+            green_dir,
             &color_lookup,
             homo,
             width,
             height,
-            output,
+            &mut r,
+            &mut g,
+            &mut b,
         );
     }
     tracing::debug!(
@@ -169,16 +176,6 @@ pub fn demosaic_xtrans_markesteijn(xtrans: &XTransImage) -> [Vec<f32>; 3] {
         t.elapsed().as_secs_f64() * 1000.0
     );
 
-    // Deinterleave the Region B output ([R0, G0, B0, ...]) into planar channels.
-    let output = &arena.storage[4 * pixels..4 * pixels + 3 * pixels];
-    let mut r = vec![0.0f32; pixels];
-    let mut g = vec![0.0f32; pixels];
-    let mut b = vec![0.0f32; pixels];
-    for (i, ((rv, gv), bv)) in r.iter_mut().zip(g.iter_mut()).zip(b.iter_mut()).enumerate() {
-        *rv = output[i * 3];
-        *gv = output[i * 3 + 1];
-        *bv = output[i * 3 + 2];
-    }
     [r, g, b]
 }
 

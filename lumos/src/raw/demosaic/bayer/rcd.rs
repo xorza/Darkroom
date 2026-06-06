@@ -354,9 +354,10 @@ pub(super) fn rcd_demosaic(bayer: &BayerImage) -> [Vec<f32>; 3] {
     // scatter and lets the caller take the buffers zero-copy.
 
     let active = width * height;
-    let mut out_r = vec![0.0f32; active];
-    let mut out_g = vec![0.0f32; active];
-    let mut out_b = vec![0.0f32; active];
+    // SAFETY: the per-row copy_from_slice below writes every element of each buffer.
+    let mut out_r = unsafe { crate::raw::alloc_uninit_vec::<f32>(active) };
+    let mut out_g = unsafe { crate::raw::alloc_uninit_vec::<f32>(active) };
+    let mut out_b = unsafe { crate::raw::alloc_uninit_vec::<f32>(active) };
 
     out_r
         .par_chunks_mut(width)
