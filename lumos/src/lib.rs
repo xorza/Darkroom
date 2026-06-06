@@ -78,7 +78,7 @@ pub use registration::config::{Config as RegistrationConfig, InterpolationMethod
 pub use registration::distortion::sip::SipPolynomial;
 pub use registration::result::{RansacFailureReason, RegistrationError, RegistrationResult};
 pub use registration::transform::{Transform, TransformType, WarpTransform};
-pub use registration::{register, warp};
+pub use registration::{WarpResult, register, warp};
 
 // ============================================================================
 // Stacking

@@ -47,7 +47,7 @@ pub(crate) mod triangle;
 #[cfg(test)]
 mod tests;
 
-use config::Config;
+use config::{Config, InterpolationMethod};
 use distortion::sip::SipPolynomial;
 use result::{RansacFailureReason, RegistrationError, RegistrationResult};
 use transform::{Transform, TransformType, WarpTransform};
@@ -61,6 +61,7 @@ use glam::DVec2;
 use crate::AstroImage;
 use crate::astro_image::PixelData;
 use crate::star_detection::star::Star;
+use common::Buffer2;
 use distortion::sip::SipConfig;
 use interpolation::warp_image;
 use ransac::transforms::estimate_transform;
@@ -218,14 +219,30 @@ fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
     fwhms[fwhms.len() / 2] as f64
 }
 
-/// Warp an image to align with the reference frame, returning the aligned image.
+/// Output of [`warp`]: the aligned image plus a per-pixel coverage map.
+///
+/// `coverage[p] ∈ [0, 1]` is the fraction of the interpolation kernel's weight
+/// at output pixel `p` that landed on real (in-bounds) source pixels — `1.0`
+/// fully inside the source, `0.0` fully extrapolated, fractional along the
+/// warped border. Downstream combination (stacking) should feed it as a
+/// per-frame pixel weight so extrapolated edges are down-weighted or rejected;
+/// without it every warped frame contributes a dark, partially-invented ring
+/// to the combined edges.
+#[derive(Debug)]
+pub struct WarpResult {
+    pub image: AstroImage,
+    pub coverage: Buffer2<f32>,
+}
+
+/// Warp an image to align with the reference frame.
 ///
 /// The `WarpTransform` bundles the linear transform with optional SIP distortion
 /// correction. Use `result.warp_transform()` to obtain one from a `RegistrationResult`,
 /// or `WarpTransform::new(transform)` for a plain transform.
 ///
 /// The output has the same dimensions and metadata as `image`; every output pixel
-/// is produced by inverse-mapping, so no input pixels are carried over.
+/// is produced by inverse-mapping, so no input pixels are carried over. Returns a
+/// [`WarpResult`] carrying the aligned image and a coverage map (see that type).
 ///
 /// # Arguments
 /// * `image` - The source (target) image to warp
@@ -238,9 +255,9 @@ fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
 /// use lumos::registration::{register, warp, Config};
 ///
 /// let result = register(&ref_stars, &target_stars, &Config::default())?;
-/// let aligned = warp(&target_image, &result.warp_transform(), &Config::default());
+/// let aligned = warp(&target_image, &result.warp_transform(), &Config::default()).image;
 /// ```
-pub fn warp(image: &AstroImage, warp_transform: &WarpTransform, config: &Config) -> AstroImage {
+pub fn warp(image: &AstroImage, warp_transform: &WarpTransform, config: &Config) -> WarpResult {
     let params = interpolation::WarpParams {
         method: config.interpolation,
         border_value: config.border_value,
@@ -261,7 +278,78 @@ pub fn warp(image: &AstroImage, warp_transform: &WarpTransform, config: &Config)
         );
     }
 
-    output
+    let coverage = warp_coverage(
+        image.width(),
+        image.height(),
+        warp_transform,
+        config.interpolation,
+    );
+
+    // Border-flux renormalization: a partially-covered pixel warped with a zero
+    // border is `Σ_in(value·w)`; dividing by `coverage = Σ_in(w)` recovers the
+    // in-bounds weighted average instead of a value darkened toward the border.
+    // Exact only for non-negative kernels (nearest/bilinear); negative-lobe
+    // kernels (bicubic/Lanczos) still emit coverage but keep their raw values,
+    // and a non-zero border is a deliberate fill we must not rescale.
+    if config.border_value == 0.0 && renormalizable(config.interpolation) {
+        for c in 0..image.channels() {
+            renormalize_by_coverage(output.channel_mut(c), &coverage);
+        }
+    }
+
+    WarpResult {
+        image: output,
+        coverage,
+    }
+}
+
+/// Per-pixel in-bounds weight fraction of the interpolation kernel, computed by
+/// warping an all-ones source with a zero border through the *same* sampler:
+/// in-bounds taps contribute their weight, out-of-bounds taps contribute 0, so
+/// the result is `Σ_in(w) / Σ_all(w)`. Reusing the real sampler (SIMD included)
+/// keeps coverage from drifting away from the value warp. Clamped to `[0, 1]`
+/// (negative-lobe kernels can ring slightly past the ends).
+fn warp_coverage(
+    width: usize,
+    height: usize,
+    warp_transform: &WarpTransform,
+    method: InterpolationMethod,
+) -> Buffer2<f32> {
+    let ones = Buffer2::new_filled(width, height, 1.0);
+    let mut coverage = Buffer2::new_default(width, height);
+    let params = interpolation::WarpParams {
+        method,
+        border_value: 0.0,
+    };
+    warp_image(&ones, &mut coverage, warp_transform, &params);
+    for v in coverage.pixels_mut() {
+        *v = v.clamp(0.0, 1.0);
+    }
+    coverage
+}
+
+/// Kernels whose weights are non-negative, where dividing a zero-border warp by
+/// its coverage exactly recovers the in-bounds weighted average. Bicubic and
+/// Lanczos have negative lobes, so their edge renormalization would need
+/// in-sampler weight tracking and is deferred.
+fn renormalizable(method: InterpolationMethod) -> bool {
+    matches!(
+        method,
+        InterpolationMethod::Nearest | InterpolationMethod::Bilinear
+    )
+}
+
+/// Brighten partially-covered border pixels back to the in-bounds weighted
+/// average. Interior pixels (`coverage ≈ 1`) are left bit-exact and fully
+/// extrapolated pixels (`coverage ≈ 0`) keep their border value.
+fn renormalize_by_coverage(channel: &mut Buffer2<f32>, coverage: &Buffer2<f32>) {
+    const PARTIAL_LO: f32 = 1e-4;
+    const PARTIAL_HI: f32 = 1.0 - 1e-4;
+    for (v, &cov) in channel.pixels_mut().iter_mut().zip(coverage.pixels()) {
+        if cov > PARTIAL_LO && cov < PARTIAL_HI {
+            *v /= cov;
+        }
+    }
 }
 
 // === Internal Functions ===

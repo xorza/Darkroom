@@ -358,7 +358,7 @@ fn test_warp_with_detected_transform() {
         interpolation: InterpolationMethod::Lanczos3 { deringing: 0.3 },
         ..Default::default()
     };
-    let warped_astro = warp(&target_astro, &result.warp_transform(), &warp_config);
+    let warped_astro = warp(&target_astro, &result.warp_transform(), &warp_config).image;
 
     // Compare aligned image to reference
     let margin = 40;
@@ -469,7 +469,7 @@ fn test_warp_grayscale_translation() {
         interpolation: InterpolationMethod::Lanczos3 { deringing: 0.3 },
         ..Default::default()
     };
-    let warped = warp(&ref_image, &WarpTransform::new(transform), &warp_config);
+    let warped = warp(&ref_image, &WarpTransform::new(transform), &warp_config).image;
 
     // Verify dimensions preserved
     assert_eq!(warped.width(), width);
@@ -531,7 +531,7 @@ fn test_warp_rgb() {
         interpolation: InterpolationMethod::Lanczos3 { deringing: 0.3 },
         ..Default::default()
     };
-    let warped = warp(&rgb_image, &WarpTransform::new(transform), &warp_config);
+    let warped = warp(&rgb_image, &WarpTransform::new(transform), &warp_config).image;
 
     // Verify dimensions preserved
     assert_eq!(warped.width(), width);
@@ -584,7 +584,7 @@ fn test_warp_preserves_output_metadata() {
         interpolation: InterpolationMethod::Bilinear,
         ..Default::default()
     };
-    let warped = warp(&image, &WarpTransform::new(transform), &warp_config);
+    let warped = warp(&image, &WarpTransform::new(transform), &warp_config).image;
 
     // Verify the input's metadata is carried into the warped output (warp only
     // produces new pixel data).
@@ -785,14 +785,15 @@ fn test_warp_api_with_sip() {
     };
 
     // Warp without SIP
-    let warped_no_sip = warp(&image, &WarpTransform::new(transform), &warp_config);
+    let warped_no_sip = warp(&image, &WarpTransform::new(transform), &warp_config).image;
 
     // Warp with SIP
     let warped_with_sip = warp(
         &image,
         &WarpTransform::with_sip(transform, sip),
         &warp_config,
-    );
+    )
+    .image;
 
     // They should differ
     let ch_no_sip = warped_no_sip.channel(0);
@@ -808,4 +809,69 @@ fn test_warp_api_with_sip() {
         "SIP should produce different warp output, only {} pixels differ",
         diff_count
     );
+}
+
+/// `warp` emits a per-pixel coverage map (the in-bounds kernel-weight fraction)
+/// and renormalizes partially-covered bilinear border pixels back to the
+/// in-bounds average instead of darkening them toward the zero border.
+#[test]
+fn warp_emits_coverage_and_renormalizes_bilinear_border() {
+    use crate::registration::config::Config as RegConfig;
+
+    // Constant image so any darkening is unambiguous: a covered output pixel
+    // must read back exactly V.
+    const V: f32 = 0.5;
+    let (w, h) = (16usize, 8usize);
+    let image = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), vec![V; w * h]);
+
+    // output(x,y) samples source (x + 2.5, y): columns 0..=12 are fully in
+    // bounds, column 13 is half-covered (its right bilinear tap is off the
+    // edge), columns 14..=15 fall entirely outside.
+    let transform = Transform::translation(DVec2::new(2.5, 0.0));
+    let config = RegConfig {
+        interpolation: InterpolationMethod::Bilinear,
+        ..Default::default()
+    };
+    assert_eq!(config.border_value, 0.0, "test assumes a zero border");
+
+    let result = warp(&image, &WarpTransform::new(transform), &config);
+    let cov = result.coverage.pixels();
+    let val = result.image.channel(0).pixels();
+    let at = |x: usize, y: usize| y * w + x;
+
+    // x-only translation → every row shares the column pattern; check one.
+    let y = 4;
+    for x in 0..=12 {
+        assert!(
+            (cov[at(x, y)] - 1.0).abs() < 1e-5,
+            "col {x} should be fully covered, got {}",
+            cov[at(x, y)]
+        );
+    }
+    assert!(
+        (cov[at(13, y)] - 0.5).abs() < 1e-5,
+        "col 13 should be half-covered, got {}",
+        cov[at(13, y)]
+    );
+    assert_eq!(cov[at(14, y)], 0.0, "col 14 is outside the source");
+    assert_eq!(cov[at(15, y)], 0.0, "col 15 is outside the source");
+
+    // Renormalization: every covered pixel — including the half-covered
+    // column 13 — reads back V, not a darkened 0.5·V; fully-outside columns
+    // stay at the zero border.
+    for x in 0..=13 {
+        assert!(
+            (val[at(x, y)] - V).abs() < 1e-5,
+            "col {x} should renormalize to V={V}, got {}",
+            val[at(x, y)]
+        );
+    }
+    assert_eq!(val[at(14, y)], 0.0);
+    assert_eq!(val[at(15, y)], 0.0);
+
+    // Coverage stays in [0, 1] everywhere; every pixel is either border-zero or V.
+    for (&c, &v) in cov.iter().zip(val.iter()) {
+        assert!((0.0..=1.0).contains(&c), "coverage {c} out of range");
+        assert!(v == 0.0 || (v - V).abs() < 1e-5, "unexpected value {v}");
+    }
 }
