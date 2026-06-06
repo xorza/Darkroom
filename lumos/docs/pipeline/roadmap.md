@@ -248,8 +248,11 @@ analyst passes (perf ×2, removal, precision), de-noised + verified.
   `from_pixels` de-interleave round trip on every demosaiced light/calibration frame. Tests:
   Bayer + Markesteijn re-interleave via `demosaic::interleave_planes`; `process_xtrans` tests
   use planar assertions.
-- ☐ **PF3 — per-star ×3 f64 `Vec` alloc in LM fit** · High (when fitting). `gaussian_fit/mod.rs:242`
-  - moffat, inside the parallel `measure` loop → per-thread scratch / f64 stamp fields.
+- ☑ **PF3 — per-star ×3 f64 `Vec` alloc in LM fit** · done. `gaussian_fit` + `moffat_fit` now
+  collect the f64 stamp into `ArrayVec<f64, MAX_STAMP_PIXELS>` instead of `Vec<f64>` — the
+  stamp size is bounded, so the per-star fit in the parallel `measure` loop makes **zero heap
+  allocations** (3 mallocs/star × N stars eliminated). Stack-only, mirrors the existing
+  `StampData` ArrayVec pattern; fit results are bit-identical (same values), 1950 tests green.
 - ☐ **PF4 (x86)** AVX2 `raw/normalize` (~2×); **PF5** parallelize the serial per-color flat-mean
   pass (`cfa.rs:272`) + defect-map sample collection (60 MB throwaway); **PF6 (x86)**
   threshold_mask AVX2 (bandwidth-bound, modest).

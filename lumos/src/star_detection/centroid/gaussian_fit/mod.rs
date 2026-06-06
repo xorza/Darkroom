@@ -42,7 +42,8 @@ pub(super) const LN2_HI: f64 = 6.931_457_519_531_25e-1;
 pub(super) const LN2_LO: f64 = 1.428_606_820_309_417_3e-6;
 
 use super::lm_optimizer::{LMConfig, LMModel, LMResult, optimize};
-use super::{estimate_sigma_from_moments, extract_stamp};
+use super::{MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp};
+use arrayvec::ArrayVec;
 use common::Buffer2;
 use glam::Vec2;
 
@@ -238,10 +239,11 @@ pub fn fit_gaussian_2d(
         return None;
     }
 
-    // Convert stamp data to f64 for fitting
-    let data_x: Vec<f64> = stamp.x.iter().map(|&v| v as f64).collect();
-    let data_y: Vec<f64> = stamp.y.iter().map(|&v| v as f64).collect();
-    let data_z: Vec<f64> = stamp.z.iter().map(|&v| v as f64).collect();
+    // Convert stamp data to f64 for fitting. Stack-allocated (stamp size is bounded
+    // by MAX_STAMP_PIXELS), so the parallel per-star fit loop makes no heap allocations.
+    let data_x: ArrayVec<f64, MAX_STAMP_PIXELS> = stamp.x.iter().map(|&v| v as f64).collect();
+    let data_y: ArrayVec<f64, MAX_STAMP_PIXELS> = stamp.y.iter().map(|&v| v as f64).collect();
+    let data_z: ArrayVec<f64, MAX_STAMP_PIXELS> = stamp.z.iter().map(|&v| v as f64).collect();
 
     // Estimate sigma from moments for better initial guess
     let sigma_est = estimate_sigma_from_moments(&stamp.x, &stamp.y, &stamp.z, pos, background);

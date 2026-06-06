@@ -22,8 +22,9 @@ mod simd_avx2;
 mod simd_neon;
 
 use super::lm_optimizer::{LMConfig, LMModel, optimize};
-use super::{estimate_sigma_from_moments, extract_stamp};
+use super::{MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp};
 use crate::math::FWHM_TO_SIGMA;
+use arrayvec::ArrayVec;
 use common::Buffer2;
 use glam::Vec2;
 
@@ -395,10 +396,11 @@ pub fn fit_moffat_2d(
         return None;
     }
 
-    // Convert stamp data to f64 for fitting
-    let data_x: Vec<f64> = stamp.x.iter().map(|&v| v as f64).collect();
-    let data_y: Vec<f64> = stamp.y.iter().map(|&v| v as f64).collect();
-    let data_z: Vec<f64> = stamp.z.iter().map(|&v| v as f64).collect();
+    // Convert stamp data to f64 for fitting. Stack-allocated (stamp size is bounded
+    // by MAX_STAMP_PIXELS), so the parallel per-star fit loop makes no heap allocations.
+    let data_x: ArrayVec<f64, MAX_STAMP_PIXELS> = stamp.x.iter().map(|&v| v as f64).collect();
+    let data_y: ArrayVec<f64, MAX_STAMP_PIXELS> = stamp.y.iter().map(|&v| v as f64).collect();
+    let data_z: ArrayVec<f64, MAX_STAMP_PIXELS> = stamp.z.iter().map(|&v| v as f64).collect();
 
     let initial_amplitude = (stamp.peak - background).max(0.01);
 
