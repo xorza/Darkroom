@@ -272,6 +272,7 @@ fn bench_gaussian_fit_single(b: ::quickbench::Bencher) {
             black_box(Vec2::splat(10.0)),
             black_box(8),
             black_box(background),
+            None,
             black_box(&config),
         ))
     });
@@ -308,6 +309,7 @@ fn bench_moffat_fit_single(b: ::quickbench::Bencher) {
             black_box(Vec2::splat(10.0)),
             black_box(8),
             black_box(background),
+            None,
             black_box(&config),
         ))
     });
@@ -344,6 +346,7 @@ fn bench_moffat_fit_variable_beta(b: ::quickbench::Bencher) {
             black_box(Vec2::splat(10.0)),
             black_box(8),
             black_box(background),
+            None,
             black_box(&config),
         ))
     });

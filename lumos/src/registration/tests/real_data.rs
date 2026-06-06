@@ -11,7 +11,7 @@ use ::quickbench::quick_bench;
 
 use crate::AstroImage;
 use crate::registration::config::Config as RegistrationConfig;
-use crate::star_detection::config::Config;
+use crate::star_detection::config::{CentroidMethod, Config, NoiseModel};
 use crate::star_detection::detector::StarDetector;
 use crate::testing::calibration_dir;
 
@@ -409,4 +409,50 @@ fn bench_warp(b: ::quickbench::Bencher) {
             black_box(&reg_config),
         )
     });
+}
+
+/// PR1 validation: inverse-variance-weighted PSF fitting should not worsen (and ideally
+/// improves) registration RMS vs unweighted, by producing lower-variance sub-pixel
+/// centroids. Runs the calibrated pair through `GaussianFit` with and without a
+/// `NoiseModel`, registers each, and compares.
+#[test]
+#[cfg_attr(not(feature = "real-data"), ignore)]
+fn test_weighted_fit_registration_rms() {
+    let Some((img1, img2)) = load_two_calibrated_lights() else {
+        return;
+    };
+
+    // Normalized-domain gain ≈ phys_gain × white_level for a 14-bit sensor; read noise
+    // small. The exact value isn't critical here — it only has to make the weighting active.
+    let noise_model = NoiseModel::new(30000.0, 30.0);
+
+    let register_with = |noise: Option<NoiseModel>| -> (f64, usize) {
+        let mut config = Config::precise_ground();
+        config.centroid_method = CentroidMethod::GaussianFit;
+        config.noise_model = noise;
+        let mut detector = StarDetector::from_config(config);
+        let s1 = detector.detect(&img1).stars;
+        let s2 = detector.detect(&img2).stars;
+        let reg_config = RegistrationConfig {
+            transform_type: crate::TransformType::Auto,
+            sip_enabled: false,
+            ..RegistrationConfig::default()
+        };
+        let r = crate::registration::register(&s1, &s2, &reg_config)
+            .expect("registration should succeed");
+        (r.rms_error, r.num_inliers)
+    };
+
+    let (unweighted_rms, unweighted_n) = register_with(None);
+    let (weighted_rms, weighted_n) = register_with(Some(noise_model));
+
+    println!("PR1 weighted-fit registration:");
+    println!("  unweighted: RMS {unweighted_rms:.4} px, {unweighted_n} matches");
+    println!("  weighted:   RMS {weighted_rms:.4} px, {weighted_n} matches");
+
+    // Weighting must not meaningfully worsen registration (5% slack for noise).
+    assert!(
+        weighted_rms <= unweighted_rms * 1.05,
+        "weighted RMS {weighted_rms:.4} should be ≤ unweighted {unweighted_rms:.4} ×1.05"
+    );
 }

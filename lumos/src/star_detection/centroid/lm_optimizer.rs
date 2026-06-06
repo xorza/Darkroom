@@ -126,6 +126,69 @@ pub trait LMModel<const N: usize> {
             })
             .sum()
     }
+
+    /// Weighted `batch_build_normal_equations`: each pixel contributes its inverse-variance
+    /// weight `w_i` to chi²/gradient/Hessian. Scalar default — the weighted fit is opt-in
+    /// (set a `NoiseModel`), so the unweighted SIMD overrides stay untouched.
+    #[allow(clippy::needless_range_loop)]
+    fn batch_build_normal_equations_weighted(
+        &self,
+        data_x: &[f64],
+        data_y: &[f64],
+        data_z: &[f64],
+        weights: &[f64],
+        params: &[f64; N],
+    ) -> ([[f64; N]; N], [f64; N], f64) {
+        let mut hessian = [[0.0f64; N]; N];
+        let mut gradient = [0.0f64; N];
+        let mut chi2 = 0.0f64;
+
+        for (((&x, &y), &z), &w) in data_x
+            .iter()
+            .zip(data_y.iter())
+            .zip(data_z.iter())
+            .zip(weights.iter())
+        {
+            let (model_val, row) = self.evaluate_and_jacobian(x, y, params);
+            let r = z - model_val;
+            chi2 += w * r * r;
+            for i in 0..N {
+                gradient[i] += w * row[i] * r;
+                for j in i..N {
+                    hessian[i][j] += w * row[i] * row[j];
+                }
+            }
+        }
+
+        for i in 1..N {
+            for j in 0..i {
+                hessian[i][j] = hessian[j][i];
+            }
+        }
+
+        (hessian, gradient, chi2)
+    }
+
+    /// Weighted `batch_compute_chi2` (inverse-variance).
+    fn batch_compute_chi2_weighted(
+        &self,
+        data_x: &[f64],
+        data_y: &[f64],
+        data_z: &[f64],
+        weights: &[f64],
+        params: &[f64; N],
+    ) -> f64 {
+        data_x
+            .iter()
+            .zip(data_y.iter())
+            .zip(data_z.iter())
+            .zip(weights.iter())
+            .map(|(((&x, &y), &z), &w)| {
+                let r = z - self.evaluate(x, y, params);
+                w * r * r
+            })
+            .sum()
+    }
 }
 
 /// Run L-M optimization for N-parameter model (generic implementation).
@@ -134,6 +197,7 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
     data_x: &[f64],
     data_y: &[f64],
     data_z: &[f64],
+    weights: Option<&[f64]>,
     initial_params: [f64; N],
     config: &LMConfig,
 ) -> LMResult<N> {
@@ -148,8 +212,12 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
 
         // Build normal equations (J^T J, J^T r) and chi² in a single fused pass.
         // Avoids storing intermediate jacobian/residuals arrays.
-        let (hessian, gradient, current_chi2) =
-            model.batch_build_normal_equations(data_x, data_y, data_z, &params);
+        let (hessian, gradient, current_chi2) = match weights {
+            Some(w) => {
+                model.batch_build_normal_equations_weighted(data_x, data_y, data_z, w, &params)
+            }
+            None => model.batch_build_normal_equations(data_x, data_y, data_z, &params),
+        };
 
         // On first iteration, initialize prev_chi2 from the fused pass.
         if iter == 0 {
@@ -171,7 +239,10 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
         }
         model.constrain(&mut new_params);
 
-        let new_chi2 = model.batch_compute_chi2(data_x, data_y, data_z, &new_params);
+        let new_chi2 = match weights {
+            Some(w) => model.batch_compute_chi2_weighted(data_x, data_y, data_z, w, &new_params),
+            None => model.batch_compute_chi2(data_x, data_y, data_z, &new_params),
+        };
 
         if new_chi2 < prev_chi2 {
             params = new_params;

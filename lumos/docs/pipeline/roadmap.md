@@ -45,11 +45,6 @@ Status: ☐ todo · ◐ in progress · ⊘ deferred (deliberate)
 
 ## Precision queue
 
-- ☐ **PR1 — weighted (inverse-variance) PSF fit** · High. LM minimizes plain `Σr²`
-  (`centroid/lm_optimizer.rs:88`, gaussian/moffat + AVX2/NEON); the ML estimator for
-  Poisson/CCD noise is `w = 1/σ²` (over-weights the bright core → biases the sub-px
-  centroid/FWHM/flux that feed registration). `NoiseModel` + per-pixel noise map already exist.
-  Shifts results → validate on real data.
 - ☐ **PR4 — FITS f32 output writer; drop lossy formats from the result path** · High. The only
   output is `AstroImage::save` → TIFF f32 (lossless) or PNG/JPEG (lossy 8-bit); lumos reads
   FITS but cannot write it. Add a FITS f32 writer and restrict the result path to lossless
@@ -59,6 +54,10 @@ Status: ☐ todo · ◐ in progress · ⊘ deferred (deliberate)
 
 - ☐ **PF1 — NEON Lanczos/bilinear warp** · High (ARM). The default Lanczos3 warp is scalar on
   aarch64; the SSE/AVX FMA kernel has no NEON twin (`interpolation/warp/`). #1 ARM win.
+- ☐ **PF7 — SIMD weighted LM fit.** PR1's inverse-variance weighted fit runs scalar (the
+  unweighted default path keeps its AVX2/NEON kernels). Add weighted AVX2/NEON
+  `batch_build_normal_equations`/`batch_compute_chi2` so `NoiseModel`-driven fits vectorize.
+  Low priority (weighted fit is opt-in).
 - ☐ **PF4** (x86) AVX2 `raw/normalize` (~2×); **PF5** parallelize the serial per-color flat-mean
   pass (`cfa.rs:272`) + defect-map sample collection (60 MB throwaway); **PF6** (x86)
   threshold_mask AVX2 (bandwidth-bound, modest).

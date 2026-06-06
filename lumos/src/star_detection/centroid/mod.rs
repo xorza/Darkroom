@@ -195,6 +195,57 @@ pub(crate) fn estimate_sigma_from_moments(
     }
 }
 
+/// Per-pixel inverse-variance weights for the LM fit, using the CCD noise model
+/// (same per-pixel decomposition as `compute_snr`):
+/// `w_i = 1 / (max(z_i − bg, 0)/gain + sky_noise² + read_noise²/gain²)`.
+///
+/// Down-weights the shot-noisy bright core so the fit is the ML estimator instead of
+/// over-weighting high-signal pixels (which biases the sub-pixel centroid/FWHM/flux).
+pub(crate) fn inverse_variance_weights(
+    data_z: &[f64],
+    background: f64,
+    sky_noise: f64,
+    gain: f64,
+    read_noise: f64,
+) -> ArrayVec<f64, MAX_STAMP_PIXELS> {
+    let sky_var = sky_noise * sky_noise;
+    let read_var = read_noise * read_noise / (gain * gain);
+    data_z
+        .iter()
+        .map(|&z| {
+            let signal = (z - background).max(0.0);
+            1.0 / (signal / gain + sky_var + read_var).max(1e-12)
+        })
+        .collect()
+}
+
+/// Noise inputs for an inverse-variance-weighted fit: the local sky σ plus the
+/// `NoiseModel`'s gain/read-noise. `None` (absent) means an unweighted fit.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FitNoise {
+    pub sky_noise: f32,
+    pub gain: f32,
+    pub read_noise: f32,
+}
+
+/// Per-pixel fit weights for a stamp, or `None` for an unweighted fit;
+/// see [`inverse_variance_weights`].
+pub(crate) fn fit_weights(
+    data_z: &[f64],
+    background: f32,
+    noise: Option<FitNoise>,
+) -> Option<ArrayVec<f64, MAX_STAMP_PIXELS>> {
+    noise.map(|n| {
+        inverse_variance_weights(
+            data_z,
+            background as f64,
+            n.sky_noise as f64,
+            n.gain as f64,
+            n.read_noise as f64,
+        )
+    })
+}
+
 /// Compute local background and noise using an annular region around the star.
 ///
 /// The inner radius excludes the star's flux, and the outer radius samples
@@ -338,7 +389,7 @@ pub fn measure_star(
         )
     };
 
-    let (local_bg, _local_noise) = match config.local_background {
+    let (local_bg, local_noise) = match config.local_background {
         LocalBackgroundMethod::GlobalMap => global_fallback(),
         LocalBackgroundMethod::LocalAnnulus => {
             let inner_radius = stamp_radius;
@@ -354,15 +405,21 @@ pub fn measure_star(
     let mut fit_fwhm: Option<f32> = None;
     let mut fit_eccentricity: Option<f32> = None;
 
+    // Inverse-variance fit weights when a noise model is configured (PR1).
+    let fit_noise = config.noise_model.as_ref().map(|nm| FitNoise {
+        sky_noise: local_noise,
+        gain: nm.gain,
+        read_noise: nm.read_noise,
+    });
+
     match config.centroid_method {
         CentroidMethod::GaussianFit => {
             let fit_config = GaussianFitConfig {
                 position_convergence_threshold: CENTROID_CONVERGENCE_THRESHOLD as f64,
                 ..GaussianFitConfig::default()
             };
-            if let Some(result) = fit_gaussian_2d(pixels, pos, stamp_radius, local_bg, &fit_config)
-                .filter(|r| r.converged)
-            {
+            let fit = fit_gaussian_2d(pixels, pos, stamp_radius, local_bg, fit_noise, &fit_config);
+            if let Some(result) = fit.filter(|r| r.converged) {
                 pos = result.pos;
                 // FWHM from geometric mean of sigma_x, sigma_y
                 let geo_sigma = (result.sigma.x * result.sigma.y).sqrt();
@@ -387,9 +444,8 @@ pub fn measure_star(
                     ..lm_optimizer::LMConfig::default()
                 },
             };
-            if let Some(result) = fit_moffat_2d(pixels, pos, stamp_radius, local_bg, &fit_config)
-                .filter(|r| r.converged)
-            {
+            let fit = fit_moffat_2d(pixels, pos, stamp_radius, local_bg, fit_noise, &fit_config);
+            if let Some(result) = fit.filter(|r| r.converged) {
                 pos = result.pos;
                 fit_fwhm = Some(result.fwhm);
                 // Moffat is radially symmetric (single alpha) — eccentricity stays moment-based

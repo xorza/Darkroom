@@ -22,7 +22,7 @@ mod simd_avx2;
 mod simd_neon;
 
 use super::lm_optimizer::{LMConfig, LMModel, optimize};
-use super::{MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp};
+use super::{FitNoise, MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp, fit_weights};
 use crate::math::FWHM_TO_SIGMA;
 use arrayvec::ArrayVec;
 use common::Buffer2;
@@ -379,13 +379,15 @@ impl LMModel<6> for MoffatVariableBeta {
     }
 }
 
-/// Fit a 2D Moffat profile to a star stamp.
-/// All fitting is done in f64 for numerical stability.
-pub fn fit_moffat_2d(
+/// Fit a 2D Moffat profile to a star stamp via Levenberg-Marquardt (f64 throughout). When
+/// `noise` is set, each pixel is weighted by `1/σ²` from the CCD noise model so the
+/// shot-noisy bright core doesn't bias the fit (PR1); `None` is a plain unweighted fit.
+pub(crate) fn fit_moffat_2d(
     pixels: &Buffer2<f32>,
     pos: Vec2,
     stamp_radius: usize,
     background: f32,
+    noise: Option<FitNoise>,
     config: &MoffatFitConfig,
 ) -> Option<MoffatFitResult> {
     let stamp = extract_stamp(pixels, pos, stamp_radius)?;
@@ -402,6 +404,8 @@ pub fn fit_moffat_2d(
     let data_y: ArrayVec<f64, MAX_STAMP_PIXELS> = stamp.y.iter().map(|&v| v as f64).collect();
     let data_z: ArrayVec<f64, MAX_STAMP_PIXELS> = stamp.z.iter().map(|&v| v as f64).collect();
 
+    let weights = fit_weights(&data_z, background, noise);
+
     let initial_amplitude = (stamp.peak - background).max(0.01);
 
     // Estimate sigma from moments, then convert to alpha
@@ -415,6 +419,7 @@ pub fn fit_moffat_2d(
             &data_x,
             &data_y,
             &data_z,
+            weights.as_deref(),
             pos,
             initial_amplitude,
             initial_alpha,
@@ -428,6 +433,7 @@ pub fn fit_moffat_2d(
             &data_x,
             &data_y,
             &data_z,
+            weights.as_deref(),
             pos,
             initial_amplitude,
             initial_alpha,
@@ -444,6 +450,7 @@ fn fit_with_fixed_beta(
     data_x: &[f64],
     data_y: &[f64],
     data_z: &[f64],
+    weights: Option<&[f64]>,
     pos: Vec2,
     initial_amplitude: f32,
     initial_alpha: f32,
@@ -462,7 +469,15 @@ fn fit_with_fixed_beta(
 
     let model = MoffatFixedBeta::new(stamp_radius as f64, config.fixed_beta as f64);
 
-    let result = optimize(&model, data_x, data_y, data_z, initial_params, &config.lm);
+    let result = optimize(
+        &model,
+        data_x,
+        data_y,
+        data_z,
+        weights,
+        initial_params,
+        &config.lm,
+    );
 
     let [x0, y0, amplitude, alpha, bg] = result.params;
     let result_pos = Vec2::new(x0 as f32, y0 as f32);
@@ -492,6 +507,7 @@ fn fit_with_variable_beta(
     data_x: &[f64],
     data_y: &[f64],
     data_z: &[f64],
+    weights: Option<&[f64]>,
     pos: Vec2,
     initial_amplitude: f32,
     initial_alpha: f32,
@@ -512,7 +528,15 @@ fn fit_with_variable_beta(
         stamp_radius: stamp_radius as f64,
     };
 
-    let result = optimize(&model, data_x, data_y, data_z, initial_params, &config.lm);
+    let result = optimize(
+        &model,
+        data_x,
+        data_y,
+        data_z,
+        weights,
+        initial_params,
+        &config.lm,
+    );
 
     let [x0, y0, amplitude, alpha, beta, bg] = result.params;
     let result_pos = Vec2::new(x0 as f32, y0 as f32);

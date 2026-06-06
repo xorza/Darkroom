@@ -22,6 +22,7 @@ fn bench_gaussian_fit_small(b: quickbench::Bencher) {
             black_box(Vec2::splat(8.0)),
             black_box(8),
             black_box(0.1),
+            None,
             black_box(&config),
         ))
     });
@@ -39,6 +40,7 @@ fn bench_gaussian_fit_medium(b: quickbench::Bencher) {
             black_box(Vec2::splat(12.0)),
             black_box(12),
             black_box(0.1),
+            None,
             black_box(&config),
         ))
     });
@@ -56,6 +58,7 @@ fn bench_gaussian_fit_large(b: quickbench::Bencher) {
             black_box(Vec2::splat(15.0)),
             black_box(15),
             black_box(0.1),
+            None,
             black_box(&config),
         ))
     });

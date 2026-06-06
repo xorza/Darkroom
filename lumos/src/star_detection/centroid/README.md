@@ -232,11 +232,13 @@ For optimal accuracy when noise characteristics are known, we support **inverse-
 
 ```rust
 // Weight = 1/variance where:
-// variance = signal/gain + noise² + read_noise²/gain²
+// variance = signal/gain + sky_noise² + read_noise²/gain²
 
-pub fn fit_gaussian_2d_weighted(
-    pixels, cx, cy, stamp_radius, background,
-    noise, gain, read_noise, config
+// Pass `Some(FitNoise { sky_noise, gain, read_noise })` to weight the fit;
+// `None` is a plain unweighted fit.
+pub fn fit_gaussian_2d(
+    pixels, pos, stamp_radius, background,
+    noise: Option<FitNoise>, config,
 ) -> Option<GaussianFitResult>;
 ```
 
@@ -463,19 +465,16 @@ pub fn compute_centroid(
     config: &StarDetectionConfig,
 ) -> Option<Star>;
 
-// Profile fitting (standard)
-pub fn fit_gaussian_2d(...) -> Option<GaussianFitResult>;
-pub fn fit_moffat_2d(...) -> Option<MoffatFitResult>;
-
-// Profile fitting (noise-weighted for optimal estimation)
-pub fn fit_gaussian_2d_weighted(
-    pixels, cx, cy, stamp_radius, background,
-    noise, gain, read_noise, config
+// Profile fitting — `noise: Option<FitNoise>` enables inverse-variance weighting
+// (Some = weighted by the CCD noise model, None = unweighted)
+pub fn fit_gaussian_2d(
+    pixels, pos, stamp_radius, background,
+    noise: Option<FitNoise>, config,
 ) -> Option<GaussianFitResult>;
 
-pub fn fit_moffat_2d_weighted(
-    pixels, cx, cy, stamp_radius, background,
-    noise, gain, read_noise, config
+pub fn fit_moffat_2d(
+    pixels, pos, stamp_radius, background,
+    noise: Option<FitNoise>, config,
 ) -> Option<MoffatFitResult>;
 
 // Utility functions

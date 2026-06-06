@@ -42,7 +42,7 @@ pub(super) const LN2_HI: f64 = 6.931_457_519_531_25e-1;
 pub(super) const LN2_LO: f64 = 1.428_606_820_309_417_3e-6;
 
 use super::lm_optimizer::{LMConfig, LMModel, LMResult, optimize};
-use super::{MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp};
+use super::{FitNoise, MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp, fit_weights};
 use arrayvec::ArrayVec;
 use common::Buffer2;
 use glam::Vec2;
@@ -220,16 +220,16 @@ impl LMModel<6> for Gaussian2D {
     }
 }
 
-/// Fit a 2D Gaussian to a star stamp.
-///
-/// Uses Levenberg-Marquardt optimization to find the best-fit Gaussian
-/// parameters, achieving ~0.01 pixel centroid accuracy.
-/// All fitting is done in f64 for numerical stability.
-pub fn fit_gaussian_2d(
+/// Fit a 2D Gaussian to a star stamp via Levenberg-Marquardt (f64 throughout, ~0.01 px
+/// centroid accuracy). When `noise` is set, each pixel is weighted by `1/σ²` from the CCD
+/// noise model so the shot-noisy bright core doesn't bias the fit (PR1); `None` is a plain
+/// unweighted fit.
+pub(crate) fn fit_gaussian_2d(
     pixels: &Buffer2<f32>,
     pos: Vec2,
     stamp_radius: usize,
     background: f32,
+    noise: Option<FitNoise>,
     config: &GaussianFitConfig,
 ) -> Option<GaussianFitResult> {
     let stamp = extract_stamp(pixels, pos, stamp_radius)?;
@@ -244,6 +244,8 @@ pub fn fit_gaussian_2d(
     let data_x: ArrayVec<f64, MAX_STAMP_PIXELS> = stamp.x.iter().map(|&v| v as f64).collect();
     let data_y: ArrayVec<f64, MAX_STAMP_PIXELS> = stamp.y.iter().map(|&v| v as f64).collect();
     let data_z: ArrayVec<f64, MAX_STAMP_PIXELS> = stamp.z.iter().map(|&v| v as f64).collect();
+
+    let weights = fit_weights(&data_z, background, noise);
 
     // Estimate sigma from moments for better initial guess
     let sigma_est = estimate_sigma_from_moments(&stamp.x, &stamp.y, &stamp.z, pos, background);
@@ -261,7 +263,15 @@ pub fn fit_gaussian_2d(
         stamp_radius: stamp_radius as f64,
     };
 
-    let result = optimize(&model, &data_x, &data_y, &data_z, initial_params, config);
+    let result = optimize(
+        &model,
+        &data_x,
+        &data_y,
+        &data_z,
+        weights.as_deref(),
+        initial_params,
+        config,
+    );
 
     validate_result(&result, pos, stamp_radius, n)
 }

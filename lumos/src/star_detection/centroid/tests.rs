@@ -1508,7 +1508,7 @@ fn test_gaussian_fit_precision_statistical() {
 
             let config = GaussianFitConfig::default();
             if let Some(result) =
-                fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, background, &config)
+                fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, background, None, &config)
                 && result.converged
             {
                 let error =
@@ -1573,7 +1573,7 @@ fn test_moffat_fit_precision_statistical() {
                 ..Default::default()
             };
             if let Some(result) =
-                fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, background, &config)
+                fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, background, None, &config)
                 && result.converged
             {
                 let error =
@@ -1856,7 +1856,7 @@ fn test_gaussian_fit_sigma_recovery() {
         let pixels_buf = Buffer2::new(width, height, pixels);
 
         let config = GaussianFitConfig::default();
-        let result = fit_gaussian_2d(&pixels_buf, Vec2::new(cx, cy), 8, background, &config);
+        let result = fit_gaussian_2d(&pixels_buf, Vec2::new(cx, cy), 8, background, None, &config);
 
         let result =
             result.unwrap_or_else(|| panic!("Fit should return Some for sigma={}", true_sigma));
@@ -1912,7 +1912,7 @@ fn test_moffat_fit_alpha_recovery() {
             fixed_beta: beta,
             ..Default::default()
         };
-        let result = fit_moffat_2d(&pixels_buf, Vec2::new(cx, cy), 8, background, &config)
+        let result = fit_moffat_2d(&pixels_buf, Vec2::new(cx, cy), 8, background, None, &config)
             .unwrap_or_else(|| panic!("Fit should return Some for alpha={}", true_alpha));
 
         // Check that alpha is accurate (convergence flag may be false if
@@ -1956,7 +1956,7 @@ fn test_gaussian_fit_with_noise() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, background, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, background, None, &config);
 
     assert!(result.is_some(), "Fit should succeed with noise");
     let result = result.unwrap();
@@ -2723,9 +2723,9 @@ fn test_gaussian_fit_accuracy_independent_of_phase1_iterations() {
 
     // Now apply Gaussian fit from both starting points
     let config = GaussianFitConfig::default();
-    let result_2iter = fit_gaussian_2d(&pixels, pos_2iter, stamp_radius, 0.1, &config)
+    let result_2iter = fit_gaussian_2d(&pixels, pos_2iter, stamp_radius, 0.1, None, &config)
         .expect("fit should succeed from 2-iter seed");
-    let result_full = fit_gaussian_2d(&pixels, pos_full, stamp_radius, 0.1, &config)
+    let result_full = fit_gaussian_2d(&pixels, pos_full, stamp_radius, 0.1, None, &config)
         .expect("fit should succeed from full seed");
 
     // Both should converge to essentially the same position
@@ -2804,9 +2804,9 @@ fn test_moffat_fit_accuracy_independent_of_phase1_iterations() {
         fixed_beta: 2.5,
         ..MoffatFitConfig::default()
     };
-    let result_2iter = fit_moffat_2d(&pixels, pos_2iter, stamp_radius, 0.1, &config)
+    let result_2iter = fit_moffat_2d(&pixels, pos_2iter, stamp_radius, 0.1, None, &config)
         .expect("fit should succeed from 2-iter seed");
-    let result_full = fit_moffat_2d(&pixels, pos_full, stamp_radius, 0.1, &config)
+    let result_full = fit_moffat_2d(&pixels, pos_full, stamp_radius, 0.1, None, &config)
         .expect("fit should succeed from full seed");
 
     // Both should converge to essentially the same position
@@ -2957,10 +2957,22 @@ fn test_prefit_moments_iterations_sufficient() {
             ..GaussianFitConfig::default()
         };
 
-        let result_from_2iter =
-            fit_gaussian_2d(&pixels, pos_2iter, stamp_radius, local_bg, &fit_config);
-        let result_from_10iter =
-            fit_gaussian_2d(&pixels, pos_10iter, stamp_radius, local_bg, &fit_config);
+        let result_from_2iter = fit_gaussian_2d(
+            &pixels,
+            pos_2iter,
+            stamp_radius,
+            local_bg,
+            None,
+            &fit_config,
+        );
+        let result_from_10iter = fit_gaussian_2d(
+            &pixels,
+            pos_10iter,
+            stamp_radius,
+            local_bg,
+            None,
+            &fit_config,
+        );
 
         // Both should converge
         assert!(
@@ -3077,9 +3089,22 @@ fn test_prefit_moments_iterations_sufficient_moffat() {
         },
     };
 
-    let result_from_2iter = fit_moffat_2d(&pixels, pos_2iter, stamp_radius, local_bg, &fit_config);
-    let result_from_10iter =
-        fit_moffat_2d(&pixels, pos_10iter, stamp_radius, local_bg, &fit_config);
+    let result_from_2iter = fit_moffat_2d(
+        &pixels,
+        pos_2iter,
+        stamp_radius,
+        local_bg,
+        None,
+        &fit_config,
+    );
+    let result_from_10iter = fit_moffat_2d(
+        &pixels,
+        pos_10iter,
+        stamp_radius,
+        local_bg,
+        None,
+        &fit_config,
+    );
 
     assert!(
         result_from_2iter.is_some(),
@@ -3212,7 +3237,7 @@ fn test_gaussian_fit_undersampled_psf() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 6, background, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 6, background, None, &config);
 
     assert!(result.is_some(), "Should fit undersampled Gaussian");
     let result = result.unwrap();
@@ -3423,6 +3448,7 @@ fn test_gaussian_fit_with_contamination() {
         Vec2::new(true_cx, true_cy),
         8,
         background,
+        None,
         &config,
     );
 
@@ -3662,7 +3688,14 @@ fn test_gaussian_fit_rotated_ellipse() {
     );
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels, Vec2::new(true_cx, true_cy), 8, background, &config);
+    let result = fit_gaussian_2d(
+        &pixels,
+        Vec2::new(true_cx, true_cy),
+        8,
+        background,
+        None,
+        &config,
+    );
 
     assert!(result.is_some(), "Should fit rotated ellipse");
     let result = result.unwrap();
@@ -3805,7 +3838,7 @@ fn test_gaussian_fit_bad_initial_guess() {
     let initial_guess = Vec2::new(13.0, 17.0);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, initial_guess, 8, background, &config);
+    let result = fit_gaussian_2d(&pixels_buf, initial_guess, 8, background, None, &config);
 
     assert!(result.is_some(), "Should converge from bad initial guess");
     let result = result.unwrap();
@@ -3848,7 +3881,7 @@ fn test_moffat_fit_bad_initial_guess() {
         fixed_beta: beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, initial_guess, 8, background, &config);
+    let result = fit_moffat_2d(&pixels_buf, initial_guess, 8, background, None, &config);
 
     assert!(
         result.is_some(),
@@ -4197,5 +4230,32 @@ fn windowed_covariance_resists_wing_noise() {
     assert!(
         (0.85..1.18).contains(&ratio),
         "axis ratio {ratio} should stay ~1 under noise (no inflation)"
+    );
+}
+
+// ── Inverse-variance weights (PR1) ───────────────────────────────────────────
+
+#[test]
+fn inverse_variance_weights_downweight_bright_pixels() {
+    // CCD per-pixel variance = signal/gain + sky² + read²/gain² (same as compute_snr).
+    // Gain is in the normalized domain (≈ phys_gain × white_level), so signal/gain is
+    // comparable to sky² and the shot-noisy bright pixels get lower weight.
+    let bg = 0.1;
+    let sky_noise = 0.02; // sky_var = 4e-4
+    let gain = 1000.0;
+    let read_noise = 10.0; // read_var = 100 / 1e6 = 1e-4
+    let data_z = [0.1, 0.6, 1.1]; // signals 0.0, 0.5, 1.0
+
+    let w = inverse_variance_weights(&data_z, bg, sky_noise, gain, read_noise);
+
+    // signal 0.0: 1/(0      + 4e-4 + 1e-4) = 2000
+    // signal 0.5: 1/(5e-4   + 5e-4)        = 1000
+    // signal 1.0: 1/(1e-3   + 5e-4)        ≈ 666.67
+    assert!((w[0] - 2000.0).abs() < 1.0, "w0 = {}", w[0]);
+    assert!((w[1] - 1000.0).abs() < 1.0, "w1 = {}", w[1]);
+    assert!((w[2] - 666.667).abs() < 1.0, "w2 = {}", w[2]);
+    assert!(
+        w[0] > w[1] && w[1] > w[2],
+        "weight must fall as signal rises"
     );
 }

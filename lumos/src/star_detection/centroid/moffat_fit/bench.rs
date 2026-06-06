@@ -25,6 +25,7 @@ fn bench_moffat_fit_fixed_beta_small(b: quickbench::Bencher) {
             black_box(Vec2::splat(8.0)),
             black_box(8),
             black_box(0.1),
+            None,
             black_box(&config),
         ))
     });
@@ -46,6 +47,7 @@ fn bench_moffat_fit_fixed_beta_medium(b: quickbench::Bencher) {
             black_box(Vec2::splat(12.0)),
             black_box(12),
             black_box(0.1),
+            None,
             black_box(&config),
         ))
     });
@@ -67,6 +69,7 @@ fn bench_moffat_fit_variable_beta(b: quickbench::Bencher) {
             black_box(Vec2::splat(10.0)),
             black_box(8),
             black_box(0.1),
+            None,
             black_box(&config),
         ))
     });

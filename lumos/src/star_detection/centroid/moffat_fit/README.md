@@ -111,22 +111,18 @@ Libraries like [SLEEF](https://sleef.org/) provide vectorized `powf` with 1 ULP 
 ## Usage
 
 ```rust
-use lumos::star_detection::centroid::moffat_fit::{
-    fit_moffat_2d, fit_moffat_2d_weighted, MoffatFitConfig
-};
+use lumos::star_detection::centroid::moffat_fit::{fit_moffat_2d, MoffatFitConfig};
 
-// Basic fitting
 let config = MoffatFitConfig::default();
-let result = fit_moffat_2d(&pixels, cx, cy, stamp_radius, background, &config)?;
 
-// Weighted fitting (optimal for known noise characteristics)
-let result = fit_moffat_2d_weighted(
-    &pixels, cx, cy, stamp_radius,
-    background, noise, gain, read_noise,
-    &config
-)?;
+// Unweighted fit
+let result = fit_moffat_2d(&pixels, pos, stamp_radius, background, None, &config)?;
 
-println!("Center: ({:.3}, {:.3})", result.x, result.y);
+// Inverse-variance-weighted fit: local sky σ + the NoiseModel's gain/read-noise
+let noise = Some(FitNoise { sky_noise, gain, read_noise });
+let result = fit_moffat_2d(&pixels, pos, stamp_radius, background, noise, &config)?;
+
+println!("Center: ({:.3}, {:.3})", result.pos.x, result.pos.y);
 println!("FWHM: {:.2} pixels", result.fwhm);
 println!("Converged: {} in {} iterations", result.converged, result.iterations);
 ```
