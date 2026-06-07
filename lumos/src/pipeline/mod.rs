@@ -10,6 +10,7 @@
 use rayon::prelude::*;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::astro_image::AstroImage;
 use crate::astro_image::error::ImageError;
@@ -100,14 +101,22 @@ pub fn align_and_stack(
     }
 
     // Detect stars on every frame. Each rayon task owns its detector — `detect` is `&mut`.
+    let total = lights.len();
+    tracing::info!(frames = total, "Detecting stars");
+    let detected = AtomicUsize::new(0);
     let star_sets: Vec<Vec<Star>> = lights
         .par_iter()
         .map(|img| {
-            StarDetector::from_config(config.detection.clone())
+            let stars = StarDetector::from_config(config.detection.clone())
                 .detect(img)
-                .stars
+                .stars;
+            let n = detected.fetch_add(1, Ordering::Relaxed) + 1;
+            tracing::info!(frame = n, total, stars = stars.len(), "detected stars");
+            stars
         })
         .collect();
+    let total_stars: usize = star_sets.iter().map(|s| s.len()).sum();
+    tracing::info!(total_stars, "Star detection complete");
 
     let reference = match config.reference {
         Reference::Index(index) => {
@@ -136,19 +145,35 @@ pub fn align_and_stack(
             required: config.registration.min_stars,
         });
     }
+    tracing::info!(
+        reference,
+        ref_stars = ref_stars.len(),
+        "Reference frame selected"
+    );
 
     // Register + warp every non-reference frame to the reference. A frame that fails to solve
     // is dropped (its index returned), not fatal.
+    let reg_total = lights.len() - 1;
+    tracing::info!(frames = reg_total, "Registering frames to the reference");
+    let registered_so_far = AtomicUsize::new(0);
     let outcomes: Vec<Result<AstroImage, usize>> = lights
         .par_iter()
         .enumerate()
         .filter(|(index, _)| *index != reference)
-        .map(
-            |(index, img)| match register(ref_stars, &star_sets[index], &config.registration) {
+        .map(|(index, img)| {
+            let outcome = match register(ref_stars, &star_sets[index], &config.registration) {
                 Ok(result) => Ok(warp(img, &result.warp_transform(), &config.registration).image),
                 Err(_) => Err(index),
-            },
-        )
+            };
+            let n = registered_so_far.fetch_add(1, Ordering::Relaxed) + 1;
+            tracing::info!(
+                frame = n,
+                total = reg_total,
+                solved = outcome.is_ok(),
+                "registered"
+            );
+            outcome
+        })
         .collect();
 
     let mut frames: Vec<AstroImage> = Vec::with_capacity(outcomes.len() + 1);
@@ -160,6 +185,11 @@ pub fn align_and_stack(
         }
     }
     dropped.sort_unstable();
+    tracing::info!(
+        aligned = frames.len(),
+        dropped = dropped.len(),
+        "Registration complete"
+    );
 
     // Every non-reference frame dropped → nothing aligned. (A lone reference frame is fine.)
     if frames.is_empty() && lights.len() > 1 {
@@ -176,7 +206,9 @@ pub fn align_and_stack(
     frames.push(reference_image);
 
     let registered = frames.len();
+    tracing::info!(frames = registered, "Stacking aligned frames");
     let image = stack_images(frames, config.stack.clone(), ProgressCallback::default())?;
+    tracing::info!("Stack complete");
 
     Ok(AlignStackResult {
         image,
@@ -200,6 +232,12 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     masters: &CalibrationMasters,
     config: &AlignStackConfig,
 ) -> Result<AlignStackResult, Error> {
+    let total = light_paths.len();
+    tracing::info!(
+        frames = total,
+        "Loading, calibrating and demosaicing raw lights (RAW decode — the slow phase)"
+    );
+    let done = AtomicUsize::new(0);
     let calibrated: Vec<AstroImage> = light_paths
         .par_iter()
         .map(|path| {
@@ -208,7 +246,10 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
                 source,
             })?;
             masters.calibrate(&mut cfa);
-            Ok(cfa.demosaic())
+            let image = cfa.demosaic();
+            let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+            tracing::info!(frame = n, total, "calibrated light");
+            Ok(image)
         })
         .collect::<Result<Vec<_>, Error>>()?;
 

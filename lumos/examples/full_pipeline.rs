@@ -34,22 +34,31 @@ fn main() {
     tracing::info!(path = %calibration_dir.display(), "Calibration directory");
 
     // Step 1 — calibration masters from raw dark/flat/bias frames.
+    tracing::info!("── Step 1/2: building calibration masters ──");
+    let step = Instant::now();
     let masters = create_calibration_masters(&calibration_dir);
+    tracing::info!(elapsed = elapsed(step), "Step 1 complete: masters ready");
 
     // Step 2 — raw lights → calibrated, registered, stacked master, in one call.
+    // (`calibrate_align_stack` narrates its own load → detect → register → stack phases.)
     let light_paths = common::file_utils::astro_image_files(&calibration_dir.join("Lights"));
     assert!(!light_paths.is_empty(), "no light frames found in Lights/");
-    tracing::info!(count = light_paths.len(), "Light frames");
-
+    tracing::info!(
+        lights = light_paths.len(),
+        "── Step 2/2: calibrate → align → stack ──"
+    );
+    let step = Instant::now();
     let result = calibrate_align_stack(&light_paths, &masters, &AlignStackConfig::default())
         .expect("calibrate_align_stack failed");
-
     tracing::info!(
-        "Stacked {} of {} lights (reference frame #{}, dropped {:?})",
-        result.registered,
-        light_paths.len(),
-        result.reference,
-        result.dropped,
+        registered = result.registered,
+        total = light_paths.len(),
+        reference = result.reference,
+        dropped = ?result.dropped,
+        width = result.image.width(),
+        height = result.image.height(),
+        elapsed = elapsed(step),
+        "Step 2 complete: stacked master ready"
     );
 
     // Save the stacked master.
@@ -60,12 +69,18 @@ fn main() {
     std::fs::create_dir_all(output.parent().unwrap()).expect("create output directory");
     let image: imaginarium::Image = result.image.into();
     image.save_file(&output).expect("save stacked master");
+    tracing::info!(path = %output.display(), "Saved stacked master");
 
     println!(
         "\nPipeline complete in {:.1}s — saved {}",
         start.elapsed().as_secs_f32(),
         output.display()
     );
+}
+
+/// Seconds elapsed since `since`, formatted for a tracing field (e.g. `"12.3s"`).
+fn elapsed(since: Instant) -> String {
+    format!("{:.1}s", since.elapsed().as_secs_f32())
 }
 
 /// Build calibration masters from raw frames in `Darks/`, `Flats/`, and `Bias/`.
@@ -101,7 +116,11 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
     .expect("failed to build calibration masters");
 
     if let Some(ref defects) = masters.defect_map {
-        tracing::info!(count = defects.count(), "Hot pixels detected");
+        tracing::info!(
+            hot = defects.hot_indices.len(),
+            cold = defects.cold_indices.len(),
+            "Defect map built (hot from dark, cold/dead from flat)"
+        );
     }
     masters
 }
