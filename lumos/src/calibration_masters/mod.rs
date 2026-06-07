@@ -126,8 +126,17 @@ impl CalibrationMasters {
             flat_dark,
         } = images;
 
-        // Hot pixels from the dark, cold/dead pixels from the flat.
-        let defect_map = DefectMap::from_masters(dark.as_ref(), flat.as_ref(), sigma_threshold);
+        // Hot pixels from the dark, cold/dead pixels from the flat — None if we have neither.
+        let defect_map = (dark.is_some() || flat.is_some()).then(|| {
+            let mut map = DefectMap::default();
+            if let Some(dark) = dark.as_ref() {
+                map = map.detect_hot(dark, sigma_threshold);
+            }
+            if let Some(flat) = flat.as_ref() {
+                map = map.detect_cold(flat);
+            }
+            map
+        });
 
         Self {
             master_dark: dark,

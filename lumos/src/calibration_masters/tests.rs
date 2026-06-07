@@ -307,7 +307,7 @@ fn test_defect_detection_zero_median_no_false_positives() {
         },
     };
 
-    let defect_map = DefectMap::from_master_dark(&dark, 5.0);
+    let defect_map = DefectMap::default().detect_hot(&dark, 5.0);
 
     // The tiny values should NOT be flagged as hot
     assert!(

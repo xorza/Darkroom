@@ -52,9 +52,9 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 ## calibration_masters — master frames & defects
 
 - `CalibrationMasters` (`mod.rs:66`): optional master dark/flat/bias/flat-dark `CfaImage`s + `DefectMap`.
-- `from_files` (`mod.rs:146`) stacks raw CFA frames through the full stacking pipeline (sigma-clipped mean at ≥8 frames, else median); `from_images` (`mod.rs:117`) builds from pre-stacked frames and derives a `DefectMap` from the dark.
+- `from_files` (`mod.rs:146`) stacks raw CFA frames through the full stacking pipeline (sigma-clipped mean at ≥8 frames, else median); `from_images` (`mod.rs:117`) builds from pre-stacked frames and derives a `DefectMap` (hot from the dark, cold/dead from the flat).
 - `calibrate(&mut CfaImage)` (`mod.rs:171`): **order = dark-subtract (or bias) → flat-divide (flat-dark priority over bias) → defect-correct**, in place.
-- `DefectMap` (`defect_map.rs:40`): hot/cold flat-index lists from per-color MAD thresholds (`from_master_dark`, adaptive sampling above 200K px); `correct()` replaces defects with same-color CFA-neighbor medians. `DEFAULT_SIGMA_THRESHOLD = 5.0`.
+- `DefectMap` (`defect_map.rs`): hot/cold flat-index lists, built fluently from `DefectMap::default().detect_hot(&dark, σ).detect_cold(&flat)` — **hot** from the dark via per-color MAD threshold (adaptive sampling above 200K px), **cold/dead** from the flat via a same-color local-neighbour ratio (`< DEAD_PIXEL_FRACTION × local median`, robust to vignetting where a global cut can't be); `correct()` replaces defects with same-color CFA-neighbor medians. `DEFAULT_SIGMA_THRESHOLD = 5.0`.
 
 ## raw — RAW decode & demosaic
 
