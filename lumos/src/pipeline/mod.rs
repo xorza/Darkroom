@@ -341,7 +341,7 @@ mod tests {
         let (base, reg) = base_field();
         let dims = base.dimensions;
         // A flat frame has no stars → registration fails → it is dropped, not fatal.
-        let blank = AstroImage::from_pixels(dims, vec![0.1; dims.width * dims.height]);
+        let blank = AstroImage::from_pixels(dims, vec![0.1; dims.size.x * dims.size.y]);
         let frames = vec![base.clone(), shifted(&base, &reg, 5.0, 3.0), blank];
 
         let config = AlignStackConfig {
@@ -360,7 +360,7 @@ mod tests {
         // Frame 1 (full field) has far more stars than frame 0 (a near-blank), so Auto must
         // anchor on frame 1.
         let dims = base.dimensions;
-        let sparse = AstroImage::from_pixels(dims, vec![0.1; dims.width * dims.height]);
+        let sparse = AstroImage::from_pixels(dims, vec![0.1; dims.size.x * dims.size.y]);
         let frames = vec![sparse, base.clone(), shifted(&base, &reg, 4.0, -3.0)];
 
         let result = align_and_stack(frames, &AlignStackConfig::default()).expect("stack");

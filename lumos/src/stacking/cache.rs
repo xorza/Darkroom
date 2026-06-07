@@ -46,7 +46,7 @@ fn compute_frame_stats(image: &impl StackableImage) -> FrameStats {
     if n == 1 {
         // Single channel — no parallelism needed, avoid rayon overhead.
         let data = image.channel(0);
-        let mut buf = Vec::with_capacity(dims.width * dims.height);
+        let mut buf = Vec::with_capacity(dims.size.x * dims.size.y);
         buf.extend_from_slice(data);
         let median = crate::math::statistics::median_f32_mut(&mut buf);
         let mad = crate::math::statistics::mad_f32_with_scratch(data, median, &mut buf);
@@ -60,7 +60,7 @@ fn compute_frame_stats(image: &impl StackableImage) -> FrameStats {
         .into_par_iter()
         .map(|c| {
             let data = image.channel(c);
-            let mut buf = Vec::with_capacity(dims.width * dims.height);
+            let mut buf = Vec::with_capacity(dims.size.x * dims.size.y);
             buf.extend_from_slice(data);
             let median = crate::math::statistics::median_f32_mut(&mut buf);
             let mad = crate::math::statistics::mad_f32_with_scratch(data, median, &mut buf);
@@ -467,8 +467,8 @@ impl<I: StackableImage> ImageCache<I> {
     {
         let dims = self.dimensions;
         let frame_count = self.frame_count();
-        let width = dims.width;
-        let height = dims.height;
+        let width = dims.size.x;
+        let height = dims.size.y;
         let available_memory = self.config.get_available_memory();
 
         let chunk_rows = match &self.storage {
@@ -532,7 +532,7 @@ impl<I: StackableImage> ImageCache<I> {
         start_row: usize,
         end_row: usize,
     ) -> &[f32] {
-        let width = self.dimensions.width;
+        let width = self.dimensions.size.x;
         let start_pixel = start_row * width;
         let end_pixel = end_row * width;
 
@@ -585,7 +585,7 @@ fn try_reuse_channel_cache_file(path: &Path, expected_dims: ImageDimensions) -> 
         return false;
     };
 
-    let pixels_per_channel = expected_dims.width * expected_dims.height;
+    let pixels_per_channel = expected_dims.size.x * expected_dims.size.y;
     let expected_size = (pixels_per_channel * size_of::<f32>()) as u64;
     if metadata.len() != expected_size {
         return false;

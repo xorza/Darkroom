@@ -71,7 +71,7 @@ pub fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
         }
     };
 
-    let plane_size = img_dims.width * img_dims.height;
+    let plane_size = img_dims.size.x * img_dims.size.y;
     assert_eq!(
         pixels.len(),
         plane_size * img_dims.channels,

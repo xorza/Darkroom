@@ -186,8 +186,8 @@ impl DrizzleAccumulator {
             input_dims.channels,
             MAX_CHANNELS
         );
-        let output_width = (input_dims.width as f32 * config.scale).ceil() as usize;
-        let output_height = (input_dims.height as f32 * config.scale).ceil() as usize;
+        let output_width = (input_dims.size.x as f32 * config.scale).ceil() as usize;
+        let output_height = (input_dims.size.y as f32 * config.scale).ceil() as usize;
 
         let mut data = ArrayVec::new();
         let mut weights = ArrayVec::new();
@@ -972,8 +972,8 @@ pub fn drizzle_stack<P: AsRef<Path> + Sync>(
     let input_dims = first_image.dimensions;
 
     tracing::info!(
-        input_width = input_dims.width,
-        input_height = input_dims.height,
+        input_width = input_dims.size.x,
+        input_height = input_dims.size.y,
         channels = input_dims.channels,
         output_scale = config.scale,
         pixfrac = config.pixfrac,
@@ -1032,8 +1032,8 @@ pub fn drizzle_images(
     let input_dims = images[0].dimensions;
 
     tracing::info!(
-        input_width = input_dims.width,
-        input_height = input_dims.height,
+        input_width = input_dims.size.x,
+        input_height = input_dims.size.y,
         channels = input_dims.channels,
         output_scale = config.scale,
         pixfrac = config.pixfrac,

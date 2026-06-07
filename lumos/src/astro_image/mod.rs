@@ -57,11 +57,11 @@ impl BitPix {
 // ImageDimensions
 // ============================================================================
 
-/// Image dimensions: width, height, and number of channels.
+/// Image dimensions: pixel size and number of channels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct ImageDimensions {
-    pub width: usize,
-    pub height: usize,
+    /// Pixel dimensions as a `(width, height)` vector.
+    pub size: Vec2us,
     pub channels: usize,
 }
 
@@ -75,27 +75,21 @@ impl ImageDimensions {
             channels
         );
         Self {
-            width,
-            height,
+            size: Vec2us::new(width, height),
             channels,
         }
-    }
-
-    /// Pixel dimensions as a `(width, height)` vector.
-    pub fn size(&self) -> Vec2us {
-        Vec2us::new(self.width, self.height)
     }
 
     /// Total number of f32 samples: `width * height * channels`.
     /// For a 100x100 RGB image, returns 30000.
     pub fn sample_count(&self) -> usize {
-        self.width * self.height * self.channels
+        self.size.x * self.size.y * self.channels
     }
 
     /// Number of pixels: `width * height`.
     /// For a 100x100 RGB image, returns 10000.
     pub fn pixel_count(&self) -> usize {
-        self.width * self.height
+        self.size.x * self.size.y
     }
 
     pub fn is_grayscale(&self) -> bool {
@@ -279,8 +273,8 @@ impl AstroImage {
             pixels.len()
         );
 
-        let width = dimensions.width;
-        let height = dimensions.height;
+        let width = dimensions.size.x;
+        let height = dimensions.size.y;
         let pixel_data = if dimensions.is_grayscale() {
             PixelData::L(Buffer2::new(width, height, pixels))
         } else {
@@ -303,9 +297,9 @@ impl AstroImage {
         dimensions: ImageDimensions,
         channels: impl IntoIterator<Item = Vec<f32>>,
     ) -> Self {
-        let expected_pixels_per_channel = dimensions.width * dimensions.height;
-        let width = dimensions.width;
-        let height = dimensions.height;
+        let expected_pixels_per_channel = dimensions.size.x * dimensions.size.y;
+        let width = dimensions.size.x;
+        let height = dimensions.size.y;
 
         let mut iter = channels.into_iter();
         let pixel_data = if dimensions.is_grayscale() {
@@ -356,11 +350,11 @@ impl AstroImage {
     // ------------------------------------------------------------------------
 
     pub fn width(&self) -> usize {
-        self.dimensions.width
+        self.dimensions.size.x
     }
 
     pub fn height(&self) -> usize {
-        self.dimensions.height
+        self.dimensions.size.y
     }
 
     pub fn channels(&self) -> usize {
@@ -481,7 +475,7 @@ impl crate::stacking::cache::StackableImage for AstroImage {
 impl SubAssign<&AstroImage> for AstroImage {
     fn sub_assign(&mut self, rhs: &AstroImage) {
         assert_eq!(self.dimensions, rhs.dimensions, "Image dimensions mismatch");
-        let w = self.dimensions.width;
+        let w = self.dimensions.size.x;
         for c in 0..self.channels() {
             let dst = self.channel_mut(c).pixels_mut();
             let src = rhs.channel(c).pixels();
@@ -502,8 +496,8 @@ impl SubAssign<&AstroImage> for AstroImage {
 
 impl From<AstroImage> for Image {
     fn from(astro: AstroImage) -> Self {
-        let width = astro.dimensions.width;
-        let height = astro.dimensions.height;
+        let width = astro.dimensions.size.x;
+        let height = astro.dimensions.size.y;
 
         let (color_format, interleaved) = match astro.pixels {
             PixelData::L(data) => (ColorFormat::L_F32, data.into_vec()),

@@ -446,8 +446,8 @@ fn test_sub_assign() {
 #[test]
 fn test_image_dimensions_validation() {
     let dims = ImageDimensions::new(100, 200, 3);
-    assert_eq!(dims.width, 100);
-    assert_eq!(dims.height, 200);
+    assert_eq!(dims.size.x, 100);
+    assert_eq!(dims.size.y, 200);
     assert_eq!(dims.channels, 3);
     assert_eq!(dims.pixel_count(), 20000);
     assert_eq!(dims.sample_count(), 60000);

@@ -43,8 +43,8 @@ fn test_drizzle_accumulator_dimensions() {
     let config = DrizzleConfig::x2();
     let acc = DrizzleAccumulator::new(ImageDimensions::new(100, 80, 3), config);
     let dims = acc.dimensions();
-    assert_eq!(dims.width, 200);
-    assert_eq!(dims.height, 160);
+    assert_eq!(dims.size.x, 200);
+    assert_eq!(dims.size.y, 160);
     assert_eq!(dims.channels, 3);
 }
 

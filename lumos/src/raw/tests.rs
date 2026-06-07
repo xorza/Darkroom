@@ -53,8 +53,8 @@ fn test_load_raw_valid_file() {
     let image = result.unwrap();
 
     // Validate dimensions
-    assert!(image.dimensions().width > 0);
-    assert!(image.dimensions().height > 0);
+    assert!(image.dimensions().size.x > 0);
+    assert!(image.dimensions().size.y > 0);
     assert_eq!(image.dimensions().channels, 3); // RGB output
 
     // Validate pixel values are normalized (check all channels)
@@ -86,11 +86,11 @@ fn test_load_raw_dimensions_match() {
     assert_eq!(image.metadata.header_dimensions.len(), 3);
     assert_eq!(
         image.metadata.header_dimensions[0],
-        image.dimensions().height
+        image.dimensions().size.y
     );
     assert_eq!(
         image.metadata.header_dimensions[1],
-        image.dimensions().width
+        image.dimensions().size.x
     );
     assert_eq!(
         image.metadata.header_dimensions[2],
