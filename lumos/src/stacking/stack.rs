@@ -8,8 +8,9 @@ use std::path::Path;
 use arrayvec::ArrayVec;
 
 use crate::AstroImage;
+use common::Buffer2;
 
-use super::cache::{FrameStats, ImageCache, StackableImage};
+use super::cache::{FrameStats, ImageCache, StackableImage, WeightedImageCache};
 use super::config::{CombineMethod, Normalization, StackConfig, Weighting};
 use super::error::Error;
 use super::progress::ProgressCallback;
@@ -36,6 +37,28 @@ impl ChannelNorm {
 #[derive(Debug, Clone)]
 pub(crate) struct FrameNorm {
     pub channels: ArrayVec<ChannelNorm, 3>,
+}
+
+/// One input frame for [`stack_images`]: the image plus optional per-pixel coverage.
+///
+/// `coverage` (e.g. produced by warping) marks how much of each output pixel landed on real source
+/// data; the combine includes a frame at a pixel only where its coverage is meaningful, weighted by
+/// it, so warped-frame borders don't drag the stacked edges dark. `None` means the frame fully
+/// covers every pixel (weight 1) — e.g. an unwarped reference. Plain `AstroImage`s convert with
+/// `.into()`.
+#[derive(Debug)]
+pub struct StackFrame {
+    pub image: AstroImage,
+    pub coverage: Option<Buffer2<f32>>,
+}
+
+impl From<AstroImage> for StackFrame {
+    fn from(image: AstroImage) -> Self {
+        Self {
+            image,
+            coverage: None,
+        }
+    }
 }
 
 /// Stack multiple images from disk into a single result.
@@ -104,35 +127,41 @@ pub fn stack<P: AsRef<Path> + Sync>(
 /// Stack frames already held in memory into a single result.
 ///
 /// The in-memory counterpart to [`stack`]: skips the disk round-trip when the caller already
-/// owns the decoded frames (e.g. straight off calibration or warping). The frames are
-/// consumed. Pass [`ProgressCallback::default()`] when you don't need progress reporting.
+/// owns the decoded frames (e.g. straight off calibration or warping). The frames are consumed.
+/// Pass [`ProgressCallback::default()`] when you don't need progress reporting.
+///
+/// Each [`StackFrame`] may carry per-pixel `coverage`; the combine then includes a frame at a
+/// pixel only where it actually covers, so warped-frame borders don't drag the stacked edges
+/// dark. Frames with no coverage count fully everywhere. Plain `AstroImage`s convert via `.into()`.
 ///
 /// # Panics
 ///
 /// - If `config` fails validation (see [`StackConfig::validate`]).
-/// - If `config.weighting` is `Manual` and the weight count doesn't match `images.len()`.
+/// - If `config.weighting` is `Manual` and the weight count doesn't match the frame count.
+/// - If any frame's `coverage` map dimensions don't match the frames.
 pub fn stack_images(
-    images: Vec<AstroImage>,
+    frames: Vec<StackFrame>,
     config: StackConfig,
     progress: ProgressCallback,
 ) -> Result<AstroImage, Error> {
-    if images.is_empty() {
+    if frames.is_empty() {
         return Err(Error::NoFrames);
     }
 
     config.validate();
-    validate_manual_weights(&config, images.len());
+    validate_manual_weights(&config, frames.len());
 
     tracing::info!(
         method = ?config.method,
         weighting = ?config.weighting,
         normalization = ?config.normalization,
-        frame_count = images.len(),
+        frame_count = frames.len(),
+        coverage_weighted = frames.iter().any(|f| f.coverage.is_some()),
         "Starting unified stack (in memory)"
     );
 
-    let cache = ImageCache::<AstroImage>::from_images(images, &config.cache, progress)?;
-    let result = run_stacking(&cache, &config);
+    let cache = WeightedImageCache::from_stack_frames(frames, &config.cache, progress)?;
+    let result = run_stacking_weighted(&cache, &config);
     cache.cleanup();
     Ok(result)
 }
@@ -339,36 +368,50 @@ pub(crate) fn run_stacking<I: StackableImage>(cache: &ImageCache<I>, config: &St
     let method = effective_combine_method(config.method, stats.len());
     let frame_norms = compute_frame_norms(stats, config.normalization);
     let weights = resolve_weights(&config.weighting, stats);
+    let norms = frame_norms.as_deref();
 
-    let pixels = dispatch_stacking(cache, weights.as_deref(), method, frame_norms.as_deref());
-    I::from_stacked(pixels, cache.metadata().clone(), cache.dimensions())
-}
-
-/// Stacking dispatch that works with any `StackableImage` type.
-///
-/// Returns `PixelData` with the combined result.
-fn dispatch_stacking(
-    cache: &ImageCache<impl StackableImage>,
-    weights: Option<&[f32]>,
-    method: CombineMethod,
-    frame_norms: Option<&[FrameNorm]>,
-) -> crate::astro_image::PixelData {
-    match method {
-        CombineMethod::Median => cache.process_chunked(None, frame_norms, |values, _, _| {
+    let pixels = match method {
+        CombineMethod::Median => cache.process_chunked(None, norms, |values, _, _| {
             math::statistics::median_f32_mut(values)
         }),
-
         CombineMethod::Mean(rejection) => {
-            cache.process_chunked(weights, frame_norms, move |values, w, scratch| {
+            cache.process_chunked(weights.as_deref(), norms, move |values, w, scratch| {
                 rejection.combine_mean(values, w, scratch)
             })
         }
-    }
+    };
+    I::from_stacked(pixels, cache.metadata().clone(), cache.dimensions())
+}
+
+/// Coverage-weighted counterpart to [`run_stacking`] for a [`WeightedImageCache`]: identical
+/// combine math, but each frame contributes only where it covers (`process_chunked_weighted`).
+pub(crate) fn run_stacking_weighted(
+    cache: &WeightedImageCache,
+    config: &StackConfig,
+) -> AstroImage {
+    let stats = cache.channel_stats();
+    let method = effective_combine_method(config.method, stats.len());
+    let frame_norms = compute_frame_norms(stats, config.normalization);
+    let weights = resolve_weights(&config.weighting, stats);
+    let norms = frame_norms.as_deref();
+
+    let pixels = match method {
+        CombineMethod::Median => cache.process_chunked_weighted(None, norms, |values, _, _| {
+            math::statistics::median_f32_mut(values)
+        }),
+        CombineMethod::Mean(rejection) => {
+            cache.process_chunked_weighted(weights.as_deref(), norms, move |values, w, scratch| {
+                rejection.combine_mean(values, w, scratch)
+            })
+        }
+    };
+    AstroImage::from_stacked(pixels, cache.metadata().clone(), cache.dimensions())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stacking::cache_config::CacheConfig;
     use crate::stacking::rejection::Rejection;
     use crate::{
         astro_image::{AstroImage, ImageDimensions},
@@ -494,7 +537,8 @@ mod tests {
             method: CombineMethod::Mean(Rejection::None),
             ..Default::default()
         };
-        let result = stack_images(images, config, ProgressCallback::default()).unwrap();
+        let frames = images.into_iter().map(StackFrame::from).collect();
+        let result = stack_images(frames, config, ProgressCallback::default()).unwrap();
         assert_eq!(result.channels(), 1);
         for &p in result.channel(0).pixels() {
             assert!((p - 20.0).abs() < 1e-4, "expected 20.0, got {p}");
@@ -506,7 +550,7 @@ mod tests {
         let a = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
         let b = AstroImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0; 4]);
         let result = stack_images(
-            vec![a, b],
+            vec![a.into(), b.into()],
             StackConfig::default(),
             ProgressCallback::default(),
         );
@@ -514,6 +558,168 @@ mod tests {
             result.unwrap_err(),
             Error::DimensionMismatch { index: 1, .. }
         ));
+    }
+
+    // ========== Per-pixel coverage weighting (warp → stack) ==========
+
+    #[test]
+    fn coverage_excludes_uncovered_frames() {
+        // 2 frames, 2 px. Frame B does not cover pixel 1 (coverage 0) → pixel 1 is A alone.
+        let dims = ImageDimensions::new((2, 1), 1);
+        let a = AstroImage::from_pixels(dims, vec![10.0, 10.0]);
+        let b = AstroImage::from_pixels(dims, vec![20.0, 20.0]);
+        let config = StackConfig {
+            method: CombineMethod::Mean(Rejection::None),
+            normalization: Normalization::None,
+            ..Default::default()
+        };
+        let frames = vec![
+            StackFrame {
+                image: a,
+                coverage: Some(Buffer2::new(2, 1, vec![1.0, 1.0])),
+            },
+            StackFrame {
+                image: b,
+                coverage: Some(Buffer2::new(2, 1, vec![1.0, 0.0])),
+            },
+        ];
+        let out = stack_images(frames, config, ProgressCallback::default()).unwrap();
+        let px = out.channel(0).pixels();
+        assert!(
+            (px[0] - 15.0).abs() < 1e-4,
+            "px0 = mean(10,20) = 15, got {}",
+            px[0]
+        );
+        assert!(
+            (px[1] - 10.0).abs() < 1e-4,
+            "px1 = A only = 10, got {}",
+            px[1]
+        );
+    }
+
+    #[test]
+    fn coverage_weights_partial_contributions() {
+        // 1 px: A (cov 1.0, val 10) + B (cov 0.5, val 20) → (10·1 + 20·0.5)/1.5 = 40/3.
+        let dims = ImageDimensions::new((1, 1), 1);
+        let a = AstroImage::from_pixels(dims, vec![10.0]);
+        let b = AstroImage::from_pixels(dims, vec![20.0]);
+        let config = StackConfig {
+            method: CombineMethod::Mean(Rejection::None),
+            normalization: Normalization::None,
+            ..Default::default()
+        };
+        let frames = vec![
+            StackFrame {
+                image: a,
+                coverage: Some(Buffer2::new(1, 1, vec![1.0])),
+            },
+            StackFrame {
+                image: b,
+                coverage: Some(Buffer2::new(1, 1, vec![0.5])),
+            },
+        ];
+        let out = stack_images(frames, config, ProgressCallback::default()).unwrap();
+        let v = out.channel(0).pixels()[0];
+        assert!((v - 40.0 / 3.0).abs() < 1e-4, "expected 40/3, got {v}");
+    }
+
+    #[test]
+    fn coverage_none_frame_counts_fully() {
+        // A `coverage: None` frame (e.g. the unwarped reference) must count fully (weight 1)
+        // alongside coverage-carrying frames — not be excluded.
+        let dims = ImageDimensions::new((1, 1), 1);
+        let frames = vec![
+            StackFrame::from(AstroImage::from_pixels(dims, vec![10.0])),
+            StackFrame {
+                image: AstroImage::from_pixels(dims, vec![20.0]),
+                coverage: Some(Buffer2::new(1, 1, vec![1.0])),
+            },
+        ];
+        let config = StackConfig {
+            method: CombineMethod::Mean(Rejection::None),
+            normalization: Normalization::None,
+            ..Default::default()
+        };
+        let v = stack_images(frames, config, ProgressCallback::default())
+            .unwrap()
+            .channel(0)
+            .pixels()[0];
+        assert!(
+            (v - 15.0).abs() < 1e-4,
+            "None frame counts fully: mean(10,20) = 15, got {v}"
+        );
+    }
+
+    #[test]
+    fn coverage_zero_in_all_frames_fills_zero() {
+        // 1 frame, 2 px; pixel 1 uncovered → no contributor → 0 fill (matches the warp border).
+        let dims = ImageDimensions::new((2, 1), 1);
+        let a = AstroImage::from_pixels(dims, vec![10.0, 10.0]);
+        let config = StackConfig {
+            method: CombineMethod::Mean(Rejection::None),
+            normalization: Normalization::None,
+            ..Default::default()
+        };
+        let frames = vec![StackFrame {
+            image: a,
+            coverage: Some(Buffer2::new(2, 1, vec![1.0, 0.0])),
+        }];
+        let out = stack_images(frames, config, ProgressCallback::default()).unwrap();
+        let px = out.channel(0).pixels();
+        assert!(
+            (px[0] - 10.0).abs() < 1e-4,
+            "covered px = 10, got {}",
+            px[0]
+        );
+        assert_eq!(px[1], 0.0, "uncovered px must be 0 fill, got {}", px[1]);
+    }
+
+    #[test]
+    fn coverage_keeps_real_values_from_sigma_rejection_at_sparse_edges() {
+        // The artifact this fixes: an edge covered by 2/5 frames. Without coverage the 3 zero
+        // border-fills dominate SigmaClip (median 0) and reject the real 0.1 values → dark edge.
+        // Coverage excludes the fills → only the 2 real frames combine.
+        let dims = ImageDimensions::new((1, 1), 1);
+        let frames: Vec<StackFrame> = [0.1, 0.1, 0.0, 0.0, 0.0]
+            .iter()
+            .zip([1.0, 1.0, 0.0, 0.0, 0.0])
+            .map(|(&v, c)| StackFrame {
+                image: AstroImage::from_pixels(dims, vec![v]),
+                coverage: Some(Buffer2::new(1, 1, vec![c])),
+            })
+            .collect();
+        let config = StackConfig {
+            method: CombineMethod::Mean(Rejection::sigma_clip(2.5)),
+            normalization: Normalization::None,
+            ..Default::default()
+        };
+        let v = stack_images(frames, config, ProgressCallback::default())
+            .unwrap()
+            .channel(0)
+            .pixels()[0];
+        assert!(
+            (v - 0.1).abs() < 1e-4,
+            "edge should be the mean of the 2 covering frames (0.1), got {v}"
+        );
+
+        // Cross-check: the same frames with no coverage maps drag the pixel toward 0.
+        let frames2: Vec<StackFrame> = [0.1, 0.1, 0.0, 0.0, 0.0]
+            .iter()
+            .map(|&v| AstroImage::from_pixels(dims, vec![v]).into())
+            .collect();
+        let cfg2 = StackConfig {
+            method: CombineMethod::Mean(Rejection::None),
+            normalization: Normalization::None,
+            ..Default::default()
+        };
+        let dark = stack_images(frames2, cfg2, ProgressCallback::default())
+            .unwrap()
+            .channel(0)
+            .pixels()[0];
+        assert!(
+            dark < 0.05,
+            "without coverage the border-fills pull the edge dark (~0.04), got {dark}"
+        );
     }
 
     // ========== Small-N rejection guard ==========
@@ -726,13 +932,12 @@ mod tests {
         let cache = make_uniform_frames(16, &[100.0, 200.0]);
         let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
 
-        let config = StackConfig {
-            method: CombineMethod::Mean(Rejection::None),
-            normalization: Normalization::Global,
-            ..Default::default()
-        };
-        let result_norm = dispatch_stacking(&cache, None, config.method, Some(&norm_params));
-        let result_unnorm = dispatch_stacking(&cache, None, config.method, None);
+        let result_norm = cache.process_chunked(None, Some(&norm_params), |values, w, scratch| {
+            Rejection::None.combine_mean(values, w, scratch)
+        });
+        let result_unnorm = cache.process_chunked(None, None, |values, w, scratch| {
+            Rejection::None.combine_mean(values, w, scratch)
+        });
 
         let norm_pixel = result_norm.channel(0)[0];
         let unnorm_pixel = result_unnorm.channel(0)[0];
@@ -746,6 +951,43 @@ mod tests {
             "Unnormalized should be ~150, got {}",
             unnorm_pixel
         );
+    }
+
+    #[test]
+    fn disk_backed_stack_combines_via_mmap() {
+        // Force the disk tier (1-byte memory budget) so the full chunked combine reads
+        // memory-mapped `Plane`s: mean(10, 20, 30) = 20 at every pixel.
+        let temp_dir = std::env::temp_dir().join("lumos_disk_stack_combine_test");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let dims = ImageDimensions::new((4, 4), 1);
+        let mut paths = Vec::new();
+        for (i, &v) in [10.0f32, 20.0, 30.0].iter().enumerate() {
+            let image = AstroImage::from_pixels(dims, vec![v; 16]);
+            let path = temp_dir.join(format!("frame{i}.tiff"));
+            image.save(&path).unwrap();
+            paths.push(path);
+        }
+
+        let config = StackConfig {
+            method: CombineMethod::Mean(Rejection::None),
+            normalization: Normalization::None,
+            cache: CacheConfig {
+                available_memory: Some(1), // forces disk-backed (mmap) storage
+                ..CacheConfig::with_cache_dir(temp_dir.join("cache"))
+            },
+            ..Default::default()
+        };
+        let result = stack(&paths, config, ProgressCallback::default()).unwrap();
+        for &p in result.channel(0).pixels() {
+            assert!(
+                (p - 20.0).abs() < 1e-4,
+                "disk-backed mean should be 20, got {p}"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     // ========== Auto Reference Frame Selection ==========

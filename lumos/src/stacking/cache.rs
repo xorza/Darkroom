@@ -1,36 +1,40 @@
 //! Image cache for stacking operations.
 //!
-//! Supports two modes:
-//! - In-memory: When all images fit in available RAM (75%), keeps images directly
-//! - Disk-based: Uses memory-mapped binary files for larger datasets
+//! Frames are stored as planar [`Plane`]s — each plane either in RAM ([`Plane::Memory`]) or
+//! memory-mapped from disk ([`Plane::Mapped`]), chosen per stack by whether the set fits in ~75% of
+//! RAM. One chunked-read path ([`Plane::chunk`]) serves both tiers, and a frame's planes always
+//! share a tier.
 //!
-//! Generic over any `StackableImage` type (e.g., `AstroImage`, `CfaImage`).
+//! Coverage is kept honest by the type system via two frame types: plain stacks use [`Frame`]
+//! (channels only — CFA masters, plain lights) and have no coverage at all; registered/warped
+//! stacks use [`WeightedFrame`] (channels + optional per-pixel coverage). [`FrameStack<I, F>`] is
+//! generic over the two, with aliases [`ImageCache<I>`] (plain) and [`WeightedImageCache`].
 //!
-//! Cache format (disk mode):
-//! - Each image frame has one file per channel (planar storage)
-//! - File naming: `{hash}_c{channel}.bin` (e.g., `abc123_c0.bin`, `abc123_c1.bin`)
-//! - Each file contains raw f32 pixels in row-major order (width * height * 4 bytes)
+//! Disk cache format: one file per channel, `{hash}_c{channel}.bin`, raw f32 row-major
+//! (width * height * 4 bytes); generic over any [`StackableImage`] (e.g. `AstroImage`, `CfaImage`).
 
 use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io::{BufWriter, Write};
+use std::marker::PhantomData;
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
 
 use arrayvec::ArrayVec;
+use common::Buffer2;
 use common::FnvHasher;
 use common::parallel::try_par_map_limited;
 use memmap2::Mmap;
 use rayon::prelude::*;
 
-use crate::astro_image::{AstroImageMetadata, ImageDimensions, PixelData};
+use crate::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
 use crate::math::statistics::ChannelStats;
 use crate::stacking::cache_config::{
     CacheConfig, MEMORY_PERCENT, compute_optimal_chunk_rows_with_memory,
 };
 use crate::stacking::error::Error;
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
-use crate::stacking::stack::FrameNorm;
+use crate::stacking::stack::{FrameNorm, StackFrame};
 
 /// Per-frame statistics: one `ChannelStats` per channel.
 #[derive(Debug, Clone)]
@@ -106,6 +110,10 @@ pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
     fn metadata(&self) -> &AstroImageMetadata;
     fn load(path: &Path) -> Result<Self, Error>;
 
+    /// Consume the image, moving its channel planes out (no copy) — one `Buffer2` per channel in
+    /// channel order. Populates the in-memory cache tier as [`Plane::Memory`].
+    fn into_planes(self) -> ArrayVec<Buffer2<f32>, 3>;
+
     /// Construct from stacking output.
     fn from_stacked(
         pixels: PixelData,
@@ -127,33 +135,73 @@ fn cache_filename_for_path(path: &Path) -> String {
     format!("{:016x}.bin", hash)
 }
 
-/// Cached frame data for disk-backed storage.
-/// Contains 1–3 memory-mapped channels (L, RGB).
+/// One W×H f32 plane — in RAM or memory-mapped. The single tiering primitive: every stored
+/// frame's channels (and a warped frame's coverage) is a `Plane`, so the in-memory and disk tiers
+/// share one chunked-read path and a frame's planes are always the same tier.
 #[derive(Debug)]
-struct CachedFrame {
-    channels: ArrayVec<Mmap, 3>,
+pub(crate) enum Plane {
+    Memory(Buffer2<f32>),
+    Mapped(Mmap),
 }
 
-/// Storage mode for image data.
-#[derive(Debug)]
-enum Storage<I> {
-    /// All images fit in memory - stores images directly for planar channel access.
-    InMemory(Vec<I>),
-    /// Images stored on disk with memory-mapped access.
-    /// Each frame has one file per channel for efficient planar access.
-    DiskBacked {
-        frames: Vec<CachedFrame>,
-        cache_dir: PathBuf,
-    },
+impl Plane {
+    /// Pixels `start..end` (a row-aligned chunk) as `f32`, tier-agnostic.
+    #[inline]
+    fn chunk(&self, start: usize, end: usize) -> &[f32] {
+        match self {
+            Plane::Memory(buffer) => &buffer[start..end],
+            Plane::Mapped(mmap) => {
+                bytemuck::cast_slice(&mmap[start * size_of::<f32>()..end * size_of::<f32>()])
+            }
+        }
+    }
 }
 
-/// Image cache that automatically chooses between in-memory and disk-based storage.
+/// A stored frame's channel planes — implemented by both [`Frame`] and [`WeightedFrame`] so the
+/// chunked combine machinery is shared. Coverage is deliberately *not* here: it lives only on
+/// [`WeightedFrame`], so a plain stack's frame type carries no coverage at all.
+pub(crate) trait CacheFrame: Send + Sync {
+    fn channels(&self) -> &[Plane];
+}
+
+/// Plain stack frame: channels only, never coverage. Used for CFA masters and plain light stacks.
 #[derive(Debug)]
-pub(crate) struct ImageCache<I> {
-    storage: Storage<I>,
+pub(crate) struct Frame {
+    channels: ArrayVec<Plane, 3>,
+}
+
+impl CacheFrame for Frame {
+    fn channels(&self) -> &[Plane] {
+        &self.channels
+    }
+}
+
+/// Registered/warped stack frame: channels + optional per-pixel coverage (`None` = fully covered,
+/// e.g. an unwarped reference). All of a frame's planes share one tier, so coverage is
+/// memory-mapped exactly when its channels are.
+#[derive(Debug)]
+pub(crate) struct WeightedFrame {
+    channels: ArrayVec<Plane, 3>,
+    coverage: Option<Plane>,
+}
+
+impl CacheFrame for WeightedFrame {
+    fn channels(&self) -> &[Plane] {
+        &self.channels
+    }
+}
+
+/// Tiered frame store + combine, parameterized by frame type `F` ([`Frame`] for plain stacks,
+/// [`WeightedFrame`] for coverage-weighted/warped stacks). All frames share one tier; `cache_dir`
+/// is `Some` only when the planes are memory-mapped (removed on cleanup). `I` is the source/output
+/// image type, used only to load inputs and reconstruct the stacked result.
+#[derive(Debug)]
+pub(crate) struct FrameStack<I, F> {
+    frames: Vec<F>,
+    cache_dir: Option<PathBuf>,
     /// Image dimensions (same for all frames).
     dimensions: ImageDimensions,
-    /// Metadata from first frame.
+    /// Metadata from the first frame.
     metadata: AstroImageMetadata,
     /// Per-frame channel statistics (median + MAD), computed at load time.
     channel_stats: Vec<FrameStats>,
@@ -161,6 +209,38 @@ pub(crate) struct ImageCache<I> {
     config: CacheConfig,
     /// Progress callback.
     progress: ProgressCallback,
+    _image: PhantomData<fn() -> I>,
+}
+
+/// Plain (unweighted) stack cache — CFA masters and plain light stacks. Carries no coverage.
+pub(crate) type ImageCache<I> = FrameStack<I, Frame>;
+
+/// Coverage-weighted stack cache for registered/warped frames.
+pub(crate) type WeightedImageCache = FrameStack<AstroImage, WeightedFrame>;
+
+/// Loader output: the stored frames, the disk cache directory (`Some` if memory-mapped), and
+/// per-frame stats.
+type LoadedFrames = (Vec<Frame>, Option<PathBuf>, Vec<FrameStats>);
+
+/// Minimum coverage for a warped frame to contribute at a pixel. Below this the frame's value
+/// there is (near-)entirely warp border-fill, so it's *excluded* from the combine rather than
+/// down-weighted — otherwise its fill would skew rejection and re-introduce the dark warped-edge
+/// ring this weighting exists to remove.
+const COVERAGE_EPSILON: f32 = 1e-3;
+
+/// Per-chunk context handed to the [`ImageCache::process_chunks_internal`] closure: the input frame
+/// slices for this chunk plus the geometry to map a within-chunk pixel to a global frame index.
+#[derive(Debug)]
+struct ChunkContext<'a> {
+    /// One channel slice per frame for this chunk; `frames.len()` is the frame count.
+    frames: &'a [&'a [f32]],
+    /// Row width in pixels.
+    width: usize,
+    /// Channel currently being combined.
+    channel: usize,
+    /// Global pixel index of this chunk's first pixel — for indexing full-frame,
+    /// channel-independent maps such as coverage.
+    pixel_offset: usize,
 }
 
 impl<I: StackableImage> ImageCache<I> {
@@ -211,27 +291,36 @@ impl<I: StackableImage> ImageCache<I> {
             "Image cache storage decision"
         );
 
-        let (storage, channel_stats) = if use_in_memory {
+        let (frames, cache_dir, channel_stats) = if use_in_memory {
             Self::load_in_memory(paths, &progress, dimensions, first_image)?
         } else {
             Self::load_to_disk(paths, config, &progress, dimensions, first_image)?
         };
 
         Ok(Self {
-            storage,
+            frames,
+            cache_dir,
             dimensions,
             metadata,
             channel_stats,
             config: config.clone(),
             progress,
+            _image: PhantomData,
         })
     }
 
-    /// Create an in-memory cache from already-loaded images.
-    ///
-    /// Validates that every frame matches the first frame's dimensions and
-    /// computes per-frame channel statistics. Unlike [`from_paths`], this never
-    /// spills to disk — the images are owned directly.
+    /// Move a loaded image's channels into an in-memory [`Frame`] (no copy — the channel buffers
+    /// are moved out of the image and wrapped as [`Plane::Memory`]).
+    fn image_to_frame(image: I) -> Frame {
+        Frame {
+            channels: image.into_planes().into_iter().map(Plane::Memory).collect(),
+        }
+    }
+
+    /// Create an in-memory plain cache from already-loaded images (no coverage). Test-only:
+    /// production in-memory stacking goes through [`WeightedImageCache::from_stack_frames`], and
+    /// disk-capable loading through [`from_paths`](Self::from_paths).
+    #[cfg(test)]
     pub fn from_images(
         images: Vec<I>,
         config: &CacheConfig,
@@ -253,16 +342,19 @@ impl<I: StackableImage> ImageCache<I> {
             }
         }
 
-        // Parallelize across frames, matching the disk/in-memory loaders.
+        // Parallelize stats across frames, then move each image's channels into in-memory planes.
         let channel_stats = images.par_iter().map(compute_frame_stats).collect();
+        let frames = images.into_iter().map(Self::image_to_frame).collect();
 
         Ok(Self {
-            storage: Storage::InMemory(images),
+            frames,
+            cache_dir: None,
             dimensions,
             metadata,
             channel_stats,
             config: config.clone(),
             progress,
+            _image: PhantomData,
         })
     }
 
@@ -272,8 +364,9 @@ impl<I: StackableImage> ImageCache<I> {
         progress: &ProgressCallback,
         dimensions: ImageDimensions,
         first_image: I,
-    ) -> Result<(Storage<I>, Vec<FrameStats>), Error> {
+    ) -> Result<LoadedFrames, Error> {
         let first_stats = compute_frame_stats(&first_image);
+        let first_frame = Self::image_to_frame(first_image);
         report_progress(progress, 1, paths.len(), StackingStage::Loading);
 
         // Load remaining images in parallel, at most 3 at a time to cap memory/IO pressure
@@ -293,23 +386,23 @@ impl<I: StackableImage> ImageCache<I> {
                 });
             }
             let stats = compute_frame_stats(&image);
-            Ok((image, stats))
+            Ok((Self::image_to_frame(image), stats))
         })?;
 
         // Build final vectors
-        let mut images = Vec::with_capacity(paths.len());
+        let mut frames = Vec::with_capacity(paths.len());
         let mut all_stats = Vec::with_capacity(paths.len());
-        images.push(first_image);
+        frames.push(first_frame);
         all_stats.push(first_stats);
-        for (image, stats) in remaining {
-            images.push(image);
+        for (frame, stats) in remaining {
+            frames.push(frame);
             all_stats.push(stats);
         }
 
         report_progress(progress, paths.len(), paths.len(), StackingStage::Loading);
 
-        tracing::info!("Loaded {} frames into memory", images.len());
-        Ok((Storage::InMemory(images), all_stats))
+        tracing::info!("Loaded {} frames into memory", frames.len());
+        Ok((frames, None, all_stats))
     }
 
     /// Load images to disk cache with memory-mapped access.
@@ -321,7 +414,7 @@ impl<I: StackableImage> ImageCache<I> {
         progress: &ProgressCallback,
         dimensions: ImageDimensions,
         first_image: I,
-    ) -> Result<(Storage<I>, Vec<FrameStats>), Error> {
+    ) -> Result<LoadedFrames, Error> {
         let cache_dir = &config.cache_dir;
         std::fs::create_dir_all(cache_dir).map_err(|e| Error::CreateCacheDir {
             path: cache_dir.to_path_buf(),
@@ -351,12 +444,12 @@ impl<I: StackableImage> ImageCache<I> {
         })?;
 
         // Build final vectors
-        let mut cached_frames = Vec::with_capacity(paths.len());
+        let mut frames = Vec::with_capacity(paths.len());
         let mut all_stats = Vec::with_capacity(paths.len());
-        cached_frames.push(first_cached);
+        frames.push(first_cached);
         all_stats.push(first_stats);
         for (frame, stats) in remaining {
-            cached_frames.push(frame);
+            frames.push(frame);
             all_stats.push(stats);
         }
 
@@ -364,20 +457,16 @@ impl<I: StackableImage> ImageCache<I> {
 
         tracing::info!(
             "Cached {} frames ({} channels each) to disk at {:?}",
-            cached_frames.len(),
+            frames.len(),
             dimensions.channels,
             cache_dir
         );
 
-        Ok((
-            Storage::DiskBacked {
-                frames: cached_frames,
-                cache_dir: cache_dir.to_path_buf(),
-            },
-            all_stats,
-        ))
+        Ok((frames, Some(cache_dir.to_path_buf()), all_stats))
     }
+}
 
+impl<I, F: CacheFrame> FrameStack<I, F> {
     /// Get image dimensions (same for all frames).
     pub fn dimensions(&self) -> ImageDimensions {
         self.dimensions
@@ -390,10 +479,7 @@ impl<I: StackableImage> ImageCache<I> {
 
     /// Get number of cached frames.
     pub fn frame_count(&self) -> usize {
-        match &self.storage {
-            Storage::InMemory(images) => images.len(),
-            Storage::DiskBacked { frames, .. } => frames.len(),
-        }
+        self.frames.len()
     }
 
     /// Process images in horizontal chunks, applying a combine function to each pixel.
@@ -404,14 +490,14 @@ impl<I: StackableImage> ImageCache<I> {
     /// Optional `norm_params` apply per-frame affine normalization before combining.
     ///
     /// Processing is done per-channel, parallelized per-row with rayon.
-    pub fn process_chunked<F>(
+    pub fn process_chunked<Combine>(
         &self,
         weights: Option<&[f32]>,
         frame_norms: Option<&[FrameNorm]>,
-        combine: F,
+        combine: Combine,
     ) -> PixelData
     where
-        F: Fn(&mut [f32], Option<&[f32]>, &mut ScratchBuffers) -> f32 + Sync,
+        Combine: Fn(&mut [f32], Option<&[f32]>, &mut ScratchBuffers) -> f32 + Sync,
     {
         if let Some(w) = weights {
             assert_eq!(
@@ -420,7 +506,14 @@ impl<I: StackableImage> ImageCache<I> {
                 "Weight count must match frame count"
             );
         }
-        self.process_chunks_internal(|output_slice, chunks, frame_count, width, channel| {
+        self.process_chunks_internal(|output_slice, ctx| {
+            let ChunkContext {
+                frames,
+                width,
+                channel,
+                pixel_offset: _,
+            } = ctx;
+            let frame_count = frames.len();
             output_slice
                 .par_chunks_mut(width)
                 .enumerate()
@@ -428,25 +521,23 @@ impl<I: StackableImage> ImageCache<I> {
                     || (vec![0.0f32; frame_count], ScratchBuffers::new(frame_count)),
                     |(values, scratch), (row_in_chunk, row_output)| {
                         let row_offset = row_in_chunk * width;
-
                         for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
                             let pixel_idx = row_offset + pixel_in_row;
                             if let Some(frame_norm) = frame_norms {
-                                for (frame_idx, chunk) in chunks.iter().enumerate() {
+                                for (frame_idx, chunk) in frames.iter().enumerate() {
                                     let cn = frame_norm[frame_idx].channels[channel];
                                     values[frame_idx] = chunk[pixel_idx] * cn.gain + cn.offset;
                                 }
                             } else {
-                                for (frame_idx, chunk) in chunks.iter().enumerate() {
+                                for (frame_idx, chunk) in frames.iter().enumerate() {
                                     values[frame_idx] = chunk[pixel_idx];
                                 }
                             }
-                            // The combine reducers (median/MAD, compensated sums)
-                            // assume finite inputs — NaN/Inf would silently corrupt
-                            // the output (NaN-unsafe ordering, multiply-through).
-                            // No production path emits them today (FITS load
-                            // sanitizes, flat division is floored, warp border-fills
-                            // 0), so this guards against a future upstream regression.
+                            // The combine reducers (median/MAD, compensated sums) assume finite
+                            // inputs — NaN/Inf would silently corrupt the output (NaN-unsafe
+                            // ordering, multiply-through). No production path emits them today
+                            // (FITS load sanitizes, flat division is floored, warp border-fills 0),
+                            // so this guards against a future upstream regression.
                             debug_assert!(
                                 values.iter().all(|v| v.is_finite()),
                                 "non-finite pixel value entered the combine",
@@ -459,11 +550,12 @@ impl<I: StackableImage> ImageCache<I> {
     }
 
     /// Internal chunk processing - handles chunking logic, calls processor for each chunk.
-    /// The closure receives `(output_slice, chunks, frame_count, width, channel)`.
+    /// The closure receives `(output_slice, ctx)`: `output_slice` is the chunk's output rows and
+    /// [`ChunkContext`] carries the per-frame input slices + chunk geometry.
     /// Returns `PixelData` with the combined result.
-    fn process_chunks_internal<F>(&self, mut process_chunk: F) -> PixelData
+    fn process_chunks_internal<Process>(&self, mut process_chunk: Process) -> PixelData
     where
-        F: FnMut(&mut [f32], &[&[f32]], usize, usize, usize),
+        Process: FnMut(&mut [f32], ChunkContext),
     {
         let dims = self.dimensions;
         let frame_count = self.frame_count();
@@ -471,11 +563,12 @@ impl<I: StackableImage> ImageCache<I> {
         let height = dims.size.y;
         let available_memory = self.config.get_available_memory();
 
-        let chunk_rows = match &self.storage {
-            Storage::InMemory(_) => height,
-            Storage::DiskBacked { .. } => {
-                compute_optimal_chunk_rows_with_memory(width, 1, frame_count, available_memory)
-            }
+        // In-memory frames need no row-chunking (whole planes are resident); disk-backed frames
+        // are read in memory-bounded row chunks.
+        let chunk_rows = if self.cache_dir.is_none() {
+            height
+        } else {
+            compute_optimal_chunk_rows_with_memory(width, 1, frame_count, available_memory)
         };
 
         let mut output = PixelData::new_default(width, height, dims.channels);
@@ -503,7 +596,15 @@ impl<I: StackableImage> ImageCache<I> {
                 let output_slice = &mut output.channel_mut(channel).pixels_mut()
                     [start_row * width..][..pixels_in_chunk];
 
-                process_chunk(output_slice, &chunks, frame_count, width, channel);
+                process_chunk(
+                    output_slice,
+                    ChunkContext {
+                        frames: &chunks,
+                        width,
+                        channel,
+                        pixel_offset: start_row * width,
+                    },
+                );
 
                 report_progress(
                     &self.progress,
@@ -524,7 +625,8 @@ impl<I: StackableImage> ImageCache<I> {
         &self.channel_stats
     }
 
-    /// Read a horizontal chunk (rows start_row..end_row) of a single channel from a frame.
+    /// Read a horizontal chunk (rows start_row..end_row) of a single channel from a frame,
+    /// tier-agnostically via [`Plane::chunk`].
     fn read_channel_chunk(
         &self,
         frame_idx: usize,
@@ -533,41 +635,183 @@ impl<I: StackableImage> ImageCache<I> {
         end_row: usize,
     ) -> &[f32] {
         let width = self.dimensions.size.x;
-        let start_pixel = start_row * width;
-        let end_pixel = end_row * width;
-
-        match &self.storage {
-            Storage::InMemory(images) => {
-                let channel_data = images[frame_idx].channel(channel);
-                &channel_data[start_pixel..end_pixel]
-            }
-            Storage::DiskBacked { frames, .. } => {
-                let mmap = &frames[frame_idx].channels[channel];
-                let start_offset = start_pixel * size_of::<f32>();
-                let end_offset = end_pixel * size_of::<f32>();
-                let bytes = &mmap[start_offset..end_offset];
-                bytemuck::cast_slice(bytes)
-            }
-        }
+        self.frames[frame_idx].channels()[channel].chunk(start_row * width, end_row * width)
     }
 }
 
-impl<I> ImageCache<I> {
-    /// Remove all cache files (only applies to disk-backed storage).
+impl<I, F> FrameStack<I, F> {
+    /// Remove the disk cache directory, if any (no-op for in-memory stacks or when `keep_cache`).
     pub fn cleanup(&self) {
         if self.config.keep_cache {
             return;
         }
-
-        if let Storage::DiskBacked { cache_dir, .. } = &self.storage {
+        if let Some(cache_dir) = &self.cache_dir {
             let _ = std::fs::remove_dir_all(cache_dir);
         }
     }
 }
 
-impl<I> Drop for ImageCache<I> {
+impl<I, F> Drop for FrameStack<I, F> {
     fn drop(&mut self) {
         self.cleanup();
+    }
+}
+
+impl WeightedImageCache {
+    /// Build an in-memory coverage-weighted cache from [`StackFrame`]s (image + optional
+    /// per-pixel coverage), moving channels and coverage into [`Plane::Memory`] (no copy).
+    pub fn from_stack_frames(
+        frames: Vec<StackFrame>,
+        config: &CacheConfig,
+        progress: ProgressCallback,
+    ) -> Result<Self, Error> {
+        if frames.is_empty() {
+            return Err(Error::NoFrames);
+        }
+        let dimensions = frames[0].image.dimensions();
+        let metadata = frames[0].image.metadata().clone();
+
+        for (index, frame) in frames.iter().enumerate().skip(1) {
+            if frame.image.dimensions() != dimensions {
+                return Err(Error::DimensionMismatch {
+                    index,
+                    expected: dimensions,
+                    actual: frame.image.dimensions(),
+                });
+            }
+        }
+        let expected = dimensions.size.x * dimensions.size.y;
+        for frame in &frames {
+            if let Some(coverage) = &frame.coverage {
+                assert_eq!(
+                    coverage.len(),
+                    expected,
+                    "coverage map must match frame dimensions"
+                );
+            }
+        }
+
+        let channel_stats = frames
+            .par_iter()
+            .map(|frame| compute_frame_stats(&frame.image))
+            .collect();
+        let stored = frames
+            .into_iter()
+            .map(|frame| WeightedFrame {
+                channels: frame
+                    .image
+                    .into_planes()
+                    .into_iter()
+                    .map(Plane::Memory)
+                    .collect(),
+                coverage: frame.coverage.map(Plane::Memory),
+            })
+            .collect();
+
+        Ok(Self {
+            frames: stored,
+            cache_dir: None,
+            dimensions,
+            metadata,
+            channel_stats,
+            config: config.clone(),
+            progress,
+            _image: PhantomData,
+        })
+    }
+
+    /// Coverage-weighted combine: a frame contributes at a pixel only where its coverage exceeds
+    /// [`COVERAGE_EPSILON`], weighted by `coverage × per-frame weight`. Excluding sub-ε coverage
+    /// keeps warp border-fill out of the rejection set, so warped-frame borders don't drag the
+    /// stacked edges dark; a pixel no frame covers gets `0`.
+    pub fn process_chunked_weighted<Combine>(
+        &self,
+        weights: Option<&[f32]>,
+        frame_norms: Option<&[FrameNorm]>,
+        combine: Combine,
+    ) -> PixelData
+    where
+        Combine: Fn(&mut [f32], Option<&[f32]>, &mut ScratchBuffers) -> f32 + Sync,
+    {
+        if let Some(w) = weights {
+            assert_eq!(
+                w.len(),
+                self.frame_count(),
+                "Weight count must match frame count"
+            );
+        }
+        self.process_chunks_internal(|output_slice, ctx| {
+            let ChunkContext {
+                frames,
+                width,
+                channel,
+                pixel_offset,
+            } = ctx;
+            let frame_count = frames.len();
+            let chunk_pixels = output_slice.len();
+            // Per-frame coverage slice for this chunk's rows; `None` = fully covered.
+            let coverage: Vec<Option<&[f32]>> = self
+                .frames
+                .iter()
+                .map(|frame| {
+                    frame
+                        .coverage
+                        .as_ref()
+                        .map(|plane| plane.chunk(pixel_offset, pixel_offset + chunk_pixels))
+                })
+                .collect();
+            output_slice
+                .par_chunks_mut(width)
+                .enumerate()
+                .for_each_init(
+                    || {
+                        (
+                            vec![0.0f32; frame_count],
+                            vec![0.0f32; frame_count],
+                            ScratchBuffers::new(frame_count),
+                        )
+                    },
+                    |(values, eff_weights, scratch), (row_in_chunk, row_output)| {
+                        let row_offset = row_in_chunk * width;
+                        for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
+                            let pixel_idx = row_offset + pixel_in_row;
+                            let mut covered = 0usize;
+                            for (frame_idx, chunk) in frames.iter().enumerate() {
+                                let c = match coverage[frame_idx] {
+                                    Some(map) => map[pixel_idx],
+                                    None => 1.0,
+                                };
+                                if c > COVERAGE_EPSILON {
+                                    let v = match frame_norms {
+                                        Some(fnm) => {
+                                            let cn = fnm[frame_idx].channels[channel];
+                                            chunk[pixel_idx] * cn.gain + cn.offset
+                                        }
+                                        None => chunk[pixel_idx],
+                                    };
+                                    values[covered] = v;
+                                    eff_weights[covered] =
+                                        weights.map_or(1.0, |w| w[frame_idx]) * c;
+                                    covered += 1;
+                                }
+                            }
+                            *out = if covered == 0 {
+                                0.0
+                            } else {
+                                debug_assert!(
+                                    values[..covered].iter().all(|v| v.is_finite()),
+                                    "non-finite pixel value entered the combine",
+                                );
+                                combine(
+                                    &mut values[..covered],
+                                    Some(&eff_weights[..covered]),
+                                    scratch,
+                                )
+                            };
+                        }
+                    },
+                );
+        })
     }
 }
 
@@ -679,14 +923,14 @@ fn mmap_channel_file(channel_path: PathBuf) -> Result<Mmap, Error> {
 }
 
 /// Load an image and cache it, or reuse existing cache files if valid.
-/// Returns the CachedFrame with memory-mapped channel data.
+/// Returns the [`Frame`] with memory-mapped channel planes.
 fn load_and_cache_frame<I: StackableImage>(
     cache_dir: &Path,
     base_filename: &str,
     source_path: &Path,
     dimensions: ImageDimensions,
     frame_index: usize,
-) -> Result<(CachedFrame, FrameStats), Error> {
+) -> Result<(Frame, FrameStats), Error> {
     let channels = dimensions.channels;
 
     // Check if all channel files exist, have correct size, and source hasn't changed
@@ -701,18 +945,16 @@ fn load_and_cache_frame<I: StackableImage>(
 
     if can_reuse {
         // Reuse existing cache files - just mmap them
-        let mut cached_channels = ArrayVec::new();
+        let mut planes = ArrayVec::new();
         for c in 0..channels {
             let channel_path = cache_dir.join(channel_cache_filename(base_filename, c));
-            cached_channels.push(mmap_channel_file(channel_path)?);
+            planes.push(Plane::Mapped(mmap_channel_file(channel_path)?));
         }
         tracing::debug!(
             source = %source_path.display(),
             "Reusing existing cache files"
         );
-        let frame = CachedFrame {
-            channels: cached_channels,
-        };
+        let frame = Frame { channels: planes };
         let stats = read_frame_stats(cache_dir, base_filename)
             .expect("stats sidecar missing for valid cache");
         Ok((frame, stats))
@@ -780,16 +1022,16 @@ fn read_frame_stats(cache_dir: &Path, base_filename: &str) -> Option<FrameStats>
     Some(FrameStats { channels })
 }
 
-/// Cache all channels of an image to separate files and return a CachedFrame.
+/// Cache all channels of an image to separate files and return a memory-mapped [`Frame`].
 fn cache_image_channels(
     cache_dir: &Path,
     base_filename: &str,
     image: &impl StackableImage,
     dimensions: ImageDimensions,
-) -> Result<CachedFrame, Error> {
+) -> Result<Frame, Error> {
     let channels = dimensions.channels;
 
-    let mut cached_channels = ArrayVec::new();
+    let mut planes = ArrayVec::new();
 
     for c in 0..channels {
         let channel_filename = channel_cache_filename(base_filename, c);
@@ -800,12 +1042,10 @@ fn cache_image_channels(
             write_channel_cache_file(&channel_path, image.channel(c))?;
         }
 
-        cached_channels.push(mmap_channel_file(channel_path)?);
+        planes.push(Plane::Mapped(mmap_channel_file(channel_path)?));
     }
 
-    Ok(CachedFrame {
-        channels: cached_channels,
-    })
+    Ok(Frame { channels: planes })
 }
 
 #[cfg(test)]
@@ -885,9 +1125,9 @@ pub(crate) mod tests {
         // Should create 3 channel files
         assert_eq!(cached_frame.channels.len(), 3);
 
-        // Verify each channel file contains the correct data
+        // Verify each channel plane contains the correct data
         for (c, cached_channel) in cached_frame.channels.iter().enumerate() {
-            let read_channel: &[f32] = bytemuck::cast_slice(&cached_channel[..]);
+            let read_channel = cached_channel.chunk(0, dims.size.x * dims.size.y);
             let expected_channel = image.channel(c).pixels();
             assert_eq!(read_channel, expected_channel);
         }
@@ -1086,16 +1326,15 @@ pub(crate) mod tests {
             ..Default::default()
         };
 
-        let cache: ImageCache<AstroImage> = ImageCache {
-            storage: Storage::DiskBacked {
-                frames: vec![cached_frame],
-                cache_dir: temp_dir.clone(),
-            },
+        let cache: ImageCache<AstroImage> = FrameStack {
+            frames: vec![cached_frame],
+            cache_dir: Some(temp_dir.clone()),
             dimensions: dims,
             metadata: AstroImageMetadata::default(),
             channel_stats: vec![],
             config,
             progress: ProgressCallback::default(),
+            _image: PhantomData,
         };
 
         // Drop the cache - should trigger cleanup via Drop
@@ -1140,16 +1379,15 @@ pub(crate) mod tests {
         let base_filename = "test_chunk.bin";
         let cached_frame = cache_image_channels(&temp_dir, base_filename, &image, dims).unwrap();
 
-        let cache: ImageCache<AstroImage> = ImageCache {
-            storage: Storage::DiskBacked {
-                frames: vec![cached_frame],
-                cache_dir: temp_dir.clone(),
-            },
+        let cache: ImageCache<AstroImage> = FrameStack {
+            frames: vec![cached_frame],
+            cache_dir: Some(temp_dir.clone()),
             dimensions: dims,
             metadata: AstroImageMetadata::default(),
             channel_stats: vec![],
             config: CacheConfig::default(),
             progress: ProgressCallback::default(),
+            _image: PhantomData,
         };
 
         // Read row 1 (pixels 4-7)
@@ -1186,16 +1424,15 @@ pub(crate) mod tests {
             frames.push(cached_frame);
         }
 
-        let cache: ImageCache<AstroImage> = ImageCache {
-            storage: Storage::DiskBacked {
-                frames,
-                cache_dir: temp_dir.clone(),
-            },
+        let cache: ImageCache<AstroImage> = FrameStack {
+            frames,
+            cache_dir: Some(temp_dir.clone()),
             dimensions: dims,
             metadata: AstroImageMetadata::default(),
             channel_stats: vec![],
             config: CacheConfig::default(),
             progress: ProgressCallback::default(),
+            _image: PhantomData,
         };
 
         assert_eq!(cache.frame_count(), 3);
@@ -1228,7 +1465,7 @@ pub(crate) mod tests {
         assert_eq!(cached_frame.channels.len(), 1);
 
         // Verify cached data matches original
-        let cached_data: &[f32] = bytemuck::cast_slice(&cached_frame.channels[0][..]);
+        let cached_data = cached_frame.channels[0].chunk(0, dims.size.x * dims.size.y);
         assert_eq!(cached_data, &pixels[..]);
 
         // Cleanup
@@ -1262,8 +1499,9 @@ pub(crate) mod tests {
                 .unwrap();
 
         // Both should have same data
-        let first_data: &[f32] = bytemuck::cast_slice(&first_frame.0.channels[0][..]);
-        let second_data: &[f32] = bytemuck::cast_slice(&second_frame.0.channels[0][..]);
+        let n = dims.size.x * dims.size.y;
+        let first_data = first_frame.0.channels[0].chunk(0, n);
+        let second_data = second_frame.0.channels[0].chunk(0, n);
         assert_eq!(first_data, second_data);
         assert_eq!(first_data, &pixels[..]);
 

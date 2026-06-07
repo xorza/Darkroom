@@ -464,6 +464,15 @@ impl crate::stacking::cache::StackableImage for AstroImage {
             pixels,
         }
     }
+
+    fn into_planes(self) -> arrayvec::ArrayVec<Buffer2<f32>, 3> {
+        let mut planes = arrayvec::ArrayVec::new();
+        match self.pixels {
+            PixelData::L(buffer) => planes.push(buffer),
+            PixelData::Rgb(buffers) => planes.extend(buffers),
+        }
+        planes
+    }
 }
 
 // ============================================================================

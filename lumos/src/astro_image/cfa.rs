@@ -83,6 +83,12 @@ impl crate::stacking::cache::StackableImage for CfaImage {
             metadata,
         }
     }
+
+    fn into_planes(self) -> arrayvec::ArrayVec<common::Buffer2<f32>, 3> {
+        let mut planes = arrayvec::ArrayVec::new();
+        planes.push(self.data);
+        planes
+    }
 }
 
 impl CfaImage {

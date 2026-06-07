@@ -100,12 +100,13 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 
 ## stacking — frame combination
 
-`stack(paths, frame_type, config)` (`stack.rs:79`) and `stack_with_progress(...)` (`stack.rs:91`) → `AstroImage`. `FrameType` = `Dark | Flat | Bias | Light`.
+`stack(paths, config, progress)` (`stack.rs:79`, from disk) and `stack_images(frames, config, progress)` (`stack.rs`, in-memory) → `AstroImage`. A `StackFrame { image, coverage: Option<Buffer2<f32>> }` bundles each in-memory frame with optional per-pixel coverage (e.g. from `warp`); plain `AstroImage`s convert via `.into()` (coverage `None` = fully covered).
 
 - `StackConfig` (`config.rs:71`): `method: CombineMethod` (`Mean(Rejection) | Median`, `config.rs:13`), `weighting: Weighting` (`Equal | Noise | Manual(Vec<f32>)`, `config.rs:22`), `normalization: Normalization` (`None | Global | Multiplicative`, `config.rs:36`), `cache: CacheConfig`. Presets `sigma_clipped`/`winsorized`/`linear_fit`/`median`/`mean`/`gesd`/`percentile`/`weighted` + frame presets `light`/`flat`/`dark`/`bias`.
 - `Rejection` (`rejection.rs:831`): `None | SigmaClip | Winsorized | LinearFit | Percentile | Gesd` (each with its own config struct).
-- `ImageCache<I>` (`cache.rs:152`): selects **in-memory** (fits in ~75% RAM) vs **disk-backed mmap** tiers; computes per-frame `FrameStats` (`cache.rs:37`, per-channel median + MAD).
-- Pipeline (`stack.rs`): tier-select + load → pick lowest-MAD reference → compute Global/Multiplicative norms → resolve weights → chunked per-pixel combine (adaptive row chunks bounded by memory) applying normalize → reject → accumulate.
+- `FrameStack<I, F>` (`cache.rs`): tiered frame store + combine. Each frame is planar `Plane`s, each `Memory` (RAM) or `Mapped` (mmap), chosen per stack by whether the set fits ~75% RAM; one chunked-read path serves both. Per-frame `FrameStats` (per-channel median + MAD). Aliases: `ImageCache<I> = FrameStack<I, Frame>` (plain — CFA masters, plain lights, **no coverage**), `WeightedImageCache = FrameStack<AstroImage, WeightedFrame>` (registered/warped — channels + optional coverage). Coverage is type-true: it exists only on `WeightedFrame`, never on the plain path.
+- Pipeline (`stack.rs`): `stack`/`stack_images` → tier-select + load → pick lowest-MAD reference → Global/Multiplicative norms → resolve weights → chunked per-pixel combine applying normalize → reject → accumulate. `run_stacking` (plain) / `run_stacking_weighted` (coverage).
+- **Coverage weighting** (`WeightedImageCache::process_chunked_weighted`): a frame contributes at a pixel only where its coverage > `COVERAGE_EPSILON`, weighted by `coverage × per-frame weight`; `0` where no frame covers. Excluding sub-ε coverage keeps warp border-fill out of the rejection set, so `align_and_stack` leaves no dark warped-edge ring. Coverage is a `Plane` (so it's mmap-capable like channels; disk-backed coverage awaits the streaming-warp producer — roadmap Tier 4).
 
 ## drizzle — variable-pixel reconstruction
 

@@ -89,7 +89,7 @@ pub use stacking::config::{CombineMethod, Normalization, StackConfig};
 pub use stacking::error::Error as StackError;
 pub use stacking::progress::{ProgressCallback, StackingProgress, StackingStage};
 pub use stacking::rejection::Rejection;
-pub use stacking::stack::{stack, stack_images};
+pub use stacking::stack::{StackFrame, stack, stack_images};
 
 pub use pipeline::{
     AlignStackConfig, AlignStackResult, Error as AlignStackError, Reference, align_and_stack,

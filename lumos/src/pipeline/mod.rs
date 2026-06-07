@@ -21,7 +21,7 @@ use crate::registration::{register, warp};
 use crate::stacking::config::StackConfig;
 use crate::stacking::error::Error as StackError;
 use crate::stacking::progress::ProgressCallback;
-use crate::stacking::stack::stack_images;
+use crate::stacking::stack::{StackFrame, stack_images};
 use crate::star_detection::config::Config as StarDetectionConfig;
 use crate::star_detection::detector::StarDetector;
 use crate::star_detection::star::Star;
@@ -165,7 +165,7 @@ pub fn align_and_stack(
     let reg_total = lights.len() - 1;
     tracing::info!(frames = reg_total, "Registering frames to the reference");
     let registered_so_far = AtomicUsize::new(0);
-    let outcomes: Vec<Result<AstroImage, usize>> = lights
+    let outcomes: Vec<Result<StackFrame, usize>> = lights
         .par_iter()
         .enumerate()
         .filter(|(index, _)| *index != reference)
@@ -182,7 +182,11 @@ pub fn align_and_stack(
                         transform = %result.transform,
                         "registered"
                     );
-                    Ok(warp(img, &result.warp_transform(), &config.registration).image)
+                    let warped = warp(img, &result.warp_transform(), &config.registration);
+                    Ok(StackFrame {
+                        image: warped.image,
+                        coverage: Some(warped.coverage),
+                    })
                 }
                 Err(error) => {
                     tracing::info!(frame = n, total = reg_total, %error, "registration failed");
@@ -192,11 +196,13 @@ pub fn align_and_stack(
         })
         .collect();
 
-    let mut frames: Vec<AstroImage> = Vec::with_capacity(outcomes.len() + 1);
+    // Each warped frame carries its coverage (how much of each output pixel landed on real
+    // source); the stack uses it so warped-frame borders don't drag the edges dark.
+    let mut frames: Vec<StackFrame> = Vec::with_capacity(outcomes.len() + 1);
     let mut dropped = Vec::new();
     for outcome in outcomes {
         match outcome {
-            Ok(warped) => frames.push(warped),
+            Ok(frame) => frames.push(frame),
             Err(index) => dropped.push(index),
         }
     }
@@ -219,7 +225,12 @@ pub fn align_and_stack(
         .into_iter()
         .nth(reference)
         .expect("reference index is in range");
-    frames.push(reference_image);
+    // Unwarped → fully covered; `coverage: None` tells the stack to weight it 1 everywhere
+    // (no throwaway full-coverage map to allocate).
+    frames.push(StackFrame {
+        image: reference_image,
+        coverage: None,
+    });
 
     let registered = frames.len();
     tracing::info!(frames = registered, "Stacking aligned frames");

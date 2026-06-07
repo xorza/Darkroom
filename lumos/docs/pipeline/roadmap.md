@@ -3,19 +3,20 @@
 Remaining work toward the most precise and most performant stacking pipeline, ranked by
 impact on the final combined image. Anchored to source `file:line`.
 
-Status: ☐ todo · ◐ in progress · ⊘ deferred (deliberate)
+Status: ☐ todo · ◐ in progress · ☑ done · ⊘ deferred (deliberate)
 
 ---
 
 ## Tier 1 — silent corruption of the default output
 
-- ◐ **T1.1 — wire `warp()` coverage into a production warp→stack path** · Critical · M
-  Coverage is emitted (`WarpResult { image, coverage }`), border flux is renormalized for the
-  non-negative kernels (nearest/bilinear), and the negative-lobe kernels (bicubic/**Lanczos**,
-  the default) now renormalize the value by the in-bounds weight in-sampler under deringing
-  (`interpolation/mod.rs` + `warp/mod.rs` slow path). Remaining: wire coverage into a production
-  warp→stack path as `pixel_weight_maps` — `warp`/`drizzle_stack` are bench/test-only today (no
-  production consumer), so this is blocked on the end-to-end registered-stack entry point.
+- ☑ **T1.1 — wire `warp()` coverage into the warp→stack path** · Critical · M
+  Done. `align_and_stack` carries each warped frame's coverage (the unwarped reference gets a
+  full-`1.0` map) into `stack_images(pixel_weight_maps)`, held on the `ImageCache`; the combine
+  (`cache.rs` `process_chunked`) includes a frame at a pixel only where coverage >
+  `COVERAGE_EPSILON`, weighted by `coverage × per-frame weight`, and fills `0` where no frame
+  covers. Excluding sub-ε coverage keeps warp border-fill out of the rejection set, so the dark
+  warped-edge ring is gone. Per-kernel value renormalization (nearest/bilinear/bicubic/Lanczos)
+  was done earlier.
 
 ## Tier 2 — high (corrupts output; narrower or quantitative)
 
@@ -36,6 +37,15 @@ Status: ☐ todo · ◐ in progress · ⊘ deferred (deliberate)
 
 ## Tier 4 — missing features (deliberate; schedule when needed)
 
+- ☐ **Streaming warp→disk for low-memory registered stacking** · Medium · L. The combine cache
+  is coverage-disk-*ready* — `WeightedFrame.coverage: Option<Plane>` and `Plane::Mapped` mean a
+  warped frame's channels **and** coverage can be memory-mapped together. What's missing is a
+  *producer*: today `warp` returns a full `AstroImage` in RAM and `align_and_stack` holds
+  `Vec<AstroImage>`, so a large registered stack OOMs at the warp stage regardless. Add a
+  streaming path — warp frame *i* → spill its channels+coverage to the disk cache → drop RAM →
+  repeat — so registered/coverage-weighted stacking scales past RAM. Needs: a spilling
+  `WeightedImageCache` constructor (write a `WeightedFrame` to mmap files) + `align_and_stack`
+  feeding frames one at a time.
 - ⊘ dark **scaling** for mismatched exposures (+ bias-free-dark path); single-frame
   **cosmic-ray** rejection (L.A.Cosmic); calibration **uncertainty plane**; drizzle
   **blot/drizzle-CR**; **CFA/Bayer-drizzle** wiring; **TPS** wired into `register()`;
