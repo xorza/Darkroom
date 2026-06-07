@@ -5,14 +5,13 @@
 //! 2. [`calibrate_align_stack`] — load each raw light → calibrate → demosaic → detect →
 //!    register → warp → stack, in a single call.
 //!
-//! Input directory (`$LUMOS_CALIBRATION_DIR`) holds `Darks/`, `Flats/`, `Bias/`, `Lights/`
-//! subdirectories of raw frames. The stacked master is written to `test_output/`.
+//! Reads `Darks/`, `Flats/`, `Bias/`, `Lights/` subdirectories of raw frames from the bundled
+//! dataset (`test_data/lumos_data`). The stacked master is written to `test_output/`.
 //!
 //! ```bash
-//! LUMOS_CALIBRATION_DIR=/path/to/data cargo run --release --example full_pipeline
+//! cargo run --release --example full_pipeline
 //! ```
 
-use std::env;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -26,9 +25,12 @@ fn main() {
     init_tracing();
     let start = Instant::now();
 
-    let calibration_dir = env::var("LUMOS_CALIBRATION_DIR")
-        .map(PathBuf::from)
-        .expect("LUMOS_CALIBRATION_DIR environment variable must be set");
+    let calibration_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/lumos_data");
+    assert!(
+        calibration_dir.is_dir(),
+        "bundled dataset not found at {}",
+        calibration_dir.display()
+    );
     tracing::info!(path = %calibration_dir.display(), "Calibration directory");
 
     // Step 1 — calibration masters from raw dark/flat/bias frames.
