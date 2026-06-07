@@ -25,18 +25,16 @@
 mod astro_image;
 mod calibration_masters;
 pub(crate) mod common;
-pub mod drizzle;
+pub(crate) mod drizzle;
 pub(crate) mod math;
 mod pipeline;
-pub mod raw;
+pub(crate) mod raw;
 pub(crate) mod registration;
 pub(crate) mod stacking;
 pub(crate) mod star_detection;
 
 #[cfg(test)]
 pub mod testing;
-
-pub mod prelude;
 
 // ============================================================================
 // Core image types
@@ -47,6 +45,7 @@ pub use astro_image::error::ImageError;
 pub use astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 pub use calibration_masters::defect_map::DefectMap;
 pub use raw::demosaic::bayer::CfaPattern;
+pub use raw::{load_raw, load_raw_cfa};
 
 // ============================================================================
 // Calibration
