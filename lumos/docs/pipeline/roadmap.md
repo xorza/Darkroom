@@ -44,7 +44,7 @@ Status: ☐ todo · ◐ in progress · ☑ done · ⊘ deferred (deliberate)
   `Vec<AstroImage>`, so a large registered stack OOMs at the warp stage regardless. Add a
   streaming path — warp frame *i* → spill its channels+coverage to the disk cache → drop RAM →
   repeat — so registered/coverage-weighted stacking scales past RAM. Needs: a spilling
-  `WeightedImageCache` constructor (write a `WeightedFrame` to mmap files) + `align_and_stack`
+  `LightCache` constructor (write a `WeightedFrame` to mmap files) + `align_and_stack`
   feeding frames one at a time.
 - ⊘ dark **scaling** for mismatched exposures (+ bias-free-dark path); single-frame
   **cosmic-ray** rejection (L.A.Cosmic); calibration **uncertainty plane**; drizzle

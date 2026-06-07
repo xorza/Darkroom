@@ -122,9 +122,8 @@ pub fn stack<P: AsRef<Path> + Sync>(
     // Files on disk carry no coverage, so this is a `LightCache` with `coverage: None` — the
     // weighted combine then treats every pixel as fully covered (identical to a plain stack).
     let cache = LightCache::from_paths(paths, &config.cache, progress)?;
-    let result = run_stacking_weighted(&cache, &config);
-    cache.core.cleanup();
-    Ok(result)
+    // The disk cache (if any) is removed when `cache` drops via `CacheCore`'s `Drop`.
+    Ok(run_stacking_weighted(&cache, &config))
 }
 
 /// Stack frames already held in memory into a single result.
@@ -164,9 +163,8 @@ pub fn stack_images(
     );
 
     let cache = LightCache::from_stack_frames(frames, &config.cache, progress)?;
-    let result = run_stacking_weighted(&cache, &config);
-    cache.core.cleanup();
-    Ok(result)
+    // In-memory only (no disk cache), but `cache` drops cleanly via `CacheCore`'s `Drop` regardless.
+    Ok(run_stacking_weighted(&cache, &config))
 }
 
 /// Select the best reference frame by lowest average noise (MAD) across channels.

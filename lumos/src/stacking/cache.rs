@@ -1050,12 +1050,42 @@ fn cache_image_channels(
 pub(crate) mod tests {
     use super::*;
     use crate::astro_image::AstroImage;
+    use crate::astro_image::cfa::CfaType;
 
     /// Create an in-memory [`LightCache`] from loaded images, with no coverage (test helper).
     pub(crate) fn make_test_cache(images: Vec<AstroImage>) -> LightCache {
         let frames = images.into_iter().map(StackFrame::from).collect();
         LightCache::from_stack_frames(frames, &CacheConfig::default(), ProgressCallback::default())
             .expect("test images must be non-empty and dimension-consistent")
+    }
+
+    /// Build an in-memory [`CfaCache`] from single-channel CFA frame pixels (test helper for the
+    /// plain combine; `process_chunked` ignores stats, so `channel_stats` is left empty).
+    fn make_cfa_cache(frames_pixels: Vec<Vec<f32>>, dims: ImageDimensions) -> CfaCache {
+        let frames = frames_pixels
+            .into_iter()
+            .map(|pixels| {
+                let image = CfaImage {
+                    data: Buffer2::new(dims.size.x, dims.size.y, pixels),
+                    metadata: AstroImageMetadata {
+                        cfa_type: Some(CfaType::Mono),
+                        ..Default::default()
+                    },
+                };
+                image_to_frame(image)
+            })
+            .collect();
+        CfaCache {
+            frames,
+            core: CacheCore {
+                cache_dir: None,
+                dimensions: dims,
+                metadata: AstroImageMetadata::default(),
+                channel_stats: vec![],
+                config: CacheConfig::default(),
+                progress: ProgressCallback::default(),
+            },
+        }
     }
 
     // ========== Storage Type Selection Tests ==========
@@ -1277,6 +1307,43 @@ pub(crate) mod tests {
 
         for &pixel in result.channel(0).pixels() {
             assert!((pixel - 17.5).abs() < f32::EPSILON);
+        }
+    }
+
+    #[test]
+    fn test_cfa_cache_plain_combine() {
+        // The plain `CfaCache::process_chunked` path (calibration): no coverage, every frame
+        // contributes at every pixel.
+        let dims = ImageDimensions::new((2, 2), 1);
+
+        // Median of [1, 3, 2] = 2 at every pixel.
+        let cache = make_cfa_cache(vec![vec![1.0; 4], vec![3.0; 4], vec![2.0; 4]], dims);
+        let median = cache.process_chunked(None, None, |values, _, _| {
+            values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            values[values.len() / 2]
+        });
+        assert_eq!(median.channels(), 1);
+        for &pixel in median.channel(0).pixels() {
+            assert!(
+                (pixel - 2.0).abs() < f32::EPSILON,
+                "CFA plain median should be 2, got {pixel}"
+            );
+        }
+
+        // Weighted mean of [10, 20] with weights [1, 3] = (10 + 60) / 4 = 17.5 — weights flow
+        // through to the combine closure unchanged (no coverage scaling on the plain path).
+        let cache = make_cfa_cache(vec![vec![10.0; 4], vec![20.0; 4]], dims);
+        let weights = [1.0, 3.0];
+        let weighted = cache.process_chunked(Some(&weights), None, |values, w, _| {
+            let w = w.unwrap();
+            let sum: f32 = values.iter().zip(w).map(|(v, wt)| v * wt).sum();
+            sum / w.iter().sum::<f32>()
+        });
+        for &pixel in weighted.channel(0).pixels() {
+            assert!(
+                (pixel - 17.5).abs() < f32::EPSILON,
+                "CFA plain weighted mean should be 17.5, got {pixel}"
+            );
         }
     }
 
