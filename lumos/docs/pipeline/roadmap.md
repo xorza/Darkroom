@@ -20,10 +20,12 @@ Status: ☐ todo · ◐ in progress · ☑ done · ⊘ deferred (deliberate)
 
 ## Tier 2 — high (corrupts output; narrower or quantitative)
 
-- ☐ **T2.3 — drizzle output variance/weight map** · High (quantitative) · L
-  `DrizzleResult` has only image + coverage (`drizzle/mod.rs:699`). At default
-  scale=2/pixfrac=0.8, R≈2 → output RMS understates true noise ~2× with no weight map.
-  Fix: accumulate + return a per-channel weight (and optional variance) map.
+- ☑ **T2.3 — drizzle output variance/weight map** · High (quantitative) · L
+  Done. `DrizzleAccumulator` now also accumulates `Σwᵢ²`, and `DrizzleResult` returns a `weight`
+  map (absolute `Σwᵢ`, the WHT) and a `variance` map (`Σwᵢ²/(Σwᵢ)²` = output variance per unit
+  input variance — the true per-pixel noise the correlation-suppressed image RMS understates;
+  multiply by input noise variance for absolute). The per-channel weight buffers collapsed to one
+  (the weight is geometric, channel-independent). Coverage (normalized `[0,1]`) is unchanged.
 
 ## Tier 3 — medium (opt-in / cheap / deep-stack)
 

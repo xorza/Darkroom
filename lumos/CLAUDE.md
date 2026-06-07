@@ -110,11 +110,11 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 
 ## drizzle — variable-pixel reconstruction
 
-`drizzle_stack(paths, transforms, weights?, pixel_weight_maps?, config, progress)` (`drizzle/mod.rs:937`) → `DrizzleResult` (output `AstroImage` + normalized coverage map).
+`drizzle_stack(paths, transforms, weights?, pixel_weight_maps?, config, progress)` (`drizzle/mod.rs`) → `DrizzleResult`: output `AstroImage` + normalized `coverage` `[0,1]`, absolute `weight` map (`Σwᵢ`, the WHT), and `variance` map (`Σwᵢ²/(Σwᵢ)²` = output variance per unit input variance — the true per-pixel noise the correlation-suppressed image RMS understates).
 
 - `DrizzleConfig` (`mod.rs:86`): `scale`, `pixfrac`, `kernel`, `fill_value`, `min_coverage`.
 - `DrizzleKernel` (`mod.rs:61`): `Square` (exact polygon clipping via Green's theorem `boxer`/`sgarea`), `Turbo` (axis-aligned, default), `Point`, `Gaussian`, `Lanczos` (valid only at pixfrac=scale=1).
-- `DrizzleAccumulator` (`mod.rs:169`): paired flux + weight `Buffer2` per channel; `add_image` maps each input pixel via `Transform`, distributes flux over the drop footprint with a local Jacobian, `finalize` normalizes `data/weights` against `min_coverage`. Pure CPU + rayon-parallel finalize.
+- `DrizzleAccumulator` (`mod.rs:169`): per-channel flux `Buffer2` (`Σ fluxᵢ·wᵢ`) plus a single shared `weight` (`Σwᵢ`) and `weight_sq` (`Σwᵢ²`) `Buffer2` — the weight is geometric, so it's channel-independent. `add_image` maps each input pixel via `Transform`, distributes flux over the drop footprint with a local Jacobian; `finalize` normalizes `data/weight` against `min_coverage` and emits the coverage/weight/variance maps. Pure CPU + rayon-parallel finalize.
 
 ## math — primitives
 

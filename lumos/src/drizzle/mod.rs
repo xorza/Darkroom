@@ -169,10 +169,15 @@ impl DrizzleConfig {
 /// Drizzle accumulator for building the output image.
 #[derive(Debug)]
 pub struct DrizzleAccumulator {
-    /// Accumulated weighted flux values, one Buffer2 per channel.
+    /// Accumulated weighted flux values (`Σ fluxᵢ·wᵢ`), one Buffer2 per channel.
     data: ArrayVec<Buffer2<f32>, MAX_CHANNELS>,
-    /// Accumulated weights, one Buffer2 per channel.
-    weights: ArrayVec<Buffer2<f32>, MAX_CHANNELS>,
+    /// Accumulated drizzle weight `Σ wᵢ` per output pixel. Channel-independent (the per-pixel
+    /// `wᵢ` is purely geometric × frame weight), so a single map serves all channels.
+    weight: Buffer2<f32>,
+    /// Accumulated squared weight `Σ wᵢ²` per output pixel — drives the output variance map
+    /// (`Var = Σwᵢ²/(Σwᵢ)²` per unit input variance), which the correlation-suppressed image RMS
+    /// understates.
+    weight_sq: Buffer2<f32>,
     /// Configuration.
     config: DrizzleConfig,
 }
@@ -190,15 +195,14 @@ impl DrizzleAccumulator {
         let output_height = (input_dims.size.y as f32 * config.scale).ceil() as usize;
 
         let mut data = ArrayVec::new();
-        let mut weights = ArrayVec::new();
         for _ in 0..input_dims.channels {
             data.push(Buffer2::new_default(output_width, output_height));
-            weights.push(Buffer2::new_default(output_width, output_height));
         }
 
         Self {
             data,
-            weights,
+            weight: Buffer2::new_default(output_width, output_height),
+            weight_sq: Buffer2::new_default(output_width, output_height),
             config,
         }
     }
@@ -623,19 +627,19 @@ impl DrizzleAccumulator {
         oy: usize,
         pixel_weight: f32,
     ) {
-        for (c, (d, w)) in self
-            .data
-            .iter_mut()
-            .zip(self.weights.iter_mut())
-            .enumerate()
-        {
+        for (c, d) in self.data.iter_mut().enumerate() {
             let flux = image.channel(c)[(ix, iy)];
             *d.get_mut(ox, oy) += flux * pixel_weight;
-            *w.get_mut(ox, oy) += pixel_weight;
         }
+        // Weight is channel-independent, so accumulate it (and its square, for the variance map)
+        // once per output pixel rather than once per channel.
+        *self.weight.get_mut(ox, oy) += pixel_weight;
+        *self.weight_sq.get_mut(ox, oy) += pixel_weight * pixel_weight;
     }
 
-    /// Finalize the drizzle result, normalizing by coverage weights.
+    /// Finalize the drizzle result: normalize flux by weight and emit the coverage, weight, and
+    /// variance maps. The weight `Σwᵢ` is channel-independent (shared geometric overlap), so one
+    /// map normalizes every channel and seeds the coverage/weight/variance outputs.
     pub fn finalize(self) -> DrizzleResult {
         let width = self.width();
         let height = self.height();
@@ -644,30 +648,24 @@ impl DrizzleAccumulator {
         let min_coverage = self.config.min_coverage;
         let fill_value = self.config.fill_value;
 
-        // Coverage from channel 0 weights (all channels share identical geometric overlap).
-        let weights0 = self.weights[0].pixels();
-        let mut coverage = Buffer2::new_default(width, height);
-        coverage.pixels_mut().copy_from_slice(weights0);
+        let weight_pixels = self.weight.pixels();
+        let weight_sq_pixels = self.weight_sq.pixels();
 
-        // Find max weight for normalizing min_coverage threshold
-        let max_weight = coverage
-            .pixels()
+        // Find max weight for normalizing the coverage / min_coverage threshold.
+        let max_weight = weight_pixels
             .par_iter()
             .copied()
             .reduce(|| 0.0f32, f32::max);
-
-        // min_coverage is 0.0-1.0, compare against normalized weight
         let weight_threshold = if max_weight > 0.0 {
             min_coverage * max_weight
         } else {
             0.0
         };
 
-        // Build per-channel output (row-parallel normalization)
+        // Build per-channel output (row-parallel normalization by the shared weight).
         let output_channels: Vec<Vec<f32>> = (0..n_channels)
             .map(|c| {
                 let data_pixels = self.data[c].pixels();
-                let weight_pixels = self.weights[c].pixels();
                 let mut out = vec![fill_value; width * height];
 
                 out.par_chunks_mut(width)
@@ -691,13 +689,31 @@ impl DrizzleAccumulator {
             })
             .collect();
 
-        // Normalize coverage to [0, 1]
+        // Output variance per unit input-pixel variance: Var(O) = Σ(wᵢ²)/(Σwᵢ)². `0` where
+        // uncovered. This is the true per-pixel noise that the correlated image RMS understates.
+        let mut variance = Buffer2::new_default(width, height);
+        variance
+            .pixels_mut()
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(idx, v)| {
+                let w = weight_pixels[idx];
+                *v = if w > 0.0 {
+                    weight_sq_pixels[idx] / (w * w)
+                } else {
+                    0.0
+                };
+            });
+
+        // Normalized coverage [0, 1] for masking.
+        let mut coverage = Buffer2::new_default(width, height);
         if max_weight > 0.0 {
             let inv_max = 1.0 / max_weight;
             coverage
                 .pixels_mut()
                 .par_iter_mut()
-                .for_each(|c| *c *= inv_max);
+                .zip(weight_pixels.par_iter())
+                .for_each(|(c, &w)| *c = w * inv_max);
         }
 
         let image = AstroImage::from_planar_channels(
@@ -705,7 +721,12 @@ impl DrizzleAccumulator {
             output_channels,
         );
 
-        DrizzleResult { image, coverage }
+        DrizzleResult {
+            image,
+            coverage,
+            weight: self.weight,
+            variance,
+        }
     }
 }
 
@@ -714,8 +735,16 @@ impl DrizzleAccumulator {
 pub struct DrizzleResult {
     /// The drizzled output image.
     pub image: AstroImage,
-    /// Normalized coverage map (0.0 = no data, 1.0 = maximum coverage).
+    /// Normalized coverage map (0.0 = no data, 1.0 = maximum coverage). For masking / fill gating.
     pub coverage: Buffer2<f32>,
+    /// Absolute per-pixel drizzle weight `Σwᵢ` (the WHT map) — channel-independent. Each pixel's
+    /// relative statistical weight; downstream co-adds / inverse-variance weighting use it directly.
+    pub weight: Buffer2<f32>,
+    /// Output variance per unit input-pixel variance: `Σ(wᵢ²)/(Σwᵢ)²` (= 1 / effective number of
+    /// contributions). Multiply by the input pixel noise variance for the absolute per-pixel output
+    /// variance — the true noise the correlation-suppressed image RMS understates. `0` where
+    /// uncovered, so read it alongside `coverage`.
+    pub variance: Buffer2<f32>,
 }
 
 impl DrizzleResult {
@@ -947,7 +976,7 @@ fn accumulate_frame(
 ///
 /// # Returns
 ///
-/// The drizzled result with image and coverage map.
+/// The drizzled result: image plus coverage, weight (`Σwᵢ`), and variance (`Σwᵢ²/(Σwᵢ)²`) maps.
 pub fn drizzle_stack<P: AsRef<Path> + Sync>(
     paths: &[P],
     transforms: &[Transform],

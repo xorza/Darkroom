@@ -331,6 +331,77 @@ fn test_coverage_at() {
     assert!((result.coverage_at(3, 3)).abs() < f32::EPSILON); // uncovered (odd)
 }
 
+#[test]
+fn test_weight_and_variance_maps() {
+    // scale=1, pixfrac=1, Turbo, identity: each input pixel maps 1:1 onto its output pixel with
+    // overlap=1 and Jacobian=1, so every contribution has weight = frame_weight exactly.
+    let config = DrizzleConfig {
+        scale: 1.0,
+        pixfrac: 1.0,
+        ..Default::default()
+    };
+    let dims = ImageDimensions::new((4, 4), 1);
+    let idx = 2 * 4 + 2; // interior output pixel (2, 2)
+
+    // (a) 3 equal-weight frames → Σw = 3, Σw² = 3, variance = 3/3² = 1/3 — the noise of an N=3
+    // average. The image RMS of these (identical) frames is 0, yet the true per-pixel variance is
+    // input_variance/3; the variance map reports that, which the RMS would understate.
+    let mut acc = DrizzleAccumulator::new(dims, config.clone());
+    for _ in 0..3 {
+        acc.add_image(
+            AstroImage::from_pixels(dims, vec![5.0; 16]),
+            &Transform::identity(),
+            1.0,
+            None,
+        );
+    }
+    let equal = acc.finalize();
+    assert!(
+        (equal.weight.pixels()[idx] - 3.0).abs() < 1e-5,
+        "Σw should be 3, got {}",
+        equal.weight.pixels()[idx]
+    );
+    assert!(
+        (equal.variance.pixels()[idx] - 1.0 / 3.0).abs() < 1e-5,
+        "variance should be 1/3, got {}",
+        equal.variance.pixels()[idx]
+    );
+    assert!((equal.image.channel(0).pixels()[idx] - 5.0).abs() < 1e-5);
+
+    // (b) 2 frames with frame weights [1, 3] → Σw = 4, Σw² = 1 + 9 = 10, variance = 10/16 = 0.625.
+    let mut acc = DrizzleAccumulator::new(dims, config);
+    acc.add_image(
+        AstroImage::from_pixels(dims, vec![10.0; 16]),
+        &Transform::identity(),
+        1.0,
+        None,
+    );
+    acc.add_image(
+        AstroImage::from_pixels(dims, vec![10.0; 16]),
+        &Transform::identity(),
+        3.0,
+        None,
+    );
+    let unequal = acc.finalize();
+    assert!(
+        (unequal.weight.pixels()[idx] - 4.0).abs() < 1e-5,
+        "Σw should be 4, got {}",
+        unequal.weight.pixels()[idx]
+    );
+    assert!(
+        (unequal.variance.pixels()[idx] - 0.625).abs() < 1e-5,
+        "variance should be 0.625, got {}",
+        unequal.variance.pixels()[idx]
+    );
+
+    // Concentrating weight on fewer frames raises variance above the equal-weight 2-frame optimum
+    // (1/2) — the map responds to the weight distribution, not just the contribution count.
+    assert!(
+        unequal.variance.pixels()[idx] > 0.5,
+        "unequal weighting should raise variance above 1/2"
+    );
+}
+
 /// Test turbo kernel drop size and overlap with hand-computed values.
 ///
 /// Setup: 4×4 input, scale=2, pixfrac=0.8 → drop_size = 1.6, half_drop = 0.8.
