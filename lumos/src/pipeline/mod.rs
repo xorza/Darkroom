@@ -107,12 +107,21 @@ pub fn align_and_stack(
     let star_sets: Vec<Vec<Star>> = lights
         .par_iter()
         .map(|img| {
-            let stars = StarDetector::from_config(config.detection.clone())
-                .detect(img)
-                .stars;
+            let result = StarDetector::from_config(config.detection.clone()).detect(img);
+            let d = &result.diagnostics;
             let n = detected.fetch_add(1, Ordering::Relaxed) + 1;
-            tracing::info!(frame = n, total, stars = stars.len(), "detected stars");
-            stars
+            // The detection funnel — candidates → deblended → centroided → kept — shows how
+            // confidently the frame resolved into usable stars.
+            tracing::info!(
+                frame = n,
+                total,
+                candidates = d.candidates_after_filtering,
+                deblended = d.deblended_components,
+                measured = d.stars_after_centroid,
+                stars = result.stars.len(),
+                "detected stars"
+            );
+            result.stars
         })
         .collect();
     let total_stars: usize = star_sets.iter().map(|s| s.len()).sum();
@@ -161,18 +170,25 @@ pub fn align_and_stack(
         .enumerate()
         .filter(|(index, _)| *index != reference)
         .map(|(index, img)| {
-            let outcome = match register(ref_stars, &star_sets[index], &config.registration) {
-                Ok(result) => Ok(warp(img, &result.warp_transform(), &config.registration).image),
-                Err(_) => Err(index),
-            };
             let n = registered_so_far.fetch_add(1, Ordering::Relaxed) + 1;
-            tracing::info!(
-                frame = n,
-                total = reg_total,
-                solved = outcome.is_ok(),
-                "registered"
-            );
-            outcome
+            match register(ref_stars, &star_sets[index], &config.registration) {
+                Ok(result) => {
+                    tracing::info!(
+                        frame = n,
+                        total = reg_total,
+                        inliers = result.num_inliers,
+                        rms = format!("{:.3}", result.rms_error),
+                        quality = format!("{:.3}", result.quality_score),
+                        transform = %result.transform,
+                        "registered"
+                    );
+                    Ok(warp(img, &result.warp_transform(), &config.registration).image)
+                }
+                Err(error) => {
+                    tracing::info!(frame = n, total = reg_total, %error, "registration failed");
+                    Err(index)
+                }
+            }
         })
         .collect();
 
