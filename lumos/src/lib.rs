@@ -94,6 +94,7 @@ pub use stacking::stack::{stack, stack_images};
 
 pub use pipeline::{
     AlignStackConfig, AlignStackResult, Error as AlignStackError, Reference, align_and_stack,
+    calibrate_align_stack,
 };
 
 // ============================================================================

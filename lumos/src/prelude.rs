@@ -26,5 +26,7 @@ pub use crate::{ProgressCallback, StackConfig, stack, stack_images};
 // Drizzle
 pub use crate::{DrizzleConfig, drizzle_images, drizzle_stack};
 
-// End-to-end: detect → register → warp → stack
-pub use crate::{AlignStackConfig, AlignStackResult, Reference, align_and_stack};
+// End-to-end: (calibrate →) detect → register → warp → stack
+pub use crate::{
+    AlignStackConfig, AlignStackResult, Reference, align_and_stack, calibrate_align_stack,
+};

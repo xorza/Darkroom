@@ -1,13 +1,20 @@
-//! End-to-end registered stacking — the pipeline's single deliverable in one call.
+//! End-to-end registered stacking — raw lights to a stacked master in one call.
 //!
-//! [`align_and_stack`] runs the full alignment + combine flow over a set of light frames:
-//! detect stars → choose a reference → register every other frame to it → warp the ones that
-//! solve → combine with [`stack_images`]. Frames that fail to register are dropped and
-//! reported in [`AlignStackResult::dropped`] rather than aborting the stack.
+//! [`align_and_stack`] runs the alignment + combine flow over calibrated frames: detect stars
+//! → choose a reference → register every other frame to it → warp the ones that solve →
+//! combine with [`stack_images`]. Frames that fail to register are dropped and reported in
+//! [`AlignStackResult::dropped`] rather than aborting the stack. [`calibrate_align_stack`]
+//! prepends calibration: load each raw light, apply the calibration masters, demosaic, then
+//! hand the calibrated frames to `align_and_stack`.
 
 use rayon::prelude::*;
 
+use std::path::{Path, PathBuf};
+
 use crate::astro_image::AstroImage;
+use crate::astro_image::error::ImageError;
+use crate::calibration_masters::CalibrationMasters;
+use crate::raw::load_raw_cfa;
 use crate::registration::config::Config as RegistrationConfig;
 use crate::registration::{register, warp};
 use crate::stacking::config::StackConfig;
@@ -52,11 +59,17 @@ pub struct AlignStackResult {
     pub dropped: Vec<usize>,
 }
 
-/// Errors from [`align_and_stack`].
+/// Errors from [`align_and_stack`] and [`calibrate_align_stack`].
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("no light frames provided")]
     NoFrames,
+    #[error("failed to load light frame '{path}': {source}")]
+    Load {
+        path: PathBuf,
+        #[source]
+        source: ImageError,
+    },
     #[error("reference index {index} out of range ({count} frames)")]
     ReferenceOutOfRange { index: usize, count: usize },
     #[error("reference frame {index} has only {found} stars (need {required})")]
@@ -173,6 +186,35 @@ pub fn align_and_stack(
     })
 }
 
+/// Calibrate, align, and stack raw light frames end to end — the full pipeline in one call.
+///
+/// For each raw light (in parallel): load it as a `CfaImage`, apply `masters`
+/// (dark/flat/defect) in place, demosaic to an `AstroImage`, then hand the calibrated frames
+/// to [`align_and_stack`]. A frame that fails to **load** is a hard error (bad input); a frame
+/// that fails to **register** is dropped and reported in [`AlignStackResult::dropped`].
+///
+/// For frames that are already calibrated (e.g. pre-processed FITS), skip this and call
+/// [`align_and_stack`] directly.
+pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
+    light_paths: &[P],
+    masters: &CalibrationMasters,
+    config: &AlignStackConfig,
+) -> Result<AlignStackResult, Error> {
+    let calibrated: Vec<AstroImage> = light_paths
+        .par_iter()
+        .map(|path| {
+            let mut cfa = load_raw_cfa(path.as_ref()).map_err(|source| Error::Load {
+                path: path.as_ref().to_path_buf(),
+                source,
+            })?;
+            masters.calibrate(&mut cfa);
+            Ok(cfa.demosaic())
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+
+    align_and_stack(calibrated, config)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,5 +322,42 @@ mod tests {
     fn empty_input_errors() {
         let err = align_and_stack(Vec::new(), &AlignStackConfig::default()).unwrap_err();
         assert!(matches!(err, Error::NoFrames));
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(feature = "real-data"),
+        ignore = "requires the bundled real-data dataset"
+    )]
+    fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
+        use crate::testing::calibration_image_paths;
+        use crate::{CalibrationFrames, DEFAULT_SIGMA_THRESHOLD};
+
+        let dark_paths = calibration_image_paths("Darks").unwrap_or_default();
+        let bias_paths = calibration_image_paths("Bias").unwrap_or_default();
+        let flat_paths = calibration_image_paths("Flats").unwrap_or_default();
+        let empty: Vec<std::path::PathBuf> = Vec::new();
+        let masters = CalibrationMasters::from_files(
+            CalibrationFrames {
+                darks: &dark_paths,
+                flats: &flat_paths,
+                bias: &bias_paths,
+                flat_darks: &empty,
+            },
+            DEFAULT_SIGMA_THRESHOLD,
+        )
+        .expect("build calibration masters");
+
+        let all = calibration_image_paths("Lights").expect("Lights subdirectory");
+        let lights = &all[..all.len().min(3)];
+        assert!(lights.len() >= 2, "need ≥2 lights to exercise registration");
+
+        let result = calibrate_align_stack(lights, &masters, &AlignStackConfig::default())
+            .expect("calibrate_align_stack");
+
+        // A real stacked image came out, and every input frame is accounted for.
+        assert!(result.image.width() > 0 && result.image.height() > 0);
+        assert_eq!(result.registered + result.dropped.len(), lights.len());
+        assert!(result.registered >= 1, "at least the reference is stacked");
     }
 }
