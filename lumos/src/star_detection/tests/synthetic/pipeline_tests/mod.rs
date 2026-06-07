@@ -38,7 +38,7 @@ fn run_test(
     );
 
     let image = AstroImage::from_pixels(
-        ImageDimensions::new(field_config.width, field_config.height, 1),
+        ImageDimensions::new((field_config.width, field_config.height), 1),
         pixels_vec.clone(),
     );
     let mut detector = StarDetector::from_config(detection_config.clone());

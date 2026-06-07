@@ -837,7 +837,7 @@ pub fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
     };
     drop(raw);
 
-    let dimensions = ImageDimensions::new(width, height, channels);
+    let dimensions = ImageDimensions::new((width, height), channels);
     let mut astro = match pixels {
         DemosaicedPixels::Planar(planes) => AstroImage::from_planar_channels(dimensions, planes),
         DemosaicedPixels::Flat(px) => AstroImage::from_pixels(dimensions, px),

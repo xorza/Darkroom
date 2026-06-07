@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn test_prepare_uniform() {
-        let dim = ImageDimensions::new(64, 64, 1);
+        let dim = ImageDimensions::new((64, 64), 1);
         let data = vec![0.5f32; 64 * 64];
         let image = AstroImage::from_pixels(dim, data);
 
@@ -140,7 +140,7 @@ mod tests {
         // Add bright pixel (simulating a star)
         data[32 * width + 32] = 0.9;
 
-        let dim = ImageDimensions::new(width, height, 1);
+        let dim = ImageDimensions::new((width, height), 1);
         let image = AstroImage::from_pixels(dim, data);
 
         let mut pool = BufferPool::new(width, height);
@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn test_detection_weights_equal_noise() {
         // Identical per-channel MAD → equal inverse-variance weights (≈ 1/3 each).
-        let dims = ImageDimensions::new(4, 4, 3);
+        let dims = ImageDimensions::new((4, 4), 3);
         let ch = channel_with_mad(0.5, 0.02);
         let image = AstroImage::from_planar_channels(dims, vec![ch.clone(), ch.clone(), ch]);
 
@@ -174,7 +174,7 @@ mod tests {
     fn test_detection_weights_downweight_noisy_channel() {
         // R,G clean (MAD 0.02), B noisy (MAD 0.08). σ ∝ MAD, so w ∝ 1/MAD².
         // w_R / w_B = (0.08 / 0.02)² = 16.
-        let dims = ImageDimensions::new(4, 4, 3);
+        let dims = ImageDimensions::new((4, 4), 3);
         let clean = channel_with_mad(0.5, 0.02);
         let noisy = channel_with_mad(0.5, 0.08);
         let image = AstroImage::from_planar_channels(dims, vec![clean.clone(), clean, noisy]);
@@ -198,7 +198,7 @@ mod tests {
     #[test]
     fn test_detection_weights_all_flat_falls_back_to_mean() {
         // Uniform channels have MAD 0 → degenerate; weights fall back to 1/3 each.
-        let dims = ImageDimensions::new(4, 4, 3);
+        let dims = ImageDimensions::new((4, 4), 3);
         let flat = vec![0.5f32; 16];
         let image = AstroImage::from_planar_channels(dims, vec![flat.clone(), flat.clone(), flat]);
 
@@ -216,7 +216,7 @@ mod tests {
     fn test_prepare_rgb_equal_noise_is_mean() {
         // Distinct per-channel levels but identical spread → equal weights, so the
         // detection plane is the plain mean of the three channels.
-        let dims = ImageDimensions::new(4, 4, 3);
+        let dims = ImageDimensions::new((4, 4), 3);
         let r = channel_with_mad(0.30, 0.02);
         let g = channel_with_mad(0.50, 0.02);
         let b = channel_with_mad(0.70, 0.02);
@@ -239,7 +239,7 @@ mod tests {
         // A star bright only in R must remain prominent in the detection plane.
         // With equal-noise channels the weights are ~1/3, so the star peak lands at
         // ~1/3 of its R amplitude — far above Rec.709's 0.21× crush of red.
-        let dims = ImageDimensions::new(4, 4, 3);
+        let dims = ImageDimensions::new((4, 4), 3);
         let mut r = channel_with_mad(0.10, 0.01);
         r[5] = 0.90; // bright red star, off the symmetric background
         let g = channel_with_mad(0.10, 0.01);

@@ -59,7 +59,8 @@ fn test_cosmic_ray_rejection() {
         ..Default::default()
     };
 
-    let image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels_vec.clone());
+    let image =
+        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), pixels_vec.clone());
     let mut detector = StarDetector::from_config(detection_config.clone());
     let result = detector.detect(&image);
     let stars = result.stars;
@@ -199,7 +200,8 @@ fn test_sharpness_visualization() {
         ..Default::default()
     };
 
-    let image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels_vec.clone());
+    let image =
+        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), pixels_vec.clone());
     let mut detector = StarDetector::from_config(detection_config);
     let result = detector.detect(&image);
     let stars = result.stars;

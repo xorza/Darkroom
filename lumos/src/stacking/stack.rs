@@ -388,7 +388,7 @@ mod tests {
     }
 
     fn make_uniform_frames(pixel_counts: usize, values: &[f32]) -> ImageCache<AstroImage> {
-        let dims = ImageDimensions::new(pixel_counts, 1, 1);
+        let dims = ImageDimensions::new((pixel_counts, 1), 1);
         let images = values
             .iter()
             .map(|&v| AstroImage::from_pixels(dims, vec![v; pixel_counts]))
@@ -397,7 +397,7 @@ mod tests {
     }
 
     fn make_rgb_frames(pixels: usize, frame_values: &[[f32; 3]]) -> ImageCache<AstroImage> {
-        let dims = ImageDimensions::new(pixels, 1, 3);
+        let dims = ImageDimensions::new((pixels, 1), 3);
         let images = frame_values
             .iter()
             .map(|rgb| {
@@ -484,7 +484,7 @@ mod tests {
     #[test]
     fn test_stack_images_in_memory_mean() {
         // In-memory stacking must match the documented mean: (10 + 20 + 30)/3 = 20.
-        let dims = ImageDimensions::new(4, 4, 1);
+        let dims = ImageDimensions::new((4, 4), 1);
         let images = vec![
             AstroImage::from_pixels(dims, vec![10.0; 16]),
             AstroImage::from_pixels(dims, vec![20.0; 16]),
@@ -503,8 +503,8 @@ mod tests {
 
     #[test]
     fn test_stack_images_dimension_mismatch() {
-        let a = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), vec![1.0; 16]);
-        let b = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![1.0; 4]);
+        let a = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
+        let b = AstroImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0; 4]);
         let result = stack_images(
             vec![a, b],
             StackConfig::default(),
@@ -586,7 +586,7 @@ mod tests {
     #[test]
     fn test_global_norm_offset_correction() {
         // Same scale, different median -> gain ~1.0, offset ~-100
-        let dims = ImageDimensions::new(4, 4, 1);
+        let dims = ImageDimensions::new((4, 4), 1);
         let frame0: Vec<f32> = (0..16).map(|i| 100.0 + i as f32).collect();
         let frame1: Vec<f32> = (0..16).map(|i| 200.0 + i as f32).collect();
         let cache = make_test_cache(vec![
@@ -611,7 +611,7 @@ mod tests {
     #[test]
     fn test_global_norm_scale_correction() {
         // Frame 1 has ~2x the spread -> gain ~0.5
-        let dims = ImageDimensions::new(10, 10, 1);
+        let dims = ImageDimensions::new((10, 10), 1);
         let frame0: Vec<f32> = (0..100).map(|i| 90.0 + (i as f32) * 20.0 / 99.0).collect();
         let frame1: Vec<f32> = (0..100).map(|i| 80.0 + (i as f32) * 40.0 / 99.0).collect();
         let cache = make_test_cache(vec![
@@ -662,7 +662,7 @@ mod tests {
     #[test]
     fn test_multiplicative_norm_no_offset() {
         // Multiplicative should only scale, never shift
-        let dims = ImageDimensions::new(10, 10, 1);
+        let dims = ImageDimensions::new((10, 10), 1);
         let frame0: Vec<f32> = (0..100).map(|i| 90.0 + (i as f32) * 0.2).collect();
         let frame1: Vec<f32> = (0..100).map(|i| 180.0 + (i as f32) * 0.4).collect();
         let cache = make_test_cache(vec![
@@ -824,7 +824,7 @@ mod tests {
         //
         // With Global normalization, the reference frame gets IDENTITY params.
         // Other frames are normalized to match the reference.
-        let dims = ImageDimensions::new(10, 10, 1);
+        let dims = ImageDimensions::new((10, 10), 1);
         // Frame 0: values spread from 80..120 (median=100, MAD=10)
         let f0: Vec<f32> = (0..100).map(|i| 80.0 + (i as f32) * 40.0 / 99.0).collect();
         // Frame 1: values spread from 198..202 (median=200, MAD=1)
@@ -875,7 +875,7 @@ mod tests {
     fn test_norm_result_matches_lowest_noise_frame() {
         // After global normalization + mean stacking, the result should be
         // at the reference frame's level (the lowest-noise frame).
-        let dims = ImageDimensions::new(16, 1, 1);
+        let dims = ImageDimensions::new((16, 1), 1);
         // Frame 0: high noise, median ~100
         let f0: Vec<f32> = (0..16).map(|i| 80.0 + (i as f32) * 40.0 / 15.0).collect();
         // Frame 1: low noise, median ~200 ← reference
@@ -902,7 +902,7 @@ mod tests {
         // Frame 1: noisy, values ~200 (spread 20.0)
         // With equal weight: mean ≈ 150
         // With noise weight: w0 = 1/sigma0^2 >> w1 = 1/sigma1^2, so result ≈ 100
-        let dims = ImageDimensions::new(100, 1, 1);
+        let dims = ImageDimensions::new((100, 1), 1);
         let f0: Vec<f32> = (0..100).map(|i| 99.75 + (i as f32) * 0.5 / 99.0).collect();
         let f1: Vec<f32> = (0..100).map(|i| 190.0 + (i as f32) * 20.0 / 99.0).collect();
         let cache = make_test_cache(vec![
@@ -947,7 +947,7 @@ mod tests {
     #[test]
     fn test_noise_weighting_with_spread_equal_noise() {
         // 3 frames with identical spread → equal weights
-        let dims = ImageDimensions::new(100, 1, 1);
+        let dims = ImageDimensions::new((100, 1), 1);
         let make_frame =
             |base: f32| -> Vec<f32> { (0..100).map(|i| base + (i as f32) * 10.0 / 99.0).collect() };
         let cache = make_test_cache(vec![
@@ -973,7 +973,7 @@ mod tests {
         // Frame 1: noisy (wide spread ~100)
         // Frame 2: has outlier pixel but clean otherwise (~100)
         // Sigma-clip should reject the outlier; noise weights should favor frame 0.
-        let dims = ImageDimensions::new(16, 1, 1);
+        let dims = ImageDimensions::new((16, 1), 1);
         let f0: Vec<f32> = (0..16).map(|i| 99.9 + (i as f32) * 0.2 / 15.0).collect();
         let f1: Vec<f32> = (0..16).map(|i| 90.0 + (i as f32) * 20.0 / 15.0).collect();
         let mut f2: Vec<f32> = (0..16).map(|i| 99.8 + (i as f32) * 0.4 / 15.0).collect();

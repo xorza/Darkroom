@@ -180,7 +180,8 @@ fn test_debug_synthetic_steps() {
     dilated_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
-    let image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), grayscale.clone());
+    let image =
+        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), grayscale.clone());
     let mut detector = StarDetector::from_config(detection_config.clone());
     let detection_result = detector.detect(&image);
     let stars = detection_result.stars;

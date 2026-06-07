@@ -76,7 +76,7 @@ fn test_synthetic_star_detection() {
     };
 
     let image = AstroImage::from_pixels(
-        ImageDimensions::new(config.width, config.height, 1),
+        ImageDimensions::new((config.width, config.height), 1),
         pixels.clone(),
     );
     let mut detector = StarDetector::from_config(detection_config);

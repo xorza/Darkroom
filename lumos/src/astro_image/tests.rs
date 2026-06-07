@@ -15,7 +15,7 @@ fn test_metadata_default() {
 #[test]
 fn test_convert_to_imaginarium_image_grayscale() {
     let astro = AstroImage::from_pixels(
-        ImageDimensions::new(3, 2, 1),
+        ImageDimensions::new((3, 2), 1),
         vec![0.0, 0.25, 0.5, 0.75, 1.0, 0.5],
     );
 
@@ -36,7 +36,7 @@ fn test_convert_to_imaginarium_image_grayscale() {
 #[test]
 fn test_convert_to_imaginarium_image_rgb() {
     let astro = AstroImage::from_pixels(
-        ImageDimensions::new(2, 2, 3),
+        ImageDimensions::new((2, 2), 3),
         vec![
             1.0, 0.0, 0.0, // red
             0.0, 1.0, 0.0, // green
@@ -128,13 +128,13 @@ fn test_from_image_no_stride_padding() {
 
 #[test]
 fn test_mean() {
-    let image = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![1.0, 2.0, 3.0, 4.0]);
+    let image = AstroImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
     assert!((image.mean() - 2.5).abs() < f32::EPSILON);
 }
 
 #[test]
 fn test_save_grayscale_tiff() {
-    let image = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![0.1, 0.2, 0.3, 0.4]);
+    let image = AstroImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![0.1, 0.2, 0.3, 0.4]);
     let output_path = test_output_path("astro_save_gray.tiff");
 
     image.save(&output_path).unwrap();
@@ -149,7 +149,7 @@ fn test_save_grayscale_tiff() {
 #[test]
 fn test_save_rgb_tiff() {
     let image = AstroImage::from_pixels(
-        ImageDimensions::new(2, 2, 3),
+        ImageDimensions::new((2, 2), 3),
         vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
     );
     let output_path = test_output_path("astro_save_rgb.tiff");
@@ -165,7 +165,7 @@ fn test_save_rgb_tiff() {
 
 #[test]
 fn test_save_invalid_extension() {
-    let image = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![0.1, 0.2, 0.3, 0.4]);
+    let image = AstroImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![0.1, 0.2, 0.3, 0.4]);
     let output_path = test_output_path("astro_save_invalid.xyz");
 
     let result = image.save(&output_path);
@@ -175,7 +175,7 @@ fn test_save_invalid_extension() {
 #[test]
 fn test_roundtrip_astro_to_image_to_astro() {
     let gray = AstroImage::from_pixels(
-        ImageDimensions::new(3, 2, 1),
+        ImageDimensions::new((3, 2), 1),
         vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
     );
 
@@ -188,7 +188,7 @@ fn test_roundtrip_astro_to_image_to_astro() {
     }
 
     let rgb = AstroImage::from_pixels(
-        ImageDimensions::new(2, 2, 3),
+        ImageDimensions::new((2, 2), 3),
         vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.5, 0.5, 0.5],
     );
 
@@ -279,7 +279,7 @@ fn test_load_single_raw_from_env() {
 #[test]
 fn test_rgb_image_creation_and_operations() {
     let image = AstroImage::from_pixels(
-        ImageDimensions::new(2, 2, 3),
+        ImageDimensions::new((2, 2), 3),
         vec![
             10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0,
         ],
@@ -301,7 +301,7 @@ fn test_rgb_image_creation_and_operations() {
 #[test]
 fn test_get_pixel_gray() {
     let image = AstroImage::from_pixels(
-        ImageDimensions::new(3, 2, 1),
+        ImageDimensions::new((3, 2), 1),
         vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
     );
 
@@ -316,7 +316,7 @@ fn test_get_pixel_gray() {
 #[test]
 fn test_get_pixel_channel_rgb() {
     let image = AstroImage::from_pixels(
-        ImageDimensions::new(2, 2, 3),
+        ImageDimensions::new((2, 2), 3),
         vec![
             1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
         ],
@@ -339,7 +339,7 @@ fn test_get_pixel_channel_rgb() {
 #[test]
 fn test_from_planar_channels_grayscale() {
     let channels = vec![vec![1.0, 2.0, 3.0, 4.0]];
-    let image = AstroImage::from_planar_channels(ImageDimensions::new(2, 2, 1), channels);
+    let image = AstroImage::from_planar_channels(ImageDimensions::new((2, 2), 1), channels);
 
     assert!(image.is_grayscale());
     assert_eq!(image.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0]);
@@ -348,7 +348,7 @@ fn test_from_planar_channels_grayscale() {
 #[test]
 fn test_from_planar_channels_rgb() {
     let image = AstroImage::from_planar_channels(
-        ImageDimensions::new(2, 1, 3),
+        ImageDimensions::new((2, 1), 3),
         vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]],
     );
 
@@ -361,7 +361,7 @@ fn test_from_planar_channels_rgb() {
 #[test]
 fn test_channel_mut() {
     let mut image =
-        AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![1.0, 2.0, 3.0, 4.0]);
+        AstroImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
 
     image.channel_mut(0)[0] = 10.0;
     image.channel_mut(0)[3] = 40.0;
@@ -372,7 +372,7 @@ fn test_channel_mut() {
 #[test]
 fn test_get_pixel_rgb() {
     let image = AstroImage::from_pixels(
-        ImageDimensions::new(2, 1, 3),
+        ImageDimensions::new((2, 1), 3),
         vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
     );
 
@@ -383,7 +383,7 @@ fn test_get_pixel_rgb() {
 #[test]
 fn test_set_pixel_rgb() {
     let mut image = AstroImage::from_pixels(
-        ImageDimensions::new(2, 1, 3),
+        ImageDimensions::new((2, 1), 3),
         vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     );
 
@@ -397,7 +397,7 @@ fn test_set_pixel_rgb() {
 #[test]
 fn test_get_pixel_gray_mut() {
     let mut image =
-        AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![1.0, 2.0, 3.0, 4.0]);
+        AstroImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
 
     *image.get_pixel_gray_mut(0, 0) = 10.0;
     *image.get_pixel_gray_mut(1, 1) = 40.0;
@@ -408,7 +408,7 @@ fn test_get_pixel_gray_mut() {
 
 #[test]
 fn test_into_interleaved_pixels_grayscale() {
-    let image = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![1.0, 2.0, 3.0, 4.0]);
+    let image = AstroImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
 
     let interleaved = image.into_interleaved_pixels();
     assert_eq!(interleaved, vec![1.0, 2.0, 3.0, 4.0]);
@@ -417,7 +417,7 @@ fn test_into_interleaved_pixels_grayscale() {
 #[test]
 fn test_into_interleaved_pixels_rgb() {
     let image = AstroImage::from_planar_channels(
-        ImageDimensions::new(2, 1, 3),
+        ImageDimensions::new((2, 1), 3),
         vec![vec![1.0, 4.0], vec![2.0, 5.0], vec![3.0, 6.0]],
     );
 
@@ -428,11 +428,11 @@ fn test_into_interleaved_pixels_rgb() {
 #[test]
 fn test_sub_assign() {
     let mut image = AstroImage::from_pixels(
-        ImageDimensions::new(2, 1, 3),
+        ImageDimensions::new((2, 1), 3),
         vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
     );
     let source = AstroImage::from_pixels(
-        ImageDimensions::new(2, 1, 3),
+        ImageDimensions::new((2, 1), 3),
         vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
     );
 
@@ -445,7 +445,7 @@ fn test_sub_assign() {
 
 #[test]
 fn test_image_dimensions_validation() {
-    let dims = ImageDimensions::new(100, 200, 3);
+    let dims = ImageDimensions::new((100, 200), 3);
     assert_eq!(dims.size.x, 100);
     assert_eq!(dims.size.y, 200);
     assert_eq!(dims.channels, 3);
@@ -458,19 +458,19 @@ fn test_image_dimensions_validation() {
 #[test]
 #[should_panic(expected = "Width must be positive")]
 fn test_image_dimensions_zero_width() {
-    ImageDimensions::new(0, 100, 1);
+    ImageDimensions::new((0, 100), 1);
 }
 
 #[test]
 #[should_panic(expected = "Height must be positive")]
 fn test_image_dimensions_zero_height() {
-    ImageDimensions::new(100, 0, 1);
+    ImageDimensions::new((100, 0), 1);
 }
 
 #[test]
 #[should_panic(expected = "Only 1 (grayscale) or 3 (RGB) channels supported")]
 fn test_image_dimensions_invalid_channels() {
-    ImageDimensions::new(100, 100, 2);
+    ImageDimensions::new((100, 100), 2);
 }
 
 #[test]

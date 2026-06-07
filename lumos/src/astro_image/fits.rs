@@ -52,11 +52,11 @@ pub fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
 
     // fits-well reports shape NAXIS1-first: [width, height, (channels)].
     let img_dims = match shape.len() {
-        2 => ImageDimensions::new(shape[0], shape[1], 1),
+        2 => ImageDimensions::new((shape[0], shape[1]), 1),
         // A 3D FITS is RGB only when NAXIS3 ∈ {1,3}; any other depth is a data cube
         // we don't model — reject it cleanly instead of tripping ImageDimensions's
         // channel assertion on untrusted file input.
-        3 if shape[2] == 1 || shape[2] == 3 => ImageDimensions::new(shape[0], shape[1], shape[2]),
+        3 if shape[2] == 1 || shape[2] == 3 => ImageDimensions::new((shape[0], shape[1]), shape[2]),
         3 => {
             return Err(fits_unsupported(
                 path,

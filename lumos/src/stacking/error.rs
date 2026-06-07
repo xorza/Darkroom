@@ -87,8 +87,8 @@ mod tests {
     fn test_dimension_mismatch_error_message() {
         let err = Error::DimensionMismatch {
             index: 5,
-            expected: ImageDimensions::new(100, 100, 3),
-            actual: ImageDimensions::new(200, 100, 3),
+            expected: ImageDimensions::new((100, 100), 3),
+            actual: ImageDimensions::new((200, 100), 3),
         };
         let msg = err.to_string();
         assert!(msg.contains("5"));

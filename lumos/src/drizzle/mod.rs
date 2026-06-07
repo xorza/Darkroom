@@ -217,7 +217,7 @@ impl DrizzleAccumulator {
 
     /// Output dimensions.
     pub fn dimensions(&self) -> ImageDimensions {
-        ImageDimensions::new(self.width(), self.height(), self.channels())
+        ImageDimensions::new((self.width(), self.height()), self.channels())
     }
 
     /// Add an image to the drizzle accumulator with the given transform.
@@ -701,7 +701,7 @@ impl DrizzleAccumulator {
         }
 
         let image = AstroImage::from_planar_channels(
-            ImageDimensions::new(width, height, n_channels),
+            ImageDimensions::new((width, height), n_channels),
             output_channels,
         );
 

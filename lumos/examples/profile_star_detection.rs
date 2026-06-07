@@ -48,7 +48,7 @@ fn generate_synthetic_image(width: usize, height: usize, num_stars: usize) -> As
         *p = p.clamp(0.0, 1.0);
     }
 
-    AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels)
+    AstroImage::from_pixels(ImageDimensions::new((width, height), 1), pixels)
 }
 
 fn main() {

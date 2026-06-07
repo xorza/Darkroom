@@ -114,11 +114,11 @@ fn test_subpixel_shift_detection() {
     let detection_config = Config::default();
 
     let image1 = AstroImage::from_pixels(
-        ImageDimensions::new(config.width, config.height, 1),
+        ImageDimensions::new((config.width, config.height), 1),
         pixels1.clone(),
     );
     let image2 = AstroImage::from_pixels(
-        ImageDimensions::new(config.width, config.height, 1),
+        ImageDimensions::new((config.width, config.height), 1),
         pixels2.clone(),
     );
     let mut detector = StarDetector::from_config(detection_config.clone());
@@ -265,7 +265,7 @@ fn test_subpixel_accuracy_sweep() {
 
     let pixels1 = generate_star_field(&config, &base_stars);
     let image1 = AstroImage::from_pixels(
-        ImageDimensions::new(config.width, config.height, 1),
+        ImageDimensions::new((config.width, config.height), 1),
         pixels1,
     );
     let mut detector = StarDetector::from_config(detection_config);
@@ -281,7 +281,7 @@ fn test_subpixel_accuracy_sweep() {
 
         let pixels2 = generate_star_field(&config, &shifted_stars);
         let image2 = AstroImage::from_pixels(
-            ImageDimensions::new(config.width, config.height, 1),
+            ImageDimensions::new((config.width, config.height), 1),
             pixels2,
         );
         let detected2 = detector.detect(&image2).stars;

@@ -44,8 +44,8 @@ mod tests {
     fn test_dimension_mismatch_message() {
         let err = DrizzleError::DimensionMismatch {
             index: 2,
-            expected: ImageDimensions::new(100, 100, 3),
-            actual: ImageDimensions::new(200, 100, 3),
+            expected: ImageDimensions::new((100, 100), 3),
+            actual: ImageDimensions::new((200, 100), 3),
         };
         let msg = err.to_string();
         assert!(msg.contains("frame 2"));

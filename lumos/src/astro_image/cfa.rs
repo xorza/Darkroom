@@ -54,7 +54,7 @@ pub struct CfaImage {
 
 impl crate::stacking::cache::StackableImage for CfaImage {
     fn dimensions(&self) -> ImageDimensions {
-        ImageDimensions::new(self.data.width(), self.data.height(), 1)
+        ImageDimensions::new((self.data.width(), self.data.height()), 1)
     }
 
     fn channel(&self, c: usize) -> &[f32] {
@@ -100,7 +100,7 @@ impl CfaImage {
         match &cfa_type {
             CfaType::Mono => {
                 // No demosaicing needed - convert 1-channel to 1-channel AstroImage
-                let dims = ImageDimensions::new(width, height, 1);
+                let dims = ImageDimensions::new((width, height), 1);
                 let mut astro = AstroImage::from_pixels(dims, pixels);
                 astro.metadata = self.metadata;
                 astro
@@ -119,7 +119,7 @@ impl CfaImage {
                     *cfa_pattern,
                 );
                 let planes = demosaic_bayer(&bayer);
-                let dims = ImageDimensions::new(width, height, 3);
+                let dims = ImageDimensions::new((width, height), 3);
                 let mut astro = AstroImage::from_planar_channels(dims, planes);
                 astro.metadata = self.metadata;
                 astro
@@ -130,7 +130,7 @@ impl CfaImage {
                 let planes =
                     process_xtrans_f32(&pixels, width, height, width, height, 0, 0, *pattern);
 
-                let dims = ImageDimensions::new(width, height, 3);
+                let dims = ImageDimensions::new((width, height), 3);
                 let mut astro = AstroImage::from_planar_channels(dims, planes);
                 astro.metadata = self.metadata;
                 astro

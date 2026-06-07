@@ -290,7 +290,7 @@ mod tests {
         };
         let (pixels, _) = star_field::generate_star_field(&cfg);
         let image = AstroImage::from_pixels(
-            ImageDimensions::new(cfg.width, cfg.height, 1),
+            ImageDimensions::new((cfg.width, cfg.height), 1),
             pixels.to_vec(),
         );
         (image, RegistrationConfig::default())

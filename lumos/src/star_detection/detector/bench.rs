@@ -20,7 +20,7 @@ fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {
     // 6K globular cluster with 50000 stars - extreme crowding
     let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
     let image = AstroImage::from_pixels(
-        ImageDimensions::new(pixels.width(), pixels.height(), 1),
+        ImageDimensions::new((pixels.width(), pixels.height()), 1),
         pixels.into_vec(),
     );
 
@@ -77,7 +77,7 @@ fn bench_detect_4k_dense(b: ::quickbench::Bencher) {
     // 4K image with 2000 stars
     let pixels = benchmark_star_field(4096, 4096, 2000, 0.1, 0.01, 42);
     let image = AstroImage::from_pixels(
-        ImageDimensions::new(pixels.width(), pixels.height(), 1),
+        ImageDimensions::new((pixels.width(), pixels.height()), 1),
         pixels.into_vec(),
     );
     let mut detector = StarDetector::default();
@@ -92,7 +92,7 @@ fn bench_detect_1k_sparse(b: ::quickbench::Bencher) {
     // 1K image with 100 stars (sparse field)
     let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
     let image = AstroImage::from_pixels(
-        ImageDimensions::new(pixels.width(), pixels.height(), 1),
+        ImageDimensions::new((pixels.width(), pixels.height()), 1),
         pixels.into_vec(),
     );
     let mut detector = StarDetector::default();

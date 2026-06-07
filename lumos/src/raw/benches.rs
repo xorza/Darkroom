@@ -404,7 +404,7 @@ fn load_raw_libraw_demosaic(path: &Path, user_qual: i32) -> Result<AstroImage, I
 
     let (pixels, out_width, out_height, num_channels) = raw.demosaic_libraw_fallback()?;
 
-    let dimensions = ImageDimensions::new(out_width, out_height, num_channels);
+    let dimensions = ImageDimensions::new((out_width, out_height), num_channels);
     Ok(AstroImage::from_pixels(dimensions, pixels))
 }
 

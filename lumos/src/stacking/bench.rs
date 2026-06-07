@@ -20,7 +20,7 @@ const BENCH_HEIGHT: usize = 1280;
 /// Bias frames have a constant pedestal (e.g. 1000 ADU) plus readout noise.
 /// Each frame gets a slightly different pedestal to simulate real variation.
 fn make_bias_frames(count: usize) -> Vec<AstroImage> {
-    let dims = ImageDimensions::new(BENCH_WIDTH, BENCH_HEIGHT, 1);
+    let dims = ImageDimensions::new((BENCH_WIDTH, BENCH_HEIGHT), 1);
     let npix = BENCH_WIDTH * BENCH_HEIGHT;
 
     (0..count)
@@ -44,7 +44,7 @@ fn make_bias_frames(count: usize) -> Vec<AstroImage> {
 /// Dark frames have a pedestal + thermal noise that increases with position
 /// (hot pixel gradient). Some frames have hot pixels (outliers).
 fn make_dark_frames(count: usize) -> Vec<AstroImage> {
-    let dims = ImageDimensions::new(BENCH_WIDTH, BENCH_HEIGHT, 1);
+    let dims = ImageDimensions::new((BENCH_WIDTH, BENCH_HEIGHT), 1);
     let npix = BENCH_WIDTH * BENCH_HEIGHT;
 
     (0..count)
@@ -78,7 +78,7 @@ fn make_dark_frames(count: usize) -> Vec<AstroImage> {
 /// Flat frames have a vignetting pattern (bright center, dim corners)
 /// with multiplicative variation between frames.
 fn make_flat_frames(count: usize) -> Vec<AstroImage> {
-    let dims = ImageDimensions::new(BENCH_WIDTH, BENCH_HEIGHT, 3);
+    let dims = ImageDimensions::new((BENCH_WIDTH, BENCH_HEIGHT), 3);
     let npix = BENCH_WIDTH * BENCH_HEIGHT;
     let cx = BENCH_WIDTH as f32 / 2.0;
     let cy = BENCH_HEIGHT as f32 / 2.0;
@@ -118,7 +118,7 @@ fn make_flat_frames(count: usize) -> Vec<AstroImage> {
 /// Light frames have a sky background gradient + stars + noise.
 /// Global normalization is needed because sky levels vary between frames.
 fn make_light_frames(count: usize) -> Vec<AstroImage> {
-    let dims = ImageDimensions::new(BENCH_WIDTH, BENCH_HEIGHT, 3);
+    let dims = ImageDimensions::new((BENCH_WIDTH, BENCH_HEIGHT), 3);
     let npix = BENCH_WIDTH * BENCH_HEIGHT;
 
     (0..count)

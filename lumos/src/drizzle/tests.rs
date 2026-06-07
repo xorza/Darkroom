@@ -41,7 +41,7 @@ fn test_drizzle_config_invalid_pixfrac() {
 #[test]
 fn test_drizzle_accumulator_dimensions() {
     let config = DrizzleConfig::x2();
-    let acc = DrizzleAccumulator::new(ImageDimensions::new(100, 80, 3), config);
+    let acc = DrizzleAccumulator::new(ImageDimensions::new((100, 80), 3), config);
     let dims = acc.dimensions();
     assert_eq!(dims.size.x, 200);
     assert_eq!(dims.size.y, 160);
@@ -84,10 +84,10 @@ fn test_lanczos_kernel() {
 #[test]
 fn test_drizzle_single_image() {
     // Create a simple test image
-    let image = AstroImage::from_pixels(ImageDimensions::new(100, 100, 1), vec![0.5; 100 * 100]);
+    let image = AstroImage::from_pixels(ImageDimensions::new((100, 100), 1), vec![0.5; 100 * 100]);
 
     let config = DrizzleConfig::x2();
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(100, 100, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((100, 100), 1), config);
 
     let identity = Transform::identity();
     acc.add_image(image, &identity, 1.0, None);
@@ -125,10 +125,10 @@ fn test_drizzle_single_image() {
 
 #[test]
 fn test_drizzle_point_kernel() {
-    let image = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), vec![1.0; 10 * 10]);
+    let image = AstroImage::from_pixels(ImageDimensions::new((10, 10), 1), vec![1.0; 10 * 10]);
 
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(10, 10, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((10, 10), 1), config);
 
     let identity = Transform::identity();
     acc.add_image(image, &identity, 1.0, None);
@@ -189,7 +189,7 @@ fn test_drizzle_images_empty() {
 fn test_drizzle_images_matches_accumulator() {
     // drizzle_images with one identity-transformed frame must reproduce the
     // single-image accumulator path: 200x200 output, interior pixels = 0.5.
-    let image = AstroImage::from_pixels(ImageDimensions::new(100, 100, 1), vec![0.5; 100 * 100]);
+    let image = AstroImage::from_pixels(ImageDimensions::new((100, 100), 1), vec![0.5; 100 * 100]);
     let result = drizzle_images(
         vec![image],
         &[Transform::identity()],
@@ -212,8 +212,8 @@ fn test_drizzle_images_matches_accumulator() {
 
 #[test]
 fn test_drizzle_images_dimension_mismatch() {
-    let a = AstroImage::from_pixels(ImageDimensions::new(20, 20, 1), vec![0.5; 400]);
-    let b = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), vec![0.5; 100]);
+    let a = AstroImage::from_pixels(ImageDimensions::new((20, 20), 1), vec![0.5; 400]);
+    let b = AstroImage::from_pixels(ImageDimensions::new((10, 10), 1), vec![0.5; 100]);
     let result = drizzle_images(
         vec![a, b],
         &[Transform::identity(), Transform::identity()],
@@ -240,10 +240,10 @@ fn test_drizzle_rgb_image() {
             pixels[idx + 2] = 0.7; // B
         }
     }
-    let image = AstroImage::from_pixels(ImageDimensions::new(50, 50, 3), pixels);
+    let image = AstroImage::from_pixels(ImageDimensions::new((50, 50), 3), pixels);
 
     let config = DrizzleConfig::x2();
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(50, 50, 3), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((50, 50), 3), config);
 
     let identity = Transform::identity();
     acc.add_image(image, &identity, 1.0, None);
@@ -260,11 +260,11 @@ fn test_drizzle_with_translation() {
     // Single bright pixel at (10,10), all others zero
     let mut pixels = vec![0.0f32; 20 * 20];
     pixels[10 * 20 + 10] = 1.0;
-    let image = AstroImage::from_pixels(ImageDimensions::new(20, 20, 1), pixels);
+    let image = AstroImage::from_pixels(ImageDimensions::new((20, 20), 1), pixels);
 
     // scale=2, pixfrac=0.8: drop_size = 0.8*2 = 1.6, half_drop = 0.8
     let config = DrizzleConfig::x2();
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(20, 20, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((20, 20), 1), config);
 
     // Integer-center: input pixel (10,10) center (10,10), +translation (0.5,0.5) → (10.5,10.5),
     // ×scale 2 → output center (21,21). drop_size 1.6 → drop [20.2,21.8]², covering cells
@@ -317,9 +317,9 @@ fn test_drizzle_with_translation() {
 #[test]
 fn test_coverage_at() {
     // Point kernel with identity: covered at even coords, uncovered at odd
-    let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), vec![1.0; 16]);
+    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
     let result = acc.finalize();
 
@@ -345,10 +345,10 @@ fn test_turbo_kernel_overlap_exact() {
     // Single bright pixel at (1,1) with value 2.0
     let mut pixels = vec![0.0f32; 4 * 4];
     pixels[5] = 2.0; // pixel (1,1) = index 1*4+1 = 5
-    let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), pixels);
+    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), pixels);
 
     let config = DrizzleConfig::x2(); // scale=2, pixfrac=0.8
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
 
     let result = acc.finalize();
@@ -385,10 +385,10 @@ fn test_turbo_kernel_overlap_exact() {
 #[test]
 fn test_turbo_kernel_fractional_shift() {
     // Uniform image so weighted mean is always 1.0 regardless of overlap pattern
-    let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), vec![1.0; 4 * 4]);
+    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 4 * 4]);
 
     let config = DrizzleConfig::x2().with_pixfrac(1.0); // drop_size = 2.0
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((4, 4), 1), config);
     let transform = Transform::translation(DVec2::new(0.25, 0.0));
     acc.add_image(image, &transform, 1.0, None);
 
@@ -421,10 +421,10 @@ fn test_turbo_kernel_fractional_shift() {
 fn test_min_coverage_normalized() {
     let mut pixels = vec![0.0f32; 4 * 4];
     pixels[0] = 1.0;
-    let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), pixels);
+    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), pixels);
 
     let config = DrizzleConfig::x2().with_pixfrac(0.5).with_min_coverage(0.6);
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((4, 4), 1), config);
     let transform = Transform::translation(DVec2::new(0.1, 0.0));
     acc.add_image(image, &transform, 1.0, None);
     let result = acc.finalize();
@@ -444,10 +444,10 @@ fn test_min_coverage_normalized() {
 /// approximately 3.0 everywhere in the interior (edges may differ due to truncation).
 #[test]
 fn test_gaussian_kernel_uniform_preserves_value() {
-    let image = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), vec![3.0; 10 * 10]);
+    let image = AstroImage::from_pixels(ImageDimensions::new((10, 10), 1), vec![3.0; 10 * 10]);
 
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Gaussian);
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(10, 10, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((10, 10), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
     let result = acc.finalize();
 
@@ -469,7 +469,7 @@ fn test_gaussian_kernel_uniform_preserves_value() {
 /// uniform value, since the normalized Lanczos weights sum to 1.
 #[test]
 fn test_lanczos_kernel_uniform_preserves_value() {
-    let image = AstroImage::from_pixels(ImageDimensions::new(20, 20, 1), vec![5.0; 20 * 20]);
+    let image = AstroImage::from_pixels(ImageDimensions::new((20, 20), 1), vec![5.0; 20 * 20]);
 
     let config = DrizzleConfig {
         scale: 1.0,
@@ -478,7 +478,7 @@ fn test_lanczos_kernel_uniform_preserves_value() {
         fill_value: 0.0,
         min_coverage: 0.0,
     };
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(20, 20, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((20, 20), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
     let result = acc.finalize();
 
@@ -500,7 +500,7 @@ fn test_lanczos_kernel_uniform_preserves_value() {
 fn test_lanczos_clamping_no_negative_output() {
     let mut pixels = vec![0.0f32; 20 * 20];
     pixels[10 * 20 + 10] = 100.0; // bright point source
-    let image = AstroImage::from_pixels(ImageDimensions::new(20, 20, 1), pixels);
+    let image = AstroImage::from_pixels(ImageDimensions::new((20, 20), 1), pixels);
 
     let config = DrizzleConfig {
         scale: 1.0,
@@ -509,7 +509,7 @@ fn test_lanczos_clamping_no_negative_output() {
         fill_value: 0.0,
         min_coverage: 0.0,
     };
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(20, 20, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((20, 20), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
     let result = acc.finalize();
 
@@ -532,11 +532,11 @@ fn test_lanczos_clamping_no_negative_output() {
 /// (2.0 * 1.0 + 6.0 * 3.0) / (1.0 + 3.0) = (2 + 18) / 4 = 5.0
 #[test]
 fn test_two_frame_weighted_mean() {
-    let image1 = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), vec![2.0; 10 * 10]);
-    let image2 = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), vec![6.0; 10 * 10]);
+    let image1 = AstroImage::from_pixels(ImageDimensions::new((10, 10), 1), vec![2.0; 10 * 10]);
+    let image2 = AstroImage::from_pixels(ImageDimensions::new((10, 10), 1), vec![6.0; 10 * 10]);
 
     let config = DrizzleConfig::x2();
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(10, 10, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((10, 10), 1), config);
     acc.add_image(image1, &Transform::identity(), 1.0, None);
     acc.add_image(image2, &Transform::identity(), 3.0, None);
     let result = acc.finalize();
@@ -566,10 +566,10 @@ fn test_pixfrac_changes_weight_distribution() {
     // Covers output pixels (4,4),(5,4),(6,4),(4,5),(5,5),(6,5),(4,6),(5,6),(6,6) = 9 pixels
     let mut pixels1 = vec![0.0f32; 6 * 6];
     pixels1[2 * 6 + 2] = 1.0;
-    let image1 = AstroImage::from_pixels(ImageDimensions::new(6, 6, 1), pixels1);
+    let image1 = AstroImage::from_pixels(ImageDimensions::new((6, 6), 1), pixels1);
 
     let config1 = DrizzleConfig::x2().with_pixfrac(1.0);
-    let mut acc1 = DrizzleAccumulator::new(ImageDimensions::new(6, 6, 1), config1);
+    let mut acc1 = DrizzleAccumulator::new(ImageDimensions::new((6, 6), 1), config1);
     acc1.add_image(image1, &transform, 1.0, None);
     let r1 = acc1.finalize();
     let out1 = r1.image.channel(0);
@@ -579,10 +579,10 @@ fn test_pixfrac_changes_weight_distribution() {
     // Drop (4.9,4.9)→(5.5,5.5): overlaps (4,4),(5,4),(4,5),(5,5) = 4 pixels
     let mut pixels2 = vec![0.0f32; 6 * 6];
     pixels2[2 * 6 + 2] = 1.0;
-    let image2 = AstroImage::from_pixels(ImageDimensions::new(6, 6, 1), pixels2);
+    let image2 = AstroImage::from_pixels(ImageDimensions::new((6, 6), 1), pixels2);
 
     let config2 = DrizzleConfig::x2().with_pixfrac(0.3);
-    let mut acc2 = DrizzleAccumulator::new(ImageDimensions::new(6, 6, 1), config2);
+    let mut acc2 = DrizzleAccumulator::new(ImageDimensions::new((6, 6), 1), config2);
     acc2.add_image(image2, &transform, 1.0, None);
     let r2 = acc2.finalize();
     let out2 = r2.image.channel(0);
@@ -606,10 +606,10 @@ fn test_rgb_channels_independent() {
     pixels[idx] = 1.0;
     pixels[idx + 1] = 2.0;
     pixels[idx + 2] = 3.0;
-    let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 3), pixels);
+    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 3), pixels);
 
     let config = DrizzleConfig::x2();
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 3), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((4, 4), 3), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
     let result = acc.finalize();
 
@@ -642,7 +642,7 @@ fn test_rgb_channels_independent() {
 #[test]
 fn test_scale1_pixfrac1_identity() {
     let pixels: Vec<f32> = (0..25).map(|i| i as f32).collect();
-    let image = AstroImage::from_pixels(ImageDimensions::new(5, 5, 1), pixels.clone());
+    let image = AstroImage::from_pixels(ImageDimensions::new((5, 5), 1), pixels.clone());
 
     let config = DrizzleConfig {
         scale: 1.0,
@@ -651,7 +651,7 @@ fn test_scale1_pixfrac1_identity() {
         fill_value: 0.0,
         min_coverage: 0.0,
     };
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(5, 5, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((5, 5), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
     let result = acc.finalize();
 
@@ -677,7 +677,7 @@ fn test_scale1_pixfrac1_identity() {
 /// With fill_value = -999.0, those gaps should contain -999.0 instead of 0.0.
 #[test]
 fn test_fill_value_in_uncovered_pixels() {
-    let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), vec![1.0; 16]);
+    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
 
     let config = DrizzleConfig {
         scale: 2.0,
@@ -686,7 +686,7 @@ fn test_fill_value_in_uncovered_pixels() {
         fill_value: -999.0,
         min_coverage: 0.0,
     };
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
     let result = acc.finalize();
 
@@ -721,11 +721,11 @@ fn test_fill_value_in_uncovered_pixels() {
 /// Result should be 3.0 everywhere (zero-weight frame contributes nothing).
 #[test]
 fn test_zero_weight_frame_ignored() {
-    let image1 = AstroImage::from_pixels(ImageDimensions::new(8, 8, 1), vec![3.0; 64]);
-    let image2 = AstroImage::from_pixels(ImageDimensions::new(8, 8, 1), vec![100.0; 64]);
+    let image1 = AstroImage::from_pixels(ImageDimensions::new((8, 8), 1), vec![3.0; 64]);
+    let image2 = AstroImage::from_pixels(ImageDimensions::new((8, 8), 1), vec![100.0; 64]);
 
     let config = DrizzleConfig::x2();
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(8, 8, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((8, 8), 1), config);
     acc.add_image(image1, &Transform::identity(), 1.0, None);
     acc.add_image(image2, &Transform::identity(), 0.0, None);
     let result = acc.finalize();
@@ -748,10 +748,10 @@ fn test_zero_weight_frame_ignored() {
 /// This tests that Gaussian + translation still preserves uniform values.
 #[test]
 fn test_gaussian_kernel_with_translation() {
-    let image = AstroImage::from_pixels(ImageDimensions::new(12, 12, 1), vec![4.0; 144]);
+    let image = AstroImage::from_pixels(ImageDimensions::new((12, 12), 1), vec![4.0; 144]);
 
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Gaussian);
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(12, 12, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((12, 12), 1), config);
     let transform = Transform::translation(DVec2::new(1.0, 0.5));
     acc.add_image(image, &transform, 1.0, None);
     let result = acc.finalize();
@@ -790,7 +790,7 @@ fn test_gaussian_kernel_with_translation() {
 /// Interior pixels should still be ~7.0 since the weighted mean of uniform values is invariant.
 #[test]
 fn test_lanczos_kernel_with_translation() {
-    let image = AstroImage::from_pixels(ImageDimensions::new(20, 20, 1), vec![7.0; 400]);
+    let image = AstroImage::from_pixels(ImageDimensions::new((20, 20), 1), vec![7.0; 400]);
 
     let config = DrizzleConfig {
         scale: 1.0,
@@ -799,7 +799,7 @@ fn test_lanczos_kernel_with_translation() {
         fill_value: 0.0,
         min_coverage: 0.0,
     };
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(20, 20, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((20, 20), 1), config);
     let transform = Transform::translation(DVec2::new(0.3, -0.2));
     acc.add_image(image, &transform, 1.0, None);
     let result = acc.finalize();
@@ -837,7 +837,7 @@ fn test_lanczos_kernel_with_translation() {
 fn test_pixel_weight_zero_excludes_pixel() {
     let mut pixels = vec![1.0f32; 4 * 4];
     pixels[5] = 100.0; // (1,1) = row 1 * 4 + col 1 = 5 (bad pixel)
-    let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), pixels);
+    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), pixels);
 
     let mut pw = Buffer2::new_filled(4, 4, 1.0f32);
     *pw.get_mut(1, 1) = 0.0; // Exclude (1,1)
@@ -849,7 +849,7 @@ fn test_pixel_weight_zero_excludes_pixel() {
         fill_value: 0.0,
         min_coverage: 0.0,
     };
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
     let result = acc.finalize();
     let out = result.image.channel(0);
@@ -884,8 +884,8 @@ fn test_pixel_weight_zero_excludes_pixel() {
 /// At other pixels: weighted mean = (2.0 * 1.0 + 6.0 * 1.0) / (1.0 + 1.0) = 4.0
 #[test]
 fn test_pixel_weight_scales_contribution() {
-    let image1 = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), vec![2.0; 16]);
-    let image2 = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), vec![6.0; 16]);
+    let image1 = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![2.0; 16]);
+    let image2 = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![6.0; 16]);
 
     let mut pw1 = Buffer2::new_filled(4, 4, 1.0f32);
     *pw1.get_mut(1, 1) = 0.5;
@@ -898,7 +898,7 @@ fn test_pixel_weight_scales_contribution() {
         fill_value: 0.0,
         min_coverage: 0.0,
     };
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image1, &Transform::identity(), 1.0, Some(&pw1));
     acc.add_image(image2, &Transform::identity(), 1.0, Some(&pw2));
     let result = acc.finalize();
@@ -926,7 +926,7 @@ fn test_pixel_weight_scales_contribution() {
 /// scale=1, pixfrac=1. Bad pixels produce fill_value; all others = 5.0.
 #[test]
 fn test_pixel_weight_bad_pixel_mask() {
-    let image = AstroImage::from_pixels(ImageDimensions::new(8, 8, 1), vec![5.0; 64]);
+    let image = AstroImage::from_pixels(ImageDimensions::new((8, 8), 1), vec![5.0; 64]);
 
     let mut pw = Buffer2::new_filled(8, 8, 1.0f32);
     *pw.get_mut(2, 3) = 0.0;
@@ -940,7 +940,7 @@ fn test_pixel_weight_bad_pixel_mask() {
         fill_value: -1.0,
         min_coverage: 0.0,
     };
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(8, 8, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((8, 8), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
     let result = acc.finalize();
     let out = result.image.channel(0);
@@ -991,13 +991,13 @@ fn test_pixel_weight_with_point_kernel() {
     let mut pixels = vec![1.0f32; 4 * 4];
     pixels[5] = 10.0; // (1,1) bad pixel
     pixels[0] = 3.0;
-    let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), pixels);
+    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), pixels);
 
     let mut pw = Buffer2::new_filled(4, 4, 1.0f32);
     *pw.get_mut(1, 1) = 0.0;
 
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
     let result = acc.finalize();
     let out = result.image.channel(0);
@@ -1025,13 +1025,13 @@ fn test_pixel_weight_with_point_kernel() {
 /// Interior pixels far from the bad pixel should still be ~4.0.
 #[test]
 fn test_pixel_weight_with_gaussian_kernel() {
-    let image = AstroImage::from_pixels(ImageDimensions::new(12, 12, 1), vec![4.0; 12 * 12]);
+    let image = AstroImage::from_pixels(ImageDimensions::new((12, 12), 1), vec![4.0; 12 * 12]);
 
     let mut pw = Buffer2::new_filled(12, 12, 1.0f32);
     *pw.get_mut(5, 5) = 0.0;
 
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Gaussian);
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(12, 12, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((12, 12), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
     let result = acc.finalize();
     let out = result.image.channel(0);
@@ -1058,11 +1058,11 @@ fn test_pixel_weight_with_gaussian_kernel() {
 #[test]
 #[should_panic(expected = "Pixel weight map dimensions")]
 fn test_pixel_weight_dimensions_mismatch_panics() {
-    let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), vec![1.0; 16]);
+    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
     let pw = Buffer2::new_filled(3, 3, 1.0f32); // Wrong size!
 
     let config = DrizzleConfig::x2();
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
 }
 
@@ -1321,7 +1321,7 @@ fn test_boxer_rotated_diamond() {
 #[test]
 fn test_square_kernel_identity_uniform() {
     let pixels: Vec<f32> = (0..25).map(|i| i as f32).collect();
-    let image = AstroImage::from_pixels(ImageDimensions::new(5, 5, 1), pixels.clone());
+    let image = AstroImage::from_pixels(ImageDimensions::new((5, 5), 1), pixels.clone());
 
     let config = DrizzleConfig {
         scale: 1.0,
@@ -1330,7 +1330,7 @@ fn test_square_kernel_identity_uniform() {
         fill_value: 0.0,
         min_coverage: 0.0,
     };
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(5, 5, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((5, 5), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
     let result = acc.finalize();
     let out = result.image.channel(0);
@@ -1354,8 +1354,8 @@ fn test_square_kernel_identity_uniform() {
 #[test]
 fn test_square_kernel_matches_turbo_no_rotation() {
     let pixels: Vec<f32> = (0..100).map(|i| (i as f32) * 0.01).collect();
-    let image1 = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), pixels.clone());
-    let image2 = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), pixels);
+    let image1 = AstroImage::from_pixels(ImageDimensions::new((10, 10), 1), pixels.clone());
+    let image2 = AstroImage::from_pixels(ImageDimensions::new((10, 10), 1), pixels);
     let transform = Transform::translation(DVec2::new(0.3, -0.2));
 
     // Turbo
@@ -1366,7 +1366,7 @@ fn test_square_kernel_matches_turbo_no_rotation() {
         fill_value: 0.0,
         min_coverage: 0.0,
     };
-    let mut acc_turbo = DrizzleAccumulator::new(ImageDimensions::new(10, 10, 1), config_turbo);
+    let mut acc_turbo = DrizzleAccumulator::new(ImageDimensions::new((10, 10), 1), config_turbo);
     acc_turbo.add_image(image1, &transform, 1.0, None);
     let result_turbo = acc_turbo.finalize();
 
@@ -1378,7 +1378,7 @@ fn test_square_kernel_matches_turbo_no_rotation() {
         fill_value: 0.0,
         min_coverage: 0.0,
     };
-    let mut acc_square = DrizzleAccumulator::new(ImageDimensions::new(10, 10, 1), config_square);
+    let mut acc_square = DrizzleAccumulator::new(ImageDimensions::new((10, 10), 1), config_square);
     acc_square.add_image(image2, &transform, 1.0, None);
     let result_square = acc_square.finalize();
 
@@ -1404,7 +1404,7 @@ fn test_square_kernel_matches_turbo_no_rotation() {
 /// Also verify that there is meaningful coverage in the output interior.
 #[test]
 fn test_square_kernel_rotation() {
-    let image = AstroImage::from_pixels(ImageDimensions::new(20, 20, 1), vec![3.0; 20 * 20]);
+    let image = AstroImage::from_pixels(ImageDimensions::new((20, 20), 1), vec![3.0; 20 * 20]);
 
     // 45° rotation around center (10, 10)
     let angle = std::f64::consts::FRAC_PI_4;
@@ -1431,7 +1431,7 @@ fn test_square_kernel_rotation() {
         fill_value: 0.0,
         min_coverage: 0.0,
     };
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(20, 20, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((20, 20), 1), config);
     acc.add_image(image, &transform, 1.0, None);
     let result = acc.finalize();
     let out = result.image.channel(0);
@@ -1472,7 +1472,7 @@ fn test_square_kernel_pixfrac() {
     // Single bright pixel at (2,2)
     let mut pixels1 = vec![0.0f32; 6 * 6];
     pixels1[2 * 6 + 2] = 1.0;
-    let image1 = AstroImage::from_pixels(ImageDimensions::new(6, 6, 1), pixels1);
+    let image1 = AstroImage::from_pixels(ImageDimensions::new((6, 6), 1), pixels1);
 
     let config1 = DrizzleConfig {
         scale: 2.0,
@@ -1481,14 +1481,14 @@ fn test_square_kernel_pixfrac() {
         fill_value: 0.0,
         min_coverage: 0.0,
     };
-    let mut acc1 = DrizzleAccumulator::new(ImageDimensions::new(6, 6, 1), config1);
+    let mut acc1 = DrizzleAccumulator::new(ImageDimensions::new((6, 6), 1), config1);
     acc1.add_image(image1, &transform, 1.0, None);
     let r1 = acc1.finalize();
     let covered_1 = r1.image.channel(0).iter().filter(|&&v| v > 0.01).count();
 
     let mut pixels2 = vec![0.0f32; 6 * 6];
     pixels2[2 * 6 + 2] = 1.0;
-    let image2 = AstroImage::from_pixels(ImageDimensions::new(6, 6, 1), pixels2);
+    let image2 = AstroImage::from_pixels(ImageDimensions::new((6, 6), 1), pixels2);
 
     let config2 = DrizzleConfig {
         scale: 2.0,
@@ -1497,7 +1497,7 @@ fn test_square_kernel_pixfrac() {
         fill_value: 0.0,
         min_coverage: 0.0,
     };
-    let mut acc2 = DrizzleAccumulator::new(ImageDimensions::new(6, 6, 1), config2);
+    let mut acc2 = DrizzleAccumulator::new(ImageDimensions::new((6, 6), 1), config2);
     acc2.add_image(image2, &transform, 1.0, None);
     let r2 = acc2.finalize();
     let covered_2 = r2.image.channel(0).iter().filter(|&&v| v > 0.01).count();
@@ -1516,7 +1516,7 @@ fn test_square_kernel_pixfrac() {
 /// scale=1, pixfrac=1. Output (1,1) should be fill_value, others = 5.0.
 #[test]
 fn test_square_kernel_with_pixel_weights() {
-    let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), vec![5.0; 16]);
+    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![5.0; 16]);
 
     let mut pw = Buffer2::new_filled(4, 4, 1.0f32);
     *pw.get_mut(1, 1) = 0.0;
@@ -1528,7 +1528,7 @@ fn test_square_kernel_with_pixel_weights() {
         fill_value: -1.0,
         min_coverage: 0.0,
     };
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
     let result = acc.finalize();
     let out = result.image.channel(0);
@@ -1565,7 +1565,7 @@ fn test_square_kernel_with_pixel_weights() {
 fn test_square_kernel_scale2_single_pixel() {
     let mut pixels = vec![0.0f32; 4 * 4];
     pixels[5] = 2.0; // pixel (1,1)
-    let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), pixels);
+    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), pixels);
 
     let config = DrizzleConfig {
         scale: 2.0,
@@ -1574,7 +1574,7 @@ fn test_square_kernel_scale2_single_pixel() {
         fill_value: 0.0,
         min_coverage: 0.0,
     };
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
     let result = acc.finalize();
     let out = result.image.channel(0);
@@ -1608,7 +1608,7 @@ fn test_square_kernel_jacobian_weighted_average() {
     let mut pixels = vec![0.0f32; 4 * 4];
     pixels[0] = 10.0; // pixel (0,0)
     pixels[1] = 20.0; // pixel (1,0)
-    let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), pixels);
+    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), pixels);
 
     let config = DrizzleConfig {
         scale: 2.0,
@@ -1617,7 +1617,7 @@ fn test_square_kernel_jacobian_weighted_average() {
         fill_value: 0.0,
         min_coverage: 0.0,
     };
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(4, 4, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
     let result = acc.finalize();
     let out = result.image.channel(0);
@@ -1733,8 +1733,8 @@ fn test_square_differs_from_turbo_under_rotation() {
             x as f32
         })
         .collect();
-    let image1 = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), pixels.clone());
-    let image2 = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), pixels);
+    let image1 = AstroImage::from_pixels(ImageDimensions::new((10, 10), 1), pixels.clone());
+    let image2 = AstroImage::from_pixels(ImageDimensions::new((10, 10), 1), pixels);
 
     // 15° rotation around center — enough to produce measurable overlap differences
     let angle = 15.0_f64.to_radians();
@@ -1758,7 +1758,7 @@ fn test_square_differs_from_turbo_under_rotation() {
         fill_value: 0.0,
         min_coverage: 0.0,
     };
-    let mut acc_turbo = DrizzleAccumulator::new(ImageDimensions::new(10, 10, 1), config_turbo);
+    let mut acc_turbo = DrizzleAccumulator::new(ImageDimensions::new((10, 10), 1), config_turbo);
     acc_turbo.add_image(image1, &transform, 1.0, None);
     let result_turbo = acc_turbo.finalize();
 
@@ -1769,7 +1769,7 @@ fn test_square_differs_from_turbo_under_rotation() {
         fill_value: 0.0,
         min_coverage: 0.0,
     };
-    let mut acc_square = DrizzleAccumulator::new(ImageDimensions::new(10, 10, 1), config_square);
+    let mut acc_square = DrizzleAccumulator::new(ImageDimensions::new((10, 10), 1), config_square);
     acc_square.add_image(image2, &transform, 1.0, None);
     let result_square = acc_square.finalize();
 
@@ -1831,7 +1831,7 @@ fn test_square_kernel_flux_conservation() {
     // = 16 * 10 + 384 * 1 = 544.0
     assert!((total_input_flux - 544.0).abs() < f32::EPSILON);
 
-    let image = AstroImage::from_pixels(ImageDimensions::new(20, 20, 1), pixels);
+    let image = AstroImage::from_pixels(ImageDimensions::new((20, 20), 1), pixels);
 
     // 15° rotation around center
     let angle = 15.0_f64.to_radians();
@@ -1855,7 +1855,7 @@ fn test_square_kernel_flux_conservation() {
         fill_value: 0.0,
         min_coverage: 0.0,
     };
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(20, 20, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((20, 20), 1), config);
     acc.add_image(image, &transform, 1.0, None);
 
     // Before finalize, check raw weighted flux sum.
@@ -1900,8 +1900,8 @@ fn test_square_kernel_flux_conservation() {
 /// Expected: (2.0 * 1.0 + 8.0 * 3.0) / (1.0 + 3.0) = 26.0 / 4.0 = 6.5
 #[test]
 fn test_square_kernel_two_frame_weighted_mean() {
-    let image1 = AstroImage::from_pixels(ImageDimensions::new(6, 6, 1), vec![2.0; 36]);
-    let image2 = AstroImage::from_pixels(ImageDimensions::new(6, 6, 1), vec![8.0; 36]);
+    let image1 = AstroImage::from_pixels(ImageDimensions::new((6, 6), 1), vec![2.0; 36]);
+    let image2 = AstroImage::from_pixels(ImageDimensions::new((6, 6), 1), vec![8.0; 36]);
 
     let config = DrizzleConfig {
         scale: 1.0,
@@ -1910,7 +1910,7 @@ fn test_square_kernel_two_frame_weighted_mean() {
         fill_value: 0.0,
         min_coverage: 0.0,
     };
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(6, 6, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((6, 6), 1), config);
     acc.add_image(image1, &Transform::identity(), 1.0, None);
     acc.add_image(image2, &Transform::identity(), 3.0, None);
     let result = acc.finalize();
@@ -2064,11 +2064,11 @@ fn test_point_jacobian_two_frame_weighted_mean() {
     let h = 12;
     let mut pixels_a = vec![0.0f32; w * h];
     pixels_a[4 * w + 4] = 10.0;
-    let image_a = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), pixels_a);
+    let image_a = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels_a);
 
     let mut pixels_b = vec![0.0f32; w * h];
     pixels_b[2 * w + 2] = 0.0; // explicitly zero
-    let image_b = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), pixels_b);
+    let image_b = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels_b);
 
     let config = DrizzleConfig {
         scale: 1.0,
@@ -2077,7 +2077,7 @@ fn test_point_jacobian_two_frame_weighted_mean() {
         ..Default::default()
     };
 
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(w, h, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((w, h), 1), config);
     acc.add_image(image_a, &Transform::identity(), 1.0, None);
     acc.add_image(image_b, &make_scale2x_transform(), 1.0, None);
     let result = acc.finalize();
@@ -2100,11 +2100,11 @@ fn test_point_jacobian_two_frame_both_nonzero() {
     let h = 12;
     let mut pixels_a = vec![0.0f32; w * h];
     pixels_a[4 * w + 4] = 10.0;
-    let image_a = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), pixels_a);
+    let image_a = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels_a);
 
     let mut pixels_b = vec![0.0f32; w * h];
     pixels_b[2 * w + 2] = 2.0;
-    let image_b = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), pixels_b);
+    let image_b = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels_b);
 
     let config = DrizzleConfig {
         scale: 1.0,
@@ -2113,7 +2113,7 @@ fn test_point_jacobian_two_frame_both_nonzero() {
         ..Default::default()
     };
 
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(w, h, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((w, h), 1), config);
     acc.add_image(image_a, &Transform::identity(), 1.0, None);
     acc.add_image(image_b, &make_scale2x_transform(), 1.0, None);
     let result = acc.finalize();
@@ -2140,11 +2140,11 @@ fn test_turbo_jacobian_two_frame_weighted_mean() {
     let h = 12;
     let mut pixels_a = vec![0.0f32; w * h];
     pixels_a[4 * w + 4] = 10.0;
-    let image_a = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), pixels_a);
+    let image_a = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels_a);
 
     let mut pixels_b = vec![0.0f32; w * h];
     pixels_b[2 * w + 2] = 2.0;
-    let image_b = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), pixels_b);
+    let image_b = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels_b);
 
     let config = DrizzleConfig {
         scale: 1.0,
@@ -2153,7 +2153,7 @@ fn test_turbo_jacobian_two_frame_weighted_mean() {
         ..Default::default()
     };
 
-    let mut acc = DrizzleAccumulator::new(ImageDimensions::new(w, h, 1), config);
+    let mut acc = DrizzleAccumulator::new(ImageDimensions::new((w, h), 1), config);
     acc.add_image(image_a, &Transform::identity(), 1.0, None);
     acc.add_image(image_b, &make_scale2x_transform(), 1.0, None);
     let result = acc.finalize();
@@ -2205,14 +2205,14 @@ fn test_turbo_matches_square_affine_with_jacobian() {
         ..Default::default()
     };
 
-    let image_turbo = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), pixels.clone());
-    let image_square = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), pixels);
+    let image_turbo = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels.clone());
+    let image_square = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels);
 
-    let mut acc_turbo = DrizzleAccumulator::new(ImageDimensions::new(w, h, 1), config_turbo);
+    let mut acc_turbo = DrizzleAccumulator::new(ImageDimensions::new((w, h), 1), config_turbo);
     acc_turbo.add_image(image_turbo, &transform, 1.0, None);
     let result_turbo = acc_turbo.finalize();
 
-    let mut acc_square = DrizzleAccumulator::new(ImageDimensions::new(w, h, 1), config_square);
+    let mut acc_square = DrizzleAccumulator::new(ImageDimensions::new((w, h), 1), config_square);
     acc_square.add_image(image_square, &transform, 1.0, None);
     let result_square = acc_square.finalize();
 
@@ -2260,9 +2260,9 @@ fn test_gaussian_jacobian_two_frame_weighted_mean() {
         ..Default::default()
     };
     let combine = |b_transform: &Transform| -> f32 {
-        let image_a = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), vec![10.0; w * h]);
-        let image_b = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), vec![2.0; w * h]);
-        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(w, h, 1), config.clone());
+        let image_a = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), vec![10.0; w * h]);
+        let image_b = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), vec![2.0; w * h]);
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new((w, h), 1), config.clone());
         acc.add_image(image_a, &Transform::identity(), 1.0, None);
         acc.add_image(image_b, b_transform, 1.0, None);
         let r = acc.finalize();
@@ -2301,9 +2301,9 @@ fn test_lanczos_jacobian_two_frame_weighted_mean() {
         ..Default::default()
     };
     let combine = |b_transform: &Transform| -> f32 {
-        let image_a = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), vec![10.0; w * h]);
-        let image_b = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), vec![2.0; w * h]);
-        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(w, h, 1), config.clone());
+        let image_a = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), vec![10.0; w * h]);
+        let image_b = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), vec![2.0; w * h]);
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new((w, h), 1), config.clone());
         acc.add_image(image_a, &Transform::identity(), 1.0, None);
         acc.add_image(image_b, b_transform, 1.0, None);
         let r = acc.finalize();
@@ -2357,8 +2357,8 @@ fn test_all_kernels_jacobian_matches_square_affine() {
         kernel: DrizzleKernel::Square,
         ..Default::default()
     };
-    let image_sq = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), pixels.clone());
-    let mut acc_sq = DrizzleAccumulator::new(ImageDimensions::new(w, h, 1), config_sq);
+    let image_sq = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels.clone());
+    let mut acc_sq = DrizzleAccumulator::new(ImageDimensions::new((w, h), 1), config_sq);
     acc_sq.add_image(image_sq, &transform, 1.0, None);
     let result_sq = acc_sq.finalize();
     let out_sq = result_sq.image.channel(0);
@@ -2375,8 +2375,8 @@ fn test_all_kernels_jacobian_matches_square_affine() {
             kernel,
             ..Default::default()
         };
-        let image = AstroImage::from_pixels(ImageDimensions::new(w, h, 1), pixels.clone());
-        let mut acc = DrizzleAccumulator::new(ImageDimensions::new(w, h, 1), config);
+        let image = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels.clone());
+        let mut acc = DrizzleAccumulator::new(ImageDimensions::new((w, h), 1), config);
         acc.add_image(image, &transform, 1.0, None);
         let result = acc.finalize();
         let out = result.image.channel(0);

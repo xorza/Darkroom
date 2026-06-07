@@ -66,18 +66,16 @@ pub struct ImageDimensions {
 }
 
 impl ImageDimensions {
-    pub fn new(width: usize, height: usize, channels: usize) -> Self {
-        assert!(width > 0, "Width must be positive");
-        assert!(height > 0, "Height must be positive");
+    pub fn new(size: impl Into<Vec2us>, channels: usize) -> Self {
+        let size = size.into();
+        assert!(size.x > 0, "Width must be positive");
+        assert!(size.y > 0, "Height must be positive");
         assert!(
             channels == 1 || channels == 3,
             "Only 1 (grayscale) or 3 (RGB) channels supported, got {}",
             channels
         );
-        Self {
-            size: Vec2us::new(width, height),
-            channels,
-        }
+        Self { size, channels }
     }
 
     /// Total number of f32 samples: `width * height * channels`.
@@ -579,8 +577,7 @@ impl From<Image> for AstroImage {
         };
 
         let dimensions = ImageDimensions::new(
-            width,
-            height,
+            (width, height),
             if matches!(pixel_data, PixelData::L(_)) {
                 1
             } else {

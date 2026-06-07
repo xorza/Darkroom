@@ -875,7 +875,7 @@ pub(crate) mod tests {
         let temp_dir = std::env::temp_dir().join("lumos_channel_cache_test");
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        let dims = ImageDimensions::new(4, 3, 3);
+        let dims = ImageDimensions::new((4, 3), 3);
         let pixels: Vec<f32> = (0..36).map(|i| i as f32).collect();
         let image = AstroImage::from_pixels(dims, pixels);
 
@@ -902,7 +902,7 @@ pub(crate) mod tests {
         let temp_dir = std::env::temp_dir().join("lumos_reuse_test");
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        let dims = ImageDimensions::new(4, 3, 1);
+        let dims = ImageDimensions::new((4, 3), 1);
         let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
         let image = AstroImage::from_pixels(dims, pixels);
 
@@ -915,7 +915,7 @@ pub(crate) mod tests {
         // Different dimensions: not reusable
         assert!(!try_reuse_channel_cache_file(
             &cache_path,
-            ImageDimensions::new(8, 3, 1)
+            ImageDimensions::new((8, 3), 1)
         ));
 
         // Nonexistent file: not reusable
@@ -970,7 +970,7 @@ pub(crate) mod tests {
     #[test]
     fn test_process_chunked_median() {
         // Create in-memory cache with 3 grayscale frames
-        let dims = ImageDimensions::new(4, 4, 1);
+        let dims = ImageDimensions::new((4, 4), 1);
         let images = vec![
             AstroImage::from_pixels(dims, vec![1.0; 16]),
             AstroImage::from_pixels(dims, vec![3.0; 16]),
@@ -995,7 +995,7 @@ pub(crate) mod tests {
     #[test]
     fn test_process_chunked_rgb() {
         // Create in-memory cache with 2 RGB frames
-        let dims = ImageDimensions::new(2, 2, 3);
+        let dims = ImageDimensions::new((2, 2), 3);
         // Frame 1: R=1, G=2, B=3 for all pixels
         let pixels1: Vec<f32> = (0..4).flat_map(|_| vec![1.0, 2.0, 3.0]).collect();
         // Frame 2: R=5, G=6, B=7 for all pixels
@@ -1027,7 +1027,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_process_chunked_with_weights() {
-        let dims = ImageDimensions::new(2, 2, 1);
+        let dims = ImageDimensions::new((2, 2), 1);
         let images = vec![
             AstroImage::from_pixels(dims, vec![10.0; 4]),
             AstroImage::from_pixels(dims, vec![20.0; 4]),
@@ -1051,7 +1051,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_frame_count() {
-        let dims = ImageDimensions::new(2, 2, 1);
+        let dims = ImageDimensions::new((2, 2), 1);
         let images = vec![
             AstroImage::from_pixels(dims, vec![1.0; 4]),
             AstroImage::from_pixels(dims, vec![2.0; 4]),
@@ -1069,7 +1069,7 @@ pub(crate) mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         // Create a real cached frame using cache_image_channels
-        let dims = ImageDimensions::new(2, 2, 3);
+        let dims = ImageDimensions::new((2, 2), 3);
         let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
         let image = AstroImage::from_pixels(dims, pixels);
 
@@ -1110,7 +1110,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_read_channel_chunk_in_memory() {
-        let dims = ImageDimensions::new(4, 3, 1);
+        let dims = ImageDimensions::new((4, 3), 1);
         // Pixels 0-11 in row-major order
         let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
         let images = vec![AstroImage::from_pixels(dims, pixels)];
@@ -1132,7 +1132,7 @@ pub(crate) mod tests {
         let temp_dir = std::env::temp_dir().join("lumos_read_chunk_disk_test");
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        let dims = ImageDimensions::new(4, 3, 1);
+        let dims = ImageDimensions::new((4, 3), 1);
         let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
         let image = AstroImage::from_pixels(dims, pixels);
 
@@ -1173,7 +1173,7 @@ pub(crate) mod tests {
         let temp_dir = std::env::temp_dir().join("lumos_frame_count_disk_test");
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        let dims = ImageDimensions::new(2, 2, 1);
+        let dims = ImageDimensions::new((2, 2), 1);
 
         // Create 3 cached frames
         let mut frames = Vec::new();
@@ -1209,7 +1209,7 @@ pub(crate) mod tests {
         let temp_dir = std::env::temp_dir().join("lumos_load_cache_fresh_test");
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        let dims = ImageDimensions::new(4, 3, 1);
+        let dims = ImageDimensions::new((4, 3), 1);
         let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
         let image = AstroImage::from_pixels(dims, pixels.clone());
 
@@ -1241,7 +1241,7 @@ pub(crate) mod tests {
         let temp_dir = std::env::temp_dir().join("lumos_load_cache_reuse_test");
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        let dims = ImageDimensions::new(4, 3, 1);
+        let dims = ImageDimensions::new((4, 3), 1);
         let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
         let image = AstroImage::from_pixels(dims, pixels.clone());
 
@@ -1278,7 +1278,7 @@ pub(crate) mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         // Create image with different dimensions than expected
-        let actual_dims = ImageDimensions::new(4, 3, 1);
+        let actual_dims = ImageDimensions::new((4, 3), 1);
         let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
         let image = AstroImage::from_pixels(actual_dims, pixels);
 
@@ -1286,7 +1286,7 @@ pub(crate) mod tests {
         image.save(&source_path).unwrap();
 
         // Try to load with wrong expected dimensions
-        let expected_dims = ImageDimensions::new(8, 6, 1);
+        let expected_dims = ImageDimensions::new((8, 6), 1);
         let result = load_and_cache_frame::<AstroImage>(
             &temp_dir,
             "cached.bin",
@@ -1313,7 +1313,7 @@ pub(crate) mod tests {
     #[test]
     fn test_compute_channel_stats_grayscale() {
         // 3 grayscale frames, 3x3 pixels each
-        let dims = ImageDimensions::new(3, 3, 1);
+        let dims = ImageDimensions::new((3, 3), 1);
 
         // Frame 0: all 5.0 → median=5.0, MAD=0.0
         let frame0 = AstroImage::from_pixels(dims, vec![5.0; 9]);
@@ -1343,7 +1343,7 @@ pub(crate) mod tests {
     #[test]
     fn test_compute_channel_stats_rgb() {
         // 2 RGB frames, 2x2 pixels each
-        let dims = ImageDimensions::new(2, 2, 3);
+        let dims = ImageDimensions::new((2, 2), 3);
 
         // Frame 0: R=[1,3,5,7] G=[10,10,10,10] B=[0,0,100,100]
         let frame0 = AstroImage::from_planar_channels(
@@ -1584,7 +1584,7 @@ pub(crate) mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         // Non-uniform data so median and MAD are non-trivial
-        let dims = ImageDimensions::new(4, 3, 1);
+        let dims = ImageDimensions::new((4, 3), 1);
         // [0,1,2,3,4,5,6,7,8,9,10,11] → median=5.5, deviations=[5.5,4.5,3.5,2.5,1.5,0.5,0.5,1.5,2.5,3.5,4.5,5.5] → MAD=3.0
         let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
         let image = AstroImage::from_pixels(dims, pixels);
@@ -1627,7 +1627,7 @@ pub(crate) mod tests {
         let temp_dir = std::env::temp_dir().join("lumos_missing_stats_test");
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        let dims = ImageDimensions::new(4, 3, 1);
+        let dims = ImageDimensions::new((4, 3), 1);
         let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
         let image = AstroImage::from_pixels(dims, pixels);
 
