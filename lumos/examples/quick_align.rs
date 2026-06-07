@@ -56,7 +56,7 @@ fn main() {
 
     // Detect stars
     println!("\nDetecting stars...");
-    let mut detector = StarDetector::new();
+    let mut detector = StarDetector::default();
 
     let ref_result = detector.detect(&ref_image);
     println!("  Reference: {} stars detected", ref_result.stars.len());

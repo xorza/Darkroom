@@ -1,7 +1,7 @@
 //! Unified stacking entry point.
 //!
-//! Provides `stack()` and `stack_with_progress()` functions as the main API
-//! for image stacking operations.
+//! Provides `stack()` (from paths) and `stack_images()` (in-memory) as the main API
+//! for image stacking operations; both take a [`ProgressCallback`].
 
 use std::path::Path;
 
@@ -67,28 +67,15 @@ pub(crate) struct FrameNorm {
 ///
 /// # Examples
 ///
+/// Pass [`ProgressCallback::default()`] when you don't need progress reporting.
+///
 /// ```ignore
-/// use lumos::stacking::{stack, StackConfig};
+/// use lumos::{stack, StackConfig, ProgressCallback};
 ///
-/// // Default sigma-clipped mean
-/// let result = stack(&paths, StackConfig::default())?;
-///
-/// // Median stacking
-/// let result = stack(&paths, StackConfig::median())?;
+/// let result = stack(&paths, StackConfig::default(), ProgressCallback::default())?;
+/// let result = stack(&paths, StackConfig::median(), ProgressCallback::default())?;
 /// ```
-pub fn stack<P: AsRef<Path> + Sync>(paths: &[P], config: StackConfig) -> Result<AstroImage, Error> {
-    stack_with_progress(paths, config, ProgressCallback::default())
-}
-
-/// Stack multiple images from disk with progress reporting.
-///
-/// Same as `stack()` but accepts a progress callback for monitoring.
-///
-/// # Panics
-///
-/// - If `config` fails validation (see [`StackConfig::validate`]).
-/// - If `config.weighting` is `Manual` and the weight count doesn't match `paths.len()`.
-pub fn stack_with_progress<P: AsRef<Path> + Sync>(
+pub fn stack<P: AsRef<Path> + Sync>(
     paths: &[P],
     config: StackConfig,
     progress: ProgressCallback,
@@ -116,22 +103,15 @@ pub fn stack_with_progress<P: AsRef<Path> + Sync>(
 
 /// Stack frames already held in memory into a single result.
 ///
-/// The in-memory counterpart to [`stack`]: skips the disk round-trip when the
-/// caller already owns the decoded frames (e.g. straight off calibration or
-/// warping). The frames are consumed.
+/// The in-memory counterpart to [`stack`]: skips the disk round-trip when the caller already
+/// owns the decoded frames (e.g. straight off calibration or warping). The frames are
+/// consumed. Pass [`ProgressCallback::default()`] when you don't need progress reporting.
 ///
 /// # Panics
 ///
 /// - If `config` fails validation (see [`StackConfig::validate`]).
 /// - If `config.weighting` is `Manual` and the weight count doesn't match `images.len()`.
-pub fn stack_images(images: Vec<AstroImage>, config: StackConfig) -> Result<AstroImage, Error> {
-    stack_images_with_progress(images, config, ProgressCallback::default())
-}
-
-/// Stack in-memory frames with progress reporting.
-///
-/// Same as [`stack_images`] but accepts a progress callback for the combine stage.
-pub fn stack_images_with_progress(
+pub fn stack_images(
     images: Vec<AstroImage>,
     config: StackConfig,
     progress: ProgressCallback,
@@ -467,20 +447,24 @@ mod tests {
     #[test]
     fn test_stack_empty_paths() {
         let paths: Vec<PathBuf> = vec![];
-        let result = stack(&paths, StackConfig::default());
+        let result = stack(&paths, StackConfig::default(), ProgressCallback::default());
         assert!(matches!(result.unwrap_err(), Error::NoFrames));
     }
 
     #[test]
     fn test_stack_images_empty() {
-        let result = stack_images(Vec::new(), StackConfig::default());
+        let result = stack_images(
+            Vec::new(),
+            StackConfig::default(),
+            ProgressCallback::default(),
+        );
         assert!(matches!(result.unwrap_err(), Error::NoFrames));
     }
 
     #[test]
     fn test_stack_nonexistent_file() {
         let paths = vec![PathBuf::from("/nonexistent/image.fits")];
-        let result = stack(&paths, StackConfig::default());
+        let result = stack(&paths, StackConfig::default(), ProgressCallback::default());
         assert!(matches!(result.unwrap_err(), Error::ImageLoad { .. }));
     }
 
@@ -494,7 +478,7 @@ mod tests {
         ];
         let mut config = StackConfig::weighted(vec![1.0, 2.0]); // Wrong count
         config.normalization = Normalization::None; // avoid loading files for stats
-        let _ = stack(&paths, config);
+        let _ = stack(&paths, config, ProgressCallback::default());
     }
 
     #[test]
@@ -510,7 +494,7 @@ mod tests {
             method: CombineMethod::Mean(Rejection::None),
             ..Default::default()
         };
-        let result = stack_images(images, config).unwrap();
+        let result = stack_images(images, config, ProgressCallback::default()).unwrap();
         assert_eq!(result.channels(), 1);
         for &p in result.channel(0).pixels() {
             assert!((p - 20.0).abs() < 1e-4, "expected 20.0, got {p}");
@@ -521,7 +505,11 @@ mod tests {
     fn test_stack_images_dimension_mismatch() {
         let a = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), vec![1.0; 16]);
         let b = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![1.0; 4]);
-        let result = stack_images(vec![a, b], StackConfig::default());
+        let result = stack_images(
+            vec![a, b],
+            StackConfig::default(),
+            ProgressCallback::default(),
+        );
         assert!(matches!(
             result.unwrap_err(),
             Error::DimensionMismatch { index: 1, .. }

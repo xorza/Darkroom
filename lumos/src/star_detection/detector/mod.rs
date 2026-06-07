@@ -84,19 +84,11 @@ pub struct StarDetector {
 
 impl Default for StarDetector {
     fn default() -> Self {
-        Self::new()
+        Self::from_config(Config::default())
     }
 }
 
 impl StarDetector {
-    /// Create a new star detector with default configuration.
-    pub fn new() -> Self {
-        Self {
-            config: Config::default(),
-            buffer_pool: None,
-        }
-    }
-
     /// Create a star detector from an existing configuration.
     pub fn from_config(config: Config) -> Self {
         Self {

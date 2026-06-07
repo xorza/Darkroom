@@ -10,7 +10,7 @@ use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
 use crate::{
     AstroImage, CalibrationFrames, CalibrationImages, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD,
     Normalization, ProgressCallback, RegistrationConfig, StackConfig, Star, StarDetectionConfig,
-    StarDetector, register, stack_with_progress, warp,
+    StarDetector, register, stack, warp,
 };
 
 #[test]
@@ -344,8 +344,7 @@ fn bench_full_pipeline() {
         ..StackConfig::sigma_clipped(2.5)
     };
 
-    let stacked =
-        stack_with_progress(&registered_paths, stack_config, ProgressCallback::default()).unwrap();
+    let stacked = stack(&registered_paths, stack_config, ProgressCallback::default()).unwrap();
 
     println!(
         "  Stacked result: {}x{}x{}",

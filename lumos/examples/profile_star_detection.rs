@@ -63,7 +63,7 @@ fn main() {
     );
     let image = generate_synthetic_image(width, height, num_stars);
 
-    let mut detector = StarDetector::new();
+    let mut detector = StarDetector::default();
 
     eprintln!("Running {} iterations (attach profiler now)...", iterations);
 

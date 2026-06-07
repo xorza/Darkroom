@@ -52,7 +52,7 @@ use lumos::raw::load_raw_cfa;
 use lumos::{
     AstroImage, CalibrationFrames, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, ProgressCallback,
     RegistrationConfig, StackConfig, StackingProgress, StackingStage, Star, StarDetectionConfig,
-    StarDetector, TransformType, stack_with_progress,
+    StarDetector, TransformType, stack,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -497,7 +497,7 @@ fn stack_registered_lights(registered_paths: &[PathBuf], output_dir: &Path) {
 
     let progress = create_progress_callback();
 
-    match stack_with_progress(registered_paths, config, progress) {
+    match stack(registered_paths, config, progress) {
         Ok(stacked) => {
             let output_path = output_dir.join("stacked_result.tiff");
 

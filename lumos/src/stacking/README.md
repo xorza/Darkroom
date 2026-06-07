@@ -8,7 +8,7 @@ Image stacking for astrophotography with pixel rejection, frame weighting, norma
 |------|-------------|
 | `mod.rs` | Public API exports |
 | `config.rs` | `StackConfig`, `CombineMethod`, `Rejection`, `Normalization` |
-| `stack.rs` | `stack()` / `stack_with_progress()` entry points, dispatch, normalization |
+| `stack.rs` | `stack()` (from paths) / `stack_images()` (in-memory) entry points, dispatch, normalization |
 | `rejection.rs` | Pixel rejection algorithms |
 | `cache.rs` | `ImageCache` — in-memory or disk-backed (mmap) storage |
 | `cache_config.rs` | `CacheConfig` — adaptive chunk sizing (75% memory budget) |
@@ -18,35 +18,32 @@ Image stacking for astrophotography with pixel rejection, frame weighting, norma
 ## Public API
 
 ```rust
-stack(paths, config) -> Result<AstroImage, Error>
-stack_with_progress(paths, config, progress) -> Result<AstroImage, Error>
+stack(paths, config, progress)         -> Result<AstroImage, Error>   // from disk (memory-tiered)
+stack_images(images, config, progress) -> Result<AstroImage, Error>   // already in memory
 
-StackConfig        // { method, weights, normalization, cache }
+StackConfig        // { method, weighting, normalization, cache }
 CombineMethod      // Mean(Rejection) | Median
 Rejection          // None | SigmaClip | SigmaClipAsymmetric | Winsorized | LinearFit | Percentile | Gesd
-Normalization      // None | Global
+Normalization      // None | Global | Multiplicative
 CacheConfig        // { cache_dir, keep_cache, available_memory }
+ProgressCallback   // pass ::default() for no progress reporting
 ```
 
 ## Usage
 
 ```rust
-use lumos::stacking::{stack, StackConfig, Rejection, Normalization};
+use lumos::{stack, Normalization, ProgressCallback, Rejection, StackConfig};
 
-// Default: sigma-clipped mean (sigma=2.5, 3 iterations)
-let result = stack(&paths, StackConfig::default())?;
+// Every entry point takes a ProgressCallback; ::default() reports nothing.
+let none = ProgressCallback::default();
 
-// Presets
-let result = stack(&paths, StackConfig::median())?;
-let result = stack(&paths, StackConfig::sigma_clipped(2.0))?;
-let result = stack(&paths, StackConfig::mean())?;
-let result = stack(&paths, StackConfig::winsorized(3.0))?;
-let result = stack(&paths, StackConfig::linear_fit(2.5))?;
-let result = stack(&paths, StackConfig::percentile(15.0))?;
-let result = stack(&paths, StackConfig::gesd())?;
+// Default: sigma-clipped mean (sigma=2.5, 3 iterations) + presets
+let result = stack(&paths, StackConfig::default(), none.clone())?;
+let result = stack(&paths, StackConfig::median(), none.clone())?;
+let result = stack(&paths, StackConfig::winsorized(3.0), none.clone())?;
 
 // Weighted stacking
-let result = stack(&paths, StackConfig::weighted(vec![1.0, 0.8, 1.2]))?;
+let result = stack(&paths, StackConfig::weighted(vec![1.0, 0.8, 1.2]), none.clone())?;
 
 // Global normalization + custom rejection
 let config = StackConfig {
@@ -54,7 +51,7 @@ let config = StackConfig {
     normalization: Normalization::Global,
     ..Default::default()
 };
-let result = stack(&paths, config)?;
+let result = stack(&paths, config, none)?;
 ```
 
 ## Rejection Algorithms

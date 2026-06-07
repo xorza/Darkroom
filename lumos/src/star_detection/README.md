@@ -14,7 +14,7 @@ The star detection module (`lumos::star_detection`) identifies stellar sources i
 use lumos::star_detection::{StarDetector, Config, Star};
 
 // Create detector with default configuration
-let mut detector = StarDetector::new();
+let mut detector = StarDetector::default();
 
 // Detect stars in an AstroImage
 let result = detector.detect(&image);
@@ -549,7 +549,7 @@ The star detection output feeds directly into the registration pipeline:
 ```rust
 use lumos::star_detection::{StarDetector, Config};
 
-let mut detector = StarDetector::new();
+let mut detector = StarDetector::default();
 
 // Detect stars in reference and target images
 let ref_result = detector.detect(&ref_image);

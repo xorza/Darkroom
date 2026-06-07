@@ -39,7 +39,7 @@ fn main() {
 
     // === Detection with default configuration ===
     println!("\n--- Detection with default config ---");
-    let mut detector = StarDetector::new();
+    let mut detector = StarDetector::default();
     let result = detector.detect(&image);
 
     println!("Stars detected: {}", result.stars.len());

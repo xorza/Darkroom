@@ -80,7 +80,7 @@ fn bench_detect_4k_dense(b: ::quickbench::Bencher) {
         ImageDimensions::new(pixels.width(), pixels.height(), 1),
         pixels.into_vec(),
     );
-    let mut detector = StarDetector::new();
+    let mut detector = StarDetector::default();
 
     b.bench(|| black_box(detector.detect(black_box(&image))));
 }
@@ -95,7 +95,7 @@ fn bench_detect_1k_sparse(b: ::quickbench::Bencher) {
         ImageDimensions::new(pixels.width(), pixels.height(), 1),
         pixels.into_vec(),
     );
-    let mut detector = StarDetector::new();
+    let mut detector = StarDetector::default();
 
     b.bench(|| black_box(detector.detect(black_box(&image))));
 }
