@@ -8,7 +8,7 @@ mod tests;
 use std::path::Path;
 
 use crate::astro_image::cfa::CfaImage;
-use crate::stacking::cache::ImageCache;
+use crate::stacking::cache::CfaCache;
 use crate::stacking::config::StackConfig;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::stack::run_stacking;
@@ -102,8 +102,7 @@ fn stack_cfa_frames(
         config
     };
 
-    let cache =
-        ImageCache::<CfaImage>::from_paths(paths, &config.cache, ProgressCallback::default())?;
+    let cache = CfaCache::from_paths(paths, &config.cache, ProgressCallback::default())?;
 
     let result = run_stacking(&cache, &config);
 

@@ -8,9 +8,10 @@ use std::path::Path;
 use arrayvec::ArrayVec;
 
 use crate::AstroImage;
+use crate::astro_image::cfa::CfaImage;
 use common::Buffer2;
 
-use super::cache::{FrameStats, ImageCache, StackableImage, WeightedImageCache};
+use super::cache::{CfaCache, FrameStats, LightCache, StackableImage};
 use super::config::{CombineMethod, Normalization, StackConfig, Weighting};
 use super::error::Error;
 use super::progress::ProgressCallback;
@@ -118,9 +119,11 @@ pub fn stack<P: AsRef<Path> + Sync>(
         "Starting unified stack (from paths)"
     );
 
-    let cache = ImageCache::<AstroImage>::from_paths(paths, &config.cache, progress)?;
-    let result = run_stacking(&cache, &config);
-    cache.cleanup();
+    // Files on disk carry no coverage, so this is a `LightCache` with `coverage: None` — the
+    // weighted combine then treats every pixel as fully covered (identical to a plain stack).
+    let cache = LightCache::from_paths(paths, &config.cache, progress)?;
+    let result = run_stacking_weighted(&cache, &config);
+    cache.core.cleanup();
     Ok(result)
 }
 
@@ -160,9 +163,9 @@ pub fn stack_images(
         "Starting unified stack (in memory)"
     );
 
-    let cache = WeightedImageCache::from_stack_frames(frames, &config.cache, progress)?;
+    let cache = LightCache::from_stack_frames(frames, &config.cache, progress)?;
     let result = run_stacking_weighted(&cache, &config);
-    cache.cleanup();
+    cache.core.cleanup();
     Ok(result)
 }
 
@@ -363,8 +366,8 @@ fn effective_combine_method(method: CombineMethod, frame_count: usize) -> Combin
     method
 }
 
-pub(crate) fn run_stacking<I: StackableImage>(cache: &ImageCache<I>, config: &StackConfig) -> I {
-    let stats = cache.channel_stats();
+pub(crate) fn run_stacking(cache: &CfaCache, config: &StackConfig) -> CfaImage {
+    let stats = &cache.core.channel_stats;
     let method = effective_combine_method(config.method, stats.len());
     let frame_norms = compute_frame_norms(stats, config.normalization);
     let weights = resolve_weights(&config.weighting, stats);
@@ -380,16 +383,13 @@ pub(crate) fn run_stacking<I: StackableImage>(cache: &ImageCache<I>, config: &St
             })
         }
     };
-    I::from_stacked(pixels, cache.metadata().clone(), cache.dimensions())
+    CfaImage::from_stacked(pixels, cache.core.metadata.clone(), cache.core.dimensions)
 }
 
-/// Coverage-weighted counterpart to [`run_stacking`] for a [`WeightedImageCache`]: identical
-/// combine math, but each frame contributes only where it covers (`process_chunked_weighted`).
-pub(crate) fn run_stacking_weighted(
-    cache: &WeightedImageCache,
-    config: &StackConfig,
-) -> AstroImage {
-    let stats = cache.channel_stats();
+/// Coverage-weighted counterpart to [`run_stacking`] for a [`LightCache`]: identical combine math,
+/// but each frame contributes only where it covers (`process_chunked_weighted`).
+pub(crate) fn run_stacking_weighted(cache: &LightCache, config: &StackConfig) -> AstroImage {
+    let stats = &cache.core.channel_stats;
     let method = effective_combine_method(config.method, stats.len());
     let frame_norms = compute_frame_norms(stats, config.normalization);
     let weights = resolve_weights(&config.weighting, stats);
@@ -405,7 +405,7 @@ pub(crate) fn run_stacking_weighted(
             })
         }
     };
-    AstroImage::from_stacked(pixels, cache.metadata().clone(), cache.dimensions())
+    AstroImage::from_stacked(pixels, cache.core.metadata.clone(), cache.core.dimensions)
 }
 
 #[cfg(test)]
@@ -422,15 +422,11 @@ mod tests {
     // ========== Helpers ==========
 
     /// Convenience wrapper: compute stats + norm params from cache (for tests).
-    fn norm_params_for(
-        cache: &ImageCache<AstroImage>,
-        normalization: Normalization,
-    ) -> Option<Vec<FrameNorm>> {
-        let stats = cache.channel_stats().to_vec();
-        compute_frame_norms(&stats, normalization)
+    fn norm_params_for(cache: &LightCache, normalization: Normalization) -> Option<Vec<FrameNorm>> {
+        compute_frame_norms(&cache.core.channel_stats, normalization)
     }
 
-    fn make_uniform_frames(pixel_counts: usize, values: &[f32]) -> ImageCache<AstroImage> {
+    fn make_uniform_frames(pixel_counts: usize, values: &[f32]) -> LightCache {
         let dims = ImageDimensions::new((pixel_counts, 1), 1);
         let images = values
             .iter()
@@ -439,7 +435,7 @@ mod tests {
         make_test_cache(images)
     }
 
-    fn make_rgb_frames(pixels: usize, frame_values: &[[f32; 3]]) -> ImageCache<AstroImage> {
+    fn make_rgb_frames(pixels: usize, frame_values: &[[f32; 3]]) -> LightCache {
         let dims = ImageDimensions::new((pixels, 1), 3);
         let images = frame_values
             .iter()
@@ -839,7 +835,7 @@ mod tests {
         let cache = make_uniform_frames(16, &[100.0, 150.0]);
         let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
 
-        let result = cache.process_chunked(None, Some(&norm_params), |values, _, _| {
+        let result = cache.process_chunked_weighted(None, Some(&norm_params), |values, _, _| {
             math::sum::mean_f32(values)
         });
         assert_channel_near(&result, 0, 100.0, 1.0);
@@ -893,7 +889,7 @@ mod tests {
         let cache = make_uniform_frames(16, &[100.0, 200.0]);
         let norm_params = norm_params_for(&cache, Normalization::Multiplicative).unwrap();
 
-        let result = cache.process_chunked(None, Some(&norm_params), |values, _, _| {
+        let result = cache.process_chunked_weighted(None, Some(&norm_params), |values, _, _| {
             math::sum::mean_f32(values)
         });
         assert_channel_near(&result, 0, 100.0, 1.0);
@@ -915,9 +911,10 @@ mod tests {
             let cache = make_rgb_frames(16, &[ref_rgb, frame1_rgb]);
             let norm_params = norm_params_for(&cache, mode).unwrap();
 
-            let result = cache.process_chunked(None, Some(&norm_params), |values, _, _| {
-                math::sum::mean_f32(values)
-            });
+            let result =
+                cache.process_chunked_weighted(None, Some(&norm_params), |values, _, _| {
+                    math::sum::mean_f32(values)
+                });
 
             for (ch, &expected) in ref_rgb.iter().enumerate() {
                 assert_channel_near(&result, ch, expected, 2.0);
@@ -932,10 +929,11 @@ mod tests {
         let cache = make_uniform_frames(16, &[100.0, 200.0]);
         let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
 
-        let result_norm = cache.process_chunked(None, Some(&norm_params), |values, w, scratch| {
-            Rejection::None.combine_mean(values, w, scratch)
-        });
-        let result_unnorm = cache.process_chunked(None, None, |values, w, scratch| {
+        let result_norm =
+            cache.process_chunked_weighted(None, Some(&norm_params), |values, w, scratch| {
+                Rejection::None.combine_mean(values, w, scratch)
+            });
+        let result_unnorm = cache.process_chunked_weighted(None, None, |values, w, scratch| {
             Rejection::None.combine_mean(values, w, scratch)
         });
 
@@ -1130,7 +1128,7 @@ mod tests {
         let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
 
         // Frame 1 is reference (lower noise), so stacked result should be ~200
-        let result = cache.process_chunked(None, Some(&norm_params), |values, _, _| {
+        let result = cache.process_chunked_weighted(None, Some(&norm_params), |values, _, _| {
             math::sum::mean_f32(values)
         });
         assert_channel_near(&result, 0, 200.0, 2.0);
@@ -1152,7 +1150,7 @@ mod tests {
             AstroImage::from_pixels(dims, f1),
         ]);
 
-        let stats = cache.channel_stats().to_vec();
+        let stats = cache.core.channel_stats.clone();
         // sigma0 ≈ MAD*1.4826 (small), sigma1 ≈ MAD*1.4826 (large)
         let sigma0 = math::statistics::mad_to_sigma(stats[0].channels[0].mad);
         let sigma1 = math::statistics::mad_to_sigma(stats[1].channels[0].mad);
@@ -1177,7 +1175,7 @@ mod tests {
     fn test_noise_weighting_equal_noise_gives_equal_weights() {
         // 3 identical frames → equal noise → equal weights
         let cache = make_uniform_frames(100, &[50.0, 50.0, 50.0]);
-        let stats = cache.channel_stats().to_vec();
+        let stats = cache.core.channel_stats.clone();
         // All MADs are 0 for uniform frames → all weights are 0 → returns None
         let weights = resolve_weights(&Weighting::Noise, &stats);
         assert!(
@@ -1197,7 +1195,7 @@ mod tests {
             AstroImage::from_pixels(dims, make_frame(200.0)),
             AstroImage::from_pixels(dims, make_frame(300.0)),
         ]);
-        let stats = cache.channel_stats().to_vec();
+        let stats = cache.core.channel_stats.clone();
         let weights = resolve_weights(&Weighting::Noise, &stats).unwrap();
         // All should be ≈ 1/3
         for (i, &w) in weights.iter().enumerate() {
@@ -1232,7 +1230,7 @@ mod tests {
             weighting: Weighting::Noise,
             ..Default::default()
         };
-        let result = run_stacking(&cache, &config);
+        let result = run_stacking_weighted(&cache, &config);
         let pixel = result.channel(0).pixels()[0];
         // Result should be near 100 (clean frame value), not near 999 (outlier)
         assert!(

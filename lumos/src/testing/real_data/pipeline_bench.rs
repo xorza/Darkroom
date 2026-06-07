@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use crate::astro_image::cfa::CfaImage;
 use crate::raw::load_raw_cfa;
-use crate::stacking::cache::ImageCache;
+use crate::stacking::cache::CfaCache;
 use crate::stacking::stack::run_stacking;
 use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
 use crate::{
@@ -157,40 +157,37 @@ fn bench_full_pipeline() {
     let bias_paths = calibration_image_paths("Bias").unwrap_or_default();
 
     // Time each master separately to find the bottleneck
-    let stack_cfa = |name: &str,
-                     paths: &[std::path::PathBuf],
-                     config: StackConfig|
-     -> Option<CfaImage> {
-        if paths.is_empty() {
-            println!("  {name}: no frames, skipping");
-            return None;
-        }
-        let config = if paths.len() < 8 {
-            StackConfig {
-                normalization: config.normalization,
-                ..StackConfig::median()
+    let stack_cfa =
+        |name: &str, paths: &[std::path::PathBuf], config: StackConfig| -> Option<CfaImage> {
+            if paths.is_empty() {
+                println!("  {name}: no frames, skipping");
+                return None;
             }
-        } else {
-            config
+            let config = if paths.len() < 8 {
+                StackConfig {
+                    normalization: config.normalization,
+                    ..StackConfig::median()
+                }
+            } else {
+                config
+            };
+
+            let t0 = Instant::now();
+            let cache =
+                CfaCache::from_paths(paths, &config.cache, ProgressCallback::default()).unwrap();
+            let load_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+            let t1 = Instant::now();
+            let result = run_stacking(&cache, &config);
+            let stack_ms = t1.elapsed().as_secs_f64() * 1000.0;
+
+            println!(
+                "  {name}: {} frames, load={load_ms:.0}ms, stack={stack_ms:.0}ms, total={:.0}ms",
+                paths.len(),
+                t0.elapsed().as_secs_f64() * 1000.0
+            );
+            Some(result)
         };
-
-        let t0 = Instant::now();
-        let cache =
-            ImageCache::<CfaImage>::from_paths(paths, &config.cache, ProgressCallback::default())
-                .unwrap();
-        let load_ms = t0.elapsed().as_secs_f64() * 1000.0;
-
-        let t1 = Instant::now();
-        let result = run_stacking(&cache, &config);
-        let stack_ms = t1.elapsed().as_secs_f64() * 1000.0;
-
-        println!(
-            "  {name}: {} frames, load={load_ms:.0}ms, stack={stack_ms:.0}ms, total={:.0}ms",
-            paths.len(),
-            t0.elapsed().as_secs_f64() * 1000.0
-        );
-        Some(result)
-    };
 
     let dark = stack_cfa("Dark", &dark_paths, StackConfig::dark());
     let flat = stack_cfa("Flat", &flat_paths, StackConfig::flat());

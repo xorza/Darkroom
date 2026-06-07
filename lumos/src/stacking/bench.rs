@@ -8,7 +8,7 @@ use std::hint::black_box;
 use crate::astro_image::{AstroImage, ImageDimensions};
 use crate::stacking::cache::tests::make_test_cache;
 use crate::stacking::config::StackConfig;
-use crate::stacking::stack::run_stacking;
+use crate::stacking::stack::run_stacking_weighted;
 
 /// Image dimensions for stacking benchmarks.
 /// 1920×1280 is a realistic sub-frame size (close to a binned DSLR frame).
@@ -177,7 +177,7 @@ fn bench_stack_bias_10(b: ::quickbench::Bencher) {
     let cache = make_test_cache(frames);
     let config = StackConfig::bias();
 
-    b.bench(|| black_box(run_stacking(&cache, &config)));
+    b.bench(|| black_box(run_stacking_weighted(&cache, &config)));
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
@@ -186,7 +186,7 @@ fn bench_stack_bias_30(b: ::quickbench::Bencher) {
     let cache = make_test_cache(frames);
     let config = StackConfig::bias();
 
-    b.bench(|| black_box(run_stacking(&cache, &config)));
+    b.bench(|| black_box(run_stacking_weighted(&cache, &config)));
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
@@ -195,7 +195,7 @@ fn bench_stack_bias_100(b: ::quickbench::Bencher) {
     let cache = make_test_cache(frames);
     let config = StackConfig::bias();
 
-    b.bench(|| black_box(run_stacking(&cache, &config)));
+    b.bench(|| black_box(run_stacking_weighted(&cache, &config)));
 }
 
 // ========== Dark Stacking Benchmarks ==========
@@ -206,7 +206,7 @@ fn bench_stack_dark_10(b: ::quickbench::Bencher) {
     let cache = make_test_cache(frames);
     let config = StackConfig::dark();
 
-    b.bench(|| black_box(run_stacking(&cache, &config)));
+    b.bench(|| black_box(run_stacking_weighted(&cache, &config)));
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
@@ -215,7 +215,7 @@ fn bench_stack_dark_30(b: ::quickbench::Bencher) {
     let cache = make_test_cache(frames);
     let config = StackConfig::dark();
 
-    b.bench(|| black_box(run_stacking(&cache, &config)));
+    b.bench(|| black_box(run_stacking_weighted(&cache, &config)));
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
@@ -224,7 +224,7 @@ fn bench_stack_dark_100(b: ::quickbench::Bencher) {
     let cache = make_test_cache(frames);
     let config = StackConfig::dark();
 
-    b.bench(|| black_box(run_stacking(&cache, &config)));
+    b.bench(|| black_box(run_stacking_weighted(&cache, &config)));
 }
 
 // ========== Flat Stacking Benchmarks ==========
@@ -235,7 +235,7 @@ fn bench_stack_flat_10(b: ::quickbench::Bencher) {
     let cache = make_test_cache(frames);
     let config = StackConfig::flat();
 
-    b.bench(|| black_box(run_stacking(&cache, &config)));
+    b.bench(|| black_box(run_stacking_weighted(&cache, &config)));
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
@@ -244,7 +244,7 @@ fn bench_stack_flat_30(b: ::quickbench::Bencher) {
     let cache = make_test_cache(frames);
     let config = StackConfig::flat();
 
-    b.bench(|| black_box(run_stacking(&cache, &config)));
+    b.bench(|| black_box(run_stacking_weighted(&cache, &config)));
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
@@ -253,7 +253,7 @@ fn bench_stack_flat_100(b: ::quickbench::Bencher) {
     let cache = make_test_cache(frames);
     let config = StackConfig::flat();
 
-    b.bench(|| black_box(run_stacking(&cache, &config)));
+    b.bench(|| black_box(run_stacking_weighted(&cache, &config)));
 }
 
 // ========== Light Stacking Benchmarks ==========
@@ -264,7 +264,7 @@ fn bench_stack_light_10(b: ::quickbench::Bencher) {
     let cache = make_test_cache(frames);
     let config = StackConfig::light();
 
-    b.bench(|| black_box(run_stacking(&cache, &config)));
+    b.bench(|| black_box(run_stacking_weighted(&cache, &config)));
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
@@ -273,7 +273,7 @@ fn bench_stack_light_30(b: ::quickbench::Bencher) {
     let cache = make_test_cache(frames);
     let config = StackConfig::light();
 
-    b.bench(|| black_box(run_stacking(&cache, &config)));
+    b.bench(|| black_box(run_stacking_weighted(&cache, &config)));
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
@@ -282,5 +282,5 @@ fn bench_stack_light_100(b: ::quickbench::Bencher) {
     let cache = make_test_cache(frames);
     let config = StackConfig::light();
 
-    b.bench(|| black_box(run_stacking(&cache, &config)));
+    b.bench(|| black_box(run_stacking_weighted(&cache, &config)));
 }
