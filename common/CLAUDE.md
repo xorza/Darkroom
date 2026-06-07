@@ -8,8 +8,9 @@ helpers. Pure leaf crate — depended on by everything, depends on nothing in-tr
 
 | Module | Role |
 |--------|------|
-| `buffer2.rs` | `Buffer2<T>`: generic 2D buffer over `Vec<T>` with `(x, y)`, linear, and range indexing. |
+| `buffer2.rs` | `Buffer2<T>`: generic 2D buffer over `Vec<T>` with `(x, y)`, linear, and range indexing. Stores its size as a `Vec2us` (`dimensions()`); `new`/`width()`/`height()` keep `usize`. |
 | `bit_buffer2.rs` | `BitBuffer2`: bit-packed 2D boolean buffer; u64 words, rows aligned to 128 bits, 16-byte-aligned for SIMD. 8× smaller than `Vec<bool>`. |
+| `vec2us.rs` | `Vec2us`: 2D `usize` vector for pixel coordinates/dimensions (`x`, `y`); index conversions (`to_index`/`from_index`), `Add`/`Sub`, tuple `From`. |
 | `key_index_vec.rs` | `KeyIndexVec<K, V>`: vec + `HashMap` index giving O(1) key lookup with stable iteration order; compaction via a drop guard. |
 | `shared.rs` | `Shared<T>`: `Arc<Mutex<T>>` convenience wrapper; derefs to the inner `Arc`. |
 | `shared_fn.rs` | `SharedFn<F>`: `Option`-like `Arc`-wrapped callable. |

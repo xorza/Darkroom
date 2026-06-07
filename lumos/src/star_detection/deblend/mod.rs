@@ -11,9 +11,9 @@
 //!    blended sources. More accurate for crowded fields but slower.
 
 use crate::math::bbox::Aabb;
-use crate::math::vec2us::Vec2us;
 use crate::star_detection::labeling::LabelMap;
 use common::Buffer2;
+use common::Vec2us;
 
 pub mod local_maxima;
 pub mod multi_threshold;

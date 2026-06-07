@@ -5,6 +5,7 @@
 
 use common::BitBuffer2;
 use common::Buffer2;
+use common::Vec2us;
 
 /// Pool of reusable buffers for star detection.
 ///
@@ -12,8 +13,7 @@ use common::Buffer2;
 /// allocation overhead. All buffers in the pool have the same dimensions.
 #[derive(Debug)]
 pub struct BufferPool {
-    width: usize,
-    height: usize,
+    dimensions: Vec2us,
     /// Pool of f32 buffers (for grayscale, scratch, background, noise, etc.)
     f32_buffers: Vec<Buffer2<f32>>,
     /// Pool of BitBuffer2 (for threshold masks, dilation scratch, etc.)
@@ -26,8 +26,7 @@ impl BufferPool {
     /// Create a new buffer pool for the given image dimensions.
     pub fn new(width: usize, height: usize) -> Self {
         Self {
-            width,
-            height,
+            dimensions: Vec2us::new(width, height),
             f32_buffers: Vec::new(),
             bit_buffers: Vec::new(),
             u32_buffer: None,
@@ -37,28 +36,34 @@ impl BufferPool {
     /// Get the expected width for buffers in this pool.
     #[inline]
     pub fn width(&self) -> usize {
-        self.width
+        self.dimensions.x
     }
 
     /// Get the expected height for buffers in this pool.
     #[inline]
     pub fn height(&self) -> usize {
-        self.height
+        self.dimensions.y
+    }
+
+    /// Expected buffer dimensions as a `(width, height)` vector.
+    #[inline]
+    pub fn dimensions(&self) -> Vec2us {
+        self.dimensions
     }
 
     /// Acquire an f32 buffer from the pool, or allocate a new one.
     pub fn acquire_f32(&mut self) -> Buffer2<f32> {
         self.f32_buffers
             .pop()
-            .unwrap_or_else(|| Buffer2::new_default(self.width, self.height))
+            .unwrap_or_else(|| Buffer2::new_default(self.dimensions.x, self.dimensions.y))
     }
 
     /// Return an f32 buffer to the pool for reuse.
     ///
     /// The buffer must have the correct dimensions.
     pub fn release_f32(&mut self, buffer: Buffer2<f32>) {
-        debug_assert_eq!(buffer.width(), self.width);
-        debug_assert_eq!(buffer.height(), self.height);
+        debug_assert_eq!(buffer.width(), self.dimensions.x);
+        debug_assert_eq!(buffer.height(), self.dimensions.y);
         self.f32_buffers.push(buffer);
     }
 
@@ -66,15 +71,15 @@ impl BufferPool {
     pub fn acquire_bit(&mut self) -> BitBuffer2 {
         self.bit_buffers
             .pop()
-            .unwrap_or_else(|| BitBuffer2::new_filled(self.width, self.height, false))
+            .unwrap_or_else(|| BitBuffer2::new_filled(self.dimensions.x, self.dimensions.y, false))
     }
 
     /// Return a BitBuffer2 to the pool for reuse.
     ///
     /// The buffer must have the correct dimensions.
     pub fn release_bit(&mut self, buffer: BitBuffer2) {
-        debug_assert_eq!(buffer.width(), self.width);
-        debug_assert_eq!(buffer.height(), self.height);
+        debug_assert_eq!(buffer.width(), self.dimensions.x);
+        debug_assert_eq!(buffer.height(), self.dimensions.y);
         self.bit_buffers.push(buffer);
     }
 
@@ -82,15 +87,15 @@ impl BufferPool {
     pub fn acquire_u32(&mut self) -> Buffer2<u32> {
         self.u32_buffer
             .take()
-            .unwrap_or_else(|| Buffer2::new_default(self.width, self.height))
+            .unwrap_or_else(|| Buffer2::new_default(self.dimensions.x, self.dimensions.y))
     }
 
     /// Return the u32 buffer to the pool for reuse.
     ///
     /// The buffer must have the correct dimensions.
     pub fn release_u32(&mut self, buffer: Buffer2<u32>) {
-        debug_assert_eq!(buffer.width(), self.width);
-        debug_assert_eq!(buffer.height(), self.height);
+        debug_assert_eq!(buffer.width(), self.dimensions.x);
+        debug_assert_eq!(buffer.height(), self.dimensions.y);
         self.u32_buffer = Some(buffer);
     }
 
@@ -103,10 +108,10 @@ impl BufferPool {
 
     /// Reset the pool for new dimensions, clearing all buffers.
     pub fn reset(&mut self, width: usize, height: usize) {
-        if self.width != width || self.height != height {
+        if self.dimensions.x != width || self.dimensions.y != height {
             self.clear();
-            self.width = width;
-            self.height = height;
+            self.dimensions.x = width;
+            self.dimensions.y = height;
         }
     }
 }
@@ -115,7 +120,7 @@ impl BufferPool {
 #[cfg(test)]
 impl BufferPool {
     pub fn matches_dimensions(&self, width: usize, height: usize) -> bool {
-        self.width == width && self.height == height
+        self.dimensions.x == width && self.dimensions.y == height
     }
 }
 

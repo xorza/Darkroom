@@ -12,6 +12,7 @@ use std::ops::SubAssign;
 use std::path::Path;
 
 use common::Buffer2;
+use common::Vec2us;
 
 // ============================================================================
 // BitPix - FITS pixel data types
@@ -78,6 +79,11 @@ impl ImageDimensions {
             height,
             channels,
         }
+    }
+
+    /// Pixel dimensions as a `(width, height)` vector.
+    pub fn size(&self) -> Vec2us {
+        Vec2us::new(self.width, self.height)
     }
 
     /// Total number of f32 samples: `width * height * channels`.

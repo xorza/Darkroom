@@ -6,8 +6,8 @@
 use rayon::prelude::*;
 
 use crate::math::bbox::Aabb;
-use crate::math::vec2us::Vec2us;
 use common::Buffer2;
+use common::Vec2us;
 
 use crate::star_detection::background::estimate::BackgroundEstimate;
 use crate::star_detection::buffer_pool::BufferPool;

@@ -1,11 +1,12 @@
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range};
 use std::slice;
 
+use crate::vec2us::Vec2us;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Buffer2<T> {
     pixels: Vec<T>,
-    width: usize,
-    height: usize,
+    dimensions: Vec2us,
 }
 
 impl<T> Buffer2<T> {
@@ -17,8 +18,7 @@ impl<T> Buffer2<T> {
         );
         Self {
             pixels,
-            width,
-            height,
+            dimensions: Vec2us::new(width, height),
         }
     }
 
@@ -29,43 +29,49 @@ impl<T> Buffer2<T> {
 
     #[inline]
     pub fn get(&self, x: usize, y: usize) -> &T {
-        assert!(x < self.width && y < self.height);
-        &self.pixels[y * self.width + x]
+        assert!(x < self.dimensions.x && y < self.dimensions.y);
+        &self.pixels[y * self.dimensions.x + x]
     }
 
     #[inline]
     pub fn get_mut(&mut self, x: usize, y: usize) -> &mut T {
-        assert!(x < self.width && y < self.height);
-        &mut self.pixels[y * self.width + x]
+        assert!(x < self.dimensions.x && y < self.dimensions.y);
+        &mut self.pixels[y * self.dimensions.x + x]
     }
 
     #[inline]
     pub fn row(&self, y: usize) -> &[T] {
-        assert!(y < self.height);
-        let start = y * self.width;
-        &self.pixels[start..start + self.width]
+        assert!(y < self.dimensions.y);
+        let start = y * self.dimensions.x;
+        &self.pixels[start..start + self.dimensions.x]
     }
 
     #[inline]
     pub fn row_mut(&mut self, y: usize) -> &mut [T] {
-        assert!(y < self.height);
-        let start = y * self.width;
-        &mut self.pixels[start..start + self.width]
+        assert!(y < self.dimensions.y);
+        let start = y * self.dimensions.x;
+        &mut self.pixels[start..start + self.dimensions.x]
     }
 
     #[inline]
     pub fn index(&self, x: usize, y: usize) -> usize {
-        y * self.width + x
+        y * self.dimensions.x + x
     }
 
     #[inline]
     pub fn width(&self) -> usize {
-        self.width
+        self.dimensions.x
     }
 
     #[inline]
     pub fn height(&self) -> usize {
-        self.height
+        self.dimensions.y
+    }
+
+    /// Buffer dimensions as a `(width, height)` vector.
+    #[inline]
+    pub fn dimensions(&self) -> Vec2us {
+        self.dimensions
     }
 
     #[inline]
@@ -88,8 +94,8 @@ impl<T> Buffer2<T> {
     where
         T: Copy,
     {
-        assert_eq!(self.width, other.width, "width mismatch");
-        assert_eq!(self.height, other.height, "height mismatch");
+        assert_eq!(self.dimensions.x, other.dimensions.x, "width mismatch");
+        assert_eq!(self.dimensions.y, other.dimensions.y, "height mismatch");
         self.pixels.copy_from_slice(&other.pixels);
     }
 }
@@ -98,8 +104,7 @@ impl<T: Default + Clone> Buffer2<T> {
     pub fn new_default(width: usize, height: usize) -> Self {
         Self {
             pixels: vec![T::default(); width * height],
-            width,
-            height,
+            dimensions: Vec2us::new(width, height),
         }
     }
 }
@@ -108,8 +113,7 @@ impl<T: Clone> Buffer2<T> {
     pub fn new_filled(width: usize, height: usize, value: T) -> Self {
         Self {
             pixels: vec![value; width * height],
-            width,
-            height,
+            dimensions: Vec2us::new(width, height),
         }
     }
 }
@@ -119,14 +123,14 @@ impl<T> Index<(usize, usize)> for Buffer2<T> {
 
     #[inline]
     fn index(&self, (x, y): (usize, usize)) -> &Self::Output {
-        &self.pixels[y * self.width + x]
+        &self.pixels[y * self.dimensions.x + x]
     }
 }
 
 impl<T> IndexMut<(usize, usize)> for Buffer2<T> {
     #[inline]
     fn index_mut(&mut self, (x, y): (usize, usize)) -> &mut Self::Output {
-        &mut self.pixels[y * self.width + x]
+        &mut self.pixels[y * self.dimensions.x + x]
     }
 }
 

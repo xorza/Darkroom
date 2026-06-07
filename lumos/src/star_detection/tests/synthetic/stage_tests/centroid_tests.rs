@@ -4,7 +4,6 @@
 
 use crate::math::bbox::Aabb;
 use crate::math::fwhm_to_sigma;
-use crate::math::vec2us::Vec2us;
 use crate::star_detection::centroid::measure_star;
 use crate::star_detection::config::Config;
 use crate::star_detection::deblend::region::Region;
@@ -14,6 +13,7 @@ use crate::star_detection::tests::common::output::image_writer::{
 use crate::testing::init_tracing;
 use crate::testing::synthetic::star_profiles::render_gaussian_star;
 use common::Buffer2;
+use common::Vec2us;
 use common::test_utils::test_output_path;
 use glam::Vec2;
 use imaginarium::Color;

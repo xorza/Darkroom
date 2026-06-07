@@ -30,6 +30,7 @@ pub(crate) mod slot;
 pub(crate) mod span;
 pub(crate) mod string_ext;
 pub(crate) mod toggle;
+pub(crate) mod vec2us;
 
 pub use bit_buffer2::{BitBuffer2, BitIter};
 pub use bool_ext::BoolExt;
@@ -51,3 +52,4 @@ pub use slot::{Slot, SlotError};
 pub use span::Span;
 pub use string_ext::StrExt;
 pub use toggle::Toggle;
+pub use vec2us::Vec2us;

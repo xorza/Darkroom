@@ -7,7 +7,6 @@ use std::hint::black_box;
 
 use super::{DeblendBuffers, deblend_multi_threshold};
 use crate::math::bbox::Aabb;
-use crate::math::vec2us::Vec2us;
 use crate::star_detection::config::Connectivity;
 use crate::star_detection::deblend::ComponentData;
 use crate::star_detection::labeling::LabelMap;
@@ -15,6 +14,7 @@ use crate::star_detection::labeling::test_utils::label_map_from_mask_with_connec
 use crate::testing::synthetic::star_field::generate_globular_cluster;
 use common::BitBuffer2;
 use common::Buffer2;
+use common::Vec2us;
 
 /// Create components from a pixel buffer for benchmarking.
 fn create_components_from_pixels(

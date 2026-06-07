@@ -14,9 +14,9 @@ use smallvec::SmallVec;
 use super::region::Region;
 use super::{ComponentData, MAX_PEAKS, Pixel};
 use crate::math::bbox::Aabb;
-use crate::math::vec2us::Vec2us;
 use crate::star_detection::labeling::LabelMap;
 use common::Buffer2;
+use common::Vec2us;
 
 #[cfg(test)]
 mod tests;

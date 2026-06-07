@@ -33,7 +33,7 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 | `registration` | `pub(crate)` | Triangle + RANSAC/MAGSAC++ star-pattern alignment, SIP distortion, image warp. |
 | `stacking` | `pub(crate)` | Multi-frame combination with rejection / normalization / weighting + cache tiers. |
 | `drizzle` | `pub` | Fruchter & Hook variable-pixel reconstruction. |
-| `math` | `pub(crate)` | `DMat3`, `Aabb`/`BBox`, `Vec2us`, compensated SIMD `sum`, robust statistics. |
+| `math` | `pub(crate)` | `DMat3`, `Aabb`/`BBox`, compensated SIMD `sum`, robust statistics. (`Vec2us` lives in `common`.) |
 | `common` | `pub(crate)` | `UnsafeSendPtr` + thin re-use of the `common` crate's CPU feature detection. |
 | `prelude` | `pub` | Convenience re-exports of the loading / detection / registration / stacking API. |
 | `testing` | `#[cfg(test)]` | Synthetic star-field + real-data fixtures for tests/benches. |
@@ -119,7 +119,7 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 
 - `sum/`: `sum_f32` / `mean_f32` / `weighted_mean_f32` — hybrid compensated summation (per-lane Kahan in the SIMD inner loop, Neumaier horizontal reduction + remainder). AVX2 (8-wide) / SSE4.1 (4-wide) / NEON / scalar.
 - `statistics/`: `median_f32_mut` (quickselect, NaN-safe `total_cmp`), `median_f32_fast` (NaN-free intermediate), `mad_f32_fast`, `mad_to_sigma` (`MAD_TO_SIGMA = 1.4826022`), iterative sigma-clipped stats; `FWHM_TO_SIGMA ≈ 2.3548` lives in `mod.rs`.
-- `dmat3.rs` (`DMat3`, row-major f64 homogeneous transforms + inverse/determinant), `bbox.rs` (`Aabb`, several methods test-gated), `vec2us.rs` (`Vec2us` pixel indexing).
+- `dmat3.rs` (`DMat3`, row-major f64 homogeneous transforms + inverse/determinant), `bbox.rs` (`Aabb`, several methods test-gated). (`Vec2us` pixel indexing now lives in `common`.)
 
 ## SIMD dispatch
 

@@ -14,7 +14,6 @@ pub(crate) mod dmat3;
 
 pub mod statistics;
 pub mod sum;
-pub(crate) mod vec2us;
 
 // =============================================================================
 // Constants

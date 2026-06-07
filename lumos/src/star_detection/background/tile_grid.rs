@@ -4,6 +4,7 @@ use crate::math::statistics::median_f32_mut;
 use crate::math::statistics::sigma_clipped_median_mad;
 use common::BitBuffer2;
 use common::Buffer2;
+use common::Vec2us;
 use rayon::prelude::*;
 
 // ============================================================================
@@ -36,8 +37,7 @@ pub(super) struct TileGrid {
     /// Precomputed X-coordinates of tile centers (one per tile column).
     centers_x: Vec<f32>,
     tile_size: usize,
-    width: usize,
-    height: usize,
+    dimensions: Vec2us,
 }
 
 // ============================================================================
@@ -68,8 +68,7 @@ impl TileGrid {
             d2y_sigma: vec![0.0; n],
             centers_x,
             tile_size,
-            width,
-            height,
+            dimensions: Vec2us::new(width, height),
         }
     }
 
@@ -80,8 +79,8 @@ impl TileGrid {
         mask: Option<&BitBuffer2>,
         sigma_clip_iterations: usize,
     ) {
-        debug_assert_eq!(pixels.width(), self.width);
-        debug_assert_eq!(pixels.height(), self.height);
+        debug_assert_eq!(pixels.width(), self.dimensions.x);
+        debug_assert_eq!(pixels.height(), self.dimensions.y);
 
         self.fill_tile_stats(pixels, mask, sigma_clip_iterations);
         self.apply_median_filter();
@@ -116,7 +115,7 @@ impl TileGrid {
     #[inline]
     pub fn center_y(&self, ty: usize) -> f32 {
         let y_start = ty * self.tile_size;
-        let y_end = (y_start + self.tile_size).min(self.height);
+        let y_end = (y_start + self.tile_size).min(self.dimensions.y);
         (y_start + y_end) as f32 * 0.5
     }
 
@@ -166,8 +165,8 @@ impl TileGrid {
     ) {
         let tiles_x = self.tiles_x();
         let tile_size = self.tile_size;
-        let width = self.width;
-        let height = self.height;
+        let width = self.dimensions.x;
+        let height = self.dimensions.y;
         let max_tile_pixels = tile_size * tile_size;
 
         self.stats

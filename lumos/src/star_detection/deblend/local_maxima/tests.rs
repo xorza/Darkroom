@@ -1,9 +1,9 @@
 //! Tests for local maxima deblending.
 
 use super::*;
-use crate::math::vec2us::Vec2us;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::test_utils::label_map_from_raw;
+use common::Vec2us;
 
 use super::is_local_maximum;
 

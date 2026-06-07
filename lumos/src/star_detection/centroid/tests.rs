@@ -5,13 +5,13 @@ use glam::Vec2;
 use super::*;
 use crate::math::FWHM_TO_SIGMA;
 use crate::math::bbox::Aabb;
-use crate::math::vec2us::Vec2us;
 use crate::star_detection::background::estimate::BackgroundEstimate;
 use crate::star_detection::config::Config;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::detector::stages::detect_test_utils::detect_stars_test;
 use crate::testing::synthetic::background_map;
 use common::Buffer2;
+use common::Vec2us;
 
 /// Default stamp radius for tests (matching expected FWHM of ~4 pixels).
 const TEST_STAMP_RADIUS: usize = 7;

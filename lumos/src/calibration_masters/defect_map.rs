@@ -38,8 +38,8 @@
 //! shadows (which dim by far less than half), so only genuinely near-zero pixels are caught.
 
 use crate::astro_image::cfa::{CfaImage, CfaType};
-use crate::math::vec2us::Vec2us;
 use common::Buffer2;
+use common::Vec2us;
 
 use arrayvec::ArrayVec;
 use rayon::prelude::*;

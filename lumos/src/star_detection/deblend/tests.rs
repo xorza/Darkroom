@@ -5,10 +5,10 @@ use super::local_maxima::deblend_local_maxima;
 use super::multi_threshold::{DeblendBuffers, deblend_multi_threshold};
 use super::region::Region;
 use super::*;
-use crate::math::vec2us::Vec2us;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::test_utils::label_map_from_raw;
 use common::Buffer2;
+use common::Vec2us;
 
 /// Convenience wrapper for tests — creates fresh buffers per call.
 fn deblend_multi_threshold_test(
