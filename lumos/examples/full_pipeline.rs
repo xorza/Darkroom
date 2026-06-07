@@ -101,7 +101,7 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
     .expect("failed to build calibration masters");
 
     if let Some(ref defects) = masters.defect_map {
-        tracing::info!(count = defects.count(), "Hot/cold pixels detected");
+        tracing::info!(count = defects.count(), "Hot pixels detected");
     }
     masters
 }

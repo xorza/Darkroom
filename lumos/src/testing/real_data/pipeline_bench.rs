@@ -131,10 +131,8 @@ fn diag_dark_pixel_distribution() {
     // Also report the DefectMap stats
     let defect_map = masters.defect_map.as_ref().unwrap();
     println!(
-        "\n  DefectMap: hot={}, cold={}, total={} ({:.4}%)",
+        "\n  DefectMap: hot={} ({:.4}%)",
         defect_map.hot_count(),
-        defect_map.cold_count(),
-        defect_map.count(),
         defect_map.percentage()
     );
 }
