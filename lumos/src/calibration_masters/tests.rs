@@ -62,7 +62,11 @@ fn test_new_no_dark_no_hot_pixels() {
 
     assert!(masters.master_dark.is_none());
     assert!(masters.master_flat.is_some());
-    assert!(masters.defect_map.is_none());
+    // A flat is present, so a defect map is built — but with no dark there are no hot pixels,
+    // and a constant flat has no cold pixels either.
+    let defect_map = masters.defect_map.expect("a flat yields a defect map");
+    assert_eq!(defect_map.hot_count(), 0, "no dark → no hot pixels");
+    assert_eq!(defect_map.count(), 0, "constant flat → no cold pixels");
 }
 
 #[test]

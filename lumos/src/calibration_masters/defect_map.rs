@@ -31,61 +31,78 @@ use common::Buffer2;
 
 use arrayvec::ArrayVec;
 
-/// A mask of hot pixels (abnormally high dark current) detected from a master dark.
+/// A mask of defective pixels: **hot** pixels (abnormally high dark current) from a master
+/// dark, and **cold/dead** pixels (abnormally low response) from a master flat.
 ///
-/// Hot pixels are above `median + sigma_threshold * sigma` for their CFA color; they are
-/// replaced with the median of same-color CFA neighbors during correction. Dead/cold pixels
-/// are not detectable in a dark (they only show under illumination, i.e. a flat), so they
-/// are not flagged here.
+/// Each is detected per CFA color and replaced with the median of same-color neighbors during
+/// correction. The two defects come from *different* masters by necessity: a dark has no
+/// illumination, so dead pixels are invisible in it (they read the same near-zero as a normal
+/// dark pixel) — they only reveal themselves as dark spots in an illuminated flat.
 #[derive(Debug, Clone)]
 pub struct DefectMap {
-    /// Flat indices of hot pixels (above the per-color upper threshold).
+    /// Flat indices of hot pixels (above `median + kσ` in the dark), ascending.
     pub hot_indices: Vec<usize>,
+    /// Flat indices of cold/dead pixels (below `median − kσ` in the flat), ascending.
+    pub cold_indices: Vec<usize>,
     pub width: usize,
     pub height: usize,
 }
 
 impl DefectMap {
-    /// Detect hot pixels from a raw CFA master dark.
+    /// Build a defect map from the available masters: **hot** pixels from the dark and
+    /// **cold/dead** pixels from the flat. Returns `None` if neither master is present.
     ///
-    /// Computes per-CFA-color MAD statistics so that each pixel is tested against a threshold
-    /// derived from same-color pixels only. This prevents green pixels (50% of Bayer data)
-    /// from dominating the statistics and masking defects in red or blue channels. A pixel is
-    /// **hot** if it sits above `median + sigma_threshold * sigma` for its color.
-    ///
-    /// Dead/cold pixels are intentionally not flagged: a dark measures dark current + read
-    /// noise (centered near zero, often slightly negative after bias subtraction), so a "low"
-    /// value is just noise, not a defect — dead pixels only reveal themselves under
-    /// illumination (a flat).
-    pub fn from_master_dark(dark: &CfaImage, sigma_threshold: f32) -> Self {
-        assert!(sigma_threshold > 0.0, "Sigma threshold must be positive");
-
-        let width = dark.data.width();
-        let height = dark.data.height();
-        let cfa_type = dark.metadata.cfa_type.as_ref();
-
-        let upper = compute_per_color_thresholds(&dark.data, cfa_type, sigma_threshold);
-
-        let mut hot_indices = Vec::new();
-        for (i, &val) in dark.data.iter().enumerate() {
-            let x = i % width;
-            let y = i / width;
-            let color = cfa_color_at(cfa_type, x, y) as usize;
-            if val > upper[color] {
-                hot_indices.push(i);
-            }
+    /// This is the constructor calibration uses; [`from_master_dark`](Self::from_master_dark)
+    /// and [`from_master_flat`](Self::from_master_flat) build the halves individually.
+    pub fn from_masters(
+        dark: Option<&CfaImage>,
+        flat: Option<&CfaImage>,
+        sigma_threshold: f32,
+    ) -> Option<Self> {
+        let reference = dark.or(flat)?;
+        let width = reference.data.width();
+        let height = reference.data.height();
+        if let (Some(d), Some(f)) = (dark, flat) {
+            assert!(
+                d.data.width() == f.data.width() && d.data.height() == f.data.height(),
+                "master dark and flat must share dimensions"
+            );
         }
 
-        Self {
+        let hot_indices = dark.map_or_else(Vec::new, |d| {
+            detect_defects(d, sigma_threshold, DefectSide::Hot)
+        });
+        let cold_indices = flat.map_or_else(Vec::new, |f| {
+            detect_defects(f, sigma_threshold, DefectSide::Cold)
+        });
+
+        Some(Self {
             hot_indices,
+            cold_indices,
             width,
             height,
-        }
+        })
     }
 
-    /// Total number of hot pixels.
+    /// Detect **hot** pixels from a raw CFA master dark — those above `median + kσ` for their
+    /// CFA color. Per-color stats keep green pixels (50% of Bayer data) from masking defects
+    /// in the red/blue channels.
+    pub fn from_master_dark(dark: &CfaImage, sigma_threshold: f32) -> Self {
+        Self::from_masters(Some(dark), None, sigma_threshold).expect("dark is Some")
+    }
+
+    /// Detect **cold/dead** pixels from a raw CFA master flat — those below `median − kσ` for
+    /// their CFA color. A dead pixel reads near zero regardless of illumination, so it sits
+    /// far below the flat's (illuminated) per-color level. The threshold is *not* clamped to
+    /// zero: for a flat the per-color median is a positive light level, so `median − kσ` is
+    /// already a sensible positive cutoff that stays above a normal (vignetted) pixel.
+    pub fn from_master_flat(flat: &CfaImage, sigma_threshold: f32) -> Self {
+        Self::from_masters(None, Some(flat), sigma_threshold).expect("flat is Some")
+    }
+
+    /// Total number of defective pixels (hot + cold).
     pub fn count(&self) -> usize {
-        self.hot_indices.len()
+        self.hot_indices.len() + self.cold_indices.len()
     }
 
     /// Get the percentage of defective pixels.
@@ -106,7 +123,7 @@ impl DefectMap {
             self.height
         );
 
-        if self.hot_indices.is_empty() {
+        if self.hot_indices.is_empty() && self.cold_indices.is_empty() {
             return;
         }
 
@@ -116,7 +133,7 @@ impl DefectMap {
             .as_ref()
             .expect("image must have CFA type for defect correction");
 
-        for &idx in &self.hot_indices {
+        for &idx in self.hot_indices.iter().chain(&self.cold_indices) {
             let x = idx % image.data.width();
             let y = idx / image.data.width();
             image.data[idx] = median_same_color_neighbors(&image.data, x, y, cfa_type);
@@ -138,52 +155,73 @@ fn cfa_color_at(cfa_type: Option<&CfaType>, x: usize, y: usize) -> u8 {
     }
 }
 
-/// Compute the per-CFA-color upper (hot-pixel) threshold.
+/// Which tail of the per-color distribution flags a defect.
+#[derive(Debug, Clone, Copy)]
+enum DefectSide {
+    /// Hot pixels: above `median + kσ` (from a master dark).
+    Hot,
+    /// Cold/dead pixels: below `median − kσ` (from a master flat).
+    Cold,
+}
+
+/// Flag the flat indices of pixels in the `side` tail, tested per CFA color.
+fn detect_defects(image: &CfaImage, sigma_threshold: f32, side: DefectSide) -> Vec<usize> {
+    assert!(sigma_threshold > 0.0, "Sigma threshold must be positive");
+    let data = &image.data;
+    let width = data.width();
+    let cfa_type = image.metadata.cfa_type.as_ref();
+    let stats = compute_per_color_stats(data, cfa_type);
+
+    let mut indices = Vec::new();
+    for (i, &val) in data.iter().enumerate() {
+        let color = cfa_color_at(cfa_type, i % width, i / width) as usize;
+        let (median, sigma) = stats[color];
+        let flagged = match side {
+            DefectSide::Hot => val > median + sigma_threshold * sigma,
+            DefectSide::Cold => val < median - sigma_threshold * sigma,
+        };
+        if flagged {
+            indices.push(i);
+        }
+    }
+    indices
+}
+
+/// Per-CFA-color robust `(median, sigma)`, indexed by color (0=R/mono, 1=G, 2=B).
 ///
-/// Returns an ArrayVec indexed by color (0=R/mono, 1=G, 2=B).
-/// Length is 1 for mono, 3 for Bayer/X-Trans.
-fn compute_per_color_thresholds(
+/// `sigma` is `MAD · 1.4826` with two floors that keep a clean (near-uniform) master from
+/// flagging its own noise tail: an absolute floor (`5e-4`, ~33 ADU in 16-bit) and a relative
+/// floor (`median · 0.1`). A color with no samples gets `sigma = ∞` so it never flags.
+fn compute_per_color_stats(
     data: &Buffer2<f32>,
     cfa_type: Option<&CfaType>,
-    sigma_threshold: f32,
-) -> ArrayVec<f32, 3> {
+) -> ArrayVec<(f32, f32), 3> {
     let num_colors = cfa_type.map_or(1, |c| c.num_colors());
-    let mut thresholds = ArrayVec::new();
+    let mut stats = ArrayVec::new();
 
     for color in 0..num_colors as u8 {
         let mut samples = collect_color_samples(data, cfa_type, color);
 
         if samples.is_empty() {
-            thresholds.push(f32::MAX);
+            stats.push((0.0, f32::INFINITY));
             continue;
         }
 
         let median = crate::math::statistics::median_f32_mut(&mut samples);
-
         for v in samples.iter_mut() {
             *v = (*v - median).abs();
         }
         let mad = crate::math::statistics::median_f32_mut(&mut samples);
 
-        let computed_sigma = mad * MAD_TO_SIGMA;
-        // Floor prevents over-detection on uniform/clean darks (MAD≈0).
-        // The absolute floor (5e-4) corresponds to ~33 ADU in 16-bit space — a pixel
-        // must be at least ~165 ADU above the median at 5-sigma to be flagged.
-        // This prevents flagging the continuous warm tail of clean CMOS darks as hot
-        // (which can be 3%+ of pixels at lower floors).
-        // The relative floor (median * 0.1) handles intermediate cases.
-        let sigma = computed_sigma.max(median * 0.1).max(5e-4);
-        let upper = median + sigma_threshold * sigma;
+        let sigma = (mad * MAD_TO_SIGMA).max(median * 0.1).max(5e-4);
 
         tracing::info!(
-            "Defect stats color={color}: median={median:.6}, MAD={mad:.6}, \
-             sigma={sigma:.6}, upper={upper:.6}"
+            "Defect stats color={color}: median={median:.6}, MAD={mad:.6}, sigma={sigma:.6}"
         );
-
-        thresholds.push(upper);
+        stats.push((median, sigma));
     }
 
-    thresholds
+    stats
 }
 
 /// Collect pixel samples for a specific CFA color channel.
@@ -370,6 +408,11 @@ impl DefectMap {
     pub fn hot_count(&self) -> usize {
         self.hot_indices.len()
     }
+
+    /// Number of cold/dead pixels detected.
+    pub fn cold_count(&self) -> usize {
+        self.cold_indices.len()
+    }
 }
 
 #[cfg(test)]
@@ -379,6 +422,10 @@ mod tests {
 
     fn is_hot(defect_map: &DefectMap, pixel_idx: usize) -> bool {
         defect_map.hot_indices.binary_search(&pixel_idx).is_ok()
+    }
+
+    fn is_cold(defect_map: &DefectMap, pixel_idx: usize) -> bool {
+        defect_map.cold_indices.binary_search(&pixel_idx).is_ok()
     }
 
     #[test]
@@ -420,6 +467,7 @@ mod tests {
 
         let defect_map = DefectMap {
             hot_indices: vec![2 * 6 + 2],
+            cold_indices: vec![],
             width: 6,
             height: 6,
         };
@@ -442,6 +490,7 @@ mod tests {
 
         let defect_map = DefectMap {
             hot_indices: vec![4],
+            cold_indices: vec![],
             width: 3,
             height: 3,
         };
@@ -609,6 +658,53 @@ mod tests {
         );
     }
 
+    /// Cold/dead pixels come from the *flat* (illuminated), where a dead pixel is a dark spot.
+    #[test]
+    fn cold_pixels_detected_from_flat() {
+        // 6x6 mono flat: uniform illumination 0.4 with one dead pixel (no response).
+        let mut pixels = vec![0.4f32; 36];
+        pixels[5] = 0.0; // dead pixel at index 5
+        let flat = make_cfa(6, 6, pixels, CfaType::Mono);
+
+        let defect_map = DefectMap::from_master_flat(&flat, 5.0);
+
+        // median 0.4, sigma floored at 0.04 → cold threshold 0.4 − 5·0.04 = 0.2; only the dead
+        // pixel (0.0) is below it. A flat yields no hot pixels.
+        assert_eq!(defect_map.cold_count(), 1, "the dead pixel is cold");
+        assert_eq!(defect_map.hot_count(), 0, "a flat yields no hot pixels");
+        assert!(is_cold(&defect_map, 5));
+        assert!(!is_cold(&defect_map, 0)); // a normal illuminated pixel
+    }
+
+    /// A clean (uniform) flat must not flag its own pixels as cold — the σ floor guards this.
+    #[test]
+    fn uniform_flat_flags_no_cold() {
+        let flat = make_cfa(8, 8, vec![0.5f32; 64], CfaType::Mono);
+        let defect_map = DefectMap::from_master_flat(&flat, 5.0);
+        assert_eq!(defect_map.count(), 0);
+    }
+
+    /// `from_masters` merges hot pixels (from the dark) and cold pixels (from the flat).
+    #[test]
+    fn from_masters_combines_dark_hot_and_flat_cold() {
+        // Near-zero dark with one hot pixel; illuminated flat with one dead pixel.
+        let mut dark_px = vec![0.001f32; 36];
+        dark_px[0] = 0.5; // hot
+        let dark = make_cfa(6, 6, dark_px, CfaType::Mono);
+
+        let mut flat_px = vec![0.4f32; 36];
+        flat_px[5] = 0.0; // dead
+        let flat = make_cfa(6, 6, flat_px, CfaType::Mono);
+
+        let defect_map = DefectMap::from_masters(Some(&dark), Some(&flat), 5.0).unwrap();
+
+        assert_eq!(defect_map.hot_count(), 1);
+        assert_eq!(defect_map.cold_count(), 1);
+        assert_eq!(defect_map.count(), 2);
+        assert!(is_hot(&defect_map, 0));
+        assert!(is_cold(&defect_map, 5));
+    }
+
     #[test]
     #[should_panic(expected = "don't match")]
     fn test_correct_cfa_dimension_mismatch() {
@@ -617,6 +713,7 @@ mod tests {
 
         let defect_map = DefectMap {
             hot_indices: vec![],
+            cold_indices: vec![],
             width: 2,
             height: 2,
         };

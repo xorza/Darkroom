@@ -126,9 +126,8 @@ impl CalibrationMasters {
             flat_dark,
         } = images;
 
-        let defect_map = dark
-            .as_ref()
-            .map(|d| DefectMap::from_master_dark(d, sigma_threshold));
+        // Hot pixels from the dark, cold/dead pixels from the flat.
+        let defect_map = DefectMap::from_masters(dark.as_ref(), flat.as_ref(), sigma_threshold);
 
         Self {
             master_dark: dark,
