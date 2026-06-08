@@ -1,16 +1,18 @@
+use crate::EPSILON;
+
 pub trait FloatExt {
     fn approximately_eq(self, other: Self) -> bool;
 }
 
 impl FloatExt for f32 {
     fn approximately_eq(self, other: Self) -> bool {
-        (self - other).abs() < crate::EPSILON
+        (self - other).abs() < EPSILON
     }
 }
 
 impl FloatExt for f64 {
     fn approximately_eq(self, other: Self) -> bool {
-        (self - other).abs() < crate::EPSILON as f64
+        (self - other).abs() < EPSILON as f64
     }
 }
 
