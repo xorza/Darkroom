@@ -611,8 +611,9 @@ fix them at all:
   by the *lower* threshold `median − k·σ` (floored at 0) and corrected identically. Often
   *invisible in a dark* (a dead pixel reads ~0, indistinguishable from the dark floor) — these
   are better found in a **flat**, where an unresponsive pixel shows as a dark spot under
-  uniform illumination. lumos currently derives the map only from the dark, so flat-only dead
-  pixels can slip through (§7).
+  uniform illumination. lumos derives cold/dead pixels from the **master flat** via a local
+  same-color-neighbor ratio (`< DEAD_PIXEL_FRACTION × local median`), which tracks vignetting
+  where a global `median − k·σ` cut cannot (`defect_map.rs`, `detect_cold`).
 - **RTS / "flickering" / telegraph pixels** — random-telegraph-signal pixels that hop between
   two or more levels *between frames*. They are the trap for static maps: a single master dark
   catches them only if they happened to be "high" during that capture, and a fixed map then
@@ -886,7 +887,11 @@ median for mono. (lumos already does all three.)
   (`defect_map.rs`) — same median center as Siril but with a **MAD σ** (vs Siril's ordinary
   σ, vs DSS's `median+16·σ`), so more robust to the outliers being hunted; more capable than
   Siril on X-Trans.
-- **Same-CFA-color neighbor median** correction for Bayer/X-Trans/mono — mathematically correct.
+- **Same-CFA-color neighbor median** correction for Bayer/X-Trans/mono — mathematically correct,
+  and repaired from a **defect mask** so clustered defects draw only on good (non-defect) neighbors.
+- **Cold/dead pixels from the master flat** via a local same-color-neighbor ratio
+  (`< DEAD_PIXEL_FRACTION × local median`, `defect_map.rs` `detect_cold`) — catches the dead pixels
+  that read normal in a dark, and tracks vignetting where a global `median − k·σ` cut cannot.
 - **Sensible combine presets:** winsorized-mean darks/bias (κ=3), sigma-clip flats (κ=2.5),
   with median fallback below 8 frames (`stacking/config.rs:163–197`; `mod.rs:92`).
 
@@ -906,9 +911,12 @@ median for mono. (lumos already does all three.)
    neighbors, or document reliance on dither + clip.
 4. **No superbias / no bias modeling, no overscan.** Bias is a plain winsorized mean; no
    overscan support for scientific CCDs. Lower priority for the RAW/CMOS target.
-5. **Defect map only from the master dark.** Dead pixels that read *normal* in a dark but fail
-   under illumination are invisible. *Opportunity:* also derive cold/dead pixels from the
-   master flat.
+5. **No hot-pixel stability (RTS) test.** Hot pixels are flagged from a single master dark, so a
+   random-telegraph pixel that happened to read low during that capture is missed (and a fixed map
+   mis-corrects the frames where it later reads high). *Opportunity:* Astropy-style per-pixel
+   stability test across the dark sub-stack (§2.4, §3.3) to exclude RTS pixels from the static map
+   and leave them to dither + stack rejection. (Cold/dead-from-flat detection — previously listed
+   here — is now implemented; see "what lumos gets right" above.)
 6. **No defect-map persistence / external bad-pixel-map import** (Siril supports
    `apply_cosme_to_image` from a file, `preprocess.c:437`). *Opportunity:* serialize the
    `DefectMap` so it can be reused / hand-edited.

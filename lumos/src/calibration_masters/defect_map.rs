@@ -38,6 +38,7 @@
 //! shadows (which dim by far less than half), so only genuinely near-zero pixels are caught.
 
 use crate::astro_image::cfa::{CfaImage, CfaType};
+use common::BitBuffer2;
 use common::Buffer2;
 use common::Vec2us;
 
@@ -67,6 +68,10 @@ impl DefectMap {
     /// their CFA color — and store them. Chainable, in any order:
     /// `DefectMap::default().detect_hot(&dark, 5.0).detect_cold(&flat)`.
     pub fn detect_hot(mut self, dark: &CfaImage, sigma_threshold: f32) -> Self {
+        // Clamp at the boundary rather than asserting: `sigma_threshold` may come from user config,
+        // and a non-positive value (which would flag every pixel above the median) must not panic
+        // the pipeline. Nothing below 1σ is a meaningful defect threshold.
+        let sigma_threshold = sigma_threshold.max(MIN_SIGMA_THRESHOLD);
         self.set_dimensions(Vec2us::new(dark.data.width(), dark.data.height()));
         self.hot_indices = detect_hot_pixels(dark, sigma_threshold);
         self
@@ -129,10 +134,19 @@ impl DefectMap {
             .as_ref()
             .expect("image must have CFA type for defect correction");
 
+        // Mask every defect so each repair draws only on GOOD neighbours. Without it, a clustered
+        // defect (hot column, adjacent same-color pixels) pulls a neighbour's bad/half-corrected
+        // value into its median and the order of `hot ⧺ cold` changes the result.
+        let width = image.data.width();
+        let mut mask = BitBuffer2::new_default(width, image.data.height());
         for &idx in self.hot_indices.iter().chain(&self.cold_indices) {
-            let x = idx % image.data.width();
-            let y = idx / image.data.width();
-            image.data[idx] = median_same_color_neighbors(&image.data, x, y, cfa_type);
+            mask.set(idx, true);
+        }
+
+        for &idx in self.hot_indices.iter().chain(&self.cold_indices) {
+            let x = idx % width;
+            let y = idx / width;
+            image.data[idx] = median_same_color_neighbors(&image.data, x, y, cfa_type, Some(&mask));
         }
     }
 }
@@ -151,6 +165,11 @@ fn cfa_color_at(cfa_type: Option<&CfaType>, x: usize, y: usize) -> u8 {
     }
 }
 
+/// Lowest hot-pixel σ multiplier `detect_hot` will honor. A non-positive (or absurdly small)
+/// threshold would flag a huge fraction of the sensor; clamping here keeps a mis-set user config
+/// from panicking or wiping the frame.
+const MIN_SIGMA_THRESHOLD: f32 = 1.0;
+
 /// A flat pixel reading below this fraction of its same-color local-neighbourhood median is
 /// treated as dead. 0.5 ("less than half the local response") sits well below vignetting (smooth,
 /// locally flat) and dust shadows (which dim by far less), so only genuinely near-zero pixels are
@@ -160,21 +179,22 @@ const DEAD_PIXEL_FRACTION: f32 = 0.5;
 /// Flag hot pixels in a master dark: those above `median + kσ` for their CFA color (robust
 /// per-color MAD stats). Per-color keeps green (50% of Bayer data) from masking red/blue defects.
 fn detect_hot_pixels(image: &CfaImage, sigma_threshold: f32) -> Vec<usize> {
-    assert!(sigma_threshold > 0.0, "Sigma threshold must be positive");
     let data = &image.data;
     let width = data.width();
+    let total = width * data.height();
     let cfa_type = image.metadata.cfa_type.as_ref();
     let stats = compute_per_color_stats(data, cfa_type);
 
-    let mut indices = Vec::new();
-    for (i, &val) in data.iter().enumerate() {
-        let color = cfa_color_at(cfa_type, i % width, i / width) as usize;
-        let (median, sigma) = stats[color];
-        if val > median + sigma_threshold * sigma {
-            indices.push(i);
-        }
-    }
-    indices
+    // Parallel like `detect_cold_pixels`: indexed `collect` keeps the result ascending, preserving
+    // the `binary_search` invariant the map relies on.
+    (0..total)
+        .into_par_iter()
+        .filter(|&i| {
+            let color = cfa_color_at(cfa_type, i % width, i / width) as usize;
+            let (median, sigma) = stats[color];
+            data[i] > median + sigma_threshold * sigma
+        })
+        .collect()
 }
 
 /// Flag cold/dead pixels in a master flat: those reading below `dead_fraction` of the median of
@@ -190,7 +210,7 @@ fn detect_cold_pixels(image: &CfaImage, dead_fraction: f32) -> Vec<usize> {
     (0..total)
         .into_par_iter()
         .filter(|&i| {
-            let local = median_same_color_neighbors(data, i % width, i / width, &cfa);
+            let local = median_same_color_neighbors(data, i % width, i / width, &cfa, None);
             data[i] < dead_fraction * local
         })
         .collect()
@@ -224,7 +244,7 @@ fn compute_per_color_stats(
 
         let sigma = (mad * MAD_TO_SIGMA).max(median * 0.1).max(5e-4);
 
-        tracing::info!(
+        tracing::debug!(
             "Defect stats color={color}: median={median:.6}, MAD={mad:.6}, sigma={sigma:.6}"
         );
         stats.push((median, sigma));
@@ -281,8 +301,14 @@ fn collect_color_samples(
     samples
 }
 
-/// Calculate median of 8-connected neighbors from raw channel data.
-fn median_of_neighbors_raw(pixels: &Buffer2<f32>, x: usize, y: usize) -> f32 {
+/// Calculate median of 8-connected neighbors from raw channel data, skipping any flagged in
+/// `defect_mask` so a defect is never repaired from another defect.
+fn median_of_neighbors_raw(
+    pixels: &Buffer2<f32>,
+    x: usize,
+    y: usize,
+    defect_mask: Option<&BitBuffer2>,
+) -> f32 {
     let width = pixels.width();
     let height = pixels.height();
     let mut neighbors: [f32; 8] = [0.0; 8];
@@ -304,7 +330,11 @@ fn median_of_neighbors_raw(pixels: &Buffer2<f32>, x: usize, y: usize) -> f32 {
         let ny = y as i32 + dy;
 
         if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {
-            neighbors[count] = *pixels.get(nx as usize, ny as usize);
+            let (nx, ny) = (nx as usize, ny as usize);
+            if defect_mask.is_some_and(|m| m.get_xy(nx, ny)) {
+                continue;
+            }
+            neighbors[count] = *pixels.get(nx, ny);
             count += 1;
         }
     }
@@ -326,17 +356,23 @@ fn median_same_color_neighbors(
     x: usize,
     y: usize,
     pattern: &CfaType,
+    defect_mask: Option<&BitBuffer2>,
 ) -> f32 {
     match pattern {
-        CfaType::Mono => median_of_neighbors_raw(pixels, x, y),
-        CfaType::Bayer(_) => bayer_same_color_median(pixels, x, y),
-        CfaType::XTrans(_) => xtrans_same_color_median(pixels, x, y, pattern),
+        CfaType::Mono => median_of_neighbors_raw(pixels, x, y, defect_mask),
+        CfaType::Bayer(_) => bayer_same_color_median(pixels, x, y, defect_mask),
+        CfaType::XTrans(_) => xtrans_same_color_median(pixels, x, y, pattern, defect_mask),
     }
 }
 
-/// Optimized Bayer same-color neighbor median.
+/// Optimized Bayer same-color neighbor median, skipping neighbors flagged in `defect_mask`.
 /// Same-color neighbors are at stride 2 in all directions.
-fn bayer_same_color_median(pixels: &Buffer2<f32>, x: usize, y: usize) -> f32 {
+fn bayer_same_color_median(
+    pixels: &Buffer2<f32>,
+    x: usize,
+    y: usize,
+    defect_mask: Option<&BitBuffer2>,
+) -> f32 {
     let width = pixels.width();
     let height = pixels.height();
     let offsets: [(i32, i32); 8] = [
@@ -355,7 +391,11 @@ fn bayer_same_color_median(pixels: &Buffer2<f32>, x: usize, y: usize) -> f32 {
         let nx = x as i32 + dx;
         let ny = y as i32 + dy;
         if nx >= 0 && ny >= 0 && nx < width as i32 && ny < height as i32 {
-            buf[count] = *pixels.get(nx as usize, ny as usize);
+            let (nx, ny) = (nx as usize, ny as usize);
+            if defect_mask.is_some_and(|m| m.get_xy(nx, ny)) {
+                continue;
+            }
+            buf[count] = *pixels.get(nx, ny);
             count += 1;
         }
     }
@@ -369,7 +409,13 @@ fn bayer_same_color_median(pixels: &Buffer2<f32>, x: usize, y: usize) -> f32 {
 /// Searches within radius of 6 (one full period) for same-color pixels.
 /// Collects all same-color neighbors, sorts by Manhattan distance, and takes
 /// the closest 24 to avoid directional bias.
-fn xtrans_same_color_median(pixels: &Buffer2<f32>, x: usize, y: usize, pattern: &CfaType) -> f32 {
+fn xtrans_same_color_median(
+    pixels: &Buffer2<f32>,
+    x: usize,
+    y: usize,
+    pattern: &CfaType,
+    defect_mask: Option<&BitBuffer2>,
+) -> f32 {
     let width = pixels.width();
     let height = pixels.height();
     let my_color = pattern.color_at(x, y);
@@ -391,6 +437,9 @@ fn xtrans_same_color_median(pixels: &Buffer2<f32>, x: usize, y: usize, pattern: 
             }
             let nx = nx as usize;
             let ny = ny as usize;
+            if defect_mask.is_some_and(|m| m.get_xy(nx, ny)) {
+                continue;
+            }
             if pattern.color_at(nx, ny) == my_color {
                 let dist = dx.abs() + dy.abs();
                 candidates.push((dist, *pixels.get(nx, ny)));
@@ -460,6 +509,94 @@ mod tests {
 
     fn is_cold(defect_map: &DefectMap, pixel_idx: usize) -> bool {
         defect_map.cold_indices.binary_search(&pixel_idx).is_ok()
+    }
+
+    #[test]
+    fn test_correct_clustered_defect_uses_only_good_neighbors() {
+        // A defect whose same-color neighbours are MOSTLY other defects must still be repaired from
+        // the few good ones — the defect mask excludes the bad neighbours. Pre-mask, the neighbour
+        // median was dominated by the cluster and left the pixel ~uncorrected (≈0.95 here).
+        let cfa = CfaType::Bayer(crate::raw::demosaic::bayer::CfaPattern::Rggb);
+        let (w, h) = (16usize, 16usize);
+        // Red pixels sit at (even,even). Target (6,6); make 5 of its 8 stride-2 red neighbours hot.
+        let hot = [(6, 6), (4, 6), (8, 6), (6, 4), (6, 8), (4, 4)];
+        let mut px = vec![0.5f32; w * h];
+        for &(x, y) in &hot {
+            px[y * w + x] = 0.95;
+        }
+        let dark = make_cfa(w, h, px, cfa.clone());
+        let defect_map = DefectMap::default().detect_hot(&dark, 5.0);
+        assert_eq!(defect_map.hot_count(), 6, "all six 0.95 red pixels are hot");
+
+        let mut light = make_cfa(w, h, vec![0.5f32; w * h], cfa);
+        for &(x, y) in &hot {
+            light.data[y * w + x] = 0.95;
+        }
+        defect_map.correct(&mut light);
+
+        // (6,6)'s only good red neighbours (4,8),(8,4),(8,8) are all 0.5 → median 0.5, despite the
+        // five hot neighbours that would otherwise dominate.
+        let corrected = light.data[6 * w + 6];
+        assert!(
+            (corrected - 0.5).abs() < 1e-4,
+            "clustered defect repaired from good neighbours → expected 0.5, got {corrected}"
+        );
+    }
+
+    #[test]
+    fn test_xtrans_hot_pixel_correction_uses_same_color() {
+        // X-Trans hot pixels must be repaired from SAME-COLOR neighbours, not the global mean.
+        let pattern = [
+            [1, 0, 1, 1, 2, 1],
+            [2, 1, 2, 0, 1, 0],
+            [1, 2, 1, 1, 0, 1],
+            [1, 2, 1, 1, 0, 1],
+            [0, 1, 0, 2, 1, 2],
+            [1, 0, 1, 1, 2, 1],
+        ];
+        let cfa = CfaType::XTrans(pattern);
+        let (w, h) = (12usize, 12usize);
+        // Distinct per-color baselines so a wrong-color repair is detectable.
+        let color_val = |c: u8| match c {
+            0 => 0.1, // R
+            1 => 0.2, // G
+            _ => 0.3, // B
+        };
+        let build = |corrupt: &[(usize, usize)]| {
+            let mut px = vec![0.0f32; w * h];
+            for y in 0..h {
+                for x in 0..w {
+                    px[y * w + x] = color_val(cfa.color_at(x, y));
+                }
+            }
+            for &(x, y) in corrupt {
+                px[y * w + x] = 0.9;
+            }
+            make_cfa(w, h, px, cfa.clone())
+        };
+
+        let r_hot = (1usize, 0usize); // pattern[0][1] = 0 → R
+        let b_hot = (0usize, 1usize); // pattern[1][0] = 2 → B
+        assert_eq!(cfa.color_at(r_hot.0, r_hot.1), 0);
+        assert_eq!(cfa.color_at(b_hot.0, b_hot.1), 2);
+
+        let dark = build(&[r_hot, b_hot]);
+        let defect_map = DefectMap::default().detect_hot(&dark, 5.0);
+        assert_eq!(defect_map.hot_count(), 2, "one R and one B hot pixel");
+
+        let mut light = build(&[r_hot, b_hot]);
+        defect_map.correct(&mut light);
+
+        let r_val = light.data[r_hot.1 * w + r_hot.0];
+        let b_val = light.data[b_hot.1 * w + b_hot.0];
+        assert!(
+            (r_val - 0.1).abs() < 1e-4,
+            "R hot repaired from R neighbours → expected 0.1, got {r_val}"
+        );
+        assert!(
+            (b_val - 0.3).abs() < 1e-4,
+            "B hot repaired from B neighbours → expected 0.3, got {b_val}"
+        );
     }
 
     #[test]
@@ -548,7 +685,7 @@ mod tests {
         pixels[4 * 6 + 2] = 80.0; // (2,4)
 
         let pixels = common::Buffer2::new(6, 6, pixels);
-        let result = bayer_same_color_median(&pixels, 2, 2);
+        let result = bayer_same_color_median(&pixels, 2, 2, None);
 
         // Neighbors: 50, 60, 70, 80, 100 (0,2=100), 100 (4,2=100), 100 (0,4=100), 100 (4,4=100)
         // Sorted: 50, 60, 70, 80, 100, 100, 100, 100 → median of 8 = (80+100)/2 = 90
@@ -568,7 +705,7 @@ mod tests {
             10.0, 10.0,
         ];
         let pixels = common::Buffer2::new(4, 4, pixels);
-        let result = bayer_same_color_median(&pixels, 0, 0);
+        let result = bayer_same_color_median(&pixels, 0, 0, None);
 
         // Same-color neighbors: (2,0)=50, (0,2)=60, (2,2)=70
         // Median of [50, 60, 70] = 60

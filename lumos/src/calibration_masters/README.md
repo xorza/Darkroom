@@ -43,7 +43,7 @@ With bias removed: `(Flat - Bias) / mean(Flat - Bias) = pure vignetting profile`
 ## Flat Dark Support
 
 Flat dark frames (darks taken at the flat's exposure time) can be provided to
-`CalibrationMasters::from_images()` or `from_raw_files()`. When available, the flat dark is
+`CalibrationMasters::from_images()` or `from_files()`. When available, the flat dark is
 subtracted from the flat instead of bias during normalization:
 
 ```
@@ -53,20 +53,33 @@ normalize(Flat - FlatDark) instead of normalize(Flat - Bias)
 This is important for narrowband imaging where longer flat exposures accumulate
 significant dark current. Flat dark takes priority over bias when both are provided.
 
-## Hot Pixel Detection
+## Defect Detection
 
-Uses Median Absolute Deviation (MAD) on the raw master dark:
-- MAD is robust to outliers (unlike standard deviation)
-- 5-sigma threshold (conservative, avoids false positives)
-- Sigma floor of `median * 0.1` prevents stacked darks' tiny MAD from over-detecting
-- Per-channel analysis for RGB data
-- 8-neighbor median replacement
+Two defect classes from two masters (a dark has no light, so dead pixels are invisible in it;
+a flat reveals them as dark spots under uniform illumination):
+
+**Hot pixels — from the master dark**, via robust per-color Median Absolute Deviation (MAD):
+- MAD is robust to outliers (unlike standard deviation — the very pixels being hunted inflate σ)
+- Default 5-sigma threshold (conservative, avoids false positives); clamped to ≥ 1σ
+- Per-color σ with two floors, `σ = max(1.4826·MAD, median·0.1, 5e-4)`: the absolute floor
+  (`5e-4`, ~33 ADU at 16-bit) stops a near-uniform stacked dark with MAD ≈ 0 from flagging its own
+  warm tail; the relative floor scales it on high-dark-current sensors
+- Adaptive sampling (100K px per color) above 200K pixels for fast median/MAD
+
+**Cold/dead pixels — from the master flat**, via a local same-color-neighbor ratio: a pixel reading
+below `DEAD_PIXEL_FRACTION` (0.5) of the median of its same-color local neighbors is dead. The local
+reference tracks vignetting (where a global `median − kσ` cut fails) and ignores dust shadows (which
+dim a pixel *and its neighbors* together, so the ratio stays ~1).
+
+**Correction:** each defect is replaced by the median of its **same-color** CFA neighbors (mono
+8-connected, Bayer stride-2, X-Trans radius-6), computed from a defect mask so clustered defects
+draw only on good neighbors.
 
 ## Pipeline Order
 
 1. Subtract master dark (removes bias + thermal)
 2. Divide by normalized master flat (corrects vignetting)
-3. Correct hot pixels (median of neighbors)
+3. Correct hot + cold/dead pixels (same-color neighbor median)
 
 ## References
 
