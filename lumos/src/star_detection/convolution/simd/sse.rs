@@ -30,11 +30,13 @@ pub unsafe fn convolve_row_avx2(input: &[f32], output: &mut [f32], kernel: &[f32
             return;
         }
 
-        // Process 8 pixels at a time in the middle section
-        // Safe region: we can load 8 contiguous floats starting at (x - radius)
-        // and ending at (x + 7 + radius) without boundary issues
+        // Process 8 pixels at a time in the middle section. A column is SIMD-safe only if its whole
+        // kernel window stays in bounds (the interior does no mirroring). The widest source read for
+        // the 8-wide block at x is `(x + 7) + (kernel.len() - 1) - radius`; requiring it `<= width-1`
+        // gives the bound below. Derived from `kernel.len()` rather than assuming the symmetric
+        // `2*radius+1`, so the SIMD interior matches the scalar mirror reference for any kernel.
         let safe_start = radius;
-        let safe_end = width - radius - 7; // Last x where we can safely load
+        let safe_end = (width + radius + 1).saturating_sub(8 + kernel.len());
 
         // Handle left edge with scalar
         for x in 0..safe_start {
@@ -89,11 +91,13 @@ pub unsafe fn convolve_row_sse41(input: &[f32], output: &mut [f32], kernel: &[f3
             return;
         }
 
-        // Process 4 pixels at a time in the middle section
-        // Safe region: we can load 4 contiguous floats starting at (x - radius)
-        // and ending at (x + 3 + radius) without boundary issues
+        // Process 4 pixels at a time in the middle section. A column is SIMD-safe only if its whole
+        // kernel window stays in bounds (the interior does no mirroring). The widest source read for
+        // the 4-wide block at x is `(x + 3) + (kernel.len() - 1) - radius`; requiring it `<= width-1`
+        // gives the bound below — via `kernel.len()` (not the symmetric `2*radius+1`) so the SIMD
+        // interior matches the scalar mirror reference for any kernel.
         let safe_start = radius;
-        let safe_end = width - radius - 3; // Last x where we can safely load
+        let safe_end = (width + radius + 1).saturating_sub(4 + kernel.len());
 
         // Handle left edge with scalar
         for x in 0..safe_start {

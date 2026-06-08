@@ -24,10 +24,6 @@ use common::Buffer2;
 const CIRCULAR_KERNEL_THRESHOLD: f32 = 0.01;
 use crate::math::fwhm_to_sigma;
 
-// ============================================================================
-// Public API
-// ============================================================================
-
 /// Scratch buffers for [`matched_filter`]. All three must have the same
 /// dimensions as the input image.
 #[derive(Debug)]
@@ -121,10 +117,6 @@ pub fn matched_filter(
         .par_iter_mut()
         .for_each(|px| *px *= inv_norm);
 }
-
-// ============================================================================
-// Internal API (visible to parent module and tests)
-// ============================================================================
 
 /// Apply separable Gaussian convolution to an image.
 ///
@@ -231,12 +223,7 @@ pub(super) fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {
     kernel
 }
 
-// ============================================================================
-// Private implementation
-// ============================================================================
-
 /// Convolve all rows in parallel using SIMD.
-#[cfg_attr(test, allow(dead_code))]
 pub(super) fn convolve_rows_parallel(
     input: &Buffer2<f32>,
     output: &mut Buffer2<f32>,
@@ -258,7 +245,6 @@ pub(super) fn convolve_rows_parallel(
 ///
 /// Processes multiple columns simultaneously using SIMD vectors.
 /// Each SIMD lane handles a different column with row-major traversal for cache locality.
-#[cfg_attr(test, allow(dead_code))]
 pub(super) fn convolve_cols(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
     let width = input.width();
     let height = input.height();

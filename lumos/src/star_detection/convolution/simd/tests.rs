@@ -59,6 +59,35 @@ fn test_convolve_row_matches_scalar() {
     }
 }
 
+#[test]
+fn convolve_row_simd_matches_scalar_width_radius_sweep() {
+    // Regression guard for the row-kernel boundary off-by-one: the SIMD interior must equal the
+    // mirrored scalar reference at *every* width. The old bug only surfaced when the final SIMD
+    // iteration landed exactly on the safe-region edge (a width/radius alignment) — it over-read
+    // one element past the row and skipped mirroring at column `width - radius`. Sweep widths
+    // across those alignments for several radii, including radius > 4 (the NEON-overshoot case).
+    for radius in [1usize, 2, 3, 5, 7] {
+        let ksize = 2 * radius + 1;
+        // Asymmetric kernel so a boundary tap error can't be masked by symmetry.
+        let kernel: Vec<f32> = (0..ksize).map(|i| (i as f32 + 1.0) * 0.05).collect();
+        for width in (2 * radius + 8)..(2 * radius + 48) {
+            let input: Vec<f32> = (0..width).map(|i| (i as f32 * 0.37).sin() + 1.0).collect();
+            let mut simd = vec![0.0f32; width];
+            let mut scalar = vec![0.0f32; width];
+            convolve_row(&input, &mut simd, &kernel, radius);
+            convolve_row_scalar(&input, &mut scalar, &kernel, radius);
+            for x in 0..width {
+                assert!(
+                    (simd[x] - scalar[x]).abs() < 1e-3,
+                    "row SIMD != scalar at radius={radius} width={width} x={x}: {} vs {}",
+                    simd[x],
+                    scalar[x]
+                );
+            }
+        }
+    }
+}
+
 // ========== Comprehensive SIMD vs Scalar tests ==========
 
 #[test]

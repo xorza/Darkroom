@@ -21,10 +21,6 @@ cfg_aarch64! {
 #[cfg(test)]
 mod tests;
 
-// ============================================================================
-// Shared utilities
-// ============================================================================
-
 /// Mirror boundary handling for convolution.
 ///
 /// Maps an index that may be out of bounds to a valid index using reflection.
@@ -68,10 +64,6 @@ pub fn convolve_pixel_scalar(
 
     sum
 }
-
-// ============================================================================
-// Row convolution dispatch
-// ============================================================================
 
 /// Convolve a single row with 1D kernel using SIMD when available.
 ///
@@ -121,10 +113,6 @@ pub(super) fn convolve_row_scalar(
         *out = convolve_pixel_scalar(input, kernel, radius, x, width);
     }
 }
-
-// ============================================================================
-// Column convolution dispatch
-// ============================================================================
 
 /// Convolve columns using direct SIMD when available.
 ///

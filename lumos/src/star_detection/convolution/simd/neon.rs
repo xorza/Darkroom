@@ -16,19 +16,25 @@ pub unsafe fn convolve_row_neon(input: &[f32], output: &mut [f32], kernel: &[f32
     unsafe {
         let width = input.len();
 
-        // Process 4 pixels at a time in the middle section
+        // Process 4 pixels at a time in the middle section. A column is SIMD-safe only if its whole
+        // kernel window stays in bounds (the interior does no mirroring). The widest source read for
+        // the 4-wide block at x is `(x + 3) + (kernel.len() - 1) - radius`; requiring it `<= width-1`
+        // gives the bound below — via `kernel.len()` (not the symmetric `2*radius+1`) so the SIMD
+        // interior matches the scalar mirror reference for any kernel.
         let safe_start = radius;
-        let safe_end = width.saturating_sub(radius + 4);
+        let safe_end = (width + radius + 1).saturating_sub(4 + kernel.len());
 
         // Handle left edge with scalar
         for (x, out) in output.iter_mut().enumerate().take(safe_start.min(width)) {
             *out = convolve_pixel_scalar(input, kernel, radius, x, width);
         }
 
-        // SIMD middle section
+        // SIMD middle section. `safe_end` is the last fully-in-bounds block start, so stop at
+        // `x <= safe_end`. (The previous `x + 4 <= safe_end + radius` overshot for radius > 4 — the
+        // common case — over-reading one element and skipping mirroring at the boundary column.)
         let mut x = safe_start;
         if safe_start < safe_end {
-            while x + 4 <= safe_end + radius {
+            while x <= safe_end {
                 let mut sum = vdupq_n_f32(0.0);
 
                 for (k, &kval) in kernel.iter().enumerate() {
