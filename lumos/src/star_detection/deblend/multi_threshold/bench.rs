@@ -5,10 +5,10 @@
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
-use super::{DeblendBuffers, deblend_multi_threshold};
 use crate::math::bbox::Aabb;
 use crate::star_detection::config::Connectivity;
 use crate::star_detection::deblend::ComponentData;
+use crate::star_detection::deblend::multi_threshold::{DeblendBuffers, deblend_multi_threshold};
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::test_utils::label_map_from_mask_with_connectivity;
 use crate::testing::synthetic::star_field::generate_globular_cluster;

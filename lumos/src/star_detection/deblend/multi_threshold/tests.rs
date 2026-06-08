@@ -1,7 +1,7 @@
 //! Tests for multi-threshold deblending.
 
-use super::*;
 use crate::math::bbox::Aabb;
+use crate::star_detection::deblend::multi_threshold::*;
 use crate::star_detection::labeling::test_utils::label_map_from_raw;
 
 /// Convenience wrapper for tests — creates fresh buffers per call.

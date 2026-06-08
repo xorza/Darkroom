@@ -11,8 +11,8 @@ use arrayvec::ArrayVec;
 
 use smallvec::SmallVec;
 
-use super::region::Region;
-use super::{ComponentData, MAX_PEAKS, Pixel};
+use crate::star_detection::deblend::region::Region;
+use crate::star_detection::deblend::{ComponentData, MAX_PEAKS, Pixel, assign_to_nearest_peak};
 use crate::star_detection::labeling::LabelMap;
 use common::Buffer2;
 use common::Vec2us;
@@ -837,7 +837,7 @@ fn assign_pixels_to_objects(
         .map(|&i| tree[i].peak)
         .collect();
 
-    super::assign_to_nearest_peak(data, pixels, labels, &peaks)
+    assign_to_nearest_peak(data, pixels, labels, &peaks)
         .into_iter()
         .collect()
 }

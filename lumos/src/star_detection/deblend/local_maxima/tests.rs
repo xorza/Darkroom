@@ -1,13 +1,13 @@
 //! Tests for local maxima deblending.
 
-use super::*;
 use crate::math::bbox::Aabb;
 use crate::star_detection::deblend::assign_to_nearest_peak;
+use crate::star_detection::deblend::local_maxima::*;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::test_utils::label_map_from_raw;
 use common::Vec2us;
 
-use super::is_local_maximum;
+use crate::star_detection::deblend::local_maxima::is_local_maximum;
 
 // Default deblend parameters for tests
 const DEFAULT_MIN_SEPARATION: usize = 3;

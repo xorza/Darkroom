@@ -11,8 +11,8 @@
 
 use arrayvec::ArrayVec;
 
-use super::region::Region;
-use super::{ComponentData, MAX_PEAKS, Pixel};
+use crate::star_detection::deblend::region::Region;
+use crate::star_detection::deblend::{ComponentData, MAX_PEAKS, Pixel, assign_to_nearest_peak};
 use crate::star_detection::labeling::LabelMap;
 use common::Buffer2;
 
@@ -62,7 +62,7 @@ pub fn deblend_local_maxima(
         result
     } else {
         // Multiple peaks - deblend by assigning pixels to nearest peak
-        super::assign_to_nearest_peak(data, pixels, labels, &peaks)
+        assign_to_nearest_peak(data, pixels, labels, &peaks)
     }
 }
 
