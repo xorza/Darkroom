@@ -160,3 +160,15 @@ cargo test -p lumos --release <bench_name> -- --ignored --nocapture   # benches 
 
 scripts/clone-refs.sh          # clone core upstream refs into .tmp/refs/ (--all for large suites, --list to preview)
 ```
+
+## Benchmarks (quickbench)
+
+Benches are `#[quick_bench]` fns (expand to `#[test] #[ignore]`) in per-module `bench.rs` files — e.g. `registration/interpolation/bench.rs`, plus RCD/Bayer/stacking. No `cargo bench` target; they run through `cargo test`.
+
+- **Run** — always `--release` (debug numbers are meaningless and print a warning):
+  ```bash
+  cargo test -p lumos --release <filter> -- --ignored --nocapture
+  ```
+  `<filter>` is a substring of the test path: a bench name (`bench_warp_lanczos3_1k`) or a whole bench module (`interpolation::bench`). Omit it to run every bench.
+- **Auto-comparison is the baseline mechanism.** Each bench writes `bench-results/<name>.txt` (gitignored); the next run prints a coloured `faster`/`SLOWER` diff against it (±5% threshold). To measure an optimization: run once (baseline) → make the change → run again, the diff is automatic. The file is overwritten each run, so to keep a baseline across several iterations, copy `bench-results/` aside first (into `.tmp/`).
+- For SIMD/kernel work, prefer the **single-thread** variants (e.g. `bench_warp_lanczos3_1k_single_thread`) to isolate per-thread throughput from rayon + memory effects; the multi-thread benches show realistic end-to-end time. **aarch64 is the profiled target** (NEON mandatory; x86 SIMD is runtime-detected — see the SIMD dispatch table above).
