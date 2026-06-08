@@ -1,6 +1,6 @@
 //! The per-run schedule: the two backward-walk orders plus SoA per-run flag
-//! columns. Produced by the [`Planner`](super::planner::Planner), consumed by
-//! the [`Executor`](super::executor::Executor). Keyed by the same indices as
+//! columns. Produced by the [`Planner`](crate::execution::planner::Planner), consumed by
+//! the [`Executor`](crate::execution::executor::Executor). Keyed by the same indices as
 //! the program's pools. Reused via a buffer on the engine so a repeated run
 //! does no scheduling allocation.
 

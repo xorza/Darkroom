@@ -3,9 +3,9 @@ use std::path::Path;
 use fits_well::{FitsReader, Header, SampleType};
 use rayon::prelude::*;
 
-use super::cfa::CfaType;
-use super::error::ImageError;
-use super::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
+use crate::astro_image::cfa::CfaType;
+use crate::astro_image::error::ImageError;
+use crate::astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 
 fn fits_err(path: &Path, source: fits_well::FitsError) -> ImageError {
     ImageError::Fits {

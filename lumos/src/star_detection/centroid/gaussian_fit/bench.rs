@@ -5,8 +5,8 @@
 use quickbench::quick_bench;
 use std::hint::black_box;
 
-use super::GaussianFitConfig;
-use super::fit_gaussian_2d;
+use crate::star_detection::centroid::gaussian_fit::GaussianFitConfig;
+use crate::star_detection::centroid::gaussian_fit::fit_gaussian_2d;
 use crate::star_detection::centroid::test_utils::make_gaussian_star;
 use glam::Vec2;
 

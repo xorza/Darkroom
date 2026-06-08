@@ -4,8 +4,8 @@
 use quickbench::quick_bench;
 use std::hint::black_box;
 
-use super::tile_grid::TileGrid;
-use super::{BufferPool, estimate_background, refine_background};
+use crate::star_detection::background::tile_grid::TileGrid;
+use crate::star_detection::background::{BufferPool, estimate_background, refine_background};
 use crate::star_detection::background::estimate::BackgroundEstimate;
 use crate::star_detection::config::Config;
 use crate::testing::synthetic::stamps;

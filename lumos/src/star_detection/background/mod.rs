@@ -18,8 +18,8 @@ use common::BitBuffer2;
 use common::Buffer2;
 use rayon::prelude::*;
 
-use super::buffer_pool::BufferPool;
-use super::config::Config;
+use crate::star_detection::buffer_pool::BufferPool;
+use crate::star_detection::config::Config;
 use estimate::BackgroundEstimate;
 use tile_grid::TileGrid;
 
@@ -150,7 +150,7 @@ fn create_object_mask(
     scratch: &mut BitBuffer2,
 ) {
     // Create threshold mask using packed SIMD-optimized implementation
-    super::threshold_mask::create_threshold_mask(
+    crate::star_detection::threshold_mask::create_threshold_mask(
         pixels,
         background,
         noise,
@@ -160,7 +160,7 @@ fn create_object_mask(
 
     // Dilate mask to cover object wings
     if dilation_radius > 0 {
-        super::mask_dilation::dilate_mask(output, dilation_radius, scratch);
+        crate::star_detection::mask_dilation::dilate_mask(output, dilation_radius, scratch);
         std::mem::swap(output, scratch);
     }
 }

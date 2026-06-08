@@ -1,6 +1,6 @@
 //! Debug test that outputs intermediate steps of star detection.
 
-use super::star_field::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
+use crate::star_detection::tests::synthetic::star_field::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 use crate::star_detection::tests::common::output::image_writer::{
     gray_to_rgb_image_stretched, save_image,
 };

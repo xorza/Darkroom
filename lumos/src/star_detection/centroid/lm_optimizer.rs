@@ -3,7 +3,7 @@
 //! Generic implementation that can be used for both Gaussian and Moffat fitting.
 //! Uses f64 throughout for numerical stability.
 
-use super::linear_solver::solve;
+use crate::star_detection::centroid::linear_solver::solve;
 
 /// Configuration for Levenberg-Marquardt optimization.
 #[derive(Debug, Clone)]

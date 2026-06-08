@@ -3,12 +3,12 @@
 //! Generates synthetic star fields with various properties for testing
 //! the star detection algorithm under different conditions.
 
-use super::artifacts::{BayerPattern, add_bayer_pattern, add_cosmic_rays};
-use super::backgrounds::{
+use crate::testing::synthetic::artifacts::{BayerPattern, add_bayer_pattern, add_cosmic_rays};
+use crate::testing::synthetic::backgrounds::{
     NebulaConfig, add_gradient_background, add_nebula_background, add_uniform_background,
     add_vignette_background,
 };
-use super::star_profiles::{
+use crate::testing::synthetic::star_profiles::{
     fwhm_to_moffat_alpha, render_elliptical_star, render_gaussian_star, render_moffat_star,
     render_saturated_star,
 };
@@ -312,7 +312,7 @@ pub fn generate_star_field(config: &StarFieldConfig) -> (Buffer2<f32>, Vec<Groun
 
     // Add noise
     if config.noise_sigma > 0.0 {
-        super::patterns::add_gaussian_noise(&mut pixels, config.noise_sigma, config.seed + 2000);
+        crate::testing::synthetic::patterns::add_gaussian_noise(&mut pixels, config.noise_sigma, config.seed + 2000);
     }
 
     // Clamp to valid range

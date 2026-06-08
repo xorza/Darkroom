@@ -1,7 +1,7 @@
 //! ARM NEON implementations of the bilinear + Lanczos row-warp kernels.
 //!
-//! 128-bit (4-wide f32) twins of the AVX2/SSE kernels in [`super::sse`]. The Lanczos kernel mirrors
-//! [`super::sse::lanczos_kernel_fma`] almost 1:1 — that "FMA" path is itself 128-bit SSE, so NEON's
+//! 128-bit (4-wide f32) twins of the AVX2/SSE kernels in [`crate::registration::interpolation::warp::sse`]. The Lanczos kernel mirrors
+//! [`crate::registration::interpolation::warp::sse::lanczos_kernel_fma`] almost 1:1 — that "FMA" path is itself 128-bit SSE, so NEON's
 //! `float32x4_t` + `vfmaq_f32` + horizontal `vaddvq_f32` map directly. NEON is mandatory on
 //! aarch64, so these need no runtime feature check; the caller dispatches on `cfg(target_arch)`.
 
@@ -12,8 +12,8 @@ use std::arch::aarch64::*;
 use common::Buffer2;
 use glam::{DVec2, IVec2, Vec2};
 
-use super::super::sample_pixel;
-use super::SoftClampAccum;
+use crate::registration::interpolation::sample_pixel;
+use crate::registration::interpolation::warp::SoftClampAccum;
 use crate::registration::transform::Transform;
 
 /// Warp a row using NEON bilinear interpolation, 4 output pixels at a time.
@@ -102,12 +102,12 @@ pub unsafe fn warp_row_bilinear_neon(
         for x in (chunks * 4)..output_width {
             let src = transform.apply(DVec2::new(x as f64, output_y as f64));
             output_row[x] =
-                super::bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
+                crate::registration::interpolation::warp::bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
         }
     }
 }
 
-/// NEON twin of [`super::sse::lanczos_kernel_fma`]: separable Lanczos over a `SIZE×SIZE` window with
+/// NEON twin of [`crate::registration::interpolation::warp::sse::lanczos_kernel_fma`]: separable Lanczos over a `SIZE×SIZE` window with
 /// optional PixInsight-style soft-clamp deringing (positive/negative contributions split).
 ///
 /// # Safety
@@ -220,7 +220,7 @@ pub unsafe fn lanczos_kernel_neon<const A: usize, const SIZE: usize, const DERIN
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::registration::interpolation::warp::*;
     use crate::registration::interpolation::get_lanczos_lut;
 
     /// NEON Lanczos kernel must match a plain scalar weighted sum (mirror of the x86

@@ -39,8 +39,8 @@ pub(crate) const EXP_Q3: f64 = 2.0;
 pub(crate) const LN2_HI: f64 = 6.931_457_519_531_25e-1;
 pub(crate) const LN2_LO: f64 = 1.428_606_820_309_417_3e-6;
 
-use super::lm_optimizer::{LMConfig, LMModel, LMResult, optimize};
-use super::{FitNoise, MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp, fit_weights};
+use crate::star_detection::centroid::lm_optimizer::{LMConfig, LMModel, LMResult, optimize};
+use crate::star_detection::centroid::{FitNoise, MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp, fit_weights};
 use arrayvec::ArrayVec;
 use common::Buffer2;
 use glam::Vec2;

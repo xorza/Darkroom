@@ -9,7 +9,7 @@
 //! that frame surfaces. Everything the GUI tree reads or mutates lives
 //! here; nothing in `Editor` knows about file dialogs or the worker.
 //!
-//! [`App`]: super::App
+//! [`App`]: crate::gui::app::App
 
 use palantir::{HostHandle, Ui};
 use scenarium::prelude::{FuncLib, SubgraphDef};
@@ -26,7 +26,7 @@ use crate::gui::run_state::RunState;
 use crate::gui::scene::Scene;
 use crate::gui::theme::Theme;
 
-use super::AppContext;
+use crate::gui::app::AppContext;
 
 /// Keyboard chords → intents/commands. A child module so it can drive the
 /// pipeline through `Editor`'s private fields (undo stack, intent buffer,

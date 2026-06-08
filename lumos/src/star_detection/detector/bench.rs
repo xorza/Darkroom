@@ -107,7 +107,7 @@ fn bench_detect_1k_sparse(b: ::quickbench::Bencher) {
 /// Simulates dense star field scenario similar to rho-opiuchi detection.
 #[quick_bench(warmup_iters = 5, iters = 20)]
 fn bench_remove_duplicate_stars_5000(b: ::quickbench::Bencher) {
-    use super::stages::filter::remove_duplicate_stars;
+    use crate::star_detection::detector::stages::filter::remove_duplicate_stars;
     use crate::star_detection::star::Star;
     use rand::prelude::*;
 
@@ -137,7 +137,7 @@ fn bench_remove_duplicate_stars_5000(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 5, iters = 20)]
 fn bench_remove_duplicate_stars_10000(b: ::quickbench::Bencher) {
-    use super::stages::filter::remove_duplicate_stars;
+    use crate::star_detection::detector::stages::filter::remove_duplicate_stars;
     use crate::star_detection::star::Star;
     use rand::prelude::*;
 

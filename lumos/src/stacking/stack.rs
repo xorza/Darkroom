@@ -11,10 +11,10 @@ use crate::AstroImage;
 use crate::astro_image::cfa::CfaImage;
 use common::Buffer2;
 
-use super::cache::{CfaCache, FrameStats, LightCache, StackableImage};
-use super::config::{CombineMethod, Normalization, StackConfig, Weighting};
-use super::error::Error;
-use super::progress::ProgressCallback;
+use crate::stacking::cache::{CfaCache, FrameStats, LightCache, StackableImage};
+use crate::stacking::config::{CombineMethod, Normalization, StackConfig, Weighting};
+use crate::stacking::error::Error;
+use crate::stacking::progress::ProgressCallback;
 use crate::math;
 use crate::math::statistics::ChannelStats;
 
@@ -1006,7 +1006,7 @@ mod tests {
     fn test_select_reference_frame_picks_lowest_noise() {
         // 3 frames, 1 channel: MADs are 2.0, 0.5, 1.0
         // Frame 1 (MAD=0.5) should be selected.
-        use super::{ChannelStats, FrameStats};
+        use crate::stacking::stack::{ChannelStats, FrameStats};
         let s = |median, mad| ChannelStats { median, mad };
         let fs = |median, mad| FrameStats {
             channels: [s(median, mad)].into_iter().collect(),
@@ -1025,7 +1025,7 @@ mod tests {
         // Frame 0: MADs = [1.0, 1.0, 5.0] → avg = 2.333
         // Frame 1: MADs = [2.0, 2.0, 2.0] → avg = 2.000
         // Frame 1 should be selected (lower average).
-        use super::{ChannelStats, FrameStats};
+        use crate::stacking::stack::{ChannelStats, FrameStats};
         let s = |median, mad| ChannelStats { median, mad };
         let stats = vec![
             FrameStats {
@@ -1044,7 +1044,7 @@ mod tests {
 
     #[test]
     fn test_select_reference_frame_single_frame() {
-        use super::{ChannelStats, FrameStats};
+        use crate::stacking::stack::{ChannelStats, FrameStats};
         let stats = vec![FrameStats {
             channels: [ChannelStats {
                 median: 50.0,
@@ -1059,7 +1059,7 @@ mod tests {
     #[test]
     fn test_select_reference_frame_equal_noise() {
         // All frames have same MAD → picks first (frame 0).
-        use super::{ChannelStats, FrameStats};
+        use crate::stacking::stack::{ChannelStats, FrameStats};
         let s = |median, mad| ChannelStats { median, mad };
         let fs = |median, mad| FrameStats {
             channels: [s(median, mad)].into_iter().collect(),

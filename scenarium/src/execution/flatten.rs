@@ -18,7 +18,7 @@ use common::FnvHasher;
 use common::{CompactInsert, KeyIndexVec};
 use hashbrown::HashSet;
 
-use super::program::{
+use crate::execution::program::{
     ExecutionBehavior, ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
     ExecutionPortAddress, Span,
 };

@@ -25,8 +25,8 @@ const FWHM_MAD_MULTIPLIER: f32 = 3.0;
 /// when all FWHM values are near-identical (uniform distribution).
 const FWHM_MAD_FLOOR_FRACTION: f32 = 0.1;
 
-use super::detect::detect;
-use super::measure;
+use crate::star_detection::detector::stages::detect::detect;
+use crate::star_detection::detector::stages::measure;
 use crate::star_detection::background::estimate::BackgroundEstimate;
 use crate::star_detection::buffer_pool::BufferPool;
 use crate::star_detection::config::Config;

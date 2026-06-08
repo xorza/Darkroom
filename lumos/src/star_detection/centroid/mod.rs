@@ -23,10 +23,10 @@ mod tests;
 use arrayvec::ArrayVec;
 use glam::Vec2;
 
-use super::background::estimate::BackgroundEstimate;
-use super::config::{CentroidMethod, Config, LocalBackgroundMethod};
-use super::deblend::region::Region;
-use super::star::Star;
+use crate::star_detection::background::estimate::BackgroundEstimate;
+use crate::star_detection::config::{CentroidMethod, Config, LocalBackgroundMethod};
+use crate::star_detection::deblend::region::Region;
+use crate::star_detection::star::Star;
 use crate::math::FWHM_TO_SIGMA;
 use common::Buffer2;
 use gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};

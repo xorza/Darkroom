@@ -617,7 +617,7 @@ fn test_elliptical_kernel_normalization() {
         for axis_ratio in [0.3, 0.5, 0.7, 1.0] {
             for angle in [0.0, 0.5, 1.0, 1.57] {
                 let (kernel, _ksize) =
-                    super::elliptical_gaussian_kernel_2d(sigma, axis_ratio, angle);
+                    crate::star_detection::convolution::elliptical_gaussian_kernel_2d(sigma, axis_ratio, angle);
                 let sum: f32 = kernel.iter().sum();
                 assert!(
                     (sum - 1.0).abs() < 1e-5,
@@ -634,7 +634,7 @@ fn test_elliptical_kernel_normalization() {
 
 #[test]
 fn test_elliptical_kernel_symmetry_at_zero_angle() {
-    let (kernel, ksize) = super::elliptical_gaussian_kernel_2d(2.0, 0.5, 0.0);
+    let (kernel, ksize) = crate::star_detection::convolution::elliptical_gaussian_kernel_2d(2.0, 0.5, 0.0);
 
     // At angle=0, kernel should be symmetric about both axes
     let center = ksize / 2;
@@ -656,7 +656,7 @@ fn test_elliptical_kernel_symmetry_at_zero_angle() {
 #[test]
 fn test_elliptical_kernel_elongation() {
     // With axis_ratio < 1, kernel should be elongated along major axis
-    let (kernel, ksize) = super::elliptical_gaussian_kernel_2d(2.0, 0.3, 0.0);
+    let (kernel, ksize) = crate::star_detection::convolution::elliptical_gaussian_kernel_2d(2.0, 0.3, 0.0);
     let center = ksize / 2;
 
     // At angle=0, major axis is horizontal (x), minor axis is vertical (y)

@@ -23,7 +23,7 @@ pub(crate) struct QualityFilterStats {
 
 impl QualityFilterStats {
     /// Write rejection counts into the corresponding Diagnostics fields.
-    pub fn apply_to(&self, d: &mut super::super::Diagnostics) {
+    pub fn apply_to(&self, d: &mut crate::star_detection::detector::Diagnostics) {
         d.rejected_saturated = self.saturated;
         d.rejected_low_snr = self.low_snr;
         d.rejected_high_eccentricity = self.high_eccentricity;

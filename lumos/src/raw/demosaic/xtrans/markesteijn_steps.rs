@@ -5,9 +5,9 @@
 
 use rayon::prelude::*;
 
-use super::XTransImage;
-use super::hex_lookup::HexLookup;
-use super::markesteijn::NDIR;
+use crate::raw::demosaic::xtrans::XTransImage;
+use crate::raw::demosaic::xtrans::hex_lookup::HexLookup;
+use crate::raw::demosaic::xtrans::markesteijn::NDIR;
 
 use crate::common::UnsafeSendPtr;
 
@@ -60,7 +60,7 @@ struct InterpEntry {
 }
 
 impl ColorInterpLookup {
-    pub(crate) fn new(pattern: &super::XTransPattern) -> Self {
+    pub(crate) fn new(pattern: &crate::raw::demosaic::xtrans::XTransPattern) -> Self {
         let mut strategies = [[[InterpEntry {
             primary: ColorInterpStrategy::None,
             secondary: ColorInterpStrategy::None,
@@ -975,8 +975,8 @@ pub(crate) fn blend_final(
 
 #[cfg(test)]
 mod tests {
-    use super::super::hex_lookup::HexLookup;
-    use super::super::{XTransImage, XTransPattern};
+    use crate::raw::demosaic::xtrans::hex_lookup::HexLookup;
+    use crate::raw::demosaic::xtrans::{XTransImage, XTransPattern};
     use super::*;
     use crate::raw::demosaic::interleave_planes;
 

@@ -16,9 +16,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::astro_image::AstroImage;
 
-use super::buffer_pool::BufferPool;
-use super::config::Config;
-use super::star::Star;
+use crate::star_detection::buffer_pool::BufferPool;
+use crate::star_detection::config::Config;
+use crate::star_detection::star::Star;
 
 /// Result of star detection with diagnostics.
 #[derive(Debug, Clone, Serialize, Deserialize)]

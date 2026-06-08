@@ -2,9 +2,9 @@ use glam::DVec2;
 
 use crate::registration::spatial::{KdTree, Neighbor};
 
-use super::TriangleParams;
-use super::geometry::Triangle;
-use super::voting::{PointMatch, build_invariant_tree, resolve_matches, vote_for_correspondences};
+use crate::registration::triangle::TriangleParams;
+use crate::registration::triangle::geometry::Triangle;
+use crate::registration::triangle::voting::{PointMatch, build_invariant_tree, resolve_matches, vote_for_correspondences};
 
 /// Form triangles using k-d tree for efficient neighbor lookup.
 ///

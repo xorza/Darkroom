@@ -179,7 +179,7 @@ mod tests {
 
         for format in SerdeFormat::all_formats_for_testing() {
             let serialized = func_lib.serialize(format)?;
-            let deserialized = super::FuncLib::deserialize(&serialized, format)?;
+            let deserialized = crate::function::FuncLib::deserialize(&serialized, format)?;
             let serialized_again = deserialized.serialize(format)?;
             assert_eq!(serialized, serialized_again);
         }

@@ -1,8 +1,8 @@
 //! The compiled, flattened graph: topology + code, immutable across runs.
 //! Built by the engine (subgraph flattening) and the only serializable part of
 //! the pipeline — its persistent form. All mutable execution state lives in the
-//! [`Executor`](super::executor::Executor); all per-run scheduling state in the
-//! [`ExecutionPlan`](super::plan::ExecutionPlan).
+//! [`Executor`](crate::execution::executor::Executor); all per-run scheduling state in the
+//! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan).
 
 use common::{KeyIndexKey, KeyIndexVec};
 use serde::{Deserialize, Serialize};

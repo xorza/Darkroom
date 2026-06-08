@@ -4,8 +4,8 @@ use glam::DVec2;
 
 use crate::registration::spatial::KdTree;
 
-use super::TriangleParams;
-use super::geometry::Triangle;
+use crate::registration::triangle::TriangleParams;
+use crate::registration::triangle::geometry::Triangle;
 
 /// Threshold for switching between dense and sparse vote matrix storage.
 ///

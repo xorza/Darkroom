@@ -1,6 +1,6 @@
 //! Benchmarks for threshold mask creation.
 
-use super::{
+use crate::star_detection::threshold_mask::{
     process_words, process_words_filtered, process_words_filtered_scalar, process_words_scalar,
 };
 use ::quickbench::quick_bench;

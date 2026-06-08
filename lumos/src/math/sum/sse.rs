@@ -2,7 +2,7 @@
 
 use std::arch::x86_64::*;
 
-use super::scalar::neumaier_add;
+use crate::math::sum::scalar::neumaier_add;
 
 /// Sum f32 values using SSE4.1 SIMD with Kahan compensated summation.
 ///

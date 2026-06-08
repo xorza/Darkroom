@@ -20,7 +20,7 @@ fn run_challenging_test(
     detection_config: &Config,
     criteria: &PassCriteria,
 ) -> bool {
-    let metrics = super::run_test(name, "challenging", field_config, detection_config);
+    let metrics = crate::star_detection::tests::synthetic::pipeline_tests::run_test(name, "challenging", field_config, detection_config);
     match check_pass(&metrics, criteria) {
         Ok(()) => {
             println!("PASS: All criteria met");

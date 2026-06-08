@@ -112,7 +112,7 @@ fn test_detect_rho_opiuchi() {
 #[test]
 #[cfg_attr(not(feature = "real-data"), ignore)]
 fn test_inspect_pipeline_intermediates_rho_opiuchi() {
-    use super::common::output::image_writer;
+    use crate::star_detection::tests::common::output::image_writer;
     use crate::star_detection::background::estimate_background;
     use crate::star_detection::buffer_pool::BufferPool;
     use crate::star_detection::convolution::{MatchedFilterBuffers, matched_filter};

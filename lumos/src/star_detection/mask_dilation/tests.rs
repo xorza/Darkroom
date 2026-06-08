@@ -3,7 +3,7 @@
 // Allow identity operations like `y * width + x` for clarity in 2D indexing
 #![allow(clippy::identity_op, clippy::erasing_op)]
 
-use super::dilate_mask;
+use crate::star_detection::mask_dilation::dilate_mask;
 use common::BitBuffer2;
 
 /// Verify dilation result against naive O(n²×r²) box dilation.

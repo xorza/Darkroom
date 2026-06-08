@@ -20,7 +20,7 @@ fn test_pipeline_sparse_field() {
         ..Config::default()
     };
 
-    let metrics = super::run_test("sparse_field", "pipeline", &field_config, &detection_config);
+    let metrics = crate::star_detection::tests::synthetic::pipeline_tests::run_test("sparse_field", "pipeline", &field_config, &detection_config);
 
     // Check against standard criteria
     let criteria = standard_criteria();
@@ -45,7 +45,7 @@ fn test_pipeline_dense_field() {
         ..Config::default()
     };
 
-    let metrics = super::run_test("dense_field", "pipeline", &field_config, &detection_config);
+    let metrics = crate::star_detection::tests::synthetic::pipeline_tests::run_test("dense_field", "pipeline", &field_config, &detection_config);
 
     // Relaxed criteria for dense field
     let criteria = crate::star_detection::tests::common::output::metrics::crowded_criteria();
@@ -84,7 +84,7 @@ fn test_pipeline_moffat_profile() {
         ..Config::default()
     };
 
-    let metrics = super::run_test(
+    let metrics = crate::star_detection::tests::synthetic::pipeline_tests::run_test(
         "moffat_profile",
         "pipeline",
         &field_config,
@@ -131,7 +131,7 @@ fn test_pipeline_fwhm_range() {
         ..Config::default()
     };
 
-    let metrics = super::run_test("fwhm_range", "pipeline", &field_config, &detection_config);
+    let metrics = crate::star_detection::tests::synthetic::pipeline_tests::run_test("fwhm_range", "pipeline", &field_config, &detection_config);
 
     // Relaxed for FWHM variation - centroid matching can have outliers with varying PSF
     let criteria = crate::star_detection::tests::common::output::metrics::PassCriteria {
@@ -176,7 +176,7 @@ fn test_pipeline_dynamic_range() {
         ..Config::default()
     };
 
-    let metrics = super::run_test(
+    let metrics = crate::star_detection::tests::synthetic::pipeline_tests::run_test(
         "dynamic_range",
         "pipeline",
         &field_config,
@@ -218,7 +218,7 @@ fn test_pipeline_low_noise() {
         ..Config::default()
     };
 
-    let metrics = super::run_test("low_noise", "pipeline", &field_config, &detection_config);
+    let metrics = crate::star_detection::tests::synthetic::pipeline_tests::run_test("low_noise", "pipeline", &field_config, &detection_config);
 
     // Good criteria for low noise - some outlier matches can skew mean centroid error
     let criteria = crate::star_detection::tests::common::output::metrics::PassCriteria {

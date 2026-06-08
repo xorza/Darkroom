@@ -7,7 +7,7 @@ use glam::{DVec2, IVec2, Vec2};
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
-use super::SoftClampAccum;
+use crate::registration::interpolation::warp::SoftClampAccum;
 use crate::registration::transform::Transform;
 
 /// Warp a row using AVX2 SIMD with bilinear interpolation.
@@ -147,7 +147,7 @@ pub unsafe fn warp_row_bilinear_avx2(
         for x in remainder_start..output_width {
             let src = transform.apply(DVec2::new(x as f64, y));
             output_row[x] =
-                super::bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
+                crate::registration::interpolation::warp::bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
         }
     }
 }
@@ -272,12 +272,12 @@ pub unsafe fn warp_row_bilinear_sse(
         for x in remainder_start..output_width {
             let src = transform.apply(DVec2::new(x as f64, y));
             output_row[x] =
-                super::bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
+                crate::registration::interpolation::warp::bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
         }
     }
 }
 
-use super::super::sample_pixel;
+use crate::registration::interpolation::sample_pixel;
 
 /// Compute the Lanczos SIZE×SIZE weighted sum for a single pixel using SSE FMA.
 ///
@@ -445,7 +445,7 @@ mod tests {
             warp_row_bilinear_avx2(input, &mut output_avx2, y, &inverse);
         }
         let inverse_wt = crate::registration::transform::WarpTransform::new(inverse);
-        super::super::warp_row_bilinear_scalar(input, &mut output_scalar, y, &inverse_wt, 0.0);
+        crate::registration::interpolation::warp::warp_row_bilinear_scalar(input, &mut output_scalar, y, &inverse_wt, 0.0);
 
         for x in 0..width {
             assert!(
@@ -477,7 +477,7 @@ mod tests {
             warp_row_bilinear_sse(input, &mut output_sse, y, &inverse);
         }
         let inverse_wt = crate::registration::transform::WarpTransform::new(inverse);
-        super::super::warp_row_bilinear_scalar(input, &mut output_scalar, y, &inverse_wt, 0.0);
+        crate::registration::interpolation::warp::warp_row_bilinear_scalar(input, &mut output_scalar, y, &inverse_wt, 0.0);
 
         for x in 0..width {
             assert!(
@@ -567,7 +567,7 @@ mod tests {
             })
             .collect();
 
-        let lut = super::super::get_lanczos_lut(A);
+        let lut = crate::registration::interpolation::warp::get_lanczos_lut(A);
         let a_minus_1 = A as i32 - 1;
 
         // Test at interior position: x0=6, y0=6, fx=0.3, fy=0.7

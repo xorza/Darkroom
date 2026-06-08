@@ -1,7 +1,7 @@
 //! Benchmarks for convolution operations.
 
-use super::simd::convolve_row;
-use super::{
+use crate::star_detection::convolution::simd::convolve_row;
+use crate::star_detection::convolution::{
     MatchedFilterBuffers, convolve_cols, convolve_rows_parallel, elliptical_gaussian_convolve,
     gaussian_convolve, gaussian_kernel_1d, matched_filter,
 };

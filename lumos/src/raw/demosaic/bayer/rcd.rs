@@ -9,7 +9,7 @@
 
 use rayon::prelude::*;
 
-use super::{BayerImage, CfaPattern};
+use crate::raw::demosaic::bayer::{BayerImage, CfaPattern};
 
 const EPS: f32 = 1e-5;
 const EPSSQ: f32 = 1e-10;

@@ -16,7 +16,7 @@ use crate::testing::synthetic::transforms::{
 };
 use glam::DVec2;
 
-use super::helpers::{FWHM_NORMAL, FWHM_TIGHT, apply_affine, apply_homography};
+use crate::registration::tests::synthetic::helpers::{FWHM_NORMAL, FWHM_TIGHT, apply_affine, apply_homography};
 
 // Additional FWHM values specific to robustness tests:
 const FWHM_LOOSE: f32 = 3.34; // max_sigma ~1.67

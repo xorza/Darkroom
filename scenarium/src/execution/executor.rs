@@ -1,8 +1,8 @@
 //! Mutable execution-time state and the run loop. The `Executor` owns the
 //! per-node runtime `slots` (cache + per-run results), the shared
 //! `ctx_manager`, and the invoke scratch. Given an immutable
-//! [`ExecutionProgram`](super::program::ExecutionProgram) and a prepared
-//! [`ExecutionPlan`](super::plan::ExecutionPlan), [`Executor::run`] invokes
+//! [`ExecutionProgram`](crate::execution::program::ExecutionProgram) and a prepared
+//! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan), [`Executor::run`] invokes
 //! each scheduled node's lambda and gathers stats.
 
 use std::time::Instant;
@@ -17,9 +17,9 @@ use crate::func_lambda::InvokeInput;
 use crate::graph::{InputPort, NodeId};
 use crate::prelude::AnyState;
 
-use super::plan::ExecutionPlan;
-use super::program::{ExecutionBinding, ExecutionNode, ExecutionProgram};
-use super::{Error, OutputUsage};
+use crate::execution::plan::ExecutionPlan;
+use crate::execution::program::{ExecutionBinding, ExecutionNode, ExecutionProgram};
+use crate::execution::{Error, OutputUsage};
 
 /// Per-node runtime state, index-aligned to the program's `e_nodes`: the
 /// cross-run value cache (`state`, `event_state`, `output_values`) plus per-run

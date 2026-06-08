@@ -38,7 +38,7 @@ fn create_detection_mask(pixels: &Buffer2<f32>, sigma_threshold: f32) -> BitBuff
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_label_map_from_buffer_1k(b: ::quickbench::Bencher) {
-    use super::label_mask_parallel;
+    use crate::star_detection::labeling::label_mask_parallel;
 
     let pixels = benchmark_star_field(1024, 1024, 500, 0.1, 0.01, 42);
     let mask = create_detection_mask(&pixels, 4.0);
@@ -56,7 +56,7 @@ fn bench_label_map_from_buffer_1k(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
 fn bench_label_map_from_buffer_4k(b: ::quickbench::Bencher) {
-    use super::label_mask_parallel;
+    use crate::star_detection::labeling::label_mask_parallel;
 
     let pixels = benchmark_star_field(4096, 4096, 2000, 0.1, 0.01, 42);
     let mask = create_detection_mask(&pixels, 4.0);
@@ -74,7 +74,7 @@ fn bench_label_map_from_buffer_4k(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 1, iters = 10)]
 fn bench_label_map_from_buffer_4k_globular(b: ::quickbench::Bencher) {
-    use super::label_mask_parallel;
+    use crate::star_detection::labeling::label_mask_parallel;
 
     let pixels = benchmark_star_field(4096, 4096, 50000, 0.1, 0.01, 42);
     let mask = create_detection_mask(&pixels, 4.0);
@@ -95,7 +95,7 @@ fn bench_label_map_from_buffer_4k_globular(b: ::quickbench::Bencher) {
 #[test]
 #[ignore]
 fn bench_threshold_sweep() {
-    use super::{label_mask_parallel, label_mask_sequential};
+    use crate::star_detection::labeling::{label_mask_parallel, label_mask_sequential};
     use crate::star_detection::config::Connectivity;
     use common::Buffer2;
     use std::time::Instant;

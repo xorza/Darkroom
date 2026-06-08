@@ -2,10 +2,10 @@
 
 use glam::DVec2;
 
-use super::TriangleParams;
-use super::geometry::{Orientation, Triangle};
-use super::matching::{form_triangles_from_neighbors, form_triangles_kdtree, match_triangles};
-use super::voting::{VoteMatrix, build_invariant_tree, resolve_matches, vote_for_correspondences};
+use crate::registration::triangle::TriangleParams;
+use crate::registration::triangle::geometry::{Orientation, Triangle};
+use crate::registration::triangle::matching::{form_triangles_from_neighbors, form_triangles_kdtree, match_triangles};
+use crate::registration::triangle::voting::{VoteMatrix, build_invariant_tree, resolve_matches, vote_for_correspondences};
 use crate::registration::spatial::KdTree;
 
 /// Build a dense VoteMatrix from (ref_idx, target_idx, votes) entries.

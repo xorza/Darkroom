@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::program::{ExecutionBinding, ExecutionProgram};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use super::*;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::FuncBehavior;

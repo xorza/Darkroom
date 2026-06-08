@@ -143,7 +143,7 @@ pub(crate) fn warp_row_bilinear_scalar(
     });
 }
 
-use super::sample_pixel;
+use crate::registration::interpolation::sample_pixel;
 
 /// Bilinear sampling at a single point (f32 coordinates).
 #[inline]

@@ -14,7 +14,7 @@
 //!
 //! Reply frame (per script):
 //!     `[u32-be body_len][body]`
-//! JSON body is the serialized [`super::ScriptResult`] — fields:
+//! JSON body is the serialized [`crate::core::script::ScriptResult`] — fields:
 //! `session`, `print`, `result`, `error`. See `ScriptResult`'s doc
 //! comment for semantics.
 //!
@@ -44,7 +44,7 @@ use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::{ScriptRequest, TcpScriptConfig, TransportHandle};
+use crate::core::script::{ScriptRequest, TcpScriptConfig, TransportHandle};
 
 /// Hard cap on a single frame so a malicious `u32::MAX` doesn't OOM
 /// the server. 1 MiB is plenty for user scripts. Applied to both the
@@ -432,7 +432,7 @@ async fn write_frame(stream: &mut TcpStream, bytes: &[u8]) -> std::io::Result<()
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::core::script::*;
     use crate::core::script::{ScriptExecutor, ScriptMessage, ScriptResult};
     use std::net::Ipv4Addr;
 

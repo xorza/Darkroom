@@ -1,6 +1,6 @@
 //! Tests for SIMD convolution implementations.
 
-use super::{
+use crate::star_detection::convolution::simd::{
     convolve_2d_row, convolve_2d_row_scalar, convolve_cols_direct, convolve_cols_scalar,
     convolve_row, convolve_row_scalar, mirror_index,
 };

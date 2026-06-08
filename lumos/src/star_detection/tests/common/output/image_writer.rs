@@ -4,7 +4,7 @@ use image::{GrayImage, Rgb, RgbImage};
 use imaginarium::{ColorFormat, Image, ImageDesc};
 use std::path::Path;
 
-use super::TEST_OUTPUT_IMAGE_EXT;
+use crate::star_detection::tests::common::output::TEST_OUTPUT_IMAGE_EXT;
 
 /// Build an output path with the configured test image extension.
 /// Takes a base path and replaces or adds the extension from `TEST_OUTPUT_IMAGE_EXT`.
@@ -147,7 +147,7 @@ pub fn save_comparison(
     match_radius: f32,
     path: &Path,
 ) {
-    let image = super::comparison::create_comparison_image(
+    let image = crate::star_detection::tests::common::output::comparison::create_comparison_image(
         pixels,
         width,
         height,

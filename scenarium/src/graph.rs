@@ -78,7 +78,7 @@ fn subscription_touches(s: &Subscription, node_id: NodeId) -> bool {
 /// map keys in string-keyed formats (JSON/TOML/Rhai). Order is deterministic
 /// because the source is a `BTreeMap`.
 mod binding_map_serde {
-    use super::{Binding, InputPort};
+    use crate::graph::{Binding, InputPort};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use std::collections::BTreeMap;
 

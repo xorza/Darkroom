@@ -1293,7 +1293,7 @@ fn make_gaussian_stamp_data(size: usize, params: &[f64; 6]) -> (Vec<f64>, Vec<f6
 
 #[test]
 fn test_batch_build_normal_equations_matches_scalar() {
-    use super::super::lm_optimizer::LMModel;
+    use crate::star_detection::centroid::lm_optimizer::LMModel;
 
     let true_params = [6.3, 6.7, 1000.0, 2.5, 3.0, 100.0];
     // Use offset params so residuals are non-trivial
@@ -1349,7 +1349,7 @@ fn test_batch_build_normal_equations_matches_scalar() {
 
 #[test]
 fn test_batch_compute_chi2_matches_scalar() {
-    use super::super::lm_optimizer::LMModel;
+    use crate::star_detection::centroid::lm_optimizer::LMModel;
 
     let model = Gaussian2D { stamp_radius: 8.0 };
     // Use slightly off params so residuals are non-zero
@@ -1380,7 +1380,7 @@ fn test_batch_compute_chi2_matches_scalar() {
 
 #[test]
 fn test_batch_build_normal_equations_various_stamp_sizes() {
-    use super::super::lm_optimizer::LMModel;
+    use crate::star_detection::centroid::lm_optimizer::LMModel;
 
     let model = Gaussian2D { stamp_radius: 10.0 };
     let true_params = [5.0, 5.0, 500.0, 2.0, 2.5, 50.0];

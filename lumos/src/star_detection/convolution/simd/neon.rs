@@ -4,7 +4,7 @@
 
 use std::arch::aarch64::*;
 
-use super::convolve_pixel_scalar;
+use crate::star_detection::convolution::simd::convolve_pixel_scalar;
 
 /// Convolve a row using NEON intrinsics.
 ///
@@ -87,7 +87,7 @@ pub unsafe fn convolve_cols_neon(
     radius: usize,
 ) {
     unsafe {
-        use super::mirror_index;
+        use crate::star_detection::convolution::simd::mirror_index;
 
         // Process row by row for cache locality
         for y in 0..height {
@@ -143,7 +143,7 @@ pub unsafe fn convolve_2d_row_neon(
     radius: usize,
 ) {
     unsafe {
-        use super::mirror_index;
+        use crate::star_detection::convolution::simd::mirror_index;
 
         // Process 4 output pixels at a time
         let mut x = 0;

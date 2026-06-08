@@ -32,9 +32,9 @@
 //! green_dir (eliminating the 12P rgb_dir buffer, ~1.1 GB for 6032×4028); Step 5 writes the
 //! final result straight into planar `[R, G, B]` output buffers.
 
-use super::XTransImage;
-use super::hex_lookup::HexLookup;
-use super::markesteijn_steps;
+use crate::raw::demosaic::xtrans::XTransImage;
+use crate::raw::demosaic::xtrans::hex_lookup::HexLookup;
+use crate::raw::demosaic::xtrans::markesteijn_steps;
 
 /// Number of interpolation directions (4 for 1-pass: H, V, D1, D2).
 pub(crate) const NDIR: usize = 4;
@@ -181,7 +181,7 @@ pub fn demosaic_xtrans_markesteijn(xtrans: &XTransImage) -> [Vec<f32>; 3] {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{XTransImage, XTransPattern};
+    use crate::raw::demosaic::xtrans::{XTransImage, XTransPattern};
     use super::*;
     use crate::raw::demosaic::interleave_planes;
 

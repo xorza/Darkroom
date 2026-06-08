@@ -4,7 +4,7 @@ use crate::star_detection::config::Connectivity;
 use common::BitBuffer2;
 use common::Buffer2;
 
-use super::LabelMap;
+use crate::star_detection::labeling::LabelMap;
 
 /// Create a label map from pre-computed labels (for testing).
 pub fn label_map_from_raw(labels: Buffer2<u32>, num_labels: usize) -> LabelMap {

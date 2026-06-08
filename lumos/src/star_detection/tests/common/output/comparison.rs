@@ -2,7 +2,7 @@
 //!
 //! Creates annotated images showing ground truth vs detected stars.
 
-use super::image_writer::gray_to_rgb_image_stretched;
+use crate::star_detection::tests::common::output::image_writer::gray_to_rgb_image_stretched;
 use crate::star_detection::star::Star;
 use crate::testing::synthetic::star_field::GroundTruthStar;
 use glam::Vec2;

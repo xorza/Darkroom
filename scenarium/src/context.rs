@@ -130,7 +130,7 @@ mod tests {
 
     use crate::context::ContextCtor;
 
-    use super::{ContextManager, ContextType};
+    use crate::context::{ContextManager, ContextType};
 
     #[derive(Debug, Default)]
     struct TestCtx {

@@ -11,7 +11,7 @@ use crate::testing::synthetic::star_field::{StarFieldConfig, generate_star_field
 use common::Buffer2;
 use common::test_utils::test_output_path;
 
-use super::TILE_SIZE;
+use crate::star_detection::tests::synthetic::stage_tests::TILE_SIZE;
 
 /// Normalize filtered output for visualization (handle negative values).
 fn normalize_for_display(pixels: &[f32]) -> Vec<f32> {

@@ -2,7 +2,7 @@
 
 use common::Buffer2;
 
-use super::super::buffer_pool::BufferPool;
+use crate::star_detection::buffer_pool::BufferPool;
 
 /// Per-pixel background and noise estimates for an image.
 ///

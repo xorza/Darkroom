@@ -321,7 +321,7 @@ fn solve_linear_system(a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
             }
         }
 
-        if max_val < super::SINGULAR_THRESHOLD {
+        if max_val < crate::registration::distortion::SINGULAR_THRESHOLD {
             return None; // Singular matrix
         }
 

@@ -47,7 +47,7 @@ impl ReadyState {
 
 #[cfg(test)]
 mod tests {
-    use super::ReadyState;
+    use crate::ready_state::ReadyState;
     use tokio::time::{Duration, timeout};
 
     #[test]

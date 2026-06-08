@@ -819,7 +819,7 @@ fn make_stamp_data(size: usize, params: &[f64; 5], beta: f64) -> (Vec<f64>, Vec<
 
 #[test]
 fn test_batch_build_normal_equations_matches_scalar() {
-    use super::super::lm_optimizer::LMModel;
+    use crate::star_detection::centroid::lm_optimizer::LMModel;
 
     let beta = 2.5;
     let true_params = [6.3, 6.7, 1000.0, 2.5, 100.0];
@@ -876,7 +876,7 @@ fn test_batch_build_normal_equations_matches_scalar() {
 
 #[test]
 fn test_batch_compute_chi2_matches_scalar() {
-    use super::super::lm_optimizer::LMModel;
+    use crate::star_detection::centroid::lm_optimizer::LMModel;
 
     let beta = 2.5;
     let model = MoffatFixedBeta::new(8.0, beta);
@@ -908,7 +908,7 @@ fn test_batch_compute_chi2_matches_scalar() {
 
 #[test]
 fn test_batch_build_normal_equations_various_stamp_sizes() {
-    use super::super::lm_optimizer::LMModel;
+    use crate::star_detection::centroid::lm_optimizer::LMModel;
 
     let beta = 2.5;
     let model = MoffatFixedBeta::new(10.0, beta);
@@ -963,7 +963,7 @@ fn test_batch_build_normal_equations_various_stamp_sizes() {
 
 #[test]
 fn test_batch_build_normal_equations_all_pow_strategies() {
-    use super::super::lm_optimizer::LMModel;
+    use crate::star_detection::centroid::lm_optimizer::LMModel;
 
     let true_params = [6.5, 6.5, 800.0, 2.0, 80.0];
     // Offset params for non-trivial residuals

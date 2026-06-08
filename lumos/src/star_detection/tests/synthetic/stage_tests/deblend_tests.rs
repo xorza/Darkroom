@@ -16,7 +16,7 @@ use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
-use super::TILE_SIZE;
+use crate::star_detection::tests::synthetic::stage_tests::TILE_SIZE;
 
 /// Test deblending on a pair of overlapping stars.
 #[test]

@@ -6,7 +6,7 @@ use crate::star_detection::config::Config;
 use crate::star_detection::deblend::region::Region;
 use common::Buffer2;
 
-use super::detect::detect;
+use crate::star_detection::detector::stages::detect::detect;
 
 /// Test utility: detect stars with automatic buffer pool management.
 ///

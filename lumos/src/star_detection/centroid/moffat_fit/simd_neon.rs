@@ -3,8 +3,8 @@
 //! Processes 2 f64 pixels per NEON iteration for `batch_build_normal_equations`
 //! and `batch_compute_chi2`. Supports HalfInt, Int, and General PowStrategy variants.
 
-use super::super::lm_optimizer::LMModel;
-use super::{MoffatFixedBeta, PowStrategy};
+use crate::star_detection::centroid::lm_optimizer::LMModel;
+use crate::star_detection::centroid::moffat_fit::{MoffatFixedBeta, PowStrategy};
 use std::arch::aarch64::*;
 
 /// SIMD `int_pow`: compute u^n for each lane using repeated squaring.

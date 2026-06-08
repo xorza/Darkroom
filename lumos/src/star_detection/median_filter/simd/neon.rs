@@ -54,7 +54,7 @@ pub unsafe fn median_filter_row_neon(
         // Handle remainder pixels with scalar code
         let remainder_start = 1 + chunks * 4;
         for x in remainder_start..(width - 1) {
-            output_row[x] = super::median9_scalar(
+            output_row[x] = crate::star_detection::median_filter::simd::median9_scalar(
                 row_above[x - 1],
                 row_above[x],
                 row_above[x + 1],
@@ -147,7 +147,7 @@ mod tests {
         let mut output_scalar = vec![0.0f32; width];
         let mut output_simd = vec![0.0f32; width];
 
-        super::super::median_filter_row_scalar(
+        crate::star_detection::median_filter::simd::median_filter_row_scalar(
             &row_above,
             &row_curr,
             &row_below,

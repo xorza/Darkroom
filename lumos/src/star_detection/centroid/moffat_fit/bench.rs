@@ -5,7 +5,7 @@
 use quickbench::quick_bench;
 use std::hint::black_box;
 
-use super::{MoffatFitConfig, fit_moffat_2d};
+use crate::star_detection::centroid::moffat_fit::{MoffatFitConfig, fit_moffat_2d};
 use crate::star_detection::centroid::test_utils::make_moffat_star;
 use glam::Vec2;
 

@@ -1,6 +1,6 @@
-//! Scheduling: turns an [`ExecutionProgram`](super::program::ExecutionProgram)
+//! Scheduling: turns an [`ExecutionProgram`](crate::execution::program::ExecutionProgram)
 //! plus the current runtime cache state into an
-//! [`ExecutionPlan`](super::plan::ExecutionPlan). Two backward DFS passes
+//! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan). Two backward DFS passes
 //! (order + cycle detection, then prune to the needed set) bracket a forward
 //! propagation that resolves each node's cached/wants-execute state. The
 //! `Planner` owns the reusable DFS scratch so a repeated plan allocates nothing.
@@ -10,10 +10,10 @@ use hashbrown::HashSet;
 
 use crate::worker::EventRef;
 
-use super::executor::Executor;
-use super::plan::{ExecutionPlan, InputFlags};
-use super::program::{ExecutionBehavior, ExecutionBinding, ExecutionProgram};
-use super::{Error, Result};
+use crate::execution::executor::Executor;
+use crate::execution::plan::{ExecutionPlan, InputFlags};
+use crate::execution::program::{ExecutionBehavior, ExecutionBinding, ExecutionProgram};
+use crate::execution::{Error, Result};
 
 /// DFS coloring for the two backward passes. White = unvisited, Gray = on
 /// stack (Done pushed, children pending), Black = children done.

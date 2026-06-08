@@ -6,7 +6,7 @@
 
 use rayon::prelude::*;
 
-use super::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
+use crate::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
 use crate::raw::demosaic::bayer::CfaPattern;
 use common::Buffer2;
 
