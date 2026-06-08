@@ -108,7 +108,7 @@ pub fn register(
     target_stars: &[Star],
     config: &Config,
 ) -> Result<RegistrationResult, RegistrationError> {
-    config.validate();
+    config.validate()?;
     let start = Instant::now();
 
     // Validate input

@@ -54,6 +54,8 @@ pub enum RegistrationError {
     AccuracyTooLow { rms_error: f64, max_allowed: f64 },
     /// Star detection failed.
     StarDetection(String),
+    /// A configuration parameter is outside its valid range.
+    InvalidConfig(String),
 }
 
 impl std::fmt::Display for RegistrationError {
@@ -92,6 +94,9 @@ impl std::fmt::Display for RegistrationError {
             }
             RegistrationError::StarDetection(msg) => {
                 write!(f, "Star detection failed: {}", msg)
+            }
+            RegistrationError::InvalidConfig(msg) => {
+                write!(f, "Invalid configuration: {}", msg)
             }
         }
     }

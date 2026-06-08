@@ -2,6 +2,7 @@
 
 use glam::DVec2;
 
+use crate::registration::result::RegistrationError;
 use crate::registration::transform::TransformType;
 
 /// Default soft-clamping threshold for Lanczos deringing (PixInsight default).
@@ -267,109 +268,131 @@ impl Config {
 
     /// Validate all configuration parameters.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if any parameter is invalid:
+    /// Returns [`RegistrationError::InvalidConfig`] if any parameter is invalid:
     /// - `max_stars` or `min_stars` < 3
     /// - `max_stars` < `min_stars`
     /// - `min_matches` < transform minimum points
     /// - `ratio_tolerance` not in (0, 1)
     /// - `min_votes` < 1
     /// - `ransac_iterations` < 1
+    /// - `lo_iterations` < 1 (when `local_optimization` is enabled)
     /// - `confidence` not in \[0, 1\]
     /// - `min_inlier_ratio` not in (0, 1\]
     /// - `max_rotation` <= 0 (when set)
     /// - `scale_range` with min <= 0 or max <= min (when set)
     /// - `max_rms_error` <= 0
     /// - `sip_order` not in 2..=5 (when SIP enabled)
-    pub fn validate(&self) {
+    /// - `border_value` not finite
+    pub fn validate(&self) -> Result<(), RegistrationError> {
+        let invalid = |msg: String| Err(RegistrationError::InvalidConfig(msg));
+
         // Star matching
-        assert!(
-            self.max_stars >= 3,
-            "max_stars must be >= 3 for triangle matching, got {}",
-            self.max_stars
-        );
-        assert!(
-            self.min_stars >= 3,
-            "min_stars must be >= 3 for triangle matching, got {}",
-            self.min_stars
-        );
-        assert!(
-            self.max_stars >= self.min_stars,
-            "max_stars ({}) must be >= min_stars ({})",
-            self.max_stars,
-            self.min_stars
-        );
+        if self.max_stars < 3 {
+            return invalid(format!(
+                "max_stars must be >= 3 for triangle matching, got {}",
+                self.max_stars
+            ));
+        }
+        if self.min_stars < 3 {
+            return invalid(format!(
+                "min_stars must be >= 3 for triangle matching, got {}",
+                self.min_stars
+            ));
+        }
+        if self.max_stars < self.min_stars {
+            return invalid(format!(
+                "max_stars ({}) must be >= min_stars ({})",
+                self.max_stars, self.min_stars
+            ));
+        }
         // Auto can upgrade to Homography (needs 4 points), so validate against that
         let required_points = if self.transform_type == TransformType::Auto {
             TransformType::Homography.min_points()
         } else {
             self.transform_type.min_points()
         };
-        assert!(
-            self.min_matches >= required_points,
-            "min_matches ({}) must be >= transform minimum points ({})",
-            self.min_matches,
-            required_points
-        );
-        assert!(
-            self.ratio_tolerance > 0.0 && self.ratio_tolerance < 1.0,
-            "ratio_tolerance must be in (0, 1), got {}",
-            self.ratio_tolerance
-        );
-        assert!(
-            self.min_votes >= 1,
-            "min_votes must be at least 1, got {}",
-            self.min_votes
-        );
+        if self.min_matches < required_points {
+            return invalid(format!(
+                "min_matches ({}) must be >= transform minimum points ({})",
+                self.min_matches, required_points
+            ));
+        }
+        if !(self.ratio_tolerance > 0.0 && self.ratio_tolerance < 1.0) {
+            return invalid(format!(
+                "ratio_tolerance must be in (0, 1), got {}",
+                self.ratio_tolerance
+            ));
+        }
+        if self.min_votes < 1 {
+            return invalid(format!(
+                "min_votes must be at least 1, got {}",
+                self.min_votes
+            ));
+        }
 
         // RANSAC
-        assert!(
-            self.ransac_iterations > 0,
-            "ransac_iterations must be positive, got {}",
-            self.ransac_iterations
-        );
-        assert!(
-            (0.0..=1.0).contains(&self.confidence),
-            "confidence must be in [0, 1], got {}",
-            self.confidence
-        );
-        assert!(
-            self.min_inlier_ratio > 0.0 && self.min_inlier_ratio <= 1.0,
-            "min_inlier_ratio must be in (0, 1], got {}",
-            self.min_inlier_ratio
-        );
-        if let Some(max_rot) = self.max_rotation {
-            assert!(
-                max_rot > 0.0,
-                "max_rotation must be positive, got {}",
-                max_rot
-            );
+        if self.ransac_iterations == 0 {
+            return invalid(format!(
+                "ransac_iterations must be positive, got {}",
+                self.ransac_iterations
+            ));
         }
-        if let Some((min_scale, max_scale)) = self.scale_range {
-            assert!(
-                min_scale > 0.0 && max_scale > min_scale,
+        if self.local_optimization && self.lo_iterations == 0 {
+            return invalid(format!(
+                "lo_iterations must be positive when local_optimization is enabled, got {}",
+                self.lo_iterations
+            ));
+        }
+        if !(0.0..=1.0).contains(&self.confidence) {
+            return invalid(format!(
+                "confidence must be in [0, 1], got {}",
+                self.confidence
+            ));
+        }
+        if !(self.min_inlier_ratio > 0.0 && self.min_inlier_ratio <= 1.0) {
+            return invalid(format!(
+                "min_inlier_ratio must be in (0, 1], got {}",
+                self.min_inlier_ratio
+            ));
+        }
+        if let Some(max_rot) = self.max_rotation
+            && max_rot <= 0.0
+        {
+            return invalid(format!("max_rotation must be positive, got {}", max_rot));
+        }
+        if let Some((min_scale, max_scale)) = self.scale_range
+            && !(min_scale > 0.0 && max_scale > min_scale)
+        {
+            return invalid(format!(
                 "scale_range must have 0 < min < max, got ({}, {})",
-                min_scale,
-                max_scale
-            );
+                min_scale, max_scale
+            ));
         }
 
         // Quality
-        assert!(
-            self.max_rms_error > 0.0,
-            "max_rms_error must be positive, got {}",
-            self.max_rms_error
-        );
+        if self.max_rms_error <= 0.0 {
+            return invalid(format!(
+                "max_rms_error must be positive, got {}",
+                self.max_rms_error
+            ));
+        }
 
         // Distortion
-        if self.sip_enabled {
-            assert!(
-                (2..=5).contains(&self.sip_order),
-                "sip_order must be 2-5, got {}",
-                self.sip_order
-            );
+        if self.sip_enabled && !(2..=5).contains(&self.sip_order) {
+            return invalid(format!("sip_order must be 2-5, got {}", self.sip_order));
         }
+
+        // Warping
+        if !self.border_value.is_finite() {
+            return invalid(format!(
+                "border_value must be finite, got {}",
+                self.border_value
+            ));
+        }
+
+        Ok(())
     }
 }
 
@@ -414,7 +437,7 @@ mod tests {
         assert_eq!(config.max_stars, 100);
         assert!(!config.local_optimization);
         assert_eq!(config.interpolation, InterpolationMethod::Bilinear);
-        config.validate();
+        config.validate().unwrap();
     }
 
     #[test]
@@ -424,7 +447,7 @@ mod tests {
         assert!((config.confidence - 0.999).abs() < 1e-10);
         assert!(config.sip_enabled);
         assert!((config.max_rms_error - 1.0).abs() < 1e-10);
-        config.validate();
+        config.validate().unwrap();
     }
 
     #[test]
@@ -434,7 +457,7 @@ mod tests {
         assert!(config.sip_enabled);
         assert!(config.max_rotation.is_none());
         assert!(config.scale_range.is_none());
-        config.validate();
+        config.validate().unwrap();
     }
 
     #[test]
@@ -451,7 +474,7 @@ mod tests {
         // Inherits unlimited rotation/scale from wide_field()
         assert!(config.max_rotation.is_none());
         assert!(config.scale_range.is_none());
-        config.validate();
+        config.validate().unwrap();
     }
 
     #[test]
@@ -459,7 +482,7 @@ mod tests {
         let config = Config::mosaic();
         assert!(config.max_rotation.is_none());
         assert_eq!(config.scale_range, Some((0.5, 2.0)));
-        config.validate();
+        config.validate().unwrap();
     }
 
     #[test]
@@ -471,27 +494,7 @@ mod tests {
         };
         assert_eq!(config.transform_type, TransformType::Similarity);
         assert_eq!(config.ransac_iterations, 1000);
-        config.validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "ransac_iterations must be positive")]
-    fn test_config_invalid_iterations() {
-        let config = Config {
-            ransac_iterations: 0,
-            ..Config::default()
-        };
-        config.validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "max_stars must be >= 3")]
-    fn test_config_invalid_max_stars() {
-        let config = Config {
-            max_stars: 2,
-            ..Config::default()
-        };
-        config.validate();
+        config.validate().unwrap();
     }
 
     #[test]
@@ -561,117 +564,151 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "min_stars must be >= 3")]
-    fn test_config_invalid_min_stars() {
-        let config = Config {
-            min_stars: 2,
-            ..Config::default()
-        };
-        config.validate();
+    fn test_config_validation_rejects_invalid() {
+        // Each case: a single out-of-range field and the substring its error must contain.
+        let cases: &[(Config, &str)] = &[
+            (
+                Config {
+                    ransac_iterations: 0,
+                    ..Config::default()
+                },
+                "ransac_iterations must be positive",
+            ),
+            (
+                Config {
+                    max_stars: 2,
+                    ..Config::default()
+                },
+                "max_stars must be >= 3",
+            ),
+            (
+                Config {
+                    min_stars: 2,
+                    ..Config::default()
+                },
+                "min_stars must be >= 3",
+            ),
+            (
+                Config {
+                    max_stars: 5,
+                    min_stars: 10,
+                    ..Config::default()
+                },
+                "max_stars (5) must be >= min_stars (10)",
+            ),
+            (
+                Config {
+                    ratio_tolerance: 0.0,
+                    ..Config::default()
+                },
+                "ratio_tolerance must be in (0, 1)",
+            ),
+            (
+                Config {
+                    ratio_tolerance: 1.0,
+                    ..Config::default()
+                },
+                "ratio_tolerance must be in (0, 1)",
+            ),
+            (
+                Config {
+                    min_votes: 0,
+                    ..Config::default()
+                },
+                "min_votes must be at least 1",
+            ),
+            (
+                Config {
+                    confidence: 1.5,
+                    ..Config::default()
+                },
+                "confidence must be in [0, 1]",
+            ),
+            (
+                Config {
+                    min_inlier_ratio: 0.0,
+                    ..Config::default()
+                },
+                "min_inlier_ratio must be in (0, 1]",
+            ),
+            (
+                Config {
+                    local_optimization: true,
+                    lo_iterations: 0,
+                    ..Config::default()
+                },
+                "lo_iterations must be positive",
+            ),
+            (
+                Config {
+                    max_rotation: Some(-0.1),
+                    ..Config::default()
+                },
+                "max_rotation must be positive",
+            ),
+            (
+                Config {
+                    scale_range: Some((1.5, 0.5)),
+                    ..Config::default()
+                },
+                "scale_range must have 0 < min < max",
+            ),
+            (
+                Config {
+                    max_rms_error: 0.0,
+                    ..Config::default()
+                },
+                "max_rms_error must be positive",
+            ),
+            (
+                Config {
+                    sip_enabled: true,
+                    sip_order: 6,
+                    ..Config::default()
+                },
+                "sip_order must be 2-5",
+            ),
+            (
+                // Homography needs 4 points, so min_matches = 3 is too few.
+                Config {
+                    transform_type: TransformType::Homography,
+                    min_matches: 3,
+                    ..Config::default()
+                },
+                "min_matches (3) must be >= transform minimum points (4)",
+            ),
+            (
+                Config {
+                    border_value: f32::NAN,
+                    ..Config::default()
+                },
+                "border_value must be finite",
+            ),
+        ];
+
+        for (config, expected) in cases {
+            let err = config.validate().unwrap_err();
+            assert!(
+                matches!(err, RegistrationError::InvalidConfig(_)),
+                "expected InvalidConfig for case '{expected}', got {err:?}"
+            );
+            let msg = err.to_string();
+            assert!(
+                msg.contains(expected),
+                "expected error to contain '{expected}', got '{msg}'"
+            );
+        }
     }
 
     #[test]
-    #[should_panic(expected = "max_stars")]
-    fn test_config_max_stars_less_than_min_stars() {
+    fn test_config_lo_iterations_zero_ok_when_lo_disabled() {
+        // lo_iterations is only validated when local_optimization is enabled.
         let config = Config {
-            max_stars: 5,
-            min_stars: 10,
+            local_optimization: false,
+            lo_iterations: 0,
             ..Config::default()
         };
-        config.validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "ratio_tolerance must be in (0, 1)")]
-    fn test_config_invalid_ratio_tolerance_zero() {
-        let config = Config {
-            ratio_tolerance: 0.0,
-            ..Config::default()
-        };
-        config.validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "ratio_tolerance must be in (0, 1)")]
-    fn test_config_invalid_ratio_tolerance_one() {
-        let config = Config {
-            ratio_tolerance: 1.0,
-            ..Config::default()
-        };
-        config.validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "confidence must be in [0, 1]")]
-    fn test_config_invalid_confidence() {
-        let config = Config {
-            confidence: 1.5,
-            ..Config::default()
-        };
-        config.validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "min_inlier_ratio must be in (0, 1]")]
-    fn test_config_invalid_min_inlier_ratio_zero() {
-        let config = Config {
-            min_inlier_ratio: 0.0,
-            ..Config::default()
-        };
-        config.validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "max_rotation must be positive")]
-    fn test_config_invalid_max_rotation_negative() {
-        let config = Config {
-            max_rotation: Some(-0.1),
-            ..Config::default()
-        };
-        config.validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "scale_range must have 0 < min < max")]
-    fn test_config_invalid_scale_range_inverted() {
-        let config = Config {
-            scale_range: Some((1.5, 0.5)),
-            ..Config::default()
-        };
-        config.validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "max_rms_error must be positive")]
-    fn test_config_invalid_max_rms_error() {
-        let config = Config {
-            max_rms_error: 0.0,
-            ..Config::default()
-        };
-        config.validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "sip_order must be 2-5")]
-    fn test_config_invalid_sip_order() {
-        let config = Config {
-            sip_enabled: true,
-            sip_order: 6,
-            ..Config::default()
-        };
-        config.validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "min_matches")]
-    fn test_config_min_matches_less_than_transform_min_points() {
-        // Homography needs 4 points, min_matches = 3 should fail
-        let config = Config {
-            transform_type: TransformType::Homography,
-            min_matches: 3,
-            ..Config::default()
-        };
-        config.validate();
+        assert!(config.validate().is_ok());
     }
 
     #[test]
@@ -694,11 +731,11 @@ mod tests {
 
     #[test]
     fn test_config_all_presets_validate() {
-        Config::default().validate();
-        Config::fast().validate();
-        Config::precise().validate();
-        Config::wide_field().validate();
-        Config::precise_wide_field().validate();
-        Config::mosaic().validate();
+        Config::default().validate().unwrap();
+        Config::fast().validate().unwrap();
+        Config::precise().validate().unwrap();
+        Config::wide_field().validate().unwrap();
+        Config::precise_wide_field().validate().unwrap();
+        Config::mosaic().validate().unwrap();
     }
 }

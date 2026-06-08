@@ -334,16 +334,21 @@ impl SipPolynomial {
 
     /// Get the maximum correction magnitude across a grid of points.
     pub fn max_correction(&self, width: usize, height: usize, grid_spacing: f64) -> f64 {
+        assert!(
+            grid_spacing > 0.0,
+            "grid_spacing must be positive, got {grid_spacing}"
+        );
+        // Integer-stepped to avoid float accumulation drift skipping the boundary band.
+        let nx = (width as f64 / grid_spacing).floor() as usize;
+        let ny = (height as f64 / grid_spacing).floor() as usize;
         let mut max_mag = 0.0f64;
-        let mut y = 0.0;
-        while y <= height as f64 {
-            let mut x = 0.0;
-            while x <= width as f64 {
+        for iy in 0..=ny {
+            let y = iy as f64 * grid_spacing;
+            for ix in 0..=nx {
+                let x = ix as f64 * grid_spacing;
                 let correction = self.correction_at(DVec2::new(x, y));
                 max_mag = max_mag.max(correction.length());
-                x += grid_spacing;
             }
-            y += grid_spacing;
         }
         max_mag
     }

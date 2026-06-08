@@ -140,24 +140,6 @@ impl DMat3 {
         let y_prime = (d[3] * p.x + d[4] * p.y + d[5]) / w;
         DVec2::new(x_prime, y_prime)
     }
-
-    /// Frobenius norm of the difference from the identity matrix.
-    pub fn deviation_from_identity(&self) -> f64 {
-        let d = &self.data;
-        let d0 = d[0] - 1.0;
-        let d4 = d[4] - 1.0;
-        let d8 = d[8] - 1.0;
-        (d0 * d0
-            + d[1] * d[1]
-            + d[2] * d[2]
-            + d[3] * d[3]
-            + d4 * d4
-            + d[5] * d[5]
-            + d[6] * d[6]
-            + d[7] * d[7]
-            + d8 * d8)
-            .sqrt()
-    }
 }
 
 impl Default for DMat3 {
@@ -240,6 +222,24 @@ impl Mul<DMat3> for f64 {
 impl DMat3 {
     pub fn as_array_mut(&mut self) -> &mut [f64; 9] {
         &mut self.data
+    }
+
+    /// Frobenius norm of the difference from the identity matrix. Test-only diagnostic.
+    pub(crate) fn deviation_from_identity(&self) -> f64 {
+        let d = &self.data;
+        let d0 = d[0] - 1.0;
+        let d4 = d[4] - 1.0;
+        let d8 = d[8] - 1.0;
+        (d0 * d0
+            + d[1] * d[1]
+            + d[2] * d[2]
+            + d[3] * d[3]
+            + d4 * d4
+            + d[5] * d[5]
+            + d[6] * d[6]
+            + d[7] * d[7]
+            + d8 * d8)
+            .sqrt()
     }
 }
 

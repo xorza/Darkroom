@@ -301,14 +301,16 @@ impl Transform {
     }
 
     /// Check if this is a valid (non-degenerate) transformation.
+    ///
+    /// Requires every matrix element finite (an isolated NaN/inf in a translation
+    /// or perspective term would otherwise slip past a finite-determinant check)
+    /// and the linear part non-singular.
     pub fn is_valid(&self) -> bool {
+        if !(0..9).all(|i| self.matrix[i].is_finite()) {
+            return false;
+        }
         let det = self.matrix[0] * self.matrix[4] - self.matrix[1] * self.matrix[3];
-        det.abs() > 1e-10 && det.is_finite()
-    }
-
-    /// Compute Frobenius norm of difference from identity.
-    pub fn deviation_from_identity(&self) -> f64 {
-        self.matrix.deviation_from_identity()
+        det.is_finite() && det.abs() > 1e-10
     }
 }
 
@@ -360,6 +362,14 @@ impl WarpTransform {
     /// When true, incremental stepping and SIMD can be used.
     pub fn is_linear(&self) -> bool {
         self.sip.is_none() && !matches!(self.transform.transform_type, TransformType::Homography)
+    }
+}
+
+#[cfg(test)]
+impl Transform {
+    /// Frobenius norm of the difference from the identity matrix. Test-only diagnostic.
+    pub(crate) fn deviation_from_identity(&self) -> f64 {
+        self.matrix.deviation_from_identity()
     }
 }
 
