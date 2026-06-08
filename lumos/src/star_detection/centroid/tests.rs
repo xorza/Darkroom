@@ -1568,7 +1568,6 @@ fn test_moffat_fit_precision_statistical() {
             let pixels_buf = Buffer2::new(width, height, pixels);
 
             let config = MoffatFitConfig {
-                fit_beta: false,
                 fixed_beta: beta,
                 ..Default::default()
             };
@@ -1908,7 +1907,6 @@ fn test_moffat_fit_alpha_recovery() {
         let pixels_buf = Buffer2::new(width, height, pixels);
 
         let config = MoffatFitConfig {
-            fit_beta: false,
             fixed_beta: beta,
             ..Default::default()
         };
@@ -2800,7 +2798,6 @@ fn test_moffat_fit_accuracy_independent_of_phase1_iterations() {
 
     // Now apply Moffat fit from both starting points
     let config = MoffatFitConfig {
-        fit_beta: false,
         fixed_beta: 2.5,
         ..MoffatFitConfig::default()
     };
@@ -3081,7 +3078,6 @@ fn test_prefit_moments_iterations_sufficient_moffat() {
     // Apply Moffat fitting to both
     let local_bg = 0.1;
     let fit_config = MoffatFitConfig {
-        fit_beta: false,
         fixed_beta: 2.5,
         lm: lm_optimizer::LMConfig {
             position_convergence_threshold: 0.0001,
@@ -3877,7 +3873,6 @@ fn test_moffat_fit_bad_initial_guess() {
     let initial_guess = Vec2::new(13.0, 17.0);
 
     let config = MoffatFitConfig {
-        fit_beta: false,
         fixed_beta: beta,
         ..Default::default()
     };

@@ -433,7 +433,6 @@ pub fn measure_star(
         }
         CentroidMethod::MoffatFit { beta } => {
             let fit_config = MoffatFitConfig {
-                fit_beta: false,
                 fixed_beta: beta,
                 lm: lm_optimizer::LMConfig {
                     position_convergence_threshold: CENTROID_CONVERGENCE_THRESHOLD as f64,

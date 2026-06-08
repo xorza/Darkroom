@@ -298,45 +298,7 @@ fn bench_moffat_fit_single(b: ::quickbench::Bencher) {
     }
     let pixels = Buffer2::new(width, height, pixels);
     let config = MoffatFitConfig {
-        fit_beta: false,
         fixed_beta: beta,
-        ..Default::default()
-    };
-
-    b.bench(|| {
-        black_box(fit_moffat_2d(
-            black_box(&pixels),
-            black_box(Vec2::splat(10.0)),
-            black_box(8),
-            black_box(background),
-            None,
-            black_box(&config),
-        ))
-    });
-}
-
-#[quick_bench(warmup_iters = 100, iters = 10000)]
-fn bench_moffat_fit_variable_beta(b: ::quickbench::Bencher) {
-    // Single Moffat fit with variable beta (6-parameter fit)
-    let width = 21;
-    let height = 21;
-    let background = 0.1f32;
-    let alpha = 2.5f32;
-    let beta = 2.5f32;
-    let cx = 10.0f32;
-    let cy = 10.0f32;
-
-    let mut pixels = vec![background; width * height];
-    for y in 0..height {
-        for x in 0..width {
-            let r2 = (x as f32 - cx).powi(2) + (y as f32 - cy).powi(2);
-            pixels[y * width + x] += 1.0 * (1.0 + r2 / (alpha * alpha)).powf(-beta);
-        }
-    }
-    let pixels = Buffer2::new(width, height, pixels);
-    let config = MoffatFitConfig {
-        fit_beta: true,
-        fixed_beta: 2.5,
         ..Default::default()
     };
 

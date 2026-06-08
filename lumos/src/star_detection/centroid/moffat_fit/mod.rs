@@ -33,9 +33,7 @@ use glam::Vec2;
 pub struct MoffatFitConfig {
     /// L-M optimization parameters.
     pub lm: LMConfig,
-    /// Whether to fit beta or fix it to a constant.
-    pub fit_beta: bool,
-    /// Fixed beta value when fit_beta is false.
+    /// Fixed Moffat β (wing-slope) used for the fit.
     pub fixed_beta: f32,
 }
 
@@ -43,7 +41,6 @@ impl Default for MoffatFitConfig {
     fn default() -> Self {
         Self {
             lm: LMConfig::default(),
-            fit_beta: false,
             fixed_beta: 2.5,
         }
     }
@@ -306,79 +303,6 @@ impl LMModel<5> for MoffatFixedBeta {
     }
 }
 
-/// Moffat model with variable beta (6 parameters).
-/// Parameters: [x0, y0, amplitude, alpha, beta, background]
-#[derive(Debug)]
-pub(crate) struct MoffatVariableBeta {
-    pub stamp_radius: f64,
-}
-
-impl LMModel<6> for MoffatVariableBeta {
-    #[inline]
-    fn evaluate(&self, x: f64, y: f64, params: &[f64; 6]) -> f64 {
-        let [x0, y0, amp, alpha, beta, bg] = *params;
-        let r2 = (x - x0).powi(2) + (y - y0).powi(2);
-        amp * (1.0 + r2 / (alpha * alpha)).powf(-beta) + bg
-    }
-
-    #[inline]
-    fn jacobian_row(&self, x: f64, y: f64, params: &[f64; 6]) -> [f64; 6] {
-        let [x0, y0, amp, alpha, beta, _bg] = *params;
-        let alpha2 = alpha * alpha;
-        let dx = x - x0;
-        let dy = y - y0;
-        let r2 = dx * dx + dy * dy;
-        let u = 1.0 + r2 / alpha2;
-        let ln_u = u.ln();
-        let u_neg_beta = (-beta * ln_u).exp();
-        let u_neg_beta_m1 = u_neg_beta / u;
-        let common = 2.0 * amp * beta / alpha2 * u_neg_beta_m1;
-
-        [
-            common * dx,              // df/dx0
-            common * dy,              // df/dy0
-            u_neg_beta,               // df/damp
-            common * r2 / alpha,      // df/dalpha
-            -amp * ln_u * u_neg_beta, // df/dbeta
-            1.0,                      // df/dbg
-        ]
-    }
-
-    #[inline]
-    fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; 6]) -> (f64, [f64; 6]) {
-        let [x0, y0, amp, alpha, beta, bg] = *params;
-        let alpha2 = alpha * alpha;
-        let dx = x - x0;
-        let dy = y - y0;
-        let r2 = dx * dx + dy * dy;
-        let u = 1.0 + r2 / alpha2;
-        let ln_u = u.ln();
-        let u_neg_beta = (-beta * ln_u).exp();
-        let model_val = amp * u_neg_beta + bg;
-        let u_neg_beta_m1 = u_neg_beta / u;
-        let common = 2.0 * amp * beta / alpha2 * u_neg_beta_m1;
-
-        (
-            model_val,
-            [
-                common * dx,              // df/dx0
-                common * dy,              // df/dy0
-                u_neg_beta,               // df/damp
-                common * r2 / alpha,      // df/dalpha
-                -amp * ln_u * u_neg_beta, // df/dbeta
-                1.0,                      // df/dbg
-            ],
-        )
-    }
-
-    #[inline]
-    fn constrain(&self, params: &mut [f64; 6]) {
-        params[2] = params[2].max(0.01); // Amplitude > 0
-        params[3] = params[3].clamp(0.5, self.stamp_radius); // Alpha
-        params[4] = params[4].clamp(1.5, 10.0); // Beta
-    }
-}
-
 /// Fit a 2D Moffat profile to a star stamp via Levenberg-Marquardt (f64 throughout). When
 /// `noise` is set, each pixel is weighted by `1/σ²` from the CCD noise model so the
 /// shot-noisy bright core doesn't bias the fit (PR1); `None` is a plain unweighted fit.
@@ -392,9 +316,9 @@ pub(crate) fn fit_moffat_2d(
 ) -> Option<MoffatFitResult> {
     let stamp = extract_stamp(pixels, pos, stamp_radius)?;
 
+    // Fixed-β Moffat fits 5 parameters [x0, y0, amplitude, alpha, background].
     let n = stamp.x.len();
-    let n_params = if config.fit_beta { 6 } else { 5 };
-    if n < n_params + 1 {
+    if n < 6 {
         return None;
     }
 
@@ -408,57 +332,12 @@ pub(crate) fn fit_moffat_2d(
 
     let initial_amplitude = (stamp.peak - background).max(0.01);
 
-    // Estimate sigma from moments, then convert to alpha
+    // Estimate sigma from moments, then convert to alpha (using the fixed β).
     let sigma_est = estimate_sigma_from_moments(&stamp.x, &stamp.y, &stamp.z, pos, background);
     let fwhm_est = sigma_est * FWHM_TO_SIGMA;
     let initial_alpha =
         fwhm_beta_to_alpha(fwhm_est, config.fixed_beta).clamp(0.5, stamp_radius as f32);
 
-    if config.fit_beta {
-        fit_with_variable_beta(
-            &data_x,
-            &data_y,
-            &data_z,
-            weights.as_deref(),
-            pos,
-            initial_amplitude,
-            initial_alpha,
-            background,
-            stamp_radius,
-            n,
-            config,
-        )
-    } else {
-        fit_with_fixed_beta(
-            &data_x,
-            &data_y,
-            &data_z,
-            weights.as_deref(),
-            pos,
-            initial_amplitude,
-            initial_alpha,
-            background,
-            stamp_radius,
-            n,
-            config,
-        )
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn fit_with_fixed_beta(
-    data_x: &[f64],
-    data_y: &[f64],
-    data_z: &[f64],
-    weights: Option<&[f64]>,
-    pos: Vec2,
-    initial_amplitude: f32,
-    initial_alpha: f32,
-    background: f32,
-    stamp_radius: usize,
-    n: usize,
-    config: &MoffatFitConfig,
-) -> Option<MoffatFitResult> {
     let initial_params: [f64; 5] = [
         pos.x as f64,
         pos.y as f64,
@@ -471,10 +350,10 @@ fn fit_with_fixed_beta(
 
     let result = optimize(
         &model,
-        data_x,
-        data_y,
-        data_z,
-        weights,
+        &data_x,
+        &data_y,
+        &data_z,
+        weights.as_deref(),
         initial_params,
         &config.lm,
     );
@@ -494,65 +373,6 @@ fn fit_with_fixed_beta(
         amplitude: amplitude as f32,
         alpha: alpha as f32,
         beta: config.fixed_beta,
-        background: bg as f32,
-        fwhm,
-        rms_residual: rms,
-        converged: result.converged,
-        iterations: result.iterations,
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-fn fit_with_variable_beta(
-    data_x: &[f64],
-    data_y: &[f64],
-    data_z: &[f64],
-    weights: Option<&[f64]>,
-    pos: Vec2,
-    initial_amplitude: f32,
-    initial_alpha: f32,
-    background: f32,
-    stamp_radius: usize,
-    n: usize,
-    config: &MoffatFitConfig,
-) -> Option<MoffatFitResult> {
-    let initial_params: [f64; 6] = [
-        pos.x as f64,
-        pos.y as f64,
-        initial_amplitude as f64,
-        initial_alpha as f64,
-        config.fixed_beta as f64,
-        background as f64,
-    ];
-    let model = MoffatVariableBeta {
-        stamp_radius: stamp_radius as f64,
-    };
-
-    let result = optimize(
-        &model,
-        data_x,
-        data_y,
-        data_z,
-        weights,
-        initial_params,
-        &config.lm,
-    );
-
-    let [x0, y0, amplitude, alpha, beta, bg] = result.params;
-    let result_pos = Vec2::new(x0 as f32, y0 as f32);
-
-    if !validate_position(result_pos, pos, alpha as f32, stamp_radius) {
-        return None;
-    }
-
-    let rms = (result.chi2 / n as f64).sqrt() as f32;
-    let fwhm = alpha_beta_to_fwhm(alpha as f32, beta as f32);
-
-    Some(MoffatFitResult {
-        pos: result_pos,
-        amplitude: amplitude as f32,
-        alpha: alpha as f32,
-        beta: beta as f32,
         background: bg as f32,
         fwhm,
         rms_residual: rms,

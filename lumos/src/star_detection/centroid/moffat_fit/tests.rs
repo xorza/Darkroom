@@ -44,7 +44,6 @@ fn test_moffat_fit_centered_fixed_beta() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = MoffatFitConfig {
-        fit_beta: false,
         fixed_beta: true_beta,
         ..Default::default()
     };
@@ -75,7 +74,6 @@ fn test_moffat_fit_subpixel_offset() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = MoffatFitConfig {
-        fit_beta: false,
         fixed_beta: true_beta,
         ..Default::default()
     };
@@ -86,40 +84,6 @@ fn test_moffat_fit_subpixel_offset() {
     assert!(result.converged);
     assert!((result.pos.x - true_cx).abs() < 0.05);
     assert!((result.pos.y - true_cy).abs() < 0.05);
-}
-
-#[test]
-fn test_moffat_fit_with_beta() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 1.0;
-    let true_alpha = 2.5;
-    let true_beta = 3.5;
-    let true_bg = 0.1;
-
-    let pixels = make_moffat_stamp(
-        width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
-
-    let config = MoffatFitConfig {
-        fit_beta: true,
-        fixed_beta: 3.0,
-        lm: LMConfig {
-            max_iterations: 100,
-            ..Default::default()
-        },
-    };
-    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!(result.converged);
-    assert!((result.pos.x - true_cx).abs() < 0.1);
-    assert!((result.pos.y - true_cy).abs() < 0.1);
-    assert!((result.beta - true_beta).abs() < 0.5);
 }
 
 #[test]
@@ -168,7 +132,6 @@ fn test_moffat_fit_with_gaussian_noise() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = MoffatFitConfig {
-        fit_beta: false,
         fixed_beta: true_beta,
         ..Default::default()
     };
@@ -210,7 +173,6 @@ fn test_moffat_fit_high_noise_still_converges() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = MoffatFitConfig {
-        fit_beta: false,
         fixed_beta: true_beta,
         ..Default::default()
     };
@@ -252,7 +214,6 @@ fn test_moffat_fit_low_snr() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = MoffatFitConfig {
-        fit_beta: false,
         fixed_beta: true_beta,
         ..Default::default()
     };
@@ -290,7 +251,6 @@ fn test_moffat_fit_wrong_background_estimate() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = MoffatFitConfig {
-        fit_beta: false,
         fixed_beta: true_beta,
         ..Default::default()
     };
@@ -339,7 +299,6 @@ fn test_moffat_fit_wrong_beta_still_finds_centroid() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = MoffatFitConfig {
-        fit_beta: false,
         fixed_beta: 2.5, // Wrong beta (2.5 instead of 4.0)
         ..Default::default()
     };
@@ -382,7 +341,6 @@ fn test_moffat_fit_very_high_amplitude() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = MoffatFitConfig {
-        fit_beta: false,
         fixed_beta: true_beta,
         ..Default::default()
     };
@@ -413,7 +371,6 @@ fn test_moffat_fit_very_low_amplitude() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = MoffatFitConfig {
-        fit_beta: false,
         fixed_beta: true_beta,
         ..Default::default()
     };
@@ -443,7 +400,6 @@ fn test_moffat_fit_narrow_psf() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = MoffatFitConfig {
-        fit_beta: false,
         fixed_beta: true_beta,
         ..Default::default()
     };
@@ -473,7 +429,6 @@ fn test_moffat_fit_wide_psf() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = MoffatFitConfig {
-        fit_beta: false,
         fixed_beta: true_beta,
         ..Default::default()
     };
@@ -509,7 +464,6 @@ fn test_moffat_fit_various_beta_values() {
         let pixels_buf = Buffer2::new(width, height, pixels);
 
         let config = MoffatFitConfig {
-            fit_beta: false,
             fixed_beta: true_beta,
             ..Default::default()
         };
@@ -552,7 +506,6 @@ fn test_moffat_fit_converges_within_max_iterations() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = MoffatFitConfig {
-        fit_beta: false,
         fixed_beta: true_beta,
         lm: LMConfig {
             max_iterations: 20, // Moderate iteration limit
@@ -585,7 +538,6 @@ fn test_moffat_fit_bad_initial_guess_still_converges() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = MoffatFitConfig {
-        fit_beta: false,
         fixed_beta: true_beta,
         lm: LMConfig {
             max_iterations: 100,
@@ -660,7 +612,6 @@ fn test_moffat_fwhm_computed_correctly() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = MoffatFitConfig {
-        fit_beta: false,
         fixed_beta: true_beta,
         ..Default::default()
     };
@@ -836,45 +787,6 @@ fn test_moffat_fixed_beta_evaluate_and_jacobian_consistency() {
                         fused_jac[i]
                     );
                 }
-            }
-        }
-    }
-}
-
-#[test]
-fn test_moffat_variable_beta_evaluate_and_jacobian_consistency() {
-    let model = MoffatVariableBeta { stamp_radius: 15.0 };
-    let params_list: &[[f64; 6]] = &[
-        [10.0, 10.0, 1000.0, 2.0, 2.5, 100.0],
-        [5.5, 7.3, 500.0, 3.0, 3.5, 50.0],
-        [0.0, 0.0, 1.0, 1.0, 4.0, 0.0],
-    ];
-    let points = [(8.0, 9.0), (10.0, 10.0), (12.0, 11.0)];
-
-    for params in params_list {
-        for &(x, y) in &points {
-            // Note: evaluate uses u.powf(-beta), while evaluate_and_jacobian uses
-            // (-beta * ln(u)).exp(). These are mathematically equivalent but differ
-            // by ~1e-14 in floating point. Use relative tolerance.
-            let eval = model.evaluate(x, y, params);
-            let jac = model.jacobian_row(x, y, params);
-            let (fused_eval, fused_jac) = model.evaluate_and_jacobian(x, y, params);
-
-            let eval_tol = eval.abs().max(1e-15) * 1e-12;
-            assert!(
-                (eval - fused_eval).abs() < eval_tol,
-                "evaluate mismatch: eval={eval}, fused={fused_eval}, diff={}",
-                (eval - fused_eval).abs()
-            );
-            for i in 0..6 {
-                let jac_tol = jac[i].abs().max(1e-15) * 1e-12;
-                assert!(
-                    (jac[i] - fused_jac[i]).abs() < jac_tol,
-                    "jacobian[{i}] mismatch: jac={}, fused={}, diff={}",
-                    jac[i],
-                    fused_jac[i],
-                    (jac[i] - fused_jac[i]).abs()
-                );
             }
         }
     }
