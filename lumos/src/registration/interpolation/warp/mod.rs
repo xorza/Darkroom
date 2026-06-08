@@ -60,7 +60,7 @@ pub(crate) fn warp_row_with(
     output_y: usize,
     wt: &WarpTransform,
     output_row: &mut [f32],
-    mut sample: impl FnMut(f32, f32) -> f32,
+    mut sample: impl FnMut(Vec2) -> f32,
 ) {
     let m = wt.transform.matrix.as_array();
     let can_step = wt.is_linear();
@@ -76,7 +76,7 @@ pub(crate) fn warp_row_with(
             src_x = src.x;
             src_y = src.y;
         }
-        *out = sample(src_x as f32, src_y as f32);
+        *out = sample(Vec2::new(src_x as f32, src_y as f32));
         if can_step {
             src_x += dx_step;
             src_y += dy_step;
@@ -138,8 +138,8 @@ pub(crate) fn warp_row_bilinear_scalar(
     wt: &WarpTransform,
     border_value: f32,
 ) {
-    warp_row_with(output_y, wt, output_row, |sx, sy| {
-        bilinear_sample(input, Vec2::new(sx, sy), border_value)
+    warp_row_with(output_y, wt, output_row, |pos| {
+        bilinear_sample(input, pos, border_value)
     });
 }
 

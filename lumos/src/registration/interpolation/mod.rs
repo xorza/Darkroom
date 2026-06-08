@@ -309,12 +309,13 @@ fn interpolate(data: &Buffer2<f32>, pos: Vec2, params: &WarpParams) -> f32 {
 /// sampler, while nearest/bilinear keep raw border-blended values that
 /// `registration::warp` divides by this coverage afterward (`renormalize_by_coverage`).
 /// Either way the value is already an average, so it is not divided by coverage again.
-fn coverage_at(pos: Vec2, w: usize, h: usize, method: InterpolationMethod) -> f32 {
+fn coverage_at(pos: Vec2, dims: Vec2us, method: InterpolationMethod) -> f32 {
     let (sx, sy) = (pos.x, pos.y);
-    let in_bounds = |x: i32, y: i32| x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h;
+    let in_bounds =
+        |c: IVec2| c.x >= 0 && c.y >= 0 && (c.x as usize) < dims.x && (c.y as usize) < dims.y;
     match method {
         InterpolationMethod::Nearest => {
-            if in_bounds(sx.round() as i32, sy.round() as i32) {
+            if in_bounds(IVec2::new(sx.round() as i32, sy.round() as i32)) {
                 1.0
             } else {
                 0.0
@@ -325,7 +326,7 @@ fn coverage_at(pos: Vec2, w: usize, h: usize, method: InterpolationMethod) -> f3
             let y0 = sy.floor() as i32;
             let fx = sx - x0 as f32;
             let fy = sy - y0 as f32;
-            separable_in_bounds_fraction(x0, &[1.0 - fx, fx], y0, &[1.0 - fy, fy], w, h)
+            separable_in_bounds_fraction(x0, &[1.0 - fx, fx], y0, &[1.0 - fy, fy], dims)
         }
         InterpolationMethod::Bicubic => {
             let x0 = sx.floor() as i32;
@@ -334,7 +335,7 @@ fn coverage_at(pos: Vec2, w: usize, h: usize, method: InterpolationMethod) -> f3
             let fy = sy - y0 as f32;
             let wx = bicubic_weights(fx);
             let wy = bicubic_weights(fy);
-            separable_in_bounds_fraction(x0 - 1, &wx, y0 - 1, &wy, w, h)
+            separable_in_bounds_fraction(x0 - 1, &wx, y0 - 1, &wy, dims)
         }
         InterpolationMethod::Lanczos2 { .. }
         | InterpolationMethod::Lanczos3 { .. }
@@ -358,7 +359,7 @@ fn coverage_at(pos: Vec2, w: usize, h: usize, method: InterpolationMethod) -> f3
                 wx[i] = lut.lookup(fx - (i as i32 - ai + 1) as f32);
                 wy[i] = lut.lookup(fy - (i as i32 - ai + 1) as f32);
             }
-            separable_in_bounds_fraction(x0 - ai + 1, &wx[..size], y0 - ai + 1, &wy[..size], w, h)
+            separable_in_bounds_fraction(x0 - ai + 1, &wx[..size], y0 - ai + 1, &wy[..size], dims)
         }
     }
 }
@@ -367,14 +368,7 @@ fn coverage_at(pos: Vec2, w: usize, h: usize, method: InterpolationMethod) -> f3
 /// weight — the fraction of the kernel that landed on real samples. The samplers
 /// themselves divide their in-bounds value sum by the in-bounds weight, so this is
 /// the downstream stacking weight, not a value-renormalization factor.
-fn separable_in_bounds_fraction(
-    x0: i32,
-    wx: &[f32],
-    y0: i32,
-    wy: &[f32],
-    w: usize,
-    h: usize,
-) -> f32 {
+fn separable_in_bounds_fraction(x0: i32, wx: &[f32], y0: i32, wy: &[f32], dims: Vec2us) -> f32 {
     let wsum = wx.iter().sum::<f32>() * wy.iter().sum::<f32>();
     if wsum.abs() < 1e-10 {
         return 0.0;
@@ -382,12 +376,12 @@ fn separable_in_bounds_fraction(
     let mut in_sum = 0.0f32;
     for (j, &wyj) in wy.iter().enumerate() {
         let py = y0 + j as i32;
-        if py < 0 || py as usize >= h {
+        if py < 0 || py as usize >= dims.y {
             continue;
         }
         for (i, &wxi) in wx.iter().enumerate() {
             let px = x0 + i as i32;
-            if px >= 0 && (px as usize) < w {
+            if px >= 0 && (px as usize) < dims.x {
                 in_sum += wxi * wyj;
             }
         }
@@ -400,20 +394,17 @@ fn separable_in_bounds_fraction(
 /// incremental coordinate stepping but reading no pixel data (see
 /// [`coverage_at`]). Channel-independent, so the caller computes it once.
 pub(crate) fn warp_coverage(
-    width: usize,
-    height: usize,
+    dims: Vec2us,
     wt: &WarpTransform,
     method: InterpolationMethod,
 ) -> Buffer2<f32> {
-    let mut coverage = Buffer2::new_default(width, height);
+    let mut coverage = Buffer2::new_default(dims.x, dims.y);
     coverage
         .pixels_mut()
-        .par_chunks_mut(width)
+        .par_chunks_mut(dims.x)
         .enumerate()
         .for_each(|(y, row)| {
-            warp::warp_row_with(y, wt, row, |sx, sy| {
-                coverage_at(Vec2::new(sx, sy), width, height, method)
-            });
+            warp::warp_row_with(y, wt, row, |pos| coverage_at(pos, dims, method));
         });
     coverage
 }
@@ -444,8 +435,8 @@ pub(crate) fn warp_image(
             } else if params.method.lanczos_param().is_some() {
                 warp::warp_row_lanczos(input, row, y, warp_transform, params);
             } else {
-                warp::warp_row_with(y, warp_transform, row, |sx, sy| {
-                    interpolate(input, Vec2::new(sx, sy), params)
+                warp::warp_row_with(y, warp_transform, row, |pos| {
+                    interpolate(input, pos, params)
                 });
             }
         });

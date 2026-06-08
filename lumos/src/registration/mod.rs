@@ -264,8 +264,7 @@ pub fn warp(image: &AstroImage, warp_transform: &WarpTransform, config: &Config)
     }
 
     let coverage = interpolation::warp_coverage(
-        image.width(),
-        image.height(),
+        image.dimensions().size,
         warp_transform,
         config.interpolation,
     );

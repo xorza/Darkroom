@@ -1051,7 +1051,7 @@ fn samplers_renormalize_partial_kernel_at_edge() {
 fn warp_coverage_nearest_identity_is_all_ones() {
     let (w, h) = (8, 8);
     let wt = WarpTransform::new(Transform::identity());
-    let cov = warp_coverage(w, h, &wt, InterpolationMethod::Nearest);
+    let cov = warp_coverage(Vec2us::new(w, h), &wt, InterpolationMethod::Nearest);
     for &c in cov.pixels() {
         assert!(
             (c - 1.0).abs() < TOL,
@@ -1065,7 +1065,7 @@ fn warp_coverage_fully_outside_is_zero() {
     let (w, h) = (8, 8);
     // Source translated far outside the image: every kernel tap is out of bounds.
     let wt = WarpTransform::new(Transform::translation(DVec2::new(1000.0, 1000.0)));
-    let cov = warp_coverage(w, h, &wt, InterpolationMethod::Bilinear);
+    let cov = warp_coverage(Vec2us::new(w, h), &wt, InterpolationMethod::Bilinear);
     for &c in cov.pixels() {
         assert_eq!(c, 0.0, "fully-outside coverage must be 0, got {c}");
     }
@@ -1077,7 +1077,7 @@ fn warp_coverage_bilinear_edge_is_partial() {
     // Output (0,4) maps to src (-0.5, 4.0): the 2×2 bilinear footprint straddles the left
     // edge — taps at x=-1 (out, weight 0.5) and x=0 (in, weight 0.5) → coverage 0.5.
     let wt = WarpTransform::new(Transform::translation(DVec2::new(-0.5, 0.0)));
-    let cov = warp_coverage(w, h, &wt, InterpolationMethod::Bilinear);
+    let cov = warp_coverage(Vec2us::new(w, h), &wt, InterpolationMethod::Bilinear);
     let edge = cov.pixels()[4 * w];
     assert!(
         (edge - 0.5).abs() < TOL,
