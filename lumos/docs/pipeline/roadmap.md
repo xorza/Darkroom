@@ -32,9 +32,16 @@ Status: ☐ todo · ◐ in progress · ☑ done · ⊘ deferred (deliberate)
 - ☐ **T3.2 — GESD critical values** · Low (opt-in). The off-by-`i` sample-size bug is fixed;
   remaining is second-order: inverse-**normal** vs Student-t critical values (`rejection.rs:759`)
   and median+MAD vs mean+sd Grubbs statistic. No default preset uses GESD.
-- ☐ **T3.3 — warp/drizzle pixel-center mismatch (~0.5px)** · Medium · S. drizzle uses `+0.5`
-  center (`drizzle/mod.rs:352`), warp integer (`interpolation/mod.rs:313`).
-- ☐ **T3.4 — `Auto` transform ladder skips Euclidean/Affine** · Medium · S — `mod.rs:163-185`.
+- ☑ **T3.3 — warp/drizzle pixel-center mismatch (~0.5px)** · Already resolved (stale entry). Both
+  use integer-center mapping: warp applies the transform to the raw output index
+  (`warp/mod.rs` `wt.apply(DVec2::new(x_idx, output_y))`), drizzle to the raw input index
+  (`drizzle/mod.rs` `transform.apply(DVec2::new(ix, iy))`); drizzle's `+0.5` is only the output
+  *cell* extent `[o-0.5, o+0.5)` for overlap area, not a coordinate offset. All four drizzle kernels
+  + warp + star centroids agree — no offset to fix.
+- ☑ **T3.4 — `Auto` transform ladder skips Euclidean/Affine** · Done. `register`'s `Auto` path now
+  uses `auto_ladder` (Euclidean → Similarity → Affine → Homography), accepting the first model
+  within 0.5px RMS so same-scale rigid sets aren't fit with a needless scale DOF and mild linear
+  distortion doesn't overshoot to the full projective model; falls through to Homography otherwise.
 - ☐ **T3.5 — drizzle uncompensated f32 accumulation** · Medium (deep stacks) · M — `drizzle/mod.rs:619`.
 
 ## Tier 4 — missing features (deliberate; schedule when needed)

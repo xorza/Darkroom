@@ -88,7 +88,7 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 1. derive `max_sigma = (median_fwhm·0.5).max(0.5)` from input FWHM,
 2. select brightest ≤`max_stars`,
 3. **triangle matching** (`triangle/`: k-NN invariant triangles via `spatial::KdTree`, ratio-space voting in `voting.rs`, greedy conflict resolution) → `Vec<PointMatch>`,
-4. **RANSAC/MAGSAC++** (`ransac/`) with `Auto` upgrading Similarity→Homography when RMS > 0.5 px,
+4. **RANSAC/MAGSAC++** (`ransac/`); `Auto` (`auto_ladder`) walks Euclidean → Similarity → Affine → Homography and takes the first model within 0.5 px RMS (simplest fit, no overfitting), falling through to Homography,
 5. iterative **match recovery** (`mod.rs:376`, kd-tree NN within `~3.03·max_sigma`, ≤5 passes),
 6. optional **SIP** polynomial fit, then `max_rms_error` gate.
 

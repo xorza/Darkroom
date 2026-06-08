@@ -677,3 +677,76 @@ fn test_affine_recovers_from_similarity_data() {
         max_error
     );
 }
+
+// ============================================================================
+// TransformType::Auto ladder: pick the simplest model that fits (T3.4)
+// ============================================================================
+
+#[test]
+fn test_auto_ladder_selects_simplest_adequate_model() {
+    // `Auto` must accept the fewest-DOF transform within 0.5 px RMS, not overfit. Each ground
+    // truth is built so every simpler model genuinely exceeds the threshold.
+    let ref_stars = generate_random_stars(90, 2000.0, 2000.0, 101010, FWHM_TIGHT);
+    let config = Config {
+        transform_type: TransformType::Auto,
+        min_stars: 8,
+        min_matches: 6,
+        ..Default::default()
+    };
+
+    // Rigid (rotation + translation, scale exactly 1.0) → Euclidean, NOT Similarity.
+    let euclid = transform_star_list(
+        &ref_stars,
+        40.0,
+        -25.0,
+        0.8f64.to_radians(),
+        1.0,
+        1000.0,
+        1000.0,
+    );
+    let result = register(&ref_stars, &euclid, &config).expect("euclidean auto");
+    assert_eq!(
+        result.transform.transform_type,
+        TransformType::Euclidean,
+        "scale-1 rigid set should select Euclidean, got {:?}",
+        result.transform.transform_type
+    );
+
+    // Uniform scale ≠ 1 → Euclidean can't fit the scale → Similarity.
+    let sim = transform_star_list(
+        &ref_stars,
+        30.0,
+        -20.0,
+        0.5f64.to_radians(),
+        1.002,
+        1000.0,
+        1000.0,
+    );
+    let result = register(&ref_stars, &sim, &config).expect("similarity auto");
+    assert_eq!(
+        result.transform.transform_type,
+        TransformType::Similarity,
+        "uniformly-scaled set should select Similarity, got {:?}",
+        result.transform.transform_type
+    );
+
+    // Anisotropic scale (shear-like) → Euclidean/Similarity fail → Affine, NOT Homography.
+    let affine = apply_affine(&ref_stars, [1.003, 0.0, 20.0, 0.0, 0.998, -15.0]);
+    let result = register(&ref_stars, &affine, &config).expect("affine auto");
+    assert_eq!(
+        result.transform.transform_type,
+        TransformType::Affine,
+        "anisotropic set should select Affine (not jump to Homography), got {:?}",
+        result.transform.transform_type
+    );
+
+    // Perspective → no linear model fits → fall through to Homography.
+    let homog = apply_homography(&ref_stars, [1.0, 0.0, 25.0, 0.0, 1.0, -18.0, 1e-5, 5e-6]);
+    let result = register(&ref_stars, &homog, &config).expect("homography auto");
+    assert_eq!(
+        result.transform.transform_type,
+        TransformType::Homography,
+        "perspective set should fall through to Homography, got {:?}",
+        result.transform.transform_type
+    );
+}

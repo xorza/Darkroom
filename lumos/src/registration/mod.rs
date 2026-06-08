@@ -25,7 +25,7 @@
 //! | Similarity | 4 | Translation + rotation + uniform scale |
 //! | Affine | 6 | Handles shear and differential scaling |
 //! | Homography | 8 | Full perspective transformation |
-//! | Auto | - | Starts with Similarity, upgrades to Homography if needed |
+//! | Auto | - | Ladder Euclidean → Similarity → Affine → Homography; first within 0.5px RMS wins |
 //!
 //! # Configuration Presets
 //!
@@ -162,28 +162,13 @@ pub fn register(
 
     // RANSAC estimation
     let result = if config.transform_type == TransformType::Auto {
-        let sim_result = estimate_and_refine(
+        auto_ladder(
             &ref_positions,
             &target_positions,
             &matches,
-            TransformType::Similarity,
             max_sigma,
             config,
-        );
-
-        const AUTO_UPGRADE_THRESHOLD: f64 = 0.5;
-
-        match sim_result {
-            Ok(result) if result.rms_error <= AUTO_UPGRADE_THRESHOLD => Ok(result),
-            _ => estimate_and_refine(
-                &ref_positions,
-                &target_positions,
-                &matches,
-                TransformType::Homography,
-                max_sigma,
-                config,
-            ),
-        }
+        )
     } else {
         estimate_and_refine(
             &ref_positions,
@@ -328,6 +313,53 @@ fn renormalize_by_coverage(channel: &mut Buffer2<f32>, coverage: &Buffer2<f32>) 
 }
 
 // === Internal Functions ===
+
+/// Maximum RMS (px) at which an `Auto` rung is accepted before escalating to a more general model.
+const AUTO_UPGRADE_THRESHOLD: f64 = 0.5;
+
+/// `Auto` model selection: estimate transforms from fewest to most degrees of freedom and accept
+/// the first whose RMS clears [`AUTO_UPGRADE_THRESHOLD`] — the *simplest model that fits*, so the
+/// alignment isn't overfit to star-centroid noise (every extra DOF soaks up noise and generalizes
+/// worse). Falls through to the most general model (Homography) when no simpler rung clears the bar;
+/// the caller's `max_rms_error` gate then has the final say on that result.
+///
+/// The ladder is Euclidean → Similarity → Affine → Homography (rigid → +scale → +shear →
+/// projective); earlier this only tried Similarity then jumped straight to Homography, so same-scale
+/// rigid sets were fit with a needless scale DOF and mild differential distortion overshot to the
+/// full projective model.
+fn auto_ladder(
+    ref_positions: &[DVec2],
+    target_positions: &[DVec2],
+    matches: &[PointMatch],
+    max_sigma: f64,
+    config: &Config,
+) -> Result<RegistrationResult, RegistrationError> {
+    for model in [
+        TransformType::Euclidean,
+        TransformType::Similarity,
+        TransformType::Affine,
+    ] {
+        if let Ok(result) = estimate_and_refine(
+            ref_positions,
+            target_positions,
+            matches,
+            model,
+            max_sigma,
+            config,
+        ) && result.rms_error <= AUTO_UPGRADE_THRESHOLD
+        {
+            return Ok(result);
+        }
+    }
+    estimate_and_refine(
+        ref_positions,
+        target_positions,
+        matches,
+        TransformType::Homography,
+        max_sigma,
+        config,
+    )
+}
 
 /// Run RANSAC estimation followed by match recovery and optional SIP fitting.
 ///
