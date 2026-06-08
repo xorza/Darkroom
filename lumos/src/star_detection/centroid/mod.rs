@@ -32,10 +32,6 @@ use common::Buffer2;
 use gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
 use moffat_fit::{MoffatFitConfig, fit_moffat_2d};
 
-// =============================================================================
-// Stamp and Centroid Constants
-// =============================================================================
-
 /// Stamp radius as a multiple of FWHM.
 ///
 /// A stamp radius of 1.75 × FWHM captures approximately 99% of the PSF flux

@@ -17,9 +17,7 @@ mod simd_avx2;
 #[cfg(target_arch = "aarch64")]
 mod simd_neon;
 
-// ============================================================================
-// Cephes exp() polynomial coefficients (shared by AVX2 and NEON SIMD)
-// ============================================================================
+// Cephes exp() polynomial coefficients (shared by AVX2 and NEON SIMD).
 //
 // Algorithm: range reduction via x = n*ln2 + r, then rational approximation
 //   exp(r) ≈ 1 + 2r * P(r²) / (Q(r²) - P(r²))

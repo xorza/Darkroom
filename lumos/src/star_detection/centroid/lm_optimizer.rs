@@ -201,28 +201,28 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
     initial_params: [f64; N],
     config: &LMConfig,
 ) -> LMResult<N> {
+    // Build normal equations (J^T J, J^T r) + χ² in one fused pass, or its weighted form.
+    let build = |p: &[f64; N]| match weights {
+        Some(w) => model.batch_build_normal_equations_weighted(data_x, data_y, data_z, w, p),
+        None => model.batch_build_normal_equations(data_x, data_y, data_z, p),
+    };
+    let chi2_at = |p: &[f64; N]| match weights {
+        Some(w) => model.batch_compute_chi2_weighted(data_x, data_y, data_z, w, p),
+        None => model.batch_compute_chi2(data_x, data_y, data_z, p),
+    };
+
     let mut params = initial_params;
     let mut lambda = config.initial_lambda;
-    let mut prev_chi2 = f64::MAX;
     let mut converged = false;
     let mut iterations = 0;
 
+    // Normal equations at the current `params`. Rebuilt only when `params` actually moves — a
+    // rejected step changes only `lambda`, so the cached (SIMD-accelerated) Jacobian pass is reused
+    // across damping retries instead of being recomputed identically every iteration.
+    let (mut hessian, mut gradient, mut prev_chi2) = build(&params);
+
     for iter in 0..config.max_iterations {
         iterations = iter + 1;
-
-        // Build normal equations (J^T J, J^T r) and chi² in a single fused pass.
-        // Avoids storing intermediate jacobian/residuals arrays.
-        let (hessian, gradient, current_chi2) = match weights {
-            Some(w) => {
-                model.batch_build_normal_equations_weighted(data_x, data_y, data_z, w, &params)
-            }
-            None => model.batch_build_normal_equations(data_x, data_y, data_z, &params),
-        };
-
-        // On first iteration, initialize prev_chi2 from the fused pass.
-        if iter == 0 {
-            prev_chi2 = current_chi2;
-        }
 
         let mut damped_hessian = hessian;
         for (i, row) in damped_hessian.iter_mut().enumerate() {
@@ -239,16 +239,12 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
         }
         model.constrain(&mut new_params);
 
-        let new_chi2 = match weights {
-            Some(w) => model.batch_compute_chi2_weighted(data_x, data_y, data_z, w, &new_params),
-            None => model.batch_compute_chi2(data_x, data_y, data_z, &new_params),
-        };
+        let new_chi2 = chi2_at(&new_params);
 
-        if new_chi2 < prev_chi2 {
+        if new_chi2.is_finite() && new_chi2 < prev_chi2 {
+            let chi2_rel_change = (prev_chi2 - new_chi2) / prev_chi2.max(1e-30);
             params = new_params;
             lambda *= config.lambda_down;
-
-            let chi2_rel_change = (prev_chi2 - new_chi2) / prev_chi2.max(1e-30);
             prev_chi2 = new_chi2;
 
             let max_delta = delta.iter().copied().fold(0.0f64, |a, d| a.max(d.abs()));
@@ -263,11 +259,21 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
                 converged = true;
                 break;
             }
+
+            // `params` moved → refresh the normal equations for the next iteration.
+            let (h, g, _) = build(&params);
+            hessian = h;
+            gradient = g;
         } else {
-            let chi2_rel_diff = (new_chi2 - prev_chi2) / prev_chi2.max(1e-30);
-            if chi2_rel_diff < 1e-10 {
-                converged = true;
-                break;
+            // Rejected step (worse fit, or a non-finite χ² from a bad trial point): keep `params`
+            // and the cached normal equations, just increase damping. A non-finite χ² skips the
+            // relative-change test (it would be NaN) and falls straight through to the lambda ramp.
+            if new_chi2.is_finite() {
+                let chi2_rel_diff = (new_chi2 - prev_chi2) / prev_chi2.max(1e-30);
+                if chi2_rel_diff < 1e-10 {
+                    converged = true;
+                    break;
+                }
             }
 
             lambda *= config.lambda_up;
