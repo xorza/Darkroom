@@ -3,11 +3,11 @@ use std::f32::consts::PI;
 use super::*;
 use crate::registration::transform::{Transform, WarpTransform};
 use common::Buffer2;
-use glam::DVec2;
+use glam::{DVec2, Vec2};
 
 /// Shorthand for tests: interpolate with a method and default border/clamp settings.
 fn interp(data: &Buffer2<f32>, x: f32, y: f32, method: InterpolationMethod) -> f32 {
-    interpolate(data, x, y, &WarpParams::new(method))
+    interpolate(data, Vec2::new(x, y), &WarpParams::new(method))
 }
 
 const TOL: f32 = 1e-5;
@@ -514,7 +514,7 @@ fn test_custom_border_value() {
     };
 
     // Fully outside should use the custom border value
-    let val = interpolate(&data_buf, -5.0, -5.0, &params);
+    let val = interpolate(&data_buf, Vec2::new(-5.0, -5.0), &params);
     assert!(
         (val - (-99.0)).abs() < TOL,
         "Expected border_value -99.0, got {val}"
@@ -804,7 +804,7 @@ fn test_warp_image_lanczos3_matches_per_pixel() {
     for y in 0..height {
         for x in 0..width {
             let src = transform.apply(DVec2::new(x as f64, y as f64));
-            let expected = interpolate(&input_buf, src.x as f32, src.y as f32, &params);
+            let expected = interpolate(&input_buf, Vec2::new(src.x as f32, src.y as f32), &params);
             let actual = output[(x, y)];
             assert!(
                 (actual - expected).abs() < 1e-4,
@@ -853,7 +853,7 @@ fn warp_image_per_pixel_reference(
     for y in 0..height {
         for x in 0..width {
             let src = warp_transform.apply(DVec2::new(x as f64, y as f64));
-            output[(x, y)] = interpolate(input, src.x as f32, src.y as f32, params);
+            output[(x, y)] = interpolate(input, Vec2::new(src.x as f32, src.y as f32), params);
         }
     }
 }

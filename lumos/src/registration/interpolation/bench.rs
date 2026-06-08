@@ -238,7 +238,7 @@ fn bench_interpolate_lanczos3_single(b: quickbench::Bencher) {
     b.bench(|| {
         let mut sum = 0.0f32;
         for &(x, y) in black_box(&positions) {
-            sum += interpolate_lanczos(&input, x, y, 3, 0.0);
+            sum += interpolate_lanczos(&input, Vec2::new(x, y), 3, 0.0);
         }
         black_box(sum)
     });

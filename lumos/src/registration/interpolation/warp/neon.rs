@@ -10,7 +10,7 @@
 use std::arch::aarch64::*;
 
 use common::Buffer2;
-use glam::DVec2;
+use glam::{DVec2, Vec2};
 
 use super::super::sample_pixel;
 use super::SoftClampAccum;
@@ -102,7 +102,8 @@ pub unsafe fn warp_row_bilinear_neon(
         // Scalar remainder.
         for x in (chunks * 4)..output_width {
             let src = transform.apply(DVec2::new(x as f64, output_y as f64));
-            output_row[x] = super::bilinear_sample(input, src.x as f32, src.y as f32, 0.0);
+            output_row[x] =
+                super::bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
         }
     }
 }

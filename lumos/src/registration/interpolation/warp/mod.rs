@@ -23,7 +23,7 @@ use crate::registration::interpolation::WarpParams;
 use crate::registration::interpolation::get_lanczos_lut;
 use crate::registration::transform::WarpTransform;
 use common::Buffer2;
-use glam::DVec2;
+use glam::{DVec2, Vec2};
 
 /// Fast inline floor-to-i32, avoiding libc `floorf` function call.
 ///
@@ -139,7 +139,7 @@ pub(crate) fn warp_row_bilinear_scalar(
     border_value: f32,
 ) {
     warp_row_with(output_y, wt, output_row, |sx, sy| {
-        bilinear_sample(input, sx, sy, border_value)
+        bilinear_sample(input, Vec2::new(sx, sy), border_value)
     });
 }
 
@@ -147,7 +147,8 @@ use super::sample_pixel;
 
 /// Bilinear sampling at a single point (f32 coordinates).
 #[inline]
-pub(crate) fn bilinear_sample(input: &Buffer2<f32>, x: f32, y: f32, border_value: f32) -> f32 {
+pub(crate) fn bilinear_sample(input: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
+    let (x, y) = (pos.x, pos.y);
     let pixels = input.pixels();
     let width = input.width();
     let height = input.height();
@@ -1139,9 +1140,9 @@ mod tests {
 
         // At integer pixel (1, 1): exactly 4.0
         assert!(
-            (bilinear_sample(&input, 1.0, 1.0, 0.0) - 4.0).abs() < 1e-6,
+            (bilinear_sample(&input, Vec2::new(1.0, 1.0), 0.0) - 4.0).abs() < 1e-6,
             "At (1,1): expected 4.0, got {}",
-            bilinear_sample(&input, 1.0, 1.0, 0.0)
+            bilinear_sample(&input, Vec2::new(1.0, 1.0), 0.0)
         );
 
         // At (0.5, 0.5): bilinear of [0,1,3,4]
@@ -1151,9 +1152,9 @@ mod tests {
         // bottom = 3 + 0.5*(4-3) = 3.5
         // result = 0.5 + 0.5*(3.5 - 0.5) = 0.5 + 1.5 = 2.0
         assert!(
-            (bilinear_sample(&input, 0.5, 0.5, 0.0) - 2.0).abs() < 1e-6,
+            (bilinear_sample(&input, Vec2::new(0.5, 0.5), 0.0) - 2.0).abs() < 1e-6,
             "At (0.5, 0.5): expected 2.0, got {}",
-            bilinear_sample(&input, 0.5, 0.5, 0.0)
+            bilinear_sample(&input, Vec2::new(0.5, 0.5), 0.0)
         );
 
         // At (1.5, 0.5): bilinear of [1,2,4,5]
@@ -1163,9 +1164,9 @@ mod tests {
         // bottom = 4 + 0.5*(5-4) = 4.5
         // result = 1.5 + 0.5*(4.5 - 1.5) = 1.5 + 1.5 = 3.0
         assert!(
-            (bilinear_sample(&input, 1.5, 0.5, 0.0) - 3.0).abs() < 1e-6,
+            (bilinear_sample(&input, Vec2::new(1.5, 0.5), 0.0) - 3.0).abs() < 1e-6,
             "At (1.5, 0.5): expected 3.0, got {}",
-            bilinear_sample(&input, 1.5, 0.5, 0.0)
+            bilinear_sample(&input, Vec2::new(1.5, 0.5), 0.0)
         );
 
         // At (0.25, 0.75): bilinear of [0,1,3,4]
@@ -1174,9 +1175,9 @@ mod tests {
         // bottom = 3 + 0.25*(4-3) = 3.25
         // result = 0.25 + 0.75*(3.25-0.25) = 0.25 + 2.25 = 2.5
         assert!(
-            (bilinear_sample(&input, 0.25, 0.75, 0.0) - 2.5).abs() < 1e-6,
+            (bilinear_sample(&input, Vec2::new(0.25, 0.75), 0.0) - 2.5).abs() < 1e-6,
             "At (0.25, 0.75): expected 2.5, got {}",
-            bilinear_sample(&input, 0.25, 0.75, 0.0)
+            bilinear_sample(&input, Vec2::new(0.25, 0.75), 0.0)
         );
     }
 
@@ -1197,9 +1198,9 @@ mod tests {
         // bottom = -5.0 + 0.0*(30.0 - (-5.0)) = -5.0
         // result = -5.0 + 0.0*(...) = -5.0
         assert!(
-            (bilinear_sample(&input, -1.0, 0.0, -5.0) - (-5.0)).abs() < 1e-6,
+            (bilinear_sample(&input, Vec2::new(-1.0, 0.0), -5.0) - (-5.0)).abs() < 1e-6,
             "At (-1.0, 0.0): expected -5.0, got {}",
-            bilinear_sample(&input, -1.0, 0.0, -5.0)
+            bilinear_sample(&input, Vec2::new(-1.0, 0.0), -5.0)
         );
     }
 

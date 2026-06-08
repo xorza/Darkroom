@@ -3,7 +3,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use common::Buffer2;
-use glam::DVec2;
+use glam::{DVec2, Vec2};
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
@@ -147,7 +147,8 @@ pub unsafe fn warp_row_bilinear_avx2(
         let remainder_start = chunks * 8;
         for x in remainder_start..output_width {
             let src = transform.apply(DVec2::new(x as f64, y));
-            output_row[x] = super::bilinear_sample(input, src.x as f32, src.y as f32, 0.0);
+            output_row[x] =
+                super::bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
         }
     }
 }
@@ -272,7 +273,8 @@ pub unsafe fn warp_row_bilinear_sse(
         let remainder_start = chunks * 4;
         for x in remainder_start..output_width {
             let src = transform.apply(DVec2::new(x as f64, y));
-            output_row[x] = super::bilinear_sample(input, src.x as f32, src.y as f32, 0.0);
+            output_row[x] =
+                super::bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
         }
     }
 }

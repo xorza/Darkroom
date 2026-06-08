@@ -12,6 +12,7 @@ use rayon::prelude::*;
 use crate::registration::config::InterpolationMethod;
 use crate::registration::transform::WarpTransform;
 use common::Buffer2;
+use glam::Vec2;
 
 /// Bundled warp parameters passed through the interpolation pipeline.
 #[derive(Debug, Clone, Copy)]
@@ -155,19 +156,20 @@ pub(super) fn sample_pixel(
 }
 
 #[inline]
-fn interpolate_nearest(data: &Buffer2<f32>, x: f32, y: f32, border_value: f32) -> f32 {
+fn interpolate_nearest(data: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
     sample_pixel(
         data.pixels(),
         data.width(),
         data.height(),
-        x.round() as i32,
-        y.round() as i32,
+        pos.x.round() as i32,
+        pos.y.round() as i32,
         border_value,
     )
 }
 
 #[inline]
-fn interpolate_bilinear(data: &Buffer2<f32>, x: f32, y: f32, border_value: f32) -> f32 {
+fn interpolate_bilinear(data: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
+    let (x, y) = (pos.x, pos.y);
     let x0 = x.floor() as i32;
     let y0 = y.floor() as i32;
     let fx = x - x0 as f32;
@@ -184,7 +186,8 @@ fn interpolate_bilinear(data: &Buffer2<f32>, x: f32, y: f32, border_value: f32) 
     top + fy * (bottom - top)
 }
 
-fn interpolate_bicubic(data: &Buffer2<f32>, x: f32, y: f32, border_value: f32) -> f32 {
+fn interpolate_bicubic(data: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
+    let (x, y) = (pos.x, pos.y);
     let x0 = x.floor() as i32;
     let y0 = y.floor() as i32;
     let fx = x - x0 as f32;
@@ -224,11 +227,11 @@ fn interpolate_bicubic(data: &Buffer2<f32>, x: f32, y: f32, border_value: f32) -
 }
 
 #[inline]
-fn interpolate_lanczos(data: &Buffer2<f32>, x: f32, y: f32, a: usize, border_value: f32) -> f32 {
+fn interpolate_lanczos(data: &Buffer2<f32>, pos: Vec2, a: usize, border_value: f32) -> f32 {
     match a {
-        2 => interpolate_lanczos_impl::<2, 4>(data, x, y, border_value),
-        3 => interpolate_lanczos_impl::<3, 6>(data, x, y, border_value),
-        4 => interpolate_lanczos_impl::<4, 8>(data, x, y, border_value),
+        2 => interpolate_lanczos_impl::<2, 4>(data, pos, border_value),
+        3 => interpolate_lanczos_impl::<3, 6>(data, pos, border_value),
+        4 => interpolate_lanczos_impl::<4, 8>(data, pos, border_value),
         _ => panic!("Unsupported Lanczos parameter: {a}"),
     }
 }
@@ -236,10 +239,10 @@ fn interpolate_lanczos(data: &Buffer2<f32>, x: f32, y: f32, a: usize, border_val
 #[inline]
 fn interpolate_lanczos_impl<const A: usize, const SIZE: usize>(
     data: &Buffer2<f32>,
-    x: f32,
-    y: f32,
+    pos: Vec2,
     border_value: f32,
 ) -> f32 {
+    let (x, y) = (pos.x, pos.y);
     let x0 = x.floor() as i32;
     let y0 = y.floor() as i32;
     let fx = x - x0 as f32;
@@ -287,19 +290,19 @@ fn interpolate_lanczos_impl<const A: usize, const SIZE: usize>(
 }
 
 #[inline]
-fn interpolate(data: &Buffer2<f32>, x: f32, y: f32, params: &WarpParams) -> f32 {
+fn interpolate(data: &Buffer2<f32>, pos: Vec2, params: &WarpParams) -> f32 {
     match params.method {
-        InterpolationMethod::Nearest => interpolate_nearest(data, x, y, params.border_value),
-        InterpolationMethod::Bilinear => interpolate_bilinear(data, x, y, params.border_value),
-        InterpolationMethod::Bicubic => interpolate_bicubic(data, x, y, params.border_value),
+        InterpolationMethod::Nearest => interpolate_nearest(data, pos, params.border_value),
+        InterpolationMethod::Bilinear => interpolate_bilinear(data, pos, params.border_value),
+        InterpolationMethod::Bicubic => interpolate_bicubic(data, pos, params.border_value),
         InterpolationMethod::Lanczos2 { .. } => {
-            interpolate_lanczos(data, x, y, 2, params.border_value)
+            interpolate_lanczos(data, pos, 2, params.border_value)
         }
         InterpolationMethod::Lanczos3 { .. } => {
-            interpolate_lanczos(data, x, y, 3, params.border_value)
+            interpolate_lanczos(data, pos, 3, params.border_value)
         }
         InterpolationMethod::Lanczos4 { .. } => {
-            interpolate_lanczos(data, x, y, 4, params.border_value)
+            interpolate_lanczos(data, pos, 4, params.border_value)
         }
     }
 }
@@ -315,7 +318,8 @@ fn interpolate(data: &Buffer2<f32>, x: f32, y: f32, params: &WarpParams) -> f32 
 /// sampler, while nearest/bilinear keep raw border-blended values that
 /// `registration::warp` divides by this coverage afterward (`renormalize_by_coverage`).
 /// Either way the value is already an average, so it is not divided by coverage again.
-fn coverage_at(sx: f32, sy: f32, w: usize, h: usize, method: InterpolationMethod) -> f32 {
+fn coverage_at(pos: Vec2, w: usize, h: usize, method: InterpolationMethod) -> f32 {
+    let (sx, sy) = (pos.x, pos.y);
     let in_bounds = |x: i32, y: i32| x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h;
     match method {
         InterpolationMethod::Nearest => {
@@ -417,7 +421,7 @@ pub(crate) fn warp_coverage(
         .enumerate()
         .for_each(|(y, row)| {
             warp::warp_row_with(y, wt, row, |sx, sy| {
-                coverage_at(sx, sy, width, height, method)
+                coverage_at(Vec2::new(sx, sy), width, height, method)
             });
         });
     coverage
@@ -450,7 +454,7 @@ pub(crate) fn warp_image(
                 warp::warp_row_lanczos(input, row, y, warp_transform, params);
             } else {
                 warp::warp_row_with(y, warp_transform, row, |sx, sy| {
-                    interpolate(input, sx, sy, params)
+                    interpolate(input, Vec2::new(sx, sy), params)
                 });
             }
         });
