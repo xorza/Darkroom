@@ -246,6 +246,10 @@ pub(super) fn interpolate_green(
         let dir_ptrs = dir_send.get();
         let raw_y = y + xtrans.top_margin;
         let row_off = y * width;
+        // `flip` depends only on the row, so compute it once. A true modulo is required: a
+        // `wrapping_sub(sgrow)` mis-handles `raw_y < sgrow` (2⁶⁴ mod 3 = 1 shifts the parity),
+        // which happens when the top margin is smaller than `sgrow`.
+        let flip = ((raw_y as i64 - hex.sgrow as i64).rem_euclid(3) != 0) as usize;
 
         for x in 0..width {
             let raw_x = x + xtrans.left_margin;
@@ -304,12 +308,6 @@ pub(super) fn interpolate_green(
                 let n5_m3 = read(-3 * h[5].dy, -3 * h[5].dx);
                 let color_c1 =
                     0.640625 * n5 + 0.359375 * n5_m2 + 0.12890625 * (2.0 * raw_val - n5_p3 - n5_m3);
-
-                let flip = if !raw_y.wrapping_sub(hex.sgrow).is_multiple_of(3) {
-                    1
-                } else {
-                    0
-                };
 
                 let colors = [color_a, color_b, color_c0, color_c1];
                 for (c, &val) in colors.iter().enumerate() {

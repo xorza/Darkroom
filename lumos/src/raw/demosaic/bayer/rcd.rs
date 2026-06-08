@@ -44,6 +44,13 @@ fn intp(a: f32, b: f32, c: f32) -> f32 {
     b + a * (c - b)
 }
 
+/// Mean of the four diagonal neighbours of `idx` (stride `w1`): the direction-discriminator's
+/// local average, used to pull a pixel's V/H (or P/Q) direction estimate toward its neighbourhood.
+#[inline(always)]
+fn avg4_diag(buf: &[f32], idx: usize, w1: usize) -> f32 {
+    0.25 * (buf[idx - w1 - 1] + buf[idx - w1 + 1] + buf[idx + w1 - 1] + buf[idx + w1 + 1])
+}
+
 // SAFETY: Caller must ensure no data races (each thread writes to unique indices).
 #[derive(Clone, Copy)]
 struct SendPtr(*mut f32);
@@ -235,11 +242,7 @@ pub(super) fn rcd_demosaic(bayer: &BayerImage) -> [Vec<f32>; 3] {
                 let h_est = (w_grad * e_est + e_grad * w_est) / (e_grad + w_grad);
 
                 let vh_central = vh_dir[idx];
-                let vh_neighbourhood = 0.25
-                    * (vh_dir[idx - w1 - 1]
-                        + vh_dir[idx - w1 + 1]
-                        + vh_dir[idx + w1 - 1]
-                        + vh_dir[idx + w1 + 1]);
+                let vh_neighbourhood = avg4_diag(&vh_dir, idx, w1);
                 let vh_disc = if (0.5 - vh_central).abs() < (0.5 - vh_neighbourhood).abs() {
                     vh_neighbourhood
                 } else {
@@ -433,11 +436,7 @@ fn process_step4_2_row(
         let idx = ry * rw + rx;
 
         let pq_central = pq_dir[idx];
-        let pq_neighbourhood = 0.25
-            * (pq_dir[idx - w1 - 1]
-                + pq_dir[idx - w1 + 1]
-                + pq_dir[idx + w1 - 1]
-                + pq_dir[idx + w1 + 1]);
+        let pq_neighbourhood = avg4_diag(pq_dir, idx, w1);
         let pq_disc = if (0.5 - pq_central).abs() < (0.5 - pq_neighbourhood).abs() {
             pq_neighbourhood
         } else {
@@ -510,11 +509,7 @@ fn step4_3_rb_at_green(
                 let idx = ry * rw + rx;
 
                 let vh_central = vh_dir[idx];
-                let vh_neighbourhood = 0.25
-                    * (vh_dir[idx - w1 - 1]
-                        + vh_dir[idx - w1 + 1]
-                        + vh_dir[idx + w1 - 1]
-                        + vh_dir[idx + w1 + 1]);
+                let vh_neighbourhood = avg4_diag(vh_dir, idx, w1);
                 let vh_disc = if (0.5 - vh_central).abs() < (0.5 - vh_neighbourhood).abs() {
                     vh_neighbourhood
                 } else {

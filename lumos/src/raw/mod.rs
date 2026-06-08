@@ -93,7 +93,7 @@ fn consolidate_black_levels(
     black_raw: u32,
     maximum_raw: u32,
     filters: u32,
-) -> BlackLevel {
+) -> Result<BlackLevel, String> {
     let mut cblack = [0u32; 4104];
     cblack.copy_from_slice(cblack_raw);
     let mut black = black_raw;
@@ -183,10 +183,13 @@ fn consolidate_black_levels(
     }
     let common = black as f32;
     let effective_max = maximum_raw as f32 - common;
-    assert!(
-        effective_max > 0.0,
-        "Invalid black level: common={common}, maximum={maximum_raw}"
-    );
+    // File-derived metadata: a corrupt RAW can report maximum <= black. Return an error rather
+    // than panicking at this trust boundary.
+    if effective_max <= 0.0 {
+        return Err(format!(
+            "invalid black level: common black {common} >= maximum {maximum_raw}"
+        ));
+    }
     let inv_range = 1.0 / effective_max;
     let mut channel_delta_norm = [0f32; 4];
     for c in 0..4 {
@@ -198,12 +201,12 @@ fn consolidate_black_levels(
          delta_norm={channel_delta_norm:?}, inv_range={inv_range}"
     );
 
-    BlackLevel {
+    Ok(BlackLevel {
         per_channel,
         common,
         inv_range,
         channel_delta_norm,
-    }
+    })
 }
 
 /// Compute normalized WB multipliers from camera multipliers.
@@ -737,7 +740,8 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
     // Consolidate per-channel black levels (replicates libraw adjust_bl)
     // SAFETY: inner is valid, color.cblack is initialized after unpack.
     let cblack_raw: [u32; 4104] = unsafe { (*inner).color.cblack };
-    let black_level = consolidate_black_levels(&cblack_raw, black_raw, maximum_raw, filters);
+    let black_level = consolidate_black_levels(&cblack_raw, black_raw, maximum_raw, filters)
+        .map_err(|reason| raw_err(path, reason))?;
 
     // Extract camera white balance multipliers
     // SAFETY: inner is valid, color.cam_mul is initialized after unpack.
@@ -862,7 +866,10 @@ pub fn load_raw_cfa(path: &Path) -> Result<CfaImage, ImageError> {
         SensorType::Bayer(p) => CfaType::Bayer(*p),
         SensorType::XTrans => CfaType::XTrans(raw.xtrans_pattern()),
         SensorType::Unknown => {
-            unimplemented!("Cannot extract raw CFA data for unknown sensor types")
+            return Err(raw_err(
+                &raw.path,
+                "raw CFA extraction is unsupported for unknown sensor types",
+            ));
         }
     };
 

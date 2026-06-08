@@ -374,7 +374,7 @@ fn test_fallback_8bit_normalization() {
 fn test_consolidate_black_levels_uniform() {
     let cblack = [0u32; 4104];
     // No per-channel, no spatial pattern
-    let bl = consolidate_black_levels(&cblack, 512, 16383, 0x94949494);
+    let bl = consolidate_black_levels(&cblack, 512, 16383, 0x94949494).unwrap();
 
     assert_eq!(bl.common, 512.0);
     assert_eq!(bl.per_channel, [512.0; 4]);
@@ -393,7 +393,7 @@ fn test_consolidate_black_levels_per_channel() {
     cblack[3] = 5; // G2
     // No spatial pattern (cblack[4]==0, cblack[5]==0)
 
-    let bl = consolidate_black_levels(&cblack, 100, 4096, 0x94949494);
+    let bl = consolidate_black_levels(&cblack, 100, 4096, 0x94949494).unwrap();
 
     // Common minimum across channels is 5, moved to black: 100+5=105
     assert_eq!(bl.common, 105.0);
@@ -431,7 +431,7 @@ fn test_consolidate_black_levels_bayer_2x2_fold() {
     // After fold: cblack = [4, 8, 16, 12]
     // Common min = 4, subtract: cblack = [0, 4, 12, 8], black = 200+4 = 204
     let filters = 0x94949494u32;
-    let bl = consolidate_black_levels(&cblack, 200, 16383, filters);
+    let bl = consolidate_black_levels(&cblack, 200, 16383, filters).unwrap();
 
     assert_eq!(bl.common, 204.0);
     assert_eq!(bl.per_channel[0], 204.0); // R: 0 + 204
@@ -456,7 +456,7 @@ fn test_consolidate_black_levels_xtrans_1x1_fold() {
     cblack[6] = 20; // Added to all channels
 
     // X-Trans filter value (typically 9 for 6x6 pattern)
-    let bl = consolidate_black_levels(&cblack, 256, 4096, 9);
+    let bl = consolidate_black_levels(&cblack, 256, 4096, 9).unwrap();
 
     // 1x1 pattern: cblack[6]=20 added to all cblack[0..3]
     // Then common minimum extracted (all equal = 20), moved to black: 256+20=276
