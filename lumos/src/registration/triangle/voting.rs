@@ -211,8 +211,16 @@ pub(crate) fn resolve_matches(
         })
         .collect();
 
-    // Sort by votes (descending)
-    matches.sort_by_key(|m| std::cmp::Reverse(m.votes));
+    // Sort by votes (descending), with a total-order tiebreak on (ref_idx, target_idx) so the
+    // greedy resolution below is deterministic regardless of vote-matrix storage — the sparse
+    // HashMap iterates in randomized order, which would otherwise make tied matches resolve
+    // differently run-to-run. (Matches the dense path, which already iterates in this order.)
+    matches.sort_by(|a, b| {
+        b.votes
+            .cmp(&a.votes)
+            .then(a.ref_idx.cmp(&b.ref_idx))
+            .then(a.target_idx.cmp(&b.target_idx))
+    });
 
     // Resolve one-to-many conflicts (greedy approach)
     let mut used_ref = vec![false; n_ref];
