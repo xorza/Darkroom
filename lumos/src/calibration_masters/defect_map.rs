@@ -261,20 +261,24 @@ fn collect_color_samples(
         return (0..sample_count).map(|i| data[i * stride]).collect();
     }
 
-    // CFA: collect all pixels of target_color, then subsample if too many
-    let mut pixels: Vec<f32> = (0..total)
-        .filter(|&i| cfa_color_at(cfa_type, i % width, i / width) == target_color)
-        .map(|i| data[i])
-        .collect();
-
-    if pixels.len() > MAX_MEDIAN_SAMPLES * 2 {
-        let stride = pixels.len() / MAX_MEDIAN_SAMPLES;
-        pixels = (0..MAX_MEDIAN_SAMPLES)
-            .map(|i| pixels[i * stride])
-            .collect();
+    // CFA: stride-sample this color in a single pass so we never materialize all of its
+    // pixels — the old "collect every matching pixel, then subsample" path allocated tens of MB
+    // of throwaway. `keep_stride` from the pixel total (color count ≤ total) keeps well under
+    // `MAX_MEDIAN_SAMPLES` samples, ample for a robust median/MAD.
+    let keep_stride = (total / MAX_MEDIAN_SAMPLES).max(1);
+    let mut samples = Vec::with_capacity(MAX_MEDIAN_SAMPLES.min(total));
+    let mut seen = 0usize;
+    for y in 0..height {
+        for (x, &val) in data.row(y).iter().enumerate() {
+            if cfa_color_at(cfa_type, x, y) == target_color {
+                if seen.is_multiple_of(keep_stride) {
+                    samples.push(val);
+                }
+                seen += 1;
+            }
+        }
     }
-
-    pixels
+    samples
 }
 
 /// Calculate median of 8-connected neighbors from raw channel data.
@@ -421,6 +425,27 @@ impl DefectMap {
     /// Number of cold/dead pixels detected.
     pub fn cold_count(&self) -> usize {
         self.cold_indices.len()
+    }
+}
+
+#[cfg(test)]
+mod bench {
+    use super::*;
+    use crate::raw::demosaic::bayer::CfaPattern;
+    use ::quickbench::quick_bench;
+
+    #[quick_bench(warmup_iters = 3, iters = 20)]
+    fn bench_collect_color_samples(b: quickbench::Bencher) {
+        let (w, h) = (6000, 4000);
+        let data = Buffer2::new(w, h, (0..w * h).map(|i| (i % 1000) as f32).collect());
+        let cfa = CfaType::Bayer(CfaPattern::Rggb);
+        b.bench(|| {
+            std::hint::black_box(collect_color_samples(
+                std::hint::black_box(&data),
+                Some(&cfa),
+                0,
+            ))
+        });
     }
 }
 

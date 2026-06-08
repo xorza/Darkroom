@@ -43,10 +43,16 @@ Status: ☐ todo · ⊘ deferred (deliberate)
 
 ## Performance queue (ARM is the profiled target)
 
-- ☐ **PF7 — SIMD weighted LM fit.** PR1's inverse-variance weighted fit runs scalar (the
-  unweighted default path keeps its AVX2/NEON kernels). Add weighted AVX2/NEON
-  `batch_build_normal_equations`/`batch_compute_chi2` so `NoiseModel`-driven fits vectorize.
-  Low priority (weighted fit is opt-in).
-- ☐ **PF4** (x86) AVX2 `raw/normalize` (~2×); **PF5** parallelize the serial per-color flat-mean
-  pass (`cfa.rs:272`) + defect-map sample collection (60 MB throwaway); **PF6** (x86)
-  threshold_mask AVX2 (bandwidth-bound, modest).
+- ☑ **PF5 — parallelize per-color flat-mean + defect sampling** · Done (arch-independent).
+  `flat_per_color_inv_means` (`cfa.rs`) reduces the per-color flat sums across rows with rayon:
+  **36.6 → 4.5 ms (−88%)** per light frame. `collect_color_samples` (`defect_map.rs`) now
+  stride-samples each CFA color in one pass instead of materializing every matching pixel then
+  subsampling: **41 → 9.5 ms (−77%)**, and the ~60 MB throwaway alloc is gone.
+- ☐ **PF7 — SIMD weighted LM fit** · Low priority (opt-in). PR1's inverse-variance weighted
+  centroid fit runs scalar; the unweighted default keeps its AVX2/NEON
+  `batch_build_normal_equations`/`batch_compute_chi2`. Vectorizing the weighted path is ~4 new
+  weighted kernels (gaussian + moffat × build + chi2; ~400–500 lines NEON now, AVX2 later) plus a
+  weighted-fit bench (none exists). Only helps `NoiseModel`-driven centroiding.
+- ☐ **PF4** (x86) AVX2 `raw/normalize` (~2×); **PF6** (x86) `threshold_mask` AVX2 (bandwidth-bound,
+  modest). Both are x86 AVX2 — deferred until on x86 hardware (can't bench-verify on the arm64 dev
+  machine).

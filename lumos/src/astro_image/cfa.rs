@@ -270,36 +270,8 @@ impl CfaImage {
         cfa_type: &CfaType,
     ) {
         let width = self.data.width();
-        let height = self.data.height();
 
-        // Accumulate per-color sums and counts
-        let mut sums = [0.0f64; 3];
-        let mut counts = [0u64; 3];
-
-        for y in 0..height {
-            let flat_row = flat.data.row(y);
-            let bias_row = bias.map(|b| b.data.row(y));
-            for x in 0..width {
-                let color = cfa_type.color_at(x, y) as usize;
-                let val = match bias_row {
-                    Some(br) => (flat_row[x] - br[x]) as f64,
-                    None => flat_row[x] as f64,
-                };
-                sums[color] += val;
-                counts[color] += 1;
-            }
-        }
-
-        let mut inv_means = [0.0f32; 3];
-        for c in 0..3 {
-            assert!(counts[c] > 0, "Flat has no pixels for color channel {c}");
-            let mean = (sums[c] / counts[c] as f64) as f32;
-            assert!(
-                mean > f32::EPSILON,
-                "Flat channel {c} mean is zero or negative"
-            );
-            inv_means[c] = 1.0 / mean;
-        }
+        let inv_means = flat_per_color_inv_means(flat, bias, cfa_type);
 
         // Apply per-channel normalization (row-parallel)
         let flat_data = &flat.data;
@@ -320,6 +292,84 @@ impl CfaImage {
                     *pixel /= norm_flat.max(Self::MIN_NORMALIZED_FLAT);
                 }
             });
+    }
+}
+
+/// Per-CFA-color inverse means of the (bias-subtracted) flat — the normalization factors applied by
+/// [`CfaImage::divide_by_normalized_cfa`]. Called once per calibrated light frame; the per-color
+/// `(sum, count)` accumulation is reduced across rows in parallel.
+fn flat_per_color_inv_means(
+    flat: &CfaImage,
+    bias: Option<&CfaImage>,
+    cfa_type: &CfaType,
+) -> [f32; 3] {
+    let width = flat.data.width();
+    let height = flat.data.height();
+
+    let (sums, counts) = (0..height)
+        .into_par_iter()
+        .map(|y| {
+            let flat_row = flat.data.row(y);
+            let bias_row = bias.map(|b| b.data.row(y));
+            let mut sums = [0.0f64; 3];
+            let mut counts = [0u64; 3];
+            for x in 0..width {
+                let color = cfa_type.color_at(x, y) as usize;
+                let val = match bias_row {
+                    Some(br) => (flat_row[x] - br[x]) as f64,
+                    None => flat_row[x] as f64,
+                };
+                sums[color] += val;
+                counts[color] += 1;
+            }
+            (sums, counts)
+        })
+        .reduce(
+            || ([0.0f64; 3], [0u64; 3]),
+            |(mut sa, mut ca), (sb, cb)| {
+                for i in 0..3 {
+                    sa[i] += sb[i];
+                    ca[i] += cb[i];
+                }
+                (sa, ca)
+            },
+        );
+
+    let mut inv_means = [0.0f32; 3];
+    for c in 0..3 {
+        assert!(counts[c] > 0, "Flat has no pixels for color channel {c}");
+        let mean = (sums[c] / counts[c] as f64) as f32;
+        assert!(
+            mean > f32::EPSILON,
+            "Flat channel {c} mean is zero or negative"
+        );
+        inv_means[c] = 1.0 / mean;
+    }
+    inv_means
+}
+
+#[cfg(test)]
+mod bench {
+    use super::*;
+    use crate::testing::make_cfa;
+    use ::quickbench::quick_bench;
+
+    #[quick_bench(warmup_iters = 3, iters = 20)]
+    fn bench_flat_per_color_inv_means(b: quickbench::Bencher) {
+        let (w, h) = (6000, 4000);
+        // Vignetting-ish flat with per-color variation (range ~[0.5, 1.0]).
+        let pixels: Vec<f32> = (0..w * h)
+            .map(|i| 0.5 + ((i % 997) as f32) / 1994.0)
+            .collect();
+        let flat = make_cfa(w, h, pixels, CfaType::Bayer(CfaPattern::Rggb));
+        let cfa = CfaType::Bayer(CfaPattern::Rggb);
+        b.bench(|| {
+            std::hint::black_box(flat_per_color_inv_means(
+                std::hint::black_box(&flat),
+                None,
+                &cfa,
+            ))
+        });
     }
 }
 
