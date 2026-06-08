@@ -364,9 +364,22 @@ fn effective_combine_method(method: CombineMethod, frame_count: usize) -> Combin
     method
 }
 
+/// Warn when frame weighting was requested but the resolved combine is a median, which has no
+/// weighted form here — the weights would be silently dropped. Fires both for an explicit `Median`
+/// and for a σ-method downgraded to median at small N (see [`effective_combine_method`]).
+fn warn_if_weights_ignored(method: CombineMethod, weighting: &Weighting) {
+    if matches!(method, CombineMethod::Median) && *weighting != Weighting::Equal {
+        tracing::warn!(
+            ?weighting,
+            "frame weighting is ignored by the median combine; use a Mean method to apply weights",
+        );
+    }
+}
+
 pub(crate) fn run_stacking(cache: &CfaCache, config: &StackConfig) -> CfaImage {
     let stats = &cache.core.channel_stats;
     let method = effective_combine_method(config.method, stats.len());
+    warn_if_weights_ignored(method, &config.weighting);
     let frame_norms = compute_frame_norms(stats, config.normalization);
     let weights = resolve_weights(&config.weighting, stats);
     let norms = frame_norms.as_deref();
@@ -389,6 +402,7 @@ pub(crate) fn run_stacking(cache: &CfaCache, config: &StackConfig) -> CfaImage {
 pub(crate) fn run_stacking_weighted(cache: &LightCache, config: &StackConfig) -> AstroImage {
     let stats = &cache.core.channel_stats;
     let method = effective_combine_method(config.method, stats.len());
+    warn_if_weights_ignored(method, &config.weighting);
     let frame_norms = compute_frame_norms(stats, config.normalization);
     let weights = resolve_weights(&config.weighting, stats);
     let norms = frame_norms.as_deref();

@@ -94,6 +94,10 @@ pub(crate) struct ScratchBuffers {
     pub floats_a: Vec<f32>,
     /// Second f32 scratch (e.g. median/MAD computation).
     pub floats_b: Vec<f32>,
+    /// usize scratch (large-N `sort_with_indices` permutation).
+    pub usize_a: Vec<usize>,
+    /// Second usize scratch (large-N `sort_with_indices` index copy).
+    pub usize_b: Vec<usize>,
 }
 
 impl ScratchBuffers {
@@ -102,6 +106,8 @@ impl ScratchBuffers {
             indices: Vec::with_capacity(frame_count),
             floats_a: Vec::with_capacity(frame_count),
             floats_b: Vec::with_capacity(frame_count),
+            usize_a: Vec::with_capacity(frame_count),
+            usize_b: Vec::with_capacity(frame_count),
         }
     }
 }

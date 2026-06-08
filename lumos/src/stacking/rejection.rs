@@ -141,14 +141,16 @@ impl SigmaClipConfig {
             return false;
         }
 
-        // Single pass: compute sum, sum_sq, min, max
-        let mut sum = 0.0f32;
-        let mut sum_sq = 0.0f32;
+        // Single pass: compute sum, sum_sq, min, max. Accumulate in f64 — the variance below is
+        // the cancellation-prone `E[X²] − E[X]²` form, which in f32 over many bright pixels loses
+        // most significant bits (and can go negative), spuriously tripping the constant-data exit.
+        let mut sum = 0.0f64;
+        let mut sum_sq = 0.0f64;
         let mut min1 = f32::MAX;
         let mut max1 = f32::MIN;
         for &v in values {
-            sum += v;
-            sum_sq += v * v;
+            sum += v as f64;
+            sum_sq += (v as f64) * (v as f64);
             if v < min1 {
                 min1 = v;
             }
@@ -156,16 +158,17 @@ impl SigmaClipConfig {
                 max1 = v;
             }
         }
+        let (min1, max1) = (min1 as f64, max1 as f64);
 
         // Trimmed mean and variance: exclude the single most extreme min and max
-        let trimmed_n = (n - 2) as f32;
+        let trimmed_n = (n - 2) as f64;
         let trimmed_sum = sum - min1 - max1;
         let trimmed_mean = trimmed_sum / trimmed_n;
         let trimmed_sum_sq = sum_sq - min1 * min1 - max1 * max1;
         // Var = E[X²] - E[X]² with Bessel's correction
         let variance = (trimmed_sum_sq - trimmed_sum * trimmed_sum / trimmed_n) / (trimmed_n - 1.0);
 
-        if variance < f32::EPSILON {
+        if variance < f32::EPSILON as f64 {
             // Trimmed data is constant. The full path would compute MAD=0, sigma=0
             // and break without rejecting. Early exit matches that behavior.
             return true;
@@ -175,7 +178,7 @@ impl SigmaClipConfig {
 
         // Check: can any value exceed the threshold from the trimmed center?
         let max_dev = (max1 - trimmed_mean).abs().max((min1 - trimmed_mean).abs());
-        max_dev <= min_sigma_k * stddev
+        max_dev <= min_sigma_k as f64 * stddev
     }
 }
 
@@ -445,15 +448,22 @@ impl LinearFitClipConfig {
                     }
                 }
 
-                if write_idx == len {
-                    break;
-                }
+                // No early break when the seed pass rejects nothing: the linear-fit passes below
+                // must still run. A trend-hidden outlier (the case LinearFit targets) sits within
+                // sigma·MAD here — it's only exposed after fitting out the trend.
                 len = write_idx;
             } else {
                 // Subsequent passes: linear fit rejection
 
                 // Sort remaining values with index co-array
-                sort_with_indices(values, &mut scratch.indices, &mut scratch.floats_b, len);
+                sort_with_indices(
+                    values,
+                    &mut scratch.indices,
+                    &mut scratch.floats_b,
+                    &mut scratch.usize_a,
+                    &mut scratch.usize_b,
+                    len,
+                );
 
                 // Fit line y = a + b*x through sorted values, x = sorted position
                 let n = len as f32;
@@ -594,7 +604,14 @@ impl PercentileClipConfig {
             return n;
         }
 
-        sort_with_indices(values, &mut scratch.indices, &mut scratch.floats_a, n);
+        sort_with_indices(
+            values,
+            &mut scratch.indices,
+            &mut scratch.floats_a,
+            &mut scratch.usize_a,
+            &mut scratch.usize_b,
+            n,
+        );
 
         let range = self.surviving_range(n);
         let count = range.len();
@@ -798,6 +815,8 @@ fn sort_with_indices(
     values: &mut [f32],
     indices: &mut [usize],
     scratch_buf: &mut Vec<f32>,
+    perm: &mut Vec<usize>,
+    old_indices: &mut Vec<usize>,
     n: usize,
 ) {
     const INSERTION_SORT_THRESHOLD: usize = 64;
@@ -812,14 +831,16 @@ fn sort_with_indices(
             }
         }
     } else {
-        // Build position permutation, sort by values, apply to both arrays.
-        // Reuse scratch_buf for the value copy; allocate perm on stack-like Vec.
-        let mut perm: Vec<usize> = (0..n).collect();
+        // Build position permutation, sort by values, apply to both arrays. All scratch
+        // (value copy, permutation, index copy) is caller-owned and reused — no per-pixel alloc.
+        perm.clear();
+        perm.extend(0..n);
         perm.sort_unstable_by(|&a, &b| values[a].total_cmp(&values[b]));
 
         scratch_buf.clear();
         scratch_buf.extend_from_slice(&values[..n]);
-        let old_indices: Vec<usize> = indices[..n].to_vec();
+        old_indices.clear();
+        old_indices.extend_from_slice(&indices[..n]);
         for (dst, &src) in perm.iter().enumerate() {
             values[dst] = scratch_buf[src];
             indices[dst] = old_indices[src];
@@ -1173,6 +1194,53 @@ mod tests {
     }
 
     #[test]
+    fn test_linear_fit_rejects_off_line_point_when_seed_pass_is_clean() {
+        // The fit must run even when the median+MAD seed pass rejects nothing — otherwise an
+        // off-line point hidden by a steep spread survives. Ramp 10..90 + an off-line `5`:
+        // seed median≈45, MAD≈25 → sigma≈37, threshold(2.0)≈74, so the `5` (|Δ|=40) is kept and
+        // the seed rejects nothing. The line fit through the sorted values has σ≈0.92 (mean |resid|),
+        // threshold(2.0)≈1.84; only `5` (residual≈3.27 from the fitted line) exceeds it.
+        let mut values = vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 5.0];
+        let mut s = scratch();
+        let remaining = LinearFitClipConfig::new(2.0, 2.0, 3).reject(&mut values, &mut s);
+
+        assert_eq!(remaining, 9, "only the off-line `5` should be rejected");
+        assert!(
+            !s.indices[..remaining].contains(&9),
+            "frame 9 (value 5.0) must be rejected, survivors: {:?}",
+            &s.indices[..remaining]
+        );
+        // Survivors are the clean ramp 10..90 → mean 50.
+        let mean = crate::math::sum::mean_f32(&values[..remaining]);
+        assert!((mean - 50.0).abs() < 1e-3, "expected mean 50, got {mean}");
+    }
+
+    #[test]
+    fn test_sigma_clip_rejects_outlier_in_bright_high_magnitude_data() {
+        // Guards the early-exit's numerical soundness (f64 accumulation): on high-magnitude pixels
+        // (~8000) with a real outlier, `no_outliers_possible` must not spuriously fire and skip
+        // rejection. 14 clean values symmetric about 8000 (mean exactly 8000) + one 9000 outlier.
+        let mut values = vec![
+            7990.0, 8000.0, 8010.0, 7995.0, 8005.0, 8000.0, 7990.0, 8010.0, 8000.0, 7995.0, 8005.0,
+            8000.0, 7990.0, 8010.0, 9000.0,
+        ];
+        let mut s = scratch();
+        let remaining = SigmaClipConfig::new(2.5, 3).reject(&mut values, &mut s);
+
+        assert_eq!(remaining, 14, "the 9000 outlier must be rejected");
+        assert!(
+            !s.indices[..remaining].contains(&14),
+            "frame 14 (value 9000) must be rejected, survivors: {:?}",
+            &s.indices[..remaining]
+        );
+        let mean = crate::math::sum::mean_f32(&values[..remaining]);
+        assert!(
+            (mean - 8000.0).abs() < 0.5,
+            "expected mean 8000, got {mean}"
+        );
+    }
+
+    #[test]
     fn test_percentile_clip() {
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
         let remaining = PercentileClipConfig::new(20.0, 20.0).reject(&mut values, &mut scratch());
@@ -1387,6 +1455,8 @@ mod tests {
             indices: vec![],
             floats_a: vec![],
             floats_b: vec![],
+            usize_a: vec![],
+            usize_b: vec![],
         }
     }
 
@@ -2005,8 +2075,17 @@ mod tests {
         let mut values: Vec<f32> = (0..n).rev().map(|i| i as f32).collect();
         let mut indices: Vec<usize> = (0..n).collect();
         let mut scratch_buf = Vec::new();
+        let mut perm = Vec::new();
+        let mut old_indices = Vec::new();
 
-        sort_with_indices(&mut values, &mut indices, &mut scratch_buf, n);
+        sort_with_indices(
+            &mut values,
+            &mut indices,
+            &mut scratch_buf,
+            &mut perm,
+            &mut old_indices,
+            n,
+        );
 
         for i in 0..n {
             assert_eq!(values[i], i as f32, "values[{i}] wrong");
@@ -2028,8 +2107,17 @@ mod tests {
         }
         let original_values = values.clone();
         let mut scratch_buf = Vec::new();
+        let mut perm = Vec::new();
+        let mut old_indices = Vec::new();
 
-        sort_with_indices(&mut values, &mut indices, &mut scratch_buf, n);
+        sort_with_indices(
+            &mut values,
+            &mut indices,
+            &mut scratch_buf,
+            &mut perm,
+            &mut old_indices,
+            n,
+        );
 
         // Values must be sorted
         for i in 1..n {

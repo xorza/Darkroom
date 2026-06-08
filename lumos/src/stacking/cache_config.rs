@@ -21,6 +21,7 @@
 //! consistent performance without memory pressure issues.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Minimum chunk rows to avoid excessive I/O overhead.
 pub const MIN_CHUNK_ROWS: usize = 64;
@@ -46,11 +47,24 @@ pub struct CacheConfig {
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
-            cache_dir: std::env::temp_dir().join("lumos_cache"),
+            cache_dir: unique_cache_dir(),
             keep_cache: cfg!(debug_assertions) || cfg!(test),
             available_memory: None,
         }
     }
+}
+
+/// A process-unique cache directory `{temp}/lumos_cache/{pid}-{counter}`, so concurrent stacks never
+/// share a directory: each owns its files and its `remove_dir_all` cleanup can't delete another
+/// stack's still-mmapped files. The `{pid}-{counter}` suffix is unique across processes and across
+/// stacks within one process. (This trades the cross-run cache reuse a fixed path would give for
+/// safe concurrency — each run starts with a fresh, empty directory.)
+fn unique_cache_dir() -> PathBuf {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir()
+        .join("lumos_cache")
+        .join(format!("{}-{}", std::process::id(), id))
 }
 
 impl CacheConfig {
@@ -140,9 +154,24 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = CacheConfig::default();
-        assert!(config.cache_dir.ends_with("lumos_cache"));
+        // Cache dir is a unique subdir under `lumos_cache` (`{temp}/lumos_cache/{pid}-{counter}`).
+        assert!(
+            config.cache_dir.parent().unwrap().ends_with("lumos_cache"),
+            "cache_dir should sit under lumos_cache, got {:?}",
+            config.cache_dir
+        );
         // In test mode, keep_cache should be true
         assert!(config.keep_cache);
+    }
+
+    #[test]
+    fn test_default_cache_dir_is_unique_per_call() {
+        // Two stacks created concurrently must not share a cache dir, or the first to finish would
+        // `remove_dir_all` the other's in-flight files.
+        let a = CacheConfig::default();
+        let b = CacheConfig::default();
+        assert_ne!(a.cache_dir, b.cache_dir);
+        assert_eq!(a.cache_dir.parent(), b.cache_dir.parent());
     }
 
     #[test]
