@@ -200,7 +200,7 @@ fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
         .map(|s| s.fwhm)
         .collect();
 
-    fwhms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    fwhms.sort_by(|a, b| a.total_cmp(b));
     fwhms[fwhms.len() / 2] as f64
 }
 
@@ -484,26 +484,29 @@ pub(crate) fn recover_matches(
     let mut current_transform = *transform;
     let mut current_matches: Vec<(usize, usize)> = inlier_matches.to_vec();
 
-    let mut matched_target: std::collections::HashSet<usize> =
-        std::collections::HashSet::with_capacity(current_matches.len());
-    let mut matched_ref: std::collections::HashSet<usize> =
-        std::collections::HashSet::with_capacity(current_matches.len());
-    let mut newly_matched_targets: std::collections::HashSet<usize> =
-        std::collections::HashSet::new();
+    // Dense small-integer membership over [0, n) → bitmaps, not HashSets: no hashing,
+    // no allocation per pass, and order-independent (deterministic).
+    let mut matched_target = vec![false; target_stars.len()];
+    let mut matched_ref = vec![false; ref_stars.len()];
+    let mut newly_matched_targets = vec![false; target_stars.len()];
 
     for _ in 0..RECOVERY_MAX_ITERATIONS {
         let prev_count = current_matches.len();
 
-        matched_target.clear();
-        matched_target.extend(current_matches.iter().map(|&(_, t)| t));
+        matched_target.fill(false);
+        for &(_, t) in &current_matches {
+            matched_target[t] = true;
+        }
 
-        matched_ref.clear();
-        matched_ref.extend(current_matches.iter().map(|&(r, _)| r));
+        matched_ref.fill(false);
+        for &(r, _) in &current_matches {
+            matched_ref[r] = true;
+        }
 
-        newly_matched_targets.clear();
+        newly_matched_targets.fill(false);
 
         for (ref_idx, &ref_pos) in ref_stars.iter().enumerate() {
-            if matched_ref.contains(&ref_idx) {
+            if matched_ref[ref_idx] {
                 continue;
             }
 
@@ -511,11 +514,11 @@ pub(crate) fn recover_matches(
 
             if let Some(nn) = target_tree.nearest_one(predicted)
                 && nn.dist_sq <= threshold_sq
-                && !matched_target.contains(&nn.index)
-                && !newly_matched_targets.contains(&nn.index)
+                && !matched_target[nn.index]
+                && !newly_matched_targets[nn.index]
             {
                 current_matches.push((ref_idx, nn.index));
-                newly_matched_targets.insert(nn.index);
+                newly_matched_targets[nn.index] = true;
             }
         }
 

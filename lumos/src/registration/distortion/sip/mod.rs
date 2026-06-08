@@ -228,11 +228,11 @@ impl SipPolynomial {
                 break; // Not enough points to re-fit
             }
 
-            active.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+            active.sort_unstable_by(|a, b| a.total_cmp(b));
             let median = active[active.len() / 2];
 
             let mut deviations: Vec<f64> = active.iter().map(|&r| (r - median).abs()).collect();
-            deviations.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+            deviations.sort_unstable_by(|a, b| a.total_cmp(b));
             let mad = deviations[deviations.len() / 2];
 
             const MAD_TO_SIGMA: f64 = 1.4826022;

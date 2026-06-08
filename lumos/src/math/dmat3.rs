@@ -123,16 +123,19 @@ impl DMat3 {
     /// y' = (m[3]*x + m[4]*y + m[5]) / w
     /// ```
     ///
-    /// # Panics
-    /// Panics if `w` is near zero (point at infinity).
+    /// A point on a homography's horizon (`w ≈ 0`) maps to infinity rather than
+    /// panicking, so a warp treats it as out-of-bounds (→ border) instead of
+    /// crashing. `INFINITY` (not `NaN`) is deliberate: `inf as i32` saturates to
+    /// `i32::MAX` and fails the sampler's bounds check, whereas `NaN as i32` is 0
+    /// and would read pixel (0,0). Affine/similarity/euclidean have a `[0,0,1]`
+    /// bottom row, so `w` is structurally 1 and this branch never fires for them.
     #[inline]
     pub fn transform_point(&self, p: DVec2) -> DVec2 {
         let d = &self.data;
         let w = d[6] * p.x + d[7] * p.y + d[8];
-        assert!(
-            w.abs() > f64::EPSILON,
-            "transform_point: w ≈ 0 (point at infinity)"
-        );
+        if w.abs() <= f64::EPSILON {
+            return DVec2::splat(f64::INFINITY);
+        }
         let x_prime = (d[0] * p.x + d[1] * p.y + d[2]) / w;
         let y_prime = (d[3] * p.x + d[4] * p.y + d[5]) / w;
         DVec2::new(x_prime, y_prime)
@@ -465,11 +468,14 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "point at infinity")]
-    fn test_transform_point_at_infinity_panics() {
+    fn test_transform_point_at_infinity_returns_infinity() {
         // Bottom row [1, 0, -5] gives w = x - 5; at x = 5, w = 0 (point at infinity).
+        // Maps to INFINITY (not NaN) so a warp's bounds check rejects it → border.
         let m = DMat3::from_array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, -5.0]);
-        let _ = m.transform_point(DVec2::new(5.0, 0.0));
+        let p = m.transform_point(DVec2::new(5.0, 0.0));
+        assert!(p.x.is_infinite() && p.y.is_infinite());
+        // inf saturates to i32::MAX (out of bounds), unlike NaN which casts to 0.
+        assert_eq!(p.x as i32, i32::MAX);
     }
 
     #[test]
