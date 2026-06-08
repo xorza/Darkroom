@@ -432,7 +432,7 @@ async fn write_frame(stream: &mut TcpStream, bytes: &[u8]) -> std::io::Result<()
 
 #[cfg(test)]
 mod tests {
-    use crate::core::script::*;
+    use super::*;
     use crate::core::script::{ScriptExecutor, ScriptMessage, ScriptResult};
     use std::net::Ipv4Addr;
 

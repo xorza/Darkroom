@@ -220,7 +220,7 @@ pub unsafe fn lanczos_kernel_neon<const A: usize, const SIZE: usize, const DERIN
 
 #[cfg(test)]
 mod tests {
-    use crate::registration::interpolation::warp::*;
+    use super::*;
     use crate::registration::interpolation::get_lanczos_lut;
 
     /// NEON Lanczos kernel must match a plain scalar weighted sum (mirror of the x86
