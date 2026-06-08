@@ -69,7 +69,7 @@ pub fn convolve_pixel_scalar(
 ///
 /// Falls back to scalar implementation on unsupported platforms.
 #[inline]
-pub(super) fn convolve_row(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
+pub(crate) fn convolve_row(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
     #[cfg(target_arch = "x86_64")]
     {
         if cpu_features::has_avx2_fma() {
@@ -101,7 +101,7 @@ pub(super) fn convolve_row(input: &[f32], output: &mut [f32], kernel: &[f32], ra
 
 /// Scalar implementation of row convolution.
 #[inline]
-pub(super) fn convolve_row_scalar(
+pub(crate) fn convolve_row_scalar(
     input: &[f32],
     output: &mut [f32],
     kernel: &[f32],
@@ -118,7 +118,7 @@ pub(super) fn convolve_row_scalar(
 ///
 /// Falls back to scalar implementation on unsupported platforms.
 #[inline]
-pub(super) fn convolve_cols_direct(
+pub(crate) fn convolve_cols_direct(
     input: &[f32],
     output: &mut [f32],
     width: usize,
@@ -157,7 +157,7 @@ pub(super) fn convolve_cols_direct(
 
 /// Scalar implementation of column convolution.
 #[inline]
-pub(super) fn convolve_cols_scalar(
+pub(crate) fn convolve_cols_scalar(
     input: &[f32],
     output: &mut [f32],
     width: usize,
@@ -185,7 +185,7 @@ pub(super) fn convolve_cols_scalar(
 /// This processes one output row at a given y coordinate.
 #[inline]
 #[allow(clippy::too_many_arguments)]
-pub(super) fn convolve_2d_row(
+pub(crate) fn convolve_2d_row(
     input: &[f32],
     output_row: &mut [f32],
     width: usize,
@@ -231,7 +231,7 @@ pub(super) fn convolve_2d_row(
 /// Scalar implementation of single-row 2D convolution.
 #[inline]
 #[allow(clippy::too_many_arguments)]
-pub(super) fn convolve_2d_row_scalar(
+pub(crate) fn convolve_2d_row_scalar(
     input: &[f32],
     output_row: &mut [f32],
     width: usize,

@@ -37,7 +37,7 @@ use super::hex_lookup::HexLookup;
 use super::markesteijn_steps;
 
 /// Number of interpolation directions (4 for 1-pass: H, V, D1, D2).
-pub(super) const NDIR: usize = 4;
+pub(crate) const NDIR: usize = 4;
 
 /// Preallocated arena for all Markesteijn demosaic working memory.
 ///

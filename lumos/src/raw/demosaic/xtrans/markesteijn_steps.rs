@@ -43,7 +43,7 @@ enum ColorInterpStrategy {
 /// Precomputed interpolation strategies for all 36 X-Trans positions × 2 target colors.
 /// Indexed as [row%6][col%6][target_color_index] where target_color_index: 0=red, 1=blue.
 #[derive(Debug)]
-pub(super) struct ColorInterpLookup {
+pub(crate) struct ColorInterpLookup {
     /// For each position, the best strategies for interpolating red and blue.
     /// [row%6][col%6][0=red, 1=blue] = array of up to 2 strategies (H pair, V pair)
     /// sorted by expected quality (pairs first, then singles).
@@ -60,7 +60,7 @@ struct InterpEntry {
 }
 
 impl ColorInterpLookup {
-    pub(super) fn new(pattern: &super::XTransPattern) -> Self {
+    pub(crate) fn new(pattern: &super::XTransPattern) -> Self {
         let mut strategies = [[[InterpEntry {
             primary: ColorInterpStrategy::None,
             secondary: ColorInterpStrategy::None,
@@ -148,7 +148,7 @@ impl ColorInterpLookup {
 /// For green pixels, gmin=gmax=raw_value.
 /// For non-green pixels, scans the first 6 hex neighbors to find
 /// the range of nearby green values. This constrains green interpolation.
-pub(super) fn compute_green_minmax(
+pub(crate) fn compute_green_minmax(
     xtrans: &XTransImage,
     hex: &HexLookup,
     gmin: &mut [f32],
@@ -215,7 +215,7 @@ pub(super) fn compute_green_minmax(
 /// For green pixels, all 4 directions get the raw value.
 ///
 /// The green_dir buffer is laid out as [dir * pixels + y * width + x].
-pub(super) fn interpolate_green(
+pub(crate) fn interpolate_green(
     xtrans: &XTransImage,
     hex: &HexLookup,
     gmin: &[f32],
@@ -330,7 +330,7 @@ pub(super) fn interpolate_green(
 /// For each direction, computes a Laplacian in that direction's offset,
 /// storing the squared derivative magnitude per pixel. RGB is computed
 /// per-pixel using `compute_rgb_pixel` instead of reading from a materialized buffer.
-pub(super) fn compute_derivatives(
+pub(crate) fn compute_derivatives(
     xtrans: &XTransImage,
     green_dir: &[f32],
     color_lookup: &ColorInterpLookup,
@@ -761,7 +761,7 @@ fn interpolate_missing_color_fast(
 /// Two sub-passes:
 /// 1. Find minimum derivative across all 4 directions at each pixel → threshold = 8 × min
 /// 2. In a 3×3 window, count how many pixels have drv ≤ threshold
-pub(super) fn compute_homogeneity(
+pub(crate) fn compute_homogeneity(
     drv: &[f32],
     width: usize,
     height: usize,
@@ -878,7 +878,7 @@ fn sat_query(sat: &[u32], sat_w: usize, y0: usize, x0: usize, y1: usize, x1: usi
 /// `out_r`/`out_g`/`out_b` are preallocated planar channels (each length `pixels`) that the
 /// final RGB is written into.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn blend_final(
+pub(crate) fn blend_final(
     xtrans: &XTransImage,
     green_dir: &[f32],
     color_lookup: &ColorInterpLookup,

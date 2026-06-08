@@ -32,16 +32,16 @@ const PATT: [[i32; 16]; 2] = [
 /// Indexed by `[row % 3][col % 3]`, contains 8 relative (dy, dx) offsets
 /// for the hex neighborhood used in green interpolation.
 #[derive(Debug)]
-pub(super) struct HexLookup {
+pub(crate) struct HexLookup {
     /// offsets[row%3][col%3] = [(dy, dx); 8]
     offsets: [[[HexOffset; HEX_ENTRIES]; 3]; 3],
     /// The "solitary green" row position (mod 3)
-    pub(super) sgrow: usize,
+    pub(crate) sgrow: usize,
 }
 
 /// A single hex neighbor offset.
 #[derive(Debug, Clone, Copy, Default)]
-pub(super) struct HexOffset {
+pub(crate) struct HexOffset {
     pub dy: i32,
     pub dx: i32,
 }
@@ -53,7 +53,7 @@ impl HexLookup {
     /// position, it finds the 8 hex neighbor offsets based on the local CFA
     /// pattern geometry. The construction rotates through 4 orthogonal
     /// directions and applies pattern-specific coefficients.
-    pub(super) fn new(pattern: &XTransPattern) -> Self {
+    pub(crate) fn new(pattern: &XTransPattern) -> Self {
         let mut offsets = [[[HexOffset::default(); HEX_ENTRIES]; 3]; 3];
         let mut sgrow = 0usize;
 
@@ -137,7 +137,7 @@ impl HexLookup {
 
     /// Get hex offsets for a given (row, col) position.
     #[inline(always)]
-    pub(super) fn get(&self, row: usize, col: usize) -> &[HexOffset; HEX_ENTRIES] {
+    pub(crate) fn get(&self, row: usize, col: usize) -> &[HexOffset; HEX_ENTRIES] {
         &self.offsets[row % 3][col % 3]
     }
 }

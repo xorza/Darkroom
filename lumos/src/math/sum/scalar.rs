@@ -3,7 +3,7 @@
 /// Neumaier compensated addition. Single source of truth for the compensation step — the SIMD
 /// backends call this for their lane-reduction and scalar-remainder tails.
 #[inline]
-pub(super) fn neumaier_add(sum: &mut f32, c: &mut f32, v: f32) {
+pub(crate) fn neumaier_add(sum: &mut f32, c: &mut f32, v: f32) {
     let t = *sum + v;
     if sum.abs() >= v.abs() {
         *c += (*sum - t) + v;

@@ -39,7 +39,7 @@ const MIN_ROWS_PER_STRIP: usize = 64;
 
 /// A horizontal run of foreground pixels.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct Run {
+pub(crate) struct Run {
     start: u32, // Starting x coordinate (inclusive)
     end: u32,   // Ending x coordinate (exclusive)
     label: u32, // Provisional label
@@ -71,7 +71,7 @@ fn runs_connected(prev: &Run, curr: &Run, connectivity: Connectivity) -> bool {
 /// Uses trailing zero counting (CTZ) for efficient run boundary detection.
 /// This is faster than bit-by-bit scanning for mixed words.
 #[inline]
-pub(super) fn extract_runs_from_row(
+pub(crate) fn extract_runs_from_row(
     mask_words: &[u64],
     word_row_start: usize,
     words_per_row: usize,
@@ -372,7 +372,7 @@ fn merge_runs_with_prev(
 // ============================================================================
 
 /// Sequential RLE-based CCL for small images.
-pub(super) fn label_mask_sequential(
+pub(crate) fn label_mask_sequential(
     mask: &BitBuffer2,
     labels: &mut Buffer2<u32>,
     connectivity: Connectivity,
@@ -433,7 +433,7 @@ struct StripResult {
 }
 
 /// Parallel RLE-based CCL for large images.
-pub(super) fn label_mask_parallel(
+pub(crate) fn label_mask_parallel(
     mask: &BitBuffer2,
     labels: &mut Buffer2<u32>,
     connectivity: Connectivity,

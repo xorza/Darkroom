@@ -19,7 +19,7 @@ pub(crate) struct TileStats {
 
 /// Tile grid with precomputed centers and spline coefficients for interpolation.
 #[derive(Debug)]
-pub(super) struct TileGrid {
+pub(crate) struct TileGrid {
     stats: Buffer2<TileStats>,
     /// Second derivatives in Y direction for natural cubic spline (median).
     /// Layout: tiles_x * tiles_y, row-major (same as stats).
@@ -281,7 +281,7 @@ impl TileGrid {
 /// Factored form (since (ct³-ct) = -t*ct*(2-t) and (t³-t) = -t*ct*(1+t)):
 ///   f(t) = (1-t)*f0 + t*f1 - t*(1-t)*((2-t)*a + (1+t)*b)
 #[inline]
-pub(super) fn cubic_spline_eval(f0: f32, f1: f32, d0: f32, d1: f32, h: f32, t: f32) -> f32 {
+pub(crate) fn cubic_spline_eval(f0: f32, f1: f32, d0: f32, d1: f32, h: f32, t: f32) -> f32 {
     if h <= 0.0 {
         return f0;
     }
@@ -304,7 +304,7 @@ pub(super) fn cubic_spline_eval(f0: f32, f1: f32, d0: f32, d1: f32, h: f32, t: f
 /// per-call heap allocation.
 ///
 /// Supports non-uniform spacing. O(n) forward elimination + back substitution.
-pub(super) fn solve_natural_spline_d2(
+pub(crate) fn solve_natural_spline_d2(
     values: &[f32],
     centers: &[f32],
     d2: &mut [f32],

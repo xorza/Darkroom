@@ -56,7 +56,7 @@ fn lanczos_kernel_compute(x: f32, a: f32) -> f32 {
 }
 
 #[derive(Debug)]
-pub(super) struct LanczosLut {
+pub(crate) struct LanczosLut {
     values: Vec<f32>,
     a: usize,
 }
@@ -75,7 +75,7 @@ impl LanczosLut {
     }
 
     #[inline]
-    pub(super) fn lookup(&self, x: f32) -> f32 {
+    pub(crate) fn lookup(&self, x: f32) -> f32 {
         let abs_x = x.abs();
         if abs_x >= self.a as f32 {
             return 0.0;
@@ -90,7 +90,7 @@ impl LanczosLut {
     /// `abs_x` is in `[0, a]`. Used in the Lanczos3 inner loop where fractional
     /// parts are computed such that all distances are known-positive.
     #[inline(always)]
-    pub(super) fn lookup_positive(&self, abs_x: f32) -> f32 {
+    pub(crate) fn lookup_positive(&self, abs_x: f32) -> f32 {
         debug_assert!(abs_x >= 0.0 && abs_x <= self.a as f32);
         let idx = (abs_x * LANCZOS_LUT_RESOLUTION as f32 + 0.5) as usize;
         unsafe { *self.values.get_unchecked(idx) }
@@ -102,7 +102,7 @@ static LANCZOS3_LUT: OnceLock<LanczosLut> = OnceLock::new();
 static LANCZOS4_LUT: OnceLock<LanczosLut> = OnceLock::new();
 
 #[inline]
-pub(super) fn get_lanczos_lut(a: usize) -> &'static LanczosLut {
+pub(crate) fn get_lanczos_lut(a: usize) -> &'static LanczosLut {
     match a {
         2 => LANCZOS2_LUT.get_or_init(|| LanczosLut::new(2)),
         3 => LANCZOS3_LUT.get_or_init(|| LanczosLut::new(3)),
@@ -140,7 +140,7 @@ fn bicubic_weights(f: f32) -> [f32; 4] {
 
 /// Sample a pixel with bounds checking. Returns `border_value` for out-of-bounds coordinates.
 #[inline]
-pub(super) fn sample_pixel(data: &[f32], dims: Vec2us, coord: IVec2, border_value: f32) -> f32 {
+pub(crate) fn sample_pixel(data: &[f32], dims: Vec2us, coord: IVec2, border_value: f32) -> f32 {
     if coord.x < 0 || coord.y < 0 || coord.x >= dims.x as i32 || coord.y >= dims.y as i32 {
         border_value
     } else {

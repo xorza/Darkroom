@@ -68,7 +68,7 @@ impl SendPtr {
 /// Input: BayerImage with normalized [0,1] CFA data and margin info.
 /// Output: Interleaved RGB f32 pixels `[R0, G0, B0, R1, G1, B1, ...]`
 /// for the active area (width × height).
-pub(super) fn rcd_demosaic(bayer: &BayerImage) -> [Vec<f32>; 3] {
+pub(crate) fn rcd_demosaic(bayer: &BayerImage) -> [Vec<f32>; 3] {
     let width = bayer.width;
     let height = bayer.height;
     let rw = bayer.raw_width;

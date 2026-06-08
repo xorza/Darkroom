@@ -29,7 +29,7 @@ use common::cpu_features;
 /// Scalar implementation for packed threshold mask with background.
 #[cfg_attr(not(test), inline)]
 #[cfg(any(test, target_arch = "x86_64", not(target_arch = "aarch64")))]
-pub(super) fn process_words_scalar(
+pub(crate) fn process_words_scalar(
     pixels: &[f32],
     bg: &[f32],
     noise: &[f32],
@@ -63,7 +63,7 @@ pub(super) fn process_words_scalar(
 /// Scalar implementation for packed threshold mask without background (filtered).
 #[cfg_attr(not(test), inline)]
 #[cfg(any(test, target_arch = "x86_64", not(target_arch = "aarch64")))]
-pub(super) fn process_words_filtered_scalar(
+pub(crate) fn process_words_filtered_scalar(
     pixels: &[f32],
     noise: &[f32],
     sigma_threshold: f32,
@@ -95,7 +95,7 @@ pub(super) fn process_words_filtered_scalar(
 
 /// Process words with best available SIMD (with background).
 #[cfg_attr(not(test), inline)]
-pub(super) fn process_words(
+pub(crate) fn process_words(
     pixels: &Buffer2<f32>,
     bg: &Buffer2<f32>,
     noise: &Buffer2<f32>,
@@ -169,7 +169,7 @@ pub(super) fn process_words(
 
 /// Process words with best available SIMD (without background, for filtered images).
 #[inline]
-pub(super) fn process_words_filtered(
+pub(crate) fn process_words_filtered(
     pixels: &Buffer2<f32>,
     noise: &Buffer2<f32>,
     sigma_threshold: f32,

@@ -122,7 +122,7 @@ pub fn matched_filter(
 ///
 /// Uses separable convolution: first convolve rows, then columns.
 /// This is O(n×k) instead of O(n×k²) for a 2D convolution.
-pub(super) fn gaussian_convolve(
+pub(crate) fn gaussian_convolve(
     pixels: &Buffer2<f32>,
     sigma: f32,
     output: &mut Buffer2<f32>,
@@ -157,7 +157,7 @@ pub(super) fn gaussian_convolve(
 /// Unlike separable convolution for circular Gaussians, elliptical Gaussians
 /// require full 2D convolution which is O(n×k²). This is used when the PSF
 /// is known to be non-circular.
-pub(super) fn elliptical_gaussian_convolve(
+pub(crate) fn elliptical_gaussian_convolve(
     pixels: &Buffer2<f32>,
     sigma: f32,
     axis_ratio: f32,
@@ -199,7 +199,7 @@ pub(super) fn elliptical_gaussian_convolve(
 }
 
 /// Compute 1D Gaussian kernel (normalized to sum to 1.0).
-pub(super) fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {
+pub(crate) fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {
     assert!(sigma > 0.0, "Sigma must be positive");
 
     let radius = (3.0 * sigma).ceil() as usize;
@@ -224,7 +224,7 @@ pub(super) fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {
 }
 
 /// Convolve all rows in parallel using SIMD.
-pub(super) fn convolve_rows_parallel(
+pub(crate) fn convolve_rows_parallel(
     input: &Buffer2<f32>,
     output: &mut Buffer2<f32>,
     kernel: &[f32],
@@ -245,7 +245,7 @@ pub(super) fn convolve_rows_parallel(
 ///
 /// Processes multiple columns simultaneously using SIMD vectors.
 /// Each SIMD lane handles a different column with row-major traversal for cache locality.
-pub(super) fn convolve_cols(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
+pub(crate) fn convolve_cols(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
     let width = input.width();
     let height = input.height();
     let radius = kernel.len() / 2;

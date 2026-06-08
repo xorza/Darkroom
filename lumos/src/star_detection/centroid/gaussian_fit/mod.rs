@@ -25,19 +25,19 @@ mod simd_neon;
 // Max relative error < 2e-13.
 
 // P coefficients (numerator)
-pub(super) const EXP_P0: f64 = 1.261_771_930_748_105_8e-4;
-pub(super) const EXP_P1: f64 = 3.029_944_077_074_419_5e-2;
-pub(super) const EXP_P2: f64 = 1.0;
+pub(crate) const EXP_P0: f64 = 1.261_771_930_748_105_8e-4;
+pub(crate) const EXP_P1: f64 = 3.029_944_077_074_419_5e-2;
+pub(crate) const EXP_P2: f64 = 1.0;
 
 // Q coefficients (denominator)
-pub(super) const EXP_Q0: f64 = 3.001_985_051_386_644_6e-6;
-pub(super) const EXP_Q1: f64 = 2.524_483_403_496_841e-3;
-pub(super) const EXP_Q2: f64 = 2.272_655_482_081_550_3e-1;
-pub(super) const EXP_Q3: f64 = 2.0;
+pub(crate) const EXP_Q0: f64 = 3.001_985_051_386_644_6e-6;
+pub(crate) const EXP_Q1: f64 = 2.524_483_403_496_841e-3;
+pub(crate) const EXP_Q2: f64 = 2.272_655_482_081_550_3e-1;
+pub(crate) const EXP_Q3: f64 = 2.0;
 
 // ln(2) split into high and low parts for exact range reduction
-pub(super) const LN2_HI: f64 = 6.931_457_519_531_25e-1;
-pub(super) const LN2_LO: f64 = 1.428_606_820_309_417_3e-6;
+pub(crate) const LN2_HI: f64 = 6.931_457_519_531_25e-1;
+pub(crate) const LN2_LO: f64 = 1.428_606_820_309_417_3e-6;
 
 use super::lm_optimizer::{LMConfig, LMModel, LMResult, optimize};
 use super::{FitNoise, MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp, fit_weights};

@@ -1,6 +1,6 @@
 //! Sum and accumulation operations with SIMD acceleration.
 
-pub(super) mod scalar;
+pub(crate) mod scalar;
 
 #[cfg(target_arch = "aarch64")]
 mod neon;

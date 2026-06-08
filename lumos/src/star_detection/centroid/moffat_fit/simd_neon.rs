@@ -71,7 +71,7 @@ unsafe fn simd_fast_pow_neg(u: float64x2_t, strategy: PowStrategy) -> float64x2_
 /// For N=5 (MoffatFixedBeta), accumulates 15 upper-triangle hessian elements,
 /// 5 gradient elements, and chi² directly in NEON registers.
 #[allow(clippy::needless_range_loop)]
-pub(super) unsafe fn batch_build_normal_equations_neon(
+pub(crate) unsafe fn batch_build_normal_equations_neon(
     model: &MoffatFixedBeta,
     data_x: &[f64],
     data_y: &[f64],
@@ -230,7 +230,7 @@ pub(super) unsafe fn batch_build_normal_equations_neon(
 }
 
 /// Batch compute chi² using NEON.
-pub(super) unsafe fn batch_compute_chi2_neon(
+pub(crate) unsafe fn batch_compute_chi2_neon(
     model: &MoffatFixedBeta,
     data_x: &[f64],
     data_y: &[f64],

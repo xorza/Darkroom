@@ -80,7 +80,7 @@ unsafe fn simd_fast_pow_neg(u: __m256d, strategy: PowStrategy) -> __m256d {
 /// Caller must ensure AVX2 and FMA are available on the current CPU.
 #[allow(clippy::needless_range_loop)]
 #[target_feature(enable = "avx2,fma")]
-pub(super) unsafe fn batch_build_normal_equations_avx2(
+pub(crate) unsafe fn batch_build_normal_equations_avx2(
     model: &MoffatFixedBeta,
     data_x: &[f64],
     data_y: &[f64],
@@ -247,7 +247,7 @@ pub(super) unsafe fn batch_build_normal_equations_avx2(
 /// # Safety
 /// Caller must ensure AVX2 and FMA are available on the current CPU.
 #[target_feature(enable = "avx2,fma")]
-pub(super) unsafe fn batch_compute_chi2_avx2(
+pub(crate) unsafe fn batch_compute_chi2_avx2(
     model: &MoffatFixedBeta,
     data_x: &[f64],
     data_y: &[f64],
