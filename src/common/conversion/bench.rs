@@ -2,7 +2,7 @@
 
 use super::conversion_scalar::{ConversionInfo, dispatch_convert_row_scalar};
 use super::conversion_simd::get_simd_row_converter;
-use crate::common::color_format::ColorFormat;
+use crate::common::color_format::{ChannelSize, ColorFormat};
 use quickbench::quick_bench;
 use std::hint::black_box;
 
@@ -29,9 +29,9 @@ fn create_f32_row(width: usize, channels: usize) -> Vec<u8> {
 fn create_row_for_format(width: usize, format: ColorFormat) -> Vec<u8> {
     let channels = format.channel_count as usize;
     match format.channel_size {
-        crate::common::color_format::ChannelSize::_8bit => create_u8_row(width, channels),
-        crate::common::color_format::ChannelSize::_16bit => create_u16_row(width, channels),
-        crate::common::color_format::ChannelSize::_32bit => create_f32_row(width, channels),
+        ChannelSize::_8bit => create_u8_row(width, channels),
+        ChannelSize::_16bit => create_u16_row(width, channels),
+        ChannelSize::_32bit => create_f32_row(width, channels),
     }
 }
 
