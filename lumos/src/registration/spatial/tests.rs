@@ -688,7 +688,8 @@ fn test_heap_small_push_and_eviction() {
     assert!((heap.max_distance() - 10.0).abs() < 1e-10);
 
     // Final contents: dist_sq = {10, 5, 2}, indices = {0, 1, 3}
-    let result = heap.into_vec();
+    let mut result = Vec::new();
+    heap.write_into(&mut result);
     assert_eq!(result.len(), 3);
     let mut dist_sqs: Vec<u64> = result.iter().map(|n| n.dist_sq.to_bits()).collect();
     dist_sqs.sort();
@@ -726,7 +727,8 @@ fn test_heap_large_push_and_eviction() {
     // New max should be capacity-1 = 36
     assert!((heap.max_distance() - (capacity - 1) as f64).abs() < 1e-10);
 
-    let result = heap.into_vec();
+    let mut result = Vec::new();
+    heap.write_into(&mut result);
     assert_eq!(result.len(), capacity);
     // Should contain 0.5 and 1..36
     let has_half = result.iter().any(|n| (n.dist_sq - 0.5).abs() < 1e-10);
@@ -764,7 +766,8 @@ fn test_heap_capacity_one() {
     });
     assert!((heap.max_distance() - 3.0).abs() < 1e-10);
 
-    let result = heap.into_vec();
+    let mut result = Vec::new();
+    heap.write_into(&mut result);
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].index, 1);
     assert!((result[0].dist_sq - 3.0).abs() < 1e-10);

@@ -98,7 +98,7 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 - `ransac/`: `transforms.rs` (Procrustes for Euclidean/Similarity, Hartley-normalized least-squares for Affine, DLT-SVD for Homography), `magsac.rs` (continuous MAGSAC++ loss, no binary threshold), LO-RANSAC + adaptive iteration count.
 - `distortion/`: `sip` (FITS WCS SIP polynomial, order 2–5, MAD sigma-clipped fit) is live; `tps` (thin-plate spline, `DistortionMap`) is **fully implemented but `#![allow(dead_code)]` and not wired into `register()`**.
 - `warp(image, output, warp_transform, config)` (`mod.rs:243`): per-channel inverse-mapping. `InterpolationMethod` (`config.rs:24`) = `Nearest | Bilinear | Bicubic | Lanczos2/3/4{deringing}`. `interpolation/warp/` has AVX2/SSE4.1 + NEON bilinear (no-SIP, border 0) and a const-generic Lanczos path (4096-sample LUT, incremental f64 stepping, interior fast path, PixInsight-style soft-clamp deringing) whose 128-bit interior kernel is x86_64 AVX2/FMA (`warp/sse.rs`) and aarch64 NEON (`warp/neon.rs`) for all Lanczos sizes — both vectorize the deringing soft-clamp; bicubic is scalar.
-- `spatial::KdTree` (`spatial/mod.rs`): flat implicit 2D k-d tree (`k_nearest`/`nearest_one`/`radius_indices_into`) with a stack-allocated bounded max-heap for k ≤ 32.
+- `spatial::KdTree` (`spatial/mod.rs`): flat implicit 2D k-d tree (`k_nearest_into`/`nearest_one`/`radius_indices_into`) with a stack-allocated bounded max-heap for k ≤ 32.
 
 ## stacking — frame combination
 

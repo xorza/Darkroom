@@ -19,7 +19,7 @@
 ## API
 
 - `KdTree::build(points) -> Option<Self>` — Iterative median-split construction, O(n log n).
-- `k_nearest(query, k) -> Vec<Neighbor>` — K-nearest neighbors, sorted by distance squared. `Neighbor` has `index` and `dist_sq` fields.
+- `k_nearest_into(query, k, &mut buf)` — K-nearest neighbors (sorted by distance squared) into a reused buffer, zero per-query allocation. `Neighbor` has `index` and `dist_sq` fields.
 - `radius_indices_into(query, radius, &mut buf)` — All indices within radius, zero-allocation reuse.
 - `len()` — Number of points in the tree.
 - `get_point(idx)` — Get a point by its original index.

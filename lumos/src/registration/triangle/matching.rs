@@ -1,6 +1,6 @@
 use glam::DVec2;
 
-use crate::registration::spatial::KdTree;
+use crate::registration::spatial::{KdTree, Neighbor};
 
 use super::TriangleParams;
 use super::geometry::Triangle;
@@ -107,10 +107,12 @@ pub(crate) fn form_triangles_from_neighbors(tree: &KdTree, k: usize) -> Vec<[usi
 
     let k = k.min(n - 1);
     let mut triangles = Vec::new();
+    // Reused across the loop to avoid a per-star allocation (mirrors `radius_indices_into`).
+    let mut neighbors: Vec<Neighbor> = Vec::new();
 
     for i in 0..n {
         let point_i = tree.get_point(i);
-        let neighbors = tree.k_nearest(point_i, k + 1); // +1 because point itself is included
+        tree.k_nearest_into(point_i, k + 1, &mut neighbors); // +1 because point itself is included
 
         // Form triangles from pairs of neighbors
         for (ni, n1) in neighbors.iter().enumerate() {

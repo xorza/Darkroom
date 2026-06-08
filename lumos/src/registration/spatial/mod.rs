@@ -120,17 +120,20 @@ impl KdTree {
     ///
     /// # Returns
     /// Vector of `Neighbor` results sorted by distance
-    pub fn k_nearest(&self, query: DVec2, k: usize) -> Vec<Neighbor> {
+    /// Find the `k` nearest neighbors to `query`, filling `out` (cleared first) instead of
+    /// allocating — for hot loops that query repeatedly (e.g. the per-star k-NN graph).
+    /// Results are sorted by ascending distance.
+    pub fn k_nearest_into(&self, query: DVec2, k: usize, out: &mut Vec<Neighbor>) {
+        out.clear();
         if k == 0 || self.indices.is_empty() {
-            return Vec::new();
+            return;
         }
 
         let mut heap = BoundedMaxHeap::new(k);
         self.k_nearest_range(0, self.indices.len(), 0, query, &mut heap);
 
-        let mut result: Vec<Neighbor> = heap.into_vec();
-        result.sort_by(|a, b| a.dist_sq.total_cmp(&b.dist_sq));
-        result
+        heap.write_into(out);
+        out.sort_by(|a, b| a.dist_sq.total_cmp(&b.dist_sq));
     }
 
     /// K-nearest neighbor search over a range of the implicit tree.
@@ -396,10 +399,11 @@ impl BoundedMaxHeap {
         }
     }
 
-    fn into_vec(self) -> Vec<Neighbor> {
+    /// Append the heap's contents to `out` (unsorted) without consuming the heap.
+    fn write_into(&self, out: &mut Vec<Neighbor>) {
         match self {
-            BoundedMaxHeap::Small { len, items, .. } => items[..len].to_vec(),
-            BoundedMaxHeap::Large { items, .. } => items,
+            BoundedMaxHeap::Small { len, items, .. } => out.extend_from_slice(&items[..*len]),
+            BoundedMaxHeap::Large { items, .. } => out.extend_from_slice(items),
         }
     }
 
@@ -436,5 +440,17 @@ impl BoundedMaxHeap {
                 break;
             }
         }
+    }
+}
+
+/// Test-only ergonomic wrapper: k-nearest as an owned, distance-sorted `Vec`. Production uses
+/// the buffer-reusing [`KdTree::k_nearest_into`]; this allocating form exists only for test
+/// readability, so it's gated out of the library build.
+#[cfg(test)]
+impl KdTree {
+    pub(crate) fn k_nearest(&self, query: DVec2, k: usize) -> Vec<Neighbor> {
+        let mut out = Vec::new();
+        self.k_nearest_into(query, k, &mut out);
+        out
     }
 }
