@@ -310,8 +310,11 @@ fn interpolate(data: &Buffer2<f32>, x: f32, y: f32, params: &WarpParams) -> f32 
 /// it needs neither a scratch source buffer nor a second sampling pass. The
 /// `1.0` for fully-interior pixels and `0.0` for fully-extrapolated ones is the
 /// per-pixel data-fraction weight [`warp_coverage`] feeds to downstream stacking.
-/// The warped *value* is already renormalized by the in-bounds weight inside the
-/// samplers, so it is not divided by this coverage again.
+/// The warped *value* is renormalized to the in-bounds weighted average, but *where*
+/// depends on the kernel: bicubic/Lanczos (negative lobes) renormalize inside the
+/// sampler, while nearest/bilinear keep raw border-blended values that
+/// `registration::warp` divides by this coverage afterward (`renormalize_by_coverage`).
+/// Either way the value is already an average, so it is not divided by coverage again.
 fn coverage_at(sx: f32, sy: f32, w: usize, h: usize, method: InterpolationMethod) -> f32 {
     let in_bounds = |x: i32, y: i32| x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h;
     match method {
@@ -413,26 +416,9 @@ pub(crate) fn warp_coverage(
         .par_chunks_mut(width)
         .enumerate()
         .for_each(|(y, row)| {
-            let m = wt.transform.matrix.as_array();
-            let can_step = wt.is_linear();
-            let src0 = wt.apply(glam::DVec2::new(0.0, y as f64));
-            let mut src_x = src0.x;
-            let mut src_y = src0.y;
-            let dx_step = m[0];
-            let dy_step = m[3];
-
-            for (x, c) in row.iter_mut().enumerate() {
-                if !can_step {
-                    let src = wt.apply(glam::DVec2::new(x as f64, y as f64));
-                    src_x = src.x;
-                    src_y = src.y;
-                }
-                *c = coverage_at(src_x as f32, src_y as f32, width, height, method);
-                if can_step {
-                    src_x += dx_step;
-                    src_y += dy_step;
-                }
-            }
+            warp::warp_row_with(y, wt, row, |sx, sy| {
+                coverage_at(sx, sy, width, height, method)
+            });
         });
     coverage
 }
@@ -463,28 +449,9 @@ pub(crate) fn warp_image(
             } else if params.method.lanczos_param().is_some() {
                 warp::warp_row_lanczos(input, row, y, warp_transform, params);
             } else {
-                let m = warp_transform.transform.matrix.as_array();
-                let can_step = warp_transform.is_linear();
-                let src0 = warp_transform.apply(glam::DVec2::new(0.0, y as f64));
-                let mut src_x = src0.x;
-                let mut src_y = src0.y;
-                let dx_step = m[0];
-                let dy_step = m[3];
-
-                for (x, pixel) in row.iter_mut().enumerate() {
-                    if !can_step {
-                        let src = warp_transform.apply(glam::DVec2::new(x as f64, y as f64));
-                        src_x = src.x;
-                        src_y = src.y;
-                    }
-
-                    *pixel = interpolate(input, src_x as f32, src_y as f32, params);
-
-                    if can_step {
-                        src_x += dx_step;
-                        src_y += dy_step;
-                    }
-                }
+                warp::warp_row_with(y, warp_transform, row, |sx, sy| {
+                    interpolate(input, sx, sy, params)
+                });
             }
         });
 }

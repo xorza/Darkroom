@@ -49,6 +49,41 @@ pub(crate) struct SoftClampAccum {
     pub wn: f32,
 }
 
+/// Inverse-map one output row to source coordinates and fill it via `sample`.
+///
+/// Centralizes the linear incremental-stepping fast path — for non-perspective transforms the
+/// source coordinate advances by a constant `(m[0], m[3])` per output pixel, so the per-pixel matrix
+/// multiply is skipped. Shared by the scalar bilinear, generic per-pixel, and coverage row loops so
+/// the stepping logic lives in exactly one place (value and coverage cannot drift).
+#[inline]
+pub(crate) fn warp_row_with(
+    output_y: usize,
+    wt: &WarpTransform,
+    output_row: &mut [f32],
+    mut sample: impl FnMut(f32, f32) -> f32,
+) {
+    let m = wt.transform.matrix.as_array();
+    let can_step = wt.is_linear();
+    let src0 = wt.apply(DVec2::new(0.0, output_y as f64));
+    let mut src_x = src0.x;
+    let mut src_y = src0.y;
+    let dx_step = m[0];
+    let dy_step = m[3];
+
+    for (x, out) in output_row.iter_mut().enumerate() {
+        if !can_step {
+            let src = wt.apply(DVec2::new(x as f64, output_y as f64));
+            src_x = src.x;
+            src_y = src.y;
+        }
+        *out = sample(src_x as f32, src_y as f32);
+        if can_step {
+            src_x += dx_step;
+            src_y += dy_step;
+        }
+    }
+}
+
 /// Warp a row of pixels using bilinear interpolation.
 ///
 /// Uses AVX2/SSE4.1 on x86_64, NEON on aarch64, scalar with incremental stepping elsewhere.
@@ -103,29 +138,9 @@ pub(crate) fn warp_row_bilinear_scalar(
     wt: &WarpTransform,
     border_value: f32,
 ) {
-    let m = wt.transform.matrix.as_array();
-    let can_step = wt.is_linear();
-
-    let src0 = wt.apply(DVec2::new(0.0, output_y as f64));
-    let mut src_x = src0.x;
-    let mut src_y = src0.y;
-    let dx_step = m[0];
-    let dy_step = m[3];
-
-    for (x_idx, out_pixel) in output_row.iter_mut().enumerate() {
-        if !can_step {
-            let src = wt.apply(DVec2::new(x_idx as f64, output_y as f64));
-            src_x = src.x;
-            src_y = src.y;
-        }
-
-        *out_pixel = bilinear_sample(input, src_x as f32, src_y as f32, border_value);
-
-        if can_step {
-            src_x += dx_step;
-            src_y += dy_step;
-        }
-    }
+    warp_row_with(output_y, wt, output_row, |sx, sy| {
+        bilinear_sample(input, sx, sy, border_value)
+    });
 }
 
 use super::sample_pixel;
@@ -286,17 +301,23 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
             };
         }
 
-        let mut wx_sum = 0.0f32;
-        let mut wy_sum = 0.0f32;
-        for i in 0..SIZE {
-            wx_sum += wx[i];
-            wy_sum += wy[i];
-        }
-        let total_sum = wx_sum * wy_sum;
-        let inv_total = if total_sum.abs() > 1e-10 {
-            1.0 / total_sum
+        // Only the non-deringing path divides by the full-kernel weight; deringing normalizes
+        // inside `soft_clamp`. `DERINGING` is const, so this block vanishes when it's true.
+        let inv_total = if DERINGING {
+            1.0 // unused
         } else {
-            1.0
+            let mut wx_sum = 0.0f32;
+            let mut wy_sum = 0.0f32;
+            for i in 0..SIZE {
+                wx_sum += wx[i];
+                wy_sum += wy[i];
+            }
+            let total_sum = wx_sum * wy_sum;
+            if total_sum.abs() > 1e-10 {
+                1.0 / total_sum
+            } else {
+                1.0
+            }
         };
 
         // SIMD fast path (x86_64 AVX2+FMA / aarch64 NEON — both 128-bit, 4-wide): needs all SIZE

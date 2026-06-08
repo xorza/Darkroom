@@ -217,3 +217,78 @@ pub unsafe fn lanczos_kernel_neon<const A: usize, const SIZE: usize, const DERIN
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registration::interpolation::get_lanczos_lut;
+
+    /// NEON Lanczos kernel must match a plain scalar weighted sum (mirror of the x86
+    /// `lanczos_kernel_fma_matches_scalar` checks). Interior 20×20 window, no border.
+    fn assert_lanczos_kernel_neon_matches_scalar<const A: usize, const SIZE: usize>(label: &str) {
+        let (width, height) = (20usize, 20usize);
+        let data: Vec<f32> = (0..width * height)
+            .map(|i| (i % width) as f32 + (i / width) as f32 * 0.1)
+            .collect();
+
+        let lut = get_lanczos_lut(A);
+        let a_minus_1 = A as i32 - 1;
+        let kx = (6 - a_minus_1) as usize;
+        let ky = (6 - a_minus_1) as usize;
+        let (fx, fy) = (0.3f32, 0.7f32);
+
+        let mut wx = [0.0f32; SIZE];
+        let mut wy = [0.0f32; SIZE];
+        for i in 0..SIZE {
+            wx[i] = if i < A {
+                lut.lookup_positive((a_minus_1 - i as i32) as f32 + fx)
+            } else {
+                lut.lookup_positive((i as i32 - a_minus_1) as f32 - fx)
+            };
+            wy[i] = if i < A {
+                lut.lookup_positive((a_minus_1 - i as i32) as f32 + fy)
+            } else {
+                lut.lookup_positive((i as i32 - a_minus_1) as f32 - fy)
+            };
+        }
+
+        let mut scalar_sum = 0.0f32;
+        for j in 0..SIZE {
+            for k in 0..SIZE {
+                scalar_sum += data[(ky + j) * width + kx + k] * wx[k] * wy[j];
+            }
+        }
+
+        let simd = unsafe { lanczos_kernel_neon::<A, SIZE, false>(&data, width, kx, ky, &wx, &wy) };
+        assert!(
+            (simd.sp - scalar_sum).abs() < 1e-4,
+            "{label} no-dering: NEON {} vs scalar {scalar_sum}",
+            simd.sp
+        );
+        assert_eq!(simd.sn, 0.0);
+
+        // With deringing, sp - sn reconstructs the same weighted sum.
+        let simd_d =
+            unsafe { lanczos_kernel_neon::<A, SIZE, true>(&data, width, kx, ky, &wx, &wy) };
+        let total = simd_d.sp - simd_d.sn;
+        assert!(
+            (total - scalar_sum).abs() < 1e-4,
+            "{label} dering: sp-sn={total} vs scalar {scalar_sum}"
+        );
+    }
+
+    #[test]
+    fn lanczos2_kernel_neon_matches_scalar() {
+        assert_lanczos_kernel_neon_matches_scalar::<2, 4>("Lanczos2");
+    }
+
+    #[test]
+    fn lanczos3_kernel_neon_matches_scalar() {
+        assert_lanczos_kernel_neon_matches_scalar::<3, 6>("Lanczos3");
+    }
+
+    #[test]
+    fn lanczos4_kernel_neon_matches_scalar() {
+        assert_lanczos_kernel_neon_matches_scalar::<4, 8>("Lanczos4");
+    }
+}

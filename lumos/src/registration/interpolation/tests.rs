@@ -1044,3 +1044,66 @@ fn samplers_renormalize_partial_kernel_at_edge() {
         );
     }
 }
+
+#[test]
+fn warp_coverage_nearest_identity_is_all_ones() {
+    let (w, h) = (8, 8);
+    let wt = WarpTransform::new(Transform::identity());
+    let cov = warp_coverage(w, h, &wt, InterpolationMethod::Nearest);
+    for &c in cov.pixels() {
+        assert!(
+            (c - 1.0).abs() < TOL,
+            "nearest identity coverage should be 1.0, got {c}"
+        );
+    }
+}
+
+#[test]
+fn warp_coverage_fully_outside_is_zero() {
+    let (w, h) = (8, 8);
+    // Source translated far outside the image: every kernel tap is out of bounds.
+    let wt = WarpTransform::new(Transform::translation(DVec2::new(1000.0, 1000.0)));
+    let cov = warp_coverage(w, h, &wt, InterpolationMethod::Bilinear);
+    for &c in cov.pixels() {
+        assert_eq!(c, 0.0, "fully-outside coverage must be 0, got {c}");
+    }
+}
+
+#[test]
+fn warp_coverage_bilinear_edge_is_partial() {
+    let (w, h) = (8, 8);
+    // Output (0,4) maps to src (-0.5, 4.0): the 2×2 bilinear footprint straddles the left
+    // edge — taps at x=-1 (out, weight 0.5) and x=0 (in, weight 0.5) → coverage 0.5.
+    let wt = WarpTransform::new(Transform::translation(DVec2::new(-0.5, 0.0)));
+    let cov = warp_coverage(w, h, &wt, InterpolationMethod::Bilinear);
+    let edge = cov.pixels()[4 * w];
+    assert!(
+        (edge - 0.5).abs() < TOL,
+        "left-edge bilinear coverage should be 0.5, got {edge}"
+    );
+    // An interior output pixel maps fully in bounds → coverage 1.0.
+    let interior = cov.pixels()[4 * w + 4];
+    assert!(
+        (interior - 1.0).abs() < TOL,
+        "interior coverage should be 1.0, got {interior}"
+    );
+}
+
+#[test]
+fn warp_tiny_image_smaller_than_lanczos4_kernel() {
+    // 3×3 image with Lanczos4 (8-tap window > image): every output pixel's kernel is mostly
+    // out of bounds, exercising the renormalized slow path. DC must be preserved.
+    let (w, h) = (3, 3);
+    let input = Buffer2::new(w, h, vec![0.5f32; w * h]);
+    let mut output = Buffer2::new_default(w, h);
+    let wt = WarpTransform::new(Transform::identity());
+    let params = WarpParams::new(InterpolationMethod::Lanczos4 { deringing: -1.0 });
+    warp_image(&input, &mut output, &wt, &params);
+    for &v in output.pixels() {
+        assert!(v.is_finite(), "tiny-image warp produced non-finite {v}");
+        assert!(
+            (v - 0.5).abs() < 1e-4,
+            "uniform image must stay 0.5, got {v}"
+        );
+    }
+}
