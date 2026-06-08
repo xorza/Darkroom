@@ -1,9 +1,11 @@
 //! Optimized row-warping implementations.
 //!
 //! Runtime dispatch to the best available implementation:
-//! - **Bilinear**: AVX2/SSE4.1 on x86_64, scalar with incremental stepping elsewhere
-//! - **Lanczos2/3/4**: Scalar with incremental stepping, fast-path interior bounds
-//!   skipping, const-generic deringing, and SIMD FMA (Lanczos3 only on x86_64)
+//! - **Bilinear**: AVX2/SSE4.1 on x86_64, NEON on aarch64, scalar with incremental stepping
+//!   elsewhere
+//! - **Lanczos2/3/4**: Scalar with incremental stepping, fast-path interior bounds skipping,
+//!   const-generic deringing, and a 128-bit SIMD interior kernel — x86_64 AVX2/FMA and aarch64
+//!   NEON, all Lanczos sizes, with the deringing soft-clamp vectorized too
 //!
 //! When SIP distortion correction is active, incremental stepping is disabled
 //! (SIP is nonlinear) and SIMD paths fall back to scalar.
@@ -13,6 +15,9 @@ use common::cpu_features;
 
 #[cfg(target_arch = "x86_64")]
 pub mod sse;
+
+#[cfg(target_arch = "aarch64")]
+pub mod neon;
 
 use crate::registration::interpolation::WarpParams;
 use crate::registration::interpolation::get_lanczos_lut;
@@ -31,7 +36,7 @@ fn fast_floor_i32(x: f32) -> i32 {
 }
 
 /// Positive/negative weighted contribution accumulators for soft clamping.
-#[allow(dead_code)] // only constructed by the x86_64 SSE/AVX paths
+#[allow(dead_code)] // constructed only by the SIMD kernels (x86_64 SSE/AVX, aarch64 NEON)
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SoftClampAccum {
     /// Sum of positive weighted values (pixel * weight where result >= 0)
@@ -46,7 +51,7 @@ pub(crate) struct SoftClampAccum {
 
 /// Warp a row of pixels using bilinear interpolation.
 ///
-/// Uses AVX2/SSE4.1 on x86_64, scalar with incremental stepping elsewhere.
+/// Uses AVX2/SSE4.1 on x86_64, NEON on aarch64, scalar with incremental stepping elsewhere.
 /// When SIP is active, falls back to scalar (SIP is nonlinear).
 #[inline]
 pub(crate) fn warp_row_bilinear(
@@ -74,7 +79,16 @@ pub(crate) fn warp_row_bilinear(
         }
     }
 
-    // Scalar fallback (also used on aarch64 and when SIP is active)
+    #[cfg(target_arch = "aarch64")]
+    if !wt.has_sip() && border_value == 0.0 && output_row.len() >= 4 {
+        // SAFETY: NEON is always available on aarch64.
+        unsafe {
+            neon::warp_row_bilinear_neon(input, output_row, output_y, &wt.transform);
+        }
+        return;
+    }
+
+    // Scalar fallback (also used when SIP is active or the row is too short for SIMD)
     warp_row_bilinear_scalar(input, output_row, output_y, wt, border_value);
 }
 
@@ -173,7 +187,7 @@ fn soft_clamp(sp: f32, sn: f32, wp: f32, wn: f32, th: f32, th_inv: f32) -> f32 {
 /// 3. Incremental source coordinate stepping (avoid per-pixel matrix multiply)
 /// 4. Fast-path for interior pixels (skip bounds checks, use direct row pointers)
 /// 5. `lookup_positive()` — skips abs() and bounds check in LUT lookup
-/// 6. SIMD FMA fast path for Lanczos3 on x86_64
+/// 6. 128-bit SIMD interior fast path: x86_64 AVX2/FMA, aarch64 NEON (all Lanczos sizes)
 pub(crate) fn warp_row_lanczos(
     input: &Buffer2<f32>,
     output_row: &mut [f32],
@@ -285,36 +299,58 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
             1.0
         };
 
-        // SIMD fast path: needs all SIZE rows and enough columns for 128-bit loads.
-        // SIZE=4: reads 4 floats/row (one __m128), needs kx0 + 3 < iw
-        // SIZE=6: reads 8 floats/row (two __m128, 2 zero-padded), needs kx0 + 7 < iw
-        // SIZE=8: reads 8 floats/row (two __m128), needs kx0 + 7 < iw
-        #[cfg(target_arch = "x86_64")]
-        let simd_cols: i32 = if SIZE > 4 { 8 } else { SIZE as i32 };
-        #[cfg(target_arch = "x86_64")]
-        if use_fma && kx0 >= 0 && ky0 >= 0 && kx0 + simd_cols - 1 < iw && ky0 + SIZE as i32 - 1 < ih
+        // SIMD fast path (x86_64 AVX2+FMA / aarch64 NEON — both 128-bit, 4-wide): needs all SIZE
+        // rows and enough columns for the 128-bit loads.
+        // SIZE=4: reads 4 floats/row (one vector), needs kx0 + 3 < iw
+        // SIZE=6/8: reads 8 floats/row (two vectors, SIZE=6 zero-pads 2), needs kx0 + 7 < iw
+        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
         {
-            let acc = unsafe {
-                sse::lanczos_kernel_fma::<A, SIZE, DERINGING>(
-                    pixels,
-                    input_width,
-                    kx0 as usize,
-                    ky0 as usize,
-                    &wx,
-                    &wy,
-                )
-            };
-            *out_pixel = if DERINGING {
-                soft_clamp(acc.sp, acc.sn, acc.wp, acc.wn, clamp_th, clamp_th_inv)
-            } else {
-                acc.sp * inv_total
-            };
+            let simd_cols: i32 = if SIZE > 4 { 8 } else { SIZE as i32 };
+            let in_bounds =
+                kx0 >= 0 && ky0 >= 0 && kx0 + simd_cols - 1 < iw && ky0 + SIZE as i32 - 1 < ih;
+            // x86 AVX2/FMA is runtime-detected; NEON is mandatory on aarch64.
+            #[cfg(target_arch = "x86_64")]
+            let try_simd = use_fma && in_bounds;
+            #[cfg(target_arch = "aarch64")]
+            let try_simd = in_bounds;
 
-            if can_step {
-                src_x += dx_step;
-                src_y += dy_step;
+            if try_simd {
+                let acc = unsafe {
+                    #[cfg(target_arch = "x86_64")]
+                    {
+                        sse::lanczos_kernel_fma::<A, SIZE, DERINGING>(
+                            pixels,
+                            input_width,
+                            kx0 as usize,
+                            ky0 as usize,
+                            &wx,
+                            &wy,
+                        )
+                    }
+                    #[cfg(target_arch = "aarch64")]
+                    {
+                        neon::lanczos_kernel_neon::<A, SIZE, DERINGING>(
+                            pixels,
+                            input_width,
+                            kx0 as usize,
+                            ky0 as usize,
+                            &wx,
+                            &wy,
+                        )
+                    }
+                };
+                *out_pixel = if DERINGING {
+                    soft_clamp(acc.sp, acc.sn, acc.wp, acc.wn, clamp_th, clamp_th_inv)
+                } else {
+                    acc.sp * inv_total
+                };
+
+                if can_step {
+                    src_x += dx_step;
+                    src_y += dy_step;
+                }
+                continue;
             }
-            continue;
         }
 
         if kx0 >= 0 && ky0 >= 0 && kx0 + SIZE as i32 - 1 < iw && ky0 + SIZE as i32 - 1 < ih {

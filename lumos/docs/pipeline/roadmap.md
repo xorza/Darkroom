@@ -71,8 +71,13 @@ Status: ☐ todo · ◐ in progress · ☑ done · ⊘ deferred (deliberate)
 
 ## Performance queue (ARM is the profiled target)
 
-- ☐ **PF1 — NEON Lanczos/bilinear warp** · High (ARM). The default Lanczos3 warp is scalar on
-  aarch64; the SSE/AVX FMA kernel has no NEON twin (`interpolation/warp/`). #1 ARM win.
+- ☑ **PF1 — NEON Lanczos/bilinear warp** · Done (ARM). Added `warp/neon.rs` — a `float32x4` twin of
+  the 128-bit SSE/FMA kernel (`lanczos_kernel_neon` for all Lanczos sizes incl. the deringing
+  soft-clamp via `vbslq`/`vaddvq`, + `warp_row_bilinear_neon`) wired into the `warp/mod.rs` dispatch
+  (NEON is mandatory on aarch64, so no runtime check). Measured (arm64, single-file isolation where
+  noted): Lanczos3 warp **−48 to −51%** (1k/2k/4k, ~2×), deringing single-thread **−48.5%**,
+  Lanczos2/4 −25%/−45%, bilinear −8% (memory-bound). Correctness covered by the existing ungated
+  scalar-vs-optimized parity tests, which now exercise the NEON backend.
 - ☐ **PF7 — SIMD weighted LM fit.** PR1's inverse-variance weighted fit runs scalar (the
   unweighted default path keeps its AVX2/NEON kernels). Add weighted AVX2/NEON
   `batch_build_normal_equations`/`batch_compute_chi2` so `NoiseModel`-driven fits vectorize.

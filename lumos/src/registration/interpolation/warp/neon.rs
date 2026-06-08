@@ -1,0 +1,219 @@
+//! ARM NEON implementations of the bilinear + Lanczos row-warp kernels.
+//!
+//! 128-bit (4-wide f32) twins of the AVX2/SSE kernels in [`super::sse`]. The Lanczos kernel mirrors
+//! [`super::sse::lanczos_kernel_fma`] almost 1:1 — that "FMA" path is itself 128-bit SSE, so NEON's
+//! `float32x4_t` + `vfmaq_f32` + horizontal `vaddvq_f32` map directly. NEON is mandatory on
+//! aarch64, so these need no runtime feature check; the caller dispatches on `cfg(target_arch)`.
+
+#![allow(clippy::needless_range_loop)] // indices drive pointer arithmetic over the pixel window
+
+use std::arch::aarch64::*;
+
+use common::Buffer2;
+use glam::DVec2;
+
+use super::super::sample_pixel;
+use super::SoftClampAccum;
+use crate::registration::transform::Transform;
+
+/// Warp a row using NEON bilinear interpolation, 4 output pixels at a time.
+///
+/// # Safety
+/// Caller must be on aarch64 (NEON is always available there).
+pub unsafe fn warp_row_bilinear_neon(
+    input: &Buffer2<f32>,
+    output_row: &mut [f32],
+    output_y: usize,
+    transform: &Transform,
+) {
+    unsafe {
+        let pixels = input.pixels();
+        let input_width = input.width();
+        let input_height = input.height();
+        let output_width = output_row.len();
+        let y = output_y as f32;
+
+        let t = transform.matrix.as_array();
+        let (a, b, c) = (t[0] as f32, t[1] as f32, t[2] as f32);
+        let (d, e, f) = (t[3] as f32, t[4] as f32, t[5] as f32);
+        let (g, h) = (t[6] as f32, t[7] as f32);
+
+        // src_x = (a*x + by_c) / (g*x + hy_1), src_y = (d*x + ey_f) / (g*x + hy_1)
+        let by_c = vdupq_n_f32(b * y + c);
+        let ey_f = vdupq_n_f32(e * y + f);
+        let hy_1 = vdupq_n_f32(h * y + 1.0);
+        let a_vec = vdupq_n_f32(a);
+        let d_vec = vdupq_n_f32(d);
+        let g_vec = vdupq_n_f32(g);
+
+        let chunks = output_width / 4;
+        for chunk in 0..chunks {
+            let base_x = chunk * 4;
+            let xs = [
+                base_x as f32,
+                (base_x + 1) as f32,
+                (base_x + 2) as f32,
+                (base_x + 3) as f32,
+            ];
+            let x_coords = vld1q_f32(xs.as_ptr());
+
+            let num_x = vfmaq_f32(by_c, a_vec, x_coords);
+            let num_y = vfmaq_f32(ey_f, d_vec, x_coords);
+            let denom = vfmaq_f32(hy_1, g_vec, x_coords);
+            let src_x = vdivq_f32(num_x, denom);
+            let src_y = vdivq_f32(num_y, denom);
+
+            let x0 = vrndmq_f32(src_x); // floor toward -inf
+            let y0 = vrndmq_f32(src_y);
+            let fx = vsubq_f32(src_x, x0);
+            let fy = vsubq_f32(src_y, y0);
+
+            // Gather the four corners scalar-ly (mirrors the AVX2 path).
+            let mut x0_arr = [0.0f32; 4];
+            let mut y0_arr = [0.0f32; 4];
+            vst1q_f32(x0_arr.as_mut_ptr(), x0);
+            vst1q_f32(y0_arr.as_mut_ptr(), y0);
+
+            let mut p00 = [0.0f32; 4];
+            let mut p10 = [0.0f32; 4];
+            let mut p01 = [0.0f32; 4];
+            let mut p11 = [0.0f32; 4];
+            for i in 0..4 {
+                let ix0 = x0_arr[i] as i32;
+                let iy0 = y0_arr[i] as i32;
+                p00[i] = sample_pixel(pixels, input_width, input_height, ix0, iy0, 0.0);
+                p10[i] = sample_pixel(pixels, input_width, input_height, ix0 + 1, iy0, 0.0);
+                p01[i] = sample_pixel(pixels, input_width, input_height, ix0, iy0 + 1, 0.0);
+                p11[i] = sample_pixel(pixels, input_width, input_height, ix0 + 1, iy0 + 1, 0.0);
+            }
+            let p00v = vld1q_f32(p00.as_ptr());
+            let p10v = vld1q_f32(p10.as_ptr());
+            let p01v = vld1q_f32(p01.as_ptr());
+            let p11v = vld1q_f32(p11.as_ptr());
+
+            // top = p00 + fx*(p10-p00); bottom = p01 + fx*(p11-p01); out = top + fy*(bottom-top)
+            let top = vfmaq_f32(p00v, fx, vsubq_f32(p10v, p00v));
+            let bottom = vfmaq_f32(p01v, fx, vsubq_f32(p11v, p01v));
+            let result = vfmaq_f32(top, fy, vsubq_f32(bottom, top));
+
+            vst1q_f32(output_row.as_mut_ptr().add(base_x), result);
+        }
+
+        // Scalar remainder.
+        for x in (chunks * 4)..output_width {
+            let src = transform.apply(DVec2::new(x as f64, output_y as f64));
+            output_row[x] = super::bilinear_sample(input, src.x as f32, src.y as f32, 0.0);
+        }
+    }
+}
+
+/// NEON twin of [`super::sse::lanczos_kernel_fma`]: separable Lanczos over a `SIZE×SIZE` window with
+/// optional PixInsight-style soft-clamp deringing (positive/negative contributions split).
+///
+/// # Safety
+/// - Caller must be on aarch64.
+/// - The `SIZE×SIZE` window at `(kx, ky)` must be fully in bounds. For `SIZE > 4`,
+///   `kx + 7 < input_width` (reads 8 floats/row); for `SIZE = 4`, `kx + 3 < input_width`.
+pub unsafe fn lanczos_kernel_neon<const A: usize, const SIZE: usize, const DERINGING: bool>(
+    pixels: &[f32],
+    input_width: usize,
+    kx: usize,
+    ky: usize,
+    wx: &[f32; SIZE],
+    wy: &[f32; SIZE],
+) -> SoftClampAccum {
+    unsafe {
+        // Horizontal weights, constant across rows. For SIZE=6 the top half is zero-padded; the
+        // dispatch guarantees the extra two columns are in bounds, and their zero weight nulls them.
+        let wx_lo = vld1q_f32(wx.as_ptr());
+        let wx_hi = if SIZE == 8 {
+            vld1q_f32(wx.as_ptr().add(4))
+        } else if SIZE == 6 {
+            let tmp = [wx[4], wx[5], 0.0, 0.0];
+            vld1q_f32(tmp.as_ptr())
+        } else {
+            vdupq_n_f32(0.0)
+        };
+
+        let zero = vdupq_n_f32(0.0);
+        let mut acc_lo = zero;
+        let mut acc_hi = zero;
+        let mut sp_lo = zero;
+        let mut sp_hi = zero;
+        let mut sn_lo = zero;
+        let mut sn_hi = zero;
+        let mut wp_lo = zero;
+        let mut wp_hi = zero;
+        let mut wn_lo = zero;
+        let mut wn_hi = zero;
+
+        for j in 0..SIZE {
+            let row_ptr = pixels.as_ptr().add((ky + j) * input_width + kx);
+            let src_lo = vld1q_f32(row_ptr);
+            let wyj = vdupq_n_f32(wy[j]);
+
+            if DERINGING {
+                let w_lo = vmulq_f32(wx_lo, wyj);
+                let s_lo = vmulq_f32(src_lo, w_lo);
+                // pos lanes: s >= 0; the complement (s < 0) feeds the negative accumulators.
+                let pos_lo = vcgeq_f32(s_lo, zero);
+                sp_lo = vaddq_f32(sp_lo, vbslq_f32(pos_lo, s_lo, zero));
+                wp_lo = vaddq_f32(wp_lo, vbslq_f32(pos_lo, w_lo, zero));
+                sn_lo = vsubq_f32(sn_lo, vbslq_f32(pos_lo, zero, s_lo));
+                wn_lo = vsubq_f32(wn_lo, vbslq_f32(pos_lo, zero, w_lo));
+
+                if SIZE > 4 {
+                    let src_hi = vld1q_f32(row_ptr.add(4));
+                    let w_hi = vmulq_f32(wx_hi, wyj);
+                    let s_hi = vmulq_f32(src_hi, w_hi);
+                    let pos_hi = vcgeq_f32(s_hi, zero);
+                    sp_hi = vaddq_f32(sp_hi, vbslq_f32(pos_hi, s_hi, zero));
+                    wp_hi = vaddq_f32(wp_hi, vbslq_f32(pos_hi, w_hi, zero));
+                    sn_hi = vsubq_f32(sn_hi, vbslq_f32(pos_hi, zero, s_hi));
+                    wn_hi = vsubq_f32(wn_hi, vbslq_f32(pos_hi, zero, w_hi));
+                }
+            } else {
+                let sx_lo = vmulq_f32(src_lo, wx_lo);
+                acc_lo = vfmaq_f32(acc_lo, sx_lo, wyj);
+
+                if SIZE > 4 {
+                    let src_hi = vld1q_f32(row_ptr.add(4));
+                    let sx_hi = vmulq_f32(src_hi, wx_hi);
+                    acc_hi = vfmaq_f32(acc_hi, sx_hi, wyj);
+                }
+            }
+        }
+
+        if DERINGING {
+            if SIZE > 4 {
+                SoftClampAccum {
+                    sp: vaddvq_f32(vaddq_f32(sp_lo, sp_hi)),
+                    sn: vaddvq_f32(vaddq_f32(sn_lo, sn_hi)),
+                    wp: vaddvq_f32(vaddq_f32(wp_lo, wp_hi)),
+                    wn: vaddvq_f32(vaddq_f32(wn_lo, wn_hi)),
+                }
+            } else {
+                SoftClampAccum {
+                    sp: vaddvq_f32(sp_lo),
+                    sn: vaddvq_f32(sn_lo),
+                    wp: vaddvq_f32(wp_lo),
+                    wn: vaddvq_f32(wn_lo),
+                }
+            }
+        } else if SIZE > 4 {
+            SoftClampAccum {
+                sp: vaddvq_f32(vaddq_f32(acc_lo, acc_hi)),
+                sn: 0.0,
+                wp: 0.0,
+                wn: 0.0,
+            }
+        } else {
+            SoftClampAccum {
+                sp: vaddvq_f32(acc_lo),
+                sn: 0.0,
+                wp: 0.0,
+                wn: 0.0,
+            }
+        }
+    }
+}
