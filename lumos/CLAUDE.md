@@ -4,7 +4,9 @@ Astronomical image-processing library: RAW/FITS decoding, master-frame calibrati
 
 ## Mission & scope
 
-Lumos aims to be the **most precise and the fastest** astrophotography stacking pipeline there is. There is exactly one deliverable: a calibrated, registered, **stacked** deep-sky image — the highest-fidelity master a given set of exposures can yield. Every feature must move a frame toward that result (load → calibrate → detect → register → combine); functionality that doesn't serve the stacked image is **out of scope** and should be removed rather than carried.
+Lumos aims to be the **most precise and the fastest** astrophotography stacking pipeline there is, and is growing from "produce a good-looking image" toward a **science data product**: the calibrated, registered, **stacked** deep-sky image *plus* the ancillary per-pixel quality planes (coverage, weight, variance/noise) that let a downstream tool **measure** the result — photometry, source extraction, error bars — instead of merely viewing it.
+
+The core deliverable is still that stacked master — load → calibrate → detect → register → combine — and it always comes first. **Science-metadata extras are welcome alongside it, but only when they stay low-complexity and don't derail the core**: they should ride cheaply on data the pipeline already computes (e.g. drizzle's `weight`/`variance` maps fall straight out of the `Σwᵢ`/`Σwᵢ²` the accumulator already tracks). Anything that adds significant machinery without serving either the image or its measurability is still **out of scope** and should be removed rather than carried.
 
 **Precision and correctness outrank speed.** Both are first-class goals — the hot paths are aggressively optimized — but when the two conflict, the numerically-correct choice wins; never trade accuracy of the stacked result for throughput.
 
