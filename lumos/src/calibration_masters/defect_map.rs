@@ -38,6 +38,7 @@
 //! shadows (which dim by far less than half), so only genuinely near-zero pixels are caught.
 
 use crate::astro_image::cfa::{CfaImage, CfaType};
+use crate::math::statistics::median_f32_mut;
 use common::BitBuffer2;
 use common::Buffer2;
 use common::Vec2us;
@@ -236,11 +237,11 @@ fn compute_per_color_stats(
             continue;
         }
 
-        let median = crate::math::statistics::median_f32_mut(&mut samples);
+        let median = median_f32_mut(&mut samples);
         for v in samples.iter_mut() {
             *v = (*v - median).abs();
         }
-        let mad = crate::math::statistics::median_f32_mut(&mut samples);
+        let mad = median_f32_mut(&mut samples);
 
         let sigma = (mad * MAD_TO_SIGMA).max(median * 0.1).max(5e-4);
 
@@ -343,7 +344,7 @@ fn median_of_neighbors_raw(
         return *pixels.get(x, y);
     }
 
-    crate::math::statistics::median_f32_mut(&mut neighbors[..count])
+    median_f32_mut(&mut neighbors[..count])
 }
 
 /// Find same-color CFA neighbors and return their median.
@@ -402,7 +403,7 @@ fn bayer_same_color_median(
     if count == 0 {
         return *pixels.get(x, y);
     }
-    crate::math::statistics::median_f32_mut(&mut buf[..count])
+    median_f32_mut(&mut buf[..count])
 }
 
 /// X-Trans same-color neighbor median.
@@ -460,7 +461,7 @@ fn xtrans_same_color_median(
     for (i, &(_, val)) in candidates[..n].iter().enumerate() {
         neighbors[i] = val;
     }
-    crate::math::statistics::median_f32_mut(&mut neighbors[..n])
+    median_f32_mut(&mut neighbors[..n])
 }
 
 /// Per-class defect counts, used only by tests to assert detection behavior.
@@ -501,7 +502,7 @@ mod bench {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::make_cfa;
+    use crate::{raw::demosaic::bayer::CfaPattern, testing::make_cfa};
 
     fn is_hot(defect_map: &DefectMap, pixel_idx: usize) -> bool {
         defect_map.hot_indices.binary_search(&pixel_idx).is_ok()
@@ -516,7 +517,7 @@ mod tests {
         // A defect whose same-color neighbours are MOSTLY other defects must still be repaired from
         // the few good ones — the defect mask excludes the bad neighbours. Pre-mask, the neighbour
         // median was dominated by the cluster and left the pixel ~uncorrected (≈0.95 here).
-        let cfa = CfaType::Bayer(crate::raw::demosaic::bayer::CfaPattern::Rggb);
+        let cfa = CfaType::Bayer(CfaPattern::Rggb);
         let (w, h) = (16usize, 16usize);
         // Red pixels sit at (even,even). Target (6,6); make 5 of its 8 stride-2 red neighbours hot.
         let hot = [(6, 6), (4, 6), (8, 6), (6, 4), (6, 8), (4, 4)];
@@ -607,12 +608,7 @@ mod tests {
         pixels[14] = 10000.0; // hot at (2,2)
         pixels[35] = 10000.0; // hot at (5,5)
 
-        let dark = make_cfa(
-            6,
-            6,
-            pixels,
-            CfaType::Bayer(crate::raw::demosaic::bayer::CfaPattern::Rggb),
-        );
+        let dark = make_cfa(6, 6, pixels, CfaType::Bayer(CfaPattern::Rggb));
         let defect_map = DefectMap::default().detect_hot(&dark, 5.0);
 
         assert_eq!(defect_map.hot_count(), 3);
@@ -629,12 +625,7 @@ mod tests {
         let mut pixels = vec![100.0; 36];
         pixels[2 * 6 + 2] = 10000.0; // hot at (2,2)
 
-        let mut image = make_cfa(
-            6,
-            6,
-            pixels,
-            CfaType::Bayer(crate::raw::demosaic::bayer::CfaPattern::Rggb),
-        );
+        let mut image = make_cfa(6, 6, pixels, CfaType::Bayer(CfaPattern::Rggb));
 
         let defect_map = DefectMap {
             hot_indices: vec![2 * 6 + 2],
@@ -728,12 +719,7 @@ mod tests {
             pixels[idx] = 10000.0;
         }
 
-        let dark = make_cfa(
-            size,
-            size,
-            pixels,
-            CfaType::Bayer(crate::raw::demosaic::bayer::CfaPattern::Rggb),
-        );
+        let dark = make_cfa(size, size, pixels, CfaType::Bayer(CfaPattern::Rggb));
         let defect_map = DefectMap::default().detect_hot(&dark, 5.0);
 
         assert_eq!(defect_map.hot_count(), hot_positions.len());
@@ -754,7 +740,7 @@ mod tests {
         // Blue pixels (at odd x, odd y) have value 50.0
         // One red pixel is hot at 500.0 — should be detected by per-channel stats
         // even though 500 might not exceed a global threshold dominated by green=200.
-        let pattern = CfaType::Bayer(crate::raw::demosaic::bayer::CfaPattern::Rggb);
+        let pattern = CfaType::Bayer(CfaPattern::Rggb);
         let mut pixels = vec![0.0f32; 64];
         for y in 0..8 {
             for x in 0..8 {

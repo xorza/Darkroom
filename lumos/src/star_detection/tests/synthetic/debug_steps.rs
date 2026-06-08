@@ -1,10 +1,12 @@
 //! Debug test that outputs intermediate steps of star detection.
 
-use crate::star_detection::tests::synthetic::star_field::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 use crate::star_detection::tests::common::output::image_writer::{
     gray_to_rgb_image_stretched, save_image,
 };
 use crate::star_detection::tests::common::output::image_writer::{mask_to_gray, to_gray_stretched};
+use crate::star_detection::tests::synthetic::star_field::{
+    SyntheticFieldConfig, SyntheticStar, generate_star_field,
+};
 use crate::{AstroImage, ImageDimensions};
 use common::BitBuffer2;
 use common::Buffer2;
@@ -12,7 +14,7 @@ use common::Buffer2;
 use crate::star_detection::config::Config;
 use crate::star_detection::detector::StarDetector;
 use crate::star_detection::mask_dilation::dilate_mask;
-use crate::testing::init_tracing;
+use crate::testing::{estimate_background, init_tracing};
 use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
@@ -85,7 +87,7 @@ fn test_debug_synthetic_steps() {
 
     let detection_config = Config::default();
     let grayscale_buf = Buffer2::new(width, height, grayscale.clone());
-    let background = crate::testing::estimate_background(&grayscale_buf, &detection_config);
+    let background = estimate_background(&grayscale_buf, &detection_config);
 
     println!(
         "Background stats: min={:.4}, max={:.4}",

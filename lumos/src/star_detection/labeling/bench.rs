@@ -4,6 +4,7 @@ use crate::star_detection::config::Config;
 use crate::star_detection::config::Connectivity;
 use crate::star_detection::mask_dilation::dilate_mask;
 use crate::star_detection::threshold_mask::create_threshold_mask;
+use crate::testing::estimate_background;
 use crate::testing::synthetic::stamps::benchmark_star_field;
 use ::quickbench::quick_bench;
 use common::BitBuffer2;
@@ -17,7 +18,7 @@ fn create_detection_mask(pixels: &Buffer2<f32>, sigma_threshold: f32) -> BitBuff
     let height = pixels.height();
 
     // Create background map (same as real pipeline)
-    let background = crate::testing::estimate_background(pixels, &Config::default());
+    let background = estimate_background(pixels, &Config::default());
 
     // Create threshold mask
     let mut mask = BitBuffer2::new_filled(width, height, false);
@@ -95,8 +96,8 @@ fn bench_label_map_from_buffer_4k_globular(b: ::quickbench::Bencher) {
 #[test]
 #[ignore]
 fn bench_threshold_sweep() {
-    use crate::star_detection::labeling::{label_mask_parallel, label_mask_sequential};
     use crate::star_detection::config::Connectivity;
+    use crate::star_detection::labeling::{label_mask_parallel, label_mask_sequential};
     use common::Buffer2;
     use std::time::Instant;
 

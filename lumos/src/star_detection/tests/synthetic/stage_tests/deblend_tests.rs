@@ -8,8 +8,8 @@ use crate::star_detection::detector::stages::detect_test_utils::detect_stars_tes
 use crate::star_detection::tests::common::output::image_writer::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
-use crate::testing::init_tracing;
 use crate::testing::synthetic::star_profiles::render_gaussian_star;
+use crate::testing::{TestRng, estimate_background, init_tracing};
 use common::Buffer2;
 use common::test_utils::test_output_path;
 use glam::Vec2;
@@ -43,7 +43,7 @@ fn test_deblend_star_pair() {
     render_gaussian_star(&mut pixels, width, star2_x, star_y, sigma, amplitude);
 
     // Add noise
-    let mut rng = crate::testing::TestRng::new(42);
+    let mut rng = TestRng::new(42);
     for p in &mut pixels {
         *p += rng.next_gaussian_f32() * 0.01;
         *p = p.clamp(0.0, 1.0);
@@ -58,7 +58,7 @@ fn test_deblend_star_pair() {
 
     // Estimate background
     let pixels_buf = Buffer2::new(width, height, pixels.clone());
-    let background = crate::testing::estimate_background(
+    let background = estimate_background(
         &pixels_buf,
         &Config {
             tile_size: TILE_SIZE,
@@ -146,7 +146,7 @@ fn test_deblend_chain() {
     }
 
     // Add noise
-    let mut rng = crate::testing::TestRng::new(42);
+    let mut rng = TestRng::new(42);
     for p in &mut pixels {
         *p += rng.next_gaussian_f32() * 0.01;
         *p = p.clamp(0.0, 1.0);
@@ -161,7 +161,7 @@ fn test_deblend_chain() {
 
     // Estimate background
     let pixels_buf = Buffer2::new(width, height, pixels.clone());
-    let background = crate::testing::estimate_background(
+    let background = estimate_background(
         &pixels_buf,
         &Config {
             tile_size: TILE_SIZE,
@@ -250,7 +250,7 @@ fn test_deblend_unequal_pair() {
     render_gaussian_star(&mut pixels, width, star2_x, star_y, sigma, amplitude2);
 
     // Add noise
-    let mut rng = crate::testing::TestRng::new(42);
+    let mut rng = TestRng::new(42);
     for p in &mut pixels {
         *p += rng.next_gaussian_f32() * 0.01;
         *p = p.clamp(0.0, 1.0);
@@ -265,7 +265,7 @@ fn test_deblend_unequal_pair() {
 
     // Estimate background
     let pixels_buf = Buffer2::new(width, height, pixels.clone());
-    let background = crate::testing::estimate_background(
+    let background = estimate_background(
         &pixels_buf,
         &Config {
             tile_size: TILE_SIZE,

@@ -12,12 +12,15 @@
 
 use crate::registration::{Config, TransformType, register};
 use crate::star_detection::star::Star;
+use crate::testing::TestRng;
 use crate::testing::synthetic::transforms::{
     generate_random_stars, transform_star_list, translate_star_list,
 };
 use glam::DVec2;
 
-use crate::registration::tests::synthetic::helpers::{FWHM_NORMAL, FWHM_TIGHT, apply_affine, apply_homography};
+use crate::registration::tests::synthetic::helpers::{
+    FWHM_NORMAL, FWHM_TIGHT, apply_affine, apply_homography,
+};
 
 #[test]
 fn test_registration_translation_only() {
@@ -157,7 +160,7 @@ fn test_registration_with_noise() {
     let dx = 50.0;
     let dy = 35.0;
 
-    let mut rng = crate::testing::TestRng::new(11111);
+    let mut rng = TestRng::new(11111);
 
     let target_stars: Vec<Star> = ref_stars
         .iter()

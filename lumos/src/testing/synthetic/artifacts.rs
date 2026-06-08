@@ -4,6 +4,8 @@
 //! - Cosmic rays
 //! - CFA (Bayer) pattern artifacts
 
+use crate::testing::TestRng;
+
 /// Add random cosmic ray hits to the image.
 ///
 /// Returns the positions of added cosmic rays for verification.
@@ -17,7 +19,7 @@ pub fn add_cosmic_rays(
     let height = pixels.len() / width;
     let mut positions = Vec::with_capacity(count);
 
-    let mut rng = crate::testing::TestRng::new(seed);
+    let mut rng = TestRng::new(seed);
 
     for _ in 0..count {
         let x = (rng.next_f32() * width as f32) as usize;

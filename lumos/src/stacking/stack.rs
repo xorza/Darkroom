@@ -11,12 +11,12 @@ use crate::AstroImage;
 use crate::astro_image::cfa::CfaImage;
 use common::Buffer2;
 
+use crate::math;
+use crate::math::statistics::ChannelStats;
 use crate::stacking::cache::{CfaCache, FrameStats, LightCache, StackableImage};
 use crate::stacking::config::{CombineMethod, Normalization, StackConfig, Weighting};
 use crate::stacking::error::Error;
 use crate::stacking::progress::ProgressCallback;
-use crate::math;
-use crate::math::statistics::ChannelStats;
 
 /// Per-frame, per-channel affine normalization parameters.
 ///
@@ -423,6 +423,7 @@ pub(crate) fn run_stacking_weighted(cache: &LightCache, config: &StackConfig) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::astro_image::PixelData;
     use crate::stacking::cache_config::CacheConfig;
     use crate::stacking::rejection::Rejection;
     use crate::{
@@ -476,12 +477,7 @@ mod tests {
         }
     }
 
-    fn assert_channel_near(
-        result: &crate::astro_image::PixelData,
-        channel: usize,
-        expected: f32,
-        tol: f32,
-    ) {
+    fn assert_channel_near(result: &PixelData, channel: usize, expected: f32, tol: f32) {
         for &pixel in result.channel(channel).pixels() {
             assert!(
                 (pixel - expected).abs() < tol,

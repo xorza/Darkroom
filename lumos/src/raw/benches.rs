@@ -2,13 +2,15 @@ use std::time::Instant;
 
 use quickbench::quick_bench;
 
+use crate::testing::init_tracing;
+
 use super::*;
 
 #[quick_bench(warmup_iters = 1, iters = 5)]
 fn raw_load(b: quickbench::Bencher) {
     use crate::testing::calibration_image_paths;
 
-    crate::testing::init_tracing();
+    init_tracing();
 
     let paths = calibration_image_paths("Lights").or_else(|| calibration_image_paths("Flats"));
     let Some(paths) = paths else {
@@ -29,7 +31,7 @@ fn raw_load(b: quickbench::Bencher) {
 fn bench_load_raw_libraw_demosaic() {
     use crate::testing::calibration_image_paths;
 
-    crate::testing::init_tracing();
+    init_tracing();
 
     let paths = calibration_image_paths("Lights")
         .or_else(|| calibration_image_paths("Flats"))
@@ -90,7 +92,7 @@ fn bench_load_raw_libraw_demosaic() {
 fn bench_markesteijn_quality_vs_libraw() {
     use crate::testing::calibration_image_paths;
 
-    crate::testing::init_tracing();
+    init_tracing();
 
     let paths = calibration_image_paths("Lights")
         .or_else(|| calibration_image_paths("Flats"))
@@ -187,7 +189,7 @@ fn bench_markesteijn_quality_vs_libraw() {
 #[test]
 #[ignore]
 fn bench_bayer_rcd_demosaic() {
-    crate::testing::init_tracing();
+    init_tracing();
 
     let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test_data/raw_samples");
     let test_files = ["sample_canon.cr2", "raw-12bit-GBRG.dng", "sample.dng"];
@@ -277,7 +279,7 @@ fn bench_bayer_rcd_demosaic() {
 #[test]
 #[ignore]
 fn bench_bayer_rcd_quality_vs_libraw() {
-    crate::testing::init_tracing();
+    init_tracing();
 
     let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test_data/raw_samples");
     let test_files = ["sample_canon.cr2", "raw-12bit-GBRG.dng", "sample.dng"];

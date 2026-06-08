@@ -32,6 +32,7 @@
 //! green_dir (eliminating the 12P rgb_dir buffer, ~1.1 GB for 6032×4028); Step 5 writes the
 //! final result straight into planar `[R, G, B]` output buffers.
 
+use crate::raw::alloc_uninit_vec;
 use crate::raw::demosaic::xtrans::XTransImage;
 use crate::raw::demosaic::xtrans::hex_lookup::HexLookup;
 use crate::raw::demosaic::xtrans::markesteijn_steps;
@@ -55,7 +56,7 @@ impl DemosaicArena {
 
         // SAFETY: Every element in every region is fully written by parallel passes
         // before being read. See per-step comments in demosaic_xtrans_markesteijn().
-        let storage = unsafe { crate::raw::alloc_uninit_vec::<f32>(total) };
+        let storage = unsafe { alloc_uninit_vec::<f32>(total) };
 
         tracing::debug!(
             "Demosaic arena: {:.1} MB ({} × {} × 10 × 4 bytes)",
@@ -147,9 +148,9 @@ pub fn demosaic_xtrans_markesteijn(xtrans: &XTransImage) -> [Vec<f32>; 3] {
     // Reads: Region A (green_dir), Region C (homo via SATs). Writes planar [R, G, B]
     // directly into the output buffers — no interleave, no extract copy.
     // SAFETY: blend_final writes every element of each output buffer.
-    let mut r = unsafe { crate::raw::alloc_uninit_vec::<f32>(pixels) };
-    let mut g = unsafe { crate::raw::alloc_uninit_vec::<f32>(pixels) };
-    let mut b = unsafe { crate::raw::alloc_uninit_vec::<f32>(pixels) };
+    let mut r = unsafe { alloc_uninit_vec::<f32>(pixels) };
+    let mut g = unsafe { alloc_uninit_vec::<f32>(pixels) };
+    let mut b = unsafe { alloc_uninit_vec::<f32>(pixels) };
     let t = Instant::now();
     {
         let green_dir = &arena.storage[..4 * pixels];
@@ -181,9 +182,9 @@ pub fn demosaic_xtrans_markesteijn(xtrans: &XTransImage) -> [Vec<f32>; 3] {
 
 #[cfg(test)]
 mod tests {
-    use crate::raw::demosaic::xtrans::{XTransImage, XTransPattern};
     use super::*;
     use crate::raw::demosaic::interleave_planes;
+    use crate::raw::demosaic::xtrans::{XTransImage, XTransPattern};
 
     fn test_pattern() -> XTransPattern {
         XTransPattern::new([

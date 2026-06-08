@@ -13,7 +13,7 @@ use common::Buffer2;
 use glam::{DVec2, IVec2, Vec2};
 
 use crate::registration::interpolation::sample_pixel;
-use crate::registration::interpolation::warp::SoftClampAccum;
+use crate::registration::interpolation::warp::{SoftClampAccum, bilinear_sample};
 use crate::registration::transform::Transform;
 
 /// Warp a row using NEON bilinear interpolation, 4 output pixels at a time.
@@ -101,8 +101,7 @@ pub unsafe fn warp_row_bilinear_neon(
         // Scalar remainder.
         for x in (chunks * 4)..output_width {
             let src = transform.apply(DVec2::new(x as f64, output_y as f64));
-            output_row[x] =
-                crate::registration::interpolation::warp::bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
+            output_row[x] = bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
         }
     }
 }

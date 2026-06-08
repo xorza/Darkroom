@@ -3,16 +3,18 @@
 //! Generates synthetic star fields with various properties for testing
 //! the star detection algorithm under different conditions.
 
+use crate::math::fwhm_to_sigma;
+use crate::testing::TestRng;
 use crate::testing::synthetic::artifacts::{BayerPattern, add_bayer_pattern, add_cosmic_rays};
 use crate::testing::synthetic::backgrounds::{
     NebulaConfig, add_gradient_background, add_nebula_background, add_uniform_background,
     add_vignette_background,
 };
+use crate::testing::synthetic::patterns::add_gaussian_noise;
 use crate::testing::synthetic::star_profiles::{
     fwhm_to_moffat_alpha, render_elliptical_star, render_gaussian_star, render_moffat_star,
     render_saturated_star,
 };
-use crate::math::fwhm_to_sigma;
 use common::Buffer2;
 use glam::DVec2;
 use std::f32::consts::PI;
@@ -150,7 +152,7 @@ pub fn generate_star_field(config: &StarFieldConfig) -> (Buffer2<f32>, Vec<Groun
     let mut pixels = vec![0.0f32; config.width * config.height];
     let mut ground_truth = Vec::with_capacity(config.num_stars);
 
-    let mut rng = crate::testing::TestRng::new(config.seed);
+    let mut rng = TestRng::new(config.seed);
 
     // Add background
     match (&config.gradient, &config.vignette) {
@@ -312,7 +314,7 @@ pub fn generate_star_field(config: &StarFieldConfig) -> (Buffer2<f32>, Vec<Groun
 
     // Add noise
     if config.noise_sigma > 0.0 {
-        crate::testing::synthetic::patterns::add_gaussian_noise(&mut pixels, config.noise_sigma, config.seed + 2000);
+        add_gaussian_noise(&mut pixels, config.noise_sigma, config.seed + 2000);
     }
 
     // Clamp to valid range
@@ -327,10 +329,7 @@ pub fn generate_star_field(config: &StarFieldConfig) -> (Buffer2<f32>, Vec<Groun
 }
 
 /// Generate star positions based on crowding type.
-fn generate_star_positions(
-    config: &StarFieldConfig,
-    rng: &mut crate::testing::TestRng,
-) -> Vec<(f32, f32)> {
+fn generate_star_positions(config: &StarFieldConfig, rng: &mut TestRng) -> Vec<(f32, f32)> {
     let mut positions = Vec::with_capacity(config.num_stars);
 
     let margin = config.edge_margin as f32;
@@ -503,7 +502,7 @@ pub fn generate_globular_cluster(
     let background = 0.02f32;
     let mut pixels = vec![background; width * height];
 
-    let mut rng = crate::testing::TestRng::new(seed);
+    let mut rng = TestRng::new(seed);
 
     let center_x = width as f64 / 2.0;
     let center_y = height as f64 / 2.0;

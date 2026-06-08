@@ -1,11 +1,11 @@
 //! Benchmarks for convolution operations.
 
 use crate::star_detection::convolution::simd::convolve_row;
+use crate::star_detection::convolution::simd::convolve_row_scalar;
 use crate::star_detection::convolution::{
     MatchedFilterBuffers, convolve_cols, convolve_rows_parallel, elliptical_gaussian_convolve,
     gaussian_convolve, gaussian_kernel_1d, matched_filter,
 };
-use crate::star_detection::convolution::simd::convolve_row_scalar;
 use crate::testing::synthetic::stamps::benchmark_star_field;
 use ::quickbench::quick_bench;
 use common::Buffer2;

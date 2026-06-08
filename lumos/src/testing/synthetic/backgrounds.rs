@@ -10,6 +10,8 @@
 use glam::Vec2;
 use std::f32::consts::PI;
 
+use crate::testing::TestRng;
+
 /// Add uniform background to image.
 pub fn add_uniform_background(pixels: &mut [f32], level: f32) {
     for p in pixels.iter_mut() {
@@ -190,7 +192,7 @@ pub fn add_complex_nebula(
     base_amplitude: f32,
     seed: u64,
 ) {
-    let mut rng = crate::testing::TestRng::new(seed);
+    let mut rng = TestRng::new(seed);
 
     // Add 3-5 overlapping nebula patches
     let num_patches = 3 + (rng.next_f32() * 3.0) as usize;

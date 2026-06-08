@@ -6,6 +6,7 @@ use crate::star_detection::config::Config;
 use crate::star_detection::tests::common::output::metrics::{
     PassCriteria, check_pass, crowded_criteria, faint_star_criteria,
 };
+use crate::star_detection::tests::synthetic::pipeline_tests::run_test;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::backgrounds::NebulaConfig;
 use crate::testing::synthetic::star_field::{
@@ -20,7 +21,7 @@ fn run_challenging_test(
     detection_config: &Config,
     criteria: &PassCriteria,
 ) -> bool {
-    let metrics = crate::star_detection::tests::synthetic::pipeline_tests::run_test(name, "challenging", field_config, detection_config);
+    let metrics = run_test(name, "challenging", field_config, detection_config);
     match check_pass(&metrics, criteria) {
         Ok(()) => {
             println!("PASS: All criteria met");

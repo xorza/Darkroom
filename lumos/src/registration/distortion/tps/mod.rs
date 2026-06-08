@@ -15,6 +15,8 @@
 
 use glam::DVec2;
 
+use crate::registration::distortion::SINGULAR_THRESHOLD;
+
 /// Configuration for thin-plate spline fitting.
 #[derive(Debug, Clone)]
 pub struct TpsConfig {
@@ -321,7 +323,7 @@ fn solve_linear_system(a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
             }
         }
 
-        if max_val < crate::registration::distortion::SINGULAR_THRESHOLD {
+        if max_val < SINGULAR_THRESHOLD {
             return None; // Singular matrix
         }
 

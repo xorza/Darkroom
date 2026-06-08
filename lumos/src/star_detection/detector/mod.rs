@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::astro_image::AstroImage;
 
+use crate::math::statistics::median_f32_mut;
+use crate::star_detection::background::{estimate_background, refine_background};
 use crate::star_detection::buffer_pool::BufferPool;
 use crate::star_detection::config::Config;
 use crate::star_detection::star::Star;
@@ -119,20 +121,11 @@ impl StarDetector {
         let grayscale_image = stages::prepare::prepare(image, pool);
 
         // Step 2: Estimate background and noise
-        let mut background = crate::star_detection::background::estimate_background(
-            &grayscale_image,
-            &self.config,
-            pool,
-        );
+        let mut background = estimate_background(&grayscale_image, &self.config, pool);
 
         // Step 2b: Refine background if iterative refinement is enabled
         if self.config.refinement.iterations() > 0 {
-            crate::star_detection::background::refine_background(
-                &grayscale_image,
-                &mut background,
-                &self.config,
-                pool,
-            );
+            refine_background(&grayscale_image, &mut background, &self.config, pool);
         }
 
         // Step 3: Determine effective FWHM (manual > auto-estimate > disabled)
@@ -195,11 +188,11 @@ impl StarDetector {
         diagnostics.final_star_count = stars.len();
         if !stars.is_empty() {
             let mut buf: Vec<f32> = stars.iter().map(|s| s.fwhm).collect();
-            diagnostics.median_fwhm = crate::math::statistics::median_f32_mut(&mut buf);
+            diagnostics.median_fwhm = median_f32_mut(&mut buf);
 
             buf.clear();
             buf.extend(stars.iter().map(|s| s.snr));
-            diagnostics.median_snr = crate::math::statistics::median_f32_mut(&mut buf);
+            diagnostics.median_snr = median_f32_mut(&mut buf);
         }
 
         DetectionResult { stars, diagnostics }

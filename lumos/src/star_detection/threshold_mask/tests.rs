@@ -7,7 +7,9 @@
 //! - Filtered threshold tests: Background-subtracted image thresholding
 //! - Multi-row tests: 2D image patterns and row boundary handling
 
-use crate::star_detection::threshold_mask::{create_threshold_mask, create_threshold_mask_filtered};
+use crate::star_detection::threshold_mask::{
+    create_threshold_mask, create_threshold_mask_filtered,
+};
 use common::BitBuffer2;
 use common::Buffer2;
 

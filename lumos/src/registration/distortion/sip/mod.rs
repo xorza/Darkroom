@@ -29,7 +29,7 @@
 use arrayvec::ArrayVec;
 use glam::DVec2;
 
-use crate::registration::transform::Transform;
+use crate::registration::{distortion::SINGULAR_THRESHOLD, transform::Transform};
 
 #[cfg(test)]
 mod tests;
@@ -514,7 +514,7 @@ fn solve_cholesky(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TE
         diag_min = diag_min.min(d);
         diag_max = diag_max.max(d);
     }
-    if diag_min < crate::registration::distortion::SINGULAR_THRESHOLD || (diag_max / diag_min) > 1e5 {
+    if diag_min < SINGULAR_THRESHOLD || (diag_max / diag_min) > 1e5 {
         // cond(A) ≈ (1e5)^2 = 1e10, unreliable — fall back to LU
         return solve_lu(a, b, n);
     }
@@ -567,7 +567,7 @@ fn solve_lu(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TERMS>> 
             }
         }
 
-        if max_val < crate::registration::distortion::SINGULAR_THRESHOLD {
+        if max_val < SINGULAR_THRESHOLD {
             return None; // Singular matrix
         }
 

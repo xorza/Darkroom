@@ -5,6 +5,8 @@
 
 use common::Buffer2;
 
+use crate::testing::TestRng;
+
 /// Create a uniform image filled with a single value.
 pub fn uniform(width: usize, height: usize, value: f32) -> Buffer2<f32> {
     Buffer2::new_filled(width, height, value)
@@ -122,7 +124,7 @@ pub fn checkerboard_offset(
 /// Uses a simple LCG-based hash for reproducible noise.
 /// Each pixel gets a random offset in `[-amplitude, +amplitude]`.
 pub fn add_noise(pixels: &mut Buffer2<f32>, amplitude: f32, seed: u64) {
-    let mut rng = crate::testing::TestRng::new(seed);
+    let mut rng = TestRng::new(seed);
     for p in pixels.iter_mut() {
         let hash = rng.next_f32();
         *p += (hash - 0.5) * 2.0 * amplitude;
@@ -135,7 +137,7 @@ pub fn add_noise(pixels: &mut Buffer2<f32>, amplitude: f32, seed: u64) {
 /// This is the canonical noise helper — all test code should use this
 /// instead of reimplementing Gaussian noise locally.
 pub fn add_gaussian_noise(pixels: &mut [f32], sigma: f32, seed: u64) {
-    let mut rng = crate::testing::TestRng::new(seed);
+    let mut rng = TestRng::new(seed);
     for p in pixels.iter_mut() {
         *p += rng.next_gaussian_f32() * sigma;
     }

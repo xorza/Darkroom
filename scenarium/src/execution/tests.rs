@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use super::*;
 use crate::data::{DataType, DynamicValue, StaticValue};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::function::FuncBehavior;
 use crate::graph::{Binding, InputPort, Node, NodeBehavior};
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
@@ -1566,6 +1566,7 @@ mod stats {
 
 mod events {
     use super::*;
+    use crate::async_lambda;
     use crate::event_lambda::EventLambda;
     use crate::function::{Func, FuncEvent, FuncInput, FuncOutput};
     use crate::worker::EventRef;
@@ -1604,7 +1605,7 @@ mod events {
                 name: "tick".to_string(),
                 event_lambda: EventLambda::new(|_state| Box::pin(async move {})),
             }],
-            lambda: crate::async_lambda!(
+            lambda: async_lambda!(
                 move |_, _, _, _, _, outputs| { calls = emit_calls_l.clone() } => {
                     let mut n = calls.lock().await;
                     *n += 1;
@@ -1624,7 +1625,7 @@ mod events {
                 default_value: None,
                 value_options: vec![],
             }],
-            lambda: crate::async_lambda!(
+            lambda: async_lambda!(
                 move |_, _, _, inputs, _, _| { values = recv_values_l.clone() } => {
                     values.lock().await.push(inputs[0].value.as_i64().unwrap());
                     Ok(())
@@ -1738,7 +1739,10 @@ mod events {
 
 mod output_usage {
     use super::*;
-    use crate::function::{Func, FuncInput, FuncOutput};
+    use crate::{
+        async_lambda,
+        function::{Func, FuncInput, FuncOutput},
+    };
 
     const SPLIT_FUNC: FuncId = FuncId::from_u128(0x5911);
     const SINK_FUNC: FuncId = FuncId::from_u128(0x5922);
@@ -1762,7 +1766,7 @@ mod output_usage {
                     data_type: DataType::Int,
                 },
             ],
-            lambda: crate::async_lambda!(
+            lambda: async_lambda!(
                 move |_, _, _, _, usage, outputs| { seen = seen_usage_l.clone() } => {
                     seen.lock().await.extend_from_slice(usage);
                     outputs[0] = DynamicValue::Static(StaticValue::Int(1));
@@ -1783,7 +1787,7 @@ mod output_usage {
                 default_value: None,
                 value_options: vec![],
             }],
-            lambda: crate::async_lambda!(|_, _, _, _, _, _| { Ok(()) }),
+            lambda: async_lambda!(|_, _, _, _, _, _| { Ok(()) }),
             ..Default::default()
         });
 
@@ -2094,6 +2098,7 @@ mod subgraph {
     use crate::event_lambda::EventLambda;
     use crate::function::{Func, FuncBehavior, FuncEvent, FuncId, FuncOutput};
     use crate::graph::NodeKind;
+    use crate::prelude::FuncLambda;
     use crate::subgraph::{SubgraphDef, SubgraphEvent, SubgraphId, SubgraphRef};
     use std::sync::Mutex as StdMutex;
 
@@ -2431,7 +2436,7 @@ mod subgraph {
                 event_lambda: EventLambda::default(),
             }],
             required_contexts: vec![],
-            lambda: crate::prelude::FuncLambda::default(),
+            lambda: FuncLambda::default(),
         });
     }
 

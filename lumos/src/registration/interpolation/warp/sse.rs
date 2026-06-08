@@ -146,8 +146,11 @@ pub unsafe fn warp_row_bilinear_avx2(
         let remainder_start = chunks * 8;
         for x in remainder_start..output_width {
             let src = transform.apply(DVec2::new(x as f64, y));
-            output_row[x] =
-                crate::registration::interpolation::warp::bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
+            output_row[x] = crate::registration::interpolation::warp::bilinear_sample(
+                input,
+                Vec2::new(src.x as f32, src.y as f32),
+                0.0,
+            );
         }
     }
 }
@@ -271,8 +274,11 @@ pub unsafe fn warp_row_bilinear_sse(
         let remainder_start = chunks * 4;
         for x in remainder_start..output_width {
             let src = transform.apply(DVec2::new(x as f64, y));
-            output_row[x] =
-                crate::registration::interpolation::warp::bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
+            output_row[x] = crate::registration::interpolation::warp::bilinear_sample(
+                input,
+                Vec2::new(src.x as f32, src.y as f32),
+                0.0,
+            );
         }
     }
 }
@@ -445,7 +451,13 @@ mod tests {
             warp_row_bilinear_avx2(input, &mut output_avx2, y, &inverse);
         }
         let inverse_wt = crate::registration::transform::WarpTransform::new(inverse);
-        crate::registration::interpolation::warp::warp_row_bilinear_scalar(input, &mut output_scalar, y, &inverse_wt, 0.0);
+        crate::registration::interpolation::warp::warp_row_bilinear_scalar(
+            input,
+            &mut output_scalar,
+            y,
+            &inverse_wt,
+            0.0,
+        );
 
         for x in 0..width {
             assert!(
@@ -477,7 +489,13 @@ mod tests {
             warp_row_bilinear_sse(input, &mut output_sse, y, &inverse);
         }
         let inverse_wt = crate::registration::transform::WarpTransform::new(inverse);
-        crate::registration::interpolation::warp::warp_row_bilinear_scalar(input, &mut output_scalar, y, &inverse_wt, 0.0);
+        crate::registration::interpolation::warp::warp_row_bilinear_scalar(
+            input,
+            &mut output_scalar,
+            y,
+            &inverse_wt,
+            0.0,
+        );
 
         for x in 0..width {
             assert!(

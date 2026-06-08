@@ -8,6 +8,7 @@
 //! - Generalized Extreme Studentized Deviate (GESD)
 
 use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_fast};
+use crate::math::sum::{mean_f32, weighted_mean_f32};
 use crate::stacking::cache::ScratchBuffers;
 
 /// Configuration for sigma clipping.
@@ -948,8 +949,8 @@ impl Rejection {
         // None doesn't reorder values, so weights align directly
         if let Rejection::None = self {
             return match weights {
-                Some(w) => crate::math::sum::weighted_mean_f32(values, w),
-                None => crate::math::sum::mean_f32(values),
+                Some(w) => weighted_mean_f32(values, w),
+                None => mean_f32(values),
             };
         }
 
@@ -963,7 +964,7 @@ impl Rejection {
                 &scratch.indices[..remaining],
                 &mut scratch.floats_a,
             ),
-            _ => crate::math::sum::mean_f32(&values[..remaining]),
+            _ => mean_f32(&values[..remaining]),
         }
     }
 }
@@ -987,11 +988,13 @@ fn weighted_mean_indexed(
 
     scratch.clear();
     scratch.extend(indices.iter().map(|&idx| weights[idx]));
-    crate::math::sum::weighted_mean_f32(values, scratch.as_slice())
+    weighted_mean_f32(values, scratch.as_slice())
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::math::sum::mean_f32;
+
     use super::*;
 
     // ========== Config Construction Tests ==========
@@ -1088,7 +1091,7 @@ mod tests {
     fn test_sigma_clip_removes_outlier() {
         let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
         let remaining = SigmaClipConfig::new(2.0, 3).reject(&mut values, &mut scratch());
-        let mean = crate::math::sum::mean_f32(&values[..remaining]);
+        let mean = mean_f32(&values[..remaining]);
         assert!(mean < 10.0, "Expected outlier to be clipped, got {}", mean);
         assert!(remaining < 8);
     }
@@ -1105,7 +1108,7 @@ mod tests {
         let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
         let remaining =
             SigmaClipConfig::new_asymmetric(4.0, 2.0, 3).reject(&mut values, &mut scratch());
-        let mean = crate::math::sum::mean_f32(&values[..remaining]);
+        let mean = mean_f32(&values[..remaining]);
         assert!(mean < 10.0, "High outlier should be clipped, got {}", mean);
         assert!(remaining < 8);
     }
@@ -1123,7 +1126,7 @@ mod tests {
             "Low outlier should be kept, remaining={}",
             remaining
         );
-        let mean = crate::math::sum::mean_f32(&values[..remaining]);
+        let mean = mean_f32(&values[..remaining]);
         assert!(
             mean < 2.5,
             "Mean should be < 2.5 due to kept low outlier, got {}",
@@ -1173,7 +1176,7 @@ mod tests {
             remaining < 8,
             "Outlier should be rejected, got {remaining} survivors"
         );
-        let mean = crate::math::sum::mean_f32(&values[..remaining]);
+        let mean = mean_f32(&values[..remaining]);
         assert!(mean < 10.0, "Mean of survivors should be low, got {mean}");
     }
 
@@ -1211,7 +1214,7 @@ mod tests {
             &s.indices[..remaining]
         );
         // Survivors are the clean ramp 10..90 → mean 50.
-        let mean = crate::math::sum::mean_f32(&values[..remaining]);
+        let mean = mean_f32(&values[..remaining]);
         assert!((mean - 50.0).abs() < 1e-3, "expected mean 50, got {mean}");
     }
 
@@ -1233,7 +1236,7 @@ mod tests {
             "frame 14 (value 9000) must be rejected, survivors: {:?}",
             &s.indices[..remaining]
         );
-        let mean = crate::math::sum::mean_f32(&values[..remaining]);
+        let mean = mean_f32(&values[..remaining]);
         assert!(
             (mean - 8000.0).abs() < 0.5,
             "expected mean 8000, got {mean}"
@@ -1751,7 +1754,7 @@ mod tests {
         let remaining =
             WinsorizedClipConfig::new_asymmetric(3.0, 2.0).reject(&mut values, &mut scratch());
         assert!(remaining < 6, "High outlier should be rejected");
-        let mean = crate::math::sum::mean_f32(&values[..remaining]);
+        let mean = mean_f32(&values[..remaining]);
         assert!(mean < 5.0, "Mean without outlier should be low, got {mean}");
     }
 

@@ -7,10 +7,10 @@ use crate::star_detection::detector::stages::detect_test_utils::detect_stars_tes
 use crate::star_detection::tests::common::output::image_writer::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
-use crate::testing::init_tracing;
 use crate::testing::synthetic::star_field::{
     StarFieldConfig, generate_star_field, sparse_field_config,
 };
+use crate::testing::{estimate_background, init_tracing};
 use common::test_utils::test_output_path;
 use glam::Vec2;
 use imaginarium::Color;
@@ -61,7 +61,7 @@ fn test_detection_sparse() {
     );
 
     // Estimate background
-    let background = crate::testing::estimate_background(
+    let background = estimate_background(
         &pixels,
         &Config {
             tile_size: TILE_SIZE,
@@ -151,7 +151,7 @@ fn test_detection_thresholds() {
     );
 
     // Estimate background
-    let background = crate::testing::estimate_background(
+    let background = estimate_background(
         &pixels,
         &Config {
             tile_size: TILE_SIZE,
@@ -250,7 +250,7 @@ fn test_detection_area_filter() {
     );
 
     // Estimate background
-    let background = crate::testing::estimate_background(
+    let background = estimate_background(
         &pixels,
         &Config {
             tile_size: TILE_SIZE,

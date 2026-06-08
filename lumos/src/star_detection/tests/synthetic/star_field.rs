@@ -1,6 +1,6 @@
 //! Synthetic star field generation for testing star detection algorithms.
 
-use crate::math::FWHM_TO_SIGMA;
+use crate::{math::FWHM_TO_SIGMA, testing::synthetic::patterns::add_gaussian_noise};
 use glam::Vec2;
 
 /// A synthetic star to be placed in a generated image.
@@ -67,11 +67,7 @@ pub fn generate_star_field(config: &SyntheticFieldConfig, stars: &[SyntheticStar
 
     // Add noise if configured
     if config.noise_sigma > 0.0 {
-        crate::testing::synthetic::patterns::add_gaussian_noise(
-            &mut pixels,
-            config.noise_sigma,
-            12345,
-        );
+        add_gaussian_noise(&mut pixels, config.noise_sigma, 12345);
     }
 
     // Clamp to valid range

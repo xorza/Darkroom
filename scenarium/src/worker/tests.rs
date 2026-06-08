@@ -13,7 +13,7 @@ use crate::execution_stats::ExecutionStats;
 use crate::function::FuncLib;
 use crate::graph::{Graph, InputPort, Node, NodeId};
 
-use crate::worker::{EventRef, EventTrigger, Worker, WorkerMessage};
+use crate::worker::{EventRef, EventTrigger, Worker, WorkerMessage, scan, start_event_loop};
 
 /// Print messages a run logged, in order — `print` now logs via
 /// `ContextManager::info`, surfaced in `ExecutionStats.logs`.
@@ -152,7 +152,7 @@ async fn start_event_loop_forwards_events() {
     let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
     let event_state = SharedAnyState::default();
 
-    let (mut handle, mut event_rx) = crate::worker::start_event_loop(
+    let (mut handle, mut event_rx) = start_event_loop(
         vec![EventTrigger {
             event: EventRef {
                 node_id,
@@ -192,7 +192,7 @@ async fn start_event_loop_waits_for_callback() {
 
     let notify_for_callback = Arc::clone(&notify);
 
-    let (mut handle, mut event_rx) = crate::worker::start_event_loop(
+    let (mut handle, mut event_rx) = start_event_loop(
         vec![EventTrigger {
             event: EventRef {
                 node_id,
@@ -240,7 +240,7 @@ async fn pause_gate_blocks_event_loop_iterations() {
 
     let pause_gate = PauseGate::default();
 
-    let (mut handle, mut event_rx) = crate::worker::start_event_loop(
+    let (mut handle, mut event_rx) = start_event_loop(
         vec![EventTrigger {
             event: EventRef {
                 node_id,
@@ -302,7 +302,7 @@ async fn lambda_panic_is_captured_not_unwound() {
     let node_id = NodeId::unique();
     let event_lambda = EventLambda::new(|_state| Box::pin(async { panic!("boom in lambda") }));
 
-    let (mut handle, mut event_rx) = crate::worker::start_event_loop(
+    let (mut handle, mut event_rx) = start_event_loop(
         vec![EventTrigger {
             event: EventRef {
                 node_id,
@@ -510,7 +510,7 @@ async fn stopped_event_loop_channel_is_closed() {
     let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
     let event_state = SharedAnyState::default();
 
-    let (mut handle, mut event_rx) = crate::worker::start_event_loop(
+    let (mut handle, mut event_rx) = start_event_loop(
         vec![EventTrigger {
             event: EventRef {
                 node_id,
@@ -932,7 +932,7 @@ fn scan_accumulates_simple_flags() {
         event_idx: 0,
     };
 
-    let intent = crate::worker::scan(vec![
+    let intent = scan(vec![
         WorkerMessage::Clear,
         WorkerMessage::StartEventLoop,
         WorkerMessage::ExecuteTerminals,
@@ -946,7 +946,10 @@ fn scan_accumulates_simple_flags() {
         },
     ]);
 
-    assert!(matches!(intent.graph_state, Some(crate::worker::GraphOp::Clear)));
+    assert!(matches!(
+        intent.graph_state,
+        Some(crate::worker::GraphOp::Clear)
+    ));
     assert!(matches!(
         intent.loop_request,
         Some(crate::worker::LoopCommand::Start)
@@ -968,7 +971,7 @@ fn scan_deduplicates_events() {
         event_idx: 0,
     };
 
-    let intent = crate::worker::scan(vec![
+    let intent = scan(vec![
         WorkerMessage::InjectEvents {
             events: vec![event],
         },
@@ -991,7 +994,7 @@ fn scan_deduplicates_events() {
 fn scan_exit_dominates_entire_batch() {
     // Exit is sticky across the whole batch: every other command
     // in the batch is discarded, whether sent before or after.
-    let intent = crate::worker::scan(vec![
+    let intent = scan(vec![
         WorkerMessage::Clear,
         WorkerMessage::ExecuteTerminals,
         WorkerMessage::Exit,
@@ -1028,7 +1031,7 @@ fn scan_update_overwrites_earlier_update_in_same_batch() {
     let empty_graph = Graph::default();
     let func_lib = Arc::new(FuncLib::default());
 
-    let intent = crate::worker::scan(vec![
+    let intent = scan(vec![
         WorkerMessage::Update {
             graph: empty_graph.clone(),
             func_lib: func_lib.clone(),
@@ -1049,7 +1052,7 @@ fn scan_update_overwrites_earlier_update_in_same_batch() {
 
 #[test]
 fn scan_clear_then_update_yields_replace() {
-    let intent = crate::worker::scan(vec![
+    let intent = scan(vec![
         WorkerMessage::Clear,
         WorkerMessage::Update {
             graph: Graph::default(),
@@ -1057,14 +1060,17 @@ fn scan_clear_then_update_yields_replace() {
         },
     ]);
     assert!(
-        matches!(intent.graph_state, Some(crate::worker::GraphOp::Replace(_, _))),
+        matches!(
+            intent.graph_state,
+            Some(crate::worker::GraphOp::Replace(_, _))
+        ),
         "last write (Update) wins over earlier Clear"
     );
 }
 
 #[test]
 fn scan_update_then_clear_yields_clear() {
-    let intent = crate::worker::scan(vec![
+    let intent = scan(vec![
         WorkerMessage::Update {
             graph: Graph::default(),
             func_lib: Arc::new(FuncLib::default()),
@@ -1079,7 +1085,7 @@ fn scan_update_then_clear_yields_clear() {
 
 #[test]
 fn scan_start_then_stop_yields_stop() {
-    let intent = crate::worker::scan(vec![
+    let intent = scan(vec![
         WorkerMessage::StartEventLoop,
         WorkerMessage::StopEventLoop,
     ]);
@@ -1091,7 +1097,7 @@ fn scan_start_then_stop_yields_stop() {
 
 #[test]
 fn scan_stop_then_start_yields_start() {
-    let intent = crate::worker::scan(vec![
+    let intent = scan(vec![
         WorkerMessage::StopEventLoop,
         WorkerMessage::StartEventLoop,
     ]);

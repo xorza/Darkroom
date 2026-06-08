@@ -5,9 +5,10 @@
 
 use rayon::prelude::*;
 
-use crate::raw::demosaic::xtrans::XTransImage;
+use crate::raw::alloc_uninit_vec;
 use crate::raw::demosaic::xtrans::hex_lookup::HexLookup;
 use crate::raw::demosaic::xtrans::markesteijn::NDIR;
+use crate::raw::demosaic::xtrans::{XTransImage, XTransPattern};
 
 use crate::common::UnsafeSendPtr;
 
@@ -60,7 +61,7 @@ struct InterpEntry {
 }
 
 impl ColorInterpLookup {
-    pub(crate) fn new(pattern: &crate::raw::demosaic::xtrans::XTransPattern) -> Self {
+    pub(crate) fn new(pattern: &XTransPattern) -> Self {
         let mut strategies = [[[InterpEntry {
             primary: ColorInterpStrategy::None,
             secondary: ColorInterpStrategy::None,
@@ -900,7 +901,7 @@ pub(crate) fn blend_final(
     // This keeps only one SAT (~1P) alive at a time instead of all 4 (~4P).
     // The SAT buffer is reused across all 4 directions (allocated once, ~1P u32).
     // SAFETY: Every element of hm_buf is written by the loop below before being read.
-    let mut hm_buf: Vec<[u32; NDIR]> = unsafe { crate::raw::alloc_uninit_vec(pixels) };
+    let mut hm_buf: Vec<[u32; NDIR]> = unsafe { alloc_uninit_vec(pixels) };
     let mut sat = Vec::new();
 
     for d in 0..NDIR {
@@ -975,10 +976,10 @@ pub(crate) fn blend_final(
 
 #[cfg(test)]
 mod tests {
-    use crate::raw::demosaic::xtrans::hex_lookup::HexLookup;
-    use crate::raw::demosaic::xtrans::{XTransImage, XTransPattern};
     use super::*;
     use crate::raw::demosaic::interleave_planes;
+    use crate::raw::demosaic::xtrans::hex_lookup::HexLookup;
+    use crate::raw::demosaic::xtrans::{XTransImage, XTransPattern};
 
     fn test_pattern() -> XTransPattern {
         XTransPattern::new([

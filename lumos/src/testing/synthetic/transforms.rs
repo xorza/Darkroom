@@ -6,7 +6,7 @@
 //! Most functions are generic over the `Positioned` trait, supporting both
 //! `DVec2` (bare positions) and `Star` (full star structs) transparently.
 
-use crate::star_detection::star::Star;
+use crate::{star_detection::star::Star, testing::TestRng};
 use glam::DVec2;
 
 // ============================================================================
@@ -76,7 +76,7 @@ fn transform_impl<T: Positioned>(
 }
 
 fn add_noise_impl<T: Positioned>(items: &[T], noise_amplitude: f64, seed: u64) -> Vec<T> {
-    let mut rng = crate::testing::TestRng::new(seed);
+    let mut rng = TestRng::new(seed);
 
     items
         .iter()
@@ -96,7 +96,7 @@ fn remove_random_impl<T: Positioned>(items: &[T], fraction: f64, seed: u64) -> V
         "fraction must be between 0.0 and 1.0"
     );
 
-    let mut rng = crate::testing::TestRng::new(seed);
+    let mut rng = TestRng::new(seed);
 
     items
         .iter()
@@ -168,7 +168,7 @@ pub fn generate_random_positions_with_margin(
     seed: u64,
     margin: f64,
 ) -> Vec<DVec2> {
-    let mut rng = crate::testing::TestRng::new(seed);
+    let mut rng = TestRng::new(seed);
     let mut stars = Vec::with_capacity(num_stars);
 
     for _ in 0..num_stars {
@@ -234,7 +234,7 @@ pub fn add_spurious_stars(
 ) -> Vec<DVec2> {
     let margin = 10.0;
     let mut result = stars.to_vec();
-    let mut rng = crate::testing::TestRng::new(seed);
+    let mut rng = TestRng::new(seed);
 
     for _ in 0..count {
         let x = margin + rng.next_f64() * (width - 2.0 * margin);
@@ -345,7 +345,7 @@ pub fn add_spurious_star_list(
 ) -> Vec<Star> {
     let margin = 10.0;
     let mut result = stars.to_vec();
-    let mut rng = crate::testing::TestRng::new(seed);
+    let mut rng = TestRng::new(seed);
 
     for i in 0..count {
         let x = margin + rng.next_f64() * (width - 2.0 * margin);

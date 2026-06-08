@@ -25,7 +25,8 @@ pub fn horizontal_gradient(
     bg_right: f32,
     noise: f32,
 ) -> BackgroundEstimate {
-    let bg_buf = crate::testing::synthetic::patterns::horizontal_gradient(width, height, bg_left, bg_right);
+    let bg_buf =
+        crate::testing::synthetic::patterns::horizontal_gradient(width, height, bg_left, bg_right);
     let mut noise_buf = Buffer2::new_default(width, height);
     noise_buf.fill(noise);
     BackgroundEstimate {
@@ -42,7 +43,8 @@ pub fn vertical_gradient(
     bg_bottom: f32,
     noise: f32,
 ) -> BackgroundEstimate {
-    let bg_buf = crate::testing::synthetic::patterns::vertical_gradient(width, height, bg_top, bg_bottom);
+    let bg_buf =
+        crate::testing::synthetic::patterns::vertical_gradient(width, height, bg_top, bg_bottom);
     let mut noise_buf = Buffer2::new_default(width, height);
     noise_buf.fill(noise);
     BackgroundEstimate {

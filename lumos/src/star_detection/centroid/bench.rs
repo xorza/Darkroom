@@ -13,6 +13,7 @@ use crate::star_detection::centroid::refine_centroid;
 use crate::star_detection::centroid::test_utils::make_gaussian_star;
 use crate::star_detection::config::{CentroidMethod, Config, LocalBackgroundMethod};
 use crate::star_detection::detector::stages::detect_test_utils::detect_stars_test;
+use crate::testing::estimate_background;
 use crate::testing::synthetic::stamps::benchmark_star_field;
 use common::Buffer2;
 
@@ -26,7 +27,7 @@ fn bench_measure_star_single(b: ::quickbench::Bencher) {
     let width = 64;
     let height = 64;
     let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
-    let bg = crate::testing::estimate_background(&pixels, &Config::default());
+    let bg = estimate_background(&pixels, &Config::default());
     let candidates = detect_stars_test(&pixels, &bg, &Config::default());
     let region = candidates.first().expect("Should detect star");
     let config = Config {
@@ -50,7 +51,7 @@ fn bench_measure_star_gaussian_fit(b: ::quickbench::Bencher) {
     let width = 64;
     let height = 64;
     let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
-    let bg = crate::testing::estimate_background(&pixels, &Config::default());
+    let bg = estimate_background(&pixels, &Config::default());
     let candidates = detect_stars_test(&pixels, &bg, &Config::default());
     let region = candidates.first().expect("Should detect star");
     let config = Config {
@@ -74,7 +75,7 @@ fn bench_measure_star_moffat_fit(b: ::quickbench::Bencher) {
     let width = 64;
     let height = 64;
     let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
-    let bg = crate::testing::estimate_background(&pixels, &Config::default());
+    let bg = estimate_background(&pixels, &Config::default());
     let candidates = detect_stars_test(&pixels, &bg, &Config::default());
     let region = candidates.first().expect("Should detect star");
     let config = Config {
@@ -98,7 +99,7 @@ fn bench_measure_star_local_annulus(b: ::quickbench::Bencher) {
     let width = 128;
     let height = 128;
     let pixels = make_gaussian_star(width, height, Vec2::splat(64.0), 2.5, 0.8, 0.1);
-    let bg = crate::testing::estimate_background(&pixels, &Config::default());
+    let bg = estimate_background(&pixels, &Config::default());
     let candidates = detect_stars_test(&pixels, &bg, &Config::default());
     let region = candidates.first().expect("Should detect star");
     let config = Config {
@@ -125,7 +126,7 @@ fn bench_measure_star_local_annulus(b: ::quickbench::Bencher) {
 fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
     // 100 stars batch processing with WeightedMoments
     let pixels = benchmark_star_field(512, 512, 100, 0.1, 0.01, 42);
-    let bg = crate::testing::estimate_background(&pixels, &Config::default());
+    let bg = estimate_background(&pixels, &Config::default());
     let candidates = detect_stars_test(&pixels, &bg, &Config::default());
     let regions: Vec<_> = candidates.iter().collect();
     let config = Config {
@@ -146,7 +147,7 @@ fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
 fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     // 2000 stars on 4K image - compare all centroid methods
     let pixels = benchmark_star_field(6144, 6144, 10000, 0.1, 0.01, 42);
-    let bg = crate::testing::estimate_background(&pixels, &Config::default());
+    let bg = estimate_background(&pixels, &Config::default());
     let candidates = detect_stars_test(&pixels, &bg, &Config::default());
     let regions: Vec<_> = candidates.iter().collect();
 
@@ -198,7 +199,7 @@ fn bench_refine_centroid_single(b: ::quickbench::Bencher) {
     let width = 64;
     let height = 64;
     let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
-    let bg = crate::testing::estimate_background(&pixels, &Config::default());
+    let bg = estimate_background(&pixels, &Config::default());
     let stamp_radius = 7; // typical for FWHM ~4
     let expected_fwhm = 4.0;
 
@@ -221,7 +222,7 @@ fn bench_refine_centroid_batch_1000(b: ::quickbench::Bencher) {
     let width = 64;
     let height = 64;
     let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
-    let bg = crate::testing::estimate_background(&pixels, &Config::default());
+    let bg = estimate_background(&pixels, &Config::default());
     let stamp_radius = 7;
     let expected_fwhm = 4.0;
 

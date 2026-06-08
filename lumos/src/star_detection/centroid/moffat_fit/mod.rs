@@ -21,9 +21,11 @@ mod simd_avx2;
 #[cfg(target_arch = "aarch64")]
 mod simd_neon;
 
-use crate::star_detection::centroid::lm_optimizer::{LMConfig, LMModel, optimize};
-use crate::star_detection::centroid::{FitNoise, MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp, fit_weights};
 use crate::math::FWHM_TO_SIGMA;
+use crate::star_detection::centroid::lm_optimizer::{LMConfig, LMModel, optimize};
+use crate::star_detection::centroid::{
+    FitNoise, MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp, fit_weights,
+};
 use arrayvec::ArrayVec;
 use common::Buffer2;
 use glam::Vec2;

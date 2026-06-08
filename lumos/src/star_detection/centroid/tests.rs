@@ -6,9 +6,14 @@ use super::*;
 use crate::math::FWHM_TO_SIGMA;
 use crate::math::bbox::Aabb;
 use crate::star_detection::background::estimate::BackgroundEstimate;
+use crate::star_detection::centroid::compute_roundness;
+use crate::star_detection::centroid::moffat_fit::alpha_beta_to_fwhm;
+use crate::star_detection::centroid::test_utils::add_noise;
+use crate::star_detection::centroid::test_utils::make_elliptical_star;
 use crate::star_detection::config::Config;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::detector::stages::detect_test_utils::detect_stars_test;
+use crate::testing::estimate_background;
 use crate::testing::synthetic::background_map;
 use common::Buffer2;
 use common::Vec2us;
@@ -29,7 +34,7 @@ fn test_centroid_accuracy() {
     let true_pos = Vec2::new(64.3, 64.7);
     let pixels = make_gaussian_star(width, height, true_pos, 2.5, 0.8, 0.1);
 
-    let bg = crate::testing::estimate_background(
+    let bg = estimate_background(
         &pixels,
         &Config {
             tile_size: 32,
@@ -73,7 +78,7 @@ fn test_fwhm_estimation() {
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
     let pixels = make_gaussian_star(width, height, Vec2::splat(64.0), sigma, 0.8, 0.1);
 
-    let bg = crate::testing::estimate_background(
+    let bg = estimate_background(
         &pixels,
         &Config {
             tile_size: 32,
@@ -110,7 +115,7 @@ fn test_circular_star_eccentricity() {
     let height = 64;
     let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
 
-    let bg = crate::testing::estimate_background(
+    let bg = estimate_background(
         &pixels,
         &Config {
             tile_size: 32,
@@ -138,7 +143,7 @@ fn test_snr_and_flux_values() {
     let height = 64;
     let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
 
-    let bg = crate::testing::estimate_background(
+    let bg = estimate_background(
         &pixels,
         &Config {
             tile_size: 32,
@@ -652,8 +657,6 @@ fn test_compute_metrics_snr_scales_with_amplitude() {
 // =============================================================================
 // Elongated Star Tests (Eccentricity)
 // =============================================================================
-
-use crate::star_detection::centroid::test_utils::make_elliptical_star;
 
 #[test]
 fn test_elongated_star_high_eccentricity() {
@@ -1191,7 +1194,7 @@ fn test_measure_star_multiple_stars_independent() {
     }
 
     let pixels = Buffer2::new(width, height, pixels);
-    let bg = crate::testing::estimate_background(
+    let bg = estimate_background(
         &pixels,
         &Config {
             tile_size: 32,
@@ -1240,7 +1243,7 @@ fn test_circular_star_roundness() {
     let height = 64;
     let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
 
-    let bg = crate::testing::estimate_background(
+    let bg = estimate_background(
         &pixels,
         &Config {
             tile_size: 32,
@@ -1294,7 +1297,7 @@ fn test_elongated_x_star_roundness() {
     }
 
     let pixels = Buffer2::new(width, height, pixels);
-    let bg = crate::testing::estimate_background(
+    let bg = estimate_background(
         &pixels,
         &Config {
             tile_size: 32,
@@ -1348,7 +1351,7 @@ fn test_asymmetric_star_roundness2() {
     }
 
     let pixels = Buffer2::new(width, height, pixels);
-    let bg = crate::testing::estimate_background(
+    let bg = estimate_background(
         &pixels,
         &Config {
             tile_size: 32,
@@ -1430,7 +1433,7 @@ fn test_weighted_centroid_precision_statistical() {
             let true_pos = Vec2::new(64.0 + dx as f32 * 0.1, 64.0 + dy as f32 * 0.1);
 
             let pixels = make_gaussian_star(width, height, true_pos, sigma, 1.0, 0.1);
-            let bg = crate::testing::estimate_background(
+            let bg = estimate_background(
                 &pixels,
                 &Config {
                     tile_size: 32,
@@ -2349,7 +2352,7 @@ fn test_local_annulus_background_uniform() {
     }
     let pixels = Buffer2::new(width, height, pixels);
 
-    let bg = crate::testing::estimate_background(
+    let bg = estimate_background(
         &pixels,
         &Config {
             tile_size: 32,
@@ -2382,7 +2385,7 @@ fn test_local_annulus_vs_global_map() {
 
     // Create star on uniform background
     let pixels = make_gaussian_star(width, height, Vec2::splat(64.0), 2.5, 0.8, 0.1);
-    let bg = crate::testing::estimate_background(
+    let bg = estimate_background(
         &pixels,
         &Config {
             tile_size: 32,
@@ -2432,7 +2435,7 @@ fn test_local_annulus_near_edge_fallback() {
     // Create star near edge where annulus might be partially outside
     let pos = Vec2::new(20.0, 32.0);
     let pixels = make_gaussian_star(width, height, pos, 2.0, 0.8, 0.1);
-    let bg = crate::testing::estimate_background(
+    let bg = estimate_background(
         &pixels,
         &Config {
             tile_size: 32,
@@ -2466,7 +2469,7 @@ fn test_roundness_zero_flux() {
     let marginal_x = vec![0.0f64; 11];
     let marginal_y = vec![0.0f64; 11];
 
-    let (r1, r2) = crate::star_detection::centroid::compute_roundness(&marginal_x, &marginal_y);
+    let (r1, r2) = compute_roundness(&marginal_x, &marginal_y);
 
     assert_eq!(r1, 0.0, "Roundness1 should be 0 for zero flux");
     assert_eq!(r2, 0.0, "Roundness2 should be 0 for zero flux");
@@ -2478,7 +2481,7 @@ fn test_roundness_uniform_marginals() {
     let marginal_x = vec![1.0f64; 11];
     let marginal_y = vec![1.0f64; 11];
 
-    let (r1, _) = crate::star_detection::centroid::compute_roundness(&marginal_x, &marginal_y);
+    let (r1, _) = compute_roundness(&marginal_x, &marginal_y);
 
     assert!(
         r1.abs() < 0.01,
@@ -2493,7 +2496,7 @@ fn test_roundness_asymmetric_x() {
     marginal_x[8] = 1.0; // Extra flux on right side
     let marginal_y = vec![0.5f64; 11]; // Symmetric
 
-    let (_, r2) = crate::star_detection::centroid::compute_roundness(&marginal_x, &marginal_y);
+    let (_, r2) = compute_roundness(&marginal_x, &marginal_y);
 
     assert!(
         r2 > 0.0,
@@ -2511,7 +2514,7 @@ fn test_roundness_x_vs_y_elongation() {
     marginal_y[5] = 2.0;
     marginal_x[5] = 1.0;
 
-    let (r1, _) = crate::star_detection::centroid::compute_roundness(&marginal_x, &marginal_y);
+    let (r1, _) = compute_roundness(&marginal_x, &marginal_y);
 
     // r1 = (Hx - Hy) / (Hx + Hy) = (1.0 - 2.0) / (1.0 + 2.0) = -1/3
     assert!(
@@ -2531,7 +2534,7 @@ fn test_roundness_y_vs_x_elongation() {
     marginal_x[5] = 2.0;
     marginal_y[5] = 1.0;
 
-    let (r1, _) = crate::star_detection::centroid::compute_roundness(&marginal_x, &marginal_y);
+    let (r1, _) = compute_roundness(&marginal_x, &marginal_y);
 
     // r1 = (Hx - Hy) / (Hx + Hy) = (2.0 - 1.0) / (2.0 + 1.0) = 1/3
     assert!(
@@ -2551,7 +2554,7 @@ fn test_roundness_bounds() {
     ];
 
     for (marginal_x, marginal_y) in test_cases {
-        let (r1, r2) = crate::star_detection::centroid::compute_roundness(&marginal_x, &marginal_y);
+        let (r1, r2) = compute_roundness(&marginal_x, &marginal_y);
         assert!(
             (-1.0..=1.0).contains(&r1),
             "Roundness1 out of bounds: {}",
@@ -2858,7 +2861,9 @@ fn test_compute_stamp_radius_clamped_max() {
 #[test]
 fn test_compute_stamp_radius_various_fwhm() {
     use crate::star_detection::centroid::compute_stamp_radius;
-    use crate::star_detection::centroid::{MAX_STAMP_RADIUS, MIN_STAMP_RADIUS, STAMP_RADIUS_FWHM_FACTOR};
+    use crate::star_detection::centroid::{
+        MAX_STAMP_RADIUS, MIN_STAMP_RADIUS, STAMP_RADIUS_FWHM_FACTOR,
+    };
 
     // Test various FWHM values
     for fwhm in [2.0f32, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0] {
@@ -3021,7 +3026,9 @@ fn test_prefit_moments_iterations_sufficient() {
 #[test]
 fn test_prefit_moments_iterations_sufficient_moffat() {
     use crate::star_detection::centroid::moffat_fit::{MoffatFitConfig, fit_moffat_2d};
-    use crate::star_detection::centroid::{CONVERGENCE_THRESHOLD_SQ, lm_optimizer, refine_centroid};
+    use crate::star_detection::centroid::{
+        CONVERGENCE_THRESHOLD_SQ, lm_optimizer, refine_centroid,
+    };
 
     let width = 64;
     let height = 64;
@@ -3896,7 +3903,9 @@ fn test_moffat_fit_bad_initial_guess() {
 // Fit-derived FWHM and Eccentricity Tests
 // =========================================================================
 
-use crate::star_detection::centroid::test_utils::{make_elliptical_star as make_elliptical_gaussian, make_moffat_star};
+use crate::star_detection::centroid::test_utils::{
+    make_elliptical_star as make_elliptical_gaussian, make_moffat_star,
+};
 
 /// Helper: run measure_star on a single-star image with given centroid method.
 fn measure_single_star(
@@ -4034,7 +4043,7 @@ fn test_gaussian_fit_fwhm_more_accurate_than_moments() {
 fn test_moffat_fit_fwhm_from_fit_params() {
     let alpha = 3.0f32;
     let beta = 2.5f32;
-    let true_fwhm = crate::star_detection::centroid::moffat_fit::alpha_beta_to_fwhm(alpha, beta);
+    let true_fwhm = alpha_beta_to_fwhm(alpha, beta);
     // Verify: 2 * 3.0 * sqrt(2^0.4 - 1) ≈ 3.3915
     assert!(
         (true_fwhm - 3.3915).abs() < 0.001,
@@ -4113,7 +4122,7 @@ fn test_moments_only_fwhm_unchanged() {
 fn test_moffat_fit_fwhm_more_accurate_than_moments() {
     let alpha = 3.0f32;
     let beta = 2.5f32;
-    let true_fwhm = crate::star_detection::centroid::moffat_fit::alpha_beta_to_fwhm(alpha, beta);
+    let true_fwhm = alpha_beta_to_fwhm(alpha, beta);
 
     let pos = Vec2::new(64.0, 64.0);
     let pixels = make_moffat_star(128, 128, pos, alpha, beta, 0.8, 0.1);
@@ -4178,7 +4187,7 @@ fn windowed_covariance_recovers_elliptical_axes() {
     let (width, height) = (64, 64);
     let pos = Vec2::new(32.0, 32.0);
     let (sx, sy) = (3.0f32, 2.0f32);
-    let pixels = crate::star_detection::centroid::test_utils::make_elliptical_star(width, height, pos, sx, sy, 1.0, 0.0);
+    let pixels = make_elliptical_star(width, height, pos, sx, sy, 1.0, 0.0);
     let bg = background_map::uniform(width, height, 0.0, 1.0);
 
     let seed = ((sx * sx + sy * sy) / 2.0) as f64;
@@ -4215,7 +4224,7 @@ fn windowed_covariance_resists_wing_noise() {
     let pos = Vec2::new(32.0, 32.0);
     let sigma = 2.5f32;
     let mut pixels = make_gaussian_star(width, height, pos, sigma, 1.0, 0.1);
-    crate::star_detection::centroid::test_utils::add_noise(pixels.pixels_mut(), 0.03, 12345);
+    add_noise(pixels.pixels_mut(), 0.03, 12345);
     let bg = background_map::uniform(width, height, 0.1, 1.0);
 
     let cov = windowed_covariance(&pixels, &bg, pos, 12, (sigma * sigma) as f64)

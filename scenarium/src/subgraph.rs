@@ -132,7 +132,7 @@ impl KeyIndexKey<SubgraphId> for SubgraphDef {
 mod tests {
     use super::*;
     use crate::data::DataType;
-    use crate::function::FuncLib;
+    use crate::function::{FuncId, FuncLib};
     use crate::graph::{Graph, InputPort, Node, NodeKind};
     use crate::testing::{TestFuncHooks, test_func_lib};
     use common::SerdeFormat;
@@ -349,12 +349,12 @@ mod tests {
     }
 
     /// A func with one event and no I/O, for exposed-event tests.
-    fn ticker_func_lib() -> (FuncLib, crate::function::FuncId) {
+    fn ticker_func_lib() -> (FuncLib, FuncId) {
         use crate::event_lambda::EventLambda;
         use crate::func_lambda::FuncLambda;
         use crate::function::{Func, FuncBehavior, FuncEvent};
 
-        let id = crate::function::FuncId::unique();
+        let id = FuncId::unique();
         let mut lib = FuncLib::default();
         lib.add(Func {
             id,

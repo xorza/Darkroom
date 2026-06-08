@@ -23,11 +23,12 @@ mod tests;
 use arrayvec::ArrayVec;
 use glam::Vec2;
 
+use crate::math::statistics::sigma_clipped_median_mad_arrayvec;
+use crate::math::{FWHM_TO_SIGMA, sigma_to_fwhm};
 use crate::star_detection::background::estimate::BackgroundEstimate;
 use crate::star_detection::config::{CentroidMethod, Config, LocalBackgroundMethod};
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::star::Star;
-use crate::math::FWHM_TO_SIGMA;
 use common::Buffer2;
 use gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
 use moffat_fit::{MoffatFitConfig, fit_moffat_2d};
@@ -306,12 +307,7 @@ fn sigma_clipped_median_mad(values: &mut [f32], kappa: f32, iterations: usize) -
     let mut deviations: ArrayVec<f32, MAX_ANNULUS_PIXELS> = ArrayVec::new();
     // Resize to match values length
     deviations.extend(std::iter::repeat_n(0.0, values.len()));
-    crate::math::statistics::sigma_clipped_median_mad_arrayvec(
-        values,
-        &mut deviations,
-        kappa,
-        iterations,
-    )
+    sigma_clipped_median_mad_arrayvec(values, &mut deviations, kappa, iterations)
 }
 
 /// Measure a star candidate: compute sub-pixel position and quality metrics.
@@ -419,7 +415,7 @@ pub fn measure_star(
                 pos = result.pos;
                 // FWHM from geometric mean of sigma_x, sigma_y
                 let geo_sigma = (result.sigma.x * result.sigma.y).sqrt();
-                fit_fwhm = Some(crate::math::sigma_to_fwhm(geo_sigma));
+                fit_fwhm = Some(sigma_to_fwhm(geo_sigma));
                 // Eccentricity from sigma ratio: e = sqrt(1 - min/max)
                 let (s_min, s_max) = if result.sigma.x < result.sigma.y {
                     (result.sigma.x, result.sigma.y)
@@ -799,7 +795,7 @@ pub(crate) fn compute_metrics(
 
     // FWHM from the mean second moment (assuming Gaussian PSF)
     let sigma_sq = (trace / 2.0).max(0.0);
-    let fwhm = crate::math::sigma_to_fwhm(sigma_sq.sqrt() as f32);
+    let fwhm = sigma_to_fwhm(sigma_sq.sqrt() as f32);
 
     // Eccentricity from covariance matrix eigenvalues
     let discriminant = (trace * trace - 4.0 * det).max(0.0);

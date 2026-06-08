@@ -1,5 +1,7 @@
 use rayon::prelude::*;
 
+use crate::raw::alloc_uninit_vec;
+
 /// Light-frame normalization: `clamp((value - black).max(0) * inv_range, 0, 1)`.
 /// The `[0, 1]` clamp is the display / demosaic contract for light frames.
 pub(crate) fn normalize_u16_to_f32_parallel(data: &[u16], black: f32, inv_range: f32) -> Vec<f32> {
@@ -27,7 +29,7 @@ fn normalize_generic<const CLAMP: bool>(data: &[u16], black: f32, inv_range: f32
     const CHUNK_SIZE: usize = 16384; // Process 64KB chunks (16K * 4 bytes)
 
     // SAFETY: Every element is written by the parallel SIMD pass below before being read.
-    let mut result = unsafe { crate::raw::alloc_uninit_vec::<f32>(data.len()) };
+    let mut result = unsafe { alloc_uninit_vec::<f32>(data.len()) };
 
     result
         .par_chunks_mut(CHUNK_SIZE)

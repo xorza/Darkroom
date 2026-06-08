@@ -4,8 +4,10 @@
 //! and `batch_compute_chi2`. Uses a fast polynomial `exp()` approximation
 //! (Cephes-derived, ~1e-13 relative accuracy) fully vectorized in AVX2.
 
+use crate::star_detection::centroid::gaussian_fit::{
+    EXP_P0, EXP_P1, EXP_P2, EXP_Q0, EXP_Q1, EXP_Q2, EXP_Q3, Gaussian2D, LN2_HI, LN2_LO,
+};
 use crate::star_detection::centroid::lm_optimizer::LMModel;
-use crate::star_detection::centroid::gaussian_fit::{EXP_P0, EXP_P1, EXP_P2, EXP_Q0, EXP_Q1, EXP_Q2, EXP_Q3, Gaussian2D, LN2_HI, LN2_LO};
 use std::arch::x86_64::*;
 
 const LOG2E: f64 = std::f64::consts::LOG2_E;

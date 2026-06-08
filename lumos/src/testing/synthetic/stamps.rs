@@ -5,6 +5,8 @@
 
 use common::Buffer2;
 
+use crate::testing::TestRng;
+
 /// Generate a Gaussian star stamp.
 ///
 /// Creates a small image with a single Gaussian star at the specified position.
@@ -151,7 +153,7 @@ pub fn star_field(
 ) -> (Buffer2<f32>, Vec<(f32, f32)>) {
     let mut pixels = vec![background; width * height];
     let mut positions = Vec::with_capacity(num_stars);
-    let mut rng = crate::testing::TestRng::new(seed);
+    let mut rng = TestRng::new(seed);
 
     let margin = (sigma * 4.0).ceil() as usize;
     let two_sigma_sq = 2.0 * sigma * sigma;
@@ -252,7 +254,7 @@ pub fn benchmark_star_field(
     }
 
     // Add synthetic stars
-    let mut rng = crate::testing::TestRng::new(seed);
+    let mut rng = TestRng::new(seed);
 
     let margin = 15;
     for _ in 0..num_stars {

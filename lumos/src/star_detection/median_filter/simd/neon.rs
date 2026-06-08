@@ -5,6 +5,9 @@
 #[cfg(target_arch = "aarch64")]
 use std::arch::aarch64::*;
 
+#[cfg(target_arch = "aarch64")]
+use crate::star_detection::median_filter::simd::median9_scalar;
+
 /// Process a row of interior pixels using NEON.
 ///
 /// Processes 4 pixels in parallel.
@@ -54,7 +57,7 @@ pub unsafe fn median_filter_row_neon(
         // Handle remainder pixels with scalar code
         let remainder_start = 1 + chunks * 4;
         for x in remainder_start..(width - 1) {
-            output_row[x] = crate::star_detection::median_filter::simd::median9_scalar(
+            output_row[x] = median9_scalar(
                 row_above[x - 1],
                 row_above[x],
                 row_above[x + 1],
@@ -139,6 +142,8 @@ mod tests {
     #[test]
     #[cfg(target_arch = "aarch64")]
     fn test_neon_median_filter_row() {
+        use crate::star_detection::median_filter::simd::median_filter_row_scalar;
+
         let width = 20;
         let row_above: Vec<f32> = (0..width).map(|i| ((i * 3) % 100) as f32 * 0.01).collect();
         let row_curr: Vec<f32> = (0..width).map(|i| ((i * 7) % 100) as f32 * 0.01).collect();
@@ -147,13 +152,7 @@ mod tests {
         let mut output_scalar = vec![0.0f32; width];
         let mut output_simd = vec![0.0f32; width];
 
-        crate::star_detection::median_filter::simd::median_filter_row_scalar(
-            &row_above,
-            &row_curr,
-            &row_below,
-            &mut output_scalar,
-            width,
-        );
+        median_filter_row_scalar(&row_above, &row_curr, &row_below, &mut output_scalar, width);
 
         unsafe {
             median_filter_row_neon(&row_above, &row_curr, &row_below, &mut output_simd, width);

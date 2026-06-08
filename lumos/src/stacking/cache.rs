@@ -34,7 +34,7 @@ use rayon::prelude::*;
 
 use crate::astro_image::cfa::CfaImage;
 use crate::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
-use crate::math::statistics::ChannelStats;
+use crate::math::statistics::{ChannelStats, mad_f32_with_scratch, median_f32_mut};
 use crate::stacking::cache_config::{
     CacheConfig, MEMORY_PERCENT, compute_optimal_chunk_rows_with_memory,
 };
@@ -58,8 +58,8 @@ fn compute_frame_stats(image: &impl StackableImage) -> FrameStats {
         let data = image.channel(0);
         let mut buf = Vec::with_capacity(dims.size.x * dims.size.y);
         buf.extend_from_slice(data);
-        let median = crate::math::statistics::median_f32_mut(&mut buf);
-        let mad = crate::math::statistics::mad_f32_with_scratch(data, median, &mut buf);
+        let median = median_f32_mut(&mut buf);
+        let mad = mad_f32_with_scratch(data, median, &mut buf);
         let mut channels = ArrayVec::new();
         channels.push(ChannelStats { median, mad });
         return FrameStats { channels };
@@ -72,8 +72,8 @@ fn compute_frame_stats(image: &impl StackableImage) -> FrameStats {
             let data = image.channel(c);
             let mut buf = Vec::with_capacity(dims.size.x * dims.size.y);
             buf.extend_from_slice(data);
-            let median = crate::math::statistics::median_f32_mut(&mut buf);
-            let mad = crate::math::statistics::mad_f32_with_scratch(data, median, &mut buf);
+            let median = median_f32_mut(&mut buf);
+            let mad = mad_f32_with_scratch(data, median, &mut buf);
             ChannelStats { median, mad }
         })
         .collect();

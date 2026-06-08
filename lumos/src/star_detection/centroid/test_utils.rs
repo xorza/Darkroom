@@ -4,9 +4,11 @@ use glam::Vec2;
 
 use common::Buffer2;
 
+use crate::testing::synthetic::patterns::add_gaussian_noise;
+
 /// Add Gaussian noise to pixel values using a simple LCG PRNG.
 pub fn add_noise(pixels: &mut [f32], noise_sigma: f32, seed: u64) {
-    crate::testing::synthetic::patterns::add_gaussian_noise(pixels, noise_sigma, seed);
+    add_gaussian_noise(pixels, noise_sigma, seed);
 }
 
 /// Compare two f64 values with absolute + relative tolerance.

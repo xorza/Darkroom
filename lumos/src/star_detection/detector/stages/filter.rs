@@ -2,7 +2,9 @@
 //!
 //! Applies quality filters, removes duplicates, and sorts by flux.
 
+use crate::math::statistics::median_and_mad_f32_mut;
 use crate::star_detection::config::Config;
+use crate::star_detection::detector::Diagnostics;
 use crate::star_detection::star::Star;
 
 /// Below this star count, use O(n²) brute-force duplicate removal
@@ -23,7 +25,7 @@ pub(crate) struct QualityFilterStats {
 
 impl QualityFilterStats {
     /// Write rejection counts into the corresponding Diagnostics fields.
-    pub fn apply_to(&self, d: &mut crate::star_detection::detector::Diagnostics) {
+    pub fn apply_to(&self, d: &mut Diagnostics) {
         d.rejected_saturated = self.saturated;
         d.rejected_low_snr = self.low_snr;
         d.rejected_high_eccentricity = self.high_eccentricity;
@@ -92,7 +94,7 @@ pub(crate) fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) ->
 
     let reference_count = (stars.len() / 2).max(5).min(stars.len());
     let mut fwhms: Vec<f32> = stars.iter().take(reference_count).map(|s| s.fwhm).collect();
-    let (median_fwhm, mad) = crate::math::statistics::median_and_mad_f32_mut(&mut fwhms);
+    let (median_fwhm, mad) = median_and_mad_f32_mut(&mut fwhms);
 
     let effective_mad = mad.max(median_fwhm * 0.1);
     let max_fwhm = median_fwhm + max_deviation * effective_mad;

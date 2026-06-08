@@ -14,6 +14,11 @@ use std::path::Path;
 use common::Buffer2;
 use common::Vec2us;
 
+use crate::math::sum::sum_f32;
+use crate::raw::load_raw;
+use crate::stacking::cache::StackableImage;
+use crate::stacking::error::Error;
+
 /// FITS BITPIX values representing pixel data types.
 ///
 /// FITS natively supports only signed integers. Unsigned integers use the
@@ -229,7 +234,7 @@ impl AstroImage {
 
         match ext.as_str() {
             "fit" | "fits" => fits::load_fits(path),
-            "raf" | "cr2" | "cr3" | "nef" | "arw" | "dng" => crate::raw::load_raw(path),
+            "raf" | "cr2" | "cr3" | "nef" | "arw" | "dng" => load_raw(path),
             "tiff" | "tif" | "png" | "jpg" | "jpeg" => {
                 let image = Image::read_file(path).map_err(|e| ImageError::Image {
                     path: path.to_path_buf(),
@@ -380,7 +385,7 @@ impl AstroImage {
     /// Calculate mean pixel value across all channels.
     pub fn mean(&self) -> f32 {
         fn parallel_sum(values: &[f32]) -> f32 {
-            values.par_chunks(8192).map(crate::math::sum::sum_f32).sum()
+            values.par_chunks(8192).map(sum_f32).sum()
         }
 
         match &self.pixels {
@@ -409,7 +414,7 @@ impl AstroImage {
     }
 }
 
-impl crate::stacking::cache::StackableImage for AstroImage {
+impl StackableImage for AstroImage {
     fn dimensions(&self) -> ImageDimensions {
         self.dimensions()
     }
@@ -422,8 +427,8 @@ impl crate::stacking::cache::StackableImage for AstroImage {
         &self.metadata
     }
 
-    fn load(path: &Path) -> Result<Self, crate::stacking::error::Error> {
-        AstroImage::from_file(path).map_err(|e| crate::stacking::error::Error::ImageLoad {
+    fn load(path: &Path) -> Result<Self, Error> {
+        AstroImage::from_file(path).map_err(|e| Error::ImageLoad {
             path: path.to_path_buf(),
             source: std::io::Error::other(e),
         })

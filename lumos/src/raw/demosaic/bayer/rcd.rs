@@ -9,7 +9,10 @@
 
 use rayon::prelude::*;
 
-use crate::raw::demosaic::bayer::{BayerImage, CfaPattern};
+use crate::raw::{
+    alloc_uninit_vec,
+    demosaic::bayer::{BayerImage, CfaPattern},
+};
 
 const EPS: f32 = 1e-5;
 const EPSSQ: f32 = 1e-10;
@@ -358,9 +361,9 @@ pub(crate) fn rcd_demosaic(bayer: &BayerImage) -> [Vec<f32>; 3] {
 
     let active = width * height;
     // SAFETY: the per-row copy_from_slice below writes every element of each buffer.
-    let mut out_r = unsafe { crate::raw::alloc_uninit_vec::<f32>(active) };
-    let mut out_g = unsafe { crate::raw::alloc_uninit_vec::<f32>(active) };
-    let mut out_b = unsafe { crate::raw::alloc_uninit_vec::<f32>(active) };
+    let mut out_r = unsafe { alloc_uninit_vec::<f32>(active) };
+    let mut out_g = unsafe { alloc_uninit_vec::<f32>(active) };
+    let mut out_b = unsafe { alloc_uninit_vec::<f32>(active) };
 
     out_r
         .par_chunks_mut(width)

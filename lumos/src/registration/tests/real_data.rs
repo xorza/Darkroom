@@ -9,11 +9,13 @@ use std::path::PathBuf;
 
 use ::quickbench::quick_bench;
 
-use crate::AstroImage;
 use crate::registration::config::Config as RegistrationConfig;
+use crate::registration::distortion::sip::{SipConfig, SipPolynomial};
+use crate::registration::{register, warp};
 use crate::star_detection::config::{CentroidMethod, Config, NoiseModel};
 use crate::star_detection::detector::StarDetector;
 use crate::testing::calibration_dir;
+use crate::{AstroImage, TransformType};
 
 const IMAGE_EXTENSIONS: &[&str] = &["tiff", "tif", "fit", "fits", "png"];
 
@@ -128,13 +130,13 @@ fn test_register_two_calibrated_lights() {
 
     // Register image 2 to image 1 WITHOUT SIP first (baseline).
     let reg_config = RegistrationConfig {
-        transform_type: crate::TransformType::Auto,
+        transform_type: TransformType::Auto,
         sip_enabled: false,
         ..RegistrationConfig::default()
     };
 
-    let result = crate::registration::register(&result1.stars, &result2.stars, &reg_config)
-        .expect("Registration should succeed");
+    let result =
+        register(&result1.stars, &result2.stars, &reg_config).expect("Registration should succeed");
 
     let baseline_rms = result.rms_error;
 
@@ -179,13 +181,13 @@ fn test_register_two_calibrated_lights() {
         .map(|&(_, ti)| target_positions[ti])
         .collect();
 
-    let sip_config = crate::registration::distortion::sip::SipConfig {
+    let sip_config = SipConfig {
         order: 4,
         reference_point: None,
         ..Default::default()
     };
 
-    let sip = crate::registration::distortion::sip::SipPolynomial::fit_from_transform(
+    let sip = SipPolynomial::fit_from_transform(
         &inlier_ref,
         &inlier_target,
         &result.transform,
@@ -237,7 +239,7 @@ fn test_register_two_calibrated_lights() {
 
     // Warp img2 to align with img1 and measure time
     let warp_start = std::time::Instant::now();
-    let warped = crate::registration::warp(&img2, &result.warp_transform(), &reg_config).image;
+    let warped = warp(&img2, &result.warp_transform(), &reg_config).image;
     let warp_elapsed = warp_start.elapsed();
 
     println!(
@@ -314,7 +316,7 @@ fn bench_register_and_warp_all(b: ::quickbench::Bencher) {
             let name = paths[i].file_name().unwrap();
             let target_stars = &detections[i].stars;
 
-            let result = match crate::registration::register(ref_stars, target_stars, &reg_config) {
+            let result = match register(ref_stars, target_stars, &reg_config) {
                 Ok(r) => r,
                 Err(e) => {
                     println!("  {:?}: FAILED ({:?}), skipping", name, e);
@@ -327,8 +329,7 @@ fn bench_register_and_warp_all(b: ::quickbench::Bencher) {
                 name, result.num_inliers, result.rms_error, result.elapsed_ms,
             );
 
-            let warped =
-                crate::registration::warp(&images[i], &result.warp_transform(), &reg_config).image;
+            let warped = warp(&images[i], &result.warp_transform(), &reg_config).image;
 
             let output_path = output_dir.join(name);
             warped
@@ -377,7 +378,7 @@ fn bench_register_stars(b: ::quickbench::Bencher) {
     let reg_config = RegistrationConfig::default();
 
     b.bench(|| {
-        black_box(crate::registration::register(
+        black_box(register(
             black_box(&result1.stars),
             black_box(&result2.stars),
             &reg_config,
@@ -399,11 +400,11 @@ fn bench_warp(b: ::quickbench::Bencher) {
     let result2 = detector.detect(&img2);
 
     let reg_config = RegistrationConfig::default();
-    let registration = crate::registration::register(&result1.stars, &result2.stars, &reg_config)
-        .expect("Registration should succeed");
+    let registration =
+        register(&result1.stars, &result2.stars, &reg_config).expect("Registration should succeed");
 
     b.bench(|| {
-        crate::registration::warp(
+        warp(
             black_box(&img2),
             black_box(&registration.warp_transform()),
             black_box(&reg_config),
@@ -434,12 +435,11 @@ fn test_weighted_fit_registration_rms() {
         let s1 = detector.detect(&img1).stars;
         let s2 = detector.detect(&img2).stars;
         let reg_config = RegistrationConfig {
-            transform_type: crate::TransformType::Auto,
+            transform_type: TransformType::Auto,
             sip_enabled: false,
             ..RegistrationConfig::default()
         };
-        let r = crate::registration::register(&s1, &s2, &reg_config)
-            .expect("registration should succeed");
+        let r = register(&s1, &s2, &reg_config).expect("registration should succeed");
         (r.rms_error, r.num_inliers)
     };
 

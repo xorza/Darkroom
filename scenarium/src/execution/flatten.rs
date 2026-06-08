@@ -18,11 +18,11 @@ use common::FnvHasher;
 use common::{CompactInsert, KeyIndexVec};
 use hashbrown::HashSet;
 
+use crate::data::StaticValue;
 use crate::execution::program::{
     ExecutionBehavior, ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
     ExecutionPortAddress, Span,
 };
-use crate::data::StaticValue;
 use crate::execution_stats::FlattenMap;
 use crate::function::FuncLib;
 use crate::graph::{Binding, Graph, InputPort, NodeBehavior, NodeId, NodeKind, Subscription};

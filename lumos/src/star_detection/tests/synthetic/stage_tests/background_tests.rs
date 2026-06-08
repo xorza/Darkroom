@@ -6,12 +6,12 @@ use glam::Vec2;
 
 use crate::star_detection::config::Config;
 use crate::star_detection::tests::common::output::image_writer::save_grayscale;
-use crate::testing::init_tracing;
 use crate::testing::synthetic::backgrounds::{
     NebulaConfig, add_gradient_background, add_nebula_background, add_uniform_background,
     add_vignette_background,
 };
 use crate::testing::synthetic::star_field::{StarFieldConfig, generate_star_field};
+use crate::testing::{estimate_background, init_tracing};
 use common::Buffer2;
 use common::test_utils::test_output_path;
 
@@ -39,7 +39,7 @@ fn test_background_uniform() {
     let (pixels, _ground_truth) = generate_star_field(&config);
 
     // Estimate background
-    let background = crate::testing::estimate_background(
+    let background = estimate_background(
         &pixels,
         &Config {
             tile_size: TILE_SIZE,
@@ -121,7 +121,7 @@ fn test_background_gradient() {
     }
 
     // Estimate background
-    let background = crate::testing::estimate_background(
+    let background = estimate_background(
         &Buffer2::new(width, height, pixels.clone()),
         &Config {
             tile_size: TILE_SIZE,
@@ -202,7 +202,7 @@ fn test_background_vignette() {
     }
 
     // Estimate background
-    let background = crate::testing::estimate_background(
+    let background = estimate_background(
         &Buffer2::new(width, height, pixels.clone()),
         &Config {
             tile_size: TILE_SIZE,
@@ -295,7 +295,7 @@ fn test_background_nebula() {
     }
 
     // Estimate background
-    let background = crate::testing::estimate_background(
+    let background = estimate_background(
         &Buffer2::new(width, height, pixels.clone()),
         &Config {
             tile_size: TILE_SIZE,

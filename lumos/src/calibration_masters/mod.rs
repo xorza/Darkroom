@@ -10,6 +10,7 @@ use std::path::Path;
 use crate::astro_image::cfa::CfaImage;
 use crate::stacking::cache::CfaCache;
 use crate::stacking::config::StackConfig;
+use crate::stacking::error::Error;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::stack::run_stacking;
 use defect_map::DefectMap;
@@ -88,7 +89,7 @@ pub struct CalibrationMasters {
 fn stack_cfa_frames(
     paths: &[impl AsRef<Path> + Sync],
     config: StackConfig,
-) -> Result<Option<CfaImage>, crate::stacking::error::Error> {
+) -> Result<Option<CfaImage>, Error> {
     if paths.is_empty() {
         return Ok(None);
     }
@@ -157,7 +158,7 @@ impl CalibrationMasters {
     pub fn from_files<P: AsRef<Path> + Sync>(
         frames: CalibrationFrames<'_, P>,
         sigma_threshold: f32,
-    ) -> Result<Self, crate::stacking::error::Error> {
+    ) -> Result<Self, Error> {
         let dark = stack_cfa_frames(frames.darks, StackConfig::dark())?;
         let flat = stack_cfa_frames(frames.flats, StackConfig::flat())?;
         let bias = stack_cfa_frames(frames.bias, StackConfig::bias())?;
