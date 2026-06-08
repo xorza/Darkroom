@@ -117,12 +117,10 @@ pub struct RansacResult {
     pub transform: Transform,
     /// Indices of inlier matches.
     pub inliers: Vec<usize>,
-    /// Number of iterations performed. Used for diagnostics and testing.
-    #[allow(dead_code)] // Used in tests
+    /// RANSAC iterations performed — a diagnostic; the adaptive-early-termination
+    /// test asserts on it (no production reader yet).
+    #[allow(dead_code)]
     pub iterations: usize,
-    /// Final inlier ratio. Used for diagnostics and testing.
-    #[allow(dead_code)] // Used in tests
-    pub inlier_ratio: f64,
 }
 
 /// RANSAC estimator for robust transformation fitting.
@@ -324,8 +322,12 @@ impl RansacEstimator {
                     &scorer,
                     &mut lo_buffers,
                 );
-                // Only accept LO result if it's still plausible
-                if self.is_plausible(&lo_transform) {
+                // Accept LO only if it actually improved the score (and is still plausible).
+                // Without the `lo_score > score` guard, LO can return a lower score (it accepts
+                // refits with more — possibly budget-early-exited — inliers even when the score
+                // drops), discarding a hypothesis that had already beaten `best_score`. On the
+                // not-accepted path `inlier_buf` still holds the complete pre-LO inliers.
+                if lo_score > score && self.is_plausible(&lo_transform) {
                     current_transform = lo_transform;
                     std::mem::swap(&mut inlier_buf, &mut lo_buffers.inlier_buf);
                     score = lo_score;
@@ -377,13 +379,10 @@ impl RansacEstimator {
                 f64::NEG_INFINITY,
             );
 
-            let inlier_ratio = inlier_buf.len() as f64 / n as f64;
-
             return Some(RansacResult {
                 transform: refined,
                 inliers: inlier_buf,
                 iterations,
-                inlier_ratio,
             });
         }
 
@@ -447,6 +446,8 @@ impl RansacEstimator {
 
         // Persistent index array for Fisher-Yates shuffle (avoids O(n) re-init per iteration)
         let mut shuffle_indices: Vec<usize> = Vec::new();
+        // Persistent key buffer for weighted A-Res sampling (avoids a per-iteration allocation).
+        let mut weighted_scratch: Vec<(usize, f64)> = Vec::new();
 
         self.ransac_loop(
             &ref_points,
@@ -468,6 +469,7 @@ impl RansacEstimator {
                         &weights,
                         min_samples,
                         sample_buf,
+                        &mut weighted_scratch,
                     );
                 } else {
                     random_sample_into(&mut rng, n, min_samples, sample_buf, &mut shuffle_indices);
@@ -488,6 +490,7 @@ fn weighted_sample_into<R: Rng>(
     weights: &[f64],
     k: usize,
     buffer: &mut Vec<usize>,
+    scratch: &mut Vec<(usize, f64)>,
 ) {
     buffer.clear();
 
@@ -497,23 +500,22 @@ fn weighted_sample_into<R: Rng>(
     }
 
     // Use reservoir sampling with weights (Algorithm A-Res)
-    // For each item, compute key = random^(1/weight), keep top k keys
-    let mut items_with_keys: Vec<(usize, f64)> = pool
-        .iter()
-        .map(|&idx| {
-            let w = weights.get(idx).copied().unwrap_or(1.0).max(0.001);
-            let u: f64 = rng.random();
-            let key = u.powf(1.0 / w); // Higher weight = higher expected key
-            (idx, key)
-        })
-        .collect();
+    // For each item, compute key = random^(1/weight), keep top k keys.
+    // `scratch` is reused across iterations to avoid a per-iteration allocation.
+    scratch.clear();
+    scratch.extend(pool.iter().map(|&idx| {
+        let w = weights.get(idx).copied().unwrap_or(1.0).max(0.001);
+        let u: f64 = rng.random();
+        let key = u.powf(1.0 / w); // Higher weight = higher expected key
+        (idx, key)
+    }));
 
     // Partition so the top k elements (by descending key) are in [0..k]
-    items_with_keys.select_nth_unstable_by(k - 1, |a, b| {
+    scratch.select_nth_unstable_by(k - 1, |a, b| {
         b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    for &(idx, _) in &items_with_keys[..k] {
+    for &(idx, _) in &scratch[..k] {
         buffer.push(idx);
     }
 }

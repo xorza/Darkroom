@@ -22,12 +22,10 @@ pub(crate) fn adaptive_iterations(inlier_ratio: f64, sample_size: usize, confide
         return 1;
     }
 
+    // `w_n ∈ (0, 1)` is guaranteed by the guards above, so `1 - w_n ∈ (0, 1)` and
+    // `log_outlier < 0` — both logs are finite and negative, giving a positive count.
     let log_conf = (1.0 - confidence).ln();
     let log_outlier = (1.0 - w_n).ln();
-
-    if log_outlier >= 0.0 {
-        return 1000; // Fallback to high number
-    }
 
     (log_conf / log_outlier).ceil() as usize
 }
@@ -228,26 +226,24 @@ pub(crate) fn estimate_affine(ref_points: &[DVec2], target_points: &[DVec2]) -> 
 
     let inv_det = 1.0 / det;
 
-    // Compute inverse of the matrix (Cramer's rule would work too)
+    // Inverse of the symmetric normal-equations matrix — only the 6 distinct entries
+    // (it's symmetric, so m10=m01, m20=m02, m21=m12).
     let m00 = (sum_yy * n - sum_y * sum_y) * inv_det;
     let m01 = (sum_x * sum_y - sum_xy * n) * inv_det;
     let m02 = (sum_xy * sum_y - sum_yy * sum_x) * inv_det;
-    let m10 = (sum_y * sum_x - sum_xy * n) * inv_det;
     let m11 = (sum_xx * n - sum_x * sum_x) * inv_det;
     let m12 = (sum_xy * sum_x - sum_xx * sum_y) * inv_det;
-    let m20 = (sum_xy * sum_y - sum_x * sum_yy) * inv_det;
-    let m21 = (sum_xy * sum_x - sum_y * sum_xx) * inv_det;
     let m22 = (sum_xx * sum_yy - sum_xy * sum_xy) * inv_det;
 
     // Solve for x-coordinate parameters (in normalized space)
     let a = m00 * sum_x_tx + m01 * sum_y_tx + m02 * sum_tx;
-    let b = m10 * sum_x_tx + m11 * sum_y_tx + m12 * sum_tx;
-    let e = m20 * sum_x_tx + m21 * sum_y_tx + m22 * sum_tx;
+    let b = m01 * sum_x_tx + m11 * sum_y_tx + m12 * sum_tx;
+    let e = m02 * sum_x_tx + m12 * sum_y_tx + m22 * sum_tx;
 
     // Solve for y-coordinate parameters (in normalized space)
     let c = m00 * sum_x_ty + m01 * sum_y_ty + m02 * sum_ty;
-    let d = m10 * sum_x_ty + m11 * sum_y_ty + m12 * sum_ty;
-    let f = m20 * sum_x_ty + m21 * sum_y_ty + m22 * sum_ty;
+    let d = m01 * sum_x_ty + m11 * sum_y_ty + m12 * sum_ty;
+    let f = m02 * sum_x_ty + m12 * sum_y_ty + m22 * sum_ty;
 
     // Denormalize: A = T_target^{-1} * A_norm * T_ref
     let a_norm = Transform::affine([a, b, e, c, d, f]);

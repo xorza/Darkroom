@@ -858,8 +858,9 @@ fn test_weighted_sample_into_pool_smaller_than_k() {
     let pool = vec![5, 10, 15];
     let weights = vec![0.0; 20]; // weights indexed by pool values
     let mut buffer = Vec::new();
+    let mut scratch = Vec::new();
 
-    weighted_sample_into(&mut rng, &pool, &weights, 5, &mut buffer);
+    weighted_sample_into(&mut rng, &pool, &weights, 5, &mut buffer, &mut scratch);
     let mut sorted = buffer.clone();
     sorted.sort();
     assert_eq!(sorted, vec![5, 10, 15]);
@@ -873,9 +874,10 @@ fn test_weighted_sample_into_returns_k_unique() {
     let weights: Vec<f64> = (0..20).map(|i| i as f64 + 1.0).collect();
     let k = 4;
     let mut buffer = Vec::new();
+    let mut scratch = Vec::new();
 
     for _ in 0..100 {
-        weighted_sample_into(&mut rng, &pool, &weights, k, &mut buffer);
+        weighted_sample_into(&mut rng, &pool, &weights, k, &mut buffer, &mut scratch);
         assert_eq!(buffer.len(), k);
 
         // All unique
