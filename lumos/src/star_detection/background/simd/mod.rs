@@ -8,10 +8,6 @@
 #[cfg(target_arch = "x86_64")]
 use common::cpu_features;
 
-// ============================================================================
-// Cubic spline segment interpolation
-// ============================================================================
-
 /// Natural cubic spline interpolation for a row segment using SIMD.
 ///
 /// Evaluates f(t) = (1-t)*f0 + t*f1 - t*(1-t)*((2-t)*a + (1+t)*b)
@@ -87,6 +83,9 @@ pub fn interpolate_segment_cubic_simd(
 /// Evaluate cubic spline for a single value.
 ///
 /// f(t) = (1-t)*f0 + t*f1 - t*(1-t)*((2-t)*a + (1+t)*b)
+///
+/// Same polynomial as `tile_grid::cubic_spline_eval`, but takes the precomputed
+/// `a, b = h²/6·d2` instead of raw second derivatives — keep the two in sync.
 #[inline]
 fn cubic_eval(f0: f32, f1: f32, a: f32, b: f32, t: f32) -> f32 {
     let ct = 1.0 - t;
@@ -117,10 +116,6 @@ fn interpolate_segment_cubic_scalar(
         *noise = cubic_eval(noise_f0, noise_f1, noise_a, noise_b, t);
     }
 }
-
-// ============================================================================
-// Cubic spline SIMD implementations
-// ============================================================================
 
 /// Evaluate cubic spline for 8 values using AVX2+FMA.
 ///

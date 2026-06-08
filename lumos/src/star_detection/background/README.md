@@ -29,7 +29,7 @@ BackgroundMap::new(pixels, config)
          │
          ▼
 ┌──────────────────┐
-│   Interpolation  │  ◄── Bilinear interpolation between tile centers
+│   Interpolation  │  ◄── Natural bicubic spline between tile centers
 │    (mod.rs)      │
 └────────┬─────────┘
          │
@@ -55,16 +55,16 @@ This follows SExtractor's approach where the background estimator uses "κσ cli
 
 ### Phase 2: Interpolation
 
-Bilinear interpolation creates smooth per-pixel background and noise maps:
+Natural bicubic spline interpolation creates smooth, C²-continuous per-pixel background and noise maps (matching SExtractor/SEP):
 
 ```
-For each pixel (x, y):
-    1. Find surrounding tile centers
-    2. Compute interpolation weights
-    3. Blend tile statistics bilinearly
+For each row:
+    1. Evaluate the per-column Y spline at this row → node values
+    2. Solve the natural cubic spline in X over those node values
+    3. Evaluate the X spline per pixel (SIMD-accelerated)
 ```
 
-SExtractor uses bicubic spline interpolation, but bilinear is faster and sufficient for most use cases. The 3×3 median filter on tiles reduces artifacts.
+Second derivatives in Y are precomputed once per tile column; the X system is solved per row. The 3×3 median filter on tile statistics reduces artifacts before interpolation.
 
 ### Phase 3: Iterative Refinement (Optional)
 
@@ -77,39 +77,15 @@ For crowded fields, iterative refinement improves accuracy:
 
 This is similar to Photutils' recommendation to use source masks for accurate background estimation.
 
-## Adaptive Sigma Thresholding
-
-The `adaptive_sigma` feature provides per-pixel detection thresholds that vary based on local image contrast. This is useful for images with nebulosity or other structured backgrounds where a fixed sigma threshold would cause false detections in high-contrast regions.
-
-### How It Works
-
-During tile statistics computation, local contrast is measured using the coefficient of variation (CV = σ/median). Higher contrast regions get higher detection thresholds:
-
-- Low contrast (uniform sky): threshold ≈ `base_sigma` (default 3.0)
-- High contrast (nebulae): threshold up to `max_sigma` (default 8.0)
-
-### Important: Mutual Exclusivity with Refinement
-
-**Adaptive sigma and iterative refinement are mutually exclusive.** When `iterations > 0`, the `adaptive_sigma` configuration is ignored and no adaptive threshold buffer is allocated.
-
-Rationale:
-- **Refinement** improves background accuracy by masking detected sources and re-estimating. After refinement, the background closely follows the true sky, making adaptive thresholds less necessary.
-- **Adaptive sigma** compensates for imperfect background estimation in single-pass mode by raising thresholds in noisy regions.
-
-Choose one approach:
-- `iterations > 0`: Use refinement for accurate background in crowded fields
-- `iterations == 0` with `adaptive_sigma`: Use adaptive thresholds for nebulous regions without refinement overhead
-
 ## Configuration
 
 ```rust
-BackgroundConfig {
-    tile_size: 64,              // Tile size in pixels (32-512 typical)
-    iterations: 1,              // Refinement iterations (0 = none)
-    sigma_threshold: 3.0,       // Detection threshold for masking
-    mask_dilation: 5,           // Mask dilation radius
-    min_unmasked_fraction: 0.1, // Min unmasked pixels per tile
-    sigma_clip_iterations: 2,   // Sigma clipping iterations (2-5 typical)
+Config {
+    tile_size: 64,            // Tile size in pixels (16-256)
+    sigma_clip_iterations: 3, // Sigma-clip iterations per tile
+    refinement: BackgroundRefinement::Iterative { iterations: 1 }, // None = single pass
+    bg_mask_dilation: 3,      // Source-mask dilation radius (pixels)
+    sigma_threshold: 4.0,     // Detection threshold for source masking during refinement
 }
 ```
 
@@ -167,6 +143,6 @@ Benchmark results (6144×6144 globular cluster image):
 
 - `mod.rs` - BackgroundMap, interpolation, refinement
 - `tile_grid.rs` - TileGrid, sigma-clipped statistics
-- `simd.rs` - SIMD-accelerated interpolation
+- `simd/mod.rs` - SIMD-accelerated interpolation
 - `bench.rs` - Benchmarks
 - `tests.rs` - Integration tests

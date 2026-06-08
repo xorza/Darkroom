@@ -191,8 +191,6 @@ pub struct Config {
     pub refinement: BackgroundRefinement,
     /// Dilation radius for background refinement object masks (pixels).
     pub bg_mask_dilation: usize,
-    /// Minimum fraction of unmasked pixels per tile for refinement.
-    pub min_unmasked_fraction: f32,
 
     // -- Detection --
     /// Detection threshold in sigma above background.
@@ -266,7 +264,6 @@ impl Default for Config {
             sigma_clip_iterations: 3,
             refinement: BackgroundRefinement::None,
             bg_mask_dilation: 3,
-            min_unmasked_fraction: 0.3,
 
             // Detection
             sigma_threshold: 4.0,
@@ -328,11 +325,6 @@ impl Config {
             self.bg_mask_dilation <= 50,
             "bg_mask_dilation must be <= 50, got {}",
             self.bg_mask_dilation
-        );
-        assert!(
-            (0.0..=1.0).contains(&self.min_unmasked_fraction),
-            "min_unmasked_fraction must be in [0, 1], got {}",
-            self.min_unmasked_fraction
         );
 
         // Detection
@@ -514,7 +506,6 @@ impl Config {
             // Background
             sigma_threshold: 3.0,
             bg_mask_dilation: 5,
-            min_unmasked_fraction: 0.2,
             tile_size: 128,
             sigma_clip_iterations: 3,
             refinement: BackgroundRefinement::Iterative { iterations: 3 },
@@ -894,16 +885,6 @@ mod tests {
     fn test_config_invalid_sigma_clip_iterations() {
         Config {
             sigma_clip_iterations: 15,
-            ..Default::default()
-        }
-        .validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "min_unmasked_fraction must be in [0, 1]")]
-    fn test_config_invalid_min_unmasked_fraction() {
-        Config {
-            min_unmasked_fraction: 1.5,
             ..Default::default()
         }
         .validate();

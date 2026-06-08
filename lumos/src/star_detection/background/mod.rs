@@ -35,17 +35,17 @@ pub(crate) fn estimate_background(
     let width = pixels.width();
     let height = pixels.height();
 
-    assert!(
-        width >= config.tile_size && height >= config.tile_size,
-        "Image must be at least tile_size x tile_size"
-    );
+    // Clamp the tile size to the image rather than panicking on a small image: a sub-tile_size
+    // image yields a coarse (possibly single-tile) grid, which the spline path handles correctly
+    // (1-tile dimensions degenerate to a constant fill).
+    let tile_size = config.tile_size.min(width).min(height);
 
     // Acquire buffers from pool
     let mut background = pool.acquire_f32();
     let mut noise = pool.acquire_f32();
 
     // Create tile grid and compute statistics
-    let mut tile_grid = TileGrid::new_uninit(width, height, config.tile_size);
+    let mut tile_grid = TileGrid::new_uninit(width, height, tile_size);
     tile_grid.compute(pixels, None, config.sigma_clip_iterations);
 
     // Interpolate from tile grid to per-pixel values
@@ -70,8 +70,9 @@ pub(crate) fn refine_background(
 
     let width = pixels.width();
     let height = pixels.height();
+    let tile_size = config.tile_size.min(width).min(height);
 
-    let mut tile_grid = TileGrid::new_uninit(width, height, config.tile_size);
+    let mut tile_grid = TileGrid::new_uninit(width, height, tile_size);
     let mut mask = pool.acquire_bit();
     let mut scratch = pool.acquire_bit();
 

@@ -7,16 +7,8 @@ use common::Buffer2;
 use common::Vec2us;
 use rayon::prelude::*;
 
-// ============================================================================
-// Constants
-// ============================================================================
-
 /// Maximum samples per tile for statistics computation.
 const MAX_TILE_SAMPLES: usize = 1024;
-
-// ============================================================================
-// Types
-// ============================================================================
 
 /// Tile statistics computed during background estimation.
 #[derive(Clone, Copy, Debug, Default)]
@@ -39,10 +31,6 @@ pub(super) struct TileGrid {
     tile_size: usize,
     dimensions: Vec2us,
 }
-
-// ============================================================================
-// TileGrid implementation
-// ============================================================================
 
 impl TileGrid {
     /// Create an uninitialized TileGrid with preallocated buffers.
@@ -87,10 +75,6 @@ impl TileGrid {
         self.compute_y_spline_derivatives();
     }
 
-    // ------------------------------------------------------------------------
-    // Accessors
-    // ------------------------------------------------------------------------
-
     #[inline]
     pub fn get(&self, tx: usize, ty: usize) -> TileStats {
         self.stats[(tx, ty)]
@@ -134,10 +118,8 @@ impl TileGrid {
     /// Find the tile index whose center is at or before the given Y position.
     #[inline]
     pub fn find_lower_tile_y(&self, pos: f32) -> usize {
+        // tiles_y >= 1 always (the grid is built from an image with at least one tile row).
         let tiles_y = self.tiles_y();
-        if tiles_y == 0 {
-            return 0;
-        }
 
         // Binary search for largest tile index with center <= pos
         let mut lo = 0;
@@ -152,10 +134,6 @@ impl TileGrid {
         }
         lo.saturating_sub(1)
     }
-
-    // ------------------------------------------------------------------------
-    // Statistics computation
-    // ------------------------------------------------------------------------
 
     fn fill_tile_stats(
         &mut self,
@@ -290,10 +268,6 @@ impl TileGrid {
     }
 }
 
-// ============================================================================
-// Natural cubic spline helpers
-// ============================================================================
-
 /// Evaluate natural cubic spline between two nodes.
 ///
 /// Given function values `f0`, `f1` and second derivatives `d0`, `d1` at the
@@ -396,10 +370,6 @@ pub(super) fn solve_natural_spline_d2(
     d2[0] = 0.0;
     d2[n - 1] = 0.0;
 }
-
-// ============================================================================
-// Pixel collection helpers
-// ============================================================================
 
 /// Compute sigma-clipped statistics for a tile region.
 ///
@@ -552,7 +522,12 @@ fn collect_unmasked_pixels(
     }
 }
 
-/// Subsample a vector in place to approximately target_size elements.
+/// Subsample a vector in place to exactly `target_size` elements, evenly spread across the input.
+///
+/// Picks `read_idx = i * len / target_size` so the kept samples span the whole tile rather than its
+/// first rows (an integer `len / target_size` stride collapses to 1 for `len` just above the target,
+/// keeping only the leading run). `read_idx >= write_idx` always (since `len > target_size`), so the
+/// in-place overwrite never clobbers an unread element.
 #[inline]
 fn subsample_in_place(values: &mut Vec<f32>, target_size: usize) {
     let len = values.len();
@@ -560,23 +535,13 @@ fn subsample_in_place(values: &mut Vec<f32>, target_size: usize) {
         return;
     }
 
-    let stride = len / target_size;
-    let mut write_idx = 0;
-
-    for read_idx in (0..len).step_by(stride) {
+    for write_idx in 0..target_size {
+        let read_idx = write_idx * len / target_size;
         values[write_idx] = values[read_idx];
-        write_idx += 1;
-        if write_idx >= target_size {
-            break;
-        }
     }
 
-    values.truncate(write_idx);
+    values.truncate(target_size);
 }
-
-// ============================================================================
-// Tests
-// ============================================================================
 
 #[cfg(test)]
 mod tests {

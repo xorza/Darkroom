@@ -29,7 +29,6 @@ fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {
         // Background
         sigma_threshold: 4.0,
         bg_mask_dilation: 3,
-        min_unmasked_fraction: 0.3,
         tile_size: 64,
         sigma_clip_iterations: 5,
         refinement: BackgroundRefinement::Iterative { iterations: 2 },

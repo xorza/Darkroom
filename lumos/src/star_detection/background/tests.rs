@@ -32,6 +32,28 @@ fn test_uniform_background() {
 }
 
 #[test]
+fn test_small_image_below_tile_size_does_not_panic() {
+    // A tile_size larger than the image must clamp to the image (a single tile) rather than panic;
+    // a uniform image then yields a uniform background at the pixel value.
+    let pixels = Buffer2::new(20, 20, vec![0.7; 20 * 20]);
+
+    let bg = crate::testing::estimate_background(
+        &pixels,
+        &Config {
+            tile_size: 64, // larger than the 20x20 image → clamped to the image
+            ..Default::default()
+        },
+    );
+
+    for &val in bg.background.pixels() {
+        assert!(
+            (val - 0.7).abs() < 1e-4,
+            "expected uniform background 0.7, got {val}"
+        );
+    }
+}
+
+#[test]
 fn test_gradient_background() {
     let width = 128;
     let height = 128;
@@ -259,19 +281,6 @@ fn test_tile_size_too_large() {
     config.validate();
 }
 
-#[test]
-#[should_panic(expected = "Image must be at least tile_size x tile_size")]
-fn test_image_too_small() {
-    let pixels = Buffer2::new(32, 32, vec![0.5; 32 * 32]);
-    crate::testing::estimate_background(
-        &pixels,
-        &Config {
-            tile_size: 64,
-            ..Default::default()
-        },
-    );
-}
-
 // =============================================================================
 // Edge Case Tests
 // =============================================================================
@@ -459,7 +468,6 @@ fn test_iterative_background_with_bright_stars() {
         sigma_threshold: 3.0,
         refinement: BackgroundRefinement::Iterative { iterations: 2 },
         bg_mask_dilation: 5,
-        min_unmasked_fraction: 0.3,
         tile_size: 32,
         sigma_clip_iterations: 2,
 
@@ -550,7 +558,6 @@ fn test_iterative_background_no_dilation() {
         sigma_threshold: 3.0,
         refinement: BackgroundRefinement::Iterative { iterations: 1 },
         bg_mask_dilation: 0, // No dilation
-        min_unmasked_fraction: 0.3,
         tile_size: 32,
         sigma_clip_iterations: 2,
 
@@ -574,7 +581,6 @@ fn test_iterative_background_config_default() {
     assert!((config.sigma_threshold - 4.0).abs() < 1e-6);
     assert!(matches!(config.refinement, BackgroundRefinement::None));
     assert_eq!(config.bg_mask_dilation, 3);
-    assert!((config.min_unmasked_fraction - 0.3).abs() < 1e-6);
 }
 
 #[test]
