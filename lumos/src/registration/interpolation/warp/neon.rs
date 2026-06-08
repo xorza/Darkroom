@@ -10,7 +10,7 @@
 use std::arch::aarch64::*;
 
 use common::Buffer2;
-use glam::{DVec2, Vec2};
+use glam::{DVec2, IVec2, Vec2};
 
 use super::super::sample_pixel;
 use super::SoftClampAccum;
@@ -28,8 +28,7 @@ pub unsafe fn warp_row_bilinear_neon(
 ) {
     unsafe {
         let pixels = input.pixels();
-        let input_width = input.width();
-        let input_height = input.height();
+        let dims = input.dimensions();
         let output_width = output_row.len();
         let y = output_y as f32;
 
@@ -81,10 +80,10 @@ pub unsafe fn warp_row_bilinear_neon(
             for i in 0..4 {
                 let ix0 = x0_arr[i] as i32;
                 let iy0 = y0_arr[i] as i32;
-                p00[i] = sample_pixel(pixels, input_width, input_height, ix0, iy0, 0.0);
-                p10[i] = sample_pixel(pixels, input_width, input_height, ix0 + 1, iy0, 0.0);
-                p01[i] = sample_pixel(pixels, input_width, input_height, ix0, iy0 + 1, 0.0);
-                p11[i] = sample_pixel(pixels, input_width, input_height, ix0 + 1, iy0 + 1, 0.0);
+                p00[i] = sample_pixel(pixels, dims, IVec2::new(ix0, iy0), 0.0);
+                p10[i] = sample_pixel(pixels, dims, IVec2::new(ix0 + 1, iy0), 0.0);
+                p01[i] = sample_pixel(pixels, dims, IVec2::new(ix0, iy0 + 1), 0.0);
+                p11[i] = sample_pixel(pixels, dims, IVec2::new(ix0 + 1, iy0 + 1), 0.0);
             }
             let p00v = vld1q_f32(p00.as_ptr());
             let p10v = vld1q_f32(p10.as_ptr());

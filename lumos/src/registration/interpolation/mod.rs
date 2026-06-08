@@ -11,8 +11,8 @@ use rayon::prelude::*;
 
 use crate::registration::config::InterpolationMethod;
 use crate::registration::transform::WarpTransform;
-use common::Buffer2;
-use glam::Vec2;
+use common::{Buffer2, Vec2us};
+use glam::{IVec2, Vec2};
 
 /// Bundled warp parameters passed through the interpolation pipeline.
 #[derive(Debug, Clone, Copy)]
@@ -140,18 +140,11 @@ fn bicubic_weights(f: f32) -> [f32; 4] {
 
 /// Sample a pixel with bounds checking. Returns `border_value` for out-of-bounds coordinates.
 #[inline]
-pub(super) fn sample_pixel(
-    data: &[f32],
-    width: usize,
-    height: usize,
-    x: i32,
-    y: i32,
-    border_value: f32,
-) -> f32 {
-    if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
+pub(super) fn sample_pixel(data: &[f32], dims: Vec2us, coord: IVec2, border_value: f32) -> f32 {
+    if coord.x < 0 || coord.y < 0 || coord.x >= dims.x as i32 || coord.y >= dims.y as i32 {
         border_value
     } else {
-        data[y as usize * width + x as usize]
+        data[coord.y as usize * dims.x + coord.x as usize]
     }
 }
 
@@ -159,10 +152,8 @@ pub(super) fn sample_pixel(
 fn interpolate_nearest(data: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
     sample_pixel(
         data.pixels(),
-        data.width(),
-        data.height(),
-        pos.x.round() as i32,
-        pos.y.round() as i32,
+        data.dimensions(),
+        IVec2::new(pos.x.round() as i32, pos.y.round() as i32),
         border_value,
     )
 }
@@ -175,11 +166,11 @@ fn interpolate_bilinear(data: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f3
     let fx = x - x0 as f32;
     let fy = y - y0 as f32;
 
-    let (pixels, w, h) = (data.pixels(), data.width(), data.height());
-    let p00 = sample_pixel(pixels, w, h, x0, y0, border_value);
-    let p10 = sample_pixel(pixels, w, h, x0 + 1, y0, border_value);
-    let p01 = sample_pixel(pixels, w, h, x0, y0 + 1, border_value);
-    let p11 = sample_pixel(pixels, w, h, x0 + 1, y0 + 1, border_value);
+    let (pixels, dims) = (data.pixels(), data.dimensions());
+    let p00 = sample_pixel(pixels, dims, IVec2::new(x0, y0), border_value);
+    let p10 = sample_pixel(pixels, dims, IVec2::new(x0 + 1, y0), border_value);
+    let p01 = sample_pixel(pixels, dims, IVec2::new(x0, y0 + 1), border_value);
+    let p11 = sample_pixel(pixels, dims, IVec2::new(x0 + 1, y0 + 1), border_value);
 
     let top = p00 + fx * (p10 - p00);
     let bottom = p01 + fx * (p11 - p01);

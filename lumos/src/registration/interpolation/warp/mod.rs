@@ -23,7 +23,7 @@ use crate::registration::interpolation::WarpParams;
 use crate::registration::interpolation::get_lanczos_lut;
 use crate::registration::transform::WarpTransform;
 use common::Buffer2;
-use glam::{DVec2, Vec2};
+use glam::{DVec2, IVec2, Vec2};
 
 /// Fast inline floor-to-i32, avoiding libc `floorf` function call.
 ///
@@ -150,18 +150,17 @@ use super::sample_pixel;
 pub(crate) fn bilinear_sample(input: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
     let (x, y) = (pos.x, pos.y);
     let pixels = input.pixels();
-    let width = input.width();
-    let height = input.height();
+    let dims = input.dimensions();
 
     let x0 = fast_floor_i32(x);
     let y0 = fast_floor_i32(y);
     let fx = x - x0 as f32;
     let fy = y - y0 as f32;
 
-    let p00 = sample_pixel(pixels, width, height, x0, y0, border_value);
-    let p10 = sample_pixel(pixels, width, height, x0 + 1, y0, border_value);
-    let p01 = sample_pixel(pixels, width, height, x0, y0 + 1, border_value);
-    let p11 = sample_pixel(pixels, width, height, x0 + 1, y0 + 1, border_value);
+    let p00 = sample_pixel(pixels, dims, IVec2::new(x0, y0), border_value);
+    let p10 = sample_pixel(pixels, dims, IVec2::new(x0 + 1, y0), border_value);
+    let p01 = sample_pixel(pixels, dims, IVec2::new(x0, y0 + 1), border_value);
+    let p11 = sample_pixel(pixels, dims, IVec2::new(x0 + 1, y0 + 1), border_value);
 
     let top = p00 + fx * (p10 - p00);
     let bottom = p01 + fx * (p11 - p01);

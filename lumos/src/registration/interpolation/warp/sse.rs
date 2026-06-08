@@ -3,7 +3,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use common::Buffer2;
-use glam::{DVec2, Vec2};
+use glam::{DVec2, IVec2, Vec2};
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
@@ -25,8 +25,7 @@ pub unsafe fn warp_row_bilinear_avx2(
     transform: &Transform,
 ) {
     let pixels = input.pixels();
-    let input_width = input.width();
-    let input_height = input.height();
+    let dims = input.dimensions();
 
     unsafe {
         let output_width = output_row.len();
@@ -120,10 +119,10 @@ pub unsafe fn warp_row_bilinear_avx2(
                 let ix1 = x1_arr[i] as i32;
                 let iy1 = y1_arr[i] as i32;
 
-                p00[i] = sample_pixel(pixels, input_width, input_height, ix0, iy0, 0.0);
-                p10[i] = sample_pixel(pixels, input_width, input_height, ix1, iy0, 0.0);
-                p01[i] = sample_pixel(pixels, input_width, input_height, ix0, iy1, 0.0);
-                p11[i] = sample_pixel(pixels, input_width, input_height, ix1, iy1, 0.0);
+                p00[i] = sample_pixel(pixels, dims, IVec2::new(ix0, iy0), 0.0);
+                p10[i] = sample_pixel(pixels, dims, IVec2::new(ix1, iy0), 0.0);
+                p01[i] = sample_pixel(pixels, dims, IVec2::new(ix0, iy1), 0.0);
+                p11[i] = sample_pixel(pixels, dims, IVec2::new(ix1, iy1), 0.0);
             }
 
             let p00_vec = _mm256_loadu_ps(p00.as_ptr());
@@ -168,8 +167,7 @@ pub unsafe fn warp_row_bilinear_sse(
     transform: &Transform,
 ) {
     let pixels = input.pixels();
-    let input_width = input.width();
-    let input_height = input.height();
+    let dims = input.dimensions();
 
     unsafe {
         let output_width = output_row.len();
@@ -249,10 +247,10 @@ pub unsafe fn warp_row_bilinear_sse(
                 let ix1 = ix0 + 1;
                 let iy1 = iy0 + 1;
 
-                p00[i] = sample_pixel(pixels, input_width, input_height, ix0, iy0, 0.0);
-                p10[i] = sample_pixel(pixels, input_width, input_height, ix1, iy0, 0.0);
-                p01[i] = sample_pixel(pixels, input_width, input_height, ix0, iy1, 0.0);
-                p11[i] = sample_pixel(pixels, input_width, input_height, ix1, iy1, 0.0);
+                p00[i] = sample_pixel(pixels, dims, IVec2::new(ix0, iy0), 0.0);
+                p10[i] = sample_pixel(pixels, dims, IVec2::new(ix1, iy0), 0.0);
+                p01[i] = sample_pixel(pixels, dims, IVec2::new(ix0, iy1), 0.0);
+                p11[i] = sample_pixel(pixels, dims, IVec2::new(ix1, iy1), 0.0);
             }
 
             let p00_vec = _mm_loadu_ps(p00.as_ptr());

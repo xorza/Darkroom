@@ -2,8 +2,8 @@ use std::f32::consts::PI;
 
 use super::*;
 use crate::registration::transform::{Transform, WarpTransform};
-use common::Buffer2;
-use glam::{DVec2, Vec2};
+use common::{Buffer2, Vec2us};
+use glam::{DVec2, IVec2, Vec2};
 
 /// Shorthand for tests: interpolate with a method and default border/clamp settings.
 fn interp(data: &Buffer2<f32>, x: f32, y: f32, method: InterpolationMethod) -> f32 {
@@ -212,24 +212,26 @@ fn test_bicubic_kernel_continuity_at_one() {
 fn test_sample_pixel_in_bounds() {
     // 3x2 image: [[10, 20, 30], [40, 50, 60]]
     let data = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0];
-    assert_eq!(sample_pixel(&data, 3, 2, 0, 0, -1.0), 10.0);
-    assert_eq!(sample_pixel(&data, 3, 2, 1, 0, -1.0), 20.0);
-    assert_eq!(sample_pixel(&data, 3, 2, 2, 0, -1.0), 30.0);
-    assert_eq!(sample_pixel(&data, 3, 2, 0, 1, -1.0), 40.0);
-    assert_eq!(sample_pixel(&data, 3, 2, 2, 1, -1.0), 60.0);
+    let dims = Vec2us::new(3, 2);
+    assert_eq!(sample_pixel(&data, dims, IVec2::new(0, 0), -1.0), 10.0);
+    assert_eq!(sample_pixel(&data, dims, IVec2::new(1, 0), -1.0), 20.0);
+    assert_eq!(sample_pixel(&data, dims, IVec2::new(2, 0), -1.0), 30.0);
+    assert_eq!(sample_pixel(&data, dims, IVec2::new(0, 1), -1.0), 40.0);
+    assert_eq!(sample_pixel(&data, dims, IVec2::new(2, 1), -1.0), 60.0);
 }
 
 #[test]
 fn test_sample_pixel_out_of_bounds() {
     let data = [10.0, 20.0, 30.0, 40.0];
     let bv = -999.0;
+    let dims = Vec2us::new(2, 2);
     // Negative coordinates
-    assert_eq!(sample_pixel(&data, 2, 2, -1, 0, bv), bv);
-    assert_eq!(sample_pixel(&data, 2, 2, 0, -1, bv), bv);
+    assert_eq!(sample_pixel(&data, dims, IVec2::new(-1, 0), bv), bv);
+    assert_eq!(sample_pixel(&data, dims, IVec2::new(0, -1), bv), bv);
     // Beyond width/height
-    assert_eq!(sample_pixel(&data, 2, 2, 2, 0, bv), bv);
-    assert_eq!(sample_pixel(&data, 2, 2, 0, 2, bv), bv);
-    assert_eq!(sample_pixel(&data, 2, 2, 100, 100, bv), bv);
+    assert_eq!(sample_pixel(&data, dims, IVec2::new(2, 0), bv), bv);
+    assert_eq!(sample_pixel(&data, dims, IVec2::new(0, 2), bv), bv);
+    assert_eq!(sample_pixel(&data, dims, IVec2::new(100, 100), bv), bv);
 }
 
 // ============================================================================
