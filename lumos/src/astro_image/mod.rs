@@ -14,10 +14,6 @@ use std::path::Path;
 use common::Buffer2;
 use common::Vec2us;
 
-// ============================================================================
-// BitPix - FITS pixel data types
-// ============================================================================
-
 /// FITS BITPIX values representing pixel data types.
 ///
 /// FITS natively supports only signed integers. Unsigned integers use the
@@ -52,10 +48,6 @@ impl BitPix {
         }
     }
 }
-
-// ============================================================================
-// ImageDimensions
-// ============================================================================
 
 /// Image dimensions: pixel size and number of channels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -98,10 +90,6 @@ impl ImageDimensions {
         self.channels == 3
     }
 }
-
-// ============================================================================
-// AstroImageMetadata
-// ============================================================================
 
 /// Metadata extracted from FITS file headers or RAW EXIF.
 #[derive(Debug, Clone, Default)]
@@ -150,10 +138,6 @@ pub struct AstroImageMetadata {
     /// Maximum valid pixel value (saturation level).
     pub data_max: Option<f64>,
 }
-
-// ============================================================================
-// PixelData
-// ============================================================================
 
 /// Pixel data storage - planar format for efficient per-channel operations.
 #[derive(Debug, Clone)]
@@ -215,10 +199,6 @@ impl PixelData {
         }
     }
 }
-
-// ============================================================================
-// AstroImage
-// ============================================================================
 
 /// Represents an astronomical image.
 #[derive(Debug, Clone)]
@@ -372,11 +352,11 @@ impl AstroImage {
     }
 
     pub fn is_grayscale(&self) -> bool {
-        matches!(self.pixels, PixelData::L(_))
+        self.dimensions.is_grayscale()
     }
 
     pub fn is_rgb(&self) -> bool {
-        matches!(self.pixels, PixelData::Rgb(_))
+        self.dimensions.is_rgb()
     }
 
     // ------------------------------------------------------------------------
@@ -422,16 +402,12 @@ impl AstroImage {
 
     /// Save to file (PNG, JPEG, TIFF supported).
     pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<(), ImageError> {
-        let image: Image = self.clone().into();
+        let image: Image = self.into();
         image
             .save_file(path)
             .map_err(|source| ImageError::Save { source })
     }
 }
-
-// ============================================================================
-// StackableImage implementation
-// ============================================================================
 
 impl crate::stacking::cache::StackableImage for AstroImage {
     fn dimensions(&self) -> ImageDimensions {
@@ -475,10 +451,6 @@ impl crate::stacking::cache::StackableImage for AstroImage {
     }
 }
 
-// ============================================================================
-// Arithmetic operators
-// ============================================================================
-
 impl SubAssign<&AstroImage> for AstroImage {
     fn sub_assign(&mut self, rhs: &AstroImage) {
         assert_eq!(self.dimensions, rhs.dimensions, "Image dimensions mismatch");
@@ -497,27 +469,37 @@ impl SubAssign<&AstroImage> for AstroImage {
     }
 }
 
-// ============================================================================
-// From implementations
-// ============================================================================
-
-impl From<AstroImage> for Image {
-    fn from(astro: AstroImage) -> Self {
+impl From<&AstroImage> for Image {
+    fn from(astro: &AstroImage) -> Self {
         let width = astro.dimensions.size.x;
         let height = astro.dimensions.size.y;
 
-        let (color_format, interleaved) = match astro.pixels {
-            PixelData::L(data) => (ColorFormat::L_F32, data.into_vec()),
+        // Build the byte buffer directly from the channel planes — one copy. (`save` takes `&self`,
+        // so going through `&AstroImage` avoids cloning the whole image, which for an RGB master is
+        // ~3× the largest allocation in the pipeline.)
+        let (color_format, bytes): (ColorFormat, Vec<u8>) = match &astro.pixels {
+            PixelData::L(data) => (
+                ColorFormat::L_F32,
+                bytemuck::cast_slice(data.pixels()).to_vec(),
+            ),
             PixelData::Rgb([r, g, b]) => {
                 let mut interleaved = vec![0.0f32; r.len() * 3];
-                interleave_rgb(&r, &g, &b, &mut interleaved);
-                (ColorFormat::RGB_F32, interleaved)
+                interleave_rgb(r, g, b, &mut interleaved);
+                (
+                    ColorFormat::RGB_F32,
+                    bytemuck::cast_slice(&interleaved).to_vec(),
+                )
             }
         };
 
         let desc = ImageDesc::new_with_stride(width, height, color_format);
-        let bytes: Vec<u8> = bytemuck::cast_slice(&interleaved).to_vec();
         Image::new_with_data(desc, bytes).expect("Failed to create Image")
+    }
+}
+
+impl From<AstroImage> for Image {
+    fn from(astro: AstroImage) -> Self {
+        Image::from(&astro)
     }
 }
 
@@ -601,10 +583,6 @@ impl From<Image> for AstroImage {
         }
     }
 }
-
-// ============================================================================
-// Private helper functions
-// ============================================================================
 
 /// Deinterleave RGB data (RGBRGB...) into separate R, G, B planes.
 fn deinterleave_rgb(interleaved: &[f32], r: &mut [f32], g: &mut [f32], b: &mut [f32]) {
