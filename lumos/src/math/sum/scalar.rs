@@ -1,8 +1,9 @@
 //! Scalar (non-SIMD) implementations of sum operations.
 
-/// Neumaier compensated addition.
+/// Neumaier compensated addition. Single source of truth for the compensation step — the SIMD
+/// backends call this for their lane-reduction and scalar-remainder tails.
 #[inline]
-fn neumaier_add(sum: &mut f32, c: &mut f32, v: f32) {
+pub(super) fn neumaier_add(sum: &mut f32, c: &mut f32, v: f32) {
     let t = *sum + v;
     if sum.abs() >= v.abs() {
         *c += (*sum - t) + v;

@@ -42,7 +42,9 @@ pub fn mean_f32(values: &[f32]) -> f32 {
 /// Uses Kahan compensated summation (SIMD) or Neumaier (scalar) for both numerator
 /// and denominator. Returns 0.0 if the total weight is near zero.
 pub fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
-    debug_assert_eq!(
+    // Release assert, not debug: the SIMD backends walk `weights` through a raw pointer, so a
+    // shorter `weights` is an out-of-bounds read (UB) in release, not a recoverable error.
+    assert_eq!(
         values.len(),
         weights.len(),
         "values and weights must have the same length"

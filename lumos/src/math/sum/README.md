@@ -8,7 +8,7 @@ Vector sum and accumulation operations with SIMD acceleration.
 |----------|-------------|------|
 | `sum_f32` | Sum all elements | AVX2, SSE4.1, NEON |
 | `mean_f32` | Arithmetic mean (uses `sum_f32`) | via sum |
-| `weighted_mean_f32` | Weighted mean | scalar only |
+| `weighted_mean_f32` | Weighted mean | AVX2, SSE4.1, NEON |
 
 ## SIMD Implementation
 

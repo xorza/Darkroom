@@ -475,3 +475,13 @@ fn test_weighted_mean_simd_catastrophic_cancellation() {
         "simd={simd_result}, f64_ref={f64_ref:.6}"
     );
 }
+
+#[test]
+#[should_panic(expected = "must have the same length")]
+fn test_weighted_mean_length_mismatch_panics() {
+    // The SIMD kernels walk `weights` by raw pointer, so a shorter `weights` is UB in release —
+    // the length precondition is a release assert, not debug. Verify it fires.
+    let values = [1.0f32, 2.0, 3.0, 4.0, 5.0];
+    let weights = [1.0f32, 1.0, 1.0];
+    let _ = weighted_mean_f32(&values, &weights);
+}

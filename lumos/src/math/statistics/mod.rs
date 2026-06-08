@@ -250,12 +250,17 @@ pub fn sigma_clipped_median_mad_arrayvec<const N: usize>(
     if values.is_empty() {
         return (0.0, 0.0);
     }
+    assert!(
+        values.len() <= N,
+        "sigma_clipped_median_mad_arrayvec: values.len()={} exceeds deviations capacity N={N}",
+        values.len()
+    );
 
     let mut len = values.len();
 
-    // Ensure deviations buffer is sized correctly
+    // Ensure deviations buffer is sized correctly (len ≤ N, asserted above).
     deviations.clear();
-    deviations.extend(std::iter::repeat_n(0.0f32, len.min(N)));
+    deviations.extend(std::iter::repeat_n(0.0f32, len));
 
     for _ in 0..iterations {
         match sigma_clip_iteration(values, &mut len, deviations.as_mut_slice(), kappa) {

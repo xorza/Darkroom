@@ -365,6 +365,16 @@ fn test_sigma_clipped_arrayvec_basic() {
 }
 
 #[test]
+#[should_panic(expected = "exceeds deviations capacity")]
+fn test_sigma_clipped_arrayvec_overflow_panics() {
+    // values.len() (5) > N (3): the scratch can't hold the deviations. Verify the explicit
+    // capacity assert fires instead of an opaque out-of-bounds panic deeper in.
+    let mut values = vec![1.0f32, 2.0, 3.0, 4.0, 5.0];
+    let mut deviations: arrayvec::ArrayVec<f32, 3> = arrayvec::ArrayVec::new();
+    let _ = sigma_clipped_median_mad_arrayvec(&mut values, &mut deviations, 3.0, 2);
+}
+
+#[test]
 fn test_sigma_clipped_arrayvec_empty() {
     let mut values: Vec<f32> = vec![];
     let mut deviations: arrayvec::ArrayVec<f32, 16> = arrayvec::ArrayVec::new();

@@ -5,29 +5,17 @@
 //! - [`sum`]: Sum, accumulate, and scale operations
 //! - [`statistics`]: Median, MAD, and sigma-clipped statistics
 
-// =============================================================================
-// Submodules
-// =============================================================================
-
 pub(crate) mod bbox;
 pub(crate) mod dmat3;
 
 pub mod statistics;
 pub mod sum;
 
-// =============================================================================
-// Constants
-// =============================================================================
-
 /// FWHM to Gaussian sigma conversion factor.
 ///
 /// For a Gaussian distribution, FWHM = 2√(2ln2) × σ ≈ 2.3548 × σ.
 /// This is the exact value: 2 * sqrt(2 * ln(2)).
 pub const FWHM_TO_SIGMA: f32 = 2.354_82;
-
-// =============================================================================
-// Unit Conversion Functions
-// =============================================================================
 
 /// Convert FWHM to Gaussian sigma.
 #[inline]
@@ -40,10 +28,6 @@ pub fn fwhm_to_sigma(fwhm: f32) -> f32 {
 pub fn sigma_to_fwhm(sigma: f32) -> f32 {
     sigma * FWHM_TO_SIGMA
 }
-
-// =============================================================================
-// Tests
-// =============================================================================
 
 #[cfg(test)]
 mod tests {

@@ -2,6 +2,8 @@
 
 use std::arch::x86_64::*;
 
+use super::scalar::neumaier_add;
+
 /// Sum f32 values using SSE4.1 SIMD with Kahan compensated summation.
 ///
 /// # Safety
@@ -23,43 +25,10 @@ pub unsafe fn sum_f32(values: &[f32]) -> f32 {
             sum_vec = t;
         }
 
-        // Reduce sum and compensation lanes separately to preserve precision.
-        let mut s_arr = [0.0f32; 4];
-        let mut c_arr = [0.0f32; 4];
-        _mm_storeu_ps(s_arr.as_mut_ptr(), sum_vec);
-        _mm_storeu_ps(c_arr.as_mut_ptr(), c_vec);
+        let (mut s, mut c) = reduce_kahan_128(sum_vec, c_vec);
 
-        let mut s = 0.0f32;
-        let mut c = 0.0f32;
-        for i in 0..4 {
-            // Add lane sum with Neumaier
-            let t = s + s_arr[i];
-            if s.abs() >= s_arr[i].abs() {
-                c += (s - t) + s_arr[i];
-            } else {
-                c += (s_arr[i] - t) + s;
-            }
-            s = t;
-            // Add lane compensation (subtract since Kahan c tracks error to subtract)
-            let ci = -c_arr[i];
-            let t = s + ci;
-            if s.abs() >= ci.abs() {
-                c += (s - t) + ci;
-            } else {
-                c += (ci - t) + s;
-            }
-            s = t;
-        }
-
-        // Neumaier for remainder elements
         for &v in remainder {
-            let t = s + v;
-            if s.abs() >= v.abs() {
-                c += (s - t) + v;
-            } else {
-                c += (v - t) + s;
-            }
-            s = t;
+            neumaier_add(&mut s, &mut c, v);
         }
 
         s + c
@@ -79,21 +48,8 @@ unsafe fn reduce_kahan_128(sum_vec: __m128, c_vec: __m128) -> (f32, f32) {
     let mut s = 0.0f32;
     let mut c = 0.0f32;
     for i in 0..4 {
-        let t = s + s_arr[i];
-        if s.abs() >= s_arr[i].abs() {
-            c += (s - t) + s_arr[i];
-        } else {
-            c += (s_arr[i] - t) + s;
-        }
-        s = t;
-        let ci = -c_arr[i];
-        let t = s + ci;
-        if s.abs() >= ci.abs() {
-            c += (s - t) + ci;
-        } else {
-            c += (ci - t) + s;
-        }
-        s = t;
+        neumaier_add(&mut s, &mut c, s_arr[i]);
+        neumaier_add(&mut s, &mut c, -c_arr[i]);
     }
     (s, c)
 }
@@ -137,22 +93,8 @@ pub unsafe fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
 
         let w_rem = &weights[values.len() - v_rem.len()..];
         for (&v, &w) in v_rem.iter().zip(w_rem.iter()) {
-            let vw = v * w;
-            let t = s_vw + vw;
-            if s_vw.abs() >= vw.abs() {
-                c_s_vw += (s_vw - t) + vw;
-            } else {
-                c_s_vw += (vw - t) + s_vw;
-            }
-            s_vw = t;
-
-            let t = s_w + w;
-            if s_w.abs() >= w.abs() {
-                c_s_w += (s_w - t) + w;
-            } else {
-                c_s_w += (w - t) + s_w;
-            }
-            s_w = t;
+            neumaier_add(&mut s_vw, &mut c_s_vw, v * w);
+            neumaier_add(&mut s_w, &mut c_s_w, w);
         }
 
         let total = s_vw + c_s_vw;

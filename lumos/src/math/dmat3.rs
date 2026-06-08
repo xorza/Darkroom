@@ -123,7 +123,7 @@ impl DMat3 {
     /// y' = (m[3]*x + m[4]*y + m[5]) / w
     /// ```
     ///
-    /// # Panics (debug)
+    /// # Panics
     /// Panics if `w` is near zero (point at infinity).
     #[inline]
     pub fn transform_point(&self, p: DVec2) -> DVec2 {
@@ -156,10 +156,6 @@ impl DMat3 {
             .sqrt()
     }
 }
-
-// ---------------------------------------------------------------------------
-// Trait implementations
-// ---------------------------------------------------------------------------
 
 impl Default for DMat3 {
     #[inline]
@@ -243,10 +239,6 @@ impl DMat3 {
         &mut self.data
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -470,6 +462,14 @@ mod tests {
         // w = 0.001 * 100 + 1 = 1.1
         assert!((p.x - 90.909).abs() < 0.01);
         assert!(approx_eq(p.y, 0.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "point at infinity")]
+    fn test_transform_point_at_infinity_panics() {
+        // Bottom row [1, 0, -5] gives w = x - 5; at x = 5, w = 0 (point at infinity).
+        let m = DMat3::from_array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, -5.0]);
+        let _ = m.transform_point(DVec2::new(5.0, 0.0));
     }
 
     #[test]
