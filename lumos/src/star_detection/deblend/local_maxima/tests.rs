@@ -1,6 +1,8 @@
 //! Tests for local maxima deblending.
 
 use super::*;
+use crate::math::bbox::Aabb;
+use crate::star_detection::deblend::assign_to_nearest_peak;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::test_utils::label_map_from_raw;
 use common::Vec2us;
@@ -144,7 +146,7 @@ fn test_deblend_empty_peaks() {
     let (pixels, labels, data) = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
     let empty_peaks: &[Pixel] = &[];
 
-    let candidates = deblend_by_nearest_peak(&data, &pixels, &labels, empty_peaks);
+    let candidates = assign_to_nearest_peak(&data, &pixels, &labels, empty_peaks);
     assert!(
         candidates.is_empty(),
         "Empty peaks should return empty result"
@@ -305,7 +307,7 @@ fn test_voronoi_partitioning() {
         },
     ];
 
-    let candidates = deblend_by_nearest_peak(&data, &pixels, &labels, &peaks);
+    let candidates = assign_to_nearest_peak(&data, &pixels, &labels, &peaks);
 
     assert_eq!(candidates.len(), 2);
     // Each candidate should have its peak inside its bounding box
@@ -435,7 +437,7 @@ fn test_voronoi_midpoint_assignment() {
         },
     ];
 
-    let candidates = deblend_by_nearest_peak(&data, &pixels, &labels, &peaks);
+    let candidates = assign_to_nearest_peak(&data, &pixels, &labels, &peaks);
 
     assert_eq!(candidates.len(), 2);
     // Total area should be conserved

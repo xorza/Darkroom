@@ -5,6 +5,7 @@ use super::local_maxima::deblend_local_maxima;
 use super::multi_threshold::{DeblendBuffers, deblend_multi_threshold};
 use super::region::Region;
 use super::*;
+use crate::math::bbox::Aabb;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::test_utils::label_map_from_raw;
 use common::Buffer2;

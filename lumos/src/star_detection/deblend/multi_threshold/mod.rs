@@ -13,7 +13,6 @@ use smallvec::SmallVec;
 
 use super::region::Region;
 use super::{ComponentData, MAX_PEAKS, Pixel};
-use crate::math::bbox::Aabb;
 use crate::star_detection::labeling::LabelMap;
 use common::Buffer2;
 use common::Vec2us;
@@ -24,19 +23,11 @@ mod tests;
 #[cfg(test)]
 mod bench;
 
-// ============================================================================
-// Constants
-// ============================================================================
-
 /// Maximum children per node (same as MAX_PEAKS since each child becomes a candidate).
 const MAX_CHILDREN: usize = MAX_PEAKS;
 
 /// Sentinel value indicating no pixel value at grid position.
 const NO_PIXEL: f32 = f32::NEG_INFINITY;
-
-// ============================================================================
-// Types
-// ============================================================================
 
 /// Grid-based pixel lookup for fast neighbor access during connected component finding.
 ///
@@ -360,10 +351,6 @@ impl DeblendBuffers {
     }
 }
 
-// ============================================================================
-// Public API
-// ============================================================================
-
 /// Multi-threshold deblending with caller-provided reusable buffers.
 ///
 /// Buffers are reused across threshold levels within a single component, and
@@ -441,10 +428,6 @@ pub(crate) fn deblend_multi_threshold(
     // Assign all pixels to nearest leaf peak
     assign_pixels_to_objects(data, pixels, labels, &tree, &leaves)
 }
-
-// ============================================================================
-// Tree Building
-// ============================================================================
 
 /// Number of consecutive levels without splits before early termination.
 /// Once all regions have stabilized (no further splits), continuing is unlikely
@@ -722,10 +705,6 @@ fn create_child_nodes(
     tree[parent_idx].children = child_indices.into_iter().collect();
 }
 
-// ============================================================================
-// Tree Analysis
-// ============================================================================
-
 /// Maximum expected tree size for stack allocation.
 /// Trees are small: O(n_thresholds * MAX_PEAKS) but practically much smaller
 /// since most components don't split at every level.
@@ -839,11 +818,8 @@ fn collect_significant_leaves(
     }
 }
 
-// ============================================================================
-// Pixel Assignment
-// ============================================================================
-
-/// Assign pixels to their nearest object (based on peak positions).
+/// Assign pixels to their nearest object using the leaf peak positions, then build one `Region` per
+/// occupied peak. Delegates the Voronoi assignment to the shared `assign_to_nearest_peak`.
 fn assign_pixels_to_objects(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
@@ -855,61 +831,16 @@ fn assign_pixels_to_objects(
         return smallvec::smallvec![create_single_object(data, pixels, labels)];
     }
 
-    // Get peak positions for each leaf (stack allocated)
     let peaks: ArrayVec<Pixel, MAX_PEAKS> = leaf_indices
         .iter()
         .take(MAX_PEAKS)
         .map(|&i| tree[i].peak)
         .collect();
 
-    // Initialize objects (stack allocated)
-    let mut objects: SmallVec<[Region; MAX_PEAKS]> = peaks
-        .iter()
-        .map(|p| Region {
-            bbox: Aabb::empty(),
-            peak: p.pos,
-            peak_value: p.value,
-            area: 0,
-        })
-        .collect();
-
-    // Assign each pixel to nearest peak
-    for p in data.iter_pixels(pixels, labels) {
-        let nearest = find_nearest_peak_index(p.pos, &peaks);
-        let obj = &mut objects[nearest];
-        obj.area += 1;
-        obj.bbox.include(p.pos);
-    }
-
-    // Filter out objects with no pixels
-    objects.retain(|o| o.area > 0);
-
-    objects
+    super::assign_to_nearest_peak(data, pixels, labels, &peaks)
+        .into_iter()
+        .collect()
 }
-
-/// Find the index of the nearest peak to a position.
-#[inline]
-fn find_nearest_peak_index(pos: Vec2us, peaks: &[Pixel]) -> usize {
-    let mut min_dist_sq = usize::MAX;
-    let mut nearest = 0;
-
-    for (i, peak) in peaks.iter().enumerate() {
-        let dx = (pos.x as i32 - peak.pos.x as i32).unsigned_abs() as usize;
-        let dy = (pos.y as i32 - peak.pos.y as i32).unsigned_abs() as usize;
-        let dist_sq = dx * dx + dy * dy;
-
-        if dist_sq < min_dist_sq {
-            min_dist_sq = dist_sq;
-            nearest = i;
-        }
-    }
-
-    nearest
-}
-
-// ============================================================================
-// Connected Component Finding
-// ============================================================================
 
 /// Find connected regions using grid-based BFS.
 ///
@@ -1061,10 +992,6 @@ unsafe fn try_visit_idx(idx: usize, grid: &mut PixelGrid, queue: &mut Vec<u32>) 
         queue.push(idx as u32);
     }
 }
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
 
 /// Find the peak (brightest pixel) in a region.
 #[inline]

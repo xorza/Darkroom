@@ -13,7 +13,6 @@ use arrayvec::ArrayVec;
 
 use super::region::Region;
 use super::{ComponentData, MAX_PEAKS, Pixel};
-use crate::math::bbox::Aabb;
 use crate::star_detection::labeling::LabelMap;
 use common::Buffer2;
 
@@ -23,29 +22,9 @@ mod tests;
 #[cfg(test)]
 mod bench;
 
-/// Per-peak bounding box and area data (internal).
-#[derive(Debug, Copy, Clone)]
-struct PeakData {
-    bbox: Aabb,
-    area: usize,
-}
-
-impl Default for PeakData {
-    fn default() -> Self {
-        Self {
-            bbox: Aabb::empty(),
-            area: 0,
-        }
-    }
-}
-
-// ============================================================================
-// Public API
-// ============================================================================
-
 /// Deblend a component using local maxima detection.
 ///
-/// Combines `find_local_maxima` and `deblend_by_nearest_peak`.
+/// Combines `find_local_maxima` and the shared nearest-peak assignment.
 /// Returns a single candidate if no deblending is needed, or multiple
 /// candidates if the component contains multiple peaks.
 ///
@@ -83,7 +62,7 @@ pub fn deblend_local_maxima(
         result
     } else {
         // Multiple peaks - deblend by assigning pixels to nearest peak
-        deblend_by_nearest_peak(data, pixels, labels, &peaks)
+        super::assign_to_nearest_peak(data, pixels, labels, &peaks)
     }
 }
 
@@ -134,58 +113,6 @@ pub fn find_local_maxima(
     peaks
 }
 
-/// Deblend a component into multiple candidates based on peak positions.
-///
-/// Each pixel is assigned to the nearest peak (Voronoi partitioning),
-/// creating separate candidates. Uses fixed-size arrays to avoid heap allocation.
-pub fn deblend_by_nearest_peak(
-    data: &ComponentData,
-    pixels: &Buffer2<f32>,
-    labels: &LabelMap,
-    peaks: &[Pixel],
-) -> ArrayVec<Region, MAX_PEAKS> {
-    debug_assert_eq!(
-        (pixels.width(), pixels.height()),
-        (labels.width(), labels.height()),
-        "pixels and labels must have same dimensions"
-    );
-
-    let mut result: ArrayVec<Region, MAX_PEAKS> = ArrayVec::new();
-
-    if peaks.is_empty() {
-        return result;
-    }
-
-    let mut peak_data: [PeakData; MAX_PEAKS] = [PeakData::default(); MAX_PEAKS];
-    let num_peaks = peaks.len().min(MAX_PEAKS);
-
-    // Assign each pixel to nearest peak
-    for pixel in data.iter_pixels(pixels, labels) {
-        let nearest = find_nearest_peak(pixel, peaks, num_peaks);
-        let pd = &mut peak_data[nearest];
-        pd.bbox.include(pixel.pos);
-        pd.area += 1;
-    }
-
-    // Build candidates
-    for (peak, pd) in peaks.iter().take(num_peaks).zip(peak_data.iter()) {
-        if pd.area > 0 {
-            result.push(Region {
-                bbox: pd.bbox,
-                peak: peak.pos,
-                peak_value: peak.value,
-                area: pd.area,
-            });
-        }
-    }
-
-    result
-}
-
-// ============================================================================
-// Internal helpers
-// ============================================================================
-
 /// Check if a pixel is a local maximum (greater than all 8 neighbors).
 /// Uses explicit neighbor checks instead of loops for better performance.
 #[inline]
@@ -208,7 +135,7 @@ pub(crate) fn is_local_maximum(pixel: Pixel, pixels: &Buffer2<f32>) -> bool {
 }
 
 /// Add a peak to the list, or replace an existing nearby peak if this one is brighter.
-/// Uses squared Euclidean distance for consistency with `find_nearest_peak`.
+/// Uses squared Euclidean distance, matching the shared nearest-peak assignment.
 #[inline]
 fn add_or_replace_peak(peaks: &mut ArrayVec<Pixel, MAX_PEAKS>, pixel: Pixel, min_sep_sq: usize) {
     // Check separation from existing peaks using squared Euclidean distance
@@ -233,24 +160,4 @@ fn add_or_replace_peak(peaks: &mut ArrayVec<Pixel, MAX_PEAKS>, pixel: Pixel, min
             }
         }
     }
-}
-
-/// Find the index of the nearest peak to a pixel.
-#[inline]
-fn find_nearest_peak(pixel: Pixel, peaks: &[Pixel], num_peaks: usize) -> usize {
-    let mut min_dist_sq = usize::MAX;
-    let mut nearest = 0;
-
-    for (i, peak) in peaks.iter().take(num_peaks).enumerate() {
-        let dx = (pixel.pos.x as i32 - peak.pos.x as i32).unsigned_abs() as usize;
-        let dy = (pixel.pos.y as i32 - peak.pos.y as i32).unsigned_abs() as usize;
-        let dist_sq = dx * dx + dy * dy;
-
-        if dist_sq < min_dist_sq {
-            min_dist_sq = dist_sq;
-            nearest = i;
-        }
-    }
-
-    nearest
 }
