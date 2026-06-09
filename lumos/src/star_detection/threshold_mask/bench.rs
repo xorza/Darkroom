@@ -1,8 +1,6 @@
 //! Benchmarks for threshold mask creation.
 
-use crate::star_detection::threshold_mask::{
-    process_words, process_words_filtered, process_words_filtered_scalar, process_words_scalar,
-};
+use crate::star_detection::threshold_mask::{process_words, process_words_scalar};
 use ::quickbench::quick_bench;
 use common::BitBuffer2;
 use common::Buffer2;
@@ -38,10 +36,10 @@ fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
 
     b.bench_labeled("simd", || {
         let words = black_box(&mut mask).words_mut();
-        process_words(
-            black_box(&pixels),
-            black_box(&bg),
-            black_box(&noise),
+        process_words::<true>(
+            black_box(pixels.pixels()),
+            black_box(bg.pixels()),
+            black_box(noise.pixels()),
             black_box(3.0),
             words,
             0,
@@ -51,7 +49,7 @@ fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
 
     b.bench_labeled("scalar", || {
         let words = black_box(&mut mask).words_mut();
-        process_words_scalar(
+        process_words_scalar::<true>(
             black_box(pixels.pixels()),
             black_box(bg.pixels()),
             black_box(noise.pixels()),
@@ -64,9 +62,10 @@ fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
 
     b.bench_labeled("filtered_simd", || {
         let words = black_box(&mut mask).words_mut();
-        process_words_filtered(
-            black_box(&pixels),
-            black_box(&noise),
+        process_words::<false>(
+            black_box(pixels.pixels()),
+            &[],
+            black_box(noise.pixels()),
             black_box(3.0),
             words,
             0,
@@ -76,8 +75,9 @@ fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
 
     b.bench_labeled("filtered_scalar", || {
         let words = black_box(&mut mask).words_mut();
-        process_words_filtered_scalar(
+        process_words_scalar::<false>(
             black_box(pixels.pixels()),
+            &[],
             black_box(noise.pixels()),
             black_box(3.0),
             words,

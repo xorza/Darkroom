@@ -26,10 +26,12 @@ use common::Buffer2;
 #[cfg(target_arch = "x86_64")]
 use common::cpu_features;
 
-/// Scalar implementation for packed threshold mask with background.
+/// Scalar packed threshold kernel. With `WITH_BG` the threshold is `bg + σ·noise`; otherwise it is
+/// `σ·noise` (matched-filter case — background already subtracted), and `bg` is unused and may be
+/// empty.
 #[cfg_attr(not(test), inline)]
 #[cfg(any(test, target_arch = "x86_64", not(target_arch = "aarch64")))]
-pub(crate) fn process_words_scalar(
+pub(crate) fn process_words_scalar<const WITH_BG: bool>(
     pixels: &[f32],
     bg: &[f32],
     noise: &[f32],
@@ -49,7 +51,10 @@ pub(crate) fn process_words_scalar(
             }
 
             let px = pixels[px_idx];
-            let threshold = bg[px_idx] + sigma_threshold * noise[px_idx].max(1e-6);
+            let mut threshold = sigma_threshold * noise[px_idx].max(1e-6);
+            if WITH_BG {
+                threshold += bg[px_idx];
+            }
 
             if px > threshold {
                 bits |= 1u64 << bit;
@@ -60,59 +65,23 @@ pub(crate) fn process_words_scalar(
     }
 }
 
-/// Scalar implementation for packed threshold mask without background (filtered).
+/// Dispatch the packed threshold kernel to the best available backend. See `process_words_scalar`
+/// for the `WITH_BG` meaning; pass an empty `bg` when `WITH_BG` is false.
 #[cfg_attr(not(test), inline)]
-#[cfg(any(test, target_arch = "x86_64", not(target_arch = "aarch64")))]
-pub(crate) fn process_words_filtered_scalar(
+pub(crate) fn process_words<const WITH_BG: bool>(
     pixels: &[f32],
+    bg: &[f32],
     noise: &[f32],
     sigma_threshold: f32,
     words: &mut [u64],
     pixel_offset: usize,
     pixel_end: usize,
 ) {
-    for (word_idx, word) in words.iter_mut().enumerate() {
-        let base_pixel = pixel_offset + word_idx * 64;
-        let mut bits = 0u64;
-
-        for bit in 0..64 {
-            let px_idx = base_pixel + bit;
-            if px_idx >= pixel_end {
-                break;
-            }
-
-            let px = pixels[px_idx];
-            let threshold = sigma_threshold * noise[px_idx].max(1e-6);
-
-            if px > threshold {
-                bits |= 1u64 << bit;
-            }
-        }
-
-        *word = bits;
-    }
-}
-
-/// Process words with best available SIMD (with background).
-#[cfg_attr(not(test), inline)]
-pub(crate) fn process_words(
-    pixels: &Buffer2<f32>,
-    bg: &Buffer2<f32>,
-    noise: &Buffer2<f32>,
-    sigma_threshold: f32,
-    words: &mut [u64],
-    pixel_offset: usize,
-    pixel_end: usize,
-) {
-    let pixels = pixels.pixels();
-    let bg = bg.pixels();
-    let noise = noise.pixels();
-
     #[cfg(target_arch = "aarch64")]
     {
         // SAFETY: NEON is always available on aarch64.
         unsafe {
-            neon::process_words_neon(
+            neon::process_words_neon::<WITH_BG>(
                 pixels,
                 bg,
                 noise,
@@ -127,9 +96,9 @@ pub(crate) fn process_words(
     #[cfg(target_arch = "x86_64")]
     {
         if cpu_features::has_sse4_1() {
-            // SAFETY: We've checked that SSE4.1 is available.
+            // SAFETY: SSE4.1 availability checked above.
             unsafe {
-                sse::process_words_sse(
+                sse::process_words_sse::<WITH_BG>(
                     pixels,
                     bg,
                     noise,
@@ -142,7 +111,7 @@ pub(crate) fn process_words(
             return;
         }
 
-        process_words_scalar(
+        process_words_scalar::<WITH_BG>(
             pixels,
             bg,
             noise,
@@ -155,77 +124,9 @@ pub(crate) fn process_words(
 
     #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
     {
-        process_words_scalar(
+        process_words_scalar::<WITH_BG>(
             pixels,
             bg,
-            noise,
-            sigma_threshold,
-            words,
-            pixel_offset,
-            pixel_end,
-        );
-    }
-}
-
-/// Process words with best available SIMD (without background, for filtered images).
-#[inline]
-pub(crate) fn process_words_filtered(
-    pixels: &Buffer2<f32>,
-    noise: &Buffer2<f32>,
-    sigma_threshold: f32,
-    words: &mut [u64],
-    pixel_offset: usize,
-    pixel_end: usize,
-) {
-    let pixels = pixels.pixels();
-    let noise = noise.pixels();
-
-    #[cfg(target_arch = "aarch64")]
-    {
-        // SAFETY: NEON is always available on aarch64.
-        unsafe {
-            neon::process_words_filtered_neon(
-                pixels,
-                noise,
-                sigma_threshold,
-                words,
-                pixel_offset,
-                pixel_end,
-            );
-        }
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    {
-        if cpu_features::has_sse4_1() {
-            // SAFETY: We've checked that SSE4.1 is available.
-            unsafe {
-                sse::process_words_filtered_sse(
-                    pixels,
-                    noise,
-                    sigma_threshold,
-                    words,
-                    pixel_offset,
-                    pixel_end,
-                );
-            }
-            return;
-        }
-
-        process_words_filtered_scalar(
-            pixels,
-            noise,
-            sigma_threshold,
-            words,
-            pixel_offset,
-            pixel_end,
-        );
-    }
-
-    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-    {
-        process_words_filtered_scalar(
-            pixels,
             noise,
             sigma_threshold,
             words,
@@ -244,7 +145,7 @@ pub(crate) fn process_words_filtered(
 ///
 /// Note: All input buffers must have the same dimensions as the mask.
 /// The output mask has row-aligned storage (stride may differ from width).
-pub fn create_threshold_mask(
+pub(crate) fn create_threshold_mask(
     pixels: &Buffer2<f32>,
     bg: &Buffer2<f32>,
     noise: &Buffer2<f32>,
@@ -261,13 +162,16 @@ pub fn create_threshold_mask(
     debug_assert_eq!(height, noise.height());
 
     let words_per_row = mask.words_per_row();
+    let pixels = pixels.pixels();
+    let bg = bg.pixels();
+    let noise = noise.pixels();
 
     mask.words_mut()
         .par_chunks_mut(words_per_row)
         .enumerate()
         .for_each(|(y, row_words)| {
             let row_pixel_start = y * width;
-            process_words(
+            process_words::<true>(
                 pixels,
                 bg,
                 noise,
@@ -286,7 +190,7 @@ pub fn create_threshold_mask(
 ///
 /// Note: All input buffers must have the same dimensions as the mask.
 /// The output mask has row-aligned storage (stride may differ from width).
-pub fn create_threshold_mask_filtered(
+pub(crate) fn create_threshold_mask_filtered(
     filtered: &Buffer2<f32>,
     noise: &Buffer2<f32>,
     sigma_threshold: f32,
@@ -300,14 +204,17 @@ pub fn create_threshold_mask_filtered(
     debug_assert_eq!(height, noise.height());
 
     let words_per_row = mask.words_per_row();
+    let filtered = filtered.pixels();
+    let noise = noise.pixels();
 
     mask.words_mut()
         .par_chunks_mut(words_per_row)
         .enumerate()
         .for_each(|(y, row_words)| {
             let row_pixel_start = y * width;
-            process_words_filtered(
+            process_words::<false>(
                 filtered,
+                &[],
                 noise,
                 sigma_threshold,
                 row_words,
