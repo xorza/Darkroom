@@ -160,44 +160,7 @@ unsafe fn median9_avx2(
     mut v7: __m256,
     mut v8: __m256,
 ) -> __m256 {
-    // Sorting network using min/max
-    // swap(a, b) => a=min(a,b), b=max(a,b)
-    macro_rules! swap {
-        ($a:ident, $b:ident) => {
-            let t = $a;
-            $a = _mm256_min_ps($a, $b);
-            $b = _mm256_max_ps(t, $b);
-        };
-    }
-
-    // Optimal 25-comparator sorting network for 9 elements
-    // This fully sorts the array so v4 contains the median
-    swap!(v0, v1);
-    swap!(v3, v4);
-    swap!(v6, v7);
-    swap!(v1, v2);
-    swap!(v4, v5);
-    swap!(v7, v8);
-    swap!(v0, v1);
-    swap!(v3, v4);
-    swap!(v6, v7);
-    swap!(v0, v3);
-    swap!(v3, v6);
-    swap!(v0, v3);
-    swap!(v1, v4);
-    swap!(v4, v7);
-    swap!(v1, v4);
-    swap!(v2, v5);
-    swap!(v5, v8);
-    swap!(v2, v5);
-    swap!(v1, v3);
-    swap!(v5, v7);
-    swap!(v2, v6);
-    swap!(v4, v6);
-    swap!(v2, v4);
-    swap!(v2, v3);
-    swap!(v4, v5);
-
+    median9_simd_sort!(_mm256_min_ps, _mm256_max_ps; v0, v1, v2, v3, v4, v5, v6, v7, v8);
     v4
 }
 
@@ -217,42 +180,7 @@ unsafe fn median9_sse41(
     mut v7: __m128,
     mut v8: __m128,
 ) -> __m128 {
-    // Sorting network using min/max
-    macro_rules! swap {
-        ($a:ident, $b:ident) => {
-            let t = $a;
-            $a = _mm_min_ps($a, $b);
-            $b = _mm_max_ps(t, $b);
-        };
-    }
-
-    // Optimal 25-comparator sorting network for 9 elements
-    swap!(v0, v1);
-    swap!(v3, v4);
-    swap!(v6, v7);
-    swap!(v1, v2);
-    swap!(v4, v5);
-    swap!(v7, v8);
-    swap!(v0, v1);
-    swap!(v3, v4);
-    swap!(v6, v7);
-    swap!(v0, v3);
-    swap!(v3, v6);
-    swap!(v0, v3);
-    swap!(v1, v4);
-    swap!(v4, v7);
-    swap!(v1, v4);
-    swap!(v2, v5);
-    swap!(v5, v8);
-    swap!(v2, v5);
-    swap!(v1, v3);
-    swap!(v5, v7);
-    swap!(v2, v6);
-    swap!(v4, v6);
-    swap!(v2, v4);
-    swap!(v2, v3);
-    swap!(v4, v5);
-
+    median9_simd_sort!(_mm_min_ps, _mm_max_ps; v0, v1, v2, v3, v4, v5, v6, v7, v8);
     v4
 }
 

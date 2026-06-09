@@ -248,18 +248,6 @@ fn test_large_image_parallel() {
 }
 
 #[test]
-fn test_median3() {
-    let mut v = [0.3, 0.1, 0.2];
-    assert!((median3(&mut v) - 0.2).abs() < 1e-6);
-
-    let mut v = [0.1, 0.2, 0.3];
-    assert!((median3(&mut v) - 0.2).abs() < 1e-6);
-
-    let mut v = [0.3, 0.2, 0.1];
-    assert!((median3(&mut v) - 0.2).abs() < 1e-6);
-}
-
-#[test]
 fn test_median4() {
     let mut v = [0.4, 0.1, 0.3, 0.2];
     // Sorted: [0.1, 0.2, 0.3, 0.4], median = (0.2 + 0.3) / 2 = 0.25
@@ -267,36 +255,10 @@ fn test_median4() {
 }
 
 #[test]
-fn test_median5() {
-    let mut v = [0.5, 0.1, 0.4, 0.2, 0.3];
-    // Sorted: [0.1, 0.2, 0.3, 0.4, 0.5], median = 0.3
-    assert!((median5(&mut v) - 0.3).abs() < 1e-6);
-}
-
-#[test]
 fn test_median6() {
     let mut v = [0.6, 0.1, 0.5, 0.2, 0.4, 0.3];
     // Sorted: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], median = (0.3 + 0.4) / 2 = 0.35
     assert!((median6(&mut v) - 0.35).abs() < 1e-6);
-}
-
-#[test]
-fn test_median9() {
-    let mut v = [0.9, 0.1, 0.8, 0.2, 0.7, 0.3, 0.6, 0.4, 0.5];
-    // Sorted: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], median = 0.5
-    assert!((median9(&mut v) - 0.5).abs() < 1e-6);
-}
-
-#[test]
-fn test_median9_already_sorted() {
-    let mut v = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
-    assert!((median9(&mut v) - 0.5).abs() < 1e-6);
-}
-
-#[test]
-fn test_median9_reverse_sorted() {
-    let mut v = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1];
-    assert!((median9(&mut v) - 0.5).abs() < 1e-6);
 }
 
 #[test]
@@ -363,43 +325,6 @@ fn test_bayer_pattern_removal() {
         "Interior even-row pixel should be 0.6, got {}",
         output[(5, 4)]
     );
-}
-
-// --- Tests for median_of_n ---
-
-#[test]
-fn test_median_of_n_empty() {
-    let mut v: [f32; 0] = [];
-    assert!((median_of_n(&mut v) - 0.0).abs() < 1e-6);
-}
-
-#[test]
-fn test_median_of_n_single() {
-    let mut v = [0.42];
-    assert!((median_of_n(&mut v) - 0.42).abs() < 1e-6);
-}
-
-#[test]
-fn test_median_of_n_two() {
-    let mut v = [0.2, 0.8];
-    // Average of two = 0.5
-    assert!((median_of_n(&mut v) - 0.5).abs() < 1e-6);
-}
-
-#[test]
-fn test_median_of_n_seven() {
-    // 7 elements - uses fallback sort
-    let mut v = [0.7, 0.1, 0.6, 0.2, 0.5, 0.3, 0.4];
-    // Sorted: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], median = v[3] = 0.4
-    assert!((median_of_n(&mut v) - 0.4).abs() < 1e-6);
-}
-
-#[test]
-fn test_median_of_n_eight() {
-    // 8 elements - uses fallback sort
-    let mut v = [0.8, 0.1, 0.7, 0.2, 0.6, 0.3, 0.5, 0.4];
-    // Sorted: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8], median = v[4] = 0.5
-    assert!((median_of_n(&mut v) - 0.5).abs() < 1e-6);
 }
 
 // --- Tests for median_at_left_edge ---
@@ -757,56 +682,13 @@ fn test_tall_image() {
 }
 
 #[test]
-fn test_median3_all_permutations() {
-    // Test all 6 permutations of [0.1, 0.2, 0.3]
-    let permutations = [
-        [0.1, 0.2, 0.3],
-        [0.1, 0.3, 0.2],
-        [0.2, 0.1, 0.3],
-        [0.2, 0.3, 0.1],
-        [0.3, 0.1, 0.2],
-        [0.3, 0.2, 0.1],
-    ];
-
-    for perm in permutations {
-        let mut v = perm;
-        let result = median3(&mut v);
-        assert!(
-            (result - 0.2).abs() < 1e-6,
-            "median3 of {:?} should be 0.2, got {}",
-            perm,
-            result
-        );
-    }
-}
-
-#[test]
 fn test_median_with_duplicates() {
     // Test median functions with duplicate values
-    let mut v3 = [0.5, 0.5, 0.5];
-    assert!((median3(&mut v3) - 0.5).abs() < 1e-6);
-
     let mut v4 = [0.3, 0.3, 0.7, 0.7];
     assert!((median4(&mut v4) - 0.5).abs() < 1e-6);
 
-    let mut v5 = [0.1, 0.5, 0.5, 0.5, 0.9];
-    assert!((median5(&mut v5) - 0.5).abs() < 1e-6);
-
     let mut v6 = [0.1, 0.1, 0.5, 0.5, 0.9, 0.9];
     assert!((median6(&mut v6) - 0.5).abs() < 1e-6);
-
-    let mut v9 = [0.1, 0.1, 0.1, 0.5, 0.5, 0.5, 0.9, 0.9, 0.9];
-    assert!((median9(&mut v9) - 0.5).abs() < 1e-6);
-}
-
-#[test]
-fn test_extreme_values() {
-    // Test with extreme float values
-    let mut v = [0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0];
-    assert!((median9(&mut v) - 0.5).abs() < 1e-6);
-
-    let mut v = [f32::MIN_POSITIVE, 0.5, 1.0 - f32::EPSILON];
-    assert!((median3(&mut v) - 0.5).abs() < 1e-6);
 }
 
 #[test]

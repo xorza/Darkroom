@@ -15,7 +15,7 @@ use rayon::prelude::*;
 ///
 /// Uses parallel processing for large images. Separates interior pixels
 /// (full 9-element neighborhood) from edge pixels for better performance.
-pub fn median_filter_3x3(pixels: &Buffer2<f32>, output: &mut Buffer2<f32>) {
+pub(crate) fn median_filter_3x3(pixels: &Buffer2<f32>, output: &mut Buffer2<f32>) {
     let width = pixels.width();
     let height = pixels.height();
     debug_assert_eq!(width, output.width());
@@ -114,49 +114,12 @@ fn median_at_edge(pixels: &[f32], width: usize, height: usize, x: usize, y: usiz
         }
     }
 
-    median_of_n(&mut neighbors[..count])
-}
-
-/// Compute median of a small array (up to 9 elements).
-///
-/// Uses sorting networks for fixed sizes (3-6, 9) for optimal performance,
-/// falls back to partial sort for other sizes (7, 8).
-#[inline]
-pub fn median_of_n(values: &mut [f32]) -> f32 {
-    let n = values.len();
-    match n {
-        0 => 0.0,
-        1 => values[0],
-        2 => (values[0] + values[1]) * 0.5,
-        3 => median3(values),
-        4 => median4(values),
-        5 => median5(values),
-        6 => median6(values),
-        9 => median9(values),
-        _ => {
-            // Fallback for 7, 8 (edge cases)
-            values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-            values[n / 2]
-        }
+    // Edge rows span exactly 2 input rows × {2, 3} columns, so the neighborhood is always 4 or 6.
+    match count {
+        4 => median4(&mut neighbors[..4]),
+        6 => median6(&mut neighbors[..6]),
+        _ => unreachable!("edge/corner neighborhood is always 4 or 6, got {count}"),
     }
-}
-
-/// Median of 3 elements.
-#[inline]
-fn median3(v: &mut [f32]) -> f32 {
-    // Sort first two
-    if v[0] > v[1] {
-        v.swap(0, 1);
-    }
-    // v[0] <= v[1]
-    if v[1] > v[2] {
-        v.swap(1, 2);
-        // Now v[0] <= old_v[1], v[1] = v[2], v[2] = old_v[1]
-        if v[0] > v[1] {
-            v.swap(0, 1);
-        }
-    }
-    v[1]
 }
 
 /// Median of 4 elements (average of middle two).
@@ -179,40 +142,6 @@ fn median4(v: &mut [f32]) -> f32 {
         v.swap(1, 2);
     }
     (v[1] + v[2]) * 0.5
-}
-
-/// Median of 5 elements.
-#[inline]
-fn median5(v: &mut [f32]) -> f32 {
-    // Optimal sorting network for 5 elements (9 comparisons)
-    if v[0] > v[1] {
-        v.swap(0, 1);
-    }
-    if v[3] > v[4] {
-        v.swap(3, 4);
-    }
-    if v[2] > v[4] {
-        v.swap(2, 4);
-    }
-    if v[2] > v[3] {
-        v.swap(2, 3);
-    }
-    if v[0] > v[3] {
-        v.swap(0, 3);
-    }
-    if v[0] > v[2] {
-        v.swap(0, 2);
-    }
-    if v[1] > v[4] {
-        v.swap(1, 4);
-    }
-    if v[1] > v[3] {
-        v.swap(1, 3);
-    }
-    if v[1] > v[2] {
-        v.swap(1, 2);
-    }
-    v[2]
 }
 
 /// Median of 6 elements (average of middle two).
@@ -259,84 +188,4 @@ fn median6(v: &mut [f32]) -> f32 {
         v.swap(2, 3);
     }
     (v[2] + v[3]) * 0.5
-}
-
-/// Median of 9 elements (the common case for interior pixels).
-#[inline]
-fn median9(v: &mut [f32]) -> f32 {
-    // Partial sorting network to find median (position 4)
-    // We don't need a full sort, just need element 4 in place
-
-    // Sort pairs
-    if v[0] > v[1] {
-        v.swap(0, 1);
-    }
-    if v[3] > v[4] {
-        v.swap(3, 4);
-    }
-    if v[6] > v[7] {
-        v.swap(6, 7);
-    }
-    if v[1] > v[2] {
-        v.swap(1, 2);
-    }
-    if v[4] > v[5] {
-        v.swap(4, 5);
-    }
-    if v[7] > v[8] {
-        v.swap(7, 8);
-    }
-    if v[0] > v[1] {
-        v.swap(0, 1);
-    }
-    if v[3] > v[4] {
-        v.swap(3, 4);
-    }
-    if v[6] > v[7] {
-        v.swap(6, 7);
-    }
-
-    // Cross comparisons
-    if v[0] > v[3] {
-        v.swap(0, 3);
-    }
-    if v[3] > v[6] {
-        v.swap(3, 6);
-    }
-    if v[0] > v[3] {
-        v.swap(0, 3);
-    }
-
-    if v[1] > v[4] {
-        v.swap(1, 4);
-    }
-    if v[4] > v[7] {
-        v.swap(4, 7);
-    }
-    if v[1] > v[4] {
-        v.swap(1, 4);
-    }
-
-    if v[2] > v[5] {
-        v.swap(2, 5);
-    }
-    if v[5] > v[8] {
-        v.swap(5, 8);
-    }
-    if v[2] > v[5] {
-        v.swap(2, 5);
-    }
-
-    // Final comparisons to place median
-    if v[3] > v[4] {
-        v.swap(3, 4);
-    }
-    if v[4] > v[5] {
-        v.swap(4, 5);
-    }
-    if v[3] > v[4] {
-        v.swap(3, 4);
-    }
-
-    v[4]
 }

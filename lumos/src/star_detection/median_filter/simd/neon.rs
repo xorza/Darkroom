@@ -91,46 +91,9 @@ unsafe fn median9_neon(
     mut v7: float32x4_t,
     mut v8: float32x4_t,
 ) -> float32x4_t {
-    // Sorting network using min/max
-    // The final assignments to v0-v3, v5-v8 are unused because we only need v4 (median)
-    macro_rules! swap {
-        ($a:ident, $b:ident) => {
-            let t = $a;
-            $a = vminq_f32($a, $b);
-            $b = vmaxq_f32(t, $b);
-        };
-    }
-
-    // Optimal 25-comparator sorting network for 9 elements
-    swap!(v0, v1);
-    swap!(v3, v4);
-    swap!(v6, v7);
-    swap!(v1, v2);
-    swap!(v4, v5);
-    swap!(v7, v8);
-    swap!(v0, v1);
-    swap!(v3, v4);
-    swap!(v6, v7);
-    swap!(v0, v3);
-    swap!(v3, v6);
-    swap!(v0, v3);
-    swap!(v1, v4);
-    swap!(v4, v7);
-    swap!(v1, v4);
-    swap!(v2, v5);
-    swap!(v5, v8);
-    swap!(v2, v5);
-    swap!(v1, v3);
-    swap!(v5, v7);
-    swap!(v2, v6);
-    swap!(v4, v6);
-    swap!(v2, v4);
-    swap!(v2, v3);
-    swap!(v4, v5);
-
-    // Suppress unused assignment warnings - only v4 (median) is needed
+    median9_simd_sort!(vminq_f32, vmaxq_f32; v0, v1, v2, v3, v4, v5, v6, v7, v8);
+    // Only v4 (the median) is needed; the network writes the rest but they go unused.
     let _ = (v0, v1, v2, v3, v5, v6, v7, v8);
-
     v4
 }
 
