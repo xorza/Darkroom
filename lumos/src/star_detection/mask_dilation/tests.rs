@@ -191,7 +191,7 @@ fn test_dilate_mask_radius_larger_than_image() {
     mask_data[4] = true; // center of 3x3
     let mask = BitBuffer2::from_slice(3, 3, &mask_data);
     let mut dilated = BitBuffer2::new_filled(3, 3, false);
-    dilate_mask(&mask, 100, &mut dilated);
+    dilate_mask(&mask, 5, &mut dilated);
 
     // Should fill entire image
     assert!(dilated.iter().all(|x| x));
@@ -390,39 +390,30 @@ fn test_dilate_mask_wide_image_200_pixels() {
 }
 
 #[test]
-fn test_dilate_mask_large_radius_64() {
-    // Radius 64 - larger than a word
+fn test_dilate_mask_max_radius_63() {
+    // Radius 63 is the maximum the fast word kernel supports; it reaches into adjacent words.
     let width = 200;
     let mut mask_data = vec![false; width];
     mask_data[100] = true;
     let mask = BitBuffer2::from_slice(width, 1, &mask_data);
     let mut dilated = BitBuffer2::new_filled(width, 1, false);
-    dilate_mask(&mask, 64, &mut dilated);
+    dilate_mask(&mask, 63, &mut dilated);
 
-    // Should expand: 36-164
-    for i in 36..=164 {
+    // Should expand: 37-163 (100 ± 63)
+    for i in 37..=163 {
         assert!(dilated.get(i), "Pixel {} should be set", i);
     }
-    assert!(!dilated.get(35));
-    assert!(!dilated.get(165));
+    assert!(!dilated.get(36));
+    assert!(!dilated.get(164));
 }
 
 #[test]
-fn test_dilate_mask_large_radius_70() {
-    // Radius 70 - spans multiple words
-    let width = 200;
-    let mut mask_data = vec![false; width];
-    mask_data[100] = true;
-    let mask = BitBuffer2::from_slice(width, 1, &mask_data);
-    let mut dilated = BitBuffer2::new_filled(width, 1, false);
-    dilate_mask(&mask, 70, &mut dilated);
-
-    // Should expand: 30-170
-    for i in 30..=170 {
-        assert!(dilated.get(i), "Pixel {} should be set", i);
-    }
-    assert!(!dilated.get(29));
-    assert!(!dilated.get(171));
+#[should_panic(expected = "radius must be <= 63")]
+fn test_dilate_mask_radius_above_63_panics() {
+    // Radius > 63 is out of contract (production caps dilation at 50).
+    let mask = BitBuffer2::from_slice(200, 1, &[false; 200]);
+    let mut dilated = BitBuffer2::new_filled(200, 1, false);
+    dilate_mask(&mask, 64, &mut dilated);
 }
 
 #[test]

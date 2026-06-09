@@ -11,6 +11,7 @@ mod tests;
 use crate::common::UnsafeSendPtr;
 use common::BitBuffer2;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use rayon::slice::ParallelSliceMut;
 
 /// Dilate a binary mask by the given radius (morphological dilation).
 ///
@@ -20,7 +21,7 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 ///
 /// Uses separable dilation (horizontal then vertical passes) for O(r) complexity
 /// per pixel instead of O(r²). Operates on packed 64-bit words for efficiency.
-pub fn dilate_mask(mask: &BitBuffer2, radius: usize, output: &mut BitBuffer2) {
+pub(crate) fn dilate_mask(mask: &BitBuffer2, radius: usize, output: &mut BitBuffer2) {
     assert_eq!(mask.width(), output.width(), "width mismatch");
     assert_eq!(mask.height(), output.height(), "height mismatch");
 
@@ -28,47 +29,44 @@ pub fn dilate_mask(mask: &BitBuffer2, radius: usize, output: &mut BitBuffer2) {
         output.copy_from(mask);
         return;
     }
+    // The fast word kernel smears within a 64-bit word, so a single pass covers radius ≤ 63.
+    // Production never exceeds this (config caps `bg_mask_dilation` at 50).
+    assert!(
+        radius <= 63,
+        "dilate_mask radius must be <= 63, got {radius}"
+    );
 
     let width = mask.width();
-    let height = mask.height();
     let words_per_row = mask.words_per_row();
+    let input_words = mask.words();
 
-    // Get mutable pointer from a proper &mut borrow before entering parallel sections
+    // Horizontal dilation pass — rows are independent, so hand each task its own row slice.
+    output
+        .words_mut()
+        .par_chunks_mut(words_per_row)
+        .enumerate()
+        .for_each(|(y, out_row)| {
+            let row_start = y * words_per_row;
+            let row = &input_words[row_start..row_start + words_per_row];
+
+            for (word_idx, out) in out_row.iter_mut().enumerate() {
+                let base_x = word_idx * 64;
+                let mut result = dilate_word_fast(row, word_idx, radius);
+
+                // Mask off bits beyond width for the last (partial) word.
+                if base_x < width && base_x + 64 > width {
+                    result &= (1u64 << (width - base_x)) - 1;
+                }
+
+                *out = result;
+            }
+        });
+
+    // Vertical dilation pass with sliding window. Columns are strided across the row-major buffer,
+    // so each task writes disjoint word columns through a shared raw pointer.
+    let height = mask.height();
     let num_words = output.num_words();
     let out_ptr = UnsafeSendPtr::new(output.words_mut().as_mut_ptr());
-
-    // Horizontal dilation pass
-    (0..height).into_par_iter().for_each(|y| {
-        let row_start = y * words_per_row;
-        let input_words = mask.words();
-        // SAFETY: Each thread writes to a disjoint set of rows (non-overlapping row_start ranges).
-        // Rebind to capture the UnsafeSendPtr (which is Sync), not the raw pointer field.
-        let p = out_ptr;
-        let output_words = unsafe { std::slice::from_raw_parts_mut(p.get(), num_words) };
-
-        let row = &input_words[row_start..row_start + words_per_row];
-
-        for word_idx in 0..words_per_row {
-            let base_x = word_idx * 64;
-
-            let mut result = if radius <= 63 {
-                dilate_word_fast(row, word_idx, radius)
-            } else {
-                dilate_word_slow(row, word_idx, width, radius)
-            };
-
-            // Mask off bits beyond width for the last word
-            if base_x < width && base_x + 64 > width {
-                result &= (1u64 << (width - base_x)) - 1;
-            } else if base_x >= width {
-                result = 0;
-            }
-
-            output_words[row_start + word_idx] = result;
-        }
-    });
-
-    // Vertical dilation pass with sliding window
     let chunk_size = 64.max(words_per_row / rayon::current_num_threads().max(1));
 
     (0..words_per_row)
@@ -178,60 +176,4 @@ fn dilate_word_fast(row: &[u64], word_idx: usize, radius: usize) -> u64 {
     }
 
     result
-}
-
-/// Slow horizontal dilation using per-bit checking (radius > 63).
-#[inline]
-fn dilate_word_slow(row: &[u64], word_idx: usize, width: usize, radius: usize) -> u64 {
-    let base_x = word_idx * 64;
-    let mut result = 0u64;
-
-    for bit in 0..64usize {
-        let x = base_x + bit;
-        if x >= width {
-            break;
-        }
-
-        let x_min = x.saturating_sub(radius);
-        let x_max = (x + radius).min(width - 1);
-
-        if has_set_bit_in_range(row, x_min, x_max) {
-            result |= 1u64 << bit;
-        }
-    }
-
-    result
-}
-
-/// Check if any bit is set in the given x range using word masks.
-#[inline]
-fn has_set_bit_in_range(row: &[u64], x_min: usize, x_max: usize) -> bool {
-    let word_min = x_min / 64;
-    let word_max = (x_max / 64).min(row.len() - 1);
-
-    for (i, &word) in row[word_min..=word_max].iter().enumerate() {
-        if word == 0 {
-            continue;
-        }
-
-        let word_idx = word_min + i;
-        let word_start = word_idx * 64;
-
-        // Calculate bit range within this word
-        let bit_start = x_min.saturating_sub(word_start);
-        let bit_end = (x_max - word_start).min(63);
-
-        // Create mask for the relevant bits
-        let mask = if bit_end >= 63 {
-            !0u64 << bit_start
-        } else {
-            ((1u64 << (bit_end + 1)) - 1) & (!0u64 << bit_start)
-        };
-
-        if word & mask != 0 {
-            return true;
-        }
-    }
-
-    false
 }
