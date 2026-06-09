@@ -144,8 +144,8 @@ fn extract_and_filter_candidates(
         c.area >= config.min_area
             && c.bbox.min.x >= config.edge_margin
             && c.bbox.min.y >= config.edge_margin
-            && c.bbox.max.x < width - config.edge_margin
-            && c.bbox.max.y < height - config.edge_margin
+            && c.bbox.max.x < width.saturating_sub(config.edge_margin)
+            && c.bbox.max.y < height.saturating_sub(config.edge_margin)
     });
 
     result

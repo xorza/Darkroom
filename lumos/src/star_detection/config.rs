@@ -4,10 +4,6 @@
 //! the star detection pipeline. All parameters are grouped by comments into
 //! logical sections.
 
-// ============================================================================
-// Enums
-// ============================================================================
-
 /// Pixel connectivity for connected component labeling.
 ///
 /// Determines which pixels are considered neighbors when grouping
@@ -77,10 +73,6 @@ impl CentroidMethod {
     }
 }
 
-// ============================================================================
-// Noise Model
-// ============================================================================
-
 /// Camera noise model for accurate SNR calculation.
 #[derive(Debug, Clone, Copy)]
 pub struct NoiseModel {
@@ -108,10 +100,6 @@ impl NoiseModel {
         );
     }
 }
-
-// ============================================================================
-// Background Refinement
-// ============================================================================
 
 /// Strategy for refining background estimation.
 #[derive(Debug, Clone, Copy, Default)]
@@ -157,10 +145,6 @@ impl BackgroundRefinement {
         }
     }
 }
-
-// ============================================================================
-// Star Detection Configuration
-// ============================================================================
 
 /// Configuration for the star detection pipeline.
 ///
@@ -547,10 +531,6 @@ impl Config {
         self.deblend_n_thresholds > 0
     }
 }
-
-// ============================================================================
-// Tests
-// ============================================================================
 
 #[cfg(test)]
 mod tests {

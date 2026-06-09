@@ -39,9 +39,12 @@ pub(crate) struct FwhmResult {
 
 /// Determine the effective FWHM for matched filtering.
 ///
+/// Precedence: auto-estimation (if enabled) wins, falling back to `expected_fwhm` (else a default)
+/// when too few stars are found; otherwise the fixed `expected_fwhm` is used.
+///
 /// Returns:
-/// - `fwhm: Some(value)` if manual FWHM is set or auto-estimation succeeds
-/// - `fwhm: None` if matched filtering is disabled
+/// - `fwhm: Some(value)` if auto-estimation runs or a fixed `expected_fwhm` is set
+/// - `fwhm: None` if matched filtering is disabled (auto off and `expected_fwhm == 0`)
 /// - `stars_used` is non-zero only when auto-estimation was performed
 pub(crate) fn estimate_fwhm(
     pixels: &Buffer2<f32>,
@@ -49,17 +52,18 @@ pub(crate) fn estimate_fwhm(
     config: &Config,
     pool: &mut BufferPool,
 ) -> FwhmResult {
-    // Manual FWHM takes precedence
+    // Auto-estimation takes precedence; `expected_fwhm` becomes its fallback when too few stars
+    // are found (see `estimate_from_bright_stars`).
+    if config.auto_estimate_fwhm {
+        return estimate_from_bright_stars(pixels, stats, config, pool);
+    }
+
+    // Otherwise use the fixed expected FWHM (0 disables the matched filter).
     if config.expected_fwhm > f32::EPSILON {
         return FwhmResult {
             fwhm: Some(config.expected_fwhm),
             stars_used: 0,
         };
-    }
-
-    // Auto-estimate if enabled
-    if config.auto_estimate_fwhm {
-        return estimate_from_bright_stars(pixels, stats, config, pool);
     }
 
     FwhmResult {
@@ -93,9 +97,17 @@ fn estimate_from_bright_stars(
 
     let stars = measure::measure(&regions, pixels, stats, &first_pass_config);
 
+    // Fall back to the configured `expected_fwhm` (a tuned per-preset seed) when auto-estimation
+    // can't find enough stars; only use the generic default if no expected FWHM was set.
+    let fallback_fwhm = if config.expected_fwhm > f32::EPSILON {
+        config.expected_fwhm
+    } else {
+        DEFAULT_FWHM
+    };
     estimate_fwhm_from_stars(
         &stars,
         config.min_stars_for_fwhm,
+        fallback_fwhm,
         config.max_eccentricity,
         config.max_sharpness,
     )
@@ -114,6 +126,7 @@ fn estimate_from_bright_stars(
 fn estimate_fwhm_from_stars(
     stars: &[Star],
     min_stars: usize,
+    fallback_fwhm: f32,
     max_eccentricity: f32,
     max_sharpness: f32,
 ) -> FwhmResult {
@@ -131,13 +144,13 @@ fn estimate_fwhm_from_stars(
 
     if fwhms.len() < min_stars {
         tracing::debug!(
-            "Insufficient stars for FWHM estimation: {} < {}, using default {:.1}",
+            "Insufficient stars for FWHM estimation: {} < {}, using fallback {:.1}",
             fwhms.len(),
             min_stars,
-            DEFAULT_FWHM
+            fallback_fwhm
         );
         return FwhmResult {
-            fwhm: Some(DEFAULT_FWHM),
+            fwhm: Some(fallback_fwhm),
             stars_used: fwhms.len(),
         };
     }
@@ -213,7 +226,7 @@ mod tests {
         // Fewer than min_stars returns default FWHM
         let stars: Vec<Star> = (0..4).map(|_| make_good_star(3.0)).collect();
 
-        let result = estimate_fwhm_from_stars(&stars, 5, 0.8, 0.7);
+        let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
 
         assert!(result.fwhm.is_some());
         assert!((result.fwhm.unwrap() - 4.0).abs() < 0.01); // Default FWHM
@@ -227,7 +240,7 @@ mod tests {
         let mut stars: Vec<Star> = (0..10).map(|_| make_good_star(3.0)).collect();
         stars[0] = make_star(10.0, 0.1, 0.3, 0.98); // Saturated with bad FWHM
 
-        let result = estimate_fwhm_from_stars(&stars, 5, 0.8, 0.7);
+        let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
 
         // All 9 good stars have FWHM=3.0, so median should be exactly 3.0
         assert!(result.fwhm.is_some());
@@ -244,7 +257,7 @@ mod tests {
         let mut stars: Vec<Star> = (0..10).map(|_| make_good_star(3.0)).collect();
         stars[0] = make_star(10.0, 0.9, 0.3, 0.5); // High eccentricity
 
-        let result = estimate_fwhm_from_stars(&stars, 5, 0.8, 0.7);
+        let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
 
         assert!(result.fwhm.is_some());
         assert!(
@@ -260,7 +273,7 @@ mod tests {
         let mut stars: Vec<Star> = (0..10).map(|_| make_good_star(3.0)).collect();
         stars[0] = make_star(1.0, 0.1, 0.9, 0.5); // Cosmic ray (high sharpness)
 
-        let result = estimate_fwhm_from_stars(&stars, 5, 0.8, 0.7);
+        let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
 
         assert!(result.fwhm.is_some());
         assert!(
@@ -277,7 +290,7 @@ mod tests {
         stars[0] = make_good_star(0.2); // Too small
         stars[1] = make_good_star(25.0); // Too large
 
-        let result = estimate_fwhm_from_stars(&stars, 5, 0.8, 0.7);
+        let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
 
         // 8 remaining stars all at FWHM=3.0
         assert!(result.fwhm.is_some());
@@ -295,7 +308,7 @@ mod tests {
         stars.push(make_good_star(12.0));
         stars.push(make_good_star(15.0));
 
-        let result = estimate_fwhm_from_stars(&stars, 5, 0.8, 0.7);
+        let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
 
         // MAD-based rejection should remove the 12.0 and 15.0 outliers
         assert!(result.fwhm.is_some());
@@ -311,7 +324,7 @@ mod tests {
         // All identical FWHM values
         let stars: Vec<Star> = (0..10).map(|_| make_good_star(4.5)).collect();
 
-        let result = estimate_fwhm_from_stars(&stars, 5, 0.8, 0.7);
+        let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
 
         assert!(result.fwhm.is_some());
         assert!((result.fwhm.unwrap() - 4.5).abs() < 0.01);
@@ -326,7 +339,7 @@ mod tests {
         let fwhms = [2.8, 3.0, 3.1, 3.2, 2.9, 3.3, 3.0, 3.1, 2.9, 3.0];
         let stars: Vec<Star> = fwhms.iter().map(|&f| make_good_star(f)).collect();
 
-        let result = estimate_fwhm_from_stars(&stars, 5, 0.8, 0.7);
+        let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
 
         assert!(result.fwhm.is_some());
         // Median of sorted [2.8, 2.9, 2.9, 3.0, 3.0, 3.0, 3.1, 3.1, 3.2, 3.3]
@@ -346,7 +359,7 @@ mod tests {
             .map(|_| make_star(3.0, 0.1, 0.3, 0.98)) // All saturated
             .collect();
 
-        let result = estimate_fwhm_from_stars(&stars, 5, 0.8, 0.7);
+        let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
 
         assert!(result.fwhm.is_some());
         assert!((result.fwhm.unwrap() - 4.0).abs() < 0.01); // Default

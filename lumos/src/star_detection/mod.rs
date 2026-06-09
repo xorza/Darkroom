@@ -48,10 +48,6 @@
 //! println!("Found {} stars", result.stars.len());
 //! ```
 
-// =============================================================================
-// Submodules
-// =============================================================================
-
 pub(crate) mod background;
 pub(crate) mod buffer_pool;
 pub(crate) mod centroid;

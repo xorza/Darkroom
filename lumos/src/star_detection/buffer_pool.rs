@@ -11,6 +11,9 @@ use common::Vec2us;
 ///
 /// Buffers are stored and reused across multiple `detect()` calls to avoid
 /// allocation overhead. All buffers in the pool have the same dimensions.
+///
+/// `acquire_*` returns buffers with **unspecified contents**: a freshly allocated buffer is
+/// zeroed, but a reused one keeps its previous data. Callers must overwrite before reading.
 #[derive(Debug)]
 pub struct BufferPool {
     dimensions: Vec2us,

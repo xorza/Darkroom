@@ -52,8 +52,7 @@ let config = Config {
     tile_size: 64,                  // Grid cell size for background mesh
     sigma_clip_iterations: 5,       // Sigma-clipping iterations per tile
     bg_mask_dilation: 3,            // Object mask dilation radius
-    min_unmasked_fraction: 0.3,     // Min unmasked pixels per tile
-    refinement: BackgroundRefinement::None, // or Iterative/AdaptiveSigma
+    refinement: BackgroundRefinement::None, // or Iterative { iterations }
 
     // PSF and matched filtering
     expected_fwhm: 4.0,             // Expected FWHM for matched filter (0 = disable)
@@ -365,7 +364,6 @@ pub struct Config {
     pub tile_size: usize,
     pub sigma_clip_iterations: usize,
     pub bg_mask_dilation: usize,
-    pub min_unmasked_fraction: f32,
     pub refinement: BackgroundRefinement,
 
     // PSF / matched filter
