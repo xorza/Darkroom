@@ -374,6 +374,30 @@ mod parallel {
     }
 
     #[test]
+    fn dense_mask_does_not_overflow_atomic_uf() {
+        // Regression: the parallel union-find capacity scales with the foreground count, not a
+        // fixed 5%-of-pixels heuristic. A grid of isolated pixels is one component each — 25% of
+        // pixels here — which previously overflowed the atomic union-find (cap = pixels/20) and
+        // panicked. With cap = count_ones() it labels cleanly.
+        let width = 400;
+        let height = 300; // 120_000 px > PARALLEL_CCL_THRESHOLD → parallel path
+        let mut mask_data = vec![false; width * height];
+        let mut expected = 0;
+        for y in (0..height).step_by(2) {
+            for x in (0..width).step_by(2) {
+                mask_data[y * width + x] = true;
+                expected += 1;
+            }
+        }
+
+        let mask = BitBuffer2::from_slice(width, height, &mask_data);
+        let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+
+        // Every isolated pixel is its own component (4-connectivity, 1-px gaps).
+        assert_eq!(label_map.num_labels(), expected); // 200 * 150 = 30_000, far above pixels/20
+    }
+
+    #[test]
     fn strip_boundary_vertical_line() {
         // Vertical line spanning multiple strips (tests boundary merging)
         let width = 400;

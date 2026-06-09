@@ -33,13 +33,9 @@ const PARALLEL_CCL_THRESHOLD: usize = 65_000;
 /// Minimum rows per strip in parallel CCL to avoid excessive strip overhead.
 const MIN_ROWS_PER_STRIP: usize = 64;
 
-// ============================================================================
-// Run-Length Encoding
-// ============================================================================
-
 /// A horizontal run of foreground pixels.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Run {
+struct Run {
     start: u32, // Starting x coordinate (inclusive)
     end: u32,   // Ending x coordinate (exclusive)
     label: u32, // Provisional label
@@ -71,7 +67,7 @@ fn runs_connected(prev: &Run, curr: &Run, connectivity: Connectivity) -> bool {
 /// Uses trailing zero counting (CTZ) for efficient run boundary detection.
 /// This is faster than bit-by-bit scanning for mixed words.
 #[inline]
-pub(crate) fn extract_runs_from_row(
+fn extract_runs_from_row(
     mask_words: &[u64],
     word_row_start: usize,
     words_per_row: usize,
@@ -189,10 +185,6 @@ fn extract_runs_from_mixed_word(
     }
 }
 
-// ============================================================================
-// LabelMap
-// ============================================================================
-
 /// A 2D label map from connected component analysis.
 #[derive(Debug)]
 pub struct LabelMap {
@@ -230,7 +222,7 @@ impl LabelMap {
     /// * `mask` - Binary mask of foreground pixels
     /// * `connectivity` - Four or Eight connectivity
     /// * `labels` - Pre-allocated buffer (must be zeroed, same dimensions as mask)
-    pub fn from_buffer(
+    fn from_buffer(
         mask: &BitBuffer2,
         connectivity: Connectivity,
         mut labels: Buffer2<u32>,
@@ -293,10 +285,6 @@ impl std::ops::Index<usize> for LabelMap {
         &self.labels[idx]
     }
 }
-
-// ============================================================================
-// Shared run-merge helper
-// ============================================================================
 
 /// Trait abstracting union-find operations for run merging.
 trait RunMergeUF {
@@ -367,12 +355,8 @@ fn merge_runs_with_prev(
     }
 }
 
-// ============================================================================
-// Sequential labeling (small images)
-// ============================================================================
-
 /// Sequential RLE-based CCL for small images.
-pub(crate) fn label_mask_sequential(
+fn label_mask_sequential(
     mask: &BitBuffer2,
     labels: &mut Buffer2<u32>,
     connectivity: Connectivity,
@@ -417,10 +401,6 @@ pub(crate) fn label_mask_sequential(
     uf.flatten_labels(labels.pixels_mut())
 }
 
-// ============================================================================
-// Parallel labeling (large images)
-// ============================================================================
-
 /// Result from labeling a strip.
 #[derive(Debug)]
 struct StripResult {
@@ -433,7 +413,7 @@ struct StripResult {
 }
 
 /// Parallel RLE-based CCL for large images.
-pub(crate) fn label_mask_parallel(
+fn label_mask_parallel(
     mask: &BitBuffer2,
     labels: &mut Buffer2<u32>,
     connectivity: Connectivity,
@@ -447,8 +427,9 @@ pub(crate) fn label_mask_parallel(
     let num_strips = (height / MIN_ROWS_PER_STRIP).clamp(1, num_threads);
     let rows_per_strip = height / num_strips;
 
-    // Atomic union-find for parallel merging (5% of pixels as upper bound)
-    let uf = AtomicUnionFind::new(((width * height) / 20).max(1024));
+    // Capacity = foreground pixel count, an exact upper bound on provisional labels (each run
+    // is ≥1 foreground pixel and make_set runs once per run), so it can never overflow.
+    let uf = AtomicUnionFind::new(mask.count_ones().max(1024));
 
     // Phase 1: Label each strip in parallel
     let strip_results: Vec<StripResult> = (0..num_strips)
@@ -472,7 +453,7 @@ pub(crate) fn label_mask_parallel(
         })
         .collect();
 
-    // Phase 2: Merge labels at strip boundaries using O(n+m) sorted merge
+    // Phase 2: merge labels across strip boundaries (two-pointer sweep over sorted runs)
     for strip_idx in 1..num_strips {
         merge_strip_boundary_sorted(
             &strip_results[strip_idx - 1].last_row_runs,
@@ -497,6 +478,7 @@ pub(crate) fn label_mask_parallel(
         for &(y, run) in &strip.runs {
             let row_start = y as usize * width;
             let final_label = label_map
+                .map
                 .get(run.label as usize)
                 .copied()
                 .expect("label out of range in label_map");
@@ -510,12 +492,7 @@ pub(crate) fn label_mask_parallel(
         }
     });
 
-    label_map
-        .iter()
-        .filter(|&&l| l > 0)
-        .max()
-        .copied()
-        .unwrap_or(0) as usize
+    label_map.count
 }
 
 /// Label a single strip and return runs with boundary information.
@@ -581,7 +558,7 @@ fn label_strip(
     result
 }
 
-/// Merge labels at strip boundary using O(n+m) sorted merge.
+/// Merge labels across a strip boundary by sweeping the two sorted run lists.
 fn merge_strip_boundary_sorted(
     above_runs: &[Run],
     below_runs: &[Run],
@@ -627,10 +604,6 @@ fn merge_strip_boundary_sorted(
         below_idx += 1;
     }
 }
-
-// ============================================================================
-// Union-Find (sequential)
-// ============================================================================
 
 /// Sequential union-find for small images.
 #[derive(Debug)]
@@ -740,10 +713,6 @@ impl UnionFind {
     }
 }
 
-// ============================================================================
-// Union-Find (atomic/parallel)
-// ============================================================================
-
 /// Lock-free atomic union-find for parallel labeling.
 struct AtomicUnionFind {
     parent: Vec<AtomicU32>,
@@ -757,6 +726,14 @@ impl std::fmt::Debug for AtomicUnionFind {
             .field("next_label", &self.next_label.load(Ordering::Relaxed))
             .finish()
     }
+}
+
+/// Dense 1..=N relabeling from [`AtomicUnionFind::build_label_map`]: `map[provisional]` is the
+/// final label, and `count` is the number of distinct components (the max final label).
+#[derive(Debug)]
+struct LabelMapping {
+    map: Vec<u32>,
+    count: usize,
 }
 
 impl AtomicUnionFind {
@@ -834,20 +811,23 @@ impl AtomicUnionFind {
         (self.next_label.load(Ordering::Relaxed) - 1) as usize
     }
 
-    /// Build sequential label mapping using single-pass approach.
-    fn build_label_map(&self, total_labels: usize) -> Vec<u32> {
-        let mut label_map = vec![0u32; total_labels + 1];
-        let mut num_labels = 0u32;
+    /// Build the dense 1..=N label mapping (single pass) together with the component count.
+    fn build_label_map(&self, total_labels: usize) -> LabelMapping {
+        let mut map = vec![0u32; total_labels + 1];
+        let mut count = 0u32;
 
         for i in 1..=total_labels {
             let root = self.find(i as u32);
-            if label_map[root as usize] == 0 {
-                num_labels += 1;
-                label_map[root as usize] = num_labels;
+            if map[root as usize] == 0 {
+                count += 1;
+                map[root as usize] = count;
             }
-            label_map[i] = label_map[root as usize];
+            map[i] = map[root as usize];
         }
 
-        label_map
+        LabelMapping {
+            map,
+            count: count as usize,
+        }
     }
 }
