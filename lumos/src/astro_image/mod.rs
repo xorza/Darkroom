@@ -224,6 +224,11 @@ impl AstroImage {
     /// - FITS: .fit, .fits
     /// - RAW: .raf, .cr2, .cr3, .nef, .arw, .dng
     /// - Standard: .tiff, .tif, .png, .jpg, .jpeg
+    ///
+    /// **Linearity:** the pipeline assumes flux-linear (photon-proportional) pixels. FITS and RAW
+    /// satisfy this; standard formats are loaded as-is and *assumed* linear. PNG/JPEG and 8-bit
+    /// TIFF are typically sRGB-gamma encoded — **not** valid input for calibration/stacking/
+    /// photometry — so loading one logs a warning.
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ImageError> {
         let path = path.as_ref();
         let ext = path
@@ -236,6 +241,13 @@ impl AstroImage {
             "fit" | "fits" => fits::load_fits(path),
             "raf" | "cr2" | "cr3" | "nef" | "arw" | "dng" => load_raw(path),
             "tiff" | "tif" | "png" | "jpg" | "jpeg" => {
+                tracing::warn!(
+                    path = %path.display(),
+                    format = %ext,
+                    "loading a standard image as linear; PNG/JPEG (and 8-bit TIFF) are usually \
+                     sRGB-gamma encoded — non-linear input corrupts calibration, stacking, and \
+                     photometry"
+                );
                 let image = Image::read_file(path).map_err(|e| ImageError::Image {
                     path: path.to_path_buf(),
                     source: e,

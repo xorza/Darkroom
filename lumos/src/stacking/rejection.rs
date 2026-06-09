@@ -759,7 +759,9 @@ impl GesdConfig {
             // shrinking λ, and over-rejecting.
             let ni = (len + num_candidates - i) as f32;
             let p = 1.0 - self.alpha / (2.0 * ni);
-            let t_crit = inverse_normal_approx(p);
+            // Rosner's λ uses the Student-t quantile with ν = ni − 2 d.o.f.; the normal quantile
+            // under-estimates it for small samples and over-rejects.
+            let t_crit = student_t_inverse(p, ni - 2.0);
 
             let numerator = (ni - 1.0) * t_crit;
             let denominator = ((ni - 2.0 + t_crit * t_crit) * ni).sqrt();
@@ -801,6 +803,22 @@ fn inverse_normal_approx(p: f32) -> f32 {
     let denominator = 1.0 + d1 * t + d2 * t * t + d3 * t * t * t;
 
     sign * (t - numerator / denominator)
+}
+
+/// Inverse CDF of Student's t-distribution, via the Cornish-Fisher expansion from the normal
+/// quantile. The GESD critical value needs `t_{p, ν}` (not the normal quantile); the normal
+/// under-estimates it for small `ν`, which over-rejects on small stacks. Accurate to ~1% for
+/// `ν ≥ 3` (e.g. t₀.₉₇₅,₁₀ = 2.2281, ν,₅ = 2.5706), converging to the normal as `ν → ∞`.
+fn student_t_inverse(p: f32, dof: f32) -> f32 {
+    let z = inverse_normal_approx(p) as f64;
+    let n = (dof as f64).max(1.0);
+    let (z2, z3) = (z * z, z * z * z);
+    let (z5, z7, z9) = (z3 * z2, z3 * z2 * z2, z3 * z2 * z2 * z2);
+    let g1 = (z3 + z) / 4.0;
+    let g2 = (5.0 * z5 + 16.0 * z3 + 3.0 * z) / 96.0;
+    let g3 = (3.0 * z7 + 19.0 * z5 + 17.0 * z3 - 15.0 * z) / 384.0;
+    let g4 = (79.0 * z9 + 776.0 * z7 + 1482.0 * z5 - 1920.0 * z3 - 945.0 * z) / 92160.0;
+    (z + g1 / n + g2 / (n * n) + g3 / (n * n * n) + g4 / (n * n * n * n)) as f32
 }
 
 /// Reset an indices buffer to [0, 1, 2, ...n), reusing the allocation.
@@ -1631,16 +1649,30 @@ mod tests {
 
     #[test]
     fn test_gesd_relaxation_boundary() {
-        // dark=9.5 is too extreme: with relax=1.5, r=2.248 > lambda=2.005
-        // so even default relaxation cannot save it — both outliers rejected.
+        // dark=8.5 is far below the cluster (~8σ): even the relax=1.5 down-weighting of dark
+        // pixels cannot save it, so both outliers are rejected. (With the Student-t critical
+        // values a mild dark like 9.5 — only ~2σ out — is correctly kept; see
+        // `test_gesd_relaxation_correctness`.)
         let cluster = vec![10.0, 10.1, 9.9, 10.0, 10.2, 9.8, 10.05, 9.95, 10.15, 9.85];
-        let mut v: Vec<f32> = cluster.iter().copied().chain([9.5, 50.0]).collect();
+        let mut v: Vec<f32> = cluster.iter().copied().chain([8.5, 50.0]).collect();
         let mut s = scratch();
         let remaining = GesdConfig::new(0.05, Some(3)).reject(&mut v, &mut s);
         assert_eq!(
             remaining, 10,
-            "dark=9.5 too extreme, both rejected even with relax=1.5"
+            "dark=8.5 far below cluster, both rejected even with relax=1.5"
         );
+    }
+
+    #[test]
+    fn test_student_t_inverse_known_values() {
+        // t_{0.975, ν} from standard tables. Cornish-Fisher is ~1% at small ν, tighter as ν grows,
+        // and converges to the normal quantile (1.960) as ν → ∞.
+        assert!((student_t_inverse(0.975, 10.0) - 2.2281).abs() < 0.01);
+        assert!((student_t_inverse(0.975, 5.0) - 2.5706).abs() < 0.02);
+        assert!((student_t_inverse(0.975, 30.0) - 2.0423).abs() < 0.01);
+        assert!((student_t_inverse(0.975, 1.0e6) - 1.9600).abs() < 0.01);
+        // A larger ν must give a smaller (tighter) critical value than a smaller ν.
+        assert!(student_t_inverse(0.975, 30.0) < student_t_inverse(0.975, 5.0));
     }
 
     #[test]

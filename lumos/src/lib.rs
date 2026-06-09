@@ -36,10 +36,6 @@ pub(crate) mod star_detection;
 #[cfg(test)]
 pub mod testing;
 
-// ============================================================================
-// Core image types
-// ============================================================================
-
 pub use astro_image::cfa::{CfaImage, CfaType};
 pub use astro_image::error::ImageError;
 pub use astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
@@ -47,17 +43,9 @@ pub use calibration_masters::defect_map::DefectMap;
 pub use raw::demosaic::bayer::CfaPattern;
 pub use raw::{load_raw, load_raw_cfa};
 
-// ============================================================================
-// Calibration
-// ============================================================================
-
 pub use calibration_masters::{
     CalibrationFrames, CalibrationImages, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD,
 };
-
-// ============================================================================
-// Star detection
-// ============================================================================
 
 pub use math::statistics::ChannelStats;
 pub use star_detection::background::estimate::BackgroundEstimate;
@@ -70,19 +58,11 @@ pub use star_detection::detector::{
 };
 pub use star_detection::star::Star;
 
-// ============================================================================
-// Registration
-// ============================================================================
-
 pub use registration::config::{Config as RegistrationConfig, InterpolationMethod};
 pub use registration::distortion::sip::SipPolynomial;
 pub use registration::result::{RansacFailureReason, RegistrationError, RegistrationResult};
 pub use registration::transform::{Transform, TransformType, WarpTransform};
 pub use registration::{WarpResult, register, warp};
-
-// ============================================================================
-// Stacking
-// ============================================================================
 
 pub use stacking::cache_config::CacheConfig;
 pub use stacking::config::{CombineMethod, Normalization, StackConfig};
@@ -95,10 +75,6 @@ pub use pipeline::{
     AlignStackConfig, AlignStackResult, Error as AlignStackError, Reference, align_and_stack,
     calibrate_align_stack,
 };
-
-// ============================================================================
-// Drizzle
-// ============================================================================
 
 pub use drizzle::error::DrizzleError;
 pub use drizzle::{

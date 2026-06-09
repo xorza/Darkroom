@@ -1,13 +1,12 @@
-//! MAGSAC++ scoring for threshold-free robust estimation.
+//! MAGSAC++-inspired scoring for threshold-free robust estimation.
 //!
-//! MAGSAC++ (Barath & Matas 2020) eliminates the need for manual inlier threshold
-//! tuning by marginalizing over a range of noise scales σ ∈ [0, σ_max].
+//! Inspired by MAGSAC++ (Barath & Matas 2020): instead of a binary inlier/outlier decision, each
+//! point gets a continuous loss that grades how well it fits, removing manual threshold tuning.
 //!
-//! Instead of a binary inlier/outlier decision, MAGSAC++ computes a continuous
-//! quality score based on the marginal likelihood of each point being an inlier.
-//!
-//! For k=2 (2D point correspondences), the lower incomplete gamma function has
-//! the closed-form γ(1, x) = 1 - exp(-x), so no lookup table is needed.
+//! This is **not** the paper's exact `ρ` (which uses the n=4 DoF incomplete gammas). It is a
+//! lighter monotone saturating loss built on the closed-form `γ(1, x) = 1 − exp(−x)` (no lookup
+//! table): quadratic (≈ r²/4) near zero, saturating at `σ²_max/2`. It is monotone non-decreasing
+//! in the residual — the property a robust loss must have.
 
 /// Chi-square 99% quantile for k=2 degrees of freedom.
 /// Points beyond this are considered outliers.
@@ -19,10 +18,10 @@ fn gamma_k2(x: f64) -> f64 {
     if x <= 0.0 { 0.0 } else { 1.0 - (-x).exp() }
 }
 
-/// MAGSAC++ scorer for threshold-free inlier evaluation.
+/// MAGSAC++-inspired scorer for threshold-free inlier evaluation.
 ///
-/// Computes a continuous loss function by marginalizing over noise scales,
-/// eliminating the need for manual threshold tuning.
+/// Computes a continuous, monotone saturating loss instead of a binary inlier decision (see the
+/// module docs — this is a lighter loss than the paper's exact `ρ`).
 #[derive(Debug)]
 pub struct MagsacScorer {
     /// Maximum sigma squared (σ²_max)
@@ -68,10 +67,10 @@ impl MagsacScorer {
         // x = r² / (2σ²_max)
         let x = residual_sq / (2.0 * self.max_sigma_sq);
 
-        // For k=2: loss = σ²_max/2 · γ(1,x) + r²/4 · (1 - γ(1,x))
-        let gx = gamma_k2(x);
-
-        self.max_sigma_sq / 2.0 * gx + residual_sq / 4.0 * (1.0 - gx)
+        // Monotone saturating loss: ≈ r²/4 near zero (least-squares), saturating at σ²_max/2 as the
+        // residual grows. (An earlier `+ r²/4·(1−γ)` term made the loss climb past the outlier value
+        // around r≈2σ then fall back — a non-monotone shape a robust loss must not have.)
+        self.max_sigma_sq / 2.0 * gamma_k2(x)
     }
 
     /// Check if a point should be considered an inlier for counting purposes.
@@ -139,20 +138,15 @@ mod tests {
         // With σ_max = 1.0: σ²_max = 1.0, threshold_sq = 9.21
         let scorer = MagsacScorer::new(1.0);
 
-        // loss(r²) = σ²_max/2 * γ(1, x) + r²/4 * (1 - γ(1, x))
-        // where x = r² / (2 * σ²_max) = r² / 2
+        // loss(r²) = σ²_max/2 * γ(1, x),  x = r² / (2 * σ²_max) = r² / 2
 
-        // r² = 0: x = 0, γ(1,0) = 0 → loss = 0.5*0 + 0/4*(1-0) = 0
+        // r² = 0: x = 0, γ(1,0) = 0 → loss = 0
         assert!((scorer.loss(0.0)).abs() < TOL);
 
-        // r² = 1.0: x = 0.5, γ(1,0.5) = 1 - exp(-0.5)
-        // γ = 0.393469340...
-        // loss = 0.5 * 0.393469340 + 0.25 * (1 - 0.393469340)
-        //      = 0.196734670 + 0.25 * 0.606530659
-        //      = 0.196734670 + 0.151632664
-        //      = 0.348367335
+        // r² = 1.0: x = 0.5, γ(1,0.5) = 1 - exp(-0.5) = 0.393469340
+        // loss = 0.5 * 0.393469340 = 0.196734670
         let g_half = 1.0 - (-0.5_f64).exp();
-        let expected = 0.5 * g_half + 0.25 * (1.0 - g_half);
+        let expected = 0.5 * g_half;
         assert!(
             (scorer.loss(1.0) - expected).abs() < TOL,
             "loss(1.0) = {}, expected {}",
@@ -160,18 +154,20 @@ mod tests {
             expected
         );
 
-        // r² = 4.0: x = 2.0, γ(1,2) = 1 - exp(-2)
-        // γ = 0.864664716...
-        // loss = 0.5 * 0.864664716 + 1.0 * (1 - 0.864664716)
-        //      = 0.432332358 + 0.135335283
-        //      = 0.567667641
+        // r² = 4.0 (r = 2σ): x = 2.0, γ(1,2) = 0.864664716
+        // loss = 0.5 * 0.864664716 = 0.432332358 — below the outlier loss (0.5), as a monotone
+        // robust loss requires.
         let g_2 = 1.0 - (-2.0_f64).exp();
-        let expected_4 = 0.5 * g_2 + 1.0 * (1.0 - g_2);
+        let expected_4 = 0.5 * g_2;
         assert!(
             (scorer.loss(4.0) - expected_4).abs() < TOL,
             "loss(4.0) = {}, expected {}",
             scorer.loss(4.0),
             expected_4
+        );
+        assert!(
+            scorer.loss(4.0) < scorer.outlier_loss,
+            "a 2σ inlier must not be penalized more than a clear outlier"
         );
 
         // r² > threshold_sq (9.21): returns outlier_loss = 0.5
@@ -188,18 +184,16 @@ mod tests {
         let threshold_sq = scorer.threshold_sq; // 9.21
 
         // Loss just below threshold:
-        // x = 9.20 / 2 = 4.60, γ(1, 4.60) = 1 - exp(-4.60) ≈ 0.98994...
-        // loss = 0.5 * 0.98994 + 9.20/4 * (1-0.98994)
-        //      ≈ 0.49497 + 2.30 * 0.01006 ≈ 0.49497 + 0.02314 ≈ 0.51811
-        // This is slightly above outlier_loss (0.5), which is expected
-        // (the MAGSAC formula can overshoot slightly near the boundary)
+        // x = 9.20 / 2 = 4.60, γ(1, 4.60) ≈ 0.98994
+        // loss = 0.5 * 0.98994 ≈ 0.49497 — just *below* the outlier loss (0.5), saturating into it.
         let loss_just_below = scorer.loss(threshold_sq - 0.01);
         let loss_just_above = scorer.loss(threshold_sq + 0.01);
 
         // Just above threshold returns exactly outlier_loss = 0.5
         assert!((loss_just_above - 0.5).abs() < TOL);
 
-        // The discontinuity at the boundary should be small (< 0.03)
+        // Monotone and nearly continuous: just-below ≤ just-above, with a tiny gap.
+        assert!(loss_just_below <= loss_just_above);
         assert!(
             (loss_just_below - loss_just_above).abs() < 0.03,
             "Discontinuity at threshold: just_below={}, just_above={}",
@@ -219,10 +213,8 @@ mod tests {
         let loss_1 = scorer_1.loss(2.0);
         let loss_2 = scorer_2.loss(2.0);
 
-        // σ=1: x=1.0, γ(1,1)=0.63212..., loss = 0.5*0.63212 + 0.5*(1-0.63212) = 0.50000 (coincidence?)
-        // Recompute: loss = 0.5*0.63212 + 0.5*0.36788 = 0.31606 + 0.18394 = 0.50000
-        // σ=2: σ²=4, x=2/(2*4)=0.25, γ(1,0.25)=1-exp(-0.25)=0.22119
-        // loss = 4/2*0.22119 + 2/4*(1-0.22119) = 2*0.22119 + 0.5*0.77880 = 0.44239 + 0.38940 = 0.83179
+        // σ=1: x=1.0, γ(1,1)=0.63212, loss = 0.5*0.63212 = 0.31606
+        // σ=2: σ²=4, x=2/8=0.25, γ(1,0.25)=0.22120, loss = 2*0.22120 = 0.44239
         // Different as expected
         assert!(
             (loss_1 - loss_2).abs() > 0.1,

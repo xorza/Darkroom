@@ -2,7 +2,7 @@
 name = "lumos"
 version.workspace = true
 edition.workspace = true
-description = ""
+description = "Astronomical image-processing pipeline: RAW/FITS decode, calibration, star detection, registration, stacking, and drizzle."
 
 [features]
 real-data = []
