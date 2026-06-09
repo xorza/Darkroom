@@ -30,6 +30,10 @@ pub struct Star {
     pub roundness2: f32,
 }
 
+/// Default peak threshold (normalized) above which a star is treated as saturated.
+/// Saturated peaks give unreliable centroids, so the detection quality filters drop them.
+pub(crate) const SATURATION_PEAK: f32 = 0.95;
+
 impl Star {
     /// Check if star is likely saturated.
     ///

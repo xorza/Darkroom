@@ -58,10 +58,8 @@ pub(crate) fn detect(
     let width = pixels.width();
     let height = pixels.height();
 
-    let mut scratch = pool.acquire_f32();
-
-    // Apply matched filter if FWHM is provided
-    let filtered: Option<&Buffer2<f32>> = if let Some(fwhm) = fwhm {
+    // Apply matched filter if FWHM is provided; its output buffer is acquired only then.
+    let filtered: Option<Buffer2<f32>> = if let Some(fwhm) = fwhm {
         tracing::debug!(
             "Applying matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.1}°",
             fwhm,
@@ -69,6 +67,7 @@ pub(crate) fn detect(
             config.psf_angle.to_degrees()
         );
 
+        let mut output = pool.acquire_f32();
         let mut convolution_scratch = pool.acquire_f32();
         let mut convolution_temp = pool.acquire_f32();
         matched_filter(
@@ -78,7 +77,7 @@ pub(crate) fn detect(
             config.psf_axis_ratio,
             config.psf_angle,
             &mut MatchedFilterBuffers {
-                output: &mut scratch,
+                output: &mut output,
                 subtraction_scratch: &mut convolution_scratch,
                 temp: &mut convolution_temp,
             },
@@ -86,7 +85,7 @@ pub(crate) fn detect(
         pool.release_f32(convolution_temp);
         pool.release_f32(convolution_scratch);
 
-        Some(&scratch)
+        Some(output)
     } else {
         None
     };
@@ -95,7 +94,7 @@ pub(crate) fn detect(
     let mut mask = pool.acquire_bit();
     mask.fill(false);
 
-    if let Some(filtered) = filtered {
+    if let Some(filtered) = &filtered {
         debug_assert_eq!(width, filtered.width());
         debug_assert_eq!(height, filtered.height());
         create_threshold_mask_filtered(filtered, &stats.noise, config.sigma_threshold, &mut mask);
@@ -119,7 +118,9 @@ pub(crate) fn detect(
     let extraction = extract_and_filter_candidates(pixels, &label_map, config, width, height);
 
     label_map.release_to_pool(pool);
-    pool.release_f32(scratch);
+    if let Some(scratch) = filtered {
+        pool.release_f32(scratch);
+    }
 
     DetectResult {
         regions: extraction.regions,
@@ -162,7 +163,7 @@ fn extract_candidates(
             deblended_components: 0,
         };
     }
-    let component_data = collect_component_data(label_map, config.max_area);
+    let component_data = collect_component_data(label_map);
     let total_components = component_data.len();
 
     tracing::debug!(
@@ -177,10 +178,8 @@ fn extract_candidates(
         .filter(|data| data.area > 0 && data.area <= config.max_area)
         .collect();
 
-    let num_components = filtered.len();
-
-    // Track (regions, deblended_count) where deblended_count is number of
-    // components that produced more than one region
+    // Track (regions, deblended_count) where deblended_count is the number of
+    // components that produced more than one region.
     let result = if config.is_multi_threshold() {
         let (regions, deblended_components) = filtered
             .into_par_iter()
@@ -216,20 +215,32 @@ fn extract_candidates(
             deblended_components,
         }
     } else {
-        let regions: Vec<Region> = filtered
+        let (regions, deblended_components) = filtered
             .into_par_iter()
-            .flat_map_iter(|data| {
-                deblend_local_maxima(
-                    &data,
-                    pixels,
-                    label_map,
-                    config.deblend_min_separation,
-                    config.deblend_min_prominence,
-                )
-            })
-            .collect();
-        // For local_maxima, deblended = regions - components (if more regions than components)
-        let deblended_components = regions.len().saturating_sub(num_components);
+            .fold(
+                || (Vec::new(), 0usize),
+                |(mut regions, mut deblended), data| {
+                    let deblend_result = deblend_local_maxima(
+                        &data,
+                        pixels,
+                        label_map,
+                        config.deblend_min_separation,
+                        config.deblend_min_prominence,
+                    );
+                    if deblend_result.len() > 1 {
+                        deblended += 1;
+                    }
+                    regions.extend(deblend_result);
+                    (regions, deblended)
+                },
+            )
+            .reduce(
+                || (Vec::new(), 0),
+                |(mut a, da), (b, db)| {
+                    a.extend(b);
+                    (a, da + db)
+                },
+            );
         ExtractionResult {
             regions,
             deblended_components,
@@ -246,7 +257,7 @@ fn extract_candidates(
 }
 
 /// Collect component metadata (bounding boxes and areas) from label map.
-fn collect_component_data(label_map: &LabelMap, max_area: usize) -> Vec<ComponentData> {
+fn collect_component_data(label_map: &LabelMap) -> Vec<ComponentData> {
     use parking_lot::Mutex;
     use rayon::prelude::*;
 
@@ -328,13 +339,86 @@ fn collect_component_data(label_map: &LabelMap, max_area: usize) -> Vec<Componen
         },
     );
 
-    let mut component_data = result.into_inner();
+    result.into_inner()
+}
 
-    for data in &mut component_data {
-        if data.area > max_area {
-            data.area = max_area + 1;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::star_detection::labeling::test_utils::label_map_from_raw;
+
+    /// Render Gaussian `stars` (cx, cy, amplitude, sigma) into a single connected
+    /// component: every lit pixel gets label 1.
+    fn one_component(
+        width: usize,
+        height: usize,
+        stars: &[(usize, usize, f32, f32)],
+    ) -> (Buffer2<f32>, LabelMap) {
+        let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
+        let mut labels = Buffer2::new_filled(width, height, 0u32);
+        for &(cx, cy, amplitude, sigma) in stars {
+            let radius = (sigma * 4.0).ceil() as i32;
+            for dy in -radius..=radius {
+                for dx in -radius..=radius {
+                    let x = (cx as i32 + dx) as usize;
+                    let y = (cy as i32 + dy) as usize;
+                    if x < width && y < height {
+                        let r2 = (dx * dx + dy * dy) as f32;
+                        let v = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
+                        if v > 0.001 {
+                            pixels[(x, y)] += v;
+                            labels[(x, y)] = 1;
+                        }
+                    }
+                }
+            }
+        }
+        (pixels, label_map_from_raw(labels, 1))
+    }
+
+    fn local_maxima_config() -> Config {
+        Config {
+            deblend_n_thresholds: 0, // 0 selects the local-maxima deblend path
+            deblend_min_separation: 3,
+            deblend_min_prominence: 0.3,
+            max_area: usize::MAX,
+            ..Default::default()
         }
     }
 
-    component_data
+    #[test]
+    fn local_maxima_deblended_counts_split_components_not_extra_regions() {
+        // One connected blob with three well-separated peaks. Local-maxima deblending
+        // splits it into three regions, but it is ONE component that split, so
+        // `deblended_components` must be 1. The previous `regions - num_components`
+        // formula reported 3 - 1 = 2 here, which this pins against.
+        let (pixels, label_map) = one_component(
+            48,
+            24,
+            &[(12, 12, 1.0, 3.0), (24, 12, 1.0, 3.0), (36, 12, 1.0, 3.0)],
+        );
+
+        let result = extract_candidates(&pixels, &label_map, &local_maxima_config());
+
+        assert_eq!(
+            result.regions.len(),
+            3,
+            "three resolved peaks should yield three regions"
+        );
+        assert_eq!(
+            result.deblended_components, 1,
+            "one component split into >1 region counts once, not `regions - components`"
+        );
+    }
+
+    #[test]
+    fn local_maxima_single_peak_reports_zero_deblended() {
+        // A lone star: one region from one component — nothing was split.
+        let (pixels, label_map) = one_component(32, 32, &[(16, 16, 1.0, 3.0)]);
+
+        let result = extract_candidates(&pixels, &label_map, &local_maxima_config());
+
+        assert_eq!(result.regions.len(), 1);
+        assert_eq!(result.deblended_components, 0);
+    }
 }

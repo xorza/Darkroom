@@ -30,7 +30,7 @@ use crate::star_detection::buffer_pool::BufferPool;
 use crate::star_detection::config::Config;
 use crate::star_detection::detector::stages::detect::detect;
 use crate::star_detection::detector::stages::measure;
-use crate::star_detection::star::Star;
+use crate::star_detection::star::{SATURATION_PEAK, Star};
 
 /// Result of FWHM estimation stage.
 #[derive(Debug, Clone, Copy)]
@@ -116,7 +116,6 @@ fn estimate_from_bright_stars(
 /// 2. Compute median FWHM from filtered stars
 /// 3. Reject outliers using MAD-based threshold (keep within 3×MAD of median)
 /// 4. Recompute median from remaining stars
-#[allow(clippy::needless_pass_by_value)]
 fn estimate_fwhm_from_stars(
     stars: &[Star],
     min_stars: usize,
@@ -128,7 +127,7 @@ fn estimate_fwhm_from_stars(
     let mut fwhms: Vec<f32> = stars
         .iter()
         .filter(|s| {
-            !s.is_saturated(0.95)
+            !s.is_saturated(SATURATION_PEAK)
                 && s.eccentricity <= max_eccentricity
                 && s.sharpness < max_sharpness
                 && (FWHM_MIN..FWHM_MAX).contains(&s.fwhm)

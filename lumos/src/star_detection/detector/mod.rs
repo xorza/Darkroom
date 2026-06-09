@@ -8,10 +8,6 @@ pub(crate) mod stages;
 #[cfg(test)]
 mod bench;
 
-// =============================================================================
-// Imports
-// =============================================================================
-
 use serde::{Deserialize, Serialize};
 
 use crate::astro_image::AstroImage;
@@ -71,10 +67,6 @@ pub struct Diagnostics {
     /// Whether FWHM was auto-estimated (true) or manual/disabled (false).
     pub fwhm_was_auto_estimated: bool,
 }
-
-// =============================================================================
-// StarDetector
-// =============================================================================
 
 /// Star detector with reusable buffer pool.
 #[derive(Debug)]

@@ -5,7 +5,7 @@
 use crate::math::statistics::median_and_mad_f32_mut;
 use crate::star_detection::config::Config;
 use crate::star_detection::detector::Diagnostics;
-use crate::star_detection::star::Star;
+use crate::star_detection::star::{SATURATION_PEAK, Star};
 
 /// Below this star count, use O(n²) brute-force duplicate removal
 /// instead of spatial hashing. Determined by benchmark crossover point.
@@ -45,7 +45,7 @@ pub(crate) fn filter(mut stars: Vec<Star>, config: &Config) -> (Vec<Star>, Quali
 
     // Apply quality filters
     stars.retain(|star| {
-        if star.is_saturated(0.95) {
+        if star.is_saturated(SATURATION_PEAK) {
             stats.saturated += 1;
             false
         } else if star.snr < config.min_snr {
@@ -87,7 +87,7 @@ fn sort_by_flux(stars: &mut [Star]) {
 }
 
 /// Filter stars by FWHM using MAD-based outlier detection.
-pub(crate) fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize {
+fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize {
     if max_deviation <= 0.0 || stars.len() < 5 {
         return 0;
     }
@@ -177,7 +177,7 @@ pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32)
 }
 
 /// Simple O(n²) duplicate removal for small star counts.
-pub(crate) fn remove_duplicate_stars_simple(stars: &mut Vec<Star>, min_separation: f32) -> usize {
+fn remove_duplicate_stars_simple(stars: &mut Vec<Star>, min_separation: f32) -> usize {
     let min_sep_sq = (min_separation * min_separation) as f64;
     let mut kept = vec![true; stars.len()];
 
