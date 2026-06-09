@@ -15,8 +15,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use common::Buffer2;
 
 use crate::astro_image::AstroImage;
+use crate::astro_image::cfa::CfaType;
 use crate::astro_image::error::ImageError;
 use crate::calibration_masters::CalibrationMasters;
+use crate::calibration_masters::cosmic_ray::{CosmicRayConfig, reject_cosmic_rays};
 use crate::raw::load_raw_cfa;
 use crate::registration::config::Config as RegistrationConfig;
 use crate::registration::{register, warp};
@@ -46,6 +48,10 @@ pub struct AlignStackConfig {
     pub registration: RegistrationConfig,
     pub stack: StackConfig,
     pub reference: Reference,
+    /// Optional single-frame cosmic-ray rejection, applied per light by [`calibrate_align_stack`]
+    /// after calibration and before demosaic. `None` (default) skips it. Currently mono-only;
+    /// Bayer/X-Trans frames are skipped with a warning (Phase 2 adds CFA support).
+    pub cosmic_ray: Option<CosmicRayConfig>,
 }
 
 /// Outcome of [`align_and_stack`].
@@ -284,6 +290,21 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
                 source,
             })?;
             masters.calibrate(&mut cfa);
+            if let Some(cr) = &config.cosmic_ray {
+                // Phase 1 is mono-only — a Laplacian across CFA colors is meaningless. Run only on
+                // a frame known to be mono; anything else (Bayer/X-Trans, or an unknown pattern that
+                // could be mislabeled Bayer) is skipped rather than corrupted (Phase 2 adds
+                // same-color stencils).
+                match &cfa.metadata.cfa_type {
+                    Some(CfaType::Mono) => {
+                        let removed = reject_cosmic_rays(&mut cfa, cr);
+                        tracing::info!(removed, "rejected cosmic rays");
+                    }
+                    _ => tracing::warn!(
+                        "cosmic-ray rejection currently supports mono frames only; skipping"
+                    ),
+                }
+            }
             let image = cfa.demosaic();
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
             tracing::info!(frame = n, total, "calibrated light");
