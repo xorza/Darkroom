@@ -26,11 +26,12 @@ Status: ☐ todo · ⊘ deferred (deliberate)
   repeat — so registered/coverage-weighted stacking scales past RAM. Needs: a spilling
   `LightCache` constructor (write a `WeightedFrame` to mmap files) + `align_and_stack`
   feeding frames one at a time.
-- ☐ **Cosmic-ray rejection — Phase 2 (CFA)** · High · M. Phase 1 (mono L.A.Cosmic) shipped:
-  `calibration_masters::cosmic_ray` + `AlignStackConfig.cosmic_ray`, ground-truth tested on
-  synthetic mono fields. Phase 2 generalizes the Laplacian/median/replace stencils to same-color
-  neighbors via `CfaType::color_at` for Bayer + X-Trans (the bundled `.RAF` Lights), dropping the
-  mono guard. See `docs/pipeline/cosmic-ray-rejection-plan.md`.
+- ☑ **Cosmic-ray rejection (L.A.Cosmic)** · Done. `calibration_masters::cosmic_ray` +
+  `AlignStackConfig.cosmic_ray` (off by default). Mono = subsampled L.A.Cosmic; **Bayer** =
+  deinterleave-by-phase + per-plane mono reuse; **X-Trans** = `color_at` same-color detector. Noise:
+  empirical (default) or parametric. Ground-truth tested (mono/Bayer/X-Trans synthetic). Remaining
+  follow-ups: a CR **mask → stack coverage** path (exclude vs in-paint), and X-Trans **perf** (the
+  per-pixel same-color gather is unoptimized). See `docs/pipeline/cosmic-ray-rejection-plan.md`.
 - ⊘ dark **scaling** for mismatched exposures (+ bias-free-dark path); calibration
   **uncertainty plane**; drizzle **blot/drizzle-CR**; **CFA/Bayer-drizzle** wiring; **TPS** wired
   into `register()`; **SIP auto-order**.

@@ -15,7 +15,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use common::Buffer2;
 
 use crate::astro_image::AstroImage;
-use crate::astro_image::cfa::CfaType;
 use crate::astro_image::error::ImageError;
 use crate::calibration_masters::CalibrationMasters;
 use crate::calibration_masters::cosmic_ray::{CosmicRayConfig, reject_cosmic_rays};
@@ -291,18 +290,17 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
             })?;
             masters.calibrate(&mut cfa);
             if let Some(cr) = &config.cosmic_ray {
-                // Phase 1 is mono-only — a Laplacian across CFA colors is meaningless. Run only on
-                // a frame known to be mono; anything else (Bayer/X-Trans, or an unknown pattern that
-                // could be mislabeled Bayer) is skipped rather than corrupted (Phase 2 adds
-                // same-color stencils).
+                // Dispatched per CFA type inside `reject_cosmic_rays` (mono / Bayer-deinterleave /
+                // X-Trans same-color). Only an unlabeled frame is skipped — its pattern is unknown,
+                // so any same-color/Laplacian stencil could corrupt a mislabeled mosaic.
                 match &cfa.metadata.cfa_type {
-                    Some(CfaType::Mono) => {
+                    Some(_) => {
                         let removed = reject_cosmic_rays(&mut cfa, cr);
                         tracing::info!(removed, "rejected cosmic rays");
                     }
-                    _ => tracing::warn!(
-                        "cosmic-ray rejection currently supports mono frames only; skipping"
-                    ),
+                    None => {
+                        tracing::warn!("frame has no CFA pattern; skipping cosmic-ray rejection")
+                    }
                 }
             }
             let image = cfa.demosaic();
