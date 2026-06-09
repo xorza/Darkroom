@@ -39,7 +39,19 @@ Status: ☐ todo · ⊘ deferred (deliberate)
   output is `AstroImage::save` → TIFF f32 (lossless) or PNG/JPEG (lossy 8-bit); lumos reads
   FITS but cannot write it. Add a FITS f32 writer and restrict the result path to lossless
   formats (TIFF f32 + FITS). PNG/JPEG belong in a viewer, not the pipeline output. The drizzle
-  `weight`/`variance` planes are the natural FITS extension HDUs (WHT/VAR) for the science product.
+  *and* stacking (`StackResult` / `AlignStackResult`) `weight`/`variance`/`coverage` planes are the
+  natural FITS extension HDUs (WHT/VAR) for the science product.
+- ☐ **PR5 — post-rejection per-channel stack variance/weight planes** · Medium (precision) · M.
+  `stack`/`stack_images`/`align_and_stack` now emit geometric `coverage`/`weight`/`variance` planes
+  (`StackResult`, `LightCache::geometry_planes` in `stacking/cache.rs`) — channel-independent and
+  computed **pre-rejection**, matching drizzle's `Σwᵢ`/`Σwᵢ²` contract. Refinement: rejection drops
+  frames per channel, so under aggressive clipping the true effective `N` (hence the variance) is
+  per-channel and slightly below the geometric estimate. Make the planes reflect the *surviving*
+  set — have `combine_mean` also return `Σw`/`Σw²` over its post-rejection survivors (the indices it
+  already tracks in `scratch`), so `weight`/`variance` become exact per-channel `PixelData`. Cost:
+  the combine return type grows from `f32` to a small struct and the aux planes need a parallel
+  write inside the engine (`UnsafeSendPtr`), so it touches the hot path — deferred from the initial
+  geometric version for that reason.
 
 ## Performance queue (ARM is the profiled target)
 

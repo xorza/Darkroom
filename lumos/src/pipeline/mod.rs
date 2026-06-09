@@ -12,6 +12,8 @@ use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use common::Buffer2;
+
 use crate::astro_image::AstroImage;
 use crate::astro_image::error::ImageError;
 use crate::calibration_masters::CalibrationMasters;
@@ -51,6 +53,12 @@ pub struct AlignStackConfig {
 pub struct AlignStackResult {
     /// The combined image.
     pub image: AstroImage,
+    /// Per-pixel fraction of frames that contributed, `[0,1]` — `< 1` along warped-frame borders.
+    pub coverage: Buffer2<f32>,
+    /// Per-pixel WHT (`Σ wᵢcᵢ`): each pixel's absolute statistical weight.
+    pub weight: Buffer2<f32>,
+    /// Per-pixel output variance per unit input variance (`Σwᵢ²/(Σwᵢ)²`). See [`crate::StackResult`].
+    pub variance: Buffer2<f32>,
     /// Index (into the input) of the reference frame the others were aligned to.
     pub reference: usize,
     /// Number of frames that went into the stack: the reference plus every frame that
@@ -234,11 +242,14 @@ pub fn align_and_stack(
 
     let registered = frames.len();
     tracing::info!(frames = registered, "Stacking aligned frames");
-    let image = stack_images(frames, config.stack.clone(), ProgressCallback::default())?;
+    let stacked = stack_images(frames, config.stack.clone(), ProgressCallback::default())?;
     tracing::info!("Stack complete");
 
     Ok(AlignStackResult {
-        image,
+        image: stacked.image,
+        coverage: stacked.coverage,
+        weight: stacked.weight,
+        variance: stacked.variance,
         reference,
         registered,
         dropped,

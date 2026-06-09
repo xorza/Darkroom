@@ -28,7 +28,8 @@ fn test_stack_registered_lights() {
     };
 
     let stacked = stack(&paths, config, ProgressCallback::default())
-        .expect("Failed to stack registered lights");
+        .expect("Failed to stack registered lights")
+        .image;
 
     println!(
         "Stacked result: {}x{}x{}",

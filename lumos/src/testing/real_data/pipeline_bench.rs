@@ -339,7 +339,9 @@ fn bench_full_pipeline() {
         ..StackConfig::sigma_clipped(2.5)
     };
 
-    let stacked = stack(&registered_paths, stack_config, ProgressCallback::default()).unwrap();
+    let stacked = stack(&registered_paths, stack_config, ProgressCallback::default())
+        .unwrap()
+        .image;
 
     println!(
         "  Stacked result: {}x{}x{}",

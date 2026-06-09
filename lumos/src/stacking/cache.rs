@@ -661,6 +661,17 @@ impl CfaCache {
     }
 }
 
+/// Geometric per-pixel quality planes produced by [`LightCache::geometry_planes`]: `coverage`
+/// (fraction of frames contributing, `[0,1]`), `weight` (the WHT, `Σ wᵢcᵢ`), and `variance`
+/// (`Σ(wᵢcᵢ)²/(Σ wᵢcᵢ)²`). Channel-independent and pre-rejection — the same `Σwᵢ`/`Σwᵢ²` maps
+/// drizzle reports, so a downstream tool reads identical ancillary data from either combine backend.
+#[derive(Debug)]
+pub(crate) struct GeometryPlanes {
+    pub(crate) coverage: Buffer2<f32>,
+    pub(crate) weight: Buffer2<f32>,
+    pub(crate) variance: Buffer2<f32>,
+}
+
 impl LightCache {
     /// Build an in-memory coverage-weighted cache from [`StackFrame`]s (image + optional
     /// per-pixel coverage), moving channels and coverage into [`Plane::Memory`] (no copy).
@@ -722,6 +733,112 @@ impl LightCache {
                 progress,
             },
         })
+    }
+
+    /// Geometric per-pixel quality planes — `coverage` (fraction of frames contributing, `[0,1]`),
+    /// `weight` (`Σ wᵢcᵢ`, the WHT), and `variance` (`Σ(wᵢcᵢ)²/(Σ wᵢcᵢ)²`, output variance per unit
+    /// input variance) — matching the `Σwᵢ`/`Σwᵢ²` maps drizzle reports. The weight `wᵢ·cᵢ`
+    /// (per-frame weight × per-pixel coverage) doesn't depend on channel, so this rides cheaply on
+    /// data the combine already touches and stays one plane each.
+    ///
+    /// **Pre-rejection:** a frame counts wherever its coverage clears [`COVERAGE_EPSILON`] — the set
+    /// the combine draws from *before* outlier rejection narrows it per channel. Computed in a
+    /// standalone pass so the combine engine is untouched; under aggressive rejection the variance
+    /// is a slight under-estimate (see the per-channel follow-up in `docs/pipeline/roadmap.md`).
+    ///
+    /// `weights` are the same per-frame weights the combine used (`None` = equal, e.g. median).
+    pub(crate) fn geometry_planes(&self, weights: Option<&[f32]>) -> GeometryPlanes {
+        let frame_count = self.frames.len();
+        if let Some(w) = weights {
+            assert_eq!(w.len(), frame_count, "weight count must match frame count");
+        }
+        let width = self.core.dimensions.size.x;
+        let height = self.core.dimensions.size.y;
+        let frame_weight = |f: usize| weights.map_or(1.0, |w| w[f]);
+
+        // No frame carries a coverage map → every pixel is fully covered and the planes are
+        // spatially uniform; fill constants and skip the per-pixel pass. (`stack()`-from-disk
+        // always lands here, as does an all-reference in-memory stack.)
+        if self.frames.iter().all(|f| f.coverage.is_none()) {
+            let wsum: f32 = (0..frame_count).map(frame_weight).sum();
+            let wsq: f32 = (0..frame_count).map(|f| frame_weight(f).powi(2)).sum();
+            let variance = if wsum > 0.0 { wsq / (wsum * wsum) } else { 0.0 };
+            return GeometryPlanes {
+                coverage: Buffer2::new_filled(width, height, 1.0),
+                weight: Buffer2::new_filled(width, height, wsum),
+                variance: Buffer2::new_filled(width, height, variance),
+            };
+        }
+
+        let mut coverage = Buffer2::new_default(width, height);
+        let mut weight = Buffer2::new_default(width, height);
+        let mut variance = Buffer2::new_default(width, height);
+        let inv_frames = 1.0 / frame_count as f32;
+
+        // Coverage planes share their frame's tier, so they may be mmap-backed: read them in the
+        // same row-aligned chunks the combine uses. The output planes are small single-channel RAM
+        // buffers, written in parallel across the three at once, one row per task.
+        let chunk_rows = if self.core.cache_dir.is_none() {
+            height
+        } else {
+            compute_optimal_chunk_rows_with_memory(
+                width,
+                1,
+                frame_count,
+                self.core.config.get_available_memory(),
+            )
+        };
+
+        let mut start_row = 0;
+        while start_row < height {
+            let end_row = (start_row + chunk_rows).min(height);
+            let base = start_row * width;
+            let span = (end_row - start_row) * width;
+
+            let cov_chunks: Vec<Option<&[f32]>> = self
+                .frames
+                .iter()
+                .map(|f| f.coverage.as_ref().map(|p| p.chunk(base, base + span)))
+                .collect();
+
+            let cov_out = &mut coverage.pixels_mut()[base..base + span];
+            let wt_out = &mut weight.pixels_mut()[base..base + span];
+            let var_out = &mut variance.pixels_mut()[base..base + span];
+            cov_out
+                .par_chunks_mut(width)
+                .zip(wt_out.par_chunks_mut(width))
+                .zip(var_out.par_chunks_mut(width))
+                .enumerate()
+                .for_each(|(row_in_chunk, ((cov_row, wt_row), var_row))| {
+                    let row_base = row_in_chunk * width;
+                    for px in 0..width {
+                        let local = row_base + px;
+                        let mut count = 0u32;
+                        let mut wsum = 0.0f32;
+                        let mut wsq = 0.0f32;
+                        for (frame_idx, cov) in cov_chunks.iter().enumerate() {
+                            let c = cov.map_or(1.0, |map| map[local]);
+                            if c > COVERAGE_EPSILON {
+                                let w = frame_weight(frame_idx) * c;
+                                wsum += w;
+                                wsq += w * w;
+                                count += 1;
+                            }
+                        }
+                        cov_row[px] = count as f32 * inv_frames;
+                        wt_row[px] = wsum;
+                        var_row[px] = if wsum > 0.0 { wsq / (wsum * wsum) } else { 0.0 };
+                    }
+                });
+
+            start_row = end_row;
+        }
+
+        GeometryPlanes {
+            coverage,
+            weight,
+            variance,
+        }
     }
 
     /// Coverage-weighted combine: a frame contributes at a pixel only where its coverage exceeds
@@ -1063,6 +1180,77 @@ pub(crate) mod tests {
         let frames = images.into_iter().map(StackFrame::from).collect();
         LightCache::from_stack_frames(frames, &CacheConfig::default(), ProgressCallback::default())
             .expect("test images must be non-empty and dimension-consistent")
+    }
+
+    #[test]
+    fn geometry_planes_uniform_equal_weights() {
+        // 4 frames, no coverage maps → fast path. Equal weights: every pixel sees all 4 frames at
+        // weight 1, so weight = Σw = 4, variance = Σw²/(Σw)² = 4/16 = 0.25, coverage = 4/4 = 1.
+        let dims = ImageDimensions::new((3, 2), 1);
+        let images: Vec<AstroImage> = (0..4)
+            .map(|i| AstroImage::from_pixels(dims, vec![i as f32; 6]))
+            .collect();
+        let g = make_test_cache(images).geometry_planes(None);
+        for p in 0..6 {
+            assert_eq!(g.coverage[p], 1.0);
+            assert_eq!(g.weight[p], 4.0);
+            assert_eq!(g.variance[p], 0.25);
+        }
+    }
+
+    #[test]
+    fn geometry_planes_uniform_manual_weights() {
+        // weights [1,2,3,4], full coverage: weight = 10, Σw² = 1+4+9+16 = 30, variance = 30/100 = 0.30.
+        let dims = ImageDimensions::new((2, 1), 1);
+        let images: Vec<AstroImage> = (0..4)
+            .map(|_| AstroImage::from_pixels(dims, vec![0.5; 2]))
+            .collect();
+        let g = make_test_cache(images).geometry_planes(Some(&[1.0, 2.0, 3.0, 4.0]));
+        for p in 0..2 {
+            assert_eq!(g.coverage[p], 1.0);
+            assert_eq!(g.weight[p], 10.0);
+            assert!(
+                (g.variance[p] - 0.30).abs() < 1e-6,
+                "variance = {}",
+                g.variance[p]
+            );
+        }
+    }
+
+    #[test]
+    fn geometry_planes_partial_coverage() {
+        // width-2 frames; px0 fully covered by all 4, px1 covered by f0(1.0), f1(0.5), f3(1.0) and
+        // dropped by f2 (coverage 0 < ε). Equal weights. Exercises the per-pixel (non-fast) path.
+        //   px0: count 4, Σwc = 4,   Σ(wc)² = 4    → coverage 1.0,  weight 4.0, variance 4/16  = 0.25
+        //   px1: count 3, Σwc = 2.5, Σ(wc)² = 2.25 → coverage 0.75, weight 2.5, variance 2.25/6.25 = 0.36
+        let dims = ImageDimensions::new((2, 1), 1);
+        let cov = [[1.0_f32, 1.0], [1.0, 0.5], [1.0, 0.0], [1.0, 1.0]];
+        let frames: Vec<StackFrame> = cov
+            .iter()
+            .map(|c| StackFrame {
+                image: AstroImage::from_pixels(dims, vec![0.5, 0.5]),
+                coverage: Some(Buffer2::new(2, 1, c.to_vec())),
+            })
+            .collect();
+        let cache = LightCache::from_stack_frames(
+            frames,
+            &CacheConfig::default(),
+            ProgressCallback::default(),
+        )
+        .expect("frames are valid");
+        let g = cache.geometry_planes(None);
+
+        assert_eq!(g.coverage[0], 1.0);
+        assert_eq!(g.weight[0], 4.0);
+        assert_eq!(g.variance[0], 0.25);
+
+        assert_eq!(g.coverage[1], 0.75);
+        assert_eq!(g.weight[1], 2.5);
+        assert!(
+            (g.variance[1] - 0.36).abs() < 1e-6,
+            "variance = {}",
+            g.variance[1]
+        );
     }
 
     /// Build an in-memory [`CfaCache`] from single-channel CFA frame pixels (test helper for the
