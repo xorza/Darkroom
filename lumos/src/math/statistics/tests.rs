@@ -925,3 +925,13 @@ fn test_sigma_clipped_stats_all_same_except_one() {
         median
     );
 }
+
+#[test]
+fn test_mad_floored() {
+    // Floor active: a spread below the floor is raised to floor_fraction * center.
+    assert_eq!(mad_floored(0.1, 10.0, 0.5), 5.0);
+    // Floor inactive: a real spread above the floor passes through unchanged.
+    assert_eq!(mad_floored(8.0, 10.0, 0.5), 8.0);
+    // Exactly at the floor.
+    assert_eq!(mad_floored(5.0, 10.0, 0.5), 5.0);
+}

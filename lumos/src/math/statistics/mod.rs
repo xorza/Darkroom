@@ -114,6 +114,16 @@ pub fn median_and_mad_f32_mut(data: &mut [f32]) -> (f32, f32) {
     (median, mad)
 }
 
+/// MAD floored at `floor_fraction * center`.
+///
+/// A near-degenerate distribution (values nearly identical) has MAD ≈ 0, which would
+/// collapse any MAD-scaled rejection threshold to zero. Flooring at a fraction of the
+/// center keeps a usable spread estimate. Callers pass the median as `center`.
+#[inline]
+pub fn mad_floored(mad: f32, center: f32, floor_fraction: f32) -> f32 {
+    mad.max(center * floor_fraction)
+}
+
 /// Result of a single sigma-clipping iteration.
 enum ClipResult {
     /// Converged: no values were clipped (or sigma ≈ 0). Final stats.
