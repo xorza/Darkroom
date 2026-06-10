@@ -5,7 +5,7 @@
 use crate::color_calibration::{ScnrMethod, neutralize_background, scnr};
 use crate::denoise::{DenoiseConfig, denoise};
 use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
-use crate::testing::{calibration_dir, init_tracing, save_jpg};
+use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{AstroImage, StretchConfig, stretch};
 
 /// Robust high-frequency noise of a channel: the MAD-sigma of adjacent-pixel differences. Slow
@@ -63,5 +63,5 @@ fn denoise_reduces_linear_noise() {
     // Finish the display chain — stretch then clean any residual green — and save the final image.
     stretch(&mut img, StretchConfig::auto_stf());
     scnr(&mut img, ScnrMethod::AverageNeutral);
-    save_jpg(&img, "denoise/stacked_light_denoised.jpg");
+    save_png(&img, "denoise/stacked_light_denoised.png");
 }

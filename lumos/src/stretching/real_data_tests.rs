@@ -3,7 +3,7 @@
 //! lives in `test_data/lumos_data/`).
 
 use crate::math::statistics::median_f32_mut;
-use crate::testing::{calibration_dir, init_tracing, save_jpg};
+use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{AstroImage, StretchConfig, stretch};
 
 #[derive(Debug)]
@@ -77,6 +77,6 @@ fn stretch_stacked_light() {
             "{name} spreads contrast across the range: {out:?}"
         );
 
-        save_jpg(&stretched, &format!("stretch/stacked_light_{name}.jpg"));
+        save_png(&stretched, &format!("stretch/stacked_light_{name}.png"));
     }
 }

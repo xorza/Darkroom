@@ -5,7 +5,7 @@
 use common::Rgb;
 
 use crate::color_calibration::{ScnrMethod, channel_backgrounds, neutralize_background, scnr};
-use crate::testing::{calibration_dir, init_tracing, save_jpg};
+use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{AstroImage, StretchConfig, stretch};
 
 fn spread(bg: Rgb) -> f32 {
@@ -52,12 +52,12 @@ fn neutralize_then_stretch_removes_green() {
     // Neutralized → stretch → save (compare against the un-neutralized green stretch from
     // `stretching::real_data_tests`).
     stretch(&mut img, StretchConfig::auto_stf());
-    save_jpg(&img, "color/stacked_light_neutralized_stf.jpg");
+    save_png(&img, "color/stacked_light_neutralized_stf.png");
 
     // Post-stretch Average-Neutral SCNR cleans any residual green left after neutralization.
     scnr(&mut img, ScnrMethod::AverageNeutral);
-    save_jpg(&img, "color/stacked_light_neutralized_scnr.jpg");
+    save_png(&img, "color/stacked_light_neutralized_scnr.png");
 
     neutralize_background(&mut img);
-    save_jpg(&img, "color/stacked_light_neutralized_scnr_renorm.jpg");
+    save_png(&img, "color/stacked_light_neutralized_scnr_renorm.png");
 }
