@@ -48,10 +48,10 @@ The image is divided into a grid of tiles (default 64×64 pixels). For each tile
 
 1. **Pixel Collection**: Gather pixel values (with optional source mask)
 2. **Sigma Clipping**: Iteratively reject outliers beyond 3σ from median
-3. **Statistics**: Compute median (background) and MAD-based sigma (noise)
+3. **Statistics**: SExtractor crowding-aware sky — Pearson mode `2.5·median − 1.5·mean` of the clip survivors when `|mean − median| < 0.3σ` (cancels the residual bright-ward skew a plain median over-estimates), median fallback when strongly skewed — plus MAD-based sigma (noise)
 4. **Median Filter**: Apply 3×3 median filter to tile statistics
 
-This follows SExtractor's approach where the background estimator uses "κσ clipping and mode estimation" with "iterative clipping at ±3σ around the median."
+This follows SExtractor's approach where the background estimator uses "κσ clipping and mode estimation" with "iterative clipping at ±3σ around the median" (Bertin & Arnouts 1996, `back.c`).
 
 ### Phase 2: Interpolation
 

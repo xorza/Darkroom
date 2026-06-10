@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::math::sum::mean_f32;
+
 /// Per-channel robust statistics (median and MAD).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ChannelStats {
@@ -124,6 +126,25 @@ pub fn mad_floored(mad: f32, center: f32, floor_fraction: f32) -> f32 {
     mad.max(center * floor_fraction)
 }
 
+/// Statistics of the sigma-clip survivors, from [`sigma_clipped_median_mad`].
+#[derive(Debug, Clone, Copy)]
+pub struct ClippedStats {
+    pub median: f32,
+    /// MAD-based sigma of the survivors.
+    pub sigma: f32,
+    /// Mean of the survivors (compensated sum). With the median it exposes the residual skew of
+    /// the clipped distribution — what SExtractor's Pearson mode estimator corrects for.
+    pub mean: f32,
+}
+
+impl ClippedStats {
+    const ZERO: ClippedStats = ClippedStats {
+        median: 0.0,
+        sigma: 0.0,
+        mean: 0.0,
+    };
+}
+
 /// Result of a single sigma-clipping iteration.
 enum ClipResult {
     /// Converged: no values were clipped (or sigma ≈ 0). Final stats.
@@ -211,15 +232,15 @@ fn compute_final_stats(values: &mut [f32], deviations: &mut [f32]) -> (f32, f32)
 /// * `iterations` - Number of clipping iterations
 ///
 /// # Returns
-/// Tuple of (median, sigma) after clipping
+/// [`ClippedStats`] (median, MAD-sigma, mean) of the clip survivors.
 pub fn sigma_clipped_median_mad(
     values: &mut [f32],
     deviations: &mut Vec<f32>,
     kappa: f32,
     iterations: usize,
-) -> (f32, f32) {
+) -> ClippedStats {
     if values.is_empty() {
-        return (0.0, 0.0);
+        return ClippedStats::ZERO;
     }
 
     let mut len = values.len();
@@ -227,15 +248,27 @@ pub fn sigma_clipped_median_mad(
     // Ensure deviations buffer has enough capacity
     deviations.resize(len, 0.0);
 
+    let mut converged = None;
     for _ in 0..iterations {
         match sigma_clip_iteration(values, &mut len, deviations, kappa) {
-            ClipResult::Converged(median, sigma) => return (median, sigma),
+            ClipResult::Converged(median, sigma) => {
+                converged = Some((median, sigma));
+                break;
+            }
             ClipResult::TooFew => break,
             ClipResult::Clipped => {}
         }
     }
 
-    compute_final_stats(&mut values[..len], &mut deviations[..len])
+    // Every exit path leaves the survivors in `values[..len]` (len ≥ 1: at entry values is
+    // non-empty and a clip pass always keeps at least the values at the median).
+    let (median, sigma) = converged
+        .unwrap_or_else(|| compute_final_stats(&mut values[..len], &mut deviations[..len]));
+    ClippedStats {
+        median,
+        sigma,
+        mean: mean_f32(&values[..len]),
+    }
 }
 
 /// Sigma-clipped median and MAD computation using ArrayVec for zero heap allocation.
@@ -250,15 +283,15 @@ pub fn sigma_clipped_median_mad(
 /// * `iterations` - Number of clipping iterations
 ///
 /// # Returns
-/// Tuple of (median, sigma) after clipping
+/// [`ClippedStats`] (median, MAD-sigma, mean) of the clip survivors.
 pub fn sigma_clipped_median_mad_arrayvec<const N: usize>(
     values: &mut [f32],
     deviations: &mut arrayvec::ArrayVec<f32, N>,
     kappa: f32,
     iterations: usize,
-) -> (f32, f32) {
+) -> ClippedStats {
     if values.is_empty() {
-        return (0.0, 0.0);
+        return ClippedStats::ZERO;
     }
     assert!(
         values.len() <= N,
@@ -272,15 +305,26 @@ pub fn sigma_clipped_median_mad_arrayvec<const N: usize>(
     deviations.clear();
     deviations.extend(std::iter::repeat_n(0.0f32, len));
 
+    let mut converged = None;
     for _ in 0..iterations {
         match sigma_clip_iteration(values, &mut len, deviations.as_mut_slice(), kappa) {
-            ClipResult::Converged(median, sigma) => return (median, sigma),
+            ClipResult::Converged(median, sigma) => {
+                converged = Some((median, sigma));
+                break;
+            }
             ClipResult::TooFew => break,
             ClipResult::Clipped => {}
         }
     }
 
-    compute_final_stats(&mut values[..len], &mut deviations.as_mut_slice()[..len])
+    let (median, sigma) = converged.unwrap_or_else(|| {
+        compute_final_stats(&mut values[..len], &mut deviations.as_mut_slice()[..len])
+    });
+    ClippedStats {
+        median,
+        sigma,
+        mean: mean_f32(&values[..len]),
+    }
 }
 
 #[cfg(test)]

@@ -199,10 +199,10 @@ fn interpolate_row(
     let node_noise = &mut scratch.node_noise[..tiles_x];
 
     for tx in 0..tiles_x {
-        let f0_bg = grid.get(tx, ty0).median;
-        let f1_bg = grid.get(tx, ty1).median;
-        let d0_bg = grid.d2y_median(tx, ty0);
-        let d1_bg = grid.d2y_median(tx, ty1);
+        let f0_bg = grid.get(tx, ty0).sky;
+        let f1_bg = grid.get(tx, ty1).sky;
+        let d0_bg = grid.d2y_sky(tx, ty0);
+        let d1_bg = grid.d2y_sky(tx, ty1);
         node_bg[tx] = tile_grid::cubic_spline_eval(f0_bg, f1_bg, d0_bg, d1_bg, hy, ty);
 
         let f0_n = grid.get(tx, ty0).sigma;

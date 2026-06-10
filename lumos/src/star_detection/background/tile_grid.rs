@@ -1,5 +1,6 @@
 //! Tile grid for background estimation interpolation.
 
+use crate::math::statistics::ClippedStats;
 use crate::math::statistics::median_f32_mut;
 use crate::math::statistics::sigma_clipped_median_mad;
 use common::BitBuffer2;
@@ -13,7 +14,9 @@ const MAX_TILE_SAMPLES: usize = 1024;
 /// Tile statistics computed during background estimation.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct TileStats {
-    pub median: f32,
+    /// Sky level: SExtractor's crowding-aware estimator (Pearson mode, median fallback when
+    /// strongly skewed) over the sigma-clip survivors. See [`sextractor_sky`].
+    pub sky: f32,
     pub sigma: f32,
 }
 
@@ -21,9 +24,9 @@ pub(crate) struct TileStats {
 #[derive(Debug)]
 pub(crate) struct TileGrid {
     stats: Buffer2<TileStats>,
-    /// Second derivatives in Y direction for natural cubic spline (median).
+    /// Second derivatives in Y direction for natural cubic spline (sky).
     /// Layout: tiles_x * tiles_y, row-major (same as stats).
-    d2y_median: Vec<f32>,
+    d2y_sky: Vec<f32>,
     /// Second derivatives in Y direction for natural cubic spline (sigma).
     d2y_sigma: Vec<f32>,
     /// Precomputed X-coordinates of tile centers (one per tile column).
@@ -52,7 +55,7 @@ impl TileGrid {
 
         Self {
             stats: Buffer2::new_default(tiles_x, tiles_y),
-            d2y_median: vec![0.0; n],
+            d2y_sky: vec![0.0; n],
             d2y_sigma: vec![0.0; n],
             centers_x,
             tile_size,
@@ -103,10 +106,10 @@ impl TileGrid {
         (y_start + y_end) as f32 * 0.5
     }
 
-    /// Second derivative of median in Y at tile (tx, ty) for natural cubic spline.
+    /// Second derivative of sky in Y at tile (tx, ty) for natural cubic spline.
     #[inline]
-    pub fn d2y_median(&self, tx: usize, ty: usize) -> f32 {
-        self.d2y_median[ty * self.tiles_x() + tx]
+    pub fn d2y_sky(&self, tx: usize, ty: usize) -> f32 {
+        self.d2y_sky[ty * self.tiles_x() + tx]
     }
 
     /// Second derivative of sigma in Y at tile (tx, ty) for natural cubic spline.
@@ -200,7 +203,7 @@ impl TileGrid {
                 let tx = idx % tiles_x;
                 let ty = idx / tiles_x;
 
-                let mut medians = [0.0f32; 9];
+                let mut skies = [0.0f32; 9];
                 let mut sigmas = [0.0f32; 9];
                 let mut count = 0;
 
@@ -211,14 +214,14 @@ impl TileGrid {
 
                         if nx >= 0 && nx < tiles_x as i32 && ny >= 0 && ny < tiles_y as i32 {
                             let neighbor = src[ny as usize * tiles_x + nx as usize];
-                            medians[count] = neighbor.median;
+                            skies[count] = neighbor.sky;
                             sigmas[count] = neighbor.sigma;
                             count += 1;
                         }
                     }
                 }
 
-                out.median = median_f32_mut(&mut medians[..count]);
+                out.sky = median_f32_mut(&mut skies[..count]);
                 out.sigma = median_f32_mut(&mut sigmas[..count]);
             });
 
@@ -247,13 +250,13 @@ impl TileGrid {
         let mut scratch = vec![0.0f32; tiles_y.saturating_sub(2)];
 
         for tx in 0..tiles_x {
-            // Solve for median
+            // Solve for sky
             for (ty, val) in values.iter_mut().enumerate() {
-                *val = self.stats[(tx, ty)].median;
+                *val = self.stats[(tx, ty)].sky;
             }
             solve_natural_spline_d2(&values, &centers_y, &mut d2, &mut scratch);
             for (ty, &d) in d2.iter().enumerate() {
-                self.d2y_median[ty * tiles_x + tx] = d;
+                self.d2y_sky[ty * tiles_x + tx] = d;
             }
 
             // Solve for sigma
@@ -418,9 +421,28 @@ fn compute_tile_stats(
         return TileStats::default();
     }
 
-    let (median, sigma) = sigma_clipped_median_mad(values, deviations, 3.0, sigma_clip_iterations);
+    let stats = sigma_clipped_median_mad(values, deviations, 3.0, sigma_clip_iterations);
 
-    TileStats { median, sigma }
+    TileStats {
+        sky: sextractor_sky(&stats),
+        sigma: stats.sigma,
+    }
+}
+
+/// SExtractor's crowding-aware sky estimator (Bertin & Arnouts 1996, `back.c`).
+///
+/// Even after clipping, the sky histogram keeps a bright-ward tail from faint sources, so
+/// `mean > median > mode` and the median alone systematically over-estimates the sky. Pearson's
+/// empirical mode `2.5·median − 1.5·mean` cancels that residual skew. When the tile is strongly
+/// skewed (crowded: `|mean − median| ≥ 0.3·σ`) the extrapolation becomes unreliable, so it falls
+/// back to the plain median. σ = 0 also takes the fallback — the clip couldn't separate outliers
+/// there (zero spread estimate), so the mean is untrustworthy while the median stays robust.
+fn sextractor_sky(stats: &ClippedStats) -> f32 {
+    if (stats.mean - stats.median).abs() < 0.3 * stats.sigma {
+        2.5 * stats.median - 1.5 * stats.mean
+    } else {
+        stats.median
+    }
 }
 
 /// Collect all pixels from a tile region.
@@ -568,6 +590,53 @@ mod tests {
         grid
     }
 
+    // --- SExtractor sky estimator ---
+
+    #[test]
+    fn sextractor_sky_hand_computed() {
+        let stats = |median: f32, mean: f32, sigma: f32| ClippedStats {
+            median,
+            sigma,
+            mean,
+        };
+        // Mild skew (|mean−median| = 0.2 < 0.3σ): Pearson mode 2.5·100 − 1.5·100.2 = 99.7,
+        // pulled below the median toward the histogram peak.
+        let sky = sextractor_sky(&stats(100.0, 100.2, 1.0));
+        assert!((sky - 99.7).abs() < 1e-4, "mode = 99.7, got {sky}");
+        // Strong skew (1.0 ≥ 0.3σ): the mode extrapolation is unreliable → plain median.
+        assert_eq!(sextractor_sky(&stats(100.0, 101.0, 1.0)), 100.0);
+        // Symmetric histogram: mode = 2.5·m − 1.5·m = m — estimator changes nothing.
+        assert_eq!(sextractor_sky(&stats(100.0, 100.0, 1.0)), 100.0);
+        // Uniform tile (σ = 0): |0| < 0 is false → median fallback.
+        assert_eq!(sextractor_sky(&stats(5.0, 5.0, 0.0)), 5.0);
+    }
+
+    #[test]
+    fn skewed_tile_sky_sits_below_median() {
+        // One 32×32 tile: a symmetric ramp 0.1 + i·1e-5 (i = 0..1024) whose top 200 values get
+        // +0.005 — a bright-ward tail that survives 3σ clipping (max deviation ≈ 0.0101 < 3σ ≈
+        // 0.0114). Hand-computed: median ≈ 0.10512 (unchanged by shifting the top values),
+        // mean = median + 200·0.005/1024 ≈ median + 0.00098, |mean−median| < 0.3σ → mode fires:
+        //   sky = 2.5·0.10512 − 1.5·0.10610 ≈ 0.10365
+        // — below the median-only estimate by ~1.5e-3.
+        let n = 1024usize;
+        let mut values: Vec<f32> = (0..n).map(|i| 0.1 + i as f32 * 1e-5).collect();
+        for v in values.iter_mut().skip(n - 200) {
+            *v += 0.005;
+        }
+        let pixels = Buffer2::new(32, 32, values);
+        let grid = make_grid(&pixels, 32);
+        let sky = grid.get(0, 0).sky;
+        assert!(
+            (sky - 0.10365).abs() < 5e-4,
+            "Pearson-mode sky ≈ 0.10365, got {sky}"
+        );
+        assert!(
+            sky < 0.1045,
+            "sky must sit below the median-only estimate (≈0.10512), got {sky}"
+        );
+    }
+
     // --- Construction ---
 
     #[test]
@@ -596,7 +665,7 @@ mod tests {
         for ty in 0..grid.tiles_y() {
             for tx in 0..grid.tiles_x() {
                 let stats = grid.get(tx, ty);
-                assert!((stats.median - 0.3).abs() < 0.01);
+                assert!((stats.sky - 0.3).abs() < 0.01);
                 assert!(stats.sigma < 0.01);
             }
         }
@@ -720,7 +789,7 @@ mod tests {
         let grid = make_grid_with_mask(&pixels, 32, &mask);
 
         let stats_11 = grid.get(1, 1);
-        assert!((stats_11.median - 0.2).abs() < 0.05);
+        assert!((stats_11.sky - 0.2).abs() < 0.05);
     }
 
     #[test]
@@ -758,9 +827,9 @@ mod tests {
         // With the fix: uses the 64 unmasked background pixels → median ≈ 0.2
         // Without the fix: falls back to all 1024 pixels → median biased toward 0.9
         assert!(
-            (stats.median - 0.2).abs() < 0.05,
+            (stats.sky - 0.2).abs() < 0.05,
             "Tile (0,0) median should be ~0.2 (background), got {}",
-            stats.median
+            stats.sky
         );
     }
 
@@ -774,7 +843,7 @@ mod tests {
         let grid = make_grid_with_mask(&pixels, 32, &mask);
 
         let stats = grid.get(0, 0);
-        assert!((stats.median - 0.4).abs() < 0.05);
+        assert!((stats.sky - 0.4).abs() < 0.05);
     }
 
     #[test]
@@ -790,7 +859,7 @@ mod tests {
             for tx in 0..grid_none.tiles_x() {
                 let s1 = grid_none.get(tx, ty);
                 let s2 = grid_empty.get(tx, ty);
-                assert!((s1.median - s2.median).abs() < 0.001);
+                assert!((s1.sky - s2.sky).abs() < 0.001);
             }
         }
     }
@@ -805,7 +874,7 @@ mod tests {
         for ty in 0..grid.tiles_y() {
             for tx in 0..grid.tiles_x() {
                 let stats = grid.get(tx, ty);
-                assert!((stats.median - 0.4).abs() < 0.01);
+                assert!((stats.sky - 0.4).abs() < 0.01);
             }
         }
     }
@@ -826,7 +895,7 @@ mod tests {
         let grid = make_grid(&pixels, 32);
 
         let center_stats = grid.get(1, 1);
-        assert!((center_stats.median - 0.3).abs() < 0.1);
+        assert!((center_stats.sky - 0.3).abs() < 0.1);
     }
 
     #[test]
@@ -838,7 +907,7 @@ mod tests {
         assert_eq!(grid.tiles_y(), 2);
 
         let stats = grid.get(0, 0);
-        assert!((stats.median - 0.5).abs() < 0.01);
+        assert!((stats.sky - 0.5).abs() < 0.01);
     }
 
     // --- Edge cases ---
@@ -852,7 +921,7 @@ mod tests {
         assert_eq!(grid.tiles_y(), 1);
 
         let stats = grid.get(0, 0);
-        assert!((stats.median - 0.6).abs() < 0.01);
+        assert!((stats.sky - 0.6).abs() < 0.01);
         assert!((grid.centers_x()[0] - 16.0).abs() < 0.01);
         assert!((grid.center_y(0) - 16.0).abs() < 0.01);
     }
@@ -870,7 +939,7 @@ mod tests {
 
         let tl = grid.get(0, 0);
         let br = grid.get(1, 1);
-        assert!(br.median > tl.median);
+        assert!(br.sky > tl.sky);
     }
 
     #[test]
@@ -891,7 +960,7 @@ mod tests {
         assert_eq!(grid.tiles_y(), 1);
 
         let stats = grid.get(0, 0);
-        assert!((stats.median - 0.7).abs() < 0.01);
+        assert!((stats.sky - 0.7).abs() < 0.01);
         assert!((grid.centers_x()[0] - 10.0).abs() < 0.01);
         assert!((grid.center_y(0) - 10.0).abs() < 0.01);
     }
@@ -905,7 +974,7 @@ mod tests {
         assert_eq!(grid.tiles_y(), 1);
 
         let stats = grid.get(0, 0);
-        assert!((stats.median - 0.3).abs() < 0.01);
+        assert!((stats.sky - 0.3).abs() < 0.01);
     }
 
     #[test]
@@ -918,7 +987,7 @@ mod tests {
 
         for tx in 0..grid.tiles_x() {
             let stats = grid.get(tx, 0);
-            assert!((stats.median - 0.5).abs() < 0.01);
+            assert!((stats.sky - 0.5).abs() < 0.01);
         }
     }
 
@@ -932,7 +1001,7 @@ mod tests {
 
         for ty in 0..grid.tiles_y() {
             let stats = grid.get(0, ty);
-            assert!((stats.median - 0.5).abs() < 0.01);
+            assert!((stats.sky - 0.5).abs() < 0.01);
         }
     }
 
@@ -1040,7 +1109,7 @@ mod tests {
 
         let stats = grid.get(0, 0);
         // Median should be close to 0.5 despite outliers
-        assert!((stats.median - 0.5).abs() < 0.1);
+        assert!((stats.sky - 0.5).abs() < 0.1);
     }
 
     #[test]
@@ -1069,7 +1138,7 @@ mod tests {
         let corners = [(0, 0), (3, 0), (0, 3), (3, 3)];
         for (tx, ty) in corners {
             let stats = grid.get(tx, ty);
-            assert!((stats.median - 0.5).abs() < 0.01);
+            assert!((stats.sky - 0.5).abs() < 0.01);
         }
     }
 
@@ -1083,7 +1152,7 @@ mod tests {
         let grid = make_grid(&pixels, 32);
 
         let stats = grid.get(0, 0);
-        assert!((stats.median - (-0.5)).abs() < 0.01);
+        assert!((stats.sky - (-0.5)).abs() < 0.01);
     }
 
     #[test]
@@ -1111,9 +1180,9 @@ mod tests {
 
         let stats = grid.get(0, 0);
         assert!(
-            (stats.median - 5.0).abs() < 0.1,
+            (stats.sky - 5.0).abs() < 0.1,
             "Median of 1-9 should be 5, got {}",
-            stats.median
+            stats.sky
         );
     }
 
@@ -1149,11 +1218,14 @@ mod tests {
         let grid = make_grid(&pixels, 10);
         let stats = grid.get(0, 0);
 
-        // Approximate median for even-length array returns upper-middle element
+        // Approximate median for even-length array returns the upper-middle element (5), the
+        // mean is 4.5, and |mean − median| = 0.5 < 0.3σ ≈ 1.33, so the Pearson mode fires:
+        // sky = 2.5·5 − 1.5·4.5 = 5.75. (The 0.5 "skew" is the fast-median convention on a
+        // 10-sample fixture; on real ≥1000-sample tiles the offset is negligible.)
         assert!(
-            (stats.median - 5.0).abs() < 0.1,
-            "Median should be 5.0 (approx), got {}",
-            stats.median
+            (stats.sky - 5.75).abs() < 0.1,
+            "Pearson-mode sky should be 5.75, got {}",
+            stats.sky
         );
         // Sigma should be ~4.4 (MAD=3 * 1.4826)
         assert!(
@@ -1183,9 +1255,9 @@ mod tests {
 
         // After sigma clipping, median should still be ~100
         assert!(
-            (stats.median - 100.0).abs() < 5.0,
+            (stats.sky - 100.0).abs() < 5.0,
             "Median should be ~100 after clipping outliers, got {}",
-            stats.median
+            stats.sky
         );
     }
 
@@ -1210,9 +1282,9 @@ mod tests {
         // Center tile should be filtered to ~50 (median of 8x50 + 1x200 = 50)
         let center = grid.get(2, 2);
         assert!(
-            (center.median - 50.0).abs() < 10.0,
+            (center.sky - 50.0).abs() < 10.0,
             "Center tile should be ~50 after median filter, got {}",
-            center.median
+            center.sky
         );
     }
 
@@ -1234,20 +1306,20 @@ mod tests {
         let right = grid.get(3, 0);
 
         assert!(
-            right.median > left.median + 30.0,
+            right.sky > left.sky + 30.0,
             "Right tile median {} should be > left {} + 30",
-            right.median,
-            left.median
+            right.sky,
+            left.sky
         );
         assert!(
-            left.median < 30.0,
+            left.sky < 30.0,
             "Left tile median {} should be < 30",
-            left.median
+            left.sky
         );
         assert!(
-            right.median > 70.0,
+            right.sky > 70.0,
             "Right tile median {} should be > 70",
-            right.median
+            right.sky
         );
     }
 
@@ -1301,11 +1373,11 @@ mod tests {
             for tx in 0..grid.tiles_x() {
                 let stats = grid.get(tx, ty);
                 assert!(
-                    (stats.median - 100.0).abs() < 20.0,
+                    (stats.sky - 100.0).abs() < 20.0,
                     "Tile ({},{}) median {} should be ~100 (background)",
                     tx,
                     ty,
-                    stats.median
+                    stats.sky
                 );
             }
         }
@@ -1341,9 +1413,9 @@ mod tests {
         // Bottom-right tile (1,1): no masked pixels → uses background value
         let br = grid.get(1, 1);
         assert!(
-            (br.median - 50.0).abs() < 5.0,
+            (br.sky - 50.0).abs() < 5.0,
             "Unmasked tile median {} should be ~50",
-            br.median
+            br.sky
         );
     }
 
@@ -1520,11 +1592,11 @@ mod tests {
         for ty in 0..grid.tiles_y() {
             for tx in 0..grid.tiles_x() {
                 assert!(
-                    grid.d2y_median(tx, ty).abs() < 1e-6,
-                    "d2y_median({},{}) = {}, expected 0",
+                    grid.d2y_sky(tx, ty).abs() < 1e-6,
+                    "d2y_sky({},{}) = {}, expected 0",
                     tx,
                     ty,
-                    grid.d2y_median(tx, ty)
+                    grid.d2y_sky(tx, ty)
                 );
                 assert!(
                     grid.d2y_sigma(tx, ty).abs() < 1e-6,
@@ -1545,7 +1617,7 @@ mod tests {
 
         assert_eq!(grid.tiles_y(), 1);
         for tx in 0..grid.tiles_x() {
-            assert_eq!(grid.d2y_median(tx, 0), 0.0);
+            assert_eq!(grid.d2y_sky(tx, 0), 0.0);
             assert_eq!(grid.d2y_sigma(tx, 0), 0.0);
         }
     }
@@ -1563,8 +1635,8 @@ mod tests {
 
         assert_eq!(grid.tiles_y(), 2);
         for tx in 0..grid.tiles_x() {
-            assert_eq!(grid.d2y_median(tx, 0), 0.0);
-            assert_eq!(grid.d2y_median(tx, 1), 0.0);
+            assert_eq!(grid.d2y_sky(tx, 0), 0.0);
+            assert_eq!(grid.d2y_sky(tx, 1), 0.0);
         }
     }
 
@@ -1582,16 +1654,16 @@ mod tests {
         assert_eq!(grid.tiles_y(), 4);
         for tx in 0..grid.tiles_x() {
             assert!(
-                grid.d2y_median(tx, 0).abs() < 1e-6,
+                grid.d2y_sky(tx, 0).abs() < 1e-6,
                 "Natural BC: d2y[{},0] = {}",
                 tx,
-                grid.d2y_median(tx, 0)
+                grid.d2y_sky(tx, 0)
             );
             assert!(
-                grid.d2y_median(tx, 3).abs() < 1e-6,
+                grid.d2y_sky(tx, 3).abs() < 1e-6,
                 "Natural BC: d2y[{},3] = {}",
                 tx,
-                grid.d2y_median(tx, 3)
+                grid.d2y_sky(tx, 3)
             );
         }
     }
@@ -1870,46 +1942,46 @@ mod tests {
         // Natural BC: endpoints should be 0
         for tx in 0..grid.tiles_x() {
             assert!(
-                grid.d2y_median(tx, 0).abs() < 1e-5,
+                grid.d2y_sky(tx, 0).abs() < 1e-5,
                 "d2y[{},0] = {}, expected 0",
                 tx,
-                grid.d2y_median(tx, 0)
+                grid.d2y_sky(tx, 0)
             );
             assert!(
-                grid.d2y_median(tx, 3).abs() < 1e-5,
+                grid.d2y_sky(tx, 3).abs() < 1e-5,
                 "d2y[{},3] = {}, expected 0",
                 tx,
-                grid.d2y_median(tx, 3)
+                grid.d2y_sky(tx, 3)
             );
         }
 
         // Interior d2 should be nonzero (positive, since f''(y²) > 0)
         for tx in 0..grid.tiles_x() {
             assert!(
-                grid.d2y_median(tx, 1) > 1e-4,
+                grid.d2y_sky(tx, 1) > 1e-4,
                 "d2y[{},1] = {}, expected positive",
                 tx,
-                grid.d2y_median(tx, 1)
+                grid.d2y_sky(tx, 1)
             );
             assert!(
-                grid.d2y_median(tx, 2) > 1e-4,
+                grid.d2y_sky(tx, 2) > 1e-4,
                 "d2y[{},2] = {}, expected positive",
                 tx,
-                grid.d2y_median(tx, 2)
+                grid.d2y_sky(tx, 2)
             );
         }
 
         // All columns should have the same d2 values (uniform X data)
         if grid.tiles_x() >= 2 {
             for ty in 0..grid.tiles_y() {
-                let d0 = grid.d2y_median(0, ty);
+                let d0 = grid.d2y_sky(0, ty);
                 for tx in 1..grid.tiles_x() {
                     assert!(
-                        (grid.d2y_median(tx, ty) - d0).abs() < 1e-5,
+                        (grid.d2y_sky(tx, ty) - d0).abs() < 1e-5,
                         "d2y[{},{}] = {} != d2y[0,{}] = {}",
                         tx,
                         ty,
-                        grid.d2y_median(tx, ty),
+                        grid.d2y_sky(tx, ty),
                         ty,
                         d0
                     );
@@ -1942,11 +2014,11 @@ mod tests {
                 let stats = grid.get(tx, ty);
                 // Background should be ~1000 ± 5
                 assert!(
-                    (stats.median - 1000.0).abs() < 10.0,
+                    (stats.sky - 1000.0).abs() < 10.0,
                     "Tile ({},{}) median {} should be ~1000",
                     tx,
                     ty,
-                    stats.median
+                    stats.sky
                 );
                 // Sigma should be reasonable (not zero, not huge)
                 assert!(

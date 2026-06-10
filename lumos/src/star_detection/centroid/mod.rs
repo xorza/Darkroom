@@ -23,7 +23,7 @@ mod tests;
 use arrayvec::ArrayVec;
 use glam::Vec2;
 
-use crate::math::statistics::sigma_clipped_median_mad_arrayvec;
+use crate::math::statistics::{ClippedStats, sigma_clipped_median_mad_arrayvec};
 use crate::math::{FWHM_TO_SIGMA, sigma_to_fwhm};
 use crate::star_detection::background::estimate::BackgroundEstimate;
 use crate::star_detection::config::{CentroidMethod, Config, LocalBackgroundMethod};
@@ -296,14 +296,14 @@ fn compute_annulus_background(
     }
 
     // Sigma-clipped median (2 iterations, 3-sigma clip)
-    let (median, sigma) = sigma_clipped_median_mad(&mut values, 3.0, 2);
-    Some((median, sigma))
+    let stats = sigma_clipped_median_mad(&mut values, 3.0, 2);
+    Some((stats.median, stats.sigma))
 }
 
 /// Compute sigma-clipped median and MAD using the shared implementation.
 /// Uses stack-allocated ArrayVec for deviations to avoid heap allocation.
 #[inline]
-fn sigma_clipped_median_mad(values: &mut [f32], kappa: f32, iterations: usize) -> (f32, f32) {
+fn sigma_clipped_median_mad(values: &mut [f32], kappa: f32, iterations: usize) -> ClippedStats {
     let mut deviations: ArrayVec<f32, MAX_ANNULUS_PIXELS> = ArrayVec::new();
     // Resize to match values length
     deviations.extend(std::iter::repeat_n(0.0, values.len()));
