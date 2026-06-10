@@ -6,11 +6,9 @@ use glam::Vec2;
 
 use crate::star_detection::config::Config;
 use crate::star_detection::tests::common::output::image_writer::save_grayscale;
-use crate::testing::synthetic::backgrounds::{
-    NebulaConfig, add_gradient_background, add_nebula_background, add_uniform_background,
-    add_vignette_background,
-};
-use crate::testing::synthetic::star_field::{StarFieldConfig, generate_star_field};
+use crate::star_detection::tests::synthetic::Scenario;
+use crate::testing::synthetic::backgrounds::NebulaConfig;
+use crate::testing::synthetic::scene::BackgroundField;
 use crate::testing::{estimate_background, init_tracing};
 use common::Buffer2;
 use common::test_utils::test_output_path;
@@ -27,16 +25,16 @@ fn test_background_uniform() {
     let height = 256;
     let bg_level = 0.15;
 
-    // Create uniform background with some stars
-    let config = StarFieldConfig {
-        width,
-        height,
+    // Uniform background with some stars.
+    let pixels = Scenario {
         num_stars: 30,
-        background_level: bg_level,
-        noise_sigma: 0.02,
+        background: BackgroundField::Uniform { level: bg_level },
         ..Default::default()
-    };
-    let (pixels, _ground_truth) = generate_star_field(&config);
+    }
+    .frame()
+    .image
+    .channel(0)
+    .clone();
 
     // Estimate background
     let background = estimate_background(
@@ -100,25 +98,21 @@ fn test_background_gradient() {
     let width = 256;
     let height = 256;
 
-    // Create gradient background
-    let mut pixels = vec![0.0f32; width * height];
-    add_gradient_background(&mut pixels, width, height, 0.05, 0.25, 0.0);
-
-    // Add some stars
-    let config = StarFieldConfig {
-        width,
-        height,
+    // Stars rendered directly on a gradient sky (0.05 left → 0.25 right).
+    let pixels = Scenario {
         num_stars: 30,
-        background_level: 0.0, // We already have background
-        noise_sigma: 0.02,
+        background: BackgroundField::Gradient {
+            start: 0.05,
+            end: 0.25,
+            angle: 0.0,
+        },
         ..Default::default()
-    };
-    let (star_pixels, _) = generate_star_field(&config);
-
-    // Combine (add stars to gradient)
-    for (p, s) in pixels.iter_mut().zip(star_pixels.iter()) {
-        *p = (*p + s - 0.1).clamp(0.0, 1.0); // Subtract default bg from stars
     }
+    .frame()
+    .image
+    .channel(0)
+    .pixels()
+    .to_vec();
 
     // Estimate background
     let background = estimate_background(
@@ -182,24 +176,21 @@ fn test_background_vignette() {
     let width = 256;
     let height = 256;
 
-    // Create vignette background
-    let mut pixels = vec![0.0f32; width * height];
-    add_vignette_background(&mut pixels, width, height, 0.2, 0.05, 2.0);
-
-    // Add some stars
-    let config = StarFieldConfig {
-        width,
-        height,
+    // Stars rendered directly on a vignette sky (bright centre, dark corners).
+    let pixels = Scenario {
         num_stars: 30,
-        background_level: 0.0,
-        noise_sigma: 0.02,
+        background: BackgroundField::Vignette {
+            center: 0.2,
+            edge: 0.05,
+            falloff: 2.0,
+        },
         ..Default::default()
-    };
-    let (star_pixels, _) = generate_star_field(&config);
-
-    for (p, s) in pixels.iter_mut().zip(star_pixels.iter()) {
-        *p = (*p + s - 0.1).clamp(0.0, 1.0);
     }
+    .frame()
+    .image
+    .channel(0)
+    .pixels()
+    .to_vec();
 
     // Estimate background
     let background = estimate_background(
@@ -262,37 +253,24 @@ fn test_background_nebula() {
     let width = 256;
     let height = 256;
 
-    // Create nebula background
-    let mut pixels = vec![0.0f32; width * height];
-    add_uniform_background(&mut pixels, 0.1);
-    add_nebula_background(
-        &mut pixels,
-        width,
-        height,
-        &NebulaConfig {
-            center: Vec2::splat(0.5), // Center of image (fraction)
-            radius: 0.3,              // 30% of diagonal
+    // Stars rendered directly on a nebula sky.
+    let pixels = Scenario {
+        num_stars: 40,
+        background: BackgroundField::Nebula(NebulaConfig {
+            center: Vec2::splat(0.5),
+            radius: 0.3,
             amplitude: 0.3,
             softness: 2.0,
             aspect_ratio: 1.2,
             angle: 0.3,
-        },
-    );
-
-    // Add some stars
-    let config = StarFieldConfig {
-        width,
-        height,
-        num_stars: 40,
-        background_level: 0.0,
-        noise_sigma: 0.02,
+        }),
         ..Default::default()
-    };
-    let (star_pixels, _) = generate_star_field(&config);
-
-    for (p, s) in pixels.iter_mut().zip(star_pixels.iter()) {
-        *p = (*p + s - 0.1).clamp(0.0, 1.0);
     }
+    .frame()
+    .image
+    .channel(0)
+    .pixels()
+    .to_vec();
 
     // Estimate background
     let background = estimate_background(

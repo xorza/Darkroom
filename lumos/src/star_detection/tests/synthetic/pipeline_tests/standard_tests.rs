@@ -1,10 +1,11 @@
 //! Standard pipeline tests - full star detection on typical forward-model scenarios.
 
-use super::{Scenario, run_test};
+use super::run_test;
 use crate::star_detection::config::Config;
 use crate::star_detection::tests::common::output::metrics::{
     PassCriteria, check_pass, crowded_criteria, faint_star_criteria, standard_criteria,
 };
+use crate::star_detection::tests::synthetic::Scenario;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::camera::PsfModel;
 use crate::testing::synthetic::scene::BackgroundField;

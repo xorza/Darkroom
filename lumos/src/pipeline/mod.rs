@@ -316,24 +316,12 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::astro_image::ImageDimensions;
     use crate::registration::transform::{Transform, WarpTransform};
-    use crate::testing::synthetic::star_field::{self, StarFieldConfig};
+    use crate::testing::synthetic::fixtures::star_field;
     use glam::DVec2;
 
     fn base_field() -> (AstroImage, RegistrationConfig) {
-        let cfg = StarFieldConfig {
-            width: 256,
-            height: 256,
-            num_stars: 40,
-            seed: 66666,
-            ..star_field::sparse_field_config()
-        };
-        let (pixels, _) = star_field::generate_star_field(&cfg);
-        let image = AstroImage::from_pixels(
-            ImageDimensions::new((cfg.width, cfg.height), 1),
-            pixels.to_vec(),
-        );
+        let image = star_field(256, 256, 40, 66666).image;
         (image, RegistrationConfig::default())
     }
 

@@ -7,9 +7,7 @@ use crate::star_detection::detector::stages::detect_test_utils::detect_stars_tes
 use crate::star_detection::tests::common::output::image_writer::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
-use crate::testing::synthetic::star_field::{
-    StarFieldConfig, generate_star_field, sparse_field_config,
-};
+use crate::star_detection::tests::synthetic::Scenario;
 use crate::testing::{estimate_background, init_tracing};
 use common::test_utils::test_output_path;
 use glam::Vec2;
@@ -49,14 +47,20 @@ fn create_detection_overlay(
 fn test_detection_sparse() {
     init_tracing();
 
-    let config = sparse_field_config();
-    let (pixels, ground_truth) = generate_star_field(&config);
+    let (width, height) = (256, 256);
+    let frame = Scenario {
+        num_stars: 15,
+        ..Default::default()
+    }
+    .frame();
+    let pixels = frame.image.channel(0).clone();
+    let ground_truth = frame.truth.sources.clone();
 
     // Save input
     save_grayscale(
         pixels.pixels(),
-        config.width,
-        config.height,
+        width,
+        height,
         &test_output_path("synthetic_starfield/stage_det_sparse_input.png"),
     );
 
@@ -85,8 +89,8 @@ fn test_detection_sparse() {
         candidates.iter().map(|c| (c.peak.x, c.peak.y)).collect();
     let overlay = create_detection_overlay(
         pixels.pixels(),
-        config.width,
-        config.height,
+        width,
+        height,
         &candidate_positions,
         &truth_positions,
     );
@@ -129,18 +133,15 @@ fn test_detection_thresholds() {
     let width = 256;
     let height = 256;
 
-    // Create field with mix of bright and faint stars
-    let config = StarFieldConfig {
-        width,
-        height,
+    // Field with a mix of bright and faint stars.
+    let frame = Scenario {
         num_stars: 50,
-        magnitude_range: (8.0, 14.0), // Wide range
-        fwhm_range: (3.0, 4.0),
-        background_level: 0.1,
-        noise_sigma: 0.02,
+        flux: (3.0, 14.0),
         ..Default::default()
-    };
-    let (pixels, ground_truth) = generate_star_field(&config);
+    }
+    .frame();
+    let pixels = frame.image.channel(0).clone();
+    let ground_truth = frame.truth.sources.clone();
 
     // Save input
     save_grayscale(
@@ -226,20 +227,15 @@ fn test_detection_area_filter() {
     let width = 256;
     let height = 256;
 
-    // Create field with varying star sizes
-    let config = StarFieldConfig {
-        width,
-        height,
+    // Field with cosmic rays (small, sharp features) to exercise the area filter.
+    let frame = Scenario {
         num_stars: 30,
-        fwhm_range: (2.0, 6.0), // Wide range of sizes
-        magnitude_range: (8.0, 12.0),
-        background_level: 0.1,
-        noise_sigma: 0.02,
-        // Add some cosmic rays (small, sharp features)
-        cosmic_ray_count: 20,
+        cosmic_rays: 20,
         ..Default::default()
-    };
-    let (pixels, ground_truth) = generate_star_field(&config);
+    }
+    .frame();
+    let pixels = frame.image.channel(0).clone();
+    let ground_truth = frame.truth.sources.clone();
 
     // Save input
     save_grayscale(

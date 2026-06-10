@@ -22,19 +22,19 @@
 //! // detect on `frame.image`, then: score_detection(&scene.positions(), &found, 2.0)
 //! ```
 //!
-//! The flat per-frame generator [`star_field`] (`StarFieldConfig` + `generate_star_field`)
-//! remains for detection tests that only need pixels + a `GroundTruthStar` list.
+//! Ready-made fields live in [`fixtures`] (`star_field` / `cluster_field`), used by the
+//! benches and detection tests.
 //!
 //! # Modules
 //!
 //! Forward model: [`scene`] (true sky), [`camera`] (instrument/sensor + PSF), [`observe`]
-//! (render + `FrameTruth`), [`noise`] (physical Poisson + read noise), [`metrics`] (graders).
+//! (render + `FrameTruth`), [`noise`] (physical Poisson + read noise), [`fixtures`]
+//! (ready-made field builders), [`metrics`] (graders).
 //!
-//! Building blocks: [`star_field`] (flat star-field generator + `*_config` presets),
-//! [`star_profiles`] (PSF kernels), [`backgrounds`] (background fields), [`artifacts`]
-//! (cosmic rays, Bayer pattern), [`transforms`] (star-position transforms for registration),
-//! [`patterns`] (warp/interpolation fixtures), [`stamps`] (detection benchmark fields),
-//! [`background_map`] (`BackgroundEstimate` fixtures).
+//! Building blocks: [`star_profiles`] (PSF kernels), [`backgrounds`] (background fields),
+//! [`artifacts`] (cosmic rays, Bayer pattern), [`transforms`] (star-position transforms for
+//! registration), [`patterns`] (warp/interpolation fixtures), [`stamps`] (detection benchmark
+//! fields), [`background_map`] (`BackgroundEstimate` fixtures).
 
 pub mod artifacts;
 pub mod background_map;
@@ -48,6 +48,5 @@ pub mod observe;
 pub mod patterns;
 pub mod scene;
 pub mod stamps;
-pub mod star_field;
 pub mod star_profiles;
 pub mod transforms;

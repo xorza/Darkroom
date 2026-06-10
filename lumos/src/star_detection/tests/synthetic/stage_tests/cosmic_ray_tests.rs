@@ -9,9 +9,9 @@ use crate::star_detection::detector::StarDetector;
 use crate::star_detection::tests::common::output::image_writer::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
+use crate::star_detection::tests::synthetic::Scenario;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::artifacts::add_cosmic_rays;
-use crate::testing::synthetic::star_field::{StarFieldConfig, generate_star_field};
 use common::test_utils::test_output_path;
 use glam::Vec2;
 use imaginarium::Color;
@@ -26,22 +26,14 @@ fn test_cosmic_ray_rejection() {
     let width = 256;
     let height = 256;
 
-    // Create star field without cosmic rays first
-    let config = StarFieldConfig {
-        width,
-        height,
+    // Clean star field; cosmic rays are added manually below so we know their positions.
+    let frame = Scenario {
         num_stars: 30,
-        fwhm_range: (3.5, 4.5),
-        // Use proper magnitude range to avoid saturation
-        magnitude_range: (12.5, 13.5),
-        mag_zero_point: 14.8,
-        background_level: 0.1,
-        noise_sigma: 0.02,
-        cosmic_ray_count: 0,
         ..Default::default()
-    };
-    let (pixels, ground_truth) = generate_star_field(&config);
-    let mut pixels_vec = pixels.into_vec();
+    }
+    .frame();
+    let ground_truth = frame.truth.sources.clone();
+    let mut pixels_vec = frame.image.channel(0).pixels().to_vec();
 
     // Add cosmic rays manually so we know their positions
     let cr_positions = add_cosmic_rays(&mut pixels_vec, width, 15, (0.5, 1.0), 123);
@@ -167,22 +159,14 @@ fn test_sharpness_visualization() {
     let width = 256;
     let height = 256;
 
-    // Create simple field with stars and cosmic rays
-    let config = StarFieldConfig {
-        width,
-        height,
+    // Simple field; cosmic rays added manually below.
+    let frame = Scenario {
         num_stars: 10,
-        fwhm_range: (4.0, 4.0),
-        // Use proper magnitude range to avoid saturation
-        magnitude_range: (12.5, 13.5),
-        mag_zero_point: 14.8,
-        background_level: 0.1,
-        noise_sigma: 0.02,
-        cosmic_ray_count: 0,
         ..Default::default()
-    };
-    let (pixels, ground_truth) = generate_star_field(&config);
-    let mut pixels_vec = pixels.into_vec();
+    }
+    .frame();
+    let ground_truth = frame.truth.sources.clone();
+    let mut pixels_vec = frame.image.channel(0).pixels().to_vec();
 
     // Add cosmic rays
     let cr_positions = add_cosmic_rays(&mut pixels_vec, width, 10, (0.6, 0.9), 456);

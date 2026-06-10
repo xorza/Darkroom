@@ -25,11 +25,6 @@ use crate::testing::synthetic::observe::{Observation, observe_dithered, render};
 use crate::testing::synthetic::patterns::{checkerboard, diagonal_gradient, horizontal_gradient};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
 use crate::testing::synthetic::stamps::benchmark_star_field;
-use crate::testing::synthetic::star_field::{
-    ElongationType, StarFieldConfig, crowded_cluster_config, dense_field_config,
-    elliptical_stars_config, faint_stars_config, generate_globular_cluster, generate_star_field,
-    sparse_field_config,
-};
 
 /// Tone mapping applied before writing 8-bit PNG.
 #[derive(Debug, Clone, Copy)]
@@ -457,112 +452,6 @@ fn gallery_dither() {
             Stretch::Asinh,
         );
     }
-}
-
-#[test]
-#[ignore = "visual gallery; run with --ignored"]
-fn gallery_legacy_star_fields() {
-    // The flat `generate_star_field` generator + presets still used by detection tests.
-    let presets: [(&str, StarFieldConfig); 5] = [
-        ("legacy/sparse", sparse_field_config()),
-        ("legacy/dense", dense_field_config()),
-        ("legacy/crowded", crowded_cluster_config()),
-        ("legacy/faint", faint_stars_config()),
-        ("legacy/elliptical", elliptical_stars_config()),
-    ];
-    for (name, config) in presets {
-        let (pixels, _) = generate_star_field(&config);
-        save(
-            pixels.pixels(),
-            config.width,
-            config.height,
-            name,
-            Stretch::Asinh,
-        );
-    }
-
-    let variants: [(&str, StarFieldConfig); 6] = [
-        (
-            "legacy/moffat",
-            StarFieldConfig {
-                use_moffat: true,
-                moffat_beta: 3.0,
-                ..dense_field_config()
-            },
-        ),
-        (
-            "legacy/saturated",
-            StarFieldConfig {
-                saturation_fraction: 0.3,
-                magnitude_range: (9.0, 11.0),
-                ..dense_field_config()
-            },
-        ),
-        (
-            "legacy/bayer",
-            StarFieldConfig {
-                add_bayer: true,
-                bayer_strength: 0.1,
-                ..sparse_field_config()
-            },
-        ),
-        (
-            "legacy/cosmic_rays",
-            StarFieldConfig {
-                cosmic_ray_count: 25,
-                ..sparse_field_config()
-            },
-        ),
-        (
-            "legacy/gradient_bg",
-            StarFieldConfig {
-                gradient: Some((0.05, 0.3, 0.4)),
-                ..sparse_field_config()
-            },
-        ),
-        (
-            "legacy/nebula_bg",
-            StarFieldConfig {
-                nebula: Some(NebulaConfig::default()),
-                ..sparse_field_config()
-            },
-        ),
-    ];
-    for (name, config) in variants {
-        let (pixels, _) = generate_star_field(&config);
-        save(
-            pixels.pixels(),
-            config.width,
-            config.height,
-            name,
-            Stretch::Asinh,
-        );
-    }
-
-    // Elongation modes.
-    let field_rotation = StarFieldConfig {
-        elongation: ElongationType::FieldRotation,
-        num_stars: 120,
-        ..dense_field_config()
-    };
-    let (pixels, _) = generate_star_field(&field_rotation);
-    save(
-        pixels.pixels(),
-        field_rotation.width,
-        field_rotation.height,
-        "legacy/field_rotation",
-        Stretch::Asinh,
-    );
-
-    // Globular cluster stress field.
-    let glob = generate_globular_cluster(512, 512, 30_000, 7);
-    save(
-        glob.pixels(),
-        512,
-        512,
-        "legacy/globular_cluster",
-        Stretch::Asinh,
-    );
 }
 
 #[test]

@@ -6,7 +6,7 @@ use crate::math::fwhm_to_sigma;
 use crate::star_detection::config::Config;
 use crate::star_detection::convolution::gaussian_convolve;
 use crate::star_detection::tests::common::output::image_writer::save_grayscale;
-use crate::testing::synthetic::star_field::{StarFieldConfig, generate_star_field};
+use crate::star_detection::tests::synthetic::Scenario;
 use crate::testing::{estimate_background, init_tracing};
 use common::Buffer2;
 use common::test_utils::test_output_path;
@@ -32,18 +32,15 @@ fn test_gaussian_filter_sparse() {
     let height = 256;
     let fwhm = 3.5;
 
-    // Create sparse star field
-    let config = StarFieldConfig {
-        width,
-        height,
+    // Sparse star field.
+    let frame = Scenario {
         num_stars: 25,
-        fwhm_range: (fwhm, fwhm),
-        magnitude_range: (8.0, 12.0),
-        background_level: 0.1,
-        noise_sigma: 0.02,
+        fwhm,
         ..Default::default()
-    };
-    let (pixels, ground_truth) = generate_star_field(&config);
+    }
+    .frame();
+    let pixels = frame.image.channel(0).clone();
+    let ground_truth = frame.truth.sources.clone();
 
     // Save input
     save_grayscale(
@@ -132,18 +129,14 @@ fn test_gaussian_filter_fwhm_range() {
     let width = 256;
     let height = 256;
 
-    // Create stars with varying FWHM
-    let config = StarFieldConfig {
-        width,
-        height,
+    // Stars at the instrument FWHM (legacy varied per-star).
+    let frame = Scenario {
         num_stars: 30,
-        fwhm_range: (2.0, 6.0), // Wide FWHM range
-        magnitude_range: (8.0, 11.0),
-        background_level: 0.1,
-        noise_sigma: 0.02,
         ..Default::default()
-    };
-    let (pixels, ground_truth) = generate_star_field(&config);
+    }
+    .frame();
+    let pixels = frame.image.channel(0).clone();
+    let ground_truth = frame.truth.sources.clone();
 
     // Save input
     save_grayscale(
@@ -204,18 +197,17 @@ fn test_gaussian_filter_noise() {
     let height = 256;
     let fwhm = 3.5;
 
-    // Create star field with high noise
-    let config = StarFieldConfig {
-        width,
-        height,
+    // Star field with elevated noise (shallow well + high read noise).
+    let frame = Scenario {
         num_stars: 20,
-        fwhm_range: (fwhm, fwhm),
-        magnitude_range: (8.0, 11.0),
-        background_level: 0.1,
-        noise_sigma: 0.05, // High noise
+        fwhm,
+        full_well_e: 4_000.0,
+        read_noise_e: 150.0,
         ..Default::default()
-    };
-    let (pixels, ground_truth) = generate_star_field(&config);
+    }
+    .frame();
+    let pixels = frame.image.channel(0).clone();
+    let ground_truth = frame.truth.sources.clone();
 
     // Save input
     save_grayscale(
