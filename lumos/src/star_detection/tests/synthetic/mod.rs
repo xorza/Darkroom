@@ -8,11 +8,39 @@ mod pipeline_tests;
 mod stage_tests;
 mod subpixel_accuracy;
 
+use crate::star_detection::config::Config;
+use crate::star_detection::detector::StarDetector;
 use crate::testing::synthetic::artifacts::{BayerPattern, add_bayer_pattern, add_cosmic_rays};
 use crate::testing::synthetic::camera::{Camera, PsfModel};
 use crate::testing::synthetic::observe::{Observation, SimFrame, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
 use crate::{AstroImage, ImageDimensions};
+use glam::DVec2;
+
+/// Detection config for synthetic (already-linear) frames: the CFA matched filter is disabled
+/// so the measured FWHM stays accurate.
+pub(crate) fn synthetic_config() -> Config {
+    Config {
+        expected_fwhm: 0.0,
+        min_snr: 5.0,
+        ..Config::default()
+    }
+}
+
+/// True source positions of a rendered frame.
+pub(crate) fn truth_positions(frame: &SimFrame) -> Vec<DVec2> {
+    frame.truth.sources.iter().map(|s| s.pos).collect()
+}
+
+/// Detect on `frame.image` with `config` and return the detected star positions.
+pub(crate) fn detected_positions(frame: &SimFrame, config: &Config) -> Vec<DVec2> {
+    StarDetector::from_config(config.clone())
+        .detect(&frame.image)
+        .stars
+        .iter()
+        .map(|s| s.pos)
+        .collect()
+}
 
 /// Source placement for a forward-model detection scenario.
 #[derive(Debug, Clone, Copy)]

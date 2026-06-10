@@ -14,7 +14,7 @@ use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
-use crate::star_detection::tests::synthetic::stage_tests::TILE_SIZE;
+use super::{TILE_SIZE, matched_truths};
 
 /// Create a detection overlay image showing candidates.
 fn create_detection_overlay(
@@ -176,7 +176,7 @@ fn test_detection_thresholds() {
             ..Default::default()
         };
         let candidates = detect_stars_test(&pixels, &background, &det_config);
-        let matched = matched_count(&candidates, &truth_positions, 5.0);
+        let matched = matched_truths(&candidates, &truth_positions, 5.0);
         println!(
             "sigma {sigma}: candidates {}, matched {matched}",
             candidates.len()
@@ -207,24 +207,6 @@ fn test_detection_thresholds() {
         counts[0].1,
         counts[3].1
     );
-}
-
-/// Count how many of `truths` `(x, y)` have a candidate peak within `radius` px.
-fn matched_count(
-    candidates: &[crate::star_detection::deblend::region::Region],
-    truths: &[(f32, f32)],
-    radius: f32,
-) -> usize {
-    truths
-        .iter()
-        .filter(|&&(tx, ty)| {
-            candidates.iter().any(|c| {
-                let dx = c.peak.x as f32 - tx;
-                let dy = c.peak.y as f32 - ty;
-                (dx * dx + dy * dy).sqrt() < radius
-            })
-        })
-        .count()
 }
 
 /// Test detection area filtering.
@@ -277,7 +259,7 @@ fn test_detection_area_filter() {
             ..Default::default()
         };
         let candidates = detect_stars_test(&pixels, &background, &det_config);
-        let matched = matched_count(&candidates, &truth_positions, 5.0);
+        let matched = matched_truths(&candidates, &truth_positions, 5.0);
         let false_positives = candidates.len().saturating_sub(matched);
         (matched, false_positives)
     };

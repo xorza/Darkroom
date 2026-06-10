@@ -5,38 +5,16 @@
 //! [`Observation`] translation, and verify the detector's centroids recover that shift to well
 //! under 0.1 px — grading per-frame completeness through [`metrics`] against captured truth.
 
+use super::{detected_positions, synthetic_config, truth_positions};
 use crate::registration::transform::Transform;
 use crate::star_detection::config::Config;
-use crate::star_detection::detector::StarDetector;
 use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::metrics::{match_catalogs, score_detection};
-use crate::testing::synthetic::observe::{Observation, SimFrame, render};
+use crate::testing::synthetic::observe::{Observation, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
 use glam::DVec2;
 
 const MATCH_RADIUS: f64 = 4.0;
-
-fn synthetic_config() -> Config {
-    // Disable the CFA matched filter for synthetic (already-linear) frames.
-    Config {
-        expected_fwhm: 0.0,
-        min_snr: 5.0,
-        ..Config::default()
-    }
-}
-
-fn detected_positions(frame: &SimFrame, config: &Config) -> Vec<DVec2> {
-    StarDetector::from_config(config.clone())
-        .detect(&frame.image)
-        .stars
-        .iter()
-        .map(|s| s.pos)
-        .collect()
-}
-
-fn truth_positions(frame: &SimFrame) -> Vec<DVec2> {
-    frame.truth.sources.iter().map(|s| s.pos).collect()
-}
 
 /// Median per-axis shift between two matched detection catalogs (`shifted − reference`).
 /// The median over many stars averages down per-star centroid scatter.

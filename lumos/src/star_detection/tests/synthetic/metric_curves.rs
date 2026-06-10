@@ -6,39 +6,15 @@
 //! a source-free noise field yields essentially no false positives, completeness falls under
 //! crowding, and the `min_snr` knob gates the faint end.
 
-use super::{Placement, Scenario};
+use super::{Placement, Scenario, detected_positions, synthetic_config, truth_positions};
 use crate::star_detection::config::Config;
 use crate::star_detection::detector::StarDetector;
 use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::metrics::{astrometric_rms, score_detection};
-use crate::testing::synthetic::observe::SimFrame;
 use crate::testing::synthetic::observe::{Observation, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
-use glam::DVec2;
 
 const MATCH_RADIUS: f64 = 4.0;
-
-fn synthetic_config() -> Config {
-    // Disable the CFA matched filter for synthetic (already-linear) frames.
-    Config {
-        expected_fwhm: 0.0,
-        min_snr: 5.0,
-        ..Config::default()
-    }
-}
-
-fn truth_positions(frame: &SimFrame) -> Vec<DVec2> {
-    frame.truth.sources.iter().map(|s| s.pos).collect()
-}
-
-fn detected_positions(frame: &SimFrame, config: &Config) -> Vec<DVec2> {
-    StarDetector::from_config(config.clone())
-        .detect(&frame.image)
-        .stars
-        .iter()
-        .map(|s| s.pos)
-        .collect()
-}
 
 #[test]
 fn completeness_and_reliability_high_for_bright_field() {

@@ -4,17 +4,16 @@
 //! stated sub-pixel tolerance, accuracy tracks SNR, and the three centroid methods
 //! (weighted-moments / Gaussian-fit / Moffat-fit) agree and the profile fits beat moments.
 
+use super::background_estimate;
 use crate::math::bbox::Aabb;
 use crate::math::fwhm_to_sigma;
 use crate::star_detection::centroid::measure_star;
 use crate::star_detection::config::{CentroidMethod, Config};
 use crate::star_detection::deblend::region::Region;
+use crate::testing::TestRng;
 use crate::testing::synthetic::star_profiles::render_gaussian_star;
-use crate::testing::{TestRng, estimate_background};
 use common::Buffer2;
 use common::Vec2us;
-
-use crate::star_detection::tests::synthetic::stage_tests::TILE_SIZE;
 
 /// Render `stars` as `(x, y, brightness)` Gaussians of width `sigma` on a 0.1 sky + Gaussian
 /// noise σ `noise`.
@@ -54,16 +53,6 @@ fn candidate_at(pixels: &Buffer2<f32>, x: f32, y: f32) -> Region {
     }
 }
 
-fn bg_of(pixels: &Buffer2<f32>) -> crate::star_detection::background::estimate::BackgroundEstimate {
-    estimate_background(
-        pixels,
-        &Config {
-            tile_size: TILE_SIZE,
-            ..Default::default()
-        },
-    )
-}
-
 #[test]
 fn centroid_recovers_known_subpixel_positions() {
     let (width, height) = (256, 256);
@@ -79,7 +68,7 @@ fn centroid_recovers_known_subpixel_positions() {
     // Bright stars (high SNR) so centroiding is limited by sampling, not noise.
     let stars: Vec<(f32, f32, f32)> = positions.iter().map(|&(x, y)| (x, y, 5.0)).collect();
     let pixels = field(width, height, sigma, &stars, 0.01, 42);
-    let background = bg_of(&pixels);
+    let background = background_estimate(&pixels);
     let config = Config {
         expected_fwhm: fwhm,
         ..Default::default()
@@ -124,7 +113,7 @@ fn centroid_accuracy_improves_with_snr() {
         .map(|(i, &b)| (40.0 + i as f32 * 60.0 + 0.42, y, b))
         .collect();
     let pixels = field(width, height, sigma, &stars, 0.01, 42);
-    let background = bg_of(&pixels);
+    let background = background_estimate(&pixels);
     let config = Config {
         expected_fwhm: fwhm,
         ..Default::default()
@@ -176,7 +165,7 @@ fn centroid_methods_agree_and_fits_beat_moments() {
     let (tx, ty) = (64.37f32, 64.63f32);
     // A bright, clean star so all three methods are in their accurate regime.
     let pixels = field(width, height, sigma, &[(tx, ty, 5.0)], 0.005, 7);
-    let background = bg_of(&pixels);
+    let background = background_estimate(&pixels);
 
     let error_for = |method: CentroidMethod| -> (f64, f64) {
         let config = Config {

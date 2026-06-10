@@ -5,15 +5,13 @@
 //! bound (`>= N`) would pass a deblender that under-splits or fragments a single star. A knob
 //! sweep pins that the contrast threshold actually controls the split.
 
+use super::{background_estimate, matched_truths};
 use crate::math::fwhm_to_sigma;
 use crate::star_detection::config::Config;
-use crate::star_detection::deblend::region::Region;
 use crate::star_detection::detector::stages::detect_test_utils::detect_stars_test;
+use crate::testing::TestRng;
 use crate::testing::synthetic::star_profiles::render_gaussian_star;
-use crate::testing::{TestRng, estimate_background};
 use common::Buffer2;
-
-use crate::star_detection::tests::synthetic::stage_tests::TILE_SIZE;
 
 /// Render `stars` as `(x, y, amplitude)` on a 0.1 sky with light Gaussian noise (σ 0.01).
 fn field(
@@ -35,18 +33,6 @@ fn field(
     Buffer2::new(width, height, pixels)
 }
 
-fn background_of(
-    pixels: &Buffer2<f32>,
-) -> crate::star_detection::background::estimate::BackgroundEstimate {
-    estimate_background(
-        pixels,
-        &Config {
-            tile_size: TILE_SIZE,
-            ..Default::default()
-        },
-    )
-}
-
 fn deblend_config(fwhm: f32, n_thresholds: usize, min_contrast: f32) -> Config {
     Config {
         expected_fwhm: fwhm,
@@ -54,21 +40,6 @@ fn deblend_config(fwhm: f32, n_thresholds: usize, min_contrast: f32) -> Config {
         deblend_min_contrast: min_contrast,
         ..Default::default()
     }
-}
-
-/// Count how many of `truths` `(x, y)` have a candidate peak within `radius` px (each truth at
-/// most once).
-fn matched_truths(candidates: &[Region], truths: &[(f32, f32)], radius: f32) -> usize {
-    truths
-        .iter()
-        .filter(|&&(tx, ty)| {
-            candidates.iter().any(|c| {
-                let dx = c.peak.x as f32 - tx;
-                let dy = c.peak.y as f32 - ty;
-                (dx * dx + dy * dy).sqrt() < radius
-            })
-        })
-        .count()
 }
 
 #[test]
@@ -79,7 +50,7 @@ fn deblend_resolves_equal_pair_into_exactly_two() {
     let sep = fwhm * 2.5;
     let (x1, x2, y) = (128.0 - sep / 2.0, 128.0 + sep / 2.0, 128.0);
     let pixels = field(width, height, sigma, &[(x1, y, 0.15), (x2, y, 0.15)], 42);
-    let background = background_of(&pixels);
+    let background = background_estimate(&pixels);
 
     let candidates = detect_stars_test(&pixels, &background, &deblend_config(fwhm, 32, 0.005));
     assert_eq!(
@@ -105,7 +76,7 @@ fn deblend_resolves_chain_of_five() {
     let truths: Vec<(f32, f32)> = (0..5).map(|i| (100.0 + i as f32 * sep, star_y)).collect();
     let stars: Vec<(f32, f32, f32)> = truths.iter().map(|&(x, y)| (x, y, 0.15)).collect();
     let pixels = field(width, height, sigma, &stars, 42);
-    let background = background_of(&pixels);
+    let background = background_estimate(&pixels);
 
     let candidates = detect_stars_test(&pixels, &background, &deblend_config(fwhm, 32, 0.005));
     assert_eq!(
@@ -130,7 +101,7 @@ fn deblend_resolves_unequal_pair() {
     let (x1, x2, y) = (128.0 - sep / 2.0, 128.0 + sep / 2.0, 128.0);
     // Bright (~20σ) + faint (~5σ companion).
     let pixels = field(width, height, sigma, &[(x1, y, 0.20), (x2, y, 0.05)], 42);
-    let background = background_of(&pixels);
+    let background = background_estimate(&pixels);
 
     let candidates = detect_stars_test(&pixels, &background, &deblend_config(fwhm, 32, 0.005));
     assert_eq!(
@@ -157,7 +128,7 @@ fn deblend_separation_controls_split() {
         let sep = fwhm * sep_fwhm;
         let (x1, x2, y) = (128.0 - sep / 2.0, 128.0 + sep / 2.0, 128.0);
         let pixels = field(width, height, sigma, &[(x1, y, 0.15), (x2, y, 0.15)], 42);
-        let background = background_of(&pixels);
+        let background = background_estimate(&pixels);
         detect_stars_test(&pixels, &background, &deblend_config(fwhm, 32, 0.005)).len()
     };
     let wide = pair_count(2.5);
