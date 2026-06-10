@@ -21,6 +21,10 @@ mod real_data_tests;
 /// Sigma-clip parameters for the robust per-channel background estimate (rejects stars/nebula).
 const BACKGROUND_KAPPA: f32 = 2.5;
 const BACKGROUND_ITERATIONS: usize = 5;
+/// Cap on the per-channel sample size for the background estimate (uniform stride for larger
+/// channels, matching `defect_map`'s `MAX_MEDIAN_SAMPLES`). A robust background median converges
+/// well below this; small images stay exact (stride 1).
+const MAX_BACKGROUND_SAMPLES: usize = 1_000_000;
 
 /// Neutralize the per-channel sky background so the background is a neutral gray (R=G=B).
 ///
@@ -51,7 +55,10 @@ pub fn neutralize_background(image: &mut AstroImage) {
 fn channel_backgrounds(image: &AstroImage) -> Rgb {
     let mut scratch = Vec::new();
     let mut median = |c: usize| {
-        let mut samples = image.channel(c).to_vec();
+        // Uniform-stride subsample for a fast robust background level (exact for small channels).
+        let pixels = image.channel(c).pixels();
+        let stride = (pixels.len() / MAX_BACKGROUND_SAMPLES).max(1);
+        let mut samples: Vec<f32> = pixels.iter().step_by(stride).copied().collect();
         sigma_clipped_median_mad(
             &mut samples,
             &mut scratch,
@@ -82,6 +89,9 @@ pub enum ScnrMethod {
 /// Remove the residual green cast (Subtractive Chromatic Noise Reduction). Intended for the
 /// stretched, already-color-balanced image. No-op on grayscale.
 pub fn scnr(image: &mut AstroImage, method: ScnrMethod) {
+    if !image.is_rgb() {
+        return;
+    }
     match method {
         ScnrMethod::AverageNeutral => image.par_map_pixels(
             |l| l,
