@@ -1,0 +1,755 @@
+//! Tests for transform type estimation using synthetic star positions.
+//!
+//! These tests verify that the registrator correctly estimates transforms
+//! from known star position correspondences (without actual image data).
+//!
+//! Tests for all TransformType variants:
+//! - Translation (2 DOF)
+//! - Euclidean (3 DOF: translation + rotation)
+//! - Similarity (4 DOF: translation + rotation + uniform scale)
+//! - Affine (6 DOF: handles differential scaling and shear)
+//! - Homography (8 DOF: handles perspective)
+
+use crate::stacking::registration::{Config, TransformType, register};
+use crate::stacking::star_detection::star::Star;
+use crate::testing::TestRng;
+use crate::testing::synthetic::transforms::{
+    generate_random_stars, transform_star_list, translate_star_list,
+};
+use glam::DVec2;
+
+use crate::stacking::registration::synthetic_tests::helpers::{
+    FWHM_NORMAL, FWHM_TIGHT, apply_affine, apply_homography,
+};
+
+#[test]
+fn test_registration_translation_only() {
+    // Generate reference star field
+    let ref_stars = generate_random_stars(50, 1000.0, 1000.0, 12345, FWHM_TIGHT);
+
+    // Apply known translation
+    let dx = 25.5;
+    let dy = -15.3;
+    let target_stars = translate_star_list(&ref_stars, dx, dy);
+
+    // Configure registration for translation only
+    let config = Config {
+        transform_type: TransformType::Translation,
+        min_stars: Some(6),
+        min_matches: 4,
+        ..Default::default()
+    };
+
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
+
+    // Extract recovered translation
+    let recovered = result.transform.translation_components();
+
+    // Validate translation (should be very close to original)
+    let dx_error = (recovered.x - dx).abs();
+    let dy_error = (recovered.y - dy).abs();
+
+    assert!(
+        dx_error < 0.1,
+        "X translation error too large: expected {}, got {}, error {}",
+        dx,
+        recovered.x,
+        dx_error
+    );
+    assert!(
+        dy_error < 0.1,
+        "Y translation error too large: expected {}, got {}, error {}",
+        dy,
+        recovered.y,
+        dy_error
+    );
+
+    // Check RMS error is small
+    assert!(
+        result.rms_error < 0.5,
+        "RMS error too large: {}",
+        result.rms_error
+    );
+
+    // Check we matched most stars
+    assert!(
+        result.num_inliers >= 40,
+        "Too few inliers: {}",
+        result.num_inliers
+    );
+}
+
+#[test]
+fn test_registration_similarity_transform() {
+    // Generate reference star field
+    let ref_stars = generate_random_stars(80, 2000.0, 2000.0, 54321, FWHM_NORMAL);
+
+    // Apply known similarity transform (translation + rotation + scale)
+    let dx = 30.0;
+    let dy = -20.0;
+    let angle_deg: f64 = 0.5; // Small rotation
+    let angle_rad = angle_deg.to_radians();
+    let scale = 1.002; // Small scale change
+    let center_x = 1000.0;
+    let center_y = 1000.0;
+
+    let target_stars =
+        transform_star_list(&ref_stars, dx, dy, angle_rad, scale, center_x, center_y);
+
+    // Configure registration with scale
+    let config = Config {
+        transform_type: TransformType::Similarity,
+        min_stars: Some(6),
+        min_matches: 4,
+        ..Default::default()
+    };
+
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
+
+    // Validate by applying the recovered transform to reference stars
+    // and checking they match target stars
+    let mut max_error = 0.0f64;
+    for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
+        let transformed = result.transform.apply(ref_star.pos);
+        let error = transformed.distance(target_star.pos);
+        max_error = max_error.max(error);
+    }
+
+    assert!(
+        max_error < 1.0,
+        "Max transformation error too large: {} pixels",
+        max_error
+    );
+
+    // Validate rotation is approximately correct
+    let recovered_angle = result.transform.rotation_angle();
+    let rotation_error = (recovered_angle - angle_rad).abs();
+    assert!(
+        rotation_error < 0.01,
+        "Rotation error too large: expected {} rad, got {} rad, error {}",
+        angle_rad,
+        recovered_angle,
+        rotation_error
+    );
+
+    // Validate scale is approximately correct
+    let recovered_scale = result.transform.scale_factor();
+    let scale_error = (recovered_scale - scale).abs();
+    assert!(
+        scale_error < 0.001,
+        "Scale error too large: expected {}, got {}, error {}",
+        scale,
+        recovered_scale,
+        scale_error
+    );
+
+    // Check RMS error is small
+    assert!(
+        result.rms_error < 1.0,
+        "RMS error too large: {}",
+        result.rms_error
+    );
+}
+
+#[test]
+fn test_registration_with_noise() {
+    // Generate reference star field
+    let ref_stars = generate_random_stars(100, 1500.0, 1500.0, 99999, FWHM_NORMAL);
+
+    // Apply translation with some noise in star positions
+    let dx = 50.0;
+    let dy = 35.0;
+
+    let mut rng = TestRng::new(11111);
+
+    let target_stars: Vec<Star> = ref_stars
+        .iter()
+        .map(|s| {
+            let noise_x = (rng.next_f64() * 2.0 - 1.0) * 0.5; // +/- 0.5 pixel noise
+            let noise_y = (rng.next_f64() * 2.0 - 1.0) * 0.5;
+            Star {
+                pos: DVec2::new(s.pos.x + dx + noise_x, s.pos.y + dy + noise_y),
+                ..*s
+            }
+        })
+        .collect();
+
+    // Configure registration
+    let config = Config {
+        transform_type: TransformType::Translation,
+        min_stars: Some(6),
+        min_matches: 4,
+        ..Default::default()
+    };
+
+    // Allow more residual due to noise (FWHM_NORMAL -> max_sigma ~1.0)
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
+
+    // Extract recovered translation
+    let recovered = result.transform.translation_components();
+
+    // Validate translation (allow more error due to noise)
+    let dx_error = (recovered.x - dx).abs();
+    let dy_error = (recovered.y - dy).abs();
+
+    assert!(
+        dx_error < 1.0,
+        "X translation error too large: expected {}, got {}, error {}",
+        dx,
+        recovered.x,
+        dx_error
+    );
+    assert!(
+        dy_error < 1.0,
+        "Y translation error too large: expected {}, got {}, error {}",
+        dy,
+        recovered.y,
+        dy_error
+    );
+
+    // RMS error will be higher due to noise, but should still be reasonable
+    assert!(
+        result.rms_error < 2.0,
+        "RMS error too large: {}",
+        result.rms_error
+    );
+}
+
+#[test]
+fn test_registration_large_translation() {
+    // Generate reference star field
+    let ref_stars = generate_random_stars(60, 2000.0, 2000.0, 77777, FWHM_TIGHT);
+
+    // Apply large translation (simulating significant pointing offset)
+    let dx = 200.0;
+    let dy = -150.0;
+    let target_stars = translate_star_list(&ref_stars, dx, dy);
+
+    // Configure registration
+    let config = Config {
+        transform_type: TransformType::Translation,
+        min_stars: Some(6),
+        min_matches: 4,
+        ..Default::default()
+    };
+
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
+
+    let recovered = result.transform.translation_components();
+
+    let dx_error = (recovered.x - dx).abs();
+    let dy_error = (recovered.y - dy).abs();
+
+    assert!(
+        dx_error < 0.1,
+        "X translation error too large: {}",
+        dx_error
+    );
+    assert!(
+        dy_error < 0.1,
+        "Y translation error too large: {}",
+        dy_error
+    );
+}
+
+// ============================================================================
+// TransformType::Euclidean tests (translation + rotation, no scale)
+// ============================================================================
+
+#[test]
+fn test_registration_euclidean_rotation_only() {
+    // Generate reference star field
+    let ref_stars = generate_random_stars(80, 2000.0, 2000.0, 11111, FWHM_TIGHT);
+
+    // Apply pure rotation around image center (no translation, no scale)
+    let angle_deg: f64 = 1.5;
+    let angle_rad = angle_deg.to_radians();
+    let center_x = 1000.0;
+    let center_y = 1000.0;
+
+    // transform_star_list with scale=1.0 and dx=dy=0 gives pure rotation
+    let target_stars =
+        transform_star_list(&ref_stars, 0.0, 0.0, angle_rad, 1.0, center_x, center_y);
+
+    let config = Config {
+        transform_type: TransformType::Euclidean,
+        min_stars: Some(6),
+        min_matches: 4,
+        ..Default::default()
+    };
+
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
+
+    assert_eq!(result.transform.transform_type, TransformType::Euclidean);
+
+    // Validate rotation
+    let recovered_angle = result.transform.rotation_angle();
+    let rotation_error = (recovered_angle - angle_rad).abs();
+    assert!(
+        rotation_error < 0.001,
+        "Rotation error too large: expected {} rad, got {} rad, error {}",
+        angle_rad,
+        recovered_angle,
+        rotation_error
+    );
+
+    // Scale should be ~1.0 for Euclidean
+    let recovered_scale = result.transform.scale_factor();
+    assert!(
+        (recovered_scale - 1.0).abs() < 0.001,
+        "Scale should be 1.0 for Euclidean, got {}",
+        recovered_scale
+    );
+
+    assert!(
+        result.rms_error < 0.5,
+        "RMS error too large: {}",
+        result.rms_error
+    );
+}
+
+#[test]
+fn test_registration_euclidean_translation_and_rotation() {
+    let ref_stars = generate_random_stars(70, 1500.0, 1500.0, 22222, FWHM_TIGHT);
+
+    let dx = 45.0;
+    let dy = -30.0;
+    let angle_deg: f64 = 0.8;
+    let angle_rad = angle_deg.to_radians();
+    let center_x = 750.0;
+    let center_y = 750.0;
+
+    let target_stars = transform_star_list(&ref_stars, dx, dy, angle_rad, 1.0, center_x, center_y);
+
+    let config = Config {
+        transform_type: TransformType::Euclidean,
+        min_stars: Some(6),
+        min_matches: 4,
+        ..Default::default()
+    };
+
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
+
+    assert_eq!(result.transform.transform_type, TransformType::Euclidean);
+
+    // Validate by applying transform to all reference stars
+    let mut max_error = 0.0f64;
+    for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
+        let t = result.transform.apply(ref_star.pos);
+        let error = t.distance(target_star.pos);
+        max_error = max_error.max(error);
+    }
+
+    assert!(
+        max_error < 0.5,
+        "Max transformation error too large: {} pixels",
+        max_error
+    );
+
+    let recovered_angle = result.transform.rotation_angle();
+    let rotation_error = (recovered_angle - angle_rad).abs();
+    assert!(
+        rotation_error < 0.01,
+        "Rotation error too large: {} vs {}",
+        recovered_angle,
+        angle_rad
+    );
+}
+
+// ============================================================================
+// TransformType::Affine tests (6 DOF: differential scaling, shear)
+// ============================================================================
+
+#[test]
+fn test_registration_affine_differential_scale() {
+    // Test affine with different X and Y scales (anisotropic scaling)
+    let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 33333, FWHM_NORMAL);
+
+    // Affine with different X/Y scales: scale_x=1.003, scale_y=0.998
+    let scale_x = 1.003;
+    let scale_y = 0.998;
+    let dx = 20.0;
+    let dy = -15.0;
+
+    let affine_params = [scale_x, 0.0, dx, 0.0, scale_y, dy];
+    let target_stars = apply_affine(&ref_stars, affine_params);
+
+    let config = Config {
+        transform_type: TransformType::Affine,
+        min_stars: Some(6),
+        min_matches: 4,
+        ..Default::default()
+    };
+
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
+
+    assert_eq!(result.transform.transform_type, TransformType::Affine);
+
+    // Validate by applying transform
+    let mut max_error = 0.0f64;
+    for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
+        let t = result.transform.apply(ref_star.pos);
+        let error = t.distance(target_star.pos);
+        max_error = max_error.max(error);
+    }
+
+    assert!(
+        max_error < 1.0,
+        "Max transformation error too large: {} pixels",
+        max_error
+    );
+
+    assert!(
+        result.rms_error < 1.0,
+        "RMS error too large: {}",
+        result.rms_error
+    );
+}
+
+#[test]
+fn test_registration_affine_with_shear() {
+    // Test affine with shear component
+    let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 44444, FWHM_NORMAL);
+
+    // Affine with small shear: shear_x = 0.002
+    let shear = 0.002;
+    let dx = 30.0;
+    let dy = 25.0;
+
+    // [a, b, tx, c, d, ty] where b is shear in x direction
+    let affine_params = [1.0, shear, dx, 0.0, 1.0, dy];
+    let target_stars = apply_affine(&ref_stars, affine_params);
+
+    let config = Config {
+        transform_type: TransformType::Affine,
+        min_stars: Some(6),
+        min_matches: 4,
+        ..Default::default()
+    };
+
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
+
+    assert_eq!(result.transform.transform_type, TransformType::Affine);
+
+    // Validate transformation accuracy
+    let mut max_error = 0.0f64;
+    for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
+        let t = result.transform.apply(ref_star.pos);
+        let error = t.distance(target_star.pos);
+        max_error = max_error.max(error);
+    }
+
+    assert!(
+        max_error < 1.0,
+        "Max transformation error too large: {} pixels",
+        max_error
+    );
+}
+
+#[test]
+fn test_registration_affine_rotation_and_differential_scale() {
+    // Combined rotation with differential scaling
+    let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 55555, FWHM_NORMAL);
+
+    let angle_rad = 0.3_f64.to_radians();
+    let scale_x = 1.002;
+    let scale_y = 0.999;
+    let dx = 40.0;
+    let dy = -20.0;
+
+    let cos_a = angle_rad.cos();
+    let sin_a = angle_rad.sin();
+
+    // Rotation matrix scaled differently in X and Y
+    let affine_params = [
+        scale_x * cos_a,
+        -scale_y * sin_a,
+        dx,
+        scale_x * sin_a,
+        scale_y * cos_a,
+        dy,
+    ];
+    let target_stars = apply_affine(&ref_stars, affine_params);
+
+    let config = Config {
+        transform_type: TransformType::Affine,
+        min_stars: Some(6),
+        min_matches: 4,
+        ..Default::default()
+    };
+
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
+
+    assert_eq!(result.transform.transform_type, TransformType::Affine);
+
+    let mut max_error = 0.0f64;
+    for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
+        let t = result.transform.apply(ref_star.pos);
+        let error = t.distance(target_star.pos);
+        max_error = max_error.max(error);
+    }
+
+    assert!(
+        max_error < 1.0,
+        "Max transformation error too large: {} pixels",
+        max_error
+    );
+
+    assert!(
+        result.rms_error < 1.0,
+        "RMS error too large: {}",
+        result.rms_error
+    );
+}
+
+// ============================================================================
+// TransformType::Homography tests (8 DOF: perspective)
+// ============================================================================
+
+#[test]
+fn test_registration_homography_mild_perspective() {
+    // Test homography with mild perspective distortion
+    let ref_stars = generate_random_stars(120, 2000.0, 2000.0, 66666, FWHM_NORMAL);
+
+    // Mild perspective: small h6, h7 values
+    // Start with identity-like homography and add small perspective
+    let h6 = 0.00001;
+    let h7 = 0.000005;
+    let dx = 25.0;
+    let dy = -18.0;
+
+    let homography_params = [1.0, 0.0, dx, 0.0, 1.0, dy, h6, h7];
+    let target_stars = apply_homography(&ref_stars, homography_params);
+
+    let config = Config {
+        transform_type: TransformType::Homography,
+        min_stars: Some(8),
+        min_matches: 6,
+        ..Default::default()
+    };
+
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
+
+    assert_eq!(result.transform.transform_type, TransformType::Homography);
+
+    // Validate transformation accuracy
+    let mut max_error = 0.0f64;
+    for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
+        let t = result.transform.apply(ref_star.pos);
+        let error = t.distance(target_star.pos);
+        max_error = max_error.max(error);
+    }
+
+    assert!(
+        max_error < 2.0,
+        "Max transformation error too large: {} pixels",
+        max_error
+    );
+
+    assert!(
+        result.rms_error < 1.5,
+        "RMS error too large: {}",
+        result.rms_error
+    );
+}
+
+#[test]
+fn test_registration_homography_with_rotation() {
+    // Homography combining rotation and perspective
+    let ref_stars = generate_random_stars(120, 2000.0, 2000.0, 77778, FWHM_NORMAL);
+
+    let angle_rad = 0.5_f64.to_radians();
+    let cos_a = angle_rad.cos();
+    let sin_a = angle_rad.sin();
+    let dx = 35.0;
+    let dy = -25.0;
+    let h6 = 0.000008;
+    let h7 = 0.000003;
+
+    let homography_params = [cos_a, -sin_a, dx, sin_a, cos_a, dy, h6, h7];
+    let target_stars = apply_homography(&ref_stars, homography_params);
+
+    let config = Config {
+        transform_type: TransformType::Homography,
+        min_stars: Some(8),
+        min_matches: 6,
+        ..Default::default()
+    };
+
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
+
+    assert_eq!(result.transform.transform_type, TransformType::Homography);
+
+    let mut max_error = 0.0f64;
+    for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
+        let t = result.transform.apply(ref_star.pos);
+        let error = t.distance(target_star.pos);
+        max_error = max_error.max(error);
+    }
+
+    assert!(
+        max_error < 2.0,
+        "Max transformation error too large: {} pixels",
+        max_error
+    );
+}
+
+// ============================================================================
+// Cross-type validation tests
+// ============================================================================
+
+#[test]
+fn test_similarity_recovers_from_euclidean_data() {
+    // When data only has rotation (no scale), Similarity should still work
+    // and recover scale ≈ 1.0
+    let ref_stars = generate_random_stars(60, 1500.0, 1500.0, 88888, FWHM_TIGHT);
+
+    let angle_rad = 0.6_f64.to_radians();
+    let dx = 20.0;
+    let dy = 15.0;
+    let center_x = 750.0;
+    let center_y = 750.0;
+
+    // Apply Euclidean transform (scale = 1.0)
+    let target_stars = transform_star_list(&ref_stars, dx, dy, angle_rad, 1.0, center_x, center_y);
+
+    // Use Similarity estimator
+    let config = Config {
+        transform_type: TransformType::Similarity,
+        min_stars: Some(6),
+        min_matches: 4,
+        ..Default::default()
+    };
+
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
+
+    // Scale should be recovered as ~1.0
+    let recovered_scale = result.transform.scale_factor();
+    assert!(
+        (recovered_scale - 1.0).abs() < 0.001,
+        "Scale should be ~1.0 for Euclidean data, got {}",
+        recovered_scale
+    );
+
+    // Rotation should be accurate
+    let recovered_angle = result.transform.rotation_angle();
+    let rotation_error = (recovered_angle - angle_rad).abs();
+    assert!(
+        rotation_error < 0.01,
+        "Rotation error: {} vs {}",
+        recovered_angle,
+        angle_rad
+    );
+}
+
+#[test]
+fn test_affine_recovers_from_similarity_data() {
+    // When data only has similarity transform, Affine should recover it correctly
+    let ref_stars = generate_random_stars(80, 2000.0, 2000.0, 99999, FWHM_TIGHT);
+
+    let angle_rad = 0.4_f64.to_radians();
+    let scale = 1.005;
+    let dx = 30.0;
+    let dy = -20.0;
+    let center_x = 1000.0;
+    let center_y = 1000.0;
+
+    let target_stars =
+        transform_star_list(&ref_stars, dx, dy, angle_rad, scale, center_x, center_y);
+
+    let config = Config {
+        transform_type: TransformType::Affine,
+        min_stars: Some(6),
+        min_matches: 4,
+        ..Default::default()
+    };
+
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
+
+    // Validate by applying transform
+    let mut max_error = 0.0f64;
+    for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
+        let t = result.transform.apply(ref_star.pos);
+        let error = t.distance(target_star.pos);
+        max_error = max_error.max(error);
+    }
+
+    assert!(
+        max_error < 0.5,
+        "Max transformation error too large: {} pixels",
+        max_error
+    );
+}
+
+// ============================================================================
+// TransformType::Auto ladder: pick the simplest model that fits (T3.4)
+// ============================================================================
+
+#[test]
+fn test_auto_ladder_selects_simplest_adequate_model() {
+    // `Auto` must accept the fewest-DOF transform within 0.5 px RMS, not overfit. Each ground
+    // truth is built so every simpler model genuinely exceeds the threshold.
+    let ref_stars = generate_random_stars(90, 2000.0, 2000.0, 101010, FWHM_TIGHT);
+    let config = Config {
+        transform_type: TransformType::Auto,
+        min_stars: Some(8),
+        min_matches: 6,
+        ..Default::default()
+    };
+
+    // Rigid (rotation + translation, scale exactly 1.0) → Euclidean, NOT Similarity.
+    let euclid = transform_star_list(
+        &ref_stars,
+        40.0,
+        -25.0,
+        0.8f64.to_radians(),
+        1.0,
+        1000.0,
+        1000.0,
+    );
+    let result = register(&ref_stars, &euclid, &config).expect("euclidean auto");
+    assert_eq!(
+        result.transform.transform_type,
+        TransformType::Euclidean,
+        "scale-1 rigid set should select Euclidean, got {:?}",
+        result.transform.transform_type
+    );
+
+    // Uniform scale ≠ 1 → Euclidean can't fit the scale → Similarity.
+    let sim = transform_star_list(
+        &ref_stars,
+        30.0,
+        -20.0,
+        0.5f64.to_radians(),
+        1.002,
+        1000.0,
+        1000.0,
+    );
+    let result = register(&ref_stars, &sim, &config).expect("similarity auto");
+    assert_eq!(
+        result.transform.transform_type,
+        TransformType::Similarity,
+        "uniformly-scaled set should select Similarity, got {:?}",
+        result.transform.transform_type
+    );
+
+    // Anisotropic scale (shear-like) → Euclidean/Similarity fail → Affine, NOT Homography.
+    let affine = apply_affine(&ref_stars, [1.003, 0.0, 20.0, 0.0, 0.998, -15.0]);
+    let result = register(&ref_stars, &affine, &config).expect("affine auto");
+    assert_eq!(
+        result.transform.transform_type,
+        TransformType::Affine,
+        "anisotropic set should select Affine (not jump to Homography), got {:?}",
+        result.transform.transform_type
+    );
+
+    // Perspective → no linear model fits → fall through to Homography.
+    let homog = apply_homography(&ref_stars, [1.0, 0.0, 25.0, 0.0, 1.0, -18.0, 1e-5, 5e-6]);
+    let result = register(&ref_stars, &homog, &config).expect("homography auto");
+    assert_eq!(
+        result.transform.transform_type,
+        TransformType::Homography,
+        "perspective set should fall through to Homography, got {:?}",
+        result.transform.transform_type
+    );
+}

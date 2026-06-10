@@ -18,8 +18,8 @@ use common::Vec2us;
 
 use crate::math::sum::sum_f32;
 use crate::raw::load_raw;
-use crate::stacking::cache::StackableImage;
-use crate::stacking::error::Error;
+use crate::stacking::combine::cache::StackableImage;
+use crate::stacking::combine::error::Error;
 
 /// FITS BITPIX values representing pixel data types.
 ///

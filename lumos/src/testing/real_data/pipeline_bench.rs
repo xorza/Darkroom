@@ -4,8 +4,8 @@ use std::time::Instant;
 
 use crate::astro_image::cfa::CfaImage;
 use crate::raw::load_raw_cfa;
-use crate::stacking::cache::CfaCache;
-use crate::stacking::stack::run_stacking;
+use crate::stacking::combine::cache::CfaCache;
+use crate::stacking::combine::stack::run_stacking;
 use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
 use crate::{
     AstroImage, CalibrationFrames, CalibrationImages, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD,

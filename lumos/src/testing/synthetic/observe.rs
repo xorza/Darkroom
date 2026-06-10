@@ -7,7 +7,7 @@
 //! image, so the *same* code path produces both the stimulus and its truth.
 
 use crate::astro_image::{AstroImage, ImageDimensions};
-use crate::registration::transform::Transform;
+use crate::stacking::registration::transform::Transform;
 use crate::testing::TestRng;
 use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::noise::{add_dark_current, add_read_noise, apply_shot_noise};

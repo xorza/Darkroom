@@ -1,14 +1,16 @@
-pub(crate) mod cache;
-pub(crate) mod cache_config;
-pub(crate) mod config;
-pub(crate) mod error;
-pub mod progress;
-pub mod rejection;
-pub(crate) mod stack;
+//! Stacking: turn a set of sub-exposures into one calibrated, aligned, combined
+//! deep-sky image. Each submodule is a stage in that flow:
+//!
+//! - [`calibration_masters`] — master dark/flat/bias + defect maps, per-frame calibration.
+//! - [`star_detection`] — sub-pixel star detection feeding registration.
+//! - [`registration`] — star-pattern alignment + image warp into a common frame.
+//! - [`combine`] — statistical per-pixel frame combination (rejection/normalization/weighting).
+//! - [`drizzle`] — Fruchter & Hook variable-pixel reconstruction (dithered/super-resolution sets).
+//! - [`pipeline`] — end-to-end orchestration (`align_and_stack`, `calibrate_align_stack`).
 
-#[cfg(test)]
-mod bench;
-#[cfg(test)]
-mod real_data_tests;
-#[cfg(test)]
-mod synthetic_tests;
+pub(crate) mod calibration_masters;
+pub(crate) mod combine;
+pub(crate) mod drizzle;
+pub(crate) mod pipeline;
+pub(crate) mod registration;
+pub(crate) mod star_detection;

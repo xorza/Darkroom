@@ -23,15 +23,10 @@
 //! ```
 
 mod astro_image;
-mod calibration_masters;
 pub(crate) mod common;
-pub(crate) mod drizzle;
 pub(crate) mod math;
-mod pipeline;
 pub(crate) mod raw;
-pub(crate) mod registration;
 pub(crate) mod stacking;
-pub(crate) mod star_detection;
 
 #[cfg(test)]
 pub mod testing;
@@ -39,43 +34,45 @@ pub mod testing;
 pub use astro_image::cfa::{CfaImage, CfaType};
 pub use astro_image::error::ImageError;
 pub use astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
-pub use calibration_masters::cosmic_ray::{CosmicRayConfig, NoiseEstimation};
-pub use calibration_masters::defect_map::DefectMap;
 pub use raw::demosaic::bayer::CfaPattern;
 pub use raw::{load_raw, load_raw_cfa};
+pub use stacking::calibration_masters::cosmic_ray::{CosmicRayConfig, NoiseEstimation};
+pub use stacking::calibration_masters::defect_map::DefectMap;
 
-pub use calibration_masters::{
+pub use stacking::calibration_masters::{
     CalibrationFrames, CalibrationImages, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD,
 };
 
-pub use star_detection::config::{
+pub use stacking::star_detection::config::{
     BackgroundRefinement, CentroidMethod, Config as StarDetectionConfig, Connectivity,
     LocalBackgroundMethod, NoiseModel,
 };
-pub use star_detection::detector::{
+pub use stacking::star_detection::detector::{
     DetectionResult as StarDetectionResult, Diagnostics as StarDetectionDiagnostics, StarDetector,
 };
-pub use star_detection::star::Star;
+pub use stacking::star_detection::star::Star;
 
-pub use registration::config::{Config as RegistrationConfig, InterpolationMethod};
-pub use registration::distortion::sip::SipPolynomial;
-pub use registration::result::{RansacFailureReason, RegistrationError, RegistrationResult};
-pub use registration::transform::{Transform, TransformType, WarpTransform};
-pub use registration::{WarpResult, register, warp};
+pub use stacking::registration::config::{Config as RegistrationConfig, InterpolationMethod};
+pub use stacking::registration::distortion::sip::SipPolynomial;
+pub use stacking::registration::result::{
+    RansacFailureReason, RegistrationError, RegistrationResult,
+};
+pub use stacking::registration::transform::{Transform, TransformType, WarpTransform};
+pub use stacking::registration::{WarpResult, register, warp};
 
-pub use stacking::cache_config::CacheConfig;
-pub use stacking::config::{CombineMethod, Normalization, StackConfig};
-pub use stacking::error::Error as StackError;
-pub use stacking::progress::{ProgressCallback, StackingProgress, StackingStage};
-pub use stacking::rejection::Rejection;
-pub use stacking::stack::{StackFrame, StackResult, stack, stack_images};
+pub use stacking::combine::cache_config::CacheConfig;
+pub use stacking::combine::config::{CombineMethod, Normalization, StackConfig};
+pub use stacking::combine::error::Error as StackError;
+pub use stacking::combine::progress::{ProgressCallback, StackingProgress, StackingStage};
+pub use stacking::combine::rejection::Rejection;
+pub use stacking::combine::stack::{StackFrame, StackResult, stack, stack_images};
 
-pub use pipeline::{
+pub use stacking::pipeline::{
     AlignStackConfig, AlignStackResult, Error as AlignStackError, Reference, align_and_stack,
     calibrate_align_stack,
 };
 
-pub use drizzle::error::DrizzleError;
-pub use drizzle::{
+pub use stacking::drizzle::error::DrizzleError;
+pub use stacking::drizzle::{
     DrizzleAccumulator, DrizzleConfig, DrizzleKernel, DrizzleResult, drizzle_images, drizzle_stack,
 };

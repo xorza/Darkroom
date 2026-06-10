@@ -9,8 +9,8 @@ use rayon::prelude::*;
 use crate::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
 use crate::raw::demosaic::bayer::CfaPattern;
 use crate::raw::load_raw_cfa;
-use crate::stacking::cache::StackableImage;
-use crate::stacking::error::Error;
+use crate::stacking::combine::cache::StackableImage;
+use crate::stacking::combine::error::Error;
 use common::Buffer2;
 
 /// CFA pattern for raw sensor data.

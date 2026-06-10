@@ -57,9 +57,9 @@ use std::path::PathBuf;
 use crate::AstroImage;
 use crate::astro_image::AstroImageMetadata;
 use crate::astro_image::cfa::{CfaImage, CfaType};
-use crate::star_detection::background::estimate::BackgroundEstimate;
-use crate::star_detection::buffer_pool::BufferPool;
-use crate::star_detection::config::Config;
+use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
+use crate::stacking::star_detection::buffer_pool::BufferPool;
+use crate::stacking::star_detection::config::Config;
 use common::Buffer2;
 
 /// Convenience function to estimate background for tests.
@@ -68,7 +68,7 @@ use common::Buffer2;
 /// Creates a temporary buffer pool internally.
 pub(crate) fn estimate_background(pixels: &Buffer2<f32>, config: &Config) -> BackgroundEstimate {
     let mut pool = BufferPool::new(pixels.width(), pixels.height());
-    crate::star_detection::background::estimate_background(pixels, config, &mut pool)
+    crate::stacking::star_detection::background::estimate_background(pixels, config, &mut pool)
 }
 
 /// Create a CfaImage from raw pixel data and CFA type.

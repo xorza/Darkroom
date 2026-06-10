@@ -4,7 +4,7 @@
 //! to `Star` positions for testing registration algorithms, plus helpers to
 //! synthesize random fields.
 
-use crate::{star_detection::star::Star, testing::TestRng};
+use crate::{stacking::star_detection::star::Star, testing::TestRng};
 use glam::DVec2;
 
 /// Generate random star positions within a bounded area (default 50-px margin).
