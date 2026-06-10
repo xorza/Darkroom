@@ -210,6 +210,39 @@ impl PixelData {
     }
 }
 
+/// One pixel's RGB channel values, decoupling per-pixel code from the planar storage. Passed to
+/// and returned from the closure in [`AstroImage::par_map_pixels`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Rgb {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+}
+
+impl Rgb {
+    pub(crate) const ZERO: Rgb = Rgb {
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
+    };
+
+    /// Combined intensity `(r + g + b) / 3`.
+    #[inline]
+    pub(crate) fn intensity(self) -> f32 {
+        (self.r + self.g + self.b) * (1.0 / 3.0)
+    }
+
+    /// Scale all three channels by `f`.
+    #[inline]
+    pub(crate) fn scale(self, f: f32) -> Rgb {
+        Rgb {
+            r: self.r * f,
+            g: self.g * f,
+            b: self.b * f,
+        }
+    }
+}
+
 /// Represents an astronomical image.
 #[derive(Debug, Clone)]
 pub struct AstroImage {
@@ -393,6 +426,54 @@ impl AstroImage {
     /// Get channel as mutable Buffer2 reference.
     pub fn channel_mut(&mut self, c: usize) -> &mut Buffer2<f32> {
         self.pixels.channel_mut(c)
+    }
+
+    /// Transform every pixel in place, in parallel. The grayscale/RGB layout is dispatched
+    /// **once**, then a homogeneous loop runs `mono` over each sample (grayscale) or `rgb` over
+    /// each [`Rgb`] pixel — so per-pixel code never re-checks the channel count.
+    pub(crate) fn par_map_pixels(
+        &mut self,
+        mono: impl Fn(f32) -> f32 + Sync,
+        rgb: impl Fn(Rgb) -> Rgb + Sync,
+    ) {
+        match &mut self.pixels {
+            PixelData::L(buf) => buf.pixels_mut().par_iter_mut().for_each(|v| *v = mono(*v)),
+            PixelData::Rgb([r, g, b]) => {
+                let (rp, gp, bp) = (r.pixels_mut(), g.pixels_mut(), b.pixels_mut());
+                rp.par_iter_mut()
+                    .zip(gp.par_iter_mut())
+                    .zip(bp.par_iter_mut())
+                    .for_each(|((rv, gv), bv)| {
+                        let out = rgb(Rgb {
+                            r: *rv,
+                            g: *gv,
+                            b: *bv,
+                        });
+                        *rv = out.r;
+                        *gv = out.g;
+                        *bv = out.b;
+                    });
+            }
+        }
+    }
+
+    /// Per-pixel combined intensity as a 2D plane: the channel itself for grayscale, `(r+g+b)/3`
+    /// for RGB. Keeps the image dimensions — a luminance plane, also usable as a sample set for
+    /// image statistics.
+    pub(crate) fn intensity_plane(&self) -> Buffer2<f32> {
+        match &self.pixels {
+            PixelData::L(buf) => buf.clone(),
+            PixelData::Rgb([r, g, b]) => {
+                let intensity = r
+                    .pixels()
+                    .iter()
+                    .zip(g.pixels())
+                    .zip(b.pixels())
+                    .map(|((&r, &g), &b)| Rgb { r, g, b }.intensity())
+                    .collect();
+                Buffer2::new(self.width(), self.height(), intensity)
+            }
+        }
     }
 
     // ------------------------------------------------------------------------

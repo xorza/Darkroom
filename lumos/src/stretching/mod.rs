@@ -20,7 +20,7 @@
 use rayon::prelude::*;
 
 use crate::core::math::statistics::{mad_to_sigma, median_and_mad_f32_mut};
-use crate::io::astro_image::{AstroImage, PixelData};
+use crate::io::astro_image::{AstroImage, Rgb};
 
 #[cfg(test)]
 mod tests;
@@ -212,22 +212,8 @@ fn build_curve_combined(image: &AstroImage, method: &StretchMethod) -> Curve {
     if let StretchMethod::Asinh { beta } = *method {
         return Curve::asinh(beta); // explicit β needs no statistics
     }
-    let mut samples = combined_intensity_samples(image);
-    build_curve(&mut samples, method)
-}
-
-/// Combined intensity `I = (r+g+b)/3` per pixel (or the single channel for grayscale), as a
-/// sample set for statistics. `samples` is consumed/reordered by the median computation.
-fn combined_intensity_samples(image: &AstroImage) -> Vec<f32> {
-    match &image.pixels {
-        PixelData::L(buf) => buf.to_vec(),
-        PixelData::Rgb([r, g, b]) => r
-            .iter()
-            .zip(g.iter())
-            .zip(b.iter())
-            .map(|((&ri, &gi), &bi)| (ri + gi + bi) * (1.0 / 3.0))
-            .collect(),
-    }
+    let mut plane = image.intensity_plane();
+    build_curve(plane.pixels_mut(), method)
 }
 
 /// Build a curve from a sample set, computing statistics in place as needed.
@@ -255,37 +241,21 @@ fn apply_to_slice(pixels: &mut [f32], curve: Curve) {
 /// Apply `curve` to the combined intensity and scale each channel by `f(I)/I`, with a
 /// hue-preserving cap when a channel would exceed 1 (divide all three by their max).
 fn apply_color_preserving(image: &mut AstroImage, curve: Curve) {
-    match &mut image.pixels {
-        PixelData::L(buf) => apply_to_slice(buf.pixels_mut(), curve),
-        PixelData::Rgb([r, g, b]) => {
-            let (rp, gp, bp) = (r.pixels_mut(), g.pixels_mut(), b.pixels_mut());
-            rp.par_iter_mut()
-                .zip(gp.par_iter_mut())
-                .zip(bp.par_iter_mut())
-                .for_each(|((ro, go), bo)| {
-                    let (ri, gi, bi) = (*ro, *go, *bo);
-                    let intensity = (ri + gi + bi) * (1.0 / 3.0);
-                    if intensity <= 0.0 {
-                        *ro = 0.0;
-                        *go = 0.0;
-                        *bo = 0.0;
-                        return;
-                    }
-                    let factor = curve.eval(intensity) / intensity;
-                    let mut r2 = ri * factor;
-                    let mut g2 = gi * factor;
-                    let mut b2 = bi * factor;
-                    let maxc = r2.max(g2).max(b2);
-                    if maxc > 1.0 {
-                        let s = 1.0 / maxc;
-                        r2 *= s;
-                        g2 *= s;
-                        b2 *= s;
-                    }
-                    *ro = r2;
-                    *go = g2;
-                    *bo = b2;
-                });
-        }
-    }
+    image.par_map_pixels(
+        |l| curve.eval(l),
+        |px| {
+            let intensity = px.intensity();
+            if intensity <= 0.0 {
+                return Rgb::ZERO;
+            }
+            let scaled = px.scale(curve.eval(intensity) / intensity);
+            // Hue-preserving highlight cap: when a channel exceeds 1, divide all three by the max.
+            let maxc = scaled.r.max(scaled.g).max(scaled.b);
+            if maxc > 1.0 {
+                scaled.scale(1.0 / maxc)
+            } else {
+                scaled
+            }
+        },
+    );
 }
