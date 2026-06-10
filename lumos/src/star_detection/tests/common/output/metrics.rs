@@ -2,7 +2,7 @@
 
 use crate::star_detection::star::Star;
 use crate::star_detection::tests::common::output::comparison::match_stars;
-use crate::testing::synthetic::star_field::GroundTruthStar;
+use crate::testing::synthetic::observe::ObservedSource;
 use std::fmt;
 use std::fs::File;
 use std::io::Write;
@@ -130,7 +130,7 @@ impl fmt::Display for DetectionMetrics {
 /// * `detected` - Detected stars
 /// * `match_radius` - Maximum distance for matching (typically 2 × FWHM)
 pub fn compute_detection_metrics(
-    ground_truth: &[GroundTruthStar],
+    ground_truth: &[ObservedSource],
     detected: &[Star],
     match_radius: f32,
 ) -> DetectionMetrics {
@@ -357,14 +357,11 @@ pub fn check_pass(metrics: &DetectionMetrics, criteria: &PassCriteria) -> Result
 mod tests {
     use super::*;
 
-    fn make_truth(x: f64, y: f64) -> GroundTruthStar {
-        GroundTruthStar {
+    fn make_truth(x: f64, y: f64) -> ObservedSource {
+        ObservedSource {
             pos: glam::DVec2::new(x, y),
             flux: 100.0,
             fwhm: 3.0,
-            eccentricity: 0.0,
-            is_saturated: false,
-            angle: 0.0,
         }
     }
 

@@ -1,240 +1,173 @@
-//! Standard pipeline tests - tests full star detection on typical scenarios.
+//! Standard pipeline tests - full star detection on typical forward-model scenarios.
 
+use super::{Scenario, run_test};
 use crate::star_detection::config::Config;
 use crate::star_detection::tests::common::output::metrics::{
     PassCriteria, check_pass, crowded_criteria, faint_star_criteria, standard_criteria,
 };
-use crate::star_detection::tests::synthetic::pipeline_tests::run_test;
 use crate::testing::init_tracing;
-use crate::testing::synthetic::star_field::{
-    StarFieldConfig, dense_field_config, sparse_field_config,
-};
+use crate::testing::synthetic::camera::PsfModel;
+use crate::testing::synthetic::scene::BackgroundField;
+
+/// Detection config for synthetic images: disable the CFA matched filter so FWHM stays accurate.
+fn detection_config() -> Config {
+    Config {
+        expected_fwhm: 0.0,
+        ..Config::default()
+    }
+}
 
 /// Test: Sparse field with well-separated stars.
 #[test]
-
 fn test_pipeline_sparse_field() {
     init_tracing();
 
-    let field_config = sparse_field_config();
-    // Synthetic images: disable CFA filter, disable matched filter for accurate FWHM
-    let detection_config = Config {
-        expected_fwhm: 0.0,
-        ..Config::default()
-    };
+    let frame = Scenario {
+        num_stars: 15,
+        ..Default::default()
+    }
+    .frame();
 
-    let metrics = run_test("sparse_field", "pipeline", &field_config, &detection_config);
+    let metrics = run_test("sparse_field", "pipeline", &frame, &detection_config());
 
-    // Check against standard criteria
-    let criteria = standard_criteria();
-    if let Err(failures) = check_pass(&metrics, &criteria) {
-        for f in &failures {
-            println!("FAIL: {}", f);
-        }
-        panic!("Test failed: {:?}", failures);
+    if let Err(failures) = check_pass(&metrics, &standard_criteria()) {
+        panic!("Sparse field test failed: {:?}", failures);
     }
 }
 
 /// Test: Dense field with many stars.
 #[test]
-
 fn test_pipeline_dense_field() {
     init_tracing();
 
-    let field_config = dense_field_config();
-    // Synthetic images: disable CFA filter, disable matched filter for accurate FWHM
-    let detection_config = Config {
-        expected_fwhm: 0.0,
-        ..Config::default()
-    };
+    let frame = Scenario {
+        num_stars: 80,
+        ..Default::default()
+    }
+    .frame();
 
-    let metrics = run_test("dense_field", "pipeline", &field_config, &detection_config);
+    let metrics = run_test("dense_field", "pipeline", &frame, &detection_config());
 
-    // Relaxed criteria for dense field
-    let criteria = crowded_criteria();
-    if let Err(failures) = check_pass(&metrics, &criteria) {
-        for f in &failures {
-            println!("FAIL: {}", f);
-        }
-        // Don't fail the test, just report
-        println!("Dense field test has some failures (expected for challenging conditions)");
+    // Relaxed criteria for dense field; report-only (crowding is genuinely hard).
+    if let Err(failures) = check_pass(&metrics, &crowded_criteria()) {
+        println!(
+            "Dense field test has some failures (expected): {:?}",
+            failures
+        );
     }
 }
 
 /// Test: Moffat profile stars (more realistic PSF).
 #[test]
-
 fn test_pipeline_moffat_profile() {
     init_tracing();
 
-    let field_config = StarFieldConfig {
-        width: 256,
-        height: 256,
-        num_stars: 25,
-        fwhm_range: (3.5, 4.5),
-        // Narrower magnitude range to avoid saturation
-        magnitude_range: (12.5, 13.5),
-        mag_zero_point: 14.8,
-        background_level: 0.1,
-        noise_sigma: 0.02,
-        use_moffat: true,
-        moffat_beta: 2.5,
+    let frame = Scenario {
+        // Moffat's broad 8α wings merge close neighbours and elevate the local background, so
+        // use fewer, well-separated stars at moderate (unsaturated) brightness — the scenario
+        // still exercises detection on a realistic atmospheric PSF.
+        num_stars: 15,
+        psf: Some(PsfModel::Moffat {
+            fwhm: 4.0,
+            beta: 2.5,
+        }),
+        flux: (5.0, 11.0),
+        background: BackgroundField::Uniform { level: 0.05 },
         ..Default::default()
-    };
-    // Synthetic images: disable CFA filter, disable matched filter for accurate FWHM
-    let detection_config = Config {
-        expected_fwhm: 0.0,
-        ..Config::default()
-    };
+    }
+    .frame();
 
-    let metrics = run_test(
-        "moffat_profile",
-        "pipeline",
-        &field_config,
-        &detection_config,
-    );
+    let metrics = run_test("moffat_profile", "pipeline", &frame, &detection_config());
 
-    // Moffat profile has extended wings that can affect FWHM estimation
+    // Moffat wings: Gaussian-fit FWHM and centroid matching carry some extra error.
     let criteria = PassCriteria {
-        min_detection_rate: 0.85, // 25 stars on 256x256 — one missed star is -4%
+        min_detection_rate: 0.85,
         max_false_positive_rate: 0.05,
-        max_mean_centroid_error: 0.30, // Moffat wings can affect centroid matching
-        max_fwhm_error: 0.20,          // Gaussian fit on Moffat profile has some error
+        max_mean_centroid_error: 0.30,
+        max_fwhm_error: 0.20,
     };
     if let Err(failures) = check_pass(&metrics, &criteria) {
-        for f in &failures {
-            println!("FAIL: {}", f);
-        }
         panic!("Moffat profile test failed: {:?}", failures);
     }
 }
 
-/// Test: Wide FWHM range (3-5 pixels).
+/// Test: Larger PSF (single instrument FWHM; legacy varied per-star).
 #[test]
-
 fn test_pipeline_fwhm_range() {
     init_tracing();
 
-    let field_config = StarFieldConfig {
-        width: 256,
-        height: 256,
+    let frame = Scenario {
         num_stars: 25,
-        // Moderate FWHM range - very small stars (< 2.5px) fail min_area filter
-        fwhm_range: (3.0, 5.0),
-        // Narrower magnitude range to avoid saturation
-        magnitude_range: (12.5, 13.5),
-        mag_zero_point: 14.8,
-        background_level: 0.1,
-        noise_sigma: 0.02,
+        fwhm: 4.5,
         ..Default::default()
-    };
-    // Synthetic images: disable CFA filter, disable matched filter for accurate FWHM
-    let detection_config = Config {
-        expected_fwhm: 0.0,
-        ..Config::default()
-    };
+    }
+    .frame();
 
-    let metrics = run_test("fwhm_range", "pipeline", &field_config, &detection_config);
+    let metrics = run_test("fwhm_range", "pipeline", &frame, &detection_config());
 
-    // Relaxed for FWHM variation - centroid matching can have outliers with varying PSF
     let criteria = PassCriteria {
-        min_detection_rate: 0.90, // Relaxed for smaller images
+        min_detection_rate: 0.90,
         max_false_positive_rate: 0.05,
-        max_mean_centroid_error: 0.30, // Relaxed due to FWHM variation
+        max_mean_centroid_error: 0.30,
         max_fwhm_error: 0.30,
     };
-
     if let Err(failures) = check_pass(&metrics, &criteria) {
-        for f in &failures {
-            println!("FAIL: {}", f);
-        }
         panic!("FWHM range test failed: {:?}", failures);
     }
 }
 
 /// Test: Wide dynamic range (bright to faint stars).
 #[test]
-
 fn test_pipeline_dynamic_range() {
     init_tracing();
 
-    let field_config = StarFieldConfig {
-        width: 256,
-        height: 256,
+    let frame = Scenario {
         num_stars: 30,
-        fwhm_range: (3.0, 4.0),
-        // Adjusted to avoid saturation: bright stars peak ~0.8, faint ~0.2
-        magnitude_range: (12.0, 14.0),
-        mag_zero_point: 14.8,
-        background_level: 0.1,
-        noise_sigma: 0.02,
+        // Faint end near the detection limit.
+        flux: (2.5, 22.0),
         ..Default::default()
-    };
+    }
+    .frame();
 
-    // Synthetic images: disable CFA filter, disable matched filter
-    // Lower SNR threshold to catch faint stars
     let detection_config = Config {
         expected_fwhm: 0.0,
         min_snr: 5.0,
         ..Config::default()
     };
+    let metrics = run_test("dynamic_range", "pipeline", &frame, &detection_config);
 
-    let metrics = run_test(
-        "dynamic_range",
-        "pipeline",
-        &field_config,
-        &detection_config,
-    );
-
-    // Faint stars are hard to detect, so relaxed criteria
-    let criteria = faint_star_criteria();
-
-    if let Err(failures) = check_pass(&metrics, &criteria) {
-        for f in &failures {
-            println!("FAIL: {}", f);
-        }
-        println!("Dynamic range test has some failures (expected for faint stars)");
+    // Faint stars are hard; report-only.
+    if let Err(failures) = check_pass(&metrics, &faint_star_criteria()) {
+        println!(
+            "Dynamic range test has some failures (expected): {:?}",
+            failures
+        );
     }
 }
 
 /// Test: Low noise (ideal conditions).
 #[test]
-
 fn test_pipeline_low_noise() {
     init_tracing();
 
-    let field_config = StarFieldConfig {
-        width: 256,
-        height: 256,
+    let frame = Scenario {
         num_stars: 25,
-        fwhm_range: (3.0, 4.0),
-        // Narrower magnitude range to avoid saturation
-        magnitude_range: (12.5, 13.5),
-        mag_zero_point: 14.8,
-        background_level: 0.1,
-        noise_sigma: 0.005, // Very low noise
+        // Deep well + low read noise → very clean.
+        full_well_e: 120_000.0,
+        read_noise_e: 1.0,
         ..Default::default()
-    };
-    // Synthetic images: disable CFA filter, disable matched filter for accurate FWHM
-    let detection_config = Config {
-        expected_fwhm: 0.0,
-        ..Config::default()
-    };
+    }
+    .frame();
 
-    let metrics = run_test("low_noise", "pipeline", &field_config, &detection_config);
+    let metrics = run_test("low_noise", "pipeline", &frame, &detection_config());
 
-    // Good criteria for low noise - some outlier matches can skew mean centroid error
     let criteria = PassCriteria {
         min_detection_rate: 0.92,
         max_false_positive_rate: 0.02,
-        max_mean_centroid_error: 0.25, // Outliers in matching can skew mean
+        max_mean_centroid_error: 0.25,
         max_fwhm_error: 0.10,
     };
-
     if let Err(failures) = check_pass(&metrics, &criteria) {
-        for f in &failures {
-            println!("FAIL: {}", f);
-        }
         panic!("Low noise test failed: {:?}", failures);
     }
 }

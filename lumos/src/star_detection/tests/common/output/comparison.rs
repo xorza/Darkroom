@@ -4,7 +4,7 @@
 
 use crate::star_detection::star::Star;
 use crate::star_detection::tests::common::output::image_writer::gray_to_rgb_image_stretched;
-use crate::testing::synthetic::star_field::GroundTruthStar;
+use crate::testing::synthetic::observe::ObservedSource;
 use glam::Vec2;
 use imaginarium::Image;
 use imaginarium::drawing::{draw_circle, draw_cross};
@@ -40,7 +40,7 @@ pub fn create_comparison_image(
     pixels: &[f32],
     width: usize,
     height: usize,
-    ground_truth: &[GroundTruthStar],
+    ground_truth: &[ObservedSource],
     detected: &[Star],
     match_radius: f32,
 ) -> Image {
@@ -102,7 +102,7 @@ pub struct MatchResult {
 
 /// Match detected stars to ground truth using nearest neighbor.
 pub fn match_stars(
-    ground_truth: &[GroundTruthStar],
+    ground_truth: &[ObservedSource],
     detected: &[Star],
     max_distance: f32,
 ) -> MatchResult {
@@ -154,21 +154,15 @@ mod tests {
     #[test]
     fn test_match_stars_perfect() {
         let truth = vec![
-            GroundTruthStar {
+            ObservedSource {
                 pos: glam::DVec2::new(10.0, 10.0),
                 flux: 1.0,
                 fwhm: 3.0,
-                eccentricity: 0.0,
-                is_saturated: false,
-                angle: 0.0,
             },
-            GroundTruthStar {
+            ObservedSource {
                 pos: glam::DVec2::new(50.0, 50.0),
                 flux: 1.0,
                 fwhm: 3.0,
-                eccentricity: 0.0,
-                is_saturated: false,
-                angle: 0.0,
             },
         ];
 
@@ -205,13 +199,10 @@ mod tests {
 
     #[test]
     fn test_match_stars_with_false_positive() {
-        let truth = vec![GroundTruthStar {
+        let truth = vec![ObservedSource {
             pos: glam::DVec2::new(10.0, 10.0),
             flux: 1.0,
             fwhm: 3.0,
-            eccentricity: 0.0,
-            is_saturated: false,
-            angle: 0.0,
         }];
 
         let detected = vec![

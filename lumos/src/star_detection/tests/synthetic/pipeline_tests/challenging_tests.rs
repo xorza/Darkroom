@@ -1,27 +1,30 @@
-//! Challenging case tests - tests star detection under difficult conditions.
+//! Challenging-case tests — star detection under difficult conditions.
+//!
+//! These are **informational**: each renders a hard forward-model scenario, runs the full
+//! pipeline, and reports metrics against criteria. They assert only that detection runs
+//! without panicking (the thresholds are printed, not enforced) — so they double as a smoke
+//! test across the hard scenarios.
 
-use glam::Vec2;
-
+use super::{Placement, Scenario, run_test};
 use crate::star_detection::config::Config;
 use crate::star_detection::tests::common::output::metrics::{
     PassCriteria, check_pass, crowded_criteria, faint_star_criteria,
 };
-use crate::star_detection::tests::synthetic::pipeline_tests::run_test;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::backgrounds::NebulaConfig;
-use crate::testing::synthetic::star_field::{
-    CrowdingType, ElongationType, StarFieldConfig, crowded_cluster_config, elliptical_stars_config,
-    faint_stars_config,
-};
+use crate::testing::synthetic::camera::PsfModel;
+use crate::testing::synthetic::observe::SimFrame;
+use crate::testing::synthetic::scene::BackgroundField;
+use glam::Vec2;
 
-/// Run full pipeline and evaluate metrics for challenging cases.
+/// Run the pipeline on `frame` and report pass/fail against `criteria` (informational).
 fn run_challenging_test(
     name: &str,
-    field_config: &StarFieldConfig,
+    frame: &SimFrame,
     detection_config: &Config,
     criteria: &PassCriteria,
 ) -> bool {
-    let metrics = run_test(name, "challenging", field_config, detection_config);
+    let metrics = run_test(name, "challenging", frame, detection_config);
     match check_pass(&metrics, criteria) {
         Ok(()) => {
             println!("PASS: All criteria met");
@@ -36,531 +39,358 @@ fn run_challenging_test(
     }
 }
 
-// ============================================================================
-// Crowded Field Tests
-// ============================================================================
+// ---- Crowded fields ----
 
-/// Test: Crowded cluster with overlapping stars.
 #[test]
-
 fn test_crowded_cluster() {
     init_tracing();
-
-    let field_config = crowded_cluster_config();
-    let detection_config = Config::default();
-
-    let passed = run_challenging_test(
+    let frame = Scenario {
+        num_stars: 150,
+        placement: Placement::Cluster,
+        ..Default::default()
+    }
+    .frame();
+    run_challenging_test(
         "crowded_cluster",
-        &field_config,
-        &detection_config,
+        &frame,
+        &Config::default(),
         &crowded_criteria(),
     );
-
-    // Informational - crowded fields are hard
-    if !passed {
-        println!("Note: Crowded cluster is a challenging case");
-    }
 }
 
-/// Test: Very dense uniform distribution.
 #[test]
-
 fn test_very_dense() {
     init_tracing();
-
-    let field_config = StarFieldConfig {
-        width: 256,
-        height: 256,
-        num_stars: 200, // Very dense
-        fwhm_range: (3.0, 4.0),
-        magnitude_range: (8.0, 14.0),
-        background_level: 0.1,
-        noise_sigma: 0.02,
-        crowding: CrowdingType::Uniform,
+    let frame = Scenario {
+        num_stars: 200,
         ..Default::default()
-    };
-    let detection_config = Config::default();
-
-    // Very relaxed criteria
+    }
+    .frame();
     let criteria = PassCriteria {
-        min_detection_rate: 0.70, // Many will be blended
+        min_detection_rate: 0.70,
         max_false_positive_rate: 0.15,
         max_mean_centroid_error: 0.3,
         max_fwhm_error: 0.40,
     };
-
-    run_challenging_test("very_dense", &field_config, &detection_config, &criteria);
+    run_challenging_test("very_dense", &frame, &Config::default(), &criteria);
 }
 
-/// Test: Gradient density field.
 #[test]
-
 fn test_gradient_density() {
     init_tracing();
-
-    let field_config = StarFieldConfig {
-        width: 256,
-        height: 256,
+    // Cluster placement stands in for the legacy left-heavy density gradient (non-uniform).
+    let frame = Scenario {
         num_stars: 100,
-        fwhm_range: (3.0, 4.0),
-        magnitude_range: (8.0, 14.0),
-        background_level: 0.1,
-        noise_sigma: 0.02,
-        crowding: CrowdingType::Gradient,
+        placement: Placement::Cluster,
         ..Default::default()
-    };
-    let detection_config = Config::default();
-
+    }
+    .frame();
     run_challenging_test(
         "gradient_density",
-        &field_config,
-        &detection_config,
+        &frame,
+        &Config::default(),
         &crowded_criteria(),
     );
 }
 
-// ============================================================================
-// Elliptical Star Tests
-// ============================================================================
+// ---- Elliptical (tracking error) ----
 
-/// Test: Uniform tracking error (all stars elongated same direction).
 #[test]
-
 fn test_uniform_tracking_error() {
     init_tracing();
-
-    let field_config = elliptical_stars_config();
-    let detection_config = Config::default();
-
-    // Relaxed for elliptical
+    let frame = Scenario {
+        num_stars: 30,
+        psf: Some(PsfModel::Elliptical {
+            fwhm: 4.0,
+            eccentricity: 0.5,
+            angle: 0.5,
+        }),
+        ..Default::default()
+    }
+    .frame();
     let criteria = PassCriteria {
         min_detection_rate: 0.95,
         max_false_positive_rate: 0.05,
         max_mean_centroid_error: 0.2,
-        max_fwhm_error: 0.35, // FWHM harder to measure on elliptical
+        max_fwhm_error: 0.35,
     };
-
-    run_challenging_test(
-        "uniform_tracking",
-        &field_config,
-        &detection_config,
-        &criteria,
-    );
+    run_challenging_test("uniform_tracking", &frame, &Config::default(), &criteria);
 }
 
-/// Test: Varying tracking error (random elongation).
 #[test]
-
 fn test_varying_tracking_error() {
     init_tracing();
-
-    let field_config = StarFieldConfig {
-        width: 256,
-        height: 256,
+    // Legacy per-star varying elongation collapses to one elliptical instrument PSF.
+    let frame = Scenario {
         num_stars: 30,
-        fwhm_range: (3.0, 4.0),
-        magnitude_range: (8.0, 13.0),
-        background_level: 0.1,
-        noise_sigma: 0.02,
-        elongation: ElongationType::Varying,
-        eccentricity_range: (0.2, 0.5),
+        psf: Some(PsfModel::Elliptical {
+            fwhm: 4.0,
+            eccentricity: 0.4,
+            angle: 0.3,
+        }),
         ..Default::default()
-    };
-    let detection_config = Config::default();
-
+    }
+    .frame();
     let criteria = PassCriteria {
         min_detection_rate: 0.95,
         max_false_positive_rate: 0.05,
         max_mean_centroid_error: 0.2,
         max_fwhm_error: 0.40,
     };
-
-    run_challenging_test(
-        "varying_tracking",
-        &field_config,
-        &detection_config,
-        &criteria,
-    );
+    run_challenging_test("varying_tracking", &frame, &Config::default(), &criteria);
 }
 
-/// Test: Field rotation effect.
 #[test]
-
 fn test_field_rotation() {
     init_tracing();
-
-    let field_config = StarFieldConfig {
-        width: 256,
-        height: 256,
+    // Legacy field-rotation elongation collapses to one elliptical instrument PSF.
+    let frame = Scenario {
         num_stars: 35,
-        fwhm_range: (3.0, 4.0),
-        magnitude_range: (8.0, 13.0),
-        background_level: 0.1,
-        noise_sigma: 0.02,
-        elongation: ElongationType::FieldRotation,
+        psf: Some(PsfModel::Elliptical {
+            fwhm: 4.0,
+            eccentricity: 0.4,
+            angle: 0.0,
+        }),
         ..Default::default()
-    };
-    let detection_config = Config::default();
-
+    }
+    .frame();
     let criteria = PassCriteria {
         min_detection_rate: 0.90,
         max_false_positive_rate: 0.05,
         max_mean_centroid_error: 0.25,
         max_fwhm_error: 0.45,
     };
-
-    run_challenging_test(
-        "field_rotation",
-        &field_config,
-        &detection_config,
-        &criteria,
-    );
+    run_challenging_test("field_rotation", &frame, &Config::default(), &criteria);
 }
 
-// ============================================================================
-// Artifact Tests
-// ============================================================================
+// ---- Artifacts ----
 
-/// Test: Cosmic ray contamination.
 #[test]
-
 fn test_cosmic_rays() {
     init_tracing();
-
-    let field_config = StarFieldConfig {
-        width: 256,
-        height: 256,
+    let frame = Scenario {
         num_stars: 25,
-        fwhm_range: (3.0, 4.0),
-        magnitude_range: (8.0, 13.0),
-        background_level: 0.1,
-        noise_sigma: 0.02,
-        cosmic_ray_count: 25, // Many cosmic rays
+        cosmic_rays: 25,
         ..Default::default()
-    };
-    let detection_config = Config::default();
-
-    // Cosmic rays may cause false positives
+    }
+    .frame();
     let criteria = PassCriteria {
         min_detection_rate: 0.95,
-        max_false_positive_rate: 0.20, // Allow more FP from cosmic rays
+        max_false_positive_rate: 0.20,
         max_mean_centroid_error: 0.15,
         max_fwhm_error: 0.20,
     };
-
-    run_challenging_test("cosmic_rays", &field_config, &detection_config, &criteria);
+    run_challenging_test("cosmic_rays", &frame, &Config::default(), &criteria);
 }
 
-/// Test: Bayer pattern artifacts (uncalibrated CFA).
 #[test]
-
 fn test_bayer_pattern() {
     init_tracing();
-
-    let field_config = StarFieldConfig {
-        width: 256,
-        height: 256,
+    let frame = Scenario {
         num_stars: 25,
-        fwhm_range: (3.0, 4.0),
-        magnitude_range: (8.0, 13.0),
-        background_level: 0.1,
-        noise_sigma: 0.02,
-        add_bayer: true,
-        bayer_strength: 0.08,
+        bayer: true,
         ..Default::default()
-    };
-    let detection_config = Config::default();
-
+    }
+    .frame();
     let criteria = PassCriteria {
         min_detection_rate: 0.95,
         max_false_positive_rate: 0.05,
-        max_mean_centroid_error: 0.20, // Bayer affects centroid
+        max_mean_centroid_error: 0.20,
         max_fwhm_error: 0.25,
     };
-
-    run_challenging_test("bayer_pattern", &field_config, &detection_config, &criteria);
+    run_challenging_test("bayer_pattern", &frame, &Config::default(), &criteria);
 }
 
-/// Test: Saturated stars.
 #[test]
-
 fn test_saturated_stars() {
     init_tracing();
-
-    let field_config = StarFieldConfig {
-        width: 256,
-        height: 256,
+    // Bright sources clip at the well — flux-driven saturation.
+    let frame = Scenario {
         num_stars: 30,
-        fwhm_range: (3.0, 4.0),
-        magnitude_range: (6.0, 13.0), // Include bright stars
-        background_level: 0.1,
-        noise_sigma: 0.02,
-        saturation_fraction: 0.2, // 20% saturated
-        saturation_level: 0.95,
+        flux: (8.0, 250.0),
         ..Default::default()
-    };
-    let detection_config = Config::default();
-
+    }
+    .frame();
     let criteria = PassCriteria {
         min_detection_rate: 0.95,
         max_false_positive_rate: 0.05,
-        max_mean_centroid_error: 0.25, // Saturated stars harder to centroid
-        max_fwhm_error: 0.40,          // FWHM affected by saturation
+        max_mean_centroid_error: 0.25,
+        max_fwhm_error: 0.40,
     };
-
-    run_challenging_test(
-        "saturated_stars",
-        &field_config,
-        &detection_config,
-        &criteria,
-    );
+    run_challenging_test("saturated_stars", &frame, &Config::default(), &criteria);
 }
 
-// ============================================================================
-// Background Tests
-// ============================================================================
+// ---- Backgrounds ----
 
-/// Test: Gradient background.
 #[test]
-
 fn test_gradient_background() {
     init_tracing();
-
-    let field_config = StarFieldConfig {
-        width: 256,
-        height: 256,
+    let frame = Scenario {
         num_stars: 25,
-        fwhm_range: (3.0, 4.0),
-        magnitude_range: (8.0, 13.0),
-        gradient: Some((0.05, 0.25, 0.3)), // Strong gradient
-        noise_sigma: 0.02,
+        background: BackgroundField::Gradient {
+            start: 0.05,
+            end: 0.25,
+            angle: 0.3,
+        },
         ..Default::default()
-    };
-    let detection_config = Config::default();
-
+    }
+    .frame();
     let criteria = PassCriteria {
         min_detection_rate: 0.95,
         max_false_positive_rate: 0.05,
         max_mean_centroid_error: 0.15,
         max_fwhm_error: 0.20,
     };
-
-    run_challenging_test(
-        "gradient_background",
-        &field_config,
-        &detection_config,
-        &criteria,
-    );
+    run_challenging_test("gradient_background", &frame, &Config::default(), &criteria);
 }
 
-/// Test: Vignette background.
 #[test]
-
 fn test_vignette_background() {
     init_tracing();
-
-    let field_config = StarFieldConfig {
-        width: 256,
-        height: 256,
+    let frame = Scenario {
         num_stars: 25,
-        fwhm_range: (3.0, 4.0),
-        magnitude_range: (8.0, 13.0),
-        vignette: Some((0.2, 0.05, 2.0)), // Strong vignette
-        noise_sigma: 0.02,
+        background: BackgroundField::Vignette {
+            center: 0.2,
+            edge: 0.05,
+            falloff: 2.0,
+        },
         ..Default::default()
-    };
-    let detection_config = Config::default();
-
+    }
+    .frame();
     let criteria = PassCriteria {
         min_detection_rate: 0.95,
         max_false_positive_rate: 0.05,
         max_mean_centroid_error: 0.15,
         max_fwhm_error: 0.20,
     };
-
-    run_challenging_test(
-        "vignette_background",
-        &field_config,
-        &detection_config,
-        &criteria,
-    );
+    run_challenging_test("vignette_background", &frame, &Config::default(), &criteria);
 }
 
-/// Test: Nebula background.
 #[test]
-
 fn test_nebula_background() {
     init_tracing();
-
-    let field_config = StarFieldConfig {
-        width: 256,
-        height: 256,
+    let frame = Scenario {
         num_stars: 30,
-        fwhm_range: (3.0, 4.0),
-        magnitude_range: (8.0, 13.0),
-        background_level: 0.1,
-        nebula: Some(NebulaConfig {
-            center: Vec2::splat(0.5), // Center of image (fraction)
-            radius: 0.35,             // 35% of diagonal
+        background: BackgroundField::Nebula(NebulaConfig {
+            center: Vec2::splat(0.5),
+            radius: 0.35,
             amplitude: 0.35,
             softness: 2.0,
             aspect_ratio: 1.3,
             angle: 0.5,
         }),
-        noise_sigma: 0.02,
         ..Default::default()
-    };
-    let detection_config = Config::default();
-
-    // Nebula is challenging due to variable background
+    }
+    .frame();
     let criteria = PassCriteria {
         min_detection_rate: 0.90,
         max_false_positive_rate: 0.10,
         max_mean_centroid_error: 0.20,
         max_fwhm_error: 0.25,
     };
-
-    run_challenging_test(
-        "nebula_background",
-        &field_config,
-        &detection_config,
-        &criteria,
-    );
+    run_challenging_test("nebula_background", &frame, &Config::default(), &criteria);
 }
 
-// ============================================================================
-// Edge Case Tests
-// ============================================================================
+// ---- Edge cases ----
 
-/// Test: Stars near image edges.
 #[test]
-
 fn test_edge_stars() {
     init_tracing();
-
-    let field_config = StarFieldConfig {
-        width: 256,
-        height: 256,
+    let frame = Scenario {
         num_stars: 30,
-        fwhm_range: (3.0, 4.0),
-        magnitude_range: (8.0, 12.0),
-        background_level: 0.1,
-        noise_sigma: 0.02,
-        edge_margin: 5, // Very small margin - stars near edges
+        placement: Placement::Uniform { margin: 5.0 },
         ..Default::default()
-    };
-    let detection_config = Config::default();
-
-    // Edge stars may be partially detected
+    }
+    .frame();
     let criteria = PassCriteria {
         min_detection_rate: 0.85,
         max_false_positive_rate: 0.05,
         max_mean_centroid_error: 0.25,
         max_fwhm_error: 0.30,
     };
-
-    run_challenging_test("edge_stars", &field_config, &detection_config, &criteria);
+    run_challenging_test("edge_stars", &frame, &Config::default(), &criteria);
 }
 
-/// Test: Faint stars in high noise.
 #[test]
-
 fn test_faint_in_noise() {
     init_tracing();
-
-    let field_config = faint_stars_config();
-
-    // Use lower SNR threshold for faint stars
+    // Faint stars over a shallow, noisy sensor.
+    let frame = Scenario {
+        num_stars: 20,
+        flux: (1.5, 6.0),
+        full_well_e: 5_000.0,
+        background: BackgroundField::Uniform { level: 0.15 },
+        ..Default::default()
+    }
+    .frame();
     let detection_config = Config {
         min_snr: 3.0,
         sigma_threshold: 2.5,
         ..Default::default()
     };
-
     run_challenging_test(
         "faint_in_noise",
-        &field_config,
+        &frame,
         &detection_config,
         &faint_star_criteria(),
     );
 }
 
-/// Test: Very low SNR conditions.
 #[test]
-
 fn test_very_low_snr() {
     init_tracing();
-
-    let field_config = StarFieldConfig {
-        width: 256,
-        height: 256,
+    let frame = Scenario {
         num_stars: 20,
-        fwhm_range: (3.5, 4.5),
-        magnitude_range: (13.0, 15.5), // Very faint
-        mag_zero_point: 16.0,
-        background_level: 0.15,
-        noise_sigma: 0.06, // High noise
+        fwhm: 4.0,
+        flux: (1.0, 4.0),
+        full_well_e: 2_000.0,
+        read_noise_e: 20.0,
+        background: BackgroundField::Uniform { level: 0.15 },
         ..Default::default()
-    };
-
+    }
+    .frame();
     let detection_config = Config {
         min_snr: 2.5,
         sigma_threshold: 2.0,
         ..Default::default()
     };
-
-    // Very relaxed for extreme conditions
     let criteria = PassCriteria {
-        min_detection_rate: 0.50, // Many will be lost in noise
+        min_detection_rate: 0.50,
         max_false_positive_rate: 0.30,
         max_mean_centroid_error: 0.8,
         max_fwhm_error: 0.60,
     };
-
-    let passed = run_challenging_test("very_low_snr", &field_config, &detection_config, &criteria);
-
-    if !passed {
-        println!("Note: Very low SNR is an extreme case, failures expected");
-    }
+    run_challenging_test("very_low_snr", &frame, &detection_config, &criteria);
 }
 
-/// Test: Mixed challenging conditions.
 #[test]
-
 fn test_combined_challenges() {
     init_tracing();
-
-    let field_config = StarFieldConfig {
-        width: 256,
-        height: 256,
+    // Cluster + elliptical PSF + cosmic rays + bright/saturated + gradient sky.
+    let frame = Scenario {
         num_stars: 50,
-        fwhm_range: (2.5, 5.0),
-        magnitude_range: (7.0, 14.0),
-        background_level: 0.1,
-        noise_sigma: 0.03,
-        crowding: CrowdingType::Clustered,
-        elongation: ElongationType::Varying,
-        eccentricity_range: (0.1, 0.4),
-        cosmic_ray_count: 20,
-        saturation_fraction: 0.1,
-        gradient: Some((0.08, 0.18, 0.5)),
+        flux: (7.0, 200.0),
+        placement: Placement::Cluster,
+        psf: Some(PsfModel::Elliptical {
+            fwhm: 4.0,
+            eccentricity: 0.4,
+            angle: 0.3,
+        }),
+        background: BackgroundField::Gradient {
+            start: 0.08,
+            end: 0.18,
+            angle: 0.5,
+        },
+        cosmic_rays: 20,
+        read_noise_e: 6.0,
         ..Default::default()
-    };
-
-    let detection_config = Config::default();
-
-    // Relaxed for combined challenges
+    }
+    .frame();
     let criteria = PassCriteria {
         min_detection_rate: 0.80,
         max_false_positive_rate: 0.15,
         max_mean_centroid_error: 0.25,
         max_fwhm_error: 0.35,
     };
-
-    run_challenging_test(
-        "combined_challenges",
-        &field_config,
-        &detection_config,
-        &criteria,
-    );
+    run_challenging_test("combined_challenges", &frame, &Config::default(), &criteria);
 }

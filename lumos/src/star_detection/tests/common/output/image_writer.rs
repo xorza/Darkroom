@@ -9,7 +9,7 @@ use crate::{
         star::Star,
         tests::common::output::{TEST_OUTPUT_IMAGE_EXT, comparison::create_comparison_image},
     },
-    testing::synthetic::star_field::GroundTruthStar,
+    testing::synthetic::observe::ObservedSource,
 };
 
 /// Build an output path with the configured test image extension.
@@ -148,7 +148,7 @@ pub fn save_comparison(
     pixels: &[f32],
     width: usize,
     height: usize,
-    ground_truth: &[GroundTruthStar],
+    ground_truth: &[ObservedSource],
     detected: &[Star],
     match_radius: f32,
     path: &Path,
