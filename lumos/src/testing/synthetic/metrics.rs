@@ -1,8 +1,8 @@
 //! Quantitative graders for synthetic-recovery tests.
 //!
 //! These turn "did the stage work?" into hand-checkable numbers — detection completeness
-//! and reliability, photometric and astrometric error, rejection precision/recall, and
-//! noise statistics — so tests assert bounds you can compute on paper rather than eyeballing.
+//! and reliability, astrometric error, rejection precision/recall, and noise statistics — so
+//! tests assert bounds you can compute on paper rather than eyeballing.
 
 use glam::DVec2;
 use std::collections::HashSet;
@@ -70,39 +70,6 @@ pub fn score_detection(truth: &[DVec2], recovered: &[DVec2], max_dist: f64) -> D
         matched: match_catalogs(truth, recovered, max_dist).len(),
         n_truth: truth.len(),
         n_recovered: recovered.len(),
-    }
-}
-
-/// Photometric recovery: relative flux bias `mean((rec-true)/true)` and its scatter.
-#[derive(Debug, Clone, Copy)]
-pub struct PhotometryScore {
-    pub bias: f64,
-    pub scatter: f64,
-    pub n: usize,
-}
-
-/// Compare recovered fluxes to true fluxes element-wise (same ordering, same length).
-pub fn score_photometry(true_flux: &[f32], rec_flux: &[f32]) -> PhotometryScore {
-    assert_eq!(true_flux.len(), rec_flux.len(), "flux lengths differ");
-    let n = true_flux.len();
-    if n == 0 {
-        return PhotometryScore {
-            bias: 0.0,
-            scatter: 0.0,
-            n: 0,
-        };
-    }
-    let rel: Vec<f64> = true_flux
-        .iter()
-        .zip(rec_flux)
-        .map(|(t, r)| (*r as f64 - *t as f64) / *t as f64)
-        .collect();
-    let bias = rel.iter().sum::<f64>() / n as f64;
-    let var = rel.iter().map(|x| (x - bias).powi(2)).sum::<f64>() / n as f64;
-    PhotometryScore {
-        bias,
-        scatter: var.sqrt(),
-        n,
     }
 }
 
@@ -236,14 +203,6 @@ mod tests {
         let s = score_detection(&truth, &recovered, 1.0);
         assert_eq!(s.completeness(), 1.0);
         assert!((s.reliability() - 2.0 / 3.0).abs() < 1e-12);
-    }
-
-    #[test]
-    fn photometry_bias_and_scatter_exact() {
-        // rel errors +0.1 and -0.1 → bias 0, scatter sqrt(((0.1)²+(0.1)²)/2)=0.1.
-        let s = score_photometry(&[100.0, 100.0], &[110.0, 90.0]);
-        assert!(s.bias.abs() < 1e-12, "bias {}", s.bias);
-        assert!((s.scatter - 0.1).abs() < 1e-9, "scatter {}", s.scatter);
     }
 
     #[test]

@@ -62,6 +62,29 @@ impl BackgroundField {
     }
 }
 
+/// Log-uniform flux sampler over a positive `(min, max)` range — a realistic brightness spread
+/// rather than a flat one. Validates the range once and caches its logs.
+#[derive(Debug, Clone, Copy)]
+struct LogUniformFlux {
+    log_min: f32,
+    log_max: f32,
+}
+
+impl LogUniformFlux {
+    fn new(range: (f32, f32)) -> Self {
+        let (min, max) = range;
+        assert!(min > 0.0 && max >= min, "invalid flux range");
+        Self {
+            log_min: min.ln(),
+            log_max: max.ln(),
+        }
+    }
+
+    fn sample(&self, rng: &mut TestRng) -> f32 {
+        (self.log_min + rng.next_f32() * (self.log_max - self.log_min)).exp()
+    }
+}
+
 /// The true sky for a simulated observation session.
 #[derive(Debug, Clone)]
 pub struct Scene {
@@ -103,19 +126,15 @@ impl Scene {
         margin: f64,
         seed: u64,
     ) -> Self {
-        let (flux_min, flux_max) = flux_range;
-        assert!(flux_min > 0.0 && flux_max >= flux_min, "invalid flux range");
+        let flux_dist = LogUniformFlux::new(flux_range);
         let mut rng = TestRng::new(seed);
         let mut sources = Vec::with_capacity(count);
-        let log_min = flux_min.ln();
-        let log_max = flux_max.ln();
         for _ in 0..count {
             let x = margin + rng.next_f64() * (width as f64 - 2.0 * margin);
             let y = margin + rng.next_f64() * (height as f64 - 2.0 * margin);
-            let flux = (log_min + rng.next_f32() * (log_max - log_min)).exp();
             sources.push(TrueSource {
                 pos: DVec2::new(x, y),
-                flux,
+                flux: flux_dist.sample(&mut rng),
             });
         }
         Scene {
@@ -137,10 +156,8 @@ impl Scene {
         background: BackgroundField,
         seed: u64,
     ) -> Self {
-        let (flux_min, flux_max) = flux_range;
-        assert!(flux_min > 0.0 && flux_max >= flux_min, "invalid flux range");
+        let flux_dist = LogUniformFlux::new(flux_range);
         let mut rng = TestRng::new(seed);
-        let (log_min, log_max) = (flux_min.ln(), flux_max.ln());
         let (cx, cy) = (width as f64 / 2.0, height as f64 / 2.0);
         let core_sigma = width.min(height) as f64 * 0.12;
         let core_count = (count as f64 * 0.8) as usize;
@@ -167,8 +184,10 @@ impl Scene {
                     margin + rng.next_f64() * (height as f64 - 2.0 * margin),
                 )
             };
-            let flux = (log_min + rng.next_f32() * (log_max - log_min)).exp();
-            sources.push(TrueSource { pos, flux });
+            sources.push(TrueSource {
+                pos,
+                flux: flux_dist.sample(&mut rng),
+            });
         }
         Scene {
             width,

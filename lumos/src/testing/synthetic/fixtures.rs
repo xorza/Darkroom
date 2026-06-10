@@ -1,17 +1,15 @@
 //! Forward-model field fixtures for benchmarks and integration tests.
 //!
 //! Populated star fields rendered through a realistic [`Camera`] and returned as a
-//! [`SimFrame`] (sensor image + ground truth). These are the forward-model replacements for
-//! the old flat `stamps::benchmark_star_field` / `star_field::generate_globular_cluster`
-//! generators: benches take `frame.image` (or `frame.image.channel(0)`); tests grade against
-//! `frame.truth`.
+//! [`SimFrame`] (sensor image + ground truth): benches take `frame.image` (or
+//! `frame.image.channel(0)`); tests grade against `frame.truth`.
 
 use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::observe::{Observation, SimFrame, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
 
-/// A uniform-random field of `num_stars` bright, cleanly-detected stars over a modest sky.
-/// The general-purpose populated field (replaces `benchmark_star_field`).
+/// A uniform-random field of `num_stars` bright, cleanly-detected stars over a modest sky —
+/// the general-purpose populated field.
 pub fn star_field(width: usize, height: usize, num_stars: usize, seed: u64) -> SimFrame {
     let scene = Scene::random_field(
         width,
@@ -30,7 +28,7 @@ pub fn star_field(width: usize, height: usize, num_stars: usize, seed: u64) -> S
 }
 
 /// A crowded central cluster of `num_stars` with heavy blending over a dark sky — for
-/// deblend, labeling, and crowded-detection stress (replaces `generate_globular_cluster`).
+/// deblend, labeling, and crowded-detection stress.
 pub fn cluster_field(width: usize, height: usize, num_stars: usize, seed: u64) -> SimFrame {
     let scene = Scene::cluster(
         width,

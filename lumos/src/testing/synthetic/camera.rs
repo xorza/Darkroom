@@ -149,8 +149,8 @@ pub struct BiasField {
 #[derive(Debug, Clone)]
 pub struct Camera {
     pub psf: PsfModel,
-    /// Electrons at normalized value 1.0 (full well); sets the shot-noise scale.
-    /// `0.0` is the sentinel for a *noiseless* sensor — render skips shot/dark/read noise.
+    /// Electrons at normalized value 1.0 (full well); sets the shot-noise scale. Inert when
+    /// [`noiseless`](Self::noiseless) is set.
     pub full_well_e: f32,
     /// Read noise in electrons (Gaussian).
     pub read_noise_e: f32,
@@ -161,6 +161,9 @@ pub struct Camera {
     pub flat: FlatField,
     pub defects: SensorDefects,
     pub bias: BiasField,
+    /// When set, render emits the clean signal — the stochastic layers (shot/dark/read) are
+    /// skipped, so the frame *is* its own ground truth.
+    pub noiseless: bool,
 }
 
 impl Camera {
@@ -169,13 +172,14 @@ impl Camera {
     pub fn ideal(fwhm: f32) -> Self {
         Self {
             psf: PsfModel::Gaussian { fwhm },
-            full_well_e: 0.0,
+            full_well_e: 50_000.0,
             read_noise_e: 0.0,
             dark_current_e_per_s: 0.0,
             saturation: 1.0,
             flat: FlatField::default(),
             defects: SensorDefects::default(),
             bias: BiasField::default(),
+            noiseless: true,
         }
     }
 
@@ -190,6 +194,7 @@ impl Camera {
             flat: FlatField::default(),
             defects: SensorDefects::default(),
             bias: BiasField::default(),
+            noiseless: false,
         }
     }
 }

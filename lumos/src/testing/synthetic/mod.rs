@@ -1,7 +1,7 @@
 //! Synthetic data generation for testing.
 //!
 //! Tools for generating synthetic astronomical images and star fields for testing the
-//! lumos pipeline. See `SYNTHETIC_TESTING_PLAN.md` for the overall design and roadmap.
+//! lumos pipeline.
 //!
 //! # Forward model (preferred)
 //!
@@ -33,8 +33,8 @@
 //!
 //! Building blocks: [`star_profiles`] (PSF kernels), [`backgrounds`] (background fields),
 //! [`artifacts`] (cosmic rays, Bayer pattern), [`transforms`] (star-position transforms for
-//! registration), [`patterns`] (warp/interpolation fixtures), [`stamps`] (detection benchmark
-//! fields), [`background_map`] (`BackgroundEstimate` fixtures).
+//! registration), [`patterns`] (warp/interpolation fixtures), [`background_map`]
+//! (`BackgroundEstimate` fixtures).
 
 pub mod artifacts;
 pub mod background_map;
@@ -47,6 +47,5 @@ pub mod noise;
 pub mod observe;
 pub mod patterns;
 pub mod scene;
-pub mod stamps;
 pub mod star_profiles;
 pub mod transforms;

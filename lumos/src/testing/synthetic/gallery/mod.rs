@@ -24,7 +24,6 @@ use crate::testing::synthetic::fixtures::{cluster_field, star_field};
 use crate::testing::synthetic::observe::{Observation, observe_dithered, render};
 use crate::testing::synthetic::patterns::{checkerboard, diagonal_gradient, horizontal_gradient};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
-use crate::testing::synthetic::stamps::benchmark_star_field;
 
 /// Tone mapping applied before writing 8-bit PNG.
 #[derive(Debug, Clone, Copy)]
@@ -478,15 +477,6 @@ fn gallery_patterns() {
         h,
         "patterns/diagonal_gradient",
         Stretch::Linear,
-    );
-
-    let bench = benchmark_star_field(w, h, 150, 0.05, 0.01, 3);
-    save(
-        bench.pixels(),
-        w,
-        h,
-        "patterns/benchmark_star_field",
-        Stretch::Asinh,
     );
 }
 

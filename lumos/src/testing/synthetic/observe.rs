@@ -51,17 +51,10 @@ pub struct ObservedSource {
 /// Ground truth captured alongside a rendered frame.
 #[derive(Debug, Clone)]
 pub struct FrameTruth {
-    /// Noiseless, flat-fielded signal `(background + sources) × flat` — the detection target
-    /// and, divided by `flat`, the calibration target.
+    /// Noiseless, flat-fielded signal `(background + sources) × flat` — the detection target.
     pub clean: Buffer2<f32>,
     /// Sources as they land on the sensor (post-transform).
     pub sources: Vec<ObservedSource>,
-    /// The sky→sensor transform applied (registration target).
-    pub transform: Transform,
-    /// The astrophysical background only, pre-flat (background-estimation target).
-    pub background: Buffer2<f32>,
-    /// The multiplicative flat applied (calibration target).
-    pub flat: Buffer2<f32>,
 }
 
 /// A rendered frame plus its ground truth.
@@ -77,8 +70,7 @@ pub fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFrame {
     let height = scene.height;
 
     // 1 + 2. Geometry + PSF + background → the clean (pre-flat) signal, and the truth catalog.
-    let background = scene.background.render(width, height);
-    let mut clean = background.clone();
+    let mut clean = scene.background.render(width, height);
     let mut observed = Vec::with_capacity(scene.sources.len());
     let recovered_fwhm = camera.psf.fwhm() * obs.seeing_scale;
     for src in &scene.sources {
@@ -108,8 +100,8 @@ pub fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFrame {
     let mut raw = clean.clone();
     let mut rng = TestRng::new(obs.seed);
 
-    // 5 + 6 + 8. Shot noise, dark current, read noise — only for a real (finite-well) sensor.
-    if camera.full_well_e > 0.0 {
+    // 5 + 6 + 8. Shot noise, dark current, read noise — skipped for a noiseless sensor.
+    if !camera.noiseless {
         apply_shot_noise(&mut raw, camera.full_well_e, &mut rng);
         add_dark_current(
             &mut raw,
@@ -162,9 +154,6 @@ pub fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFrame {
         truth: FrameTruth {
             clean: Buffer2::new(width, height, clean),
             sources: observed,
-            transform: obs.transform,
-            background: Buffer2::new(width, height, background),
-            flat: Buffer2::new(width, height, flat),
         },
     }
 }
@@ -262,8 +251,8 @@ mod tests {
     }
 
     #[test]
-    fn background_and_flat_truth() {
-        // Uniform 0.3 sky, vignette flat: clean = bg × flat, so center > corner.
+    fn flat_applied_to_clean_truth() {
+        // Uniform 0.3 sky, vignette flat: clean = bg × flat, so center (≈0.3) > darkened corner.
         let scene = Scene {
             width: 64,
             height: 64,
@@ -278,8 +267,6 @@ mod tests {
             ..Camera::ideal(3.0)
         };
         let frame = render(&scene, &camera, &Observation::reference(1));
-        // Background truth is the pre-flat sky.
-        assert!((pixel_stats(frame.truth.background.pixels()).mean - 0.3).abs() < 1e-6);
         let clean = frame.truth.clean.pixels();
         assert!(
             clean[32 * 64 + 32] > clean[0],
