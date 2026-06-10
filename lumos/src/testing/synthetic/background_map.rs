@@ -6,7 +6,12 @@ use crate::star_detection::background::estimate::BackgroundEstimate;
 use common::Buffer2;
 
 /// Create a uniform BackgroundEstimate with constant background and noise values.
-pub fn uniform(width: usize, height: usize, background: f32, noise: f32) -> BackgroundEstimate {
+pub(crate) fn uniform(
+    width: usize,
+    height: usize,
+    background: f32,
+    noise: f32,
+) -> BackgroundEstimate {
     let mut bg_buf = Buffer2::new_default(width, height);
     let mut noise_buf = Buffer2::new_default(width, height);
     bg_buf.fill(background);
@@ -18,7 +23,7 @@ pub fn uniform(width: usize, height: usize, background: f32, noise: f32) -> Back
 }
 
 /// Create a BackgroundEstimate with a horizontal gradient in the background.
-pub fn horizontal_gradient(
+pub(crate) fn horizontal_gradient(
     width: usize,
     height: usize,
     bg_left: f32,
@@ -36,7 +41,7 @@ pub fn horizontal_gradient(
 }
 
 /// Create a BackgroundEstimate with a vertical gradient in the background.
-pub fn vertical_gradient(
+pub(crate) fn vertical_gradient(
     width: usize,
     height: usize,
     bg_top: f32,
@@ -54,7 +59,7 @@ pub fn vertical_gradient(
 }
 
 /// Create an BackgroundEstimate with radial vignette in the background.
-pub fn vignette(
+pub(crate) fn vignette(
     width: usize,
     height: usize,
     bg_center: f32,

@@ -48,8 +48,6 @@ pub use calibration_masters::{
     CalibrationFrames, CalibrationImages, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD,
 };
 
-pub use math::statistics::ChannelStats;
-pub use star_detection::background::estimate::BackgroundEstimate;
 pub use star_detection::config::{
     BackgroundRefinement, CentroidMethod, Config as StarDetectionConfig, Connectivity,
     LocalBackgroundMethod, NoiseModel,

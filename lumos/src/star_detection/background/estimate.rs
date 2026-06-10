@@ -10,7 +10,7 @@ use crate::star_detection::buffer_pool::BufferPool;
 /// Used by subsequent pipeline stages for thresholding, centroid computation,
 /// and SNR calculation.
 #[derive(Debug)]
-pub struct BackgroundEstimate {
+pub(crate) struct BackgroundEstimate {
     /// Per-pixel background values (sky level).
     pub background: Buffer2<f32>,
     /// Per-pixel noise (sigma) estimates.

@@ -48,12 +48,6 @@ impl BufferPool {
         self.dimensions.y
     }
 
-    /// Expected buffer dimensions as a `(width, height)` vector.
-    #[inline]
-    pub fn dimensions(&self) -> Vec2us {
-        self.dimensions
-    }
-
     /// Acquire an f32 buffer from the pool, or allocate a new one.
     pub fn acquire_f32(&mut self) -> Buffer2<f32> {
         self.f32_buffers

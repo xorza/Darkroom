@@ -6,7 +6,7 @@ use crate::math::sum::mean_f32;
 
 /// Per-channel robust statistics (median and MAD).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct ChannelStats {
+pub(crate) struct ChannelStats {
     pub median: f32,
     pub mad: f32,
 }
