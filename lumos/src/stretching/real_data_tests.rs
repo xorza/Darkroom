@@ -34,22 +34,19 @@ fn stretch_stacked_light() {
     let (w, h, ch) = (image.width(), image.height(), image.channels());
     assert!(w > 0 && h > 0);
 
-    // A linear stacked deep-sky frame: non-negative, background-dominated (a tiny median, the sky
-    // sitting just above zero) with a bright stellar tail whose peaks can exceed 1 — the stretch
-    // still caps the display output back into [0,1].
+    // A linear stacked deep-sky frame, before any display stretch: the calibrated background sits at
+    // zero (a near-zero median — symmetric read noise dips some background pixels slightly negative,
+    // which is correct calibration, not a defect) with a bright stellar tail whose peaks exceed 1.
+    // The stretch caps the display output back into [0,1].
     let input = stats(image.intensity_plane().pixels());
     eprintln!("input {w}x{h} {ch}ch: {input:?}");
     assert!(
-        input.min >= 0.0,
-        "a linear stack is non-negative: {input:?}"
+        input.median.abs() < 0.05,
+        "a calibrated linear background sits at zero: {input:?}"
     );
     assert!(
-        input.median < 0.1,
-        "a linear frame is background-dominated (low median): {input:?}"
-    );
-    assert!(
-        input.max > input.median * 10.0,
-        "has a bright stellar tail far above the background: {input:?}"
+        input.max > 0.5,
+        "has a bright stellar tail far above the zero background: {input:?}"
     );
 
     for (name, config) in [
