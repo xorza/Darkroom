@@ -25,6 +25,9 @@ use crate::io::astro_image::{AstroImage, Rgb};
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod real_data_tests;
+
 /// Midtones balance is clamped away from the degenerate endpoints `0`/`1`, where the MTF
 /// collapses every interior value onto a single output.
 const MIDTONES_MIN: f32 = 1e-4;
