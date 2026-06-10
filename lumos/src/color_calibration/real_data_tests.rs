@@ -70,4 +70,7 @@ fn neutralize_then_stretch_removes_green() {
     // Post-stretch Average-Neutral SCNR cleans any residual green left after neutralization.
     scnr(&mut img, ScnrMethod::AverageNeutral);
     save_jpg(&img, "color/stacked_light_neutralized_scnr.jpg");
+
+    neutralize_background(&mut img);
+    save_jpg(&img, "color/stacked_light_neutralized_scnr_renorm.jpg");
 }
