@@ -1,6 +1,6 @@
 # Lumos
 
-Astronomical image-processing library: RAW/FITS decoding, master-frame calibration, star detection, star-pattern registration, frame stacking, and drizzle reconstruction. CPU-bound with hand-written SIMD (AVX2 / SSE4.1 / NEON) hot paths and rayon parallelism; no GPU backend. Pixels are stored **planar** (one `common::Buffer2<f32>` per channel) and normalized to `[0, 1]`.
+Astronomical image-processing library: RAW/FITS decoding, master-frame calibration, star detection, star-pattern registration, frame stacking, drizzle reconstruction, and non-linear display stretching. CPU-bound with hand-written SIMD (AVX2 / SSE4.1 / NEON) hot paths and rayon parallelism; no GPU backend. Pixels are stored **planar** (one `common::Buffer2<f32>` per channel) and normalized to `[0, 1]`.
 
 ## Mission & scope
 
@@ -19,18 +19,20 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 3. **Detect stars** (`stacking::star_detection`) — six-stage detector → flux-sorted `Star`s with sub-pixel centroids and shape/quality metrics.
 4. **Register** (`stacking::registration`) — triangle matching → RANSAC/MAGSAC++ transform fit → match recovery → optional SIP distortion → image warp into a common frame.
 5. **Combine** — `stacking::combine` (statistical per-pixel combine with rejection/normalization/weighting, memory-tiered) **or** `stacking::drizzle` (Fruchter & Hook variable-pixel reconstruction for dithered/super-resolution sets).
+6. **Stretch** (`stretching`, *display-domain, optional*) — map the linear stacked master to a viewable image with a non-linear tone curve (MTF/STF auto-stretch or color-preserving arcsinh), parameters auto-derived from the background. The science deliverable is the linear master from step 5; stretching is display-prep that runs strictly after all linear-domain work.
 
 `core::math` (SIMD sums, robust statistics, transforms) and `core::common` (CPU dispatch) support all stages. `lib.rs` defines the entire public surface.
 
 ## Crate layout
 
-`src/lib.rs` is the only place that `pub use`s — no intermediate re-exports. Source is organized as one **feature** (`stacking/`) over shared **foundation** modules (`io/`, `core/`), so `src/` reads as a short list of top-level concerns and a new feature (e.g. stretching) drops in as a sibling of `stacking/`:
+`src/lib.rs` is the only place that `pub use`s — no intermediate re-exports. Source is organized as **features** (`stacking/`, `stretching/`) over shared **foundation** modules (`io/`, `core/`), so `src/` reads as a short list of top-level concerns and new features drop in as siblings:
 
 ```
 src/
-├── stacking/   THE feature: load → calibrate → detect → register → combine into a stacked master
+├── stacking/   feature: load → calibrate → detect → register → combine into a stacked master
 │   ├── calibration_masters/   star_detection/   registration/
 │   └── combine/   drizzle/   pipeline/
+├── stretching/ feature: post-stack display — linear master → viewable image (MTF/STF, arcsinh)
 ├── io/         astro_image (container + FITS/standard load) · raw (libraw decode + demosaic)
 ├── core/       math (robust stats, SIMD sum, DMat3, bbox) · common (UnsafeSendPtr)
 └── testing/    #[cfg(test)] forward-model synthetic generator + real_data fixtures
@@ -45,6 +47,7 @@ src/
 | `stacking::combine` | `pub(crate)` | Multi-frame combination with rejection / normalization / weighting + cache tiers. (Was the old top-level `stacking`.) |
 | `stacking::drizzle` | `pub(crate)` | Fruchter & Hook variable-pixel reconstruction. |
 | `stacking::pipeline` | `pub(crate)` | End-to-end orchestration: `align_and_stack`, `calibrate_align_stack`. |
+| `stretching` | `pub(crate)` (types re-exported) | Post-stack non-linear display stretch: MTF/STF and color-preserving arcsinh. |
 | `io::astro_image` | `pub(crate)` (types re-exported) | `AstroImage` container, FITS/standard loading, metadata, CFA, sensor detection. |
 | `io::raw` | `pub(crate)` | libraw RAW decode + Bayer (RCD) / X-Trans (Markesteijn) demosaicing. |
 | `core::math` | `pub(crate)` | `DMat3`, `Aabb`/`BBox`, compensated SIMD `sum`, robust statistics. (`Vec2us` lives in the workspace `common` crate.) |
@@ -55,10 +58,11 @@ src/
 
 ## io/astro_image — image container & loading
 
-- `AstroImage` (`io/astro_image/mod.rs:251`): `metadata: AstroImageMetadata` + `dimensions: ImageDimensions` + `pixels: PixelData`.
-- `PixelData` (`mod.rs:186`): `L(Buffer2<f32>)` or `Rgb([Buffer2<f32>; 3])` — **planar**, one buffer per channel.
-- `BitPix` (`mod.rs:27`, FITS pixel type + `normalization_max()`), `ImageDimensions` (`mod.rs`, `size: Vec2us` + channels ∈ {1,3}), `AstroImageMetadata` (`mod.rs:134`, full FITS/EXIF header set + CFA/filter/gain/exposure/coords).
-- Entry points: `from_file` (`mod.rs:268`, dispatches FITS → `fits::load_fits`, RAW exts → `io::raw::load_raw`, else imaginarium), `from_pixels` (`mod.rs:291`, interleaved → planar), `from_planar_channels` (`mod.rs:320`). `mean()` (parallel Kahan).
+- `AstroImage` (`io/astro_image/mod.rs:248`): `metadata: AstroImageMetadata` + `dimensions: ImageDimensions` + `pixels: PixelData`.
+- `PixelData` (`mod.rs:154`): `L(Buffer2<f32>)` or `Rgb([Buffer2<f32>; 3])` — **planar**, one buffer per channel.
+- `BitPix` (`mod.rs:31`, FITS pixel type + `normalization_max()`), `ImageDimensions` (`mod.rs`, `size: Vec2us` + channels ∈ {1,3}), `AstroImageMetadata` (`mod.rs:103`, full FITS/EXIF header set + CFA/filter/gain/exposure/coords).
+- Entry points: `from_file` (`mod.rs:270`, dispatches FITS → `fits::load_fits`, RAW exts → `io::raw::load_raw`, else imaginarium), `from_pixels` (`mod.rs:300`, interleaved → planar), `from_planar_channels` (`mod.rs:329`). `mean()` (parallel Kahan).
+- Per-pixel transforms (used by `stretching`): `par_map_pixels(mono, rgb)` (`mod.rs:434`, rayon in-place map — dispatches `L`/`Rgb` once, then a homogeneous loop), `intensity_plane()` (`mod.rs:463`, combined `(r+g+b)/3` luminance as a `Buffer2`), and the `Rgb` value struct (`mod.rs:216`, `.intensity()` / `.scale()`).
 - `cfa` (`CfaType` = `Mono | Bayer(CfaPattern) | XTrans([[u8;6];6])`; `CfaImage` un-demosaiced sensor data with in-place `subtract`/`divide_by_normalized` and `demosaic()` → `AstroImage`). Flat division uses **per-color-channel means** so non-white flats don't shift color.
 - `fits` (`fits-well` I/O, `physical()` BSCALE/BZERO scaling, NaN/Inf sanitization, ROWORDER/XBAYROFF flips), `sensor` (`detect_sensor_type(filters, colors)` from libraw metadata), `error` (`ImageError`).
 
@@ -130,6 +134,14 @@ src/
 - `DrizzleKernel` (`mod.rs:61`): `Square` (exact polygon clipping via Green's theorem `boxer`/`sgarea`), `Turbo` (axis-aligned, default), `Point`, `Gaussian`, `Lanczos` (valid only at pixfrac=scale=1).
 - `DrizzleAccumulator` (`mod.rs:169`): per-channel flux `Buffer2` (`Σ fluxᵢ·wᵢ`) plus a single shared `weight` (`Σwᵢ`) and `weight_sq` (`Σwᵢ²`) `Buffer2` — the weight is geometric, so it's channel-independent. `add_image` maps each input pixel via `Transform`, distributes flux over the drop footprint with a local Jacobian; `finalize` normalizes `data/weight` against `min_coverage` and emits the coverage/weight/variance maps. Pure CPU + rayon-parallel finalize.
 
+## stretching — non-linear display stretch
+
+`stretch(&mut AstroImage, StretchConfig)` (`stretching/mod.rs`) maps a *linear* stacked master to a display image. Input may exceed `[0,1]` (a raw stack's bright stars do); every curve clamps, so output is always `[0,1]`. Runs strictly after the linear-domain work (background extraction, color calibration). Algorithm derivations live in `docs/image-stretching.md`.
+
+- `StretchMethod`: `AutoStf{shadow_sigmas, target_background}` (MTF/STF screen-stretch — black point `median − k·σ`, midtones from the MTF self-inverse identity so the rescaled median lands on the target), `AutoAsinh{target_background}` (normalized arcsinh, `β` solved by log-space bisection so the background median maps to the target), `Asinh{beta}` (explicit). `StretchConfig::validate()` (called by `stretch`) panics on out-of-range params.
+- `ColorMode`: `ColorPreserving` (default — stretch the combined intensity `I=(r+g+b)/3`, scale every channel by `f(I)/I` with a hue-preserving highlight cap, so star color survives) or `PerChannel` (independent per-channel auto-stretch — auto-grays the background but ties color to brightness). No effect on grayscale.
+- Curves are monomorphized behind a `ToneCurve` trait — `StfCurve` (clip-rescale + `MTF(m,x) = (m−1)x/((2m−1)x − m)`) and `AsinhCurve` (`asinh(x/β)/asinh(1/β)`), both clamping to `[0,1]`. `stretch` resolves the `Curve` enum **once** and runs a monomorphized loop, so the variant is never re-decided per pixel. Statistics come from `intensity_plane()` (color) or each channel (per-channel); explicit-`β` skips them.
+
 ## core/math — primitives
 
 - `sum/`: `sum_f32` / `mean_f32` / `weighted_mean_f32` — hybrid compensated summation (per-lane Kahan in the SIMD inner loop, Neumaier horizontal reduction + remainder). AVX2 (8-wide) / SSE4.1 (4-wide) / NEON / scalar.
@@ -161,6 +173,7 @@ Runtime feature detection via the `common` crate (`cpu_features::has_avx2()` / `
 ## Reference docs & upstream sources
 
 - **`docs/pipeline/`** — best-practices reference for each pipeline stage, grounded in upstream source + cross-checked web research (≥2 sources per load-bearing claim). One doc per stage: `01-load-decode.md`, `02-calibration.md`, `03-star-detection.md`, `04-registration.md`, `05-stacking-drizzle.md`, plus `README.md` (index + cross-cutting "stay linear, stay calibrated" principle). These are *descriptive* references (how the field does each stage well, what to avoid) — **not** a prescriptive change list. `README.md` also tracks a table of findings flagged against lumos source (claims to verify, with file pointers; none acted on yet) — consult it before working a stage, but treat each row as unverified.
+- **`docs/image-stretching.md`** — the stretch-stage algorithm reference: MTF/STF, Lupton arcsinh, Generalized Hyperbolic Stretch, CLAHE, color preservation, and workflow ordering, with the math behind the `stretching` module. Multi-source-verified; descriptive (how the field stretches well), like `docs/pipeline/`.
 - **`scripts/clone-refs.sh`** — shallow-clones the upstream software whose functionality overlaps lumos into `.tmp/refs/<name>/` for source investigation (Read/Grep without per-file registry prompts; nothing is built or linked). `--list` prints the set, `--all` adds the large suites (RawTherapee, OpenCV, astropy, kstars, …), no arg clones the core set. Idempotent — an existing clone is skipped; delete its dir to refresh. Native deps (LibRaw, cfitsio) are pinned to `Cargo.lock` versions; everything else tracks upstream HEAD. Each entry's comment names the lumos module it informs (e.g. `sep`/`sextractor`/`photutils` → `stacking::star_detection`, `magsac`/`astroalign` → `stacking::registration`, `drizzle` → `stacking::drizzle`).
 - **`.tmp/refs/`** is gitignored and persists across sessions. Run the script before reading upstream source; the `docs/pipeline/` docs were built from these clones.
 
