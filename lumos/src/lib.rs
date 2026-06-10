@@ -22,6 +22,7 @@
 //! println!("Found {} stars", result.stars.len());
 //! ```
 
+pub(crate) mod color_calibration;
 pub(crate) mod core;
 pub(crate) mod io;
 pub(crate) mod stacking;
@@ -77,3 +78,5 @@ pub use stacking::drizzle::{
 };
 
 pub use stretching::{ColorMode, StretchConfig, StretchMethod, stretch};
+
+pub use color_calibration::{ScnrMethod, neutralize_background, scnr};
