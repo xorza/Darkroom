@@ -15,7 +15,7 @@ The core deliverable is still that stacked master — load → calibrate → det
 A stack of telescope exposures → one calibrated, aligned, combined deep-sky image. The modules below are stages in that flow:
 
 1. **Load / decode** (`astro_image`, `raw`) — FITS (pure-Rust `fits-well`), camera RAW (libraw → RCD/Markesteijn demosaic), or standard formats into a planar `AstroImage`. The calibration path keeps RAW as single-channel `CfaImage` (correct before demosaic).
-2. **Calibrate** (`calibration_masters`) — stack calibration frames into master dark/flat/bias/flat-dark + defect map, then per light frame: dark-subtract → flat-divide → defect-correct.
+2. **Calibrate** (`calibration_masters`) — stack calibration frames into master dark/flat/bias/flat-dark + defect map, then per light frame: dark-subtract → flat-divide → defect-correct, plus optional single-frame cosmic-ray rejection (L.A.Cosmic) on the calibrated `CfaImage` before demosaic.
 3. **Detect stars** (`star_detection`) — six-stage detector → flux-sorted `Star`s with sub-pixel centroids and shape/quality metrics.
 4. **Register** (`registration`) — triangle matching → RANSAC/MAGSAC++ transform fit → match recovery → optional SIP distortion → image warp into a common frame.
 5. **Combine** — `stacking` (statistical per-pixel combine with rejection/normalization/weighting, memory-tiered) **or** `drizzle` (Fruchter & Hook variable-pixel reconstruction for dithered/super-resolution sets).
@@ -30,15 +30,15 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 |--------|-----|------|
 | `astro_image` | private (types re-exported) | `AstroImage` container, FITS/RAW/standard loading, metadata, CFA, sensor detection. |
 | `calibration_masters` | private (types re-exported) | Master dark/flat/bias/flat-dark creation, defect maps, `calibrate()`. |
-| `raw` | `pub` | libraw RAW decode + Bayer (RCD) / X-Trans (Markesteijn) demosaicing. |
+| `raw` | `pub(crate)` | libraw RAW decode + Bayer (RCD) / X-Trans (Markesteijn) demosaicing. |
 | `star_detection` | `pub(crate)` | Six-stage stellar detection + sub-pixel centroiding. |
 | `registration` | `pub(crate)` | Triangle + RANSAC/MAGSAC++ star-pattern alignment, SIP distortion, image warp. |
 | `stacking` | `pub(crate)` | Multi-frame combination with rejection / normalization / weighting + cache tiers. |
-| `drizzle` | `pub` | Fruchter & Hook variable-pixel reconstruction. |
+| `drizzle` | `pub(crate)` | Fruchter & Hook variable-pixel reconstruction. |
 | `math` | `pub(crate)` | `DMat3`, `Aabb`/`BBox`, compensated SIMD `sum`, robust statistics. (`Vec2us` lives in `common`.) |
 | `common` | `pub(crate)` | `UnsafeSendPtr` + thin re-use of the `common` crate's CPU feature detection. |
 | `prelude` | `pub` | Convenience re-exports of the loading / detection / registration / stacking API. |
-| `testing` | `#[cfg(test)]` | Synthetic star-field + real-data fixtures for tests/benches. |
+| `testing` | `#[cfg(test)]` | Forward-model synthetic generator (`synthetic/`: `Scene` → `Camera` → `observe::render` → `SimFrame{image, truth}`, graded by `metrics`) + `real_data/` fixtures, for tests/benches. |
 
 `common::{Buffer2, BitBuffer2, cpu_features}` (the workspace `common` crate, not the in-crate `common` module) underpin pixel storage and SIMD dispatch. This file is the crate-level map; read the code in each domain module for algorithm specifics.
 
@@ -53,10 +53,11 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 
 ## calibration_masters — master frames & defects
 
-- `CalibrationMasters` (`mod.rs:66`): optional master dark/flat/bias/flat-dark `CfaImage`s + `DefectMap`.
-- `from_files` (`mod.rs:146`) stacks raw CFA frames through the full stacking pipeline (sigma-clipped mean at ≥8 frames, else median); `from_images` (`mod.rs:117`) builds from pre-stacked frames and derives a `DefectMap` (hot from the dark, cold/dead from the flat).
-- `calibrate(&mut CfaImage)` (`mod.rs:171`): **order = dark-subtract (or bias) → flat-divide (flat-dark priority over bias) → defect-correct**, in place.
+- `CalibrationMasters` (`mod.rs:70`): optional master dark/flat/bias/flat-dark `CfaImage`s + `DefectMap`.
+- `from_files` (`mod.rs:161`) stacks raw CFA frames through the full stacking pipeline (sigma-clipped mean at ≥8 frames, else median); `from_images` (`mod.rs:124`) builds from pre-stacked frames and derives a `DefectMap` (hot from the dark, cold/dead from the flat).
+- `calibrate(&mut CfaImage)` (`mod.rs:186`): **order = dark-subtract (or bias) → flat-divide (flat-dark priority over bias) → defect-correct**, in place.
 - `DefectMap` (`defect_map.rs`): hot/cold flat-index lists, built fluently from `DefectMap::default().detect_hot(&dark, σ).detect_cold(&flat)` — **hot** from the dark via per-color MAD threshold (adaptive sampling above 200K px), **cold/dead** from the flat via a same-color local-neighbour ratio (`< DEAD_PIXEL_FRACTION × local median`, robust to vignetting where a global cut can't be); `correct()` replaces defects with same-color CFA-neighbor medians. `DEFAULT_SIGMA_THRESHOLD = 5.0`.
+- `cosmic_ray.rs`: `reject_cosmic_rays(&mut CfaImage, &CosmicRayConfig) -> usize` (count removed) — single-frame **L.A.Cosmic** (van Dokkum 2001) Laplacian CR/streak rejection on the calibrated, linear `CfaImage` *before* demosaic/registration (warping/demosaic would smear a hit); flagged pixels in-painted with unflagged-neighbour medians, detect→replace looped. CFA dispatch: Mono = subsampled L.A.Cosmic, Bayer = per-2×2-phase dense same-color planes, X-Trans = same-color stencils via `color_at`. `CosmicRayConfig` / `NoiseEstimation` are `pub use`d in `lib.rs`.
 
 ## raw — RAW decode & demosaic
 
@@ -121,7 +122,7 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 ## math — primitives
 
 - `sum/`: `sum_f32` / `mean_f32` / `weighted_mean_f32` — hybrid compensated summation (per-lane Kahan in the SIMD inner loop, Neumaier horizontal reduction + remainder). AVX2 (8-wide) / SSE4.1 (4-wide) / NEON / scalar.
-- `statistics/`: `median_f32_mut` (quickselect, NaN-safe `total_cmp`), `median_f32_fast` (NaN-free intermediate), `mad_f32_fast`, `mad_to_sigma` (`MAD_TO_SIGMA = 1.4826022`), iterative sigma-clipped stats; `FWHM_TO_SIGMA ≈ 2.3548` lives in `mod.rs`.
+- `statistics/`: `median_f32_mut` (quickselect, NaN-safe `total_cmp`), `median_f32_fast` (NaN-free intermediate), `mad_f32_fast`, `mad_to_sigma` (`MAD_TO_SIGMA = 1.4826022`), iterative `sigma_clipped_median_mad` → `ClippedStats {median, sigma, mean}` (the survivors' mean exposes residual skew for the background's Pearson-mode estimator); `FWHM_TO_SIGMA ≈ 2.3548` lives in `mod.rs`.
 - `dmat3.rs` (`DMat3`, row-major f64 homogeneous transforms + inverse/determinant), `bbox.rs` (`Aabb`, several methods test-gated). (`Vec2us` pixel indexing now lives in `common`.)
 
 ## SIMD dispatch
@@ -144,6 +145,7 @@ Runtime feature detection via the `common` crate (`cpu_features::has_avx2()` / `
 - `registration/distortion/tps` (thin-plate spline) is implemented and tested but `#![allow(dead_code)]` and **not wired** into `register()` — an alternate post-RANSAC distortion model.
 - Test-only constructors/APIs are gated and kept minimal (e.g. `math/bbox`, warp params). Don't widen them for production use.
 - The `real-data` feature flag (empty) gates real-data tests/benches that read the bundled `test_data/lumos_data` dataset (gitignored; present locally).
+- **Test layout:** per-file unit tests are the `foo/{mod.rs, tests.rs}` split, beside the code. Module-level integration tests sit beside the implementation as `<module>/synthetic_tests[.rs|/]` (forward-model tests) and `<module>/real_data_tests.rs` (`#[cfg_attr(not(feature="real-data"), ignore)]`). `star_detection`'s shared test-output/metric infra is `star_detection/test_common/`; its synthetic tree groups `synthetic_tests/{stage_tests, pipeline_tests}/` + `metric_curves.rs` / `subpixel_accuracy.rs`. The shared generator + graders live in `testing::synthetic`.
 
 ## Reference docs & upstream sources
 
