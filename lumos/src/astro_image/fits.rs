@@ -117,6 +117,7 @@ pub fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
         pixel_size_x: header.get_real("XPIXSZ"),
         pixel_size_y: header.get_real("YPIXSZ"),
         data_max,
+        calibrated: false,
     };
 
     // FITS stores 3D images in planar order (all R, then all G, then all B).

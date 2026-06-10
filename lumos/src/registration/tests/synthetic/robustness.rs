@@ -28,7 +28,7 @@ const FWHM_SUBPIXEL: f32 = 0.66; // max_sigma ~0.33
 fn robustness_config(transform_type: TransformType) -> Config {
     Config {
         transform_type,
-        min_stars: 6,
+        min_stars: Some(6),
         min_matches: 4,
         ..Default::default()
     }
@@ -38,7 +38,7 @@ fn robustness_config(transform_type: TransformType) -> Config {
 fn unconstrained_config(transform_type: TransformType) -> Config {
     Config {
         transform_type,
-        min_stars: 6,
+        min_stars: Some(6),
         min_matches: 4,
         max_rotation: None,
         scale_range: None,
@@ -455,7 +455,7 @@ fn test_minimum_stars_translation() {
 
     let config = Config {
         transform_type: TransformType::Translation,
-        min_stars: 4,
+        min_stars: Some(4),
         min_matches: 3,
         ..Default::default()
     };
@@ -495,7 +495,7 @@ fn test_minimum_stars_similarity() {
 
     let config = Config {
         transform_type: TransformType::Similarity,
-        min_stars: 4,
+        min_stars: Some(4),
         min_matches: 3,
         ..Default::default()
     };
@@ -526,7 +526,7 @@ fn test_insufficient_stars_fails() {
 
     let config = Config {
         transform_type: TransformType::Translation,
-        min_stars: 4,
+        min_stars: Some(4),
         min_matches: 3,
         ..Default::default()
     };
@@ -657,7 +657,7 @@ fn test_stress_dense_field_large_transform() {
 
     let config = Config {
         transform_type: TransformType::Similarity,
-        min_stars: 10,
+        min_stars: Some(10),
         min_matches: 8,
         ..Default::default()
     };
@@ -1038,7 +1038,7 @@ fn test_homography_with_outliers() {
 
     let config = Config {
         transform_type: TransformType::Homography,
-        min_stars: 8,
+        min_stars: Some(8),
         min_matches: 6,
         ..Default::default()
     };
@@ -1095,7 +1095,7 @@ fn test_homography_with_noise_and_partial_overlap() {
 
     let config = Config {
         transform_type: TransformType::Homography,
-        min_stars: 8,
+        min_stars: Some(8),
         min_matches: 6,
         ..Default::default()
     };

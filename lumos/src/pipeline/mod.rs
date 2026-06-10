@@ -160,11 +160,11 @@ pub fn align_and_stack(
     };
 
     let ref_stars = &star_sets[reference];
-    if ref_stars.len() < config.registration.min_stars {
+    if ref_stars.len() < config.registration.required_stars() {
         return Err(Error::ReferenceInsufficientStars {
             index: reference,
             found: ref_stars.len(),
-            required: config.registration.min_stars,
+            required: config.registration.required_stars(),
         });
     }
     tracing::info!(

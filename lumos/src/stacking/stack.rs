@@ -294,7 +294,11 @@ fn compute_frame_norms(
 /// Resolve weights from the weighting strategy and pre-computed channel stats.
 ///
 /// Returns normalized weights (sum to 1.0) or `None` for equal weighting.
-fn resolve_weights(weighting: &Weighting, stats: &[FrameStats]) -> Option<Vec<f32>> {
+fn resolve_weights(
+    weighting: &Weighting,
+    stats: &[FrameStats],
+    frame_norms: Option<&[FrameNorm]>,
+) -> Option<Vec<f32>> {
     match weighting {
         Weighting::Equal => None,
         Weighting::Noise => {
@@ -302,14 +306,22 @@ fn resolve_weights(weighting: &Weighting, stats: &[FrameStats]) -> Option<Vec<f3
                 !stats.is_empty(),
                 "channel stats required for noise weighting"
             );
-            // w = 1/sigma^2 where sigma = average MAD-based sigma across channels
+            // Inverse variance of the frame *as combined*: normalization multiplies the frame by
+            // `gain`, scaling its noise to `gain·σ`, so w = 1/(gain·σ)² — the "pscale²" term.
+            // Without it a frame scaled up to match the reference is over-weighted by gain².
             let weights: Vec<f32> = stats
                 .iter()
-                .map(|fs| {
+                .enumerate()
+                .map(|(frame_idx, fs)| {
                     let sigma_sum: f32 = fs
                         .channels
                         .iter()
-                        .map(|c| math::statistics::mad_to_sigma(c.mad))
+                        .enumerate()
+                        .map(|(channel, c)| {
+                            let gain =
+                                frame_norms.map_or(1.0, |n| n[frame_idx].channels[channel].gain);
+                            gain * math::statistics::mad_to_sigma(c.mad)
+                        })
                         .sum();
                     let avg_sigma = sigma_sum / fs.channels.len() as f32;
                     if avg_sigma > f32::EPSILON {
@@ -400,7 +412,7 @@ pub(crate) fn run_stacking(cache: &CfaCache, config: &StackConfig) -> CfaImage {
     let method = effective_combine_method(config.method, stats.len());
     warn_if_weights_ignored(method, &config.weighting);
     let frame_norms = compute_frame_norms(stats, config.normalization);
-    let weights = resolve_weights(&config.weighting, stats);
+    let weights = resolve_weights(&config.weighting, stats, frame_norms.as_deref());
     let norms = frame_norms.as_deref();
 
     let pixels = match method {
@@ -423,7 +435,7 @@ pub(crate) fn run_stacking_weighted(cache: &LightCache, config: &StackConfig) ->
     let method = effective_combine_method(config.method, stats.len());
     warn_if_weights_ignored(method, &config.weighting);
     let frame_norms = compute_frame_norms(stats, config.normalization);
-    let weights = resolve_weights(&config.weighting, stats);
+    let weights = resolve_weights(&config.weighting, stats, frame_norms.as_deref());
     let norms = frame_norms.as_deref();
 
     // Median ignores per-frame weights (each contributing frame counts equally), so the geometry
@@ -1286,7 +1298,7 @@ mod tests {
             "Frame 1 should be much noisier: sigma0={sigma0}, sigma1={sigma1}"
         );
 
-        let weights = resolve_weights(&Weighting::Noise, &stats).unwrap();
+        let weights = resolve_weights(&Weighting::Noise, &stats, None).unwrap();
         // Frame 0 should get much higher weight
         assert!(
             weights[0] > weights[1] * 10.0,
@@ -1304,7 +1316,7 @@ mod tests {
         let cache = make_uniform_frames(100, &[50.0, 50.0, 50.0]);
         let stats = cache.core.channel_stats.clone();
         // All MADs are 0 for uniform frames → all weights are 0 → returns None
-        let weights = resolve_weights(&Weighting::Noise, &stats);
+        let weights = resolve_weights(&Weighting::Noise, &stats, None);
         assert!(
             weights.is_none(),
             "Uniform frames have zero MAD → no weights (equal weighting fallback)"
@@ -1323,7 +1335,7 @@ mod tests {
             AstroImage::from_pixels(dims, make_frame(300.0)),
         ]);
         let stats = cache.core.channel_stats.clone();
-        let weights = resolve_weights(&Weighting::Noise, &stats).unwrap();
+        let weights = resolve_weights(&Weighting::Noise, &stats, None).unwrap();
         // All should be ≈ 1/3
         for (i, &w) in weights.iter().enumerate() {
             assert!(
@@ -1367,9 +1379,45 @@ mod tests {
     }
 
     #[test]
+    fn test_noise_weighting_folds_normalization_gain() {
+        // Two frames with identical MAD (σ_A = σ_B). Frame B's normalization gain is 2, so its
+        // combined noise is 2σ: w_A ∝ 1/σ², w_B ∝ 1/(2σ)² = w_A/4 → normalized 0.8 / 0.2.
+        // Without the pscale² term both weights would come out 0.5.
+        let frame_stats = |mad: f32| {
+            let mut channels = ArrayVec::new();
+            channels.push(ChannelStats { median: 0.5, mad });
+            FrameStats { channels }
+        };
+        let frame_norm = |gain: f32| {
+            let mut channels = ArrayVec::new();
+            channels.push(ChannelNorm { gain, offset: 0.0 });
+            FrameNorm { channels }
+        };
+        let stats = vec![frame_stats(0.01), frame_stats(0.01)];
+        let norms = vec![frame_norm(1.0), frame_norm(2.0)];
+
+        let weights = resolve_weights(&Weighting::Noise, &stats, Some(&norms)).unwrap();
+        assert!(
+            (weights[0] - 0.8).abs() < 1e-6,
+            "reference frame weight should be 0.8, got {}",
+            weights[0]
+        );
+        assert!(
+            (weights[1] - 0.2).abs() < 1e-6,
+            "gain-2 frame weight should be 0.2, got {}",
+            weights[1]
+        );
+
+        // Identity norms reproduce the unscaled weighting: equal σ → equal weights.
+        let identity = vec![frame_norm(1.0), frame_norm(1.0)];
+        let equal = resolve_weights(&Weighting::Noise, &stats, Some(&identity)).unwrap();
+        assert!((equal[0] - 0.5).abs() < 1e-6 && (equal[1] - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
     fn test_manual_weighting_unchanged() {
         // Manual(vec![1.0, 2.0, 3.0]) should produce normalized [1/6, 2/6, 3/6]
-        let weights = resolve_weights(&Weighting::Manual(vec![1.0, 2.0, 3.0]), &[]).unwrap();
+        let weights = resolve_weights(&Weighting::Manual(vec![1.0, 2.0, 3.0]), &[], None).unwrap();
         assert_eq!(weights.len(), 3);
         assert!((weights[0] - 1.0 / 6.0).abs() < 1e-6);
         assert!((weights[1] - 2.0 / 6.0).abs() < 1e-6);
@@ -1378,7 +1426,7 @@ mod tests {
 
     #[test]
     fn test_equal_weighting_returns_none() {
-        let weights = resolve_weights(&Weighting::Equal, &[]);
+        let weights = resolve_weights(&Weighting::Equal, &[], None);
         assert!(weights.is_none());
     }
 

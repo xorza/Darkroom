@@ -112,7 +112,7 @@ fn test_image_registration_translation() {
     // Register the images using detected stars directly
     let reg_config = Config {
         transform_type: TransformType::Translation,
-        min_stars: 6,
+        min_stars: Some(6),
         min_matches: 4,
         max_rms_error: 3.0,
         ..Default::default()
@@ -183,7 +183,7 @@ fn test_image_registration_rotation() {
 
     let reg_config = Config {
         transform_type: TransformType::Euclidean,
-        min_stars: 6,
+        min_stars: Some(6),
         min_matches: 4,
         max_rms_error: 3.0,
         ..Default::default()
@@ -244,7 +244,7 @@ fn test_image_registration_similarity() {
 
     let reg_config = Config {
         transform_type: TransformType::Similarity,
-        min_stars: 6,
+        min_stars: Some(6),
         min_matches: 4,
         max_rms_error: 3.0,
         ..Default::default()
@@ -319,7 +319,7 @@ fn test_image_registration_with_noise() {
 
     let reg_config = Config {
         transform_type: TransformType::Translation,
-        min_stars: 6,
+        min_stars: Some(6),
         min_matches: 4,
         max_rms_error: 5.0, // Allow more error due to noise
         ..Default::default()
@@ -387,7 +387,7 @@ fn test_image_registration_dense_field() {
 
     let reg_config = Config {
         transform_type: TransformType::Euclidean,
-        min_stars: 10,
+        min_stars: Some(10),
         min_matches: 8,
         max_rms_error: 3.0,
         ..Default::default()
@@ -441,7 +441,7 @@ fn test_image_registration_large_image() {
 
     let reg_config = Config {
         transform_type: TransformType::Translation,
-        min_stars: 6,
+        min_stars: Some(6),
         min_matches: 4,
         max_rms_error: 3.0,
         ..Default::default()

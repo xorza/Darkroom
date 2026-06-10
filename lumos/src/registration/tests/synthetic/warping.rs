@@ -343,7 +343,7 @@ fn test_warp_with_detected_transform() {
     // Register to find transform using detected stars directly
     let reg_config = RegConfig {
         transform_type: TransformType::Euclidean,
-        min_stars: 6,
+        min_stars: Some(6),
         min_matches: 4,
         ..Default::default()
     };

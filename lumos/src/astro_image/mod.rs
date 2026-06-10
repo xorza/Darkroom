@@ -142,6 +142,9 @@ pub struct AstroImageMetadata {
     pub pixel_size_y: Option<f64>,
     /// Maximum valid pixel value (saturation level).
     pub data_max: Option<f64>,
+    /// Set by `CalibrationMasters::calibrate` — guards against applying the dark/flat twice
+    /// (the FITS `CALSTAT` convention). Travels with the frame through demosaic.
+    pub calibrated: bool,
 }
 
 /// Pixel data storage - planar format for efficient per-channel operations.

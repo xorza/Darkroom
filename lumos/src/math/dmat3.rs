@@ -90,11 +90,15 @@ impl DMat3 {
 
     /// Compute the matrix inverse, or `None` if singular.
     ///
-    /// Uses a fixed threshold of 1e-12 for singularity detection,
-    /// appropriate for pixel-scale coordinates (typical values 0-10000).
+    /// The singularity threshold scales **down** with sub-unit element magnitude (`det` scales
+    /// with magnitude cubed, so a fixed epsilon would call a well-conditioned `1e-5·I`,
+    /// det = 1e-15, singular) but is capped at the absolute `1e-12` above unit scale: 2D
+    /// homogeneous transforms legitimately carry translations of ~1e4–1e10 px that inflate the
+    /// element magnitude without inflating the determinant.
     pub fn inverse(&self) -> Option<DMat3> {
         let det = self.determinant();
-        if det.abs() < 1e-12 {
+        let scale = self.data.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+        if det.abs() <= 1e-12 * scale.powi(3).min(1.0) {
             return None;
         }
         let inv_det = 1.0 / det;
@@ -375,6 +379,24 @@ mod tests {
     fn test_inverse_singular_returns_none() {
         let m = DMat3::from_array([0.0; 9]);
         assert!(m.inverse().is_none());
+
+        // Rank-deficient with large elements (det = 0 but scale³ = 1e9): still singular —
+        // the relative threshold must not be fooled by magnitude.
+        let m = DMat3::from_rows([1e3, 0.0, 0.0], [0.0, 1e3, 0.0], [1e3, 0.0, 0.0]);
+        assert!(m.inverse().is_none());
+    }
+
+    #[test]
+    fn test_inverse_small_scale_not_misclassified_singular() {
+        // 1e-5·I is perfectly conditioned but det = 1e-15 — the old fixed 1e-12 threshold
+        // wrongly called it singular. Relative test: 1e-15 > 1e-12·(1e-5)³ = 1e-27 → invertible,
+        // inverse = 1e5·I.
+        let m = DMat3::from_rows([1e-5, 0.0, 0.0], [0.0, 1e-5, 0.0], [0.0, 0.0, 1e-5]);
+        let inv = m
+            .inverse()
+            .expect("well-conditioned small-scale matrix must invert");
+        let expected = DMat3::from_rows([1e5, 0.0, 0.0], [0.0, 1e5, 0.0], [0.0, 0.0, 1e5]);
+        assert!(mat_approx_eq(&inv, &expected));
     }
 
     #[test]

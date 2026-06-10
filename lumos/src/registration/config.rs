@@ -116,8 +116,10 @@ pub struct Config {
     // == Star matching ==
     /// Maximum stars to use for matching (brightest N). Default: 200.
     pub max_stars: usize,
-    /// Minimum stars required in each image. Default: 10.
-    pub min_stars: usize,
+    /// Minimum stars required in each image. `None` (default) derives the gate from
+    /// `transform_type` (see [`Config::required_stars`]); `Some(n)` overrides it — e.g. as a
+    /// frame-quality floor independent of the model.
+    pub min_stars: Option<usize>,
     /// Minimum matched star pairs to accept. Default: 8.
     pub min_matches: usize,
     /// Triangle ratio tolerance (0.01 = 1%). Default: 0.01.
@@ -173,7 +175,7 @@ impl Default for Config {
 
             // Star matching
             max_stars: 200,
-            min_stars: 10,
+            min_stars: None,
             min_matches: 8,
             ratio_tolerance: 0.01,
             min_votes: 3,
@@ -266,6 +268,23 @@ impl Config {
         }
     }
 
+    /// The star-count gate `register()` applies to each input set: the explicit `min_stars`
+    /// override when set, otherwise keyed to the transform model — twice its minimal RANSAC
+    /// sample (margin for triangle voting and LO refinement), floored at 3 for triangle
+    /// matching. `Auto` can climb to Homography, so it gates like Homography (8). A Similarity
+    /// fit thus accepts a 4-star frame that the old flat gate of 10 rejected.
+    pub fn required_stars(&self) -> usize {
+        if let Some(n) = self.min_stars {
+            return n;
+        }
+        let model = if self.transform_type == TransformType::Auto {
+            TransformType::Homography
+        } else {
+            self.transform_type
+        };
+        (2 * model.min_points()).max(3)
+    }
+
     /// Validate all configuration parameters.
     ///
     /// # Errors
@@ -295,16 +314,18 @@ impl Config {
                 self.max_stars
             ));
         }
-        if self.min_stars < 3 {
+        if let Some(n) = self.min_stars
+            && n < 3
+        {
             return invalid(format!(
-                "min_stars must be >= 3 for triangle matching, got {}",
-                self.min_stars
+                "min_stars must be >= 3 for triangle matching, got {n}"
             ));
         }
-        if self.max_stars < self.min_stars {
+        if self.max_stars < self.required_stars() {
             return invalid(format!(
-                "max_stars ({}) must be >= min_stars ({})",
-                self.max_stars, self.min_stars
+                "max_stars ({}) must be >= the star gate ({})",
+                self.max_stars,
+                self.required_stars()
             ));
         }
         // Auto can upgrade to Homography (needs 4 points), so validate against that
@@ -405,7 +426,25 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.transform_type, TransformType::Auto);
         assert_eq!(config.max_stars, 200);
-        assert_eq!(config.min_stars, 10);
+        assert_eq!(config.min_stars, None);
+        // Auto gates like Homography: 2 × 4 minimal points = 8.
+        assert_eq!(config.required_stars(), 8);
+        assert_eq!(
+            Config {
+                transform_type: TransformType::Similarity,
+                ..Config::default()
+            }
+            .required_stars(),
+            4
+        );
+        assert_eq!(
+            Config {
+                min_stars: Some(20),
+                ..Config::default()
+            }
+            .required_stars(),
+            20
+        );
         assert_eq!(config.min_matches, 8);
         assert!((config.ratio_tolerance - 0.01).abs() < 1e-10);
         assert_eq!(config.min_votes, 3);
@@ -583,7 +622,7 @@ mod tests {
             ),
             (
                 Config {
-                    min_stars: 2,
+                    min_stars: Some(2),
                     ..Config::default()
                 },
                 "min_stars must be >= 3",
@@ -591,10 +630,10 @@ mod tests {
             (
                 Config {
                     max_stars: 5,
-                    min_stars: 10,
+                    min_stars: Some(10),
                     ..Config::default()
                 },
-                "max_stars (5) must be >= min_stars (10)",
+                "max_stars (5) must be >= the star gate (10)",
             ),
             (
                 Config {

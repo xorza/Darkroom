@@ -111,17 +111,18 @@ pub fn register(
     config.validate()?;
     let start = Instant::now();
 
-    // Validate input
-    if ref_stars.len() < config.min_stars {
+    // Validate input — the gate is keyed to the transform model unless min_stars overrides it.
+    let required_stars = config.required_stars();
+    if ref_stars.len() < required_stars {
         return Err(RegistrationError::InsufficientStars {
             found: ref_stars.len(),
-            required: config.min_stars,
+            required: required_stars,
         });
     }
-    if target_stars.len() < config.min_stars {
+    if target_stars.len() < required_stars {
         return Err(RegistrationError::InsufficientStars {
             found: target_stars.len(),
-            required: config.min_stars,
+            required: required_stars,
         });
     }
 

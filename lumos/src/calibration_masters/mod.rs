@@ -182,6 +182,13 @@ impl CalibrationMasters {
     /// 2. Flat division with normalization
     /// 3. CFA-aware defect pixel correction
     pub fn calibrate(&self, image: &mut CfaImage) {
+        // Double application would silently subtract the dark / divide the flat twice.
+        assert!(
+            !image.metadata.calibrated,
+            "calibrate() called on an already-calibrated frame"
+        );
+        image.metadata.calibrated = true;
+
         // 1. Dark subtraction
         if let Some(ref dark) = self.master_dark {
             image.subtract(dark);

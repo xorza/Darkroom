@@ -6,6 +6,18 @@ use crate::{AstroImageMetadata, CalibrationFrames, CalibrationImages, Calibratio
 use common::Buffer2;
 
 #[test]
+#[should_panic(expected = "already-calibrated frame")]
+fn test_calibrate_twice_panics() {
+    // A second calibrate() would subtract the dark / divide the flat twice — must crash, not
+    // silently corrupt.
+    let masters = CalibrationMasters::from_images(CalibrationImages::default(), 5.0);
+    let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
+    masters.calibrate(&mut light);
+    assert!(light.metadata.calibrated);
+    masters.calibrate(&mut light);
+}
+
+#[test]
 fn test_from_files_all_empty_yields_no_masters() {
     // Empty frame sets must produce a `None` for every master (no file I/O path).
     let empty: Vec<std::path::PathBuf> = Vec::new();
