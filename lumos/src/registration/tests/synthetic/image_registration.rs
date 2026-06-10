@@ -13,7 +13,10 @@ use crate::registration::transform::{Transform, WarpTransform};
 use crate::registration::{Config, TransformType, register};
 use crate::star_detection::config::Config as DetConfig;
 use crate::star_detection::detector::StarDetector;
-use crate::testing::synthetic::{self, star_field::StarFieldConfig};
+use crate::testing::synthetic::camera::Camera;
+use crate::testing::synthetic::fixtures::star_field;
+use crate::testing::synthetic::observe::{Observation, render};
+use crate::testing::synthetic::scene::{BackgroundField, Scene};
 use common::Buffer2;
 
 /// Default star detector for synthetic images.
@@ -70,17 +73,13 @@ fn translate_image(src_pixels: &[f32], width: usize, height: usize, dx: f64, dy:
 
 #[test]
 fn test_image_registration_translation() {
-    // Generate a reference star field image using standard config
-    let config = StarFieldConfig {
-        num_stars: 50,
-        seed: 42,
-        ..synthetic::star_field::sparse_field_config()
-    };
-    let width = config.width;
-    let height = config.height;
-
-    let (ref_pixels, _ground_truth) = synthetic::star_field::generate_star_field(&config);
-    let ref_pixels_vec = ref_pixels.into_vec();
+    // Reference star field image (forward model).
+    let (width, height) = (256, 256);
+    let ref_pixels_vec = star_field(width, height, 50, 42)
+        .image
+        .channel(0)
+        .pixels()
+        .to_vec();
 
     // Apply a known translation to create target image
     let dx = 15.5;
@@ -153,16 +152,12 @@ fn test_image_registration_translation() {
 
 #[test]
 fn test_image_registration_rotation() {
-    let config = StarFieldConfig {
-        num_stars: 60,
-        seed: 123,
-        ..synthetic::star_field::sparse_field_config()
-    };
-    let width = config.width;
-    let height = config.height;
-
-    let (ref_pixels, _) = synthetic::star_field::generate_star_field(&config);
-    let ref_pixels_vec = ref_pixels.into_vec();
+    let (width, height) = (256, 256);
+    let ref_pixels_vec = star_field(width, height, 60, 123)
+        .image
+        .channel(0)
+        .pixels()
+        .to_vec();
 
     // Apply rotation + small translation
     let dx = 5.0;
@@ -213,16 +208,12 @@ fn test_image_registration_rotation() {
 
 #[test]
 fn test_image_registration_similarity() {
-    let config = StarFieldConfig {
-        num_stars: 70,
-        seed: 456,
-        ..synthetic::star_field::sparse_field_config()
-    };
-    let width = config.width;
-    let height = config.height;
-
-    let (ref_pixels, _) = synthetic::star_field::generate_star_field(&config);
-    let ref_pixels_vec = ref_pixels.into_vec();
+    let (width, height) = (256, 256);
+    let ref_pixels_vec = star_field(width, height, 70, 456)
+        .image
+        .channel(0)
+        .pixels()
+        .to_vec();
 
     // Apply similarity transform (translation + rotation + scale)
     let dx = 8.0;
@@ -284,18 +275,27 @@ fn test_image_registration_similarity() {
 
 #[test]
 fn test_image_registration_with_noise() {
-    // Higher noise level
-    let config = StarFieldConfig {
-        num_stars: 80,
-        noise_sigma: 0.04, // Higher noise
-        seed: 789,
-        ..synthetic::star_field::sparse_field_config()
+    // Higher noise level: a shallow well + extra read noise stresses registration.
+    let (width, height) = (256, 256);
+    let scene = Scene::random_field(
+        width,
+        height,
+        80,
+        (6.0, 16.0),
+        BackgroundField::Uniform { level: 0.1 },
+        16.0,
+        789,
+    );
+    let noisy = Camera {
+        full_well_e: 3000.0,
+        read_noise_e: 15.0,
+        ..Camera::realistic(4.0)
     };
-    let width = config.width;
-    let height = config.height;
-
-    let (ref_pixels, _) = synthetic::star_field::generate_star_field(&config);
-    let ref_pixels_vec = ref_pixels.into_vec();
+    let ref_pixels_vec = render(&scene, &noisy, &Observation::reference(789))
+        .image
+        .channel(0)
+        .pixels()
+        .to_vec();
 
     // Apply translation
     let dx = 20.0;
@@ -352,17 +352,13 @@ fn test_image_registration_with_noise() {
 
 #[test]
 fn test_image_registration_dense_field() {
-    // Dense star field
-    let config = StarFieldConfig {
-        num_stars: 200,
-        seed: 999,
-        ..synthetic::star_field::dense_field_config()
-    };
-    let width = config.width;
-    let height = config.height;
-
-    let (ref_pixels, _) = synthetic::star_field::generate_star_field(&config);
-    let ref_pixels_vec = ref_pixels.into_vec();
+    // Dense star field.
+    let (width, height) = (256, 256);
+    let ref_pixels_vec = star_field(width, height, 200, 999)
+        .image
+        .channel(0)
+        .pixels()
+        .to_vec();
 
     let dx = 10.0;
     let dy = 8.0;
@@ -412,18 +408,12 @@ fn test_image_registration_dense_field() {
 
 #[test]
 fn test_image_registration_large_image() {
-    let config = StarFieldConfig {
-        width: 1024,
-        height: 1024,
-        num_stars: 100,
-        seed: 111,
-        ..synthetic::star_field::sparse_field_config()
-    };
-    let width = config.width;
-    let height = config.height;
-
-    let (ref_pixels, _) = synthetic::star_field::generate_star_field(&config);
-    let ref_pixels_vec = ref_pixels.into_vec();
+    let (width, height) = (1024, 1024);
+    let ref_pixels_vec = star_field(width, height, 100, 111)
+        .image
+        .channel(0)
+        .pixels()
+        .to_vec();
 
     // Larger translation for larger image
     let dx = 50.0;
