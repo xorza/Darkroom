@@ -9,5 +9,6 @@
 mod helpers;
 mod image_registration;
 mod robustness;
+mod sip_distortion;
 mod transform_types;
 mod warping;

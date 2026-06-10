@@ -2,6 +2,8 @@ pub mod cfa;
 pub mod error;
 mod fits;
 pub(crate) mod sensor;
+#[cfg(test)]
+mod synthetic_tests;
 
 use rayon::prelude::*;
 

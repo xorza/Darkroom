@@ -4,6 +4,7 @@
 //! without requiring real calibration data.
 
 mod debug_steps;
+mod metric_curves;
 mod pipeline_tests;
 mod stage_tests;
 mod star_field;
