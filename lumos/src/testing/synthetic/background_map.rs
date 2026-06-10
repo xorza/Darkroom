@@ -22,72 +22,6 @@ pub(crate) fn uniform(
     }
 }
 
-/// Create a BackgroundEstimate with a horizontal gradient in the background.
-pub(crate) fn horizontal_gradient(
-    width: usize,
-    height: usize,
-    bg_left: f32,
-    bg_right: f32,
-    noise: f32,
-) -> BackgroundEstimate {
-    let bg_buf =
-        crate::testing::synthetic::patterns::horizontal_gradient(width, height, bg_left, bg_right);
-    let mut noise_buf = Buffer2::new_default(width, height);
-    noise_buf.fill(noise);
-    BackgroundEstimate {
-        background: bg_buf,
-        noise: noise_buf,
-    }
-}
-
-/// Create a BackgroundEstimate with a vertical gradient in the background.
-pub(crate) fn vertical_gradient(
-    width: usize,
-    height: usize,
-    bg_top: f32,
-    bg_bottom: f32,
-    noise: f32,
-) -> BackgroundEstimate {
-    let bg_buf =
-        crate::testing::synthetic::patterns::vertical_gradient(width, height, bg_top, bg_bottom);
-    let mut noise_buf = Buffer2::new_default(width, height);
-    noise_buf.fill(noise);
-    BackgroundEstimate {
-        background: bg_buf,
-        noise: noise_buf,
-    }
-}
-
-/// Create an BackgroundEstimate with radial vignette in the background.
-pub(crate) fn vignette(
-    width: usize,
-    height: usize,
-    bg_center: f32,
-    bg_edge: f32,
-    noise: f32,
-) -> BackgroundEstimate {
-    let mut bg_buf = Buffer2::new_default(width, height);
-    let mut noise_buf = Buffer2::new_default(width, height);
-    let cx = width as f32 / 2.0;
-    let cy = height as f32 / 2.0;
-    let max_r = (cx * cx + cy * cy).sqrt();
-
-    for y in 0..height {
-        for x in 0..width {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            let r = (dx * dx + dy * dy).sqrt();
-            let t = if max_r > 0.0 { r / max_r } else { 0.0 };
-            bg_buf[(x, y)] = bg_center + t * (bg_edge - bg_center);
-        }
-    }
-    noise_buf.fill(noise);
-    BackgroundEstimate {
-        background: bg_buf,
-        noise: noise_buf,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,27 +33,5 @@ mod tests {
         assert_eq!(bg.background.height(), 100);
         assert!((bg.background[(50, 50)] - 0.1).abs() < 1e-6);
         assert!((bg.noise[(50, 50)] - 0.01).abs() < 1e-6);
-    }
-
-    #[test]
-    fn test_horizontal_gradient() {
-        let bg = horizontal_gradient(100, 10, 0.0, 1.0, 0.05);
-        assert!((bg.background[(0, 5)] - 0.0).abs() < 1e-6);
-        assert!((bg.background[(99, 5)] - 1.0).abs() < 1e-6);
-        assert!((bg.noise[(50, 5)] - 0.05).abs() < 1e-6);
-    }
-
-    #[test]
-    fn test_vertical_gradient() {
-        let bg = vertical_gradient(10, 100, 0.0, 1.0, 0.02);
-        assert!((bg.background[(5, 0)] - 0.0).abs() < 1e-6);
-        assert!((bg.background[(5, 99)] - 1.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn test_vignette() {
-        let bg = vignette(100, 100, 1.0, 0.5, 0.01);
-        // Center should be brighter
-        assert!(bg.background[(50, 50)] > bg.background[(0, 0)]);
     }
 }

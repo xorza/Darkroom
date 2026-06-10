@@ -8,9 +8,6 @@
 //! - Amplifier glow (corner brightening)
 
 use glam::Vec2;
-use std::f32::consts::PI;
-
-use crate::testing::TestRng;
 
 /// Add uniform background to image.
 pub fn add_uniform_background(pixels: &mut [f32], level: f32) {
@@ -77,41 +74,6 @@ pub fn add_vignette_background(
             let t = (r / max_r).powf(falloff);
             let level = center_level + (edge_level - center_level) * t;
             pixels[y * width + x] += level;
-        }
-    }
-}
-
-/// Add amplifier glow (corner brightening, typical in CCDs).
-///
-/// Creates a gradient from the specified corner that fades out.
-///
-/// # Arguments
-/// * `pixels` - Mutable pixel buffer
-/// * `width`, `height` - Image dimensions
-/// * `corner` - Which corner (0=TL, 1=TR, 2=BL, 3=BR)
-/// * `amplitude` - Maximum glow brightness
-/// * `decay_scale` - Distance scale for exponential decay (in pixels)
-pub fn add_amp_glow(
-    pixels: &mut [f32],
-    width: usize,
-    height: usize,
-    corner: usize,
-    amplitude: f32,
-    decay_scale: f32,
-) {
-    let glow_pos = match corner {
-        0 => Vec2::new(0.0, 0.0),                                // Top-left
-        1 => Vec2::new(width as f32 - 1.0, 0.0),                 // Top-right
-        2 => Vec2::new(0.0, height as f32 - 1.0),                // Bottom-left
-        _ => Vec2::new(width as f32 - 1.0, height as f32 - 1.0), // Bottom-right
-    };
-
-    for y in 0..height {
-        for x in 0..width {
-            let pixel_pos = Vec2::new(x as f32, y as f32);
-            let dist = pixel_pos.distance(glow_pos);
-            let glow = amplitude * (-dist / decay_scale).exp();
-            pixels[y * width + x] += glow;
         }
     }
 }
@@ -184,32 +146,6 @@ pub fn add_nebula_background(
     }
 }
 
-/// Add multiple smaller nebula patches (simulates complex nebula structure).
-pub fn add_complex_nebula(
-    pixels: &mut [f32],
-    width: usize,
-    height: usize,
-    base_amplitude: f32,
-    seed: u64,
-) {
-    let mut rng = TestRng::new(seed);
-
-    // Add 3-5 overlapping nebula patches
-    let num_patches = 3 + (rng.next_f32() * 3.0) as usize;
-
-    for _ in 0..num_patches {
-        let config = NebulaConfig {
-            center: Vec2::new(0.2 + rng.next_f32() * 0.6, 0.2 + rng.next_f32() * 0.6),
-            radius: 0.1 + rng.next_f32() * 0.2,
-            amplitude: base_amplitude * (0.3 + rng.next_f32() * 0.7),
-            softness: 1.5 + rng.next_f32() * 2.0,
-            aspect_ratio: 0.5 + rng.next_f32() * 0.5,
-            angle: rng.next_f32() * PI,
-        };
-        add_nebula_background(pixels, width, height, &config);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,26 +190,6 @@ mod tests {
             "Center {} should be > corner {}",
             center,
             corner
-        );
-    }
-
-    #[test]
-    fn test_amp_glow_decays() {
-        let width = 64;
-        let height = 64;
-        let mut pixels = vec![0.0f32; width * height];
-
-        add_amp_glow(&mut pixels, width, height, 0, 0.5, 20.0);
-
-        // Top-left corner should be brightest
-        let corner = pixels[0];
-        let center = pixels[32 * width + 32];
-
-        assert!(
-            corner > center,
-            "Corner {} should be > center {}",
-            corner,
-            center
         );
     }
 }

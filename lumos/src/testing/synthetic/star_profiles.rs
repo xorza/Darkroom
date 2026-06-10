@@ -155,12 +155,6 @@ pub fn render_elliptical_star(
     }
 }
 
-/// Compute eccentricity from sigma_major and sigma_minor.
-pub fn compute_eccentricity(sigma_major: f32, sigma_minor: f32) -> f32 {
-    let ratio = sigma_minor / sigma_major;
-    (1.0 - ratio * ratio).sqrt()
-}
-
 /// Render a saturated star (flat-topped Gaussian).
 ///
 /// Stars become saturated when pixel values exceed the detector's well capacity.
@@ -203,46 +197,6 @@ pub fn render_saturated_star(
             let idx = py * width + px;
             pixels[idx] = (pixels[idx] + value).min(saturation_level);
         }
-    }
-}
-
-/// Render a cosmic ray hit (very sharp single-pixel spike).
-pub fn render_cosmic_ray(pixels: &mut [f32], width: usize, x: usize, y: usize, amplitude: f32) {
-    let height = pixels.len() / width;
-    if x < width && y < height {
-        pixels[y * width + x] += amplitude;
-    }
-}
-
-/// Render a cosmic ray with slight bleeding to neighbors.
-pub fn render_cosmic_ray_extended(
-    pixels: &mut [f32],
-    width: usize,
-    x: usize,
-    y: usize,
-    amplitude: f32,
-) {
-    let height = pixels.len() / width;
-    if x >= width || y >= height {
-        return;
-    }
-
-    // Central pixel gets most of the flux
-    pixels[y * width + x] += amplitude;
-
-    // Small fraction bleeds to neighbors
-    let bleed = amplitude * 0.1;
-    if x > 0 {
-        pixels[y * width + x - 1] += bleed;
-    }
-    if x < width - 1 {
-        pixels[y * width + x + 1] += bleed;
-    }
-    if y > 0 {
-        pixels[(y - 1) * width + x] += bleed;
-    }
-    if y < height - 1 {
-        pixels[(y + 1) * width + x] += bleed;
     }
 }
 
