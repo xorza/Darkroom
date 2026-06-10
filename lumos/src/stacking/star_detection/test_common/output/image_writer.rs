@@ -18,6 +18,21 @@ pub fn output_path(base: &Path) -> std::path::PathBuf {
     base.with_extension(TEST_OUTPUT_IMAGE_EXT)
 }
 
+/// Convert f32 grayscale pixels to an imaginarium RGB_F32 image, clamped to `[0, 1]` (no stretch).
+/// Matches [`to_gray_image`]'s mapping so a comparison overlay reads at the same brightness as the
+/// `_input` image it sits beside.
+pub fn gray_to_rgb_image(pixels: &[f32], width: usize, height: usize) -> Image {
+    let desc = ImageDesc::new_packed(width, height, ColorFormat::RGB_F32);
+    let rgb_pixels: Vec<f32> = pixels
+        .iter()
+        .flat_map(|&p| {
+            let v = p.clamp(0.0, 1.0);
+            [v, v, v]
+        })
+        .collect();
+    Image::new_with_data(desc, bytemuck::cast_slice(&rgb_pixels).to_vec()).unwrap()
+}
+
 /// Convert f32 grayscale pixels to imaginarium RGB_F32 image with auto-stretching.
 pub fn gray_to_rgb_image_stretched(pixels: &[f32], width: usize, height: usize) -> Image {
     let min = pixels.iter().cloned().fold(f32::INFINITY, f32::min);

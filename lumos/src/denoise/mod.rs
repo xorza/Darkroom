@@ -78,8 +78,8 @@ pub struct DenoiseConfig {
 impl Default for DenoiseConfig {
     fn default() -> Self {
         Self {
-            scales: 5,
-            k: 3.0,
+            scales: 2,
+            k: 1.2,
             threshold: Threshold::Hard,
             strength: 1.0,
         }

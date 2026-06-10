@@ -3,7 +3,7 @@
 //! Creates annotated images showing ground truth vs detected stars.
 
 use crate::stacking::star_detection::star::Star;
-use crate::stacking::star_detection::test_common::output::image_writer::gray_to_rgb_image_stretched;
+use crate::stacking::star_detection::test_common::output::image_writer::gray_to_rgb_image;
 use crate::testing::synthetic::observe::ObservedSource;
 use glam::Vec2;
 use imaginarium::Image;
@@ -44,7 +44,7 @@ pub fn create_comparison_image(
     detected: &[Star],
     match_radius: f32,
 ) -> Image {
-    let mut image = gray_to_rgb_image_stretched(pixels, width, height);
+    let mut image = gray_to_rgb_image(pixels, width, height);
 
     // Match detected stars to ground truth
     let matches = match_stars(ground_truth, detected, match_radius);
