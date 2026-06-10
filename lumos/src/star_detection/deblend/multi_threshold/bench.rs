@@ -11,7 +11,7 @@ use crate::star_detection::deblend::ComponentData;
 use crate::star_detection::deblend::multi_threshold::{DeblendBuffers, deblend_multi_threshold};
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::test_utils::label_map_from_mask_with_connectivity;
-use crate::testing::synthetic::star_field::generate_globular_cluster;
+use crate::testing::synthetic::fixtures::cluster_field;
 use common::BitBuffer2;
 use common::Buffer2;
 use common::Vec2us;
@@ -64,7 +64,10 @@ fn create_components_from_pixels(
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
 fn bench_deblend_multi_threshold_6k_dense(b: ::quickbench::Bencher) {
-    let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
+    let pixels = cluster_field(6144, 6144, 50000, 42)
+        .image
+        .channel(0)
+        .clone();
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
 
     // Filter out huge components - multi-threshold is O(n * n_thresholds) per component
@@ -94,7 +97,10 @@ fn bench_deblend_multi_threshold_6k_dense(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
 fn bench_deblend_multi_threshold_6k_dense_fewer_levels(b: ::quickbench::Bencher) {
-    let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
+    let pixels = cluster_field(6144, 6144, 50000, 42)
+        .image
+        .channel(0)
+        .clone();
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
 
     // Filter out huge components - multi-threshold is O(n^2) and not practical for >100k pixels
@@ -127,7 +133,10 @@ fn bench_deblend_multi_threshold_6k_dense_fewer_levels(b: ::quickbench::Bencher)
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
 fn bench_multi_threshold_4k_dense(b: ::quickbench::Bencher) {
-    let pixels = generate_globular_cluster(4096, 4096, 20000, 42);
+    let pixels = cluster_field(4096, 4096, 20000, 42)
+        .image
+        .channel(0)
+        .clone();
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
 
     // Filter out huge components - multi-threshold is O(n^2) and not practical for >100k pixels

@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use crate::testing::synthetic::artifacts::add_cosmic_rays;
 use crate::testing::synthetic::backgrounds::NebulaConfig;
 use crate::testing::synthetic::camera::{BiasField, Camera, FlatField, PsfModel, SensorDefects};
+use crate::testing::synthetic::fixtures::{cluster_field, star_field};
 use crate::testing::synthetic::observe::{Observation, observe_dithered, render};
 use crate::testing::synthetic::patterns::{checkerboard, diagonal_gradient, horizontal_gradient};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
@@ -596,6 +597,48 @@ fn gallery_patterns() {
         w,
         h,
         "patterns/benchmark_star_field",
+        Stretch::Asinh,
+    );
+}
+
+#[test]
+#[ignore = "visual gallery; run with --ignored"]
+fn gallery_fixtures() {
+    // The exact forward-model fields the benchmarks now run on (fixtures::{star_field,
+    // cluster_field}), at inspectable sizes.
+    let size = 1024;
+    save(
+        star_field(size, size, 100, 42).image.channel(0).pixels(),
+        size,
+        size,
+        "fixtures/star_field_sparse",
+        Stretch::Asinh,
+    );
+    save(
+        star_field(size, size, 1000, 42).image.channel(0).pixels(),
+        size,
+        size,
+        "fixtures/star_field_dense",
+        Stretch::Asinh,
+    );
+    save(
+        cluster_field(size, size, 4000, 42)
+            .image
+            .channel(0)
+            .pixels(),
+        size,
+        size,
+        "fixtures/cluster_field",
+        Stretch::Asinh,
+    );
+    save(
+        cluster_field(size, size, 15000, 42)
+            .image
+            .channel(0)
+            .pixels(),
+        size,
+        size,
+        "fixtures/cluster_field_dense",
         Stretch::Asinh,
     );
 }

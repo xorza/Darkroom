@@ -8,8 +8,7 @@ use crate::star_detection::background::estimate::BackgroundEstimate;
 use crate::star_detection::background::tile_grid::TileGrid;
 use crate::star_detection::background::{BufferPool, estimate_background, refine_background};
 use crate::star_detection::config::Config;
-use crate::testing::synthetic::stamps;
-use crate::testing::synthetic::star_field::generate_globular_cluster;
+use crate::testing::synthetic::fixtures::{cluster_field, star_field};
 use common::BitBuffer2;
 use common::Buffer2;
 
@@ -29,7 +28,10 @@ fn bench_background_estimate_6k(b: ::quickbench::Bencher) {
     let height = 6144;
     let num_stars = (width * height) / 1000;
 
-    let pixels = stamps::benchmark_star_field(width, height, num_stars, 0.1, 0.01, 42);
+    let pixels = star_field(width, height, num_stars, 42)
+        .image
+        .channel(0)
+        .clone();
     let config = Config {
         tile_size: 64,
         ..Default::default()
@@ -45,7 +47,10 @@ const BENCH_SIGMA_CLIP_ITERATIONS: usize = 2;
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
 fn bench_tile_grid_6k_globular(b: ::quickbench::Bencher) {
-    let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
+    let pixels = cluster_field(6144, 6144, 50000, 42)
+        .image
+        .channel(0)
+        .clone();
     let mut grid = TileGrid::new_uninit(pixels.width(), pixels.height(), 64);
 
     b.bench(|| {
@@ -56,7 +61,10 @@ fn bench_tile_grid_6k_globular(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 2, iters = 50)]
 fn bench_tile_grid_6k_with_mask(b: ::quickbench::Bencher) {
-    let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
+    let pixels = cluster_field(6144, 6144, 50000, 42)
+        .image
+        .channel(0)
+        .clone();
 
     // Create mask from actual bright pixels (threshold at 0.1)
     let width = pixels.width();

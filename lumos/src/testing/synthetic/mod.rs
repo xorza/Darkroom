@@ -40,6 +40,7 @@ pub mod artifacts;
 pub mod background_map;
 pub mod backgrounds;
 pub mod camera;
+pub mod fixtures;
 pub mod gallery;
 pub mod metrics;
 pub mod noise;

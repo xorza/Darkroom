@@ -14,7 +14,7 @@ use crate::star_detection::centroid::test_utils::make_gaussian_star;
 use crate::star_detection::config::{CentroidMethod, Config, LocalBackgroundMethod};
 use crate::star_detection::detector::stages::detect_test_utils::detect_stars_test;
 use crate::testing::estimate_background;
-use crate::testing::synthetic::stamps::benchmark_star_field;
+use crate::testing::synthetic::fixtures::star_field;
 use common::Buffer2;
 
 // =============================================================================
@@ -125,7 +125,7 @@ fn bench_measure_star_local_annulus(b: ::quickbench::Bencher) {
 #[quick_bench(warmup_iters = 5, iters = 200)]
 fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
     // 100 stars batch processing with WeightedMoments
-    let pixels = benchmark_star_field(512, 512, 100, 0.1, 0.01, 42);
+    let pixels = star_field(512, 512, 100, 42).image.channel(0).clone();
     let bg = estimate_background(&pixels, &Config::default());
     let candidates = detect_stars_test(&pixels, &bg, &Config::default());
     let regions: Vec<_> = candidates.iter().collect();
@@ -146,7 +146,7 @@ fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
 #[quick_bench(warmup_iters = 2, iters = 10)]
 fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     // 2000 stars on 4K image - compare all centroid methods
-    let pixels = benchmark_star_field(6144, 6144, 10000, 0.1, 0.01, 42);
+    let pixels = star_field(6144, 6144, 10000, 42).image.channel(0).clone();
     let bg = estimate_background(&pixels, &Config::default());
     let candidates = detect_stars_test(&pixels, &bg, &Config::default());
     let regions: Vec<_> = candidates.iter().collect();

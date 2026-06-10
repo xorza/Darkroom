@@ -6,7 +6,7 @@ use crate::star_detection::convolution::{
     MatchedFilterBuffers, convolve_cols, convolve_rows_parallel, elliptical_gaussian_convolve,
     gaussian_convolve, gaussian_kernel_1d, matched_filter,
 };
-use crate::testing::synthetic::stamps::benchmark_star_field;
+use crate::testing::synthetic::fixtures::star_field;
 use ::quickbench::quick_bench;
 use common::Buffer2;
 use std::hint::black_box;
@@ -71,7 +71,7 @@ fn bench_convolve_row_large_kernel(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_convolve_cols_1k(b: ::quickbench::Bencher) {
-    let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
+    let pixels = star_field(1024, 1024, 100, 42).image.channel(0).clone();
     let kernel = gaussian_kernel_1d(2.0);
     let mut output = Buffer2::new_default(1024, 1024);
 
@@ -86,7 +86,7 @@ fn bench_convolve_cols_1k(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
 fn bench_convolve_cols_4k(b: ::quickbench::Bencher) {
-    let pixels = benchmark_star_field(4096, 4096, 500, 0.1, 0.01, 42);
+    let pixels = star_field(4096, 4096, 500, 42).image.channel(0).clone();
     let kernel = gaussian_kernel_1d(2.0);
     let mut output = Buffer2::new_default(4096, 4096);
 
@@ -103,7 +103,7 @@ fn bench_convolve_cols_4k(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_row_vs_col_1k(b: ::quickbench::Bencher) {
-    let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
+    let pixels = star_field(1024, 1024, 100, 42).image.channel(0).clone();
     let kernel = gaussian_kernel_1d(2.0);
     let mut output = Buffer2::new_default(1024, 1024);
 
@@ -128,7 +128,7 @@ fn bench_row_vs_col_1k(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_gaussian_convolve_1k(b: ::quickbench::Bencher) {
-    let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
+    let pixels = star_field(1024, 1024, 100, 42).image.channel(0).clone();
     let mut output = Buffer2::new_default(1024, 1024);
     let mut temp = Buffer2::new_default(1024, 1024);
     let sigma = 2.0;
@@ -145,7 +145,7 @@ fn bench_gaussian_convolve_1k(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
 fn bench_gaussian_convolve_4k(b: ::quickbench::Bencher) {
-    let pixels = benchmark_star_field(4096, 4096, 500, 0.1, 0.01, 42);
+    let pixels = star_field(4096, 4096, 500, 42).image.channel(0).clone();
     let mut output = Buffer2::new_default(4096, 4096);
     let mut temp = Buffer2::new_default(4096, 4096);
     let sigma = 2.0;
@@ -164,7 +164,7 @@ fn bench_gaussian_convolve_4k(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_elliptical_convolve_1k(b: ::quickbench::Bencher) {
-    let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
+    let pixels = star_field(1024, 1024, 100, 42).image.channel(0).clone();
     let mut output = Buffer2::new_default(1024, 1024);
     let mut temp = Buffer2::new_default(1024, 1024);
     let sigma = 2.0;
@@ -185,7 +185,7 @@ fn bench_elliptical_convolve_1k(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_elliptical_vs_circular_1k(b: ::quickbench::Bencher) {
-    let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
+    let pixels = star_field(1024, 1024, 100, 42).image.channel(0).clone();
     let mut output = Buffer2::new_default(1024, 1024);
     let mut temp = Buffer2::new_default(1024, 1024);
     let sigma = 2.0;
@@ -215,7 +215,7 @@ fn bench_elliptical_vs_circular_1k(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_matched_filter_1k(b: ::quickbench::Bencher) {
-    let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
+    let pixels = star_field(1024, 1024, 100, 42).image.channel(0).clone();
     let background = Buffer2::new_filled(1024, 1024, 0.1);
     let mut output = Buffer2::new_default(1024, 1024);
     let mut scratch = Buffer2::new_default(1024, 1024);
@@ -255,7 +255,7 @@ fn bench_matched_filter_1k(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
 fn bench_matched_filter_4k(b: ::quickbench::Bencher) {
-    let pixels = benchmark_star_field(4096, 4096, 500, 0.1, 0.01, 42);
+    let pixels = star_field(4096, 4096, 500, 42).image.channel(0).clone();
     let background = Buffer2::new_filled(4096, 4096, 0.1);
     let mut output = Buffer2::new_default(4096, 4096);
     let mut scratch = Buffer2::new_default(4096, 4096);

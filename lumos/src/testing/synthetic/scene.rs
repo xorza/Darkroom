@@ -126,6 +126,58 @@ impl Scene {
         }
     }
 
+    /// A centrally-concentrated field: most sources packed into a Gaussian core, the rest a
+    /// sparse halo — a crowded cluster for deblend/labeling stress. Fluxes are log-uniform in
+    /// `flux_range`; deterministic in `seed`.
+    pub fn cluster(
+        width: usize,
+        height: usize,
+        count: usize,
+        flux_range: (f32, f32),
+        background: BackgroundField,
+        seed: u64,
+    ) -> Self {
+        let (flux_min, flux_max) = flux_range;
+        assert!(flux_min > 0.0 && flux_max >= flux_min, "invalid flux range");
+        let mut rng = TestRng::new(seed);
+        let (log_min, log_max) = (flux_min.ln(), flux_max.ln());
+        let (cx, cy) = (width as f64 / 2.0, height as f64 / 2.0);
+        let core_sigma = width.min(height) as f64 * 0.12;
+        let core_count = (count as f64 * 0.8) as usize;
+        let margin = 4.0;
+
+        let mut sources = Vec::with_capacity(count);
+        for i in 0..count {
+            let pos = if i < core_count {
+                // Rejection-sample a central Gaussian back into bounds.
+                loop {
+                    let x = cx + rng.next_gaussian_f32() as f64 * core_sigma;
+                    let y = cy + rng.next_gaussian_f32() as f64 * core_sigma;
+                    if x >= margin
+                        && x < width as f64 - margin
+                        && y >= margin
+                        && y < height as f64 - margin
+                    {
+                        break DVec2::new(x, y);
+                    }
+                }
+            } else {
+                DVec2::new(
+                    margin + rng.next_f64() * (width as f64 - 2.0 * margin),
+                    margin + rng.next_f64() * (height as f64 - 2.0 * margin),
+                )
+            };
+            let flux = (log_min + rng.next_f32() * (log_max - log_min)).exp();
+            sources.push(TrueSource { pos, flux });
+        }
+        Scene {
+            width,
+            height,
+            sources,
+            background,
+        }
+    }
+
     /// True source positions as a catalog (for matching against detector output).
     pub fn positions(&self) -> Vec<DVec2> {
         self.sources.iter().map(|s| s.pos).collect()
@@ -189,5 +241,35 @@ mod tests {
         assert_eq!(scene.positions(), vec![DVec2::new(32.0, 32.0)]);
         // Empty-sky background really is empty.
         assert_eq!(pixel_stats(&scene.background.render(64, 64)).mean, 0.0);
+    }
+
+    #[test]
+    fn cluster_is_centrally_concentrated() {
+        let (w, h) = (400usize, 400usize);
+        let scene = Scene::cluster(
+            w,
+            h,
+            500,
+            (1.0, 10.0),
+            BackgroundField::Uniform { level: 0.0 },
+            7,
+        );
+        assert_eq!(scene.sources.len(), 500);
+
+        // Count sources within a central disk of radius = 12% of the field (the core σ).
+        let (cx, cy) = (w as f64 / 2.0, h as f64 / 2.0);
+        let r = w as f64 * 0.12;
+        let central = scene
+            .sources
+            .iter()
+            .filter(|s| ((s.pos.x - cx).powi(2) + (s.pos.y - cy).powi(2)).sqrt() < r)
+            .count();
+        // A uniform field would put only ~π r² / (w·h) ≈ 4.5% in that disk; clustering must
+        // pack far more (the 80% core inside ~1σ ⇒ well over a third).
+        let uniform_expectation = 500.0 * std::f64::consts::PI * r * r / (w * h) as f64;
+        assert!(
+            central as f64 > uniform_expectation * 4.0 && central > 150,
+            "central {central} vs uniform expectation {uniform_expectation:.1}"
+        );
     }
 }

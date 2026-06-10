@@ -11,7 +11,7 @@ use crate::star_detection::deblend::ComponentData;
 use crate::star_detection::deblend::local_maxima::{deblend_local_maxima, find_local_maxima};
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::test_utils::label_map_from_mask_with_connectivity;
-use crate::testing::synthetic::star_field::generate_globular_cluster;
+use crate::testing::synthetic::fixtures::cluster_field;
 use common::BitBuffer2;
 use common::Buffer2;
 use common::Vec2us;
@@ -64,7 +64,10 @@ fn create_components_from_pixels(
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_find_local_maxima_6k_dense(b: ::quickbench::Bencher) {
-    let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
+    let pixels = cluster_field(6144, 6144, 50000, 42)
+        .image
+        .channel(0)
+        .clone();
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
 
     // Find the 100 largest components for benchmarking
@@ -87,7 +90,10 @@ fn bench_find_local_maxima_6k_dense(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_deblend_local_maxima_6k_dense(b: ::quickbench::Bencher) {
-    let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
+    let pixels = cluster_field(6144, 6144, 50000, 42)
+        .image
+        .channel(0)
+        .clone();
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
 
     b.bench(|| {
@@ -105,7 +111,10 @@ fn bench_deblend_local_maxima_6k_dense(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_local_maxima_4k_dense(b: ::quickbench::Bencher) {
-    let pixels = generate_globular_cluster(4096, 4096, 20000, 42);
+    let pixels = cluster_field(4096, 4096, 20000, 42)
+        .image
+        .channel(0)
+        .clone();
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
 
     b.bench(|| {

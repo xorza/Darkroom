@@ -5,7 +5,7 @@ use crate::star_detection::config::Connectivity;
 use crate::star_detection::mask_dilation::dilate_mask;
 use crate::star_detection::threshold_mask::create_threshold_mask;
 use crate::testing::estimate_background;
-use crate::testing::synthetic::stamps::benchmark_star_field;
+use crate::testing::synthetic::fixtures::star_field;
 use ::quickbench::quick_bench;
 use common::BitBuffer2;
 use common::Buffer2;
@@ -41,7 +41,7 @@ fn create_detection_mask(pixels: &Buffer2<f32>, sigma_threshold: f32) -> BitBuff
 fn bench_label_map_from_buffer_1k(b: ::quickbench::Bencher) {
     use crate::star_detection::labeling::label_mask_parallel;
 
-    let pixels = benchmark_star_field(1024, 1024, 500, 0.1, 0.01, 42);
+    let pixels = star_field(1024, 1024, 500, 42).image.channel(0).clone();
     let mask = create_detection_mask(&pixels, 4.0);
     let mut labels = Buffer2::new_filled(1024, 1024, 0u32);
 
@@ -59,7 +59,7 @@ fn bench_label_map_from_buffer_1k(b: ::quickbench::Bencher) {
 fn bench_label_map_from_buffer_4k(b: ::quickbench::Bencher) {
     use crate::star_detection::labeling::label_mask_parallel;
 
-    let pixels = benchmark_star_field(4096, 4096, 2000, 0.1, 0.01, 42);
+    let pixels = star_field(4096, 4096, 2000, 42).image.channel(0).clone();
     let mask = create_detection_mask(&pixels, 4.0);
     let mut labels = Buffer2::new_filled(4096, 4096, 0u32);
 
@@ -77,7 +77,7 @@ fn bench_label_map_from_buffer_4k(b: ::quickbench::Bencher) {
 fn bench_label_map_from_buffer_4k_globular(b: ::quickbench::Bencher) {
     use crate::star_detection::labeling::label_mask_parallel;
 
-    let pixels = benchmark_star_field(4096, 4096, 50000, 0.1, 0.01, 42);
+    let pixels = star_field(4096, 4096, 50000, 42).image.channel(0).clone();
     let mask = create_detection_mask(&pixels, 4.0);
     let mut labels = Buffer2::new_filled(4096, 4096, 0u32);
 
@@ -127,7 +127,10 @@ fn bench_threshold_sweep() {
     ];
 
     for (width, height) in test_sizes {
-        let pixels = benchmark_star_field(width, height, width * height / 200, 0.1, 0.01, 42);
+        let pixels = star_field(width, height, width * height / 200, 42)
+            .image
+            .channel(0)
+            .clone();
         let mask = create_detection_mask(&pixels, 4.0);
         let total_pixels = width * height;
 
