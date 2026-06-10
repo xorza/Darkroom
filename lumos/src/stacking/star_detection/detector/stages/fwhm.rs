@@ -3,7 +3,7 @@
 //! Determines the effective FWHM for matched filtering by either using
 //! a manual value, auto-estimating from bright stars, or disabling.
 
-use crate::math::statistics::{mad_f32_with_scratch, mad_floored, median_f32_mut};
+use crate::core::math::statistics::{mad_f32_with_scratch, mad_floored, median_f32_mut};
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::buffer_pool::BufferPool;
 use crate::stacking::star_detection::config::Config;

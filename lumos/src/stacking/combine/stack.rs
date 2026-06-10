@@ -8,11 +8,11 @@ use std::path::Path;
 use arrayvec::ArrayVec;
 
 use crate::AstroImage;
-use crate::astro_image::cfa::CfaImage;
+use crate::io::astro_image::cfa::CfaImage;
 use common::Buffer2;
 
-use crate::math;
-use crate::math::statistics::ChannelStats;
+use crate::core::math;
+use crate::core::math::statistics::ChannelStats;
 use crate::stacking::combine::cache::{
     CfaCache, FrameStats, GeometryPlanes, LightCache, StackableImage,
 };
@@ -477,11 +477,11 @@ pub(crate) fn run_stacking_weighted(cache: &LightCache, config: &StackConfig) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::astro_image::PixelData;
+    use crate::io::astro_image::PixelData;
     use crate::stacking::combine::cache_config::CacheConfig;
     use crate::stacking::combine::rejection::Rejection;
     use crate::{
-        astro_image::{AstroImage, ImageDimensions},
+        io::astro_image::{AstroImage, ImageDimensions},
         stacking::combine::cache::tests::make_test_cache,
     };
     use std::path::PathBuf;

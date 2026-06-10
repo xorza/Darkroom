@@ -3,7 +3,7 @@
 use rayon::prelude::*;
 
 use crate::AstroImage;
-use crate::math::statistics::{mad_to_sigma, median_and_mad_f32_mut};
+use crate::core::math::statistics::{mad_to_sigma, median_and_mad_f32_mut};
 use crate::stacking::star_detection::buffer_pool::BufferPool;
 use crate::stacking::star_detection::median_filter::median_filter_3x3;
 use common::Buffer2;

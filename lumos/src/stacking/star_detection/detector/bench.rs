@@ -5,7 +5,7 @@
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::astro_image::ImageDimensions;
+use crate::io::astro_image::ImageDimensions;
 use crate::stacking::star_detection::config::{
     BackgroundRefinement, CentroidMethod, Config, Connectivity, LocalBackgroundMethod,
 };

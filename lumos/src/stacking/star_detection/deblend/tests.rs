@@ -1,7 +1,7 @@
 //! Integration tests for deblending algorithms.
 //! These tests compare behavior between local_maxima and multi_threshold.
 
-use crate::math::bbox::Aabb;
+use crate::core::math::bbox::Aabb;
 use crate::stacking::star_detection::deblend::local_maxima::deblend_local_maxima;
 use crate::stacking::star_detection::deblend::multi_threshold::{
     DeblendBuffers, deblend_multi_threshold,

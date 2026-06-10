@@ -30,7 +30,7 @@ use glam::DVec2;
 use rayon::prelude::*;
 
 use crate::ImageDimensions;
-use crate::astro_image::AstroImage;
+use crate::io::astro_image::AstroImage;
 use crate::stacking::combine::progress::report_progress;
 use crate::stacking::combine::progress::{ProgressCallback, StackingStage};
 use crate::stacking::registration::transform::Transform;

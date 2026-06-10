@@ -3,9 +3,9 @@ use std::path::Path;
 use fits_well::{FitsReader, Header, SampleType};
 use rayon::prelude::*;
 
-use crate::astro_image::cfa::CfaType;
-use crate::astro_image::error::ImageError;
-use crate::astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
+use crate::io::astro_image::cfa::CfaType;
+use crate::io::astro_image::error::ImageError;
+use crate::io::astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 
 fn fits_err(path: &Path, source: fits_well::FitsError) -> ImageError {
     ImageError::Fits {
@@ -203,7 +203,7 @@ fn normalize_fits_pixels(mut pixels: Vec<f32>, bitpix: BitPix, data_max: Option<
 /// ROWORDER: "TOP-DOWN" (default) or "BOTTOM-UP" (flips pattern vertically).
 /// XBAYROFF/YBAYROFF: integer offsets into the Bayer matrix (shifts pattern).
 fn read_cfa_from_headers(header: &Header) -> Option<CfaType> {
-    use crate::raw::demosaic::bayer::CfaPattern;
+    use crate::io::raw::demosaic::bayer::CfaPattern;
 
     let bayerpat = header.get_text("BAYERPAT")?;
     let mut pattern = CfaPattern::from_bayerpat(bayerpat)?;

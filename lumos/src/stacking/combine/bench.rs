@@ -5,7 +5,7 @@
 use quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::astro_image::{AstroImage, ImageDimensions};
+use crate::io::astro_image::{AstroImage, ImageDimensions};
 use crate::stacking::combine::cache::tests::make_test_cache;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::stack::run_stacking_weighted;

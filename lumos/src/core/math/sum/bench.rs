@@ -3,9 +3,9 @@
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::math::sum::scalar;
-use crate::math::sum::sum_f32;
-use crate::math::sum::weighted_mean_f32;
+use crate::core::math::sum::scalar;
+use crate::core::math::sum::sum_f32;
+use crate::core::math::sum::weighted_mean_f32;
 
 const BENCH_SIZE: usize = 10000;
 
@@ -39,7 +39,7 @@ fn bench_weighted_mean_f32(b: ::quickbench::Bencher) {
 
     #[cfg(target_arch = "x86_64")]
     {
-        use crate::math::sum::sse;
+        use crate::core::math::sum::sse;
         if common::cpu_features::has_sse4_1() {
             b.bench_labeled("sse", || unsafe {
                 black_box(sse::weighted_mean_f32(
@@ -49,7 +49,7 @@ fn bench_weighted_mean_f32(b: ::quickbench::Bencher) {
             });
         }
 
-        use crate::math::sum::avx2;
+        use crate::core::math::sum::avx2;
         if common::cpu_features::has_avx2() {
             b.bench_labeled("avx2", || unsafe {
                 black_box(avx2::weighted_mean_f32(

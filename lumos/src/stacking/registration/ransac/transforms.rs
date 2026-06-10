@@ -6,7 +6,7 @@
 use glam::DVec2;
 use nalgebra::{DMatrix, SVD};
 
-use crate::math::dmat3::DMat3;
+use crate::core::math::dmat3::DMat3;
 use crate::stacking::registration::transform::{Transform, TransformType};
 
 /// Compute adaptive iteration count for early termination.

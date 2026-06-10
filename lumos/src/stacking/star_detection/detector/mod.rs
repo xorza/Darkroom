@@ -10,9 +10,9 @@ mod bench;
 
 use serde::{Deserialize, Serialize};
 
-use crate::astro_image::AstroImage;
+use crate::io::astro_image::AstroImage;
 
-use crate::math::statistics::median_f32_mut;
+use crate::core::math::statistics::median_f32_mut;
 use crate::stacking::star_detection::background::{estimate_background, refine_background};
 use crate::stacking::star_detection::buffer_pool::BufferPool;
 use crate::stacking::star_detection::config::Config;

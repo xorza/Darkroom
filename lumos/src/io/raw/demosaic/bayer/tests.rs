@@ -1,7 +1,7 @@
 //! Tests for Bayer CFA types and RCD demosaicing.
 
-use crate::raw::demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
-use crate::raw::demosaic::interleave_planes;
+use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
+use crate::io::raw::demosaic::interleave_planes;
 
 // ── CFA pattern tests ────────────────────────────────────────
 

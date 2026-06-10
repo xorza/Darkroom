@@ -18,8 +18,8 @@
 use common::{Buffer2, Vec2us};
 use rayon::prelude::*;
 
-use crate::astro_image::cfa::{CfaImage, CfaType};
-use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_mut};
+use crate::core::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_mut};
+use crate::io::astro_image::cfa::{CfaImage, CfaType};
 
 /// `F` is floored to this (in normalized pixel units) so the CR-to-fine-structure contrast test
 /// `L⁺ > objlim·F` stays well-defined where the object fine structure is ~0 (i.e. at a CR).
@@ -597,9 +597,9 @@ fn xtrans_replace(data: &mut Buffer2<f32>, cfa: &CfaType, mask: &[bool]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::astro_image::AstroImageMetadata;
-    use crate::astro_image::cfa::CfaType;
-    use crate::raw::demosaic::bayer::CfaPattern;
+    use crate::io::astro_image::AstroImageMetadata;
+    use crate::io::astro_image::cfa::CfaType;
+    use crate::io::raw::demosaic::bayer::CfaPattern;
     use crate::testing::TestRng;
 
     /// Add a round Gaussian source (peak above the existing background) at `(cx, cy)`.

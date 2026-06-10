@@ -562,7 +562,7 @@ fn test_warp_rgb() {
 
 #[test]
 fn test_warp_preserves_output_metadata() {
-    use crate::astro_image::AstroImageMetadata;
+    use crate::io::astro_image::AstroImageMetadata;
     use crate::stacking::registration::config::Config as RegConfig;
 
     let pixels = star_field(256, 256, 30, 11111).image.channel(0).clone();

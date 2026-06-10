@@ -16,8 +16,8 @@ use std::path::Path;
 use common::Buffer2;
 use common::Vec2us;
 
-use crate::math::sum::sum_f32;
-use crate::raw::load_raw;
+use crate::core::math::sum::sum_f32;
+use crate::io::raw::load_raw;
 use crate::stacking::combine::cache::StackableImage;
 use crate::stacking::combine::error::Error;
 

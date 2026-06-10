@@ -10,7 +10,7 @@
 //!
 //! Reference: Frank Markesteijn's algorithm as implemented in dcraw/libraw.
 
-use crate::raw::demosaic::xtrans::XTransPattern;
+use crate::io::raw::demosaic::xtrans::XTransPattern;
 
 /// Number of hex neighbor entries per pattern position.
 const HEX_ENTRIES: usize = 8;

@@ -23,8 +23,8 @@ mod tests;
 use arrayvec::ArrayVec;
 use glam::Vec2;
 
-use crate::math::statistics::{ClippedStats, sigma_clipped_median_mad_arrayvec};
-use crate::math::{FWHM_TO_SIGMA, sigma_to_fwhm};
+use crate::core::math::statistics::{ClippedStats, sigma_clipped_median_mad_arrayvec};
+use crate::core::math::{FWHM_TO_SIGMA, sigma_to_fwhm};
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::config::{CentroidMethod, Config, LocalBackgroundMethod};
 use crate::stacking::star_detection::deblend::region::Region;

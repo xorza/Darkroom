@@ -5,7 +5,7 @@
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::math::bbox::Aabb;
+use crate::core::math::bbox::Aabb;
 use crate::stacking::star_detection::config::Connectivity;
 use crate::stacking::star_detection::deblend::ComponentData;
 use crate::stacking::star_detection::deblend::local_maxima::{

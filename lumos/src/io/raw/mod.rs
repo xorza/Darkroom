@@ -12,13 +12,13 @@ use std::path::{Path, PathBuf};
 use std::slice;
 use std::time::Instant;
 
-use crate::astro_image::error::ImageError;
+use crate::io::astro_image::error::ImageError;
 
 use rayon::prelude::*;
 
-use crate::astro_image::cfa::{CfaImage, CfaType};
-use crate::astro_image::sensor::{SensorType, detect_sensor_type};
-use crate::astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
+use crate::io::astro_image::cfa::{CfaImage, CfaType};
+use crate::io::astro_image::sensor::{SensorType, detect_sensor_type};
+use crate::io::astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 use common::Buffer2;
 use demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
 use demosaic::xtrans::process_xtrans;

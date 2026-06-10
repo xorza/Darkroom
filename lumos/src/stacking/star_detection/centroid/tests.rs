@@ -3,8 +3,8 @@
 use glam::Vec2;
 
 use super::*;
-use crate::math::FWHM_TO_SIGMA;
-use crate::math::bbox::Aabb;
+use crate::core::math::FWHM_TO_SIGMA;
+use crate::core::math::bbox::Aabb;
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::centroid::compute_roundness;
 use crate::stacking::star_detection::centroid::moffat_fit::alpha_beta_to_fwhm;

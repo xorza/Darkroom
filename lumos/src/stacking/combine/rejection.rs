@@ -7,8 +7,8 @@
 //! - Percentile clipping
 //! - Generalized Extreme Studentized Deviate (GESD)
 
-use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_fast};
-use crate::math::sum::{mean_f32, weighted_mean_f32};
+use crate::core::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_fast};
+use crate::core::math::sum::{mean_f32, weighted_mean_f32};
 use crate::stacking::combine::cache::ScratchBuffers;
 
 /// Configuration for sigma clipping.
@@ -1011,7 +1011,7 @@ fn weighted_mean_indexed(
 
 #[cfg(test)]
 mod tests {
-    use crate::math::sum::mean_f32;
+    use crate::core::math::sum::mean_f32;
 
     use super::*;
 
@@ -1165,7 +1165,9 @@ mod tests {
 
         assert_eq!(r1, r2);
         assert!(
-            (crate::math::sum::mean_f32(&v1[..r1]) - crate::math::sum::mean_f32(&v2[..r2])).abs()
+            (crate::core::math::sum::mean_f32(&v1[..r1])
+                - crate::core::math::sum::mean_f32(&v2[..r2]))
+            .abs()
                 < 1e-6,
         );
     }
@@ -1203,7 +1205,7 @@ mod tests {
         let mut values = vec![5.0, 5.0, 5.0, 5.0, 5.0];
         let remaining = LinearFitClipConfig::default().reject(&mut values, &mut scratch());
         assert_eq!(remaining, 5);
-        assert!((crate::math::sum::mean_f32(&values[..remaining]) - 5.0).abs() < 0.01);
+        assert!((crate::core::math::sum::mean_f32(&values[..remaining]) - 5.0).abs() < 0.01);
     }
 
     #[test]
@@ -1211,7 +1213,7 @@ mod tests {
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 100.0, 6.0];
         let remaining = LinearFitClipConfig::new(2.0, 2.0, 3).reject(&mut values, &mut scratch());
         assert!(remaining < 6);
-        assert!(crate::math::sum::mean_f32(&values[..remaining]) < 20.0);
+        assert!(crate::core::math::sum::mean_f32(&values[..remaining]) < 20.0);
     }
 
     #[test]
@@ -1267,7 +1269,7 @@ mod tests {
         let remaining = PercentileClipConfig::new(20.0, 20.0).reject(&mut values, &mut scratch());
         assert_eq!(remaining, 6);
         // Mean of [3, 4, 5, 6, 7, 8] = 5.5
-        assert!((crate::math::sum::mean_f32(&values[..remaining]) - 5.5).abs() < 0.01);
+        assert!((crate::core::math::sum::mean_f32(&values[..remaining]) - 5.5).abs() < 0.01);
     }
 
     #[test]

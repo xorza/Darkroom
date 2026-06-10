@@ -2,7 +2,7 @@
 
 use glam::DVec2;
 
-use crate::math::dmat3::DMat3;
+use crate::core::math::dmat3::DMat3;
 use crate::stacking::registration::distortion::sip::SipPolynomial;
 
 /// Supported transformation models with increasing degrees of freedom.

@@ -5,8 +5,8 @@
 //! `[0,1]` normalization, and NaN/Inf sanitization. The demosaic path is exercised by building a
 //! Bayer mosaic from a known colour and demosaicing it back.
 
-use crate::astro_image::fits::load_fits;
-use crate::raw::demosaic::bayer::CfaPattern;
+use crate::io::astro_image::fits::load_fits;
+use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::testing::make_cfa;
 use crate::{AstroImage, CfaType};
 use fits_well::{FitsWriter, Image, ImageData, Scaling};

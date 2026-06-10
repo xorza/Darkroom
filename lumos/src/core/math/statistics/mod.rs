@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::math::sum::mean_f32;
+use crate::core::math::sum::mean_f32;
 
 /// Per-channel robust statistics (median and MAD).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

@@ -61,7 +61,7 @@ use std::time::Instant;
 use glam::DVec2;
 
 use crate::AstroImage;
-use crate::astro_image::PixelData;
+use crate::io::astro_image::PixelData;
 use crate::stacking::star_detection::star::Star;
 use common::Buffer2;
 use distortion::sip::SipConfig;

@@ -2,7 +2,7 @@
 
 use std::arch::aarch64::*;
 
-use crate::math::sum::scalar::neumaier_add;
+use crate::core::math::sum::scalar::neumaier_add;
 
 /// Sum f32 values using NEON SIMD with Kahan compensated summation.
 ///

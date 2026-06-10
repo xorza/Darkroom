@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::{
-    math::FWHM_TO_SIGMA, stacking::star_detection::convolution::elliptical_gaussian_kernel_2d,
+    core::math::FWHM_TO_SIGMA, stacking::star_detection::convolution::elliptical_gaussian_kernel_2d,
 };
 use common::Buffer2;
 

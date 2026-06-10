@@ -21,7 +21,7 @@ mod simd_avx2;
 #[cfg(target_arch = "aarch64")]
 mod simd_neon;
 
-use crate::math::FWHM_TO_SIGMA;
+use crate::core::math::FWHM_TO_SIGMA;
 use crate::stacking::star_detection::centroid::lm_optimizer::{LMConfig, LMModel, optimize};
 use crate::stacking::star_detection::centroid::{
     FitNoise, MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp, fit_weights,

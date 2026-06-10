@@ -2,8 +2,8 @@
 
 use std::time::Instant;
 
-use crate::astro_image::cfa::CfaImage;
-use crate::raw::load_raw_cfa;
+use crate::io::astro_image::cfa::CfaImage;
+use crate::io::raw::load_raw_cfa;
 use crate::stacking::combine::cache::CfaCache;
 use crate::stacking::combine::stack::run_stacking;
 use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};

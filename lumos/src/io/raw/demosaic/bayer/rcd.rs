@@ -9,7 +9,7 @@
 
 use rayon::prelude::*;
 
-use crate::raw::{
+use crate::io::raw::{
     alloc_uninit_vec,
     demosaic::bayer::{BayerImage, CfaPattern},
 };

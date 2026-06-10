@@ -6,9 +6,9 @@
 
 use rayon::prelude::*;
 
-use crate::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
-use crate::raw::demosaic::bayer::CfaPattern;
-use crate::raw::load_raw_cfa;
+use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
+use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::raw::load_raw_cfa;
 use crate::stacking::combine::cache::StackableImage;
 use crate::stacking::combine::error::Error;
 use common::Buffer2;
@@ -115,7 +115,7 @@ impl CfaImage {
                 astro
             }
             CfaType::Bayer(cfa_pattern) => {
-                use crate::raw::demosaic::bayer::{BayerImage, demosaic_bayer};
+                use crate::io::raw::demosaic::bayer::{BayerImage, demosaic_bayer};
 
                 let bayer = BayerImage::with_margins(
                     &pixels,
@@ -134,7 +134,7 @@ impl CfaImage {
                 astro
             }
             CfaType::XTrans(pattern) => {
-                use crate::raw::demosaic::xtrans::process_xtrans_f32;
+                use crate::io::raw::demosaic::xtrans::process_xtrans_f32;
 
                 let planes =
                     process_xtrans_f32(&pixels, width, height, width, height, 0, 0, *pattern);

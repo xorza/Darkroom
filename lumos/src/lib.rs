@@ -22,20 +22,18 @@
 //! println!("Found {} stars", result.stars.len());
 //! ```
 
-mod astro_image;
-pub(crate) mod common;
-pub(crate) mod math;
-pub(crate) mod raw;
+pub(crate) mod core;
+pub(crate) mod io;
 pub(crate) mod stacking;
 
 #[cfg(test)]
 pub mod testing;
 
-pub use astro_image::cfa::{CfaImage, CfaType};
-pub use astro_image::error::ImageError;
-pub use astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
-pub use raw::demosaic::bayer::CfaPattern;
-pub use raw::{load_raw, load_raw_cfa};
+pub use io::astro_image::cfa::{CfaImage, CfaType};
+pub use io::astro_image::error::ImageError;
+pub use io::astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
+pub use io::raw::demosaic::bayer::CfaPattern;
+pub use io::raw::{load_raw, load_raw_cfa};
 pub use stacking::calibration_masters::cosmic_ray::{CosmicRayConfig, NoiseEstimation};
 pub use stacking::calibration_masters::defect_map::DefectMap;
 

@@ -5,12 +5,12 @@
 
 use rayon::prelude::*;
 
-use crate::raw::alloc_uninit_vec;
-use crate::raw::demosaic::xtrans::hex_lookup::HexLookup;
-use crate::raw::demosaic::xtrans::markesteijn::NDIR;
-use crate::raw::demosaic::xtrans::{XTransImage, XTransPattern};
+use crate::io::raw::alloc_uninit_vec;
+use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
+use crate::io::raw::demosaic::xtrans::markesteijn::NDIR;
+use crate::io::raw::demosaic::xtrans::{XTransImage, XTransPattern};
 
-use crate::common::UnsafeSendPtr;
+use crate::core::common::UnsafeSendPtr;
 
 /// Direction offsets for derivative computation.
 /// Maps direction index to (dy, dx) offset for the spatial Laplacian.
@@ -977,9 +977,9 @@ pub(crate) fn blend_final(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::raw::demosaic::interleave_planes;
-    use crate::raw::demosaic::xtrans::hex_lookup::HexLookup;
-    use crate::raw::demosaic::xtrans::{XTransImage, XTransPattern};
+    use crate::io::raw::demosaic::interleave_planes;
+    use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
+    use crate::io::raw::demosaic::xtrans::{XTransImage, XTransPattern};
 
     fn test_pattern() -> XTransPattern {
         XTransPattern::new([

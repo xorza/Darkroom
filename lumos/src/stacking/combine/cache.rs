@@ -32,9 +32,9 @@ use common::parallel::try_par_map_limited;
 use memmap2::Mmap;
 use rayon::prelude::*;
 
-use crate::astro_image::cfa::CfaImage;
-use crate::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
-use crate::math::statistics::{ChannelStats, mad_f32_with_scratch, median_f32_mut};
+use crate::core::math::statistics::{ChannelStats, mad_f32_with_scratch, median_f32_mut};
+use crate::io::astro_image::cfa::CfaImage;
+use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
 use crate::stacking::combine::cache_config::{
     CacheConfig, MEMORY_PERCENT, compute_optimal_chunk_rows_with_memory,
 };
@@ -1172,8 +1172,8 @@ fn cache_image_channels(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::astro_image::AstroImage;
-    use crate::astro_image::cfa::CfaType;
+    use crate::io::astro_image::AstroImage;
+    use crate::io::astro_image::cfa::CfaType;
 
     /// Create an in-memory [`LightCache`] from loaded images, with no coverage (test helper).
     pub(crate) fn make_test_cache(images: Vec<AstroImage>) -> LightCache {

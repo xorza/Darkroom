@@ -10,7 +10,7 @@ mod tests;
 
 use std::path::Path;
 
-use crate::astro_image::cfa::CfaImage;
+use crate::io::astro_image::cfa::CfaImage;
 use crate::stacking::combine::cache::CfaCache;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;

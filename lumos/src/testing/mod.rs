@@ -55,8 +55,8 @@ impl TestRng {
 use std::path::PathBuf;
 
 use crate::AstroImage;
-use crate::astro_image::AstroImageMetadata;
-use crate::astro_image::cfa::{CfaImage, CfaType};
+use crate::io::astro_image::AstroImageMetadata;
+use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::buffer_pool::BufferPool;
 use crate::stacking::star_detection::config::Config;

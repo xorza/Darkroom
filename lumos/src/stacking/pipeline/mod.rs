@@ -14,9 +14,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::Buffer2;
 
-use crate::astro_image::AstroImage;
-use crate::astro_image::error::ImageError;
-use crate::raw::load_raw_cfa;
+use crate::io::astro_image::AstroImage;
+use crate::io::astro_image::error::ImageError;
+use crate::io::raw::load_raw_cfa;
 use crate::stacking::calibration_masters::CalibrationMasters;
 use crate::stacking::calibration_masters::cosmic_ray::{CosmicRayConfig, reject_cosmic_rays};
 use crate::stacking::combine::config::StackConfig;

@@ -1,6 +1,6 @@
 use rayon::prelude::*;
 
-use crate::raw::alloc_uninit_vec;
+use crate::io::raw::alloc_uninit_vec;
 
 /// Light-frame normalization: `clamp((value - black).max(0) * inv_range, 0, 1)`.
 /// The `[0, 1]` clamp is the display / demosaic contract for light frames.

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::astro_image::ImageDimensions;
+use crate::io::astro_image::ImageDimensions;
 
 /// Errors that can occur during drizzle stacking.
 #[derive(Debug, Error)]

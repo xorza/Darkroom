@@ -37,8 +37,8 @@
 //! local neighbours* — a reference that tracks vignetting (smooth, locally flat) and ignores dust
 //! shadows (which dim by far less than half), so only genuinely near-zero pixels are caught.
 
-use crate::astro_image::cfa::{CfaImage, CfaType};
-use crate::math::statistics::median_f32_mut;
+use crate::core::math::statistics::median_f32_mut;
+use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use common::BitBuffer2;
 use common::Buffer2;
 use common::Vec2us;
@@ -155,7 +155,7 @@ impl DefectMap {
 /// Maximum number of samples per color channel for median estimation.
 const MAX_MEDIAN_SAMPLES: usize = 100_000;
 
-use crate::math::statistics::MAD_TO_SIGMA;
+use crate::core::math::statistics::MAD_TO_SIGMA;
 
 /// Get CFA color index at (x, y). Returns 0 for Mono (None CFA type).
 fn cfa_color_at(cfa_type: Option<&CfaType>, x: usize, y: usize) -> u8 {
@@ -481,7 +481,7 @@ impl DefectMap {
 #[cfg(test)]
 mod bench {
     use super::*;
-    use crate::raw::demosaic::bayer::CfaPattern;
+    use crate::io::raw::demosaic::bayer::CfaPattern;
     use ::quickbench::quick_bench;
 
     #[quick_bench(warmup_iters = 3, iters = 20)]
@@ -502,7 +502,7 @@ mod bench {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{raw::demosaic::bayer::CfaPattern, testing::make_cfa};
+    use crate::{io::raw::demosaic::bayer::CfaPattern, testing::make_cfa};
 
     fn is_hot(defect_map: &DefectMap, pixel_idx: usize) -> bool {
         defect_map.hot_indices.binary_search(&pixel_idx).is_ok()

@@ -8,7 +8,7 @@ mod bench;
 #[cfg(test)]
 mod tests;
 
-use crate::common::UnsafeSendPtr;
+use crate::core::common::UnsafeSendPtr;
 use common::BitBuffer2;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
