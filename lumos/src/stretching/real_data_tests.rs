@@ -2,11 +2,8 @@
 //! write viewable JPEGs for visual inspection. Gated behind the `real-data` feature (the dataset
 //! lives in `test_data/lumos_data/`).
 
-use common::test_utils::test_output_path;
-use imaginarium::{ColorFormat, Image};
-
 use crate::math::statistics::median_f32_mut;
-use crate::testing::{calibration_dir, init_tracing};
+use crate::testing::{calibration_dir, init_tracing, save_jpg};
 use crate::{AstroImage, StretchConfig, stretch};
 
 #[derive(Debug)]
@@ -80,14 +77,6 @@ fn stretch_stacked_light() {
             "{name} spreads contrast across the range: {out:?}"
         );
 
-        let out_path = test_output_path(&format!("stretch/stacked_light_{name}.jpg"));
-        std::fs::create_dir_all(out_path.parent().unwrap()).expect("create test_output/stretch");
-        // JPEG needs 8-bit; convert the [0,1] float result to RGB_U8 for a viewable file.
-        Image::from(&stretched)
-            .convert(ColorFormat::RGB_U8)
-            .expect("convert to RGB_U8")
-            .save_file(&out_path)
-            .expect("save stretched jpg");
-        eprintln!("{name}: wrote {}", out_path.display());
+        save_jpg(&stretched, &format!("stretch/stacked_light_{name}.jpg"));
     }
 }

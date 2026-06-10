@@ -3,23 +3,10 @@
 //! green cast can be seen disappearing. Gated behind the `real-data` feature.
 
 use common::Rgb;
-use common::test_utils::test_output_path;
-use imaginarium::{ColorFormat, Image};
 
 use crate::color_calibration::{ScnrMethod, channel_backgrounds, neutralize_background, scnr};
-use crate::testing::{calibration_dir, init_tracing};
+use crate::testing::{calibration_dir, init_tracing, save_jpg};
 use crate::{AstroImage, StretchConfig, stretch};
-
-fn save_jpg(image: &AstroImage, name: &str) {
-    let path = test_output_path(name);
-    std::fs::create_dir_all(path.parent().unwrap()).expect("create test_output dir");
-    Image::from(image)
-        .convert(ColorFormat::RGB_U8)
-        .expect("convert to RGB_U8")
-        .save_file(&path)
-        .expect("save jpg");
-    eprintln!("wrote {}", path.display());
-}
 
 fn spread(bg: Rgb) -> f32 {
     bg.r.max(bg.g).max(bg.b) - bg.r.min(bg.g).min(bg.b)
