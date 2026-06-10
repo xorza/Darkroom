@@ -74,7 +74,7 @@ fn mtf_self_inverse_identity() {
 #[test]
 fn asinh_endpoints_and_monotonic() {
     for &beta in &[0.01f32, 0.1, 1.0, 10.0] {
-        let c = Curve::asinh(beta);
+        let c = AsinhCurve::new(beta);
         assert!(c.eval(0.0).abs() < 1e-7, "f(0) = 0 (beta={beta})");
         assert!((c.eval(1.0) - 1.0).abs() < 1e-6, "f(1) = 1 (beta={beta})");
         let mut prev = f32::NEG_INFINITY;
@@ -92,26 +92,26 @@ fn asinh_endpoints_and_monotonic() {
 #[test]
 fn asinh_beta_controls_strength() {
     // Smaller beta = stronger stretch: a faint value is lifted higher.
-    let aggressive = Curve::asinh(0.01).eval(0.05);
-    let gentle = Curve::asinh(1.0).eval(0.05);
+    let aggressive = AsinhCurve::new(0.01).eval(0.05);
+    let gentle = AsinhCurve::new(1.0).eval(0.05);
     assert!(
         aggressive > gentle,
         "smaller beta lifts faint signal more ({aggressive} vs {gentle})"
     );
     // Large beta approaches the identity.
     assert!(
-        (Curve::asinh(1000.0).eval(0.5) - 0.5).abs() < 1e-2,
+        (AsinhCurve::new(1000.0).eval(0.5) - 0.5).abs() < 1e-2,
         "large beta ~ identity"
     );
     // Hand-computed: beta=0.01, f(0.1) = asinh(10)/asinh(100) = 2.99822/5.29842 = 0.56587.
-    assert!((Curve::asinh(0.01).eval(0.1) - 0.56587).abs() < 2e-3);
+    assert!((AsinhCurve::new(0.01).eval(0.1) - 0.56587).abs() < 2e-3);
 }
 
 #[test]
 fn solve_beta_hits_target_background() {
     for &(median, target) in &[(0.05f32, 0.2f32), (0.1, 0.25), (0.02, 0.15)] {
         let beta = solve_asinh_beta(median, target);
-        let got = Curve::asinh(beta).eval(median);
+        let got = AsinhCurve::new(beta).eval(median);
         assert!(
             (got - target).abs() < 2e-3,
             "median {median} -> {got}, want {target}"
@@ -128,21 +128,18 @@ fn stf_params_hand_computed() {
     //   rescaled median = (0.1-0.08)/(1-0.08) = 0.0217391
     //   midtones = MTF(0.25, 0.0217391) = 0.0625
     //   eval(0.1) = MTF(0.0625, 0.0217391) = 0.25   (self-inverse: median maps to target)
-    let c = Curve::stf(0.1, 0.02, 1.0, 0.25);
-    let Curve::Stf {
-        black,
-        inv_range,
-        midtones,
-    } = c
-    else {
-        panic!("expected Stf");
-    };
-    assert!((black - 0.08).abs() < 1e-6, "black = {black}");
+    let c = StfCurve::new(0.1, 0.02, 1.0, 0.25);
+    assert!((c.black - 0.08).abs() < 1e-6, "black = {}", c.black);
     assert!(
-        (inv_range - 1.0 / 0.92).abs() < 1e-5,
-        "inv_range = {inv_range}"
+        (c.inv_range - 1.0 / 0.92).abs() < 1e-5,
+        "inv_range = {}",
+        c.inv_range
     );
-    assert!((midtones - 0.0625).abs() < 1e-5, "midtones = {midtones}");
+    assert!(
+        (c.midtones - 0.0625).abs() < 1e-5,
+        "midtones = {}",
+        c.midtones
+    );
     assert!(
         (c.eval(0.1) - 0.25).abs() < 1e-5,
         "median maps to target background"
@@ -151,12 +148,8 @@ fn stf_params_hand_computed() {
 
 #[test]
 fn stf_shadow_sigmas_lower_the_black_point() {
-    let Curve::Stf { black: b1, .. } = Curve::stf(0.1, 0.02, 1.0, 0.25) else {
-        panic!()
-    };
-    let Curve::Stf { black: b3, .. } = Curve::stf(0.1, 0.02, 3.0, 0.25) else {
-        panic!()
-    };
+    let b1 = StfCurve::new(0.1, 0.02, 1.0, 0.25).black;
+    let b3 = StfCurve::new(0.1, 0.02, 3.0, 0.25).black;
     assert!((b1 - 0.08).abs() < 1e-6);
     assert!((b3 - 0.04).abs() < 1e-6);
     assert!(b3 < b1, "more shadow sigmas => lower black point");
@@ -172,7 +165,7 @@ fn color_preserving_keeps_channel_ratio_and_caps_highlights() {
         method: StretchMethod::Asinh { beta: 0.05 },
         color: ColorMode::ColorPreserving,
     };
-    stretch(&mut img, &cfg);
+    stretch(&mut img, cfg);
     let r = img.channel(0).to_vec();
     let g = img.channel(1).to_vec();
     let b = img.channel(2).to_vec();
@@ -204,10 +197,10 @@ fn per_channel_neutralizes_color_preserving_keeps_it() {
     let mut linked = rgb(5, 1, r.clone(), g.clone(), b.clone());
     let mut unlinked = rgb(5, 1, r, g, b);
 
-    stretch(&mut linked, &StretchConfig::auto_stf());
+    stretch(&mut linked, StretchConfig::auto_stf());
     stretch(
         &mut unlinked,
-        &StretchConfig {
+        StretchConfig {
             method: StretchMethod::AutoStf {
                 shadow_sigmas: 1.0,
                 target_background: 0.25,
@@ -249,7 +242,7 @@ fn end_to_end_gray_auto_stf_brightens_background_to_target() {
     let input_median = median_of(&px);
 
     let mut img = gray(10, 10, px);
-    stretch(&mut img, &StretchConfig::auto_stf());
+    stretch(&mut img, StretchConfig::auto_stf());
     let out = img.channel(0).to_vec();
 
     for &v in &out {

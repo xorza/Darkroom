@@ -60,7 +60,7 @@ fn stretch_stacked_light() {
         ("asinh", StretchConfig::auto_asinh()),
     ] {
         let mut stretched = image.clone();
-        stretch(&mut stretched, &config);
+        stretch(&mut stretched, config);
 
         let out = stats(stretched.intensity_plane().pixels());
         eprintln!("{name}: {out:?}");
