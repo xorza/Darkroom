@@ -106,18 +106,31 @@ fn test_gaussian_filter_sparse() {
 
     let mean_star_response: f32 =
         star_responses.iter().sum::<f32>() / star_responses.len().max(1) as f32;
-    let mean_bg_response: f32 = filtered.iter().sum::<f32>() / filtered.len() as f32;
 
-    println!("Mean star response: {:.6}", mean_star_response);
-    println!("Mean background response: {:.6}", mean_bg_response);
+    // Robust noise floor of the filtered image: stars are sparse, so the median and MAD
+    // describe the star-free background (not the near-tautological whole-image mean).
+    let (median, robust_sigma) = robust_floor(filtered.pixels());
+    let min_star_response = star_responses.iter().cloned().fold(f32::INFINITY, f32::min);
 
-    // Stars should have significantly higher response
+    println!("Mean star response: {mean_star_response:.6}");
+    println!("Filtered floor: median {median:.6}, sigma {robust_sigma:.6}");
+
+    // Matched filtering must lift every detected star far above the noise floor.
     assert!(
-        mean_star_response > mean_bg_response * 3.0,
-        "Star response {:.6} should be much higher than background {:.6}",
-        mean_star_response,
-        mean_bg_response
+        min_star_response > median + 5.0 * robust_sigma,
+        "faintest star response {min_star_response:.6} should clear floor {median:.6} + 5σ ({:.6})",
+        5.0 * robust_sigma
     );
+}
+
+/// Median and MAD-derived σ of a slice (robust background statistics).
+fn robust_floor(pixels: &[f32]) -> (f32, f32) {
+    let mut sorted: Vec<f32> = pixels.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let median = sorted[sorted.len() / 2];
+    let mut dev: Vec<f32> = sorted.iter().map(|&v| (v - median).abs()).collect();
+    dev.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    (median, dev[dev.len() / 2] * 1.4826)
 }
 
 /// Test Gaussian filter with different FWHM values.
@@ -161,30 +174,37 @@ fn test_gaussian_filter_fwhm_range() {
         .map(|(&p, &bg)| (p - bg).max(0.0))
         .collect();
 
-    // Test with different kernel sizes
-    for target_fwhm in [2.5, 4.0, 5.5] {
+    // The matched-filter property: a Gaussian kernel matched to the source FWHM (the Scenario
+    // default, 4.0) maximises detection *SNR* — not raw peak response, which rises monotonically
+    // for narrower kernels. SNR = mean star response above the filtered noise floor, in σ.
+    let snr = |target_fwhm: f32| -> f32 {
         let sigma = fwhm_to_sigma(target_fwhm);
-        let bg_subtracted_buf = Buffer2::new(width, height, bg_subtracted.clone());
+        let bg_buf = Buffer2::new(width, height, bg_subtracted.clone());
         let mut filtered = Buffer2::new_default(width, height);
         let mut temp = Buffer2::new_default(width, height);
-        gaussian_convolve(&bg_subtracted_buf, sigma, &mut filtered, &mut temp);
-        let filtered_display = normalize_for_display(filtered.pixels());
+        gaussian_convolve(&bg_buf, sigma, &mut filtered, &mut temp);
+        let responses: Vec<f32> = ground_truth
+            .iter()
+            .filter_map(|s| {
+                let (x, y) = (s.pos.x.round() as usize, s.pos.y.round() as usize);
+                (x > 10 && x < width - 10 && y > 10 && y < height - 10)
+                    .then(|| filtered[y * width + x])
+            })
+            .collect();
+        let mean_resp = responses.iter().sum::<f32>() / responses.len() as f32;
+        let (median, robust_sigma) = robust_floor(filtered.pixels());
+        (mean_resp - median) / robust_sigma
+    };
 
-        save_grayscale(
-            &filtered_display,
-            width,
-            height,
-            &test_output_path(&format!(
-                "synthetic_starfield/stage_conv_fwhm_range_filtered_{:.1}.png",
-                target_fwhm
-            )),
-        );
+    let narrow = snr(2.5);
+    let matched = snr(4.0);
+    let wide = snr(5.5);
+    println!("matched-filter SNR — narrow {narrow:.2}, matched {matched:.2}, wide {wide:.2}");
 
-        println!("FWHM={:.1}: sigma={:.2}", target_fwhm, sigma);
-    }
-
-    println!("Ground truth FWHM range: {:.1} - {:.1}", 2.0, 6.0);
-    println!("Generated {} stars", ground_truth.len());
+    assert!(
+        matched > narrow && matched > wide,
+        "kernel matched to source FWHM should maximise SNR: narrow {narrow:.2}, matched {matched:.2}, wide {wide:.2}"
+    );
 }
 
 /// Test Gaussian filter noise rejection.
@@ -268,24 +288,14 @@ fn test_gaussian_filter_noise() {
     let mean_star_response: f32 =
         star_responses.iter().sum::<f32>() / star_responses.len().max(1) as f32;
 
-    // Compute noise level in filtered image
-    let sorted: Vec<f32> = {
-        let mut v = filtered.into_vec();
-        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        v
-    };
-    let median = sorted[sorted.len() / 2];
-    let mad: f32 = sorted.iter().map(|&v| (v - median).abs()).sum::<f32>() / sorted.len() as f32;
-
-    println!("Mean star response: {:.6}", mean_star_response);
-    println!("Filtered image median: {:.6}", median);
-    println!("Filtered image MAD: {:.6}", mad);
-    println!("SNR estimate: {:.1}", mean_star_response / mad);
-
-    // Even with high noise, stars should be detectable (SNR > 3)
-    assert!(
-        mean_star_response > mad * 3.0,
-        "Star SNR {:.1} should be > 3",
-        mean_star_response / mad
+    // Robust noise of the filtered image: true MAD-derived σ (not the mean-abs-dev this used
+    // to mislabel as MAD).
+    let (median, robust_sigma) = robust_floor(filtered.pixels());
+    let snr = (mean_star_response - median) / robust_sigma;
+    println!(
+        "Mean star response {mean_star_response:.6}, floor {median:.6} ± {robust_sigma:.6}, SNR {snr:.1}"
     );
+
+    // Even with a shallow well + high read noise, matched-filtered stars stay detectable.
+    assert!(snr > 3.0, "filtered star SNR {snr:.1} should exceed 3");
 }

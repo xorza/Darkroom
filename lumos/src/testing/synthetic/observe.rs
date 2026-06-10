@@ -347,4 +347,119 @@ mod tests {
         // Dead pixel forced low (applied after bias).
         assert_eq!(px[5 * 32 + 5], 0.0);
     }
+
+    #[test]
+    fn saturation_clamps_bright_source() {
+        // A flux-20 source at fwhm 3 has a clean peak ~2.0; the well clips it at `saturation`.
+        let scene = Scene::single(
+            64,
+            64,
+            DVec2::new(32.0, 32.0),
+            20.0,
+            BackgroundField::Uniform { level: 0.1 },
+        );
+        let camera = Camera {
+            saturation: 0.8,
+            ..Camera::ideal(3.0)
+        };
+        let frame = render(&scene, &camera, &Observation::reference(1));
+        let px = frame.image.channel(0).pixels();
+        let max = px.iter().copied().fold(0.0f32, f32::max);
+        assert!(
+            (max - 0.8).abs() < 1e-6,
+            "saturation must clamp the peak to 0.8, got {max}"
+        );
+        assert!(
+            px.iter().all(|&p| p <= 0.8 + 1e-6),
+            "no pixel may exceed the saturation level"
+        );
+        // Truth keeps the unclamped clean signal (peak well above the clip).
+        let clean_max = frame
+            .truth
+            .clean
+            .pixels()
+            .iter()
+            .copied()
+            .fold(0.0f32, f32::max);
+        assert!(
+            clean_max > 1.0,
+            "clean truth peak {clean_max} should be unclamped"
+        );
+    }
+
+    #[test]
+    fn bad_columns_raise_their_column() {
+        let scene = Scene {
+            width: 32,
+            height: 32,
+            sources: vec![],
+            background: BackgroundField::Uniform { level: 0.1 },
+        };
+        let camera = Camera {
+            bias: BiasField {
+                offset: 0.0,
+                bad_columns: vec![(7, 0.2)],
+            },
+            ..Camera::ideal(3.0)
+        };
+        let frame = render(&scene, &camera, &Observation::reference(1));
+        let px = frame.image.channel(0).pixels();
+        // Column 7 sits 0.2 above the 0.1 sky; its neighbour stays at sky level.
+        for y in 0..32 {
+            assert!(
+                (px[y * 32 + 7] - 0.3).abs() < 1e-6,
+                "bad column y={y}: {}",
+                px[y * 32 + 7]
+            );
+            assert!(
+                (px[y * 32 + 6] - 0.1).abs() < 1e-6,
+                "neighbour y={y}: {}",
+                px[y * 32 + 6]
+            );
+        }
+    }
+
+    #[test]
+    fn exposure_scales_dark_current() {
+        // Dark pedestal = dark_rate·exposure/full_well. With read noise off and an empty sky, the
+        // mean pixel is that pedestal, so a 100× exposure scales it ~100×.
+        let scene = Scene {
+            width: 128,
+            height: 128,
+            sources: vec![],
+            background: BackgroundField::Uniform { level: 0.0 },
+        };
+        let camera = Camera {
+            read_noise_e: 0.0,
+            dark_current_e_per_s: 5.0,
+            ..Camera::realistic(3.0)
+        };
+        let short = render(
+            &scene,
+            &camera,
+            &Observation {
+                exposure_s: 1.0,
+                ..Observation::reference(5)
+            },
+        );
+        let long = render(
+            &scene,
+            &camera,
+            &Observation {
+                exposure_s: 100.0,
+                ..Observation::reference(5)
+            },
+        );
+        let m_short = pixel_stats(short.image.channel(0).pixels()).mean;
+        let m_long = pixel_stats(long.image.channel(0).pixels()).mean;
+        // 5·100/50000 = 0.01 for the long exposure; 1e-4 for the short.
+        assert!(
+            (m_long - 0.01).abs() < 1e-3,
+            "long-exposure dark mean {m_long}"
+        );
+        assert!(
+            m_long > m_short * 50.0,
+            "dark current must scale with exposure: {m_short} → {m_long}"
+        );
+    }
 }

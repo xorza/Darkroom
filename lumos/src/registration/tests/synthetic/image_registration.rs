@@ -128,15 +128,16 @@ fn test_image_registration_translation() {
     let dx_error = (recovered_dx - dx).abs();
     let dy_error = (recovered_dy - dy).abs();
 
+    // Noiseless fixture: recovery is limited only by centroid scatter, so the gate is sub-pixel.
     assert!(
-        dx_error < 1.0,
+        dx_error < 0.3,
         "X translation error too large: expected {}, got {}, error {}",
         dx,
         recovered_dx,
         dx_error
     );
     assert!(
-        dy_error < 1.0,
+        dy_error < 0.3,
         "Y translation error too large: expected {}, got {}, error {}",
         dy,
         recovered_dy,
@@ -144,7 +145,7 @@ fn test_image_registration_translation() {
     );
 
     assert!(
-        result.rms_error < 2.0,
+        result.rms_error < 0.5,
         "RMS error too large: {}",
         result.rms_error
     );
@@ -200,7 +201,7 @@ fn test_image_registration_rotation() {
     );
 
     assert!(
-        result.rms_error < 2.0,
+        result.rms_error < 0.5,
         "RMS error too large: {}",
         result.rms_error
     );

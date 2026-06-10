@@ -304,4 +304,80 @@ mod tests {
             4.0
         );
     }
+
+    #[test]
+    fn moffat_has_heavier_wings_than_gaussian() {
+        // Equal FWHM and flux: the Gaussian concentrates flux in the core, the Moffat spreads it
+        // into atmospheric wings. At r=10 px the Gaussian (4σ-truncated) is gone; the Moffat is not.
+        let size = 121;
+        let c = size / 2;
+        let g = render_one(PsfModel::Gaussian { fwhm: 4.0 }, size, 100.0, 1.0);
+        let m = render_one(
+            PsfModel::Moffat {
+                fwhm: 4.0,
+                beta: 2.5,
+            },
+            size,
+            100.0,
+            1.0,
+        );
+        assert!(
+            g[c * size + c] > m[c * size + c],
+            "Gaussian core {} should exceed Moffat core {}",
+            g[c * size + c],
+            m[c * size + c]
+        );
+        assert!(
+            m[c * size + (c + 10)] > 0.005,
+            "Moffat should carry real wing flux at r=10, got {}",
+            m[c * size + (c + 10)]
+        );
+        assert!(
+            g[c * size + (c + 10)] < 1e-4,
+            "Gaussian wings should be negligible at r=10, got {}",
+            g[c * size + (c + 10)]
+        );
+    }
+
+    #[test]
+    fn moffat_beta_controls_wing_weight() {
+        // Lower beta → heavier wings at fixed FWHM.
+        let size = 121;
+        let c = size / 2;
+        let wing = |beta: f32| {
+            render_one(PsfModel::Moffat { fwhm: 4.0, beta }, size, 100.0, 1.0)[c * size + (c + 10)]
+        };
+        let heavy = wing(2.0);
+        let light = wing(6.0);
+        assert!(
+            heavy > light * 2.0,
+            "lower beta should have heavier wings: β2 {heavy:.4} vs β6 {light:.4}"
+        );
+    }
+
+    #[test]
+    fn eccentricity_controls_elongation() {
+        // Larger eccentricity → more elongated profile (higher horiz/vert ratio at angle 0).
+        let size = 81;
+        let c = size / 2;
+        let ratio = |e: f32| {
+            let p = render_one(
+                PsfModel::Elliptical {
+                    fwhm: 4.0,
+                    eccentricity: e,
+                    angle: 0.0,
+                },
+                size,
+                100.0,
+                1.0,
+            );
+            p[c * size + (c + 5)] / p[(c + 5) * size + c]
+        };
+        let low = ratio(0.3);
+        let high = ratio(0.7);
+        assert!(
+            high > low && low > 1.0,
+            "elongation must grow with eccentricity: e0.3 {low:.2}, e0.7 {high:.2}"
+        );
+    }
 }

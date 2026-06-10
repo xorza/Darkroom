@@ -1,9 +1,11 @@
 //! Challenging-case tests — star detection under difficult conditions.
 //!
-//! These are **informational**: each renders a hard forward-model scenario, runs the full
-//! pipeline, and reports metrics against criteria. They assert only that detection runs
-//! without panicking (the thresholds are printed, not enforced) — so they double as a smoke
-//! test across the hard scenarios.
+//! Each renders a hard forward-model scenario and runs the full pipeline. The per-scenario
+//! `min_detection_rate` targets are **aspirational** (crowding blends sources, saturated stars
+//! are rejected by design, edge stars fall outside the margin) and stay informational. What is
+//! **enforced** on every scenario are two real regression guards: the detector must not
+//! hallucinate (false-positive rate within the scenario's bound) and detection must not collapse
+//! to nothing. A regression in either fails the test.
 
 use super::run_test;
 use crate::star_detection::config::Config;
@@ -18,26 +20,37 @@ use crate::testing::synthetic::observe::SimFrame;
 use crate::testing::synthetic::scene::BackgroundField;
 use glam::Vec2;
 
-/// Run the pipeline on `frame` and report pass/fail against `criteria` (informational).
+/// Run the pipeline on `frame`, print the aspirational per-scenario criteria (informational),
+/// and enforce two universal regression guards: the false-positive rate stays within the
+/// scenario's bound (no hallucination) and detection does not collapse.
 fn run_challenging_test(
     name: &str,
     frame: &SimFrame,
     detection_config: &Config,
     criteria: &PassCriteria,
-) -> bool {
+) {
     let metrics = run_test(name, "challenging", frame, detection_config);
     match check_pass(&metrics, criteria) {
-        Ok(()) => {
-            println!("PASS: All criteria met");
-            true
-        }
+        Ok(()) => println!("PASS: all aspirational criteria met"),
         Err(failures) => {
             for f in &failures {
-                println!("FAIL: {}", f);
+                println!("INFO (aspirational): {}", f);
             }
-            false
         }
     }
+
+    // Enforced regression guards (independent of the aspirational detection-rate target).
+    assert!(
+        metrics.false_positive_rate <= criteria.max_false_positive_rate,
+        "{name}: false-positive rate {:.1}% exceeds the {:.1}% bound — detector is hallucinating",
+        metrics.false_positive_rate * 100.0,
+        criteria.max_false_positive_rate * 100.0
+    );
+    assert!(
+        metrics.detection_rate >= 0.05,
+        "{name}: detection collapsed to {:.1}%",
+        metrics.detection_rate * 100.0
+    );
 }
 
 // ---- Crowded fields ----

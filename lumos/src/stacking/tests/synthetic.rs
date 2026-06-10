@@ -199,9 +199,40 @@ fn noise_weighting_beats_equal_on_mixed_quality_frames() {
 
     let equal_rms = rms_diff(equal.channel(0).pixels(), clean.pixels());
     let weighted_rms = rms_diff(weighted.channel(0).pixels(), clean.pixels());
-    // Down-weighting the noisy frames must lower the residual RMS against truth.
+    // The noisy frames carry ~12× the per-pixel σ, so inverse-variance weighting nearly ignores
+    // them — the residual must drop by a clear margin, not just epsilon.
+    let ratio = equal_rms / weighted_rms;
     assert!(
-        weighted_rms < equal_rms,
-        "inverse-noise weighting should beat equal: weighted {weighted_rms:.5} vs equal {equal_rms:.5}"
+        ratio > 1.5,
+        "inverse-noise weighting should clearly beat equal: ratio {ratio:.2} \
+         (weighted {weighted_rms:.5} vs equal {equal_rms:.5})"
     );
+}
+
+#[test]
+fn rejection_methods_preserve_clean_frames() {
+    // With no injected outliers, a rejecting combine must not damage the result: its residual vs
+    // truth stays close to the plain mean's. This is the precision complement to the recall
+    // tests — rejection must not eat good pixels.
+    let scene = demo_scene(5);
+    let camera = Camera::realistic(4.0);
+    let (sims, clean) = frame_set(&scene, &camera, 14, 500);
+    let mean_rms = rms_diff(
+        stack_frames(&sims, StackConfig::mean()).channel(0).pixels(),
+        clean.pixels(),
+    );
+    for (name, config) in [
+        ("sigma_clip", StackConfig::sigma_clipped(2.5)),
+        ("winsorized", StackConfig::winsorized(2.5)),
+        ("gesd", StackConfig::gesd()),
+    ] {
+        let rms = rms_diff(
+            stack_frames(&sims, config).channel(0).pixels(),
+            clean.pixels(),
+        );
+        assert!(
+            rms < mean_rms * 1.5,
+            "{name} must not damage clean frames: rms {rms:.5} vs mean {mean_rms:.5}"
+        );
+    }
 }

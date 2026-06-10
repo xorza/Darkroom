@@ -7,7 +7,7 @@
 //! - Minimum star counts
 //! - Combined disturbances (stress tests)
 
-use crate::registration::{Config, TransformType, register};
+use crate::registration::{Config, RegistrationError, TransformType, register};
 use crate::star_detection::star::Star;
 use crate::testing::synthetic::transforms::{
     add_spurious_star_list, add_star_noise, filter_stars_to_bounds, generate_random_stars,
@@ -533,9 +533,14 @@ fn test_insufficient_stars_fails() {
 
     let result = register(&ref_stars, &target_stars, &config);
 
+    // Must fail with the *specific* insufficient-stars error (found 3), not any failure — a
+    // bare is_err() would also pass on an unrelated RANSAC/config error.
     assert!(
-        result.is_err(),
-        "Registration should fail with only 3 stars"
+        matches!(
+            result,
+            Err(RegistrationError::InsufficientStars { found: 3, .. })
+        ),
+        "expected InsufficientStars{{found:3}}, got {result:?}"
     );
 }
 

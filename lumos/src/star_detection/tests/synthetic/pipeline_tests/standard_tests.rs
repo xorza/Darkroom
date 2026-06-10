@@ -3,7 +3,7 @@
 use super::run_test;
 use crate::star_detection::config::Config;
 use crate::star_detection::tests::common::output::metrics::{
-    PassCriteria, check_pass, crowded_criteria, faint_star_criteria, standard_criteria,
+    PassCriteria, check_pass, standard_criteria,
 };
 use crate::star_detection::tests::synthetic::Scenario;
 use crate::testing::init_tracing;
@@ -49,12 +49,16 @@ fn test_pipeline_dense_field() {
 
     let metrics = run_test("dense_field", "pipeline", &frame, &detection_config());
 
-    // Relaxed criteria for dense field; report-only (crowding is genuinely hard).
-    if let Err(failures) = check_pass(&metrics, &crowded_criteria()) {
-        println!(
-            "Dense field test has some failures (expected): {:?}",
-            failures
-        );
+    // Crowding blends some neighbours, so the floor is below a sparse field's — but it is a
+    // real, enforced regression guard (observed ~81% completeness, 0 false positives).
+    let criteria = PassCriteria {
+        min_detection_rate: 0.75,
+        max_false_positive_rate: 0.05,
+        max_mean_centroid_error: 0.20,
+        max_fwhm_error: 0.10,
+    };
+    if let Err(failures) = check_pass(&metrics, &criteria) {
+        panic!("Dense field regressed: {failures:?}");
     }
 }
 
@@ -137,12 +141,16 @@ fn test_pipeline_dynamic_range() {
     };
     let metrics = run_test("dynamic_range", "pipeline", &frame, &detection_config);
 
-    // Faint stars are hard; report-only.
-    if let Err(failures) = check_pass(&metrics, &faint_star_criteria()) {
-        println!(
-            "Dynamic range test has some failures (expected): {:?}",
-            failures
-        );
+    // The faint end sits near the detection limit, so completeness is lower — but enforced as a
+    // real floor (observed ~77% completeness, 0 false positives, sub-0.35 px centroids).
+    let criteria = PassCriteria {
+        min_detection_rate: 0.70,
+        max_false_positive_rate: 0.05,
+        max_mean_centroid_error: 0.35,
+        max_fwhm_error: 0.10,
+    };
+    if let Err(failures) = check_pass(&metrics, &criteria) {
+        panic!("Dynamic range regressed: {failures:?}");
     }
 }
 

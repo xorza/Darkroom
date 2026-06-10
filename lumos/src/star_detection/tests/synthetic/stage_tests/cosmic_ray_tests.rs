@@ -150,16 +150,15 @@ fn test_cosmic_ray_rejection() {
     );
 }
 
-/// Test sharpness visualization.
+/// Sharpness discriminates real PSF stars (low sharpness) from cosmic-ray spikes (high
+/// sharpness): real stars must read below the CR threshold, and almost no CR survives as a star.
 #[test]
-
-fn test_sharpness_visualization() {
+fn detected_real_stars_have_low_sharpness() {
     init_tracing();
 
     let width = 256;
     let height = 256;
 
-    // Simple field; cosmic rays added manually below.
     let frame = Scenario {
         num_stars: 10,
         ..Default::default()
@@ -167,82 +166,51 @@ fn test_sharpness_visualization() {
     .frame();
     let ground_truth = frame.truth.sources.clone();
     let mut pixels_vec = frame.image.channel(0).pixels().to_vec();
-
-    // Add cosmic rays
     let cr_positions = add_cosmic_rays(&mut pixels_vec, width, 10, (0.6, 0.9), 456);
 
-    save_grayscale(
-        &pixels_vec,
-        width,
-        height,
-        &test_output_path("synthetic_starfield/stage_sharpness_input.png"),
-    );
-
-    // Run detection - disable CFA filter and matched filter for synthetic images
     let detection_config = Config {
         expected_fwhm: 0.0,
         ..Default::default()
     };
+    let image = AstroImage::from_pixels(ImageDimensions::new((width, height), 1), pixels_vec);
+    let stars = StarDetector::from_config(detection_config)
+        .detect(&image)
+        .stars;
 
-    let image =
-        AstroImage::from_pixels(ImageDimensions::new((width, height), 1), pixels_vec.clone());
-    let mut detector = StarDetector::from_config(detection_config);
-    let result = detector.detect(&image);
-    let stars = result.stars;
-
-    println!("\nSharpness Analysis:");
-    println!("Stars (should have low sharpness):");
-    for (i, star) in stars.iter().enumerate() {
-        // Check if this star matches a ground truth star
+    let mut real = 0;
+    let mut cr_as_star = 0;
+    for star in &stars {
         let is_real = ground_truth.iter().any(|t| {
             let dx = t.pos.x - star.pos.x;
             let dy = t.pos.y - star.pos.y;
             (dx * dx + dy * dy).sqrt() < 5.0
         });
-
-        let label = if is_real { "STAR" } else { "CR?" };
-        println!(
-            "  {}: ({:.1}, {:.1}) FWHM={:.2} SNR={:.1} sharp={:.3} [{}]",
-            i, star.pos.x, star.pos.y, star.fwhm, star.snr, star.sharpness, label
-        );
+        let is_cr = cr_positions.iter().any(|&(cx, cy)| {
+            let dx = star.pos.x - cx as f64;
+            let dy = star.pos.y - cy as f64;
+            (dx * dx + dy * dy).sqrt() < 3.0
+        });
+        if is_real {
+            real += 1;
+            // The discriminator treats sharpness > 0.7 as a cosmic ray; a true PSF star must
+            // sit well below that.
+            assert!(
+                star.sharpness < 0.7,
+                "real star at ({:.1},{:.1}) has CR-like sharpness {:.3}",
+                star.pos.x,
+                star.pos.y,
+                star.sharpness
+            );
+        } else if is_cr {
+            cr_as_star += 1;
+        }
     }
-
-    // Create composite visualization
-    let mut img = gray_to_rgb_image_stretched(&pixels_vec, width, height);
-
-    // Mark CR positions
-    let red = Color::rgb(1.0, 0.4, 0.4);
-    for (x, y) in &cr_positions {
-        draw_cross(&mut img, Vec2::new(*x as f32, *y as f32), 3.0, red, 1.0);
-    }
-
-    // Mark detected stars colored by sharpness
-    for star in &stars {
-        // High sharpness = likely cosmic ray (red), low = likely star (green)
-        let color = if star.sharpness > 0.7 {
-            Color::RED // High sharpness: likely CR
-        } else if star.sharpness > 0.4 {
-            Color::YELLOW // Medium: uncertain
-        } else {
-            Color::GREEN // Low sharpness: likely real star
-        };
-        draw_circle(
-            &mut img,
-            Vec2::new(star.pos.x as f32, star.pos.y as f32),
-            6.0,
-            color,
-            1.0,
-        );
-    }
-
-    save_image(
-        img,
-        &test_output_path("synthetic_starfield/stage_sharpness_overlay.png"),
+    assert!(
+        real >= 8,
+        "should detect most of the 10 true stars, got {real}"
     );
-
-    println!("\nColor legend:");
-    println!("  Green circles: Low sharpness (likely real star)");
-    println!("  Yellow circles: Medium sharpness (uncertain)");
-    println!("  Red circles: High sharpness (likely cosmic ray)");
-    println!("  Red crosses: True cosmic ray positions");
+    assert!(
+        cr_as_star <= 2,
+        "cosmic rays should be rejected, {cr_as_star} survived as stars"
+    );
 }

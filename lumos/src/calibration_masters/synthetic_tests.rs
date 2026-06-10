@@ -134,11 +134,13 @@ fn calibrate_recovers_star_field_through_a_noisy_light() {
     let mut light = make_cfa(w, h, light_px, CfaType::Mono);
     masters.calibrate(&mut light);
 
-    // Uniform flat (mean 1) → recovered ≈ true signal, within the single-frame noise floor.
+    // Uniform flat (mean 1) → recovered ≈ true signal. The residual is the single-frame shot+read
+    // noise floor (~0.0015–0.003 at 50 ke⁻ well); assert it sits in that band — a tighter upper
+    // bound than the old 0.01, and a lower bound that catches noise accidentally not applied.
     let err = rms_diff(light.data.pixels(), sig);
     assert!(
-        err < 0.01,
-        "calibrated light should recover the signal: rms {err:.5}"
+        (0.0008..0.005).contains(&err),
+        "calibrated residual {err:.5} should sit at the single-frame noise floor"
     );
 }
 
@@ -155,11 +157,11 @@ fn defect_map_detects_injected_hot_and_cold_pixels() {
     }
     let dark = make_cfa(w, h, dark_px, CfaType::Mono);
     let map = DefectMap::default().detect_hot(&dark, 5.0);
+    // The injected set is clean and uniform, so detection must be *exactly* the 5 hot pixels —
+    // no spurious flags (precision 1.0) and none missed (recall 1.0).
     let hot_score = score_rejection(&map.hot_indices, &hot);
-    assert!(
-        hot_score.precision > 0.99 && hot_score.recall > 0.99,
-        "hot detection should be exact: {hot_score:?}"
-    );
+    assert_eq!(map.hot_indices.len(), 5, "exactly the 5 hot pixels");
+    assert_eq!((hot_score.precision, hot_score.recall), (1.0, 1.0));
 
     // Dead pixels (≈ 0) injected into an otherwise-uniform flat.
     let dead: [usize; 3] = [200, 1700, 3001];
@@ -170,9 +172,38 @@ fn defect_map_detects_injected_hot_and_cold_pixels() {
     let flat = make_cfa(w, h, flat_px, CfaType::Mono);
     let map = DefectMap::default().detect_cold(&flat);
     let cold_score = score_rejection(&map.cold_indices, &dead);
+    assert_eq!(map.cold_indices.len(), 3, "exactly the 3 dead pixels");
+    assert_eq!((cold_score.precision, cold_score.recall), (1.0, 1.0));
+}
+
+#[test]
+fn hot_detection_sigma_threshold_is_monotonic() {
+    // A noisy dark (so MAD is meaningful) with two tiers of hot pixels — moderate and extreme.
+    // A lower σ threshold must flag strictly more pixels than a higher one.
+    let (w, h) = (64, 64);
+    let n = w * h;
+    let mut rng = TestRng::new(99);
+    let mut dark_px: Vec<f32> = (0..n)
+        .map(|_| 0.1 + rng.next_gaussian_f32() * 0.01)
+        .collect();
+    for &i in &[500usize, 1500, 2500] {
+        dark_px[i] = 0.1 + 0.05; // ~5σ
+    }
+    for &i in &[800usize, 1800, 2800] {
+        dark_px[i] = 0.1 + 0.10; // ~10σ
+    }
+    let dark = make_cfa(w, h, dark_px, CfaType::Mono);
+    let lenient = DefectMap::default()
+        .detect_hot(&dark, 3.0)
+        .hot_indices
+        .len();
+    let strict = DefectMap::default()
+        .detect_hot(&dark, 8.0)
+        .hot_indices
+        .len();
     assert!(
-        cold_score.recall > 0.99,
-        "every dead pixel should be detected: {cold_score:?}"
+        lenient > strict,
+        "a lower sigma threshold must flag more hot pixels: σ3 {lenient} vs σ8 {strict}"
     );
 }
 

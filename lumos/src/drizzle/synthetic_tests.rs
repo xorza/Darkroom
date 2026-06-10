@@ -212,3 +212,67 @@ fn drizzle_dithering_recovers_resolution() {
         "dithered reconstruction should recover a higher peak: {multi_peak:.4} vs single {single_peak:.4}"
     );
 }
+
+#[test]
+fn drizzle_emits_coverage_weight_and_variance_maps() {
+    // The coverage / weight / variance maps are drizzle's science deliverable; verify them
+    // against the closed form for N equal-weight frames at full interior coverage.
+    let (w, h) = (64, 64);
+    let scene = Scene::single(
+        w,
+        h,
+        DVec2::new(32.0, 32.0),
+        5.0,
+        BackgroundField::Uniform { level: 0.1 },
+    );
+    let camera = Camera::ideal(3.5);
+    let dithers = [
+        DVec2::ZERO,
+        DVec2::new(0.5, 0.0),
+        DVec2::new(0.0, 0.5),
+        DVec2::new(0.5, 0.5),
+    ];
+    let (images, transforms) = dithered_frames(&scene, &camera, &dithers);
+    let config = DrizzleConfig {
+        scale: 1.0,
+        pixfrac: 1.0,
+        ..DrizzleConfig::default()
+    };
+    let result = drizzle_images(
+        images,
+        &transforms,
+        None,
+        None,
+        &config,
+        ProgressCallback::default(),
+    )
+    .unwrap();
+
+    // Coverage is normalized to [0,1]; the interior is fully covered by all 4 frames.
+    let cov = result.coverage.pixels();
+    assert!(
+        cov.iter().all(|&c| (-1e-4..=1.0001).contains(&c)),
+        "coverage must stay in [0,1]"
+    );
+    assert!(
+        (cov[32 * w + 32] - 1.0).abs() < 0.05,
+        "interior coverage {} should be ~1",
+        cov[32 * w + 32]
+    );
+
+    // weight = Σwᵢ ≈ the 4 frames' total. variance = Σwᵢ²/(Σwᵢ)² = 1/N_eff; drizzle pools each
+    // frame's drop across neighbouring output pixels, so N_eff ≥ the frame count (variance
+    // smaller than a naive 1/4) — that pooling is the whole point of the WHT.
+    let weight_c = result.weight.pixels()[32 * w + 32];
+    let var_c = result.variance.pixels()[32 * w + 32];
+    let n_eff = 1.0 / var_c;
+    println!("interior weight {weight_c:.3}, variance {var_c:.4}, N_eff {n_eff:.1}");
+    assert!(
+        (3.5..=4.5).contains(&weight_c),
+        "interior weight {weight_c} should equal the 4 frames"
+    );
+    assert!(
+        var_c > 0.0 && n_eff >= 4.0,
+        "effective contributions {n_eff:.1} should be ≥ the 4 frames (drop pooling)"
+    );
+}

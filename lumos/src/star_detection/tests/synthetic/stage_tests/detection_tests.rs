@@ -133,10 +133,12 @@ fn test_detection_thresholds() {
     let width = 256;
     let height = 256;
 
-    // Field with a mix of bright and faint stars.
+    // Field with a mix of bright and faint stars over a shallow (noisy) well, so the faint half
+    // sits near the threshold and drops out as σ rises.
     let frame = Scenario {
         num_stars: 50,
-        flux: (3.0, 14.0),
+        flux: (1.0, 10.0),
+        full_well_e: 2_000.0,
         ..Default::default()
     }
     .frame();
@@ -160,62 +162,69 @@ fn test_detection_thresholds() {
         },
     );
 
-    // Test different thresholds
+    // The detection threshold is the central knob: raising σ must yield strictly fewer
+    // candidates overall and never more matches — a detector ignoring `sigma_threshold` would
+    // return a flat count across the sweep.
+    let truth_positions: Vec<(f32, f32)> = ground_truth
+        .iter()
+        .map(|s| (s.pos.x as f32, s.pos.y as f32))
+        .collect();
+    let mut counts: Vec<(f32, usize, usize)> = Vec::new();
     for sigma in [2.0, 3.0, 5.0, 10.0] {
         let det_config = Config {
             sigma_threshold: sigma,
             ..Default::default()
         };
         let candidates = detect_stars_test(&pixels, &background, &det_config);
-
-        let truth_positions: Vec<(f32, f32)> = ground_truth
-            .iter()
-            .map(|s| (s.pos.x as f32, s.pos.y as f32))
-            .collect();
-        let candidate_positions: Vec<(usize, usize)> =
-            candidates.iter().map(|c| (c.peak.x, c.peak.y)).collect();
-        let overlay = create_detection_overlay(
-            pixels.pixels(),
-            width,
-            height,
-            &candidate_positions,
-            &truth_positions,
-        );
-        save_image(
-            overlay,
-            &test_output_path(&format!(
-                "synthetic_starfield/stage_det_thresholds_sigma_{:.0}.png",
-                sigma
-            )),
-        );
-
-        // Count matches
-        let match_radius = 5.0;
-        let mut matched = 0;
-        for (tx, ty) in &truth_positions {
-            for c in &candidates {
-                let dx = c.peak.x as f32 - tx;
-                let dy = c.peak.y as f32 - ty;
-                let dist = (dx * dx + dy * dy).sqrt();
-                if dist < match_radius {
-                    matched += 1;
-                    break;
-                }
-            }
-        }
-
-        let detection_rate = matched as f32 / ground_truth.len() as f32;
-        let false_positives = candidates.len().saturating_sub(matched);
-
+        let matched = matched_count(&candidates, &truth_positions, 5.0);
         println!(
-            "Sigma={:.1}: candidates={}, matched={}, FP={}, rate={:.1}%",
-            sigma,
-            candidates.len(),
-            matched,
-            false_positives,
-            detection_rate * 100.0
+            "sigma {sigma}: candidates {}, matched {matched}",
+            candidates.len()
+        );
+        counts.push((sigma, candidates.len(), matched));
+    }
+    for w in counts.windows(2) {
+        assert!(
+            w[1].1 <= w[0].1,
+            "candidate count must not rise with threshold: σ {}→{} gave {}→{}",
+            w[0].0,
+            w[1].0,
+            w[0].1,
+            w[1].1
+        );
+        assert!(
+            w[1].2 <= w[0].2,
+            "match count must not rise with threshold: σ {}→{} matched {}→{}",
+            w[0].0,
+            w[1].0,
+            w[0].2,
+            w[1].2
         );
     }
+    assert!(
+        counts[0].1 > counts[3].1,
+        "2σ must detect strictly more candidates than 10σ: {} vs {}",
+        counts[0].1,
+        counts[3].1
+    );
+}
+
+/// Count how many of `truths` `(x, y)` have a candidate peak within `radius` px.
+fn matched_count(
+    candidates: &[crate::star_detection::deblend::region::Region],
+    truths: &[(f32, f32)],
+    radius: f32,
+) -> usize {
+    truths
+        .iter()
+        .filter(|&&(tx, ty)| {
+            candidates.iter().any(|c| {
+                let dx = c.peak.x as f32 - tx;
+                let dy = c.peak.y as f32 - ty;
+                (dx * dx + dy * dy).sqrt() < radius
+            })
+        })
+        .count()
 }
 
 /// Test detection area filtering.
@@ -254,67 +263,37 @@ fn test_detection_area_filter() {
         },
     );
 
-    // Test with different area filters
-    for (min_area, max_area, label) in [
-        (3, 1000, "permissive"),
-        (5, 500, "default"),
-        (9, 200, "strict"),
-    ] {
+    // The area filter must discriminate small, sharp cosmic rays from real stars: a strict
+    // `[9,200]` minimum-area cut removes the single-pixel CR detections that a permissive
+    // `[3,1000]` cut keeps, while real stars (larger footprints) survive both.
+    let truth_positions: Vec<(f32, f32)> = ground_truth
+        .iter()
+        .map(|s| (s.pos.x as f32, s.pos.y as f32))
+        .collect();
+    let run = |min_area: usize, max_area: usize| -> (usize, usize) {
         let det_config = Config {
             min_area,
             max_area,
             ..Default::default()
         };
         let candidates = detect_stars_test(&pixels, &background, &det_config);
-
-        let truth_positions: Vec<(f32, f32)> = ground_truth
-            .iter()
-            .map(|s| (s.pos.x as f32, s.pos.y as f32))
-            .collect();
-        let candidate_positions: Vec<(usize, usize)> =
-            candidates.iter().map(|c| (c.peak.x, c.peak.y)).collect();
-        let overlay = create_detection_overlay(
-            pixels.pixels(),
-            width,
-            height,
-            &candidate_positions,
-            &truth_positions,
-        );
-        save_image(
-            overlay,
-            &test_output_path(&format!(
-                "synthetic_starfield/stage_det_area_filter_{}.png",
-                label
-            )),
-        );
-
-        // Count matches and false positives
-        let match_radius = 5.0;
-        let mut matched = 0;
-        for (tx, ty) in &truth_positions {
-            for c in &candidates {
-                let dx = c.peak.x as f32 - tx;
-                let dy = c.peak.y as f32 - ty;
-                let dist = (dx * dx + dy * dy).sqrt();
-                if dist < match_radius {
-                    matched += 1;
-                    break;
-                }
-            }
-        }
-
-        let detection_rate = matched as f32 / ground_truth.len() as f32;
+        let matched = matched_count(&candidates, &truth_positions, 5.0);
         let false_positives = candidates.len().saturating_sub(matched);
+        (matched, false_positives)
+    };
+    let (permissive_matched, permissive_fp) = run(3, 1000);
+    let (strict_matched, strict_fp) = run(9, 200);
+    println!(
+        "permissive: matched {permissive_matched}, FP {permissive_fp}; strict: matched {strict_matched}, FP {strict_fp}"
+    );
 
-        println!(
-            "{}: area=[{},{}], candidates={}, matched={}, FP={}, rate={:.1}%",
-            label,
-            min_area,
-            max_area,
-            candidates.len(),
-            matched,
-            false_positives,
-            detection_rate * 100.0
-        );
-    }
+    assert!(
+        strict_fp < permissive_fp,
+        "strict area filter should reject CR false positives: strict FP {strict_fp} vs permissive {permissive_fp}"
+    );
+    // Real stars survive the strict filter (they are larger than the CR area cut).
+    assert!(
+        strict_matched >= permissive_matched.saturating_sub(2),
+        "strict filter should keep real stars: strict {strict_matched} vs permissive {permissive_matched}"
+    );
 }

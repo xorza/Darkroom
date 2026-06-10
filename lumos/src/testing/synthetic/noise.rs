@@ -170,4 +170,47 @@ mod tests {
         add_read_noise(&mut pixels, 0.0, 10_000.0, &mut rng);
         assert!(pixels.iter().all(|&p| p == 0.3));
     }
+
+    #[test]
+    fn poisson_sub_unit_lambda_is_small_integers() {
+        // Dark current's actual regime (λ≈0.05): mean tracks λ; draws are 0/1/(rare 2).
+        let mut rng = TestRng::new(11);
+        let samples: Vec<f32> = (0..200_000).map(|_| poisson(&mut rng, 0.05)).collect();
+        let (mean, _) = mean_var(&samples);
+        assert!((mean - 0.05).abs() < 0.005, "mean {mean}");
+        assert!(
+            samples
+                .iter()
+                .all(|&s| s == s.round() && (0.0..=3.0).contains(&s)),
+            "sub-unit Poisson should be small integers"
+        );
+    }
+
+    #[test]
+    fn poisson_branch_boundary_at_30() {
+        // λ=30 takes the Gaussian branch; mean and variance must still equal λ.
+        let mut rng = TestRng::new(12);
+        let samples: Vec<f32> = (0..200_000).map(|_| poisson(&mut rng, 30.0)).collect();
+        let (mean, var) = mean_var(&samples);
+        assert!((mean - 30.0).abs() < 0.3, "mean {mean}");
+        assert!((var - 30.0).abs() < 2.5, "var {var}");
+    }
+
+    #[test]
+    fn shot_noise_variance_scales_with_signal() {
+        // Var = v/full_well, so a 4× brighter signal has ~4× the per-pixel variance at one well.
+        let mut rng = TestRng::new(13);
+        let well = 5_000.0;
+        let mut dim = vec![0.2f32; 200_000];
+        let mut bright = vec![0.8f32; 200_000];
+        apply_shot_noise(&mut dim, well, &mut rng);
+        apply_shot_noise(&mut bright, well, &mut rng);
+        let (_, var_dim) = mean_var(&dim);
+        let (_, var_bright) = mean_var(&bright);
+        let ratio = var_bright / var_dim;
+        assert!(
+            (ratio - 4.0).abs() < 0.4,
+            "shot-noise variance must scale with signal: ratio {ratio:.2}"
+        );
+    }
 }

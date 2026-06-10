@@ -234,4 +234,30 @@ mod tests {
         // diffs 0 and 2 → rms = sqrt((0+4)/2) = sqrt(2).
         assert!((rms_diff(&[1.0, 2.0], &[1.0, 4.0]) - 2.0f64.sqrt()).abs() < 1e-12);
     }
+
+    #[test]
+    fn graders_handle_empty_and_degenerate_inputs() {
+        let none: [DVec2; 0] = [];
+        let some = [DVec2::new(1.0, 1.0)];
+        // No truth → completeness 1.0; no detections → reliability 1.0 and completeness 0.
+        assert_eq!(score_detection(&none, &some, 2.0).completeness(), 1.0);
+        let s = score_detection(&some, &none, 2.0);
+        assert_eq!(s.reliability(), 1.0);
+        assert_eq!(s.completeness(), 0.0);
+        // No in-radius match → infinite RMS.
+        assert_eq!(
+            astrometric_rms(&some, &[DVec2::new(99.0, 99.0)], 2.0),
+            f64::INFINITY
+        );
+        // Empty rejection sets → precision and recall both 1.0.
+        let r = score_rejection(&[], &[]);
+        assert_eq!((r.precision, r.recall), (1.0, 1.0));
+        // Empty pixel slices → zero stats.
+        assert_eq!(pixel_stats(&[]).mean, 0.0);
+        assert_eq!(rms_diff(&[], &[]), 0.0);
+        // Two recovered near one truth → greedy nearest pairs only the closer one.
+        let truth = [DVec2::new(0.0, 0.0)];
+        let recovered = [DVec2::new(0.3, 0.0), DVec2::new(0.9, 0.0)];
+        assert_eq!(match_catalogs(&truth, &recovered, 2.0), vec![(0, 0)]);
+    }
 }

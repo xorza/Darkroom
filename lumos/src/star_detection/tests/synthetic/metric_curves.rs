@@ -3,9 +3,10 @@
 //! The migrated pipeline tests assert pass/fail thresholds; these assert the *shape* of the
 //! detector's response through the `metrics` graders: completeness and reliability are high on a
 //! bright field, astrometry is sub-pixel, completeness falls for fainter (lower-SNR) sources, and
-//! a source-free noise field yields essentially no false positives.
+//! a source-free noise field yields essentially no false positives, completeness falls under
+//! crowding, and the `min_snr` knob gates the faint end.
 
-use super::Scenario;
+use super::{Placement, Scenario};
 use crate::star_detection::config::Config;
 use crate::star_detection::detector::StarDetector;
 use crate::testing::synthetic::camera::Camera;
@@ -135,14 +136,88 @@ fn negligible_false_positives_on_source_free_noise() {
         sources: vec![],
         background: BackgroundField::Uniform { level: 0.1 },
     };
-    let frame = render(&scene, &Camera::realistic(4.0), &Observation::reference(1));
-    let detections = StarDetector::from_config(synthetic_config())
-        .detect(&frame.image)
-        .stars
-        .len();
-    // The detection threshold should keep noise-only fields essentially empty.
+    // Average over several seeds so the bound reflects the threshold, not one lucky noise draw.
+    let total: usize = (1u64..=4)
+        .map(|seed| {
+            let frame = render(
+                &scene,
+                &Camera::realistic(4.0),
+                &Observation::reference(seed),
+            );
+            StarDetector::from_config(synthetic_config())
+                .detect(&frame.image)
+                .stars
+                .len()
+        })
+        .sum();
+    let mean = total as f64 / 4.0;
+    // A correct threshold keeps source-free fields essentially empty.
     assert!(
-        detections <= 3,
-        "source-free noise field should yield ~0 detections, got {detections}"
+        mean < 0.5,
+        "source-free noise fields should average ~0 detections, got mean {mean:.2} over 4 seeds"
+    );
+}
+
+#[test]
+fn completeness_falls_with_crowding() {
+    let config = synthetic_config();
+    // Same star count and brightness, sparse-uniform vs packed-cluster placement.
+    let sparse = Scenario {
+        num_stars: 40,
+        ..Default::default()
+    }
+    .frame();
+    let crowded = Scenario {
+        num_stars: 40,
+        placement: Placement::Cluster,
+        ..Default::default()
+    }
+    .frame();
+    let sparse_c = score_detection(
+        &truth_positions(&sparse),
+        &detected_positions(&sparse, &config),
+        MATCH_RADIUS,
+    )
+    .completeness();
+    let crowded_c = score_detection(
+        &truth_positions(&crowded),
+        &detected_positions(&crowded, &config),
+        MATCH_RADIUS,
+    )
+    .completeness();
+    println!("sparse completeness {sparse_c:.3}, crowded {crowded_c:.3}");
+    assert!(
+        sparse_c > 0.8,
+        "sparse completeness {sparse_c:.3} should be high"
+    );
+    assert!(
+        crowded_c < sparse_c - 0.1,
+        "crowding should lower completeness: crowded {crowded_c:.3} vs sparse {sparse_c:.3}"
+    );
+}
+
+#[test]
+fn min_snr_knob_gates_faint_detections() {
+    // A bright→faint field over a shallow (noisy) well, so `min_snr` decides the faint end.
+    let frame = Scenario {
+        num_stars: 40,
+        flux: (1.0, 10.0),
+        full_well_e: 2_000.0,
+        ..Default::default()
+    }
+    .frame();
+    let permissive = Config {
+        min_snr: 5.0,
+        ..synthetic_config()
+    };
+    let strict = Config {
+        min_snr: 30.0,
+        ..synthetic_config()
+    };
+    let n_permissive = detected_positions(&frame, &permissive).len();
+    let n_strict = detected_positions(&frame, &strict).len();
+    assert!(
+        n_permissive > n_strict,
+        "raising min_snr must reject faint detections: {n_permissive} (snr≥5) vs {n_strict} (snr≥30)"
     );
 }
