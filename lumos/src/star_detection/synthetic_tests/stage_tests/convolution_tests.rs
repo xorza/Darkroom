@@ -5,13 +5,13 @@
 use crate::math::fwhm_to_sigma;
 use crate::star_detection::config::Config;
 use crate::star_detection::convolution::gaussian_convolve;
-use crate::star_detection::tests::common::output::image_writer::save_grayscale;
-use crate::star_detection::tests::synthetic::Scenario;
+use crate::star_detection::synthetic_tests::Scenario;
+use crate::star_detection::test_common::output::image_writer::save_grayscale;
 use crate::testing::{estimate_background, init_tracing};
 use common::Buffer2;
 use common::test_utils::test_output_path;
 
-use crate::star_detection::tests::synthetic::stage_tests::TILE_SIZE;
+use crate::star_detection::synthetic_tests::stage_tests::TILE_SIZE;
 
 /// Normalize filtered output for visualization (handle negative values).
 fn normalize_for_display(pixels: &[f32]) -> Vec<f32> {

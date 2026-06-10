@@ -7,7 +7,7 @@ use std::path::Path;
 use crate::{
     star_detection::{
         star::Star,
-        tests::common::output::{TEST_OUTPUT_IMAGE_EXT, comparison::create_comparison_image},
+        test_common::output::{TEST_OUTPUT_IMAGE_EXT, comparison::create_comparison_image},
     },
     testing::synthetic::observe::ObservedSource,
 };

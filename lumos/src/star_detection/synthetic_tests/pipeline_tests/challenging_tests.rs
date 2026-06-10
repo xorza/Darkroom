@@ -9,10 +9,10 @@
 
 use super::run_test;
 use crate::star_detection::config::Config;
-use crate::star_detection::tests::common::output::metrics::{
+use crate::star_detection::synthetic_tests::{Placement, Scenario};
+use crate::star_detection::test_common::output::metrics::{
     PassCriteria, check_pass, crowded_criteria, faint_star_criteria,
 };
-use crate::star_detection::tests::synthetic::{Placement, Scenario};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::backgrounds::NebulaConfig;
 use crate::testing::synthetic::camera::PsfModel;

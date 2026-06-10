@@ -45,7 +45,9 @@ pub(crate) mod transform;
 pub(crate) mod triangle;
 
 #[cfg(test)]
-mod tests;
+mod real_data_tests;
+#[cfg(test)]
+mod synthetic_tests;
 
 use config::{Config, InterpolationMethod};
 use distortion::sip::SipPolynomial;

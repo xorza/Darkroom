@@ -2,8 +2,8 @@
 
 use crate::star_detection::config::Config;
 use crate::star_detection::detector::StarDetector;
-use crate::star_detection::tests::common::output::image_writer::{save_comparison, save_grayscale};
-use crate::star_detection::tests::common::output::metrics::{
+use crate::star_detection::test_common::output::image_writer::{save_comparison, save_grayscale};
+use crate::star_detection::test_common::output::metrics::{
     DetectionMetrics, compute_detection_metrics, save_metrics,
 };
 use crate::testing::synthetic::observe::SimFrame;

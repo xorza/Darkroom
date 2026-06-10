@@ -2,10 +2,10 @@
 
 use super::run_test;
 use crate::star_detection::config::Config;
-use crate::star_detection::tests::common::output::metrics::{
+use crate::star_detection::synthetic_tests::Scenario;
+use crate::star_detection::test_common::output::metrics::{
     PassCriteria, check_pass, standard_criteria,
 };
-use crate::star_detection::tests::synthetic::Scenario;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::camera::PsfModel;
 use crate::testing::synthetic::scene::BackgroundField;

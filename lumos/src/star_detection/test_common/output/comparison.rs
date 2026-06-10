@@ -3,7 +3,7 @@
 //! Creates annotated images showing ground truth vs detected stars.
 
 use crate::star_detection::star::Star;
-use crate::star_detection::tests::common::output::image_writer::gray_to_rgb_image_stretched;
+use crate::star_detection::test_common::output::image_writer::gray_to_rgb_image_stretched;
 use crate::testing::synthetic::observe::ObservedSource;
 use glam::Vec2;
 use imaginarium::Image;

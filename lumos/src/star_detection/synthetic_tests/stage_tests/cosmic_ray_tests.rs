@@ -6,10 +6,10 @@ use crate::{AstroImage, ImageDimensions};
 
 use crate::star_detection::config::Config;
 use crate::star_detection::detector::StarDetector;
-use crate::star_detection::tests::common::output::image_writer::{
+use crate::star_detection::synthetic_tests::Scenario;
+use crate::star_detection::test_common::output::image_writer::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
-use crate::star_detection::tests::synthetic::Scenario;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::artifacts::add_cosmic_rays;
 use common::test_utils::test_output_path;

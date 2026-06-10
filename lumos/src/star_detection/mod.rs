@@ -62,4 +62,8 @@ pub(crate) mod star;
 pub(crate) mod threshold_mask;
 
 #[cfg(test)]
-pub mod tests;
+mod real_data_tests;
+#[cfg(test)]
+mod synthetic_tests;
+#[cfg(test)]
+pub(crate) mod test_common;

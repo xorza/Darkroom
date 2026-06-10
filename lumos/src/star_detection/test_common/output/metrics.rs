@@ -1,7 +1,7 @@
 //! Detection metrics computation for visual tests.
 
 use crate::star_detection::star::Star;
-use crate::star_detection::tests::common::output::comparison::match_stars;
+use crate::star_detection::test_common::output::comparison::match_stars;
 use crate::testing::synthetic::observe::ObservedSource;
 use std::fmt;
 use std::fs::File;
