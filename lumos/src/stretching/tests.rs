@@ -1,0 +1,276 @@
+use super::*;
+use crate::core::math::statistics::median_f32_mut;
+use crate::io::astro_image::{AstroImage, ImageDimensions};
+use common::Vec2us;
+
+fn gray(width: usize, height: usize, px: Vec<f32>) -> AstroImage {
+    AstroImage::from_planar_channels(ImageDimensions::new(Vec2us::new(width, height), 1), [px])
+}
+
+fn rgb(width: usize, height: usize, r: Vec<f32>, g: Vec<f32>, b: Vec<f32>) -> AstroImage {
+    AstroImage::from_planar_channels(
+        ImageDimensions::new(Vec2us::new(width, height), 3),
+        [r, g, b],
+    )
+}
+
+fn median_of(v: &[f32]) -> f32 {
+    let mut c = v.to_vec();
+    median_f32_mut(&mut c)
+}
+
+// ---- Midtones Transfer Function ----
+
+#[test]
+fn mtf_fixed_points_identity_and_direction() {
+    for &m in &[0.1f32, 0.25, 0.5, 0.75, 0.9] {
+        assert_eq!(mtf(m, 0.0), 0.0, "MTF(m,0) = 0");
+        assert_eq!(mtf(m, 1.0), 1.0, "MTF(m,1) = 1");
+        assert!((mtf(m, m) - 0.5).abs() < 1e-6, "MTF(m,m) = 0.5 for m={m}");
+    }
+    // m = 0.5 is the identity (exactly, since 2m-1 = 0).
+    for &x in &[0.1f32, 0.3, 0.7, 0.9] {
+        assert!((mtf(0.5, x) - x).abs() < 1e-6, "MTF(0.5,·) is the identity");
+    }
+    // m < 0.5 brightens, m > 0.5 darkens — hand-computed at x = 0.25.
+    assert!(
+        (mtf(0.25, 0.25) - 0.5).abs() < 1e-6,
+        "m<0.5 brightens: 0.25 -> 0.5"
+    );
+    assert!(
+        (mtf(0.75, 0.25) - 0.1).abs() < 1e-6,
+        "m>0.5 darkens: 0.25 -> 0.1"
+    );
+}
+
+#[test]
+fn mtf_monotonic_increasing() {
+    for &m in &[0.1f32, 0.3, 0.5, 0.7, 0.9] {
+        let mut prev = f32::NEG_INFINITY;
+        for i in 0..=100 {
+            let y = mtf(m, i as f32 / 100.0);
+            assert!(y >= prev - 1e-7, "MTF must be monotonic (m={m})");
+            prev = y;
+        }
+    }
+}
+
+#[test]
+fn mtf_self_inverse_identity() {
+    // The midtones balance that maps x0 -> t is MTF(t, x0), so MTF(MTF(t, x0), x0) = t.
+    for &x0 in &[0.02f32, 0.05, 0.1, 0.3] {
+        for &t in &[0.1f32, 0.25, 0.4] {
+            let m = mtf(t, x0);
+            assert!(
+                (mtf(m, x0) - t).abs() < 1e-5,
+                "self-inverse (x0={x0}, t={t})"
+            );
+        }
+    }
+}
+
+// ---- normalized arcsinh ----
+
+#[test]
+fn asinh_endpoints_and_monotonic() {
+    for &beta in &[0.01f32, 0.1, 1.0, 10.0] {
+        let c = Curve::asinh(beta);
+        assert!(c.eval(0.0).abs() < 1e-7, "f(0) = 0 (beta={beta})");
+        assert!((c.eval(1.0) - 1.0).abs() < 1e-6, "f(1) = 1 (beta={beta})");
+        let mut prev = f32::NEG_INFINITY;
+        for i in 0..=100 {
+            let y = c.eval(i as f32 / 100.0);
+            assert!(
+                y >= prev - 1e-7,
+                "asinh stretch must be monotonic (beta={beta})"
+            );
+            prev = y;
+        }
+    }
+}
+
+#[test]
+fn asinh_beta_controls_strength() {
+    // Smaller beta = stronger stretch: a faint value is lifted higher.
+    let aggressive = Curve::asinh(0.01).eval(0.05);
+    let gentle = Curve::asinh(1.0).eval(0.05);
+    assert!(
+        aggressive > gentle,
+        "smaller beta lifts faint signal more ({aggressive} vs {gentle})"
+    );
+    // Large beta approaches the identity.
+    assert!(
+        (Curve::asinh(1000.0).eval(0.5) - 0.5).abs() < 1e-2,
+        "large beta ~ identity"
+    );
+    // Hand-computed: beta=0.01, f(0.1) = asinh(10)/asinh(100) = 2.99822/5.29842 = 0.56587.
+    assert!((Curve::asinh(0.01).eval(0.1) - 0.56587).abs() < 2e-3);
+}
+
+#[test]
+fn solve_beta_hits_target_background() {
+    for &(median, target) in &[(0.05f32, 0.2f32), (0.1, 0.25), (0.02, 0.15)] {
+        let beta = solve_asinh_beta(median, target);
+        let got = Curve::asinh(beta).eval(median);
+        assert!(
+            (got - target).abs() < 2e-3,
+            "median {median} -> {got}, want {target}"
+        );
+    }
+}
+
+// ---- STF parameter derivation ----
+
+#[test]
+fn stf_params_hand_computed() {
+    // median=0.1, sigma=0.02, shadow_sigmas=1.0, target=0.25:
+    //   black = 0.1 - 0.02 = 0.08
+    //   rescaled median = (0.1-0.08)/(1-0.08) = 0.0217391
+    //   midtones = MTF(0.25, 0.0217391) = 0.0625
+    //   eval(0.1) = MTF(0.0625, 0.0217391) = 0.25   (self-inverse: median maps to target)
+    let c = Curve::stf(0.1, 0.02, 1.0, 0.25);
+    let Curve::Stf {
+        black,
+        inv_range,
+        midtones,
+    } = c
+    else {
+        panic!("expected Stf");
+    };
+    assert!((black - 0.08).abs() < 1e-6, "black = {black}");
+    assert!(
+        (inv_range - 1.0 / 0.92).abs() < 1e-5,
+        "inv_range = {inv_range}"
+    );
+    assert!((midtones - 0.0625).abs() < 1e-5, "midtones = {midtones}");
+    assert!(
+        (c.eval(0.1) - 0.25).abs() < 1e-5,
+        "median maps to target background"
+    );
+}
+
+#[test]
+fn stf_shadow_sigmas_lower_the_black_point() {
+    let Curve::Stf { black: b1, .. } = Curve::stf(0.1, 0.02, 1.0, 0.25) else {
+        panic!()
+    };
+    let Curve::Stf { black: b3, .. } = Curve::stf(0.1, 0.02, 3.0, 0.25) else {
+        panic!()
+    };
+    assert!((b1 - 0.08).abs() < 1e-6);
+    assert!((b3 - 0.04).abs() < 1e-6);
+    assert!(b3 < b1, "more shadow sigmas => lower black point");
+}
+
+// ---- color preservation ----
+
+#[test]
+fn color_preserving_keeps_channel_ratio_and_caps_highlights() {
+    // Two pixels with a 2:1:1 R:G:B ratio; pixel 1 is bright enough to trip the highlight guard.
+    let mut img = rgb(2, 1, vec![0.3, 0.9], vec![0.15, 0.45], vec![0.15, 0.45]);
+    let cfg = StretchConfig {
+        method: StretchMethod::Asinh { beta: 0.05 },
+        color: ColorMode::ColorPreserving,
+    };
+    stretch(&mut img, &cfg);
+    let r = img.channel(0).to_vec();
+    let g = img.channel(1).to_vec();
+    let b = img.channel(2).to_vec();
+    // Pixel 0: ratio preserved, below the white point.
+    assert!(
+        (r[0] / g[0] - 2.0).abs() < 1e-3,
+        "R:G ratio preserved (px0)"
+    );
+    assert!((g[0] - b[0]).abs() < 1e-6, "G == B (px0)");
+    assert!(r[0] < 1.0, "px0 not clipped");
+    // Pixel 1: the guard caps the brightest channel at 1 but keeps the ratio exactly.
+    assert!(
+        (r[1] / g[1] - 2.0).abs() < 1e-3,
+        "R:G ratio preserved through the guard (px1)"
+    );
+    let max1 = r[1].max(g[1]).max(b[1]);
+    assert!(
+        (max1 - 1.0).abs() < 1e-4,
+        "brightest channel capped at 1, got {max1}"
+    );
+}
+
+#[test]
+fn per_channel_neutralizes_color_preserving_keeps_it() {
+    // Background that is redder (R≈0.20) than green/blue (≈0.05), plus one white star.
+    let r = vec![0.20, 0.21, 0.19, 0.20, 0.50];
+    let g = vec![0.05, 0.06, 0.04, 0.05, 0.50];
+    let b = vec![0.05, 0.06, 0.04, 0.05, 0.50];
+    let mut linked = rgb(5, 1, r.clone(), g.clone(), b.clone());
+    let mut unlinked = rgb(5, 1, r, g, b);
+
+    stretch(&mut linked, &StretchConfig::auto_stf());
+    stretch(
+        &mut unlinked,
+        &StretchConfig {
+            method: StretchMethod::AutoStf {
+                shadow_sigmas: 1.0,
+                target_background: 0.25,
+            },
+            color: ColorMode::PerChannel,
+        },
+    );
+
+    let lr = linked.channel(0).to_vec();
+    let lg = linked.channel(1).to_vec();
+    let ur = unlinked.channel(0).to_vec();
+    let ug = unlinked.channel(1).to_vec();
+    // Color-preserving keeps the red bias in the background.
+    assert!(
+        lr[0] > lg[0] + 0.1,
+        "color-preserving keeps red > green ({}, {})",
+        lr[0],
+        lg[0]
+    );
+    // Per-channel pushes each background to the same target -> neutral gray.
+    assert!(
+        (ur[0] - ug[0]).abs() < 0.05,
+        "per-channel neutralizes background ({}, {})",
+        ur[0],
+        ug[0]
+    );
+}
+
+// ---- end-to-end ----
+
+#[test]
+fn end_to_end_gray_auto_stf_brightens_background_to_target() {
+    // Background ~0.05 with spread (MAD > 0) plus bright stars.
+    let mut px = Vec::new();
+    for i in 0..90 {
+        px.push(0.04 + (i % 3) as f32 * 0.01); // {0.04, 0.05, 0.06} -> median 0.05, MAD 0.01
+    }
+    px.extend(std::iter::repeat_n(0.6f32, 10));
+    let input_median = median_of(&px);
+
+    let mut img = gray(10, 10, px);
+    stretch(&mut img, &StretchConfig::auto_stf());
+    let out = img.channel(0).to_vec();
+
+    for &v in &out {
+        assert!((0.0..=1.0).contains(&v), "output out of [0,1]: {v}");
+    }
+    let out_median = median_of(&out);
+    assert!(
+        out_median > input_median,
+        "background brightened ({out_median} > {input_median})"
+    );
+    assert!(
+        (out_median - 0.25).abs() < 0.05,
+        "background lands near target 0.25, got {out_median}"
+    );
+    // Monotonic mapping: a star pixel (input 0.6) stays brighter than the background.
+    assert!(out[95] > out[0], "stars stay brighter than the background");
+}
+
+#[test]
+fn default_config_is_color_preserving_auto_asinh() {
+    let cfg = StretchConfig::default();
+    assert_eq!(cfg.color, ColorMode::ColorPreserving);
+    assert!(matches!(cfg.method, StretchMethod::AutoAsinh { .. }));
+}

@@ -25,6 +25,7 @@
 pub(crate) mod core;
 pub(crate) mod io;
 pub(crate) mod stacking;
+pub(crate) mod stretching;
 
 #[cfg(test)]
 pub mod testing;
@@ -74,3 +75,5 @@ pub use stacking::drizzle::error::DrizzleError;
 pub use stacking::drizzle::{
     DrizzleAccumulator, DrizzleConfig, DrizzleKernel, DrizzleResult, drizzle_images, drizzle_stack,
 };
+
+pub use stretching::{ColorMode, StretchConfig, StretchMethod, stretch};
