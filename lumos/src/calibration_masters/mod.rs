@@ -4,6 +4,8 @@ pub(crate) mod cosmic_ray;
 pub mod defect_map;
 
 #[cfg(test)]
+mod synthetic_tests;
+#[cfg(test)]
 mod tests;
 
 use std::path::Path;
