@@ -21,10 +21,11 @@
 //! preserved and only intensity is remapped. A per-channel stretch instead ties an object's color
 //! to its brightness and burns bright star cores toward white.
 
+use common::Rgb;
 use rayon::prelude::*;
 
 use crate::core::math::statistics::{mad_to_sigma, median_and_mad_f32_mut};
-use crate::io::astro_image::{AstroImage, Rgb};
+use crate::io::astro_image::AstroImage;
 
 #[cfg(test)]
 mod tests;

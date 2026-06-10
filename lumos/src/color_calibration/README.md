@@ -173,7 +173,7 @@ nebulae. Offer the mask form with a tunable `amount`, and/or mask bright OIII re
 ### Rust (using `par_map_pixels` + `Rgb`)
 
 ```rust
-use crate::io::astro_image::Rgb;
+use common::Rgb;
 
 /// SCNR Average-Neutral green removal: G' = min(G, (R+B)/2). Run on the stretched image.
 pub fn scnr_average_neutral(image: &mut AstroImage) {
@@ -308,7 +308,7 @@ src/color_calibration/
 **Reuse already in the crate:**
 - `sigma_clipped_median_mad` → `ClippedStats { median, sigma, mean }` (`core::math::statistics`) — the
   per-channel robust background.
-- `par_map_pixels(mono, rgb)` + the `Rgb { r, g, b }` struct (`io::astro_image`) — the SCNR per-pixel map.
+- `par_map_pixels(mono, rgb)` (`io::astro_image`) + the `Rgb { r, g, b }` struct (`common`) — the SCNR per-pixel map.
 - `channel(c)` / `channel_mut(c)`, planar `Buffer2<f32>` — per-channel offsets.
 - `stacking::star_detection` (PSF flux, centroids) — the photometry PCC/SPCC need.
 

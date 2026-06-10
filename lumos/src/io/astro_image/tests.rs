@@ -1,3 +1,4 @@
+use common::Rgb;
 use common::test_utils::test_output_path;
 use imaginarium::{ColorFormat, Image, ImageDesc};
 
@@ -453,8 +454,22 @@ fn test_get_pixel_rgb() {
         vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
     );
 
-    assert_eq!(image.get_pixel_rgb(0, 0), [1.0, 2.0, 3.0]);
-    assert_eq!(image.get_pixel_rgb(1, 0), [4.0, 5.0, 6.0]);
+    assert_eq!(
+        image.get_pixel_rgb(0, 0),
+        Rgb {
+            r: 1.0,
+            g: 2.0,
+            b: 3.0
+        }
+    );
+    assert_eq!(
+        image.get_pixel_rgb(1, 0),
+        Rgb {
+            r: 4.0,
+            g: 5.0,
+            b: 6.0
+        }
+    );
 }
 
 #[test]
@@ -464,11 +479,41 @@ fn test_set_pixel_rgb() {
         vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     );
 
-    image.set_pixel_rgb(0, 0, [1.0, 2.0, 3.0]);
-    image.set_pixel_rgb(1, 0, [4.0, 5.0, 6.0]);
+    image.set_pixel_rgb(
+        0,
+        0,
+        Rgb {
+            r: 1.0,
+            g: 2.0,
+            b: 3.0,
+        },
+    );
+    image.set_pixel_rgb(
+        1,
+        0,
+        Rgb {
+            r: 4.0,
+            g: 5.0,
+            b: 6.0,
+        },
+    );
 
-    assert_eq!(image.get_pixel_rgb(0, 0), [1.0, 2.0, 3.0]);
-    assert_eq!(image.get_pixel_rgb(1, 0), [4.0, 5.0, 6.0]);
+    assert_eq!(
+        image.get_pixel_rgb(0, 0),
+        Rgb {
+            r: 1.0,
+            g: 2.0,
+            b: 3.0
+        }
+    );
+    assert_eq!(
+        image.get_pixel_rgb(1, 0),
+        Rgb {
+            r: 4.0,
+            g: 5.0,
+            b: 6.0
+        }
+    );
 }
 
 #[test]

@@ -14,6 +14,7 @@ use std::ops::SubAssign;
 use std::path::Path;
 
 use common::Buffer2;
+use common::Rgb;
 use common::Vec2us;
 
 use crate::core::math::sum::sum_f32;
@@ -206,39 +207,6 @@ impl PixelData {
         match self {
             PixelData::L(data) => data,
             PixelData::Rgb(_) => panic!("Expected L variant, got Rgb"),
-        }
-    }
-}
-
-/// One pixel's RGB channel values, decoupling per-pixel code from the planar storage. Passed to
-/// and returned from the closure in [`AstroImage::par_map_pixels`].
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Rgb {
-    pub r: f32,
-    pub g: f32,
-    pub b: f32,
-}
-
-impl Rgb {
-    pub(crate) const ZERO: Rgb = Rgb {
-        r: 0.0,
-        g: 0.0,
-        b: 0.0,
-    };
-
-    /// Combined intensity `(r + g + b) / 3`.
-    #[inline]
-    pub(crate) fn intensity(self) -> f32 {
-        (self.r + self.g + self.b) * (1.0 / 3.0)
-    }
-
-    /// Scale all three channels by `f`.
-    #[inline]
-    pub(crate) fn scale(self, f: f32) -> Rgb {
-        Rgb {
-            r: self.r * f,
-            g: self.g * f,
-            b: self.b * f,
         }
     }
 }
@@ -746,26 +714,30 @@ impl AstroImage {
     }
 
     /// Get RGB pixel values at (x, y).
-    pub fn get_pixel_rgb(&self, x: usize, y: usize) -> [f32; 3] {
+    pub fn get_pixel_rgb(&self, x: usize, y: usize) -> Rgb {
         debug_assert!(x < self.width() && y < self.height());
         debug_assert!(self.is_rgb());
         let idx = y * self.width() + x;
         match &self.pixels {
-            PixelData::Rgb([r, g, b]) => [r[idx], g[idx], b[idx]],
+            PixelData::Rgb([r, g, b]) => Rgb {
+                r: r[idx],
+                g: g[idx],
+                b: b[idx],
+            },
             _ => unreachable!(),
         }
     }
 
     /// Set RGB pixel values at (x, y).
-    pub fn set_pixel_rgb(&mut self, x: usize, y: usize, rgb: [f32; 3]) {
+    pub fn set_pixel_rgb(&mut self, x: usize, y: usize, rgb: Rgb) {
         debug_assert!(x < self.width() && y < self.height());
         debug_assert!(self.is_rgb());
         let idx = y * self.width() + x;
         match &mut self.pixels {
             PixelData::Rgb([r, g, b]) => {
-                r[idx] = rgb[0];
-                g[idx] = rgb[1];
-                b[idx] = rgb[2];
+                r[idx] = rgb.r;
+                g[idx] = rgb.g;
+                b[idx] = rgb.b;
             }
             _ => unreachable!(),
         }

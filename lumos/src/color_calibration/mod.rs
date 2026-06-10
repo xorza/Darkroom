@@ -6,10 +6,11 @@
 //! - [`scnr`] (post-stretch): Subtractive Chromatic Noise Reduction — clamp green that exceeds the
 //!   red/blue average, the residual green being noise on a color-balanced deep-sky image.
 
+use common::Rgb;
 use rayon::prelude::*;
 
 use crate::core::math::statistics::sigma_clipped_median_mad;
-use crate::io::astro_image::{AstroImage, Rgb};
+use crate::io::astro_image::AstroImage;
 
 #[cfg(test)]
 mod tests;

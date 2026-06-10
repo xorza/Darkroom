@@ -6,9 +6,9 @@ use common::test_utils::test_output_path;
 use imaginarium::{ColorFormat, Image};
 
 use super::{ScnrMethod, channel_backgrounds, neutralize_background, scnr};
-use crate::io::astro_image::Rgb;
 use crate::testing::{calibration_dir, init_tracing};
 use crate::{AstroImage, StretchConfig, stretch};
+use common::Rgb;
 
 fn save_jpg(image: &AstroImage, name: &str) {
     let path = test_output_path(name);
