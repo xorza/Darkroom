@@ -5,7 +5,7 @@
 
 use rayon::prelude::*;
 
-use crate::core::math::bbox::Aabb;
+use crate::math::bbox::Aabb;
 use common::Buffer2;
 use common::Vec2us;
 

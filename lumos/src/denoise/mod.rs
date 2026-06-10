@@ -12,8 +12,8 @@
 use common::Buffer2;
 use rayon::prelude::*;
 
-use crate::core::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
 use crate::io::astro_image::AstroImage;
+use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
 
 #[cfg(test)]
 mod tests;

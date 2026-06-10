@@ -17,8 +17,8 @@ use common::Buffer2;
 use common::Rgb;
 use common::Vec2us;
 
-use crate::core::math::sum::sum_f32;
 use crate::io::raw::load_raw;
+use crate::math::sum::sum_f32;
 use crate::stacking::combine::cache::StackableImage;
 use crate::stacking::combine::error::Error;
 

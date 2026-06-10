@@ -12,7 +12,7 @@
 
 use arrayvec::ArrayVec;
 
-use crate::core::math::bbox::Aabb;
+use crate::math::bbox::Aabb;
 use crate::stacking::star_detection::labeling::LabelMap;
 use common::Buffer2;
 use common::Vec2us;

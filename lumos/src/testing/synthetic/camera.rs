@@ -5,7 +5,7 @@
 //! electron count at that level and sets the Poisson shot-noise scale (see
 //! [`noise`](crate::testing::synthetic::noise)).
 
-use crate::core::math::fwhm_to_sigma;
+use crate::math::fwhm_to_sigma;
 use crate::testing::synthetic::star_profiles::{
     fwhm_to_moffat_alpha, render_elliptical_star, render_gaussian_star, render_moffat_star,
 };

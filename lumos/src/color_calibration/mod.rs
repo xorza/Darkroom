@@ -9,8 +9,8 @@
 use common::Rgb;
 use rayon::prelude::*;
 
-use crate::core::math::statistics::sigma_clipped_median_mad;
 use crate::io::astro_image::AstroImage;
+use crate::math::statistics::sigma_clipped_median_mad;
 
 #[cfg(test)]
 mod tests;

@@ -2,7 +2,7 @@
 //!
 //! Applies quality filters, removes duplicates, and sorts by flux.
 
-use crate::core::math::statistics::{mad_floored, median_and_mad_f32_mut};
+use crate::math::statistics::{mad_floored, median_and_mad_f32_mut};
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::Diagnostics;
 use crate::stacking::star_detection::detector::stages::FWHM_MAD_FLOOR_FRACTION;

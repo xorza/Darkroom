@@ -5,7 +5,7 @@
 use common::test_utils::test_output_path;
 use imaginarium::{ColorFormat, Image};
 
-use crate::core::math::statistics::median_f32_mut;
+use crate::math::statistics::median_f32_mut;
 use crate::testing::{calibration_dir, init_tracing};
 use crate::{AstroImage, StretchConfig, stretch};
 

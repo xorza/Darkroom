@@ -37,8 +37,8 @@
 //! local neighbours* — a reference that tracks vignetting (smooth, locally flat) and ignores dust
 //! shadows (which dim by far less than half), so only genuinely near-zero pixels are caught.
 
-use crate::core::math::statistics::median_f32_mut;
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
+use crate::math::statistics::median_f32_mut;
 use common::BitBuffer2;
 use common::Buffer2;
 use common::Vec2us;
@@ -155,7 +155,7 @@ impl DefectMap {
 /// Maximum number of samples per color channel for median estimation.
 const MAX_MEDIAN_SAMPLES: usize = 100_000;
 
-use crate::core::math::statistics::MAD_TO_SIGMA;
+use crate::math::statistics::MAD_TO_SIGMA;
 
 /// Get CFA color index at (x, y). Returns 0 for Mono (None CFA type).
 fn cfa_color_at(cfa_type: Option<&CfaType>, x: usize, y: usize) -> u8 {

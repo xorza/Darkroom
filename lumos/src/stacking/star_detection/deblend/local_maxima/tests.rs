@@ -1,6 +1,6 @@
 //! Tests for local maxima deblending.
 
-use crate::core::math::bbox::Aabb;
+use crate::math::bbox::Aabb;
 use crate::stacking::star_detection::deblend::assign_to_nearest_peak;
 use crate::stacking::star_detection::deblend::local_maxima::*;
 use crate::stacking::star_detection::labeling::LabelMap;

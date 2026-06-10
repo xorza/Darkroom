@@ -3,7 +3,7 @@
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
-use crate::core::math::sum::scalar::neumaier_add;
+use crate::math::sum::scalar::neumaier_add;
 
 /// Sum f32 values using AVX2 SIMD with Kahan compensated summation.
 ///

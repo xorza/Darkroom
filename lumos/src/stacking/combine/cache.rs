@@ -32,9 +32,9 @@ use common::parallel::try_par_map_limited;
 use memmap2::Mmap;
 use rayon::prelude::*;
 
-use crate::core::math::statistics::{ChannelStats, mad_f32_with_scratch, median_f32_mut};
 use crate::io::astro_image::cfa::CfaImage;
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
+use crate::math::statistics::{ChannelStats, mad_f32_with_scratch, median_f32_mut};
 use crate::stacking::combine::cache_config::{
     CacheConfig, MEMORY_PERCENT, compute_optimal_chunk_rows_with_memory,
 };

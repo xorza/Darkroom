@@ -1,6 +1,6 @@
 //! Tests for multi-threshold deblending.
 
-use crate::core::math::bbox::Aabb;
+use crate::math::bbox::Aabb;
 use crate::stacking::star_detection::deblend::multi_threshold::*;
 use crate::stacking::star_detection::labeling::test_utils::label_map_from_raw;
 

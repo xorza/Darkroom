@@ -10,7 +10,7 @@ use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
 use crate::io::raw::demosaic::xtrans::markesteijn::NDIR;
 use crate::io::raw::demosaic::xtrans::{XTransImage, XTransPattern};
 
-use crate::core::common::UnsafeSendPtr;
+use crate::concurrency::UnsafeSendPtr;
 
 /// Direction offsets for derivative computation.
 /// Maps direction index to (dy, dx) offset for the spatial Laplacian.

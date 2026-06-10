@@ -5,8 +5,8 @@
 //! (weighted-moments / Gaussian-fit / Moffat-fit) agree and the profile fits beat moments.
 
 use super::background_estimate;
-use crate::core::math::bbox::Aabb;
-use crate::core::math::fwhm_to_sigma;
+use crate::math::bbox::Aabb;
+use crate::math::fwhm_to_sigma;
 use crate::stacking::star_detection::centroid::measure_star;
 use crate::stacking::star_detection::config::{CentroidMethod, Config};
 use crate::stacking::star_detection::deblend::region::Region;

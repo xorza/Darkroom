@@ -21,11 +21,11 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 5. **Combine** — `stacking::combine` (statistical per-pixel combine with rejection/normalization/weighting, memory-tiered) **or** `stacking::drizzle` (Fruchter & Hook variable-pixel reconstruction for dithered/super-resolution sets).
 6. **Stretch** (`stretching`, *display-domain, optional*) — map the linear stacked master to a viewable image with a non-linear tone curve (MTF/STF auto-stretch or color-preserving arcsinh), parameters auto-derived from the background. The science deliverable is the linear master from step 5; stretching is display-prep that runs strictly after all linear-domain work.
 
-`core::math` (SIMD sums, robust statistics, transforms) and `core::common` (CPU dispatch) support all stages. `lib.rs` defines the entire public surface.
+`math` (SIMD sums, robust statistics, transforms) and `concurrency` (`UnsafeSendPtr`) support all stages. `lib.rs` defines the entire public surface.
 
 ## Crate layout
 
-`src/lib.rs` is the only place that `pub use`s — no intermediate re-exports. Source is organized as **features** (`stacking/`, `stretching/`) over shared **foundation** modules (`io/`, `core/`), so `src/` reads as a short list of top-level concerns and new features drop in as siblings:
+`src/lib.rs` is the only place that `pub use`s — no intermediate re-exports. Source is organized as **features** (`stacking/`, `stretching/`) over shared **foundation** modules (`io/`, `math/`, `concurrency`), so `src/` reads as a short list of top-level concerns and new features drop in as siblings:
 
 ```
 src/
@@ -34,7 +34,8 @@ src/
 │   └── combine/   drizzle/   pipeline/
 ├── stretching/ feature: post-stack display — linear master → viewable image (MTF/STF, arcsinh)
 ├── io/         astro_image (container + FITS/standard load) · raw (libraw decode + demosaic)
-├── core/       math (robust stats, SIMD sum, DMat3, bbox) · common (UnsafeSendPtr)
+├── math/       robust stats, SIMD sum, DMat3, bbox
+├── concurrency.rs  UnsafeSendPtr (send raw pointers across rayon closures)
 └── testing/    #[cfg(test)] forward-model synthetic generator + real_data fixtures
 ```
 
@@ -50,11 +51,11 @@ src/
 | `stretching` | `pub(crate)` (types re-exported) | Post-stack non-linear display stretch: MTF/STF and color-preserving arcsinh. |
 | `io::astro_image` | `pub(crate)` (types re-exported) | `AstroImage` container, FITS/standard loading, metadata, CFA, sensor detection. |
 | `io::raw` | `pub(crate)` | libraw RAW decode + Bayer (RCD) / X-Trans (Markesteijn) demosaicing. |
-| `core::math` | `pub(crate)` | `DMat3`, `Aabb`/`BBox`, compensated SIMD `sum`, robust statistics. (`Vec2us` lives in the workspace `common` crate.) |
-| `core::common` | `pub(crate)` | `UnsafeSendPtr` (send raw pointers across rayon closures). |
+| `math` | `pub(crate)` | `DMat3`, `Aabb`/`BBox`, compensated SIMD `sum`, robust statistics. (`Vec2us` lives in the workspace `common` crate.) |
+| `concurrency` | `pub(crate)` | `UnsafeSendPtr` (send raw pointers across rayon closures). |
 | `testing` | `#[cfg(test)]` | Forward-model synthetic generator (`synthetic/`: `Scene` → `Camera` → `observe::render` → `SimFrame{image, truth}`, graded by `metrics`) + `real_data/` fixtures, for tests/benches. |
 
-`common::{Buffer2, BitBuffer2, cpu_features}` (the workspace `common` crate, not the in-crate `core::common` module) underpin pixel storage and SIMD dispatch. This file is the crate-level map; read the code in each module for algorithm specifics.
+`common::{Buffer2, BitBuffer2, cpu_features}` (the workspace `common` crate, distinct from the in-crate `concurrency` module) underpin pixel storage and SIMD dispatch. This file is the crate-level map; read the code in each module for algorithm specifics.
 
 ## io/astro_image — image container & loading
 
@@ -142,7 +143,7 @@ src/
 - `ColorMode`: `ColorPreserving` (default — stretch the combined intensity `I=(r+g+b)/3`, scale every channel by `f(I)/I` with a hue-preserving highlight cap, so star color survives) or `PerChannel` (independent per-channel auto-stretch — auto-grays the background but ties color to brightness). No effect on grayscale.
 - Curves are monomorphized behind a `ToneCurve` trait — `StfCurve` (clip-rescale + `MTF(m,x) = (m−1)x/((2m−1)x − m)`) and `AsinhCurve` (`asinh(x/β)/asinh(1/β)`), both clamping to `[0,1]`. `stretch` resolves the `Curve` enum **once** and runs a monomorphized loop, so the variant is never re-decided per pixel. Statistics come from `intensity_plane()` (color) or each channel (per-channel); explicit-`β` skips them.
 
-## core/math — primitives
+## math — primitives
 
 - `sum/`: `sum_f32` / `mean_f32` / `weighted_mean_f32` — hybrid compensated summation (per-lane Kahan in the SIMD inner loop, Neumaier horizontal reduction + remainder). AVX2 (8-wide) / SSE4.1 (4-wide) / NEON / scalar.
 - `statistics/`: `median_f32_mut` (quickselect, NaN-safe `total_cmp`), `median_f32_fast` (NaN-free intermediate), `mad_f32_fast`, `mad_to_sigma` (`MAD_TO_SIGMA = 1.4826022`), iterative `sigma_clipped_median_mad` → `ClippedStats {median, sigma, mean}` (the survivors' mean exposes residual skew for the background's Pearson-mode estimator); `FWHM_TO_SIGMA ≈ 2.3548` lives in `mod.rs`.
@@ -154,7 +155,7 @@ Runtime feature detection via the `common` crate (`cpu_features::has_avx2()` / `
 
 | Area | AVX2 | SSE4.1 | NEON |
 |------|------|--------|------|
-| `core/math/sum` | ✓ | ✓ | ✓ |
+| `math/sum` | ✓ | ✓ | ✓ |
 | `io/raw/normalize` | | ✓ | ✓ |
 | `stacking/star_detection/background` | ✓ | ✓ | ✓ |
 | `stacking/star_detection/convolution` | ✓ | ✓ | ✓ |
@@ -166,7 +167,7 @@ Runtime feature detection via the `common` crate (`cpu_features::has_avx2()` / `
 ## WIP / notes
 
 - `stacking/registration/distortion/tps` (thin-plate spline) is implemented and tested but `#![allow(dead_code)]` and **not wired** into `register()` — an alternate post-RANSAC distortion model.
-- Test-only constructors/APIs are gated and kept minimal (e.g. `core/math/bbox`, warp params). Don't widen them for production use.
+- Test-only constructors/APIs are gated and kept minimal (e.g. `math/bbox`, warp params). Don't widen them for production use.
 - The `real-data` feature flag (empty) gates real-data tests/benches that read the bundled `test_data/lumos_data` dataset (gitignored; present locally).
 - **Test layout:** per-file unit tests are the `foo/{mod.rs, tests.rs}` split, beside the code. Module-level integration tests sit beside the implementation as `<module>/synthetic_tests[.rs|/]` (forward-model tests) and `<module>/real_data_tests.rs` (`#[cfg_attr(not(feature="real-data"), ignore)]`). `stacking::star_detection`'s shared test-output/metric infra is `stacking/star_detection/test_common/`; its synthetic tree groups `stacking/star_detection/synthetic_tests/{stage_tests, pipeline_tests}/` + `metric_curves.rs` / `subpixel_accuracy.rs`. The shared generator + graders live in `testing::synthetic`.
 

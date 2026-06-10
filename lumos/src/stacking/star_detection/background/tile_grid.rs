@@ -1,8 +1,8 @@
 //! Tile grid for background estimation interpolation.
 
-use crate::core::math::statistics::ClippedStats;
-use crate::core::math::statistics::median_f32_mut;
-use crate::core::math::statistics::sigma_clipped_median_mad;
+use crate::math::statistics::ClippedStats;
+use crate::math::statistics::median_f32_mut;
+use crate::math::statistics::sigma_clipped_median_mad;
 use common::BitBuffer2;
 use common::Buffer2;
 use common::Vec2us;

@@ -1,6 +1,6 @@
 use super::*;
-use crate::core::math::statistics::median_f32_mut;
 use crate::io::astro_image::{AstroImage, ImageDimensions};
+use crate::math::statistics::median_f32_mut;
 use common::Vec2us;
 
 fn gray(width: usize, height: usize, px: Vec<f32>) -> AstroImage {

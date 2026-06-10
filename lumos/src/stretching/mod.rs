@@ -24,8 +24,8 @@
 use common::Rgb;
 use rayon::prelude::*;
 
-use crate::core::math::statistics::{mad_to_sigma, median_and_mad_f32_mut};
 use crate::io::astro_image::AstroImage;
+use crate::math::statistics::{mad_to_sigma, median_and_mad_f32_mut};
 
 #[cfg(test)]
 mod tests;

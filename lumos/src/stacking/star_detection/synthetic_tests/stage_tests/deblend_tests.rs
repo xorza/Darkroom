@@ -6,7 +6,7 @@
 //! sweep pins that the contrast threshold actually controls the split.
 
 use super::{background_estimate, matched_truths};
-use crate::core::math::fwhm_to_sigma;
+use crate::math::fwhm_to_sigma;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::stages::detect_test_utils::detect_stars_test;
 use crate::testing::TestRng;

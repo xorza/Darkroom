@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use rayon::prelude::*;
 
-use crate::core::common::UnsafeSendPtr;
+use crate::concurrency::UnsafeSendPtr;
 use crate::stacking::star_detection::buffer_pool::BufferPool;
 use common::BitBuffer2;
 use common::Buffer2;

@@ -100,7 +100,7 @@ fine in linear (the stretch's black point handles it), but don't clamp to 0 here
 ### Rust (against `lumos` types)
 
 ```rust
-use crate::core::math::statistics::sigma_clipped_median_mad;
+use crate::math::statistics::sigma_clipped_median_mad;
 
 /// Neutralize the per-channel sky background: shift each channel so its (robust) background level
 /// matches the darkest channel's, making the sky neutral. Linear-domain; run before the stretch.
@@ -127,7 +127,7 @@ pub fn neutralize_background(image: &mut AstroImage, kappa: f32, iterations: usi
 }
 ```
 
-(`sigma_clipped_median_mad` already lives in `core::math::statistics`; for a large frame, sampling a
+(`sigma_clipped_median_mad` already lives in `math::statistics`; for a large frame, sampling a
 sub-region or a strided subset is a fine speed/robustness refinement — PixInsight uses a user-chosen
 background reference region.)
 
@@ -306,7 +306,7 @@ src/color_calibration/
    but the astrometric solve and catalog are new. *Defer.*
 
 **Reuse already in the crate:**
-- `sigma_clipped_median_mad` → `ClippedStats { median, sigma, mean }` (`core::math::statistics`) — the
+- `sigma_clipped_median_mad` → `ClippedStats { median, sigma, mean }` (`math::statistics`) — the
   per-channel robust background.
 - `par_map_pixels(mono, rgb)` (`io::astro_image`) + the `Rgb { r, g, b }` struct (`common`) — the SCNR per-pixel map.
 - `channel(c)` / `channel_mut(c)`, planar `Buffer2<f32>` — per-channel offsets.

@@ -203,7 +203,7 @@ pub fn render_saturated_star(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::math::{fwhm_to_sigma, sigma_to_fwhm};
+    use crate::math::{fwhm_to_sigma, sigma_to_fwhm};
 
     #[test]
     fn test_gaussian_peak_at_center() {

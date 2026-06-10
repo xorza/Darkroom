@@ -1,4 +1,4 @@
-//! Common utilities for lumos.
+//! Concurrency helpers: send raw pointers across rayon worker threads.
 
 /// Wrapper to send raw pointers across thread boundaries in Rayon closures.
 ///

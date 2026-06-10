@@ -11,8 +11,8 @@ use crate::AstroImage;
 use crate::io::astro_image::cfa::CfaImage;
 use common::Buffer2;
 
-use crate::core::math;
-use crate::core::math::statistics::ChannelStats;
+use crate::math;
+use crate::math::statistics::ChannelStats;
 use crate::stacking::combine::cache::{
     CfaCache, FrameStats, GeometryPlanes, LightCache, StackableImage,
 };

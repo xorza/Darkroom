@@ -23,9 +23,10 @@
 //! ```
 
 pub(crate) mod color_calibration;
-pub(crate) mod core;
+pub(crate) mod concurrency;
 pub(crate) mod denoise;
 pub(crate) mod io;
+pub(crate) mod math;
 pub(crate) mod stacking;
 pub(crate) mod stretching;
 

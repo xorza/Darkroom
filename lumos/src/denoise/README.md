@@ -215,7 +215,7 @@ thresholding, estimate it **per scale** from that scale's coefficients: `σ_j = 
 MAD shrugs off the sparse bright real structure, so it measures the noise floor even where signal is
 present. The global single-image estimate uses the **finest scale** (`w_1`), which is noise-dominated:
 `σ ≈ 1.4826 · MAD(w_1)`. lumos already has `mad_f32_*` / `mad_to_sigma` (`MAD_TO_SIGMA = 1.4826022`)
-in `core::math::statistics`.
+in `math::statistics`.
 
 ---
 
@@ -260,7 +260,7 @@ src/denoise/
 5. **AI denoise** — ONNX-runtime CNN. *Far later; the heavy extension.*
 
 **Reuse already in the crate:**
-- `core::math::statistics::{mad_f32_with_scratch, mad_to_sigma}` — per-scale noise σ.
+- `math::statistics::{mad_f32_with_scratch, mad_to_sigma}` — per-scale noise σ.
 - planar `Buffer2<f32>` channels + `channel`/`channel_mut`, `par_map_pixels` — per-channel work.
 - `stacking::star_detection::convolution` (separable Gaussian/elliptical conv, SIMD) — the template for
   the à trous separable B3-spline convolution.
