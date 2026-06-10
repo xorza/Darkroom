@@ -79,9 +79,9 @@ impl Default for DenoiseConfig {
     fn default() -> Self {
         Self {
             scales: 2,
-            k: 1.2,
-            threshold: Threshold::Hard,
-            strength: 1.0,
+            k: 2.5,
+            threshold: Threshold::Soft,
+            strength: 0.85,
         }
     }
 }
