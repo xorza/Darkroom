@@ -2,13 +2,13 @@
 //! background in the linear domain, stretch, and SCNR — writing viewable JPEGs at each step so the
 //! green cast can be seen disappearing. Gated behind the `real-data` feature.
 
+use common::Rgb;
 use common::test_utils::test_output_path;
 use imaginarium::{ColorFormat, Image};
 
-use super::{ScnrMethod, channel_backgrounds, neutralize_background, scnr};
+use crate::color_calibration::{ScnrMethod, channel_backgrounds, neutralize_background, scnr};
 use crate::testing::{calibration_dir, init_tracing};
 use crate::{AstroImage, StretchConfig, stretch};
-use common::Rgb;
 
 fn save_jpg(image: &AstroImage, name: &str) {
     let path = test_output_path(name);

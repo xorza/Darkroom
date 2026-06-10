@@ -15,9 +15,6 @@ use crate::io::astro_image::AstroImage;
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
-mod real_data_tests;
-
 /// Sigma-clip parameters for the robust per-channel background estimate (rejects stars/nebula).
 const BACKGROUND_KAPPA: f32 = 2.5;
 const BACKGROUND_ITERATIONS: usize = 5;
@@ -52,7 +49,7 @@ pub fn neutralize_background(image: &mut AstroImage) {
 }
 
 /// Per-channel robust (sigma-clipped median) background level — i.e. the background's color.
-fn channel_backgrounds(image: &AstroImage) -> Rgb {
+pub(crate) fn channel_backgrounds(image: &AstroImage) -> Rgb {
     let mut scratch = Vec::new();
     let mut median = |c: usize| {
         // Uniform-stride subsample for a fast robust background level (exact for small channels).
