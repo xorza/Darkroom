@@ -11,7 +11,7 @@ use ort::value::Tensor;
 use crate::io::astro_image::{AstroImage, ImageDimensions};
 
 /// The fixed model processing window — these nets take a `[1, 512, 512, 3]` (NHWC) input.
-pub(crate) const WINDOW: usize = 512;
+const WINDOW: usize = 512;
 /// Feather ramp (px): tiles fade in over this border width so overlaps blend without seams.
 const FEATHER_RAMP: f32 = 64.0;
 const FEATHER_MIN: f32 = 0.02;
@@ -59,6 +59,7 @@ pub(crate) fn run_tiled(
     if w < WINDOW || h < WINDOW {
         return Err(MlError::TooSmall(w, h));
     }
+    assert!(config.stride > 0, "TiledOnnxConfig.stride must be > 0");
     let mut session = Session::builder()
         .map_err(model_err)?
         .commit_from_file(&config.weights)
@@ -69,14 +70,21 @@ pub(crate) fn run_tiled(
 
     let xs = tile_starts(w, config.stride);
     let ys = tile_starts(h, config.stride);
-    let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
     for &ty in &ys {
         for &tx in &xs {
+            let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
             fill_tile_input(image, tx, ty, &mut input);
-            let tensor = Tensor::from_array(([1usize, WINDOW, WINDOW, 3], input.clone()))
-                .map_err(model_err)?;
+            let tensor =
+                Tensor::from_array(([1usize, WINDOW, WINDOW, 3], input)).map_err(model_err)?;
             let outputs = session.run(ort::inputs![tensor]).map_err(model_err)?;
             let (_shape, tile) = outputs[0].try_extract_tensor::<f32>().map_err(model_err)?;
+            let expected = WINDOW * WINDOW * 3;
+            if tile.len() != expected {
+                return Err(MlError::Model(format!(
+                    "model output has {} values, expected {expected} (NHWC [1,{WINDOW},{WINDOW},3])",
+                    tile.len()
+                )));
+            }
             accumulate(tile, tx, ty, w, &mut acc, &mut weight);
         }
     }

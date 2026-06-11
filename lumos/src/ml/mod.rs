@@ -1,4 +1,4 @@
-//! ML-based filters via a pure-Rust ONNX backend (`tract`), gated behind the `ml` feature.
+//! ML-based filters via an ONNX Runtime backend (`ort`), gated behind the `ml` feature.
 //!
 //! These wrap a pre-trained convolutional network that the **caller supplies** — lumos bundles **no
 //! model weights**. The best astro star-removal / denoise models (StarNet2, the *XTerminator*
@@ -7,7 +7,7 @@
 //! the StarNet2 I/O contract).
 //!
 //! Currently: [`star_removal`] (StarNet-style) and [`denoise`] (DeepSNR-style), both on the shared
-//! tract [`backend`].
+//! ONNX-Runtime [`backend`].
 
 pub(crate) mod backend;
 pub(crate) mod denoise;

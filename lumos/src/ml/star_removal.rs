@@ -1,6 +1,6 @@
 //! Star removal via a StarNet-style ONNX model (caller-supplied weights). See `ml/README.md`.
 //!
-//! Runs the model through the shared tract [`backend`](super::backend) (overlapping 512² tiles,
+//! Runs the model through the shared `ort` [`backend`](super::backend) (overlapping 512² tiles,
 //! feather-blended) and recovers the stars layer by **unscreen**. A **display-domain** operation:
 //! StarNet expects stretched data in `[0, 1]`, so run it after the stretch.
 

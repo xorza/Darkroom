@@ -1,6 +1,6 @@
 //! Image denoising via a caller-supplied ONNX model (e.g. DeepSNR). See `ml/README.md`.
 //!
-//! Runs the model through the shared tract [`backend`](super::backend) (overlapping 512² tiles,
+//! Runs the model through the shared `ort` [`backend`](super::backend) (overlapping 512² tiles,
 //! feather-blended). A **display-domain** operation: these CNN denoisers are trained on stretched
 //! data, so feed the stretched `[0,1]` image — mirroring how NoiseXTerminator / GraXpert AI denoise
 //! are applied (after the stretch / channel combination).
