@@ -24,7 +24,7 @@ use rayon::prelude::*;
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct TileStats {
     /// Sky level: SExtractor's crowding-aware estimator (Pearson mode, median fallback when
-    /// strongly skewed) over the sigma-clip survivors. See [`sextractor_sky`].
+    /// strongly skewed) over the sigma-clip survivors. Computed by `tile_stats::compute_tile_stats`.
     pub sky: f32,
     pub sigma: f32,
 }

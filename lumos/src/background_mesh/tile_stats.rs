@@ -204,7 +204,10 @@ fn subsample_in_place(values: &mut Vec<f32>, target_size: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::background_mesh::tests::create_uniform_image;
+
+    fn create_uniform_image(width: usize, height: usize, value: f32) -> Buffer2<f32> {
+        Buffer2::new(width, height, vec![value; width * height])
+    }
 
     #[test]
     fn sextractor_sky_hand_computed() {

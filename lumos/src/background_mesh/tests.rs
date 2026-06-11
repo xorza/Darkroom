@@ -3,7 +3,7 @@ use super::*;
 /// Number of sigma-clipping iterations for tests.
 const TEST_SIGMA_CLIP_ITERATIONS: usize = 2;
 
-pub(crate) fn create_uniform_image(width: usize, height: usize, value: f32) -> Buffer2<f32> {
+fn create_uniform_image(width: usize, height: usize, value: f32) -> Buffer2<f32> {
     Buffer2::new(width, height, vec![value; width * height])
 }
 
