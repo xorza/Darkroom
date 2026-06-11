@@ -22,6 +22,7 @@
 //! println!("Found {} stars", result.stars.len());
 //! ```
 
+pub(crate) mod background_extraction;
 pub(crate) mod color_calibration;
 pub(crate) mod concurrency;
 pub(crate) mod denoise;
@@ -87,6 +88,8 @@ pub use stacking::drizzle::{
 pub use stretching::{ColorMode, StretchConfig, StretchMethod, stretch};
 
 pub use color_calibration::{ScnrMethod, neutralize_background, scnr};
+
+pub use background_extraction::{BackgroundConfig, BackgroundMode, extract_background};
 
 pub use denoise::{DenoiseConfig, Threshold, denoise};
 

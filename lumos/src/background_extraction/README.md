@@ -37,8 +37,8 @@ A **three-step** operation on the linear master:
 
 | Tier | Method | Notes |
 |---|---|---|
-| **Pragmatic core** | **SExtractor tiled-mesh model → subtract** | lumos *already has* this estimator (see §8) |
-| Constrained / safest | **low-order 2D polynomial (degree 1–4) → subtract** | least likely to eat nebulosity |
+| **Constrained / safest** ✅ **implemented** | **low-order 2D polynomial (degree 1–4) → subtract/divide** | `mod.rs` — the shipping core; least likely to eat nebulosity |
+| Pragmatic core | **SExtractor tiled-mesh model → subtract** | lumos *already has* this estimator (see §8); not yet wired here |
 | Flexible | **regularized thin-plate-spline (TPS) surface → subtract** | Siril's RBF model; λ controls smoothness |
 | Accurate (heavy) | **AI/CNN background prediction** (GraXpert) | ⚠️ ML extension, not a from-scratch impl |
 
@@ -218,6 +218,17 @@ the obvious later add (ONNX backend) once the classical path exists, mirroring t
 ---
 
 ## 8. Implementation plan for `lumos`
+
+> **Status (implemented).** `mod.rs` ships the **safe-default core**: a robust tiled sky estimate
+> (per-tile ±3σ-clipped median) → **low-order 2D polynomial** surface fit by least squares with
+> **iterative residual sigma-clipping** (§5) → **subtract or divide**, **per channel**. Public API:
+> `extract_background(&mut AstroImage, &BackgroundConfig)` with `BackgroundMode::{Subtract, Divide}`
+> (defaults: `tile_size 128`, `degree 2`, 3 reject passes, `divide_floor 0.1`). Verified by tests:
+> a pure linear gradient → ≈0; a pedestal+stars → background ≈0 while stars survive; a quadratic
+> vignette → flat under `Divide`; degree-3 fits a cubic where degree-1 can't; independent per-channel
+> gradients each removed. **Still open:** the SExtractor tiled-**mesh** model (reuse `star_detection`,
+> below), the **TPS/RBF** surface (§3b), an explicit **object mask** from the star detector (§6.2),
+> and **wiring into the pipeline stage** (`stack → [background_extraction] → colour-cal → stretch`).
 
 **lumos already implements the canonical algorithm.** `stacking::star_detection::background`
 (`background/mod.rs`, `tile_grid.rs`) is *exactly* the SExtractor/photutils Background2D mesh:
