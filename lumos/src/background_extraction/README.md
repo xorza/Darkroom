@@ -219,23 +219,26 @@ the obvious later add (ONNX backend) once the classical path exists, mirroring t
 
 ## 8. Implementation plan for `lumos`
 
-> **Status (implemented).** `mod.rs` ships the **safe-default core**: a robust tiled sky estimate
-> (per-tile ±3σ-clipped median) → **low-order 2D polynomial** surface fit by least squares with
-> **iterative residual sigma-clipping** (§5) → **subtract or divide**, **per channel**. Public API:
+> **Status (implemented).** `mod.rs` ships the **safe-default core**: the **shared
+> `background_mesh::TileGrid`** SExtractor sky estimator (per-tile ±σ-clip → Pearson mode `2.5·median
+> − 1.5·mean`, grid median filter **off** here so it can't bias a real gradient's boundary tiles) →
+> tile-centre samples → **low-order 2D polynomial** surface fit by least squares with **iterative
+> residual sigma-clipping** (§5) → **subtract or divide**, **per channel**. Public API:
 > `extract_background(&mut AstroImage, &BackgroundConfig)` with `BackgroundMode::{Subtract, Divide}`
 > (defaults: `tile_size 128`, `degree 2`, 3 reject passes, `divide_floor 0.1`). Verified by tests:
 > a pure linear gradient → ≈0; a pedestal+stars → background ≈0 while stars survive; a quadratic
 > vignette → flat under `Divide`; degree-3 fits a cubic where degree-1 can't; independent per-channel
-> gradients each removed. **Still open:** the SExtractor tiled-**mesh** model (reuse `star_detection`,
-> below), the **TPS/RBF** surface (§3b), an explicit **object mask** from the star detector (§6.2),
-> and **wiring into the pipeline stage** (`stack → [background_extraction] → colour-cal → stretch`).
+> gradients each removed. **Still open:** the **TPS/RBF** surface (§3b), an explicit **object mask**
+> from the star detector (§6.2 — `TileGrid::compute` already takes the mask, just not built yet), the
+> full-res tiled-**mesh** model as an alternative surface, and **wiring into the pipeline stage**
+> (`stack → [background_extraction] → colour-cal → stretch`).
 
-**lumos already implements the canonical algorithm.** `stacking::star_detection::background`
-(`background/mod.rs`, `tile_grid.rs`) is *exactly* the SExtractor/photutils Background2D mesh:
-tiled (default 64 px, 3 clip iterations), per-tile **Pearson mode `2.5·median − 1.5·mean`** with the
-median fallback on skew, MAD σ, **3×3 tile median filter**, and **natural bicubic-spline
-interpolation** → a full-res `BackgroundEstimate`, with **optional iterative object-masking**. That is
-the verified §2–§3c pipeline already written and SIMD-optimized.
+**The robust sky estimator is now a shared foundation module.** `background_mesh::TileGrid` (promoted
+out of `stacking::star_detection`) is *exactly* the SExtractor/photutils Background2D mesh: tiled,
+per-tile **Pearson mode `2.5·median − 1.5·mean`** with the median fallback on skew, MAD σ, an optional
+**3×3 tile median filter**, and **natural bicubic-spline** coefficients. Star detection consumes it for
+its full-res `BackgroundEstimate`; this module consumes the same tile samples for the surface fit — so
+both see one robust sky. That is the verified §2–§3c estimator, already written and SIMD-optimized.
 
 So the pragmatic core is mostly **wiring, not new math**:
 

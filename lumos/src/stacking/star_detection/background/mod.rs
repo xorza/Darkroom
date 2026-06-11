@@ -12,18 +12,17 @@ pub(crate) mod estimate;
 mod simd;
 #[cfg(test)]
 mod tests;
-mod tile_grid;
 
 use common::BitBuffer2;
 use common::Buffer2;
 use rayon::prelude::*;
 
+use crate::background_mesh::{TileGrid, cubic_spline_eval, solve_natural_spline_d2};
 use crate::stacking::star_detection::buffer_pool::BufferPool;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::mask_dilation::dilate_mask;
 use crate::stacking::star_detection::threshold_mask::create_threshold_mask;
 use estimate::BackgroundEstimate;
-use tile_grid::TileGrid;
 
 /// Estimate background and noise for the image.
 ///
@@ -48,7 +47,7 @@ pub(crate) fn estimate_background(
 
     // Create tile grid and compute statistics
     let mut tile_grid = TileGrid::new_uninit(width, height, tile_size);
-    tile_grid.compute(pixels, None, config.sigma_clip_iterations);
+    tile_grid.compute(pixels, None, config.sigma_clip_iterations, true);
 
     // Interpolate from tile grid to per-pixel values
     interpolate_from_grid(&tile_grid, &mut background, &mut noise);
@@ -89,7 +88,7 @@ pub(crate) fn refine_background(
             &mut scratch,
         );
 
-        tile_grid.compute(pixels, Some(&mask), config.sigma_clip_iterations);
+        tile_grid.compute(pixels, Some(&mask), config.sigma_clip_iterations, true);
 
         interpolate_from_grid(&tile_grid, &mut estimate.background, &mut estimate.noise);
     }
@@ -203,13 +202,13 @@ fn interpolate_row(
         let f1_bg = grid.get(tx, ty1).sky;
         let d0_bg = grid.d2y_sky(tx, ty0);
         let d1_bg = grid.d2y_sky(tx, ty1);
-        node_bg[tx] = tile_grid::cubic_spline_eval(f0_bg, f1_bg, d0_bg, d1_bg, hy, ty);
+        node_bg[tx] = cubic_spline_eval(f0_bg, f1_bg, d0_bg, d1_bg, hy, ty);
 
         let f0_n = grid.get(tx, ty0).sigma;
         let f1_n = grid.get(tx, ty1).sigma;
         let d0_n = grid.d2y_sigma(tx, ty0);
         let d1_n = grid.d2y_sigma(tx, ty1);
-        node_noise[tx] = tile_grid::cubic_spline_eval(f0_n, f1_n, d0_n, d1_n, hy, ty);
+        node_noise[tx] = cubic_spline_eval(f0_n, f1_n, d0_n, d1_n, hy, ty);
     }
 
     // --- Step 2: Solve tridiagonal system in X for second derivatives ---
@@ -217,8 +216,8 @@ fn interpolate_row(
     let d2x_bg = &mut scratch.d2x_bg[..tiles_x];
     let d2x_noise = &mut scratch.d2x_noise[..tiles_x];
 
-    tile_grid::solve_natural_spline_d2(node_bg, centers_x, d2x_bg, &mut scratch.spline_scratch);
-    tile_grid::solve_natural_spline_d2(
+    solve_natural_spline_d2(node_bg, centers_x, d2x_bg, &mut scratch.spline_scratch);
+    solve_natural_spline_d2(
         node_noise,
         centers_x,
         d2x_noise,

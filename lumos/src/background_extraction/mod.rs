@@ -15,8 +15,11 @@
 use common::Buffer2;
 use nalgebra::{DMatrix, DVector};
 
+use crate::background_mesh::TileGrid;
 use crate::io::astro_image::AstroImage;
-use crate::math::statistics::sigma_clipped_median_mad;
+
+/// Sigma-clip passes for the per-tile sky estimate (matches the detector's tiled-background default).
+const SKY_CLIP_ITERATIONS: usize = 3;
 
 /// How the modeled background is removed from the image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,36 +134,29 @@ struct Sample {
     z: f64,
 }
 
-/// Robust per-tile sky estimate (sigma-clipped median, rejecting stars within the tile).
+/// One robust sky sample per tile — the tile centre with coordinates normalized to `[-1, 1]` and the
+/// shared [`TileGrid`] SExtractor-style sky estimate (per-tile ±σ-clip → Pearson mode). Reuses the
+/// exact estimator star detection uses, so the gradient fit and the detector see the same sky. The
+/// grid 3×3 median filter is **off** (it would bias a real gradient's boundary tiles; outlier tiles
+/// are instead rejected by the surface fit's residual clip). A `None` object mask for now — passing a
+/// star/bright-signal mask here is the §6.2 refinement.
 fn collect_samples(channel: &Buffer2<f32>, tile: usize) -> Vec<Sample> {
     let (w, h) = (channel.width(), channel.height());
-    let px = channel.pixels();
-    let mut samples = Vec::new();
-    let mut scratch: Vec<f32> = Vec::with_capacity(tile * tile);
-    let mut deviations: Vec<f32> = Vec::new();
-    let mut ty = 0;
-    while ty < h {
-        let y1 = (ty + tile).min(h);
-        let cy = (ty + y1 - 1) as f64 * 0.5;
-        let mut tx = 0;
-        while tx < w {
-            let x1 = (tx + tile).min(w);
-            let cx = (tx + x1 - 1) as f64 * 0.5;
-            scratch.clear();
-            for y in ty..y1 {
-                let row = y * w;
-                scratch.extend_from_slice(&px[row + tx..row + x1]);
-            }
-            // ±3σ clip around the median, 5 passes — the SExtractor/photutils star-rejection step.
-            let stats = sigma_clipped_median_mad(&mut scratch, &mut deviations, 3.0, 5);
+    let tile = tile.min(w).min(h).max(1);
+    let mut grid = TileGrid::new_uninit(w, h, tile);
+    grid.compute(channel, None, SKY_CLIP_ITERATIONS, false);
+
+    let centers_x = grid.centers_x().to_vec();
+    let mut samples = Vec::with_capacity(grid.tiles_x() * grid.tiles_y());
+    for ty in 0..grid.tiles_y() {
+        let y = norm(grid.center_y(ty) as f64, h);
+        for (tx, &cx) in centers_x.iter().enumerate() {
             samples.push(Sample {
-                x: norm(cx, w),
-                y: norm(cy, h),
-                z: stats.median as f64,
+                x: norm(cx as f64, w),
+                y,
+                z: grid.get(tx, ty).sky as f64,
             });
-            tx += tile;
         }
-        ty += tile;
     }
     samples
 }

@@ -23,6 +23,7 @@
 //! ```
 
 pub(crate) mod background_extraction;
+pub(crate) mod background_mesh;
 pub(crate) mod color_calibration;
 pub(crate) mod concurrency;
 pub(crate) mod denoise;

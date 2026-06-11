@@ -4,8 +4,8 @@
 use quickbench::quick_bench;
 use std::hint::black_box;
 
+use crate::background_mesh::TileGrid;
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
-use crate::stacking::star_detection::background::tile_grid::TileGrid;
 use crate::stacking::star_detection::background::{
     BufferPool, estimate_background, refine_background,
 };
@@ -56,7 +56,7 @@ fn bench_tile_grid_6k_globular(b: ::quickbench::Bencher) {
     let mut grid = TileGrid::new_uninit(pixels.width(), pixels.height(), 64);
 
     b.bench(|| {
-        grid.compute(&pixels, None, BENCH_SIGMA_CLIP_ITERATIONS);
+        grid.compute(&pixels, None, BENCH_SIGMA_CLIP_ITERATIONS, true);
         black_box(&grid);
     });
 }
@@ -89,7 +89,7 @@ fn bench_tile_grid_6k_with_mask(b: ::quickbench::Bencher) {
     let mut grid = TileGrid::new_uninit(width, height, 64);
 
     b.bench(|| {
-        grid.compute(&pixels, Some(&mask), BENCH_SIGMA_CLIP_ITERATIONS);
+        grid.compute(&pixels, Some(&mask), BENCH_SIGMA_CLIP_ITERATIONS, true);
         black_box(&grid);
     });
 }

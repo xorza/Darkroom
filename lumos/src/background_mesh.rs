@@ -1,4 +1,11 @@
-//! Tile grid for background estimation interpolation.
+//! Shared tiled sky-background mesh estimator (SExtractor/SEP style). A [`TileGrid`] divides the
+//! image into a grid of boxes and computes one robust sky value + noise per box — per-box ±σ-clip
+//! then the crowding-aware Pearson mode `2.5·median − 1.5·mean` (median fallback on skew), with a
+//! 3×3 grid median filter — plus natural-cubic-spline coefficients for C²-continuous interpolation.
+//!
+//! Foundation module (depends only on `math`/`common`): the canonical robust background estimate,
+//! reused by `stacking::star_detection::background` (full-res background+noise map for detection)
+//! and `background_extraction` (tile-centre samples feeding the gradient surface fit).
 
 use crate::math::statistics::ClippedStats;
 use crate::math::statistics::median_f32_mut;
@@ -63,18 +70,24 @@ impl TileGrid {
         }
     }
 
-    /// Compute tile statistics, reusing the existing buffer.
+    /// Compute tile statistics, reusing the existing buffer. `median_filter` applies the 3×3 grid
+    /// median filter — keep it on for detection (de-rings a star-contaminated tile before
+    /// interpolation); turn it off when fitting a smooth surface to the tile samples, where it would
+    /// bias the boundary tiles of a real gradient.
     pub fn compute(
         &mut self,
         pixels: &Buffer2<f32>,
         mask: Option<&BitBuffer2>,
         sigma_clip_iterations: usize,
+        median_filter: bool,
     ) {
         debug_assert_eq!(pixels.width(), self.dimensions.x);
         debug_assert_eq!(pixels.height(), self.dimensions.y);
 
         self.fill_tile_stats(pixels, mask, sigma_clip_iterations);
-        self.apply_median_filter();
+        if median_filter {
+            self.apply_median_filter();
+        }
         self.compute_y_spline_derivatives();
     }
 
@@ -579,14 +592,14 @@ mod tests {
     /// Create a TileGrid with default test parameters (no mask, default sigma clip iterations)
     fn make_grid(pixels: &Buffer2<f32>, tile_size: usize) -> TileGrid {
         let mut grid = TileGrid::new_uninit(pixels.width(), pixels.height(), tile_size);
-        grid.compute(pixels, None, TEST_SIGMA_CLIP_ITERATIONS);
+        grid.compute(pixels, None, TEST_SIGMA_CLIP_ITERATIONS, true);
         grid
     }
 
     /// Create a TileGrid with mask
     fn make_grid_with_mask(pixels: &Buffer2<f32>, tile_size: usize, mask: &BitBuffer2) -> TileGrid {
         let mut grid = TileGrid::new_uninit(pixels.width(), pixels.height(), tile_size);
-        grid.compute(pixels, Some(mask), TEST_SIGMA_CLIP_ITERATIONS);
+        grid.compute(pixels, Some(mask), TEST_SIGMA_CLIP_ITERATIONS, true);
         grid
     }
 
@@ -853,7 +866,7 @@ mod tests {
         let grid_none = make_grid(&pixels, 32);
 
         let mut grid_empty = TileGrid::new_uninit(64, 64, 32);
-        grid_empty.compute(&pixels, None, TEST_SIGMA_CLIP_ITERATIONS);
+        grid_empty.compute(&pixels, None, TEST_SIGMA_CLIP_ITERATIONS, true);
 
         for ty in 0..grid_none.tiles_y() {
             for tx in 0..grid_none.tiles_x() {
