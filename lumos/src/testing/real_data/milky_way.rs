@@ -7,8 +7,9 @@
 use crate::math::statistics::median_f32_mut;
 use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{
-    AstroImage, DenoiseConfig, HdrConfig, LocalContrastConfig, ScnrMethod, StretchConfig,
-    compress_dynamic_range, denoise, enhance_local_contrast, neutralize_background, scnr, stretch,
+    AstroImage, ColorMode, DenoiseConfig, HdrConfig, LocalContrastConfig, ScnrMethod,
+    StretchConfig, StretchMethod, compress_dynamic_range, denoise, enhance_local_contrast,
+    neutralize_background, scnr, stretch,
 };
 
 fn median(image: &AstroImage) -> f32 {
@@ -44,7 +45,31 @@ fn milky_way_best_pipeline() {
     denoise(&mut img, DenoiseConfig::default()); // gentle wavelet denoise (MW-tuned default)
 
     // --- Stretch + green removal, as in the neutralize / SCNR / renorm reference image. ---
-    stretch(&mut img, StretchConfig::auto_stf());
+    stretch(
+        &mut img,
+        StretchConfig {
+            // 0.25 is PixInsight's STF default target background.
+            method: StretchMethod::AutoStf {
+                shadow_sigmas: 1.0,
+                target_background: 0.25,
+            },
+            color: ColorMode::ColorPreserving,
+        },
+    );
+    // stretch(&mut img, StretchConfig::auto_asinh());
+    // stretch(
+    //     &mut img,
+    //     StretchConfig {
+    //         method: StretchMethod::Ghs {
+    //             d: 3.0,
+    //             b: 0.0,
+    //             sp: 0.3,
+    //             lp: 0.15,
+    //             hp: 0.9,
+    //         },
+    //         color: ColorMode::ColorPreserving,
+    //     },
+    // );
     scnr(&mut img, ScnrMethod::AverageNeutral);
     neutralize_background(&mut img); // re-neutralize the now-display-domain background
     eprintln!("stretched base: median {:.3}", median(&img));
