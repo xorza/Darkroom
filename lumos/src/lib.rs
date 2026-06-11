@@ -29,6 +29,8 @@ pub(crate) mod hdr;
 pub(crate) mod io;
 pub(crate) mod local_contrast;
 pub(crate) mod math;
+#[cfg(feature = "ml")]
+pub(crate) mod ml;
 pub(crate) mod stacking;
 pub(crate) mod stretching;
 pub(crate) mod wavelet;
@@ -91,3 +93,6 @@ pub use denoise::{DenoiseConfig, Threshold, denoise};
 pub use local_contrast::{LocalContrastConfig, enhance_local_contrast};
 
 pub use hdr::{HdrConfig, compress_dynamic_range};
+
+#[cfg(feature = "ml")]
+pub use ml::star_removal::{StarRemovalConfig, StarRemovalError, StarRemovalResult, remove_stars};

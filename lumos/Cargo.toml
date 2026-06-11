@@ -6,10 +6,15 @@ description = "Astronomical image-processing pipeline: RAW/FITS decode, calibrat
 
 [features]
 real-data = []
+# ML-based filters (star removal, …) via a pure-Rust ONNX backend (tract). Off by default — pulls in
+# a heavy inference stack. Models are NOT bundled; the caller supplies their own ONNX weights.
+ml = ["dep:tract-onnx"]
 
 [dependencies]
 common = { workspace = true }
 imaginarium = { workspace = true }
+
+tract-onnx = { workspace = true, optional = true }
 
 fits-well = { workspace = true }
 libraw-rs-sys = { workspace = true }

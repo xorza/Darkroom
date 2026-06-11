@@ -39,7 +39,7 @@ Modern deep-sky processing is "stars vs everything else" — separate, process i
 
 | Fn | Pri | Status | What it does |
 |---|---|---|---|
-| **Star removal / starless separation** | ★★★ | 🔲 | Split the image into a **starless** layer and a **stars-only** layer, so nebulosity can be stretched/sharpened hard without bloating stars, then recombine (screen/add). Classical = morphological/inpainting; state of the art = CNN (*StarNet*, *StarXTerminator*). Unlocks the whole starless workflow. |
+| **Star removal / starless separation** | ★★★ | ◐ | `ml::remove_stars` (feature `ml`, + `ml/README.md`) — **CNN backend working**: a pure-Rust **tract** ONNX runner (CPU), tiled 512² + feather-blended, returns starless + stars (unscreen). lumos ships **no model** (StarNet2/XTerminator licenses forbid it); the caller supplies their own `.onnx`. Verified end-to-end on StarNet2 weights. *Missing:* the license-free **classical morphological/inpainting** fallback. |
 | **Star reduction / de-emphasis** | ★★ | 🔲 | Shrink and/or dim stars (morphological erosion, or scaling the separated star layer) so they stop dominating a nebula-rich frame. Usually done on the stars-only layer post-separation. |
 | **Star mask generation** | ★★ | ◐ | Build a mask from detected stars (size-graded, dilated) to **protect or select** stars during sharpening/stretch/denoise. lumos already detects stars — this is mostly a rasterization step on top. |
 | **Halo / fringe removal ("unpurple")** | ★ | 🔲 | Remove the blue/violet halos and purple fringing around bright stars from refractor chromatic aberration. = Siril *unpurple*, PI *halo* scripts. Localized chroma correction keyed to bright-star positions. |
