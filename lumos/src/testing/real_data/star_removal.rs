@@ -1,5 +1,5 @@
-use super::{StarRemovalConfig, remove_stars};
 use crate::io::astro_image::{AstroImage, ImageDimensions};
+use crate::ml::star_removal::{StarRemovalConfig, remove_stars};
 use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{StretchConfig, neutralize_background, stretch};
 use common::Vec2us;

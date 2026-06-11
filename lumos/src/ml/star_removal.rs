@@ -12,9 +12,6 @@ use tract_onnx::prelude::*;
 
 use crate::io::astro_image::{AstroImage, ImageDimensions};
 
-#[cfg(test)]
-mod tests;
-
 /// StarNet's fixed processing window — the model input is `[1, 512, 512, 3]` (NHWC).
 const WINDOW: usize = 512;
 /// Feather ramp (px): tiles fade in over this border width so overlaps blend without seams.
