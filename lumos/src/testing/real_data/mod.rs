@@ -10,6 +10,7 @@
 //! - [`star_removal`] (feature `ml`) — StarNet ONNX star removal on a crop (caller-supplied weights).
 //! - [`ml_denoise`] (feature `ml`) — DeepSNR ONNX denoiser on a crop (caller-supplied weights).
 
+mod background_extraction;
 mod color_calibration;
 mod denoise;
 mod milky_way;

@@ -7,8 +7,10 @@
       "-p",
       "$ZED_CUSTOM_RUST_PACKAGE",
       "--release",
+      "--all-features",
       "$ZED_SYMBOL",
       "--",
+
       "--include-ignored",
       "--nocapture",
     ],
