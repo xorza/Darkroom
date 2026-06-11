@@ -7,7 +7,7 @@
 //! stars routinely exceed 1). Every curve clamps its output, so the result is always a valid
 //! display image in `[0, 1]`.
 //!
-//! Two algorithms (see `docs/image-stretching.md` for the full derivation):
+//! Three curve families (see `docs/image-stretching.md` and `ghs.md` for the full derivations):
 //! - **STF / MTF auto-stretch** (PixInsight/Siril): a linear black-point clip-rescale followed by
 //!   the Midtones Transfer Function `MTF(m,x) = (m−1)x / ((2m−1)x − m)` — a rational (Möbius)
 //!   curve, *not* a gamma curve. The black point (`median − k·σ`) and midtones `m` are derived
@@ -15,8 +15,11 @@
 //! - **Normalized arcsinh** (Lupton et al. 2004): `f(x) = asinh(x/β) / asinh(1/β)`, linear near
 //!   black (faint detail, low noise gain) and logarithmic in the highlights (compressed cores),
 //!   with `β` chosen automatically from the background level.
+//! - **Generalized Hyperbolic Stretch (GHS)**: an explicit *designer* curve — a hyperbolic base
+//!   mirrored about a symmetry point with linear shadow/highlight protection, spanning the
+//!   exponential/logarithmic/hyperbolic family via one parameter `b` (`b ≈ −1.4` ≈ arcsinh).
 //!
-//! Both default to **color-preserving** application: the curve runs on the combined intensity
+//! All default to **color-preserving** application: the curve runs on the combined intensity
 //! `I = (r+g+b)/3` and every channel is scaled by `f(I)/I`, so hue/saturation and star color are
 //! preserved and only intensity is remapped. A per-channel stretch instead ties an object's color
 //! to its brightness and burns bright star cores toward white.
@@ -53,6 +56,17 @@ pub enum StretchMethod {
     AutoAsinh { target_background: f32 },
     /// Normalized arcsinh with an explicit softening `β` (smaller = stronger stretch).
     Asinh { beta: f32 },
+    /// Generalized Hyperbolic Stretch — an explicit *designer* curve (see `ghs.md`). `d` is the
+    /// stretch strength (0 = identity); `b` selects the curve family (`0` exponential, `b < 0`
+    /// logarithmic-like with `b ≈ −1.4` ≈ asinh, `b > 0` hyperbolic); `sp` is the symmetry point
+    /// (most contrast); `lp`/`hp` are the shadow/highlight protection points (linear outside them).
+    Ghs {
+        d: f32,
+        b: f32,
+        sp: f32,
+        lp: f32,
+        hp: f32,
+    },
 }
 
 /// How a stretch curve is applied across the channels of a color image. No effect on a grayscale
@@ -62,8 +76,10 @@ pub enum ColorMode {
     /// Stretch the combined intensity `I = (r+g+b)/3` and scale each channel by `f(I)/I`.
     /// Preserves hue/saturation and star color; recommended for a final image.
     ColorPreserving,
-    /// Stretch each channel independently with its own auto parameters — auto-neutralizes the
-    /// background toward gray but ties color to brightness. For a quick screen preview.
+    /// Stretch each channel independently. For an **auto** method each channel derives its own
+    /// parameters from its own statistics, which neutralizes the background toward gray but ties
+    /// color to brightness; an explicit method (`Asinh`/`Ghs`) applies the same fixed curve to every
+    /// channel (no neutralization). For a quick screen preview.
     PerChannel,
 }
 
@@ -98,6 +114,21 @@ impl StretchConfig {
         }
     }
 
+    /// Color-preserving Generalized Hyperbolic Stretch (see `ghs.md`) with no shadow/highlight
+    /// protection (`lp = 0`, `hp = 1`). `d` = strength, `b` = curve family, `sp` = symmetry point.
+    pub fn ghs(d: f32, b: f32, sp: f32) -> Self {
+        Self {
+            method: StretchMethod::Ghs {
+                d,
+                b,
+                sp,
+                lp: 0.0,
+                hp: 1.0,
+            },
+            color: ColorMode::ColorPreserving,
+        }
+    }
+
     /// Panic if any parameter is out of range. Called by [`stretch`]; public so a caller can fail
     /// fast before doing expensive work.
     pub fn validate(&self) {
@@ -117,6 +148,25 @@ impl StretchConfig {
             }
             StretchMethod::Asinh { beta } => {
                 assert!(beta > 0.0, "asinh beta must be > 0, got {beta}")
+            }
+            StretchMethod::Ghs { d, b, sp, lp, hp } => {
+                assert!(
+                    d >= 0.0 && d.is_finite(),
+                    "ghs d must be a finite value >= 0, got {d}"
+                );
+                assert!(b.is_finite(), "ghs b must be finite, got {b}");
+                assert!(
+                    (0.0..=1.0).contains(&sp),
+                    "ghs sp must be in [0, 1], got {sp}"
+                );
+                assert!(
+                    (0.0..=sp).contains(&lp),
+                    "ghs lp must be in [0, sp], got {lp}"
+                );
+                assert!(
+                    (sp..=1.0).contains(&hp),
+                    "ghs hp must be in [sp, 1], got {hp}"
+                );
             }
         }
     }
@@ -143,24 +193,47 @@ pub fn stretch(image: &mut AstroImage, config: StretchConfig) {
     config.validate();
     match config.color {
         ColorMode::ColorPreserving => {
-            // Statistics come from the combined intensity (one curve for the whole image).
-            let curve = match config.method {
-                StretchMethod::Asinh { beta } => Curve::Asinh(AsinhCurve::new(beta)),
-                method => build_curve(&mut image.intensity_plane().into_vec(), method),
-            };
+            // Auto methods derive the curve from the combined intensity (one curve for the image).
+            let curve = explicit_curve(config.method).unwrap_or_else(|| {
+                build_curve(
+                    &mut subsample(image.intensity_plane().pixels()),
+                    config.method,
+                )
+            });
             apply_color_preserving(image, curve);
         }
         ColorMode::PerChannel => {
-            // Each channel gets its own curve from its own statistics.
+            // Each channel gets its own curve from its own statistics (auto methods only).
             for c in 0..image.channels() {
-                let curve = match config.method {
-                    StretchMethod::Asinh { beta } => Curve::Asinh(AsinhCurve::new(beta)),
-                    method => build_curve(&mut image.channel(c).to_vec(), method),
-                };
+                let curve = explicit_curve(config.method).unwrap_or_else(|| {
+                    build_curve(&mut subsample(image.channel(c).pixels()), config.method)
+                });
                 apply_per_channel(image.channel_mut(c).pixels_mut(), curve);
             }
         }
     }
+}
+
+/// Curves that need no image statistics — built straight from their parameters. Returns `None` for
+/// the auto methods, which [`build_curve`] derives from a sample set instead.
+fn explicit_curve(method: StretchMethod) -> Option<Curve> {
+    match method {
+        StretchMethod::Asinh { beta } => Some(Curve::Asinh(AsinhCurve::new(beta))),
+        StretchMethod::Ghs { d, b, sp, lp, hp } => {
+            Some(Curve::Ghs(GhsCurve::new(d, b, sp, lp, hp)))
+        }
+        StretchMethod::AutoStf { .. } | StretchMethod::AutoAsinh { .. } => None,
+    }
+}
+
+/// Cap on the sample count for the auto methods' median/MAD. A robust median+MAD converges far below
+/// this, so a uniform-stride subsample is statistically identical to selecting over every pixel —
+/// and avoids two full-resolution quickselects (matches `color_calibration` / `denoise`).
+const MAX_STRETCH_SAMPLES: usize = 1_000_000;
+
+fn subsample(pixels: &[f32]) -> Vec<f32> {
+    let stride = (pixels.len() / MAX_STRETCH_SAMPLES).max(1);
+    pixels.iter().step_by(stride).copied().collect()
 }
 
 /// A prepared tone curve, selected once from the [`StretchMethod`]. Implementors clamp their
@@ -237,6 +310,119 @@ impl ToneCurve for AsinhCurve {
     }
 }
 
+/// `b`-special-cases collapse below this — `b = −1` (logarithmic) and `b = 0` (exponential) are
+/// genuine limits where the general forms divide by `b` or `b + 1`.
+const GHS_EPS: f32 = 1e-6;
+
+/// GHS base hyperbolic function `T(u)` for `u ≥ 0`, selected on `b` (see `ghs.md`). `T(0) = 0` in
+/// every case, which is what makes the curve continuous at the symmetry point.
+fn ghs_base_t(d: f32, b: f32, u: f32) -> f32 {
+    if (b + 1.0).abs() < GHS_EPS {
+        (1.0 + d * u).ln()
+    } else if b.abs() < GHS_EPS {
+        1.0 - (-d * u).exp()
+    } else if b < 0.0 {
+        (1.0 - (1.0 - b * d * u).powf((b + 1.0) / b)) / (d * (b + 1.0))
+    } else {
+        1.0 - (1.0 + b * d * u).powf(-1.0 / b)
+    }
+}
+
+/// Derivative `T'(u)` of [`ghs_base_t`] — the slope of the linear shadow/highlight tails.
+fn ghs_base_tp(d: f32, b: f32, u: f32) -> f32 {
+    if (b + 1.0).abs() < GHS_EPS {
+        d / (1.0 + d * u)
+    } else if b.abs() < GHS_EPS {
+        d * (-d * u).exp()
+    } else if b < 0.0 {
+        (1.0 - b * d * u).powf(1.0 / b)
+    } else {
+        d * (1.0 + b * d * u).powf(-(1.0 + b) / b)
+    }
+}
+
+/// Generalized Hyperbolic Stretch: the base curve [`ghs_base_t`] mirrored about `sp`, with linear
+/// shadow (`< lp`) and highlight (`> hp`) protection, normalized to map `[0, 1] → [0, 1]`. C¹ and
+/// monotonic. Four base evaluations are precomputed here; `eval` does two per pixel. See `ghs.md`.
+#[derive(Debug, Clone, Copy)]
+struct GhsCurve {
+    /// `d ≈ 0` ⇒ the transform is the identity; short-circuit (the normalization would be `0/0`).
+    identity: bool,
+    d: f32,
+    b: f32,
+    sp: f32,
+    lp: f32,
+    hp: f32,
+    /// `T(sp − lp)` / `T'(sp − lp)` — the shadow tail's intercept and slope.
+    t_sp_lp: f32,
+    tp_sp_lp: f32,
+    /// `T(hp − sp)` / `T'(hp − sp)` — the highlight tail's intercept and slope.
+    t_hp_sp: f32,
+    tp_hp_sp: f32,
+    /// `t0 = T1(0)` (raw output at 0); `inv_range = 1 / (T4(1) − T1(0))`.
+    t0: f32,
+    inv_range: f32,
+}
+
+impl GhsCurve {
+    fn new(d: f32, b: f32, sp: f32, lp: f32, hp: f32) -> Self {
+        let zero = Self {
+            identity: true,
+            d,
+            b,
+            sp,
+            lp,
+            hp,
+            t_sp_lp: 0.0,
+            tp_sp_lp: 0.0,
+            t_hp_sp: 0.0,
+            tp_hp_sp: 0.0,
+            t0: 0.0,
+            inv_range: 1.0,
+        };
+        if d < GHS_EPS {
+            return zero;
+        }
+        let t_sp_lp = ghs_base_t(d, b, sp - lp);
+        let tp_sp_lp = ghs_base_tp(d, b, sp - lp);
+        let t_hp_sp = ghs_base_t(d, b, hp - sp);
+        let tp_hp_sp = ghs_base_tp(d, b, hp - sp);
+        let t0 = -lp * tp_sp_lp - t_sp_lp; // T1(0)
+        let t1 = (1.0 - hp) * tp_hp_sp + t_hp_sp; // T4(1)
+        Self {
+            identity: false,
+            t_sp_lp,
+            tp_sp_lp,
+            t_hp_sp,
+            tp_hp_sp,
+            t0,
+            inv_range: 1.0 / (t1 - t0),
+            ..zero
+        }
+    }
+}
+
+impl ToneCurve for GhsCurve {
+    #[inline]
+    fn eval(&self, x: f32) -> f32 {
+        if self.identity {
+            return x.clamp(0.0, 1.0);
+        }
+        let raw = if x < self.lp {
+            // T1: linear, tangent to the mirrored base at lp.
+            self.tp_sp_lp * (x - self.lp) - self.t_sp_lp
+        } else if x < self.sp {
+            -ghs_base_t(self.d, self.b, self.sp - x) // T2: mirror below sp
+        } else if x < self.hp {
+            ghs_base_t(self.d, self.b, x - self.sp) // T3: base above sp
+        } else {
+            // T4: linear, tangent to the base at hp.
+            self.tp_hp_sp * (x - self.hp) + self.t_hp_sp
+        };
+        ((raw - self.t0) * self.inv_range).clamp(0.0, 1.0)
+    }
+}
+
 /// The curve chosen for a stretch. [`apply_color_preserving`] / [`apply_per_channel`] match this
 /// exactly once and then run a monomorphized loop, so the `Stf`/`Asinh` choice is never re-decided
 /// per pixel.
@@ -244,6 +430,7 @@ impl ToneCurve for AsinhCurve {
 enum Curve {
     Stf(StfCurve),
     Asinh(AsinhCurve),
+    Ghs(GhsCurve),
 }
 
 /// Midtones Transfer Function: a rational (Möbius) interpolation through `(0,0)`, `(m,0.5)`,
@@ -265,7 +452,11 @@ fn mtf(m: f32, x: f32) -> f32 {
 /// `β → 0` (strong, log-like) to `median` as `β → ∞` (near-linear). Bisect `log₁₀ β` to hit the
 /// target, which must lie in `(median, 1)`.
 fn solve_asinh_beta(median: f32, target_background: f32) -> f32 {
-    let target = target_background.clamp(median + 1e-4, 1.0 - 1e-4);
+    // The reachable target lies in `(median, 1)`. Cap the lower bound at the upper one so a
+    // near-white median (not expected on a linear stack, but possible per-channel) can't invert the
+    // clamp range and panic.
+    let hi = 1.0 - 1e-4;
+    let target = target_background.clamp((median + 1e-4).min(hi), hi);
     let (mut lo, mut hi) = (-5.0f32, 5.0f32);
     for _ in 0..50 {
         let mid = 0.5 * (lo + hi);
@@ -280,8 +471,9 @@ fn solve_asinh_beta(median: f32, target_background: f32) -> f32 {
     10.0f32.powf(0.5 * (lo + hi))
 }
 
-/// Build a curve for a statistics-driven method from a (reorderable) sample set. Explicit-`β`
-/// `Asinh` is handled by the callers before any samples are materialized, so it never reaches here.
+/// Build a curve for a statistics-driven (auto) method from a (reorderable) sample set. The explicit
+/// methods are resolved by [`explicit_curve`] before any samples are materialized, so they never
+/// reach here.
 fn build_curve(samples: &mut [f32], method: StretchMethod) -> Curve {
     match method {
         StretchMethod::AutoStf {
@@ -300,7 +492,9 @@ fn build_curve(samples: &mut [f32], method: StretchMethod) -> Curve {
             let (median, _) = median_and_mad_f32_mut(samples);
             Curve::Asinh(AsinhCurve::new(solve_asinh_beta(median, target_background)))
         }
-        StretchMethod::Asinh { beta } => Curve::Asinh(AsinhCurve::new(beta)),
+        StretchMethod::Asinh { .. } | StretchMethod::Ghs { .. } => {
+            unreachable!("explicit methods are built by explicit_curve, not build_curve")
+        }
     }
 }
 
@@ -309,6 +503,7 @@ fn apply_per_channel(pixels: &mut [f32], curve: Curve) {
     match curve {
         Curve::Stf(c) => map_slice(pixels, c),
         Curve::Asinh(c) => map_slice(pixels, c),
+        Curve::Ghs(c) => map_slice(pixels, c),
     }
 }
 
@@ -322,6 +517,7 @@ fn apply_color_preserving(image: &mut AstroImage, curve: Curve) {
     match curve {
         Curve::Stf(c) => map_color_preserving(image, c),
         Curve::Asinh(c) => map_color_preserving(image, c),
+        Curve::Ghs(c) => map_color_preserving(image, c),
     }
 }
 

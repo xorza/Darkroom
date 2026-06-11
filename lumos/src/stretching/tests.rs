@@ -155,6 +155,117 @@ fn stf_shadow_sigmas_lower_the_black_point() {
     assert!(b3 < b1, "more shadow sigmas => lower black point");
 }
 
+// ---- Generalized Hyperbolic Stretch ----
+
+#[test]
+fn ghs_endpoints_and_monotonic_across_b_family() {
+    // Every b case (b=-1 log, b=0 exp, b>0 hyperbolic, general b<0) must map 0->0, 1->1, monotone.
+    for &b in &[-2.0f32, -1.4, -1.0, -0.3, 0.0, 0.5, 1.0, 3.0] {
+        for &d in &[0.5f32, 2.0, 6.0] {
+            let c = GhsCurve::new(d, b, 0.3, 0.0, 1.0);
+            assert!(c.eval(0.0).abs() < 1e-6, "f(0)=0 (b={b}, d={d})");
+            assert!((c.eval(1.0) - 1.0).abs() < 1e-5, "f(1)=1 (b={b}, d={d})");
+            let mut prev = f32::NEG_INFINITY;
+            for i in 0..=200 {
+                let y = c.eval(i as f32 / 200.0);
+                assert!(y >= prev - 1e-6, "monotonic (b={b}, d={d})");
+                prev = y;
+            }
+        }
+    }
+}
+
+#[test]
+fn ghs_identity_when_d_zero() {
+    let c = GhsCurve::new(0.0, 1.0, 0.3, 0.1, 0.9);
+    for &x in &[0.0f32, 0.05, 0.3, 0.5, 0.9, 1.0] {
+        assert!((c.eval(x) - x).abs() < 1e-6, "d=0 is the identity at {x}");
+    }
+}
+
+#[test]
+fn ghs_exponential_b0_hand_computed() {
+    // b=0, sp=lp=0, hp=1, D=2 reduces to f(x) = (1 - e^(-2x)) / (1 - e^(-2)).
+    let c = GhsCurve::new(2.0, 0.0, 0.0, 0.0, 1.0);
+    // f(0.5) = (1 - e^-1)/(1 - e^-2) = 0.632121/0.864665 = 0.731060.
+    assert!(
+        (c.eval(0.5) - 0.731060).abs() < 1e-4,
+        "f(0.5) = {}",
+        c.eval(0.5)
+    );
+    // f(0.25) = (1 - e^-0.5)/(1 - e^-2) = 0.393469/0.864665 = 0.455056.
+    assert!(
+        (c.eval(0.25) - 0.455056).abs() < 1e-4,
+        "f(0.25) = {}",
+        c.eval(0.25)
+    );
+}
+
+#[test]
+fn ghs_protection_tails_are_linear() {
+    let c = GhsCurve::new(3.0, 1.0, 0.5, 0.2, 0.8);
+    // f(0)=0 and the [0, lp] segment is linear, so f(lp/2) = 0.5·f(lp).
+    assert!(
+        (c.eval(0.1) - 0.5 * c.eval(0.2)).abs() < 1e-4,
+        "shadow tail linear from the origin"
+    );
+    // f(1)=1 and the [hp, 1] segment is linear, so f(0.9) = (f(0.8) + 1)/2.
+    assert!(
+        (c.eval(0.9) - 0.5 * (c.eval(0.8) + 1.0)).abs() < 1e-4,
+        "highlight tail linear to white"
+    );
+}
+
+#[test]
+fn ghs_continuous_at_breakpoints() {
+    // C¹ construction => no jumps at lp, sp, hp (b=-1.4 ~ asinh exercises the general b<0 form).
+    let c = GhsCurve::new(2.5, -1.4, 0.4, 0.15, 0.85);
+    for &bp in &[0.15f32, 0.4, 0.85] {
+        let (below, above) = (c.eval(bp - 1e-3), c.eval(bp + 1e-3));
+        assert!(
+            (above - below).abs() < 1e-2,
+            "continuous at {bp}: {below} vs {above}"
+        );
+    }
+}
+
+#[test]
+fn ghs_clamps_out_of_range_input() {
+    let c = GhsCurve::new(2.0, 1.0, 0.3, 0.0, 0.9);
+    assert_eq!(
+        c.eval(5.0),
+        1.0,
+        "above-1 input (a bright star) clamps to white"
+    );
+    assert_eq!(c.eval(-2.0), 0.0, "negative input clamps to black");
+}
+
+#[test]
+fn ghs_d_controls_strength() {
+    // With the symmetry point at the faint-signal level, stronger d lifts signal above sp higher
+    // (below sp the antisymmetric curve instead compresses toward black).
+    let weak = GhsCurve::new(1.0, 0.0, 0.1, 0.0, 1.0).eval(0.2);
+    let strong = GhsCurve::new(6.0, 0.0, 0.1, 0.0, 1.0).eval(0.2);
+    assert!(
+        strong > weak,
+        "stronger d lifts signal above sp more ({strong} > {weak})"
+    );
+}
+
+#[test]
+fn ghs_end_to_end_lifts_background_and_stays_in_range() {
+    let mut px: Vec<f32> = (0..90).map(|i| 0.04 + (i % 3) as f32 * 0.01).collect();
+    px.extend(std::iter::repeat_n(0.8f32, 10));
+    let mut img = gray(10, 10, px.clone());
+    stretch(&mut img, StretchConfig::ghs(5.0, 0.0, 0.1));
+    let out = img.channel(0).to_vec();
+    for &v in &out {
+        assert!((0.0..=1.0).contains(&v), "output in [0,1]: {v}");
+    }
+    assert!(median_of(&out) > median_of(&px), "background lifted");
+    assert!(out[95] > out[0], "stars stay brighter than the background");
+}
+
 // ---- color preservation ----
 
 #[test]
