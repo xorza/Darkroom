@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use palantir::{HostHandle, Ui};
+use palantir::Ui;
 use scenarium::prelude::{FuncLib, Graph as CoreGraph};
 
 use crate::core::document::Document;
@@ -11,6 +11,8 @@ use crate::core::script::{ScriptConfig, ScriptMessage};
 use crate::core::theme_pref::ThemeChoice;
 use crate::core::wake::Wake;
 use crate::core::worker::WorkerEvent;
+use crate::gui::HostHandle;
+use crate::gui::MAIN_WINDOW;
 use crate::gui::run_state::RunState;
 use crate::gui::theme::Theme;
 
@@ -79,7 +81,7 @@ impl App {
         // `crate::core::wake`).
         let wake: Wake = {
             let handle = handle.clone();
-            Arc::new(move || handle.request_repaint())
+            Arc::new(move || handle.request_repaint(MAIN_WINDOW))
         };
         let mut app = Self {
             editor: Editor::new(document),
@@ -173,7 +175,7 @@ impl App {
 }
 
 impl palantir::App for App {
-    fn frame(&mut self, ui: &mut Ui) {
+    fn frame(&mut self, _win: palantir::WindowToken, ui: &mut Ui) {
         // Drain anything the worker posted since last frame, before the
         // editor rebuilds its scene so the status/log projections it
         // reads reflect the latest run.

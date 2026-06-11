@@ -11,7 +11,7 @@
 //!
 //! [`App`]: crate::gui::app::App
 
-use palantir::{HostHandle, Ui};
+use palantir::Ui;
 use scenarium::prelude::{FuncLib, SubgraphDef};
 
 use crate::core::document::{Document, GraphRef};
@@ -19,6 +19,7 @@ use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::intent::{Intent, apply_step, build_step};
 use crate::core::theme_pref::ThemeChoice;
 use crate::core::worker::ValueRequest;
+use crate::gui::HostHandle;
 use crate::gui::UiAction;
 use crate::gui::main_window::MainWindow;
 use crate::gui::menu_bar::MenuCommand;

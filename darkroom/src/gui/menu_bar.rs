@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
 use glam::Vec2;
-use palantir::{
-    Button, Configure, ContextMenu, HostHandle, MenuItem, Panel, PopupHandle, Sizing, Spacing, Ui,
-};
+use palantir::{Button, Configure, ContextMenu, MenuItem, Panel, PopupHandle, Sizing, Spacing, Ui};
 use scenarium::data::FsPathConfig;
 use scenarium::prelude::NodeId;
 
 use crate::core::theme_pref::ThemeChoice;
+use crate::gui::HostHandle;
 
 /// A command surfaced by the menu bar. `App` performs the side effect
 /// (file dialog + read/write + doc/theme swap + config persist)

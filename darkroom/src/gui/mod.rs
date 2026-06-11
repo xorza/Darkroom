@@ -13,6 +13,19 @@ pub(crate) mod scene;
 pub(crate) mod theme;
 
 use crate::core::document::GraphRef;
+use crate::gui::app::App;
+use palantir::WindowToken;
+
+/// darkroom is single-window; this is the token its one OS window is
+/// addressed by — passed to `WinitHost::new`, handed back to
+/// `App::frame`, and used for `HostHandle::request_repaint`.
+pub(crate) const MAIN_WINDOW: WindowToken = WindowToken(0);
+
+/// Palantir's `HostHandle` is generic over the app type (only its
+/// `run_on_main` uses it); darkroom has exactly one app, so alias it once
+/// here and let widget signatures stay `HostHandle` instead of repeating
+/// `<App>`.
+pub(crate) type HostHandle = palantir::HostHandle<App>;
 
 /// A navigation request surfaced from last frame's responses (tab/chip
 /// clicks) and applied by `App` in the navigation phase. Decoupled from

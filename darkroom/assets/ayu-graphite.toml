@@ -97,7 +97,7 @@ Solid = "#00000000"
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2
-family = "Sans"
+family = "SegoeUi"
 
 [palantir_theme]
 window_clear = "#1a1a1a"
@@ -159,7 +159,7 @@ Solid = "#aaaaa82e"
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2
-family = "Sans"
+family = "SegoeUi"
 
 [palantir_theme.menu_button]
 padding = [8.0, 4.0]
@@ -175,7 +175,7 @@ Solid = "#343434d9"
 font_size_px = 13.0
 color = "#e2dfd3"
 line_height_mult = 1.2
-family = "Sans"
+family = "SegoeUi"
 
 [palantir_theme.menu_button.hovered.background]
 corners = 4.0
@@ -187,7 +187,7 @@ Solid = "#3e3e3e"
 font_size_px = 13.0
 color = "#e2dfd3"
 line_height_mult = 1.2
-family = "Sans"
+family = "SegoeUi"
 
 [palantir_theme.menu_button.pressed.background]
 corners = 4.0
@@ -199,7 +199,7 @@ Solid = "#4b4b4b"
 font_size_px = 13.0
 color = "#e2dfd3"
 line_height_mult = 1.2
-family = "Sans"
+family = "SegoeUi"
 
 [palantir_theme.menu_button.disabled.background]
 corners = 4.0
@@ -211,7 +211,7 @@ Solid = "#343434d9"
 font_size_px = 13.0
 color = "#e2dfd3"
 line_height_mult = 1.2
-family = "Sans"
+family = "SegoeUi"
 
 [palantir_theme.checkbox]
 indicator = "#1a1a1a"
@@ -272,7 +272,7 @@ Solid = "#aaaaa82e"
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2
-family = "Sans"
+family = "SegoeUi"
 
 [palantir_theme.checkbox.checked.normal.background]
 corners = 3.0
@@ -308,7 +308,7 @@ Solid = "#9adbfb73"
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2
-family = "Sans"
+family = "SegoeUi"
 
 [palantir_theme.radio]
 indicator = "#1a1a1a"
@@ -369,7 +369,7 @@ Solid = "#aaaaa82e"
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2
-family = "Sans"
+family = "SegoeUi"
 
 [palantir_theme.radio.checked.normal.background]
 corners = 8.0
@@ -405,7 +405,7 @@ Solid = "#9adbfb73"
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2
-family = "Sans"
+family = "SegoeUi"
 
 [palantir_theme.switch]
 indicator = "#ffffff"
@@ -466,7 +466,7 @@ Solid = "#aaaaa82e"
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2
-family = "Sans"
+family = "SegoeUi"
 
 [palantir_theme.switch.checked.normal.background]
 corners = 10.0
@@ -502,7 +502,7 @@ Solid = "#9adbfb73"
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2
-family = "Sans"
+family = "SegoeUi"
 
 [palantir_theme.switch.anim]
 kind = "spring"
@@ -567,7 +567,7 @@ Solid = "#aaaaa82e"
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2
-family = "Sans"
+family = "SegoeUi"
 
 [palantir_theme.context_menu]
 padding = 4.0
@@ -594,7 +594,7 @@ padding = [10.0, 6.0]
 font_size_px = 13.0
 color = "#e2dfd3"
 line_height_mult = 1.2
-family = "Sans"
+family = "SegoeUi"
 
 [palantir_theme.context_menu.item.hovered.background]
 corners = 4.0
@@ -606,13 +606,13 @@ Solid = "#3e3e3e"
 font_size_px = 13.0
 color = "#e2dfd3"
 line_height_mult = 1.2
-family = "Sans"
+family = "SegoeUi"
 
 [palantir_theme.context_menu.item.disabled.text]
 font_size_px = 13.0
 color = "#878a8d"
 line_height_mult = 1.2
-family = "Sans"
+family = "SegoeUi"
 
 [palantir_theme.tooltip]
 padding = [6.0, 4.0]
@@ -643,7 +643,7 @@ inset = false
 font_size_px = 13.0
 color = "#e2dfd3"
 line_height_mult = 1.2
-family = "Sans"
+family = "SegoeUi"
 
 [palantir_theme.tooltip.max_size]
 w = 280.0
@@ -664,4 +664,4 @@ rail_thickness = 4.0
 font_size_px = 16.0
 color = "#e2dfd3"
 line_height_mult = 1.2
-family = "Sans"
+family = "SegoeUi"

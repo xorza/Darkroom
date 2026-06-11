@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::core::script::{DEFAULT_BIND, ScriptConfig, TcpScriptConfig};
 use crate::core::session::Session;
 use crate::core::wake;
+use crate::gui::MAIN_WINDOW;
 use crate::gui::app::App;
 
 /// darkroom — node-graph editor. The optional subcommand picks the
@@ -131,9 +132,11 @@ fn main() {
 /// Launch the Palantir desktop editor. The winit event loop owns the main
 /// thread, so this doesn't return until the window closes.
 fn run_gui(script_cfg: ScriptConfig) {
-    WinitHost::new(WinitHostConfig::new("darkroom"), move |ui, handle| {
-        App::new(ui, handle, script_cfg)
-    })
+    WinitHost::new(
+        MAIN_WINDOW,
+        WinitHostConfig::new("darkroom"),
+        move |ui, handle| App::new(ui, handle, script_cfg),
+    )
     .run();
 }
 

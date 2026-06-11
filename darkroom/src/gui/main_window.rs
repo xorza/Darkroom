@@ -1,9 +1,10 @@
 use std::mem::take;
 
-use palantir::{Background, Configure, HostHandle, Panel, Sizing, Ui};
+use palantir::{Background, Configure, Panel, Sizing, Ui};
 
 use crate::core::document::{Document, GraphRef};
 use crate::core::edit::intent::Intent;
+use crate::gui::HostHandle;
 use crate::gui::UiAction;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::GraphUI;
