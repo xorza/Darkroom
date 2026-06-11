@@ -25,10 +25,13 @@
 pub(crate) mod color_calibration;
 pub(crate) mod concurrency;
 pub(crate) mod denoise;
+pub(crate) mod hdr;
 pub(crate) mod io;
+pub(crate) mod local_contrast;
 pub(crate) mod math;
 pub(crate) mod stacking;
 pub(crate) mod stretching;
+pub(crate) mod wavelet;
 
 #[cfg(test)]
 pub mod testing;
@@ -84,3 +87,7 @@ pub use stretching::{ColorMode, StretchConfig, StretchMethod, stretch};
 pub use color_calibration::{ScnrMethod, neutralize_background, scnr};
 
 pub use denoise::{DenoiseConfig, Threshold, denoise};
+
+pub use local_contrast::{LocalContrastConfig, enhance_local_contrast};
+
+pub use hdr::{HdrConfig, compress_dynamic_range};

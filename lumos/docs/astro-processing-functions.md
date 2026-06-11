@@ -51,8 +51,8 @@ Modern deep-sky processing is "stars vs everything else" — separate, process i
 | STF / MTF auto-stretch | — | ✅ | `stretching::AutoStf`. |
 | Colour-preserving arcsinh | — | ✅ | `stretching::AutoAsinh` / `Asinh`. |
 | **Generalized Hyperbolic Stretch (GHS)** | ★★ | ✅ | `stretching::StretchMethod::Ghs` (+ `stretching/ghs.md`) — designer stretch with independent control of **where** contrast lands: strength `D`, local intensity `b`, symmetry/focus point `sp`, shadow/highlight protection `lp`/`hp`. = PI/Siril *GHS*. (Auto-`sp`-from-background variant still open.) |
-| **HDR multiscale transform** | ★★ | 🔲 | Compress **local** dynamic range across scales so an overexposed core (M42, galaxy cores) and the faint outskirts are both visible in one image. Multiscale (wavelet) — decompose, attenuate the large-scale luminance, recombine. Post-stretch. = PI *HDRMultiscaleTransform*, StarTools *HDR*. |
-| **Local contrast enhancement (LHE / CLAHE)** | ★★ | 🔲 | Large-kernel **Contrast-Limited Adaptive Histogram Equalization** to bring out medium-scale structure — dust lanes, nebula filaments, spiral arms. Astro use is the large-radius regime. = PI *LocalHistogramEqualization*, StarTools *Contrast*. |
+| **HDR multiscale transform** | ★★ | ✅ | `hdr::compress_dynamic_range` (+ `hdr/README.md`) — à trous starlet, attenuate the coarse residual toward its mean to compress the bright core's large-scale glow while preserving fine detail. Post-stretch. = PI *HDRMultiscaleTransform*, StarTools *HDR*. |
+| **Local contrast enhancement (LHE / CLAHE)** | ★★ | ✅ | `local_contrast::enhance_local_contrast` (+ `local_contrast/README.md`) — tiled Contrast-Limited Adaptive Histogram Equalization (clip-limited, bilinear-blended) for medium-scale structure: dust lanes, rifts, filaments. = PI *LocalHistogramEqualization*, StarTools *Contrast*. |
 | Masked stretch | ★ | 🔲 | Stretch while protecting already-bright regions via a luminance mask (keeps star cores/bright nebula from blowing out). |
 
 ## D. Colour & channel combination
@@ -68,7 +68,7 @@ Modern deep-sky processing is "stars vs everything else" — separate, process i
 
 | Fn | Pri | Status | What it does |
 |---|---|---|---|
-| **Multiscale (wavelet) sharpening** | ★★ | ◐ | Scale-selective detail **boost** — decompose with the à trous starlet, amplify chosen scales, recombine. **Reuses the exact transform `denoise/` already implements** (denoise attenuates small coefficients; sharpening amplifies them). = PI *MultiscaleLinearTransform / MMT*, Siril *wavelets*. Low cost given the existing code. |
+| **Multiscale (wavelet) sharpening** | ★★ | ◐ | Scale-selective detail **boost** — amplify chosen layers, recombine. **The starlet is now a shared `wavelet::StarletTransform`** (forward/reconstruct), used by `denoise` (threshold) and `hdr` (compress); sharpening is the same transform with layers *amplified*. = PI *MultiscaleLinearTransform / MMT*, Siril *wavelets*. Nearly free now. |
 
 ## F. Composition & multi-frame (astro-specific)
 
@@ -89,7 +89,7 @@ If the goal is "linear master → nice picture," the highest-leverage additions,
 3. **Star removal / starless separation** (★★★) — unlocks the modern stretch-the-nebula-hard workflow. (Classical first; AI later.)
 4. **Deconvolution** (★★★) — reuses the star/PSF machinery the detector already has.
 5. **Multiscale sharpening** (★★) — small, high-impact, reuses the `denoise/` starlet directly (amplify scales instead of attenuating). (**GHS stretch** ✅ done.)
-6. **HDR multiscale** + **local contrast** (★★) — reveal cores and structure.
+6. **HDR multiscale** + **local contrast** (★★) — reveal cores and structure. ✅ both done.
 7. **LRGB / narrowband combination** (★★) — when targeting those acquisition styles.
 
 The cluster **3–5** is where lumos's existing assets (star detection, the à trous transform, the

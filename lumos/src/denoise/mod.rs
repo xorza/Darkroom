@@ -14,12 +14,10 @@ use rayon::prelude::*;
 
 use crate::io::astro_image::AstroImage;
 use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
+use crate::wavelet::{atrous_smooth, max_scales};
 
 #[cfg(test)]
 mod tests;
-
-/// B3-spline low-pass filter `[1, 4, 6, 4, 1] / 16` — the separable à trous smoothing kernel.
-const B3: [f32; 5] = [1.0 / 16.0, 4.0 / 16.0, 6.0 / 16.0, 4.0 / 16.0, 1.0 / 16.0];
 
 /// Subsample cap for the per-scale noise estimate (uniform stride above this; exact below). A robust
 /// MAD converges far below this, matching `color_calibration`'s subsampled-background precedent.
@@ -128,16 +126,6 @@ pub fn denoise(image: &mut AstroImage, config: DenoiseConfig) {
     }
 }
 
-/// Largest scale count `J` for which the coarsest hole step stays within the image: `2^J ≤ min(w,h)`.
-/// Beyond it the à trous kernel spans the whole frame and the extra scales do nothing useful.
-fn max_scales(width: usize, height: usize) -> usize {
-    let min_dim = width.min(height);
-    if min_dim < 2 {
-        return 1;
-    }
-    min_dim.ilog2() as usize
-}
-
 /// Reusable buffers for [`denoise_plane`], allocated once and shared across channels.
 #[derive(Debug)]
 struct DenoiseScratch {
@@ -208,96 +196,6 @@ fn denoise_plane(
 
         std::mem::swap(c_curr, c_next); // c_curr = c_{j+1}
     }
-}
-
-/// One starlet smoothing step: separable B3-spline à trous convolution with hole spacing `step`,
-/// `src → dst` using `tmp` as the horizontal-pass intermediate.
-fn atrous_smooth(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, tmp: &mut Buffer2<f32>, step: usize) {
-    convolve_horizontal(src, tmp, step);
-    convolve_vertical(tmp, dst, step);
-}
-
-/// Horizontal B3-spline convolution with taps at `x ± step` and `x ± 2·step` (mirror boundary).
-fn convolve_horizontal(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: usize) {
-    let width = src.width();
-    let wi = width as isize;
-    let s = step as isize;
-    dst.pixels_mut()
-        .par_chunks_mut(width)
-        .enumerate()
-        .for_each(|(y, out)| {
-            let row = src.row(y);
-            for x in 0..width {
-                out[x] = if x >= 2 * step && x + 2 * step < width {
-                    B3[0] * row[x - 2 * step]
-                        + B3[1] * row[x - step]
-                        + B3[2] * row[x]
-                        + B3[3] * row[x + step]
-                        + B3[4] * row[x + 2 * step]
-                } else {
-                    let xi = x as isize;
-                    B3[0] * row[reflect(xi - 2 * s, wi)]
-                        + B3[1] * row[reflect(xi - s, wi)]
-                        + B3[2] * row[x]
-                        + B3[3] * row[reflect(xi + s, wi)]
-                        + B3[4] * row[reflect(xi + 2 * s, wi)]
-                };
-            }
-        });
-}
-
-/// Vertical B3-spline convolution with taps at `y ± step` and `y ± 2·step` (mirror boundary).
-fn convolve_vertical(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: usize) {
-    let width = src.width();
-    let height = src.height();
-    let hi = height as isize;
-    let s = step as isize;
-    dst.pixels_mut()
-        .par_chunks_mut(width)
-        .enumerate()
-        .for_each(|(y, out)| {
-            let (r0, r1, r2, r3, r4) = if y >= 2 * step && y + 2 * step < height {
-                (
-                    src.row(y - 2 * step),
-                    src.row(y - step),
-                    src.row(y),
-                    src.row(y + step),
-                    src.row(y + 2 * step),
-                )
-            } else {
-                let yi = y as isize;
-                (
-                    src.row(reflect(yi - 2 * s, hi)),
-                    src.row(reflect(yi - s, hi)),
-                    src.row(y),
-                    src.row(reflect(yi + s, hi)),
-                    src.row(reflect(yi + 2 * s, hi)),
-                )
-            };
-            for x in 0..width {
-                out[x] =
-                    B3[0] * r0[x] + B3[1] * r1[x] + B3[2] * r2[x] + B3[3] * r3[x] + B3[4] * r4[x];
-            }
-        });
-}
-
-/// Mirror-reflect an index into `[0, n)` (whole-sample symmetric, no edge repeat), folding
-/// arbitrary out-of-range values so even the coarsest hole step is safe on small images.
-#[inline]
-fn reflect(i: isize, n: isize) -> usize {
-    debug_assert!(n >= 1);
-    if n == 1 {
-        return 0;
-    }
-    let period = 2 * (n - 1);
-    let mut m = i % period;
-    if m < 0 {
-        m += period;
-    }
-    if m >= n {
-        m = period - m;
-    }
-    m as usize
 }
 
 /// Robust per-scale noise σ: `1.4826 · MAD` of a uniform-stride subsample of the wavelet plane.

@@ -5,7 +5,9 @@
 //!   (`cargo test -p lumos --release bench_full_pipeline -- --ignored --nocapture`).
 //! - [`color_calibration`] — background neutralization + SCNR on the bundled stacked light frame.
 //! - [`denoise`] — linear-domain wavelet denoising of the bundled stacked light frame.
+//! - [`stretching`] — STF/asinh/GHS display stretches of the bundled stacked light frame.
 
 mod color_calibration;
 mod denoise;
 mod pipeline_bench;
+mod stretching;

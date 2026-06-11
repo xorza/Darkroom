@@ -449,6 +449,48 @@ impl AstroImage {
         }
     }
 
+    /// Remap pixel intensity from the `intensity` plane to the `mapped` plane (both precomputed over
+    /// this image, matching its dimensions) in place. Hue-preserving: RGB channels are scaled by the
+    /// gain `mapped/intensity`, with a max-cap so a brightened channel can't clip past white and
+    /// shift hue; grayscale takes `mapped` directly. Output clamped to `[0, 1]`. Used by the
+    /// display-domain enhancers (`local_contrast`, `hdr`).
+    pub(crate) fn apply_intensity_remap(
+        &mut self,
+        intensity: &Buffer2<f32>,
+        mapped: &Buffer2<f32>,
+    ) {
+        match &mut self.pixels {
+            PixelData::L(buf) => buf
+                .pixels_mut()
+                .par_iter_mut()
+                .zip(mapped.pixels().par_iter())
+                .for_each(|(p, &m)| *p = m.clamp(0.0, 1.0)),
+            PixelData::Rgb([r, g, b]) => {
+                let (rp, gp, bp) = (r.pixels_mut(), g.pixels_mut(), b.pixels_mut());
+                rp.par_iter_mut()
+                    .zip(gp.par_iter_mut())
+                    .zip(bp.par_iter_mut())
+                    .zip(intensity.pixels().par_iter())
+                    .zip(mapped.pixels().par_iter())
+                    .for_each(|((((rv, gv), bv), &i), &m)| {
+                        if i <= 0.0 {
+                            return;
+                        }
+                        let gain = m / i;
+                        let (mut nr, mut ng, mut nb) = (*rv * gain, *gv * gain, *bv * gain);
+                        let maxc = nr.max(ng).max(nb);
+                        if maxc > 1.0 {
+                            let s = 1.0 / maxc;
+                            nr *= s;
+                            ng *= s;
+                            nb *= s;
+                        }
+                        (*rv, *gv, *bv) = (nr.max(0.0), ng.max(0.0), nb.max(0.0));
+                    });
+            }
+        }
+    }
+
     // ------------------------------------------------------------------------
     // Statistics
     // ------------------------------------------------------------------------

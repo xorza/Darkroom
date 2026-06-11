@@ -1,6 +1,6 @@
-use super::{DenoiseConfig, Threshold, atrous_smooth, denoise, max_scales, reflect};
+use super::{DenoiseConfig, Threshold, denoise};
 use crate::io::astro_image::{AstroImage, ImageDimensions};
-use common::{Buffer2, Vec2us};
+use common::Vec2us;
 
 /// Deterministic xorshift64 + Box-Muller Gaussian, so noise tests are reproducible without a dep.
 struct Rng(u64);
@@ -60,38 +60,6 @@ fn noisy(width: usize, height: usize, bg: f32, sigma: f32, seed: u64) -> Vec<f32
 }
 
 #[test]
-fn reflect_mirrors_indices() {
-    let n = 5; // period = 2*(5-1) = 8
-    // interior unchanged
-    assert_eq!(reflect(0, n), 0);
-    assert_eq!(reflect(4, n), 4);
-    // left mirror (no edge repeat): -1->1, -2->2, -3->3
-    assert_eq!(reflect(-1, n), 1);
-    assert_eq!(reflect(-2, n), 2);
-    assert_eq!(reflect(-3, n), 3);
-    // right mirror: 5->3, 6->2, 7->1, 8->0
-    assert_eq!(reflect(5, n), 3);
-    assert_eq!(reflect(6, n), 2);
-    assert_eq!(reflect(7, n), 1);
-    assert_eq!(reflect(8, n), 0);
-    // far out-of-range folds through the period: 10 -> 10%8=2 ; -10 -> +6 -> 8-6=2
-    assert_eq!(reflect(10, n), 2);
-    assert_eq!(reflect(-10, n), 2);
-    // degenerate single-column axis
-    assert_eq!(reflect(3, 1), 0);
-    assert_eq!(reflect(-3, 1), 0);
-}
-
-#[test]
-fn max_scales_bounds_by_dimension() {
-    assert_eq!(max_scales(1, 1), 1);
-    assert_eq!(max_scales(2, 2), 1); // floor(log2 2) = 1
-    assert_eq!(max_scales(5, 5), 2); // floor(log2 5) = 2
-    assert_eq!(max_scales(8, 8), 3); // floor(log2 8) = 3
-    assert_eq!(max_scales(1000, 8), 3); // bounded by the smaller dimension
-}
-
-#[test]
 fn threshold_apply_hand_computed() {
     // Hard: keep |w| >= t, else 0.
     assert_eq!(Threshold::Hard.apply(0.3, 0.2), 0.3);
@@ -102,54 +70,6 @@ fn threshold_apply_hand_computed() {
     assert!((Threshold::Soft.apply(0.3, 0.2) - 0.1).abs() < 1e-6);
     assert!((Threshold::Soft.apply(-0.3, 0.2) + 0.1).abs() < 1e-6);
     assert_eq!(Threshold::Soft.apply(0.1, 0.2), 0.0);
-}
-
-#[test]
-fn atrous_smooth_preserves_constant() {
-    // The B3 kernel sums to 1, so a flat field is reproduced exactly at every hole spacing.
-    let (w, h) = (8, 6);
-    let src = Buffer2::new(w, h, vec![0.42; w * h]);
-    let mut dst = Buffer2::new_default(w, h);
-    let mut tmp = Buffer2::new_default(w, h);
-    for step in [1usize, 2, 4] {
-        atrous_smooth(&src, &mut dst, &mut tmp, step);
-        for &v in dst.pixels() {
-            assert!(
-                (v - 0.42).abs() < 1e-6,
-                "constant preserved at step {step}: {v}"
-            );
-        }
-    }
-}
-
-#[test]
-fn starlet_reconstruction_is_exact() {
-    // c_0 == c_J + Σ w_j (telescoping) — the property denoise_plane relies on to preserve the
-    // coarse residual implicitly.
-    let (w, h) = (17, 13);
-    let input = noisy(w, h, 0.5, 0.1, 99);
-    let scales = 4;
-
-    let mut c_curr = Buffer2::new(w, h, input.clone());
-    let mut c_next = Buffer2::new_default(w, h);
-    let mut tmp = Buffer2::new_default(w, h);
-    let mut acc = vec![0.0f32; w * h];
-    for j in 0..scales {
-        atrous_smooth(&c_curr, &mut c_next, &mut tmp, 1 << j);
-        for i in 0..w * h {
-            acc[i] += c_curr[i] - c_next[i]; // Σ w_j
-        }
-        std::mem::swap(&mut c_curr, &mut c_next);
-    }
-    for i in 0..w * h {
-        acc[i] += c_curr[i]; // + residual c_J
-        assert!(
-            (acc[i] - input[i]).abs() < 1e-4,
-            "reconstruct[{i}] = {} vs input {}",
-            acc[i],
-            input[i]
-        );
-    }
 }
 
 #[test]
