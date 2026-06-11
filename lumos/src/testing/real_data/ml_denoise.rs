@@ -1,36 +1,12 @@
-use std::path::PathBuf;
-
-use common::Vec2us;
-
-use crate::io::astro_image::{AstroImage, ImageDimensions};
+use super::ml_support::{center_crop, onnx_weights, stretched_master};
+use crate::AstroImage;
 use crate::ml::backend::TiledOnnxConfig;
 use crate::ml::denoise::ml_denoise;
-use crate::testing::{calibration_dir, init_tracing, save_png};
-use crate::{StretchConfig, neutralize_background, stretch};
-
-/// Copy a `cw×ch` sub-region starting at `(x0, y0)` into a fresh image.
-fn crop(image: &AstroImage, x0: usize, y0: usize, cw: usize, ch: usize) -> AstroImage {
-    let iw = image.width();
-    let channels: Vec<Vec<f32>> = (0..image.channels())
-        .map(|c| {
-            let src = image.channel(c).pixels();
-            let mut out = Vec::with_capacity(cw * ch);
-            for yy in 0..ch {
-                let r = (y0 + yy) * iw + x0;
-                out.extend_from_slice(&src[r..r + cw]);
-            }
-            out
-        })
-        .collect();
-    AstroImage::from_planar_channels(
-        ImageDimensions::new(Vec2us::new(cw, ch), image.channels()),
-        channels,
-    )
-}
+use crate::testing::{init_tracing, save_png};
 
 /// Mean |adjacent-pixel difference| of the intensity — a high-frequency noise proxy (slow gradients
 /// cancel; pixel-scale grain is what a denoiser removes).
-fn highfreq_noise(image: &AstroImage) -> f32 {
+fn mean_adjacent_diff(image: &AstroImage) -> f32 {
     let plane = image.intensity_plane();
     let w = plane.width();
     let px = plane.pixels();
@@ -52,40 +28,20 @@ fn highfreq_noise(image: &AstroImage) -> f32 {
 #[cfg_attr(not(feature = "real-data"), ignore)]
 fn deepsnr_denoises_a_crop() {
     init_tracing();
-    let weights = std::env::var_os("DEEPSNR_ONNX")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/DeepSNR_weights_v2.onnx")
-        });
-    if !weights.exists() {
-        eprintln!(
-            "DeepSNR weights not found at {} (set DEEPSNR_ONNX or drop the .onnx there); skipping",
-            weights.display()
-        );
+    let Some(weights) = onnx_weights("DEEPSNR_ONNX", "DeepSNR_weights_v2.onnx") else {
         return;
-    }
+    };
 
-    // CNN denoisers want stretched display data in [0,1]: neutralize + stretch first.
-    let mut img =
-        AstroImage::from_file(calibration_dir().join("stacked_light.tiff")).expect("load");
-    neutralize_background(&mut img);
-    stretch(&mut img, StretchConfig::auto_stf());
-
-    let (cw, ch) = (1024, 1024);
-    let crop = crop(
-        &img,
-        (img.width() - cw) / 2,
-        (img.height() - ch) / 2,
-        cw,
-        ch,
-    );
+    // CNN denoisers want stretched display data in [0,1].
+    let img = stretched_master();
+    let crop = center_crop(&img, 1024, 1024);
     save_png(&crop, "ml_denoise/input.png");
 
     let denoised = ml_denoise(&crop, &TiledOnnxConfig::new(weights)).expect("denoise succeeds");
     save_png(&denoised, "ml_denoise/denoised.png");
 
-    let in_hf = highfreq_noise(&crop);
-    let out_hf = highfreq_noise(&denoised);
+    let in_hf = mean_adjacent_diff(&crop);
+    let out_hf = mean_adjacent_diff(&denoised);
     eprintln!("high-frequency noise: {in_hf:.5} -> {out_hf:.5}");
     assert!(
         out_hf < in_hf,
