@@ -6,8 +6,6 @@ description = "Astronomical image-processing pipeline: RAW/FITS decode, calibrat
 
 [features]
 real-data = []
-# ML-based filters (star removal, denoise, …) via an ONNX Runtime backend (ort). Off by default —
-# pulls in onnxruntime. Models are NOT bundled; the caller supplies their own ONNX weights.
 ml = ["dep:ort"]
 
 [dependencies]

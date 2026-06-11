@@ -17,7 +17,8 @@ use common::BitBuffer2;
 use common::Buffer2;
 use rayon::prelude::*;
 
-use crate::background_mesh::{TileGrid, cubic_spline_eval, solve_natural_spline_d2};
+use crate::background_mesh::TileGrid;
+use crate::background_mesh::spline::{cubic_spline_eval, solve_natural_spline_d2};
 use crate::stacking::star_detection::buffer_pool::BufferPool;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::mask_dilation::dilate_mask;
