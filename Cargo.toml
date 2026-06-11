@@ -198,3 +198,12 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.tract-transformers]
 opt-level = 3
+# tract's generic GEMM + array backends — the actual matmul/conv inner loops (the real hot path).
+[profile.dev.package.matrixmultiply]
+opt-level = 3
+[profile.dev.package.ndarray]
+opt-level = 3
+[profile.dev.package.num-traits]
+opt-level = 3
+[profile.dev.package.num-complex]
+opt-level = 3
