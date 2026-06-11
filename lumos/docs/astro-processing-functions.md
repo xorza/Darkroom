@@ -31,6 +31,7 @@ These run on the linear master and matter most — errors here are baked in befo
 | **Continuum subtraction** (narrowband) | ★★ | 🔲 | Isolate emission-line signal by subtracting a scaled, PSF-matched broadband/continuum: `NB − k·(BB − median(BB))`. Removes the stellar continuum bleeding through narrowband filters so faint nebulosity stands out. |
 | **Synthetic flat / residual flat-fielding** | ★ | ◐ | Derive a flat from the background model to correct residual vignetting/dust the calibration flat missed (StarTools *Wipe* does this as a by-product of gradient removal). Overlaps with gradient extraction. |
 | Denoise (starlet wavelet) | — | ✅ | `denoise/` — à trous wavelet thresholding. |
+| **ML denoise (CNN, display-domain)** | ★★ | ◐ | `ml::ml_denoise` (feature `ml`) — the same **ort (ONNX Runtime)** tiled backend as star removal; runs a caller-supplied *DeepSNR*-style `.onnx` on the **stretched** image. Verified end-to-end on DeepSNR v2 over the full frame. lumos ships **no model** (caller supplies weights). = *NoiseXTerminator*, GraXpert AI denoise. Note: runs **after** the stretch, not on the linear master. |
 | Background neutralization | — | ✅ | `color_calibration::neutralize_background`. |
 
 ## B. Star processing
@@ -39,7 +40,7 @@ Modern deep-sky processing is "stars vs everything else" — separate, process i
 
 | Fn | Pri | Status | What it does |
 |---|---|---|---|
-| **Star removal / starless separation** | ★★★ | ◐ | `ml::remove_stars` (feature `ml`, + `ml/README.md`) — **CNN backend working**: a pure-Rust **tract** ONNX runner (CPU), tiled 512² + feather-blended, returns starless + stars (unscreen). lumos ships **no model** (StarNet2/XTerminator licenses forbid it); the caller supplies their own `.onnx`. Verified end-to-end on StarNet2 weights. *Missing:* the license-free **classical morphological/inpainting** fallback. |
+| **Star removal / starless separation** | ★★★ | ◐ | `ml::remove_stars` (feature `ml`, + `ml/README.md`) — **CNN backend working**: an **ort (ONNX Runtime)** runner (CPU), tiled 512² + feather-blended, returns starless + stars (unscreen). lumos ships **no model** (StarNet2/XTerminator licenses forbid it); the caller supplies their own `.onnx`. Verified end-to-end on StarNet2 over the full frame (~60 s for 24 MP on the 4 P-cores of an M-series CPU — memory-bound, so it stays sequential). *Missing:* the license-free **classical morphological/inpainting** fallback. |
 | **Star reduction / de-emphasis** | ★★ | 🔲 | Shrink and/or dim stars (morphological erosion, or scaling the separated star layer) so they stop dominating a nebula-rich frame. Usually done on the stars-only layer post-separation. |
 | **Star mask generation** | ★★ | ◐ | Build a mask from detected stars (size-graded, dilated) to **protect or select** stars during sharpening/stretch/denoise. lumos already detects stars — this is mostly a rasterization step on top. |
 | **Halo / fringe removal ("unpurple")** | ★ | 🔲 | Remove the blue/violet halos and purple fringing around bright stars from refractor chromatic aberration. = Siril *unpurple*, PI *halo* scripts. Localized chroma correction keyed to bright-star positions. |
@@ -86,7 +87,7 @@ If the goal is "linear master → nice picture," the highest-leverage additions,
 
 1. **Gradient / background extraction** (★★★) — nothing else looks good over a light-pollution gradient. *Build first* — already researched (`background_extraction/README.md`), reuses the existing tiled SExtractor background estimator.
 2. **Photometric colour calibration (PCC/SPCC)** (★★★) — needs the plate-solve + catalog match; objective colour.
-3. **Star removal / starless separation** (★★★) — unlocks the modern stretch-the-nebula-hard workflow. (Classical first; AI later.)
+3. **Star removal / starless separation** (★★★) — unlocks the modern stretch-the-nebula-hard workflow. (**AI backend ✅ done** via ort; the license-free **classical** fallback is the remaining gap.)
 4. **Deconvolution** (★★★) — reuses the star/PSF machinery the detector already has.
 5. **Multiscale sharpening** (★★) — small, high-impact, reuses the `denoise/` starlet directly (amplify scales instead of attenuating). (**GHS stretch** ✅ done.)
 6. **HDR multiscale** + **local contrast** (★★) — reveal cores and structure. ✅ both done.
@@ -98,8 +99,10 @@ registration plate-solve) pay off most — much of the hard infrastructure is al
 A natural split mirrors the denoise tiering: **classical, implementable cores** (gradient model, RL
 deconvolution, morphological star work, GHS, wavelet sharpen, HDR/LHE, palette/LRGB combine) vs the
 **heavy ML extensions** (CNN star removal / denoise / deconvolution — *StarXTerminator*,
-*NoiseXTerminator*, *BlurXTerminator*, GraXpert AI) that are best as an optional ONNX-runtime backend
-once the classical path exists.
+*NoiseXTerminator*, *BlurXTerminator*, GraXpert AI). **The optional ONNX-runtime backend now exists**
+(`ml` feature, **ort**, caller-supplied weights): CNN **star removal** (StarNet2) and **denoise**
+(DeepSNR) work today; CNN deconvolution (*BlurXTerminator*-style) would slot into the same tiled
+backend. The classical cores remain the priority — the ML path layers on top.
 
 ## Deliberately excluded (general image editing — not this library's job)
 
