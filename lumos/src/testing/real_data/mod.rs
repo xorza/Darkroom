@@ -6,8 +6,10 @@
 //! - [`color_calibration`] — background neutralization + SCNR on the bundled stacked light frame.
 //! - [`denoise`] — linear-domain wavelet denoising of the bundled stacked light frame.
 //! - [`stretching`] — STF/asinh/GHS display stretches of the bundled stacked light frame.
+//! - [`milky_way`] — full "best Milky Way" pipeline: green removal + stretch + denoise/HDR/CLAHE.
 
 mod color_calibration;
 mod denoise;
+mod milky_way;
 mod pipeline_bench;
 mod stretching;
