@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::io::astro_image::{AstroImage, ImageDimensions};
 use crate::ml::star_removal::{StarRemovalConfig, remove_stars};
 use crate::testing::{calibration_dir, init_tracing, save_png};
@@ -28,17 +30,26 @@ fn max_of(p: &[f32]) -> f32 {
     p.iter().copied().fold(0.0f32, f32::max)
 }
 
-/// Prototype: run a caller-supplied StarNet2 ONNX over a crop of the bundled (stretched) frame and
-/// write input / starless / stars PNGs. Skipped unless `STARNET2_ONNX` points at the weights file
-/// (lumos ships no model). Build/run with `--features ml,real-data`.
+/// Prototype: run a StarNet2 ONNX over a crop of the bundled (stretched) frame and write
+/// input / starless / stars PNGs. Uses the gitignored, caller-supplied `StarNet2_weights.onnx` in
+/// `test_data/` (lumos ships no model); `STARNET2_ONNX` overrides the path. Skipped if absent.
+/// Build/run with `--features ml,real-data`.
 #[test]
 #[cfg_attr(not(feature = "real-data"), ignore)]
 fn starnet_removes_stars_on_a_crop() {
     init_tracing();
-    let Ok(weights) = std::env::var("STARNET2_ONNX") else {
-        eprintln!("set STARNET2_ONNX to the StarNet2_weights.onnx path to run this test; skipping");
+    let weights = std::env::var_os("STARNET2_ONNX")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/StarNet2_weights.onnx")
+        });
+    if !weights.exists() {
+        eprintln!(
+            "StarNet2 weights not found at {} (set STARNET2_ONNX or drop the .onnx there); skipping",
+            weights.display()
+        );
         return;
-    };
+    }
 
     // StarNet wants stretched display data in [0,1]: neutralize + stretch the linear master first.
     let mut img =
