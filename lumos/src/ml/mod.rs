@@ -6,6 +6,9 @@
 //! at their own legally-obtained `.onnx` file (see `ml/README.md` for the licensing rationale and
 //! the StarNet2 I/O contract).
 //!
-//! Currently: [`star_removal`] — StarNet-style star removal.
+//! Currently: [`star_removal`] (StarNet-style) and [`denoise`] (DeepSNR-style), both on the shared
+//! tract [`backend`].
 
+pub(crate) mod backend;
+pub(crate) mod denoise;
 pub(crate) mod star_removal;

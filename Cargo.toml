@@ -81,7 +81,7 @@ ryu = { version = "1.0" }
 ratatui = { version = "0.30" }
 crossterm = { version = "0.29" }
 clap = { version = "4.6", features = ["derive"] }
-tract-onnx = { version = "0.23" }
+ort = { version = "2.0.0-rc.12" }
 
 
 [profile.bench]
@@ -173,37 +173,4 @@ opt-level = 3
 [profile.dev.package.read-fonts]
 opt-level = 3
 [profile.dev.package.skrifa]
-opt-level = 3
-# ML inference (tract, feature "ml"): the model optimize pass + matmul/conv kernels are unusably slow
-# unoptimized in debug — opt the whole tract stack (load passes + runtime).
-[profile.dev.package.tract-linalg]
-opt-level = 3
-[profile.dev.package.tract-core]
-opt-level = 3
-[profile.dev.package.tract-data]
-opt-level = 3
-[profile.dev.package.tract-onnx]
-opt-level = 3
-[profile.dev.package.tract-onnx-opl]
-opt-level = 3
-[profile.dev.package.tract-hir]
-opt-level = 3
-[profile.dev.package.tract-nnef]
-opt-level = 3
-[profile.dev.package.tract-pulse]
-opt-level = 3
-[profile.dev.package.tract-pulse-opl]
-opt-level = 3
-[profile.dev.package.tract-extra]
-opt-level = 3
-[profile.dev.package.tract-transformers]
-opt-level = 3
-# tract's generic GEMM + array backends — the actual matmul/conv inner loops (the real hot path).
-[profile.dev.package.matrixmultiply]
-opt-level = 3
-[profile.dev.package.ndarray]
-opt-level = 3
-[profile.dev.package.num-traits]
-opt-level = 3
-[profile.dev.package.num-complex]
 opt-level = 3

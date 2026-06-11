@@ -8,10 +8,13 @@
 //! - [`stretching`] — STF/asinh/GHS display stretches of the bundled stacked light frame.
 //! - [`milky_way`] — full "best Milky Way" pipeline: green removal + stretch + denoise/HDR/CLAHE.
 //! - [`star_removal`] (feature `ml`) — StarNet ONNX star removal on a crop (caller-supplied weights).
+//! - [`ml_denoise`] (feature `ml`) — DeepSNR ONNX denoiser on a crop (caller-supplied weights).
 
 mod color_calibration;
 mod denoise;
 mod milky_way;
+#[cfg(feature = "ml")]
+mod ml_denoise;
 mod pipeline_bench;
 #[cfg(feature = "ml")]
 mod star_removal;

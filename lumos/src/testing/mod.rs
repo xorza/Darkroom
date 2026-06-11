@@ -126,7 +126,9 @@ pub fn calibration_masters_dir() -> Option<PathBuf> {
 /// Respects RUST_LOG env var, defaults to "info".
 pub fn init_tracing() {
     use tracing_subscriber::EnvFilter;
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    // `ort` (ONNX Runtime) logs its arena allocations at INFO — far too chatty; quiet it by default.
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,ort=warn"));
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_test_writer()

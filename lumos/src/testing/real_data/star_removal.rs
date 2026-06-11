@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 use crate::io::astro_image::{AstroImage, ImageDimensions};
-use crate::ml::star_removal::{StarRemovalConfig, remove_stars};
+use crate::ml::backend::TiledOnnxConfig;
+use crate::ml::star_removal::remove_stars;
 use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{StretchConfig, neutralize_background, stretch};
 use common::Vec2us;
@@ -69,7 +70,7 @@ fn starnet_removes_stars_on_a_crop() {
     save_png(&crop, "star_removal/input.png");
 
     let result =
-        remove_stars(&crop, &StarRemovalConfig::new(weights)).expect("star removal succeeds");
+        remove_stars(&crop, &TiledOnnxConfig::new(weights)).expect("star removal succeeds");
     save_png(&result.starless, "star_removal/starless.png");
     save_png(&result.stars, "star_removal/stars.png");
 

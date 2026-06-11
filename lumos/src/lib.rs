@@ -95,4 +95,8 @@ pub use local_contrast::{LocalContrastConfig, enhance_local_contrast};
 pub use hdr::{HdrConfig, compress_dynamic_range};
 
 #[cfg(feature = "ml")]
-pub use ml::star_removal::{StarRemovalConfig, StarRemovalError, StarRemovalResult, remove_stars};
+pub use ml::backend::{MlError, TiledOnnxConfig};
+#[cfg(feature = "ml")]
+pub use ml::denoise::ml_denoise;
+#[cfg(feature = "ml")]
+pub use ml::star_removal::{StarRemovalResult, remove_stars};
