@@ -25,7 +25,7 @@ These run on the linear master and matter most — errors here are baked in befo
 
 | Fn | Pri | Status | What it does |
 |---|---|---|---|
-| **Gradient / background extraction** | ★★★ | 🔲 | Model the smoothly-varying background (light pollution, sky glow, vignetting residual, amp glow) from sample points or a grid, fit a low-order **polynomial / RBF / spline** surface, and **subtract** it → a flat, neutral field. The single highest-value missing tool. = PixInsight *DBE/ABE*, Siril *Background Extraction*, GraXpert AI, StarTools *Wipe*. **Distinct from** the background *neutralization* lumos has (that only equalizes per-channel offsets; this removes spatial gradients). |
+| **Gradient / background extraction** | ★★★ | 🔲 (researched) | Model the smoothly-varying background (light pollution, sky glow, vignetting residual, amp glow) from sample points or a grid, fit a low-order **polynomial / RBF / spline** surface, and **subtract** it → a flat, neutral field. The single highest-value missing tool. = PixInsight *DBE/ABE*, Siril *Background Extraction*, GraXpert AI, StarTools *Wipe*. **Distinct from** the background *neutralization* lumos has (that only equalizes per-channel offsets; this removes spatial gradients). **Spec'd in `background_extraction/README.md`** (algorithm + plan: reuse the tiled SExtractor estimator already in `star_detection`, fit a low-order surface, subtract) — ready to build. |
 | **Photometric colour calibration (PCC / SPCC)** | ★★★ | 🔲 | Plate-solve the frame, match detected stars to a catalog (**Gaia DR3**), and derive per-channel white balance from real stellar photometry. **SPCC** refines it with sensor QE + filter-transmission curves. The rigorous, objective colour calibration — replaces eyeballed white balance. = PixInsight *PCC/SPCC*, Siril *PCC/SPCC*. |
 | **Deconvolution (PSF / star-aware)** | ★★★ | 🔲 | Sharpen by reversing the optical+atmospheric blur, using the **PSF measured from stars** in the frame. Classical **Richardson–Lucy** or regularized; **star-aware** (suppress ringing around stars via a mask); **spatially-variant** for field-varying PSF (StarTools *SVDecon*). The AI incarnation is *BlurXTerminator*. Astro-specific because the PSF comes from the stars. |
 | **Continuum subtraction** (narrowband) | ★★ | 🔲 | Isolate emission-line signal by subtracting a scaled, PSF-matched broadband/continuum: `NB − k·(BB − median(BB))`. Removes the stellar continuum bleeding through narrowband filters so faint nebulosity stands out. |
@@ -84,7 +84,7 @@ Modern deep-sky processing is "stars vs everything else" — separate, process i
 
 If the goal is "linear master → nice picture," the highest-leverage additions, in order:
 
-1. **Gradient / background extraction** (★★★) — nothing else looks good over a light-pollution gradient. *Build first.*
+1. **Gradient / background extraction** (★★★) — nothing else looks good over a light-pollution gradient. *Build first* — already researched (`background_extraction/README.md`), reuses the existing tiled SExtractor background estimator.
 2. **Photometric colour calibration (PCC/SPCC)** (★★★) — needs the plate-solve + catalog match; objective colour.
 3. **Star removal / starless separation** (★★★) — unlocks the modern stretch-the-nebula-hard workflow. (Classical first; AI later.)
 4. **Deconvolution** (★★★) — reuses the star/PSF machinery the detector already has.
