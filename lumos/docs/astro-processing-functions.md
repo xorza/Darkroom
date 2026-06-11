@@ -50,7 +50,7 @@ Modern deep-sky processing is "stars vs everything else" — separate, process i
 |---|---|---|---|
 | STF / MTF auto-stretch | — | ✅ | `stretching::AutoStf`. |
 | Colour-preserving arcsinh | — | ✅ | `stretching::AutoAsinh` / `Asinh`. |
-| **Generalized Hyperbolic Stretch (GHS)** | ★★ | 🔲 | A flexible stretch with independent control of **where** contrast is placed: stretch intensity `D`, local intensity `b`, symmetry/focus point, and protected shadow/highlight clip points. The current community-preferred stretch — far more control than MTF. Slots straight into `StretchMethod`. = PI/Siril *GHS*. |
+| **Generalized Hyperbolic Stretch (GHS)** | ★★ | ✅ | `stretching::StretchMethod::Ghs` (+ `stretching/ghs.md`) — designer stretch with independent control of **where** contrast lands: strength `D`, local intensity `b`, symmetry/focus point `sp`, shadow/highlight protection `lp`/`hp`. = PI/Siril *GHS*. (Auto-`sp`-from-background variant still open.) |
 | **HDR multiscale transform** | ★★ | 🔲 | Compress **local** dynamic range across scales so an overexposed core (M42, galaxy cores) and the faint outskirts are both visible in one image. Multiscale (wavelet) — decompose, attenuate the large-scale luminance, recombine. Post-stretch. = PI *HDRMultiscaleTransform*, StarTools *HDR*. |
 | **Local contrast enhancement (LHE / CLAHE)** | ★★ | 🔲 | Large-kernel **Contrast-Limited Adaptive Histogram Equalization** to bring out medium-scale structure — dust lanes, nebula filaments, spiral arms. Astro use is the large-radius regime. = PI *LocalHistogramEqualization*, StarTools *Contrast*. |
 | Masked stretch | ★ | 🔲 | Stretch while protecting already-bright regions via a luminance mask (keeps star cores/bright nebula from blowing out). |
@@ -88,7 +88,7 @@ If the goal is "linear master → nice picture," the highest-leverage additions,
 2. **Photometric colour calibration (PCC/SPCC)** (★★★) — needs the plate-solve + catalog match; objective colour.
 3. **Star removal / starless separation** (★★★) — unlocks the modern stretch-the-nebula-hard workflow. (Classical first; AI later.)
 4. **Deconvolution** (★★★) — reuses the star/PSF machinery the detector already has.
-5. **GHS stretch** (★★) and **multiscale sharpening** (★★) — both small, high-impact, and reuse existing code (`stretching/`, the `denoise/` starlet).
+5. **Multiscale sharpening** (★★) — small, high-impact, reuses the `denoise/` starlet directly (amplify scales instead of attenuating). (**GHS stretch** ✅ done.)
 6. **HDR multiscale** + **local contrast** (★★) — reveal cores and structure.
 7. **LRGB / narrowband combination** (★★) — when targeting those acquisition styles.
 
