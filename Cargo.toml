@@ -174,10 +174,27 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.skrifa]
 opt-level = 3
-# ML inference (tract, feature "ml"): unoptimized matmul/conv kernels are unusably slow in debug.
+# ML inference (tract, feature "ml"): the model optimize pass + matmul/conv kernels are unusably slow
+# unoptimized in debug — opt the whole tract stack (load passes + runtime).
 [profile.dev.package.tract-linalg]
 opt-level = 3
 [profile.dev.package.tract-core]
 opt-level = 3
 [profile.dev.package.tract-data]
+opt-level = 3
+[profile.dev.package.tract-onnx]
+opt-level = 3
+[profile.dev.package.tract-onnx-opl]
+opt-level = 3
+[profile.dev.package.tract-hir]
+opt-level = 3
+[profile.dev.package.tract-nnef]
+opt-level = 3
+[profile.dev.package.tract-pulse]
+opt-level = 3
+[profile.dev.package.tract-pulse-opl]
+opt-level = 3
+[profile.dev.package.tract-extra]
+opt-level = 3
+[profile.dev.package.tract-transformers]
 opt-level = 3
