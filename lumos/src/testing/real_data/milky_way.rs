@@ -48,10 +48,9 @@ fn milky_way_best_pipeline() {
     stretch(
         &mut img,
         StretchConfig {
-            // 0.25 is PixInsight's STF default target background.
             method: StretchMethod::AutoStf {
-                shadow_sigmas: 1.0,
-                target_background: 0.25,
+                shadow_sigmas: 1.5,
+                target_background: 0.2,
             },
             color: ColorMode::ColorPreserving,
         },
