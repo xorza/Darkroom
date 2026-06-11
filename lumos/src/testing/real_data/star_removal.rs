@@ -1,4 +1,4 @@
-use super::ml_support::{center_crop, onnx_weights, stretched_master};
+use super::ml_support::{onnx_weights, stretched_master};
 use crate::ml::backend::TiledOnnxConfig;
 use crate::ml::star_removal::remove_stars;
 use crate::testing::{init_tracing, save_png};
@@ -7,31 +7,30 @@ fn max_of(p: &[f32]) -> f32 {
     p.iter().copied().fold(0.0f32, f32::max)
 }
 
-/// Prototype: run a StarNet2 ONNX over a crop of the bundled (stretched) frame and write
+/// Prototype: run a StarNet2 ONNX over the full bundled (stretched) frame and write
 /// input / starless / stars PNGs. Uses the gitignored, caller-supplied `StarNet2_weights.onnx` in
-/// `test_data/` (lumos ships no model); `STARNET2_ONNX` overrides the path. Skipped if absent.
-/// Build/run with `--features ml,real-data`.
+/// `test_data/` (lumos ships no model); `STARNET2_ONNX` overrides the path. Skipped if absent. The
+/// full frame is hundreds of 512² tiles — ~60 s on a 10-core machine. Build/run with
+/// `--features ml,real-data`.
 #[test]
 #[cfg_attr(not(feature = "real-data"), ignore)]
-fn starnet_removes_stars_on_a_crop() {
+fn starnet_removes_stars() {
     init_tracing();
     let Some(weights) = onnx_weights("STARNET2_ONNX", "StarNet2_weights.onnx") else {
         return;
     };
 
-    // StarNet wants stretched display data in [0,1]; a 1024² centre crop is 9 tiles at stride 256.
+    // StarNet wants stretched display data in [0,1].
     let img = stretched_master();
-    let crop = center_crop(&img, 1024, 1024);
-    save_png(&crop, "star_removal/input.png");
+    save_png(&img, "star_removal/input.png");
 
-    let result =
-        remove_stars(&crop, &TiledOnnxConfig::new(weights)).expect("star removal succeeds");
+    let result = remove_stars(&img, &TiledOnnxConfig::new(weights)).expect("star removal succeeds");
     save_png(&result.starless, "star_removal/starless.png");
     save_png(&result.stars, "star_removal/stars.png");
 
     // The starless image is no brighter than the input, and a non-trivial amount of (positive) star
     // signal was removed.
-    let input = crop.intensity_plane();
+    let input = img.intensity_plane();
     let starless = result.starless.intensity_plane();
     let in_max = max_of(input.pixels());
     let sl_max = max_of(starless.pixels());

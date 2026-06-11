@@ -23,14 +23,12 @@ mod star_removal;
 mod stretching;
 
 /// Shared scaffolding for the `ml`-gated real-data prototypes (`star_removal`, `ml_denoise`):
-/// resolving caller-supplied weights, building the stretched display-domain master, and cropping.
+/// resolving caller-supplied weights and building the stretched display-domain master.
 #[cfg(feature = "ml")]
 mod ml_support {
     use std::path::PathBuf;
 
-    use common::Vec2us;
-
-    use crate::io::astro_image::{AstroImage, ImageDimensions};
+    use crate::io::astro_image::AstroImage;
     use crate::testing::calibration_dir;
     use crate::{StretchConfig, neutralize_background, stretch};
 
@@ -64,27 +62,5 @@ mod ml_support {
         neutralize_background(&mut img);
         stretch(&mut img, StretchConfig::auto_stf());
         img
-    }
-
-    /// Centre `cw×ch` crop of `image` into a fresh `AstroImage`.
-    pub(super) fn center_crop(image: &AstroImage, cw: usize, ch: usize) -> AstroImage {
-        let iw = image.width();
-        let x0 = (iw - cw) / 2;
-        let y0 = (image.height() - ch) / 2;
-        let channels: Vec<Vec<f32>> = (0..image.channels())
-            .map(|c| {
-                let src = image.channel(c).pixels();
-                let mut out = Vec::with_capacity(cw * ch);
-                for yy in 0..ch {
-                    let r = (y0 + yy) * iw + x0;
-                    out.extend_from_slice(&src[r..r + cw]);
-                }
-                out
-            })
-            .collect();
-        AstroImage::from_planar_channels(
-            ImageDimensions::new(Vec2us::new(cw, ch), image.channels()),
-            channels,
-        )
     }
 }
