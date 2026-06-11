@@ -1,6 +1,11 @@
 //! Shared `ort` (ONNX Runtime) backend for the display-domain ML filters. Loads a caller-supplied
 //! `512×512×3` NHWC model and runs it over an image in overlapping, feather-blended 512×512 tiles.
 //! Used by [`star_removal`](super::star_removal) and [`denoise`](super::denoise).
+//!
+//! The tile loop is **sequential** and lets ONNX Runtime use its default (all-core) intra-op
+//! threading. These nets are memory-bandwidth-bound (~125 MB of weights streamed per tile), so
+//! running tiles concurrently (one `Session` per worker) was measured slower *and* exhausted RAM —
+//! see `ml/README.md`. ~60 s for a full 24 MP frame on a 10-core machine.
 
 use std::path::PathBuf;
 

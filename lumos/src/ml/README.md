@@ -65,8 +65,13 @@ screen the stars back.
 
 ## Cost & caveats
 
-- **Speed** — onnxruntime CPU inference: the test's 1024² crop (9 tiles) runs in seconds; a full 24 MP
-  frame is hundreds of tiles (a minute-ish). The tile loop is sequential — an obvious parallelization.
+- **Speed** — onnxruntime CPU inference. Measured on a 10-core machine: the full 6032×4028 frame
+  (345 tiles at stride 256) takes **~60 s sequentially** (~175 ms/tile); a 1024² crop (9 tiles) runs in
+  seconds. The tile loop is **sequential by design** — these nets are memory-bandwidth-bound (~125 MB
+  of weights streamed per tile), so ORT's intra-op threads already saturate the bus (1→10 threads
+  scales only ~1.9×). Running tiles concurrently with one `Session` per worker was measured **~2×
+  slower** (≈125 s, 10 workers) and **exhausted RAM** — each Session holds its own model copy plus a
+  non-shrinking activation arena. So: do **not** wrap the tile loop in rayon. (`ml_perf.rs` times it.)
 - **Preprocessing is the risk** — these nets were trained on a particular normalization. We feed
   stretched `[0,1]`, matching how the CLIs are used (stretched 8/16-bit TIFF/PNG). Validate visually.
 - **Native dep** — ort downloads onnxruntime at build time (needs network once).
@@ -76,5 +81,6 @@ screen the stars back.
 Prototype: generic ort backend + tiling/blend behind `--features ml`, with `star_removal` (StarNet2)
 and `denoise` (DeepSNR) wrappers. Tests (`--features ml,real-data`) run each on a 1024² crop and write
 `test_output/{star_removal,ml_denoise}/*.png`; they skip cleanly if the (gitignored) weights are
-absent. Open: parallelize the tile loop; full-image path; starless-workflow helper; the license-free
-classical morphological star-removal fallback.
+absent. Full-image processing works (see `ml_perf.rs`); tile-loop parallelism was investigated and
+rejected (above). Open: starless-workflow helper; the license-free classical morphological
+star-removal fallback.
