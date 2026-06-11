@@ -4,7 +4,10 @@
 
 use crate::math::statistics::median_f32_mut;
 use crate::testing::{calibration_dir, init_tracing, save_png};
-use crate::{AstroImage, StretchConfig, stretch};
+use crate::{
+    AstroImage, ColorMode, ScnrMethod, StretchConfig, StretchMethod, neutralize_background, scnr,
+    stretch,
+};
 
 #[derive(Debug)]
 struct Stats {
@@ -30,9 +33,11 @@ fn stretch_stacked_light() {
     init_tracing();
 
     let path = calibration_dir().join("stacked_light.tiff");
-    let image = AstroImage::from_file(&path).expect("load stacked_light.tiff");
+    let mut image = AstroImage::from_file(&path).expect("load stacked_light.tiff");
     let (w, h, ch) = (image.width(), image.height(), image.channels());
     assert!(w > 0 && h > 0);
+
+    neutralize_background(&mut image);
 
     // A linear stacked deep-sky frame, before any display stretch: the calibrated background sits at
     // zero (a near-zero median — symmetric read noise dips some background pixels slightly negative,
@@ -52,6 +57,9 @@ fn stretch_stacked_light() {
     for (name, config) in [
         ("stf", StretchConfig::auto_stf()),
         ("asinh", StretchConfig::auto_asinh()),
+        // GHS applied cold to linear data: the background sits at ~0, so the symmetry point is at 0
+        // and the strength D must be large (the b=-1 logarithmic family lifts the faint signal).
+        ("ghs", StretchConfig::ghs(5000.0, -1.0, 0.0)),
     ] {
         let mut stretched = image.clone();
         stretch(&mut stretched, config);
@@ -74,6 +82,36 @@ fn stretch_stacked_light() {
             "{name} spreads contrast across the range: {out:?}"
         );
 
+        scnr(&mut stretched, ScnrMethod::AverageNeutral);
         save_png(&stretched, &format!("stretch/stacked_light_{name}.png"));
     }
+
+    // Two-stage Milky-Way contrast — the realistic GHS workflow. A gentle auto-asinh first lifts the
+    // dust into the mid-shadows (background median ~0.2), where GHS parameters are intuitive: a
+    // contrast pass centered just above the background (`sp` on the dust), with `lp` keeping the
+    // background dark and `hp` protecting the star cores. Far easier to focus on the Milky Way than
+    // tuning GHS cold on linear data.
+    let mut staged = image.clone();
+    stretch(&mut staged, StretchConfig::auto_asinh());
+    stretch(
+        &mut staged,
+        StretchConfig {
+            method: StretchMethod::Ghs {
+                d: 3.0,
+                b: 0.0,
+                sp: 0.3,
+                lp: 0.15,
+                hp: 0.9,
+            },
+            color: ColorMode::ColorPreserving,
+        },
+    );
+    let out = stats(staged.intensity_plane().pixels());
+    eprintln!("asinh+ghs: {out:?}");
+    assert!(
+        out.min >= 0.0 && out.max <= 1.0 + 1e-3,
+        "asinh+ghs output stays in [0,1]: {out:?}"
+    );
+    scnr(&mut staged, ScnrMethod::AverageNeutral);
+    save_png(&staged, "stretch/stacked_light_asinh_ghs.png");
 }
