@@ -25,8 +25,8 @@ use rayon::prelude::*;
 pub(crate) struct TileStats {
     /// Sky level: SExtractor's crowding-aware estimator (Pearson mode, median fallback when
     /// strongly skewed) over the sigma-clip survivors. Computed by `tile_stats::compute_tile_stats`.
-    pub sky: f32,
-    pub sigma: f32,
+    pub(crate) sky: f32,
+    pub(crate) sigma: f32,
 }
 
 /// Tile grid with precomputed centers and spline coefficients for interpolation.
@@ -39,7 +39,7 @@ pub(crate) struct TileGrid {
     /// Second derivatives in Y direction for natural cubic spline (sigma).
     d2y_sigma: Vec<f32>,
     /// Precomputed X-coordinates of tile centers (one per tile column).
-    centers_x: Vec<f32>,
+    pub(crate) centers_x: Vec<f32>,
     tile_size: usize,
     dimensions: Vec2us,
 }
@@ -48,7 +48,7 @@ impl TileGrid {
     /// Create an uninitialized TileGrid with preallocated buffers.
     ///
     /// Call `compute` to fill in the tile statistics.
-    pub fn new_uninit(width: usize, height: usize, tile_size: usize) -> Self {
+    pub(crate) fn new_uninit(width: usize, height: usize, tile_size: usize) -> Self {
         let tiles_x = width.div_ceil(tile_size);
         let tiles_y = height.div_ceil(tile_size);
         let n = tiles_x * tiles_y;
@@ -76,7 +76,7 @@ impl TileGrid {
     /// median filter — keep it on for detection (de-rings a star-contaminated tile before
     /// interpolation); turn it off when fitting a smooth surface to the tile samples, where it would
     /// bias the boundary tiles of a real gradient.
-    pub fn compute(
+    pub(crate) fn compute(
         &mut self,
         pixels: &Buffer2<f32>,
         mask: Option<&BitBuffer2>,
@@ -94,28 +94,22 @@ impl TileGrid {
     }
 
     #[inline]
-    pub fn get(&self, tx: usize, ty: usize) -> TileStats {
+    pub(crate) fn get(&self, tx: usize, ty: usize) -> TileStats {
         self.stats[(tx, ty)]
     }
 
     #[inline]
-    pub fn tiles_x(&self) -> usize {
+    pub(crate) fn tiles_x(&self) -> usize {
         self.stats.width()
     }
 
     #[inline]
-    pub fn tiles_y(&self) -> usize {
+    pub(crate) fn tiles_y(&self) -> usize {
         self.stats.height()
     }
 
-    /// Precomputed X-coordinates of all tile centers.
     #[inline]
-    pub fn centers_x(&self) -> &[f32] {
-        &self.centers_x
-    }
-
-    #[inline]
-    pub fn center_y(&self, ty: usize) -> f32 {
+    pub(crate) fn center_y(&self, ty: usize) -> f32 {
         let y_start = ty * self.tile_size;
         let y_end = (y_start + self.tile_size).min(self.dimensions.y);
         (y_start + y_end) as f32 * 0.5
@@ -123,19 +117,19 @@ impl TileGrid {
 
     /// Second derivative of sky in Y at tile (tx, ty) for natural cubic spline.
     #[inline]
-    pub fn d2y_sky(&self, tx: usize, ty: usize) -> f32 {
+    pub(crate) fn d2y_sky(&self, tx: usize, ty: usize) -> f32 {
         self.d2y_sky[ty * self.tiles_x() + tx]
     }
 
     /// Second derivative of sigma in Y at tile (tx, ty) for natural cubic spline.
     #[inline]
-    pub fn d2y_sigma(&self, tx: usize, ty: usize) -> f32 {
+    pub(crate) fn d2y_sigma(&self, tx: usize, ty: usize) -> f32 {
         self.d2y_sigma[ty * self.tiles_x() + tx]
     }
 
     /// Find the tile index whose center is at or before the given Y position.
     #[inline]
-    pub fn find_lower_tile_y(&self, pos: f32) -> usize {
+    pub(crate) fn find_lower_tile_y(&self, pos: f32) -> usize {
         // tiles_y >= 1 always (the grid is built from an image with at least one tile row).
         let tiles_y = self.tiles_y();
 

@@ -2,8 +2,11 @@
   "lsp": {
     "rust-analyzer": {
       "initialization_options": {
+        "cargo": {
+          "features": "all",
+        },
         "runnables": {
-          "extraArgs": ["--release"],
+          "extraArgs": [""],
           "extraTestBinaryArgs": ["--nocapture"],
         },
       },

@@ -17,6 +17,7 @@ use nalgebra::{DMatrix, DVector};
 
 use crate::background_mesh::TileGrid;
 use crate::io::astro_image::AstroImage;
+use crate::math::statistics::MAD_TO_SIGMA;
 
 /// Sigma-clip passes for the per-tile sky estimate (matches the detector's tiled-background default).
 const SKY_CLIP_ITERATIONS: usize = 3;
@@ -118,7 +119,7 @@ pub fn extract_background(image: &mut AstroImage, config: &BackgroundConfig) {
 }
 
 /// The fitted background surface for a single channel, as a full-resolution plane.
-pub(crate) fn model_channel(channel: &Buffer2<f32>, config: &BackgroundConfig) -> Buffer2<f32> {
+fn model_channel(channel: &Buffer2<f32>, config: &BackgroundConfig) -> Buffer2<f32> {
     let (w, h) = (channel.width(), channel.height());
     let samples = collect_samples(channel, config.tile_size);
     let terms = poly_terms(effective_degree(samples.len(), config.degree));
@@ -146,11 +147,10 @@ fn collect_samples(channel: &Buffer2<f32>, tile: usize) -> Vec<Sample> {
     let mut grid = TileGrid::new_uninit(w, h, tile);
     grid.compute(channel, None, SKY_CLIP_ITERATIONS, false);
 
-    let centers_x = grid.centers_x().to_vec();
     let mut samples = Vec::with_capacity(grid.tiles_x() * grid.tiles_y());
     for ty in 0..grid.tiles_y() {
         let y = norm(grid.center_y(ty) as f64, h);
-        for (tx, &cx) in centers_x.iter().enumerate() {
+        for (tx, &cx) in grid.centers_x.iter().enumerate() {
             samples.push(Sample {
                 x: norm(cx as f64, w),
                 y,
@@ -255,7 +255,7 @@ fn robust_sigma(residuals: &[f64]) -> f64 {
     }
     let median = median_f64(&mut residuals.to_vec());
     let mut dev: Vec<f64> = residuals.iter().map(|&r| (r - median).abs()).collect();
-    1.482_602_2 * median_f64(&mut dev)
+    f64::from(MAD_TO_SIGMA) * median_f64(&mut dev)
 }
 
 fn median_f64(v: &mut [f64]) -> f64 {

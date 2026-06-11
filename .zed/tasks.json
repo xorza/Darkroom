@@ -9,7 +9,7 @@
       "--release",
       "$ZED_SYMBOL",
       "--",
-      "--ignored",
+      "--include-ignored",
       "--nocapture",
     ],
     "tags": ["rust-test"],

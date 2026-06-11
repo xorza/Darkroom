@@ -179,7 +179,7 @@ fn interpolate_row(
     let fy = y as f32;
     let width = bg_row.len();
     let tiles_x = grid.tiles_x();
-    let centers_x = grid.centers_x();
+    let centers_x = &grid.centers_x;
 
     // --- Step 1: Evaluate Y spline at each tile column ---
 

@@ -90,10 +90,10 @@ fn test_center_x_full_tiles() {
     let pixels = create_uniform_image(128, 64, 0.5);
     let grid = make_grid(&pixels, 32);
 
-    assert!((grid.centers_x()[0] - 16.0).abs() < 0.01);
-    assert!((grid.centers_x()[1] - 48.0).abs() < 0.01);
-    assert!((grid.centers_x()[2] - 80.0).abs() < 0.01);
-    assert!((grid.centers_x()[3] - 112.0).abs() < 0.01);
+    assert!((grid.centers_x[0] - 16.0).abs() < 0.01);
+    assert!((grid.centers_x[1] - 48.0).abs() < 0.01);
+    assert!((grid.centers_x[2] - 80.0).abs() < 0.01);
+    assert!((grid.centers_x[3] - 112.0).abs() < 0.01);
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn test_center_x_partial_tile() {
     let pixels = create_uniform_image(100, 64, 0.5);
     let grid = make_grid(&pixels, 32);
 
-    assert!((grid.centers_x()[3] - 98.0).abs() < 0.01);
+    assert!((grid.centers_x[3] - 98.0).abs() < 0.01);
 }
 
 #[test]
@@ -334,7 +334,7 @@ fn test_single_tile_image() {
 
     let stats = grid.get(0, 0);
     assert!((stats.sky - 0.6).abs() < 0.01);
-    assert!((grid.centers_x()[0] - 16.0).abs() < 0.01);
+    assert!((grid.centers_x[0] - 16.0).abs() < 0.01);
     assert!((grid.center_y(0) - 16.0).abs() < 0.01);
 }
 
@@ -373,7 +373,7 @@ fn test_image_smaller_than_tile() {
 
     let stats = grid.get(0, 0);
     assert!((stats.sky - 0.7).abs() < 0.01);
-    assert!((grid.centers_x()[0] - 10.0).abs() < 0.01);
+    assert!((grid.centers_x[0] - 10.0).abs() < 0.01);
     assert!((grid.center_y(0) - 10.0).abs() < 0.01);
 }
 
