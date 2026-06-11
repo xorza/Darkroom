@@ -1,4 +1,4 @@
-//! Shared tract ONNX backend for the display-domain ML filters. Loads a caller-supplied
+//! Shared `ort` (ONNX Runtime) backend for the display-domain ML filters. Loads a caller-supplied
 //! `512×512×3` NHWC model and runs it over an image in overlapping, feather-blended 512×512 tiles.
 //! Used by [`star_removal`](super::star_removal) and [`denoise`](super::denoise).
 
