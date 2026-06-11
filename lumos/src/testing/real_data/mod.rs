@@ -15,6 +15,8 @@ mod denoise;
 mod milky_way;
 #[cfg(feature = "ml")]
 mod ml_denoise;
+#[cfg(feature = "ml")]
+mod ml_perf;
 mod pipeline_bench;
 #[cfg(feature = "ml")]
 mod star_removal;
