@@ -4,23 +4,20 @@
 //! orchestration on top — so the worker/script construction and the
 //! drain/run primitives live here once instead of in both shells.
 
-use std::sync::Arc;
+use scenarium::prelude::Graph;
 
-use scenarium::prelude::{FuncLib, Graph};
-
-use crate::core::func_lib::builtin_func_lib;
-use crate::core::io::library;
+use crate::core::func_lib::{SharedFuncLib, runtime_func_lib};
 use crate::core::script::{ScriptConfig, ScriptHost, ScriptMessage};
 use crate::core::wake::Wake;
 use crate::core::worker::{ValueRequest, WorkerBridge, WorkerEvent};
 
 #[derive(Debug)]
 pub(crate) struct Engine {
-    /// Shared with the worker on every run and with the script executor at
-    /// startup (`Arc` so a run clones a pointer, not the whole lib). Built
-    /// from builtins + the on-disk subgraph library. The `pub(crate)` field
-    /// lets the GUI's promote/publish commands `Arc::make_mut` it.
-    pub(crate) func_lib: Arc<FuncLib>,
+    /// The shared runtime library. The GUI's promote/publish commands swap a
+    /// grown copy into the cell; the worker (re-snapshots each run) and any
+    /// running script executor observe it on their next `load`. See
+    /// [`SharedFuncLib`].
+    pub(crate) func_lib: SharedFuncLib,
     worker: WorkerBridge,
     /// `Some` only when `--script-tcp` bound a listener.
     script: Option<ScriptHost>,
@@ -32,11 +29,7 @@ impl Engine {
     /// unless `script_cfg` enabled a listener). The worker + script host are
     /// both woken through `wake`.
     pub(crate) fn new(script_cfg: &ScriptConfig, wake: Wake) -> Self {
-        let mut func_lib = builtin_func_lib();
-        for def in library::load_library() {
-            func_lib.add_subgraph(def);
-        }
-        let func_lib = Arc::new(func_lib);
+        let func_lib = runtime_func_lib();
         let worker = WorkerBridge::new(wake.clone());
         let script = ScriptHost::start(script_cfg, func_lib.clone(), wake);
         Self {
@@ -49,7 +42,7 @@ impl Engine {
     /// Send `graph` to the worker for one evaluation (paired with the
     /// startup func lib). Results arrive via [`Self::drain_worker`].
     pub(crate) fn run_once(&self, graph: Graph) {
-        self.worker.run_once(graph, self.func_lib.clone());
+        self.worker.run_once(graph, self.func_lib.load_full());
     }
 
     /// Non-blocking drain of worker results posted since the last frame.

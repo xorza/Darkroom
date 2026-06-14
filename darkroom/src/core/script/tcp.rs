@@ -453,7 +453,9 @@ mod tests {
         let executor = ScriptExecutor::new(
             transport,
             action_tx,
-            Arc::new(scenarium::prelude::FuncLib::default()),
+            Arc::new(arc_swap::ArcSwap::from_pointee(
+                scenarium::prelude::FuncLib::default(),
+            )),
             Arc::new(|| {}),
         );
         (addr, executor, action_rx)

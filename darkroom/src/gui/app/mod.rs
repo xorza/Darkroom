@@ -49,8 +49,9 @@ pub(crate) struct AppContext<'a> {
 pub(crate) struct App {
     pub(crate) editor: Editor,
     /// Shared runtime services — func lib + evaluation worker + script host
-    /// — built at startup. The GUI reads `engine.func_lib` each frame and
-    /// drains the worker/script queues through it. Off the serialized state.
+    /// — built at startup. The GUI loads an `engine.func_lib` snapshot each
+    /// frame and drains the worker/script queues through it. Off the
+    /// serialized state.
     pub(crate) engine: Engine,
     pub(crate) theme: Theme,
     pub(crate) host_handle: HostHandle,
@@ -185,9 +186,12 @@ impl palantir::App for App {
         // run, quit) before the editor rebuilds, so the scene reflects them.
         self.handle_script_inbound();
 
+        // One consistent library snapshot for the whole frame (cheap atomic
+        // load); a mid-frame promote/publish swap takes effect next frame.
+        let func_lib = self.engine.func_lib.load();
         let command = self.editor.frame(
             ui,
-            &self.engine.func_lib,
+            &func_lib,
             &self.theme,
             self.config.theme,
             &self.host_handle,

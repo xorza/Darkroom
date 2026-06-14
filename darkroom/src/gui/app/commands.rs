@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use arc_swap::ArcSwap;
 use palantir::Ui;
 use scenarium::data::{FsPathConfig, StaticValue};
 use scenarium::function::FuncLib;
@@ -90,7 +91,8 @@ impl App {
     /// wins; otherwise, when the active tab is itself a subgraph, that
     /// open subgraph is exported. No-op when neither resolves.
     fn export_active_subgraph(&mut self) {
-        let Some(def) = subgraph_to_export(&self.editor.document, &self.engine.func_lib) else {
+        let func_lib = self.engine.func_lib.load();
+        let Some(def) = subgraph_to_export(&self.editor.document, &func_lib) else {
             eprintln!("subgraph export: no subgraph selected or open");
             return;
         };
@@ -108,8 +110,8 @@ impl App {
     /// not routed through undo. No-op when neither a subgraph instance
     /// nor an open subgraph resolves.
     fn promote_active_subgraph(&mut self) {
-        if promote_to_library(&mut self.editor.document, &mut self.engine.func_lib) {
-            library::save_library(self.engine.func_lib.subgraphs.iter());
+        if promote_to_library(&mut self.editor.document, &self.engine.func_lib) {
+            library::save_library(self.engine.func_lib.load().subgraphs.iter());
         } else {
             eprintln!("subgraph promote: no subgraph selected or open");
         }
@@ -127,11 +129,11 @@ impl App {
         let target = self.editor.document.active_target();
         if publish_local_def(
             &mut self.editor.document,
-            &mut self.engine.func_lib,
+            &self.engine.func_lib,
             target,
             node_id,
         ) {
-            library::save_library(self.engine.func_lib.subgraphs.iter());
+            library::save_library(self.engine.func_lib.load().subgraphs.iter());
         } else {
             eprintln!("subgraph publish: node is not a local subgraph");
         }
@@ -239,14 +241,15 @@ impl App {
 /// can be unit-tested against a bare `Document` + `FuncLib`.
 fn publish_local_def(
     document: &mut Document,
-    func_lib: &mut Arc<FuncLib>,
+    func_lib: &ArcSwap<FuncLib>,
     target: GraphRef,
     node_id: NodeId,
 ) -> bool {
-    // Resolve read-only first (so a non-subgraph node doesn't force an
-    // `Arc::make_mut` clone of the library). `fresh_copy` already gives
-    // fresh interior ids + `origin: None` — the shape a library def
-    // wants; we keep or override its id below.
+    // Load a snapshot and resolve read-only first (so a non-subgraph node
+    // returns before the `Arc::make_mut` clone). `fresh_copy` already gives
+    // fresh interior ids + `origin: None` — the shape a library def wants;
+    // we keep or override its id below.
+    let mut lib = func_lib.load_full();
     let Some((local_id, mut published, existing_lib)) = (|| {
         let scope = document.scope(target)?;
         let NodeKind::Subgraph(SubgraphRef::Local(local_id)) = scope.graph.by_id(&node_id)?.kind
@@ -254,9 +257,7 @@ fn publish_local_def(
             return None;
         };
         let local = scope.graph.subgraphs.by_key(&local_id)?;
-        let existing_lib = local
-            .origin
-            .filter(|id| func_lib.subgraph_by_id(id).is_some());
+        let existing_lib = local.origin.filter(|id| lib.subgraph_by_id(id).is_some());
         Some((local_id, local.fresh_copy(), existing_lib))
     })() else {
         return false;
@@ -265,15 +266,18 @@ fn publish_local_def(
     let new_origin = match existing_lib {
         Some(lib_id) => {
             published.id = lib_id;
-            Arc::make_mut(func_lib).add_subgraph(published);
+            Arc::make_mut(&mut lib).add_subgraph(published);
             lib_id
         }
         None => {
             let new_id = published.id;
-            Arc::make_mut(func_lib).add_subgraph(published);
+            Arc::make_mut(&mut lib).add_subgraph(published);
             new_id
         }
     };
+    // Swap the grown copy in so the worker and any running scripts pick it
+    // up on their next load.
+    func_lib.store(lib);
     set_origin(document, target, local_id, new_origin);
     true
 }
@@ -283,13 +287,15 @@ fn publish_local_def(
 /// when nothing resolves. On success the source local def's `origin` is
 /// re-pointed at the new library entry, so it tracks its lineage. Free
 /// fn so it's unit-testable against a bare `Document` + `FuncLib`.
-fn promote_to_library(document: &mut Document, func_lib: &mut Arc<FuncLib>) -> bool {
-    let Some(source) = promote_source(document, func_lib) else {
+fn promote_to_library(document: &mut Document, func_lib: &ArcSwap<FuncLib>) -> bool {
+    let mut lib = func_lib.load_full();
+    let Some(source) = promote_source(document, &lib) else {
         return false;
     };
     let published = source.def.fresh_copy();
     let lib_id = published.id;
-    Arc::make_mut(func_lib).add_subgraph(published);
+    Arc::make_mut(&mut lib).add_subgraph(published);
+    func_lib.store(lib);
     if let Some(relink) = source.relink {
         set_origin(document, relink.holder, relink.def_id, lib_id);
     }
@@ -447,7 +453,7 @@ mod tests {
             name: "Old".into(),
             ..Default::default()
         });
-        let mut func_lib = Arc::new(func_lib);
+        let func_lib = ArcSwap::from_pointee(func_lib);
 
         // Local copy linked to that library def, with diverged content.
         let mut doc = Document::default();
@@ -457,17 +463,17 @@ mod tests {
 
         assert!(publish_local_def(
             &mut doc,
-            &mut func_lib,
+            &func_lib,
             GraphRef::Main,
             node_id
         ));
         assert_eq!(
-            func_lib.subgraphs.len(),
+            func_lib.load().subgraphs.len(),
             1,
             "update in place — no new library entry"
         );
         assert_eq!(
-            func_lib.subgraph_by_id(&lib_id).unwrap().name,
+            func_lib.load().subgraph_by_id(&lib_id).unwrap().name,
             "New",
             "library def took the local def's content"
         );
@@ -480,7 +486,7 @@ mod tests {
 
     #[test]
     fn publish_without_origin_creates_entry_and_links_it() {
-        let mut func_lib = Arc::new(FuncLib::default());
+        let func_lib = ArcSwap::from_pointee(FuncLib::default());
         let mut doc = Document::default();
         let local = def("Standalone", None);
         let local_id = local.id;
@@ -488,11 +494,15 @@ mod tests {
 
         assert!(publish_local_def(
             &mut doc,
-            &mut func_lib,
+            &func_lib,
             GraphRef::Main,
             node_id
         ));
-        assert_eq!(func_lib.subgraphs.len(), 1, "a new library entry was added");
+        assert_eq!(
+            func_lib.load().subgraphs.len(),
+            1,
+            "a new library entry was added"
+        );
         let linked = doc
             .graph
             .subgraphs
@@ -501,14 +511,14 @@ mod tests {
             .origin
             .expect("local def linked to the new entry");
         assert!(
-            func_lib.subgraph_by_id(&linked).is_some(),
+            func_lib.load().subgraph_by_id(&linked).is_some(),
             "origin points at the freshly-created library def"
         );
     }
 
     #[test]
     fn promote_links_source_local_def_to_new_library_entry() {
-        let mut func_lib = Arc::new(FuncLib::default());
+        let func_lib = ArcSwap::from_pointee(FuncLib::default());
         let mut doc = Document::default();
         // A local subgraph instance (no library lineage yet), selected
         // so `promote_source` resolves it from the active graph.
@@ -517,8 +527,12 @@ mod tests {
         let node_id = add_local_instance(&mut doc, local);
         doc.main_view.selected_nodes.insert(node_id);
 
-        assert!(promote_to_library(&mut doc, &mut func_lib));
-        assert_eq!(func_lib.subgraphs.len(), 1, "a new library entry is added");
+        assert!(promote_to_library(&mut doc, &func_lib));
+        assert_eq!(
+            func_lib.load().subgraphs.len(),
+            1,
+            "a new library entry is added"
+        );
         let owner = doc
             .graph
             .subgraphs
@@ -527,23 +541,23 @@ mod tests {
             .origin
             .expect("source local def now carries an origin");
         assert!(
-            func_lib.subgraph_by_id(&owner).is_some(),
+            func_lib.load().subgraph_by_id(&owner).is_some(),
             "origin points at the freshly-promoted library entry"
         );
     }
 
     #[test]
     fn promote_with_nothing_selected_is_a_noop() {
-        let mut func_lib = Arc::new(FuncLib::default());
+        let func_lib = ArcSwap::from_pointee(FuncLib::default());
         let mut doc = Document::default();
-        assert!(!promote_to_library(&mut doc, &mut func_lib));
-        assert_eq!(func_lib.subgraphs.len(), 0);
+        assert!(!promote_to_library(&mut doc, &func_lib));
+        assert_eq!(func_lib.load().subgraphs.len(), 0);
     }
 
     #[test]
     fn publish_non_subgraph_node_is_a_noop() {
         use scenarium::prelude::FuncId;
-        let mut func_lib = Arc::new(FuncLib::default());
+        let func_lib = ArcSwap::from_pointee(FuncLib::default());
         let mut doc = Document::default();
         let node = Node::new(scenarium::graph::NodeKind::Func(FuncId::unique()));
         let node_id = node.id;
@@ -551,10 +565,10 @@ mod tests {
 
         assert!(!publish_local_def(
             &mut doc,
-            &mut func_lib,
+            &func_lib,
             GraphRef::Main,
             node_id
         ));
-        assert_eq!(func_lib.subgraphs.len(), 0, "nothing published");
+        assert_eq!(func_lib.load().subgraphs.len(), 0, "nothing published");
     }
 }

@@ -136,7 +136,8 @@ impl Session {
 
     fn reconcile_if_needed(&mut self) {
         if self.needs_reconcile {
-            self.document.reconcile_boundaries(&self.engine.func_lib);
+            self.document
+                .reconcile_boundaries(&self.engine.func_lib.load());
             self.needs_reconcile = false;
         }
     }

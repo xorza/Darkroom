@@ -32,11 +32,11 @@ use glam::Vec2;
 use rhai::{Array, Dynamic, Engine};
 use scenarium::function::FuncId;
 use scenarium::graph::{Node, NodeId};
-use scenarium::prelude::FuncLib;
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::view_node::ViewNode;
 use crate::core::edit::intent::Intent;
+use crate::core::func_lib::SharedFuncLib;
 use crate::core::wake::Wake;
 use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, oneshot};
@@ -181,8 +181,8 @@ pub enum ScriptMessage {
     /// peer addr at the tracing layer).
     Print { msg: String },
     /// A batch of graph mutations issued by a script. Built on the
-    /// executor side (which has `Arc<FuncLib>` and any other inputs the
-    /// actions need) and applied verbatim by the editor through the same
+    /// executor side (which has the shared `FuncLib` cell and any other
+    /// inputs the actions need) and applied verbatim by the editor through the same
     /// intent/undo path the GUI uses — one batch is one undo entry. Keeps
     /// the script→graph boundary symmetric with the GUI→graph boundary,
     /// with no editor-side per-variant glue. Empty vecs are no-ops.
@@ -276,7 +276,7 @@ impl ScriptExecutor {
     pub fn new(
         transport: tcp::TcpTransport,
         action_tx: mpsc::UnboundedSender<ScriptMessage>,
-        func_lib: Arc<FuncLib>,
+        func_lib: SharedFuncLib,
         notify: Wake,
     ) -> Self {
         let inbound = InboundSender {
@@ -313,7 +313,7 @@ async fn run_executor(
     mut rx: mpsc::Receiver<ScriptRequest>,
     cancel: CancellationToken,
     inbound: InboundSender,
-    func_lib: Arc<FuncLib>,
+    func_lib: SharedFuncLib,
 ) {
     let state: StdoutBuffer = Arc::new(Mutex::new(String::new()));
     let engine = build_engine(state.clone(), inbound, func_lib);
@@ -343,7 +343,7 @@ async fn run_executor(
     }
 }
 
-fn build_engine(stdout: StdoutBuffer, inbound: InboundSender, func_lib: Arc<FuncLib>) -> Engine {
+fn build_engine(stdout: StdoutBuffer, inbound: InboundSender, func_lib: SharedFuncLib) -> Engine {
     let mut engine = Engine::new();
     configure_caps(&mut engine);
     wire_print_hook(&mut engine, stdout, inbound.clone());
@@ -454,11 +454,13 @@ fn register_mutations(engine: &mut Engine, inbound: InboundSender) {
 /// derive (id, name, category, inputs, outputs, …; `lambda` is
 /// `#[serde(skip)]`). Lets scripts query the live FuncLib without a
 /// separate registry on this side.
-fn register_introspection(engine: &mut Engine, func_lib: Arc<FuncLib>) {
+fn register_introspection(engine: &mut Engine, func_lib: SharedFuncLib) {
     engine.register_fn("list_funcs", move || -> Array {
+        // `load` per call so promote/publish growth is visible to scripts.
         // Skip (don't panic on) any func that fails to serialize, so a bad
         // entry can't take down the executor task mid-eval.
         func_lib
+            .load()
             .funcs
             .iter()
             .filter_map(|f| rhai::serde::to_dynamic(f).ok())
@@ -484,7 +486,7 @@ fn register_introspection(engine: &mut Engine, func_lib: Arc<FuncLib>) {
 /// bare-name surface. Keep this module small: prefer script-side helpers
 /// in `prelude.rhai` when a thing can be expressed via `apply` + the
 /// already-shaped maps.
-fn register_host_helpers(engine: &mut Engine, func_lib: Arc<FuncLib>) {
+fn register_host_helpers(engine: &mut Engine, func_lib: SharedFuncLib) {
     let mut module = rhai::Module::new();
     module.set_native_fn(
         "make_add_node",
@@ -495,7 +497,9 @@ fn register_host_helpers(engine: &mut Engine, func_lib: Arc<FuncLib>) {
             let func_id: FuncId = id
                 .parse()
                 .map_err(|e| format!("invalid func id {id:?}: {e}"))?;
-            let func = func_lib
+            // `load` per call so a func added since startup still resolves.
+            let lib = func_lib.load();
+            let func = lib
                 .by_id(&func_id)
                 .ok_or_else(|| format!("unknown func id: {id}"))?;
             let node: Node = func.into();
@@ -644,9 +648,10 @@ impl ScriptHost {
     /// Bind the TCP listener (when `cfg.tcp` is set), spin up a runtime,
     /// and start the executor on it. Returns `None` when scripting is off
     /// or the bind failed (logged here) — the normal case, not an error.
-    /// `func_lib` is a startup snapshot shared with the executor; later
-    /// library growth (promote/publish) isn't reflected in running scripts.
-    pub fn start(cfg: &ScriptConfig, func_lib: Arc<FuncLib>, wake: Wake) -> Option<Self> {
+    /// `func_lib` is the shared swappable library cell; the executor `load`s
+    /// it per call, so promote/publish growth from the GUI is reflected in
+    /// running scripts on their next access.
+    pub fn start(cfg: &ScriptConfig, func_lib: SharedFuncLib, wake: Wake) -> Option<Self> {
         let tcp_cfg = cfg.tcp.as_ref()?;
         let (transport, report) = match tcp::start(tcp_cfg) {
             Ok(pair) => pair,

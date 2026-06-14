@@ -1185,6 +1185,7 @@ name = "darkroom"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "clap",
  "common",
  "dark-light",
