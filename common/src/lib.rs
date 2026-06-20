@@ -27,6 +27,7 @@ pub(crate) mod rgb;
 pub(crate) mod shared;
 pub(crate) mod shared_fn;
 pub(crate) mod slot;
+pub(crate) mod span;
 pub(crate) mod vec2us;
 
 pub use bit_buffer2::{BitBuffer2, BitIter};
@@ -46,4 +47,5 @@ pub use serde::{deserialize, serialize};
 pub use shared::Shared;
 pub use shared_fn::SharedFn;
 pub use slot::{Slot, SlotError};
+pub use span::Span;
 pub use vec2us::Vec2us;

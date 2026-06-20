@@ -4,7 +4,7 @@
 //! [`Executor`](crate::execution::executor::Executor); all per-run scheduling state in the
 //! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan).
 
-use common::{KeyIndexKey, KeyIndexVec};
+use common::{KeyIndexKey, KeyIndexVec, Span};
 use serde::{Deserialize, Serialize};
 
 use crate::data::{DataType, StaticValue};
@@ -61,19 +61,6 @@ pub(crate) enum ExecutionBehavior {
     Impure,
     Pure,
     Once,
-}
-
-/// A contiguous slice into one of the program's SoA pools.
-#[derive(Clone, Copy, Default, Debug, Serialize, Deserialize)]
-pub(crate) struct Span {
-    pub(crate) start: u32,
-    pub(crate) len: u32,
-}
-
-impl Span {
-    pub(crate) fn range(self) -> std::ops::Range<usize> {
-        self.start as usize..(self.start + self.len) as usize
-    }
 }
 
 // === Execution Node ===

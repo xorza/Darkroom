@@ -15,13 +15,13 @@
 use std::hash::Hasher;
 
 use common::FnvHasher;
-use common::{CompactInsert, KeyIndexVec};
+use common::{CompactInsert, KeyIndexVec, Span};
 use hashbrown::HashSet;
 
 use crate::data::StaticValue;
 use crate::execution::program::{
     ExecutionBehavior, ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
-    ExecutionPortAddress, Span,
+    ExecutionPortAddress,
 };
 use crate::execution_stats::FlattenMap;
 use crate::function::FuncLib;
@@ -309,18 +309,9 @@ impl<'a> Run<'a> {
                     if !was_inited {
                         e_node.lambda = func.lambda.clone();
                     }
-                    e_node.inputs = Span {
-                        start: inputs_start,
-                        len: input_count as u32,
-                    };
-                    e_node.outputs = Span {
-                        start: outputs_start,
-                        len: func.outputs.len() as u32,
-                    };
-                    e_node.events = Span {
-                        start: events_start,
-                        len: func.events.len() as u32,
-                    };
+                    e_node.inputs = Span::new(inputs_start, input_count as u32);
+                    e_node.outputs = Span::new(outputs_start, func.outputs.len() as u32);
+                    e_node.events = Span::new(events_start, func.events.len() as u32);
                     e_node.terminal = func.terminal;
                     // Inside a `Once` composite the whole interior is frozen
                     // after its first run; otherwise the node's own behavior
