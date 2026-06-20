@@ -233,8 +233,6 @@ impl BitBuffer2 {
 
         let words_per_row = self.words_per_row();
         let bits_in_last_word = self.width % BITS_PER_WORD;
-        // Number of words that contain valid data (not just padding)
-        let data_words_per_row = self.width.div_ceil(BITS_PER_WORD);
         // Number of fully-used words (all 64 bits valid)
         let full_words_per_row = self.width / BITS_PER_WORD;
 
@@ -248,8 +246,10 @@ impl BitBuffer2 {
                 count += self.words[row_start + w].count_ones() as usize;
             }
 
-            // Handle partial last word if width is not a multiple of 64
-            if bits_in_last_word != 0 && data_words_per_row > 0 {
+            // Handle partial last word if width is not a multiple of 64.
+            // The empty-buffer early-return guarantees width > 0 here, so a
+            // nonzero `bits_in_last_word` already implies a valid last word.
+            if bits_in_last_word != 0 {
                 let last_word = self.words[row_start + full_words_per_row];
                 // Mask off padding bits
                 let mask = (1u64 << bits_in_last_word) - 1;

@@ -18,7 +18,6 @@ helpers. Pure leaf crate — depended on by everything, depends on nothing in-tr
 | `slot.rs` | `Slot<T>`: lockless single-slot async value channel (`ArcSwapOption` + `Notify`); only the latest value is retained. |
 | `pause_gate.rs` | `PauseGate`: pause/resume gate; `close()` returns a guard that reopens on drop. |
 | `ready_state.rs` | `ReadyState`: barrier-like counter that notifies waiters once `total` signals arrive. |
-| `lambda.rs` | `Lambda`: `Arc<dyn Fn() + Send + Sync>` wrapper. |
 | `macros.rs` | `id_type!` (strongly-typed UUID wrappers) + `cfg_x86_64!` / `cfg_aarch64!` arch-gate macros. |
 | `serde.rs` | Generic `serialize`/`deserialize` dispatching over `SerdeFormat`. |
 | `serde_rhai/` | Rhai text (de)serialization via a `serde_json::Value` intermediary. |
@@ -27,12 +26,8 @@ helpers. Pure leaf crate — depended on by everything, depends on nothing in-tr
 | `cpu_features.rs` | `X86Features`: cached runtime SSE/AVX2/FMA detection (x86_64; stubbed elsewhere). |
 | `parallel.rs` | `par_map_limited` / `try_par_map_limited`: concurrency-capped parallel map. |
 | `fnv.rs` | `FnvHasher`: deterministic FNV-1a 64-bit hasher (fixed seed). |
-| `span.rs` | `Span`: compact `(u32, u32)` range, 8 bytes vs 16 for `Range<usize>`. |
 | `float_ext.rs` | `FloatExt::approximately_eq` for `f32`/`f64`/`Vec2` (within `EPSILON`). |
-| `string_ext.rs` | `StrExt`: `last_line`, `line_count`. |
 | `normalize_string.rs` | `NormalizeString::normalize`: CRLF/CR → LF, guarantees trailing newline. |
-| `bool_ext.rs` | `BoolExt`: `then_else` / `then_else_with` ternary helpers. |
-| `toggle.rs` | `Toggle::toggle`: flip a bool, return the old value. |
 | `constants.rs` | `EPSILON: f32 = 1e-6`. |
 | `debug.rs` | `is_debug()`: reports `debug_assertions`. |
 | `test_utils.rs` | `workspace_root`, `test_output_path` for tests. |
