@@ -45,22 +45,45 @@ impl<T> Slot<T> {
     }
 
     /// Takes the value if present, leaving the slot empty.
-    /// Returns `None` if slot is empty or if other references exist (from `peek`/`peek_or_wait`).
+    ///
+    /// Returns `None` if the slot is empty, or if a `peek`/`peek_or_wait` clone
+    /// is still alive (the value can't be uniquely owned). In the contended
+    /// case the value is left in the slot, not discarded.
     pub fn take(&self) -> Option<T> {
-        self.value.swap(None).and_then(Arc::into_inner)
+        self.try_take().ok().flatten()
     }
 
     /// Takes the value, waiting asynchronously if none exists.
-    /// Returns error if other references exist (from `peek`/`peek_or_wait`).
+    /// Returns `Err` if a `peek`/`peek_or_wait` clone is still alive; the value
+    /// stays in the slot in that case.
     pub async fn take_or_wait(&self) -> Result<T, SlotError> {
         loop {
             let notified = self.notify.notified();
 
-            if let Some(arc) = self.value.swap(None) {
-                return Arc::into_inner(arc).ok_or(SlotError);
+            match self.try_take()? {
+                Some(value) => return Ok(value),
+                None => notified.await,
             }
+        }
+    }
 
-            notified.await;
+    /// Removes and returns the value when it can be uniquely owned.
+    ///
+    /// `Ok(None)` is empty; `Err` is contended — a live `peek`/`peek_or_wait`
+    /// clone exists. Unlike a bare `swap` + `into_inner`, the contended path
+    /// puts the value back so a failed take never drops it. The restore is a
+    /// `compare_and_swap` so a racing `send` wins (its value stays, ours is
+    /// dropped) instead of being clobbered by a stale resurrection.
+    fn try_take(&self) -> Result<Option<T>, SlotError> {
+        let Some(arc) = self.value.swap(None) else {
+            return Ok(None);
+        };
+        match Arc::try_unwrap(arc) {
+            Ok(value) => Ok(Some(value)),
+            Err(arc) => {
+                self.value.compare_and_swap(&None::<Arc<T>>, Some(arc));
+                Err(SlotError)
+            }
         }
     }
 
@@ -290,10 +313,48 @@ mod tests {
         slot.send(42);
 
         // Hold a reference via peek
-        let _peeked = slot.peek().unwrap();
+        let peeked = slot.peek().unwrap();
 
         // take_or_wait should return error since reference exists
         let result = slot.take_or_wait().await;
         assert!(result.is_err());
+
+        // ...and the value must NOT have been consumed by the failed take:
+        // it is still present and becomes takeable once the peek clone drops.
+        assert!(slot.has_value(), "failed take must not empty the slot");
+        drop(peeked);
+        assert_eq!(slot.take(), Some(42));
+        assert!(!slot.has_value());
+    }
+
+    #[test]
+    fn take_preserves_value_on_contention() {
+        let slot = Slot::default();
+        slot.send(7);
+
+        let peeked = slot.peek().unwrap();
+        // Contended: a peek clone is alive, so `take` yields None but leaves the
+        // value in place rather than dropping it on the floor.
+        assert_eq!(slot.take(), None);
+        assert!(slot.has_value());
+        assert_eq!(*peeked, 7);
+
+        drop(peeked);
+        assert_eq!(slot.take(), Some(7));
+        assert!(slot.take().is_none());
+    }
+
+    #[test]
+    fn send_after_failed_take_overwrites_restored_value() {
+        // A contended take leaves the old value in place; a later send must
+        // still overwrite it (last-write-wins is preserved across the restore).
+        let slot = Slot::default();
+        slot.send(1);
+        let peeked = slot.peek().unwrap();
+        assert_eq!(slot.take(), None); // contended: 1 restored
+
+        slot.send(2);
+        drop(peeked);
+        assert_eq!(slot.take(), Some(2), "newer send must win over the restore");
     }
 }
