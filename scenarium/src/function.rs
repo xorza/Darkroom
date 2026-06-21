@@ -36,10 +36,56 @@ pub struct FuncInput {
     pub value_options: Vec<ValueOption>,
 }
 
+impl FuncInput {
+    /// A required input of `data_type` (no const default).
+    pub fn required(name: impl Into<String>, data_type: DataType) -> Self {
+        Self {
+            name: name.into(),
+            required: true,
+            data_type,
+            default_value: None,
+            value_options: Vec::new(),
+        }
+    }
+
+    /// An optional input of `data_type`; chain [`Self::default`] to seed a
+    /// const default value.
+    pub fn optional(name: impl Into<String>, data_type: DataType) -> Self {
+        Self {
+            name: name.into(),
+            required: false,
+            data_type,
+            default_value: None,
+            value_options: Vec::new(),
+        }
+    }
+
+    /// Seed this input's const default value.
+    pub fn default(mut self, value: impl Into<StaticValue>) -> Self {
+        self.default_value = Some(value.into());
+        self
+    }
+
+    /// Attach the editor picker options (`ValueOption`s).
+    pub fn options(mut self, options: Vec<ValueOption>) -> Self {
+        self.value_options = options;
+        self
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FuncOutput {
     pub name: String,
     pub data_type: DataType,
+}
+
+impl FuncOutput {
+    pub fn new(name: impl Into<String>, data_type: DataType) -> Self {
+        Self {
+            name: name.into(),
+            data_type,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -95,6 +141,78 @@ pub struct FuncLib {
 }
 
 impl Func {
+    /// Start a func definition. Defaults: `Impure`, non-terminal,
+    /// `NodeBehavior::AsFunction`, empty category/inputs/outputs/events and a
+    /// `None` lambda — set the rest with the chained builders below.
+    pub fn new(id: impl Into<FuncId>, name: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            ..Default::default()
+        }
+    }
+
+    pub fn category(mut self, category: impl Into<String>) -> Self {
+        self.category = category.into();
+        self
+    }
+
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
+    /// Mark the func `Pure` (same inputs → same outputs; cacheable).
+    pub fn pure(mut self) -> Self {
+        self.behavior = FuncBehavior::Pure;
+        self
+    }
+
+    /// Make freshly-dropped nodes default to `NodeBehavior::Once` (run a single
+    /// time rather than re-evaluating as a function).
+    pub fn run_once(mut self) -> Self {
+        self.node_default_behavior = NodeBehavior::Once;
+        self
+    }
+
+    pub fn terminal(mut self) -> Self {
+        self.terminal = true;
+        self
+    }
+
+    pub fn input(mut self, input: FuncInput) -> Self {
+        self.inputs.push(input);
+        self
+    }
+
+    pub fn inputs(mut self, inputs: impl IntoIterator<Item = FuncInput>) -> Self {
+        self.inputs.extend(inputs);
+        self
+    }
+
+    pub fn output(mut self, name: impl Into<String>, data_type: DataType) -> Self {
+        self.outputs.push(FuncOutput::new(name, data_type));
+        self
+    }
+
+    pub fn event(mut self, name: impl Into<String>, event_lambda: EventLambda) -> Self {
+        self.events.push(FuncEvent {
+            name: name.into(),
+            event_lambda,
+        });
+        self
+    }
+
+    pub fn context(mut self, context: ContextType) -> Self {
+        self.required_contexts.push(context);
+        self
+    }
+
+    pub fn lambda(mut self, lambda: FuncLambda) -> Self {
+        self.lambda = lambda;
+        self
+    }
+
     fn validate(&self) {
         assert!(
             !self.outputs.is_empty() || self.behavior == FuncBehavior::Impure,

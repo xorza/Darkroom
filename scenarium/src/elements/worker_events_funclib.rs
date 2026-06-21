@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use crate::data::DataType;
 use crate::event_lambda::EventLambda;
 use crate::func_lambda::FuncLambda;
-use crate::function::{Func, FuncBehavior, FuncEvent, FuncInput, FuncLib, FuncOutput};
+use crate::function::{Func, FuncInput, FuncLib};
 use crate::prelude::FuncId;
 use common::FloatExt;
 use common::Slot;
@@ -21,75 +21,53 @@ struct FpsEventState {
 pub fn worker_events_funclib() -> FuncLib {
     let mut func_lib = FuncLib::default();
 
-    func_lib.add(Func {
-            id: FRAME_EVENT_FUNC_ID,
-            name: "frame event".to_string(),
-            description: None,
-            behavior: FuncBehavior::Impure,
-            category: "Timers".to_string(),
-            terminal: false,
-            inputs: vec![FuncInput {
-                name: "frequency".to_string(),
-                required: true,
-                data_type: DataType::Float,
-                default_value: Some((1.0).into()),
-                value_options: vec![],
-            }],
-            outputs: vec![
-                FuncOutput {
-                    name: "delta".to_string(),
-                    data_type: DataType::Float,
-                },
-                FuncOutput {
-                    name: "frame no".to_string(),
-                    data_type: DataType::Int,
-                },
-            ],
-            events: vec![
-                FuncEvent {
-                    name: "always".into(),
-                    event_lambda: EventLambda::new(|_state| {
-                        Box::pin(async move {
-                            //
-                        })
-                    }),
-                },
-                FuncEvent {
-                    name: "fps".into(),
-                    event_lambda: EventLambda::new(|state| {
-                        Box::pin(async move {
-                            // Get current state from per-node event state
-                            let slot = state
-                                .lock()
-                                .await
-                                .get::<Slot<FpsEventState>>()
-                                .expect("Node was never executed, nodes should be executed prior to registering events")
-                                .clone();
-                            let fps_state = slot.peek_or_wait().await;
+    func_lib.add(
+        Func::new(FRAME_EVENT_FUNC_ID, "frame event")
+            .category("Timers")
+            .input(FuncInput::required("frequency", DataType::Float).default(1.0))
+            .output("delta", DataType::Float)
+            .output("frame no", DataType::Int)
+            .event(
+                "always",
+                EventLambda::new(|_state| {
+                    Box::pin(async move {
+                        //
+                    })
+                }),
+            )
+            .event(
+                "fps",
+                EventLambda::new(|state| {
+                    Box::pin(async move {
+                        // Get current state from per-node event state
+                        let slot = state
+                            .lock()
+                            .await
+                            .get::<Slot<FpsEventState>>()
+                            .expect("Node was never executed, nodes should be executed prior to registering events")
+                            .clone();
+                        let fps_state = slot.peek_or_wait().await;
 
-                            if fps_state.frequency.approximately_eq(0.0) {
-                                tracing::info!("Frequency is zero, no FPS event");
+                        if fps_state.frequency.approximately_eq(0.0) {
+                            tracing::info!("Frequency is zero, no FPS event");
 
-                                std::future::pending::<()>().await;
-                                return;
-                            }
+                            std::future::pending::<()>().await;
+                            return;
+                        }
 
-                            let desired_duration =
-                                Duration::from_secs_f64(1.0 / fps_state.frequency);
-                            let elapsed = fps_state.last_execution.elapsed();
+                        let desired_duration = Duration::from_secs_f64(1.0 / fps_state.frequency);
+                        let elapsed = fps_state.last_execution.elapsed();
 
-                            if elapsed < desired_duration {
-                                // todo save last execution time here
-                                tokio::time::sleep(desired_duration - elapsed).await;
-                            }
+                        if elapsed < desired_duration {
+                            // todo save last execution time here
+                            tokio::time::sleep(desired_duration - elapsed).await;
+                        }
 
-                            // If elapsed >= desired_duration, fire immediately (no sleep)
-                        })
-                    }),
-                },
-            ],
-            required_contexts: vec![],
-            lambda: FuncLambda::new(
+                        // If elapsed >= desired_duration, fire immediately (no sleep)
+                    })
+                }),
+            )
+            .lambda(FuncLambda::new(
                 move |_context_manager, _state, event_state, inputs, _output_usage, outputs| {
                     Box::pin(async move {
                         let frequency = inputs[0].value.as_f64().unwrap_or(1.0);
@@ -129,9 +107,8 @@ pub fn worker_events_funclib() -> FuncLib {
                         Ok(())
                     })
                 },
-            ),
-            ..Default::default()
-        });
+            )),
+    );
 
     func_lib
 }

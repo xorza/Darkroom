@@ -107,7 +107,11 @@ missing inputs, errors, drained logs, `FlattenMap`) are collected into `Executio
 
 A `Func` (`function.rs:56`) is a definition (id, name, behavior, inputs/outputs/
 events, `required_contexts`, and a runtime-attached `lambda` skipped on serialize).
-`FuncLib` (`function.rs:87`) registers funcs + shared subgraph defs. A node
+Build one with the fluent builder — `Func::new(id, name).category(..).pure()
+.input(FuncInput::required(name, ty)).output(name, ty).lambda(..)` — rather than a
+struct literal (`FuncInput::required`/`optional(..).default(v)`, `FuncOutput::new`;
+fields stay `pub` for serde + the editor). `FuncLib` (`function.rs:87`) registers
+funcs + shared subgraph defs. A node
 function is a `FuncLambda` (`func_lambda.rs:62`): async
 `fn(&mut ContextManager, &mut AnyState, &SharedAnyState, &[InvokeInput], &[OutputUsage], &mut [DynamicValue]) -> InvokeResult<()>`.
 Build them with `async_lambda!` (`macros.rs`). `EventLambda` (`event_lambda.rs`)
