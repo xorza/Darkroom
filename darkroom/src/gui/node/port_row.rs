@@ -131,6 +131,13 @@ pub(crate) fn const_editor_wid(node_id: NodeId, port_idx: usize) -> WidgetId {
     WidgetId::from_hash(("graph.node.const_editor", node_id, port_idx))
 }
 
+/// Stable widget id for an input port's cell (circle + label). The prepass
+/// polls it for a double-click on the label area (the circle has its own
+/// `port_circle_wid`) to toggle the input's binding.
+pub(crate) fn input_cell_wid(port: PortRef) -> WidgetId {
+    WidgetId::from_hash(("graph.node.input_cell", port.node_id, port.port_idx))
+}
+
 /// Column 0: the input port circle + label, plus the right-click binding
 /// menu (anchored here, so right-clicking the circle or label opens it).
 /// The circle's `WidgetId` is the deterministic `port_circle_wid(port)`, so
@@ -162,8 +169,10 @@ fn input_label_cell(
     let overhang = theme.port_radius() + theme.port_col_pad_x;
     let margin = Spacing::new(-overhang, 0.0, 0.0, 0.0);
     let wid = port_circle_wid(port);
+    // Stable cell id so the prepass can poll a label-area double-click (the
+    // circle has its own `port_circle_wid`); also the context-menu anchor.
     let cell = Panel::hstack()
-        .id_salt(("in", port.port_idx))
+        .id(input_cell_wid(port))
         .grid_cell((port.port_idx as u16, COL_INPUT))
         .align(Align::new(HAlign::Left, VAlign::Center))
         .size((Sizing::Hug, Sizing::Hug))
@@ -185,9 +194,10 @@ fn input_label_cell(
     {
         ContextMenu::open(ui, menu_id, p);
     }
-    // Double-click on the circle clears the binding — handled in
-    // `emit_port_disconnects` (prepass), since clearing a `Const` resizes
-    // the node and the wires must re-anchor before the record.
+    // Double-click on the circle or label toggles the binding (clear, or seed
+    // the default const when unbound) — handled in `emit_port_dblclicks`
+    // (prepass), since adding/removing a `Const` resizes the node and the
+    // wires must re-anchor before the record.
     ContextMenu::for_id(menu_id)
         .size((Sizing::Hug, Sizing::Hug))
         .show(ui, |ui, popup| {
@@ -286,7 +296,7 @@ fn output_cell(
             );
         });
     // Double-click to disconnect every consumer is handled in
-    // `emit_port_disconnects` (prepass) alongside the input-side gesture.
+    // `emit_port_dblclicks` (prepass) alongside the input-side gesture.
 }
 
 /// Hover / grab box scaled past the painted dot so ports are easier to

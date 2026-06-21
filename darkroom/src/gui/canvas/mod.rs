@@ -26,7 +26,7 @@ use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subgraph_menu::SubgraphMenuUi;
 use crate::gui::menu_bar::MenuCommand;
-use crate::gui::node::{NodeUI, RecordCtx, emit_path_picks, emit_port_disconnects};
+use crate::gui::node::{NodeUI, RecordCtx, emit_path_picks, emit_port_dblclicks};
 use crate::gui::scene::{Scene, SceneNode};
 use crate::gui::{PortKind, PortRef};
 
@@ -125,7 +125,7 @@ impl GraphUI {
         let gesture = classify_canvas_gesture(ui);
         pan_zoom::emit_pan_zoom(&mut self.gestures.pan_anchor, ui, scene, gesture, out);
         self.gestures.node_ui.prepass(ui, scene, out);
-        emit_port_disconnects(ui, scene, out);
+        emit_port_dblclicks(ui, scene, out);
         self.port_frame.rebuild(ui, scene);
         self.gestures
             .connection_ui

@@ -11,7 +11,7 @@ use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::node_ports;
 use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::node::header::{header, status_row, subgraph_badge_wid};
-use crate::gui::node::port_row::{const_editor_wid, port_circle_wid, ports_row};
+use crate::gui::node::port_row::{const_editor_wid, input_cell_wid, port_circle_wid, ports_row};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, Scene, SceneNode};
 use crate::gui::theme::Theme;
@@ -352,19 +352,42 @@ pub(crate) fn emit_path_picks(ui: &Ui, scene: &Scene) -> Option<PathPickRequest>
     None
 }
 
-/// Prepass scan: port-circle double-clicks read from last frame's
-/// responses. An input double-click clears that input's binding; an
-/// output double-click disconnects every consumer it feeds.
+/// Prepass scan: port double-clicks read from last frame's responses. An
+/// input double-click (on the port circle *or* its label) toggles the
+/// binding — clears it, or seeds the default const when unbound; an output
+/// double-click disconnects every consumer it feeds.
 ///
-/// Emitted pre-record (like the connection commit) because clearing a
-/// `Const` input removes its inline editor and resizes the node — doing it
-/// before Pass A lets the node arrange at its settled size and the wires
-/// re-anchor the same frame, instead of floating until the relayout pass.
-pub(crate) fn emit_port_disconnects(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
+/// Emitted pre-record (like the connection commit) because adding or removing
+/// a `Const` input's inline editor resizes the node — doing it before Pass A
+/// lets the node arrange at its settled size and the wires re-anchor the same
+/// frame, instead of floating until the relayout pass.
+pub(crate) fn emit_port_dblclicks(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
     for node in &scene.nodes {
-        for port in node_ports(node, PortKind::Input) {
-            if ui.response_for(port_circle_wid(port)).double_clicked() {
-                out.push(set_input(port, Binding::None));
+        // Boundary ports route the interface — no const affordance, so an
+        // unbound one has nothing to seed (its label double-click renames).
+        let can_set = !node.boundary;
+        for (i, input) in scene.inputs(node.inputs).iter().enumerate() {
+            let port = PortRef {
+                node_id: node.id,
+                kind: PortKind::Input,
+                port_idx: i,
+            };
+            // The circle intercepts its own rect; the cell catches the label.
+            let dbl = ui.response_for(port_circle_wid(port)).double_clicked()
+                || ui.response_for(input_cell_wid(port)).double_clicked();
+            if !dbl {
+                continue;
+            }
+            match &input.binding {
+                // Unbound → seed the default literal (or first enum / value-
+                // option variant, both already folded into `SceneInput::default`).
+                InputBindingView::None => {
+                    if can_set && let Some(default) = &input.default {
+                        out.push(set_input(port, Binding::Const(default.clone())));
+                    }
+                }
+                // Already bound → clear it.
+                _ => out.push(set_input(port, Binding::None)),
             }
         }
         for port in node_ports(node, PortKind::Output) {
