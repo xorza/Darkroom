@@ -3,7 +3,7 @@ use std::slice;
 
 use crate::vec2us::Vec2us;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Buffer2<T> {
     pixels: Vec<T>,
     dimensions: Vec2us,
