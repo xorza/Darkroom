@@ -144,14 +144,30 @@ could come later if wanted.
 ### Phase 4 — Polish / advanced
 
 4. Split detection/registration/warp/combine into composable nodes (`StarSet`,
-   `WarpTransform` custom types) for power users; add **Drizzle**.
-5. Optional **config-builder nodes** (e.g. a `Stack Config` node outputting a
-   `StackConfig` custom value) if presets+overrides prove too limiting — defer
-   until needed.
+   `WarpTransform` custom types) for power users; add **Drizzle**. lumos exposes
+   the stages (`star_detection::detect`, `registration` → `WarpTransform`,
+   `warp`, `drizzle::*_stack`), so this is buildable without lumos changes.
+   **Not started.**
+5. ✅ **Config-builder nodes** — *done.* A generic `config_builder_func::<T>()`
+   (`lens/src/config_node.rs`) reflects any `common::Introspect` type into a
+   field-per-input node → a wireable `ConfigValue<T>`; lens-side mirror structs
+   (`astro_configs.rs`) drive `build_background_config` / `build_detection_config`
+   / `build_registration_config` / `build_combine_config`. The consuming nodes
+   take **one** config-typed input that offers the presets via `value_options`
+   (a dropdown) *and* accepts a builder wire to override.
 6. AstroFrame ⇄ lens `Image` bridge nodes so astro output can flow into the
    existing imaginarium nodes (trivial now that both live in `lens`).
    ✅ **`astro_to_image`** (`AstroFrame → Image`, via lumos' `From<&AstroImage>`
    for `imaginarium::Image`). Reverse (`Image → AstroFrame`) not yet needed.
+
+### Still open (Phase 4)
+
+- **Composable stacking nodes + Drizzle** (item 4) — the headline remaining item.
+- **Star-detect overlay** — `star_detect` currently outputs just a `count`; draw
+  the detected stars over the frame preview.
+- (Minor) roll the config-builder / value_options pattern out to the remaining
+  single-param per-frame nodes (`denoise` / `hdr_compress` / `local_contrast`);
+  reverse `Image → AstroFrame` bridge (only if a workflow needs it).
 
 ## Brief implementation sketches
 
