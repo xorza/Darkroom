@@ -11,6 +11,7 @@ use palantir::{
     Rect, Sense, Shape, Sizing, Spacing, Stroke, Tooltip, Track, Ui, VAlign, WidgetId,
 };
 use scenarium::data::{DataType, FsPathMode, StaticValue};
+use scenarium::function::ValueOption;
 use scenarium::graph::Binding;
 use scenarium::prelude::NodeId;
 
@@ -70,6 +71,8 @@ fn input_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<
     let bindings = rcx.scene.bindings(node.inputs);
     let defaults = rcx.scene.defaults(node.inputs);
     let types = rcx.scene.input_types(node.inputs);
+    let required = rcx.scene.required(node.inputs);
+    let option_spans = rcx.scene.value_option_spans(node.inputs);
     // Boundary (`SubgraphInput`/`SubgraphOutput`) ports route the
     // interface, not literal values — no const affordance.
     let allow_const = !node.boundary;
@@ -86,6 +89,9 @@ fn input_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<
         // *outputs* — renameable, except the trailing "+" placeholder.
         let rename = (node.boundary && i + 1 < names.len()).then_some(BoundarySide::Output);
         let tip = type_label(&data_type);
+        // A required input with no binding is a missing input — highlight it.
+        let missing =
+            required.get(i).copied().unwrap_or(false) && matches!(binding, InputBindingView::None);
         input_label_cell(
             ui,
             rcx,
@@ -97,11 +103,16 @@ fn input_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<
             allow_const,
             rename,
             &data_type,
+            missing,
             &tip,
             out,
         );
         if allow_const && let InputBindingView::Const(value) = binding {
-            value_cell(ui, rcx.theme, port, i, value, &data_type, out);
+            let options = option_spans
+                .get(i)
+                .map(|s| rcx.scene.value_options(*s))
+                .unwrap_or(&[]);
+            value_cell(ui, rcx.theme, port, i, value, &data_type, options, out);
         }
     }
 }
@@ -159,16 +170,23 @@ fn input_label_cell(
     allow_const: bool,
     rename: Option<BoundarySide>,
     data_type: &DataType,
+    missing: bool,
     tip: &str,
     out: &mut Vec<Intent>,
 ) {
     let theme = rcx.theme;
-    let fill = port_color(
-        theme,
-        data_type,
-        PortKind::Input,
-        rcx.port_frame.is_hovered(port),
-    );
+    // A missing required input paints its port in the warning color regardless
+    // of data type, so the unfilled port stands out before a run.
+    let fill = if missing {
+        theme.exec_missing_glow
+    } else {
+        port_color(
+            theme,
+            data_type,
+            PortKind::Input,
+            rcx.port_frame.is_hovered(port),
+        )
+    };
     let overhang = theme.port_radius() + theme.port_col_pad_x;
     let margin = Spacing::new(-overhang, 0.0, 0.0, 0.0);
     let wid = port_circle_wid(port);
@@ -224,6 +242,7 @@ fn input_label_cell(
 
 /// Column 1: the inline const editor for an input bound to a `Const`. A
 /// hug-sized column, so every editor starts at the same x.
+#[allow(clippy::too_many_arguments)]
 fn value_cell(
     ui: &mut Ui,
     theme: &Theme,
@@ -231,6 +250,7 @@ fn value_cell(
     row: usize,
     value: &StaticValue,
     data_type: &DataType,
+    value_options: &[ValueOption],
     out: &mut Vec<Intent>,
 ) {
     let editor_id = const_editor_wid(port.node_id, port.port_idx);
@@ -243,7 +263,14 @@ fn value_cell(
         .size((Sizing::FILL, Sizing::Hug))
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            value_editor::show(ui, &theme.static_value_editor, editor_id, value, data_type)
+            value_editor::show(
+                ui,
+                &theme.static_value_editor,
+                editor_id,
+                value,
+                data_type,
+                value_options,
+            )
         });
     if let Some(new_value) = edited.inner {
         out.push(set_input(port, Binding::Const(new_value)));

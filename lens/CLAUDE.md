@@ -38,11 +38,11 @@ Node-function library: adapts `imaginarium` (GPU image ops) **and** `lumos`
 | `blend` | Blend two images with configurable mode and alpha. |
 | `load_astro_image` | Decode a FITS/RAW/standard file into an `AstroFrame` (off-thread). |
 | `build_masters` | Stack `darks`/`flats`/`bias`/`flat_darks` folders into `Masters` (off-thread, per-role via `stack_cfa_master` + `CalibrationMasters::from_images`). `cache` toggle (default on) writes each master as `master_<role>.lcm` next to its frames and reloads it next run instead of re-stacking (`CfaImage::save`/`load`). |
-| `stack_lights` | Calibrate + align + stack a `lights` folder (+ optional `Masters`, preset dropdowns) into `image`/`coverage`/`weight` `AstroFrame`s (`calibrate_align_stack`, off-thread). |
+| `stack_lights` | Calibrate + align + stack a `lights` folder (+ optional `Masters`) into `image`/`coverage`/`weight` `AstroFrame`s (`calibrate_align_stack`, off-thread). Each of detection/registration/combine is **one required** config-typed input: a preset quick-pick (`value_options` dropdown, seeded to the first) that a `build_*_config` node can wire into to override. Inputs with a default/variants are **required + seeded** (not optional with a hidden fallback) — clearing one is a missing input (errored run, highlighted port), never a silent default. `masters` is the only genuinely-optional input (absent = no calibration). |
 | `auto_stretch` | Display-stretch an `AstroFrame` (`StretchPreset` dropdown → `lumos::stretch`, off-thread). |
 | `background_extract` / `denoise` / `scnr` / `neutralize_background` / `hdr_compress` / `local_contrast` | Per-frame `AstroFrame → AstroFrame` processing (lumos in-place ops via the `processing_func` + `run_frame_op` helpers, off-thread). |
 | `star_detect` | Detect stars in an `AstroFrame` → star `count` (Int) (`StarDetector`, `DetectionPreset` dropdown). |
-| `build_background_config` | Config-builder (`config_builder_func::<BackgroundConfig>`): a field-per-input node → a `BackgroundConfig` value; wire into `background_extract`'s optional `config` to override its `mode` preset. |
+| `build_background_config` / `build_detection_config` / `build_registration_config` / `build_combine_config` | Config-builder nodes (`config_builder_func::<…ConfigDef>`): a field-per-input node → a config value, wired into the matching node's config input to override its preset quick-pick (`background_extract`'s `config`; `stack_lights`' detection/registration/combine). Mirrors expose a curated subset of each lumos config's knobs; the consuming input offers the presets via `value_options`. |
 | `astro_to_image` | Bridge an `AstroFrame` → `Image` so the imaginarium image nodes can consume astro output. |
 
 ## Dependencies

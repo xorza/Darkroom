@@ -22,6 +22,7 @@ use palantir::{
     Button, Checkbox, ComboBox, Configure, Sizing, Spacing, TextEdit, TextWrap, Ui, WidgetId,
 };
 use scenarium::data::{DataType, StaticValue};
+use scenarium::function::ValueOption;
 
 use crate::gui::theme::StaticValueEditorTheme;
 
@@ -40,8 +41,30 @@ pub(crate) fn show(
     id: WidgetId,
     value: &StaticValue,
     data_type: &DataType,
+    value_options: &[ValueOption],
 ) -> Option<StaticValue> {
     let width = theme.width;
+    // Picker options (the input's `value_options`, e.g. named config presets)
+    // override the per-type editor: a dropdown of option names, binding the
+    // chosen option's value. Works regardless of `data_type` (a custom config
+    // port still shows its presets).
+    if !value_options.is_empty() {
+        let names: Vec<&str> = value_options.iter().map(|o| o.name.as_str()).collect();
+        let before = value_options
+            .iter()
+            .position(|o| &o.value == value)
+            .unwrap_or(0);
+        let mut idx = before;
+        ComboBox::new(&mut idx, &names)
+            .id(id)
+            .style(theme.button.clone())
+            .size((Sizing::FILL, Sizing::Hug))
+            .min_size((width, 0.0))
+            .show(ui);
+        return (idx != before)
+            .then(|| value_options.get(idx).map(|o| o.value.clone()))
+            .flatten();
+    }
     match value {
         StaticValue::Int(current) => {
             let buf = buffered_text_edit(ui, id, *current, i64::to_string, width);

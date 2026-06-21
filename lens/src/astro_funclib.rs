@@ -18,18 +18,21 @@ use lumos::{
     compress_dynamic_range, denoise, enhance_local_contrast, extract_background,
     neutralize_background, scnr, stack_cfa_master, stretch,
 };
-use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
+use scenarium::data::{
+    DataType, DynamicValue, EnumVariants, FsPathConfig, FsPathMode, StaticValue,
+};
 use scenarium::func_lambda::FuncLambda;
-use scenarium::function::{Func, FuncInput, FuncLib};
+use scenarium::function::{Func, FuncInput, FuncLib, ValueOption};
 
-use crate::astro_configs::BackgroundConfigDef;
+use crate::astro_configs::{
+    BackgroundConfigDef, CombineConfigDef, DetectionConfigDef, RegistrationConfigDef,
+};
 use crate::astro_frame::{ASTRO_FRAME_DATA_TYPE, AstroFrame};
 use crate::astro_presets::{
-    BACKGROUND_MODE_DATATYPE, BackgroundModeKind, COMBINE_PRESET_DATATYPE, CombinePreset,
-    DETECTION_PRESET_DATATYPE, DetectionPreset, REGISTRATION_PRESET_DATATYPE, RegistrationPreset,
-    SCNR_METHOD_DATATYPE, STRETCH_PRESET_DATATYPE, ScnrKind, StretchPreset,
+    BackgroundModeKind, CombinePreset, DETECTION_PRESET_DATATYPE, DetectionPreset,
+    RegistrationPreset, SCNR_METHOD_DATATYPE, STRETCH_PRESET_DATATYPE, ScnrKind, StretchPreset,
 };
-use crate::config_node::{ConfigValue, config_builder_func, config_data_type};
+use crate::config_node::{ConfigValue, NodeConfig, config_builder_func, config_data_type};
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use crate::masters::{MASTERS_DATA_TYPE, Masters};
 
@@ -114,10 +117,10 @@ pub fn astro_funclib() -> FuncLib {
                 dir_input("flat_darks"),
             ])
             .input(
-                FuncInput::optional("sigma", DataType::Float)
+                FuncInput::required("sigma", DataType::Float)
                     .default(DEFAULT_SIGMA_THRESHOLD as f64),
             )
-            .input(FuncInput::optional("cache", DataType::Bool).default(true))
+            .input(FuncInput::required("cache", DataType::Bool).default(true))
             .output("masters", MASTERS_DATA_TYPE.clone())
             .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
                 Box::pin(async move {
@@ -132,8 +135,8 @@ pub fn astro_funclib() -> FuncLib {
                         .value
                         .as_f64()
                         .map(|v| v as f32)
-                        .unwrap_or(DEFAULT_SIGMA_THRESHOLD);
-                    let cache = inputs[5].value.as_bool().unwrap_or(true);
+                        .expect("sigma is required");
+                    let cache = inputs[5].value.as_bool().expect("cache is required");
 
                     // Stacking many full-resolution CFA frames is heavy CPU work;
                     // a cached master is loaded instead when present.
@@ -158,12 +161,23 @@ pub fn astro_funclib() -> FuncLib {
             .run_once()
             .input(FuncInput::required("lights", ASTRO_DIR_DATA_TYPE.clone()))
             .input(FuncInput::optional("masters", MASTERS_DATA_TYPE.clone()))
-            .input(preset_input("detection", &DETECTION_PRESET_DATATYPE))
-            .input(preset_input("registration", &REGISTRATION_PRESET_DATATYPE))
-            .input(preset_input("combine", &COMBINE_PRESET_DATATYPE))
+            // Each stage is one input: a preset quick-pick (the `value_options`
+            // dropdown) that a build_*_config node can wire into to override.
+            .input(preset_config_input::<DetectionConfigDef>(
+                "detection",
+                DetectionPreset::variant_names(),
+            ))
+            .input(preset_config_input::<RegistrationConfigDef>(
+                "registration",
+                RegistrationPreset::variant_names(),
+            ))
+            .input(preset_config_input::<CombineConfigDef>(
+                "combine",
+                CombinePreset::variant_names(),
+            ))
             // reference: < 0 picks the frame with the most stars (auto); >= 0 is
             // a 0-based index into the (directory-sorted) light frames.
-            .input(FuncInput::optional("reference", DataType::Int).default(-1_i64))
+            .input(FuncInput::required("reference", DataType::Int).default(-1_i64))
             .output("image", ASTRO_FRAME_DATA_TYPE.clone())
             .output("coverage", ASTRO_FRAME_DATA_TYPE.clone())
             .output("weight", ASTRO_FRAME_DATA_TYPE.clone())
@@ -180,26 +194,46 @@ pub fn astro_funclib() -> FuncLib {
                     // Arc-clone the masters value so it can move into the
                     // blocking task; `Unbound` means "no calibration".
                     let masters_val = inputs[1].value.clone();
+                    // Each stage input: a wired config overrides the picked preset.
                     let detection = inputs[2]
                         .value
-                        .as_enum()
-                        .and_then(|s| DetectionPreset::from_str(s).ok())
-                        .unwrap_or(DetectionPreset::WideField)
-                        .config();
+                        .as_custom::<ConfigValue<DetectionConfigDef>>()
+                        .map(|c| c.0.clone().into())
+                        .or_else(|| {
+                            inputs[2]
+                                .value
+                                .as_enum()
+                                .and_then(|s| DetectionPreset::from_str(s).ok())
+                                .map(|preset| preset.config())
+                        })
+                        .expect("detection is required");
                     let registration = inputs[3]
                         .value
-                        .as_enum()
-                        .and_then(|s| RegistrationPreset::from_str(s).ok())
-                        .unwrap_or(RegistrationPreset::Default)
-                        .config();
+                        .as_custom::<ConfigValue<RegistrationConfigDef>>()
+                        .map(|c| c.0.clone().into())
+                        .or_else(|| {
+                            inputs[3]
+                                .value
+                                .as_enum()
+                                .and_then(|s| RegistrationPreset::from_str(s).ok())
+                                .map(|preset| preset.config())
+                        })
+                        .expect("registration is required");
                     let stack = inputs[4]
                         .value
-                        .as_enum()
-                        .and_then(|s| CombinePreset::from_str(s).ok())
-                        .unwrap_or(CombinePreset::SigmaClipped)
-                        .config();
-                    let reference = match inputs[5].value.as_i64() {
-                        Some(index) if index >= 0 => Reference::Index(index as usize),
+                        .as_custom::<ConfigValue<CombineConfigDef>>()
+                        .map(|c| c.0.clone().into())
+                        .or_else(|| {
+                            inputs[4]
+                                .value
+                                .as_enum()
+                                .and_then(|s| CombinePreset::from_str(s).ok())
+                                .map(|preset| preset.config())
+                        })
+                        .expect("combine is required");
+                    // `reference` is required + seeded to -1 (auto); >= 0 selects a frame.
+                    let reference = match inputs[5].value.as_i64().expect("reference is required") {
+                        index if index >= 0 => Reference::Index(index as usize),
                         _ => Reference::Auto,
                     };
                     let config = AlignStackConfig {
@@ -260,7 +294,7 @@ pub fn astro_funclib() -> FuncLib {
                         .value
                         .as_enum()
                         .and_then(|s| StretchPreset::from_str(s).ok())
-                        .unwrap_or(StretchPreset::AutoAsinh)
+                        .expect("method is required")
                         .config();
                     // Arc-clone the frame so the deep copy + stretch run
                     // off the worker thread.
@@ -327,6 +361,25 @@ pub fn astro_funclib() -> FuncLib {
         "Builds a detailed background-extraction config",
     ));
 
+    // build_detection_config / build_registration_config / build_combine_config:
+    // detailed overrides for stack_lights' detection / registration / combine
+    // preset dropdowns.
+    func_lib.add(config_builder_func::<DetectionConfigDef>(
+        "6c6f92e7-0f74-454c-acc4-68691cb8462f",
+        "build_detection_config",
+        "Builds a detailed star-detection config",
+    ));
+    func_lib.add(config_builder_func::<RegistrationConfigDef>(
+        "adf216fe-baa9-4abd-8c4a-bfb98bb60fbc",
+        "build_registration_config",
+        "Builds a detailed registration config",
+    ));
+    func_lib.add(config_builder_func::<CombineConfigDef>(
+        "05313ceb-a3b2-4488-92af-c9e228bb1789",
+        "build_combine_config",
+        "Builds a detailed frame-combination config",
+    ));
+
     // --- per-frame processing nodes (AstroFrame → AstroFrame) ---
 
     // background_extract: a quick `mode` preset, or a `config` wired from
@@ -337,27 +390,30 @@ pub fn astro_funclib() -> FuncLib {
         "Fits and removes a smooth sky-background gradient",
         vec![
             frame_input("image"),
-            preset_input("mode", &BACKGROUND_MODE_DATATYPE),
-            FuncInput::optional("config", config_data_type::<BackgroundConfigDef>()),
+            // One `config` input: pick a `mode` preset (value_options dropdown)
+            // or wire a build_background_config node to override it.
+            preset_config_input::<BackgroundConfigDef>(
+                "config",
+                BackgroundModeKind::variant_names(),
+            ),
         ],
         FuncLambda::new(move |_, _, _, inputs, _, outputs| {
             Box::pin(async move {
-                let config = inputs[2]
+                let config = inputs[1]
                     .value
                     .as_custom::<ConfigValue<BackgroundConfigDef>>()
                     .map(|c| c.0.clone().into())
-                    .unwrap_or_else(|| {
-                        let mode = inputs[1]
+                    .or_else(|| {
+                        inputs[1]
                             .value
                             .as_enum()
                             .and_then(|s| BackgroundModeKind::from_str(s).ok())
-                            .unwrap_or(BackgroundModeKind::Subtract)
-                            .config();
-                        BackgroundConfig {
-                            mode,
-                            ..Default::default()
-                        }
-                    });
+                            .map(|mode| BackgroundConfig {
+                                mode: mode.config(),
+                                ..Default::default()
+                            })
+                    })
+                    .expect("config is required");
                 let value = inputs[0].value.clone();
                 outputs[0] = run_frame_op(value, move |img| {
                     extract_background(img, &config);
@@ -376,7 +432,11 @@ pub fn astro_funclib() -> FuncLib {
         vec![frame_input("image"), float_input("strength", 0.85)],
         FuncLambda::new(move |_, _, _, inputs, _, outputs| {
             Box::pin(async move {
-                let strength = inputs[1].value.as_f64().map(|v| v as f32).unwrap_or(0.85);
+                let strength = inputs[1]
+                    .value
+                    .as_f64()
+                    .map(|v| v as f32)
+                    .expect("strength is required");
                 let value = inputs[0].value.clone();
                 outputs[0] = run_frame_op(value, move |img| {
                     denoise(
@@ -408,7 +468,7 @@ pub fn astro_funclib() -> FuncLib {
                     .value
                     .as_enum()
                     .and_then(|s| ScnrKind::from_str(s).ok())
-                    .unwrap_or(ScnrKind::AverageNeutral)
+                    .expect("method is required")
                     .config();
                 let value = inputs[0].value.clone();
                 outputs[0] = run_frame_op(value, move |img| scnr(img, method)).await?;
@@ -440,7 +500,11 @@ pub fn astro_funclib() -> FuncLib {
         vec![frame_input("image"), float_input("amount", 0.5)],
         FuncLambda::new(move |_, _, _, inputs, _, outputs| {
             Box::pin(async move {
-                let amount = inputs[1].value.as_f64().map(|v| v as f32).unwrap_or(0.5);
+                let amount = inputs[1]
+                    .value
+                    .as_f64()
+                    .map(|v| v as f32)
+                    .expect("amount is required");
                 let value = inputs[0].value.clone();
                 outputs[0] = run_frame_op(value, move |img| {
                     compress_dynamic_range(
@@ -465,7 +529,11 @@ pub fn astro_funclib() -> FuncLib {
         vec![frame_input("image"), float_input("strength", 0.8)],
         FuncLambda::new(move |_, _, _, inputs, _, outputs| {
             Box::pin(async move {
-                let strength = inputs[1].value.as_f64().map(|v| v as f32).unwrap_or(0.8);
+                let strength = inputs[1]
+                    .value
+                    .as_f64()
+                    .map(|v| v as f32)
+                    .expect("strength is required");
                 let value = inputs[0].value.clone();
                 outputs[0] = run_frame_op(value, move |img| {
                     enhance_local_contrast(
@@ -500,7 +568,7 @@ pub fn astro_funclib() -> FuncLib {
                         .value
                         .as_enum()
                         .and_then(|s| DetectionPreset::from_str(s).ok())
-                        .unwrap_or(DetectionPreset::WideField)
+                        .expect("detection is required")
                         .config();
                     let value = inputs[0].value.clone();
                     let count = tokio::task::spawn_blocking(move || {
@@ -525,10 +593,28 @@ pub fn astro_funclib() -> FuncLib {
     func_lib
 }
 
-/// A preset dropdown input seeded to the enum's first variant.
+/// A required preset dropdown input seeded to the enum's first variant. The
+/// default keeps a fresh node valid; clearing it surfaces as a missing input.
 fn preset_input(name: &str, datatype: &DataType) -> FuncInput {
-    let mut input = FuncInput::optional(name, datatype.clone());
+    let mut input = FuncInput::required(name, datatype.clone());
     input.default_value = datatype.default_value();
+    input
+}
+
+/// A single config input that's a config `T`'s wire (so a `build_*_config` node
+/// can drive it) *and* offers `presets` as a quick-pick dropdown via
+/// `value_options` (seeded to the first). The node resolves a wired
+/// `ConfigValue<T>` if present, else the picked preset name.
+fn preset_config_input<T: NodeConfig>(name: &str, presets: Vec<String>) -> FuncInput {
+    let options = presets
+        .iter()
+        .map(|preset| ValueOption {
+            name: preset.clone(),
+            value: StaticValue::Enum(preset.clone()),
+        })
+        .collect();
+    let mut input = FuncInput::required(name, config_data_type::<T>()).options(options);
+    input.default_value = presets.first().map(|p| StaticValue::Enum(p.clone()));
     input
 }
 
@@ -551,9 +637,9 @@ fn frame_input(name: &str) -> FuncInput {
     FuncInput::required(name, ASTRO_FRAME_DATA_TYPE.clone())
 }
 
-/// An optional float parameter input seeded with `default`.
+/// A required float parameter input seeded with `default`.
 fn float_input(name: &str, default: f32) -> FuncInput {
-    FuncInput::optional(name, DataType::Float).default(default as f64)
+    FuncInput::required(name, DataType::Float).default(default as f64)
 }
 
 /// Assemble a `Func` for an `AstroFrame → AstroFrame` processing node:
@@ -711,18 +797,59 @@ mod tests {
         let f = func(&lib, "stack_lights");
         assert_eq!(f.category, "astro");
 
+        // One input per stage: lights, masters, detection, registration,
+        // combine, reference.
         assert_eq!(f.inputs.len(), 6);
-        assert_eq!(f.inputs[0].name, "lights");
+        let names: Vec<&str> = f.inputs.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "lights",
+                "masters",
+                "detection",
+                "registration",
+                "combine",
+                "reference"
+            ]
+        );
         assert_eq!(f.inputs[0].data_type, *ASTRO_DIR_DATA_TYPE);
         assert!(f.inputs[0].required, "lights folder is required");
-        assert_eq!(f.inputs[1].name, "masters");
         assert_eq!(f.inputs[1].data_type, *MASTERS_DATA_TYPE);
-        assert!(!f.inputs[1].required, "masters are optional");
-        // Preset dropdowns seed to their first variant.
-        assert_eq!(f.inputs[2].data_type, *DETECTION_PRESET_DATATYPE);
+        assert!(!f.inputs[1].required, "masters are genuinely optional");
+        // Each stage is one config-typed input (so a build_*_config wires in),
+        // with the presets offered via value_options + seeded to the first.
+        // It's required: the seeded preset keeps a fresh node valid, but a
+        // cleared input errors the run rather than silently defaulting.
+        assert!(f.inputs[2].required, "detection is required");
+        assert_eq!(
+            f.inputs[2].data_type,
+            config_data_type::<DetectionConfigDef>()
+        );
+        let detection_presets: Vec<&str> = f.inputs[2]
+            .value_options
+            .iter()
+            .map(|o| o.name.as_str())
+            .collect();
+        assert_eq!(
+            detection_presets,
+            [
+                "wide_field",
+                "high_resolution",
+                "crowded_field",
+                "precise_ground"
+            ]
+        );
         assert_eq!(
             f.inputs[2].default_value,
             Some(StaticValue::Enum("wide_field".to_string())),
+        );
+        assert_eq!(
+            f.inputs[3].data_type,
+            config_data_type::<RegistrationConfigDef>()
+        );
+        assert_eq!(
+            f.inputs[4].data_type,
+            config_data_type::<CombineConfigDef>()
         );
         assert_eq!(f.inputs[5].name, "reference");
         assert_eq!(f.inputs[5].default_value, Some(StaticValue::Int(-1)));
@@ -827,14 +954,21 @@ mod tests {
             config_data_type::<BackgroundConfigDef>()
         );
 
-        // background_extract gained an optional `config` input of that type, so a
-        // built config can be wired in to override the `mode` preset.
+        // background_extract is image + one `config` input of that type: a mode
+        // preset quick-pick (value_options) a builder can wire into to override.
         let bg = func(&lib, "background_extract");
-        assert_eq!(bg.inputs[2].name, "config");
+        let bg_names: Vec<&str> = bg.inputs.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(bg_names, ["image", "config"]);
+        assert!(bg.inputs[1].required, "config is required (preset-seeded)");
         assert_eq!(
-            bg.inputs[2].data_type,
+            bg.inputs[1].data_type,
             config_data_type::<BackgroundConfigDef>()
         );
-        assert!(!bg.inputs[2].required);
+        let modes: Vec<&str> = bg.inputs[1]
+            .value_options
+            .iter()
+            .map(|o| o.name.as_str())
+            .collect();
+        assert_eq!(modes, ["subtract", "divide"]);
     }
 }

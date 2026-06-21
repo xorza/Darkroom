@@ -1,10 +1,11 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 
+use common::Span;
 use glam::Vec2;
 use palantir::InternedStr;
 use scenarium::data::{DataType, StaticValue};
-use scenarium::function::{FuncInput, FuncOutput};
+use scenarium::function::{FuncInput, FuncOutput, ValueOption};
 use scenarium::prelude::{
     Binding, FuncLib, Graph, NodeBehavior, NodeId, NodeKind, SubgraphDef, SubgraphRef,
 };
@@ -33,6 +34,17 @@ pub struct Scene {
     /// representable static default (a `Custom` type like an image — there
     /// is no `StaticValue` for it, so its port offers no inline const).
     pub input_defaults: Vec<Option<StaticValue>>,
+    /// Whether each input is required (from the func/def interface). A required
+    /// input with no binding is a missing input — its port renders highlighted.
+    /// Lockstep with the other input pools.
+    pub input_required: Vec<bool>,
+    /// Per-input span into [`Self::value_options_pool`] for that input's editor
+    /// picker options (the func/def `value_options`). Empty span = no options
+    /// (the common case). Lockstep with the other input pools.
+    pub input_value_option_spans: Vec<Span>,
+    /// One flat pool of every input's picker options across all nodes, sliced
+    /// per input by [`Self::input_value_option_spans`].
+    pub value_options_pool: Vec<ValueOption>,
     /// Flat pools for **output** ports, grown in lockstep and sliced by
     /// the single `SceneNode::outputs` span.
     pub output_names: Vec<InternedStr>,
@@ -81,6 +93,9 @@ impl Default for Scene {
             input_types: Vec::new(),
             input_bindings: Vec::new(),
             input_defaults: Vec::new(),
+            input_required: Vec::new(),
+            input_value_option_spans: Vec::new(),
+            value_options_pool: Vec::new(),
             output_names: Vec::new(),
             output_types: Vec::new(),
             pan: Vec2::ZERO,
@@ -101,9 +116,9 @@ pub struct SceneNode {
     pub kind_label: InternedStr,
     /// Span into the input pools (`input_names` / `input_types` /
     /// `input_bindings` / `input_defaults` — all lockstep).
-    pub inputs: PortSpan,
+    pub inputs: Span,
     /// Span into the output pools (`output_names` / `output_types`).
-    pub outputs: PortSpan,
+    pub outputs: Span,
     /// `Some` for a composite (`NodeKind::Subgraph`) instance — carries
     /// the ref so the header's open-in-tab action knows which def to
     /// target. `None` for a plain func node.
@@ -136,12 +151,6 @@ pub struct SceneConnection {
     pub tgt_port: usize,
 }
 
-#[derive(Clone, Copy, Default, Debug)]
-pub struct PortSpan {
-    pub start: u32,
-    pub len: u32,
-}
-
 impl Scene {
     /// Names live in palantir's per-frame text arena, which clears at
     /// the next `Ui::frame` — so `Scene` must be rebuilt every frame
@@ -172,6 +181,9 @@ impl Scene {
         self.input_types.clear();
         self.input_bindings.clear();
         self.input_defaults.clear();
+        self.input_required.clear();
+        self.input_value_option_spans.clear();
+        self.value_options_pool.clear();
         self.output_names.clear();
         self.output_types.clear();
 
@@ -260,6 +272,19 @@ impl Scene {
                 &mut self.input_defaults,
                 interface.inputs.iter().map(default_static_value),
             );
+            extend_pool(
+                &mut self.input_required,
+                interface.inputs.iter().map(|i| i.required),
+            );
+            // value_options are flattened into one pool; each input records its
+            // span into it (empty for the common no-options case).
+            for input in interface.inputs.iter() {
+                let opts = extend_pool(
+                    &mut self.value_options_pool,
+                    input.value_options.iter().cloned(),
+                );
+                self.input_value_option_spans.push(opts);
+            }
             let outputs = extend_pool(
                 &mut self.output_names,
                 interface.outputs.iter().map(|o| o.name.clone().into()),
@@ -305,40 +330,55 @@ impl Scene {
     }
 
     /// Per-input port names, sliced by the node's `inputs` span.
-    pub fn input_names(&self, span: PortSpan) -> &[InternedStr] {
+    pub fn input_names(&self, span: Span) -> &[InternedStr] {
         slice_pool(&self.input_names, span)
     }
 
     /// Per-output port names, sliced by the node's `outputs` span.
-    pub fn output_names(&self, span: PortSpan) -> &[InternedStr] {
+    pub fn output_names(&self, span: Span) -> &[InternedStr] {
         slice_pool(&self.output_names, span)
     }
 
     /// Per-input binding snapshots, sliced by the node's `inputs` span.
-    pub fn bindings(&self, span: PortSpan) -> &[InputBindingView] {
+    pub fn bindings(&self, span: Span) -> &[InputBindingView] {
         slice_pool(&self.input_bindings, span)
     }
 
     /// Per-input default literals, sliced by the node's `inputs` span.
     /// `None` where the input type has no static default (e.g. `Custom`).
-    pub fn defaults(&self, span: PortSpan) -> &[Option<StaticValue>] {
+    pub fn defaults(&self, span: Span) -> &[Option<StaticValue>] {
         slice_pool(&self.input_defaults, span)
     }
 
     /// Per-input data types, sliced by the node's `inputs` span.
-    pub fn input_types(&self, span: PortSpan) -> &[DataType] {
+    pub fn input_types(&self, span: Span) -> &[DataType] {
         slice_pool(&self.input_types, span)
     }
 
+    /// Per-input required flags, sliced by the node's `inputs` span.
+    pub fn required(&self, span: Span) -> &[bool] {
+        slice_pool(&self.input_required, span)
+    }
+
+    /// Per-input picker-option spans, sliced by the node's `inputs` span.
+    /// Resolve one input's span into its options with [`Self::value_options`].
+    pub fn value_option_spans(&self, span: Span) -> &[Span] {
+        slice_pool(&self.input_value_option_spans, span)
+    }
+
+    /// One input's picker options, from its span (via [`Self::value_option_spans`]).
+    pub fn value_options(&self, span: Span) -> &[ValueOption] {
+        slice_pool(&self.value_options_pool, span)
+    }
+
     /// Per-output data types, sliced by the node's `outputs` span.
-    pub fn output_types(&self, span: PortSpan) -> &[DataType] {
+    pub fn output_types(&self, span: Span) -> &[DataType] {
         slice_pool(&self.output_types, span)
     }
 }
 
-fn slice_pool<T>(pool: &[T], span: PortSpan) -> &[T] {
-    let start = span.start as usize;
-    &pool[start..start + span.len as usize]
+fn slice_pool<T>(pool: &[T], span: Span) -> &[T] {
+    &pool[span.range()]
 }
 
 /// View of a node's interface during a single rebuild: the input ports
@@ -415,13 +455,10 @@ fn placeholder_input() -> FuncInput {
     }
 }
 
-fn extend_pool<T>(pool: &mut Vec<T>, items: impl IntoIterator<Item = T>) -> PortSpan {
+fn extend_pool<T>(pool: &mut Vec<T>, items: impl IntoIterator<Item = T>) -> Span {
     let start = pool.len();
     pool.extend(items);
-    PortSpan {
-        start: start as u32,
-        len: (pool.len() - start) as u32,
-    }
+    Span::new(start as u32, (pool.len() - start) as u32)
 }
 
 #[cfg(test)]
