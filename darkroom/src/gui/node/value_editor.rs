@@ -99,10 +99,15 @@ pub(crate) fn show(
             let options: Vec<&str> = def.variants.iter().map(String::as_str).collect();
             let before = options.iter().position(|v| *v == current).unwrap_or(0);
             let mut idx = before;
+            // Hug + min width, not Fixed: the combo's label isn't ellipsized,
+            // so a long variant (e.g. `sigma_clipped`) would overflow a fixed
+            // field; let it grow to fit while keeping the field at least
+            // `width` so short variants match the other editors.
             ComboBox::new(&mut idx, &options)
                 .id(id)
                 .style(theme.button.clone())
-                .size((Sizing::Fixed(width), Sizing::Hug))
+                .size((Sizing::Hug, Sizing::Hug))
+                .min_size((width, 0.0))
                 .show(ui);
             if idx != before {
                 options.get(idx).map(|v| StaticValue::Enum((*v).to_owned()))
