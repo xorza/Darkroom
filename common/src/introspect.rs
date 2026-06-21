@@ -6,8 +6,9 @@
 //! own widgets and reads edited values back as `FieldValue`s.
 //!
 //! Derive with `#[derive(Introspect)]` (re-exported here). Enum-typed fields
-//! must implement [`IntrospectEnum`] (variant list + string round-trip), e.g.
-//! via `strum`.
+//! implement [`IntrospectEnum`] (variant list + string round-trip) — derive it
+//! with `#[derive(IntrospectEnum)]`, which delegates to the enum's
+//! `Display`/`FromStr` (typically strum's `Display`/`EnumString`).
 //!
 //! ```ignore
 //! #[derive(Default, Introspect)]
@@ -69,8 +70,8 @@ pub trait Introspect: Default {
 }
 
 /// A fieldless enum usable as an introspected field — a variant list plus a
-/// string round-trip. Trivially backed by `strum` (`EnumIter` + `Display` +
-/// `EnumString`).
+/// string round-trip. Derive with `#[derive(IntrospectEnum)]` (needs the enum's
+/// `Display` + `FromStr` — e.g. strum's `Display` + `EnumString`).
 pub trait IntrospectEnum: Sized {
     fn variants() -> Vec<String>;
     fn to_variant(&self) -> String;

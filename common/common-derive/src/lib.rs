@@ -153,7 +153,14 @@ fn classify(ty: &Type) -> syn::Result<Kind> {
                 _ => None,
             }
             .ok_or_else(|| syn::Error::new_spanned(ty, "Option needs a type argument"))?;
-            Ok(Kind::Option(Box::new(classify(inner)?), inner.clone()))
+            let inner_kind = classify(inner)?;
+            if matches!(inner_kind, Kind::Option(..)) {
+                return Err(syn::Error::new_spanned(
+                    ty,
+                    "nested Option<Option<_>> is not supported",
+                ));
+            }
+            Ok(Kind::Option(Box::new(inner_kind), inner.clone()))
         }
         name => Ok(Kind::Enum(ty.clone(), name.to_string())),
     }
@@ -296,7 +303,8 @@ fn option_read(get: &TokenStream2, fname: &Ident, inner: &Kind, inner_ty: &Type)
             ::core::option::Option::Some(::common::FieldValue::Enum(s)) =>
                 <#ty as ::common::IntrospectEnum>::from_variant(s).map(::core::option::Option::Some).unwrap_or(d.#fname),
         },
-        Kind::Option(..) => quote!(),
+        // `classify` rejects `Option<Option<_>>`, so an Option never nests another.
+        Kind::Option(..) => unreachable!("nested Option is rejected in classify"),
     };
     quote! {
         match #get {
