@@ -80,7 +80,8 @@ pub(crate) fn show(
                 .label(path_preview(path))
                 .style(theme.button.clone())
                 .text_wrap(TextWrap::Ellipsis)
-                .size((Sizing::Fixed(width), Sizing::Hug))
+                .size((Sizing::FILL, Sizing::Hug))
+                .min_size((width, 0.0))
                 // Override the theme's vertical padding so the chip sits
                 // flush on the port-row baseline.
                 .padding(Spacing::xy(6.0, 0.0))
@@ -99,14 +100,10 @@ pub(crate) fn show(
             let options: Vec<&str> = def.variants.iter().map(String::as_str).collect();
             let before = options.iter().position(|v| *v == current).unwrap_or(0);
             let mut idx = before;
-            // Hug + min width, not Fixed: the combo's label isn't ellipsized,
-            // so a long variant (e.g. `sigma_clipped`) would overflow a fixed
-            // field; let it grow to fit while keeping the field at least
-            // `width` so short variants match the other editors.
             ComboBox::new(&mut idx, &options)
                 .id(id)
                 .style(theme.button.clone())
-                .size((Sizing::Hug, Sizing::Hug))
+                .size((Sizing::FILL, Sizing::Hug))
                 .min_size((width, 0.0))
                 .show(ui);
             if idx != before {
@@ -166,7 +163,8 @@ fn buffered_text_edit<T>(
     let mut text = std::mem::take(&mut ui.state_mut::<EditBuffer>(id).text);
     TextEdit::new(&mut text)
         .id(id)
-        .size((Sizing::Fixed(width), Sizing::Hug))
+        .size((Sizing::FILL, Sizing::Hug))
+        .min_size((width, 0.0))
         .show(ui);
     let snapshot = text.clone();
     ui.state_mut::<EditBuffer>(id).text = text;

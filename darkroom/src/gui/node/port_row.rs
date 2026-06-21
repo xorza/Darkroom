@@ -229,11 +229,13 @@ fn value_cell(
     out: &mut Vec<Intent>,
 ) {
     let editor_id = const_editor_wid(port.node_id, port.port_idx);
+    // Fill the value column so every editor is the same width (the column
+    // hugs to the widest editor's content). `min_size` on the editors keeps
+    // a sensible floor; the editor fills this cell, this cell fills the col.
     let edited = Panel::hstack()
         .id_salt(("val", port.port_idx))
         .grid_cell((row as u16, COL_VALUE))
-        .align(Align::new(HAlign::Left, VAlign::Center))
-        .size((Sizing::Hug, Sizing::Hug))
+        .size((Sizing::FILL, Sizing::Hug))
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             value_editor::show(ui, &theme.static_value_editor, editor_id, value, data_type)
