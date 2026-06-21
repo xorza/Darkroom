@@ -414,6 +414,7 @@ fn status_text(status: ExecStatus) -> String {
         ExecStatus::None => "not run".to_owned(),
         ExecStatus::Cached => "cached".to_owned(),
         ExecStatus::Executed(secs) => format!("ran in {}", fmt_elapsed(secs)),
+        ExecStatus::Running => "running…".to_owned(),
         ExecStatus::MissingInputs => "missing inputs".to_owned(),
         ExecStatus::Errored => "errored".to_owned(),
     }

@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 
 use palantir::Ui;
 use scenarium::execution::ArgumentValues;
-use scenarium::prelude::{ExecutionStats, LogEntry, NodeId};
+use scenarium::prelude::{ExecutionStats, LogEntry, NodeId, RunPhase, RunProgress};
 
 use crate::core::worker::{RunId, ValueRequest};
 use crate::gui::node_values::{NodeValueView, build_view};
@@ -32,13 +32,16 @@ use crate::gui::node_values::{NodeValueView, build_view};
 /// Per-node execution outcome of the last run. Ordered low→high so a
 /// higher-severity status wins when several fold onto one node
 /// (`Errored` > `MissingInputs` > `Executed` > `Cached`). `Executed`
-/// carries the node's wall-clock run time (seconds).
+/// carries the node's wall-clock run time (seconds). `Running` is the
+/// transient live state while a node computes (set directly from
+/// `RunProgress`, never produced by the final `set_results`).
 #[derive(Clone, Copy, PartialEq, Default, Debug)]
 pub(crate) enum ExecStatus {
     #[default]
     None,
     Cached,
     Executed(f64),
+    Running,
     MissingInputs,
     Errored,
 }
@@ -46,14 +49,16 @@ pub(crate) enum ExecStatus {
 impl ExecStatus {
     /// Severity rank, for folding several outcomes onto one editor node
     /// (a subgraph def's interior node runs once per instance; an
-    /// instance node aggregates its whole subtree). Higher wins.
+    /// instance node aggregates its whole subtree). Higher wins. `Running`
+    /// is live-only — it's set directly, never folded through `merged`.
     fn severity(self) -> u8 {
         match self {
             ExecStatus::None => 0,
             ExecStatus::Cached => 1,
             ExecStatus::Executed(_) => 2,
-            ExecStatus::MissingInputs => 3,
-            ExecStatus::Errored => 4,
+            ExecStatus::Running => 3,
+            ExecStatus::MissingInputs => 4,
+            ExecStatus::Errored => 5,
         }
     }
 
@@ -152,6 +157,21 @@ impl RunState {
         }
     }
 
+    /// Apply one live [`RunProgress`] event: mark the node(s) `Running` on
+    /// `Started`, `Executed` on `Finished`. Overwrites the prior status (the
+    /// final [`set_results`](Self::set_results) reconciles, e.g. summing an
+    /// instance subtree's times). `nodes` is already the authoring
+    /// attribution, so no flatten projection is needed here.
+    pub(crate) fn apply_progress(&mut self, progress: &RunProgress) {
+        let status = match progress.phase {
+            RunPhase::Started => ExecStatus::Running,
+            RunPhase::Finished { elapsed_secs } => ExecStatus::Executed(elapsed_secs),
+        };
+        for &id in &progress.nodes {
+            self.nodes.entry(id).or_default().status = status;
+        }
+    }
+
     /// Drop everything (a failed run paints no glow and shows no logs /
     /// values).
     pub(crate) fn clear(&mut self) {
@@ -245,6 +265,32 @@ mod tests {
             logs: vec![],
             flatten,
         }
+    }
+
+    #[test]
+    fn apply_progress_marks_all_attributed_nodes_running_then_executed() {
+        let mut rs = RunState::default();
+        let (interior, instance) = (nid(1), nid(2));
+        let nodes = vec![interior, instance];
+
+        // Started → every attributed node turns Running.
+        rs.apply_progress(&RunProgress {
+            nodes: nodes.clone(),
+            phase: RunPhase::Started,
+        });
+        assert_eq!(rs.status(interior), ExecStatus::Running);
+        assert_eq!(rs.status(instance), ExecStatus::Running);
+
+        // Finished → Executed with the reported time (overwrites Running).
+        rs.apply_progress(&RunProgress {
+            nodes,
+            phase: RunPhase::Finished { elapsed_secs: 0.5 },
+        });
+        assert_eq!(rs.status(interior), ExecStatus::Executed(0.5));
+        assert_eq!(rs.status(instance), ExecStatus::Executed(0.5));
+
+        // A node no event mentioned stays None.
+        assert_eq!(rs.status(nid(99)), ExecStatus::None);
     }
 
     /// Two instances of one def → the interior node's flattened ids both

@@ -655,6 +655,59 @@ mod behavior {
         Ok(())
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn execute_emits_started_then_finished_progress_per_node() -> anyhow::Result<()> {
+        use crate::execution_stats::{RunPhase, RunProgress};
+        use tokio::sync::mpsc::unbounded_channel;
+
+        let graph = test_graph();
+        let func_lib = test_func_lib(default_hooks());
+        let mut eg = ExecutionEngine::default();
+        eg.update(&graph, &func_lib);
+
+        let (tx, mut rx) = unbounded_channel::<RunProgress>();
+        let stats = eg
+            .execute(true, false, Vec::<EventRef>::new(), Some(&tx))
+            .await?;
+        drop(tx);
+
+        let mut events: Vec<(NodeId, RunPhase)> = Vec::new();
+        while let Ok(p) = rx.try_recv() {
+            // No subgraphs in `test_graph` → each event maps to exactly one node.
+            assert_eq!(p.nodes.len(), 1);
+            events.push((p.nodes[0], p.phase));
+        }
+
+        let name_of: std::collections::HashMap<NodeId, String> =
+            ["get_a", "get_b", "sum", "mult", "print"]
+                .iter()
+                .map(|n| (graph.by_name(n).unwrap().id, n.to_string()))
+                .collect();
+
+        // Events come in Started→Finished pairs for the *same* node (the
+        // executor is sequential, so each node brackets before the next starts).
+        assert_eq!(events.len() % 2, 0, "paired events");
+        let mut started_order: Vec<String> = Vec::new();
+        for pair in events.chunks_exact(2) {
+            let (sid, sphase) = pair[0];
+            let (fid, fphase) = pair[1];
+            assert_eq!(sphase, RunPhase::Started, "first of pair is Started");
+            assert_eq!(sid, fid, "Started/Finished are the same node");
+            assert!(
+                matches!(fphase, RunPhase::Finished { elapsed_secs } if elapsed_secs >= 0.0),
+                "second of pair is Finished with non-negative elapsed",
+            );
+            started_order.push(name_of[&sid].clone());
+        }
+
+        // The progressed order equals the executor's recorded run order, and
+        // covers exactly the finally-executed nodes.
+        assert_eq!(started_order, execution_node_names_in_order(&eg));
+        assert_eq!(started_order.len(), stats.executed_nodes.len());
+
+        Ok(())
+    }
+
     #[test]
     fn impure_node_always_invoked() -> anyhow::Result<()> {
         let mut graph = test_graph();
@@ -1748,7 +1801,8 @@ mod events {
 
         // terminals=false, event_triggers=true → emit (owns a subscribed event)
         // becomes a root; recv is downstream of emit, not a root.
-        eg.execute(false, true, Vec::<EventRef>::new()).await?;
+        eg.execute(false, true, Vec::<EventRef>::new(), None)
+            .await?;
 
         assert_eq!(execution_node_names_in_order(&eg), ["emit"]);
         assert_eq!(*f.emit_calls.lock().await, 1);
@@ -1763,7 +1817,9 @@ mod events {
         let mut eg = ExecutionEngine::default();
         eg.update(&f.graph, &f.func_lib);
 
-        let stats = eg.execute(false, true, Vec::<EventRef>::new()).await?;
+        let stats = eg
+            .execute(false, true, Vec::<EventRef>::new(), None)
+            .await?;
         let triggers = eg.active_event_triggers(&stats);
 
         // emit executed and has a populated lambda + a subscriber → one trigger.

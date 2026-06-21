@@ -13,7 +13,9 @@ use crate::execution_stats::ExecutionStats;
 use crate::function::FuncLib;
 use crate::graph::{Graph, InputPort, Node, NodeId};
 
-use crate::worker::{EventRef, EventTrigger, Worker, WorkerMessage, scan, start_event_loop};
+use crate::worker::{
+    EventRef, EventTrigger, Worker, WorkerMessage, WorkerReport, scan, start_event_loop,
+};
 
 /// Print messages a run logged, in order — `print` now logs via
 /// `ContextManager::info`, surfaced in `ExecutionStats.logs`.
@@ -49,8 +51,11 @@ impl FrameHarness {
         let func_lib = Arc::new(func_lib);
 
         let (tx, compute_rx) = mpsc::channel(cap);
-        let worker = Worker::new(move |result| {
-            tx.try_send(result).ok();
+        let worker = Worker::new(move |report| {
+            // The fixture only asserts on final stats; drop live progress.
+            if let WorkerReport::Finished(result) = report {
+                tx.try_send(result).ok();
+            }
         });
 
         Self {
@@ -394,8 +399,10 @@ async fn execute_terminals_triggers_terminal_nodes() {
     );
 
     let (compute_finish_tx, mut compute_finish_rx) = mpsc::channel(8);
-    let worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
+    let worker = Worker::new(move |report| {
+        if let WorkerReport::Finished(result) = report {
+            compute_finish_tx.try_send(result).ok();
+        }
     });
 
     worker
@@ -741,8 +748,10 @@ async fn assert_no_callback_within(
 /// not-running, empty batches, syncs, etc.).
 fn empty_worker() -> (Worker, mpsc::Receiver<ExecResult<ExecutionStats>>) {
     let (tx, rx) = mpsc::channel(8);
-    let worker = Worker::new(move |result| {
-        tx.try_send(result).ok();
+    let worker = Worker::new(move |report| {
+        if let WorkerReport::Finished(result) = report {
+            tx.try_send(result).ok();
+        }
     });
     (worker, rx)
 }
@@ -805,8 +814,10 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
     );
 
     let (compute_finish_tx, mut compute_finish_rx) = mpsc::channel(8);
-    let worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
+    let worker = Worker::new(move |report| {
+        if let WorkerReport::Finished(result) = report {
+            compute_finish_tx.try_send(result).ok();
+        }
     });
 
     worker
@@ -863,8 +874,10 @@ async fn drain_on_wake_folds_queued_batches_into_one_commit() {
     );
 
     let (compute_finish_tx, mut compute_finish_rx) = mpsc::channel(8);
-    let worker = Worker::new(move |result| {
-        compute_finish_tx.try_send(result).ok();
+    let worker = Worker::new(move |report| {
+        if let WorkerReport::Finished(result) = report {
+            compute_finish_tx.try_send(result).ok();
+        }
     });
 
     // Three separate send_many calls, all synchronous — they all

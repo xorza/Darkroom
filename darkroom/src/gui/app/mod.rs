@@ -132,6 +132,7 @@ impl App {
                     eprintln!("compute failed: {err}");
                     run_state.clear();
                 }
+                WorkerEvent::NodeProgress(progress) => run_state.apply_progress(&progress),
                 WorkerEvent::ArgumentValues { request, values } => {
                     run_state.ingest_values(ui, request, values)
                 }

@@ -7,12 +7,16 @@
 
 use std::time::Instant;
 
+use tokio::sync::mpsc::UnboundedSender;
+
 use common::{KeyIndexKey, KeyIndexVec};
 
 use crate::common::shared_any_state::SharedAnyState;
 use crate::context::ContextManager;
 use crate::data::DynamicValue;
-use crate::execution_stats::{ExecutedNodeStats, ExecutionStats, FlattenMap, NodeError};
+use crate::execution_stats::{
+    ExecutedNodeStats, ExecutionStats, FlattenMap, NodeError, RunPhase, RunProgress,
+};
 use crate::func_lambda::InvokeInput;
 use crate::graph::{InputPort, NodeId};
 use crate::prelude::AnyState;
@@ -92,6 +96,8 @@ impl Executor {
         &mut self,
         program: &ExecutionProgram,
         plan: &ExecutionPlan,
+        flatten: &FlattenMap,
+        progress: Option<&UnboundedSender<RunProgress>>,
     ) -> ExecutionStats {
         let start = Instant::now();
 
@@ -131,7 +137,14 @@ impl Executor {
 
             // Attribute any logs this node emits to it (read by
             // `ContextManager::log`).
-            self.ctx_manager.current_node = Some(program.e_nodes[e_node_idx].id);
+            let flat_id = program.e_nodes[e_node_idx].id;
+            self.ctx_manager.current_node = Some(flat_id);
+            if let Some(progress) = progress {
+                let _ = progress.send(RunProgress {
+                    nodes: flatten.attribution(flat_id).collect(),
+                    phase: RunPhase::Started,
+                });
+            }
             let invoke_start = Instant::now();
             let result = {
                 let lambda = &program.e_nodes[e_node_idx].lambda;
@@ -155,11 +168,20 @@ impl Executor {
                     })
             };
 
+            let run_time = invoke_start.elapsed().as_secs_f64();
             let slot = &mut self.slots[e_node_idx];
-            slot.run_time = invoke_start.elapsed().as_secs_f64();
+            slot.run_time = run_time;
             if let Err(err) = result {
                 slot.error = Some(err);
                 slot.output_values = None;
+            }
+            if let Some(progress) = progress {
+                let _ = progress.send(RunProgress {
+                    nodes: flatten.attribution(flat_id).collect(),
+                    phase: RunPhase::Finished {
+                        elapsed_secs: run_time,
+                    },
+                });
             }
 
             let span = program.e_nodes[e_node_idx].inputs;

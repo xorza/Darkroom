@@ -76,6 +76,7 @@ pub(crate) mod dark {
     // execution-status glow
     pub(crate) const EXEC_EXECUTED_GLOW: Color = Color::hex(0xdaff58);
     pub(crate) const EXEC_CACHED_GLOW: Color = Color::hex(0x9adbfb);
+    pub(crate) const EXEC_RUNNING_GLOW: Color = Color::hex(0xd4bfff);
     pub(crate) const EXEC_MISSING_GLOW: Color = Color::hex(0xffa63d);
     pub(crate) const EXEC_ERRORED_GLOW: Color = Color::hex(0xff5e44);
 
@@ -125,6 +126,7 @@ pub(crate) mod light {
     // execution-status glow — success / accent / syn_keyword / error.
     pub(crate) const EXEC_EXECUTED_GLOW: Color = Color::hex(0x85b304);
     pub(crate) const EXEC_CACHED_GLOW: Color = Color::hex(0x3b9ee5);
+    pub(crate) const EXEC_RUNNING_GLOW: Color = Color::hex(0xa37acc);
     pub(crate) const EXEC_MISSING_GLOW: Color = Color::hex(0xfa8d3e);
     pub(crate) const EXEC_ERRORED_GLOW: Color = Color::hex(0xef7271);
 
@@ -277,6 +279,8 @@ pub struct Theme {
     pub exec_executed_glow: Color,
     /// Node reused its cached result — palette `accent` (cyan).
     pub exec_cached_glow: Color,
+    /// Node is computing this run (live) — palette `constant` (purple).
+    pub exec_running_glow: Color,
     /// Node has unfilled required inputs — palette `syn_keyword` (orange).
     pub exec_missing_glow: Color,
     /// Node errored — palette `error` (red).
@@ -660,6 +664,7 @@ struct PaletteColors {
     badge_cache: Color,
     exec_executed_glow: Color,
     exec_cached_glow: Color,
+    exec_running_glow: Color,
     exec_missing_glow: Color,
     exec_errored_glow: Color,
     input_port: Color,
@@ -685,6 +690,7 @@ impl PaletteColors {
         badge_cache: dark::BADGE_CACHE,
         exec_executed_glow: dark::EXEC_EXECUTED_GLOW,
         exec_cached_glow: dark::EXEC_CACHED_GLOW,
+        exec_running_glow: dark::EXEC_RUNNING_GLOW,
         exec_missing_glow: dark::EXEC_MISSING_GLOW,
         exec_errored_glow: dark::EXEC_ERRORED_GLOW,
         input_port: dark::INPUT_PORT,
@@ -709,6 +715,7 @@ impl PaletteColors {
         badge_cache: light::BADGE_CACHE,
         exec_executed_glow: light::EXEC_EXECUTED_GLOW,
         exec_cached_glow: light::EXEC_CACHED_GLOW,
+        exec_running_glow: light::EXEC_RUNNING_GLOW,
         exec_missing_glow: light::EXEC_MISSING_GLOW,
         exec_errored_glow: light::EXEC_ERRORED_GLOW,
         input_port: light::INPUT_PORT,
@@ -810,6 +817,7 @@ impl Theme {
             badge_cache: c.badge_cache,
             exec_executed_glow: c.exec_executed_glow,
             exec_cached_glow: c.exec_cached_glow,
+            exec_running_glow: c.exec_running_glow,
             exec_missing_glow: c.exec_missing_glow,
             exec_errored_glow: c.exec_errored_glow,
             input_port: c.input_port,

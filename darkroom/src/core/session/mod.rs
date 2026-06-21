@@ -160,7 +160,9 @@ impl Session {
                 WorkerEvent::ExecutionFinished(Err(err)) => {
                     self.push_status(format!("run failed: {err}"));
                 }
-                // Headless/TUI never request per-node argument values.
+                // Headless/TUI surfaces only the final summary, not live
+                // per-node progress or per-node argument values.
+                WorkerEvent::NodeProgress(_) => {}
                 WorkerEvent::ArgumentValues { .. } => {}
             }
         }

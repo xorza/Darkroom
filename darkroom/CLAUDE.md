@@ -219,12 +219,16 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
 
 - `App::run_graph` clones the active graph + func_lib and sends an
   `[Update, ExecuteTerminals]` batch to the worker. The worker evaluates on its
-  runtime and replies via callback, which forwards `ExecutionStats` over the
-  channel and pokes `host.request_repaint()`.
+  runtime and replies via callback with a `scenarium::WorkerReport`: a live
+  `Progress(RunProgress)` per node *as it runs*, then a final `Finished(stats)`.
+  `WorkerBridge::deliver` maps these to `WorkerEvent::NodeProgress` /
+  `ExecutionFinished` on the channel and pokes `host.request_repaint()`.
 - On-thread, `App::frame` drains the channel (`worker.drain()`, non-blocking).
-  `RunState::ingest` folds `ExecutionStats` (including nested-subgraph
-  attribution) onto authoring nodes: per-node `ExecStatus`
-  (`None`/`Cached`/`Executed(secs)`/`MissingInputs`/`Errored`) + logs.
+  `NodeProgress` → `RunState::apply_progress` marks the active node
+  `ExecStatus::Running` (purple glow) live; `ExecutionFinished` → `set_results`
+  folds the final `ExecutionStats` (including nested-subgraph attribution) onto
+  authoring nodes: per-node `ExecStatus`
+  (`None`/`Cached`/`Executed(secs)`/`Running`/`MissingInputs`/`Errored`) + logs.
 - **Status + logs persist across re-runs** (the glow doesn't blank during
   compute); runtime *values* invalidate immediately on `begin_run` and are
   fetched on demand.

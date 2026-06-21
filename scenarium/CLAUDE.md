@@ -100,8 +100,12 @@ the cross-run `input_dirty` column. `RuntimeSlot` (`executor.rs:29`) caches
 The run loop walks `execute_order`: skip if an upstream errored, resolve each input
 (None/Const/Bind→upstream cached output, marking `changed` from dirty bit or
 dependency wants-execute), set `ctx_manager.current_node` for log attribution,
-await the lambda, store results, clear input dirty bits. Stats (executed, cached,
-missing inputs, errors, drained logs, `FlattenMap`) are collected into `ExecutionStats`.
+await the lambda, store results, clear input dirty bits. When `execute` is given
+a progress `UnboundedSender<RunProgress>`, the loop sends `RunPhase::Started`
+before each lambda and `Finished{elapsed}` after — node ids resolved to authoring
+attribution via the `FlattenMap` so the consumer needn't be. Stats (executed,
+cached, missing inputs, errors, drained logs, `FlattenMap`) are collected into
+`ExecutionStats`.
 
 ## Functions and lambdas
 
@@ -124,6 +128,10 @@ funclibs.
 A `Vec<WorkerMessage>` is **one atomic commit unit** — no partial batches.
 `WorkerMessage` covers `Update{graph, func_lib}`, `Clear`, `ExecuteTerminals`,
 `InjectEvents`, `Start/StopEventLoop`, `Sync`, `RequestArgumentValues`, `Exit`.
+The host callback receives a `WorkerReport`: a live `Progress(RunProgress)` per
+node *during* a run (forwarded from a `mpsc` the executor sends on, drained
+concurrently with the run in the worker `select!`), then a single
+`Finished(Result<ExecutionStats>)`.
 The loop uses `tokio::select! { biased }`: command batches take priority and are
 collapsed via a `BatchIntent` reduction table (last-write-wins for graph/loop,
 union for events, `Exit` dominates); the event loop emits frame events through a

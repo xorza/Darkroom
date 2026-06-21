@@ -13,9 +13,9 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use scenarium::execution::{ArgumentValues, Error as ExecError};
-use scenarium::execution_stats::ExecutionStats;
+use scenarium::execution_stats::{ExecutionStats, RunProgress};
 use scenarium::prelude::{FuncLib, Graph, NodeId};
-use scenarium::worker::{Worker, WorkerMessage};
+use scenarium::worker::{Worker, WorkerMessage, WorkerReport};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
 
@@ -41,6 +41,8 @@ pub(crate) struct ValueRequest {
 #[derive(Debug)]
 pub(crate) enum WorkerEvent {
     ExecutionFinished(Result<ExecutionStats, ExecError>),
+    /// Live per-node progress during a run, ahead of `ExecutionFinished`.
+    NodeProgress(RunProgress),
     /// Reply to a [`WorkerBridge::request_argument_values`] call. The
     /// `request` echoes back the node + run epoch it was tagged with so a
     /// reply from a superseded run can be dropped. `values` is `None` when
@@ -87,7 +89,7 @@ impl WorkerBridge {
             let _guard = runtime.enter();
             let tx = tx.clone();
             let wake = wake.clone();
-            Worker::new(move |result| Self::deliver(&tx, &wake, result))
+            Worker::new(move |report| Self::deliver(&tx, &wake, report))
         };
         Self {
             runtime,
@@ -98,8 +100,12 @@ impl WorkerBridge {
         }
     }
 
-    fn deliver(tx: &Sender<WorkerEvent>, wake: &Wake, result: Result<ExecutionStats, ExecError>) {
-        let _ = tx.send(WorkerEvent::ExecutionFinished(result));
+    fn deliver(tx: &Sender<WorkerEvent>, wake: &Wake, report: WorkerReport) {
+        let event = match report {
+            WorkerReport::Progress(progress) => WorkerEvent::NodeProgress(progress),
+            WorkerReport::Finished(result) => WorkerEvent::ExecutionFinished(result),
+        };
+        let _ = tx.send(event);
         (wake)();
     }
 

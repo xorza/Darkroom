@@ -117,6 +117,25 @@ pub struct ExecutedNodeStats {
     pub elapsed_secs: f64,
 }
 
+/// Where a node is in its run, for live progress (emitted by the executor
+/// *during* a run, ahead of the final [`ExecutionStats`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RunPhase {
+    /// The node's lambda is about to be invoked.
+    Started,
+    /// The node's lambda finished, taking `elapsed_secs`.
+    Finished { elapsed_secs: f64 },
+}
+
+/// One live progress event for a node. `nodes` is the authoring node(s) the
+/// flattened node attributes to (interior id + enclosing composite instances),
+/// already resolved via the [`FlattenMap`] so the consumer needn't be.
+#[derive(Debug, Clone)]
+pub struct RunProgress {
+    pub nodes: Vec<NodeId>,
+    pub phase: RunPhase,
+}
+
 #[derive(Debug, Clone)]
 pub struct NodeError {
     pub node_id: NodeId,

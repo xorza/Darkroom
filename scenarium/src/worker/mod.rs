@@ -13,9 +13,18 @@ use common::ReadyState;
 use crate::common::shared_any_state::SharedAnyState;
 use crate::event_lambda::EventLambda;
 use crate::execution::{ArgumentValues, Error, ExecutionEngine, Result};
-use crate::execution_stats::ExecutionStats;
+use crate::execution_stats::{ExecutionStats, RunProgress};
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
+
+/// What the worker reports back to its host: live per-node [`RunProgress`]
+/// during a run, then a single [`WorkerReport::Finished`] with the run's full
+/// stats (or error). Progress events always precede the matching `Finished`.
+#[derive(Debug)]
+pub enum WorkerReport {
+    Progress(RunProgress),
+    Finished(Result<ExecutionStats>),
+}
 
 /// Capacity of the bounded channel each event-lambda task writes into.
 /// The worker reads this channel directly and applies backpressure to
@@ -85,7 +94,7 @@ pub struct Worker {
 impl Worker {
     pub fn new<ExecutionCallback>(callback: ExecutionCallback) -> Self
     where
-        ExecutionCallback: Fn(Result<ExecutionStats>) + Send + 'static,
+        ExecutionCallback: Fn(WorkerReport) + Send + 'static,
     {
         let (tx, rx) = unbounded_channel::<Vec<WorkerMessage>>();
         let event_loop_started = Arc::new(AtomicBool::new(false));
@@ -190,13 +199,13 @@ impl EventLoopHandle {
 /// Forwards captured lambda panics to the execution callback as `Err`s.
 fn report_lambda_panics<C>(panics: Vec<LambdaPanic>, callback: &C)
 where
-    C: Fn(Result<ExecutionStats>),
+    C: Fn(WorkerReport),
 {
     for panic in panics {
-        callback(Err(Error::EventLambdaPanic {
+        callback(WorkerReport::Finished(Err(Error::EventLambdaPanic {
             node_id: panic.node_id,
             message: panic.message,
-        }));
+        })));
     }
 }
 
@@ -302,7 +311,7 @@ async fn worker_loop<ExecutionCallback>(
     execution_callback: ExecutionCallback,
     event_loop_started: Arc<AtomicBool>,
 ) where
-    ExecutionCallback: Fn(Result<ExecutionStats>) + Send + 'static,
+    ExecutionCallback: Fn(WorkerReport) + Send + 'static,
 {
     let mut execution_engine = ExecutionEngine::default();
 
@@ -406,9 +415,33 @@ async fn worker_loop<ExecutionCallback>(
             let _pause_guard = event_loop_pause_gate.close();
 
             let in_loop = should_start_event_loop || event_loop.is_some();
-            let result = execution_engine
-                .execute(intent.execute_terminals, in_loop, intent.events.drain())
-                .await;
+            // Forward each node's live progress to the host as it runs, ahead
+            // of the final stats: the executor sends on `prog_tx`, and this
+            // loop drains `prog_rx` concurrently with the run.
+            let (prog_tx, mut prog_rx) = unbounded_channel::<RunProgress>();
+            let result = {
+                let run = execution_engine.execute(
+                    intent.execute_terminals,
+                    in_loop,
+                    intent.events.drain(),
+                    Some(&prog_tx),
+                );
+                tokio::pin!(run);
+                loop {
+                    tokio::select! {
+                        biased;
+                        r = &mut run => break r,
+                        Some(p) = prog_rx.recv() => {
+                            (execution_callback)(WorkerReport::Progress(p));
+                        }
+                    }
+                }
+            };
+            // Flush any progress buffered between the last poll and completion.
+            drop(prog_tx);
+            while let Ok(p) = prog_rx.try_recv() {
+                (execution_callback)(WorkerReport::Progress(p));
+            }
 
             if should_start_event_loop && let Ok(stats) = &result {
                 assert!(event_loop.is_none());
@@ -420,7 +453,7 @@ async fn worker_loop<ExecutionCallback>(
                 }
             }
 
-            (execution_callback)(result);
+            (execution_callback)(WorkerReport::Finished(result));
         }
 
         for (node_id, reply) in intent.argument_requests.drain(..) {

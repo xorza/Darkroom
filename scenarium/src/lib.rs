@@ -20,7 +20,8 @@ pub mod prelude {
     pub use crate::data::{CustomValue, DataType, DynamicValue, StaticValue, TypeId};
     pub use crate::execution::ExecutionEngine;
     pub use crate::execution_stats::{
-        ExecutedNodeStats, ExecutionStats, FlattenMap, LogEntry, LogLevel, NodeError,
+        ExecutedNodeStats, ExecutionStats, FlattenMap, LogEntry, LogLevel, NodeError, RunPhase,
+        RunProgress,
     };
     pub use crate::func_lambda::{FuncLambda, InvokeError, InvokeInput, InvokeResult};
     pub use crate::function::{Func, FuncBehavior, FuncId, FuncLib};
