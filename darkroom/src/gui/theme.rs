@@ -16,7 +16,7 @@ const NODE_CORNER_RADIUS: f32 = 6.0;
 const NODE_MIN_WIDTH: f32 = 160.0;
 const NODE_MIN_HEIGHT: f32 = 10.0;
 const TAB_CORNER_RADIUS: f32 = 6.0;
-const PORT_SIZE: f32 = 10.0;
+const PORT_SIZE: f32 = 13.0;
 const PORT_COL_PAD_TOP: f32 = 6.0;
 const PORT_COL_PAD_X: f32 = 8.0;
 const PORT_GAP: f32 = 6.0;
@@ -293,9 +293,9 @@ pub struct Theme {
     /// Vertical inset at the top of each port column (gap below the
     /// header band before the first port).
     pub port_col_pad_top: f32,
-    /// Horizontal inset on each side of the ports row. Port circles
-    /// overhang by `-(port_radius + port_col_pad_x)` so they straddle
-    /// the node body edge regardless of this inset.
+    /// Horizontal inset on each side of the ports row. Port circles overhang
+    /// by `-port_overhang()` (which folds in this inset + the body border) so
+    /// their center sits on the node body edge regardless of this value.
     pub port_col_pad_x: f32,
     /// Vertical gap between adjacent ports in a column.
     pub port_gap: f32,
@@ -725,6 +725,17 @@ impl Theme {
     #[inline]
     pub fn port_radius(&self) -> f32 {
         self.port_size * 0.5
+    }
+
+    /// How far a port circle is pulled out of its column so its **center**
+    /// lands on the node body's outer edge: clear the column inset
+    /// (`port_col_pad_x`) and the body border (`node_border_width * 2`, which
+    /// "folds into" the body's content padding), then push out by `port_radius`
+    /// so the dot straddles the edge evenly. Independent of `port_size` — bigger
+    /// circles keep their center on the edge.
+    #[inline]
+    pub fn port_overhang(&self) -> f32 {
+        self.port_radius() + self.port_col_pad_x + self.node_border_width * 2.0
     }
 
     /// Assemble the full theme for a built-in preset. One place so

@@ -171,7 +171,7 @@ fn input_label_cell(
             rcx.port_frame.is_hovered(port),
         )
     };
-    let overhang = theme.port_radius() + theme.port_col_pad_x;
+    let overhang = theme.port_overhang();
     let margin = Spacing::new(-overhang, 0.0, 0.0, 0.0);
     let wid = port_circle_wid(port);
     // Stable cell id so the prepass can poll a label-area double-click (the
@@ -281,7 +281,7 @@ fn output_cell(
     );
     let tip = type_label(&output.ty);
     let wid = port_circle_wid(port);
-    let overhang = theme.port_radius() + theme.port_col_pad_x;
+    let overhang = theme.port_overhang();
     Panel::hstack()
         .id_salt(("out", port.port_idx))
         .grid_cell((port.port_idx as u16, COL_OUTPUT))
