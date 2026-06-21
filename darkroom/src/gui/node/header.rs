@@ -4,7 +4,7 @@
 
 use palantir::{
     Align, Background, Color, Configure, Corners, Panel, Sense, Sizing, Spacing, Stroke, Text,
-    TextStyle, Ui, VAlign, WidgetId,
+    TextStyle, Tooltip, Ui, VAlign, WidgetId,
 };
 use scenarium::prelude::{NodeBehavior, NodeId};
 
@@ -88,6 +88,7 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
                     color,
                     mode == Some(InspectMode::Pinned),
                     Some(inspect_badge_wid(node.id)),
+                    "Inspect — values, status, log",
                 );
             }
         });
@@ -138,10 +139,20 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                     theme.badge_subgraph,
                     true,
                     Some(subgraph_badge_wid(node.id)),
+                    "Open subgraph",
                 );
             }
             if node.terminal {
-                badge(ui, theme, "badge_t", "T", theme.badge_terminal, true, None);
+                badge(
+                    ui,
+                    theme,
+                    "badge_t",
+                    "T",
+                    theme.badge_terminal,
+                    true,
+                    None,
+                    "Terminal — output sink",
+                );
             }
             let toggled = badge(
                 ui,
@@ -151,6 +162,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                 theme.badge_cache,
                 node.cached,
                 Some(cache_badge_wid(node.id)),
+                "Compute once (cache the result)",
             );
             if toggled {
                 out.push(Intent::SetCacheBehavior {
@@ -172,6 +184,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                 theme.text_muted,
                 node.disabled,
                 Some(disable_badge_wid(node.id)),
+                "Disable — exclude from the run",
             );
             if disable_toggled {
                 out.push(Intent::SetDisabled {
@@ -226,6 +239,7 @@ pub(crate) fn subgraph_badge_wid(node_id: NodeId) -> WidgetId {
 /// it's a hollow outline (inactive toggle). A `wid` makes it clickable
 /// and the returned bool reports a click this frame; decorative chips
 /// pass `None` and ignore the result.
+#[allow(clippy::too_many_arguments)]
 fn badge(
     ui: &mut Ui,
     theme: &Theme,
@@ -234,6 +248,7 @@ fn badge(
     color: Color,
     filled: bool,
     wid: Option<WidgetId>,
+    tip: &str,
 ) -> bool {
     let background = if filled {
         Background {
@@ -255,20 +270,27 @@ fn badge(
         .size((Sizing::Fixed(BADGE_SIZE), Sizing::Fixed(BADGE_SIZE)))
         .child_align(Align::CENTER)
         .background(background);
+    // Clickable chips capture the press; decorative ones (`T`) still opt
+    // into `HOVER` so their tooltip fires without swallowing the click.
     panel = match wid {
         Some(w) => panel.id(w).sense(Sense::CLICK),
-        None => panel.id_salt(salt),
+        None => panel.id_salt(salt).sense(Sense::HOVER),
     };
-    panel
-        .show(ui, |ui| {
-            Text::new(glyph)
-                .style(TextStyle {
-                    color: glyph_color,
-                    font_size_px: BADGE_FONT,
-                    ..ui.theme.text
-                })
-                .show(ui);
-        })
-        .response
-        .clicked()
+    let chip = panel.show(ui, |ui| {
+        Text::new(glyph)
+            .style(TextStyle {
+                color: glyph_color,
+                font_size_px: BADGE_FONT,
+                ..ui.theme.text
+            })
+            .show(ui);
+    });
+    // Take the owned snapshot + click result so the chip's `ui` borrow ends
+    // before the tooltip records into `ui`.
+    let snapshot = chip.response.snapshot();
+    let clicked = chip.response.clicked();
+    if !tip.is_empty() {
+        Tooltip::for_(&snapshot).text(tip.to_owned()).show(ui);
+    }
+    clicked
 }
