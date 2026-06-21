@@ -140,6 +140,8 @@ A user right-clicks → picks from a new **`astro`** category:
    until needed.
 6. AstroFrame ⇄ lens `Image` bridge nodes so astro output can flow into the
    existing imaginarium nodes (trivial now that both live in `lens`).
+   ✅ **`astro_to_image`** (`AstroFrame → Image`, via lumos' `From<&AstroImage>`
+   for `imaginarium::Image`). Reverse (`Image → AstroFrame`) not yet needed.
 
 ## Brief implementation sketches
 

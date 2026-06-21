@@ -37,6 +37,8 @@ Node-function library: adapts `imaginarium` (GPU image ops) **and** `lumos`
 | `load_astro_image` | Decode a FITS/RAW/standard file into an `AstroFrame` (off-thread). |
 | `build_masters` | Stack `darks`/`flats`/`bias`/`flat_darks` folders into `Masters` (`CalibrationMasters::from_files`, off-thread). |
 | `stack_lights` | Calibrate + align + stack a `lights` folder (+ optional `Masters`, preset dropdowns) into `image`/`coverage`/`weight` `AstroFrame`s (`calibrate_align_stack`, off-thread). |
+| `auto_stretch` | Display-stretch an `AstroFrame` (`StretchPreset` dropdown → `lumos::stretch`, off-thread). |
+| `astro_to_image` | Bridge an `AstroFrame` → `Image` so the imaginarium image nodes can consume astro output. |
 
 ## Dependencies
 

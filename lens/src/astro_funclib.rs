@@ -10,6 +10,7 @@ use std::sync::{Arc, LazyLock};
 
 use common::Buffer2;
 use common::file_utils::astro_image_files;
+use imaginarium::Image as RawImage;
 use lumos::{
     AlignStackConfig, AstroImage, CalibrationFrames, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD,
     ImageDimensions, Reference, calibrate_align_stack, stretch,
@@ -24,6 +25,7 @@ use crate::astro_presets::{
     COMBINE_PRESET_DATATYPE, CombinePreset, DETECTION_PRESET_DATATYPE, DetectionPreset,
     REGISTRATION_PRESET_DATATYPE, RegistrationPreset, STRETCH_PRESET_DATATYPE, StretchPreset,
 };
+use crate::image::{IMAGE_DATA_TYPE, Image};
 use crate::masters::{MASTERS_DATA_TYPE, Masters};
 
 /// Every file extension `AstroImage::from_file` recognizes: FITS, camera
@@ -379,6 +381,56 @@ impl Default for AstroFuncLib {
             ..Default::default()
         });
 
+        // astro_to_image: bridge an `AstroFrame` into a `lens::Image` so the
+        // imaginarium image nodes (brightness/contrast, blend, convert, save…)
+        // can consume astro output.
+        func_lib.add(Func {
+            id: "7a0265e1-9631-45bd-8ecd-1e923b67a58c".into(),
+            name: "astro_to_image".to_string(),
+            description: Some(
+                "Converts an astro frame to an image (for the imaginarium image nodes)".to_string(),
+            ),
+            behavior: FuncBehavior::Pure,
+            terminal: false,
+            category: "astro".to_string(),
+            inputs: vec![FuncInput {
+                name: "frame".to_string(),
+                required: true,
+                data_type: ASTRO_FRAME_DATA_TYPE.clone(),
+                default_value: None,
+                value_options: vec![],
+            }],
+            outputs: vec![FuncOutput {
+                name: "image".to_string(),
+                data_type: IMAGE_DATA_TYPE.clone(),
+            }],
+            events: vec![],
+            required_contexts: vec![],
+            lambda: FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+                Box::pin(async move {
+                    assert_eq!(inputs.len(), 1);
+                    assert_eq!(outputs.len(), 1);
+
+                    // The planar→interleaved conversion is a full-frame copy;
+                    // run it off the worker thread.
+                    let value = inputs[0].value.clone();
+                    let raw = tokio::task::spawn_blocking(move || {
+                        let frame = value
+                            .as_custom::<AstroFrame>()
+                            .expect("frame input is an AstroFrame");
+                        RawImage::from(&frame.image)
+                    })
+                    .await
+                    .map_err(anyhow::Error::from)?;
+
+                    outputs[0] = DynamicValue::from_custom(Image::from(raw));
+
+                    Ok(())
+                })
+            }),
+            ..Default::default()
+        });
+
         Self { func_lib }
     }
 }
@@ -535,5 +587,19 @@ mod tests {
         );
         assert_eq!(f.outputs.len(), 1);
         assert_eq!(f.outputs[0].data_type, *ASTRO_FRAME_DATA_TYPE);
+    }
+
+    #[test]
+    fn astro_to_image_node_is_registered() {
+        let lib = AstroFuncLib::default();
+        let f = func(&lib, "astro_to_image");
+        assert_eq!(f.category, "astro");
+        assert_eq!(f.inputs.len(), 1);
+        assert_eq!(f.inputs[0].name, "frame");
+        assert_eq!(f.inputs[0].data_type, *ASTRO_FRAME_DATA_TYPE);
+        assert!(f.inputs[0].required);
+        assert_eq!(f.outputs.len(), 1);
+        assert_eq!(f.outputs[0].name, "image");
+        assert_eq!(f.outputs[0].data_type, *IMAGE_DATA_TYPE);
     }
 }
