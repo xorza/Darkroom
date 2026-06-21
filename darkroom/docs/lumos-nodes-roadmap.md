@@ -43,9 +43,9 @@ plus in-place `AstroImage` ops (`stretch`, `denoise`, `extract_background`, `scn
 rich config presets (`StackConfig::sigma_clipped`, `StarDetectionConfig::wide_field`,
 `RegistrationConfig::fast`, …).
 
-## Editor foundations — done
+## Done so far
 
-The reusable editor work the astro nodes lean on is already in place:
+**Editor foundations** (Phase 0) — reusable across all node types:
 
 - **Enum config editing** — `value_editor.rs` renders enum ports as a dropdown
   (`ComboBox`) over the declared variants.
@@ -55,10 +55,20 @@ The reusable editor work the astro nodes lean on is already in place:
 - **Per-type port colors + type tooltips** — ports and wires read by `DataType`
   (`gui/node/port_color.rs`); hovering a port circle or label shows the type.
 
-One prerequisite remains, and it's just authoring: **custom data types** for the
-astro payloads (`AstroFrame`, `Masters`) — built in Phase 1 below.
+**Astro types + proof node** (Phase 1) — in the `lens` crate (now depends on
+`lumos`):
 
-One non-blocking concern: **lumos work is heavy synchronous CPU**
+- **`AstroFrame`** (`lens/src/astro_frame.rs`) wraps `lumos::AstroImage` as a
+  `CustomValue` with a CPU auto-stretched RGBA_U8 thumbnail (`gen_preview` runs
+  synchronously and parks the result in a `Slot`).
+- **`Masters`** (`lens/src/masters.rs`) wraps `lumos::CalibrationMasters`.
+- **`AstroFuncLib`** (`lens/src/astro_funclib.rs`) with `load_astro_image`
+  (`FsPath` → `AstroFrame`, decode off-thread via `spawn_blocking`); merged at
+  `darkroom/src/core/func_lib.rs`. A new `AstroFrame` branch in `node_values.rs`
+  uploads its preview.
+
+One non-blocking concern carried into the node phases: **lumos work is heavy
+synchronous CPU**
 (rayon/nalgebra). Node lambdas run on the tokio worker, so each must offload via
 `tokio::task::spawn_blocking` to avoid stalling the scheduler.
 
@@ -87,31 +97,15 @@ A user right-clicks → picks from a new **`astro`** category:
 
 ## Roadmap
 
-> Phase 0 (darkroom editor foundations — enum dropdown editor, connection type
-> validation, per-type port colors, port type tooltips) is **done**; see *Editor
-> foundations* above.
-
-### Phase 1 — Astro support inside `lens` (mirrors the image-node pattern)
-
-1. Add `lumos` as a dependency in `lens/Cargo.toml` (alongside `imaginarium`).
-2. **`AstroFrame`** custom type (`lens/src/astro_frame.rs`): wrap
-   `lumos::AstroImage`, impl `CustomValue` (+ `ASTRO_DATA_TYPE` static),
-   `gen_preview` = autostretch → `imaginarium::Image` thumbnail. Pattern =
-   `lens/src/image.rs`.
-3. **`Masters`** custom type (`lens/src/masters.rs`) wrapping
-   `lumos::CalibrationMasters`.
-4. New `AstroFuncLib::default()` in `lens/src/astro_funclib.rs` (sibling to
-   `ImageFuncLib`), exported from `lens/src/lib.rs`. Add one trivial node
-   (**Load Astro Image**: `FsPath` file → `AstroFrame`) to prove it end-to-end,
-   then merge it at `darkroom/src/core/func_lib.rs:27`:
-   `func_lib.merge(AstroFuncLib::default());`
+> **Done:** Phase 0 (editor foundations) and Phase 1 (astro custom types +
+> `load_astro_image`). See *Done so far* above.
 
 ### Phase 2 — Headline nodes
 
-5. **Build Masters node.** Inputs: `darks/flats/bias/flat_darks` (`FsPath`
+1. **Build Masters node.** Inputs: `darks/flats/bias/flat_darks` (`FsPath`
    Directory, optional), `sigma` (Float = 5.0). Output: `Masters`. Lambda globs
    each dir, calls `CalibrationMasters::from_files`, inside `spawn_blocking`.
-6. **Stack Lights node.** Inputs: `lights` (Directory), `masters` (`Masters`,
+2. **Stack Lights node.** Inputs: `lights` (Directory), `masters` (`Masters`,
    optional), `detection`/`registration`/`combine` presets (Enum), `σ-low`/`σ-high`
    (Float), `reference` (Enum). Outputs: `image` + `coverage` + `weight`
    (`AstroFrame`). Lambda builds `AlignStackConfig` from preset + overrides →
@@ -120,7 +114,7 @@ A user right-clicks → picks from a new **`astro`** category:
 
 ### Phase 3 — Processing nodes (fast fan-out)
 
-7. One node each, `AstroFrame → AstroFrame`, wrapping the in-place ops:
+3. One node each, `AstroFrame → AstroFrame`, wrapping the in-place ops:
    **Auto Stretch, Background Extract, Denoise, SCNR, HDR Compress, Local
    Contrast, Neutralize Background**, plus **Save Astro Image** and **Star Detect**
    (→ count/overlay). Each: clone input frame, mutate, output. Mostly boilerplate
@@ -128,30 +122,15 @@ A user right-clicks → picks from a new **`astro`** category:
 
 ### Phase 4 — Polish / advanced
 
-8. Split detection/registration/warp/combine into composable nodes (`StarSet`,
+4. Split detection/registration/warp/combine into composable nodes (`StarSet`,
    `WarpTransform` custom types) for power users; add **Drizzle**.
-9. Optional **config-builder nodes** (e.g. a `Stack Config` node outputting a
+5. Optional **config-builder nodes** (e.g. a `Stack Config` node outputting a
    `StackConfig` custom value) if presets+overrides prove too limiting — defer
    until needed.
-10. AstroFrame ⇄ lens `Image` bridge nodes so astro output can flow into the
-    existing imaginarium nodes (trivial now that both live in `lens`).
+6. AstroFrame ⇄ lens `Image` bridge nodes so astro output can flow into the
+   existing imaginarium nodes (trivial now that both live in `lens`).
 
 ## Brief implementation sketches
-
-**Custom type (Phase 1):**
-
-```rust
-// lens/src/astro_frame.rs
-pub static ASTRO_TYPE_DEF: LazyLock<Arc<TypeDef>> = LazyLock::new(|| Arc::new(TypeDef {
-    type_id: "….".into(), display_name: "AstroFrame".into(),
-}));
-pub static ASTRO_DATA_TYPE: LazyLock<DataType> =
-    LazyLock::new(|| DataType::Custom(ASTRO_TYPE_DEF.clone()));
-
-#[derive(Debug)]
-pub struct AstroFrame { pub image: lumos::AstroImage, preview: Slot<imaginarium::Image> }
-impl CustomValue for AstroFrame { /* type_def, as_any, gen_preview = autostretch→thumb */ }
-```
 
 **Node lambda offloading heavy work (Phase 2):**
 
@@ -176,8 +155,7 @@ lambda: async_lambda!(move |ctx, _, _, inputs, _, outputs| {
   enum editor.
 - **Stacking granularity:** one mega `Stack Lights` node *(recommended for v1)* vs.
   composable detect/register/warp/combine nodes (Phase 4).
-- **Home:** all astro types + nodes live in `lens` (new modules: `astro_frame.rs`,
-  `masters.rs`, `astro_funclib.rs`); `lens` gains a `lumos` dependency.
+- **Home:** astro types + nodes live in `lens` (`astro_frame.rs`, `masters.rs`,
+  `astro_funclib.rs`); `lens` depends on `lumos`. *(Decided + done in Phase 1.)*
 
-With the editor foundations done, **Phase 1** (custom astro types in `lens`) is
-the next slice.
+**Phase 2** (Build Masters + Stack Lights) is the next slice.

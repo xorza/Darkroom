@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
-use lens::ImageFuncLib;
+use lens::{AstroFuncLib, ImageFuncLib};
 use scenarium::elements::basic_funclib::BasicFuncLib;
 use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
 use scenarium::prelude::FuncLib;
@@ -25,6 +25,7 @@ pub(crate) fn runtime_func_lib() -> SharedFuncLib {
     func_lib.merge(BasicFuncLib::default());
     func_lib.merge(WorkerEventsFuncLib::default());
     func_lib.merge(ImageFuncLib::default());
+    func_lib.merge(AstroFuncLib::default());
     for def in library::load_library() {
         func_lib.add_subgraph(def);
     }

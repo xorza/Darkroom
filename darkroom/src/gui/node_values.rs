@@ -8,7 +8,7 @@
 //! lives in [`crate::gui::run_state::RunState`].
 
 use imaginarium::{ColorFormat, Image as RawImage};
-use lens::Image as LensImage;
+use lens::{AstroFrame, Image as LensImage};
 use palantir::{Image as PalImage, ImageHandle, Ui};
 use scenarium::data::DynamicValue;
 use scenarium::execution::ArgumentValues;
@@ -54,9 +54,17 @@ pub(crate) fn build_view(ui: &Ui, values: ArgumentValues) -> NodeValueView {
 }
 
 fn port_view(ui: &Ui, value: &DynamicValue) -> PortValueView {
+    // Each custom type parks its preview as an RGBA_U8 image; downcast to
+    // whichever produced one. Both the imaginarium-backed `Image` and the
+    // lumos-backed `AstroFrame` resolve a thumbnail the same way.
     let preview = value
         .as_custom::<LensImage>()
         .and_then(LensImage::take_preview)
+        .or_else(|| {
+            value
+                .as_custom::<AstroFrame>()
+                .and_then(AstroFrame::take_preview)
+        })
         .and_then(|preview| upload_preview(ui, preview));
     PortValueView {
         text: value.to_string(),

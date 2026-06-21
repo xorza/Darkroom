@@ -27,6 +27,7 @@ scenarium = { path = "scenarium" }
 darkroom = { path = "darkroom" }
 imaginarium = { path = "imaginarium", features = ["wgpu"] }
 lens = { path = "lens" }
+lumos = { path = "lumos" }
 palantir = { path = "palantir" }
 fits-well = { path = "fits-well" }
 

@@ -2317,6 +2317,7 @@ dependencies = [
  "async-trait",
  "common",
  "imaginarium",
+ "lumos",
  "scenarium",
  "strum",
  "strum_macros",

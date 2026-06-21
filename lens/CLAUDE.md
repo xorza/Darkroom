@@ -1,21 +1,28 @@
 # lens
 
-Image-processing function library: adapts `imaginarium` operations into the `scenarium` node-based workflow.
+Node-function library: adapts `imaginarium` (GPU image ops) **and** `lumos`
+(astronomical processing) into the `scenarium` node-based workflow.
 
 ## Modules
 
 | Module | Role |
 |--------|------|
-| `image_funclib.rs` | Image-processing node functions + type definitions. |
+| `image_funclib.rs` | Image-processing node functions (imaginarium) + type definitions. |
 | `vision_ctx.rs` | `VisionCtx` wrapping `imaginarium::ProcessingContext` for GPU/CPU dispatch. |
+| `astro_funclib.rs` | Astro node functions (lumos), category `astro`. |
+| `astro_frame.rs` | `AstroFrame` — `lumos::AstroImage` as a `CustomValue` (CPU thumbnail preview). |
+| `masters.rs` | `Masters` — `lumos::CalibrationMasters` as a `CustomValue`. |
 
 ## Key types
 
-- `ImageFuncLib` — the function library exposing image nodes.
-- `Image` — wrapper around `imaginarium::ImageBuffer` implementing `CustomValue`.
+- `ImageFuncLib` — function library exposing the imaginarium image nodes.
+- `AstroFuncLib` — function library exposing the lumos astro nodes.
+- `Image` — wrapper around `imaginarium::ImageBuffer` implementing `CustomValue` (GPU thumbnail preview).
+- `AstroFrame` — wrapper around `lumos::AstroImage` implementing `CustomValue`; `gen_preview` builds a downscaled RGBA_U8 thumbnail on the CPU (planar channels sampled straight to RGBA, no display stretch — linear frames preview dark) and parks it in a `Slot`.
+- `Masters` — wrapper around `lumos::CalibrationMasters`.
 - `VisionCtx` — context holding a `ProcessingContext` for GPU/CPU dispatch.
 - `ConversionFormat` — enum of the 12 color-format conversion targets.
-- Lazy-initialized type handles: `IMAGE_DATA_TYPE`, `BLENDMODE_DATATYPE`, `CONVERSION_FORMAT_DATATYPE`, `VISION_CTX_TYPE`.
+- Lazy-initialized type handles: `IMAGE_DATA_TYPE`, `ASTRO_FRAME_DATA_TYPE`, `MASTERS_DATA_TYPE`, `ASTRO_IMAGE_PATH_DATA_TYPE` (existing-file picker filtered to the FITS/RAW/standard extensions `from_file` loads), `BLENDMODE_DATATYPE`, `CONVERSION_FORMAT_DATATYPE`, `VISION_CTX_TYPE`.
 
 ## Functions
 
@@ -26,7 +33,8 @@ Image-processing function library: adapts `imaginarium` operations into the `sce
 | `save_image` | Write image to file. |
 | `convert` | Convert image to a different color format (enum input). |
 | `blend` | Blend two images with configurable mode and alpha. |
+| `load_astro_image` | Decode a FITS/RAW/standard file into an `AstroFrame` (off-thread). |
 
 ## Dependencies
 
-common, scenarium, imaginarium, anyhow, strum, strum_macros.
+common, scenarium, imaginarium, lumos, anyhow, strum, strum_macros, tracing, tokio, async-trait.
