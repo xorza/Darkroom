@@ -5,7 +5,7 @@
 //! (`SubgraphInput`/`SubgraphOutput`) port rows in
 //! [`crate::gui::node::port_row`]; ordinary node ports render plain text.
 
-use palantir::{HAlign, InternedStr, Text, Ui, WidgetId};
+use palantir::{Configure, HAlign, InternedStr, Sense, Text, Tooltip, Ui, WidgetId};
 
 use crate::core::document::BoundarySide;
 use crate::core::edit::intent::Intent;
@@ -32,17 +32,25 @@ fn port_rename_wid(port: PortRef) -> WidgetId {
 /// A port label. When `rename` is `Some`, double-clicking swaps the
 /// label for a length-capped `TextEdit`; Enter or focus loss commits a
 /// [`Intent::RenameBoundaryPort`], Esc cancels. `None` (regular node
-/// ports and the trailing "+" placeholder) renders plain text.
+/// ports and the trailing "+" placeholder) renders plain text. `tip`
+/// (the port's data type) shows as a hover tooltip; empty = no tooltip.
 pub(crate) fn port_label(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
     port: PortRef,
     name: InternedStr,
+    tip: &str,
     rename: Option<BoundarySide>,
     out: &mut Vec<Intent>,
 ) {
     let Some(side) = rename else {
-        Text::new(name).show(ui);
+        // Regular node port: a plain label that opts into `Sense::HOVER`
+        // (it captures no clicks, so node selection/drag still fall
+        // through) so the type tooltip has a trigger anchor.
+        let snapshot = Text::new(name).sense(Sense::HOVER).show(ui).snapshot();
+        if !tip.is_empty() {
+            Tooltip::for_(&snapshot).text(tip.to_owned()).show(ui);
+        }
         return;
     };
     let shift = ui.modifiers().shift;

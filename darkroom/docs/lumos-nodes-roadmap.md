@@ -43,23 +43,22 @@ plus in-place `AstroImage` ops (`stretch`, `denoise`, `extract_background`, `scn
 rich config presets (`StackConfig::sigma_clipped`, `StarDetectionConfig::wide_field`,
 `RegistrationConfig::fast`, …).
 
-## The three real gaps (everything else is just authoring nodes)
+## Editor foundations — done
 
-These are what configs + connection validation actually depend on:
+The reusable editor work the astro nodes lean on is already in place:
 
-1. **Enum config editing is missing.** `value_editor.rs` renders
-   `StaticValue::Enum` as a *read-only label*. Stacking config is enum-heavy
-   (combine method, rejection, normalization, preset), so we need a dropdown
-   widget. This is the single most important darkroom change.
-2. **No connection type validation.** `scan_snap_target()`
-   (`gui/canvas/connection_ui.rs:292`) snaps *any* output to *any* input — it only
-   checks port-kind, not `DataType`. `DataType` already implements `PartialEq`
-   (with `TypeId` matching for custom types), so the check is cheap to add. Ports
-   also aren't colored by type today.
-3. **No custom data types for astro data yet** — need `CustomValue` wrappers for
-   the things that flow on wires.
+- **Enum config editing** — `value_editor.rs` renders enum ports as a dropdown
+  (`ComboBox`) over the declared variants.
+- **Connection type validation** — incompatible ports won't snap
+  (`connection_ui.rs`, `types_compatible`); `Null` is a wildcard for boundary
+  "+" placeholders.
+- **Per-type port colors + type tooltips** — ports and wires read by `DataType`
+  (`gui/node/port_color.rs`); hovering a port circle or label shows the type.
 
-A fourth, non-blocking concern: **lumos work is heavy synchronous CPU**
+One prerequisite remains, and it's just authoring: **custom data types** for the
+astro payloads (`AstroFrame`, `Masters`) — built in Phase 1 below.
+
+One non-blocking concern: **lumos work is heavy synchronous CPU**
 (rayon/nalgebra). Node lambdas run on the tokio worker, so each must offload via
 `tokio::task::spawn_blocking` to avoid stalling the scheduler.
 
@@ -88,35 +87,20 @@ A user right-clicks → picks from a new **`astro`** category:
 
 ## Roadmap
 
-### Phase 0 — Darkroom foundations (reusable infra) — **DONE**
-
-1. **Enum dropdown editor.** ✅ `value_editor::show()` now takes the port's
-   `DataType` and renders `StaticValue::Enum` as a palantir `ComboBox` over the
-   `DataType::Enum(EnumDef).variants`, emitting `Binding::Const(StaticValue::Enum)`.
-   (`gui/node/value_editor.rs`, `gui/node/port_row.rs`)
-2. **Connection type validation.** ✅ `scan_snap_target()` now rejects a snap when
-   the dragged port's `DataType` is incompatible with the candidate's
-   (`types_compatible`: equal types, or `Null` wildcard for boundary "+"
-   placeholders). (`gui/canvas/connection_ui.rs`)
-3. **Per-type port colors.** ✅ New `gui/node/port_color.rs` maps `DataType` →
-   color (built-in scalars fixed per palette; `Custom`/`Enum` keyed by `type_id`
-   onto a ramp; `Null` falls back to the positional port colors). Used by
-   `port_row.rs` for port fills and by `connection_ui.rs` for the wire gradient,
-   so wires read by type.
-
-*These three benefit the existing image nodes too and were independent of the
-astro work — landed first.*
+> Phase 0 (darkroom editor foundations — enum dropdown editor, connection type
+> validation, per-type port colors, port type tooltips) is **done**; see *Editor
+> foundations* above.
 
 ### Phase 1 — Astro support inside `lens` (mirrors the image-node pattern)
 
-4. Add `lumos` as a dependency in `lens/Cargo.toml` (alongside `imaginarium`).
-5. **`AstroFrame`** custom type (`lens/src/astro_frame.rs`): wrap
+1. Add `lumos` as a dependency in `lens/Cargo.toml` (alongside `imaginarium`).
+2. **`AstroFrame`** custom type (`lens/src/astro_frame.rs`): wrap
    `lumos::AstroImage`, impl `CustomValue` (+ `ASTRO_DATA_TYPE` static),
    `gen_preview` = autostretch → `imaginarium::Image` thumbnail. Pattern =
    `lens/src/image.rs`.
-6. **`Masters`** custom type (`lens/src/masters.rs`) wrapping
+3. **`Masters`** custom type (`lens/src/masters.rs`) wrapping
    `lumos::CalibrationMasters`.
-7. New `AstroFuncLib::default()` in `lens/src/astro_funclib.rs` (sibling to
+4. New `AstroFuncLib::default()` in `lens/src/astro_funclib.rs` (sibling to
    `ImageFuncLib`), exported from `lens/src/lib.rs`. Add one trivial node
    (**Load Astro Image**: `FsPath` file → `AstroFrame`) to prove it end-to-end,
    then merge it at `darkroom/src/core/func_lib.rs:27`:
@@ -124,10 +108,10 @@ astro work — landed first.*
 
 ### Phase 2 — Headline nodes
 
-8. **Build Masters node.** Inputs: `darks/flats/bias/flat_darks` (`FsPath`
+5. **Build Masters node.** Inputs: `darks/flats/bias/flat_darks` (`FsPath`
    Directory, optional), `sigma` (Float = 5.0). Output: `Masters`. Lambda globs
    each dir, calls `CalibrationMasters::from_files`, inside `spawn_blocking`.
-9. **Stack Lights node.** Inputs: `lights` (Directory), `masters` (`Masters`,
+6. **Stack Lights node.** Inputs: `lights` (Directory), `masters` (`Masters`,
    optional), `detection`/`registration`/`combine` presets (Enum), `σ-low`/`σ-high`
    (Float), `reference` (Enum). Outputs: `image` + `coverage` + `weight`
    (`AstroFrame`). Lambda builds `AlignStackConfig` from preset + overrides →
@@ -136,20 +120,20 @@ astro work — landed first.*
 
 ### Phase 3 — Processing nodes (fast fan-out)
 
-10. One node each, `AstroFrame → AstroFrame`, wrapping the in-place ops:
-    **Auto Stretch, Background Extract, Denoise, SCNR, HDR Compress, Local
-    Contrast, Neutralize Background**, plus **Save Astro Image** and **Star Detect**
-    (→ count/overlay). Each: clone input frame, mutate, output. Mostly boilerplate
-    once the type + enum editor exist.
+7. One node each, `AstroFrame → AstroFrame`, wrapping the in-place ops:
+   **Auto Stretch, Background Extract, Denoise, SCNR, HDR Compress, Local
+   Contrast, Neutralize Background**, plus **Save Astro Image** and **Star Detect**
+   (→ count/overlay). Each: clone input frame, mutate, output. Mostly boilerplate
+   now that the type + enum editor exist.
 
 ### Phase 4 — Polish / advanced
 
-11. Split detection/registration/warp/combine into composable nodes (`StarSet`,
-    `WarpTransform` custom types) for power users; add **Drizzle**.
-12. Optional **config-builder nodes** (e.g. a `Stack Config` node outputting a
-    `StackConfig` custom value) if presets+overrides prove too limiting — defer
-    until needed.
-13. AstroFrame ⇄ lens `Image` bridge nodes so astro output can flow into the
+8. Split detection/registration/warp/combine into composable nodes (`StarSet`,
+   `WarpTransform` custom types) for power users; add **Drizzle**.
+9. Optional **config-builder nodes** (e.g. a `Stack Config` node outputting a
+   `StackConfig` custom value) if presets+overrides prove too limiting — defer
+   until needed.
+10. AstroFrame ⇄ lens `Image` bridge nodes so astro output can flow into the
     existing imaginarium nodes (trivial now that both live in `lens`).
 
 ## Brief implementation sketches
@@ -185,13 +169,6 @@ lambda: async_lambda!(move |ctx, _, _, inputs, _, outputs| {
 })
 ```
 
-**Connection validation (Phase 0):**
-
-```rust
-// in scan_snap_target(), before returning a candidate port:
-if start_type(scene, start) == cand_type(scene, port) { /* allow */ }
-```
-
 ## Decision points (recommendations baked in above)
 
 - **Config surfacing:** preset enum + few override ports *(recommended)* vs. full
@@ -202,5 +179,5 @@ if start_type(scene, start) == cand_type(scene, port) { /* allow */ }
 - **Home:** all astro types + nodes live in `lens` (new modules: `astro_frame.rs`,
   `masters.rs`, `astro_funclib.rs`); `lens` gains a `lumos` dependency.
 
-Phase 0 is the highest-leverage starting point and helps the existing image nodes
-too.
+With the editor foundations done, **Phase 1** (custom astro types in `lens`) is
+the next slice.

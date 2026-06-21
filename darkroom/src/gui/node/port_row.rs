@@ -6,9 +6,9 @@
 
 use palantir::{
     Align, Color, Configure, ContextMenu, Corners, HAlign, InternedStr, MenuItem, Panel, Rect,
-    Sense, Shape, Sizing, Spacing, Stroke, Ui, VAlign, WidgetId,
+    Sense, Shape, Sizing, Spacing, Stroke, Tooltip, Ui, VAlign, WidgetId,
 };
-use scenarium::data::{DataType, StaticValue};
+use scenarium::data::{DataType, FsPathMode, StaticValue};
 use scenarium::graph::Binding;
 use scenarium::prelude::NodeId;
 
@@ -158,6 +158,7 @@ fn output_port_row(
         PortKind::Output,
         rcx.port_frame.is_hovered(port),
     );
+    let tip = type_label(&data_type);
     let wid = port_circle_wid(port);
     let overhang = theme.port_radius() + theme.port_col_pad_x;
     Panel::hstack()
@@ -166,8 +167,15 @@ fn output_port_row(
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            port_label(ui, rcx, port, name, rename, out);
-            circle_frame(ui, theme, wid, fill, Spacing::new(0.0, 0.0, -overhang, 0.0));
+            port_label(ui, rcx, port, name, &tip, rename, out);
+            circle_frame(
+                ui,
+                theme,
+                wid,
+                fill,
+                Spacing::new(0.0, 0.0, -overhang, 0.0),
+                &tip,
+            );
         });
     // Double-click to disconnect every consumer is handled in
     // `emit_port_disconnects` (prepass) alongside the input-side gesture.
@@ -193,6 +201,7 @@ fn input_port_row(
         PortKind::Input,
         rcx.port_frame.is_hovered(port),
     );
+    let tip = type_label(&data_type);
     let overhang = theme.port_radius() + theme.port_col_pad_x;
     let margin = Spacing::new(-overhang, 0.0, 0.0, 0.0);
     let wid = port_circle_wid(port);
@@ -203,8 +212,8 @@ fn input_port_row(
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            circle_frame(ui, theme, wid, fill, margin);
-            port_label(ui, rcx, port, name.clone(), rename, out);
+            circle_frame(ui, theme, wid, fill, margin, &tip);
+            port_label(ui, rcx, port, name.clone(), &tip, rename, out);
             if allow_const && let InputBindingView::Const(value) = binding {
                 let editor_id = const_editor_wid(port.node_id, port.port_idx);
                 if let Some(new_value) =
@@ -257,7 +266,14 @@ fn input_port_row(
 /// hit and snap to, while the visible circle stays `port_size`.
 const PORT_HIT_SCALE: f32 = 1.8;
 
-fn circle_frame(ui: &mut Ui, theme: &Theme, wid: WidgetId, fill: Color, margin: Spacing) {
+fn circle_frame(
+    ui: &mut Ui,
+    theme: &Theme,
+    wid: WidgetId,
+    fill: Color,
+    margin: Spacing,
+    tip: &str,
+) {
     let port = theme.port_size;
     let hit = port * PORT_HIT_SCALE;
     let inset = (hit - port) * 0.5;
@@ -276,7 +292,7 @@ fn circle_frame(ui: &mut Ui, theme: &Theme, wid: WidgetId, fill: Color, margin: 
     // structure shifts. CLICK | DRAG so the port (a) intercepts the
     // press before it falls through to the node body's `Sense::DRAG`,
     // and (b) can latch a connection drag.
-    Panel::zstack()
+    let circle = Panel::zstack()
         .id(wid)
         .size((Sizing::Fixed(hit), Sizing::Fixed(hit)))
         .margin(hit_margin)
@@ -289,4 +305,31 @@ fn circle_frame(ui: &mut Ui, theme: &Theme, wid: WidgetId, fill: Color, margin: 
                 stroke: Stroke::ZERO,
             });
         });
+    if !tip.is_empty() {
+        Tooltip::for_(&circle.response.snapshot())
+            .text(tip.to_owned())
+            .show(ui);
+    }
+}
+
+/// Human-readable type for a port tooltip. Mirrors `DataType`'s `Display`
+/// for the scalars, names the picker mode for paths, and reads `Null`
+/// (the untyped boundary placeholder) as "any".
+fn type_label(ty: &DataType) -> String {
+    match ty {
+        DataType::Null => "any".to_owned(),
+        DataType::FsPath(cfg) => {
+            let mode = match cfg.mode {
+                FsPathMode::Directory => "directory",
+                FsPathMode::ExistingFile => "file",
+                FsPathMode::NewFile => "save path",
+            };
+            if cfg.extensions.is_empty() {
+                format!("path · {mode}")
+            } else {
+                format!("path · {mode} ({})", cfg.extensions.join(", "))
+            }
+        }
+        other => other.to_string(),
+    }
 }
