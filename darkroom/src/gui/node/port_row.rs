@@ -11,7 +11,7 @@ use palantir::{
     Shape, Sizing, Spacing, Stroke, Tooltip, Track, Ui, VAlign, WidgetId,
 };
 use scenarium::data::{DataType, FsPathMode, StaticValue};
-use scenarium::function::ValueOption;
+use scenarium::function::ValueVariant;
 use scenarium::graph::Binding;
 use scenarium::prelude::NodeId;
 
@@ -91,8 +91,8 @@ fn input_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<
         let rename = (node.boundary && i + 1 < inputs.len()).then_some(BoundarySide::Output);
         input_label_cell(ui, rcx, port, node, input, rename, out);
         if allow_const && let InputBindingView::Const(value) = &input.binding {
-            let options = rcx.scene.value_options(input.value_options);
-            value_cell(ui, rcx.theme, port, value, &input.ty, options, out);
+            let variants = rcx.scene.value_variants(input.value_variants);
+            value_cell(ui, rcx.theme, port, value, &input.ty, variants, out);
         }
     }
 }
@@ -235,7 +235,7 @@ fn value_cell(
     port: PortRef,
     value: &StaticValue,
     data_type: &DataType,
-    value_options: &[ValueOption],
+    value_variants: &[ValueVariant],
     out: &mut Vec<Intent>,
 ) {
     let editor_id = const_editor_wid(port.node_id, port.port_idx);
@@ -254,7 +254,7 @@ fn value_cell(
                 editor_id,
                 value,
                 data_type,
-                value_options,
+                value_variants,
             )
         });
     if let Some(new_value) = edited.inner {

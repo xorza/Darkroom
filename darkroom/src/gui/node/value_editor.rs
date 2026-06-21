@@ -22,7 +22,7 @@ use palantir::{
     Button, Checkbox, ComboBox, Configure, Sizing, Spacing, TextEdit, TextWrap, Ui, WidgetId,
 };
 use scenarium::data::{DataType, StaticValue};
-use scenarium::function::ValueOption;
+use scenarium::function::ValueVariant;
 
 use crate::gui::theme::StaticValueEditorTheme;
 
@@ -41,16 +41,16 @@ pub(crate) fn show(
     id: WidgetId,
     value: &StaticValue,
     data_type: &DataType,
-    value_options: &[ValueOption],
+    value_variants: &[ValueVariant],
 ) -> Option<StaticValue> {
     let width = theme.width;
-    // Picker options (the input's `value_options`, e.g. named config presets)
-    // override the per-type editor: a dropdown of option names, binding the
-    // chosen option's value. Works regardless of `data_type` (a custom config
+    // Picker variants (the input's `value_variants`, e.g. named config presets)
+    // override the per-type editor: a dropdown of variant names, binding the
+    // chosen variant's value. Works regardless of `data_type` (a custom config
     // port still shows its presets).
-    if !value_options.is_empty() {
-        let names: Vec<&str> = value_options.iter().map(|o| o.name.as_str()).collect();
-        let before = value_options
+    if !value_variants.is_empty() {
+        let names: Vec<&str> = value_variants.iter().map(|o| o.name.as_str()).collect();
+        let before = value_variants
             .iter()
             .position(|o| &o.value == value)
             .unwrap_or(0);
@@ -62,7 +62,7 @@ pub(crate) fn show(
             .min_size((width, 0.0))
             .show(ui);
         return (idx != before)
-            .then(|| value_options.get(idx).map(|o| o.value.clone()))
+            .then(|| value_variants.get(idx).map(|o| o.value.clone()))
             .flatten();
     }
     match value {

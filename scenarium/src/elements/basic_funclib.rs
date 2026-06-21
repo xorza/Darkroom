@@ -5,7 +5,7 @@ use strum_macros::{Display, EnumIter};
 use crate::async_lambda;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::func_lambda::InvokeInput;
-use crate::function::{Func, FuncInput, FuncLib, ValueOption};
+use crate::function::{Func, FuncInput, FuncLib, ValueVariant};
 
 #[repr(u32)]
 #[derive(Debug, Display, EnumIter, Copy, Clone)]
@@ -20,9 +20,9 @@ enum Math2ArgOp {
 }
 
 impl Math2ArgOp {
-    fn list_variants() -> Vec<ValueOption> {
+    fn list_variants() -> Vec<ValueVariant> {
         Math2ArgOp::iter()
-            .map(|op| ValueOption {
+            .map(|op| ValueVariant {
                 name: op.to_string(),
                 value: StaticValue::Int(op as i64),
             })
@@ -97,7 +97,7 @@ pub fn basic_funclib() -> FuncLib {
             .input(
                 FuncInput::required("op", DataType::Int)
                     .default(Math2ArgOp::Add)
-                    .options(Math2ArgOp::list_variants()),
+                    .variants(Math2ArgOp::list_variants()),
             )
             .output("result", DataType::Float)
             .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {

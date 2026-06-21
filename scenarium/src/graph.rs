@@ -1092,7 +1092,7 @@ mod tests {
                 required: false,
                 data_type: DataType::Int,
                 default_value: Some(default.into()),
-                value_options: vec![],
+                value_variants: vec![],
             }],
             ..Default::default()
         }
@@ -1129,7 +1129,7 @@ mod tests {
             required: false,
             data_type: DataType::Int,
             default_value: Some(3i64.into()),
-            value_options: vec![],
+            value_variants: vec![],
         };
         let def = SubgraphDef {
             id: SubgraphId::unique(),

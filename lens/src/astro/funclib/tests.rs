@@ -94,7 +94,7 @@ fn stack_lights_node_is_registered() {
     assert_eq!(f.inputs[1].data_type, *MASTERS_DATA_TYPE);
     assert!(!f.inputs[1].required, "masters are genuinely optional");
     // Each stage is one config-typed input (so a build_*_config wires in),
-    // with the presets offered via value_options + seeded to the first.
+    // with the presets offered via value_variants + seeded to the first.
     // It's required: the seeded preset keeps a fresh node valid, but a
     // cleared input errors the run rather than silently defaulting.
     assert!(f.inputs[2].required, "detection is required");
@@ -103,7 +103,7 @@ fn stack_lights_node_is_registered() {
         config_data_type::<DetectionConfigDef>()
     );
     let detection_presets: Vec<&str> = f.inputs[2]
-        .value_options
+        .value_variants
         .iter()
         .map(|o| o.name.as_str())
         .collect();
@@ -272,7 +272,7 @@ fn build_background_config_reflects_fields_and_feeds_background_extract() {
     );
 
     // background_extract is image + one `config` input of that type: a mode
-    // preset quick-pick (value_options) a builder can wire into to override.
+    // preset quick-pick (value_variants) a builder can wire into to override.
     let bg = func(&lib, "background_extract");
     let bg_names: Vec<&str> = bg.inputs.iter().map(|i| i.name.as_str()).collect();
     assert_eq!(bg_names, ["image", "config"]);
@@ -282,7 +282,7 @@ fn build_background_config_reflects_fields_and_feeds_background_extract() {
         config_data_type::<BackgroundConfigDef>()
     );
     let modes: Vec<&str> = bg.inputs[1]
-        .value_options
+        .value_variants
         .iter()
         .map(|o| o.name.as_str())
         .collect();

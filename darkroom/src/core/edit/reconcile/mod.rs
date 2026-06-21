@@ -258,7 +258,7 @@ fn synth_input(idx: usize, data_type: DataType) -> FuncInput {
         required: false,
         data_type,
         default_value: None,
-        value_options: Vec::new(),
+        value_variants: Vec::new(),
     }
 }
 

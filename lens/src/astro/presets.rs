@@ -22,7 +22,7 @@ const COMBINE_SIGMA: f32 = 3.0;
 /// with a `DataType::Enum` handle. Each variant carries a stable string `label`
 /// (the dropdown text + serialized value) and a `config` expression that builds
 /// the lumos stage config. Presets consumed only as a variant list + `config`
-/// (e.g. `stack_lights`' `value_options`) omit the `datatype:`/`type_id:` lines;
+/// (e.g. `stack_lights`' `value_variants`) omit the `datatype:`/`type_id:` lines;
 /// presets rendered as a dropdown (via `enum_input`) keep them.
 macro_rules! preset_enum {
     // With a `DataType::Enum` handle — delegates to the enum-only form, then
@@ -210,7 +210,7 @@ mod tests {
 
     #[test]
     fn combine_preset_lists_its_variants() {
-        // Covers the enum-only arm (combine is consumed via value_options, not a
+        // Covers the enum-only arm (combine is consumed via value_variants, not a
         // DataType handle).
         assert_eq!(
             CombinePreset::variant_names(),

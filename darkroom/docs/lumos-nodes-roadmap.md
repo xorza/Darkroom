@@ -153,7 +153,7 @@ could come later if wanted.
    field-per-input node → a wireable `ConfigValue<T>`; lens-side mirror structs
    (`astro_configs.rs`) drive `build_background_config` / `build_detection_config`
    / `build_registration_config` / `build_combine_config`. The consuming nodes
-   take **one** config-typed input that offers the presets via `value_options`
+   take **one** config-typed input that offers the presets via `value_variants`
    (a dropdown) *and* accepts a builder wire to override.
 6. AstroFrame ⇄ lens `Image` bridge nodes so astro output can flow into the
    existing imaginarium nodes (trivial now that both live in `lens`).
@@ -170,7 +170,7 @@ could come later if wanted.
   override fed by new `build_denoise_config` / `build_hdr_config` /
   `build_local_contrast_config` nodes (mirrors in `astro_configs.rs`,
   `config_override_input` helper). These have no named presets, so they use a
-  scalar + optional override rather than the `value_options` preset dropdown.
+  scalar + optional override rather than the `value_variants` preset dropdown.
 - (Minor) reverse `Image → AstroFrame` bridge — only if a workflow needs it.
 
 ## Brief implementation sketches

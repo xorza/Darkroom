@@ -1684,7 +1684,7 @@ mod events {
                 required: true,
                 data_type: DataType::Int,
                 default_value: None,
-                value_options: vec![],
+                value_variants: vec![],
             }],
             lambda: async_lambda!(
                 move |_, _, _, inputs, _, _| { values = recv_values_l.clone() } => {
@@ -1846,7 +1846,7 @@ mod output_usage {
                 required: true,
                 data_type: DataType::Int,
                 default_value: None,
-                value_options: vec![],
+                value_variants: vec![],
             }],
             lambda: async_lambda!(|_, _, _, _, _, _| { Ok(()) }),
             ..Default::default()
@@ -2202,14 +2202,14 @@ mod subgraph {
                     required: true,
                     data_type: DataType::Int,
                     default_value: None,
-                    value_options: vec![],
+                    value_variants: vec![],
                 },
                 crate::function::FuncInput {
                     name: "B".into(),
                     required: false,
                     data_type: DataType::Int,
                     default_value: None,
-                    value_options: vec![],
+                    value_variants: vec![],
                 },
             ],
             outputs: vec![int_out("Sum")],

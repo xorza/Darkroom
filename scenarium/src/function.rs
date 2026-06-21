@@ -20,7 +20,7 @@ pub enum FuncBehavior {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ValueOption {
+pub struct ValueVariant {
     pub name: String,
     pub value: StaticValue,
 }
@@ -33,7 +33,7 @@ pub struct FuncInput {
     #[serde(default)]
     pub default_value: Option<StaticValue>,
     #[serde(default)]
-    pub value_options: Vec<ValueOption>,
+    pub value_variants: Vec<ValueVariant>,
 }
 
 impl FuncInput {
@@ -44,7 +44,7 @@ impl FuncInput {
             required: true,
             data_type,
             default_value: None,
-            value_options: Vec::new(),
+            value_variants: Vec::new(),
         }
     }
 
@@ -56,7 +56,7 @@ impl FuncInput {
             required: false,
             data_type,
             default_value: None,
-            value_options: Vec::new(),
+            value_variants: Vec::new(),
         }
     }
 
@@ -66,9 +66,9 @@ impl FuncInput {
         self
     }
 
-    /// Attach the editor picker options (`ValueOption`s).
-    pub fn options(mut self, options: Vec<ValueOption>) -> Self {
-        self.value_options = options;
+    /// Attach the editor picker variants (`ValueVariant`s).
+    pub fn variants(mut self, variants: Vec<ValueVariant>) -> Self {
+        self.value_variants = variants;
         self
     }
 }

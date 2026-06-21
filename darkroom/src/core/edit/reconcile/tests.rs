@@ -14,7 +14,7 @@ fn int_input(name: &str) -> FuncInput {
         required: false,
         data_type: DataType::Int,
         default_value: None,
-        value_options: Vec::new(),
+        value_variants: Vec::new(),
     }
 }
 
@@ -276,7 +276,7 @@ fn existing_port_type_is_rederived_from_wiring() {
         required: false,
         data_type: DataType::Bool,
         default_value: None,
-        value_options: Vec::new(),
+        value_variants: Vec::new(),
     };
     let (mut def, sgin, sum, _sgout) = build_def(&func_lib, vec![stale], vec![]);
     bind(&mut def.graph, sum, 0, sgin, 0); // sgin.out0 -> sum.in0

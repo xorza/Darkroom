@@ -143,7 +143,7 @@ mod tests {
             required: false,
             data_type: DataType::Int,
             default_value: None,
-            value_options: vec![],
+            value_variants: vec![],
         }
     }
 

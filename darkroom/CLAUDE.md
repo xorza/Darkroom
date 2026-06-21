@@ -266,9 +266,9 @@ the open-tab strip + "+" new-subgraph chip, emits `UiAction`s). The rest:
   port keeps its data-type color while editing), `port_rename` (inline
   boundary-port rename in subgraph
   interiors), and `value_editor` (inline `Const` editing; an input with
-  `value_options` renders a preset dropdown over them regardless of type — carried
-  on the flat `Scene::value_options_pool` sliced per input by
-  `SceneInput::value_options`).
+  `value_variants` renders a preset dropdown over them regardless of type — carried
+  on the flat `Scene::value_variants_pool` sliced per input by
+  `SceneInput::value_variants`).
 - **`gui/widgets/`** — reusable widgets. `inline_rename.rs` is a label that
   swaps to a `TextEdit` on double-click (used by the node title and
   boundary-port names).

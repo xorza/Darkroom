@@ -219,7 +219,7 @@ mod tests {
             required: true,
             data_type: DataType::Float,
             default_value: default,
-            value_options: vec![],
+            value_variants: vec![],
         }
     }
 

@@ -5,7 +5,7 @@ use common::Span;
 use glam::Vec2;
 use palantir::InternedStr;
 use scenarium::data::{DataType, StaticValue};
-use scenarium::function::{FuncInput, FuncOutput, ValueOption};
+use scenarium::function::{FuncInput, FuncOutput, ValueVariant};
 use scenarium::prelude::{
     Binding, FuncLib, Graph, NodeBehavior, NodeId, NodeKind, SubgraphDef, SubgraphRef,
 };
@@ -27,8 +27,8 @@ pub struct Scene {
     /// `SceneNode::outputs` span.
     pub outputs: Vec<SceneOutput>,
     /// One flat pool of every input's picker options across all nodes, sliced
-    /// per input by [`SceneInput::value_options`].
-    pub value_options_pool: Vec<ValueOption>,
+    /// per input by [`SceneInput::value_variants`].
+    pub value_variants_pool: Vec<ValueVariant>,
     /// Live viewport, mirrored from `Document::{pan, scale}` each
     /// `rebuild`. Read by the canvas transform and the pointer↔world
     /// mapping; the pan/zoom gesture writes it back here, and `App`
@@ -71,7 +71,7 @@ impl Default for Scene {
             connections: Vec::new(),
             inputs: Vec::new(),
             outputs: Vec::new(),
-            value_options_pool: Vec::new(),
+            value_variants_pool: Vec::new(),
             pan: Vec2::ZERO,
             zoom: 1.0,
             selected_nodes: BTreeSet::new(),
@@ -94,9 +94,9 @@ pub struct SceneInput {
     /// A required input with no binding is a missing input — its port renders
     /// highlighted.
     pub required: bool,
-    /// Span into [`Scene::value_options_pool`] for this input's editor picker
+    /// Span into [`Scene::value_variants_pool`] for this input's editor picker
     /// options. Empty = no options (the common case).
-    pub value_options: Span,
+    pub value_variants: Span,
 }
 
 /// One output port in the per-frame projection.
@@ -179,7 +179,7 @@ impl Scene {
         self.connections.clear();
         self.inputs.clear();
         self.outputs.clear();
-        self.value_options_pool.clear();
+        self.value_variants_pool.clear();
 
         for vn in view.view_nodes.iter() {
             let Some(node) = graph.by_id(&vn.id) else {
@@ -246,7 +246,7 @@ impl Scene {
             };
             // One `SceneInput` per input port, sliced by the node's `inputs`
             // span. The bindings come from a parallel graph iterator; each
-            // input's value_options are flattened into one pool, the input
+            // input's value_variants are flattened into one pool, the input
             // recording its span (empty for the common no-options case).
             let inputs_start = self.inputs.len();
             for (input, (_, binding)) in interface
@@ -254,9 +254,9 @@ impl Scene {
                 .iter()
                 .zip(graph.node_bindings(node.id, interface.inputs.len()))
             {
-                let value_options = extend_pool(
-                    &mut self.value_options_pool,
-                    input.value_options.iter().cloned(),
+                let value_variants = extend_pool(
+                    &mut self.value_variants_pool,
+                    input.value_variants.iter().cloned(),
                 );
                 self.inputs.push(SceneInput {
                     name: input.name.clone().into(),
@@ -264,7 +264,7 @@ impl Scene {
                     binding: InputBindingView::from(&binding),
                     default: default_static_value(input),
                     required: input.required,
-                    value_options,
+                    value_variants,
                 });
             }
             let inputs = Span::new(
@@ -324,10 +324,10 @@ impl Scene {
         slice_pool(&self.outputs, span)
     }
 
-    /// One input's picker options, resolved from its [`SceneInput::value_options`]
+    /// One input's picker options, resolved from its [`SceneInput::value_variants`]
     /// span into the shared pool.
-    pub fn value_options(&self, span: Span) -> &[ValueOption] {
-        slice_pool(&self.value_options_pool, span)
+    pub fn value_variants(&self, span: Span) -> &[ValueVariant] {
+        slice_pool(&self.value_variants_pool, span)
     }
 }
 
@@ -370,7 +370,7 @@ fn boundary_input(output: &FuncOutput) -> FuncInput {
         required: false,
         data_type: output.data_type.clone(),
         default_value: None,
-        value_options: Vec::new(),
+        value_variants: Vec::new(),
     }
 }
 
@@ -405,7 +405,7 @@ fn placeholder_input() -> FuncInput {
         required: false,
         data_type: DataType::default(),
         default_value: None,
-        value_options: Vec::new(),
+        value_variants: Vec::new(),
     }
 }
 
@@ -427,7 +427,7 @@ mod tests {
             required: false,
             data_type: ty,
             default_value: None,
-            value_options: Vec::new(),
+            value_variants: Vec::new(),
         }
     }
 

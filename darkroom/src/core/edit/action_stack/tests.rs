@@ -435,7 +435,7 @@ fn doc_with_def() -> (Document, GraphRef) {
             required: false,
             data_type: DataType::Int,
             default_value: None,
-            value_options: Vec::new(),
+            value_variants: Vec::new(),
         }],
         outputs: vec![FuncOutput {
             name: "R".into(),
@@ -554,7 +554,7 @@ fn rename_undo_survives_interface_compaction() {
         required: false,
         data_type: DataType::Int,
         default_value: None,
-        value_options: Vec::new(),
+        value_variants: Vec::new(),
     };
     let mut doc: Document = test_graph().into();
     let def = SubgraphDef {

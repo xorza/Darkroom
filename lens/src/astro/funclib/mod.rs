@@ -22,7 +22,7 @@ use scenarium::data::{
     DataType, DynamicValue, EnumVariants, FsPathConfig, FsPathMode, StaticValue,
 };
 use scenarium::func_lambda::FuncLambda;
-use scenarium::function::{Func, FuncInput, FuncLib, ValueOption};
+use scenarium::function::{Func, FuncInput, FuncLib, ValueVariant};
 
 use crate::astro::configs::{
     BackgroundConfigDef, CombineConfigDef, DenoiseConfigDef, DetectionConfigDef, HdrConfigDef,
@@ -164,7 +164,7 @@ pub fn astro_funclib() -> FuncLib {
             .run_once()
             .input(FuncInput::required("lights", ASTRO_DIR_DATA_TYPE.clone()))
             .input(FuncInput::optional("masters", MASTERS_DATA_TYPE.clone()))
-            // Each stage is one input: a preset quick-pick (the `value_options`
+            // Each stage is one input: a preset quick-pick (the `value_variants`
             // dropdown) that a build_*_config node can wire into to override.
             .input(preset_config_input::<DetectionConfigDef>(
                 "detection",
@@ -411,7 +411,7 @@ pub fn astro_funclib() -> FuncLib {
         "Fits and removes a smooth sky-background gradient",
         vec![
             frame_input("image"),
-            // One `config` input: pick a `mode` preset (value_options dropdown)
+            // One `config` input: pick a `mode` preset (value_variants dropdown)
             // or wire a build_background_config node to override it.
             preset_config_input::<BackgroundConfigDef>(
                 "config",
@@ -633,17 +633,17 @@ pub fn astro_funclib() -> FuncLib {
 
 /// A single config input that's a config `T`'s wire (so a `build_*_config` node
 /// can drive it) *and* offers `presets` as a quick-pick dropdown via
-/// `value_options` (seeded to the first). The node resolves a wired
+/// `value_variants` (seeded to the first). The node resolves a wired
 /// `ConfigValue<T>` if present, else the picked preset name.
 fn preset_config_input<T: NodeConfig>(name: &str, presets: Vec<String>) -> FuncInput {
-    let options = presets
+    let variants = presets
         .iter()
-        .map(|preset| ValueOption {
+        .map(|preset| ValueVariant {
             name: preset.clone(),
             value: StaticValue::Enum(preset.clone()),
         })
         .collect();
-    let mut input = FuncInput::required(name, config_data_type::<T>()).options(options);
+    let mut input = FuncInput::required(name, config_data_type::<T>()).variants(variants);
     input.default_value = presets.first().map(|p| StaticValue::Enum(p.clone()));
     input
 }
