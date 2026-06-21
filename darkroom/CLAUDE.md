@@ -260,9 +260,11 @@ the open-tab strip + "+" new-subgraph chip, emits `UiAction`s). The rest:
   drag; emits `MoveNodes`, subgraph-open requests, port-disconnect
   double-clicks), with sub-widgets `header` (title + `S`/`T`/`C`/`i` badges:
   subgraph / terminal / cache-behavior / inspect), `port_row` (the two port
-  columns + circles + binding menu; a **required** input with no binding paints
-  its port in the missing/warning color — `SceneInput::required` +
-  `exec_missing_glow`), `port_rename` (inline boundary-port rename in subgraph
+  columns + circles + binding menu; a required input's port paints in the
+  missing/warning color only once a run flagged its node `MissingInputs` —
+  `SceneInput::required` + `node.exec_status` + `exec_missing_glow` — so the
+  port keeps its data-type color while editing), `port_rename` (inline
+  boundary-port rename in subgraph
   interiors), and `value_editor` (inline `Const` editing; an input with
   `value_options` renders a preset dropdown over them regardless of type — carried
   on the flat `Scene::value_options_pool` sliced per input by

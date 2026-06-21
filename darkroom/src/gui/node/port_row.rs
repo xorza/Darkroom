@@ -21,6 +21,7 @@ use crate::gui::node::port_color::port_color;
 use crate::gui::node::port_rename::port_label;
 use crate::gui::node::value_editor;
 use crate::gui::node::{RecordCtx, set_input};
+use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, SceneInput, SceneNode, SceneOutput};
 use crate::gui::theme::Theme;
 use crate::gui::{PortKind, PortRef};
@@ -88,7 +89,7 @@ fn input_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<
         // A `SubgraphOutput` boundary node's input ports are the subgraph's
         // *outputs* — renameable, except the trailing "+" placeholder.
         let rename = (node.boundary && i + 1 < inputs.len()).then_some(BoundarySide::Output);
-        input_label_cell(ui, rcx, port, input, allow_const, rename, out);
+        input_label_cell(ui, rcx, port, node, input, rename, out);
         if allow_const && let InputBindingView::Const(value) = &input.binding {
             let options = rcx.scene.value_options(input.value_options);
             value_cell(ui, rcx.theme, port, value, &input.ty, options, out);
@@ -146,16 +147,20 @@ fn input_label_cell(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
     port: PortRef,
+    node: &SceneNode,
     input: &SceneInput,
-    allow_const: bool,
     rename: Option<BoundarySide>,
     out: &mut Vec<Intent>,
 ) {
     let theme = rcx.theme;
+    let allow_const = !node.boundary;
     let tip = type_label(&input.ty);
-    // A required input with no binding is a missing input — paint its port in the
-    // warning color regardless of data type so the unfilled port stands out.
-    let missing = input.required && matches!(input.binding, InputBindingView::None);
+    // Flag a required input's port only once a run actually failed on it (the
+    // node is `MissingInputs`) — not on every unbound edit — so the port keeps
+    // its data-type color while editing instead of flipping as you bind/unbind.
+    let missing = matches!(node.exec_status, ExecStatus::MissingInputs)
+        && input.required
+        && matches!(input.binding, InputBindingView::None);
     let fill = if missing {
         theme.exec_missing_glow
     } else {
