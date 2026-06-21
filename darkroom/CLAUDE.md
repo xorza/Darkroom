@@ -33,7 +33,7 @@ Run the ignored one-shot asset generator after changing the default look:
   texture upload come from here. Pre-1.0, breaks freely — coordinate changes
   with palantir.
 - **`common`** — `SerdeFormat`, `serialize`/`deserialize`, `KeyIndexVec`.
-- **`lens`** — `ImageFuncLib` (image-processing node library).
+- **`lens`** — `image_funclib()` / `astro_funclib()` (image + astro node libraries).
 - **`tokio`** — multi-thread runtime backing the execution worker (graph runs
   off the UI thread; results drain back on-frame).
 
