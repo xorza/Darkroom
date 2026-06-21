@@ -165,9 +165,13 @@ could come later if wanted.
 - **Composable stacking nodes + Drizzle** (item 4) — the headline remaining item.
 - **Star-detect overlay** — `star_detect` currently outputs just a `count`; draw
   the detected stars over the frame preview.
-- (Minor) roll the config-builder / value_options pattern out to the remaining
-  single-param per-frame nodes (`denoise` / `hdr_compress` / `local_contrast`);
-  reverse `Image → AstroFrame` bridge (only if a workflow needs it).
+- ✅ **Per-frame config overrides** — *done.* `denoise` / `hdr_compress` /
+  `local_contrast` keep their inline scalar and gained an optional `config`
+  override fed by new `build_denoise_config` / `build_hdr_config` /
+  `build_local_contrast_config` nodes (mirrors in `astro_configs.rs`,
+  `config_override_input` helper). These have no named presets, so they use a
+  scalar + optional override rather than the `value_options` preset dropdown.
+- (Minor) reverse `Image → AstroFrame` bridge — only if a workflow needs it.
 
 ## Brief implementation sketches
 

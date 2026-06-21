@@ -10,7 +10,8 @@
 
 use common::{Introspect, IntrospectEnum};
 use lumos::{
-    BackgroundConfig, BackgroundMode, RegistrationConfig, StackConfig, StarDetectionConfig,
+    BackgroundConfig, BackgroundMode, DenoiseConfig, HdrConfig, LocalContrastConfig,
+    RegistrationConfig, StackConfig, StarDetectionConfig, Threshold,
 };
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
@@ -259,4 +260,163 @@ impl From<CombineConfigDef> for StackConfig {
 impl NodeConfig for CombineConfigDef {
     const TYPE_ID: &'static str = "843bff16-61ec-47db-9a86-64bb53c9c1cc";
     const NAME: &'static str = "CombineConfig";
+}
+
+/// Editable mirror of [`lumos::Threshold`] — wavelet coefficient thresholding.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumIter, EnumString, Display)]
+#[strum(serialize_all = "snake_case")]
+pub enum ThresholdDef {
+    Hard,
+    #[default]
+    Soft,
+}
+
+impl IntrospectEnum for ThresholdDef {
+    fn variants() -> Vec<String> {
+        Self::iter().map(|variant| variant.to_string()).collect()
+    }
+    fn to_variant(&self) -> String {
+        self.to_string()
+    }
+    fn from_variant(name: &str) -> Option<Self> {
+        name.parse().ok()
+    }
+}
+
+impl From<ThresholdDef> for Threshold {
+    fn from(threshold: ThresholdDef) -> Self {
+        match threshold {
+            ThresholdDef::Hard => Threshold::Hard,
+            ThresholdDef::Soft => Threshold::Soft,
+        }
+    }
+}
+
+impl From<Threshold> for ThresholdDef {
+    fn from(threshold: Threshold) -> Self {
+        match threshold {
+            Threshold::Hard => ThresholdDef::Hard,
+            Threshold::Soft => ThresholdDef::Soft,
+        }
+    }
+}
+
+/// Editable mirror of [`lumos::DenoiseConfig`] (full wavelet-denoise knobs;
+/// `denoise`'s inline `strength` covers the common case).
+#[derive(Debug, Clone, Introspect)]
+pub struct DenoiseConfigDef {
+    pub scales: usize,
+    pub k: f32,
+    pub threshold: ThresholdDef,
+    pub strength: f32,
+}
+
+impl Default for DenoiseConfigDef {
+    fn default() -> Self {
+        DenoiseConfig::default().into()
+    }
+}
+
+impl From<DenoiseConfig> for DenoiseConfigDef {
+    fn from(config: DenoiseConfig) -> Self {
+        Self {
+            scales: config.scales,
+            k: config.k,
+            threshold: config.threshold.into(),
+            strength: config.strength,
+        }
+    }
+}
+
+impl From<DenoiseConfigDef> for DenoiseConfig {
+    fn from(mirror: DenoiseConfigDef) -> Self {
+        Self {
+            scales: mirror.scales,
+            k: mirror.k,
+            threshold: mirror.threshold.into(),
+            strength: mirror.strength,
+        }
+    }
+}
+
+impl NodeConfig for DenoiseConfigDef {
+    const TYPE_ID: &'static str = "ab942729-dc49-4518-aae4-9008bd33cea1";
+    const NAME: &'static str = "DenoiseConfig";
+}
+
+/// Editable mirror of [`lumos::HdrConfig`] (`hdr_compress`'s inline `amount`
+/// covers the common case).
+#[derive(Debug, Clone, Introspect)]
+pub struct HdrConfigDef {
+    pub scales: usize,
+    pub amount: f32,
+}
+
+impl Default for HdrConfigDef {
+    fn default() -> Self {
+        HdrConfig::default().into()
+    }
+}
+
+impl From<HdrConfig> for HdrConfigDef {
+    fn from(config: HdrConfig) -> Self {
+        Self {
+            scales: config.scales,
+            amount: config.amount,
+        }
+    }
+}
+
+impl From<HdrConfigDef> for HdrConfig {
+    fn from(mirror: HdrConfigDef) -> Self {
+        Self {
+            scales: mirror.scales,
+            amount: mirror.amount,
+        }
+    }
+}
+
+impl NodeConfig for HdrConfigDef {
+    const TYPE_ID: &'static str = "36babf1d-0fda-4d5d-b4c6-ed4c13ebff6b";
+    const NAME: &'static str = "HdrConfig";
+}
+
+/// Editable mirror of [`lumos::LocalContrastConfig`] (`local_contrast`'s inline
+/// `strength` covers the common case).
+#[derive(Debug, Clone, Introspect)]
+pub struct LocalContrastConfigDef {
+    pub tiles: usize,
+    pub clip_limit: f32,
+    pub strength: f32,
+}
+
+impl Default for LocalContrastConfigDef {
+    fn default() -> Self {
+        LocalContrastConfig::default().into()
+    }
+}
+
+impl From<LocalContrastConfig> for LocalContrastConfigDef {
+    fn from(config: LocalContrastConfig) -> Self {
+        Self {
+            tiles: config.tiles,
+            clip_limit: config.clip_limit,
+            strength: config.strength,
+        }
+    }
+}
+
+impl From<LocalContrastConfigDef> for LocalContrastConfig {
+    fn from(mirror: LocalContrastConfigDef) -> Self {
+        Self {
+            tiles: mirror.tiles,
+            clip_limit: mirror.clip_limit,
+            strength: mirror.strength,
+        }
+    }
+}
+
+impl NodeConfig for LocalContrastConfigDef {
+    const TYPE_ID: &'static str = "eb0062ca-cef9-4fef-a52b-cf3e8e0fce3c";
+    const NAME: &'static str = "LocalContrastConfig";
 }

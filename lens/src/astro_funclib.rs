@@ -25,7 +25,8 @@ use scenarium::func_lambda::FuncLambda;
 use scenarium::function::{Func, FuncInput, FuncLib, ValueOption};
 
 use crate::astro_configs::{
-    BackgroundConfigDef, CombineConfigDef, DetectionConfigDef, RegistrationConfigDef,
+    BackgroundConfigDef, CombineConfigDef, DenoiseConfigDef, DetectionConfigDef, HdrConfigDef,
+    LocalContrastConfigDef, RegistrationConfigDef,
 };
 use crate::astro_frame::{ASTRO_FRAME_DATA_TYPE, AstroFrame};
 use crate::astro_presets::{
@@ -380,6 +381,24 @@ pub fn astro_funclib() -> FuncLib {
         "Builds a detailed frame-combination config",
     ));
 
+    // build_denoise_config / build_hdr_config / build_local_contrast_config:
+    // full configs for the per-frame nodes whose inline param is one scalar.
+    func_lib.add(config_builder_func::<DenoiseConfigDef>(
+        "77693298-3531-4858-89ce-03cb347dc3f2",
+        "build_denoise_config",
+        "Builds a detailed wavelet-denoise config",
+    ));
+    func_lib.add(config_builder_func::<HdrConfigDef>(
+        "dc82d7a9-b7a7-460b-a86d-5dc9055e0d18",
+        "build_hdr_config",
+        "Builds a detailed HDR dynamic-range-compression config",
+    ));
+    func_lib.add(config_builder_func::<LocalContrastConfigDef>(
+        "f9ebdedf-38e3-4a74-8c74-eb207903d327",
+        "build_local_contrast_config",
+        "Builds a detailed local-contrast config",
+    ));
+
     // --- per-frame processing nodes (AstroFrame → AstroFrame) ---
 
     // background_extract: a quick `mode` preset, or a `config` wired from
@@ -429,25 +448,30 @@ pub fn astro_funclib() -> FuncLib {
         "61c17dfa-8369-446b-b6e7-d91d62d344ee",
         "denoise",
         "Wavelet denoise (starlet coefficient thresholding)",
-        vec![frame_input("image"), float_input("strength", 0.85)],
+        vec![
+            frame_input("image"),
+            float_input("strength", 0.85),
+            config_override_input::<DenoiseConfigDef>(),
+        ],
         FuncLambda::new(move |_, _, _, inputs, _, outputs| {
             Box::pin(async move {
-                let strength = inputs[1]
+                let config = inputs[2]
                     .value
-                    .as_f64()
-                    .map(|v| v as f32)
-                    .expect("strength is required");
-                let value = inputs[0].value.clone();
-                outputs[0] = run_frame_op(value, move |img| {
-                    denoise(
-                        img,
+                    .as_custom::<ConfigValue<DenoiseConfigDef>>()
+                    .map(|c| c.0.clone().into())
+                    .unwrap_or_else(|| {
+                        let strength = inputs[1]
+                            .value
+                            .as_f64()
+                            .map(|v| v as f32)
+                            .expect("strength is required");
                         DenoiseConfig {
                             strength,
                             ..Default::default()
-                        },
-                    );
-                })
-                .await?;
+                        }
+                    });
+                let value = inputs[0].value.clone();
+                outputs[0] = run_frame_op(value, move |img| denoise(img, config)).await?;
                 Ok(())
             })
         }),
@@ -497,25 +521,31 @@ pub fn astro_funclib() -> FuncLib {
         "300a2ec5-0ccd-47ec-b282-030eea41441c",
         "hdr_compress",
         "Compresses large-scale dynamic range (multiscale HDR)",
-        vec![frame_input("image"), float_input("amount", 0.5)],
+        vec![
+            frame_input("image"),
+            float_input("amount", 0.5),
+            config_override_input::<HdrConfigDef>(),
+        ],
         FuncLambda::new(move |_, _, _, inputs, _, outputs| {
             Box::pin(async move {
-                let amount = inputs[1]
+                let config = inputs[2]
                     .value
-                    .as_f64()
-                    .map(|v| v as f32)
-                    .expect("amount is required");
-                let value = inputs[0].value.clone();
-                outputs[0] = run_frame_op(value, move |img| {
-                    compress_dynamic_range(
-                        img,
+                    .as_custom::<ConfigValue<HdrConfigDef>>()
+                    .map(|c| c.0.clone().into())
+                    .unwrap_or_else(|| {
+                        let amount = inputs[1]
+                            .value
+                            .as_f64()
+                            .map(|v| v as f32)
+                            .expect("amount is required");
                         HdrConfig {
                             amount,
                             ..Default::default()
-                        },
-                    );
-                })
-                .await?;
+                        }
+                    });
+                let value = inputs[0].value.clone();
+                outputs[0] =
+                    run_frame_op(value, move |img| compress_dynamic_range(img, config)).await?;
                 Ok(())
             })
         }),
@@ -526,25 +556,31 @@ pub fn astro_funclib() -> FuncLib {
         "6a28b732-2704-454b-8afd-0a91d385458a",
         "local_contrast",
         "Local contrast enhancement (CLAHE)",
-        vec![frame_input("image"), float_input("strength", 0.8)],
+        vec![
+            frame_input("image"),
+            float_input("strength", 0.8),
+            config_override_input::<LocalContrastConfigDef>(),
+        ],
         FuncLambda::new(move |_, _, _, inputs, _, outputs| {
             Box::pin(async move {
-                let strength = inputs[1]
+                let config = inputs[2]
                     .value
-                    .as_f64()
-                    .map(|v| v as f32)
-                    .expect("strength is required");
-                let value = inputs[0].value.clone();
-                outputs[0] = run_frame_op(value, move |img| {
-                    enhance_local_contrast(
-                        img,
+                    .as_custom::<ConfigValue<LocalContrastConfigDef>>()
+                    .map(|c| c.0.clone().into())
+                    .unwrap_or_else(|| {
+                        let strength = inputs[1]
+                            .value
+                            .as_f64()
+                            .map(|v| v as f32)
+                            .expect("strength is required");
                         LocalContrastConfig {
                             strength,
                             ..Default::default()
-                        },
-                    );
-                })
-                .await?;
+                        }
+                    });
+                let value = inputs[0].value.clone();
+                outputs[0] =
+                    run_frame_op(value, move |img| enhance_local_contrast(img, config)).await?;
                 Ok(())
             })
         }),
@@ -616,6 +652,14 @@ fn preset_config_input<T: NodeConfig>(name: &str, presets: Vec<String>) -> FuncI
     let mut input = FuncInput::required(name, config_data_type::<T>()).options(options);
     input.default_value = presets.first().map(|p| StaticValue::Enum(p.clone()));
     input
+}
+
+/// An optional `config` override input of config `T`'s custom type, for nodes
+/// whose quick knob is an inline scalar (no presets to enumerate). Unbound → the
+/// node uses its scalar param; wired from a `build_*_config` node → the full
+/// config overrides it.
+fn config_override_input<T: NodeConfig>() -> FuncInput {
+    FuncInput::optional("config", config_data_type::<T>())
 }
 
 /// Wrap a single-channel result plane (coverage / weight) as a grayscale
@@ -926,6 +970,46 @@ mod tests {
         assert_eq!(sd.outputs.len(), 1);
         assert_eq!(sd.outputs[0].name, "count");
         assert_eq!(sd.outputs[0].data_type, DataType::Int);
+    }
+
+    #[test]
+    fn scalar_per_frame_nodes_take_optional_config_overrides() {
+        let lib = astro_funclib();
+        // denoise / hdr_compress / local_contrast keep their inline scalar and
+        // gain an optional `config` override fed by the matching build node.
+        let cases: [(&str, &str, DataType); 3] = [
+            (
+                "denoise",
+                "build_denoise_config",
+                config_data_type::<DenoiseConfigDef>(),
+            ),
+            (
+                "hdr_compress",
+                "build_hdr_config",
+                config_data_type::<HdrConfigDef>(),
+            ),
+            (
+                "local_contrast",
+                "build_local_contrast_config",
+                config_data_type::<LocalContrastConfigDef>(),
+            ),
+        ];
+        for (node, builder, ty) in cases {
+            let f = func(&lib, node);
+            let config = f.inputs.last().unwrap();
+            assert_eq!(config.name, "config", "{node} override input");
+            assert_eq!(config.data_type, ty, "{node} override type");
+            assert!(!config.required, "{node} config is an optional override");
+
+            // The builder node emits that same config type.
+            let b = func(&lib, builder);
+            assert_eq!(b.category, "astro");
+            assert_eq!(b.outputs[0].data_type, ty, "{builder} output type");
+            assert!(
+                b.inputs.iter().all(|i| i.required),
+                "{builder} fields required"
+            );
+        }
     }
 
     #[test]
