@@ -7,8 +7,8 @@
 //! affordance lives in [`crate::gui::node::port_rename`].
 
 use palantir::{
-    Align, Color, Configure, ContextMenu, Corners, Grid, HAlign, InternedStr, MenuItem, Panel,
-    Rect, Sense, Shape, Sizing, Spacing, Stroke, Tooltip, Track, Ui, VAlign, WidgetId,
+    Align, Color, Configure, ContextMenu, Corners, Grid, HAlign, MenuItem, Panel, Rect, Sense,
+    Shape, Sizing, Spacing, Stroke, Tooltip, Track, Ui, VAlign, WidgetId,
 };
 use scenarium::data::{DataType, FsPathMode, StaticValue};
 use scenarium::function::ValueOption;
@@ -21,7 +21,7 @@ use crate::gui::node::port_color::port_color;
 use crate::gui::node::port_rename::port_label;
 use crate::gui::node::value_editor;
 use crate::gui::node::{RecordCtx, set_input};
-use crate::gui::scene::{InputBindingView, SceneNode};
+use crate::gui::scene::{InputBindingView, SceneInput, SceneNode, SceneOutput};
 use crate::gui::theme::Theme;
 use crate::gui::{PortKind, PortRef};
 
@@ -36,13 +36,21 @@ const COL_INPUT: u16 = 0;
 const COL_VALUE: u16 = 1;
 const COL_OUTPUT: u16 = 3;
 
+/// Port row height as a multiple of the body font size. Clears the tallest
+/// inline editor (a preset dropdown / pick chip ≈ 1.7em) so fixed rows stay
+/// uniform without clipping their editor.
+const PORT_ROW_HEIGHT_EM: f32 = 1.8;
+
 pub(crate) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
     let n_rows = (node.inputs.len as usize).max(node.outputs.len as usize);
     if n_rows == 0 {
         return;
     }
-    let rows: Vec<Track> = vec![Track::hug(); n_rows];
+    // Fixed-height rows (font-relative) so a node's ports stay uniform whether
+    // or not an input carries an inline editor (hug makes editor rows taller).
+    let row_height = theme.palantir_theme.text.font_size_px * PORT_ROW_HEIGHT_EM;
+    let rows: Vec<Track> = vec![Track::fixed(row_height); n_rows];
     Grid::new()
         .id_salt("ports")
         .size((Sizing::FILL, Sizing::Hug))
@@ -80,27 +88,10 @@ fn input_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<
         // A `SubgraphOutput` boundary node's input ports are the subgraph's
         // *outputs* — renameable, except the trailing "+" placeholder.
         let rename = (node.boundary && i + 1 < inputs.len()).then_some(BoundarySide::Output);
-        let tip = type_label(&input.ty);
-        // A required input with no binding is a missing input — highlight it.
-        let missing = input.required && matches!(input.binding, InputBindingView::None);
-        input_label_cell(
-            ui,
-            rcx,
-            port,
-            i,
-            input.name.clone(),
-            &input.binding,
-            input.default.clone(),
-            allow_const,
-            rename,
-            &input.ty,
-            missing,
-            &tip,
-            out,
-        );
+        input_label_cell(ui, rcx, port, input, allow_const, rename, out);
         if allow_const && let InputBindingView::Const(value) = &input.binding {
             let options = rcx.scene.value_options(input.value_options);
-            value_cell(ui, rcx.theme, port, i, value, &input.ty, options, out);
+            value_cell(ui, rcx.theme, port, value, &input.ty, options, out);
         }
     }
 }
@@ -116,16 +107,7 @@ fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec
         // A `SubgraphInput` boundary node's output ports are the subgraph's
         // *inputs* — renameable, except the trailing "+" placeholder.
         let rename = (node.boundary && i + 1 < outputs.len()).then_some(BoundarySide::Input);
-        output_cell(
-            ui,
-            rcx,
-            port,
-            i,
-            output.name.clone(),
-            output.ty.clone(),
-            rename,
-            out,
-        );
+        output_cell(ui, rcx, port, output, rename, out);
     }
 }
 
@@ -153,31 +135,26 @@ pub(crate) fn const_editor_wid(node_id: NodeId, port_idx: usize) -> WidgetId {
 /// menu (anchored here, so right-clicking the circle or label opens it).
 /// The circle's `WidgetId` is the deterministic `port_circle_wid(port)`, so
 /// `PortFrame`/snap/draw reconstruct it from domain coords.
-#[allow(clippy::too_many_arguments)]
 fn input_label_cell(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
     port: PortRef,
-    row: usize,
-    name: InternedStr,
-    binding: &InputBindingView,
-    default_static: Option<StaticValue>,
+    input: &SceneInput,
     allow_const: bool,
     rename: Option<BoundarySide>,
-    data_type: &DataType,
-    missing: bool,
-    tip: &str,
     out: &mut Vec<Intent>,
 ) {
     let theme = rcx.theme;
-    // A missing required input paints its port in the warning color regardless
-    // of data type, so the unfilled port stands out before a run.
+    let tip = type_label(&input.ty);
+    // A required input with no binding is a missing input — paint its port in the
+    // warning color regardless of data type so the unfilled port stands out.
+    let missing = input.required && matches!(input.binding, InputBindingView::None);
     let fill = if missing {
         theme.exec_missing_glow
     } else {
         port_color(
             theme,
-            data_type,
+            &input.ty,
             PortKind::Input,
             rcx.port_frame.is_hovered(port),
         )
@@ -187,15 +164,15 @@ fn input_label_cell(
     let wid = port_circle_wid(port);
     let cell = Panel::hstack()
         .id_salt(("in", port.port_idx))
-        .grid_cell((row as u16, COL_INPUT))
+        .grid_cell((port.port_idx as u16, COL_INPUT))
         .align(Align::new(HAlign::Left, VAlign::Center))
         .size((Sizing::Hug, Sizing::Hug))
         .sense(Sense::CLICK)
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            circle_frame(ui, theme, wid, fill, margin, tip);
-            port_label(ui, rcx, port, name, tip, rename, out);
+            circle_frame(ui, theme, wid, fill, margin, &tip);
+            port_label(ui, rcx, port, input.name.clone(), &tip, rename, out);
         });
     // Open on right-click anywhere on the cell — circle or label. The
     // circle has its own `Sense::CLICK` and consumes hits over its rect, so
@@ -215,18 +192,18 @@ fn input_label_cell(
         .size((Sizing::Hug, Sizing::Hug))
         .show(ui, |ui, popup| {
             let can_set = allow_const
-                && !matches!(binding, InputBindingView::Const(_))
-                && default_static.is_some();
+                && !matches!(input.binding, InputBindingView::Const(_))
+                && input.default.is_some();
             if MenuItem::new("Set constant")
                 .enabled(can_set)
                 .show(ui, popup)
                 .clicked()
-                && let Some(value) = default_static.clone()
+                && let Some(value) = input.default.clone()
             {
                 out.push(set_input(port, Binding::Const(value)));
             }
             if MenuItem::new("Clear binding")
-                .enabled(!matches!(binding, InputBindingView::None))
+                .enabled(!matches!(input.binding, InputBindingView::None))
                 .show(ui, popup)
                 .clicked()
             {
@@ -237,12 +214,10 @@ fn input_label_cell(
 
 /// Column 1: the inline const editor for an input bound to a `Const`. A
 /// hug-sized column, so every editor starts at the same x.
-#[allow(clippy::too_many_arguments)]
 fn value_cell(
     ui: &mut Ui,
     theme: &Theme,
     port: PortRef,
-    row: usize,
     value: &StaticValue,
     data_type: &DataType,
     value_options: &[ValueOption],
@@ -254,7 +229,7 @@ fn value_cell(
     // a sensible floor; the editor fills this cell, this cell fills the col.
     let edited = Panel::hstack()
         .id_salt(("val", port.port_idx))
-        .grid_cell((row as u16, COL_VALUE))
+        .grid_cell((port.port_idx as u16, COL_VALUE))
         .size((Sizing::FILL, Sizing::Hug))
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
@@ -274,36 +249,33 @@ fn value_cell(
 
 /// Column 2: the output label + circle, right-aligned (the fill column
 /// pins it to the node's right edge); the circle overhangs that edge.
-#[allow(clippy::too_many_arguments)]
 fn output_cell(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
     port: PortRef,
-    row: usize,
-    name: InternedStr,
-    data_type: DataType,
+    output: &SceneOutput,
     rename: Option<BoundarySide>,
     out: &mut Vec<Intent>,
 ) {
     let theme = rcx.theme;
     let fill = port_color(
         theme,
-        &data_type,
+        &output.ty,
         PortKind::Output,
         rcx.port_frame.is_hovered(port),
     );
-    let tip = type_label(&data_type);
+    let tip = type_label(&output.ty);
     let wid = port_circle_wid(port);
     let overhang = theme.port_radius() + theme.port_col_pad_x;
     Panel::hstack()
         .id_salt(("out", port.port_idx))
-        .grid_cell((row as u16, COL_OUTPUT))
+        .grid_cell((port.port_idx as u16, COL_OUTPUT))
         .align(Align::new(HAlign::Right, VAlign::Center))
         .size((Sizing::Hug, Sizing::Hug))
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            port_label(ui, rcx, port, name, &tip, rename, out);
+            port_label(ui, rcx, port, output.name.clone(), &tip, rename, out);
             circle_frame(
                 ui,
                 theme,
