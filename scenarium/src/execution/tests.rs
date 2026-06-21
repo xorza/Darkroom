@@ -221,13 +221,18 @@ mod missing_inputs {
         Ok(())
     }
 
+    /// A *binding* to a missing-required producer propagates even through an
+    /// **optional** input: the wired value can't be delivered, so the consumer
+    /// (and its consumers) are missing too. Optionality only excuses an
+    /// *unbound* input (see `optional_unbound_does_not_propagate`), not a
+    /// binding to a broken upstream.
     #[test]
-    fn non_required_missing_does_not_propagate() -> anyhow::Result<()> {
+    fn optional_bind_to_missing_propagates() -> anyhow::Result<()> {
         let mut graph = test_graph();
         let mut func_lib = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionEngine::default();
 
-        // Remove sum's first input, but make mult's first input optional
+        // sum missing-required; mult[0] stays bound to sum but is made optional.
         bind(&mut graph, "sum", 0, Binding::None);
         func_lib.by_name_mut("mult").unwrap().inputs[0].required = false;
 
@@ -238,56 +243,72 @@ mod missing_inputs {
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
 
-        // sum still missing, but mult/print are fine because mult[0] is optional
+        // The missing flag flows through the optional bind to mult and on to print.
         assert!(execution_graph.node_flags(sum).missing_required_inputs);
-        assert!(!execution_graph.node_flags(mult).missing_required_inputs);
-        assert!(!execution_graph.node_flags(print).missing_required_inputs);
+        assert!(execution_graph.node_flags(mult).missing_required_inputs);
+        assert!(execution_graph.node_flags(print).missing_required_inputs);
 
-        // Only get_b→mult→print should execute (sum excluded)
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph),
-            ["get_b", "mult", "print"]
-        );
+        // The whole chain is gated — nothing executes.
+        assert!(execution_node_names_in_order(&execution_graph).is_empty());
 
         Ok(())
     }
 
-    /// An optional input bound to a node that's gated for *its own* missing
-    /// required input must read `Unbound` at execution — not panic. Regression
-    /// for the worker crashing in `collect_inputs` ("missing output values")
-    /// when a gated upstream produced no output yet an optional consumer still
-    /// ran. The planned-only sibling above can't catch this: it never executes.
+    /// The contrast to `optional_bind_to_missing_propagates`: an optional input
+    /// left **unbound** is a deliberate no-value, so it does not flag the node
+    /// missing — it runs with its default.
+    #[test]
+    fn optional_unbound_does_not_propagate() -> anyhow::Result<()> {
+        let mut graph = test_graph();
+        let mut func_lib = test_func_lib(TestFuncHooks::default());
+        let mut execution_graph = ExecutionEngine::default();
+
+        // mult[0] unbound + optional (not wired to anything).
+        bind(&mut graph, "mult", 0, Binding::None);
+        func_lib.by_name_mut("mult").unwrap().inputs[0].required = false;
+
+        execution_graph.update(&graph, &func_lib);
+        execution_graph.prepare_execution(true, false, &[])?;
+
+        let mult = execution_graph.by_name("mult").unwrap();
+        let print = execution_graph.by_name("print").unwrap();
+
+        assert!(!execution_graph.node_flags(mult).missing_required_inputs);
+        assert!(!execution_graph.node_flags(print).missing_required_inputs);
+        assert!(execution_node_names_in_order(&execution_graph).contains(&"mult".to_string()));
+
+        Ok(())
+    }
+
+    /// Executing counterpart: an optional bind to a gated upstream gates the
+    /// consumer chain, so the executor never reads the absent output. Regression
+    /// for the worker panicking in `collect_inputs` ("missing output values") —
+    /// the planned-only siblings above can't catch it since they never execute.
     #[tokio::test(flavor = "multi_thread")]
-    async fn optional_bind_to_gated_upstream_reads_unbound() -> anyhow::Result<()> {
+    async fn optional_bind_to_gated_upstream_is_gated() -> anyhow::Result<()> {
         let mut graph = test_graph();
         let mut func_lib = test_func_lib(default_hooks());
 
         let get_b_id = graph.by_name("get_b").unwrap().id;
         let sum_id = graph.by_name("sum").unwrap().id;
 
-        // sum's required input[0] is unbound → sum is missing-required → gated,
-        // so it produces no output this run.
+        // sum's required input[0] unbound → sum missing-required → gated.
         bind(&mut graph, "sum", 0, Binding::None);
-        // mult[0] gets a real value (its lambda unwraps input[0]); mult[1] is an
-        // *optional* bind to the gated sum, so its missing output must surface as
-        // Unbound rather than crashing the executor.
+        // mult[0] (required) gets a real value; mult[1] is the only bind to the
+        // gated sum and is *optional* — so this exercises optional-bind
+        // propagation specifically. mult and print end up gated.
         bind(&mut graph, "mult", 0, (get_b_id, 0).into());
         bind(&mut graph, "mult", 1, (sum_id, 0).into());
         func_lib.by_name_mut("mult").unwrap().inputs[1].required = false;
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &func_lib);
-        // Pre-fix, this panicked the worker in `collect_inputs`.
+        // Pre-fix, this panicked the worker; now the chain is gated and nothing runs.
         execution_graph.execute_terminals().await?;
 
-        // sum is reported missing-required and gated; the optional consumer and
-        // the terminal still run (sum excluded).
-        let sum = execution_graph.by_name("sum").unwrap();
-        assert!(execution_graph.node_flags(sum).missing_required_inputs);
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph),
-            ["get_b", "mult", "print"]
-        );
+        let mult = execution_graph.by_name("mult").unwrap();
+        assert!(execution_graph.node_flags(mult).missing_required_inputs);
+        assert!(execution_node_names_in_order(&execution_graph).is_empty());
 
         Ok(())
     }

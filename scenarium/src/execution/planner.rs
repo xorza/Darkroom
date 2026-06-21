@@ -228,8 +228,15 @@ impl Planner {
                 let e_input = &program.inputs[pool_idx];
                 let binding_changed = executor.input_dirty[pool_idx];
                 let (dep_wants_execute, missing) = match &e_input.binding {
+                    // Unbound is "missing" only if the input is required — an
+                    // optional input left unbound is a deliberate no-value.
                     ExecutionBinding::None => (false, e_input.required),
                     ExecutionBinding::Const(_) => (false, false),
+                    // A *wired* input whose producer can't run (missing its own
+                    // required inputs) has no value to deliver, so the consumer
+                    // is missing too — regardless of whether the input is
+                    // optional. (Optional only excuses an *unbound* input, not a
+                    // binding to a broken upstream.)
                     ExecutionBinding::Bind(addr) => {
                         let target_idx = addr.target_idx;
                         assert!(addr.port_idx < program.e_nodes[target_idx].outputs.len as usize);
@@ -237,10 +244,7 @@ impl Planner {
                             assert!(processed[target_idx], "forward pass: dep not yet processed");
                         }
                         let dep = plan.node_flags[target_idx];
-                        (
-                            dep.wants_execute,
-                            e_input.required && dep.missing_required_inputs,
-                        )
+                        (dep.wants_execute, dep.missing_required_inputs)
                     }
                 };
 

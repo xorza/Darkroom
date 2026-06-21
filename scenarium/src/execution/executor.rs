@@ -197,23 +197,20 @@ impl Executor {
                 ExecutionBinding::None => DynamicValue::Unbound,
                 ExecutionBinding::Const(v) => v.into(),
                 ExecutionBinding::Bind(addr) => {
-                    // The upstream may not have produced this run — e.g. it was
-                    // gated for its own missing required input, or never cached.
-                    // A bound *required* input can't reach here (its consumer
-                    // would itself be gated and excluded from `execute_order`),
-                    // so a missing upstream output only ever surfaces on an
-                    // optional input, which correctly reads as Unbound (absent)
-                    // rather than panicking the worker.
-                    match self.slots[addr.target_idx].output_values.as_ref() {
-                        Some(outputs) => {
-                            assert_eq!(
-                                outputs.len(),
-                                program.e_nodes[addr.target_idx].outputs.len as usize
-                            );
-                            outputs[addr.port_idx].clone()
-                        }
-                        None => DynamicValue::Unbound,
-                    }
+                    // Invariant: any node in `execute_order` has every bound
+                    // upstream producing output — the planner gates a consumer
+                    // (`missing_required_inputs`) whenever a bind target can't
+                    // run, *including* optional binds, so a `None` here is a
+                    // planner bug, not a graph the user can author.
+                    let outputs = self.slots[addr.target_idx]
+                        .output_values
+                        .as_ref()
+                        .expect("missing output values");
+                    assert_eq!(
+                        outputs.len(),
+                        program.e_nodes[addr.target_idx].outputs.len as usize
+                    );
+                    outputs[addr.port_idx].clone()
                 }
             };
             let pool_idx = span.start as usize + i;
