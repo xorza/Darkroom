@@ -126,13 +126,11 @@ impl ConnectionUI {
             return None;
         }
         // Don't overwrite an existing const value.
-        if matches!(
-            scene.bindings(node.inputs).get(start.port_idx),
-            Some(InputBindingView::Const(_))
-        ) {
+        let input = scene.inputs(node.inputs).get(start.port_idx)?;
+        if matches!(input.binding, InputBindingView::Const(_)) {
             return None;
         }
-        let default = scene.defaults(node.inputs).get(start.port_idx)?.clone()?;
+        let default = input.default.clone()?;
         Some(set_input(start, Binding::Const(default)))
     }
 
@@ -349,10 +347,10 @@ fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -
 fn port_data_type(scene: &Scene, port: PortRef) -> Option<DataType> {
     let node = scene.nodes.iter().find(|n| n.id == port.node_id)?;
     let ty = match port.kind {
-        PortKind::Input => scene.input_types(node.inputs).get(port.port_idx)?,
-        PortKind::Output => scene.output_types(node.outputs).get(port.port_idx)?,
+        PortKind::Input => scene.inputs(node.inputs).get(port.port_idx)?.ty.clone(),
+        PortKind::Output => scene.outputs(node.outputs).get(port.port_idx)?.ty.clone(),
     };
-    Some(ty.clone())
+    Some(ty)
 }
 
 /// Whether an output↔input link is allowed by type. Equal types connect;

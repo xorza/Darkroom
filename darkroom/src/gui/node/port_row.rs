@@ -67,70 +67,65 @@ pub(crate) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: 
 }
 
 fn input_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
-    let names = rcx.scene.input_names(node.inputs);
-    let bindings = rcx.scene.bindings(node.inputs);
-    let defaults = rcx.scene.defaults(node.inputs);
-    let types = rcx.scene.input_types(node.inputs);
-    let required = rcx.scene.required(node.inputs);
-    let option_spans = rcx.scene.value_option_spans(node.inputs);
+    let inputs = rcx.scene.inputs(node.inputs);
     // Boundary (`SubgraphInput`/`SubgraphOutput`) ports route the
     // interface, not literal values — no const affordance.
     let allow_const = !node.boundary;
-    for (i, name) in names.iter().enumerate() {
+    for (i, input) in inputs.iter().enumerate() {
         let port = PortRef {
             node_id: node.id,
             kind: PortKind::Input,
             port_idx: i,
         };
-        let binding = bindings.get(i).unwrap_or(&InputBindingView::None);
-        let default = defaults.get(i).cloned().flatten();
-        let data_type = types.get(i).cloned().unwrap_or_default();
         // A `SubgraphOutput` boundary node's input ports are the subgraph's
         // *outputs* — renameable, except the trailing "+" placeholder.
-        let rename = (node.boundary && i + 1 < names.len()).then_some(BoundarySide::Output);
-        let tip = type_label(&data_type);
+        let rename = (node.boundary && i + 1 < inputs.len()).then_some(BoundarySide::Output);
+        let tip = type_label(&input.ty);
         // A required input with no binding is a missing input — highlight it.
-        let missing =
-            required.get(i).copied().unwrap_or(false) && matches!(binding, InputBindingView::None);
+        let missing = input.required && matches!(input.binding, InputBindingView::None);
         input_label_cell(
             ui,
             rcx,
             port,
             i,
-            name.clone(),
-            binding,
-            default,
+            input.name.clone(),
+            &input.binding,
+            input.default.clone(),
             allow_const,
             rename,
-            &data_type,
+            &input.ty,
             missing,
             &tip,
             out,
         );
-        if allow_const && let InputBindingView::Const(value) = binding {
-            let options = option_spans
-                .get(i)
-                .map(|s| rcx.scene.value_options(*s))
-                .unwrap_or(&[]);
-            value_cell(ui, rcx.theme, port, i, value, &data_type, options, out);
+        if allow_const && let InputBindingView::Const(value) = &input.binding {
+            let options = rcx.scene.value_options(input.value_options);
+            value_cell(ui, rcx.theme, port, i, value, &input.ty, options, out);
         }
     }
 }
 
 fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
-    let names = rcx.scene.output_names(node.outputs);
-    let types = rcx.scene.output_types(node.outputs);
-    for (i, name) in names.iter().enumerate() {
+    let outputs = rcx.scene.outputs(node.outputs);
+    for (i, output) in outputs.iter().enumerate() {
         let port = PortRef {
             node_id: node.id,
             kind: PortKind::Output,
             port_idx: i,
         };
-        let data_type = types.get(i).cloned().unwrap_or_default();
         // A `SubgraphInput` boundary node's output ports are the subgraph's
         // *inputs* — renameable, except the trailing "+" placeholder.
-        let rename = (node.boundary && i + 1 < names.len()).then_some(BoundarySide::Input);
-        output_cell(ui, rcx, port, i, name.clone(), data_type, rename, out);
+        let rename = (node.boundary && i + 1 < outputs.len()).then_some(BoundarySide::Input);
+        output_cell(
+            ui,
+            rcx,
+            port,
+            i,
+            output.name.clone(),
+            output.ty.clone(),
+            rename,
+            out,
+        );
     }
 }
 

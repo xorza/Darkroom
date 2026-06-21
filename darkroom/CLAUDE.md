@@ -261,11 +261,12 @@ the open-tab strip + "+" new-subgraph chip, emits `UiAction`s). The rest:
   double-clicks), with sub-widgets `header` (title + `S`/`T`/`C`/`i` badges:
   subgraph / terminal / cache-behavior / inspect), `port_row` (the two port
   columns + circles + binding menu; a **required** input with no binding paints
-  its port in the missing/warning color — `Scene::required` + `exec_missing_glow`),
-  `port_rename` (inline boundary-port rename in subgraph interiors), and
-  `value_editor` (inline `Const` editing; an input with `value_options` renders a
-  preset dropdown over them regardless of type — carried on the flat
-  `Scene::value_options_pool` sliced per input by `input_value_option_spans`).
+  its port in the missing/warning color — `SceneInput::required` +
+  `exec_missing_glow`), `port_rename` (inline boundary-port rename in subgraph
+  interiors), and `value_editor` (inline `Const` editing; an input with
+  `value_options` renders a preset dropdown over them regardless of type — carried
+  on the flat `Scene::value_options_pool` sliced per input by
+  `SceneInput::value_options`).
 - **`gui/widgets/`** — reusable widgets. `inline_rename.rs` is a label that
   swaps to a `TextEdit` on double-click (used by the node title and
   boundary-port names).

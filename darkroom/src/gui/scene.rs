@@ -17,38 +17,18 @@ use crate::gui::run_state::{ExecStatus, RunState};
 pub struct Scene {
     pub nodes: Vec<SceneNode>,
     pub connections: Vec<SceneConnection>,
-    /// Flat pools for **input** ports, all grown in lockstep (one entry
-    /// per input port across every node) and sliced by the single
-    /// `SceneNode::inputs` span. One coordinate system: names, types,
-    /// binding snapshots, and default literals all share that span, so a
-    /// caller can't slice the wrong pool with the wrong span. Keeps
-    /// per-node allocations to zero in steady state (the `Vec`s retain
-    /// capacity across the per-frame `clear` + re-`extend`).
-    pub input_names: Vec<InternedStr>,
-    pub input_types: Vec<DataType>,
-    pub input_bindings: Vec<InputBindingView>,
-    /// Each input's default literal (from the func/def interface),
-    /// resolved once per rebuild, so the UI can offer a "set constant"
-    /// value without re-resolving against the func lib (and without a
-    /// func at all for subgraph instance nodes). `None` for inputs with no
-    /// representable static default (a `Custom` type like an image — there
-    /// is no `StaticValue` for it, so its port offers no inline const).
-    pub input_defaults: Vec<Option<StaticValue>>,
-    /// Whether each input is required (from the func/def interface). A required
-    /// input with no binding is a missing input — its port renders highlighted.
-    /// Lockstep with the other input pools.
-    pub input_required: Vec<bool>,
-    /// Per-input span into [`Self::value_options_pool`] for that input's editor
-    /// picker options (the func/def `value_options`). Empty span = no options
-    /// (the common case). Lockstep with the other input pools.
-    pub input_value_option_spans: Vec<Span>,
+    /// One flat pool of [`SceneInput`] across every node, sliced by the single
+    /// `SceneNode::inputs` span. A struct-per-port (not parallel columns) so the
+    /// per-port fields can't desync. Keeps per-node allocations to zero in
+    /// steady state (the `Vec` retains capacity across the per-frame `clear` +
+    /// re-`extend`).
+    pub inputs: Vec<SceneInput>,
+    /// One flat pool of [`SceneOutput`] across every node, sliced by the single
+    /// `SceneNode::outputs` span.
+    pub outputs: Vec<SceneOutput>,
     /// One flat pool of every input's picker options across all nodes, sliced
-    /// per input by [`Self::input_value_option_spans`].
+    /// per input by [`SceneInput::value_options`].
     pub value_options_pool: Vec<ValueOption>,
-    /// Flat pools for **output** ports, grown in lockstep and sliced by
-    /// the single `SceneNode::outputs` span.
-    pub output_names: Vec<InternedStr>,
-    pub output_types: Vec<DataType>,
     /// Live viewport, mirrored from `Document::{pan, scale}` each
     /// `rebuild`. Read by the canvas transform and the pointer↔world
     /// mapping; the pan/zoom gesture writes it back here, and `App`
@@ -89,20 +69,41 @@ impl Default for Scene {
         Self {
             nodes: Vec::new(),
             connections: Vec::new(),
-            input_names: Vec::new(),
-            input_types: Vec::new(),
-            input_bindings: Vec::new(),
-            input_defaults: Vec::new(),
-            input_required: Vec::new(),
-            input_value_option_spans: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
             value_options_pool: Vec::new(),
-            output_names: Vec::new(),
-            output_types: Vec::new(),
             pan: Vec2::ZERO,
             zoom: 1.0,
             selected_nodes: BTreeSet::new(),
         }
     }
+}
+
+/// One input port in the per-frame projection. Fields the UI reads together
+/// per port (so an AoS pool beats parallel columns here).
+#[derive(Debug)]
+pub struct SceneInput {
+    pub name: InternedStr,
+    pub ty: DataType,
+    /// Per-frame snapshot of the input's [`Binding`].
+    pub binding: InputBindingView,
+    /// Default literal (from the func/def interface), resolved once per rebuild
+    /// so the UI can offer "set constant" without re-resolving the func lib.
+    /// `None` for types with no `StaticValue` (a `Custom` image port).
+    pub default: Option<StaticValue>,
+    /// A required input with no binding is a missing input — its port renders
+    /// highlighted.
+    pub required: bool,
+    /// Span into [`Scene::value_options_pool`] for this input's editor picker
+    /// options. Empty = no options (the common case).
+    pub value_options: Span,
+}
+
+/// One output port in the per-frame projection.
+#[derive(Debug)]
+pub struct SceneOutput {
+    pub name: InternedStr,
+    pub ty: DataType,
 }
 
 #[derive(Debug)]
@@ -114,10 +115,9 @@ pub struct SceneNode {
     /// name, or the boundary role (`Input`/`Output`). Shown by the
     /// inspection panel.
     pub kind_label: InternedStr,
-    /// Span into the input pools (`input_names` / `input_types` /
-    /// `input_bindings` / `input_defaults` — all lockstep).
+    /// Span into [`Scene::inputs`].
     pub inputs: Span,
-    /// Span into the output pools (`output_names` / `output_types`).
+    /// Span into [`Scene::outputs`].
     pub outputs: Span,
     /// `Some` for a composite (`NodeKind::Subgraph`) instance — carries
     /// the ref so the header's open-in-tab action knows which def to
@@ -177,15 +177,9 @@ impl Scene {
         self.zoom = view.scale;
         self.nodes.clear();
         self.connections.clear();
-        self.input_names.clear();
-        self.input_types.clear();
-        self.input_bindings.clear();
-        self.input_defaults.clear();
-        self.input_required.clear();
-        self.input_value_option_spans.clear();
+        self.inputs.clear();
+        self.outputs.clear();
         self.value_options_pool.clear();
-        self.output_names.clear();
-        self.output_types.clear();
 
         for vn in view.view_nodes.iter() {
             let Some(node) = graph.by_id(&vn.id) else {
@@ -250,48 +244,39 @@ impl Scene {
             let Some(interface) = interface else {
                 continue;
             };
-            // The four input pools and the two output pools each grow by
-            // one entry per port, so the `inputs` span (taken from
-            // `input_names`) slices every input pool identically and the
-            // `outputs` span (from `output_names`) slices both output pools.
-            let inputs = extend_pool(
-                &mut self.input_names,
-                interface.inputs.iter().map(|i| i.name.clone().into()),
-            );
-            extend_pool(
-                &mut self.input_types,
-                interface.inputs.iter().map(|i| i.data_type.clone()),
-            );
-            extend_pool(
-                &mut self.input_bindings,
-                graph
-                    .node_bindings(node.id, interface.inputs.len())
-                    .map(|(_, binding)| InputBindingView::from(&binding)),
-            );
-            extend_pool(
-                &mut self.input_defaults,
-                interface.inputs.iter().map(default_static_value),
-            );
-            extend_pool(
-                &mut self.input_required,
-                interface.inputs.iter().map(|i| i.required),
-            );
-            // value_options are flattened into one pool; each input records its
-            // span into it (empty for the common no-options case).
-            for input in interface.inputs.iter() {
-                let opts = extend_pool(
+            // One `SceneInput` per input port, sliced by the node's `inputs`
+            // span. The bindings come from a parallel graph iterator; each
+            // input's value_options are flattened into one pool, the input
+            // recording its span (empty for the common no-options case).
+            let inputs_start = self.inputs.len();
+            for (input, (_, binding)) in interface
+                .inputs
+                .iter()
+                .zip(graph.node_bindings(node.id, interface.inputs.len()))
+            {
+                let value_options = extend_pool(
                     &mut self.value_options_pool,
                     input.value_options.iter().cloned(),
                 );
-                self.input_value_option_spans.push(opts);
+                self.inputs.push(SceneInput {
+                    name: input.name.clone().into(),
+                    ty: input.data_type.clone(),
+                    binding: InputBindingView::from(&binding),
+                    default: default_static_value(input),
+                    required: input.required,
+                    value_options,
+                });
             }
-            let outputs = extend_pool(
-                &mut self.output_names,
-                interface.outputs.iter().map(|o| o.name.clone().into()),
+            let inputs = Span::new(
+                inputs_start as u32,
+                (self.inputs.len() - inputs_start) as u32,
             );
-            extend_pool(
-                &mut self.output_types,
-                interface.outputs.iter().map(|o| o.data_type.clone()),
+            let outputs = extend_pool(
+                &mut self.outputs,
+                interface.outputs.iter().map(|o| SceneOutput {
+                    name: o.name.clone().into(),
+                    ty: o.data_type.clone(),
+                }),
             );
             // Boundary nodes carry no name in the model; label them by
             // role so the interior header isn't a blank bar.
@@ -329,51 +314,20 @@ impl Scene {
         }
     }
 
-    /// Per-input port names, sliced by the node's `inputs` span.
-    pub fn input_names(&self, span: Span) -> &[InternedStr] {
-        slice_pool(&self.input_names, span)
+    /// A node's input ports, sliced by its `inputs` span.
+    pub fn inputs(&self, span: Span) -> &[SceneInput] {
+        slice_pool(&self.inputs, span)
     }
 
-    /// Per-output port names, sliced by the node's `outputs` span.
-    pub fn output_names(&self, span: Span) -> &[InternedStr] {
-        slice_pool(&self.output_names, span)
+    /// A node's output ports, sliced by its `outputs` span.
+    pub fn outputs(&self, span: Span) -> &[SceneOutput] {
+        slice_pool(&self.outputs, span)
     }
 
-    /// Per-input binding snapshots, sliced by the node's `inputs` span.
-    pub fn bindings(&self, span: Span) -> &[InputBindingView] {
-        slice_pool(&self.input_bindings, span)
-    }
-
-    /// Per-input default literals, sliced by the node's `inputs` span.
-    /// `None` where the input type has no static default (e.g. `Custom`).
-    pub fn defaults(&self, span: Span) -> &[Option<StaticValue>] {
-        slice_pool(&self.input_defaults, span)
-    }
-
-    /// Per-input data types, sliced by the node's `inputs` span.
-    pub fn input_types(&self, span: Span) -> &[DataType] {
-        slice_pool(&self.input_types, span)
-    }
-
-    /// Per-input required flags, sliced by the node's `inputs` span.
-    pub fn required(&self, span: Span) -> &[bool] {
-        slice_pool(&self.input_required, span)
-    }
-
-    /// Per-input picker-option spans, sliced by the node's `inputs` span.
-    /// Resolve one input's span into its options with [`Self::value_options`].
-    pub fn value_option_spans(&self, span: Span) -> &[Span] {
-        slice_pool(&self.input_value_option_spans, span)
-    }
-
-    /// One input's picker options, from its span (via [`Self::value_option_spans`]).
+    /// One input's picker options, resolved from its [`SceneInput::value_options`]
+    /// span into the shared pool.
     pub fn value_options(&self, span: Span) -> &[ValueOption] {
         slice_pool(&self.value_options_pool, span)
-    }
-
-    /// Per-output data types, sliced by the node's `outputs` span.
-    pub fn output_types(&self, span: Span) -> &[DataType] {
-        slice_pool(&self.output_types, span)
     }
 }
 
@@ -530,30 +484,30 @@ mod tests {
 
         // SubgraphInput's outputs mirror the def inputs (A:Int, B:Float)
         // plus the untyped "+" placeholder — types align with names.
-        let in_out_types = scene.output_types(input_node.outputs);
-        assert_eq!(in_out_types.len(), 3, "two def inputs + placeholder");
-        assert!(matches!(in_out_types[0], DataType::Int));
-        assert!(matches!(in_out_types[1], DataType::Float));
+        let in_outs = scene.outputs(input_node.outputs);
+        assert_eq!(in_outs.len(), 3, "two def inputs + placeholder");
+        assert!(matches!(in_outs[0].ty, DataType::Int));
+        assert!(matches!(in_outs[1].ty, DataType::Float));
         assert!(
-            matches!(in_out_types[2], DataType::Null),
+            matches!(in_outs[2].ty, DataType::Null),
             "placeholder untyped"
         );
 
         // SubgraphOutput's inputs mirror the def output (Sum:Int) plus a
         // placeholder.
-        let out_in_types = scene.input_types(output_node.inputs);
-        assert_eq!(out_in_types.len(), 2, "one def output + placeholder");
-        assert!(matches!(out_in_types[0], DataType::Int));
+        let out_ins = scene.inputs(output_node.inputs);
+        assert_eq!(out_ins.len(), 2, "one def output + placeholder");
+        assert!(matches!(out_ins[0].ty, DataType::Int));
 
         // SubgraphInput: 0 inputs; one output per def *input*, named to
         // match, plus the trailing "+" placeholder.
-        assert_eq!(scene.input_names(input_node.inputs).len(), 0);
-        let in_outs: Vec<&str> = scene
-            .output_names(input_node.outputs)
+        assert_eq!(scene.inputs(input_node.inputs).len(), 0);
+        let in_out_names: Vec<&str> = scene
+            .outputs(input_node.outputs)
             .iter()
-            .map(|s| s.as_str(""))
+            .map(|o| o.name.as_str(""))
             .collect();
-        assert_eq!(in_outs, ["A", "B", "+"]);
+        assert_eq!(in_out_names, ["A", "B", "+"]);
         assert!(input_node.subgraph.is_none() && !input_node.terminal);
         assert!(
             input_node.boundary && output_node.boundary,
@@ -562,13 +516,13 @@ mod tests {
 
         // SubgraphOutput: one input per def *output* plus the "+"
         // placeholder; 0 outputs.
-        assert_eq!(scene.output_names(output_node.outputs).len(), 0);
-        let out_ins: Vec<&str> = scene
-            .input_names(output_node.inputs)
+        assert_eq!(scene.outputs(output_node.outputs).len(), 0);
+        let out_in_names: Vec<&str> = scene
+            .inputs(output_node.inputs)
             .iter()
-            .map(|s| s.as_str(""))
+            .map(|i| i.name.as_str(""))
             .collect();
-        assert_eq!(out_ins, ["Sum", "+"]);
+        assert_eq!(out_in_names, ["Sum", "+"]);
 
         // The interior wire shows up as a connection between the boundaries.
         assert_eq!(scene.connections.len(), 1);

@@ -336,10 +336,9 @@ pub(crate) struct PathPickRequest {
 /// dialog outside the record.
 pub(crate) fn emit_path_picks(ui: &Ui, scene: &Scene) -> Option<PathPickRequest> {
     for node in &scene.nodes {
-        let types = scene.input_types(node.inputs);
-        for (port_idx, binding) in scene.bindings(node.inputs).iter().enumerate() {
-            if let InputBindingView::Const(StaticValue::FsPath(_)) = binding
-                && let DataType::FsPath(config) = &types[port_idx]
+        for (port_idx, input) in scene.inputs(node.inputs).iter().enumerate() {
+            if let InputBindingView::Const(StaticValue::FsPath(_)) = &input.binding
+                && let DataType::FsPath(config) = &input.ty
                 && ui.response_for(const_editor_wid(node.id, port_idx)).clicked
             {
                 return Some(PathPickRequest {

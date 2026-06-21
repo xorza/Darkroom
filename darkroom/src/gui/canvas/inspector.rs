@@ -201,14 +201,12 @@ impl Inspectors {
                 line(ui, node.name.as_str("(unnamed)"), title_style(ui));
                 line(ui, node.kind_label.as_str(""), muted_style(ui));
 
-                let in_names = scene.input_names(node.inputs);
-                let in_types = scene.input_types(node.inputs);
-                let in_binds = scene.bindings(node.inputs);
-                if !in_names.is_empty() {
+                let inputs = scene.inputs(node.inputs);
+                if !inputs.is_empty() {
                     line(ui, "Inputs", section_style(ui));
-                    for (i, name) in in_names.iter().enumerate() {
-                        let name = name.as_str("");
-                        let ty = in_types.get(i);
+                    for (i, input) in inputs.iter().enumerate() {
+                        let name = input.name.as_str("");
+                        let ty = Some(&input.ty);
                         // Runtime value when this run computed one; else
                         // fall back to the static binding.
                         match values.and_then(|v| v.inputs.get(i)) {
@@ -217,20 +215,19 @@ impl Inspectors {
                                 draw_preview(ui, node.id, "in", i, pv);
                             }
                             None => {
-                                let val = in_binds.get(i).map(value_str);
-                                line(ui, &port_line(name, ty, val.as_deref()), body_style(ui));
+                                let val = value_str(&input.binding);
+                                line(ui, &port_line(name, ty, Some(val.as_str())), body_style(ui));
                             }
                         }
                     }
                 }
 
-                let out_names = scene.output_names(node.outputs);
-                let out_types = scene.output_types(node.outputs);
-                if !out_names.is_empty() {
+                let outputs = scene.outputs(node.outputs);
+                if !outputs.is_empty() {
                     line(ui, "Outputs", section_style(ui));
-                    for (i, name) in out_names.iter().enumerate() {
-                        let name = name.as_str("");
-                        let ty = out_types.get(i);
+                    for (i, output) in outputs.iter().enumerate() {
+                        let name = output.name.as_str("");
+                        let ty = Some(&output.ty);
                         match values.and_then(|v| v.outputs.get(i)) {
                             Some(pv) => {
                                 line(ui, &port_line(name, ty, Some(&pv.text)), body_style(ui));
