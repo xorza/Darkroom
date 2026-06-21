@@ -1,8 +1,8 @@
-//! `AstroFuncLib` — the `lumos`-backed node library (category `astro`).
-//!
-//! Phase 1 ships one proof node, `load_astro_image`, that decodes a
-//! FITS/RAW/standard file into an [`AstroFrame`]. The heavier masters /
-//! stacking / processing nodes build on these types in later phases.
+//! `AstroFuncLib` — the `lumos`-backed node library (category `astro`):
+//! `load_astro_image` (decode), `build_masters` (calibration masters),
+//! `stack_lights` (calibrate + align + stack), and per-frame processing
+//! nodes like `auto_stretch`. Heavy work runs off the worker via
+//! `spawn_blocking`; preset dropdowns live in [`crate::astro_presets`].
 
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -12,7 +12,7 @@ use common::Buffer2;
 use common::file_utils::astro_image_files;
 use lumos::{
     AlignStackConfig, AstroImage, CalibrationFrames, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD,
-    ImageDimensions, Reference, calibrate_align_stack,
+    ImageDimensions, Reference, calibrate_align_stack, stretch,
 };
 use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::func_lambda::FuncLambda;
@@ -22,7 +22,7 @@ use scenarium::graph::NodeBehavior;
 use crate::astro_frame::{ASTRO_FRAME_DATA_TYPE, AstroFrame};
 use crate::astro_presets::{
     COMBINE_PRESET_DATATYPE, CombinePreset, DETECTION_PRESET_DATATYPE, DetectionPreset,
-    REGISTRATION_PRESET_DATATYPE, RegistrationPreset,
+    REGISTRATION_PRESET_DATATYPE, RegistrationPreset, STRETCH_PRESET_DATATYPE, StretchPreset,
 };
 use crate::masters::{MASTERS_DATA_TYPE, Masters};
 
@@ -322,6 +322,63 @@ impl Default for AstroFuncLib {
             }),
         });
 
+        // auto_stretch
+        func_lib.add(Func {
+            id: "c15248e0-006a-4a4a-9aae-b1fc7886dea1".into(),
+            name: "auto_stretch".to_string(),
+            description: Some(
+                "Auto-stretches a linear frame to a viewable image (display tone curve)"
+                    .to_string(),
+            ),
+            behavior: FuncBehavior::Pure,
+            terminal: false,
+            category: "astro".to_string(),
+            inputs: vec![
+                FuncInput {
+                    name: "image".to_string(),
+                    required: true,
+                    data_type: ASTRO_FRAME_DATA_TYPE.clone(),
+                    default_value: None,
+                    value_options: vec![],
+                },
+                preset_input("method", &STRETCH_PRESET_DATATYPE),
+            ],
+            outputs: vec![frame_output("image")],
+            events: vec![],
+            required_contexts: vec![],
+            lambda: FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+                Box::pin(async move {
+                    assert_eq!(inputs.len(), 2);
+                    assert_eq!(outputs.len(), 1);
+
+                    let config = inputs[1]
+                        .value
+                        .as_enum()
+                        .and_then(|s| StretchPreset::from_str(s).ok())
+                        .unwrap_or(StretchPreset::AutoAsinh)
+                        .config();
+                    // Arc-clone the frame so the deep copy + stretch run
+                    // off the worker thread.
+                    let value = inputs[0].value.clone();
+                    let stretched = tokio::task::spawn_blocking(move || {
+                        let frame = value
+                            .as_custom::<AstroFrame>()
+                            .expect("image input is an AstroFrame");
+                        let mut image = frame.image.clone();
+                        stretch(&mut image, config);
+                        image
+                    })
+                    .await
+                    .map_err(anyhow::Error::from)?;
+
+                    outputs[0] = DynamicValue::from_custom(AstroFrame::from(stretched));
+
+                    Ok(())
+                })
+            }),
+            ..Default::default()
+        });
+
         Self { func_lib }
     }
 }
@@ -459,5 +516,24 @@ mod tests {
         for out in &f.outputs {
             assert_eq!(out.data_type, *ASTRO_FRAME_DATA_TYPE);
         }
+    }
+
+    #[test]
+    fn auto_stretch_node_is_registered() {
+        let lib = AstroFuncLib::default();
+        let f = func(&lib, "auto_stretch");
+        assert_eq!(f.category, "astro");
+        assert_eq!(f.inputs.len(), 2);
+        assert_eq!(f.inputs[0].name, "image");
+        assert_eq!(f.inputs[0].data_type, *ASTRO_FRAME_DATA_TYPE);
+        assert!(f.inputs[0].required);
+        assert_eq!(f.inputs[1].name, "method");
+        assert_eq!(f.inputs[1].data_type, *STRETCH_PRESET_DATATYPE);
+        assert_eq!(
+            f.inputs[1].default_value,
+            Some(StaticValue::Enum("auto_asinh".to_string())),
+        );
+        assert_eq!(f.outputs.len(), 1);
+        assert_eq!(f.outputs[0].data_type, *ASTRO_FRAME_DATA_TYPE);
     }
 }

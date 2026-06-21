@@ -1,13 +1,14 @@
-//! Dropdown presets for the stacking node — small enums that map a
-//! human-readable variant onto a lumos stage config (`StarDetectionConfig`
-//! / `RegistrationConfig` / `StackConfig`). Each renders in the editor as a
-//! `DataType::Enum` dropdown (via the Phase 0 enum editor); the node reads
-//! the chosen variant back with `FromStr` and expands it with `config()`.
+//! Dropdown presets for the astro nodes — small enums that map a
+//! human-readable variant onto a lumos config (`StarDetectionConfig` /
+//! `RegistrationConfig` / `StackConfig` / `StretchConfig`). Each renders in
+//! the editor as a `DataType::Enum` dropdown (via the Phase 0 enum editor);
+//! the node reads the chosen variant back with `FromStr` and expands it with
+//! `config()`.
 
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use lumos::{RegistrationConfig, StackConfig, StarDetectionConfig};
+use lumos::{RegistrationConfig, StackConfig, StarDetectionConfig, StretchConfig};
 use scenarium::data::{DataType, EnumVariants};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -113,6 +114,18 @@ preset_enum! {
     }
 }
 
+preset_enum! {
+    /// Auto-stretch method preset (display-domain tone curve).
+    StretchPreset => StretchConfig,
+    datatype: STRETCH_PRESET_DATATYPE,
+    type_id: "b0aada00-4594-407e-9bb1-219d7eeffbb4",
+    display: "StretchPreset",
+    variants: {
+        AutoAsinh = "auto_asinh" => StretchConfig::auto_asinh(),
+        AutoStf = "auto_stf" => StretchConfig::auto_stf(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,5 +168,14 @@ mod tests {
             RegistrationPreset::Default
         );
         let _cfg: RegistrationConfig = RegistrationPreset::Default.config();
+    }
+
+    #[test]
+    fn stretch_preset_round_trips_and_maps_to_config() {
+        assert_eq!(StretchPreset::variant_names(), ["auto_asinh", "auto_stf"]);
+        for v in StretchPreset::iter() {
+            assert_eq!(StretchPreset::from_str(v.label()).unwrap(), v);
+        }
+        let _cfg: StretchConfig = StretchPreset::AutoStf.config();
     }
 }
