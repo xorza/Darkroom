@@ -59,13 +59,20 @@ rich config presets (`StackConfig::sigma_clipped`, `StarDetectionConfig::wide_fi
 `lumos`):
 
 - **`AstroFrame`** (`lens/src/astro_frame.rs`) wraps `lumos::AstroImage` as a
-  `CustomValue` with a CPU auto-stretched RGBA_U8 thumbnail (`gen_preview` runs
-  synchronously and parks the result in a `Slot`).
+  `CustomValue` with a CPU RGBA_U8 thumbnail — planar channels sampled straight to
+  RGBA in one pass, no display stretch (so a *linear* FITS/RAW frame previews
+  dark); `gen_preview` runs synchronously and parks the result in a `Slot`.
 - **`Masters`** (`lens/src/masters.rs`) wraps `lumos::CalibrationMasters`.
 - **`AstroFuncLib`** (`lens/src/astro_funclib.rs`) with `load_astro_image`
   (`FsPath` → `AstroFrame`, decode off-thread via `spawn_blocking`); merged at
   `darkroom/src/core/func_lib.rs`. A new `AstroFrame` branch in `node_values.rs`
   uploads its preview.
+
+**Build Masters node** (Phase 2, partial) — `build_masters` in `AstroFuncLib`:
+optional `darks`/`flats`/`bias`/`flat_darks` directory inputs (new shared
+`ASTRO_DIR_DATA_TYPE`) + `sigma` (Float = 5.0) → `Masters`. Globs each folder via
+`common::file_utils::astro_image_files` and calls `CalibrationMasters::from_files`
+inside `spawn_blocking`.
 
 One non-blocking concern carried into the node phases: **lumos work is heavy
 synchronous CPU**
@@ -93,7 +100,7 @@ A user right-clicks → picks from a new **`astro`** category:
   RAW/FITS.
 - Config = a **preset enum dropdown + a few key override ports** (recommended over
   exploding all ~40 config fields into ports).
-- Nodes show live thumbnails via `gen_preview` (autostretched for visibility).
+- Nodes show live thumbnails via `gen_preview` (linear — dark without a stretch).
 
 ## Roadmap
 
