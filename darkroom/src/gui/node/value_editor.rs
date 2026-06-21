@@ -7,8 +7,9 @@
 //! Supports `Int`, `Float`, `Bool`, `String`, and `FsPath` (a pick
 //! button showing the chosen file's name — the actual path change comes
 //! back deferred via the OS file dialog, opened by `App` outside the
-//! record and polled here by `emit_path_picks`). `Null` and `Enum`
-//! render as a read-only label.
+//! record and polled here by `emit_path_picks`). `Enum` renders as a
+//! dropdown over the port's declared variants. `Null` renders as a
+//! read-only label.
 //!
 //! Textual edit state: a `TextEdit` round-trip through `i64`/`f64`
 //! formatting would clobber partial input (typing "3." would reformat
@@ -17,8 +18,10 @@
 //! unfocused and parse on every frame, emitting a change only when the
 //! parsed value differs from the canonical one.
 
-use palantir::{Button, Checkbox, Configure, Sizing, Spacing, TextEdit, TextWrap, Ui, WidgetId};
-use scenarium::data::StaticValue;
+use palantir::{
+    Button, Checkbox, ComboBox, Configure, Sizing, Spacing, TextEdit, TextWrap, Ui, WidgetId,
+};
+use scenarium::data::{DataType, StaticValue};
 
 use crate::gui::theme::StaticValueEditorTheme;
 
@@ -36,6 +39,7 @@ pub(crate) fn show(
     theme: &StaticValueEditorTheme,
     id: WidgetId,
     value: &StaticValue,
+    data_type: &DataType,
 ) -> Option<StaticValue> {
     let width = theme.width;
     match value {
@@ -83,17 +87,48 @@ pub(crate) fn show(
                 .show(ui);
             None
         }
-        StaticValue::Null | StaticValue::Enum(_) => {
-            // Not editable. Show the textual form so the value is
-            // visible; clicks fall through to the surrounding row.
-            let mut buf = placeholder(value);
-            TextEdit::new(&mut buf)
+        StaticValue::Enum(current) => {
+            // A dropdown over the port's declared variants. The variant
+            // list + type identity live on `DataType::Enum`, not on the
+            // value — without that we can't populate the menu, so fall
+            // back to a read-only label (shouldn't happen: an `Enum`
+            // value always rides an `Enum`-typed port).
+            let DataType::Enum(def) = data_type else {
+                return read_only_label(ui, id, value, width);
+            };
+            let options: Vec<&str> = def.variants.iter().map(String::as_str).collect();
+            let before = options.iter().position(|v| *v == current).unwrap_or(0);
+            let mut idx = before;
+            ComboBox::new(&mut idx, &options)
                 .id(id)
+                .style(theme.button.clone())
                 .size((Sizing::Fixed(width), Sizing::Hug))
                 .show(ui);
-            None
+            if idx != before {
+                options.get(idx).map(|v| StaticValue::Enum((*v).to_owned()))
+            } else {
+                None
+            }
         }
+        StaticValue::Null => read_only_label(ui, id, value, width),
     }
+}
+
+/// Non-editable values (`Null`, or an `Enum` on a port that lost its
+/// type) show their textual form in a read-only field; clicks fall
+/// through to the surrounding row. Always returns `None`.
+fn read_only_label(
+    ui: &mut Ui,
+    id: WidgetId,
+    value: &StaticValue,
+    width: f32,
+) -> Option<StaticValue> {
+    let mut buf = placeholder(value);
+    TextEdit::new(&mut buf)
+        .id(id)
+        .size((Sizing::Fixed(width), Sizing::Hug))
+        .show(ui);
+    None
 }
 
 /// The pick button's label: the chosen file's name (last path

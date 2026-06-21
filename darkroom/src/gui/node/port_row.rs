@@ -8,12 +8,13 @@ use palantir::{
     Align, Color, Configure, ContextMenu, Corners, HAlign, InternedStr, MenuItem, Panel, Rect,
     Sense, Shape, Sizing, Spacing, Stroke, Ui, VAlign, WidgetId,
 };
-use scenarium::data::StaticValue;
+use scenarium::data::{DataType, StaticValue};
 use scenarium::graph::Binding;
 use scenarium::prelude::NodeId;
 
 use crate::core::document::BoundarySide;
 use crate::core::edit::intent::Intent;
+use crate::gui::node::port_color::port_color;
 use crate::gui::node::port_rename::port_label;
 use crate::gui::node::value_editor;
 use crate::gui::node::{RecordCtx, set_input};
@@ -38,6 +39,7 @@ fn input_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec
     let names = rcx.scene.input_names(node.inputs);
     let bindings = rcx.scene.bindings(node.inputs);
     let defaults = rcx.scene.defaults(node.inputs);
+    let types = rcx.scene.input_types(node.inputs);
     let theme = rcx.theme;
     // Boundary (`SubgraphInput`/`SubgraphOutput`) ports route the
     // interface, not literal values — no const affordance.
@@ -62,6 +64,7 @@ fn input_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec
                 };
                 let binding = bindings.get(i).unwrap_or(&InputBindingView::None);
                 let default = defaults.get(i).cloned().flatten();
+                let data_type = types.get(i).cloned().unwrap_or_default();
                 // A `SubgraphOutput` boundary node's input ports are the
                 // subgraph's *outputs* — renameable, except the trailing
                 // "+" placeholder.
@@ -73,6 +76,7 @@ fn input_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec
                     name.clone(),
                     binding,
                     default,
+                    data_type,
                     allow_const,
                     rename,
                     out,
@@ -83,6 +87,7 @@ fn input_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec
 
 fn output_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let names = rcx.scene.output_names(node.outputs);
+    let types = rcx.scene.output_types(node.outputs);
     let theme = rcx.theme;
     Panel::vstack()
         .id_salt("out")
@@ -102,11 +107,12 @@ fn output_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Ve
                     kind: PortKind::Output,
                     port_idx: i,
                 };
+                let data_type = types.get(i).cloned().unwrap_or_default();
                 // A `SubgraphInput` boundary node's output ports are the
                 // subgraph's *inputs* — renameable, except the trailing
                 // "+" placeholder.
                 let rename = (node.boundary && i + 1 < names.len()).then_some(BoundarySide::Input);
-                output_port_row(ui, rcx, port, name.clone(), rename, out);
+                output_port_row(ui, rcx, port, name.clone(), data_type, rename, out);
             }
         });
 }
@@ -141,15 +147,17 @@ fn output_port_row(
     rcx: RecordCtx<'_>,
     port: PortRef,
     name: InternedStr,
+    data_type: DataType,
     rename: Option<BoundarySide>,
     out: &mut Vec<Intent>,
 ) {
     let theme = rcx.theme;
-    let fill = if rcx.port_frame.is_hovered(port) {
-        theme.output_port_hover
-    } else {
-        theme.output_port
-    };
+    let fill = port_color(
+        theme,
+        &data_type,
+        PortKind::Output,
+        rcx.port_frame.is_hovered(port),
+    );
     let wid = port_circle_wid(port);
     let overhang = theme.port_radius() + theme.port_col_pad_x;
     Panel::hstack()
@@ -173,16 +181,18 @@ fn input_port_row(
     name: InternedStr,
     binding: &InputBindingView,
     default_static: Option<StaticValue>,
+    data_type: DataType,
     allow_const: bool,
     rename: Option<BoundarySide>,
     out: &mut Vec<Intent>,
 ) {
     let theme = rcx.theme;
-    let fill = if rcx.port_frame.is_hovered(port) {
-        theme.input_port_hover
-    } else {
-        theme.input_port
-    };
+    let fill = port_color(
+        theme,
+        &data_type,
+        PortKind::Input,
+        rcx.port_frame.is_hovered(port),
+    );
     let overhang = theme.port_radius() + theme.port_col_pad_x;
     let margin = Spacing::new(-overhang, 0.0, 0.0, 0.0);
     let wid = port_circle_wid(port);
@@ -198,7 +208,7 @@ fn input_port_row(
             if allow_const && let InputBindingView::Const(value) = binding {
                 let editor_id = const_editor_wid(port.node_id, port.port_idx);
                 if let Some(new_value) =
-                    value_editor::show(ui, &theme.static_value_editor, editor_id, value)
+                    value_editor::show(ui, &theme.static_value_editor, editor_id, value, &data_type)
                 {
                     out.push(set_input(port, Binding::Const(new_value)));
                 }

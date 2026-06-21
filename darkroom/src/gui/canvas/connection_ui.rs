@@ -1,5 +1,6 @@
 use glam::Vec2;
 use palantir::{Brush, Color, LineCap, LinearGradient, Shape, Stop, Ui};
+use scenarium::data::DataType;
 use scenarium::graph::{Binding, InputPort, OutputPort};
 
 use crate::core::edit::intent::Intent;
@@ -7,6 +8,7 @@ use crate::gui::app::AppContext;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::canvas::{node_ports, to_world};
+use crate::gui::node::port_color::port_color;
 use crate::gui::node::{node_widget_id, set_input};
 use crate::gui::scene::{InputBindingView, Scene};
 use crate::gui::{PortKind, PortRef};
@@ -188,15 +190,22 @@ impl ConnectionUI {
                 });
             }
             // Gradient from output (p0) → input (p3) port color so each
-            // end of a connection visually matches the port it touches.
-            // `lower_cubic_bezier` samples `Brush::Linear` along the
-            // curve parameter `t` and ignores `angle` — we pass 0.0.
-            // Broken-state still wins as a flat color so the alarm read
-            // doesn't get diluted by the gradient.
+            // end of a connection visually matches the port it touches —
+            // and, with per-type port colors, the wire reads as its data
+            // type (both ends share it unless one side is the untyped
+            // `Null` wildcard). `lower_cubic_bezier` samples `Brush::Linear`
+            // along the curve parameter `t` and ignores `angle` — we pass
+            // 0.0. Broken-state still wins as a flat color so the alarm
+            // read doesn't get diluted by the gradient.
             let brush = if broken {
                 Brush::Solid(ctx.theme.connection_broken)
             } else {
-                port_gradient(ctx.theme.output_port, ctx.theme.input_port)
+                let src_ty = port_data_type(scene, src_port).unwrap_or_default();
+                let tgt_ty = port_data_type(scene, tgt_port).unwrap_or_default();
+                port_gradient(
+                    port_color(ctx.theme, &src_ty, PortKind::Output, false),
+                    port_color(ctx.theme, &tgt_ty, PortKind::Input, false),
+                )
             };
             ui.add_shape(Shape::CubicBezier {
                 p0,
@@ -239,13 +248,17 @@ impl ConnectionUI {
             PortKind::Input => (end, start),
         };
         let CubicHandles { p1, p2 } = cubic_handles(p0, p3);
+        // Tint the in-flight wire by the dragged port's data type, so the
+        // preview already reads as the type being connected.
+        let drag_ty = port_data_type(scene, drag.start).unwrap_or_default();
+        let wire = port_color(ctx.theme, &drag_ty, drag.start.kind, false);
         ui.add_shape(Shape::CubicBezier {
             p0,
             p1,
             p2,
             p3,
             width: ctx.theme.connection_width,
-            brush: port_gradient(ctx.theme.output_port, ctx.theme.input_port),
+            brush: port_gradient(wire, wire),
             cap: LineCap::Round,
         });
     }
@@ -302,6 +315,7 @@ fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -
         .iter()
         .find(|n| n.id == start.node_id)
         .is_some_and(|n| n.boundary);
+    let start_type = port_data_type(scene, start);
     for n in &scene.nodes {
         if n.id == start.node_id {
             continue;
@@ -311,11 +325,42 @@ fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -
         }
         for port in node_ports(n, want_kind) {
             if frame.contains_pointer(port, pointer) {
-                return Some(port);
+                // Reject a drop onto an incompatible port so the wire
+                // won't latch. Geometrically only one port sits under the
+                // pointer, so a reject here falls through to `None` (drop)
+                // rather than snapping elsewhere.
+                let compatible = match (&start_type, port_data_type(scene, port)) {
+                    (Some(a), Some(b)) => types_compatible(a, &b),
+                    // Missing type info (port not in the scene this frame)
+                    // — don't block; let the intent layer decide.
+                    _ => true,
+                };
+                if compatible {
+                    return Some(port);
+                }
             }
         }
     }
     None
+}
+
+/// The declared [`DataType`] of `port` in the current scene, or `None`
+/// if the port isn't present (e.g. mid-rebuild).
+fn port_data_type(scene: &Scene, port: PortRef) -> Option<DataType> {
+    let node = scene.nodes.iter().find(|n| n.id == port.node_id)?;
+    let ty = match port.kind {
+        PortKind::Input => scene.input_types(node.inputs).get(port.port_idx)?,
+        PortKind::Output => scene.output_types(node.outputs).get(port.port_idx)?,
+    };
+    Some(ty.clone())
+}
+
+/// Whether an output↔input link is allowed by type. Equal types connect;
+/// `Null` is a wildcard on either side, because the default type and the
+/// boundary "+" placeholder are `Null` and must accept any producer so
+/// wiring one grows the interface from the connected type.
+fn types_compatible(a: &DataType, b: &DataType) -> bool {
+    matches!(a, DataType::Null) || matches!(b, DataType::Null) || a == b
 }
 
 /// Convert a snapped `(start, end)` PortRef pair (one `Input`, one
@@ -337,4 +382,42 @@ fn commit_connection(start: PortRef, end: PortRef, out: &mut Vec<Intent>) {
             port_idx: output.port_idx,
         }),
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use scenarium::data::{TypeDef, TypeId};
+
+    use super::*;
+
+    fn custom(id: u128) -> DataType {
+        DataType::Custom(Arc::new(TypeDef {
+            type_id: TypeId::from_u128(id),
+            display_name: "X".into(),
+        }))
+    }
+
+    #[test]
+    fn matching_scalar_types_connect_mismatched_do_not() {
+        assert!(types_compatible(&DataType::Float, &DataType::Float));
+        assert!(types_compatible(&DataType::String, &DataType::String));
+        assert!(!types_compatible(&DataType::Float, &DataType::Int));
+        assert!(!types_compatible(&DataType::String, &DataType::Bool));
+    }
+
+    #[test]
+    fn null_is_a_wildcard_both_directions() {
+        assert!(types_compatible(&DataType::Null, &DataType::Float));
+        assert!(types_compatible(&DataType::Float, &DataType::Null));
+        assert!(types_compatible(&DataType::Null, &DataType::Null));
+    }
+
+    #[test]
+    fn custom_types_match_by_id() {
+        assert!(types_compatible(&custom(1), &custom(1)));
+        assert!(!types_compatible(&custom(1), &custom(2)));
+        assert!(!types_compatible(&custom(1), &DataType::Float));
+    }
 }

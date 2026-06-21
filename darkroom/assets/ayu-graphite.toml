@@ -614,6 +614,23 @@ color = "#878a8d"
 line_height_mult = 1.2
 family = "SegoeUi"
 
+[palantir_theme.modal]
+backdrop = "#00000080"
+padding = 20.0
+min_width = 280.0
+
+[palantir_theme.modal.card]
+corners = 12.0
+
+[palantir_theme.modal.card.fill]
+Solid = "#3e3e3e"
+
+[palantir_theme.modal.card.stroke]
+width = 1.0
+
+[palantir_theme.modal.card.stroke.brush]
+Solid = "#aaaaa840"
+
 [palantir_theme.tooltip]
 padding = [6.0, 4.0]
 delay = 0.5

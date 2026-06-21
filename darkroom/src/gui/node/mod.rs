@@ -1,4 +1,5 @@
 pub(crate) mod header;
+pub(crate) mod port_color;
 pub(crate) mod port_rename;
 pub(crate) mod port_row;
 pub(crate) mod value_editor;
