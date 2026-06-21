@@ -12,8 +12,10 @@ use common::Buffer2;
 use common::file_utils::astro_image_files;
 use imaginarium::Image as RawImage;
 use lumos::{
-    AlignStackConfig, AstroImage, CalibrationFrames, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD,
-    ImageDimensions, Reference, calibrate_align_stack, stretch,
+    AlignStackConfig, AstroImage, BackgroundConfig, CalibrationFrames, CalibrationMasters,
+    DEFAULT_SIGMA_THRESHOLD, DenoiseConfig, HdrConfig, ImageDimensions, LocalContrastConfig,
+    Reference, StarDetector, calibrate_align_stack, compress_dynamic_range, denoise,
+    enhance_local_contrast, extract_background, neutralize_background, scnr, stretch,
 };
 use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::func_lambda::FuncLambda;
@@ -22,8 +24,9 @@ use scenarium::graph::NodeBehavior;
 
 use crate::astro_frame::{ASTRO_FRAME_DATA_TYPE, AstroFrame};
 use crate::astro_presets::{
-    COMBINE_PRESET_DATATYPE, CombinePreset, DETECTION_PRESET_DATATYPE, DetectionPreset,
-    REGISTRATION_PRESET_DATATYPE, RegistrationPreset, STRETCH_PRESET_DATATYPE, StretchPreset,
+    BACKGROUND_MODE_DATATYPE, BackgroundModeKind, COMBINE_PRESET_DATATYPE, CombinePreset,
+    DETECTION_PRESET_DATATYPE, DetectionPreset, REGISTRATION_PRESET_DATATYPE, RegistrationPreset,
+    SCNR_METHOD_DATATYPE, STRETCH_PRESET_DATATYPE, ScnrKind, StretchPreset,
 };
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use crate::masters::{MASTERS_DATA_TYPE, Masters};
@@ -431,6 +434,205 @@ impl Default for AstroFuncLib {
             ..Default::default()
         });
 
+        // --- per-frame processing nodes (AstroFrame → AstroFrame) ---
+
+        // background_extract
+        func_lib.add(processing_func(
+            "e27c2a02-ec2a-4c6d-afea-60d1276ff8e1",
+            "background_extract",
+            "Fits and removes a smooth sky-background gradient",
+            vec![
+                frame_input("image"),
+                preset_input("mode", &BACKGROUND_MODE_DATATYPE),
+            ],
+            FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+                Box::pin(async move {
+                    let mode = inputs[1]
+                        .value
+                        .as_enum()
+                        .and_then(|s| BackgroundModeKind::from_str(s).ok())
+                        .unwrap_or(BackgroundModeKind::Subtract)
+                        .config();
+                    let value = inputs[0].value.clone();
+                    outputs[0] = run_frame_op(value, move |img| {
+                        extract_background(
+                            img,
+                            &BackgroundConfig {
+                                mode,
+                                ..Default::default()
+                            },
+                        );
+                    })
+                    .await?;
+                    Ok(())
+                })
+            }),
+        ));
+
+        // denoise
+        func_lib.add(processing_func(
+            "61c17dfa-8369-446b-b6e7-d91d62d344ee",
+            "denoise",
+            "Wavelet denoise (starlet coefficient thresholding)",
+            vec![frame_input("image"), float_input("strength", 0.85)],
+            FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+                Box::pin(async move {
+                    let strength = inputs[1].value.as_f64().map(|v| v as f32).unwrap_or(0.85);
+                    let value = inputs[0].value.clone();
+                    outputs[0] = run_frame_op(value, move |img| {
+                        denoise(
+                            img,
+                            DenoiseConfig {
+                                strength,
+                                ..Default::default()
+                            },
+                        );
+                    })
+                    .await?;
+                    Ok(())
+                })
+            }),
+        ));
+
+        // scnr
+        func_lib.add(processing_func(
+            "ef0c2661-8553-4302-9251-95b2d383af19",
+            "scnr",
+            "Removes the residual green cast (SCNR)",
+            vec![
+                frame_input("image"),
+                preset_input("method", &SCNR_METHOD_DATATYPE),
+            ],
+            FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+                Box::pin(async move {
+                    let method = inputs[1]
+                        .value
+                        .as_enum()
+                        .and_then(|s| ScnrKind::from_str(s).ok())
+                        .unwrap_or(ScnrKind::AverageNeutral)
+                        .config();
+                    let value = inputs[0].value.clone();
+                    outputs[0] = run_frame_op(value, move |img| scnr(img, method)).await?;
+                    Ok(())
+                })
+            }),
+        ));
+
+        // neutralize_background
+        func_lib.add(processing_func(
+            "5a8c9043-61ca-4a5a-8e55-ce27c804e84b",
+            "neutralize_background",
+            "Shifts each channel so the background reads neutral gray",
+            vec![frame_input("image")],
+            FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+                Box::pin(async move {
+                    let value = inputs[0].value.clone();
+                    outputs[0] = run_frame_op(value, neutralize_background).await?;
+                    Ok(())
+                })
+            }),
+        ));
+
+        // hdr_compress
+        func_lib.add(processing_func(
+            "300a2ec5-0ccd-47ec-b282-030eea41441c",
+            "hdr_compress",
+            "Compresses large-scale dynamic range (multiscale HDR)",
+            vec![frame_input("image"), float_input("amount", 0.5)],
+            FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+                Box::pin(async move {
+                    let amount = inputs[1].value.as_f64().map(|v| v as f32).unwrap_or(0.5);
+                    let value = inputs[0].value.clone();
+                    outputs[0] = run_frame_op(value, move |img| {
+                        compress_dynamic_range(
+                            img,
+                            HdrConfig {
+                                amount,
+                                ..Default::default()
+                            },
+                        );
+                    })
+                    .await?;
+                    Ok(())
+                })
+            }),
+        ));
+
+        // local_contrast
+        func_lib.add(processing_func(
+            "6a28b732-2704-454b-8afd-0a91d385458a",
+            "local_contrast",
+            "Local contrast enhancement (CLAHE)",
+            vec![frame_input("image"), float_input("strength", 0.8)],
+            FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+                Box::pin(async move {
+                    let strength = inputs[1].value.as_f64().map(|v| v as f32).unwrap_or(0.8);
+                    let value = inputs[0].value.clone();
+                    outputs[0] = run_frame_op(value, move |img| {
+                        enhance_local_contrast(
+                            img,
+                            LocalContrastConfig {
+                                strength,
+                                ..Default::default()
+                            },
+                        );
+                    })
+                    .await?;
+                    Ok(())
+                })
+            }),
+        ));
+
+        // star_detect → star count
+        func_lib.add(Func {
+            id: "eb93559d-370c-4bea-aef0-c43897f3416a".into(),
+            name: "star_detect".to_string(),
+            description: Some("Detects stars and outputs the count".to_string()),
+            behavior: FuncBehavior::Pure,
+            terminal: false,
+            category: "astro".to_string(),
+            inputs: vec![
+                frame_input("image"),
+                preset_input("detection", &DETECTION_PRESET_DATATYPE),
+            ],
+            outputs: vec![FuncOutput {
+                name: "count".to_string(),
+                data_type: DataType::Int,
+            }],
+            events: vec![],
+            required_contexts: vec![],
+            lambda: FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+                Box::pin(async move {
+                    assert_eq!(inputs.len(), 2);
+                    assert_eq!(outputs.len(), 1);
+
+                    let config = inputs[1]
+                        .value
+                        .as_enum()
+                        .and_then(|s| DetectionPreset::from_str(s).ok())
+                        .unwrap_or(DetectionPreset::WideField)
+                        .config();
+                    let value = inputs[0].value.clone();
+                    let count = tokio::task::spawn_blocking(move || {
+                        let frame = value
+                            .as_custom::<AstroFrame>()
+                            .expect("image input is an AstroFrame");
+                        StarDetector::from_config(config)
+                            .detect(&frame.image)
+                            .stars
+                            .len()
+                    })
+                    .await
+                    .map_err(anyhow::Error::from)?;
+
+                    outputs[0] = (count as i64).into();
+
+                    Ok(())
+                })
+            }),
+            ..Default::default()
+        });
+
         Self { func_lib }
     }
 }
@@ -472,6 +674,73 @@ fn dir_input(name: &str) -> FuncInput {
         default_value: None,
         value_options: vec![],
     }
+}
+
+/// A required `AstroFrame` input port.
+fn frame_input(name: &str) -> FuncInput {
+    FuncInput {
+        name: name.to_string(),
+        required: true,
+        data_type: ASTRO_FRAME_DATA_TYPE.clone(),
+        default_value: None,
+        value_options: vec![],
+    }
+}
+
+/// An optional float parameter input seeded with `default`.
+fn float_input(name: &str, default: f32) -> FuncInput {
+    FuncInput {
+        name: name.to_string(),
+        required: false,
+        data_type: DataType::Float,
+        default_value: Some((default as f64).into()),
+        value_options: vec![],
+    }
+}
+
+/// Assemble a `Func` for an `AstroFrame → AstroFrame` processing node:
+/// `Pure`, category `astro`, a single `image` output. The caller supplies
+/// the inputs (the frame first) and the lambda.
+fn processing_func(
+    id: &str,
+    name: &str,
+    description: &str,
+    inputs: Vec<FuncInput>,
+    lambda: FuncLambda,
+) -> Func {
+    Func {
+        id: id.into(),
+        name: name.to_string(),
+        description: Some(description.to_string()),
+        behavior: FuncBehavior::Pure,
+        terminal: false,
+        category: "astro".to_string(),
+        inputs,
+        outputs: vec![frame_output("image")],
+        events: vec![],
+        required_contexts: vec![],
+        lambda,
+        ..Default::default()
+    }
+}
+
+/// Clone the input `AstroFrame`'s image, apply `op` to it off the worker
+/// thread, and wrap the result back into a fresh `AstroFrame` value.
+async fn run_frame_op<F>(value: DynamicValue, op: F) -> Result<DynamicValue, anyhow::Error>
+where
+    F: FnOnce(&mut AstroImage) + Send + 'static,
+{
+    let image = tokio::task::spawn_blocking(move || {
+        let frame = value
+            .as_custom::<AstroFrame>()
+            .expect("frame input is an AstroFrame");
+        let mut image = frame.image.clone();
+        op(&mut image);
+        image
+    })
+    .await
+    .map_err(anyhow::Error::from)?;
+    Ok(DynamicValue::from_custom(AstroFrame::from(image)))
 }
 
 #[cfg(test)]
@@ -601,5 +870,39 @@ mod tests {
         assert_eq!(f.outputs.len(), 1);
         assert_eq!(f.outputs[0].name, "image");
         assert_eq!(f.outputs[0].data_type, *IMAGE_DATA_TYPE);
+    }
+
+    #[test]
+    fn processing_nodes_are_registered() {
+        let lib = AstroFuncLib::default();
+        // Each in-place op: a required `image` AstroFrame in, an AstroFrame out.
+        for name in [
+            "background_extract",
+            "denoise",
+            "scnr",
+            "neutralize_background",
+            "hdr_compress",
+            "local_contrast",
+        ] {
+            let f = func(&lib, name);
+            assert_eq!(f.category, "astro", "{name} category");
+            assert_eq!(f.inputs[0].name, "image", "{name} first input");
+            assert_eq!(
+                f.inputs[0].data_type, *ASTRO_FRAME_DATA_TYPE,
+                "{name} in type"
+            );
+            assert!(f.inputs[0].required, "{name} image required");
+            assert_eq!(f.outputs.len(), 1, "{name} one output");
+            assert_eq!(
+                f.outputs[0].data_type, *ASTRO_FRAME_DATA_TYPE,
+                "{name} out type"
+            );
+        }
+        // star_detect analyzes the frame and outputs a count.
+        let sd = func(&lib, "star_detect");
+        assert_eq!(sd.inputs[0].data_type, *ASTRO_FRAME_DATA_TYPE);
+        assert_eq!(sd.outputs.len(), 1);
+        assert_eq!(sd.outputs[0].name, "count");
+        assert_eq!(sd.outputs[0].data_type, DataType::Int);
     }
 }

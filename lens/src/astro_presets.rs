@@ -8,7 +8,9 @@
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use lumos::{RegistrationConfig, StackConfig, StarDetectionConfig, StretchConfig};
+use lumos::{
+    BackgroundMode, RegistrationConfig, ScnrMethod, StackConfig, StarDetectionConfig, StretchConfig,
+};
 use scenarium::data::{DataType, EnumVariants};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -126,6 +128,35 @@ preset_enum! {
     }
 }
 
+preset_enum! {
+    /// Background-removal mode for `extract_background`.
+    BackgroundModeKind => BackgroundMode,
+    datatype: BACKGROUND_MODE_DATATYPE,
+    type_id: "064153dd-6c55-4603-be27-dc15b8db4d4c",
+    display: "BackgroundMode",
+    variants: {
+        Subtract = "subtract" => BackgroundMode::Subtract,
+        Divide = "divide" => BackgroundMode::Divide,
+    }
+}
+
+/// Blend amount for the SCNR additive-mask method.
+const SCNR_ADDITIVE_AMOUNT: f32 = 0.5;
+
+preset_enum! {
+    /// SCNR (green-cast removal) method.
+    ScnrKind => ScnrMethod,
+    datatype: SCNR_METHOD_DATATYPE,
+    type_id: "d2bc4900-f306-4359-b1dc-3812c89d7a6f",
+    display: "ScnrMethod",
+    variants: {
+        AverageNeutral = "average_neutral" => ScnrMethod::AverageNeutral,
+        AdditiveMask = "additive_mask" => ScnrMethod::AdditiveMask {
+            amount: SCNR_ADDITIVE_AMOUNT,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,5 +208,16 @@ mod tests {
             assert_eq!(StretchPreset::from_str(v.label()).unwrap(), v);
         }
         let _cfg: StretchConfig = StretchPreset::AutoStf.config();
+    }
+
+    #[test]
+    fn processing_enums_have_expected_variants() {
+        assert_eq!(BackgroundModeKind::variant_names(), ["subtract", "divide"]);
+        assert_eq!(
+            ScnrKind::variant_names(),
+            ["average_neutral", "additive_mask"]
+        );
+        let _bg: BackgroundMode = BackgroundModeKind::Divide.config();
+        let _scnr: ScnrMethod = ScnrKind::AdditiveMask.config();
     }
 }

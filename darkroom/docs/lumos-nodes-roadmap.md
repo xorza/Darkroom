@@ -81,12 +81,22 @@ via `spawn_blocking`, directories globbed with `common::file_utils`:
   variant to a lumos stage config); coverage/weight planes wrap as 1-channel
   `AstroImage`s. Per-field σ overrides deferred — presets bake the rejection sigma.
 
-**Processing nodes** (Phase 3, started) — `AstroFrame → AstroFrame` transforms:
+**Processing nodes** (Phase 3) — `AstroFrame → AstroFrame` transforms, all
+`FuncBehavior::Pure`, cloned + run off-thread (shared `processing_func` +
+`run_frame_op` helpers):
 
-- **`auto_stretch`** — `image` + `method` preset (`StretchPreset`: auto-asinh /
-  auto-stf) → stretched `AstroFrame`, via `lumos::stretch`. Clones the frame and
-  stretches off-thread; `FuncBehavior::Pure`. (Bonus: its output previews bright,
-  unlike the linear input.)
+- **`auto_stretch`** — `StretchPreset` (auto-asinh / auto-stf) → `lumos::stretch`.
+  (Bonus: its output previews bright, unlike the linear input.)
+- **`background_extract`** — `BackgroundMode` (subtract/divide) → `extract_background`.
+- **`denoise`** — `strength` float → `denoise`.
+- **`scnr`** — `ScnrMethod` (average-neutral / additive-mask) → `scnr`.
+- **`neutralize_background`** — no params → `neutralize_background`.
+- **`hdr_compress`** — `amount` float → `compress_dynamic_range`.
+- **`local_contrast`** — `strength` float → `enhance_local_contrast`.
+- **`star_detect`** — `DetectionPreset` → star `count` (Int), via `StarDetector`.
+
+(No dedicated *save* node: `AstroImage::save` only routes through imaginarium —
+no FITS, F32-only-via-TIFF — so saving goes through `astro_to_image → save_image`.)
 
 One non-blocking concern carried into the node phases: **lumos work is heavy
 synchronous CPU**
@@ -119,17 +129,17 @@ A user right-clicks → picks from a new **`astro`** category:
 ## Roadmap
 
 > **Done:** Phase 0 (editor foundations), Phase 1 (astro custom types +
-> `load_astro_image`), Phase 2 (`build_masters` + `stack_lights`), and the start
-> of Phase 3 (`auto_stretch`). See *Done so far* above.
+> `load_astro_image`), Phase 2 (`build_masters` + `stack_lights`), Phase 3
+> (per-frame processing nodes), and one Phase 4 bridge (`astro_to_image`). See
+> *Done so far* above.
 
-### Phase 3 — Processing nodes (fast fan-out)
+### Phase 3 — Processing nodes — **DONE**
 
-3. One node each, `AstroFrame → AstroFrame`, wrapping the in-place ops.
-   ✅ **Auto Stretch** (`auto_stretch`). Remaining: **Background Extract,
-   Denoise, SCNR, HDR Compress, Local Contrast, Neutralize Background**, plus
-   **Save Astro Image** and **Star Detect**
-   (→ count/overlay). Each: clone input frame, mutate, output. Mostly boilerplate
-   now that the type + enum editor exist.
+✅ `auto_stretch`, `background_extract`, `denoise`, `scnr`,
+`neutralize_background`, `hdr_compress`, `local_contrast`, `star_detect`. The
+only listed item dropped is a dedicated *Save Astro Image* node (covered by
+`astro_to_image → save_image`); a star-detect **overlay** (vs. the current count)
+could come later if wanted.
 
 ### Phase 4 — Polish / advanced
 
@@ -171,6 +181,8 @@ lambda: async_lambda!(move |ctx, _, _, inputs, _, outputs| {
 - **Home:** astro types + nodes live in `lens` (`astro_frame.rs`, `masters.rs`,
   `astro_funclib.rs`); `lens` depends on `lumos`. *(Decided + done in Phase 1.)*
 
-**Phase 3 continues** — `auto_stretch` is in; the next slices are the remaining
-per-frame nodes (background extract / denoise / SCNR / HDR / local contrast /
-neutralize / save / star-detect), each the same `AstroFrame → AstroFrame` shape.
+Phases 1–3 are done, plus the `astro_to_image` bridge — so the editor has a full
+pipeline: `load → (build masters) → stack → stretch → background → denoise →
+scnr → astro_to_image → save`. **Phase 4** (composable detect/register/warp/
+combine nodes, drizzle, optional config-builder nodes, star-detect overlay) is
+what's left.
