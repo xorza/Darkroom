@@ -2,6 +2,11 @@
 // crate-root `pub use`s below (one canonical path per item). Modules that are
 // free-function namespaces (or a macro home) stay `pub` and are used as
 // `common::<module>::fn`.
+
+// Lets `common-derive`'s generated `::common::…` paths resolve inside `common`
+// itself (e.g. its own `#[derive(Introspect)]` test).
+extern crate self as common;
+
 #[macro_use]
 pub mod macros;
 pub mod cpu_features;
@@ -19,6 +24,7 @@ pub(crate) mod debug;
 pub(crate) mod file_format;
 pub(crate) mod float_ext;
 pub(crate) mod fnv;
+pub(crate) mod introspect;
 pub(crate) mod key_index_vec;
 pub(crate) mod normalize_string;
 pub(crate) mod pause_gate;
@@ -37,6 +43,7 @@ pub use debug::is_debug;
 pub use file_format::{FileExtensionError, FileFormatResult, SerdeFormat};
 pub use float_ext::FloatExt;
 pub use fnv::FnvHasher;
+pub use introspect::{FieldDesc, FieldKind, FieldValue, Introspect, IntrospectEnum};
 pub use key_index_vec::{CompactInsert, KeyIndexKey, KeyIndexVec};
 pub use normalize_string::NormalizeString;
 pub use pause_gate::{PauseGate, PauseGateCloseGuard};

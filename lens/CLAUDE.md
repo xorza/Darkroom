@@ -13,8 +13,8 @@ Node-function library: adapts `imaginarium` (GPU image ops) **and** `lumos`
 | `astro_frame.rs` | `AstroFrame` — `lumos::AstroImage` as a `CustomValue` (CPU thumbnail preview). |
 | `masters.rs` | `Masters` — `lumos::CalibrationMasters` as a `CustomValue`. |
 | `astro_presets.rs` | `preset_enum!` macro + `DetectionPreset`/`RegistrationPreset`/`CombinePreset` (dropdown enums → lumos stage configs). |
-| `config_node.rs` | Generic config-builder: `config_builder_func::<T: NodeConfig>()` reflects a serde+`JsonSchema` type's fields (via its JSON schema) into a `Func` with one input per field → a wireable `ConfigValue<T>`. Labels = `#[schemars(title)]` or prettified field name (`tile_size`→"Tile Size"); inputs are required unless the field is `Option<_>`. Flat configs only (primitives + unit-enum dropdowns); nested/data-enums fall back to `Default`. |
-| `astro_configs.rs` | Lens-side editable **mirror** structs of lumos configs (e.g. `BackgroundConfigDef`) that derive serde+`JsonSchema` (so lumos needn't) + `impl NodeConfig` + `From`/`Into` the lumos type. `From<lumos::X>` gives the mirror's `Default`; `From<Mirror> for lumos::X` is compile-checked against the lumos struct. |
+| `config_node.rs` | Scenarium bridge over `common`'s struct introspection: `config_builder_func::<T: NodeConfig>()` maps a `common::Introspect` type's `FieldDesc`s → a `Func` with one input per field (`FieldKind`→`DataType`, `FieldValue`↔`StaticValue`/`DynamicValue`) → a wireable `ConfigValue<T>`. `NodeConfig` = `Introspect` + a stable wire `TYPE_ID`/`NAME`. Inputs are required unless the field is `Option<_>`; enum `type_id`s via `common::FnvHasher`. |
+| `astro_configs.rs` | Lens-side editable **mirror** structs of lumos configs (e.g. `BackgroundConfigDef`) deriving `common::Introspect` (so lumos needn't) + `impl NodeConfig` + `From`/`Into` the lumos type. Mirror enums (`BackgroundModeDef`) impl `common::IntrospectEnum` via `strum`. `From<lumos::X>` gives the mirror's `Default`; `From<Mirror> for lumos::X` is compile-checked against the lumos struct. |
 
 ## Key types
 
