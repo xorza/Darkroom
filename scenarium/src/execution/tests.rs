@@ -251,6 +251,46 @@ mod missing_inputs {
 
         Ok(())
     }
+
+    /// An optional input bound to a node that's gated for *its own* missing
+    /// required input must read `Unbound` at execution — not panic. Regression
+    /// for the worker crashing in `collect_inputs` ("missing output values")
+    /// when a gated upstream produced no output yet an optional consumer still
+    /// ran. The planned-only sibling above can't catch this: it never executes.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn optional_bind_to_gated_upstream_reads_unbound() -> anyhow::Result<()> {
+        let mut graph = test_graph();
+        let mut func_lib = test_func_lib(default_hooks());
+
+        let get_b_id = graph.by_name("get_b").unwrap().id;
+        let sum_id = graph.by_name("sum").unwrap().id;
+
+        // sum's required input[0] is unbound → sum is missing-required → gated,
+        // so it produces no output this run.
+        bind(&mut graph, "sum", 0, Binding::None);
+        // mult[0] gets a real value (its lambda unwraps input[0]); mult[1] is an
+        // *optional* bind to the gated sum, so its missing output must surface as
+        // Unbound rather than crashing the executor.
+        bind(&mut graph, "mult", 0, (get_b_id, 0).into());
+        bind(&mut graph, "mult", 1, (sum_id, 0).into());
+        func_lib.by_name_mut("mult").unwrap().inputs[1].required = false;
+
+        let mut execution_graph = ExecutionEngine::default();
+        execution_graph.update(&graph, &func_lib);
+        // Pre-fix, this panicked the worker in `collect_inputs`.
+        execution_graph.execute_terminals().await?;
+
+        // sum is reported missing-required and gated; the optional consumer and
+        // the terminal still run (sum excluded).
+        let sum = execution_graph.by_name("sum").unwrap();
+        assert!(execution_graph.node_flags(sum).missing_required_inputs);
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph),
+            ["get_b", "mult", "print"]
+        );
+
+        Ok(())
+    }
 }
 
 // === Disabled Nodes ===

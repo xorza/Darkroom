@@ -137,6 +137,7 @@ pub fn astro_funclib() -> FuncLib {
                         .map(|v| v as f32)
                         .expect("sigma is required");
                     let cache = inputs[5].value.as_bool().expect("cache is required");
+                    eprintln!("cache {:?}", cache);
 
                     // Stacking many full-resolution CFA frames is heavy CPU work;
                     // a cached master is loaded instead when present.
