@@ -10,8 +10,9 @@
 
 use common::{Introspect, IntrospectEnum};
 use lumos::{
-    BackgroundConfig, BackgroundMode, DenoiseConfig, HdrConfig, LocalContrastConfig,
-    RegistrationConfig, StackConfig, StarDetectionConfig, Threshold,
+    BackgroundConfig, BackgroundMode, ColorMode, DenoiseConfig, HdrConfig, LocalContrastConfig,
+    RegistrationConfig, ScnrMethod, StackConfig, StarDetectionConfig, StretchConfig, StretchMethod,
+    Threshold,
 };
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
@@ -419,4 +420,188 @@ impl From<LocalContrastConfigDef> for LocalContrastConfig {
 impl NodeConfig for LocalContrastConfigDef {
     const TYPE_ID: &'static str = "eb0062ca-cef9-4fef-a52b-cf3e8e0fce3c";
     const NAME: &'static str = "LocalContrastConfig";
+}
+
+/// SCNR method (mirrors [`lumos::ScnrMethod`]'s variant choice; `amount` applies
+/// to `additive_mask`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumIter, EnumString, Display)]
+#[strum(serialize_all = "snake_case")]
+pub enum ScnrMethodDef {
+    #[default]
+    AverageNeutral,
+    AdditiveMask,
+}
+
+impl IntrospectEnum for ScnrMethodDef {
+    fn variants() -> Vec<String> {
+        Self::iter().map(|variant| variant.to_string()).collect()
+    }
+    fn to_variant(&self) -> String {
+        self.to_string()
+    }
+    fn from_variant(name: &str) -> Option<Self> {
+        name.parse().ok()
+    }
+}
+
+/// A SCNR config: method + the `additive_mask` blend `amount` (ignored by
+/// average-neutral). Builds the matching [`lumos::ScnrMethod`].
+#[derive(Debug, Clone, Introspect)]
+pub struct ScnrConfigDef {
+    pub method: ScnrMethodDef,
+    pub amount: f32,
+}
+
+impl Default for ScnrConfigDef {
+    fn default() -> Self {
+        Self {
+            method: ScnrMethodDef::AverageNeutral,
+            amount: 0.5,
+        }
+    }
+}
+
+impl From<ScnrConfigDef> for ScnrMethod {
+    fn from(mirror: ScnrConfigDef) -> Self {
+        match mirror.method {
+            ScnrMethodDef::AverageNeutral => ScnrMethod::AverageNeutral,
+            ScnrMethodDef::AdditiveMask => ScnrMethod::AdditiveMask {
+                amount: mirror.amount,
+            },
+        }
+    }
+}
+
+impl NodeConfig for ScnrConfigDef {
+    const TYPE_ID: &'static str = "cb80e688-a5ed-42fd-9087-6a9639a8b056";
+    const NAME: &'static str = "ScnrConfig";
+}
+
+/// Mirror of [`lumos::ColorMode`] (how a stretch curve maps across channels).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumIter, EnumString, Display)]
+#[strum(serialize_all = "snake_case")]
+pub enum ColorModeDef {
+    #[default]
+    ColorPreserving,
+    PerChannel,
+}
+
+impl IntrospectEnum for ColorModeDef {
+    fn variants() -> Vec<String> {
+        Self::iter().map(|variant| variant.to_string()).collect()
+    }
+    fn to_variant(&self) -> String {
+        self.to_string()
+    }
+    fn from_variant(name: &str) -> Option<Self> {
+        name.parse().ok()
+    }
+}
+
+impl From<ColorModeDef> for ColorMode {
+    fn from(mode: ColorModeDef) -> Self {
+        match mode {
+            ColorModeDef::ColorPreserving => ColorMode::ColorPreserving,
+            ColorModeDef::PerChannel => ColorMode::PerChannel,
+        }
+    }
+}
+
+impl From<ColorMode> for ColorModeDef {
+    fn from(mode: ColorMode) -> Self {
+        match mode {
+            ColorMode::ColorPreserving => ColorModeDef::ColorPreserving,
+            ColorMode::PerChannel => ColorModeDef::PerChannel,
+        }
+    }
+}
+
+/// The auto-stretch method choice (mirrors the two automatic
+/// [`lumos::StretchMethod`] variants the presets use).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumIter, EnumString, Display)]
+#[strum(serialize_all = "snake_case")]
+pub enum StretchMethodKindDef {
+    #[default]
+    AutoAsinh,
+    AutoStf,
+}
+
+impl IntrospectEnum for StretchMethodKindDef {
+    fn variants() -> Vec<String> {
+        Self::iter().map(|variant| variant.to_string()).collect()
+    }
+    fn to_variant(&self) -> String {
+        self.to_string()
+    }
+    fn from_variant(name: &str) -> Option<Self> {
+        name.parse().ok()
+    }
+}
+
+/// Curated mirror of [`lumos::StretchConfig`] for the two auto methods (what the
+/// presets expose): `target_background` applies to both, `shadow_sigmas` only to
+/// `auto_stf`. Explicit asinh / GHS curves aren't surfaced as nodes.
+#[derive(Debug, Clone, Introspect)]
+pub struct StretchConfigDef {
+    pub method: StretchMethodKindDef,
+    pub target_background: f32,
+    pub shadow_sigmas: f32,
+    pub color: ColorModeDef,
+}
+
+impl Default for StretchConfigDef {
+    fn default() -> Self {
+        StretchConfig::default().into()
+    }
+}
+
+impl From<StretchConfig> for StretchConfigDef {
+    fn from(config: StretchConfig) -> Self {
+        let (method, target_background, shadow_sigmas) = match config.method {
+            StretchMethod::AutoAsinh { target_background } => {
+                (StretchMethodKindDef::AutoAsinh, target_background, 1.5)
+            }
+            StretchMethod::AutoStf {
+                shadow_sigmas,
+                target_background,
+            } => (
+                StretchMethodKindDef::AutoStf,
+                target_background,
+                shadow_sigmas,
+            ),
+            // Explicit asinh / GHS aren't mirrored — fall back to auto-asinh defaults.
+            StretchMethod::Asinh { .. } | StretchMethod::Ghs { .. } => {
+                (StretchMethodKindDef::AutoAsinh, 0.2, 1.5)
+            }
+        };
+        Self {
+            method,
+            target_background,
+            shadow_sigmas,
+            color: config.color.into(),
+        }
+    }
+}
+
+impl From<StretchConfigDef> for StretchConfig {
+    fn from(mirror: StretchConfigDef) -> Self {
+        let method = match mirror.method {
+            StretchMethodKindDef::AutoAsinh => StretchMethod::AutoAsinh {
+                target_background: mirror.target_background,
+            },
+            StretchMethodKindDef::AutoStf => StretchMethod::AutoStf {
+                shadow_sigmas: mirror.shadow_sigmas,
+                target_background: mirror.target_background,
+            },
+        };
+        StretchConfig {
+            method,
+            color: mirror.color.into(),
+        }
+    }
+}
+
+impl NodeConfig for StretchConfigDef {
+    const TYPE_ID: &'static str = "b08bb9a1-db12-43d4-aa57-fe3e3732e917";
+    const NAME: &'static str = "StretchConfig";
 }

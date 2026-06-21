@@ -26,17 +26,14 @@ use scenarium::function::{Func, FuncInput, FuncLib, ValueVariant};
 
 use crate::astro::configs::{
     BackgroundConfigDef, CombineConfigDef, DenoiseConfigDef, DetectionConfigDef, HdrConfigDef,
-    LocalContrastConfigDef, RegistrationConfigDef,
+    LocalContrastConfigDef, RegistrationConfigDef, ScnrConfigDef, StretchConfigDef,
 };
 use crate::astro::masters::{MASTERS_DATA_TYPE, Masters};
 use crate::astro::presets::{
-    BackgroundModeKind, CombinePreset, DETECTION_PRESET_DATATYPE, DetectionPreset,
-    RegistrationPreset, SCNR_METHOD_DATATYPE, STRETCH_PRESET_DATATYPE, ScnrKind, StretchPreset,
+    BackgroundModeKind, CombinePreset, DetectionPreset, RegistrationPreset, ScnrKind, StretchPreset,
 };
 use crate::astro::{ASTRO_FRAME_DATA_TYPE, AstroFrame};
-use crate::config_node::{
-    ConfigValue, NodeConfig, config_builder_func, config_data_type, enum_input,
-};
+use crate::config_node::{ConfigValue, NodeConfig, config_builder_func, config_data_type};
 use crate::image::{IMAGE_DATA_TYPE, Image};
 
 /// Every file extension `AstroImage::from_file` recognizes: FITS, camera
@@ -286,19 +283,29 @@ pub fn astro_funclib() -> FuncLib {
             .category("astro")
             .pure()
             .input(frame_input("image"))
-            .input(enum_input("method", &STRETCH_PRESET_DATATYPE))
+            .input(preset_config_input::<StretchConfigDef>(
+                "method",
+                StretchPreset::variant_names(),
+            ))
             .output("image", ASTRO_FRAME_DATA_TYPE.clone())
             .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
                 Box::pin(async move {
                     assert_eq!(inputs.len(), 2);
                     assert_eq!(outputs.len(), 1);
 
+                    // A wired build_stretch_config overrides the picked preset.
                     let config = inputs[1]
                         .value
-                        .as_enum()
-                        .and_then(|s| StretchPreset::from_str(s).ok())
-                        .expect("method is required")
-                        .config();
+                        .as_custom::<ConfigValue<StretchConfigDef>>()
+                        .map(|c| c.0.clone().into())
+                        .or_else(|| {
+                            inputs[1]
+                                .value
+                                .as_enum()
+                                .and_then(|s| StretchPreset::from_str(s).ok())
+                                .map(|preset| preset.config())
+                        })
+                        .expect("method is required");
                     // Arc-clone the frame so the deep copy + stretch run
                     // off the worker thread.
                     let value = inputs[0].value.clone();
@@ -401,6 +408,19 @@ pub fn astro_funclib() -> FuncLib {
         "Builds a detailed local-contrast config",
     ));
 
+    // build_stretch_config / build_scnr_config: detailed overrides for the
+    // auto_stretch / scnr preset quick-picks.
+    func_lib.add(config_builder_func::<StretchConfigDef>(
+        "82f271d4-d047-459a-83aa-0bf8288787cf",
+        "build_stretch_config",
+        "Builds a detailed display-stretch config",
+    ));
+    func_lib.add(config_builder_func::<ScnrConfigDef>(
+        "d07742d1-4469-4739-b2ff-78b4dcf64132",
+        "build_scnr_config",
+        "Builds a detailed SCNR (green-removal) config",
+    ));
+
     // --- per-frame processing nodes (AstroFrame → AstroFrame) ---
 
     // background_extract: a quick `mode` preset, or a `config` wired from
@@ -486,16 +506,23 @@ pub fn astro_funclib() -> FuncLib {
         "Removes the residual green cast (SCNR)",
         vec![
             frame_input("image"),
-            enum_input("method", &SCNR_METHOD_DATATYPE),
+            preset_config_input::<ScnrConfigDef>("method", ScnrKind::variant_names()),
         ],
         FuncLambda::new(move |_, _, _, inputs, _, outputs| {
             Box::pin(async move {
+                // A wired build_scnr_config overrides the picked preset.
                 let method = inputs[1]
                     .value
-                    .as_enum()
-                    .and_then(|s| ScnrKind::from_str(s).ok())
-                    .expect("method is required")
-                    .config();
+                    .as_custom::<ConfigValue<ScnrConfigDef>>()
+                    .map(|c| c.0.clone().into())
+                    .or_else(|| {
+                        inputs[1]
+                            .value
+                            .as_enum()
+                            .and_then(|s| ScnrKind::from_str(s).ok())
+                            .map(|preset| preset.config())
+                    })
+                    .expect("method is required");
                 let value = inputs[0].value.clone();
                 outputs[0] = run_frame_op(value, move |img| scnr(img, method)).await?;
                 Ok(())
@@ -595,19 +622,29 @@ pub fn astro_funclib() -> FuncLib {
             .category("astro")
             .pure()
             .input(frame_input("image"))
-            .input(enum_input("detection", &DETECTION_PRESET_DATATYPE))
+            .input(preset_config_input::<DetectionConfigDef>(
+                "detection",
+                DetectionPreset::variant_names(),
+            ))
             .output("count", DataType::Int)
             .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
                 Box::pin(async move {
                     assert_eq!(inputs.len(), 2);
                     assert_eq!(outputs.len(), 1);
 
+                    // A wired build_detection_config overrides the picked preset.
                     let config = inputs[1]
                         .value
-                        .as_enum()
-                        .and_then(|s| DetectionPreset::from_str(s).ok())
-                        .expect("detection is required")
-                        .config();
+                        .as_custom::<ConfigValue<DetectionConfigDef>>()
+                        .map(|c| c.0.clone().into())
+                        .or_else(|| {
+                            inputs[1]
+                                .value
+                                .as_enum()
+                                .and_then(|s| DetectionPreset::from_str(s).ok())
+                                .map(|preset| preset.config())
+                        })
+                        .expect("detection is required");
                     let value = inputs[0].value.clone();
                     let count = tokio::task::spawn_blocking(move || {
                         let frame = value

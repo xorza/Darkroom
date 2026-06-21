@@ -147,8 +147,19 @@ fn auto_stretch_node_is_registered() {
     assert_eq!(f.inputs[0].name, "image");
     assert_eq!(f.inputs[0].data_type, *ASTRO_FRAME_DATA_TYPE);
     assert!(f.inputs[0].required);
+    // `method` is a config-typed input with the presets as value_variants
+    // (seeded to the first), overridable by build_stretch_config.
     assert_eq!(f.inputs[1].name, "method");
-    assert_eq!(f.inputs[1].data_type, *STRETCH_PRESET_DATATYPE);
+    assert_eq!(
+        f.inputs[1].data_type,
+        config_data_type::<StretchConfigDef>()
+    );
+    let methods: Vec<&str> = f.inputs[1]
+        .value_variants
+        .iter()
+        .map(|o| o.name.as_str())
+        .collect();
+    assert_eq!(methods, ["auto_asinh", "auto_stf"]);
     assert_eq!(
         f.inputs[1].default_value,
         Some(StaticValue::Enum("auto_asinh".to_string())),
@@ -242,6 +253,62 @@ fn scalar_per_frame_nodes_take_optional_config_overrides() {
             b.inputs.iter().all(|i| i.required),
             "{builder} fields required"
         );
+    }
+}
+
+#[test]
+fn preset_nodes_use_value_variant_picks_with_build_overrides() {
+    let lib = astro_funclib();
+    // Every preset node is consistent: a config-typed input whose `value_variants`
+    // are the preset names (seeded to the first), overridable by a build node.
+    // (node, input name, input index, config type, build node, first preset)
+    let cases: [(&str, &str, usize, DataType, &str, &str); 3] = [
+        (
+            "auto_stretch",
+            "method",
+            1,
+            config_data_type::<StretchConfigDef>(),
+            "build_stretch_config",
+            "auto_asinh",
+        ),
+        (
+            "scnr",
+            "method",
+            1,
+            config_data_type::<ScnrConfigDef>(),
+            "build_scnr_config",
+            "average_neutral",
+        ),
+        (
+            "star_detect",
+            "detection",
+            1,
+            config_data_type::<DetectionConfigDef>(),
+            "build_detection_config",
+            "wide_field",
+        ),
+    ];
+    for (node, input_name, idx, ty, builder, first_preset) in cases {
+        let f = func(&lib, node);
+        let input = &f.inputs[idx];
+        assert_eq!(input.name, input_name, "{node} preset input name");
+        assert_eq!(input.data_type, ty, "{node} preset input is config-typed");
+        assert!(
+            !input.value_variants.is_empty(),
+            "{node} offers preset value_variants"
+        );
+        assert_eq!(
+            input.value_variants[0].name, first_preset,
+            "{node} first preset"
+        );
+        assert_eq!(
+            input.default_value,
+            Some(StaticValue::Enum(first_preset.to_string())),
+            "{node} seeded to first preset"
+        );
+        // The matching build node exists and emits the same config type.
+        let b = func(&lib, builder);
+        assert_eq!(b.outputs[0].data_type, ty, "{builder} output type");
     }
 }
 
