@@ -1,10 +1,16 @@
-//! `AstroFrame` — a [`lumos::AstroImage`] wrapped as a scenarium
-//! [`CustomValue`] so astronomical frames flow on graph wires.
+//! The `astro` domain — `lumos`-backed nodes and types. This module is also the
+//! home of [`AstroFrame`] (a [`lumos::AstroImage`] wrapped as a scenarium
+//! [`CustomValue`] so astronomical frames flow on graph wires).
 //!
-//! Mirrors [`crate::image::Image`], but the preview is generated on the CPU
-//! (lumos has no GPU backend): a downscaled RGBA_U8 thumbnail is computed
-//! synchronously in [`AstroFrame::gen_preview`] and parked in a [`Slot`]
-//! for the editor to pick up via [`AstroFrame::take_preview`].
+//! `AstroFrame` mirrors [`crate::image::Image`], but the preview is generated on
+//! the CPU (lumos has no GPU backend): a downscaled RGBA_U8 thumbnail is
+//! computed synchronously in [`AstroFrame::gen_preview`] and parked in a
+//! [`Slot`] for the editor to pick up via [`AstroFrame::take_preview`].
+
+mod configs;
+pub(crate) mod funclib;
+mod masters;
+mod presets;
 
 use std::any::Any;
 use std::sync::{Arc, LazyLock};

@@ -10,7 +10,7 @@
 //! The introspection itself (field reflection, labels, typed rebuild) lives in
 //! `common` and is GUI-agnostic; this module only maps it to node ports +
 //! `DynamicValue`s. A config type is a [`NodeConfig`]: `Introspect` plus a
-//! stable wire `TYPE_ID`/`NAME`. See [`crate::astro_configs`] for the mirror
+//! stable wire `TYPE_ID`/`NAME`. See [`crate::astro::configs`] for the mirror
 //! types.
 
 use std::any::Any;
@@ -25,7 +25,9 @@ use scenarium::function::{Func, FuncInput};
 
 /// A config type that can back a config-builder node: introspectable, plus a
 /// stable identity for the value it travels on.
-pub trait NodeConfig: Introspect + Clone + fmt::Debug + Send + Sync + 'static {
+pub(crate) trait NodeConfig:
+    Introspect + Clone + fmt::Debug + Send + Sync + 'static
+{
     /// Stable type id for the built config's wire (a `uuidgen` literal).
     const TYPE_ID: &'static str;
     /// Display name for the wire type (e.g. `"BackgroundConfig"`).
@@ -34,7 +36,7 @@ pub trait NodeConfig: Introspect + Clone + fmt::Debug + Send + Sync + 'static {
 
 /// A built config flowing on a wire — wraps the typed value.
 #[derive(Debug)]
-pub struct ConfigValue<T>(pub T);
+pub(crate) struct ConfigValue<T>(pub(crate) T);
 
 impl<T: NodeConfig> CustomValue for ConfigValue<T> {
     fn type_def(&self) -> Arc<TypeDef> {
@@ -57,13 +59,22 @@ impl<T: NodeConfig> fmt::Display for ConfigValue<T> {
 
 /// The custom [`DataType`] a `T` config travels on (distinct per `T`, so wiring
 /// is type-checked).
-pub fn config_data_type<T: NodeConfig>() -> DataType {
+pub(crate) fn config_data_type<T: NodeConfig>() -> DataType {
     DataType::from_custom(T::TYPE_ID, T::NAME)
+}
+
+/// A required enum/preset dropdown input seeded to the datatype's first variant.
+/// Shared by both funclibs: the default keeps a fresh node valid, while clearing
+/// it surfaces as a missing input.
+pub(crate) fn enum_input(name: &str, datatype: &DataType) -> FuncInput {
+    let mut input = FuncInput::required(name, datatype.clone());
+    input.default_value = datatype.default_value();
+    input
 }
 
 /// Build a config-builder `Func` for `T`: one labeled input per introspected
 /// field, a single `config` output of [`config_data_type::<T>`].
-pub fn config_builder_func<T: NodeConfig>(
+pub(crate) fn config_builder_func<T: NodeConfig>(
     node_id: &str,
     node_name: &str,
     description: &str,

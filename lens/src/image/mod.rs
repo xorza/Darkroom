@@ -1,3 +1,12 @@
+//! The `image` domain — `imaginarium`-backed nodes and types. This module is
+//! also the home of [`Image`] (a [`imaginarium::ImageBuffer`] wrapped as a
+//! scenarium [`CustomValue`] with an async GPU thumbnail preview).
+
+mod blend_mode;
+mod conversion_format;
+pub(crate) mod funclib;
+mod vision_ctx;
+
 use std::any::Any;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
@@ -10,7 +19,7 @@ use scenarium::data::{CustomValue, DataType, PendingPreview, TypeDef};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-use crate::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
+use crate::image::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
 
 /// Pending preview for image data that requires GPU polling.
 struct ImagePendingPreview {

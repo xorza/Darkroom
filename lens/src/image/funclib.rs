@@ -1,10 +1,11 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::blend_mode::BLENDMODE_DATATYPE;
-use crate::conversion_format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat};
+use crate::config_node::enum_input;
+use crate::image::blend_mode::BLENDMODE_DATATYPE;
+use crate::image::conversion_format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat};
+use crate::image::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
 use crate::image::{IMAGE_DATA_TYPE, Image};
-use crate::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
 use imaginarium::{Blend, BlendMode, ContrastBrightness, SUPPORTED_EXTENSIONS, Transform, Vec2};
 use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::func_lambda::FuncLambda;
@@ -268,11 +269,4 @@ pub fn image_funclib() -> FuncLib {
     );
 
     func_lib
-}
-
-/// A required enum-dropdown input seeded to the datatype's first variant.
-fn enum_input(name: &str, datatype: &DataType) -> FuncInput {
-    let mut input = FuncInput::required(name, datatype.clone());
-    input.default_value = datatype.default_value();
-    input
 }

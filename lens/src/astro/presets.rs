@@ -18,16 +18,37 @@ use strum_macros::EnumIter;
 /// Sigma threshold baked into the rejection-based combine presets.
 const COMBINE_SIGMA: f32 = 3.0;
 
-/// Generate a preset enum plus its `EnumVariants` / `FromStr` glue and a
-/// `DataType::Enum` handle. Each variant carries a stable string `label`
-/// (the dropdown text + serialized value) and a `config` expression that
-/// builds the lumos stage config.
+/// Generate a preset enum plus its `EnumVariants` / `FromStr` glue, optionally
+/// with a `DataType::Enum` handle. Each variant carries a stable string `label`
+/// (the dropdown text + serialized value) and a `config` expression that builds
+/// the lumos stage config. Presets consumed only as a variant list + `config`
+/// (e.g. `stack_lights`' `value_options`) omit the `datatype:`/`type_id:` lines;
+/// presets rendered as a dropdown (via `enum_input`) keep them.
 macro_rules! preset_enum {
+    // With a `DataType::Enum` handle — delegates to the enum-only form, then
+    // adds the datatype static.
     (
         $(#[$meta:meta])*
         $enum:ident => $config:ty,
         datatype: $datatype:ident,
         type_id: $type_id:literal,
+        display: $display:literal,
+        variants: { $($variant:ident = $label:literal => $ctor:expr),+ $(,)? }
+    ) => {
+        preset_enum! {
+            $(#[$meta])*
+            $enum => $config,
+            display: $display,
+            variants: { $($variant = $label => $ctor),+ }
+        }
+
+        pub(crate) static $datatype: LazyLock<DataType> =
+            LazyLock::new(|| DataType::from_enum::<$enum>($type_id, $display));
+    };
+    // Enum-only form.
+    (
+        $(#[$meta:meta])*
+        $enum:ident => $config:ty,
         display: $display:literal,
         variants: { $($variant:ident = $label:literal => $ctor:expr),+ $(,)? }
     ) => {
@@ -67,9 +88,6 @@ macro_rules! preset_enum {
                     .ok_or_else(|| format!("unknown {} preset: {s}", $display))
             }
         }
-
-        pub static $datatype: LazyLock<DataType> =
-            LazyLock::new(|| DataType::from_enum::<$enum>($type_id, $display));
     };
 }
 
@@ -90,8 +108,6 @@ preset_enum! {
 preset_enum! {
     /// Registration (alignment) tuning preset.
     RegistrationPreset => RegistrationConfig,
-    datatype: REGISTRATION_PRESET_DATATYPE,
-    type_id: "2724355e-82f6-4b20-b4dc-8df4ee3441b7",
     display: "RegistrationPreset",
     variants: {
         Default = "default" => RegistrationConfig::default(),
@@ -105,8 +121,6 @@ preset_enum! {
 preset_enum! {
     /// Frame-combination preset.
     CombinePreset => StackConfig,
-    datatype: COMBINE_PRESET_DATATYPE,
-    type_id: "a5ced174-4463-4395-99f2-59d66725574b",
     display: "CombinePreset",
     variants: {
         SigmaClipped = "sigma_clipped" => StackConfig::sigma_clipped(COMBINE_SIGMA),
@@ -131,8 +145,6 @@ preset_enum! {
 preset_enum! {
     /// Background-removal mode for `extract_background`.
     BackgroundModeKind => BackgroundMode,
-    datatype: BACKGROUND_MODE_DATATYPE,
-    type_id: "064153dd-6c55-4603-be27-dc15b8db4d4c",
     display: "BackgroundMode",
     variants: {
         Subtract = "subtract" => BackgroundMode::Subtract,
@@ -179,13 +191,29 @@ mod tests {
     }
 
     #[test]
-    fn combine_datatype_is_an_enum_with_the_listed_variants() {
-        let DataType::Enum(def) = &*COMBINE_PRESET_DATATYPE else {
+    fn detection_datatype_is_an_enum_with_the_listed_variants() {
+        // Covers the macro's with-`datatype` arm (detection renders as a dropdown).
+        let DataType::Enum(def) = &*DETECTION_PRESET_DATATYPE else {
             panic!("expected an Enum data type");
         };
-        assert_eq!(def.display_name, "CombinePreset");
+        assert_eq!(def.display_name, "DetectionPreset");
         assert_eq!(
             def.variants,
+            [
+                "wide_field",
+                "high_resolution",
+                "crowded_field",
+                "precise_ground"
+            ]
+        );
+    }
+
+    #[test]
+    fn combine_preset_lists_its_variants() {
+        // Covers the enum-only arm (combine is consumed via value_options, not a
+        // DataType handle).
+        assert_eq!(
+            CombinePreset::variant_names(),
             ["sigma_clipped", "winsorized", "median", "mean"]
         );
     }

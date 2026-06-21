@@ -3,18 +3,40 @@
 Node-function library: adapts `imaginarium` (GPU image ops) **and** `lumos`
 (astronomical processing) into the `scenarium` node-based workflow.
 
-## Modules
+## Layout
+
+Two domains as folders + a shared bridge at the root. Modules are private;
+`lib.rs` publishes only `AstroFrame`, `Image`, `astro_funclib`, `image_funclib`
+(everything else — config mirrors, presets, datatypes, the bridge — is
+crate-internal).
+
+```
+src/
+├── lib.rs              published surface (4 items)
+├── config_node.rs      shared Introspect → config-builder bridge
+├── image/              imaginarium adapter
+│   ├── mod.rs          Image (CustomValue, async GPU thumbnail) + submodules
+│   ├── funclib.rs      image_funclib() — category `image`
+│   ├── blend_mode.rs · conversion_format.rs · vision_ctx.rs
+└── astro/              lumos adapter
+    ├── mod.rs          AstroFrame (CustomValue, CPU thumbnail) + submodules
+    ├── funclib/        astro_funclib() — category `astro` (mod.rs + tests.rs)
+    ├── configs.rs      mirror config structs (Introspect)
+    ├── presets.rs      preset_enum! dropdown enums → lumos stage configs
+    └── masters.rs      Masters (CalibrationMasters CustomValue)
+```
 
 | Module | Role |
 |--------|------|
-| `image_funclib.rs` | Image-processing node functions (imaginarium) + type definitions. |
-| `vision_ctx.rs` | `VisionCtx` wrapping `imaginarium::ProcessingContext` for GPU/CPU dispatch. |
-| `astro_funclib.rs` | Astro node functions (lumos), category `astro`. |
-| `astro_frame.rs` | `AstroFrame` — `lumos::AstroImage` as a `CustomValue` (CPU thumbnail preview). |
-| `masters.rs` | `Masters` — `lumos::CalibrationMasters` as a `CustomValue`. |
-| `astro_presets.rs` | `preset_enum!` macro + `DetectionPreset`/`RegistrationPreset`/`CombinePreset` (dropdown enums → lumos stage configs). |
-| `config_node.rs` | Scenarium bridge over `common`'s struct introspection: `config_builder_func::<T: NodeConfig>()` maps a `common::Introspect` type's `FieldDesc`s → a `Func` with one input per field (`FieldKind`→`DataType`, `FieldValue`↔`StaticValue`/`DynamicValue`) → a wireable `ConfigValue<T>`. `NodeConfig` = `Introspect` + a stable wire `TYPE_ID`/`NAME`. Inputs are required unless the field is `Option<_>`; enum `type_id`s via `common::FnvHasher`. |
-| `astro_configs.rs` | Lens-side editable **mirror** structs of lumos configs (e.g. `BackgroundConfigDef`) deriving `common::Introspect` (so lumos needn't) + `impl NodeConfig` + `From`/`Into` the lumos type. Mirror enums (`BackgroundModeDef`) impl `common::IntrospectEnum` via `strum`. `From<lumos::X>` gives the mirror's `Default`; `From<Mirror> for lumos::X` is compile-checked against the lumos struct. |
+| `image/mod.rs` | `Image` — `imaginarium::ImageBuffer` as a `CustomValue` (async GPU thumbnail). |
+| `image/funclib.rs` | `image_funclib()` — imaginarium nodes (category `image`). |
+| `image/{blend_mode,conversion_format,vision_ctx}.rs` | `BlendMode`/`ColorFormat` datatypes; `VisionCtx` (GPU/CPU `ProcessingContext`). |
+| `astro/mod.rs` | `AstroFrame` — `lumos::AstroImage` as a `CustomValue` (CPU thumbnail preview). |
+| `astro/funclib/` | `astro_funclib()` — lumos nodes (category `astro`); tests in `tests.rs`. |
+| `astro/masters.rs` | `Masters` — `lumos::CalibrationMasters` as a `CustomValue`. |
+| `astro/presets.rs` | `preset_enum!` macro + dropdown enums → lumos stage configs. The macro's `datatype:` handle is optional — presets consumed only as `value_options` (registration/combine/background) skip it; those rendered via `enum_input` (detection/stretch/scnr) keep it. |
+| `config_node.rs` | Scenarium bridge over `common`'s struct introspection: `config_builder_func::<T: NodeConfig>()` maps a `common::Introspect` type's `FieldDesc`s → a `Func` with one input per field (`FieldKind`→`DataType`, `FieldValue`↔`StaticValue`/`DynamicValue`) → a wireable `ConfigValue<T>`. `NodeConfig` = `Introspect` + a stable wire `TYPE_ID`/`NAME`. Inputs required unless the field is `Option<_>`; enum `type_id`s via `common::FnvHasher`. Also home of the shared `enum_input` FuncInput helper. |
+| `astro/configs.rs` | Lens-side editable **mirror** structs of lumos configs (e.g. `BackgroundConfigDef`) deriving `common::Introspect` (so lumos needn't) + `impl NodeConfig` + `From`/`Into` the lumos type. Mirror enums (`BackgroundModeDef`) impl `common::IntrospectEnum` via `strum`. `From<lumos::X>` gives the mirror's `Default`; `From<Mirror> for lumos::X` is compile-checked against the lumos struct. |
 
 ## Key types
 
@@ -25,7 +47,7 @@ Node-function library: adapts `imaginarium` (GPU image ops) **and** `lumos`
 - `Masters` — wrapper around `lumos::CalibrationMasters`.
 - `VisionCtx` — context holding a `ProcessingContext` for GPU/CPU dispatch.
 - `ConversionFormat` — enum of the 12 color-format conversion targets.
-- Lazy-initialized type handles: `IMAGE_DATA_TYPE`, `ASTRO_FRAME_DATA_TYPE`, `MASTERS_DATA_TYPE`, `ASTRO_IMAGE_PATH_DATA_TYPE` (file picker filtered to the FITS/RAW/standard extensions `from_file` loads), `ASTRO_DIR_DATA_TYPE` (frame-folder picker), `DETECTION_PRESET_DATATYPE` / `REGISTRATION_PRESET_DATATYPE` / `COMBINE_PRESET_DATATYPE`, `BLENDMODE_DATATYPE`, `CONVERSION_FORMAT_DATATYPE`, `VISION_CTX_TYPE`.
+- Lazy-initialized type handles: `IMAGE_DATA_TYPE`, `ASTRO_FRAME_DATA_TYPE`, `MASTERS_DATA_TYPE`, `ASTRO_IMAGE_PATH_DATA_TYPE` (file picker filtered to the FITS/RAW/standard extensions `from_file` loads), `ASTRO_DIR_DATA_TYPE` (frame-folder picker), the dropdown preset datatypes `DETECTION_PRESET_DATATYPE` / `STRETCH_PRESET_DATATYPE` / `SCNR_METHOD_DATATYPE` (registration/combine/background are consumed via `value_options`, so they have no datatype handle), `BLENDMODE_DATATYPE`, `CONVERSION_FORMAT_DATATYPE`, `VISION_CTX_TYPE`.
 
 ## Functions
 
