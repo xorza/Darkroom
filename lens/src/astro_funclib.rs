@@ -1,4 +1,4 @@
-//! `AstroFuncLib` — the `lumos`-backed node library (category `astro`):
+//! `astro_funclib()` — the `lumos`-backed node library (category `astro`):
 //! `load_astro_image` (decode), `build_masters` (calibration masters),
 //! `stack_lights` (calibrate + align + stack), and per-frame processing
 //! nodes like `auto_stretch`. Heavy work runs off the worker via
@@ -60,30 +60,9 @@ pub static ASTRO_IMAGE_PATH_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| {
 pub static ASTRO_DIR_DATA_TYPE: LazyLock<DataType> =
     LazyLock::new(|| DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::Directory))));
 
-#[derive(Debug)]
-pub struct AstroFuncLib {
-    func_lib: FuncLib,
-}
-
-impl AstroFuncLib {
-    pub fn func_lib(&self) -> &FuncLib {
-        &self.func_lib
-    }
-
-    pub fn into_func_lib(self) -> FuncLib {
-        self.func_lib
-    }
-}
-
-impl From<AstroFuncLib> for FuncLib {
-    fn from(astro: AstroFuncLib) -> Self {
-        astro.func_lib
-    }
-}
-
-impl Default for AstroFuncLib {
-    fn default() -> Self {
-        let mut func_lib = FuncLib::default();
+/// The lumos-backed astro nodes (category `astro`).
+pub fn astro_funclib() -> FuncLib {
+    let mut func_lib = FuncLib::default();
 
         // load_astro_image
         func_lib.add(Func {
@@ -633,8 +612,7 @@ impl Default for AstroFuncLib {
             ..Default::default()
         });
 
-        Self { func_lib }
-    }
+    func_lib
 }
 
 /// A preset dropdown input seeded to the enum's first variant.
@@ -749,9 +727,8 @@ mod tests {
 
     use super::*;
 
-    fn func<'a>(lib: &'a AstroFuncLib, name: &str) -> &'a Func {
-        lib.func_lib()
-            .funcs
+    fn func<'a>(lib: &'a FuncLib, name: &str) -> &'a Func {
+        lib.funcs
             .iter()
             .find(|f| f.name == name)
             .unwrap_or_else(|| panic!("{name} registered"))
@@ -777,7 +754,7 @@ mod tests {
 
     #[test]
     fn load_astro_image_node_is_registered() {
-        let lib = AstroFuncLib::default();
+        let lib = astro_funclib();
         let f = func(&lib, "load_astro_image");
         assert_eq!(f.category, "astro");
         assert_eq!(f.inputs.len(), 1);
@@ -788,7 +765,7 @@ mod tests {
 
     #[test]
     fn build_masters_node_is_registered() {
-        let lib = AstroFuncLib::default();
+        let lib = astro_funclib();
         let f = func(&lib, "build_masters");
         assert_eq!(f.category, "astro");
         assert_eq!(f.outputs.len(), 1);
@@ -812,7 +789,7 @@ mod tests {
 
     #[test]
     fn stack_lights_node_is_registered() {
-        let lib = AstroFuncLib::default();
+        let lib = astro_funclib();
         let f = func(&lib, "stack_lights");
         assert_eq!(f.category, "astro");
 
@@ -841,7 +818,7 @@ mod tests {
 
     #[test]
     fn auto_stretch_node_is_registered() {
-        let lib = AstroFuncLib::default();
+        let lib = astro_funclib();
         let f = func(&lib, "auto_stretch");
         assert_eq!(f.category, "astro");
         assert_eq!(f.inputs.len(), 2);
@@ -860,7 +837,7 @@ mod tests {
 
     #[test]
     fn astro_to_image_node_is_registered() {
-        let lib = AstroFuncLib::default();
+        let lib = astro_funclib();
         let f = func(&lib, "astro_to_image");
         assert_eq!(f.category, "astro");
         assert_eq!(f.inputs.len(), 1);
@@ -874,7 +851,7 @@ mod tests {
 
     #[test]
     fn processing_nodes_are_registered() {
-        let lib = AstroFuncLib::default();
+        let lib = astro_funclib();
         // Each in-place op: a required `image` AstroFrame in, an AstroFrame out.
         for name in [
             "background_extract",

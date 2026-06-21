@@ -10,30 +10,9 @@ use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::func_lambda::FuncLambda;
 use scenarium::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
 
-#[derive(Debug)]
-pub struct ImageFuncLib {
-    func_lib: FuncLib,
-}
-
-impl ImageFuncLib {
-    pub fn func_lib(&self) -> &FuncLib {
-        &self.func_lib
-    }
-
-    pub fn into_func_lib(self) -> FuncLib {
-        self.func_lib
-    }
-}
-
-impl From<ImageFuncLib> for FuncLib {
-    fn from(image: ImageFuncLib) -> Self {
-        image.func_lib
-    }
-}
-
-impl Default for ImageFuncLib {
-    fn default() -> Self {
-        let mut func_lib = FuncLib::default();
+/// The imaginarium image-processing nodes (category `image`).
+pub fn image_funclib() -> FuncLib {
+    let mut func_lib = FuncLib::default();
 
         // brightness_contrast
         func_lib.add(Func {
@@ -425,6 +404,5 @@ impl Default for ImageFuncLib {
             ..Default::default()
         });
 
-        Self { func_lib }
-    }
+    func_lib
 }
