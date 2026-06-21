@@ -13,6 +13,8 @@ Node-function library: adapts `imaginarium` (GPU image ops) **and** `lumos`
 | `astro_frame.rs` | `AstroFrame` — `lumos::AstroImage` as a `CustomValue` (CPU thumbnail preview). |
 | `masters.rs` | `Masters` — `lumos::CalibrationMasters` as a `CustomValue`. |
 | `astro_presets.rs` | `preset_enum!` macro + `DetectionPreset`/`RegistrationPreset`/`CombinePreset` (dropdown enums → lumos stage configs). |
+| `config_node.rs` | Generic config-builder: `config_builder_func::<T: NodeConfig>()` reflects a serde+`JsonSchema` type's fields (via its JSON schema) into a `Func` with one input per field → a wireable `ConfigValue<T>`. Labels = `#[schemars(title)]` or prettified field name (`tile_size`→"Tile Size"); inputs are required unless the field is `Option<_>`. Flat configs only (primitives + unit-enum dropdowns); nested/data-enums fall back to `Default`. |
+| `astro_configs.rs` | Lens-side editable **mirror** structs of lumos configs (e.g. `BackgroundConfigDef`) that derive serde+`JsonSchema` (so lumos needn't) + `impl NodeConfig` + `From`/`Into` the lumos type. `From<lumos::X>` gives the mirror's `Default`; `From<Mirror> for lumos::X` is compile-checked against the lumos struct. |
 
 ## Key types
 
@@ -40,6 +42,7 @@ Node-function library: adapts `imaginarium` (GPU image ops) **and** `lumos`
 | `auto_stretch` | Display-stretch an `AstroFrame` (`StretchPreset` dropdown → `lumos::stretch`, off-thread). |
 | `background_extract` / `denoise` / `scnr` / `neutralize_background` / `hdr_compress` / `local_contrast` | Per-frame `AstroFrame → AstroFrame` processing (lumos in-place ops via the `processing_func` + `run_frame_op` helpers, off-thread). |
 | `star_detect` | Detect stars in an `AstroFrame` → star `count` (Int) (`StarDetector`, `DetectionPreset` dropdown). |
+| `build_background_config` | Config-builder (`config_builder_func::<BackgroundConfig>`): a field-per-input node → a `BackgroundConfig` value; wire into `background_extract`'s optional `config` to override its `mode` preset. |
 | `astro_to_image` | Bridge an `AstroFrame` → `Image` so the imaginarium image nodes can consume astro output. |
 
 ## Dependencies

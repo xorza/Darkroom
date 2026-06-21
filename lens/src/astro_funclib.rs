@@ -22,12 +22,14 @@ use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::func_lambda::FuncLambda;
 use scenarium::function::{Func, FuncInput, FuncLib};
 
+use crate::astro_configs::BackgroundConfigDef;
 use crate::astro_frame::{ASTRO_FRAME_DATA_TYPE, AstroFrame};
 use crate::astro_presets::{
     BACKGROUND_MODE_DATATYPE, BackgroundModeKind, COMBINE_PRESET_DATATYPE, CombinePreset,
     DETECTION_PRESET_DATATYPE, DetectionPreset, REGISTRATION_PRESET_DATATYPE, RegistrationPreset,
     SCNR_METHOD_DATATYPE, STRETCH_PRESET_DATATYPE, ScnrKind, StretchPreset,
 };
+use crate::config_node::{ConfigValue, config_builder_func, config_data_type};
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use crate::masters::{MASTERS_DATA_TYPE, Masters};
 
@@ -315,9 +317,20 @@ pub fn astro_funclib() -> FuncLib {
             })),
     );
 
+    // --- config-builder nodes ---
+
+    // build_background_config: expose every BackgroundConfig field as an input,
+    // output a detailed config to wire into background_extract.
+    func_lib.add(config_builder_func::<BackgroundConfigDef>(
+        "9cda0462-1b8e-4c50-83d6-4db470df22d9",
+        "build_background_config",
+        "Builds a detailed background-extraction config",
+    ));
+
     // --- per-frame processing nodes (AstroFrame → AstroFrame) ---
 
-    // background_extract
+    // background_extract: a quick `mode` preset, or a `config` wired from
+    // build_background_config (which overrides the preset when present).
     func_lib.add(processing_func(
         "e27c2a02-ec2a-4c6d-afea-60d1276ff8e1",
         "background_extract",
@@ -325,24 +338,29 @@ pub fn astro_funclib() -> FuncLib {
         vec![
             frame_input("image"),
             preset_input("mode", &BACKGROUND_MODE_DATATYPE),
+            FuncInput::optional("config", config_data_type::<BackgroundConfigDef>()),
         ],
         FuncLambda::new(move |_, _, _, inputs, _, outputs| {
             Box::pin(async move {
-                let mode = inputs[1]
+                let config = inputs[2]
                     .value
-                    .as_enum()
-                    .and_then(|s| BackgroundModeKind::from_str(s).ok())
-                    .unwrap_or(BackgroundModeKind::Subtract)
-                    .config();
-                let value = inputs[0].value.clone();
-                outputs[0] = run_frame_op(value, move |img| {
-                    extract_background(
-                        img,
-                        &BackgroundConfig {
+                    .as_custom::<ConfigValue<BackgroundConfigDef>>()
+                    .map(|c| c.0.clone().into())
+                    .unwrap_or_else(|| {
+                        let mode = inputs[1]
+                            .value
+                            .as_enum()
+                            .and_then(|s| BackgroundModeKind::from_str(s).ok())
+                            .unwrap_or(BackgroundModeKind::Subtract)
+                            .config();
+                        BackgroundConfig {
                             mode,
                             ..Default::default()
-                        },
-                    );
+                        }
+                    });
+                let value = inputs[0].value.clone();
+                outputs[0] = run_frame_op(value, move |img| {
+                    extract_background(img, &config);
                 })
                 .await?;
                 Ok(())
@@ -781,5 +799,42 @@ mod tests {
         assert_eq!(sd.outputs.len(), 1);
         assert_eq!(sd.outputs[0].name, "count");
         assert_eq!(sd.outputs[0].data_type, DataType::Int);
+    }
+
+    #[test]
+    fn build_background_config_reflects_fields_and_feeds_background_extract() {
+        let lib = astro_funclib();
+        // The builder exposes one labeled input per BackgroundConfig field, in
+        // struct order; all required (none are `Option`s).
+        let builder = func(&lib, "build_background_config");
+        assert_eq!(builder.category, "astro");
+        let labels: Vec<&str> = builder.inputs.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(
+            labels,
+            [
+                "Tile Size",
+                "Degree",
+                "Mode",
+                "Rejection Sigma",
+                "Iterations",
+                "Divide Floor"
+            ]
+        );
+        assert!(builder.inputs.iter().all(|i| i.required));
+        assert_eq!(builder.outputs[0].name, "config");
+        assert_eq!(
+            builder.outputs[0].data_type,
+            config_data_type::<BackgroundConfigDef>()
+        );
+
+        // background_extract gained an optional `config` input of that type, so a
+        // built config can be wired in to override the `mode` preset.
+        let bg = func(&lib, "background_extract");
+        assert_eq!(bg.inputs[2].name, "config");
+        assert_eq!(
+            bg.inputs[2].data_type,
+            config_data_type::<BackgroundConfigDef>()
+        );
+        assert!(!bg.inputs[2].required);
     }
 }
