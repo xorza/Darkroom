@@ -77,7 +77,7 @@ pub trait IntrospectEnum: Sized {
     fn from_variant(name: &str) -> Option<Self>;
 }
 
-pub use common_derive::Introspect;
+pub use common_derive::{Introspect, IntrospectEnum};
 
 #[cfg(test)]
 mod tests {
@@ -108,6 +108,43 @@ mod tests {
                 _ => None,
             }
         }
+    }
+
+    /// `#[derive(IntrospectEnum)]` — proves the derive needs only `Display` +
+    /// `FromStr` (hand-written here; strum's `Display`/`EnumString` are the usual
+    /// source), with no `strum`/`IntoEnumIterator` dependency.
+    #[derive(Debug, Clone, Copy, PartialEq, IntrospectEnum)]
+    enum Speed {
+        Fast,
+        Slow,
+    }
+
+    impl std::fmt::Display for Speed {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(match self {
+                Speed::Fast => "fast",
+                Speed::Slow => "slow",
+            })
+        }
+    }
+
+    impl std::str::FromStr for Speed {
+        type Err = ();
+        fn from_str(s: &str) -> Result<Self, ()> {
+            match s {
+                "fast" => Ok(Speed::Fast),
+                "slow" => Ok(Speed::Slow),
+                _ => Err(()),
+            }
+        }
+    }
+
+    #[test]
+    fn derived_introspect_enum_delegates_to_display_and_from_str() {
+        assert_eq!(Speed::variants(), ["fast", "slow"]);
+        assert_eq!(Speed::Slow.to_variant(), "slow");
+        assert_eq!(Speed::from_variant("fast"), Some(Speed::Fast));
+        assert_eq!(Speed::from_variant("nope"), None);
     }
 
     #[derive(Debug, Clone, PartialEq, Introspect)]

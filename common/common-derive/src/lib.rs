@@ -67,6 +67,54 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
     .into())
 }
 
+/// `#[derive(IntrospectEnum)]` — the variant-list + string round-trip an enum
+/// field needs to be an `Introspect` field. Delegates to `Display` / `FromStr`
+/// (typically from strum's `Display` + `EnumString`, so the strings honor
+/// `#[strum(serialize_all = "…")]`), replacing the hand-written bridge impl. The
+/// enum must be fieldless (unit variants only).
+#[proc_macro_derive(IntrospectEnum)]
+pub fn derive_introspect_enum(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    expand_enum(input).unwrap_or_else(|err| err.to_compile_error().into())
+}
+
+fn expand_enum(input: DeriveInput) -> syn::Result<TokenStream> {
+    let ident = &input.ident;
+    let Data::Enum(data) = &input.data else {
+        return Err(syn::Error::new_spanned(
+            ident,
+            "IntrospectEnum is only for enums",
+        ));
+    };
+    let mut variants = Vec::new();
+    for variant in &data.variants {
+        if !matches!(variant.fields, Fields::Unit) {
+            return Err(syn::Error::new_spanned(
+                &variant.ident,
+                "IntrospectEnum requires fieldless (unit) variants",
+            ));
+        }
+        variants.push(&variant.ident);
+    }
+
+    Ok(quote! {
+        impl ::common::IntrospectEnum for #ident {
+            fn variants() -> ::std::vec::Vec<::std::string::String> {
+                ::std::vec![ #( ::std::string::ToString::to_string(&#ident::#variants) ),* ]
+            }
+
+            fn to_variant(&self) -> ::std::string::String {
+                ::std::string::ToString::to_string(self)
+            }
+
+            fn from_variant(name: &str) -> ::std::option::Option<Self> {
+                <Self as ::std::str::FromStr>::from_str(name).ok()
+            }
+        }
+    }
+    .into())
+}
+
 /// Reflected field kind. `Int`/`Float` carry the concrete numeric type (for the
 /// cast), `Enum` the type + its name, `Option` its inner kind + inner type.
 enum Kind {

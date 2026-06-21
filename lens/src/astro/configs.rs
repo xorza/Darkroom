@@ -14,31 +14,18 @@ use lumos::{
     RegistrationConfig, ScnrMethod, StackConfig, StarDetectionConfig, StretchConfig, StretchMethod,
     Threshold,
 };
-use strum::IntoEnumIterator;
-use strum_macros::{Display, EnumIter, EnumString};
+use strum_macros::{Display, EnumString};
 
 use crate::config_node::NodeConfig;
 
 /// Editable mirror of [`lumos::BackgroundMode`]. `strum` gives the variant
 /// string round-trip backing [`IntrospectEnum`].
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumIter, EnumString, Display)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumString, Display, IntrospectEnum)]
 #[strum(serialize_all = "snake_case")]
 pub enum BackgroundModeDef {
     #[default]
     Subtract,
     Divide,
-}
-
-impl IntrospectEnum for BackgroundModeDef {
-    fn variants() -> Vec<String> {
-        Self::iter().map(|variant| variant.to_string()).collect()
-    }
-    fn to_variant(&self) -> String {
-        self.to_string()
-    }
-    fn from_variant(name: &str) -> Option<Self> {
-        name.parse().ok()
-    }
 }
 
 impl From<BackgroundModeDef> for BackgroundMode {
@@ -208,7 +195,7 @@ impl NodeConfig for RegistrationConfigDef {
 
 /// Frame-combination method (mirrors the rejection/median/mean choice of
 /// [`lumos::StackConfig`]; `sigma` applies to the rejection methods).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumIter, EnumString, Display)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumString, Display, IntrospectEnum)]
 #[strum(serialize_all = "snake_case")]
 pub enum CombineMethodDef {
     #[default]
@@ -216,18 +203,6 @@ pub enum CombineMethodDef {
     Winsorized,
     Median,
     Mean,
-}
-
-impl IntrospectEnum for CombineMethodDef {
-    fn variants() -> Vec<String> {
-        Self::iter().map(|variant| variant.to_string()).collect()
-    }
-    fn to_variant(&self) -> String {
-        self.to_string()
-    }
-    fn from_variant(name: &str) -> Option<Self> {
-        name.parse().ok()
-    }
 }
 
 /// A combine config: a [`CombineMethodDef`] + the rejection `sigma`. Builds the
@@ -264,24 +239,12 @@ impl NodeConfig for CombineConfigDef {
 }
 
 /// Editable mirror of [`lumos::Threshold`] — wavelet coefficient thresholding.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumIter, EnumString, Display)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumString, Display, IntrospectEnum)]
 #[strum(serialize_all = "snake_case")]
 pub enum ThresholdDef {
     Hard,
     #[default]
     Soft,
-}
-
-impl IntrospectEnum for ThresholdDef {
-    fn variants() -> Vec<String> {
-        Self::iter().map(|variant| variant.to_string()).collect()
-    }
-    fn to_variant(&self) -> String {
-        self.to_string()
-    }
-    fn from_variant(name: &str) -> Option<Self> {
-        name.parse().ok()
-    }
 }
 
 impl From<ThresholdDef> for Threshold {
@@ -424,24 +387,12 @@ impl NodeConfig for LocalContrastConfigDef {
 
 /// SCNR method (mirrors [`lumos::ScnrMethod`]'s variant choice; `amount` applies
 /// to `additive_mask`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumIter, EnumString, Display)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumString, Display, IntrospectEnum)]
 #[strum(serialize_all = "snake_case")]
 pub enum ScnrMethodDef {
     #[default]
     AverageNeutral,
     AdditiveMask,
-}
-
-impl IntrospectEnum for ScnrMethodDef {
-    fn variants() -> Vec<String> {
-        Self::iter().map(|variant| variant.to_string()).collect()
-    }
-    fn to_variant(&self) -> String {
-        self.to_string()
-    }
-    fn from_variant(name: &str) -> Option<Self> {
-        name.parse().ok()
-    }
 }
 
 /// A SCNR config: method + the `additive_mask` blend `amount` (ignored by
@@ -478,24 +429,12 @@ impl NodeConfig for ScnrConfigDef {
 }
 
 /// Mirror of [`lumos::ColorMode`] (how a stretch curve maps across channels).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumIter, EnumString, Display)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumString, Display, IntrospectEnum)]
 #[strum(serialize_all = "snake_case")]
 pub enum ColorModeDef {
     #[default]
     ColorPreserving,
     PerChannel,
-}
-
-impl IntrospectEnum for ColorModeDef {
-    fn variants() -> Vec<String> {
-        Self::iter().map(|variant| variant.to_string()).collect()
-    }
-    fn to_variant(&self) -> String {
-        self.to_string()
-    }
-    fn from_variant(name: &str) -> Option<Self> {
-        name.parse().ok()
-    }
 }
 
 impl From<ColorModeDef> for ColorMode {
@@ -518,24 +457,12 @@ impl From<ColorMode> for ColorModeDef {
 
 /// The auto-stretch method choice (mirrors the two automatic
 /// [`lumos::StretchMethod`] variants the presets use).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumIter, EnumString, Display)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumString, Display, IntrospectEnum)]
 #[strum(serialize_all = "snake_case")]
 pub enum StretchMethodKindDef {
     #[default]
     AutoAsinh,
     AutoStf,
-}
-
-impl IntrospectEnum for StretchMethodKindDef {
-    fn variants() -> Vec<String> {
-        Self::iter().map(|variant| variant.to_string()).collect()
-    }
-    fn to_variant(&self) -> String {
-        self.to_string()
-    }
-    fn from_variant(name: &str) -> Option<Self> {
-        name.parse().ok()
-    }
 }
 
 /// Curated mirror of [`lumos::StretchConfig`] for the two auto methods (what the

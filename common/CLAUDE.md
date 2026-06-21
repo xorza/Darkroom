@@ -27,7 +27,7 @@ helpers. Pure leaf crate — depended on by everything, depends on nothing in-tr
 | `parallel.rs` | `par_map_limited` / `try_par_map_limited`: concurrency-capped parallel map. |
 | `fnv.rs` | `FnvHasher`: deterministic FNV-1a 64-bit hasher (fixed seed). |
 | `span.rs` | `Span`: compact serde `(start, len)` u32 range into a flat SoA pool; 8 bytes vs 16 for `Range<usize>`. Used by `scenarium`'s execution program. |
-| `introspect.rs` | Generic struct introspection: `#[derive(Introspect)]` (from the nested `common-derive` proc-macro crate) → `fields()` (`FieldDesc`: name/label/`FieldKind`/default/required) + `from_fields(&[FieldValue])` typed rebuild. GUI/value-model agnostic — consumers map `FieldDesc` to their own widgets. Enum fields impl `IntrospectEnum`. (`darkroom`/`lens` build config editors on it.) |
+| `introspect.rs` | Generic struct introspection: `#[derive(Introspect)]` (from the nested `common-derive` proc-macro crate) → `fields()` (`FieldDesc`: name/label/`FieldKind`/default/required) + `from_fields(&[FieldValue])` typed rebuild. GUI/value-model agnostic — consumers map `FieldDesc` to their own widgets. Fieldless enum fields impl `IntrospectEnum` via `#[derive(IntrospectEnum)]` (lists the variants + delegates the string round-trip to `Display`/`FromStr` — typically strum's, but the derive itself is strum-agnostic). (`darkroom`/`lens` build config editors on it.) |
 | `float_ext.rs` | `FloatExt::approximately_eq` for `f32`/`f64`/`Vec2` (within `EPSILON`). |
 | `normalize_string.rs` | `NormalizeString::normalize`: CRLF/CR → LF, guarantees trailing newline. |
 | `constants.rs` | `EPSILON: f32 = 1e-6`. |
