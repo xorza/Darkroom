@@ -1,12 +1,14 @@
-//! The two port columns of a node body: one labeled row per port, each
-//! with its grab/snap circle, plus the inline const editor on bound
-//! inputs and the right-click binding menu. Drawn below the header by
-//! [`crate::gui::node::NodeUI`]; the boundary-port rename affordance
-//! lives in [`crate::gui::node::port_rename`].
+//! The ports area of a node body, laid out as a grid: input port+label
+//! (col 0), the inline const editor for that input (col 1, so every value
+//! lines up regardless of label width), a fill spacer (col 2), and the
+//! output port+label (col 3, right-aligned against the node edge). Row `i`
+//! holds input `i` and output `i`, so the two sides align. Drawn below the
+//! header by [`crate::gui::node::NodeUI`]; the boundary-port rename
+//! affordance lives in [`crate::gui::node::port_rename`].
 
 use palantir::{
-    Align, Color, Configure, ContextMenu, Corners, HAlign, InternedStr, MenuItem, Panel, Rect,
-    Sense, Shape, Sizing, Spacing, Stroke, Tooltip, Ui, VAlign, WidgetId,
+    Align, Color, Configure, ContextMenu, Corners, Grid, HAlign, InternedStr, MenuItem, Panel,
+    Rect, Sense, Shape, Sizing, Spacing, Stroke, Tooltip, Track, Ui, VAlign, WidgetId,
 };
 use scenarium::data::{DataType, FsPathMode, StaticValue};
 use scenarium::graph::Binding;
@@ -22,99 +24,98 @@ use crate::gui::scene::{InputBindingView, SceneNode};
 use crate::gui::theme::Theme;
 use crate::gui::{PortKind, PortRef};
 
+/// Grid columns: inputs (hug), input values (hug — uniform width keeps the
+/// editors aligned), a fill spacer, then outputs (hug). The outputs sit in a
+/// *hug* column, not the fill, so the grid's content size includes them: a
+/// `fill` column contributes 0 to a hug-sized grid and would collapse,
+/// spilling the outputs out of the node (palantir
+/// `grid_hug_grid_collapses_fill_tracks`). The fill spacer instead claims any
+/// width beyond the ports, pushing the outputs to the node's right edge.
+const COL_INPUT: u16 = 0;
+const COL_VALUE: u16 = 1;
+const COL_OUTPUT: u16 = 3;
+
 pub(crate) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
-    Panel::hstack()
+    let n_rows = (node.inputs.len as usize).max(node.outputs.len as usize);
+    if n_rows == 0 {
+        return;
+    }
+    let rows: Vec<Track> = vec![Track::hug(); n_rows];
+    Grid::new()
         .id_salt("ports")
         .size((Sizing::FILL, Sizing::Hug))
-        .padding(Spacing::xy(theme.port_col_pad_x, 0.0))
-        .gap(theme.port_cols_gap)
+        .cols([Track::hug(), Track::hug(), Track::fill(), Track::hug()])
+        .rows(rows)
+        .gap_xy(theme.port_gap, theme.port_cols_gap)
+        .padding(Spacing::new(
+            theme.port_col_pad_x,
+            theme.port_col_pad_top,
+            theme.port_col_pad_x,
+            theme.port_col_pad_top,
+        ))
         .show(ui, |ui| {
-            input_column(ui, rcx, node, out);
-            output_column(ui, rcx, node, out);
+            input_cells(ui, rcx, node, out);
+            output_cells(ui, rcx, node, out);
         });
 }
 
-fn input_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+fn input_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let names = rcx.scene.input_names(node.inputs);
     let bindings = rcx.scene.bindings(node.inputs);
     let defaults = rcx.scene.defaults(node.inputs);
     let types = rcx.scene.input_types(node.inputs);
-    let theme = rcx.theme;
     // Boundary (`SubgraphInput`/`SubgraphOutput`) ports route the
     // interface, not literal values — no const affordance.
     let allow_const = !node.boundary;
-    Panel::vstack()
-        .id_salt("in")
-        .size((Sizing::Fill(1.0), Sizing::Hug))
-        .padding(Spacing::new(
-            0.0,
-            theme.port_col_pad_top,
-            0.0,
-            theme.port_col_pad_top,
-        ))
-        .gap(theme.port_gap)
-        .child_align(Align::h(HAlign::Left))
-        .show(ui, |ui| {
-            for (i, name) in names.iter().enumerate() {
-                let port = PortRef {
-                    node_id: node.id,
-                    kind: PortKind::Input,
-                    port_idx: i,
-                };
-                let binding = bindings.get(i).unwrap_or(&InputBindingView::None);
-                let default = defaults.get(i).cloned().flatten();
-                let data_type = types.get(i).cloned().unwrap_or_default();
-                // A `SubgraphOutput` boundary node's input ports are the
-                // subgraph's *outputs* — renameable, except the trailing
-                // "+" placeholder.
-                let rename = (node.boundary && i + 1 < names.len()).then_some(BoundarySide::Output);
-                input_port_row(
-                    ui,
-                    rcx,
-                    port,
-                    name.clone(),
-                    binding,
-                    default,
-                    data_type,
-                    allow_const,
-                    rename,
-                    out,
-                );
-            }
-        });
+    for (i, name) in names.iter().enumerate() {
+        let port = PortRef {
+            node_id: node.id,
+            kind: PortKind::Input,
+            port_idx: i,
+        };
+        let binding = bindings.get(i).unwrap_or(&InputBindingView::None);
+        let default = defaults.get(i).cloned().flatten();
+        let data_type = types.get(i).cloned().unwrap_or_default();
+        // A `SubgraphOutput` boundary node's input ports are the subgraph's
+        // *outputs* — renameable, except the trailing "+" placeholder.
+        let rename = (node.boundary && i + 1 < names.len()).then_some(BoundarySide::Output);
+        let tip = type_label(&data_type);
+        input_label_cell(
+            ui,
+            rcx,
+            port,
+            i,
+            name.clone(),
+            binding,
+            default,
+            allow_const,
+            rename,
+            &data_type,
+            &tip,
+            out,
+        );
+        if allow_const && let InputBindingView::Const(value) = binding {
+            value_cell(ui, rcx.theme, port, i, value, &data_type, out);
+        }
+    }
 }
 
-fn output_column(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let names = rcx.scene.output_names(node.outputs);
     let types = rcx.scene.output_types(node.outputs);
-    let theme = rcx.theme;
-    Panel::vstack()
-        .id_salt("out")
-        .size((Sizing::Fill(1.0), Sizing::Hug))
-        .padding(Spacing::new(
-            0.0,
-            theme.port_col_pad_top,
-            0.0,
-            theme.port_col_pad_top,
-        ))
-        .gap(theme.port_gap)
-        .child_align(Align::h(HAlign::Right))
-        .show(ui, |ui| {
-            for (i, name) in names.iter().enumerate() {
-                let port = PortRef {
-                    node_id: node.id,
-                    kind: PortKind::Output,
-                    port_idx: i,
-                };
-                let data_type = types.get(i).cloned().unwrap_or_default();
-                // A `SubgraphInput` boundary node's output ports are the
-                // subgraph's *inputs* — renameable, except the trailing
-                // "+" placeholder.
-                let rename = (node.boundary && i + 1 < names.len()).then_some(BoundarySide::Input);
-                output_port_row(ui, rcx, port, name.clone(), data_type, rename, out);
-            }
-        });
+    for (i, name) in names.iter().enumerate() {
+        let port = PortRef {
+            node_id: node.id,
+            kind: PortKind::Output,
+            port_idx: i,
+        };
+        let data_type = types.get(i).cloned().unwrap_or_default();
+        // A `SubgraphInput` boundary node's output ports are the subgraph's
+        // *inputs* — renameable, except the trailing "+" placeholder.
+        let rename = (node.boundary && i + 1 < names.len()).then_some(BoundarySide::Input);
+        output_cell(ui, rcx, port, i, name.clone(), data_type, rename, out);
+    }
 }
 
 /// Stable widget id for one port circle. Derived from
@@ -137,100 +138,54 @@ pub(crate) fn const_editor_wid(node_id: NodeId, port_idx: usize) -> WidgetId {
     WidgetId::from_hash(("graph.node.const_editor", node_id, port_idx))
 }
 
-/// One output port = label + circle, vertically centered. Circle has a
-/// negative right margin so it overhangs the column. The circle's
-/// `WidgetId` is the deterministic `port_circle_wid(port)`, so
-/// downstream consumers (`PortFrame::rebuild`, snap, draw) reconstruct
-/// it from domain coords without threading any cache.
-fn output_port_row(
-    ui: &mut Ui,
-    rcx: RecordCtx<'_>,
-    port: PortRef,
-    name: InternedStr,
-    data_type: DataType,
-    rename: Option<BoundarySide>,
-    out: &mut Vec<Intent>,
-) {
-    let theme = rcx.theme;
-    let fill = port_color(
-        theme,
-        &data_type,
-        PortKind::Output,
-        rcx.port_frame.is_hovered(port),
-    );
-    let tip = type_label(&data_type);
-    let wid = port_circle_wid(port);
-    let overhang = theme.port_radius() + theme.port_col_pad_x;
-    Panel::hstack()
-        .id_salt(("port", port.port_idx))
-        .size((Sizing::Hug, Sizing::Hug))
-        .gap(4.0)
-        .child_align(Align::v(VAlign::Center))
-        .show(ui, |ui| {
-            port_label(ui, rcx, port, name, &tip, rename, out);
-            circle_frame(
-                ui,
-                theme,
-                wid,
-                fill,
-                Spacing::new(0.0, 0.0, -overhang, 0.0),
-                &tip,
-            );
-        });
-    // Double-click to disconnect every consumer is handled in
-    // `emit_port_disconnects` (prepass) alongside the input-side gesture.
-}
-
+/// Column 0: the input port circle + label, plus the right-click binding
+/// menu (anchored here, so right-clicking the circle or label opens it).
+/// The circle's `WidgetId` is the deterministic `port_circle_wid(port)`, so
+/// `PortFrame`/snap/draw reconstruct it from domain coords.
 #[allow(clippy::too_many_arguments)]
-fn input_port_row(
+fn input_label_cell(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
     port: PortRef,
+    row: usize,
     name: InternedStr,
     binding: &InputBindingView,
     default_static: Option<StaticValue>,
-    data_type: DataType,
     allow_const: bool,
     rename: Option<BoundarySide>,
+    data_type: &DataType,
+    tip: &str,
     out: &mut Vec<Intent>,
 ) {
     let theme = rcx.theme;
     let fill = port_color(
         theme,
-        &data_type,
+        data_type,
         PortKind::Input,
         rcx.port_frame.is_hovered(port),
     );
-    let tip = type_label(&data_type);
     let overhang = theme.port_radius() + theme.port_col_pad_x;
     let margin = Spacing::new(-overhang, 0.0, 0.0, 0.0);
     let wid = port_circle_wid(port);
-    let row = Panel::hstack()
-        .id_salt(("port", port.port_idx))
+    let cell = Panel::hstack()
+        .id_salt(("in", port.port_idx))
+        .grid_cell((row as u16, COL_INPUT))
+        .align(Align::new(HAlign::Left, VAlign::Center))
         .size((Sizing::Hug, Sizing::Hug))
         .sense(Sense::CLICK)
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            circle_frame(ui, theme, wid, fill, margin, &tip);
-            port_label(ui, rcx, port, name.clone(), &tip, rename, out);
-            if allow_const && let InputBindingView::Const(value) = binding {
-                let editor_id = const_editor_wid(port.node_id, port.port_idx);
-                if let Some(new_value) =
-                    value_editor::show(ui, &theme.static_value_editor, editor_id, value, &data_type)
-                {
-                    out.push(set_input(port, Binding::Const(new_value)));
-                }
-            }
+            circle_frame(ui, theme, wid, fill, margin, tip);
+            port_label(ui, rcx, port, name, tip, rename, out);
         });
-    // Open on right-click anywhere on the row — circle, label, or
-    // editor. The circle has its own `Sense::CLICK` and consumes hits
-    // over its rect, so the row's snapshot alone misses clicks landing
-    // on the circle (no event bubbling in palantir's hit-test).
-    let menu_id = row.response.widget_id();
-    let row_secondary = row.response.secondary_clicked();
+    // Open on right-click anywhere on the cell — circle or label. The
+    // circle has its own `Sense::CLICK` and consumes hits over its rect, so
+    // the cell snapshot alone misses clicks on the circle (no bubbling).
+    let menu_id = cell.response.widget_id();
+    let cell_secondary = cell.response.secondary_clicked();
     let circle_state = ui.response_for(wid);
-    if (row_secondary || circle_state.secondary_clicked)
+    if (cell_secondary || circle_state.secondary_clicked)
         && let Some(p) = ui.pointer_pos()
     {
         ContextMenu::open(ui, menu_id, p);
@@ -260,6 +215,77 @@ fn input_port_row(
                 out.push(set_input(port, Binding::None));
             }
         });
+}
+
+/// Column 1: the inline const editor for an input bound to a `Const`. A
+/// hug-sized column, so every editor starts at the same x.
+fn value_cell(
+    ui: &mut Ui,
+    theme: &Theme,
+    port: PortRef,
+    row: usize,
+    value: &StaticValue,
+    data_type: &DataType,
+    out: &mut Vec<Intent>,
+) {
+    let editor_id = const_editor_wid(port.node_id, port.port_idx);
+    let edited = Panel::hstack()
+        .id_salt(("val", port.port_idx))
+        .grid_cell((row as u16, COL_VALUE))
+        .align(Align::new(HAlign::Left, VAlign::Center))
+        .size((Sizing::Hug, Sizing::Hug))
+        .child_align(Align::v(VAlign::Center))
+        .show(ui, |ui| {
+            value_editor::show(ui, &theme.static_value_editor, editor_id, value, data_type)
+        });
+    if let Some(new_value) = edited.inner {
+        out.push(set_input(port, Binding::Const(new_value)));
+    }
+}
+
+/// Column 2: the output label + circle, right-aligned (the fill column
+/// pins it to the node's right edge); the circle overhangs that edge.
+#[allow(clippy::too_many_arguments)]
+fn output_cell(
+    ui: &mut Ui,
+    rcx: RecordCtx<'_>,
+    port: PortRef,
+    row: usize,
+    name: InternedStr,
+    data_type: DataType,
+    rename: Option<BoundarySide>,
+    out: &mut Vec<Intent>,
+) {
+    let theme = rcx.theme;
+    let fill = port_color(
+        theme,
+        &data_type,
+        PortKind::Output,
+        rcx.port_frame.is_hovered(port),
+    );
+    let tip = type_label(&data_type);
+    let wid = port_circle_wid(port);
+    let overhang = theme.port_radius() + theme.port_col_pad_x;
+    Panel::hstack()
+        .id_salt(("out", port.port_idx))
+        .grid_cell((row as u16, COL_OUTPUT))
+        .align(Align::new(HAlign::Right, VAlign::Center))
+        .size((Sizing::Hug, Sizing::Hug))
+        .gap(4.0)
+        .child_align(Align::v(VAlign::Center))
+        .show(ui, |ui| {
+            port_label(ui, rcx, port, name, &tip, rename, out);
+            circle_frame(
+                ui,
+                theme,
+                wid,
+                fill,
+                Spacing::new(0.0, 0.0, -overhang, 0.0),
+                &tip,
+            );
+        });
+    // Double-click to disconnect every consumer is handled in
+    // `emit_port_disconnects` (prepass) alongside the input-side gesture.
 }
 
 /// Hover / grab box scaled past the painted dot so ports are easier to
