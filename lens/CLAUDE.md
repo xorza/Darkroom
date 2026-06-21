@@ -35,7 +35,7 @@ Node-function library: adapts `imaginarium` (GPU image ops) **and** `lumos`
 | `convert` | Convert image to a different color format (enum input). |
 | `blend` | Blend two images with configurable mode and alpha. |
 | `load_astro_image` | Decode a FITS/RAW/standard file into an `AstroFrame` (off-thread). |
-| `build_masters` | Stack `darks`/`flats`/`bias`/`flat_darks` folders into `Masters` (off-thread, per-role via `stack_calibration_master` + `CalibrationMasters::from_images`). `cache` toggle (default on) writes each master as `master_<role>.lcm` next to its frames and reloads it next run instead of re-stacking (`CfaImage::save`/`load`). |
+| `build_masters` | Stack `darks`/`flats`/`bias`/`flat_darks` folders into `Masters` (off-thread, per-role via `stack_cfa_master` + `CalibrationMasters::from_images`). `cache` toggle (default on) writes each master as `master_<role>.lcm` next to its frames and reloads it next run instead of re-stacking (`CfaImage::save`/`load`). |
 | `stack_lights` | Calibrate + align + stack a `lights` folder (+ optional `Masters`, preset dropdowns) into `image`/`coverage`/`weight` `AstroFrame`s (`calibrate_align_stack`, off-thread). |
 | `auto_stretch` | Display-stretch an `AstroFrame` (`StretchPreset` dropdown → `lumos::stretch`, off-thread). |
 | `background_extract` / `denoise` / `scnr` / `neutralize_background` / `hdr_compress` / `local_contrast` | Per-frame `AstroFrame → AstroFrame` processing (lumos in-place ops via the `processing_func` + `run_frame_op` helpers, off-thread). |

@@ -14,7 +14,7 @@ use crate::stacking::combine::error::Error;
 use common::Buffer2;
 
 /// CFA pattern for raw sensor data.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum CfaType {
     /// No CFA pattern (monochrome sensor)
     Mono,
@@ -47,7 +47,7 @@ impl CfaType {
 
 /// Raw CFA image - single channel with color filter pattern metadata.
 /// Represents sensor data before demosaicing.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CfaImage {
     /// Single-channel pixel data, normalized to 0.0-1.0.
     /// Layout: row-major, width * height pixels.
@@ -95,6 +95,20 @@ impl StackableImage for CfaImage {
 }
 
 impl CfaImage {
+    /// Serialize this CFA image to `path` (bitcode: the CFA plane + metadata).
+    /// Pairs with [`Self::load`] for a calibration-master cache.
+    pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
+        let bytes =
+            common::serialize(self, common::SerdeFormat::Bitcode).map_err(std::io::Error::other)?;
+        std::fs::write(path, bytes)
+    }
+
+    /// Load a CFA image written by [`Self::save`].
+    pub fn load(path: &std::path::Path) -> std::io::Result<Self> {
+        let bytes = std::fs::read(path)?;
+        common::deserialize(&bytes, common::SerdeFormat::Bitcode).map_err(std::io::Error::other)
+    }
+
     /// Demosaic this CFA image into a 3-channel AstroImage.
     /// Consumes self.
     pub fn demosaic(self) -> AstroImage {
@@ -380,6 +394,27 @@ mod bench {
 mod tests {
     use super::*;
     use crate::testing::make_cfa;
+
+    #[test]
+    fn master_cfa_save_load_round_trips_data_and_pattern() {
+        let cfa = CfaImage {
+            data: Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
+            metadata: AstroImageMetadata {
+                cfa_type: Some(CfaType::Bayer(CfaPattern::Bggr)),
+                ..Default::default()
+            },
+        };
+        let path = common::test_utils::test_output_path("cfa_master_roundtrip.lcm");
+        cfa.save(&path).unwrap();
+        let loaded = CfaImage::load(&path).unwrap();
+
+        assert_eq!((loaded.data.width(), loaded.data.height()), (2, 2));
+        assert_eq!(loaded.data.to_vec(), vec![0.1f32, 0.2, 0.3, 0.4]);
+        assert!(matches!(
+            loaded.metadata.cfa_type,
+            Some(CfaType::Bayer(CfaPattern::Bggr))
+        ));
+    }
 
     // ====================================================================
     // CfaType tests

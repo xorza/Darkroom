@@ -12,10 +12,11 @@ use common::Buffer2;
 use common::file_utils::astro_image_files;
 use imaginarium::Image as RawImage;
 use lumos::{
-    AlignStackConfig, AstroImage, BackgroundConfig, CalibrationFrames, CalibrationMasters,
-    DEFAULT_SIGMA_THRESHOLD, DenoiseConfig, HdrConfig, ImageDimensions, LocalContrastConfig,
-    Reference, StarDetector, calibrate_align_stack, compress_dynamic_range, denoise,
-    enhance_local_contrast, extract_background, neutralize_background, scnr, stretch,
+    AlignStackConfig, AstroImage, BackgroundConfig, CalibrationImages, CalibrationMasters,
+    CfaImage, DEFAULT_SIGMA_THRESHOLD, DenoiseConfig, HdrConfig, ImageDimensions,
+    LocalContrastConfig, Reference, StackConfig, StarDetector, calibrate_align_stack,
+    compress_dynamic_range, denoise, enhance_local_contrast, extract_background,
+    neutralize_background, scnr, stack_cfa_master, stretch,
 };
 use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::func_lambda::FuncLambda;
@@ -99,7 +100,8 @@ pub fn astro_funclib() -> FuncLib {
         Func::new("f2f6f1ff-5b10-409c-900f-d6b48750a529", "build_masters")
             .description(
                 "Stacks raw calibration frames (darks/flats/bias/flat-darks) into calibration \
-                 masters",
+                 masters. With `cache` on, each master is written next to its frames and reused \
+                 next run instead of re-stacking.",
             )
             .category("astro")
             .run_once()
@@ -113,46 +115,31 @@ pub fn astro_funclib() -> FuncLib {
                 FuncInput::optional("sigma", DataType::Float)
                     .default(DEFAULT_SIGMA_THRESHOLD as f64),
             )
+            .input(FuncInput::optional("cache", DataType::Bool).default(true))
             .output("masters", MASTERS_DATA_TYPE.clone())
             .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
                 Box::pin(async move {
-                    assert_eq!(inputs.len(), 5);
+                    assert_eq!(inputs.len(), 6);
                     assert_eq!(outputs.len(), 1);
 
-                    // Each optional folder globs to its astro frames (empty
-                    // when the port is unbound or the directory is unreadable).
-                    let frames_in = |idx: usize| -> Vec<PathBuf> {
-                        inputs[idx]
-                            .value
-                            .as_fs_path()
-                            .map(|dir| astro_image_files(Path::new(dir)))
-                            .unwrap_or_default()
-                    };
-                    let darks = frames_in(0);
-                    let flats = frames_in(1);
-                    let bias = frames_in(2);
-                    let flat_darks = frames_in(3);
+                    // Each optional folder maps to its directory (unbound → no
+                    // master for that role); frames are globbed only on a miss.
+                    let dir = |idx: usize| inputs[idx].value.as_fs_path().map(PathBuf::from);
+                    let dirs = [dir(0), dir(1), dir(2), dir(3)];
                     let sigma = inputs[4]
                         .value
                         .as_f64()
                         .map(|v| v as f32)
                         .unwrap_or(DEFAULT_SIGMA_THRESHOLD);
+                    let cache = inputs[5].value.as_bool().unwrap_or(true);
 
-                    // Stacking many full-resolution CFA frames is heavy CPU work.
+                    // Stacking many full-resolution CFA frames is heavy CPU work;
+                    // a cached master is loaded instead when present.
                     let masters = tokio::task::spawn_blocking(move || {
-                        CalibrationMasters::from_files(
-                            CalibrationFrames {
-                                darks: &darks,
-                                flats: &flats,
-                                bias: &bias,
-                                flat_darks: &flat_darks,
-                            },
-                            sigma,
-                        )
+                        build_masters_cached(dirs, sigma, cache)
                     })
                     .await
-                    .map_err(anyhow::Error::from)?
-                    .map_err(anyhow::Error::from)?;
+                    .map_err(anyhow::Error::from)??;
 
                     outputs[0] = DynamicValue::from_custom(Masters::from(masters));
 
@@ -589,6 +576,47 @@ where
     Ok(DynamicValue::from_custom(AstroFrame::from(image)))
 }
 
+/// Build (or load from cache) the four calibration masters for `dirs`
+/// (darks / flats / bias / flat_darks, in order). With `cache` on, a master is
+/// loaded from `master_<role>.lcm` next to its frames when present, and a
+/// freshly-stacked one is written there for next time. Delete the `.lcm` to
+/// force a rebuild (a changed frame set is not auto-detected).
+fn build_masters_cached(
+    dirs: [Option<PathBuf>; 4],
+    sigma: f32,
+    cache: bool,
+) -> anyhow::Result<CalibrationMasters> {
+    let [darks, flats, bias, flat_darks] = dirs;
+    let role = |dir: Option<PathBuf>,
+                config: StackConfig,
+                file: &str|
+     -> anyhow::Result<Option<CfaImage>> {
+        let Some(dir) = dir else {
+            return Ok(None);
+        };
+        let cache_path = dir.join(file);
+        if cache && cache_path.exists() {
+            return Ok(Some(CfaImage::load(&cache_path)?));
+        }
+        let frames = astro_image_files(&dir);
+        let master = stack_cfa_master(&frames, config).map_err(anyhow::Error::from)?;
+        if cache && let Some(master) = &master {
+            master.save(&cache_path)?;
+        }
+        Ok(master)
+    };
+
+    Ok(CalibrationMasters::from_images(
+        CalibrationImages {
+            dark: role(darks, StackConfig::dark(), "master_dark.lcm")?,
+            flat: role(flats, StackConfig::flat(), "master_flat.lcm")?,
+            bias: role(bias, StackConfig::bias(), "master_bias.lcm")?,
+            flat_dark: role(flat_darks, StackConfig::dark(), "master_flat_dark.lcm")?,
+        },
+        sigma,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use scenarium::data::StaticValue;
@@ -639,8 +667,8 @@ mod tests {
         assert_eq!(f.outputs.len(), 1);
         assert_eq!(f.outputs[0].data_type, *MASTERS_DATA_TYPE);
 
-        // Four optional calibration-frame folders, then sigma.
-        assert_eq!(f.inputs.len(), 5);
+        // Four optional calibration-frame folders, then sigma, then cache.
+        assert_eq!(f.inputs.len(), 6);
         let dir_names: Vec<&str> = f.inputs[..4].iter().map(|i| i.name.as_str()).collect();
         assert_eq!(dir_names, ["darks", "flats", "bias", "flat_darks"]);
         for input in &f.inputs[..4] {
@@ -653,6 +681,10 @@ mod tests {
             f.inputs[4].default_value,
             Some(StaticValue::Float(DEFAULT_SIGMA_THRESHOLD as f64)),
         );
+        // Cache toggle defaults on, so masters persist + reload by default.
+        assert_eq!(f.inputs[5].name, "cache");
+        assert_eq!(f.inputs[5].data_type, DataType::Bool);
+        assert_eq!(f.inputs[5].default_value, Some(StaticValue::Bool(true)));
     }
 
     #[test]

@@ -80,7 +80,8 @@ pub struct CalibrationMasters {
     pub defect_map: Option<DefectMap>,
 }
 
-/// Stack raw CFA frames using the full stacking pipeline.
+/// Stack one calibration role's raw CFA frames into a single master, using that
+/// role's preset `config` (`StackConfig::dark()` / `flat()` / `bias()`).
 ///
 /// Uses the frame-type preset config. Falls back to median for < 8 frames
 /// (too few for rejection to work well). This is a stricter, all-methods
@@ -89,7 +90,11 @@ pub struct CalibrationMasters {
 /// only overrides genuinely-unsound σ-rejection at N ≤ 4); the two compose —
 /// a `< 8` master is already median here, so the library floor is a no-op.
 /// Returns `None` if `paths` is empty.
-fn stack_cfa_frames(
+///
+/// The per-role half of [`CalibrationMasters::from_files`], public so a caller
+/// can stack/cache each role independently and assemble the set with
+/// [`CalibrationMasters::from_images`].
+pub fn stack_cfa_master(
     paths: &[impl AsRef<Path> + Sync],
     config: StackConfig,
 ) -> Result<Option<CfaImage>, Error> {
@@ -162,10 +167,10 @@ impl CalibrationMasters {
         frames: CalibrationFrames<'_, P>,
         sigma_threshold: f32,
     ) -> Result<Self, Error> {
-        let dark = stack_cfa_frames(frames.darks, StackConfig::dark())?;
-        let flat = stack_cfa_frames(frames.flats, StackConfig::flat())?;
-        let bias = stack_cfa_frames(frames.bias, StackConfig::bias())?;
-        let flat_dark = stack_cfa_frames(frames.flat_darks, StackConfig::dark())?;
+        let dark = stack_cfa_master(frames.darks, StackConfig::dark())?;
+        let flat = stack_cfa_master(frames.flats, StackConfig::flat())?;
+        let bias = stack_cfa_master(frames.bias, StackConfig::bias())?;
+        let flat_dark = stack_cfa_master(frames.flat_darks, StackConfig::dark())?;
         Ok(Self::from_images(
             CalibrationImages {
                 dark,
