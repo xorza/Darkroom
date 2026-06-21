@@ -6,7 +6,7 @@ mod tests;
 
 /// Bayer CFA (Color Filter Array) pattern.
 /// Represents the 2x2 pattern of color filters on the sensor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CfaPattern {
     /// RGGB: Red at (0,0), Green at (0,1) and (1,0), Blue at (1,1)
     Rggb,

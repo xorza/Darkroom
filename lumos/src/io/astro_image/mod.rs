@@ -28,7 +28,9 @@ use crate::stacking::combine::error::Error;
 /// BZERO convention (e.g., BITPIX=16 + BZERO=32768 for unsigned 16-bit).
 /// fits-well's `SampleType` resolves this and reports the effective type.
 /// The unsigned variants here preserve the distinction for correct normalization.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 pub enum BitPix {
     #[default]
     UInt8,
@@ -100,7 +102,7 @@ impl ImageDimensions {
 }
 
 /// Metadata extracted from FITS file headers or RAW EXIF.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct AstroImageMetadata {
     pub object: Option<String>,
     pub instrument: Option<String>,
