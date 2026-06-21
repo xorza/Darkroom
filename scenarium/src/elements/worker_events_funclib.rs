@@ -10,11 +10,6 @@ use common::Slot;
 
 pub const FRAME_EVENT_FUNC_ID: FuncId = FuncId::from_u128(0x01897c92d6055f5a7a21627ed74824ff);
 
-#[derive(Debug)]
-pub struct WorkerEventsFuncLib {
-    func_lib: FuncLib,
-}
-
 #[derive(Debug, Clone)]
 struct FpsEventState {
     frequency: f64,
@@ -22,21 +17,11 @@ struct FpsEventState {
     frame_no: i64,
 }
 
-impl WorkerEventsFuncLib {
-    pub fn func_lib(&self) -> &FuncLib {
-        &self.func_lib
-    }
+/// The worker frame / fps event-source nodes.
+pub fn worker_events_funclib() -> FuncLib {
+    let mut func_lib = FuncLib::default();
 
-    pub fn into_func_lib(self) -> FuncLib {
-        self.func_lib
-    }
-}
-
-impl Default for WorkerEventsFuncLib {
-    fn default() -> WorkerEventsFuncLib {
-        let mut func_lib = FuncLib::default();
-
-        func_lib.add(Func {
+    func_lib.add(Func {
             id: FRAME_EVENT_FUNC_ID,
             name: "frame event".to_string(),
             description: None,
@@ -148,8 +133,7 @@ impl Default for WorkerEventsFuncLib {
             ..Default::default()
         });
 
-        WorkerEventsFuncLib { func_lib }
-    }
+    func_lib
 }
 
 impl Default for FpsEventState {
@@ -159,11 +143,5 @@ impl Default for FpsEventState {
             last_execution: Instant::now(),
             frame_no: 0,
         }
-    }
-}
-
-impl From<WorkerEventsFuncLib> for FuncLib {
-    fn from(value: WorkerEventsFuncLib) -> Self {
-        value.func_lib
     }
 }

@@ -64,553 +64,551 @@ pub static ASTRO_DIR_DATA_TYPE: LazyLock<DataType> =
 pub fn astro_funclib() -> FuncLib {
     let mut func_lib = FuncLib::default();
 
-        // load_astro_image
-        func_lib.add(Func {
-            id: "fbcc8899-efc3-40e0-a6fd-8743f86edbd3".into(),
-            name: "load_astro_image".to_string(),
-            description: Some("Loads a FITS/RAW/standard astronomical image".to_string()),
-            behavior: FuncBehavior::Impure,
-            node_default_behavior: NodeBehavior::Once,
-            terminal: false,
-            category: "astro".to_string(),
-            inputs: vec![FuncInput {
-                name: "path".to_string(),
-                required: true,
-                data_type: ASTRO_IMAGE_PATH_DATA_TYPE.clone(),
-                default_value: None,
-                value_options: vec![],
-            }],
-            outputs: vec![FuncOutput {
-                name: "image".to_string(),
-                data_type: ASTRO_FRAME_DATA_TYPE.clone(),
-            }],
-            events: vec![],
-            required_contexts: vec![],
-            lambda: FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 1);
-                    assert_eq!(outputs.len(), 1);
+    // load_astro_image
+    func_lib.add(Func {
+        id: "fbcc8899-efc3-40e0-a6fd-8743f86edbd3".into(),
+        name: "load_astro_image".to_string(),
+        description: Some("Loads a FITS/RAW/standard astronomical image".to_string()),
+        behavior: FuncBehavior::Impure,
+        node_default_behavior: NodeBehavior::Once,
+        terminal: false,
+        category: "astro".to_string(),
+        inputs: vec![FuncInput {
+            name: "path".to_string(),
+            required: true,
+            data_type: ASTRO_IMAGE_PATH_DATA_TYPE.clone(),
+            default_value: None,
+            value_options: vec![],
+        }],
+        outputs: vec![FuncOutput {
+            name: "image".to_string(),
+            data_type: ASTRO_FRAME_DATA_TYPE.clone(),
+        }],
+        events: vec![],
+        required_contexts: vec![],
+        lambda: FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+            Box::pin(async move {
+                assert_eq!(inputs.len(), 1);
+                assert_eq!(outputs.len(), 1);
 
-                    let path = inputs[0].value.as_fs_path().unwrap().to_owned();
-                    // Decoding (FITS parse / libraw / demosaic) is heavy
-                    // synchronous CPU work — keep it off the worker thread.
-                    let image = tokio::task::spawn_blocking(move || AstroImage::from_file(&path))
-                        .await
-                        .map_err(anyhow::Error::from)?
-                        .map_err(anyhow::Error::from)?;
-
-                    outputs[0] = DynamicValue::from_custom(AstroFrame::from(image));
-
-                    Ok(())
-                })
-            }),
-        });
-
-        // build_masters
-        func_lib.add(Func {
-            id: "f2f6f1ff-5b10-409c-900f-d6b48750a529".into(),
-            name: "build_masters".to_string(),
-            description: Some(
-                "Stacks raw calibration frames (darks/flats/bias/flat-darks) into calibration \
-                 masters"
-                    .to_string(),
-            ),
-            behavior: FuncBehavior::Impure,
-            node_default_behavior: NodeBehavior::Once,
-            terminal: false,
-            category: "astro".to_string(),
-            inputs: vec![
-                dir_input("darks"),
-                dir_input("flats"),
-                dir_input("bias"),
-                dir_input("flat_darks"),
-                FuncInput {
-                    name: "sigma".to_string(),
-                    required: false,
-                    data_type: DataType::Float,
-                    default_value: Some((DEFAULT_SIGMA_THRESHOLD as f64).into()),
-                    value_options: vec![],
-                },
-            ],
-            outputs: vec![FuncOutput {
-                name: "masters".to_string(),
-                data_type: MASTERS_DATA_TYPE.clone(),
-            }],
-            events: vec![],
-            required_contexts: vec![],
-            lambda: FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 5);
-                    assert_eq!(outputs.len(), 1);
-
-                    // Each optional folder globs to its astro frames (empty
-                    // when the port is unbound or the directory is unreadable).
-                    let frames_in = |idx: usize| -> Vec<PathBuf> {
-                        inputs[idx]
-                            .value
-                            .as_fs_path()
-                            .map(|dir| astro_image_files(Path::new(dir)))
-                            .unwrap_or_default()
-                    };
-                    let darks = frames_in(0);
-                    let flats = frames_in(1);
-                    let bias = frames_in(2);
-                    let flat_darks = frames_in(3);
-                    let sigma = inputs[4]
-                        .value
-                        .as_f64()
-                        .map(|v| v as f32)
-                        .unwrap_or(DEFAULT_SIGMA_THRESHOLD);
-
-                    // Stacking many full-resolution CFA frames is heavy CPU work.
-                    let masters = tokio::task::spawn_blocking(move || {
-                        CalibrationMasters::from_files(
-                            CalibrationFrames {
-                                darks: &darks,
-                                flats: &flats,
-                                bias: &bias,
-                                flat_darks: &flat_darks,
-                            },
-                            sigma,
-                        )
-                    })
+                let path = inputs[0].value.as_fs_path().unwrap().to_owned();
+                // Decoding (FITS parse / libraw / demosaic) is heavy
+                // synchronous CPU work — keep it off the worker thread.
+                let image = tokio::task::spawn_blocking(move || AstroImage::from_file(&path))
                     .await
                     .map_err(anyhow::Error::from)?
                     .map_err(anyhow::Error::from)?;
 
-                    outputs[0] = DynamicValue::from_custom(Masters::from(masters));
+                outputs[0] = DynamicValue::from_custom(AstroFrame::from(image));
 
-                    Ok(())
-                })
-            }),
-        });
+                Ok(())
+            })
+        }),
+    });
 
-        // stack_lights
-        func_lib.add(Func {
-            id: "b02f5c42-7bda-48f6-81dd-81338efbb126".into(),
-            name: "stack_lights".to_string(),
-            description: Some(
-                "Calibrates, aligns and stacks a folder of light frames into one image".to_string(),
-            ),
-            behavior: FuncBehavior::Impure,
-            node_default_behavior: NodeBehavior::Once,
-            terminal: false,
-            category: "astro".to_string(),
-            inputs: vec![
-                FuncInput {
-                    name: "lights".to_string(),
-                    required: true,
-                    data_type: ASTRO_DIR_DATA_TYPE.clone(),
-                    default_value: None,
-                    value_options: vec![],
-                },
-                FuncInput {
-                    name: "masters".to_string(),
-                    required: false,
-                    data_type: MASTERS_DATA_TYPE.clone(),
-                    default_value: None,
-                    value_options: vec![],
-                },
-                preset_input("detection", &DETECTION_PRESET_DATATYPE),
-                preset_input("registration", &REGISTRATION_PRESET_DATATYPE),
-                preset_input("combine", &COMBINE_PRESET_DATATYPE),
-                FuncInput {
-                    name: "reference".to_string(),
-                    required: false,
-                    // < 0 picks the frame with the most stars (auto); >= 0 is a
-                    // 0-based index into the (directory-sorted) light frames.
-                    data_type: DataType::Int,
-                    default_value: Some((-1_i64).into()),
-                    value_options: vec![],
-                },
-            ],
-            outputs: vec![
-                frame_output("image"),
-                frame_output("coverage"),
-                frame_output("weight"),
-            ],
-            events: vec![],
-            required_contexts: vec![],
-            lambda: FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 6);
-                    assert_eq!(outputs.len(), 3);
+    // build_masters
+    func_lib.add(Func {
+        id: "f2f6f1ff-5b10-409c-900f-d6b48750a529".into(),
+        name: "build_masters".to_string(),
+        description: Some(
+            "Stacks raw calibration frames (darks/flats/bias/flat-darks) into calibration \
+                 masters"
+                .to_string(),
+        ),
+        behavior: FuncBehavior::Impure,
+        node_default_behavior: NodeBehavior::Once,
+        terminal: false,
+        category: "astro".to_string(),
+        inputs: vec![
+            dir_input("darks"),
+            dir_input("flats"),
+            dir_input("bias"),
+            dir_input("flat_darks"),
+            FuncInput {
+                name: "sigma".to_string(),
+                required: false,
+                data_type: DataType::Float,
+                default_value: Some((DEFAULT_SIGMA_THRESHOLD as f64).into()),
+                value_options: vec![],
+            },
+        ],
+        outputs: vec![FuncOutput {
+            name: "masters".to_string(),
+            data_type: MASTERS_DATA_TYPE.clone(),
+        }],
+        events: vec![],
+        required_contexts: vec![],
+        lambda: FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+            Box::pin(async move {
+                assert_eq!(inputs.len(), 5);
+                assert_eq!(outputs.len(), 1);
 
-                    let lights = inputs[0]
+                // Each optional folder globs to its astro frames (empty
+                // when the port is unbound or the directory is unreadable).
+                let frames_in = |idx: usize| -> Vec<PathBuf> {
+                    inputs[idx]
                         .value
                         .as_fs_path()
                         .map(|dir| astro_image_files(Path::new(dir)))
-                        .unwrap_or_default();
-                    // Arc-clone the masters value so it can move into the
-                    // blocking task; `Unbound` means "no calibration".
-                    let masters_val = inputs[1].value.clone();
-                    let detection = inputs[2]
-                        .value
-                        .as_enum()
-                        .and_then(|s| DetectionPreset::from_str(s).ok())
-                        .unwrap_or(DetectionPreset::WideField)
-                        .config();
-                    let registration = inputs[3]
-                        .value
-                        .as_enum()
-                        .and_then(|s| RegistrationPreset::from_str(s).ok())
-                        .unwrap_or(RegistrationPreset::Default)
-                        .config();
-                    let stack = inputs[4]
-                        .value
-                        .as_enum()
-                        .and_then(|s| CombinePreset::from_str(s).ok())
-                        .unwrap_or(CombinePreset::SigmaClipped)
-                        .config();
-                    let reference = match inputs[5].value.as_i64() {
-                        Some(index) if index >= 0 => Reference::Index(index as usize),
-                        _ => Reference::Auto,
-                    };
-                    let config = AlignStackConfig {
-                        detection,
-                        registration,
-                        stack,
-                        reference,
-                        cosmic_ray: None,
-                    };
+                        .unwrap_or_default()
+                };
+                let darks = frames_in(0);
+                let flats = frames_in(1);
+                let bias = frames_in(2);
+                let flat_darks = frames_in(3);
+                let sigma = inputs[4]
+                    .value
+                    .as_f64()
+                    .map(|v| v as f32)
+                    .unwrap_or(DEFAULT_SIGMA_THRESHOLD);
 
-                    // Load → calibrate → demosaic → detect → register → combine:
-                    // the whole pipeline is heavy synchronous CPU work.
-                    let result = tokio::task::spawn_blocking(move || {
-                        let empty = CalibrationMasters {
-                            master_dark: None,
-                            master_flat: None,
-                            master_bias: None,
-                            master_flat_dark: None,
-                            defect_map: None,
-                        };
-                        let masters = masters_val
-                            .as_custom::<Masters>()
-                            .map(|m| &m.masters)
-                            .unwrap_or(&empty);
-                        calibrate_align_stack(&lights, masters, &config)
-                    })
-                    .await
-                    .map_err(anyhow::Error::from)?
-                    .map_err(anyhow::Error::from)?;
-
-                    outputs[0] = DynamicValue::from_custom(AstroFrame::from(result.image));
-                    outputs[1] = DynamicValue::from_custom(AstroFrame::from(plane_to_frame(
-                        result.coverage,
-                    )));
-                    outputs[2] =
-                        DynamicValue::from_custom(AstroFrame::from(plane_to_frame(result.weight)));
-
-                    Ok(())
+                // Stacking many full-resolution CFA frames is heavy CPU work.
+                let masters = tokio::task::spawn_blocking(move || {
+                    CalibrationMasters::from_files(
+                        CalibrationFrames {
+                            darks: &darks,
+                            flats: &flats,
+                            bias: &bias,
+                            flat_darks: &flat_darks,
+                        },
+                        sigma,
+                    )
                 })
-            }),
-        });
+                .await
+                .map_err(anyhow::Error::from)?
+                .map_err(anyhow::Error::from)?;
 
-        // auto_stretch
-        func_lib.add(Func {
-            id: "c15248e0-006a-4a4a-9aae-b1fc7886dea1".into(),
-            name: "auto_stretch".to_string(),
-            description: Some(
-                "Auto-stretches a linear frame to a viewable image (display tone curve)"
-                    .to_string(),
-            ),
-            behavior: FuncBehavior::Pure,
-            terminal: false,
-            category: "astro".to_string(),
-            inputs: vec![
-                FuncInput {
-                    name: "image".to_string(),
-                    required: true,
-                    data_type: ASTRO_FRAME_DATA_TYPE.clone(),
-                    default_value: None,
-                    value_options: vec![],
-                },
-                preset_input("method", &STRETCH_PRESET_DATATYPE),
-            ],
-            outputs: vec![frame_output("image")],
-            events: vec![],
-            required_contexts: vec![],
-            lambda: FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 2);
-                    assert_eq!(outputs.len(), 1);
+                outputs[0] = DynamicValue::from_custom(Masters::from(masters));
 
-                    let config = inputs[1]
-                        .value
-                        .as_enum()
-                        .and_then(|s| StretchPreset::from_str(s).ok())
-                        .unwrap_or(StretchPreset::AutoAsinh)
-                        .config();
-                    // Arc-clone the frame so the deep copy + stretch run
-                    // off the worker thread.
-                    let value = inputs[0].value.clone();
-                    let stretched = tokio::task::spawn_blocking(move || {
-                        let frame = value
-                            .as_custom::<AstroFrame>()
-                            .expect("image input is an AstroFrame");
-                        let mut image = frame.image.clone();
-                        stretch(&mut image, config);
-                        image
-                    })
-                    .await
-                    .map_err(anyhow::Error::from)?;
+                Ok(())
+            })
+        }),
+    });
 
-                    outputs[0] = DynamicValue::from_custom(AstroFrame::from(stretched));
+    // stack_lights
+    func_lib.add(Func {
+        id: "b02f5c42-7bda-48f6-81dd-81338efbb126".into(),
+        name: "stack_lights".to_string(),
+        description: Some(
+            "Calibrates, aligns and stacks a folder of light frames into one image".to_string(),
+        ),
+        behavior: FuncBehavior::Impure,
+        node_default_behavior: NodeBehavior::Once,
+        terminal: false,
+        category: "astro".to_string(),
+        inputs: vec![
+            FuncInput {
+                name: "lights".to_string(),
+                required: true,
+                data_type: ASTRO_DIR_DATA_TYPE.clone(),
+                default_value: None,
+                value_options: vec![],
+            },
+            FuncInput {
+                name: "masters".to_string(),
+                required: false,
+                data_type: MASTERS_DATA_TYPE.clone(),
+                default_value: None,
+                value_options: vec![],
+            },
+            preset_input("detection", &DETECTION_PRESET_DATATYPE),
+            preset_input("registration", &REGISTRATION_PRESET_DATATYPE),
+            preset_input("combine", &COMBINE_PRESET_DATATYPE),
+            FuncInput {
+                name: "reference".to_string(),
+                required: false,
+                // < 0 picks the frame with the most stars (auto); >= 0 is a
+                // 0-based index into the (directory-sorted) light frames.
+                data_type: DataType::Int,
+                default_value: Some((-1_i64).into()),
+                value_options: vec![],
+            },
+        ],
+        outputs: vec![
+            frame_output("image"),
+            frame_output("coverage"),
+            frame_output("weight"),
+        ],
+        events: vec![],
+        required_contexts: vec![],
+        lambda: FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+            Box::pin(async move {
+                assert_eq!(inputs.len(), 6);
+                assert_eq!(outputs.len(), 3);
 
-                    Ok(())
+                let lights = inputs[0]
+                    .value
+                    .as_fs_path()
+                    .map(|dir| astro_image_files(Path::new(dir)))
+                    .unwrap_or_default();
+                // Arc-clone the masters value so it can move into the
+                // blocking task; `Unbound` means "no calibration".
+                let masters_val = inputs[1].value.clone();
+                let detection = inputs[2]
+                    .value
+                    .as_enum()
+                    .and_then(|s| DetectionPreset::from_str(s).ok())
+                    .unwrap_or(DetectionPreset::WideField)
+                    .config();
+                let registration = inputs[3]
+                    .value
+                    .as_enum()
+                    .and_then(|s| RegistrationPreset::from_str(s).ok())
+                    .unwrap_or(RegistrationPreset::Default)
+                    .config();
+                let stack = inputs[4]
+                    .value
+                    .as_enum()
+                    .and_then(|s| CombinePreset::from_str(s).ok())
+                    .unwrap_or(CombinePreset::SigmaClipped)
+                    .config();
+                let reference = match inputs[5].value.as_i64() {
+                    Some(index) if index >= 0 => Reference::Index(index as usize),
+                    _ => Reference::Auto,
+                };
+                let config = AlignStackConfig {
+                    detection,
+                    registration,
+                    stack,
+                    reference,
+                    cosmic_ray: None,
+                };
+
+                // Load → calibrate → demosaic → detect → register → combine:
+                // the whole pipeline is heavy synchronous CPU work.
+                let result = tokio::task::spawn_blocking(move || {
+                    let empty = CalibrationMasters {
+                        master_dark: None,
+                        master_flat: None,
+                        master_bias: None,
+                        master_flat_dark: None,
+                        defect_map: None,
+                    };
+                    let masters = masters_val
+                        .as_custom::<Masters>()
+                        .map(|m| &m.masters)
+                        .unwrap_or(&empty);
+                    calibrate_align_stack(&lights, masters, &config)
                 })
-            }),
-            ..Default::default()
-        });
+                .await
+                .map_err(anyhow::Error::from)?
+                .map_err(anyhow::Error::from)?;
 
-        // astro_to_image: bridge an `AstroFrame` into a `lens::Image` so the
-        // imaginarium image nodes (brightness/contrast, blend, convert, save…)
-        // can consume astro output.
-        func_lib.add(Func {
-            id: "7a0265e1-9631-45bd-8ecd-1e923b67a58c".into(),
-            name: "astro_to_image".to_string(),
-            description: Some(
-                "Converts an astro frame to an image (for the imaginarium image nodes)".to_string(),
-            ),
-            behavior: FuncBehavior::Pure,
-            terminal: false,
-            category: "astro".to_string(),
-            inputs: vec![FuncInput {
-                name: "frame".to_string(),
+                outputs[0] = DynamicValue::from_custom(AstroFrame::from(result.image));
+                outputs[1] =
+                    DynamicValue::from_custom(AstroFrame::from(plane_to_frame(result.coverage)));
+                outputs[2] =
+                    DynamicValue::from_custom(AstroFrame::from(plane_to_frame(result.weight)));
+
+                Ok(())
+            })
+        }),
+    });
+
+    // auto_stretch
+    func_lib.add(Func {
+        id: "c15248e0-006a-4a4a-9aae-b1fc7886dea1".into(),
+        name: "auto_stretch".to_string(),
+        description: Some(
+            "Auto-stretches a linear frame to a viewable image (display tone curve)".to_string(),
+        ),
+        behavior: FuncBehavior::Pure,
+        terminal: false,
+        category: "astro".to_string(),
+        inputs: vec![
+            FuncInput {
+                name: "image".to_string(),
                 required: true,
                 data_type: ASTRO_FRAME_DATA_TYPE.clone(),
                 default_value: None,
                 value_options: vec![],
-            }],
-            outputs: vec![FuncOutput {
-                name: "image".to_string(),
-                data_type: IMAGE_DATA_TYPE.clone(),
-            }],
-            events: vec![],
-            required_contexts: vec![],
-            lambda: FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 1);
-                    assert_eq!(outputs.len(), 1);
+            },
+            preset_input("method", &STRETCH_PRESET_DATATYPE),
+        ],
+        outputs: vec![frame_output("image")],
+        events: vec![],
+        required_contexts: vec![],
+        lambda: FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+            Box::pin(async move {
+                assert_eq!(inputs.len(), 2);
+                assert_eq!(outputs.len(), 1);
 
-                    // The planar→interleaved conversion is a full-frame copy;
-                    // run it off the worker thread.
-                    let value = inputs[0].value.clone();
-                    let raw = tokio::task::spawn_blocking(move || {
-                        let frame = value
-                            .as_custom::<AstroFrame>()
-                            .expect("frame input is an AstroFrame");
-                        RawImage::from(&frame.image)
-                    })
-                    .await
-                    .map_err(anyhow::Error::from)?;
-
-                    outputs[0] = DynamicValue::from_custom(Image::from(raw));
-
-                    Ok(())
+                let config = inputs[1]
+                    .value
+                    .as_enum()
+                    .and_then(|s| StretchPreset::from_str(s).ok())
+                    .unwrap_or(StretchPreset::AutoAsinh)
+                    .config();
+                // Arc-clone the frame so the deep copy + stretch run
+                // off the worker thread.
+                let value = inputs[0].value.clone();
+                let stretched = tokio::task::spawn_blocking(move || {
+                    let frame = value
+                        .as_custom::<AstroFrame>()
+                        .expect("image input is an AstroFrame");
+                    let mut image = frame.image.clone();
+                    stretch(&mut image, config);
+                    image
                 })
-            }),
-            ..Default::default()
-        });
+                .await
+                .map_err(anyhow::Error::from)?;
 
-        // --- per-frame processing nodes (AstroFrame → AstroFrame) ---
+                outputs[0] = DynamicValue::from_custom(AstroFrame::from(stretched));
 
-        // background_extract
-        func_lib.add(processing_func(
-            "e27c2a02-ec2a-4c6d-afea-60d1276ff8e1",
-            "background_extract",
-            "Fits and removes a smooth sky-background gradient",
-            vec![
-                frame_input("image"),
-                preset_input("mode", &BACKGROUND_MODE_DATATYPE),
-            ],
-            FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-                Box::pin(async move {
-                    let mode = inputs[1]
-                        .value
-                        .as_enum()
-                        .and_then(|s| BackgroundModeKind::from_str(s).ok())
-                        .unwrap_or(BackgroundModeKind::Subtract)
-                        .config();
-                    let value = inputs[0].value.clone();
-                    outputs[0] = run_frame_op(value, move |img| {
-                        extract_background(
-                            img,
-                            &BackgroundConfig {
-                                mode,
-                                ..Default::default()
-                            },
-                        );
-                    })
-                    .await?;
-                    Ok(())
+                Ok(())
+            })
+        }),
+        ..Default::default()
+    });
+
+    // astro_to_image: bridge an `AstroFrame` into a `lens::Image` so the
+    // imaginarium image nodes (brightness/contrast, blend, convert, save…)
+    // can consume astro output.
+    func_lib.add(Func {
+        id: "7a0265e1-9631-45bd-8ecd-1e923b67a58c".into(),
+        name: "astro_to_image".to_string(),
+        description: Some(
+            "Converts an astro frame to an image (for the imaginarium image nodes)".to_string(),
+        ),
+        behavior: FuncBehavior::Pure,
+        terminal: false,
+        category: "astro".to_string(),
+        inputs: vec![FuncInput {
+            name: "frame".to_string(),
+            required: true,
+            data_type: ASTRO_FRAME_DATA_TYPE.clone(),
+            default_value: None,
+            value_options: vec![],
+        }],
+        outputs: vec![FuncOutput {
+            name: "image".to_string(),
+            data_type: IMAGE_DATA_TYPE.clone(),
+        }],
+        events: vec![],
+        required_contexts: vec![],
+        lambda: FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+            Box::pin(async move {
+                assert_eq!(inputs.len(), 1);
+                assert_eq!(outputs.len(), 1);
+
+                // The planar→interleaved conversion is a full-frame copy;
+                // run it off the worker thread.
+                let value = inputs[0].value.clone();
+                let raw = tokio::task::spawn_blocking(move || {
+                    let frame = value
+                        .as_custom::<AstroFrame>()
+                        .expect("frame input is an AstroFrame");
+                    RawImage::from(&frame.image)
                 })
-            }),
-        ));
+                .await
+                .map_err(anyhow::Error::from)?;
 
-        // denoise
-        func_lib.add(processing_func(
-            "61c17dfa-8369-446b-b6e7-d91d62d344ee",
-            "denoise",
-            "Wavelet denoise (starlet coefficient thresholding)",
-            vec![frame_input("image"), float_input("strength", 0.85)],
-            FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-                Box::pin(async move {
-                    let strength = inputs[1].value.as_f64().map(|v| v as f32).unwrap_or(0.85);
-                    let value = inputs[0].value.clone();
-                    outputs[0] = run_frame_op(value, move |img| {
-                        denoise(
-                            img,
-                            DenoiseConfig {
-                                strength,
-                                ..Default::default()
-                            },
-                        );
-                    })
-                    .await?;
-                    Ok(())
+                outputs[0] = DynamicValue::from_custom(Image::from(raw));
+
+                Ok(())
+            })
+        }),
+        ..Default::default()
+    });
+
+    // --- per-frame processing nodes (AstroFrame → AstroFrame) ---
+
+    // background_extract
+    func_lib.add(processing_func(
+        "e27c2a02-ec2a-4c6d-afea-60d1276ff8e1",
+        "background_extract",
+        "Fits and removes a smooth sky-background gradient",
+        vec![
+            frame_input("image"),
+            preset_input("mode", &BACKGROUND_MODE_DATATYPE),
+        ],
+        FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+            Box::pin(async move {
+                let mode = inputs[1]
+                    .value
+                    .as_enum()
+                    .and_then(|s| BackgroundModeKind::from_str(s).ok())
+                    .unwrap_or(BackgroundModeKind::Subtract)
+                    .config();
+                let value = inputs[0].value.clone();
+                outputs[0] = run_frame_op(value, move |img| {
+                    extract_background(
+                        img,
+                        &BackgroundConfig {
+                            mode,
+                            ..Default::default()
+                        },
+                    );
                 })
-            }),
-        ));
+                .await?;
+                Ok(())
+            })
+        }),
+    ));
 
-        // scnr
-        func_lib.add(processing_func(
-            "ef0c2661-8553-4302-9251-95b2d383af19",
-            "scnr",
-            "Removes the residual green cast (SCNR)",
-            vec![
-                frame_input("image"),
-                preset_input("method", &SCNR_METHOD_DATATYPE),
-            ],
-            FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-                Box::pin(async move {
-                    let method = inputs[1]
-                        .value
-                        .as_enum()
-                        .and_then(|s| ScnrKind::from_str(s).ok())
-                        .unwrap_or(ScnrKind::AverageNeutral)
-                        .config();
-                    let value = inputs[0].value.clone();
-                    outputs[0] = run_frame_op(value, move |img| scnr(img, method)).await?;
-                    Ok(())
+    // denoise
+    func_lib.add(processing_func(
+        "61c17dfa-8369-446b-b6e7-d91d62d344ee",
+        "denoise",
+        "Wavelet denoise (starlet coefficient thresholding)",
+        vec![frame_input("image"), float_input("strength", 0.85)],
+        FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+            Box::pin(async move {
+                let strength = inputs[1].value.as_f64().map(|v| v as f32).unwrap_or(0.85);
+                let value = inputs[0].value.clone();
+                outputs[0] = run_frame_op(value, move |img| {
+                    denoise(
+                        img,
+                        DenoiseConfig {
+                            strength,
+                            ..Default::default()
+                        },
+                    );
                 })
-            }),
-        ));
+                .await?;
+                Ok(())
+            })
+        }),
+    ));
 
-        // neutralize_background
-        func_lib.add(processing_func(
-            "5a8c9043-61ca-4a5a-8e55-ce27c804e84b",
-            "neutralize_background",
-            "Shifts each channel so the background reads neutral gray",
-            vec![frame_input("image")],
-            FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-                Box::pin(async move {
-                    let value = inputs[0].value.clone();
-                    outputs[0] = run_frame_op(value, neutralize_background).await?;
-                    Ok(())
+    // scnr
+    func_lib.add(processing_func(
+        "ef0c2661-8553-4302-9251-95b2d383af19",
+        "scnr",
+        "Removes the residual green cast (SCNR)",
+        vec![
+            frame_input("image"),
+            preset_input("method", &SCNR_METHOD_DATATYPE),
+        ],
+        FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+            Box::pin(async move {
+                let method = inputs[1]
+                    .value
+                    .as_enum()
+                    .and_then(|s| ScnrKind::from_str(s).ok())
+                    .unwrap_or(ScnrKind::AverageNeutral)
+                    .config();
+                let value = inputs[0].value.clone();
+                outputs[0] = run_frame_op(value, move |img| scnr(img, method)).await?;
+                Ok(())
+            })
+        }),
+    ));
+
+    // neutralize_background
+    func_lib.add(processing_func(
+        "5a8c9043-61ca-4a5a-8e55-ce27c804e84b",
+        "neutralize_background",
+        "Shifts each channel so the background reads neutral gray",
+        vec![frame_input("image")],
+        FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+            Box::pin(async move {
+                let value = inputs[0].value.clone();
+                outputs[0] = run_frame_op(value, neutralize_background).await?;
+                Ok(())
+            })
+        }),
+    ));
+
+    // hdr_compress
+    func_lib.add(processing_func(
+        "300a2ec5-0ccd-47ec-b282-030eea41441c",
+        "hdr_compress",
+        "Compresses large-scale dynamic range (multiscale HDR)",
+        vec![frame_input("image"), float_input("amount", 0.5)],
+        FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+            Box::pin(async move {
+                let amount = inputs[1].value.as_f64().map(|v| v as f32).unwrap_or(0.5);
+                let value = inputs[0].value.clone();
+                outputs[0] = run_frame_op(value, move |img| {
+                    compress_dynamic_range(
+                        img,
+                        HdrConfig {
+                            amount,
+                            ..Default::default()
+                        },
+                    );
                 })
-            }),
-        ));
+                .await?;
+                Ok(())
+            })
+        }),
+    ));
 
-        // hdr_compress
-        func_lib.add(processing_func(
-            "300a2ec5-0ccd-47ec-b282-030eea41441c",
-            "hdr_compress",
-            "Compresses large-scale dynamic range (multiscale HDR)",
-            vec![frame_input("image"), float_input("amount", 0.5)],
-            FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-                Box::pin(async move {
-                    let amount = inputs[1].value.as_f64().map(|v| v as f32).unwrap_or(0.5);
-                    let value = inputs[0].value.clone();
-                    outputs[0] = run_frame_op(value, move |img| {
-                        compress_dynamic_range(
-                            img,
-                            HdrConfig {
-                                amount,
-                                ..Default::default()
-                            },
-                        );
-                    })
-                    .await?;
-                    Ok(())
+    // local_contrast
+    func_lib.add(processing_func(
+        "6a28b732-2704-454b-8afd-0a91d385458a",
+        "local_contrast",
+        "Local contrast enhancement (CLAHE)",
+        vec![frame_input("image"), float_input("strength", 0.8)],
+        FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+            Box::pin(async move {
+                let strength = inputs[1].value.as_f64().map(|v| v as f32).unwrap_or(0.8);
+                let value = inputs[0].value.clone();
+                outputs[0] = run_frame_op(value, move |img| {
+                    enhance_local_contrast(
+                        img,
+                        LocalContrastConfig {
+                            strength,
+                            ..Default::default()
+                        },
+                    );
                 })
-            }),
-        ));
+                .await?;
+                Ok(())
+            })
+        }),
+    ));
 
-        // local_contrast
-        func_lib.add(processing_func(
-            "6a28b732-2704-454b-8afd-0a91d385458a",
-            "local_contrast",
-            "Local contrast enhancement (CLAHE)",
-            vec![frame_input("image"), float_input("strength", 0.8)],
-            FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-                Box::pin(async move {
-                    let strength = inputs[1].value.as_f64().map(|v| v as f32).unwrap_or(0.8);
-                    let value = inputs[0].value.clone();
-                    outputs[0] = run_frame_op(value, move |img| {
-                        enhance_local_contrast(
-                            img,
-                            LocalContrastConfig {
-                                strength,
-                                ..Default::default()
-                            },
-                        );
-                    })
-                    .await?;
-                    Ok(())
+    // star_detect → star count
+    func_lib.add(Func {
+        id: "eb93559d-370c-4bea-aef0-c43897f3416a".into(),
+        name: "star_detect".to_string(),
+        description: Some("Detects stars and outputs the count".to_string()),
+        behavior: FuncBehavior::Pure,
+        terminal: false,
+        category: "astro".to_string(),
+        inputs: vec![
+            frame_input("image"),
+            preset_input("detection", &DETECTION_PRESET_DATATYPE),
+        ],
+        outputs: vec![FuncOutput {
+            name: "count".to_string(),
+            data_type: DataType::Int,
+        }],
+        events: vec![],
+        required_contexts: vec![],
+        lambda: FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+            Box::pin(async move {
+                assert_eq!(inputs.len(), 2);
+                assert_eq!(outputs.len(), 1);
+
+                let config = inputs[1]
+                    .value
+                    .as_enum()
+                    .and_then(|s| DetectionPreset::from_str(s).ok())
+                    .unwrap_or(DetectionPreset::WideField)
+                    .config();
+                let value = inputs[0].value.clone();
+                let count = tokio::task::spawn_blocking(move || {
+                    let frame = value
+                        .as_custom::<AstroFrame>()
+                        .expect("image input is an AstroFrame");
+                    StarDetector::from_config(config)
+                        .detect(&frame.image)
+                        .stars
+                        .len()
                 })
-            }),
-        ));
+                .await
+                .map_err(anyhow::Error::from)?;
 
-        // star_detect → star count
-        func_lib.add(Func {
-            id: "eb93559d-370c-4bea-aef0-c43897f3416a".into(),
-            name: "star_detect".to_string(),
-            description: Some("Detects stars and outputs the count".to_string()),
-            behavior: FuncBehavior::Pure,
-            terminal: false,
-            category: "astro".to_string(),
-            inputs: vec![
-                frame_input("image"),
-                preset_input("detection", &DETECTION_PRESET_DATATYPE),
-            ],
-            outputs: vec![FuncOutput {
-                name: "count".to_string(),
-                data_type: DataType::Int,
-            }],
-            events: vec![],
-            required_contexts: vec![],
-            lambda: FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 2);
-                    assert_eq!(outputs.len(), 1);
+                outputs[0] = (count as i64).into();
 
-                    let config = inputs[1]
-                        .value
-                        .as_enum()
-                        .and_then(|s| DetectionPreset::from_str(s).ok())
-                        .unwrap_or(DetectionPreset::WideField)
-                        .config();
-                    let value = inputs[0].value.clone();
-                    let count = tokio::task::spawn_blocking(move || {
-                        let frame = value
-                            .as_custom::<AstroFrame>()
-                            .expect("image input is an AstroFrame");
-                        StarDetector::from_config(config)
-                            .detect(&frame.image)
-                            .stars
-                            .len()
-                    })
-                    .await
-                    .map_err(anyhow::Error::from)?;
-
-                    outputs[0] = (count as i64).into();
-
-                    Ok(())
-                })
-            }),
-            ..Default::default()
-        });
+                Ok(())
+            })
+        }),
+        ..Default::default()
+    });
 
     func_lib
 }

@@ -5,8 +5,8 @@ use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
 use crate::common::shared_any_state::SharedAnyState;
-use crate::elements::basic_funclib::BasicFuncLib;
-use crate::elements::worker_events_funclib::WorkerEventsFuncLib;
+use crate::elements::basic_funclib::basic_funclib;
+use crate::elements::worker_events_funclib::worker_events_funclib;
 use crate::event_lambda::EventLambda;
 use crate::execution::Result as ExecResult;
 use crate::execution_stats::ExecutionStats;
@@ -41,9 +41,8 @@ impl FrameHarness {
     }
 
     async fn with_callback_capacity(cap: usize) -> Self {
-        let timers_invoker = WorkerEventsFuncLib::default();
-        let mut func_lib = BasicFuncLib::default().into_func_lib();
-        func_lib.merge(timers_invoker.into_func_lib());
+        let mut func_lib = basic_funclib();
+        func_lib.merge(worker_events_funclib());
 
         let graph = log_frame_no_graph(&func_lib);
         let frame_event_node_id = graph.by_name("frame event").unwrap().id;
@@ -379,7 +378,7 @@ async fn events_are_deduplicated() {
 async fn execute_terminals_triggers_terminal_nodes() {
     use crate::data::StaticValue;
 
-    let func_lib = BasicFuncLib::default().into_func_lib();
+    let func_lib = basic_funclib();
 
     // Simple single-terminal graph — doesn't use FrameHarness' frame-event setup.
     let mut graph = Graph::default();
@@ -792,7 +791,7 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
     // the loop never actually spawns. This removes lambda-driven
     // callbacks as a confounding factor while still exercising the
     // should_start_event_loop branch.
-    let func_lib = BasicFuncLib::default().into_func_lib();
+    let func_lib = basic_funclib();
 
     let mut graph = Graph::default();
     let print_func = func_lib.by_name("print").unwrap();
@@ -849,7 +848,7 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
 async fn drain_on_wake_folds_queued_batches_into_one_commit() {
     use crate::data::StaticValue;
 
-    let func_lib = BasicFuncLib::default().into_func_lib();
+    let func_lib = basic_funclib();
 
     // Terminal-only graph — one execute produces one line of output.
     let mut graph = Graph::default();

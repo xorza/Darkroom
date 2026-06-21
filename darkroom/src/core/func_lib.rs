@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
-use lens::{AstroFuncLib, ImageFuncLib};
-use scenarium::elements::basic_funclib::BasicFuncLib;
-use scenarium::elements::worker_events_funclib::WorkerEventsFuncLib;
+use lens::{astro_funclib, image_funclib};
+use scenarium::elements::basic_funclib::basic_funclib;
+use scenarium::elements::worker_events_funclib::worker_events_funclib;
 use scenarium::prelude::FuncLib;
 
 use crate::core::io::library;
@@ -22,10 +22,10 @@ pub(crate) type SharedFuncLib = Arc<ArcSwap<FuncLib>>;
 /// loaded from the library file here at startup, grown by "promote".
 pub(crate) fn runtime_func_lib() -> SharedFuncLib {
     let mut func_lib = FuncLib::default();
-    func_lib.merge(BasicFuncLib::default());
-    func_lib.merge(WorkerEventsFuncLib::default());
-    func_lib.merge(ImageFuncLib::default());
-    func_lib.merge(AstroFuncLib::default());
+    func_lib.merge(basic_funclib());
+    func_lib.merge(worker_events_funclib());
+    func_lib.merge(image_funclib());
+    func_lib.merge(astro_funclib());
     for def in library::load_library() {
         func_lib.add_subgraph(def);
     }
