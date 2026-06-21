@@ -1,5 +1,6 @@
 use glam::Vec2;
-use scenarium::graph::{Node, NodeId, NodeKind};
+use scenarium::data::StaticValue;
+use scenarium::graph::{Binding, InputPort, Node, NodeId, NodeKind};
 use scenarium::prelude::FuncId;
 
 use super::*;
@@ -19,12 +20,37 @@ fn apply_intents_adds_node_and_flags_reconcile() {
         },
         node,
         def: None,
+        bindings: vec![],
     };
 
     let reconcile = apply_intents(&mut doc, vec![intent]);
     assert_eq!(doc.graph.len(), 1);
     assert!(doc.graph.by_id(&id).is_some(), "node landed in the graph");
     assert!(reconcile, "AddNode can change the interface → reconcile");
+}
+
+#[test]
+fn apply_add_node_seeds_initial_bindings() {
+    let mut doc = empty_document();
+    let node = Node::new(NodeKind::Func(FuncId::unique()));
+    let id = node.id;
+    let port = InputPort::new(id, 0);
+    let intent = Intent::AddNode {
+        view_node: ViewNode {
+            id,
+            pos: Vec2::ZERO,
+        },
+        node,
+        def: None,
+        bindings: vec![(port, Binding::Const(StaticValue::Float(5.0)))],
+    };
+
+    apply_intents(&mut doc, vec![intent]);
+    assert_eq!(
+        doc.graph.input_binding(port),
+        Binding::Const(StaticValue::Float(5.0)),
+        "the seeded default landed as a const binding",
+    );
 }
 
 #[test]
@@ -78,6 +104,7 @@ fn apply_intents_batches_multiple() {
                 },
                 node,
                 def: None,
+                bindings: vec![],
             }
         })
         .collect();

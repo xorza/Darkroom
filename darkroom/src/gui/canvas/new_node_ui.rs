@@ -1,6 +1,8 @@
 use glam::Vec2;
 use palantir::{ClickOutside, Configure, MenuItem, Panel, Popup, Sizing, Spacing, Text, Ui};
-use scenarium::graph::Node;
+use scenarium::function::FuncInput;
+use scenarium::graph::{Binding, InputPort, Node};
+use scenarium::prelude::NodeId;
 use scenarium::subgraph::{SubgraphDef, SubgraphRef};
 
 use crate::core::document::view_node::ViewNode;
@@ -8,6 +10,10 @@ use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::scene::Scene;
+
+/// A chosen palette entry: the node to spawn, an optional `Local` subgraph
+/// def to add alongside it, and the default input bindings to seed with it.
+type ChosenNode = (Node, Option<Box<SubgraphDef>>, Vec<(InputPort, Binding)>);
 
 /// Right-click-on-canvas → popup that lists every `Func` in
 /// `AppContext::func_lib` grouped by category. Clicking an entry emits
@@ -59,7 +65,7 @@ impl NewNodeUi {
         // add alongside it (library subgraphs are localized on instance,
         // so they drop an editable copy that records its `origin`). Owned,
         // so it holds no borrow of `func_lib` past the popup body.
-        let mut chosen: Option<(Node, Option<Box<SubgraphDef>>)> = None;
+        let mut chosen: Option<ChosenNode> = None;
         let chrome = ui.theme.context_menu.panel.clone();
         // One column per category (an `hstack` laid left-to-right). Within
         // a column the function list is a `wrap_vstack`, so a category with
@@ -107,7 +113,10 @@ impl NewNodeUi {
                                                     .show(ui, popup)
                                                     .clicked()
                                                 {
-                                                    chosen = Some((func.into(), None));
+                                                    let node: Node = func.into();
+                                                    let bindings =
+                                                        default_bindings(node.id, &func.inputs);
+                                                    chosen = Some((node, None, bindings));
                                                 }
                                             }
                                             // Shared (`Linked`) subgraph
@@ -132,7 +141,13 @@ impl NewNodeUi {
                                                         &local,
                                                         SubgraphRef::Local(local.id),
                                                     );
-                                                    chosen = Some((node, Some(Box::new(local))));
+                                                    let bindings =
+                                                        default_bindings(node.id, &local.inputs);
+                                                    chosen = Some((
+                                                        node,
+                                                        Some(Box::new(local)),
+                                                        bindings,
+                                                    ));
                                                 }
                                             }
                                         });
@@ -141,7 +156,7 @@ impl NewNodeUi {
                     });
             });
 
-        if let Some((node, def)) = chosen {
+        if let Some((node, def, bindings)) = chosen {
             let view_node = ViewNode {
                 id: node.id,
                 pos: open.world_pos,
@@ -150,6 +165,7 @@ impl NewNodeUi {
                 view_node,
                 node,
                 def,
+                bindings,
             });
             self.state = None;
         } else if popup_resp.dismissed || popup_resp.close_requested {
@@ -171,4 +187,63 @@ fn sorted_categories<'a>(ctx: &'a AppContext<'_>) -> Vec<&'a str> {
     cats.sort();
     cats.dedup();
     cats
+}
+
+/// Seed each input that declares a func default with a matching
+/// `Binding::Const`, so a freshly dropped node starts with its defaults
+/// filled in (a sigma of `5.0`, a preset already chosen, …) instead of
+/// every port unbound. Inputs without a declared default (images, required
+/// custom inputs) are left for the user to wire.
+fn default_bindings(node_id: NodeId, inputs: &[FuncInput]) -> Vec<(InputPort, Binding)> {
+    inputs
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, input)| {
+            input
+                .default_value
+                .clone()
+                .map(|value| (InputPort::new(node_id, idx), Binding::Const(value)))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use scenarium::data::{DataType, StaticValue};
+
+    use super::*;
+
+    fn finput(default: Option<StaticValue>) -> FuncInput {
+        FuncInput {
+            name: "p".to_string(),
+            required: true,
+            data_type: DataType::Float,
+            default_value: default,
+            value_options: vec![],
+        }
+    }
+
+    #[test]
+    fn default_bindings_seeds_only_declared_defaults_at_original_indices() {
+        let node = NodeId::unique();
+        let inputs = vec![
+            finput(None),                          // 0: no default → skipped
+            finput(Some(StaticValue::Float(0.0))), // 1
+            finput(None),                          // 2: skipped
+            finput(Some(StaticValue::Float(1.0))), // 3
+        ];
+        assert_eq!(
+            default_bindings(node, &inputs),
+            vec![
+                (
+                    InputPort::new(node, 1),
+                    Binding::Const(StaticValue::Float(0.0))
+                ),
+                (
+                    InputPort::new(node, 3),
+                    Binding::Const(StaticValue::Float(1.0))
+                ),
+            ]
+        );
+    }
 }

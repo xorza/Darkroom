@@ -61,6 +61,12 @@ pub enum Intent {
         /// just created (e.g. instancing a library subgraph, which drops
         /// a localized copy). `None` for plain func nodes.
         def: Option<Box<SubgraphDef>>,
+        /// Initial input bindings to seed alongside the node — the caller
+        /// fills these with each input's func-declared default
+        /// (`Binding::Const`) so a fresh node lands ready to run instead of
+        /// fully unbound. Applied atomically with the node, so one undo
+        /// removes node + seeds together.
+        bindings: Vec<(InputPort, Binding)>,
     },
     /// Paste a set of pre-cloned nodes (fresh ids, offset positions) plus
     /// the connections *among* them, and select the copies. The caller
@@ -184,6 +190,7 @@ pub enum GraphStep {
         view_node: ViewNode,
         node: Node,
         def: Option<Box<SubgraphDef>>,
+        bindings: Vec<(InputPort, Binding)>,
     },
     /// Add a batch of nodes + their internal wiring and swap the
     /// selection to the copies. Undo removes every added node (which
@@ -432,12 +439,14 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             view_node,
             mut node,
             def,
+            bindings,
         } => {
             let def = reuse_local_subgraph(graph, &mut node, def);
             GraphStep::AddNode {
                 view_node,
                 node,
                 def,
+                bindings,
             }
         }
         Intent::DuplicateNodes {
@@ -679,6 +688,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             view_node,
             node,
             def,
+            bindings,
         } => {
             assert!(
                 scope.graph.by_id(&node.id).is_none(),
@@ -688,6 +698,9 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
                 scope.graph.subgraphs.add((**def).clone());
             }
             scope.graph.add(node.clone());
+            for (port, binding) in bindings {
+                scope.graph.set_input_binding(*port, binding.clone());
+            }
             scope.view.view_nodes.add(view_node.clone());
         }
         GraphStep::DuplicateNodes {

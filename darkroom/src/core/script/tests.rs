@@ -149,7 +149,9 @@ fn create_node_known_id_enqueues_add_node() {
             view_node,
             node,
             def,
+            bindings,
         } => {
+            assert!(bindings.is_empty(), "script-created nodes seed no defaults");
             assert_eq!(node.kind, NodeKind::Func(alpha_id));
             assert_eq!(node.name, "alpha");
             assert_eq!(view_node.id, node.id);

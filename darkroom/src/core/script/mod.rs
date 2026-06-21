@@ -511,6 +511,9 @@ fn register_host_helpers(engine: &mut Engine, func_lib: SharedFuncLib) {
                 view_node,
                 node,
                 def: None,
+                // Script-created nodes set their inputs explicitly; no
+                // default-seeding (that's the interactive-palette path).
+                bindings: vec![],
             };
             rhai::serde::to_dynamic(&action)
                 .map_err(|e| format!("make_add_node: encode failed: {e}").into())
