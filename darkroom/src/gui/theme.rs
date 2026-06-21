@@ -22,6 +22,10 @@ const PORT_COL_PAD_X: f32 = 8.0;
 const PORT_GAP: f32 = 6.0;
 const PORT_COLS_GAP: f32 = 12.0;
 const VALUE_EDITOR_WIDTH: f32 = 100.0;
+/// Upper bound on the value column: editors fill the column up to here, then
+/// a long value (e.g. a long file path) ellipsizes instead of stretching the
+/// node out.
+const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
 const NEW_NODE_POPUP_MAX_HEIGHT: f32 = 400.0;
 // palantir sub-theme tweaks (see `palantir_theme_for`)
 const MENU_FONT_SIZE: f32 = 13.0;
@@ -327,8 +331,12 @@ pub struct Theme {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct StaticValueEditorTheme {
     pub button: ButtonTheme,
-    /// Fixed logical-px width of the embedded `TextEdit` / pick button.
+    /// Minimum logical-px width of the embedded `TextEdit` / pick button /
+    /// dropdown — editors fill the value column down to at least this.
     pub width: f32,
+    /// Maximum logical-px width of the value column, so a long value
+    /// ellipsizes rather than stretching the node.
+    pub max_width: f32,
 }
 
 impl StaticValueEditorTheme {
@@ -360,6 +368,7 @@ impl StaticValueEditorTheme {
         Self {
             button,
             width: VALUE_EDITOR_WIDTH,
+            max_width: VALUE_EDITOR_MAX_WIDTH,
         }
     }
 }

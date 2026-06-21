@@ -45,7 +45,12 @@ pub(crate) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: 
     Grid::new()
         .id_salt("ports")
         .size((Sizing::FILL, Sizing::Hug))
-        .cols([Track::hug(), Track::hug(), Track::fill(), Track::hug()])
+        .cols([
+            Track::hug(),
+            Track::hug().max(theme.static_value_editor.max_width),
+            Track::fill(),
+            Track::hug(),
+        ])
         .rows(rows)
         .gap_xy(theme.port_gap, theme.port_cols_gap)
         .padding(Spacing::new(

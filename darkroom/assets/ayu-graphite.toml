@@ -38,6 +38,7 @@ new_node_popup_max_height = 400.0
 
 [static_value_editor]
 width = 100.0
+max_width = 240.0
 
 [static_value_editor.button]
 padding = [8.0, 4.0]
