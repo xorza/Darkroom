@@ -16,3 +16,7 @@ Scenarium is a Cargo workspace for a node-based data processing pipeline framewo
 `default-members = ["darkroom"]`; only `.tmp` is `exclude`d. `imaginarium`, `quickbench`, and `palantir` are git submodules (see `.gitmodules`).
 
 **`darkroom` + `palantir`.** `darkroom/` is the editor, built on **Palantir** — our own in-tree immediate-mode GUI library in `palantir/`. Palantir is a sibling project (workspace member + git submodule) with its own conventions in `palantir/CLAUDE.md`; changes to `darkroom/` may require coordinated changes in `palantir/`. Both are pre-1.0 and break freely.
+
+## Conventions
+
+**UUIDs / IDs.** Every new UUID literal (a `TypeId`, `FuncId`, `SubgraphId`, or any other `id_type!`-backed id) must be generated with the real `uuidgen` tool, lowercased — `uuidgen | tr 'A-Z' 'a-z'` — never hand-typed or model-invented. Hand-made ids look unique but aren't drawn from any entropy source and risk silently colliding with an existing id. After adding one, `rg` the new value across the repo to confirm it's unique. These ids are the stable identity that persisted graphs bind to, so once an id ships in a saved document it must not change.

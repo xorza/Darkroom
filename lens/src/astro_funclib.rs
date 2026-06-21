@@ -5,16 +5,25 @@
 //! stacking / processing nodes build on these types in later phases.
 
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::{Arc, LazyLock};
 
+use common::Buffer2;
 use common::file_utils::astro_image_files;
-use lumos::{AstroImage, CalibrationFrames, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
+use lumos::{
+    AlignStackConfig, AstroImage, CalibrationFrames, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD,
+    ImageDimensions, Reference, calibrate_align_stack,
+};
 use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::func_lambda::FuncLambda;
 use scenarium::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
 use scenarium::graph::NodeBehavior;
 
 use crate::astro_frame::{ASTRO_FRAME_DATA_TYPE, AstroFrame};
+use crate::astro_presets::{
+    COMBINE_PRESET_DATATYPE, CombinePreset, DETECTION_PRESET_DATATYPE, DetectionPreset,
+    REGISTRATION_PRESET_DATATYPE, RegistrationPreset,
+};
 use crate::masters::{MASTERS_DATA_TYPE, Masters};
 
 /// Every file extension `AstroImage::from_file` recognizes: FITS, camera
@@ -73,7 +82,7 @@ impl Default for AstroFuncLib {
 
         // load_astro_image
         func_lib.add(Func {
-            id: "f1a2b3c4-d5e6-4f70-8a91-b2c3d4e5f610".into(),
+            id: "fbcc8899-efc3-40e0-a6fd-8743f86edbd3".into(),
             name: "load_astro_image".to_string(),
             description: Some("Loads a FITS/RAW/standard astronomical image".to_string()),
             behavior: FuncBehavior::Impure,
@@ -115,7 +124,7 @@ impl Default for AstroFuncLib {
 
         // build_masters
         func_lib.add(Func {
-            id: "f1a2b3c4-d5e6-4f70-8a91-b2c3d4e5f611".into(),
+            id: "f2f6f1ff-5b10-409c-900f-d6b48750a529".into(),
             name: "build_masters".to_string(),
             description: Some(
                 "Stacks raw calibration frames (darks/flats/bias/flat-darks) into calibration \
@@ -192,8 +201,155 @@ impl Default for AstroFuncLib {
             }),
         });
 
+        // stack_lights
+        func_lib.add(Func {
+            id: "b02f5c42-7bda-48f6-81dd-81338efbb126".into(),
+            name: "stack_lights".to_string(),
+            description: Some(
+                "Calibrates, aligns and stacks a folder of light frames into one image".to_string(),
+            ),
+            behavior: FuncBehavior::Impure,
+            node_default_behavior: NodeBehavior::Once,
+            terminal: false,
+            category: "astro".to_string(),
+            inputs: vec![
+                FuncInput {
+                    name: "lights".to_string(),
+                    required: true,
+                    data_type: ASTRO_DIR_DATA_TYPE.clone(),
+                    default_value: None,
+                    value_options: vec![],
+                },
+                FuncInput {
+                    name: "masters".to_string(),
+                    required: false,
+                    data_type: MASTERS_DATA_TYPE.clone(),
+                    default_value: None,
+                    value_options: vec![],
+                },
+                preset_input("detection", &DETECTION_PRESET_DATATYPE),
+                preset_input("registration", &REGISTRATION_PRESET_DATATYPE),
+                preset_input("combine", &COMBINE_PRESET_DATATYPE),
+                FuncInput {
+                    name: "reference".to_string(),
+                    required: false,
+                    // < 0 picks the frame with the most stars (auto); >= 0 is a
+                    // 0-based index into the (directory-sorted) light frames.
+                    data_type: DataType::Int,
+                    default_value: Some((-1_i64).into()),
+                    value_options: vec![],
+                },
+            ],
+            outputs: vec![
+                frame_output("image"),
+                frame_output("coverage"),
+                frame_output("weight"),
+            ],
+            events: vec![],
+            required_contexts: vec![],
+            lambda: FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+                Box::pin(async move {
+                    assert_eq!(inputs.len(), 6);
+                    assert_eq!(outputs.len(), 3);
+
+                    let lights = inputs[0]
+                        .value
+                        .as_fs_path()
+                        .map(|dir| astro_image_files(Path::new(dir)))
+                        .unwrap_or_default();
+                    // Arc-clone the masters value so it can move into the
+                    // blocking task; `Unbound` means "no calibration".
+                    let masters_val = inputs[1].value.clone();
+                    let detection = inputs[2]
+                        .value
+                        .as_enum()
+                        .and_then(|s| DetectionPreset::from_str(s).ok())
+                        .unwrap_or(DetectionPreset::WideField)
+                        .config();
+                    let registration = inputs[3]
+                        .value
+                        .as_enum()
+                        .and_then(|s| RegistrationPreset::from_str(s).ok())
+                        .unwrap_or(RegistrationPreset::Default)
+                        .config();
+                    let stack = inputs[4]
+                        .value
+                        .as_enum()
+                        .and_then(|s| CombinePreset::from_str(s).ok())
+                        .unwrap_or(CombinePreset::SigmaClipped)
+                        .config();
+                    let reference = match inputs[5].value.as_i64() {
+                        Some(index) if index >= 0 => Reference::Index(index as usize),
+                        _ => Reference::Auto,
+                    };
+                    let config = AlignStackConfig {
+                        detection,
+                        registration,
+                        stack,
+                        reference,
+                        cosmic_ray: None,
+                    };
+
+                    // Load → calibrate → demosaic → detect → register → combine:
+                    // the whole pipeline is heavy synchronous CPU work.
+                    let result = tokio::task::spawn_blocking(move || {
+                        let empty = CalibrationMasters {
+                            master_dark: None,
+                            master_flat: None,
+                            master_bias: None,
+                            master_flat_dark: None,
+                            defect_map: None,
+                        };
+                        let masters = masters_val
+                            .as_custom::<Masters>()
+                            .map(|m| &m.masters)
+                            .unwrap_or(&empty);
+                        calibrate_align_stack(&lights, masters, &config)
+                    })
+                    .await
+                    .map_err(anyhow::Error::from)?
+                    .map_err(anyhow::Error::from)?;
+
+                    outputs[0] = DynamicValue::from_custom(AstroFrame::from(result.image));
+                    outputs[1] = DynamicValue::from_custom(AstroFrame::from(plane_to_frame(
+                        result.coverage,
+                    )));
+                    outputs[2] =
+                        DynamicValue::from_custom(AstroFrame::from(plane_to_frame(result.weight)));
+
+                    Ok(())
+                })
+            }),
+        });
+
         Self { func_lib }
     }
+}
+
+/// A preset dropdown input seeded to the enum's first variant.
+fn preset_input(name: &str, datatype: &DataType) -> FuncInput {
+    FuncInput {
+        name: name.to_string(),
+        required: false,
+        data_type: datatype.clone(),
+        default_value: datatype.default_value(),
+        value_options: vec![],
+    }
+}
+
+/// An `AstroFrame` output port.
+fn frame_output(name: &str) -> FuncOutput {
+    FuncOutput {
+        name: name.to_string(),
+        data_type: ASTRO_FRAME_DATA_TYPE.clone(),
+    }
+}
+
+/// Wrap a single-channel result plane (coverage / weight) as a grayscale
+/// `AstroImage` so it can ride an `AstroFrame` wire and preview.
+fn plane_to_frame(plane: Buffer2<f32>) -> AstroImage {
+    let dims = ImageDimensions::new((plane.width(), plane.height()), 1);
+    AstroImage::from_planar_channels(dims, [Vec::from(plane)])
 }
 
 /// An optional calibration-frame folder input (`darks`/`flats`/…): an
@@ -274,5 +430,34 @@ mod tests {
             f.inputs[4].default_value,
             Some(StaticValue::Float(DEFAULT_SIGMA_THRESHOLD as f64)),
         );
+    }
+
+    #[test]
+    fn stack_lights_node_is_registered() {
+        let lib = AstroFuncLib::default();
+        let f = func(&lib, "stack_lights");
+        assert_eq!(f.category, "astro");
+
+        assert_eq!(f.inputs.len(), 6);
+        assert_eq!(f.inputs[0].name, "lights");
+        assert_eq!(f.inputs[0].data_type, *ASTRO_DIR_DATA_TYPE);
+        assert!(f.inputs[0].required, "lights folder is required");
+        assert_eq!(f.inputs[1].name, "masters");
+        assert_eq!(f.inputs[1].data_type, *MASTERS_DATA_TYPE);
+        assert!(!f.inputs[1].required, "masters are optional");
+        // Preset dropdowns seed to their first variant.
+        assert_eq!(f.inputs[2].data_type, *DETECTION_PRESET_DATATYPE);
+        assert_eq!(
+            f.inputs[2].default_value,
+            Some(StaticValue::Enum("wide_field".to_string())),
+        );
+        assert_eq!(f.inputs[5].name, "reference");
+        assert_eq!(f.inputs[5].default_value, Some(StaticValue::Int(-1)));
+
+        let out_names: Vec<&str> = f.outputs.iter().map(|o| o.name.as_str()).collect();
+        assert_eq!(out_names, ["image", "coverage", "weight"]);
+        for out in &f.outputs {
+            assert_eq!(out.data_type, *ASTRO_FRAME_DATA_TYPE);
+        }
     }
 }

@@ -68,11 +68,18 @@ rich config presets (`StackConfig::sigma_clipped`, `StarDetectionConfig::wide_fi
   `darkroom/src/core/func_lib.rs`. A new `AstroFrame` branch in `node_values.rs`
   uploads its preview.
 
-**Build Masters node** (Phase 2, partial) — `build_masters` in `AstroFuncLib`:
-optional `darks`/`flats`/`bias`/`flat_darks` directory inputs (new shared
-`ASTRO_DIR_DATA_TYPE`) + `sigma` (Float = 5.0) → `Masters`. Globs each folder via
-`common::file_utils::astro_image_files` and calls `CalibrationMasters::from_files`
-inside `spawn_blocking`.
+**Headline nodes** (Phase 2) — both in `AstroFuncLib`, decode/stack off-thread
+via `spawn_blocking`, directories globbed with `common::file_utils`:
+
+- **`build_masters`** — optional `darks`/`flats`/`bias`/`flat_darks` directory
+  inputs (new shared `ASTRO_DIR_DATA_TYPE`) + `sigma` (Float = 5.0) → `Masters`,
+  via `CalibrationMasters::from_files`.
+- **`stack_lights`** — `lights` (directory) + optional `masters` + `detection` /
+  `registration` / `combine` preset dropdowns + `reference` (Int, `-1` = auto) →
+  `image` / `coverage` / `weight` (`AstroFrame`), via `calibrate_align_stack`.
+  Presets live in `lens/src/astro_presets.rs` (a `preset_enum!` macro maps each
+  variant to a lumos stage config); coverage/weight planes wrap as 1-channel
+  `AstroImage`s. Per-field σ overrides deferred — presets bake the rejection sigma.
 
 One non-blocking concern carried into the node phases: **lumos work is heavy
 synchronous CPU**
@@ -104,20 +111,9 @@ A user right-clicks → picks from a new **`astro`** category:
 
 ## Roadmap
 
-> **Done:** Phase 0 (editor foundations) and Phase 1 (astro custom types +
-> `load_astro_image`). See *Done so far* above.
-
-### Phase 2 — Headline nodes
-
-1. **Build Masters node.** Inputs: `darks/flats/bias/flat_darks` (`FsPath`
-   Directory, optional), `sigma` (Float = 5.0). Output: `Masters`. Lambda globs
-   each dir, calls `CalibrationMasters::from_files`, inside `spawn_blocking`.
-2. **Stack Lights node.** Inputs: `lights` (Directory), `masters` (`Masters`,
-   optional), `detection`/`registration`/`combine` presets (Enum), `σ-low`/`σ-high`
-   (Float), `reference` (Enum). Outputs: `image` + `coverage` + `weight`
-   (`AstroFrame`). Lambda builds `AlignStackConfig` from preset + overrides →
-   `calibrate_align_stack`, in `spawn_blocking`; route lumos progress to
-   `ctx.info`.
+> **Done:** Phase 0 (editor foundations), Phase 1 (astro custom types +
+> `load_astro_image`), and Phase 2 (`build_masters` + `stack_lights`). See
+> *Done so far* above.
 
 ### Phase 3 — Processing nodes (fast fan-out)
 
@@ -165,4 +161,5 @@ lambda: async_lambda!(move |ctx, _, _, inputs, _, outputs| {
 - **Home:** astro types + nodes live in `lens` (`astro_frame.rs`, `masters.rs`,
   `astro_funclib.rs`); `lens` depends on `lumos`. *(Decided + done in Phase 1.)*
 
-**Phase 2** (Build Masters + Stack Lights) is the next slice.
+**Phase 3** (per-frame processing nodes: stretch / background / denoise / SCNR /
+save / star-detect) is the next slice.

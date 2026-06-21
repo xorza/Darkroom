@@ -12,6 +12,7 @@ Node-function library: adapts `imaginarium` (GPU image ops) **and** `lumos`
 | `astro_funclib.rs` | Astro node functions (lumos), category `astro`. |
 | `astro_frame.rs` | `AstroFrame` — `lumos::AstroImage` as a `CustomValue` (CPU thumbnail preview). |
 | `masters.rs` | `Masters` — `lumos::CalibrationMasters` as a `CustomValue`. |
+| `astro_presets.rs` | `preset_enum!` macro + `DetectionPreset`/`RegistrationPreset`/`CombinePreset` (dropdown enums → lumos stage configs). |
 
 ## Key types
 
@@ -22,7 +23,7 @@ Node-function library: adapts `imaginarium` (GPU image ops) **and** `lumos`
 - `Masters` — wrapper around `lumos::CalibrationMasters`.
 - `VisionCtx` — context holding a `ProcessingContext` for GPU/CPU dispatch.
 - `ConversionFormat` — enum of the 12 color-format conversion targets.
-- Lazy-initialized type handles: `IMAGE_DATA_TYPE`, `ASTRO_FRAME_DATA_TYPE`, `MASTERS_DATA_TYPE`, `ASTRO_IMAGE_PATH_DATA_TYPE` (existing-file picker filtered to the FITS/RAW/standard extensions `from_file` loads), `BLENDMODE_DATATYPE`, `CONVERSION_FORMAT_DATATYPE`, `VISION_CTX_TYPE`.
+- Lazy-initialized type handles: `IMAGE_DATA_TYPE`, `ASTRO_FRAME_DATA_TYPE`, `MASTERS_DATA_TYPE`, `ASTRO_IMAGE_PATH_DATA_TYPE` (file picker filtered to the FITS/RAW/standard extensions `from_file` loads), `ASTRO_DIR_DATA_TYPE` (frame-folder picker), `DETECTION_PRESET_DATATYPE` / `REGISTRATION_PRESET_DATATYPE` / `COMBINE_PRESET_DATATYPE`, `BLENDMODE_DATATYPE`, `CONVERSION_FORMAT_DATATYPE`, `VISION_CTX_TYPE`.
 
 ## Functions
 
@@ -34,6 +35,8 @@ Node-function library: adapts `imaginarium` (GPU image ops) **and** `lumos`
 | `convert` | Convert image to a different color format (enum input). |
 | `blend` | Blend two images with configurable mode and alpha. |
 | `load_astro_image` | Decode a FITS/RAW/standard file into an `AstroFrame` (off-thread). |
+| `build_masters` | Stack `darks`/`flats`/`bias`/`flat_darks` folders into `Masters` (`CalibrationMasters::from_files`, off-thread). |
+| `stack_lights` | Calibrate + align + stack a `lights` folder (+ optional `Masters`, preset dropdowns) into `image`/`coverage`/`weight` `AstroFrame`s (`calibrate_align_stack`, off-thread). |
 
 ## Dependencies
 

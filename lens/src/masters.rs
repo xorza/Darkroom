@@ -13,7 +13,7 @@ use scenarium::data::{CustomValue, DataType, TypeDef};
 
 pub static MASTERS_TYPE_DEF: LazyLock<Arc<TypeDef>> = LazyLock::new(|| {
     Arc::new(TypeDef {
-        type_id: "f1a2b3c4-d5e6-4f70-8a91-b2c3d4e5f602".into(),
+        type_id: "db1bc978-1d0b-4ffc-9a74-6220eff8908e".into(),
         display_name: "Masters".to_string(),
     })
 });

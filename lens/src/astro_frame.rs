@@ -17,7 +17,7 @@ use scenarium::data::{CustomValue, DataType, PendingPreview, TypeDef};
 
 pub static ASTRO_FRAME_TYPE_DEF: LazyLock<Arc<TypeDef>> = LazyLock::new(|| {
     Arc::new(TypeDef {
-        type_id: "f1a2b3c4-d5e6-4f70-8a91-b2c3d4e5f601".into(),
+        type_id: "8b8cdfd0-e98a-4067-870c-9b078d7f34d1".into(),
         display_name: "AstroFrame".to_string(),
     })
 });
