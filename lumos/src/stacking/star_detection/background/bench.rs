@@ -12,7 +12,7 @@ use crate::stacking::star_detection::background::{
 use crate::stacking::star_detection::config::Config;
 use crate::testing::synthetic::fixtures::{cluster_field, star_field};
 use common::BitBuffer2;
-use common::Buffer2;
+use imaginarium::Buffer2;
 
 /// Estimate background with automatic buffer pool management (bench helper).
 fn estimate_background_test(pixels: &Buffer2<f32>, config: &Config) -> BackgroundEstimate {

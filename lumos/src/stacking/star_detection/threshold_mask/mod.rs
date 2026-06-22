@@ -21,7 +21,7 @@ mod bench;
 mod tests;
 
 use common::BitBuffer2;
-use common::Buffer2;
+use imaginarium::Buffer2;
 
 #[cfg(target_arch = "x86_64")]
 use common::cpu_features;

@@ -8,7 +8,7 @@ use crate::stacking::star_detection::convolution::{
 };
 use crate::testing::synthetic::fixtures::star_field;
 use ::quickbench::quick_bench;
-use common::Buffer2;
+use imaginarium::Buffer2;
 use std::hint::black_box;
 
 // ============ Row convolution: SIMD vs Scalar ============

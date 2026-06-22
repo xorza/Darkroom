@@ -6,7 +6,7 @@
 //! per-tile mappings. Brings out medium-scale structure (dust lanes, nebula filaments). Runs on the
 //! combined intensity and scales channels by `f(I)/I` so hue is preserved.
 
-use common::Buffer2;
+use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::io::astro_image::AstroImage;

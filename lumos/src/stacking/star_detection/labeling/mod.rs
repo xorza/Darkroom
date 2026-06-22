@@ -19,7 +19,7 @@ use rayon::prelude::*;
 use crate::concurrency::UnsafeSendPtr;
 use crate::stacking::star_detection::buffer_pool::BufferPool;
 use common::BitBuffer2;
-use common::Buffer2;
+use imaginarium::Buffer2;
 
 use crate::stacking::star_detection::config::Connectivity;
 

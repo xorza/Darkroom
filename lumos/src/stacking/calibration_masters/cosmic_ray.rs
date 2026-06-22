@@ -15,7 +15,8 @@
 //! four 2×2 phases and reuse the mono detector per dense same-color plane; **X-Trans** = same-color
 //! stencils on the mosaic via `color_at` (no dense same-color sub-lattice exists there).
 
-use common::{Buffer2, Vec2us};
+use common::Vec2us;
+use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
@@ -382,7 +383,7 @@ struct XtransStructure {
 /// iteration handles multi-pixel hits. Significance is `S = L⁺/N`; no `S'` median-subtraction is
 /// needed because `L⁺` (excess over the same-color median) is already a local high-pass.
 fn reject_xtrans(data: &mut Buffer2<f32>, cfa: &CfaType, config: &CosmicRayConfig) -> usize {
-    let size = data.dimensions();
+    let size = Vec2us::new(data.width(), data.height());
     if size.x < 7 || size.y < 7 {
         return 0;
     }
@@ -558,7 +559,7 @@ fn xtrans_noise(
 
 /// Replace masked pixels with the median of their nearest unmasked same-color neighbors.
 fn xtrans_replace(data: &mut Buffer2<f32>, cfa: &CfaType, mask: &[bool]) {
-    let size = data.dimensions();
+    let size = Vec2us::new(data.width(), data.height());
     let w = size.x;
     let src = data.pixels().to_vec();
     let scene = CfaScene {

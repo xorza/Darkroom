@@ -12,7 +12,7 @@
 //! equalizes per-channel offsets): this removes a **spatial surface**, per channel (light pollution
 //! is coloured), and runs on the linear master *before* colour calibration and the stretch.
 
-use common::Buffer2;
+use imaginarium::Buffer2;
 use nalgebra::{DMatrix, DVector};
 
 use crate::background_mesh::TileGrid;

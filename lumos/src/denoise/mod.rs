@@ -9,7 +9,7 @@
 //! A **linear-domain** operation: run after stacking and color calibration, before the stretch (the
 //! stretch's non-uniform gain would distort the noise statistics this relies on).
 
-use common::Buffer2;
+use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::io::astro_image::AstroImage;

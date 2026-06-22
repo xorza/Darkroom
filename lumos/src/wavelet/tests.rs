@@ -1,5 +1,5 @@
 use super::{StarletTransform, atrous_smooth, max_scales, reflect};
-use common::Buffer2;
+use imaginarium::Buffer2;
 
 fn pattern(width: usize, height: usize) -> Buffer2<f32> {
     let px = (0..width * height)

@@ -13,7 +13,7 @@ use imaginarium::{ChannelCount, ChannelType, ColorFormat, Image, ImageDesc};
 use std::ops::SubAssign;
 use std::path::Path;
 
-use common::Buffer2;
+use imaginarium::Buffer2;
 use common::Rgb;
 use common::Vec2us;
 

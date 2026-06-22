@@ -4,7 +4,7 @@
 //! when processing multiple images of the same dimensions.
 
 use common::BitBuffer2;
-use common::Buffer2;
+use imaginarium::Buffer2;
 use common::Vec2us;
 
 /// Pool of reusable buffers for star detection.

@@ -1,7 +1,7 @@
 //! Tests for 3x3 median filter.
 
 use super::*;
-use common::Buffer2;
+use imaginarium::Buffer2;
 
 #[test]
 fn test_uniform_image() {

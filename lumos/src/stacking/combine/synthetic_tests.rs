@@ -16,7 +16,7 @@ use crate::testing::synthetic::metrics::rms_diff;
 use crate::testing::synthetic::observe::{Observation, SimFrame, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
 use crate::{AstroImage, ImageDimensions};
-use common::Buffer2;
+use imaginarium::Buffer2;
 
 const W: usize = 128;
 const H: usize = 128;

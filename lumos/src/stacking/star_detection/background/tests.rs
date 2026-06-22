@@ -4,7 +4,7 @@ use crate::{
     stacking::star_detection::config::{BackgroundRefinement, Config},
     testing::estimate_background,
 };
-use common::Buffer2;
+use imaginarium::Buffer2;
 
 #[test]
 fn test_uniform_background() {

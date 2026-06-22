@@ -22,7 +22,8 @@ pub mod neon;
 use crate::stacking::registration::interpolation::WarpParams;
 use crate::stacking::registration::interpolation::get_lanczos_lut;
 use crate::stacking::registration::transform::WarpTransform;
-use common::Buffer2;
+use common::Vec2us;
+use imaginarium::Buffer2;
 use glam::{DVec2, IVec2, Vec2};
 
 /// Fast inline floor-to-i32, avoiding libc `floorf` function call.
@@ -150,7 +151,7 @@ use crate::stacking::registration::interpolation::sample_pixel;
 pub(crate) fn bilinear_sample(input: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
     let (x, y) = (pos.x, pos.y);
     let pixels = input.pixels();
-    let dims = input.dimensions();
+    let dims = Vec2us::new(input.width(), input.height());
 
     let x0 = fast_floor_i32(x);
     let y0 = fast_floor_i32(y);

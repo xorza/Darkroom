@@ -12,7 +12,7 @@ use crate::stacking::star_detection::config::{CentroidMethod, Config};
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::testing::TestRng;
 use crate::testing::synthetic::star_profiles::render_gaussian_star;
-use common::Buffer2;
+use imaginarium::Buffer2;
 use common::Vec2us;
 
 /// Render `stars` as `(x, y, brightness)` Gaussians of width `sigma` on a 0.1 sky + Gaussian

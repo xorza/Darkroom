@@ -2,7 +2,7 @@
 
 use glam::Vec2;
 
-use common::Buffer2;
+use imaginarium::Buffer2;
 
 use crate::testing::synthetic::patterns::add_gaussian_noise;
 

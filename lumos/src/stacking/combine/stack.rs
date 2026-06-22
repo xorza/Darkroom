@@ -9,7 +9,7 @@ use arrayvec::ArrayVec;
 
 use crate::AstroImage;
 use crate::io::astro_image::cfa::CfaImage;
-use common::Buffer2;
+use imaginarium::Buffer2;
 use common::CancelToken;
 
 use crate::math;

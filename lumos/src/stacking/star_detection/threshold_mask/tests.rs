@@ -11,7 +11,7 @@ use crate::stacking::star_detection::threshold_mask::{
     create_threshold_mask, create_threshold_mask_filtered,
 };
 use common::BitBuffer2;
-use common::Buffer2;
+use imaginarium::Buffer2;
 
 // ============================================================================
 // Test helpers

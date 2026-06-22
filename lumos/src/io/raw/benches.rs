@@ -421,8 +421,8 @@ struct ChannelCompareStats {
 
 /// Compare two channels using linear regression to remove scale/offset differences.
 fn compare_channels(
-    a: &common::Buffer2<f32>,
-    b: &common::Buffer2<f32>,
+    a: &imaginarium::Buffer2<f32>,
+    b: &imaginarium::Buffer2<f32>,
     width: usize,
     height: usize,
     border: usize,

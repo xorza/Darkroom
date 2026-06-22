@@ -17,7 +17,7 @@ use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::fixtures::star_field;
 use crate::testing::synthetic::observe::{Observation, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
-use common::Buffer2;
+use imaginarium::Buffer2;
 
 /// Default star detector for synthetic images.
 fn detector() -> StarDetector {

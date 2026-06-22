@@ -3,7 +3,7 @@
 use crate::stacking::star_detection::threshold_mask::{process_words, process_words_scalar};
 use ::quickbench::quick_bench;
 use common::BitBuffer2;
-use common::Buffer2;
+use imaginarium::Buffer2;
 use std::hint::black_box;
 
 fn create_bench_data(size: usize) -> (Buffer2<f32>, Buffer2<f32>, Buffer2<f32>) {

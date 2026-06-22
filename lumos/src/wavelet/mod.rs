@@ -7,7 +7,7 @@
 //! transform (never storing all layers) via [`atrous_smooth`]; `hdr` needs the layers explicitly via
 //! [`StarletTransform`].
 
-use common::Buffer2;
+use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 #[cfg(test)]

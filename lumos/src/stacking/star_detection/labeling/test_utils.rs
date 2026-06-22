@@ -2,7 +2,7 @@
 
 use crate::stacking::star_detection::config::Connectivity;
 use common::BitBuffer2;
-use common::Buffer2;
+use imaginarium::Buffer2;
 
 use crate::stacking::star_detection::labeling::LabelMap;
 

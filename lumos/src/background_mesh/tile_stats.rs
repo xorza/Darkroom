@@ -5,7 +5,7 @@ use super::TileStats;
 use crate::math::statistics::ClippedStats;
 use crate::math::statistics::sigma_clipped_median_mad;
 use common::BitBuffer2;
-use common::Buffer2;
+use imaginarium::Buffer2;
 
 /// Maximum samples per tile for statistics computation.
 const MAX_TILE_SAMPLES: usize = 1024;

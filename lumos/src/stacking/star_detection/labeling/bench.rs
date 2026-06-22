@@ -8,7 +8,7 @@ use crate::testing::estimate_background;
 use crate::testing::synthetic::fixtures::star_field;
 use ::quickbench::quick_bench;
 use common::BitBuffer2;
-use common::Buffer2;
+use imaginarium::Buffer2;
 use std::hint::black_box;
 
 /// Create a threshold mask using the real detection pipeline.
@@ -98,7 +98,7 @@ fn bench_label_map_from_buffer_4k_globular(b: ::quickbench::Bencher) {
 fn bench_threshold_sweep() {
     use crate::stacking::star_detection::config::Connectivity;
     use crate::stacking::star_detection::labeling::{label_mask_parallel, label_mask_sequential};
-    use common::Buffer2;
+    use imaginarium::Buffer2;
     use std::time::Instant;
 
     println!("\n=== Sequential vs Parallel Threshold Benchmark ===\n");

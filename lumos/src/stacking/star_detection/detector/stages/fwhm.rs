@@ -11,7 +11,7 @@ use crate::stacking::star_detection::detector::stages::FWHM_MAD_FLOOR_FRACTION;
 use crate::stacking::star_detection::detector::stages::detect::detect;
 use crate::stacking::star_detection::detector::stages::measure;
 use crate::stacking::star_detection::star::{SATURATION_PEAK, Star};
-use common::Buffer2;
+use imaginarium::Buffer2;
 
 /// Minimum plausible FWHM in pixels. Stars narrower than this are likely
 /// cosmic rays or hot pixels.

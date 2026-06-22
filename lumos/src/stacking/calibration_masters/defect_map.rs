@@ -40,7 +40,7 @@
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::math::statistics::median_f32_mut;
 use common::BitBuffer2;
-use common::Buffer2;
+use imaginarium::Buffer2;
 use common::CancelToken;
 use common::Vec2us;
 
@@ -689,7 +689,7 @@ mod tests {
         pixels[2] = 70.0; // (2,0)
         pixels[4 * 6 + 2] = 80.0; // (2,4)
 
-        let pixels = common::Buffer2::new(6, 6, pixels);
+        let pixels = imaginarium::Buffer2::new(6, 6, pixels);
         let result = bayer_same_color_median(&pixels, 2, 2, None);
 
         // Neighbors: 50, 60, 70, 80, 100 (0,2=100), 100 (4,2=100), 100 (0,4=100), 100 (4,4=100)
@@ -709,7 +709,7 @@ mod tests {
             999.0, 10.0, 50.0, 10.0, 10.0, 10.0, 10.0, 10.0, 60.0, 10.0, 70.0, 10.0, 10.0, 10.0,
             10.0, 10.0,
         ];
-        let pixels = common::Buffer2::new(4, 4, pixels);
+        let pixels = imaginarium::Buffer2::new(4, 4, pixels);
         let result = bayer_same_color_median(&pixels, 0, 0, None);
 
         // Same-color neighbors: (2,0)=50, (0,2)=60, (2,2)=70

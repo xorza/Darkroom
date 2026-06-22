@@ -47,7 +47,7 @@ The hard requirements, in priority order:
    smears hot pixels, breaks the per-photosite dark/bias model, and makes flat
    division per-channel-incorrect.
 4. **Planar f32 output.** Channels are stored as separate contiguous buffers
-   (`common::Buffer2<f32>` in lumos), which is the natural layout for per-channel
+   (`imaginarium::Buffer2<f32>` in lumos), which is the natural layout for per-channel
    SIMD, per-channel statistics, and channel-independent registration/stacking.
 
 Everything below serves those four goals.

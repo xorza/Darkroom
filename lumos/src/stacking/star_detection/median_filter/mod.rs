@@ -8,7 +8,7 @@ pub mod simd;
 #[cfg(test)]
 mod tests;
 
-use common::Buffer2;
+use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 /// Apply 3x3 median filter to remove Bayer pattern artifacts.

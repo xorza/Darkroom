@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock};
 
-use common::Buffer2;
+use imaginarium::Buffer2;
 use common::CancelToken;
 use common::file_utils::astro_image_files;
 use imaginarium::Image as RawImage;

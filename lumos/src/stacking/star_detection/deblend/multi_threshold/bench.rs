@@ -15,7 +15,7 @@ use crate::stacking::star_detection::labeling::LabelMap;
 use crate::stacking::star_detection::labeling::test_utils::label_map_from_mask_with_connectivity;
 use crate::testing::synthetic::fixtures::cluster_field;
 use common::BitBuffer2;
-use common::Buffer2;
+use imaginarium::Buffer2;
 use common::Vec2us;
 
 /// Create components from a pixel buffer for benchmarking.

@@ -15,7 +15,7 @@ use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::detector::stages::detect_test_utils::detect_stars_test;
 use crate::testing::estimate_background;
 use crate::testing::synthetic::background_map;
-use common::Buffer2;
+use imaginarium::Buffer2;
 use common::Vec2us;
 
 /// Default stamp radius for tests (matching expected FWHM of ~4 pixels).

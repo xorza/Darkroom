@@ -63,7 +63,7 @@ use glam::DVec2;
 use crate::AstroImage;
 use crate::io::astro_image::PixelData;
 use crate::stacking::star_detection::star::Star;
-use common::Buffer2;
+use imaginarium::Buffer2;
 use distortion::sip::SipConfig;
 use interpolation::warp_image;
 use ransac::transforms::estimate_transform;

@@ -4,7 +4,7 @@ use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::buffer_pool::BufferPool;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::deblend::region::Region;
-use common::Buffer2;
+use imaginarium::Buffer2;
 
 use crate::stacking::star_detection::detector::stages::detect::detect;
 

@@ -11,7 +11,7 @@
 //! background gradients, and noise texture; flat/level images use `Stretch::Linear` to show
 //! true values.
 
-use common::Buffer2;
+use imaginarium::Buffer2;
 use common::test_utils::test_output_path;
 use glam::{DVec2, Vec2};
 use image::GrayImage;

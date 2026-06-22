@@ -49,7 +49,7 @@ pub fn cluster_field(width: usize, height: usize, num_stars: usize, seed: u64) -
 mod tests {
     use super::*;
     use crate::testing::synthetic::metrics::pixel_stats;
-    use common::Buffer2;
+    use imaginarium::Buffer2;
 
     fn region_sum(px: &Buffer2<f32>, x0: usize, y0: usize, size: usize) -> f64 {
         let mut s = 0.0;

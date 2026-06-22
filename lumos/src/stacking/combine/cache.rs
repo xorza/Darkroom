@@ -26,7 +26,7 @@ use std::mem::size_of;
 use std::path::{Path, PathBuf};
 
 use arrayvec::ArrayVec;
-use common::Buffer2;
+use imaginarium::Buffer2;
 use common::CancelToken;
 use common::FnvHasher;
 use common::parallel::try_par_map_limited;

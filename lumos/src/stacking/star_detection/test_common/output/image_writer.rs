@@ -94,7 +94,7 @@ pub fn mask_to_gray(mask: &[bool], width: usize, height: usize) -> GrayImage {
 /// Convert labeled image to colored visualization.
 ///
 /// Each label gets a unique color for easy visualization.
-pub fn labels_to_rgb(labels: &common::Buffer2<u32>) -> RgbImage {
+pub fn labels_to_rgb(labels: &imaginarium::Buffer2<u32>) -> RgbImage {
     // Generate distinct colors for labels using golden ratio
     let label_to_color = |label: u32| -> Rgb<u8> {
         if label == 0 {

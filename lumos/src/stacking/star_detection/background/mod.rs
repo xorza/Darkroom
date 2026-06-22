@@ -14,7 +14,7 @@ mod simd;
 mod tests;
 
 use common::BitBuffer2;
-use common::Buffer2;
+use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::background_mesh::TileGrid;

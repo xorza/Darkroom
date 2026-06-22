@@ -16,7 +16,7 @@ use crate::background_mesh::spline::solve_natural_spline_d2;
 use crate::background_mesh::tile_stats::compute_tile_stats;
 use crate::math::statistics::median_f32_mut;
 use common::BitBuffer2;
-use common::Buffer2;
+use imaginarium::Buffer2;
 use common::Vec2us;
 use rayon::prelude::*;
 

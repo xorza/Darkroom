@@ -6,7 +6,7 @@
 use rayon::prelude::*;
 
 use crate::math::bbox::Aabb;
-use common::Buffer2;
+use imaginarium::Buffer2;
 use common::Vec2us;
 
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;

@@ -10,7 +10,7 @@ use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::deblend::*;
 use crate::stacking::star_detection::labeling::LabelMap;
 use crate::stacking::star_detection::labeling::test_utils::label_map_from_raw;
-use common::Buffer2;
+use imaginarium::Buffer2;
 use common::Vec2us;
 
 /// Convenience wrapper for tests — creates fresh buffers per call.

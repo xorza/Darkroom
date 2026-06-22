@@ -3,7 +3,7 @@
 //! Provides basic image patterns like gradients, uniform fills, and checkerboards
 //! that are commonly needed in benchmarks and tests.
 
-use common::Buffer2;
+use imaginarium::Buffer2;
 
 use crate::testing::TestRng;
 

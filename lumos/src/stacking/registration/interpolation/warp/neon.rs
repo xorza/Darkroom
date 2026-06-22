@@ -9,7 +9,8 @@
 
 use std::arch::aarch64::*;
 
-use common::Buffer2;
+use common::Vec2us;
+use imaginarium::Buffer2;
 use glam::{DVec2, IVec2, Vec2};
 
 use crate::stacking::registration::interpolation::sample_pixel;
@@ -28,7 +29,7 @@ pub unsafe fn warp_row_bilinear_neon(
 ) {
     unsafe {
         let pixels = input.pixels();
-        let dims = input.dimensions();
+        let dims = Vec2us::new(input.width(), input.height());
         let output_width = output_row.len();
         let y = output_y as f32;
 

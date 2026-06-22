@@ -12,7 +12,7 @@ use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::load_raw_cfa;
 use crate::stacking::combine::cache::StackableImage;
 use crate::stacking::combine::error::Error;
-use common::Buffer2;
+use imaginarium::Buffer2;
 use common::CancelToken;
 
 /// CFA pattern for raw sensor data.
@@ -89,7 +89,7 @@ impl StackableImage for CfaImage {
         }
     }
 
-    fn into_planes(self) -> arrayvec::ArrayVec<common::Buffer2<f32>, 3> {
+    fn into_planes(self) -> arrayvec::ArrayVec<imaginarium::Buffer2<f32>, 3> {
         let mut planes = arrayvec::ArrayVec::new();
         planes.push(self.data);
         planes

@@ -1,6 +1,7 @@
 use super::{LocalContrastConfig, build_tile_luts, enhance_local_contrast_planar};
 use crate::io::astro_image::{AstroImage, ImageDimensions};
-use common::{Buffer2, Vec2us};
+use common::Vec2us;
+use imaginarium::Buffer2;
 
 fn gray(width: usize, height: usize, px: Vec<f32>) -> AstroImage {
     AstroImage::from_planar_channels(ImageDimensions::new(Vec2us::new(width, height), 1), [px])

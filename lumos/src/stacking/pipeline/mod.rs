@@ -12,7 +12,7 @@ use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use common::Buffer2;
+use imaginarium::Buffer2;
 use common::CancelToken;
 use common::parallel::try_par_map_limited;
 

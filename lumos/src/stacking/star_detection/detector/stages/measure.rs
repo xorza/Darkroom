@@ -3,7 +3,7 @@
 //! Takes detected regions and computes sub-pixel centroids, flux, FWHM,
 //! and quality metrics for each candidate star.
 
-use common::Buffer2;
+use imaginarium::Buffer2;
 
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::centroid::measure_star;

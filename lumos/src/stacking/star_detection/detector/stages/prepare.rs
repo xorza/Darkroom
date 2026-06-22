@@ -6,7 +6,7 @@ use crate::AstroImage;
 use crate::math::statistics::{mad_to_sigma, median_and_mad_f32_mut};
 use crate::stacking::star_detection::buffer_pool::BufferPool;
 use crate::stacking::star_detection::median_filter::median_filter_3x3;
-use common::Buffer2;
+use imaginarium::Buffer2;
 
 /// Reduce an input image to a single-channel detection plane, applying CFA
 /// median filtering if needed.

@@ -2,7 +2,8 @@
 
 #![allow(clippy::needless_range_loop)]
 
-use common::Buffer2;
+use common::Vec2us;
+use imaginarium::Buffer2;
 use glam::{DVec2, IVec2, Vec2};
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
@@ -25,7 +26,7 @@ pub unsafe fn warp_row_bilinear_avx2(
     transform: &Transform,
 ) {
     let pixels = input.pixels();
-    let dims = input.dimensions();
+    let dims = Vec2us::new(input.width(), input.height());
 
     unsafe {
         let output_width = output_row.len();
@@ -170,7 +171,7 @@ pub unsafe fn warp_row_bilinear_sse(
     transform: &Transform,
 ) {
     let pixels = input.pixels();
-    let dims = input.dimensions();
+    let dims = Vec2us::new(input.width(), input.height());
 
     unsafe {
         let output_width = output_row.len();
@@ -426,7 +427,8 @@ unsafe fn hsum_ps(v: __m128) -> f32 {
 mod tests {
     use super::*;
     use crate::testing::synthetic::patterns;
-    use common::Buffer2;
+    use common::Vec2us;
+use imaginarium::Buffer2;
     #[cfg(target_arch = "x86_64")]
     use common::cpu_features;
 

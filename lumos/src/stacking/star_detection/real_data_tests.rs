@@ -120,7 +120,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     use crate::stacking::star_detection::mask_dilation::dilate_mask;
     use crate::stacking::star_detection::test_common::output::image_writer;
     use crate::stacking::star_detection::threshold_mask::create_threshold_mask_filtered;
-    use common::Buffer2;
+    use imaginarium::Buffer2;
 
     init_tracing();
 

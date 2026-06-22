@@ -11,7 +11,7 @@ use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::stages::detect_test_utils::detect_stars_test;
 use crate::testing::TestRng;
 use crate::testing::synthetic::star_profiles::render_gaussian_star;
-use common::Buffer2;
+use imaginarium::Buffer2;
 
 /// Render `stars` as `(x, y, amplitude)` on a 0.1 sky with light Gaussian noise (σ 0.01).
 fn field(

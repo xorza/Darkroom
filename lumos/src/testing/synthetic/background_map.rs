@@ -3,7 +3,7 @@
 //! Provides utilities to create BackgroundEstimate instances for benchmarks and tests.
 
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
-use common::Buffer2;
+use imaginarium::Buffer2;
 
 /// Create a uniform BackgroundEstimate with constant background and noise values.
 pub(crate) fn uniform(
