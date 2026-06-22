@@ -1,3 +1,4 @@
+mod image_data;
 mod io;
 mod tiff;
 
@@ -24,8 +25,7 @@ const ALIGNMENT: usize = std::mem::align_of::<f32>();
 
 /// Image dimensions + pixel format. Pixel data is **always tightly packed**
 /// (`row_bytes == width * bytes_per_pixel`, no inter-row padding) — any row
-/// alignment a GPU backend needs lives inside [`GpuImage`](crate::gpu::gpu_image),
-/// never here.
+/// alignment a GPU backend needs lives inside `GpuImage` (`src/gpu/`), never here.
 #[derive(Clone, Copy, Eq, PartialEq, Debug, Hash)]
 pub struct ImageDesc {
     pub width: usize,
@@ -33,7 +33,7 @@ pub struct ImageDesc {
     pub color_format: ColorFormat,
 }
 
-/// An image: a tightly-packed, [`ALIGNMENT`]-aligned byte buffer plus the
+/// An image: a tightly-packed, `ALIGNMENT`-aligned byte buffer plus the
 /// [`ImageDesc`] that says how to interpret it. The bytes are reinterpreted as
 /// `u8`/`u16`/`f32` per the format via `bytemuck::cast_slice` at the use sites.
 #[derive(Clone, Debug)]

@@ -1,3 +1,4 @@
+pub(crate) mod buffer2;
 pub(crate) mod color;
 pub(crate) mod color_format;
 pub(crate) mod conversion;

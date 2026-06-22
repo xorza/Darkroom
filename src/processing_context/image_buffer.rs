@@ -34,7 +34,7 @@ impl ImageBuffer {
     /// Creates a new ImageBuffer from a CPU image.
     ///
     /// CPU storage is always tightly packed; any row-stride alignment a GPU
-    /// backend needs is added by [`GpuImage`] on upload (and stripped on
+    /// backend needs is added by `GpuImage` on upload (and stripped on
     /// download), so it never leaks into the CPU representation.
     pub fn from_cpu(image: Image) -> Self {
         Self {
