@@ -15,7 +15,10 @@ mod markesteijn_steps;
 
 use std::time::Instant;
 
+use common::CancelToken;
 use markesteijn::demosaic_xtrans_markesteijn;
+
+use crate::io::raw::demosaic::Cancelled;
 
 /// Process X-Trans sensor data and demosaic to RGB.
 ///
@@ -54,7 +57,9 @@ pub fn process_xtrans(
     );
 
     let demosaic_start = Instant::now();
-    let rgb_pixels = demosaic_xtrans_markesteijn(&xtrans);
+    // The u16 decode path isn't cancellable — a never-token can't yield `Cancelled`.
+    let rgb_pixels = demosaic_xtrans_markesteijn(&xtrans, &CancelToken::never())
+        .expect("never-token demosaic cannot be cancelled");
     let demosaic_elapsed = demosaic_start.elapsed();
 
     tracing::info!(
@@ -81,7 +86,8 @@ pub fn process_xtrans_f32(
     top_margin: usize,
     left_margin: usize,
     xtrans_pattern: [[u8; 6]; 6],
-) -> [Vec<f32>; 3] {
+    cancel: &CancelToken,
+) -> Result<[Vec<f32>; 3], Cancelled> {
     let pattern = XTransPattern::new(xtrans_pattern);
 
     let xtrans = XTransImage::with_margins_f32(
@@ -96,7 +102,7 @@ pub fn process_xtrans_f32(
     );
 
     let demosaic_start = Instant::now();
-    let rgb_pixels = demosaic_xtrans_markesteijn(&xtrans);
+    let rgb_pixels = demosaic_xtrans_markesteijn(&xtrans, cancel)?;
     let demosaic_elapsed = demosaic_start.elapsed();
 
     tracing::info!(
@@ -106,7 +112,7 @@ pub fn process_xtrans_f32(
         demosaic_elapsed.as_secs_f64() * 1000.0
     );
 
-    rgb_pixels
+    Ok(rgb_pixels)
 }
 
 /// X-Trans 6x6 color filter array pattern.
@@ -654,14 +660,36 @@ mod tests {
     #[test]
     fn test_process_xtrans_f32_output_size() {
         let data: Vec<f32> = vec![0.5; 12 * 12];
-        let rgb = process_xtrans_f32(&data, 12, 12, 6, 6, 3, 3, test_pattern_array());
+        let rgb = process_xtrans_f32(
+            &data,
+            12,
+            12,
+            6,
+            6,
+            3,
+            3,
+            test_pattern_array(),
+            &CancelToken::never(),
+        )
+        .unwrap();
         assert_eq!(rgb.iter().map(|c| c.len()).sum::<usize>(), 6 * 6 * 3);
     }
 
     #[test]
     fn test_process_xtrans_f32_uniform() {
         let data: Vec<f32> = vec![0.5; 12 * 12];
-        let rgb = process_xtrans_f32(&data, 12, 12, 6, 6, 3, 3, test_pattern_array());
+        let rgb = process_xtrans_f32(
+            &data,
+            12,
+            12,
+            6,
+            6,
+            3,
+            3,
+            test_pattern_array(),
+            &CancelToken::never(),
+        )
+        .unwrap();
 
         for &val in rgb.iter().flatten() {
             assert!((val - 0.5).abs() < 0.01, "Expected ~0.5, got {}", val);
@@ -694,7 +722,18 @@ mod tests {
             inv_range,
             [1.0; 3],
         );
-        let rgb_f32 = process_xtrans_f32(&raw_f32, 12, 12, 6, 6, 3, 3, test_pattern_array());
+        let rgb_f32 = process_xtrans_f32(
+            &raw_f32,
+            12,
+            12,
+            6,
+            6,
+            3,
+            3,
+            test_pattern_array(),
+            &CancelToken::never(),
+        )
+        .unwrap();
 
         assert_eq!(
             rgb_u16.iter().flatten().count(),

@@ -368,13 +368,13 @@ fn bench_rcd_demosaic_core() {
         let bayer = BayerImage::with_margins(&data, w, h, w, h, 0, 0, CfaPattern::Rggb);
 
         // Warmup
-        let _ = demosaic_bayer(&bayer);
+        let _ = demosaic_bayer(&bayer, &CancelToken::never()).unwrap();
 
         let iterations = 5;
         let mut times = Vec::with_capacity(iterations);
         for _ in 0..iterations {
             let start = Instant::now();
-            let _rgb = demosaic_bayer(&bayer);
+            let _rgb = demosaic_bayer(&bayer, &CancelToken::never()).unwrap();
             let elapsed = start.elapsed();
             times.push(elapsed);
         }

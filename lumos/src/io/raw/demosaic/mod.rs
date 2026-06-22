@@ -9,6 +9,12 @@
 pub(crate) mod bayer;
 pub(crate) mod xtrans;
 
+/// Returned by a demosaic kernel when it observes the cancel token set
+/// between stages. A marker only — the partial buffers are dropped; the caller
+/// maps this to its own cancellation error.
+#[derive(Debug)]
+pub(crate) struct Cancelled;
+
 /// Re-interleave planar `[R, G, B]` demosaic output to `[R0, G0, B0, R1, ...]`.
 ///
 /// Test-only bridge: the demosaic kernels return planar channels, but their

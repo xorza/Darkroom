@@ -4,6 +4,10 @@ mod rcd;
 #[cfg(test)]
 mod tests;
 
+use common::CancelToken;
+
+use crate::io::raw::demosaic::Cancelled;
+
 /// Bayer CFA (Color Filter Array) pattern.
 /// Represents the 2x2 pattern of color filters on the sensor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -165,6 +169,9 @@ impl<'a> BayerImage<'a> {
 ///
 /// Returns planar channels `[R, G, B]`, each `width * height`, cropped to the
 /// active area.
-pub(crate) fn demosaic_bayer(bayer: &BayerImage) -> [Vec<f32>; 3] {
-    rcd::rcd_demosaic(bayer)
+pub(crate) fn demosaic_bayer(
+    bayer: &BayerImage,
+    cancel: &CancelToken,
+) -> Result<[Vec<f32>; 3], Cancelled> {
+    rcd::rcd_demosaic(bayer, cancel)
 }

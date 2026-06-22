@@ -7,7 +7,10 @@
 //! interpolation in a low-pass filter domain to reduce color artifacts,
 //! particularly beneficial for astrophotography (star morphology).
 
+use common::CancelToken;
 use rayon::prelude::*;
+
+use crate::io::raw::demosaic::Cancelled;
 
 use crate::io::raw::{
     alloc_uninit_vec,
@@ -71,7 +74,10 @@ impl SendPtr {
 /// Input: BayerImage with normalized [0,1] CFA data and margin info.
 /// Output: Interleaved RGB f32 pixels `[R0, G0, B0, R1, G1, B1, ...]`
 /// for the active area (width × height).
-pub(crate) fn rcd_demosaic(bayer: &BayerImage) -> [Vec<f32>; 3] {
+pub(crate) fn rcd_demosaic(
+    bayer: &BayerImage,
+    cancel: &CancelToken,
+) -> Result<[Vec<f32>; 3], Cancelled> {
     let width = bayer.width;
     let height = bayer.height;
     let rw = bayer.raw_width;
@@ -81,6 +87,11 @@ pub(crate) fn rcd_demosaic(bayer: &BayerImage) -> [Vec<f32>; 3] {
     let cfa = bayer.data;
     let pattern = bayer.cfa;
     let npix = rw * rh;
+
+    // Cooperative cancel: each stage below is a full-image parallel pass. A
+    // check between stages lets a cancelled run bail within one stage (~tens of
+    // ms) instead of finishing the whole demosaic; the partial buffers are
+    // dropped and `Cancelled` propagates to the caller.
 
     let s = Strides::new(rw, rh);
     let w1 = s.w1;
@@ -119,6 +130,9 @@ pub(crate) fn rcd_demosaic(bayer: &BayerImage) -> [Vec<f32>; 3] {
     // Each row computes its own H-HPF² inline and reads V-HPF² from ±1 neighbor
     // rows via a full V-HPF buffer. This eliminates two extra full-image passes.
 
+    if cancel.is_cancelled() {
+        return Err(Cancelled);
+    }
     let mut v_hpf = vec![0.0f32; npix];
 
     // Step 1a: Compute V-HPF² for all rows (needed by Step 1b for ±1 row reads).
@@ -176,6 +190,9 @@ pub(crate) fn rcd_demosaic(bayer: &BayerImage) -> [Vec<f32>; 3] {
 
     // No fill needed: Step 2 writes all positions that Step 3 reads
     // (rows 1..rh-1, cols 1..rw-1; Step 3 reads within BORDER=4 margin).
+    if cancel.is_cancelled() {
+        return Err(Cancelled);
+    }
     let lpf = &mut scratch;
     lpf.par_chunks_mut(rw)
         .enumerate()
@@ -199,6 +216,9 @@ pub(crate) fn rcd_demosaic(bayer: &BayerImage) -> [Vec<f32>; 3] {
 
     // ── Step 3: Green Channel Interpolation ─────────────────────────────
 
+    if cancel.is_cancelled() {
+        return Err(Cancelled);
+    }
     rgb_g
         .par_chunks_mut(rw)
         .enumerate()
@@ -265,6 +285,9 @@ pub(crate) fn rcd_demosaic(bayer: &BayerImage) -> [Vec<f32>; 3] {
 
     // Step 4.0-4.1: P/Q diagonal direction detection.
     // Reuse scratch buffer for pq_dir.
+    if cancel.is_cancelled() {
+        return Err(Cancelled);
+    }
     scratch.fill(0.0);
     let mut pq_dir = scratch;
 
@@ -340,6 +363,9 @@ pub(crate) fn rcd_demosaic(bayer: &BayerImage) -> [Vec<f32>; 3] {
     // We need mutable access to rgb_r and rgb_b while reading rgb_g.
     // Since Step 4.2 only writes to one of rgb_r/rgb_b at R/B positions, and we
     // need to read the other, we process R-rows and B-rows with the appropriate channel.
+    if cancel.is_cancelled() {
+        return Err(Cancelled);
+    }
     step4_2_rb_at_opposing(&mut rgb_r, &mut rgb_b, &rgb_g, &pq_dir, &pattern, s);
 
     // Step 4.3: Red/Blue at Green CFA positions.
@@ -353,6 +379,9 @@ pub(crate) fn rcd_demosaic(bayer: &BayerImage) -> [Vec<f32>; 3] {
 
     // ── Step 5: Border Handling ──────────────────────────────────────────
 
+    if cancel.is_cancelled() {
+        return Err(Cancelled);
+    }
     border_interpolate(&mut rgb_r, &mut rgb_b, &mut rgb_g, cfa, &pattern, s);
 
     // ── Extract active area to planar RGB channels ───────────────────────
@@ -377,7 +406,7 @@ pub(crate) fn rcd_demosaic(bayer: &BayerImage) -> [Vec<f32>; 3] {
             b_row.copy_from_slice(&rgb_b[base..base + width]);
         });
 
-    [out_r, out_g, out_b]
+    Ok([out_r, out_g, out_b])
 }
 
 /// Step 4.2: Interpolate the missing color at R/B CFA positions.

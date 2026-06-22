@@ -7,11 +7,13 @@
 use rayon::prelude::*;
 
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
+use crate::io::raw::demosaic::Cancelled;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::load_raw_cfa;
 use crate::stacking::combine::cache::StackableImage;
 use crate::stacking::combine::error::Error;
 use common::Buffer2;
+use common::CancelToken;
 
 /// CFA pattern for raw sensor data.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -111,7 +113,7 @@ impl CfaImage {
 
     /// Demosaic this CFA image into a 3-channel AstroImage.
     /// Consumes self.
-    pub fn demosaic(self) -> AstroImage {
+    pub(crate) fn demosaic(self, cancel: &CancelToken) -> Result<AstroImage, Cancelled> {
         let width = self.data.width();
         let height = self.data.height();
         let cfa_type =
@@ -120,7 +122,7 @@ impl CfaImage {
             );
         let pixels = self.data.into_vec();
 
-        match &cfa_type {
+        Ok(match &cfa_type {
             CfaType::Mono => {
                 // No demosaicing needed - convert 1-channel to 1-channel AstroImage
                 let dims = ImageDimensions::new((width, height), 1);
@@ -141,7 +143,7 @@ impl CfaImage {
                     0,
                     *cfa_pattern,
                 );
-                let planes = demosaic_bayer(&bayer);
+                let planes = demosaic_bayer(&bayer, cancel)?;
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut astro = AstroImage::from_planar_channels(dims, planes);
                 astro.metadata = self.metadata;
@@ -150,15 +152,16 @@ impl CfaImage {
             CfaType::XTrans(pattern) => {
                 use crate::io::raw::demosaic::xtrans::process_xtrans_f32;
 
-                let planes =
-                    process_xtrans_f32(&pixels, width, height, width, height, 0, 0, *pattern);
+                let planes = process_xtrans_f32(
+                    &pixels, width, height, width, height, 0, 0, *pattern, cancel,
+                )?;
 
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut astro = AstroImage::from_planar_channels(dims, planes);
                 astro.metadata = self.metadata;
                 astro
             }
-        }
+        })
     }
 
     /// Subtract another CfaImage pixel-by-pixel (dark subtraction).

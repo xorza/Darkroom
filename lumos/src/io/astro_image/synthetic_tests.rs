@@ -9,6 +9,7 @@ use crate::io::astro_image::fits::load_fits;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::testing::make_cfa;
 use crate::{AstroImage, CfaType};
+use common::CancelToken;
 use fits_well::{FitsWriter, Image, ImageData, Scaling};
 
 fn identity_scaling() -> Scaling {
@@ -104,7 +105,9 @@ fn demosaic_uniform_bayer_recovers_colour() {
             mosaic[y * w + x] = rgb[cfa.color_at(x, y) as usize];
         }
     }
-    let image = make_cfa(w, h, mosaic, cfa).demosaic();
+    let image = make_cfa(w, h, mosaic, cfa)
+        .demosaic(&CancelToken::never())
+        .unwrap();
 
     // A uniform colour must demosaic back to that colour. RCD is gradient-based, so a perfectly
     // flat field is a degenerate (zero-gradient) input with a few ratio artifacts — but recovery

@@ -20,6 +20,7 @@ use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::io::astro_image::sensor::{SensorType, detect_sensor_type};
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 use common::Buffer2;
+use common::CancelToken;
 use demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
 use demosaic::xtrans::process_xtrans;
 
@@ -451,7 +452,9 @@ impl UnpackedRaw {
         );
 
         let demosaic_start = Instant::now();
-        let rgb_pixels = demosaic_bayer(&bayer);
+        // The u16 decode path isn't cancellable — a never-token can't yield `Cancelled`.
+        let rgb_pixels = demosaic_bayer(&bayer, &CancelToken::never())
+            .expect("never-token demosaic cannot be cancelled");
         let demosaic_elapsed = demosaic_start.elapsed();
 
         tracing::info!(

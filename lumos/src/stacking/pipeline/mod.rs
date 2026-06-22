@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::Buffer2;
 use common::CancelToken;
+use common::parallel::try_par_map_limited;
 
 use crate::io::astro_image::AstroImage;
 use crate::io::astro_image::error::ImageError;
@@ -284,6 +285,12 @@ pub fn align_and_stack(
     })
 }
 
+/// Max light frames decoded+demosaiced concurrently. The RAW decode is the one
+/// uninterruptible step, so this caps the work a cancel must drain and peak
+/// memory; the demosaic (work-conserving across cores) keeps the pool busy
+/// within a batch, so the cap costs little throughput.
+const MAX_CONCURRENT_LIGHTS: usize = 4;
+
 /// Calibrate, align, and stack raw light frames end to end — the full pipeline in one call.
 ///
 /// For each raw light (in parallel): load it as a `CfaImage`, apply `masters`
@@ -305,11 +312,14 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
         "Loading, calibrating and demosaicing raw lights (RAW decode — the slow phase)"
     );
     let done = AtomicUsize::new(0);
-    let calibrated: Vec<AstroImage> = light_paths
-        .par_iter()
-        .map(|path| {
-            // Cancel between frames: stop launching new RAW decodes (the slow
-            // phase) once the run is cancelled. In-flight frames finish.
+    // Bound how many frames are in flight: the RAW decode (libraw) is the one
+    // uninterruptible step, so capping it caps the work a cancel must drain and
+    // peak demosaic memory. The demosaic itself polls `cancel` between stages
+    // (see `CfaImage::demosaic`), so the heavy phase stays interruptible at full
+    // core utilization within a batch.
+    let calibrated: Vec<AstroImage> =
+        try_par_map_limited(light_paths, MAX_CONCURRENT_LIGHTS, |path| {
+            // Skip launching the RAW decode (the slow uninterruptible step) once cancelled.
             if cancel.is_cancelled() {
                 return Err(Error::Stack(StackError::Cancelled));
             }
@@ -332,18 +342,15 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
                     }
                 }
             }
-            // Demosaic is the other heavy per-frame step (after the RAW decode);
-            // skip it if the run was cancelled during this frame's load/calibrate
-            // so a cancel doesn't pay for a full demosaic per in-flight frame.
-            if cancel.is_cancelled() {
-                return Err(Error::Stack(StackError::Cancelled));
-            }
-            let image = cfa.demosaic();
+            // Demosaic is the other heavy step; it polls `cancel` internally and
+            // bails mid-pass, surfacing as `Cancelled` here.
+            let image = cfa
+                .demosaic(&cancel)
+                .map_err(|_| Error::Stack(StackError::Cancelled))?;
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
             tracing::info!(frame = n, total, "calibrated light");
             Ok(image)
-        })
-        .collect::<Result<Vec<_>, Error>>()?;
+        })?;
 
     align_and_stack(calibrated, config, cancel)
 }

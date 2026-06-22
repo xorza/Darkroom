@@ -117,7 +117,7 @@ fn bench_full_pipeline() {
     let calibrated: Vec<AstroImage> = common::parallel::par_map_limited(&light_paths, 3, |p| {
         let mut cfa = load_raw_cfa(p).unwrap();
         masters.calibrate(&mut cfa);
-        cfa.demosaic()
+        cfa.demosaic(&CancelToken::never()).unwrap()
     });
 
     println!("  Elapsed: {:?}", step_start.elapsed());
