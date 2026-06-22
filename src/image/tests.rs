@@ -393,22 +393,36 @@ fn clone_image() {
 }
 
 // =============================================================================
-// Alignment tests (AVec)
+// Alignment & byte-cast tests
 // =============================================================================
 
+// Each format's typed `Buffer2<[T; N]>` is intrinsically aligned to its element
+// type `T` — exactly what `bytemuck::cast_slice` to that element needs (f32 → 4,
+// u16 → 2). This must hold for both construction paths, including `new_with_data`
+// which copies a plain (align-1) `Vec<u8>` into the typed buffer.
 #[test]
-fn image_bytes_are_16_byte_aligned() {
-    let desc = ImageDesc::new(100, 100, ColorFormat::RGBA_U8);
-    let img = Image::new_black(desc).unwrap();
-    let ptr = img.bytes().as_ptr() as usize;
-    assert_eq!(ptr % 16, 0, "Image bytes should be 16-byte aligned");
-
-    // Also test with new_with_data when source is aligned
-    let desc = ImageDesc::new(10, 10, ColorFormat::RGBA_U8);
-    let data = vec![0u8; desc.size_in_bytes()];
-    let img = Image::new_with_data(desc, data).unwrap();
-    let ptr = img.bytes().as_ptr() as usize;
-    assert_eq!(ptr % 16, 0, "Image bytes should be 16-byte aligned");
+fn image_bytes_are_element_aligned() {
+    for &format in &[ColorFormat::RGBA_F32, ColorFormat::L_F32] {
+        let desc = ImageDesc::new(10, 10, format);
+        let from_black = Image::new_black(desc).unwrap();
+        let from_data = Image::new_with_data(desc, vec![0u8; desc.size_in_bytes()]).unwrap();
+        for img in [from_black, from_data] {
+            assert_eq!(
+                img.bytes().as_ptr() as usize % std::mem::align_of::<f32>(),
+                0,
+                "{format:?} bytes must be f32-aligned for cast_slice::<f32>"
+            );
+        }
+    }
+    for &format in &[ColorFormat::RGBA_U16, ColorFormat::L_U16] {
+        let desc = ImageDesc::new(8, 8, format);
+        let img = Image::new_with_data(desc, vec![0u8; desc.size_in_bytes()]).unwrap();
+        assert_eq!(
+            img.bytes().as_ptr() as usize % std::mem::align_of::<u16>(),
+            0,
+            "{format:?} bytes must be u16-aligned for cast_slice::<u16>"
+        );
+    }
 }
 
 #[test]
@@ -418,29 +432,9 @@ fn into_bytes_preserves_data() {
     img.bytes_mut()[..4].copy_from_slice(&[1, 2, 3, 4]);
     let expected = img.bytes().to_vec();
     let vec = img.into_bytes();
-    // into_bytes copies (an AVec's over-aligned allocation can't be freed as a plain Vec),
-    // so we assert the data is preserved rather than pointer identity.
+    // into_bytes copies (the typed buffer's allocation can't be reinterpreted as a
+    // Vec<u8>), so assert the data is preserved rather than pointer identity.
     assert_eq!(vec, expected, "into_bytes must preserve the pixel data");
-}
-
-#[test]
-fn new_with_data_produces_aligned_copy() {
-    // A plain Vec<u8> is only 1-byte aligned; new_with_data must copy into
-    // 16-byte-aligned storage while preserving the bytes.
-    let desc = ImageDesc::new(2, 2, ColorFormat::RGBA_U8);
-    let data: Vec<u8> = (0..desc.size_in_bytes() as u8).collect();
-    let img = Image::new_with_data(desc, data.clone()).unwrap();
-
-    assert_eq!(
-        img.bytes().as_ptr() as usize % 16,
-        0,
-        "stored bytes must be 16-byte aligned"
-    );
-    assert_eq!(
-        img.bytes(),
-        &data[..],
-        "new_with_data must preserve the data"
-    );
 }
 
 #[test]

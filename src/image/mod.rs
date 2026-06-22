@@ -7,21 +7,13 @@ mod tests;
 
 use std::path::Path;
 
-use aligned_vec::{AVec, ConstAlign};
-
 /// Supported image file extensions for reading and writing.
 pub const SUPPORTED_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "tiff", "tif"];
 
 use crate::common::color_format::ColorFormat;
 use crate::common::conversion::convert_image;
 use crate::common::error::{Error, Result};
-
-/// Alignment of the pixel buffer. The only hard requirement is that `u16`/`f32`
-/// channels can be read via `bytemuck::cast_slice`, which panics unless the
-/// buffer is aligned to the element type; `align_of::<f32>()` (4) covers every
-/// supported element type (`u8`/`u16`/`f32`). The SIMD kernels all use unaligned
-/// loads, so nothing benefits from over-aligning further.
-const ALIGNMENT: usize = std::mem::align_of::<f32>();
+use crate::image::image_data::AnyImageData;
 
 /// Image dimensions + pixel format. Pixel data is **always tightly packed**
 /// (`row_bytes == width * bytes_per_pixel`, no inter-row padding) — any row
@@ -33,39 +25,38 @@ pub struct ImageDesc {
     pub color_format: ColorFormat,
 }
 
-/// An image: a tightly-packed, `ALIGNMENT`-aligned byte buffer plus the
-/// [`ImageDesc`] that says how to interpret it. The bytes are reinterpreted as
-/// `u8`/`u16`/`f32` per the format via `bytemuck::cast_slice` at the use sites.
+/// An image: interleaved pixel data ([`AnyImageData`], stored as a typed
+/// `Buffer2<[T; N]>` per the format) plus the [`ImageDesc`] that names its
+/// format and dimensions. `bytes()` reinterprets the typed buffer as `&[u8]`
+/// zero-copy for the conversion / GPU / io paths; `desc` is kept in sync with
+/// `data` by the constructors.
 #[derive(Clone, Debug)]
 pub struct Image {
     pub desc: ImageDesc,
-    bytes: AVec<u8, ConstAlign<ALIGNMENT>>,
+    data: AnyImageData,
 }
 
 impl Image {
-    /// Returns the image bytes as a slice.
+    /// The interleaved pixel bytes — a zero-copy `&[u8]` view of the typed buffer.
     pub fn bytes(&self) -> &[u8] {
-        &self.bytes
+        self.data.bytes()
     }
 
-    /// Convert to owned bytes. Copies: an `AVec`'s over-aligned allocation cannot be
-    /// freed as a plain `Vec` (the dealloc `Layout` alignment would mismatch the alloc).
+    /// Copy the pixel bytes into an owned `Vec<u8>` (the typed buffer's allocation
+    /// can't be reinterpreted as a `Vec<u8>`, so this copies).
     pub fn into_bytes(self) -> Vec<u8> {
-        self.bytes.to_vec()
+        self.data.bytes().to_vec()
     }
 
-    /// Returns the image bytes as a mutable slice.
+    /// The interleaved pixel bytes, mutable — zero-copy; writes hit the buffer.
     pub fn bytes_mut(&mut self) -> &mut [u8] {
-        &mut self.bytes
+        self.data.bytes_mut()
     }
 
     pub fn new_black(desc: ImageDesc) -> Result<Image> {
         desc.validate()?;
-
-        let mut bytes = AVec::with_capacity(ALIGNMENT, desc.size_in_bytes());
-        bytes.resize(desc.size_in_bytes(), 0);
-
-        Ok(Image { desc, bytes })
+        let data = AnyImageData::new_zeroed(desc.color_format, desc.width, desc.height);
+        Ok(Image { desc, data })
     }
 
     pub fn new_with_data(desc: ImageDesc, bytes: Vec<u8>) -> Result<Image> {
@@ -79,10 +70,8 @@ impl Image {
             )));
         }
 
-        Ok(Image {
-            desc,
-            bytes: vec_to_avec(bytes),
-        })
+        let data = AnyImageData::from_bytes(desc.color_format, desc.width, desc.height, &bytes);
+        Ok(Image { desc, data })
     }
 
     pub fn read_file<P: AsRef<Path>>(filename: P) -> Result<Image> {
@@ -140,15 +129,6 @@ impl Image {
     pub fn bytes_per_pixel(&self) -> u8 {
         self.desc.color_format.byte_count()
     }
-}
-
-/// Convert `Vec<u8>` to a 16-byte-aligned `AVec<u8>`.
-///
-/// Always copies: a `Vec` is allocated with align 1, so reinterpreting its buffer as an
-/// `AVec<_, ConstAlign<16>>` would make the destructor free it with a mismatched `Layout`
-/// alignment (UB), even when the pointer happens to already be 16-aligned.
-fn vec_to_avec(bytes: Vec<u8>) -> AVec<u8, ConstAlign<ALIGNMENT>> {
-    AVec::from_slice(ALIGNMENT, &bytes)
 }
 
 impl ImageDesc {
