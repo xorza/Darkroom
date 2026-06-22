@@ -691,7 +691,10 @@ mod behavior {
         for pair in events.chunks_exact(2) {
             let (sid, sphase) = pair[0];
             let (fid, fphase) = pair[1];
-            assert_eq!(sphase, RunPhase::Started, "first of pair is Started");
+            assert!(
+                matches!(sphase, RunPhase::Started { .. }),
+                "first of pair is Started",
+            );
             assert_eq!(sid, fid, "Started/Finished are the same node");
             assert!(
                 matches!(fphase, RunPhase::Finished { elapsed_secs } if elapsed_secs >= 0.0),

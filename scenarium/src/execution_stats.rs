@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use hashbrown::HashMap;
 
 use crate::execution::Error;
@@ -121,8 +123,9 @@ pub struct ExecutedNodeStats {
 /// *during* a run, ahead of the final [`ExecutionStats`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RunPhase {
-    /// The node's lambda is about to be invoked.
-    Started,
+    /// The node's lambda is about to be invoked. `at` is the instant the
+    /// invoke began (monotonic), so a consumer can show live elapsed-so-far.
+    Started { at: Instant },
     /// The node's lambda finished, taking `elapsed_secs`.
     Finished { elapsed_secs: f64 },
 }

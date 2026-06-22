@@ -108,9 +108,15 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            // Last-run time, in the node's status color so it ties to the
-            // glow. Only executed nodes carry a time.
-            if let ExecStatus::Executed(secs) = node.exec_status {
+            // Run time in the node's status color so it ties to the glow:
+            // the final time once executed, or live elapsed-so-far while
+            // running (`App::frame` repaints so it ticks).
+            let elapsed = match node.exec_status {
+                ExecStatus::Executed(secs) => Some(secs),
+                ExecStatus::Running(at) => Some(at.elapsed().as_secs_f64()),
+                _ => None,
+            };
+            if let Some(secs) = elapsed {
                 let color = exec_color(theme, node.exec_status).unwrap_or(ui.theme.text.color);
                 Text::new(fmt_elapsed(secs))
                     .style(TextStyle {

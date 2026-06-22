@@ -1,10 +1,13 @@
 # Realtime execution feedback + cancellation — design
 
-> **Status: P1 (per-node progress) shipped.** The worker now streams a
+> **Status: P1 (per-node progress) shipped.** The worker streams a
 > `WorkerReport::Progress(RunProgress)` per node ahead of the final
-> `WorkerReport::Finished`; darkroom marks the active node `ExecStatus::Running`
-> (purple glow) live. P2 (cancel) / P3 (cooperative lumos stop) are still open —
-> see Phasing. Implementation notes are folded into the steps below.
+> `WorkerReport::Finished` (drained with `recv_many` in a `select!` alongside the
+> run). `RunPhase::Started { at: Instant }` carries the start instant; darkroom
+> marks the active node `ExecStatus::Running(Instant)` (purple glow) and its
+> header shows **live elapsed-so-far**, ticking via a ~20fps repaint while any
+> node runs. P2 (cancel) / P3 (cooperative lumos stop) are still open — see
+> Phasing.
 
 Goal: while a long-running graph runs, the editor should show **which node is
 computing right now** (and that it started), and the user should be able to

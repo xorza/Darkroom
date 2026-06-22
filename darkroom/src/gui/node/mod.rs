@@ -418,7 +418,7 @@ pub(crate) fn exec_color(theme: &Theme, status: ExecStatus) -> Option<Color> {
         ExecStatus::None => None,
         ExecStatus::Cached => Some(theme.exec_cached_glow),
         ExecStatus::Executed(_) => Some(theme.exec_executed_glow),
-        ExecStatus::Running => Some(theme.exec_running_glow),
+        ExecStatus::Running(_) => Some(theme.exec_running_glow),
         ExecStatus::MissingInputs => Some(theme.exec_missing_glow),
         ExecStatus::Errored => Some(theme.exec_errored_glow),
     }

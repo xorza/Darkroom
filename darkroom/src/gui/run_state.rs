@@ -21,6 +21,7 @@
 //! [`Editor`]: crate::gui::app::editor::Editor
 
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use palantir::Ui;
 use scenarium::execution::ArgumentValues;
@@ -34,14 +35,15 @@ use crate::gui::node_values::{NodeValueView, build_view};
 /// (`Errored` > `MissingInputs` > `Executed` > `Cached`). `Executed`
 /// carries the node's wall-clock run time (seconds). `Running` is the
 /// transient live state while a node computes (set directly from
-/// `RunProgress`, never produced by the final `set_results`).
+/// `RunProgress`, never produced by the final `set_results`); it carries the
+/// instant the node started so the UI can show live elapsed-so-far.
 #[derive(Clone, Copy, PartialEq, Default, Debug)]
 pub(crate) enum ExecStatus {
     #[default]
     None,
     Cached,
     Executed(f64),
-    Running,
+    Running(Instant),
     MissingInputs,
     Errored,
 }
@@ -56,7 +58,7 @@ impl ExecStatus {
             ExecStatus::None => 0,
             ExecStatus::Cached => 1,
             ExecStatus::Executed(_) => 2,
-            ExecStatus::Running => 3,
+            ExecStatus::Running(_) => 3,
             ExecStatus::MissingInputs => 4,
             ExecStatus::Errored => 5,
         }
@@ -100,6 +102,15 @@ pub(crate) struct RunState {
 impl RunState {
     pub(crate) fn status(&self, id: NodeId) -> ExecStatus {
         self.nodes.get(&id).map(|n| n.status).unwrap_or_default()
+    }
+
+    /// Whether any node is mid-compute. Drives a per-frame repaint so the
+    /// running node's elapsed-so-far timer keeps ticking between progress
+    /// events (a long single node emits none until it finishes).
+    pub(crate) fn is_running(&self) -> bool {
+        self.nodes
+            .values()
+            .any(|n| matches!(n.status, ExecStatus::Running(_)))
     }
 
     pub(crate) fn logs(&self, id: NodeId) -> &[LogEntry] {
@@ -164,7 +175,7 @@ impl RunState {
     /// attribution, so no flatten projection is needed here.
     pub(crate) fn apply_progress(&mut self, progress: &RunProgress) {
         let status = match progress.phase {
-            RunPhase::Started => ExecStatus::Running,
+            RunPhase::Started { at } => ExecStatus::Running(at),
             RunPhase::Finished { elapsed_secs } => ExecStatus::Executed(elapsed_secs),
         };
         for &id in &progress.nodes {
@@ -276,10 +287,13 @@ mod tests {
         // Started → every attributed node turns Running.
         rs.apply_progress(&RunProgress {
             nodes: nodes.clone(),
-            phase: RunPhase::Started,
+            phase: RunPhase::Started {
+                at: std::time::Instant::now(),
+            },
         });
-        assert_eq!(rs.status(interior), ExecStatus::Running);
-        assert_eq!(rs.status(instance), ExecStatus::Running);
+        assert!(matches!(rs.status(interior), ExecStatus::Running(_)));
+        assert!(matches!(rs.status(instance), ExecStatus::Running(_)));
+        assert!(rs.is_running());
 
         // Finished → Executed with the reported time (overwrites Running).
         rs.apply_progress(&RunProgress {

@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use palantir::Ui;
 use scenarium::prelude::{FuncLib, Graph as CoreGraph};
@@ -182,6 +183,13 @@ impl palantir::App for App {
         // editor rebuilds its scene so the status/log projections it
         // reads reflect the latest run.
         self.drain_worker_events(ui);
+
+        // While nodes are computing, keep repainting (~20 fps) so the running
+        // node's live elapsed-so-far timer ticks — a single long node emits no
+        // progress events between its start and finish.
+        if self.editor.run_state.is_running() {
+            ui.request_repaint_after(Duration::from_millis(50));
+        }
 
         // Apply anything scripts pushed since the last frame (graph edits,
         // run, quit) before the editor rebuilds, so the scene reflects them.

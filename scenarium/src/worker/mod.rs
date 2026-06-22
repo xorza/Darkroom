@@ -417,8 +417,10 @@ async fn worker_loop<ExecutionCallback>(
             let in_loop = should_start_event_loop || event_loop.is_some();
             // Forward each node's live progress to the host as it runs, ahead
             // of the final stats: the executor sends on `prog_tx`, and this
-            // loop drains `prog_rx` concurrently with the run.
+            // loop drains `prog_rx` concurrently with the run, batching each
+            // wake with `recv_many` to keep select churn down.
             let (prog_tx, mut prog_rx) = unbounded_channel::<RunProgress>();
+            let mut prog_buf: Vec<RunProgress> = Vec::new();
             let result = {
                 let run = execution_engine.execute(
                     intent.execute_terminals,
@@ -431,15 +433,19 @@ async fn worker_loop<ExecutionCallback>(
                     tokio::select! {
                         biased;
                         r = &mut run => break r,
-                        Some(p) = prog_rx.recv() => {
-                            (execution_callback)(WorkerReport::Progress(p));
+                        _ = prog_rx.recv_many(&mut prog_buf, 64) => {
+                            for p in prog_buf.drain(..) {
+                                (execution_callback)(WorkerReport::Progress(p));
+                            }
                         }
                     }
                 }
             };
-            // Flush any progress buffered between the last poll and completion.
+            // Flush any progress buffered between the last poll and completion;
+            // the dropped sender lets `recv_many` return all remaining at once.
             drop(prog_tx);
-            while let Ok(p) = prog_rx.try_recv() {
+            prog_rx.recv_many(&mut prog_buf, usize::MAX).await;
+            for p in prog_buf.drain(..) {
                 (execution_callback)(WorkerReport::Progress(p));
             }
 

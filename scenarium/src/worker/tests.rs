@@ -9,7 +9,7 @@ use crate::elements::basic_funclib::basic_funclib;
 use crate::elements::worker_events_funclib::worker_events_funclib;
 use crate::event_lambda::EventLambda;
 use crate::execution::Result as ExecResult;
-use crate::execution_stats::ExecutionStats;
+use crate::execution_stats::{ExecutionStats, RunPhase};
 use crate::function::FuncLib;
 use crate::graph::{Graph, InputPort, Node, NodeId};
 
@@ -423,6 +423,67 @@ async fn execute_terminals_triggers_terminal_nodes() {
 
     assert_eq!(executed.executed_nodes.len(), 1);
     assert_eq!(messages(&executed), ["hello"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn worker_streams_node_progress_before_finished() {
+    use crate::data::StaticValue;
+
+    let func_lib = basic_funclib();
+    let mut graph = Graph::default();
+    let print_func = func_lib.by_name("print").unwrap();
+    let mut print_node: Node = print_func.into();
+    print_node.id = NodeId::unique();
+    let print_node_id = print_node.id;
+    graph.add(print_node);
+    graph.set_input_binding(
+        InputPort::new(print_node_id, 0),
+        StaticValue::String("hi".to_string()).into(),
+    );
+
+    // Capture the full report stream (progress + final), unlike the fixture.
+    let (tx, mut rx) = mpsc::channel::<WorkerReport>(16);
+    let worker = Worker::new(move |report| {
+        tx.try_send(report).ok();
+    });
+    worker
+        .send_many([
+            WorkerMessage::Update {
+                graph,
+                func_lib: Arc::new(func_lib),
+            },
+            WorkerMessage::ExecuteTerminals,
+        ])
+        .unwrap();
+
+    // The single node's Started + Finished progress both arrive (mapped to its
+    // authoring id) ahead of the terminal `Finished` report.
+    let mut started = 0;
+    let mut node_finished = 0;
+    loop {
+        let report = timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("worker timed out")
+            .expect("worker channel closed");
+        match report {
+            WorkerReport::Progress(p) => {
+                assert_eq!(p.nodes, vec![print_node_id], "progress maps to the node");
+                match p.phase {
+                    RunPhase::Started { .. } => started += 1,
+                    RunPhase::Finished { .. } => node_finished += 1,
+                }
+            }
+            WorkerReport::Finished(result) => {
+                assert_eq!(result.expect("compute ok").executed_nodes.len(), 1);
+                break;
+            }
+        }
+    }
+    assert_eq!(started, 1, "one Started before the final report");
+    assert_eq!(
+        node_finished, 1,
+        "one Finished progress before the final report"
+    );
 }
 
 #[tokio::test]

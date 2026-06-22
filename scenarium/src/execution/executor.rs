@@ -139,13 +139,13 @@ impl Executor {
             // `ContextManager::log`).
             let flat_id = program.e_nodes[e_node_idx].id;
             self.ctx_manager.current_node = Some(flat_id);
+            let invoke_start = Instant::now();
             if let Some(progress) = progress {
                 let _ = progress.send(RunProgress {
                     nodes: flatten.attribution(flat_id).collect(),
-                    phase: RunPhase::Started,
+                    phase: RunPhase::Started { at: invoke_start },
                 });
             }
-            let invoke_start = Instant::now();
             let result = {
                 let lambda = &program.e_nodes[e_node_idx].lambda;
                 let slot = &mut self.slots[e_node_idx];
