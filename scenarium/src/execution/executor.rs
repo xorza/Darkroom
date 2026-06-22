@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use tokio::sync::mpsc::UnboundedSender;
 
-use common::{CancelToken, KeyIndexKey, KeyIndexVec};
+use common::{CancelToken, KeyIndexKey, KeyIndexVec, is_cancelled};
 
 use crate::common::shared_any_state::SharedAnyState;
 use crate::context::ContextManager;
@@ -24,11 +24,6 @@ use crate::prelude::AnyState;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{ExecutionBinding, ExecutionNode, ExecutionProgram};
 use crate::execution::{Error, OutputUsage};
-
-/// Whether the run's cancel token (if any) is set.
-fn is_cancelled(cancel: &Option<CancelToken>) -> bool {
-    cancel.as_ref().is_some_and(|c| c.is_cancelled())
-}
 
 /// Per-node runtime state, index-aligned to the program's `e_nodes`: the
 /// cross-run value cache (`state`, `event_state`, `output_values`) plus per-run

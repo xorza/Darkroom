@@ -42,6 +42,13 @@ impl CancelToken {
     }
 }
 
+/// Whether an optional cancel token is set. The companion to threading a
+/// `cancel: Option<CancelToken>` through an operation — `None` (no token wired)
+/// reads as "not cancelled".
+pub fn is_cancelled(cancel: &Option<CancelToken>) -> bool {
+    cancel.as_ref().is_some_and(|c| c.is_cancelled())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -62,5 +69,14 @@ mod tests {
         token.reset();
         assert!(!token.is_cancelled());
         assert!(!clone.is_cancelled());
+    }
+
+    #[test]
+    fn option_helper_treats_none_as_not_cancelled() {
+        assert!(!is_cancelled(&None));
+        assert!(!is_cancelled(&Some(CancelToken::new())));
+        let token = CancelToken::new();
+        token.cancel();
+        assert!(is_cancelled(&Some(token)));
     }
 }

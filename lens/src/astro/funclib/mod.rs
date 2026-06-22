@@ -9,8 +9,8 @@ use std::str::FromStr;
 use std::sync::{Arc, LazyLock};
 
 use common::Buffer2;
-use common::CancelToken;
 use common::file_utils::astro_image_files;
+use common::{CancelToken, is_cancelled};
 use imaginarium::Image as RawImage;
 use lumos::{
     AlignStackConfig, AstroImage, BackgroundConfig, CalibrationImages, CalibrationMasters,
@@ -769,11 +769,6 @@ where
 /// loaded from `master_<role>.lcm` next to its frames when present, and a
 /// freshly-stacked one is written there for next time. Delete the `.lcm` to
 /// force a rebuild (a changed frame set is not auto-detected).
-/// Whether the run's cancel token (if any) is set.
-fn is_cancelled(cancel: &Option<CancelToken>) -> bool {
-    cancel.as_ref().is_some_and(|c| c.is_cancelled())
-}
-
 /// Run a cancellable blocking lumos op off the worker. Returns `Ok(None)` when
 /// the run was cancelled (the node should bail with no output), `Ok(Some(v))` on
 /// success, `Err` on a real failure. Centralizes the `spawn_blocking` + join

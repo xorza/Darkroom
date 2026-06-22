@@ -10,12 +10,12 @@ use arrayvec::ArrayVec;
 use crate::AstroImage;
 use crate::io::astro_image::cfa::CfaImage;
 use common::Buffer2;
-use common::CancelToken;
+use common::{CancelToken, is_cancelled};
 
 use crate::math;
 use crate::math::statistics::ChannelStats;
 use crate::stacking::combine::cache::{
-    CfaCache, FrameStats, GeometryPlanes, LightCache, StackableImage, is_cancelled,
+    CfaCache, FrameStats, GeometryPlanes, LightCache, StackableImage,
 };
 use crate::stacking::combine::config::{CombineMethod, Normalization, StackConfig, Weighting};
 use crate::stacking::combine::error::Error;

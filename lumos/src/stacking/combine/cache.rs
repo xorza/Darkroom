@@ -27,9 +27,9 @@ use std::path::{Path, PathBuf};
 
 use arrayvec::ArrayVec;
 use common::Buffer2;
-use common::CancelToken;
 use common::FnvHasher;
 use common::parallel::try_par_map_limited;
+use common::{CancelToken, is_cancelled};
 use memmap2::Mmap;
 use rayon::prelude::*;
 
@@ -516,11 +516,6 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
         cache_dir: Some(cache_dir.to_path_buf()),
         channel_stats: all_stats,
     })
-}
-
-/// Whether a cooperative cancel token is set.
-pub(crate) fn is_cancelled(cancel: &Option<CancelToken>) -> bool {
-    cancel.as_ref().is_some_and(|c| c.is_cancelled())
 }
 
 impl CacheCore {

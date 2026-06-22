@@ -39,7 +39,7 @@ pub(crate) mod vec2us;
 
 pub use bit_buffer2::{BitBuffer2, BitIter};
 pub use buffer2::Buffer2;
-pub use cancel_token::CancelToken;
+pub use cancel_token::{CancelToken, is_cancelled};
 pub use constants::EPSILON;
 pub use debug::is_debug;
 pub use file_format::{FileExtensionError, FileFormatResult, SerdeFormat};

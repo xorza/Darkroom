@@ -13,14 +13,13 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::Buffer2;
-use common::CancelToken;
+use common::{CancelToken, is_cancelled};
 
 use crate::io::astro_image::AstroImage;
 use crate::io::astro_image::error::ImageError;
 use crate::io::raw::load_raw_cfa;
 use crate::stacking::calibration_masters::CalibrationMasters;
 use crate::stacking::calibration_masters::cosmic_ray::{CosmicRayConfig, reject_cosmic_rays};
-use crate::stacking::combine::cache::is_cancelled;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::combine::progress::ProgressCallback;

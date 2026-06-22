@@ -10,10 +10,10 @@ mod tests;
 
 use std::path::Path;
 
-use common::CancelToken;
+use common::{CancelToken, is_cancelled};
 
 use crate::io::astro_image::cfa::CfaImage;
-use crate::stacking::combine::cache::{CfaCache, is_cancelled};
+use crate::stacking::combine::cache::CfaCache;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::progress::ProgressCallback;
