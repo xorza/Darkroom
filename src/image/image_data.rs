@@ -184,7 +184,7 @@ impl<const N: usize, T: bytemuck::Pod> ImageData<N, T> {
             "byte length must equal width * height * size_of::<[T; N]>()"
         );
         let mut pixels = vec![[T::zeroed(); N]; count];
-        bytemuck::cast_slice_mut::<[T; N], u8>(&mut pixels).copy_from_slice(bytes);
+        bytemuck::cast_slice_mut::<T, u8>(pixels.as_flattened_mut()).copy_from_slice(bytes);
         Self::from_buffer(Buffer2::new(width, height, pixels))
     }
 
@@ -200,12 +200,12 @@ impl<const N: usize, T: bytemuck::Pod> ImageData<N, T> {
 
     /// Interleaved samples as raw bytes — zero-copy view of the pixel buffer.
     pub fn as_bytes(&self) -> &[u8] {
-        bytemuck::cast_slice(self.buffer.pixels())
+        bytemuck::cast_slice(self.buffer.pixels().as_flattened())
     }
 
     /// Interleaved samples as mutable raw bytes — zero-copy; writes hit the buffer.
     pub fn as_bytes_mut(&mut self) -> &mut [u8] {
-        bytemuck::cast_slice_mut(self.buffer.pixels_mut())
+        bytemuck::cast_slice_mut(self.buffer.pixels_mut().as_flattened_mut())
     }
 }
 
