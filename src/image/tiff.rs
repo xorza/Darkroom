@@ -70,38 +70,6 @@ define_int_color_type!(Gray32U, u32, PhotometricInterpretation::BlackIsZero, 32,
 // Gray float type
 define_float_color_type!(Gray32F, f32, PhotometricInterpretation::BlackIsZero, 32, 1);
 
-// GrayAlpha unsigned integer types
-define_int_color_type!(
-    GrayAlpha8U,
-    u8,
-    PhotometricInterpretation::BlackIsZero,
-    8,
-    2
-);
-define_int_color_type!(
-    GrayAlpha16U,
-    u16,
-    PhotometricInterpretation::BlackIsZero,
-    16,
-    2
-);
-define_int_color_type!(
-    GrayAlpha32U,
-    u32,
-    PhotometricInterpretation::BlackIsZero,
-    32,
-    2
-);
-
-// GrayAlpha float type
-define_float_color_type!(
-    GrayAlpha32F,
-    f32,
-    PhotometricInterpretation::BlackIsZero,
-    32,
-    2
-);
-
 // RGB unsigned integer types
 define_int_color_type!(RGB8U, u8, PhotometricInterpretation::RGB, 8, 3);
 define_int_color_type!(RGB16U, u16, PhotometricInterpretation::RGB, 16, 3);
@@ -151,11 +119,6 @@ pub(crate) fn save_tiff<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()
         (L, _16bit, UInt) => Gray16U,
         (L, _32bit, UInt) => Gray32U,
         (L, _32bit, Float) => Gray32F,
-        // LA (grayscale + alpha)
-        (LA, _8bit, UInt) => GrayAlpha8U,
-        (LA, _16bit, UInt) => GrayAlpha16U,
-        (LA, _32bit, UInt) => GrayAlpha32U,
-        (LA, _32bit, Float) => GrayAlpha32F,
         // RGB
         (Rgb, _8bit, UInt) => RGB8U,
         (Rgb, _16bit, UInt) => RGB16U,

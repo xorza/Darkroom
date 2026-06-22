@@ -4,7 +4,6 @@ use crate::common::error::{Error, Result};
 #[repr(u8)]
 pub enum ChannelCount {
     L = 1,
-    LA = 2,
     Rgb = 3,
     #[default]
     Rgba = 4,
@@ -102,13 +101,12 @@ macro_rules! define_color_formats {
     };
 }
 
-define_color_formats!((L, L), (LA, LA), (RGB, Rgb), (RGBA, Rgba),);
+define_color_formats!((L, L), (RGB, Rgb), (RGBA, Rgba),);
 
 impl std::fmt::Display for ChannelCount {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ChannelCount::L => write!(f, "L"),
-            ChannelCount::LA => write!(f, "LA"),
             ChannelCount::Rgb => write!(f, "RGB"),
             ChannelCount::Rgba => write!(f, "RGBA"),
         }
@@ -151,10 +149,6 @@ pub const ALL_FORMATS: &[ColorFormat] = &[
     ColorFormat::L_U16,
     ColorFormat::L_F32,
     //
-    ColorFormat::LA_U8,
-    ColorFormat::LA_U16,
-    ColorFormat::LA_F32,
-    //
     ColorFormat::RGB_U8,
     ColorFormat::RGB_U16,
     ColorFormat::RGB_F32,
@@ -164,13 +158,8 @@ pub const ALL_FORMATS: &[ColorFormat] = &[
     ColorFormat::RGBA_F32,
 ];
 
-/// Formats with alpha channel (LA and RGBA).
+/// Formats with an alpha channel (RGBA).
 pub const ALPHA_FORMATS: &[ColorFormat] = &[
-    //
-    ColorFormat::LA_U8,
-    ColorFormat::LA_U16,
-    ColorFormat::LA_F32,
-    //
     ColorFormat::RGBA_U8,
     ColorFormat::RGBA_U16,
     ColorFormat::RGBA_F32,

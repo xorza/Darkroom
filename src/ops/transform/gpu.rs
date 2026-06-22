@@ -37,12 +37,7 @@ impl Transform {
 
         let needs_clear = matches!(
             format_type,
-            FORMAT_L_U8
-                | FORMAT_LA_U8
-                | FORMAT_RGB_U8
-                | FORMAT_L_U16
-                | FORMAT_LA_U16
-                | FORMAT_RGB_U16
+            FORMAT_L_U8 | FORMAT_RGB_U8 | FORMAT_L_U16 | FORMAT_RGB_U16
         );
 
         let inv = self.transform.inverse();
@@ -483,15 +478,12 @@ mod tests {
 
         let formats = [
             ColorFormat::L_U8,
-            ColorFormat::LA_U8,
             ColorFormat::RGB_U8,
             ColorFormat::RGBA_U8,
             ColorFormat::L_U16,
-            ColorFormat::LA_U16,
             ColorFormat::RGB_U16,
             ColorFormat::RGBA_U16,
             ColorFormat::L_F32,
-            ColorFormat::LA_F32,
             ColorFormat::RGB_F32,
             ColorFormat::RGBA_F32,
         ];
@@ -546,29 +538,6 @@ mod tests {
     }
 
     #[test]
-    fn test_transform_gray_alpha_u8_identity() {
-        let Some(ctx) = test_gpu() else {
-            return;
-        };
-
-        let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
-
-        let lena_rgba = load_lena_rgba_u8_895x551();
-        let lena_gray_alpha = lena_rgba.convert(ColorFormat::LA_U8).unwrap();
-
-        let input = GpuImage::from_image(&ctx, &lena_gray_alpha);
-        let mut output = GpuImage::new_empty(&ctx, lena_gray_alpha.desc);
-
-        let transform = Transform::new();
-        transform.apply_gpu(&ctx, &pipeline, &input, &mut output);
-
-        let output_cpu = output.to_image(&ctx).unwrap();
-
-        // Identity transform should preserve the image
-        assert_eq!(lena_gray_alpha.bytes(), output_cpu.bytes());
-    }
-
-    #[test]
     fn test_transform_gray_f32_identity() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -589,34 +558,6 @@ mod tests {
 
         // Compare as f32 slices
         let input_floats: &[f32] = bytemuck::cast_slice(lena_gray_f32.bytes());
-        let output_floats: &[f32] = bytemuck::cast_slice(output_cpu.bytes());
-
-        for (i, (a, b)) in input_floats.iter().zip(output_floats.iter()).enumerate() {
-            assert!((a - b).abs() < 1e-5, "Mismatch at index {i}: {a} vs {b}");
-        }
-    }
-
-    #[test]
-    fn test_transform_gray_alpha_f32_identity() {
-        let Some(ctx) = test_gpu() else {
-            return;
-        };
-
-        let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
-
-        let lena_rgba = load_lena_rgba_u8_895x551();
-        let lena_gray_alpha_f32 = lena_rgba.convert(ColorFormat::LA_F32).unwrap();
-
-        let input = GpuImage::from_image(&ctx, &lena_gray_alpha_f32);
-        let mut output = GpuImage::new_empty(&ctx, lena_gray_alpha_f32.desc);
-
-        let transform = Transform::new();
-        transform.apply_gpu(&ctx, &pipeline, &input, &mut output);
-
-        let output_cpu = output.to_image(&ctx).unwrap();
-
-        // Compare as f32 slices
-        let input_floats: &[f32] = bytemuck::cast_slice(lena_gray_alpha_f32.bytes());
         let output_floats: &[f32] = bytemuck::cast_slice(output_cpu.bytes());
 
         for (i, (a, b)) in input_floats.iter().zip(output_floats.iter()).enumerate() {

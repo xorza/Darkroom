@@ -34,11 +34,6 @@ pub(super) fn apply(params: &ContrastBrightness, input: &Image, output: &mut Ima
                 unsafe { apply_u8_gray_sse41(input, output, *params) };
                 return;
             }
-            (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::LA) => {
-                // SAFETY: SSE4.1 support verified above
-                unsafe { apply_u8_gray_alpha_sse41(input, output, *params) };
-                return;
-            }
             (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::Rgb) => {
                 // SAFETY: SSE4.1 support verified above
                 unsafe { apply_u8_rgb_sse41(input, output, *params) };
@@ -53,11 +48,6 @@ pub(super) fn apply(params: &ContrastBrightness, input: &Image, output: &mut Ima
             (ChannelSize::_32bit, ChannelType::Float, ChannelCount::L) => {
                 // SAFETY: SSE4.1 support verified above
                 unsafe { apply_f32_gray_sse41(input, output, *params) };
-                return;
-            }
-            (ChannelSize::_32bit, ChannelType::Float, ChannelCount::LA) => {
-                // SAFETY: SSE4.1 support verified above
-                unsafe { apply_f32_gray_alpha_sse41(input, output, *params) };
                 return;
             }
             (ChannelSize::_32bit, ChannelType::Float, ChannelCount::Rgb) => {
@@ -84,11 +74,6 @@ pub(super) fn apply(params: &ContrastBrightness, input: &Image, output: &mut Ima
                 unsafe { apply_u8_gray_neon(input, output, *params) };
                 return;
             }
-            (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::LA) => {
-                // SAFETY: NEON is always available on aarch64
-                unsafe { apply_u8_gray_alpha_neon(input, output, *params) };
-                return;
-            }
             (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::Rgb) => {
                 // SAFETY: NEON is always available on aarch64
                 unsafe { apply_u8_rgb_neon(input, output, *params) };
@@ -103,11 +88,6 @@ pub(super) fn apply(params: &ContrastBrightness, input: &Image, output: &mut Ima
             (ChannelSize::_32bit, ChannelType::Float, ChannelCount::L) => {
                 // SAFETY: NEON is always available on aarch64
                 unsafe { apply_f32_gray_neon(input, output, *params) };
-                return;
-            }
-            (ChannelSize::_32bit, ChannelType::Float, ChannelCount::LA) => {
-                // SAFETY: NEON is always available on aarch64
-                unsafe { apply_f32_gray_alpha_neon(input, output, *params) };
                 return;
             }
             (ChannelSize::_32bit, ChannelType::Float, ChannelCount::Rgb) => {
@@ -301,100 +281,6 @@ unsafe fn process_row_u8_gray_sse41(
             out_row[x] = (in_row[x] as f32 * contrast + offset)
                 .round()
                 .clamp(0.0, 255.0) as u8;
-            x += 1;
-        }
-    }
-}
-
-// ============================================================================
-// U8 GRAY_ALPHA SSE4.1
-// ============================================================================
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "sse4.1")]
-unsafe fn apply_u8_gray_alpha_sse41(from: &Image, to: &mut Image, params: ContrastBrightness) {
-    let width = from.desc.width;
-    let in_stride = from.desc.row_bytes();
-    let out_stride = to.desc.row_bytes();
-    let contrast = params.contrast;
-    let offset = 127.5 * (1.0 - contrast) + params.brightness * 255.0;
-
-    to.bytes_mut()
-        .par_chunks_mut(out_stride)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            let in_row = &from.bytes()[y * in_stride..];
-            unsafe { process_row_u8_gray_alpha_sse41(in_row, out_row, width, contrast, offset) };
-        });
-}
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "sse4.1")]
-unsafe fn process_row_u8_gray_alpha_sse41(
-    in_row: &[u8],
-    out_row: &mut [u8],
-    width: usize,
-    contrast: f32,
-    offset: f32,
-) {
-    use std::arch::x86_64::*;
-
-    unsafe {
-        let contrast_vec = _mm_set1_ps(contrast);
-        let offset_vec = _mm_set1_ps(offset);
-        let max_val = _mm_set1_ps(255.0);
-        let min_val = _mm_setzero_ps();
-        let zero = _mm_setzero_si128();
-
-        // Process 8 GrayAlpha pixels at a time (16 bytes)
-        let simd_width = 8;
-        let mut x = 0;
-
-        while x + simd_width <= width {
-            let pixels = _mm_loadu_si128(in_row[x * 2..].as_ptr() as *const __m128i);
-
-            // Extract gray and alpha channels
-            // Layout: G0 A0 G1 A1 G2 A2 G3 A3 G4 A4 G5 A5 G6 A6 G7 A7
-            let shuffle_g =
-                _mm_setr_epi8(0, 2, 4, 6, 8, 10, 12, 14, -1, -1, -1, -1, -1, -1, -1, -1);
-            let shuffle_a =
-                _mm_setr_epi8(1, 3, 5, 7, 9, 11, 13, 15, -1, -1, -1, -1, -1, -1, -1, -1);
-
-            let gray_bytes = _mm_shuffle_epi8(pixels, shuffle_g);
-            let alpha_bytes = _mm_shuffle_epi8(pixels, shuffle_a);
-
-            // Process gray channel (8 values in lower 64 bits)
-            let gray_16 = _mm_unpacklo_epi8(gray_bytes, zero);
-            let g0_32 = _mm_unpacklo_epi16(gray_16, zero);
-            let g1_32 = _mm_unpackhi_epi16(gray_16, zero);
-
-            macro_rules! process {
-                ($v:expr) => {{
-                    let f = _mm_cvtepi32_ps($v);
-                    let r = _mm_add_ps(_mm_mul_ps(f, contrast_vec), offset_vec);
-                    _mm_cvtps_epi32(_mm_min_ps(_mm_max_ps(r, min_val), max_val))
-                }};
-            }
-
-            let r0 = process!(g0_32);
-            let r1 = process!(g1_32);
-
-            let gray_16_out = _mm_packs_epi32(r0, r1);
-            let gray_8_out = _mm_packus_epi16(gray_16_out, zero);
-
-            // Interleave gray and alpha back
-            let result = _mm_unpacklo_epi8(gray_8_out, alpha_bytes);
-
-            _mm_storeu_si128(out_row[x * 2..].as_mut_ptr() as *mut __m128i, result);
-            x += simd_width;
-        }
-
-        // Scalar fallback
-        while x < width {
-            out_row[x * 2] = (in_row[x * 2] as f32 * contrast + offset)
-                .round()
-                .clamp(0.0, 255.0) as u8;
-            out_row[x * 2 + 1] = in_row[x * 2 + 1]; // preserve alpha
             x += 1;
         }
     }
@@ -674,81 +560,6 @@ unsafe fn process_row_f32_gray_sse41(
 }
 
 // ============================================================================
-// F32 GRAY_ALPHA SSE4.1
-// ============================================================================
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "sse4.1")]
-unsafe fn apply_f32_gray_alpha_sse41(from: &Image, to: &mut Image, params: ContrastBrightness) {
-    let width = from.desc.width;
-    let in_stride = from.desc.row_bytes();
-    let out_stride = to.desc.row_bytes();
-    let contrast = params.contrast;
-    let brightness = params.brightness;
-
-    to.bytes_mut()
-        .par_chunks_mut(out_stride)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            let in_row = &from.bytes()[y * in_stride..];
-            unsafe {
-                process_row_f32_gray_alpha_sse41(in_row, out_row, width, contrast, brightness)
-            };
-        });
-}
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "sse4.1")]
-unsafe fn process_row_f32_gray_alpha_sse41(
-    in_row: &[u8],
-    out_row: &mut [u8],
-    width: usize,
-    contrast: f32,
-    brightness: f32,
-) {
-    use std::arch::x86_64::*;
-
-    unsafe {
-        let offset = 0.5 * (1.0 - contrast) + brightness;
-        let contrast_vec = _mm_set1_ps(contrast);
-        let offset_vec = _mm_set1_ps(offset);
-        let max_val = _mm_set1_ps(1.0);
-        let min_val = _mm_setzero_ps();
-
-        let in_f32: &[f32] = bytemuck::cast_slice(in_row);
-        let out_f32: &mut [f32] = bytemuck::cast_slice_mut(out_row);
-
-        // Process 2 GrayAlpha pixels at a time (4 floats)
-        let simd_width = 2;
-        let mut x = 0;
-
-        while x + simd_width <= width {
-            // Load G0 A0 G1 A1
-            let pixels = _mm_loadu_ps(in_f32[x * 2..].as_ptr());
-
-            // Process all 4 values
-            let result = _mm_add_ps(_mm_mul_ps(pixels, contrast_vec), offset_vec);
-            let clamped = _mm_min_ps(_mm_max_ps(result, min_val), max_val);
-
-            // Restore alpha (blend original alpha back)
-            // Mask: process G, keep A
-            let blend_mask = _mm_castsi128_ps(_mm_setr_epi32(0, -1, 0, -1));
-            let final_result = _mm_blendv_ps(clamped, pixels, blend_mask);
-
-            _mm_storeu_ps(out_f32[x * 2..].as_mut_ptr(), final_result);
-            x += simd_width;
-        }
-
-        // Scalar fallback
-        while x < width {
-            out_f32[x * 2] = (in_f32[x * 2] * contrast + offset).clamp(0.0, 1.0);
-            out_f32[x * 2 + 1] = in_f32[x * 2 + 1]; // preserve alpha
-            x += 1;
-        }
-    }
-}
-
-// ============================================================================
 // F32 RGB SSE4.1
 // ============================================================================
 
@@ -978,89 +789,6 @@ unsafe fn process_row_u8_gray_neon(
             out_row[x] = (in_row[x] as f32 * contrast + offset)
                 .round()
                 .clamp(0.0, 255.0) as u8;
-            x += 1;
-        }
-    }
-}
-
-// ============================================================================
-// U8 GRAY_ALPHA NEON
-// ============================================================================
-
-#[cfg(target_arch = "aarch64")]
-unsafe fn apply_u8_gray_alpha_neon(from: &Image, to: &mut Image, params: ContrastBrightness) {
-    let width = from.desc.width;
-    let in_stride = from.desc.row_bytes();
-    let out_stride = to.desc.row_bytes();
-    let contrast = params.contrast;
-    let offset = 127.5 * (1.0 - contrast) + params.brightness * 255.0;
-
-    to.bytes_mut()
-        .par_chunks_mut(out_stride)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            let in_row = &from.bytes()[y * in_stride..];
-            unsafe { process_row_u8_gray_alpha_neon(in_row, out_row, width, contrast, offset) };
-        });
-}
-
-#[cfg(target_arch = "aarch64")]
-unsafe fn process_row_u8_gray_alpha_neon(
-    in_row: &[u8],
-    out_row: &mut [u8],
-    width: usize,
-    contrast: f32,
-    offset: f32,
-) {
-    use std::arch::aarch64::*;
-
-    unsafe {
-        let contrast_vec = vdupq_n_f32(contrast);
-        let offset_vec = vdupq_n_f32(offset);
-        let max_val = vdupq_n_f32(255.0);
-        let min_val = vdupq_n_f32(0.0);
-
-        // Process 8 GrayAlpha pixels at a time (16 bytes)
-        let simd_width = 8;
-        let mut x = 0;
-
-        while x + simd_width <= width {
-            // Load 16 bytes as 8x2 structure (gray, alpha pairs)
-            let pixels = vld2_u8(in_row[x * 2..].as_ptr());
-            let gray_bytes = pixels.0;
-            let alpha_bytes = pixels.1;
-
-            // Process gray channel (8 values)
-            let gray_16 = vmovl_u8(gray_bytes);
-            let g0_32 = vmovl_u16(vget_low_u16(gray_16));
-            let g1_32 = vmovl_u16(vget_high_u16(gray_16));
-
-            macro_rules! process {
-                ($v:expr) => {{
-                    let f = vcvtq_f32_u32($v);
-                    let r = vmlaq_f32(offset_vec, f, contrast_vec);
-                    vcvtnq_u32_f32(vminq_f32(vmaxq_f32(r, min_val), max_val))
-                }};
-            }
-
-            let r0 = process!(g0_32);
-            let r1 = process!(g1_32);
-
-            let gray_16_out = vcombine_u16(vmovn_u32(r0), vmovn_u32(r1));
-            let gray_8_out = vmovn_u16(gray_16_out);
-
-            // Store interleaved gray and alpha
-            let result = uint8x8x2_t(gray_8_out, alpha_bytes);
-            vst2_u8(out_row[x * 2..].as_mut_ptr(), result);
-            x += simd_width;
-        }
-
-        // Scalar fallback
-        while x < width {
-            out_row[x * 2] = (in_row[x * 2] as f32 * contrast + offset)
-                .round()
-                .clamp(0.0, 255.0) as u8;
-            out_row[x * 2 + 1] = in_row[x * 2 + 1]; // preserve alpha
             x += 1;
         }
     }
@@ -1301,78 +1029,6 @@ unsafe fn process_row_f32_gray_neon(
         // Scalar fallback
         while x < width {
             out_f32[x] = (in_f32[x] * contrast + offset).clamp(0.0, 1.0);
-            x += 1;
-        }
-    }
-}
-
-// ============================================================================
-// F32 GRAY_ALPHA NEON
-// ============================================================================
-
-#[cfg(target_arch = "aarch64")]
-unsafe fn apply_f32_gray_alpha_neon(from: &Image, to: &mut Image, params: ContrastBrightness) {
-    let width = from.desc.width;
-    let in_stride = from.desc.row_bytes();
-    let out_stride = to.desc.row_bytes();
-    let contrast = params.contrast;
-    let brightness = params.brightness;
-
-    to.bytes_mut()
-        .par_chunks_mut(out_stride)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            let in_row = &from.bytes()[y * in_stride..];
-            unsafe {
-                process_row_f32_gray_alpha_neon(in_row, out_row, width, contrast, brightness)
-            };
-        });
-}
-
-#[cfg(target_arch = "aarch64")]
-unsafe fn process_row_f32_gray_alpha_neon(
-    in_row: &[u8],
-    out_row: &mut [u8],
-    width: usize,
-    contrast: f32,
-    brightness: f32,
-) {
-    use std::arch::aarch64::*;
-
-    unsafe {
-        let offset = 0.5 * (1.0 - contrast) + brightness;
-        let contrast_vec = vdupq_n_f32(contrast);
-        let offset_vec = vdupq_n_f32(offset);
-        let max_val = vdupq_n_f32(1.0);
-        let min_val = vdupq_n_f32(0.0);
-
-        let in_f32: &[f32] = bytemuck::cast_slice(in_row);
-        let out_f32: &mut [f32] = bytemuck::cast_slice_mut(out_row);
-
-        // Process 4 GrayAlpha pixels at a time (8 floats) using deinterleaved load
-        let simd_width = 4;
-        let mut x = 0;
-
-        while x + simd_width <= width {
-            // Load 8 floats as 4x2 structure (gray, alpha pairs)
-            let pixels = vld2q_f32(in_f32[x * 2..].as_ptr());
-            let gray = pixels.0;
-            let alpha = pixels.1;
-
-            // Process gray channel
-            let result = vmlaq_f32(offset_vec, gray, contrast_vec);
-            let clamped = vminq_f32(vmaxq_f32(result, min_val), max_val);
-
-            // Store interleaved
-            let output = float32x4x2_t(clamped, alpha);
-            vst2q_f32(out_f32[x * 2..].as_mut_ptr(), output);
-            x += simd_width;
-        }
-
-        // Scalar fallback
-        while x < width {
-            out_f32[x * 2] = (in_f32[x * 2] * contrast + offset).clamp(0.0, 1.0);
-            out_f32[x * 2 + 1] = in_f32[x * 2 + 1]; // preserve alpha
             x += 1;
         }
     }

@@ -236,94 +236,6 @@ fn test_rgb_to_l_u8_various_widths() {
 // =============================================================================
 
 #[test]
-fn test_la_to_rgba_u8_various_widths() {
-    for &width in &TEST_WIDTHS {
-        let desc = ImageDesc::new(width, 2, ColorFormat::LA_U8);
-        let mut src = Image::new_black(desc).unwrap();
-
-        let stride = src.desc.row_bytes();
-        let bytes = src.bytes_mut();
-        for y in 0..2 {
-            let row = y * stride;
-            for x in 0..width {
-                let idx = y * width + x;
-                bytes[row + x * 2] = (idx % 256) as u8;
-                bytes[row + x * 2 + 1] = ((idx + 100) % 256) as u8;
-            }
-        }
-
-        let dst = src.clone().convert(ColorFormat::RGBA_U8).unwrap();
-
-        let src_bytes = src.bytes();
-        let dst_bytes = dst.bytes();
-        for y in 0..2 {
-            let src_row = y * src.desc.row_bytes();
-            let dst_row = y * dst.desc.row_bytes();
-            for x in 0..width {
-                let l = src_bytes[src_row + x * 2];
-                let a = src_bytes[src_row + x * 2 + 1];
-
-                assert_eq!(
-                    dst_bytes[dst_row + x * 4],
-                    l,
-                    "R should equal L at ({x}, {y})"
-                );
-                assert_eq!(
-                    dst_bytes[dst_row + x * 4 + 1],
-                    l,
-                    "G should equal L at ({x}, {y})"
-                );
-                assert_eq!(
-                    dst_bytes[dst_row + x * 4 + 2],
-                    l,
-                    "B should equal L at ({x}, {y})"
-                );
-                assert_eq!(
-                    dst_bytes[dst_row + x * 4 + 3],
-                    a,
-                    "A should be preserved at ({x}, {y})"
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn test_rgba_to_la_u8_various_widths() {
-    for &width in &TEST_WIDTHS {
-        let src = create_test_image(width, 2, ColorFormat::RGBA_U8);
-        let dst = src.clone().convert(ColorFormat::LA_U8).unwrap();
-
-        let src_bytes = src.bytes();
-        let dst_bytes = dst.bytes();
-        for y in 0..2 {
-            let src_row = y * src.desc.row_bytes();
-            let dst_row = y * dst.desc.row_bytes();
-            for x in 0..width {
-                let r = src_bytes[src_row + x * 4] as f32;
-                let g = src_bytes[src_row + x * 4 + 1] as f32;
-                let b = src_bytes[src_row + x * 4 + 2] as f32;
-                let a = src_bytes[src_row + x * 4 + 3];
-
-                let expected_l = (r * 0.2126 + g * 0.7152 + b * 0.0722).round() as u8;
-                let actual_l = dst_bytes[dst_row + x * 2];
-                let actual_a = dst_bytes[dst_row + x * 2 + 1];
-
-                assert!(
-                    (expected_l as i32 - actual_l as i32).abs() <= 1,
-                    "L mismatch at ({x}, {y}): expected {expected_l}, got {actual_l}"
-                );
-                assert_eq!(a, actual_a, "A should be preserved at ({x}, {y})");
-            }
-        }
-    }
-}
-
-// =============================================================================
-// U8 <-> U16 conversion tests
-// =============================================================================
-
-#[test]
 fn test_u8_to_u16_boundary_values() {
     let desc = ImageDesc::new(3, 1, ColorFormat::RGBA_U8);
     let mut src = Image::new_black(desc).unwrap();
@@ -583,15 +495,9 @@ fn test_single_pixel_conversions() {
 
 #[test]
 fn test_all_u8_u16_format_pairs() {
-    let formats_u8 = [
-        ColorFormat::L_U8,
-        ColorFormat::LA_U8,
-        ColorFormat::RGB_U8,
-        ColorFormat::RGBA_U8,
-    ];
+    let formats_u8 = [ColorFormat::L_U8, ColorFormat::RGB_U8, ColorFormat::RGBA_U8];
     let formats_u16 = [
         ColorFormat::L_U16,
-        ColorFormat::LA_U16,
         ColorFormat::RGB_U16,
         ColorFormat::RGBA_U16,
     ];

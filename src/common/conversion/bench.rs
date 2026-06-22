@@ -44,8 +44,6 @@ const CONVERSION_PAIRS: &[(ColorFormat, ColorFormat)] = &[
     (ColorFormat::RGB_U8, ColorFormat::L_U8),
     (ColorFormat::L_U8, ColorFormat::RGBA_U8),
     (ColorFormat::L_U8, ColorFormat::RGB_U8),
-    (ColorFormat::LA_U8, ColorFormat::RGBA_U8),
-    (ColorFormat::RGBA_U8, ColorFormat::LA_U8),
     // U8 <-> U16
     (ColorFormat::RGBA_U8, ColorFormat::RGBA_U16),
     (ColorFormat::RGBA_U16, ColorFormat::RGBA_U8),
@@ -53,8 +51,6 @@ const CONVERSION_PAIRS: &[(ColorFormat, ColorFormat)] = &[
     (ColorFormat::RGB_U16, ColorFormat::RGB_U8),
     (ColorFormat::L_U8, ColorFormat::L_U16),
     (ColorFormat::L_U16, ColorFormat::L_U8),
-    (ColorFormat::LA_U8, ColorFormat::LA_U16),
-    (ColorFormat::LA_U16, ColorFormat::LA_U8),
     // U8 <-> F32
     (ColorFormat::RGBA_U8, ColorFormat::RGBA_F32),
     (ColorFormat::RGBA_F32, ColorFormat::RGBA_U8),
@@ -62,15 +58,11 @@ const CONVERSION_PAIRS: &[(ColorFormat, ColorFormat)] = &[
     (ColorFormat::RGB_F32, ColorFormat::RGB_U8),
     (ColorFormat::L_U8, ColorFormat::L_F32),
     (ColorFormat::L_F32, ColorFormat::L_U8),
-    (ColorFormat::LA_U8, ColorFormat::LA_F32),
-    (ColorFormat::LA_F32, ColorFormat::LA_U8),
     // U16 <-> F32
     (ColorFormat::RGBA_U16, ColorFormat::RGBA_F32),
     (ColorFormat::RGB_U16, ColorFormat::RGB_F32),
     (ColorFormat::L_U16, ColorFormat::L_F32),
     (ColorFormat::L_F32, ColorFormat::L_U16),
-    (ColorFormat::LA_U16, ColorFormat::LA_F32),
-    (ColorFormat::LA_F32, ColorFormat::LA_U16),
 ];
 
 #[quick_bench(warmup_iters = 3, iters = 20)]

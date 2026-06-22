@@ -127,7 +127,7 @@ impl Params {
         let format = desc.color_format;
         let channels = format.channel_count.channel_count() as u32;
         let alpha_channel = match format.channel_count {
-            ChannelCount::LA | ChannelCount::Rgba => channels - 1,
+            ChannelCount::Rgba => channels - 1,
             _ => NO_ALPHA,
         };
         Self {
@@ -544,23 +544,16 @@ mod tests {
 
         let pipeline = GpuBlendPipeline::new(&ctx).unwrap();
 
-        let u8_formats = [
-            ColorFormat::L_U8,
-            ColorFormat::LA_U8,
-            ColorFormat::RGB_U8,
-            ColorFormat::RGBA_U8,
-        ];
+        let u8_formats = [ColorFormat::L_U8, ColorFormat::RGB_U8, ColorFormat::RGBA_U8];
 
         let u16_formats = [
             ColorFormat::L_U16,
-            ColorFormat::LA_U16,
             ColorFormat::RGB_U16,
             ColorFormat::RGBA_U16,
         ];
 
         let f32_formats = [
             ColorFormat::L_F32,
-            ColorFormat::LA_F32,
             ColorFormat::RGB_F32,
             ColorFormat::RGBA_F32,
         ];

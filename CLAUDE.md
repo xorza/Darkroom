@@ -1,6 +1,6 @@
 # Imaginarium
 
-An image-processing library with **CPU (SIMD: SSE/AVX2/NEON) and GPU (wgpu compute) backends**, a unified CPU/GPU image buffer, and 12-format pixel polymorphism. A workspace member of Scenarium and a git submodule; consumed by `lens`/`lumos`. Pre-alpha, breaks freely.
+An image-processing library with **CPU (SIMD: SSE/AVX2/NEON) and GPU (wgpu compute) backends**, a unified CPU/GPU image buffer, and 9-format pixel polymorphism. A workspace member of Scenarium and a git submodule; consumed by `lens`/`lumos`. Pre-alpha, breaks freely.
 
 `README.md` is the public-facing blurb; this file is the architecture map.
 
@@ -9,7 +9,7 @@ An image-processing library with **CPU (SIMD: SSE/AVX2/NEON) and GPU (wgpu compu
 - **No stability guarantees.** Rename, refactor, change signatures and rewrite callers. No compat shims.
 - **GPU is optional, gated behind the `wgpu` feature** (`default = []`). Everything under `src/gpu/`, `GpuContext`, the `ops/*/gpu.rs` + `pipeline.rs` paths, and the `*Pipeline` / `Gpu*` re-exports in `lib.rs` only exist with `wgpu` on. CPU paths must compile and pass with the feature off.
 - **SIMD correctness is cross-checked against scalar.** Every SIMD kernel has a scalar reference; tests compare the two. Don't add a SIMD path without the scalar fallback and the cross-check.
-- **12 formats, always.** New ops and shaders handle the full `ALL_FORMATS` set (or explicitly declare a narrower supported list to `select_backend`). Half-covering the format matrix is a bug.
+- **9 formats, always.** New ops and shaders handle the full `ALL_FORMATS` set (or explicitly declare a narrower supported list to `select_backend`). Half-covering the format matrix is a bug.
 
 ## Architecture
 
@@ -30,9 +30,9 @@ I/O (`src/image/io.rs`): PNG/JPG via the `image` crate, TIFF via `tiff.rs` (unli
 
 ### Color & conversion (`src/common/`)
 
-`Color` (`src/common/color.rs`) is f32 RGBA in 0..1 with Rec. 709 `luminance()`; used by drawing and grayscale handling, not pixel storage. `ColorFormat` (`src/common/color_format.rs:31`) composes `ChannelCount` (L/LA/RGB/RGBA), `ChannelSize` (8/16/32-bit), `ChannelType` (UInt/Float). The 12 supported combos are macro-generated constants (`L_U8`…`RGBA_F32`); `ALL_FORMATS` lists all 12, `ALPHA_FORMATS` the 6 with alpha.
+`Color` (`src/common/color.rs`) is f32 RGBA in 0..1 with Rec. 709 `luminance()`; used by drawing and grayscale handling, not pixel storage. `ColorFormat` (`src/common/color_format.rs:31`) composes `ChannelCount` (L/RGB/RGBA), `ChannelSize` (8/16/32-bit), `ChannelType` (UInt/Float). The 9 supported combos are macro-generated constants (`L_U8`…`RGBA_F32`); `ALL_FORMATS` lists all 9, `ALPHA_FORMATS` the 3 with alpha (RGBA).
 
-Conversion dispatch (`src/common/conversion/mod.rs:28`): `convert_image(from, to)` processes rows in parallel (`rayon`), trying `get_simd_row_converter(from_fmt, to_fmt)` first and falling back to `dispatch_convert_row_scalar`. SIMD lives in `conversion_simd/` (sse/avx/neon submodules); the converter type is `fn(&[u8], &mut [u8], usize)`. Covered fast paths: RGBA↔RGB, RGB→L, L→RGB, LA↔RGBA, U8↔U16, U16↔F32. `bench.rs` and `tests.rs` sit alongside.
+Conversion dispatch (`src/common/conversion/mod.rs:28`): `convert_image(from, to)` processes rows in parallel (`rayon`), trying `get_simd_row_converter(from_fmt, to_fmt)` first and falling back to `dispatch_convert_row_scalar`. SIMD lives in `conversion_simd/` (sse/avx/neon submodules); the converter type is `fn(&[u8], &mut [u8], usize)`. Covered fast paths: RGBA↔RGB, RGB→L, L→RGB, U8↔U16, U16↔F32. `bench.rs` and `tests.rs` sit alongside.
 
 `error.rs`: `Error` enum (`Io`, `InvalidExtension`, `UnsupportedColorType`, `UnsupportedFormat`, `InvalidColorFormat`, `SizeMismatch`, `Conversion`, `Encoding`, `Gpu`, `NoGpuContext`) + `Result<T>`. `image_diff.rs`: `max_pixel_diff`/`pixels_equal` for tests. `test_utils.rs`: cached lena fixtures + shared `test_gpu()`/`test_processing_context()` (GPU init is ~2s, so it's shared across tests).
 
@@ -64,7 +64,7 @@ The three ops:
 | Contrast/Brightness | `ContrastBrightness { contrast, brightness }`, formula `(x-mid)*contrast + mid + brightness` (`contrast_brightness/mod.rs:46`) | SSE4.1 / NEON + scalar (alpha preserved) | `GpuContrastBrightnessPipeline`, binds params+input+output | `contrast_brightness.wgsl` |
 | Transform | `Transform { transform: Affine2, filter: FilterMode }`, `FilterMode { Nearest, Bilinear }` (default Bilinear); builders `scale`/`rotate`/`rotate_around`/`translate`/`affine`/`filter` (`transform/mod.rs:39`) | **none — GPU-only** | `GpuTransformPipeline`, applies `Affine2` + interpolation | `shader.wgsl` |
 
-WGSL shaders treat storage buffers as `array<u32>` over the packed layout. The **pointwise** ops (`Blend`, `ContrastBrightness`) dispatch **one invocation per `u32` word** (output word built from the matching input word(s), so element layout is uniform across all 12 formats — no per-format switch, no shared-word read-modify-write, no races). `Transform` is coordinate-based: it dispatches per output pixel, reads input via general byte→word addressing, and writes through `array<atomic<u32>>` (`atomicOr` into a pre-cleared buffer for sub-word formats, `atomicStore` for word-aligned ones) so output pixels that share a `u32` never race. Workgroup size 256 (pointwise) / 16×16 (transform).
+WGSL shaders treat storage buffers as `array<u32>` over the packed layout. The **pointwise** ops (`Blend`, `ContrastBrightness`) dispatch **one invocation per `u32` word** (output word built from the matching input word(s), so element layout is uniform across all 9 formats — no per-format switch, no shared-word read-modify-write, no races). `Transform` is coordinate-based: it dispatches per output pixel, reads input via general byte→word addressing, and writes through `array<atomic<u32>>` (`atomicOr` into a pre-cleared buffer for sub-word formats, `atomicStore` for word-aligned ones) so output pixels that share a `u32` never race. Workgroup size 256 (pointwise) / 16×16 (transform).
 
 **End-to-end data flow** (Blend, GPU path): `Image` → `ImageBuffer::from_cpu` → `Blend::execute` → `select_backend` (sees a GPU buffer ⇒ GPU) → `make_gpu()` uploads any CPU buffers → `get_or_create::<GpuBlendPipeline>` → `apply_gpu` builds params+bind group, dispatches, `queue.submit()` → `to_image()` downloads when the caller wants CPU pixels back. CPU path is identical up to `select_backend`, then `make_cpu()` (no-op if already CPU) → `apply_cpu` → rayon-parallel SIMD/scalar kernel; result stays on CPU.
 

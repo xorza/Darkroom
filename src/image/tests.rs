@@ -336,7 +336,6 @@ fn convert_and_save_various_formats() {
             ColorFormat::RGBA_F32,
             test_output_path("conv-rgba-f32.tiff"),
         ),
-        (ColorFormat::LA_U8, test_output_path("conv-ga-u8.tiff")),
     ];
 
     for (format, path) in conversions {

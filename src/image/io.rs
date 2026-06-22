@@ -15,8 +15,6 @@ pub(crate) fn load_png_jpeg<P: AsRef<Path>>(filename: P) -> Result<Image> {
     let (channel_count, channel_size, channel_type) = match img.color() {
         image_lib::ColorType::L8 => (ChannelCount::L, ChannelSize::_8bit, ChannelType::UInt),
         image_lib::ColorType::L16 => (ChannelCount::L, ChannelSize::_16bit, ChannelType::UInt),
-        image_lib::ColorType::La8 => (ChannelCount::LA, ChannelSize::_8bit, ChannelType::UInt),
-        image_lib::ColorType::La16 => (ChannelCount::LA, ChannelSize::_16bit, ChannelType::UInt),
         image_lib::ColorType::Rgb8 => (ChannelCount::Rgb, ChannelSize::_8bit, ChannelType::UInt),
         image_lib::ColorType::Rgb16 => (ChannelCount::Rgb, ChannelSize::_16bit, ChannelType::UInt),
         image_lib::ColorType::Rgba8 => (ChannelCount::Rgba, ChannelSize::_8bit, ChannelType::UInt),
@@ -46,7 +44,6 @@ pub(crate) fn load_tiff<P: AsRef<Path>>(filename: P) -> Result<Image> {
 
     let (channel_bits, channel_count) = match decoder.colortype()? {
         tiff::ColorType::Gray(b) => (b, ChannelCount::L),
-        tiff::ColorType::GrayA(b) => (b, ChannelCount::LA),
         tiff::ColorType::RGB(b) => (b, ChannelCount::Rgb),
         tiff::ColorType::RGBA(b) => (b, ChannelCount::Rgba),
         _ => {
@@ -146,13 +143,11 @@ pub(crate) fn save_png<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
     let color_format = match image.desc.color_format.channel_size {
         ChannelSize::_8bit => match image.desc.color_format.channel_count {
             ChannelCount::L => image_lib::ColorType::L8,
-            ChannelCount::LA => image_lib::ColorType::La8,
             ChannelCount::Rgb => image_lib::ColorType::Rgb8,
             ChannelCount::Rgba => image_lib::ColorType::Rgba8,
         },
         ChannelSize::_16bit => match image.desc.color_format.channel_count {
             ChannelCount::L => image_lib::ColorType::L16,
-            ChannelCount::LA => image_lib::ColorType::La16,
             ChannelCount::Rgb => image_lib::ColorType::Rgb16,
             ChannelCount::Rgba => image_lib::ColorType::Rgba16,
         },

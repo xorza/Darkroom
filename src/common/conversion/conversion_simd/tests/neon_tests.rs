@@ -231,60 +231,6 @@ fn test_neon_l_to_rgb_various_widths() {
 // =============================================================================
 
 #[test]
-fn test_neon_la_to_rgba_various_widths() {
-    for &width in &TEST_WIDTHS {
-        let src = create_test_row_u8(width, 2);
-        let mut dst = vec![0u8; width * 4];
-
-        unsafe {
-            neon::convert_la_to_rgba_row_neon(&src, &mut dst, width);
-        }
-
-        for x in 0..width {
-            let l = src[x * 2];
-            let a = src[x * 2 + 1];
-            assert_eq!(dst[x * 4], l, "R should equal L at x={x}");
-            assert_eq!(dst[x * 4 + 1], l, "G should equal L at x={x}");
-            assert_eq!(dst[x * 4 + 2], l, "B should equal L at x={x}");
-            assert_eq!(dst[x * 4 + 3], a, "Alpha should be preserved at x={x}");
-        }
-    }
-}
-
-#[test]
-fn test_neon_rgba_to_la_various_widths() {
-    for &width in &TEST_WIDTHS {
-        let src = create_test_row_u8(width, 4);
-        let mut dst = vec![0u8; width * 2];
-
-        unsafe {
-            neon::convert_rgba_to_la_row_neon(&src, &mut dst, width);
-        }
-
-        for x in 0..width {
-            let r = src[x * 4];
-            let g = src[x * 4 + 1];
-            let b = src[x * 4 + 2];
-            let a = src[x * 4 + 3];
-            let expected_l = expected_luminance(r, g, b);
-
-            assert!(
-                within_tolerance(dst[x * 2], expected_l, 1),
-                "L mismatch at x={}: expected {}, got {}",
-                x,
-                expected_l,
-                dst[x * 2]
-            );
-            assert_eq!(dst[x * 2 + 1], a, "Alpha should be preserved at x={x}");
-        }
-    }
-}
-
-// =============================================================================
-// NEON F32 <-> U8 tests
-// =============================================================================
-
-#[test]
 fn test_neon_f32_to_u8_various_widths() {
     for &width in &TEST_WIDTHS {
         let src = create_test_row_f32(width, 4);
@@ -474,21 +420,17 @@ fn test_neon_single_pixel() {
     // Test all NEON functions with single pixel
     let rgba = [100u8, 150, 200, 255];
     let rgb = [100u8, 150, 200];
-    let la = [128u8, 200];
     let l = [128u8];
 
     let mut dst_rgb = [0u8; 3];
     let mut dst_rgba = [0u8; 4];
     let mut dst_l = [0u8; 1];
-    let mut dst_la = [0u8; 2];
 
     unsafe {
         neon::convert_rgba_to_rgb_row_neon(&rgba, &mut dst_rgb, 1);
         neon::convert_rgb_to_rgba_row_neon(&rgb, &mut dst_rgba, 1);
         neon::convert_rgba_to_l_row_neon(&rgba, &mut dst_l, 1);
         neon::convert_l_to_rgba_row_neon(&l, &mut dst_rgba, 1);
-        neon::convert_la_to_rgba_row_neon(&la, &mut dst_rgba, 1);
-        neon::convert_rgba_to_la_row_neon(&rgba, &mut dst_la, 1);
     }
 
     assert_eq!(dst_rgb, [100, 150, 200]);
