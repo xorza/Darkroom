@@ -14,8 +14,8 @@ use crate::stacking::registration::warp;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::synthetic::fixtures::star_field;
 use crate::{AstroImage, ImageDimensions};
-use imaginarium::Buffer2;
 use glam::DVec2;
+use imaginarium::Buffer2;
 
 /// Helper to warp and return a new buffer (for test convenience).
 /// Visually applies the transform to the image content (stars move by T).

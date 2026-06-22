@@ -12,8 +12,8 @@ use rayon::prelude::*;
 use crate::stacking::registration::config::InterpolationMethod;
 use crate::stacking::registration::transform::WarpTransform;
 use common::Vec2us;
-use imaginarium::Buffer2;
 use glam::{IVec2, Vec2};
+use imaginarium::Buffer2;
 
 /// Bundled warp parameters passed through the interpolation pipeline.
 #[derive(Debug, Clone, Copy)]

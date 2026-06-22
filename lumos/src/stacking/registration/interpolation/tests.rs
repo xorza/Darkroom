@@ -3,8 +3,8 @@ use std::f32::consts::PI;
 use super::*;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use common::Vec2us;
-use imaginarium::Buffer2;
 use glam::{DVec2, IVec2, Vec2};
+use imaginarium::Buffer2;
 
 /// Shorthand for tests: interpolate with a method and default border/clamp settings.
 fn interp(data: &Buffer2<f32>, x: f32, y: f32, method: InterpolationMethod) -> f32 {

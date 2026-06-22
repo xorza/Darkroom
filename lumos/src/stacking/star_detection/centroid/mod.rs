@@ -29,8 +29,8 @@ use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::config::{CentroidMethod, Config, LocalBackgroundMethod};
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::star::Star;
-use imaginarium::Buffer2;
 use gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
+use imaginarium::Buffer2;
 use moffat_fit::{MoffatFitConfig, fit_moffat_2d};
 
 /// Stamp radius as a multiple of FWHM.

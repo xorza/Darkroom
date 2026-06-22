@@ -13,9 +13,9 @@ use imaginarium::{ChannelCount, ChannelType, ColorFormat, Image, ImageDesc};
 use std::ops::SubAssign;
 use std::path::Path;
 
-use imaginarium::Buffer2;
 use common::Rgb;
 use common::Vec2us;
+use imaginarium::{Buffer2, ImageData};
 
 use crate::io::raw::load_raw;
 use crate::math::sum::sum_f32;
@@ -155,45 +155,41 @@ pub struct AstroImageMetadata {
 /// Pixel data storage - planar format for efficient per-channel operations.
 #[derive(Debug, Clone)]
 pub(crate) enum PixelData {
-    L(Buffer2<f32>),
-    Rgb([Buffer2<f32>; 3]),
+    L(ImageData<1, f32>),
+    Rgb(ImageData<3, f32>),
 }
 
 impl PixelData {
     pub fn new_default(width: usize, height: usize, channels: usize) -> Self {
         match channels {
-            1 => PixelData::L(Buffer2::new_default(width, height)),
-            3 => PixelData::Rgb([
-                Buffer2::new_default(width, height),
-                Buffer2::new_default(width, height),
-                Buffer2::new_default(width, height),
-            ]),
+            1 => PixelData::L(ImageData::new_zeroed(width, height)),
+            3 => PixelData::Rgb(ImageData::new_zeroed(width, height)),
             _ => panic!("Only 1 or 3 channels supported, got {channels}"),
         }
     }
 
     pub fn channel(&self, c: usize) -> &Buffer2<f32> {
         match self {
-            PixelData::L(data) => {
+            PixelData::L(img) => {
                 assert!(c == 0, "Grayscale image only has channel 0, got {c}");
-                data
+                &img.channels[0]
             }
-            PixelData::Rgb(channels) => {
+            PixelData::Rgb(img) => {
                 assert!(c < 3, "RGB image has channels 0-2, got {c}");
-                &channels[c]
+                &img.channels[c]
             }
         }
     }
 
     pub fn channel_mut(&mut self, c: usize) -> &mut Buffer2<f32> {
         match self {
-            PixelData::L(data) => {
+            PixelData::L(img) => {
                 assert!(c == 0, "Grayscale image only has channel 0, got {c}");
-                data
+                &mut img.channels[0]
             }
-            PixelData::Rgb(channels) => {
+            PixelData::Rgb(img) => {
                 assert!(c < 3, "RGB image has channels 0-2, got {c}");
-                &mut channels[c]
+                &mut img.channels[c]
             }
         }
     }
@@ -207,7 +203,10 @@ impl PixelData {
 
     pub fn into_l(self) -> Buffer2<f32> {
         match self {
-            PixelData::L(data) => data,
+            PixelData::L(img) => {
+                let [data] = img.channels;
+                data
+            }
             PixelData::Rgb(_) => panic!("Expected L variant, got Rgb"),
         }
     }
@@ -284,13 +283,15 @@ impl AstroImage {
         let width = dimensions.size.x;
         let height = dimensions.size.y;
         let pixel_data = if dimensions.is_grayscale() {
-            PixelData::L(Buffer2::new(width, height, pixels))
+            PixelData::L(ImageData::from_channels([Buffer2::new(
+                width, height, pixels,
+            )]))
         } else {
             let mut r: Buffer2<f32> = Buffer2::new_default(width, height);
             let mut g: Buffer2<f32> = Buffer2::new_default(width, height);
             let mut b: Buffer2<f32> = Buffer2::new_default(width, height);
             deinterleave_rgb(&pixels, r.pixels_mut(), g.pixels_mut(), b.pixels_mut());
-            PixelData::Rgb([r, g, b])
+            PixelData::Rgb(ImageData::from_channels([r, g, b]))
         };
 
         AstroImage {
@@ -318,7 +319,7 @@ impl AstroImage {
                 "Channel 0 pixel count mismatch"
             );
             assert!(iter.next().is_none(), "Too many channels for grayscale");
-            PixelData::L(Buffer2::new(width, height, ch))
+            PixelData::L(ImageData::from_channels([Buffer2::new(width, height, ch)]))
         } else {
             let r = iter.next().expect("Expected 3 channels for RGB");
             let g = iter.next().expect("Expected 3 channels for RGB");
@@ -339,11 +340,11 @@ impl AstroImage {
                 "B channel pixel count mismatch"
             );
             assert!(iter.next().is_none(), "Too many channels for RGB");
-            PixelData::Rgb([
+            PixelData::Rgb(ImageData::from_channels([
                 Buffer2::new(width, height, r),
                 Buffer2::new(width, height, g),
                 Buffer2::new(width, height, b),
-            ])
+            ]))
         };
 
         AstroImage {
@@ -412,8 +413,12 @@ impl AstroImage {
         rgb: impl Fn(Rgb) -> Rgb + Sync,
     ) {
         match &mut self.pixels {
-            PixelData::L(buf) => buf.pixels_mut().par_iter_mut().for_each(|v| *v = mono(*v)),
-            PixelData::Rgb([r, g, b]) => {
+            PixelData::L(img) => img.channels[0]
+                .pixels_mut()
+                .par_iter_mut()
+                .for_each(|v| *v = mono(*v)),
+            PixelData::Rgb(img) => {
+                let [r, g, b] = &mut img.channels;
                 let (rp, gp, bp) = (r.pixels_mut(), g.pixels_mut(), b.pixels_mut());
                 rp.par_iter_mut()
                     .zip(gp.par_iter_mut())
@@ -437,8 +442,9 @@ impl AstroImage {
     /// image statistics.
     pub(crate) fn intensity_plane(&self) -> Buffer2<f32> {
         match &self.pixels {
-            PixelData::L(buf) => buf.clone(),
-            PixelData::Rgb([r, g, b]) => {
+            PixelData::L(img) => img.channels[0].clone(),
+            PixelData::Rgb(img) => {
+                let [r, g, b] = &img.channels;
                 let intensity = r
                     .pixels()
                     .iter()
@@ -462,12 +468,13 @@ impl AstroImage {
         mapped: &Buffer2<f32>,
     ) {
         match &mut self.pixels {
-            PixelData::L(buf) => buf
+            PixelData::L(img) => img.channels[0]
                 .pixels_mut()
                 .par_iter_mut()
                 .zip(mapped.pixels().par_iter())
                 .for_each(|(p, &m)| *p = m.clamp(0.0, 1.0)),
-            PixelData::Rgb([r, g, b]) => {
+            PixelData::Rgb(img) => {
+                let [r, g, b] = &mut img.channels;
                 let (rp, gp, bp) = (r.pixels_mut(), g.pixels_mut(), b.pixels_mut());
                 rp.par_iter_mut()
                     .zip(gp.par_iter_mut())
@@ -504,11 +511,13 @@ impl AstroImage {
         }
 
         match &self.pixels {
-            PixelData::L(data) => {
+            PixelData::L(img) => {
+                let data = &img.channels[0];
                 debug_assert!(!data.is_empty());
                 parallel_sum(data) / data.len() as f32
             }
-            PixelData::Rgb([r, g, b]) => {
+            PixelData::Rgb(img) => {
+                let [r, g, b] = &img.channels;
                 let total = parallel_sum(r) + parallel_sum(g) + parallel_sum(b);
                 let count = r.len() + g.len() + b.len();
                 total / count as f32
@@ -564,8 +573,11 @@ impl StackableImage for AstroImage {
     fn into_planes(self) -> arrayvec::ArrayVec<Buffer2<f32>, 3> {
         let mut planes = arrayvec::ArrayVec::new();
         match self.pixels {
-            PixelData::L(buffer) => planes.push(buffer),
-            PixelData::Rgb(buffers) => planes.extend(buffers),
+            PixelData::L(img) => {
+                let [buffer] = img.channels;
+                planes.push(buffer);
+            }
+            PixelData::Rgb(img) => planes.extend(img.channels),
         }
         planes
     }
@@ -598,11 +610,12 @@ impl From<&AstroImage> for Image {
         // so going through `&AstroImage` avoids cloning the whole image, which for an RGB master is
         // ~3× the largest allocation in the pipeline.)
         let (color_format, bytes): (ColorFormat, Vec<u8>) = match &astro.pixels {
-            PixelData::L(data) => (
+            PixelData::L(img) => (
                 ColorFormat::L_F32,
-                bytemuck::cast_slice(data.pixels()).to_vec(),
+                bytemuck::cast_slice(img.channels[0].pixels()).to_vec(),
             ),
-            PixelData::Rgb([r, g, b]) => {
+            PixelData::Rgb(img) => {
+                let [r, g, b] = &img.channels;
                 let mut interleaved = vec![0.0f32; r.len() * 3];
                 interleave_rgb(r, g, b, &mut interleaved);
                 (
@@ -644,13 +657,17 @@ fn astro_from_f32_image(image: &Image) -> AstroImage {
     let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
 
     let pixel_data = if desc.color_format == ColorFormat::L_F32 {
-        PixelData::L(Buffer2::new(width, height, pixels.to_vec()))
+        PixelData::L(ImageData::from_channels([Buffer2::new(
+            width,
+            height,
+            pixels.to_vec(),
+        )]))
     } else {
         let mut r: Buffer2<f32> = Buffer2::new_default(width, height);
         let mut g: Buffer2<f32> = Buffer2::new_default(width, height);
         let mut b: Buffer2<f32> = Buffer2::new_default(width, height);
         deinterleave_rgb(pixels, r.pixels_mut(), g.pixels_mut(), b.pixels_mut());
-        PixelData::Rgb([r, g, b])
+        PixelData::Rgb(ImageData::from_channels([r, g, b]))
     };
 
     let dimensions = ImageDimensions::new(
@@ -761,11 +778,14 @@ impl AstroImage {
         debug_assert!(self.is_rgb());
         let idx = y * self.width() + x;
         match &self.pixels {
-            PixelData::Rgb([r, g, b]) => Rgb {
-                r: r[idx],
-                g: g[idx],
-                b: b[idx],
-            },
+            PixelData::Rgb(img) => {
+                let [r, g, b] = &img.channels;
+                Rgb {
+                    r: r[idx],
+                    g: g[idx],
+                    b: b[idx],
+                }
+            }
             _ => unreachable!(),
         }
     }
@@ -776,7 +796,8 @@ impl AstroImage {
         debug_assert!(self.is_rgb());
         let idx = y * self.width() + x;
         match &mut self.pixels {
-            PixelData::Rgb([r, g, b]) => {
+            PixelData::Rgb(img) => {
+                let [r, g, b] = &mut img.channels;
                 r[idx] = rgb.r;
                 g[idx] = rgb.g;
                 b[idx] = rgb.b;
@@ -788,8 +809,12 @@ impl AstroImage {
     /// Consume and return interleaved pixels (RGBRGBRGB...).
     pub fn into_interleaved_pixels(self) -> Vec<f32> {
         match self.pixels {
-            PixelData::L(data) => data.into_vec(),
-            PixelData::Rgb([r, g, b]) => {
+            PixelData::L(img) => {
+                let [data] = img.channels;
+                data.into_vec()
+            }
+            PixelData::Rgb(img) => {
+                let [r, g, b] = img.channels;
                 let mut interleaved = vec![0.0f32; r.len() * 3];
                 interleave_rgb(&r, &g, &b, &mut interleaved);
                 interleaved

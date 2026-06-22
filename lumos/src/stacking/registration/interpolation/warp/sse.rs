@@ -3,8 +3,8 @@
 #![allow(clippy::needless_range_loop)]
 
 use common::Vec2us;
-use imaginarium::Buffer2;
 use glam::{DVec2, IVec2, Vec2};
+use imaginarium::Buffer2;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
@@ -428,9 +428,9 @@ mod tests {
     use super::*;
     use crate::testing::synthetic::patterns;
     use common::Vec2us;
-use imaginarium::Buffer2;
     #[cfg(target_arch = "x86_64")]
     use common::cpu_features;
+    use imaginarium::Buffer2;
 
     /// Helper: compare SIMD output against scalar reference for a given transform.
     #[cfg(target_arch = "x86_64")]

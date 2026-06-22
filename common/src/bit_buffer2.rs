@@ -3,7 +3,7 @@
 //! Uses 1 bit per element instead of 1 byte, reducing memory by 8x.
 //! Rows are aligned to 128 bits (16 bytes) for efficient SIMD operations.
 //! Memory is 16-byte aligned for optimal SIMD load/store operations.
-//! Provides the same API as `Buffer2<bool>` for easy migration.
+//! `(x, y)` and linear indexing like a dense `Vec<bool>` 2D grid, but bit-packed.
 
 use aligned_vec::AVec;
 use std::ops::Index;

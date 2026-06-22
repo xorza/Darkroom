@@ -12,8 +12,8 @@ use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::load_raw_cfa;
 use crate::stacking::combine::cache::StackableImage;
 use crate::stacking::combine::error::Error;
-use imaginarium::Buffer2;
 use common::CancelToken;
+use imaginarium::Buffer2;
 
 /// CFA pattern for raw sensor data.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

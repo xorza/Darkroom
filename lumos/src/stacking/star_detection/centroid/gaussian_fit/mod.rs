@@ -46,8 +46,8 @@ use crate::stacking::star_detection::centroid::{
     FitNoise, MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp, fit_weights,
 };
 use arrayvec::ArrayVec;
-use imaginarium::Buffer2;
 use glam::Vec2;
+use imaginarium::Buffer2;
 
 /// Configuration for Gaussian fitting.
 pub type GaussianFitConfig = LMConfig;

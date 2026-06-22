@@ -8,8 +8,7 @@ helpers. Pure leaf crate — depended on by everything, depends on nothing in-tr
 
 | Module | Role |
 |--------|------|
-| `buffer2.rs` | `Buffer2<T>`: generic 2D buffer over `Vec<T>` with `(x, y)`, linear, and range indexing. Stores its size as a `Vec2us` (`dimensions()`); `new`/`width()`/`height()` keep `usize`. |
-| `bit_buffer2.rs` | `BitBuffer2`: bit-packed 2D boolean buffer; u64 words, rows aligned to 128 bits, 16-byte-aligned for SIMD. 8× smaller than `Vec<bool>`. |
+| `bit_buffer2.rs` | `BitBuffer2`: bit-packed 2D boolean buffer; u64 words, rows aligned to 128 bits, 16-byte-aligned for SIMD. 8× smaller than `Vec<bool>`. (The generic `Buffer2<T>` pixel buffer now lives in `imaginarium`.) |
 | `vec2us.rs` | `Vec2us`: 2D `usize` vector for pixel coordinates/dimensions (`x`, `y`); index conversions (`to_index`/`from_index`), `Add`/`Sub`, tuple `From`. |
 | `rgb.rs` | `Rgb`: an RGB color as three `f32` channels (`r`, `g`, `b`); `intensity()` (unweighted channel mean), `scale()`, `ZERO`. |
 | `key_index_vec.rs` | `KeyIndexVec<K, V>`: vec + `HashMap` index giving O(1) key lookup with stable iteration order; compaction via a drop guard. |
@@ -37,7 +36,7 @@ helpers. Pure leaf crate — depended on by everything, depends on nothing in-tr
 
 ## Key types
 
-- `Buffer2<T>` / `BitBuffer2` — 2D buffers. Both index by `(x, y)` tuple, linear `usize`, and (Buffer2) ranges. `BitBuffer2` has no `IndexMut` (bits aren't independently addressable); mutate via `set`/`set_xy`.
+- `BitBuffer2` — bit-packed 2D bool buffer; indexes by `(x, y)` tuple and linear `usize`. No `IndexMut` (bits aren't independently addressable); mutate via `set`/`set_xy`. (The generic pixel `Buffer2<T>` moved to `imaginarium`.)
 - `KeyIndexVec<K, V>` — `V: KeyIndexKey<K>` (must expose `key(&self) -> &K`). `add`/`remove_by_key`/`by_key`/`index_of_key`, plus `compact_insert_start()` returning a `CompactInsert` guard whose `insert_with` deduplicates and which truncates + reindexes on drop.
 - `Slot<T>` — `send` (overwrites), `take`/`take_or_wait`, `peek`/`peek_or_wait` (Arc clone, keeps). For cross-task async value passing.
 - `PauseGate` / `ReadyState` — race-safe via registering the `Notify` future *before* checking the flag/count.

@@ -14,8 +14,8 @@ use arrayvec::ArrayVec;
 
 use crate::math::bbox::Aabb;
 use crate::stacking::star_detection::labeling::LabelMap;
-use imaginarium::Buffer2;
 use common::Vec2us;
+use imaginarium::Buffer2;
 
 pub mod local_maxima;
 pub mod multi_threshold;

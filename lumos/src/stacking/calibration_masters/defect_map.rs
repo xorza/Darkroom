@@ -40,9 +40,9 @@
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::math::statistics::median_f32_mut;
 use common::BitBuffer2;
-use imaginarium::Buffer2;
 use common::CancelToken;
 use common::Vec2us;
+use imaginarium::Buffer2;
 
 use arrayvec::ArrayVec;
 use rayon::prelude::*;

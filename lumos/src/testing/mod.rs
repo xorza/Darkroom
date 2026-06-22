@@ -60,8 +60,8 @@ use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::buffer_pool::BufferPool;
 use crate::stacking::star_detection::config::Config;
-use imaginarium::Buffer2;
 use common::test_utils::test_output_path;
+use imaginarium::Buffer2;
 use imaginarium::{ColorFormat, Image};
 
 /// Convenience function to estimate background for tests.

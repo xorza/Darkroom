@@ -3,8 +3,8 @@ use crate::stacking::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::testing::constant_cfa;
 use crate::{AstroImageMetadata, CalibrationFrames, CalibrationImages, CalibrationMasters};
-use imaginarium::Buffer2;
 use common::CancelToken;
+use imaginarium::Buffer2;
 
 #[test]
 #[should_panic(expected = "already-calibrated frame")]

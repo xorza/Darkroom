@@ -10,8 +10,8 @@ use crate::stacking::star_detection::test_common::output::image_writer::save_gra
 use crate::testing::synthetic::backgrounds::NebulaConfig;
 use crate::testing::synthetic::scene::BackgroundField;
 use crate::testing::{estimate_background, init_tracing};
-use imaginarium::Buffer2;
 use common::test_utils::test_output_path;
+use imaginarium::Buffer2;
 
 use crate::stacking::star_detection::synthetic_tests::stage_tests::TILE_SIZE;
 

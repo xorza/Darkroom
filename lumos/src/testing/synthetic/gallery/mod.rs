@@ -11,10 +11,10 @@
 //! background gradients, and noise texture; flat/level images use `Stretch::Linear` to show
 //! true values.
 
-use imaginarium::Buffer2;
 use common::test_utils::test_output_path;
 use glam::{DVec2, Vec2};
 use image::GrayImage;
+use imaginarium::Buffer2;
 use std::path::PathBuf;
 
 use crate::testing::synthetic::artifacts::add_cosmic_rays;

@@ -16,8 +16,8 @@ use crate::stacking::star_detection::deblend::{
     ComponentData, MAX_PEAKS, Pixel, assign_to_nearest_peak,
 };
 use crate::stacking::star_detection::labeling::LabelMap;
-use imaginarium::Buffer2;
 use common::Vec2us;
+use imaginarium::Buffer2;
 
 #[cfg(test)]
 mod tests;

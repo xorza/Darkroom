@@ -23,8 +23,8 @@ use crate::stacking::registration::interpolation::WarpParams;
 use crate::stacking::registration::interpolation::get_lanczos_lut;
 use crate::stacking::registration::transform::WarpTransform;
 use common::Vec2us;
-use imaginarium::Buffer2;
 use glam::{DVec2, IVec2, Vec2};
+use imaginarium::Buffer2;
 
 /// Fast inline floor-to-i32, avoiding libc `floorf` function call.
 ///

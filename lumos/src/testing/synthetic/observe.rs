@@ -12,8 +12,8 @@ use crate::testing::TestRng;
 use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::noise::{add_dark_current, add_read_noise, apply_shot_noise};
 use crate::testing::synthetic::scene::Scene;
-use imaginarium::Buffer2;
 use glam::DVec2;
+use imaginarium::Buffer2;
 
 /// Geometry + exposure parameters for one frame.
 #[derive(Debug, Clone)]

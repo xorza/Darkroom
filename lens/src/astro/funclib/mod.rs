@@ -8,9 +8,9 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock};
 
-use imaginarium::Buffer2;
 use common::CancelToken;
 use common::file_utils::astro_image_files;
+use imaginarium::Buffer2;
 use imaginarium::Image as RawImage;
 use lumos::{
     AlignStackConfig, AstroImage, BackgroundConfig, CalibrationImages, CalibrationMasters,

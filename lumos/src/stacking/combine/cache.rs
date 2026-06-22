@@ -26,10 +26,10 @@ use std::mem::size_of;
 use std::path::{Path, PathBuf};
 
 use arrayvec::ArrayVec;
-use imaginarium::Buffer2;
 use common::CancelToken;
 use common::FnvHasher;
 use common::parallel::try_par_map_limited;
+use imaginarium::Buffer2;
 use memmap2::Mmap;
 use rayon::prelude::*;
 

@@ -19,10 +19,10 @@ use rayon::prelude::*;
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::io::astro_image::sensor::{SensorType, detect_sensor_type};
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
-use imaginarium::Buffer2;
 use common::CancelToken;
 use demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
 use demosaic::xtrans::process_xtrans;
+use imaginarium::Buffer2;
 
 use normalize::{normalize_u16_to_f32_parallel, normalize_u16_to_f32_parallel_unclamped};
 

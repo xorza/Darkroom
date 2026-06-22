@@ -9,8 +9,8 @@ use arrayvec::ArrayVec;
 
 use crate::AstroImage;
 use crate::io::astro_image::cfa::CfaImage;
-use imaginarium::Buffer2;
 use common::CancelToken;
+use imaginarium::Buffer2;
 
 use crate::math;
 use crate::math::statistics::ChannelStats;
