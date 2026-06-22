@@ -135,7 +135,12 @@ concurrently with the run in the worker `select!`), then a single
 on the `Worker` (`request_cancel()` sets it, the worker `reset()`s it at each
 run's start) that the executor polls between nodes — set directly across threads, so
 no command-channel round-trip; a cancelled run stops scheduling and reports
-`ExecutionStats { cancelled: true }` with only the nodes that ran.
+`ExecutionStats { cancelled: true }` with only the nodes that ran. The node that
+was *mid-invoke* when the cancel landed (a cancellable lambda bails with `Ok` +
+partial output) is reported truthfully as `Error::Cancelled`, not a fake success:
+its output is dropped so it isn't cached (re-runs next time) and it's omitted from
+`executed_nodes`. darkroom paints that node neutrally (it was interrupted, not a
+failure), unlike a real `Error`.
 The loop uses `tokio::select! { biased }`: command batches take priority and are
 collapsed via a `BatchIntent` reduction table (last-write-wins for graph/loop,
 union for events, `Exit` dominates); the event loop emits frame events through a

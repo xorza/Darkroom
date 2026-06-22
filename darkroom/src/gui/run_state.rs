@@ -146,6 +146,12 @@ impl RunState {
             self.record_status(stats, port.node_id, ExecStatus::MissingInputs);
         }
         for e in &stats.node_errors {
+            // A node cancelled mid-run didn't fail — it was interrupted and
+            // will re-run next time. Leave it neutral (no glow) rather than
+            // flagging it as an error.
+            if matches!(e.error, scenarium::execution::Error::Cancelled { .. }) {
+                continue;
+            }
             self.record_status(stats, e.node_id, ExecStatus::Errored);
         }
         for entry in &stats.logs {

@@ -120,6 +120,10 @@ impl Executor {
         // normal run; on cancel it's the count reached before bailing, so the
         // stats report only the nodes that actually ran (not the unrun tail).
         let mut executed_count = plan.execute_order.len();
+        // The node (if any) that was mid-invoke when the run was cancelled. Its
+        // result is untrustworthy (a cancellable lambda bails with Ok + partial
+        // output), so it's dropped from the cache and the stats below.
+        let mut cancelled_in_flight: Option<usize> = None;
         for (pos, e_node_idx) in plan.execute_order.iter().copied().enumerate() {
             // Coarse cancel: stop scheduling further nodes. A node already
             // mid-invoke isn't interrupted (it finishes), but nothing after
@@ -185,13 +189,29 @@ impl Executor {
             };
 
             let run_time = invoke_start.elapsed().as_secs_f64();
+            // A cancel observed by the time this node returns means it was
+            // in-flight when the run was cancelled: a cancellable lambda bails
+            // with Ok and partial/no output, so a fake "success" would cache a
+            // bogus result. Report it truthfully as `Cancelled` — the error
+            // path then drops its output (so it re-runs next time).
+            let result = if self.ctx_manager.cancel.is_cancelled() {
+                Err(Error::Cancelled { func_id })
+            } else {
+                result
+            };
+            let cancelled = matches!(&result, Err(Error::Cancelled { .. }));
+            if cancelled {
+                cancelled_in_flight = Some(e_node_idx);
+            }
             let slot = &mut self.slots[e_node_idx];
             slot.run_time = run_time;
             if let Err(err) = result {
                 slot.error = Some(err);
                 slot.output_values = None;
             }
-            if let Some(progress) = progress {
+            // No `Finished` for the cancelled node — it didn't complete; the
+            // consumer would otherwise paint it executed live.
+            if !cancelled && let Some(progress) = progress {
                 let _ = progress.send(RunProgress {
                     nodes: flatten.attribution(flat_id).collect(),
                     phase: RunPhase::Finished {
@@ -207,7 +227,8 @@ impl Executor {
         }
 
         self.ctx_manager.current_node = None;
-        let mut stats = self.collect_execution_stats(program, plan, start, executed_count);
+        let mut stats =
+            self.collect_execution_stats(program, plan, start, executed_count, cancelled_in_flight);
         stats.logs = std::mem::take(&mut self.ctx_manager.logs);
         stats.cancelled = self.ctx_manager.cancel.is_cancelled();
         self.inputs = inputs;
@@ -285,6 +306,7 @@ impl Executor {
         plan: &ExecutionPlan,
         start: Instant,
         executed_count: usize,
+        cancelled_in_flight: Option<usize>,
     ) -> ExecutionStats {
         let mut executed_nodes = Vec::new();
         let mut missing_inputs = Vec::new();
@@ -292,6 +314,11 @@ impl Executor {
         let mut node_errors = Vec::new();
 
         for &idx in &plan.execute_order[..executed_count] {
+            // The node interrupted mid-invoke by a cancel didn't complete —
+            // omit it so the consumer doesn't paint it as executed.
+            if Some(idx) == cancelled_in_flight {
+                continue;
+            }
             let e = &program.e_nodes[idx];
             executed_nodes.push(ExecutedNodeStats {
                 node_id: e.id,

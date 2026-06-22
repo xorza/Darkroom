@@ -43,6 +43,8 @@ use program::{ExecutionBinding, ExecutionNode, ExecutionProgram};
 pub enum Error {
     #[error("{message}")]
     Invoke { func_id: FuncId, message: String },
+    #[error("node {func_id:?} was cancelled before completing")]
+    Cancelled { func_id: FuncId },
     #[error("Cycle detected while building execution graph at node {node_id:?}")]
     CycleDetected { node_id: NodeId },
     #[error("event lambda for node {node_id:?} panicked: {message}")]

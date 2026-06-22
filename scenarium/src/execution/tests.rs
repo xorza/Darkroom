@@ -760,6 +760,112 @@ mod behavior {
         Ok(())
     }
 
+    /// A node cancelled *mid-invoke* (the run is cancelled while its lambda
+    /// runs) must not be reported executed and must not cache its partial
+    /// output — otherwise the next run treats it as already computed. Models
+    /// "start a run, immediately cancel it": the in-flight node bails with `Ok`
+    /// but its result is bogus.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancel_mid_invoke_drops_in_flight_node_and_reruns() -> anyhow::Result<()> {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        use common::CancelToken;
+
+        use crate::async_lambda;
+        use crate::execution_stats::NodeError;
+        use crate::function::{Func, FuncLib, FuncOutput};
+        use crate::graph::{Graph, NodeId};
+
+        // Trips the cancel on its first invoke only, so the re-run completes.
+        let cancel_first = Arc::new(AtomicBool::new(true));
+        let func_lib: FuncLib = [Func {
+            id: "8400cb3a-a5d2-4fcd-a9d8-0ab4880c710f".into(),
+            name: "self_cancel".to_string(),
+            description: None,
+            category: "Debug".to_string(),
+            behavior: FuncBehavior::Pure,
+            terminal: true,
+            inputs: vec![],
+            outputs: vec![FuncOutput {
+                name: "out".to_string(),
+                data_type: DataType::Int,
+            }],
+            events: vec![],
+            required_contexts: vec![],
+            lambda: async_lambda!(
+                move |ctx, _, _, _, _, outputs| { cancel_first = Arc::clone(&cancel_first) } => {
+                    if cancel_first.swap(false, Ordering::Relaxed) {
+                        // Stand in for the user hitting Cancel while this node runs.
+                        ctx.cancel_flag().cancel();
+                    }
+                    outputs[0] = DynamicValue::Static(StaticValue::Int(7));
+                    Ok(())
+                }
+            ),
+            ..Default::default()
+        }]
+        .into();
+
+        let mut graph = Graph::default();
+        let node_id: NodeId = "acb11422-9951-4fc6-9696-53b1a6699120".into();
+        let mut node: Node = func_lib.by_name("self_cancel").unwrap().into();
+        node.id = node_id;
+        graph.add(node);
+        graph.validate();
+
+        let mut eg = ExecutionEngine::default();
+        eg.update(&graph, &func_lib);
+
+        // Run 1: the node trips the cancel mid-invoke — it must not appear as
+        // executed (it didn't complete), and the run is flagged cancelled.
+        let stats = eg
+            .execute(
+                true,
+                false,
+                Vec::<EventRef>::new(),
+                None,
+                CancelToken::new(),
+            )
+            .await?;
+        assert!(stats.cancelled, "the node cancelled the run mid-invoke");
+        assert!(
+            stats.executed_nodes.is_empty(),
+            "an in-flight cancelled node is not reported executed (no green glow)"
+        );
+        assert!(
+            matches!(
+                stats.node_errors.as_slice(),
+                [NodeError { node_id: n, error: Error::Cancelled { .. } }] if *n == node_id
+            ),
+            "the node is reported truthfully as Cancelled, not a fake success: {:?}",
+            stats.node_errors
+        );
+
+        // Run 2: a fresh token. The node's partial output was dropped, so it
+        // re-executes rather than being served from a bogus cache.
+        let stats = eg
+            .execute(
+                true,
+                false,
+                Vec::<EventRef>::new(),
+                None,
+                CancelToken::new(),
+            )
+            .await?;
+        assert!(!stats.cancelled);
+        assert_eq!(
+            stats.executed_nodes.len(),
+            1,
+            "the cancelled node re-runs next time (its output was not cached)"
+        );
+        assert!(
+            stats.cached_nodes.is_empty(),
+            "a cancelled node must not be served from cache on the next run"
+        );
+
+        Ok(())
+    }
+
     #[test]
     fn impure_node_always_invoked() -> anyhow::Result<()> {
         let mut graph = test_graph();
