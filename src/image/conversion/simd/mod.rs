@@ -70,24 +70,24 @@ pub(crate) fn get_simd_row_converter(
                     Some(convert_l_u8_to_rgb_u8_row)
                 }
                 // F32<->U8
-                (ColorFormat::RGBA_F32, ColorFormat::RGBA_U8) => Some(convert_f32_to_u8_row_4ch),
-                (ColorFormat::RGB_F32, ColorFormat::RGB_U8) => Some(convert_f32_to_u8_row_3ch),
-                (ColorFormat::L_F32, ColorFormat::L_U8) => Some(convert_f32_to_u8_row_1ch),
-                (ColorFormat::RGBA_U8, ColorFormat::RGBA_F32) => Some(convert_u8_to_f32_row_4ch),
-                (ColorFormat::RGB_U8, ColorFormat::RGB_F32) => Some(convert_u8_to_f32_row_3ch),
-                (ColorFormat::L_U8, ColorFormat::L_F32) => Some(convert_u8_to_f32_row_1ch),
+                (ColorFormat::RGBA_F32, ColorFormat::RGBA_U8) => Some(convert_f32_to_u8_bytes),
+                (ColorFormat::RGB_F32, ColorFormat::RGB_U8) => Some(convert_f32_to_u8_bytes),
+                (ColorFormat::L_F32, ColorFormat::L_U8) => Some(convert_f32_to_u8_bytes),
+                (ColorFormat::RGBA_U8, ColorFormat::RGBA_F32) => Some(convert_u8_to_f32_bytes),
+                (ColorFormat::RGB_U8, ColorFormat::RGB_F32) => Some(convert_u8_to_f32_bytes),
+                (ColorFormat::L_U8, ColorFormat::L_F32) => Some(convert_u8_to_f32_bytes),
                 // U8<->U16
-                (ColorFormat::RGBA_U8, ColorFormat::RGBA_U16) => Some(convert_u8_to_u16_row_4ch),
-                (ColorFormat::RGBA_U16, ColorFormat::RGBA_U8) => Some(convert_u16_to_u8_row_4ch),
-                (ColorFormat::RGB_U8, ColorFormat::RGB_U16) => Some(convert_u8_to_u16_row_3ch),
-                (ColorFormat::RGB_U16, ColorFormat::RGB_U8) => Some(convert_u16_to_u8_row_3ch),
-                (ColorFormat::L_U8, ColorFormat::L_U16) => Some(convert_u8_to_u16_row_1ch),
-                (ColorFormat::L_U16, ColorFormat::L_U8) => Some(convert_u16_to_u8_row_1ch),
+                (ColorFormat::RGBA_U8, ColorFormat::RGBA_U16) => Some(convert_u8_to_u16_bytes),
+                (ColorFormat::RGBA_U16, ColorFormat::RGBA_U8) => Some(convert_u16_to_u8_bytes),
+                (ColorFormat::RGB_U8, ColorFormat::RGB_U16) => Some(convert_u8_to_u16_bytes),
+                (ColorFormat::RGB_U16, ColorFormat::RGB_U8) => Some(convert_u16_to_u8_bytes),
+                (ColorFormat::L_U8, ColorFormat::L_U16) => Some(convert_u8_to_u16_bytes),
+                (ColorFormat::L_U16, ColorFormat::L_U8) => Some(convert_u16_to_u8_bytes),
                 // U16<->F32
-                (ColorFormat::L_U16, ColorFormat::L_F32) => Some(convert_u16_to_f32_row_1ch),
-                (ColorFormat::L_F32, ColorFormat::L_U16) => Some(convert_f32_to_u16_row_1ch),
-                (ColorFormat::RGB_U16, ColorFormat::RGB_F32) => Some(convert_u16_to_f32_row_3ch),
-                (ColorFormat::RGBA_U16, ColorFormat::RGBA_F32) => Some(convert_u16_to_f32_row_4ch),
+                (ColorFormat::L_U16, ColorFormat::L_F32) => Some(convert_u16_to_f32_bytes),
+                (ColorFormat::L_F32, ColorFormat::L_U16) => Some(convert_f32_to_u16_bytes),
+                (ColorFormat::RGB_U16, ColorFormat::RGB_F32) => Some(convert_u16_to_f32_bytes),
+                (ColorFormat::RGBA_U16, ColorFormat::RGBA_F32) => Some(convert_u16_to_f32_bytes),
                 _ => None,
             }
         }
@@ -106,24 +106,24 @@ pub(crate) fn get_simd_row_converter(
                 (ColorFormat::L_U8, ColorFormat::RGBA_U8) => Some(convert_l_u8_to_rgba_u8_row),
                 (ColorFormat::L_U8, ColorFormat::RGB_U8) => Some(convert_l_u8_to_rgb_u8_row),
                 // F32<->U8
-                (ColorFormat::RGBA_F32, ColorFormat::RGBA_U8) => Some(convert_f32_to_u8_row_4ch),
-                (ColorFormat::RGB_F32, ColorFormat::RGB_U8) => Some(convert_f32_to_u8_row_3ch),
-                (ColorFormat::L_F32, ColorFormat::L_U8) => Some(convert_f32_to_u8_row_1ch),
-                (ColorFormat::RGBA_U8, ColorFormat::RGBA_F32) => Some(convert_u8_to_f32_row_4ch),
-                (ColorFormat::RGB_U8, ColorFormat::RGB_F32) => Some(convert_u8_to_f32_row_3ch),
-                (ColorFormat::L_U8, ColorFormat::L_F32) => Some(convert_u8_to_f32_row_1ch),
+                (ColorFormat::RGBA_F32, ColorFormat::RGBA_U8) => Some(convert_f32_to_u8_bytes),
+                (ColorFormat::RGB_F32, ColorFormat::RGB_U8) => Some(convert_f32_to_u8_bytes),
+                (ColorFormat::L_F32, ColorFormat::L_U8) => Some(convert_f32_to_u8_bytes),
+                (ColorFormat::RGBA_U8, ColorFormat::RGBA_F32) => Some(convert_u8_to_f32_bytes),
+                (ColorFormat::RGB_U8, ColorFormat::RGB_F32) => Some(convert_u8_to_f32_bytes),
+                (ColorFormat::L_U8, ColorFormat::L_F32) => Some(convert_u8_to_f32_bytes),
                 // U8<->U16
-                (ColorFormat::RGBA_U8, ColorFormat::RGBA_U16) => Some(convert_u8_to_u16_row_4ch),
-                (ColorFormat::RGBA_U16, ColorFormat::RGBA_U8) => Some(convert_u16_to_u8_row_4ch),
-                (ColorFormat::RGB_U8, ColorFormat::RGB_U16) => Some(convert_u8_to_u16_row_3ch),
-                (ColorFormat::RGB_U16, ColorFormat::RGB_U8) => Some(convert_u16_to_u8_row_3ch),
-                (ColorFormat::L_U8, ColorFormat::L_U16) => Some(convert_u8_to_u16_row_1ch),
-                (ColorFormat::L_U16, ColorFormat::L_U8) => Some(convert_u16_to_u8_row_1ch),
+                (ColorFormat::RGBA_U8, ColorFormat::RGBA_U16) => Some(convert_u8_to_u16_bytes),
+                (ColorFormat::RGBA_U16, ColorFormat::RGBA_U8) => Some(convert_u16_to_u8_bytes),
+                (ColorFormat::RGB_U8, ColorFormat::RGB_U16) => Some(convert_u8_to_u16_bytes),
+                (ColorFormat::RGB_U16, ColorFormat::RGB_U8) => Some(convert_u16_to_u8_bytes),
+                (ColorFormat::L_U8, ColorFormat::L_U16) => Some(convert_u8_to_u16_bytes),
+                (ColorFormat::L_U16, ColorFormat::L_U8) => Some(convert_u16_to_u8_bytes),
                 // U16<->F32
-                (ColorFormat::L_U16, ColorFormat::L_F32) => Some(convert_u16_to_f32_row_1ch),
-                (ColorFormat::L_F32, ColorFormat::L_U16) => Some(convert_f32_to_u16_row_1ch),
-                (ColorFormat::RGB_U16, ColorFormat::RGB_F32) => Some(convert_u16_to_f32_row_3ch),
-                (ColorFormat::RGBA_U16, ColorFormat::RGBA_F32) => Some(convert_u16_to_f32_row_4ch),
+                (ColorFormat::L_U16, ColorFormat::L_F32) => Some(convert_u16_to_f32_bytes),
+                (ColorFormat::L_F32, ColorFormat::L_U16) => Some(convert_f32_to_u16_bytes),
+                (ColorFormat::RGB_U16, ColorFormat::RGB_F32) => Some(convert_u16_to_f32_bytes),
+                (ColorFormat::RGBA_U16, ColorFormat::RGBA_F32) => Some(convert_u16_to_f32_bytes),
                 _ => None,
             }
         }
@@ -283,93 +283,30 @@ fn convert_l_u8_to_rgb_u8_row(src: &[u8], dst: &mut [u8], width: usize) {
     }
 }
 
-// Channel-specific F32->U8 wrappers
-fn convert_f32_to_u8_row_1ch(src: &[u8], dst: &mut [u8], width: usize) {
-    let src_floats: &[f32] = bytemuck::cast_slice(&src[..width * 4]);
-    convert_f32_to_u8_row(src_floats, &mut dst[..width]);
+// Element-type converters: change the sample type, channel count unchanged.
+// Element conversion is per-sample (channel-agnostic), so one wrapper per
+// type-pair handles L/RGB/RGBA alike — the sample count is just
+// `dst.len() / size_of::<Dst>()` (each `to_row` is exactly one packed row).
+// `_width` is unused here; the shared `RowConvertFn` signature carries it for the
+// channel-changing kernels above.
+macro_rules! elem_row {
+    ($name:ident, $core:ident, $src:ty => $dst:ty) => {
+        fn $name(src: &[u8], dst: &mut [u8], _width: usize) {
+            let count = dst.len() / std::mem::size_of::<$dst>();
+            let src_typed: &[$src] =
+                bytemuck::cast_slice(&src[..count * std::mem::size_of::<$src>()]);
+            let dst_typed: &mut [$dst] = bytemuck::cast_slice_mut(dst);
+            $core(src_typed, dst_typed);
+        }
+    };
 }
 
-fn convert_f32_to_u8_row_3ch(src: &[u8], dst: &mut [u8], width: usize) {
-    let src_floats: &[f32] = bytemuck::cast_slice(&src[..width * 12]);
-    convert_f32_to_u8_row(src_floats, &mut dst[..width * 3]);
-}
-
-fn convert_f32_to_u8_row_4ch(src: &[u8], dst: &mut [u8], width: usize) {
-    let src_floats: &[f32] = bytemuck::cast_slice(&src[..width * 16]);
-    convert_f32_to_u8_row(src_floats, &mut dst[..width * 4]);
-}
-
-// Channel-specific U8->F32 wrappers
-fn convert_u8_to_f32_row_1ch(src: &[u8], dst: &mut [u8], width: usize) {
-    let dst_floats: &mut [f32] = bytemuck::cast_slice_mut(&mut dst[..width * 4]);
-    convert_u8_to_f32_row(&src[..width], dst_floats);
-}
-
-fn convert_u8_to_f32_row_3ch(src: &[u8], dst: &mut [u8], width: usize) {
-    let dst_floats: &mut [f32] = bytemuck::cast_slice_mut(&mut dst[..width * 12]);
-    convert_u8_to_f32_row(&src[..width * 3], dst_floats);
-}
-
-fn convert_u8_to_f32_row_4ch(src: &[u8], dst: &mut [u8], width: usize) {
-    let dst_floats: &mut [f32] = bytemuck::cast_slice_mut(&mut dst[..width * 16]);
-    convert_u8_to_f32_row(&src[..width * 4], dst_floats);
-}
-
-// Channel-specific U8<->U16 wrappers
-fn convert_u8_to_u16_row_1ch(src: &[u8], dst: &mut [u8], width: usize) {
-    let dst_words: &mut [u16] = bytemuck::cast_slice_mut(&mut dst[..width * 2]);
-    convert_u8_to_u16_row(&src[..width], dst_words);
-}
-
-fn convert_u8_to_u16_row_3ch(src: &[u8], dst: &mut [u8], width: usize) {
-    let dst_words: &mut [u16] = bytemuck::cast_slice_mut(&mut dst[..width * 6]);
-    convert_u8_to_u16_row(&src[..width * 3], dst_words);
-}
-
-fn convert_u8_to_u16_row_4ch(src: &[u8], dst: &mut [u8], width: usize) {
-    let dst_words: &mut [u16] = bytemuck::cast_slice_mut(&mut dst[..width * 8]);
-    convert_u8_to_u16_row(&src[..width * 4], dst_words);
-}
-
-fn convert_u16_to_u8_row_1ch(src: &[u8], dst: &mut [u8], width: usize) {
-    let src_words: &[u16] = bytemuck::cast_slice(&src[..width * 2]);
-    convert_u16_to_u8_row(src_words, &mut dst[..width]);
-}
-
-fn convert_u16_to_u8_row_3ch(src: &[u8], dst: &mut [u8], width: usize) {
-    let src_words: &[u16] = bytemuck::cast_slice(&src[..width * 6]);
-    convert_u16_to_u8_row(src_words, &mut dst[..width * 3]);
-}
-
-fn convert_u16_to_u8_row_4ch(src: &[u8], dst: &mut [u8], width: usize) {
-    let src_words: &[u16] = bytemuck::cast_slice(&src[..width * 8]);
-    convert_u16_to_u8_row(src_words, &mut dst[..width * 4]);
-}
-
-// Channel-specific U16<->F32 wrappers
-fn convert_u16_to_f32_row_1ch(src: &[u8], dst: &mut [u8], width: usize) {
-    let src_words: &[u16] = bytemuck::cast_slice(&src[..width * 2]);
-    let dst_floats: &mut [f32] = bytemuck::cast_slice_mut(&mut dst[..width * 4]);
-    convert_u16_to_f32_row(src_words, dst_floats);
-}
-
-fn convert_u16_to_f32_row_3ch(src: &[u8], dst: &mut [u8], width: usize) {
-    let src_words: &[u16] = bytemuck::cast_slice(&src[..width * 6]);
-    let dst_floats: &mut [f32] = bytemuck::cast_slice_mut(&mut dst[..width * 12]);
-    convert_u16_to_f32_row(src_words, dst_floats);
-}
-
-fn convert_u16_to_f32_row_4ch(src: &[u8], dst: &mut [u8], width: usize) {
-    let src_words: &[u16] = bytemuck::cast_slice(&src[..width * 8]);
-    let dst_floats: &mut [f32] = bytemuck::cast_slice_mut(&mut dst[..width * 16]);
-    convert_u16_to_f32_row(src_words, dst_floats);
-}
-
-fn convert_f32_to_u16_row_1ch(src: &[u8], dst: &mut [u8], width: usize) {
-    let src_floats: &[f32] = bytemuck::cast_slice(&src[..width * 4]);
-    let dst_words: &mut [u16] = bytemuck::cast_slice_mut(&mut dst[..width * 2]);
-    convert_f32_to_u16_row(src_floats, dst_words);
-}
+elem_row!(convert_f32_to_u8_bytes, convert_f32_to_u8_row, f32 => u8);
+elem_row!(convert_u8_to_f32_bytes, convert_u8_to_f32_row, u8 => f32);
+elem_row!(convert_u8_to_u16_bytes, convert_u8_to_u16_row, u8 => u16);
+elem_row!(convert_u16_to_u8_bytes, convert_u16_to_u8_row, u16 => u8);
+elem_row!(convert_u16_to_f32_bytes, convert_u16_to_f32_row, u16 => f32);
+elem_row!(convert_f32_to_u16_bytes, convert_f32_to_u16_row, f32 => u16);
 
 // =============================================================================
 // Core SIMD row implementations

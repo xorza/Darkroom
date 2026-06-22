@@ -123,7 +123,7 @@ impl Image {
         let desc = ImageDesc::new(self.desc.width, self.desc.height, color_format);
         let mut result = Image::new_black(desc)?;
 
-        convert_image(&self, &mut result)?;
+        convert_image(&self, &mut result);
 
         Ok(result)
     }

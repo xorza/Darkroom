@@ -29,24 +29,24 @@ mod tests;
 
 use rayon::prelude::*;
 
-use crate::common::error::Result;
 use crate::image::Image;
 
 use scalar::{ConversionInfo, dispatch_convert_row_scalar};
 use simd::get_simd_row_converter;
 
-/// Convert image format, using SIMD acceleration when available.
-/// This is the single entry point for all image conversions.
-pub fn convert_image(from: &Image, to: &mut Image) -> Result<()> {
-    debug_assert_eq!(from.desc.width, to.desc.width);
-    debug_assert_eq!(from.desc.height, to.desc.height);
+/// Convert `from` into `to`'s format, using SIMD acceleration when available.
+/// `from` and `to` must share dimensions; every format pair is handled (SIMD
+/// fast paths fall back to the scalar reference), so this is infallible.
+pub fn convert_image(from: &Image, to: &mut Image) {
+    assert_eq!(from.desc.width, to.desc.width);
+    assert_eq!(from.desc.height, to.desc.height);
 
     let from_fmt = from.desc.color_format;
     let to_fmt = to.desc.color_format;
 
     // Same format - nothing to do
     if from_fmt == to_fmt {
-        return Ok(());
+        return;
     }
 
     let width = from.desc.width;
@@ -78,6 +78,4 @@ pub fn convert_image(from: &Image, to: &mut Image) -> Result<()> {
                 dispatch_convert_row_scalar(from_row, to_row, width, &info);
             });
     }
-
-    Ok(())
 }
