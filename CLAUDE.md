@@ -15,7 +15,7 @@ An image-processing library with **CPU (SIMD: SSE/AVX2/NEON) and GPU (wgpu compu
 
 Six layers, bottom-up. A caller drives everything through a `ProcessingContext` and `ImageBuffer`s; ops pick a backend and the buffer transparently moves pixels between CPU and GPU.
 
-1. **Image** — `Image` + `ImageDesc` hold raw, strided, 16-byte-aligned pixel bytes; `io.rs`/`tiff.rs` do PNG/JPG/TIFF.
+1. **Image** — `Image` + `ImageDesc` hold raw, tightly-packed, 16-byte-aligned pixel bytes; `io.rs`/`tiff.rs` do PNG/JPG/TIFF.
 2. **Color/format** — `ColorFormat` (`ChannelCount` × `ChannelSize` × `ChannelType`) is the format vocabulary; `conversion/` converts between any two formats.
 3. **Processing context** — `ProcessingContext` owns the optional `GpuContext`; `ImageBuffer` abstracts CPU-vs-GPU residency via interior mutability.
 4. **GPU wrapper** — `Gpu` (device+queue), `GpuImage` (a wgpu storage buffer + desc), `Slot` (async callback handoff).
@@ -24,7 +24,7 @@ Six layers, bottom-up. A caller drives everything through a `ProcessingContext` 
 
 ### Image storage (`src/image/`)
 
-`ImageDesc` (`src/image/mod.rs:25`) = `{ width, height, stride, color_format }`; `stride` is bytes between row starts. Three constructors: `new` (4-byte aligned), `new_with_stride`, `new_packed` (no padding). `Image` (`src/image/mod.rs:36`) holds `bytes: AVec<u8, ConstAlign<ALIGNMENT>>` (16-byte aligned for SIMD) plus the `desc`. `packed()` strips stride padding (zero-copy when already packed); `with_stride()` adds 4-byte-aligned padding. Stride helpers live in `src/image/stride.rs` and return `Option`/zero-copy where the layout already matches.
+`ImageDesc` (`src/image/mod.rs:24`) = `{ width, height, color_format }` — a single `new` constructor. Pixel data is **always tightly packed**: `row_bytes() == width * bytes_per_pixel`, `size_in_bytes() == height * row_bytes()`, no inter-row padding. There is no `stride` field. `Image` (`src/image/mod.rs:36`) holds `bytes: AVec<u8, ConstAlign<ALIGNMENT>>` (16-byte aligned for SIMD) plus the `desc`. Any row alignment a GPU backend needs lives entirely inside `GpuImage` (it derives an aligned stride, pads on upload, strips on download) — see the GPU wrapper section. `src/image/stride.rs` (the `align_stride`/`strip_stride_padding_from_slice` helpers) is therefore `#[cfg(feature = "wgpu")]`.
 
 I/O (`src/image/io.rs`): PNG/JPG via the `image` crate, TIFF via `tiff.rs` (unlimited decoder for large astrophotography frames, U8/U16/U32/F32). `SUPPORTED_EXTENSIONS = ["png","jpg","jpeg","tiff","tif"]`. PNG save is U8/U16 only (no F32); JPG save needs `RGBA_U8` or `L_U8`.
 
@@ -46,7 +46,7 @@ Conversion dispatch (`src/common/conversion/mod.rs:28`): `convert_image(from, to
 
 ### GPU wrapper (`src/gpu/`, `wgpu` feature only)
 
-`Gpu` (`mod.rs:10`) = `{ device: Arc<Device>, queue: Arc<Queue> }` (Arc so it clones across threads). `new()` requests a HighPerformance adapter with 1GB buffer limits; `wait()`/`wait_async()` poll to idle. `GpuImage` (`gpu_image.rs:39`) = a `STORAGE|COPY_SRC|COPY_DST` buffer + `ImageDesc`; `from_image` uploads (re-striding, zero-copy when aligned), `to_image`/`to_image_async` download via a staging buffer + `map_async`, `clone_buffer` copies on-GPU. `ReadBuffer`/`WriteBuffer` (`gpu_image.rs:11,22`) are thin binding newtypes for shader bind groups. `Slot<T>` (`slot.rs:14`) is a lockless single-value handoff (`ArcSwapOption` + `Notify`) used by `to_image_async` to bridge the GPU map callback into async/await.
+`Gpu` (`mod.rs:10`) = `{ device: Arc<Device>, queue: Arc<Queue> }` (Arc so it clones across threads). `new()` requests a HighPerformance adapter with 1GB buffer limits; `wait()`/`wait_async()` poll to idle. `GpuImage` (`gpu_image.rs:46`) = a `STORAGE|COPY_SRC|COPY_DST` buffer + the (packed) `ImageDesc`. It owns **all** row alignment: `stride()` derives `align_stride(row_bytes)` (rows must start on a `u32` word so the WGSL `array<u32>` indexing works — a shader concern, not a buffer requirement; F32/RGBA_U8 are already aligned so this equals `row_bytes`). `from_image` uploads (padding rows out to the aligned stride, zero-copy when already aligned), `to_image`/`to_image_async` download via a staging buffer + `map_async` and **strip the padding back to a packed `Image`**, `clone_buffer` copies on-GPU. `ReadBuffer`/`WriteBuffer` (`gpu_image.rs:11,22`) are thin binding newtypes for shader bind groups. `Slot<T>` (`slot.rs:14`) is a lockless single-value handoff (`ArcSwapOption` + `Notify`) used by `to_image_async` to bridge the GPU map callback into async/await.
 
 ### Ops (`src/ops/`)
 

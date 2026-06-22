@@ -1,5 +1,7 @@
 mod io;
-mod stride;
+// Row alignment is only needed to lay rows out for the GPU storage buffers.
+#[cfg(feature = "wgpu")]
+pub(crate) mod stride;
 mod tiff;
 
 #[cfg(test)]
@@ -16,16 +18,17 @@ use crate::common::color_format::ColorFormat;
 use crate::common::conversion::convert_image;
 use crate::common::error::{Error, Result};
 
-use stride::{add_stride_padding, align_stride, strip_stride_padding_from_slice};
-
 /// 16-byte alignment for image data to enable SIMD operations and zero-copy casting to f32/f64.
 const ALIGNMENT: usize = 16;
 
+/// Image dimensions + pixel format. Pixel data is **always tightly packed**
+/// (`row_bytes == width * bytes_per_pixel`, no inter-row padding) — any row
+/// alignment a GPU backend needs lives inside [`GpuImage`](crate::gpu::gpu_image),
+/// never here.
 #[derive(Clone, Copy, Eq, PartialEq, Debug, Hash)]
 pub struct ImageDesc {
     pub width: usize,
     pub height: usize,
-    pub stride: usize,
     pub color_format: ColorFormat,
 }
 
@@ -107,32 +110,10 @@ impl Image {
             .ok_or_else(|| Error::InvalidExtension("missing extension".to_string()))?
             .to_ascii_lowercase();
 
-        // Strip stride padding if present (all formats expect tightly packed pixels).
-        // Only allocates a packed copy when stride != row_bytes (avoids full image clone).
-        let packed_image;
-        let image = if let Some(packed_bytes) = strip_stride_padding_from_slice(
-            self.bytes(),
-            self.desc.width,
-            self.desc.height,
-            self.desc.stride,
-            self.desc.color_format.byte_count(),
-        ) {
-            packed_image = Image {
-                desc: ImageDesc {
-                    stride: self.desc.row_bytes(),
-                    ..self.desc
-                },
-                bytes: packed_bytes,
-            };
-            &packed_image
-        } else {
-            self
-        };
-
         match extension.as_str() {
-            "png" => io::save_png(image, filename)?,
-            "jpeg" | "jpg" => io::save_jpg(image, filename)?,
-            "tiff" | "tif" => tiff::save_tiff(image, filename)?,
+            "png" => io::save_png(self, filename)?,
+            "jpeg" | "jpg" => io::save_jpg(self, filename)?,
+            "tiff" | "tif" => tiff::save_tiff(self, filename)?,
 
             _ => return Err(Error::InvalidExtension(extension)),
         };
@@ -147,12 +128,7 @@ impl Image {
             return Ok(self);
         }
 
-        let desc = if self.desc.is_aligned() {
-            ImageDesc::new_with_stride(self.desc.width, self.desc.height, color_format)
-        } else {
-            ImageDesc::new_packed(self.desc.width, self.desc.height, color_format)
-        };
-
+        let desc = ImageDesc::new(self.desc.width, self.desc.height, color_format);
         let mut result = Image::new_black(desc)?;
 
         convert_image(&self, &mut result)?;
@@ -162,59 +138,6 @@ impl Image {
 
     pub fn bytes_per_pixel(&self) -> u8 {
         self.desc.color_format.byte_count()
-    }
-
-    /// Returns an image with tightly packed pixel data (stride equals row bytes).
-    pub fn packed(self) -> Image {
-        if self.desc.is_packed() {
-            return self;
-        }
-        let desc = self.desc;
-        let bytes = strip_stride_padding_from_slice(
-            self.bytes(),
-            desc.width,
-            desc.height,
-            desc.stride,
-            desc.color_format.byte_count(),
-        )
-        .expect("is_packed check above guarantees stride != row_bytes");
-
-        Image {
-            desc: ImageDesc {
-                width: desc.width,
-                height: desc.height,
-                stride: desc.row_bytes(),
-                color_format: desc.color_format,
-            },
-            bytes,
-        }
-    }
-
-    /// Returns an image with 4-byte aligned stride padding applied.
-    pub fn with_stride(self) -> Image {
-        let aligned_stride = align_stride(self.desc.row_bytes());
-        if self.desc.stride == aligned_stride {
-            return self;
-        }
-
-        let desc = self.desc;
-        let bytes = add_stride_padding(
-            self.bytes,
-            desc.width,
-            desc.height,
-            aligned_stride,
-            desc.color_format.byte_count(),
-        );
-
-        Image {
-            desc: ImageDesc {
-                width: desc.width,
-                height: desc.height,
-                stride: aligned_stride,
-                color_format: desc.color_format,
-            },
-            bytes,
-        }
     }
 }
 
@@ -228,72 +151,32 @@ fn vec_to_avec(bytes: Vec<u8>) -> AVec<u8, ConstAlign<ALIGNMENT>> {
 }
 
 impl ImageDesc {
-    /// Create a new ImageDesc with aligned stride (4-byte aligned).
-    pub fn new_with_stride(width: usize, height: usize, color_format: ColorFormat) -> Self {
-        let row_bytes = width * color_format.byte_count() as usize;
-        let stride = align_stride(row_bytes);
-
+    /// Create a new (tightly packed) image descriptor.
+    pub fn new(width: usize, height: usize, color_format: ColorFormat) -> Self {
         Self {
             width,
             height,
-            stride,
             color_format,
         }
     }
 
-    /// Create a new ImageDesc with packed stride (no padding).
-    pub fn new_packed(width: usize, height: usize, color_format: ColorFormat) -> Self {
-        let stride = width * color_format.byte_count() as usize;
-
-        Self {
-            width,
-            height,
-            stride,
-            color_format,
-        }
-    }
-
+    /// Total packed byte size: `height * row_bytes`.
     pub fn size_in_bytes(&self) -> usize {
-        self.height * self.stride
+        self.height * self.row_bytes()
     }
 
-    /// Returns the number of bytes per row without padding.
+    /// Bytes per (packed) row: `width * bytes_per_pixel`.
     pub fn row_bytes(&self) -> usize {
         self.width * self.color_format.byte_count() as usize
     }
 
-    /// Returns true if stride equals row bytes (no padding).
-    pub fn is_packed(&self) -> bool {
-        self.stride == self.row_bytes()
-    }
-
-    /// Returns true if the stride is 4-byte aligned.
-    pub fn is_aligned(&self) -> bool {
-        self.stride.is_multiple_of(4)
-    }
-
-    /// Returns a new descriptor with 4-byte aligned stride.
-    pub fn with_aligned_stride(self) -> Self {
-        Self {
-            stride: align_stride(self.row_bytes()),
-            ..self
-        }
-    }
-
-    /// Validates the descriptor: positive dimensions, valid format, stride >= row bytes.
+    /// Validates the descriptor: positive dimensions, valid format.
     pub fn validate(&self) -> Result<()> {
         self.color_format.validate()?;
         if self.width == 0 || self.height == 0 {
             return Err(Error::SizeMismatch(format!(
                 "image dimensions must be non-zero, got {}x{}",
                 self.width, self.height
-            )));
-        }
-        if self.stride < self.row_bytes() {
-            return Err(Error::SizeMismatch(format!(
-                "stride {} smaller than row bytes {}",
-                self.stride,
-                self.row_bytes()
             )));
         }
         Ok(())

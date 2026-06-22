@@ -187,7 +187,7 @@ where
 
     let width = from.desc.width;
     let channels = from.desc.color_format.channel_count.channel_count() as usize;
-    let stride = from.desc.stride;
+    let stride = from.desc.row_bytes();
     let row_bytes = width * channels * size_of::<T>();
 
     let has_alpha = channels == 2 || channels == 4;
@@ -227,8 +227,8 @@ where
 #[target_feature(enable = "sse4.1")]
 unsafe fn apply_u8_gray_sse41(from: &Image, to: &mut Image, params: ContrastBrightness) {
     let width = from.desc.width;
-    let in_stride = from.desc.stride;
-    let out_stride = to.desc.stride;
+    let in_stride = from.desc.row_bytes();
+    let out_stride = to.desc.row_bytes();
     let contrast = params.contrast;
     let offset = 127.5 * (1.0 - contrast) + params.brightness * 255.0;
 
@@ -314,8 +314,8 @@ unsafe fn process_row_u8_gray_sse41(
 #[target_feature(enable = "sse4.1")]
 unsafe fn apply_u8_gray_alpha_sse41(from: &Image, to: &mut Image, params: ContrastBrightness) {
     let width = from.desc.width;
-    let in_stride = from.desc.stride;
-    let out_stride = to.desc.stride;
+    let in_stride = from.desc.row_bytes();
+    let out_stride = to.desc.row_bytes();
     let contrast = params.contrast;
     let offset = 127.5 * (1.0 - contrast) + params.brightness * 255.0;
 
@@ -408,8 +408,8 @@ unsafe fn process_row_u8_gray_alpha_sse41(
 #[target_feature(enable = "sse4.1")]
 unsafe fn apply_u8_rgb_sse41(from: &Image, to: &mut Image, params: ContrastBrightness) {
     let width = from.desc.width;
-    let in_stride = from.desc.stride;
-    let out_stride = to.desc.stride;
+    let in_stride = from.desc.row_bytes();
+    let out_stride = to.desc.row_bytes();
     let contrast = params.contrast;
     let offset = 127.5 * (1.0 - contrast) + params.brightness * 255.0;
 
@@ -507,8 +507,8 @@ unsafe fn process_row_u8_rgb_sse41(
 #[target_feature(enable = "sse4.1")]
 unsafe fn apply_u8_rgba_sse41(from: &Image, to: &mut Image, params: ContrastBrightness) {
     let width = from.desc.width;
-    let in_stride = from.desc.stride;
-    let out_stride = to.desc.stride;
+    let in_stride = from.desc.row_bytes();
+    let out_stride = to.desc.row_bytes();
     let contrast = params.contrast;
     let offset = 127.5 * (1.0 - contrast) + params.brightness * 255.0;
 
@@ -616,8 +616,8 @@ unsafe fn process_row_u8_rgba_sse41(
 #[target_feature(enable = "sse4.1")]
 unsafe fn apply_f32_gray_sse41(from: &Image, to: &mut Image, params: ContrastBrightness) {
     let width = from.desc.width;
-    let in_stride = from.desc.stride;
-    let out_stride = to.desc.stride;
+    let in_stride = from.desc.row_bytes();
+    let out_stride = to.desc.row_bytes();
     let contrast = params.contrast;
     let brightness = params.brightness;
 
@@ -681,8 +681,8 @@ unsafe fn process_row_f32_gray_sse41(
 #[target_feature(enable = "sse4.1")]
 unsafe fn apply_f32_gray_alpha_sse41(from: &Image, to: &mut Image, params: ContrastBrightness) {
     let width = from.desc.width;
-    let in_stride = from.desc.stride;
-    let out_stride = to.desc.stride;
+    let in_stride = from.desc.row_bytes();
+    let out_stride = to.desc.row_bytes();
     let contrast = params.contrast;
     let brightness = params.brightness;
 
@@ -756,8 +756,8 @@ unsafe fn process_row_f32_gray_alpha_sse41(
 #[target_feature(enable = "sse4.1")]
 unsafe fn apply_f32_rgb_sse41(from: &Image, to: &mut Image, params: ContrastBrightness) {
     let width = from.desc.width;
-    let in_stride = from.desc.stride;
-    let out_stride = to.desc.stride;
+    let in_stride = from.desc.row_bytes();
+    let out_stride = to.desc.row_bytes();
     let contrast = params.contrast;
     let brightness = params.brightness;
 
@@ -838,8 +838,8 @@ unsafe fn process_row_f32_rgb_sse41(
 #[target_feature(enable = "sse4.1")]
 unsafe fn apply_f32_rgba_sse41(from: &Image, to: &mut Image, params: ContrastBrightness) {
     let width = from.desc.width;
-    let in_stride = from.desc.stride;
-    let out_stride = to.desc.stride;
+    let in_stride = from.desc.row_bytes();
+    let out_stride = to.desc.row_bytes();
     let contrast = params.contrast;
     let brightness = params.brightness;
 
@@ -905,8 +905,8 @@ unsafe fn process_row_f32_rgba_sse41(
 #[cfg(target_arch = "aarch64")]
 unsafe fn apply_u8_gray_neon(from: &Image, to: &mut Image, params: ContrastBrightness) {
     let width = from.desc.width;
-    let in_stride = from.desc.stride;
-    let out_stride = to.desc.stride;
+    let in_stride = from.desc.row_bytes();
+    let out_stride = to.desc.row_bytes();
     let contrast = params.contrast;
     let offset = 127.5 * (1.0 - contrast) + params.brightness * 255.0;
 
@@ -990,8 +990,8 @@ unsafe fn process_row_u8_gray_neon(
 #[cfg(target_arch = "aarch64")]
 unsafe fn apply_u8_gray_alpha_neon(from: &Image, to: &mut Image, params: ContrastBrightness) {
     let width = from.desc.width;
-    let in_stride = from.desc.stride;
-    let out_stride = to.desc.stride;
+    let in_stride = from.desc.row_bytes();
+    let out_stride = to.desc.row_bytes();
     let contrast = params.contrast;
     let offset = 127.5 * (1.0 - contrast) + params.brightness * 255.0;
 
@@ -1073,8 +1073,8 @@ unsafe fn process_row_u8_gray_alpha_neon(
 #[cfg(target_arch = "aarch64")]
 unsafe fn apply_u8_rgb_neon(from: &Image, to: &mut Image, params: ContrastBrightness) {
     let width = from.desc.width;
-    let in_stride = from.desc.stride;
-    let out_stride = to.desc.stride;
+    let in_stride = from.desc.row_bytes();
+    let out_stride = to.desc.row_bytes();
     let contrast = params.contrast;
     let offset = 127.5 * (1.0 - contrast) + params.brightness * 255.0;
 
@@ -1159,8 +1159,8 @@ unsafe fn process_row_u8_rgb_neon(
 #[cfg(target_arch = "aarch64")]
 unsafe fn apply_u8_rgba_neon(from: &Image, to: &mut Image, params: ContrastBrightness) {
     let width = from.desc.width;
-    let in_stride = from.desc.stride;
-    let out_stride = to.desc.stride;
+    let in_stride = from.desc.row_bytes();
+    let out_stride = to.desc.row_bytes();
     let contrast = params.contrast;
     let offset = 127.5 * (1.0 - contrast) + params.brightness * 255.0;
 
@@ -1250,8 +1250,8 @@ unsafe fn process_row_u8_rgba_neon(
 #[cfg(target_arch = "aarch64")]
 unsafe fn apply_f32_gray_neon(from: &Image, to: &mut Image, params: ContrastBrightness) {
     let width = from.desc.width;
-    let in_stride = from.desc.stride;
-    let out_stride = to.desc.stride;
+    let in_stride = from.desc.row_bytes();
+    let out_stride = to.desc.row_bytes();
     let contrast = params.contrast;
     let brightness = params.brightness;
 
@@ -1313,8 +1313,8 @@ unsafe fn process_row_f32_gray_neon(
 #[cfg(target_arch = "aarch64")]
 unsafe fn apply_f32_gray_alpha_neon(from: &Image, to: &mut Image, params: ContrastBrightness) {
     let width = from.desc.width;
-    let in_stride = from.desc.stride;
-    let out_stride = to.desc.stride;
+    let in_stride = from.desc.row_bytes();
+    let out_stride = to.desc.row_bytes();
     let contrast = params.contrast;
     let brightness = params.brightness;
 
@@ -1385,8 +1385,8 @@ unsafe fn process_row_f32_gray_alpha_neon(
 #[cfg(target_arch = "aarch64")]
 unsafe fn apply_f32_rgb_neon(from: &Image, to: &mut Image, params: ContrastBrightness) {
     let width = from.desc.width;
-    let in_stride = from.desc.stride;
-    let out_stride = to.desc.stride;
+    let in_stride = from.desc.row_bytes();
+    let out_stride = to.desc.row_bytes();
     let contrast = params.contrast;
     let brightness = params.brightness;
 
@@ -1460,8 +1460,8 @@ unsafe fn process_row_f32_rgb_neon(
 #[cfg(target_arch = "aarch64")]
 unsafe fn apply_f32_rgba_neon(from: &Image, to: &mut Image, params: ContrastBrightness) {
     let width = from.desc.width;
-    let in_stride = from.desc.stride;
-    let out_stride = to.desc.stride;
+    let in_stride = from.desc.row_bytes();
+    let out_stride = to.desc.row_bytes();
     let contrast = params.contrast;
     let brightness = params.brightness;
 
@@ -1590,7 +1590,7 @@ mod tests {
 
             // Check alpha bytes for each pixel
             for row in 0..4 {
-                let row_start = row * input.desc.stride;
+                let row_start = row * input.desc.row_bytes();
                 for x in 0..16 {
                     let pixel_start = row_start + x * pixel_size;
                     let alpha_start = pixel_start + alpha_offset;

@@ -38,10 +38,10 @@ pub const TEST_WIDTHS: [usize; 9] = [1, 15, 16, 17, 31, 32, 33, 100, 256];
 
 /// Helper to create a test image with specific pixel pattern
 pub fn create_test_image(width: usize, height: usize, format: ColorFormat) -> Image {
-    let desc = ImageDesc::new_with_stride(width, height, format);
+    let desc = ImageDesc::new(width, height, format);
     let mut img = Image::new_black(desc).unwrap();
     let bpp = format.byte_count() as usize;
-    let stride = img.desc.stride;
+    let stride = img.desc.row_bytes();
 
     // Fill with a recognizable pattern: pixel index mod 256 for each channel
     let bytes = img.bytes_mut();
@@ -60,10 +60,10 @@ pub fn create_test_image(width: usize, height: usize, format: ColorFormat) -> Im
 
 /// Helper to create a test image with f32 values
 pub fn create_test_image_f32(width: usize, height: usize, format: ColorFormat) -> Image {
-    let desc = ImageDesc::new_with_stride(width, height, format);
+    let desc = ImageDesc::new(width, height, format);
     let mut img = Image::new_black(desc).unwrap();
     let channels = format.channel_count as usize;
-    let float_stride = img.desc.stride / 4;
+    let float_stride = img.desc.row_bytes() / 4;
 
     // Fill with normalized values
     let bytes = img.bytes_mut();
@@ -84,10 +84,10 @@ pub fn create_test_image_f32(width: usize, height: usize, format: ColorFormat) -
 
 /// Helper to create a test image with u16 values
 pub fn create_test_image_u16(width: usize, height: usize, format: ColorFormat) -> Image {
-    let desc = ImageDesc::new_with_stride(width, height, format);
+    let desc = ImageDesc::new(width, height, format);
     let mut img = Image::new_black(desc).unwrap();
     let channels = format.channel_count as usize;
-    let word_stride = img.desc.stride / 2;
+    let word_stride = img.desc.row_bytes() / 2;
 
     // Fill with pattern
     let bytes = img.bytes_mut();

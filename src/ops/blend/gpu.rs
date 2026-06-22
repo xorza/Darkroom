@@ -34,7 +34,7 @@ impl Blend {
 
         let width = src.desc.width;
         let height = src.desc.height;
-        let stride = src.desc.stride;
+        let stride = src.stride();
 
         // BlendMode is #[repr(u8)]; the shader's mode contract depends on this declared order.
         let mode_u32 = self.mode as u32;
@@ -224,7 +224,7 @@ mod tests {
 
         let pipeline = GpuBlendPipeline::new(&ctx).unwrap();
 
-        let desc = ImageDesc::new_with_stride(2, 2, ColorFormat::RGBA_U8);
+        let desc = ImageDesc::new(2, 2, ColorFormat::RGBA_U8);
 
         // White source RGB, same alpha as dst
         let mut src_data = vec![255u8; 16];

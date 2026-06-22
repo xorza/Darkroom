@@ -42,8 +42,8 @@ pub fn convert_image(from: &Image, to: &mut Image) -> Result<()> {
     }
 
     let width = from.desc.width;
-    let from_stride = from.desc.stride;
-    let to_stride = to.desc.stride;
+    let from_stride = from.desc.row_bytes();
+    let to_stride = to.desc.row_bytes();
 
     let from_bytes = from.bytes();
     let to_bytes = to.bytes_mut();

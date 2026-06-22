@@ -5,6 +5,7 @@ use wgpu::{BufferAsyncError, util::DeviceExt};
 
 use crate::common::error::{Error, Result};
 use crate::gpu::Gpu;
+use crate::image::stride::{align_stride, strip_stride_padding_from_slice};
 use crate::image::{Image, ImageDesc};
 
 /// Wrapper for read-only buffer access.
@@ -35,6 +36,13 @@ impl WriteBuffer<'_> {
 }
 
 /// Image data stored on the GPU as a buffer.
+///
+/// `desc` is the packed logical layout (shared with the CPU side). The buffer's
+/// per-row byte stride is *derived* ([`GpuImage::stride`]): `row_bytes` rounded
+/// up to a 4-byte boundary so the WGSL shaders can address rows as `array<u32>`.
+/// Storage buffers impose no row alignment themselves (that's a texture rule), so
+/// this only ever exceeds `row_bytes` for narrow U8/U16 formats; F32 rows are
+/// already word-aligned. Uploads add the padding, downloads strip it.
 #[derive(Debug)]
 pub struct GpuImage {
     pub(crate) buffer: wgpu::Buffer,
@@ -42,21 +50,26 @@ pub struct GpuImage {
 }
 
 impl GpuImage {
-    /// Creates a new GPU image from CPU image data.
+    /// The buffer's per-row byte stride: `row_bytes` aligned up to 4 bytes.
+    pub(crate) fn stride(&self) -> usize {
+        align_stride(self.desc.row_bytes())
+    }
+
+    /// Creates a new GPU image from (packed) CPU image data.
     pub fn from_image(ctx: &Gpu, image: &Image) -> Self {
-        let desc = image.desc.with_aligned_stride();
-        let bytes: Cow<[u8]> = if image.desc.stride == desc.stride {
-            // Already aligned — zero-copy borrow
+        let desc = image.desc;
+        let stride = align_stride(desc.row_bytes());
+        let row_bytes = desc.row_bytes();
+        let bytes: Cow<[u8]> = if stride == row_bytes {
+            // Packed row already lands on a 4-byte boundary — zero-copy borrow.
             Cow::Borrowed(image.bytes())
         } else {
-            // Need to re-stride: copy pixel rows with new aligned stride (no full image clone)
+            // Pad each row out to the aligned stride (no full image clone).
             let src = image.bytes();
-            let src_stride = image.desc.stride;
-            let row_bytes = image.desc.row_bytes();
-            let mut buf = vec![0u8; desc.size_in_bytes()];
+            let mut buf = vec![0u8; stride * desc.height];
             for y in 0..desc.height {
-                buf[y * desc.stride..y * desc.stride + row_bytes]
-                    .copy_from_slice(&src[y * src_stride..y * src_stride + row_bytes]);
+                buf[y * stride..y * stride + row_bytes]
+                    .copy_from_slice(&src[y * row_bytes..y * row_bytes + row_bytes]);
             }
             Cow::Owned(buf)
         };
@@ -74,10 +87,10 @@ impl GpuImage {
         Self { buffer, desc }
     }
 
-    /// Creates an empty GPU image with the given descriptor.
+    /// Creates an empty GPU image with the given (packed) descriptor.
     pub fn new_empty(ctx: &Gpu, desc: ImageDesc) -> Self {
-        let desc = desc.with_aligned_stride();
-        let size = desc.size_in_bytes() as u64;
+        let stride = align_stride(desc.row_bytes());
+        let size = (stride * desc.height) as u64;
 
         let buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("gpu_image_buffer"),
@@ -91,9 +104,28 @@ impl GpuImage {
         Self { buffer, desc }
     }
 
+    /// Bytes occupied by the (row-aligned) GPU buffer.
+    fn buffer_size(&self) -> u64 {
+        (self.stride() * self.desc.height) as u64
+    }
+
+    /// Builds a packed CPU image from a freshly downloaded (row-aligned) buffer.
+    fn to_packed_image(&self, bytes: Vec<u8>) -> Result<Image> {
+        match strip_stride_padding_from_slice(
+            &bytes,
+            self.desc.width,
+            self.desc.height,
+            self.stride(),
+            self.desc.color_format.byte_count(),
+        ) {
+            Some(packed) => Image::new_with_data(self.desc, packed.to_vec()),
+            None => Image::new_with_data(self.desc, bytes),
+        }
+    }
+
     /// Downloads GPU image data to CPU.
     pub fn to_image(&self, ctx: &Gpu) -> Result<Image> {
-        let size = self.desc.size_in_bytes() as u64;
+        let size = self.buffer_size();
 
         let staging_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("gpu_image_staging"),
@@ -131,7 +163,8 @@ impl GpuImage {
         drop(data);
         staging_buffer.unmap();
 
-        Image::new_with_data(self.desc, bytes)
+        // Strip the GPU buffer's row alignment so the CPU image is packed.
+        self.to_packed_image(bytes)
     }
 
     /// Downloads GPU image data to CPU asynchronously.
@@ -140,7 +173,7 @@ impl GpuImage {
     /// `ctx.wait_async()`) for the download to complete. The polling can happen
     /// from another thread - the callback will fire when polled, waking up this future.
     pub async fn to_image_async(&self, ctx: &Gpu) -> Result<Image> {
-        let size = self.desc.size_in_bytes() as u64;
+        let size = self.buffer_size();
 
         let staging_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("gpu_image_staging"),
@@ -177,12 +210,13 @@ impl GpuImage {
         drop(data);
         staging_buffer.unmap();
 
-        Image::new_with_data(self.desc, bytes)
+        // Strip the GPU buffer's row alignment so the CPU image is packed.
+        self.to_packed_image(bytes)
     }
 
     /// Creates a copy of this GPU image with a new buffer.
     pub fn clone_buffer(&self, ctx: &Gpu) -> Self {
-        let size = self.desc.size_in_bytes() as u64;
+        let size = self.buffer_size();
 
         let buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("gpu_image_buffer"),

@@ -31,7 +31,7 @@ impl ContrastBrightness {
 
         let width = input.desc.width;
         let height = input.desc.height;
-        let stride = input.desc.stride;
+        let stride = input.stride();
 
         let uniform_params = Params {
             contrast: self.contrast,
@@ -203,12 +203,12 @@ mod tests {
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
 
-        let desc = ImageDesc::new_with_stride(4, 4, ColorFormat::RGBA_U8);
-        let mut input_data = vec![0u8; desc.stride * desc.height];
+        let desc = ImageDesc::new(4, 4, ColorFormat::RGBA_U8);
+        let mut input_data = vec![0u8; desc.row_bytes() * desc.height];
         // Set specific alpha values
         for y in 0..4usize {
             for x in 0..4usize {
-                let idx = y * desc.stride + x * 4;
+                let idx = y * desc.row_bytes() + x * 4;
                 input_data[idx] = 100; // R
                 input_data[idx + 1] = 150; // G
                 input_data[idx + 2] = 200; // B
@@ -230,7 +230,7 @@ mod tests {
         // Check alpha is preserved
         for y in 0..4usize {
             for x in 0..4usize {
-                let idx = y * desc.stride + x * 4;
+                let idx = y * desc.row_bytes() + x * 4;
                 let expected_alpha = ((x + y * 4) * 16) as u8;
                 assert_eq!(
                     output_cpu.bytes()[idx + 3],
@@ -518,12 +518,12 @@ mod tests {
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
 
-        let desc = ImageDesc::new_with_stride(4, 4, ColorFormat::LA_U8);
-        let mut input_data = vec![0u8; desc.stride * desc.height];
+        let desc = ImageDesc::new(4, 4, ColorFormat::LA_U8);
+        let mut input_data = vec![0u8; desc.row_bytes() * desc.height];
         // Set specific alpha values
         for y in 0..4usize {
             for x in 0..4usize {
-                let idx = y * desc.stride + x * 2;
+                let idx = y * desc.row_bytes() + x * 2;
                 input_data[idx] = 100; // Gray
                 input_data[idx + 1] = ((x + y * 4) * 16) as u8; // A - unique per pixel
             }
@@ -543,7 +543,7 @@ mod tests {
         // Check alpha is preserved
         for y in 0..4usize {
             for x in 0..4usize {
-                let idx = y * desc.stride + x * 2;
+                let idx = y * desc.row_bytes() + x * 2;
                 let expected_alpha = ((x + y * 4) * 16) as u8;
                 assert_eq!(
                     output_cpu.bytes()[idx + 1],
@@ -562,12 +562,12 @@ mod tests {
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
 
-        let desc = ImageDesc::new_with_stride(4, 4, ColorFormat::RGBA_F32);
-        let mut input_data = vec![0u8; desc.stride * desc.height];
+        let desc = ImageDesc::new(4, 4, ColorFormat::RGBA_F32);
+        let mut input_data = vec![0u8; desc.row_bytes() * desc.height];
         // Set specific alpha values
         for y in 0..4usize {
             for x in 0..4usize {
-                let idx = y * desc.stride + x * 16;
+                let idx = y * desc.row_bytes() + x * 16;
                 // R, G, B = 0.5
                 let rgb_bytes = 0.5f32.to_le_bytes();
                 input_data[idx..idx + 4].copy_from_slice(&rgb_bytes);
@@ -594,7 +594,7 @@ mod tests {
         // Check alpha is preserved
         for y in 0..4usize {
             for x in 0..4usize {
-                let idx = y * desc.stride + x * 16;
+                let idx = y * desc.row_bytes() + x * 16;
                 let expected_alpha = (x as f32 + y as f32 * 4.0) / 16.0;
                 let out_alpha = f32::from_le_bytes([
                     output_cpu.bytes()[idx + 12],

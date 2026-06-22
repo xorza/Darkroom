@@ -59,8 +59,8 @@ impl Transform {
             input_height: input_desc.height as u32,
             output_width: output_desc.width as u32,
             output_height: output_desc.height as u32,
-            input_stride: input_desc.stride as u32,
-            output_stride: output_desc.stride as u32,
+            input_stride: input.stride() as u32,
+            output_stride: output.stride() as u32,
             filter_mode: match self.filter {
                 FilterMode::Nearest => 0,
                 FilterMode::Bilinear => 1,
@@ -193,8 +193,8 @@ mod tests {
         let output_cpu = output.to_image(&ctx).unwrap();
 
         // With identity transform, output should match input
-        let input_packed = input_cpu.packed();
-        let output_packed = output_cpu.packed();
+        let input_packed = input_cpu;
+        let output_packed = output_cpu;
         assert_eq!(input_packed.bytes(), output_packed.bytes());
     }
 
@@ -212,7 +212,7 @@ mod tests {
         // Create larger output for 2x scale
         let output_format =
             ColorFormat::from((ChannelCount::Rgba, ChannelSize::_8bit, ChannelType::UInt));
-        let output_desc = ImageDesc::new_with_stride(122, 76, output_format);
+        let output_desc = ImageDesc::new(122, 76, output_format);
         let mut output = GpuImage::new_empty(&ctx, output_desc);
 
         let transform = Transform::new().scale(Vec2::new(2.0, 2.0));
@@ -265,7 +265,7 @@ mod tests {
         // Scale up with nearest neighbor
         let output_format =
             ColorFormat::from((ChannelCount::Rgba, ChannelSize::_8bit, ChannelType::UInt));
-        let output_desc = ImageDesc::new_with_stride(122, 76, output_format);
+        let output_desc = ImageDesc::new(122, 76, output_format);
 
         let mut output_nearest = GpuImage::new_empty(&ctx, output_desc);
         let transform_nearest = Transform::new()
@@ -285,8 +285,8 @@ mod tests {
 
         // Results should be different due to different filtering
         // (though this isn't guaranteed for all inputs)
-        let nearest_packed = nearest_cpu.packed();
-        let bilinear_packed = bilinear_cpu.packed();
+        let nearest_packed = nearest_cpu;
+        let bilinear_packed = bilinear_cpu;
 
         // At minimum, both should have produced valid output
         assert!(nearest_packed.bytes().iter().any(|&b| b != 0));
@@ -502,7 +502,7 @@ mod tests {
             let height = input_cpu.desc.height;
 
             // Create output with same dimensions
-            let output_desc = ImageDesc::new_with_stride(width / 2, height / 2, format);
+            let output_desc = ImageDesc::new(width / 2, height / 2, format);
 
             let input = GpuImage::from_image(&ctx, &input_cpu);
             let mut output = GpuImage::new_empty(&ctx, output_desc);

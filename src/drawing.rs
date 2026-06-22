@@ -38,7 +38,7 @@ pub fn draw_circle(image: &mut Image, center: Vec2, radius: f32, color: Color, t
     let width = desc.width;
     let height = desc.height;
     let channels = desc.color_format.channel_count as usize;
-    let stride = desc.stride / 4; // stride in f32 elements
+    let stride = desc.row_bytes() / 4; // stride in f32 elements
 
     let pixels: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
 
@@ -83,7 +83,7 @@ pub fn draw_dot(image: &mut Image, center: Vec2, radius: f32, color: Color) {
     let width = desc.width;
     let height = desc.height;
     let channels = desc.color_format.channel_count as usize;
-    let stride = desc.stride / 4;
+    let stride = desc.row_bytes() / 4;
 
     let pixels: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
 
@@ -157,7 +157,7 @@ pub fn draw_line(image: &mut Image, start: Vec2, end: Vec2, color: Color, thickn
     let width = desc.width;
     let height = desc.height;
     let channels = desc.color_format.channel_count as usize;
-    let stride = desc.stride / 4;
+    let stride = desc.row_bytes() / 4;
 
     let pixels: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
 
@@ -277,7 +277,7 @@ mod tests {
         } else {
             ColorFormat::RGB_F32
         };
-        let desc = ImageDesc::new_packed(width, height, format);
+        let desc = ImageDesc::new(width, height, format);
         Image::new_black(desc).unwrap()
     }
 

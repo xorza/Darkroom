@@ -33,7 +33,7 @@ pub(crate) fn load_png_jpeg<P: AsRef<Path>>(filename: P) -> Result<Image> {
     };
 
     let color_format = ColorFormat::from((channel_count, channel_size, channel_type));
-    let desc = ImageDesc::new_packed(img.width() as usize, img.height() as usize, color_format);
+    let desc = ImageDesc::new(img.width() as usize, img.height() as usize, color_format);
     let bytes = vec_to_avec(img.into_bytes());
 
     Ok(Image { desc, bytes })
@@ -88,15 +88,13 @@ pub(crate) fn load_tiff<P: AsRef<Path>>(filename: P) -> Result<Image> {
 
     let channel_size = ChannelSize::from_bit_count(channel_bits)?;
     let color_format = ColorFormat::from((channel_count, channel_size, channel_type));
-    let desc = ImageDesc::new_packed(w as usize, h as usize, color_format);
+    let desc = ImageDesc::new(w as usize, h as usize, color_format);
     let bytes = vec_to_avec(bytes);
 
     Ok(Image { desc, bytes })
 }
 
 pub(crate) fn save_jpg<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()> {
-    debug_assert!(image.desc.is_packed(), "Image must be packed before saving");
-
     if image.desc.color_format.channel_type != ChannelType::UInt {
         return Err(Error::UnsupportedFormat(format!(
             "JPEG channel type: {:?}",
@@ -138,8 +136,6 @@ pub(crate) fn save_jpg<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
 }
 
 pub(crate) fn save_png<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()> {
-    debug_assert!(image.desc.is_packed(), "Image must be packed before saving");
-
     if image.desc.color_format.channel_type != ChannelType::UInt {
         return Err(Error::UnsupportedFormat(format!(
             "PNG channel type: {:?}",

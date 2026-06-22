@@ -32,27 +32,32 @@ pub struct ImageBuffer {
 
 impl ImageBuffer {
     /// Creates a new ImageBuffer from a CPU image.
+    ///
+    /// CPU storage is always tightly packed; any row-stride alignment a GPU
+    /// backend needs is added by [`GpuImage`] on upload (and stripped on
+    /// download), so it never leaks into the CPU representation.
     pub fn from_cpu(image: Image) -> Self {
-        let image = image.with_stride();
         Self {
             desc: image.desc,
             storage: AtomicRefCell::new(Some(Storage::Cpu(image))),
         }
     }
 
-    /// Creates a new ImageBuffer from a GPU image.
+    /// Creates a new ImageBuffer from a GPU image. The buffer's descriptor is
+    /// the packed logical layout; the `GpuImage` keeps its own aligned stride.
     #[cfg(feature = "wgpu")]
     pub(crate) fn from_gpu(image: GpuImage) -> Self {
+        let d = image.desc;
         Self {
-            desc: image.desc,
+            desc: ImageDesc::new(d.width, d.height, d.color_format),
             storage: AtomicRefCell::new(Some(Storage::Gpu(image))),
         }
     }
 
-    /// Creates an empty ImageBuffer with no storage, just a descriptor.
+    /// Creates an empty ImageBuffer with no storage, just a (packed) descriptor.
     pub fn new_empty(desc: ImageDesc) -> Self {
         Self {
-            desc: desc.with_aligned_stride(),
+            desc: ImageDesc::new(desc.width, desc.height, desc.color_format),
             storage: AtomicRefCell::new(None),
         }
     }

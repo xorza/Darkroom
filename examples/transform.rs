@@ -22,10 +22,8 @@ fn main() {
     );
 
     // Scale down 50%
-    let mut output = GpuImage::new_empty(
-        &ctx,
-        ImageDesc::new_with_stride(256, 256, input_cpu.desc.color_format),
-    );
+    let mut output =
+        GpuImage::new_empty(&ctx, ImageDesc::new(256, 256, input_cpu.desc.color_format));
     Transform::new()
         .scale(Vec2::new(0.5, 0.5))
         .apply_gpu(&ctx, &pipeline, &input, &mut output);
@@ -33,10 +31,8 @@ fn main() {
     save_image(&output_cpu, "transform_scale_down.png");
 
     // Scale up 150%
-    let mut output = GpuImage::new_empty(
-        &ctx,
-        ImageDesc::new_with_stride(768, 768, input_cpu.desc.color_format),
-    );
+    let mut output =
+        GpuImage::new_empty(&ctx, ImageDesc::new(768, 768, input_cpu.desc.color_format));
     Transform::new()
         .scale(Vec2::new(1.5, 1.5))
         .apply_gpu(&ctx, &pipeline, &input, &mut output);
@@ -66,10 +62,8 @@ fn main() {
     save_image(&output_cpu, "transform_rotate_90.png");
 
     // Combined: scale + rotate + translate
-    let mut output = GpuImage::new_empty(
-        &ctx,
-        ImageDesc::new_with_stride(800, 600, input_cpu.desc.color_format),
-    );
+    let mut output =
+        GpuImage::new_empty(&ctx, ImageDesc::new(800, 600, input_cpu.desc.color_format));
     Transform::new()
         .scale(Vec2::new(0.7, 0.7))
         .rotate(PI / 6.0) // 30 degrees
@@ -118,7 +112,7 @@ fn main() {
     // Compare filter modes: nearest vs bilinear on upscale
     let mut output_nearest = GpuImage::new_empty(
         &ctx,
-        ImageDesc::new_with_stride(1024, 1024, input_cpu.desc.color_format),
+        ImageDesc::new(1024, 1024, input_cpu.desc.color_format),
     );
     Transform::new()
         .scale(Vec2::new(2.0, 2.0))
@@ -129,7 +123,7 @@ fn main() {
 
     let mut output_bilinear = GpuImage::new_empty(
         &ctx,
-        ImageDesc::new_with_stride(1024, 1024, input_cpu.desc.color_format),
+        ImageDesc::new(1024, 1024, input_cpu.desc.color_format),
     );
     Transform::new()
         .scale(Vec2::new(2.0, 2.0))
