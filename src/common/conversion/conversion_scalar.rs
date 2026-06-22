@@ -192,28 +192,10 @@ pub(crate) fn convert_row_scalar<From, To>(
         let src = &from_row[x * from_channels..];
         let dst = &mut to_row[x * to_channels..];
 
+        // Channel counts are always 1 (L), 3 (RGB), or 4 (RGBA).
         match (to_channels, from_channels) {
             (1, 1) => dst[0] = src[0].convert(),
-            (1, 2) => dst[0] = src[0].convert(),
-            (1, 3) => dst[0] = From::luminance(src[0], src[1], src[2]).convert(),
-            (1, 4) => dst[0] = From::luminance(src[0], src[1], src[2]).convert(),
-
-            (2, 1) => {
-                dst[0] = src[0].convert();
-                dst[1] = To::opaque_alpha();
-            }
-            (2, 2) => {
-                dst[0] = src[0].convert();
-                dst[1] = src[1].convert();
-            }
-            (2, 3) => {
-                dst[0] = From::luminance(src[0], src[1], src[2]).convert();
-                dst[1] = To::opaque_alpha();
-            }
-            (2, 4) => {
-                dst[0] = From::luminance(src[0], src[1], src[2]).convert();
-                dst[1] = src[3].convert();
-            }
+            (1, 3) | (1, 4) => dst[0] = From::luminance(src[0], src[1], src[2]).convert(),
 
             (3, 1) => {
                 let v = src[0].convert();
@@ -221,18 +203,7 @@ pub(crate) fn convert_row_scalar<From, To>(
                 dst[1] = v;
                 dst[2] = v;
             }
-            (3, 2) => {
-                let v = src[0].convert();
-                dst[0] = v;
-                dst[1] = v;
-                dst[2] = v;
-            }
-            (3, 3) => {
-                dst[0] = src[0].convert();
-                dst[1] = src[1].convert();
-                dst[2] = src[2].convert();
-            }
-            (3, 4) => {
+            (3, 3) | (3, 4) => {
                 dst[0] = src[0].convert();
                 dst[1] = src[1].convert();
                 dst[2] = src[2].convert();
@@ -244,13 +215,6 @@ pub(crate) fn convert_row_scalar<From, To>(
                 dst[1] = v;
                 dst[2] = v;
                 dst[3] = To::opaque_alpha();
-            }
-            (4, 2) => {
-                let v = src[0].convert();
-                dst[0] = v;
-                dst[1] = v;
-                dst[2] = v;
-                dst[3] = src[1].convert();
             }
             (4, 3) => {
                 dst[0] = src[0].convert();
