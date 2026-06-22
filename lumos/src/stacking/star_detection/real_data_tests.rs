@@ -29,7 +29,6 @@ fn test_detect_rho_opiuchi() {
 
     let img = imaginarium::Image::read_file(&image_path)
         .expect("Failed to load image")
-        .packed()
         .convert(ColorFormat::L_F32)
         .expect("Failed to convert to grayscale");
 
@@ -75,7 +74,6 @@ fn test_detect_rho_opiuchi() {
     // Load original image for visualization (RGB_F32 for drawing functions)
     let mut output_img = imaginarium::Image::read_file(&image_path)
         .expect("Failed to load image")
-        .packed()
         .convert(ColorFormat::RGB_F32)
         .expect("Failed to convert to RGB_F32");
 
@@ -135,7 +133,6 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
 
     let img = imaginarium::Image::read_file(&image_path)
         .expect("Failed to load image")
-        .packed()
         .convert(ColorFormat::L_F32)
         .expect("Failed to convert to grayscale");
 
@@ -296,7 +293,6 @@ fn quick_bench_detect_rho_opiuchi(b: quickbench::Bencher) {
     // Preload image outside of benchmark loop
     let img = imaginarium::Image::read_file(&image_path)
         .expect("Failed to load image")
-        .packed()
         .convert(ColorFormat::L_F32)
         .expect("Failed to convert to grayscale");
 

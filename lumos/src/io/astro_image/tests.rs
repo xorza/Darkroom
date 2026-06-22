@@ -144,7 +144,7 @@ fn test_load_full_example_fits() {
 
 #[test]
 fn test_from_image_no_stride_padding() {
-    let desc = ImageDesc::new_with_stride(3, 2, ColorFormat::L_F32);
+    let desc = ImageDesc::new(3, 2, ColorFormat::L_F32);
     let pixels: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
     let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
     let image = Image::new_with_data(desc, bytes).unwrap();
@@ -155,53 +155,6 @@ fn test_from_image_no_stride_padding() {
     assert_eq!(astro.height(), 2);
     assert_eq!(astro.channels(), 1);
     assert_eq!(astro.channel(0).pixels(), &pixels[..]);
-}
-
-#[test]
-fn test_from_image_rgb_with_stride_padding() {
-    // Non-packed RGB_F32 (2 f32 trailing pad/row, stride > row bytes) — exercises the strided
-    // From<Image> branch that manually indexes past the padding.
-    let (w, h) = (2, 2);
-    let row_f32 = w * 3;
-    let stride_f32 = row_f32 + 2;
-    let row_values = [
-        [1.0, 2.0, 3.0, 4.0, 5.0, 6.0], // y=0: px0 RGB, px1 RGB
-        [7.0, 8.0, 9.0, 10.0, 11.0, 12.0],
-    ];
-    let mut data = vec![0.0f32; stride_f32 * h];
-    for (y, row) in row_values.iter().enumerate() {
-        data[y * stride_f32..y * stride_f32 + row_f32].copy_from_slice(row);
-    }
-
-    let mut desc = ImageDesc::new_packed(w, h, ColorFormat::RGB_F32);
-    desc.stride = stride_f32 * std::mem::size_of::<f32>();
-    assert!(!desc.is_packed());
-    let image = Image::new_with_data(desc, bytemuck::cast_slice(&data).to_vec()).unwrap();
-
-    let astro: AstroImage = image.into();
-    assert_eq!(astro.channel(0).pixels(), &[1.0, 4.0, 7.0, 10.0]); // R
-    assert_eq!(astro.channel(1).pixels(), &[2.0, 5.0, 8.0, 11.0]); // G
-    assert_eq!(astro.channel(2).pixels(), &[3.0, 6.0, 9.0, 12.0]); // B
-}
-
-#[test]
-fn test_from_image_gray_with_stride_padding() {
-    // Non-packed L_F32 (1 f32 trailing pad/row) — exercises the strided L branch.
-    let (w, h) = (3, 2);
-    let stride_f32 = w + 1;
-    let row_values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
-    let mut data = vec![0.0f32; stride_f32 * h];
-    for (y, row) in row_values.iter().enumerate() {
-        data[y * stride_f32..y * stride_f32 + w].copy_from_slice(row);
-    }
-
-    let mut desc = ImageDesc::new_packed(w, h, ColorFormat::L_F32);
-    desc.stride = stride_f32 * std::mem::size_of::<f32>();
-    assert!(!desc.is_packed());
-    let image = Image::new_with_data(desc, bytemuck::cast_slice(&data).to_vec()).unwrap();
-
-    let astro: AstroImage = image.into();
-    assert_eq!(astro.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
 }
 
 #[test]
@@ -283,7 +236,7 @@ fn test_roundtrip_astro_to_image_to_astro() {
 
 #[test]
 fn test_image_rgba_to_astro_drops_alpha() {
-    let desc = ImageDesc::new_with_stride(2, 1, ColorFormat::RGBA_F32);
+    let desc = ImageDesc::new(2, 1, ColorFormat::RGBA_F32);
     let pixels: Vec<f32> = vec![1.0, 0.0, 0.0, 0.5, 0.0, 1.0, 0.0, 1.0];
     let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
     let image = Image::new_with_data(desc, bytes).unwrap();
@@ -301,7 +254,7 @@ fn test_image_rgba_to_astro_drops_alpha() {
 
 #[test]
 fn test_image_gray_alpha_to_astro_drops_alpha() {
-    let desc = ImageDesc::new_with_stride(2, 1, ColorFormat::LA_F32);
+    let desc = ImageDesc::new(2, 1, ColorFormat::LA_F32);
     let pixels: Vec<f32> = vec![0.5, 0.8, 0.9, 1.0];
     let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
     let image = Image::new_with_data(desc, bytes).unwrap();

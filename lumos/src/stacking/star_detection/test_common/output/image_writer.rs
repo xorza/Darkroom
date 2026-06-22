@@ -22,7 +22,7 @@ pub fn output_path(base: &Path) -> std::path::PathBuf {
 /// Matches [`to_gray_image`]'s mapping so a comparison overlay reads at the same brightness as the
 /// `_input` image it sits beside.
 pub fn gray_to_rgb_image(pixels: &[f32], width: usize, height: usize) -> Image {
-    let desc = ImageDesc::new_packed(width, height, ColorFormat::RGB_F32);
+    let desc = ImageDesc::new(width, height, ColorFormat::RGB_F32);
     let rgb_pixels: Vec<f32> = pixels
         .iter()
         .flat_map(|&p| {
@@ -39,7 +39,7 @@ pub fn gray_to_rgb_image_stretched(pixels: &[f32], width: usize, height: usize) 
     let max = pixels.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     let range = (max - min).max(1e-10);
 
-    let desc = ImageDesc::new_packed(width, height, ColorFormat::RGB_F32);
+    let desc = ImageDesc::new(width, height, ColorFormat::RGB_F32);
     let rgb_pixels: Vec<f32> = pixels
         .iter()
         .flat_map(|&p| {

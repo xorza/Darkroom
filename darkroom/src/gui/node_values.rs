@@ -75,23 +75,9 @@ fn upload_preview(ui: &Ui, image: RawImage) -> Option<ImageHandle> {
     if desc.color_format != ColorFormat::RGBA_U8 {
         return None;
     }
-    let row = desc.width * 4;
-    // A sub-row stride would overrun on the per-row slice below — reject
-    // rather than panic on a malformed image from the worker.
-    if desc.stride < row {
-        return None;
-    }
-    let bytes = image.into_bytes();
-    let pixels = if desc.stride == row {
-        bytes
-    } else {
-        let mut packed = Vec::with_capacity(row * desc.height);
-        for y in 0..desc.height {
-            packed.extend_from_slice(&bytes[y * desc.stride..y * desc.stride + row]);
-        }
-        packed
-    };
-    if pixels.len() != row * desc.height {
+    // imaginarium images are tightly packed, so the bytes are ready to upload.
+    let pixels = image.into_bytes();
+    if pixels.len() != desc.row_bytes() * desc.height {
         return None;
     }
     let handle = ui.register_image(PalImage::from_rgba8(

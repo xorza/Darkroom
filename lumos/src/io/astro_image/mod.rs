@@ -612,7 +612,7 @@ impl From<&AstroImage> for Image {
             }
         };
 
-        let desc = ImageDesc::new_with_stride(width, height, color_format);
+        let desc = ImageDesc::new(width, height, color_format);
         Image::new_with_data(desc, bytes).expect("Failed to create Image")
     }
 }
@@ -639,51 +639,17 @@ fn astro_from_f32_image(image: &Image) -> AstroImage {
     let desc = image.desc;
     let width = desc.width;
     let height = desc.height;
-    let stride_f32 = desc.stride / std::mem::size_of::<f32>();
-    let bytes = image.bytes();
+    // imaginarium images are always tightly packed, so the bytes are a plain
+    // `width*height*channels` f32 slice with no row padding to skip.
+    let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
 
     let pixel_data = if desc.color_format == ColorFormat::L_F32 {
-        let mut data = vec![0.0f32; width * height];
-        if desc.is_packed() {
-            let pixels: &[f32] = bytemuck::cast_slice(bytes);
-            data.copy_from_slice(pixels);
-        } else {
-            let row_bytes = width * std::mem::size_of::<f32>();
-            let stride = desc.stride;
-            data.par_chunks_mut(width).enumerate().for_each(|(y, row)| {
-                let src_offset = y * stride;
-                let src_row: &[f32] =
-                    bytemuck::cast_slice(&bytes[src_offset..src_offset + row_bytes]);
-                row.copy_from_slice(src_row);
-            });
-        }
-        PixelData::L(Buffer2::new(width, height, data))
-    } else if desc.is_packed() {
-        let pixels: &[f32] = bytemuck::cast_slice(bytes);
+        PixelData::L(Buffer2::new(width, height, pixels.to_vec()))
+    } else {
         let mut r: Buffer2<f32> = Buffer2::new_default(width, height);
         let mut g: Buffer2<f32> = Buffer2::new_default(width, height);
         let mut b: Buffer2<f32> = Buffer2::new_default(width, height);
         deinterleave_rgb(pixels, r.pixels_mut(), g.pixels_mut(), b.pixels_mut());
-        PixelData::Rgb([r, g, b])
-    } else {
-        let pixels: &[f32] = bytemuck::cast_slice(bytes);
-        let mut r: Buffer2<f32> = Buffer2::new_default(width, height);
-        let mut g: Buffer2<f32> = Buffer2::new_default(width, height);
-        let mut b: Buffer2<f32> = Buffer2::new_default(width, height);
-        r.pixels_mut()
-            .par_chunks_mut(width)
-            .zip(g.pixels_mut().par_chunks_mut(width))
-            .zip(b.pixels_mut().par_chunks_mut(width))
-            .enumerate()
-            .for_each(|(y, ((r_row, g_row), b_row))| {
-                let row_start = y * stride_f32;
-                for x in 0..width {
-                    let src_idx = row_start + x * 3;
-                    r_row[x] = pixels[src_idx];
-                    g_row[x] = pixels[src_idx + 1];
-                    b_row[x] = pixels[src_idx + 2];
-                }
-            });
         PixelData::Rgb([r, g, b])
     };
 
