@@ -18,9 +18,9 @@ use crate::common::buffer2::Buffer2;
 /// sharing the same dimensions. One `Buffer2<T>` per channel.
 ///
 /// `N` and `T` live in the type, so e.g. an RGB f32 image is `ImageData<3, f32>`
-/// and the channel count is known at compile time (no runtime format tag). The
-/// `1..=4` bound is checked per monomorphization via a `const` assert in the
-/// constructors.
+/// and the channel count is known at compile time (no runtime format tag). Only
+/// the shipping channel counts — `1` (L), `3` (RGB), `4` (RGBA) — are valid;
+/// that's checked per monomorphization via a `const` assert in the constructors.
 #[derive(Debug, Clone)]
 pub(crate) struct ImageData<const N: usize, T> {
     /// One plane per channel; all share `width × height`.
@@ -30,7 +30,7 @@ pub(crate) struct ImageData<const N: usize, T> {
 impl<const N: usize, T> ImageData<N, T> {
     /// Wrap `N` channel planes. All planes must share the same dimensions.
     pub(crate) fn from_channels(channels: [Buffer2<T>; N]) -> Self {
-        const { assert!(N >= 1 && N <= 4, "ImageData supports 1..=4 channels") };
+        const { assert!(N == 1 || N == 3 || N == 4, "ImageData supports 1, 3, or 4 channels (L/RGB/RGBA)") };
         let w = channels[0].width();
         let h = channels[0].height();
         for plane in &channels {
@@ -54,7 +54,7 @@ impl<const N: usize, T> ImageData<N, T> {
 impl<const N: usize, T: Default + Clone> ImageData<N, T> {
     /// A `width × height` image with all `N` planes zero-filled.
     pub(crate) fn new_zeroed(width: usize, height: usize) -> Self {
-        const { assert!(N >= 1 && N <= 4, "ImageData supports 1..=4 channels") };
+        const { assert!(N == 1 || N == 3 || N == 4, "ImageData supports 1, 3, or 4 channels (L/RGB/RGBA)") };
         Self {
             channels: std::array::from_fn(|_| Buffer2::new_default(width, height)),
         }
@@ -166,9 +166,10 @@ mod tests {
     #[test]
     #[should_panic(expected = "all channel planes must share width")]
     fn from_channels_rejects_mismatched_dims() {
-        let a = Buffer2::new(2, 2, vec![0u8; 4]);
-        let b = Buffer2::new(3, 2, vec![0u8; 6]); // wrong width
-        let _ = ImageData::from_channels([a, b]);
+        let r = Buffer2::new(2, 2, vec![0u8; 4]);
+        let g = Buffer2::new(3, 2, vec![0u8; 6]); // wrong width
+        let b = Buffer2::new(2, 2, vec![0u8; 4]);
+        let _ = ImageData::from_channels([r, g, b]);
     }
 
     #[test]
