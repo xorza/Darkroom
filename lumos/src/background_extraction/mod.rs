@@ -18,6 +18,7 @@ use nalgebra::{DMatrix, DVector};
 use crate::background_mesh::TileGrid;
 use crate::io::astro_image::AstroImage;
 use crate::math::statistics::MAD_TO_SIGMA;
+use imaginarium::Image;
 
 /// Sigma-clip passes for the per-tile sky estimate (matches the detector's tiled-background default).
 const SKY_CLIP_ITERATIONS: usize = 3;
@@ -93,7 +94,13 @@ impl BackgroundConfig {
 
 /// Model and remove the smooth background of `image` in place, **per channel**. Operates on linear
 /// data: the output background sits at ≈0 (slightly negative on noise — kept signed, not clamped).
-pub fn extract_background(image: &mut AstroImage, config: &BackgroundConfig) {
+pub fn extract_background(image: &mut Image, config: &BackgroundConfig) {
+    let mut astro = AstroImage::from(&*image);
+    extract_background_planar(&mut astro, config);
+    *image = Image::from(&astro);
+}
+
+pub(crate) fn extract_background_planar(image: &mut AstroImage, config: &BackgroundConfig) {
     config.validate();
     for c in 0..image.channels() {
         let model = model_channel(image.channel(c), config);

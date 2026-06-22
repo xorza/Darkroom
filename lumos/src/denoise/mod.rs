@@ -15,6 +15,7 @@ use rayon::prelude::*;
 use crate::io::astro_image::AstroImage;
 use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
 use crate::wavelet::{atrous_smooth, max_scales};
+use imaginarium::Image;
 
 #[cfg(test)]
 mod tests;
@@ -109,7 +110,13 @@ impl DenoiseConfig {
 ///
 /// Operates per channel. No-op-safe on any size (the scale count is clamped to what the dimensions
 /// support). Run on linear data, after color calibration and before the stretch.
-pub fn denoise(image: &mut AstroImage, config: DenoiseConfig) {
+pub fn denoise(image: &mut Image, config: DenoiseConfig) {
+    let mut astro = AstroImage::from(&*image);
+    denoise_planar(&mut astro, config);
+    *image = Image::from(&astro);
+}
+
+pub(crate) fn denoise_planar(image: &mut AstroImage, config: DenoiseConfig) {
     config.validate();
     let (width, height) = (image.width(), image.height());
     let scales = config.scales.min(max_scales(width, height));

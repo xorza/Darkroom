@@ -29,9 +29,11 @@ mod stretching;
 mod ml_support {
     use std::path::PathBuf;
 
+    use crate::color_calibration::{neutralize_background_planar, scnr_planar};
     use crate::io::astro_image::AstroImage;
+    use crate::stretching::stretch_planar;
     use crate::testing::calibration_dir;
-    use crate::{ScnrMethod, StretchConfig, neutralize_background, scnr, stretch};
+    use crate::{ScnrMethod, StretchConfig};
 
     /// Resolve caller-supplied ONNX weights: the `env_var` override, else `test_data/<default_file>`.
     /// Returns `None` (after a skip message) when absent — lumos ships no models, so the tests skip
@@ -61,9 +63,9 @@ mod ml_support {
         let mut img = AstroImage::from_file(calibration_dir().join("stacked_light.tiff"))
             .expect("load stacked_light.tiff");
 
-        neutralize_background(&mut img);
-        stretch(&mut img, StretchConfig::auto_stf());
-        scnr(&mut img, ScnrMethod::AverageNeutral);
+        neutralize_background_planar(&mut img);
+        stretch_planar(&mut img, StretchConfig::auto_stf());
+        scnr_planar(&mut img, ScnrMethod::AverageNeutral);
 
         img
     }

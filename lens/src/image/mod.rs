@@ -5,7 +5,7 @@
 mod blend_mode;
 mod conversion_format;
 pub(crate) mod funclib;
-mod vision_ctx;
+pub(crate) mod vision_ctx;
 
 use std::any::Any;
 use std::ops::{Deref, DerefMut};

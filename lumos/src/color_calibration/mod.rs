@@ -7,6 +7,7 @@
 //!   red/blue average, the residual green being noise on a color-balanced deep-sky image.
 
 use common::Rgb;
+use imaginarium::Image;
 use rayon::prelude::*;
 
 use crate::io::astro_image::AstroImage;
@@ -30,7 +31,13 @@ const MAX_BACKGROUND_SAMPLES: usize = 1_000_000;
 /// linear-domain operation — run after gradient/background extraction and before the stretch.
 /// Additive, so it preserves signal *above* the background (and may push faint pixels slightly
 /// negative, which the stretch's black point absorbs). No-op on grayscale.
-pub fn neutralize_background(image: &mut AstroImage) {
+pub fn neutralize_background(image: &mut Image) {
+    let mut astro = AstroImage::from(&*image);
+    neutralize_background_planar(&mut astro);
+    *image = Image::from(&astro);
+}
+
+pub(crate) fn neutralize_background_planar(image: &mut AstroImage) {
     if !image.is_rgb() {
         return;
     }
@@ -85,7 +92,13 @@ pub enum ScnrMethod {
 
 /// Remove the residual green cast (Subtractive Chromatic Noise Reduction). Intended for the
 /// stretched, already-color-balanced image. No-op on grayscale.
-pub fn scnr(image: &mut AstroImage, method: ScnrMethod) {
+pub fn scnr(image: &mut Image, method: ScnrMethod) {
+    let mut astro = AstroImage::from(&*image);
+    scnr_planar(&mut astro, method);
+    *image = Image::from(&astro);
+}
+
+pub(crate) fn scnr_planar(image: &mut AstroImage, method: ScnrMethod) {
     if !image.is_rgb() {
         return;
     }

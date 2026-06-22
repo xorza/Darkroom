@@ -37,7 +37,7 @@ fn load_astro_image_node_is_registered() {
     assert_eq!(f.inputs.len(), 1);
     assert_eq!(f.outputs.len(), 1);
     assert_eq!(f.inputs[0].data_type, *ASTRO_IMAGE_PATH_DATA_TYPE);
-    assert_eq!(f.outputs[0].data_type, *ASTRO_FRAME_DATA_TYPE);
+    assert_eq!(f.outputs[0].data_type, *IMAGE_DATA_TYPE);
 }
 
 #[test]
@@ -134,7 +134,7 @@ fn stack_lights_node_is_registered() {
     let out_names: Vec<&str> = f.outputs.iter().map(|o| o.name.as_str()).collect();
     assert_eq!(out_names, ["image", "coverage", "weight"]);
     for out in &f.outputs {
-        assert_eq!(out.data_type, *ASTRO_FRAME_DATA_TYPE);
+        assert_eq!(out.data_type, *IMAGE_DATA_TYPE);
     }
 }
 
@@ -145,7 +145,7 @@ fn auto_stretch_node_is_registered() {
     assert_eq!(f.category, "astro");
     assert_eq!(f.inputs.len(), 2);
     assert_eq!(f.inputs[0].name, "image");
-    assert_eq!(f.inputs[0].data_type, *ASTRO_FRAME_DATA_TYPE);
+    assert_eq!(f.inputs[0].data_type, *IMAGE_DATA_TYPE);
     assert!(f.inputs[0].required);
     // `method` is a config-typed input with the presets as value_variants
     // (seeded to the first), overridable by build_stretch_config.
@@ -165,27 +165,13 @@ fn auto_stretch_node_is_registered() {
         Some(StaticValue::Enum("auto_asinh".to_string())),
     );
     assert_eq!(f.outputs.len(), 1);
-    assert_eq!(f.outputs[0].data_type, *ASTRO_FRAME_DATA_TYPE);
-}
-
-#[test]
-fn astro_to_image_node_is_registered() {
-    let lib = astro_funclib();
-    let f = func(&lib, "astro_to_image");
-    assert_eq!(f.category, "astro");
-    assert_eq!(f.inputs.len(), 1);
-    assert_eq!(f.inputs[0].name, "frame");
-    assert_eq!(f.inputs[0].data_type, *ASTRO_FRAME_DATA_TYPE);
-    assert!(f.inputs[0].required);
-    assert_eq!(f.outputs.len(), 1);
-    assert_eq!(f.outputs[0].name, "image");
     assert_eq!(f.outputs[0].data_type, *IMAGE_DATA_TYPE);
 }
 
 #[test]
 fn processing_nodes_are_registered() {
     let lib = astro_funclib();
-    // Each in-place op: a required `image` AstroFrame in, an AstroFrame out.
+    // Each in-place op: a required `image` Image in, an Image out.
     for name in [
         "background_extract",
         "denoise",
@@ -197,20 +183,14 @@ fn processing_nodes_are_registered() {
         let f = func(&lib, name);
         assert_eq!(f.category, "astro", "{name} category");
         assert_eq!(f.inputs[0].name, "image", "{name} first input");
-        assert_eq!(
-            f.inputs[0].data_type, *ASTRO_FRAME_DATA_TYPE,
-            "{name} in type"
-        );
+        assert_eq!(f.inputs[0].data_type, *IMAGE_DATA_TYPE, "{name} in type");
         assert!(f.inputs[0].required, "{name} image required");
         assert_eq!(f.outputs.len(), 1, "{name} one output");
-        assert_eq!(
-            f.outputs[0].data_type, *ASTRO_FRAME_DATA_TYPE,
-            "{name} out type"
-        );
+        assert_eq!(f.outputs[0].data_type, *IMAGE_DATA_TYPE, "{name} out type");
     }
     // star_detect analyzes the frame and outputs a count.
     let sd = func(&lib, "star_detect");
-    assert_eq!(sd.inputs[0].data_type, *ASTRO_FRAME_DATA_TYPE);
+    assert_eq!(sd.inputs[0].data_type, *IMAGE_DATA_TYPE);
     assert_eq!(sd.outputs.len(), 1);
     assert_eq!(sd.outputs[0].name, "count");
     assert_eq!(sd.outputs[0].data_type, DataType::Int);

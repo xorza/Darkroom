@@ -257,7 +257,7 @@ fn ghs_end_to_end_lifts_background_and_stays_in_range() {
     let mut px: Vec<f32> = (0..90).map(|i| 0.04 + (i % 3) as f32 * 0.01).collect();
     px.extend(std::iter::repeat_n(0.8f32, 10));
     let mut img = gray(10, 10, px.clone());
-    stretch(&mut img, StretchConfig::ghs(5.0, 0.0, 0.1));
+    stretch_planar(&mut img, StretchConfig::ghs(5.0, 0.0, 0.1));
     let out = img.channel(0).to_vec();
     for &v in &out {
         assert!((0.0..=1.0).contains(&v), "output in [0,1]: {v}");
@@ -276,7 +276,7 @@ fn color_preserving_keeps_channel_ratio_and_caps_highlights() {
         method: StretchMethod::Asinh { beta: 0.05 },
         color: ColorMode::ColorPreserving,
     };
-    stretch(&mut img, cfg);
+    stretch_planar(&mut img, cfg);
     let r = img.channel(0).to_vec();
     let g = img.channel(1).to_vec();
     let b = img.channel(2).to_vec();
@@ -308,8 +308,8 @@ fn per_channel_neutralizes_color_preserving_keeps_it() {
     let mut linked = rgb(5, 1, r.clone(), g.clone(), b.clone());
     let mut unlinked = rgb(5, 1, r, g, b);
 
-    stretch(&mut linked, StretchConfig::auto_stf());
-    stretch(
+    stretch_planar(&mut linked, StretchConfig::auto_stf());
+    stretch_planar(
         &mut unlinked,
         StretchConfig {
             method: StretchMethod::AutoStf {
@@ -353,7 +353,7 @@ fn end_to_end_gray_auto_stf_brightens_background_to_target() {
     let input_median = median_of(&px);
 
     let mut img = gray(10, 10, px);
-    stretch(&mut img, StretchConfig::auto_stf());
+    stretch_planar(&mut img, StretchConfig::auto_stf());
     let out = img.channel(0).to_vec();
 
     for &v in &out {

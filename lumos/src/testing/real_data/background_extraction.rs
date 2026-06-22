@@ -3,12 +3,12 @@
 //! on the **stretched** master to flatten the display-domain background, saving a viewable
 //! before/after. Gated behind the `real-data` feature.
 
+use crate::background_extraction::extract_background_planar;
+use crate::color_calibration::{neutralize_background_planar, scnr_planar};
 use crate::math::statistics::median_f32_mut;
+use crate::stretching::stretch_planar;
 use crate::testing::{calibration_dir, init_tracing, save_png};
-use crate::{
-    AstroImage, BackgroundConfig, ScnrMethod, StretchConfig, extract_background,
-    neutralize_background, scnr, stretch,
-};
+use crate::{AstroImage, BackgroundConfig, ScnrMethod, StretchConfig};
 
 /// Max−min of the robust background level across the four corners of the intensity plane — a proxy
 /// for the corner-to-corner gradient. A light-pollution gradient makes opposite corners differ;
@@ -48,9 +48,9 @@ fn extract_flattens_background_on_stretched_master() {
     // The display-domain master, as the other real-data tests build it.
     let mut img =
         AstroImage::from_file(calibration_dir().join("stacked_light.tiff")).expect("load");
-    neutralize_background(&mut img);
-    stretch(&mut img, StretchConfig::auto_stf());
-    scnr(&mut img, ScnrMethod::AverageNeutral);
+    neutralize_background_planar(&mut img);
+    stretch_planar(&mut img, StretchConfig::auto_stf());
+    scnr_planar(&mut img, ScnrMethod::AverageNeutral);
     save_png(&img, "bg_extraction/stretched.png");
 
     let before = corner_background_spread(&img);
@@ -58,8 +58,8 @@ fn extract_flattens_background_on_stretched_master() {
     // Model and subtract the smooth background per channel, then re-neutralize so the now-flattened
     // background sits at a viewable level (subtraction pulls it toward zero).
     let mut extracted = img.clone();
-    extract_background(&mut extracted, &BackgroundConfig::default());
-    neutralize_background(&mut extracted);
+    extract_background_planar(&mut extracted, &BackgroundConfig::default());
+    neutralize_background_planar(&mut extracted);
     save_png(&extracted, "bg_extraction/extracted.png");
 
     let after = corner_background_spread(&extracted);

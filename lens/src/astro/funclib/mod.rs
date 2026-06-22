@@ -33,9 +33,9 @@ use crate::astro::masters::{MASTERS_DATA_TYPE, Masters};
 use crate::astro::presets::{
     BackgroundModeKind, CombinePreset, DetectionPreset, RegistrationPreset, ScnrKind, StretchPreset,
 };
-use crate::astro::{ASTRO_FRAME_DATA_TYPE, AstroFrame};
 use crate::config_node::{ConfigValue, NodeConfig, config_builder_func, config_data_type};
 use crate::image::{IMAGE_DATA_TYPE, Image};
+use imaginarium::ProcessingContext;
 
 /// Every file extension `AstroImage::from_file` recognizes: FITS, camera
 /// RAW, and standard images. Kept in lockstep with that dispatch (note
@@ -80,7 +80,7 @@ pub fn astro_funclib() -> FuncLib {
                 "path",
                 ASTRO_IMAGE_PATH_DATA_TYPE.clone(),
             ))
-            .output("image", ASTRO_FRAME_DATA_TYPE.clone())
+            .output("image", IMAGE_DATA_TYPE.clone())
             .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
                 Box::pin(async move {
                     assert_eq!(inputs.len(), 1);
@@ -89,12 +89,14 @@ pub fn astro_funclib() -> FuncLib {
                     let path = inputs[0].value.as_fs_path().unwrap().to_owned();
                     // Decoding (FITS parse / libraw / demosaic) is heavy
                     // synchronous CPU work — keep it off the worker thread.
-                    let image = tokio::task::spawn_blocking(move || AstroImage::from_file(&path))
-                        .await
-                        .map_err(anyhow::Error::from)?
-                        .map_err(anyhow::Error::from)?;
+                    let image = tokio::task::spawn_blocking(move || {
+                        AstroImage::from_file(&path).map(|astro| RawImage::from(&astro))
+                    })
+                    .await
+                    .map_err(anyhow::Error::from)?
+                    .map_err(anyhow::Error::from)?;
 
-                    outputs[0] = DynamicValue::from_custom(AstroFrame::from(image));
+                    outputs[0] = DynamicValue::from_custom(Image::from(image));
 
                     Ok(())
                 })
@@ -181,9 +183,9 @@ pub fn astro_funclib() -> FuncLib {
             // reference: < 0 picks the frame with the most stars (auto); >= 0 is
             // a 0-based index into the (directory-sorted) light frames.
             .input(FuncInput::required("reference", DataType::Int).default(-1_i64))
-            .output("image", ASTRO_FRAME_DATA_TYPE.clone())
-            .output("coverage", ASTRO_FRAME_DATA_TYPE.clone())
-            .output("weight", ASTRO_FRAME_DATA_TYPE.clone())
+            .output("image", IMAGE_DATA_TYPE.clone())
+            .output("coverage", IMAGE_DATA_TYPE.clone())
+            .output("weight", IMAGE_DATA_TYPE.clone())
             .lambda(FuncLambda::new(move |ctx, _, _, inputs, _, outputs| {
                 // Grab the run's cancel flag so the heavy lumos op can poll it.
                 let cancel = ctx.cancel_flag();
@@ -269,12 +271,14 @@ pub fn astro_funclib() -> FuncLib {
                     })
                     .await?;
 
-                    outputs[0] = DynamicValue::from_custom(AstroFrame::from(result.image));
-                    outputs[1] = DynamicValue::from_custom(AstroFrame::from(plane_to_frame(
-                        result.coverage,
+                    outputs[0] =
+                        DynamicValue::from_custom(Image::from(RawImage::from(&result.image)));
+                    outputs[1] = DynamicValue::from_custom(Image::from(RawImage::from(
+                        &plane_to_frame(result.coverage),
                     )));
-                    outputs[2] =
-                        DynamicValue::from_custom(AstroFrame::from(plane_to_frame(result.weight)));
+                    outputs[2] = DynamicValue::from_custom(Image::from(RawImage::from(
+                        &plane_to_frame(result.weight),
+                    )));
 
                     Ok(())
                 })
@@ -292,7 +296,7 @@ pub fn astro_funclib() -> FuncLib {
                 "method",
                 StretchPreset::variant_names(),
             ))
-            .output("image", ASTRO_FRAME_DATA_TYPE.clone())
+            .output("image", IMAGE_DATA_TYPE.clone())
             .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
                 Box::pin(async move {
                     assert_eq!(inputs.len(), 2);
@@ -311,55 +315,8 @@ pub fn astro_funclib() -> FuncLib {
                                 .map(|preset| preset.config())
                         })
                         .expect("method is required");
-                    // Arc-clone the frame so the deep copy + stretch run
-                    // off the worker thread.
                     let value = inputs[0].value.clone();
-                    let stretched = tokio::task::spawn_blocking(move || {
-                        let frame = value
-                            .as_custom::<AstroFrame>()
-                            .expect("image input is an AstroFrame");
-                        let mut image = frame.image.clone();
-                        stretch(&mut image, config);
-                        image
-                    })
-                    .await
-                    .map_err(anyhow::Error::from)?;
-
-                    outputs[0] = DynamicValue::from_custom(AstroFrame::from(stretched));
-
-                    Ok(())
-                })
-            })),
-    );
-
-    // astro_to_image: bridge an `AstroFrame` into a `lens::Image` so the
-    // imaginarium image nodes (brightness/contrast, blend, convert, save…)
-    // can consume astro output.
-    func_lib.add(
-        Func::new("7a0265e1-9631-45bd-8ecd-1e923b67a58c", "astro_to_image")
-            .description("Converts an astro frame to an image (for the imaginarium image nodes)")
-            .category("astro")
-            .pure()
-            .input(FuncInput::required("frame", ASTRO_FRAME_DATA_TYPE.clone()))
-            .output("image", IMAGE_DATA_TYPE.clone())
-            .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 1);
-                    assert_eq!(outputs.len(), 1);
-
-                    // The planar→interleaved conversion is a full-frame copy;
-                    // run it off the worker thread.
-                    let value = inputs[0].value.clone();
-                    let raw = tokio::task::spawn_blocking(move || {
-                        let frame = value
-                            .as_custom::<AstroFrame>()
-                            .expect("frame input is an AstroFrame");
-                        RawImage::from(&frame.image)
-                    })
-                    .await
-                    .map_err(anyhow::Error::from)?;
-
-                    outputs[0] = DynamicValue::from_custom(Image::from(raw));
+                    outputs[0] = run_frame_op(value, move |img| stretch(img, config)).await?;
 
                     Ok(())
                 })
@@ -426,7 +383,7 @@ pub fn astro_funclib() -> FuncLib {
         "Builds a detailed SCNR (green-removal) config",
     ));
 
-    // --- per-frame processing nodes (AstroFrame → AstroFrame) ---
+    // --- per-frame processing nodes (Image → Image) ---
 
     // background_extract: a quick `mode` preset, or a `config` wired from
     // build_background_config (which overrides the preset when present).
@@ -650,15 +607,12 @@ pub fn astro_funclib() -> FuncLib {
                                 .map(|preset| preset.config())
                         })
                         .expect("detection is required");
-                    let value = inputs[0].value.clone();
+                    // Star detection works on planar channels, so bring the
+                    // image back to a CPU `AstroImage` for the detector.
+                    let cpu = image_to_cpu(&inputs[0].value)?;
                     let count = tokio::task::spawn_blocking(move || {
-                        let frame = value
-                            .as_custom::<AstroFrame>()
-                            .expect("image input is an AstroFrame");
-                        StarDetector::from_config(config)
-                            .detect(&frame.image)
-                            .stars
-                            .len()
+                        let astro = AstroImage::from(cpu);
+                        StarDetector::from_config(config).detect(&astro).stars.len()
                     })
                     .await
                     .map_err(anyhow::Error::from)?;
@@ -699,7 +653,7 @@ fn config_override_input<T: NodeConfig>() -> FuncInput {
 }
 
 /// Wrap a single-channel result plane (coverage / weight) as a grayscale
-/// `AstroImage` so it can ride an `AstroFrame` wire and preview.
+/// `AstroImage` so it can ride an `Image` wire (it is converted to `Image` at the node).
 fn plane_to_frame(plane: Buffer2<f32>) -> AstroImage {
     let dims = ImageDimensions::new((plane.width(), plane.height()), 1);
     AstroImage::from_planar_channels(dims, [Vec::from(plane)])
@@ -712,9 +666,9 @@ fn dir_input(name: &str) -> FuncInput {
     FuncInput::optional(name, ASTRO_DIR_DATA_TYPE.clone())
 }
 
-/// A required `AstroFrame` input port.
+/// A required `Image` input port (the astro nodes' image currency).
 fn frame_input(name: &str) -> FuncInput {
-    FuncInput::required(name, ASTRO_FRAME_DATA_TYPE.clone())
+    FuncInput::required(name, IMAGE_DATA_TYPE.clone())
 }
 
 /// A required float parameter input seeded with `default`.
@@ -722,7 +676,7 @@ fn float_input(name: &str, default: f32) -> FuncInput {
     FuncInput::required(name, DataType::Float).default(default as f64)
 }
 
-/// Assemble a `Func` for an `AstroFrame → AstroFrame` processing node:
+/// Assemble a `Func` for an `Image → Image` processing node:
 /// `Pure`, category `astro`, a single `image` output. The caller supplies
 /// the inputs (the frame first) and the lambda.
 fn processing_func(
@@ -737,27 +691,39 @@ fn processing_func(
         .description(description)
         .pure()
         .inputs(inputs)
-        .output("image", ASTRO_FRAME_DATA_TYPE.clone())
+        .output("image", IMAGE_DATA_TYPE.clone())
         .lambda(lambda)
 }
 
-/// Clone the input `AstroFrame`'s image, apply `op` to it off the worker
-/// thread, and wrap the result back into a fresh `AstroFrame` value.
+/// Pull the input `Image` to a CPU `imaginarium::Image`, apply the lumos `op`
+/// off the worker thread, and wrap the result as an `Image`. The astro pipeline
+/// is CPU-backed, so the CPU extraction is a no-op transfer; a GPU-resident
+/// input (e.g. straight out of a GPU image-node) would error here — promote it
+/// to CPU upstream. (A future version can thread `VisionCtx` to read it back.)
 async fn run_frame_op<F>(value: DynamicValue, op: F) -> Result<DynamicValue, anyhow::Error>
 where
-    F: FnOnce(&mut AstroImage) + Send + 'static,
+    F: FnOnce(&mut RawImage) + Send + 'static,
 {
-    let image = tokio::task::spawn_blocking(move || {
-        let frame = value
-            .as_custom::<AstroFrame>()
-            .expect("frame input is an AstroFrame");
-        let mut image = frame.image.clone();
-        op(&mut image);
-        image
+    let cpu = image_to_cpu(&value)?;
+    let out = tokio::task::spawn_blocking(move || {
+        let mut cpu = cpu;
+        op(&mut cpu);
+        cpu
     })
     .await
     .map_err(anyhow::Error::from)?;
-    Ok(DynamicValue::from_custom(AstroFrame::from(image)))
+    Ok(DynamicValue::from_custom(Image::from(out)))
+}
+
+/// Extract an owned CPU `imaginarium::Image` from a node's `Image` input.
+fn image_to_cpu(value: &DynamicValue) -> anyhow::Result<RawImage> {
+    let image = value.as_custom::<Image>().expect("image input is an Image");
+    let cpu = ProcessingContext::cpu_only();
+    Ok(image
+        .buffer
+        .make_cpu(&cpu)
+        .map_err(anyhow::Error::from)?
+        .clone())
 }
 
 /// Build (or load from cache) the four calibration masters for `dirs`

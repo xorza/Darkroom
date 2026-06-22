@@ -10,6 +10,7 @@ use common::Buffer2;
 use rayon::prelude::*;
 
 use crate::io::astro_image::AstroImage;
+use imaginarium::Image;
 
 #[cfg(test)]
 mod tests;
@@ -61,7 +62,13 @@ impl LocalContrastConfig {
 ///
 /// Computed on the combined intensity; color channels are rescaled hue-preservingly. Grayscale gets
 /// the mapping directly.
-pub fn enhance_local_contrast(image: &mut AstroImage, config: LocalContrastConfig) {
+pub fn enhance_local_contrast(image: &mut Image, config: LocalContrastConfig) {
+    let mut astro = AstroImage::from(&*image);
+    enhance_local_contrast_planar(&mut astro, config);
+    *image = Image::from(&astro);
+}
+
+pub(crate) fn enhance_local_contrast_planar(image: &mut AstroImage, config: LocalContrastConfig) {
     config.validate();
     let intensity = image.intensity_plane();
     // Keep each tile well-populated (≳ 4·N_BINS pixels) so the clipped-histogram CDF is meaningful;

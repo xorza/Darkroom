@@ -29,6 +29,7 @@ use rayon::prelude::*;
 
 use crate::io::astro_image::AstroImage;
 use crate::math::statistics::{mad_to_sigma, median_and_mad_f32_mut};
+use imaginarium::Image;
 
 #[cfg(test)]
 mod tests;
@@ -186,7 +187,13 @@ fn assert_target_background(t: f32) {
 ///
 /// # Panics
 /// If `config` is out of range — see [`StretchConfig::validate`].
-pub fn stretch(image: &mut AstroImage, config: StretchConfig) {
+pub fn stretch(image: &mut Image, config: StretchConfig) {
+    let mut astro = AstroImage::from(&*image);
+    stretch_planar(&mut astro, config);
+    *image = Image::from(&astro);
+}
+
+pub(crate) fn stretch_planar(image: &mut AstroImage, config: StretchConfig) {
     config.validate();
     match config.color {
         ColorMode::ColorPreserving => {

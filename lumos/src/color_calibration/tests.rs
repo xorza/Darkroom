@@ -30,7 +30,7 @@ fn neutralize_equalizes_backgrounds_and_makes_image_neutral() {
         "green background elevated before: {before:?}"
     );
 
-    neutralize_background(&mut img);
+    neutralize_background_planar(&mut img);
 
     // Backgrounds all shifted to the darkest channel (0.1).
     let after = channel_backgrounds(&img);
@@ -67,7 +67,7 @@ fn neutralize_equalizes_backgrounds_and_makes_image_neutral() {
 fn scnr_average_neutral_clamps_only_green_excess() {
     // px0: green above (R+B)/2 -> clamped; px1: green below it -> untouched. R and B never change.
     let mut img = rgb(2, 1, vec![0.2, 0.5], vec![0.6, 0.3], vec![0.2, 0.5]);
-    scnr(&mut img, ScnrMethod::AverageNeutral);
+    scnr_planar(&mut img, ScnrMethod::AverageNeutral);
     let (r, g, b) = (
         img.channel(0).to_vec(),
         img.channel(1).to_vec(),
@@ -91,7 +91,7 @@ fn scnr_average_neutral_clamps_only_green_excess() {
 fn scnr_additive_mask_amount_zero_noop_and_full_hand_computed() {
     // amount = 0 is a no-op.
     let mut img0 = rgb(1, 1, vec![0.2], vec![0.6], vec![0.2]);
-    scnr(&mut img0, ScnrMethod::AdditiveMask { amount: 0.0 });
+    scnr_planar(&mut img0, ScnrMethod::AdditiveMask { amount: 0.0 });
     assert!(
         (img0.channel(1).to_vec()[0] - 0.6).abs() < 1e-6,
         "amount 0 is a no-op"
@@ -99,7 +99,7 @@ fn scnr_additive_mask_amount_zero_noop_and_full_hand_computed() {
 
     // amount = 1: m = min(1, R+B) = min(1, 0.4) = 0.4; G' = G·0·(1−m) + m·G = 0.4·0.6 = 0.24.
     let mut img1 = rgb(1, 1, vec![0.2], vec![0.6], vec![0.2]);
-    scnr(&mut img1, ScnrMethod::AdditiveMask { amount: 1.0 });
+    scnr_planar(&mut img1, ScnrMethod::AdditiveMask { amount: 1.0 });
     assert!(
         (img1.channel(1).to_vec()[0] - 0.24).abs() < 1e-6,
         "additive mask at full strength: {}",
@@ -110,8 +110,8 @@ fn scnr_additive_mask_amount_zero_noop_and_full_hand_computed() {
 #[test]
 fn color_ops_are_noops_on_grayscale() {
     let mut g = gray(2, 1, vec![0.3, 0.7]);
-    neutralize_background(&mut g);
-    scnr(&mut g, ScnrMethod::AverageNeutral);
+    neutralize_background_planar(&mut g);
+    scnr_planar(&mut g, ScnrMethod::AverageNeutral);
     assert_eq!(
         g.channel(0).to_vec(),
         vec![0.3, 0.7],

@@ -2,11 +2,12 @@
 //! the linear domain, then stretch and SCNR into a viewable image — saving only the final result.
 //! Gated behind the `real-data` feature.
 
-use crate::color_calibration::{ScnrMethod, neutralize_background, scnr};
-use crate::denoise::{DenoiseConfig, denoise};
+use crate::color_calibration::{ScnrMethod, neutralize_background_planar, scnr_planar};
+use crate::denoise::{DenoiseConfig, denoise_planar};
 use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
+use crate::stretching::stretch_planar;
 use crate::testing::{calibration_dir, init_tracing, save_png};
-use crate::{AstroImage, StretchConfig, stretch};
+use crate::{AstroImage, StretchConfig};
 
 /// Robust high-frequency noise of a channel: the MAD-sigma of adjacent-pixel differences. Slow
 /// gradients and extended signal cancel in the difference, so this isolates the pixel-scale noise
@@ -38,11 +39,11 @@ fn denoise_reduces_linear_noise() {
         AstroImage::from_file(calibration_dir().join("stacked_light.tiff")).expect("load");
 
     // Neutralize the background first so denoising runs on color-calibrated linear data.
-    neutralize_background(&mut img);
+    neutralize_background_planar(&mut img);
 
     // Measure pixel-scale noise per channel before and after denoising (both in the linear domain).
     let before: Vec<f32> = (0..3).map(|c| highfreq_noise(&img, c)).collect();
-    denoise(&mut img, DenoiseConfig::default());
+    denoise_planar(&mut img, DenoiseConfig::default());
     let after: Vec<f32> = (0..3).map(|c| highfreq_noise(&img, c)).collect();
 
     for c in 0..3 {
@@ -61,7 +62,7 @@ fn denoise_reduces_linear_noise() {
     }
 
     // Finish the display chain — stretch then clean any residual green — and save the final image.
-    stretch(&mut img, StretchConfig::auto_stf());
-    scnr(&mut img, ScnrMethod::AverageNeutral);
+    stretch_planar(&mut img, StretchConfig::auto_stf());
+    scnr_planar(&mut img, ScnrMethod::AverageNeutral);
     save_png(&img, "denoise/stacked_light_denoised.png");
 }

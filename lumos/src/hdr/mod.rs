@@ -9,6 +9,7 @@ use rayon::prelude::*;
 
 use crate::io::astro_image::AstroImage;
 use crate::wavelet::{StarletTransform, max_scales};
+use imaginarium::Image;
 
 #[cfg(test)]
 mod tests;
@@ -54,7 +55,13 @@ impl HdrConfig {
 ///
 /// Computed on the combined intensity; color channels are rescaled hue-preservingly. Grayscale gets
 /// the compressed intensity directly.
-pub fn compress_dynamic_range(image: &mut AstroImage, config: HdrConfig) {
+pub fn compress_dynamic_range(image: &mut Image, config: HdrConfig) {
+    let mut astro = AstroImage::from(&*image);
+    compress_dynamic_range_planar(&mut astro, config);
+    *image = Image::from(&astro);
+}
+
+pub(crate) fn compress_dynamic_range_planar(image: &mut AstroImage, config: HdrConfig) {
     config.validate();
     let (w, h) = (image.width(), image.height());
     let scales = config.scales.min(max_scales(w, h));

@@ -1,4 +1,4 @@
-use super::{LocalContrastConfig, build_tile_luts, enhance_local_contrast};
+use super::{LocalContrastConfig, build_tile_luts, enhance_local_contrast_planar};
 use crate::io::astro_image::{AstroImage, ImageDimensions};
 use common::{Buffer2, Vec2us};
 
@@ -33,7 +33,7 @@ fn low_contrast(width: usize, height: usize) -> Vec<f32> {
 fn clahe_strength_zero_is_identity() {
     let px = low_contrast(64, 64);
     let mut img = gray(64, 64, px.clone());
-    enhance_local_contrast(
+    enhance_local_contrast_planar(
         &mut img,
         LocalContrastConfig {
             strength: 0.0,
@@ -53,7 +53,7 @@ fn clahe_output_stays_in_range() {
         .map(|i| ((i as f32 * 0.013).sin() * 0.5 + 0.5).clamp(0.0, 1.0))
         .collect();
     let mut img = gray(96, 96, px);
-    enhance_local_contrast(&mut img, LocalContrastConfig::default());
+    enhance_local_contrast_planar(&mut img, LocalContrastConfig::default());
     for &v in &img.channel(0).to_vec() {
         assert!((0.0..=1.0).contains(&v), "output in [0,1]: {v}");
     }
@@ -63,7 +63,7 @@ fn clahe_output_stays_in_range() {
 fn clahe_flat_region_not_blown_up() {
     // Contrast-limited: a flat field must stay put, not get stretched to full range.
     let mut img = gray(64, 64, vec![0.5; 64 * 64]);
-    enhance_local_contrast(&mut img, LocalContrastConfig::default());
+    enhance_local_contrast_planar(&mut img, LocalContrastConfig::default());
     let out = img.channel(0).to_vec();
     assert!(
         out.iter().all(|&v| (v - 0.5).abs() < 0.05),
@@ -78,7 +78,7 @@ fn clahe_increases_low_contrast() {
     let px = low_contrast(64, 64);
     let in_std = std_dev(&px);
     let mut img = gray(64, 64, px);
-    enhance_local_contrast(
+    enhance_local_contrast_planar(
         &mut img,
         LocalContrastConfig {
             tiles: 4,
@@ -119,7 +119,7 @@ fn clahe_is_color_preserving() {
     let i: Vec<f32> = low_contrast(w, h); // use as the green/blue level
     let r: Vec<f32> = i.iter().map(|&v| (2.0 * v).min(1.0)).collect();
     let mut img = rgb(w, h, r, i.clone(), i.clone());
-    enhance_local_contrast(&mut img, LocalContrastConfig::default());
+    enhance_local_contrast_planar(&mut img, LocalContrastConfig::default());
     let (ro, go, bo) = (
         img.channel(0).to_vec(),
         img.channel(1).to_vec(),

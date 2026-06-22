@@ -1,4 +1,4 @@
-use super::{DenoiseConfig, Threshold, denoise};
+use super::{DenoiseConfig, Threshold, denoise_planar};
 use crate::io::astro_image::{AstroImage, ImageDimensions};
 use common::Vec2us;
 
@@ -80,7 +80,7 @@ fn denoise_reduces_white_noise_and_preserves_mean() {
     let in_std = std_dev(&px);
 
     let mut img = gray(w, h, px);
-    denoise(&mut img, DenoiseConfig::default());
+    denoise_planar(&mut img, DenoiseConfig::default());
     let out = img.channel(0).to_vec();
 
     let out_std = std_dev(&out);
@@ -101,14 +101,14 @@ fn higher_k_smooths_more() {
     let px = noisy(w, h, 0.5, 0.04, 7);
     let mut img2 = gray(w, h, px.clone());
     let mut img5 = gray(w, h, px);
-    denoise(
+    denoise_planar(
         &mut img2,
         DenoiseConfig {
             k: 2.0,
             ..Default::default()
         },
     );
-    denoise(
+    denoise_planar(
         &mut img5,
         DenoiseConfig {
             k: 5.0,
@@ -130,7 +130,7 @@ fn strength_zero_is_identity_and_blends_between() {
 
     // strength 0 removes nothing — bit-for-bit identity.
     let mut img0 = gray(w, h, px.clone());
-    denoise(
+    denoise_planar(
         &mut img0,
         DenoiseConfig {
             strength: 0.0,
@@ -146,14 +146,14 @@ fn strength_zero_is_identity_and_blends_between() {
     // Partial strength sits strictly between no-op and full denoise.
     let mut half = gray(w, h, px.clone());
     let mut full = gray(w, h, px.clone());
-    denoise(
+    denoise_planar(
         &mut half,
         DenoiseConfig {
             strength: 0.5,
             ..Default::default()
         },
     );
-    denoise(&mut full, DenoiseConfig::default());
+    denoise_planar(&mut full, DenoiseConfig::default());
     let in_std = std_dev(&px);
     let half_std = std_dev(half.channel(0));
     let full_std = std_dev(full.channel(0));
@@ -169,14 +169,14 @@ fn hard_and_soft_thresholds_differ() {
     let px = noisy(w, h, 0.5, 0.05, 55);
     let mut hard = gray(w, h, px.clone());
     let mut soft = gray(w, h, px);
-    denoise(
+    denoise_planar(
         &mut hard,
         DenoiseConfig {
             threshold: Threshold::Hard,
             ..Default::default()
         },
     );
-    denoise(
+    denoise_planar(
         &mut soft,
         DenoiseConfig {
             threshold: Threshold::Soft,
@@ -207,7 +207,7 @@ fn denoise_preserves_bright_feature() {
         }
     }
     let mut img = gray(w, h, px);
-    denoise(&mut img, DenoiseConfig::default());
+    denoise_planar(&mut img, DenoiseConfig::default());
     let out = img.channel(0).to_vec();
 
     // 4x4 interior of the block stays near 0.9.
@@ -240,7 +240,7 @@ fn denoise_is_per_channel_on_rgb() {
     let b = noisy(w, h, 0.5, 0.04, 6072);
     let in_std = [std_dev(&r), std_dev(&g), std_dev(&b)];
     let mut img = rgb(w, h, r, g, b);
-    denoise(&mut img, DenoiseConfig::default());
+    denoise_planar(&mut img, DenoiseConfig::default());
     for (c, &expected) in in_std.iter().enumerate() {
         let out_std = std_dev(img.channel(c));
         assert!(
@@ -254,9 +254,9 @@ fn denoise_is_per_channel_on_rgb() {
 fn denoise_handles_images_smaller_than_the_kernel() {
     // Scale count clamps to the dimensions — these must not panic.
     let mut tiny = gray(3, 3, vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]);
-    denoise(&mut tiny, DenoiseConfig::default());
+    denoise_planar(&mut tiny, DenoiseConfig::default());
     let mut one = gray(1, 1, vec![0.42]);
-    denoise(&mut one, DenoiseConfig::default());
+    denoise_planar(&mut one, DenoiseConfig::default());
     assert!(
         (one.channel(0).to_vec()[0] - 0.42).abs() < 1e-6,
         "1x1 has no detail to remove"
@@ -267,7 +267,7 @@ fn denoise_handles_images_smaller_than_the_kernel() {
 #[should_panic(expected = "strength must be in")]
 fn validate_rejects_out_of_range_strength() {
     let mut img = gray(4, 4, vec![0.0; 16]);
-    denoise(
+    denoise_planar(
         &mut img,
         DenoiseConfig {
             strength: 1.5,
@@ -280,7 +280,7 @@ fn validate_rejects_out_of_range_strength() {
 #[should_panic(expected = "k must")]
 fn validate_rejects_nonpositive_k() {
     let mut img = gray(4, 4, vec![0.0; 16]);
-    denoise(
+    denoise_planar(
         &mut img,
         DenoiseConfig {
             k: 0.0,

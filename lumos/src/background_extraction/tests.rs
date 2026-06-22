@@ -60,7 +60,7 @@ fn subtract_removes_linear_gradient() {
     // a + b·x + c·y over [0.5, 0.5+0.16+0.096] — a pure additive plane, no signal.
     let plane = |x: usize, y: usize| 0.5 + 0.0008 * x as f32 + 0.0006 * y as f32;
     let mut img = gray(w, h, plane);
-    extract_background(
+    extract_background_planar(
         &mut img,
         &BackgroundConfig {
             degree: 1,
@@ -84,7 +84,7 @@ fn subtract_removes_pedestal_keeps_stars() {
             px[y * w + x] = 0.95;
         }
     }
-    extract_background(
+    extract_background_planar(
         &mut img,
         &BackgroundConfig {
             degree: 2,
@@ -119,7 +119,7 @@ fn divide_corrects_quadratic_vignette() {
     };
     let signal = 0.5f32;
     let mut img = gray(w, h, |x, y| signal * vignette(x, y));
-    extract_background(
+    extract_background_planar(
         &mut img,
         &BackgroundConfig {
             degree: 2,
@@ -147,7 +147,7 @@ fn higher_degree_fits_cubic_better() {
     };
     let resid_energy = |degree| {
         let mut img = gray(w, h, cubic);
-        extract_background(
+        extract_background_planar(
             &mut img,
             &BackgroundConfig {
                 degree,
@@ -182,7 +182,7 @@ fn removes_independent_per_channel_gradients() {
     let b = fill(w, h, |x, y| 0.50 - 0.0005 * x as f32 + 0.0006 * y as f32);
     let mut img =
         AstroImage::from_planar_channels(ImageDimensions::new(Vec2us::new(w, h), 3), [r, g, b]);
-    extract_background(
+    extract_background_planar(
         &mut img,
         &BackgroundConfig {
             degree: 1,

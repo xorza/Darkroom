@@ -623,83 +623,110 @@ impl From<AstroImage> for Image {
     }
 }
 
+/// The `f32` target format a given image deinterleaves into: `L_F32` for
+/// grayscale, `RGB_F32` for color.
+fn astro_target_format(image: &Image) -> ColorFormat {
+    match image.desc.color_format.channel_count {
+        ChannelCount::L | ChannelCount::LA => ColorFormat::L_F32,
+        ChannelCount::Rgb | ChannelCount::Rgba => ColorFormat::RGB_F32,
+    }
+}
+
+/// Deinterleave an already-`f32` (`L_F32` / `RGB_F32`) imaginarium image into a
+/// planar [`AstroImage`]. This is the single unavoidable copy a per-channel op
+/// pays to get planar data; callers must convert to f32 first.
+fn astro_from_f32_image(image: &Image) -> AstroImage {
+    let desc = image.desc;
+    let width = desc.width;
+    let height = desc.height;
+    let stride_f32 = desc.stride / std::mem::size_of::<f32>();
+    let bytes = image.bytes();
+
+    let pixel_data = if desc.color_format == ColorFormat::L_F32 {
+        let mut data = vec![0.0f32; width * height];
+        if desc.is_packed() {
+            let pixels: &[f32] = bytemuck::cast_slice(bytes);
+            data.copy_from_slice(pixels);
+        } else {
+            let row_bytes = width * std::mem::size_of::<f32>();
+            let stride = desc.stride;
+            data.par_chunks_mut(width).enumerate().for_each(|(y, row)| {
+                let src_offset = y * stride;
+                let src_row: &[f32] =
+                    bytemuck::cast_slice(&bytes[src_offset..src_offset + row_bytes]);
+                row.copy_from_slice(src_row);
+            });
+        }
+        PixelData::L(Buffer2::new(width, height, data))
+    } else if desc.is_packed() {
+        let pixels: &[f32] = bytemuck::cast_slice(bytes);
+        let mut r: Buffer2<f32> = Buffer2::new_default(width, height);
+        let mut g: Buffer2<f32> = Buffer2::new_default(width, height);
+        let mut b: Buffer2<f32> = Buffer2::new_default(width, height);
+        deinterleave_rgb(pixels, r.pixels_mut(), g.pixels_mut(), b.pixels_mut());
+        PixelData::Rgb([r, g, b])
+    } else {
+        let pixels: &[f32] = bytemuck::cast_slice(bytes);
+        let mut r: Buffer2<f32> = Buffer2::new_default(width, height);
+        let mut g: Buffer2<f32> = Buffer2::new_default(width, height);
+        let mut b: Buffer2<f32> = Buffer2::new_default(width, height);
+        r.pixels_mut()
+            .par_chunks_mut(width)
+            .zip(g.pixels_mut().par_chunks_mut(width))
+            .zip(b.pixels_mut().par_chunks_mut(width))
+            .enumerate()
+            .for_each(|(y, ((r_row, g_row), b_row))| {
+                let row_start = y * stride_f32;
+                for x in 0..width {
+                    let src_idx = row_start + x * 3;
+                    r_row[x] = pixels[src_idx];
+                    g_row[x] = pixels[src_idx + 1];
+                    b_row[x] = pixels[src_idx + 2];
+                }
+            });
+        PixelData::Rgb([r, g, b])
+    };
+
+    let dimensions = ImageDimensions::new(
+        (width, height),
+        if matches!(pixel_data, PixelData::L(_)) {
+            1
+        } else {
+            3
+        },
+    );
+
+    AstroImage {
+        metadata: AstroImageMetadata::default(),
+        dimensions,
+        pixels: pixel_data,
+    }
+}
+
 impl From<Image> for AstroImage {
     fn from(image: Image) -> Self {
-        let desc = image.desc;
-
-        let target_format = match desc.color_format.channel_count {
-            ChannelCount::L | ChannelCount::LA => ColorFormat::L_F32,
-            ChannelCount::Rgb | ChannelCount::Rgba => ColorFormat::RGB_F32,
-        };
-
+        let target = astro_target_format(&image);
         let image = image
-            .convert(target_format)
+            .convert(target)
             .expect("Failed to convert image to f32");
+        astro_from_f32_image(&image)
+    }
+}
 
-        let desc = image.desc;
-        let width = desc.width;
-        let height = desc.height;
-        let stride_f32 = desc.stride / std::mem::size_of::<f32>();
-        let bytes = image.bytes();
-
-        let pixel_data = if desc.color_format == ColorFormat::L_F32 {
-            let mut data = vec![0.0f32; width * height];
-            if desc.is_packed() {
-                let pixels: &[f32] = bytemuck::cast_slice(bytes);
-                data.copy_from_slice(pixels);
-            } else {
-                let row_bytes = width * std::mem::size_of::<f32>();
-                let stride = desc.stride;
-                data.par_chunks_mut(width).enumerate().for_each(|(y, row)| {
-                    let src_offset = y * stride;
-                    let src_row: &[f32] =
-                        bytemuck::cast_slice(&bytes[src_offset..src_offset + row_bytes]);
-                    row.copy_from_slice(src_row);
-                });
-            }
-            PixelData::L(Buffer2::new(width, height, data))
-        } else if desc.is_packed() {
-            let pixels: &[f32] = bytemuck::cast_slice(bytes);
-            let mut r: Buffer2<f32> = Buffer2::new_default(width, height);
-            let mut g: Buffer2<f32> = Buffer2::new_default(width, height);
-            let mut b: Buffer2<f32> = Buffer2::new_default(width, height);
-            deinterleave_rgb(pixels, r.pixels_mut(), g.pixels_mut(), b.pixels_mut());
-            PixelData::Rgb([r, g, b])
+impl From<&Image> for AstroImage {
+    fn from(image: &Image) -> Self {
+        // Already f32: deinterleave straight from the borrow (one copy). A
+        // non-f32 image is rare here (the processing path is RGB_F32) and needs
+        // a format conversion, which can't borrow — so clone then convert.
+        let target = astro_target_format(image);
+        if image.desc.color_format == target {
+            astro_from_f32_image(image)
         } else {
-            let pixels: &[f32] = bytemuck::cast_slice(bytes);
-            let mut r: Buffer2<f32> = Buffer2::new_default(width, height);
-            let mut g: Buffer2<f32> = Buffer2::new_default(width, height);
-            let mut b: Buffer2<f32> = Buffer2::new_default(width, height);
-            r.pixels_mut()
-                .par_chunks_mut(width)
-                .zip(g.pixels_mut().par_chunks_mut(width))
-                .zip(b.pixels_mut().par_chunks_mut(width))
-                .enumerate()
-                .for_each(|(y, ((r_row, g_row), b_row))| {
-                    let row_start = y * stride_f32;
-                    for x in 0..width {
-                        let src_idx = row_start + x * 3;
-                        r_row[x] = pixels[src_idx];
-                        g_row[x] = pixels[src_idx + 1];
-                        b_row[x] = pixels[src_idx + 2];
-                    }
-                });
-            PixelData::Rgb([r, g, b])
-        };
-
-        let dimensions = ImageDimensions::new(
-            (width, height),
-            if matches!(pixel_data, PixelData::L(_)) {
-                1
-            } else {
-                3
-            },
-        );
-
-        AstroImage {
-            metadata: AstroImageMetadata::default(),
-            dimensions,
-            pixels: pixel_data,
+            let converted = image
+                .clone()
+                .convert(target)
+                .expect("Failed to convert image to f32");
+            astro_from_f32_image(&converted)
         }
     }
 }

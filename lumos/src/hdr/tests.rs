@@ -1,4 +1,4 @@
-use super::{HdrConfig, compress_dynamic_range};
+use super::{HdrConfig, compress_dynamic_range_planar};
 use crate::io::astro_image::{AstroImage, ImageDimensions};
 use common::Vec2us;
 
@@ -24,7 +24,7 @@ fn dome(width: usize, height: usize) -> Vec<f32> {
 fn hdr_amount_zero_is_identity() {
     let px = dome(64, 64);
     let mut img = gray(64, 64, px.clone());
-    compress_dynamic_range(
+    compress_dynamic_range_planar(
         &mut img,
         HdrConfig {
             scales: 3,
@@ -45,7 +45,7 @@ fn hdr_compresses_large_scale_contrast() {
     let ci = (h / 2) * w + w / 2;
     let in_contrast = px[ci] - px[0];
     let mut img = gray(w, h, px);
-    compress_dynamic_range(
+    compress_dynamic_range_planar(
         &mut img,
         HdrConfig {
             scales: 3,
@@ -68,7 +68,7 @@ fn hdr_amount_controls_compression() {
     let ci = (h / 2) * w + w / 2;
     let contrast_at = |amount: f32| {
         let mut img = gray(w, h, px.clone());
-        compress_dynamic_range(&mut img, HdrConfig { scales: 3, amount });
+        compress_dynamic_range_planar(&mut img, HdrConfig { scales: 3, amount });
         let o = img.channel(0).to_vec();
         o[ci] - o[0]
     };
@@ -92,7 +92,7 @@ fn hdr_preserves_fine_detail() {
         };
     }
     let mut img = gray(w, h, px.clone());
-    compress_dynamic_range(
+    compress_dynamic_range_planar(
         &mut img,
         HdrConfig {
             scales: 3,
@@ -112,7 +112,7 @@ fn hdr_preserves_fine_detail() {
 #[test]
 fn hdr_output_stays_in_range() {
     let mut img = gray(96, 96, dome(96, 96));
-    compress_dynamic_range(&mut img, HdrConfig::default());
+    compress_dynamic_range_planar(&mut img, HdrConfig::default());
     for &v in &img.channel(0).to_vec() {
         assert!((0.0..=1.0).contains(&v), "output in [0,1]: {v}");
     }
