@@ -1,4 +1,4 @@
-mod image_data;
+pub(crate) mod image_data;
 mod io;
 mod tiff;
 

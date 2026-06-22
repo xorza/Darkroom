@@ -1,24 +1,21 @@
-//! `Buffer2<T>` — a generic 2D buffer over `Vec<T>`.
-//!
-//! Vendored into imaginarium (adapted from the workspace `common` crate) so the
-//! crate stays standalone — it stores its size as plain `usize`s rather than
-//! `common::Vec2us` and carries no `serde` derives. The full API is kept even
-//! where the experimental planar image code (`image::image_data`) doesn't use
-//! all of it yet.
-#![allow(dead_code)]
+//! `Buffer2<T>` — a generic 2D buffer over `Vec<T>` with `(x, y)`, linear, and
+//! range indexing plus `Deref` to `[T]`. imaginarium's own (size stored as plain
+//! `usize`s — no `common::Vec2us` — and no `serde` derives, so the crate stays
+//! standalone); the planar `ImageData` is built on it, and `lumos` uses it as the
+//! channel-plane type for its `AstroImage`.
 
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range};
 use std::slice;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Buffer2<T> {
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Buffer2<T> {
     pixels: Vec<T>,
     width: usize,
     height: usize,
 }
 
 impl<T> Buffer2<T> {
-    pub(crate) fn new(width: usize, height: usize, pixels: Vec<T>) -> Self {
+    pub fn new(width: usize, height: usize, pixels: Vec<T>) -> Self {
         assert_eq!(
             pixels.len(),
             width * height,
@@ -32,63 +29,63 @@ impl<T> Buffer2<T> {
     }
 
     #[inline]
-    pub(crate) fn get(&self, x: usize, y: usize) -> &T {
+    pub fn get(&self, x: usize, y: usize) -> &T {
         assert!(x < self.width && y < self.height);
         &self.pixels[y * self.width + x]
     }
 
     #[inline]
-    pub(crate) fn get_mut(&mut self, x: usize, y: usize) -> &mut T {
+    pub fn get_mut(&mut self, x: usize, y: usize) -> &mut T {
         assert!(x < self.width && y < self.height);
         &mut self.pixels[y * self.width + x]
     }
 
     #[inline]
-    pub(crate) fn row(&self, y: usize) -> &[T] {
+    pub fn row(&self, y: usize) -> &[T] {
         assert!(y < self.height);
         let start = y * self.width;
         &self.pixels[start..start + self.width]
     }
 
     #[inline]
-    pub(crate) fn row_mut(&mut self, y: usize) -> &mut [T] {
+    pub fn row_mut(&mut self, y: usize) -> &mut [T] {
         assert!(y < self.height);
         let start = y * self.width;
         &mut self.pixels[start..start + self.width]
     }
 
     #[inline]
-    pub(crate) fn index(&self, x: usize, y: usize) -> usize {
+    pub fn index(&self, x: usize, y: usize) -> usize {
         y * self.width + x
     }
 
     #[inline]
-    pub(crate) fn width(&self) -> usize {
+    pub fn width(&self) -> usize {
         self.width
     }
 
     #[inline]
-    pub(crate) fn height(&self) -> usize {
+    pub fn height(&self) -> usize {
         self.height
     }
 
     #[inline]
-    pub(crate) fn pixels(&self) -> &[T] {
+    pub fn pixels(&self) -> &[T] {
         &self.pixels
     }
 
     #[inline]
-    pub(crate) fn pixels_mut(&mut self) -> &mut [T] {
+    pub fn pixels_mut(&mut self) -> &mut [T] {
         &mut self.pixels
     }
 
     #[inline]
-    pub(crate) fn into_vec(self) -> Vec<T> {
+    pub fn into_vec(self) -> Vec<T> {
         self.pixels
     }
 
     #[inline]
-    pub(crate) fn copy_from(&mut self, other: &Self)
+    pub fn copy_from(&mut self, other: &Self)
     where
         T: Copy,
     {
@@ -99,7 +96,7 @@ impl<T> Buffer2<T> {
 }
 
 impl<T: Default + Clone> Buffer2<T> {
-    pub(crate) fn new_default(width: usize, height: usize) -> Self {
+    pub fn new_default(width: usize, height: usize) -> Self {
         Self {
             pixels: vec![T::default(); width * height],
             width,
@@ -109,7 +106,7 @@ impl<T: Default + Clone> Buffer2<T> {
 }
 
 impl<T: Clone> Buffer2<T> {
-    pub(crate) fn new_filled(width: usize, height: usize, value: T) -> Self {
+    pub fn new_filled(width: usize, height: usize, value: T) -> Self {
         Self {
             pixels: vec![value; width * height],
             width,

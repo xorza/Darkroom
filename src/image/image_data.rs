@@ -22,14 +22,14 @@ use crate::common::buffer2::Buffer2;
 /// the shipping channel counts — `1` (L), `3` (RGB), `4` (RGBA) — are valid;
 /// that's checked per monomorphization via a `const` assert in the constructors.
 #[derive(Debug, Clone)]
-pub(crate) struct ImageData<const N: usize, T> {
+pub struct ImageData<const N: usize, T> {
     /// One plane per channel; all share `width × height`.
-    pub(crate) channels: [Buffer2<T>; N],
+    pub channels: [Buffer2<T>; N],
 }
 
 impl<const N: usize, T> ImageData<N, T> {
     /// Wrap `N` channel planes. All planes must share the same dimensions.
-    pub(crate) fn from_channels(channels: [Buffer2<T>; N]) -> Self {
+    pub fn from_channels(channels: [Buffer2<T>; N]) -> Self {
         const {
             assert!(
                 N == 1 || N == 3 || N == 4,
@@ -46,19 +46,19 @@ impl<const N: usize, T> ImageData<N, T> {
     }
 
     /// Width in pixels (shared across all planes).
-    pub(crate) fn width(&self) -> usize {
+    pub fn width(&self) -> usize {
         self.channels[0].width()
     }
 
     /// Height in pixels (shared across all planes).
-    pub(crate) fn height(&self) -> usize {
+    pub fn height(&self) -> usize {
         self.channels[0].height()
     }
 }
 
 impl<const N: usize, T: Default + Clone> ImageData<N, T> {
     /// A `width × height` image with all `N` planes zero-filled.
-    pub(crate) fn new_zeroed(width: usize, height: usize) -> Self {
+    pub fn new_zeroed(width: usize, height: usize) -> Self {
         const {
             assert!(
                 N == 1 || N == 3 || N == 4,
@@ -125,12 +125,12 @@ macro_rules! with_inner {
 
 impl AnyImageData {
     /// Width in pixels, regardless of format.
-    pub(crate) fn width(&self) -> usize {
+    pub fn width(&self) -> usize {
         with_inner!(self, img => img.width())
     }
 
     /// Height in pixels, regardless of format.
-    pub(crate) fn height(&self) -> usize {
+    pub fn height(&self) -> usize {
         with_inner!(self, img => img.height())
     }
 

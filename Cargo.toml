@@ -26,6 +26,7 @@ paste = { version = "1.0" }
 atomic_refcell = { version = "0.1" }
 arc-swap = { version = "1.9" }
 aligned-vec = { version = "0.6" }
+serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
 quickbench = "0.1"

@@ -37,6 +37,8 @@ pub use crate::common::color_format::{
 };
 pub use crate::common::error::{Error, Result};
 
+pub use crate::common::buffer2::Buffer2;
+pub use crate::image::image_data::ImageData;
 pub use crate::image::{Image, ImageDesc, SUPPORTED_EXTENSIONS};
 
 pub use crate::processing_context::ProcessingContext;
