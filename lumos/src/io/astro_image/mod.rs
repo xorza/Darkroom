@@ -15,7 +15,7 @@ use std::path::Path;
 
 use common::Rgb;
 use common::Vec2us;
-use imaginarium::{Buffer2, ImageData};
+use imaginarium::{Buffer2, DeinterleavedImageData};
 
 use crate::io::raw::load_raw;
 use crate::math::sum::sum_f32;
@@ -155,15 +155,15 @@ pub struct AstroImageMetadata {
 /// Pixel data storage - planar format for efficient per-channel operations.
 #[derive(Debug, Clone)]
 pub(crate) enum PixelData {
-    L(ImageData<1, f32>),
-    Rgb(ImageData<3, f32>),
+    L(DeinterleavedImageData<1, f32>),
+    Rgb(DeinterleavedImageData<3, f32>),
 }
 
 impl PixelData {
     pub fn new_default(width: usize, height: usize, channels: usize) -> Self {
         match channels {
-            1 => PixelData::L(ImageData::new_zeroed(width, height)),
-            3 => PixelData::Rgb(ImageData::new_zeroed(width, height)),
+            1 => PixelData::L(DeinterleavedImageData::new_zeroed(width, height)),
+            3 => PixelData::Rgb(DeinterleavedImageData::new_zeroed(width, height)),
             _ => panic!("Only 1 or 3 channels supported, got {channels}"),
         }
     }
@@ -283,7 +283,7 @@ impl AstroImage {
         let width = dimensions.size.x;
         let height = dimensions.size.y;
         let pixel_data = if dimensions.is_grayscale() {
-            PixelData::L(ImageData::from_channels([Buffer2::new(
+            PixelData::L(DeinterleavedImageData::from_channels([Buffer2::new(
                 width, height, pixels,
             )]))
         } else {
@@ -291,7 +291,7 @@ impl AstroImage {
             let mut g: Buffer2<f32> = Buffer2::new_default(width, height);
             let mut b: Buffer2<f32> = Buffer2::new_default(width, height);
             deinterleave_rgb(&pixels, r.pixels_mut(), g.pixels_mut(), b.pixels_mut());
-            PixelData::Rgb(ImageData::from_channels([r, g, b]))
+            PixelData::Rgb(DeinterleavedImageData::from_channels([r, g, b]))
         };
 
         AstroImage {
@@ -319,7 +319,9 @@ impl AstroImage {
                 "Channel 0 pixel count mismatch"
             );
             assert!(iter.next().is_none(), "Too many channels for grayscale");
-            PixelData::L(ImageData::from_channels([Buffer2::new(width, height, ch)]))
+            PixelData::L(DeinterleavedImageData::from_channels([Buffer2::new(
+                width, height, ch,
+            )]))
         } else {
             let r = iter.next().expect("Expected 3 channels for RGB");
             let g = iter.next().expect("Expected 3 channels for RGB");
@@ -340,7 +342,7 @@ impl AstroImage {
                 "B channel pixel count mismatch"
             );
             assert!(iter.next().is_none(), "Too many channels for RGB");
-            PixelData::Rgb(ImageData::from_channels([
+            PixelData::Rgb(DeinterleavedImageData::from_channels([
                 Buffer2::new(width, height, r),
                 Buffer2::new(width, height, g),
                 Buffer2::new(width, height, b),
@@ -657,7 +659,7 @@ fn astro_from_f32_image(image: &Image) -> AstroImage {
     let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
 
     let pixel_data = if desc.color_format == ColorFormat::L_F32 {
-        PixelData::L(ImageData::from_channels([Buffer2::new(
+        PixelData::L(DeinterleavedImageData::from_channels([Buffer2::new(
             width,
             height,
             pixels.to_vec(),
@@ -667,7 +669,7 @@ fn astro_from_f32_image(image: &Image) -> AstroImage {
         let mut g: Buffer2<f32> = Buffer2::new_default(width, height);
         let mut b: Buffer2<f32> = Buffer2::new_default(width, height);
         deinterleave_rgb(pixels, r.pixels_mut(), g.pixels_mut(), b.pixels_mut());
-        PixelData::Rgb(ImageData::from_channels([r, g, b]))
+        PixelData::Rgb(DeinterleavedImageData::from_channels([r, g, b]))
     };
 
     let dimensions = ImageDimensions::new(
