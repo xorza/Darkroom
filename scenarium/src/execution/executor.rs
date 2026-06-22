@@ -17,7 +17,7 @@ use crate::data::DynamicValue;
 use crate::execution_stats::{
     ExecutedNodeStats, ExecutionStats, FlattenMap, NodeError, RunPhase, RunProgress,
 };
-use crate::func_lambda::InvokeInput;
+use crate::func_lambda::{InvokeError, InvokeInput};
 use crate::graph::{InputPort, NodeId};
 use crate::prelude::AnyState;
 
@@ -182,18 +182,24 @@ impl Executor {
                         outputs,
                     )
                     .await
-                    .map_err(|e| Error::Invoke {
-                        func_id,
-                        message: e.to_string(),
+                    .map_err(|e| match e {
+                        // A lambda that bailed on cancel reports it truthfully;
+                        // surface it as a cancel rather than a generic invoke error.
+                        InvokeError::Cancelled => Error::Cancelled { func_id },
+                        other => Error::Invoke {
+                            func_id,
+                            message: other.to_string(),
+                        },
                     })
             };
 
             let run_time = invoke_start.elapsed().as_secs_f64();
-            // A lambda bails on cancel by returning `Ok` (with partial/no
-            // output) — so an `Ok` seen while the run is cancelled means this
-            // node was in-flight at cancel time. Report that truthfully as
-            // `Cancelled` (the error path drops its output so it re-runs); a
-            // genuine error stands on its own, even mid-cancel.
+            // A cancellable lambda reports a cancel itself (→ `Error::Cancelled`
+            // above). This is the safety net for the rest: a lambda that doesn't
+            // poll the token (a builtin, a single decode) but ran while the run
+            // was cancelled returns `Ok` with a result from an aborted run — map
+            // that to `Cancelled` too so its output isn't cached. A genuine
+            // error stands on its own, even mid-cancel.
             let result = match result {
                 Ok(()) if self.ctx_manager.cancel.is_cancelled() => {
                     Err(Error::Cancelled { func_id })

@@ -14,6 +14,13 @@ use crate::{
 pub enum InvokeError {
     #[error("{0}")]
     External(#[from] anyhow::Error),
+    /// The lambda bailed because the run was cancelled. The executor maps this
+    /// to `execution::Error::Cancelled` (a cancel is not a failure): the node's
+    /// output is dropped so it re-runs, and it's reported as cancelled, not
+    /// errored. A lambda doing heavy cancellable work returns this when it
+    /// observes the cancel token set.
+    #[error("cancelled")]
+    Cancelled,
 }
 
 pub type InvokeResult<T> = Result<T, InvokeError>;

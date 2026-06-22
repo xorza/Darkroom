@@ -22,7 +22,7 @@ use lumos::{
 use scenarium::data::{
     DataType, DynamicValue, EnumVariants, FsPathConfig, FsPathMode, StaticValue,
 };
-use scenarium::func_lambda::{FuncLambda, InvokeResult};
+use scenarium::func_lambda::{FuncLambda, InvokeError, InvokeResult};
 use scenarium::function::{Func, FuncInput, FuncLib, ValueVariant};
 
 use crate::astro::configs::{
@@ -142,14 +142,12 @@ pub fn astro_funclib() -> FuncLib {
 
                     // Stacking many full-resolution CFA frames is heavy CPU work
                     // (polls `cancel` between decode frames + combine rows); a
-                    // cached master is loaded instead when present.
-                    let Some(masters) = run_cancellable(cancel, move |c| {
+                    // cached master is loaded instead when present. A cancel
+                    // propagates out as `InvokeError::Cancelled` via `?`.
+                    let masters = run_cancellable(cancel, move |c| {
                         build_masters_cached(dirs, sigma, cache, c)
                     })
-                    .await?
-                    else {
-                        return Ok(());
-                    };
+                    .await?;
 
                     outputs[0] = DynamicValue::from_custom(Masters::from(masters));
 
@@ -253,7 +251,8 @@ pub fn astro_funclib() -> FuncLib {
 
                     // Load → calibrate → demosaic → detect → register → combine:
                     // heavy synchronous CPU work that polls `cancel` throughout.
-                    let Some(result) = run_cancellable(cancel, move |c| {
+                    // A cancel propagates out as `InvokeError::Cancelled` via `?`.
+                    let result = run_cancellable(cancel, move |c| {
                         let empty = CalibrationMasters {
                             master_dark: None,
                             master_flat: None,
@@ -268,10 +267,7 @@ pub fn astro_funclib() -> FuncLib {
                         calibrate_align_stack(&lights, masters, &config, c)
                             .map_err(anyhow::Error::from)
                     })
-                    .await?
-                    else {
-                        return Ok(());
-                    };
+                    .await?;
 
                     outputs[0] = DynamicValue::from_custom(AstroFrame::from(result.image));
                     outputs[1] = DynamicValue::from_custom(AstroFrame::from(plane_to_frame(
@@ -769,13 +765,13 @@ where
 /// loaded from `master_<role>.lcm` next to its frames when present, and a
 /// freshly-stacked one is written there for next time. Delete the `.lcm` to
 /// force a rebuild (a changed frame set is not auto-detected).
-/// Run a cancellable blocking lumos op off the worker. Returns `Ok(None)` when
-/// the run was cancelled (the node should bail with no output), `Ok(Some(v))` on
-/// success, `Err` on a real failure. Centralizes the `spawn_blocking` + join
-/// handling and the "a cancelled op is a clean bail, not an errored node" rule
-/// the heavy astro nodes share — a lumos op reports cancellation as an error, so
-/// it's only a bail when the cancel token is actually set.
-async fn run_cancellable<T, F>(cancel: CancelToken, op: F) -> InvokeResult<Option<T>>
+/// Run a cancellable blocking lumos op off the worker. Centralizes the
+/// `spawn_blocking` + join handling and the "a cancelled op is a cancel, not a
+/// failure" rule the heavy astro nodes share: a lumos op reports cancellation as
+/// its own error, so when the token is set its failure is surfaced as
+/// [`InvokeError::Cancelled`] (the executor turns that into `Error::Cancelled` —
+/// no output, re-runs next time), and a genuine failure as `Err` otherwise.
+async fn run_cancellable<T, F>(cancel: CancelToken, op: F) -> InvokeResult<T>
 where
     F: FnOnce(CancelToken) -> anyhow::Result<T> + Send + 'static,
     T: Send + 'static,
@@ -785,8 +781,8 @@ where
         .await
         .map_err(anyhow::Error::from)?
     {
-        Ok(value) => Ok(Some(value)),
-        Err(_) if cancel.is_cancelled() => Ok(None),
+        Ok(value) => Ok(value),
+        Err(_) if cancel.is_cancelled() => Err(InvokeError::Cancelled),
         Err(err) => Err(err.into()),
     }
 }

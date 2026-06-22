@@ -866,6 +866,73 @@ mod behavior {
         Ok(())
     }
 
+    /// A lambda that bails by returning `InvokeError::Cancelled` is reported as
+    /// `Error::Cancelled` (not a generic `Invoke` error) and dropped from the
+    /// executed set — the truthful lambda-level signal, distinct from the
+    /// executor's flag-check fallback covered above (asserted here without
+    /// touching the flag, so only the error mapping can produce the verdict).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn lambda_cancelled_error_maps_to_error_cancelled() -> anyhow::Result<()> {
+        use crate::async_lambda;
+        use crate::execution_stats::NodeError;
+        use crate::func_lambda::InvokeError;
+        use crate::function::{Func, FuncLib, FuncOutput};
+        use crate::graph::{Graph, NodeId};
+
+        let func_lib: FuncLib = [Func {
+            id: "8003e30b-0417-474d-a77f-1d3ea71ac6b3".into(),
+            name: "always_cancel".to_string(),
+            description: None,
+            category: "Debug".to_string(),
+            behavior: FuncBehavior::Pure,
+            terminal: true,
+            inputs: vec![],
+            outputs: vec![FuncOutput {
+                name: "out".to_string(),
+                data_type: DataType::Int,
+            }],
+            events: vec![],
+            required_contexts: vec![],
+            lambda: async_lambda!(move |_, _, _, _, _, _| { Err(InvokeError::Cancelled) }),
+            ..Default::default()
+        }]
+        .into();
+
+        let mut graph = Graph::default();
+        let node_id: NodeId = "c791f8aa-3bf9-435d-8530-f3904b4b6a28".into();
+        let mut node: Node = func_lib.by_name("always_cancel").unwrap().into();
+        node.id = node_id;
+        graph.add(node);
+        graph.validate();
+
+        let mut eg = ExecutionEngine::default();
+        eg.update(&graph, &func_lib);
+        let stats = eg
+            .execute(
+                true,
+                false,
+                Vec::<EventRef>::new(),
+                None,
+                common::CancelToken::new(),
+            )
+            .await?;
+
+        assert!(
+            stats.executed_nodes.is_empty(),
+            "a cancelled lambda is not reported executed"
+        );
+        assert!(
+            matches!(
+                stats.node_errors.as_slice(),
+                [NodeError { node_id: n, error: Error::Cancelled { .. } }] if *n == node_id
+            ),
+            "InvokeError::Cancelled maps to Error::Cancelled, not Invoke: {:?}",
+            stats.node_errors
+        );
+
+        Ok(())
+    }
+
     #[test]
     fn impure_node_always_invoked() -> anyhow::Result<()> {
         let mut graph = test_graph();
