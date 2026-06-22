@@ -15,8 +15,12 @@ use crate::common::color_format::ColorFormat;
 use crate::common::conversion::convert_image;
 use crate::common::error::{Error, Result};
 
-/// 16-byte alignment for image data to enable SIMD operations and zero-copy casting to f32/f64.
-const ALIGNMENT: usize = 16;
+/// Alignment of the pixel buffer. The only hard requirement is that `u16`/`f32`
+/// channels can be read via `bytemuck::cast_slice`, which panics unless the
+/// buffer is aligned to the element type; `align_of::<f32>()` (4) covers every
+/// supported element type (`u8`/`u16`/`f32`). The SIMD kernels all use unaligned
+/// loads, so nothing benefits from over-aligning further.
+const ALIGNMENT: usize = std::mem::align_of::<f32>();
 
 /// Image dimensions + pixel format. Pixel data is **always tightly packed**
 /// (`row_bytes == width * bytes_per_pixel`, no inter-row padding) — any row
@@ -29,9 +33,9 @@ pub struct ImageDesc {
     pub color_format: ColorFormat,
 }
 
-/// An image with pixel data stored in 16-byte aligned memory.
-///
-/// The 16-byte alignment enables SIMD operations and allows zero-copy casting to/from `Vec<f32>` or `Vec<f64>`.
+/// An image: a tightly-packed, [`ALIGNMENT`]-aligned byte buffer plus the
+/// [`ImageDesc`] that says how to interpret it. The bytes are reinterpreted as
+/// `u8`/`u16`/`f32` per the format via `bytemuck::cast_slice` at the use sites.
 #[derive(Clone, Debug)]
 pub struct Image {
     pub desc: ImageDesc,
