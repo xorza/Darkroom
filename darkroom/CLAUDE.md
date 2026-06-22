@@ -235,7 +235,8 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
 - **Cancel** (coarse): **Run ▸ Cancel Run** shows while `run_state.is_running()`
   (a `running` flag, set by `begin_run`, cleared by `set_results`); it routes
   `MenuCommand::CancelRun` → `Engine::cancel_run` → `WorkerBridge::cancel_run` →
-  `Worker::request_cancel` (a shared atomic the executor polls between nodes). The
+  `Worker::request_cancel` (a shared `common::CancelToken` the executor polls
+  between nodes). The
   in-flight node still finishes (its blocking work isn't interrupted — that's
   P3), but nothing further runs and the run reports `stats.cancelled`.
 - **Status + logs persist across re-runs** (the glow doesn't blank during

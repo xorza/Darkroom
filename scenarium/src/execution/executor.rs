@@ -5,12 +5,11 @@
 //! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan), [`Executor::run`] invokes
 //! each scheduled node's lambda and gathers stats.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use tokio::sync::mpsc::UnboundedSender;
 
-use common::{KeyIndexKey, KeyIndexVec};
+use common::{CancelToken, KeyIndexKey, KeyIndexVec};
 
 use crate::common::shared_any_state::SharedAnyState;
 use crate::context::ContextManager;
@@ -25,6 +24,11 @@ use crate::prelude::AnyState;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{ExecutionBinding, ExecutionNode, ExecutionProgram};
 use crate::execution::{Error, OutputUsage};
+
+/// Whether the run's cancel token (if any) is set.
+fn is_cancelled(cancel: &Option<CancelToken>) -> bool {
+    cancel.as_ref().is_some_and(|c| c.is_cancelled())
+}
 
 /// Per-node runtime state, index-aligned to the program's `e_nodes`: the
 /// cross-run value cache (`state`, `event_state`, `output_values`) plus per-run
@@ -99,9 +103,13 @@ impl Executor {
         plan: &ExecutionPlan,
         flatten: &FlattenMap,
         progress: Option<&UnboundedSender<RunProgress>>,
-        cancel: Option<&AtomicBool>,
+        cancel: Option<CancelToken>,
     ) -> ExecutionStats {
         let start = Instant::now();
+        // Hold the cancel flag on the context so lambdas can poll it inside
+        // off-thread work, and so the loop-top / post-loop checks below read
+        // one source.
+        self.ctx_manager.cancel = cancel;
 
         // Clear the previous run's per-run results.
         for slot in self.slots.iter_mut() {
@@ -121,7 +129,7 @@ impl Executor {
             // Coarse cancel: stop scheduling further nodes. A node already
             // mid-invoke isn't interrupted (it finishes), but nothing after
             // it starts. The unrun nodes simply don't appear in the stats.
-            if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+            if is_cancelled(&self.ctx_manager.cancel) {
                 executed_count = pos;
                 break;
             }
@@ -206,7 +214,7 @@ impl Executor {
         self.ctx_manager.current_node = None;
         let mut stats = self.collect_execution_stats(program, plan, start, executed_count);
         stats.logs = std::mem::take(&mut self.ctx_manager.logs);
-        stats.cancelled = cancel.is_some_and(|c| c.load(Ordering::Relaxed));
+        stats.cancelled = is_cancelled(&self.ctx_manager.cancel);
         self.inputs = inputs;
         self.output_usage = output_usage;
         stats

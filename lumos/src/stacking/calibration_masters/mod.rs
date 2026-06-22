@@ -10,8 +10,10 @@ mod tests;
 
 use std::path::Path;
 
+use common::CancelToken;
+
 use crate::io::astro_image::cfa::CfaImage;
-use crate::stacking::combine::cache::CfaCache;
+use crate::stacking::combine::cache::{CfaCache, is_cancelled};
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::progress::ProgressCallback;
@@ -97,6 +99,7 @@ pub struct CalibrationMasters {
 pub fn stack_cfa_master(
     paths: &[impl AsRef<Path> + Sync],
     config: StackConfig,
+    cancel: Option<CancelToken>,
 ) -> Result<Option<CfaImage>, Error> {
     if paths.is_empty() {
         return Ok(None);
@@ -111,9 +114,13 @@ pub fn stack_cfa_master(
         config
     };
 
-    let cache = CfaCache::from_paths(paths, &config.cache, ProgressCallback::default())?;
+    let mut cache = CfaCache::from_paths(paths, &config.cache, ProgressCallback::default())?;
+    cache.core.cancel = cancel;
 
     let result = run_stacking(&cache, &config);
+    if is_cancelled(&cache.core.cancel) {
+        return Err(Error::Cancelled);
+    }
 
     Ok(Some(result))
 }
@@ -167,10 +174,10 @@ impl CalibrationMasters {
         frames: CalibrationFrames<'_, P>,
         sigma_threshold: f32,
     ) -> Result<Self, Error> {
-        let dark = stack_cfa_master(frames.darks, StackConfig::dark())?;
-        let flat = stack_cfa_master(frames.flats, StackConfig::flat())?;
-        let bias = stack_cfa_master(frames.bias, StackConfig::bias())?;
-        let flat_dark = stack_cfa_master(frames.flat_darks, StackConfig::dark())?;
+        let dark = stack_cfa_master(frames.darks, StackConfig::dark(), None)?;
+        let flat = stack_cfa_master(frames.flats, StackConfig::flat(), None)?;
+        let bias = stack_cfa_master(frames.bias, StackConfig::bias(), None)?;
+        let flat_dark = stack_cfa_master(frames.flat_darks, StackConfig::dark(), None)?;
         Ok(Self::from_images(
             CalibrationImages {
                 dark,

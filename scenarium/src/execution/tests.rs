@@ -713,7 +713,7 @@ mod behavior {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn execute_honors_cancel_flag_and_marks_cancelled() -> anyhow::Result<()> {
-        use std::sync::atomic::AtomicBool;
+        use common::CancelToken;
 
         let graph = test_graph();
         let func_lib = test_func_lib(default_hooks());
@@ -722,9 +722,10 @@ mod behavior {
 
         // Pre-tripped: the executor breaks at the first loop-top check, so no
         // node runs and the run is flagged cancelled.
-        let cancel = AtomicBool::new(true);
+        let tripped = CancelToken::new();
+        tripped.cancel();
         let stats = eg
-            .execute(true, false, Vec::<EventRef>::new(), None, Some(&cancel))
+            .execute(true, false, Vec::<EventRef>::new(), None, Some(tripped))
             .await?;
         assert!(stats.cancelled, "pre-tripped run is cancelled");
         assert!(
@@ -732,11 +733,16 @@ mod behavior {
             "no node runs when cancel is already set"
         );
 
-        // A fresh, un-cancelled flag runs the whole graph (nothing cached from
+        // A fresh, un-cancelled token runs the whole graph (nothing cached from
         // the aborted run above).
-        let cancel = AtomicBool::new(false);
         let stats = eg
-            .execute(true, false, Vec::<EventRef>::new(), None, Some(&cancel))
+            .execute(
+                true,
+                false,
+                Vec::<EventRef>::new(),
+                None,
+                Some(CancelToken::new()),
+            )
             .await?;
         assert!(!stats.cancelled);
         assert_eq!(

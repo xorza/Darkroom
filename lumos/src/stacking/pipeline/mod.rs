@@ -13,12 +13,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::Buffer2;
+use common::CancelToken;
 
 use crate::io::astro_image::AstroImage;
 use crate::io::astro_image::error::ImageError;
 use crate::io::raw::load_raw_cfa;
 use crate::stacking::calibration_masters::CalibrationMasters;
 use crate::stacking::calibration_masters::cosmic_ray::{CosmicRayConfig, reject_cosmic_rays};
+use crate::stacking::combine::cache::is_cancelled;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::combine::progress::ProgressCallback;
@@ -108,6 +110,7 @@ pub enum Error {
 pub fn align_and_stack(
     lights: Vec<AstroImage>,
     config: &AlignStackConfig,
+    cancel: Option<CancelToken>,
 ) -> Result<AlignStackResult, Error> {
     if lights.is_empty() {
         return Err(Error::NoFrames);
@@ -247,7 +250,12 @@ pub fn align_and_stack(
 
     let registered = frames.len();
     tracing::info!(frames = registered, "Stacking aligned frames");
-    let stacked = stack_images(frames, config.stack.clone(), ProgressCallback::default())?;
+    let stacked = stack_images(
+        frames,
+        config.stack.clone(),
+        ProgressCallback::default(),
+        cancel,
+    )?;
     tracing::info!("Stack complete");
 
     Ok(AlignStackResult {
@@ -274,6 +282,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     light_paths: &[P],
     masters: &CalibrationMasters,
     config: &AlignStackConfig,
+    cancel: Option<CancelToken>,
 ) -> Result<AlignStackResult, Error> {
     let total = light_paths.len();
     tracing::info!(
@@ -284,6 +293,11 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     let calibrated: Vec<AstroImage> = light_paths
         .par_iter()
         .map(|path| {
+            // Cancel between frames: stop launching new RAW decodes (the slow
+            // phase) once the run is cancelled. In-flight frames finish.
+            if is_cancelled(&cancel) {
+                return Err(Error::Stack(StackError::Cancelled));
+            }
             let mut cfa = load_raw_cfa(path.as_ref()).map_err(|source| Error::Load {
                 path: path.as_ref().to_path_buf(),
                 source,
@@ -310,7 +324,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
         })
         .collect::<Result<Vec<_>, Error>>()?;
 
-    align_and_stack(calibrated, config)
+    align_and_stack(calibrated, config, cancel)
 }
 
 #[cfg(test)]
@@ -344,7 +358,7 @@ mod tests {
             reference: Reference::Index(0),
             ..Default::default()
         };
-        let result = align_and_stack(frames, &config).expect("stack");
+        let result = align_and_stack(frames, &config, None).expect("stack");
 
         assert_eq!(result.reference, 0);
         assert_eq!(result.registered, 3, "all three frames should stack");
@@ -377,7 +391,7 @@ mod tests {
             reference: Reference::Index(0),
             ..Default::default()
         };
-        let result = align_and_stack(frames, &config).expect("stack");
+        let result = align_and_stack(frames, &config, None).expect("stack");
 
         assert_eq!(result.dropped, vec![2], "blank frame should be dropped");
         assert_eq!(result.registered, 2, "reference + one aligned frame");
@@ -392,7 +406,7 @@ mod tests {
         let sparse = AstroImage::from_pixels(dims, vec![0.1; dims.size.x * dims.size.y]);
         let frames = vec![sparse, base.clone(), shifted(&base, &reg, 4.0, -3.0)];
 
-        let result = align_and_stack(frames, &AlignStackConfig::default()).expect("stack");
+        let result = align_and_stack(frames, &AlignStackConfig::default(), None).expect("stack");
         assert_ne!(
             result.reference, 0,
             "Auto must not anchor on the near-blank frame"
@@ -406,7 +420,7 @@ mod tests {
 
     #[test]
     fn empty_input_errors() {
-        let err = align_and_stack(Vec::new(), &AlignStackConfig::default()).unwrap_err();
+        let err = align_and_stack(Vec::new(), &AlignStackConfig::default(), None).unwrap_err();
         assert!(matches!(err, Error::NoFrames));
     }
 
@@ -438,7 +452,7 @@ mod tests {
         let lights = &all[..all.len().min(3)];
         assert!(lights.len() >= 2, "need ≥2 lights to exercise registration");
 
-        let result = calibrate_align_stack(lights, &masters, &AlignStackConfig::default())
+        let result = calibrate_align_stack(lights, &masters, &AlignStackConfig::default(), None)
             .expect("calibrate_align_stack");
 
         // A real stacked image came out, and every input frame is accounted for.

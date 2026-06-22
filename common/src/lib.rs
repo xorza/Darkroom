@@ -19,6 +19,7 @@ pub mod test_utils;
 
 pub(crate) mod bit_buffer2;
 pub(crate) mod buffer2;
+pub(crate) mod cancel_token;
 pub(crate) mod constants;
 pub(crate) mod debug;
 pub(crate) mod file_format;
@@ -38,6 +39,7 @@ pub(crate) mod vec2us;
 
 pub use bit_buffer2::{BitBuffer2, BitIter};
 pub use buffer2::Buffer2;
+pub use cancel_token::CancelToken;
 pub use constants::EPSILON;
 pub use debug::is_debug;
 pub use file_format::{FileExtensionError, FileFormatResult, SerdeFormat};

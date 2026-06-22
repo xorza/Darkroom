@@ -9,6 +9,7 @@ use std::str::FromStr;
 use std::sync::{Arc, LazyLock};
 
 use common::Buffer2;
+use common::CancelToken;
 use common::file_utils::astro_image_files;
 use imaginarium::Image as RawImage;
 use lumos::{
@@ -122,7 +123,8 @@ pub fn astro_funclib() -> FuncLib {
             )
             .input(FuncInput::required("cache", DataType::Bool).default(true))
             .output("masters", MASTERS_DATA_TYPE.clone())
-            .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+            .lambda(FuncLambda::new(move |ctx, _, _, inputs, _, outputs| {
+                let cancel = ctx.cancel_flag();
                 Box::pin(async move {
                     assert_eq!(inputs.len(), 6);
                     assert_eq!(outputs.len(), 1);
@@ -138,13 +140,20 @@ pub fn astro_funclib() -> FuncLib {
                         .expect("sigma is required");
                     let cache = inputs[5].value.as_bool().expect("cache is required");
 
-                    // Stacking many full-resolution CFA frames is heavy CPU work;
-                    // a cached master is loaded instead when present.
+                    // Stacking many full-resolution CFA frames is heavy CPU work
+                    // (polls `cancel` between chunks); a cached master is loaded
+                    // instead when present.
+                    let cancel_for_op = cancel.clone();
                     let masters = tokio::task::spawn_blocking(move || {
-                        build_masters_cached(dirs, sigma, cache)
+                        build_masters_cached(dirs, sigma, cache, cancel_for_op)
                     })
                     .await
-                    .map_err(anyhow::Error::from)??;
+                    .map_err(anyhow::Error::from)?;
+                    let masters = match masters {
+                        Ok(masters) => masters,
+                        Err(_) if is_cancelled(&cancel) => return Ok(()),
+                        Err(err) => return Err(err.into()),
+                    };
 
                     outputs[0] = DynamicValue::from_custom(Masters::from(masters));
 
@@ -181,7 +190,9 @@ pub fn astro_funclib() -> FuncLib {
             .output("image", ASTRO_FRAME_DATA_TYPE.clone())
             .output("coverage", ASTRO_FRAME_DATA_TYPE.clone())
             .output("weight", ASTRO_FRAME_DATA_TYPE.clone())
-            .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+            .lambda(FuncLambda::new(move |ctx, _, _, inputs, _, outputs| {
+                // Grab the run's cancel flag so the heavy lumos op can poll it.
+                let cancel = ctx.cancel_flag();
                 Box::pin(async move {
                     assert_eq!(inputs.len(), 6);
                     assert_eq!(outputs.len(), 3);
@@ -245,7 +256,9 @@ pub fn astro_funclib() -> FuncLib {
                     };
 
                     // Load → calibrate → demosaic → detect → register → combine:
-                    // the whole pipeline is heavy synchronous CPU work.
+                    // the whole pipeline is heavy synchronous CPU work that polls
+                    // `cancel` between frames + stacking chunks.
+                    let cancel_for_op = cancel.clone();
                     let result = tokio::task::spawn_blocking(move || {
                         let empty = CalibrationMasters {
                             master_dark: None,
@@ -258,11 +271,17 @@ pub fn astro_funclib() -> FuncLib {
                             .as_custom::<Masters>()
                             .map(|m| &m.masters)
                             .unwrap_or(&empty);
-                        calibrate_align_stack(&lights, masters, &config)
+                        calibrate_align_stack(&lights, masters, &config, cancel_for_op)
                     })
                     .await
-                    .map_err(anyhow::Error::from)?
                     .map_err(anyhow::Error::from)?;
+                    let result = match result {
+                        Ok(result) => result,
+                        // A cancelled run bails cleanly (no output, no error);
+                        // any other failure propagates.
+                        Err(_) if is_cancelled(&cancel) => return Ok(()),
+                        Err(err) => return Err(anyhow::Error::from(err).into()),
+                    };
 
                     outputs[0] = DynamicValue::from_custom(AstroFrame::from(result.image));
                     outputs[1] = DynamicValue::from_custom(AstroFrame::from(plane_to_frame(
@@ -760,10 +779,18 @@ where
 /// loaded from `master_<role>.lcm` next to its frames when present, and a
 /// freshly-stacked one is written there for next time. Delete the `.lcm` to
 /// force a rebuild (a changed frame set is not auto-detected).
+/// Whether the run's cancel token (if any) is set — a heavy lumos op that
+/// returns early on cancellation reports an error, which the node lambdas
+/// fold into a clean no-output bail rather than a failed run.
+fn is_cancelled(cancel: &Option<CancelToken>) -> bool {
+    cancel.as_ref().is_some_and(|c| c.is_cancelled())
+}
+
 fn build_masters_cached(
     dirs: [Option<PathBuf>; 4],
     sigma: f32,
     cache: bool,
+    cancel: Option<CancelToken>,
 ) -> anyhow::Result<CalibrationMasters> {
     let [darks, flats, bias, flat_darks] = dirs;
     let role = |dir: Option<PathBuf>,
@@ -778,7 +805,8 @@ fn build_masters_cached(
             return Ok(Some(CfaImage::load(&cache_path)?));
         }
         let frames = astro_image_files(&dir);
-        let master = stack_cfa_master(&frames, config).map_err(anyhow::Error::from)?;
+        let master =
+            stack_cfa_master(&frames, config, cancel.clone()).map_err(anyhow::Error::from)?;
         if cache && let Some(master) = &master {
             master.save(&cache_path)?;
         }

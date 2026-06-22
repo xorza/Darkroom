@@ -119,7 +119,7 @@ src/
 
 ## stacking/combine — frame combination
 
-`stack(paths, config, progress)` (`stack.rs:79`, from disk) and `stack_images(frames, config, progress)` (`stack.rs`, in-memory) → `AstroImage`. A `StackFrame { image, coverage: Option<Buffer2<f32>> }` bundles each in-memory frame with optional per-pixel coverage (e.g. from `warp`); plain `AstroImage`s convert via `.into()` (coverage `None` = fully covered).
+`stack(paths, config, progress, cancel)` (`stack.rs:79`, from disk) and `stack_images(frames, config, progress, cancel)` (`stack.rs`, in-memory) → `AstroImage`. The trailing `cancel: Option<common::CancelToken>` is a cooperative cancel token (also on `stack_cfa_master` and `calibrate_align_stack`): it rides on `CacheCore` and `CacheCore::process_chunks` polls it between chunks — when set, the combine bails and the entry returns `Error::Cancelled`. `calibrate_align_stack` additionally polls it between RAW-load frames. A `StackFrame { image, coverage: Option<Buffer2<f32>> }` bundles each in-memory frame with optional per-pixel coverage (e.g. from `warp`); plain `AstroImage`s convert via `.into()` (coverage `None` = fully covered).
 
 - `StackConfig` (`config.rs:71`): `method: CombineMethod` (`Mean(Rejection) | Median`, `config.rs:13`), `weighting: Weighting` (`Equal | Noise | Manual(Vec<f32>)`, `config.rs:22`), `normalization: Normalization` (`None | Global | Multiplicative`, `config.rs:36`), `cache: CacheConfig`. Presets `sigma_clipped`/`winsorized`/`linear_fit`/`median`/`mean`/`gesd`/`percentile`/`weighted` + frame presets `light`/`flat`/`dark`/`bias`.
 - `Rejection` (`rejection.rs:831`): `None | SigmaClip | Winsorized | LinearFit | Percentile | Gesd` (each with its own config struct).

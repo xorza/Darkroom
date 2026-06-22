@@ -13,6 +13,9 @@ pub enum Error {
     #[error("No frames provided for stacking")]
     NoFrames,
 
+    #[error("stacking cancelled")]
+    Cancelled,
+
     #[error("Failed to load image '{path}': {source}")]
     ImageLoad {
         path: PathBuf,

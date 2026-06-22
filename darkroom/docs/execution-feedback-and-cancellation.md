@@ -8,22 +8,31 @@
 > header shows a **comet `Spinner` + live elapsed-so-far**, ticking via a ~20fps
 > repaint while any node runs.
 >
-> **Status: P2 (coarse cancel) shipped.** A shared `Arc<AtomicBool>` on the
-> `Worker` (`request_cancel()`, cleared at each run's start) is polled by the
+> **Status: P2 (coarse cancel) shipped.** A shared `common::CancelToken` on the
+> `Worker` (`request_cancel()`, `reset()` at each run's start) is polled by the
 > executor between nodes; when set, scheduling stops and the run reports
 > `ExecutionStats { cancelled: true }` with only the nodes that actually ran. The
 > editor offers **Run ▸ Cancel Run** while a run is in flight. **Honest B1
 > limitation:** the node already mid-`spawn_blocking` (e.g. a stack) still runs to
-> completion in the background — its result is discarded, but the CPU work isn't
-> interrupted. P3 (cooperative lumos stop) is what makes a long op bail promptly.
+> completion in the background unless lumos polls the flag (that's P3).
 >
-> P3 (cooperative lumos stop) is still open — see Phasing.
+> **Status: P3 (cooperative lumos stop) shipped for the named ops.** The same
+> `CancelToken` is exposed to lambdas via `ContextManager::cancel_flag()`;
+> `stack_lights` / `build_masters` clone it into their `spawn_blocking` and pass
+> it to lumos. lumos's combine chokepoint (`CacheCore::process_chunks`) polls it
+> between chunks (covers both ops' stacking), and `calibrate_align_stack`'s RAW
+> load `par_iter` polls it between frames — so a long stack/master build now bails
+> within roughly a chunk/frame and returns `lumos::…::Error::Cancelled`; the lens
+> lambda folds that (when the flag is set) into a clean no-output bail (no red
+> "errored" node). **Remaining (P3b):** the detect / register / warp `par_iter`
+> loops inside `align_and_stack` aren't polled yet, so a cancel during alignment
+> waits for that stage to finish before bailing at combine.
 
 Goal: while a long-running graph runs, the editor should show **which node is
 computing right now** (and that it started), and the user should be able to
 **cancel the run and actually stop** long operations (`stack_lights`,
-`build_masters`). P1 + P2 deliver progress + coarse cancel; P3 (truly halting an
-in-flight heavy op) is still TODO.
+`build_masters`). P1–P3 deliver progress + coarse cancel + cooperative stop of
+the heavy stacking/load work; the alignment `par_iter`s (P3b) remain.
 
 Spans `scenarium` (the headless executor + worker) and `darkroom` (the editor
 feedback + controls). `lumos` is touched only in the final phase (cooperative
@@ -166,16 +175,16 @@ stop promptly (requires cooperative checks in lumos).
 
 ### B1 — coarse cancel (shipped)
 
-**Implemented with a shared `Arc<AtomicBool>`, not a token + command-channel
-arm.** The sketch below proposed tripping a `CancellationToken` via a second
-`select!` arm on the command channel. The shipped design is simpler: the
-`Worker` owns an `Arc<AtomicBool>` (`Worker::request_cancel()` stores `true`)
+**Implemented with a shared `common::CancelToken` (an `Arc<AtomicBool>` wrapper),
+not a command-channel arm.** The sketch below proposed tripping a token via a
+second `select!` arm on the command channel. The shipped design is simpler: the
+`Worker` owns a `CancelToken` (`Worker::request_cancel()` → `token.cancel()`)
 that the executor polls — the host sets it *directly* across threads, so a
 cancel is observed mid-run with **no command-channel round-trip and no
-carry-over/stash machinery**. The worker clears the flag at each run's start, so
-a stale cancel issued while idle can't bleed into the next run (pinned by
-`worker::tests::stale_cancel_is_cleared_at_run_start`). An `AtomicBool` (not a
-token) is also exactly what P3 wants — cheap to poll inside a rayon loop.
+carry-over/stash machinery**. The worker `reset()`s it at each run's start, so a
+stale cancel issued while idle can't bleed into the next run (pinned by
+`worker::tests::stale_cancel_is_cleared_at_run_start`). The token is poll-only
+(no async wait) — exactly what P3 wants, cheap to poll inside a rayon loop.
 
 **Executor honors the flag between nodes.** `Executor::run` checks
 `cancel.load(Relaxed)` at the top of the `execute_order` loop; if set, it stops
@@ -214,20 +223,21 @@ loop {
 B1 won't interrupt a stack mid-computation (tokio can't kill a `spawn_blocking`
 thread). To *truly* stop, the op must poll a cancel flag and bail.
 
-**Plumb the cancel flag (the P2 `Arc<AtomicBool>`) to lambdas.** Expose it on
+**Plumb the cancel token (the P2 `CancelToken`) to lambdas.** Exposed on
 `ContextManager` (the per-run resource store the lambda already gets):
-`ctx_manager.cancel()` → `&AtomicBool` (the same flag P2's executor polls), cheap
-to poll in a rayon loop. The worker already owns it and clears it per run.
+`ctx_manager.cancel_flag()` → `Option<CancelToken>` (the same token P2's executor
+polls), cheap to poll in a rayon loop. The worker already owns it and resets it
+per run.
 
-**Lambdas pass it into the `spawn_blocking` closure → into lumos.** e.g.
-`stack_cfa_master(paths, config, &cancel)`, `calibrate_align_stack(..., &cancel)`,
-`run_frame_op(value, cancel, op)`. lumos's chunked/rayon loops
-(`stacking::combine` `process_chunks`, `calibration_masters::from_files`, the
-registration/detection passes) check `cancel.load(Relaxed)` between chunks/frames
-and return a `Cancelled` error early. This is the only way the CPU work stops
-promptly; it's a lumos API addition (a new `&AtomicBool` param + periodic checks
-in the stage loops), so it lands last and incrementally (start with the two the
-user named: stacking masters + light stacking).
+**Lambdas pass it into the `spawn_blocking` closure → into lumos.**
+`stack_cfa_master(paths, config, cancel)` and `calibrate_align_stack(.., cancel)`
+take `cancel: Option<CancelToken>`; lumos's combine chokepoint
+(`CacheCore::process_chunks`) polls it between chunks (covers both ops' stacking)
+and `calibrate_align_stack`'s RAW-load `par_iter` polls it between frames,
+returning `Error::Cancelled` early. The lens lambda folds that (when the token is
+set) into a clean no-output bail. **Done** for stacking masters + light stacking;
+the detect / register / warp `par_iter`s inside `align_and_stack` aren't polled
+yet (P3b).
 
 The lambda maps a lumos `Cancelled` into an `InvokeError` (or a dedicated
 `InvokeResult` "cancelled" so the executor can mark the node cancelled rather

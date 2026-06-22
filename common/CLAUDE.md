@@ -18,6 +18,7 @@ helpers. Pure leaf crate — depended on by everything, depends on nothing in-tr
 | `slot.rs` | `Slot<T>`: lockless single-slot async value channel (`ArcSwapOption` + `Notify`); only the latest value is retained. |
 | `pause_gate.rs` | `PauseGate`: pause/resume gate; `close()` returns a guard that reopens on drop. |
 | `ready_state.rs` | `ReadyState`: barrier-like counter that notifies waiters once `total` signals arrive. |
+| `cancel_token.rs` | `CancelToken`: shared poll-only cooperative cancel flag (`Arc<AtomicBool>` wrapper). `cancel()`/`is_cancelled()`/`reset()`; clones share one flag. For cooperative bail-out in hot loops (`spawn_blocking`/rayon); `reset()` makes it reusable across operations. No async wait — use `tokio_util`'s token for that. |
 | `macros.rs` | `id_type!` (strongly-typed UUID wrappers) + `cfg_x86_64!` / `cfg_aarch64!` arch-gate macros. |
 | `serde.rs` | Generic `serialize`/`deserialize` dispatching over `SerdeFormat`. |
 | `serde_rhai/` | Rhai text (de)serialization via a `serde_json::Value` intermediary. |

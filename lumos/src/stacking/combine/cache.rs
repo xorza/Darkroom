@@ -27,6 +27,7 @@ use std::path::{Path, PathBuf};
 
 use arrayvec::ArrayVec;
 use common::Buffer2;
+use common::CancelToken;
 use common::FnvHasher;
 use common::parallel::try_par_map_limited;
 use memmap2::Mmap;
@@ -219,6 +220,10 @@ pub(crate) struct CacheCore {
     pub(crate) config: CacheConfig,
     /// Progress callback.
     pub(crate) progress: ProgressCallback,
+    /// Cooperative cancel flag, polled by [`Self::process_chunks`] between
+    /// chunks. `None` (the construction default) = never cancel; a public
+    /// stacking entry sets it from the caller's flag before the combine.
+    pub(crate) cancel: Option<CancelToken>,
 }
 
 /// Plain calibration cache: `CfaImage` frames, channels only (never coverage), plain combine.
@@ -338,6 +343,8 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
             channel_stats,
             config: config.clone(),
             progress,
+            // Set by the public stacking entry before the combine, if any.
+            cancel: None,
         },
     })
 }
@@ -497,6 +504,11 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     })
 }
 
+/// Whether a cooperative cancel token is set.
+pub(crate) fn is_cancelled(cancel: &Option<CancelToken>) -> bool {
+    cancel.as_ref().is_some_and(|c| c.is_cancelled())
+}
+
 impl CacheCore {
     /// Combine engine: walk the output in memory-bounded row chunks (whole planes for in-memory
     /// stacks, bounded row chunks for disk-backed), gather each frame's channel slice for the
@@ -560,6 +572,13 @@ impl CacheCore {
                     total_work,
                     StackingStage::Processing,
                 );
+
+                // Cooperative cancel: bail between chunks (the in-flight chunk
+                // completes). The partial `output` is discarded by the caller,
+                // which detects the cancel and returns `Error::Cancelled`.
+                if is_cancelled(&self.cancel) {
+                    return output;
+                }
             }
         }
 
@@ -731,6 +750,8 @@ impl LightCache {
                 channel_stats,
                 config: config.clone(),
                 progress,
+                // Set by the public stacking entry before the combine, if any.
+                cancel: None,
             },
         })
     }
@@ -1278,6 +1299,7 @@ pub(crate) mod tests {
                 channel_stats: vec![],
                 config: CacheConfig::default(),
                 progress: ProgressCallback::default(),
+                cancel: None,
             },
         }
     }
@@ -1587,6 +1609,7 @@ pub(crate) mod tests {
                 channel_stats: vec![],
                 config,
                 progress: ProgressCallback::default(),
+                cancel: None,
             },
         };
 
@@ -1641,6 +1664,7 @@ pub(crate) mod tests {
                 channel_stats: vec![],
                 config: CacheConfig::default(),
                 progress: ProgressCallback::default(),
+                cancel: None,
             },
         };
 
@@ -1687,6 +1711,7 @@ pub(crate) mod tests {
                 channel_stats: vec![],
                 config: CacheConfig::default(),
                 progress: ProgressCallback::default(),
+                cancel: None,
             },
         };
 

@@ -3,6 +3,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use common::CancelToken;
 use common::id_type;
 use hashbrown::HashMap;
 
@@ -28,9 +29,20 @@ pub struct ContextManager {
     /// Log lines emitted this run, drained into `ExecutionStats` when the
     /// run finishes.
     pub(crate) logs: Vec<LogEntry>,
+    /// The run's cooperative cancel token (the executor polls it between
+    /// nodes). A lambda offloading heavy work can clone it via
+    /// [`Self::cancel_flag`] and poll it inside that work to bail early.
+    pub(crate) cancel: Option<CancelToken>,
 }
 
 impl ContextManager {
+    /// A clonable handle to the run's [`CancelToken`], for a lambda to hand to
+    /// long-running work (e.g. a `spawn_blocking` lumos op) so it can poll
+    /// `token.is_cancelled()` and stop early. `None` outside a cancellable run.
+    pub fn cancel_flag(&self) -> Option<CancelToken> {
+        self.cancel.clone()
+    }
+
     /// Emit a log line attributed to the node currently executing, and
     /// mirror it to `tracing` at the matching level so headless runs
     /// still surface output. No-op when called outside a node invoke

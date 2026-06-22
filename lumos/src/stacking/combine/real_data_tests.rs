@@ -27,7 +27,7 @@ fn test_stack_registered_lights() {
         ..StackConfig::sigma_clipped(2.5)
     };
 
-    let stacked = stack(&paths, config, ProgressCallback::default())
+    let stacked = stack(&paths, config, ProgressCallback::default(), None)
         .expect("Failed to stack registered lights")
         .image;
 

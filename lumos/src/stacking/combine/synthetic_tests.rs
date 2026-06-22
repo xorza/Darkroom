@@ -54,7 +54,7 @@ fn frame_set(
 
 fn stack_frames(sims: &[SimFrame], config: StackConfig) -> AstroImage {
     let frames: Vec<StackFrame> = sims.iter().map(|s| s.image.clone().into()).collect();
-    stack_images(frames, config, ProgressCallback::default())
+    stack_images(frames, config, ProgressCallback::default(), None)
         .expect("stack")
         .image
 }

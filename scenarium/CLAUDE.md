@@ -25,7 +25,7 @@ to the other:
 | `subgraph.rs` | `SubgraphDef`, `SubgraphRef` (Linked/Local), `SubgraphEvent`. Composite definitions and their exposed interface. |
 | `function.rs` | `Func` (definition), `FuncLib` (registry of funcs + shared subgraphs), `FuncInput`/`FuncOutput`, `FuncBehavior`. |
 | `data.rs` | Value model: `StaticValue` (editor consts), `DynamicValue` (runtime), `DataType`, `CustomValue` trait, `TypeDef`/`EnumDef`. |
-| `context.rs` | `ContextManager` (per-run resource store + log sink), `ContextType` (lazy-init type token). |
+| `context.rs` | `ContextManager` (per-run resource store + log sink + the run's cancel flag via `cancel_flag()`, which a lambda clones into off-thread work to bail early), `ContextType` (lazy-init type token). |
 | `func_lambda.rs` | `FuncLambda`: the async node-function signature + `InvokeInput`/`InvokeResult`/`InvokeError`. |
 | `event_lambda.rs` | `EventLambda`: async event-handler signature. |
 | `macros.rs` | `async_lambda!` — ergonomic `FuncLambda` construction. |
@@ -131,9 +131,9 @@ A `Vec<WorkerMessage>` is **one atomic commit unit** — no partial batches.
 The host callback receives a `WorkerReport`: a live `Progress(RunProgress)` per
 node *during* a run (forwarded from a `mpsc` the executor sends on, drained
 concurrently with the run in the worker `select!`), then a single
-`Finished(Result<ExecutionStats>)`. **Cancel** is a shared `Arc<AtomicBool>` on
-the `Worker` (`request_cancel()` sets it, the worker clears it at each run's
-start) that the executor polls between nodes — set directly across threads, so
+`Finished(Result<ExecutionStats>)`. **Cancel** is a shared `common::CancelToken`
+on the `Worker` (`request_cancel()` sets it, the worker `reset()`s it at each
+run's start) that the executor polls between nodes — set directly across threads, so
 no command-channel round-trip; a cancelled run stops scheduling and reports
 `ExecutionStats { cancelled: true }` with only the nodes that ran.
 The loop uses `tokio::select! { biased }`: command batches take priority and are

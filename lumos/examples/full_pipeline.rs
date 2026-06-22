@@ -48,7 +48,7 @@ fn main() {
         "── Step 2/2: calibrate → align → stack ──"
     );
     let step = Instant::now();
-    let result = calibrate_align_stack(&light_paths, &masters, &AlignStackConfig::default())
+    let result = calibrate_align_stack(&light_paths, &masters, &AlignStackConfig::default(), None)
         .expect("calibrate_align_stack failed");
     tracing::info!(
         registered = result.registered,

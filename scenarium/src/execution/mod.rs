@@ -10,8 +10,7 @@
 //! [`ExecutionEngine`] owns all four pieces (program, plan, planner, executor)
 //! and exposes `update` (phase 1) and `execute*` (phases 2–3, run back-to-back).
 
-use std::sync::atomic::AtomicBool;
-
+use common::CancelToken;
 use common::is_debug;
 use hashbrown::HashSet;
 use serde::{Deserialize, Serialize};
@@ -170,7 +169,7 @@ impl ExecutionEngine {
         event_triggers: bool,
         events: T,
         progress: Option<&UnboundedSender<RunProgress>>,
-        cancel: Option<&AtomicBool>,
+        cancel: Option<CancelToken>,
     ) -> Result<ExecutionStats> {
         let events: Vec<EventRef> = events.into_iter().collect();
 
