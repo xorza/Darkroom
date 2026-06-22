@@ -3,8 +3,8 @@
 //! top child of each node body by [`crate::gui::node::NodeUI`].
 
 use palantir::{
-    Align, Background, Color, Configure, Corners, Panel, Sense, Sizing, Spacing, Stroke, Text,
-    TextStyle, Tooltip, Ui, VAlign, WidgetId,
+    Align, Background, Color, Configure, Corners, Panel, Sense, Sizing, Spacing, Spinner, Stroke,
+    Text, TextStyle, Tooltip, Ui, VAlign, WidgetId,
 };
 use scenarium::prelude::{NodeBehavior, NodeId};
 
@@ -118,6 +118,11 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
             };
             if let Some(secs) = elapsed {
                 let color = exec_color(theme, node.exec_status).unwrap_or(ui.theme.text.color);
+                // A comet spinner while computing, just left of the live time,
+                // so glow + spin + ticking time read as one "running" cue.
+                if matches!(node.exec_status, ExecStatus::Running(_)) {
+                    Spinner::new().size(BADGE_FONT).color(color).show(ui);
+                }
                 Text::new(fmt_elapsed(secs))
                     .style(TextStyle {
                         color,

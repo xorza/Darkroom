@@ -226,8 +226,9 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
 - On-thread, `App::frame` drains the channel (`worker.drain()`, non-blocking).
   `NodeProgress` → `RunState::apply_progress` marks the active node
   `ExecStatus::Running(Instant)` (purple glow) live — carrying the start instant
-  so the node header shows live elapsed-so-far (`App::frame` repaints ~20fps
-  while `run_state.is_running()`); `ExecutionFinished` → `set_results`
+  so the node header shows a `palantir::Spinner` + live elapsed-so-far
+  (`App::frame` repaints ~20fps while `run_state.is_running()`);
+  `ExecutionFinished` → `set_results`
   folds the final `ExecutionStats` (including nested-subgraph attribution) onto
   authoring nodes: per-node `ExecStatus`
   (`None`/`Cached`/`Executed(secs)`/`Running`/`MissingInputs`/`Errored`) + logs.

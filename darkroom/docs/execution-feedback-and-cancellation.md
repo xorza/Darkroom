@@ -5,9 +5,9 @@
 > `WorkerReport::Finished` (drained with `recv_many` in a `select!` alongside the
 > run). `RunPhase::Started { at: Instant }` carries the start instant; darkroom
 > marks the active node `ExecStatus::Running(Instant)` (purple glow) and its
-> header shows **live elapsed-so-far**, ticking via a ~20fps repaint while any
-> node runs. P2 (cancel) / P3 (cooperative lumos stop) are still open — see
-> Phasing.
+> header shows a **comet `Spinner` + live elapsed-so-far**, ticking via a ~20fps
+> repaint while any node runs. P2 (cancel) / P3 (cooperative lumos stop) are
+> still open — see Phasing.
 
 Goal: while a long-running graph runs, the editor should show **which node is
 computing right now** (and that it started), and the user should be able to
