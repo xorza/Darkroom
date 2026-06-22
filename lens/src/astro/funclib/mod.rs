@@ -802,6 +802,11 @@ fn build_masters_cached(
                 config: StackConfig,
                 file: &str|
      -> anyhow::Result<Option<CfaImage>> {
+        // Bail between roles (a cancel during the cached-master loads stops the
+        // next load); a real load/stack error propagates as itself.
+        if cancel.is_cancelled() {
+            anyhow::bail!("cancelled");
+        }
         let Some(dir) = dir else {
             return Ok(None);
         };
@@ -818,7 +823,7 @@ fn build_masters_cached(
         Ok(master)
     };
 
-    Ok(CalibrationMasters::from_images(
+    let masters = CalibrationMasters::from_images(
         CalibrationImages {
             dark: role(darks, StackConfig::dark(), "master_dark.lcm")?,
             flat: role(flats, StackConfig::flat(), "master_flat.lcm")?,
@@ -826,7 +831,14 @@ fn build_masters_cached(
             flat_dark: role(flat_darks, StackConfig::dark(), "master_flat_dark.lcm")?,
         },
         sigma,
-    ))
+        cancel.clone(),
+    );
+    // `from_images` returns a *partial* defect map if cancelled mid-scan, so
+    // turn that into an error here — otherwise the bail would look like success.
+    if cancel.is_cancelled() {
+        anyhow::bail!("cancelled");
+    }
+    Ok(masters)
 }
 
 #[cfg(test)]

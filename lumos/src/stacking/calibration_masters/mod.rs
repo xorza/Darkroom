@@ -134,7 +134,11 @@ impl CalibrationMasters {
     /// instead of bias for flat normalization when provided.
     /// `sigma_threshold` controls defect detection sensitivity (see
     /// [`DEFAULT_SIGMA_THRESHOLD`]).
-    pub fn from_images(images: CalibrationImages, sigma_threshold: f32) -> Self {
+    pub fn from_images(
+        images: CalibrationImages,
+        sigma_threshold: f32,
+        cancel: CancelToken,
+    ) -> Self {
         let CalibrationImages {
             dark,
             flat,
@@ -143,13 +147,15 @@ impl CalibrationMasters {
         } = images;
 
         // Hot pixels from the dark, cold/dead pixels from the flat — None if we have neither.
+        // Both detections poll `cancel` per pixel (the defect-map scan dominates a cached-master
+        // build, so a cancel must bail it mid-scan).
         let defect_map = (dark.is_some() || flat.is_some()).then(|| {
             let mut map = DefectMap::default();
             if let Some(dark) = dark.as_ref() {
-                map = map.detect_hot(dark, sigma_threshold);
+                map = map.detect_hot(dark, sigma_threshold, &cancel);
             }
             if let Some(flat) = flat.as_ref() {
-                map = map.detect_cold(flat);
+                map = map.detect_cold(flat, &cancel);
             }
             map
         });
@@ -188,6 +194,7 @@ impl CalibrationMasters {
                 flat_dark,
             },
             sigma_threshold,
+            CancelToken::never(),
         ))
     }
 

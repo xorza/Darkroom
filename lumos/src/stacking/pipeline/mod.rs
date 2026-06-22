@@ -332,6 +332,12 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
                     }
                 }
             }
+            // Demosaic is the other heavy per-frame step (after the RAW decode);
+            // skip it if the run was cancelled during this frame's load/calibrate
+            // so a cancel doesn't pay for a full demosaic per in-flight frame.
+            if cancel.is_cancelled() {
+                return Err(Error::Stack(StackError::Cancelled));
+            }
             let image = cfa.demosaic();
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
             tracing::info!(frame = n, total, "calibrated light");

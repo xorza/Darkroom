@@ -85,6 +85,7 @@ fn bench_full_pipeline() {
             flat_dark: None,
         },
         DEFAULT_SIGMA_THRESHOLD,
+        CancelToken::never(),
     );
     println!(
         "  DefectMap: {:.0}ms",

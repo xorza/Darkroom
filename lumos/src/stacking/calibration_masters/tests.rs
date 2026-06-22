@@ -4,13 +4,15 @@ use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::testing::constant_cfa;
 use crate::{AstroImageMetadata, CalibrationFrames, CalibrationImages, CalibrationMasters};
 use common::Buffer2;
+use common::CancelToken;
 
 #[test]
 #[should_panic(expected = "already-calibrated frame")]
 fn test_calibrate_twice_panics() {
     // A second calibrate() would subtract the dark / divide the flat twice — must crash, not
     // silently corrupt.
-    let masters = CalibrationMasters::from_images(CalibrationImages::default(), 5.0);
+    let masters =
+        CalibrationMasters::from_images(CalibrationImages::default(), 5.0, CancelToken::never());
     let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
     masters.calibrate(&mut light);
     assert!(light.metadata.calibrated);
@@ -51,6 +53,7 @@ fn test_new_constructor() {
             ..Default::default()
         },
         DEFAULT_SIGMA_THRESHOLD,
+        CancelToken::never(),
     );
 
     assert!(masters.master_dark.is_some());
@@ -70,6 +73,7 @@ fn test_new_no_dark_no_hot_pixels() {
             ..Default::default()
         },
         DEFAULT_SIGMA_THRESHOLD,
+        CancelToken::never(),
     );
 
     assert!(masters.master_dark.is_none());
@@ -90,6 +94,7 @@ fn test_calibrate_dark_subtraction() {
             ..Default::default()
         },
         DEFAULT_SIGMA_THRESHOLD,
+        CancelToken::never(),
     );
 
     let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
@@ -111,6 +116,7 @@ fn test_calibrate_bias_only() {
             ..Default::default()
         },
         DEFAULT_SIGMA_THRESHOLD,
+        CancelToken::never(),
     );
 
     let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
@@ -134,6 +140,7 @@ fn test_calibrate_dark_takes_priority_over_bias() {
             ..Default::default()
         },
         DEFAULT_SIGMA_THRESHOLD,
+        CancelToken::never(),
     );
 
     let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
@@ -165,6 +172,7 @@ fn test_calibrate_flat_correction() {
             ..Default::default()
         },
         DEFAULT_SIGMA_THRESHOLD,
+        CancelToken::never(),
     );
 
     let mut light = constant_cfa(2, 2, 0.3, CfaType::Mono);
@@ -219,6 +227,7 @@ fn test_calibrate_full_pipeline() {
             ..Default::default()
         },
         DEFAULT_SIGMA_THRESHOLD,
+        CancelToken::never(),
     );
 
     let mut light = CfaImage {
@@ -281,6 +290,7 @@ fn test_sigma_threshold_affects_detection() {
             ..Default::default()
         },
         3.0,
+        CancelToken::never(),
     );
     let masters_loose = CalibrationMasters::from_images(
         CalibrationImages {
@@ -288,6 +298,7 @@ fn test_sigma_threshold_affects_detection() {
             ..Default::default()
         },
         20.0,
+        CancelToken::never(),
     );
 
     let strict_count = masters_strict.defect_map.as_ref().unwrap().hot_count();
@@ -319,7 +330,7 @@ fn test_defect_detection_zero_median_no_false_positives() {
         },
     };
 
-    let defect_map = DefectMap::default().detect_hot(&dark, 5.0);
+    let defect_map = DefectMap::default().detect_hot(&dark, 5.0, &CancelToken::never());
 
     // The tiny values should NOT be flagged as hot
     assert!(
@@ -360,6 +371,7 @@ fn test_calibrate_hot_pixel_correction() {
             ..Default::default()
         },
         DEFAULT_SIGMA_THRESHOLD,
+        CancelToken::never(),
     );
 
     assert!(masters.defect_map.is_some());
@@ -430,6 +442,7 @@ fn test_calibrate_flat_dark() {
             ..Default::default()
         },
         DEFAULT_SIGMA_THRESHOLD,
+        CancelToken::never(),
     );
 
     let mut light = CfaImage {
@@ -483,6 +496,7 @@ fn test_flat_dark_takes_priority_over_bias() {
             ..Default::default()
         },
         DEFAULT_SIGMA_THRESHOLD,
+        CancelToken::never(),
     );
 
     let mut light = constant_cfa(2, 2, 0.5, CfaType::Mono);
