@@ -1,11 +1,12 @@
 use wgpu::util::DeviceExt;
 
-use super::Blend;
 use super::pipeline::GpuBlendPipeline;
+use super::{Blend, BlendMode};
+use crate::common::color_format::{ChannelCount, ChannelType};
 use crate::common::error::Result;
 use crate::gpu::Gpu;
 use crate::gpu::gpu_image::GpuImage;
-use crate::ops::gpu_format::{get_format_type, workgroup_count};
+use crate::image::ImageDesc;
 use crate::processing_context::ProcessingContext;
 use crate::processing_context::image_buffer::ImageBuffer;
 
@@ -29,25 +30,7 @@ impl Blend {
         assert_eq!(src.desc, dst.desc, "src/dst desc mismatch");
         assert_eq!(src.desc, output.desc, "src/output desc mismatch");
 
-        let format = src.desc.color_format;
-        let format_type = get_format_type(format)?;
-
-        let width = src.desc.width;
-        let height = src.desc.height;
-        let stride = src.stride();
-
-        // BlendMode is #[repr(u8)]; the shader's mode contract depends on this declared order.
-        let mode_u32 = self.mode as u32;
-
-        let uniform_params = Params {
-            mode: mode_u32,
-            alpha: self.alpha,
-            width: width as u32,
-            height: height as u32,
-            stride: stride as u32,
-            format_type,
-            _padding: [0; 2],
-        };
+        let uniform_params = Params::new(src.desc, self.mode, self.alpha);
 
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("blend_params_buffer"),
@@ -90,8 +73,9 @@ impl Blend {
             compute_pass.set_pipeline(&pipeline.compute_pipeline);
             compute_pass.set_bind_group(0, &bind_group, &[]);
 
-            let groups = workgroup_count(format_type, width, height);
-            compute_pass.dispatch_workgroups(groups, 1, 1);
+            // One invocation per u32 word of the packed buffer.
+            let total_words = uniform_params.total_bytes.div_ceil(4);
+            compute_pass.dispatch_workgroups(total_words.div_ceil(256), 1, 1);
         }
 
         queue.submit(std::iter::once(encoder.finish()));
@@ -122,16 +106,42 @@ impl Blend {
     }
 }
 
+/// Sentinel for "no alpha channel" (matches the WGSL constant).
+const NO_ALPHA: u32 = 0xffff_ffff;
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Params {
     mode: u32,
     alpha: f32,
-    width: u32,
-    height: u32,
-    stride: u32,
-    format_type: u32,
-    _padding: [u32; 2],
+    total_bytes: u32,
+    elem_size: u32,
+    channels: u32,
+    alpha_channel: u32,
+    is_float: u32,
+    _pad: u32,
+}
+
+impl Params {
+    fn new(desc: ImageDesc, mode: BlendMode, alpha: f32) -> Self {
+        let format = desc.color_format;
+        let channels = format.channel_count.channel_count() as u32;
+        let alpha_channel = match format.channel_count {
+            ChannelCount::LA | ChannelCount::Rgba => channels - 1,
+            _ => NO_ALPHA,
+        };
+        Self {
+            // BlendMode is #[repr(u8)]; the shader's mode contract depends on this order.
+            mode: mode as u32,
+            alpha,
+            total_bytes: desc.size_in_bytes() as u32,
+            elem_size: format.channel_size.byte_count() as u32,
+            channels,
+            alpha_channel,
+            is_float: u32::from(format.channel_type == ChannelType::Float),
+            _pad: 0,
+        }
+    }
 }
 
 #[cfg(test)]

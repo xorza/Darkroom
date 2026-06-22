@@ -2,10 +2,11 @@ use wgpu::util::DeviceExt;
 
 use super::ContrastBrightness;
 use super::pipeline::GpuContrastBrightnessPipeline;
+use crate::common::color_format::{ChannelCount, ChannelType};
 use crate::common::error::Result;
 use crate::gpu::Gpu;
 use crate::gpu::gpu_image::GpuImage;
-use crate::ops::gpu_format::{get_format_type, workgroup_count};
+use crate::image::ImageDesc;
 use crate::processing_context::ProcessingContext;
 use crate::processing_context::image_buffer::ImageBuffer;
 
@@ -26,22 +27,7 @@ impl ContrastBrightness {
 
         assert_eq!(input.desc, output.desc, "input/output desc mismatch");
 
-        let format = input.desc.color_format;
-        let format_type = get_format_type(format)?;
-
-        let width = input.desc.width;
-        let height = input.desc.height;
-        let stride = input.stride();
-
-        let uniform_params = Params {
-            contrast: self.contrast,
-            brightness: self.brightness,
-            width: width as u32,
-            height: height as u32,
-            stride: stride as u32,
-            format_type,
-            _padding: [0; 2],
-        };
+        let uniform_params = Params::new(input.desc, self.contrast, self.brightness);
 
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("contrast_brightness_params_buffer"),
@@ -80,8 +66,9 @@ impl ContrastBrightness {
             compute_pass.set_pipeline(&pipeline.compute_pipeline);
             compute_pass.set_bind_group(0, &bind_group, &[]);
 
-            let groups = workgroup_count(format_type, width, height);
-            compute_pass.dispatch_workgroups(groups, 1, 1);
+            // One invocation per u32 word of the packed buffer.
+            let total_words = uniform_params.total_bytes.div_ceil(4);
+            compute_pass.dispatch_workgroups(total_words.div_ceil(256), 1, 1);
         }
 
         queue.submit(std::iter::once(encoder.finish()));
@@ -112,16 +99,41 @@ impl ContrastBrightness {
     }
 }
 
+/// Sentinel for "no alpha channel to preserve" (matches the WGSL constant).
+const NO_ALPHA: u32 = 0xffff_ffff;
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Params {
     contrast: f32,
     brightness: f32,
-    width: u32,
-    height: u32,
-    stride: u32,
-    format_type: u32,
-    _padding: [u32; 2],
+    total_bytes: u32,
+    elem_size: u32,
+    channels: u32,
+    alpha_channel: u32,
+    is_float: u32,
+    _pad: u32,
+}
+
+impl Params {
+    fn new(desc: ImageDesc, contrast: f32, brightness: f32) -> Self {
+        let format = desc.color_format;
+        let channels = format.channel_count.channel_count() as u32;
+        let alpha_channel = match format.channel_count {
+            ChannelCount::LA | ChannelCount::Rgba => channels - 1,
+            _ => NO_ALPHA,
+        };
+        Self {
+            contrast,
+            brightness,
+            total_bytes: desc.size_in_bytes() as u32,
+            elem_size: format.channel_size.byte_count() as u32,
+            channels,
+            alpha_channel,
+            is_float: u32::from(format.channel_type == ChannelType::Float),
+            _pad: 0,
+        }
+    }
 }
 
 #[cfg(test)]

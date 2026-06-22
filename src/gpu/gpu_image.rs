@@ -5,8 +5,14 @@ use wgpu::{BufferAsyncError, util::DeviceExt};
 
 use crate::common::error::{Error, Result};
 use crate::gpu::Gpu;
-use crate::image::stride::{align_stride, strip_stride_padding_from_slice};
 use crate::image::{Image, ImageDesc};
+
+/// Rounds a byte length up to a multiple of 4 — wgpu's `COPY_BUFFER_ALIGNMENT`,
+/// i.e. a whole number of `u32` words. The only "padding" a packed GPU buffer
+/// needs (1-3 trailing bytes on the whole buffer, never per row).
+fn align_to_u32(bytes: usize) -> usize {
+    (bytes + 3) & !3
+}
 
 /// Wrapper for read-only buffer access.
 #[derive(Debug)]
@@ -37,12 +43,12 @@ impl WriteBuffer<'_> {
 
 /// Image data stored on the GPU as a buffer.
 ///
-/// `desc` is the packed logical layout (shared with the CPU side). The buffer's
-/// per-row byte stride is *derived* ([`GpuImage::stride`]): `row_bytes` rounded
-/// up to a 4-byte boundary so the WGSL shaders can address rows as `array<u32>`.
-/// Storage buffers impose no row alignment themselves (that's a texture rule), so
-/// this only ever exceeds `row_bytes` for narrow U8/U16 formats; F32 rows are
-/// already word-aligned. Uploads add the padding, downloads strip it.
+/// The buffer holds the **tightly-packed** pixel bytes — no row padding (storage
+/// buffers impose none; that's a texture rule). The only concession to wgpu is
+/// that the buffer's *total* size is rounded up to a multiple of 4
+/// (`COPY_BUFFER_ALIGNMENT`); those few trailing bytes are never read back. The
+/// shaders address the buffer per-`u32`-word over this packed layout, so there
+/// is no stride.
 #[derive(Debug)]
 pub struct GpuImage {
     pub(crate) buffer: wgpu::Buffer,
@@ -50,27 +56,17 @@ pub struct GpuImage {
 }
 
 impl GpuImage {
-    /// The buffer's per-row byte stride: `row_bytes` aligned up to 4 bytes.
-    pub(crate) fn stride(&self) -> usize {
-        align_stride(self.desc.row_bytes())
-    }
-
     /// Creates a new GPU image from (packed) CPU image data.
     pub fn from_image(ctx: &Gpu, image: &Image) -> Self {
         let desc = image.desc;
-        let stride = align_stride(desc.row_bytes());
-        let row_bytes = desc.row_bytes();
-        let bytes: Cow<[u8]> = if stride == row_bytes {
-            // Packed row already lands on a 4-byte boundary — zero-copy borrow.
+        let packed = desc.size_in_bytes();
+        let buf_size = align_to_u32(packed); // wgpu buffers: size multiple of 4
+        let bytes: Cow<[u8]> = if packed == buf_size {
             Cow::Borrowed(image.bytes())
         } else {
-            // Pad each row out to the aligned stride (no full image clone).
-            let src = image.bytes();
-            let mut buf = vec![0u8; stride * desc.height];
-            for y in 0..desc.height {
-                buf[y * stride..y * stride + row_bytes]
-                    .copy_from_slice(&src[y * row_bytes..y * row_bytes + row_bytes]);
-            }
+            // Only the trailing 1-3 bytes of the whole buffer are padding.
+            let mut buf = image.bytes().to_vec();
+            buf.resize(buf_size, 0);
             Cow::Owned(buf)
         };
 
@@ -89,8 +85,7 @@ impl GpuImage {
 
     /// Creates an empty GPU image with the given (packed) descriptor.
     pub fn new_empty(ctx: &Gpu, desc: ImageDesc) -> Self {
-        let stride = align_stride(desc.row_bytes());
-        let size = (stride * desc.height) as u64;
+        let size = align_to_u32(desc.size_in_bytes()) as u64;
 
         let buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("gpu_image_buffer"),
@@ -104,23 +99,16 @@ impl GpuImage {
         Self { buffer, desc }
     }
 
-    /// Bytes occupied by the (row-aligned) GPU buffer.
+    /// Bytes occupied by the GPU buffer (packed size rounded up to a multiple of 4).
     fn buffer_size(&self) -> u64 {
-        (self.stride() * self.desc.height) as u64
+        align_to_u32(self.desc.size_in_bytes()) as u64
     }
 
-    /// Builds a packed CPU image from a freshly downloaded (row-aligned) buffer.
-    fn to_packed_image(&self, bytes: Vec<u8>) -> Result<Image> {
-        match strip_stride_padding_from_slice(
-            &bytes,
-            self.desc.width,
-            self.desc.height,
-            self.stride(),
-            self.desc.color_format.byte_count(),
-        ) {
-            Some(packed) => Image::new_with_data(self.desc, packed.to_vec()),
-            None => Image::new_with_data(self.desc, bytes),
-        }
+    /// Builds a packed CPU image from a freshly downloaded buffer, dropping the
+    /// 1-3 trailing round-to-4 bytes.
+    fn to_packed_image(&self, mut bytes: Vec<u8>) -> Result<Image> {
+        bytes.truncate(self.desc.size_in_bytes());
+        Image::new_with_data(self.desc, bytes)
     }
 
     /// Downloads GPU image data to CPU.
@@ -163,7 +151,7 @@ impl GpuImage {
         drop(data);
         staging_buffer.unmap();
 
-        // Strip the GPU buffer's row alignment so the CPU image is packed.
+        // Drop the trailing round-to-4 bytes; the CPU image is exactly packed.
         self.to_packed_image(bytes)
     }
 
@@ -210,7 +198,7 @@ impl GpuImage {
         drop(data);
         staging_buffer.unmap();
 
-        // Strip the GPU buffer's row alignment so the CPU image is packed.
+        // Drop the trailing round-to-4 bytes; the CPU image is exactly packed.
         self.to_packed_image(bytes)
     }
 

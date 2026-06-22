@@ -24,7 +24,7 @@ Six layers, bottom-up. A caller drives everything through a `ProcessingContext` 
 
 ### Image storage (`src/image/`)
 
-`ImageDesc` (`src/image/mod.rs:24`) = `{ width, height, color_format }` — a single `new` constructor. Pixel data is **always tightly packed**: `row_bytes() == width * bytes_per_pixel`, `size_in_bytes() == height * row_bytes()`, no inter-row padding. There is no `stride` field. `Image` (`src/image/mod.rs:36`) holds `bytes: AVec<u8, ConstAlign<ALIGNMENT>>` (16-byte aligned for SIMD) plus the `desc`. Any row alignment a GPU backend needs lives entirely inside `GpuImage` (it derives an aligned stride, pads on upload, strips on download) — see the GPU wrapper section. `src/image/stride.rs` (the `align_stride`/`strip_stride_padding_from_slice` helpers) is therefore `#[cfg(feature = "wgpu")]`.
+`ImageDesc` (`src/image/mod.rs:24`) = `{ width, height, color_format }` — a single `new` constructor. Pixel data is **always tightly packed**: `row_bytes() == width * bytes_per_pixel`, `size_in_bytes() == height * row_bytes()`, no inter-row padding. There is no `stride` field. `Image` (`src/image/mod.rs:36`) holds `bytes: AVec<u8, ConstAlign<ALIGNMENT>>` (16-byte aligned for SIMD) plus the `desc`. The GPU side is packed too (see the GPU wrapper section): there is no stride anywhere.
 
 I/O (`src/image/io.rs`): PNG/JPG via the `image` crate, TIFF via `tiff.rs` (unlimited decoder for large astrophotography frames, U8/U16/U32/F32). `SUPPORTED_EXTENSIONS = ["png","jpg","jpeg","tiff","tif"]`. PNG save is U8/U16 only (no F32); JPG save needs `RGBA_U8` or `L_U8`.
 
@@ -46,7 +46,7 @@ Conversion dispatch (`src/common/conversion/mod.rs:28`): `convert_image(from, to
 
 ### GPU wrapper (`src/gpu/`, `wgpu` feature only)
 
-`Gpu` (`mod.rs:10`) = `{ device: Arc<Device>, queue: Arc<Queue> }` (Arc so it clones across threads). `new()` requests a HighPerformance adapter with 1GB buffer limits; `wait()`/`wait_async()` poll to idle. `GpuImage` (`gpu_image.rs:46`) = a `STORAGE|COPY_SRC|COPY_DST` buffer + the (packed) `ImageDesc`. It owns **all** row alignment: `stride()` derives `align_stride(row_bytes)` (rows must start on a `u32` word so the WGSL `array<u32>` indexing works — a shader concern, not a buffer requirement; F32/RGBA_U8 are already aligned so this equals `row_bytes`). `from_image` uploads (padding rows out to the aligned stride, zero-copy when already aligned), `to_image`/`to_image_async` download via a staging buffer + `map_async` and **strip the padding back to a packed `Image`**, `clone_buffer` copies on-GPU. `ReadBuffer`/`WriteBuffer` (`gpu_image.rs:11,22`) are thin binding newtypes for shader bind groups. `Slot<T>` (`slot.rs:14`) is a lockless single-value handoff (`ArcSwapOption` + `Notify`) used by `to_image_async` to bridge the GPU map callback into async/await.
+`Gpu` (`mod.rs:10`) = `{ device: Arc<Device>, queue: Arc<Queue> }` (Arc so it clones across threads). `new()` requests a HighPerformance adapter with 1GB buffer limits; `wait()`/`wait_async()` poll to idle. `GpuImage` (`gpu_image.rs:52`) = a `STORAGE|COPY_SRC|COPY_DST` buffer + the (packed) `ImageDesc`, holding the **tightly-packed** pixel bytes — no row stride/padding (storage buffers don't require it). The buffer's *total* size is the only thing rounded up, to a multiple of 4 (`align_to_u32`, wgpu's `COPY_BUFFER_ALIGNMENT`); those 1-3 trailing bytes are never read back. `from_image` uploads (zero-copy unless that round-up applies), `to_image`/`to_image_async` download via a staging buffer + `map_async` and truncate to the packed size, `clone_buffer` copies on-GPU. `ReadBuffer`/`WriteBuffer` (`gpu_image.rs:11,22`) are thin binding newtypes for shader bind groups. `Slot<T>` (`slot.rs:14`) is a lockless single-value handoff (`ArcSwapOption` + `Notify`) used by `to_image_async` to bridge the GPU map callback into async/await.
 
 ### Ops (`src/ops/`)
 
@@ -64,7 +64,7 @@ The three ops:
 | Contrast/Brightness | `ContrastBrightness { contrast, brightness }`, formula `(x-mid)*contrast + mid + brightness` (`contrast_brightness/mod.rs:46`) | SSE4.1 / NEON + scalar (alpha preserved) | `GpuContrastBrightnessPipeline`, binds params+input+output | `contrast_brightness.wgsl` |
 | Transform | `Transform { transform: Affine2, filter: FilterMode }`, `FilterMode { Nearest, Bilinear }` (default Bilinear); builders `scale`/`rotate`/`rotate_around`/`translate`/`affine`/`filter` (`transform/mod.rs:39`) | **none — GPU-only** | `GpuTransformPipeline`, applies `Affine2` + interpolation | `shader.wgsl` |
 
-WGSL shaders treat storage buffers as `array<u32>` and pack/unpack per the `format_type` discriminant (12 cases). Workgroup size is 256; for narrow formats the blend shader packs multiple pixels per work item (L_U8: 4, LA_U8/L_U16: 2, else 1).
+WGSL shaders treat storage buffers as `array<u32>` over the packed layout. The **pointwise** ops (`Blend`, `ContrastBrightness`) dispatch **one invocation per `u32` word** (output word built from the matching input word(s), so element layout is uniform across all 12 formats — no per-format switch, no shared-word read-modify-write, no races). `Transform` is coordinate-based: it dispatches per output pixel, reads input via general byte→word addressing, and writes through `array<atomic<u32>>` (`atomicOr` into a pre-cleared buffer for sub-word formats, `atomicStore` for word-aligned ones) so output pixels that share a `u32` never race. Workgroup size 256 (pointwise) / 16×16 (transform).
 
 **End-to-end data flow** (Blend, GPU path): `Image` → `ImageBuffer::from_cpu` → `Blend::execute` → `select_backend` (sees a GPU buffer ⇒ GPU) → `make_gpu()` uploads any CPU buffers → `get_or_create::<GpuBlendPipeline>` → `apply_gpu` builds params+bind group, dispatches, `queue.submit()` → `to_image()` downloads when the caller wants CPU pixels back. CPU path is identical up to `select_backend`, then `make_cpu()` (no-op if already CPU) → `apply_cpu` → rayon-parallel SIMD/scalar kernel; result stays on CPU.
 
@@ -76,7 +76,7 @@ WGSL shaders treat storage buffers as `array<u32>` and pack/unpack per the `form
 
 - `src/lib.rs` — crate root: `cfg_x86_64!`/`cfg_aarch64!` macros, module decls, and the published surface (`pub use`s). GPU items are re-exported only under `#[cfg(feature = "wgpu")]`.
 - `src/common/` — `color.rs`, `color_format.rs`, `conversion/` (mod dispatch + `conversion_scalar.rs` + `conversion_simd/` + `bench.rs` + `tests.rs`), `error.rs`, `image_diff.rs`, `test_utils.rs`.
-- `src/image/` — `mod.rs` (`Image`/`ImageDesc`), `stride.rs`, `io.rs`, `tiff.rs`, `tests.rs`.
+- `src/image/` — `mod.rs` (`Image`/`ImageDesc`), `io.rs`, `tiff.rs`, `tests.rs`.
 - `src/processing_context/` — `mod.rs` (`ProcessingContext`), `image_buffer.rs`, `gpu_context.rs`, `tests.rs`.
 - `src/gpu/` — `mod.rs` (`Gpu`), `gpu_image.rs`, `slot.rs` (all `wgpu`-gated).
 - `src/ops/` — `mod.rs`, `backend_selection.rs`, `gpu_format.rs`, and `blend/`, `contrast_brightness/`, `transform/` (each `mod.rs`/`cpu.rs`/`gpu.rs`/`pipeline.rs`/`.wgsl`; transform has no `cpu.rs`).

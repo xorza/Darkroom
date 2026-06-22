@@ -1,7 +1,4 @@
 mod io;
-// Row alignment is only needed to lay rows out for the GPU storage buffers.
-#[cfg(feature = "wgpu")]
-pub(crate) mod stride;
 mod tiff;
 
 #[cfg(test)]

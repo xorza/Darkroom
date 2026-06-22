@@ -59,8 +59,8 @@ impl Transform {
             input_height: input_desc.height as u32,
             output_width: output_desc.width as u32,
             output_height: output_desc.height as u32,
-            input_stride: input.stride() as u32,
-            output_stride: output.stride() as u32,
+            input_stride: input.desc.row_bytes() as u32,
+            output_stride: output.desc.row_bytes() as u32,
             filter_mode: match self.filter {
                 FilterMode::Nearest => 0,
                 FilterMode::Bilinear => 1,
