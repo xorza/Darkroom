@@ -157,10 +157,7 @@ pub struct ImageData<const N: usize, T> {
     pub buffer: Buffer2<[T; N]>,
 }
 
-impl<const N: usize, T: bytemuck::Pod> ImageData<N, T>
-where
-    [T; N]: bytemuck::Pod,
-{
+impl<const N: usize, T: bytemuck::Pod> ImageData<N, T> {
     /// Wrap an interleaved pixel buffer.
     pub fn from_buffer(buffer: Buffer2<[T; N]>) -> Self {
         const {
