@@ -14,8 +14,8 @@
 
 use crate::common::buffer2::Buffer2;
 
-/// A deinterleaved image: `N` channel planes (`1..=4`) of element type `T`, all
-/// sharing the same dimensions. One `Buffer2<T>` per channel.
+/// A deinterleaved image: `N` channel planes (`1`, `3`, or `4`) of element type
+/// `T`, all sharing the same dimensions. One `Buffer2<T>` per channel.
 ///
 /// `N` and `T` live in the type, so e.g. an RGB f32 image is `ImageData<3, f32>`
 /// and the channel count is known at compile time (no runtime format tag). Only
@@ -30,7 +30,12 @@ pub(crate) struct ImageData<const N: usize, T> {
 impl<const N: usize, T> ImageData<N, T> {
     /// Wrap `N` channel planes. All planes must share the same dimensions.
     pub(crate) fn from_channels(channels: [Buffer2<T>; N]) -> Self {
-        const { assert!(N == 1 || N == 3 || N == 4, "ImageData supports 1, 3, or 4 channels (L/RGB/RGBA)") };
+        const {
+            assert!(
+                N == 1 || N == 3 || N == 4,
+                "ImageData supports 1, 3, or 4 channels (L/RGB/RGBA)"
+            )
+        };
         let w = channels[0].width();
         let h = channels[0].height();
         for plane in &channels {
@@ -54,7 +59,12 @@ impl<const N: usize, T> ImageData<N, T> {
 impl<const N: usize, T: Default + Clone> ImageData<N, T> {
     /// A `width × height` image with all `N` planes zero-filled.
     pub(crate) fn new_zeroed(width: usize, height: usize) -> Self {
-        const { assert!(N == 1 || N == 3 || N == 4, "ImageData supports 1, 3, or 4 channels (L/RGB/RGBA)") };
+        const {
+            assert!(
+                N == 1 || N == 3 || N == 4,
+                "ImageData supports 1, 3, or 4 channels (L/RGB/RGBA)"
+            )
+        };
         Self {
             channels: std::array::from_fn(|_| Buffer2::new_default(width, height)),
         }
