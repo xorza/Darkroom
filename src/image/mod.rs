@@ -13,7 +13,7 @@ pub const SUPPORTED_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "tiff", "tif"]
 use crate::common::color_format::ColorFormat;
 use crate::common::conversion::convert_image;
 use crate::common::error::{Error, Result};
-use crate::image::image_data::AnyImageData;
+use crate::image::image_data::interleaved::AnyImageData;
 
 /// Image dimensions + pixel format. Pixel data is **always tightly packed**
 /// (`row_bytes == width * bytes_per_pixel`, no inter-row padding) — any row

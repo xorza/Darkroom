@@ -1,8 +1,9 @@
 //! `Buffer2<T>` — a generic 2D buffer over `Vec<T>` with `(x, y)`, linear, and
 //! range indexing plus `Deref` to `[T]`. imaginarium's own (size stored as plain
 //! `usize`s — no `common::Vec2us` — and no `serde` derives, so the crate stays
-//! standalone); the planar `ImageData` is built on it, and `lumos` uses it as the
-//! channel-plane type for its `AstroImage`.
+//! standalone). Both image-data layouts build on it — interleaved `ImageData`
+//! (`Buffer2<[T; N]>`) and planar `DeinterleavedImageData` (one `Buffer2<T>` per
+//! channel) — and `lumos` uses it as the channel-plane type for its `AstroImage`.
 
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range};
 use std::slice;
