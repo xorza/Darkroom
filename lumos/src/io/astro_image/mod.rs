@@ -627,7 +627,7 @@ impl From<AstroImage> for Image {
 /// grayscale, `RGB_F32` for color.
 fn astro_target_format(image: &Image) -> ColorFormat {
     match image.desc.color_format.channel_count {
-        ChannelCount::L | ChannelCount::LA => ColorFormat::L_F32,
+        ChannelCount::L => ColorFormat::L_F32,
         ChannelCount::Rgb | ChannelCount::Rgba => ColorFormat::RGB_F32,
     }
 }

@@ -253,20 +253,6 @@ fn test_image_rgba_to_astro_drops_alpha() {
 }
 
 #[test]
-fn test_image_gray_alpha_to_astro_drops_alpha() {
-    let desc = ImageDesc::new(2, 1, ColorFormat::LA_F32);
-    let pixels: Vec<f32> = vec![0.5, 0.8, 0.9, 1.0];
-    let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
-    let image = Image::new_with_data(desc, bytes).unwrap();
-
-    let astro: AstroImage = image.into();
-
-    assert_eq!(astro.channels(), 1);
-    assert!((astro.channel(0)[0] - 0.5).abs() < 1e-6);
-    assert!((astro.channel(0)[1] - 0.9).abs() < 1e-6);
-}
-
-#[test]
 #[cfg_attr(not(feature = "real-data"), ignore)]
 fn test_load_single_raw_from_env() {
     init_tracing();
