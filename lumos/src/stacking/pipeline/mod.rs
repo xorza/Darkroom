@@ -123,6 +123,11 @@ pub fn align_and_stack(
     let star_sets: Vec<Vec<Star>> = lights
         .par_iter()
         .map(|img| {
+            // Cancelled: skip this frame's detection (cheap empty result); the
+            // post-loop check below turns the run into `Cancelled`.
+            if is_cancelled(&cancel) {
+                return Vec::new();
+            }
             let result = StarDetector::from_config(config.detection.clone()).detect(img);
             let d = &result.diagnostics;
             let n = detected.fetch_add(1, Ordering::Relaxed) + 1;
@@ -142,6 +147,9 @@ pub fn align_and_stack(
         .collect();
     let total_stars: usize = star_sets.iter().map(|s| s.len()).sum();
     tracing::info!(total_stars, "Star detection complete");
+    if is_cancelled(&cancel) {
+        return Err(Error::Stack(StackError::Cancelled));
+    }
 
     let reference = match config.reference {
         Reference::Index(index) => {
@@ -186,6 +194,11 @@ pub fn align_and_stack(
         .enumerate()
         .filter(|(index, _)| *index != reference)
         .map(|(index, img)| {
+            // Cancelled: drop this frame (skips the heavy register + warp); the
+            // post-loop check below turns the run into `Cancelled`.
+            if is_cancelled(&cancel) {
+                return Err(index);
+            }
             let n = registered_so_far.fetch_add(1, Ordering::Relaxed) + 1;
             match register(ref_stars, &star_sets[index], &config.registration) {
                 Ok(result) => {
@@ -211,6 +224,9 @@ pub fn align_and_stack(
             }
         })
         .collect();
+    if is_cancelled(&cancel) {
+        return Err(Error::Stack(StackError::Cancelled));
+    }
 
     // Each warped frame carries its coverage (how much of each output pixel landed on real
     // source); the stack uses it so warped-frame borders don't drag the edges dark.

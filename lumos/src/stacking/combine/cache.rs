@@ -299,6 +299,7 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     paths: &[P],
     config: &CacheConfig,
     progress: ProgressCallback,
+    cancel: Option<CancelToken>,
 ) -> Result<LoadedCache, Error> {
     if paths.is_empty() {
         return Err(Error::NoFrames);
@@ -329,9 +330,9 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
         cache_dir,
         channel_stats,
     } = if use_in_memory {
-        load_in_memory::<I, P>(paths, &progress, dimensions, first_image)?
+        load_in_memory::<I, P>(paths, &progress, dimensions, first_image, &cancel)?
     } else {
-        load_to_disk::<I, P>(paths, config, &progress, dimensions, first_image)?
+        load_to_disk::<I, P>(paths, config, &progress, dimensions, first_image, &cancel)?
     };
 
     Ok(LoadedCache {
@@ -343,8 +344,7 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
             channel_stats,
             config: config.clone(),
             progress,
-            // Set by the public stacking entry before the combine, if any.
-            cancel: None,
+            cancel,
         },
     })
 }
@@ -355,8 +355,10 @@ impl CfaCache {
         paths: &[P],
         config: &CacheConfig,
         progress: ProgressCallback,
+        cancel: Option<CancelToken>,
     ) -> Result<Self, Error> {
-        let LoadedCache { frames, core } = load_tiered::<CfaImage, P>(paths, config, progress)?;
+        let LoadedCache { frames, core } =
+            load_tiered::<CfaImage, P>(paths, config, progress, cancel)?;
         Ok(Self { frames, core })
     }
 }
@@ -369,8 +371,10 @@ impl LightCache {
         paths: &[P],
         config: &CacheConfig,
         progress: ProgressCallback,
+        cancel: Option<CancelToken>,
     ) -> Result<Self, Error> {
-        let LoadedCache { frames, core } = load_tiered::<AstroImage, P>(paths, config, progress)?;
+        let LoadedCache { frames, core } =
+            load_tiered::<AstroImage, P>(paths, config, progress, cancel)?;
         let frames = frames
             .into_iter()
             .map(|frame| WeightedFrame {
@@ -396,6 +400,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     progress: &ProgressCallback,
     dimensions: ImageDimensions,
     first_image: I,
+    cancel: &Option<CancelToken>,
 ) -> Result<LoadedTier, Error> {
     let first_stats = compute_frame_stats(&first_image);
     let first_frame = image_to_frame(first_image);
@@ -408,6 +413,10 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         .map(|(i, p)| (i + 1, p))
         .collect();
     let remaining = try_par_map_limited(&indexed_paths, 3, |&(idx, path)| {
+        // Cancelled: stop decoding further frames (the slow phase).
+        if is_cancelled(cancel) {
+            return Err(Error::Cancelled);
+        }
         let path_ref = path.as_ref();
         let image = I::load(path_ref)?;
         if image.dimensions() != dimensions {
@@ -450,6 +459,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     progress: &ProgressCallback,
     dimensions: ImageDimensions,
     first_image: I,
+    cancel: &Option<CancelToken>,
 ) -> Result<LoadedTier, Error> {
     let cache_dir = &config.cache_dir;
     std::fs::create_dir_all(cache_dir).map_err(|e| Error::CreateCacheDir {
@@ -473,6 +483,10 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
         .map(|(i, p)| (i + 1, p))
         .collect();
     let remaining = try_par_map_limited(&indexed_paths, 3, |&(idx, ref path)| {
+        // Cancelled: stop decoding further frames (the slow phase).
+        if is_cancelled(cancel) {
+            return Err(Error::Cancelled);
+        }
         let path_ref = path.as_ref();
         let base_filename = cache_filename_for_path(path_ref);
         load_and_cache_frame::<I>(cache_dir, &base_filename, path_ref, dimensions, idx)
@@ -636,6 +650,9 @@ impl CfaCache {
                 "Weight count must match frame count"
             );
         }
+        // An in-memory stack is one chunk, so the per-chunk cancel check in
+        // `process_chunks` can't interrupt the combine — poll per row here too.
+        let cancel = self.core.cancel.clone();
         self.core.process_chunks(&self.frames, |output_slice, ctx| {
             let ChunkContext {
                 frames,
@@ -650,6 +667,11 @@ impl CfaCache {
                 .for_each_init(
                     || (vec![0.0f32; frame_count], ScratchBuffers::new(frame_count)),
                     |(values, scratch), (row_in_chunk, row_output)| {
+                        // Cancelled: skip the row's work (output stays zero; the
+                        // caller discards the partial result and reports Cancelled).
+                        if is_cancelled(&cancel) {
+                            return;
+                        }
                         let row_offset = row_in_chunk * width;
                         for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
                             let pixel_idx = row_offset + pixel_in_row;
@@ -882,6 +904,9 @@ impl LightCache {
                 "Weight count must match frame count"
             );
         }
+        // An in-memory stack is one chunk, so the per-chunk cancel check in
+        // `process_chunks` can't interrupt the combine — poll per row here too.
+        let cancel = self.core.cancel.clone();
         self.core.process_chunks(&self.frames, |output_slice, ctx| {
             let ChunkContext {
                 frames,
@@ -914,6 +939,11 @@ impl LightCache {
                         )
                     },
                     |(values, eff_weights, scratch), (row_in_chunk, row_output)| {
+                        // Cancelled: skip the row's work (output stays zero; the
+                        // caller discards the partial result and reports Cancelled).
+                        if is_cancelled(&cancel) {
+                            return;
+                        }
                         let row_offset = row_in_chunk * width;
                         for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
                             let pixel_idx = row_offset + pixel_in_row;
@@ -1429,8 +1459,12 @@ pub(crate) mod tests {
         let config = CacheConfig::default();
 
         // Empty paths
-        let result =
-            LightCache::from_paths(&Vec::<PathBuf>::new(), &config, ProgressCallback::default());
+        let result = LightCache::from_paths(
+            &Vec::<PathBuf>::new(),
+            &config,
+            ProgressCallback::default(),
+            None,
+        );
         assert!(matches!(result.unwrap_err(), Error::NoFrames));
 
         // Nonexistent file
@@ -1438,6 +1472,7 @@ pub(crate) mod tests {
             &[PathBuf::from("/nonexistent/path/image.fits")],
             &config,
             ProgressCallback::default(),
+            None,
         );
         assert!(matches!(result.unwrap_err(), Error::ImageLoad { .. }));
     }

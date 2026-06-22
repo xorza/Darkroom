@@ -114,8 +114,9 @@ pub fn stack_cfa_master(
         config
     };
 
-    let mut cache = CfaCache::from_paths(paths, &config.cache, ProgressCallback::default())?;
-    cache.core.cancel = cancel;
+    // `cancel` rides on the cache from construction, so the RAW-decode load loop
+    // polls it too (not just the combine).
+    let cache = CfaCache::from_paths(paths, &config.cache, ProgressCallback::default(), cancel)?;
 
     let result = run_stacking(&cache, &config);
     if is_cancelled(&cache.core.cancel) {

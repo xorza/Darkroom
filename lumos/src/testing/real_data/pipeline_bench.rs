@@ -50,7 +50,8 @@ fn bench_full_pipeline() {
 
             let t0 = Instant::now();
             let cache =
-                CfaCache::from_paths(paths, &config.cache, ProgressCallback::default()).unwrap();
+                CfaCache::from_paths(paths, &config.cache, ProgressCallback::default(), None)
+                    .unwrap();
             let load_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
             let t1 = Instant::now();

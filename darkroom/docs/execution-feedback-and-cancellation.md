@@ -16,23 +16,24 @@
 > limitation:** the node already mid-`spawn_blocking` (e.g. a stack) still runs to
 > completion in the background unless lumos polls the flag (that's P3).
 >
-> **Status: P3 (cooperative lumos stop) shipped for the named ops.** The same
-> `CancelToken` is exposed to lambdas via `ContextManager::cancel_flag()`;
-> `stack_lights` / `build_masters` clone it into their `spawn_blocking` and pass
-> it to lumos. lumos's combine chokepoint (`CacheCore::process_chunks`) polls it
-> between chunks (covers both ops' stacking), and `calibrate_align_stack`'s RAW
-> load `par_iter` polls it between frames — so a long stack/master build now bails
-> within roughly a chunk/frame and returns `lumos::…::Error::Cancelled`; the lens
-> lambda folds that (when the flag is set) into a clean no-output bail (no red
-> "errored" node). **Remaining (P3b):** the detect / register / warp `par_iter`
-> loops inside `align_and_stack` aren't polled yet, so a cancel during alignment
-> waits for that stage to finish before bailing at combine.
+> **Status: P3 (cooperative lumos stop) shipped — every hot loop in the named
+> ops polls the token.** The `CancelToken` is exposed to lambdas via
+> `ContextManager::cancel_flag()`; `stack_lights` / `build_masters` clone it into
+> their `spawn_blocking` and pass it to lumos, where it rides on `CacheCore` and
+> is polled at every heavy loop: the **RAW-decode load** (`load_in_memory` /
+> `load_to_disk`, per frame), **star detection** + **registration/warp**
+> (`align_and_stack` par_iters, per frame), and the **combine** (`process_chunked`
+> / `process_chunked_weighted`, **per row** — the per-chunk check alone can't
+> interrupt an in-memory stack, which is a single chunk). So a cancel bails within
+> ~one frame or row at any phase and returns `Error::Cancelled`; the lens lambda
+> folds that (when the token is set) into a clean no-output bail (no red "errored"
+> node).
 
 Goal: while a long-running graph runs, the editor should show **which node is
 computing right now** (and that it started), and the user should be able to
 **cancel the run and actually stop** long operations (`stack_lights`,
 `build_masters`). P1–P3 deliver progress + coarse cancel + cooperative stop of
-the heavy stacking/load work; the alignment `par_iter`s (P3b) remain.
+every heavy loop in the two named ops (decode, detect, register, combine).
 
 Spans `scenarium` (the headless executor + worker) and `darkroom` (the editor
 feedback + controls). `lumos` is touched only in the final phase (cooperative
@@ -231,13 +232,13 @@ per run.
 
 **Lambdas pass it into the `spawn_blocking` closure → into lumos.**
 `stack_cfa_master(paths, config, cancel)` and `calibrate_align_stack(.., cancel)`
-take `cancel: Option<CancelToken>`; lumos's combine chokepoint
-(`CacheCore::process_chunks`) polls it between chunks (covers both ops' stacking)
-and `calibrate_align_stack`'s RAW-load `par_iter` polls it between frames,
-returning `Error::Cancelled` early. The lens lambda folds that (when the token is
-set) into a clean no-output bail. **Done** for stacking masters + light stacking;
-the detect / register / warp `par_iter`s inside `align_and_stack` aren't polled
-yet (P3b).
+take `cancel: Option<CancelToken>`, which rides on `CacheCore` and is polled at
+every heavy loop: the RAW-decode load (`load_in_memory`/`load_to_disk`, per
+frame), star detection + registration/warp (`align_and_stack` par_iters, per
+frame), and the combine (`process_chunked{,_weighted}`, **per row** — the
+per-chunk check can't interrupt an in-memory single-chunk stack). Each returns
+`Error::Cancelled` early; the lens lambda folds that (when the token is set) into
+a clean no-output bail. **Done** for both named ops at every phase.
 
 The lambda maps a lumos `Cancelled` into an `InvokeError` (or a dedicated
 `InvokeResult` "cancelled" so the executor can mark the node cancelled rather

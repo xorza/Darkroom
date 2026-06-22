@@ -144,8 +144,8 @@ pub fn stack<P: AsRef<Path> + Sync>(
 
     // Files on disk carry no coverage, so this is a `LightCache` with `coverage: None` — the
     // weighted combine then treats every pixel as fully covered (identical to a plain stack).
-    let mut cache = LightCache::from_paths(paths, &config.cache, progress)?;
-    cache.core.cancel = cancel;
+    // `cancel` rides on the cache from construction, so the load loop polls it too.
+    let cache = LightCache::from_paths(paths, &config.cache, progress, cancel)?;
     // The disk cache (if any) is removed when `cache` drops via `CacheCore`'s `Drop`.
     let result = run_stacking_weighted(&cache, &config);
     if is_cancelled(&cache.core.cancel) {
