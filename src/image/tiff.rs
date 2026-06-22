@@ -62,28 +62,19 @@ macro_rules! define_float_color_type {
     };
 }
 
-// Gray unsigned integer types
+// Gray (BlackIsZero); only the formats `ColorFormat` actually has — U8/U16/F32.
 define_int_color_type!(Gray8U, u8, PhotometricInterpretation::BlackIsZero, 8, 1);
 define_int_color_type!(Gray16U, u16, PhotometricInterpretation::BlackIsZero, 16, 1);
-define_int_color_type!(Gray32U, u32, PhotometricInterpretation::BlackIsZero, 32, 1);
-
-// Gray float type
 define_float_color_type!(Gray32F, f32, PhotometricInterpretation::BlackIsZero, 32, 1);
 
-// RGB unsigned integer types
+// RGB
 define_int_color_type!(RGB8U, u8, PhotometricInterpretation::RGB, 8, 3);
 define_int_color_type!(RGB16U, u16, PhotometricInterpretation::RGB, 16, 3);
-define_int_color_type!(RGB32U, u32, PhotometricInterpretation::RGB, 32, 3);
-
-// RGB float type
 define_float_color_type!(RGB32F, f32, PhotometricInterpretation::RGB, 32, 3);
 
-// RGBA unsigned integer types
+// RGBA
 define_int_color_type!(RGBA8U, u8, PhotometricInterpretation::RGB, 8, 4);
 define_int_color_type!(RGBA16U, u16, PhotometricInterpretation::RGB, 16, 4);
-define_int_color_type!(RGBA32U, u32, PhotometricInterpretation::RGB, 32, 4);
-
-// RGBA float type
 define_float_color_type!(RGBA32F, f32, PhotometricInterpretation::RGB, 32, 4);
 
 macro_rules! dispatch_tiff {
@@ -117,17 +108,14 @@ pub(crate) fn save_tiff<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()
         // L (grayscale)
         (L, _8bit, UInt) => Gray8U,
         (L, _16bit, UInt) => Gray16U,
-        (L, _32bit, UInt) => Gray32U,
         (L, _32bit, Float) => Gray32F,
         // RGB
         (Rgb, _8bit, UInt) => RGB8U,
         (Rgb, _16bit, UInt) => RGB16U,
-        (Rgb, _32bit, UInt) => RGB32U,
         (Rgb, _32bit, Float) => RGB32F,
         // RGBA
         (Rgba, _8bit, UInt) => RGBA8U,
         (Rgba, _16bit, UInt) => RGBA16U,
-        (Rgba, _32bit, UInt) => RGBA32U,
         (Rgba, _32bit, Float) => RGBA32F,
     });
 

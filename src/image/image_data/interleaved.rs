@@ -4,10 +4,10 @@
 //! so it casts to `&[u8]` zero-copy. The interleaved twin of the planar
 //! [`DeinterleavedImageData`](super::deinterleaved::DeinterleavedImageData).
 
-// dead_code: `width`/`height`/`color_format` are the symmetric accessors the
-// interleave/deinterleave conversions will use; not called yet. Image reads
-// format/dims off its own `desc`. non_camel_case_types: the enum variants mirror
-// the `ColorFormat` constant names 1:1 on purpose.
+// dead_code: the type-erased `AnyImageData` isn't wired into a runtime path yet,
+// so its `width`/`height`/`color_format` accessors have no production caller
+// (`Image` reads format/dims off its own `desc`). non_camel_case_types: the enum
+// variants mirror the `ColorFormat` constant names 1:1 on purpose.
 #![allow(dead_code, non_camel_case_types)]
 
 use crate::common::buffer2::Buffer2;

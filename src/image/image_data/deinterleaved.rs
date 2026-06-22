@@ -58,15 +58,8 @@ impl<const N: usize, T> DeinterleavedImageData<N, T> {
 impl<const N: usize, T: Default + Clone> DeinterleavedImageData<N, T> {
     /// A `width × height` image with all `N` planes zero-filled.
     pub fn new_zeroed(width: usize, height: usize) -> Self {
-        const {
-            assert!(
-                N == 1 || N == 3 || N == 4,
-                "DeinterleavedImageData supports 1, 3, or 4 channels (L/RGB/RGBA)"
-            )
-        };
-        Self {
-            channels: std::array::from_fn(|_| Buffer2::new_default(width, height)),
-        }
+        // Channel-count invariant + (trivially-satisfied) dim check live in `from_channels`.
+        Self::from_channels(std::array::from_fn(|_| Buffer2::new_default(width, height)))
     }
 }
 
