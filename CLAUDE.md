@@ -15,8 +15,8 @@ An image-processing library with **CPU (SIMD: SSE/AVX2/NEON) and GPU (wgpu compu
 
 Six layers, bottom-up. A caller drives everything through a `ProcessingContext` and `ImageBuffer`s; ops pick a backend and the buffer transparently moves pixels between CPU and GPU.
 
-1. **Image** — `Image` + `ImageDesc` hold raw, tightly-packed, 16-byte-aligned pixel bytes; `io.rs`/`tiff.rs` do PNG/JPG/TIFF.
-2. **Color/format** — `ColorFormat` (`ChannelCount` × `ChannelSize` × `ChannelType`) is the format vocabulary; `conversion/` converts between any two formats.
+1. **Image** — `Image` + `ImageDesc` hold tightly-packed interleaved pixel data (`AnyImageData`, a typed `Buffer2<[T; N]>` per format; `bytes()` views it as `&[u8]` zero-copy, element-aligned); `io.rs`/`tiff.rs` do PNG/JPG/TIFF.
+2. **Color/format** — `ColorFormat` (`ChannelCount` × `ChannelSize` × `ChannelType`) is the format vocabulary; `image/conversion/` converts between any two formats, `image/transpose.rs` flips interleaved ⟷ planar layout.
 3. **Processing context** — `ProcessingContext` owns the optional `GpuContext`; `ImageBuffer` abstracts CPU-vs-GPU residency via interior mutability.
 4. **GPU wrapper** — `Gpu` (device+queue), `GpuImage` (a wgpu storage buffer + desc), `Slot` (async callback handoff).
 5. **Ops** — `Blend`, `ContrastBrightness`, `Transform`; each exposes an `execute(&mut ProcessingContext, …)` that calls `select_backend` then routes to a CPU or GPU path.
@@ -28,11 +28,13 @@ Six layers, bottom-up. A caller drives everything through a `ProcessingContext` 
 
 I/O (`src/image/io.rs`): PNG/JPG via the `image` crate, TIFF via `tiff.rs` (unlimited decoder for large astrophotography frames, U8/U16/U32/F32). `SUPPORTED_EXTENSIONS = ["png","jpg","jpeg","tiff","tif"]`. PNG save is U8/U16 only (no F32); JPG save needs `RGBA_U8` or `L_U8`.
 
-### Color & conversion (`src/common/`)
+### Color & format (`src/common/`)
 
 `Color` (`src/common/color.rs`) is f32 RGBA in 0..1 with Rec. 709 `luminance()`; used by drawing and grayscale handling, not pixel storage. `ColorFormat` (`src/common/color_format.rs:31`) composes `ChannelCount` (L/RGB/RGBA), `ChannelSize` (8/16/32-bit), `ChannelType` (UInt/Float). The 9 supported combos are macro-generated constants (`L_U8`…`RGBA_F32`); `ALL_FORMATS` lists all 9, `ALPHA_FORMATS` the 3 with alpha (RGBA).
 
-Conversion dispatch (`src/common/conversion/mod.rs:28`): `convert_image(from, to)` processes rows in parallel (`rayon`), trying `get_simd_row_converter(from_fmt, to_fmt)` first and falling back to `dispatch_convert_row_scalar`. SIMD lives in `conversion_simd/` (sse/avx/neon submodules); the converter type is `fn(&[u8], &mut [u8], usize)`. Covered fast paths: RGBA↔RGB, RGB→L, L→RGB, U8↔U16, U16↔F32. `bench.rs` and `tests.rs` sit alongside.
+### Format conversion (`src/image/conversion/`)
+
+`convert_image(from, to)` (`src/image/conversion/mod.rs`) changes an interleaved image's **format** (element type and/or channel count), processing rows in parallel (`rayon`): it tries `get_simd_row_converter(from_fmt, to_fmt)` first and falls back to the scalar reference. SIMD lives in `simd/` (sse/avx/neon submodules); the converter type is `fn(&[u8], &mut [u8], usize)`. The scalar path is `scalar.rs`. Covered fast paths: RGBA↔RGB, RGB→L, L→RGB, U8↔U16, U16↔F32. `bench.rs` and `tests.rs` sit alongside. (Changing *layout* rather than format is `src/image/transpose.rs` — see below.)
 
 `error.rs`: `Error` enum (`Io`, `InvalidExtension`, `UnsupportedColorType`, `UnsupportedFormat`, `InvalidColorFormat`, `SizeMismatch`, `Conversion`, `Encoding`, `Gpu`, `NoGpuContext`) + `Result<T>`. `image_diff.rs`: `max_pixel_diff`/`pixels_equal` for tests. `test_utils.rs`: cached lena fixtures + shared `test_gpu()`/`test_processing_context()` (GPU init is ~2s, so it's shared across tests).
 
@@ -75,8 +77,8 @@ WGSL shaders treat storage buffers as `array<u32>` over the packed layout. The *
 ## Project layout
 
 - `src/lib.rs` — crate root: `cfg_x86_64!`/`cfg_aarch64!` macros, module decls, and the published surface (`pub use`s). GPU items are re-exported only under `#[cfg(feature = "wgpu")]`.
-- `src/common/` — `buffer2.rs` (`Buffer2<T>`, the workspace's planar 2D pixel buffer — `lumos` builds `AstroImage` on it), `color.rs`, `color_format.rs`, `conversion/` (mod dispatch + `conversion_scalar.rs` + `conversion_simd/` + `bench.rs` + `tests.rs`), `error.rs`, `image_diff.rs`, `test_utils.rs`.
-- `src/image/` — `mod.rs` (`Image`/`ImageDesc`), `image_data.rs` (the planar `ImageData<N, T>` + `AnyImageData`), `io.rs`, `tiff.rs`, `tests.rs`.
+- `src/common/` — `buffer2.rs` (`Buffer2<T>`, the workspace's 2D pixel buffer — both image-data layouts and `lumos`'s `AstroImage` build on it), `color.rs`, `color_format.rs`, `error.rs`, `image_diff.rs`, `test_utils.rs`.
+- `src/image/` — `mod.rs` (`Image`/`ImageDesc`); `image_data/` (the typed layouts: `interleaved.rs` = `ImageData<N,T>`/`AnyImageData`, `deinterleaved.rs` = `DeinterleavedImageData<N,T>`/`AnyDeinterleavedImageData`); `transpose.rs` (interleave ⟷ deinterleave); `conversion/` (format conversion: `mod.rs` dispatch + `scalar.rs` + `simd/` + `bench.rs` + `tests.rs`); `io.rs`, `tiff.rs`, `tests.rs`.
 - `src/processing_context/` — `mod.rs` (`ProcessingContext`), `image_buffer.rs`, `gpu_context.rs`, `tests.rs`.
 - `src/gpu/` — `mod.rs` (`Gpu`), `gpu_image.rs`, `slot.rs` (all `wgpu`-gated).
 - `src/ops/` — `mod.rs`, `backend_selection.rs`, `gpu_format.rs`, and `blend/`, `contrast_brightness/`, `transform/` (each `mod.rs`/`cpu.rs`/`gpu.rs`/`pipeline.rs`/`.wgsl`; transform has no `cpu.rs`).

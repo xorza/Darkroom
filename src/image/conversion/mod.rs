@@ -1,5 +1,13 @@
-pub(crate) mod conversion_scalar;
-pub(crate) mod conversion_simd;
+//! Format conversion — change an interleaved [`Image`]'s pixel *format* (element
+//! type `u8`/`u16`/`f32` and/or channel count L/RGB/RGBA), e.g. `RGB_U8` →
+//! `RGBA_F32`. [`convert_image`] is the single entry point: it processes rows in
+//! parallel through a SIMD kernel when one exists for the pair ([`simd`]), else
+//! the scalar reference ([`scalar`]). Layout is preserved (interleaved →
+//! interleaved); changing *layout* is the separate
+//! [`transpose`](crate::image::transpose).
+
+pub(crate) mod scalar;
+pub(crate) mod simd;
 
 // Rec. 709 (sRGB) luminance weights scaled to fixed-point for integer math
 // R: 0.2126 * 65536 = 13933
@@ -24,8 +32,8 @@ use rayon::prelude::*;
 use crate::common::error::Result;
 use crate::image::Image;
 
-use conversion_scalar::{ConversionInfo, dispatch_convert_row_scalar};
-use conversion_simd::get_simd_row_converter;
+use scalar::{ConversionInfo, dispatch_convert_row_scalar};
+use simd::get_simd_row_converter;
 
 /// Convert image format, using SIMD acceleration when available.
 /// This is the single entry point for all image conversions.

@@ -5,20 +5,20 @@
 //! boundary values.
 //!
 //! Test modules:
-//! - `common_tests`: Cross-platform tests using high-level Image API
-//! - `sse_tests`: x86_64 SSE2/SSSE3 specific tests
-//! - `avx_tests`: x86_64 AVX2 specific tests
-//! - `neon_tests`: aarch64 NEON specific tests
+//! - `common`: Cross-platform tests using the high-level `Image` API
+//! - `sse`: x86_64 SSE2/SSSE3 specific tests
+//! - `avx`: x86_64 AVX2 specific tests
+//! - `neon`: aarch64 NEON specific tests
 
-mod common_tests;
+mod common;
 
 cfg_x86_64! {
-    mod sse_tests;
-    mod avx_tests;
+    mod sse;
+    mod avx;
 }
 
 cfg_aarch64! {
-    mod neon_tests;
+    mod neon;
 }
 
 use crate::common::color_format::ColorFormat;

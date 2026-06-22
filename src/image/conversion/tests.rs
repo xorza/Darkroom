@@ -1,4 +1,4 @@
-use super::conversion_scalar::ChannelConvert;
+use super::scalar::ChannelConvert;
 
 macro_rules! test_identity {
     ($name:ident, $t:ty, $vals:expr) => {
@@ -76,7 +76,7 @@ test_float_conversion!(float_conversion_u16_f32, u16, f32);
 // Test that opaque_alpha is correct for each channel type
 #[test]
 fn opaque_alpha_values() {
-    use super::conversion_scalar::OpaqueAlpha;
+    use super::scalar::OpaqueAlpha;
     assert_eq!(
         f32::opaque_alpha(),
         1.0,

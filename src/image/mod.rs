@@ -1,6 +1,8 @@
+mod conversion;
 pub(crate) mod image_data;
 mod io;
 mod tiff;
+mod transpose;
 
 #[cfg(test)]
 mod tests;
@@ -11,8 +13,8 @@ use std::path::Path;
 pub const SUPPORTED_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "tiff", "tif"];
 
 use crate::common::color_format::ColorFormat;
-use crate::common::conversion::convert_image;
 use crate::common::error::{Error, Result};
+use crate::image::conversion::convert_image;
 use crate::image::image_data::interleaved::AnyImageData;
 
 /// Image dimensions + pixel format. Pixel data is **always tightly packed**

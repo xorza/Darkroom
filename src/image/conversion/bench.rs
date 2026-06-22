@@ -1,7 +1,7 @@
 //! Benchmarks for row conversion operations (SIMD vs Scalar).
 
-use super::conversion_scalar::{ConversionInfo, dispatch_convert_row_scalar};
-use super::conversion_simd::get_simd_row_converter;
+use super::scalar::{ConversionInfo, dispatch_convert_row_scalar};
+use super::simd::get_simd_row_converter;
 use crate::common::color_format::{ChannelSize, ColorFormat};
 use quickbench::quick_bench;
 use std::hint::black_box;

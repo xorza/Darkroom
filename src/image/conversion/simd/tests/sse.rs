@@ -7,7 +7,7 @@ use super::{
     TEST_WIDTHS, create_test_row_f32, create_test_row_u8, create_test_row_u16, expected_luminance,
     within_tolerance,
 };
-use crate::common::conversion::conversion_simd::sse;
+use crate::image::conversion::simd::sse;
 use crate::cpu_features;
 
 // =============================================================================

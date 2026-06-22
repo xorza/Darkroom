@@ -1,9 +1,9 @@
 use crate::common::color_format::{ChannelCount, ChannelSize, ChannelType, ColorFormat};
-use crate::common::conversion::conversion_scalar::ChannelConvert;
 use crate::common::error::Error;
 use crate::common::test_utils::{
     load_lena_rgba_f32_895x551, load_lena_rgba_u8_895x551, test_output_path,
 };
+use crate::image::conversion::scalar::ChannelConvert;
 use crate::image::{Image, ImageDesc};
 
 // =============================================================================
