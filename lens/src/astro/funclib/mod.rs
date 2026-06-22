@@ -22,7 +22,7 @@ use lumos::{
 use scenarium::data::{
     DataType, DynamicValue, EnumVariants, FsPathConfig, FsPathMode, StaticValue,
 };
-use scenarium::func_lambda::FuncLambda;
+use scenarium::func_lambda::{FuncLambda, InvokeResult};
 use scenarium::function::{Func, FuncInput, FuncLib, ValueVariant};
 
 use crate::astro::configs::{
@@ -141,18 +141,14 @@ pub fn astro_funclib() -> FuncLib {
                     let cache = inputs[5].value.as_bool().expect("cache is required");
 
                     // Stacking many full-resolution CFA frames is heavy CPU work
-                    // (polls `cancel` between chunks); a cached master is loaded
-                    // instead when present.
-                    let cancel_for_op = cancel.clone();
-                    let masters = tokio::task::spawn_blocking(move || {
-                        build_masters_cached(dirs, sigma, cache, cancel_for_op)
+                    // (polls `cancel` between decode frames + combine rows); a
+                    // cached master is loaded instead when present.
+                    let Some(masters) = run_cancellable(cancel, move |c| {
+                        build_masters_cached(dirs, sigma, cache, c)
                     })
-                    .await
-                    .map_err(anyhow::Error::from)?;
-                    let masters = match masters {
-                        Ok(masters) => masters,
-                        Err(_) if is_cancelled(&cancel) => return Ok(()),
-                        Err(err) => return Err(err.into()),
+                    .await?
+                    else {
+                        return Ok(());
                     };
 
                     outputs[0] = DynamicValue::from_custom(Masters::from(masters));
@@ -256,10 +252,8 @@ pub fn astro_funclib() -> FuncLib {
                     };
 
                     // Load → calibrate → demosaic → detect → register → combine:
-                    // the whole pipeline is heavy synchronous CPU work that polls
-                    // `cancel` between frames + stacking chunks.
-                    let cancel_for_op = cancel.clone();
-                    let result = tokio::task::spawn_blocking(move || {
+                    // heavy synchronous CPU work that polls `cancel` throughout.
+                    let Some(result) = run_cancellable(cancel, move |c| {
                         let empty = CalibrationMasters {
                             master_dark: None,
                             master_flat: None,
@@ -271,16 +265,12 @@ pub fn astro_funclib() -> FuncLib {
                             .as_custom::<Masters>()
                             .map(|m| &m.masters)
                             .unwrap_or(&empty);
-                        calibrate_align_stack(&lights, masters, &config, cancel_for_op)
+                        calibrate_align_stack(&lights, masters, &config, c)
+                            .map_err(anyhow::Error::from)
                     })
-                    .await
-                    .map_err(anyhow::Error::from)?;
-                    let result = match result {
-                        Ok(result) => result,
-                        // A cancelled run bails cleanly (no output, no error);
-                        // any other failure propagates.
-                        Err(_) if is_cancelled(&cancel) => return Ok(()),
-                        Err(err) => return Err(anyhow::Error::from(err).into()),
+                    .await?
+                    else {
+                        return Ok(());
                     };
 
                     outputs[0] = DynamicValue::from_custom(AstroFrame::from(result.image));
@@ -779,11 +769,31 @@ where
 /// loaded from `master_<role>.lcm` next to its frames when present, and a
 /// freshly-stacked one is written there for next time. Delete the `.lcm` to
 /// force a rebuild (a changed frame set is not auto-detected).
-/// Whether the run's cancel token (if any) is set — a heavy lumos op that
-/// returns early on cancellation reports an error, which the node lambdas
-/// fold into a clean no-output bail rather than a failed run.
+/// Whether the run's cancel token (if any) is set.
 fn is_cancelled(cancel: &Option<CancelToken>) -> bool {
     cancel.as_ref().is_some_and(|c| c.is_cancelled())
+}
+
+/// Run a cancellable blocking lumos op off the worker. Returns `Ok(None)` when
+/// the run was cancelled (the node should bail with no output), `Ok(Some(v))` on
+/// success, `Err` on a real failure. Centralizes the `spawn_blocking` + join
+/// handling and the "a cancelled op is a clean bail, not an errored node" rule
+/// the heavy astro nodes share — a lumos op reports cancellation as an error, so
+/// it's only a bail when the cancel token is actually set.
+async fn run_cancellable<T, F>(cancel: Option<CancelToken>, op: F) -> InvokeResult<Option<T>>
+where
+    F: FnOnce(Option<CancelToken>) -> anyhow::Result<T> + Send + 'static,
+    T: Send + 'static,
+{
+    let cancel_for_op = cancel.clone();
+    match tokio::task::spawn_blocking(move || op(cancel_for_op))
+        .await
+        .map_err(anyhow::Error::from)?
+    {
+        Ok(value) => Ok(Some(value)),
+        Err(_) if is_cancelled(&cancel) => Ok(None),
+        Err(err) => Err(err.into()),
+    }
 }
 
 fn build_masters_cached(
