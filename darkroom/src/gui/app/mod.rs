@@ -128,7 +128,15 @@ impl App {
         let run_state = &mut self.editor.run_state;
         for event in self.engine.drain_worker() {
             match event {
-                WorkerEvent::ExecutionFinished(Ok(stats)) => run_state.set_results(&stats),
+                WorkerEvent::ExecutionFinished(Ok(stats)) => {
+                    if stats.cancelled {
+                        tracing::info!(
+                            "run cancelled after {} node(s)",
+                            stats.executed_nodes.len()
+                        );
+                    }
+                    run_state.set_results(&stats);
+                }
                 WorkerEvent::ExecutionFinished(Err(err)) => {
                     eprintln!("compute failed: {err}");
                     run_state.clear();

@@ -180,4 +180,8 @@ pub struct ExecutionStats {
     /// flattened-id stats above back onto the authoring nodes the user
     /// sees (including subgraph interiors + instances).
     pub flatten: FlattenMap,
+    /// The run was cancelled mid-flight: scheduling stopped before every
+    /// node ran (the already-running node still completed). The stat lists
+    /// reflect only what actually ran.
+    pub cancelled: bool,
 }

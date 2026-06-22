@@ -67,6 +67,7 @@ impl App {
                 config,
             } => self.pick_input_path(node_id, port_idx, config),
             MenuCommand::Run => self.run_graph(),
+            MenuCommand::CancelRun => self.engine.cancel_run(),
         }
     }
 

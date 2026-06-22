@@ -45,6 +45,12 @@ impl Engine {
         self.worker.run_once(graph, self.func_lib.load_full());
     }
 
+    /// Request cancellation of the in-flight run (coarse — the running node
+    /// finishes, nothing further is scheduled).
+    pub(crate) fn cancel_run(&self) {
+        self.worker.cancel_run();
+    }
+
     /// Non-blocking drain of worker results posted since the last frame.
     pub(crate) fn drain_worker(&self) -> impl Iterator<Item = WorkerEvent> + '_ {
         self.worker.drain()

@@ -667,7 +667,7 @@ mod behavior {
 
         let (tx, mut rx) = unbounded_channel::<RunProgress>();
         let stats = eg
-            .execute(true, false, Vec::<EventRef>::new(), Some(&tx))
+            .execute(true, false, Vec::<EventRef>::new(), Some(&tx), None)
             .await?;
         drop(tx);
 
@@ -707,6 +707,43 @@ mod behavior {
         // covers exactly the finally-executed nodes.
         assert_eq!(started_order, execution_node_names_in_order(&eg));
         assert_eq!(started_order.len(), stats.executed_nodes.len());
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn execute_honors_cancel_flag_and_marks_cancelled() -> anyhow::Result<()> {
+        use std::sync::atomic::AtomicBool;
+
+        let graph = test_graph();
+        let func_lib = test_func_lib(default_hooks());
+        let mut eg = ExecutionEngine::default();
+        eg.update(&graph, &func_lib);
+
+        // Pre-tripped: the executor breaks at the first loop-top check, so no
+        // node runs and the run is flagged cancelled.
+        let cancel = AtomicBool::new(true);
+        let stats = eg
+            .execute(true, false, Vec::<EventRef>::new(), None, Some(&cancel))
+            .await?;
+        assert!(stats.cancelled, "pre-tripped run is cancelled");
+        assert!(
+            stats.executed_nodes.is_empty(),
+            "no node runs when cancel is already set"
+        );
+
+        // A fresh, un-cancelled flag runs the whole graph (nothing cached from
+        // the aborted run above).
+        let cancel = AtomicBool::new(false);
+        let stats = eg
+            .execute(true, false, Vec::<EventRef>::new(), None, Some(&cancel))
+            .await?;
+        assert!(!stats.cancelled);
+        assert_eq!(
+            stats.executed_nodes.len(),
+            5,
+            "all nodes run when not cancelled"
+        );
 
         Ok(())
     }
@@ -1804,7 +1841,7 @@ mod events {
 
         // terminals=false, event_triggers=true → emit (owns a subscribed event)
         // becomes a root; recv is downstream of emit, not a root.
-        eg.execute(false, true, Vec::<EventRef>::new(), None)
+        eg.execute(false, true, Vec::<EventRef>::new(), None, None)
             .await?;
 
         assert_eq!(execution_node_names_in_order(&eg), ["emit"]);
@@ -1821,7 +1858,7 @@ mod events {
         eg.update(&f.graph, &f.func_lib);
 
         let stats = eg
-            .execute(false, true, Vec::<EventRef>::new(), None)
+            .execute(false, true, Vec::<EventRef>::new(), None, None)
             .await?;
         let triggers = eg.active_event_triggers(&stats);
 

@@ -120,6 +120,13 @@ impl WorkerBridge {
         ]);
     }
 
+    /// Request cancellation of the in-flight run. Coarse: the running node
+    /// finishes, but no further nodes are scheduled (a shared atomic the
+    /// executor polls — no command-channel round-trip).
+    pub(crate) fn cancel_run(&self) {
+        self.worker.request_cancel();
+    }
+
     /// Ask the worker for one node's computed input/output values. The
     /// worker answers on a oneshot against its live executor slots; a
     /// forwarder task on our runtime turns that into a

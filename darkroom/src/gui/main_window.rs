@@ -77,7 +77,8 @@ impl MainWindow {
                         ..Default::default()
                     })
                     .show(ui, |ui| {
-                        command = menu_bar::show(ui, host, ctx.theme_choice);
+                        command =
+                            menu_bar::show(ui, host, ctx.theme_choice, ctx.run_state.is_running());
                     });
                 tab_bar::show(ui, ctx.theme, &tabs, doc.active, out);
                 self.graph_ui.frame(ui, ctx, scene, out, &mut command);

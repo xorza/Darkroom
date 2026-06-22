@@ -89,6 +89,10 @@ pub struct Worker {
     thread_handle: Option<JoinHandle<()>>,
     tx: UnboundedSender<Vec<WorkerMessage>>,
     event_loop_started: Arc<AtomicBool>,
+    /// Cooperative cancel for the in-flight run: the executor polls it
+    /// between nodes (and, in P3, long ops poll it too). Set via
+    /// [`Worker::request_cancel`]; the worker clears it at each run's start.
+    cancel: Arc<AtomicBool>,
 }
 
 impl Worker {
@@ -98,10 +102,12 @@ impl Worker {
     {
         let (tx, rx) = unbounded_channel::<Vec<WorkerMessage>>();
         let event_loop_started = Arc::new(AtomicBool::new(false));
+        let cancel = Arc::new(AtomicBool::new(false));
         let thread_handle: JoinHandle<()> = tokio::spawn({
             let event_loop_started = event_loop_started.clone();
+            let cancel = cancel.clone();
             async move {
-                worker_loop(rx, callback, event_loop_started).await;
+                worker_loop(rx, callback, event_loop_started, cancel).await;
             }
         });
 
@@ -109,11 +115,20 @@ impl Worker {
             thread_handle: Some(thread_handle),
             tx,
             event_loop_started,
+            cancel,
         }
     }
 
     pub fn is_event_loop_started(&self) -> bool {
         self.event_loop_started.load(Ordering::Relaxed)
+    }
+
+    /// Request cancellation of the currently-running graph. Coarse: the
+    /// in-flight node still finishes, but no further nodes are scheduled and
+    /// the run reports `cancelled`. A no-op when nothing is running (cleared
+    /// at the next run's start).
+    pub fn request_cancel(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
     }
 
     pub fn send(&self, msg: WorkerMessage) -> std::result::Result<(), WorkerExited> {
@@ -310,6 +325,7 @@ async fn worker_loop<ExecutionCallback>(
     mut worker_message_rx: UnboundedReceiver<Vec<WorkerMessage>>,
     execution_callback: ExecutionCallback,
     event_loop_started: Arc<AtomicBool>,
+    cancel: Arc<AtomicBool>,
 ) where
     ExecutionCallback: Fn(WorkerReport) + Send + 'static,
 {
@@ -415,6 +431,11 @@ async fn worker_loop<ExecutionCallback>(
             let _pause_guard = event_loop_pause_gate.close();
 
             let in_loop = should_start_event_loop || event_loop.is_some();
+            // Fresh run: clear any cancel left set while idle — a cancel only
+            // applies to the run in flight when it was requested. The host
+            // sets `cancel` directly (a shared atomic), so no command-channel
+            // round-trip is needed for it to be observed mid-run.
+            cancel.store(false, Ordering::Relaxed);
             // Forward each node's live progress to the host as it runs, ahead
             // of the final stats: the executor sends on `prog_tx`, and this
             // loop drains `prog_rx` concurrently with the run, batching each
@@ -427,6 +448,7 @@ async fn worker_loop<ExecutionCallback>(
                     in_loop,
                     intent.events.drain(),
                     Some(&prog_tx),
+                    Some(&cancel),
                 );
                 tokio::pin!(run);
                 loop {

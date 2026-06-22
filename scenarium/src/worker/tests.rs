@@ -486,6 +486,51 @@ async fn worker_streams_node_progress_before_finished() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn stale_cancel_is_cleared_at_run_start() {
+    use crate::data::StaticValue;
+
+    let func_lib = basic_funclib();
+    let mut graph = Graph::default();
+    let print_func = func_lib.by_name("print").unwrap();
+    let mut print_node: Node = print_func.into();
+    print_node.id = NodeId::unique();
+    let print_node_id = print_node.id;
+    graph.add(print_node);
+    graph.set_input_binding(
+        InputPort::new(print_node_id, 0),
+        StaticValue::String("hi".to_string()).into(),
+    );
+
+    let (tx, mut rx) = mpsc::channel::<ExecResult<ExecutionStats>>(8);
+    let worker = Worker::new(move |report| {
+        if let WorkerReport::Finished(result) = report {
+            tx.try_send(result).ok();
+        }
+    });
+
+    // Cancel requested with nothing running: it must not bleed into the run
+    // kicked next (the worker clears the flag at each run's start).
+    worker.request_cancel();
+    worker
+        .send_many([
+            WorkerMessage::Update {
+                graph,
+                func_lib: Arc::new(func_lib),
+            },
+            WorkerMessage::ExecuteTerminals,
+        ])
+        .unwrap();
+
+    let stats = timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .expect("worker timed out")
+        .expect("worker channel closed")
+        .expect("compute ok");
+    assert!(!stats.cancelled, "a stale cancel was cleared at run start");
+    assert_eq!(stats.executed_nodes.len(), 1, "the run completed in full");
+}
+
 #[tokio::test]
 async fn start_stop_event_loop() {
     let mut h = FrameHarness::with_callback_capacity(32).await;

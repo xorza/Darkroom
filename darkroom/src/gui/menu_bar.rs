@@ -53,6 +53,8 @@ pub(crate) enum MenuCommand {
     },
     /// Evaluate the graph once on the worker.
     Run,
+    /// Request cancellation of the in-flight run.
+    CancelRun,
 }
 
 /// Top-of-window menu bar. Horizontal strip of "menu trigger" buttons;
@@ -63,6 +65,7 @@ pub(crate) fn show(
     ui: &mut Ui,
     host: Option<&HostHandle>,
     theme_choice: ThemeChoice,
+    running: bool,
 ) -> Option<MenuCommand> {
     let mut command = None;
     Panel::hstack()
@@ -74,7 +77,7 @@ pub(crate) fn show(
             command = file_menu(ui, host)
                 .or_else(|| subgraph_menu(ui))
                 .or_else(|| theme_menu(ui, theme_choice))
-                .or_else(|| run_menu(ui));
+                .or_else(|| run_menu(ui, running));
         });
     command
 }
@@ -149,11 +152,15 @@ fn subgraph_menu(ui: &mut Ui) -> Option<MenuCommand> {
     })
 }
 
-fn run_menu(ui: &mut Ui) -> Option<MenuCommand> {
+fn run_menu(ui: &mut Ui, running: bool) -> Option<MenuCommand> {
     dropdown(ui, "Run", |ui, popup| {
         let mut command = None;
         if MenuItem::new("Run Once").show(ui, popup).clicked() {
             command = Some(MenuCommand::Run);
+        }
+        // Only offer Cancel while a run is actually in flight.
+        if running && MenuItem::new("Cancel Run").show(ui, popup).clicked() {
+            command = Some(MenuCommand::CancelRun);
         }
         command
     })

@@ -5,6 +5,7 @@
 //! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan), [`Executor::run`] invokes
 //! each scheduled node's lambda and gathers stats.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use tokio::sync::mpsc::UnboundedSender;
@@ -98,6 +99,7 @@ impl Executor {
         plan: &ExecutionPlan,
         flatten: &FlattenMap,
         progress: Option<&UnboundedSender<RunProgress>>,
+        cancel: Option<&AtomicBool>,
     ) -> ExecutionStats {
         let start = Instant::now();
 
@@ -111,7 +113,18 @@ impl Executor {
         let mut inputs = std::mem::take(&mut self.inputs);
         let mut output_usage = std::mem::take(&mut self.output_usage);
 
-        for e_node_idx in plan.execute_order.iter().copied() {
+        // How far down `execute_order` the run got. Stays the full length on a
+        // normal run; on cancel it's the count reached before bailing, so the
+        // stats report only the nodes that actually ran (not the unrun tail).
+        let mut executed_count = plan.execute_order.len();
+        for (pos, e_node_idx) in plan.execute_order.iter().copied().enumerate() {
+            // Coarse cancel: stop scheduling further nodes. A node already
+            // mid-invoke isn't interrupted (it finishes), but nothing after
+            // it starts. The unrun nodes simply don't appear in the stats.
+            if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+                executed_count = pos;
+                break;
+            }
             if program.e_nodes[e_node_idx].lambda.is_none() {
                 continue;
             }
@@ -191,8 +204,9 @@ impl Executor {
         }
 
         self.ctx_manager.current_node = None;
-        let mut stats = self.collect_execution_stats(program, plan, start);
+        let mut stats = self.collect_execution_stats(program, plan, start, executed_count);
         stats.logs = std::mem::take(&mut self.ctx_manager.logs);
+        stats.cancelled = cancel.is_some_and(|c| c.load(Ordering::Relaxed));
         self.inputs = inputs;
         self.output_usage = output_usage;
         stats
@@ -267,13 +281,14 @@ impl Executor {
         program: &ExecutionProgram,
         plan: &ExecutionPlan,
         start: Instant,
+        executed_count: usize,
     ) -> ExecutionStats {
         let mut executed_nodes = Vec::new();
         let mut missing_inputs = Vec::new();
         let mut cached_nodes = Vec::new();
         let mut node_errors = Vec::new();
 
-        for &idx in &plan.execute_order {
+        for &idx in &plan.execute_order[..executed_count] {
             let e = &program.e_nodes[idx];
             executed_nodes.push(ExecutedNodeStats {
                 node_id: e.id,
@@ -317,6 +332,8 @@ impl Executor {
             // Filled by `ExecutionEngine::execute` from the flatten pass;
             // the executor doesn't know the authoring graph.
             flatten: FlattenMap::default(),
+            // Set by `run` from the cancel flag after the loop.
+            cancelled: false,
         }
     }
 }

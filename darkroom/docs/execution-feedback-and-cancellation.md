@@ -6,13 +6,24 @@
 > run). `RunPhase::Started { at: Instant }` carries the start instant; darkroom
 > marks the active node `ExecStatus::Running(Instant)` (purple glow) and its
 > header shows a **comet `Spinner` + live elapsed-so-far**, ticking via a ~20fps
-> repaint while any node runs. P2 (cancel) / P3 (cooperative lumos stop) are
-> still open — see Phasing.
+> repaint while any node runs.
+>
+> **Status: P2 (coarse cancel) shipped.** A shared `Arc<AtomicBool>` on the
+> `Worker` (`request_cancel()`, cleared at each run's start) is polled by the
+> executor between nodes; when set, scheduling stops and the run reports
+> `ExecutionStats { cancelled: true }` with only the nodes that actually ran. The
+> editor offers **Run ▸ Cancel Run** while a run is in flight. **Honest B1
+> limitation:** the node already mid-`spawn_blocking` (e.g. a stack) still runs to
+> completion in the background — its result is discarded, but the CPU work isn't
+> interrupted. P3 (cooperative lumos stop) is what makes a long op bail promptly.
+>
+> P3 (cooperative lumos stop) is still open — see Phasing.
 
 Goal: while a long-running graph runs, the editor should show **which node is
 computing right now** (and that it started), and the user should be able to
 **cancel the run and actually stop** long operations (`stack_lights`,
-`build_masters`). P1 delivers the first half; cancellation is still TODO.
+`build_masters`). P1 + P2 deliver progress + coarse cancel; P3 (truly halting an
+in-flight heavy op) is still TODO.
 
 Spans `scenarium` (the headless executor + worker) and `darkroom` (the editor
 feedback + controls). `lumos` is touched only in the final phase (cooperative
@@ -153,19 +164,35 @@ Two levels, shipped in order. **B1** makes the *editor* stop and become
 responsive immediately (no lumos changes). **B2** makes the *CPU work* actually
 stop promptly (requires cooperative checks in lumos).
 
-### B1 — coarse cancel + responsive worker (no lumos changes)
+### B1 — coarse cancel (shipped)
 
-The worker holds a per-run `CancellationToken` (tokio-util — already a workspace
-dep; or `Arc<AtomicBool>` + `Notify`). A new `WorkerMessage::Cancel` trips it.
+**Implemented with a shared `Arc<AtomicBool>`, not a token + command-channel
+arm.** The sketch below proposed tripping a `CancellationToken` via a second
+`select!` arm on the command channel. The shipped design is simpler: the
+`Worker` owns an `Arc<AtomicBool>` (`Worker::request_cancel()` stores `true`)
+that the executor polls — the host sets it *directly* across threads, so a
+cancel is observed mid-run with **no command-channel round-trip and no
+carry-over/stash machinery**. The worker clears the flag at each run's start, so
+a stale cancel issued while idle can't bleed into the next run (pinned by
+`worker::tests::stale_cancel_is_cleared_at_run_start`). An `AtomicBool` (not a
+token) is also exactly what P3 wants — cheap to poll inside a rayon loop.
 
-**Make the worker observe Cancel mid-run** (the load-bearing change). P1 already
-built half of this: the worker now runs `execute()` as a pinned future inside a
-`tokio::select!` loop that drains the progress channel concurrently (P1 chose an
-`UnboundedSender<RunProgress>` over a borrowed `&mut dyn FnMut` precisely so the
-host callback needn't be `Sync` and so this loop exists). B1 just adds a second
-select arm on the command channel that trips the cancel token. Today the
-remaining gap: outside that loop the worker still folds one command batch at a
-time. Restructure so the in-flight run is raced against incoming commands too:
+**Executor honors the flag between nodes.** `Executor::run` checks
+`cancel.load(Relaxed)` at the top of the `execute_order` loop; if set, it stops
+scheduling further nodes and the run reports `ExecutionStats { cancelled: true }`
+with `executed_nodes` truncated to what actually ran (the planned-but-unrun tail
+is dropped). The *in-flight* node still runs to completion (B1 limitation — a
+stack already started keeps going on the blocking pool); no further nodes start.
+
+**Report + UI.** `ExecutionStats.cancelled` (not a separate report variant).
+darkroom: `RunState` tracks an explicit `running` flag (set by `begin_run`,
+cleared by `set_results`); **Run ▸ Cancel Run** shows only while running
+(`menu_bar::show(.., running)`), wired `MenuCommand::CancelRun` →
+`Engine::cancel_run` → `WorkerBridge::cancel_run` → `Worker::request_cancel`. The
+cancelled run's `Finished` report clears the glows via `set_results` as usual. A
+keyboard shortcut / toolbar button is a deferred polish item.
+
+<details><summary>Original sketch (superseded)</summary>
 
 ```rust
 let run = self.engine.execute(terminals, events, token.clone(), &mut progress);
@@ -180,42 +207,25 @@ loop {
     }
 }
 ```
-
-**Executor honors the token between nodes.** `Executor::run` checks
-`token.is_cancelled()` at the top of the `execute_order` loop
-(`executor.rs:108`); if set, stop scheduling further nodes and return a stats
-marked `cancelled`. The *in-flight* node still runs to completion (B1 limitation
-— a stack already started keeps going on the blocking pool), but:
-- no further nodes start, and
-- the worker stops `await`ing it (the `select!` arm returns once the executor
-  yields), so the editor is immediately responsive and the orphaned
-  `spawn_blocking` result is dropped when it eventually lands.
-
-**Report + UI.** Add `RunPhase::Cancelled` / a `WorkerReport::Cancelled` (or a
-flag on the finished stats). darkroom: a **Cancel button** (menu + a
-`Esc`/`Ctrl+.` shortcut) shown only while a run is in flight (`RunState` already
-knows via `run_id`/a `running` flag); wire `MenuCommand::CancelRun` →
-`Engine::cancel_run` → `WorkerBridge` sends `WorkerMessage::Cancel`. On a
-cancelled report, clear `Running` glows.
+</details>
 
 ### B2 — cooperative stop inside the heavy ops (lumos)
 
 B1 won't interrupt a stack mid-computation (tokio can't kill a `spawn_blocking`
 thread). To *truly* stop, the op must poll a cancel flag and bail.
 
-**Plumb a cancel flag to lambdas.** Expose it on `ContextManager` (the per-run
-resource store the lambda already gets): `ctx_manager.cancel_token()` →
-a cheap-to-poll handle (`CancellationToken` exposes `is_cancelled()`; or hand out
-an `Arc<AtomicBool>` derived from it — ideal for polling in a rayon loop). The
-executor owns it for the run; the worker trips it on `Cancel`.
+**Plumb the cancel flag (the P2 `Arc<AtomicBool>`) to lambdas.** Expose it on
+`ContextManager` (the per-run resource store the lambda already gets):
+`ctx_manager.cancel()` → `&AtomicBool` (the same flag P2's executor polls), cheap
+to poll in a rayon loop. The worker already owns it and clears it per run.
 
 **Lambdas pass it into the `spawn_blocking` closure → into lumos.** e.g.
 `stack_cfa_master(paths, config, &cancel)`, `calibrate_align_stack(..., &cancel)`,
 `run_frame_op(value, cancel, op)`. lumos's chunked/rayon loops
 (`stacking::combine` `process_chunks`, `calibration_masters::from_files`, the
-registration/detection passes) check `cancel.is_cancelled()` between chunks/frames
+registration/detection passes) check `cancel.load(Relaxed)` between chunks/frames
 and return a `Cancelled` error early. This is the only way the CPU work stops
-promptly; it's a lumos API addition (a new `&CancelFlag` param + periodic checks
+promptly; it's a lumos API addition (a new `&AtomicBool` param + periodic checks
 in the stage loops), so it lands last and incrementally (start with the two the
 user named: stacking masters + light stacking).
 

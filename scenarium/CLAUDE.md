@@ -131,7 +131,11 @@ A `Vec<WorkerMessage>` is **one atomic commit unit** — no partial batches.
 The host callback receives a `WorkerReport`: a live `Progress(RunProgress)` per
 node *during* a run (forwarded from a `mpsc` the executor sends on, drained
 concurrently with the run in the worker `select!`), then a single
-`Finished(Result<ExecutionStats>)`.
+`Finished(Result<ExecutionStats>)`. **Cancel** is a shared `Arc<AtomicBool>` on
+the `Worker` (`request_cancel()` sets it, the worker clears it at each run's
+start) that the executor polls between nodes — set directly across threads, so
+no command-channel round-trip; a cancelled run stops scheduling and reports
+`ExecutionStats { cancelled: true }` with only the nodes that ran.
 The loop uses `tokio::select! { biased }`: command batches take priority and are
 collapsed via a `BatchIntent` reduction table (last-write-wins for graph/loop,
 union for events, `Exit` dominates); the event loop emits frame events through a

@@ -10,6 +10,8 @@
 //! [`ExecutionEngine`] owns all four pieces (program, plan, planner, executor)
 //! and exposes `update` (phase 1) and `execute*` (phases 2–3, run back-to-back).
 
+use std::sync::atomic::AtomicBool;
+
 use common::is_debug;
 use hashbrown::HashSet;
 use serde::{Deserialize, Serialize};
@@ -148,25 +150,27 @@ impl ExecutionEngine {
     // === Phases 2–3: plan then execute ===
 
     pub async fn execute_terminals(&mut self) -> Result<ExecutionStats> {
-        self.execute(true, false, [], None).await
+        self.execute(true, false, [], None, None).await
     }
 
     pub async fn execute_events<T: IntoIterator<Item = EventRef>>(
         &mut self,
         events: T,
     ) -> Result<ExecutionStats> {
-        self.execute(false, false, events, None).await
+        self.execute(false, false, events, None, None).await
     }
 
     /// When `progress` is `Some`, a [`RunProgress`] is sent before and after
     /// each node's lambda runs, for live per-node feedback ahead of the final
-    /// stats.
+    /// stats. When `cancel` is `Some` and gets set mid-run, scheduling stops
+    /// after the in-flight node and the returned stats are marked `cancelled`.
     pub async fn execute<T: IntoIterator<Item = EventRef>>(
         &mut self,
         terminals: bool,
         event_triggers: bool,
         events: T,
         progress: Option<&UnboundedSender<RunProgress>>,
+        cancel: Option<&AtomicBool>,
     ) -> Result<ExecutionStats> {
         let events: Vec<EventRef> = events.into_iter().collect();
 
@@ -183,7 +187,7 @@ impl ExecutionEngine {
         // Phase 3: run the schedule.
         let mut stats = self
             .executor
-            .run(&self.program, &self.plan, &self.flatten, progress)
+            .run(&self.program, &self.plan, &self.flatten, progress, cancel)
             .await;
         stats.triggered_events = events;
         // Annotate with how the graph was flattened so the stats' flat ids

@@ -90,6 +90,9 @@ pub(crate) struct NodeRunState {
 #[derive(Default, Debug)]
 pub(crate) struct RunState {
     nodes: HashMap<NodeId, NodeRunState>,
+    /// A run is in flight (`begin_run` → its `ExecutionFinished`). Drives the
+    /// live repaint tick and whether the Cancel affordance shows.
+    running: bool,
     /// Current run epoch (tags value requests/replies).
     run_id: RunId,
     /// Nodes already asked about this epoch (insert-only; cleared only on
@@ -104,13 +107,12 @@ impl RunState {
         self.nodes.get(&id).map(|n| n.status).unwrap_or_default()
     }
 
-    /// Whether any node is mid-compute. Drives a per-frame repaint so the
-    /// running node's elapsed-so-far timer keeps ticking between progress
-    /// events (a long single node emits none until it finishes).
+    /// Whether a run is in flight (kicked, not yet finished/cancelled). Drives
+    /// a per-frame repaint so the running node's elapsed-so-far timer keeps
+    /// ticking between progress events (a long single node emits none until it
+    /// finishes), and gates the Cancel affordance.
     pub(crate) fn is_running(&self) -> bool {
-        self.nodes
-            .values()
-            .any(|n| matches!(n.status, ExecStatus::Running(_)))
+        self.running
     }
 
     pub(crate) fn logs(&self, id: NodeId) -> &[LogEntry] {
@@ -129,6 +131,7 @@ impl RunState {
     /// (they belong to this epoch — a value reply can land before its
     /// stats). Entries left carrying nothing are dropped.
     pub(crate) fn set_results(&mut self, stats: &ExecutionStats) {
+        self.running = false;
         for node in self.nodes.values_mut() {
             node.status = ExecStatus::None;
             node.logs.clear();
@@ -186,6 +189,7 @@ impl RunState {
     /// Drop everything (a failed run paints no glow and shows no logs /
     /// values).
     pub(crate) fn clear(&mut self) {
+        self.running = false;
         self.nodes.clear();
         self.requested.clear();
     }
@@ -195,6 +199,7 @@ impl RunState {
     /// during compute (the new run's stats replace them). Pending request
     /// markers reset so open panels re-request under the new epoch.
     pub(crate) fn begin_run(&mut self) {
+        self.running = true;
         self.run_id = self.run_id.wrapping_add(1);
         self.requested.clear();
         for node in self.nodes.values_mut() {
@@ -275,6 +280,7 @@ mod tests {
                 .collect(),
             logs: vec![],
             flatten,
+            cancelled: false,
         }
     }
 
@@ -293,7 +299,6 @@ mod tests {
         });
         assert!(matches!(rs.status(interior), ExecStatus::Running(_)));
         assert!(matches!(rs.status(instance), ExecStatus::Running(_)));
-        assert!(rs.is_running());
 
         // Finished → Executed with the reported time (overwrites Running).
         rs.apply_progress(&RunProgress {
@@ -416,12 +421,18 @@ mod tests {
         rs.nodes.get_mut(&node).unwrap().values = Some(NodeValueView::default());
         rs.requested.insert(node);
 
+        assert!(!rs.is_running(), "not running after a finished run");
         rs.begin_run();
 
+        assert!(rs.is_running(), "running once a run is kicked");
         assert_eq!(rs.run_id, 1);
         assert_eq!(rs.status(node), ExecStatus::Executed(1.0), "status lingers");
         assert!(rs.values(node).is_none(), "values invalidated");
         assert!(rs.requested.is_empty(), "pending markers reset");
+
+        // The finishing run clears the in-flight flag.
+        rs.set_results(&stats(FlattenMap::default(), &[], &[]));
+        assert!(!rs.is_running(), "not running after results land");
     }
 
     /// `take_requests` asks for each open node once per epoch, then nothing
