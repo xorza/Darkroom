@@ -9,7 +9,7 @@ use rayon::prelude::*;
 
 use error::ImageError;
 
-use imaginarium::{ChannelCount, ChannelType, ColorFormat, Image, ImageDesc};
+use imaginarium::{ChannelCount, ChannelType, ColorFormat, Image};
 use std::ops::SubAssign;
 use std::path::Path;
 
@@ -605,30 +605,13 @@ impl SubAssign<&AstroImage> for AstroImage {
 
 impl From<&AstroImage> for Image {
     fn from(astro: &AstroImage) -> Self {
-        let width = astro.dimensions.size.x;
-        let height = astro.dimensions.size.y;
-
-        // Build the byte buffer directly from the channel planes — one copy. (`save` takes `&self`,
-        // so going through `&AstroImage` avoids cloning the whole image, which for an RGB master is
-        // ~3× the largest allocation in the pipeline.)
-        let (color_format, bytes): (ColorFormat, Vec<u8>) = match &astro.pixels {
-            PixelData::L(img) => (
-                ColorFormat::L_F32,
-                bytemuck::cast_slice(img.channels[0].pixels()).to_vec(),
-            ),
-            PixelData::Rgb(img) => {
-                let [r, g, b] = &img.channels;
-                let mut interleaved = vec![0.0f32; r.len() * 3];
-                interleave_rgb(r, g, b, &mut interleaved);
-                (
-                    ColorFormat::RGB_F32,
-                    bytemuck::cast_slice(&interleaved).to_vec(),
-                )
-            }
-        };
-
-        let desc = ImageDesc::new(width, height, color_format);
-        Image::new_with_data(desc, bytes).expect("Failed to create Image")
+        // imaginarium owns the planar→interleaved transpose; each `PixelData`
+        // arm already holds the `DeinterleavedImageData` it interleaves from
+        // (borrowed, so an RGB master isn't cloned — `save` takes `&self`).
+        match &astro.pixels {
+            PixelData::L(planes) => Image::from(planes),
+            PixelData::Rgb(planes) => Image::from(planes),
+        }
     }
 }
 
@@ -651,40 +634,27 @@ fn astro_target_format(image: &Image) -> ColorFormat {
 /// planar [`AstroImage`]. This is the single unavoidable copy a per-channel op
 /// pays to get planar data; callers must convert to f32 first.
 fn astro_from_f32_image(image: &Image) -> AstroImage {
-    let desc = image.desc;
-    let width = desc.width;
-    let height = desc.height;
-    // imaginarium images are always tightly packed, so the bytes are a plain
-    // `width*height*channels` f32 slice with no row padding to skip.
-    let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
-
-    let pixel_data = if desc.color_format == ColorFormat::L_F32 {
-        PixelData::L(DeinterleavedImageData::from_channels([Buffer2::new(
-            width,
-            height,
-            pixels.to_vec(),
-        )]))
-    } else {
-        let mut r: Buffer2<f32> = Buffer2::new_default(width, height);
-        let mut g: Buffer2<f32> = Buffer2::new_default(width, height);
-        let mut b: Buffer2<f32> = Buffer2::new_default(width, height);
-        deinterleave_rgb(pixels, r.pixels_mut(), g.pixels_mut(), b.pixels_mut());
-        PixelData::Rgb(DeinterleavedImageData::from_channels([r, g, b]))
+    let (width, height) = (image.desc.width, image.desc.height);
+    // imaginarium owns the interleaved→planar transpose; the image is guaranteed
+    // f32 here, so the variant deinterleaves into 1 or 3 planes.
+    let pixels = match image.desc.color_format.channel_count {
+        ChannelCount::L => PixelData::L(
+            image
+                .try_into()
+                .expect("L_F32 image deinterleaves to 1 plane"),
+        ),
+        _ => PixelData::Rgb(
+            image
+                .try_into()
+                .expect("RGB_F32 image deinterleaves to 3 planes"),
+        ),
     };
 
-    let dimensions = ImageDimensions::new(
-        (width, height),
-        if matches!(pixel_data, PixelData::L(_)) {
-            1
-        } else {
-            3
-        },
-    );
-
+    let dimensions = ImageDimensions::new((width, height), pixels.channels());
     AstroImage {
         metadata: AstroImageMetadata::default(),
         dimensions,
-        pixels: pixel_data,
+        pixels,
     }
 }
 
@@ -734,7 +704,10 @@ fn deinterleave_rgb(interleaved: &[f32], r: &mut [f32], g: &mut [f32], b: &mut [
         });
 }
 
-/// Interleave separate R, G, B planes into RGB data (RGBRGB...).
+/// Interleave separate R, G, B planes into RGB data (RGBRGB...). Test-only:
+/// production interleaving goes through imaginarium's `Image` conversion; this
+/// backs the `#[cfg(test)]` `into_interleaved_pixels` inspection helper.
+#[cfg(test)]
 fn interleave_rgb(r: &[f32], g: &[f32], b: &[f32], interleaved: &mut [f32]) {
     debug_assert_eq!(interleaved.len(), r.len() * 3);
     debug_assert_eq!(r.len(), g.len());
