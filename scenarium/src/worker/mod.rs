@@ -449,7 +449,7 @@ async fn worker_loop<ExecutionCallback>(
                     in_loop,
                     intent.events.drain(),
                     Some(&prog_tx),
-                    Some(cancel.clone()),
+                    cancel.clone(),
                 );
                 tokio::pin!(run);
                 loop {

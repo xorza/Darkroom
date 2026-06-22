@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use tokio::sync::mpsc::UnboundedSender;
 
-use common::{CancelToken, KeyIndexKey, KeyIndexVec, is_cancelled};
+use common::{CancelToken, KeyIndexKey, KeyIndexVec};
 
 use crate::common::shared_any_state::SharedAnyState;
 use crate::context::ContextManager;
@@ -98,7 +98,7 @@ impl Executor {
         plan: &ExecutionPlan,
         flatten: &FlattenMap,
         progress: Option<&UnboundedSender<RunProgress>>,
-        cancel: Option<CancelToken>,
+        cancel: CancelToken,
     ) -> ExecutionStats {
         let start = Instant::now();
         // Hold the cancel flag on the context so lambdas can poll it inside
@@ -124,7 +124,7 @@ impl Executor {
             // Coarse cancel: stop scheduling further nodes. A node already
             // mid-invoke isn't interrupted (it finishes), but nothing after
             // it starts. The unrun nodes simply don't appear in the stats.
-            if is_cancelled(&self.ctx_manager.cancel) {
+            if self.ctx_manager.cancel.is_cancelled() {
                 executed_count = pos;
                 break;
             }
@@ -209,7 +209,7 @@ impl Executor {
         self.ctx_manager.current_node = None;
         let mut stats = self.collect_execution_stats(program, plan, start, executed_count);
         stats.logs = std::mem::take(&mut self.ctx_manager.logs);
-        stats.cancelled = is_cancelled(&self.ctx_manager.cancel);
+        stats.cancelled = self.ctx_manager.cancel.is_cancelled();
         self.inputs = inputs;
         self.output_usage = output_usage;
         stats

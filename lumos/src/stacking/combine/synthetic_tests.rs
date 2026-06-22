@@ -6,6 +6,8 @@
 //! rejected (the master recovers the clean truth where a plain mean is contaminated), and
 //! inverse-noise weighting lowers the output variance on a mixed-quality set.
 
+use common::CancelToken;
+
 use crate::stacking::combine::config::{StackConfig, Weighting};
 use crate::stacking::combine::progress::ProgressCallback;
 use crate::stacking::combine::stack::{StackFrame, stack_images};
@@ -54,9 +56,14 @@ fn frame_set(
 
 fn stack_frames(sims: &[SimFrame], config: StackConfig) -> AstroImage {
     let frames: Vec<StackFrame> = sims.iter().map(|s| s.image.clone().into()).collect();
-    stack_images(frames, config, ProgressCallback::default(), None)
-        .expect("stack")
-        .image
+    stack_images(
+        frames,
+        config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .expect("stack")
+    .image
 }
 
 /// Overwrite one pixel of one frame with a bright cosmic-ray-like spike.

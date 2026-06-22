@@ -149,14 +149,16 @@ impl ExecutionEngine {
     // === Phases 2–3: plan then execute ===
 
     pub async fn execute_terminals(&mut self) -> Result<ExecutionStats> {
-        self.execute(true, false, [], None, None).await
+        self.execute(true, false, [], None, CancelToken::never())
+            .await
     }
 
     pub async fn execute_events<T: IntoIterator<Item = EventRef>>(
         &mut self,
         events: T,
     ) -> Result<ExecutionStats> {
-        self.execute(false, false, events, None, None).await
+        self.execute(false, false, events, None, CancelToken::never())
+            .await
     }
 
     /// When `progress` is `Some`, a [`RunProgress`] is sent before and after
@@ -169,7 +171,7 @@ impl ExecutionEngine {
         event_triggers: bool,
         events: T,
         progress: Option<&UnboundedSender<RunProgress>>,
-        cancel: Option<CancelToken>,
+        cancel: CancelToken,
     ) -> Result<ExecutionStats> {
         let events: Vec<EventRef> = events.into_iter().collect();
 

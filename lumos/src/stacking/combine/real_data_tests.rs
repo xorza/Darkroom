@@ -1,3 +1,5 @@
+use common::CancelToken;
+
 use crate::stacking::combine::config::{Normalization, StackConfig};
 use crate::stacking::combine::progress::ProgressCallback;
 use crate::stacking::combine::stack::stack;
@@ -27,9 +29,14 @@ fn test_stack_registered_lights() {
         ..StackConfig::sigma_clipped(2.5)
     };
 
-    let stacked = stack(&paths, config, ProgressCallback::default(), None)
-        .expect("Failed to stack registered lights")
-        .image;
+    let stacked = stack(
+        &paths,
+        config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .expect("Failed to stack registered lights")
+    .image;
 
     println!(
         "Stacked result: {}x{}x{}",

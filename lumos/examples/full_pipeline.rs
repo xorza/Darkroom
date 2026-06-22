@@ -15,6 +15,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use common::CancelToken;
 use lumos::{
     AlignStackConfig, CalibrationFrames, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD,
     calibrate_align_stack,
@@ -48,8 +49,13 @@ fn main() {
         "── Step 2/2: calibrate → align → stack ──"
     );
     let step = Instant::now();
-    let result = calibrate_align_stack(&light_paths, &masters, &AlignStackConfig::default(), None)
-        .expect("calibrate_align_stack failed");
+    let result = calibrate_align_stack(
+        &light_paths,
+        &masters,
+        &AlignStackConfig::default(),
+        CancelToken::never(),
+    )
+    .expect("calibrate_align_stack failed");
     tracing::info!(
         registered = result.registered,
         total = light_paths.len(),

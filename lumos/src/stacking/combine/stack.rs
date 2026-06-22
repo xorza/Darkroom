@@ -10,7 +10,7 @@ use arrayvec::ArrayVec;
 use crate::AstroImage;
 use crate::io::astro_image::cfa::CfaImage;
 use common::Buffer2;
-use common::{CancelToken, is_cancelled};
+use common::CancelToken;
 
 use crate::math;
 use crate::math::statistics::ChannelStats;
@@ -118,14 +118,14 @@ pub struct StackResult {
 /// ```ignore
 /// use lumos::{stack, StackConfig, ProgressCallback};
 ///
-/// let result = stack(&paths, StackConfig::default(), ProgressCallback::default(), None)?;
-/// let result = stack(&paths, StackConfig::median(), ProgressCallback::default(), None)?;
+/// let result = stack(&paths, StackConfig::default(), ProgressCallback::default(), CancelToken::never())?;
+/// let result = stack(&paths, StackConfig::median(), ProgressCallback::default(), CancelToken::never())?;
 /// ```
 pub fn stack<P: AsRef<Path> + Sync>(
     paths: &[P],
     config: StackConfig,
     progress: ProgressCallback,
-    cancel: Option<CancelToken>,
+    cancel: CancelToken,
 ) -> Result<StackResult, Error> {
     if paths.is_empty() {
         return Err(Error::NoFrames);
@@ -148,7 +148,7 @@ pub fn stack<P: AsRef<Path> + Sync>(
     let cache = LightCache::from_paths(paths, &config.cache, progress, cancel)?;
     // The disk cache (if any) is removed when `cache` drops via `CacheCore`'s `Drop`.
     let result = run_stacking_weighted(&cache, &config);
-    if is_cancelled(&cache.core.cancel) {
+    if cache.core.cancel.is_cancelled() {
         return Err(Error::Cancelled);
     }
     Ok(result)
@@ -173,7 +173,7 @@ pub fn stack_images(
     frames: Vec<StackFrame>,
     config: StackConfig,
     progress: ProgressCallback,
-    cancel: Option<CancelToken>,
+    cancel: CancelToken,
 ) -> Result<StackResult, Error> {
     if frames.is_empty() {
         return Err(Error::NoFrames);
@@ -195,7 +195,7 @@ pub fn stack_images(
     cache.core.cancel = cancel;
     // In-memory only (no disk cache), but `cache` drops cleanly via `CacheCore`'s `Drop` regardless.
     let result = run_stacking_weighted(&cache, &config);
-    if is_cancelled(&cache.core.cancel) {
+    if cache.core.cancel.is_cancelled() {
         return Err(Error::Cancelled);
     }
     Ok(result)
@@ -565,7 +565,7 @@ mod tests {
             &paths,
             StackConfig::default(),
             ProgressCallback::default(),
-            None,
+            CancelToken::never(),
         );
         assert!(matches!(result.unwrap_err(), Error::NoFrames));
     }
@@ -576,7 +576,7 @@ mod tests {
             Vec::new(),
             StackConfig::default(),
             ProgressCallback::default(),
-            None,
+            CancelToken::never(),
         );
         assert!(matches!(result.unwrap_err(), Error::NoFrames));
     }
@@ -588,7 +588,7 @@ mod tests {
             &paths,
             StackConfig::default(),
             ProgressCallback::default(),
-            None,
+            CancelToken::never(),
         );
         assert!(matches!(result.unwrap_err(), Error::ImageLoad { .. }));
     }
@@ -603,7 +603,12 @@ mod tests {
         ];
         let mut config = StackConfig::weighted(vec![1.0, 2.0]); // Wrong count
         config.normalization = Normalization::None; // avoid loading files for stats
-        let _ = stack(&paths, config, ProgressCallback::default(), None);
+        let _ = stack(
+            &paths,
+            config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        );
     }
 
     #[test]
@@ -620,9 +625,14 @@ mod tests {
             ..Default::default()
         };
         let frames = images.into_iter().map(StackFrame::from).collect();
-        let result = stack_images(frames, config, ProgressCallback::default(), None)
-            .unwrap()
-            .image;
+        let result = stack_images(
+            frames,
+            config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap()
+        .image;
         assert_eq!(result.channels(), 1);
         for &p in result.channel(0).pixels() {
             assert!((p - 20.0).abs() < 1e-4, "expected 20.0, got {p}");
@@ -637,7 +647,7 @@ mod tests {
             vec![a.into(), b.into()],
             StackConfig::default(),
             ProgressCallback::default(),
-            None,
+            CancelToken::never(),
         );
         assert!(matches!(
             result.unwrap_err(),
@@ -657,7 +667,7 @@ mod tests {
             vec![a.into(), b.into()],
             StackConfig::default(),
             ProgressCallback::default(),
-            Some(cancel),
+            cancel,
         );
         assert!(matches!(result.unwrap_err(), Error::Cancelled));
     }
@@ -685,9 +695,14 @@ mod tests {
                 coverage: Some(Buffer2::new(2, 1, vec![1.0, 0.0])),
             },
         ];
-        let out = stack_images(frames, config, ProgressCallback::default(), None)
-            .unwrap()
-            .image;
+        let out = stack_images(
+            frames,
+            config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap()
+        .image;
         let px = out.channel(0).pixels();
         assert!(
             (px[0] - 15.0).abs() < 1e-4,
@@ -722,9 +737,14 @@ mod tests {
                 coverage: Some(Buffer2::new(1, 1, vec![0.5])),
             },
         ];
-        let out = stack_images(frames, config, ProgressCallback::default(), None)
-            .unwrap()
-            .image;
+        let out = stack_images(
+            frames,
+            config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap()
+        .image;
         let v = out.channel(0).pixels()[0];
         assert!((v - 40.0 / 3.0).abs() < 1e-4, "expected 40/3, got {v}");
     }
@@ -746,11 +766,16 @@ mod tests {
             normalization: Normalization::None,
             ..Default::default()
         };
-        let v = stack_images(frames, config, ProgressCallback::default(), None)
-            .unwrap()
-            .image
-            .channel(0)
-            .pixels()[0];
+        let v = stack_images(
+            frames,
+            config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap()
+        .image
+        .channel(0)
+        .pixels()[0];
         assert!(
             (v - 15.0).abs() < 1e-4,
             "None frame counts fully: mean(10,20) = 15, got {v}"
@@ -771,9 +796,14 @@ mod tests {
             image: a,
             coverage: Some(Buffer2::new(2, 1, vec![1.0, 0.0])),
         }];
-        let out = stack_images(frames, config, ProgressCallback::default(), None)
-            .unwrap()
-            .image;
+        let out = stack_images(
+            frames,
+            config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap()
+        .image;
         let px = out.channel(0).pixels();
         assert!(
             (px[0] - 10.0).abs() < 1e-4,
@@ -802,11 +832,16 @@ mod tests {
             normalization: Normalization::None,
             ..Default::default()
         };
-        let v = stack_images(frames, config, ProgressCallback::default(), None)
-            .unwrap()
-            .image
-            .channel(0)
-            .pixels()[0];
+        let v = stack_images(
+            frames,
+            config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap()
+        .image
+        .channel(0)
+        .pixels()[0];
         assert!(
             (v - 0.1).abs() < 1e-4,
             "edge should be the mean of the 2 covering frames (0.1), got {v}"
@@ -822,11 +857,16 @@ mod tests {
             normalization: Normalization::None,
             ..Default::default()
         };
-        let dark = stack_images(frames2, cfg2, ProgressCallback::default(), None)
-            .unwrap()
-            .image
-            .channel(0)
-            .pixels()[0];
+        let dark = stack_images(
+            frames2,
+            cfg2,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap()
+        .image
+        .channel(0)
+        .pixels()[0];
         assert!(
             dark < 0.05,
             "without coverage the border-fills pull the edge dark (~0.04), got {dark}"
@@ -855,7 +895,13 @@ mod tests {
             normalization: Normalization::None,
             ..Default::default()
         };
-        let r = stack_images(frames, config, ProgressCallback::default(), None).unwrap();
+        let r = stack_images(
+            frames,
+            config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap();
         assert_eq!(r.coverage[0], 1.0);
         assert_eq!(r.weight[0], 2.0);
         assert_eq!(r.variance[0], 0.5);
@@ -884,7 +930,13 @@ mod tests {
             normalization: Normalization::None,
             ..Default::default()
         };
-        let r = stack_images(frames, config, ProgressCallback::default(), None).unwrap();
+        let r = stack_images(
+            frames,
+            config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap();
         for p in 0..8 {
             assert_eq!(r.coverage[p], 1.0);
             assert_eq!(
@@ -1158,9 +1210,14 @@ mod tests {
             },
             ..Default::default()
         };
-        let result = stack(&paths, config, ProgressCallback::default(), None)
-            .unwrap()
-            .image;
+        let result = stack(
+            &paths,
+            config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap()
+        .image;
         for &p in result.channel(0).pixels() {
             assert!(
                 (p - 20.0).abs() < 1e-4,

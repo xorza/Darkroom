@@ -27,9 +27,9 @@ use std::path::{Path, PathBuf};
 
 use arrayvec::ArrayVec;
 use common::Buffer2;
+use common::CancelToken;
 use common::FnvHasher;
 use common::parallel::try_par_map_limited;
-use common::{CancelToken, is_cancelled};
 use memmap2::Mmap;
 use rayon::prelude::*;
 
@@ -223,7 +223,7 @@ pub(crate) struct CacheCore {
     /// Cooperative cancel flag, polled by [`Self::process_chunks`] between
     /// chunks. `None` (the construction default) = never cancel; a public
     /// stacking entry sets it from the caller's flag before the combine.
-    pub(crate) cancel: Option<CancelToken>,
+    pub(crate) cancel: CancelToken,
 }
 
 /// Plain calibration cache: `CfaImage` frames, channels only (never coverage), plain combine.
@@ -299,7 +299,7 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     paths: &[P],
     config: &CacheConfig,
     progress: ProgressCallback,
-    cancel: Option<CancelToken>,
+    cancel: CancelToken,
 ) -> Result<LoadedCache, Error> {
     if paths.is_empty() {
         return Err(Error::NoFrames);
@@ -355,7 +355,7 @@ impl CfaCache {
         paths: &[P],
         config: &CacheConfig,
         progress: ProgressCallback,
-        cancel: Option<CancelToken>,
+        cancel: CancelToken,
     ) -> Result<Self, Error> {
         let LoadedCache { frames, core } =
             load_tiered::<CfaImage, P>(paths, config, progress, cancel)?;
@@ -371,7 +371,7 @@ impl LightCache {
         paths: &[P],
         config: &CacheConfig,
         progress: ProgressCallback,
-        cancel: Option<CancelToken>,
+        cancel: CancelToken,
     ) -> Result<Self, Error> {
         let LoadedCache { frames, core } =
             load_tiered::<AstroImage, P>(paths, config, progress, cancel)?;
@@ -400,7 +400,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     progress: &ProgressCallback,
     dimensions: ImageDimensions,
     first_image: I,
-    cancel: &Option<CancelToken>,
+    cancel: &CancelToken,
 ) -> Result<LoadedTier, Error> {
     let first_stats = compute_frame_stats(&first_image);
     let first_frame = image_to_frame(first_image);
@@ -414,7 +414,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         .collect();
     let remaining = try_par_map_limited(&indexed_paths, 3, |&(idx, path)| {
         // Cancelled: stop decoding further frames (the slow phase).
-        if is_cancelled(cancel) {
+        if cancel.is_cancelled() {
             return Err(Error::Cancelled);
         }
         let path_ref = path.as_ref();
@@ -459,7 +459,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     progress: &ProgressCallback,
     dimensions: ImageDimensions,
     first_image: I,
-    cancel: &Option<CancelToken>,
+    cancel: &CancelToken,
 ) -> Result<LoadedTier, Error> {
     let cache_dir = &config.cache_dir;
     std::fs::create_dir_all(cache_dir).map_err(|e| Error::CreateCacheDir {
@@ -484,7 +484,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
         .collect();
     let remaining = try_par_map_limited(&indexed_paths, 3, |&(idx, ref path)| {
         // Cancelled: stop decoding further frames (the slow phase).
-        if is_cancelled(cancel) {
+        if cancel.is_cancelled() {
             return Err(Error::Cancelled);
         }
         let path_ref = path.as_ref();
@@ -585,7 +585,7 @@ impl CacheCore {
                 // Cooperative cancel: bail between chunks (the in-flight chunk
                 // completes). The partial `output` is discarded by the caller,
                 // which detects the cancel and returns `Error::Cancelled`.
-                if is_cancelled(&self.cancel) {
+                if self.cancel.is_cancelled() {
                     return output;
                 }
             }
@@ -664,7 +664,7 @@ impl CfaCache {
                     |(values, scratch), (row_in_chunk, row_output)| {
                         // Cancelled: skip the row's work (output stays zero; the
                         // caller discards the partial result and reports Cancelled).
-                        if is_cancelled(&cancel) {
+                        if cancel.is_cancelled() {
                             return;
                         }
                         let row_offset = row_in_chunk * width;
@@ -768,7 +768,7 @@ impl LightCache {
                 config: config.clone(),
                 progress,
                 // Set by the public stacking entry before the combine, if any.
-                cancel: None,
+                cancel: CancelToken::never(),
             },
         })
     }
@@ -936,7 +936,7 @@ impl LightCache {
                     |(values, eff_weights, scratch), (row_in_chunk, row_output)| {
                         // Cancelled: skip the row's work (output stays zero; the
                         // caller discards the partial result and reports Cancelled).
-                        if is_cancelled(&cancel) {
+                        if cancel.is_cancelled() {
                             return;
                         }
                         let row_offset = row_in_chunk * width;
@@ -1324,7 +1324,7 @@ pub(crate) mod tests {
                 channel_stats: vec![],
                 config: CacheConfig::default(),
                 progress: ProgressCallback::default(),
-                cancel: None,
+                cancel: CancelToken::never(),
             },
         }
     }
@@ -1458,7 +1458,7 @@ pub(crate) mod tests {
             &Vec::<PathBuf>::new(),
             &config,
             ProgressCallback::default(),
-            None,
+            CancelToken::never(),
         );
         assert!(matches!(result.unwrap_err(), Error::NoFrames));
 
@@ -1467,7 +1467,7 @@ pub(crate) mod tests {
             &[PathBuf::from("/nonexistent/path/image.fits")],
             &config,
             ProgressCallback::default(),
-            None,
+            CancelToken::never(),
         );
         assert!(matches!(result.unwrap_err(), Error::ImageLoad { .. }));
     }
@@ -1639,7 +1639,7 @@ pub(crate) mod tests {
                 channel_stats: vec![],
                 config,
                 progress: ProgressCallback::default(),
-                cancel: None,
+                cancel: CancelToken::never(),
             },
         };
 
@@ -1694,7 +1694,7 @@ pub(crate) mod tests {
                 channel_stats: vec![],
                 config: CacheConfig::default(),
                 progress: ProgressCallback::default(),
-                cancel: None,
+                cancel: CancelToken::never(),
             },
         };
 
@@ -1741,7 +1741,7 @@ pub(crate) mod tests {
                 channel_stats: vec![],
                 config: CacheConfig::default(),
                 progress: ProgressCallback::default(),
-                cancel: None,
+                cancel: CancelToken::never(),
             },
         };
 

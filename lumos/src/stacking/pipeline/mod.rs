@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::Buffer2;
-use common::{CancelToken, is_cancelled};
+use common::CancelToken;
 
 use crate::io::astro_image::AstroImage;
 use crate::io::astro_image::error::ImageError;
@@ -109,7 +109,7 @@ pub enum Error {
 pub fn align_and_stack(
     lights: Vec<AstroImage>,
     config: &AlignStackConfig,
-    cancel: Option<CancelToken>,
+    cancel: CancelToken,
 ) -> Result<AlignStackResult, Error> {
     if lights.is_empty() {
         return Err(Error::NoFrames);
@@ -124,7 +124,7 @@ pub fn align_and_stack(
         .map(|img| {
             // Cancelled: skip this frame's detection (cheap empty result); the
             // post-loop check below turns the run into `Cancelled`.
-            if is_cancelled(&cancel) {
+            if cancel.is_cancelled() {
                 return Vec::new();
             }
             let result = StarDetector::from_config(config.detection.clone()).detect(img);
@@ -146,7 +146,7 @@ pub fn align_and_stack(
         .collect();
     let total_stars: usize = star_sets.iter().map(|s| s.len()).sum();
     tracing::info!(total_stars, "Star detection complete");
-    if is_cancelled(&cancel) {
+    if cancel.is_cancelled() {
         return Err(Error::Stack(StackError::Cancelled));
     }
 
@@ -195,7 +195,7 @@ pub fn align_and_stack(
         .map(|(index, img)| {
             // Cancelled: drop this frame (skips the heavy register + warp); the
             // post-loop check below turns the run into `Cancelled`.
-            if is_cancelled(&cancel) {
+            if cancel.is_cancelled() {
                 return Err(index);
             }
             let n = registered_so_far.fetch_add(1, Ordering::Relaxed) + 1;
@@ -223,7 +223,7 @@ pub fn align_and_stack(
             }
         })
         .collect();
-    if is_cancelled(&cancel) {
+    if cancel.is_cancelled() {
         return Err(Error::Stack(StackError::Cancelled));
     }
 
@@ -297,7 +297,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     light_paths: &[P],
     masters: &CalibrationMasters,
     config: &AlignStackConfig,
-    cancel: Option<CancelToken>,
+    cancel: CancelToken,
 ) -> Result<AlignStackResult, Error> {
     let total = light_paths.len();
     tracing::info!(
@@ -310,7 +310,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
         .map(|path| {
             // Cancel between frames: stop launching new RAW decodes (the slow
             // phase) once the run is cancelled. In-flight frames finish.
-            if is_cancelled(&cancel) {
+            if cancel.is_cancelled() {
                 return Err(Error::Stack(StackError::Cancelled));
             }
             let mut cfa = load_raw_cfa(path.as_ref()).map_err(|source| Error::Load {
@@ -373,7 +373,7 @@ mod tests {
             reference: Reference::Index(0),
             ..Default::default()
         };
-        let result = align_and_stack(frames, &config, None).expect("stack");
+        let result = align_and_stack(frames, &config, CancelToken::never()).expect("stack");
 
         assert_eq!(result.reference, 0);
         assert_eq!(result.registered, 3, "all three frames should stack");
@@ -406,7 +406,7 @@ mod tests {
             reference: Reference::Index(0),
             ..Default::default()
         };
-        let result = align_and_stack(frames, &config, None).expect("stack");
+        let result = align_and_stack(frames, &config, CancelToken::never()).expect("stack");
 
         assert_eq!(result.dropped, vec![2], "blank frame should be dropped");
         assert_eq!(result.registered, 2, "reference + one aligned frame");
@@ -421,7 +421,8 @@ mod tests {
         let sparse = AstroImage::from_pixels(dims, vec![0.1; dims.size.x * dims.size.y]);
         let frames = vec![sparse, base.clone(), shifted(&base, &reg, 4.0, -3.0)];
 
-        let result = align_and_stack(frames, &AlignStackConfig::default(), None).expect("stack");
+        let result = align_and_stack(frames, &AlignStackConfig::default(), CancelToken::never())
+            .expect("stack");
         assert_ne!(
             result.reference, 0,
             "Auto must not anchor on the near-blank frame"
@@ -435,7 +436,12 @@ mod tests {
 
     #[test]
     fn empty_input_errors() {
-        let err = align_and_stack(Vec::new(), &AlignStackConfig::default(), None).unwrap_err();
+        let err = align_and_stack(
+            Vec::new(),
+            &AlignStackConfig::default(),
+            CancelToken::never(),
+        )
+        .unwrap_err();
         assert!(matches!(err, Error::NoFrames));
     }
 
@@ -467,8 +473,13 @@ mod tests {
         let lights = &all[..all.len().min(3)];
         assert!(lights.len() >= 2, "need ≥2 lights to exercise registration");
 
-        let result = calibrate_align_stack(lights, &masters, &AlignStackConfig::default(), None)
-            .expect("calibrate_align_stack");
+        let result = calibrate_align_stack(
+            lights,
+            &masters,
+            &AlignStackConfig::default(),
+            CancelToken::never(),
+        )
+        .expect("calibrate_align_stack");
 
         // A real stacked image came out, and every input frame is accounted for.
         assert!(result.image.width() > 0 && result.image.height() > 0);

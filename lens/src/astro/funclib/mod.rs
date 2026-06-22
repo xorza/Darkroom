@@ -9,8 +9,8 @@ use std::str::FromStr;
 use std::sync::{Arc, LazyLock};
 
 use common::Buffer2;
+use common::CancelToken;
 use common::file_utils::astro_image_files;
-use common::{CancelToken, is_cancelled};
 use imaginarium::Image as RawImage;
 use lumos::{
     AlignStackConfig, AstroImage, BackgroundConfig, CalibrationImages, CalibrationMasters,
@@ -775,9 +775,9 @@ where
 /// handling and the "a cancelled op is a clean bail, not an errored node" rule
 /// the heavy astro nodes share — a lumos op reports cancellation as an error, so
 /// it's only a bail when the cancel token is actually set.
-async fn run_cancellable<T, F>(cancel: Option<CancelToken>, op: F) -> InvokeResult<Option<T>>
+async fn run_cancellable<T, F>(cancel: CancelToken, op: F) -> InvokeResult<Option<T>>
 where
-    F: FnOnce(Option<CancelToken>) -> anyhow::Result<T> + Send + 'static,
+    F: FnOnce(CancelToken) -> anyhow::Result<T> + Send + 'static,
     T: Send + 'static,
 {
     let cancel_for_op = cancel.clone();
@@ -786,7 +786,7 @@ where
         .map_err(anyhow::Error::from)?
     {
         Ok(value) => Ok(Some(value)),
-        Err(_) if is_cancelled(&cancel) => Ok(None),
+        Err(_) if cancel.is_cancelled() => Ok(None),
         Err(err) => Err(err.into()),
     }
 }
@@ -795,7 +795,7 @@ fn build_masters_cached(
     dirs: [Option<PathBuf>; 4],
     sigma: f32,
     cache: bool,
-    cancel: Option<CancelToken>,
+    cancel: CancelToken,
 ) -> anyhow::Result<CalibrationMasters> {
     let [darks, flats, bias, flat_darks] = dirs;
     let role = |dir: Option<PathBuf>,

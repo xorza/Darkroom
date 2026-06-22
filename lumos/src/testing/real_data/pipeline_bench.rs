@@ -2,6 +2,8 @@
 
 use std::time::Instant;
 
+use common::CancelToken;
+
 use crate::io::astro_image::cfa::CfaImage;
 use crate::io::raw::load_raw_cfa;
 use crate::stacking::combine::cache::CfaCache;
@@ -49,9 +51,13 @@ fn bench_full_pipeline() {
             };
 
             let t0 = Instant::now();
-            let cache =
-                CfaCache::from_paths(paths, &config.cache, ProgressCallback::default(), None)
-                    .unwrap();
+            let cache = CfaCache::from_paths(
+                paths,
+                &config.cache,
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .unwrap();
             let load_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
             let t1 = Instant::now();
@@ -220,7 +226,7 @@ fn bench_full_pipeline() {
         &registered_paths,
         stack_config,
         ProgressCallback::default(),
-        None,
+        CancelToken::never(),
     )
     .unwrap()
     .image;

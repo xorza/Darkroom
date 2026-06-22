@@ -667,7 +667,13 @@ mod behavior {
 
         let (tx, mut rx) = unbounded_channel::<RunProgress>();
         let stats = eg
-            .execute(true, false, Vec::<EventRef>::new(), Some(&tx), None)
+            .execute(
+                true,
+                false,
+                Vec::<EventRef>::new(),
+                Some(&tx),
+                CancelToken::never(),
+            )
             .await?;
         drop(tx);
 
@@ -725,7 +731,7 @@ mod behavior {
         let tripped = CancelToken::new();
         tripped.cancel();
         let stats = eg
-            .execute(true, false, Vec::<EventRef>::new(), None, Some(tripped))
+            .execute(true, false, Vec::<EventRef>::new(), None, tripped)
             .await?;
         assert!(stats.cancelled, "pre-tripped run is cancelled");
         assert!(
@@ -741,7 +747,7 @@ mod behavior {
                 false,
                 Vec::<EventRef>::new(),
                 None,
-                Some(CancelToken::new()),
+                CancelToken::new(),
             )
             .await?;
         assert!(!stats.cancelled);
@@ -1847,8 +1853,14 @@ mod events {
 
         // terminals=false, event_triggers=true → emit (owns a subscribed event)
         // becomes a root; recv is downstream of emit, not a root.
-        eg.execute(false, true, Vec::<EventRef>::new(), None, None)
-            .await?;
+        eg.execute(
+            false,
+            true,
+            Vec::<EventRef>::new(),
+            None,
+            CancelToken::never(),
+        )
+        .await?;
 
         assert_eq!(execution_node_names_in_order(&eg), ["emit"]);
         assert_eq!(*f.emit_calls.lock().await, 1);
@@ -1864,7 +1876,13 @@ mod events {
         eg.update(&f.graph, &f.func_lib);
 
         let stats = eg
-            .execute(false, true, Vec::<EventRef>::new(), None, None)
+            .execute(
+                false,
+                true,
+                Vec::<EventRef>::new(),
+                None,
+                CancelToken::never(),
+            )
             .await?;
         let triggers = eg.active_event_triggers(&stats);
 

@@ -226,13 +226,13 @@ thread). To *truly* stop, the op must poll a cancel flag and bail.
 
 **Plumb the cancel token (the P2 `CancelToken`) to lambdas.** Exposed on
 `ContextManager` (the per-run resource store the lambda already gets):
-`ctx_manager.cancel_flag()` → `Option<CancelToken>` (the same token P2's executor
-polls), cheap to poll in a rayon loop. The worker already owns it and resets it
-per run.
+`ctx_manager.cancel_flag()` → `CancelToken` (the same token P2's executor polls;
+a `never()` token outside a cancellable run), cheap to poll in a rayon loop. The
+worker already owns it and resets it per run.
 
 **Lambdas pass it into the `spawn_blocking` closure → into lumos.**
 `stack_cfa_master(paths, config, cancel)` and `calibrate_align_stack(.., cancel)`
-take `cancel: Option<CancelToken>`, which rides on `CacheCore` and is polled at
+take `cancel: CancelToken`, which rides on `CacheCore` and is polled at
 every heavy loop: the RAW-decode load (`load_in_memory`/`load_to_disk`, per
 frame), star detection + registration/warp (`align_and_stack` par_iters, per
 frame), and the combine (`process_chunked{,_weighted}`, **per row** — the

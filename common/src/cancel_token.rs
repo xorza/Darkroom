@@ -1,52 +1,68 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// A shared, poll-only cooperative cancellation flag.
+/// A shared, poll-only cooperative cancellation token.
 ///
-/// Clones share one underlying flag, so a holder on any thread can
-/// [`cancel`](Self::cancel) work that another thread observes via
-/// [`is_cancelled`](Self::is_cancelled). It carries no async wait: cooperative
-/// code checks it at safe points (a loop top, between work chunks) and bails —
-/// which is exactly what a `spawn_blocking` / rayon hot loop can afford. For an
-/// awaitable cancel, reach for `tokio_util`'s token instead.
+/// It carries its own "no cancellation" case ([`CancelToken::never`], the
+/// `Default`), so an operation takes a plain `CancelToken` rather than an
+/// `Option<CancelToken>` — a caller that doesn't want cancellation passes a
+/// never-token (zero-cost, no allocation) and everything downstream just polls
+/// [`is_cancelled`](Self::is_cancelled).
 ///
-/// **Reusable across operations.** [`reset`](Self::reset) clears the flag so one
-/// long-lived token can gate a *sequence* of operations: the owner clears it at
-/// each operation's start, so a cancel only affects the operation in flight when
-/// it was requested (a cancel issued while idle is cleared by the next start).
+/// A live token's flag is shared by all clones, so a holder on any thread can
+/// [`cancel`](Self::cancel) work another thread polls. There's no async wait:
+/// cooperative code checks it at safe points (a loop top, between work chunks)
+/// and bails — exactly what a `spawn_blocking` / rayon hot loop can afford. For
+/// an awaitable cancel, reach for `tokio_util`'s token instead.
 ///
-/// Ordering is `Relaxed`: the flag is standalone (it publishes no other data),
-/// so it needs no synchronization beyond the atomic itself.
+/// **Reusable across operations.** [`reset`](Self::reset) clears a live token so
+/// one long-lived token can gate a *sequence* of operations: the owner clears it
+/// at each operation's start, so a cancel only affects the operation in flight
+/// when it was requested. Ordering is `Relaxed`: the flag is standalone (it
+/// publishes no other data), so it needs no synchronization beyond the atomic.
 #[derive(Clone, Debug, Default)]
-pub struct CancelToken(Arc<AtomicBool>);
+pub struct CancelToken(State);
 
-impl CancelToken {
-    /// A fresh, un-cancelled token.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Request cancellation. Idempotent; visible to every clone.
-    pub fn cancel(&self) {
-        self.0.store(true, Ordering::Relaxed);
-    }
-
-    /// Whether cancellation has been requested.
-    pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
-    }
-
-    /// Clear the flag so the token can gate a fresh operation.
-    pub fn reset(&self) {
-        self.0.store(false, Ordering::Relaxed);
-    }
+#[derive(Clone, Debug, Default)]
+enum State {
+    /// Never cancels — the zero-cost stand-in for "no cancellation wired".
+    #[default]
+    Never,
+    /// A live flag; clones share it.
+    Live(Arc<AtomicBool>),
 }
 
-/// Whether an optional cancel token is set. The companion to threading a
-/// `cancel: Option<CancelToken>` through an operation — `None` (no token wired)
-/// reads as "not cancelled".
-pub fn is_cancelled(cancel: &Option<CancelToken>) -> bool {
-    cancel.as_ref().is_some_and(|c| c.is_cancelled())
+impl CancelToken {
+    /// A fresh, live token that can be cancelled.
+    pub fn new() -> Self {
+        Self(State::Live(Arc::new(AtomicBool::new(false))))
+    }
+
+    /// A token that never cancels (zero-cost opt-out; same as `default()`).
+    pub fn never() -> Self {
+        Self(State::Never)
+    }
+
+    /// Request cancellation. Idempotent; visible to every clone. A no-op on a
+    /// never-token.
+    pub fn cancel(&self) {
+        if let State::Live(flag) = &self.0 {
+            flag.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Whether cancellation has been requested. Always `false` for a never-token.
+    pub fn is_cancelled(&self) -> bool {
+        matches!(&self.0, State::Live(flag) if flag.load(Ordering::Relaxed))
+    }
+
+    /// Clear the flag so the token can gate a fresh operation. A no-op on a
+    /// never-token.
+    pub fn reset(&self) {
+        if let State::Live(flag) = &self.0 {
+            flag.store(false, Ordering::Relaxed);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -72,11 +88,11 @@ mod tests {
     }
 
     #[test]
-    fn option_helper_treats_none_as_not_cancelled() {
-        assert!(!is_cancelled(&None));
-        assert!(!is_cancelled(&Some(CancelToken::new())));
-        let token = CancelToken::new();
+    fn never_token_ignores_cancel() {
+        let token = CancelToken::never();
         token.cancel();
-        assert!(is_cancelled(&Some(token)));
+        assert!(!token.is_cancelled(), "a never-token can't be cancelled");
+        // Default is a never-token.
+        assert!(!CancelToken::default().is_cancelled());
     }
 }

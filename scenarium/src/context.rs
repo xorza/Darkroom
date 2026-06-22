@@ -32,14 +32,16 @@ pub struct ContextManager {
     /// The run's cooperative cancel token (the executor polls it between
     /// nodes). A lambda offloading heavy work can clone it via
     /// [`Self::cancel_flag`] and poll it inside that work to bail early.
-    pub(crate) cancel: Option<CancelToken>,
+    /// Defaults to a never-token outside a cancellable run.
+    pub(crate) cancel: CancelToken,
 }
 
 impl ContextManager {
     /// A clonable handle to the run's [`CancelToken`], for a lambda to hand to
     /// long-running work (e.g. a `spawn_blocking` lumos op) so it can poll
-    /// `token.is_cancelled()` and stop early. `None` outside a cancellable run.
-    pub fn cancel_flag(&self) -> Option<CancelToken> {
+    /// `token.is_cancelled()` and stop early. A never-token outside a
+    /// cancellable run.
+    pub fn cancel_flag(&self) -> CancelToken {
         self.cancel.clone()
     }
 
