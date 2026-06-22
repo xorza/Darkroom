@@ -189,15 +189,16 @@ impl Executor {
             };
 
             let run_time = invoke_start.elapsed().as_secs_f64();
-            // A cancel observed by the time this node returns means it was
-            // in-flight when the run was cancelled: a cancellable lambda bails
-            // with Ok and partial/no output, so a fake "success" would cache a
-            // bogus result. Report it truthfully as `Cancelled` — the error
-            // path then drops its output (so it re-runs next time).
-            let result = if self.ctx_manager.cancel.is_cancelled() {
-                Err(Error::Cancelled { func_id })
-            } else {
-                result
+            // A lambda bails on cancel by returning `Ok` (with partial/no
+            // output) — so an `Ok` seen while the run is cancelled means this
+            // node was in-flight at cancel time. Report that truthfully as
+            // `Cancelled` (the error path drops its output so it re-runs); a
+            // genuine error stands on its own, even mid-cancel.
+            let result = match result {
+                Ok(()) if self.ctx_manager.cancel.is_cancelled() => {
+                    Err(Error::Cancelled { func_id })
+                }
+                other => other,
             };
             let cancelled = matches!(&result, Err(Error::Cancelled { .. }));
             if cancelled {
