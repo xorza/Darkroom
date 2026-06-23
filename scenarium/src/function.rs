@@ -108,6 +108,13 @@ pub struct Func {
     pub behavior: FuncBehavior,
     pub node_default_behavior: NodeBehavior,
 
+    /// Algorithm version, folded into the disk-cache content digest so a changed
+    /// implementation invalidates results computed by an older binary. Bump it
+    /// whenever the func's output for identical inputs changes. Pure cache
+    /// metadata — execution never reads it.
+    #[serde(default)]
+    pub version: u64,
+
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
@@ -159,6 +166,14 @@ impl Func {
 
     pub fn description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
+        self
+    }
+
+    /// Stamp the func's algorithm [`version`](Func::version). Bump when the
+    /// implementation changes its output for the same inputs, to invalidate
+    /// disk-cached results from older binaries.
+    pub fn version(mut self, version: u64) -> Self {
+        self.version = version;
         self
     }
 
@@ -294,15 +309,34 @@ mod tests {
 
     #[test]
     fn roundtrip_serialization() -> anyhow::Result<()> {
-        let func_lib = test_func_lib(TestFuncHooks::default());
+        let mut func_lib = test_func_lib(TestFuncHooks::default());
+        // Stamp a non-default version so the round-trip actually exercises the
+        // field rather than always serializing the `0` default.
+        func_lib.by_name_mut("sum").unwrap().version = 7;
 
         for format in SerdeFormat::all_formats_for_testing() {
             let serialized = func_lib.serialize(format)?;
             let deserialized = FuncLib::deserialize(&serialized, format)?;
+            assert_eq!(deserialized.by_name("sum").unwrap().version, 7);
             let serialized_again = deserialized.serialize(format)?;
             assert_eq!(serialized, serialized_again);
         }
 
+        Ok(())
+    }
+
+    #[test]
+    fn version_defaults_to_zero_for_legacy_documents() -> anyhow::Result<()> {
+        use crate::function::Func;
+        use common::deserialize;
+        // A document authored before `version` existed carries no such field;
+        // `#[serde(default)]` must fill it with 0 rather than fail to parse.
+        let legacy = r#"{ "id": "00000000-0000-0000-0000-000000000001", "name": "legacy",
+            "category": "", "terminal": false, "behavior": "Impure",
+            "node_default_behavior": "AsFunction" }"#;
+        let func: Func = deserialize(legacy.as_bytes(), SerdeFormat::Json)?;
+        assert_eq!(func.version, 0);
+        assert_eq!(Func::default().version, 0);
         Ok(())
     }
 

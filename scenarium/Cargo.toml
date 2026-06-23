@@ -17,6 +17,7 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 hashbrown = { workspace = true }
 async-trait = { workspace = true }
+blake3 = { workspace = true }
 
 [dev-dependencies]
 common = { workspace = true, features = ["test-support"] }

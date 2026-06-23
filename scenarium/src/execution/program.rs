@@ -81,6 +81,12 @@ pub(crate) struct ExecutionNode {
 
     pub func_id: FuncId,
 
+    /// Copied from [`Func::version`](crate::function::Func::version) at flatten
+    /// time so the content digest is self-contained in the program. Bumping a
+    /// func's version flows here and invalidates its disk-cached outputs.
+    #[serde(default)]
+    pub func_version: u64,
+
     #[serde(skip)]
     pub lambda: FuncLambda,
 

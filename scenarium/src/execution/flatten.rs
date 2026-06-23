@@ -309,6 +309,7 @@ impl<'a> Run<'a> {
                     let e_node = &mut self.compact[idx];
                     e_node.inited = true;
                     e_node.func_id = func.id;
+                    e_node.func_version = func.version;
                     if !was_inited {
                         e_node.lambda = func.lambda.clone();
                     }

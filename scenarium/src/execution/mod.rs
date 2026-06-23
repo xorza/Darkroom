@@ -24,6 +24,11 @@ use crate::graph::{Graph, NodeId};
 use crate::prelude::FuncId;
 use crate::worker::{EventRef, EventTrigger};
 
+// Content-addressed output digests for disk-backed caching (the cache key).
+// Computed here but not yet consumed by the planner/executor — that wiring lands
+// in the disk-cache integration phase, so the whole API is dead until then.
+#[allow(dead_code)]
+pub(crate) mod digest;
 pub(crate) mod executor;
 mod flatten;
 pub(crate) mod plan;

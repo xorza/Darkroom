@@ -363,6 +363,7 @@ mod tests {
             terminal: true,
             behavior: FuncBehavior::Impure,
             node_default_behavior: Default::default(),
+            version: 0,
             description: None,
             inputs: vec![],
             outputs: vec![],
