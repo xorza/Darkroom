@@ -3,6 +3,7 @@ pub(crate) mod breaker;
 pub(crate) mod connection_ui;
 pub(crate) mod inspector;
 pub(crate) mod new_node_ui;
+pub(crate) mod node_menu;
 pub(crate) mod pan_zoom;
 pub(crate) mod port_frame;
 pub(crate) mod selection_ui;
@@ -22,6 +23,7 @@ use crate::gui::canvas::breaker::BreakerUI;
 use crate::gui::canvas::connection_ui::ConnectionUI;
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::new_node_ui::NewNodeUi;
+use crate::gui::canvas::node_menu::{NodeMenuAction, NodeMenuUi};
 use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subgraph_menu::SubgraphMenuUi;
@@ -75,6 +77,7 @@ struct Gestures {
     connection_ui: ConnectionUI,
     new_node_ui: NewNodeUi,
     subgraph_menu: SubgraphMenuUi,
+    node_menu: NodeMenuUi,
     selection_ui: SelectionUI,
     /// `Scene::pan` snapshot captured at the frame the active pan-drag
     /// latched. While the drag is active, `scene.pan = anchor +
@@ -99,6 +102,13 @@ impl GraphUI {
     /// request runtime values for.
     pub(crate) fn open_inspector_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
         self.inspectors.open_nodes()
+    }
+
+    /// Take the node context-menu action picked this frame, if any. The
+    /// `Editor` resolves it against the live selection (it owns the
+    /// `Document` needed to build the duplicate / removal intents).
+    pub(crate) fn take_node_menu_action(&mut self) -> Option<NodeMenuAction> {
+        self.gestures.node_menu.take_action()
     }
 
     /// Pre-record pass — see
@@ -166,6 +176,7 @@ impl GraphUI {
             .new_node_ui
             .apply(ui, ctx, scene, gesture, out);
         self.gestures.subgraph_menu.apply(ui, scene, out, cmd);
+        self.gestures.node_menu.apply(ui, scene, out);
         // A click on an FsPath input's pick button surfaces a deferred
         // PickInputPath command (App opens the dialog outside the record).
         // The node UI returns a domain request; the canvas — which owns the
@@ -205,6 +216,7 @@ impl GraphUI {
                     connection_ui,
                     new_node_ui: _,
                     subgraph_menu: _,
+                    node_menu: _,
                     selection_ui,
                     pan_anchor: _,
                 },

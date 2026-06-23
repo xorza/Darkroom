@@ -539,23 +539,40 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
     Some(UndoStep::Graph(step))
 }
 
-/// Build an [`Intent::DuplicateNodes`] for `target`'s current selection:
-/// clone each selected node with a fresh id and an offset position, copy
-/// const-value bindings, and recreate the data + event connections whose
-/// *both* endpoints are selected (wires to unselected nodes are dropped).
-/// `None` when nothing is selected or the target doesn't resolve. Reads
-/// the document to assemble the intent — editor-operation construction,
-/// kept with the rest of the intent machinery rather than on the
-/// `Document` model.
+/// Build an [`Intent::DuplicateNodes`] for `target`'s current selection.
+/// Thin wrapper over [`build_duplicate_intent_for`] with the selection as
+/// the node set and incoming (external) wires dropped — the Ctrl+D path.
 pub fn build_duplicate_intent(doc: &Document, target: GraphRef) -> Option<Intent> {
-    let EditScopeRef { graph, view } = doc.scope(target)?;
+    let EditScopeRef { view, .. } = doc.scope(target)?;
     if view.selected_nodes.is_empty() {
+        return None;
+    }
+    build_duplicate_intent_for(doc, target, &view.selected_nodes, false)
+}
+
+/// Build an [`Intent::DuplicateNodes`] cloning `node_ids` in `target`: each
+/// node gets a fresh id and an offset position, const-value bindings copy
+/// verbatim, and the data + event connections *among* `node_ids` are
+/// recreated against the clones. A `Bind` whose source is *outside* the set
+/// is dropped unless `include_incoming` is set, in which case the clone
+/// keeps the wire pointing at the original external producer. `None` when
+/// `node_ids` is empty or the target doesn't resolve. Reads the document to
+/// assemble the intent — editor-operation construction, kept with the rest
+/// of the intent machinery rather than on the `Document` model.
+pub fn build_duplicate_intent_for(
+    doc: &Document,
+    target: GraphRef,
+    node_ids: &BTreeSet<NodeId>,
+    include_incoming: bool,
+) -> Option<Intent> {
+    let EditScopeRef { graph, view } = doc.scope(target)?;
+    if node_ids.is_empty() {
         return None;
     }
 
     let mut id_map: HashMap<NodeId, NodeId> = HashMap::new();
     let mut nodes = Vec::new();
-    for old_id in &view.selected_nodes {
+    for old_id in node_ids {
         let Some(node) = graph.by_id(old_id) else {
             continue;
         };
@@ -567,11 +584,12 @@ pub fn build_duplicate_intent(doc: &Document, target: GraphRef) -> Option<Intent
         nodes.push((ViewNode { id: new_id, pos }, clone));
     }
 
-    // Each selected node's own input ports. Const/None copy verbatim;
-    // a `Bind` survives only if its source is also selected (remapped
-    // to the clone) — otherwise the wire is external and dropped.
+    // Each cloned node's own input ports. Const/None copy verbatim; a `Bind`
+    // to a source inside the set is remapped to that source's clone. A `Bind`
+    // to an *external* source is dropped — unless `include_incoming`, where
+    // the clone keeps the wire to the original producer.
     let mut bindings = Vec::new();
-    for old_id in &view.selected_nodes {
+    for old_id in node_ids {
         for (port, binding) in graph.bindings_touching(*old_id) {
             if port.node_id != *old_id {
                 continue;
@@ -582,6 +600,7 @@ pub fn build_duplicate_intent(doc: &Document, target: GraphRef) -> Option<Intent
                         node_id: new_src,
                         port_idx: src.port_idx,
                     }),
+                    None if include_incoming => Binding::Bind(src),
                     None => continue,
                 },
                 other => other,
@@ -590,7 +609,7 @@ pub fn build_duplicate_intent(doc: &Document, target: GraphRef) -> Option<Intent
         }
     }
 
-    // Event subscriptions internal to the selection.
+    // Event subscriptions internal to the set.
     let mut subscriptions = Vec::new();
     for s in graph.subscriptions() {
         if let (Some(&emitter), Some(&subscriber)) =
@@ -1103,7 +1122,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_intent_clones_internal_wiring_and_drops_external() {
+    fn duplicate_intent_drops_or_keeps_external_by_flag() {
         // a -> b (internal edge, both selected); c -> b (external, c not
         // selected). b also has a Const on input 1. Selecting {a, b} must
         // duplicate a' and b', keep a'->b' and the Const, drop c->b.
@@ -1174,6 +1193,36 @@ mod tests {
             !bindings.iter().any(|(port, _)| port.port_idx == 2),
             "external edge dropped"
         );
+
+        // With `include_incoming`, the same selection keeps the external
+        // c -> b edge, the clone's input still pointing at the original c.
+        // (Fresh build → fresh clone ids, so re-find b's clone by position.)
+        let Some(Intent::DuplicateNodes {
+            nodes: incoming_nodes,
+            bindings: incoming,
+            ..
+        }) = build_duplicate_intent_for(&doc, GraphRef::Main, &doc.main_view.selected_nodes, true)
+        else {
+            panic!("expected a DuplicateNodes intent");
+        };
+        assert_eq!(incoming.len(), 3, "internal + const + kept external");
+        let b_clone2 = incoming_nodes
+            .iter()
+            .find(|(vn, _)| vn.pos == Vec2::new(100.0, 0.0) + DUPLICATE_OFFSET)
+            .map(|(_, n)| n.id)
+            .unwrap();
+        let external = incoming
+            .iter()
+            .find(|(port, _)| port.port_idx == 2)
+            .expect("external edge kept");
+        assert_eq!(external.0.node_id, b_clone2, "edge sinks into b's clone");
+        match &external.1 {
+            Binding::Bind(src) => {
+                assert_eq!(src.node_id, c, "external source stays the original c");
+                assert_eq!(src.port_idx, 0);
+            }
+            other => panic!("expected Bind, got {other:?}"),
+        }
     }
 
     #[test]

@@ -12,15 +12,16 @@
 //! [`App`]: crate::gui::app::App
 
 use palantir::Ui;
-use scenarium::prelude::{FuncLib, SubgraphDef};
+use scenarium::prelude::{FuncLib, NodeId, SubgraphDef};
 
 use crate::core::document::{Document, GraphRef};
 use crate::core::edit::action_stack::ActionStack;
-use crate::core::edit::intent::{Intent, apply_step, build_step};
+use crate::core::edit::intent::{Intent, apply_step, build_duplicate_intent_for, build_step};
 use crate::core::theme_pref::ThemeChoice;
 use crate::core::worker::ValueRequest;
 use crate::gui::HostHandle;
 use crate::gui::UiAction;
+use crate::gui::canvas::node_menu::NodeMenuAction;
 use crate::gui::main_window::MainWindow;
 use crate::gui::menu_bar::MenuCommand;
 use crate::gui::run_state::RunState;
@@ -262,6 +263,14 @@ impl Editor {
             )
             .or(command_from_shortcut);
 
+        // A node context-menu pick resolves here, where the Document is
+        // available to build the duplicate / removal intents against the
+        // live selection (the canvas gesture only sees the read-only Scene).
+        // Pushed before the post-record drain so it lands this frame.
+        if let Some(action) = self.main_window.graph_ui.take_node_menu_action() {
+            self.apply_node_menu_action(action, target);
+        }
+
         // Post-record drain — graph edits the record surfaced (node
         // select, cache toggle, const edit). Navigation is fully settled
         // in the navigation phase, so nothing here moves the active tab.
@@ -274,6 +283,36 @@ impl Editor {
             ui.request_relayout();
         }
         command
+    }
+
+    /// Resolve a node context-menu pick against `target`'s live selection
+    /// (right-click already selected the clicked node). Duplicate variants
+    /// reuse the Ctrl+D builder; Remove mirrors the Delete-key path —
+    /// one `RemoveNode` per node, batched into a single undo entry by the
+    /// post-record drain.
+    fn apply_node_menu_action(&mut self, action: NodeMenuAction, target: GraphRef) {
+        let Some(view) = self.document.view(target) else {
+            return;
+        };
+        match action {
+            NodeMenuAction::Duplicate | NodeMenuAction::DuplicateWithIncoming => {
+                let incoming = matches!(action, NodeMenuAction::DuplicateWithIncoming);
+                if let Some(intent) = build_duplicate_intent_for(
+                    &self.document,
+                    target,
+                    &view.selected_nodes,
+                    incoming,
+                ) {
+                    self.intents.push(intent);
+                }
+            }
+            NodeMenuAction::Remove => {
+                let ids: Vec<NodeId> = view.selected_nodes.iter().copied().collect();
+                for node_id in ids {
+                    self.intents.push(Intent::RemoveNode { node_id });
+                }
+            }
+        }
     }
 
     /// Settle which graph is active for this frame, from inputs all
