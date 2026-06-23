@@ -19,6 +19,12 @@
 //!     undo-stack redo.
 //!   - [`revert_step`] — write the "from" half of an `UndoStep` to
 //!     `&mut Document`. Used during undo.
+//!
+//! [`commit_intent`] is the high-level entry the live frontends drive
+//! their per-intent loop through: build → no-op-filter → apply in one
+//! call, returning the committed step to record. The two halves stay
+//! public for undo-stack redo, which applies a *stored* step without
+//! rebuilding it.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -539,6 +545,25 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
     Some(UndoStep::Graph(step))
 }
 
+/// Build, no-op-filter, and apply one `intent` against `target` in a
+/// single call — the high-level entry both live frontends (the GUI
+/// [`crate::gui::app::editor::Editor`] and the headless
+/// [`crate::core::session::Session`]) drive their per-intent loop through.
+///
+/// Returns the committed [`UndoStep`] (the caller records it and reads its
+/// `requires_*` signals), or `None` when the intent was stale (anchor node
+/// gone) or a no-op — in both cases nothing was written. [`build_step`] /
+/// [`apply_step`] stay separate for the undo-stack redo path, which applies
+/// a stored step without rebuilding it.
+pub fn commit_intent(intent: Intent, doc: &mut Document, target: GraphRef) -> Option<UndoStep> {
+    let step = build_step(intent, doc, target)?;
+    if step.is_noop() {
+        return None;
+    }
+    apply_step(&step, doc, target);
+    Some(step)
+}
+
 /// Build an [`Intent::DuplicateNodes`] for `target`'s current selection.
 /// Thin wrapper over [`build_duplicate_intent_for`] with the selection as
 /// the node set and incoming (external) wires dropped — the Ctrl+D path.
@@ -580,7 +605,12 @@ pub fn build_duplicate_intent_for(
         id_map.insert(*old_id, new_id);
         let mut clone = node.clone();
         clone.id = new_id;
-        let pos = view.view_nodes.by_key(old_id).unwrap().pos + DUPLICATE_OFFSET;
+        let pos = view
+            .view_nodes
+            .by_key(old_id)
+            .expect("view holds a position for every graph node")
+            .pos
+            + DUPLICATE_OFFSET;
         nodes.push((ViewNode { id: new_id, pos }, clone));
     }
 

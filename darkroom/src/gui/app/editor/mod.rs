@@ -16,7 +16,7 @@ use scenarium::prelude::{FuncLib, NodeId, SubgraphDef};
 
 use crate::core::document::{Document, GraphRef};
 use crate::core::edit::action_stack::ActionStack;
-use crate::core::edit::intent::{Intent, apply_step, build_duplicate_intent_for, build_step};
+use crate::core::edit::intent::{Intent, build_duplicate_intent_for, commit_intent};
 use crate::core::theme_pref::ThemeChoice;
 use crate::core::worker::ValueRequest;
 use crate::gui::HostHandle;
@@ -157,13 +157,9 @@ impl Editor {
     ) -> bool {
         let mut batch = Vec::new();
         for intent in intents {
-            let Some(step) = build_step(intent, &self.document, target) else {
+            let Some(step) = commit_intent(intent, &mut self.document, target) else {
                 continue;
             };
-            if step.is_noop() {
-                continue;
-            }
-            apply_step(&step, &mut self.document, target);
             self.needs_relayout |= step.requires_relayout();
             self.needs_reconcile |= step.requires_reconcile();
             batch.push(step);
