@@ -323,7 +323,8 @@ pub(crate) enum CanvasGesture {
     /// that latched it, since the breaker polls that same button for
     /// continuation/release (a Cmd+LMB breaker must keep reading Left).
     Breaker(PointerButton),
-    /// RMB-click (no drag) → new-node popup.
+    /// RMB-click or LMB double-click on empty canvas (no drag) → new-node
+    /// popup.
     NewNode,
     /// LMB-click (no drag) → clear selection.
     Deselect,
@@ -349,7 +350,11 @@ pub(crate) fn classify_canvas_gesture(ui: &Ui) -> Option<CanvasGesture> {
             CanvasGesture::Select
         });
     }
-    if resp.secondary_clicked {
+    // A double-click sets `clicked` *and* `double_click` on the same frame,
+    // so this must precede the plain-click `Deselect` arm to win. The first
+    // click of the pair already ran its own `Deselect`, so the selection is
+    // clear by the time the popup opens.
+    if resp.secondary_clicked || resp.double_clicked_by(PointerButton::Left) {
         return Some(CanvasGesture::NewNode);
     }
     if resp.clicked {

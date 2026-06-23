@@ -15,9 +15,9 @@ use crate::gui::scene::Scene;
 /// def to add alongside it, and the default input bindings to seed with it.
 type ChosenNode = (Node, Option<Box<SubgraphDef>>, Vec<(InputPort, Binding)>);
 
-/// Right-click-on-canvas → popup that lists every `Func` in
-/// `AppContext::func_lib` grouped by category. Clicking an entry emits
-/// an `Intent::AddNode` placed at the click's world position (inner-
+/// Right-click or double-click on empty canvas → popup that lists every
+/// `Func` in `AppContext::func_lib` grouped by category. Clicking an entry
+/// emits an `Intent::AddNode` placed at the click's world position (inner-
 /// canvas pre-transform). Outside-click and Esc dismiss.
 #[derive(Default, Debug)]
 pub(crate) struct NewNodeUi {
