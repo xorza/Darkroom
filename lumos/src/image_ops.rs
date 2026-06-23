@@ -1,12 +1,14 @@
 //! Run the display/processing ops directly on imaginarium's interleaved `Image`.
 //! These ops require a linear **f32** master (`L_F32` or `RGB_F32`):
 //!
-//! - per-pixel and per-channel-reduction ops stay interleaved — [`par_map_pixels`]
-//!   over the samples (optionally after reducing each channel in place, e.g.
-//!   [`crate::color_calibration::neutralize_background`]);
+//! - per-pixel ops and per-channel ops with no 2D structure stay interleaved —
+//!   [`par_map_pixels`] over the samples, an intensity-domain remap
+//!   ([`remap_intensity`]), or a per-channel reduction/curve applied in place (e.g.
+//!   [`crate::color_calibration::neutralize_background`], per-channel
+//!   [`crate::stretching`]);
 //! - only ops with genuine per-channel 2D structure ([`crate::denoise`]'s wavelets,
-//!   [`crate::background_extraction`]'s surface fit, per-channel stretch)
-//!   [`deinterleave_f32`] to channel planes, process, and [`interleave_f32`] back.
+//!   [`crate::background_extraction`]'s surface fit) [`deinterleave_f32`] to channel
+//!   planes, process, and [`interleave_f32`] back.
 
 use common::Rgb;
 use imaginarium::{Buffer2, ChannelCount, ColorFormat, DeinterleavedImageData, Image};
@@ -71,15 +73,20 @@ pub(crate) fn intensity_plane(image: &Image) -> Buffer2<f32> {
     }
 }
 
+/// Enhance an image in its intensity (luminance) domain: take the combined intensity, transform it
+/// with `map`, then rescale every channel hue-preservingly so the new intensity matches. The shape
+/// shared by the display enhancers ([`crate::hdr`], [`crate::local_contrast`]).
+pub(crate) fn remap_intensity(image: &mut Image, map: impl FnOnce(&Buffer2<f32>) -> Buffer2<f32>) {
+    let intensity = intensity_plane(image);
+    let mapped = map(&intensity);
+    apply_intensity_remap(image, &intensity, &mapped);
+}
+
 /// Hue-preserving intensity remap: scale each pixel's channels by `mapped/intensity`
 /// (with a highlight cap so a channel can't clip past white and shift hue); L takes
 /// `mapped` directly. Output clamped to `[0, 1]`. `intensity`/`mapped` must match the
 /// image's dimensions.
-pub(crate) fn apply_intensity_remap(
-    image: &mut Image,
-    intensity: &Buffer2<f32>,
-    mapped: &Buffer2<f32>,
-) {
+fn apply_intensity_remap(image: &mut Image, intensity: &Buffer2<f32>, mapped: &Buffer2<f32>) {
     assert_f32_master(image);
     let is_rgb = image.desc.color_format.channel_count == ChannelCount::Rgb;
     let samples: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
@@ -127,6 +134,15 @@ pub(crate) fn deinterleave_f32(image: &Image) -> Vec<Buffer2<f32>> {
         }
         ChannelCount::Rgba => unreachable!("assert_f32_master rejects RGBA"),
     }
+}
+
+/// Run a per-channel operation that needs contiguous 2D planes: deinterleave the channels, process
+/// them in place, and re-interleave. For the spatial ops ([`crate::denoise`],
+/// [`crate::background_extraction`]) whose per-channel 2D work is cache-friendly on planar data.
+pub(crate) fn process_planes(image: &mut Image, process: impl FnOnce(&mut [Buffer2<f32>])) {
+    let mut planes = deinterleave_f32(image);
+    process(&mut planes);
+    *image = interleave_f32(planes);
 }
 
 /// Re-interleave channel planes (1 or 3) back into an f32 `Image`.

@@ -9,7 +9,7 @@
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::image_ops::{apply_intensity_remap, intensity_plane};
+use crate::image_ops::remap_intensity;
 use imaginarium::Image;
 
 #[cfg(test)]
@@ -64,9 +64,7 @@ impl LocalContrastConfig {
 /// the mapping directly.
 pub fn enhance_local_contrast(image: &mut Image, config: LocalContrastConfig) {
     config.validate();
-    let intensity = intensity_plane(image);
-    let mapped = clahe_map(&intensity, config);
-    apply_intensity_remap(image, &intensity, &mapped);
+    remap_intensity(image, |intensity| clahe_map(intensity, config));
 }
 
 /// The CLAHE mapping on the combined intensity plane; [`enhance_local_contrast`]

@@ -7,7 +7,7 @@
 
 use rayon::prelude::*;
 
-use crate::image_ops::{apply_intensity_remap, intensity_plane};
+use crate::image_ops::remap_intensity;
 use crate::wavelet::{StarletTransform, max_scales};
 use imaginarium::{Buffer2, Image};
 
@@ -57,9 +57,7 @@ impl HdrConfig {
 /// the compressed intensity directly.
 pub fn compress_dynamic_range(image: &mut Image, config: HdrConfig) {
     config.validate();
-    let intensity = intensity_plane(image);
-    let mapped = hdr_map(&intensity, config);
-    apply_intensity_remap(image, &intensity, &mapped);
+    remap_intensity(image, |intensity| hdr_map(intensity, config));
 }
 
 /// The starlet residual-flattening on the combined intensity plane;

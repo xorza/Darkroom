@@ -16,7 +16,7 @@ use imaginarium::Buffer2;
 use nalgebra::{DMatrix, DVector};
 
 use crate::background_mesh::TileGrid;
-use crate::image_ops::{deinterleave_f32, interleave_f32};
+use crate::image_ops::process_planes;
 use crate::math::statistics::MAD_TO_SIGMA;
 use imaginarium::Image;
 
@@ -95,9 +95,7 @@ impl BackgroundConfig {
 /// Model and remove the smooth background of `image` in place, **per channel**. Operates on linear
 /// data: the output background sits at ≈0 (slightly negative on noise — kept signed, not clamped).
 pub fn extract_background(image: &mut Image, config: &BackgroundConfig) {
-    let mut planes = deinterleave_f32(image);
-    extract_background_core(&mut planes, config);
-    *image = interleave_f32(planes);
+    process_planes(image, |planes| extract_background_core(planes, config));
 }
 
 /// The per-channel background fit + removal, over channel planes (1 for L, 3 for RGB).

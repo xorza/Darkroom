@@ -12,7 +12,7 @@
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::image_ops::{deinterleave_f32, interleave_f32};
+use crate::image_ops::process_planes;
 use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
 use crate::wavelet::{atrous_smooth, max_scales};
 use imaginarium::Image;
@@ -111,9 +111,7 @@ impl DenoiseConfig {
 /// Operates per channel. No-op-safe on any size (the scale count is clamped to what the dimensions
 /// support). Run on linear data, after color calibration and before the stretch.
 pub fn denoise(image: &mut Image, config: DenoiseConfig) {
-    let mut planes = deinterleave_f32(image);
-    denoise_core(&mut planes, config);
-    *image = interleave_f32(planes);
+    process_planes(image, |planes| denoise_core(planes, config));
 }
 
 /// Denoise each channel plane (1 for L, 3 for RGB), reusing one scratch arena.
