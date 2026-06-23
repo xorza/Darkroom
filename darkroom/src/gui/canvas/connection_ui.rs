@@ -56,48 +56,32 @@ pub(crate) struct ConnectionUI {
     ended_on_secondary: bool,
 }
 
-/// The in-flight wire being created. Both lifetimes share one preview
-/// renderer ([`ConnectionUI::draw_in_flight`]) and snap tracking; only the
-/// terminating input differs. Identity-only — port centers resolve every
-/// frame from `PortFrame`, so a wire survives layout changes.
+/// The in-flight wire being created. Both modes share one preview renderer
+/// ([`ConnectionUI::draw_in_flight`]), snap tracking, and data — only the
+/// terminating input differs (so `mode` is a discriminant, not distinct
+/// payloads). Identity-only — port centers resolve every frame from
+/// `PortFrame`, so a wire survives layout changes.
 #[derive(Clone, Copy, Debug)]
-enum InFlight {
+struct InFlight {
+    /// The port the wire started from.
+    start: PortRef,
+    /// Compatible port currently under the pointer, if any — drives the
+    /// preview's snap end and the hover highlight.
+    snap_end: Option<PortRef>,
+    mode: DragMode,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DragMode {
     /// LMB-drag from `start`; ends on button release. The original
     /// gesture: a compatible `snap_end` commits, an input dropped on its
     /// own body gets a const, a drop on empty canvas opens the palette.
-    Held {
-        start: PortRef,
-        snap_end: Option<PortRef>,
-    },
-    /// Free wire from `start` following the cursor with **no button held**
-    /// — entered after a dropped wire spawned a node, so the user aims at
-    /// the exact port. A left-click over a compatible port commits; a
-    /// left-click elsewhere, a right-click, or Esc cancels.
-    Floating {
-        start: PortRef,
-        snap_end: Option<PortRef>,
-    },
-}
-
-impl InFlight {
-    fn start(self) -> PortRef {
-        match self {
-            InFlight::Held { start, .. } | InFlight::Floating { start, .. } => start,
-        }
-    }
-
-    fn snap_end(self) -> Option<PortRef> {
-        match self {
-            InFlight::Held { snap_end, .. } | InFlight::Floating { snap_end, .. } => snap_end,
-        }
-    }
-
-    fn with_snap(self, snap_end: Option<PortRef>) -> Self {
-        match self {
-            InFlight::Held { start, .. } => InFlight::Held { start, snap_end },
-            InFlight::Floating { start, .. } => InFlight::Floating { start, snap_end },
-        }
-    }
+    Held,
+    /// Free wire following the cursor with **no button held** — entered
+    /// after a dropped wire spawned a node, so the user aims at the exact
+    /// port. A left-click over a compatible port commits; a left-click
+    /// elsewhere, a right-click, or Esc cancels.
+    Floating,
 }
 
 impl ConnectionUI {
@@ -124,38 +108,39 @@ impl ConnectionUI {
 
         // A just-spawned node hands its dropped wire back to float.
         if let Some(start) = resume {
-            self.state = Some(InFlight::Floating {
+            self.state = Some(InFlight {
                 start,
                 snap_end: None,
+                mode: DragMode::Floating,
             });
         }
         // Latch a fresh port drag only when idle.
         if self.state.is_none()
             && let Some(start) = scan_drag_start(port_frame, scene)
         {
-            self.state = Some(InFlight::Held {
+            self.state = Some(InFlight {
                 start,
                 snap_end: None,
+                mode: DragMode::Held,
             });
         }
         if ui.escape_pressed() {
             self.state = None;
             return;
         }
-        let Some(state) = self.state else {
+        let Some(mut state) = self.state else {
             return;
         };
 
-        // Refresh the compatible port under the pointer for both modes — it
-        // drives the preview's snap end and the hover highlight.
-        let snap_end = scan_snap_target(port_frame, ui, scene, state.start());
-        self.state = Some(state.with_snap(snap_end));
+        // Refresh the compatible port under the pointer for both modes.
+        state.snap_end = scan_snap_target(port_frame, ui, scene, state.start);
+        self.state = Some(state);
 
-        match state {
-            InFlight::Held { start, .. } => {
-                self.resolve_held(ui, scene, port_frame, start, snap_end, out)
+        match state.mode {
+            DragMode::Held => {
+                self.resolve_held(ui, scene, port_frame, state.start, state.snap_end, out)
             }
-            InFlight::Floating { start, .. } => self.resolve_floating(ui, start, snap_end, out),
+            DragMode::Floating => self.resolve_floating(ui, state.start, state.snap_end, out),
         }
     }
 
@@ -275,7 +260,7 @@ impl ConnectionUI {
     /// the hover state in `PortFrame` (otherwise palantir's
     /// drag-capture suppression would hide it).
     pub(crate) fn snap_port(&self) -> Option<PortRef> {
-        self.state.and_then(InFlight::snap_end)
+        self.state.and_then(|s| s.snap_end)
     }
 
     /// Paint every permanent connection on the current scene, marking
@@ -366,11 +351,11 @@ impl ConnectionUI {
         canvas_origin: Vec2,
     ) {
         let Some(state) = self.state else { return };
-        let start_port = state.start();
+        let start_port = state.start;
         let Some(start) = port_frame.center_canvas_local(start_port) else {
             return;
         };
-        let end = match state.snap_end() {
+        let end = match state.snap_end {
             Some(snap) => port_frame.center_canvas_local(snap),
             None => ui.pointer_pos().map(|p| to_world(p - canvas_origin, scene)),
         };
