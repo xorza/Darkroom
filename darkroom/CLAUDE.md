@@ -185,8 +185,10 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   coalesce in place (a node drag = many `MoveNodes` intents → one undo entry).
 - **`UiAction`** (`gui/mod.rs`) is the navigation-request transport from the
   UI layer to `Editor`: `ActivateTab`/`CloseTab` become undoable
-  `SwitchTab`/`CloseTab`; `OpenGraph` and `NewSubgraph` mutate the tab list
-  directly (opening/creating isn't undoable; switching and closing are).
+  `SwitchTab`/`CloseTab`. `OpenGraph`/`NewSubgraph` add the tab (and, for
+  `NewSubgraph`, the def + instance) to the document directly — that part
+  isn't undoable — but focus the tab through the same recorded `SwitchTab`,
+  so undo faithfully reverses focus while leaving the opened tab in place.
 - Per-step properties (`is_noop`, `requires_relayout`, `requires_reconcile`,
   `gesture_key`, `coalesce`) are methods on `UndoStep`, exhaustive over the
   variants so a new one won't compile until it declares its behavior.

@@ -31,8 +31,9 @@ pub(crate) type HostHandle = palantir::HostHandle<App>;
 /// clicks) and applied by `App` in the navigation phase. Decoupled from
 /// `Intent` so the UI layer doesn't need to know which requests are
 /// undoable: `App` translates `ActivateTab`/`CloseTab` into the undoable
-/// `Intent::SwitchTab`/`CloseTab`, while `OpenGraph` mutates the tab list
-/// directly (opening a tab isn't undoable — only switching/closing is).
+/// `Intent::SwitchTab`/`CloseTab`. `OpenGraph` adds the tab to the strip
+/// directly (that part isn't undoable) but focuses it through the same
+/// recorded `SwitchTab`, so undo faithfully reverses focus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum UiAction {
     /// Open `target` in a tab (or focus its existing tab).

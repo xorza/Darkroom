@@ -398,10 +398,11 @@ impl Editor {
         self.intents = scratch;
     }
 
-    /// Apply the record pass's view-state requests. Open mutates the tab
-    /// list directly (not undoable); activate and close are queued as
-    /// `Intent::SwitchTab` / `Intent::CloseTab` so they join the undo
-    /// history (their relayout is decided later, when they drain).
+    /// Apply the record pass's view-state requests. Adding a tab to the
+    /// strip is the only non-undoable part of opening; the focus change it
+    /// implies, plus activate and close, are queued as `Intent::SwitchTab` /
+    /// `Intent::CloseTab` so they join the undo history (their relayout is
+    /// decided later, when they drain).
     fn apply_view_actions(&mut self) {
         for action in std::mem::take(&mut self.actions) {
             match action {
@@ -413,9 +414,9 @@ impl Editor {
                     self.intents.push(Intent::CloseTab { index });
                 }
                 UiAction::NewSubgraph => {
-                    // Create the def then open it; like `OpenGraph`, this
-                    // isn't undoable (the new def is referenced by no undo
-                    // history, so the stack stays valid).
+                    // Creating the def + instance isn't undoable (no undo
+                    // history references the fresh def, so the stack stays
+                    // valid); `open_graph` still records the focus switch.
                     let id = self.document.create_subgraph();
                     self.open_graph(GraphRef::Local(id));
                 }
@@ -423,23 +424,92 @@ impl Editor {
         }
     }
 
-    /// Focus `target`'s tab, opening a new one (lazily seeding its view
-    /// metadata) if not already open. Flags a relayout when anything moved.
+    /// Open `target`'s tab and focus it. Adding the tab to the strip (lazily
+    /// seeding a `Local` interior's view) is the non-undoable part; focusing
+    /// it routes through a recorded `SwitchTab` like every other focus
+    /// change — queued here, drained right after. Undo then faithfully
+    /// reverses focus (the opened tab stays open) and a fresh open discards
+    /// the redo tail, instead of leaving `active` mutated outside the record.
     fn open_graph(&mut self, target: GraphRef) {
-        if let Some(index) = self.document.tabs.iter().position(|t| *t == target) {
-            if self.document.active != index {
-                self.document.active = index;
-                self.needs_relayout = true;
+        let index = match self.document.tabs.iter().position(|t| *t == target) {
+            Some(index) => index,
+            None => {
+                if let GraphRef::Local(id) = target
+                    && !self.document.ensure_sub_view(id)
+                {
+                    return; // subgraph vanished — nothing to open
+                }
+                self.document.tabs.push(target);
+                self.document.tabs.len() - 1
             }
-            return;
-        }
-        if let GraphRef::Local(id) = target
-            && !self.document.ensure_sub_view(id)
-        {
-            return;
-        }
-        self.document.tabs.push(target);
-        self.document.active = self.document.tabs.len() - 1;
-        self.needs_relayout = true;
+        };
+        self.intents.push(Intent::SwitchTab { to: index });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Run an `OpenGraph` exactly as `navigate` does: queue the focus
+    /// switch, then drain it onto the undo stack.
+    fn open(editor: &mut Editor, target: GraphRef) {
+        editor.open_graph(target);
+        // `SwitchTab` is graph-agnostic, so the drain target is irrelevant.
+        editor.drain_intents(GraphRef::Main);
+    }
+
+    fn undo(editor: &mut Editor) -> bool {
+        editor.action_stack.undo(&mut editor.document, &mut |_| {})
+    }
+
+    fn redo(editor: &mut Editor) -> bool {
+        editor.action_stack.redo(&mut editor.document, &mut |_| {})
+    }
+
+    #[test]
+    fn opening_a_graph_records_an_undoable_focus_switch() {
+        let mut editor = Editor::new(Document::default());
+        let a = editor.document.create_subgraph();
+        let b = editor.document.create_subgraph();
+
+        // Opening appends the tab and focuses it through a recorded switch.
+        open(&mut editor, GraphRef::Local(a));
+        assert_eq!(
+            editor.document.tabs,
+            vec![GraphRef::Main, GraphRef::Local(a)]
+        );
+        assert_eq!(editor.document.active, 1);
+
+        // Undo reverses the focus only — the opened tab stays in the strip
+        // (adding it isn't undoable), and `active` returns to its real prior
+        // value rather than a stale stored index.
+        assert!(undo(&mut editor));
+        assert_eq!(editor.document.active, 0, "undo restores the prior focus");
+        assert_eq!(
+            editor.document.tabs.len(),
+            2,
+            "undo reverses focus, not the tab open"
+        );
+
+        // A fresh open after that undo is a new action: it discards the
+        // redoable tail instead of leaving it replayable on a stale `active`.
+        open(&mut editor, GraphRef::Local(b));
+        assert_eq!(editor.document.active, 2);
+        assert!(
+            !redo(&mut editor),
+            "the undone switch is unreachable after a fresh open"
+        );
+        assert_eq!(editor.document.active, 2);
+
+        // Re-focusing an already-open tab also routes through `SwitchTab`:
+        // `active` follows and no second tab is added.
+        open(&mut editor, GraphRef::Local(a));
+        assert_eq!(editor.document.active, 1, "re-focus moves active");
+        assert_eq!(
+            editor.document.tabs.len(),
+            3,
+            "re-focusing an open tab adds none"
+        );
     }
 }
