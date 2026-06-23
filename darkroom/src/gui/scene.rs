@@ -141,6 +141,11 @@ pub struct SceneNode {
     /// `Executed`) the header time label; `None` (the default) paints
     /// no glow.
     pub exec_status: ExecStatus,
+    /// The node's func/subgraph def is absent from the library (e.g. a
+    /// document saved against an older library), so its interface can't be
+    /// resolved. Rendered as a portless error stub the user can still
+    /// select and delete — never silently dropped.
+    pub missing: bool,
 }
 
 #[derive(Debug)]
@@ -241,8 +246,27 @@ impl Scene {
                     }
                 }),
             };
-            let Some(interface) = interface else {
-                continue;
+            // A Func/Subgraph node whose func/def is absent from the library
+            // has no interface to project. Dropping it would make it
+            // invisible — and so impossible to select and delete — silently
+            // corrupting the document. Render it as a portless error stub
+            // instead. Boundary nodes only fail to resolve when misplaced at
+            // the root (no enclosing `ctx_def`), which still skips.
+            let missing = interface.is_none();
+            let interface = match interface {
+                Some(interface) => interface,
+                None => {
+                    if !matches!(node.kind, NodeKind::Func(_) | NodeKind::Subgraph(_)) {
+                        continue;
+                    }
+                    NodeInterface {
+                        kind_label: "missing func".into(),
+                        inputs: Cow::Borrowed(&[]),
+                        outputs: Cow::Borrowed(&[]),
+                        subgraph: None,
+                        terminal: false,
+                    }
+                }
             };
             // One `SceneInput` per input port, sliced by the node's `inputs`
             // span. The bindings come from a parallel graph iterator; each
@@ -301,6 +325,7 @@ impl Scene {
                     NodeKind::SubgraphInput | NodeKind::SubgraphOutput
                 ),
                 exec_status: run_state.status(vn.id),
+                missing,
             });
         }
 

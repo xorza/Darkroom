@@ -154,6 +154,10 @@ impl NodeUI {
         let border_width = theme.node_border_width * 2.0;
         let border = if broken {
             theme.connection_broken
+        } else if node.missing {
+            // A stub for a node whose func is gone from the library: paint it
+            // in the error color so it reads as broken-but-deletable.
+            theme.exec_errored_glow
         } else if selected {
             theme.text_muted
         } else {
