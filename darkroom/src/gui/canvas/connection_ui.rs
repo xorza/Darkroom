@@ -213,7 +213,12 @@ impl ConnectionUI {
         snap_end: Option<PortRef>,
         out: &mut Vec<Intent>,
     ) {
-        ui.subscribe_pointer(PointerSense::BUTTONS);
+        // `MOVE` wakes a repaint on every cursor move so the wire tracks the
+        // pointer (no button is held, so there's no drag-capture keeping
+        // frames coming — without this it only redraws when some other
+        // widget's hover change happens to wake a frame). `BUTTONS` delivers
+        // the terminating press.
+        ui.subscribe_pointer(PointerSense::MOVE | PointerSense::BUTTONS);
         let ended = ui.pointer_events().iter().find_map(|ev| match ev {
             PointerEvent::Down {
                 button: button @ (PointerButton::Left | PointerButton::Right),
