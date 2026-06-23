@@ -2,12 +2,14 @@
 //!
 //! [`DynamicValue`] is deliberately not `Serialize`: `Unbound`/`Static` are
 //! trivially serializable, but `Custom(Arc<dyn CustomValue>)` is an opaque
-//! runtime payload. This module bridges that gap for disk-backed caching —
-//! `Static`/`Unbound` serialize directly, and each `Custom` value is encoded
-//! via [`CustomValue::cache_blob`] and rebuilt on load by a decoder looked up by
-//! type id in a [`CustomValueRegistry`]. A value whose `cache_blob` is `None`
-//! makes the whole output set non-cacheable, so the caller recomputes rather
-//! than persisting a partial result. See `docs/disk-cache-design.md`.
+//! runtime payload. Each custom *type* registers a [`CustomValueCodec`] in a
+//! [`CustomValueRegistry`], and that single entry drives both directions: encode
+//! (you have the value — async + context-aware, mirroring preview generation, so
+//! a GPU-resident value can read back) and decode (you have only bytes + a type
+//! id, since on reload there is no value yet — which is exactly why the registry
+//! must exist). A type with no registered codec is left out of the cache, and
+//! caching is all-or-nothing per node so a reload never yields a half-real output
+//! set. See `scenarium/docs/disk-cache-design.md`.
 
 // Consumed by the executor only in the disk-cache integration phase; the
 // crate-internal codec helpers are dead until that wiring lands.
@@ -16,83 +18,100 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use common::{SerdeFormat, deserialize, serialize};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::context::ContextManager;
 use crate::data::{CustomValue, DynamicValue, StaticValue, TypeId};
 
-/// Rebuilds a custom value from the bytes its [`CustomValue::cache_blob`]
-/// produced. Takes the blob **by value** so a decoder can move it straight into
-/// the reconstructed value (e.g. an image's pixel buffer) without copying — the
-/// caller already owns it and would otherwise drop it. The decoder lives in a
-/// downstream crate, so its own failure (bytes that don't match the type's
-/// current layout) stays type-erased here; the framework wraps it in
-/// [`Error::Decoder`].
-pub type CustomDecoder =
-    fn(
-        Vec<u8>,
-    ) -> std::result::Result<Arc<dyn CustomValue>, Box<dyn std::error::Error + Send + Sync>>;
+/// Error a codec hands back to the framework. The codec lives in a downstream
+/// crate, so its concrete failure stays type-erased here.
+type CodecError = Box<dyn std::error::Error + Send + Sync>;
 
-/// Failure rebuilding cached outputs from disk bytes. Each variant is an
-/// *expected* condition when a blob outlives the binary or library that wrote
-/// it — never a logic bug in the caller.
+/// Bidirectional disk codec for one custom-value type, registered once in a
+/// [`CustomValueRegistry`]. Encode takes `&dyn CustomValue` (downcast to the
+/// codec's concrete type) and is async + context-aware like
+/// [`CustomValue::gen_preview`](crate::data::CustomValue::gen_preview), so a
+/// GPU-resident value can read back through the [`ContextManager`]. Decode has
+/// only bytes — there is no value on reload, which is why dispatch goes through
+/// the registry rather than a method on the value.
+#[async_trait]
+pub trait CustomValueCodec: Send + Sync {
+    /// Encode `value` (always this codec's concrete type) for the cache, or
+    /// `Err` if encoding failed (e.g. a GPU readback error) — surfaced to the
+    /// caller rather than silently dropped. Whether a *type* is cacheable at all
+    /// is decided by whether a codec is registered for it, not here.
+    async fn encode(
+        &self,
+        value: &dyn CustomValue,
+        ctx: &mut ContextManager,
+    ) -> std::result::Result<Vec<u8>, CodecError>;
+
+    /// Rebuild a value from bytes a prior [`Self::encode`] produced. Errors are
+    /// expected when a blob outlives the binary that wrote it (corrupt or
+    /// layout-changed bytes).
+    fn decode(&self, bytes: Vec<u8>) -> std::result::Result<Arc<dyn CustomValue>, CodecError>;
+}
+
+/// Maps a custom type's [`TypeId`] to its [`CustomValueCodec`]. Downstream crates
+/// register the types they want disk-cacheable (`scenarium` itself knows of
+/// none); both [`serialize_outputs`] and [`deserialize_outputs`] dispatch through
+/// it.
+#[derive(Default)]
+pub struct CustomValueRegistry {
+    codecs: HashMap<TypeId, Box<dyn CustomValueCodec>>,
+}
+
+impl CustomValueRegistry {
+    /// Register `codec` as the encoder/decoder for `type_id`. Panics on a
+    /// duplicate registration — two codecs for one type is a wiring bug, not a
+    /// runtime condition.
+    pub fn register(&mut self, type_id: impl Into<TypeId>, codec: impl CustomValueCodec + 'static) {
+        let prev = self.codecs.insert(type_id.into(), Box::new(codec));
+        assert!(prev.is_none(), "duplicate custom-value codec registration");
+    }
+
+    fn codec(&self, type_id: &TypeId) -> Option<&dyn CustomValueCodec> {
+        self.codecs.get(type_id).map(|codec| &**codec)
+    }
+}
+
+impl std::fmt::Debug for CustomValueRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Codecs aren't `Debug`; the registered type ids are the useful state.
+        f.debug_struct("CustomValueRegistry")
+            .field("types", &self.codecs.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
+/// Failure encoding outputs to, or rebuilding them from, the cache. Each variant
+/// is an *expected* condition (a GPU readback error, or a blob that outlived the
+/// binary that wrote it) — never a logic bug in the caller.
 #[derive(Debug, Error)]
 pub enum Error {
     /// The serialized output frame didn't decode — corrupt, truncated, or
     /// written by an incompatible codec version.
     #[error("malformed cached output frame: {0}")]
     Frame(String),
-    /// A cached custom value names a type with no decoder registered in this
+    /// A registered codec failed to encode a value (e.g. a GPU readback error).
+    #[error("encoding a {type_id:?} value failed: {source}")]
+    Encode { type_id: TypeId, source: CodecError },
+    /// A cached custom value names a type with no codec registered in this
     /// process (the producing crate isn't loaded, or never registered it).
-    #[error("no cache decoder registered for custom type {0:?}")]
+    #[error("no cache codec registered for custom type {0:?}")]
     UnknownType(TypeId),
-    /// A registered decoder rejected its blob.
+    /// A registered codec rejected its blob.
     #[error("decoding a {type_id:?} value failed: {source}")]
-    Decoder {
-        type_id: TypeId,
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
+    Decoder { type_id: TypeId, source: CodecError },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Maps a custom type's [`TypeId`] to the decoder that rebuilds its values from
-/// a cache blob. Downstream crates register the types they want disk-cacheable
-/// (`scenarium` itself knows of none); [`deserialize_outputs`] dispatches
-/// through it. The encode side needs no registration — it goes through the
-/// value's own `cache_blob`.
-#[derive(Debug, Default)]
-pub struct CustomValueRegistry {
-    decoders: HashMap<TypeId, CustomDecoder>,
-}
-
-impl CustomValueRegistry {
-    /// Register `decoder` as the rebuilder for `type_id`. Panics on a duplicate
-    /// registration — two decoders for one type is a wiring bug, not a runtime
-    /// condition.
-    pub fn register(&mut self, type_id: impl Into<TypeId>, decoder: CustomDecoder) {
-        let prev = self.decoders.insert(type_id.into(), decoder);
-        assert!(
-            prev.is_none(),
-            "duplicate custom-value decoder registration"
-        );
-    }
-
-    fn decode(&self, type_id: &TypeId, bytes: Vec<u8>) -> Result<Arc<dyn CustomValue>> {
-        let decoder = self
-            .decoders
-            .get(type_id)
-            .ok_or(Error::UnknownType(*type_id))?;
-        decoder(bytes).map_err(|source| Error::Decoder {
-            type_id: *type_id,
-            source,
-        })
-    }
-}
-
 /// Serializable mirror of one [`DynamicValue`]. `Custom` carries the producer's
-/// type id so the loader can pick the right decoder.
+/// type id so the loader can pick the right codec.
 #[derive(Serialize, Deserialize)]
 enum CachedValue {
     Unbound,
@@ -100,28 +119,42 @@ enum CachedValue {
     Custom { type_id: TypeId, blob: Vec<u8> },
 }
 
-/// Encode a node's outputs for the cache, or `None` if any value can't be
-/// persisted (an unbacked `Custom`) — caching is all-or-nothing per node so a
-/// reload never yields a half-real output set.
-pub(crate) fn serialize_outputs(outputs: &[DynamicValue]) -> Option<Vec<u8>> {
+/// Encode a node's outputs for the cache. `Ok(None)` means the node isn't
+/// cacheable because a custom output's type has no registered codec; caching is
+/// all-or-nothing per node, so that skips the whole node and a reload never
+/// yields a half-real set. `Err` carries a real encode failure (e.g. a GPU
+/// readback error) for the caller to surface.
+pub(crate) async fn serialize_outputs(
+    outputs: &[DynamicValue],
+    registry: &CustomValueRegistry,
+    ctx: &mut ContextManager,
+) -> Result<Option<Vec<u8>>> {
     let mut cached = Vec::with_capacity(outputs.len());
     for value in outputs {
         cached.push(match value {
             DynamicValue::Unbound => CachedValue::Unbound,
             DynamicValue::Static(value) => CachedValue::Static(value.clone()),
-            DynamicValue::Custom(value) => CachedValue::Custom {
-                type_id: value.type_def().type_id,
-                blob: value.cache_blob()?,
-            },
+            DynamicValue::Custom(value) => {
+                let type_id = value.type_def().type_id;
+                let Some(codec) = registry.codec(&type_id) else {
+                    return Ok(None); // type not registered for caching ⇒ node not cacheable
+                };
+                let blob = codec
+                    .encode(value.as_ref(), ctx)
+                    .await
+                    .map_err(|source| Error::Encode { type_id, source })?;
+                CachedValue::Custom { type_id, blob }
+            }
         });
     }
     // In-memory encode of known-serializable types: failure is a logic bug.
-    Some(serialize(&cached, SerdeFormat::Bitcode).expect("cache output serialization"))
+    Ok(Some(
+        serialize(&cached, SerdeFormat::Bitcode).expect("cache output serialization"),
+    ))
 }
 
 /// Decode outputs previously written by [`serialize_outputs`], rebuilding custom
-/// values through `registry`. Errors on malformed bytes or an unregistered type
-/// — both expected when a cache blob outlives the binary that wrote it.
+/// values through `registry`. Errors on malformed bytes or an unregistered type.
 pub(crate) fn deserialize_outputs(
     bytes: &[u8],
     registry: &CustomValueRegistry,
@@ -135,7 +168,13 @@ pub(crate) fn deserialize_outputs(
                 CachedValue::Unbound => DynamicValue::Unbound,
                 CachedValue::Static(value) => DynamicValue::Static(value),
                 CachedValue::Custom { type_id, blob } => {
-                    DynamicValue::Custom(registry.decode(&type_id, blob)?)
+                    let codec = registry
+                        .codec(&type_id)
+                        .ok_or(Error::UnknownType(type_id))?;
+                    let value = codec
+                        .decode(blob)
+                        .map_err(|source| Error::Decoder { type_id, source })?;
+                    DynamicValue::Custom(value)
                 }
             })
         })
@@ -152,7 +191,7 @@ mod tests {
     const BLOB_TYPE: &str = "6c20414f-12a2-4150-bd79-1b4ee23a9f33";
     const OPAQUE_TYPE: &str = "f4a1b423-1ab3-4864-a59d-f4bb2f74ecb1";
 
-    /// A disk-cacheable custom value: its blob is just its bytes.
+    /// A disk-cacheable custom value; its [`BlobCodec`] just moves the bytes.
     #[derive(Debug, PartialEq)]
     struct Blob(Vec<u8>);
 
@@ -172,18 +211,31 @@ mod tests {
         fn as_any(&self) -> &dyn Any {
             self
         }
-        fn cache_blob(&self) -> Option<Vec<u8>> {
-            Some(self.0.clone())
+    }
+
+    #[derive(Debug)]
+    struct BlobCodec;
+
+    #[async_trait]
+    impl CustomValueCodec for BlobCodec {
+        async fn encode(
+            &self,
+            value: &dyn CustomValue,
+            _ctx: &mut ContextManager,
+        ) -> std::result::Result<Vec<u8>, CodecError> {
+            Ok(value
+                .as_any()
+                .downcast_ref::<Blob>()
+                .expect("BlobCodec is only registered for Blob")
+                .0
+                .clone())
+        }
+        fn decode(&self, bytes: Vec<u8>) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
+            Ok(Arc::new(Blob(bytes)))
         }
     }
 
-    fn decode_blob(
-        bytes: Vec<u8>,
-    ) -> std::result::Result<Arc<dyn CustomValue>, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(Arc::new(Blob(bytes)))
-    }
-
-    /// A custom value with no disk codec (default `cache_blob` → `None`).
+    /// A custom value used with no codec (skip) or [`FailingCodec`] (error).
     #[derive(Debug)]
     struct Opaque;
 
@@ -205,20 +257,45 @@ mod tests {
         }
     }
 
+    /// A codec whose `encode` always fails — exercises the `Err` path.
+    #[derive(Debug)]
+    struct FailingCodec;
+
+    #[async_trait]
+    impl CustomValueCodec for FailingCodec {
+        async fn encode(
+            &self,
+            _value: &dyn CustomValue,
+            _ctx: &mut ContextManager,
+        ) -> std::result::Result<Vec<u8>, CodecError> {
+            Err("boom".into())
+        }
+        fn decode(&self, _bytes: Vec<u8>) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
+            Err("boom".into())
+        }
+    }
+
     fn blob_registry() -> CustomValueRegistry {
         let mut registry = CustomValueRegistry::default();
-        registry.register(BLOB_TYPE, decode_blob);
+        registry.register(BLOB_TYPE, BlobCodec);
         registry
     }
 
-    #[test]
-    fn static_and_unbound_round_trip() {
+    #[tokio::test]
+    async fn static_and_unbound_round_trip() {
         let outputs = vec![
             DynamicValue::Unbound,
             DynamicValue::Static(StaticValue::Int(42)),
             DynamicValue::Static(StaticValue::String("hi".into())),
         ];
-        let bytes = serialize_outputs(&outputs).expect("all serializable");
+        let bytes = serialize_outputs(
+            &outputs,
+            &CustomValueRegistry::default(),
+            &mut ContextManager::default(),
+        )
+        .await
+        .expect("no encode error")
+        .expect("all serializable");
         let back = deserialize_outputs(&bytes, &CustomValueRegistry::default()).unwrap();
 
         assert_eq!(back.len(), 3);
@@ -227,13 +304,16 @@ mod tests {
         assert_eq!(back[2].as_string(), Some("hi"));
     }
 
-    #[test]
-    fn custom_round_trips_via_registry() {
+    #[tokio::test]
+    async fn custom_round_trips_via_registry() {
         let outputs = vec![
             DynamicValue::Static(StaticValue::Bool(true)),
             DynamicValue::from_custom(Blob(vec![1, 2, 3, 255])),
         ];
-        let bytes = serialize_outputs(&outputs).expect("blob is cacheable");
+        let bytes = serialize_outputs(&outputs, &blob_registry(), &mut ContextManager::default())
+            .await
+            .expect("no encode error")
+            .expect("blob is cacheable");
         let back = deserialize_outputs(&bytes, &blob_registry()).unwrap();
 
         assert_eq!(back.len(), 2);
@@ -242,31 +322,49 @@ mod tests {
         assert_eq!(blob, &Blob(vec![1, 2, 3, 255]));
     }
 
-    #[test]
-    fn non_cacheable_custom_makes_whole_set_none() {
-        // One unbacked custom value poisons the whole output set, even though
-        // the other values would serialize fine.
+    #[tokio::test]
+    async fn unregistered_custom_type_is_skipped() {
+        // No codec for `Opaque` ⇒ the whole output set is not cacheable (a skip,
+        // not an error), even though the `Int` beside it would serialize fine.
         let outputs = vec![
             DynamicValue::Static(StaticValue::Int(1)),
             DynamicValue::from_custom(Opaque),
         ];
-        assert!(serialize_outputs(&outputs).is_none());
+        let result = serialize_outputs(
+            &outputs,
+            &CustomValueRegistry::default(),
+            &mut ContextManager::default(),
+        )
+        .await;
+        assert!(matches!(result, Ok(None)));
     }
 
-    #[test]
-    fn unregistered_type_errors_on_load() {
+    #[tokio::test]
+    async fn encode_failure_propagates_as_error() {
+        let mut registry = CustomValueRegistry::default();
+        registry.register(OPAQUE_TYPE, FailingCodec);
+        let outputs = vec![DynamicValue::from_custom(Opaque)];
+        let result = serialize_outputs(&outputs, &registry, &mut ContextManager::default()).await;
+        assert!(matches!(result, Err(Error::Encode { .. })));
+    }
+
+    #[tokio::test]
+    async fn unregistered_type_errors_on_load() {
         let outputs = vec![DynamicValue::from_custom(Blob(vec![9]))];
-        let bytes = serialize_outputs(&outputs).unwrap();
-        // Empty registry — the type was written but has no decoder here.
+        let bytes = serialize_outputs(&outputs, &blob_registry(), &mut ContextManager::default())
+            .await
+            .unwrap()
+            .unwrap();
+        // Empty registry — the type was written but has no codec here.
         let result = deserialize_outputs(&bytes, &CustomValueRegistry::default());
         assert!(matches!(result, Err(Error::UnknownType(_))));
     }
 
     #[test]
-    #[should_panic(expected = "duplicate custom-value decoder")]
+    #[should_panic(expected = "duplicate custom-value codec")]
     fn duplicate_registration_panics() {
         let mut registry = CustomValueRegistry::default();
-        registry.register(BLOB_TYPE, decode_blob);
-        registry.register(BLOB_TYPE, decode_blob);
+        registry.register(BLOB_TYPE, BlobCodec);
+        registry.register(BLOB_TYPE, BlobCodec);
     }
 }

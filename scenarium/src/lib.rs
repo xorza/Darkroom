@@ -30,5 +30,5 @@ pub mod prelude {
         Binding, Graph, InputPort, Node, NodeBehavior, NodeId, NodeKind, OutputPort, Subscription,
     };
     pub use crate::subgraph::{SubgraphDef, SubgraphEvent, SubgraphId, SubgraphRef};
-    pub use crate::value_cache::{CustomDecoder, CustomValueRegistry};
+    pub use crate::value_cache::{CustomValueCodec, CustomValueRegistry};
 }
