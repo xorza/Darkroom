@@ -256,11 +256,16 @@ impl Scene {
             let interface = match interface {
                 Some(interface) => interface,
                 None => {
-                    if !matches!(node.kind, NodeKind::Func(_) | NodeKind::Subgraph(_)) {
-                        continue;
-                    }
+                    // Label the stub by what's missing — a func vs a subgraph
+                    // def. Boundary nodes only fail to resolve when misplaced
+                    // at the root (no enclosing `ctx_def`); nothing to render.
+                    let kind_label = match node.kind {
+                        NodeKind::Func(_) => "missing func",
+                        NodeKind::Subgraph(_) => "missing subgraph",
+                        NodeKind::SubgraphInput | NodeKind::SubgraphOutput => continue,
+                    };
                     NodeInterface {
-                        kind_label: "missing func".into(),
+                        kind_label: kind_label.into(),
                         inputs: Cow::Borrowed(&[]),
                         outputs: Cow::Borrowed(&[]),
                         subgraph: None,
@@ -579,52 +584,58 @@ mod tests {
     }
 
     #[test]
-    fn missing_func_node_renders_as_deletable_stub() {
+    fn missing_func_and_subgraph_render_as_deletable_stubs() {
         use scenarium::elements::basic_funclib::basic_funclib;
+        use scenarium::prelude::SubgraphRef;
 
-        // One node bound to a real func, one bound to a func id the library
-        // doesn't define (e.g. a document saved against an older library
-        // that has since dropped the func).
+        // A resolvable func, plus two unresolvable nodes (e.g. a document
+        // saved against an older library): a func id and a linked subgraph
+        // def id the library no longer defines.
         let func_lib = basic_funclib();
         let mut graph = Graph::default();
         let known: Node = func_lib.by_name("add").unwrap().into();
         let known_id = known.id;
-        let mut ghost = Node::new(NodeKind::Func(
+        let mut ghost_func = Node::new(NodeKind::Func(
             "7a0265e1-9631-45bd-8ecd-1e923b67a58c".into(),
         ));
-        ghost.name = "astro_to_image".into();
-        let ghost_id = ghost.id;
+        ghost_func.name = "astro_to_image".into();
+        let ghost_func_id = ghost_func.id;
+        let mut ghost_sub = Node::new(NodeKind::Subgraph(SubgraphRef::Linked(
+            "00000000-0000-0000-0000-0000000000ff".into(),
+        )));
+        ghost_sub.name = "removed_subgraph".into();
+        let ghost_sub_id = ghost_sub.id;
         graph.add(known);
-        graph.add(ghost);
+        graph.add(ghost_func);
+        graph.add(ghost_sub);
 
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
         scene.rebuild(&graph, &view, &func_lib, None, &RunState::default());
 
-        // The missing-func node is rendered, not silently dropped — so it
-        // stays selectable and deletable to repair the document.
-        assert_eq!(scene.nodes.len(), 2, "both nodes render");
+        // Every node renders, not silently dropped — so the unresolvable ones
+        // stay selectable and deletable to repair the document.
+        assert_eq!(scene.nodes.len(), 3, "all nodes render");
         let known_node = scene.nodes.iter().find(|n| n.id == known_id).unwrap();
-        let ghost_node = scene.nodes.iter().find(|n| n.id == ghost_id).unwrap();
+        let ghost_func_node = scene.nodes.iter().find(|n| n.id == ghost_func_id).unwrap();
+        let ghost_sub_node = scene.nodes.iter().find(|n| n.id == ghost_sub_id).unwrap();
 
-        // The flag tracks resolution: resolved → false, absent → true.
+        // The flag tracks resolution; the label names what's missing.
         assert!(!known_node.missing, "a resolved func is not a stub");
-        assert!(ghost_node.missing, "an absent func renders as a stub");
+        assert!(ghost_func_node.missing && ghost_sub_node.missing);
+        assert_eq!(ghost_func_node.kind_label.as_str(""), "missing func");
+        assert_eq!(ghost_sub_node.kind_label.as_str(""), "missing subgraph");
 
-        // The stub keeps the node's saved name, is labeled missing, and has
-        // no ports — the removed func's interface is unknown.
-        assert_eq!(ghost_node.name.as_str(""), "astro_to_image");
-        assert_eq!(ghost_node.kind_label.as_str(""), "missing func");
-        assert_eq!(
-            scene.inputs(ghost_node.inputs).len(),
-            0,
-            "stub has no inputs"
-        );
-        assert_eq!(
-            scene.outputs(ghost_node.outputs).len(),
-            0,
-            "stub has no outputs"
-        );
+        // Both stubs keep their saved name and carry no ports — and the
+        // subgraph stub drops its `subgraph` ref so the "open in tab" action
+        // isn't offered for a def that isn't there.
+        assert_eq!(ghost_func_node.name.as_str(""), "astro_to_image");
+        assert_eq!(ghost_sub_node.name.as_str(""), "removed_subgraph");
+        assert!(ghost_sub_node.subgraph.is_none());
+        for stub in [ghost_func_node, ghost_sub_node] {
+            assert_eq!(scene.inputs(stub.inputs).len(), 0, "stub has no inputs");
+            assert_eq!(scene.outputs(stub.outputs).len(), 0, "stub has no outputs");
+        }
 
         // The resolved node, by contrast, exposes its real ports.
         assert!(
