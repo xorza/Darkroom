@@ -13,11 +13,10 @@ use common::file_utils::astro_image_files;
 use imaginarium::Buffer2;
 use imaginarium::Image as RawImage;
 use lumos::{
-    AlignStackConfig, AstroImage, BackgroundConfig, CalibrationImages, CalibrationMasters,
-    CfaImage, DEFAULT_SIGMA_THRESHOLD, DenoiseConfig, HdrConfig, ImageDimensions,
-    LocalContrastConfig, Reference, StackConfig, StarDetector, calibrate_align_stack,
-    compress_dynamic_range, denoise, enhance_local_contrast, extract_background,
-    neutralize_background, scnr, stack_cfa_master, stretch,
+    AlignStackConfig, AstroImage, CalibrationImages, CalibrationMasters, CfaImage,
+    DEFAULT_SIGMA_THRESHOLD, Denoise, ExtractBackground, Hdr, ImageDimensions, LocalContrast,
+    NeutralizeBackground, OpError, Reference, StackConfig, StarDetector, calibrate_align_stack,
+    stack_cfa_master,
 };
 use scenarium::data::{
     DataType, DynamicValue, EnumVariants, FsPathConfig, FsPathMode, StaticValue,
@@ -316,7 +315,7 @@ pub fn astro_funclib() -> FuncLib {
                         })
                         .expect("method is required");
                     let value = inputs[0].value.clone();
-                    outputs[0] = run_frame_op(value, move |img| stretch(img, config)).await?;
+                    outputs[0] = run_frame_op(value, move |img| config.apply(img)).await?;
 
                     Ok(())
                 })
@@ -325,7 +324,7 @@ pub fn astro_funclib() -> FuncLib {
 
     // --- config-builder nodes ---
 
-    // build_background_config: expose every BackgroundConfig field as an input,
+    // build_background_config: expose every ExtractBackground field as an input,
     // output a detailed config to wire into background_extract.
     func_lib.add(config_builder_func::<BackgroundConfigDef>(
         "9cda0462-1b8e-4c50-83d6-4db470df22d9",
@@ -411,17 +410,14 @@ pub fn astro_funclib() -> FuncLib {
                             .value
                             .as_enum()
                             .and_then(|s| BackgroundModeKind::from_str(s).ok())
-                            .map(|mode| BackgroundConfig {
+                            .map(|mode| ExtractBackground {
                                 mode: mode.config(),
                                 ..Default::default()
                             })
                     })
                     .expect("config is required");
                 let value = inputs[0].value.clone();
-                outputs[0] = run_frame_op(value, move |img| {
-                    extract_background(img, &config);
-                })
-                .await?;
+                outputs[0] = run_frame_op(value, move |img| config.apply(img)).await?;
                 Ok(())
             })
         }),
@@ -449,13 +445,13 @@ pub fn astro_funclib() -> FuncLib {
                             .as_f64()
                             .map(|v| v as f32)
                             .expect("strength is required");
-                        DenoiseConfig {
+                        Denoise {
                             strength,
                             ..Default::default()
                         }
                     });
                 let value = inputs[0].value.clone();
-                outputs[0] = run_frame_op(value, move |img| denoise(img, config)).await?;
+                outputs[0] = run_frame_op(value, move |img| config.apply(img)).await?;
                 Ok(())
             })
         }),
@@ -486,7 +482,7 @@ pub fn astro_funclib() -> FuncLib {
                     })
                     .expect("method is required");
                 let value = inputs[0].value.clone();
-                outputs[0] = run_frame_op(value, move |img| scnr(img, method)).await?;
+                outputs[0] = run_frame_op(value, move |img| method.apply(img)).await?;
                 Ok(())
             })
         }),
@@ -501,7 +497,7 @@ pub fn astro_funclib() -> FuncLib {
         FuncLambda::new(move |_, _, _, inputs, _, outputs| {
             Box::pin(async move {
                 let value = inputs[0].value.clone();
-                outputs[0] = run_frame_op(value, neutralize_background).await?;
+                outputs[0] = run_frame_op(value, |img| NeutralizeBackground.apply(img)).await?;
                 Ok(())
             })
         }),
@@ -529,14 +525,13 @@ pub fn astro_funclib() -> FuncLib {
                             .as_f64()
                             .map(|v| v as f32)
                             .expect("amount is required");
-                        HdrConfig {
+                        Hdr {
                             amount,
                             ..Default::default()
                         }
                     });
                 let value = inputs[0].value.clone();
-                outputs[0] =
-                    run_frame_op(value, move |img| compress_dynamic_range(img, config)).await?;
+                outputs[0] = run_frame_op(value, move |img| config.apply(img)).await?;
                 Ok(())
             })
         }),
@@ -564,14 +559,13 @@ pub fn astro_funclib() -> FuncLib {
                             .as_f64()
                             .map(|v| v as f32)
                             .expect("strength is required");
-                        LocalContrastConfig {
+                        LocalContrast {
                             strength,
                             ..Default::default()
                         }
                     });
                 let value = inputs[0].value.clone();
-                outputs[0] =
-                    run_frame_op(value, move |img| enhance_local_contrast(img, config)).await?;
+                outputs[0] = run_frame_op(value, move |img| config.apply(img)).await?;
                 Ok(())
             })
         }),
@@ -702,16 +696,17 @@ fn processing_func(
 /// to CPU upstream. (A future version can thread `VisionCtx` to read it back.)
 async fn run_frame_op<F>(value: DynamicValue, op: F) -> Result<DynamicValue, anyhow::Error>
 where
-    F: FnOnce(&mut RawImage) + Send + 'static,
+    F: FnOnce(&mut RawImage) -> Result<(), OpError> + Send + 'static,
 {
     let cpu = image_to_cpu(&value)?;
     let out = tokio::task::spawn_blocking(move || {
         let mut cpu = cpu;
-        op(&mut cpu);
-        cpu
+        op(&mut cpu)?;
+        Ok::<_, OpError>(cpu)
     })
     .await
-    .map_err(anyhow::Error::from)?;
+    .map_err(anyhow::Error::from)? // join error
+    .map_err(anyhow::Error::from)?; // op rejected the config / format
     Ok(DynamicValue::from_custom(Image::from(out)))
 }
 

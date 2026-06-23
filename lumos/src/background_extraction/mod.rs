@@ -18,6 +18,7 @@ use nalgebra::{DMatrix, DVector};
 use crate::background_mesh::TileGrid;
 use crate::image_ops::process_planes;
 use crate::math::statistics::MAD_TO_SIGMA;
+use crate::op::{OpError, ensure, require_f32_master};
 use imaginarium::Image;
 
 /// Sigma-clip passes for the per-tile sky estimate (matches the detector's tiled-background default).
@@ -34,9 +35,10 @@ pub enum BackgroundMode {
     Divide,
 }
 
-/// Parameters for [`extract_background`].
+/// Model and remove the smooth background of an image in place, **per channel**. Operates on linear
+/// data: the output background sits at ≈0 (slightly negative on noise — kept signed, not clamped).
 #[derive(Debug, Clone)]
-pub struct BackgroundConfig {
+pub struct ExtractBackground {
     /// Sample-tile size in px. Each tile yields one robust sky sample. Larger → smoother, less able
     /// to absorb extended real signal; should be far larger than stars and smaller than the gradient.
     pub tile_size: usize,
@@ -54,7 +56,7 @@ pub struct BackgroundConfig {
     pub divide_floor: f32,
 }
 
-impl Default for BackgroundConfig {
+impl Default for ExtractBackground {
     fn default() -> Self {
         Self {
             tile_size: 128,
@@ -67,40 +69,73 @@ impl Default for BackgroundConfig {
     }
 }
 
-impl BackgroundConfig {
-    fn validate(&self) {
-        assert!(
-            (1..=4).contains(&self.degree),
-            "degree must be 1..=4, got {}",
-            self.degree
-        );
-        assert!(
-            self.tile_size >= 8,
-            "tile_size must be ≥ 8, got {}",
-            self.tile_size
-        );
-        assert!(
-            self.rejection_sigma > 0.0,
-            "rejection_sigma must be > 0, got {}",
-            self.rejection_sigma
-        );
-        assert!(
-            self.divide_floor > 0.0 && self.divide_floor <= 1.0,
-            "divide_floor must be in (0, 1], got {}",
-            self.divide_floor
-        );
+impl ExtractBackground {
+    /// Set the sample-tile size in px.
+    pub fn tile_size(mut self, tile_size: usize) -> Self {
+        self.tile_size = tile_size;
+        self
+    }
+
+    /// Set the polynomial degree (1–4).
+    pub fn degree(mut self, degree: usize) -> Self {
+        self.degree = degree;
+        self
+    }
+
+    /// Set subtract-vs-divide removal.
+    pub fn mode(mut self, mode: BackgroundMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// Set the tile-rejection sigma.
+    pub fn rejection_sigma(mut self, rejection_sigma: f32) -> Self {
+        self.rejection_sigma = rejection_sigma;
+        self
+    }
+
+    /// Set the refit-pass count.
+    pub fn iterations(mut self, iterations: usize) -> Self {
+        self.iterations = iterations;
+        self
+    }
+
+    /// Set the minimum normalized divisor for [`BackgroundMode::Divide`].
+    pub fn divide_floor(mut self, divide_floor: f32) -> Self {
+        self.divide_floor = divide_floor;
+        self
+    }
+
+    /// Model and remove the smooth background of `image` in place, per channel.
+    ///
+    /// # Errors
+    /// [`OpError::UnsupportedFormat`] unless `image` is `L_F32`/`RGB_F32`; [`OpError::InvalidConfig`]
+    /// on out-of-range parameters.
+    pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
+        self.validate()?;
+        require_f32_master(image)?;
+        process_planes(image, |planes| extract_background_core(planes, self));
+        Ok(())
+    }
+
+    fn validate(&self) -> Result<(), OpError> {
+        ensure((1..=4).contains(&self.degree), || {
+            format!("degree must be 1..=4, got {}", self.degree)
+        })?;
+        ensure(self.tile_size >= 8, || {
+            format!("tile_size must be ≥ 8, got {}", self.tile_size)
+        })?;
+        ensure(self.rejection_sigma > 0.0, || {
+            format!("rejection_sigma must be > 0, got {}", self.rejection_sigma)
+        })?;
+        ensure(self.divide_floor > 0.0 && self.divide_floor <= 1.0, || {
+            format!("divide_floor must be in (0, 1], got {}", self.divide_floor)
+        })
     }
 }
 
-/// Model and remove the smooth background of `image` in place, **per channel**. Operates on linear
-/// data: the output background sits at ≈0 (slightly negative on noise — kept signed, not clamped).
-pub fn extract_background(image: &mut Image, config: &BackgroundConfig) {
-    process_planes(image, |planes| extract_background_core(planes, config));
-}
-
 /// The per-channel background fit + removal, over channel planes (1 for L, 3 for RGB).
-fn extract_background_core(planes: &mut [Buffer2<f32>], config: &BackgroundConfig) {
-    config.validate();
+fn extract_background_core(planes: &mut [Buffer2<f32>], config: &ExtractBackground) {
     for plane in planes.iter_mut() {
         let model = model_channel(plane, config);
         match config.mode {
@@ -124,7 +159,7 @@ fn extract_background_core(planes: &mut [Buffer2<f32>], config: &BackgroundConfi
 }
 
 /// The fitted background surface for a single channel, as a full-resolution plane.
-fn model_channel(channel: &Buffer2<f32>, config: &BackgroundConfig) -> Buffer2<f32> {
+fn model_channel(channel: &Buffer2<f32>, config: &ExtractBackground) -> Buffer2<f32> {
     let (w, h) = (channel.width(), channel.height());
     let samples = collect_samples(channel, config.tile_size);
     let terms = poly_terms(effective_degree(samples.len(), config.degree));

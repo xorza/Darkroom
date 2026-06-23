@@ -11,6 +11,7 @@ use imaginarium::{ChannelCount, Image};
 
 use crate::image_ops::par_map_pixels;
 use crate::math::statistics::sigma_clipped_median_mad;
+use crate::op::{OpError, ensure, require_f32_master};
 
 #[cfg(test)]
 mod tests;
@@ -30,22 +31,33 @@ const MAX_BACKGROUND_SAMPLES: usize = 1_000_000;
 /// linear-domain operation — run after gradient/background extraction and before the stretch.
 /// Additive, so it preserves signal *above* the background (and may push faint pixels slightly
 /// negative, which the stretch's black point absorbs). No-op on grayscale.
-pub fn neutralize_background(image: &mut Image) {
-    if image.desc.color_format.channel_count != ChannelCount::Rgb {
-        return; // no-op on grayscale
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NeutralizeBackground;
+
+impl NeutralizeBackground {
+    /// Neutralize `image`'s background in place.
+    ///
+    /// # Errors
+    /// [`OpError::UnsupportedFormat`] unless `image` is `L_F32`/`RGB_F32` (a no-op on grayscale).
+    pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
+        require_f32_master(image)?;
+        if image.desc.color_format.channel_count != ChannelCount::Rgb {
+            return Ok(()); // no-op on grayscale
+        }
+        let bg = channel_backgrounds(image);
+        let target = bg.r.min(bg.g).min(bg.b);
+        let (dr, dg, db) = (target - bg.r, target - bg.g, target - bg.b);
+        par_map_pixels(
+            image,
+            |l| l,
+            move |px| Rgb {
+                r: px.r + dr,
+                g: px.g + dg,
+                b: px.b + db,
+            },
+        );
+        Ok(())
     }
-    let bg = channel_backgrounds(image);
-    let target = bg.r.min(bg.g).min(bg.b);
-    let (dr, dg, db) = (target - bg.r, target - bg.g, target - bg.b);
-    par_map_pixels(
-        image,
-        |l| l,
-        move |px| Rgb {
-            r: px.r + dr,
-            g: px.g + dg,
-            b: px.b + db,
-        },
-    );
 }
 
 /// Per-channel sigma-clipped median background of an RGB f32 image, read straight from the
@@ -73,38 +85,72 @@ fn channel_background(samples: &[f32], channel: usize, scratch: &mut Vec<f32>) -
     sigma_clipped_median_mad(&mut s, scratch, BACKGROUND_KAPPA, BACKGROUND_ITERATIONS).median
 }
 
-/// Which SCNR (green-removal) protection method to apply.
+/// Remove the residual green cast (Subtractive Chromatic Noise Reduction). Intended for the
+/// stretched, already-color-balanced image. No-op on grayscale.
 #[derive(Debug, Clone, Copy)]
-pub enum ScnrMethod {
-    /// Average Neutral (the default): `G' = min(G, (R+B)/2)` — a full-strength clamp of green down
-    /// to the red/blue average.
+pub struct Scnr {
+    method: ScnrMethod,
+}
+
+/// Which green-removal protection [`Scnr`] applies.
+#[derive(Debug, Clone, Copy)]
+enum ScnrMethod {
     AverageNeutral,
-    /// Additive Mask with blend `amount` ∈ [0,1] (0 = no change, 1 = full strength): attenuates
-    /// rather than clamps, so genuine teal (OIII planetary nebulae) survives. `m = min(1, R+B)`,
-    /// `G' = G·(1−amount)·(1−m) + m·G`.
     AdditiveMask { amount: f32 },
 }
 
-/// Remove the residual green cast (Subtractive Chromatic Noise Reduction). Intended for the
-/// stretched, already-color-balanced image. No-op on grayscale.
-pub fn scnr(image: &mut Image, method: ScnrMethod) {
-    if image.desc.color_format.channel_count != ChannelCount::Rgb {
-        return; // no-op on grayscale
-    }
-    match method {
-        ScnrMethod::AverageNeutral => par_map_pixels(image, |l| l, scnr_average_neutral),
-        ScnrMethod::AdditiveMask { amount } => {
-            assert_scnr_amount(amount);
-            par_map_pixels(image, |l| l, move |px| scnr_additive_mask(px, amount));
-        }
+impl Default for Scnr {
+    fn default() -> Self {
+        Self::average_neutral()
     }
 }
 
-fn assert_scnr_amount(amount: f32) {
-    assert!(
-        (0.0..=1.0).contains(&amount),
-        "SCNR amount must be in [0, 1], got {amount}"
-    );
+impl Scnr {
+    /// Average Neutral: `G' = min(G, (R+B)/2)` — a full-strength clamp of green to the red/blue
+    /// average. The default.
+    pub fn average_neutral() -> Self {
+        Self {
+            method: ScnrMethod::AverageNeutral,
+        }
+    }
+
+    /// Additive Mask with blend `amount` ∈ [0,1] (0 = no change, 1 = full strength): attenuates
+    /// rather than clamps, so genuine teal (OIII planetary nebulae) survives. `m = min(1, R+B)`,
+    /// `G' = G·(1−amount)·(1−m) + m·G`.
+    pub fn additive_mask(amount: f32) -> Self {
+        Self {
+            method: ScnrMethod::AdditiveMask { amount },
+        }
+    }
+
+    /// Remove the residual green cast from `image` in place.
+    ///
+    /// # Errors
+    /// [`OpError::UnsupportedFormat`] unless `image` is `L_F32`/`RGB_F32` (a no-op on grayscale);
+    /// [`OpError::InvalidConfig`] if the additive-mask amount is outside `[0, 1]`.
+    pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
+        self.validate()?;
+        require_f32_master(image)?;
+        if image.desc.color_format.channel_count != ChannelCount::Rgb {
+            return Ok(()); // no-op on grayscale
+        }
+        match self.method {
+            ScnrMethod::AverageNeutral => par_map_pixels(image, |l| l, scnr_average_neutral),
+            ScnrMethod::AdditiveMask { amount } => {
+                par_map_pixels(image, |l| l, move |px| scnr_additive_mask(px, amount));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate(&self) -> Result<(), OpError> {
+        if let ScnrMethod::AdditiveMask { amount } = self.method {
+            ensure((0.0..=1.0).contains(&amount), || {
+                format!("SCNR amount must be in [0, 1], got {amount}")
+            })?;
+        }
+        Ok(())
+    }
 }
 
 /// Average Neutral: clamp green to the red/blue average.

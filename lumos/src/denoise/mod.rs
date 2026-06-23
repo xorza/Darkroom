@@ -14,6 +14,7 @@ use rayon::prelude::*;
 
 use crate::image_ops::process_planes;
 use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
+use crate::op::{OpError, ensure, require_f32_master};
 use crate::wavelet::{atrous_smooth, max_scales};
 use imaginarium::Image;
 
@@ -57,9 +58,12 @@ impl Threshold {
     }
 }
 
-/// Parameters for [`denoise`].
+/// Wavelet denoise of a *linear* image in place: à trous starlet thresholding, per channel.
+///
+/// Run on linear data, after color calibration and before the stretch. No-op-safe on any size (the
+/// scale count is clamped to what the dimensions support).
 #[derive(Debug, Clone, Copy)]
-pub struct DenoiseConfig {
+pub struct Denoise {
     /// Number of wavelet scales `J`. Each scale `j` targets structure ~`2^j` px wide; more scales
     /// reach larger noise (mottle) at the cost of touching more real extended signal. Clamped to
     /// what the image size supports.
@@ -74,7 +78,7 @@ pub struct DenoiseConfig {
     pub strength: f32,
 }
 
-impl Default for DenoiseConfig {
+impl Default for Denoise {
     fn default() -> Self {
         Self {
             scales: 2,
@@ -85,38 +89,58 @@ impl Default for DenoiseConfig {
     }
 }
 
-impl DenoiseConfig {
-    /// Panic on out-of-range parameters (called by [`denoise`]).
-    pub fn validate(&self) {
-        assert!(
-            self.scales >= 1,
-            "denoise scales must be ≥ 1, got {}",
-            self.scales
-        );
-        assert!(
-            self.k > 0.0 && self.k.is_finite(),
-            "denoise k must be a finite value > 0, got {}",
-            self.k
-        );
-        assert!(
-            (0.0..=1.0).contains(&self.strength),
-            "denoise strength must be in [0, 1], got {}",
-            self.strength
-        );
+impl Denoise {
+    /// Set the wavelet scale count `J`.
+    pub fn scales(mut self, scales: usize) -> Self {
+        self.scales = scales;
+        self
+    }
+
+    /// Set the threshold in per-scale noise σ.
+    pub fn k(mut self, k: f32) -> Self {
+        self.k = k;
+        self
+    }
+
+    /// Set hard or soft thresholding.
+    pub fn threshold(mut self, threshold: Threshold) -> Self {
+        self.threshold = threshold;
+        self
+    }
+
+    /// Set the denoise/original blend in `[0, 1]`.
+    pub fn strength(mut self, strength: f32) -> Self {
+        self.strength = strength;
+        self
+    }
+
+    /// Denoise every channel of `image` in place via starlet wavelet thresholding.
+    ///
+    /// # Errors
+    /// [`OpError::UnsupportedFormat`] unless `image` is `L_F32`/`RGB_F32`; [`OpError::InvalidConfig`]
+    /// on out-of-range parameters.
+    pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
+        self.validate()?;
+        require_f32_master(image)?;
+        process_planes(image, |planes| denoise_core(planes, self));
+        Ok(())
+    }
+
+    fn validate(&self) -> Result<(), OpError> {
+        ensure(self.scales >= 1, || {
+            format!("denoise scales must be ≥ 1, got {}", self.scales)
+        })?;
+        ensure(self.k > 0.0 && self.k.is_finite(), || {
+            format!("denoise k must be a finite value > 0, got {}", self.k)
+        })?;
+        ensure((0.0..=1.0).contains(&self.strength), || {
+            format!("denoise strength must be in [0, 1], got {}", self.strength)
+        })
     }
 }
 
-/// Denoise every channel of a *linear* image in place via starlet wavelet thresholding.
-///
-/// Operates per channel. No-op-safe on any size (the scale count is clamped to what the dimensions
-/// support). Run on linear data, after color calibration and before the stretch.
-pub fn denoise(image: &mut Image, config: DenoiseConfig) {
-    process_planes(image, |planes| denoise_core(planes, config));
-}
-
 /// Denoise each channel plane (1 for L, 3 for RGB), reusing one scratch arena.
-fn denoise_core(planes: &mut [Buffer2<f32>], config: DenoiseConfig) {
-    config.validate();
+fn denoise_core(planes: &mut [Buffer2<f32>], config: &Denoise) {
     let (width, height) = (planes[0].width(), planes[0].height());
     let scales = config.scales.min(max_scales(width, height));
     let mut scratch = DenoiseScratch::new(width, height);

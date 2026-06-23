@@ -29,11 +29,9 @@ mod stretching;
 mod ml_support {
     use std::path::PathBuf;
 
-    use crate::color_calibration::{neutralize_background, scnr};
     use crate::io::astro_image::AstroImage;
-    use crate::stretching::stretch;
     use crate::testing::calibration_dir;
-    use crate::{ScnrMethod, StretchConfig};
+    use crate::{NeutralizeBackground, Scnr, Stretch};
     use imaginarium::Image;
 
     /// Resolve caller-supplied ONNX weights: the `env_var` override, else `test_data/<default_file>`.
@@ -66,9 +64,9 @@ mod ml_support {
                 .expect("load stacked_light.tiff"),
         );
 
-        neutralize_background(&mut img);
-        stretch(&mut img, StretchConfig::auto_stf());
-        scnr(&mut img, ScnrMethod::AverageNeutral);
+        NeutralizeBackground.apply(&mut img).unwrap();
+        Stretch::auto_stf().apply(&mut img).unwrap();
+        Scnr::average_neutral().apply(&mut img).unwrap();
 
         img
     }

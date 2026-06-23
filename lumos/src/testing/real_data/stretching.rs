@@ -2,12 +2,10 @@
 //! write viewable JPEGs for visual inspection. Gated behind the `real-data` feature (the dataset
 //! lives in `test_data/lumos_data/`).
 
-use crate::color_calibration::{neutralize_background, scnr};
 use crate::image_ops::intensity_plane;
 use crate::math::statistics::median_f32_mut;
-use crate::stretching::stretch;
 use crate::testing::{calibration_dir, init_tracing, save_png};
-use crate::{AstroImage, ColorMode, ScnrMethod, StretchConfig, StretchMethod};
+use crate::{AstroImage, ColorMode, NeutralizeBackground, Scnr, Stretch, StretchMethod};
 use imaginarium::Image;
 
 #[derive(Debug)]
@@ -38,7 +36,7 @@ fn stretch_stacked_light() {
     let desc = image.desc;
     assert!(desc.width > 0 && desc.height > 0);
 
-    neutralize_background(&mut image);
+    NeutralizeBackground.apply(&mut image).unwrap();
 
     // A linear stacked deep-sky frame, before any display stretch: the calibrated background sits at
     // zero (a near-zero median — symmetric read noise dips some background pixels slightly negative,
@@ -56,14 +54,14 @@ fn stretch_stacked_light() {
     );
 
     for (name, config) in [
-        ("stf", StretchConfig::auto_stf()),
-        ("asinh", StretchConfig::auto_asinh()),
+        ("stf", Stretch::auto_stf()),
+        ("asinh", Stretch::auto_asinh()),
         // GHS applied cold to linear data: the background sits at ~0, so the symmetry point is at 0
         // and the strength D must be large (the b=-1 logarithmic family lifts the faint signal).
-        ("ghs", StretchConfig::ghs(5000.0, -1.0, 0.0)),
+        ("ghs", Stretch::ghs(5000.0, -1.0, 0.0)),
     ] {
         let mut stretched = image.clone();
-        stretch(&mut stretched, config);
+        config.apply(&mut stretched).unwrap();
 
         let out = stats(intensity_plane(&stretched).pixels());
         eprintln!("{name}: {out:?}");
@@ -83,7 +81,7 @@ fn stretch_stacked_light() {
             "{name} spreads contrast across the range: {out:?}"
         );
 
-        scnr(&mut stretched, ScnrMethod::AverageNeutral);
+        Scnr::average_neutral().apply(&mut stretched).unwrap();
         save_png(&stretched, &format!("stretch/stacked_light_{name}.png"));
     }
 
@@ -93,26 +91,25 @@ fn stretch_stacked_light() {
     // background dark and `hp` protecting the star cores. Far easier to focus on the Milky Way than
     // tuning GHS cold on linear data.
     let mut staged = image.clone();
-    stretch(&mut staged, StretchConfig::auto_asinh());
-    stretch(
-        &mut staged,
-        StretchConfig {
-            method: StretchMethod::Ghs {
-                d: 3.0,
-                b: 0.0,
-                sp: 0.3,
-                lp: 0.15,
-                hp: 0.9,
-            },
-            color: ColorMode::ColorPreserving,
+    Stretch::auto_asinh().apply(&mut staged).unwrap();
+    Stretch {
+        method: StretchMethod::Ghs {
+            d: 3.0,
+            b: 0.0,
+            sp: 0.3,
+            lp: 0.15,
+            hp: 0.9,
         },
-    );
+        color: ColorMode::ColorPreserving,
+    }
+    .apply(&mut staged)
+    .unwrap();
     let out = stats(intensity_plane(&staged).pixels());
     eprintln!("asinh+ghs: {out:?}");
     assert!(
         out.min >= 0.0 && out.max <= 1.0 + 1e-3,
         "asinh+ghs output stays in [0,1]: {out:?}"
     );
-    scnr(&mut staged, ScnrMethod::AverageNeutral);
+    Scnr::average_neutral().apply(&mut staged).unwrap();
     save_png(&staged, "stretch/stacked_light_asinh_ghs.png");
 }
