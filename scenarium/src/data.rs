@@ -39,6 +39,15 @@ pub trait CustomValue: Any + Send + Sync + Display {
         None
     }
     fn as_any(&self) -> &dyn Any;
+
+    /// Encode this value for the on-disk output cache, or `None` (the default)
+    /// when it can't be persisted — disk-caching then falls back to recompute.
+    /// The bytes are opaque to the framework; the decoder registered under this
+    /// value's `type_def().type_id` in a `CustomValueRegistry` reconstructs it.
+    /// See `docs/disk-cache-design.md`.
+    fn cache_blob(&self) -> Option<Vec<u8>> {
+        None
+    }
 }
 
 /// Definition of a custom type for `DataType::Custom`.
