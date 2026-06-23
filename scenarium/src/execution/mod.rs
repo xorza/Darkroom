@@ -43,6 +43,8 @@ use program::{ExecutionBinding, ExecutionNode, ExecutionProgram};
 pub enum Error {
     #[error("{message}")]
     Invoke { func_id: FuncId, message: String },
+    #[error("invalid graph: {message}")]
+    InvalidGraph { message: String },
     #[error("node {func_id:?} was cancelled before completing")]
     Cancelled { func_id: FuncId },
     #[error("Cycle detected while building execution graph at node {node_id:?}")]
@@ -122,8 +124,20 @@ impl ExecutionEngine {
 
     // === Phase 1: compile ===
 
-    pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) {
-        graph.validate_with(func_lib);
+    pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> Result<()> {
+        // Validate the graph against the library before touching any state.
+        // The graph+library pair is untrusted input here (a document can be
+        // stale against an evolved library — a dropped func, a shrunk port
+        // list), so an invalid one is a recoverable error the caller
+        // surfaces, not a logic bug. Checking first leaves the prior program
+        // intact on error and lets the flatten pass resolve every reference
+        // infallibly.
+        if let Err(e) = graph.check_with(func_lib) {
+            tracing::error!(error = %e, "graph update rejected: invalid graph");
+            return Err(Error::InvalidGraph {
+                message: e.to_string(),
+            });
+        }
 
         self.plan.clear();
 
@@ -146,6 +160,7 @@ impl ExecutionEngine {
         self.executor.reconcile(&self.program.e_nodes);
 
         self.validate_built(func_lib);
+        Ok(())
     }
 
     // === Phases 2–3: plan then execute ===

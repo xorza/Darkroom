@@ -396,14 +396,26 @@ async fn worker_loop<ExecutionCallback>(
             return;
         }
 
-        match intent.graph_state.take() {
-            Some(GraphOp::Clear) => execution_engine.clear(),
+        let update_ok = match intent.graph_state.take() {
+            Some(GraphOp::Clear) => {
+                execution_engine.clear();
+                true
+            }
             Some(GraphOp::Replace(graph, func_lib)) => {
                 tracing::info!("Graph updated");
-                execution_engine.update(&graph, &func_lib);
+                match execution_engine.update(&graph, &func_lib) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        // Compile failed (e.g. a func missing from the lib):
+                        // report it like a run failure and skip execute —
+                        // the prior program is left untouched by `update`.
+                        (execution_callback)(WorkerReport::Finished(Err(e)));
+                        false
+                    }
+                }
             }
-            None => {}
-        }
+            None => true,
+        };
         let should_start_event_loop = match intent.loop_request {
             Some(LoopCommand::Start) => true,
             Some(LoopCommand::Stop) => false,
@@ -419,7 +431,7 @@ async fn worker_loop<ExecutionCallback>(
         // Empty graph is a normal state, not a failure: skip execute
         // silently. Events/terminals/StartEventLoop are no-ops until
         // a graph is loaded.
-        if needs_execute && !execution_engine.is_empty() {
+        if update_ok && needs_execute && !execution_engine.is_empty() {
             // Quiesce the event loop around execute(): closing the gate
             // stops lambdas from *starting a new iteration*. It does NOT
             // pause a lambda already inside `invoke()`, so this is not an

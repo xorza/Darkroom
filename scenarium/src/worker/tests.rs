@@ -8,10 +8,10 @@ use crate::common::shared_any_state::SharedAnyState;
 use crate::elements::basic_funclib::basic_funclib;
 use crate::elements::worker_events_funclib::worker_events_funclib;
 use crate::event_lambda::EventLambda;
-use crate::execution::Result as ExecResult;
+use crate::execution::{Error, Result as ExecResult};
 use crate::execution_stats::{ExecutionStats, RunPhase};
 use crate::function::FuncLib;
-use crate::graph::{Graph, InputPort, Node, NodeId};
+use crate::graph::{Graph, InputPort, Node, NodeId, NodeKind};
 
 use crate::worker::{
     EventRef, EventTrigger, Worker, WorkerMessage, WorkerReport, scan, start_event_loop,
@@ -148,6 +148,50 @@ async fn test_worker() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[tokio::test]
+async fn update_with_missing_func_reports_error_then_recovers() {
+    let mut h = FrameHarness::new().await;
+
+    // A graph naming a func id the library doesn't define (e.g. a document
+    // saved against a library that has since dropped the func).
+    let mut bad_graph = Graph::default();
+    let mut ghost = Node::new(NodeKind::Func(
+        "7a0265e1-9631-45bd-8ecd-1e923b67a58c".into(),
+    ));
+    ghost.id = NodeId::unique();
+    bad_graph.add(ghost);
+
+    h.worker
+        .send_many([
+            WorkerMessage::Update {
+                graph: bad_graph,
+                func_lib: h.func_lib.clone(),
+            },
+            WorkerMessage::ExecuteTerminals,
+        ])
+        .unwrap();
+
+    // The compile failure surfaces as a Finished(Err(InvalidGraph)) — not a
+    // panic, and not a silently-dropped run.
+    let result = h.compute_rx.recv().await.expect("a Finished report");
+    assert!(
+        matches!(result, Err(Error::InvalidGraph { .. })),
+        "expected InvalidGraph, got {result:?}"
+    );
+
+    // The bad update doesn't wedge the worker: a good graph then runs fine.
+    h.worker
+        .send_many([h.update_msg(), h.inject_frame_event()])
+        .unwrap();
+    let stats = h
+        .compute_rx
+        .recv()
+        .await
+        .expect("a Finished report")
+        .expect("the recovered run succeeds");
+    assert_eq!(stats.executed_nodes.len(), 3);
 }
 
 #[tokio::test]

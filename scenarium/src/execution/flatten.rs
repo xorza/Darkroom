@@ -261,7 +261,10 @@ impl<'a> Run<'a> {
             match &node.kind {
                 NodeKind::Func(func_id) => {
                     let flat_id = flatten_id(self.ids.as_slice(), node.id);
-                    let func = self.func_lib.by_id(func_id).unwrap();
+                    let func = self
+                        .func_lib
+                        .by_id(func_id)
+                        .expect("func resolved by update's check_with pre-check");
                     let input_count = func.inputs.len();
                     let (idx, e_node) = self.compact.insert_with(&flat_id, || ExecutionNode {
                         id: flat_id,

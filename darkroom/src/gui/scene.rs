@@ -577,4 +577,59 @@ mod tests {
         // it; the draw layer skips wires whose ports don't resolve.
         assert_eq!(scene.connections.len(), 1);
     }
+
+    #[test]
+    fn missing_func_node_renders_as_deletable_stub() {
+        use scenarium::elements::basic_funclib::basic_funclib;
+
+        // One node bound to a real func, one bound to a func id the library
+        // doesn't define (e.g. a document saved against an older library
+        // that has since dropped the func).
+        let func_lib = basic_funclib();
+        let mut graph = Graph::default();
+        let known: Node = func_lib.by_name("add").unwrap().into();
+        let known_id = known.id;
+        let mut ghost = Node::new(NodeKind::Func(
+            "7a0265e1-9631-45bd-8ecd-1e923b67a58c".into(),
+        ));
+        ghost.name = "astro_to_image".into();
+        let ghost_id = ghost.id;
+        graph.add(known);
+        graph.add(ghost);
+
+        let view = GraphView::for_graph(&graph);
+        let mut scene = Scene::default();
+        scene.rebuild(&graph, &view, &func_lib, None, &RunState::default());
+
+        // The missing-func node is rendered, not silently dropped — so it
+        // stays selectable and deletable to repair the document.
+        assert_eq!(scene.nodes.len(), 2, "both nodes render");
+        let known_node = scene.nodes.iter().find(|n| n.id == known_id).unwrap();
+        let ghost_node = scene.nodes.iter().find(|n| n.id == ghost_id).unwrap();
+
+        // The flag tracks resolution: resolved → false, absent → true.
+        assert!(!known_node.missing, "a resolved func is not a stub");
+        assert!(ghost_node.missing, "an absent func renders as a stub");
+
+        // The stub keeps the node's saved name, is labeled missing, and has
+        // no ports — the removed func's interface is unknown.
+        assert_eq!(ghost_node.name.as_str(""), "astro_to_image");
+        assert_eq!(ghost_node.kind_label.as_str(""), "missing func");
+        assert_eq!(
+            scene.inputs(ghost_node.inputs).len(),
+            0,
+            "stub has no inputs"
+        );
+        assert_eq!(
+            scene.outputs(ghost_node.outputs).len(),
+            0,
+            "stub has no outputs"
+        );
+
+        // The resolved node, by contrast, exposes its real ports.
+        assert!(
+            !scene.inputs(known_node.inputs).is_empty(),
+            "the resolved func still renders its interface"
+        );
+    }
 }

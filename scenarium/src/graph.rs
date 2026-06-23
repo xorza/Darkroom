@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::data::StaticValue;
 use crate::function::{Func, FuncId, FuncLib};
 use crate::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
-use anyhow::ensure;
+use anyhow::{Context, ensure};
 use common::{Result, SerdeFormat, deserialize, serialize};
 use common::{id_type, is_debug};
 use hashbrown::HashSet;
@@ -543,82 +543,139 @@ impl Graph {
         self.check().expect("graph structural invariant violated");
     }
 
+    /// Debug-only assert form of [`check_with`]: a violation surfaces as a
+    /// panic so a graph the editor itself built wrong is caught loudly in
+    /// development. The release-safe, error-returning gate is `check_with`,
+    /// which `ExecutionEngine::update` runs in every build.
     pub fn validate_with(&self, func_lib: &FuncLib) {
         if !is_debug() {
             return;
         }
-
-        self.validate();
-
-        let mut visited: HashSet<SubgraphId> = HashSet::new();
-        self.validate_level(func_lib, None, &mut visited);
+        self.check_with(func_lib)
+            .expect("graph structural invariant violated");
     }
 
-    /// Recursive per-level validation. `ctx_def` is the enclosing subgraph
-    /// definition when validating a def's interior (so boundary nodes can be
-    /// checked against the interface), `None` at the top level. `visited`
-    /// carries the descent path of `SubgraphId`s for the recursion guard.
-    fn validate_level(
+    /// Full structural validation against `func_lib`, in all builds. Extends
+    /// [`check`] (which can't see the library) with every func_lib-dependent
+    /// check: each func/subgraph reference resolves, no subgraph contains
+    /// itself, boundary nodes sit inside a def, and every binding/subscription
+    /// port index is in range. A graph+library is untrusted input at the
+    /// compile boundary (a document can be stale against an evolved library),
+    /// so an invalid one is a recoverable error the caller surfaces — not a
+    /// panic. With this passing, flattening resolves every reference infallibly.
+    pub fn check_with(&self, func_lib: &FuncLib) -> Result<()> {
+        self.check()?;
+        let mut visited: HashSet<SubgraphId> = HashSet::new();
+        self.check_level(func_lib, None, &mut visited)
+    }
+
+    /// Recursive per-level half of [`check_with`]. `ctx_def` is the enclosing
+    /// subgraph definition when checking a def's interior (so boundary nodes
+    /// can be checked against the interface), `None` at the top level.
+    /// `visited` is the descent path of `SubgraphId`s — re-entering one is the
+    /// recursion error.
+    fn check_level(
         &self,
         func_lib: &FuncLib,
         ctx_def: Option<&SubgraphDef>,
         visited: &mut HashSet<SubgraphId>,
-    ) {
-        // When validating a def's interior, each exposed event must name an
-        // interior emitter that actually exposes that event.
-        if let Some(def) = ctx_def {
-            for event in &def.events {
-                let emitter = self
-                    .by_id(&event.emitter)
-                    .expect("exposed event names a missing interior emitter");
-                assert!(event.emitter_event_idx < self.event_count(emitter, func_lib, ctx_def));
-            }
-        }
-
+    ) -> Result<()> {
+        // Resolve every node's func/def first (and recurse into composites):
+        // the port-count helpers below look funcs/defs up infallibly, so this
+        // pass must establish they all resolve before any count is taken.
         for node in self.nodes.iter() {
             match &node.kind {
                 NodeKind::Func(func_id) => {
-                    func_lib.by_id(func_id).unwrap();
+                    ensure!(
+                        func_lib.by_id(func_id).is_some(),
+                        "node {:?} references func {:?}, absent from the library",
+                        node.id,
+                        func_id
+                    );
                 }
                 NodeKind::Subgraph(r) => {
-                    let def = self
-                        .resolve_def(*r, func_lib)
-                        .expect("subgraph node references a missing definition");
-                    assert!(
+                    let def = self.resolve_def(*r, func_lib).with_context(|| {
+                        format!(
+                            "node {:?} references a missing subgraph definition",
+                            node.id
+                        )
+                    })?;
+                    ensure!(
                         visited.insert(def.id),
                         "subgraph {:?} is recursive (contains itself)",
                         def.id
                     );
-                    def.graph.validate_level(func_lib, Some(def), visited);
+                    def.graph.check_level(func_lib, Some(def), visited)?;
                     visited.remove(&def.id);
                 }
                 NodeKind::SubgraphInput => {
-                    assert!(
+                    ensure!(
                         ctx_def.is_some(),
                         "SubgraphInput node is only valid inside a subgraph"
                     );
                 }
                 NodeKind::SubgraphOutput => {
-                    ctx_def.expect("SubgraphOutput is only valid inside a subgraph");
+                    ensure!(
+                        ctx_def.is_some(),
+                        "SubgraphOutput is only valid inside a subgraph"
+                    );
                 }
+            }
+        }
+
+        // When checking a def's interior, each exposed event must name an
+        // interior emitter that actually exposes that event.
+        if let Some(def) = ctx_def {
+            for event in &def.events {
+                let emitter = self.by_id(&event.emitter).with_context(|| {
+                    format!("exposed event names missing emitter {:?}", event.emitter)
+                })?;
+                ensure!(
+                    event.emitter_event_idx < self.event_count(emitter, func_lib, ctx_def),
+                    "exposed event index {} out of range on {:?}",
+                    event.emitter_event_idx,
+                    event.emitter
+                );
             }
         }
 
         // Every binding addresses ports that exist on both ends.
         for (dst, binding) in self.bindings.iter() {
-            let consumer = self.by_id(&dst.node_id).unwrap();
-            assert!(dst.port_idx < self.input_count(consumer, func_lib, ctx_def));
+            let consumer = self
+                .by_id(&dst.node_id)
+                .with_context(|| format!("binding on missing node {:?}", dst.node_id))?;
+            ensure!(
+                dst.port_idx < self.input_count(consumer, func_lib, ctx_def),
+                "binding on node {:?} input {} is out of range",
+                dst.node_id,
+                dst.port_idx
+            );
             if let Binding::Bind(src) = binding {
-                let producer = self.by_id(&src.node_id).unwrap();
-                assert!(src.port_idx < self.output_count(producer, func_lib, ctx_def));
+                let producer = self
+                    .by_id(&src.node_id)
+                    .with_context(|| format!("binding from missing node {:?}", src.node_id))?;
+                ensure!(
+                    src.port_idx < self.output_count(producer, func_lib, ctx_def),
+                    "binding from node {:?} output {} is out of range",
+                    src.node_id,
+                    src.port_idx
+                );
             }
         }
 
         // Every subscription targets an event the emitter actually exposes.
         for s in self.subscriptions.iter() {
-            let emitter = self.by_id(&s.emitter).unwrap();
-            assert!(s.event_idx < self.event_count(emitter, func_lib, ctx_def));
+            let emitter = self
+                .by_id(&s.emitter)
+                .with_context(|| format!("subscription from missing emitter {:?}", s.emitter))?;
+            ensure!(
+                s.event_idx < self.event_count(emitter, func_lib, ctx_def),
+                "subscription event index {} out of range on {:?}",
+                s.event_idx,
+                s.emitter
+            );
         }
+        Ok(())
     }
 
     /// Number of input ports a node exposes — by kind. `ctx_def` is the

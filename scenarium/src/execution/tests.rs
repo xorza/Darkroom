@@ -58,7 +58,7 @@ mod graph_structure {
         let func_lib = test_func_lib(TestFuncHooks::default());
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         assert_eq!(
@@ -114,7 +114,7 @@ mod graph_structure {
         let func_lib = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionEngine::default();
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
 
         // Rewire mult to get_a and get_b directly (bypassing sum)
         let binding1: Binding = (graph.by_name("get_a").unwrap().id, 0).into();
@@ -122,7 +122,7 @@ mod graph_structure {
         bind(&mut graph, "mult", 0, binding1);
         bind(&mut graph, "mult", 1, binding2);
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         let get_a = execution_graph.by_name("get_a").unwrap();
@@ -143,12 +143,40 @@ mod graph_structure {
     }
 
     #[test]
+    fn update_rejects_func_missing_from_lib_and_keeps_prior_program() {
+        let graph = test_graph();
+        let func_lib = test_func_lib(TestFuncHooks::default());
+        let mut execution_graph = ExecutionEngine::default();
+
+        // A good compile establishes a program.
+        execution_graph.update(&graph, &func_lib).unwrap();
+        assert_eq!(execution_graph.program.e_nodes.len(), 5);
+
+        // Re-compiling the same graph against a library that defines none of
+        // its funcs is rejected with a message naming a missing func.
+        let err = execution_graph
+            .update(&graph, &FuncLib::default())
+            .unwrap_err();
+        let Error::InvalidGraph { message } = err else {
+            panic!("expected InvalidGraph, got {err:?}");
+        };
+        assert!(
+            message.contains("absent from the library"),
+            "message should explain the missing func, got: {message}"
+        );
+
+        // The rejection happens before any mutation, so the prior program is
+        // left intact rather than torn down.
+        assert_eq!(execution_graph.program.e_nodes.len(), 5);
+    }
+
+    #[test]
     fn roundtrip_serialization() -> anyhow::Result<()> {
         let graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks::default());
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
 
         // The compiled `ExecutionProgram` is the serializable artifact; the
         // engine itself is not serializable.
@@ -200,7 +228,7 @@ mod missing_inputs {
         bind(&mut graph, "sum", 0, Binding::None);
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         let get_b = execution_graph.by_name("get_b").unwrap();
@@ -236,7 +264,7 @@ mod missing_inputs {
         bind(&mut graph, "sum", 0, Binding::None);
         func_lib.by_name_mut("mult").unwrap().inputs[0].required = false;
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         let sum = execution_graph.by_name("sum").unwrap();
@@ -267,7 +295,7 @@ mod missing_inputs {
         bind(&mut graph, "mult", 0, Binding::None);
         func_lib.by_name_mut("mult").unwrap().inputs[0].required = false;
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         let mult = execution_graph.by_name("mult").unwrap();
@@ -302,7 +330,7 @@ mod missing_inputs {
         func_lib.by_name_mut("mult").unwrap().inputs[1].required = false;
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         // Pre-fix, this panicked the worker; now the chain is gated and nothing runs.
         execution_graph.execute_terminals().await?;
 
@@ -332,7 +360,7 @@ mod disabled_nodes {
         graph.by_id_mut(&sum_id).unwrap().disabled = true;
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         // The disabled node emits no execution node at all.
@@ -367,7 +395,7 @@ mod disabled_nodes {
         func_lib.by_name_mut("mult").unwrap().inputs[0].required = false;
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         assert!(execution_graph.by_name("sum").is_none());
@@ -394,7 +422,7 @@ mod const_bindings {
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(3)));
         bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(5)));
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
 
         let mult = execution_graph.by_name("mult").unwrap();
         assert!(execution_graph.node_input_dirty(mult)[0]);
@@ -417,7 +445,7 @@ mod const_bindings {
         assert!(!execution_graph.node_input_flags(mult)[1].dependency_wants_execute);
 
         // Re-run with same bindings: mult is cached, only print re-executes
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
@@ -429,7 +457,7 @@ mod const_bindings {
 
         // Change one const: mult re-executes
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(4)));
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         let mult = execution_graph.by_name("mult").unwrap();
@@ -464,7 +492,7 @@ mod const_bindings {
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(3)));
         bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(5)));
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -474,14 +502,14 @@ mod const_bindings {
 
         // Same const value: no re-execution of mult
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(3)));
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
 
         // Different const value: mult re-executes
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(4)));
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -490,7 +518,7 @@ mod const_bindings {
         );
 
         // Stable again
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
@@ -508,7 +536,7 @@ mod const_bindings {
         // Replace sum[0] (get_a) with a const — get_a is no longer needed
         bind(&mut graph, "sum", 0, Binding::Const(33.into()));
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -519,7 +547,7 @@ mod const_bindings {
         // Also unbind sum[1] — now sum has all const/none inputs, no upstream needed
         bind(&mut graph, "sum", 1, Binding::None);
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -540,7 +568,7 @@ mod const_bindings {
         let get_b_id = graph.by_name_mut("get_b").unwrap().id;
         bind(&mut graph, "sum", 0, Binding::Const(33.into()));
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -551,7 +579,7 @@ mod const_bindings {
         // Switch from const back to bind — sum must re-execute
         bind(&mut graph, "sum", 0, (get_b_id, 0).into());
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -569,14 +597,14 @@ mod const_bindings {
         let mut graph = test_graph();
         let mut execution_graph = ExecutionEngine::default();
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         // Switch mult inputs to const/none
         bind(&mut graph, "mult", 0, Binding::Const(2.into()));
         bind(&mut graph, "mult", 1, Binding::None);
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -585,7 +613,7 @@ mod const_bindings {
         );
 
         // Stable on rerun
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
@@ -608,7 +636,7 @@ mod behavior {
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Pure;
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         assert!(execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
@@ -616,7 +644,7 @@ mod behavior {
         // Simulate cached output — pure node should skip
         execution_graph.set_output_values("get_b", vec![DynamicValue::Static(StaticValue::Int(7))]);
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         assert!(!execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
@@ -630,7 +658,7 @@ mod behavior {
         let func_lib = test_func_lib(default_hooks());
         let mut execution_graph = ExecutionEngine::default();
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -663,7 +691,7 @@ mod behavior {
         let graph = test_graph();
         let func_lib = test_func_lib(default_hooks());
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
 
         let (tx, mut rx) = unbounded_channel::<RunProgress>();
         let stats = eg
@@ -724,7 +752,7 @@ mod behavior {
         let graph = test_graph();
         let func_lib = test_func_lib(default_hooks());
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
 
         // Pre-tripped: the executor breaks at the first loop-top check, so no
         // node runs and the run is flagged cancelled.
@@ -814,7 +842,7 @@ mod behavior {
         graph.validate();
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
 
         // Run 1: the node trips the cancel mid-invoke — it must not appear as
         // executed (it didn't complete), and the run is flagged cancelled.
@@ -906,7 +934,7 @@ mod behavior {
         graph.validate();
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
         let stats = eg
             .execute(
                 true,
@@ -942,11 +970,11 @@ mod behavior {
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
 
         // Even with cached output, impure node still wants to execute
         execution_graph.set_output_values("get_b", vec![DynamicValue::Static(StaticValue::Int(7))]);
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         assert_eq!(
@@ -966,7 +994,7 @@ mod behavior {
         graph.by_name_mut("get_b").unwrap().behavior = NodeBehavior::Once;
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         assert_eq!(
@@ -976,7 +1004,7 @@ mod behavior {
 
         // With cached output, Once node is skipped even though func is Impure
         execution_graph.set_output_values("get_b", vec![DynamicValue::Static(StaticValue::Int(7))]);
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         // get_b excluded, but rest still runs
@@ -1000,7 +1028,7 @@ mod behavior {
 
         graph.by_name_mut("mult").unwrap().behavior = NodeBehavior::Once;
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -1009,7 +1037,7 @@ mod behavior {
         );
 
         // Second run: Once node cached
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
@@ -1018,7 +1046,7 @@ mod behavior {
         let b1 = binding(&graph, "mult", 1);
         bind(&mut graph, "mult", 0, b1);
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -1041,7 +1069,7 @@ mod behavior {
 
         graph.by_name_mut("mult").unwrap().behavior = NodeBehavior::Once;
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -1049,7 +1077,7 @@ mod behavior {
             ["sum", "mult", "print"]
         );
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
@@ -1060,7 +1088,7 @@ mod behavior {
         bind(&mut graph, "mult", 0, Binding::Const(2.into()));
         bind(&mut graph, "mult", 1, Binding::Const(22.into()));
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -1072,7 +1100,7 @@ mod behavior {
         bind(&mut graph, "mult", 0, old_binding1);
         bind(&mut graph, "mult", 1, old_binding0);
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -1093,14 +1121,14 @@ mod behavior {
         bind(&mut graph, "sum", 0, Binding::Const(2.into()));
         bind(&mut graph, "sum", 1, Binding::Const(21.into()));
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         // Change sum's const and set mult to Once simultaneously
         bind(&mut graph, "sum", 0, Binding::Const(12.into()));
         graph.by_name_mut("mult").unwrap().behavior = NodeBehavior::Once;
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         let sum = execution_graph.by_name("sum").unwrap();
@@ -1112,7 +1140,7 @@ mod behavior {
         // Toggle mult back to AsFunction — sum now needs to re-execute
         graph.by_name_mut("mult").unwrap().behavior = NodeBehavior::AsFunction;
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -1195,14 +1223,14 @@ mod composite_behavior {
     /// output already present for that node — i.e. "would it re-run?".
     fn reruns_with_cache(graph: &Graph, func_lib: &FuncLib, name: &str) -> bool {
         let mut eg = ExecutionEngine::default();
-        eg.update(graph, func_lib);
+        eg.update(graph, func_lib).unwrap();
         eg.prepare_execution(true, false, &[]).unwrap();
         assert!(
             execution_node_names_in_order(&eg).contains(&name.to_string()),
             "{name} should run on the first prepare"
         );
         eg.set_output_values(name, vec![DynamicValue::Static(StaticValue::Int(11))]);
-        eg.update(graph, func_lib);
+        eg.update(graph, func_lib).unwrap();
         eg.prepare_execution(true, false, &[]).unwrap();
         execution_node_names_in_order(&eg).contains(&name.to_string())
     }
@@ -1240,6 +1268,33 @@ mod composite_behavior {
         assert!(
             !reruns_with_cache(&graph, &func_lib, "inner"),
             "Once composite freezes its interior after the first run"
+        );
+    }
+
+    #[test]
+    fn update_rejects_func_missing_inside_subgraph() {
+        // The check descends composites: a func only the *interior*
+        // references, absent from the lib, is still caught.
+        let func_lib = test_func_lib(TestFuncHooks::default());
+        let def = impure_output_def(
+            &func_lib,
+            "00000000-0000-0000-0000-0000000000a1",
+            "S",
+            "inner",
+        );
+        let graph = main_with(&func_lib, def, false);
+
+        // A `Local` def resolves from the graph itself, so the walk reaches
+        // the interior even with an empty library — and flags its `get_b`.
+        let mut eg = ExecutionEngine::default();
+        let err = eg.update(&graph, &FuncLib::default()).unwrap_err();
+        let Error::InvalidGraph { message } = err else {
+            panic!("expected InvalidGraph, got {err:?}");
+        };
+        let get_b = func_lib.by_name("get_b").unwrap().id;
+        assert!(
+            message.contains(&format!("{get_b:?}")),
+            "message should name the interior's missing func, got: {message}"
         );
     }
 
@@ -1334,7 +1389,7 @@ mod cycle_detection {
         bind(&mut graph, "sum", 0, (mult_node_id, 0).into());
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
 
         let err = execution_graph
             .prepare_execution(true, false, &[])
@@ -1359,7 +1414,7 @@ mod invalidation {
         let func_lib = test_func_lib(default_hooks());
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert!(!execution_graph.program.e_nodes.is_empty());
@@ -1383,7 +1438,7 @@ mod invalidation {
         let func_lib = test_func_lib(default_hooks());
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         // Verify outputs exist before reset
@@ -1454,7 +1509,7 @@ mod execution {
         let graph = test_graph();
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
         // sum = get_a + get_b = 2 + 5 = 7, mult = sum * get_b = 7 * 5 = 35
         assert_eq!(test_values.try_lock()?.result, 35);
@@ -1462,7 +1517,7 @@ mod execution {
         // Changing external state doesn't recompute (get_b is Once by default)
         test_values.try_lock()?.b = 7;
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
         assert_eq!(test_values.try_lock()?.result, 35);
 
@@ -1470,7 +1525,7 @@ mod execution {
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
         // sum = 2 + 7 = 9, mult = 9 * 7 = 63
         assert_eq!(test_values.try_lock()?.result, 63);
@@ -1488,7 +1543,7 @@ mod execution {
         // Make sum's first input None (required) — sum and downstream shouldn't execute
         bind(&mut graph, "sum", 0, Binding::None);
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
 
         execution_graph.execute_terminals().await?;
         let order1 = execution_node_names_in_order(&execution_graph);
@@ -1511,7 +1566,7 @@ mod execution {
         let func_lib = test_func_lib(default_hooks());
         let graph = test_graph();
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
 
         eg.execute_terminals().await?;
         let run1 = execution_node_names_in_order(&eg);
@@ -1545,14 +1600,14 @@ mod execution {
         let mut graph = test_graph();
         let mut execution_graph = ExecutionEngine::default();
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         // Switch mult to const inputs
         bind(&mut graph, "mult", 0, Binding::Const(2.into()));
         bind(&mut graph, "mult", 1, Binding::Const(21.into()));
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -1564,7 +1619,7 @@ mod execution {
         let get_b_id = graph.by_name_mut("get_b").unwrap().id;
         bind(&mut graph, "mult", 0, (get_b_id, 0).into());
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -1587,7 +1642,7 @@ mod argument_values {
         let func_lib = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionEngine::default();
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
 
         let nonexistent_id: NodeId = "00000000-0000-0000-0000-000000000000".into();
         assert!(
@@ -1612,7 +1667,7 @@ mod argument_values {
         bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(5)));
         let mult_id = graph.by_name("mult").unwrap().id;
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         let values = execution_graph.get_argument_values(&mult_id).unwrap();
@@ -1648,7 +1703,7 @@ mod argument_values {
         let graph = test_graph();
         let mut execution_graph = ExecutionEngine::default();
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         // sum: inputs are get_a(2.0) and get_b(5.0), output is 2+5=7
@@ -1711,7 +1766,7 @@ mod argument_values {
         bind(&mut graph, "mult", 1, Binding::None);
         let mult_id = graph.by_name("mult").unwrap().id;
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
 
         let values = execution_graph.get_argument_values(&mult_id).unwrap();
@@ -1730,7 +1785,7 @@ mod argument_values {
         let func_lib = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionEngine::default();
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
 
         let sum_id = graph.by_name("sum").unwrap().id;
         let values = execution_graph.get_argument_values(&sum_id).unwrap();
@@ -1760,7 +1815,7 @@ mod error_propagation {
         });
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
 
         let stats = execution_graph.execute_terminals().await?;
 
@@ -1849,7 +1904,7 @@ mod stats {
         bind(&mut graph, "sum", 0, Binding::None);
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         let stats = execution_graph.execute_terminals().await?;
 
         // sum[0] should appear in missing_inputs
@@ -1872,7 +1927,7 @@ mod stats {
         let func_lib = test_func_lib(default_hooks());
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib).unwrap();
         let stats = execution_graph.execute_terminals().await?;
 
         // All 5 nodes should be reported as executed
@@ -1996,7 +2051,7 @@ mod events {
     async fn execute_events_runs_subscribers() -> anyhow::Result<()> {
         let f = build();
         let mut eg = ExecutionEngine::default();
-        eg.update(&f.graph, &f.func_lib);
+        eg.update(&f.graph, &f.func_lib).unwrap();
 
         let stats = eg
             .execute_events([EventRef {
@@ -2022,7 +2077,7 @@ mod events {
     async fn event_triggers_collects_nodes_with_subscribers() -> anyhow::Result<()> {
         let f = build();
         let mut eg = ExecutionEngine::default();
-        eg.update(&f.graph, &f.func_lib);
+        eg.update(&f.graph, &f.func_lib).unwrap();
 
         // terminals=false, event_triggers=true → emit (owns a subscribed event)
         // becomes a root; recv is downstream of emit, not a root.
@@ -2046,7 +2101,7 @@ mod events {
     async fn active_event_triggers_lists_live_events() -> anyhow::Result<()> {
         let f = build();
         let mut eg = ExecutionEngine::default();
-        eg.update(&f.graph, &f.func_lib);
+        eg.update(&f.graph, &f.func_lib).unwrap();
 
         let stats = eg
             .execute(
@@ -2078,7 +2133,7 @@ mod events {
         f.func_lib.by_name_mut("emit").unwrap().terminal = true;
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&f.graph, &f.func_lib);
+        eg.update(&f.graph, &f.func_lib).unwrap();
         let stats = eg.execute_terminals().await?;
 
         // emit ran, but its event has no subscribers → no live triggers.
@@ -2155,7 +2210,7 @@ mod output_usage {
         graph.validate();
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
         eg.execute_terminals().await?;
 
         let split = eg.by_name("split").unwrap();
@@ -2190,7 +2245,7 @@ mod topology {
 
         let mut graph = test_graph();
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
         assert_eq!(eg.program.e_nodes.len(), 5);
 
         // Remove get_b — a middle node feeding sum[1] and mult[1] (both optional).
@@ -2199,7 +2254,7 @@ mod topology {
         graph.remove_by_id(get_b_id);
         graph.validate();
 
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
         assert_eq!(eg.program.e_nodes.len(), 4);
         assert!(eg.by_name("get_b").is_none());
 
@@ -2229,7 +2284,7 @@ mod topology {
         let func_lib = FuncLib::default();
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
 
         assert!(eg.is_empty());
 
@@ -2267,7 +2322,7 @@ mod topology {
         graph.validate();
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
         let stats = eg.execute_terminals().await?;
 
         // Both terminals plus both sources execute exactly once.
@@ -2314,7 +2369,7 @@ mod topology {
         graph.validate();
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
         eg.execute_terminals().await?;
         assert_eq!(*calls_a.lock().await, 1); // get_a ran once
         let idx_before = eg.program.e_nodes.index_of_key(&get_a_id).unwrap();
@@ -2324,7 +2379,7 @@ mod topology {
         graph.remove_by_id(print_b_id);
         graph.validate();
 
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
         let idx_after = eg.program.e_nodes.index_of_key(&get_a_id).unwrap();
         assert_ne!(idx_before, idx_after, "get_a should have been reordered");
 
@@ -2364,7 +2419,7 @@ mod topology {
         graph.validate();
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
         eg.execute_terminals().await?;
 
         for round in 0..3 {
@@ -2375,7 +2430,7 @@ mod topology {
             graph.add(node(&func_lib, "print", pb));
             graph.set_input_binding(InputPort::new(pb, 0), (gb, 0).into());
             graph.validate();
-            eg.update(&graph, &func_lib);
+            eg.update(&graph, &func_lib).unwrap();
             assert_eq!(eg.program.e_nodes.len(), 4, "round {round} grow");
             printed.lock().await.clear();
             eg.execute_terminals().await?;
@@ -2387,7 +2442,7 @@ mod topology {
             graph.remove_by_id(gb);
             graph.remove_by_id(pb);
             graph.validate();
-            eg.update(&graph, &func_lib);
+            eg.update(&graph, &func_lib).unwrap();
             assert_eq!(eg.program.e_nodes.len(), 2, "round {round} shrink");
             printed.lock().await.clear();
             eg.execute_terminals().await?;
@@ -2417,7 +2472,7 @@ mod previews {
         let graph = test_graph();
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
         eg.execute_terminals().await?;
 
         // For non-Custom values gen_preview is a no-op, so the preview variant
@@ -2545,7 +2600,7 @@ mod subgraph {
         graph.set_input_binding(InputPort::new(print_id, 0), (c_id, 0).into());
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
         eg.execute_terminals().await?;
 
         assert_eq!(*captured.lock().unwrap(), vec![6]); // 2 + 4
@@ -2603,7 +2658,7 @@ mod subgraph {
         graph.set_input_binding(InputPort::new(print_id, 0), (c_id, 0).into());
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
         eg.execute_terminals().await?;
 
         assert_eq!(*captured.lock().unwrap(), vec![7]); // get_a only; get_b pruned
@@ -2632,7 +2687,7 @@ mod subgraph {
         graph.set_input_binding(InputPort::new(print_id, 0), (c_id, 0).into());
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
         let result = eg.execute_terminals().await;
 
         assert!(
@@ -2675,7 +2730,7 @@ mod subgraph {
         graph.set_input_binding(InputPort::new(print_id, 0), (c_id, 0).into());
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
 
         // get_a, get_b, sum (interior), print — no composite/boundary nodes.
         assert_eq!(eg.program.e_nodes.len(), 4);
@@ -2691,7 +2746,7 @@ mod subgraph {
         let func_lib = test_func_lib(default_hooks());
         let graph = test_graph();
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
 
         assert_eq!(eg.program.e_nodes.len(), graph.len());
         for node in graph.iter() {
@@ -2719,7 +2774,7 @@ mod subgraph {
         ));
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
 
         let sums: Vec<NodeId> = eg
             .program
@@ -2756,7 +2811,7 @@ mod subgraph {
         graph.set_input_binding(InputPort::new(c_id, 0), (a_id, 0).into());
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
 
         // Interior node: flattened id is remapped, but attribution points
         // back to the authoring interior id then the enclosing instance.
@@ -2844,7 +2899,7 @@ mod subgraph {
         graph.subscribe(c_id, 0, listener_id);
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
 
         // The flattened interior `ticker` carries the rewired subscriber.
         let ticker_node = eg.by_name("ticker").unwrap();
@@ -2890,7 +2945,7 @@ mod subgraph {
         graph.subscribe(emitter_id, 0, c_id);
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
 
         // The interior `print` flat id is the one wired onto `ticker`'s event.
         let reactor_flat = eg.by_name("print").unwrap().id;
@@ -2938,7 +2993,7 @@ mod subgraph {
         graph.set_input_binding(InputPort::new(p2_id, 0), (c2_id, 0).into());
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
         eg.execute_terminals().await?;
 
         let mut got = captured.lock().unwrap().clone();
@@ -2981,7 +3036,7 @@ mod subgraph {
                 .set_input_binding(InputPort::new(so, 0), (si, 0).into());
         }
 
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
         eg.execute_terminals().await?;
 
         let mut got = captured.lock().unwrap().clone();
@@ -3046,7 +3101,7 @@ mod subgraph {
         graph.subscribe(emitter_id, 0, c_id);
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib);
+        eg.update(&graph, &func_lib).unwrap();
 
         // Fire E's event (as the worker does) — the interior `get_a` runs.
         eg.execute_events([EventRef {
