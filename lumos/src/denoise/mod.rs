@@ -1,7 +1,7 @@
 //! Denoising: à trous (starlet) wavelet thresholding of the linear master. See `denoise/README.md`
 //! for the algorithm research and the rationale for this approach.
 //!
-//! [`denoise`] decomposes each channel into a redundant, shift-invariant multiscale (starlet)
+//! [`Denoise`] decomposes each channel into a redundant, shift-invariant multiscale (starlet)
 //! pyramid — a B3-spline à trous transform — estimates the noise per scale from the robust MAD of
 //! that scale's coefficients, and zeroes (hard) or shrinks (soft) the coefficients below `k·σ`. The
 //! kept coefficients plus the untouched coarse residual reconstruct a denoised channel.

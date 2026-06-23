@@ -1,9 +1,9 @@
 //! Color calibration: neutralize the per-channel sky background and remove the residual green cast
 //! from a one-shot-color stack. See `color_calibration/README.md` for the algorithm research.
 //!
-//! - [`neutralize_background`] (linear, pre-stretch): estimate each channel's background and
+//! - [`NeutralizeBackground`] (linear, pre-stretch): estimate each channel's background and
 //!   additively shift them to a common level, so the sky is neutral gray (R=G=B).
-//! - [`scnr`] (post-stretch): Subtractive Chromatic Noise Reduction — clamp green that exceeds the
+//! - [`Scnr`] (post-stretch): Subtractive Chromatic Noise Reduction — clamp green that exceeds the
 //!   red/blue average, the residual green being noise on a color-balanced deep-sky image.
 
 use common::Rgb;
@@ -61,7 +61,7 @@ impl NeutralizeBackground {
 }
 
 /// Per-channel sigma-clipped median background of an RGB f32 image, read straight from the
-/// interleaved samples. Used by [`neutralize_background`] and the colour-calibration tests/fixtures.
+/// interleaved samples. Used by [`NeutralizeBackground::apply`] and the colour-calibration tests/fixtures.
 pub(crate) fn channel_backgrounds(image: &Image) -> Rgb {
     let samples: &[f32] = bytemuck::cast_slice(image.bytes());
     let mut scratch = Vec::new();
