@@ -33,6 +33,10 @@ pub(crate) mod digest;
 // the executor in the integration phase, dead until then.
 #[allow(dead_code)]
 pub(crate) mod cache_store;
+// Glue tying the digest, value codec, and store into load/store-by-digest. Wired
+// into the executor in the integration phase, dead until then.
+#[allow(dead_code)]
+pub(crate) mod disk_cache;
 pub(crate) mod executor;
 mod flatten;
 pub(crate) mod plan;
