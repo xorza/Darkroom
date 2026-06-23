@@ -80,16 +80,15 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
                 } else {
                     theme.text_muted
                 };
-                badge(
-                    ui,
-                    theme,
-                    "badge_inspect",
-                    "i",
+                Badge {
+                    salt: "badge_inspect",
+                    glyph: "i",
                     color,
-                    mode == Some(InspectMode::Pinned),
-                    Some(inspect_badge_wid(node.id)),
-                    "Inspect — values, status, log",
-                );
+                    filled: mode == Some(InspectMode::Pinned),
+                    wid: Some(inspect_badge_wid(node.id)),
+                    tip: "Inspect — values, status, log",
+                }
+                .show(ui, theme);
             }
         });
 }
@@ -142,39 +141,36 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
             // before the record — letting the subgraph record a pass
             // earlier and its connections draw with no first-frame gap.
             if node.subgraph.is_some() {
-                badge(
-                    ui,
-                    theme,
-                    "badge_sg",
-                    "S",
-                    theme.badge_subgraph,
-                    true,
-                    Some(subgraph_badge_wid(node.id)),
-                    "Open subgraph",
-                );
+                Badge {
+                    salt: "badge_sg",
+                    glyph: "S",
+                    color: theme.badge_subgraph,
+                    filled: true,
+                    wid: Some(subgraph_badge_wid(node.id)),
+                    tip: "Open subgraph",
+                }
+                .show(ui, theme);
             }
             if node.terminal {
-                badge(
-                    ui,
-                    theme,
-                    "badge_t",
-                    "T",
-                    theme.badge_terminal,
-                    true,
-                    None,
-                    "Terminal — output sink",
-                );
+                Badge {
+                    salt: "badge_t",
+                    glyph: "T",
+                    color: theme.badge_terminal,
+                    filled: true,
+                    wid: None,
+                    tip: "Terminal — output sink",
+                }
+                .show(ui, theme);
             }
-            let toggled = badge(
-                ui,
-                theme,
-                "badge_c",
-                "C",
-                theme.badge_cache,
-                node.cached,
-                Some(cache_badge_wid(node.id)),
-                "Compute once (cache the result)",
-            );
+            let toggled = Badge {
+                salt: "badge_c",
+                glyph: "C",
+                color: theme.badge_cache,
+                filled: node.cached,
+                wid: Some(cache_badge_wid(node.id)),
+                tip: "Compute once (cache the result)",
+            }
+            .show(ui, theme);
             if toggled {
                 out.push(Intent::SetCacheBehavior {
                     node_id: node.id,
@@ -187,16 +183,15 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
             }
             // Disable toggle: filled when the node is excluded from
             // execution. Muted swatch (it's "off", not an alarm).
-            let disable_toggled = badge(
-                ui,
-                theme,
-                "badge_d",
-                "D",
-                theme.text_muted,
-                node.disabled,
-                Some(disable_badge_wid(node.id)),
-                "Disable — exclude from the run",
-            );
+            let disable_toggled = Badge {
+                salt: "badge_d",
+                glyph: "D",
+                color: theme.text_muted,
+                filled: node.disabled,
+                wid: Some(disable_badge_wid(node.id)),
+                tip: "Disable — exclude from the run",
+            }
+            .show(ui, theme);
             if disable_toggled {
                 out.push(Intent::SetDisabled {
                     node_id: node.id,
@@ -247,61 +242,73 @@ pub(crate) fn subgraph_badge_wid(node_id: NodeId) -> WidgetId {
 
 /// One header indicator chip: a small rounded square with a centered
 /// glyph. `filled` paints a solid swatch (active/descriptor); otherwise
-/// it's a hollow outline (inactive toggle). A `wid` makes it clickable
-/// and the returned bool reports a click this frame; decorative chips
-/// pass `None` and ignore the result.
-#[allow(clippy::too_many_arguments)]
-fn badge(
-    ui: &mut Ui,
-    theme: &Theme,
+/// it's a hollow outline (inactive toggle). A `wid` makes it clickable and
+/// [`Badge::show`] returns whether it was clicked this frame; decorative
+/// chips set `wid: None` (relying on `salt` for a stable id) and ignore it.
+struct Badge {
+    /// Stable id salt — used only for decorative (`wid: None`) chips.
     salt: &'static str,
     glyph: &'static str,
     color: Color,
     filled: bool,
     wid: Option<WidgetId>,
-    tip: &str,
-) -> bool {
-    let background = if filled {
-        Background {
-            fill: color.into(),
-            corners: Corners::all(3.0),
-            ..Default::default()
+    tip: &'static str,
+}
+
+impl Badge {
+    fn show(self, ui: &mut Ui, theme: &Theme) -> bool {
+        let Badge {
+            salt,
+            glyph,
+            color,
+            filled,
+            wid,
+            tip,
+        } = self;
+        let background = if filled {
+            Background {
+                fill: color.into(),
+                corners: Corners::all(3.0),
+                ..Default::default()
+            }
+        } else {
+            Background {
+                stroke: Stroke::solid(color, 1.0),
+                corners: Corners::all(3.0),
+                ..Default::default()
+            }
+        };
+        // Solid chips carry dark glyphs (contrast against the swatch);
+        // hollow chips ink the glyph in the accent itself.
+        let glyph_color = if filled { theme.header_fill } else { color };
+        let mut panel = Panel::zstack()
+            .size((Sizing::Fixed(BADGE_SIZE), Sizing::Fixed(BADGE_SIZE)))
+            .child_align(Align::CENTER)
+            .background(background);
+        // Clickable chips capture the press; decorative ones (`T`) still opt
+        // into `HOVER` so their tooltip fires without swallowing the click.
+        panel = match wid {
+            Some(w) => panel.id(w).sense(Sense::CLICK),
+            None => panel.id_salt(salt).sense(Sense::HOVER),
+        };
+        let chip = panel.show(ui, |ui| {
+            Text::new(glyph)
+                .style(TextStyle {
+                    color: glyph_color,
+                    font_size_px: BADGE_FONT,
+                    ..ui.theme.text
+                })
+                .show(ui);
+        });
+        // Take the owned snapshot + click result so the chip's `ui` borrow
+        // ends before the tooltip records into `ui`.
+        let snapshot = chip.response.snapshot();
+        let clicked = chip.response.clicked();
+        if !tip.is_empty() {
+            // `tip` is `&'static str`, so it rides into the tooltip as a
+            // borrowed `Cow` — no per-frame allocation.
+            Tooltip::for_(&snapshot).text(tip).show(ui);
         }
-    } else {
-        Background {
-            stroke: Stroke::solid(color, 1.0),
-            corners: Corners::all(3.0),
-            ..Default::default()
-        }
-    };
-    // Solid chips carry dark glyphs (contrast against the swatch);
-    // hollow chips ink the glyph in the accent itself.
-    let glyph_color = if filled { theme.header_fill } else { color };
-    let mut panel = Panel::zstack()
-        .size((Sizing::Fixed(BADGE_SIZE), Sizing::Fixed(BADGE_SIZE)))
-        .child_align(Align::CENTER)
-        .background(background);
-    // Clickable chips capture the press; decorative ones (`T`) still opt
-    // into `HOVER` so their tooltip fires without swallowing the click.
-    panel = match wid {
-        Some(w) => panel.id(w).sense(Sense::CLICK),
-        None => panel.id_salt(salt).sense(Sense::HOVER),
-    };
-    let chip = panel.show(ui, |ui| {
-        Text::new(glyph)
-            .style(TextStyle {
-                color: glyph_color,
-                font_size_px: BADGE_FONT,
-                ..ui.theme.text
-            })
-            .show(ui);
-    });
-    // Take the owned snapshot + click result so the chip's `ui` borrow ends
-    // before the tooltip records into `ui`.
-    let snapshot = chip.response.snapshot();
-    let clicked = chip.response.clicked();
-    if !tip.is_empty() {
-        Tooltip::for_(&snapshot).text(tip.to_owned()).show(ui);
+        clicked
     }
-    clicked
 }
