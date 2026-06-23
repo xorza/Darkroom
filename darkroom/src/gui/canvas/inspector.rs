@@ -29,12 +29,12 @@ use palantir::{
     Stroke, Text, TextStyle, TextWrap, Ui, WidgetId,
 };
 use scenarium::data::{DataType, StaticValue};
-use scenarium::prelude::{LogEntry, LogLevel, NodeId};
+use scenarium::prelude::{LogLevel, NodeId};
 
 use crate::gui::canvas::outer_canvas_widget_id;
 use crate::gui::node::header::fmt_elapsed;
 use crate::gui::node::{exec_color, node_widget_id};
-use crate::gui::node_values::{NodeValueView, PortValueView};
+use crate::gui::node_values::PortValueView;
 use crate::gui::run_state::{ExecStatus, RunState};
 use crate::gui::scene::{InputBindingView, Scene, SceneNode};
 use crate::gui::theme::Theme;
@@ -54,6 +54,14 @@ pub(crate) enum InspectMode {
 #[derive(Default, Debug)]
 pub(crate) struct Inspectors {
     modes: HashMap<NodeId, InspectMode>,
+}
+
+/// Cross-cutting refs every inspector panel reads, bundled so `draw_one`
+/// takes a context rather than a fistful of loose arguments.
+struct PanelDraw<'a> {
+    theme: &'a Theme,
+    scene: &'a Scene,
+    run_state: &'a RunState,
 }
 
 /// Fixed panel width in canvas (pre-transform) units.
@@ -130,6 +138,11 @@ impl Inspectors {
         scene: &Scene,
         run_state: &RunState,
     ) {
+        let ctx = PanelDraw {
+            theme,
+            scene,
+            run_state,
+        };
         for (&id, &mode) in &self.modes {
             let Some(node) = scene.nodes.iter().find(|n| n.id == id) else {
                 continue;
@@ -148,31 +161,22 @@ impl Inspectors {
                 .map(|r| r.size.w)
                 .unwrap_or(theme.node_min_width);
             let pos = node.pos + Vec2::new(node_w + PANEL_GAP, 0.0);
-            self.draw_one(
-                ui,
-                theme,
-                scene,
-                node,
-                mode,
-                pos,
-                run_state.logs(id),
-                run_state.values(id),
-            );
+            self.draw_one(ui, &ctx, node, mode, pos);
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn draw_one(
         &self,
         ui: &mut Ui,
-        theme: &Theme,
-        scene: &Scene,
+        ctx: &PanelDraw,
         node: &SceneNode,
         mode: InspectMode,
         pos: Vec2,
-        logs: &[LogEntry],
-        values: Option<&NodeValueView>,
     ) {
+        let theme = ctx.theme;
+        let scene = ctx.scene;
+        let logs = ctx.run_state.logs(node.id);
+        let values = ctx.run_state.values(node.id);
         let border = match mode {
             InspectMode::Pinned => theme.text_muted,
             InspectMode::Open => theme.node_border,

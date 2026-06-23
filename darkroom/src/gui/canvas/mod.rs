@@ -1,3 +1,4 @@
+pub(crate) mod anchored_menu;
 pub(crate) mod background;
 pub(crate) mod breaker;
 pub(crate) mod connection_ui;
@@ -137,9 +138,12 @@ impl GraphUI {
         self.gestures.node_ui.prepass(ui, scene, out);
         emit_port_dblclicks(ui, scene, out);
         self.port_frame.rebuild(ui, scene);
+        // A node picked from a drop-spawned palette last frame re-floats its
+        // wire so the user clicks the exact port to land it.
+        let resume = self.gestures.new_node_ui.take_resume_floating();
         self.gestures
             .connection_ui
-            .apply(ui, scene, &self.port_frame, out);
+            .apply(ui, scene, &self.port_frame, resume, out);
     }
 
     pub(crate) fn frame(
@@ -172,9 +176,19 @@ impl GraphUI {
         // recorded yet. Reuse it here; no second rebuild needed.
         self.gestures.selection_ui.apply(ui, scene, gesture, out);
         self.gestures.breaker_ui.apply(ui, scene, gesture, out);
+        // A connection released over empty canvas (detected in `prepass`)
+        // opens the new-node popup; picking a node re-floats the wire.
+        let pending_connection = self.gestures.connection_ui.take_pending_connection();
+        // A right-click that just ended a floating wire shouldn't also open
+        // the palette — suppress the `NewNode` gesture for this frame.
+        let popup_gesture = if self.gestures.connection_ui.ended_on_secondary() {
+            None
+        } else {
+            gesture
+        };
         self.gestures
             .new_node_ui
-            .apply(ui, ctx, scene, gesture, out);
+            .apply(ui, ctx, scene, popup_gesture, pending_connection, out);
         self.gestures.subgraph_menu.apply(ui, scene, out, cmd);
         self.gestures.node_menu.apply(ui, scene, out);
         // A click on an FsPath input's pick button surfaces a deferred
@@ -335,6 +349,12 @@ pub(crate) enum CanvasGesture {
 /// reports `clicked`/`secondary_clicked` only on a release that *didn't*
 /// drag, but the explicit ordering keeps the precedence obvious). `None`
 /// when nothing latched — an idle canvas, or a press a node/port captured.
+///
+/// This only ever sees presses that *missed* every node and port: a
+/// node/badge widget captures its own press, so a right-click on a node
+/// body or `S` badge routes to `node_menu` / `subgraph_menu` (which read
+/// those widgets' `secondary_clicked` directly) and never reaches here —
+/// `NewNode` is therefore right-click-on-*empty*-canvas by construction.
 pub(crate) fn classify_canvas_gesture(ui: &Ui) -> Option<CanvasGesture> {
     let resp = ui.response_for(outer_canvas_widget_id());
     if resp.drag_started_by(PointerButton::Middle) {

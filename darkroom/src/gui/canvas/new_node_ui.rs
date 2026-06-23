@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{ClickOutside, Configure, MenuItem, Panel, Popup, Sizing, Spacing, Text, Ui};
+use palantir::{Configure, MenuItem, Panel, Sizing, Text, Ui};
 use scenarium::function::FuncInput;
 use scenarium::graph::{Binding, InputPort, Node};
 use scenarium::prelude::NodeId;
@@ -7,13 +7,20 @@ use scenarium::subgraph::{SubgraphDef, SubgraphRef};
 
 use crate::core::document::view_node::ViewNode;
 use crate::core::edit::intent::Intent;
+use crate::gui::PortRef;
 use crate::gui::app::AppContext;
+use crate::gui::canvas::anchored_menu::AnchoredMenu;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::scene::Scene;
 
 /// A chosen palette entry: the node to spawn, an optional `Local` subgraph
 /// def to add alongside it, and the default input bindings to seed with it.
-type ChosenNode = (Node, Option<Box<SubgraphDef>>, Vec<(InputPort, Binding)>);
+#[derive(Debug)]
+struct ChosenNode {
+    node: Node,
+    def: Option<Box<SubgraphDef>>,
+    bindings: Vec<(InputPort, Binding)>,
+}
 
 /// Right-click or double-click on empty canvas → popup that lists every
 /// `Func` in `AppContext::func_lib` grouped by category. Clicking an entry
@@ -21,16 +28,20 @@ type ChosenNode = (Node, Option<Box<SubgraphDef>>, Vec<(InputPort, Binding)>);
 /// canvas pre-transform). Outside-click and Esc dismiss.
 #[derive(Default, Debug)]
 pub(crate) struct NewNodeUi {
-    state: Option<OpenState>,
-}
-
-#[derive(Copy, Clone, Debug)]
-struct OpenState {
-    /// Inner-canvas pre-transform position derived from the click —
-    /// the spawned node lands exactly under the right-clicked pixel.
+    menu: AnchoredMenu,
+    /// Inner-canvas pre-transform position of the current open — the
+    /// spawned node lands exactly under the click. Set at open, read at pick.
     world_pos: Vec2,
-    /// Surface-space anchor for [`Popup::anchored_to`].
-    anchor: Vec2,
+    /// Source port when a connection dropped on empty canvas opened the
+    /// palette; on pick the wire resumes floating from it (rather than
+    /// auto-attaching). `None` for a plain RMB / double-click. Set at open,
+    /// read at pick.
+    source: Option<PortRef>,
+    /// Set when a node was picked from a popup that a dropped connection
+    /// opened: the wire's source port, handed back to `ConnectionUI` so the
+    /// wire resumes *floating* and the user clicks the exact port to land
+    /// it. Taken by the canvas next frame.
+    resume_floating: Option<PortRef>,
 }
 
 impl NewNodeUi {
@@ -40,49 +51,35 @@ impl NewNodeUi {
         ctx: &AppContext<'_>,
         scene: &Scene,
         gesture: Option<CanvasGesture>,
+        pending_source: Option<PortRef>,
         out: &mut Vec<Intent>,
     ) {
         let resp = ui.response_for(outer_canvas_widget_id());
-        if gesture == Some(CanvasGesture::NewNode)
+        // Open the palette either from a bare RMB / double-click (`NewNode`
+        // gesture) or from a connection dropped on empty canvas
+        // (`pending_source`). Placement is the same — under the pointer.
+        if (pending_source.is_some() || gesture == Some(CanvasGesture::NewNode))
             && let (Some(local), Some(rect)) = (resp.pointer_local, resp.rect)
         {
-            self.state = Some(OpenState {
-                world_pos: to_world(local, scene),
-                anchor: rect.min + local,
-            });
+            self.world_pos = to_world(local, scene);
+            self.source = pending_source;
+            self.menu.open_at(rect.min + local);
         }
 
-        let Some(open) = self.state else {
-            return;
-        };
-
-        if ui.escape_pressed() {
-            self.state = None;
-            return;
-        }
-
-        // Click result: the node to spawn, plus a `Local` subgraph def to
-        // add alongside it (library subgraphs are localized on instance,
-        // so they drop an editable copy that records its `origin`). Owned,
-        // so it holds no borrow of `func_lib` past the popup body.
-        let mut chosen: Option<ChosenNode> = None;
-        let chrome = ui.theme.context_menu.panel.clone();
-        // One column per category (an `hstack` laid left-to-right). Within
-        // a column the function list is a `wrap_vstack`, so a category with
-        // many functions wraps into sub-columns once it would exceed the
-        // popup's height cap. The cap lives once on the popup: a bounded
-        // stack constrains its children's main axis, so the popup's
-        // `max_size` height flows down through the column `hstack`/`vstack`
-        // into each func wrap. Everything hugs, so the popup is only as
-        // wide/tall as its columns need.
-        let popup_resp = Popup::anchored_to(open.anchor)
-            .click_outside(ClickOutside::Dismiss)
-            .background(chrome)
-            .id_salt("new_node_popup")
-            .size((Sizing::Hug, Sizing::Hug))
-            .max_size((f32::INFINITY, ctx.theme.new_node_popup_max_height))
-            .padding(Spacing::all(6.0))
-            .show(ui, |ui, popup| {
+        // The popup lists every `Func` grouped by category, one column each
+        // (an `hstack`). Within a column the func list is a `wrap_vstack`,
+        // so a category with many funcs wraps into sub-columns once it would
+        // exceed the popup's height cap (the `max_height` passed to `show`):
+        // a bounded stack constrains its children's main axis, so the cap
+        // flows down through the column stacks into each func wrap.
+        // Everything hugs, so the popup is only as wide/tall as its columns
+        // need. The pick is owned, holding no `func_lib` borrow past the body.
+        let chosen = self.menu.show(
+            ui,
+            "new_node_popup",
+            Some(ctx.theme.new_node_popup_max_height),
+            |ui, popup| {
+                let mut chosen: Option<ChosenNode> = None;
                 Panel::hstack()
                     .id_salt("new_node_columns")
                     .size((Sizing::Hug, Sizing::Hug))
@@ -116,7 +113,11 @@ impl NewNodeUi {
                                                     let node: Node = func.into();
                                                     let bindings =
                                                         default_bindings(node.id, &func.inputs);
-                                                    chosen = Some((node, None, bindings));
+                                                    chosen = Some(ChosenNode {
+                                                        node,
+                                                        def: None,
+                                                        bindings,
+                                                    });
                                                 }
                                             }
                                             // Shared (`Linked`) subgraph
@@ -143,23 +144,30 @@ impl NewNodeUi {
                                                     );
                                                     let bindings =
                                                         default_bindings(node.id, &local.inputs);
-                                                    chosen = Some((
+                                                    chosen = Some(ChosenNode {
                                                         node,
-                                                        Some(Box::new(local)),
+                                                        def: Some(Box::new(local)),
                                                         bindings,
-                                                    ));
+                                                    });
                                                 }
                                             }
                                         });
                                 });
                         }
                     });
-            });
+                chosen
+            },
+        );
 
-        if let Some((node, def, bindings)) = chosen {
+        if let Some(ChosenNode {
+            node,
+            def,
+            bindings,
+        }) = chosen
+        {
             let view_node = ViewNode {
                 id: node.id,
-                pos: open.world_pos,
+                pos: self.world_pos,
             };
             out.push(Intent::AddNode {
                 view_node,
@@ -167,10 +175,17 @@ impl NewNodeUi {
                 def,
                 bindings,
             });
-            self.state = None;
-        } else if popup_resp.dismissed || popup_resp.close_requested {
-            self.state = None;
+            // If a dropped connection opened this popup, hand its source
+            // back so the wire resumes floating — the user then clicks the
+            // exact port to land it, rather than it auto-attaching.
+            self.resume_floating = self.source;
         }
+    }
+
+    /// Take the source of a wire whose drop spawned a node this frame — the
+    /// canvas re-floats it on `ConnectionUI`. `None` on a plain palette open.
+    pub(crate) fn take_resume_floating(&mut self) -> Option<PortRef> {
+        self.resume_floating.take()
     }
 }
 

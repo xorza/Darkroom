@@ -1,5 +1,8 @@
 use glam::Vec2;
-use palantir::{Brush, Color, LineCap, LinearGradient, Shape, Stop, Ui};
+use palantir::{
+    Brush, Color, LineCap, LinearGradient, PointerButton, PointerEvent, PointerSense, Shape, Stop,
+    Ui,
+};
 use scenarium::data::DataType;
 use scenarium::graph::{Binding, InputPort, OutputPort};
 
@@ -7,7 +10,7 @@ use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::port_frame::PortFrame;
-use crate::gui::canvas::{node_ports, to_world};
+use crate::gui::canvas::{node_ports, outer_canvas_widget_id, to_world};
 use crate::gui::node::port_color::port_color;
 use crate::gui::node::{node_widget_id, set_input};
 use crate::gui::scene::{InputBindingView, Scene};
@@ -34,75 +37,203 @@ fn cubic_handles(p0: Vec2, p3: Vec2) -> CubicHandles {
     }
 }
 
-/// Owns the in-flight new-connection drag plus the existing-connection
-/// renderer. Single-port-at-a-time means one `Option` is enough; the
-/// permanent connection list lives on `Scene` and is iterated each
-/// frame by [`Self::draw`]. Mirrors the deprecated
-/// `Gesture::DraggingConnection` but as a dedicated UI module.
+/// Owns the in-flight new-connection wire (a held drag or a free-floating
+/// wire — see [`InFlight`]) plus the existing-connection renderer.
+/// Single-wire-at-a-time means one `Option` is enough; the permanent
+/// connection list lives on `Scene` and is iterated each frame by
+/// [`Self::draw`].
 #[derive(Default, Debug)]
 pub(crate) struct ConnectionUI {
-    drag: Option<ConnectionDrag>,
+    state: Option<InFlight>,
+    /// Source port of a wire dropped on empty canvas this frame. Handed to
+    /// the new-node popup so it opens; the wire then resumes *floating*
+    /// once a node is picked (see [`InFlight::Floating`]). Taken by the
+    /// canvas the same frame.
+    pending_open: Option<PortRef>,
+    /// Set when a floating wire ended on a right-click this frame, so the
+    /// canvas can suppress the new-node popup that same right-click would
+    /// otherwise open — a right-click then reads purely as "cancel".
+    ended_on_secondary: bool,
 }
 
-/// In-flight connection drag. Identity-only — port centers are
-/// resolved every frame from `PortFrame`, so the drag survives layout
-/// changes without stale coordinates.
+/// The in-flight wire being created. Both lifetimes share one preview
+/// renderer ([`ConnectionUI::draw_in_flight`]) and snap tracking; only the
+/// terminating input differs. Identity-only — port centers resolve every
+/// frame from `PortFrame`, so a wire survives layout changes.
 #[derive(Clone, Copy, Debug)]
-struct ConnectionDrag {
-    start: PortRef,
-    /// Compatible-kind port currently under the pointer, if any. Set
-    /// during the per-frame update and read at release time.
-    snap_end: Option<PortRef>,
+enum InFlight {
+    /// LMB-drag from `start`; ends on button release. The original
+    /// gesture: a compatible `snap_end` commits, an input dropped on its
+    /// own body gets a const, a drop on empty canvas opens the palette.
+    Held {
+        start: PortRef,
+        snap_end: Option<PortRef>,
+    },
+    /// Free wire from `start` following the cursor with **no button held**
+    /// — entered after a dropped wire spawned a node, so the user aims at
+    /// the exact port. A left-click over a compatible port commits; a
+    /// left-click elsewhere, a right-click, or Esc cancels.
+    Floating {
+        start: PortRef,
+        snap_end: Option<PortRef>,
+    },
+}
+
+impl InFlight {
+    fn start(self) -> PortRef {
+        match self {
+            InFlight::Held { start, .. } | InFlight::Floating { start, .. } => start,
+        }
+    }
+
+    fn snap_end(self) -> Option<PortRef> {
+        match self {
+            InFlight::Held { snap_end, .. } | InFlight::Floating { snap_end, .. } => snap_end,
+        }
+    }
+
+    fn with_snap(self, snap_end: Option<PortRef>) -> Self {
+        match self {
+            InFlight::Held { start, .. } => InFlight::Held { start, snap_end },
+            InFlight::Floating { start, .. } => InFlight::Floating { start, snap_end },
+        }
+    }
 }
 
 impl ConnectionUI {
-    /// Drive the gesture: latch start, track snap target, commit on
-    /// release.
+    /// Drive the in-flight wire: latch a fresh drag, track the snap
+    /// target, and resolve on the active mode's terminating input.
     ///
-    /// Latch: on the first port whose `PortFrame::drag_started`
-    /// fires, store a [`ConnectionDrag`] pinned to that port.
-    /// While active: rescan every port each frame for the topmost
-    /// opposite-kind port under the pointer; that becomes `snap_end`.
-    /// Release resolves to one of three outcomes:
-    /// - a compatible `snap_end` → bind the input to the output
-    ///   ([`Intent::SetInput`] with `Binding::Bind`);
-    /// - dragged from an **input** and dropped back on its **own
-    ///   node's body** (no snap) → give that input a default const
-    ///   value (quick "I want a literal here" gesture);
-    /// - anything else → drop silently.
-    ///
-    /// Esc cancels without emitting anything.
+    /// Latch: the first port whose `PortFrame::drag_started` fires starts a
+    /// [`InFlight::Held`] wire. While active, every port is rescanned each
+    /// frame for the topmost opposite-kind port under the pointer
+    /// (`snap_end`). [`InFlight::Held`] resolves on release; a drop on
+    /// empty canvas opens the new-node palette instead of dropping, and
+    /// `resume` (the source of such a wire, after its node was picked)
+    /// re-enters [`InFlight::Floating`] so the user clicks the exact port
+    /// to land it. Esc cancels either mode without emitting anything.
     pub(crate) fn apply(
         &mut self,
         ui: &mut Ui,
         scene: &Scene,
         port_frame: &PortFrame,
+        resume: Option<PortRef>,
         out: &mut Vec<Intent>,
     ) {
-        if self.drag.is_none() {
-            self.drag = scan_drag_start(port_frame, scene);
+        self.ended_on_secondary = false;
+
+        // A just-spawned node hands its dropped wire back to float.
+        if let Some(start) = resume {
+            self.state = Some(InFlight::Floating {
+                start,
+                snap_end: None,
+            });
+        }
+        // Latch a fresh port drag only when idle.
+        if self.state.is_none()
+            && let Some(start) = scan_drag_start(port_frame, scene)
+        {
+            self.state = Some(InFlight::Held {
+                start,
+                snap_end: None,
+            });
         }
         if ui.escape_pressed() {
-            self.drag = None;
+            self.state = None;
             return;
         }
-        let Some(mut drag) = self.drag else {
+        let Some(state) = self.state else {
             return;
         };
-        // `PortFrame::dragging` rolls up `drag_delta().is_some() || drag_started()`
-        // — `Some` (incl. zero-delta first-frame) means live, transition
-        // to `false` is the release edge.
-        drag.snap_end = scan_snap_target(port_frame, ui, scene, drag.start);
-        if port_frame.dragging(drag.start) {
-            self.drag = Some(drag);
+
+        // Refresh the compatible port under the pointer for both modes — it
+        // drives the preview's snap end and the hover highlight.
+        let snap_end = scan_snap_target(port_frame, ui, scene, state.start());
+        self.state = Some(state.with_snap(snap_end));
+
+        match state {
+            InFlight::Held { start, .. } => {
+                self.resolve_held(ui, scene, port_frame, start, snap_end, out)
+            }
+            InFlight::Floating { start, .. } => self.resolve_floating(ui, start, snap_end, out),
+        }
+    }
+
+    /// Take the source port of a wire dropped on empty canvas this frame,
+    /// if any. The canvas hands it to the new-node popup to open it.
+    pub(crate) fn take_pending_connection(&mut self) -> Option<PortRef> {
+        self.pending_open.take()
+    }
+
+    /// Whether a floating wire ended on a right-click this frame — the
+    /// canvas suppresses the palette that same right-click would open.
+    pub(crate) fn ended_on_secondary(&self) -> bool {
+        self.ended_on_secondary
+    }
+
+    /// `Held` release: commit a snapped port, else set a const on an
+    /// input dropped on its own body, else open the new-node palette for a
+    /// drop on empty canvas. While the button is still down, keep the wire.
+    fn resolve_held(
+        &mut self,
+        ui: &Ui,
+        scene: &Scene,
+        port_frame: &PortFrame,
+        start: PortRef,
+        snap_end: Option<PortRef>,
+        out: &mut Vec<Intent>,
+    ) {
+        // `PortFrame::dragging` rolls up `drag_delta().is_some() ||
+        // drag_started()`; its transition to `false` is the release edge.
+        if port_frame.dragging(start) {
             return;
         }
-        if let Some(end) = drag.snap_end {
-            commit_connection(drag.start, end, out);
-        } else if let Some(intent) = self.const_drop(ui, scene, drag.start) {
+        if let Some(end) = snap_end {
+            commit_connection(start, end, out);
+        } else if let Some(intent) = self.const_drop(ui, scene, start) {
             out.push(intent);
+        } else if dropped_on_empty_canvas(ui, scene) {
+            // Open the palette and remember the source; the wire resumes
+            // floating once a node is picked.
+            self.pending_open = Some(start);
         }
-        self.drag = None;
+        self.state = None;
+    }
+
+    /// `Floating` resolve: the wire follows the cursor with no button held,
+    /// so its terminating clicks aren't a widget drag — read them off the
+    /// global pointer stream (subscribe to wake it; it's empty otherwise).
+    /// Left-click lands the wire on a compatible port (or cancels if over
+    /// none); right-click cancels (and suppresses the palette); Esc is
+    /// handled in `apply`.
+    fn resolve_floating(
+        &mut self,
+        ui: &mut Ui,
+        start: PortRef,
+        snap_end: Option<PortRef>,
+        out: &mut Vec<Intent>,
+    ) {
+        ui.subscribe_pointer(PointerSense::BUTTONS);
+        let ended = ui.pointer_events().iter().find_map(|ev| match ev {
+            PointerEvent::Down {
+                button: button @ (PointerButton::Left | PointerButton::Right),
+                ..
+            } => Some(*button),
+            _ => None,
+        });
+        match ended {
+            Some(PointerButton::Left) => {
+                if let Some(end) = snap_end {
+                    commit_connection(start, end, out);
+                }
+                self.state = None;
+            }
+            Some(PointerButton::Right) => {
+                self.ended_on_secondary = true;
+                self.state = None;
+            }
+            _ => {} // keep floating
+        }
     }
 
     /// "Set const" gesture: an input-port drag released over its own
@@ -139,7 +270,7 @@ impl ConnectionUI {
     /// the hover state in `PortFrame` (otherwise palantir's
     /// drag-capture suppression would hide it).
     pub(crate) fn snap_port(&self) -> Option<PortRef> {
-        self.drag.and_then(|d| d.snap_end)
+        self.state.and_then(InFlight::snap_end)
     }
 
     /// Paint every permanent connection on the current scene, marking
@@ -229,11 +360,12 @@ impl ConnectionUI {
         port_frame: &PortFrame,
         canvas_origin: Vec2,
     ) {
-        let Some(drag) = self.drag else { return };
-        let Some(start) = port_frame.center_canvas_local(drag.start) else {
+        let Some(state) = self.state else { return };
+        let start_port = state.start();
+        let Some(start) = port_frame.center_canvas_local(start_port) else {
             return;
         };
-        let end = match drag.snap_end {
+        let end = match state.snap_end() {
             Some(snap) => port_frame.center_canvas_local(snap),
             None => ui.pointer_pos().map(|p| to_world(p - canvas_origin, scene)),
         };
@@ -241,15 +373,15 @@ impl ConnectionUI {
         // Orient handles by kind: outputs grow rightward, inputs grow
         // leftward. Same dx algebra as `draw` so the preview matches
         // the eventual permanent curve exactly when snapped.
-        let (p0, p3) = match drag.start.kind {
+        let (p0, p3) = match start_port.kind {
             PortKind::Output => (start, end),
             PortKind::Input => (end, start),
         };
         let CubicHandles { p1, p2 } = cubic_handles(p0, p3);
         // Tint the in-flight wire by the dragged port's data type, so the
         // preview already reads as the type being connected.
-        let drag_ty = port_data_type(scene, drag.start).unwrap_or_default();
-        let wire = port_color(ctx.theme, &drag_ty, drag.start.kind, false);
+        let drag_ty = port_data_type(scene, start_port).unwrap_or_default();
+        let wire = port_color(ctx.theme, &drag_ty, start_port.kind, false);
         ui.add_shape(Shape::CubicBezier {
             p0,
             p1,
@@ -274,19 +406,15 @@ fn port_gradient(start: Color, end: Color) -> Brush {
     ))
 }
 
-/// First port whose response shows `drag_started` this frame, or
-/// `None`. Iterates inputs first then outputs per node so the topmost
-/// recorded port wins ties (matches paint order). Returns a fully-
-/// initialized [`ConnectionDrag`] with no snap target yet.
-fn scan_drag_start(frame: &PortFrame, scene: &Scene) -> Option<ConnectionDrag> {
+/// First port whose response shows `drag_started` this frame, or `None`.
+/// Iterates inputs first then outputs per node so the topmost recorded
+/// port wins ties (matches paint order).
+fn scan_drag_start(frame: &PortFrame, scene: &Scene) -> Option<PortRef> {
     for n in &scene.nodes {
         for kind in [PortKind::Input, PortKind::Output] {
             for port in node_ports(n, kind) {
                 if frame.drag_started(port) {
-                    return Some(ConnectionDrag {
-                        start: port,
-                        snap_end: None,
-                    });
+                    return Some(port);
                 }
             }
         }
@@ -340,6 +468,25 @@ fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -
         }
     }
     None
+}
+
+/// Whether the pointer is over the canvas but not over any node body —
+/// the "released into empty space" condition that offers the new-node
+/// palette. Uses the same arranged-rect hit test as `const_drop`.
+fn dropped_on_empty_canvas(ui: &Ui, scene: &Scene) -> bool {
+    let Some(pointer) = ui.pointer_pos() else {
+        return false;
+    };
+    let over_canvas = ui
+        .response_for(outer_canvas_widget_id())
+        .rect
+        .is_some_and(|r| r.contains(pointer));
+    over_canvas
+        && !scene.nodes.iter().any(|n| {
+            ui.response_for(node_widget_id(n.id))
+                .rect
+                .is_some_and(|r| r.contains(pointer))
+        })
 }
 
 /// The declared [`DataType`] of `port` in the current scene, or `None`

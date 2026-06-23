@@ -1,29 +1,22 @@
 use std::collections::BTreeSet;
 
-use glam::Vec2;
-use palantir::{ClickOutside, Configure, MenuItem, Popup, Sizing, Spacing, Ui};
+use palantir::{MenuItem, Ui};
 
 use crate::core::edit::intent::Intent;
+use crate::gui::canvas::anchored_menu::AnchoredMenu;
 use crate::gui::node::node_widget_id;
 use crate::gui::scene::Scene;
 
 /// Right-click on a node body → a small popup with structural actions on
 /// the node (and, when it's part of a multi-selection, the whole set).
-/// Modeled on [`crate::gui::canvas::subgraph_menu`]: the open is latched
-/// off *last* frame's node-body response, then the popup is shown and its
-/// clicks handled this frame. Picking an action stashes a [`NodeMenuAction`]
-/// the `Editor` resolves against the live selection (where the `Document`
-/// is available to build the clone / removal intents).
+/// The open is latched off *last* frame's node-body response; the shared
+/// [`AnchoredMenu`] handles the popup lifecycle. Picking an action stashes a
+/// [`NodeMenuAction`] the `Editor` resolves against the live selection
+/// (where the `Document` is available to build the clone / removal intents).
 #[derive(Default, Debug)]
 pub(crate) struct NodeMenuUi {
-    open: Option<OpenState>,
+    menu: AnchoredMenu,
     action: Option<NodeMenuAction>,
-}
-
-#[derive(Copy, Clone, Debug)]
-struct OpenState {
-    /// Surface-space anchor for [`Popup::anchored_to`].
-    anchor: Vec2,
 }
 
 /// A structural action picked from a node's context menu. The target is the
@@ -53,47 +46,29 @@ impl NodeMenuUi {
                         to: BTreeSet::from([n.id]),
                     });
                 }
-                self.open = Some(OpenState { anchor: p });
+                self.menu.open_at(p);
             }
         }
 
-        let Some(open) = self.open else {
-            return;
-        };
-        if ui.escape_pressed() {
-            self.open = None;
-            return;
-        }
-
-        let chrome = ui.theme.context_menu.panel.clone();
-        let mut chosen: Option<NodeMenuAction> = None;
-        let popup_resp = Popup::anchored_to(open.anchor)
-            .click_outside(ClickOutside::Dismiss)
-            .background(chrome)
-            .id_salt("node_body_menu")
-            .size((Sizing::Hug, Sizing::Hug))
-            .padding(Spacing::all(6.0))
-            .show(ui, |ui, popup| {
-                if MenuItem::new("Duplicate").show(ui, popup).clicked() {
-                    chosen = Some(NodeMenuAction::Duplicate);
-                }
-                if MenuItem::new("Duplicate with incoming connections")
-                    .show(ui, popup)
-                    .clicked()
-                {
-                    chosen = Some(NodeMenuAction::DuplicateWithIncoming);
-                }
-                MenuItem::separator(ui);
-                if MenuItem::new("Remove").show(ui, popup).clicked() {
-                    chosen = Some(NodeMenuAction::Remove);
-                }
-            });
-
-        if let Some(action) = chosen {
+        let pick = self.menu.show(ui, "node_body_menu", None, |ui, popup| {
+            let mut chosen = None;
+            if MenuItem::new("Duplicate").show(ui, popup).clicked() {
+                chosen = Some(NodeMenuAction::Duplicate);
+            }
+            if MenuItem::new("Duplicate with incoming connections")
+                .show(ui, popup)
+                .clicked()
+            {
+                chosen = Some(NodeMenuAction::DuplicateWithIncoming);
+            }
+            MenuItem::separator(ui);
+            if MenuItem::new("Remove").show(ui, popup).clicked() {
+                chosen = Some(NodeMenuAction::Remove);
+            }
+            chosen
+        });
+        if let Some(action) = pick {
             self.action = Some(action);
-            self.open = None;
-        } else if popup_resp.dismissed || popup_resp.close_requested {
-            self.open = None;
         }
     }
 
