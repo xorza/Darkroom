@@ -29,6 +29,10 @@ use crate::worker::{EventRef, EventTrigger};
 // in the disk-cache integration phase, so the whole API is dead until then.
 #[allow(dead_code)]
 pub(crate) mod digest;
+// Content-addressed blob store keyed by `digest::Digest`. Same story — wired into
+// the executor in the integration phase, dead until then.
+#[allow(dead_code)]
+pub(crate) mod cache_store;
 pub(crate) mod executor;
 mod flatten;
 pub(crate) mod plan;
