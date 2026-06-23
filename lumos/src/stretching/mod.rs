@@ -27,9 +27,9 @@
 use common::Rgb;
 use rayon::prelude::*;
 
-use crate::image_ops::{deinterleave_f32, intensity_plane, interleave_f32, par_map_pixels};
+use crate::image_ops::{intensity_plane, par_map_pixels};
 use crate::math::statistics::{mad_to_sigma, median_and_mad_f32_mut};
-use imaginarium::{Buffer2, Image};
+use imaginarium::Image;
 
 #[cfg(test)]
 mod tests;
@@ -200,21 +200,33 @@ pub fn stretch(image: &mut Image, config: StretchConfig) {
             });
             apply_color_preserving_image(image, curve);
         }
-        ColorMode::PerChannel => {
-            let mut planes = deinterleave_f32(image);
-            stretch_per_channel(&mut planes, config.method);
-            *image = interleave_f32(planes);
-        }
+        ColorMode::PerChannel => apply_per_channel_image(image, config.method),
     }
 }
 
-/// Per-channel stretch: each channel gets its own auto curve from its own statistics.
-fn stretch_per_channel(planes: &mut [Buffer2<f32>], method: StretchMethod) {
-    for plane in planes.iter_mut() {
+/// Per-channel stretch on the interleaved image: each channel gets its own auto curve from its own
+/// statistics (explicit methods share one curve across channels), applied in place — no deinterleave.
+/// Channels are independent, so building channel `c`'s curve from its own samples and writing it back
+/// before moving on never reads a value another channel already changed.
+fn apply_per_channel_image(image: &mut Image, method: StretchMethod) {
+    let nchan = image.desc.color_format.channel_count.channel_count() as usize;
+    let samples: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
+    for c in 0..nchan {
         let curve = explicit_curve(method)
-            .unwrap_or_else(|| build_curve(&mut subsample(plane.pixels()), method));
-        apply_per_channel(plane.pixels_mut(), curve);
+            .unwrap_or_else(|| build_curve(&mut subsample_channel(samples, c, nchan), method));
+        apply_curve_channel(samples, c, nchan, curve);
     }
+}
+
+/// Uniform-stride subsample of channel `channel` from the interleaved `samples` (every `nchan`-th
+/// value), capped at `MAX_STRETCH_SAMPLES` for the curve's median/MAD.
+fn subsample_channel(samples: &[f32], channel: usize, nchan: usize) -> Vec<f32> {
+    let stride = (samples.len() / nchan / MAX_STRETCH_SAMPLES).max(1);
+    samples[channel..]
+        .iter()
+        .step_by(nchan * stride)
+        .copied()
+        .collect()
 }
 
 /// Curves that need no image statistics — built straight from their parameters. Returns `None` for
@@ -426,9 +438,9 @@ impl ToneCurve for GhsCurve {
     }
 }
 
-/// The curve chosen for a stretch. [`apply_color_preserving`] / [`apply_per_channel`] match this
-/// exactly once and then run a monomorphized loop, so the `Stf`/`Asinh` choice is never re-decided
-/// per pixel.
+/// The curve chosen for a stretch. [`apply_color_preserving_image`] / [`apply_curve_channel`] match
+/// this exactly once and then run a monomorphized loop, so the `Stf`/`Asinh` choice is never
+/// re-decided per pixel.
 #[derive(Debug, Clone, Copy)]
 enum Curve {
     Stf(StfCurve),
@@ -501,17 +513,20 @@ fn build_curve(samples: &mut [f32], method: StretchMethod) -> Curve {
     }
 }
 
-/// Stretch a single channel's samples. Resolves the curve type once, then runs a monomorphized loop.
-fn apply_per_channel(pixels: &mut [f32], curve: Curve) {
+/// Stretch channel `channel` (every `nchan`-th interleaved sample). Resolves the curve type once,
+/// then runs a monomorphized loop.
+fn apply_curve_channel(samples: &mut [f32], channel: usize, nchan: usize, curve: Curve) {
     match curve {
-        Curve::Stf(c) => map_slice(pixels, c),
-        Curve::Asinh(c) => map_slice(pixels, c),
-        Curve::Ghs(c) => map_slice(pixels, c),
+        Curve::Stf(c) => map_channel(samples, channel, nchan, c),
+        Curve::Asinh(c) => map_channel(samples, channel, nchan, c),
+        Curve::Ghs(c) => map_channel(samples, channel, nchan, c),
     }
 }
 
-fn map_slice<C: ToneCurve>(pixels: &mut [f32], curve: C) {
-    pixels.par_iter_mut().for_each(|v| *v = curve.eval(*v));
+fn map_channel<C: ToneCurve>(samples: &mut [f32], channel: usize, nchan: usize, curve: C) {
+    samples
+        .par_chunks_mut(nchan)
+        .for_each(|px| px[channel] = curve.eval(px[channel]));
 }
 
 /// Map one pixel under color-preserving stretch: run `curve` on the combined

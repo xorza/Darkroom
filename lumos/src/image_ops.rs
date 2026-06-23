@@ -1,12 +1,12 @@
-//! Run the display/processing ops directly on imaginarium's interleaved `Image`,
-//! instead of round-tripping through a planar `AstroImage`. These ops require a
-//! linear **f32** master (`L_F32` or `RGB_F32`):
+//! Run the display/processing ops directly on imaginarium's interleaved `Image`.
+//! These ops require a linear **f32** master (`L_F32` or `RGB_F32`):
 //!
-//! - per-pixel ops use [`par_map_pixels`] on the interleaved samples — no
-//!   deinterleave;
-//! - the few genuinely per-channel/spatial ops ([`crate::denoise`],
-//!   [`crate::background_extraction`]) [`deinterleave_f32`] to channel planes,
-//!   process, and [`interleave_f32`] back.
+//! - per-pixel and per-channel-reduction ops stay interleaved — [`par_map_pixels`]
+//!   over the samples (optionally after reducing each channel in place, e.g.
+//!   [`crate::color_calibration::neutralize_background`]);
+//! - only ops with genuine per-channel 2D structure ([`crate::denoise`]'s wavelets,
+//!   [`crate::background_extraction`]'s surface fit, per-channel stretch)
+//!   [`deinterleave_f32`] to channel planes, process, and [`interleave_f32`] back.
 
 use common::Rgb;
 use imaginarium::{Buffer2, ChannelCount, ColorFormat, DeinterleavedImageData, Image};
@@ -48,7 +48,7 @@ pub(crate) fn par_map_pixels(
 }
 
 /// Per-pixel combined intensity as a plane: the channel itself for L, `(r+g+b)/3`
-/// for RGB. The interleaved analogue of `AstroImage::intensity_plane`.
+/// for RGB.
 pub(crate) fn intensity_plane(image: &Image) -> Buffer2<f32> {
     assert_f32_master(image);
     let (width, height) = (image.desc.width, image.desc.height);
