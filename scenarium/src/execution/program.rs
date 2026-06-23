@@ -75,6 +75,13 @@ pub(crate) struct ExecutionNode {
     pub terminal: bool,
     pub behavior: ExecutionBehavior,
 
+    /// Whether to persist this node's output to the on-disk cache. Resolved at
+    /// flatten: the authoring node's `Disk` request, clamped off when the node is
+    /// effectively `Impure` (non-reproducible). Read by the executor in the
+    /// disk-cache integration phase.
+    #[serde(default)]
+    pub persist: bool,
+
     pub inputs: Span,
     pub outputs: Span,
     pub events: Span,

@@ -4,7 +4,7 @@ use super::*;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::function::FuncBehavior;
-use crate::graph::{Binding, InputPort, Node, NodeBehavior};
+use crate::graph::{Binding, CachePersistence, InputPort, Node, NodeBehavior};
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use common::{FloatExt, SerdeFormat};
 use tokio::sync::Mutex;
@@ -45,6 +45,65 @@ fn bind(graph: &mut Graph, node_name: &str, idx: usize, binding: Binding) {
 fn binding(graph: &Graph, node_name: &str, idx: usize) -> Binding {
     let id = graph.by_name(node_name).unwrap().id;
     graph.input_binding(InputPort::new(id, idx))
+}
+
+// === Cache Persistence ===
+
+mod cache_persistence {
+    use super::*;
+
+    /// Flatten resolves the authoring `persist` request into the execution
+    /// node's `persist` flag, clamping `Disk` off for effectively-`Impure` nodes.
+    #[test]
+    fn flatten_clamps_disk_to_reproducible_nodes() {
+        let func_lib = test_func_lib(default_hooks());
+        let mut graph = Graph::default();
+
+        // (node name, func, behavior, persist request)
+        let cases = [
+            (
+                "pure_disk",
+                "get_a",
+                NodeBehavior::AsFunction,
+                CachePersistence::Disk,
+            ),
+            (
+                "pure_mem",
+                "get_a",
+                NodeBehavior::AsFunction,
+                CachePersistence::Memory,
+            ),
+            (
+                "impure_disk",
+                "get_b",
+                NodeBehavior::AsFunction,
+                CachePersistence::Disk,
+            ),
+            (
+                "once_impure_disk",
+                "get_b",
+                NodeBehavior::Once,
+                CachePersistence::Disk,
+            ),
+        ];
+        for (name, func, behavior, persist) in cases {
+            let mut n = node(&func_lib, func, NodeId::unique());
+            n.name = name.to_string();
+            n.behavior = behavior;
+            n.persist = persist;
+            graph.add(n);
+        }
+
+        let mut engine = ExecutionEngine::default();
+        engine.update(&graph, &func_lib).unwrap();
+
+        // Pure + Disk persists; Memory never does; Impure + Disk is clamped off;
+        // a `Once` node freezes its (impure) output, so it stays persistable.
+        assert!(engine.by_name("pure_disk").unwrap().persist);
+        assert!(!engine.by_name("pure_mem").unwrap().persist);
+        assert!(!engine.by_name("impure_disk").unwrap().persist);
+        assert!(engine.by_name("once_impure_disk").unwrap().persist);
+    }
 }
 
 // === Graph Structure ===

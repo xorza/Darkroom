@@ -105,6 +105,20 @@ pub enum NodeBehavior {
     Once,
 }
 
+/// Where a node's computed output is cached. `Memory` keeps it only in the live
+/// engine (dropped on reload); `Disk` also persists it to the content-addressed
+/// store, so an unchanged graph reloads the result instead of recomputing.
+/// `Disk` is a *request* honored only for deterministic nodes — an effectively
+/// `Impure` node is clamped back to memory at flatten time (its output isn't
+/// reproducible), so the flag never risks serving a stale value. See
+/// `docs/disk-cache-design.md`.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+pub enum CachePersistence {
+    #[default]
+    Memory,
+    Disk,
+}
+
 /// What a node *is*. A plain `Func` instance, a composite `Subgraph`
 /// instance, or one of the two interface boundary nodes that may appear
 /// only inside a `SubgraphDef.graph` (their port arity comes from the
@@ -130,6 +144,12 @@ pub struct Node {
 
     #[serde(default)]
     pub behavior: NodeBehavior,
+
+    /// Where this node's output is cached. See [`CachePersistence`]. Orthogonal
+    /// to `behavior`; `#[serde(default)]` → `Memory` keeps pre-field documents
+    /// memory-only.
+    #[serde(default)]
+    pub persist: CachePersistence,
 
     /// Disabled nodes are skipped at flatten time: they emit no execution
     /// node, and any binding resolving to one yields no producer, so a
@@ -772,6 +792,7 @@ impl Node {
             kind,
             name: String::new(),
             behavior: NodeBehavior::AsFunction,
+            persist: CachePersistence::Memory,
             disabled: false,
         }
     }
@@ -787,6 +808,7 @@ impl Node {
             kind: NodeKind::Subgraph(r),
             name: def.name.clone(),
             behavior: NodeBehavior::AsFunction,
+            persist: CachePersistence::Memory,
             disabled: false,
         }
     }
@@ -801,6 +823,7 @@ impl From<&Func> for Node {
             kind: NodeKind::Func(func.id),
             name: func.name.clone(),
             behavior: func.node_default_behavior,
+            persist: CachePersistence::Memory,
             disabled: false,
         }
     }
@@ -870,7 +893,8 @@ mod tests {
     use crate::data::DataType;
     use crate::function::{Func, FuncInput};
     use crate::graph::{
-        Binding, Graph, InputPort, Node, NodeBehavior, NodeId, NodeKind, OutputPort, Subscription,
+        Binding, CachePersistence, Graph, InputPort, Node, NodeBehavior, NodeId, NodeKind,
+        OutputPort, Subscription,
     };
     use crate::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
     use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
@@ -897,6 +921,33 @@ mod tests {
     #[test]
     fn check_passes_for_valid_graph() {
         assert!(test_graph().check().is_ok());
+    }
+
+    #[test]
+    fn persist_round_trips_and_defaults_to_memory() {
+        use common::deserialize;
+        assert_eq!(CachePersistence::default(), CachePersistence::Memory);
+
+        let func_lib = test_func_lib(TestFuncHooks::default());
+        let mut graph = Graph::default();
+        let mut node: Node = func_lib.by_name("get_a").unwrap().into();
+        node.persist = CachePersistence::Disk;
+        graph.add(node);
+
+        for format in [SerdeFormat::Json, SerdeFormat::Bitcode] {
+            let bytes = graph.serialize(format).unwrap();
+            let back = Graph::deserialize(&bytes, format).unwrap();
+            assert_eq!(
+                back.by_name("get_a").unwrap().persist,
+                CachePersistence::Disk
+            );
+        }
+
+        // A node authored before `persist` existed deserializes as `Memory`.
+        let legacy = r#"{ "id": "00000000-0000-0000-0000-000000000001",
+            "kind": { "Func": "00000000-0000-0000-0000-000000000002" }, "name": "n" }"#;
+        let node: Node = deserialize(legacy.as_bytes(), SerdeFormat::Json).unwrap();
+        assert_eq!(node.persist, CachePersistence::Memory);
     }
 
     #[test]

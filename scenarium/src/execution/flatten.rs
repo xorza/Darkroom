@@ -25,7 +25,9 @@ use crate::execution::program::{
 };
 use crate::execution_stats::FlattenMap;
 use crate::function::FuncLib;
-use crate::graph::{Binding, Graph, InputPort, NodeBehavior, NodeId, NodeKind, Subscription};
+use crate::graph::{
+    Binding, CachePersistence, Graph, InputPort, NodeBehavior, NodeId, NodeKind, Subscription,
+};
 use crate::subgraph::SubgraphId;
 
 /// Hard cap on nesting depth — a release backstop for the output-resolution
@@ -325,6 +327,12 @@ impl<'a> Run<'a> {
                     } else {
                         ExecutionNode::compute_behavior(node.behavior, func.behavior)
                     };
+                    // Honor a `Disk` request only where the output is
+                    // reproducible — an effectively `Impure` node is clamped to
+                    // memory-only (a `Once` composite freezes its interior, so
+                    // those stay persistable).
+                    e_node.persist = node.persist == CachePersistence::Disk
+                        && e_node.behavior != ExecutionBehavior::Impure;
                     e_node.name.clear();
                     e_node.name.push_str(&node.name);
 
