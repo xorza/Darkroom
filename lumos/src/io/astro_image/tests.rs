@@ -14,36 +14,6 @@ fn test_metadata_default() {
 }
 
 #[test]
-fn intensity_plane_and_par_map_pixels() {
-    let approx = |a: &[f32], b: &[f32]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6);
-
-    // intensity_plane: the channel itself for grayscale, (r+g+b)/3 for RGB; keeps the dimensions.
-    let gray = AstroImage::from_planar_channels(ImageDimensions::new((2, 1), 1), [vec![0.2, 0.8]]);
-    let plane = gray.intensity_plane();
-    assert_eq!(plane.width(), 2);
-    assert_eq!(plane.height(), 1);
-    assert_eq!(plane.pixels(), &[0.2, 0.8]);
-
-    let mut rgb = AstroImage::from_planar_channels(
-        ImageDimensions::new((2, 1), 3),
-        [vec![0.3, 0.6], vec![0.0, 0.6], vec![0.0, 0.6]],
-    );
-    assert!(approx(rgb.intensity_plane().pixels(), &[0.1, 0.6])); // (0.3+0+0)/3, (0.6+0.6+0.6)/3
-
-    // par_map_pixels dispatches L/Rgb once, then maps every channel of every pixel.
-    rgb.par_map_pixels(|l| l, |px| px.scale(2.0));
-    assert!(approx(rgb.channel(0).pixels(), &[0.6, 1.2]));
-    assert!(approx(rgb.channel(1).pixels(), &[0.0, 1.2]));
-    assert!(approx(rgb.channel(2).pixels(), &[0.0, 1.2]));
-
-    // The grayscale arm runs the `mono` closure (the `rgb` closure is never invoked here).
-    let mut g2 =
-        AstroImage::from_planar_channels(ImageDimensions::new((2, 1), 1), [vec![0.1, 0.5]]);
-    g2.par_map_pixels(|l| l + 0.25, |px| px);
-    assert!(approx(g2.channel(0).pixels(), &[0.35, 0.75]));
-}
-
-#[test]
 fn test_convert_to_imaginarium_image_grayscale() {
     let astro = AstroImage::from_pixels(
         ImageDimensions::new((3, 2), 1),

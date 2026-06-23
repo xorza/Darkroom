@@ -29,11 +29,12 @@ mod stretching;
 mod ml_support {
     use std::path::PathBuf;
 
-    use crate::color_calibration::{neutralize_background_planar, scnr_planar};
+    use crate::color_calibration::{neutralize_background, scnr};
     use crate::io::astro_image::AstroImage;
-    use crate::stretching::stretch_planar;
+    use crate::stretching::stretch;
     use crate::testing::calibration_dir;
     use crate::{ScnrMethod, StretchConfig};
+    use imaginarium::Image;
 
     /// Resolve caller-supplied ONNX weights: the `env_var` override, else `test_data/<default_file>`.
     /// Returns `None` (after a skip message) when absent — lumos ships no models, so the tests skip
@@ -59,13 +60,15 @@ mod ml_support {
 
     /// Load the bundled linear master, neutralize its background and apply the default STF stretch —
     /// the display-domain `[0, 1]` input the ML filters (StarNet / DeepSNR) are trained for.
-    pub(super) fn stretched_master() -> AstroImage {
-        let mut img = AstroImage::from_file(calibration_dir().join("stacked_light.tiff"))
-            .expect("load stacked_light.tiff");
+    pub(crate) fn stretched_master() -> Image {
+        let mut img = Image::from(
+            &AstroImage::from_file(calibration_dir().join("stacked_light.tiff"))
+                .expect("load stacked_light.tiff"),
+        );
 
-        neutralize_background_planar(&mut img);
-        stretch_planar(&mut img, StretchConfig::auto_stf());
-        scnr_planar(&mut img, ScnrMethod::AverageNeutral);
+        neutralize_background(&mut img);
+        stretch(&mut img, StretchConfig::auto_stf());
+        scnr(&mut img, ScnrMethod::AverageNeutral);
 
         img
     }

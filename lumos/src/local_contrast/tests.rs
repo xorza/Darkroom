@@ -1,17 +1,24 @@
-use super::{LocalContrastConfig, build_tile_luts, enhance_local_contrast_planar};
-use crate::io::astro_image::{AstroImage, ImageDimensions};
-use common::Vec2us;
-use imaginarium::Buffer2;
+use super::{LocalContrastConfig, build_tile_luts, enhance_local_contrast};
+use crate::image_ops::deinterleave_f32;
+use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
-fn gray(width: usize, height: usize, px: Vec<f32>) -> AstroImage {
-    AstroImage::from_planar_channels(ImageDimensions::new(Vec2us::new(width, height), 1), [px])
+fn gray(width: usize, height: usize, px: Vec<f32>) -> Image {
+    Image::from(&DeinterleavedImageData::from_channels([Buffer2::new(
+        width, height, px,
+    )]))
 }
 
-fn rgb(width: usize, height: usize, r: Vec<f32>, g: Vec<f32>, b: Vec<f32>) -> AstroImage {
-    AstroImage::from_planar_channels(
-        ImageDimensions::new(Vec2us::new(width, height), 3),
-        [r, g, b],
-    )
+fn rgb(width: usize, height: usize, r: Vec<f32>, g: Vec<f32>, b: Vec<f32>) -> Image {
+    Image::from(&DeinterleavedImageData::from_channels([
+        Buffer2::new(width, height, r),
+        Buffer2::new(width, height, g),
+        Buffer2::new(width, height, b),
+    ]))
+}
+
+/// Channel `c` of an image as a buffer (for assertions).
+fn channel(image: &Image, c: usize) -> Buffer2<f32> {
+    deinterleave_f32(image)[c].clone()
 }
 
 fn mean(d: &[f32]) -> f32 {
@@ -34,7 +41,7 @@ fn low_contrast(width: usize, height: usize) -> Vec<f32> {
 fn clahe_strength_zero_is_identity() {
     let px = low_contrast(64, 64);
     let mut img = gray(64, 64, px.clone());
-    enhance_local_contrast_planar(
+    enhance_local_contrast(
         &mut img,
         LocalContrastConfig {
             strength: 0.0,
@@ -42,7 +49,7 @@ fn clahe_strength_zero_is_identity() {
         },
     );
     assert_eq!(
-        img.channel(0).to_vec(),
+        channel(&img, 0).to_vec(),
         px,
         "strength 0 leaves the image untouched"
     );
@@ -54,8 +61,8 @@ fn clahe_output_stays_in_range() {
         .map(|i| ((i as f32 * 0.013).sin() * 0.5 + 0.5).clamp(0.0, 1.0))
         .collect();
     let mut img = gray(96, 96, px);
-    enhance_local_contrast_planar(&mut img, LocalContrastConfig::default());
-    for &v in &img.channel(0).to_vec() {
+    enhance_local_contrast(&mut img, LocalContrastConfig::default());
+    for &v in &channel(&img, 0).to_vec() {
         assert!((0.0..=1.0).contains(&v), "output in [0,1]: {v}");
     }
 }
@@ -64,8 +71,8 @@ fn clahe_output_stays_in_range() {
 fn clahe_flat_region_not_blown_up() {
     // Contrast-limited: a flat field must stay put, not get stretched to full range.
     let mut img = gray(64, 64, vec![0.5; 64 * 64]);
-    enhance_local_contrast_planar(&mut img, LocalContrastConfig::default());
-    let out = img.channel(0).to_vec();
+    enhance_local_contrast(&mut img, LocalContrastConfig::default());
+    let out = channel(&img, 0).to_vec();
     assert!(
         out.iter().all(|&v| (v - 0.5).abs() < 0.05),
         "flat 0.5 stays ~0.5 (mean {})",
@@ -79,7 +86,7 @@ fn clahe_increases_low_contrast() {
     let px = low_contrast(64, 64);
     let in_std = std_dev(&px);
     let mut img = gray(64, 64, px);
-    enhance_local_contrast_planar(
+    enhance_local_contrast(
         &mut img,
         LocalContrastConfig {
             tiles: 4,
@@ -87,7 +94,7 @@ fn clahe_increases_low_contrast() {
             strength: 1.0,
         },
     );
-    let out_std = std_dev(img.channel(0));
+    let out_std = std_dev(&channel(&img, 0));
     assert!(
         out_std > in_std,
         "local contrast expanded: {out_std} > {in_std}"
@@ -120,11 +127,11 @@ fn clahe_is_color_preserving() {
     let i: Vec<f32> = low_contrast(w, h); // use as the green/blue level
     let r: Vec<f32> = i.iter().map(|&v| (2.0 * v).min(1.0)).collect();
     let mut img = rgb(w, h, r, i.clone(), i.clone());
-    enhance_local_contrast_planar(&mut img, LocalContrastConfig::default());
+    enhance_local_contrast(&mut img, LocalContrastConfig::default());
     let (ro, go, bo) = (
-        img.channel(0).to_vec(),
-        img.channel(1).to_vec(),
-        img.channel(2).to_vec(),
+        channel(&img, 0).to_vec(),
+        channel(&img, 1).to_vec(),
+        channel(&img, 2).to_vec(),
     );
     assert_eq!(go, bo, "G and B stay equal");
     // Where red isn't clamped at 1, the 2:1 ratio is preserved.

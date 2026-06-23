@@ -1,9 +1,16 @@
-use super::{HdrConfig, compress_dynamic_range_planar};
-use crate::io::astro_image::{AstroImage, ImageDimensions};
-use common::Vec2us;
+use super::{HdrConfig, compress_dynamic_range};
+use crate::image_ops::deinterleave_f32;
+use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
-fn gray(width: usize, height: usize, px: Vec<f32>) -> AstroImage {
-    AstroImage::from_planar_channels(ImageDimensions::new(Vec2us::new(width, height), 1), [px])
+fn gray(width: usize, height: usize, px: Vec<f32>) -> Image {
+    Image::from(&DeinterleavedImageData::from_channels([Buffer2::new(
+        width, height, px,
+    )]))
+}
+
+/// Channel `c` of an image as a buffer (for assertions).
+fn channel(image: &Image, c: usize) -> Buffer2<f32> {
+    deinterleave_f32(image)[c].clone()
 }
 
 /// A smooth radial brightness dome — bright center (~1.0), dark corners (~0.1). The large-scale
@@ -24,14 +31,14 @@ fn dome(width: usize, height: usize) -> Vec<f32> {
 fn hdr_amount_zero_is_identity() {
     let px = dome(64, 64);
     let mut img = gray(64, 64, px.clone());
-    compress_dynamic_range_planar(
+    compress_dynamic_range(
         &mut img,
         HdrConfig {
             scales: 3,
             amount: 0.0,
         },
     );
-    for (a, b) in img.channel(0).to_vec().iter().zip(&px) {
+    for (a, b) in channel(&img, 0).to_vec().iter().zip(&px) {
         assert!((a - b).abs() < 1e-4, "amount 0 is the identity: {a} vs {b}");
     }
 }
@@ -45,14 +52,14 @@ fn hdr_compresses_large_scale_contrast() {
     let ci = (h / 2) * w + w / 2;
     let in_contrast = px[ci] - px[0];
     let mut img = gray(w, h, px);
-    compress_dynamic_range_planar(
+    compress_dynamic_range(
         &mut img,
         HdrConfig {
             scales: 3,
             amount: 0.5,
         },
     );
-    let out = img.channel(0).to_vec();
+    let out = channel(&img, 0).to_vec();
     let out_contrast = out[ci] - out[0];
     assert!(
         out_contrast < in_contrast * 0.7,
@@ -68,8 +75,8 @@ fn hdr_amount_controls_compression() {
     let ci = (h / 2) * w + w / 2;
     let contrast_at = |amount: f32| {
         let mut img = gray(w, h, px.clone());
-        compress_dynamic_range_planar(&mut img, HdrConfig { scales: 3, amount });
-        let o = img.channel(0).to_vec();
+        compress_dynamic_range(&mut img, HdrConfig { scales: 3, amount });
+        let o = channel(&img, 0).to_vec();
         o[ci] - o[0]
     };
     assert!(
@@ -92,14 +99,14 @@ fn hdr_preserves_fine_detail() {
         };
     }
     let mut img = gray(w, h, px.clone());
-    compress_dynamic_range_planar(
+    compress_dynamic_range(
         &mut img,
         HdrConfig {
             scales: 3,
             amount: 0.6,
         },
     );
-    let out = img.channel(0).to_vec();
+    let out = channel(&img, 0).to_vec();
     // Adjacent-pixel contrast along a dark row (corner side, no clipping) is the fine texture.
     let tex_in: f32 = (0..w - 1).map(|x| (px[x + 1] - px[x]).abs()).sum();
     let tex_out: f32 = (0..w - 1).map(|x| (out[x + 1] - out[x]).abs()).sum();
@@ -112,8 +119,8 @@ fn hdr_preserves_fine_detail() {
 #[test]
 fn hdr_output_stays_in_range() {
     let mut img = gray(96, 96, dome(96, 96));
-    compress_dynamic_range_planar(&mut img, HdrConfig::default());
-    for &v in &img.channel(0).to_vec() {
+    compress_dynamic_range(&mut img, HdrConfig::default());
+    for &v in &channel(&img, 0).to_vec() {
         assert!((0.0..=1.0).contains(&v), "output in [0,1]: {v}");
     }
 }

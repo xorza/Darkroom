@@ -13,6 +13,7 @@ use imaginarium::{ChannelCount, ChannelType, ColorFormat, Image};
 use std::ops::SubAssign;
 use std::path::Path;
 
+#[cfg(test)]
 use common::Rgb;
 use common::Vec2us;
 use imaginarium::{Buffer2, DeinterleavedImageData};
@@ -404,102 +405,6 @@ impl AstroImage {
     /// Get channel as mutable Buffer2 reference.
     pub fn channel_mut(&mut self, c: usize) -> &mut Buffer2<f32> {
         self.pixels.channel_mut(c)
-    }
-
-    /// Transform every pixel in place, in parallel. The grayscale/RGB layout is dispatched
-    /// **once**, then a homogeneous loop runs `mono` over each sample (grayscale) or `rgb` over
-    /// each [`Rgb`] pixel — so per-pixel code never re-checks the channel count.
-    pub(crate) fn par_map_pixels(
-        &mut self,
-        mono: impl Fn(f32) -> f32 + Sync,
-        rgb: impl Fn(Rgb) -> Rgb + Sync,
-    ) {
-        match &mut self.pixels {
-            PixelData::L(img) => img.channels[0]
-                .pixels_mut()
-                .par_iter_mut()
-                .for_each(|v| *v = mono(*v)),
-            PixelData::Rgb(img) => {
-                let [r, g, b] = &mut img.channels;
-                let (rp, gp, bp) = (r.pixels_mut(), g.pixels_mut(), b.pixels_mut());
-                rp.par_iter_mut()
-                    .zip(gp.par_iter_mut())
-                    .zip(bp.par_iter_mut())
-                    .for_each(|((rv, gv), bv)| {
-                        let out = rgb(Rgb {
-                            r: *rv,
-                            g: *gv,
-                            b: *bv,
-                        });
-                        *rv = out.r;
-                        *gv = out.g;
-                        *bv = out.b;
-                    });
-            }
-        }
-    }
-
-    /// Per-pixel combined intensity as a 2D plane: the channel itself for grayscale, `(r+g+b)/3`
-    /// for RGB. Keeps the image dimensions — a luminance plane, also usable as a sample set for
-    /// image statistics.
-    pub(crate) fn intensity_plane(&self) -> Buffer2<f32> {
-        match &self.pixels {
-            PixelData::L(img) => img.channels[0].clone(),
-            PixelData::Rgb(img) => {
-                let [r, g, b] = &img.channels;
-                let intensity = r
-                    .pixels()
-                    .iter()
-                    .zip(g.pixels())
-                    .zip(b.pixels())
-                    .map(|((&r, &g), &b)| Rgb { r, g, b }.intensity())
-                    .collect();
-                Buffer2::new(self.width(), self.height(), intensity)
-            }
-        }
-    }
-
-    /// Remap pixel intensity from the `intensity` plane to the `mapped` plane (both precomputed over
-    /// this image, matching its dimensions) in place. Hue-preserving: RGB channels are scaled by the
-    /// gain `mapped/intensity`, with a max-cap so a brightened channel can't clip past white and
-    /// shift hue; grayscale takes `mapped` directly. Output clamped to `[0, 1]`. Used by the
-    /// display-domain enhancers (`local_contrast`, `hdr`).
-    pub(crate) fn apply_intensity_remap(
-        &mut self,
-        intensity: &Buffer2<f32>,
-        mapped: &Buffer2<f32>,
-    ) {
-        match &mut self.pixels {
-            PixelData::L(img) => img.channels[0]
-                .pixels_mut()
-                .par_iter_mut()
-                .zip(mapped.pixels().par_iter())
-                .for_each(|(p, &m)| *p = m.clamp(0.0, 1.0)),
-            PixelData::Rgb(img) => {
-                let [r, g, b] = &mut img.channels;
-                let (rp, gp, bp) = (r.pixels_mut(), g.pixels_mut(), b.pixels_mut());
-                rp.par_iter_mut()
-                    .zip(gp.par_iter_mut())
-                    .zip(bp.par_iter_mut())
-                    .zip(intensity.pixels().par_iter())
-                    .zip(mapped.pixels().par_iter())
-                    .for_each(|((((rv, gv), bv), &i), &m)| {
-                        if i <= 0.0 {
-                            return;
-                        }
-                        let gain = m / i;
-                        let (mut nr, mut ng, mut nb) = (*rv * gain, *gv * gain, *bv * gain);
-                        let maxc = nr.max(ng).max(nb);
-                        if maxc > 1.0 {
-                            let s = 1.0 / maxc;
-                            nr *= s;
-                            ng *= s;
-                            nb *= s;
-                        }
-                        (*rv, *gv, *bv) = (nr.max(0.0), ng.max(0.0), nb.max(0.0));
-                    });
-            }
-        }
     }
 
     // ------------------------------------------------------------------------

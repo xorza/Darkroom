@@ -63,7 +63,7 @@ src/
 - `PixelData` (`mod.rs:154`): `L(Buffer2<f32>)` or `Rgb([Buffer2<f32>; 3])` — **planar**, one buffer per channel.
 - `BitPix` (`mod.rs:31`, FITS pixel type + `normalization_max()`), `ImageDimensions` (`mod.rs`, `size: Vec2us` + channels ∈ {1,3}), `AstroImageMetadata` (`mod.rs:103`, full FITS/EXIF header set + CFA/filter/gain/exposure/coords).
 - Entry points: `from_file` (`mod.rs:270`, dispatches FITS → `fits::load_fits`, RAW exts → `io::raw::load_raw`, else imaginarium), `from_pixels` (`mod.rs:300`, interleaved → planar), `from_planar_channels` (`mod.rs:329`). `mean()` (parallel Kahan).
-- Per-pixel transforms (used by `stretching`): `par_map_pixels(mono, rgb)` (`mod.rs:434`, rayon in-place map — dispatches `L`/`Rgb` once, then a homogeneous loop), `intensity_plane()` (`mod.rs:463`, combined `(r+g+b)/3` luminance as a `Buffer2`), and the `Rgb` value struct (`mod.rs:216`, `.intensity()` / `.scale()`).
+- The `Rgb` value struct (`mod.rs:216`, `.intensity()` / `.scale()`). Per-pixel display transforms now live in `image_ops` (`par_map_pixels` / `intensity_plane` / `apply_intensity_remap` / `deinterleave_f32` / `interleave_f32`) over the interleaved `imaginarium::Image`, not on `AstroImage`.
 - `cfa` (`CfaType` = `Mono | Bayer(CfaPattern) | XTrans([[u8;6];6])`; `CfaImage` un-demosaiced sensor data with in-place `subtract`/`divide_by_normalized` and `demosaic()` → `AstroImage`). Flat division uses **per-color-channel means** so non-white flats don't shift color.
 - `fits` (`fits-well` I/O, `physical()` BSCALE/BZERO scaling, NaN/Inf sanitization, ROWORDER/XBAYROFF flips), `sensor` (`detect_sensor_type(filters, colors)` from libraw metadata), `error` (`ImageError`).
 
@@ -137,7 +137,7 @@ src/
 
 ## stretching — non-linear display stretch
 
-`stretch(&mut AstroImage, StretchConfig)` (`stretching/mod.rs`) maps a *linear* stacked master to a display image. Input may exceed `[0,1]` (a raw stack's bright stars do); every curve clamps, so output is always `[0,1]`. Runs strictly after the linear-domain work (background extraction, color calibration). Algorithm derivations live in `docs/image-stretching.md`.
+`stretch(&mut imaginarium::Image, StretchConfig)` (`stretching/mod.rs`) maps a *linear* stacked master to a display image (the display/processing ops — `stretching`, `denoise`, `hdr`, `local_contrast`, `background_extraction`, `color_calibration` — all operate in place on the interleaved `imaginarium::Image` via `image_ops`). Input may exceed `[0,1]` (a raw stack's bright stars do); every curve clamps, so output is always `[0,1]`. Runs strictly after the linear-domain work (background extraction, color calibration). Algorithm derivations live in `docs/image-stretching.md`.
 
 - `StretchMethod`: `AutoStf{shadow_sigmas, target_background}` (MTF/STF screen-stretch — black point `median − k·σ`, midtones from the MTF self-inverse identity so the rescaled median lands on the target), `AutoAsinh{target_background}` (normalized arcsinh, `β` solved by log-space bisection so the background median maps to the target), `Asinh{beta}` (explicit). `StretchConfig::validate()` (called by `stretch`) panics on out-of-range params.
 - `ColorMode`: `ColorPreserving` (default — stretch the combined intensity `I=(r+g+b)/3`, scale every channel by `f(I)/I` with a hue-preserving highlight cap, so star color survives) or `PerChannel` (independent per-channel auto-stretch — auto-grays the background but ties color to brightness). No effect on grayscale.

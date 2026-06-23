@@ -4,12 +4,11 @@
 
 use common::Rgb;
 
-use crate::color_calibration::{
-    ScnrMethod, channel_backgrounds, neutralize_background_planar, scnr_planar,
-};
-use crate::stretching::stretch_planar;
+use crate::color_calibration::{ScnrMethod, channel_backgrounds, neutralize_background, scnr};
+use crate::stretching::stretch;
 use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{AstroImage, StretchConfig};
+use imaginarium::Image;
 
 fn spread(bg: Rgb) -> f32 {
     bg.r.max(bg.g).max(bg.b) - bg.r.min(bg.g).min(bg.b)
@@ -20,7 +19,9 @@ fn spread(bg: Rgb) -> f32 {
 fn neutralize_then_stretch_removes_green() {
     init_tracing();
 
-    let image = AstroImage::from_file(calibration_dir().join("stacked_light.tiff")).expect("load");
+    let image = Image::from(
+        &AstroImage::from_file(calibration_dir().join("stacked_light.tiff")).expect("load"),
+    );
 
     // The raw OSC stack has a colored (green-elevated) background: the per-channel backgrounds differ.
     let before = channel_backgrounds(&image);
@@ -36,7 +37,7 @@ fn neutralize_then_stretch_removes_green() {
 
     // Neutralize in the linear domain → background goes neutral (all channels to a common level).
     let mut img = image.clone();
-    neutralize_background_planar(&mut img);
+    neutralize_background(&mut img);
     let after = channel_backgrounds(&img);
     let spread_after = spread(after);
     eprintln!(
@@ -54,13 +55,13 @@ fn neutralize_then_stretch_removes_green() {
 
     // Neutralized → stretch → save (compare against the un-neutralized green stretch from
     // `stretching::real_data_tests`).
-    stretch_planar(&mut img, StretchConfig::auto_stf());
+    stretch(&mut img, StretchConfig::auto_stf());
     save_png(&img, "color/stacked_light_neutralized_stf.png");
 
     // Post-stretch Average-Neutral SCNR cleans any residual green left after neutralization.
-    scnr_planar(&mut img, ScnrMethod::AverageNeutral);
+    scnr(&mut img, ScnrMethod::AverageNeutral);
     save_png(&img, "color/stacked_light_neutralized_scnr.png");
 
-    neutralize_background_planar(&mut img);
+    neutralize_background(&mut img);
     save_png(&img, "color/stacked_light_neutralized_scnr_renorm.png");
 }

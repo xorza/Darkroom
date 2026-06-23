@@ -135,13 +135,14 @@ pub fn init_tracing() {
         .try_init();
 }
 
-/// Save an `AstroImage` as an 8-bit RGB file under `test_output/<name>`, creating the directory.
+/// Save an image as an 8-bit RGB file under `test_output/<name>`, creating the directory.
 /// 8-bit/JPEG output needs `RGB_U8`, so the (often `[0,1]`-float) image is converted first. Used by
 /// real-data tests to write viewable results for inspection.
-pub(crate) fn save_png(image: &AstroImage, name: &str) {
+pub(crate) fn save_png(image: &Image, name: &str) {
     let path = test_output_path(name);
     std::fs::create_dir_all(path.parent().unwrap()).expect("create test_output dir");
-    Image::from(image)
+    image
+        .clone()
         .convert(ColorFormat::RGB_U8)
         .expect("convert to RGB_U8")
         .save_file(&path)

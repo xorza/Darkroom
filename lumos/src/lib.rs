@@ -28,6 +28,7 @@ pub(crate) mod color_calibration;
 pub(crate) mod concurrency;
 pub(crate) mod denoise;
 pub(crate) mod hdr;
+pub(crate) mod image_ops;
 pub(crate) mod io;
 pub(crate) mod local_contrast;
 pub(crate) mod math;

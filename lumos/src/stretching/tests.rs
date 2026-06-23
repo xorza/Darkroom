@@ -1,17 +1,25 @@
 use super::*;
-use crate::io::astro_image::{AstroImage, ImageDimensions};
+use crate::image_ops::deinterleave_f32;
 use crate::math::statistics::median_f32_mut;
-use common::Vec2us;
+use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
-fn gray(width: usize, height: usize, px: Vec<f32>) -> AstroImage {
-    AstroImage::from_planar_channels(ImageDimensions::new(Vec2us::new(width, height), 1), [px])
+fn gray(width: usize, height: usize, px: Vec<f32>) -> Image {
+    Image::from(&DeinterleavedImageData::from_channels([Buffer2::new(
+        width, height, px,
+    )]))
 }
 
-fn rgb(width: usize, height: usize, r: Vec<f32>, g: Vec<f32>, b: Vec<f32>) -> AstroImage {
-    AstroImage::from_planar_channels(
-        ImageDimensions::new(Vec2us::new(width, height), 3),
-        [r, g, b],
-    )
+fn rgb(width: usize, height: usize, r: Vec<f32>, g: Vec<f32>, b: Vec<f32>) -> Image {
+    Image::from(&DeinterleavedImageData::from_channels([
+        Buffer2::new(width, height, r),
+        Buffer2::new(width, height, g),
+        Buffer2::new(width, height, b),
+    ]))
+}
+
+/// Channel `c` of an image as a buffer (for assertions).
+fn channel(image: &Image, c: usize) -> Buffer2<f32> {
+    deinterleave_f32(image)[c].clone()
 }
 
 fn median_of(v: &[f32]) -> f32 {
@@ -257,8 +265,8 @@ fn ghs_end_to_end_lifts_background_and_stays_in_range() {
     let mut px: Vec<f32> = (0..90).map(|i| 0.04 + (i % 3) as f32 * 0.01).collect();
     px.extend(std::iter::repeat_n(0.8f32, 10));
     let mut img = gray(10, 10, px.clone());
-    stretch_planar(&mut img, StretchConfig::ghs(5.0, 0.0, 0.1));
-    let out = img.channel(0).to_vec();
+    stretch(&mut img, StretchConfig::ghs(5.0, 0.0, 0.1));
+    let out = channel(&img, 0).to_vec();
     for &v in &out {
         assert!((0.0..=1.0).contains(&v), "output in [0,1]: {v}");
     }
@@ -276,10 +284,10 @@ fn color_preserving_keeps_channel_ratio_and_caps_highlights() {
         method: StretchMethod::Asinh { beta: 0.05 },
         color: ColorMode::ColorPreserving,
     };
-    stretch_planar(&mut img, cfg);
-    let r = img.channel(0).to_vec();
-    let g = img.channel(1).to_vec();
-    let b = img.channel(2).to_vec();
+    stretch(&mut img, cfg);
+    let r = channel(&img, 0).to_vec();
+    let g = channel(&img, 1).to_vec();
+    let b = channel(&img, 2).to_vec();
     // Pixel 0: ratio preserved, below the white point.
     assert!(
         (r[0] / g[0] - 2.0).abs() < 1e-3,
@@ -308,8 +316,8 @@ fn per_channel_neutralizes_color_preserving_keeps_it() {
     let mut linked = rgb(5, 1, r.clone(), g.clone(), b.clone());
     let mut unlinked = rgb(5, 1, r, g, b);
 
-    stretch_planar(&mut linked, StretchConfig::auto_stf());
-    stretch_planar(
+    stretch(&mut linked, StretchConfig::auto_stf());
+    stretch(
         &mut unlinked,
         StretchConfig {
             method: StretchMethod::AutoStf {
@@ -320,10 +328,10 @@ fn per_channel_neutralizes_color_preserving_keeps_it() {
         },
     );
 
-    let lr = linked.channel(0).to_vec();
-    let lg = linked.channel(1).to_vec();
-    let ur = unlinked.channel(0).to_vec();
-    let ug = unlinked.channel(1).to_vec();
+    let lr = channel(&linked, 0).to_vec();
+    let lg = channel(&linked, 1).to_vec();
+    let ur = channel(&unlinked, 0).to_vec();
+    let ug = channel(&unlinked, 1).to_vec();
     // Color-preserving keeps the red bias in the background.
     assert!(
         lr[0] > lg[0] + 0.1,
@@ -353,8 +361,8 @@ fn end_to_end_gray_auto_stf_brightens_background_to_target() {
     let input_median = median_of(&px);
 
     let mut img = gray(10, 10, px);
-    stretch_planar(&mut img, StretchConfig::auto_stf());
-    let out = img.channel(0).to_vec();
+    stretch(&mut img, StretchConfig::auto_stf());
+    let out = channel(&img, 0).to_vec();
 
     for &v in &out {
         assert!((0.0..=1.0).contains(&v), "output out of [0,1]: {v}");

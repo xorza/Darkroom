@@ -27,9 +27,9 @@
 use common::Rgb;
 use rayon::prelude::*;
 
-use crate::io::astro_image::AstroImage;
+use crate::image_ops::{deinterleave_f32, intensity_plane, interleave_f32, par_map_pixels};
 use crate::math::statistics::{mad_to_sigma, median_and_mad_f32_mut};
-use imaginarium::Image;
+use imaginarium::{Buffer2, Image};
 
 #[cfg(test)]
 mod tests;
@@ -81,7 +81,7 @@ pub enum ColorMode {
     PerChannel,
 }
 
-/// A stretch to apply to a stacked [`AstroImage`]. Output is always clamped to `[0, 1]`.
+/// A stretch to apply to a stacked image. Output is always clamped to `[0, 1]`.
 #[derive(Debug, Clone, Copy)]
 pub struct StretchConfig {
     pub method: StretchMethod,
@@ -188,33 +188,32 @@ fn assert_target_background(t: f32) {
 /// # Panics
 /// If `config` is out of range — see [`StretchConfig::validate`].
 pub fn stretch(image: &mut Image, config: StretchConfig) {
-    let mut astro = AstroImage::from(&*image);
-    stretch_planar(&mut astro, config);
-    *image = Image::from(&astro);
-}
-
-pub(crate) fn stretch_planar(image: &mut AstroImage, config: StretchConfig) {
     config.validate();
     match config.color {
         ColorMode::ColorPreserving => {
             // Auto methods derive the curve from the combined intensity (one curve for the image).
             let curve = explicit_curve(config.method).unwrap_or_else(|| {
                 build_curve(
-                    &mut subsample(image.intensity_plane().pixels()),
+                    &mut subsample(intensity_plane(image).pixels()),
                     config.method,
                 )
             });
-            apply_color_preserving(image, curve);
+            apply_color_preserving_image(image, curve);
         }
         ColorMode::PerChannel => {
-            // Each channel gets its own curve from its own statistics (auto methods only).
-            for c in 0..image.channels() {
-                let curve = explicit_curve(config.method).unwrap_or_else(|| {
-                    build_curve(&mut subsample(image.channel(c).pixels()), config.method)
-                });
-                apply_per_channel(image.channel_mut(c).pixels_mut(), curve);
-            }
+            let mut planes = deinterleave_f32(image);
+            stretch_per_channel(&mut planes, config.method);
+            *image = interleave_f32(planes);
         }
+    }
+}
+
+/// Per-channel stretch: each channel gets its own auto curve from its own statistics.
+fn stretch_per_channel(planes: &mut [Buffer2<f32>], method: StretchMethod) {
+    for plane in planes.iter_mut() {
+        let curve = explicit_curve(method)
+            .unwrap_or_else(|| build_curve(&mut subsample(plane.pixels()), method));
+        apply_per_channel(plane.pixels_mut(), curve);
     }
 }
 
@@ -515,33 +514,30 @@ fn map_slice<C: ToneCurve>(pixels: &mut [f32], curve: C) {
     pixels.par_iter_mut().for_each(|v| *v = curve.eval(*v));
 }
 
-/// Apply `curve` to the combined intensity and scale each channel by `f(I)/I`, with a
-/// hue-preserving cap when a channel would exceed 1. Resolves the curve type once.
-fn apply_color_preserving(image: &mut AstroImage, curve: Curve) {
-    match curve {
-        Curve::Stf(c) => map_color_preserving(image, c),
-        Curve::Asinh(c) => map_color_preserving(image, c),
-        Curve::Ghs(c) => map_color_preserving(image, c),
+/// Map one pixel under color-preserving stretch: run `curve` on the combined
+/// intensity and scale every channel by `f(I)/I`, with a hue-preserving highlight
+/// cap.
+fn color_preserve_pixel<C: ToneCurve>(px: Rgb, curve: &C) -> Rgb {
+    let intensity = px.intensity();
+    // Sub-background pixels (≤ 0, possible after background subtraction) map to black.
+    if intensity <= 0.0 {
+        return Rgb::ZERO;
+    }
+    let scaled = px.scale(curve.eval(intensity) / intensity);
+    // Hue-preserving highlight cap: when a channel exceeds 1, divide all three by the max.
+    let maxc = scaled.r.max(scaled.g).max(scaled.b);
+    if maxc > 1.0 {
+        scaled.scale(1.0 / maxc)
+    } else {
+        scaled
     }
 }
 
-fn map_color_preserving<C: ToneCurve>(image: &mut AstroImage, curve: C) {
-    image.par_map_pixels(
-        |l| curve.eval(l),
-        |px| {
-            let intensity = px.intensity();
-            // Sub-background pixels (≤ 0, possible after background subtraction) map to black.
-            if intensity <= 0.0 {
-                return Rgb::ZERO;
-            }
-            let scaled = px.scale(curve.eval(intensity) / intensity);
-            // Hue-preserving highlight cap: when a channel exceeds 1, divide all three by the max.
-            let maxc = scaled.r.max(scaled.g).max(scaled.b);
-            if maxc > 1.0 {
-                scaled.scale(1.0 / maxc)
-            } else {
-                scaled
-            }
-        },
-    );
+/// Color-preserving stretch on an interleaved `Image`. Resolves the curve type once.
+fn apply_color_preserving_image(image: &mut Image, curve: Curve) {
+    match curve {
+        Curve::Stf(c) => par_map_pixels(image, |l| c.eval(l), |px| color_preserve_pixel(px, &c)),
+        Curve::Asinh(c) => par_map_pixels(image, |l| c.eval(l), |px| color_preserve_pixel(px, &c)),
+        Curve::Ghs(c) => par_map_pixels(image, |l| c.eval(l), |px| color_preserve_pixel(px, &c)),
+    }
 }

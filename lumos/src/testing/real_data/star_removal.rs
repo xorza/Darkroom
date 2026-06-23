@@ -1,4 +1,5 @@
 use super::ml_support::{onnx_weights, stretched_master};
+use crate::image_ops::intensity_plane;
 use crate::ml::backend::TiledOnnxConfig;
 use crate::ml::star_removal::remove_stars;
 use crate::testing::{init_tracing, save_png};
@@ -30,8 +31,8 @@ fn starnet_removes_stars() {
 
     // The starless image is no brighter than the input, and a non-trivial amount of (positive) star
     // signal was removed.
-    let input = img.intensity_plane();
-    let starless = result.starless.intensity_plane();
+    let input = intensity_plane(&img);
+    let starless = intensity_plane(&result.starless);
     let in_max = max_of(input.pixels());
     let sl_max = max_of(starless.pixels());
     let removed: f32 = input

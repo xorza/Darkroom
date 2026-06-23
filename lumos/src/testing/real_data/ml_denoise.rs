@@ -1,13 +1,14 @@
 use super::ml_support::{onnx_weights, stretched_master};
-use crate::AstroImage;
+use crate::image_ops::intensity_plane;
 use crate::ml::backend::TiledOnnxConfig;
 use crate::ml::denoise::ml_denoise;
 use crate::testing::{init_tracing, save_png};
+use imaginarium::Image;
 
 /// Mean |adjacent-pixel difference| of the intensity — a high-frequency noise proxy (slow gradients
 /// cancel; pixel-scale grain is what a denoiser removes).
-fn mean_adjacent_diff(image: &AstroImage) -> f32 {
-    let plane = image.intensity_plane();
+fn mean_adjacent_diff(image: &Image) -> f32 {
+    let plane = intensity_plane(image);
     let w = plane.width();
     let px = plane.pixels();
     let (mut sum, mut n) = (0.0f32, 0u64);

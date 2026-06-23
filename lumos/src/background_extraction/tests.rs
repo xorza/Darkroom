@@ -1,6 +1,6 @@
 use super::*;
-use crate::io::astro_image::{AstroImage, ImageDimensions};
-use common::Vec2us;
+use crate::image_ops::deinterleave_f32;
+use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
 fn fill(w: usize, h: usize, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
     let mut v = vec![0.0f32; w * h];
@@ -12,8 +12,17 @@ fn fill(w: usize, h: usize, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
     v
 }
 
-fn gray(w: usize, h: usize, f: impl Fn(usize, usize) -> f32) -> AstroImage {
-    AstroImage::from_planar_channels(ImageDimensions::new(Vec2us::new(w, h), 1), [fill(w, h, f)])
+fn gray(w: usize, h: usize, f: impl Fn(usize, usize) -> f32) -> Image {
+    Image::from(&DeinterleavedImageData::from_channels([Buffer2::new(
+        w,
+        h,
+        fill(w, h, f),
+    )]))
+}
+
+/// Channel `c` of an image as a buffer (for assertions).
+fn channel(image: &Image, c: usize) -> Buffer2<f32> {
+    deinterleave_f32(image)[c].clone()
 }
 
 fn max_abs(p: &[f32]) -> f32 {
@@ -60,7 +69,7 @@ fn subtract_removes_linear_gradient() {
     // a + b·x + c·y over [0.5, 0.5+0.16+0.096] — a pure additive plane, no signal.
     let plane = |x: usize, y: usize| 0.5 + 0.0008 * x as f32 + 0.0006 * y as f32;
     let mut img = gray(w, h, plane);
-    extract_background_planar(
+    extract_background(
         &mut img,
         &BackgroundConfig {
             degree: 1,
@@ -69,22 +78,22 @@ fn subtract_removes_linear_gradient() {
         },
     );
     // A degree-1 surface represents the plane exactly; subtract leaves ≈ 0 everywhere.
-    let m = max_abs(img.channel(0).pixels());
+    let m = max_abs(channel(&img, 0).pixels());
     assert!(m < 1e-3, "linear gradient removed to ~0, got max abs {m}");
 }
 
 #[test]
 fn subtract_removes_pedestal_keeps_stars() {
     let (w, h) = (128, 128);
-    let mut img = gray(w, h, |_, _| 0.3);
     let stars = [(10, 10), (50, 80), (100, 30), (70, 70), (20, 110)];
-    {
-        let px = img.channel_mut(0).pixels_mut();
-        for &(x, y) in &stars {
-            px[y * w + x] = 0.95;
-        }
-    }
-    extract_background_planar(
+    let mut img = gray(
+        w,
+        h,
+        |x, y| {
+            if stars.contains(&(x, y)) { 0.95 } else { 0.3 }
+        },
+    );
+    extract_background(
         &mut img,
         &BackgroundConfig {
             degree: 2,
@@ -92,7 +101,7 @@ fn subtract_removes_pedestal_keeps_stars() {
             ..Default::default()
         },
     );
-    let out = img.channel(0).pixels();
+    let out = channel(&img, 0);
     // Per-tile sigma-clip rejects the lone star pixel, so the modeled sky is the 0.3 pedestal:
     // background → ~0, the star (0.95 − 0.3 = 0.65) survives.
     assert!(
@@ -119,7 +128,7 @@ fn divide_corrects_quadratic_vignette() {
     };
     let signal = 0.5f32;
     let mut img = gray(w, h, |x, y| signal * vignette(x, y));
-    extract_background_planar(
+    extract_background(
         &mut img,
         &BackgroundConfig {
             degree: 2,
@@ -130,7 +139,7 @@ fn divide_corrects_quadratic_vignette() {
     );
     // The quadratic vignette is exactly degree-2; dividing by the normalized model flattens it to a
     // constant (= signal·mean(vignette)).
-    let (lo, hi) = min_max(img.channel(0).pixels());
+    let (lo, hi) = min_max(channel(&img, 0).pixels());
     assert!(
         hi - lo < 0.01,
         "divide flattens the vignette: residual range {} (lo {lo} hi {hi})",
@@ -147,7 +156,7 @@ fn higher_degree_fits_cubic_better() {
     };
     let resid_energy = |degree| {
         let mut img = gray(w, h, cubic);
-        extract_background_planar(
+        extract_background(
             &mut img,
             &BackgroundConfig {
                 degree,
@@ -155,7 +164,7 @@ fn higher_degree_fits_cubic_better() {
                 ..Default::default()
             },
         );
-        energy(img.channel(0).pixels())
+        energy(channel(&img, 0).pixels())
     };
     let e1 = resid_energy(1);
     let e3 = resid_energy(3);
@@ -180,9 +189,12 @@ fn removes_independent_per_channel_gradients() {
     let r = fill(w, h, |x, _| 0.40 + 0.0010 * x as f32);
     let g = fill(w, h, |_, y| 0.30 + 0.0008 * y as f32);
     let b = fill(w, h, |x, y| 0.50 - 0.0005 * x as f32 + 0.0006 * y as f32);
-    let mut img =
-        AstroImage::from_planar_channels(ImageDimensions::new(Vec2us::new(w, h), 3), [r, g, b]);
-    extract_background_planar(
+    let mut img = Image::from(&DeinterleavedImageData::from_channels([
+        Buffer2::new(w, h, r),
+        Buffer2::new(w, h, g),
+        Buffer2::new(w, h, b),
+    ]));
+    extract_background(
         &mut img,
         &BackgroundConfig {
             degree: 1,
@@ -191,7 +203,7 @@ fn removes_independent_per_channel_gradients() {
         },
     );
     for c in 0..3 {
-        let m = max_abs(img.channel(c).pixels());
+        let m = max_abs(channel(&img, c).pixels());
         assert!(
             m < 1e-3,
             "channel {c} gradient removed independently, max abs {m}"

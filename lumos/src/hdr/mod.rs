@@ -7,9 +7,9 @@
 
 use rayon::prelude::*;
 
-use crate::io::astro_image::AstroImage;
+use crate::image_ops::{apply_intensity_remap, intensity_plane};
 use crate::wavelet::{StarletTransform, max_scales};
-use imaginarium::Image;
+use imaginarium::{Buffer2, Image};
 
 #[cfg(test)]
 mod tests;
@@ -56,18 +56,19 @@ impl HdrConfig {
 /// Computed on the combined intensity; color channels are rescaled hue-preservingly. Grayscale gets
 /// the compressed intensity directly.
 pub fn compress_dynamic_range(image: &mut Image, config: HdrConfig) {
-    let mut astro = AstroImage::from(&*image);
-    compress_dynamic_range_planar(&mut astro, config);
-    *image = Image::from(&astro);
+    config.validate();
+    let intensity = intensity_plane(image);
+    let mapped = hdr_map(&intensity, config);
+    apply_intensity_remap(image, &intensity, &mapped);
 }
 
-pub(crate) fn compress_dynamic_range_planar(image: &mut AstroImage, config: HdrConfig) {
-    config.validate();
-    let (w, h) = (image.width(), image.height());
+/// The starlet residual-flattening on the combined intensity plane;
+/// [`compress_dynamic_range`] computes the intensity, runs this, then remaps the
+/// image's channels to it.
+fn hdr_map(intensity: &Buffer2<f32>, config: HdrConfig) -> Buffer2<f32> {
+    let (w, h) = (intensity.width(), intensity.height());
     let scales = config.scales.min(max_scales(w, h));
-
-    let intensity = image.intensity_plane();
-    let mut transform = StarletTransform::forward(&intensity, scales);
+    let mut transform = StarletTransform::forward(intensity, scales);
 
     // Flatten the large-scale residual toward its mean by `amount` (keep = 1 − amount of the
     // deviation), leaving the detail layers untouched.
@@ -78,6 +79,5 @@ pub(crate) fn compress_dynamic_range_planar(image: &mut AstroImage, config: HdrC
         .pixels_mut()
         .par_iter_mut()
         .for_each(|v| *v = mean + keep * (*v - mean));
-    let mapped = transform.reconstruct();
-    image.apply_intensity_remap(&intensity, &mapped);
+    transform.reconstruct()
 }

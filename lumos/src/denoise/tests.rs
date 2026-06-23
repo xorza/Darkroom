@@ -1,6 +1,6 @@
-use super::{DenoiseConfig, Threshold, denoise_planar};
-use crate::io::astro_image::{AstroImage, ImageDimensions};
-use common::Vec2us;
+use super::{DenoiseConfig, Threshold, denoise};
+use crate::image_ops::deinterleave_f32;
+use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
 /// Deterministic xorshift64 + Box-Muller Gaussian, so noise tests are reproducible without a dep.
 struct Rng(u64);
@@ -32,15 +32,23 @@ impl Rng {
     }
 }
 
-fn gray(width: usize, height: usize, px: Vec<f32>) -> AstroImage {
-    AstroImage::from_planar_channels(ImageDimensions::new(Vec2us::new(width, height), 1), [px])
+fn gray(width: usize, height: usize, px: Vec<f32>) -> Image {
+    Image::from(&DeinterleavedImageData::from_channels([Buffer2::new(
+        width, height, px,
+    )]))
 }
 
-fn rgb(width: usize, height: usize, r: Vec<f32>, g: Vec<f32>, b: Vec<f32>) -> AstroImage {
-    AstroImage::from_planar_channels(
-        ImageDimensions::new(Vec2us::new(width, height), 3),
-        [r, g, b],
-    )
+fn rgb(width: usize, height: usize, r: Vec<f32>, g: Vec<f32>, b: Vec<f32>) -> Image {
+    Image::from(&DeinterleavedImageData::from_channels([
+        Buffer2::new(width, height, r),
+        Buffer2::new(width, height, g),
+        Buffer2::new(width, height, b),
+    ]))
+}
+
+/// Channel `c` of an image as a buffer (for assertions).
+fn channel(image: &Image, c: usize) -> Buffer2<f32> {
+    deinterleave_f32(image)[c].clone()
 }
 
 fn mean(data: &[f32]) -> f32 {
@@ -80,8 +88,8 @@ fn denoise_reduces_white_noise_and_preserves_mean() {
     let in_std = std_dev(&px);
 
     let mut img = gray(w, h, px);
-    denoise_planar(&mut img, DenoiseConfig::default());
-    let out = img.channel(0).to_vec();
+    denoise(&mut img, DenoiseConfig::default());
+    let out = channel(&img, 0).to_vec();
 
     let out_std = std_dev(&out);
     assert!(
@@ -101,22 +109,22 @@ fn higher_k_smooths_more() {
     let px = noisy(w, h, 0.5, 0.04, 7);
     let mut img2 = gray(w, h, px.clone());
     let mut img5 = gray(w, h, px);
-    denoise_planar(
+    denoise(
         &mut img2,
         DenoiseConfig {
             k: 2.0,
             ..Default::default()
         },
     );
-    denoise_planar(
+    denoise(
         &mut img5,
         DenoiseConfig {
             k: 5.0,
             ..Default::default()
         },
     );
-    let s2 = std_dev(img2.channel(0));
-    let s5 = std_dev(img5.channel(0));
+    let s2 = std_dev(&channel(&img2, 0));
+    let s5 = std_dev(&channel(&img5, 0));
     assert!(
         s5 < s2,
         "higher k thresholds more, leaving less noise: s5 {s5} vs s2 {s2}"
@@ -130,7 +138,7 @@ fn strength_zero_is_identity_and_blends_between() {
 
     // strength 0 removes nothing — bit-for-bit identity.
     let mut img0 = gray(w, h, px.clone());
-    denoise_planar(
+    denoise(
         &mut img0,
         DenoiseConfig {
             strength: 0.0,
@@ -138,7 +146,7 @@ fn strength_zero_is_identity_and_blends_between() {
         },
     );
     assert_eq!(
-        img0.channel(0).to_vec(),
+        channel(&img0, 0).to_vec(),
         px,
         "strength 0 leaves the image untouched"
     );
@@ -146,17 +154,17 @@ fn strength_zero_is_identity_and_blends_between() {
     // Partial strength sits strictly between no-op and full denoise.
     let mut half = gray(w, h, px.clone());
     let mut full = gray(w, h, px.clone());
-    denoise_planar(
+    denoise(
         &mut half,
         DenoiseConfig {
             strength: 0.5,
             ..Default::default()
         },
     );
-    denoise_planar(&mut full, DenoiseConfig::default());
+    denoise(&mut full, DenoiseConfig::default());
     let in_std = std_dev(&px);
-    let half_std = std_dev(half.channel(0));
-    let full_std = std_dev(full.channel(0));
+    let half_std = std_dev(&channel(&half, 0));
+    let full_std = std_dev(&channel(&full, 0));
     assert!(
         full_std < half_std && half_std < in_std,
         "blend ordering: full {full_std} < half {half_std} < in {in_std}"
@@ -169,22 +177,22 @@ fn hard_and_soft_thresholds_differ() {
     let px = noisy(w, h, 0.5, 0.05, 55);
     let mut hard = gray(w, h, px.clone());
     let mut soft = gray(w, h, px);
-    denoise_planar(
+    denoise(
         &mut hard,
         DenoiseConfig {
             threshold: Threshold::Hard,
             ..Default::default()
         },
     );
-    denoise_planar(
+    denoise(
         &mut soft,
         DenoiseConfig {
             threshold: Threshold::Soft,
             ..Default::default()
         },
     );
-    let hv = hard.channel(0).to_vec();
-    let sv = soft.channel(0).to_vec();
+    let hv = channel(&hard, 0).to_vec();
+    let sv = channel(&soft, 0).to_vec();
     assert!(hv != sv, "hard and soft produce different results");
     // Soft additionally shrinks the kept coefficients, so it is at least as smooth.
     assert!(
@@ -207,8 +215,8 @@ fn denoise_preserves_bright_feature() {
         }
     }
     let mut img = gray(w, h, px);
-    denoise_planar(&mut img, DenoiseConfig::default());
-    let out = img.channel(0).to_vec();
+    denoise(&mut img, DenoiseConfig::default());
+    let out = channel(&img, 0).to_vec();
 
     // 4x4 interior of the block stays near 0.9.
     let interior: Vec<f32> = (30..34)
@@ -240,9 +248,9 @@ fn denoise_is_per_channel_on_rgb() {
     let b = noisy(w, h, 0.5, 0.04, 6072);
     let in_std = [std_dev(&r), std_dev(&g), std_dev(&b)];
     let mut img = rgb(w, h, r, g, b);
-    denoise_planar(&mut img, DenoiseConfig::default());
+    denoise(&mut img, DenoiseConfig::default());
     for (c, &expected) in in_std.iter().enumerate() {
-        let out_std = std_dev(img.channel(c));
+        let out_std = std_dev(&channel(&img, c));
         assert!(
             out_std < expected,
             "channel {c} denoised: {out_std} < {expected}"
@@ -254,11 +262,11 @@ fn denoise_is_per_channel_on_rgb() {
 fn denoise_handles_images_smaller_than_the_kernel() {
     // Scale count clamps to the dimensions — these must not panic.
     let mut tiny = gray(3, 3, vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]);
-    denoise_planar(&mut tiny, DenoiseConfig::default());
+    denoise(&mut tiny, DenoiseConfig::default());
     let mut one = gray(1, 1, vec![0.42]);
-    denoise_planar(&mut one, DenoiseConfig::default());
+    denoise(&mut one, DenoiseConfig::default());
     assert!(
-        (one.channel(0).to_vec()[0] - 0.42).abs() < 1e-6,
+        (channel(&one, 0).to_vec()[0] - 0.42).abs() < 1e-6,
         "1x1 has no detail to remove"
     );
 }
@@ -267,7 +275,7 @@ fn denoise_handles_images_smaller_than_the_kernel() {
 #[should_panic(expected = "strength must be in")]
 fn validate_rejects_out_of_range_strength() {
     let mut img = gray(4, 4, vec![0.0; 16]);
-    denoise_planar(
+    denoise(
         &mut img,
         DenoiseConfig {
             strength: 1.5,
@@ -280,7 +288,7 @@ fn validate_rejects_out_of_range_strength() {
 #[should_panic(expected = "k must")]
 fn validate_rejects_nonpositive_k() {
     let mut img = gray(4, 4, vec![0.0; 16]);
-    denoise_planar(
+    denoise(
         &mut img,
         DenoiseConfig {
             k: 0.0,

@@ -9,11 +9,11 @@
 
 use std::path::PathBuf;
 
-use common::Vec2us;
 use ort::session::Session;
 use ort::value::Tensor;
 
-use crate::io::astro_image::{AstroImage, ImageDimensions};
+use crate::image_ops::{deinterleave_f32, interleave_f32};
+use imaginarium::{Buffer2, Image};
 
 /// The fixed model processing window — these nets take a `[1, 512, 512, 3]` (NHWC) input.
 const WINDOW: usize = 512;
@@ -54,13 +54,12 @@ fn model_err(e: ort::Error) -> MlError {
 }
 
 /// Run the model over `image` in 512² tiles (NHWC `[0,1]` in, NHWC out), feather-blending the
-/// overlaps. Returns the output as an `AstroImage` with the same channel count as the input
-/// (grayscale is replicated to RGB for the model, then averaged back). Expects display-domain data.
-pub(crate) fn run_tiled(
-    image: &AstroImage,
-    config: &TiledOnnxConfig,
-) -> Result<AstroImage, MlError> {
-    let (w, h) = (image.width(), image.height());
+/// overlaps. Returns the output as an `Image` with the same channel count as the input (grayscale
+/// is replicated to RGB for the model, then averaged back). Expects a display-domain f32 master
+/// (`L_F32` or `RGB_F32`).
+pub(crate) fn run_tiled(image: &Image, config: &TiledOnnxConfig) -> Result<Image, MlError> {
+    let planes = deinterleave_f32(image);
+    let (w, h) = (image.desc.width, image.desc.height);
     if w < WINDOW || h < WINDOW {
         return Err(MlError::TooSmall(w, h));
     }
@@ -78,7 +77,7 @@ pub(crate) fn run_tiled(
     for &ty in &ys {
         for &tx in &xs {
             let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
-            fill_tile_input(image, tx, ty, &mut input);
+            fill_tile_input(&planes, tx, ty, &mut input);
             let tensor =
                 Tensor::from_array(([1usize, WINDOW, WINDOW, 3], input)).map_err(model_err)?;
             let outputs = session.run(ort::inputs![tensor]).map_err(model_err)?;
@@ -93,7 +92,7 @@ pub(crate) fn run_tiled(
             accumulate(tile, tx, ty, w, &mut acc, &mut weight);
         }
     }
-    Ok(build_output(image, &acc, &weight))
+    Ok(build_output(planes.len() == 3, &acc, &weight, w, h))
 }
 
 /// Tile origins covering `dim` with 512-px windows at `stride`, the last one flush to the edge.
@@ -113,16 +112,12 @@ fn tile_starts(dim: usize, stride: usize) -> Vec<usize> {
 
 /// Fill the NHWC `[1,512,512,3]` model input from the tile at `(tx, ty)`, clamped to `[0,1]`.
 /// Grayscale replicates its single channel to R=G=B.
-fn fill_tile_input(image: &AstroImage, tx: usize, ty: usize, input: &mut [f32]) {
-    let w = image.width();
-    let chans: [&[f32]; 3] = if image.is_rgb() {
-        [
-            image.channel(0).pixels(),
-            image.channel(1).pixels(),
-            image.channel(2).pixels(),
-        ]
+fn fill_tile_input(planes: &[Buffer2<f32>], tx: usize, ty: usize, input: &mut [f32]) {
+    let w = planes[0].width();
+    let chans: [&[f32]; 3] = if planes.len() == 3 {
+        [planes[0].pixels(), planes[1].pixels(), planes[2].pixels()]
     } else {
-        let c = image.channel(0).pixels();
+        let c = planes[0].pixels();
         [c, c, c]
     };
     for hh in 0..WINDOW {
@@ -167,25 +162,25 @@ fn accumulate(
     }
 }
 
-/// Normalize the feather-weighted accumulation into an `AstroImage` matching the input's channels.
-fn build_output(image: &AstroImage, acc: &[Vec<f32>; 3], weight: &[f32]) -> AstroImage {
-    let (w, h) = (image.width(), image.height());
-    if image.is_rgb() {
-        let channels: Vec<Vec<f32>> = (0..3)
+/// Normalize the feather-weighted accumulation into an `Image` matching the input's channels.
+fn build_output(rgb: bool, acc: &[Vec<f32>; 3], weight: &[f32], w: usize, h: usize) -> Image {
+    if rgb {
+        let planes: Vec<Buffer2<f32>> = (0..3)
             .map(|c| {
-                acc[c]
+                let px = acc[c]
                     .iter()
                     .zip(weight)
                     .map(|(&a, &wt)| (a / wt).clamp(0.0, 1.0))
-                    .collect()
+                    .collect();
+                Buffer2::new(w, h, px)
             })
             .collect();
-        AstroImage::from_planar_channels(ImageDimensions::new(Vec2us::new(w, h), 3), channels)
+        interleave_f32(planes)
     } else {
         // Average the three model output channels back to grayscale.
         let gray: Vec<f32> = (0..w * h)
             .map(|i| ((acc[0][i] + acc[1][i] + acc[2][i]) / (3.0 * weight[i])).clamp(0.0, 1.0))
             .collect();
-        AstroImage::from_planar_channels(ImageDimensions::new(Vec2us::new(w, h), 1), [gray])
+        interleave_f32(vec![Buffer2::new(w, h, gray)])
     }
 }

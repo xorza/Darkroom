@@ -54,7 +54,7 @@ let (_shape, out): (_, &[f32]) = outputs[0].try_extract_tensor::<f32>()?; // NHW
 
 `run_tiled` does this over 512² tiles at `stride` (default 256, last flush to the edge) and
 **feather-blends** overlaps (ramped window, weight ∈ `[0.02, 1]`, `Σ out·w / Σ w`), returning an
-`AstroImage` with the input's channel count. The two filters are thin wrappers:
+`Image` with the input's channel count. The two filters are thin wrappers:
 
 - **`remove_stars`** → `run_tiled` = starless; `stars = unscreen(original, starless)` (screen inverse).
 - **`ml_denoise`** → `run_tiled` = the denoised image.

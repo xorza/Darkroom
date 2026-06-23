@@ -3,18 +3,20 @@
 //! on the **stretched** master to flatten the display-domain background, saving a viewable
 //! before/after. Gated behind the `real-data` feature.
 
-use crate::background_extraction::extract_background_planar;
-use crate::color_calibration::{neutralize_background_planar, scnr_planar};
+use crate::background_extraction::extract_background;
+use crate::color_calibration::{neutralize_background, scnr};
+use crate::image_ops::intensity_plane;
 use crate::math::statistics::median_f32_mut;
-use crate::stretching::stretch_planar;
+use crate::stretching::stretch;
 use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{AstroImage, BackgroundConfig, ScnrMethod, StretchConfig};
+use imaginarium::Image;
 
 /// Max−min of the robust background level across the four corners of the intensity plane — a proxy
 /// for the corner-to-corner gradient. A light-pollution gradient makes opposite corners differ;
 /// flattening the background drives them together.
-fn corner_background_spread(image: &AstroImage) -> f32 {
-    let plane = image.intensity_plane();
+fn corner_background_spread(image: &Image) -> f32 {
+    let plane = intensity_plane(image);
     let (w, h) = (plane.width(), plane.height());
     let px = plane.pixels();
     let patch = 256.min(w / 4).min(h / 4);
@@ -46,11 +48,12 @@ fn extract_flattens_background_on_stretched_master() {
     init_tracing();
 
     // The display-domain master, as the other real-data tests build it.
-    let mut img =
-        AstroImage::from_file(calibration_dir().join("stacked_light.tiff")).expect("load");
-    neutralize_background_planar(&mut img);
-    stretch_planar(&mut img, StretchConfig::auto_stf());
-    scnr_planar(&mut img, ScnrMethod::AverageNeutral);
+    let mut img = Image::from(
+        &AstroImage::from_file(calibration_dir().join("stacked_light.tiff")).expect("load"),
+    );
+    neutralize_background(&mut img);
+    stretch(&mut img, StretchConfig::auto_stf());
+    scnr(&mut img, ScnrMethod::AverageNeutral);
     save_png(&img, "bg_extraction/stretched.png");
 
     let before = corner_background_spread(&img);
@@ -58,8 +61,8 @@ fn extract_flattens_background_on_stretched_master() {
     // Model and subtract the smooth background per channel, then re-neutralize so the now-flattened
     // background sits at a viewable level (subtraction pulls it toward zero).
     let mut extracted = img.clone();
-    extract_background_planar(&mut extracted, &BackgroundConfig::default());
-    neutralize_background_planar(&mut extracted);
+    extract_background(&mut extracted, &BackgroundConfig::default());
+    neutralize_background(&mut extracted);
     save_png(&extracted, "bg_extraction/extracted.png");
 
     let after = corner_background_spread(&extracted);

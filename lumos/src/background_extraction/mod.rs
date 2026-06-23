@@ -16,7 +16,7 @@ use imaginarium::Buffer2;
 use nalgebra::{DMatrix, DVector};
 
 use crate::background_mesh::TileGrid;
-use crate::io::astro_image::AstroImage;
+use crate::image_ops::{deinterleave_f32, interleave_f32};
 use crate::math::statistics::MAD_TO_SIGMA;
 use imaginarium::Image;
 
@@ -95,16 +95,16 @@ impl BackgroundConfig {
 /// Model and remove the smooth background of `image` in place, **per channel**. Operates on linear
 /// data: the output background sits at ≈0 (slightly negative on noise — kept signed, not clamped).
 pub fn extract_background(image: &mut Image, config: &BackgroundConfig) {
-    let mut astro = AstroImage::from(&*image);
-    extract_background_planar(&mut astro, config);
-    *image = Image::from(&astro);
+    let mut planes = deinterleave_f32(image);
+    extract_background_core(&mut planes, config);
+    *image = interleave_f32(planes);
 }
 
-pub(crate) fn extract_background_planar(image: &mut AstroImage, config: &BackgroundConfig) {
+/// The per-channel background fit + removal, over channel planes (1 for L, 3 for RGB).
+fn extract_background_core(planes: &mut [Buffer2<f32>], config: &BackgroundConfig) {
     config.validate();
-    for c in 0..image.channels() {
-        let model = model_channel(image.channel(c), config);
-        let plane = image.channel_mut(c);
+    for plane in planes.iter_mut() {
+        let model = model_channel(plane, config);
         match config.mode {
             BackgroundMode::Subtract => {
                 for (p, &m) in plane.pixels_mut().iter_mut().zip(model.pixels()) {

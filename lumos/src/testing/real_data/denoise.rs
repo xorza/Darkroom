@@ -2,18 +2,21 @@
 //! the linear domain, then stretch and SCNR into a viewable image — saving only the final result.
 //! Gated behind the `real-data` feature.
 
-use crate::color_calibration::{ScnrMethod, neutralize_background_planar, scnr_planar};
-use crate::denoise::{DenoiseConfig, denoise_planar};
+use crate::AstroImage;
+use crate::StretchConfig;
+use crate::color_calibration::{ScnrMethod, neutralize_background, scnr};
+use crate::denoise::{DenoiseConfig, denoise};
+use crate::image_ops::deinterleave_f32;
 use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
-use crate::stretching::stretch_planar;
+use crate::stretching::stretch;
 use crate::testing::{calibration_dir, init_tracing, save_png};
-use crate::{AstroImage, StretchConfig};
+use imaginarium::Image;
 
 /// Robust high-frequency noise of a channel: the MAD-sigma of adjacent-pixel differences. Slow
 /// gradients and extended signal cancel in the difference, so this isolates the pixel-scale noise
 /// that denoising removes (unlike a global sigma, which is dominated by real structure).
-fn highfreq_noise(image: &AstroImage, channel: usize) -> f32 {
-    let buf = image.channel(channel);
+fn highfreq_noise(image: &Image, channel: usize) -> f32 {
+    let buf = deinterleave_f32(image)[channel].clone();
     let width = buf.width();
     let px = buf.pixels();
     let n = px.len();
@@ -35,15 +38,16 @@ fn highfreq_noise(image: &AstroImage, channel: usize) -> f32 {
 fn denoise_reduces_linear_noise() {
     init_tracing();
 
-    let mut img =
-        AstroImage::from_file(calibration_dir().join("stacked_light.tiff")).expect("load");
+    let mut img = Image::from(
+        &AstroImage::from_file(calibration_dir().join("stacked_light.tiff")).expect("load"),
+    );
 
     // Neutralize the background first so denoising runs on color-calibrated linear data.
-    neutralize_background_planar(&mut img);
+    neutralize_background(&mut img);
 
     // Measure pixel-scale noise per channel before and after denoising (both in the linear domain).
     let before: Vec<f32> = (0..3).map(|c| highfreq_noise(&img, c)).collect();
-    denoise_planar(&mut img, DenoiseConfig::default());
+    denoise(&mut img, DenoiseConfig::default());
     let after: Vec<f32> = (0..3).map(|c| highfreq_noise(&img, c)).collect();
 
     for c in 0..3 {
@@ -62,7 +66,7 @@ fn denoise_reduces_linear_noise() {
     }
 
     // Finish the display chain — stretch then clean any residual green — and save the final image.
-    stretch_planar(&mut img, StretchConfig::auto_stf());
-    scnr_planar(&mut img, ScnrMethod::AverageNeutral);
+    stretch(&mut img, StretchConfig::auto_stf());
+    scnr(&mut img, ScnrMethod::AverageNeutral);
     save_png(&img, "denoise/stacked_light_denoised.png");
 }

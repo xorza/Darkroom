@@ -9,7 +9,7 @@
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::io::astro_image::AstroImage;
+use crate::image_ops::{apply_intensity_remap, intensity_plane};
 use imaginarium::Image;
 
 #[cfg(test)]
@@ -63,22 +63,23 @@ impl LocalContrastConfig {
 /// Computed on the combined intensity; color channels are rescaled hue-preservingly. Grayscale gets
 /// the mapping directly.
 pub fn enhance_local_contrast(image: &mut Image, config: LocalContrastConfig) {
-    let mut astro = AstroImage::from(&*image);
-    enhance_local_contrast_planar(&mut astro, config);
-    *image = Image::from(&astro);
+    config.validate();
+    let intensity = intensity_plane(image);
+    let mapped = clahe_map(&intensity, config);
+    apply_intensity_remap(image, &intensity, &mapped);
 }
 
-pub(crate) fn enhance_local_contrast_planar(image: &mut AstroImage, config: LocalContrastConfig) {
-    config.validate();
-    let intensity = image.intensity_plane();
+/// The CLAHE mapping on the combined intensity plane; [`enhance_local_contrast`]
+/// computes the intensity, runs this, then remaps the image's channels to it.
+fn clahe_map(intensity: &Buffer2<f32>, config: LocalContrastConfig) -> Buffer2<f32> {
     // Keep each tile well-populated (≳ 4·N_BINS pixels) so the clipped-histogram CDF is meaningful;
     // on a small image this caps the requested tile count (a no-op on a real megapixel frame).
-    let max_tiles =
-        (((image.width() * image.height()) as f64 / (4 * N_BINS) as f64).sqrt() as usize).max(1);
+    let max_tiles = (((intensity.width() * intensity.height()) as f64 / (4 * N_BINS) as f64).sqrt()
+        as usize)
+        .max(1);
     let tiles = config.tiles.min(max_tiles);
-    let luts = build_tile_luts(&intensity, tiles, config.clip_limit);
-    let mapped = apply_luts(&intensity, &luts, tiles, config.strength);
-    image.apply_intensity_remap(&intensity, &mapped);
+    let luts = build_tile_luts(intensity, tiles, config.clip_limit);
+    apply_luts(intensity, &luts, tiles, config.strength)
 }
 
 /// One mapping LUT per tile (`tiles*tiles`, row-major), each `bin → [0,1]` from the clipped CDF.

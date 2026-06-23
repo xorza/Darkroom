@@ -2,11 +2,13 @@
 //! write viewable JPEGs for visual inspection. Gated behind the `real-data` feature (the dataset
 //! lives in `test_data/lumos_data/`).
 
-use crate::color_calibration::{neutralize_background_planar, scnr_planar};
+use crate::color_calibration::{neutralize_background, scnr};
+use crate::image_ops::intensity_plane;
 use crate::math::statistics::median_f32_mut;
-use crate::stretching::stretch_planar;
+use crate::stretching::stretch;
 use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{AstroImage, ColorMode, ScnrMethod, StretchConfig, StretchMethod};
+use imaginarium::Image;
 
 #[derive(Debug)]
 struct Stats {
@@ -32,18 +34,18 @@ fn stretch_stacked_light() {
     init_tracing();
 
     let path = calibration_dir().join("stacked_light.tiff");
-    let mut image = AstroImage::from_file(&path).expect("load stacked_light.tiff");
-    let (w, h, ch) = (image.width(), image.height(), image.channels());
-    assert!(w > 0 && h > 0);
+    let mut image = Image::from(&AstroImage::from_file(&path).expect("load stacked_light.tiff"));
+    let desc = image.desc;
+    assert!(desc.width > 0 && desc.height > 0);
 
-    neutralize_background_planar(&mut image);
+    neutralize_background(&mut image);
 
     // A linear stacked deep-sky frame, before any display stretch: the calibrated background sits at
     // zero (a near-zero median — symmetric read noise dips some background pixels slightly negative,
     // which is correct calibration, not a defect) with a bright stellar tail whose peaks exceed 1.
     // The stretch caps the display output back into [0,1].
-    let input = stats(image.intensity_plane().pixels());
-    eprintln!("input {w}x{h} {ch}ch: {input:?}");
+    let input = stats(intensity_plane(&image).pixels());
+    eprintln!("input {}x{}: {input:?}", desc.width, desc.height);
     assert!(
         input.median.abs() < 0.05,
         "a calibrated linear background sits at zero: {input:?}"
@@ -61,9 +63,9 @@ fn stretch_stacked_light() {
         ("ghs", StretchConfig::ghs(5000.0, -1.0, 0.0)),
     ] {
         let mut stretched = image.clone();
-        stretch_planar(&mut stretched, config);
+        stretch(&mut stretched, config);
 
-        let out = stats(stretched.intensity_plane().pixels());
+        let out = stats(intensity_plane(&stretched).pixels());
         eprintln!("{name}: {out:?}");
 
         assert!(
@@ -81,7 +83,7 @@ fn stretch_stacked_light() {
             "{name} spreads contrast across the range: {out:?}"
         );
 
-        scnr_planar(&mut stretched, ScnrMethod::AverageNeutral);
+        scnr(&mut stretched, ScnrMethod::AverageNeutral);
         save_png(&stretched, &format!("stretch/stacked_light_{name}.png"));
     }
 
@@ -91,8 +93,8 @@ fn stretch_stacked_light() {
     // background dark and `hp` protecting the star cores. Far easier to focus on the Milky Way than
     // tuning GHS cold on linear data.
     let mut staged = image.clone();
-    stretch_planar(&mut staged, StretchConfig::auto_asinh());
-    stretch_planar(
+    stretch(&mut staged, StretchConfig::auto_asinh());
+    stretch(
         &mut staged,
         StretchConfig {
             method: StretchMethod::Ghs {
@@ -105,12 +107,12 @@ fn stretch_stacked_light() {
             color: ColorMode::ColorPreserving,
         },
     );
-    let out = stats(staged.intensity_plane().pixels());
+    let out = stats(intensity_plane(&staged).pixels());
     eprintln!("asinh+ghs: {out:?}");
     assert!(
         out.min >= 0.0 && out.max <= 1.0 + 1e-3,
         "asinh+ghs output stays in [0,1]: {out:?}"
     );
-    scnr_planar(&mut staged, ScnrMethod::AverageNeutral);
+    scnr(&mut staged, ScnrMethod::AverageNeutral);
     save_png(&staged, "stretch/stacked_light_asinh_ghs.png");
 }

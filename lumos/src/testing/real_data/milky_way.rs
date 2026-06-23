@@ -4,24 +4,26 @@
 //! Milky Way. Writes the stretched base and the enhanced result for side-by-side visual comparison.
 //! Gated behind the `real-data` feature.
 
-use crate::color_calibration::{neutralize_background_planar, scnr_planar};
-use crate::denoise::denoise_planar;
-use crate::hdr::compress_dynamic_range_planar;
-use crate::local_contrast::enhance_local_contrast_planar;
+use crate::color_calibration::{neutralize_background, scnr};
+use crate::denoise::denoise;
+use crate::hdr::compress_dynamic_range;
+use crate::image_ops::intensity_plane;
+use crate::local_contrast::enhance_local_contrast;
 use crate::math::statistics::median_f32_mut;
-use crate::stretching::stretch_planar;
+use crate::stretching::stretch;
 use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{
     AstroImage, ColorMode, DenoiseConfig, HdrConfig, LocalContrastConfig, ScnrMethod,
     StretchConfig, StretchMethod,
 };
+use imaginarium::Image;
 
-fn median(image: &AstroImage) -> f32 {
-    median_f32_mut(&mut image.intensity_plane().into_vec())
+fn median(image: &Image) -> f32 {
+    median_f32_mut(&mut intensity_plane(image).into_vec())
 }
 
-fn assert_displayable(image: &AstroImage, label: &str) {
-    let plane = image.intensity_plane();
+fn assert_displayable(image: &Image, label: &str) {
+    let plane = intensity_plane(image);
     let (min, max) = plane
         .pixels()
         .iter()
@@ -42,14 +44,14 @@ fn assert_displayable(image: &AstroImage, label: &str) {
 fn milky_way_best_pipeline() {
     init_tracing();
     let path = calibration_dir().join("stacked_light.tiff");
-    let mut img = AstroImage::from_file(&path).expect("load stacked_light.tiff");
+    let mut img = Image::from(&AstroImage::from_file(&path).expect("load stacked_light.tiff"));
 
     // --- Linear domain (before the stretch): colour-calibrate, then denoise. ---
-    neutralize_background_planar(&mut img); // equalize the green-elevated background
-    denoise_planar(&mut img, DenoiseConfig::default()); // gentle wavelet denoise (MW-tuned default)
+    neutralize_background(&mut img); // equalize the green-elevated background
+    denoise(&mut img, DenoiseConfig::default()); // gentle wavelet denoise (MW-tuned default)
 
     // --- Stretch + green removal, as in the neutralize / SCNR / renorm reference image. ---
-    stretch_planar(
+    stretch(
         &mut img,
         StretchConfig {
             method: StretchMethod::AutoStf {
@@ -59,22 +61,8 @@ fn milky_way_best_pipeline() {
             color: ColorMode::ColorPreserving,
         },
     );
-    // stretch_planar(&mut img, StretchConfig::auto_asinh());
-    // stretch_planar(
-    //     &mut img,
-    //     StretchConfig {
-    //         method: StretchMethod::Ghs {
-    //             d: 3.0,
-    //             b: 0.0,
-    //             sp: 0.3,
-    //             lp: 0.15,
-    //             hp: 0.9,
-    //         },
-    //         color: ColorMode::ColorPreserving,
-    //     },
-    // );
-    scnr_planar(&mut img, ScnrMethod::AverageNeutral);
-    neutralize_background_planar(&mut img); // re-neutralize the now-display-domain background
+    scnr(&mut img, ScnrMethod::AverageNeutral);
+    neutralize_background(&mut img); // re-neutralize the now-display-domain background
     eprintln!("stretched base: median {:.3}", median(&img));
     assert_displayable(&img, "stretched base");
     save_png(&img, "milky_way/stretched.png");
@@ -82,7 +70,7 @@ fn milky_way_best_pipeline() {
     // --- Display-domain enhancement, tuned for a wide-angle Milky Way. ---
     // HDR: gently compress the bright star-cloud cores to reveal detail (small amount; too much
     // flattens the large-scale brightness).
-    compress_dynamic_range_planar(
+    compress_dynamic_range(
         &mut img,
         HdrConfig {
             scales: 6,
@@ -91,7 +79,7 @@ fn milky_way_best_pipeline() {
     );
     // Local contrast: pop the dust lanes / dark rifts (modest clip + strength so it doesn't crush
     // the background or over-sharpen the dense starfield).
-    enhance_local_contrast_planar(
+    enhance_local_contrast(
         &mut img,
         LocalContrastConfig {
             tiles: 8,
@@ -99,7 +87,7 @@ fn milky_way_best_pipeline() {
             strength: 0.6,
         },
     );
-    scnr_planar(&mut img, ScnrMethod::AverageNeutral); // final green touch-up after the enhancement
+    scnr(&mut img, ScnrMethod::AverageNeutral); // final green touch-up after the enhancement
 
     eprintln!("enhanced: median {:.3}", median(&img));
     assert_displayable(&img, "enhanced");
