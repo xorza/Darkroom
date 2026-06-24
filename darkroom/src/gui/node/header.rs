@@ -189,7 +189,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                 let persist_toggled = Badge {
                     salt: "badge_c",
                     glyph: "C",
-                    color: theme.text_muted,
+                    color: theme.badge_cache,
                     filled: node.persist,
                     wid: Some(persist_badge_wid(node.id)),
                     tip: "Cache to disk — persist output across runs",
