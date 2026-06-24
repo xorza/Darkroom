@@ -51,7 +51,7 @@ impl FrameHarness {
         let func_lib = Arc::new(func_lib);
 
         let (tx, compute_rx) = mpsc::channel(cap);
-        let worker = Worker::new(move |report| {
+        let worker = Worker::new(None, move |report| {
             // The fixture only asserts on final stats; drop live progress.
             if let WorkerReport::Finished(result) = report {
                 tx.try_send(result).ok();
@@ -443,7 +443,7 @@ async fn execute_terminals_triggers_terminal_nodes() {
     );
 
     let (compute_finish_tx, mut compute_finish_rx) = mpsc::channel(8);
-    let worker = Worker::new(move |report| {
+    let worker = Worker::new(None, move |report| {
         if let WorkerReport::Finished(result) = report {
             compute_finish_tx.try_send(result).ok();
         }
@@ -487,7 +487,7 @@ async fn worker_streams_node_progress_before_finished() {
 
     // Capture the full report stream (progress + final), unlike the fixture.
     let (tx, mut rx) = mpsc::channel::<WorkerReport>(16);
-    let worker = Worker::new(move |report| {
+    let worker = Worker::new(None, move |report| {
         tx.try_send(report).ok();
     });
     worker
@@ -547,7 +547,7 @@ async fn stale_cancel_is_cleared_at_run_start() {
     );
 
     let (tx, mut rx) = mpsc::channel::<ExecResult<ExecutionStats>>(8);
-    let worker = Worker::new(move |report| {
+    let worker = Worker::new(None, move |report| {
         if let WorkerReport::Finished(result) = report {
             tx.try_send(result).ok();
         }
@@ -698,7 +698,7 @@ async fn stopped_event_loop_channel_is_closed() {
 #[tokio::test]
 async fn send_many_empty_is_noop() {
     // Empty batch must not panic, hang, or desynchronize the worker.
-    let worker = Worker::new(|_| {});
+    let worker = Worker::new(None, |_| {});
 
     worker
         .send_many(std::iter::empty::<WorkerMessage>())
@@ -715,7 +715,7 @@ async fn send_many_empty_is_noop() {
 
 #[tokio::test]
 async fn stop_event_loop_when_not_running_is_noop() {
-    let worker = Worker::new(|_| {});
+    let worker = Worker::new(None, |_| {});
 
     worker.send(WorkerMessage::StopEventLoop).unwrap();
     assert!(!worker.is_event_loop_started());
@@ -753,7 +753,7 @@ async fn request_argument_values_for_unknown_node_returns_none() {
 
 #[tokio::test]
 async fn multiple_syncs_in_batch_all_run() {
-    let worker = Worker::new(|_| {});
+    let worker = Worker::new(None, |_| {});
 
     let (reply_a, rx_a) = oneshot::channel();
     let (reply_b, rx_b) = oneshot::channel();
@@ -898,7 +898,7 @@ async fn assert_no_callback_within(
 /// not-running, empty batches, syncs, etc.).
 fn empty_worker() -> (Worker, mpsc::Receiver<ExecResult<ExecutionStats>>) {
     let (tx, rx) = mpsc::channel(8);
-    let worker = Worker::new(move |report| {
+    let worker = Worker::new(None, move |report| {
         if let WorkerReport::Finished(result) = report {
             tx.try_send(result).ok();
         }
@@ -964,7 +964,7 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
     );
 
     let (compute_finish_tx, mut compute_finish_rx) = mpsc::channel(8);
-    let worker = Worker::new(move |report| {
+    let worker = Worker::new(None, move |report| {
         if let WorkerReport::Finished(result) = report {
             compute_finish_tx.try_send(result).ok();
         }
@@ -1024,7 +1024,7 @@ async fn drain_on_wake_folds_queued_batches_into_one_commit() {
     );
 
     let (compute_finish_tx, mut compute_finish_rx) = mpsc::channel(8);
-    let worker = Worker::new(move |report| {
+    let worker = Worker::new(None, move |report| {
         if let WorkerReport::Finished(result) = report {
             compute_finish_tx.try_send(result).ok();
         }
@@ -1529,7 +1529,7 @@ async fn drop_without_exit_shuts_down_cleanly() {
     let counter = Arc::new(AtomicUsize::new(0));
     {
         let counter_cb = Arc::clone(&counter);
-        let worker = Worker::new(move |_| {
+        let worker = Worker::new(None, move |_| {
             counter_cb.fetch_add(1, Ordering::SeqCst);
         });
 
@@ -1554,11 +1554,11 @@ async fn drop_without_exit_shuts_down_cleanly() {
     );
 }
 
-/// `Worker::with_disk_cache` wires the engine's disk cache: a `persist`
+/// A disk-cache-backed `Worker::new` wires the engine's disk cache: a `persist`
 /// (Disk-marked) reproducible node's output survives a fresh worker over the
 /// same store, so its upstream never recomputes on the reopen.
 #[tokio::test]
-async fn with_disk_cache_persists_node_across_worker_restart() {
+async fn disk_cache_persists_node_across_worker_restart() {
     use std::path::Path;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
@@ -1617,14 +1617,11 @@ async fn with_disk_cache_persists_node_across_worker_restart() {
     async fn run(root: &Path, graph: Graph, func_lib: Arc<FuncLib>) -> ExecutionStats {
         let cache = DiskCache::new(root, CustomValueRegistry::default());
         let (tx, mut rx) = mpsc::channel(4);
-        let worker = Worker::with_disk_cache(
-            move |report| {
-                if let WorkerReport::Finished(result) = report {
-                    tx.try_send(result).ok();
-                }
-            },
-            Some(cache),
-        );
+        let worker = Worker::new(Some(cache), move |report| {
+            if let WorkerReport::Finished(result) = report {
+                tx.try_send(result).ok();
+            }
+        });
         worker
             .send_many([
                 WorkerMessage::Update { graph, func_lib },

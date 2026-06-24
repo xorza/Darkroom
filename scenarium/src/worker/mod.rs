@@ -90,22 +90,13 @@ pub struct Worker {
 }
 
 impl Worker {
-    /// Spin up a memory-only worker. Equivalent to
-    /// [`Worker::with_disk_cache`] with no disk cache.
-    pub fn new<ExecutionCallback>(callback: ExecutionCallback) -> Self
-    where
-        ExecutionCallback: Fn(WorkerReport) + Send + 'static,
-    {
-        Self::with_disk_cache(callback, None)
-    }
-
     /// Spin up a worker, optionally backed by a disk cache. When `disk_cache` is
     /// `Some`, the engine hydrates `persist` (Disk-marked) node outputs from it at
     /// `update` and stores fresh ones after each run; `None` is memory-only. The
     /// cache is a construction-time property — every run of this worker shares it.
-    pub fn with_disk_cache<ExecutionCallback>(
-        callback: ExecutionCallback,
+    pub fn new<ExecutionCallback>(
         disk_cache: Option<DiskCache>,
+        callback: ExecutionCallback,
     ) -> Self
     where
         ExecutionCallback: Fn(WorkerReport) + Send + 'static,

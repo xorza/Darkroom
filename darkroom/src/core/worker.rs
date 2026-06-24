@@ -90,10 +90,9 @@ impl WorkerBridge {
             let _guard = runtime.enter();
             let tx = tx.clone();
             let wake = wake.clone();
-            Worker::with_disk_cache(
-                move |report| Self::deliver(&tx, &wake, report),
-                Some(disk_cache),
-            )
+            Worker::new(Some(disk_cache), move |report| {
+                Self::deliver(&tx, &wake, report)
+            })
         };
         Self {
             runtime,

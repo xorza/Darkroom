@@ -119,7 +119,7 @@ impl ExecutionEngine {
     /// node's output is loaded from `cache` on a digest hit (skipping
     /// recompute), and after a run freshly-computed `persist` outputs are
     /// stored. [`Default`] is the memory-only engine. Wired by
-    /// [`Worker::with_disk_cache`](crate::worker::Worker).
+    /// [`Worker::new`](crate::worker::Worker::new).
     pub fn with_disk_cache(cache: DiskCache) -> Self {
         Self {
             disk: DiskCacheLayer::new(cache),
