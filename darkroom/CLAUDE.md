@@ -62,7 +62,9 @@ everything else is grouped by responsibility:
   `action_stack/` (packed undo history), `reconcile/` (derived subgraph-
   interface reconciliation).
 - **`io/`** — `persistence.rs` (file-dialog + serde I/O), `config.rs`
-  (`AppConfig` session state), `library.rs` (shared subgraph library file).
+  (`AppConfig` session state), `library.rs` (shared subgraph library file),
+  `cache.rs` (per-document disk-cache root: `<stem>.darkroom-cache/` beside the
+  file, with a self-ignoring `.gitignore`).
 - **`gui/`** — the UI tree: `canvas/` (the graph canvas + its gestures/
   overlays/inspectors), `node/` (the node-body widget cluster), `widgets/`
   (reusable widgets like inline-rename), plus `main_window`, `menu_bar`,
@@ -225,6 +227,12 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   `Progress(RunProgress)` per node *as it runs*, then a final `Finished(stats)`.
   `WorkerBridge::deliver` maps these to `WorkerEvent::NodeProgress` /
   `ExecutionFinished` on the channel and pokes `host.request_repaint()`.
+- **Per-document disk cache.** The worker starts memory-only;
+  `Engine::set_document_cache` (called from `set_document_path` — i.e. on
+  open/save/new and startup restore) sends `WorkerMessage::SetDiskCache` pointing
+  it at `io::cache`'s `<stem>.darkroom-cache/` store. An unsaved doc stays
+  memory-only. So a node toggled to `CachePersistence::Disk` (header `C` chip)
+  reloads its output across sessions from a store beside the project file.
 - On-thread, `App::frame` drains the channel (`worker.drain()`, non-blocking).
   `NodeProgress` → `RunState::apply_progress` marks the active node
   `ExecStatus::Running(Instant)` (purple glow) live — carrying the start instant

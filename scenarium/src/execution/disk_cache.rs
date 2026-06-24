@@ -62,18 +62,6 @@ impl DiskCache {
         }
     }
 
-    /// The machine-global default location: `$XDG_CACHE_HOME/scenarium`, else
-    /// `$HOME/.cache/scenarium`, else `<tempdir>/scenarium`.
-    pub fn default_root() -> PathBuf {
-        if let Some(xdg) = std::env::var_os("XDG_CACHE_HOME") {
-            return PathBuf::from(xdg).join("scenarium");
-        }
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(".cache").join("scenarium");
-        }
-        std::env::temp_dir().join("scenarium")
-    }
-
     /// Load the outputs cached under `digest`, or `None` on a miss or a blob that
     /// no longer decodes (corrupt, or a custom type whose codec is gone) — both
     /// are a miss, so the node simply recomputes.
@@ -206,8 +194,8 @@ pub(crate) struct DiskCacheLayer {
 }
 
 impl DiskCacheLayer {
-    pub(crate) fn new(cache: DiskCache) -> Self {
-        Self { inner: Some(cache) }
+    pub(crate) fn set(&mut self, cache: Option<DiskCache>) {
+        self.inner = cache;
     }
 
     /// Pull any disk-cached `persist` output into its slot, so a digest the disk
@@ -393,11 +381,6 @@ mod tests {
             h.chars()
                 .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
         );
-    }
-
-    #[test]
-    fn default_root_is_named_scenarium() {
-        assert_eq!(DiskCache::default_root().file_name().unwrap(), "scenarium");
     }
 
     // === Presence index (filesystem-access minimization) ===

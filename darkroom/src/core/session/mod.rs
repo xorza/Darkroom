@@ -67,6 +67,11 @@ impl Session {
             None => (empty_document(), None),
         };
 
+        // Point the worker at the document's project-local cache (memory-only
+        // for a never-saved doc). The session's path is fixed after startup, so
+        // this one call suffices.
+        engine.set_document_cache(current_path.as_deref());
+
         let mut session = Self {
             document,
             engine,

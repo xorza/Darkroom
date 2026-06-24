@@ -197,9 +197,12 @@ impl App {
 
     /// Record `path` as both the dialog-anchor `current_path` and the
     /// persisted `config.document_path`, then write the config so the
-    /// next launch reopens this document.
+    /// next launch reopens this document. Also repoints the worker's disk
+    /// cache at the document's project-local store (or memory-only when the
+    /// path is cleared / never saved).
     fn set_document_path(&mut self, path: Option<PathBuf>) {
         self.current_path = path.clone();
+        self.engine.set_document_cache(self.current_path.as_deref());
         self.config.document_path = path;
         self.config.save();
     }

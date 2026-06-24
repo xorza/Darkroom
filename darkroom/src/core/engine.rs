@@ -4,9 +4,12 @@
 //! orchestration on top — so the worker/script construction and the
 //! drain/run primitives live here once instead of in both shells.
 
-use scenarium::prelude::{DiskCache, Graph};
+use std::path::Path;
 
-use crate::core::func_lib::{SharedFuncLib, runtime_codec_registry, runtime_func_lib};
+use scenarium::prelude::Graph;
+
+use crate::core::func_lib::{SharedFuncLib, runtime_func_lib};
+use crate::core::io::cache::build_document_disk_cache;
 use crate::core::script::{ScriptConfig, ScriptHost, ScriptMessage};
 use crate::core::wake::Wake;
 use crate::core::worker::{ValueRequest, WorkerBridge, WorkerEvent};
@@ -30,17 +33,24 @@ impl Engine {
     /// both woken through `wake`.
     pub(crate) fn new(script_cfg: &ScriptConfig, wake: Wake) -> Self {
         let func_lib = runtime_func_lib();
-        // Disk cache at the machine-global default root, so `persist` nodes
-        // reload their outputs across sessions. Always wired; only Disk-marked
-        // reproducible nodes ever write to it.
-        let disk_cache = DiskCache::new(DiskCache::default_root(), runtime_codec_registry());
-        let worker = WorkerBridge::new(wake.clone(), disk_cache);
+        // Starts memory-only; the frontend points the worker at the active
+        // document's cache dir via `set_document_cache` once a path is known.
+        let worker = WorkerBridge::new(wake.clone());
         let script = ScriptHost::start(script_cfg, func_lib.clone(), wake);
         Self {
             func_lib,
             worker,
             script,
         }
+    }
+
+    /// Point the worker's disk cache at `doc_path`'s project-local store
+    /// (`<stem>.darkroom-cache/` beside the file), so `persist` nodes reload
+    /// across sessions. `None` (an unsaved document) is memory-only — nothing
+    /// is written until the document has a home on disk.
+    pub(crate) fn set_document_cache(&self, doc_path: Option<&Path>) {
+        self.worker
+            .set_disk_cache(doc_path.map(build_document_disk_cache));
     }
 
     /// Send `graph` to the worker for one evaluation (paired with the

@@ -75,11 +75,11 @@ impl std::fmt::Debug for WorkerBridge {
 }
 
 impl WorkerBridge {
-    /// Spin up the worker on a fresh multi-thread runtime, backed by
-    /// `disk_cache` so `persist` (Disk-marked) nodes survive reloads. The
-    /// callback runs on a worker thread: it forwards the result over `tx` and
-    /// asks the host to paint, so the next frame drains it.
-    pub(crate) fn new(wake: Wake, disk_cache: DiskCache) -> Self {
+    /// Spin up the worker on a fresh multi-thread runtime. Starts memory-only;
+    /// the host points it at a document's cache via [`Self::set_disk_cache`].
+    /// The callback runs on a worker thread: it forwards the result over `tx`
+    /// and asks the host to paint, so the next frame drains it.
+    pub(crate) fn new(wake: Wake) -> Self {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -90,9 +90,7 @@ impl WorkerBridge {
             let _guard = runtime.enter();
             let tx = tx.clone();
             let wake = wake.clone();
-            Worker::new(Some(disk_cache), move |report| {
-                Self::deliver(&tx, &wake, report)
-            })
+            Worker::new(None, move |report| Self::deliver(&tx, &wake, report))
         };
         Self {
             runtime,
@@ -121,6 +119,13 @@ impl WorkerBridge {
             WorkerMessage::Update { graph, func_lib },
             WorkerMessage::ExecuteTerminals,
         ]);
+    }
+
+    /// Point the worker's engine at `cache` (or `None` for memory-only) for
+    /// the active document. Takes effect before the next run's compile. A
+    /// dropped send (worker already exited) is a harmless shutdown no-op.
+    pub(crate) fn set_disk_cache(&self, cache: Option<DiskCache>) {
+        let _ = self.worker.send(WorkerMessage::SetDiskCache(cache));
     }
 
     /// Request cancellation of the in-flight run. Coarse: the running node

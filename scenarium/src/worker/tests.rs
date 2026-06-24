@@ -1554,9 +1554,13 @@ async fn drop_without_exit_shuts_down_cleanly() {
     );
 }
 
-/// A disk-cache-backed `Worker::new` wires the engine's disk cache: a `persist`
-/// (Disk-marked) reproducible node's output survives a fresh worker over the
-/// same store, so its upstream never recomputes on the reopen.
+/// The disk cache wires through both entry points and persists across worker
+/// restarts: a `persist` (Disk-marked) reproducible node's output, stored on a
+/// cold run, reloads on a fresh worker over the same store so its upstream never
+/// recomputes. The cold run sets the cache at construction
+/// (`Worker::new(Some(..), ..)`); the reopen sets it at runtime via a
+/// `SetDiskCache` message sent in the same batch as `Update` — exercising that
+/// the swap is applied before the compile hydrates.
 #[tokio::test]
 async fn disk_cache_persists_node_across_worker_restart() {
     use std::path::Path;
@@ -1614,28 +1618,42 @@ async fn disk_cache_persists_node_across_worker_restart() {
     graph.set_input_binding(InputPort::new(mult_id, 1), (get_a_id, 0).into());
     graph.set_input_binding(InputPort::new(print_id, 0), (mult_id, 0).into());
 
-    async fn run(root: &Path, graph: Graph, func_lib: Arc<FuncLib>) -> ExecutionStats {
+    // `via_message`: route the cache through a runtime `SetDiskCache` (the host
+    // repointing it for the active document); else seed it at construction.
+    async fn run(
+        root: &Path,
+        graph: Graph,
+        func_lib: Arc<FuncLib>,
+        via_message: bool,
+    ) -> ExecutionStats {
         let cache = DiskCache::new(root, CustomValueRegistry::default());
+        let (ctor_cache, set_cache_msg) = if via_message {
+            (None, Some(WorkerMessage::SetDiskCache(Some(cache))))
+        } else {
+            (Some(cache), None)
+        };
         let (tx, mut rx) = mpsc::channel(4);
-        let worker = Worker::new(Some(cache), move |report| {
+        let worker = Worker::new(ctor_cache, move |report| {
             if let WorkerReport::Finished(result) = report {
                 tx.try_send(result).ok();
             }
         });
-        worker
-            .send_many([
-                WorkerMessage::Update { graph, func_lib },
-                WorkerMessage::ExecuteTerminals,
-            ])
-            .unwrap();
+        // The SetDiskCache (when present) shares the batch with Update, proving
+        // it's applied before the compile hydrates.
+        let mut msgs = Vec::new();
+        msgs.extend(set_cache_msg);
+        msgs.push(WorkerMessage::Update { graph, func_lib });
+        msgs.push(WorkerMessage::ExecuteTerminals);
+        worker.send_many(msgs).unwrap();
         rx.recv()
             .await
             .expect("worker reports Finished")
             .expect("run succeeds")
     }
 
-    // First run: cold cache, all three nodes compute; mult is stored to disk.
-    let stats = run(&dir.0, graph.clone(), Arc::new(make_lib())).await;
+    // First run (cache set at construction): cold cache, all three nodes
+    // compute; mult is stored to disk.
+    let stats = run(&dir.0, graph.clone(), Arc::new(make_lib()), false).await;
     assert_eq!(
         stats.executed_nodes.len(),
         3,
@@ -1643,9 +1661,10 @@ async fn disk_cache_persists_node_across_worker_restart() {
     );
     assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
 
-    // Reopen on a fresh worker over the same store: mult loads from disk, so
-    // its sole-consumer upstream get_a is pruned and never recomputes.
-    let stats = run(&dir.0, graph.clone(), Arc::new(make_lib())).await;
+    // Reopen on a fresh worker, cache set at runtime via SetDiskCache over the
+    // same store: mult loads from disk, so its sole-consumer upstream get_a is
+    // pruned and never recomputes.
+    let stats = run(&dir.0, graph.clone(), Arc::new(make_lib()), true).await;
     assert_eq!(
         get_a_calls.load(Ordering::SeqCst),
         1,

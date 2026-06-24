@@ -129,7 +129,11 @@ funclibs.
 `Worker` (`worker/mod.rs:79`) wraps a tokio task fed by `UnboundedSender<Vec<WorkerMessage>>`.
 A `Vec<WorkerMessage>` is **one atomic commit unit** — no partial batches.
 `WorkerMessage` covers `Update{graph, func_lib}`, `Clear`, `ExecuteTerminals`,
-`InjectEvents`, `Start/StopEventLoop`, `Sync`, `RequestArgumentValues`, `Exit`.
+`InjectEvents`, `Start/StopEventLoop`, `Sync`, `RequestArgumentValues`,
+`SetDiskCache(Option<DiskCache>)` (swap the engine's disk cache — applied before
+any same-batch graph op so the next `Update` hydrates from the new store),
+`Exit`. Disk caching is set initially via `Worker::new(disk_cache, callback)` and
+repointed at runtime via `SetDiskCache` (e.g. a per-document cache dir).
 The host callback receives a `WorkerReport`: a live `Progress(RunProgress)` per
 node *during* a run (forwarded from a `mpsc` the executor sends on, drained
 concurrently with the run in the worker `select!`), then a single

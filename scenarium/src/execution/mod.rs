@@ -108,25 +108,13 @@ pub struct ExecutionEngine {
     planner: Planner,
     /// Reusable plan buffer, recycled across runs to avoid reallocation.
     plan: ExecutionPlan,
-    /// Disk-cache coordinator. Empty by default (memory-only); populated via
-    /// [`Self::with_disk_cache`]. Hydrates `persist` outputs into the RAM cache at
+    /// Disk-cache coordinator. Empty by default (memory-only); set/swapped via
+    /// [`Self::set_disk_cache`]. Hydrates `persist` outputs into the RAM cache at
     /// `update` and persists fresh ones after a run.
     disk: DiskCacheLayer,
 }
 
 impl ExecutionEngine {
-    /// Construct a disk-backed engine: at `update` a `persist` (Disk-marked)
-    /// node's output is loaded from `cache` on a digest hit (skipping
-    /// recompute), and after a run freshly-computed `persist` outputs are
-    /// stored. [`Default`] is the memory-only engine. Wired by
-    /// [`Worker::new`](crate::worker::Worker::new).
-    pub fn with_disk_cache(cache: DiskCache) -> Self {
-        Self {
-            disk: DiskCacheLayer::new(cache),
-            ..Default::default()
-        }
-    }
-
     // === Accessors ===
 
     pub(crate) fn by_id(&self, node_id: &NodeId) -> Option<&ExecutionNode> {
@@ -148,6 +136,16 @@ impl ExecutionEngine {
 
     pub fn reset_states(&mut self) {
         self.cache.reset_states();
+    }
+
+    /// Swap the disk cache backing this engine (`None` = memory-only). At the
+    /// next `update`, a `persist` (Disk-marked) node's output is loaded from
+    /// `cache` on a digest hit (skipping recompute), and after a run its
+    /// freshly-computed `persist` outputs are stored. The in-RAM cache is keyed
+    /// by node id + digest, independent of the disk root, so swapping the root
+    /// keeps any warm in-memory outputs.
+    pub fn set_disk_cache(&mut self, cache: Option<DiskCache>) {
+        self.disk.set(cache);
     }
 
     // === Phase 1: compile ===

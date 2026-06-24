@@ -76,7 +76,9 @@ mod cache_persistence {
     /// A fresh engine backed by a disk cache rooted at `dir` (simulating a reopen
     /// when called twice against the same dir).
     fn disk_engine(dir: &TempDir) -> ExecutionEngine {
-        ExecutionEngine::with_disk_cache(DiskCache::new(&dir.0, CustomValueRegistry::default()))
+        let mut engine = ExecutionEngine::default();
+        engine.set_disk_cache(Some(DiskCache::new(&dir.0, CustomValueRegistry::default())));
+        engine
     }
 
     /// A `persist` node's output survives a fresh engine (reopen), its sole-consumer
