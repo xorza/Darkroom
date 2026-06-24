@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -11,8 +10,7 @@ use common::CancelToken;
 use common::PauseGate;
 use common::ReadyState;
 
-use crate::common::shared_any_state::SharedAnyState;
-use crate::event_lambda::EventLambda;
+use crate::execution::event::{EventRef, EventTrigger};
 use crate::execution::{ArgumentValues, Error, ExecutionEngine, Result};
 use crate::execution_stats::{ExecutionStats, RunProgress};
 use crate::function::FuncLib;
@@ -31,12 +29,6 @@ pub enum WorkerReport {
 /// The worker reads this channel directly and applies backpressure to
 /// lambdas when it can't keep up.
 const EVENT_LOOP_BACKPRESSURE: usize = 10;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct EventRef {
-    pub node_id: NodeId,
-    pub event_idx: usize,
-}
 
 /// Command enum sent into the worker loop.
 ///
@@ -277,14 +269,6 @@ struct BatchIntent {
     events: HashSet<EventRef>,
     syncs: Vec<oneshot::Sender<()>>,
     argument_requests: Vec<(NodeId, oneshot::Sender<Option<ArgumentValues>>)>,
-}
-
-/// One `(event, lambda, state)` triple spawned as a looping task.
-#[derive(Debug)]
-pub struct EventTrigger {
-    pub event: EventRef,
-    pub lambda: EventLambda,
-    pub state: SharedAnyState,
 }
 
 /// Pure scan: folds a command batch into a `BatchIntent`. Exit

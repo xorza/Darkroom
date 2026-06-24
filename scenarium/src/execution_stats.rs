@@ -3,8 +3,8 @@ use std::time::Instant;
 use hashbrown::HashMap;
 
 use crate::execution::Error;
+use crate::execution::event::EventRef;
 use crate::graph::{InputPort, NodeId};
-use crate::worker::EventRef;
 
 /// A record of how the authoring graph was flattened for execution.
 ///

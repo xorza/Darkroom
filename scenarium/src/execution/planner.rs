@@ -8,7 +8,7 @@
 use common::is_debug;
 use hashbrown::HashSet;
 
-use crate::worker::EventRef;
+use crate::execution::event::EventRef;
 
 use crate::execution::executor::Executor;
 use crate::execution::plan::{ExecutionPlan, NodeFlags};

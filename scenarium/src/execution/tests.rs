@@ -1893,8 +1893,8 @@ mod events {
     use super::*;
     use crate::async_lambda;
     use crate::event_lambda::EventLambda;
+    use crate::execution::event::EventRef;
     use crate::function::{Func, FuncEvent, FuncInput, FuncOutput};
-    use crate::worker::EventRef;
 
     const EMIT_FUNC: FuncId = FuncId::from_u128(0xE311);
     const RECV_FUNC: FuncId = FuncId::from_u128(0xE322);

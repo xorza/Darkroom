@@ -22,7 +22,6 @@ use crate::execution_stats::{ExecutionStats, FlattenMap, RunProgress};
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
 use crate::prelude::FuncId;
-use crate::worker::{EventRef, EventTrigger};
 
 // Content digests for node outputs — the cache key. Recomputed every `update`
 // and consumed by the planner/executor (RAM cache) and the disk cache below.
@@ -30,6 +29,7 @@ pub(crate) mod digest;
 // Content-addressed on-disk output cache. Active only once a caller wires a
 // `DiskCache` via `set_disk_cache` (today: tests); the RAM cache runs regardless.
 pub(crate) mod disk_cache;
+pub(crate) mod event;
 pub(crate) mod executor;
 mod flatten;
 pub(crate) mod plan;
@@ -40,6 +40,7 @@ mod tests;
 
 use digest::{Digest, DigestEngine};
 use disk_cache::DiskCache;
+use event::{EventRef, EventTrigger};
 use executor::Executor;
 use plan::ExecutionPlan;
 use planner::Planner;
