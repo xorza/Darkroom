@@ -29,7 +29,7 @@ use std::sync::Arc;
 /// Read-only context the node-draw chain threads top to bottom: the
 /// theme, the scene being rendered, and last frame's port geometry.
 /// `Copy` (all shared refs), so it's passed by value — copying it while
-/// a `&rcx.scene.nodes[..]` borrow is live is fine, which keeps
+/// a `&rcx.scene.nodes` borrow is live is fine, which keeps
 /// `draw_all`'s node loop borrow-clean. The mutable sinks (`out`,
 /// `actions`) and the breaker `probe` stay separate params.
 #[derive(Clone, Copy)]
@@ -110,7 +110,7 @@ impl NodeUI {
         // (mid-drag delete). Without this, the slot would linger and
         // could fire when a fresh node reused the id.
         if let Some(a) = &self.drag_anchor
-            && !rcx.scene.nodes.iter().any(|n| n.id == a.node_id)
+            && rcx.scene.nodes.by_key(&a.node_id).is_none()
         {
             self.drag_anchor = None;
         }
@@ -127,7 +127,7 @@ impl NodeUI {
         let order = self.z_order.reconcile(&current, &scene.selected_nodes);
         order
             .iter()
-            .filter_map(|id| scene.nodes.iter().find(|n| n.id == *id))
+            .filter_map(|id| scene.nodes.by_key(id))
             .collect()
     }
 
@@ -283,7 +283,7 @@ impl NodeUI {
         // emitted `MoveNodes` would target a missing node and panic in
         // `build_step`. `draw_all` also clears stale anchors, but only
         // after this prepass runs.
-        if !scene.nodes.iter().any(|n| n.id == node_id) {
+        if scene.nodes.by_key(&node_id).is_none() {
             self.drag_anchor = None;
             return;
         }

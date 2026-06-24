@@ -241,7 +241,7 @@ impl ConnectionUI {
         if !body.contains(pointer) {
             return None;
         }
-        let node = scene.nodes.iter().find(|n| n.id == start.node_id)?;
+        let node = scene.nodes.by_key(&start.node_id)?;
         // Boundary ports route the interface, not literal values.
         if node.boundary {
             return None;
@@ -428,8 +428,7 @@ fn input_const_only(scene: &Scene, port: PortRef) -> bool {
     }
     scene
         .nodes
-        .iter()
-        .find(|n| n.id == port.node_id)
+        .by_key(&port.node_id)
         .and_then(|n| scene.inputs(n.inputs).get(port.port_idx))
         .is_some_and(|i| i.const_only)
 }
@@ -449,8 +448,7 @@ fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -
     // passthrough, so a blanket reject is precise.
     let start_boundary = scene
         .nodes
-        .iter()
-        .find(|n| n.id == start.node_id)
+        .by_key(&start.node_id)
         .is_some_and(|n| n.boundary);
     let start_type = port_data_type(scene, start);
     for n in &scene.nodes {

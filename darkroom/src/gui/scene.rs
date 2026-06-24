@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 
-use common::Span;
+use common::{KeyIndexKey, KeyIndexVec, Span};
 use glam::Vec2;
 use palantir::InternedStr;
 use scenarium::data::{DataType, StaticValue};
@@ -15,7 +15,10 @@ use crate::gui::run_state::{ExecStatus, RunState};
 
 #[derive(Debug)]
 pub struct Scene {
-    pub nodes: Vec<SceneNode>,
+    /// Insertion-ordered (draw order) with an `id → index` map, so per-frame
+    /// lookups by `NodeId` (`by_key`) are O(1) without losing the ordered
+    /// iteration the paint/z-order passes rely on.
+    pub nodes: KeyIndexVec<NodeId, SceneNode>,
     pub connections: Vec<SceneConnection>,
     /// One flat pool of [`SceneInput`] across every node, sliced by the single
     /// `SceneNode::inputs` span. A struct-per-port (not parallel columns) so the
@@ -67,7 +70,7 @@ impl From<&Binding> for InputBindingView {
 impl Default for Scene {
     fn default() -> Self {
         Self {
-            nodes: Vec::new(),
+            nodes: KeyIndexVec::default(),
             connections: Vec::new(),
             inputs: Vec::new(),
             outputs: Vec::new(),
@@ -154,6 +157,12 @@ pub struct SceneNode {
     /// resolved. Rendered as a portless error stub the user can still
     /// select and delete — never silently dropped.
     pub missing: bool,
+}
+
+impl KeyIndexKey<NodeId> for SceneNode {
+    fn key(&self) -> &NodeId {
+        &self.id
+    }
 }
 
 #[derive(Debug)]
@@ -345,7 +354,7 @@ impl Scene {
                 (NodeKind::SubgraphOutput, true) => "Outputs".into(),
                 _ => node.name.clone().into(),
             };
-            self.nodes.push(SceneNode {
+            self.nodes.add(SceneNode {
                 id: vn.id,
                 pos: vn.pos,
                 name,
