@@ -109,13 +109,22 @@ The central change.
   engine is now orchestration only: error/value types, struct, accessors, state,
   `update`, `execute`. Full suite: 174 passing.
 
-### Stage 4 — unit tests for the core phases (issue G)
+### Stage 4 — unit tests for the core phases (issue G) ✅ done
 
-Now isolatable:
+Colocated `#[cfg(test)]` modules added where there were none (+10 tests, suite
+174 → 184):
 
-- `flatten`: hand-built `Graph` → assert `ExecutionProgram` shape.
-- `planner`: hand-built `program` + `Cache` snapshot → assert orders/flags.
-- `executor`: small program + plan → assert run results.
+- `flatten.rs`: `flatten_id` pure-function tests — identity at top level (the
+  cache-survival invariant), plus determinism and path/interior sensitivity.
+  Fuller composite flattening stays covered by the integration suite.
+- `planner.rs`: hand-built program + `Cache` snapshot (no executor needed) →
+  post-order ordering, the cached-consumer-prunes-producer case (the one a plain
+  `filter(wants_execute)` gets wrong), required-vs-optional missing-input
+  propagation, fan-out `output_usage` counts, and cycle rejection.
+- `executor.rs`: hand-built program with real `async_lambda!` lambdas + a
+  hand-built plan (no planner needed) → bind resolution + output storage, and
+  upstream-error-skips-dependent with output cleared. Each phase is now testable
+  without the others, so a bug in one can't mask a bug in another.
 
 ### Stage 5 — ergonomics + cleanups (issues E, F, H)
 

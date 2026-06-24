@@ -343,3 +343,174 @@ impl Planner {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::DataType;
+    use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
+    use crate::graph::NodeId;
+    use crate::prelude::FuncId;
+    use common::Span;
+
+    /// Hand-built program for planner tests. Node `idx` gets id `from_u128(idx+1)`,
+    /// so `bind`'s `target_idx`/`target_id` line up. Inputs are `(required, binding)`.
+    #[derive(Default)]
+    struct Fix {
+        program: ExecutionProgram,
+    }
+
+    impl Fix {
+        fn node(
+            &mut self,
+            terminal: bool,
+            inputs: &[(bool, ExecutionBinding)],
+            outputs: u32,
+        ) -> usize {
+            let inputs_start = self.program.inputs.len() as u32;
+            for (required, binding) in inputs {
+                self.program.inputs.push(ExecutionInput {
+                    required: *required,
+                    binding: binding.clone(),
+                    data_type: DataType::Null,
+                });
+            }
+            let outputs_start = self.program.n_outputs as u32;
+            self.program.n_outputs += outputs as usize;
+            let idx = self.program.e_nodes.len();
+            self.program.e_nodes.add(ExecutionNode {
+                id: NodeId::from_u128(idx as u128 + 1),
+                inited: true,
+                terminal,
+                func_id: FuncId::from_u128(idx as u128 + 1),
+                inputs: Span::new(inputs_start, inputs.len() as u32),
+                outputs: Span::new(outputs_start, outputs),
+                ..Default::default()
+            });
+            idx
+        }
+    }
+
+    fn bind(idx: usize, port: usize) -> ExecutionBinding {
+        ExecutionBinding::Bind(ExecutionPortAddress {
+            target_id: NodeId::from_u128(idx as u128 + 1),
+            target_idx: idx,
+            port_idx: port,
+        })
+    }
+
+    /// Plan `terminals` over `fix`, with the slots at `cached` marked as RAM hits.
+    fn plan_with_cached(fix: &Fix, cached: &[usize]) -> ExecutionPlan {
+        let mut cache = Cache::default();
+        cache.reconcile(&fix.program.e_nodes);
+        for &idx in cached {
+            let digest = [idx as u8 + 1; 32];
+            cache.slots[idx].current_digest = Some(digest);
+            cache.slots[idx].output_values = Some(Vec::new());
+            cache.slots[idx].output_digest = Some(digest);
+        }
+        let mut planner = Planner::default();
+        let mut plan = ExecutionPlan::default();
+        planner
+            .plan(&fix.program, &cache, true, false, &[], &mut plan)
+            .expect("no cycle");
+        plan
+    }
+
+    fn plan(fix: &Fix) -> ExecutionPlan {
+        plan_with_cached(fix, &[])
+    }
+
+    #[test]
+    fn chain_orders_deps_before_consumers_and_schedules_all() {
+        // A → B → C (C terminal), nothing cached.
+        let mut f = Fix::default();
+        let a = f.node(false, &[], 1);
+        let b = f.node(false, &[(false, bind(a, 0))], 1);
+        let c = f.node(true, &[(false, bind(b, 0))], 1);
+
+        let p = plan(&f);
+        assert_eq!(p.process_order, vec![a, b, c], "post-order: deps first");
+        assert_eq!(p.execute_order, vec![a, b, c]);
+        for idx in [a, b, c] {
+            assert!(p.node_flags[idx].wants_execute);
+            assert!(!p.node_flags[idx].cached);
+            assert!(!p.node_flags[idx].missing_required_inputs);
+        }
+    }
+
+    #[test]
+    fn cached_consumer_prunes_its_producer_from_execute_order() {
+        // A → B (B terminal). B is cached. A "wants" to run, but its only consumer
+        // won't read it, so A must not be scheduled — the case a plain
+        // filter(wants_execute) would get wrong.
+        let mut f = Fix::default();
+        let a = f.node(false, &[], 1);
+        let b = f.node(true, &[(false, bind(a, 0))], 1);
+
+        let p = plan_with_cached(&f, &[b]);
+        assert!(p.node_flags[b].cached);
+        assert!(p.node_flags[a].wants_execute, "A wants to run…");
+        assert!(
+            p.execute_order.is_empty(),
+            "…but isn't scheduled: its sole consumer is cached"
+        );
+    }
+
+    #[test]
+    fn missing_required_input_blocks_node_and_dependents() {
+        // A has a required *unbound* input ⇒ missing; B binds A ⇒ inherits missing.
+        let mut f = Fix::default();
+        let a = f.node(false, &[(true, ExecutionBinding::None)], 1);
+        let b = f.node(true, &[(false, bind(a, 0))], 1);
+
+        let p = plan(&f);
+        for idx in [a, b] {
+            assert!(
+                p.node_flags[idx].missing_required_inputs,
+                "node {idx} missing"
+            );
+            assert!(!p.node_flags[idx].wants_execute, "node {idx} not runnable");
+        }
+        assert!(p.execute_order.is_empty());
+    }
+
+    #[test]
+    fn optional_unbound_input_does_not_block() {
+        // An *optional* unbound input is fine — the node still runs.
+        let mut f = Fix::default();
+        let a = f.node(true, &[(false, ExecutionBinding::None)], 1);
+
+        let p = plan(&f);
+        assert!(!p.node_flags[a].missing_required_inputs);
+        assert!(p.node_flags[a].wants_execute);
+        assert_eq!(p.execute_order, vec![a]);
+    }
+
+    #[test]
+    fn fan_out_counts_each_executing_consumer() {
+        // A feeds both B and C (both terminal) ⇒ A's output is needed twice.
+        let mut f = Fix::default();
+        let a = f.node(false, &[], 1);
+        f.node(true, &[(false, bind(a, 0))], 1);
+        f.node(true, &[(false, bind(a, 0))], 1);
+
+        let p = plan(&f);
+        assert_eq!(p.output_usage[0], 2, "A.0 read by two consumers");
+    }
+
+    #[test]
+    fn dependency_cycle_is_rejected() {
+        // A binds B, B binds A (A terminal) — the planner must error, not loop.
+        let mut f = Fix::default();
+        f.node(true, &[(false, bind(1, 0))], 1); // A (idx 0) binds B
+        f.node(false, &[(false, bind(0, 0))], 1); // B (idx 1) binds A
+
+        let mut cache = Cache::default();
+        cache.reconcile(&f.program.e_nodes);
+        let mut planner = Planner::default();
+        let mut plan = ExecutionPlan::default();
+        let result = planner.plan(&f.program, &cache, true, false, &[], &mut plan);
+        assert!(matches!(result, Err(Error::CycleDetected { .. })));
+    }
+}
