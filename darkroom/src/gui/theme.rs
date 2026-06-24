@@ -71,7 +71,6 @@ pub(crate) mod dark {
     // header badges
     pub(crate) const BADGE_SUBGRAPH: Color = Color::hex(0x9adbfb);
     pub(crate) const BADGE_TERMINAL: Color = Color::hex(0xff5e44);
-    pub(crate) const BADGE_CACHE: Color = Color::hex(0xffd44a);
 
     // execution-status glow
     pub(crate) const EXEC_EXECUTED_GLOW: Color = Color::hex(0xdaff58);
@@ -121,7 +120,6 @@ pub(crate) mod light {
     // warning yellow (#f1ad49 was barely visible on a light surface).
     pub(crate) const BADGE_SUBGRAPH: Color = Color::hex(0x3b9ee5);
     pub(crate) const BADGE_TERMINAL: Color = Color::hex(0xef7271);
-    pub(crate) const BADGE_CACHE: Color = Color::hex(0xb87503);
 
     // execution-status glow — success / accent / syn_keyword / error.
     pub(crate) const EXEC_EXECUTED_GLOW: Color = Color::hex(0x85b304);
@@ -269,7 +267,6 @@ pub struct Theme {
     /// Terminal (sink) chip — error red.
     pub badge_terminal: Color,
     /// Cache (compute-once) chip — warning yellow.
-    pub badge_cache: Color,
 
     // ── execution-status glow ────────────────────────────────────
     // Color of the soft glow shadow behind a node, by the last run's
@@ -661,7 +658,6 @@ struct PaletteColors {
     chrome_fill: Color,
     badge_subgraph: Color,
     badge_terminal: Color,
-    badge_cache: Color,
     exec_executed_glow: Color,
     exec_cached_glow: Color,
     exec_running_glow: Color,
@@ -687,7 +683,6 @@ impl PaletteColors {
         chrome_fill: dark::CHROME_FILL,
         badge_subgraph: dark::BADGE_SUBGRAPH,
         badge_terminal: dark::BADGE_TERMINAL,
-        badge_cache: dark::BADGE_CACHE,
         exec_executed_glow: dark::EXEC_EXECUTED_GLOW,
         exec_cached_glow: dark::EXEC_CACHED_GLOW,
         exec_running_glow: dark::EXEC_RUNNING_GLOW,
@@ -712,7 +707,6 @@ impl PaletteColors {
         chrome_fill: light::CHROME_FILL,
         badge_subgraph: light::BADGE_SUBGRAPH,
         badge_terminal: light::BADGE_TERMINAL,
-        badge_cache: light::BADGE_CACHE,
         exec_executed_glow: light::EXEC_EXECUTED_GLOW,
         exec_cached_glow: light::EXEC_CACHED_GLOW,
         exec_running_glow: light::EXEC_RUNNING_GLOW,
@@ -814,7 +808,6 @@ impl Theme {
             chrome_fill: c.chrome_fill,
             badge_subgraph: c.badge_subgraph,
             badge_terminal: c.badge_terminal,
-            badge_cache: c.badge_cache,
             exec_executed_glow: c.exec_executed_glow,
             exec_cached_glow: c.exec_cached_glow,
             exec_running_glow: c.exec_running_glow,

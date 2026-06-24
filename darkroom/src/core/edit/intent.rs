@@ -30,7 +30,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use glam::Vec2;
 use scenarium::graph::{
-    Binding, Graph, InputPort, Node, NodeBehavior, NodeId, NodeKind, OutputPort, Subscription,
+    Binding, Graph, InputPort, Node, NodeId, NodeKind, OutputPort, Subscription,
 };
 use scenarium::prelude::{SubgraphDef, SubgraphId};
 use scenarium::subgraph::SubgraphRef;
@@ -110,10 +110,6 @@ pub enum Intent {
     /// the desired final set and the undo layer captures the prior one.
     SetSelection {
         to: BTreeSet<NodeId>,
-    },
-    SetCacheBehavior {
-        node_id: NodeId,
-        to: NodeBehavior,
     },
     /// Enable/disable a node for execution (`Node::disabled`). The header
     /// badge toggles it; a disabled node is skipped at flatten time.
@@ -243,11 +239,6 @@ pub enum GraphStep {
         from: BTreeSet<NodeId>,
         to: BTreeSet<NodeId>,
     },
-    SetCacheBehavior {
-        node_id: NodeId,
-        from: NodeBehavior,
-        to: NodeBehavior,
-    },
     SetDisabled {
         node_id: NodeId,
         from: bool,
@@ -349,7 +340,6 @@ impl GraphStep {
             GraphStep::RenameNode { from, to, .. } => from == to,
             GraphStep::SetInput { from, to, .. } => from == to,
             GraphStep::SetSelection { from, to } => from == to,
-            GraphStep::SetCacheBehavior { from, to, .. } => from == to,
             GraphStep::SetDisabled { from, to, .. } => from == to,
             GraphStep::SetViewport {
                 from_pan,
@@ -510,11 +500,6 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
         }
         Intent::SetSelection { to } => GraphStep::SetSelection {
             from: view.selected_nodes.clone(),
-            to,
-        },
-        Intent::SetCacheBehavior { node_id, to } => GraphStep::SetCacheBehavior {
-            from: graph.by_id(&node_id)?.behavior,
-            node_id,
             to,
         },
         Intent::SetDisabled { node_id, to } => GraphStep::SetDisabled {
@@ -801,9 +786,6 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetSelection { to, .. } => {
             scope.view.selected_nodes = to.clone();
         }
-        GraphStep::SetCacheBehavior { node_id, to, .. } => {
-            scope.graph.by_id_mut(node_id).unwrap().behavior = *to;
-        }
         GraphStep::SetDisabled { node_id, to, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().disabled = *to;
         }
@@ -923,9 +905,6 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetSelection { from, .. } => {
             scope.view.selected_nodes = from.clone();
         }
-        GraphStep::SetCacheBehavior { node_id, from, .. } => {
-            scope.graph.by_id_mut(node_id).unwrap().behavior = *from;
-        }
         GraphStep::SetDisabled { node_id, from, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().disabled = *from;
         }
@@ -994,7 +973,6 @@ impl UndoStep {
                 matches!(from, Binding::Const(_)) != matches!(to, Binding::Const(_))
             }
             GraphStep::SetSelection { .. }
-            | GraphStep::SetCacheBehavior { .. }
             // Disabling only dims the body paint — same rect, no remeasure.
             | GraphStep::SetDisabled { .. } => false,
         },
@@ -1023,7 +1001,6 @@ impl UndoStep {
                 GraphStep::MoveNodes { .. }
                 | GraphStep::RenameNode { .. }
                 | GraphStep::SetSelection { .. }
-                | GraphStep::SetCacheBehavior { .. }
                 | GraphStep::SetDisabled { .. }
                 | GraphStep::SetViewport { .. },
             )
@@ -1054,7 +1031,6 @@ impl UndoStep {
                 | GraphStep::RenameNode { .. }
                 | GraphStep::SetInput { .. }
                 | GraphStep::SetSelection { .. }
-                | GraphStep::SetCacheBehavior { .. }
                 | GraphStep::SetDisabled { .. }
                 | GraphStep::DetachSubgraph { .. },
             )

@@ -424,17 +424,9 @@ fn status_text(status: ExecStatus) -> String {
     }
 }
 
-/// `cached` / `terminal` flags joined for the footer, or `None` when the
-/// node carries neither.
+/// `terminal` flag for the footer, or `None` when the node isn't a terminal.
 fn flag_text(node: &SceneNode) -> Option<String> {
-    let mut flags = Vec::new();
-    if node.cached {
-        flags.push("cached");
-    }
-    if node.terminal {
-        flags.push("terminal");
-    }
-    (!flags.is_empty()).then(|| flags.join(" · "))
+    node.terminal.then(|| "terminal".to_owned())
 }
 
 /// Stable id for a node's inspector toggle chip in the header.

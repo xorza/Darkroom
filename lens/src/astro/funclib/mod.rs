@@ -74,7 +74,7 @@ pub fn astro_funclib() -> FuncLib {
         Func::new("fbcc8899-efc3-40e0-a6fd-8743f86edbd3", "load_astro_image")
             .description("Loads a FITS/RAW/standard astronomical image")
             .category("astro")
-            .run_once()
+            .pure()
             .input(FuncInput::required(
                 "path",
                 ASTRO_IMAGE_PATH_DATA_TYPE.clone(),
@@ -111,7 +111,7 @@ pub fn astro_funclib() -> FuncLib {
                  next run instead of re-stacking.",
             )
             .category("astro")
-            .run_once()
+            .pure()
             .inputs([
                 dir_input("darks"),
                 dir_input("flats"),
@@ -162,7 +162,7 @@ pub fn astro_funclib() -> FuncLib {
         Func::new("b02f5c42-7bda-48f6-81dd-81338efbb126", "stack_lights")
             .description("Calibrates, aligns and stacks a folder of light frames into one image")
             .category("astro")
-            .run_once()
+            .pure()
             .input(FuncInput::required("lights", ASTRO_DIR_DATA_TYPE.clone()))
             .input(FuncInput::optional("masters", MASTERS_DATA_TYPE.clone()))
             // Each stage is one input: a preset quick-pick (the `value_variants`

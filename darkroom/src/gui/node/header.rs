@@ -6,7 +6,7 @@ use palantir::{
     Align, Background, Color, Configure, Corners, Panel, Sense, Sizing, Spacing, Spinner, Stroke,
     Text, TextStyle, Tooltip, Ui, VAlign, WidgetId,
 };
-use scenarium::prelude::{NodeBehavior, NodeId};
+use scenarium::prelude::NodeId;
 
 use crate::core::edit::intent::Intent;
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
@@ -162,25 +162,6 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                 }
                 .show(ui, theme);
             }
-            let toggled = Badge {
-                salt: "badge_c",
-                glyph: "C",
-                color: theme.badge_cache,
-                filled: node.cached,
-                wid: Some(cache_badge_wid(node.id)),
-                tip: "Compute once (cache the result)",
-            }
-            .show(ui, theme);
-            if toggled {
-                out.push(Intent::SetCacheBehavior {
-                    node_id: node.id,
-                    to: if node.cached {
-                        NodeBehavior::AsFunction
-                    } else {
-                        NodeBehavior::Once
-                    },
-                });
-            }
             // Disable toggle: filled when the node is excluded from
             // execution. Muted swatch (it's "off", not an alarm).
             let disable_toggled = Badge {
@@ -222,12 +203,6 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent
             to,
         });
     }
-}
-
-/// Stable id for a node's clickable cache-toggle chip. Domain-derived
-/// so `response_for` works without threading state.
-fn cache_badge_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.cache_badge", node_id))
 }
 
 /// Stable id for a node's clickable enable/disable chip.

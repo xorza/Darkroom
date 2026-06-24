@@ -6,9 +6,7 @@ use glam::Vec2;
 use palantir::InternedStr;
 use scenarium::data::{DataType, StaticValue};
 use scenarium::function::{FuncInput, FuncOutput, ValueVariant};
-use scenarium::prelude::{
-    Binding, FuncLib, Graph, NodeBehavior, NodeId, NodeKind, SubgraphDef, SubgraphRef,
-};
+use scenarium::prelude::{Binding, FuncLib, Graph, NodeId, NodeKind, SubgraphDef, SubgraphRef};
 
 use crate::core::document::GraphView;
 use crate::gui::run_state::{ExecStatus, RunState};
@@ -125,9 +123,6 @@ pub struct SceneNode {
     pub subgraph: Option<SubgraphRef>,
     /// Sink node (its func is `terminal` — no outputs feed downstream).
     pub terminal: bool,
-    /// Result is cached / computed once (`NodeBehavior::Once`). The
-    /// header badge toggles this via `Intent::SetCacheBehavior`.
-    pub cached: bool,
     /// Excluded from execution (`Node::disabled`). The header badge
     /// toggles this via `Intent::SetDisabled`; the body paints dimmed.
     pub disabled: bool,
@@ -323,7 +318,6 @@ impl Scene {
                 outputs,
                 subgraph: interface.subgraph,
                 terminal: interface.terminal,
-                cached: node.behavior == NodeBehavior::Once,
                 disabled: node.disabled,
                 boundary: matches!(
                     node.kind,

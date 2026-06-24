@@ -68,7 +68,7 @@ pub fn image_funclib() -> FuncLib {
         Func::new("a4d9bf87-9d98-44f1-a162-7483c298be3d", "load_image")
             .description("Loads an image from file")
             .category("image")
-            .run_once()
+            .pure()
             .input(FuncInput::required(
                 "path",
                 DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
