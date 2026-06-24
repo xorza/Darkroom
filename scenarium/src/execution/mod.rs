@@ -25,8 +25,11 @@ use crate::prelude::FuncId;
 use crate::worker::{EventRef, EventTrigger};
 
 // Content digests for node outputs — the cache key. Recomputed every `update`
-// and consumed by the planner/executor for the RAM cache.
+// and consumed by the planner/executor (RAM cache) and the disk cache below.
 pub(crate) mod digest;
+// Content-addressed on-disk output cache. Active only once a caller wires a
+// `DiskCache` via `set_disk_cache` (today: tests); the RAM cache runs regardless.
+pub(crate) mod disk_cache;
 pub(crate) mod executor;
 mod flatten;
 pub(crate) mod plan;
@@ -35,7 +38,8 @@ pub(crate) mod program;
 #[cfg(test)]
 mod tests;
 
-use digest::DigestEngine;
+use digest::{Digest, DigestEngine};
+use disk_cache::DiskCache;
 use executor::Executor;
 use plan::ExecutionPlan;
 use planner::Planner;
@@ -100,6 +104,9 @@ pub struct ExecutionEngine {
     planner: Planner,
     /// Reusable plan buffer, recycled across runs to avoid reallocation.
     plan: ExecutionPlan,
+    /// Optional disk-backed output cache. `None` keeps the engine memory-only
+    /// (the default); set via [`Self::set_disk_cache`].
+    disk_cache: Option<DiskCache>,
 }
 
 impl ExecutionEngine {
@@ -123,6 +130,16 @@ impl ExecutionEngine {
 
     pub fn reset_states(&mut self) {
         self.executor.reset_states();
+    }
+
+    /// Enable disk-backed output caching: at `update` a `persist` node's output is
+    /// loaded from `cache` on a digest hit (skipping recompute), and after a run
+    /// freshly-computed `persist` outputs are stored. Without this the engine is
+    /// memory-only. No production caller until the worker wires it (Phase 8) — only
+    /// tests call it now, hence dead from the library's view.
+    #[allow(dead_code)]
+    pub(crate) fn set_disk_cache(&mut self, cache: DiskCache) {
+        self.disk_cache = Some(cache);
     }
 
     // === Phase 1: compile ===
@@ -164,10 +181,12 @@ impl ExecutionEngine {
         self.validate_built(func_lib);
 
         // A node's digest changes only at compile (consts/bindings/func versions
-        // are fixed between updates), so recompute it now and keep it off the
-        // per-execute path; the trade-off is that an external file change with no
-        // graph edit isn't noticed until the next update/reopen.
+        // are fixed between updates), so recompute it now and pull any disk-cached
+        // `persist` outputs into RAM — both off the per-execute path. The trade-off
+        // is that an external file change with no graph edit isn't noticed until
+        // the next update/reopen.
         self.recompute_digests();
+        self.load_disk_cache();
         Ok(())
     }
 
@@ -217,6 +236,9 @@ impl ExecutionEngine {
             .run(&self.program, &self.plan, &self.flatten, progress, cancel)
             .await;
 
+        // Phase 3b: persist freshly-computed `persist` outputs to disk.
+        self.store_to_disk().await;
+
         stats.triggered_events = events;
         // Annotate with how the graph was flattened so the stats' flat ids
         // can be projected back onto authoring nodes (the executor itself
@@ -226,7 +248,7 @@ impl ExecutionEngine {
         Ok(stats)
     }
 
-    // === Cache (digests resolved at update) ===
+    // === Cache (digests resolved at update; disk loaded/stored around runs) ===
 
     /// Recompute each slot's `current_digest`. Digests are compile-stable, so this
     /// runs once per [`Self::update`] and the planner and `run` read the stored
@@ -235,6 +257,69 @@ impl ExecutionEngine {
         let mut engine = DigestEngine::with_fs(&self.program);
         for idx in 0..self.program.e_nodes.len() {
             self.executor.slots[idx].current_digest = engine.node_digest(idx);
+        }
+    }
+
+    /// Pull any disk-cached `persist` output into its slot, so a digest the disk
+    /// already holds becomes a plain RAM hit for the planner. A no-op without a
+    /// disk cache, for a node whose RAM already matches, or for one with no digest
+    /// (an impure cone — not reproducible, so never disk-cached).
+    fn load_disk_cache(&mut self) {
+        let Some(disk) = self.disk_cache.as_ref() else {
+            return;
+        };
+        for idx in 0..self.program.e_nodes.len() {
+            if !self.program.e_nodes[idx].persist {
+                continue;
+            }
+            let slot = &self.executor.slots[idx];
+            let Some(digest) = slot.current_digest else {
+                continue;
+            };
+            if slot.output_values.is_some() && slot.output_digest == Some(digest) {
+                continue; // RAM already holds it for this digest.
+            }
+            if let Some(values) = disk.load(&digest) {
+                let slot = &mut self.executor.slots[idx];
+                slot.output_values = Some(values);
+                slot.output_digest = Some(digest);
+            }
+        }
+    }
+
+    /// Persist the outputs of `persist` nodes that ran this round. Best-effort: a
+    /// store failure is logged, not propagated — caching never fails a run. The
+    /// store short-circuits a digest already on disk (a RAM check via the blob
+    /// store's presence index), so an unchanged re-run costs nothing.
+    async fn store_to_disk(&mut self) {
+        if self.disk_cache.is_none() {
+            return;
+        }
+        // Collect first so the executor's borrows are released before the async
+        // stores (which need it mutably). The clone is cheap — custom values are
+        // `Arc`.
+        let mut pending: Vec<(Digest, Vec<DynamicValue>)> = Vec::new();
+        for &idx in &self.plan.execute_order {
+            if !self.program.e_nodes[idx].persist {
+                continue;
+            }
+            let slot = &self.executor.slots[idx];
+            let Some(digest) = slot.current_digest else {
+                continue;
+            };
+            if let Some(outputs) = slot.output_values.as_ref() {
+                pending.push((digest, outputs.clone()));
+            }
+        }
+
+        let disk = self.disk_cache.as_ref().unwrap();
+        for (digest, outputs) in &pending {
+            if let Err(e) = disk
+                .store(digest, outputs, &mut self.executor.ctx_manager)
+                .await
+            {
+                tracing::warn!(error = %e, "failed to persist node outputs to disk cache");
+            }
         }
     }
 

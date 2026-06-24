@@ -4,7 +4,7 @@ use super::*;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::function::FuncBehavior;
-use crate::graph::{Binding, InputPort, Node};
+use crate::graph::{Binding, CachePersistence, InputPort, Node};
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use common::{FloatExt, SerdeFormat};
 use tokio::sync::Mutex;
@@ -39,6 +39,198 @@ fn node(func_lib: &FuncLib, func_name: &str, id: NodeId) -> Node {
 fn bind(graph: &mut Graph, node_name: &str, idx: usize, binding: Binding) {
     let id = graph.by_name(node_name).unwrap().id;
     graph.set_input_binding(InputPort::new(id, idx), binding);
+}
+
+// === Disk Cache (engine integration) ===
+
+mod cache_persistence {
+    use super::*;
+    use crate::execution::disk_cache::DiskCache;
+    use crate::value_codec::CustomValueRegistry;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+    /// A unique temp directory removed on drop, so tests don't collide or leak.
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(tag: &str) -> Self {
+            static COUNTER: AtomicU64 = AtomicU64::new(0);
+            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let dir = std::env::temp_dir().join(format!(
+                "scenarium-engine-diskcache-{tag}-{}-{n}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            TempDir(dir)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A fresh engine backed by a disk cache rooted at `dir` (simulating a reopen
+    /// when called twice against the same dir).
+    fn disk_engine(dir: &TempDir) -> ExecutionEngine {
+        let mut engine = ExecutionEngine::default();
+        engine.set_disk_cache(DiskCache::new(&dir.0, CustomValueRegistry::default()));
+        engine
+    }
+
+    /// A `persist` node's output survives a fresh engine (reopen), its sole-consumer
+    /// upstream is pruned on the hit, and a digest change (a bumped func version,
+    /// standing in for any input change) invalidates it.
+    #[tokio::test]
+    async fn persist_output_survives_reopen_and_invalidates_on_digest_change() {
+        let dir = TempDir::new("e2e");
+
+        // `get_a` recompute counter, shared across every engine via the hook.
+        let get_a_calls = Arc::new(AtomicUsize::new(0));
+        let make_lib = || {
+            let calls = get_a_calls.clone();
+            test_func_lib(TestFuncHooks {
+                get_a: Arc::new(move || {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(7)
+                }),
+                ..default_hooks()
+            })
+        };
+
+        // get_a (pure source) → mult (pure, persist Disk) → print (terminal).
+        let lib = make_lib();
+        let mut graph = Graph::default();
+        graph.add(node(&lib, "get_a", NodeId::unique()));
+        let mut mult = node(&lib, "mult", NodeId::unique());
+        mult.persist = CachePersistence::Disk;
+        graph.add(mult);
+        graph.add(node(&lib, "print", NodeId::unique()));
+        let get_a_id = graph.by_name("get_a").unwrap().id;
+        let mult_id = graph.by_name("mult").unwrap().id;
+        bind(&mut graph, "mult", 0, (get_a_id, 0).into());
+        bind(&mut graph, "mult", 1, (get_a_id, 0).into());
+        bind(&mut graph, "print", 0, (mult_id, 0).into());
+
+        // First run: everything computes; `mult` is stored to disk.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &make_lib()).unwrap();
+        engine.execute_terminals().await.unwrap();
+        assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
+
+        // Reopen: a fresh engine over the same store. `mult` loads from disk
+        // (cached) and `get_a` is pruned — never re-runs.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &make_lib()).unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            get_a_calls.load(Ordering::SeqCst),
+            1,
+            "get_a must not recompute"
+        );
+        assert!(
+            stats.cached_nodes.contains(&mult_id),
+            "mult should be disk-cached"
+        );
+        assert!(
+            !stats.executed_nodes.iter().any(|n| n.node_id == get_a_id),
+            "mult's sole-consumer upstream should be pruned"
+        );
+
+        // Digest change: bump `mult`'s func version ⇒ miss ⇒ recompute ⇒ get_a runs.
+        let mut bumped = make_lib();
+        bumped.by_name_mut("mult").unwrap().version = 1;
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &bumped).unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            get_a_calls.load(Ordering::SeqCst),
+            2,
+            "version bump must recompute"
+        );
+        assert!(
+            !stats.cached_nodes.contains(&mult_id),
+            "mult should not be cached after a digest change"
+        );
+    }
+
+    /// A `persist` node whose cone contains an impure node has digest `None`, so
+    /// it's never disk-cached even with `persist=Disk` — on reopen it recomputes.
+    #[tokio::test]
+    async fn impure_cone_persist_node_is_not_disk_cached() {
+        let dir = TempDir::new("impure-cone");
+        let mut func_lib = test_func_lib(default_hooks());
+        func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
+
+        // get_b (impure) → mult (persist) → print. mult's cone is impure.
+        let mut graph = Graph::default();
+        graph.add(node(&func_lib, "get_b", NodeId::unique()));
+        let mut mult = node(&func_lib, "mult", NodeId::unique());
+        mult.persist = CachePersistence::Disk;
+        graph.add(mult);
+        graph.add(node(&func_lib, "print", NodeId::unique()));
+        let get_b_id = graph.by_name("get_b").unwrap().id;
+        let mult_id = graph.by_name("mult").unwrap().id;
+        bind(&mut graph, "mult", 0, (get_b_id, 0).into());
+        bind(&mut graph, "mult", 1, (get_b_id, 0).into());
+        bind(&mut graph, "print", 0, (mult_id, 0).into());
+
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &func_lib).unwrap();
+        engine.execute_terminals().await.unwrap();
+
+        // Reopen: mult must recompute — an impure cone can't be content-addressed.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &func_lib).unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert!(
+            !stats.cached_nodes.contains(&mult_id),
+            "impure-cone node must not be disk-cached"
+        );
+        assert!(
+            stats.executed_nodes.iter().any(|n| n.node_id == mult_id),
+            "mult recomputes on reopen"
+        );
+    }
+
+    /// A `persist = Memory` node (the default) is never written to disk even though
+    /// its cone is reproducible — only `Disk` opts in — so on reopen it recomputes.
+    #[tokio::test]
+    async fn memory_persistence_node_is_not_disk_cached() {
+        let dir = TempDir::new("memory-persist");
+        let func_lib = test_func_lib(default_hooks());
+
+        // get_a (pure) → mult (Memory, the default) → print.
+        let mut graph = Graph::default();
+        graph.add(node(&func_lib, "get_a", NodeId::unique()));
+        graph.add(node(&func_lib, "mult", NodeId::unique()));
+        graph.add(node(&func_lib, "print", NodeId::unique()));
+        let get_a_id = graph.by_name("get_a").unwrap().id;
+        let mult_id = graph.by_name("mult").unwrap().id;
+        bind(&mut graph, "mult", 0, (get_a_id, 0).into());
+        bind(&mut graph, "mult", 1, (get_a_id, 0).into());
+        bind(&mut graph, "print", 0, (mult_id, 0).into());
+
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &func_lib).unwrap();
+        engine.execute_terminals().await.unwrap();
+
+        // Reopen: fresh RAM, nothing on disk for mult ⇒ it recomputes.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &func_lib).unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert!(
+            !stats.cached_nodes.contains(&mult_id),
+            "a Memory-persistence node must not be disk-cached"
+        );
+        assert!(
+            stats.executed_nodes.iter().any(|n| n.node_id == mult_id),
+            "mult recomputes on reopen"
+        );
+    }
 }
 
 // === Graph Structure ===

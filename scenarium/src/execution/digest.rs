@@ -8,7 +8,7 @@
 //! node. Equal digests ⇒ identical computation, so the digest is at once the
 //! cache key *and* the invalidation signal: change anything upstream and every
 //! downstream digest changes — on this machine or any other. See
-//! `docs/cache-redesign.md`.
+//! `docs/disk-cache-design.md`.
 
 use blake3::Hasher;
 

@@ -87,12 +87,11 @@ Reusable `Planner` (`planner.rs:43`) runs backward DFS passes: collect terminals
 (terminal nodes, event subscribers, triggerable events) → post-order
 `process_order` (deps first) → forward pass resolving cached / wants-execute →
 pruned `execute_order` (only nodes whose output a running consumer reads). The
-cache decision is content-addressed: a node is cached iff its current digest
-(`Executor.current_digests[idx]`, recomputed at `update`) matches its slot's
-`output_digest`; a `None` digest (impure cone) never matches. See
-`docs/cache-redesign.md`. `ExecutionPlan` (`plan.rs:24`) holds the two orders plus
-SoA flag columns: `node_flags`, `input_flags`, and `output_usage` (per-output
-consumer counts; 0 = skip).
+cache decision is content-addressed: a node is cached iff its `slot.current_digest`
+(recomputed at `update`) matches its `slot.output_digest`; a `None` digest (impure
+cone) never matches. See `docs/disk-cache-design.md`. `ExecutionPlan` (`plan.rs:24`)
+holds the two orders plus SoA flag columns: `node_flags` and `output_usage`
+(per-output consumer counts; 0 = skip).
 
 **3. Execute — `Executor::run(program, plan)`** (`executor.rs`).
 `Executor` (`executor.rs:53`) owns cross-run state: `slots: KeyIndexVec<NodeId, RuntimeSlot>`

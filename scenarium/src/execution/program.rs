@@ -70,8 +70,9 @@ pub(crate) struct ExecutionNode {
     pub behavior: FuncBehavior,
 
     /// The authoring node's `Disk` cache request, flattened from
-    /// [`CachePersistence`](crate::graph::CachePersistence). Inert for now — the
-    /// on-disk cache that read it was removed; kept so the intent survives.
+    /// [`CachePersistence`](crate::graph::CachePersistence). Read by the engine's
+    /// disk-cache load/store when one is configured; honored only when the node has
+    /// a content digest (a reproducible cone) — see `digest.rs`.
     #[serde(default)]
     pub persist: bool,
 

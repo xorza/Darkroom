@@ -11,7 +11,7 @@ pub mod graph;
 pub mod macros;
 pub mod subgraph;
 pub mod testing;
-pub mod value_cache;
+pub mod value_codec;
 pub mod worker;
 
 pub mod prelude {
@@ -30,5 +30,5 @@ pub mod prelude {
         Binding, Graph, InputPort, Node, NodeId, NodeKind, OutputPort, Subscription,
     };
     pub use crate::subgraph::{SubgraphDef, SubgraphEvent, SubgraphId, SubgraphRef};
-    pub use crate::value_cache::{CustomValueCodec, CustomValueRegistry};
+    pub use crate::value_codec::{CustomValueCodec, CustomValueRegistry};
 }
