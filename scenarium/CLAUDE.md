@@ -21,7 +21,7 @@ to the other:
 
 | Path | Role |
 |------|------|
-| `graph.rs` | `Graph`, `Node`, `Binding`, `Subscription`, ports, `NodeKind`/`NodeBehavior`. Authoring model + validation. |
+| `graph.rs` | `Graph`, `Node`, `Binding`, `Subscription`, ports, `NodeKind`, `CachePersistence`. Authoring model + validation. |
 | `subgraph.rs` | `SubgraphDef`, `SubgraphRef` (Linked/Local), `SubgraphEvent`. Composite definitions and their exposed interface. |
 | `function.rs` | `Func` (definition), `FuncLib` (registry of funcs + shared subgraphs), `FuncInput`/`FuncOutput`, `FuncBehavior`. |
 | `data.rs` | Value model: `StaticValue` (editor consts), `DynamicValue` (runtime), `DataType`, `CustomValue` trait, `TypeDef`/`EnumDef`. |
@@ -47,7 +47,7 @@ port Vecs; wiring lives flat at graph level:
 
 `Node` (`graph.rs:126`) is pure identity: `id`, `kind: NodeKind`
 (Func / Subgraph / SubgraphInput / SubgraphOutput), `name`,
-`behavior: NodeBehavior` (`AsFunction | Once`), `disabled: bool`. Port arity
+`persist: CachePersistence` (`Memory | Disk`), `disabled: bool`. Port arity
 derives from `kind`. `Binding` (`graph.rs:48`) is `None` (unbound) /
 `Const(StaticValue)` / `Bind(OutputPort)`. `validate_with(func_lib)` recurses per
 composite level with recursion guards.
@@ -74,10 +74,9 @@ remapped ids. `flatten_id` (`flatten.rs:172`) keeps **top-level** node ids
 unchanged (so caches survive edits) and hashes nested ids from the descent path +
 interior id. `Flattener` (`flatten.rs:43`) walks levels, skipping `disabled`
 nodes and boundary nodes, recursing into subgraph instances; bindings and event
-edges are resolved across boundaries into flat producers/subscribers. A composite
-with `NodeBehavior::Once` bumps `once_depth` on entry (`flatten.rs:225`); while
-`> 0`, every interior func is forced to `ExecutionBehavior::Once` — freezing the
-whole composite after its first run.
+edges are resolved across boundaries into flat producers/subscribers. Each flat
+node copies its func's `FuncBehavior` (`Pure`/`Impure`) — only `Pure` is
+content-cacheable.
 
 `ExecutionProgram` (`program.rs:128`) is immutable SoA: `e_nodes`,
 plus flat `inputs`/`events` pools indexed by `Span` slices per node; outputs are
@@ -87,20 +86,24 @@ span-only. `ExecutionBinding` (`program.rs:26`) is `None`/`Const`/`Bind(address)
 Reusable `Planner` (`planner.rs:43`) runs backward DFS passes: collect terminals
 (terminal nodes, event subscribers, triggerable events) → post-order
 `process_order` (deps first) → forward pass resolving cached / wants-execute →
-pruned `execute_order` (only nodes whose output a running consumer reads).
-`ExecutionPlan` (`plan.rs:24`) holds the two orders plus SoA flag columns:
-`node_flags`, `input_flags`, and `output_usage` (per-output consumer counts;
-0 = skip).
+pruned `execute_order` (only nodes whose output a running consumer reads). The
+cache decision is content-addressed: a node is cached iff its current digest
+(`Executor.current_digests[idx]`, recomputed at `update`) matches its slot's
+`output_digest`; a `None` digest (impure cone) never matches. See
+`docs/cache-redesign.md`. `ExecutionPlan` (`plan.rs:24`) holds the two orders plus
+SoA flag columns: `node_flags`, `input_flags`, and `output_usage` (per-output
+consumer counts; 0 = skip).
 
 **3. Execute — `Executor::run(program, plan)`** (`executor.rs`).
 `Executor` (`executor.rs:53`) owns cross-run state: `slots: KeyIndexVec<NodeId, RuntimeSlot>`
 (reconciled by id against `e_nodes` after each flatten), the `ContextManager`, and
-the cross-run `input_dirty` column. `RuntimeSlot` (`executor.rs:29`) caches
-`output_values`, per-node `AnyState`/`SharedAnyState`, and per-run `error`/`run_time`.
+the per-node `current_digests` column. `RuntimeSlot` (`executor.rs:29`) caches
+`output_values` + the `output_digest` they were produced under, per-node
+`AnyState`/`SharedAnyState`, and per-run `error`/`run_time`.
 The run loop walks `execute_order`: skip if an upstream errored, resolve each input
-(None/Const/Bind→upstream cached output, marking `changed` from dirty bit or
-dependency wants-execute), set `ctx_manager.current_node` for log attribution,
-await the lambda, store results, clear input dirty bits. When `execute` is given
+(None/Const/Bind→upstream cached output), set `ctx_manager.current_node` for log
+attribution, await the lambda, store results, and stamp `output_digest` from the
+node's current digest. When `execute` is given
 a progress `UnboundedSender<RunProgress>`, the loop sends `RunPhase::Started`
 before each lambda and `Finished{elapsed}` after — node ids resolved to authoring
 attribution via the `FlattenMap` so the consumer needn't be. Stats (executed,

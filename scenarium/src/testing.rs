@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::async_lambda;
 use crate::data::DataType;
 use crate::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
-use crate::graph::{Graph, InputPort, Node, NodeBehavior, NodeId};
+use crate::graph::{Graph, InputPort, Node, NodeId};
 
 pub struct TestFuncHooks {
     pub get_a: Arc<dyn Fn() -> anyhow::Result<i64> + Send + Sync + 'static>,
@@ -103,9 +103,9 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
         Func {
             id: "a937baff-822d-48fd-9154-58751539b59b".into(),
             name: "get_b".to_string(),
-            description: Some("Returns the value from test hook B (impure)".to_string()),
+            description: Some("Returns the value from test hook B".to_string()),
             category: "Debug".to_string(),
-            behavior: FuncBehavior::Impure,
+            behavior: FuncBehavior::Pure,
             terminal: false,
             inputs: vec![],
             outputs: vec![FuncOutput {
@@ -212,12 +212,10 @@ pub fn test_graph() -> Graph {
 
     let mut get_a_node: Node = get_a_func.into();
     get_a_node.id = get_a_node_id;
-    get_a_node.behavior = NodeBehavior::Once;
     graph.add(get_a_node);
 
     let mut get_b_node: Node = get_b_func.into();
     get_b_node.id = get_b_node_id;
-    get_b_node.behavior = NodeBehavior::Once;
     graph.add(get_b_node);
 
     let mut sum_node: Node = sum_func.into();

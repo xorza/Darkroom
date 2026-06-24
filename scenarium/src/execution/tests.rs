@@ -4,7 +4,7 @@ use super::*;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::function::FuncBehavior;
-use crate::graph::{Binding, CachePersistence, InputPort, Node, NodeBehavior};
+use crate::graph::{Binding, CachePersistence, InputPort, Node};
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use common::{FloatExt, SerdeFormat};
 use tokio::sync::Mutex;
@@ -41,68 +41,203 @@ fn bind(graph: &mut Graph, node_name: &str, idx: usize, binding: Binding) {
     graph.set_input_binding(InputPort::new(id, idx), binding);
 }
 
-/// Read input `idx` of the named node's binding from the source graph.
-fn binding(graph: &Graph, node_name: &str, idx: usize) -> Binding {
-    let id = graph.by_name(node_name).unwrap().id;
-    graph.input_binding(InputPort::new(id, idx))
-}
-
 // === Cache Persistence ===
 
 mod cache_persistence {
     use super::*;
+    use crate::execution::cache_store::CacheStore;
+    use crate::execution::disk_cache::DiskCache;
+    use crate::value_cache::CustomValueRegistry;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    /// Flatten resolves the authoring `persist` request into the execution
-    /// node's `persist` flag, clamping `Disk` off for effectively-`Impure` nodes.
-    #[test]
-    fn flatten_clamps_disk_to_reproducible_nodes() {
-        let func_lib = test_func_lib(default_hooks());
-        let mut graph = Graph::default();
+    /// A unique temp directory removed on drop, so tests don't collide or leak.
+    #[derive(Debug)]
+    struct TempDir(PathBuf);
 
-        // (node name, func, behavior, persist request)
-        let cases = [
-            (
-                "pure_disk",
-                "get_a",
-                NodeBehavior::AsFunction,
-                CachePersistence::Disk,
-            ),
-            (
-                "pure_mem",
-                "get_a",
-                NodeBehavior::AsFunction,
-                CachePersistence::Memory,
-            ),
-            (
-                "impure_disk",
-                "get_b",
-                NodeBehavior::AsFunction,
-                CachePersistence::Disk,
-            ),
-            (
-                "once_impure_disk",
-                "get_b",
-                NodeBehavior::Once,
-                CachePersistence::Disk,
-            ),
-        ];
-        for (name, func, behavior, persist) in cases {
-            let mut n = node(&func_lib, func, NodeId::unique());
-            n.name = name.to_string();
-            n.behavior = behavior;
-            n.persist = persist;
-            graph.add(n);
+    impl TempDir {
+        fn new(tag: &str) -> Self {
+            static COUNTER: AtomicUsize = AtomicUsize::new(0);
+            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let dir = std::env::temp_dir().join(format!(
+                "scenarium-engine-cache-{tag}-{}-{n}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            TempDir(dir)
         }
+    }
 
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn disk_engine(dir: &TempDir) -> ExecutionEngine {
         let mut engine = ExecutionEngine::default();
-        engine.update(&graph, &func_lib).unwrap();
+        engine.set_disk_cache(DiskCache::new(
+            CacheStore::new(&dir.0),
+            CustomValueRegistry::default(),
+        ));
+        engine
+    }
 
-        // Pure + Disk persists; Memory never does; Impure + Disk is clamped off;
-        // a `Once` node freezes its (impure) output, so it stays persistable.
-        assert!(engine.by_name("pure_disk").unwrap().persist);
-        assert!(!engine.by_name("pure_mem").unwrap().persist);
-        assert!(!engine.by_name("impure_disk").unwrap().persist);
-        assert!(engine.by_name("once_impure_disk").unwrap().persist);
+    /// End-to-end: a `persist` node's output survives a fresh `Executor` (the
+    /// reopen case), its upstream is pruned on the hit, and a digest change (a
+    /// bumped func version, standing in for any input change) invalidates it.
+    #[tokio::test]
+    async fn persist_output_survives_reopen_and_invalidates_on_digest_change() {
+        let dir = TempDir::new("e2e");
+
+        // `get_a` recompute counter, shared across every engine via the hook.
+        let get_a_calls = Arc::new(AtomicUsize::new(0));
+        let make_lib = || {
+            let calls = get_a_calls.clone();
+            test_func_lib(TestFuncHooks {
+                get_a: Arc::new(move || {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(7)
+                }),
+                ..default_hooks()
+            })
+        };
+
+        // get_a (pure source) → mult (pure, persist Disk) → print (terminal).
+        // `mult`'s cone is just the pure `get_a`, so it's disk-cacheable; `get_a`
+        // feeds only `mult`, so a hit prunes it.
+        let lib = make_lib();
+        let mut graph = Graph::default();
+        graph.add(node(&lib, "get_a", NodeId::unique()));
+        let mut mult = node(&lib, "mult", NodeId::unique());
+        mult.persist = CachePersistence::Disk;
+        graph.add(mult);
+        graph.add(node(&lib, "print", NodeId::unique()));
+        let get_a_id = graph.by_name("get_a").unwrap().id;
+        let mult_id = graph.by_name("mult").unwrap().id;
+        bind(&mut graph, "mult", 0, (get_a_id, 0).into());
+        bind(&mut graph, "mult", 1, (get_a_id, 0).into());
+        bind(&mut graph, "print", 0, (mult_id, 0).into());
+
+        // First run: everything computes; `mult` is stored to disk.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &make_lib()).unwrap();
+        engine.execute_terminals().await.unwrap();
+        assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
+
+        // Reopen: a fresh engine + executor over the same store. `mult` loads from
+        // disk (cached) and `get_a` is pruned — never re-runs.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &make_lib()).unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            get_a_calls.load(Ordering::SeqCst),
+            1,
+            "get_a must not recompute"
+        );
+        assert!(
+            stats.cached_nodes.contains(&mult_id),
+            "mult should be disk-cached"
+        );
+        assert!(
+            !stats.executed_nodes.iter().any(|n| n.node_id == get_a_id),
+            "mult's sole-consumer upstream should be pruned"
+        );
+
+        // Digest change: bump `mult`'s func version (stands in for any input
+        // change). Its digest no longer matches the stored blob ⇒ miss ⇒
+        // recompute ⇒ `get_a` runs again.
+        let mut bumped = make_lib();
+        bumped.by_name_mut("mult").unwrap().version = 1;
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &bumped).unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            get_a_calls.load(Ordering::SeqCst),
+            2,
+            "version bump must recompute"
+        );
+        assert!(
+            !stats.cached_nodes.contains(&mult_id),
+            "mult should not be cached after a digest change"
+        );
+    }
+
+    /// A `persist` node whose cone contains an impure node has digest `None`, so
+    /// it's never disk-cached even though `persist=Disk` is requested — on reopen
+    /// it recomputes (contrast the pure-cone e2e above, which caches).
+    #[tokio::test]
+    async fn impure_cone_persist_node_is_not_disk_cached() {
+        let dir = TempDir::new("impure-cone");
+        let mut func_lib = test_func_lib(default_hooks());
+        func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
+
+        // get_b (impure) → mult (persist) → print. mult's cone is impure.
+        let mut graph = Graph::default();
+        graph.add(node(&func_lib, "get_b", NodeId::unique()));
+        let mut mult = node(&func_lib, "mult", NodeId::unique());
+        mult.persist = CachePersistence::Disk;
+        graph.add(mult);
+        graph.add(node(&func_lib, "print", NodeId::unique()));
+        let get_b_id = graph.by_name("get_b").unwrap().id;
+        let mult_id = graph.by_name("mult").unwrap().id;
+        bind(&mut graph, "mult", 0, (get_b_id, 0).into());
+        bind(&mut graph, "mult", 1, (get_b_id, 0).into());
+        bind(&mut graph, "print", 0, (mult_id, 0).into());
+
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &func_lib).unwrap();
+        engine.execute_terminals().await.unwrap();
+
+        // Reopen: mult must recompute — an impure cone can't be content-addressed.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &func_lib).unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert!(
+            !stats.cached_nodes.contains(&mult_id),
+            "impure-cone node must not be disk-cached"
+        );
+        assert!(
+            stats.executed_nodes.iter().any(|n| n.node_id == mult_id),
+            "mult recomputes on reopen"
+        );
+    }
+
+    /// A `persist = Memory` node (the default) is never written to disk even
+    /// though its cone is reproducible — only `Disk` opts into the store — so on
+    /// reopen it recomputes. (Contrast the `Disk` e2e above, which reloads.)
+    #[tokio::test]
+    async fn memory_persistence_node_is_not_disk_cached() {
+        let dir = TempDir::new("memory-persist");
+        let func_lib = test_func_lib(default_hooks());
+
+        // get_a (pure) → mult (Memory, the default) → print.
+        let mut graph = Graph::default();
+        graph.add(node(&func_lib, "get_a", NodeId::unique()));
+        graph.add(node(&func_lib, "mult", NodeId::unique()));
+        graph.add(node(&func_lib, "print", NodeId::unique()));
+        let get_a_id = graph.by_name("get_a").unwrap().id;
+        let mult_id = graph.by_name("mult").unwrap().id;
+        bind(&mut graph, "mult", 0, (get_a_id, 0).into());
+        bind(&mut graph, "mult", 1, (get_a_id, 0).into());
+        bind(&mut graph, "print", 0, (mult_id, 0).into());
+
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &func_lib).unwrap();
+        engine.execute_terminals().await.unwrap();
+
+        // Reopen: fresh RAM, nothing on disk for mult ⇒ it recomputes.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &func_lib).unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert!(
+            !stats.cached_nodes.contains(&mult_id),
+            "a Memory-persistence node must not be disk-cached"
+        );
+        assert!(
+            stats.executed_nodes.iter().any(|n| n.node_id == mult_id),
+            "mult recomputes on reopen"
+        );
     }
 }
 
@@ -154,13 +289,6 @@ mod graph_structure {
         assert_eq!(execution_graph.node_output_usage(get_b)[0], 2);
         assert_eq!(execution_graph.node_output_usage(sum)[0], 1);
         assert_eq!(execution_graph.node_output_usage(mult)[0], 1);
-
-        // Leaf nodes have no input dependencies so inputs_updated=false
-        assert!(!execution_graph.node_flags(get_a).inputs_updated);
-        assert!(!execution_graph.node_flags(get_b).inputs_updated);
-        assert!(execution_graph.node_flags(sum).inputs_updated);
-        assert!(execution_graph.node_flags(mult).inputs_updated);
-        assert!(execution_graph.node_flags(print).inputs_updated);
 
         assert!(print.terminal);
 
@@ -482,57 +610,36 @@ mod const_bindings {
         bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(5)));
 
         execution_graph.update(&graph, &func_lib).unwrap();
-
-        let mult = execution_graph.by_name("mult").unwrap();
-        assert!(execution_graph.node_input_dirty(mult)[0]);
-        assert!(execution_graph.node_input_dirty(mult)[1]);
-
         execution_graph.execute_terminals().await?;
 
-        // Only mult and print execute (upstream nodes excluded by const)
+        // Only mult and print execute — the const binds detach mult from its
+        // upstream, so get_a/get_b/sum are pruned.
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
             ["mult", "print"]
         );
 
-        let mult = execution_graph.by_name("mult").unwrap();
-        assert!(execution_graph.node_flags(mult).inputs_updated);
-        // After execution, binding_changed is cleared
-        assert!(!execution_graph.node_input_dirty(mult)[0]);
-        assert!(!execution_graph.node_input_flags(mult)[0].dependency_wants_execute);
-        assert!(!execution_graph.node_input_dirty(mult)[1]);
-        assert!(!execution_graph.node_input_flags(mult)[1].dependency_wants_execute);
-
-        // Re-run with same bindings: mult is cached, only print re-executes
+        // Re-run with the same bindings: mult's digest is unchanged, so it's a
+        // RAM cache hit; only print (impure terminal) re-executes.
         execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.execute_terminals().await?;
-
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
 
-        let mult = execution_graph.by_name("mult").unwrap();
-        assert!(!execution_graph.node_flags(mult).inputs_updated);
-        assert!(!execution_graph.node_input_dirty(mult)[0]);
-        assert!(!execution_graph.node_input_dirty(mult)[1]);
-
-        // Change one const: mult re-executes
+        // Change one const: mult's digest changes ⇒ cache miss ⇒ it re-executes.
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(4)));
         execution_graph.update(&graph, &func_lib).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
-
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
             ["mult", "print"]
         );
-
-        assert!(execution_graph.node_input_dirty(mult)[0]);
-        assert!(!execution_graph.node_input_dirty(mult)[1]);
+        assert!(execution_graph.node_flags(mult).wants_execute);
+        assert!(!execution_graph.node_flags(mult).cached);
         assert!(!execution_graph.node_flags(mult).missing_required_inputs);
         assert!(!execution_graph.node_flags(print).missing_required_inputs);
-        assert!(execution_graph.node_flags(mult).inputs_updated);
-        assert!(execution_graph.node_flags(print).inputs_updated);
 
         Ok(())
     }
@@ -681,18 +788,16 @@ mod const_bindings {
     }
 }
 
-// === Behavior (Pure / Impure / Once) ===
+// === Behavior (Pure / Impure) ===
 
 mod behavior {
     use super::*;
 
     #[test]
     fn pure_node_skips_on_rerun() -> anyhow::Result<()> {
-        let mut graph = test_graph();
-        let mut func_lib = test_func_lib(TestFuncHooks::default());
-
-        graph.by_name_mut("get_b").unwrap().behavior = NodeBehavior::AsFunction;
-        func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Pure;
+        // `get_b` is a pure source in the fixture, so a cached output lets it skip.
+        let graph = test_graph();
+        let func_lib = test_func_lib(TestFuncHooks::default());
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &func_lib).unwrap();
@@ -1022,10 +1127,9 @@ mod behavior {
 
     #[test]
     fn impure_node_always_invoked() -> anyhow::Result<()> {
-        let mut graph = test_graph();
+        let graph = test_graph();
         let mut func_lib = test_func_lib(TestFuncHooks::default());
 
-        graph.by_name_mut("get_b").unwrap().behavior = NodeBehavior::AsFunction;
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         let mut execution_graph = ExecutionEngine::default();
@@ -1038,172 +1142,6 @@ mod behavior {
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
-            ["sum", "mult", "print"]
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn once_node_always_caches() -> anyhow::Result<()> {
-        let mut graph = test_graph();
-        let mut func_lib = test_func_lib(TestFuncHooks::default());
-        let mut execution_graph = ExecutionEngine::default();
-
-        graph.by_name_mut("get_b").unwrap().behavior = NodeBehavior::Once;
-        func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
-
-        execution_graph.update(&graph, &func_lib).unwrap();
-        execution_graph.prepare_execution(true, false, &[])?;
-
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph)[2..],
-            ["sum", "mult", "print"]
-        );
-
-        // With cached output, Once node is skipped even though func is Impure
-        execution_graph.set_output_values("get_b", vec![DynamicValue::Static(StaticValue::Int(7))]);
-        execution_graph.update(&graph, &func_lib).unwrap();
-        execution_graph.prepare_execution(true, false, &[])?;
-
-        // get_b excluded, but rest still runs
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph),
-            ["get_a", "sum", "mult", "print"]
-        );
-
-        Ok(())
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn once_node_recomputes_on_binding_change() -> anyhow::Result<()> {
-        let mut graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || Ok(3)),
-            get_b: Arc::new(move || 55),
-            print: Arc::new(move |_| {}),
-        });
-        let mut execution_graph = ExecutionEngine::default();
-
-        graph.by_name_mut("mult").unwrap().behavior = NodeBehavior::Once;
-
-        execution_graph.update(&graph, &func_lib).unwrap();
-        execution_graph.execute_terminals().await?;
-
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph)[2..],
-            ["sum", "mult", "print"]
-        );
-
-        // Second run: Once node cached
-        execution_graph.update(&graph, &func_lib).unwrap();
-        execution_graph.execute_terminals().await?;
-
-        assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
-
-        // Change binding: Once node must recompute
-        let b1 = binding(&graph, "mult", 1);
-        bind(&mut graph, "mult", 0, b1);
-
-        execution_graph.update(&graph, &func_lib).unwrap();
-        execution_graph.execute_terminals().await?;
-
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph),
-            ["mult", "print"]
-        );
-
-        Ok(())
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn once_node_recomputes_on_binding_change_with_cached_inputs() -> anyhow::Result<()> {
-        let mut graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || Ok(3)),
-            get_b: Arc::new(move || 55),
-            print: Arc::new(move |_| {}),
-        });
-        let mut execution_graph = ExecutionEngine::default();
-
-        graph.by_name_mut("mult").unwrap().behavior = NodeBehavior::Once;
-
-        execution_graph.update(&graph, &func_lib).unwrap();
-        execution_graph.execute_terminals().await?;
-
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph)[2..],
-            ["sum", "mult", "print"]
-        );
-
-        execution_graph.update(&graph, &func_lib).unwrap();
-        execution_graph.execute_terminals().await?;
-
-        assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
-
-        // Switch to const bindings
-        let old_binding0 = binding(&graph, "mult", 0);
-        let old_binding1 = binding(&graph, "mult", 1);
-        bind(&mut graph, "mult", 0, Binding::Const(2.into()));
-        bind(&mut graph, "mult", 1, Binding::Const(22.into()));
-
-        execution_graph.update(&graph, &func_lib).unwrap();
-        execution_graph.execute_terminals().await?;
-
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph),
-            ["mult", "print"]
-        );
-
-        // Switch back to bind (swapped) — still recomputes
-        bind(&mut graph, "mult", 0, old_binding1);
-        bind(&mut graph, "mult", 1, old_binding0);
-
-        execution_graph.update(&graph, &func_lib).unwrap();
-        execution_graph.execute_terminals().await?;
-
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph),
-            ["mult", "print"],
-        );
-
-        Ok(())
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn once_node_toggle_refreshes_upstream() -> anyhow::Result<()> {
-        let func_lib = test_func_lib(default_hooks());
-
-        let mut graph = test_graph();
-        let mut execution_graph = ExecutionEngine::default();
-
-        bind(&mut graph, "sum", 0, Binding::Const(2.into()));
-        bind(&mut graph, "sum", 1, Binding::Const(21.into()));
-
-        execution_graph.update(&graph, &func_lib).unwrap();
-        execution_graph.execute_terminals().await?;
-
-        // Change sum's const and set mult to Once simultaneously
-        bind(&mut graph, "sum", 0, Binding::Const(12.into()));
-        graph.by_name_mut("mult").unwrap().behavior = NodeBehavior::Once;
-
-        execution_graph.update(&graph, &func_lib).unwrap();
-        execution_graph.execute_terminals().await?;
-
-        let sum = execution_graph.by_name("sum").unwrap();
-        assert!(!execution_graph.node_flags(sum).cached);
-
-        // Once node was just set, it has cached output, so only print runs
-        assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
-
-        // Toggle mult back to AsFunction — sum now needs to re-execute
-        graph.by_name_mut("mult").unwrap().behavior = NodeBehavior::AsFunction;
-
-        execution_graph.update(&graph, &func_lib).unwrap();
-        execution_graph.execute_terminals().await?;
-
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph),
             ["sum", "mult", "print"]
         );
 
@@ -1261,16 +1199,12 @@ mod composite_behavior {
         }
     }
 
-    /// Main graph: one instance of `def` whose output feeds a terminal
-    /// `print`. `once` toggles the instance's cache flag.
-    fn main_with(func_lib: &FuncLib, def: SubgraphDef, once: bool) -> Graph {
+    /// Main graph: one instance of `def` whose output feeds a terminal `print`.
+    fn main_with(func_lib: &FuncLib, def: SubgraphDef) -> Graph {
         let def_id = def.id;
         let mut graph = Graph::default();
         graph.subgraphs.add(def.clone());
         let inst = graph.add_subgraph_node(&def, SubgraphRef::Local(def_id));
-        if once {
-            graph.by_id_mut(&inst).unwrap().behavior = NodeBehavior::Once;
-        }
         let p = func_node(func_lib, "print", "p");
         let p_id = p.id;
         graph.add(p);
@@ -1295,38 +1229,21 @@ mod composite_behavior {
     }
 
     #[test]
-    fn as_function_composite_reruns_impure_interior() {
-        // Control: the instance is *not* `Once`, so its impure interior
-        // recomputes like any impure node — my change must not force it.
-        let func_lib = test_func_lib(TestFuncHooks::default());
+    fn composite_reruns_impure_interior() {
+        // An impure interior recomputes across a composite boundary like any
+        // impure node — flattening must preserve its impurity.
+        let mut func_lib = test_func_lib(TestFuncHooks::default());
+        func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
         let def = impure_output_def(
             &func_lib,
             "00000000-0000-0000-0000-0000000000a1",
             "S",
             "inner",
         );
-        let graph = main_with(&func_lib, def, false);
+        let graph = main_with(&func_lib, def);
         assert!(
             reruns_with_cache(&graph, &func_lib, "inner"),
-            "impure interior recomputes when the composite is AsFunction"
-        );
-    }
-
-    #[test]
-    fn once_composite_caches_impure_interior() {
-        // The instance is `Once`: its interior computes once and then
-        // caches, even though `get_b` is impure.
-        let func_lib = test_func_lib(TestFuncHooks::default());
-        let def = impure_output_def(
-            &func_lib,
-            "00000000-0000-0000-0000-0000000000a1",
-            "S",
-            "inner",
-        );
-        let graph = main_with(&func_lib, def, true);
-        assert!(
-            !reruns_with_cache(&graph, &func_lib, "inner"),
-            "Once composite freezes its interior after the first run"
+            "impure interior recomputes through a composite"
         );
     }
 
@@ -1341,7 +1258,7 @@ mod composite_behavior {
             "S",
             "inner",
         );
-        let graph = main_with(&func_lib, def, false);
+        let graph = main_with(&func_lib, def);
 
         // A `Local` def resolves from the graph itself, so the walk reaches
         // the interior even with an empty library — and flags its `get_b`.
@@ -1358,49 +1275,11 @@ mod composite_behavior {
     }
 
     #[test]
-    fn once_composite_freezes_nested_interior() {
-        // `Once` propagates through nested composites: marking only the
-        // outer instance freezes a node two levels deep.
-        let func_lib = test_func_lib(TestFuncHooks::default());
-        let inner_def = impure_output_def(
-            &func_lib,
-            "00000000-0000-0000-0000-0000000000b1",
-            "Inner",
-            "deep",
-        );
-        let inner_id = inner_def.id;
-
-        // Outer's interior holds an instance of Inner feeding its output.
-        let mut outer_interior = Graph::default();
-        outer_interior.subgraphs.add(inner_def.clone());
-        let inner_inst = outer_interior.add_subgraph_node(&inner_def, SubgraphRef::Local(inner_id));
-        let so = Node::new(NodeKind::SubgraphOutput);
-        let so_id = so.id;
-        outer_interior.add(so);
-        outer_interior.set_input_binding(InputPort::new(so_id, 0), (inner_inst, 0).into());
-        let outer_def = SubgraphDef {
-            id: "00000000-0000-0000-0000-0000000000b2".into(),
-            name: "Outer".to_string(),
-            category: String::new(),
-            graph: outer_interior,
-            inputs: vec![],
-            outputs: vec![int_output("Out")],
-            events: vec![],
-            origin: None,
-        };
-
-        let graph = main_with(&func_lib, outer_def, true);
-        assert!(
-            !reruns_with_cache(&graph, &func_lib, "deep"),
-            "Once on the outer composite freezes the doubly-nested interior"
-        );
-    }
-
-    #[test]
-    fn nested_without_once_reruns() {
-        // Same nesting, outer instance left AsFunction: the deep impure
-        // node recomputes (no forced caching leaks in).
-        let func_lib = test_func_lib(TestFuncHooks::default());
+    fn nested_impure_interior_reruns() {
+        // A doubly-nested impure node recomputes — flattening preserves its
+        // impurity through two composite levels.
+        let mut func_lib = test_func_lib(TestFuncHooks::default());
+        func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
         let inner_def = impure_output_def(
             &func_lib,
             "00000000-0000-0000-0000-0000000000b1",
@@ -1425,10 +1304,10 @@ mod composite_behavior {
             events: vec![],
             origin: None,
         };
-        let graph = main_with(&func_lib, outer_def, false);
+        let graph = main_with(&func_lib, outer_def);
         assert!(
             reruns_with_cache(&graph, &func_lib, "deep"),
-            "nested impure interior recomputes when nothing is Once"
+            "doubly-nested impure interior recomputes"
         );
     }
 }
@@ -1573,7 +1452,8 @@ mod execution {
         // sum = get_a + get_b = 2 + 5 = 7, mult = sum * get_b = 7 * 5 = 35
         assert_eq!(test_values.try_lock()?.result, 35);
 
-        // Changing external state doesn't recompute (get_b is Once by default)
+        // Changing external state doesn't recompute: get_b is pure, so its digest
+        // is stable and the cached value stands.
         test_values.try_lock()?.b = 7;
 
         execution_graph.update(&graph, &func_lib).unwrap();
@@ -1634,9 +1514,9 @@ mod execution {
         eg.execute_terminals().await?;
         let run3 = execution_node_names_in_order(&eg);
 
-        // First run executes everything; once the Once/Pure upstream is cached,
-        // runs 2 and 3 must schedule identically — guards the reused `Scratch`
-        // buffers being reset cleanly each run (a missed reset would drift).
+        // First run executes everything; once the pure upstream is cached, runs 2
+        // and 3 must schedule identically — guards the reused `Scratch` buffers
+        // being reset cleanly each run (a missed reset would drift).
         assert_eq!(run2, ["print"]);
         assert_eq!(run2, run3);
         assert_ne!(run1, run2);
@@ -2895,7 +2775,6 @@ mod subgraph {
             category: "Test".into(),
             terminal: true,
             behavior: FuncBehavior::Impure,
-            node_default_behavior: Default::default(),
             version: 0,
             description: None,
             inputs: vec![],

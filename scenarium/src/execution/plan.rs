@@ -9,14 +9,12 @@
 pub(crate) struct NodeFlags {
     pub(crate) wants_execute: bool,
     pub(crate) cached: bool,
-    pub(crate) inputs_updated: bool,
     pub(crate) missing_required_inputs: bool,
 }
 
 /// Per-run scheduling state for one input, indexed by input-pool index.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct InputFlags {
-    pub(crate) dependency_wants_execute: bool,
     pub(crate) missing: bool,
 }
 

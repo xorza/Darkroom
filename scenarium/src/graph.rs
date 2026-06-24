@@ -98,19 +98,12 @@ mod binding_map_serde {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
-pub enum NodeBehavior {
-    #[default]
-    AsFunction,
-    Once,
-}
-
 /// Where a node's computed output is cached. `Memory` keeps it only in the live
 /// engine (dropped on reload); `Disk` also persists it to the content-addressed
 /// store, so an unchanged graph reloads the result instead of recomputing.
-/// `Disk` is a *request* honored only for deterministic nodes — an effectively
-/// `Impure` node is clamped back to memory at flatten time (its output isn't
-/// reproducible), so the flag never risks serving a stale value. See
+/// `Disk` is a *request* honored only for reproducible nodes — a node with an
+/// impure node anywhere in its upstream cone has no content digest, so it's
+/// silently kept memory-only and never risks serving a stale value. See
 /// `docs/disk-cache-design.md`.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum CachePersistence {
@@ -142,20 +135,15 @@ pub struct Node {
     pub kind: NodeKind,
     pub name: String,
 
-    #[serde(default)]
-    pub behavior: NodeBehavior,
-
-    /// Where this node's output is cached. See [`CachePersistence`]. Orthogonal
-    /// to `behavior`; `#[serde(default)]` → `Memory` keeps pre-field documents
-    /// memory-only.
+    /// Where this node's output is cached. See [`CachePersistence`].
+    /// `#[serde(default)]` → `Memory` keeps pre-field documents memory-only.
     #[serde(default)]
     pub persist: CachePersistence,
 
     /// Disabled nodes are skipped at flatten time: they emit no execution
     /// node, and any binding resolving to one yields no producer, so a
     /// downstream consumer sees the wire as unbound (→ `MissingInputs` if
-    /// the input is required). Orthogonal to `behavior` (which only
-    /// matters for nodes that run). `#[serde(default)]` → `false` keeps
+    /// the input is required). `#[serde(default)]` → `false` keeps
     /// pre-field documents enabled.
     #[serde(default)]
     pub disabled: bool,
@@ -791,7 +779,6 @@ impl Node {
             id: NodeId::unique(),
             kind,
             name: String::new(),
-            behavior: NodeBehavior::AsFunction,
             persist: CachePersistence::Memory,
             disabled: false,
         }
@@ -807,7 +794,6 @@ impl Node {
             id: NodeId::unique(),
             kind: NodeKind::Subgraph(r),
             name: def.name.clone(),
-            behavior: NodeBehavior::AsFunction,
             persist: CachePersistence::Memory,
             disabled: false,
         }
@@ -815,14 +801,13 @@ impl Node {
 }
 
 impl From<&Func> for Node {
-    /// A bare func instance (identity + name + default behavior). Default
-    /// input bindings are seeded by `Graph::add_func_node`.
+    /// A bare func instance (identity + name). Default input bindings are seeded
+    /// by `Graph::add_func_node`.
     fn from(func: &Func) -> Self {
         Node {
             id: NodeId::unique(),
             kind: NodeKind::Func(func.id),
             name: func.name.clone(),
-            behavior: func.node_default_behavior,
             persist: CachePersistence::Memory,
             disabled: false,
         }
@@ -879,22 +864,13 @@ impl From<i64> for Binding {
     }
 }
 
-impl NodeBehavior {
-    pub fn toggle(&mut self) {
-        match self {
-            NodeBehavior::AsFunction => *self = NodeBehavior::Once,
-            NodeBehavior::Once => *self = NodeBehavior::AsFunction,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::data::DataType;
     use crate::function::{Func, FuncInput};
     use crate::graph::{
-        Binding, CachePersistence, Graph, InputPort, Node, NodeBehavior, NodeId, NodeKind,
-        OutputPort, Subscription,
+        Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, OutputPort,
+        Subscription,
     };
     use crate::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
     use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
@@ -1056,15 +1032,6 @@ mod tests {
         assert_eq!(from_port.as_output_binding().unwrap().port_idx, 1);
 
         assert_eq!(Binding::from(7i64), Binding::Const(7i64.into()));
-    }
-
-    #[test]
-    fn node_behavior_toggle_round_trips() {
-        let mut b = NodeBehavior::AsFunction;
-        b.toggle();
-        assert_eq!(b, NodeBehavior::Once);
-        b.toggle();
-        assert_eq!(b, NodeBehavior::AsFunction);
     }
 
     // === Data bindings ===

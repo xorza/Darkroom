@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::data::{DataType, StaticValue};
 use crate::event_lambda::EventLambda;
 use crate::function::FuncBehavior;
-use crate::graph::{NodeBehavior, NodeId};
+use crate::graph::NodeId;
 use crate::prelude::{FuncId, FuncLambda};
 
 // === Execution Binding ===
@@ -55,14 +55,6 @@ pub(crate) struct ExecutionEvent {
     pub lambda: EventLambda,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub(crate) enum ExecutionBehavior {
-    #[default]
-    Impure,
-    Pure,
-    Once,
-}
-
 // === Execution Node ===
 
 /// Topology + code for one flat node. Immutable across runs; all mutable
@@ -73,12 +65,13 @@ pub(crate) struct ExecutionNode {
     pub(crate) inited: bool,
 
     pub terminal: bool,
-    pub behavior: ExecutionBehavior,
+    /// Copied from the node's func at flatten. Only `Pure` is content-cacheable;
+    /// the digest of an `Impure` node (or any node downstream of one) is `None`.
+    pub behavior: FuncBehavior,
 
-    /// Whether to persist this node's output to the on-disk cache. Resolved at
-    /// flatten: the authoring node's `Disk` request, clamped off when the node is
-    /// effectively `Impure` (non-reproducible). Read by the executor in the
-    /// disk-cache integration phase.
+    /// The authoring node's `Disk` cache request. Honored only when the node has a
+    /// content digest (a reproducible cone) — see `digest.rs`; otherwise the disk
+    /// cache silently ignores it.
     #[serde(default)]
     pub persist: bool,
 
@@ -104,21 +97,6 @@ pub(crate) struct ExecutionNode {
 impl KeyIndexKey<NodeId> for ExecutionNode {
     fn key(&self) -> &NodeId {
         &self.id
-    }
-}
-
-impl ExecutionNode {
-    pub(crate) fn compute_behavior(
-        node_behavior: NodeBehavior,
-        func_behavior: FuncBehavior,
-    ) -> ExecutionBehavior {
-        match node_behavior {
-            NodeBehavior::AsFunction => match func_behavior {
-                FuncBehavior::Pure => ExecutionBehavior::Pure,
-                FuncBehavior::Impure => ExecutionBehavior::Impure,
-            },
-            NodeBehavior::Once => ExecutionBehavior::Once,
-        }
     }
 }
 

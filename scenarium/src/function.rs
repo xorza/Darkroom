@@ -3,7 +3,6 @@ use crate::context::ContextType;
 use crate::data::*;
 use crate::event_lambda::EventLambda;
 use crate::func_lambda::FuncLambda;
-use crate::graph::NodeBehavior;
 use crate::subgraph::{SubgraphDef, SubgraphId};
 use common::id_type;
 use common::{KeyIndexKey, KeyIndexVec};
@@ -106,7 +105,6 @@ pub struct Func {
     pub terminal: bool,
 
     pub behavior: FuncBehavior,
-    pub node_default_behavior: NodeBehavior,
 
     /// Algorithm version, folded into the disk-cache content digest so a changed
     /// implementation invalidates results computed by an older binary. Bump it
@@ -148,9 +146,9 @@ pub struct FuncLib {
 }
 
 impl Func {
-    /// Start a func definition. Defaults: `Impure`, non-terminal,
-    /// `NodeBehavior::AsFunction`, empty category/inputs/outputs/events and a
-    /// `None` lambda — set the rest with the chained builders below.
+    /// Start a func definition. Defaults: `Impure`, non-terminal, empty
+    /// category/inputs/outputs/events and a `None` lambda — set the rest with the
+    /// chained builders below.
     pub fn new(id: impl Into<FuncId>, name: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -180,13 +178,6 @@ impl Func {
     /// Mark the func `Pure` (same inputs → same outputs; cacheable).
     pub fn pure(mut self) -> Self {
         self.behavior = FuncBehavior::Pure;
-        self
-    }
-
-    /// Make freshly-dropped nodes default to `NodeBehavior::Once` (run a single
-    /// time rather than re-evaluating as a function).
-    pub fn run_once(mut self) -> Self {
-        self.node_default_behavior = NodeBehavior::Once;
         self
     }
 
@@ -332,8 +323,7 @@ mod tests {
         // A document authored before `version` existed carries no such field;
         // `#[serde(default)]` must fill it with 0 rather than fail to parse.
         let legacy = r#"{ "id": "00000000-0000-0000-0000-000000000001", "name": "legacy",
-            "category": "", "terminal": false, "behavior": "Impure",
-            "node_default_behavior": "AsFunction" }"#;
+            "category": "", "terminal": false, "behavior": "Impure" }"#;
         let func: Func = deserialize(legacy.as_bytes(), SerdeFormat::Json)?;
         assert_eq!(func.version, 0);
         assert_eq!(Func::default().version, 0);
