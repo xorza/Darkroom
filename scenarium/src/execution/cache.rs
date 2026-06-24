@@ -9,8 +9,8 @@ use common::{KeyIndexKey, KeyIndexVec};
 
 use crate::common::shared_any_state::SharedAnyState;
 use crate::data::DynamicValue;
-use crate::execution::digest::Digest;
-use crate::execution::program::ExecutionNode;
+use crate::execution::digest::{Digest, DigestEngine};
+use crate::execution::program::{ExecutionNode, ExecutionProgram};
 use crate::graph::NodeId;
 use crate::prelude::AnyState;
 
@@ -82,8 +82,15 @@ impl Cache {
         }
     }
 
-    pub(crate) fn set_current_digest(&mut self, idx: usize, digest: Option<Digest>) {
-        self.slots[idx].current_digest = digest;
+    /// Refresh every slot's `current_digest` for `program`. Digests are
+    /// compile-stable (consts/bindings/func versions are fixed between updates),
+    /// so the engine calls this once per `update`; the planner and run then read
+    /// the stored value rather than re-walking the cone each execute.
+    pub(crate) fn recompute_digests(&mut self, program: &ExecutionProgram) {
+        let mut engine = DigestEngine::with_fs(program);
+        for idx in 0..program.e_nodes.len() {
+            self.slots[idx].current_digest = engine.node_digest(idx);
+        }
     }
 
     pub(crate) fn current_digest(&self, idx: usize) -> Option<Digest> {
@@ -182,10 +189,13 @@ mod tests {
         assert!(!cache.is_hit(0), "empty slot misses");
 
         cache.hydrate(0, out(), d);
-        assert!(cache.is_hit(0), "a slot hydrated under its current digest hits");
+        assert!(
+            cache.is_hit(0),
+            "a slot hydrated under its current digest hits"
+        );
 
         // Hydrating under a digest that is no longer current does not hit.
-        cache.set_current_digest(0, Some([9u8; 32]));
+        cache.slots[0].current_digest = Some([9u8; 32]);
         assert!(!cache.is_hit(0), "current digest moved on ⇒ miss");
     }
 }

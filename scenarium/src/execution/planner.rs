@@ -6,14 +6,12 @@
 //! `Planner` owns the reusable DFS scratch so a repeated plan allocates nothing.
 
 use common::is_debug;
-use hashbrown::HashSet;
-
-use crate::execution::event::EventRef;
 
 use crate::execution::cache::Cache;
+use crate::execution::event::EventRef;
 use crate::execution::plan::{ExecutionPlan, NodeFlags};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
-use crate::execution::{Error, Result};
+use crate::execution::{Error, Result, validate};
 
 /// DFS coloring for the two backward passes. White = unvisited, Gray = on
 /// stack (Done pushed, children pending), Black = children done.
@@ -72,7 +70,7 @@ impl Planner {
         if result.is_ok() {
             self.resolve_node_flags(program, cache, plan);
             self.walk_backward_collect_execute_order(program, plan);
-            self.validate_for_execution(program, plan);
+            validate::schedule(program, plan);
         }
         result
     }
@@ -340,64 +338,6 @@ impl Planner {
                             output_idx: addr.port_idx,
                         },
                     });
-                }
-            }
-        }
-    }
-
-    fn validate_for_execution(&self, program: &ExecutionProgram, plan: &ExecutionPlan) {
-        if !is_debug() {
-            return;
-        }
-
-        assert!(plan.process_order.len() <= program.e_nodes.len());
-
-        // `process_order` is a post-order DFS: unique, and every Bind dep
-        // appears before its consumer.
-        let mut seen_in_order = HashSet::with_capacity(program.e_nodes.len());
-        for &idx in &plan.process_order {
-            assert!(idx < program.e_nodes.len());
-            let span = program.e_nodes[idx].inputs;
-            for input in &program.inputs[span.range()] {
-                if let ExecutionBinding::Bind(addr) = &input.binding {
-                    assert!(addr.target_idx < program.e_nodes.len());
-                    assert!(seen_in_order.contains(&addr.target_idx));
-                }
-            }
-            assert!(seen_in_order.insert(idx));
-        }
-
-        for (idx, e_node) in program.e_nodes.iter().enumerate() {
-            let flags = plan.node_flags[idx];
-            if flags.missing_required_inputs {
-                assert!(!flags.wants_execute);
-            }
-
-            for e_input in &program.inputs[e_node.inputs.range()] {
-                if let ExecutionBinding::Bind(addr) = &e_input.binding {
-                    assert!(addr.target_idx < program.e_nodes.len());
-                    assert!(addr.port_idx < program.e_nodes[addr.target_idx].outputs.len as usize);
-                }
-            }
-        }
-
-        assert!(plan.execute_order.len() <= plan.process_order.len());
-
-        let mut pending: HashSet<usize> = plan.execute_order.iter().copied().collect();
-        assert_eq!(pending.len(), plan.execute_order.len());
-
-        for &idx in &plan.execute_order {
-            assert!(idx < program.e_nodes.len());
-            pending.remove(&idx);
-
-            let e_node = &program.e_nodes[idx];
-            let flags = plan.node_flags[idx];
-            assert!(flags.wants_execute);
-            assert!(!flags.missing_required_inputs);
-
-            for e_input in &program.inputs[e_node.inputs.range()] {
-                if let ExecutionBinding::Bind(addr) = &e_input.binding {
-                    assert!(!pending.contains(&addr.target_idx));
                 }
             }
         }

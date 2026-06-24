@@ -12,8 +12,6 @@
 //! 2–3, run back-to-back).
 
 use common::CancelToken;
-use common::is_debug;
-use hashbrown::HashSet;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
@@ -33,17 +31,18 @@ mod flatten;
 pub(crate) mod plan;
 pub(crate) mod planner;
 pub(crate) mod program;
+mod query;
 #[cfg(test)]
 mod tests;
+pub(crate) mod validate;
 
 use cache::Cache;
-use digest::{Digest, DigestEngine};
-use disk_cache::DiskCache;
-use event::{EventRef, EventTrigger};
+use disk_cache::{DiskCache, DiskCacheLayer};
+use event::EventRef;
 use executor::Executor;
 use plan::ExecutionPlan;
 use planner::Planner;
-use program::{ExecutionBinding, ExecutionNode, ExecutionProgram};
+use program::{ExecutionNode, ExecutionProgram};
 
 // === Error Types ===
 
@@ -108,9 +107,10 @@ pub struct ExecutionEngine {
     planner: Planner,
     /// Reusable plan buffer, recycled across runs to avoid reallocation.
     plan: ExecutionPlan,
-    /// Optional disk-backed output cache. `None` keeps the engine memory-only
-    /// (the default); set via [`Self::set_disk_cache`].
-    disk_cache: Option<DiskCache>,
+    /// Disk-cache coordinator. Empty by default (memory-only); wired via
+    /// [`Self::set_disk_cache`]. Hydrates `persist` outputs into the RAM cache at
+    /// `update` and persists fresh ones after a run.
+    disk: DiskCacheLayer,
 }
 
 impl ExecutionEngine {
@@ -143,7 +143,7 @@ impl ExecutionEngine {
     /// tests call it now, hence dead from the library's view.
     #[allow(dead_code)]
     pub(crate) fn set_disk_cache(&mut self, cache: DiskCache) {
-        self.disk_cache = Some(cache);
+        self.disk.set(cache);
     }
 
     // === Phase 1: compile ===
@@ -182,15 +182,15 @@ impl ExecutionEngine {
         // default new, trim gone).
         self.cache.reconcile(&self.program.e_nodes);
 
-        self.validate_built(func_lib);
+        validate::built(&self.program, &self.cache, func_lib);
 
         // A node's digest changes only at compile (consts/bindings/func versions
         // are fixed between updates), so recompute it now and pull any disk-cached
         // `persist` outputs into RAM — both off the per-execute path. The trade-off
         // is that an external file change with no graph edit isn't noticed until
         // the next update/reopen.
-        self.recompute_digests();
-        self.load_disk_cache();
+        self.cache.recompute_digests(&self.program);
+        self.disk.load_into(&self.program, &mut self.cache);
         Ok(())
     }
 
@@ -234,8 +234,14 @@ impl ExecutionEngine {
             )
             .await;
 
-        // Phase 3b: persist freshly-computed `persist` outputs to disk.
-        self.store_to_disk().await;
+        // Phase 3b: persist freshly-computed `persist` outputs to disk. The
+        // snapshot is taken synchronously (the cache isn't `Sync`), then stored.
+        let pending = self
+            .disk
+            .pending_persists(&self.program, &self.plan, &self.cache);
+        self.disk
+            .store_pending(pending, &mut self.executor.ctx_manager)
+            .await;
 
         stats.triggered_events = events;
         // Annotate with how the graph was flattened so the stats' flat ids
@@ -244,204 +250,6 @@ impl ExecutionEngine {
         stats.flatten = self.flatten.clone();
 
         Ok(stats)
-    }
-
-    // === Cache (digests resolved at update; disk loaded/stored around runs) ===
-
-    /// Recompute each slot's `current_digest`. Digests are compile-stable, so this
-    /// runs once per [`Self::update`] and the planner and `run` read the stored
-    /// value rather than re-walking the cone each execute.
-    fn recompute_digests(&mut self) {
-        let mut engine = DigestEngine::with_fs(&self.program);
-        for idx in 0..self.program.e_nodes.len() {
-            self.cache.set_current_digest(idx, engine.node_digest(idx));
-        }
-    }
-
-    /// Pull any disk-cached `persist` output into its slot, so a digest the disk
-    /// already holds becomes a plain RAM hit for the planner. A no-op without a
-    /// disk cache, for a node whose RAM already matches, or for one with no digest
-    /// (an impure cone — not reproducible, so never disk-cached).
-    fn load_disk_cache(&mut self) {
-        let Some(disk) = self.disk_cache.as_ref() else {
-            return;
-        };
-        for idx in 0..self.program.e_nodes.len() {
-            if !self.program.e_nodes[idx].persist {
-                continue;
-            }
-            let Some(digest) = self.cache.current_digest(idx) else {
-                continue;
-            };
-            if self.cache.is_hit(idx) {
-                continue; // RAM already holds it for this digest.
-            }
-            if let Some(values) = disk.load(&digest) {
-                self.cache.hydrate(idx, values, digest);
-            }
-        }
-    }
-
-    /// Persist the outputs of `persist` nodes that ran this round. Best-effort: a
-    /// store failure is logged, not propagated — caching never fails a run. The
-    /// store short-circuits a digest already on disk (a RAM check via the blob
-    /// store's presence index), so an unchanged re-run costs nothing.
-    async fn store_to_disk(&mut self) {
-        if self.disk_cache.is_none() {
-            return;
-        }
-        // Collect first so the cache borrow is released before the async stores
-        // (which need `ctx_manager` mutably). The clone is cheap — custom values
-        // are `Arc`.
-        let mut pending: Vec<(Digest, Vec<DynamicValue>)> = Vec::new();
-        for &idx in &self.plan.execute_order {
-            if !self.program.e_nodes[idx].persist {
-                continue;
-            }
-            let Some(digest) = self.cache.current_digest(idx) else {
-                continue;
-            };
-            if let Some(outputs) = self.cache.output_values(idx) {
-                pending.push((digest, outputs.clone()));
-            }
-        }
-
-        let disk = self.disk_cache.as_ref().unwrap();
-        for (digest, outputs) in &pending {
-            if let Err(e) = disk
-                .store(digest, outputs, &mut self.executor.ctx_manager)
-                .await
-            {
-                tracing::warn!(error = %e, "failed to persist node outputs to disk cache");
-            }
-        }
-    }
-
-    // === Query ===
-
-    pub fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
-        let idx = self.program.e_nodes.index_of_key(node_id)?;
-        let e_node = &self.program.e_nodes[idx];
-
-        let inputs = self.program.inputs[e_node.inputs.range()]
-            .iter()
-            .map(|input| match &input.binding {
-                ExecutionBinding::None => None,
-                ExecutionBinding::Const(v) => Some(DynamicValue::from(v)),
-                ExecutionBinding::Bind(addr) => self
-                    .cache
-                    .output_values(addr.target_idx)
-                    .and_then(|o| o.get(addr.port_idx))
-                    .cloned(),
-            })
-            .collect();
-
-        let outputs = self
-            .cache
-            .output_values(idx)
-            .map(|o| o.to_vec())
-            .unwrap_or_default();
-
-        Some(ArgumentValues { inputs, outputs })
-    }
-
-    /// `get_argument_values` plus awaited preview resolution.
-    pub async fn get_argument_values_with_previews(
-        &mut self,
-        node_id: &NodeId,
-    ) -> Option<ArgumentValues> {
-        let mut values = self.get_argument_values(node_id)?;
-        let mut pending_previews = Vec::new();
-        for value in values
-            .inputs
-            .iter_mut()
-            .flatten()
-            .chain(values.outputs.iter_mut())
-        {
-            if let Some(pending) = value.gen_preview(&mut self.executor.ctx_manager) {
-                pending_previews.push(pending);
-            }
-        }
-        for pending in pending_previews {
-            pending.wait(&mut self.executor.ctx_manager).await;
-        }
-        Some(values)
-    }
-
-    /// Collect every (event → lambda → state) triple that is currently
-    /// "live" — node was executed or cached this run, the event has at
-    /// least one subscriber, and its lambda is populated. Used by the
-    /// worker to spawn the tasks that drive the event loop.
-    pub fn active_event_triggers(&self, stats: &ExecutionStats) -> Vec<EventTrigger> {
-        stats
-            .cached_nodes
-            .iter()
-            .copied()
-            .chain(stats.executed_nodes.iter().map(|n| n.node_id))
-            .flat_map(|node_id| {
-                let e_node = self.by_id(&node_id).unwrap();
-                let event_state = self
-                    .cache
-                    .slots
-                    .by_key(&node_id)
-                    .unwrap()
-                    .event_state
-                    .clone();
-                let id = e_node.id;
-                self.program.events[e_node.events.range()]
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, event)| !event.subscribers.is_empty() && !event.lambda.is_none())
-                    .map(move |(event_idx, event)| EventTrigger {
-                        event: EventRef {
-                            node_id: id,
-                            event_idx,
-                        },
-                        lambda: event.lambda.clone(),
-                        state: event_state.clone(),
-                    })
-            })
-            .collect()
-    }
-
-    // === Validation ===
-
-    /// Self-consistency check of the compiled program against the `FuncLib`,
-    /// plus that the runtime slots stayed index-aligned to the nodes after
-    /// `reconcile`. The source graph is gone after flattening, so this
-    /// validates each `e_node` against its func and checks binding integrity.
-    fn validate_built(&self, func_lib: &FuncLib) {
-        if !is_debug() {
-            return;
-        }
-
-        // Runtime slots stay index-aligned to nodes after `reconcile`.
-        assert_eq!(self.cache.slots.len(), self.program.e_nodes.len());
-
-        let mut seen_node_ids: HashSet<NodeId> = HashSet::with_capacity(self.program.e_nodes.len());
-        for (idx, e_node) in self.program.e_nodes.iter().enumerate() {
-            assert!(seen_node_ids.insert(e_node.id));
-
-            let slot = &self.cache.slots[idx];
-            assert_eq!(slot.id, e_node.id);
-            if let Some(output_values) = slot.output_values.as_ref() {
-                assert_eq!(output_values.len(), e_node.outputs.len as usize);
-            }
-
-            let func = func_lib.by_id(&e_node.func_id).unwrap();
-            assert_eq!(e_node.inputs.len as usize, func.inputs.len());
-            assert_eq!(e_node.outputs.len as usize, func.outputs.len());
-            assert_eq!(e_node.events.len as usize, func.events.len());
-
-            for e_input in &self.program.inputs[e_node.inputs.range()] {
-                if let ExecutionBinding::Bind(e_addr) = &e_input.binding {
-                    assert!(e_addr.target_idx < self.program.e_nodes.len());
-                    let target = &self.program.e_nodes[e_addr.target_idx];
-                    assert_eq!(e_addr.target_id, target.id);
-                    assert!(e_addr.port_idx < target.outputs.len as usize);
-                }
-            }
-        }
     }
 }
 

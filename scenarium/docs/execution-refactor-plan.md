@@ -88,16 +88,26 @@ The central change.
 - New colocated unit tests in `cache.rs` for `is_hit` (full truth table) and
   `hydrate`. Full suite: 174 passing.
 
-### Stage 3 — slim `ExecutionEngine` (issue D)
+### Stage 3 — slim `ExecutionEngine` (issue D) ✅ done
 
-- Move disk-cache choreography (`recompute_digests`, `load_disk_cache`,
-  `store_to_disk`) behind a cache/disk coordinator so the engine calls
-  `load_before_run` / `store_after_run` and the `disk_cache.is_none()` branch
-  lives inside.
-- Move value queries (`get_argument_values`, `…_with_previews`) to
-  `execution/query.rs`.
-- Move `validate_built` to `execution/validate.rs` (alongside the planner's
-  `validate_for_execution`).
+- `recompute_digests` moved onto `Cache` (it's RAM-cache digest refresh, runs
+  every `update`).
+- Disk choreography moved behind a `DiskCacheLayer` coordinator in
+  `disk_cache.rs`: `load_into` (disk→RAM at `update`) and
+  `pending_persists` + `store_pending` (RAM→disk after a run). The
+  `disk_cache.is_none()` branch lives inside it; the engine just calls the
+  coordinator. The store is split sync-collect / async-write so the non-`Sync`
+  `Cache` borrow never crosses an await (the run future stays `Send`).
+- Value queries + event-trigger extraction (`get_argument_values`,
+  `…_with_previews`, `active_event_triggers`) moved to `execution/query.rs` as an
+  `impl ExecutionEngine` block (child module → reads the private fields).
+- Both debug validators moved to `execution/validate.rs` as free fns
+  `validate::built` (was `validate_built`) and `validate::schedule` (was the
+  planner's `validate_for_execution`).
+- Trivial `set_current_digest` setter dropped (per no-trivial-accessors).
+- `mod.rs` shrank from ~454 to 291 lines; `planner.rs` from 410 to 327. The
+  engine is now orchestration only: error/value types, struct, accessors, state,
+  `update`, `execute`. Full suite: 174 passing.
 
 ### Stage 4 — unit tests for the core phases (issue G)
 

@@ -22,7 +22,10 @@ use thiserror::Error;
 
 use crate::context::ContextManager;
 use crate::data::DynamicValue;
+use crate::execution::cache::Cache;
 use crate::execution::digest::Digest;
+use crate::execution::plan::ExecutionPlan;
+use crate::execution::program::ExecutionProgram;
 use crate::value_codec::{self, CustomValueRegistry, deserialize_outputs, serialize_outputs};
 
 /// Disk-backed output cache: a content-addressed blob directory plus the codec
@@ -195,6 +198,93 @@ impl DiskCache {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         self.root
             .join(format!("{}.{}.{n}.tmp", hex(digest), std::process::id()))
+    }
+}
+
+/// Coordinates the optional disk cache with the RAM [`Cache`] around a run:
+/// hydrates persisted `persist` outputs into RAM before planning, and persists
+/// freshly-computed ones after. A `None` inner cache makes both no-ops — the
+/// memory-only default — so the engine never branches on disk presence itself.
+#[derive(Debug, Default)]
+pub(crate) struct DiskCacheLayer {
+    inner: Option<DiskCache>,
+}
+
+impl DiskCacheLayer {
+    #[allow(dead_code)] // no production caller until the worker wires the cache.
+    pub(crate) fn set(&mut self, cache: DiskCache) {
+        self.inner = Some(cache);
+    }
+
+    /// Pull any disk-cached `persist` output into its slot, so a digest the disk
+    /// already holds becomes a plain RAM hit for the planner. A no-op without a
+    /// disk cache, for a node whose RAM already matches, or for one with no digest
+    /// (an impure cone — not reproducible, so never disk-cached).
+    pub(crate) fn load_into(&self, program: &ExecutionProgram, cache: &mut Cache) {
+        let Some(disk) = self.inner.as_ref() else {
+            return;
+        };
+        for idx in 0..program.e_nodes.len() {
+            if !program.e_nodes[idx].persist {
+                continue;
+            }
+            let Some(digest) = cache.current_digest(idx) else {
+                continue;
+            };
+            if cache.is_hit(idx) {
+                continue; // RAM already holds it for this digest.
+            }
+            if let Some(values) = disk.load(&digest) {
+                cache.hydrate(idx, values, digest);
+            }
+        }
+    }
+
+    /// Snapshot the `(digest, outputs)` of every `persist` node that ran this
+    /// round, ready to hand to [`Self::store_pending`]. Done synchronously and
+    /// up front so the non-`Sync` [`Cache`] borrow never crosses an await; the
+    /// clone is cheap (custom values are `Arc`). Empty without a disk cache.
+    pub(crate) fn pending_persists(
+        &self,
+        program: &ExecutionProgram,
+        plan: &ExecutionPlan,
+        cache: &Cache,
+    ) -> Vec<(Digest, Vec<DynamicValue>)> {
+        let mut pending = Vec::new();
+        if self.inner.is_none() {
+            return pending;
+        }
+        for &idx in &plan.execute_order {
+            if !program.e_nodes[idx].persist {
+                continue;
+            }
+            let Some(digest) = cache.current_digest(idx) else {
+                continue;
+            };
+            if let Some(outputs) = cache.output_values(idx) {
+                pending.push((digest, outputs.clone()));
+            }
+        }
+        pending
+    }
+
+    /// Persist the snapshot from [`Self::pending_persists`]. Best-effort: a store
+    /// failure is logged, not propagated — caching never fails a run. The store
+    /// short-circuits a digest already on disk (a RAM check via the blob store's
+    /// presence index), so an unchanged re-run costs nothing.
+    pub(crate) async fn store_pending(
+        &self,
+        pending: Vec<(Digest, Vec<DynamicValue>)>,
+        ctx: &mut ContextManager,
+    ) {
+        let Some(disk) = self.inner.as_ref() else {
+            return;
+        };
+        for (digest, outputs) in &pending {
+            if let Err(e) = disk.store(digest, outputs, ctx).await {
+                tracing::warn!(error = %e, "failed to persist node outputs to disk cache");
+            }
+        }
     }
 }
 
