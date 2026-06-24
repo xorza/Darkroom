@@ -8,7 +8,6 @@ use scenarium::data::{DataType, StaticValue};
 use scenarium::function::{FuncInput, FuncOutput, ValueVariant};
 use scenarium::prelude::{
     Binding, CachePersistence, FuncLib, Graph, NodeId, NodeKind, SubgraphDef, SubgraphRef,
-    special_func,
 };
 
 use crate::core::document::GraphView;
@@ -217,7 +216,7 @@ impl Scene {
                 }),
                 // A built-in special node: its interface is the hardcoded spec.
                 NodeKind::Special(s) => {
-                    let f = special_func(*s);
+                    let f = s.func();
                     Some(NodeInterface {
                         kind_label: f.name.clone().into(),
                         inputs: Cow::Borrowed(&f.inputs),
