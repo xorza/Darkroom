@@ -131,4 +131,9 @@ impl ExecutionProgram {
         self.events.clear();
         self.n_outputs = 0;
     }
+
+    /// `e_node`'s slice of the shared input pool.
+    pub(crate) fn node_inputs(&self, e_node: &ExecutionNode) -> &[ExecutionInput] {
+        &self.inputs[e_node.inputs.range()]
+    }
 }
