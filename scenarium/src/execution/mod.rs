@@ -100,7 +100,7 @@ pub struct ExecutionEngine {
     /// map). Rebuilt each compile, cloned into each run's `ExecutionStats`
     /// so the editor can project stats onto its nodes. Compile scratch,
     /// not part of the serialized program.
-    flatten: FlattenMap,
+    flatten_map: FlattenMap,
     /// Per-node cross-run cache (output values, digests, node state), reconciled
     /// to the node set at each `update`.
     cache: Cache,
@@ -131,7 +131,7 @@ impl ExecutionEngine {
         self.program.clear();
         self.plan.clear();
         self.cache.clear();
-        self.flatten.reset();
+        self.flatten_map.reset();
     }
 
     pub fn reset_states(&mut self) {
@@ -177,14 +177,14 @@ impl ExecutionEngine {
             },
             graph,
             func_lib,
-            &mut self.flatten,
+            &mut self.flatten_map,
         ) as usize;
 
         // Realign the runtime cache to the rebuilt node set (preserve by id,
         // default new, trim gone).
         self.cache.reconcile(&self.program.e_nodes);
 
-        validate::built(&self.program, &self.cache, func_lib);
+        validate::compiled(&self.program, &self.cache, func_lib);
 
         // A node's digest changes only at compile (consts/bindings/func versions
         // are fixed between updates), so recompute it now and pull any disk-cached
@@ -220,7 +220,7 @@ impl ExecutionEngine {
                 &self.program,
                 &self.plan,
                 &mut self.cache,
-                &self.flatten,
+                &self.flatten_map,
                 progress,
                 cancel,
             )
@@ -239,7 +239,7 @@ impl ExecutionEngine {
         // Annotate with how the graph was flattened so the stats' flat ids
         // can be projected back onto authoring nodes (the executor itself
         // stays oblivious to the authoring graph).
-        stats.flatten = self.flatten.clone();
+        stats.flatten = self.flatten_map.clone();
 
         Ok(stats)
     }

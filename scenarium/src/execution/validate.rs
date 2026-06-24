@@ -17,7 +17,7 @@ use crate::graph::NodeId;
 /// runtime cache stayed index-aligned to the nodes after `reconcile`. The source
 /// graph is gone after flattening, so this validates each `e_node` against its
 /// func and checks binding integrity.
-pub(crate) fn built(program: &ExecutionProgram, cache: &Cache, func_lib: &FuncLib) {
+pub(crate) fn compiled(program: &ExecutionProgram, cache: &Cache, func_lib: &FuncLib) {
     if !is_debug() {
         return;
     }

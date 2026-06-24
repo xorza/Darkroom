@@ -2744,11 +2744,11 @@ mod subgraph {
         // back to the authoring interior id then the enclosing instance.
         let sum_flat = eg.by_name("sum").unwrap().id;
         assert_ne!(sum_flat, interior_sum_id, "flattened id is remapped");
-        let attr: Vec<_> = eg.flatten.attribution(sum_flat).collect();
+        let attr: Vec<_> = eg.flatten_map.attribution(sum_flat).collect();
         assert_eq!(attr, vec![interior_sum_id, c_id]);
 
         // Top-level node: id unchanged, attribution is just itself.
-        let a_attr: Vec<_> = eg.flatten.attribution(a_id).collect();
+        let a_attr: Vec<_> = eg.flatten_map.attribution(a_id).collect();
         assert_eq!(a_attr, vec![a_id]);
     }
 

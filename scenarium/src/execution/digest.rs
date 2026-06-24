@@ -150,7 +150,7 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
                         Self::hash_static(&mut hasher, value, &self.file_id);
                     }
                     ExecutionBinding::Bind(addr) => {
-                        match self.output_digest(addr.target_idx, addr.port_idx) {
+                        match self.port_digest(addr.target_idx, addr.port_idx) {
                             Some(upstream) => {
                                 hasher.update(&[2u8]);
                                 hasher.update(&upstream);
@@ -177,7 +177,7 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
 
     /// Digest of one output *port* of node `idx`, or `None` if the node has no
     /// digest. Disambiguates ports of a multi-output node sharing one node digest.
-    pub(crate) fn output_digest(&mut self, idx: usize, port_idx: usize) -> Option<Digest> {
+    pub(crate) fn port_digest(&mut self, idx: usize, port_idx: usize) -> Option<Digest> {
         let node = self.node_digest(idx)?;
         let mut hasher = Hasher::new();
         hasher.update(&node);
@@ -445,8 +445,8 @@ mod tests {
 
         let mut engine = DigestEngine::new(&p.program, no_files);
         assert_ne!(
-            engine.output_digest(0, 0),
-            engine.output_digest(0, 1),
+            engine.port_digest(0, 0),
+            engine.port_digest(0, 1),
             "ports of one node must hash apart"
         );
         let db = engine.node_digest(1);
