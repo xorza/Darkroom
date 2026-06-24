@@ -192,19 +192,6 @@ impl ExecutionEngine {
 
     // === Phases 2–3: plan then execute ===
 
-    pub async fn execute_terminals(&mut self) -> Result<ExecutionStats> {
-        self.execute(true, false, [], None, CancelToken::never())
-            .await
-    }
-
-    pub async fn execute_events<T: IntoIterator<Item = EventRef>>(
-        &mut self,
-        events: T,
-    ) -> Result<ExecutionStats> {
-        self.execute(false, false, events, None, CancelToken::never())
-            .await
-    }
-
     /// When `progress` is `Some`, a [`RunProgress`] is sent before and after
     /// each node's lambda runs, for live per-node feedback ahead of the final
     /// stats. When `cancel` is `Some` and gets set mid-run, scheduling stops
@@ -456,6 +443,19 @@ impl ExecutionEngine {
 /// executor reads it straight from the live `ExecutionPlan`.
 #[cfg(test)]
 impl ExecutionEngine {
+    pub(crate) async fn execute_terminals(&mut self) -> Result<ExecutionStats> {
+        self.execute(true, false, [], None, CancelToken::never())
+            .await
+    }
+
+    pub(crate) async fn execute_events<T: IntoIterator<Item = EventRef>>(
+        &mut self,
+        events: T,
+    ) -> Result<ExecutionStats> {
+        self.execute(false, false, events, None, CancelToken::never())
+            .await
+    }
+
     /// Run only the planning phase (no execution), leaving the schedule in
     /// `self.plan` for inspection.
     pub(crate) fn prepare_execution(
