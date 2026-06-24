@@ -1,8 +1,9 @@
 use glam::Vec2;
 use palantir::{Configure, MenuItem, Panel, PopupHandle, Sizing, Text, Ui};
 use scenarium::function::FuncInput;
-use scenarium::graph::{Binding, InputPort, Node};
+use scenarium::graph::{Binding, InputPort, Node, NodeKind};
 use scenarium::prelude::NodeId;
+use scenarium::special::{ALL as SPECIAL_NODES, SpecialNode};
 use scenarium::subgraph::{SubgraphDef, SubgraphRef};
 
 use crate::core::document::view_node::ViewNode;
@@ -147,6 +148,16 @@ fn palette_body(ui: &mut Ui, popup: &PopupHandle, ctx: &AppContext<'_>) -> Optio
                                         });
                                     }
                                 }
+                                // Built-in special nodes of this category (their
+                                // interface is hardcoded, not library-registered).
+                                for &special in SPECIAL_NODES
+                                    .iter()
+                                    .filter(|s| s.func().category == category)
+                                {
+                                    if let Some(picked) = special_entry(ui, popup, special) {
+                                        chosen = Some(picked);
+                                    }
+                                }
                                 // Shared (`Linked`) subgraph defs of this
                                 // category, after the funcs.
                                 for def in ctx
@@ -188,10 +199,30 @@ fn sorted_categories<'a>(ctx: &'a AppContext<'_>) -> Vec<&'a str> {
         .iter()
         .map(|f| f.category.as_str())
         .chain(ctx.func_lib.subgraphs.iter().map(|d| d.category.as_str()))
+        .chain(SPECIAL_NODES.iter().map(|s| s.func().category.as_str()))
         .collect();
     cats.sort();
     cats.dedup();
     cats
+}
+
+/// One palette entry for a built-in special node. Its `Func` (interface) is
+/// hardcoded, not library-registered, so the spawned `Node` is a
+/// `NodeKind::Special` named after that func, with its declared input defaults
+/// seeded like a func node.
+fn special_entry(ui: &mut Ui, popup: &PopupHandle, special: SpecialNode) -> Option<ChosenNode> {
+    let func = special.func();
+    if !MenuItem::new(func.name.clone()).show(ui, popup).clicked() {
+        return None;
+    }
+    let mut node = Node::new(NodeKind::Special(special));
+    node.name = func.name.clone();
+    let bindings = default_bindings(node.id, &func.inputs);
+    Some(ChosenNode {
+        node,
+        def: None,
+        bindings,
+    })
 }
 
 /// Seed each input that declares a func default with a matching

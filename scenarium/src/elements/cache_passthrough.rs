@@ -81,7 +81,10 @@ fn build_func() -> Func {
                 "path",
                 DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::NewFile))),
             )
-            .const_only(),
+            .const_only()
+            // Seed an empty path so a freshly-dropped node shows its (const-only)
+            // path editor right away; an empty path just means "not caching yet".
+            .default(StaticValue::FsPath(String::new())),
         )
         .output("value", DataType::Null)
         .lambda(crate::async_lambda!(|_, _, _, inputs, _, outputs| {
@@ -90,4 +93,22 @@ fn build_func() -> Func {
             outputs[0] = inputs[0].value.clone();
             Ok(())
         }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::special::SpecialNode;
+
+    #[test]
+    fn path_input_is_const_only_with_empty_default() {
+        let func = SpecialNode::CachePassthrough { bypass: false }.func();
+        assert_eq!(func.inputs.len(), 2);
+
+        let path = &func.inputs[CACHE_PATH_INPUT];
+        assert_eq!(path.name, "path");
+        assert!(path.const_only, "the cache path must reject wired bindings");
+        // Seeded empty so a freshly-dropped node shows its path editor.
+        assert_eq!(path.default_value, Some(StaticValue::FsPath(String::new())));
+    }
 }
