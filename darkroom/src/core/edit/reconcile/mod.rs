@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use scenarium::data::DataType;
 use scenarium::function::{FuncInput, FuncOutput};
 use scenarium::graph::{Binding, Graph, InputPort, NodeKind, OutputPort};
-use scenarium::prelude::{FuncLib, NodeId, SubgraphDef, SubgraphId};
+use scenarium::prelude::{FuncLib, NodeId, SubgraphDef, SubgraphId, special_func};
 
 use crate::core::document::{Document, GraphRef};
 
@@ -326,6 +326,13 @@ fn port_type(
             match dir {
                 Dir::Input => d.inputs.get(port_idx).map(|i| i.data_type.clone()),
                 Dir::Output => d.outputs.get(port_idx).map(|o| o.data_type.clone()),
+            }
+        }
+        NodeKind::Special(s) => {
+            let f = special_func(*s);
+            match dir {
+                Dir::Input => f.inputs.get(port_idx).map(|i| i.data_type.clone()),
+                Dir::Output => f.outputs.get(port_idx).map(|o| o.data_type.clone()),
             }
         }
         NodeKind::SubgraphInput | NodeKind::SubgraphOutput => None,

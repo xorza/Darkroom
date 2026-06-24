@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::data::StaticValue;
 use crate::function::{Func, FuncId, FuncLib};
+use crate::special::{SpecialNode, special_func};
 use crate::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
 use anyhow::{Context, ensure};
 use common::{Result, SerdeFormat, deserialize, serialize};
@@ -114,13 +115,17 @@ pub enum CachePersistence {
 }
 
 /// What a node *is*. A plain `Func` instance, a composite `Subgraph`
-/// instance, or one of the two interface boundary nodes that may appear
-/// only inside a `SubgraphDef.graph` (their port arity comes from the
-/// enclosing def's interface, not from a func).
+/// instance, a built-in [`SpecialNode`] (hardcoded declaration, recognized by
+/// the engine), or one of the two interface boundary nodes that may appear only
+/// inside a `SubgraphDef.graph` (their port arity comes from the enclosing def's
+/// interface, not from a func).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum NodeKind {
     Func(FuncId),
     Subgraph(SubgraphRef),
+    /// A built-in special node; its interface comes from
+    /// [`special_func`](crate::special::special_func).
+    Special(SpecialNode),
     /// Inbound boundary: outputs = enclosing def's exposed inputs.
     SubgraphInput,
     /// Outbound boundary: inputs = enclosing def's exposed outputs.
@@ -484,7 +489,9 @@ impl Graph {
                         );
                     }
                 }
-                NodeKind::SubgraphInput | NodeKind::SubgraphOutput => {}
+                // Special nodes carry no id to validate; their declaration is
+                // hardcoded and always resolves.
+                NodeKind::Special(_) | NodeKind::SubgraphInput | NodeKind::SubgraphOutput => {}
             }
         }
 
@@ -629,6 +636,8 @@ impl Graph {
                         "SubgraphOutput is only valid inside a subgraph"
                     );
                 }
+                // Hardcoded declaration — nothing to resolve or recurse into.
+                NodeKind::Special(_) => {}
             }
         }
 
@@ -694,6 +703,7 @@ impl Graph {
         match &node.kind {
             NodeKind::Func(func_id) => func_lib.by_id(func_id).unwrap().inputs.len(),
             NodeKind::Subgraph(r) => self.resolve_def(*r, func_lib).unwrap().inputs.len(),
+            NodeKind::Special(s) => special_func(*s).inputs.len(),
             NodeKind::SubgraphInput => 0,
             NodeKind::SubgraphOutput => ctx_def.unwrap().outputs.len(),
         }
@@ -711,6 +721,7 @@ impl Graph {
         match &node.kind {
             NodeKind::Func(func_id) => func_lib.by_id(func_id).unwrap().outputs.len(),
             NodeKind::Subgraph(r) => self.resolve_def(*r, func_lib).unwrap().outputs.len(),
+            NodeKind::Special(s) => special_func(*s).outputs.len(),
             NodeKind::SubgraphInput => ctx_def.unwrap().inputs.len(),
             NodeKind::SubgraphOutput => 0,
         }
@@ -728,6 +739,7 @@ impl Graph {
         match &node.kind {
             NodeKind::Func(func_id) => func_lib.by_id(func_id).unwrap().events.len(),
             NodeKind::Subgraph(r) => self.resolve_def(*r, func_lib).unwrap().events.len(),
+            NodeKind::Special(s) => special_func(*s).events.len(),
             NodeKind::SubgraphInput => 1,
             NodeKind::SubgraphOutput => 0,
         }

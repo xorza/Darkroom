@@ -15,10 +15,36 @@ use blake3::Hasher;
 use crate::data::StaticValue;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::function::FuncBehavior;
+use crate::special::SpecialNode;
 
 /// Domain separator mixed into every node digest. Bump the suffix to invalidate
 /// every cached digest when the hashing scheme itself changes.
 const DOMAIN: &[u8] = b"scenarium-cache-v1";
+
+/// Domain separator for a file-cache node's path-keyed digest, kept distinct from
+/// [`DOMAIN`] so a path can't collide with a normal node's content hash.
+const DOMAIN_FILECACHE: &[u8] = b"scenarium-filecache-v1";
+
+/// Path-keyed digest of a [`SpecialNode::CachePassthrough`] node: a hash of the
+/// `Const` `FsPath` in `input[1]` *alone* — deliberately ignoring `input[0]`'s
+/// cone, so the file is the sole cache key (the node's whole point). A non-const
+/// or empty path ⇒ `None` (never a hit; the store still writes via the path
+/// resolved at execute). The file's `(len, mtime)` is *not* folded in — presence,
+/// not content, decides the hit.
+fn file_cache_digest(program: &ExecutionProgram, idx: usize) -> Option<Digest> {
+    let e_node = &program.e_nodes[idx];
+    let path_input = program.inputs.get(e_node.inputs.start as usize + 1)?;
+    let ExecutionBinding::Const(StaticValue::FsPath(path)) = &path_input.binding else {
+        return None;
+    };
+    if path.is_empty() {
+        return None;
+    }
+    let mut hasher = Hasher::new();
+    hasher.update(DOMAIN_FILECACHE);
+    hasher.update(path.as_bytes());
+    Some(hasher.finalize().into())
+}
 
 /// 256-bit content digest. Cross-machine stable for a given binary: equal
 /// digests mean the same func+version, params, upstream outputs, and file inputs.
@@ -116,6 +142,21 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
             NodeDigest::NotCacheable => return None,
             NodeDigest::Pending => {}
         }
+        // A file-cache node is keyed on its path input alone, *not* its input
+        // cone — so input 0 can be impure/expensive and the node still presents a
+        // digest (the reproducibility boundary). Resolve it before recursing.
+        if matches!(
+            self.program.e_nodes[idx].special,
+            Some(SpecialNode::CachePassthrough { .. })
+        ) {
+            let digest = file_cache_digest(self.program, idx);
+            self.memo[idx] = match digest {
+                Some(d) => NodeDigest::Digest(d),
+                None => NodeDigest::NotCacheable,
+            };
+            return digest;
+        }
+
         if self.visiting[idx] {
             // Cycle (the planner rejects these) — treat as non-reproducible.
             return None;

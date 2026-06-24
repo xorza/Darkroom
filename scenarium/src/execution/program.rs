@@ -12,6 +12,7 @@ use crate::event_lambda::EventLambda;
 use crate::function::FuncBehavior;
 use crate::graph::NodeId;
 use crate::prelude::{FuncId, FuncLambda};
+use crate::special::SpecialNode;
 
 // === Execution Binding ===
 
@@ -74,6 +75,14 @@ pub(crate) struct ExecutionNode {
     /// a content digest (a reproducible cone) — see `digest.rs`.
     #[serde(default)]
     pub persist: bool,
+
+    /// `Some` for a built-in [`SpecialNode`] (flattened from
+    /// [`NodeKind::Special`](crate::graph::NodeKind::Special)); the engine
+    /// recognizes the kind for special behavior — e.g. the cache node's path-keyed
+    /// load/store + input pruning, with the bypass toggle riding in the variant.
+    /// See `docs/file-cache-design.md`.
+    #[serde(default)]
+    pub special: Option<SpecialNode>,
 
     pub inputs: Span,
     pub outputs: Span,

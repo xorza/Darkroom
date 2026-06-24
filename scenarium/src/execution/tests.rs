@@ -233,6 +233,119 @@ mod cache_persistence {
     }
 }
 
+// === File Cache (explicit-path passthrough node) ===
+
+mod file_cache {
+    use super::*;
+    use crate::graph::NodeKind;
+    use crate::special::SpecialNode;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+    /// A temp file path removed on drop.
+    struct TempFile(PathBuf);
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    fn temp_file(tag: &str) -> TempFile {
+        static C: AtomicU64 = AtomicU64::new(0);
+        let n = C.fetch_add(1, Ordering::Relaxed);
+        TempFile(std::env::temp_dir().join(format!(
+            "scenarium-filecache-{tag}-{}-{n}.bin",
+            std::process::id()
+        )))
+    }
+
+    /// `get_a` (counted source) → cache (`CachePassthrough` at `path`) → `print`
+    /// (terminal). `bypass` sets the cache node's bypass toggle. The shared
+    /// `get_a_calls` counter measures whether input 0 is recomputed.
+    fn graph_with_cache(
+        path: &Path,
+        get_a_calls: Arc<AtomicUsize>,
+        bypass: bool,
+    ) -> (Graph, FuncLib, NodeId, NodeId) {
+        let lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(move || {
+                get_a_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(7)
+            }),
+            ..default_hooks()
+        });
+        let mut graph = Graph::default();
+        graph.add(node(&lib, "get_a", NodeId::unique()));
+        let cache_node = Node::new(NodeKind::Special(SpecialNode::CachePassthrough { bypass }));
+        let cache_id = cache_node.id;
+        graph.add(cache_node);
+        graph.add(node(&lib, "print", NodeId::unique()));
+
+        let get_a_id = graph.by_name("get_a").unwrap().id;
+        let print_id = graph.by_name("print").unwrap().id;
+        // cache.value = get_a.0; cache.path = const; print.value = cache.0
+        graph.set_input_binding(InputPort::new(cache_id, 0), (get_a_id, 0).into());
+        graph.set_input_binding(
+            InputPort::new(cache_id, 1),
+            Binding::Const(StaticValue::FsPath(path.to_string_lossy().into_owned())),
+        );
+        graph.set_input_binding(InputPort::new(print_id, 0), (cache_id, 0).into());
+        (graph, lib, get_a_id, cache_id)
+    }
+
+    /// The three behaviors in one flow over a shared cache file: a cold run
+    /// computes + writes; a present file is served without recomputing input 0
+    /// (its upstream pruned); bypass forces a recompute despite the file.
+    #[tokio::test]
+    async fn present_prunes_input_absent_writes_bypass_recomputes() {
+        let file = temp_file("e2e");
+        let path = file.0.clone();
+        let calls = Arc::new(AtomicUsize::new(0));
+
+        // Cold (file absent): get_a runs; the cache passes through + writes.
+        let (graph, lib, get_a_id, _) = graph_with_cache(&path, calls.clone(), false);
+        let mut engine = ExecutionEngine::default();
+        engine.update(&graph, &lib).unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "cold run computes get_a");
+        assert!(path.exists(), "cache file written");
+        assert!(
+            stats.executed_nodes.iter().any(|n| n.node_id == get_a_id),
+            "get_a runs on the cold pass"
+        );
+
+        // Reopen (file present): the cache node hits, so get_a is pruned.
+        let (graph, lib, get_a_id, cache_id) = graph_with_cache(&path, calls.clone(), false);
+        let mut engine = ExecutionEngine::default();
+        engine.update(&graph, &lib).unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "present file ⇒ input 0 not recomputed"
+        );
+        assert!(
+            stats.cached_nodes.contains(&cache_id),
+            "cache node served from its file"
+        );
+        assert!(
+            !stats.executed_nodes.iter().any(|n| n.node_id == get_a_id),
+            "the cache node's upstream is pruned"
+        );
+
+        // Bypass on (file still present): recompute + overwrite anyway.
+        let (graph, lib, _, _) = graph_with_cache(&path, calls.clone(), true);
+        let mut engine = ExecutionEngine::default();
+        engine.update(&graph, &lib).unwrap();
+        engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "bypass forces a recompute even with the file present"
+        );
+    }
+}
+
 // === Graph Structure ===
 
 mod graph_structure {

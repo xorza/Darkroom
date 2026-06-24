@@ -8,6 +8,7 @@ use scenarium::data::{DataType, StaticValue};
 use scenarium::function::{FuncInput, FuncOutput, ValueVariant};
 use scenarium::prelude::{
     Binding, CachePersistence, FuncLib, Graph, NodeId, NodeKind, SubgraphDef, SubgraphRef,
+    special_func,
 };
 
 use crate::core::document::GraphView;
@@ -214,6 +215,17 @@ impl Scene {
                     // outputs" as the visible sink signal.
                     terminal: d.outputs.is_empty(),
                 }),
+                // A built-in special node: its interface is the hardcoded spec.
+                NodeKind::Special(s) => {
+                    let f = special_func(*s);
+                    Some(NodeInterface {
+                        kind_label: f.name.clone().into(),
+                        inputs: Cow::Borrowed(&f.inputs),
+                        outputs: Cow::Borrowed(&f.outputs),
+                        subgraph: None,
+                        terminal: f.terminal,
+                    })
+                }
                 // Inbound boundary: no inputs; one output per def input,
                 // plus a trailing placeholder output. Dragging from the
                 // placeholder commits a normal `SetInput` binding to its
@@ -263,7 +275,12 @@ impl Scene {
                     let kind_label = match node.kind {
                         NodeKind::Func(_) => "missing func",
                         NodeKind::Subgraph(_) => "missing subgraph",
-                        NodeKind::SubgraphInput | NodeKind::SubgraphOutput => continue,
+                        // A special node's spec always resolves, so it never
+                        // reaches this `None` branch; boundary nodes only fail at
+                        // the root. Nothing to render either way.
+                        NodeKind::Special(_)
+                        | NodeKind::SubgraphInput
+                        | NodeKind::SubgraphOutput => continue,
                     };
                     NodeInterface {
                         kind_label: kind_label.into(),

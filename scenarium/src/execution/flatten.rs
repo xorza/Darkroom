@@ -23,8 +23,9 @@ use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionPortAddress,
 };
 use crate::execution_stats::FlattenMap;
-use crate::function::FuncLib;
+use crate::function::{Func, FuncLib};
 use crate::graph::{Binding, CachePersistence, Graph, InputPort, NodeId, NodeKind, Subscription};
+use crate::special::{SpecialNode, special_func};
 use crate::subgraph::SubgraphId;
 
 /// Hard cap on nesting depth — a release backstop for the output-resolution
@@ -234,85 +235,19 @@ impl<'a> Run<'a> {
             if node.disabled {
                 continue;
             }
-            match &node.kind {
-                NodeKind::Func(func_id) => {
-                    let flat_id = flatten_id(self.path.as_slice(), node.id);
-                    let func = self
-                        .func_lib
+            // A subgraph recurses; boundary nodes emit nothing. A func or a
+            // special node both resolve to a `&Func` spec and emit one leaf —
+            // the spec is the only difference (`func_lib` vs. the hardcoded
+            // `special_func`), so the emit body below is shared.
+            let func_lib = self.func_lib;
+            let (func, special): (&Func, Option<SpecialNode>) = match &node.kind {
+                NodeKind::Func(func_id) => (
+                    func_lib
                         .by_id(func_id)
-                        .expect("func resolved by update's check_with pre-check");
-                    let input_count = func.inputs.len();
-                    let (idx, e_node) = self.compact.insert_with(&flat_id, || ExecutionNode {
-                        id: flat_id,
-                        ..Default::default()
-                    });
-                    let was_inited = e_node.inited;
-                    let old_inputs_span = e_node.inputs;
-                    if was_inited {
-                        assert_eq!(
-                            e_node.func_id, func.id,
-                            "func changed under a reused node id"
-                        );
-                    }
-
-                    let outputs_start = self.n_outputs;
-                    self.n_outputs += func.outputs.len() as u32;
-                    let events_start = self.events.len() as u32;
-                    for func_event in &func.events {
-                        self.events.push(ExecutionEvent {
-                            lambda: func_event.event_lambda.clone(),
-                            ..Default::default()
-                        });
-                    }
-
-                    let inputs_start = self.new_inputs.len() as u32;
-                    if was_inited {
-                        self.new_inputs
-                            .extend_from_slice(&self.old_inputs[old_inputs_span.range()]);
-                    } else {
-                        for func_input in &func.inputs {
-                            self.new_inputs.push(ExecutionInput {
-                                required: func_input.required,
-                                ..Default::default()
-                            });
-                        }
-                    }
-
-                    let e_node = &mut self.compact[idx];
-                    e_node.inited = true;
-                    e_node.func_id = func.id;
-                    e_node.func_version = func.version;
-                    if !was_inited {
-                        e_node.lambda = func.lambda.clone();
-                    }
-                    e_node.inputs = Span::new(inputs_start, input_count as u32);
-                    e_node.outputs = Span::new(outputs_start, func.outputs.len() as u32);
-                    e_node.events = Span::new(events_start, func.events.len() as u32);
-                    e_node.terminal = func.terminal;
-                    e_node.behavior = func.behavior;
-                    // Record the `Disk` request; whether it's actually honored is
-                    // decided by the content digest (a node with an impure cone has
-                    // no digest and so can't be disk-cached) — see `digest.rs`.
-                    e_node.persist = node.persist == CachePersistence::Disk;
-                    e_node.name.clear();
-                    e_node.name.push_str(&node.name);
-
-                    // Record where this flat node came from (current scope
-                    // + authoring id) so stats map back to editor nodes.
-                    let scope = *self.scope_stack.last().unwrap();
-                    self.flatten.set_leaf(flat_id, scope, node.id);
-
-                    self.cur_idx = idx;
-
-                    for (input_idx, binding) in graph.node_bindings(node.id, input_count) {
-                        let source = match binding {
-                            Binding::None => Source::None,
-                            Binding::Const(v) => Source::Const(v),
-                            Binding::Bind(op) => self.resolve(op.node_id, op.port_idx),
-                        };
-                        self.set_input(input_idx, source);
-                    }
-                }
+                        .expect("func resolved by update's check_with pre-check"),
+                    None,
+                ),
+                NodeKind::Special(s) => (special_func(*s), Some(*s)),
                 NodeKind::Subgraph(r) => {
                     assert!(
                         self.seen.insert(r.id()),
@@ -329,8 +264,85 @@ impl<'a> Run<'a> {
                     self.scope_stack.pop();
                     self.path.pop();
                     self.seen.remove(&r.id());
+                    continue;
                 }
-                NodeKind::SubgraphInput | NodeKind::SubgraphOutput => {}
+                NodeKind::SubgraphInput | NodeKind::SubgraphOutput => continue,
+            };
+
+            let flat_id = flatten_id(self.path.as_slice(), node.id);
+            let input_count = func.inputs.len();
+            let (idx, e_node) = self.compact.insert_with(&flat_id, || ExecutionNode {
+                id: flat_id,
+                ..Default::default()
+            });
+            let was_inited = e_node.inited;
+            let old_inputs_span = e_node.inputs;
+            if was_inited {
+                assert_eq!(
+                    e_node.func_id, func.id,
+                    "func changed under a reused node id"
+                );
+            }
+
+            let outputs_start = self.n_outputs;
+            self.n_outputs += func.outputs.len() as u32;
+            let events_start = self.events.len() as u32;
+            for func_event in &func.events {
+                self.events.push(ExecutionEvent {
+                    lambda: func_event.event_lambda.clone(),
+                    ..Default::default()
+                });
+            }
+
+            let inputs_start = self.new_inputs.len() as u32;
+            if was_inited {
+                self.new_inputs
+                    .extend_from_slice(&self.old_inputs[old_inputs_span.range()]);
+            } else {
+                for func_input in &func.inputs {
+                    self.new_inputs.push(ExecutionInput {
+                        required: func_input.required,
+                        ..Default::default()
+                    });
+                }
+            }
+
+            let e_node = &mut self.compact[idx];
+            e_node.inited = true;
+            e_node.func_id = func.id;
+            e_node.func_version = func.version;
+            if !was_inited {
+                e_node.lambda = func.lambda.clone();
+            }
+            e_node.inputs = Span::new(inputs_start, input_count as u32);
+            e_node.outputs = Span::new(outputs_start, func.outputs.len() as u32);
+            e_node.events = Span::new(events_start, func.events.len() as u32);
+            e_node.terminal = func.terminal;
+            e_node.behavior = func.behavior;
+            // Record the `Disk` request; whether it's actually honored is decided
+            // by the content digest (a node with an impure cone has no digest and
+            // so can't be disk-cached) — see `digest.rs`.
+            e_node.persist = node.persist == CachePersistence::Disk;
+            // Special-node identity + its per-instance config (e.g. cache bypass),
+            // recognized by the engine.
+            e_node.special = special;
+            e_node.name.clear();
+            e_node.name.push_str(&node.name);
+
+            // Record where this flat node came from (current scope + authoring
+            // id) so stats map back to editor nodes.
+            let scope = *self.scope_stack.last().unwrap();
+            self.flatten.set_leaf(flat_id, scope, node.id);
+
+            self.cur_idx = idx;
+
+            for (input_idx, binding) in graph.node_bindings(node.id, input_count) {
+                let source = match binding {
+                    Binding::None => Source::None,
+                    Binding::Const(v) => Source::Const(v),
+                    Binding::Bind(op) => self.resolve(op.node_id, op.port_idx),
+                };
+                self.set_input(input_idx, source);
             }
         }
 
@@ -377,7 +389,9 @@ impl<'a> Run<'a> {
             return None; // a disabled node fires no events
         }
         match &node.kind {
-            NodeKind::Func(_) => Some((flatten_id(self.path.as_slice(), node_id), event_idx)),
+            NodeKind::Func(_) | NodeKind::Special(_) => {
+                Some((flatten_id(self.path.as_slice(), node_id), event_idx))
+            }
             NodeKind::Subgraph(r) => {
                 let def = graph.resolve_def(*r, self.func_lib)?;
                 let exposed = def.events.get(event_idx)?;
@@ -475,7 +489,7 @@ impl<'a> Run<'a> {
             return Source::None;
         }
         match &node.kind {
-            NodeKind::Func(_) => Source::Producer {
+            NodeKind::Func(_) | NodeKind::Special(_) => Source::Producer {
                 node_id: flatten_id(self.path.as_slice(), node_id),
                 port_idx,
             },

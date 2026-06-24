@@ -9,6 +9,7 @@ pub mod func_lambda;
 pub mod function;
 pub mod graph;
 pub mod macros;
+pub mod special;
 pub mod subgraph;
 pub mod testing;
 pub mod value_codec;
@@ -32,6 +33,7 @@ pub mod prelude {
         Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, OutputPort,
         Subscription,
     };
+    pub use crate::special::{SpecialNode, special_func};
     pub use crate::subgraph::{SubgraphDef, SubgraphEvent, SubgraphId, SubgraphRef};
     pub use crate::value_codec::{CustomValueCodec, CustomValueRegistry};
 }
