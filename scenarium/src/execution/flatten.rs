@@ -19,13 +19,13 @@ use common::{CompactInsert, KeyIndexVec, Span};
 use hashbrown::HashSet;
 
 use crate::data::StaticValue;
+use crate::elements::special::{SpecialNode, special_func};
 use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionPortAddress,
 };
 use crate::execution_stats::FlattenMap;
 use crate::function::{Func, FuncLib};
 use crate::graph::{Binding, CachePersistence, Graph, InputPort, NodeId, NodeKind, Subscription};
-use crate::special::{SpecialNode, special_func};
 use crate::subgraph::SubgraphId;
 
 /// Hard cap on nesting depth — a release backstop for the output-resolution

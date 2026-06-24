@@ -4,8 +4,8 @@ use common::{KeyIndexKey, KeyIndexVec};
 use serde::{Deserialize, Serialize};
 
 use crate::data::StaticValue;
+use crate::elements::special::{SpecialNode, special_func};
 use crate::function::{Func, FuncId, FuncLib};
-use crate::special::{SpecialNode, special_func};
 use crate::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
 use anyhow::{Context, ensure};
 use common::{Result, SerdeFormat, deserialize, serialize};
@@ -124,7 +124,7 @@ pub enum NodeKind {
     Func(FuncId),
     Subgraph(SubgraphRef),
     /// A built-in special node; its interface comes from
-    /// [`special_func`](crate::special::special_func).
+    /// [`special_func`](crate::elements::special::special_func).
     Special(SpecialNode),
     /// Inbound boundary: outputs = enclosing def's exposed inputs.
     SubgraphInput,

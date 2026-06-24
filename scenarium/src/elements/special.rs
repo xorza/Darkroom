@@ -34,6 +34,11 @@ pub enum SpecialNode {
 /// Every special node (default config), for the editor's node-add menu.
 pub const ALL: &[SpecialNode] = &[SpecialNode::CachePassthrough { bypass: false }];
 
+/// Input index of a `CachePassthrough` node's `path` (the second input declared by
+/// [`cache_passthrough_func`]). The output cache and the path-keyed digest read the
+/// path from here — keep it in step with the input order below.
+pub(crate) const CACHE_PATH_INPUT: usize = 1;
+
 /// Stable `FuncId` standing in for the cache node in the flattened program (digest
 /// memo / stats attribution). Not registered in any `FuncLib`.
 // generated with uuidgen
@@ -61,6 +66,7 @@ fn cache_passthrough_func() -> Func {
              upstream is not recomputed.",
         )
         .input(FuncInput::required("value", DataType::Null))
+        // The path input — its index is [`CACHE_PATH_INPUT`].
         .input(FuncInput::required(
             "path",
             DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::NewFile))),

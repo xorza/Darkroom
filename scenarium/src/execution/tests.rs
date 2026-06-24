@@ -241,8 +241,8 @@ mod cache_persistence {
 
 mod file_cache {
     use super::*;
+    use crate::elements::special::SpecialNode;
     use crate::graph::NodeKind;
-    use crate::special::SpecialNode;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};

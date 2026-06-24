@@ -7,12 +7,12 @@
 use common::is_debug;
 use hashbrown::HashSet;
 
+use crate::elements::special::special_func;
 use crate::execution::cache::Cache;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::function::FuncLib;
 use crate::graph::NodeId;
-use crate::special::special_func;
 
 /// Self-consistency of the compiled program against the `FuncLib`, plus that the
 /// runtime cache stayed index-aligned to the nodes after `reconcile`. The source

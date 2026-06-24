@@ -8,11 +8,11 @@ use common::{KeyIndexKey, KeyIndexVec, Span};
 use serde::{Deserialize, Serialize};
 
 use crate::data::StaticValue;
+use crate::elements::special::SpecialNode;
 use crate::event_lambda::EventLambda;
 use crate::function::FuncBehavior;
 use crate::graph::NodeId;
 use crate::prelude::{FuncId, FuncLambda};
-use crate::special::SpecialNode;
 
 // === Execution Binding ===
 
