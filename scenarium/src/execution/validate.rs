@@ -12,7 +12,6 @@ use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::function::FuncLib;
 use crate::graph::NodeId;
-use crate::special::special_func;
 
 /// Self-consistency of the compiled program against the `FuncLib`, plus that the
 /// runtime cache stayed index-aligned to the nodes after `reconcile`. The source
@@ -38,7 +37,7 @@ pub(crate) fn compiled(program: &ExecutionProgram, cache: &Cache, func_lib: &Fun
 
         // A special node's interface is its hardcoded spec, not a library func.
         let func = match e_node.special {
-            Some(s) => special_func(s),
+            Some(s) => s.func(),
             None => func_lib.by_id(&e_node.func_id).unwrap(),
         };
         assert_eq!(e_node.inputs.len as usize, func.inputs.len());

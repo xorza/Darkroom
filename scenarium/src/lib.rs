@@ -20,7 +20,6 @@ pub mod prelude {
     pub use crate::common::shared_any_state::SharedAnyState;
     pub use crate::context::ContextType;
     pub use crate::data::{CustomValue, DataType, DynamicValue, StaticValue, TypeId};
-    pub use crate::special::{SpecialNode, special_func};
     pub use crate::execution::ExecutionEngine;
     pub use crate::execution::event::{EventRef, EventTrigger};
     pub use crate::execution::output_cache::OutputCache;
@@ -34,6 +33,7 @@ pub mod prelude {
         Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, OutputPort,
         Subscription,
     };
+    pub use crate::special::SpecialNode;
     pub use crate::subgraph::{SubgraphDef, SubgraphEvent, SubgraphId, SubgraphRef};
     pub use crate::value_codec::{CustomValueCodec, CustomValueRegistry};
 }

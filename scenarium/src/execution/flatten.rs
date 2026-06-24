@@ -25,7 +25,7 @@ use crate::execution::program::{
 use crate::execution_stats::FlattenMap;
 use crate::function::{Func, FuncLib};
 use crate::graph::{Binding, CachePersistence, Graph, InputPort, NodeId, NodeKind, Subscription};
-use crate::special::{SpecialNode, special_func};
+use crate::special::SpecialNode;
 use crate::subgraph::SubgraphId;
 
 /// Hard cap on nesting depth — a release backstop for the output-resolution
@@ -238,7 +238,7 @@ impl<'a> Run<'a> {
             // A subgraph recurses; boundary nodes emit nothing. A func or a
             // special node both resolve to a `&Func` spec and emit one leaf —
             // the spec is the only difference (`func_lib` vs. the hardcoded
-            // `special_func`), so the emit body below is shared.
+            // `SpecialNode::func`), so the emit body below is shared.
             let func_lib = self.func_lib;
             let (func, special): (&Func, Option<SpecialNode>) = match &node.kind {
                 NodeKind::Func(func_id) => (
@@ -247,7 +247,7 @@ impl<'a> Run<'a> {
                         .expect("func resolved by update's check_with pre-check"),
                     None,
                 ),
-                NodeKind::Special(s) => (special_func(*s), Some(*s)),
+                NodeKind::Special(s) => (s.func(), Some(*s)),
                 NodeKind::Subgraph(r) => {
                     assert!(
                         self.seen.insert(r.id()),
