@@ -86,10 +86,11 @@ pub struct RunSeeds {
 // === Execution Engine ===
 
 /// The three-phase pipeline container. Owns the compiled `program`, the
-/// `flattener` (compile scratch), the reusable `plan` buffer, the `planner`
-/// (scheduling scratch), the cross-run `cache` (per-node outputs + state), and
-/// the `executor` (run loop + context). Not serializable — the persistent form
-/// is the [`ExecutionProgram`] alone.
+/// `flattener` (compile scratch) and its `flatten` map (flat↔authoring ids), the
+/// reusable `plan` buffer, the `planner` (scheduling scratch), the cross-run
+/// `cache` (per-node outputs + state), the `executor` (run loop + context), and
+/// the optional `disk` cache layer. Not serializable — the persistent form is the
+/// [`ExecutionProgram`] alone.
 #[derive(Debug, Default)]
 pub struct ExecutionEngine {
     pub(crate) program: ExecutionProgram,
@@ -130,6 +131,7 @@ impl ExecutionEngine {
         self.program.clear();
         self.plan.clear();
         self.cache.clear();
+        self.flatten.reset();
     }
 
     pub fn reset_states(&mut self) {

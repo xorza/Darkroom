@@ -273,7 +273,6 @@ impl<'a> Run<'a> {
                         for func_input in &func.inputs {
                             self.new_inputs.push(ExecutionInput {
                                 required: func_input.required,
-                                data_type: func_input.data_type.clone(),
                                 ..Default::default()
                             });
                         }

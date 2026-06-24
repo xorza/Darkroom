@@ -338,11 +338,9 @@ mod tests {
         let mut node_state = AnyState::default();
         let mut inputs = vec![
             InvokeInput {
-                changed: true,
                 value: DynamicValue::Static(StaticValue::Int(2)),
             },
             InvokeInput {
-                changed: true,
                 value: DynamicValue::Static(StaticValue::Int(4)),
             },
         ];

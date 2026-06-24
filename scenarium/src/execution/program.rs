@@ -7,7 +7,7 @@
 use common::{KeyIndexKey, KeyIndexVec, Span};
 use serde::{Deserialize, Serialize};
 
-use crate::data::{DataType, StaticValue};
+use crate::data::StaticValue;
 use crate::event_lambda::EventLambda;
 use crate::function::FuncBehavior;
 use crate::graph::NodeId;
@@ -45,7 +45,6 @@ impl ExecutionBinding {
 pub(crate) struct ExecutionInput {
     pub required: bool,
     pub binding: ExecutionBinding,
-    pub data_type: DataType,
 }
 
 #[derive(Default, Debug, Serialize, Deserialize)]

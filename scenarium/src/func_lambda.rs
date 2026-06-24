@@ -37,7 +37,6 @@ pub type InvokeResult<T> = Result<T, InvokeError>;
 
 #[derive(Debug)]
 pub struct InvokeInput {
-    pub changed: bool,
     pub value: DynamicValue,
 }
 

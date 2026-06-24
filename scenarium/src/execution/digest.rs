@@ -229,7 +229,7 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::{DataType, StaticValue};
+    use crate::data::StaticValue;
     use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
     use crate::function::FuncId;
     use crate::graph::NodeId;
@@ -272,7 +272,6 @@ mod tests {
                 self.program.inputs.push(ExecutionInput {
                     required: false,
                     binding: binding.clone(),
-                    data_type: DataType::Null,
                 });
             }
             let idx = self.program.e_nodes.len();

@@ -248,12 +248,7 @@ fn collect_inputs(
                 outputs[addr.port_idx].clone()
             }
         };
-        // A node only runs on a cache miss, so its inputs are effectively fresh;
-        // `changed` is vestigial (no lambda reads it).
-        inputs.push(InvokeInput {
-            changed: true,
-            value,
-        });
+        inputs.push(InvokeInput { value });
     }
 }
 
@@ -349,7 +344,7 @@ fn collect_execution_stats(
 mod tests {
     use super::*;
     use crate::async_lambda;
-    use crate::data::{DataType, StaticValue};
+    use crate::data::StaticValue;
     use crate::execution::cache::Cache;
     use crate::execution::plan::NodeFlags;
     use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
@@ -373,7 +368,6 @@ mod tests {
                 self.program.inputs.push(ExecutionInput {
                     required: false,
                     binding: binding.clone(),
-                    data_type: DataType::Null,
                 });
             }
             let outputs_start = self.program.n_outputs as u32;

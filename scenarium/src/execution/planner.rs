@@ -333,7 +333,6 @@ impl Planner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::DataType;
     use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
     use crate::graph::NodeId;
     use crate::prelude::FuncId;
@@ -358,7 +357,6 @@ mod tests {
                 self.program.inputs.push(ExecutionInput {
                     required: *required,
                     binding: binding.clone(),
-                    data_type: DataType::Null,
                 });
             }
             let outputs_start = self.program.n_outputs as u32;
