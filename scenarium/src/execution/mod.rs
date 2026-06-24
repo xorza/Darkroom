@@ -24,19 +24,9 @@ use crate::graph::{Graph, NodeId};
 use crate::prelude::FuncId;
 use crate::worker::{EventRef, EventTrigger};
 
-// Content-addressed output digests for disk-backed caching (the cache key).
-// Computed here but not yet consumed by the planner/executor — that wiring lands
-// in the disk-cache integration phase, so the whole API is dead until then.
-#[allow(dead_code)]
+// Content digests for node outputs — the cache key. Recomputed every `update`
+// and consumed by the planner/executor for the RAM cache.
 pub(crate) mod digest;
-// Content-addressed blob store keyed by `digest::Digest`. Same story — wired into
-// the executor in the integration phase, dead until then.
-#[allow(dead_code)]
-pub(crate) mod cache_store;
-// Glue tying the digest, value codec, and store into load/store-by-digest. Wired
-// into the executor in the integration phase, dead until then.
-#[allow(dead_code)]
-pub(crate) mod disk_cache;
 pub(crate) mod executor;
 mod flatten;
 pub(crate) mod plan;
@@ -45,6 +35,7 @@ pub(crate) mod program;
 #[cfg(test)]
 mod tests;
 
+use digest::DigestEngine;
 use executor::Executor;
 use plan::ExecutionPlan;
 use planner::Planner;
@@ -128,7 +119,6 @@ impl ExecutionEngine {
         self.program.clear();
         self.plan.clear();
         self.executor.slots.clear();
-        self.executor.input_dirty.clear();
     }
 
     pub fn reset_states(&mut self) {
@@ -161,7 +151,6 @@ impl ExecutionEngine {
             flatten::Pools {
                 inputs: &mut self.program.inputs,
                 events: &mut self.program.events,
-                input_dirty: &mut self.executor.input_dirty,
             },
             graph,
             func_lib,
@@ -173,6 +162,12 @@ impl ExecutionEngine {
         self.executor.reconcile(&self.program.e_nodes);
 
         self.validate_built(func_lib);
+
+        // A node's digest changes only at compile (consts/bindings/func versions
+        // are fixed between updates), so recompute it now and keep it off the
+        // per-execute path; the trade-off is that an external file change with no
+        // graph edit isn't noticed until the next update/reopen.
+        self.recompute_digests();
         Ok(())
     }
 
@@ -205,7 +200,8 @@ impl ExecutionEngine {
     ) -> Result<ExecutionStats> {
         let events: Vec<EventRef> = events.into_iter().collect();
 
-        // Phase 2: schedule into the reusable plan buffer.
+        // Phase 2: schedule into the reusable plan buffer (node digests were
+        // recomputed at `update` time and persist across re-executes).
         self.planner.plan(
             &self.program,
             &self.executor,
@@ -220,6 +216,7 @@ impl ExecutionEngine {
             .executor
             .run(&self.program, &self.plan, &self.flatten, progress, cancel)
             .await;
+
         stats.triggered_events = events;
         // Annotate with how the graph was flattened so the stats' flat ids
         // can be projected back onto authoring nodes (the executor itself
@@ -227,6 +224,18 @@ impl ExecutionEngine {
         stats.flatten = self.flatten.clone();
 
         Ok(stats)
+    }
+
+    // === Cache (digests resolved at update) ===
+
+    /// Recompute each slot's `current_digest`. Digests are compile-stable, so this
+    /// runs once per [`Self::update`] and the planner and `run` read the stored
+    /// value rather than re-walking the cone each execute.
+    fn recompute_digests(&mut self) {
+        let mut engine = DigestEngine::with_fs(&self.program);
+        for idx in 0..self.program.e_nodes.len() {
+            self.executor.slots[idx].current_digest = engine.node_digest(idx);
+        }
     }
 
     // === Query ===
@@ -400,15 +409,6 @@ impl ExecutionEngine {
         self.plan.node_flags[idx]
     }
 
-    pub(crate) fn node_input_flags(&self, e_node: &ExecutionNode) -> &[plan::InputFlags] {
-        &self.plan.input_flags[e_node.inputs.range()]
-    }
-
-    /// Cross-run per-input dirty bits for a node, from the executor.
-    pub(crate) fn node_input_dirty(&self, e_node: &ExecutionNode) -> &[bool] {
-        &self.executor.input_dirty[e_node.inputs.range()]
-    }
-
     pub(crate) fn node_output_usage(&self, e_node: &ExecutionNode) -> &[u32] {
         &self.plan.output_usage[e_node.outputs.range()]
     }
@@ -422,9 +422,16 @@ impl ExecutionEngine {
         self.executor.slots.iter()
     }
 
-    /// Seed a node's cached output (simulating a prior run).
+    /// Seed a node's cached output (simulating a prior run): set the value and
+    /// stamp `output_digest` from the current digest, so the planner sees a hit.
     pub(crate) fn set_output_values(&mut self, node_name: &str, values: Vec<DynamicValue>) {
-        let id = self.by_name(node_name).unwrap().id;
-        self.executor.slots.by_key_mut(&id).unwrap().output_values = Some(values);
+        let idx = self
+            .program
+            .e_nodes
+            .index_of_key(&self.by_name(node_name).unwrap().id);
+        let idx = idx.unwrap();
+        let slot = &mut self.executor.slots[idx];
+        slot.output_values = Some(values);
+        slot.output_digest = slot.current_digest;
     }
 }

@@ -1,4 +1,5 @@
-//! Content digests for node outputs — the cache key for disk-backed results.
+//! Content digests for node outputs — the cache key for the per-slot RAM cache
+//! (and the disk cache, when that's wired up).
 //!
 //! A node's output is a pure function of its function (identity + version), its
 //! resolved input values, the outputs of its upstream producers, and the content
@@ -7,20 +8,33 @@
 //! node. Equal digests ⇒ identical computation, so the digest is at once the
 //! cache key *and* the invalidation signal: change anything upstream and every
 //! downstream digest changes — on this machine or any other. See
-//! `docs/disk-cache-design.md`.
+//! `docs/cache-redesign.md`.
 
 use blake3::Hasher;
 
 use crate::data::StaticValue;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
+use crate::function::FuncBehavior;
 
 /// Domain separator mixed into every node digest. Bump the suffix to invalidate
-/// the entire on-disk cache when the hashing scheme itself changes.
+/// every cached digest when the hashing scheme itself changes.
 const DOMAIN: &[u8] = b"scenarium-cache-v1";
 
 /// 256-bit content digest. Cross-machine stable for a given binary: equal
 /// digests mean the same func+version, params, upstream outputs, and file inputs.
 pub(crate) type Digest = [u8; 32];
+
+/// One node's memoized digest result. A node has a digest iff its whole cone is
+/// reproducible; an impure node (or any impure ancestor) is `NotCacheable`, which
+/// is at once "never RAM-cache" and "never disk-cache" — `Some`/`None` carry
+/// exactly that. The `Pending` state distinguishes "not computed yet" from a
+/// computed `NotCacheable`.
+#[derive(Clone, Copy, Debug)]
+enum NodeDigest {
+    Pending,
+    NotCacheable,
+    Digest(Digest),
+}
 
 /// Identity of an external file an `FsPath` input points at, folded into the
 /// digest so the same path holding different bytes invalidates the cache. The
@@ -56,10 +70,10 @@ pub(crate) fn fs_file_id(path: &str) -> FileId {
 pub(crate) struct DigestEngine<'a, F> {
     program: &'a ExecutionProgram,
     file_id: F,
-    memo: Vec<Option<Digest>>,
+    memo: Vec<NodeDigest>,
     /// Per-node in-progress marker — a node re-entered while still on the
-    /// recursion stack is a cycle (the planner rejects these upstream, but the
-    /// digest pass must not silently loop if ever handed a malformed program).
+    /// recursion stack is a cycle (the planner rejects these upstream; the digest
+    /// pass treats it as non-reproducible rather than looping).
     visiting: Vec<bool>,
 }
 
@@ -87,20 +101,25 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
         Self {
             program,
             file_id,
-            memo: vec![None; n],
+            memo: vec![NodeDigest::Pending; n],
             visiting: vec![false; n],
         }
     }
 
-    /// Digest of node `idx`'s computation (func + version + every input). Memoized.
-    pub(crate) fn node_digest(&mut self, idx: usize) -> Digest {
-        if let Some(digest) = self.memo[idx] {
-            return digest;
+    /// Content digest of node `idx`, or `None` when its output isn't reproducible
+    /// — the node is `Impure`, or *any* upstream producer is non-reproducible (the
+    /// taint flows up). `None` is the "always recompute, never cache" signal — for
+    /// RAM and disk alike. Memoized.
+    pub(crate) fn node_digest(&mut self, idx: usize) -> Option<Digest> {
+        match self.memo[idx] {
+            NodeDigest::Digest(d) => return Some(d),
+            NodeDigest::NotCacheable => return None,
+            NodeDigest::Pending => {}
         }
-        assert!(
-            !self.visiting[idx],
-            "cycle detected computing digest for node index {idx}"
-        );
+        if self.visiting[idx] {
+            // Cycle (the planner rejects these) — treat as non-reproducible.
+            return None;
+        }
         self.visiting[idx] = true;
 
         // Copy the shared program reference out so the input loop borrows the
@@ -108,46 +127,62 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
         let program = self.program;
         let e_node = &program.e_nodes[idx];
 
-        let mut hasher = Hasher::new();
-        hasher.update(DOMAIN);
-        hasher.update(&e_node.func_id.as_u128().to_le_bytes());
-        hasher.update(&e_node.func_version.to_le_bytes());
+        // Only a `Pure` node is content-cacheable; `Impure` varies per run.
+        let digest = if e_node.behavior != FuncBehavior::Pure {
+            None
+        } else {
+            let mut hasher = Hasher::new();
+            hasher.update(DOMAIN);
+            hasher.update(&e_node.func_id.as_u128().to_le_bytes());
+            hasher.update(&e_node.func_version.to_le_bytes());
 
-        for input in &program.inputs[e_node.inputs.range()] {
-            match &input.binding {
-                // Unbound optional input — the runtime substitutes the func's
-                // `default_value`, which `func_version` already stands in for, so
-                // a default change must ship with a version bump to invalidate
-                // nodes that leave this input unbound. Only the tag is folded.
-                ExecutionBinding::None => {
-                    hasher.update(&[0u8]);
-                }
-                ExecutionBinding::Const(value) => {
-                    hasher.update(&[1u8]);
-                    Self::hash_static(&mut hasher, value, &self.file_id);
-                }
-                ExecutionBinding::Bind(addr) => {
-                    hasher.update(&[2u8]);
-                    let upstream = self.output_digest(addr.target_idx, addr.port_idx);
-                    hasher.update(&upstream);
+            let mut tainted = false;
+            for pool_idx in e_node.inputs.range() {
+                match &program.inputs[pool_idx].binding {
+                    // Unbound optional input — the runtime substitutes the func's
+                    // `default_value`, which `func_version` stands in for, so a
+                    // default change ships with a version bump.
+                    ExecutionBinding::None => {
+                        hasher.update(&[0u8]);
+                    }
+                    ExecutionBinding::Const(value) => {
+                        hasher.update(&[1u8]);
+                        Self::hash_static(&mut hasher, value, &self.file_id);
+                    }
+                    ExecutionBinding::Bind(addr) => {
+                        match self.output_digest(addr.target_idx, addr.port_idx) {
+                            Some(upstream) => {
+                                hasher.update(&[2u8]);
+                                hasher.update(&upstream);
+                            }
+                            // A non-reproducible producer taints this node.
+                            None => {
+                                tainted = true;
+                                break;
+                            }
+                        }
+                    }
                 }
             }
-        }
+            (!tainted).then(|| hasher.finalize().into())
+        };
 
-        let digest: Digest = hasher.finalize().into();
         self.visiting[idx] = false;
-        self.memo[idx] = Some(digest);
+        self.memo[idx] = match digest {
+            Some(d) => NodeDigest::Digest(d),
+            None => NodeDigest::NotCacheable,
+        };
         digest
     }
 
-    /// Digest of one output *port* of node `idx` — the key its cached blob lives
-    /// under. Disambiguates ports of a multi-output node sharing one node digest.
-    pub(crate) fn output_digest(&mut self, idx: usize, port_idx: usize) -> Digest {
-        let node = self.node_digest(idx);
+    /// Digest of one output *port* of node `idx`, or `None` if the node has no
+    /// digest. Disambiguates ports of a multi-output node sharing one node digest.
+    pub(crate) fn output_digest(&mut self, idx: usize, port_idx: usize) -> Option<Digest> {
+        let node = self.node_digest(idx)?;
         let mut hasher = Hasher::new();
         hasher.update(&node);
         hasher.update(&(port_idx as u64).to_le_bytes());
-        hasher.finalize().into()
+        Some(hasher.finalize().into())
     }
 
     /// Fold one constant into `hasher`: a discriminant tag plus length-prefixed
@@ -208,8 +243,25 @@ mod tests {
     }
 
     impl Prog {
+        /// Add a `Pure` (content-cacheable) node.
         fn add(
             &mut self,
+            func: u128,
+            version: u64,
+            outputs: u32,
+            bindings: &[ExecutionBinding],
+        ) -> usize {
+            self.add_with(FuncBehavior::Pure, func, version, outputs, bindings)
+        }
+
+        /// Add an `Impure` node — its `node_digest` is always `None`.
+        fn add_impure(&mut self, func: u128, outputs: u32, bindings: &[ExecutionBinding]) -> usize {
+            self.add_with(FuncBehavior::Impure, func, 0, outputs, bindings)
+        }
+
+        fn add_with(
+            &mut self,
+            behavior: FuncBehavior,
             func: u128,
             version: u64,
             outputs: u32,
@@ -229,6 +281,7 @@ mod tests {
             self.program.e_nodes.add(ExecutionNode {
                 id: NodeId::from_u128(idx as u128 + 1),
                 inited: true,
+                behavior,
                 func_id: FuncId::from_u128(func),
                 func_version: version,
                 inputs: Span::new(inputs_start, bindings.len() as u32),
@@ -255,7 +308,7 @@ mod tests {
         FileId::default()
     }
 
-    fn digests(prog: &Prog) -> Vec<Digest> {
+    fn digests(prog: &Prog) -> Vec<Option<Digest>> {
         let mut engine = DigestEngine::new(&prog.program, no_files);
         (0..prog.program.e_nodes.len())
             .map(|i| engine.node_digest(i))
@@ -403,12 +456,29 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "cycle detected")]
-    fn cycle_is_rejected() {
-        // A binds B.0, B binds A.0 — a malformed program the guard must catch.
+    fn cycle_yields_none() {
+        // A binds B.0, B binds A.0 — a malformed program (the planner rejects it
+        // separately); the digest pass must break the recursion, not loop.
         let mut p = Prog::default();
         p.add(10, 0, 1, &[bind(1, 0)]); // A binds B (idx 1)
         p.add(20, 0, 1, &[bind(0, 0)]); // B binds A (idx 0)
-        DigestEngine::new(&p.program, no_files).node_digest(0);
+        assert_eq!(DigestEngine::new(&p.program, no_files).node_digest(0), None);
+    }
+
+    #[test]
+    fn impure_node_and_its_dependents_are_none() {
+        // src (impure) → mid (pure) → sink (pure). The impure source taints the
+        // whole downstream chain; an independent pure node stays `Some`.
+        let mut p = Prog::default();
+        p.add_impure(10, 1, &[]); // 0: impure source
+        p.add(20, 0, 1, &[bind(0, 0)]); // 1: pure, binds impure
+        p.add(30, 0, 1, &[bind(1, 0)]); // 2: pure, binds tainted
+        p.add(40, 0, 1, &[konst(StaticValue::Int(5))]); // 3: independent pure
+
+        let d = digests(&p);
+        assert_eq!(d[0], None, "impure node ⇒ None");
+        assert_eq!(d[1], None, "pure node under impure ⇒ None");
+        assert_eq!(d[2], None, "taint flows the whole way up");
+        assert!(d[3].is_some(), "independent pure node is unaffected");
     }
 }

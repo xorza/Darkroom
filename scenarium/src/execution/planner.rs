@@ -11,8 +11,8 @@ use hashbrown::HashSet;
 use crate::worker::EventRef;
 
 use crate::execution::executor::Executor;
-use crate::execution::plan::{ExecutionPlan, InputFlags};
-use crate::execution::program::{ExecutionBehavior, ExecutionBinding, ExecutionProgram};
+use crate::execution::plan::{ExecutionPlan, NodeFlags};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::execution::{Error, Result};
 
 /// DFS coloring for the two backward passes. White = unvisited, Gray = on
@@ -53,8 +53,8 @@ pub(crate) struct Planner {
 
 impl Planner {
     /// Build the per-run schedule into `plan` from the program and the
-    /// executor's cache state (which nodes hold cached outputs). Errors only on
-    /// a dependency cycle.
+    /// executor's cache state (which nodes hold cached outputs, which are
+    /// disk-pinned). Errors only on a dependency cycle.
     pub(crate) fn plan(
         &mut self,
         program: &ExecutionProgram,
@@ -64,17 +64,13 @@ impl Planner {
         events: &[EventRef],
         plan: &mut ExecutionPlan,
     ) -> Result<()> {
-        plan.reset(
-            program.e_nodes.len(),
-            program.inputs.len(),
-            program.n_outputs,
-        );
+        plan.reset(program.e_nodes.len(), program.n_outputs);
 
         self.collect_terminal_nodes(program, terminals, event_triggers, events);
 
         let result = self.walk_backward_collect_order(program, plan);
         if result.is_ok() {
-            self.propagate_input_state_forward(program, executor, plan);
+            self.resolve_node_flags(program, executor, plan);
             self.walk_backward_collect_execute_order(program, plan);
             self.validate_for_execution(program, plan);
         }
@@ -200,7 +196,7 @@ impl Planner {
         Ok(())
     }
 
-    fn propagate_input_state_forward(
+    fn resolve_node_flags(
         &self,
         program: &ExecutionProgram,
         executor: &Executor,
@@ -218,66 +214,62 @@ impl Planner {
 
         for order_idx in 0..plan.process_order.len() {
             let e_node_idx = plan.process_order[order_idx];
+            let slot = &executor.slots[e_node_idx];
+
+            // Cache hit: the slot holds a value produced under this node's current
+            // digest (a disk-cached value was hydrated into the slot at update, so
+            // this is a RAM check either way). `None` (impure cone) never matches.
+            let cached = match slot.current_digest {
+                Some(d) => slot.output_values.is_some() && slot.output_digest == Some(d),
+                None => false,
+            };
+
+            if cached {
+                plan.node_flags[e_node_idx] = NodeFlags {
+                    cached: true,
+                    wants_execute: false,
+                    missing_required_inputs: false,
+                };
+                if is_debug() {
+                    processed[e_node_idx] = true;
+                }
+                continue;
+            }
+
+            // Not cached: a node is runnable unless a required input is unbound,
+            // or wired to a producer that itself can't run (`missing` propagates
+            // only through non-runnable producers — a cached or executing one
+            // delivers a value, optional or not). The per-input verdict isn't
+            // stored — `collect_execution_stats` recomputes it for the rare
+            // missing node when reporting which ports are unsatisfied.
             let inputs_span = program.e_nodes[e_node_idx].inputs;
-
-            let mut inputs_updated = false;
-            let mut bindings_changed = false;
             let mut missing_required = false;
-
             for pool_idx in inputs_span.range() {
                 let e_input = &program.inputs[pool_idx];
-                let binding_changed = executor.input_dirty[pool_idx];
-                let (dep_wants_execute, missing) = match &e_input.binding {
-                    // Unbound is "missing" only if the input is required — an
-                    // optional input left unbound is a deliberate no-value.
-                    ExecutionBinding::None => (false, e_input.required),
-                    ExecutionBinding::Const(_) => (false, false),
-                    // A *wired* input whose producer can't run (missing its own
-                    // required inputs) has no value to deliver, so the consumer
-                    // is missing too — regardless of whether the input is
-                    // optional. (Optional only excuses an *unbound* input, not a
-                    // binding to a broken upstream.)
+                let missing = match &e_input.binding {
+                    ExecutionBinding::None => e_input.required,
+                    ExecutionBinding::Const(_) => false,
                     ExecutionBinding::Bind(addr) => {
-                        let target_idx = addr.target_idx;
-                        assert!(addr.port_idx < program.e_nodes[target_idx].outputs.len as usize);
+                        assert!(
+                            addr.port_idx < program.e_nodes[addr.target_idx].outputs.len as usize
+                        );
                         if is_debug() {
-                            assert!(processed[target_idx], "forward pass: dep not yet processed");
+                            assert!(
+                                processed[addr.target_idx],
+                                "forward pass: dep not yet processed"
+                            );
                         }
-                        let dep = plan.node_flags[target_idx];
-                        (dep.wants_execute, dep.missing_required_inputs)
+                        plan.node_flags[addr.target_idx].missing_required_inputs
                     }
                 };
-
-                plan.input_flags[pool_idx] = InputFlags {
-                    dependency_wants_execute: dep_wants_execute,
-                    missing,
-                };
-                inputs_updated |= binding_changed || dep_wants_execute;
-                bindings_changed |= binding_changed;
                 missing_required |= missing;
             }
 
-            let behavior = program.e_nodes[e_node_idx].behavior;
-            let has_outputs = executor.slots[e_node_idx].output_values.is_some();
-            let flags = &mut plan.node_flags[e_node_idx];
-            flags.inputs_updated = inputs_updated;
-            flags.missing_required_inputs = missing_required;
-
-            if missing_required {
-                flags.wants_execute = false;
-                flags.cached = false;
-            } else if bindings_changed {
-                flags.wants_execute = true;
-                flags.cached = false;
-            } else {
-                flags.cached = match behavior {
-                    ExecutionBehavior::Impure => false,
-                    ExecutionBehavior::Pure => has_outputs && !inputs_updated,
-                    ExecutionBehavior::Once => has_outputs,
-                };
-                flags.wants_execute = !flags.cached;
-            }
-
+            plan.node_flags[e_node_idx] = NodeFlags {
+                cached: false,
+                wants_execute: !missing_required,
+                missing_required_inputs: missing_required,
+            };
             if is_debug() {
                 processed[e_node_idx] = true;
             }
@@ -286,11 +278,9 @@ impl Planner {
 
     // Prunes `process_order` to only nodes whose output is actually read by an
     // executing consumer this run. A filter over `wants_execute` is not
-    // equivalent: a Pure/Impure node can have `wants_execute = true` while its
-    // sole consumer is Once-cached and won't read it — the forward pass can't
-    // see that because "needed by consumer" is a backward fact. See
-    // `once_node_toggle_refreshes_upstream` in tests.rs for the case this pass
-    // exists to handle.
+    // equivalent: a node can have `wants_execute = true` while its sole consumer
+    // is cached and won't read it — the forward pass can't see that because
+    // "needed by consumer" is a backward fact.
     fn walk_backward_collect_execute_order(
         &mut self,
         program: &ExecutionProgram,
@@ -342,9 +332,11 @@ impl Planner {
             });
 
             let span = program.e_nodes[idx].inputs;
-            for (pool_idx, e_input) in program.inputs[span.range()].iter().enumerate() {
-                if plan.input_flags[span.start as usize + pool_idx].dependency_wants_execute
-                    && let Some(addr) = e_input.binding.as_bind()
+            for e_input in &program.inputs[span.range()] {
+                // Recurse only into a producer that will itself run; a cached
+                // producer's value is already available, so its cone is pruned.
+                if let Some(addr) = e_input.binding.as_bind()
+                    && plan.node_flags[addr.target_idx].wants_execute
                 {
                     self.stack.push(Visit {
                         e_node_idx: addr.target_idx,

@@ -69,9 +69,9 @@ pub(crate) struct ExecutionNode {
     /// the digest of an `Impure` node (or any node downstream of one) is `None`.
     pub behavior: FuncBehavior,
 
-    /// The authoring node's `Disk` cache request. Honored only when the node has a
-    /// content digest (a reproducible cone) — see `digest.rs`; otherwise the disk
-    /// cache silently ignores it.
+    /// The authoring node's `Disk` cache request, flattened from
+    /// [`CachePersistence`](crate::graph::CachePersistence). Inert for now — the
+    /// on-disk cache that read it was removed; kept so the intent survives.
     #[serde(default)]
     pub persist: bool,
 

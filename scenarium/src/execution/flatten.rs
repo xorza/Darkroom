@@ -20,14 +20,11 @@ use hashbrown::HashSet;
 
 use crate::data::StaticValue;
 use crate::execution::program::{
-    ExecutionBehavior, ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
-    ExecutionPortAddress,
+    ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionPortAddress,
 };
 use crate::execution_stats::FlattenMap;
 use crate::function::FuncLib;
-use crate::graph::{
-    Binding, CachePersistence, Graph, InputPort, NodeBehavior, NodeId, NodeKind, Subscription,
-};
+use crate::graph::{Binding, CachePersistence, Graph, InputPort, NodeId, NodeKind, Subscription};
 use crate::subgraph::SubgraphId;
 
 /// Hard cap on nesting depth — a release backstop for the output-resolution
@@ -57,9 +54,6 @@ pub(crate) struct Flattener {
     /// Reusable scratch for the next `inputs` pool, built during emit and
     /// swapped into the graph (the displaced old pool returns here for reuse).
     inputs_scratch: Vec<ExecutionInput>,
-    /// Reusable scratch for the next per-input dirty column, built in lockstep
-    /// with `inputs_scratch` and swapped into the executor's `input_dirty`.
-    dirty_scratch: Vec<bool>,
 }
 
 /// The graph's SoA pools, rebuilt each `build`. `inputs` is the new pool being
@@ -70,17 +64,13 @@ pub(crate) struct Flattener {
 pub(crate) struct Pools<'a> {
     pub inputs: &'a mut Vec<ExecutionInput>,
     pub events: &'a mut Vec<ExecutionEvent>,
-    /// The executor's cross-run per-input dirty column, rebuilt in lockstep
-    /// with `inputs` (reused nodes carry their bits over, new inputs start
-    /// clean, then `set_input` marks changed bindings).
-    pub input_dirty: &'a mut Vec<bool>,
 }
 
 impl Flattener {
     /// Flatten `root` into `e_nodes` (via compact insert, preserving caches),
-    /// rebuilding the SoA pools. Inputs carry over per-node `binding` and dirty
-    /// bit for reused nodes; outputs/events are rebuilt fresh. Returns the total
-    /// output count assigned across all nodes.
+    /// rebuilding the SoA pools. Inputs carry over each reused node's `binding`;
+    /// outputs/events are rebuilt fresh. Returns the total output count assigned
+    /// across all nodes.
     pub(crate) fn build(
         &mut self,
         e_nodes: &mut KeyIndexVec<NodeId, ExecutionNode>,
@@ -100,8 +90,6 @@ impl Flattener {
 
         let mut new_inputs = std::mem::take(&mut self.inputs_scratch);
         new_inputs.clear();
-        let mut new_dirty = std::mem::take(&mut self.dirty_scratch);
-        new_dirty.clear();
         pools.events.clear();
         let n_outputs;
         {
@@ -117,11 +105,8 @@ impl Flattener {
                 cur_idx: 0,
                 old_inputs: pools.inputs.as_slice(),
                 new_inputs: &mut new_inputs,
-                old_dirty: pools.input_dirty.as_slice(),
-                new_dirty: &mut new_dirty,
                 n_outputs: 0,
                 events: pools.events,
-                once_depth: 0,
             };
             run.emit();
             n_outputs = run.n_outputs;
@@ -130,8 +115,6 @@ impl Flattener {
         // Swap the freshly built pools in; recycle the old ones as scratch.
         std::mem::swap(pools.inputs, &mut new_inputs);
         self.inputs_scratch = new_inputs;
-        std::mem::swap(pools.input_dirty, &mut new_dirty);
-        self.dirty_scratch = new_dirty;
 
         // Apply resolved event edges now that every flat emitter exists and is
         // addressable by key. Subscribers were cleared while rebuilding events.
@@ -217,18 +200,9 @@ struct Run<'a> {
     old_inputs: &'a [ExecutionInput],
     /// The inputs pool being built this update; `cur_idx`'s span is its tail.
     new_inputs: &'a mut Vec<ExecutionInput>,
-    /// Last build's dirty column, read to carry over reused nodes' dirty bits.
-    old_dirty: &'a [bool],
-    /// The dirty column being built this update, parallel to `new_inputs`.
-    new_dirty: &'a mut Vec<bool>,
     /// Running total of outputs emitted so far; also the next output span start.
     n_outputs: u32,
     events: &'a mut Vec<ExecutionEvent>,
-    /// How many `Once` composite instances enclose the node being emitted.
-    /// While `> 0`, every interior func node is forced to
-    /// `ExecutionBehavior::Once` so the whole subgraph computes once and
-    /// then caches — the composite-level reading of `NodeBehavior::Once`.
-    once_depth: usize,
 }
 
 impl<'a> Run<'a> {
@@ -295,8 +269,6 @@ impl<'a> Run<'a> {
                     if was_inited {
                         self.new_inputs
                             .extend_from_slice(&self.old_inputs[old_inputs_span.range()]);
-                        self.new_dirty
-                            .extend_from_slice(&self.old_dirty[old_inputs_span.range()]);
                     } else {
                         for func_input in &func.inputs {
                             self.new_inputs.push(ExecutionInput {
@@ -304,7 +276,6 @@ impl<'a> Run<'a> {
                                 data_type: func_input.data_type.clone(),
                                 ..Default::default()
                             });
-                            self.new_dirty.push(false);
                         }
                     }
 
@@ -319,20 +290,11 @@ impl<'a> Run<'a> {
                     e_node.outputs = Span::new(outputs_start, func.outputs.len() as u32);
                     e_node.events = Span::new(events_start, func.events.len() as u32);
                     e_node.terminal = func.terminal;
-                    // Inside a `Once` composite the whole interior is frozen
-                    // after its first run; otherwise the node's own behavior
-                    // applies.
-                    e_node.behavior = if self.once_depth > 0 {
-                        ExecutionBehavior::Once
-                    } else {
-                        ExecutionNode::compute_behavior(node.behavior, func.behavior)
-                    };
-                    // Honor a `Disk` request only where the output is
-                    // reproducible — an effectively `Impure` node is clamped to
-                    // memory-only (a `Once` composite freezes its interior, so
-                    // those stay persistable).
-                    e_node.persist = node.persist == CachePersistence::Disk
-                        && e_node.behavior != ExecutionBehavior::Impure;
+                    e_node.behavior = func.behavior;
+                    // Record the `Disk` request; whether it's actually honored is
+                    // decided by the content digest (a node with an impure cone has
+                    // no digest and so can't be disk-cached) — see `digest.rs`.
+                    e_node.persist = node.persist == CachePersistence::Disk;
                     e_node.name.clear();
                     e_node.name.push_str(&node.name);
 
@@ -358,10 +320,6 @@ impl<'a> Run<'a> {
                         "recursive subgraph {:?} (it contains itself)",
                         r.id()
                     );
-                    // A `Once` composite freezes its whole interior: bump the
-                    // depth so every interior func node flattens as `Once`.
-                    let once = node.behavior == NodeBehavior::Once;
-                    self.once_depth += once as usize;
                     self.push_level(node.id);
                     // Open this instance's scope under the current one; its
                     // interior nodes record their leaves against it.
@@ -371,7 +329,6 @@ impl<'a> Run<'a> {
                     self.emit();
                     self.scope_stack.pop();
                     self.ids.pop();
-                    self.once_depth -= once as usize;
                     self.seen.remove(&r.id());
                 }
                 NodeKind::SubgraphInput | NodeKind::SubgraphOutput => {}
@@ -484,49 +441,27 @@ impl<'a> Run<'a> {
         self.compact[self.cur_idx].inputs.start as usize + input_idx
     }
 
-    /// Write the resolved source into input `cur_idx`/`input_idx`, marking the
-    /// dirty bit when the binding changes so caching stays correct across updates.
+    /// Write the resolved source into input `cur_idx`/`input_idx`. A changed
+    /// binding changes the node's content digest, which drives cache
+    /// invalidation — no per-input dirty tracking is needed.
     fn set_input(&mut self, input_idx: usize, source: Source) {
         let pool_idx = self.cur_input_idx(input_idx);
-        match source {
-            Source::None => {
-                let e_input = &mut self.new_inputs[pool_idx];
-                if !matches!(e_input.binding, ExecutionBinding::None) {
-                    e_input.binding = ExecutionBinding::None;
-                    self.new_dirty[pool_idx] = true;
-                }
-            }
-            Source::Const(v) => {
-                let e_input = &mut self.new_inputs[pool_idx];
-                if !matches!(&e_input.binding, ExecutionBinding::Const(existing) if *existing == v)
-                {
-                    e_input.binding = ExecutionBinding::Const(v);
-                    self.new_dirty[pool_idx] = true;
-                }
-            }
+        let binding = match source {
+            Source::None => ExecutionBinding::None,
+            Source::Const(v) => ExecutionBinding::Const(v),
             Source::Producer { node_id, port_idx } => {
                 let (target_idx, _) = self.compact.insert_with(&node_id, || ExecutionNode {
                     id: node_id,
                     ..Default::default()
                 });
-                let e_input = &mut self.new_inputs[pool_idx];
-                match &mut e_input.binding {
-                    ExecutionBinding::Bind(existing)
-                        if existing.target_id == node_id && existing.port_idx == port_idx =>
-                    {
-                        existing.target_idx = target_idx;
-                    }
-                    _ => {
-                        e_input.binding = ExecutionBinding::Bind(ExecutionPortAddress {
-                            target_id: node_id,
-                            target_idx,
-                            port_idx,
-                        });
-                        self.new_dirty[pool_idx] = true;
-                    }
-                }
+                ExecutionBinding::Bind(ExecutionPortAddress {
+                    target_id: node_id,
+                    target_idx,
+                    port_idx,
+                })
             }
-        }
+        };
+        self.new_inputs[pool_idx].binding = binding;
     }
 
     /// Resolve an output reference `(node_id, port_idx)` in the current frame

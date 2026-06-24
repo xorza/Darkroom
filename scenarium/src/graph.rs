@@ -98,13 +98,14 @@ mod binding_map_serde {
     }
 }
 
-/// Where a node's computed output is cached. `Memory` keeps it only in the live
-/// engine (dropped on reload); `Disk` also persists it to the content-addressed
-/// store, so an unchanged graph reloads the result instead of recomputing.
-/// `Disk` is a *request* honored only for reproducible nodes — a node with an
-/// impure node anywhere in its upstream cone has no content digest, so it's
-/// silently kept memory-only and never risks serving a stale value. See
-/// `docs/disk-cache-design.md`.
+/// Where a node's computed output is *requested* to be cached. `Memory` keeps it
+/// only in the live engine (dropped on reload); `Disk` would also persist it to a
+/// content-addressed store so an unchanged graph reloads instead of recomputing.
+///
+/// The on-disk backend is currently removed (see git history /
+/// `docs/disk-cache-design.md`), so `Disk` is an inert authoring flag for now —
+/// every node is memory-only regardless. The flag is kept (and serialized) so the
+/// intent survives until the disk cache returns.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum CachePersistence {
     #[default]

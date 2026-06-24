@@ -21,6 +21,7 @@ use crate::func_lambda::{InvokeError, InvokeInput};
 use crate::graph::{InputPort, NodeId};
 use crate::prelude::AnyState;
 
+use crate::execution::digest::Digest;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{ExecutionBinding, ExecutionNode, ExecutionProgram};
 use crate::execution::{Error, OutputUsage};
@@ -35,6 +36,15 @@ pub(crate) struct RuntimeSlot {
     pub(crate) state: AnyState,
     pub(crate) event_state: SharedAnyState,
     pub(crate) output_values: Option<Vec<DynamicValue>>,
+    /// The node's current content digest (`None` when not reproducible), recomputed
+    /// by the engine at `update`. The cache hit is `output_digest == current_digest`;
+    /// `run` stamps `output_digest` from this on success.
+    pub(crate) current_digest: Option<Digest>,
+    /// The content digest `output_values` were produced under (`None` until run,
+    /// or for a non-reproducible node). Compared to `current_digest` for the cache
+    /// check — a changed input no longer matches, so a flipped-back parameter can't
+    /// serve a stale value — and it's the disk key for a `persist` node.
+    pub(crate) output_digest: Option<Digest>,
     pub(crate) error: Option<Error>,
     pub(crate) run_time: f64,
 }
@@ -50,6 +60,7 @@ impl RuntimeSlot {
         self.state = AnyState::default();
         self.event_state = SharedAnyState::default();
         self.output_values = None;
+        self.output_digest = None;
     }
 }
 
@@ -58,11 +69,6 @@ pub(crate) struct Executor {
     /// Per-node runtime state, index-aligned to `program.e_nodes`.
     pub(crate) slots: KeyIndexVec<NodeId, RuntimeSlot>,
     pub(crate) ctx_manager: ContextManager,
-    /// Cross-run per-input dirty bits, index-aligned to `program.inputs`. Set by
-    /// `flatten` when a binding changes at `update`, consumed/cleared here when
-    /// the owning node runs. Rebuilt positionally by each `flatten` so it tracks
-    /// the inputs pool; bridges update→run, unlike the per-run plan flags.
-    pub(crate) input_dirty: Vec<bool>,
     /// Per-node invoke scratch, refilled per executed node.
     inputs: Vec<InvokeInput>,
     output_usage: Vec<OutputUsage>,
@@ -89,8 +95,8 @@ impl Executor {
     }
 
     /// Execute every node in `plan.execute_order`, invoking its lambda with the
-    /// collected inputs. Mutates the runtime cache and clears each executed
-    /// node's per-input dirty bits in `input_dirty`. The `program` is read-only.
+    /// collected inputs. Mutates the runtime cache and stamps each executed node's
+    /// `output_digest` from its slot's `current_digest`. The `program` is read-only.
     /// Returns per-run stats.
     pub(crate) async fn run(
         &mut self,
@@ -148,7 +154,7 @@ impl Executor {
                 continue;
             }
 
-            self.collect_inputs(program, plan, e_node_idx, &mut inputs);
+            self.collect_inputs(program, e_node_idx, &mut inputs);
             self.collect_output_usage(program, plan, e_node_idx, &mut output_usage);
 
             let output_count = program.e_nodes[e_node_idx].outputs.len as usize;
@@ -212,9 +218,15 @@ impl Executor {
             }
             let slot = &mut self.slots[e_node_idx];
             slot.run_time = run_time;
-            if let Err(err) = result {
-                slot.error = Some(err);
-                slot.output_values = None;
+            match result {
+                // The fresh output now corresponds to this node's current digest;
+                // record it so the planner's next cache check is a RAM hit.
+                Ok(()) => slot.output_digest = slot.current_digest,
+                Err(err) => {
+                    slot.error = Some(err);
+                    slot.output_values = None;
+                    slot.output_digest = None;
+                }
             }
             // No `Finished` for the cancelled node — it didn't complete; the
             // consumer would otherwise paint it executed live.
@@ -225,11 +237,6 @@ impl Executor {
                         elapsed_secs: run_time,
                     },
                 });
-            }
-
-            let span = program.e_nodes[e_node_idx].inputs;
-            for dirty in &mut self.input_dirty[span.range()] {
-                *dirty = false;
             }
         }
 
@@ -253,13 +260,12 @@ impl Executor {
     fn collect_inputs(
         &self,
         program: &ExecutionProgram,
-        plan: &ExecutionPlan,
         e_node_idx: usize,
         inputs: &mut Vec<InvokeInput>,
     ) {
         inputs.clear();
         let span = program.e_nodes[e_node_idx].inputs;
-        for (i, input) in program.inputs[span.range()].iter().enumerate() {
+        for input in &program.inputs[span.range()] {
             let value = match &input.binding {
                 ExecutionBinding::None => DynamicValue::Unbound,
                 ExecutionBinding::Const(v) => v.into(),
@@ -280,10 +286,10 @@ impl Executor {
                     outputs[addr.port_idx].clone()
                 }
             };
-            let pool_idx = span.start as usize + i;
-            let dependency_wants_execute = plan.input_flags[pool_idx].dependency_wants_execute;
+            // A node only runs on a cache miss, so its inputs are effectively
+            // fresh; `changed` is vestigial (no lambda reads it).
             inputs.push(InvokeInput {
-                changed: self.input_dirty[pool_idx] || dependency_wants_execute,
+                changed: true,
                 value,
             });
         }
@@ -337,8 +343,19 @@ impl Executor {
             let e = &program.e_nodes[idx];
             let flags = plan.node_flags[idx];
             if flags.missing_required_inputs {
-                for i in 0..e.inputs.len as usize {
-                    if plan.input_flags[e.inputs.start as usize + i].missing {
+                // Recompute which ports are unsatisfied (mirrors the planner's
+                // per-input check) — only for the rare missing node, so it isn't
+                // worth a stored column.
+                for (i, pool_idx) in e.inputs.range().enumerate() {
+                    let input = &program.inputs[pool_idx];
+                    let missing = match &input.binding {
+                        ExecutionBinding::None => input.required,
+                        ExecutionBinding::Const(_) => false,
+                        ExecutionBinding::Bind(addr) => {
+                            plan.node_flags[addr.target_idx].missing_required_inputs
+                        }
+                    };
+                    if missing {
                         missing_inputs.push(InputPort {
                             node_id: e.id,
                             port_idx: i,
