@@ -51,7 +51,7 @@ impl FrameHarness {
         let func_lib = Arc::new(func_lib);
 
         let (tx, compute_rx) = mpsc::channel(cap);
-        let worker = Worker::new(None, move |report| {
+        let worker = Worker::new(move |report| {
             // The fixture only asserts on final stats; drop live progress.
             if let WorkerReport::Finished(result) = report {
                 tx.try_send(result).ok();
@@ -443,7 +443,7 @@ async fn execute_terminals_triggers_terminal_nodes() {
     );
 
     let (compute_finish_tx, mut compute_finish_rx) = mpsc::channel(8);
-    let worker = Worker::new(None, move |report| {
+    let worker = Worker::new(move |report| {
         if let WorkerReport::Finished(result) = report {
             compute_finish_tx.try_send(result).ok();
         }
@@ -487,7 +487,7 @@ async fn worker_streams_node_progress_before_finished() {
 
     // Capture the full report stream (progress + final), unlike the fixture.
     let (tx, mut rx) = mpsc::channel::<WorkerReport>(16);
-    let worker = Worker::new(None, move |report| {
+    let worker = Worker::new(move |report| {
         tx.try_send(report).ok();
     });
     worker
@@ -547,7 +547,7 @@ async fn stale_cancel_is_cleared_at_run_start() {
     );
 
     let (tx, mut rx) = mpsc::channel::<ExecResult<ExecutionStats>>(8);
-    let worker = Worker::new(None, move |report| {
+    let worker = Worker::new(move |report| {
         if let WorkerReport::Finished(result) = report {
             tx.try_send(result).ok();
         }
@@ -698,7 +698,7 @@ async fn stopped_event_loop_channel_is_closed() {
 #[tokio::test]
 async fn send_many_empty_is_noop() {
     // Empty batch must not panic, hang, or desynchronize the worker.
-    let worker = Worker::new(None, |_| {});
+    let worker = Worker::new(|_| {});
 
     worker
         .send_many(std::iter::empty::<WorkerMessage>())
@@ -715,7 +715,7 @@ async fn send_many_empty_is_noop() {
 
 #[tokio::test]
 async fn stop_event_loop_when_not_running_is_noop() {
-    let worker = Worker::new(None, |_| {});
+    let worker = Worker::new(|_| {});
 
     worker.send(WorkerMessage::StopEventLoop).unwrap();
     assert!(!worker.is_event_loop_started());
@@ -753,7 +753,7 @@ async fn request_argument_values_for_unknown_node_returns_none() {
 
 #[tokio::test]
 async fn multiple_syncs_in_batch_all_run() {
-    let worker = Worker::new(None, |_| {});
+    let worker = Worker::new(|_| {});
 
     let (reply_a, rx_a) = oneshot::channel();
     let (reply_b, rx_b) = oneshot::channel();
@@ -898,7 +898,7 @@ async fn assert_no_callback_within(
 /// not-running, empty batches, syncs, etc.).
 fn empty_worker() -> (Worker, mpsc::Receiver<ExecResult<ExecutionStats>>) {
     let (tx, rx) = mpsc::channel(8);
-    let worker = Worker::new(None, move |report| {
+    let worker = Worker::new(move |report| {
         if let WorkerReport::Finished(result) = report {
             tx.try_send(result).ok();
         }
@@ -964,7 +964,7 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
     );
 
     let (compute_finish_tx, mut compute_finish_rx) = mpsc::channel(8);
-    let worker = Worker::new(None, move |report| {
+    let worker = Worker::new(move |report| {
         if let WorkerReport::Finished(result) = report {
             compute_finish_tx.try_send(result).ok();
         }
@@ -1024,7 +1024,7 @@ async fn drain_on_wake_folds_queued_batches_into_one_commit() {
     );
 
     let (compute_finish_tx, mut compute_finish_rx) = mpsc::channel(8);
-    let worker = Worker::new(None, move |report| {
+    let worker = Worker::new(move |report| {
         if let WorkerReport::Finished(result) = report {
             compute_finish_tx.try_send(result).ok();
         }
@@ -1529,7 +1529,7 @@ async fn drop_without_exit_shuts_down_cleanly() {
     let counter = Arc::new(AtomicUsize::new(0));
     {
         let counter_cb = Arc::clone(&counter);
-        let worker = Worker::new(None, move |_| {
+        let worker = Worker::new(move |_| {
             counter_cb.fetch_add(1, Ordering::SeqCst);
         });
 
@@ -1557,19 +1557,16 @@ async fn drop_without_exit_shuts_down_cleanly() {
 /// The disk cache wires through both entry points and persists across worker
 /// restarts: a `persist` (Disk-marked) reproducible node's output, stored on a
 /// cold run, reloads on a fresh worker over the same store so its upstream never
-/// recomputes. The cold run sets the cache at construction
-/// (`Worker::new(Some(..), ..)`); the reopen sets it at runtime via a
-/// `SetDiskCache` message sent in the same batch as `Update` — exercising that
-/// the swap is applied before the compile hydrates.
+/// recomputes. The store root is set at runtime via a `SetDiskRoot` message in the
+/// same batch as `Update` — exercising that it's applied before the compile
+/// hydrates.
 #[tokio::test]
 async fn disk_cache_persists_node_across_worker_restart() {
     use std::path::Path;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
-    use crate::execution::disk_cache::DiskCache;
     use crate::graph::CachePersistence;
     use crate::testing::{TestFuncHooks, test_func_lib};
-    use crate::value_codec::CustomValueRegistry;
 
     /// A unique temp dir removed on drop, so the test doesn't collide or leak.
     struct TempDir(std::path::PathBuf);
@@ -1618,42 +1615,30 @@ async fn disk_cache_persists_node_across_worker_restart() {
     graph.set_input_binding(InputPort::new(mult_id, 1), (get_a_id, 0).into());
     graph.set_input_binding(InputPort::new(print_id, 0), (mult_id, 0).into());
 
-    // `via_message`: route the cache through a runtime `SetDiskCache` (the host
-    // repointing it for the active document); else seed it at construction.
-    async fn run(
-        root: &Path,
-        graph: Graph,
-        func_lib: Arc<FuncLib>,
-        via_message: bool,
-    ) -> ExecutionStats {
-        let cache = DiskCache::new(root, CustomValueRegistry::default());
-        let (ctor_cache, set_cache_msg) = if via_message {
-            (None, Some(WorkerMessage::SetDiskCache(Some(cache))))
-        } else {
-            (Some(cache), None)
-        };
+    async fn run(root: &Path, graph: Graph, func_lib: Arc<FuncLib>) -> ExecutionStats {
         let (tx, mut rx) = mpsc::channel(4);
-        let worker = Worker::new(ctor_cache, move |report| {
+        let worker = Worker::new(move |report| {
             if let WorkerReport::Finished(result) = report {
                 tx.try_send(result).ok();
             }
         });
-        // The SetDiskCache (when present) shares the batch with Update, proving
-        // it's applied before the compile hydrates.
-        let mut msgs = Vec::new();
-        msgs.extend(set_cache_msg);
-        msgs.push(WorkerMessage::Update { graph, func_lib });
-        msgs.push(WorkerMessage::ExecuteTerminals);
-        worker.send_many(msgs).unwrap();
+        // SetDiskRoot shares the batch with Update, proving it's applied before
+        // the compile hydrates.
+        worker
+            .send_many([
+                WorkerMessage::SetDiskRoot(Some(root.to_path_buf())),
+                WorkerMessage::Update { graph, func_lib },
+                WorkerMessage::ExecuteTerminals,
+            ])
+            .unwrap();
         rx.recv()
             .await
             .expect("worker reports Finished")
             .expect("run succeeds")
     }
 
-    // First run (cache set at construction): cold cache, all three nodes
-    // compute; mult is stored to disk.
-    let stats = run(&dir.0, graph.clone(), Arc::new(make_lib()), false).await;
+    // Cold cache: all three nodes compute; mult is stored to disk.
+    let stats = run(&dir.0, graph.clone(), Arc::new(make_lib())).await;
     assert_eq!(
         stats.executed_nodes.len(),
         3,
@@ -1661,10 +1646,9 @@ async fn disk_cache_persists_node_across_worker_restart() {
     );
     assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
 
-    // Reopen on a fresh worker, cache set at runtime via SetDiskCache over the
-    // same store: mult loads from disk, so its sole-consumer upstream get_a is
-    // pruned and never recomputes.
-    let stats = run(&dir.0, graph.clone(), Arc::new(make_lib()), true).await;
+    // Reopen on a fresh worker over the same store: mult loads from disk, so its
+    // sole-consumer upstream get_a is pruned and never recomputes.
+    let stats = run(&dir.0, graph.clone(), Arc::new(make_lib())).await;
     assert_eq!(
         get_a_calls.load(Ordering::SeqCst),
         1,

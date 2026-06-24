@@ -45,8 +45,6 @@ fn bind(graph: &mut Graph, node_name: &str, idx: usize, binding: Binding) {
 
 mod cache_persistence {
     use super::*;
-    use crate::execution::disk_cache::DiskCache;
-    use crate::value_codec::CustomValueRegistry;
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -73,11 +71,12 @@ mod cache_persistence {
         }
     }
 
-    /// A fresh engine backed by a disk cache rooted at `dir` (simulating a reopen
-    /// when called twice against the same dir).
+    /// A fresh engine backed by a content-addressed store rooted at `dir`
+    /// (simulating a reopen when called twice against the same dir). The default
+    /// empty registry is fine — these tests cache plain values.
     fn disk_engine(dir: &TempDir) -> ExecutionEngine {
         let mut engine = ExecutionEngine::default();
-        engine.set_disk_cache(Some(DiskCache::new(&dir.0, CustomValueRegistry::default())));
+        engine.set_disk_root(Some(dir.0.clone()));
         engine
     }
 
